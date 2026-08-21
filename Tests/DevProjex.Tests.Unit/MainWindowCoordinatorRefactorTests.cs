@@ -373,10 +373,10 @@ public sealed class MainWindowCoordinatorRefactorTests
             ProjectLoadHostCall.UpdateTitle,
             ProjectLoadHostCall.YieldProjectLoadStartupFrame,
             ProjectLoadHostCall.ReloadProject,
+			ProjectLoadHostCall.ClearProjectLoadCancellation,
+			ProjectLoadHostCall.ScheduleInitialProjectLoadCleanup,
             ProjectLoadHostCall.RecordRecentFolder,
-            ProjectLoadHostCall.ReleaseCurrentRepositorySession,
-            ProjectLoadHostCall.ClearProjectLoadCancellation,
-            ProjectLoadHostCall.ScheduleInitialProjectLoadCleanup
+			ProjectLoadHostCall.ReleaseCurrentRepositorySession
         ], host.Calls);
     }
 
@@ -389,7 +389,7 @@ public sealed class MainWindowCoordinatorRefactorTests
         var host = new RecordingProjectLoadHost(viewModel)
         {
             CurrentCachedRepoPathValue = @"C:\Cache\Repo",
-            ReloadHandler = async token =>
+			ReloadHandler = async token =>
             {
                 reloadStarted.SetResult();
                 await releaseReload.Task.WaitAsync(token);
@@ -446,8 +446,8 @@ public sealed class MainWindowCoordinatorRefactorTests
 
         Assert.False(loadTask.IsCompleted);
         Assert.True(viewModel.StatusBusy);
-        Assert.DoesNotContain(ProjectLoadHostCall.ClearProjectLoadCancellation, host.Calls);
-        Assert.DoesNotContain(ProjectLoadHostCall.ScheduleInitialProjectLoadCleanup, host.Calls);
+		Assert.Contains(ProjectLoadHostCall.ClearProjectLoadCancellation, host.Calls);
+		Assert.Contains(ProjectLoadHostCall.ScheduleInitialProjectLoadCleanup, host.Calls);
 
         releasePersistence.SetResult();
         await loadTask;
@@ -489,6 +489,198 @@ public sealed class MainWindowCoordinatorRefactorTests
         Assert.DoesNotContain(ProjectLoadHostCall.ScheduleInitialProjectLoadCleanup, host.Calls);
         Assert.False(viewModel.StatusBusy);
     }
+
+	[Fact]
+	public async Task ProjectLoadPipeline_FailureBeforePublicationRestoresStableProject()
+	{
+		var viewModel = CreateViewModel();
+		viewModel.IsProjectLoaded = true;
+		var host = new RecordingProjectLoadHost(viewModel)
+		{
+			StableIdentity = @"C:\Stable",
+			CurrentIdentity = @"C:\Stable",
+			ReloadHandler = _ => throw new InvalidOperationException("tree build failed")
+		};
+		var status = new StatusOperationCoordinator(
+			viewModel,
+			() => false,
+			() => viewModel.StatusOperationCalculatingData);
+		using var pipeline = new ProjectLoadPipeline(host, status);
+
+		await Assert.ThrowsAsync<InvalidOperationException>(() =>
+			pipeline.OpenFolderAsync(@"C:\Broken", fromDialog: false, recordRecentFolder: false));
+
+		Assert.Equal(@"C:\Stable", host.CurrentIdentity);
+		Assert.Contains(ProjectLoadHostCall.ApplyCancellationFallback, host.Calls);
+		Assert.DoesNotContain(ProjectLoadHostCall.ClearProjectLoadCancellation, host.Calls);
+	}
+
+	[Fact]
+	public async Task ProjectLoadPipeline_FailureAfterPublicationKeepsPublishedProject()
+	{
+		var viewModel = CreateViewModel();
+		viewModel.IsProjectLoaded = true;
+		var host = new RecordingProjectLoadHost(viewModel)
+		{
+			StableIdentity = @"C:\Stable",
+			CurrentIdentity = @"C:\Stable",
+			RecordRecentFolderHandler = _ => throw new IOException("recent store failed")
+		};
+		var status = new StatusOperationCoordinator(
+			viewModel,
+			() => false,
+			() => viewModel.StatusOperationCalculatingData);
+		using var pipeline = new ProjectLoadPipeline(host, status);
+
+		await Assert.ThrowsAsync<IOException>(() =>
+			pipeline.OpenFolderAsync(@"C:\Published", fromDialog: false, recordRecentFolder: true));
+
+		Assert.Equal(@"C:\Published", host.StableIdentity);
+		Assert.Equal(@"C:\Published", host.CurrentIdentity);
+		Assert.DoesNotContain(ProjectLoadHostCall.ApplyCancellationFallback, host.Calls);
+		Assert.Contains(ProjectLoadHostCall.ClearProjectLoadCancellation, host.Calls);
+	}
+
+	[Fact]
+	public async Task ProjectLoadPipeline_SupersededLoadCapturesLastStableProject()
+	{
+		var viewModel = CreateViewModel();
+		viewModel.IsProjectLoaded = true;
+		var firstReloadStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var reloadCount = 0;
+		var host = new RecordingProjectLoadHost(viewModel)
+		{
+			StableIdentity = @"C:\ProjectA",
+			CurrentIdentity = @"C:\ProjectA",
+			ReloadHandler = async token =>
+			{
+				if (Interlocked.Increment(ref reloadCount) != 1)
+					return;
+
+				firstReloadStarted.SetResult();
+				await Task.Delay(Timeout.InfiniteTimeSpan, token);
+			}
+		};
+		var status = new StatusOperationCoordinator(
+			viewModel,
+			() => false,
+			() => viewModel.StatusOperationCalculatingData);
+		using var pipeline = new ProjectLoadPipeline(host, status);
+
+		var loadB = pipeline.OpenFolderAsync(@"C:\ProjectB", fromDialog: false, recordRecentFolder: false);
+		await firstReloadStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+		var loadC = pipeline.OpenFolderAsync(@"C:\ProjectC", fromDialog: false, recordRecentFolder: false);
+		await Task.WhenAll(loadB, loadC);
+
+		Assert.Equal([@"C:\ProjectA", @"C:\ProjectA"], host.CapturedStableIdentities);
+		Assert.Equal(@"C:\ProjectC", host.StableIdentity);
+		Assert.Equal(@"C:\ProjectC", host.CurrentIdentity);
+	}
+
+	[Fact]
+	public void ProjectRuntimeStateSnapshot_ClearedStateCoversEveryRuntimeField()
+	{
+		var expectedProperties = new[]
+		{
+			nameof(ProjectRuntimeStateSnapshot.HideSecretsApplied),
+			nameof(ProjectRuntimeStateSnapshot.HidePrivateDataApplied),
+			nameof(ProjectRuntimeStateSnapshot.CompressCodeApplied),
+			nameof(ProjectRuntimeStateSnapshot.StripCommentsApplied),
+			nameof(ProjectRuntimeStateSnapshot.StripBlankLinesApplied),
+			nameof(ProjectRuntimeStateSnapshot.SecretRedactedCount),
+			nameof(ProjectRuntimeStateSnapshot.SecretDetectedCount),
+			nameof(ProjectRuntimeStateSnapshot.PrivateDataRedactedCount),
+			nameof(ProjectRuntimeStateSnapshot.PrivateDataDetectedCount),
+			nameof(ProjectRuntimeStateSnapshot.SecretScanState),
+			nameof(ProjectRuntimeStateSnapshot.CompressionSnapshot)
+		};
+		var actualProperties = typeof(ProjectRuntimeStateSnapshot)
+			.GetProperties(BindingFlags.Instance | BindingFlags.Public)
+			.Select(static property => property.Name)
+			.Order()
+			.ToArray();
+
+		Assert.Equal(expectedProperties.Order(), actualProperties);
+		var cleared = ProjectRuntimeStateSnapshot.Cleared;
+		Assert.False(cleared.HideSecretsApplied);
+		Assert.False(cleared.HidePrivateDataApplied);
+		Assert.False(cleared.CompressCodeApplied);
+		Assert.False(cleared.StripCommentsApplied);
+		Assert.False(cleared.StripBlankLinesApplied);
+		Assert.Null(cleared.SecretRedactedCount);
+		Assert.Null(cleared.SecretDetectedCount);
+		Assert.Null(cleared.PrivateDataRedactedCount);
+		Assert.Null(cleared.PrivateDataDetectedCount);
+		Assert.Equal(DevProjex.Application.Secrets.SecretScanState.Disabled, cleared.SecretScanState);
+		Assert.Null(cleared.CompressionSnapshot);
+	}
+
+	[Fact]
+	public void ProjectLoadCancellationSnapshot_InternalStateChecklistIsComplete()
+	{
+		var expectedProperties = new[]
+		{
+			"SelectionCheckpoint",
+			"RuntimeState",
+			"TreeSelection",
+			"TreeExpansion",
+			"SearchQuery",
+			"NameFilter",
+			"PreviewSearchVisible",
+			"PreviewSearchQuery"
+		};
+		var internalProperties = typeof(ProjectLoadCancellationSnapshot)
+			.GetProperties(BindingFlags.Instance | BindingFlags.NonPublic)
+			.Where(static property => property.Name != "EqualityContract")
+			.Select(static property => property.Name)
+			.Order()
+			.ToArray();
+
+		Assert.Equal(expectedProperties.Order(), internalProperties);
+	}
+
+	[Fact]
+	public void MetricsPipeline_StatusSnapshotIsRejectedAfterProjectSwitchAndExplicitReset()
+	{
+		var viewModel = CreateViewModel();
+		viewModel.SelectedPreviewContentMode = PreviewContentMode.TreeAndContent;
+		var currentPath = @"C:\ProjectA";
+		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
+		var status = new StatusOperationCoordinator(
+			viewModel,
+			isBackgroundMetricsActive: () => false,
+			metricsOperationTextProvider: () => viewModel.StatusOperationCalculatingData);
+		using var pipeline = new MetricsPipeline(
+			viewModel,
+			localization,
+			new StubFileContentAnalyzer(),
+			new TreeExportService(),
+			status,
+			currentTreeProvider: () => null,
+			currentPathProvider: () => currentPath,
+			selectedPathsProvider: () => new HashSet<string>(PathComparer.Default),
+			treeFormatProvider: () => TreeTextFormat.Ascii,
+			exportPathPresentationProvider: () => null,
+			boundsWidthProvider: () => 900);
+		using var document = new InMemoryPreviewTextDocument("tree\ncontent");
+
+		pipeline.UpdateStatusBarMetrics(1, 2, 3, 4, 5, 6);
+		Assert.True(pipeline.TryGetCachedPreviewSelectionMetrics(
+			PreviewContentMode.TreeAndContent,
+			document,
+			new PreviewSelectionRange(1, 0, 2, 7),
+			out _));
+
+		currentPath = @"C:\ProjectB";
+		Assert.False(pipeline.TryGetCachedPreviewSelectionMetrics(
+			PreviewContentMode.TreeAndContent,
+			document,
+			new PreviewSelectionRange(1, 0, 2, 7),
+			out _));
+
+		pipeline.ResetStatusMetricsSnapshot();
+		Assert.False(pipeline.HasStatusMetricsSnapshot);
+	}
 
     [Fact]
     public void MetricsPipeline_StatusSnapshotFeedsPreviewSelectionCache()
@@ -1279,6 +1471,7 @@ public sealed class MainWindowCoordinatorRefactorTests
         await pipeline.ReloadAsync(
             @"C:\Project",
             preserveTreeState,
+			persistentMarks: null,
             TestContext.Current.CancellationToken);
 
         Assert.Equal(
@@ -1314,6 +1507,7 @@ public sealed class MainWindowCoordinatorRefactorTests
         await pipeline.ReloadAsync(
             @"C:\Project",
             preserveTreeState: false,
+			persistentMarks: null,
             TestContext.Current.CancellationToken);
 
         Assert.Equal(
@@ -1337,6 +1531,7 @@ public sealed class MainWindowCoordinatorRefactorTests
 		await pipeline.ReloadAsync(
 			@"C:\Project",
 			preserveTreeState: false,
+			persistentMarks: null,
 			TestContext.Current.CancellationToken);
 
 		Assert.Equal(1, host.ApplyCount);
@@ -1655,13 +1850,24 @@ public sealed class MainWindowCoordinatorRefactorTests
 
         public List<ProjectLoadHostCall> Calls { get; } = [];
 
-        public Func<CancellationToken, Task>? ReloadHandler { get; set; }
+		public List<string?> CapturedStableIdentities { get; } = [];
+
+		public string? CurrentIdentity { get; set; }
+
+		public string? StableIdentity { get; set; }
+
+		public Func<CancellationToken, Task>? ReloadHandler { get; set; }
+
+		public bool ReloadPublishes { get; set; } = true;
 
         public Func<CancellationToken, Task>? RecordRecentFolderHandler { get; set; }
 
 
-        public void CaptureProjectLoadCancellationSnapshot() =>
-            Calls.Add(ProjectLoadHostCall.CaptureCancellationSnapshot);
+		public void CaptureProjectLoadCancellationSnapshot()
+		{
+			CapturedStableIdentities.Add(StableIdentity);
+			Calls.Add(ProjectLoadHostCall.CaptureCancellationSnapshot);
+		}
 
         public Task PrepareSearchAndFilterForProjectLoadAsync()
         {
@@ -1682,14 +1888,17 @@ public sealed class MainWindowCoordinatorRefactorTests
             return Task.CompletedTask;
         }
 
-        public void ClearPreviousProjectState(bool forceCompactingGc) =>
+		public void ClearPreviousProjectState(bool forceCompactingGc, bool preserveProjectSessions)
+		{
+			Assert.True(preserveProjectSessions);
             Calls.Add(forceCompactingGc
                 ? ProjectLoadHostCall.ClearPreviousProjectStateWithCompactingGc
-                : ProjectLoadHostCall.ClearPreviousProjectState);
+				: ProjectLoadHostCall.ClearPreviousProjectState);
+		}
 
         public void SetProjectLoadIdentity(string path, bool fromDialog)
         {
-            _ = path;
+			CurrentIdentity = path;
             Calls.Add(ProjectLoadHostCall.SetProjectLoadIdentity);
             viewModel.IsProjectLoaded = true;
             viewModel.SettingsVisible = true;
@@ -1701,12 +1910,13 @@ public sealed class MainWindowCoordinatorRefactorTests
         public void UpdateTitle() =>
             Calls.Add(ProjectLoadHostCall.UpdateTitle);
 
-        public async Task ReloadProjectAsync(CancellationToken cancellationToken, bool applyStoredProfile)
+		public async Task<bool> ReloadProjectAsync(CancellationToken cancellationToken, bool applyStoredProfile)
         {
             _ = applyStoredProfile;
             Calls.Add(ProjectLoadHostCall.ReloadProject);
             if (ReloadHandler is not null)
                 await ReloadHandler(cancellationToken);
+			return ReloadPublishes;
         }
 
         public async Task RecordRecentFolderAsync(string path, CancellationToken cancellationToken)
@@ -1723,11 +1933,15 @@ public sealed class MainWindowCoordinatorRefactorTests
             Calls.Add(ProjectLoadHostCall.ReleaseCurrentRepositorySession);
         }
 
-        public void ClearProjectLoadCancellation() =>
-            Calls.Add(ProjectLoadHostCall.ClearProjectLoadCancellation);
+		public void ClearProjectLoadCancellation()
+		{
+			StableIdentity = CurrentIdentity;
+			Calls.Add(ProjectLoadHostCall.ClearProjectLoadCancellation);
+		}
 
         public bool TryApplyActiveProjectLoadCancellationFallback()
         {
+			CurrentIdentity = StableIdentity;
             Calls.Add(ProjectLoadHostCall.ApplyCancellationFallback);
             return true;
         }
@@ -1875,7 +2089,7 @@ public sealed class MainWindowCoordinatorRefactorTests
             };
         }
 
-        public void ApplyProjectLoadSnapshot(
+		public bool ApplyProjectLoadSnapshot(
             ProjectLoadSnapshot snapshot,
             CancellationToken cancellationToken)
         {
@@ -1887,6 +2101,7 @@ public sealed class MainWindowCoordinatorRefactorTests
             Calls.Add(ProjectLoadSnapshotHostCall.ApplySnapshot);
 			AppliedSnapshot = snapshot;
             ApplyCount++;
+			return true;
         }
 
         private static ProjectTreeInventorySnapshot CreateInventorySnapshot()

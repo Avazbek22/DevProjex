@@ -35,6 +35,7 @@ public sealed partial class SelectionSyncCoordinator(
     private bool _disposed;
 
     private IReadOnlyList<IgnoreOptionDescriptor> _ignoreOptions = [];
+	private string? _ignoreOptionsProjectPath;
     private readonly ProjectSelectionSessionState _session = new();
     private readonly List<string> _scanRoots = [];
     private bool _hasExtensionlessExtensionEntries;
@@ -395,6 +396,14 @@ public sealed partial class SelectionSyncCoordinator(
     public void HandleExtensionsAllChanged(bool isChecked)
     {
         if (_suppressExtensionAllCheck) return;
+        if (_session.PreparedPath is not null)
+        {
+            RestorePreparedAllToggle(
+                isChecked,
+                ref _suppressExtensionAllCheck,
+                value => viewModel.AllExtensionsChecked = value);
+            return;
+        }
 
         _suppressExtensionAllCheck = true;
         viewModel.AllExtensionsChecked = isChecked;
@@ -413,6 +422,14 @@ public sealed partial class SelectionSyncCoordinator(
     public void HandleIgnoreAllChanged(bool isChecked, string? currentPath)
     {
         if (_suppressIgnoreAllCheck) return;
+        if (_session.PreparedPath is not null)
+        {
+            RestorePreparedAllToggle(
+                isChecked,
+                ref _suppressIgnoreAllCheck,
+                value => viewModel.AllIgnoreChecked = value);
+            return;
+        }
 
         _session.IgnoreOptions.IsInitialized = true;
         _session.IgnoreOptions.AllPreference = isChecked;
@@ -440,6 +457,14 @@ public sealed partial class SelectionSyncCoordinator(
 	{
 		if (_suppressContentProcessingAllCheck)
 			return;
+		if (_session.PreparedPath is not null)
+		{
+			RestorePreparedAllToggle(
+				isChecked,
+				ref _suppressContentProcessingAllCheck,
+				value => viewModel.AllContentProcessingChecked = value);
+			return;
+		}
 
 		var changed = false;
 		_suppressIgnoreItemCheck = true;
@@ -606,7 +631,7 @@ public sealed partial class SelectionSyncCoordinator(
             if (!string.IsNullOrWhiteSpace(path) && IsStalePathRequest(path))
                 return;
 
-            ApplyIgnoreOptions(options, previousSelections, hasPreviousSelections);
+			ApplyIgnoreOptions(options, previousSelections, hasPreviousSelections, path);
         });
     }
 
@@ -622,7 +647,7 @@ public sealed partial class SelectionSyncCoordinator(
         var availability = ResolveIgnoreOptionsAvailability(path, rootFolders);
         var options = ignoreOptionsService.GetOptions(availability);
 
-        ApplyIgnoreOptions(options, previousSelections, hasPreviousSelections);
+        ApplyIgnoreOptions(options, previousSelections, hasPreviousSelections, path);
     }
 
     public void RefreshIgnoreOptionsForCurrentSelection(string? currentPath = null)
@@ -633,7 +658,7 @@ public sealed partial class SelectionSyncCoordinator(
         var hasPreviousSelections = _session.IgnoreOptions.IsInitialized;
         var availability = ResolveIgnoreOptionsAvailability(path, scanRoots);
         var options = ignoreOptionsService.GetOptions(availability);
-        ApplyIgnoreOptions(options, previousSelections, hasPreviousSelections);
+        ApplyIgnoreOptions(options, previousSelections, hasPreviousSelections, path);
     }
 
     public void RelabelIgnoreOptions(
@@ -730,6 +755,9 @@ public sealed partial class SelectionSyncCoordinator(
 		_session.AdvanceRevision();
     }
 
+	internal void ConsumePreparedSelectionForPath(string projectPath) =>
+		_session.ConsumePreparedSelectionForPath(projectPath);
+
     public void ResetProjectProfileSelections(string projectPath)
     {
 		DiscardSelectionSnapshotsForDifferentProject(projectPath);
@@ -738,8 +766,18 @@ public sealed partial class SelectionSyncCoordinator(
         _session.AdvanceRevision();
 
         // Restore defaults for projects without a saved profile.
-        viewModel.AllExtensionsChecked = true;
-        viewModel.AllIgnoreChecked = true;
+		_suppressExtensionAllCheck = true;
+		_suppressIgnoreAllCheck = true;
+		try
+		{
+			viewModel.AllExtensionsChecked = true;
+			viewModel.AllIgnoreChecked = true;
+		}
+		finally
+		{
+			_suppressExtensionAllCheck = false;
+			_suppressIgnoreAllCheck = false;
+		}
     }
 
 	private void DiscardSelectionSnapshotsForDifferentProject(string projectPath)
@@ -870,7 +908,8 @@ public sealed partial class SelectionSyncCoordinator(
 					return;
 				}
 
-                ApplyLiveSelectionRefreshSnapshot(snapshot);
+				ApplyLiveSelectionRefreshSnapshot(snapshot);
+				_ignoreOptionsProjectPath = currentPath;
             });
         }
         finally
@@ -922,6 +961,7 @@ public sealed partial class SelectionSyncCoordinator(
 		{
 			ApplySelectionRefreshSnapshot(snapshot);
 		}
+		_ignoreOptionsProjectPath = currentPath;
 		if (snapshot.HadScanFailure)
 			scanIncomplete?.Invoke();
 
@@ -1031,6 +1071,7 @@ public sealed partial class SelectionSyncCoordinator(
 						snapshot,
 						retainPreviousSnapshot: expectedRequestVersion.HasValue);
 				}
+				_ignoreOptionsProjectPath = currentPath;
 				if (snapshot.HadScanFailure)
 					scanIncomplete?.Invoke();
 
@@ -1198,6 +1239,7 @@ public sealed partial class SelectionSyncCoordinator(
 
         // Clear ignore options
         _ignoreOptions = [];
+		_ignoreOptionsProjectPath = null;
         _ignoreRulesBuildCache.Invalidate();
     }
 
@@ -1275,6 +1317,8 @@ public sealed partial class SelectionSyncCoordinator(
         var scanRoots = GetProjectScanRoots();
         var availability = ResolveIgnoreOptionsAvailability(path, scanRoots);
         _ignoreOptions = ignoreOptionsService.GetOptions(availability);
+		if (!string.IsNullOrWhiteSpace(path))
+			_ignoreOptionsProjectPath = path;
         _session.IgnoreOptions.EnsureDefaults(_ignoreOptions);
     }
 
@@ -1313,7 +1357,8 @@ public sealed partial class SelectionSyncCoordinator(
     private void ApplyIgnoreOptions(
         IReadOnlyList<IgnoreOptionDescriptor> options,
         IReadOnlySet<IgnoreOptionId> previousSelections,
-        bool hasPreviousSelections)
+        bool hasPreviousSelections,
+		string? projectPath = null)
     {
         var useDefaultCheckedFallback = ShouldUseIgnoreDefaultFallback(options, previousSelections);
         var controllerGroupEndIndex = FindLastControllerOptionIndex(
@@ -1352,6 +1397,8 @@ public sealed partial class SelectionSyncCoordinator(
         UpdateIgnoreSelectionCache(
             hasPreviousSelections ? previousSelections : null,
             markStateCacheComplete: false);
+		if (!string.IsNullOrWhiteSpace(projectPath))
+			_ignoreOptionsProjectPath = projectPath;
         SyncIgnoreAllCheckbox();
         SynchronizeStableIgnoreOptionLabels();
         RequestPendingApplyEvaluation();
@@ -1482,6 +1529,14 @@ public sealed partial class SelectionSyncCoordinator(
         if (viewModel.Extensions.Contains(option))
         {
             if (_suppressExtensionItemCheck) return;
+            if (_session.PreparedPath is not null)
+            {
+                RestorePreparedItemToggle(
+                    option.IsChecked,
+                    ref _suppressExtensionItemCheck,
+                    value => option.IsChecked = value);
+                return;
+            }
 
             SyncAllCheckbox(viewModel.Extensions, ref _suppressExtensionAllCheck,
                 value => viewModel.AllExtensionsChecked = value);
@@ -1499,6 +1554,18 @@ public sealed partial class SelectionSyncCoordinator(
         if (_suppressIgnoreItemCheck) return;
 
         var changedOption = sender as IgnoreOptionViewModel;
+        if (_session.PreparedPath is not null)
+        {
+            if (changedOption is not null)
+            {
+                RestorePreparedItemToggle(
+                    changedOption.IsChecked,
+                    ref _suppressIgnoreItemCheck,
+                    value => changedOption.IsChecked = value);
+            }
+            return;
+        }
+
         _session.IgnoreOptions.IsInitialized = true;
         _session.IgnoreOptions.AllPreference = null;
 
@@ -1530,6 +1597,41 @@ public sealed partial class SelectionSyncCoordinator(
             QueueRefreshForIgnoreOptionChange(currentPath, changedOption?.Id);
         }
     }
+
+	private static void RestorePreparedAllToggle(
+		bool attemptedValue,
+		ref bool suppressChanges,
+		Action<bool> setValue)
+	{
+		suppressChanges = true;
+		try
+		{
+			// Routed checkbox events can run on either side of the TwoWay binding update.
+			// Publishing both transitions guarantees a synchronous return to the prior value.
+			setValue(attemptedValue);
+			setValue(!attemptedValue);
+		}
+		finally
+		{
+			suppressChanges = false;
+		}
+	}
+
+	private static void RestorePreparedItemToggle(
+		bool attemptedValue,
+		ref bool suppressChanges,
+		Action<bool> setValue)
+	{
+		suppressChanges = true;
+		try
+		{
+			setValue(!attemptedValue);
+		}
+		finally
+		{
+			suppressChanges = false;
+		}
+	}
 
 	private static IgnoreOptionId? ResolveChangedTransformation(
 		IReadOnlySet<IgnoreOptionId> before,
@@ -2845,6 +2947,12 @@ public sealed partial class SelectionSyncCoordinator(
         var selected = _session.IgnoreOptions.SnapshotSelectedOptions();
         if (selected.Count == 0)
             return selected;
+		if (_session.PreparedPath is not null &&
+		    (string.IsNullOrWhiteSpace(_ignoreOptionsProjectPath) ||
+		     !PathComparer.Default.Equals(_session.PreparedPath, _ignoreOptionsProjectPath)))
+		{
+			return selected;
+		}
 
         var visibleIds = new HashSet<IgnoreOptionId>();
         foreach (var option in _ignoreOptions)

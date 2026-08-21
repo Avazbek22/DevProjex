@@ -31,7 +31,7 @@ public sealed class ProjectProfilePersistenceCoordinator(
 		if (!CanPersist(currentPath) || !selectionCoordinator.IsSelectionStateCompleteForPersistence)
             return;
 
-        var profile = CaptureCurrentProfile();
+        var profile = CaptureCurrentProfile(currentPath!);
         await _pendingWrites
 			.PersistAsync(
 				currentPath!,
@@ -258,9 +258,12 @@ public sealed class ProjectProfilePersistenceCoordinator(
 		bool HadPrevious,
 		ProfileLoadState Previous);
 
-    private ProjectSelectionProfile CaptureCurrentProfile()
+    private ProjectSelectionProfile CaptureCurrentProfile(string currentPath)
     {
-        var applied = selectionCoordinator.SnapshotAppliedSelectionForPersistence();
+		var candidate = selectionCoordinator.SnapshotAppliedSelectionForPersistence();
+		var applied = candidate is not null && candidate.IsForProject(currentPath)
+			? candidate
+			: null;
         return ProjectSelectionProfileBuilder.Create(
             visibleExtensions: viewModel.Extensions.Select(option => new SelectionOption(
                 option.Name,

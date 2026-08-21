@@ -42,6 +42,7 @@ public sealed class SelectionSyncCoordinatorIgnoreStateRegressionTests
 
 		ApplyIgnoreCounts(coordinator, IgnoreOptionCounts.Empty);
 		coordinator.PopulateIgnoreOptionsForRootSelection([], ProjectPath);
+		coordinator.ConsumePreparedSelectionForPath(ProjectPath);
 
 		var selected = coordinator.GetSelectedIgnoreOptionIds();
 		Assert.DoesNotContain(IgnoreOptionId.DotFolders, selected);
@@ -79,6 +80,7 @@ public sealed class SelectionSyncCoordinatorIgnoreStateRegressionTests
 
 		ApplyIgnoreCounts(coordinator, new IgnoreOptionCounts(DotFiles: 1, ExtensionlessFiles: 2));
 		coordinator.PopulateIgnoreOptionsForRootSelection([], ProjectPath);
+		coordinator.ConsumePreparedSelectionForPath(ProjectPath);
 
 		var selected = coordinator.GetSelectedIgnoreOptionIds();
 		Assert.Contains(IgnoreOptionId.DotFiles, selected);

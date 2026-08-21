@@ -179,7 +179,18 @@ public partial class MainWindow
             return;
         }
 
-        await TryOpenFolderAsync(path, fromDialog: true);
+		try
+		{
+			await TryOpenFolderAsync(path, fromDialog: true);
+		}
+		catch (OperationCanceledException)
+		{
+			// Cancellation is handled by the project-load fallback.
+		}
+		catch (Exception exception)
+		{
+			await ShowErrorAsync(exception.Message);
+		}
     }
 
     private void StartRecentFolderAvailabilityRefresh()

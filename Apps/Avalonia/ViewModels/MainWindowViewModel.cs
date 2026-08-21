@@ -154,6 +154,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _statusProgressIsIndeterminate = true;
     private double _statusProgressValue;
     private bool _isProjectCopyExportInProgress;
+	private bool _isProjectLoadInProgress;
 
     public MainWindowViewModel(LocalizationService localization, HelpContentProvider helpContentProvider)
     {
@@ -486,6 +487,21 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         }
     }
 
+	public bool IsProjectLoadInProgress
+	{
+		get => _isProjectLoadInProgress;
+		internal set
+		{
+			if (_isProjectLoadInProgress == value)
+				return;
+
+			_isProjectLoadInProgress = value;
+			RaisePropertyChanged();
+			RaisePropertyChanged(nameof(CanApplySettings));
+			RaisePropertyChanged(nameof(IsApplySettingsAttentionActive));
+		}
+	}
+
     public bool CanChangeProjectTree => !_isProjectCopyExportInProgress;
 
     public bool CanExportProjectCopy => _isProjectLoaded && !_isProjectCopyExportInProgress;
@@ -503,7 +519,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		IsPreviewPaneVisible &&
 		_selectedPreviewContentMode != PreviewContentMode.Tree;
 
-    public bool AreFilterSettingsEnabled => _isProjectLoaded && !_isProjectCopyExportInProgress;
+	public bool AreFilterSettingsEnabled =>
+		_isProjectLoaded && !_isProjectCopyExportInProgress;
 
     public bool CanApplySettings => CanStartApplySettings;
 
@@ -543,11 +560,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     internal void CompleteApplySettings() => Interlocked.Exchange(ref _applySettingsInProgress, 0);
 
     private bool CanStartApplySettings =>
-        _isProjectLoaded && !_applySettingsBusyDelayElapsed && !_isProjectCopyExportInProgress;
+		_isProjectLoaded && !_applySettingsBusyDelayElapsed && !_isProjectCopyExportInProgress &&
+		!_isProjectLoadInProgress;
 
     private bool CanStartApplySettingsWork(StatusOperationType activeOperationType) =>
         _isProjectLoaded &&
         !_isProjectCopyExportInProgress &&
+		!_isProjectLoadInProgress &&
         activeOperationType is StatusOperationType.None or
             StatusOperationType.MetricsCalculation or
             StatusOperationType.SelectionRefresh or

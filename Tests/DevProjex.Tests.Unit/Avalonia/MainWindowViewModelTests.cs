@@ -700,6 +700,32 @@ public sealed class MainWindowViewModelTests
         Assert.True(viewModel.AreFilterSettingsEnabled);
     }
 
+	[Fact]
+	public void ProjectLoad_KeepsSettingsInteractiveAndDisablesOnlyCommitSurfaceUntilPublication()
+	{
+		var viewModel = CreateViewModel();
+		viewModel.IsProjectLoaded = true;
+		var changed = new HashSet<string>();
+		viewModel.PropertyChanged += (_, args) =>
+		{
+			if (args.PropertyName is not null)
+				changed.Add(args.PropertyName);
+		};
+
+		viewModel.IsProjectLoadInProgress = true;
+
+		Assert.True(viewModel.AreFilterSettingsEnabled);
+		Assert.False(viewModel.CanApplySettings);
+		Assert.True(viewModel.CanChangeProjectTree);
+		Assert.DoesNotContain(nameof(MainWindowViewModel.AreFilterSettingsEnabled), changed);
+		Assert.Contains(nameof(MainWindowViewModel.CanApplySettings), changed);
+
+		viewModel.IsProjectLoadInProgress = false;
+
+		Assert.True(viewModel.AreFilterSettingsEnabled);
+		Assert.True(viewModel.CanApplySettings);
+	}
+
     [Fact]
     public void ProjectCopyExport_AllowsClosingExistingPreviewButBlocksReopeningIt()
     {

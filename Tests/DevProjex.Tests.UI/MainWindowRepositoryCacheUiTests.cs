@@ -596,6 +596,54 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 	}
 
 	[AvaloniaFact]
+	public async Task CachedGitOpen_ReplacesPreviousRepositoryBranchMenuAfterPublication()
+	{
+		var appDataPath = CreateAppDataPath();
+		var cache = new RepoCacheService(Path.Combine(appDataPath, "RepoCache"));
+		CreateCachedRepository(
+			cache,
+			"https://github.com/example/branch-menu.git",
+			"feature/cache",
+			128,
+			git: true,
+			initializeGit: true);
+		var git = new BranchCatalogGitRepositoryService(
+			[new GitBranch("feature/cache", IsActive: true, IsRemote: false),
+			 new GitBranch("release", IsActive: false, IsRemote: false)]);
+		var window = await CreateWindowAsync(appDataPath, cache, git);
+
+		try
+		{
+			var viewModel = UiTestDriver.GetViewModel(window);
+			viewModel.GitBranches.Add(new GitBranch("stale-from-previous", IsActive: true, IsRemote: false));
+			var cloneWindow = await UiTestDriver.OpenGitCloneWindowAsync(window);
+			await WaitForCatalogAsync(window, expectedCount: 1);
+			var cacheCombo = Assert.IsType<ComboBox>(cloneWindow.FindControl<ComboBox>("LocalCacheComboBox"));
+			cacheCombo.SelectedItem = Assert.Single(viewModel.CachedRepositories);
+
+			await UiTestDriver.RaiseButtonClickAsync(
+				Assert.IsType<Button>(cloneWindow.FindControl<Button>("StartCloneButton")));
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => !cloneWindow.IsVisible &&
+				      viewModel.GitBranches.Select(static branch => branch.Name)
+					      .SequenceEqual(["feature/cache", "release"]),
+				"the cached repository branch catalog to refresh after publication");
+
+			Assert.Equal(["feature/cache", "release"], viewModel.GitBranches.Select(static branch => branch.Name));
+			Assert.DoesNotContain(viewModel.GitBranches, static branch => branch.Name == "stale-from-previous");
+			var menu = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "GitBranchMenuItem");
+			Assert.Equal(
+				["feature/cache", "release"],
+				menu.Items.OfType<MenuItem>().Select(static item => Assert.IsType<string>(item.Tag)));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task GitCloneWindow_EscapeInRepositoryDropDownClosesOnlyThePopup()
 	{
 		var appDataPath = CreateAppDataPath();
@@ -928,7 +976,7 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 
 			Assert.Equal(1, git.PullCount);
 			Assert.Equal(0, git.CloneCount);
-			Assert.Equal(0, git.BranchDiscoveryCount);
+			Assert.Equal(1, git.BranchDiscoveryCount);
 			Assert.Equal(ProjectSourceType.GitClone, viewModel.ProjectSourceType);
 			Assert.Equal("main", viewModel.CurrentBranch);
 			Assert.DoesNotContain(
@@ -1327,7 +1375,8 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 
 		public Task<bool> IsGitAvailableAsync(CancellationToken cancellationToken = default) => Fail<Task<bool>>();
 		public Task<GitCloneResult> CloneAsync(string url, string targetDirectory, IProgress<string>? progress = null, CancellationToken cancellationToken = default) => Fail<Task<GitCloneResult>>();
-		public Task<IReadOnlyList<GitBranch>> GetBranchesAsync(string repositoryPath, CancellationToken cancellationToken = default) => Fail<Task<IReadOnlyList<GitBranch>>>();
+		public Task<IReadOnlyList<GitBranch>> GetBranchesAsync(string repositoryPath, CancellationToken cancellationToken = default) =>
+			Task.FromResult<IReadOnlyList<GitBranch>>([]);
 		public Task<string?> GetDefaultBranchAsync(string repositoryPath, CancellationToken cancellationToken = default) => Fail<Task<string?>>();
 		public Task<bool> SwitchBranchAsync(string repositoryPath, string branchName, IProgress<string>? progress = null, CancellationToken cancellationToken = default) => Fail<Task<bool>>();
 		public Task<bool> PullUpdatesAsync(string repositoryPath, IProgress<string>? progress = null, CancellationToken cancellationToken = default) => Fail<Task<bool>>();
@@ -1403,6 +1452,28 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 		public Task<string?> GetRemoteUrlAsync(string repositoryPath, CancellationToken cancellationToken = default) => Task.FromResult<string?>(null);
 		public Task<bool> IsGitAvailableAsync(CancellationToken cancellationToken = default) => Task.FromResult(true);
 		public Task<GitCloneResult> CloneAsync(string url, string targetDirectory, IProgress<string>? progress = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+	}
+
+	private sealed class BranchCatalogGitRepositoryService(IReadOnlyList<GitBranch> branches) : IGitRepositoryService
+	{
+		public int BranchDiscoveryCount { get; private set; }
+
+		public Task<IReadOnlyList<GitBranch>> GetBranchesAsync(
+			string repositoryPath,
+			CancellationToken cancellationToken = default)
+		{
+			BranchDiscoveryCount++;
+			return Task.FromResult(branches);
+		}
+
+		public Task<bool> IsGitAvailableAsync(CancellationToken cancellationToken = default) => Task.FromResult(true);
+		public Task<GitCloneResult> CloneAsync(string url, string targetDirectory, IProgress<string>? progress = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+		public Task<string?> GetDefaultBranchAsync(string repositoryPath, CancellationToken cancellationToken = default) => Task.FromResult<string?>("main");
+		public Task<bool> SwitchBranchAsync(string repositoryPath, string branchName, IProgress<string>? progress = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+		public Task<bool> PullUpdatesAsync(string repositoryPath, IProgress<string>? progress = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+		public Task<string?> GetHeadCommitAsync(string repositoryPath, CancellationToken cancellationToken = default) => Task.FromResult<string?>("head");
+		public Task<string?> GetCurrentBranchAsync(string repositoryPath, CancellationToken cancellationToken = default) => Task.FromResult<string?>(branches.FirstOrDefault(static branch => branch.IsActive)?.Name);
+		public Task<string?> GetRemoteUrlAsync(string repositoryPath, CancellationToken cancellationToken = default) => Task.FromResult<string?>(null);
 	}
 
 	private sealed class PairedProgressGitRepositoryService : IGitRepositoryService

@@ -26,12 +26,15 @@ public partial class MainWindow : IProjectLoadPipelineHost
     Task IProjectLoadPipelineHost.YieldProjectLoadStartupFrameAsync(CancellationToken cancellationToken) =>
         YieldProjectLoadStartupFrameAsync(cancellationToken);
 
-    void IProjectLoadPipelineHost.ClearPreviousProjectState(bool forceCompactingGc) =>
-        ClearPreviousProjectState(forceCompactingGc);
+    void IProjectLoadPipelineHost.ClearPreviousProjectState(
+		bool forceCompactingGc,
+		bool preserveProjectSessions) =>
+        ClearPreviousProjectState(forceCompactingGc, preserveProjectSessions);
 
     void IProjectLoadPipelineHost.SetProjectLoadIdentity(string path, bool fromDialog)
     {
         _currentPath = path;
+		_viewModel.IsProjectLoadInProgress = true;
         _viewModel.IsProjectLoaded = true;
         _viewModel.SettingsVisible = true;
         _viewModel.SearchVisible = false;
@@ -49,7 +52,7 @@ public partial class MainWindow : IProjectLoadPipelineHost
     void IProjectLoadPipelineHost.UpdateTitle() =>
         UpdateTitle();
 
-    Task IProjectLoadPipelineHost.ReloadProjectAsync(CancellationToken cancellationToken, bool applyStoredProfile) =>
+    Task<bool> IProjectLoadPipelineHost.ReloadProjectAsync(CancellationToken cancellationToken, bool applyStoredProfile) =>
         ReloadProjectAsync(
             cancellationToken,
             applyStoredProfile,

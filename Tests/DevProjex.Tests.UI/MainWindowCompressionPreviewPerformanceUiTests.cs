@@ -254,6 +254,10 @@ public sealed class MainWindowCompressionPreviewPerformanceUiTests
                 static candidate => candidate.Id == IgnoreOptionId.CompressCode);
             Assert.False(option.IsChecked);
 			await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => UiTestDriver.TryGetCurrentStatusMetrics(window, out _, out _),
+				"initial metrics to be published in the status bar");
 			Assert.True(
 				UiTestDriver.TryGetCurrentStatusMetrics(window, out _, out var uncompressedMetrics));
 

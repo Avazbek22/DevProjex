@@ -30,6 +30,7 @@ internal sealed class PreviewSearchInteractionController : IDisposable
 	private long _searchVersion;
 	private long _lastHotkeyTimestamp;
 	private int _pendingHotkeyToggle;
+	private bool _restoreVisibleWhenAvailable;
 	private bool _disposed;
 
 	public PreviewSearchInteractionController(
@@ -69,7 +70,14 @@ internal sealed class PreviewSearchInteractionController : IDisposable
 
 		UpdateSearchButtonAvailability();
 		if (_viewModel.IsPreviewSearchAvailable)
+		{
+			if (_restoreVisibleWhenAvailable)
+			{
+				_restoreVisibleWhenAvailable = false;
+				Show();
+			}
 			return;
+		}
 
 		Close(focusPreview: false);
 	}
@@ -80,6 +88,7 @@ internal sealed class PreviewSearchInteractionController : IDisposable
 			return;
 
 		CancelPendingSearch();
+		_restoreVisibleWhenAvailable = false;
 		_viewModel.PreviewSearchQuery = string.Empty;
 		_viewModel.SetPreviewSearchInProgress(false);
 		_previewTextControl.ClearSearchMatches();
@@ -87,6 +96,26 @@ internal sealed class PreviewSearchInteractionController : IDisposable
 
 		if (_viewModel.PreviewSearchVisible || _container.IsVisible)
 			Close(focusPreview: false);
+	}
+
+	public void RestoreProjectState(string query, bool visible)
+	{
+		if (_disposed)
+			return;
+
+		_viewModel.PreviewSearchQuery = query;
+		_restoreVisibleWhenAvailable = visible && !_viewModel.IsPreviewSearchAvailable;
+		if (visible && _viewModel.IsPreviewSearchAvailable)
+		{
+			_restoreVisibleWhenAvailable = false;
+			if (!_viewModel.PreviewSearchVisible)
+				Show();
+			else
+				ScheduleSearch(navigateToNearest: false, debounce: false);
+			return;
+		}
+
+		Close(focusPreview: false);
 	}
 
 	public void Toggle()

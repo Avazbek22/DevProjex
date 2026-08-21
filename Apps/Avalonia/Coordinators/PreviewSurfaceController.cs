@@ -1443,6 +1443,7 @@ internal sealed class PreviewSurfaceController : IDisposable
     public void ClearDocument()
     {
 		_pendingRedactionViewportOffset = null;
+		_pendingMarkedSecretId = null;
         ClearSelectionMetrics();
         var previousDocument = _viewModel.PreviewDocument;
         _viewModel.PreviewDocument = null;

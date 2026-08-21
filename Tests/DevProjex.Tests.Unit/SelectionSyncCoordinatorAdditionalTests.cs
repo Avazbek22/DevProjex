@@ -264,6 +264,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 					[IgnoreOptionId.SmartIgnore] = true
 				}));
 		coordinator.PopulateIgnoreOptionsForRootSelection([], projectPath);
+		coordinator.ConsumePreparedSelectionForPath(projectPath);
 
 		Assert.False(viewModel.IgnoreOptions.Single(
 			static option => option.Id == IgnoreOptionId.UseGitIgnore).IsChecked);
@@ -307,6 +308,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 					IgnoreOptionId.SmartIgnore
 				]));
 		coordinator.PopulateIgnoreOptionsForRootSelection([], projectPath);
+		coordinator.ConsumePreparedSelectionForPath(projectPath);
 
 		var useGitIgnore = viewModel.IgnoreOptions.Single(
 			static option => option.Id == IgnoreOptionId.UseGitIgnore);
@@ -906,7 +908,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	}
 
 	[Fact]
-	public void ApplyProjectProfileSelections_StoresUnavailableIgnoreSelectionsWithoutActivatingHiddenRules()
+	public void ApplyProjectProfileSelections_PreparedReadPreservesUnavailableSelections()
 	{
 		var viewModel = CreateViewModel();
 		var coordinator = CreateCoordinator(viewModel);
@@ -919,7 +921,9 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		var selected = coordinator.GetSelectedIgnoreOptionIds();
 		var persistedStates = coordinator.SnapshotIgnoreOptionStatesForPersistence();
 
-		Assert.Empty(selected);
+		Assert.Equal(
+			new[] { IgnoreOptionId.DotFiles, IgnoreOptionId.HiddenFiles }.Order(),
+			selected.Order());
 		Assert.NotNull(persistedStates);
 		Assert.True(persistedStates![IgnoreOptionId.DotFiles]);
 		Assert.True(persistedStates[IgnoreOptionId.HiddenFiles]);

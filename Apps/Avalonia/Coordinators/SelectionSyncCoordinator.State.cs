@@ -48,6 +48,7 @@ public sealed partial class SelectionSyncCoordinator
         }
 
         public AppliedSelectionPersistenceSnapshot CreatePersistenceSnapshot() => new(
+			projectPath,
             extensionOptionStates
                 .Where(static pair => pair.Value)
                 .Select(static pair => pair.Key)
@@ -265,8 +266,13 @@ public sealed partial class SelectionSyncCoordinator
     }
 
     internal sealed record AppliedSelectionPersistenceSnapshot(
+		string ProjectPath,
         IReadOnlySet<string> SelectedExtensions,
         IReadOnlySet<IgnoreOptionId> SelectedIgnoreOptions,
         IReadOnlyDictionary<string, bool> ExtensionOptionStates,
-        IReadOnlyDictionary<IgnoreOptionId, bool> IgnoreOptionStates);
+		IReadOnlyDictionary<IgnoreOptionId, bool> IgnoreOptionStates)
+	{
+		public bool IsForProject(string currentProjectPath) =>
+			PathComparer.Default.Equals(ProjectPath, currentProjectPath);
+	}
 }

@@ -25,5 +25,5 @@ internal interface IProjectLoadSnapshotPipelineHost
 
     TreeNodeViewModel BuildTreeViewModel(TreeRefreshInput input, BuildTreeResult result);
 
-    void ApplyProjectLoadSnapshot(ProjectLoadSnapshot snapshot, CancellationToken cancellationToken);
+    bool ApplyProjectLoadSnapshot(ProjectLoadSnapshot snapshot, CancellationToken cancellationToken);
 }

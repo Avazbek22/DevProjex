@@ -48,6 +48,50 @@ public sealed class ProjectProfilePersistenceCoordinatorTests
 	}
 
 	[Fact]
+	public async Task Persist_DoesNotUseAppliedSnapshotFromAnotherProject()
+	{
+		const string projectA = @"C:\ProjectA";
+		const string projectB = @"C:\ProjectB";
+		var (viewModel, selectionCoordinator) = CreateSelectionCoordinator(projectA);
+		using (selectionCoordinator)
+		using (var secretSession = new SecretRedactionSession(new EmptySecretDetector()))
+		{
+			viewModel.Extensions.Add(new SelectionOptionViewModel(".cs", true));
+			viewModel.Extensions.Add(new SelectionOptionViewModel(".md", false));
+			viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(
+				IgnoreOptionId.HiddenFiles,
+				"hidden files",
+				true));
+			viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(
+				IgnoreOptionId.HideSecrets,
+				"hide secrets",
+				false));
+			selectionCoordinator.UpdateExtensionsSelectionCache();
+			selectionCoordinator.UpdateIgnoreSelectionCache();
+			selectionCoordinator.AcceptCurrentSelectionsAsApplied(projectA);
+
+			viewModel.Extensions[0].IsChecked = false;
+			viewModel.Extensions[1].IsChecked = true;
+			viewModel.IgnoreOptions[0].IsChecked = false;
+			viewModel.IgnoreOptions[1].IsChecked = true;
+			selectionCoordinator.UpdateExtensionsSelectionCache();
+			selectionCoordinator.UpdateIgnoreSelectionCache();
+			var store = new RetryProfileStore(projectB, failures: 0);
+			var persistence = new ProjectProfilePersistenceCoordinator(
+				viewModel,
+				selectionCoordinator,
+				store,
+				secretSession);
+
+			await persistence.PersistIfNeededAsync(projectB, TestContext.Current.CancellationToken);
+
+			var saved = store.SavedProfiles[Path.GetFullPath(projectB)];
+			Assert.Equal([".md"], saved.SelectedExtensions);
+			Assert.DoesNotContain(IgnoreOptionId.HiddenFiles, saved.SelectedIgnoreOptions);
+		}
+	}
+
+	[Fact]
 	public async Task Persist_AfterEnsuringHideSecrets_MergesImmediateAppliedOptionWithoutDrafts()
 	{
 		const string projectPath = @"C:\Project";

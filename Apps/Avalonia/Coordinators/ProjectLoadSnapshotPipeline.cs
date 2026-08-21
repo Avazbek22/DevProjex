@@ -4,13 +4,14 @@ namespace DevProjex.Avalonia.Coordinators;
 
 internal sealed class ProjectLoadSnapshotPipeline(IProjectLoadSnapshotPipelineHost host)
 {
-    public async Task ReloadAsync(
+    public async Task<bool> ReloadAsync(
         string currentPath,
         bool preserveTreeState,
+		PersistentSecretMarksSnapshot? persistentMarks,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(currentPath))
-            return;
+            return false;
 
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -18,11 +19,11 @@ internal sealed class ProjectLoadSnapshotPipeline(IProjectLoadSnapshotPipelineHo
 
         var selectionSnapshot = await host.BuildSelectionSnapshotAsync(currentPath, cancellationToken);
         if (selectionSnapshot is null)
-            return;
+            return false;
 
         cancellationToken.ThrowIfCancellationRequested();
         if (host.TryHandleSelectionRootAccessDenied(currentPath, selectionSnapshot))
-            return;
+            return false;
 
         var treeInput = host.CreateTreeRefreshInput(
             currentPath,
@@ -43,7 +44,7 @@ internal sealed class ProjectLoadSnapshotPipeline(IProjectLoadSnapshotPipelineHo
 
         cancellationToken.ThrowIfCancellationRequested();
         if (host.TryHandleTreeRootAccessDenied(treeInput, treeBuild.Tree))
-            return;
+            return false;
 
 		if (treeBuild.Tree.HadScanFailure)
 		{
@@ -61,8 +62,14 @@ internal sealed class ProjectLoadSnapshotPipeline(IProjectLoadSnapshotPipelineHo
         }
 
         cancellationToken.ThrowIfCancellationRequested();
-        host.ApplyProjectLoadSnapshot(
-            new ProjectLoadSnapshot(selectionSnapshot, treeInput, treeBuild.Tree, treeBuild.Inventory, treeRoot),
+		return host.ApplyProjectLoadSnapshot(
+			new ProjectLoadSnapshot(
+				selectionSnapshot,
+				treeInput,
+				treeBuild.Tree,
+				treeBuild.Inventory,
+				treeRoot,
+				persistentMarks),
             cancellationToken);
     }
 }

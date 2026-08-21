@@ -845,6 +845,7 @@ public partial class MainWindow
 	private readonly SecretRedactionSession _secretRedactionSession;
 	private readonly CodeCompressionSession _codeCompressionSession;
 	private CodeCompressionSnapshot? _codeCompressionSnapshot;
+	private string? _contentSessionProjectPath;
 	private long _compressionSelectionRefreshVersion;
 	private int _treeSelectionChangeBatchDepth;
 	private bool _treeSelectionChangedDuringBatch;
