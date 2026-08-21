@@ -29,6 +29,10 @@ public sealed class MainWindowSearchFilterUiTests(UiWorkspaceFixture workspace)
             var viewModel = UiTestDriver.GetViewModel(window);
             Assert.True(viewModel.SearchVisible);
             Assert.True(viewModel.SearchTotalMatches > 0);
+            AssertPanelBorderIsFullyVisible(
+                searchBar,
+                UiTestDriver.GetRequiredControl<Border>(window, "SearchBarContainer"),
+                window);
 
             await UiTestDriver.PressKeyAsync(window, Key.Escape);
             Assert.False(viewModel.SearchVisible);
@@ -146,6 +150,10 @@ public sealed class MainWindowSearchFilterUiTests(UiWorkspaceFixture workspace)
             Assert.True(viewModel.FilterVisible);
             Assert.True(viewModel.FilterMatchCount > 0);
             Assert.NotEmpty(viewModel.TreeNodes);
+            AssertPanelBorderIsFullyVisible(
+                filterBar,
+                UiTestDriver.GetRequiredControl<Border>(window, "FilterBarContainer"),
+                window);
 
             await UiTestDriver.PressKeyAsync(window, Key.Escape);
             Assert.False(viewModel.FilterVisible);
@@ -1329,6 +1337,23 @@ public sealed class MainWindowSearchFilterUiTests(UiWorkspaceFixture workspace)
         {
             await UiTestDriver.CloseWindowAsync(window);
         }
+    }
+
+    private static void AssertPanelBorderIsFullyVisible(
+        UserControl surface,
+        Border container,
+        MainWindow window)
+    {
+        var panel = Assert.IsType<Border>(surface.Content);
+        var panelBounds = UiTestDriver.GetBoundsInWindow(panel, window);
+        var containerBounds = UiTestDriver.GetBoundsInWindow(container, window);
+
+        Assert.InRange(containerBounds.Height, 47.5, 48.5);
+        Assert.InRange(panelBounds.Height, 45.5, 46.5);
+        Assert.True(panelBounds.Top >= containerBounds.Top - 0.5);
+        Assert.True(
+            panelBounds.Bottom <= containerBounds.Bottom + 0.5,
+            $"The panel border extends beyond its clipping container: panel={panelBounds}, container={containerBounds}.");
     }
 
     private static async Task ApplyAndCloseSearchAsync(MainWindow window, string query)

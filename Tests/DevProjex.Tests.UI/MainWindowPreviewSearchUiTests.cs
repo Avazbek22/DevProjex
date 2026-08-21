@@ -38,7 +38,7 @@ public sealed class MainWindowPreviewSearchUiTests
 
 			Assert.True(viewModel.PreviewSearchVisible);
 			Assert.True(container.IsVisible);
-			Assert.InRange(container.Bounds.Height, 45, 47);
+			AssertPanelBorderIsFullyVisible(searchBar, container, window);
 			Assert.True(searchBar.SearchBoxControl!.IsFocused);
 
 			await UiTestDriver.PressKeyAsync(
@@ -544,6 +544,23 @@ public sealed class MainWindowPreviewSearchUiTests
 		{
 			await UiTestDriver.CloseWindowAsync(window);
 		}
+	}
+
+	private static void AssertPanelBorderIsFullyVisible(
+		PreviewSearchBarView searchBar,
+		Border container,
+		MainWindow window)
+	{
+		var panel = Assert.IsType<Border>(searchBar.Content);
+		var panelBounds = UiTestDriver.GetBoundsInWindow(panel, window);
+		var containerBounds = UiTestDriver.GetBoundsInWindow(container, window);
+
+		Assert.InRange(containerBounds.Height, 47.5, 48.5);
+		Assert.InRange(panelBounds.Height, 45.5, 46.5);
+		Assert.True(panelBounds.Top >= containerBounds.Top - 0.5);
+		Assert.True(
+			panelBounds.Bottom <= containerBounds.Bottom + 0.5,
+			$"The preview search border extends beyond its clipping container: panel={panelBounds}, container={containerBounds}.");
 	}
 
 	private static async Task OpenSearchAsync(MainWindow window)

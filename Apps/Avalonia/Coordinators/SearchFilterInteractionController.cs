@@ -7,7 +7,7 @@ namespace DevProjex.Avalonia.Coordinators;
 
 internal sealed class SearchFilterInteractionController : IDisposable
 {
-    private const double ToolBarHeight = 46.0;
+    private const double ToolBarHeight = 48.0;
     private const double PanelIslandSpacing = 4.0;
     private static readonly TimeSpan ToolBarAnimationDuration =
         UiTimingProfile.Scale(TimeSpan.FromMilliseconds(250));
