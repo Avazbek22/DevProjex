@@ -109,13 +109,6 @@ public partial class MainWindow
 
     private void OnWindowPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
     {
-        if (e.Property == ActualTransparencyLevelProperty)
-        {
-            if (_themeEffectRuntimeProbeReady)
-                _themeBrushCoordinator.ScheduleActualEffectSynchronization();
-            return;
-        }
-
         if (e.Property != BoundsProperty)
             return;
 
@@ -497,8 +490,7 @@ public partial class MainWindow
                 EnsureDesktopControlServerAsync(cancellationToken),
                 RevealStartupWindowAfterCompositionWarmupAsync(cancellationToken));
             cancellationToken.ThrowIfCancellationRequested();
-            _themeEffectRuntimeProbeReady = true;
-            _themeBrushCoordinator.ScheduleActualEffectSynchronization();
+            _themeBrushCoordinator.ScheduleStartupEffectSynchronization();
             StartDeferredAppStateBootstrap(cancellationToken);
             StartDeferredRecentProjectsLoad(cancellationToken);
             ScheduleOptionalFontCatalogLoad();

@@ -23,6 +23,7 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
     private SolidColorBrush? _accentBrush;
     private readonly HashSet<string> _publishedResourceKeys = new(StringComparer.Ordinal);
     private int _dynamicUpdateScheduled;
+    private int _startupEffectProbeScheduled;
     private DispatcherTimer? _actualEffectProbeTimer;
     private bool _disposed;
 
@@ -76,8 +77,6 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
                 WindowTransparencyLevel.Blur,
                 WindowTransparencyLevel.None
             ];
-            ScheduleActualEffectSynchronization();
-
             return;
         }
 
@@ -90,8 +89,6 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
                 WindowTransparencyLevel.Mica,
                 WindowTransparencyLevel.None
             ];
-            ScheduleActualEffectSynchronization();
-
             return;
         }
 
@@ -103,13 +100,14 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
 
     }
 
-    public void SynchronizeActualEffectAvailability()
+    internal void SynchronizeStartupEffectAvailability(
+        WindowTransparencyLevel? actualEffectOverride = null)
     {
         var requested = viewModel.ActiveThemeEffect;
         if (requested is ThemeEffectMode.Solid or ThemeEffectMode.Transparent)
             return;
 
-        var actual = window.ActualTransparencyLevel;
+        var actual = actualEffectOverride ?? window.ActualTransparencyLevel;
         var resolved = ThemeEffectPlatformSupport.ResolveActual(requested, actual);
 
         switch (resolved)
@@ -146,10 +144,14 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
         }
     }
 
-    public void ScheduleActualEffectSynchronization()
+    public void ScheduleStartupEffectSynchronization()
     {
-        if (_disposed || !window.IsVisible)
+        if (_disposed ||
+            !window.IsVisible ||
+            Interlocked.Exchange(ref _startupEffectProbeScheduled, 1) != 0)
+        {
             return;
+        }
 
         if (_actualEffectProbeTimer is null)
         {
@@ -169,7 +171,7 @@ public sealed class ThemeBrushCoordinator(Window window, MainWindowViewModel vie
     {
         _actualEffectProbeTimer?.Stop();
         if (!_disposed)
-            SynchronizeActualEffectAvailability();
+            SynchronizeStartupEffectAvailability();
     }
 
     public void ScheduleDynamicThemeBrushUpdate()

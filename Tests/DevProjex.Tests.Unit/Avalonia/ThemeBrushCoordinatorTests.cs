@@ -43,6 +43,33 @@ public sealed class ThemeBrushCoordinatorTests
 	}
 
 	[AvaloniaFact]
+	public void UpdateTransparencyEffect_RuntimeChangesDoNotScheduleSelectionFallback()
+	{
+		using var harness = CreateHarness();
+		harness.Window.Show();
+		SetEffect(harness.ViewModel, ThemeEffectMode.Acrylic);
+
+		harness.Coordinator.UpdateTransparencyEffect();
+
+		Assert.Equal(ThemeEffectMode.Acrylic, harness.ViewModel.ActiveThemeEffect);
+		Assert.True(harness.ViewModel.IsAcrylicAvailable);
+		Assert.Null(GetPrivateFieldValue(harness.Coordinator, "_actualEffectProbeTimer"));
+	}
+
+	[AvaloniaFact]
+	public void SynchronizeStartupEffectAvailability_ResolvesInitialNativeFallback()
+	{
+		using var harness = CreateHarness();
+		SetEffect(harness.ViewModel, ThemeEffectMode.Acrylic);
+
+		harness.Coordinator.SynchronizeStartupEffectAvailability(WindowTransparencyLevel.Mica);
+
+		Assert.Equal(ThemeEffectMode.Mica, harness.ViewModel.ActiveThemeEffect);
+		Assert.False(harness.ViewModel.IsAcrylicAvailable);
+		Assert.True(harness.ViewModel.IsMicaAvailable);
+	}
+
+	[AvaloniaFact]
 	public void UpdateDynamicThemeBrushes_PublishesExpectedResourcesAndReusesBrushInstances()
 	{
 		var app = global::Avalonia.Application.Current;
@@ -339,6 +366,7 @@ public sealed class ThemeBrushCoordinatorTests
 		public void Dispose()
 		{
 			Coordinator.Dispose();
+			Window.Close();
 			ViewModel.Dispose();
 		}
 	}

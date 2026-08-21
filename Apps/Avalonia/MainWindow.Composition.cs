@@ -738,7 +738,6 @@ public partial class MainWindow
     private string? _cachedPathPresentationRepositoryUrl;
     private ExportPathPresentation? _cachedPathPresentation;
     private bool _elevationAttempted;
-    private bool _themeEffectRuntimeProbeReady;
     private bool _awaitingSystemDialogActivation;
     private TaskCompletionSource<bool>? _systemDialogActivationTcs;
 
