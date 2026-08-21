@@ -1248,6 +1248,7 @@ public partial class MainWindow
 			_toastService,
 			services.ProjectPathLauncher,
 			() => _currentPath,
+			IsCurrentTreeNode,
 			CanUseTreeContextContentAndSelection,
 			ShouldShowSelectOnlyTreeNode,
 			ReadTreeNodeContentAsync,

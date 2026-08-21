@@ -95,6 +95,40 @@ public sealed class ProjectPathStartInfoFactoryTests
 	}
 
 	[Fact]
+	public void CreateCandidates_LinuxFile_PreservesBackslashAndEscapesDbusArrayDelimiters()
+	{
+		const string path = "/home/demo/project/name\\part,one#two.txt";
+
+		var candidates = ProjectPathStartInfoFactory.CreateCandidates(
+			DesktopPlatform.Linux,
+			path,
+			isDirectory: false);
+
+		Assert.Contains(
+			"array:string:file:///home/demo/project/name%5Cpart%2Cone%23two.txt",
+			candidates[0].StartInfo.ArgumentList);
+		Assert.Equal(
+			"/home/demo/project",
+			Assert.Single(candidates[1].StartInfo.ArgumentList));
+	}
+
+	[Theory]
+	[InlineData(DesktopPlatform.Windows, "relative\\file.txt")]
+	[InlineData(DesktopPlatform.Windows, "C:file.txt")]
+	[InlineData(DesktopPlatform.MacOS, "relative/file.txt")]
+	[InlineData(DesktopPlatform.Linux, "relative/file.txt")]
+	public void CreateCandidates_RequiresAnAbsolutePlatformPath(
+		DesktopPlatform platform,
+		string path)
+	{
+		Assert.Throws<ArgumentException>(() =>
+			ProjectPathStartInfoFactory.CreateCandidates(
+				platform,
+				path,
+				isDirectory: false));
+	}
+
+	[Fact]
 	public void CreateCandidates_LongPath_RemainsOneArgument()
 	{
 		var path = "/home/demo/" + new string('x', 40_000) + "/file.txt";
@@ -152,5 +186,30 @@ public sealed class ProjectPathStartInfoFactoryTests
 
 		Assert.True(result.Succeeded);
 		Assert.Equal(["dbus-send", "xdg-open"], commands);
+	}
+
+	[Fact]
+	public async Task LaunchAsync_PathProbeFailure_IsReportedWithoutStartingAProcess()
+	{
+		var attempts = 0;
+		var launcher = new ProjectPathLauncher(
+			DesktopPlatform.Linux,
+			_ => throw new UnauthorizedAccessException("denied"),
+			_ => true,
+			(_, _) =>
+			{
+				attempts++;
+				return Task.FromResult(true);
+			});
+
+		var result = await launcher.LaunchAsync(
+			"/home/demo/private.txt",
+			isDirectory: false,
+			TestContext.Current.CancellationToken);
+
+		Assert.False(result.Succeeded);
+		Assert.Equal(ProjectPathLaunchFailure.LaunchFailed, result.Failure);
+		Assert.Equal("denied", result.ErrorMessage);
+		Assert.Equal(0, attempts);
 	}
 }

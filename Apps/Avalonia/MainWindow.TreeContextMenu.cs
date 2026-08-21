@@ -10,6 +10,13 @@ public partial class MainWindow
 		!_viewModel.IsProjectLoadInProgress &&
 		!_selectionCoordinator.HasPreparedSelection;
 
+	private bool IsCurrentTreeNode(TreeNodeViewModel node)
+	{
+		while (node.Parent is not null)
+			node = node.Parent;
+		return _viewModel.TreeNodes.Any(root => ReferenceEquals(root, node));
+	}
+
 	private bool ShouldShowSelectOnlyTreeNode(TreeNodeViewModel target) =>
 		ProjectTreeSelectionOperations.HasSelectionOtherThan(_viewModel.TreeNodes, target);
 
@@ -18,10 +25,20 @@ public partial class MainWindow
 		CancellationToken cancellationToken)
 	{
 		var transformationContext = CreateContentTransformationContext();
-		return _transformedFileContentReader.ReadAsync(
-			node.FullPath,
-			transformationContext,
+		return Task.Run(
+			() => _transformedFileContentReader.ReadAsync(
+				FindTreeRootPath(node),
+				node.FullPath,
+				transformationContext,
+				cancellationToken),
 			cancellationToken);
+	}
+
+	private static string FindTreeRootPath(TreeNodeViewModel node)
+	{
+		while (node.Parent is not null)
+			node = node.Parent;
+		return node.FullPath;
 	}
 
 	private void SelectOnlyTreeNode(TreeNodeViewModel target)

@@ -77,8 +77,33 @@ public sealed class ProjectTreeContextMenuPolicyTests
 
 		Assert.Equal("проект", ProjectTreePathUtility.GetRelativeDisplayPath(root, root));
 		Assert.Equal(
+			"проект",
+			ProjectTreePathUtility.GetRelativeDisplayPath(
+				root + Path.DirectorySeparatorChar + Path.DirectorySeparatorChar,
+				root));
+		Assert.Equal(
 			"проект/src/данные/file.cs",
 			ProjectTreePathUtility.GetRelativeDisplayPath(root, nested));
+	}
+
+	[Fact]
+	public void RelativePath_FileSystemRootHasStableDisplayAndOutsidePathIsRejected()
+	{
+		var fileSystemRoot = Path.GetPathRoot(Path.GetFullPath("."))!;
+		var nested = Path.Combine(fileSystemRoot, "folder", "file.txt");
+		var expectedRoot = OperatingSystem.IsWindows()
+			? fileSystemRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+			: "/";
+
+		Assert.Equal(expectedRoot, ProjectTreePathUtility.GetRelativeDisplayPath(fileSystemRoot, fileSystemRoot));
+		Assert.Equal(
+			$"{expectedRoot}{(expectedRoot.EndsWith('/') ? string.Empty : "/")}folder/file.txt",
+			ProjectTreePathUtility.GetRelativeDisplayPath(fileSystemRoot, nested));
+
+		using var temporary = new TemporaryDirectory();
+		var root = temporary.CreateFolder("project");
+		var outside = temporary.CreateFile("outside.txt", "outside");
+		Assert.Throws<ArgumentException>(() => ProjectTreePathUtility.GetRelativeDisplayPath(root, outside));
 	}
 
 	[Theory]

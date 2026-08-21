@@ -10,6 +10,7 @@ internal sealed class ProjectTreeContextMenuController : IDisposable
 	private readonly IToastService _toastService;
 	private readonly IProjectPathLauncher _pathLauncher;
 	private readonly Func<string?> _getProjectRoot;
+	private readonly Func<TreeNodeViewModel, bool> _isCurrentNode;
 	private readonly Func<bool> _allowContentAndSelection;
 	private readonly Func<TreeNodeViewModel, bool> _showSelectOnly;
 	private readonly Func<TreeNodeViewModel, CancellationToken, Task<TransformedFileContentResult>> _readContent;
@@ -32,6 +33,7 @@ internal sealed class ProjectTreeContextMenuController : IDisposable
 		IToastService toastService,
 		IProjectPathLauncher pathLauncher,
 		Func<string?> getProjectRoot,
+		Func<TreeNodeViewModel, bool> isCurrentNode,
 		Func<bool> allowContentAndSelection,
 		Func<TreeNodeViewModel, bool> showSelectOnly,
 		Func<TreeNodeViewModel, CancellationToken, Task<TransformedFileContentResult>> readContent,
@@ -45,6 +47,7 @@ internal sealed class ProjectTreeContextMenuController : IDisposable
 		_toastService = toastService ?? throw new ArgumentNullException(nameof(toastService));
 		_pathLauncher = pathLauncher ?? throw new ArgumentNullException(nameof(pathLauncher));
 		_getProjectRoot = getProjectRoot ?? throw new ArgumentNullException(nameof(getProjectRoot));
+		_isCurrentNode = isCurrentNode ?? throw new ArgumentNullException(nameof(isCurrentNode));
 		_allowContentAndSelection = allowContentAndSelection ?? throw new ArgumentNullException(nameof(allowContentAndSelection));
 		_showSelectOnly = showSelectOnly ?? throw new ArgumentNullException(nameof(showSelectOnly));
 		_readContent = readContent ?? throw new ArgumentNullException(nameof(readContent));
@@ -81,7 +84,7 @@ internal sealed class ProjectTreeContextMenuController : IDisposable
 		Control placementTarget,
 		bool showAtPointer)
 	{
-		if (_disposed || string.IsNullOrWhiteSpace(_getProjectRoot()))
+		if (_disposed || string.IsNullOrWhiteSpace(_getProjectRoot()) || !_isCurrentNode(node))
 			return false;
 
 		_activeNode = node;
@@ -117,8 +120,16 @@ internal sealed class ProjectTreeContextMenuController : IDisposable
 			e.Handled = true;
 	}
 
-	private static void OnTreeContextRequested(object? sender, ContextRequestedEventArgs e)
+	private void OnTreeContextRequested(object? sender, ContextRequestedEventArgs e)
 	{
+		if (!_menu.IsOpen &&
+		    TryResolveTreeItem(e.Source) is { DataContext: TreeNodeViewModel node } item)
+		{
+			_treeView.SelectedItem = node;
+			item.Focus();
+			TryOpenForNode(node, item, showAtPointer: e.TryGetPosition(_treeView, out _));
+		}
+
 		// Opening is resolved explicitly so empty tree space never inherits the shared flyout.
 		e.Handled = true;
 	}
@@ -223,6 +234,13 @@ internal sealed class ProjectTreeContextMenuController : IDisposable
 		ProjectTreeContextMenuCommand command,
 		CancellationToken cancellationToken)
 	{
+		if (!_isCurrentNode(node))
+		{
+			_menu.Hide();
+			_activeNode = null;
+			return;
+		}
+
 		switch (command)
 		{
 			case ProjectTreeContextMenuCommand.OpenInFileManager:
@@ -272,13 +290,16 @@ internal sealed class ProjectTreeContextMenuController : IDisposable
 
 	private async Task CopyRelativePathAsync(TreeNodeViewModel node)
 	{
-		var root = _getProjectRoot();
-		if (string.IsNullOrWhiteSpace(root))
-			return;
-
 		await CopyAsync(
-			ProjectTreePathUtility.GetRelativeDisplayPath(root, node.FullPath),
+			ProjectTreePathUtility.GetRelativeDisplayPath(FindTreeRoot(node).FullPath, node.FullPath),
 			"Toast.Tree.RelativePathCopied");
+	}
+
+	private static TreeNodeViewModel FindTreeRoot(TreeNodeViewModel node)
+	{
+		while (node.Parent is not null)
+			node = node.Parent;
+		return node;
 	}
 
 	private async Task CopyContentAsync(
@@ -287,13 +308,15 @@ internal sealed class ProjectTreeContextMenuController : IDisposable
 	{
 		if (!_allowContentAndSelection())
 			return;
-		if (!File.Exists(node.FullPath))
+
+		var result = await _readContent(node, cancellationToken);
+		if (!_isCurrentNode(node) || !_allowContentAndSelection())
+			return;
+		if (result.Classification == FileContentClassification.Missing)
 		{
 			_toastService.Show(_localization.Format("Tree.Context.PathNotFound", node.FullPath));
 			return;
 		}
-
-		var result = await _readContent(node, cancellationToken);
 		if (!result.HasText)
 		{
 			_toastService.Show(_localization["Msg.NoTextContent"]);

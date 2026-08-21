@@ -5,6 +5,7 @@ using DevProjex.Application.Services;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Avalonia.ViewModels;
 using DevProjex.Infrastructure.FileSystem;
+using DevProjex.Kernel.Abstractions;
 
 namespace DevProjex.Tests.UI;
 
@@ -44,6 +45,15 @@ public sealed class MainWindowTreeContextMenuUiTests(UiWorkspaceFixture workspac
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
 
 			Assert.False(controller.Menu.IsOpen);
+			fileItem.RaiseEvent(new ContextRequestedEventArgs
+			{
+				RoutedEvent = InputElement.ContextRequestedEvent
+			});
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
+
+			Assert.True(controller.Menu.IsOpen);
+			Assert.Same(file, controller.ActiveNode);
+			controller.Menu.Hide();
 
 			tree.SelectedItem = file;
 			fileItem.Focus();
@@ -109,10 +119,14 @@ public sealed class MainWindowTreeContextMenuUiTests(UiWorkspaceFixture workspac
 			await InvokeCommandAsync(controller, file, placement, ProjectTreeContextMenuCommand.CopyFullPath);
 			Assert.Equal(file.FullPath, await ClipboardExtensions.TryGetTextAsync(window.Clipboard!));
 
+			UiTestDriver.SetCurrentProjectPath(
+				window,
+				Path.Combine(Path.GetDirectoryName(workspace.Project.RootPath)!, "replacement-project"));
 			await InvokeCommandAsync(controller, file, placement, ProjectTreeContextMenuCommand.CopyRelativePath);
 			Assert.Equal(
 				$"{Path.GetFileName(Path.TrimEndingDirectorySeparator(workspace.Project.RootPath))}/README.md",
 				await ClipboardExtensions.TryGetTextAsync(window.Clipboard!));
+			UiTestDriver.SetCurrentProjectPath(window, workspace.Project.RootPath);
 
 			await InvokeCommandAsync(controller, file, placement, ProjectTreeContextMenuCommand.OpenInFileManager);
 			await UiTestDriver.WaitForConditionAsync(
@@ -165,6 +179,37 @@ public sealed class MainWindowTreeContextMenuUiTests(UiWorkspaceFixture workspac
 	}
 
 	[AvaloniaFact]
+	public async Task CopyContent_PerformsFileReadAwayFromTheUiThread()
+	{
+		var analyzer = new UiThreadRejectingContentAnalyzer(new FileContentAnalyzer());
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			workspace.Project,
+			configureServices: services => services with { FileContentAnalyzer = analyzer });
+		try
+		{
+			var root = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
+			root.IsExpanded = true;
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+			var file = root.Children.Single(node => node.DisplayName == "README.md");
+			var controller = GetController(window);
+			analyzer.RejectUiThreadReads = true;
+
+			await InvokeCommandAsync(
+				controller,
+				file,
+				FindRealizedItem(window, file),
+				ProjectTreeContextMenuCommand.CopyContent);
+			await WaitForClipboardTextAsync(window, "DevProjex UI test workspace");
+
+			Assert.True(analyzer.ValidatedReadCount > 0);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task LoadingDisablesContentAndSelectionButKeepsPathCommandsEnabled()
 	{
 		var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
@@ -186,6 +231,37 @@ public sealed class MainWindowTreeContextMenuUiTests(UiWorkspaceFixture workspac
 			Assert.True(FindCommand(controller.Menu, ProjectTreeContextMenuCommand.OpenInFileManager).IsEnabled);
 			Assert.True(FindCommand(controller.Menu, ProjectTreeContextMenuCommand.CopyFullPath).IsEnabled);
 			Assert.True(FindCommand(controller.Menu, ProjectTreeContextMenuCommand.CopyRelativePath).IsEnabled);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task CommandFromMenuOfReplacedTree_IsIgnored()
+	{
+		var launcher = new RecordingProjectPathLauncher();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			workspace.Project,
+			configureServices: services => services with { ProjectPathLauncher = launcher });
+		try
+		{
+			var viewModel = UiTestDriver.GetViewModel(window);
+			var root = Assert.Single(viewModel.TreeNodes);
+			root.IsExpanded = true;
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+			var file = root.Children.Single(node => node.DisplayName == "README.md");
+			var controller = GetController(window);
+			Assert.True(controller.TryOpenForNode(file, FindRealizedItem(window, file), showAtPointer: false));
+			var command = FindCommand(controller.Menu, ProjectTreeContextMenuCommand.OpenInFileManager);
+
+			viewModel.TreeNodes.Clear();
+			command.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
+
+			Assert.Empty(launcher.Requests);
+			Assert.Null(controller.ActiveNode);
 		}
 		finally
 		{
@@ -265,6 +341,48 @@ public sealed class MainWindowTreeContextMenuUiTests(UiWorkspaceFixture workspac
 		{
 			Requests.Add((fullPath, isDirectory));
 			return Task.FromResult(ProjectPathLaunchResult.Success);
+		}
+	}
+
+	private sealed class UiThreadRejectingContentAnalyzer(IFileContentAnalyzer inner) : IFileContentAnalyzer
+	{
+		public bool RejectUiThreadReads { get; set; }
+
+		public int ValidatedReadCount { get; private set; }
+
+		public ValueTask<bool> IsTextFileAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			inner.IsTextFileAsync(path, cancellationToken);
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			inner.GetTextFileMetricsAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default)
+		{
+			ValidateThread();
+			return inner.TryReadAsTextAsync(path, cancellationToken);
+		}
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default)
+		{
+			ValidateThread();
+			return inner.TryReadAsTextAsync(path, maxSizeForFullRead, cancellationToken);
+		}
+
+		private void ValidateThread()
+		{
+			if (!RejectUiThreadReads)
+				return;
+			Assert.False(Dispatcher.UIThread.CheckAccess());
+			ValidatedReadCount++;
 		}
 	}
 }

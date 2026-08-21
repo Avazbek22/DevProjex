@@ -43,6 +43,8 @@ internal static class ProjectPathStartInfoFactory
 		bool isDirectory)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(fullPath);
+		if (!IsAbsolutePath(platform, fullPath))
+			throw new ArgumentException("The file-manager path must be absolute.", nameof(fullPath));
 
 		return platform switch
 		{
@@ -52,6 +54,19 @@ internal static class ProjectPathStartInfoFactory
 			_ => throw new ArgumentOutOfRangeException(nameof(platform), platform, null)
 		};
 	}
+
+	private static bool IsAbsolutePath(DesktopPlatform platform, string path) =>
+		platform switch
+		{
+			DesktopPlatform.Windows =>
+				path.StartsWith("\\\\", StringComparison.Ordinal) ||
+				(path.Length >= 3 &&
+				 char.IsAsciiLetter(path[0]) &&
+				 path[1] == ':' &&
+				 path[2] is '\\' or '/'),
+			DesktopPlatform.MacOS or DesktopPlatform.Linux => path.StartsWith("/", StringComparison.Ordinal),
+			_ => false
+		};
 
 	private static ProjectPathLaunchCandidate CreateWindows(string path, bool isDirectory)
 	{
@@ -112,19 +127,18 @@ internal static class ProjectPathStartInfoFactory
 
 	private static string CreateFileUri(string path)
 	{
-		var normalized = path.Replace('\\', '/');
-		if (normalized.Length >= 2 && normalized[1] == ':')
-			normalized = "/" + normalized;
+		if (!path.StartsWith("/", StringComparison.Ordinal))
+			throw new ArgumentException("A Linux file-manager path must be absolute.", nameof(path));
 
-		return new UriBuilder(Uri.UriSchemeFile, string.Empty)
-		{
-			Path = normalized
-		}.Uri.AbsoluteUri;
+		var encodedPath = string.Join(
+			'/',
+			path.Split('/').Select(Uri.EscapeDataString));
+		return $"file://{encodedPath}";
 	}
 
 	private static string GetPosixParentPath(string path)
 	{
-		var normalized = path.Replace('\\', '/').TrimEnd('/');
+		var normalized = path.TrimEnd('/');
 		var separator = normalized.LastIndexOf('/');
 		return separator switch
 		{
@@ -171,7 +185,20 @@ public sealed class ProjectPathLauncher : IProjectPathLauncher
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(fullPath);
 		cancellationToken.ThrowIfCancellationRequested();
-		if (!(isDirectory ? _directoryExists(fullPath) : _fileExists(fullPath)))
+		bool pathExists;
+		try
+		{
+			pathExists = isDirectory ? _directoryExists(fullPath) : _fileExists(fullPath);
+		}
+		catch (Exception exception) when (IsExpectedLaunchFailure(exception))
+		{
+			return new ProjectPathLaunchResult(
+				false,
+				ProjectPathLaunchFailure.LaunchFailed,
+				exception.Message);
+		}
+
+		if (!pathExists)
 		{
 			return new ProjectPathLaunchResult(
 				false,
@@ -193,11 +220,7 @@ public sealed class ProjectPathLauncher : IProjectPathLauncher
 			{
 				throw;
 			}
-			catch (Exception exception) when (exception is
-				       InvalidOperationException or
-				       System.ComponentModel.Win32Exception or
-				       IOException or
-				       UnauthorizedAccessException)
+			catch (Exception exception) when (IsExpectedLaunchFailure(exception))
 			{
 				lastError = exception;
 			}
@@ -249,6 +272,14 @@ public sealed class ProjectPathLauncher : IProjectPathLauncher
 		{
 		}
 	}
+
+	private static bool IsExpectedLaunchFailure(Exception exception) =>
+		exception is InvalidOperationException or
+			System.ComponentModel.Win32Exception or
+			IOException or
+			UnauthorizedAccessException or
+			System.Security.SecurityException or
+			NotSupportedException;
 
 	private static DesktopPlatform ResolveCurrentPlatform() =>
 		OperatingSystem.IsWindows()
