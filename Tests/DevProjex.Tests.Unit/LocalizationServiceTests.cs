@@ -89,4 +89,31 @@ public sealed class LocalizationServiceTests
 
 		Assert.Equal(0, called);
 	}
+
+	[Fact]
+	public void Indexer_FormatsDesktopTokensOncePerLanguage_AndLeavesTerminalTuiUntouched()
+	{
+		var catalog = new StubLocalizationCatalog(new Dictionary<AppLanguage, IReadOnlyDictionary<string, string>>
+		{
+			[AppLanguage.En] = new Dictionary<string, string>
+			{
+				["Preview.Tooltip"] = "Preview ({mod}B)",
+				["Terminal.Tui.Footer"] = "{mod} must stay literal"
+			}
+		});
+		var formatCalls = 0;
+		var service = new LocalizationService(
+			catalog,
+			AppLanguage.En,
+			value =>
+			{
+				formatCalls++;
+				return value.Replace("{mod}", "Ctrl+", StringComparison.Ordinal);
+			});
+
+		Assert.Equal("Preview (Ctrl+B)", service["Preview.Tooltip"]);
+		Assert.Equal("Preview (Ctrl+B)", service["Preview.Tooltip"]);
+		Assert.Equal("{mod} must stay literal", service["Terminal.Tui.Footer"]);
+		Assert.Equal(1, formatCalls);
+	}
 }

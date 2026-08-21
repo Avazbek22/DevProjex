@@ -32,9 +32,9 @@ public sealed class LocalizationPreviewSearchKeysTests
 					$"{key} is empty in {Path.GetFileName(file)}");
 			}
 
-			Assert.Contains("Ctrl+Shift+F", document.RootElement.GetProperty(RequiredKeys[0]).GetString());
+			Assert.Contains("{mod}{shift}F", document.RootElement.GetProperty(RequiredKeys[0]).GetString());
 			Assert.Contains("F3", document.RootElement.GetProperty(RequiredKeys[1]).GetString());
-			Assert.Contains("Shift+F3", document.RootElement.GetProperty(RequiredKeys[2]).GetString());
+			Assert.Contains("{shift}F3", document.RootElement.GetProperty(RequiredKeys[2]).GetString());
 		}
 	}
 

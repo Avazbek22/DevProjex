@@ -446,7 +446,7 @@
                       VerticalAlignment="Center"
                       BorderBrush="{DynamicResource AppBorderBrush}"
                       BorderThickness="1">
-                <TextBlock Text="Ctrl+O"
+				<TextBlock Text="{Binding DropZoneShortcut}"
                            FontSize="11"
                            FontFamily="Consolas, monospace"
                            VerticalAlignment="Center"

@@ -140,9 +140,7 @@ public sealed class VirtualizedPreviewTextControlTests
 			Assert.NotSame(textCursor, control.Cursor);
 			var toolTip = Assert.IsType<ToolTip>(ToolTip.GetTip(control));
 			Assert.Equal(
-				"Detected github-pat.\n" +
-				"Click to keep the original value.\n" +
-				"Alt+Up / Alt+Down navigates findings.",
+				string.Format(control.RedactedSecretToolTipFormat, "github-pat"),
 				Assert.IsType<TextBlock>(toolTip.Content).Text);
 
             window.MouseDown(point, MouseButton.Left, RawInputModifiers.LeftMouseButton);

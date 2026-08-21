@@ -11,11 +11,11 @@ Wichtig: DevProjex ändert keine Dateien im geöffneten Projekt.
 Kontrollkästchen: Die Markierung eines Knotens gilt für seine Kinder; der Elternstatus wird automatisch neu berechnet.
 
 Tastenkürzel:
-* Ctrl+E — alles aufklappen
-* Ctrl+W — alles zuklappen (Wurzel bleibt offen)
+* {mod}E — alles aufklappen
+* {collapseAll} — alles zuklappen (Wurzel bleibt offen)
 
 ## 3) Datei
-* Ordner öffnen… — Wurzelordner öffnen (Ctrl+O)
+* Ordner öffnen… — Wurzelordner öffnen ({mod}O)
 * Neues Fenster — eine neue unabhängige DevProjex-Instanz öffnen
 * Zuletzt verwendet — Liste zuletzt geöffneter lokaler Ordner
 * Aktualisieren — einen lokalen Ordner neu einlesen und den Baum aufbauen (F5)
@@ -141,7 +141,7 @@ Der Schalter beeinflusst nicht:
 Kopiert den Projektbaum.
 Wenn Knoten markiert sind, wird der Baum aus der Auswahl gebaut; bei leerer oder ungültiger Auswahl wird der volle Baum kopiert.
 Das Ergebnisformat wird vom Baumformat-Schalter bestimmt.
-Tastenkürzel: Ctrl+Shift+C und Ctrl+Alt+C.
+Tastenkürzel: {mod}{shift}C und {mod}{alt}C.
 
 ### Inhalt kopieren
 Kopiert Dateiinhalte:
@@ -149,14 +149,14 @@ Kopiert Dateiinhalte:
 * Nicht-Textdateien werden ignoriert (einschließlich Binärdateien);
 * bei leeren Textdateien werden Pfad und die Zeile `[No Content, 0 bytes]` ausgegeben;
 * bei Dateien, die nur aus Leerzeichen/Zeilenumbrüchen bestehen, werden Pfad und die Zeile `[Whitespace, N bytes]` ausgegeben.
-Tastenkürzel: Ctrl+Alt+V.
+Tastenkürzel: {mod}{alt}V.
 
 ### Baum + Inhalt kopieren
 Kombiniert Baum und Inhalte:
 * Baum aus der Auswahl; bei leerer oder ungültiger Auswahl wird der volle Baum verwendet;
 * Inhalte nach denselben Regeln wie „Inhalt kopieren“;
 * das Format des Baumblocks wird vom Baumformat-Schalter bestimmt.
-Tastenkürzel: Ctrl+Shift+V.
+Tastenkürzel: {mod}{shift}V.
 
 ### Baumdarstellungen
 Baumformate stellen denselben ausgewählten Projektbaum unterschiedlich dar.
@@ -183,11 +183,11 @@ Baum + Inhalt:
 * Export erfolgt als `.txt`.
 
 ## 7) Vorschaumodus
-Wird über die Schaltfläche mit dem Auge in der oberen Leiste oder mit Ctrl+B geöffnet.
+Wird über die Schaltfläche mit dem Auge in der oberen Leiste oder mit {mod}B geöffnet.
 
 Die seitlichen Maustasten funktionieren wie die Browsernavigation: Vorwärts öffnet den Vorschaumodus, Zurück schließt ihn. Ein erneuter Druck in der bereits aktiven Richtung hat keine Wirkung.
 
-Ctrl+Shift+F öffnet oder schließt die Suche in den Dateiinhalten der Vorschau. Enter oder F3 geht zum nächsten Treffer, Shift+Enter oder Shift+F3 zum vorherigen.
+{mod}{shift}F öffnet oder schließt die Suche in den Dateiinhalten der Vorschau. Enter oder F3 geht zum nächsten Treffer, {shift}Enter oder {shift}F3 zum vorherigen.
 
 Zeigt das Endergebnis in einem separaten Arbeitsbereich neben dem Baum. Dieser Modus kopiert nichts in die Zwischenablage und exportiert nichts in eine Datei — er dient nur zur Vorschau.
 
@@ -220,22 +220,22 @@ Schaltflächen:
 * X in der Bauminsel — blendet den Baum aus und lässt nur die Vorschauinsel übrig;
 * X in der oberen Vorschauleiste — schließt den Vorschaumodus vollständig;
 * kleine Kopier-Schaltfläche in der fixierten oberen Dateileiste — kopiert den aktuell sichtbaren Dateiblock genau so, wie er in der Vorschau angezeigt wird;
-* ein erneuter Klick auf das Auge oder Ctrl+B schließt den Vorschaumodus ebenfalls.
+* ein erneuter Klick auf das Auge oder {mod}B schließt den Vorschaumodus ebenfalls.
 
 Suche und Filter sind verfügbar, solange in der Vorschau die Bauminsel sichtbar ist.
 Wenn der Baum ausgeblendet ist, sind Suche und Filter vorübergehend nicht verfügbar, bis der Nur-Vorschau-Modus verlassen wird.
 
 ## 8) Ansicht
 ### Zoom
-* Ctrl++ / Ctrl+= — vergrößern
-* Ctrl+- — verkleinern
-* Ctrl+0 — zurücksetzen
-* Ctrl + Mausrad — weiches Zoomen in der Insel unter dem Cursor
+* {mod}+ / {mod}= — vergrößern
+* {mod}- — verkleinern
+* {mod}0 — zurücksetzen
+* {mod}Mausrad — weiches Zoomen in der Insel unter dem Cursor
 
 Verhalten:
 * im normalen Modus wird der Baum skaliert;
 * in der Vorschau mit sichtbarem Baum wirken Vergrößern, Verkleinern und Zurücksetzen aus dem Menü gleichzeitig auf Baum und Vorschau;
-* mit Ctrl + Mausrad werden Baum und Vorschau abhängig von der Cursorposition unabhängig voneinander skaliert;
+* mit {mod}Mausrad werden Baum und Vorschau abhängig von der Cursorposition unabhängig voneinander skaliert;
 * im Nur-Vorschau-Modus wird nur die Vorschauinsel skaliert.
 
 Bereich: 6–28, Reset: 15.
@@ -254,9 +254,9 @@ Die ausgewählte Schrift wird nach dem Klick auf „Anwenden“ im Einstellungen
 
 ## 9) Suche im Baum
 Öffnet die Suche, hebt Treffer hervor und erlaubt Navigation.
-* Ctrl+F — anzeigen/ausblenden
+* {mod}F — anzeigen/ausblenden
 * Enter — nächstes Ergebnis
-* Shift+Enter — vorheriges
+* {shift}Enter — vorheriges
 * Esc — schließen
 
 Die Suche öffnet nur benötigte Zweige; beim Leeren der Suche wird der Baum eingeklappt (außer der Wurzel).
@@ -270,7 +270,7 @@ Einschränkungen:
 
 ## 10) Filter nach Namen
 Zeigt nur passende Knoten und ihre Eltern. Aktualisierung mit Verzögerung (Debounce).
-* Ctrl+Shift+N — Filter anzeigen/ausblenden
+* {mod}{shift}N — Filter anzeigen/ausblenden
 * Esc — Filter schließen
 
 Einschränkungen:
@@ -296,7 +296,7 @@ Hinweis zu „Dateitypen“:
 * in dieser Liste werden nur Dateien mit Erweiterung angezeigt;
 * Dateien ohne Erweiterung werden hier nicht angezeigt und über eine separate Option in „Ausschlüsse“ gesteuert.
 
-Ctrl+P — Panel anzeigen/ausblenden.
+{mod}P — Panel anzeigen/ausblenden.
 
 ### 11.1 Profile lokaler Projektparameter
 Für lokale Ordner merkt sich DevProjex die zuletzt angewendeten Projektparameter:

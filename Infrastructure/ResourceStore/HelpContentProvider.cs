@@ -1,8 +1,20 @@
+using DevProjex.Infrastructure.FileSystem;
+
 namespace DevProjex.Infrastructure.ResourceStore;
 
 public sealed class HelpContentProvider
 {
-    private readonly IReadOnlyDictionary<AppLanguage, Lazy<string>> _cache = CreateCache();
+    private readonly IReadOnlyDictionary<AppLanguage, Lazy<string>> _cache;
+
+    public HelpContentProvider()
+        : this(DesktopPlatformResolver.Resolve())
+    {
+    }
+
+    public HelpContentProvider(DesktopPlatform platform)
+    {
+        _cache = CreateCache(platform);
+    }
 
     public string GetHelpBody(AppLanguage language)
     {
@@ -28,29 +40,38 @@ public sealed class HelpContentProvider
         return builder.ToString().TrimEnd();
     }
 
-    private static IReadOnlyDictionary<AppLanguage, Lazy<string>> CreateCache()
+    private static IReadOnlyDictionary<AppLanguage, Lazy<string>> CreateCache(
+        DesktopPlatform platform)
     {
         var assembly = typeof(Marker).Assembly;
         return new Dictionary<AppLanguage, Lazy<string>>
         {
-            [AppLanguage.Ru] = CreateResource(assembly, "ru"),
-            [AppLanguage.En] = CreateResource(assembly, "en"),
-            [AppLanguage.Uz] = CreateResource(assembly, "uz"),
-            [AppLanguage.Tg] = CreateResource(assembly, "tg"),
-            [AppLanguage.Kk] = CreateResource(assembly, "kk"),
-            [AppLanguage.Fr] = CreateResource(assembly, "fr"),
-            [AppLanguage.De] = CreateResource(assembly, "de"),
-            [AppLanguage.It] = CreateResource(assembly, "it"),
-            [AppLanguage.Es] = CreateResource(assembly, "es"),
-            [AppLanguage.Pt] = CreateResource(assembly, "pt"),
-            [AppLanguage.PtPt] = CreateResource(assembly, "pt-pt")
+            [AppLanguage.Ru] = CreateResource(assembly, "ru", platform),
+            [AppLanguage.En] = CreateResource(assembly, "en", platform),
+            [AppLanguage.Uz] = CreateResource(assembly, "uz", platform),
+            [AppLanguage.Tg] = CreateResource(assembly, "tg", platform),
+            [AppLanguage.Kk] = CreateResource(assembly, "kk", platform),
+            [AppLanguage.Fr] = CreateResource(assembly, "fr", platform),
+            [AppLanguage.De] = CreateResource(assembly, "de", platform),
+            [AppLanguage.It] = CreateResource(assembly, "it", platform),
+            [AppLanguage.Es] = CreateResource(assembly, "es", platform),
+            [AppLanguage.Pt] = CreateResource(assembly, "pt", platform),
+            [AppLanguage.PtPt] = CreateResource(assembly, "pt-pt", platform)
         };
     }
 
-    private static Lazy<string> CreateResource(Assembly assembly, string code) =>
-        new(() => Load(assembly, code), LazyThreadSafetyMode.ExecutionAndPublication);
+    private static Lazy<string> CreateResource(
+        Assembly assembly,
+        string code,
+        DesktopPlatform platform) =>
+        new(
+            () => Load(assembly, code, platform),
+            LazyThreadSafetyMode.ExecutionAndPublication);
 
-    private static string Load(Assembly assembly, string code)
+    private static string Load(
+        Assembly assembly,
+        string code,
+        DesktopPlatform platform)
     {
         var resourceName = $"DevProjex.Assets.HelpContent.help.{code}.txt";
         var stream = assembly.GetManifestResourceStream(resourceName);
@@ -68,7 +89,7 @@ public sealed class HelpContentProvider
             throw new InvalidOperationException($"Help content resource not found: {resourceName}");
 
         using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
-        return reader.ReadToEnd();
+        return DesktopShortcutTextFormatter.Format(reader.ReadToEnd(), platform);
     }
 
     private static string FormatPlainTextLine(string line)

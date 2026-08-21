@@ -11,11 +11,11 @@ Importante: DevProjex non modifica i file del progetto aperto.
 Checkbox: la selezione di un nodo si applica ai figli; lo stato dei genitori è ricalcolato automaticamente.
 
 Scorciatoie:
-* Ctrl+E — espandi tutto
-* Ctrl+W — comprimi tutto (la radice resta aperta)
+* {mod}E — espandi tutto
+* {collapseAll} — comprimi tutto (la radice resta aperta)
 
 ## 3) File
-* Apri cartella… — apri la cartella radice (Ctrl+O)
+* Apri cartella… — apri la cartella radice ({mod}O)
 * Nuova finestra — apri una nuova istanza indipendente di DevProjex
 * Recenti — elenco delle cartelle locali aperte di recente
 * Aggiorna — rileggi una cartella locale e ricostruisci l’albero (F5)
@@ -141,7 +141,7 @@ Il selettore non influisce su:
 Copia l’albero del progetto.
 Se ci sono nodi selezionati, l’albero è costruito dalla selezione; se la selezione è vuota o non valida, viene copiato l’albero completo.
 Il formato del risultato è definito dal selettore formato albero.
-Scorciatoie: Ctrl+Shift+C e Ctrl+Alt+C.
+Scorciatoie: {mod}{shift}C e {mod}{alt}C.
 
 ### Copia contenuto
 Copia il contenuto dei file:
@@ -149,14 +149,14 @@ Copia il contenuto dei file:
 * i file non testuali vengono ignorati (inclusi i binari);
 * per i file di testo vuoti vengono riportati il percorso e la riga `[No Content, 0 bytes]`;
 * per i file composti solo da spazi/ritorni a capo vengono riportati il percorso e la riga `[Whitespace, N bytes]`.
-Scorciatoia: Ctrl+Alt+V.
+Scorciatoia: {mod}{alt}V.
 
 ### Copia albero + contenuto
 Combina albero e contenuto:
 * albero dalla selezione; se la selezione è vuota o non valida, viene usato l’albero completo;
 * contenuto secondo le stesse regole di «Copia contenuto»;
 * il formato del blocco albero è definito dal selettore formato albero.
-Scorciatoia: Ctrl+Shift+V.
+Scorciatoia: {mod}{shift}V.
 
 ### Rappresentazioni dell’albero
 I formati albero rappresentano in modi diversi lo stesso albero di progetto selezionato.
@@ -183,11 +183,11 @@ Albero + contenuto:
 * esportazione in `.txt`.
 
 ## 7) Modalità anteprima
-Si apre con il pulsante con icona a forma di occhio nella barra superiore o con Ctrl+B.
+Si apre con il pulsante con icona a forma di occhio nella barra superiore o con {mod}B.
 
 I pulsanti laterali del mouse seguono la navigazione del browser: Avanti apre la modalità anteprima, Indietro la chiude. Ripetere la direzione già attiva non produce effetti.
 
-Ctrl+Shift+F apre o chiude la ricerca nel contenuto dei file dell’anteprima. Enter o F3 passa al risultato successivo; Shift+Enter o Shift+F3 a quello precedente.
+{mod}{shift}F apre o chiude la ricerca nel contenuto dei file dell’anteprima. Enter o F3 passa al risultato successivo; {shift}Enter o {shift}F3 a quello precedente.
 
 Mostra il risultato finale in un’area di lavoro separata accanto all’albero. Questa modalità non copia nulla negli appunti e non esporta nulla su file: serve solo per la visualizzazione.
 
@@ -220,22 +220,22 @@ Pulsanti:
 * X nel pannello dell’albero — nasconde l’albero e lascia solo il pannello di anteprima;
 * X nella barra superiore dell’anteprima — chiude completamente la modalità anteprima;
 * piccolo pulsante di copia nell’intestazione fissata del file — copia il blocco del file attualmente visibile esattamente come appare nell’anteprima;
-* anche premere di nuovo l’icona occhio o Ctrl+B chiude la modalità anteprima.
+* anche premere di nuovo l’icona occhio o {mod}B chiude la modalità anteprima.
 
 Ricerca e filtro restano disponibili finché nell’anteprima è visibile il pannello dell’albero.
 Se l’albero è nascosto, ricerca e filtro diventano temporaneamente non disponibili fino all’uscita dalla modalità solo anteprima.
 
 ## 8) Visualizza
 ### Zoom
-* Ctrl++ / Ctrl+= — aumenta
-* Ctrl+- — riduci
-* Ctrl+0 — reset
-* Ctrl + rotellina — zoom fluido nel pannello sotto il cursore
+* {mod}+ / {mod}= — aumenta
+* {mod}- — riduci
+* {mod}0 — reset
+* {mod}rotellina — zoom fluido nel pannello sotto il cursore
 
 Comportamento:
 * in modalità normale viene scalato l’albero;
 * in anteprima con l’albero visibile, Aumenta, Riduci e Reset dal menu si applicano contemporaneamente all’albero e all’anteprima;
-* con Ctrl + rotellina, albero e anteprima scalano in modo indipendente in base alla posizione del cursore;
+* con {mod}rotellina, albero e anteprima scalano in modo indipendente in base alla posizione del cursore;
 * in modalità solo anteprima viene scalato solo il pannello di anteprima.
 
 Intervallo: 6–28, reset: 15.
@@ -254,9 +254,9 @@ Il font scelto viene applicato dopo aver premuto « Applica » nel pannello impo
 
 ## 9) Ricerca nell'albero
 Apre la ricerca, evidenzia le corrispondenze e permette la navigazione.
-* Ctrl+F — mostra/nascondi
+* {mod}F — mostra/nascondi
 * Enter — risultato successivo
-* Shift+Enter — precedente
+* {shift}Enter — precedente
 * Esc — chiudi
 
 La ricerca apre solo i rami necessari; svuotando la query l’albero si richiude (tranne la radice).
@@ -270,7 +270,7 @@ Limitazioni:
 
 ## 10) Filtra per nome
 Mostra solo i nodi che corrispondono al filtro e i loro genitori. Aggiornamento con debounce.
-* Ctrl+Shift+N — mostra/nascondi filtro
+* {mod}{shift}N — mostra/nascondi filtro
 * Esc — chiudi filtro
 
 Limitazioni:
@@ -296,7 +296,7 @@ Nota su « Tipi di file »:
 * in questa lista vengono mostrati solo file con estensione;
 * i file senza estensione non vengono aggiunti a questa lista e sono gestiti da un’opzione separata in « Esclusioni ».
 
-Ctrl+P — mostra/nascondi pannello.
+{mod}P — mostra/nascondi pannello.
 
 ### 11.1 Profili dei parametri dei progetti locali
 Per le cartelle locali, DevProjex memorizza gli ultimi parametri di progetto applicati:
