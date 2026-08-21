@@ -40,6 +40,10 @@ public sealed class MainWindowPreviewSearchUiTests
 			Assert.True(container.IsVisible);
 			AssertPanelBorderIsFullyVisible(searchBar, container, window);
 			Assert.True(searchBar.SearchBoxControl!.IsFocused);
+			var searchBarTransform = Assert.IsType<TranslateTransform>(searchBar.RenderTransform);
+			Assert.NotNull(searchBarTransform.Transitions);
+			Assert.NotEmpty(searchBarTransform.Transitions);
+			Assert.Equal(0, searchBarTransform.Y);
 
 			await UiTestDriver.PressKeyAsync(
 				window,
@@ -47,6 +51,7 @@ public sealed class MainWindowPreviewSearchUiTests
 				RawInputModifiers.Control | RawInputModifiers.Shift);
 			await WaitForSearchPanelAsync(window, visible: false);
 			Assert.False(viewModel.PreviewSearchVisible);
+			Assert.Equal(5, searchBarTransform.Y);
 
 			await UiTestDriver.PressKeyAsync(
 				window,

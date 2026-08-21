@@ -9,8 +9,13 @@ internal sealed class SearchFilterInteractionController : IDisposable
 {
     private const double ToolBarHeight = 48.0;
     private const double PanelIslandSpacing = 4.0;
+    private const double ToolBarContentOffset = 5.0;
     private static readonly TimeSpan ToolBarAnimationDuration =
-        UiTimingProfile.Scale(TimeSpan.FromMilliseconds(250));
+        UiTimingProfile.Scale(TimeSpan.FromMilliseconds(220));
+    private static readonly TimeSpan ToolBarContentAnimationDuration =
+        UiTimingProfile.Scale(TimeSpan.FromMilliseconds(180));
+    private static readonly TimeSpan ToolBarFadeDuration =
+        UiTimingProfile.Scale(TimeSpan.FromMilliseconds(160));
     private static readonly TimeSpan HotkeyDebounceWindow =
         UiTimingProfile.Scale(TimeSpan.FromMilliseconds(220));
 
@@ -235,9 +240,7 @@ internal sealed class SearchFilterInteractionController : IDisposable
     private async Task CloseSearchCoreAsync(bool focusTree)
     {
         InvalidateFocusRequest(_search);
-        PrepareForClose(_search, focusTree);
-        if (!await WaitForAnimationAsync(_search, _lifetimeToken))
-            return;
+        await PrepareForCloseAsync(_search, focusTree);
 
         if (_disposed || _viewModel.SearchVisible)
             return;
@@ -280,9 +283,7 @@ internal sealed class SearchFilterInteractionController : IDisposable
     private async Task CloseFilterCoreAsync(bool focusTree)
     {
         InvalidateFocusRequest(_filter);
-        PrepareForClose(_filter, focusTree);
-        if (!await WaitForAnimationAsync(_filter, _lifetimeToken))
-            return;
+        await PrepareForCloseAsync(_filter, focusTree);
 
         if (_disposed || _viewModel.FilterVisible)
             return;
@@ -558,22 +559,16 @@ internal sealed class SearchFilterInteractionController : IDisposable
         {
             _viewModel.SearchVisible = false;
             _viewModel.FilterVisible = false;
-            _search.ClosePending = false;
-            _filter.ClosePending = false;
-
-            if (searchWasVisible && !_search.IsAnimating)
-                _ = AnimateAsync(_search, show: false);
-            if (filterWasVisible && !_filter.IsAnimating)
-                _ = AnimateAsync(_filter, show: false);
+            var searchCloseTask = searchWasVisible
+                ? AnimateAsync(_search, show: false)
+                : Task.CompletedTask;
+            var filterCloseTask = filterWasVisible
+                ? AnimateAsync(_filter, show: false)
+                : Task.CompletedTask;
 
             if (searchWasVisible || filterWasVisible)
             {
-                if (!await WaitForAnimationAsync(
-                        _search,
-                        _lifetimeToken))
-                {
-                    return;
-                }
+                await Task.WhenAll(searchCloseTask, filterCloseTask);
             }
 
             if (_disposed)
@@ -703,8 +698,7 @@ internal sealed class SearchFilterInteractionController : IDisposable
     {
         if (_disposed ||
             !_viewModel.IsProjectLoaded ||
-            !IsAvailable(tool) ||
-            tool.IsAnimating)
+            !IsAvailable(tool))
             return;
 
         _cancelMemoryCleanup();
@@ -719,7 +713,7 @@ internal sealed class SearchFilterInteractionController : IDisposable
         _ = FocusAfterOpenAsync(tool, selectAllOnFocus, focusVersion);
     }
 
-    private void PrepareForClose(TextToolState tool, bool focusTree)
+    private async Task PrepareForCloseAsync(TextToolState tool, bool focusTree)
     {
         if (_disposed)
             return;
@@ -729,20 +723,20 @@ internal sealed class SearchFilterInteractionController : IDisposable
 
         SuppressAccent(tool);
         SetLogicalVisibility(tool, false);
-        if (tool.IsAnimating)
-            tool.ClosePending = true;
-        else
-            _ = AnimateAsync(tool, show: false);
+        var animationTask = AnimateAsync(tool, show: false);
 
         if (focusTree)
             _treeView.Focus();
+
+        await animationTask;
     }
 
     private async Task AnimateAsync(TextToolState tool, bool show)
     {
-        if (_disposed || tool.IsAnimating)
+        if (_disposed)
             return;
 
+        var version = Interlocked.Increment(ref tool.AnimationVersion);
         tool.IsAnimating = true;
         try
         {
@@ -760,12 +754,12 @@ internal sealed class SearchFilterInteractionController : IDisposable
 
             tool.Container.Height = show ? ToolBarHeight : 0.0;
             tool.Container.Margin = new Thickness(0, 0, 0, show ? PanelIslandSpacing : 0.0);
-            tool.Transform.Y = 0.0;
+            tool.Transform.Y = show ? 0.0 : ToolBarContentOffset;
             tool.Surface.Opacity = show ? 1.0 : 0.0;
             if (!await WaitForAnimationAsync(tool, _lifetimeToken))
                 return;
 
-            if (_disposed)
+            if (_disposed || version != Interlocked.Read(ref tool.AnimationVersion))
                 return;
 
             if (!show && !IsLogicallyVisible(tool))
@@ -781,14 +775,8 @@ internal sealed class SearchFilterInteractionController : IDisposable
         }
         finally
         {
-            tool.IsAnimating = false;
-            if (!_disposed &&
-                tool.ClosePending &&
-                !IsLogicallyVisible(tool))
-            {
-                tool.ClosePending = false;
-                _ = AnimateAsync(tool, show: false);
-            }
+            if (version == Interlocked.Read(ref tool.AnimationVersion))
+                tool.IsAnimating = false;
         }
     }
 
@@ -996,13 +984,13 @@ internal sealed class SearchFilterInteractionController : IDisposable
             {
                 Property = Layoutable.HeightProperty,
                 Duration = ToolBarAnimationDuration,
-                Easing = new CubicEaseOut()
+                Easing = new CubicEaseInOut()
             },
             new ThicknessTransition
             {
                 Property = Layoutable.MarginProperty,
                 Duration = ToolBarAnimationDuration,
-                Easing = new CubicEaseOut()
+                Easing = new CubicEaseInOut()
             }
         ];
         tool.Surface.Transitions ??=
@@ -1010,7 +998,16 @@ internal sealed class SearchFilterInteractionController : IDisposable
             new DoubleTransition
             {
                 Property = Visual.OpacityProperty,
-                Duration = ToolBarAnimationDuration,
+                Duration = ToolBarFadeDuration,
+                Easing = new CubicEaseOut()
+            }
+        ];
+        tool.Transform.Transitions ??=
+        [
+            new DoubleTransition
+            {
+                Property = TranslateTransform.YProperty,
+                Duration = ToolBarContentAnimationDuration,
                 Easing = new CubicEaseOut()
             }
         ];
@@ -1022,7 +1019,7 @@ internal sealed class SearchFilterInteractionController : IDisposable
         tool.Container.Height = 0;
         tool.Container.Margin = new Thickness(0);
         tool.Container.IsVisible = false;
-        tool.Transform.Y = 0;
+        tool.Transform.Y = ToolBarContentOffset;
         tool.Surface.Opacity = 0;
         tool.Surface.IsHitTestVisible = false;
         tool.Surface.IsEnabled = false;
@@ -1113,10 +1110,10 @@ internal sealed class SearchFilterInteractionController : IDisposable
 
     private void ResetAnimationState()
     {
+        Interlocked.Increment(ref _search.AnimationVersion);
         _search.IsAnimating = false;
-        _search.ClosePending = false;
+        Interlocked.Increment(ref _filter.AnimationVersion);
         _filter.IsAnimating = false;
-        _filter.ClosePending = false;
     }
 
     private void ReleaseRealtimeSuppression()
@@ -1151,7 +1148,7 @@ internal sealed class SearchFilterInteractionController : IDisposable
         public TranslateTransform Transform { get; } = transform;
         public Func<TextBox?> GetInput { get; } = getInput;
         public bool IsAnimating { get; set; }
-        public bool ClosePending { get; set; }
+        public long AnimationVersion;
         public int FocusVersion;
     }
 

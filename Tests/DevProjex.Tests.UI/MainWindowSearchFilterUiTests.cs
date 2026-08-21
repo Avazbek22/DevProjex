@@ -391,6 +391,33 @@ public sealed class MainWindowSearchFilterUiTests(UiWorkspaceFixture workspace)
     }
 
     [AvaloniaFact]
+    public async Task SearchClose_InterruptsOpeningWithoutQueuedSecondAnimation()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var controller = GetSearchFilterController(window);
+            var searchBar = UiTestDriver.GetRequiredControl<SearchBarView>(window, "SearchBar");
+            var container = UiTestDriver.GetRequiredControl<Border>(window, "SearchBarContainer");
+
+            controller.ShowSearch(focusInput: false);
+            await controller.CloseSearchAsync(focusTree: false);
+
+            Assert.False(controller.IsAnimating);
+            Assert.False(UiTestDriver.GetViewModel(window).SearchVisible);
+            Assert.False(container.IsVisible);
+            Assert.Equal(0, container.Height);
+            Assert.Equal(0, searchBar.Opacity);
+            Assert.Equal(5, Assert.IsType<TranslateTransform>(searchBar.RenderTransform).Y);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task SearchAndFilter_OpenFocusesInputTextBox()
     {
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);

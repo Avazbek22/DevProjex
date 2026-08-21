@@ -9,8 +9,13 @@ internal sealed class PreviewSearchInteractionController : IDisposable
 {
 	private const double ToolBarHeight = 48.0;
 	private const double PanelIslandSpacing = 4.0;
+	private const double ToolBarContentOffset = 5.0;
 	private static readonly TimeSpan ToolBarAnimationDuration =
-		UiTimingProfile.Scale(TimeSpan.FromMilliseconds(250));
+		UiTimingProfile.Scale(TimeSpan.FromMilliseconds(220));
+	private static readonly TimeSpan ToolBarContentAnimationDuration =
+		UiTimingProfile.Scale(TimeSpan.FromMilliseconds(180));
+	private static readonly TimeSpan ToolBarFadeDuration =
+		UiTimingProfile.Scale(TimeSpan.FromMilliseconds(160));
 	private static readonly TimeSpan SearchDebounceInterval =
 		UiTimingProfile.Scale(TimeSpan.FromMilliseconds(200));
 	private static readonly TimeSpan SearchButtonFadeDuration =
@@ -395,7 +400,7 @@ internal sealed class PreviewSearchInteractionController : IDisposable
 
 		_container.Height = show ? ToolBarHeight : 0;
 		_container.Margin = new Thickness(0, 0, 0, show ? PanelIslandSpacing : 0);
-		_transform.Y = 0;
+		_transform.Y = show ? 0 : ToolBarContentOffset;
 		_searchBar.Opacity = show ? 1 : 0;
 		_ = CompleteAnimationAsync(version, show);
 	}
@@ -454,13 +459,13 @@ internal sealed class PreviewSearchInteractionController : IDisposable
 			{
 				Property = Layoutable.HeightProperty,
 				Duration = ToolBarAnimationDuration,
-				Easing = new CubicEaseOut()
+				Easing = new CubicEaseInOut()
 			},
 			new ThicknessTransition
 			{
 				Property = Layoutable.MarginProperty,
 				Duration = ToolBarAnimationDuration,
-				Easing = new CubicEaseOut()
+				Easing = new CubicEaseInOut()
 			}
 		];
 		_searchBar.Transitions =
@@ -468,7 +473,16 @@ internal sealed class PreviewSearchInteractionController : IDisposable
 			new DoubleTransition
 			{
 				Property = Visual.OpacityProperty,
-				Duration = ToolBarAnimationDuration,
+				Duration = ToolBarFadeDuration,
+				Easing = new CubicEaseOut()
+			}
+		];
+		_transform.Transitions =
+		[
+			new DoubleTransition
+			{
+				Property = TranslateTransform.YProperty,
+				Duration = ToolBarContentAnimationDuration,
 				Easing = new CubicEaseOut()
 			}
 		];
@@ -504,7 +518,7 @@ internal sealed class PreviewSearchInteractionController : IDisposable
 		_container.Height = 0;
 		_container.Margin = new Thickness(0);
 		_container.IsVisible = false;
-		_transform.Y = 0;
+		_transform.Y = ToolBarContentOffset;
 		_searchBar.Opacity = 0;
 		_searchBar.IsHitTestVisible = false;
 		_searchBar.IsEnabled = false;
