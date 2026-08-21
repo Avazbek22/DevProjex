@@ -12,7 +12,6 @@
                Grid.Column="0"
                PlaceholderText="{Binding MenuSearch}"
                Text="{Binding PreviewSearchQuery, Mode=TwoWay}"
-               MinWidth="96"
                FocusAdorner="{x:Null}"
                KeyDown="OnSearchKeyDown" />
       <TextBlock Grid.Column="1"

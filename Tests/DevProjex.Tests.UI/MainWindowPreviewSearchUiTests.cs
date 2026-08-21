@@ -465,6 +465,42 @@ public sealed class MainWindowPreviewSearchUiTests
 	}
 
 	[AvaloniaFact]
+	public async Task SearchInput_RemainsInsidePanelAtMinimumWidth_WhenMatchSummaryIsVisible()
+	{
+		using var project = UiTestProject.CreateWithPreviewSearchWorkspace();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+		try
+		{
+			window.Width = window.MinWidth;
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+			await OpenSearchAsync(window);
+
+			var searchBar = UiTestDriver.GetRequiredControl<PreviewSearchBarView>(
+				window,
+				"PreviewSearchBar");
+			var searchInput = searchBar.SearchBoxControl!;
+			searchInput.Text = "PreviewSearchNeedle";
+			await WaitForPreviewSearchCountAsync(window, expectedCount: 3);
+
+			var panelBounds = UiTestDriver.GetBoundsInWindow(searchBar, window);
+			var inputBounds = UiTestDriver.GetBoundsInWindow(searchInput, window);
+			Assert.True(
+				inputBounds.Left >= panelBounds.Left - 0.5,
+				$"The preview search input extends beyond the left panel edge: input={inputBounds}, panel={panelBounds}.");
+			Assert.True(
+				inputBounds.Right <= panelBounds.Right + 0.5,
+				$"The preview search input extends beyond the right panel edge: input={inputBounds}, panel={panelBounds}.");
+			Assert.True(inputBounds.Width > 0);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task SearchButtonTooltip_RemainsInsideMinimumWidthWindow()
 	{
 		using var project = UiTestProject.CreateWithPreviewSearchWorkspace();
