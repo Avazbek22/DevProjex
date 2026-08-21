@@ -67,7 +67,6 @@ internal sealed class PreviewSurfaceController : IDisposable
 	private double _previewMarkerDragStartY;
 	private double _previewMarkerDragStartOffsetY;
 	private bool _previewMarkerDragging;
-	private bool _previewMarkerViewerAllowAutoHide;
 	private bool _previewMarkerScrollBarAllowAutoHide;
 	private bool _previewMarkerScrollBarInteractionActive;
 	private bool _previewMarkerRailPointerOver;
@@ -312,17 +311,14 @@ internal sealed class PreviewSurfaceController : IDisposable
 			return;
 		}
 
-		_previewMarkerViewerAllowAutoHide = _controls.TextScrollViewer.AllowAutoHide;
 		_previewMarkerScrollBarAllowAutoHide = _verticalScrollBar?.AllowAutoHide ?? true;
 		_previewMarkerScrollBarInteractionActive = true;
-		_controls.TextScrollViewer.SetCurrentValue(ScrollViewer.AllowAutoHideProperty, false);
 		if (_verticalScrollBar is not null)
 			_verticalScrollBar.SetCurrentValue(ScrollBar.AllowAutoHideProperty, false);
 	}
 
 	private void KeepPreviewMarkerScrollBarActive()
 	{
-		_controls.TextScrollViewer.SetCurrentValue(ScrollViewer.AllowAutoHideProperty, false);
 		_verticalScrollBar?.SetCurrentValue(ScrollBar.AllowAutoHideProperty, false);
 	}
 
@@ -332,9 +328,6 @@ internal sealed class PreviewSurfaceController : IDisposable
 			return;
 
 		_previewMarkerScrollBarInteractionActive = false;
-		_controls.TextScrollViewer.SetCurrentValue(
-			ScrollViewer.AllowAutoHideProperty,
-			_previewMarkerViewerAllowAutoHide);
 		if (_verticalScrollBar is null)
 			return;
 

@@ -32,15 +32,21 @@ public sealed class MainWindowPreviewMarkerUiTests
 			var verticalScrollBar = Assert.Single(
 				scrollViewer.GetVisualDescendants().OfType<ScrollBar>(),
 				static scrollBar => scrollBar.Orientation == Orientation.Vertical);
+			var horizontalScrollBar = Assert.Single(
+				scrollViewer.GetVisualDescendants().OfType<ScrollBar>(),
+				static scrollBar => scrollBar.Orientation == Orientation.Horizontal);
 			verticalScrollBar.HideDelay = TimeSpan.Zero;
 			verticalScrollBar.ShowDelay = TimeSpan.Zero;
+			horizontalScrollBar.HideDelay = TimeSpan.Zero;
+			horizontalScrollBar.ShowDelay = TimeSpan.Zero;
 
 			await UiTestDriver.WaitForConditionAsync(
 				window,
 				() => markerBar.IsVisible &&
 				      markerBar.MarkerTicks.Count(static tick =>
 					      tick.Target.Category == PreviewMarkerCategory.Redaction) == 3 &&
-				      scrollViewer.Extent.Height > scrollViewer.Viewport.Height,
+				      scrollViewer.Extent.Height > scrollViewer.Viewport.Height &&
+				      scrollViewer.Extent.Width > scrollViewer.Viewport.Width,
 				"large preview to expose three marker ticks");
 
 			scrollViewer.Offset = new Vector(scrollViewer.Offset.X, 64);
@@ -51,8 +57,10 @@ public sealed class MainWindowPreviewMarkerUiTests
 			window.MouseMove(UiTestDriver.GetControlCenter(previewIsland, window), RawInputModifiers.None);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
-				() => !verticalScrollBar.IsExpanded && stickyHeader.Margin.Right < 0.1,
-				"preview scrollbar to return to its collapsed state");
+				() => !verticalScrollBar.IsExpanded &&
+				      !horizontalScrollBar.IsExpanded &&
+				      stickyHeader.Margin.Right < 0.1,
+				"preview scrollbars to return to their collapsed state");
 
 			var firstTick = markerBar.MarkerTicks
 				.Where(static tick => tick.Target.Category == PreviewMarkerCategory.Redaction)
@@ -86,8 +94,9 @@ public sealed class MainWindowPreviewMarkerUiTests
 			await UiTestDriver.WaitForConditionAsync(
 				window,
 				() => stickyHeader.Margin.Right > 0.1 &&
-				      !scrollViewer.AllowAutoHide &&
-				      !verticalScrollBar.AllowAutoHide,
+				      scrollViewer.AllowAutoHide == originalViewerAllowAutoHide &&
+				      !verticalScrollBar.AllowAutoHide &&
+				      !horizontalScrollBar.IsExpanded,
 				"plain scrollbar rail hover to move the sticky path away");
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
 			var railHit = Assert.IsAssignableFrom<InputElement>(window.InputHitTest(railPoint));
@@ -97,8 +106,9 @@ public sealed class MainWindowPreviewMarkerUiTests
 			await UiTestDriver.WaitForConditionAsync(
 				window,
 				() => stickyHeader.Margin.Right > 0.1 &&
-				      !scrollViewer.AllowAutoHide &&
-				      !verticalScrollBar.AllowAutoHide,
+				      scrollViewer.AllowAutoHide == originalViewerAllowAutoHide &&
+				      !verticalScrollBar.AllowAutoHide &&
+				      !horizontalScrollBar.IsExpanded,
 				"scrollbar hover to move the sticky path away and keep the rail active");
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
 			window.MouseMove(markerPoint, RawInputModifiers.None);
@@ -218,7 +228,7 @@ public sealed class MainWindowPreviewMarkerUiTests
 			window.MouseDown(thumbDragPoint, MouseButton.Left, RawInputModifiers.LeftMouseButton);
 			window.MouseMove(dragTarget, RawInputModifiers.LeftMouseButton);
 			Assert.Equal("Arrow", scrollViewer.Cursor?.ToString());
-			Assert.False(scrollViewer.AllowAutoHide);
+			Assert.Equal(originalViewerAllowAutoHide, scrollViewer.AllowAutoHide);
 			Assert.False(verticalScrollBar.AllowAutoHide);
 			window.MouseUp(dragTarget, MouseButton.Left, RawInputModifiers.None);
 			Assert.Equal(originalViewerAllowAutoHide, scrollViewer.AllowAutoHide);

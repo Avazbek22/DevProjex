@@ -88,9 +88,13 @@ internal sealed class UiTestProject : IDisposable
 		return Create(static rootPath =>
 		{
 			var lines = Enumerable.Range(1, 5_000)
-				.Select(index => index is 2 or 2_500 or 4_900
-					? "const string awsAccessKey = \"AKIA" + "Z7M3Q5X2P6N4R7T5\";"
-					: $"ordinary preview marker line {index:000}");
+				.Select(index => index switch
+				{
+					2 or 2_500 or 4_900 =>
+						"const string awsAccessKey = \"AKIA" + "Z7M3Q5X2P6N4R7T5\";",
+					4 => new string('x', 512),
+					_ => $"ordinary preview marker line {index:000}"
+				});
 			WriteFile(rootPath, Path.Combine("src", "PreviewMarkers.cs"), string.Join('\n', lines));
 		});
 	}
