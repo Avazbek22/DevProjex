@@ -213,6 +213,14 @@ public sealed class SelectionSyncCoordinatorProjectSwitchIsolationTests
 		coordinator.ApplyProjectProfileSelections(projectB, CreateProfile(projectBState));
 		var before = coordinator.CaptureProjectCheckpoint().Session;
 		var revisionBefore = coordinator.CurrentSelectionRevision;
+		var extensionVisualStateBefore = viewModel.Extensions.ToDictionary(
+			static option => option.Name,
+			static option => option.IsChecked,
+			StringComparer.OrdinalIgnoreCase);
+		var ignoreVisualStateBefore = SnapshotIgnoreState(viewModel.IgnoreOptions);
+		var allExtensionsBefore = viewModel.AllExtensionsChecked;
+		var allIgnoreBefore = viewModel.AllIgnoreChecked;
+		var allContentProcessingBefore = viewModel.AllContentProcessingChecked;
 
 		switch (eventKind)
 		{
@@ -225,13 +233,16 @@ public sealed class SelectionSyncCoordinatorProjectSwitchIsolationTests
 				hideSecrets.IsChecked = !hideSecrets.IsChecked;
 				break;
 			case PreparedEventKind.ExtensionsAll:
-				coordinator.HandleExtensionsAllChanged(false);
+				viewModel.AllExtensionsChecked = !allExtensionsBefore;
+				coordinator.HandleExtensionsAllChanged(!allExtensionsBefore);
 				break;
 			case PreparedEventKind.IgnoreAll:
-				coordinator.HandleIgnoreAllChanged(false, projectB);
+				viewModel.AllIgnoreChecked = !allIgnoreBefore;
+				coordinator.HandleIgnoreAllChanged(!allIgnoreBefore, projectB);
 				break;
 			case PreparedEventKind.ContentProcessingAll:
-				coordinator.HandleContentProcessingAllChanged(false);
+				viewModel.AllContentProcessingChecked = !allContentProcessingBefore;
+				coordinator.HandleContentProcessingAllChanged(!allContentProcessingBefore);
 				break;
 			default:
 				throw new ArgumentOutOfRangeException(nameof(eventKind), eventKind, null);
@@ -248,6 +259,13 @@ public sealed class SelectionSyncCoordinatorProjectSwitchIsolationTests
 		Assert.Equal(
 			projectBState.Where(static pair => pair.Value).Select(static pair => pair.Key).Order(),
 			coordinator.GetSelectedIgnoreOptionIds().Order());
+		Assert.Equal(allExtensionsBefore, viewModel.AllExtensionsChecked);
+		Assert.Equal(allIgnoreBefore, viewModel.AllIgnoreChecked);
+		Assert.Equal(allContentProcessingBefore, viewModel.AllContentProcessingChecked);
+		Assert.All(
+			viewModel.Extensions,
+			option => Assert.Equal(extensionVisualStateBefore[option.Name], option.IsChecked));
+		AssertIgnoreState(SnapshotIgnoreState(viewModel.IgnoreOptions), ignoreVisualStateBefore);
 	}
 
 	[Fact]

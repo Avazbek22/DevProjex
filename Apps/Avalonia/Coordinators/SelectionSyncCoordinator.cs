@@ -395,7 +395,15 @@ public sealed partial class SelectionSyncCoordinator(
 
     public void HandleExtensionsAllChanged(bool isChecked)
     {
-        if (_suppressExtensionAllCheck || _session.PreparedPath is not null) return;
+        if (_suppressExtensionAllCheck) return;
+        if (_session.PreparedPath is not null)
+        {
+            RestorePreparedAllToggle(
+                isChecked,
+                ref _suppressExtensionAllCheck,
+                value => viewModel.AllExtensionsChecked = value);
+            return;
+        }
 
         _suppressExtensionAllCheck = true;
         viewModel.AllExtensionsChecked = isChecked;
@@ -413,7 +421,15 @@ public sealed partial class SelectionSyncCoordinator(
 
     public void HandleIgnoreAllChanged(bool isChecked, string? currentPath)
     {
-        if (_suppressIgnoreAllCheck || _session.PreparedPath is not null) return;
+        if (_suppressIgnoreAllCheck) return;
+        if (_session.PreparedPath is not null)
+        {
+            RestorePreparedAllToggle(
+                isChecked,
+                ref _suppressIgnoreAllCheck,
+                value => viewModel.AllIgnoreChecked = value);
+            return;
+        }
 
         _session.IgnoreOptions.IsInitialized = true;
         _session.IgnoreOptions.AllPreference = isChecked;
@@ -439,8 +455,16 @@ public sealed partial class SelectionSyncCoordinator(
 
 	public void HandleContentProcessingAllChanged(bool isChecked)
 	{
-		if (_suppressContentProcessingAllCheck || _session.PreparedPath is not null)
+		if (_suppressContentProcessingAllCheck)
 			return;
+		if (_session.PreparedPath is not null)
+		{
+			RestorePreparedAllToggle(
+				isChecked,
+				ref _suppressContentProcessingAllCheck,
+				value => viewModel.AllContentProcessingChecked = value);
+			return;
+		}
 
 		var changed = false;
 		_suppressIgnoreItemCheck = true;
@@ -1504,7 +1528,15 @@ public sealed partial class SelectionSyncCoordinator(
 
         if (viewModel.Extensions.Contains(option))
         {
-            if (_suppressExtensionItemCheck || _session.PreparedPath is not null) return;
+            if (_suppressExtensionItemCheck) return;
+            if (_session.PreparedPath is not null)
+            {
+                RestorePreparedItemToggle(
+                    option.IsChecked,
+                    ref _suppressExtensionItemCheck,
+                    value => option.IsChecked = value);
+                return;
+            }
 
             SyncAllCheckbox(viewModel.Extensions, ref _suppressExtensionAllCheck,
                 value => viewModel.AllExtensionsChecked = value);
@@ -1519,9 +1551,21 @@ public sealed partial class SelectionSyncCoordinator(
 
     private void OnIgnoreCheckedChanged(object? sender, EventArgs e)
     {
-        if (_suppressIgnoreItemCheck || _session.PreparedPath is not null) return;
+        if (_suppressIgnoreItemCheck) return;
 
         var changedOption = sender as IgnoreOptionViewModel;
+        if (_session.PreparedPath is not null)
+        {
+            if (changedOption is not null)
+            {
+                RestorePreparedItemToggle(
+                    changedOption.IsChecked,
+                    ref _suppressIgnoreItemCheck,
+                    value => changedOption.IsChecked = value);
+            }
+            return;
+        }
+
         _session.IgnoreOptions.IsInitialized = true;
         _session.IgnoreOptions.AllPreference = null;
 
@@ -1553,6 +1597,41 @@ public sealed partial class SelectionSyncCoordinator(
             QueueRefreshForIgnoreOptionChange(currentPath, changedOption?.Id);
         }
     }
+
+	private static void RestorePreparedAllToggle(
+		bool attemptedValue,
+		ref bool suppressChanges,
+		Action<bool> setValue)
+	{
+		suppressChanges = true;
+		try
+		{
+			// Routed checkbox events can run on either side of the TwoWay binding update.
+			// Publishing both transitions guarantees a synchronous return to the prior value.
+			setValue(attemptedValue);
+			setValue(!attemptedValue);
+		}
+		finally
+		{
+			suppressChanges = false;
+		}
+	}
+
+	private static void RestorePreparedItemToggle(
+		bool attemptedValue,
+		ref bool suppressChanges,
+		Action<bool> setValue)
+	{
+		suppressChanges = true;
+		try
+		{
+			setValue(!attemptedValue);
+		}
+		finally
+		{
+			suppressChanges = false;
+		}
+	}
 
 	private static IgnoreOptionId? ResolveChangedTransformation(
 		IReadOnlySet<IgnoreOptionId> before,

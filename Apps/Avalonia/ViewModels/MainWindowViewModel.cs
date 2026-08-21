@@ -497,7 +497,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
 			_isProjectLoadInProgress = value;
 			RaisePropertyChanged();
-			RaisePropertyChanged(nameof(AreFilterSettingsEnabled));
 			RaisePropertyChanged(nameof(CanApplySettings));
 			RaisePropertyChanged(nameof(IsApplySettingsAttentionActive));
 		}
@@ -521,7 +520,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		_selectedPreviewContentMode != PreviewContentMode.Tree;
 
 	public bool AreFilterSettingsEnabled =>
-		_isProjectLoaded && !_isProjectCopyExportInProgress && !_isProjectLoadInProgress;
+		_isProjectLoaded && !_isProjectCopyExportInProgress;
 
     public bool CanApplySettings => CanStartApplySettings;
 

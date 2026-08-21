@@ -650,9 +650,52 @@ public sealed class MainWindowApplySettingsSelectionUiTests
 			await blockingTreeBuilder.BuildStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
 			Assert.True(viewModel.IsProjectLoadInProgress);
-			Assert.False(viewModel.AreFilterSettingsEnabled);
-			Assert.False(UiTestDriver.GetRequiredIgnoreOptionCheckBox(window, IgnoreOptionId.HideSecrets)
-				.IsEffectivelyEnabled);
+			Assert.True(viewModel.AreFilterSettingsEnabled);
+			Assert.False(viewModel.CanApplySettings);
+			var pendingApplyBefore = viewModel.HasPendingFilterSettingsChanges;
+			var hideSecretsOption = viewModel.IgnoreOptions.Single(
+				static option => option.Id == IgnoreOptionId.HideSecrets);
+			var hideSecretsBefore = hideSecretsOption.IsChecked;
+			var hideSecretsCheckBox = UiTestDriver.GetRequiredIgnoreOptionCheckBox(
+				window,
+				IgnoreOptionId.HideSecrets);
+			Assert.True(hideSecretsCheckBox.IsEffectivelyEnabled);
+			await AssertPreparedToggleRollsBackAsync(hideSecretsCheckBox);
+			Assert.Equal(hideSecretsBefore, hideSecretsOption.IsChecked);
+
+			var extensionOption = viewModel.Extensions[0];
+			var extensionBefore = extensionOption.IsChecked;
+			var extensionCheckBox = UiTestDriver.GetRequiredExtensionCheckBox(window, extensionOption.Name);
+			Assert.True(extensionCheckBox.IsEffectivelyEnabled);
+			await AssertPreparedToggleRollsBackAsync(extensionCheckBox);
+			Assert.Equal(extensionBefore, extensionOption.IsChecked);
+
+			foreach (var (controlName, expectedState) in new[]
+			         {
+				         ("IgnoreAllCheckBox", viewModel.AllIgnoreChecked),
+				         ("ContentProcessingAllCheckBox", viewModel.AllContentProcessingChecked),
+				         ("ExtensionsAllCheckBox", viewModel.AllExtensionsChecked)
+			         })
+			{
+				var allCheckBox = UiTestDriver.GetRequiredControl<CheckBox>(window, controlName);
+				Assert.True(allCheckBox.IsEffectivelyEnabled);
+				await AssertPreparedToggleRollsBackAsync(allCheckBox);
+				Assert.Equal(expectedState, allCheckBox.IsChecked);
+				Assert.Equal(
+					expectedState,
+					controlName switch
+					{
+						"IgnoreAllCheckBox" => viewModel.AllIgnoreChecked,
+						"ContentProcessingAllCheckBox" => viewModel.AllContentProcessingChecked,
+						"ExtensionsAllCheckBox" => viewModel.AllExtensionsChecked,
+						_ => throw new ArgumentOutOfRangeException(nameof(controlName), controlName, null)
+					});
+			}
+
+			Assert.Equal(
+				ProjectProfileLookupStatus.Missing,
+				profileStore.LookupProfile(secondProject.RootPath, TimeSpan.FromSeconds(1)).Status);
+			Assert.Equal(pendingApplyBefore, viewModel.HasPendingFilterSettingsChanges);
 
 			await UiTestDriver.RaiseButtonClickAsync(UiTestDriver.GetRequiredStatusCancelButton(window));
 			blockingTreeBuilder.Release();
@@ -701,6 +744,17 @@ public sealed class MainWindowApplySettingsSelectionUiTests
 		{
 			blockingTreeBuilder.Release();
 			await UiTestDriver.CloseWindowAsync(window);
+		}
+
+		async Task AssertPreparedToggleRollsBackAsync(CheckBox checkBox)
+		{
+			var expectedState = checkBox.IsChecked;
+			await UiTestDriver.ClickAsync(window, checkBox);
+			Assert.Equal(expectedState, checkBox.IsChecked);
+
+			checkBox.Focus();
+			await UiTestDriver.PressKeyAsync(window, Key.Space);
+			Assert.Equal(expectedState, checkBox.IsChecked);
 		}
 	}
 

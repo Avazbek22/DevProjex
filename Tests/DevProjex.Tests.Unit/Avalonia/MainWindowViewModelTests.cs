@@ -701,7 +701,7 @@ public sealed class MainWindowViewModelTests
     }
 
 	[Fact]
-	public void ProjectLoad_DisablesOnlySettingsCommitSurfaceUntilPublication()
+	public void ProjectLoad_KeepsSettingsInteractiveAndDisablesOnlyCommitSurfaceUntilPublication()
 	{
 		var viewModel = CreateViewModel();
 		viewModel.IsProjectLoaded = true;
@@ -714,10 +714,10 @@ public sealed class MainWindowViewModelTests
 
 		viewModel.IsProjectLoadInProgress = true;
 
-		Assert.False(viewModel.AreFilterSettingsEnabled);
+		Assert.True(viewModel.AreFilterSettingsEnabled);
 		Assert.False(viewModel.CanApplySettings);
 		Assert.True(viewModel.CanChangeProjectTree);
-		Assert.Contains(nameof(MainWindowViewModel.AreFilterSettingsEnabled), changed);
+		Assert.DoesNotContain(nameof(MainWindowViewModel.AreFilterSettingsEnabled), changed);
 		Assert.Contains(nameof(MainWindowViewModel.CanApplySettings), changed);
 
 		viewModel.IsProjectLoadInProgress = false;
