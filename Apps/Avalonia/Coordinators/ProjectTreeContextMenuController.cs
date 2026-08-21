@@ -196,7 +196,8 @@ internal sealed class ProjectTreeContextMenuController : IDisposable
 	private string ResolveHeader(ProjectTreeContextMenuCommand command) =>
 		_localization[command switch
 		{
-			ProjectTreeContextMenuCommand.OpenInFileManager => "Tree.Context.OpenInFileManager",
+			ProjectTreeContextMenuCommand.OpenInFileManager =>
+				ResolveOpenInFileManagerKey(DesktopPlatformResolver.Resolve()),
 			ProjectTreeContextMenuCommand.CopyFullPath => "Tree.Context.CopyFullPath",
 			ProjectTreeContextMenuCommand.CopyRelativePath => "Tree.Context.CopyRelativePath",
 			ProjectTreeContextMenuCommand.CopyContent => "Tree.Context.CopyContent",
@@ -205,6 +206,15 @@ internal sealed class ProjectTreeContextMenuController : IDisposable
 			ProjectTreeContextMenuCommand.CollapseBranch => "Tree.Context.CollapseBranch",
 			_ => throw new ArgumentOutOfRangeException(nameof(command), command, null)
 		}];
+
+	// The label follows the platform's file-manager name (Explorer/Finder), as in VS Code and JetBrains IDEs.
+	internal static string ResolveOpenInFileManagerKey(DesktopPlatform platform) =>
+		platform switch
+		{
+			DesktopPlatform.Windows => "Tree.Context.OpenInFileManager.Windows",
+			DesktopPlatform.MacOS => "Tree.Context.OpenInFileManager.MacOS",
+			_ => "Tree.Context.OpenInFileManager.Linux"
+		};
 
 	private async void OnMenuItemClick(object? sender, RoutedEventArgs e)
 	{

@@ -1,4 +1,6 @@
 using DevProjex.Application.Services;
+using DevProjex.Avalonia.Coordinators;
+using DevProjex.Infrastructure.FileSystem;
 
 namespace DevProjex.Tests.Unit;
 
@@ -120,6 +122,19 @@ public sealed class ProjectTreeContextMenuPolicyTests
 			showSelectOnly: false);
 
 		Assert.Equal(expected.Split(','), Describe(entries));
+	}
+
+	[Theory]
+	[InlineData(DesktopPlatform.Windows, "Tree.Context.OpenInFileManager.Windows")]
+	[InlineData(DesktopPlatform.MacOS, "Tree.Context.OpenInFileManager.MacOS")]
+	[InlineData(DesktopPlatform.Linux, "Tree.Context.OpenInFileManager.Linux")]
+	public void OpenInFileManagerHeader_UsesThePlatformFileManagerName(
+		DesktopPlatform platform,
+		string expectedKey)
+	{
+		Assert.Equal(
+			expectedKey,
+			ProjectTreeContextMenuController.ResolveOpenInFileManagerKey(platform));
 	}
 
 	private static string[] Describe(IReadOnlyList<ProjectTreeContextMenuEntry> entries) =>

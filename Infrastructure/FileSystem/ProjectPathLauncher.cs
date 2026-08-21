@@ -7,6 +7,16 @@ public enum DesktopPlatform
 	Linux
 }
 
+public static class DesktopPlatformResolver
+{
+	public static DesktopPlatform Resolve() =>
+		OperatingSystem.IsWindows()
+			? DesktopPlatform.Windows
+			: OperatingSystem.IsMacOS()
+				? DesktopPlatform.MacOS
+				: DesktopPlatform.Linux;
+}
+
 public enum ProjectPathLaunchFailure
 {
 	None,
@@ -159,7 +169,7 @@ public sealed class ProjectPathLauncher : IProjectPathLauncher
 
 	public ProjectPathLauncher()
 		: this(
-			ResolveCurrentPlatform(),
+			DesktopPlatformResolver.Resolve(),
 			File.Exists,
 			Directory.Exists,
 			LaunchCandidateAsync)
@@ -281,10 +291,4 @@ public sealed class ProjectPathLauncher : IProjectPathLauncher
 			System.Security.SecurityException or
 			NotSupportedException;
 
-	private static DesktopPlatform ResolveCurrentPlatform() =>
-		OperatingSystem.IsWindows()
-			? DesktopPlatform.Windows
-			: OperatingSystem.IsMacOS()
-				? DesktopPlatform.MacOS
-				: DesktopPlatform.Linux;
 }
