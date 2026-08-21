@@ -25,13 +25,14 @@ public sealed class MainWindowTreeContextMenuUiTests(UiWorkspaceFixture workspac
 			var fileItem = FindRealizedItem(window, file);
 			var controller = GetController(window);
 			Assert.Same(controller.Menu, tree.ContextFlyout);
+			file.IsChecked = true;
 
 			await RightClickAsync(window, fileItem);
 
 			Assert.Same(file, controller.ActiveNode);
 			Assert.True(controller.Menu.IsOpen);
 			Assert.Equal(
-				["OpenInFileManager", "-", "CopyFullPath", "CopyRelativePath", "CopyContent", "-", "SelectOnly"],
+				["OpenInFileManager", "-", "CopyFullPath", "CopyRelativePath", "CopyContent"],
 				Describe(controller.Menu));
 
 			controller.Menu.Hide();
@@ -67,6 +68,7 @@ public sealed class MainWindowTreeContextMenuUiTests(UiWorkspaceFixture workspac
 			root.IsExpanded = true;
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
 			var folder = root.Children.Single(node => node.DisplayName == "src");
+			root.Children.First(node => !ReferenceEquals(node, folder)).IsChecked = true;
 			var controller = GetController(window);
 			var sharedMenu = controller.Menu;
 
@@ -108,7 +110,9 @@ public sealed class MainWindowTreeContextMenuUiTests(UiWorkspaceFixture workspac
 			Assert.Equal(file.FullPath, await ClipboardExtensions.TryGetTextAsync(window.Clipboard!));
 
 			await InvokeCommandAsync(controller, file, placement, ProjectTreeContextMenuCommand.CopyRelativePath);
-			Assert.Equal("README.md", await ClipboardExtensions.TryGetTextAsync(window.Clipboard!));
+			Assert.Equal(
+				$"{Path.GetFileName(Path.TrimEndingDirectorySeparator(workspace.Project.RootPath))}/README.md",
+				await ClipboardExtensions.TryGetTextAsync(window.Clipboard!));
 
 			await InvokeCommandAsync(controller, file, placement, ProjectTreeContextMenuCommand.OpenInFileManager);
 			await UiTestDriver.WaitForConditionAsync(
@@ -147,6 +151,7 @@ public sealed class MainWindowTreeContextMenuUiTests(UiWorkspaceFixture workspac
 			var clipboard = await ClipboardExtensions.TryGetTextAsync(window.Clipboard!);
 			Assert.DoesNotContain("AKIAZ7M3Q5X2P6N4R7T5", clipboard, StringComparison.Ordinal);
 
+			root.Children.First(node => !ReferenceEquals(node, src)).IsChecked = true;
 			await InvokeCommandAsync(controller, secretFile, placement, ProjectTreeContextMenuCommand.SelectOnly);
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
 			Assert.True(secretFile.IsChecked);
@@ -170,6 +175,7 @@ public sealed class MainWindowTreeContextMenuUiTests(UiWorkspaceFixture workspac
 			root.IsExpanded = true;
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
 			var file = root.Children.Single(node => node.DisplayName == "README.md");
+			root.Children.First(node => !ReferenceEquals(node, file)).IsChecked = true;
 			var controller = GetController(window);
 			viewModel.IsProjectLoadInProgress = true;
 

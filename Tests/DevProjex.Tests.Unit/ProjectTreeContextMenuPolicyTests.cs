@@ -10,7 +10,8 @@ public sealed class ProjectTreeContextMenuPolicyTests
 		var entries = ProjectTreeContextMenuPolicy.Build(
 			isDirectory: false,
 			isExpanded: false,
-			allowContentAndSelection: true);
+			allowContentAndSelection: true,
+			showSelectOnly: true);
 
 		Assert.Equal(
 			[
@@ -35,7 +36,8 @@ public sealed class ProjectTreeContextMenuPolicyTests
 		var entries = ProjectTreeContextMenuPolicy.Build(
 			isDirectory: true,
 			isExpanded,
-			allowContentAndSelection: true);
+			allowContentAndSelection: true,
+			showSelectOnly: true);
 
 		Assert.Equal(
 			[
@@ -56,7 +58,8 @@ public sealed class ProjectTreeContextMenuPolicyTests
 		var entries = ProjectTreeContextMenuPolicy.Build(
 			isDirectory: false,
 			isExpanded: false,
-			allowContentAndSelection: false);
+			allowContentAndSelection: false,
+			showSelectOnly: true);
 
 		Assert.False(Find(entries, ProjectTreeContextMenuCommand.CopyContent).IsEnabled);
 		Assert.False(Find(entries, ProjectTreeContextMenuCommand.SelectOnly).IsEnabled);
@@ -66,16 +69,32 @@ public sealed class ProjectTreeContextMenuPolicyTests
 	}
 
 	[Fact]
-	public void RelativePath_RootIsDotAndNestedPathsUseForwardSlashes()
+	public void RelativePath_IncludesRootFolderAndUsesForwardSlashes()
 	{
 		using var temporary = new TemporaryDirectory();
 		var root = temporary.CreateFolder("проект");
 		var nested = Path.Combine(root, "src", "данные", "file.cs");
 
-		Assert.Equal(".", ProjectTreePathUtility.GetRelativeDisplayPath(root, root));
+		Assert.Equal("проект", ProjectTreePathUtility.GetRelativeDisplayPath(root, root));
 		Assert.Equal(
-			"src/данные/file.cs",
+			"проект/src/данные/file.cs",
 			ProjectTreePathUtility.GetRelativeDisplayPath(root, nested));
+	}
+
+	[Theory]
+	[InlineData(false, "OpenInFileManager,-,CopyFullPath,CopyRelativePath,CopyContent")]
+	[InlineData(true, "OpenInFileManager,-,CopyFullPath,CopyRelativePath,-,ExpandBranch")]
+	public void Build_WithoutAnotherSelection_OmitsSelectOnly(
+		bool isDirectory,
+		string expected)
+	{
+		var entries = ProjectTreeContextMenuPolicy.Build(
+			isDirectory,
+			isExpanded: false,
+			allowContentAndSelection: true,
+			showSelectOnly: false);
+
+		Assert.Equal(expected.Split(','), Describe(entries));
 	}
 
 	private static string[] Describe(IReadOnlyList<ProjectTreeContextMenuEntry> entries) =>

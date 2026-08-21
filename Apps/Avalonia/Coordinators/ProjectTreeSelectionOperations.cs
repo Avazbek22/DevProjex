@@ -2,6 +2,20 @@ namespace DevProjex.Avalonia.Coordinators;
 
 internal static class ProjectTreeSelectionOperations
 {
+	public static bool HasSelectionOtherThan(
+		IList<TreeNodeViewModel> roots,
+		TreeNodeViewModel target)
+	{
+		ArgumentNullException.ThrowIfNull(roots);
+		ArgumentNullException.ThrowIfNull(target);
+
+		var selected = new HashSet<string>(PathComparer.Default);
+		foreach (var root in roots)
+			root.CollectCheckedPaths(selected);
+
+		return selected.Any(path => !PathComparer.Default.Equals(path, target.FullPath));
+	}
+
 	public static bool SelectOnly(
 		IList<TreeNodeViewModel> roots,
 		TreeNodeViewModel target)

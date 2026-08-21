@@ -7,6 +7,25 @@ namespace DevProjex.Tests.Integration;
 public sealed class ProjectTreeContextOperationsIntegrationTests
 {
 	[Fact]
+	public void SelectOnlyAvailability_RequiresAnotherSelectedPath()
+	{
+		var root = CreateLazyNode(
+			Directory("root", File("first.txt"), File("second.txt")),
+			parent: null);
+		var first = root.Children[0];
+		var second = root.Children[1];
+
+		root.SetCheckedForTreeStateRestore(false);
+		Assert.False(ProjectTreeSelectionOperations.HasSelectionOtherThan([root], first));
+
+		first.IsChecked = true;
+		Assert.False(ProjectTreeSelectionOperations.HasSelectionOtherThan([root], first));
+
+		second.IsChecked = true;
+		Assert.True(ProjectTreeSelectionOperations.HasSelectionOtherThan([root], first));
+	}
+
+	[Fact]
 	public void SelectOnly_LargeLazyTreePublishesOnceAndIsIdempotent()
 	{
 		var rootDescriptor = Directory(

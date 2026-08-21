@@ -1249,6 +1249,7 @@ public partial class MainWindow
 			services.ProjectPathLauncher,
 			() => _currentPath,
 			CanUseTreeContextContentAndSelection,
+			ShouldShowSelectOnlyTreeNode,
 			ReadTreeNodeContentAsync,
 			SetClipboardTextAsync,
 			SelectOnlyTreeNode,

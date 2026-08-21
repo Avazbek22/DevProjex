@@ -10,6 +10,9 @@ public partial class MainWindow
 		!_viewModel.IsProjectLoadInProgress &&
 		!_selectionCoordinator.HasPreparedSelection;
 
+	private bool ShouldShowSelectOnlyTreeNode(TreeNodeViewModel target) =>
+		ProjectTreeSelectionOperations.HasSelectionOtherThan(_viewModel.TreeNodes, target);
+
 	private Task<TransformedFileContentResult> ReadTreeNodeContentAsync(
 		TreeNodeViewModel node,
 		CancellationToken cancellationToken)

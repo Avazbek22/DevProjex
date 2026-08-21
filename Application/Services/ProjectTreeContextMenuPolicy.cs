@@ -27,7 +27,8 @@ public static class ProjectTreeContextMenuPolicy
 	public static IReadOnlyList<ProjectTreeContextMenuEntry> Build(
 		bool isDirectory,
 		bool isExpanded,
-		bool allowContentAndSelection)
+		bool allowContentAndSelection,
+		bool showSelectOnly)
 	{
 		var entries = new List<ProjectTreeContextMenuEntry>(isDirectory ? 8 : 7)
 		{
@@ -40,8 +41,10 @@ public static class ProjectTreeContextMenuPolicy
 		if (!isDirectory)
 			entries.Add(Command(ProjectTreeContextMenuCommand.CopyContent, allowContentAndSelection));
 
-		entries.Add(Separator());
-		entries.Add(Command(ProjectTreeContextMenuCommand.SelectOnly, allowContentAndSelection));
+		if (showSelectOnly || isDirectory)
+			entries.Add(Separator());
+		if (showSelectOnly)
+			entries.Add(Command(ProjectTreeContextMenuCommand.SelectOnly, allowContentAndSelection));
 		if (isDirectory)
 		{
 			entries.Add(Command(

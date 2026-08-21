@@ -11,6 +11,7 @@ internal sealed class ProjectTreeContextMenuController : IDisposable
 	private readonly IProjectPathLauncher _pathLauncher;
 	private readonly Func<string?> _getProjectRoot;
 	private readonly Func<bool> _allowContentAndSelection;
+	private readonly Func<TreeNodeViewModel, bool> _showSelectOnly;
 	private readonly Func<TreeNodeViewModel, CancellationToken, Task<TransformedFileContentResult>> _readContent;
 	private readonly Func<string, Task> _setClipboardText;
 	private readonly Action<TreeNodeViewModel> _selectOnly;
@@ -32,6 +33,7 @@ internal sealed class ProjectTreeContextMenuController : IDisposable
 		IProjectPathLauncher pathLauncher,
 		Func<string?> getProjectRoot,
 		Func<bool> allowContentAndSelection,
+		Func<TreeNodeViewModel, bool> showSelectOnly,
 		Func<TreeNodeViewModel, CancellationToken, Task<TransformedFileContentResult>> readContent,
 		Func<string, Task> setClipboardText,
 		Action<TreeNodeViewModel> selectOnly,
@@ -44,6 +46,7 @@ internal sealed class ProjectTreeContextMenuController : IDisposable
 		_pathLauncher = pathLauncher ?? throw new ArgumentNullException(nameof(pathLauncher));
 		_getProjectRoot = getProjectRoot ?? throw new ArgumentNullException(nameof(getProjectRoot));
 		_allowContentAndSelection = allowContentAndSelection ?? throw new ArgumentNullException(nameof(allowContentAndSelection));
+		_showSelectOnly = showSelectOnly ?? throw new ArgumentNullException(nameof(showSelectOnly));
 		_readContent = readContent ?? throw new ArgumentNullException(nameof(readContent));
 		_setClipboardText = setClipboardText ?? throw new ArgumentNullException(nameof(setClipboardText));
 		_selectOnly = selectOnly ?? throw new ArgumentNullException(nameof(selectOnly));
@@ -156,7 +159,8 @@ internal sealed class ProjectTreeContextMenuController : IDisposable
 		foreach (var entry in ProjectTreeContextMenuPolicy.Build(
 			         node.Descriptor.IsDirectory,
 			         node.IsExpanded,
-			         _allowContentAndSelection()))
+			         _allowContentAndSelection(),
+			         _showSelectOnly(node)))
 		{
 			if (entry.Kind == ProjectTreeContextMenuEntryKind.Separator)
 			{
