@@ -144,11 +144,6 @@
       <Setter Property="UseLayoutRounding" Value="True" />
     </Style>
 
-    <Style Selector="Border.island-splitter:pointerover, Border.island-splitter.splitter-dragging">
-      <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
-      <Setter Property="Opacity" Value="0.44" />
-    </Style>
-
     <Style Selector="Border.status-strip">
       <Setter Property="Background" Value="{DynamicResource AppPanelBrush}" />
       <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
