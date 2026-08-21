@@ -13,7 +13,7 @@
                Grid.Column="0"
                PlaceholderText="{Binding MenuSearch}"
                Text="{Binding SearchQuery, Mode=TwoWay}"
-               Width="200"
+               Width="220"
                FocusAdorner="{x:Null}"
                KeyDown="OnSearchKeyDown" />
       <TextBlock Name="SearchMatchSummary"
