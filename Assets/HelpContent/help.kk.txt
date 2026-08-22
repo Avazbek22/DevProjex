@@ -91,9 +91,11 @@ DevProjex интерактивті терминал жұмыс кеңістіг�
 * `devprojex` — интерактивті терминал жұмыс кеңістігін ашу.
 * `devprojex open . --preview` — ағымдағы папканы Desktop алдын ала қарау режимінде ашу.
 * `devprojex analyze . --format json` — ағымдағы жобаны JSON түрінде талдау.
+* `devprojex tree .` — жоба ағашын терминалға басып шығару.
 * `devprojex export context . --format markdown -o ../devprojex-context.md` — ЖИ үшін дайын контексті бастапқы жобадан тыс сақтау.
 * `devprojex export project . --as folder -o ../devprojex-submission` — тиімді жоба ағашын нақты папкаға экспорттау.
 * `devprojex export project . --as zip -o ../devprojex-submission.zip` — тиімді жоба ағашын ZIP архивіне экспорттау.
+* `devprojex export context https://github.com/owner/repo -o -` — қашықтағы репозиторийді қолмен клондамай орау.
 * `devprojex analyze . --git-mode tracked --exclude smart-ignore` — Git бақылайтын файлдарды Smart Ignore арқылы талдау.
 
 Ерекшеліктер:
@@ -102,6 +104,9 @@ DevProjex интерактивті терминал жұмыс кеңістіг�
 * `--git-mode` Git сүзгісін өшіруді, `.gitignore` немесе тек Git бақылайтын файлдарды таңдайды;
 * `--exclude` қалыпты ерекшеліктерді Git сүзгісінен бөлек басқарады;
 * талдау және экспорт командалары детерминирленген және графикалық интерфейсті ашпайды;
+* `tui`, `open`, `analyze` және екі `export` командасы Git-репозиторий URL-ін де қабылдайды; клон басқарылатын кэшке түседі (`devprojex cache`);
+* командалардың құжатталған алиастары мен қысқа жалаушалары бар — мысалы `export ctx`, `-f`, `-n`; оларды `devprojex help` көрсетеді;
+* `analyze --findings` бүркемелеу табылымдарын мәндерінсіз тізімдейді, ал `--fail-on-findings` CI үшін нөл емес шығу кодын қайтарады;
 * команда жоба файлдарын өзгертпейді — DevProjex оқу режимінде жұмыс істейді.
 
 Егер `devprojex` командасы жұмыс істемесе, DevProjex ішінде ашыңыз:

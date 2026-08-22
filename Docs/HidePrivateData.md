@@ -278,6 +278,8 @@ This phase does not attempt to detect:
 * names, street addresses, government identifiers, or arbitrary free-form personal text;
 * values assembled dynamically, encrypted, encoded, or obfuscated.
 
-Use `--hide-private-data` with `analyze`, `export context`, and `export project`. An explicit
-`--hide-private-data false` overrides a saved portable profile. The option is not exposed in
-the Terminal Workspace during this phase.
+Use `--hide-private-data` with `analyze`, `open`, `export context`, and `export project`. An
+explicit `--hide-private-data false` overrides a saved portable profile. The option is not
+exposed in the interactive Terminal Workspace during this phase. `analyze --findings` lists
+private-data findings by rule id, `private-data` category, relative path, and one-based source
+line — never the detected value.

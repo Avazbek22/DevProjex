@@ -91,9 +91,11 @@ Exemplos:
 * `devprojex` — abre o espaço de trabalho interativo do terminal.
 * `devprojex open . --preview` — abre a pasta atual na pré-visualização do Desktop.
 * `devprojex analyze . --format json` — analisa o projeto atual como JSON.
+* `devprojex tree .` — imprime a árvore do projeto no terminal.
 * `devprojex export context . --format markdown -o ../devprojex-context.md` — guarda contexto pronto para IA fora do projeto de origem.
 * `devprojex export project . --as folder -o ../devprojex-submission` — exporta a árvore efetiva para uma pasta exata.
 * `devprojex export project . --as zip -o ../devprojex-submission.zip` — exporta a árvore efetiva para um arquivo ZIP.
+* `devprojex export context https://github.com/owner/repo -o -` — empacota um repositório remoto sem o clonar manualmente.
 * `devprojex analyze . --git-mode tracked --exclude smart-ignore` — analisa ficheiros seguidos pelo Git com Smart Ignore.
 
 Notas:
@@ -102,6 +104,9 @@ Notas:
 * `--git-mode` seleciona sem filtragem Git, `.gitignore` ou apenas ficheiros seguidos pelo Git;
 * `--exclude` controla as exclusões comuns separadamente da filtragem Git;
 * os comandos de análise e exportação são determinísticos e não abrem a interface gráfica;
+* `tui`, `open`, `analyze` e os dois comandos `export` também aceitam o URL de um repositório Git; o clone vai para uma cache gerida (`devprojex cache`);
+* os comandos têm aliases e formas curtas documentados, por exemplo `export ctx`, `-f`, `-n`; `devprojex help` mostra-os;
+* `analyze --findings` lista as deteções de ocultação sem os seus valores, e `--fail-on-findings` devolve um código de saída diferente de zero para CI;
 * o comando não modifica os ficheiros do projeto – o DevProjex funciona em modo de leitura apenas.
 
 Se o comando `devprojex` não funcionar, abra no DevProjex:

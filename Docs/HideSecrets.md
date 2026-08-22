@@ -204,7 +204,13 @@ Use the dedicated additive option:
 ```shell
 devprojex export context . --hide-secrets --format markdown -o ../context.md
 devprojex export project . --hide-secrets --as zip -o ../project-redacted.zip --dry-run
+devprojex analyze . --hide-secrets --findings --fail-on-findings
 ```
+
+`analyze --findings` lists the effective findings as rule id, category, relative
+path, and one-based source line — never the detected value — and
+`--fail-on-findings` returns a policy exit code when any effective finding
+exists, so a pipeline can gate on redaction before exporting.
 
 `--hide-secrets` does not replace the `--exclude` collection. The v5 token
 `--exclude hide-secrets` remains accepted for compatibility, but is hidden from

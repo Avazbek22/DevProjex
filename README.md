@@ -78,7 +78,6 @@ Works with any language, repository, or project structure.
 * **Strip comments** — removes comments and documentation comments across 20 language packs without modifying source files
 * **Strip blank lines** — removes whitespace-only source lines across the same 20 syntax-aware language packs while preserving multiline literals and markup text
 * File tree with checkboxes, search, and name filters
-* Tree context menu — reveal in the system file manager, copy full or relative paths, copy a file's transformed contents, select only one item, expand or collapse a branch
 * Two Git-aware modes: follow `.gitignore`, or show only tracked files
 
 **Preview and export**
@@ -98,6 +97,7 @@ Works with any language, repository, or project structure.
 **Interface**
 * Light, dark, and system themes, with transparency and blur where supported
 * Platform-native keyboard shortcuts — ⌘-based on macOS, Ctrl-based on Windows and Linux
+* Tree context menu — reveal in the system file manager, copy full or relative paths, copy a file's transformed contents, select only one item, expand or collapse a branch
 * Localization in 11 languages
 * Stays smooth even on very large folders
 
@@ -138,18 +138,23 @@ DevProjex isn't only a desktop context builder. The same app runs from the termi
 ```bash
 devprojex
 devprojex open . --preview
+devprojex tree .
 devprojex analyze . --format json
+devprojex analyze . --hide-secrets --hide-private-data --findings --fail-on-findings
 devprojex export context . --format markdown -o ../devprojex-context.md
-devprojex export context . --hide-secrets --format markdown -o ../devprojex-redacted.md
-devprojex export context . --hide-private-data --format markdown -o ../devprojex-private.md
-devprojex export project . --as folder -o ../devprojex-submission
-devprojex export project . --as zip -o ../devprojex-submission.zip
+devprojex export context https://github.com/owner/repo -o -
+git diff --name-only | devprojex export context . --select-from - -o -
+devprojex export project . --as zip --hide-secrets -o ../devprojex-submission.zip
 devprojex analyze . --git-mode tracked --exclude smart-ignore
 ```
 
 ### What the CLI adds
 
 * Scriptable exports for CI pipelines — JSON reports, stdout output, deterministic files
+* Git repository URLs as project sources — analyze, export, or open a repository straight from its URL through a managed clone cache (`devprojex cache`, `devprojex recent`)
+* A redaction pre-flight for CI — `--findings` lists rule, category, file, and source line (never the values), and `--fail-on-findings` fails the pipeline when findings exist
+* Composable selection — pipe a file list from `git diff` or any tool into `--select-from -`
+* Documented aliases and short flags (`export ctx`, `export proj`, `-f`, `-n`, `-q`) plus `devprojex help <command>` and shell completion for bash, zsh, fish, and PowerShell
 * A keyboard-first Terminal Workspace for interactive work, no desktop app needed
 * A searchable Action Palette to find any workflow fast
 * The same Git filtering, exclusions, and profiles as the desktop app

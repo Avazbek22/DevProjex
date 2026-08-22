@@ -91,9 +91,11 @@ DevProjex предоставляет интерактивное терминал
 * `devprojex` — открыть интерактивное терминальное рабочее пространство.
 * `devprojex open . --preview` — открыть текущую папку в режиме превью Desktop.
 * `devprojex analyze . --format json` — проанализировать текущий проект в формате JSON.
+* `devprojex tree .` — напечатать дерево проекта в терминал.
 * `devprojex export context . --format markdown -o ../devprojex-context.md` — сохранить контекст для ИИ вне исходного проекта.
 * `devprojex export project . --as folder -o ../devprojex-submission` — экспортировать эффективное дерево проекта точно в указанную папку.
 * `devprojex export project . --as zip -o ../devprojex-submission.zip` — экспортировать эффективное дерево проекта в ZIP-архив.
+* `devprojex export context https://github.com/owner/repo -o -` — упаковать удалённый репозиторий без ручного клонирования.
 * `devprojex analyze . --git-mode tracked --exclude smart-ignore` — проанализировать отслеживаемые Git-файлы со Smart Ignore.
 
 Особенности:
@@ -102,6 +104,9 @@ DevProjex предоставляет интерактивное терминал
 * `--git-mode` выбирает отсутствие Git-фильтрации, `.gitignore` или только отслеживаемые Git-файлы;
 * `--exclude` управляет обычными исключениями отдельно от Git-фильтрации;
 * команды анализа и экспорта детерминированы и не открывают графический интерфейс;
+* `tui`, `open`, `analyze` и обе команды `export` принимают также URL Git-репозитория; клон попадает в управляемый кэш (`devprojex cache`);
+* у команд есть задокументированные алиасы и короткие флаги — например `export ctx`, `-f`, `-n`; их показывает `devprojex help`;
+* `analyze --findings` перечисляет находки маскировки без их значений, а `--fail-on-findings` возвращает ненулевой код выхода для CI;
 * команда не изменяет файлы проекта — DevProjex работает в режиме чтения.
 
 Если команда `devprojex` не работает, откройте в DevProjex:
