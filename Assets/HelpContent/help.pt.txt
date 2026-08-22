@@ -14,6 +14,17 @@ Teclas de atalho:
 * {mod}E – expandir tudo
 * {collapseAll} – recolhe tudo (a raiz permanece expandida)
 
+### Menu de contexto
+Clique com o botão direito em um nó — ou {shift}F10 / tecla Menu no nó em foco:
+* Mostrar no Explorador de Arquivos / Mostrar no Finder / Abrir no gerenciador de arquivos — revela o item no gerenciador de arquivos do sistema; o rótulo depende da plataforma.
+* Copiar caminho completo — o caminho absoluto do item.
+* Copiar caminho relativo — o caminho a partir da raiz do projeto, começando pelo nome da pasta raiz, por exemplo `project/src/File.cs`.
+* Copiar conteúdo — para arquivos: copia o conteúdo com as transformações aplicadas, exatamente como copiar e exportar produzem.
+* Selecionar apenas este item — marca somente este nó e limpa o restante da seleção; aparece apenas enquanto outro item também está marcado.
+* Expandir ramificação / Recolher ramificação — para pastas.
+
+Se o caminho não existir mais no disco, abrir o item no gerenciador de arquivos ou copiar seu conteúdo mostra uma mensagem de erro; copiar os caminhos continua funcionando.
+
 ## 3) Arquivo
 * Abrir pasta… — abre a pasta raiz ({mod}O)
 * Nova janela – abra uma nova instância independente do DevProjex
@@ -146,6 +157,7 @@ Teclas de atalho: {mod}{shift}C e {mod}{alt}C.
 ### Copiar conteúdo
 Copia o conteúdo do arquivo:
 * se os arquivos forem verificados — apenas esses; caso contrário — todos os arquivos do projeto;
+* cada arquivo é precedido por um cabeçalho com seu caminho local completo (para projetos Git Clone — o caminho web do repositório);
 * arquivos não textuais são ignorados (incluindo binários);
 * para arquivos de texto vazios, o caminho e a linha `[No Content, 0 bytes]` são gerados;
 * para arquivos contendo apenas espaços em branco/quebras de linha, o caminho e a linha `[Whitespace, N bytes]` são gerados.
@@ -208,7 +220,8 @@ As mesmas regras de cópia e exportação são aplicadas:
 
 Além disso:
 * os arquivos na visualização são separados por linhas horizontais;
-* durante a rolagem, o caminho do arquivo atual é fixado na parte superior;
+* durante a rolagem, o caminho do arquivo atual é fixado na parte superior; clicar no caminho fixado rola até o início desse arquivo;
+* a barra de rolagem da visualização marca as correspondências de pesquisa e as linhas com valores detectados; clicar em uma marca salta para a linha dela; um valor mantido continua marcado, e os caminhos mascarados dos cabeçalhos geram uma única marca na primeira linha;
 * a árvore e o zoom de visualização podem funcionar de forma independente.
 * no modo de visualização, você pode copiar o resultado atual completo ou o bloco de arquivo visível atual sem abrir o menu Copiar.
 
@@ -260,6 +273,7 @@ Abre a barra de pesquisa, destaca as correspondências e permite a navegação.
 * Esc – fechar
 
 A pesquisa expande automaticamente apenas as ramificações necessárias; limpar a consulta recolhe a árvore (exceto raiz).
+As linhas com correspondências também são marcadas na barra de rolagem da árvore; clicar em uma marca salta para essa correspondência.
 Para conjuntos de correspondências muito grandes, o aplicativo pode limitar a expansão automática e o realce global para manter a interface de usuário responsiva.
 Quando a barra de pesquisa é fechada, a consulta é limpa após a conclusão da animação de fechamento.
 
@@ -281,6 +295,7 @@ Restrições:
 ## 11) Opções (painel de configurações)
 Disponível à direita:
 * Aplicar configurações
+* Processamento de conteúdo
 * Exclusões
 * Extensões
 
@@ -295,6 +310,14 @@ Cada lista possui uma alternância para Todos.
 Nota sobre "Extensões":
 * esta lista mostra apenas arquivos que possuem uma extensão;
 * arquivos sem extensão não são adicionados a esta lista e são controlados por uma opção separada em "Exclusões".
+
+Processamento de conteúdo:
+* esta seção transforma o conteúdo dos arquivos de texto selecionados sem mudar a árvore;
+* “Ocultar segredos” e “Ocultar dados privados” substituem os valores detectados (seções 12.3 e 12.4);
+* “Comprimir código” mantém as declarações e encurta as implementações nomeadas em 14 linguagens;
+* “Remover comentários” retira os comentários e os comentários de documentação em 20 pacotes de linguagens;
+* “Remover linhas em branco” retira as linhas só de espaços nos mesmos pacotes, preservando literais multilinha;
+* as alterações entram em vigor após “Aplicar configurações”.
 
 {mod}P — mostra/oculta o painel.
 
@@ -359,16 +382,18 @@ Alguns armazenamentos de dependências e diretórios de serviços podem ser reco
 A descoberta do escopo do projeto é limitada, portanto, carregar uma pasta de usuário grande não se torna uma análise completa e repetida de cada diretório. Estruturas regulares usam descoberta superficial, enquanto monorepos reconhecidos são pesquisados ​​mais profundamente. Depois que um escopo é encontrado, o Smart Ignore se aplica a toda a sua subárvore sem limite de profundidade.
 
 ### 12.3 Ocultar segredos
-“Ocultar segredos” fica desativado por padrão. A opção verifica apenas o texto selecionado e substitui cada valor detectado no próprio local, mantendo o arquivo e o código ao redor. Enquanto estiver desativada, nenhuma verificação é executada e nenhum contador é exibido. Depois da análise da seleção atual, o rótulo mostra quantos valores continuam ocultos.
+“Ocultar segredos” fica desativado por padrão. A opção verifica apenas o texto selecionado e substitui cada valor detectado no próprio local, mantendo o arquivo e o código ao redor. Enquanto estiver desativada, nenhuma verificação é executada e nenhum contador é exibido. Depois da análise da seleção atual, o rótulo mostra o número de valores detectados; se as decisões de manter deixarem menos valores ocultos, ele mostra os dois números — detectados/ocultos — e o indicador ? da linha os informa em texto.
 
-As ocorrências são destacadas na visualização. Clique em uma delas para manter somente aquela ocorrência sem alterações. No Terminal Workspace, `[` e `]` percorrem as ocorrências e `Enter` ou `Space` alternam a ocorrência ativa. A decisão vale durante a sessão para visualização, área de transferência, exportação de contexto, pasta e ZIP; ela não é salva no perfil do projeto.
+As ocorrências são destacadas na visualização. Clique em uma delas para manter somente aquela ocorrência sem alterações; {alt}↓ / {alt}↑ percorrem os valores detectados e Enter alterna o ativo. No Terminal Workspace, `[` e `]` percorrem as ocorrências e `Enter` ou `Space` alternam a ocorrência ativa. A decisão vale durante a sessão para visualização, área de transferência, exportação de contexto, pasta e ZIP; ela não é salva no perfil do projeto.
+
+O menu de contexto da visualização amplia essas decisões. Um clique com o botão direito em uma ocorrência detectada permite manter — ou ocultar de novo — em uma única ação todas as ocorrências da sua regra ou todas as ocorrências detectadas no mesmo arquivo. Um clique com o botão direito em um valor selecionado dentro do conteúdo do arquivo adiciona uma marcação manual: “Ocultar … aqui” oculta apenas aquela ocorrência durante a sessão, “Sempre ocultar …” cria uma marcação persistente para todas as ocorrências do valor, e “Ocultar … como dado privado” cria uma marcação persistente controlada por “Ocultar dados privados”. “Remover marcação” aparece sobre uma marcação manual e a exclui; um valor que o detector ainda encontra permanece oculto. O valor manual é uma única linha de 8 a 512 caracteres selecionada dentro do conteúdo do arquivo. Criar uma marcação ativa automaticamente a opção correspondente. As marcações persistentes armazenam apenas uma identidade do valor com chave e sua classe, nunca o texto original.
 
 Uma cópia em pasta ou ZIP também altera o texto correspondente e pode deixar de compilar ou executar. Arquivos binários não são verificados e são copiados sem alterações. Um arquivo de texto selecionado com mais de 16 MiB ou uma falha de detecção interrompe a operação em vez de exportar texto não verificado.
 
 O contador informa apenas correspondências com as regras. Zero não significa que o projeto é seguro. Na CLI, use `--hide-secrets`; os detalhes estão em `Docs/HideSecrets.md`.
 
 ### 12.4 Ocultar dados privados
-“Ocultar dados privados” fica desativado por padrão. A opção detecta endereços de e-mail, endereços IP globais, nomes de usuários locais em caminhos, endereços MAC e telefones internacionais nos arquivos de texto selecionados. Os resultados usam as mesmas decisões da visualização e o mesmo fluxo de saída de Ocultar segredos.
+“Ocultar dados privados” fica desativado por padrão. A opção detecta endereços de e-mail, endereços IP globais, nomes de usuários locais em caminhos, endereços MAC e telefones internacionais nos arquivos de texto selecionados. Os resultados usam as mesmas decisões da visualização e o mesmo fluxo de saída de Ocultar segredos; as marcações manuais criadas com “Ocultar … como dado privado” pertencem a essa classe e seguem essa opção (seção 12.3). Os nomes de usuários locais nos cabeçalhos de caminho gerados e na raiz da árvore são mascarados como uma única descoberta compartilhada: o contador a conta como um valor, o indicador ? informa se está oculta ou visível, e um clique alterna todos os caminhos mascarados de uma vez.
 
 Faixas e hosts de documentação, usuários comuns de CI, resolvedores DNS públicos conhecidos e telefones fictícios documentados permanecem visíveis. Zero correspondências não garante privacidade. A CLI usa `--hide-private-data`; as regras completas e os limites da primeira fase estão em `Docs/HidePrivateData.md`.
 
@@ -448,7 +473,7 @@ O resultado depende de:
 * filtro ativo
 * nós de árvore verificados (para operações baseadas em seleção)
 
-Se o acesso for negado, o nó será marcado como Acesso negado.
+Se o acesso for negado, o nó mantém o nome e o ícone habituais e recebe o sufixo "[acesso negado]".
 
 ### 13.1 O que os contadores da barra de status mostram
 A barra de status possui dois blocos:

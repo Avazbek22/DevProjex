@@ -14,6 +14,17 @@ Hotkeys:
 * {mod}E — expand all
 * {collapseAll} — collapse all (root stays expanded)
 
+### Context menu
+Right-click a node, or press {shift}F10 or the Menu key on the focused node:
+* Show in File Explorer / Reveal in Finder / Open in file manager — reveals the item in the system file manager; the label matches the current platform.
+* Copy full path — the absolute path of the item.
+* Copy relative path — the path from the project root, starting with the root folder name, for example `project/src/File.cs`.
+* Copy contents — for files: copies the content with the applied content transformations, exactly as copy and export produce it.
+* Select only this — checks only this node and clears the rest; shown only while another item is also checked.
+* Expand branch / Collapse branch — for folders.
+
+If the path no longer exists on disk, opening the item in the file manager or copying its contents shows an error message; path copying still works.
+
 ## 3) File
 * Open folder… — open root folder ({mod}O)
 * New window — open a new independent DevProjex instance
@@ -146,6 +157,7 @@ Hotkeys: {mod}{shift}C and {mod}{alt}C.
 ### Copy content
 Copies file contents:
 * if files are checked — only those; otherwise — all project files;
+* each file is preceded by a header with its full local path (for Git Clone projects — the repository web path);
 * non-text files are ignored (including binary);
 * for empty text files, the path and the line `[No Content, 0 bytes]` are output;
 * for files containing only whitespace/line breaks, the path and the line `[Whitespace, N bytes]` are output.
@@ -208,7 +220,8 @@ The same rules as copy and export are applied:
 
 Additionally:
 * files in preview are separated by horizontal lines;
-* while scrolling, the path of the current file is pinned at the top;
+* while scrolling, the path of the current file is pinned at the top; clicking the pinned path scrolls back to the beginning of that file;
+* the preview scrollbar marks search matches and lines with redaction findings; clicking a marker jumps to its line; a finding kept as-is stays marked, and masked path headers add one marker at their first line;
 * tree and preview zoom can live independently.
 * in Preview mode, you can copy either the full current result or the current visible file block without opening the Copy menu.
 
@@ -260,6 +273,7 @@ Opens the search bar, highlights matches, and allows navigation.
 * Esc — close
 
 Search auto-expands only the needed branches; clearing the query collapses the tree (except root).
+Match lines are also marked on the tree scrollbar; clicking a marker jumps to that match.
 For very large match sets, the app may limit auto-expand and global highlighting to keep the UI responsive.
 When the search bar is closed, the query is cleared after the close animation completes.
 
@@ -281,6 +295,7 @@ Constraints:
 ## 11) Options (settings panel)
 Available on the right:
 * Apply settings
+* Content processing
 * Exclusions
 * Extensions
 
@@ -295,6 +310,14 @@ Each list has an All toggle.
 Note about "Extensions":
 * this list shows only files that have an extension;
 * files without an extension are not added to this list and are controlled by a separate option in "Exclusions".
+
+Content processing:
+* transforms the content of selected text files without changing the tree;
+* Hide secrets and Hide private data replace detected values (sections 12.3 and 12.4);
+* Compress code keeps declarations while shortening named implementations across 14 languages;
+* Strip comments removes comments and documentation comments across 20 language packs;
+* Strip blank lines removes whitespace-only lines in the same packs while preserving multiline literals;
+* changes take effect after "Apply settings".
 
 {mod}P — show/hide the panel.
 
@@ -359,16 +382,18 @@ Some dependency stores and service directories can be recognized by their charac
 Project scope discovery is bounded so loading a large user folder does not become a full repeated analysis of every directory. Regular structures use shallow discovery, while recognized monorepos are searched more deeply. After a scope is found, Smart Ignore applies to its entire subtree without a depth limit.
 
 ### 12.3 Hide Secrets
-"Hide Secrets" is off by default. It scans only selected text content and replaces each detected value in place, keeping the file and its surrounding code. While the option is off, no scan runs and no count is shown. After the current selection is scanned, the label shows how many values remain redacted.
+"Hide Secrets" is off by default. It scans only selected text content and replaces each detected value in place, keeping the file and its surrounding code. While the option is off, no scan runs and no count is shown. After the current selection is scanned, the label shows the number of detected values; if keep-as-is decisions leave fewer values hidden, it shows detected/hidden, and the row's ? indicator reports both counts.
 
-Redacted spans are highlighted in Preview. Click one to keep only that occurrence as-is. In Terminal Workspace, use `[` and `]` to move between occurrences and `Enter` or `Space` to toggle the active one. The decision applies to Preview, clipboard, context export, folder copy, and ZIP for the current session; it is not saved in the project profile.
+Redacted spans are highlighted in Preview. Click one to keep only that occurrence as-is; {alt}↓ / {alt}↑ move between findings and Enter toggles the active one. In Terminal Workspace, use `[` and `]` to move between occurrences and `Enter` or `Space` to toggle the active one. The decision applies to Preview, clipboard, context export, folder copy, and ZIP for the current session; it is not saved in the project profile.
+
+The Preview context menu extends these decisions. Right-click a detected occurrence to keep — or hide again — all occurrences of its rule or all detected occurrences in the same file in one action. Right-click a selected value inside file content to mark it manually: "Hide … here" hides only that occurrence for the session, "Always hide …" creates a persistent mark for every occurrence of the value, and "Hide … as private data" creates a persistent mark controlled by Hide private data. "Remove mark" appears on a manual mark and deletes it; a value still matched by the detector stays hidden. A manual value must be a single line of 8 to 512 characters selected inside file content. Creating a mark enables the corresponding option automatically. Persistent marks store only a keyed value identity and its class, never the original text.
 
 A folder or ZIP copy also changes matching text and may no longer build or run. Binary files are copied unchanged and are not scanned. A selected text file above 16 MiB or a detection failure stops the operation instead of exporting uninspected text.
 
 The count reports rule matches only. Zero does not mean that the project is safe. CLI uses `--hide-secrets`; technical details and limits are in `Docs/HideSecrets.md`.
 
 ### 12.4 Hide private data
-"Hide private data" is off by default. It detects email addresses, global IP addresses, local usernames in paths, MAC addresses, and international phone numbers in selected text files. Findings use the same Preview decisions and the same output pipeline as Hide Secrets.
+"Hide private data" is off by default. It detects email addresses, global IP addresses, local usernames in paths, MAC addresses, and international phone numbers in selected text files. Findings use the same Preview decisions and the same output pipeline as Hide Secrets; manual marks created with "Hide … as private data" belong to this class and follow this switch (section 12.3). Local usernames in generated path headers and the tree root are masked as one shared finding: the counter includes it as one value, the ? indicator reports whether it is hidden or shown, and one click toggles every masked path.
 
 Documentation ranges and hosts, common CI usernames, well-known public DNS resolvers, and documented fictional phone ranges stay visible. Zero matches is not a privacy guarantee. CLI uses `--hide-private-data`; the complete rules and phase-one limits are in `Docs/HidePrivateData.md`.
 
@@ -446,7 +471,7 @@ Result depends on:
 * active Filter
 * checked tree nodes (for selection-based operations)
 
-If access is denied, the node is marked Access denied.
+If access is denied, the node keeps its usual name and icon and gets an "[access denied]" suffix.
 
 ### 13.1 What status bar counters show
 The status bar has two blocks:

@@ -182,14 +182,20 @@ Hide Secrets has its own content-transformation section; it is not a path filter
 and never changes the tree, Smart Ignore, Git mode, roots, or extensions.
 
 No count is shown before a completed scan. During inspection the existing status
-surface reports scanning. After completion, a positive number is the count of
-values still redacted after keep-as-is decisions. A zero-result label explicitly
+surface reports scanning. After completion, the label shows the number of
+detected values; when keep-as-is decisions leave fewer values hidden, it shows
+the detected and still-hidden counts side by side, and the row's status
+indicator reports both numbers in text. A zero-result label explicitly
 says that no values were detected; it does not claim that the selection is safe.
 `analyze` reports matched and redacted counts under the same contract.
 
-In Desktop Preview, click a highlighted occurrence to toggle keep-as-is. In
-Terminal Workspace, `[` and `]` navigate findings and `Enter` or `Space` toggles
-the active occurrence.
+In Desktop Preview, click a highlighted occurrence to toggle keep-as-is, or move
+between findings with `Alt`+`↓` / `Alt`+`↑` (`⌥` on macOS) and toggle the active
+one with `Enter`. The Preview scrollbar marks every line with a finding and
+scrolls to the line when a marker is clicked; a marker does not disappear when
+its finding is kept as-is. In Terminal Workspace,
+`[` and `]` navigate findings and `Enter` or `Space` toggles the active
+occurrence.
 
 ## CLI
 

@@ -14,6 +14,17 @@ Teclas de acceso rápido:
 * {mod}E: expandir todo
 * {collapseAll}: contrae todo (la raíz permanece expandida)
 
+### Menú contextual
+Clic derecho sobre un nodo — o {shift}F10 / tecla Menú sobre el nodo enfocado:
+* Mostrar en el Explorador de archivos / Mostrar en el Finder / Abrir en el gestor de archivos — muestra el elemento en el gestor de archivos del sistema; la etiqueta depende de la plataforma.
+* Copiar ruta completa — la ruta absoluta del elemento.
+* Copiar ruta relativa — la ruta desde la raíz del proyecto, que empieza con el nombre de la carpeta raíz, por ejemplo `project/src/File.cs`.
+* Copiar contenido — para archivos: copia el contenido con las transformaciones aplicadas, exactamente como lo producen copiar y exportar.
+* Seleccionar solo esto — marca solo este nodo y limpia el resto de la selección; aparece solo mientras otro elemento también está marcado.
+* Expandir rama / Contraer rama — para carpetas.
+
+Si la ruta ya no existe en el disco, abrir el elemento en el gestor de archivos o copiar su contenido muestra un mensaje de error; copiar las rutas sigue funcionando.
+
 ## 3) Archivo
 * Abrir carpeta… — abrir carpeta raíz ({mod}O)
 * Nueva ventana: abre una nueva instancia independiente de DevProjex
@@ -146,6 +157,7 @@ Teclas de acceso rápido: {mod}{shift}C y {mod}{alt}C.
 ### Copiar contenido
 Copia el contenido del archivo:
 * si se comprueban los archivos, sólo esos; en caso contrario, todos los archivos del proyecto;
+* cada archivo va precedido de un encabezado con su ruta local completa (en los proyectos Git Clone — la ruta web del repositorio);
 * los archivos que no son de texto se ignoran (incluidos los binarios);
 * para archivos de texto vacíos, se muestran la ruta y la línea `[No Content, 0 bytes]`;
 * para archivos que contienen solo espacios en blanco/saltos de línea, se generan la ruta y la línea `[Whitespace, N bytes]`.
@@ -208,7 +220,8 @@ Se aplican las mismas reglas que copiar y exportar:
 
 Además:
 * los archivos en vista previa están separados por líneas horizontales;
-* mientras se desplaza, la ruta del archivo actual se fija en la parte superior;
+* mientras se desplaza, la ruta del archivo actual se fija en la parte superior; hacer clic en la ruta fijada desplaza al inicio de ese archivo;
+* la barra de desplazamiento de la vista previa marca las coincidencias de búsqueda y las líneas con valores detectados; hacer clic en una marca salta a su línea; un valor conservado sigue marcado, y las rutas enmascaradas de los encabezados dan una sola marca en su primera línea;
 * El árbol y el zoom de vista previa pueden vivir de forma independiente.
 * en el modo Vista previa, puede copiar el resultado actual completo o el bloque de archivo visible actual sin abrir el menú Copiar.
 
@@ -260,6 +273,7 @@ Abre la barra de búsqueda, resalta coincidencias y permite la navegación.
 * Esc-cerrar
 
 La búsqueda expande automáticamente solo las ramas necesarias; borrar la consulta colapsa el árbol (excepto la raíz).
+Las líneas con coincidencias también se marcan en la barra de desplazamiento del árbol; hacer clic en una marca salta a esa coincidencia.
 Para conjuntos de coincidencias muy grandes, la aplicación puede limitar la expansión automática y el resaltado global para mantener la interfaz de usuario receptiva.
 Cuando se cierra la barra de búsqueda, la consulta se borra una vez que se completa la animación de cierre.
 
@@ -281,6 +295,7 @@ Restricciones:
 ## 11) Opciones (panel de configuración)
 Disponible a la derecha:
 * Aplicar configuración
+* Procesamiento de contenido
 * Exclusiones
 * Extensiones
 
@@ -295,6 +310,14 @@ Cada lista tiene un conmutador Todo.
 Nota sobre las "Extensiones":
 * esta lista muestra sólo archivos que tienen una extensión;
 * Los archivos sin extensión no se agregan a esta lista y se controlan mediante una opción separada en "Exclusiones".
+
+Procesamiento de contenido:
+* esta sección transforma el contenido de los archivos de texto seleccionados sin cambiar el árbol;
+* «Ocultar secretos» y «Ocultar datos privados» sustituyen los valores detectados (secciones 12.3 y 12.4);
+* «Comprimir código» conserva las declaraciones y acorta las implementaciones con nombre en 14 lenguajes;
+* «Eliminar comentarios» quita los comentarios y los comentarios de documentación en 20 paquetes de lenguajes;
+* «Eliminar líneas en blanco» quita las líneas de solo espacios en los mismos paquetes preservando los literales multilínea;
+* los cambios surten efecto tras «Aplicar configuración».
 
 {mod}P: muestra/oculta el panel.
 
@@ -359,16 +382,18 @@ Algunos almacenes de dependencias y directorios de servicios pueden reconocerse 
 El descubrimiento del alcance del proyecto está limitado, por lo que cargar una carpeta de usuario grande no se convierte en un análisis completo y repetido de cada directorio. Las estructuras regulares utilizan un descubrimiento superficial, mientras que los monorepos reconocidos se buscan más profundamente. Una vez que se encuentra un alcance, Smart Ignore se aplica a todo su subárbol sin límite de profundidad.
 
 ### 12.3 Ocultar secretos
-«Ocultar secretos» está desactivado de forma predeterminada. Solo revisa el texto seleccionado y sustituye cada valor detectado en su lugar, conservando el archivo y el código que lo rodea. Mientras está desactivado no se ejecuta ningún análisis ni se muestra un contador. Tras revisar la selección actual, la etiqueta indica cuántos valores siguen ocultos.
+«Ocultar secretos» está desactivado de forma predeterminada. Solo revisa el texto seleccionado y sustituye cada valor detectado en su lugar, conservando el archivo y el código que lo rodea. Mientras está desactivado no se ejecuta ningún análisis ni se muestra un contador. Tras revisar la selección actual, la etiqueta indica el número de valores detectados; si las decisiones de conservar dejan menos valores ocultos, muestra ambos números — detectados/ocultos — y el indicador ? de la fila los informa en texto.
 
-Las coincidencias se resaltan en la vista previa. Haga clic en una para conservar únicamente esa aparición sin cambios. En Terminal Workspace, `[` y `]` recorren las apariciones y `Enter` o `Space` alternan la activa. La decisión se aplica durante la sesión a la vista previa, el portapapeles, la exportación de contexto, la carpeta y el ZIP; no se guarda en el perfil del proyecto.
+Las coincidencias se resaltan en la vista previa. Haga clic en una para conservar únicamente esa aparición sin cambios; {alt}↓ / {alt}↑ recorren los valores detectados y Enter alterna el activo. En Terminal Workspace, `[` y `]` recorren las apariciones y `Enter` o `Space` alternan la activa. La decisión se aplica durante la sesión a la vista previa, el portapapeles, la exportación de contexto, la carpeta y el ZIP; no se guarda en el perfil del proyecto.
+
+El menú contextual de la vista previa amplía estas decisiones. Un clic derecho sobre una aparición detectada permite conservar — o volver a ocultar — en una sola acción todas las apariciones de su regla o todas las apariciones detectadas en el mismo archivo. Un clic derecho sobre un valor seleccionado dentro del contenido del archivo añade una marca manual: «Ocultar … aquí» oculta solo esa aparición durante la sesión, «Ocultar siempre …» crea una marca persistente para todas las apariciones del valor, y «Ocultar … como dato privado» crea una marca persistente controlada por «Ocultar datos privados». «Quitar marca» aparece sobre una marca manual y la elimina; un valor que el detector sigue encontrando permanece oculto. El valor manual es una sola línea de 8 a 512 caracteres seleccionada dentro del contenido del archivo. Crear una marca activa automáticamente la opción correspondiente. Las marcas persistentes almacenan solo una identidad del valor con clave y su clase, nunca el texto original.
 
 Una copia en carpeta o ZIP también modifica el texto coincidente y podría dejar de compilarse o ejecutarse. Los archivos binarios no se analizan y se copian sin cambios. Un archivo de texto seleccionado de más de 16 MiB o un fallo de detección detiene la operación en lugar de exportar texto sin revisar.
 
 El contador solo informa de coincidencias con las reglas. Cero no significa que el proyecto sea seguro. En la CLI se usa `--hide-secrets`; los detalles están en `Docs/HideSecrets.md`.
 
 ### 12.4 Ocultar datos privados
-«Ocultar datos privados» está desactivado de forma predeterminada. Detecta direcciones de correo, direcciones IP globales, nombres de usuario locales en rutas, direcciones MAC y teléfonos internacionales en los archivos de texto seleccionados. Los resultados usan las mismas decisiones de la vista previa y el mismo flujo de salida que Ocultar secretos.
+«Ocultar datos privados» está desactivado de forma predeterminada. Detecta direcciones de correo, direcciones IP globales, nombres de usuario locales en rutas, direcciones MAC y teléfonos internacionales en los archivos de texto seleccionados. Los resultados usan las mismas decisiones de la vista previa y el mismo flujo de salida que Ocultar secretos; las marcas manuales creadas con «Ocultar … como dato privado» pertenecen a esta clase y siguen esta opción (sección 12.3). Los nombres de usuario locales en los encabezados de ruta generados y en la raíz del árbol se enmascaran como un único hallazgo compartido: el contador lo cuenta como un valor, el indicador ? informa si está oculto o visible, y un clic alterna todas las rutas enmascaradas a la vez.
 
 Los rangos y hosts de documentación, los usuarios de CI habituales, los resolutores DNS públicos conocidos y los teléfonos ficticios documentados permanecen visibles. Cero coincidencias no garantiza la privacidad. La CLI usa `--hide-private-data`; las reglas completas y los límites de la primera fase están en `Docs/HidePrivateData.md`.
 
@@ -448,7 +473,7 @@ El resultado depende de:
 * Filtro activo
 * nodos de árbol marcados (para operaciones basadas en selección)
 
-Si se deniega el acceso, el nodo se marca como Acceso denegado.
+Si se deniega el acceso, el nodo conserva su nombre e icono habituales y recibe el sufijo «[acceso denegado]».
 
 ### 13.1 Qué muestran los contadores de la barra de estado
 La barra de estado tiene dos bloques:

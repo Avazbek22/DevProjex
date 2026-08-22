@@ -14,6 +14,17 @@ Raccourcis :
 * {mod}E — tout déplier
 * {collapseAll} — tout replier (la racine reste ouverte)
 
+### Menu contextuel
+Clic droit sur un nœud — ou {shift}F10 / touche Menu sur le nœud sélectionné :
+* Afficher dans l’Explorateur de fichiers / Afficher dans le Finder / Ouvrir dans le gestionnaire de fichiers — révèle l’élément dans le gestionnaire de fichiers du système ; le libellé dépend de la plateforme.
+* Copier le chemin complet — le chemin absolu de l’élément.
+* Copier le chemin relatif — le chemin depuis la racine du projet, commençant par le nom du dossier racine, par exemple `project/src/File.cs`.
+* Copier le contenu — pour les fichiers : copie le contenu avec les transformations appliquées, exactement comme la copie et l’export.
+* Sélectionner uniquement cet élément — coche uniquement ce nœud et efface le reste de la sélection ; n’apparaît que tant qu’un autre élément est aussi coché.
+* Développer la branche / Réduire la branche — pour les dossiers.
+
+Si le chemin n’existe plus sur le disque, l’ouverture dans le gestionnaire de fichiers et la copie du contenu affichent un message d’erreur ; la copie des chemins continue de fonctionner.
+
 ## 3) Fichier
 * Ouvrir le dossier… — ouvrir le dossier racine ({mod}O)
 * Nouvelle fenêtre — ouvrir une nouvelle instance indépendante de DevProjex
@@ -148,7 +159,8 @@ Copie le contenu des fichiers :
 * si des fichiers sont cochés — seuls ceux-ci ; sinon — tous les fichiers du projet ;
 * les fichiers non textuels sont ignorés (y compris les binaires) ;
 * pour les fichiers texte vides, le chemin et la ligne `[No Content, 0 bytes]` sont ajoutés ;
-* pour les fichiers ne contenant que des espaces/retours à la ligne, le chemin et la ligne `[Whitespace, N bytes]` sont ajoutés.
+* pour les fichiers ne contenant que des espaces/retours à la ligne, le chemin et la ligne `[Whitespace, N bytes]` sont ajoutés ;
+* chaque fichier est précédé d’un en-tête avec son chemin local complet (pour les projets Git Clone — le chemin web du dépôt).
 Raccourci : {mod}{alt}V.
 
 ### Copier l’arborescence + le contenu
@@ -208,7 +220,8 @@ Les mêmes règles que pour la copie et l’export sont appliquées :
 
 En plus :
 * les fichiers de l’aperçu sont séparés par des lignes horizontales ;
-* pendant le défilement, le chemin du fichier courant reste épinglé en haut ;
+* pendant le défilement, le chemin du fichier courant reste épinglé en haut ; un clic sur le chemin épinglé fait défiler jusqu’au début de ce fichier ;
+* la barre de défilement de l’aperçu marque les correspondances de recherche et les lignes avec des valeurs détectées ; un clic sur une marque saute à sa ligne ; une valeur conservée reste marquée, et les chemins masqués des en-têtes donnent une seule marque à leur première ligne ;
 * le zoom de l’arborescence et celui de l’aperçu peuvent vivre séparément.
 * en mode aperçu, vous pouvez copier soit le résultat complet actuel, soit le bloc du fichier actuellement visible sans passer par le menu « Copier ».
 
@@ -260,6 +273,7 @@ Ouvre la recherche, met en évidence les correspondances et permet la navigation
 * Esc — fermer
 
 La recherche n’ouvre que les branches nécessaires ; en effaçant la requête, l’arbre se replie (sauf la racine).
+Les lignes des correspondances sont aussi marquées sur la barre de défilement de l’arbre ; un clic sur une marque saute à cette correspondance.
 Pour un très grand nombre de correspondances, l’application peut limiter l’ouverture automatique et la mise en évidence globale afin de garder l’interface réactive.
 À la fermeture de la recherche, la requête est effacée après la fin de l’animation de fermeture.
 
@@ -281,6 +295,7 @@ Limitations :
 ## 11) Options
 À droite sont disponibles :
 * Appliquer
+* Traitement du contenu
 * Exclusions
 * Types de fichiers
 
@@ -295,6 +310,14 @@ Chaque liste a un bouton Tous.
 Remarque sur « Types de fichiers » :
 * cette liste affiche uniquement les fichiers avec extension ;
 * les fichiers sans extension ne sont pas ajoutés à cette liste et sont gérés par une option séparée dans « Exclusions ».
+
+Traitement du contenu :
+* cette section transforme le contenu des fichiers texte sélectionnés sans modifier l’arborescence ;
+* « Masquer les secrets » et « Masquer les données privées » remplacent les valeurs détectées (sections 12.3 et 12.4) ;
+* « Compresser le code » conserve les déclarations et raccourcit les implémentations nommées dans 14 langages ;
+* « Supprimer les commentaires » retire les commentaires et les commentaires de documentation dans 20 packs de langages ;
+* « Supprimer les lignes vides » retire les lignes d’espaces dans les mêmes packs en préservant les littéraux multilignes ;
+* les changements prennent effet après « Appliquer ».
 
 {mod}P — afficher/masquer le panneau.
 
@@ -331,16 +354,18 @@ Pour les noms ambigus comme `build`, `vendor`, `packages`, `cache`, `pkg` ou `Li
 La détection de nouvelles zones de projet est limitée afin d’éviter une analyse répétée de chaque dossier dans un grand répertoire utilisateur. La recherche reste peu profonde dans une structure normale et va plus loin dans un monorepo reconnu. Une fois la zone détectée, Smart Ignore s’applique à tout son sous-arbre sans limite de profondeur.
 
 ### 12.3 Masquer les secrets
-« Masquer les secrets » est désactivé par défaut. L’option analyse uniquement le texte sélectionné et remplace chaque valeur détectée sur place, sans retirer le fichier ni son contexte. Lorsqu’elle est désactivée, aucune analyse n’est lancée et aucun compteur n’apparaît. Après l’analyse de la sélection, le libellé indique le nombre de valeurs qui restent masquées.
+« Masquer les secrets » est désactivé par défaut. L’option analyse uniquement le texte sélectionné et remplace chaque valeur détectée sur place, sans retirer le fichier ni son contexte. Lorsqu’elle est désactivée, aucune analyse n’est lancée et aucun compteur n’apparaît. Après l’analyse de la sélection, le libellé indique le nombre de valeurs détectées ; si des décisions « conserver » laissent moins de valeurs masquées, il affiche les deux nombres — détectées/masquées — et l’indicateur ? de la ligne les précise en texte.
 
-Les correspondances sont mises en évidence dans l’aperçu. Cliquez sur l’une d’elles pour conserver uniquement cette occurrence. Dans Terminal Workspace, `[` et `]` parcourent les occurrences, et `Enter` ou `Space` basculent l’occurrence active. La décision s’applique pendant la session à l’aperçu, au presse-papiers, aux exports de contexte, au dossier et au ZIP ; elle n’est pas enregistrée dans le profil du projet.
+Les correspondances sont mises en évidence dans l’aperçu. Cliquez sur l’une d’elles pour conserver uniquement cette occurrence ; {alt}↓ / {alt}↑ parcourent les valeurs détectées et Enter bascule la valeur active. Dans Terminal Workspace, `[` et `]` parcourent les occurrences, et `Enter` ou `Space` basculent l’occurrence active. La décision s’applique pendant la session à l’aperçu, au presse-papiers, aux exports de contexte, au dossier et au ZIP ; elle n’est pas enregistrée dans le profil du projet.
+
+Le menu contextuel de l’aperçu étend ces décisions. Un clic droit sur une occurrence détectée permet de conserver — ou de masquer à nouveau — en une seule action toutes les occurrences de sa règle ou toutes les occurrences détectées dans le même fichier. Un clic droit sur une valeur sélectionnée dans le contenu d’un fichier ajoute un marquage manuel : « Masquer … ici » masque uniquement cette occurrence pour la session, « Toujours masquer … » crée un marquage persistant pour toutes les occurrences de la valeur, et « Masquer … comme donnée privée » crée un marquage persistant contrôlé par « Masquer les données privées ». « Supprimer le marquage » apparaît sur un marquage manuel et le supprime ; une valeur toujours reconnue par le détecteur reste masquée. La valeur manuelle est une seule ligne de 8 à 512 caractères sélectionnée dans le contenu du fichier. La création d’un marquage active automatiquement l’option correspondante. Les marquages persistants ne conservent qu’une identité de valeur à clé et sa classe, jamais le texte d’origine.
 
 Une copie en dossier ou ZIP modifie également le texte correspondant et peut ne plus se compiler ou s’exécuter. Les fichiers binaires ne sont pas analysés et restent inchangés. Un fichier texte sélectionné de plus de 16 Mio ou une erreur de détection arrête l’opération au lieu d’exporter du texte non vérifié.
 
 Le compteur indique seulement les correspondances aux règles. Zéro ne signifie pas que le projet est sûr. La CLI utilise `--hide-secrets` ; les détails figurent dans `Docs/HideSecrets.md`.
 
 ### 12.4 Masquer les données privées
-« Masquer les données privées » est désactivé par défaut. Cette option détecte les adresses e-mail, les adresses IP globales, les noms d’utilisateur locaux dans les chemins, les adresses MAC et les numéros de téléphone internationaux dans les fichiers texte sélectionnés. Les résultats utilisent les mêmes décisions d’aperçu et le même pipeline de sortie que Masquer les secrets.
+« Masquer les données privées » est désactivé par défaut. Cette option détecte les adresses e-mail, les adresses IP globales, les noms d’utilisateur locaux dans les chemins, les adresses MAC et les numéros de téléphone internationaux dans les fichiers texte sélectionnés. Les résultats utilisent les mêmes décisions d’aperçu et le même pipeline de sortie que Masquer les secrets ; les marquages manuels créés avec « Masquer … comme donnée privée » appartiennent à cette classe et suivent cette option (section 12.3). Les noms d’utilisateur locaux dans les en-têtes de chemins générés et dans la racine de l’arbre sont masqués comme une seule découverte partagée : le compteur la compte comme une valeur, l’indicateur ? précise si elle est masquée ou affichée, et un clic bascule tous les chemins masqués à la fois.
 
 Les plages et hôtes de documentation, les noms d’utilisateur CI courants, les résolveurs DNS publics connus et les numéros fictifs documentés restent visibles. Zéro correspondance ne garantit pas la confidentialité. La CLI utilise `--hide-private-data` ; les règles complètes et les limites de la première phase figurent dans `Docs/HidePrivateData.md`.
 
@@ -395,7 +420,7 @@ Le résultat dépend de :
 * filtre actif
 * nœuds cochés dans l’arbre (pour les opérations basées sur la sélection)
 
-Si l’accès est refusé, le nœud est marqué Accès refusé.
+Si l’accès est refusé, le nœud garde son nom et son icône habituels et reçoit le suffixe « [accès refusé] ».
 
 ### 13.1 Ce que montrent les compteurs de la barre d’état
 La barre d’état contient deux blocs :

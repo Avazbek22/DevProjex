@@ -14,6 +14,17 @@ Teclas de atalho:
 * {mod}E – expandir tudo
 * {collapseAll} – recolhe tudo (a raiz permanece expandida)
 
+### Menu de contexto
+Clique com o botão direito num nó — ou {shift}F10 / tecla Menu no nó em foco:
+* Mostrar no Explorador de Ficheiros / Mostrar no Finder / Abrir no gestor de ficheiros — revela o item no gestor de ficheiros do sistema; o rótulo depende da plataforma.
+* Copiar caminho completo — o caminho absoluto do item.
+* Copiar caminho relativo — o caminho a partir da raiz do projeto, começando pelo nome da pasta raiz, por exemplo `project/src/File.cs`.
+* Copiar conteúdo — para ficheiros: copia o conteúdo com as transformações aplicadas, exatamente como copiar e exportar produzem.
+* Selecionar apenas este item — marca apenas este nó e limpa o resto da seleção; aparece apenas enquanto outro item também estiver marcado.
+* Expandir ramo / Recolher ramo — para pastas.
+
+Se o caminho já não existir no disco, abrir o item no gestor de ficheiros ou copiar o seu conteúdo mostra uma mensagem de erro; copiar os caminhos continua a funcionar.
+
 ## 3) Arquivo
 * Abrir pasta… — abre a pasta raiz ({mod}O)
 * Nova janela – abrir uma nova instância independente do DevProjex
@@ -146,6 +157,7 @@ Teclas de atalho: {mod}{shift}C e {mod}{alt}C.
 ### Copiar conteúdo
 Copia o conteúdo do ficheiro:
 * se os ficheiros forem verificados — apenas estes; caso contrário — todos os ficheiros do projeto;
+* cada ficheiro é precedido por um cabeçalho com o seu caminho local completo (para projetos Git Clone — o caminho web do repositório);
 * os ficheiros não textuais são ignorados (incluindo binários);
 * para ficheiros de texto vazios, é gerado o caminho e a linha `[No Content, 0 bytes]`;
 * para ficheiros que contenham apenas espaços em branco/quebras de linha, o caminho e a linha `[Whitespace, N bytes]` são gerados.
@@ -208,7 +220,8 @@ São aplicadas as mesmas regras de cópia e exportação:
 
 Além disso:
 * os ficheiros na visualização estão separados por linhas horizontais;
-* durante a deslocação, o caminho do ficheiro atual é fixado na parte superior;
+* durante a deslocação, o caminho do ficheiro atual é fixado na parte superior; clicar no caminho fixado desloca até ao início desse ficheiro;
+* a barra de deslocação da visualização marca as correspondências de pesquisa e as linhas com valores detetados; clicar numa marca salta para a linha dela; um valor mantido continua marcado, e os caminhos mascarados dos cabeçalhos geram uma única marca na primeira linha;
 * a árvore e o zoom de visualização podem funcionar de forma independente.
 * no modo de visualização, pode copiar o resultado atual completo ou o bloco de ficheiro visível atual sem abrir o menu Copiar.
 
@@ -260,6 +273,7 @@ Abre a barra de pesquisa, destaca as correspondências e permite a navegação.
 * Esc – fechar
 
 A pesquisa expande automaticamente apenas as ramificações necessárias; limpar a consulta recolhe a árvore (exceto raiz).
+As linhas com correspondências também são marcadas na barra de deslocação da árvore; clicar numa marca salta para essa correspondência.
 Para conjuntos de correspondências muito grandes, a aplicação pode limitar a expansão automática e o realce global para manter a interface de utilizador responsiva.
 Quando a barra de pesquisa é fechada, a consulta é limpa após a conclusão da animação de fecho.
 
@@ -281,6 +295,7 @@ Restrições:
 ## 11) Opções (painel de definições)
 Disponível à direita:
 * Aplicar definições
+* Processamento de conteúdo
 * Exclusões
 * Extensões
 
@@ -295,6 +310,14 @@ Cada lista possui uma alternância para Todos.
 Nota sobre "Extensões":
 * esta lista mostra apenas os ficheiros que têm uma extensão;
 * os ficheiros sem extensão não são adicionados a esta lista e são controlados por uma opção separada em "Exclusões".
+
+Processamento de conteúdo:
+* esta secção transforma o conteúdo dos ficheiros de texto selecionados sem mudar a árvore;
+* «Ocultar segredos» e «Ocultar dados privados» substituem os valores detetados (secções 12.3 e 12.4);
+* «Comprimir código» mantém as declarações e encurta as implementações nomeadas em 14 linguagens;
+* «Remover comentários» retira os comentários e os comentários de documentação em 20 pacotes de linguagens;
+* «Remover linhas em branco» retira as linhas só de espaços nos mesmos pacotes, preservando literais multilinha;
+* as alterações entram em vigor após «Aplicar definições».
 
 {mod}P — mostra/oculta o painel.
 
@@ -359,16 +382,18 @@ Alguns armazenamentos de dependências e diretórios de serviços podem ser reco
 A descoberta do âmbito do projeto é limitada, pelo que carregar uma pasta de utilizador grande não se torna uma análise completa e repetida de cada diretório. As estruturas regulares utilizam a descoberta superficial, enquanto os monorepos reconhecidos são pesquisados ​​mais profundamente. Depois de encontrado um âmbito, o Smart Ignore aplica-se a toda a sua subárvore sem limite de profundidade.
 
 ### 12.3 Ocultar segredos
-«Ocultar segredos» está desativado por predefinição. A opção analisa apenas o texto selecionado e substitui cada valor detetado no próprio local, mantendo o ficheiro e o código envolvente. Enquanto estiver desativada, não é feita qualquer análise nem apresentado um contador. Depois de analisar a seleção atual, o rótulo mostra quantos valores continuam ocultos.
+«Ocultar segredos» está desativado por predefinição. A opção analisa apenas o texto selecionado e substitui cada valor detetado no próprio local, mantendo o ficheiro e o código envolvente. Enquanto estiver desativada, não é feita qualquer análise nem apresentado um contador. Depois de analisar a seleção atual, o rótulo mostra o número de valores detetados; se as decisões de manter deixarem menos valores ocultos, mostra os dois números — detetados/ocultos — e o indicador ? da linha informa-os em texto.
 
-As ocorrências são realçadas na pré-visualização. Clique numa delas para manter apenas essa ocorrência sem alterações. No Terminal Workspace, `[` e `]` percorrem as ocorrências e `Enter` ou `Space` alternam a ocorrência ativa. A decisão aplica-se durante a sessão à pré-visualização, área de transferência, exportação de contexto, pasta e ZIP; não é guardada no perfil do projeto.
+As ocorrências são realçadas na pré-visualização. Clique numa delas para manter apenas essa ocorrência sem alterações; {alt}↓ / {alt}↑ percorrem os valores detetados e Enter alterna o ativo. No Terminal Workspace, `[` e `]` percorrem as ocorrências e `Enter` ou `Space` alternam a ocorrência ativa. A decisão aplica-se durante a sessão à pré-visualização, área de transferência, exportação de contexto, pasta e ZIP; não é guardada no perfil do projeto.
+
+O menu de contexto da pré-visualização alarga estas decisões. Um clique com o botão direito numa ocorrência detetada permite manter — ou voltar a ocultar — numa única ação todas as ocorrências da sua regra ou todas as ocorrências detetadas no mesmo ficheiro. Um clique com o botão direito num valor selecionado dentro do conteúdo do ficheiro adiciona uma marcação manual: «Ocultar … aqui» oculta apenas essa ocorrência durante a sessão, «Ocultar sempre …» cria uma marcação persistente para todas as ocorrências do valor, e «Ocultar … como dado privado» cria uma marcação persistente controlada por «Ocultar dados privados». «Remover marcação» aparece sobre uma marcação manual e elimina-a; um valor que o detetor continua a encontrar permanece oculto. O valor manual é uma única linha de 8 a 512 carateres selecionada dentro do conteúdo do ficheiro. Criar uma marcação ativa automaticamente a opção correspondente. As marcações persistentes guardam apenas uma identidade do valor com chave e a sua classe, nunca o texto original.
 
 Uma cópia em pasta ou ZIP também altera o texto correspondente e pode deixar de compilar ou executar. Os ficheiros binários não são analisados e são copiados sem alterações. Um ficheiro de texto selecionado com mais de 16 MiB ou uma falha de deteção interrompe a operação em vez de exportar texto não verificado.
 
 O contador informa apenas sobre correspondências com as regras. Zero não significa que o projeto é seguro. Na CLI, utilize `--hide-secrets`; os detalhes estão em `Docs/HideSecrets.md`.
 
 ### 12.4 Ocultar dados privados
-«Ocultar dados privados» está desativado por predefinição. A opção deteta endereços de e-mail, endereços IP globais, nomes de utilizador locais em caminhos, endereços MAC e números de telefone internacionais nos ficheiros de texto selecionados. Os resultados usam as mesmas decisões da pré-visualização e o mesmo fluxo de saída de Ocultar segredos.
+«Ocultar dados privados» está desativado por predefinição. A opção deteta endereços de e-mail, endereços IP globais, nomes de utilizador locais em caminhos, endereços MAC e números de telefone internacionais nos ficheiros de texto selecionados. Os resultados usam as mesmas decisões da pré-visualização e o mesmo fluxo de saída de Ocultar segredos; as marcações manuais criadas com «Ocultar … como dado privado» pertencem a esta classe e seguem esta opção (secção 12.3). Os nomes de utilizador locais nos cabeçalhos de caminho gerados e na raiz da árvore são mascarados como uma única descoberta partilhada: o contador conta-a como um valor, o indicador ? informa se está oculta ou visível, e um clique alterna todos os caminhos mascarados de uma vez.
 
 Intervalos e anfitriões de documentação, utilizadores comuns de CI, resolvedores DNS públicos conhecidos e números fictícios documentados permanecem visíveis. Zero correspondências não garante privacidade. A CLI usa `--hide-private-data`; as regras completas e os limites da primeira fase estão em `Docs/HidePrivateData.md`.
 
@@ -448,7 +473,7 @@ O resultado depende de:
 * filtro ativo
 * nós de árvore verificados (para operações baseadas em seleção)
 
-Se o acesso for negado, o nó será marcado como Acesso negado.
+Se o acesso for negado, o nó mantém o nome e o ícone habituais e recebe o sufixo «[acesso negado]».
 
 ### 13.1 O que mostram os contadores da barra de estado
 A barra de estado possui dois blocos:

@@ -14,6 +14,17 @@ Scorciatoie:
 * {mod}E — espandi tutto
 * {collapseAll} — comprimi tutto (la radice resta aperta)
 
+### Menu contestuale
+Clic destro su un nodo — oppure {shift}F10 / tasto Menu sul nodo selezionato:
+* Mostra in Esplora file / Mostra nel Finder / Apri nel gestore file — mostra l’elemento nel gestore file di sistema; l’etichetta dipende dalla piattaforma.
+* Copia percorso completo — il percorso assoluto dell’elemento.
+* Copia percorso relativo — il percorso dalla radice del progetto, che inizia con il nome della cartella radice, ad esempio `project/src/File.cs`.
+* Copia contenuto — per i file: copia il contenuto con le trasformazioni applicate, esattamente come copia ed esportazione.
+* Seleziona solo questo elemento — spunta solo questo nodo e azzera il resto della selezione; appare solo finché è spuntato anche un altro elemento.
+* Espandi ramo / Comprimi ramo — per le cartelle.
+
+Se il percorso non esiste più sul disco, l’apertura nel gestore file e la copia del contenuto mostrano un messaggio di errore; la copia dei percorsi continua a funzionare.
+
 ## 3) File
 * Apri cartella… — apri la cartella radice ({mod}O)
 * Nuova finestra — apri una nuova istanza indipendente di DevProjex
@@ -146,6 +157,7 @@ Scorciatoie: {mod}{shift}C e {mod}{alt}C.
 ### Copia contenuto
 Copia il contenuto dei file:
 * se ci sono file selezionati — solo quelli; altrimenti — tutti i file del progetto;
+* ogni file è preceduto da un’intestazione con il suo percorso locale completo (per i progetti Git Clone — il percorso web del repository);
 * i file non testuali vengono ignorati (inclusi i binari);
 * per i file di testo vuoti vengono riportati il percorso e la riga `[No Content, 0 bytes]`;
 * per i file composti solo da spazi/ritorni a capo vengono riportati il percorso e la riga `[Whitespace, N bytes]`.
@@ -208,7 +220,8 @@ Si applicano le stesse regole della copia e dell’esportazione:
 
 Inoltre:
 * i file nell’anteprima sono separati da linee orizzontali;
-* durante lo scorrimento, il percorso del file corrente resta fissato in alto;
+* durante lo scorrimento, il percorso del file corrente resta fissato in alto; un clic sul percorso fissato scorre all’inizio di quel file;
+* la barra di scorrimento dell’anteprima marca le corrispondenze di ricerca e le righe con valori rilevati; un clic su un segno salta alla sua riga; un valore conservato resta marcato, e i percorsi mascherati nelle intestazioni danno un solo segno alla loro prima riga;
 * lo zoom dell’albero e quello dell’anteprima possono vivere separatamente.
 * nella modalità anteprima puoi copiare sia il risultato completo corrente sia il blocco del file attualmente visibile senza aprire il menu «Copia».
 
@@ -260,6 +273,7 @@ Apre la ricerca, evidenzia le corrispondenze e permette la navigazione.
 * Esc — chiudi
 
 La ricerca apre solo i rami necessari; svuotando la query l’albero si richiude (tranne la radice).
+Le righe delle corrispondenze sono marcate anche sulla barra di scorrimento dell’albero; un clic su un segno salta a quella corrispondenza.
 Con un numero molto elevato di corrispondenze, l’app può limitare l’espansione automatica e l’evidenziazione globale per mantenere l’interfaccia reattiva.
 Alla chiusura della ricerca, la query viene svuotata dopo il completamento dell’animazione di chiusura.
 
@@ -281,6 +295,7 @@ Limitazioni:
 ## 11) Opzioni
 A destra sono disponibili:
 * Applica
+* Elaborazione contenuti
 * Esclusioni
 * Tipi di file
 
@@ -295,6 +310,14 @@ Ogni lista ha il toggle Tutti.
 Nota su « Tipi di file »:
 * in questa lista vengono mostrati solo file con estensione;
 * i file senza estensione non vengono aggiunti a questa lista e sono gestiti da un’opzione separata in « Esclusioni ».
+
+Elaborazione contenuti:
+* questa sezione trasforma il contenuto dei file di testo selezionati senza modificare l’albero;
+* «Nascondi segreti» e «Nascondi dati privati» sostituiscono i valori rilevati (sezioni 12.3 e 12.4);
+* «Comprimi il codice» conserva le dichiarazioni e accorcia le implementazioni con nome in 14 linguaggi;
+* «Rimuovi commenti» elimina i commenti e i commenti di documentazione in 20 pacchetti di linguaggi;
+* «Rimuovi righe vuote» elimina le righe di soli spazi negli stessi pacchetti preservando i letterali multilinea;
+* le modifiche hanno effetto dopo «Applica».
 
 {mod}P — mostra/nascondi pannello.
 
@@ -331,16 +354,18 @@ Per nomi ambigui come `build`, `vendor`, `packages`, `cache`, `pkg` o `Library` 
 La ricerca di nuove aree di progetto è limitata per evitare l’analisi ripetuta di ogni directory in una grande cartella utente. Le strutture normali usano una ricerca poco profonda, mentre i monorepo riconosciuti vengono esaminati più in profondità. Dopo il rilevamento, Smart Ignore si applica all’intero sottoalbero senza limite di profondità.
 
 ### 12.3 Nascondi segreti
-«Nascondi segreti» è disattivato per impostazione predefinita. Analizza solo il testo selezionato e sostituisce ogni valore rilevato sul posto, conservando il file e il codice circostante. Quando è disattivato non viene eseguita alcuna scansione e non appare alcun contatore. Dopo la scansione della selezione corrente, l’etichetta mostra quanti valori restano nascosti.
+«Nascondi segreti» è disattivato per impostazione predefinita. Analizza solo il testo selezionato e sostituisce ogni valore rilevato sul posto, conservando il file e il codice circostante. Quando è disattivato non viene eseguita alcuna scansione e non appare alcun contatore. Dopo la scansione della selezione corrente, l’etichetta mostra il numero di valori rilevati; se le decisioni «conserva» lasciano meno valori nascosti, mostra entrambi i numeri — rilevati/nascosti — e l’indicatore ? della riga li riporta in testo.
 
-Le corrispondenze sono evidenziate nell’anteprima. Fare clic su una di esse per conservare invariata solo quell’occorrenza. In Terminal Workspace, `[` e `]` scorrono le occorrenze e `Enter` o `Space` attivano o disattivano quella corrente. La decisione vale per la sessione in anteprima, appunti, esportazione del contesto, cartella e ZIP; non viene salvata nel profilo del progetto.
+Le corrispondenze sono evidenziate nell’anteprima. Fare clic su una di esse per conservare invariata solo quell’occorrenza; {alt}↓ / {alt}↑ scorrono i valori rilevati e Enter attiva o disattiva quello corrente. In Terminal Workspace, `[` e `]` scorrono le occorrenze e `Enter` o `Space` attivano o disattivano quella corrente. La decisione vale per la sessione in anteprima, appunti, esportazione del contesto, cartella e ZIP; non viene salvata nel profilo del progetto.
+
+Il menu contestuale dell’anteprima estende queste decisioni. Un clic destro su un’occorrenza rilevata consente di conservare — o nascondere di nuovo — in un’unica azione tutte le occorrenze della sua regola oppure tutte le occorrenze rilevate nello stesso file. Un clic destro su un valore selezionato nel contenuto di un file aggiunge un contrassegno manuale: «Nascondi … qui» nasconde solo quell’occorrenza per la sessione, «Nascondi sempre …» crea un contrassegno persistente per tutte le occorrenze del valore, e «Nascondi … come dato privato» crea un contrassegno persistente controllato da «Nascondi dati privati». «Rimuovi contrassegno» appare su un contrassegno manuale e lo elimina; un valore ancora riconosciuto dal rilevatore resta nascosto. Il valore manuale è una singola riga da 8 a 512 caratteri selezionata nel contenuto del file. La creazione di un contrassegno attiva automaticamente l’opzione corrispondente. I contrassegni persistenti conservano solo un’identità del valore con chiave e la sua classe, mai il testo originale.
 
 Anche una copia in cartella o ZIP modifica il testo corrispondente e potrebbe non compilarsi o avviarsi. I file binari non vengono analizzati e sono copiati senza modifiche. Un file di testo selezionato oltre 16 MiB o un errore di rilevamento interrompe l’operazione anziché esportare testo non controllato.
 
 Il contatore segnala soltanto le corrispondenze con le regole. Zero non significa che il progetto sia sicuro. La CLI usa `--hide-secrets`; i dettagli sono in `Docs/HideSecrets.md`.
 
 ### 12.4 Nascondi dati privati
-«Nascondi dati privati» è disattivato per impostazione predefinita. Rileva indirizzi e-mail, indirizzi IP globali, nomi utente locali nei percorsi, indirizzi MAC e numeri di telefono internazionali nei file di testo selezionati. I risultati usano le stesse decisioni dell’anteprima e la stessa pipeline di output di Nascondi segreti.
+«Nascondi dati privati» è disattivato per impostazione predefinita. Rileva indirizzi e-mail, indirizzi IP globali, nomi utente locali nei percorsi, indirizzi MAC e numeri di telefono internazionali nei file di testo selezionati. I risultati usano le stesse decisioni dell’anteprima e la stessa pipeline di output di Nascondi segreti; i contrassegni manuali creati con «Nascondi … come dato privato» appartengono a questa classe e seguono questa opzione (sezione 12.3). I nomi utente locali nelle intestazioni dei percorsi generati e nella radice dell’albero sono mascherati come un’unica scoperta condivisa: il contatore la conta come un valore, l’indicatore ? riporta se è nascosta o visibile, e un clic commuta tutti i percorsi mascherati insieme.
 
 Gli intervalli e gli host di documentazione, i comuni utenti CI, i resolver DNS pubblici noti e i numeri fittizi documentati rimangono visibili. Zero corrispondenze non garantisce la riservatezza. La CLI usa `--hide-private-data`; le regole complete e i limiti della prima fase sono in `Docs/HidePrivateData.md`.
 
@@ -395,7 +420,7 @@ Il risultato dipende da:
 * filtro attivo
 * nodi selezionati con checkbox nell’albero (per operazioni basate sulla selezione)
 
-Se l’accesso è negato, il nodo è marcato Accesso negato.
+Se l’accesso è negato, il nodo mantiene il nome e l’icona abituali e riceve il suffisso «[accesso negato]».
 
 ### 13.1 Cosa mostrano i contatori nella barra di stato
 La barra di stato contiene due blocchi:

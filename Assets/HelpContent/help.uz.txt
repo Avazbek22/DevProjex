@@ -14,6 +14,17 @@ Issiq tugmalar:
 * {mod}E — hammasini ochish
 * {collapseAll} — hammasini yopish (ildiz ochiq qoladi)
 
+### Kontekst menyusi
+Tugun ustida sichqonchaning o‘ng tugmasini bosing — yoki fokusdagi tugunda {shift}F10 / Menyu tugmasi:
+* File Explorerda ko‘rsatish / Finderda ko‘rsatish / Fayl menejerida ochish — elementni tizim fayl menejerida ko‘rsatadi; nom joriy platformaga mos keladi.
+* To‘liq yo‘lni nusxalash — elementning mutlaq yo‘li.
+* Nisbiy yo‘lni nusxalash — loyiha ildizidan boshlanadigan yo‘l; u ildiz papka nomidan boshlanadi, masalan `project/src/File.cs`.
+* Tarkibni nusxalash — fayllar uchun: tarkibni qo‘llangan o‘zgartirishlar bilan nusxalaydi, xuddi nusxalash va eksport chiqargani kabi.
+* Faqat shuni tanlash — faqat shu tugunni belgilab, qolgan tanlovni bekor qiladi; faqat boshqa element ham belgilangan paytda ko‘rinadi.
+* Tarmoqni yoyish / Tarmoqni yig‘ish — jildlar uchun.
+
+Agar yo‘l diskda endi mavjud bo‘lmasa, fayl menejerida ochish va tarkibni nusxalash xato xabarini ko‘rsatadi; yo‘llarni nusxalash ishlashda davom etadi.
+
 ## 3) Fayl
 * Jildni ochish… — ildiz papkani ochish ({mod}O)
 * Yangi oyna — DevProjex’ning yangi mustaqil nusxasini ochish
@@ -146,6 +157,7 @@ Tugmalar: {mod}{shift}C va {mod}{alt}C.
 ### Mazmunni nusxalash
 Fayllar mazmunini nusxalaydi:
 * agar fayllar belgilangan bo‘lsa — faqat ular; aks holda — loyihadagi barcha fayllar;
+* har bir fayl oldidan uning to‘liq lokal yo‘li yozilgan sarlavha chiqariladi (Git Clone loyihalari uchun — repozitoriyning veb-yo‘li);
 * matnli bo‘lmagan fayllar e’tiborga olinmaydi (binarlarni ham);
 * bo‘sh matnli fayllar uchun yo‘l va `[No Content, 0 bytes]` yoziladi;
 * faqat bo‘sh joylar/satr uzilishlaridan iborat fayllar uchun yo‘l va `[Whitespace, N bytes]` yoziladi.
@@ -208,7 +220,8 @@ Nusxalash va eksportdagi qoidalar shu yerda ham qo‘llanadi:
 
 Qo‘shimcha:
 * preview ichida fayllar gorizontal chiziqlar bilan ajratiladi;
-* skroll paytida joriy fayl yo‘li tepada mahkamlanadi;
+* skroll paytida joriy fayl yo‘li tepada mahkamlanadi; mahkamlangan yo‘lni bosish o‘sha fayl boshiga olib boradi;
+* preview skroll-bari qidiruv mosliklari va topilgan qiymatlari bor qatorlarni belgilaydi; belgini bosish uning qatoriga olib boradi; saqlab qolingan qiymat belgilangancha qoladi, sarlavhalardagi maskalangan yo‘llar esa birinchi qatorida bitta belgi beradi;
 * daraxt va preview masshtabi alohida yashashi mumkin.
 * preview rejimida “Nusxa” menyusiga kirmasdan turib to‘liq joriy natijani ham, joriy ko‘rinib turgan fayl blokini ham nusxalash mumkin.
 
@@ -260,6 +273,7 @@ Qidiruv panelini ochadi, mosliklarni yoritadi va navigatsiya qiladi.
 * Esc — yopish
 
 Qidiruv faqat kerakli shoxlarni ochadi; so‘rov tozalansa, daraxt yig‘iladi (ildizdan tashqari).
+Moslik qatorlari daraxt skroll-barida ham belgilanadi; belgini bosish o‘sha moslikka olib boradi.
 Mosliklar soni juda ko‘p bo‘lsa, interfeys tezkorligini saqlash uchun ilova avtomatik ochish va ommaviy yoritishni cheklashi mumkin.
 Qidiruv paneli yopilganda, yopilish animatsiyasi tugagach so‘rov tozalanadi.
 
@@ -281,6 +295,7 @@ Cheklovlar:
 ## 11) Sozlamalar
 O‘ng tomonda mavjud:
 * Sozlamalarni qo‘llash
+* Kontentni qayta ishlash
 * Istisnolar
 * Fayl turlari
 
@@ -295,6 +310,14 @@ Har bir ro‘yxatda Barchasi tugmasi bor.
 «Fayl turlari» bo‘yicha izoh:
 * bu ro‘yxatda faqat kengaytmali fayllar ko‘rsatiladi;
 * kengaytmasiz fayllar bu ro‘yxatga qo‘shilmaydi va «Istisnolar» ichidagi alohida band orqali boshqariladi.
+
+Kontentni qayta ishlash:
+* bu bo‘lim tanlangan matn fayllari tarkibini daraxtni o‘zgartirmasdan o‘zgartiradi;
+* «Sirlarni yashirish» va «Shaxsiy ma’lumotni yashirish» topilgan qiymatlarni almashtiradi (12.3 va 12.4 bo‘limlari);
+* «Kodni siqish» e’lonlarni saqlab, nomlangan implementatsiyalarni 14 tilda qisqartiradi;
+* «Izohlarni olib tashlash» 20 til paketida izohlar va hujjat izohlarini olib tashlaydi;
+* «Bo'sh qatorlarni olib tashlash» o‘sha paketlarda faqat bo‘sh joylardan iborat qatorlarni olib tashlab, ko‘p qatorli literallarni saqlaydi;
+* o‘zgarishlar «Sozlamalarni qo‘llash» bosilgandan keyin kuchga kiradi.
 
 {mod}P — panelni ko‘rsatish/yashirish.
 
@@ -331,16 +354,18 @@ Smart Ignore bog‘liqliklar, build natijalari, keshlar va boshqa xizmat artefak
 Katta foydalanuvchi papkasidagi har bir katalogni qayta tahlil qilmaslik uchun yangi loyiha hududlarini izlash cheklangan. Oddiy tuzilma sayoz, tanilgan monorepo esa chuqurroq tekshiriladi. Hudud topilgach, Smart Ignore uning butun ichki daraxtiga chuqurlik cheklovisiz qo‘llanadi.
 
 ### 12.3 Sirlarni yashirish
-“Sirlarni yashirish” odatda o‘chirilgan bo‘ladi. Bu parametr faqat tanlangan matnni tekshiradi va topilgan har bir qiymatni o‘z joyida almashtiradi; fayl va uning atrofidagi kod saqlanadi. Parametr o‘chiq bo‘lsa, tekshiruv ishlamaydi va hisoblagich ko‘rsatilmaydi. Joriy tanlov tekshirilgach, nom yashirilgan holda qolgan qiymatlar sonini ko‘rsatadi.
+“Sirlarni yashirish” odatda o‘chirilgan bo‘ladi. Bu parametr faqat tanlangan matnni tekshiradi va topilgan har bir qiymatni o‘z joyida almashtiradi; fayl va uning atrofidagi kod saqlanadi. Parametr o‘chiq bo‘lsa, tekshiruv ishlamaydi va hisoblagich ko‘rsatilmaydi. Joriy tanlov tekshirilgach, nom topilgan qiymatlar sonini ko‘rsatadi; «o‘zgarishsiz qoldirish» qarorlari yashirilganlar sonini kamaytirsa, ikkala son — topilgan/yashirilgan — ko‘rsatiladi, qatordagi «?» indikatori esa ularni matn bilan bildiradi.
 
-Mos kelgan joylar previewda ajratib ko‘rsatiladi. Faqat bitta uchrashuvni o‘zgarishsiz qoldirish uchun uni bosing. Terminal Workspace ichida `[` va `]` uchrashuvlar bo‘ylab yuradi, `Enter` yoki `Space` esa faol uchrashuvni almashtiradi. Qaror shu seans davomida preview, almashish buferi, kontekst eksporti, jild va ZIP uchun amal qiladi; loyiha profilida saqlanmaydi.
+Mos kelgan joylar previewda ajratib ko‘rsatiladi. Faqat bitta uchrashuvni o‘zgarishsiz qoldirish uchun uni bosing; {alt}↓ / {alt}↑ topilmalar bo‘ylab yuradi, Enter faolini almashtiradi. Terminal Workspace ichida `[` va `]` uchrashuvlar bo‘ylab yuradi, `Enter` yoki `Space` esa faol uchrashuvni almashtiradi. Qaror shu seans davomida preview, almashish buferi, kontekst eksporti, jild va ZIP uchun amal qiladi; loyiha profilida saqlanmaydi.
+
+Preview kontekst menyusi bu qarorlarni kengaytiradi. Topilgan uchrashuv ustida o‘ng tugmani bosish bitta amal bilan uning qoidasidagi barcha uchrashuvlarni yoki o‘sha fayldagi barcha topilgan uchrashuvlarni saqlab qolish — yoki qayta yashirish — imkonini beradi. Fayl mazmunida tanlangan qiymat ustida o‘ng tugmani bosish qo‘lda belgi qo‘shadi: «…ni shu yerda yashirish» faqat shu uchrashuvni seans davomida yashiradi, «…ni doim yashirish» qiymatning barcha uchrashuvlari uchun doimiy belgi yaratadi, «…ni shaxsiy ma’lumot sifatida yashirish» esa «Shaxsiy ma’lumotni yashirish» parametri boshqaradigan doimiy belgi yaratadi. «Belgini olib tashlash» qo‘lda qo‘yilgan belgida paydo bo‘lib, uni o‘chiradi; detektor hali ham topadigan qiymat yashirin qoladi. Qo‘lda kiritiladigan qiymat — fayl mazmunida tanlangan, 8 dan 512 belgigacha bo‘lgan bitta qator. Belgi yaratish tegishli parametrni avtomatik yoqadi. Doimiy belgilar faqat kalitli qiymat identifikatori va uning sinfini saqlaydi, asl matnni hech qachon saqlamaydi.
 
 Jild yoki ZIP nusxasidagi mos matn ham o‘zgaradi, shu sababli natija yig‘ilmasligi yoki ishga tushmasligi mumkin. Ikkilik fayllar tekshirilmaydi va o‘zgarishsiz ko‘chiriladi. 16 MiB dan katta tanlangan matn fayli yoki aniqlash xatosi tekshirilmagan matnni eksport qilish o‘rniga operatsiyani to‘xtatadi.
 
 Hisoblagich faqat qoidalarga mos kelgan joylarni bildiradi. Nol loyiha xavfsiz degani emas. CLI’da `--hide-secrets` ishlatiladi; tafsilotlar `Docs/HideSecrets.md` faylida.
 
-### 12.4 Shaxsiy ma’lumotlarni yashirish
-“Shaxsiy ma’lumotlarni yashirish” odatda o‘chirilgan bo‘ladi. Bu parametr tanlangan matn fayllaridagi elektron pochta manzillari, global IP manzillar, yo‘llardagi mahalliy foydalanuvchi nomlari, MAC manzillar va xalqaro telefon raqamlarini aniqlaydi. Topilmalar uchun Sirlarni yashirishdagi kabi oldindan ko‘rish qarorlari va bir xil chiqish konveyeri ishlatiladi.
+### 12.4 Shaxsiy ma’lumotni yashirish
+“Shaxsiy ma’lumotni yashirish” odatda o‘chirilgan bo‘ladi. Bu parametr tanlangan matn fayllaridagi elektron pochta manzillari, global IP manzillar, yo‘llardagi mahalliy foydalanuvchi nomlari, MAC manzillar va xalqaro telefon raqamlarini aniqlaydi. Topilmalar uchun Sirlarni yashirishdagi kabi oldindan ko‘rish qarorlari va bir xil chiqish konveyeri ishlatiladi; «…ni shaxsiy ma’lumot sifatida yashirish» orqali yaratilgan qo‘lda belgilar shu sinfga tegishli bo‘lib, shu parametrga bo‘ysunadi (12.3-bo‘lim). Yaratiladigan yo‘l sarlavhalaridagi va daraxt ildizidagi mahalliy foydalanuvchi nomlari bitta umumiy topilma sifatida maskalanadi: hisoblagich uni bitta qiymat deb sanaydi, «?» indikatori u yashirilgan yoki ko‘rsatilganini bildiradi, bitta bosish esa barcha maskalangan yo‘llarni birdaniga almashtiradi.
 
 Hujjat uchun ajratilgan diapazonlar va hostlar, odatiy CI foydalanuvchilari, taniqli ochiq DNS resolverlari hamda hujjatlashtirilgan uydirma raqamlar ko‘rinib qoladi. Nol moslik maxfiylik kafolati emas. CLI-da `--hide-private-data` ishlatiladi; to‘liq qoidalar va birinchi bosqich chegaralari `Docs/HidePrivateData.md` faylida berilgan.
 
@@ -395,7 +420,7 @@ Natija quyidagilarga bog‘liq:
 * faol filtr
 * daraxtdagi checkbox orqali belgilangan tugunlar (tanlovga asoslangan amallar uchun)
 
-Agar ruxsat bo‘lmasa, tugun "Kirish taqiqlangan" deb belgilanadi.
+Agar ruxsat bo‘lmasa, tugun odatiy nomi va belgisini saqlab, "[ruxsat yo'q]" qo‘shimchasini oladi.
 
 ### 13.1 Status-bardagi hisoblagichlar nimani ko‘rsatadi
 Status-barda ikki blok bor:

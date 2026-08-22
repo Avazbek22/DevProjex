@@ -345,18 +345,22 @@ public sealed class MainWindowPreviewMarkerUiTests
 			await UiTestDriver.RequestRedactionToggleAsync(window, occurrenceId);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
-				() => preview.MarkerSnapshot.Markers.Count(static marker =>
-					      marker.Category == PreviewMarkerCategory.Redaction) == 2 &&
-				      preview.MarkerSnapshot.Markers.All(marker => marker.LineNumber != targetLine),
-				"kept occurrence to disappear from the marker stripe");
+				() => preview.Document!.Redactions.Any(span =>
+					      span.LineNumber == targetLine && span.State == SecretPreviewSpanState.KeptAsIs) &&
+				      preview.MarkerSnapshot.Markers.Count(static marker =>
+					      marker.Category == PreviewMarkerCategory.Redaction) == 3 &&
+				      preview.MarkerSnapshot.Markers.Any(marker => marker.LineNumber == targetLine),
+				"kept occurrence to retain its marker on the stripe");
 
 			await UiTestDriver.RequestRedactionToggleAsync(window, occurrenceId);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
-				() => preview.MarkerSnapshot.Markers.Count(static marker =>
+				() => preview.Document!.Redactions.Any(span =>
+					      span.LineNumber == targetLine && span.State == SecretPreviewSpanState.Redacted) &&
+				      preview.MarkerSnapshot.Markers.Count(static marker =>
 					      marker.Category == PreviewMarkerCategory.Redaction) == 3 &&
 				      preview.MarkerSnapshot.Markers.Any(marker => marker.LineNumber == targetLine),
-				"re-hidden occurrence to restore its marker");
+				"re-hidden occurrence to keep its marker in place");
 
 			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Tree);
 			await UiTestDriver.WaitForConditionAsync(

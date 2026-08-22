@@ -14,6 +14,17 @@ Tastenkürzel:
 * {mod}E — alles aufklappen
 * {collapseAll} — alles zuklappen (Wurzel bleibt offen)
 
+### Kontextmenü
+Rechtsklick auf einen Knoten — oder {shift}F10 bzw. die Menütaste auf dem fokussierten Knoten:
+* Im Datei-Explorer anzeigen / Im Finder zeigen / Im Dateimanager öffnen — zeigt das Element im Dateimanager des Systems; die Beschriftung entspricht der aktuellen Plattform.
+* Vollständigen Pfad kopieren — der absolute Pfad des Elements.
+* Relativen Pfad kopieren — der Pfad ab der Projektwurzel, beginnend mit dem Namen des Wurzelordners, zum Beispiel `project/src/File.cs`.
+* Inhalt kopieren — für Dateien: kopiert den Inhalt mit den angewendeten Inhaltstransformationen, genau wie beim Kopieren und Exportieren.
+* Nur dieses Element auswählen — markiert nur diesen Knoten und hebt die übrige Auswahl auf; erscheint nur, solange auch ein anderes Element markiert ist.
+* Zweig erweitern / Zweig reduzieren — für Ordner.
+
+Existiert der Pfad nicht mehr auf der Festplatte, zeigen das Öffnen im Dateimanager und das Kopieren des Inhalts eine Fehlermeldung; das Kopieren der Pfade funktioniert weiterhin.
+
 ## 3) Datei
 * Ordner öffnen… — Wurzelordner öffnen ({mod}O)
 * Neues Fenster — eine neue unabhängige DevProjex-Instanz öffnen
@@ -146,6 +157,7 @@ Tastenkürzel: {mod}{shift}C und {mod}{alt}C.
 ### Inhalt kopieren
 Kopiert Dateiinhalte:
 * wenn Dateien markiert sind — nur diese; sonst — alle Projektdateien;
+* vor jeder Datei steht eine Kopfzeile mit ihrem vollständigen lokalen Pfad (bei Git-Clone-Projekten — dem Web-Pfad des Repositories);
 * Nicht-Textdateien werden ignoriert (einschließlich Binärdateien);
 * bei leeren Textdateien werden Pfad und die Zeile `[No Content, 0 bytes]` ausgegeben;
 * bei Dateien, die nur aus Leerzeichen/Zeilenumbrüchen bestehen, werden Pfad und die Zeile `[Whitespace, N bytes]` ausgegeben.
@@ -208,7 +220,8 @@ Es gelten dieselben Regeln wie beim Kopieren und Exportieren:
 
 Zusätzlich:
 * Dateien in der Vorschau werden durch horizontale Linien getrennt;
-* beim Scrollen wird der Pfad der aktuellen Datei oben angeheftet;
+* beim Scrollen wird der Pfad der aktuellen Datei oben angeheftet; ein Klick auf den angehefteten Pfad scrollt zum Anfang dieser Datei;
+* die Bildlaufleiste der Vorschau markiert Suchtreffer und Zeilen mit erkannten Werten; ein Klick auf eine Markierung springt zu ihrer Zeile; ein beibehaltener Fund bleibt markiert, maskierte Pfade in Kopfzeilen ergeben eine einzige Markierung an ihrer ersten Zeile;
 * Baum und Vorschau können unterschiedliche Zoomstufen haben.
 * im Vorschaumodus können Sie entweder das vollständige aktuelle Ergebnis oder den aktuell sichtbaren Dateiblock kopieren, ohne das Menü „Kopieren“ zu öffnen.
 
@@ -260,6 +273,7 @@ Die ausgewählte Schrift wird nach dem Klick auf „Anwenden“ im Einstellungen
 * Esc — schließen
 
 Die Suche öffnet nur benötigte Zweige; beim Leeren der Suche wird der Baum eingeklappt (außer der Wurzel).
+Trefferzeilen werden auch auf der Bildlaufleiste des Baums markiert; ein Klick auf eine Markierung springt zu diesem Treffer.
 Bei sehr großen Treffermengen kann die App Auto-Expand und globale Hervorhebung begrenzen, damit die UI reaktionsfähig bleibt.
 Beim Schließen der Suche wird die Suchanfrage nach Abschluss der Schließanimation geleert.
 
@@ -281,6 +295,7 @@ Einschränkungen:
 ## 11) Optionen
 Rechts verfügbar:
 * Anwenden
+* Inhaltsverarbeitung
 * Ausschlüsse
 * Dateitypen
 
@@ -295,6 +310,14 @@ Jede Liste hat einen Alle‑Schalter.
 Hinweis zu „Dateitypen“:
 * in dieser Liste werden nur Dateien mit Erweiterung angezeigt;
 * Dateien ohne Erweiterung werden hier nicht angezeigt und über eine separate Option in „Ausschlüsse“ gesteuert.
+
+Inhaltsverarbeitung:
+* dieser Bereich transformiert den Inhalt ausgewählter Textdateien, ohne den Baum zu verändern;
+* „Geheimnisse verbergen“ und „Private Daten verbergen“ ersetzen erkannte Werte (Abschnitte 12.3 und 12.4);
+* „Code komprimieren“ erhält Deklarationen und kürzt benannte Implementierungen in 14 Sprachen;
+* „Kommentare entfernen“ entfernt Kommentare und Dokumentationskommentare in 20 Sprachpaketen;
+* „Leerzeilen entfernen“ entfernt Zeilen nur aus Leerzeichen in denselben Paketen und bewahrt mehrzeilige Literale;
+* Änderungen wirken nach „Anwenden“.
 
 {mod}P — Panel anzeigen/ausblenden.
 
@@ -331,16 +354,18 @@ Bei mehrdeutigen Namen wie `build`, `vendor`, `packages`, `cache`, `pkg` oder `L
 Die Erkennung neuer Projektbereiche ist begrenzt, damit große Benutzerordner nicht vollständig wiederholt analysiert werden. Normale Strukturen werden flach, erkannte Monorepos tiefer durchsucht. Nach der Erkennung gilt Smart Ignore ohne Tiefenbegrenzung für den gesamten Unterbaum des Bereichs.
 
 ### 12.3 Geheimnisse verbergen
-„Geheimnisse verbergen“ ist standardmäßig deaktiviert. Die Option prüft nur ausgewählte Textinhalte und ersetzt jeden erkannten Wert an seiner Stelle; Datei und umgebender Code bleiben erhalten. Solange sie ausgeschaltet ist, erfolgt keine Prüfung und es erscheint kein Zähler. Nach der Prüfung zeigt die Bezeichnung, wie viele Werte weiterhin unkenntlich gemacht sind.
+„Geheimnisse verbergen“ ist standardmäßig deaktiviert. Die Option prüft nur ausgewählte Textinhalte und ersetzt jeden erkannten Wert an seiner Stelle; Datei und umgebender Code bleiben erhalten. Solange sie ausgeschaltet ist, erfolgt keine Prüfung und es erscheint kein Zähler. Nach der Prüfung zeigt die Bezeichnung die Anzahl der erkannten Werte; bleiben durch „Beibehalten“-Entscheidungen weniger Werte verborgen, erscheinen beide Zahlen — erkannt/verborgen — und der ?-Indikator der Zeile nennt beide im Text.
 
-Erkannte Stellen werden in der Vorschau hervorgehoben. Ein Klick behält nur dieses Vorkommen unverändert. Im Terminal Workspace wechseln `[` und `]` zwischen den Vorkommen; `Enter` oder `Space` schalten das aktive um. Die Entscheidung gilt während der aktuellen Sitzung für Vorschau, Zwischenablage, Kontextexport, Ordner und ZIP und wird nicht im Projektprofil gespeichert.
+Erkannte Stellen werden in der Vorschau hervorgehoben. Ein Klick behält nur dieses Vorkommen unverändert; {alt}↓ / {alt}↑ wechseln zwischen den Funden, Enter schaltet den aktiven um. Im Terminal Workspace wechseln `[` und `]` zwischen den Vorkommen; `Enter` oder `Space` schalten das aktive um. Die Entscheidung gilt während der aktuellen Sitzung für Vorschau, Zwischenablage, Kontextexport, Ordner und ZIP und wird nicht im Projektprofil gespeichert.
+
+Das Kontextmenü der Vorschau erweitert diese Entscheidungen. Ein Rechtsklick auf ein erkanntes Vorkommen behält — oder verbirgt wieder — in einer Aktion alle Vorkommen seiner Regel oder alle erkannten Vorkommen in derselben Datei. Ein Rechtsklick auf einen markierten Wert im Dateiinhalt setzt eine manuelle Markierung: „… hier ausblenden“ verbirgt nur dieses Vorkommen für die Sitzung, „… immer ausblenden“ erstellt eine dauerhafte Markierung für jedes Vorkommen des Werts, und „… als private Daten ausblenden“ erstellt eine dauerhafte Markierung, die von „Private Daten verbergen“ gesteuert wird. „Markierung entfernen“ erscheint auf einer manuellen Markierung und löscht sie; ein weiterhin vom Detektor erkannter Wert bleibt verborgen. Ein manueller Wert ist eine einzelne Zeile von 8 bis 512 Zeichen, markiert im Dateiinhalt. Das Erstellen einer Markierung aktiviert die entsprechende Option automatisch. Dauerhafte Markierungen speichern nur eine schlüsselbasierte Wertidentität und ihre Klasse, niemals den Originaltext.
 
 Auch eine Ordner- oder ZIP-Kopie ändert passenden Text und lässt sich möglicherweise nicht mehr erstellen oder ausführen. Binärdateien werden unverändert kopiert und nicht geprüft. Eine ausgewählte Textdatei über 16 MiB oder ein Erkennungsfehler beendet den Vorgang, statt ungeprüften Text zu exportieren.
 
 Der Zähler meldet nur Regelübereinstimmungen. Null bedeutet nicht, dass das Projekt sicher ist. In der CLI gilt `--hide-secrets`; Einzelheiten stehen in `Docs/HideSecrets.md`.
 
 ### 12.4 Private Daten verbergen
-"Private Daten verbergen" ist standardmäßig deaktiviert. Die Option erkennt E-Mail-Adressen, globale IP-Adressen, lokale Benutzernamen in Pfaden, MAC-Adressen und internationale Telefonnummern in ausgewählten Textdateien. Für Treffer gelten dieselben Vorschauentscheidungen und dieselbe Ausgabepipeline wie für Geheimnisse.
+"Private Daten verbergen" ist standardmäßig deaktiviert. Die Option erkennt E-Mail-Adressen, globale IP-Adressen, lokale Benutzernamen in Pfaden, MAC-Adressen und internationale Telefonnummern in ausgewählten Textdateien. Für Treffer gelten dieselben Vorschauentscheidungen und dieselbe Ausgabepipeline wie für Geheimnisse; manuelle Markierungen, die mit „… als private Daten ausblenden“ erstellt wurden, gehören zu dieser Klasse und folgen dieser Option (Abschnitt 12.3). Lokale Benutzernamen in generierten Pfad-Kopfzeilen und in der Baumwurzel werden als ein gemeinsamer Fund maskiert: Der Zähler zählt ihn als einen Wert, der ?-Indikator meldet, ob er verborgen oder sichtbar ist, und ein Klick schaltet alle maskierten Pfade zugleich um.
 
 Dokumentationsbereiche und -hosts, gängige CI-Benutzernamen, bekannte öffentliche DNS-Resolver und dokumentierte fiktive Telefonnummern bleiben sichtbar. Null Treffer sind keine Datenschutzgarantie. Die CLI verwendet `--hide-private-data`; vollständige Regeln und Grenzen der ersten Phase stehen in `Docs/HidePrivateData.md`.
 
@@ -395,7 +420,7 @@ Das Ergebnis hängt ab von:
 * aktivem Filter
 * markierten Knoten im Baum (für auswahlbasierte Operationen)
 
-Wenn der Zugriff verweigert wird, wird der Knoten als Zugriff verweigert markiert.
+Wenn der Zugriff verweigert wird, behält der Knoten seinen Namen und sein Symbol und erhält den Zusatz „[Zugriff verweigert]“.
 
 ### 13.1 Was die Zähler in der Statusleiste zeigen
 Die Statusleiste hat zwei Blöcke:

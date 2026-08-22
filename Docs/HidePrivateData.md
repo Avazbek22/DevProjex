@@ -185,7 +185,9 @@ guarantee.
 The desktop Hide private data counter also includes one logical finding when the displayed project
 root contains a masked local-user segment. Every generated path shares that one decision, so keeping
 the user name visible changes only the hidden count; repository web paths and roots without such a
-segment do not add a finding.
+segment do not add a finding. The row's status indicator reports the decision as its own line
+("User name in file paths: hidden" or "shown"), and the Preview scrollbar shows a single marker at
+the first generated path line instead of one marker per header.
 
 ## Intentionally visible ambiguous forms
 
