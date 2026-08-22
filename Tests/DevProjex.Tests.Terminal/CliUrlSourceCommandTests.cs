@@ -6,6 +6,73 @@ namespace DevProjex.Tests.Terminal;
 
 public sealed class CliUrlSourceCommandTests
 {
+	[Theory]
+	[InlineData(false, true, false)]
+	[InlineData(true, false, false)]
+	[InlineData(true, true, true)]
+	public async Task NonInteractiveTuiUrlFailsBeforeGitOrCacheAccess(
+		bool isInputInteractive,
+		bool isOutputInteractive,
+		bool isTermDumb)
+	{
+		using var data = new TemporaryDirectory();
+		var git = new CountingGitRepositoryService();
+		var services = new TerminalServiceFactory(() => data.Path).Create(AppLanguage.En) with
+		{
+			GitRepositoryService = git
+		};
+		var environment = new TestTerminalEnvironment
+		{
+			IsInputInteractive = isInputInteractive,
+			IsOutputInteractive = isOutputInteractive,
+			IsTermDumb = isTermDumb
+		};
+
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(_ => services))
+			.RunAsync(
+				["tui", "https://github.com/example/repository.git", "--language", "en"],
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Equal(0, git.CallCount);
+		Assert.Empty(services.RepoCacheService.ListCacheEntriesForManagement().Entries);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("DPX-TUI-NOT-INTERACTIVE", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task ExistingUnixDirectoryWithColonIsAnalyzedLocallyWithoutClone()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("Colon is not valid in a Windows directory name.");
+
+		using var workspace = new TemporaryDirectory();
+		using var data = new TemporaryDirectory();
+		var projectPath = workspace.CreateDirectory("repo.name:copy");
+		File.WriteAllText(Path.Combine(projectPath, "app.txt"), "content\n");
+		var git = new CountingGitRepositoryService();
+		var services = new TerminalServiceFactory(() => data.Path).Create(AppLanguage.En) with
+		{
+			GitRepositoryService = git
+		};
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(_ => services))
+			.RunAsync(
+				["analyze", projectPath, "--git-mode", "none", "--format", "json", "-o", "-"],
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Equal(0, git.CallCount);
+		using var report = JsonDocument.Parse(environment.StandardOutput);
+		Assert.Equal(1, report.RootElement.GetProperty("inventory").GetProperty("files").GetInt32());
+		Assert.Empty(environment.StandardError);
+	}
+
 	[Fact]
 	public async Task UrlSourceClonesReusesCacheSelectsBranchAndRecordsRecentHistory()
 	{
@@ -304,5 +371,59 @@ public sealed class CliUrlSourceCommandTests
 		public Task<string?> GetRemoteUrlAsync(
 			string repositoryPath,
 			CancellationToken cancellationToken = default) => throw new NotSupportedException();
+	}
+
+	private sealed class CountingGitRepositoryService : IGitRepositoryService
+	{
+		public int CallCount { get; private set; }
+
+		public Task<bool> IsGitAvailableAsync(CancellationToken cancellationToken = default)
+		{
+			CallCount++;
+			return Task.FromResult(true);
+		}
+
+		public Task<GitCloneResult> CloneAsync(
+			string url,
+			string targetDirectory,
+			IProgress<string>? progress = null,
+			CancellationToken cancellationToken = default) => Unexpected<GitCloneResult>();
+
+		public Task<IReadOnlyList<GitBranch>> GetBranchesAsync(
+			string repositoryPath,
+			CancellationToken cancellationToken = default) => Unexpected<IReadOnlyList<GitBranch>>();
+
+		public Task<string?> GetDefaultBranchAsync(
+			string repositoryPath,
+			CancellationToken cancellationToken = default) => Unexpected<string?>();
+
+		public Task<bool> SwitchBranchAsync(
+			string repositoryPath,
+			string branchName,
+			IProgress<string>? progress = null,
+			CancellationToken cancellationToken = default) => Unexpected<bool>();
+
+		public Task<bool> PullUpdatesAsync(
+			string repositoryPath,
+			IProgress<string>? progress = null,
+			CancellationToken cancellationToken = default) => Unexpected<bool>();
+
+		public Task<string?> GetHeadCommitAsync(
+			string repositoryPath,
+			CancellationToken cancellationToken = default) => Unexpected<string?>();
+
+		public Task<string?> GetCurrentBranchAsync(
+			string repositoryPath,
+			CancellationToken cancellationToken = default) => Unexpected<string?>();
+
+		public Task<string?> GetRemoteUrlAsync(
+			string repositoryPath,
+			CancellationToken cancellationToken = default) => Unexpected<string?>();
+
+		private Task<T> Unexpected<T>()
+		{
+			CallCount++;
+			throw new InvalidOperationException("Git must not be called for this source.");
+		}
 	}
 }

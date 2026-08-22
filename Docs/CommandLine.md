@@ -245,9 +245,11 @@ directory selects its effective subtree. Parent/child overlaps are deduplicated.
 An empty selected-path set means the complete effective tree. Absolute paths,
 `..`, and link-based escapes are rejected.
 
-`--select-from FILE` reads UTF-8 source-relative paths, one per line; empty lines
-are ignored. `--select-from -` reads redirected stdin and fails immediately when
-stdin is an interactive terminal. Its entries are combined with repeatable
+`--select-from FILE` reads strict UTF-8 source-relative paths, with an optional
+UTF-8 BOM, one per line; UTF-16 and UTF-32 inputs are rejected and empty lines
+are ignored. The 16 MiB limit is enforced while the stream is read, including if
+the file grows after opening. `--select-from -` reads redirected stdin and fails
+immediately when stdin is an interactive terminal. Its entries are combined with repeatable
 `--select`, deduplicated with the project filesystem path semantics, and replace
 profile path selection as one explicit override. Input is limited to 100,000
 non-empty entries and 16 MiB.
@@ -257,9 +259,14 @@ non-empty entries and 16 MiB.
 `tui`, `open`, `analyze`, `export context`, and `export project` accept either a
 local project directory or a Git repository URL as `PROJECT`. URL sources use the
 same managed clone cache and operation leases as Desktop. `--branch NAME` selects
-a validated branch for a URL source and is rejected for local paths. The lease is
+a validated branch for a URL source and is rejected for local paths and with
+`open --last`. An existing local directory takes precedence over the SCP-like URL
+heuristic, so legal Unix and macOS names containing `:` remain local; an explicit
+`scheme://` source is always treated as a URL. The lease is
 held for the complete operation and released afterward; generated cache paths are
-never reported as command results.
+never reported as results of direct URL-source commands. The interactive Terminal
+Workspace is the documented exception: its repository-details view displays the
+managed cache path for diagnostics. This TUI presentation will be unified separately.
 
 ```text
 devprojex export context https://github.com/owner/repo -o -
@@ -514,7 +521,11 @@ devprojex cache clear --force
 `cache path` prints the same managed Git clone cache root reported by `doctor`.
 `cache list` reports the repository URL, state, branch, commit, local path,
 approximate size, and last-use timestamp. Its JSON document uses
-`schemaVersion: 1` and kind `devprojex-repository-cache`.
+`schemaVersion: 1` and kind `devprojex-repository-cache`. If an index root cannot
+be read because its lock is busy or its schema is newer than this application,
+the available entries are still emitted, a localized warning goes to stderr, and
+the command returns policy exit code `3`. JSON adds `"incomplete": true` only in
+that case; a complete result omits the field.
 
 Removal commands are non-interactive and require `--force`. Their result reports
 removed, retained, and failed entries. A live repository lease is retained; any

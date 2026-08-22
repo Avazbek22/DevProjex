@@ -302,12 +302,13 @@ public class RepoCacheServiceTests : IDisposable
                 StringComparison.Ordinal));
 
 		var managementEntries = service.ListCacheEntriesForManagement();
+		Assert.True(managementEntries.IsComplete);
 		Assert.Contains(
-			managementEntries,
+			managementEntries.Entries,
 			entry => entry.RepositoryUrl == damagedUrl &&
 			         entry.State == RepositoryCacheEntryState.Damaged);
 		Assert.Contains(
-			managementEntries,
+			managementEntries.Entries,
 			entry => entry.LocalPath == newerDamagedDuplicate &&
 			         entry.State == RepositoryCacheEntryState.Damaged);
     }

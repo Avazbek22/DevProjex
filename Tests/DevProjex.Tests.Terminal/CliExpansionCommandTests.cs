@@ -2,6 +2,7 @@ using DevProjex.Infrastructure.Persistence;
 using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Infrastructure.Git;
 using DevProjex.Kernel.Abstractions;
+using DevProjex.Kernel.Models;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -238,8 +239,126 @@ public sealed class CliExpansionCommandTests
 		Assert.Equal(
 			"devprojex-repository-cache",
 			document.RootElement.GetProperty("kind").GetString());
+		Assert.False(document.RootElement.TryGetProperty("incomplete", out _));
 		Assert.Empty(document.RootElement.GetProperty("items").EnumerateArray());
 		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
+	public async Task CacheRemoveNotFoundSanitizesCredentials()
+	{
+		using var data = new TemporaryDirectory();
+		const string repositoryUrl = "https://user:top-secret@example.com/owner/repository.git";
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(() => data.Path))
+			.RunAsync(
+				["cache", "remove", repositoryUrl, "--force", "--language", "en"],
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.RuntimeError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.DoesNotContain("top-secret", environment.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain(repositoryUrl, environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("https://example.com/owner/repository.git", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void RecentTextEntryEscapesControlCharactersInsideFields()
+	{
+		var line = RecentCommandHandler.FormatTextEntry(
+			"folder",
+			"name\nrow",
+			"/tmp/source\r\tpath",
+			new DateTimeOffset(2026, 1, 2, 3, 4, 5, TimeSpan.Zero));
+
+		var fields = line.Split('\t');
+		Assert.Equal(4, fields.Length);
+		Assert.Equal("name\\nrow", fields[1]);
+		Assert.Equal("/tmp/source\\r\\tpath", fields[2]);
+		Assert.DoesNotContain('\n', line);
+		Assert.DoesNotContain('\r', line);
+	}
+
+	[Fact]
+	public void CacheTextEntryEscapesControlCharactersInsideFields()
+	{
+		var entry = new RepositoryCacheCatalogEntry(
+			"https://example.com/owner/repo\nname.git",
+			"repo",
+			"feature\rbranch",
+			new DateTimeOffset(2026, 1, 2, 3, 4, 5, TimeSpan.Zero),
+			42,
+			RepositoryCacheContentKind.Git,
+			"/tmp/cache\tpath",
+			"commit\nvalue");
+
+		var line = CacheCommandHandler.FormatTextEntry(entry);
+
+		var fields = line.Split('\t');
+		Assert.Equal(7, fields.Length);
+		Assert.Equal("https://example.com/owner/repo\\nname.git", fields[0]);
+		Assert.Equal("feature\\rbranch", fields[2]);
+		Assert.Equal("commit\\nvalue", fields[3]);
+		Assert.Equal("/tmp/cache\\tpath", fields[6]);
+		Assert.DoesNotContain('\n', line);
+		Assert.DoesNotContain('\r', line);
+	}
+
+	[Fact]
+	public async Task CacheListWithBusyIndexLockReportsIncompletePolicyResult()
+	{
+		using var data = new TemporaryDirectory();
+		var factory = new TerminalServiceFactory(() => data.Path);
+		var services = factory.Create(AppLanguage.En);
+		PublishSnapshot(services.RepoCacheService, "https://github.com/example/locked-list.git");
+		var lockPath = Path.Combine(
+			services.RepoCacheService.CacheRootPath,
+			"cache-index.json.lock");
+		using var heldLock = new FileStream(
+			lockPath,
+			FileMode.OpenOrCreate,
+			FileAccess.ReadWrite,
+			FileShare.None);
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment, factory).RunAsync(
+			["cache", "list", "--format", "json", "--language", "en"],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.PolicyFailure, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		Assert.True(document.RootElement.GetProperty("incomplete").GetBoolean());
+		Assert.Empty(document.RootElement.GetProperty("items").EnumerateArray());
+		Assert.Contains("cache list is incomplete", environment.StandardError, StringComparison.OrdinalIgnoreCase);
+	}
+
+	[Fact]
+	public async Task CacheListWithFutureSchemaReportsIncompletePolicyResult()
+	{
+		using var data = new TemporaryDirectory();
+		var factory = new TerminalServiceFactory(() => data.Path);
+		var services = factory.Create(AppLanguage.En);
+		Directory.CreateDirectory(services.RepoCacheService.CacheRootPath);
+		await File.WriteAllTextAsync(
+			Path.Combine(services.RepoCacheService.CacheRootPath, "cache-index.json"),
+			JsonSerializer.Serialize(
+				new { SchemaVersion = 999, Entries = Array.Empty<object>() },
+				new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+			TestContext.Current.CancellationToken);
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment, factory).RunAsync(
+			["cache", "list", "--format", "json", "--language", "en"],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.PolicyFailure, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		Assert.True(document.RootElement.GetProperty("incomplete").GetBoolean());
+		Assert.Empty(document.RootElement.GetProperty("items").EnumerateArray());
+		Assert.Contains("cache list is incomplete", environment.StandardError, StringComparison.OrdinalIgnoreCase);
 	}
 
 	[Fact]

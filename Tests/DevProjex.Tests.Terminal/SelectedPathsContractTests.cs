@@ -188,6 +188,46 @@ public sealed class SelectedPathsContractTests
 	}
 
 	[Fact]
+	public async Task SelectFromFileAcceptsUtf8Bom()
+	{
+		using var workspace = CreateWorkspace();
+		var selectionFile = Path.Combine(workspace.Path, "selection-utf8-bom.txt");
+		await File.WriteAllTextAsync(
+			selectionFile,
+			"src/a.cs\n",
+			new UTF8Encoding(encoderShouldEmitUTF8Identifier: true),
+			TestContext.Current.CancellationToken);
+
+		using var document = await ExportJsonAsync(
+			workspace.Path,
+			"--select-from", selectionFile);
+
+		Assert.Equal(FullContentPaths(workspace.Path, "src/a.cs"), ReadFilePaths(document));
+	}
+
+	[Fact]
+	public async Task SelectFromFileRejectsUtf16Bom()
+	{
+		using var workspace = CreateWorkspace();
+		var selectionFile = Path.Combine(workspace.Path, "selection-utf16.txt");
+		await File.WriteAllTextAsync(
+			selectionFile,
+			"src/a.cs\n",
+			Encoding.Unicode,
+			TestContext.Current.CancellationToken);
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace.Path,
+			environment,
+			"--select-from", selectionFile);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("DPX-CLI-SELECT-FROM-INVALID", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task SelectFromRedirectedStdinReadsUtf8Paths()
 	{
 		using var workspace = CreateWorkspace();

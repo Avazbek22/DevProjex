@@ -326,8 +326,8 @@ Direct commands default to `standard`. TUI and `open` default to `local` when a
 valid local profile exists, otherwise `standard`.
 
 `open --last` resolves the last project itself. It cannot be combined with a
-project argument or any selection override because silently discarding those
-overrides is forbidden.
+project argument, `--branch`, or any selection override because silently
+discarding those overrides is forbidden.
 
 ## Project Sources
 
@@ -335,15 +335,21 @@ overrides is forbidden.
 directory or a Git repository URL as `PROJECT`. URL sources are resolved through
 the shared managed clone cache; no second clone mechanism exists. One cache
 session lease spans the complete operation. `--branch NAME` is valid only for a
-URL source and branch names are validated before Git starts.
+URL source, conflicts with `open --last`, and branch names are validated before
+Git starts. An existing local directory wins over SCP-like source detection, so
+legal Unix and macOS directory names containing `:` remain local. An explicit
+`scheme://` source is always interpreted as a URL.
 
 Cached repositories are reusable offline. A successful first clone records the
 safe URL in recent-repository history. Cancellation removes clone staging;
 network and clone failures return runtime exit `1` without opening or exporting
 partial content. The generated cache path is internal and never replaces the
-requested command result. In particular, successful `open URL` writes the safe
+result of a direct URL-source command. In particular, successful `open URL` writes the safe
 repository URL rather than the physical cache checkout path. Profile commands
-and `tree` accept local directories only.
+and `tree` accept local directories only. The interactive Terminal Workspace is
+the sole documented exception: its repository-details view exposes the managed
+cache path for diagnostics. Unifying that TUI presentation is outside this CLI
+contract phase.
 
 ## Command Contracts
 
@@ -528,7 +534,11 @@ containers are included by `clear`. A retained or failed entry returns policy ex
 `3`, never clean success. Cache listing includes both ready and damaged indexed
 entries; damaged entries publish `state: "damaged"`. Cache-list JSON schema version
 1 uses kind `devprojex-repository-cache` and publishes URL, state, branch, commit,
-internal local path, approximate size, and last-use timestamp.
+internal local path, approximate size, and last-use timestamp. If any cache root
+cannot be read because its index lock is unavailable or its schema is newer, the
+command emits all available entries, writes a localized warning to stderr, and
+returns policy exit `3`. JSON adds `"incomplete": true` only for this partial
+result; complete schema-version-1 output omits that additive field.
 
 ### `help`
 
@@ -679,7 +689,7 @@ that prevents an accepted option from becoming a no-op.
 | analyze/tree/context/project/open | `--profile` | `standard`; `open`: `auto` | resolves `standard`, `local`, or a portable profile before explicit overrides | `auto` is accepted only by `open`; conflicts with `open --last` | requested payload/path stays on stdout; unresolved profile exits `2` | parser, resolver, handler, process |
 | analyze/tree/context/project/open | `--root` | profile roots | replaces the profile root set with each repeated top-level relative path | repeatable; conflicts with `open --last`; invalid/out-of-source path exits `2` | requested payload/path stays on stdout | parser, resolver, handler, process |
 | analyze/tree/context/project/open | `--extension` | profile extensions | replaces the profile extension set with each repeated normalized extension | repeatable; conflicts with `open --last` | requested payload/path stays on stdout | parser, resolver, handler, process |
-| analyze/tree/context/project/open | `--select`, `--select-from` | profile selected paths | combines direct paths with UTF-8 file/redirected-stdin entries into one explicit path override | repeatable direct values; interactive stdin, oversized input, invalid/out-of-source paths, and `open --last` fail with exit `2` | requested payload/path stays on stdout | parser, reader, resolver, process |
+| analyze/tree/context/project/open | `--select`, `--select-from` | profile selected paths | combines direct paths with strict UTF-8 file/redirected-stdin entries into one explicit path override | optional UTF-8 BOM is accepted; UTF-16/UTF-32, interactive stdin, oversized input, invalid/out-of-source paths, and `open --last` fail with exit `2`; the byte limit is enforced during reading | requested payload/path stays on stdout | parser, reader, resolver, process |
 | analyze/tree/context/project/open | `--git-mode` | profile Git mode | replaces the profile mode with `none`, `gitignore`, or `tracked` | conflicts with `open --last`; `tracked` requires Git CLI and at least one readable applicable index | on unavailable index, `analyze` preserves its requested report; tree/context/project/open create no artifact and emit no success payload; diagnostic uses stderr and exit `3` | parser, resolver, handler, process |
 | analyze/tree/context/project/open | `--exclude` | profile exclusions | replaces the path-exclusion set with repeated typed values | repeatable; `none` conflicts with every other value; conflicts with `open --last` | requested payload/path stays on stdout; invalid value exits `2` | parser, resolver, handler, process |
 | analyze/context/project/open | `--hide-secrets` | profile content-transformation state | independently enables or disables detected-value redaction without changing path filters | optional explicit Boolean; conflicts with `open --last` | requested payload/path stays on stdout; inspection failure exits `1` without a complete artifact | parser, resolver, handler, process |
@@ -706,7 +716,7 @@ that prevents an accepted option from becoming a no-op.
 | `export project` | `--force` | off | atomically replaces an existing ZIP | invalid for folder output | success path on stdout; invalid combination exits `2` | parser, destination, integration |
 | `export project` | `--dry-run` | off | validates plan, kind, and exact destination without copying | creates no folder, ZIP, parent, or staging | stdout empty; one readiness plan on stderr | handler, filesystem-effects, process |
 | `recent` | `--kind`, `--limit`, `-f`/`--format` | `all`, `48`, `text` | filters and bounds newest-first workspace history and selects text or JSON | limit range is `1..100000` | requested list on stdout; invalid value exits `2` | parser, schema, process |
-| `cache list` | `-f`, `--format` | `text` | selects text or versioned cache JSON | none | requested list on stdout | parser, schema, process |
+| `cache list` | `-f`, `--format` | `text` | selects text or versioned cache JSON | a busy index lock or future-schema root marks the result incomplete | available entries stay on stdout; warning on stderr and exit `3`; JSON adds `incomplete: true` only for a partial list | parser, schema, process |
 | `cache remove`, `cache clear` | `--force` | off | authorizes non-interactive destructive cleanup | required | result on stdout; retained/failed entries exit `3`, missing URL exits `1` | parser, leases, process |
 | `profile show` | `--profile`, `--format` | `standard`, `text` | resolves a profile and selects text or profile JSON | `auto` is not accepted | document on stdout; invalid/unresolved value exits `2` | parser, profile handler |
 | `profile export` | `--profile`, `-o`/`--output`, `--force` | `local`, required, off | resolves and atomically writes an exact portable profile outside the source; parent must exist | source safety precedes conflict; existing file needs force; directories always conflict | real committed absolute path on stdout; runtime write failure exits `1`, safety exits `3`, conflict exits `4` | parser, profile handler, filesystem effects |

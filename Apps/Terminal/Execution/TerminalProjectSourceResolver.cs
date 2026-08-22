@@ -126,6 +126,8 @@ internal sealed class TerminalProjectSourceResolver(
 			return false;
 		if (source.Contains("://", StringComparison.Ordinal))
 			return true;
+		if (Directory.Exists(source))
+			return false;
 		var colon = source.IndexOf(':');
 		return colon > 0 &&
 		       (source[..colon].Contains('@') || source[..colon].Contains('.'));

@@ -149,6 +149,9 @@ public sealed class DevProjexCommandTree
 		});
 		command.SetAction(async (parseResult, cancellationToken) =>
 		{
+			if (!TerminalTuiInteractivityGate.TryEnter(environment, _localization))
+				return CommandLineExitCodes.UsageError;
+
 			var output = new TerminalOutputOptions(
 				parseResult.GetValue(color),
 				Plain: parseResult.GetValue(plain));
@@ -541,6 +544,12 @@ public sealed class DevProjexCommandTree
 			{
 				result.AddError(LocalizedParseError.Create(
 					L("Terminal.Validation.LastSelectionConflict")));
+			}
+			if (result.GetValue(last) &&
+			    result.GetResult(branch) is { Implicit: false })
+			{
+				result.AddError(LocalizedParseError.Create(
+					L("Terminal.Validation.LastBranchConflict")));
 			}
 			if (CliParseValue.TryGet(result, filter, out var filterValue) &&
 			    filterValue is not null &&

@@ -49,15 +49,10 @@ internal static class SelectionPathListReader
 					FileShare.Read,
 					bufferSize: 16 * 1024,
 					FileOptions.Asynchronous | FileOptions.SequentialScan);
-				if (stream.Length > MaximumBytes)
-				{
-					await stream.DisposeAsync().ConfigureAwait(false);
-					throw InvalidSource();
-				}
 				ownedReader = new StreamReader(
-					stream,
+					new MaximumLengthReadStream(stream, MaximumBytes),
 					new UTF8Encoding(false, true),
-					detectEncodingFromByteOrderMarks: true,
+					detectEncodingFromByteOrderMarks: false,
 					bufferSize: 16 * 1024,
 					leaveOpen: false);
 				reader = ownedReader;
@@ -236,6 +231,19 @@ internal static class SelectionPathListReader
 		public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
 		public override void SetLength(long value) => throw new NotSupportedException();
 		public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+		protected override void Dispose(bool disposing)
+		{
+			if (disposing)
+				inner.Dispose();
+			base.Dispose(disposing);
+		}
+
+		public override async ValueTask DisposeAsync()
+		{
+			await inner.DisposeAsync().ConfigureAwait(false);
+			GC.SuppressFinalize(this);
+		}
 	}
 
 	private static ProjectContextValidationException InvalidSource() =>

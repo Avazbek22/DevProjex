@@ -315,21 +315,28 @@ public sealed class RepoCacheService : IRepoCacheService
 		return catalog.ToArray();
 	}
 
-	public IReadOnlyList<RepositoryCacheCatalogEntry> ListCacheEntriesForManagement()
+	public RepositoryCacheManagementListResult ListCacheEntriesForManagement()
 	{
 		var catalog = new List<RepositoryCacheCatalogEntry>();
+		var unavailableRootCount = 0;
 		foreach (var searchRoot in CacheSearchRootPaths)
 		{
 			var fileSet = GetIndexFileSet(searchRoot);
 			if (!File.Exists(fileSet.PrimaryPath) && !File.Exists(fileSet.BackupPath))
 				continue;
 			if (!CrossProcessFileLock.TryAcquire(fileSet, IndexLockTimeout, out var heldLock))
+			{
+				unavailableRootCount++;
 				continue;
+			}
 
 			using (heldLock)
 			{
 				if (HasUnsupportedIndexDocument(fileSet))
+				{
+					unavailableRootCount++;
 					continue;
+				}
 
 				var document = LoadIndex(fileSet);
 				List<RepositoryCacheIndexEntry>? retained = null;
@@ -366,7 +373,9 @@ public sealed class RepoCacheService : IRepoCacheService
 				? byUrl
 				: PathComparer.Default.Compare(left.LocalPath, right.LocalPath);
 		});
-		return catalog.ToArray();
+		return new RepositoryCacheManagementListResult(
+			catalog.ToArray(),
+			unavailableRootCount);
 	}
 
 	private static RepositoryCacheCatalogEntry ToCatalogEntry(RepositoryCacheIndexEntry entry) =>

@@ -91,7 +91,10 @@ newest-first `items` array. Entries use stable `kind`, nullable `path`/`url`,
 `cache list --format json` emits schema version 1 with kind
 `devprojex-repository-cache`. Entries expose `url`, `state`, nullable `branch`
 and `commit`, `localPath`, `approximateSizeBytes`, and `lastUsed`. Both ready and
-damaged indexed entries are visible; `state` is `ready` or `damaged`.
+damaged indexed entries are visible; `state` is `ready` or `damaged`. A partial
+listing caused by a busy index lock or future-schema root additionally emits
+`"incomplete": true`, writes a localized warning to stderr, and returns policy
+exit code `3`. Complete output omits the additive field.
 
 `cache remove` and `cache clear` calculate `removed`, `retained`, and `failed`
 inside the index-locked operation. A busy index lock, unsupported future schema,

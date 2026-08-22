@@ -455,8 +455,15 @@ public sealed class CliV1ParserRegressionTests
 	[InlineData("--root|src")]
 	[InlineData("--extension|.cs")]
 	[InlineData("--select|src/app.cs")]
+	[InlineData("--select-from|selection.txt")]
 	[InlineData("--git-mode|none")]
 	[InlineData("--exclude|none")]
+	[InlineData("--hide-secrets")]
+	[InlineData("--hide-private-data")]
+	[InlineData("--compress-code")]
+	[InlineData("--strip-comments")]
+	[InlineData("--strip-blank-lines")]
+	[InlineData("--branch|main")]
 	public void OpenLastRejectsEveryExplicitSelectionOverride(string selectionOverride)
 	{
 		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();

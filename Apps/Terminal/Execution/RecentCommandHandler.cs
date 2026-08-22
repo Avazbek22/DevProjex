@@ -1,6 +1,7 @@
 using System.Text.Json;
 using DevProjex.Application.Workspaces;
 using DevProjex.Terminal.CommandLine;
+using DevProjex.Terminal.Rendering;
 
 namespace DevProjex.Terminal.Execution;
 
@@ -47,14 +48,11 @@ internal sealed class RecentCommandHandler(
 		}
 
 		foreach (var entry in entries)
-		{
-			environment.Output.WriteLine(string.Join(
-				'\t',
+			environment.Output.WriteLine(FormatTextEntry(
 				entry.Kind,
 				entry.Name,
-				entry.Path ?? entry.Url,
-				entry.LastOpened.ToString("O")));
-		}
+				entry.Path ?? entry.Url ?? string.Empty,
+				entry.LastOpened));
 
 		return CommandLineExitCodes.Success;
 	}
@@ -107,6 +105,18 @@ internal sealed class RecentCommandHandler(
 	}
 
 	private static string NormalizePath(string path) => path.Replace('\\', '/');
+
+	internal static string FormatTextEntry(
+		string kind,
+		string name,
+		string source,
+		DateTimeOffset lastOpened) =>
+		string.Join(
+			'\t',
+			TerminalTextEscaping.EscapeSingleLine(kind),
+			TerminalTextEscaping.EscapeSingleLine(name),
+			TerminalTextEscaping.EscapeSingleLine(source),
+			lastOpened.ToString("O"));
 
 	private sealed record RecentOutputEntry(
 		string Kind,

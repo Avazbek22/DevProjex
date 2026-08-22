@@ -151,7 +151,7 @@ devprojex analyze . --git-mode tracked --exclude smart-ignore
 ### What the CLI adds
 
 * Scriptable exports for CI pipelines — JSON reports, stdout output, deterministic files
-* Git repository URLs as project sources — analyze, export, or open a repository straight from its URL through a managed clone cache (`devprojex cache`, `devprojex recent`)
+* Git repository URLs as project sources — analyze, export, open, or start the TUI on a repository straight from its URL through a managed clone cache (`devprojex cache`, `devprojex recent`)
 * A redaction pre-flight for CI — `--findings` lists rule, category, file, and source line (never the values), and `--fail-on-findings` fails the pipeline when findings exist
 * Composable selection — pipe a file list from `git diff` or any tool into `--select-from -`
 * Documented aliases and short flags (`export ctx`, `export proj`, `-f`, `-n`, `-q`) plus `devprojex help <command>` and shell completion for bash, zsh, fish, and PowerShell

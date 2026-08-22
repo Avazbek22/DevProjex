@@ -8,8 +8,20 @@ namespace DevProjex.Terminal.Execution;
 public sealed class TerminalServiceFactory(
 	Func<string>? appDataPathProvider = null)
 {
+	private readonly Func<AppLanguage, TerminalServices>? _servicesProvider;
+
+	internal TerminalServiceFactory(Func<AppLanguage, TerminalServices> servicesProvider)
+		: this()
+	{
+		_servicesProvider = servicesProvider ??
+			throw new ArgumentNullException(nameof(servicesProvider));
+	}
+
 	public TerminalServices Create(AppLanguage language)
 	{
+		if (_servicesProvider is not null)
+			return _servicesProvider(language);
+
 		var resolvedAppDataPathProvider =
 			appDataPathProvider ?? UserDataPathResolver.GetConfigurationRoot;
 		var localization = new LocalizationService(new JsonLocalizationCatalog(), language);
