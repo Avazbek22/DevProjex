@@ -31,6 +31,22 @@ public sealed class HumanOutputRenderer(
 				Markup.Escape(row.Value));
 		}
 		console.Write(table);
+		if (plan.Findings is not { } findings)
+			return;
+
+		console.WriteLine();
+		var findingsTable = new Table()
+			.Border(_capabilities.UseUnicode ? TableBorder.Rounded : TableBorder.Ascii)
+			.BorderColor(Color.Grey)
+			.AddColumn($"[cyan]{Markup.Escape(_localization["Terminal.Analysis.FindingCategory"])}[/]")
+			.AddColumn($"[cyan]{Markup.Escape(_localization["Terminal.Analysis.FindingRule"])}[/]")
+			.AddColumn($"[cyan]{Markup.Escape(_localization["Terminal.Analysis.FindingLocation"])}[/]");
+		foreach (var finding in findings)
+		{
+			var columns = AnalysisTextFormatter.CreateFindingColumns(finding);
+			findingsTable.AddRow(columns.Select(Markup.Escape).ToArray());
+		}
+		console.Write(findingsTable);
 	}
 
 	public void WriteSuccessPath(string path)

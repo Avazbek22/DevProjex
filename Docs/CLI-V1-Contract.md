@@ -437,6 +437,9 @@ blank-line removal; LF, CRLF, and lone CR are line boundaries. The list count
 equals the combined effective matched counters from the same output session.
 Descriptors are materialized only when `--findings` is requested. Values, source
 text, assignment context, fingerprints, and raw detector exceptions are forbidden.
+Text output places descriptors in a separate, localized three-column findings table
+after the main analysis table. Plain output aligns the same columns with spaces and
+never emits tab characters.
 `--fail-on-findings` writes the report and returns `3` when that effective count
 is nonzero; it is independent from `--strict`.
 
@@ -514,7 +517,9 @@ devprojex recent
 This is a read-only projection of the 32-entry folder history and 16-entry
 repository-URL history, newest first. JSON schema version 1 uses kind
 `devprojex-recent` and stable `kind`, `path`/`url`, `name`, `parent`, and
-`lastOpened` properties.
+`lastOpened` properties. Text output uses display-cell-aligned, space-separated
+columns and renders the timestamp in local time as `yyyy-MM-dd HH:mm`; JSON retains
+the full UTC ISO-8601 value.
 
 ### `cache`
 
@@ -534,7 +539,9 @@ containers are included by `clear`. A retained or failed entry returns policy ex
 `3`, never clean success. Cache listing includes both ready and damaged indexed
 entries; damaged entries publish `state: "damaged"`. Cache-list JSON schema version
 1 uses kind `devprojex-repository-cache` and publishes URL, state, branch, commit,
-internal local path, approximate size, and last-use timestamp. If any cache root
+internal local path, approximate size, and last-use timestamp. Text output aligns
+columns by display-cell width, renders binary sizes such as `68.2 MiB`, and uses
+local `yyyy-MM-dd HH:mm` timestamps without tab characters. If any cache root
 cannot be read because its index lock is unavailable or its schema is newer, the
 command emits all available entries, writes a localized warning to stderr, and
 returns policy exit `3`. JSON adds `"incomplete": true` only for this partial
@@ -704,7 +711,7 @@ that prevents an accepted option from becoming a no-op.
 | `analyze` | `--fail-on-findings` | off | writes the report, then gates on effective findings | independent from `--strict` | requested report remains intact; a nonzero finding count exits `3` | handler, process |
 | URL-capable commands | `--branch` | remote default branch | selects a validated repository branch under an operation lease | rejected for local paths and with `open --last` | ordinary command payload remains on stdout; clone/branch failure exits `1` or invalid name exits `2` | parser, resolver, Git fixture |
 | analyze/context/project | `--color` | `auto` | selects ANSI color policy independently for the relevant human stream | `always` conflicts with `--plain`; `never` does not force ASCII | requested payload stays on stdout; conflict exits `2` | parser, rendering, process |
-| analyze/context/project | `--progress` | `auto` | selects automatic, forced, or disabled operational progress on stderr | quiet/minimal suppress optional progress; plain forced progress is static ASCII | requested payload stays on stdout | parser, rendering, process |
+| analyze/context/project | `--progress` | `auto` | selects automatic, forced, or disabled operational progress on stderr | quiet/minimal suppress optional progress; URL-source Git operations use bounded milestones when rewriting is unavailable | requested payload stays byte-clean on stdout | parser, rendering, process |
 | analyze/context/project | `--verbosity` | `normal` | controls optional operational stderr from quiet through safe diagnostic context | never removes requested stdout or suppresses errors | requested payload stays on stdout; invalid value exits `2` | parser, rendering, process |
 | analyze/context/project | `--plain` | off | selects line-oriented ASCII human output and disables ANSI, markup, decoration, and animation | conflicts with `--color always` | machine schema and requested payload stay unchanged; conflict exits `2` | parser, rendering, process |
 | `export context` | `--view`, `--format` | `tree-content`, `markdown` | selects typed document sections and serializer | none | document on stdout/file; invalid value exits `2` | parser, serializer, process |
@@ -801,12 +808,12 @@ Color precedence is:
 
 `TERM=dumb` disables ANSI, interactive progress, and TUI startup. Direct commands
 remain usable. stdout and stderr capabilities are evaluated independently.
-Automatic progress animates only when stderr is interactive and CI is not active.
-`--plain --progress always` emits bounded static ASCII progress lines on stderr;
-plain `auto` remains suppressed. Explicit `--progress always` also falls back to
-bounded static lines when stderr is redirected or `TERM=dumb`, even if
-`--color always` was requested. `quiet` and `minimal` suppress optional progress
-even when `always` is requested.
+Automatic animated progress runs only when stderr is interactive and CI is not
+active. URL-source Git operations use a single carriage-return-updated line in that
+mode. Redirected stderr, CI, `TERM=dumb`, and `--plain` use at most six static
+milestone lines for URL-source Git progress in both `auto` and `always` modes.
+`--progress never`, `quiet`, and `minimal` suppress that progress completely.
+All progress remains on stderr and never changes the requested stdout payload.
 
 ## Destination and Atomicity
 

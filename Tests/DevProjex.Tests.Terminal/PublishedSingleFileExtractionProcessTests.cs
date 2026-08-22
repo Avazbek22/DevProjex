@@ -130,14 +130,34 @@ public sealed class PublishedSingleFileExtractionProcessTests
 			application,
 			[
 				"export", "context", repositoryUrl,
-				"--git-mode", "none", "--view", "content", "--format", "text", "-o", "-", "--plain"
+				"--git-mode", "none", "--view", "content", "--format", "text", "-o", "-", "--plain",
+				"--language", "en"
 			],
 			environment,
 			workspace.Path,
 			TestContext.Current.CancellationToken);
 		Assert.Equal(CommandLineExitCodes.Success, context.ExitCode);
 		Assert.Contains("PublishedRemoteMarker", context.StandardOutput, StringComparison.Ordinal);
-		Assert.Empty(context.StandardError);
+		var progressLines = context.StandardError
+			.ReplaceLineEndings("\n")
+			.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+		Assert.InRange(progressLines.Length, 2, 6);
+		Assert.StartsWith("Cloning ", progressLines[0], StringComparison.Ordinal);
+		Assert.Equal("Clone completed.", progressLines[^1]);
+
+		var quietContext = await RunAsync(
+			application,
+			[
+				"export", "context", repositoryUrl,
+				"--git-mode", "none", "--view", "content", "--format", "text", "-o", "-", "--plain",
+				"--language", "en", "--progress", "never"
+			],
+			environment,
+			workspace.Path,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(CommandLineExitCodes.Success, quietContext.ExitCode);
+		Assert.Equal(context.StandardOutput, quietContext.StandardOutput);
+		Assert.Empty(quietContext.StandardError);
 
 		var destination = Path.Combine(workspace.Path, "url", "exported");
 		var project = await RunAsync(

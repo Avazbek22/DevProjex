@@ -843,8 +843,13 @@
   "Terminal.Cache.NotFound": "Кэштелген репозиторий табылмады: {0}",
   "Terminal.Cache.ListIncomplete": "Кэш тізімі толық емес. Оқылмаған кэш түбірлері: {0}.",
   "Terminal.Cache.Result": "Жойылды: {0}. Сақталды: {1}. Қате: {2}.",
+  "Terminal.Progress.Clone.Start": "{0} клондануда...",
+  "Terminal.Progress.Clone.Completed": "Клондау аяқталды.",
   "Terminal.Analysis.Findings": "Табылымдар",
   "Terminal.Analysis.Finding": "Табылым",
+  "Terminal.Analysis.FindingCategory": "Санат",
+  "Terminal.Analysis.FindingRule": "Ереже",
+  "Terminal.Analysis.FindingLocation": "Файл:жол",
   "Terminal.Error.BranchLocal": "--branch параметрін тек Git репозиторийінің URL мекенжайымен пайдалануға болады.",
   "Terminal.Error.BranchUnavailable": "Сұралған Git тармағы қолжетімсіз."
 }

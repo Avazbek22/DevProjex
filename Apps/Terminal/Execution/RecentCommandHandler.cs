@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using DevProjex.Application.Workspaces;
 using DevProjex.Terminal.CommandLine;
@@ -47,12 +48,8 @@ internal sealed class RecentCommandHandler(
 			return CommandLineExitCodes.Success;
 		}
 
-		foreach (var entry in entries)
-			environment.Output.WriteLine(FormatTextEntry(
-				entry.Kind,
-				entry.Name,
-				entry.Path ?? entry.Url ?? string.Empty,
-				entry.LastOpened));
+		foreach (var line in FormatTextEntries(entries))
+			environment.Output.WriteLine(line);
 
 		return CommandLineExitCodes.Success;
 	}
@@ -106,19 +103,17 @@ internal sealed class RecentCommandHandler(
 
 	private static string NormalizePath(string path) => path.Replace('\\', '/');
 
-	internal static string FormatTextEntry(
-		string kind,
-		string name,
-		string source,
-		DateTimeOffset lastOpened) =>
-		string.Join(
-			'\t',
-			TerminalTextEscaping.EscapeSingleLine(kind),
-			TerminalTextEscaping.EscapeSingleLine(name),
-			TerminalTextEscaping.EscapeSingleLine(source),
-			lastOpened.ToString("O"));
+	internal static IReadOnlyList<string> FormatTextEntries(
+		IReadOnlyList<RecentOutputEntry> entries) =>
+		TerminalColumnLayout.Format(entries.Select(static entry => new[]
+		{
+			TerminalTextEscaping.EscapeSingleLine(entry.Kind),
+			TerminalTextEscaping.EscapeSingleLine(entry.Name),
+			TerminalTextEscaping.EscapeSingleLine(entry.Path ?? entry.Url ?? string.Empty),
+			entry.LastOpened.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)
+		}).ToArray());
 
-	private sealed record RecentOutputEntry(
+	internal sealed record RecentOutputEntry(
 		string Kind,
 		string? Path,
 		string? Url,

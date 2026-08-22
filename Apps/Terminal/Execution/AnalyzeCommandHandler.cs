@@ -182,10 +182,18 @@ internal static class AnalysisTextFormatter
 	public static string Build(ProjectContextPlan plan, LocalizationService localization)
 	{
 		var rows = BuildRows(plan, localization);
-		return string.Join(
-			       Environment.NewLine,
-			       rows.Select(static row => $"{row.Label}: {row.Value}")) +
-		       Environment.NewLine;
+		var output = new StringBuilder();
+		foreach (var row in rows)
+			output.Append(row.Label).Append(": ").AppendLine(row.Value);
+
+		if (plan.Findings is { } findings)
+		{
+			output.AppendLine();
+			foreach (var line in BuildFindingTable(findings, localization))
+				output.AppendLine(line);
+		}
+
+		return output.ToString();
 	}
 
 	public static IReadOnlyList<AnalysisTextRow> BuildRows(
@@ -265,9 +273,6 @@ internal static class AnalysisTextFormatter
 			rows.Add(new AnalysisTextRow(
 				localization["Terminal.Analysis.Findings"],
 				findings.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)));
-			rows.AddRange(findings.Select(finding => new AnalysisTextRow(
-				localization["Terminal.Analysis.Finding"],
-				FormatFinding(finding))));
 		}
 		if (plan.UnscannableFiles is { Count: > 0 } unscannableFiles)
 		{
@@ -319,10 +324,33 @@ internal static class AnalysisTextFormatter
 		return rows;
 	}
 
+	internal static IReadOnlyList<string> BuildFindingTable(
+		IReadOnlyList<EffectiveRedactionFinding> findings,
+		LocalizationService localization)
+	{
+		var rows = new List<string[]>(findings.Count + 1)
+		{
+			new[]
+			{
+				localization["Terminal.Analysis.FindingCategory"],
+				localization["Terminal.Analysis.FindingRule"],
+				localization["Terminal.Analysis.FindingLocation"]
+			}
+		};
+		rows.AddRange(findings.Select(CreateFindingColumns));
+		return TerminalColumnLayout.Format(rows);
+	}
+
 	internal static string FormatFinding(EffectiveRedactionFinding finding) =>
-		$"{ToCategoryToken(finding.Category)}\t{finding.RuleId}\t" +
+		TerminalColumnLayout.Format([CreateFindingColumns(finding)])[0];
+
+	internal static string[] CreateFindingColumns(EffectiveRedactionFinding finding) =>
+	[
+		ToCategoryToken(finding.Category),
+		TerminalTextEscaping.EscapeSingleLine(finding.RuleId),
 		$"{TerminalTextEscaping.EscapeSingleLine(finding.RelativePath.Replace('\\', '/'))}:" +
-		finding.LineNumber.ToString(System.Globalization.CultureInfo.InvariantCulture);
+		finding.LineNumber.ToString(System.Globalization.CultureInfo.InvariantCulture)
+	];
 
 	private static string FormatProfile(ProjectProfileReference? profile) =>
 		profile?.Kind switch

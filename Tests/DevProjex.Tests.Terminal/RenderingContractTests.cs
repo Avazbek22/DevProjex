@@ -266,11 +266,181 @@ public sealed class RenderingContractTests
 
 		var formatted = AnalysisTextFormatter.FormatFinding(finding);
 
-		Assert.Equal("secret\trule-id\tsafe\\nforged\\rsegment\\t\\u001Bname.cs:42", formatted);
+		Assert.Equal("secret  rule-id  safe\\nforged\\rsegment\\t\\u001Bname.cs:42", formatted);
 		Assert.DoesNotContain('\n', formatted);
 		Assert.DoesNotContain('\r', formatted);
-		Assert.DoesNotContain('\t', formatted.Split('\t')[2]);
+		Assert.DoesNotContain('\t', formatted);
 		Assert.DoesNotContain('\u001b', formatted);
+	}
+
+	[Fact]
+	public void TerminalColumnsAlignWideRunesWithoutTabs()
+	{
+		var lines = TerminalColumnLayout.Format(
+		[
+			["界", "first"],
+			["aa", "second"]
+		]);
+
+		Assert.Equal(["界  first", "aa  second"], lines);
+		Assert.All(lines, static line => Assert.DoesNotContain('\t', line));
+	}
+
+	[Fact]
+	public void FindingTableSnapshotUsesLocalizedThreeColumnLayout()
+	{
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);
+		var lines = AnalysisTextFormatter.BuildFindingTable(
+		[
+			new EffectiveRedactionFinding(
+				"github-pat",
+				RedactionFindingCategory.Secrets,
+				"src/a.cs",
+				4),
+			new EffectiveRedactionFinding(
+				"email",
+				RedactionFindingCategory.PrivateData,
+				"src/界.cs",
+				20)
+		],
+			localization);
+
+		Assert.Equal(
+		[
+			"Category      Rule        File:line",
+			"secret        github-pat  src/a.cs:4",
+			"private-data  email       src/界.cs:20"
+		], lines);
+		Assert.All(lines, static line => Assert.DoesNotContain('\t', line));
+	}
+
+	[Fact]
+	public void InteractiveGitProgressRewritesPadsAndClearsOneLine()
+	{
+		var environment = new TestTerminalEnvironment
+		{
+			IsErrorInteractive = true,
+			Width = 40
+		};
+		using var renderer = Assert.IsType<GitOperationProgressRenderer>(
+			GitOperationProgressRenderer.Create(
+				environment,
+				new TerminalOutputOptions(Progress: TerminalProgressMode.Always),
+				"clone",
+				"complete"));
+
+		renderer.Start();
+		renderer.Report("abcdefghij 25%");
+		renderer.Report("x 50%");
+		var beforeCompletion = environment.StandardError;
+		renderer.Complete();
+
+		Assert.Equal(
+			"\rclone\rabcdefghij 25%\rx 50%" + new string(' ', 9),
+			beforeCompletion);
+		Assert.Equal(beforeCompletion + "\r" + new string(' ', 5) + "\r", environment.StandardError);
+		Assert.DoesNotContain('\n', environment.StandardError);
+		Assert.DoesNotContain('\u001b', environment.StandardError);
+		Assert.Empty(environment.StandardOutput);
+	}
+
+	[Fact]
+	public void InteractiveGitProgressRereadsWidthAndTruncatesWideTextByColumns()
+	{
+		var environment = new TestTerminalEnvironment
+		{
+			IsErrorInteractive = true,
+			Width = 9
+		};
+		using var renderer = Assert.IsType<GitOperationProgressRenderer>(
+			GitOperationProgressRenderer.Create(
+				environment,
+				new TerminalOutputOptions(),
+				"go",
+				"complete"));
+
+		renderer.Start();
+		renderer.Report("界界界界界");
+		environment.Width = 5;
+		renderer.Report("界界界界界");
+
+		Assert.Contains("\r界界界界", environment.StandardError, StringComparison.Ordinal);
+		Assert.EndsWith("\r界界", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void RedirectedGitProgressSplitsCrAndLfAndEmitsOnlyBoundedMilestones()
+	{
+		var environment = new TestTerminalEnvironment();
+		using var renderer = Assert.IsType<GitOperationProgressRenderer>(
+			GitOperationProgressRenderer.Create(
+				environment,
+				new TerminalOutputOptions(),
+				"Cloning safe-url...",
+				"Clone completed."));
+
+		renderer.Start();
+		renderer.Report(
+			"remote: Enumerating objects: 100%\rReceiving objects: 24%\r" +
+			"Receiving objects: 25%\u001b\rReceiving objects: 55%\n" +
+			"Receiving objects: 76%\rResolving deltas: 100%");
+		renderer.Complete();
+
+		var lines = environment.StandardError
+			.ReplaceLineEndings("\n")
+			.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+		Assert.Equal(5, lines.Length);
+		Assert.Equal("Cloning safe-url...", lines[0]);
+		Assert.Contains("25%", lines[1], StringComparison.Ordinal);
+		Assert.Contains("55%", lines[2], StringComparison.Ordinal);
+		Assert.Contains("76%", lines[3], StringComparison.Ordinal);
+		Assert.Equal("Clone completed.", lines[4]);
+		Assert.DoesNotContain('\u001b', environment.StandardError);
+		Assert.Contains("\\u001B", lines[1], StringComparison.Ordinal);
+		Assert.Empty(environment.StandardOutput);
+	}
+
+	[Theory]
+	[InlineData(TerminalProgressMode.Never, TerminalVerbosity.Normal)]
+	[InlineData(TerminalProgressMode.Always, TerminalVerbosity.Quiet)]
+	[InlineData(TerminalProgressMode.Always, TerminalVerbosity.Minimal)]
+	public void DisabledOrQuietGitProgressWritesNoBytes(
+		TerminalProgressMode progressMode,
+		TerminalVerbosity verbosity)
+	{
+		var environment = new TestTerminalEnvironment { IsErrorInteractive = true };
+		using var renderer = GitOperationProgressRenderer.Create(
+			environment,
+			new TerminalOutputOptions(Progress: progressMode, Verbosity: verbosity),
+			"start",
+			"complete");
+
+		renderer?.Start();
+		renderer?.Report("Receiving objects: 50%");
+		renderer?.Complete();
+
+		Assert.Empty(environment.StandardError);
+		Assert.Empty(environment.StandardOutput);
+	}
+
+	[Fact]
+	public void PlainGitProgressUsesMilestonesInsteadOfCarriageReturnFrames()
+	{
+		var environment = new TestTerminalEnvironment { IsErrorInteractive = true };
+		using var renderer = Assert.IsType<GitOperationProgressRenderer>(
+			GitOperationProgressRenderer.Create(
+				environment,
+				new TerminalOutputOptions(Plain: true),
+				"start",
+				"complete"));
+
+		renderer.Start();
+		renderer.Report("Receiving objects: 50%");
+		renderer.Complete();
+
+		Assert.Equal(
+			$"start{Environment.NewLine}Receiving objects: 50%{Environment.NewLine}complete{Environment.NewLine}",
+			environment.StandardError);
 	}
 
 	[Fact]

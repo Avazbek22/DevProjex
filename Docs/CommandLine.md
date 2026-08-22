@@ -274,8 +274,10 @@ devprojex export context https://github.com/owner/repo -o -
 
 A successful first clone is added to repository history. Later invocations reuse
 the complete cached checkout and can work offline. Clone progress follows
-`--progress`, `--verbosity`, `--plain`, and `NO_COLOR`; cancellation cleans staging
-through the cache lifecycle. Profile commands and `tree` remain local-path-only.
+`--progress`, `--verbosity`, and `--plain`: an interactive stderr reuses one line,
+while redirected, CI, dumb-terminal, and plain output is limited to start, three
+percentage milestones, and completion. It never enters stdout. Cancellation cleans
+staging through the cache lifecycle. Profile commands and `tree` remain local-path-only.
 
 Common aliases are part of the public contract: `export ctx` equals
 `export context`, `export proj` equals `export project`, `-f` equals `--format`,

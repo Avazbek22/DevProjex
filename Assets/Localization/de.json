@@ -843,8 +843,13 @@
   "Terminal.Cache.NotFound": "Kein zwischengespeichertes Repository gefunden: {0}",
   "Terminal.Cache.ListIncomplete": "Die Cache-Liste ist unvollständig. Nicht lesbare Cache-Stammverzeichnisse: {0}.",
   "Terminal.Cache.Result": "Entfernt: {0}. Beibehalten: {1}. Fehlgeschlagen: {2}.",
+  "Terminal.Progress.Clone.Start": "Klonen von {0}...",
+  "Terminal.Progress.Clone.Completed": "Klonen abgeschlossen.",
   "Terminal.Analysis.Findings": "Funde",
   "Terminal.Analysis.Finding": "Fund",
+  "Terminal.Analysis.FindingCategory": "Kategorie",
+  "Terminal.Analysis.FindingRule": "Regel",
+  "Terminal.Analysis.FindingLocation": "Datei:Zeile",
   "Terminal.Error.BranchLocal": "--branch kann nur mit einer Git-Repository-URL verwendet werden.",
   "Terminal.Error.BranchUnavailable": "Der angeforderte Git-Branch ist nicht verfügbar."
 }

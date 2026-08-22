@@ -843,8 +843,13 @@
   "Terminal.Cache.NotFound": "Анбори кэшшуда ёфт нашуд: {0}",
   "Terminal.Cache.ListIncomplete": "Рӯйхати кэш нопурра аст. Решаҳои кэши хонданашуда: {0}.",
   "Terminal.Cache.Result": "Нест шуд: {0}. Нигоҳ дошта шуд: {1}. Хато: {2}.",
+  "Terminal.Progress.Clone.Start": "Клонкунии {0}...",
+  "Terminal.Progress.Clone.Completed": "Клонкунӣ анҷом ёфт.",
   "Terminal.Analysis.Findings": "Бозёфтҳо",
   "Terminal.Analysis.Finding": "Бозёфт",
+  "Terminal.Analysis.FindingCategory": "Категория",
+  "Terminal.Analysis.FindingRule": "Қоида",
+  "Terminal.Analysis.FindingLocation": "Файл:сатр",
   "Terminal.Error.BranchLocal": "--branch-ро танҳо бо URL-и анбори Git истифода бурдан мумкин аст.",
   "Terminal.Error.BranchUnavailable": "Шохаи дархостшудаи Git дастнорас аст."
 }

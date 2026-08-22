@@ -1,5 +1,6 @@
 using DevProjex.Infrastructure.Git;
 using DevProjex.Terminal.CommandLine;
+using DevProjex.Terminal.Rendering;
 
 namespace DevProjex.Terminal.Execution;
 
@@ -45,10 +46,12 @@ internal sealed class TerminalProjectSourceResolver(
 				}
 
 				stagingPath = services.RepoCacheService.CreateRepositoryStagingDirectory(safeUrl);
+				using var progress = CreateProgress(safeUrl);
+				progress?.Start();
 				var result = await services.GitRepositoryService.CloneAsync(
 						source.Trim(),
 						stagingPath,
-						CreateProgress(),
+						progress,
 						cancellationToken)
 					.ConfigureAwait(false);
 				if (!result.Success || !Directory.Exists(result.LocalPath))
@@ -71,6 +74,7 @@ internal sealed class TerminalProjectSourceResolver(
 					throw new TerminalProjectSourceException("DPX-CLI-GIT-CACHE-FAILED");
 
 				services.RecentProjectsStore.AddRepository(null, repositoryUrl);
+				progress?.Complete();
 				return ResolvedTerminalProjectSource.Repository(
 					session.RepositoryPath,
 					repositoryUrl,
@@ -104,21 +108,12 @@ internal sealed class TerminalProjectSourceResolver(
 		}
 	}
 
-	private IProgress<string>? CreateProgress()
-	{
-		if (outputOptions.Progress == TerminalProgressMode.Never ||
-		    outputOptions.Verbosity is TerminalVerbosity.Quiet or TerminalVerbosity.Minimal ||
-		    outputOptions.Progress == TerminalProgressMode.Auto && !environment.IsErrorInteractive)
-		{
-			return null;
-		}
-
-		return new SynchronousProgress<string>(message =>
-		{
-			if (!string.IsNullOrWhiteSpace(message))
-				environment.Error.WriteLine(message);
-		});
-	}
+	private GitOperationProgressRenderer? CreateProgress(string safeUrl) =>
+		GitOperationProgressRenderer.Create(
+			environment,
+			outputOptions,
+			services.Localization.Format("Terminal.Progress.Clone.Start", safeUrl),
+			services.Localization["Terminal.Progress.Clone.Completed"]);
 
 	private static bool LooksLikeRepositoryUrl(string source)
 	{
@@ -133,10 +128,6 @@ internal sealed class TerminalProjectSourceResolver(
 		       (source[..colon].Contains('@') || source[..colon].Contains('.'));
 	}
 
-	private sealed class SynchronousProgress<T>(Action<T> callback) : IProgress<T>
-	{
-		public void Report(T value) => callback(value);
-	}
 }
 
 internal sealed class ResolvedTerminalProjectSource(

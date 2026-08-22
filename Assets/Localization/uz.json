@@ -843,8 +843,13 @@
   "Terminal.Cache.NotFound": "Keshlangan repozitoriy topilmadi: {0}",
   "Terminal.Cache.ListIncomplete": "Kesh ro'yxati to'liq emas. O'qib bo'lmagan kesh ildizlari: {0}.",
   "Terminal.Cache.Result": "O'chirildi: {0}. Saqlandi: {1}. Xato: {2}.",
+  "Terminal.Progress.Clone.Start": "{0} klonlanmoqda...",
+  "Terminal.Progress.Clone.Completed": "Klonlash yakunlandi.",
   "Terminal.Analysis.Findings": "Topilmalar",
   "Terminal.Analysis.Finding": "Topilma",
+  "Terminal.Analysis.FindingCategory": "Turkum",
+  "Terminal.Analysis.FindingRule": "Qoida",
+  "Terminal.Analysis.FindingLocation": "Fayl:satr",
   "Terminal.Error.BranchLocal": "--branch faqat Git repozitoriysi URL manzili bilan ishlatilishi mumkin.",
   "Terminal.Error.BranchUnavailable": "So'ralgan Git tarmog'i mavjud emas."
 }

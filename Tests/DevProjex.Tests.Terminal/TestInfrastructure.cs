@@ -18,7 +18,7 @@ internal sealed class TestTerminalEnvironment : ITerminalEnvironment
 	public bool IsTermDumb { get; init; }
 	public bool IsNoColor { get; init; }
 	public bool SupportsUnicode { get; init; } = true;
-	public int Width { get; init; } = 120;
+	public int Width { get; set; } = 120;
 	public int Height { get; init; } = 30;
 	public IReadOnlyDictionary<string, string?> Variables { get; init; } =
 		new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);

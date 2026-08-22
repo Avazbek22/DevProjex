@@ -32,8 +32,8 @@ internal sealed class CacheCommandHandler(
 		}
 		else
 		{
-			foreach (var entry in entries)
-				environment.Output.WriteLine(FormatTextEntry(entry));
+			foreach (var line in FormatTextEntries(entries))
+				environment.Output.WriteLine(line);
 		}
 
 		if (result.IsComplete)
@@ -86,16 +86,35 @@ internal sealed class CacheCommandHandler(
 
 	private static string NormalizePath(string path) => path.Replace('\\', '/');
 
-	internal static string FormatTextEntry(RepositoryCacheCatalogEntry entry) =>
-		string.Join(
-			'\t',
+	internal static IReadOnlyList<string> FormatTextEntries(
+		IReadOnlyList<RepositoryCacheCatalogEntry> entries) =>
+		TerminalColumnLayout.Format(entries.Select(static entry => new[]
+		{
 			TerminalTextEscaping.EscapeSingleLine(entry.RepositoryUrl),
 			ToToken(entry.State),
 			TerminalTextEscaping.EscapeSingleLine(entry.Branch ?? "-"),
 			TerminalTextEscaping.EscapeSingleLine(entry.CommitHash ?? "-"),
-			entry.ApproximateSizeBytes.ToString(CultureInfo.InvariantCulture),
-			entry.LastOpenedUtc.ToUniversalTime().ToString("O"),
-			TerminalTextEscaping.EscapeSingleLine(NormalizePath(entry.LocalPath)));
+			FormatByteSize(entry.ApproximateSizeBytes),
+			entry.LastOpenedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture),
+			TerminalTextEscaping.EscapeSingleLine(NormalizePath(entry.LocalPath))
+		}).ToArray());
+
+	internal static string FormatByteSize(long bytes)
+	{
+		string[] units = ["B", "KiB", "MiB", "GiB", "TiB"];
+		var value = Math.Max(0, bytes);
+		var display = (double)value;
+		var unit = 0;
+		while (display >= 1024 && unit < units.Length - 1)
+		{
+			display /= 1024;
+			unit++;
+		}
+
+		return unit == 0
+			? $"{value.ToString(CultureInfo.InvariantCulture)} {units[unit]}"
+			: $"{display.ToString("0.#", CultureInfo.InvariantCulture)} {units[unit]}";
+	}
 
 	private void WriteJsonList(
 		IReadOnlyList<RepositoryCacheCatalogEntry> entries,

@@ -843,8 +843,13 @@
   "Terminal.Cache.NotFound": "No cached repository matches: {0}",
   "Terminal.Cache.ListIncomplete": "The cache list is incomplete. Unreadable cache roots: {0}.",
   "Terminal.Cache.Result": "Removed: {0}. Retained: {1}. Failed: {2}.",
+  "Terminal.Progress.Clone.Start": "Cloning {0}...",
+  "Terminal.Progress.Clone.Completed": "Clone completed.",
   "Terminal.Analysis.Findings": "Findings",
   "Terminal.Analysis.Finding": "Finding",
+  "Terminal.Analysis.FindingCategory": "Category",
+  "Terminal.Analysis.FindingRule": "Rule",
+  "Terminal.Analysis.FindingLocation": "File:line",
   "Terminal.Error.BranchLocal": "--branch can only be used with a Git repository URL.",
   "Terminal.Error.BranchUnavailable": "The requested Git branch is unavailable."
 }

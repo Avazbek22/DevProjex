@@ -843,8 +843,13 @@
   "Terminal.Cache.NotFound": "Кэшированный репозиторий не найден: {0}",
   "Terminal.Cache.ListIncomplete": "Список кэша неполон. Непрочитанных корней кэша: {0}.",
   "Terminal.Cache.Result": "Удалено: {0}. Удержано: {1}. Ошибок: {2}.",
+  "Terminal.Progress.Clone.Start": "Клонирование {0}...",
+  "Terminal.Progress.Clone.Completed": "Клонирование завершено.",
   "Terminal.Analysis.Findings": "Находки",
   "Terminal.Analysis.Finding": "Находка",
+  "Terminal.Analysis.FindingCategory": "Категория",
+  "Terminal.Analysis.FindingRule": "Правило",
+  "Terminal.Analysis.FindingLocation": "Файл:строка",
   "Terminal.Error.BranchLocal": "--branch можно использовать только с URL Git-репозитория.",
   "Terminal.Error.BranchUnavailable": "Запрошенная ветка Git недоступна."
 }

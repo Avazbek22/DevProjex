@@ -36,8 +36,18 @@ ANSI, markup, box-drawing characters, emoji, and animations and uses stable ASCI
 lines. `TERM=dumb` selects the same conservative terminal-capability fallback and
 never starts the TUI. stdout and stderr TTY state are evaluated independently;
 machine payloads remain undecorated in every mode.
-Explicit `--plain --progress always` uses bounded static ASCII stderr lines rather
-than a spinner. Plain `auto`, `quiet`, and `minimal` do not emit optional progress.
+Git progress for URL project sources is always confined to stderr. With interactive
+stderr, outside CI, and without `--plain`, the latest Git message replaces one line
+using carriage return and spaces only; no ANSI cursor controls are used. Every frame
+is sanitized and truncated to `terminal width - 1` display columns, with the width
+read again for every update, and the line is cleared before ordinary output resumes.
+
+Redirected stderr, CI, `TERM=dumb`, and `--plain` use bounded milestone output instead:
+one localized clone-start line, at most three Git percentage milestones, and one
+completion line (never more than six physical lines for one operation). Both `auto`
+and `always` use that fallback. `--progress never`, `--verbosity quiet`,
+`--verbosity minimal`, and `-q` emit zero progress bytes. Progress never enters stdout,
+so machine payloads and streamed context remain byte-for-byte unchanged.
 
 ## Analysis JSON
 
@@ -65,7 +75,10 @@ blank-line removal and recognizes LF, CRLF, and lone CR boundaries. The array
 count equals the combined effective matched counters from that output session.
 Secret values, source fragments, assignment context, fingerprints, and raw
 detector exceptions are never serialized. Text findings escape path control
-characters so each descriptor occupies one physical output line.
+characters so each descriptor occupies one physical output line. Text analysis
+renders findings after the main field/value table in a separate three-column table
+with localized `category`, `rule`, and `file:line` headings. Plain and redirected
+output use display-cell-aware space padding; tab characters are never emitted.
 
 When code compression, comment removal, or blank-line removal is enabled, analysis content metrics are
 calculated from the transformed text and the document adds a top-level `compression`
@@ -95,6 +108,12 @@ damaged indexed entries are visible; `state` is `ready` or `damaged`. A partial
 listing caused by a busy index lock or future-schema root additionally emits
 `"incomplete": true`, writes a localized warning to stderr, and returns policy
 exit code `3`. Complete output omits the additive field.
+
+The text forms of `recent` and `cache list` use display-cell-aware, space-padded
+columns and never tabs. Timestamps are rendered in the local time zone as
+`yyyy-MM-dd HH:mm`. Cache sizes use binary human-readable units such as `68.2 MiB`.
+Their JSON documents are unchanged: timestamps remain full UTC ISO-8601 values and
+cache sizes remain byte counts.
 
 `cache remove` and `cache clear` calculate `removed`, `retained`, and `failed`
 inside the index-locked operation. A busy index lock, unsupported future schema,

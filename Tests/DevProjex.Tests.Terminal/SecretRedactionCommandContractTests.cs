@@ -257,13 +257,17 @@ public sealed class SecretRedactionCommandContractTests
 			environment,
 			[
 				"analyze", workspace.ProjectRoot,
-				"--hide-secrets", "--findings", "--format", "text", "--plain", "-o", "-"
+				"--hide-secrets", "--findings", "--format", "text", "--plain", "-o", "-",
+				"--language", "en"
 			]);
 
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
 		Assert.DoesNotContain(GithubToken, environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("github-pat", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("secret", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("Category", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("File:line", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain('\t', environment.StandardOutput);
 		Assert.Empty(environment.StandardError);
 	}
 

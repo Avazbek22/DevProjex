@@ -1,3 +1,4 @@
+using System.Globalization;
 using DevProjex.Infrastructure.Persistence;
 using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Infrastructure.Git;
@@ -268,16 +269,25 @@ public sealed class CliExpansionCommandTests
 	[Fact]
 	public void RecentTextEntryEscapesControlCharactersInsideFields()
 	{
-		var line = RecentCommandHandler.FormatTextEntry(
-			"folder",
-			"name\nrow",
-			"/tmp/source\r\tpath",
-			new DateTimeOffset(2026, 1, 2, 3, 4, 5, TimeSpan.Zero));
+		var opened = new DateTimeOffset(2026, 1, 2, 3, 4, 5, TimeSpan.Zero);
+		var line = Assert.Single(RecentCommandHandler.FormatTextEntries(
+		[
+			new RecentCommandHandler.RecentOutputEntry(
+				"folder",
+				"/tmp/source\r\tpath",
+				null,
+				"name\nrow",
+				null,
+				opened)
+		]));
 
-		var fields = line.Split('\t');
-		Assert.Equal(4, fields.Length);
-		Assert.Equal("name\\nrow", fields[1]);
-		Assert.Equal("/tmp/source\\r\\tpath", fields[2]);
+		Assert.Contains("name\\nrow", line, StringComparison.Ordinal);
+		Assert.Contains("/tmp/source\\r\\tpath", line, StringComparison.Ordinal);
+		Assert.EndsWith(
+			opened.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture),
+			line,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain('\t', line);
 		Assert.DoesNotContain('\n', line);
 		Assert.DoesNotContain('\r', line);
 	}
@@ -295,16 +305,60 @@ public sealed class CliExpansionCommandTests
 			"/tmp/cache\tpath",
 			"commit\nvalue");
 
-		var line = CacheCommandHandler.FormatTextEntry(entry);
+		var line = Assert.Single(CacheCommandHandler.FormatTextEntries([entry]));
 
-		var fields = line.Split('\t');
-		Assert.Equal(7, fields.Length);
-		Assert.Equal("https://example.com/owner/repo\\nname.git", fields[0]);
-		Assert.Equal("feature\\rbranch", fields[2]);
-		Assert.Equal("commit\\nvalue", fields[3]);
-		Assert.Equal("/tmp/cache\\tpath", fields[6]);
+		Assert.Contains("https://example.com/owner/repo\\nname.git", line, StringComparison.Ordinal);
+		Assert.Contains("feature\\rbranch", line, StringComparison.Ordinal);
+		Assert.Contains("commit\\nvalue", line, StringComparison.Ordinal);
+		Assert.Contains("/tmp/cache\\tpath", line, StringComparison.Ordinal);
+		Assert.Contains("42 B", line, StringComparison.Ordinal);
+		Assert.DoesNotContain('\t', line);
 		Assert.DoesNotContain('\n', line);
 		Assert.DoesNotContain('\r', line);
+	}
+
+	[Fact]
+	public void CacheTextSizeUsesBinaryHumanReadableUnits()
+	{
+		Assert.Equal("68.2 MiB", CacheCommandHandler.FormatByteSize(71_512_883));
+		Assert.Equal("1 KiB", CacheCommandHandler.FormatByteSize(1_024));
+		Assert.Equal("0 B", CacheCommandHandler.FormatByteSize(-1));
+	}
+
+	[Fact]
+	public void RecentAndCacheTextSnapshotsUseLocalMinuteTimeAndSpaceSeparatedColumns()
+	{
+		var localDate = new DateTime(2026, 1, 2, 3, 4, 0, DateTimeKind.Unspecified);
+		var localTimestamp = new DateTimeOffset(localDate, TimeZoneInfo.Local.GetUtcOffset(localDate));
+		var recent = Assert.Single(RecentCommandHandler.FormatTextEntries(
+		[
+			new RecentCommandHandler.RecentOutputEntry(
+				"folder",
+				"/tmp/project",
+				null,
+				"sample",
+				null,
+				localTimestamp)
+		]));
+		var cache = Assert.Single(CacheCommandHandler.FormatTextEntries(
+		[
+			new RepositoryCacheCatalogEntry(
+				"https://example.test/repo.git",
+				"repo",
+				"main",
+				localTimestamp,
+				71_512_883,
+				RepositoryCacheContentKind.Git,
+				"/tmp/cache",
+				"abc")
+		]));
+
+		Assert.Equal("folder  sample  /tmp/project  2026-01-02 03:04", recent);
+		Assert.Equal(
+			"https://example.test/repo.git  ready  main  abc  68.2 MiB  2026-01-02 03:04  /tmp/cache",
+			cache);
+		Assert.DoesNotContain('\t', recent);
+		Assert.DoesNotContain('\t', cache);
 	}
 
 	[Fact]

@@ -173,7 +173,8 @@ public sealed class CliUrlSourceCommandTests
 		var contextExitCode = await new TerminalApplication(contextEnvironment, factory).RunAsync(
 			[
 				"export", "context", repositoryUrl,
-				"--git-mode", "none", "--view", "content", "--format", "text", "-o", "-", "--plain"
+				"--git-mode", "none", "--view", "content", "--format", "text", "-o", "-", "--plain",
+				"--progress", "never"
 			],
 			TestContext.Current.CancellationToken);
 
@@ -186,7 +187,8 @@ public sealed class CliUrlSourceCommandTests
 		var projectExitCode = await new TerminalApplication(projectEnvironment, factory).RunAsync(
 			[
 				"export", "project", repositoryUrl,
-				"--git-mode", "none", "--as", "folder", "-o", destination
+				"--git-mode", "none", "--as", "folder", "-o", destination,
+				"--progress", "never"
 			],
 			TestContext.Current.CancellationToken);
 
@@ -196,6 +198,57 @@ public sealed class CliUrlSourceCommandTests
 			File.ReadAllText(Path.Combine(destination, "src", "remote.cs")).ReplaceLineEndings("\n"));
 		Assert.Empty(projectEnvironment.StandardError);
 		Assert.Single(new RepoCacheService(Path.Combine(data.Path, "RepoCache")).ListIndexedRepositories());
+	}
+
+	[Fact]
+	public async Task RedirectedUrlCloneProgressNeverContaminatesContextPayloadAndStaysBounded()
+	{
+		if (!IsGitAvailable())
+			Assert.Skip("Git is unavailable on this test host.");
+
+		using var workspace = new TemporaryDirectory();
+		using var data = new TemporaryDirectory();
+		var source = workspace.CreateDirectory("progress-source");
+		RunGit(source, "init", "--initial-branch=main");
+		RunGit(source, "config", "user.email", "terminal-tests@devprojex.local");
+		RunGit(source, "config", "user.name", "DevProjex Terminal Tests");
+		workspace.WriteFile("progress-source/src/payload.cs", "internal sealed class PayloadMarker {}\n");
+		RunGit(source, "add", ".");
+		RunGit(source, "commit", "-m", "initial");
+		var bare = Path.Combine(workspace.Path, "progress-origin.git");
+		RunGit(workspace.Path, "clone", "--bare", source, bare);
+		var repositoryUrl = new Uri(bare + Path.DirectorySeparatorChar).AbsoluteUri;
+		var quietEnvironment = new TestTerminalEnvironment();
+		var progressEnvironment = new TestTerminalEnvironment();
+		string[] commonArguments =
+		[
+			"export", "context", repositoryUrl,
+			"--git-mode", "none", "--view", "content", "--format", "text", "-o", "-", "--plain",
+			"--language", "en"
+		];
+
+		var factory = new TerminalServiceFactory(() => data.Path);
+		var progressExitCode = await new TerminalApplication(
+				progressEnvironment,
+				factory)
+			.RunAsync(commonArguments, TestContext.Current.CancellationToken);
+		var quietExitCode = await new TerminalApplication(
+				quietEnvironment,
+				factory)
+			.RunAsync(
+				[.. commonArguments, "--progress", "never"],
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, quietExitCode);
+		Assert.Equal(CommandLineExitCodes.Success, progressExitCode);
+		Assert.Equal(quietEnvironment.StandardOutput, progressEnvironment.StandardOutput);
+		Assert.Empty(quietEnvironment.StandardError);
+		var progressLines = progressEnvironment.StandardError
+			.ReplaceLineEndings("\n")
+			.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+		Assert.InRange(progressLines.Length, 2, 6);
+		Assert.StartsWith("Cloning ", progressLines[0], StringComparison.Ordinal);
+		Assert.Equal("Clone completed.", progressLines[^1]);
 	}
 
 	[Fact]
@@ -267,7 +320,7 @@ public sealed class CliUrlSourceCommandTests
 				"analyze", repositoryUrl,
 				"--branch", branch,
 				"--git-mode", "none",
-				"--format", "json", "-o", "-"
+				"--format", "json", "-o", "-", "--progress", "never"
 			],
 			TestContext.Current.CancellationToken);
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);

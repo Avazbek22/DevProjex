@@ -837,8 +837,13 @@
   "Terminal.Cache.NotFound": "Nenhum repositório em cache corresponde a: {0}",
   "Terminal.Cache.ListIncomplete": "A lista do cache está incompleta. Raízes do cache ilegíveis: {0}.",
   "Terminal.Cache.Result": "Removidos: {0}. Mantidos: {1}. Falhas: {2}.",
+  "Terminal.Progress.Clone.Start": "Clonando {0}...",
+  "Terminal.Progress.Clone.Completed": "Clonagem concluída.",
   "Terminal.Analysis.Findings": "Achados",
   "Terminal.Analysis.Finding": "Achado",
+  "Terminal.Analysis.FindingCategory": "Categoria",
+  "Terminal.Analysis.FindingRule": "Regra",
+  "Terminal.Analysis.FindingLocation": "Arquivo:linha",
   "Terminal.Error.BranchLocal": "--branch só pode ser usado com a URL de um repositório Git.",
   "Terminal.Error.BranchUnavailable": "O branch Git solicitado não está disponível."
 }
