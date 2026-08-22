@@ -2,7 +2,7 @@ using System.Buffers;
 
 namespace DevProjex.Infrastructure.Git;
 
-internal static class GitBranchNameValidator
+public static class GitBranchNameValidator
 {
 	private static readonly SearchValues<char> ForbiddenCharacters =
 		SearchValues.Create(" ~^:?*[\\");

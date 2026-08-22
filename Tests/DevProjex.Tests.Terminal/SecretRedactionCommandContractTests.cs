@@ -181,6 +181,92 @@ public sealed class SecretRedactionCommandContractTests
 		Assert.Empty(environment.StandardError);
 	}
 
+	[Fact]
+	public async Task AnalyzeFindingsJsonPublishesOnlySanitizedEffectiveDescriptors()
+	{
+		using var workspace = CreateWorkspace();
+		workspace.Temporary.WriteFile(
+			"project/src/contact.txt",
+			$"contact={PrivateEmail}\n");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"analyze", workspace.ProjectRoot,
+				"--hide-secrets", "--hide-private-data",
+				"--findings", "--format", "json", "--plain", "-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.DoesNotContain(GithubToken, environment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain(PrivateEmail, environment.StandardOutput, StringComparison.Ordinal);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		var root = document.RootElement;
+		var findings = root.GetProperty("findings").EnumerateArray().ToArray();
+		var matched = root.GetProperty("redaction").GetProperty("matchedCount").GetInt32() +
+		              root.GetProperty("privacy").GetProperty("matchedCount").GetInt32();
+		Assert.Equal(matched, findings.Length);
+		Assert.NotEmpty(findings);
+		Assert.All(findings, static finding =>
+		{
+			Assert.Equal(
+				["category", "lineNumber", "relativePath", "ruleId"],
+				finding.EnumerateObject()
+					.Select(static property => property.Name)
+					.Order(StringComparer.Ordinal));
+			var category = finding.GetProperty("category").GetString();
+			Assert.True(category is "secret" or "private-data");
+			Assert.True(finding.GetProperty("lineNumber").GetInt32() >= 1);
+		});
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
+	public async Task FailOnFindingsWritesTheReportAndReturnsPolicyFailure()
+	{
+		using var workspace = CreateWorkspace();
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"analyze", workspace.ProjectRoot,
+				"--hide-secrets", "--fail-on-findings",
+				"--format", "json", "--plain", "-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.PolicyFailure, exitCode);
+		Assert.DoesNotContain(GithubToken, environment.StandardOutput, StringComparison.Ordinal);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		Assert.Equal(1, document.RootElement.GetProperty("redaction").GetProperty("matchedCount").GetInt32());
+		Assert.False(document.RootElement.TryGetProperty("findings", out _));
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
+	public async Task AnalyzeFindingsTextDoesNotExposeDetectedValues()
+	{
+		using var workspace = CreateWorkspace();
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"analyze", workspace.ProjectRoot,
+				"--hide-secrets", "--findings", "--format", "text", "--plain", "-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.DoesNotContain(GithubToken, environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("github-pat", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("secret", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Empty(environment.StandardError);
+	}
+
 	[Theory]
 	[InlineData(
 		ManualRedactionClass.Secret,
@@ -908,7 +994,7 @@ public sealed class SecretRedactionCommandContractTests
 	}
 
 	[Fact]
-	public async Task OpenHelp_DoesNotExposeHidePrivateDataDuringPhaseOne()
+	public async Task OpenHelp_ExposesHidePrivateData()
 	{
 		using var workspace = CreateWorkspace();
 		var environment = new TestTerminalEnvironment();
@@ -919,7 +1005,7 @@ public sealed class SecretRedactionCommandContractTests
 			["open", "--language", "en", "--help"]);
 
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
-		Assert.DoesNotContain("--hide-private-data", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("--hide-private-data", environment.StandardOutput, StringComparison.Ordinal);
 	}
 
 	private static Task<int> RunAsync(

@@ -158,7 +158,7 @@ public sealed class DirectCommandIntegrationTests
 			[
 				"analyze", workspace.Path,
 				"--format", "json",
-				"--compress",
+				"--compress-code",
 				"--git-mode", "none",
 				"--exclude", "none"
 			],
@@ -194,7 +194,7 @@ public sealed class DirectCommandIntegrationTests
 				"export", "context", workspace.Path,
 				"--view", "content",
 				"--format", "markdown",
-				"--compress",
+				"--compress-code",
 				"--git-mode", "none",
 				"--exclude", "none",
 				"-o", "-"
@@ -296,7 +296,7 @@ public sealed class DirectCommandIntegrationTests
 			.RunAsync(
 			[
 				"analyze", workspace.Path,
-				"--compress",
+				"--compress-code",
 				"--strip-comments",
 				"--git-mode", "none",
 				"--exclude", "none",
@@ -330,7 +330,7 @@ public sealed class DirectCommandIntegrationTests
 			"-o", "-"
 		};
 		if (compress)
-			arguments.Add("--compress");
+			arguments.Add("--compress-code");
 
 		var exitCode = await new TerminalApplication(
 				environment,
@@ -460,7 +460,7 @@ public sealed class DirectCommandIntegrationTests
 				"export", "context", workspace.Path,
 				"--view", "content",
 				"--format", "markdown",
-				"--compress",
+				"--compress-code",
 				"--git-mode", "none",
 				"--exclude", "none",
 				"-o", "-"
@@ -930,7 +930,7 @@ public sealed class DirectCommandIntegrationTests
 				"--progress", "never"
 		};
 		if (compress)
-			arguments.Add("--compress");
+			arguments.Add("--compress-code");
 		if (stripComments)
 			arguments.Add("--strip-comments");
 		if (stripBlankLines)

@@ -56,6 +56,13 @@ When Hide Secrets is enabled, analysis adds a top-level `redaction` object with
 `matchedCount`, `redactedCount`, and a non-safety `notice`. Zero means the pinned
 rules matched nothing; it never means that the project is safe.
 
+With `--findings`, analysis adds an ordered top-level `findings` array. Each
+effective finding contains exactly `ruleId`, `category` (`secret` or
+`private-data`), `relativePath`, and one-based `lineNumber`. The array count
+equals the combined effective matched counters from that output session. Secret
+values, source fragments, assignment context, fingerprints, and raw detector
+exceptions are never serialized.
+
 When code compression, comment removal, or blank-line removal is enabled, analysis content metrics are
 calculated from the transformed text and the document adds a top-level `compression`
 object with `compressedFiles`, `unchangedFiles`, `bodyTransformedFiles`,
@@ -68,6 +75,18 @@ independent `compressCode`, `stripComments`, and `stripBlankLines` Booleans.
 
 `--strict` writes the requested document before returning policy exit code `3`
 when diagnostics are present.
+`--fail-on-findings` likewise writes the requested document before returning
+policy exit code `3` when effective findings exist; the two gates are independent.
+
+## Recent and Cache JSON
+
+`recent --format json` emits schema version 1 with kind `devprojex-recent` and a
+newest-first `items` array. Entries use stable `kind`, nullable `path`/`url`,
+`name`, `parent`, and `lastOpened` properties.
+
+`cache list --format json` emits schema version 1 with kind
+`devprojex-repository-cache`. Entries expose `url`, `state`, nullable `branch`
+and `commit`, `localPath`, `approximateSizeBytes`, and `lastUsed`.
 
 Plain or redirected text and text written to a file use one canonical field
 model, ordering, and final-newline policy. An interactive rich presentation may
@@ -181,7 +200,7 @@ are not captured.
 
 With `--strip-comments`, syntax-tree comments are removed in 20 language packs: the 14
 body-compression languages plus comments-only HTML, CSS, TOML, Bash, XML, and YAML packs.
-The six additional packs remain on the unsupported fast path when only `--compress` is enabled.
+The six additional packs remain on the unsupported fast path when only `--compress-code` is enabled.
 XML-family project markup preserves CDATA, declarations, processing instructions, DOCTYPE
 content, and attributes; YAML preserves scalar content, anchors, tags, and document markers.
 Python leading module, class, and function docstrings are documentation for this

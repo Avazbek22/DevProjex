@@ -300,7 +300,9 @@ public sealed class RepoCacheService : IRepoCacheService
 				entry.LastOpenedUtc,
 				Math.Max(0, entry.ApproximateSizeBytes),
 				ResolveContentKind(entry),
-				entry.LocalPath));
+				entry.LocalPath,
+				entry.CommitHash,
+				entry.State));
 		}
 
 		catalog.Sort(static (left, right) =>
@@ -480,6 +482,78 @@ public sealed class RepoCacheService : IRepoCacheService
 	{
 		foreach (var cacheRoot in CacheSearchRootPaths)
 			ClearCacheRoot(cacheRoot);
+	}
+
+	public CacheClearResult ClearAllCacheWithResult()
+	{
+		var before = ListIndexedRepositories();
+		ClearAllCache();
+		return MeasureRemovalOutcome(before, ListIndexedRepositories());
+	}
+
+	public CacheClearResult RemoveCachedRepositoryWithResult(string repositoryUrl)
+	{
+		var identity = RepositoryUrlUtility.GetComparisonKey(repositoryUrl);
+		if (identity.Length == 0)
+			return new CacheClearResult(0, 0, 1);
+
+		var before = ListIndexedRepositories()
+			.Where(entry => string.Equals(
+				RepositoryUrlUtility.GetComparisonKey(entry.RepositoryUrl),
+				identity,
+				StringComparison.OrdinalIgnoreCase))
+			.ToArray();
+		foreach (var entry in before)
+			DeleteRepositoryDirectory(entry.LocalPath);
+
+		var after = ListIndexedRepositories()
+			.Where(entry => string.Equals(
+				RepositoryUrlUtility.GetComparisonKey(entry.RepositoryUrl),
+				identity,
+				StringComparison.OrdinalIgnoreCase))
+			.ToArray();
+		return MeasureRemovalOutcome(before, after);
+	}
+
+	private CacheClearResult MeasureRemovalOutcome(
+		IReadOnlyList<RepositoryCacheCatalogEntry> before,
+		IReadOnlyList<RepositoryCacheCatalogEntry> after)
+	{
+		var remaining = after
+			.Select(static entry => RepositoryUrlUtility.GetComparisonKey(entry.RepositoryUrl))
+			.ToHashSet(StringComparer.OrdinalIgnoreCase);
+		var removed = 0;
+		var retained = 0;
+		var failed = 0;
+		foreach (var entry in before
+			         .GroupBy(
+				         static entry => RepositoryUrlUtility.GetComparisonKey(entry.RepositoryUrl),
+				         StringComparer.OrdinalIgnoreCase)
+			         .Select(static group => group.First()))
+		{
+			var identity = RepositoryUrlUtility.GetComparisonKey(entry.RepositoryUrl);
+			if (remaining.Contains(identity))
+			{
+				if (!TryAcquireAllRepositoryLeases(entry.LocalPath, out var leases))
+				{
+					retained++;
+				}
+				else
+				{
+					leases!.Dispose();
+					failed++;
+				}
+				continue;
+			}
+
+			var container = RepositoryCacheLayout.GetContainer(entry.LocalPath);
+			if (Directory.Exists(container))
+				failed++;
+			else
+				removed++;
+		}
+
+		return new CacheClearResult(removed, retained, failed);
 	}
 
 	private void ClearCacheRoot(string cacheRoot)

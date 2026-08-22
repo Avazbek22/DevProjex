@@ -40,6 +40,7 @@ public sealed class AnalyzeCommandHandler(
 					services.SecretRedactionSession,
 					redactionFeatures)
 				: null);
+		IReadOnlyList<EffectiveRedactionFinding> effectiveFindings = [];
 		if (transformationContext is not null)
 		{
 			await using var prepared = await services.SecretRedactionOutputPreparer
@@ -49,6 +50,13 @@ public sealed class AnalyzeCommandHandler(
 					cancellationToken)
 				.ConfigureAwait(false);
 			var transformedAnalyzer = services.SecretRedactionOutputPreparer.CreatePreparedAnalyzer(prepared);
+			effectiveFindings = prepared.GetEffectiveFindings();
+			if (prepared.Snapshot is { } effectiveSnapshot &&
+			    effectiveFindings.Count != effectiveSnapshot.DetectedCount)
+			{
+				throw new SecretDetectionException(
+					"The effective redaction finding count did not match the published snapshot.");
+			}
 			var transformedMetrics = await ProjectContentMetricsCalculator
 				.CalculateAsync(transformedAnalyzer, plan.IncludedFiles, cancellationToken)
 				.ConfigureAwait(false);
@@ -86,6 +94,8 @@ public sealed class AnalyzeCommandHandler(
 				UnscannableFiles = prepared.UnscannableFiles
 			};
 		}
+		if (request.IncludeFindings)
+			plan = plan with { Findings = effectiveFindings };
 		new ContextDiagnosticRenderer(environment, request.Output, services.Localization)
 			.Write(plan.Diagnostics);
 
@@ -142,7 +152,9 @@ public sealed class AnalyzeCommandHandler(
 			environment.Output.WriteLine(writtenPath);
 		}
 
-		return plan.HasErrors || request.Strict && plan.Diagnostics.Count > 0
+		return plan.HasErrors ||
+		       request.Strict && plan.Diagnostics.Count > 0 ||
+		       request.FailOnFindings && effectiveFindings.Count > 0
 			? CommandLineExitCodes.PolicyFailure
 			: CommandLineExitCodes.Success;
 	}
@@ -243,6 +255,17 @@ internal static class AnalysisTextFormatter
 					localization["PrivateDataRedaction.NoFindingsNotice"]));
 			}
 		}
+		if (plan.Findings is { } findings)
+		{
+			rows.Add(new AnalysisTextRow(
+				localization["Terminal.Analysis.Findings"],
+				findings.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+			rows.AddRange(findings.Select(finding => new AnalysisTextRow(
+				localization["Terminal.Analysis.Finding"],
+				$"{ToCategoryToken(finding.Category)}\t{finding.RuleId}\t" +
+				$"{finding.RelativePath.Replace('\\', '/')}:" +
+				finding.LineNumber.ToString(System.Globalization.CultureInfo.InvariantCulture))));
+		}
 		if (plan.UnscannableFiles is { Count: > 0 } unscannableFiles)
 		{
 			rows.Add(new AnalysisTextRow(
@@ -301,6 +324,14 @@ internal static class AnalysisTextFormatter
 			ProjectProfileSourceKind.Local => "local",
 			ProjectProfileSourceKind.Portable => profile.Path ?? "portable",
 			_ => throw new ArgumentOutOfRangeException(nameof(profile), profile, null)
+		};
+
+	private static string ToCategoryToken(RedactionFindingCategory category) =>
+		category switch
+		{
+			RedactionFindingCategory.Secrets => "secret",
+			RedactionFindingCategory.PrivateData => "private-data",
+			_ => throw new ArgumentOutOfRangeException(nameof(category), category, null)
 		};
 }
 

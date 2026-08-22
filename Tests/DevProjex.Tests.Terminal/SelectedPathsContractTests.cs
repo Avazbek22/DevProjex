@@ -167,6 +167,92 @@ public sealed class SelectedPathsContractTests
 	}
 
 	[Fact]
+	public async Task SelectFromFileCombinesWithDirectSelectionAndDeduplicates()
+	{
+		using var workspace = CreateWorkspace();
+		var selectionFile = workspace.WriteFile(
+			"selection.txt",
+			"src/a.cs\n\ndocs/readme.md\nsrc/a.cs\n");
+
+		using var document = await ExportJsonAsync(
+			workspace.Path,
+			"--select", "src/nested/b.cs",
+			"--select-from", selectionFile);
+
+		Assert.Equal(
+			FullContentPaths(workspace.Path, "docs/readme.md", "src/a.cs", "src/nested/b.cs"),
+			ReadFilePaths(document));
+		Assert.Equal(
+			["docs/readme.md", "src/a.cs", "src/nested/b.cs"],
+			ReadSelectedPaths(document).Order(StringComparer.Ordinal));
+	}
+
+	[Fact]
+	public async Task SelectFromRedirectedStdinReadsUtf8Paths()
+	{
+		using var workspace = CreateWorkspace();
+		workspace.WriteFile("данные/привет.cs", "class Привет {}\n");
+		var environment = new TestTerminalEnvironment
+		{
+			Input = new StringReader("данные/привет.cs\n"),
+			IsInputInteractive = false
+		};
+
+		var exitCode = await RunAsync(
+			workspace.Path,
+			environment,
+			"--select-from", "-");
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		Assert.Equal(
+			FullContentPaths(workspace.Path, "данные/привет.cs"),
+			ReadFilePaths(document));
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
+	public async Task SelectFromInteractiveStdinFailsWithoutReading()
+	{
+		using var workspace = CreateWorkspace();
+		var environment = new TestTerminalEnvironment
+		{
+			Input = new ThrowingTextReader(),
+			IsInputInteractive = true
+		};
+
+		var exitCode = await RunAsync(
+			workspace.Path,
+			environment,
+			"--select-from", "-");
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("DPX-CLI-SELECT-FROM-INVALID", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task SelectFromRejectsMoreThanTheEntryLimit()
+	{
+		using var workspace = CreateWorkspace();
+		var input = string.Concat(Enumerable.Repeat("src/a.cs\n", 100_001));
+		var environment = new TestTerminalEnvironment
+		{
+			Input = new StringReader(input),
+			IsInputInteractive = false
+		};
+
+		var exitCode = await RunAsync(
+			workspace.Path,
+			environment,
+			"--select-from", "-");
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("DPX-CLI-SELECT-FROM-INVALID", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task SelectionPathCasingUsesThePlatformPathPolicy()
 	{
 		using var workspace = CreateWorkspace();
@@ -300,4 +386,13 @@ public sealed class SelectedPathsContractTests
 			.Select(path => Path.Combine(rootPath, path.Replace('/', Path.DirectorySeparatorChar)))
 			.OrderBy(static path => path, StringComparer.Ordinal)
 			.ToArray();
+
+	private sealed class ThrowingTextReader : TextReader
+	{
+		public override Task<string?> ReadLineAsync() =>
+			throw new InvalidOperationException("Interactive stdin must not be read.");
+
+		public override ValueTask<string?> ReadLineAsync(CancellationToken cancellationToken) =>
+			throw new InvalidOperationException("Interactive stdin must not be read.");
+	}
 }

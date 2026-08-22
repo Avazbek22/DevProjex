@@ -14,6 +14,15 @@ public sealed record AnalyzeCommandRequest(
 	AnalysisOutputFormat Format,
 	string? OutputPath,
 	bool Strict,
+	TerminalOutputOptions Output,
+	bool IncludeFindings = false,
+	bool FailOnFindings = false);
+
+public sealed record TreeCommandRequest(
+	string ProjectPath,
+	ProjectSelectionSpec Selection,
+	TreeTextFormat Format,
+	string? OutputPath,
 	TerminalOutputOptions Output);
 
 public sealed record ExportContextCommandRequest(

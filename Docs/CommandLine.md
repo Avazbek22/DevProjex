@@ -37,15 +37,22 @@ devprojex
 ├── tui
 ├── open
 ├── analyze
+├── tree
 ├── export
-│   ├── context
-│   └── project
+│   ├── context, ctx
+│   └── project, proj
 ├── profile
 │   ├── show
 │   ├── export
 │   ├── import
 │   ├── validate
 │   └── reset
+├── recent
+├── cache
+│   ├── path
+│   ├── list
+│   ├── remove
+│   └── clear
 ├── ui
 │   ├── list
 │   ├── status
@@ -55,6 +62,7 @@ devprojex
 │   ├── filter
 │   └── search
 ├── doctor
+├── help
 ├── completion
 └── dev
     ├── benchmark
@@ -72,19 +80,20 @@ status, diagnostics, and Terminal Workspace labels.
 
 ## Common Selection Options
 
-`analyze`, `export context`, and `export project` accept the same typed selection.
-`open` omits `--hide-private-data` in this phase and additionally accepts `auto`:
+`analyze`, `export context`, `export project`, and `open` accept the same typed
+selection. `open` additionally accepts the `auto` profile:
 
 ```text
 --profile <standard|local|FILE>
 --root <PATH>                 repeatable
 --extension <EXT>            repeatable
 --select <RELATIVE_PATH>     repeatable
+--select-from <FILE|->
 --git-mode <none|gitignore|tracked>
 --exclude <NAME>             repeatable
 --hide-secrets [<true|false>]
 --hide-private-data [<true|false>]
---compress [<true|false>]
+--compress-code [<true|false>]
 --strip-comments [<true|false>]
 --strip-blank-lines [<true|false>]
 ```
@@ -142,7 +151,7 @@ rules in selected text files. An explicit `false` overrides a portable profile.
 No findings is not a privacy guarantee. See
 [HidePrivateData.md](HidePrivateData.md).
 
-`--compress` is also independent from path selection and is off in the
+`--compress-code` is also independent from path selection and is off in the
 `standard` profile. It replaces block bodies of named methods, functions, and
 constructors with minimal syntax-valid placeholders (`{ }`, `...` for Python, or an empty Ruby
 method body between its declaration and `end`) in supported C, C++, C#, Go, Java, JavaScript,
@@ -187,7 +196,7 @@ removed because this output is intended for reading rather than compilation.
 Comment removal supports the 14 body-compression languages plus HTML (`.html`, `.htm`), CSS
 (`.css`), TOML (`.toml`), Bash (`.sh`, `.bash`), XML-family project files, and YAML (`.yml`,
 `.yaml`), for 20 language packs in total. The six additional packs are comments-only: enabling
-`--compress` alone keeps them on the unsupported fast path, while `--strip-comments` enables
+`--compress-code` alone keeps them on the unsupported fast path, while `--strip-comments` enables
 their syntax-aware processing. XML-family coverage includes `.xml`, `.xaml`, `.axaml`,
 `.csproj`, `.props`, `.targets`, `.vbproj`, `.fsproj`, `.nuspec`, `.config`, and `.resx`;
 SVG assets are deliberately excluded. XML CDATA, declarations, processing instructions, and
@@ -214,11 +223,11 @@ analysis and one validated edit plan:
 | Enabled transformations | Result |
 |---|---|
 | None | Original file bytes |
-| `--compress` | Signatures and declarative state; comments and docstrings remain |
+| `--compress-code` | Signatures and declarative state; comments and docstrings remain |
 | `--strip-comments` | Complete implementation code without comments or docstrings |
 | `--strip-blank-lines` | Complete code and comments without unprotected blank lines |
-| `--compress --strip-comments` | A bare declaration skeleton without comments or docstrings |
-| `--compress --strip-blank-lines` | Declaration skeleton with comments and no unprotected blank lines |
+| `--compress-code --strip-comments` | A bare declaration skeleton without comments or docstrings |
+| `--compress-code --strip-blank-lines` | Declaration skeleton with comments and no unprotected blank lines |
 | `--strip-comments --strip-blank-lines` | Complete implementation without comments or unprotected blank lines |
 | All three | Bare declaration skeleton without comments, docstrings, or unprotected blank lines |
 
@@ -236,11 +245,41 @@ directory selects its effective subtree. Parent/child overlaps are deduplicated.
 An empty selected-path set means the complete effective tree. Absolute paths,
 `..`, and link-based escapes are rejected.
 
+`--select-from FILE` reads UTF-8 source-relative paths, one per line; empty lines
+are ignored. `--select-from -` reads redirected stdin and fails immediately when
+stdin is an interactive terminal. Its entries are combined with repeatable
+`--select`, deduplicated with the project filesystem path semantics, and replace
+profile path selection as one explicit override. Input is limited to 100,000
+non-empty entries and 16 MiB.
+
+## Repository URL Sources
+
+`tui`, `open`, `analyze`, `export context`, and `export project` accept either a
+local project directory or a Git repository URL as `PROJECT`. URL sources use the
+same managed clone cache and operation leases as Desktop. `--branch NAME` selects
+a validated branch for a URL source and is rejected for local paths. The lease is
+held for the complete operation and released afterward; generated cache paths are
+never reported as command results.
+
+```text
+devprojex export context https://github.com/owner/repo -o -
+```
+
+A successful first clone is added to repository history. Later invocations reuse
+the complete cached checkout and can work offline. Clone progress follows
+`--progress`, `--verbosity`, `--plain`, and `NO_COLOR`; cancellation cleans staging
+through the cache lifecycle. Profile commands and `tree` remain local-path-only.
+
+Common aliases are part of the public contract: `export ctx` equals
+`export context`, `export proj` equals `export project`, `-f` equals `--format`,
+and `-n` equals `--dry-run`. `-q` selects the existing `quiet` verbosity and
+cannot be combined with an explicit `--verbosity`.
+
 ## Terminal Workspace
 
 ```shell
 devprojex
-devprojex tui [PROJECT]
+devprojex tui [PROJECT] [--branch NAME]
 ```
 
 Options:
@@ -265,7 +304,7 @@ See [TerminalWorkspace.md](TerminalWorkspace.md).
 ## Open Desktop
 
 ```shell
-devprojex open [PROJECT] [options]
+devprojex open [PROJECT|URL] [options]
 ```
 
 Useful options:
@@ -282,7 +321,7 @@ Useful options:
 ```
 
 `PROJECT` defaults to the current directory. `--last` cannot be combined with a
-project argument or selection/profile overrides. `--filter` and `--search` are
+project argument, `--branch`, or selection/profile overrides. `--filter` and `--search` are
 mutually exclusive. `--view` and `--search` imply `--preview`.
 
 Without `--new-window`, DevProjex reuses a suitable desktop instance through
@@ -301,7 +340,7 @@ devprojex open --last
 ## Analyze
 
 ```shell
-devprojex analyze [PROJECT] [options]
+devprojex analyze [PROJECT|URL] [options]
 ```
 
 Defaults:
@@ -314,9 +353,11 @@ Defaults:
 Specific options:
 
 ```text
---format <text|json>
+-f, --format <text|json>
 -o, --output <PATH|->
 --strict
+--findings
+--fail-on-findings
 --color <auto|always|never>
 --progress <auto|always|never>
 --verbosity <quiet|minimal|normal|detailed|diagnostic>
@@ -329,6 +370,14 @@ when policy diagnostics exist. Analysis is already read-only and therefore has
 no `--dry-run` option. A file destination must be outside the source project and
 must not already exist. Its parent directory must already exist.
 
+`--findings` adds sanitized effective findings to text and JSON: only `ruleId`,
+`category` (`secret` or `private-data`), `relativePath`, and one-based
+`lineNumber`. Values, source fragments, assignment context, fingerprints, and raw
+detector errors are never emitted. The number of descriptors equals the combined
+effective matched counts from the same redaction session. `--fail-on-findings`
+writes the requested report and returns policy exit code `3` when any effective
+finding exists; unlike `--strict`, it does not gate ordinary diagnostics.
+
 Examples:
 
 ```shell
@@ -336,13 +385,25 @@ devprojex analyze .
 devprojex analyze . --format json -o -
 devprojex analyze ./app --format json -o report.json --strict
 devprojex analyze . --git-mode tracked --exclude smart-ignore
-devprojex analyze . --compress --format json
+devprojex analyze . --compress-code --format json
+devprojex analyze . --hide-secrets --findings --fail-on-findings
 ```
+
+## Tree
+
+```shell
+devprojex tree [PROJECT] [-f text|markdown|json|xml] [-o PATH|-]
+```
+
+`tree` writes the same tree payload as the shared Desktop export service and
+defaults to text on stdout. It accepts profile and path-selection options,
+including `--select-from`, but deliberately has no content-transformation flags.
+Its `PROJECT` argument is a local directory.
 
 ## Export Context
 
 ```shell
-devprojex export context [PROJECT] [options]
+devprojex export context [PROJECT|URL] [options]
 ```
 
 Defaults:
@@ -356,10 +417,10 @@ Specific options:
 
 ```text
 --view <tree|content|tree-content>
---format <text|markdown|json|xml>
+-f, --format <text|markdown|json|xml>
 -o, --output <PATH|->
 --force
---dry-run
+-n, --dry-run
 ```
 
 The format applies to the entire document. JSON and XML are parseable structured
@@ -393,13 +454,13 @@ devprojex export context . --view content --format xml -o ../devprojex-context.x
 devprojex export context . --format markdown -o ../devprojex-context.md --force
 devprojex export context . --hide-secrets --format markdown -o ../devprojex-redacted.md
 devprojex export context . --hide-private-data --format markdown -o ../devprojex-private.md
-devprojex export context . --compress --format markdown -o ../devprojex-compact.md
+devprojex export context . --compress-code --format markdown -o ../devprojex-compact.md
 ```
 
 ## Export Project
 
 ```shell
-devprojex export project [PROJECT] --as <folder|zip> -o <PATH> [options]
+devprojex export project [PROJECT|URL] --as <folder|zip> -o <PATH> [options]
 ```
 
 The destination is exact:
@@ -407,7 +468,7 @@ The destination is exact:
 ```shell
 devprojex export project . --as folder -o ../devprojex-submission
 devprojex export project . --as zip -o ../devprojex-submission.zip
-devprojex export project . --compress --as zip -o ../devprojex-compact.zip
+devprojex export project . --compress-code --as zip -o ../devprojex-compact.zip
 ```
 
 The first command creates exactly `../devprojex-submission`; it does not create an
@@ -429,10 +490,52 @@ created.
 On success stdout contains exactly one absolute result path. Measured progress and
 warnings use stderr.
 
+## Recent Workspaces
+
+```shell
+devprojex recent [--kind all|folder|repository] [--limit N] [-f text|json]
+```
+
+`recent` is read-only and preserves the ordering used by the GUI, newest first.
+Folders come from the 32-entry local-project history and repositories from the
+16-entry clone-URL history. JSON uses `schemaVersion: 1`, kind
+`devprojex-recent`, and stable `kind`, `path`/`url`, `name`, `parent`, and
+`lastOpened` fields.
+
+## Git Clone Cache
+
+```shell
+devprojex cache path
+devprojex cache list [-f text|json]
+devprojex cache remove URL --force
+devprojex cache clear --force
+```
+
+`cache path` prints the same managed Git clone cache root reported by `doctor`.
+`cache list` reports the repository URL, state, branch, commit, local path,
+approximate size, and last-use timestamp. Its JSON document uses
+`schemaVersion: 1` and kind `devprojex-repository-cache`.
+
+Removal commands are non-interactive and require `--force`. Their result reports
+removed, retained, and failed entries. A live repository lease is retained; any
+retained or failed entry returns policy exit code `3`, so scripts cannot mistake a
+partial cleanup for complete success.
+
+## Command Help
+
+```shell
+devprojex help [COMMAND...]
+devprojex help export context
+```
+
+The command form renders the same structured help as `--help` on the resolved
+node. Aliases are accepted while canonical command names are shown. An unknown
+command path returns usage exit code `2`.
+
 ## Profiles
 
 ```shell
-devprojex profile show [PROJECT] [--profile standard|local|FILE] [--format text|json]
+devprojex profile show [PROJECT] [--profile standard|local|FILE] [-f text|json]
 devprojex profile export [PROJECT] [--profile standard|local|FILE] -o FILE [--force]
 devprojex profile import FILE [PROJECT] [--apply]
 devprojex profile validate FILE
@@ -452,7 +555,7 @@ stdout contains one absolute committed path. Errors and diagnostics use stderr.
 ## Desktop Control
 
 ```shell
-devprojex ui list [--format text|json]
+devprojex ui list [-f text|json]
 devprojex ui status
 devprojex ui activate
 devprojex ui preview open [--view tree|content|tree-content]
@@ -481,7 +584,7 @@ invocation. See [Desktop-Control.md](Desktop-Control.md).
 ## Doctor
 
 ```shell
-devprojex doctor
+devprojex doctor [-f text|json]
 devprojex doctor --format json
 ```
 

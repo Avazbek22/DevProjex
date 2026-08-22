@@ -18,7 +18,15 @@ public sealed record SecretPreviewSpan(
 	string? SessionMarkId = null,
 	PersistentSecretMarkId? PersistentMarkId = null,
 	string RelativePath = "",
-	IReadOnlyList<string>? CascadedOccurrenceIds = null);
+	IReadOnlyList<string>? CascadedOccurrenceIds = null,
+	RedactionFindingCategory Category = RedactionFindingCategory.Secrets,
+	int SourceStart = 0);
+
+public sealed record EffectiveRedactionFinding(
+	string RuleId,
+	RedactionFindingCategory Category,
+	string RelativePath,
+	int LineNumber);
 
 public sealed record SecretTextRedactionResult(
 	string Text,

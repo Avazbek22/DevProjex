@@ -402,7 +402,7 @@ public sealed class PublishedSingleFileExtractionProcessTests
 		var environment = CreateEnvironment(home, temporary, dataRoot, extractionRoot);
 		var common = new[]
 		{
-			"--compress",
+			"--compress-code",
 			"--git-mode", "none",
 			"--exclude", "none",
 			"--progress", "never",

@@ -69,7 +69,7 @@ public sealed class CommandHelpRenderer(
 		{
 			WriteSection(output, _localization["Terminal.Help.Commands"], terminalWidth);
 			foreach (var child in children)
-				WriteItem(output, child.Name, child.Description ?? string.Empty, terminalWidth);
+				WriteItem(output, FormatCommandNames(child), child.Description ?? string.Empty, terminalWidth);
 		}
 
 		WriteSection(output, _localization["Terminal.Help.Examples"], terminalWidth);
@@ -146,6 +146,14 @@ public sealed class CommandHelpRenderer(
 			? string.Join(", ", names)
 			: $"{string.Join(", ", names)} <{valueName}>";
 	}
+
+	private static string FormatCommandNames(Command command) =>
+		string.Join(
+			", ",
+			new[] { command.Name }
+				.Concat(command.Aliases)
+				.Where(static value => !string.IsNullOrWhiteSpace(value))
+				.Distinct(StringComparer.Ordinal));
 
 	private static void WriteItem(
 		TextWriter output,

@@ -521,6 +521,42 @@ public sealed class DesktopControlIntegrationTests
 	}
 
 	[Fact]
+	public void OpenRequestPreservesExplicitPrivateDataSelectionThroughJsonTransport()
+	{
+		var selection = new ProjectSelectionSpec(HidePrivateData: true)
+		{
+			ApplicationIntent = new ProjectSelectionApplicationIntent(
+				ProjectSelectionApplicationMode.Preserve,
+				ProjectSelectionApplicationMode.Preserve,
+				ProjectSelectionApplicationMode.Preserve,
+				ProjectSelectionApplicationMode.Preserve,
+				HidePrivateData: ProjectSelectionApplicationMode.ApplyResolvedValue)
+		};
+		var request = DesktopOpenRequestFactory.Create(
+			projectPath: ".",
+			useLastProject: false,
+			newWindow: false,
+			waitForCompletion: false,
+			explicitPreview: false,
+			previewView: null,
+			treeFormat: null,
+			filter: null,
+			search: null,
+			selection: selection,
+			language: AppLanguage.En,
+			elevationAttempted: false);
+
+		var json = JsonSerializer.Serialize(request);
+		var roundTrip = JsonSerializer.Deserialize<DesktopOpenRequest>(json);
+
+		Assert.NotNull(roundTrip);
+		Assert.True(roundTrip.Selection?.HidePrivateData);
+		Assert.Equal(
+			ProjectSelectionApplicationMode.ApplyResolvedValue,
+			roundTrip.Selection?.ApplicationIntent?.HidePrivateData);
+	}
+
+	[Fact]
 	public void DesktopChildUsesIsolatedStandardStreams()
 	{
 		var startInfo = DesktopProcessLauncher.CreateStartInfo("desktop-request.json");

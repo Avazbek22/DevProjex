@@ -93,6 +93,17 @@ public interface IRepoCacheService
     void ClearAllCache();
 
     /// <summary>
+    /// Clears all cached repositories and reports entries removed, retained by leases,
+    /// or left behind after a failed cleanup.
+    /// </summary>
+    CacheClearResult ClearAllCacheWithResult();
+
+    /// <summary>
+    /// Removes cached entries for an equivalent repository URL and reports the outcome.
+    /// </summary>
+    CacheClearResult RemoveCachedRepositoryWithResult(string repositoryUrl);
+
+    /// <summary>
     /// Cleans up abandoned staging directories. Completed repositories are retained
     /// regardless of age until an explicit cache-management policy removes them.
     /// </summary>

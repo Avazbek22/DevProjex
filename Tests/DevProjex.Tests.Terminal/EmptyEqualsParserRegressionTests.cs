@@ -120,8 +120,10 @@ public sealed class EmptyEqualsParserRegressionTests
 
 	private static readonly string[] ExpectedPublicValueOptionTokens =
 	[
+		"-f",
 		"-o",
 		"--as",
+		"--branch",
 		"--color",
 		"--exclude",
 		"--extension",
@@ -129,7 +131,9 @@ public sealed class EmptyEqualsParserRegressionTests
 		"--format",
 		"--git-mode",
 		"--instance",
+		"--kind",
 		"--language",
+		"--limit",
 		"--output",
 		"--profile",
 		"--progress",
@@ -138,6 +142,7 @@ public sealed class EmptyEqualsParserRegressionTests
 		"--screen",
 		"--search",
 		"--select",
+		"--select-from",
 		"--timeout",
 		"--tree-format",
 		"--verbosity",
