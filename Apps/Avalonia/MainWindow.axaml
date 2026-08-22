@@ -612,6 +612,14 @@
                     </controls:ProjectTreeView.ItemTemplate>
                   </controls:ProjectTreeView>
 
+                  <controls:PreviewMarkerBar Name="TreeSearchMarkerBar"
+                                             Width="15"
+                                             HorizontalAlignment="Right"
+                                             VerticalAlignment="Stretch"
+                                             IsHitTestVisible="False"
+                                             RedactionBrush="{DynamicResource AppAccentBrush}"
+                                             SearchBrush="{DynamicResource TreeSearchHighlightBrush}" />
+
                   <Button Name="PreviewTreeHideButton"
                           Classes="menu-icon-button tree-island-close-button"
                           IsVisible="{Binding IsPreviewMode}"

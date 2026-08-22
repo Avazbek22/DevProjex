@@ -40,8 +40,13 @@ internal sealed class SearchFilterInteractionController : IDisposable
     private readonly CancellationTokenSource _lifetimeCts = new();
     private readonly CancellationToken _lifetimeToken;
     private readonly DesktopShortcutModifiers _shortcutModifiers;
+    private readonly PreviewMarkerBar? _treeSearchMarkerBar;
 
     private ProjectTreeExpansionSnapshot? _filterExpansionSnapshot;
+    private ScrollViewer? _treeScrollViewer;
+    private ScrollBar? _treeVerticalScrollBar;
+    private Cursor? _searchMarkerCursor;
+    private InputElement? _searchMarkerCursorTarget;
     private SuspendedTextTool _suspendedTool;
     private int _filterApplyVersion;
     private int _realtimeSuppressionDepth;
@@ -72,7 +77,8 @@ internal sealed class SearchFilterInteractionController : IDisposable
         Func<Exception, Task> showErrorAsync,
         Action<MemoryCleanupReason> scheduleMemoryCleanup,
         Action cancelMemoryCleanup,
-        DesktopShortcutModifiers? shortcutModifiers = null)
+        DesktopShortcutModifiers? shortcutModifiers = null,
+        PreviewMarkerBar? treeSearchMarkerBar = null)
     {
         _lifetimeToken = _lifetimeCts.Token;
         _window = window;
@@ -90,6 +96,7 @@ internal sealed class SearchFilterInteractionController : IDisposable
         _scheduleMemoryCleanup = scheduleMemoryCleanup;
         _cancelMemoryCleanup = cancelMemoryCleanup;
         _shortcutModifiers = shortcutModifiers ?? DesktopShortcutModifiers.Current;
+        _treeSearchMarkerBar = treeSearchMarkerBar;
 
         _search = CreateToolState(
             TextToolKind.Search,
@@ -106,6 +113,23 @@ internal sealed class SearchFilterInteractionController : IDisposable
             viewModel,
             treeView,
             sessionMetrics);
+        if (_treeSearchMarkerBar is not null)
+        {
+            _searchCoordinator.SearchMarkersChanged += OnSearchMarkersChanged;
+            _treeSearchMarkerBar.SetMarkers(_searchCoordinator.SearchMarkerSnapshot);
+            _treeView.AddHandler(
+                InputElement.PointerPressedEvent,
+                OnSearchMarkerPointerPressed,
+                RoutingStrategies.Tunnel,
+                handledEventsToo: true);
+            _treeView.AddHandler(
+                InputElement.PointerMovedEvent,
+                OnSearchMarkerPointerMoved,
+                RoutingStrategies.Tunnel,
+                handledEventsToo: true);
+            _treeView.PointerExited += OnSearchMarkerPointerExited;
+            _treeView.LayoutUpdated += OnTreeLayoutUpdated;
+        }
         _filterCoordinator = new NameFilterCoordinator(
             ApplyFilterRealtime,
             () => !string.IsNullOrWhiteSpace(viewModel.NameFilter),
@@ -122,6 +146,127 @@ internal sealed class SearchFilterInteractionController : IDisposable
     public bool IsSearchEffectivelyVisible => IsEffectivelyVisible(_search);
 
     public bool IsFilterEffectivelyVisible => IsEffectivelyVisible(_filter);
+
+    private void OnSearchMarkersChanged(
+        object? sender,
+        PreviewMarkersChangedEventArgs e)
+    {
+        _treeSearchMarkerBar?.SetMarkers(e.Snapshot);
+        UpdateSearchMarkerTrackGeometry();
+    }
+
+    private void OnTreeLayoutUpdated(object? sender, EventArgs e) =>
+        UpdateSearchMarkerTrackGeometry();
+
+    private void UpdateSearchMarkerTrackGeometry()
+    {
+        if (_treeSearchMarkerBar is null)
+            return;
+
+        _treeScrollViewer ??= _treeView.FindDescendantOfType<ScrollViewer>();
+        _treeVerticalScrollBar ??= _treeScrollViewer?
+            .GetVisualDescendants()
+            .OfType<ScrollBar>()
+            .FirstOrDefault(static scrollBar =>
+                scrollBar.Orientation == Orientation.Vertical);
+
+        var hasVerticalScrollBar = _treeVerticalScrollBar is { IsVisible: true };
+        _treeSearchMarkerBar.IsMarkerDisplayEnabled = hasVerticalScrollBar;
+
+        var margin = default(Thickness);
+        if (_treeScrollViewer is { } scrollViewer &&
+            _treeVerticalScrollBar is { IsVisible: true } scrollBar &&
+            scrollBar.GetVisualDescendants()
+                .OfType<Track>()
+                .FirstOrDefault() is { } track &&
+            track.GetVisualDescendants()
+                .OfType<Thumb>()
+                .FirstOrDefault() is { } thumb &&
+            track.TranslatePoint(default, _treeView) is { } origin)
+        {
+            var availableHeight = Math.Max(0, _treeView.Bounds.Height);
+            var top = Math.Clamp(origin.Y, 0, availableHeight);
+            var bottom = Math.Clamp(
+                availableHeight - top - track.Bounds.Height,
+                0,
+                availableHeight);
+            margin = new Thickness(0, top, 0, bottom);
+
+            var visibleLineCount =
+                _searchCoordinator.SearchMarkerSnapshot.TotalLineCount;
+            var lineHeight = visibleLineCount > 0
+                ? Math.Max(1, scrollViewer.Extent.Height / visibleLineCount)
+                : 1;
+            _treeSearchMarkerBar.SetScrollMetrics(new PreviewMarkerScrollMetrics(
+                scrollViewer.Extent.Height,
+                scrollViewer.Viewport.Height,
+                thumb.Bounds.Height,
+                FirstLineTop: 0,
+                lineHeight));
+        }
+        else
+        {
+            _treeSearchMarkerBar.SetScrollMetrics(null);
+        }
+
+        if (_treeSearchMarkerBar.Margin != margin)
+            _treeSearchMarkerBar.Margin = margin;
+    }
+
+    private void OnSearchMarkerPointerPressed(
+        object? sender,
+        PointerPressedEventArgs e)
+    {
+        if (_treeSearchMarkerBar is null ||
+            !_treeSearchMarkerBar.IsVisible ||
+            !e.GetCurrentPoint(_treeView).Properties.IsLeftButtonPressed ||
+            _treeSearchMarkerBar.FindTargetAt(
+                e.GetPosition(_treeSearchMarkerBar)) is not { } target ||
+            !_searchCoordinator.TryNavigateToSearchMarker(target))
+        {
+            return;
+        }
+
+        e.Handled = true;
+    }
+
+    private void OnSearchMarkerPointerMoved(
+        object? sender,
+        PointerEventArgs e)
+    {
+        if (_treeSearchMarkerBar is not { IsVisible: true })
+        {
+            SetSearchMarkerCursor(null);
+            return;
+        }
+
+        SetSearchMarkerCursor(
+            _treeSearchMarkerBar.FindTargetAt(
+                e.GetPosition(_treeSearchMarkerBar)) is not null
+                ? e.Source as InputElement
+                : null);
+    }
+
+    private void OnSearchMarkerPointerExited(
+        object? sender,
+        PointerEventArgs e) =>
+        SetSearchMarkerCursor(null);
+
+    private void SetSearchMarkerCursor(InputElement? target)
+    {
+        var cursor = _searchMarkerCursor ??=
+            new Cursor(StandardCursorType.Hand);
+        if (ReferenceEquals(_searchMarkerCursorTarget, target) &&
+            ReferenceEquals(target?.Cursor, cursor))
+        {
+            return;
+        }
+
+        _searchMarkerCursorTarget?.ClearValue(InputElement.CursorProperty);
+        _searchMarkerCursorTarget = target;
+        if (target is not null)
+            target.Cursor = cursor;
+    }
 
     public void OnSearchQueryChanged()
     {
@@ -685,6 +830,20 @@ internal sealed class SearchFilterInteractionController : IDisposable
         Interlocked.Exchange(ref _pendingSearchHotkeyToggle, 0);
         Interlocked.Exchange(ref _pendingFilterHotkeyToggle, 0);
         ResetAnimationState();
+        if (_treeSearchMarkerBar is not null)
+        {
+            _searchCoordinator.SearchMarkersChanged -= OnSearchMarkersChanged;
+            _treeView.RemoveHandler(
+                InputElement.PointerPressedEvent,
+                OnSearchMarkerPointerPressed);
+            _treeView.RemoveHandler(
+                InputElement.PointerMovedEvent,
+                OnSearchMarkerPointerMoved);
+            _treeView.PointerExited -= OnSearchMarkerPointerExited;
+            _treeView.LayoutUpdated -= OnTreeLayoutUpdated;
+            SetSearchMarkerCursor(null);
+        }
+
         _searchCoordinator.Dispose();
         _filterCoordinator.Dispose();
         _filterExpansionSnapshot = null;

@@ -49,6 +49,84 @@ public sealed class MainWindowSearchFilterUiTests(UiWorkspaceFixture workspace)
     }
 
     [AvaloniaFact]
+    public async Task SearchMarkers_AppearOnTreeScrollBarNavigateAndClearWithQuery()
+    {
+        using var project = UiTestProject.CreateWithLargeFlatTree(fileCount: 120);
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            window.Height = window.MinHeight;
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
+            await UiTestDriver.OpenSearchAsync(window);
+
+            var searchBar = UiTestDriver.GetRequiredControl<SearchBarView>(
+                window,
+                "SearchBar");
+            var searchBox = Assert.IsType<TextBox>(searchBar.SearchBoxControl);
+            var markerBar = UiTestDriver.GetRequiredControl<PreviewMarkerBar>(
+                window,
+                "TreeSearchMarkerBar");
+            var tree = UiTestDriver.GetRequiredControl<ProjectTreeView>(
+                window,
+                "ProjectTree");
+            var scrollViewer = Assert.IsType<ScrollViewer>(
+                tree.FindDescendantOfType<ScrollViewer>());
+
+            await UiTestDriver.EnterTextAsync(window, searchBox, "file-");
+            await UiTestDriver.WaitForSearchAppliedAsync(window, "file-");
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => markerBar.IsVisible &&
+                      markerBar.MarkerTicks.Count > 1 &&
+                      scrollViewer.Extent.Height > scrollViewer.Viewport.Height,
+                "tree search results to publish scrollbar markers");
+
+            var targetTick = markerBar.MarkerTicks
+                .Where(static tick =>
+                    tick.Target.Category == PreviewMarkerCategory.Search)
+                .OrderByDescending(static tick => tick.Y)
+                .First();
+            var expectedMatchIndex = targetTick.Target.LineNumber - 2;
+            var expectedFileName =
+                $"file-{expectedMatchIndex - 1:0000}.txt";
+            var markerPoint = Assert.IsType<Point>(markerBar.TranslatePoint(
+                new Point(markerBar.Bounds.Width - 1, targetTick.Y),
+                window));
+            window.MouseMove(markerPoint, RawInputModifiers.None);
+            window.MouseDown(
+                markerPoint,
+                MouseButton.Left,
+                RawInputModifiers.LeftMouseButton);
+            window.MouseUp(markerPoint, MouseButton.Left, RawInputModifiers.None);
+
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => tree.SelectedItem is TreeNodeViewModel selectedNode &&
+                      string.Equals(
+                          selectedNode.DisplayName,
+                          expectedFileName,
+                          StringComparison.Ordinal) &&
+                      UiTestDriver.GetViewModel(window).SearchCurrentMatchIndex ==
+                      expectedMatchIndex &&
+                      scrollViewer.Offset.Y > 0,
+                "last tree-search marker to navigate to the matching node");
+
+            searchBox.Text = string.Empty;
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => UiTestDriver.GetViewModel(window).SearchTotalMatches == 0 &&
+                      markerBar.MarkerTicks.Count == 0 &&
+                      !markerBar.IsVisible,
+                "clearing tree search to remove scrollbar markers");
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task SearchSummary_RemainsVisibleAtMinimumWidthWithPreviewOpen()
     {
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);

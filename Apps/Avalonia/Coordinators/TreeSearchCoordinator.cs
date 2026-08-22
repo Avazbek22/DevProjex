@@ -87,6 +87,7 @@ public sealed class TreeSearchCoordinator(
     private readonly HashSet<TreeNodeViewModel> _nextSearchExpandedNodes = [];
     private readonly HashSet<TreeNodeViewModel> _searchSelfMatchedNodes = [];
     private readonly HashSet<TreeNodeViewModel> _searchLazyChildrenSnapshots = [];
+    private readonly Dictionary<int, int> _searchMarkerMatchIndices = [];
     private readonly List<TreeNodeViewModel> _highlightAddedNodes = [];
     private readonly List<TreeNodeViewModel> _highlightRemovedNodes = [];
     private readonly object _highlightCtsLock = new();
@@ -115,6 +116,11 @@ public sealed class TreeSearchCoordinator(
     private const int SearchGlobalHighlightMatchCap = 3500;
     private static readonly TimeSpan DispatcherWorkSlice =
         TimeSpan.FromMilliseconds(6);
+
+    internal event EventHandler<PreviewMarkersChangedEventArgs>? SearchMarkersChanged;
+
+    internal PreviewMarkerSnapshot SearchMarkerSnapshot { get; private set; } =
+        PreviewMarkerSnapshot.Empty;
 
     // Cached brushes to avoid creating new objects for each node
     private IBrush? _cachedHighlightBackground;
@@ -215,6 +221,7 @@ public sealed class TreeSearchCoordinator(
                 _searchMatches = [];
                 _searchMatchIndex = -1;
                 UpdateCurrentSearchMatch(null);
+                PublishSearchMarkers();
                 UpdateSearchMatchSummary();
                 ClearHighlightsIfNeeded();
                 _searchExpandedNodes.Clear();
@@ -357,6 +364,7 @@ public sealed class TreeSearchCoordinator(
         _searchExpansionStateInitialized = false;
         _lastComputedQuery = null;
         _searchExpansionEpoch = 0;
+        PublishSearchMarkers();
         UpdateSearchMatchSummary();
 
         // Note: Don't call UpdateHighlights here - nodes may already be cleared
@@ -422,6 +430,7 @@ public sealed class TreeSearchCoordinator(
         _searchRoot = null;
         _activeHighlightQuery = null;
         _lastComputedQuery = null;
+        PublishSearchMarkers();
         UpdateSearchMatchSummary();
 
         // Clear cached brushes
@@ -439,6 +448,21 @@ public sealed class TreeSearchCoordinator(
         _searchMatchIndex = (_searchMatchIndex + step + _searchMatches.Length) % _searchMatches.Length;
         SelectSearchMatch(adjustHorizontalOffset: true);
         metricsSink?.RecordTreeSearchNavigation(step, _searchMatchIndex + 1, _searchMatches.Length);
+    }
+
+    internal bool TryNavigateToSearchMarker(PreviewMarkerTarget target)
+    {
+        if (target.Category != PreviewMarkerCategory.Search ||
+            !_searchMarkerMatchIndices.TryGetValue(target.LineNumber, out var matchIndex) ||
+            matchIndex < 0 ||
+            matchIndex >= _searchMatches.Length)
+        {
+            return false;
+        }
+
+        _searchMatchIndex = matchIndex;
+        SelectSearchMatch(adjustHorizontalOffset: true);
+        return true;
     }
 
     public bool TryNavigateForCurrentQuery(int step)
@@ -849,6 +873,7 @@ public sealed class TreeSearchCoordinator(
             _resolvedSearchNodes.Clear();
             _descriptorSearch.Clear();
             _autoExpandAllMatches = false;
+            PublishSearchMarkers();
             UpdateSearchMatchSummary();
             return;
         }
@@ -856,6 +881,7 @@ public sealed class TreeSearchCoordinator(
         if (searchResult is null || viewModel.TreeNodes.FirstOrDefault() is not { } root)
         {
             _autoExpandAllMatches = false;
+            PublishSearchMarkers();
             UpdateSearchMatchSummary();
             return;
         }
@@ -917,6 +943,7 @@ public sealed class TreeSearchCoordinator(
         }
 
         _lastComputedQuery = query;
+        PublishSearchMarkers();
     }
 
     private void ApplySmartExpandFromMatches(
@@ -1107,7 +1134,70 @@ public sealed class TreeSearchCoordinator(
             ApplySearchHighlightDiff(
                 query,
                 highlightedMatches);
+            PublishSearchMarkers();
         }, DispatcherPriority.Background);
+    }
+
+    private void PublishSearchMarkers()
+    {
+        _searchMarkerMatchIndices.Clear();
+        if (_searchMatches.Length == 0 || _currentSearchIndex is null)
+        {
+            SetSearchMarkerSnapshot(PreviewMarkerSnapshot.Empty);
+            return;
+        }
+
+        var matchesByDescriptor = new Dictionary<TreeNodeDescriptor, int>(
+            _searchMatches.Length,
+            ReferenceEqualityComparer.Instance);
+        for (var matchIndex = 0; matchIndex < _searchMatches.Length; matchIndex++)
+        {
+            var entryIndex = _searchMatches[matchIndex];
+            if ((uint)entryIndex < (uint)_currentSearchIndex.Count)
+            {
+                matchesByDescriptor[_currentSearchIndex[entryIndex].Descriptor] =
+                    matchIndex;
+            }
+        }
+
+        var markers = new List<PreviewMarkerSource>(
+            Math.Min(_searchMatches.Length, 4096));
+        var visibleLineNumber = 0;
+        var stack = new Stack<TreeNodeViewModel>();
+        for (var rootIndex = viewModel.TreeNodes.Count - 1; rootIndex >= 0; rootIndex--)
+            stack.Push(viewModel.TreeNodes[rootIndex]);
+
+        while (stack.Count > 0)
+        {
+            var node = stack.Pop();
+            visibleLineNumber++;
+            if (matchesByDescriptor.TryGetValue(node.Descriptor, out var matchIndex))
+            {
+                markers.Add(new PreviewMarkerSource(
+                    visibleLineNumber,
+                    PreviewMarkerCategory.Search));
+                _searchMarkerMatchIndices[visibleLineNumber] = matchIndex;
+            }
+
+            if (!node.IsExpanded || !node.AreChildrenRealized)
+                continue;
+
+            var children = node.Children;
+            for (var childIndex = children.Count - 1; childIndex >= 0; childIndex--)
+                stack.Push(children[childIndex]);
+        }
+
+        SetSearchMarkerSnapshot(markers.Count == 0
+            ? PreviewMarkerSnapshot.Empty
+            : new PreviewMarkerSnapshot(visibleLineNumber, [.. markers]));
+    }
+
+    private void SetSearchMarkerSnapshot(PreviewMarkerSnapshot snapshot)
+    {
+        SearchMarkerSnapshot = snapshot;
+        SearchMarkersChanged?.Invoke(
+            this,
+            new PreviewMarkersChangedEventArgs(snapshot));
     }
 
     private void SeedExpandedNodesSnapshot()

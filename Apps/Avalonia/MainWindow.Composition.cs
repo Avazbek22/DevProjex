@@ -1110,7 +1110,9 @@ public partial class MainWindow
             () => _lastInteractiveFilterUsedInMemory,
             ex => ShowErrorAsync(ex.Message),
             ScheduleBackgroundMemoryCleanup,
-            CancelAllMemoryCleanup);
+            CancelAllMemoryCleanup,
+            treeSearchMarkerBar: this.FindControl<PreviewMarkerBar>("TreeSearchMarkerBar") ??
+                throw new InvalidOperationException("Tree search marker bar was not found."));
 		_previewSearchController = new PreviewSearchInteractionController(
 			_viewModel,
 			_previewSearchBar ??
