@@ -6,6 +6,7 @@ internal sealed class TestTerminalEnvironment : ITerminalEnvironment
 	private readonly StringWriter _error = new();
 
 	public TextReader Input { get; init; } = new StringReader(string.Empty);
+	public Stream? RawInput { get; init; }
 	public TextWriter Output => _output;
 	public TextWriter Error => _error;
 	public bool IsInputInteractive { get; init; }

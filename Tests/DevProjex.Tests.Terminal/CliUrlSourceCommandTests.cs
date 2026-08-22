@@ -83,6 +83,55 @@ public sealed class CliUrlSourceCommandTests
 	}
 
 	[Fact]
+	public async Task UrlSourceFlowsThroughContextAndProjectExportsUsingTheManagedCache()
+	{
+		if (!IsGitAvailable())
+			Assert.Skip("Git is unavailable on this test host.");
+
+		using var workspace = new TemporaryDirectory();
+		using var data = new TemporaryDirectory();
+		var source = workspace.CreateDirectory("export-source");
+		RunGit(source, "init", "--initial-branch=main");
+		RunGit(source, "config", "user.email", "terminal-tests@devprojex.local");
+		RunGit(source, "config", "user.name", "DevProjex Terminal Tests");
+		workspace.WriteFile("export-source/src/remote.cs", "internal sealed class RemoteMarker {}\n");
+		RunGit(source, "add", ".");
+		RunGit(source, "commit", "-m", "initial");
+		var bare = Path.Combine(workspace.Path, "export-origin.git");
+		RunGit(workspace.Path, "clone", "--bare", source, bare);
+		var repositoryUrl = new Uri(bare + Path.DirectorySeparatorChar).AbsoluteUri;
+		var factory = new TerminalServiceFactory(() => data.Path);
+		var contextEnvironment = new TestTerminalEnvironment();
+
+		var contextExitCode = await new TerminalApplication(contextEnvironment, factory).RunAsync(
+			[
+				"export", "context", repositoryUrl,
+				"--git-mode", "none", "--view", "content", "--format", "text", "-o", "-", "--plain"
+			],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, contextExitCode);
+		Assert.Contains("internal sealed class RemoteMarker", contextEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.Empty(contextEnvironment.StandardError);
+
+		var destination = Path.Combine(workspace.Path, "exported-project");
+		var projectEnvironment = new TestTerminalEnvironment();
+		var projectExitCode = await new TerminalApplication(projectEnvironment, factory).RunAsync(
+			[
+				"export", "project", repositoryUrl,
+				"--git-mode", "none", "--as", "folder", "-o", destination
+			],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, projectExitCode);
+		Assert.Equal(
+			"internal sealed class RemoteMarker {}\n",
+			File.ReadAllText(Path.Combine(destination, "src", "remote.cs")).ReplaceLineEndings("\n"));
+		Assert.Empty(projectEnvironment.StandardError);
+		Assert.Single(new RepoCacheService(Path.Combine(data.Path, "RepoCache")).ListIndexedRepositories());
+	}
+
+	[Fact]
 	public async Task MissingFileRemoteReturnsRuntimeFailureWithoutPayload()
 	{
 		using var workspace = new TemporaryDirectory();

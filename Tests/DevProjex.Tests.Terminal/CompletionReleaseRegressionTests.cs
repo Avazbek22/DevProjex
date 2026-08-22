@@ -154,6 +154,22 @@ public sealed class CompletionReleaseRegressionTests
 		Assert.Contains("--limit", recentOptions);
 	}
 
+	[Fact]
+	public async Task HelpCompletionFollowsTheResolvedCommandPath()
+	{
+		var root = await CompleteAsync("devprojex help ");
+		var exportChildren = await CompleteAsync("devprojex help export ");
+
+		Assert.Contains("export", root);
+		Assert.Contains("analyze", root);
+		Assert.Contains("context", exportChildren);
+		Assert.Contains("ctx", exportChildren);
+		Assert.Contains("project", exportChildren);
+		Assert.Contains("proj", exportChildren);
+		Assert.DoesNotContain("analyze", exportChildren);
+		Assert.DoesNotContain("cache", exportChildren);
+	}
+
 	[Theory]
 	[InlineData("devprojex analyze . --format=j")]
 	[InlineData("devprojex analyze . --plain --color ")]

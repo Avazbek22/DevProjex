@@ -253,6 +253,53 @@ public sealed class SelectedPathsContractTests
 	}
 
 	[Fact]
+	public async Task SelectFromRejectsAnOversizedSingleLineThroughBoundedReads()
+	{
+		using var workspace = CreateWorkspace();
+		var input = new OversizedSingleLineReader(SelectionPathListReader.MaximumBytes + 1);
+		var environment = new TestTerminalEnvironment
+		{
+			Input = input,
+			IsInputInteractive = false
+		};
+
+		var exitCode = await RunAsync(
+			workspace.Path,
+			environment,
+			"--select-from", "-");
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("DPX-CLI-SELECT-FROM-INVALID", environment.StandardError, StringComparison.Ordinal);
+		Assert.InRange(input.MaximumRequestedCharacters, 1, 16 * 1024);
+		Assert.InRange(
+			input.CharactersReturned,
+			SelectionPathListReader.MaximumBytes + 1,
+			SelectionPathListReader.MaximumBytes + 16 * 1024);
+	}
+
+	[Fact]
+	public async Task SelectFromRawStdinRejectsInvalidUtf8()
+	{
+		using var workspace = CreateWorkspace();
+		using var input = new MemoryStream([0x73, 0x72, 0x63, 0x2F, 0xC3, 0x28]);
+		var environment = new TestTerminalEnvironment
+		{
+			RawInput = input,
+			IsInputInteractive = false
+		};
+
+		var exitCode = await RunAsync(
+			workspace.Path,
+			environment,
+			"--select-from", "-");
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("DPX-CLI-SELECT-FROM-INVALID", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task SelectionPathCasingUsesThePlatformPathPolicy()
 	{
 		using var workspace = CreateWorkspace();
@@ -394,5 +441,28 @@ public sealed class SelectedPathsContractTests
 
 		public override ValueTask<string?> ReadLineAsync(CancellationToken cancellationToken) =>
 			throw new InvalidOperationException("Interactive stdin must not be read.");
+	}
+
+	private sealed class OversizedSingleLineReader(long length) : TextReader
+	{
+		private long _remaining = length;
+
+		public int MaximumRequestedCharacters { get; private set; }
+		public long CharactersReturned { get; private set; }
+
+		public override ValueTask<int> ReadAsync(
+			Memory<char> buffer,
+			CancellationToken cancellationToken = default)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			MaximumRequestedCharacters = Math.Max(MaximumRequestedCharacters, buffer.Length);
+			var count = (int)Math.Min(buffer.Length, _remaining);
+			if (count == 0)
+				return ValueTask.FromResult(0);
+			buffer.Span[..count].Fill('x');
+			_remaining -= count;
+			CharactersReturned += count;
+			return ValueTask.FromResult(count);
+		}
 	}
 }

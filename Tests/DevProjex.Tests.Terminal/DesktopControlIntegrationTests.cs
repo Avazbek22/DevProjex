@@ -88,6 +88,47 @@ public sealed class DesktopControlIntegrationTests
 	}
 
 	[Fact]
+	public async Task OpenRepositoryUrlWritesOnlyTheSafeSourceUrlInsteadOfTheCachePath()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var data = new TemporaryDirectory();
+		const string repositoryUrl = "https://user:secret@github.com/example/project.git";
+		var services = new TerminalServiceFactory(() => data.Path).Create(AppLanguage.En);
+		var staging = services.RepoCacheService.CreateRepositoryStagingDirectory(repositoryUrl);
+		File.WriteAllText(Path.Combine(staging, "README.md"), "cached\n");
+		var published = services.RepoCacheService.PublishRepositoryDirectory(staging, repositoryUrl);
+		services.RepoCacheService.RecordIndexedRepository(repositoryUrl, published);
+		var environment = new TestTerminalEnvironment();
+		await using var source = await new TerminalProjectSourceResolver(
+				services,
+			environment,
+			new TerminalOutputOptions())
+			.ResolveAsync(repositoryUrl, branch: null, TestContext.Current.CancellationToken);
+		Assert.True(source.IsRepositoryUrl);
+		var paths = new DesktopControlPaths(() => workspace.CreateDirectory("ipc"));
+		await using var server = await DesktopControlServer.StartAsync(
+			new OpenStateDesktopHandler(source.ProjectPath),
+			source.ProjectPath,
+			paths,
+			TestContext.Current.CancellationToken);
+		var client = new DesktopControlClient(new DesktopInstanceRegistry(paths));
+
+		var exitCode = await new DesktopCommandHandler(environment, client: client)
+			.OpenAsync(
+				new DesktopOpenRequest(ProjectPath: source.ProjectPath),
+				TestContext.Current.CancellationToken,
+				source.SafeRepositoryUrl);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Equal(
+			"https://github.com/example/project.git" + Environment.NewLine,
+			environment.StandardOutput);
+		Assert.DoesNotContain(services.RepoCacheService.CacheRootPath, environment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain(source.ProjectPath, environment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("secret", environment.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task SuccessIsReturnedOnlyAfterHandlerAppliedTheRequest()
 	{
 		using var workspace = new TemporaryDirectory();

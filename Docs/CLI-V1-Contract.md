@@ -341,8 +341,9 @@ Cached repositories are reusable offline. A successful first clone records the
 safe URL in recent-repository history. Cancellation removes clone staging;
 network and clone failures return runtime exit `1` without opening or exporting
 partial content. The generated cache path is internal and never replaces the
-requested command result. Profile commands and `tree` accept local directories
-only.
+requested command result. In particular, successful `open URL` writes the safe
+repository URL rather than the physical cache checkout path. Profile commands
+and `tree` accept local directories only.
 
 ## Command Contracts
 
@@ -403,8 +404,9 @@ project and state have been applied, not until Desktop closes.
 `--profile auto` is accepted by `open` and resolves `local` when a valid local
 profile exists, otherwise `standard`.
 
-On success, stdout contains the accepted absolute project path when a project was
-resolved. Operational and handoff diagnostics use stderr.
+On success, stdout contains the accepted absolute project path for a local source
+or the safe repository URL for a URL source. A generated cache path is never
+reported. Operational and handoff diagnostics use stderr.
 
 ### `analyze`
 
@@ -423,9 +425,12 @@ devprojex analyze [PROJECT|URL]
 Analysis is already read-only, so it has no `--dry-run` option. `--strict` writes
 the requested report first and returns `3` when policy diagnostics exist.
 `--findings` adds only sanitized effective descriptors (`ruleId`, `category`,
-`relativePath`, and one-based `lineNumber`). The list count equals the combined
-effective matched counters from the same output session. Values, source text,
-assignment context, fingerprints, and raw detector exceptions are forbidden.
+`relativePath`, and one-based `lineNumber`). `lineNumber` identifies the line in
+the original decoded source file before code compression, comment removal, or
+blank-line removal; LF, CRLF, and lone CR are line boundaries. The list count
+equals the combined effective matched counters from the same output session.
+Descriptors are materialized only when `--findings` is requested. Values, source
+text, assignment context, fingerprints, and raw detector exceptions are forbidden.
 `--fail-on-findings` writes the report and returns `3` when that effective count
 is nonzero; it is independent from `--strict`.
 
@@ -516,10 +521,14 @@ devprojex cache clear --force
 
 The group manages only the shared Git clone cache. Destructive commands never
 prompt and require `--force`. Their result reports removed, retained, and failed
-entries. Leased repositories are retained; a retained or failed entry returns
-policy exit `3`, never clean success. Cache-list JSON schema version 1 uses kind
-`devprojex-repository-cache` and publishes URL, state, branch, commit, internal
-local path, approximate size, and last-use timestamp.
+entries from the same index-locked operation. Leased repositories are retained;
+an unavailable index lock, an unsupported future index schema, or a failed index
+update is reported as a failure rather than an empty success. Unindexed cache
+containers are included by `clear`. A retained or failed entry returns policy exit
+`3`, never clean success. Cache listing includes both ready and damaged indexed
+entries; damaged entries publish `state: "damaged"`. Cache-list JSON schema version
+1 uses kind `devprojex-repository-cache` and publishes URL, state, branch, commit,
+internal local path, approximate size, and last-use timestamp.
 
 ### `help`
 
@@ -663,10 +672,10 @@ that prevents an accepted option from becoming a no-op.
 | `tui` | `--mouse`, `--no-mouse` | capability-based auto policy | enables or disables input handling for this session | mutually exclusive | terminal screen; conflict exits `2`; tracking restores on exit | parser, workspace, PTY lifecycle |
 | `tui` | `--color`, `--plain` | `auto`, off | selects color policy or strict plain presentation/export rendering | `--plain --color always` exits `2` | terminal screen; no payload stream repurposing | parser, presentation, plain PTY |
 | `open` | `--last` | off | resolves the most recent workspace | conflicts with `PROJECT` and every selection override | accepted absolute path on stdout; conflict exits `2` | parser, handler, Desktop IPC |
-| `open` | `--new-window` | off | requests a new Desktop instance | none | accepted path on stdout; handoff failures use stderr and `5` | handler, Desktop IPC |
-| `open` | `--wait` | off | guarantees that the requested project/state is applied before return | does not wait for Desktop termination | accepted path on stdout; timeout uses stderr and `5` | handler, Desktop IPC |
-| `open` | `--preview`, `--view`, `--tree-format` | closed; no explicit view/format | opens preview and applies its typed view/tree format | `--view` implies preview | accepted path on stdout; invalid value exits `2` | parser, handler, Desktop IPC |
-| `open` | `--filter`, `--search` | absent | applies the requested Desktop filter or preview search | mutually exclusive; search implies preview | accepted path on stdout; conflict exits `2` | parser, handler, Desktop IPC |
+| `open` | `--new-window` | off | requests a new Desktop instance | none | accepted local path or safe source URL on stdout; handoff failures use stderr and `5` | handler, Desktop IPC |
+| `open` | `--wait` | off | guarantees that the requested project/state is applied before return | does not wait for Desktop termination | accepted local path or safe source URL on stdout; timeout uses stderr and `5` | handler, Desktop IPC |
+| `open` | `--preview`, `--view`, `--tree-format` | closed; no explicit view/format | opens preview and applies its typed view/tree format | `--view` implies preview | accepted local path or safe source URL on stdout; invalid value exits `2` | parser, handler, Desktop IPC |
+| `open` | `--filter`, `--search` | absent | applies the requested Desktop filter or preview search | mutually exclusive; search implies preview | accepted local path or safe source URL on stdout; conflict exits `2` | parser, handler, Desktop IPC |
 | analyze/tree/context/project/open | `--profile` | `standard`; `open`: `auto` | resolves `standard`, `local`, or a portable profile before explicit overrides | `auto` is accepted only by `open`; conflicts with `open --last` | requested payload/path stays on stdout; unresolved profile exits `2` | parser, resolver, handler, process |
 | analyze/tree/context/project/open | `--root` | profile roots | replaces the profile root set with each repeated top-level relative path | repeatable; conflicts with `open --last`; invalid/out-of-source path exits `2` | requested payload/path stays on stdout | parser, resolver, handler, process |
 | analyze/tree/context/project/open | `--extension` | profile extensions | replaces the profile extension set with each repeated normalized extension | repeatable; conflicts with `open --last` | requested payload/path stays on stdout | parser, resolver, handler, process |
@@ -720,7 +729,7 @@ stdout is the payload channel:
 
 - analysis and context documents;
 - one real absolute result path after a file, folder, or ZIP was created;
-- an accepted project path from `open`;
+- an accepted local project path or safe repository URL from `open`;
 - requested Desktop control payloads;
 - help, version, and completion scripts.
 
@@ -937,14 +946,17 @@ XML must parse with standard parsers.
 
 Analysis v1 contains inventory, effective selection, metrics, diagnostics, and
 fingerprint. With `--findings`, it adds an ordered `findings` array whose entries
-contain only `ruleId`, `category`, `relativePath`, and `lineNumber`. Timings and
-secret values are not part of the stable v1 analysis schema.
+contain only `ruleId`, `category`, `relativePath`, and `lineNumber`. The one-based
+line number is measured in the original decoded source before content
+transformations. Timings and secret values are not part of the stable v1 analysis
+schema.
 
 Recent JSON contains `schemaVersion`, kind `devprojex-recent`, and `items` with
 stable `kind`, nullable `path`/`url`, `name`, `parent`, and `lastOpened` fields.
 Cache-list JSON contains `schemaVersion`, kind `devprojex-repository-cache`, and
 `items` with `url`, `state`, `branch`, `commit`, `localPath`,
-`approximateSizeBytes`, and `lastUsed` fields.
+`approximateSizeBytes`, and `lastUsed` fields. `state` is `ready` or `damaged`;
+damaged indexed entries remain visible for explicit cache management.
 
 ## Stable After v1
 

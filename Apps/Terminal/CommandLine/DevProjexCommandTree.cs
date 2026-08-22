@@ -609,7 +609,10 @@ public sealed class DevProjexCommandTree
 								spec,
 								parseResult.GetValue(_language),
 								parseResult.GetValue(elevationAttempted)),
-							cancellationToken)
+							cancellationToken,
+							resolvedSource is { IsRepositoryUrl: true }
+								? resolvedSource.SafeRepositoryUrl
+								: null)
 						.ConfigureAwait(false);
 				},
 				_localization).ConfigureAwait(false);
@@ -1173,11 +1176,10 @@ public sealed class DevProjexCommandTree
 			HelpName = "COMMAND",
 			Arity = ArgumentArity.ZeroOrMore
 		};
-		commandPath.CompletionSources.Add(_ =>
-			root.Subcommands
-				.Where(static candidate => !candidate.Hidden)
-				.SelectMany(static candidate => new[] { candidate.Name }.Concat(candidate.Aliases))
-				.ToArray());
+		commandPath.CompletionSources.Add(context => CompleteHelpCommandPath(
+			root,
+			commandPath,
+			context));
 		command.Arguments.Add(commandPath);
 		command.SetAction(parseResult =>
 		{
@@ -1508,6 +1510,31 @@ public sealed class DevProjexCommandTree
 
 		canonicalPath = path;
 		return true;
+	}
+
+	private static string[] CompleteHelpCommandPath(
+		RootCommand root,
+		Argument<string[]> commandPath,
+		System.CommandLine.Completions.CompletionContext context)
+	{
+		var requestedPath = context.ParseResult.GetValue(commandPath)?.ToList() ?? [];
+		var word = context.WordToComplete ?? string.Empty;
+		if (word.Length > 0 &&
+		    requestedPath.Count > 0 &&
+		    string.Equals(requestedPath[^1], word, StringComparison.Ordinal))
+		{
+			requestedPath.RemoveAt(requestedPath.Count - 1);
+		}
+		if (!TryResolveCommand(root, requestedPath, out var parent, out _))
+			return [];
+
+		return parent.Subcommands
+			.Where(static candidate => !candidate.Hidden)
+			.SelectMany(static candidate => new[] { candidate.Name }.Concat(candidate.Aliases))
+			.Where(candidate => candidate.StartsWith(word, StringComparison.OrdinalIgnoreCase))
+			.Distinct(StringComparer.Ordinal)
+			.OrderBy(static candidate => candidate, StringComparer.Ordinal)
+			.ToArray();
 	}
 
 	private static bool HasExplicitSelectionOverride(

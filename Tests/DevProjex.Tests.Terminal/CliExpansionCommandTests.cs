@@ -243,6 +243,60 @@ public sealed class CliExpansionCommandTests
 	}
 
 	[Fact]
+	public async Task CacheListIncludesDamagedEntriesWithThePromisedState()
+	{
+		using var data = new TemporaryDirectory();
+		var factory = new TerminalServiceFactory(() => data.Path);
+		var services = factory.Create(AppLanguage.En);
+		const string repositoryUrl = "https://github.com/example/damaged.git";
+		var staging = services.RepoCacheService.CreateRepositoryStagingDirectory(repositoryUrl);
+		File.WriteAllText(Path.Combine(staging, "README.md"), "damaged\n");
+		var published = services.RepoCacheService.PublishRepositoryDirectory(staging, repositoryUrl);
+		services.RepoCacheService.RecordIndexedRepository(
+			repositoryUrl,
+			published,
+			state: RepositoryCacheEntryState.Damaged);
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment, factory).RunAsync(
+			["cache", "list", "--format", "json"],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		var item = Assert.Single(document.RootElement.GetProperty("items").EnumerateArray());
+		Assert.Equal(repositoryUrl, item.GetProperty("url").GetString());
+		Assert.Equal("damaged", item.GetProperty("state").GetString());
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
+	public async Task CacheClearWithBusyIndexLockReturnsPolicyFailure()
+	{
+		using var data = new TemporaryDirectory();
+		var factory = new TerminalServiceFactory(() => data.Path);
+		var services = factory.Create(AppLanguage.En);
+		PublishSnapshot(services.RepoCacheService, "https://github.com/example/locked.git");
+		var lockPath = Path.Combine(
+			services.RepoCacheService.CacheRootPath,
+			"cache-index.json.lock");
+		using var heldLock = new FileStream(
+			lockPath,
+			FileMode.OpenOrCreate,
+			FileAccess.ReadWrite,
+			FileShare.None);
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment, factory).RunAsync(
+			["cache", "clear", "--force", "--language", "en"],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.PolicyFailure, exitCode);
+		Assert.Contains("Removed: 0. Retained: 0. Failed:", environment.StandardOutput);
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
 	public async Task CacheClearReportsLeasedRepositoryAsRetainedThenRemovesIt()
 	{
 		using var data = new TemporaryDirectory();

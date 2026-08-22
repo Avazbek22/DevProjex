@@ -1,5 +1,6 @@
 using DevProjex.Terminal.Rendering;
 using DevProjex.Infrastructure.ResourceStore;
+using DevProjex.Application.Secrets;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -252,6 +253,24 @@ public sealed class RenderingContractTests
 		Assert.DoesNotContain('\u001b', environment.StandardError);
 		Assert.DoesNotContain('\u0007', environment.StandardError);
 		Assert.DoesNotContain('\u2028', environment.StandardError);
+	}
+
+	[Fact]
+	public void TextFindingEscapesPathControlCharactersIntoOneLine()
+	{
+		var finding = new EffectiveRedactionFinding(
+			"rule-id",
+			RedactionFindingCategory.Secrets,
+			"safe\nforged\rsegment\t\u001bname.cs",
+			42);
+
+		var formatted = AnalysisTextFormatter.FormatFinding(finding);
+
+		Assert.Equal("secret\trule-id\tsafe\\nforged\\rsegment\\t\\u001Bname.cs:42", formatted);
+		Assert.DoesNotContain('\n', formatted);
+		Assert.DoesNotContain('\r', formatted);
+		Assert.DoesNotContain('\t', formatted.Split('\t')[2]);
+		Assert.DoesNotContain('\u001b', formatted);
 	}
 
 	[Fact]

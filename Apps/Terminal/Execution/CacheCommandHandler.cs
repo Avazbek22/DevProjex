@@ -23,7 +23,7 @@ internal sealed class CacheCommandHandler(
 
 	public int WriteList(CliTextJsonFormat format)
 	{
-		var entries = services.RepoCacheService.ListIndexedRepositories();
+		var entries = services.RepoCacheService.ListCacheEntriesForManagement();
 		if (format == CliTextJsonFormat.Json)
 		{
 			environment.Output.WriteLine(JsonSerializer.Serialize(

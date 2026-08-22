@@ -12,6 +12,7 @@ stdout is the machine/payload channel:
 - text, JSON, or XML analysis;
 - text, Markdown, JSON, or XML context;
 - one absolute result path after file, folder, or ZIP output.
+- one accepted local path or safe repository URL after `open`.
 
 stderr is the operational channel:
 
@@ -58,10 +59,13 @@ rules matched nothing; it never means that the project is safe.
 
 With `--findings`, analysis adds an ordered top-level `findings` array. Each
 effective finding contains exactly `ruleId`, `category` (`secret` or
-`private-data`), `relativePath`, and one-based `lineNumber`. The array count
-equals the combined effective matched counters from that output session. Secret
-values, source fragments, assignment context, fingerprints, and raw detector
-exceptions are never serialized.
+`private-data`), `relativePath`, and one-based `lineNumber`. The line number refers
+to the original decoded source file before code compression, comment removal, or
+blank-line removal and recognizes LF, CRLF, and lone CR boundaries. The array
+count equals the combined effective matched counters from that output session.
+Secret values, source fragments, assignment context, fingerprints, and raw
+detector exceptions are never serialized. Text findings escape path control
+characters so each descriptor occupies one physical output line.
 
 When code compression, comment removal, or blank-line removal is enabled, analysis content metrics are
 calculated from the transformed text and the document adds a top-level `compression`
@@ -86,7 +90,17 @@ newest-first `items` array. Entries use stable `kind`, nullable `path`/`url`,
 
 `cache list --format json` emits schema version 1 with kind
 `devprojex-repository-cache`. Entries expose `url`, `state`, nullable `branch`
-and `commit`, `localPath`, `approximateSizeBytes`, and `lastUsed`.
+and `commit`, `localPath`, `approximateSizeBytes`, and `lastUsed`. Both ready and
+damaged indexed entries are visible; `state` is `ready` or `damaged`.
+
+`cache remove` and `cache clear` calculate `removed`, `retained`, and `failed`
+inside the index-locked operation. A busy index lock, unsupported future schema,
+or failed index update cannot be reported as empty success and produces policy
+exit code `3`. `cache clear` also counts unindexed cache containers.
+
+For `open`, a local source reports its accepted absolute path. A repository URL
+source reports only its safe URL; the generated physical cache path is never a
+success payload.
 
 Plain or redirected text and text written to a file use one canonical field
 model, ordering, and final-newline policy. An interactive rich presentation may

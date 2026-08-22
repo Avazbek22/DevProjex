@@ -268,6 +268,77 @@ public sealed class SecretRedactionCommandContractTests
 	}
 
 	[Theory]
+	[InlineData("--strip-comments")]
+	[InlineData("--strip-blank-lines")]
+	[InlineData("--compress-code")]
+	[InlineData("--strip-comments --strip-blank-lines --compress-code")]
+	public async Task AnalyzeFindingsReportsSourceLineAfterContentTransforms(string transformationOptions)
+	{
+		using var workspace = CreateWorkspace(includeSecret: false);
+		const int sourceLine = 12;
+		workspace.Temporary.WriteFile(
+			"project/src/transformed.cs",
+			"internal sealed class Padding\n" +
+			"{\n" +
+			"    public void Run()\n" +
+			"    {\n" +
+			"        Console.WriteLine(\"padding\");\n" +
+			"    }\n" +
+			"}\n" +
+			"\n" +
+			"// removed comment\n" +
+			"\n" +
+			"internal static class Credentials\n" +
+			$"{{ public const string Token = \"{GithubToken}\"; }}\n");
+		var environment = new TestTerminalEnvironment();
+		var arguments = new List<string>
+		{
+			"analyze", workspace.ProjectRoot,
+			"--hide-secrets", "--findings", "--format", "json", "--plain", "-o", "-"
+		};
+		arguments.AddRange(transformationOptions.Split(' ', StringSplitOptions.RemoveEmptyEntries));
+
+		var exitCode = await RunAsync(workspace, environment, [.. arguments]);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		var finding = Assert.Single(
+			document.RootElement.GetProperty("findings").EnumerateArray(),
+			static candidate => candidate.GetProperty("relativePath").GetString() == "src/transformed.cs");
+		Assert.Equal(sourceLine, finding.GetProperty("lineNumber").GetInt32());
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Theory]
+	[InlineData("\n")]
+	[InlineData("\r\n")]
+	[InlineData("\r")]
+	public async Task AnalyzeFindingsCountsEverySourceLineEnding(string newline)
+	{
+		using var workspace = CreateWorkspace(includeSecret: false);
+		workspace.Temporary.WriteFile(
+			"project/src/line-endings.txt",
+			$"first{newline}second{newline}token={GithubToken}{newline}");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"analyze", workspace.ProjectRoot,
+				"--hide-secrets", "--findings", "--format", "json", "--plain", "-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		var finding = Assert.Single(
+			document.RootElement.GetProperty("findings").EnumerateArray(),
+			static candidate => candidate.GetProperty("relativePath").GetString() == "src/line-endings.txt");
+		Assert.Equal(3, finding.GetProperty("lineNumber").GetInt32());
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Theory]
 	[InlineData(
 		ManualRedactionClass.Secret,
 		"--hide-secrets",

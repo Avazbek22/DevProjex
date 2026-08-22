@@ -1,5 +1,6 @@
 using System.Security;
 using System.Text;
+using System.Buffers;
 
 namespace DevProjex.Terminal.CommandLine;
 
@@ -20,9 +21,24 @@ internal static class SelectionPathListReader
 		try
 		{
 			TextReader reader;
+			var enforceTextReaderByteLimit = false;
 			if (source == "-")
 			{
-				reader = environment.Input;
+				if (environment.RawInput is { } rawInput)
+				{
+					ownedReader = new StreamReader(
+						new MaximumLengthReadStream(rawInput, MaximumBytes),
+						new UTF8Encoding(false, true),
+						detectEncodingFromByteOrderMarks: false,
+						bufferSize: 16 * 1024,
+						leaveOpen: false);
+					reader = ownedReader;
+				}
+				else
+				{
+					reader = environment.Input;
+					enforceTextReaderByteLimit = true;
+				}
 			}
 			else
 			{
@@ -47,20 +63,10 @@ internal static class SelectionPathListReader
 				reader = ownedReader;
 			}
 
-			var paths = new List<string>();
-			long bytesRead = 0;
-			while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
-			{
-				bytesRead += Encoding.UTF8.GetByteCount(line) + 1L;
-				if (bytesRead > MaximumBytes)
-					throw InvalidSource();
-				if (line.Length == 0)
-					continue;
-				if (paths.Count == MaximumEntries)
-					throw InvalidSource();
-				paths.Add(line);
-			}
-			return paths;
+			return await ReadLinesAsync(
+				reader,
+				enforceTextReaderByteLimit,
+				cancellationToken).ConfigureAwait(false);
 		}
 		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
 		{
@@ -84,6 +90,152 @@ internal static class SelectionPathListReader
 		{
 			ownedReader?.Dispose();
 		}
+	}
+
+	private static async Task<IReadOnlyList<string>> ReadLinesAsync(
+		TextReader reader,
+		bool enforceByteLimit,
+		CancellationToken cancellationToken)
+	{
+		var paths = new List<string>();
+		var line = new StringBuilder();
+		var buffer = ArrayPool<char>.Shared.Rent(16 * 1024);
+		var encoder = enforceByteLimit
+			? new UTF8Encoding(false, true).GetEncoder()
+			: null;
+		long bytesRead = 0;
+		var skipLeadingBom = true;
+		var previousWasCarriageReturn = false;
+		try
+		{
+			while (true)
+			{
+				var count = await reader.ReadAsync(
+					buffer.AsMemory(),
+					cancellationToken).ConfigureAwait(false);
+				if (count == 0)
+					break;
+
+				var characters = buffer.AsSpan(0, count);
+				if (encoder is not null)
+				{
+					bytesRead = checked(bytesRead + encoder.GetByteCount(characters, flush: false));
+					if (bytesRead > MaximumBytes)
+						throw InvalidSource();
+				}
+
+				foreach (var character in characters)
+				{
+					if (skipLeadingBom)
+					{
+						skipLeadingBom = false;
+						if (character == '\uFEFF')
+							continue;
+					}
+					if (character == '\n' && previousWasCarriageReturn)
+					{
+						previousWasCarriageReturn = false;
+						continue;
+					}
+					previousWasCarriageReturn = false;
+					if (character == '\r')
+					{
+						AddLine(paths, line);
+						previousWasCarriageReturn = true;
+					}
+					else if (character == '\n')
+					{
+						AddLine(paths, line);
+					}
+					else
+					{
+						line.Append(character);
+					}
+				}
+			}
+
+			if (encoder is not null)
+			{
+				bytesRead = checked(bytesRead + encoder.GetByteCount([], flush: true));
+				if (bytesRead > MaximumBytes)
+					throw InvalidSource();
+			}
+			AddLine(paths, line);
+			return paths;
+		}
+		finally
+		{
+			ArrayPool<char>.Shared.Return(buffer);
+		}
+	}
+
+	private static void AddLine(ICollection<string> paths, StringBuilder line)
+	{
+		if (line.Length == 0)
+			return;
+		if (paths.Count == MaximumEntries)
+			throw InvalidSource();
+		paths.Add(line.ToString());
+		line.Clear();
+	}
+
+	private sealed class MaximumLengthReadStream(Stream inner, long maximumBytes) : Stream
+	{
+		private long _bytesRead;
+
+		public override bool CanRead => inner.CanRead;
+		public override bool CanSeek => false;
+		public override bool CanWrite => false;
+		public override long Length => throw new NotSupportedException();
+		public override long Position
+		{
+			get => _bytesRead;
+			set => throw new NotSupportedException();
+		}
+
+		public override int Read(byte[] buffer, int offset, int count)
+		{
+			var allowed = ResolveReadCount(count);
+			var read = inner.Read(buffer, offset, allowed);
+			RegisterRead(read);
+			return read;
+		}
+
+		public override int Read(Span<byte> buffer)
+		{
+			var read = inner.Read(buffer[..ResolveReadCount(buffer.Length)]);
+			RegisterRead(read);
+			return read;
+		}
+
+		public override async ValueTask<int> ReadAsync(
+			Memory<byte> buffer,
+			CancellationToken cancellationToken = default)
+		{
+			var read = await inner.ReadAsync(
+				buffer[..ResolveReadCount(buffer.Length)],
+				cancellationToken).ConfigureAwait(false);
+			RegisterRead(read);
+			return read;
+		}
+
+		private int ResolveReadCount(int requested)
+		{
+			var remainingWithSentinel = maximumBytes - _bytesRead + 1;
+			return (int)Math.Min(requested, Math.Max(1, remainingWithSentinel));
+		}
+
+		private void RegisterRead(int count)
+		{
+			_bytesRead = checked(_bytesRead + count);
+			if (_bytesRead > maximumBytes)
+				throw InvalidSource();
+		}
+
+		public override void Flush() => throw new NotSupportedException();
+		public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+		public override void SetLength(long value) => throw new NotSupportedException();
+		public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 	}
 
 	private static ProjectContextValidationException InvalidSource() =>

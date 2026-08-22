@@ -33,7 +33,7 @@ internal sealed class TerminalProjectSourceResolver(
 			var cached = await TryAcquireSessionAsync(safeUrl, branch, cancellationToken)
 				.ConfigureAwait(false);
 			if (cached is not null)
-				return new ResolvedTerminalProjectSource(cached.RepositoryPath, cached);
+				return ResolvedTerminalProjectSource.Repository(cached.RepositoryPath, safeUrl, cached);
 
 			try
 			{
@@ -71,7 +71,10 @@ internal sealed class TerminalProjectSourceResolver(
 					throw new TerminalProjectSourceException("DPX-CLI-GIT-CACHE-FAILED");
 
 				services.RecentProjectsStore.AddRepository(null, repositoryUrl);
-				return new ResolvedTerminalProjectSource(session.RepositoryPath, session);
+				return ResolvedTerminalProjectSource.Repository(
+					session.RepositoryPath,
+					repositoryUrl,
+					session);
 			}
 			catch
 			{
@@ -136,11 +139,20 @@ internal sealed class TerminalProjectSourceResolver(
 
 internal sealed class ResolvedTerminalProjectSource(
 	string projectPath,
+	string? safeRepositoryUrl,
 	IRepositoryCacheSession? session) : IAsyncDisposable
 {
 	public string ProjectPath { get; } = projectPath;
+	public string? SafeRepositoryUrl { get; } = safeRepositoryUrl;
+	public bool IsRepositoryUrl => SafeRepositoryUrl is not null;
 
-	public static ResolvedTerminalProjectSource Local(string projectPath) => new(projectPath, null);
+	public static ResolvedTerminalProjectSource Local(string projectPath) => new(projectPath, null, null);
+
+	public static ResolvedTerminalProjectSource Repository(
+		string projectPath,
+		string safeRepositoryUrl,
+		IRepositoryCacheSession session) =>
+		new(projectPath, safeRepositoryUrl, session);
 
 	public ValueTask DisposeAsync()
 	{

@@ -43,6 +43,12 @@ public interface IRepoCacheService
     IReadOnlyList<RepositoryCacheCatalogEntry> ListIndexedRepositories();
 
     /// <summary>
+    /// Lists every existing indexed cache entry for explicit cache management, including damaged
+    /// entries that normal repository discovery must not offer for opening.
+    /// </summary>
+    IReadOnlyList<RepositoryCacheCatalogEntry> ListCacheEntriesForManagement();
+
+    /// <summary>
     /// Pins a cache checkout for an indexed repository. Cache roots must be on a local file system;
     /// exclusive file-handle leases are not reliable on every network file system.
     /// </summary>

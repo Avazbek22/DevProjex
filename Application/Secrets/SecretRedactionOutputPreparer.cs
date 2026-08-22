@@ -38,9 +38,20 @@ public sealed class SecretRedactionOutputPreparer
 	/// export contains - one resolved state, no surface that quietly disagrees with another. The
 	/// project copy carries a notice saying so, exactly as it already does for Hide Secrets.
 	/// </summary>
+	public Task<PreparedSecretRedactionOutput> PrepareAsync(
+		ContentTransformationContext context,
+		IReadOnlyList<string> orderedFilePaths,
+		CancellationToken cancellationToken = default) =>
+		PrepareAsync(
+			context,
+			orderedFilePaths,
+			captureEffectiveFindings: false,
+			cancellationToken);
+
 	public async Task<PreparedSecretRedactionOutput> PrepareAsync(
 		ContentTransformationContext context,
 		IReadOnlyList<string> orderedFilePaths,
+		bool captureEffectiveFindings,
 		CancellationToken cancellationToken = default)
 	{
 		ArgumentNullException.ThrowIfNull(context);
@@ -145,9 +156,9 @@ public sealed class SecretRedactionOutputPreparer
 					.Where(static span => span.State == SecretPreviewSpanState.Redacted)
 					.Select(static span => new PreparedSecretSpan(span.Start, span.Length))
 					.ToArray() ?? [];
-				var findings = plan is null
+				IReadOnlyList<EffectiveRedactionFinding> findings = plan is null || !captureEffectiveFindings
 					? []
-					: BuildEffectiveFindings(plan.Spans, transformedText);
+					: BuildEffectiveFindings(plan.Spans, content.Content, compressed.Map);
 				if (ReferenceEquals(transformedText, content.Content) && redactions.Length == 0)
 				{
 					preparedFiles[sourcePath] = findings.Count == 0
@@ -341,13 +352,17 @@ public sealed class SecretRedactionOutputPreparer
 
 	private static IReadOnlyList<EffectiveRedactionFinding> BuildEffectiveFindings(
 		IReadOnlyList<SecretPreviewSpan> spans,
-		string sourceText)
+		string sourceText,
+		ContentTransformMap transformMap)
 	{
 		var candidates = spans
 			.GroupBy(static span => span.OccurrenceId, StringComparer.Ordinal)
 			.Select(static group => group.First())
-			.OrderBy(static span => span.SourceStart)
-			.ThenBy(static span => span.RuleId, StringComparer.Ordinal)
+			.Select(span => new SourceFinding(
+				span,
+				ResolveSourceStart(transformMap, span.SourceStart)))
+			.OrderBy(static finding => finding.SourceStart)
+			.ThenBy(static finding => finding.Span.RuleId, StringComparer.Ordinal)
 			.ToArray();
 		if (candidates.Length == 0)
 			return [];
@@ -355,23 +370,49 @@ public sealed class SecretRedactionOutputPreparer
 		var findings = new EffectiveRedactionFinding[candidates.Length];
 		var sourceIndex = 0;
 		var lineNumber = 1;
+		var skipLineFeedAfterCarriageReturn = false;
 		for (var index = 0; index < candidates.Length; index++)
 		{
 			var candidate = candidates[index];
 			var target = Math.Clamp(candidate.SourceStart, sourceIndex, sourceText.Length);
 			while (sourceIndex < target)
 			{
-				if (sourceText[sourceIndex++] == '\n')
+				var character = sourceText[sourceIndex++];
+				if (skipLineFeedAfterCarriageReturn && character == '\n')
+				{
+					skipLineFeedAfterCarriageReturn = false;
+					continue;
+				}
+				skipLineFeedAfterCarriageReturn = false;
+				if (character == '\r')
+				{
 					lineNumber++;
+					skipLineFeedAfterCarriageReturn = true;
+				}
+				else if (character == '\n')
+				{
+					lineNumber++;
+				}
 			}
 			findings[index] = new EffectiveRedactionFinding(
-				candidate.RuleId,
-				candidate.Category,
-				candidate.RelativePath,
+				candidate.Span.RuleId,
+				candidate.Span.Category,
+				candidate.Span.RelativePath,
 				lineNumber);
 		}
 		return findings;
 	}
+
+	private static int ResolveSourceStart(ContentTransformMap transformMap, int transformedStart)
+	{
+		if (transformMap.TryToSource(transformedStart, out var sourceStart))
+			return sourceStart;
+
+		throw new SecretDetectionException(
+			"An effective redaction finding could not be mapped to its source file.");
+	}
+
+	private readonly record struct SourceFinding(SecretPreviewSpan Span, int SourceStart);
 
 	private static PreparedTransformationEntry CreateUnsupportedEncodingEntry(CompressionWorkItem item) =>
 		new(

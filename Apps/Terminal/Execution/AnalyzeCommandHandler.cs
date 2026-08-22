@@ -41,21 +41,26 @@ public sealed class AnalyzeCommandHandler(
 					redactionFeatures)
 				: null);
 		IReadOnlyList<EffectiveRedactionFinding> effectiveFindings = [];
+		var effectiveFindingCount = 0;
 		if (transformationContext is not null)
 		{
 			await using var prepared = await services.SecretRedactionOutputPreparer
 				.PrepareAsync(
 					transformationContext,
 					plan.IncludedFiles,
+					request.IncludeFindings,
 					cancellationToken)
 				.ConfigureAwait(false);
 			var transformedAnalyzer = services.SecretRedactionOutputPreparer.CreatePreparedAnalyzer(prepared);
-			effectiveFindings = prepared.GetEffectiveFindings();
-			if (prepared.Snapshot is { } effectiveSnapshot &&
-			    effectiveFindings.Count != effectiveSnapshot.DetectedCount)
+			effectiveFindingCount = prepared.Snapshot?.DetectedCount ?? 0;
+			if (request.IncludeFindings)
 			{
-				throw new SecretDetectionException(
-					"The effective redaction finding count did not match the published snapshot.");
+				effectiveFindings = prepared.GetEffectiveFindings();
+				if (effectiveFindings.Count != effectiveFindingCount)
+				{
+					throw new SecretDetectionException(
+						"The effective redaction finding count did not match the published snapshot.");
+				}
 			}
 			var transformedMetrics = await ProjectContentMetricsCalculator
 				.CalculateAsync(transformedAnalyzer, plan.IncludedFiles, cancellationToken)
@@ -154,7 +159,7 @@ public sealed class AnalyzeCommandHandler(
 
 		return plan.HasErrors ||
 		       request.Strict && plan.Diagnostics.Count > 0 ||
-		       request.FailOnFindings && effectiveFindings.Count > 0
+		       request.FailOnFindings && effectiveFindingCount > 0
 			? CommandLineExitCodes.PolicyFailure
 			: CommandLineExitCodes.Success;
 	}
@@ -262,9 +267,7 @@ internal static class AnalysisTextFormatter
 				findings.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)));
 			rows.AddRange(findings.Select(finding => new AnalysisTextRow(
 				localization["Terminal.Analysis.Finding"],
-				$"{ToCategoryToken(finding.Category)}\t{finding.RuleId}\t" +
-				$"{finding.RelativePath.Replace('\\', '/')}:" +
-				finding.LineNumber.ToString(System.Globalization.CultureInfo.InvariantCulture))));
+				FormatFinding(finding))));
 		}
 		if (plan.UnscannableFiles is { Count: > 0 } unscannableFiles)
 		{
@@ -315,6 +318,11 @@ internal static class AnalysisTextFormatter
 			ContextDiagnosticRenderer.ResolveMessage(localization, diagnostic.Code))));
 		return rows;
 	}
+
+	internal static string FormatFinding(EffectiveRedactionFinding finding) =>
+		$"{ToCategoryToken(finding.Category)}\t{finding.RuleId}\t" +
+		$"{TerminalTextEscaping.EscapeSingleLine(finding.RelativePath.Replace('\\', '/'))}:" +
+		finding.LineNumber.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
 	private static string FormatProfile(ProjectProfileReference? profile) =>
 		profile?.Kind switch
