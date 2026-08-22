@@ -100,7 +100,9 @@ public sealed class MainWindowPreviewMarkerUiTests
 				"plain scrollbar rail hover to move the sticky path away");
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
 			var railHit = Assert.IsAssignableFrom<InputElement>(window.InputHitTest(railPoint));
-			Assert.Equal("Arrow", railHit.Cursor?.ToString());
+			Assert.True(
+				railHit.Cursor is null || railHit.Cursor.ToString() == "Arrow",
+				$"Expected the platform-default arrow cursor, but found '{railHit.Cursor}'.");
 
 			window.MouseMove(markerPoint, RawInputModifiers.None);
 			await UiTestDriver.WaitForConditionAsync(

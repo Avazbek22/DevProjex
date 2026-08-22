@@ -1174,26 +1174,47 @@ internal sealed class SearchFilterInteractionController : IDisposable
 
     private static void ForceHidden(TextToolState tool)
     {
-        SuppressAccent(tool);
-        tool.Container.Height = 0;
-        tool.Container.Margin = new Thickness(0);
-        tool.Container.IsVisible = false;
-        tool.Transform.Y = ToolBarContentOffset;
-        tool.Surface.Opacity = 0;
-        tool.Surface.IsHitTestVisible = false;
-        tool.Surface.IsEnabled = false;
+        SetForcedVisualState(tool, visible: false);
     }
 
     private static void ForceVisible(TextToolState tool)
     {
-        RestoreAccent(tool);
-        tool.Container.Height = ToolBarHeight;
-        tool.Container.Margin = new Thickness(0, 0, 0, PanelIslandSpacing);
-        tool.Container.IsVisible = true;
-        tool.Transform.Y = 0;
-        tool.Surface.Opacity = 1;
-        tool.Surface.IsHitTestVisible = true;
-        tool.Surface.IsEnabled = true;
+        SetForcedVisualState(tool, visible: true);
+    }
+
+    private static void SetForcedVisualState(TextToolState tool, bool visible)
+    {
+        var containerTransitions = tool.Container.Transitions;
+        var surfaceTransitions = tool.Surface.Transitions;
+        var transformTransitions = tool.Transform.Transitions;
+        tool.Container.Transitions = null;
+        tool.Surface.Transitions = null;
+        tool.Transform.Transitions = null;
+        try
+        {
+            if (visible)
+                RestoreAccent(tool);
+            else
+                SuppressAccent(tool);
+
+            tool.Container.Height = visible ? ToolBarHeight : 0;
+            tool.Container.Margin = new Thickness(
+                0,
+                0,
+                0,
+                visible ? PanelIslandSpacing : 0);
+            tool.Container.IsVisible = visible;
+            tool.Transform.Y = visible ? 0 : ToolBarContentOffset;
+            tool.Surface.Opacity = visible ? 1 : 0;
+            tool.Surface.IsHitTestVisible = visible;
+            tool.Surface.IsEnabled = visible;
+        }
+        finally
+        {
+            tool.Container.Transitions = containerTransitions;
+            tool.Surface.Transitions = surfaceTransitions;
+            tool.Transform.Transitions = transformTransitions;
+        }
     }
 
     private static void SetForcedVisibility(TextToolState tool, bool visible)
