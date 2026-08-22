@@ -204,6 +204,8 @@
   "Settings.Secrets.Status.FailedFiles": "Не удалось проверить файлов: {0}.",
   "Settings.Secrets.Status.SizeLimit": "Файлы больше {1} МиБ не проверены: {0}.",
   "Settings.Secrets.Status.Applied": "Найдено: {0}. Скрыто: {1}.",
+  "Settings.PrivateData.Status.PathHidden": "Имя пользователя в путях: скрыто.",
+  "Settings.PrivateData.Status.PathShown": "Имя пользователя в путях: показано.",
   "Settings.Secrets.Status.Retry": "Нажмите, чтобы повторить проверку.",
   "Preview.Secret.Redacted.Tooltip": "Обнаружено: {0}.\nНажмите, чтобы оставить исходное значение.\n{alt}↑ / {alt}↓ — переход.",
   "Preview.Secret.Kept.Tooltip": "Обнаружено: {0}.\nИсходное значение оставлено.\nНажмите, чтобы снова скрыть его.\n{alt}↑ / {alt}↓ — переход.",

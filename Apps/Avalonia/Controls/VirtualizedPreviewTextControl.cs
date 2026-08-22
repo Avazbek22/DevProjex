@@ -1501,7 +1501,9 @@ public sealed class VirtualizedPreviewTextControl : Control
 		List<PreviewMarkerSource>? markers = null;
 		foreach (var (lineNumber, redactions) in _redactionsByLine)
 		{
-			if (!redactions.Any(static span => span.State == SecretPreviewSpanState.Redacted))
+			if (!redactions.Any(static span =>
+				span.State == SecretPreviewSpanState.Redacted &&
+				span.Source != SecretFindingSource.GeneratedPath))
 				continue;
 
 			markers ??= [];

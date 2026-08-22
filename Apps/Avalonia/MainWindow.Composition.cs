@@ -85,6 +85,7 @@ public partial class MainWindow
 		// load, and after a snapshot - which makes it the right place to refresh the copy the
 		// metrics worker reads.
 		PublishTransformationContext();
+		var privateDataStatus = ComposePrivateDataPathStatus();
 		_selectionCoordinator.RelabelIgnoreOptions(
 			AdvancedIgnoreCountsAlwaysEnabled,
 			_secretRedactionCount,
@@ -96,8 +97,8 @@ public partial class MainWindow
 			_codeCompressionSnapshot?.UnchangedFiles,
 			_codeCompressionSnapshot?.BlankLineTransformedFiles,
 			_codeCompressionSnapshot?.UnchangedFiles,
-			privateDataRedactionsCount: _privateDataRedactionCount,
-			privateDataMatchesCount: _privateDataRedactionMatchedCount,
+			privateDataRedactionsCount: privateDataStatus.HiddenCount,
+			privateDataMatchesCount: privateDataStatus.DetectedCount,
 			hideSecretsApplied: _appliedHideSecretsEnabled,
 			hidePrivateDataApplied: _appliedHidePrivateDataEnabled,
 			compressCodeApplied: _appliedCompressCodeEnabled,
@@ -577,13 +578,30 @@ public partial class MainWindow
 			skippedFileCount,
 			failedFileCount,
 			unscannableFiles);
+		var privateDataStatus = ComposePrivateDataPathStatus();
 		_viewModel.SetPrivateDataProcessingStatus(
 			_appliedHidePrivateDataEnabled ? state : SecretScanState.Disabled,
-			_appliedHidePrivateDataEnabled ? _privateDataRedactionMatchedCount : null,
-			_appliedHidePrivateDataEnabled ? _privateDataRedactionCount : null,
+			_appliedHidePrivateDataEnabled ? privateDataStatus.DetectedCount : null,
+			_appliedHidePrivateDataEnabled ? privateDataStatus.HiddenCount : null,
 			skippedFileCount,
 			failedFileCount,
-			unscannableFiles);
+			unscannableFiles,
+			_appliedHidePrivateDataEnabled ? privateDataStatus.PathUserNameHidden : null);
+	}
+
+	private PrivateDataPathStatus ComposePrivateDataPathStatus() =>
+		PrivateDataPathStatusComposer.Compose(
+			_currentPath,
+			CreateExportPathPresentation(),
+			CreateContentTransformationContext(),
+			_privateDataRedactionMatchedCount,
+			_privateDataRedactionCount);
+
+	private void RefreshPreviewRedactionDecision()
+	{
+		ApplyRedactionStatus(_secretRedactionScanState);
+		RelabelIgnoreOptionsWithCurrentCounts();
+		ScheduleContentTransformationRefresh(IgnoreOptionId.HideSecrets);
 	}
 
 	private static string ResolveRedactionScanningLocalizationKey(
@@ -1166,7 +1184,7 @@ public partial class MainWindow
 			ShowErrorAsync,
 			() => _currentPath,
 			CreateContentTransformationContext,
-			() => ScheduleContentTransformationRefresh(IgnoreOptionId.HideSecrets),
+			RefreshPreviewRedactionDecision,
 			EnsureManualRedactionClassEnabled,
 			delta => _projectProfiles.ApplyMarkDeltaAsync(_currentPath, delta),
 			cancellationToken => _projectProfiles.PersistIfNeededAsync(_currentPath, cancellationToken));

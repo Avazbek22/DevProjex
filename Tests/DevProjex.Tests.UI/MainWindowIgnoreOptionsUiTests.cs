@@ -61,6 +61,20 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			var control = UiTestDriver.GetRequiredControl<VirtualizedPreviewTextControl>(
 				window,
 				"PreviewTextControl");
+			var viewModel = UiTestDriver.GetViewModel(window);
+			var privateDataOption = Assert.Single(
+				viewModel.ContentProcessingOptions,
+				static option => option.Id == IgnoreOptionId.HidePrivateData);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => string.Equals(privateDataOption.Label, "Hide private data (1)", StringComparison.Ordinal) &&
+				      string.Equals(
+					      viewModel.SettingsPrivateDataNotice,
+					      $"Found: 1. Hidden: 1.{Environment.NewLine}" +
+					      "User name in file paths: hidden.",
+					      StringComparison.Ordinal),
+				"the generated path finding to be represented in the private-data status");
+			Assert.Empty(control.MarkerSnapshot.Markers);
 			var generatedPathSpans = control.Document!.Redactions
 				.Where(static span =>
 					span.RuleId == OutputRootPathPresentation.LocalUserRuleId &&
@@ -99,8 +113,15 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				() => UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(programPath, StringComparison.Ordinal) &&
 				      control.Document!.Redactions
 					      .Where(static span => span.Source == SecretFindingSource.GeneratedPath)
-					      .All(static span => span.State == SecretPreviewSpanState.KeptAsIs),
+					      .All(static span => span.State == SecretPreviewSpanState.KeptAsIs) &&
+				      string.Equals(privateDataOption.Label, "Hide private data (1/0)", StringComparison.Ordinal) &&
+				      string.Equals(
+					      viewModel.SettingsPrivateDataNotice,
+					      $"Found: 1. Hidden: 0.{Environment.NewLine}" +
+					      "User name in file paths: shown.",
+					      StringComparison.Ordinal),
 				"the generated path occurrence to be kept as-is");
+			Assert.Empty(control.MarkerSnapshot.Markers);
 			var keptContent = await UiTestDriver.ComputeAppliedPreviewCopyPayloadAsync(
 				window,
 				PreviewContentMode.Content,
@@ -3500,6 +3521,13 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			await UiTestDriver.OpenPreviewAsync(window);
 			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
 			Assert.Equal((false, false), UiTestDriver.GetAppliedContentRedactionState(window));
+			var pathFinding = string.Equals(
+				OutputRootPathPresentation.MaskLocalUserSegment(project.RootPath),
+				project.RootPath,
+				StringComparison.Ordinal)
+				? 0
+				: 1;
+			var expectedPrivateDataCount = 1 + pathFinding;
 
 			await UiTestDriver.RequestSecretMarkThroughContextMenuAsync(
 				window,
@@ -3514,7 +3542,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				          IsChecked: true,
 				          Label: var label
 				      } &&
-				      label.EndsWith("(1)", StringComparison.Ordinal) &&
+				      label.EndsWith($"({expectedPrivateDataCount})", StringComparison.Ordinal) &&
 				      UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(
 					      "DEVPROJEX_REDACTED[manual-private-data#1]",
 					      StringComparison.Ordinal),
@@ -3835,6 +3863,19 @@ public sealed class MainWindowIgnoreOptionsUiTests
 		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
 		try
 		{
+			var pathFinding = string.Equals(
+				OutputRootPathPresentation.MaskLocalUserSegment(project.RootPath),
+				project.RootPath,
+				StringComparison.Ordinal)
+				? 0
+				: 1;
+			var expectedPrivateDataCount = 1 + pathFinding;
+			var expectedPrivateDataStatus = $"Found: {expectedPrivateDataCount}. Hidden: {expectedPrivateDataCount}.";
+			if (pathFinding == 1)
+			{
+				expectedPrivateDataStatus +=
+					$"{Environment.NewLine}User name in file paths: hidden.";
+			}
 			var viewModel = UiTestDriver.GetViewModel(window);
 			var privacy = Assert.IsType<IgnoreOptionViewModel>(viewModel.HidePrivateDataOption);
 			var privacyIndex = viewModel.ContentProcessingOptions.IndexOf(privacy);
@@ -3849,8 +3890,8 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			await UiTestDriver.WaitForIgnoreOptionLabelAsync(
 				window,
 				IgnoreOptionId.HidePrivateData,
-				"Hide private data (1)");
-			Assert.Equal("Found: 1. Hidden: 1.", viewModel.SettingsPrivateDataNotice);
+				$"Hide private data ({expectedPrivateDataCount})");
+			Assert.Equal(expectedPrivateDataStatus, viewModel.SettingsPrivateDataNotice);
 			Assert.Equal(string.Empty, viewModel.SettingsSecretsNotice);
 
 			await UiTestDriver.OpenPreviewAsync(window);

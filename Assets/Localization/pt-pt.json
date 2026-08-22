@@ -204,6 +204,8 @@
   "Settings.Secrets.Status.FailedFiles": "Ficheiros que não foi possível verificar: {0}.",
   "Settings.Secrets.Status.SizeLimit": "Ficheiros com mais de {1} MiB não verificados: {0}.",
   "Settings.Secrets.Status.Applied": "Encontrados: {0}. Ocultados: {1}.",
+  "Settings.PrivateData.Status.PathHidden": "Nome de utilizador nos caminhos dos ficheiros: oculto.",
+  "Settings.PrivateData.Status.PathShown": "Nome de utilizador nos caminhos dos ficheiros: visível.",
   "Settings.Secrets.Status.Retry": "Clique para repetir a verificação.",
   "Preview.Secret.Redacted.Tooltip": "Detetado: {0}.\nClique para manter o valor original.\n{alt}↑ / {alt}↓ — navegar.",
   "Preview.Secret.Kept.Tooltip": "Detetado: {0}.\nO valor original foi mantido.\nClique para o ocultar novamente.\n{alt}↑ / {alt}↓ — navegar.",

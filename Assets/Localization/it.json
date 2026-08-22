@@ -204,6 +204,8 @@
   "Settings.Secrets.Status.FailedFiles": "File impossibili da controllare: {0}.",
   "Settings.Secrets.Status.SizeLimit": "File oltre {1} MiB non controllati: {0}.",
   "Settings.Secrets.Status.Applied": "Trovati: {0}. Nascosti: {1}.",
+  "Settings.PrivateData.Status.PathHidden": "Nome utente nei percorsi dei file: nascosto.",
+  "Settings.PrivateData.Status.PathShown": "Nome utente nei percorsi dei file: mostrato.",
   "Settings.Secrets.Status.Retry": "Fare clic per ripetere il controllo.",
   "Preview.Secret.Redacted.Tooltip": "Rilevato: {0}.\nFai clic per mantenere il valore originale.\n{alt}↑ / {alt}↓ — naviga.",
   "Preview.Secret.Kept.Tooltip": "Rilevato: {0}.\nIl valore originale viene mantenuto.\nFai clic per nasconderlo di nuovo.\n{alt}↑ / {alt}↓ — naviga.",

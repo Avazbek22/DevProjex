@@ -510,6 +510,29 @@ public sealed class MainWindowViewModelTests
 		Assert.DoesNotContain(largePath, viewModel.SettingsPrivateDataNotice, StringComparison.Ordinal);
 	}
 
+	[Theory]
+	[InlineData(true, "Found 1, hidden 1\nUser name in file paths: hidden.")]
+	[InlineData(false, "Found 1, hidden 0\nUser name in file paths: shown.")]
+	public void PrivateDataPathStatus_AppendsTheGeneratedPathDecision(
+		bool pathUserNameHidden,
+		string expected)
+	{
+		var viewModel = CreateViewModel(new Dictionary<string, string>
+		{
+			["Settings.Secrets.Status.Applied"] = "Found {0}, hidden {1}",
+			["Settings.PrivateData.Status.PathHidden"] = "User name in file paths: hidden.",
+			["Settings.PrivateData.Status.PathShown"] = "User name in file paths: shown."
+		});
+
+		viewModel.SetPrivateDataProcessingStatus(
+			SecretScanState.Completed,
+			detectedCount: 1,
+			hiddenCount: pathUserNameHidden ? 1 : 0,
+			pathUserNameHidden: pathUserNameHidden);
+
+		Assert.Equal(expected.Replace("\n", Environment.NewLine), viewModel.SettingsPrivateDataNotice);
+	}
+
 	[Fact]
 	public void SecretsFailedStatus_OmitsUnscannableFileDetails()
 	{

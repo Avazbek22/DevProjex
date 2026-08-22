@@ -182,6 +182,11 @@ candidate in its stack, preserving the existing found-but-not-redacted counter s
 means only that the enabled rules found no effective match; it is not a privacy or safety
 guarantee.
 
+The desktop Hide private data counter also includes one logical finding when the displayed project
+root contains a masked local-user segment. Every generated path shares that one decision, so keeping
+the user name visible changes only the hidden count; repository web paths and roots without such a
+segment do not add a finding.
+
 ## Intentionally visible ambiguous forms
 
 The phase-one rules keep several source-code forms visible to avoid repeatedly redacting

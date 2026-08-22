@@ -2272,7 +2272,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		int? hiddenCount = null,
 		int? skippedFileCount = null,
 		int? failedFileCount = null,
-		IReadOnlyList<UnscannableFile>? unscannableFiles = null) =>
+		IReadOnlyList<UnscannableFile>? unscannableFiles = null,
+		bool? pathUserNameHidden = null) =>
 		SetRedactionStatus(
 			IgnoreOptionId.HidePrivateData,
 			new ContentRedactionStatus(
@@ -2281,7 +2282,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 				hiddenCount,
 				skippedFileCount,
 				failedFileCount,
-				unscannableFiles));
+				unscannableFiles,
+				pathUserNameHidden));
 
 	private void SetRedactionStatus(IgnoreOptionId optionId, ContentRedactionStatus status)
 	{
@@ -2408,6 +2410,17 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 					: "Settings.Ignore.HidePrivateData.NoMatches"],
 			_ => string.Empty
 		};
+		if (optionId == IgnoreOptionId.HidePrivateData &&
+		    status.PathUserNameHidden is { } pathUserNameHidden)
+		{
+			var pathStatus = _localization[pathUserNameHidden
+				? "Settings.PrivateData.Status.PathHidden"
+				: "Settings.PrivateData.Status.PathShown"];
+			notice = string.IsNullOrEmpty(notice)
+				? pathStatus
+				: string.Join(Environment.NewLine, notice, pathStatus);
+		}
+
 		var current = optionId == IgnoreOptionId.HideSecrets
 			? SettingsSecretsNotice
 			: SettingsPrivateDataNotice;
@@ -2582,7 +2595,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		int? HiddenCount = null,
 		int? SkippedFileCount = null,
 		int? FailedFileCount = null,
-		IReadOnlyList<UnscannableFile>? UnscannableFiles = null);
+		IReadOnlyList<UnscannableFile>? UnscannableFiles = null,
+		bool? PathUserNameHidden = null);
 
     /// <summary>
     /// Cleans up event subscriptions and resources to prevent memory leaks.

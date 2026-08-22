@@ -204,6 +204,8 @@
   "Settings.Secrets.Status.FailedFiles": "Files that could not be checked: {0}.",
   "Settings.Secrets.Status.SizeLimit": "Files larger than {1} MiB were not checked: {0}.",
   "Settings.Secrets.Status.Applied": "Found: {0}. Hidden: {1}.",
+  "Settings.PrivateData.Status.PathHidden": "User name in file paths: hidden.",
+  "Settings.PrivateData.Status.PathShown": "User name in file paths: shown.",
   "Settings.Secrets.Status.Retry": "Click to run the check again.",
   "Preview.Secret.Redacted.Tooltip": "Detected: {0}.\nClick to keep the original value.\n{alt}↑ / {alt}↓ — navigate.",
   "Preview.Secret.Kept.Tooltip": "Detected: {0}.\nThe original value is kept.\nClick to hide it again.\n{alt}↑ / {alt}↓ — navigate.",

@@ -20,7 +20,17 @@ public sealed class PreviewMarkerProjectionTests
 				Redaction("redacted-a", line: 2, SecretPreviewSpanState.Redacted),
 				Redaction("redacted-b", line: 2, SecretPreviewSpanState.Redacted),
 				Redaction("kept", line: 3, SecretPreviewSpanState.KeptAsIs),
-				Redaction("redacted-c", line: 4, SecretPreviewSpanState.Redacted)
+				Redaction(
+					"generated-path",
+					line: 3,
+					SecretPreviewSpanState.Redacted,
+					SecretFindingSource.GeneratedPath),
+				Redaction("redacted-c", line: 4, SecretPreviewSpanState.Redacted),
+				Redaction(
+					"generated-path-kept",
+					line: 5,
+					SecretPreviewSpanState.KeptAsIs,
+					SecretFindingSource.GeneratedPath)
 			]);
 		var control = new VirtualizedPreviewTextControl { Document = document };
 
@@ -204,12 +214,14 @@ public sealed class PreviewMarkerProjectionTests
 	private static PreviewRedactionSpan Redaction(
 		string occurrenceId,
 		int line,
-		SecretPreviewSpanState state)
+		SecretPreviewSpanState state,
+		SecretFindingSource source = SecretFindingSource.Detector)
 		=> new(
 			occurrenceId,
 			"test-rule",
 			line,
 			0,
 			1,
-			state);
+			state,
+			Source: source);
 }

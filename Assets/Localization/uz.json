@@ -204,6 +204,8 @@
   "Settings.Secrets.Status.FailedFiles": "Tekshirib bo‘lmagan fayllar: {0}.",
   "Settings.Secrets.Status.SizeLimit": "Hajmi {1} MiB dan katta tekshirilmagan fayllar: {0}.",
   "Settings.Secrets.Status.Applied": "Topildi: {0}. Yashirildi: {1}.",
+  "Settings.PrivateData.Status.PathHidden": "Fayl yo‘llaridagi foydalanuvchi nomi: yashirilgan.",
+  "Settings.PrivateData.Status.PathShown": "Fayl yo‘llaridagi foydalanuvchi nomi: ko‘rsatilgan.",
   "Settings.Secrets.Status.Retry": "Tekshirishni takrorlash uchun bosing.",
   "Preview.Secret.Redacted.Tooltip": "Aniqlandi: {0}.\nAsl qiymatni saqlash uchun bosing.\n{alt}↑ / {alt}↓ — o‘tish.",
   "Preview.Secret.Kept.Tooltip": "Aniqlandi: {0}.\nAsl qiymat saqlandi.\nUni yana yashirish uchun bosing.\n{alt}↑ / {alt}↓ — o‘tish.",

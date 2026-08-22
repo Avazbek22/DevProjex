@@ -204,6 +204,8 @@
   "Settings.Secrets.Status.FailedFiles": "Файлҳое, ки санҷида нашуданд: {0}.",
   "Settings.Secrets.Status.SizeLimit": "Файлҳои аз {1} МиБ калон санҷида нашуданд: {0}.",
   "Settings.Secrets.Status.Applied": "Ёфт шуд: {0}. Пинҳон шуд: {1}.",
+  "Settings.PrivateData.Status.PathHidden": "Номи корбар дар роҳҳои файл: пинҳон аст.",
+  "Settings.PrivateData.Status.PathShown": "Номи корбар дар роҳҳои файл: нишон дода мешавад.",
   "Settings.Secrets.Status.Retry": "Барои такрори санҷиш пахш кунед.",
   "Preview.Secret.Redacted.Tooltip": "Ошкор шуд: {0}.\nБарои нигоҳ доштани қимати аслӣ пахш кунед.\n{alt}↑ / {alt}↓ — гузариш.",
   "Preview.Secret.Kept.Tooltip": "Ошкор шуд: {0}.\nҚимати аслӣ нигоҳ дошта шудааст.\nБарои боз пинҳон кардан пахш кунед.\n{alt}↑ / {alt}↓ — гузариш.",

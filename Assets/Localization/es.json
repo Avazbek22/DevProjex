@@ -204,6 +204,8 @@
   "Settings.Secrets.Status.FailedFiles": "Archivos que no se pudieron comprobar: {0}.",
   "Settings.Secrets.Status.SizeLimit": "Archivos de más de {1} MiB no comprobados: {0}.",
   "Settings.Secrets.Status.Applied": "Encontrados: {0}. Ocultos: {1}.",
+  "Settings.PrivateData.Status.PathHidden": "Nombre de usuario en las rutas de archivo: oculto.",
+  "Settings.PrivateData.Status.PathShown": "Nombre de usuario en las rutas de archivo: visible.",
   "Settings.Secrets.Status.Retry": "Haga clic para repetir la comprobación.",
   "Preview.Secret.Redacted.Tooltip": "Detectado: {0}.\nHaz clic para conservar el valor original.\n{alt}↑ / {alt}↓ — navegar.",
   "Preview.Secret.Kept.Tooltip": "Detectado: {0}.\nSe conserva el valor original.\nHaz clic para ocultarlo de nuevo.\n{alt}↑ / {alt}↓ — navegar.",

@@ -204,6 +204,8 @@
   "Settings.Secrets.Status.FailedFiles": "Dateien, die nicht geprüft werden konnten: {0}.",
   "Settings.Secrets.Status.SizeLimit": "Dateien über {1} MiB wurden nicht geprüft: {0}.",
   "Settings.Secrets.Status.Applied": "Gefunden: {0}. Ausgeblendet: {1}.",
+  "Settings.PrivateData.Status.PathHidden": "Benutzername in Dateipfaden: ausgeblendet.",
+  "Settings.PrivateData.Status.PathShown": "Benutzername in Dateipfaden: angezeigt.",
   "Settings.Secrets.Status.Retry": "Klicken, um die Prüfung zu wiederholen.",
   "Preview.Secret.Redacted.Tooltip": "Erkannt: {0}.\nKlicken, um den Originalwert beizubehalten.\n{alt}↑ / {alt}↓ — navigieren.",
   "Preview.Secret.Kept.Tooltip": "Erkannt: {0}.\nDer Originalwert bleibt erhalten.\nKlicken, um ihn wieder auszublenden.\n{alt}↑ / {alt}↓ — navigieren.",
