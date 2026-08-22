@@ -236,7 +236,7 @@
 							ToolTip.Placement="BottomEdgeAlignedRight"
 							ToolTip.VerticalOffset="5">
 					  <Border.RenderTransform>
-						<TranslateTransform Y="3" />
+						<TranslateTransform Y="2" />
 					  </Border.RenderTransform>
 					  <ToolTip.Tip>
 						<ToolTip MaxWidth="280">

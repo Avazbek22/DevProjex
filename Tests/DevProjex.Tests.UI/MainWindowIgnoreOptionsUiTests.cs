@@ -3936,7 +3936,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			var indicatorPosition = Assert.IsType<Point>(helpIndicator.TranslatePoint(default, processingBorder));
 			var checkBoxCenter = checkBoxPosition.Y + (checkBox.Bounds.Height / 2);
 			var indicatorCenter = indicatorPosition.Y + (helpIndicator.Bounds.Height / 2);
-			Assert.InRange(indicatorCenter - checkBoxCenter, 1, 3);
+			Assert.InRange(indicatorCenter - checkBoxCenter, 0, 2);
 			var indicatorGap = indicatorPosition.X - (checkBoxPosition.X + checkBox.Bounds.Width);
 			Assert.InRange(indicatorGap, 4, 8);
 			var processingCollectionChanges = 0;
