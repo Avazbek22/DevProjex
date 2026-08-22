@@ -74,13 +74,19 @@ public sealed class MainWindowIgnoreOptionsUiTests
 					      "User name in file paths: hidden.",
 					      StringComparison.Ordinal),
 				"the generated path finding to be represented in the private-data status");
-			Assert.Empty(control.MarkerSnapshot.Markers);
 			var generatedPathSpans = control.Document!.Redactions
 				.Where(static span =>
 					span.RuleId == OutputRootPathPresentation.LocalUserRuleId &&
 					span.Source == SecretFindingSource.GeneratedPath)
 				.ToArray();
 			Assert.True(generatedPathSpans.Length > 1);
+			Assert.Equal(
+				[
+					new PreviewMarkerSource(
+						generatedPathSpans.Min(static span => span.LineNumber),
+						PreviewMarkerCategory.Redaction)
+				],
+				control.MarkerSnapshot.Markers);
 			var generatedOccurrenceId = Assert.Single(
 				generatedPathSpans
 					.Select(static span => span.OccurrenceId)

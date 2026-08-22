@@ -1499,8 +1499,18 @@ public sealed class VirtualizedPreviewTextControl : Control
 		}
 
 		List<PreviewMarkerSource>? markers = null;
+		int? firstGeneratedPathLine = null;
 		foreach (var (lineNumber, redactions) in _redactionsByLine)
 		{
+			if (redactions.Any(static span =>
+				span.State == SecretPreviewSpanState.Redacted &&
+				span.Source == SecretFindingSource.GeneratedPath))
+			{
+				firstGeneratedPathLine = firstGeneratedPathLine is { } current
+					? Math.Min(current, lineNumber)
+					: lineNumber;
+			}
+
 			if (!redactions.Any(static span =>
 				span.State == SecretPreviewSpanState.Redacted &&
 				span.Source != SecretFindingSource.GeneratedPath))
@@ -1508,6 +1518,14 @@ public sealed class VirtualizedPreviewTextControl : Control
 
 			markers ??= [];
 			markers.Add(new PreviewMarkerSource(lineNumber, PreviewMarkerCategory.Redaction));
+		}
+		if (firstGeneratedPathLine is { } generatedPathLine &&
+		    (markers is null || !markers.Any(marker =>
+			    marker.LineNumber == generatedPathLine &&
+			    marker.Category == PreviewMarkerCategory.Redaction)))
+		{
+			markers ??= [];
+			markers.Add(new PreviewMarkerSource(generatedPathLine, PreviewMarkerCategory.Redaction));
 		}
 
 		var previousSearchLine = -1;

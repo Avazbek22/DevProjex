@@ -48,9 +48,63 @@ public sealed class PreviewMarkerProjectionTests
 			[
 				new PreviewMarkerSource(2, PreviewMarkerCategory.Redaction),
 				new PreviewMarkerSource(4, PreviewMarkerCategory.Redaction),
+				new PreviewMarkerSource(3, PreviewMarkerCategory.Redaction),
 				new PreviewMarkerSource(1, PreviewMarkerCategory.Search),
 				new PreviewMarkerSource(4, PreviewMarkerCategory.Search)
 			],
+			control.MarkerSnapshot.Markers);
+	}
+
+	[AvaloniaFact]
+	public void GeneratedPaths_ProduceOnlyTheFirstRedactedMarker()
+	{
+		using var document = new InMemoryPreviewTextDocument(
+			string.Join('\n', Enumerable.Range(1, 8).Select(static line => $"line-{line}")),
+			redactions:
+			[
+				Redaction("path-c", line: 7, SecretPreviewSpanState.Redacted, SecretFindingSource.GeneratedPath),
+				Redaction("path-a", line: 2, SecretPreviewSpanState.Redacted, SecretFindingSource.GeneratedPath),
+				Redaction("path-b", line: 5, SecretPreviewSpanState.Redacted, SecretFindingSource.GeneratedPath)
+			]);
+
+		var control = new VirtualizedPreviewTextControl { Document = document };
+
+		Assert.Equal(
+			[new PreviewMarkerSource(2, PreviewMarkerCategory.Redaction)],
+			control.MarkerSnapshot.Markers);
+	}
+
+	[AvaloniaFact]
+	public void KeptGeneratedPaths_DoNotProduceMarkers()
+	{
+		using var document = new InMemoryPreviewTextDocument(
+			"one\ntwo\nthree",
+			redactions:
+			[
+				Redaction("path-a", line: 1, SecretPreviewSpanState.KeptAsIs, SecretFindingSource.GeneratedPath),
+				Redaction("path-b", line: 3, SecretPreviewSpanState.KeptAsIs, SecretFindingSource.GeneratedPath)
+			]);
+
+		var control = new VirtualizedPreviewTextControl { Document = document };
+
+		Assert.Empty(control.MarkerSnapshot.Markers);
+	}
+
+	[AvaloniaFact]
+	public void GeneratedPath_SharingContentRedactionLine_DoesNotDuplicateMarker()
+	{
+		using var document = new InMemoryPreviewTextDocument(
+			"one\ntwo\nthree",
+			redactions:
+			[
+				Redaction("path", line: 2, SecretPreviewSpanState.Redacted, SecretFindingSource.GeneratedPath),
+				Redaction("content", line: 2, SecretPreviewSpanState.Redacted)
+			]);
+
+		var control = new VirtualizedPreviewTextControl { Document = document };
+
+		Assert.Equal(
+			[new PreviewMarkerSource(2, PreviewMarkerCategory.Redaction)],
 			control.MarkerSnapshot.Markers);
 	}
 
