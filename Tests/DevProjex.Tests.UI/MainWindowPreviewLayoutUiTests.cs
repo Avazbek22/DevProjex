@@ -390,7 +390,7 @@ public sealed class MainWindowPreviewLayoutUiTests(UiWorkspaceFixture workspace)
     }
 
     [AvaloniaFact]
-    public async Task PreviewTreeTools_RightButtonsAlignWithTreeCloseButton()
+    public async Task PreviewTreeTools_RightButtonsUseDesignedInsets()
     {
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
 
@@ -421,9 +421,9 @@ public sealed class MainWindowPreviewLayoutUiTests(UiWorkspaceFixture workspace)
             var nextBounds = UiTestDriver.GetBoundsInWindow(nextButton, window);
             var searchCloseBounds = UiTestDriver.GetBoundsInWindow(searchCloseButton, window);
 
-            Assert.InRange(Math.Abs(searchCloseBounds.Center.X - treeCloseBounds.Center.X), 0, 1.5);
-            Assert.InRange(nextBounds.Left - previousBounds.Right, 7, 9);
-            Assert.InRange(searchCloseBounds.Left - nextBounds.Right, 7, 9);
+            Assert.InRange(treeCloseBounds.Center.X - searchCloseBounds.Center.X, 3, 5);
+            Assert.InRange(nextBounds.Left - previousBounds.Right, 3, 5);
+            Assert.InRange(searchCloseBounds.Left - nextBounds.Right, 3, 5);
             Assert.InRange(Math.Abs(previousBounds.Center.Y - nextBounds.Center.Y), 0, 1);
             Assert.InRange(Math.Abs(nextBounds.Center.Y - searchCloseBounds.Center.Y), 0, 1);
         }
