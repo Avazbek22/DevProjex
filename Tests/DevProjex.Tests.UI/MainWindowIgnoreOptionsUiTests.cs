@@ -217,15 +217,15 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				      !UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(
 					      manualValue,
 					      StringComparison.Ordinal) &&
-				      hideSecretsOption.Label.EndsWith("(1/1)", StringComparison.Ordinal),
+				      hideSecretsOption.Label.EndsWith("(1)", StringComparison.Ordinal),
 				"the context-menu session mark to redact Preview");
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
 			var measuredIndex = observedLabels.FindIndex(static label =>
-				label.EndsWith("(1/1)", StringComparison.Ordinal));
+				label.EndsWith("(1)", StringComparison.Ordinal));
 			Assert.True(measuredIndex >= 0);
 			Assert.All(
 				observedLabels.Skip(measuredIndex),
-				static label => Assert.EndsWith("(1/1)", label, StringComparison.Ordinal));
+				static label => Assert.EndsWith("(1)", label, StringComparison.Ordinal));
 		}
 		finally
 		{
@@ -1523,7 +1523,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
             await UiTestDriver.WaitForIgnoreOptionLabelAsync(
                 window,
                 IgnoreOptionId.HideSecrets,
-                "Hide secrets (1/1)");
+                "Hide secrets (1)");
 			await UiTestDriver.WaitForConditionAsync(
 				window,
 				() => string.Equals(
@@ -1829,7 +1829,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				await UiTestDriver.WaitForIgnoreOptionLabelAsync(
 					window,
 					IgnoreOptionId.HideSecrets,
-					$"Hide secrets ({expectedCount}/{expectedCount})");
+					$"Hide secrets ({expectedCount})");
 				await UiTestDriver.WaitForConditionAsync(
 					window,
 					() => string.Equals(
@@ -3514,7 +3514,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				          IsChecked: true,
 				          Label: var label
 				      } &&
-				      label.EndsWith("(1/1)", StringComparison.Ordinal) &&
+				      label.EndsWith("(1)", StringComparison.Ordinal) &&
 				      UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(
 					      "DEVPROJEX_REDACTED[manual-private-data#1]",
 					      StringComparison.Ordinal),
@@ -3849,7 +3849,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			await UiTestDriver.WaitForIgnoreOptionLabelAsync(
 				window,
 				IgnoreOptionId.HidePrivateData,
-				"Hide private data (1/1)");
+				"Hide private data (1)");
 			Assert.Equal("Found: 1. Hidden: 1.", viewModel.SettingsPrivateDataNotice);
 			Assert.Equal(string.Empty, viewModel.SettingsSecretsNotice);
 
@@ -3867,7 +3867,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			await UiTestDriver.WaitForIgnoreOptionLabelAsync(
 				window,
 				IgnoreOptionId.HideSecrets,
-				"Hide secrets (1/1)");
+				"Hide secrets (1)");
 			var combined = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
 			Assert.DoesNotContain(privateEmail, combined, StringComparison.Ordinal);
 			Assert.DoesNotContain(secret, combined, StringComparison.Ordinal);
@@ -4390,6 +4390,80 @@ public sealed class MainWindowIgnoreOptionsUiTests
 		}
 	}
 
+	[AvaloniaTheory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task LongRedactionRowLabel_TrimsNameButKeepsCounterAndIndicatorInsideThePanel(bool compactMode)
+	{
+		using var project = UiTestProject.CreateDefault();
+		LocalizationService? localization = null;
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			configureServices: services =>
+			{
+				localization = services.Localization;
+				return services;
+			});
+		try
+		{
+			window.Width = window.MinWidth;
+			window.Height = window.MinHeight;
+			Assert.IsType<LocalizationService>(localization).SetLanguage(AppLanguage.Ru);
+			if (compactMode)
+				window.Classes.Add("compact-mode");
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+
+			var viewModel = UiTestDriver.GetViewModel(window);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => viewModel.ContentProcessingOptions.Count ==
+				      ProjectPresentationCatalog.ContentTransformationOptionIds.Count,
+				"the content processing section to load");
+
+			viewModel.SetPrivateDataProcessingStatus(
+				SecretScanState.Completed,
+				detectedCount: 156,
+				hiddenCount: 156);
+			var option = Assert.Single(
+				viewModel.ContentProcessingOptions,
+				static candidate => candidate.Id == IgnoreOptionId.HidePrivateData);
+			// Wider than any shipped locale, so the layout must trim regardless of translation drift.
+			option.Label = "Скрывать обнаруженные личные данные проекта целиком (156/156)";
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+
+			var border = UiTestDriver.GetRequiredControl<Border>(window, "ContentProcessingOptionsBorder");
+			var indicator = GetContentProcessingStatusIndicator(window, IgnoreOptionId.HidePrivateData);
+			Assert.True(indicator.IsVisible);
+			var indicatorTopLeft = Assert.IsType<Point>(indicator.TranslatePoint(default, border));
+			Assert.InRange(
+				indicatorTopLeft.X + indicator.Bounds.Width,
+				1,
+				border.Bounds.Width);
+
+			var checkBox = UiTestDriver.GetRequiredIgnoreOptionCheckBox(window, IgnoreOptionId.HidePrivateData);
+			var counter = Assert.Single(
+				checkBox.GetVisualDescendants().OfType<TextBlock>(),
+				static text => string.Equals(text.Text, "(156/156)", StringComparison.Ordinal));
+			Assert.True(counter.IsVisible);
+			var counterTopLeft = Assert.IsType<Point>(counter.TranslatePoint(default, border));
+			Assert.InRange(counterTopLeft.X + counter.Bounds.Width, 1, border.Bounds.Width);
+
+			var name = Assert.Single(
+				checkBox.GetVisualDescendants().OfType<TextBlock>(),
+				static text => text.Text?.StartsWith("Скрывать", StringComparison.Ordinal) == true);
+			Assert.Equal(global::Avalonia.Media.TextTrimming.CharacterEllipsis, name.TextTrimming);
+			Assert.Equal(global::Avalonia.Media.TextWrapping.NoWrap, name.TextWrapping);
+			var nameTopLeft = Assert.IsType<Point>(name.TranslatePoint(default, border));
+			Assert.True(
+				nameTopLeft.X + name.Bounds.Width <= counterTopLeft.X,
+				"The trimmed name must end before the counter starts.");
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
 	[AvaloniaFact]
 	public async Task CompressionWithoutSecretFindings_KeepsCompressionAndSecretsStatusesSeparate()
 	{
@@ -4692,7 +4766,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			await UiTestDriver.WaitForIgnoreOptionLabelAsync(
 				window,
 				IgnoreOptionId.HideSecrets,
-				"Hide secrets (1/1)");
+				"Hide secrets (1)");
 			Assert.Empty(window.OwnedWindows);
 		}
 		finally

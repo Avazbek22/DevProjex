@@ -29,11 +29,18 @@ public sealed class IgnoreOptionsService(LocalizationService localization)
 		var label = localization[labelKey];
 		// A clean scan keeps the plain label: the row's status indicator already reports no matches,
 		// and "(0/0)" next to it would read as a counter for something that is not there.
-		return state is SecretScanState.Completed or SecretScanState.Limited &&
-		       matchedCount is not null and > 0 &&
-		       redactionCount is not null
-			? $"{label} ({matchedCount}/{redactionCount})"
-			: label;
+		if (state is not (SecretScanState.Completed or SecretScanState.Limited) ||
+		    matchedCount is not > 0 ||
+		    redactionCount is null)
+		{
+			return label;
+		}
+
+		// Matched and hidden counts differ only while overrides or a partial scan are in play;
+		// the usual all-hidden result collapses to one number so long locale labels keep fitting.
+		return matchedCount == redactionCount
+			? $"{label} ({matchedCount})"
+			: $"{label} ({matchedCount}/{redactionCount})";
 	}
 
 	public IReadOnlyList<IgnoreOptionDescriptor> GetOptions(IgnoreOptionsAvailability availability)

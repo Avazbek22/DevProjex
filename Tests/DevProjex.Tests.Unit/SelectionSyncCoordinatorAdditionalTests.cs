@@ -2344,7 +2344,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 			{
 				["Settings.Ignore.SmartIgnore"] = "Умное исключение",
 				["Settings.Ignore.HideSecrets"] = "Скрывать секреты",
-				["Settings.Ignore.HidePrivateData"] = "Скрывать приватные данные",
+				["Settings.Ignore.HidePrivateData"] = "Скрывать личные данные",
 				["Settings.Ignore.UseGitIgnore"] = "Использовать .gitignore",
 				["Settings.Ignore.TrackedGitFilesOnly"] = "Только файлы под контролем Git",
 				["Settings.Ignore.HiddenFolders"] = "Скрытые папки",

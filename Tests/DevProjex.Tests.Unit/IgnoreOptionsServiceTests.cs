@@ -150,6 +150,9 @@ public sealed class IgnoreOptionsServiceTests
 			"Hide private data (7/5)",
 			service.FormatContentRedactionLabel(IgnoreOptionId.HidePrivateData, SecretScanState.Completed, 7, 5));
 		Assert.Equal(
+			"Hide private data (7)",
+			service.FormatContentRedactionLabel(IgnoreOptionId.HidePrivateData, SecretScanState.Completed, 7, 7));
+		Assert.Equal(
 			"Hide private data",
 			service.FormatContentRedactionLabel(IgnoreOptionId.HidePrivateData, SecretScanState.Completed, 0, 0));
 	}

@@ -147,5 +147,55 @@ public sealed class OptionViewModelTests
         Assert.Equal(1, count);
     }
 
+    [Theory]
+    [InlineData("Hide secrets (4)", "Hide secrets", "(4)")]
+    [InlineData("Hide private data (156)", "Hide private data", "(156)")]
+    [InlineData("Hide secrets (4/1)", "Hide secrets", "(4/1)")]
+    [InlineData("Скрывать личные данные (12/7)", "Скрывать личные данные", "(12/7)")]
+    public void IgnoreOptionViewModel_TrailingCounter_SplitsIntoDisplayNameAndCounterText(
+        string label,
+        string expectedDisplayName,
+        string expectedCounter)
+    {
+        var option = new IgnoreOptionViewModel(IgnoreOptionId.HideSecrets, label, true);
+
+        Assert.Equal(expectedDisplayName, option.DisplayName);
+        Assert.Equal(expectedCounter, option.CounterText);
+        Assert.True(option.HasCounter);
+    }
+
+    [Theory]
+    [InlineData("Hide secrets")]
+    [InlineData("Files without extension (no ext)")]
+    [InlineData("Strange label ()")]
+    [InlineData("Strange label (12/)")]
+    [InlineData("Strange label (/12)")]
+    [InlineData("Strange label (1/2/3)")]
+    [InlineData("(12)")]
+    public void IgnoreOptionViewModel_WithoutTrailingCounter_KeepsFullLabelAsDisplayName(string label)
+    {
+        var option = new IgnoreOptionViewModel(IgnoreOptionId.HideSecrets, label, true);
+
+        Assert.Equal(label, option.DisplayName);
+        Assert.Equal(string.Empty, option.CounterText);
+        Assert.False(option.HasCounter);
+    }
+
+    [Fact]
+    public void IgnoreOptionViewModel_LabelChange_RaisesCounterPresentationNotifications()
+    {
+        var option = new IgnoreOptionViewModel(IgnoreOptionId.HideSecrets, "Hide secrets", true);
+        var changed = new List<string?>();
+        option.PropertyChanged += (_, args) => changed.Add(args.PropertyName);
+
+        option.Label = "Hide secrets (3)";
+
+        Assert.Contains(nameof(IgnoreOptionViewModel.DisplayName), changed);
+        Assert.Contains(nameof(IgnoreOptionViewModel.CounterText), changed);
+        Assert.Contains(nameof(IgnoreOptionViewModel.HasCounter), changed);
+        Assert.Equal("Hide secrets", option.DisplayName);
+        Assert.Equal("(3)", option.CounterText);
+    }
+
 }
 

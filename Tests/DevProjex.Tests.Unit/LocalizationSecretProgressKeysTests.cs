@@ -20,7 +20,7 @@ public sealed class LocalizationSecretProgressKeysTests
 	public static TheoryData<AppLanguage, string> ExpectedPrivateDataSearchLabels => new()
 	{
 		{ AppLanguage.En, "Searching for private data…" },
-		{ AppLanguage.Ru, "Поиск приватных данных…" },
+		{ AppLanguage.Ru, "Поиск личных данных…" },
 		{ AppLanguage.De, "Suche nach privaten Daten…" },
 		{ AppLanguage.Fr, "Recherche de données privées…" },
 		{ AppLanguage.It, "Ricerca di dati privati…" },
@@ -86,7 +86,7 @@ public sealed class LocalizationSecretProgressKeysTests
 
 	[Theory]
 	[InlineData(AppLanguage.En, "Hide \"{0}\" here", "Always hide \"{0}\"", "Hide \"{0}\" as private data")]
-	[InlineData(AppLanguage.Ru, "Скрыть \"{0}\" здесь", "Всегда скрывать \"{0}\"", "Скрывать \"{0}\" как приватные данные")]
+	[InlineData(AppLanguage.Ru, "Скрыть \"{0}\" здесь", "Всегда скрывать \"{0}\"", "Скрывать \"{0}\" как личные данные")]
 	public void ManualMarkMenuFormats_UseTheCanonicalEnglishAndRussianWording(
 		AppLanguage language,
 		string hideHere,

@@ -192,11 +192,34 @@
 			  </ListBox.ItemsPanel>
 			  <ListBox.ItemTemplate>
 				<DataTemplate x:DataType="vm:IgnoreOptionViewModel">
-				  <Grid ColumnDefinitions="Auto,6,16,*">
+				  <!-- Left-aligned shrink-to-fit row: the star column collapses to the text width
+				       when the label fits, and constrains it when it does not, so a long locale
+				       label trims with an ellipsis while the counter and the status indicator
+				       always stay visible. -->
+				  <Grid ColumnDefinitions="*,6,16" HorizontalAlignment="Left">
 					<CheckBox Grid.Column="0"
 							  Classes="list-item settings-list-entry"
-							  Content="{Binding Label}"
-							  IsChecked="{Binding IsChecked, Mode=TwoWay}" />
+							  IsChecked="{Binding IsChecked, Mode=TwoWay}">
+					  <!-- The Fluent CheckBox presenter inherits TextWrapping="Wrap" into its
+					       content, so NoWrap is forced here to keep the row on one line and let
+					       CharacterEllipsis trim instead of wrapping. -->
+					  <Grid ColumnDefinitions="*,Auto">
+						<TextBlock Grid.Column="0"
+								   Text="{Binding DisplayName}"
+								   TextWrapping="NoWrap"
+								   TextTrimming="CharacterEllipsis"
+								   VerticalAlignment="Center"
+								   ToolTip.Tip="{Binding Label}"
+								   ToolTip.ShowDelay="700" />
+						<TextBlock Grid.Column="1"
+								   Text="{Binding CounterText}"
+								   IsVisible="{Binding HasCounter}"
+								   TextWrapping="NoWrap"
+								   FontSize="12"
+								   Margin="4,0,0,0"
+								   VerticalAlignment="Center" />
+					  </Grid>
+					</CheckBox>
 					<Border Name="ContentProcessingStatusIndicator"
 							Classes="content-processing-status-indicator"
 							Grid.Column="2"

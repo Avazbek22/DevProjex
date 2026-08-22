@@ -174,7 +174,7 @@
   "Settings.Ignore.HideSecrets": "Sirlarni yashirish",
   "Settings.Ignore.HideSecrets.Scanning": "Sirlarni qidirish…",
   "Settings.Ignore.HideSecrets.NoMatches": "DevProjex sirlarni topmadi",
-  "Settings.Ignore.HidePrivateData": "Shaxsiy ma’lumotlarni yashirish",
+  "Settings.Ignore.HidePrivateData": "Shaxsiy ma’lumotni yashirish",
   "Settings.Ignore.HidePrivateData.Scanning": "Shaxsiy ma’lumotlar qidirilmoqda…",
   "Settings.Ignore.HidePrivateData.NoMatches": "DevProjex shaxsiy ma’lumotlarni topmadi",
   "Settings.Ignore.CompressCode": "Kodni siqish",

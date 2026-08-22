@@ -144,7 +144,7 @@ public sealed class IgnoreOptionsServiceAdditionalTests
 
 	[Theory]
 	[InlineData(0, 0, "Hide secrets")]
-	[InlineData(4, 4, "Hide secrets (4/4)")]
+	[InlineData(4, 4, "Hide secrets (4)")]
 	[InlineData(4, 1, "Hide secrets (4/1)")]
 	[InlineData(4, 0, "Hide secrets (4/0)")]
 	public void FormatHideSecretsLabel_AfterCompletion_ShowsMatchedAndHiddenCounts(
