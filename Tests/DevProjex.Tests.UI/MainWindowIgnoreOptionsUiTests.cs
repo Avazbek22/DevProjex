@@ -1622,6 +1622,10 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			var previewScrollViewer = UiTestDriver.GetRequiredControl<ScrollViewer>(
 				window,
 				"PreviewTextScrollViewer");
+			var contentFindingLine = Assert.Single(previewControl.Document!.Redactions).LineNumber;
+			Assert.Equal(
+				[new PreviewMarkerSource(contentFindingLine, PreviewMarkerCategory.Redaction)],
+				previewControl.MarkerSnapshot.Markers);
 			previewControl.Focus();
 			window.KeyPress(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
 			window.KeyRelease(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
@@ -1646,6 +1650,9 @@ public sealed class MainWindowIgnoreOptionsUiTests
 					"Found: 1. Hidden: 0.",
 					StringComparison.Ordinal),
 				"the content-processing tooltip to update after a redaction override");
+			Assert.Equal(
+				[new PreviewMarkerSource(contentFindingLine, PreviewMarkerCategory.Redaction)],
+				previewControl.MarkerSnapshot.Markers);
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
 			Assert.InRange(
 				Math.Abs(previewScrollViewer.Offset.Y - viewportBeforeOverride.Y),

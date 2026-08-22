@@ -11,7 +11,7 @@ namespace DevProjex.Tests.Unit.Avalonia;
 public sealed class PreviewMarkerProjectionTests
 {
 	[AvaloniaFact]
-	public void MarkerSnapshot_ContainsOnlyVisibleRedactionLinesAndUniqueSearchLines()
+	public void MarkerSnapshot_ContainsAllFindingLinesAndUniqueSearchLines()
 	{
 		using var document = new InMemoryPreviewTextDocument(
 			"one\ntwo\nthree\nfour\nfive",
@@ -22,7 +22,7 @@ public sealed class PreviewMarkerProjectionTests
 				Redaction("kept", line: 3, SecretPreviewSpanState.KeptAsIs),
 				Redaction(
 					"generated-path",
-					line: 3,
+					line: 5,
 					SecretPreviewSpanState.Redacted,
 					SecretFindingSource.GeneratedPath),
 				Redaction("redacted-c", line: 4, SecretPreviewSpanState.Redacted),
@@ -47,8 +47,9 @@ public sealed class PreviewMarkerProjectionTests
 		Assert.Equal(
 			[
 				new PreviewMarkerSource(2, PreviewMarkerCategory.Redaction),
-				new PreviewMarkerSource(4, PreviewMarkerCategory.Redaction),
 				new PreviewMarkerSource(3, PreviewMarkerCategory.Redaction),
+				new PreviewMarkerSource(4, PreviewMarkerCategory.Redaction),
+				new PreviewMarkerSource(5, PreviewMarkerCategory.Redaction),
 				new PreviewMarkerSource(1, PreviewMarkerCategory.Search),
 				new PreviewMarkerSource(4, PreviewMarkerCategory.Search)
 			],
@@ -56,7 +57,7 @@ public sealed class PreviewMarkerProjectionTests
 	}
 
 	[AvaloniaFact]
-	public void GeneratedPaths_ProduceOnlyTheFirstRedactedMarker()
+	public void GeneratedPaths_ProduceOnlyTheFirstMarker()
 	{
 		using var document = new InMemoryPreviewTextDocument(
 			string.Join('\n', Enumerable.Range(1, 8).Select(static line => $"line-{line}")),

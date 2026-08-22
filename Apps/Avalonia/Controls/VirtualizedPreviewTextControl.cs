@@ -1509,9 +1509,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 					: lineNumber;
 			}
 
-			if (!redactions.Any(static span =>
-				span.State == SecretPreviewSpanState.Redacted &&
-				span.Source != SecretFindingSource.GeneratedPath))
+			if (!redactions.Any(static span => span.Source != SecretFindingSource.GeneratedPath))
 				continue;
 
 			markers ??= [];
