@@ -75,7 +75,7 @@ public sealed class PreviewMarkerProjectionTests
 	}
 
 	[AvaloniaFact]
-	public void KeptGeneratedPaths_DoNotProduceMarkers()
+	public void KeptGeneratedPaths_ProduceOnlyTheFirstMarker()
 	{
 		using var document = new InMemoryPreviewTextDocument(
 			"one\ntwo\nthree",
@@ -87,7 +87,9 @@ public sealed class PreviewMarkerProjectionTests
 
 		var control = new VirtualizedPreviewTextControl { Document = document };
 
-		Assert.Empty(control.MarkerSnapshot.Markers);
+		Assert.Equal(
+			[new PreviewMarkerSource(1, PreviewMarkerCategory.Redaction)],
+			control.MarkerSnapshot.Markers);
 	}
 
 	[AvaloniaFact]

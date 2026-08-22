@@ -134,7 +134,15 @@ public sealed class MainWindowIgnoreOptionsUiTests
 					      StringComparison.Ordinal),
 				"the generated path occurrence to be kept as-is");
 			Assert.False(counterChangedBeforePreview);
-			Assert.Empty(control.MarkerSnapshot.Markers);
+			Assert.Equal(
+				[
+					new PreviewMarkerSource(
+						control.Document.Redactions
+							.Where(static span => span.Source == SecretFindingSource.GeneratedPath)
+							.Min(static span => span.LineNumber),
+						PreviewMarkerCategory.Redaction)
+				],
+				control.MarkerSnapshot.Markers);
 			var keptContent = await UiTestDriver.ComputeAppliedPreviewCopyPayloadAsync(
 				window,
 				PreviewContentMode.Content,

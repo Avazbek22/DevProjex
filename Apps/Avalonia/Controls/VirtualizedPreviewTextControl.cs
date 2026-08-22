@@ -1502,9 +1502,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 		int? firstGeneratedPathLine = null;
 		foreach (var (lineNumber, redactions) in _redactionsByLine)
 		{
-			if (redactions.Any(static span =>
-				span.State == SecretPreviewSpanState.Redacted &&
-				span.Source == SecretFindingSource.GeneratedPath))
+			if (redactions.Any(static span => span.Source == SecretFindingSource.GeneratedPath))
 			{
 				firstGeneratedPathLine = firstGeneratedPathLine is { } current
 					? Math.Min(current, lineNumber)
