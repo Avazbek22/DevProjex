@@ -13,6 +13,9 @@ namespace DevProjex.Avalonia;
 
 public partial class MainWindow
 {
+	private bool _deferRedactionDecisionPresentation;
+	private DeferredRedactionStatus? _deferredRedactionStatus;
+
 	private void OnSecretRedactionSnapshotPublished(
 		object? sender,
 		SecretRedactionSnapshotPublishedEventArgs eventArgs)
@@ -81,6 +84,9 @@ public partial class MainWindow
 	/// <summary>Relabels every content transformation row from the counts published so far.</summary>
 	private void RelabelIgnoreOptionsWithCurrentCounts()
 	{
+		if (_deferRedactionDecisionPresentation)
+			return;
+
 		// This runs on the UI thread whenever the transformation rows change - on toggle, on project
 		// load, and after a snapshot - which makes it the right place to refresh the copy the
 		// metrics worker reads.
@@ -571,6 +577,16 @@ public partial class MainWindow
 		int? failedFileCount = null,
 		IReadOnlyList<UnscannableFile>? unscannableFiles = null)
 	{
+		if (_deferRedactionDecisionPresentation)
+		{
+			_deferredRedactionStatus = new DeferredRedactionStatus(
+				state,
+				skippedFileCount,
+				failedFileCount,
+				unscannableFiles);
+			return;
+		}
+
 		_viewModel.SetContentProcessingStatus(
 			_appliedHideSecretsEnabled ? state : SecretScanState.Disabled,
 			_appliedHideSecretsEnabled ? _secretRedactionMatchedCount : null,
@@ -599,10 +615,34 @@ public partial class MainWindow
 
 	private void RefreshPreviewRedactionDecision()
 	{
+		_deferRedactionDecisionPresentation = _viewModel.IsAnyPreviewVisible;
+		_deferredRedactionStatus = null;
 		ApplyRedactionStatus(_secretRedactionScanState);
 		RelabelIgnoreOptionsWithCurrentCounts();
 		ScheduleContentTransformationRefresh(IgnoreOptionId.HideSecrets);
 	}
+
+	private void CompleteDeferredRedactionDecisionPresentation()
+	{
+		if (!_deferRedactionDecisionPresentation)
+			return;
+
+		var status = _deferredRedactionStatus ?? new DeferredRedactionStatus(_secretRedactionScanState);
+		_deferRedactionDecisionPresentation = false;
+		_deferredRedactionStatus = null;
+		ApplyRedactionStatus(
+			status.State,
+			status.SkippedFileCount,
+			status.FailedFileCount,
+			status.UnscannableFiles);
+		RelabelIgnoreOptionsWithCurrentCounts();
+	}
+
+	private readonly record struct DeferredRedactionStatus(
+		SecretScanState State,
+		int? SkippedFileCount = null,
+		int? FailedFileCount = null,
+		IReadOnlyList<UnscannableFile>? UnscannableFiles = null);
 
 	private static string ResolveRedactionScanningLocalizationKey(
 		SecretRedactionFeatures features) =>

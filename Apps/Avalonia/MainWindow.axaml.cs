@@ -653,10 +653,16 @@ public partial class MainWindow : Window
         => _previewSurfaceController.ApplyText(text, lineCount);
 
     private void ApplyPreviewDocument(IPreviewTextDocument document)
-        => _previewSurfaceController.ApplyDocument(document);
+    {
+        _previewSurfaceController.ApplyDocument(document);
+        CompleteDeferredRedactionDecisionPresentation();
+    }
 
     private void ClearPreviewDocument()
-        => _previewSurfaceController.ClearDocument();
+    {
+        _previewSurfaceController.ClearDocument();
+        CompleteDeferredRedactionDecisionPresentation();
+    }
 
     private static int CountPreviewLines(string text) => PreviewFileCollectionPolicy.CountPreviewLines(text);
 

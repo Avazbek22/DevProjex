@@ -100,6 +100,8 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				.ThenBy(static span => span.StartColumn)
 				.Skip(1)
 				.First();
+			var counterChangedBeforePreview = false;
+			privateDataOption.PropertyChanged += OnPrivateDataOptionPropertyChanged;
 			control.Focus();
 			for (var attempt = 0; attempt <= control.Document.Redactions.Count; attempt++)
 			{
@@ -131,6 +133,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 					      "User name in file paths: shown.",
 					      StringComparison.Ordinal),
 				"the generated path occurrence to be kept as-is");
+			Assert.False(counterChangedBeforePreview);
 			Assert.Empty(control.MarkerSnapshot.Markers);
 			var keptContent = await UiTestDriver.ComputeAppliedPreviewCopyPayloadAsync(
 				window,
@@ -139,6 +142,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			Assert.Equal(unprotected, keptContent);
 			Assert.Equal(keptContent, UiTestDriver.ComputeCurrentPreviewCopyPayload(window));
 			await UiTestDriver.CopyContentToClipboardAsync(window, keptContent);
+			privateDataOption.PropertyChanged -= OnPrivateDataOptionPropertyChanged;
 
 			await UiTestDriver.PressKeyAsync(window, Key.Enter);
 			await UiTestDriver.WaitForConditionAsync(
@@ -181,6 +185,16 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				Assert.Contains(protectedRoot, output, StringComparison.Ordinal);
 				if (!string.Equals(protectedRoot, project.RootPath, StringComparison.Ordinal))
 					Assert.DoesNotContain(project.RootPath, output, StringComparison.Ordinal);
+			}
+
+			void OnPrivateDataOptionPropertyChanged(object? sender, PropertyChangedEventArgs eventArgs)
+			{
+				if (eventArgs.PropertyName == nameof(IgnoreOptionViewModel.Label) &&
+				    privateDataOption.Label.EndsWith("(1/0)", StringComparison.Ordinal) &&
+				    !UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(programPath, StringComparison.Ordinal))
+				{
+					counterChangedBeforePreview = true;
+				}
 			}
 		}
 		finally
