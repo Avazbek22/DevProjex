@@ -972,7 +972,7 @@
                                            VerticalAlignment="Stretch"
                                            ZIndex="20"
                                            IsHitTestVisible="False"
-                                           IsMarkerDisplayEnabled="{Binding IsPreviewSearchAvailable}"
+                                           IsMarkerDisplayEnabled="{Binding IsPreviewPaneVisible}"
                                            RedactionBrush="{DynamicResource AppAccentBrush}"
                                            SearchBrush="{DynamicResource TreeSearchHighlightBrush}" />
               </Grid>

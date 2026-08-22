@@ -155,6 +155,21 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			})
 			{
 				await UiTestDriver.SwitchPreviewModeAsync(window, mode);
+				var modeGeneratedPathSpans = control.Document!.Redactions
+					.Where(static span =>
+						span.Source == SecretFindingSource.GeneratedPath &&
+						span.State == SecretPreviewSpanState.Redacted)
+					.ToArray();
+				Assert.NotEmpty(modeGeneratedPathSpans);
+				Assert.Equal(
+					[
+						new PreviewMarkerSource(
+							modeGeneratedPathSpans.Min(static span => span.LineNumber),
+							PreviewMarkerCategory.Redaction)
+					],
+					control.MarkerSnapshot.Markers);
+				Assert.True(
+					UiTestDriver.GetRequiredControl<PreviewMarkerBar>(window, "PreviewMarkerBar").IsVisible);
 				var output = await UiTestDriver.ComputeAppliedPreviewCopyPayloadAsync(
 					window,
 					mode,
