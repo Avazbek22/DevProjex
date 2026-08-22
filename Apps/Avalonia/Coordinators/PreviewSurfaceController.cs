@@ -1099,7 +1099,7 @@ internal sealed class PreviewSurfaceController : IDisposable
         if (topLine < sections[0].StartLine)
             return false;
 
-        currentSection =
+        var section =
             PreviewDocumentSectionLookup.FindContainingSection(
                 sections,
                 topLine) ??
@@ -1107,6 +1107,10 @@ internal sealed class PreviewSurfaceController : IDisposable
                 sections,
                 topLine) ??
             sections[^1];
+        if (topLine <= section.HeaderLine)
+            return false;
+
+        currentSection = section;
         return true;
     }
 

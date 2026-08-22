@@ -61,6 +61,10 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			var control = UiTestDriver.GetRequiredControl<VirtualizedPreviewTextControl>(
 				window,
 				"PreviewTextControl");
+			var stickyHeader = UiTestDriver.GetRequiredControl<Border>(
+				window,
+				"PreviewStickyHeaderContainer");
+			Assert.False(stickyHeader.IsVisible);
 			var viewModel = UiTestDriver.GetViewModel(window);
 			var privateDataOption = Assert.Single(
 				viewModel.ContentProcessingOptions,
