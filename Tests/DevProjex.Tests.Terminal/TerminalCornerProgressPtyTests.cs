@@ -24,10 +24,14 @@ public sealed class TerminalCornerProgressPtyTests
 
 		await FocusFirstContentOptionAsync(terminal);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		var optimistic = await terminal.WaitForScreenAsync(
+			"[x] Hide secrets",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.DoesNotContain("Processing request", optimistic, StringComparison.Ordinal);
 		var checkpointRoot = GetCheckpointRoot(dataRoot);
 		await WaitForCheckpointAsync(checkpointRoot, "background-refresh");
 		var wide = await terminal.WaitForScreenAsync(
-			"Updating…",
+			"Updating options…",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.DoesNotContain("Processing request", wide, StringComparison.Ordinal);
 		TerminalScreenSnapshot.Verify(
@@ -43,7 +47,7 @@ public sealed class TerminalCornerProgressPtyTests
 			"> PARAMETERS",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Updating…",
+			"Updating options…",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await Task.Delay(250, TestContext.Current.CancellationToken);
 		var tabbed = terminal.CaptureScreen();
@@ -56,17 +60,19 @@ public sealed class TerminalCornerProgressPtyTests
 		var tooSmall = await terminal.WaitForScreenAsync(
 			"Terminal too small",
 			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.DoesNotContain("Updating", tooSmall, StringComparison.Ordinal);
+		Assert.DoesNotContain("Updating options", tooSmall, StringComparison.Ordinal);
 
 		await terminal.ResizeAsync(160, 50, TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Updating…",
+			"Updating options…",
 			cancellationToken: TestContext.Current.CancellationToken);
 		ReleaseCheckpoint(checkpointRoot, "background-refresh");
-		var completed = await terminal.WaitForScreenAsync(
-			"[x] Hide secrets",
+		await terminal.WaitForScreenWithoutAsync(
+			"Updating options…",
 			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.DoesNotContain("Updating", completed, StringComparison.Ordinal);
+		var completed = terminal.CaptureScreen();
+		Assert.Contains("[x] Hide secrets", completed, StringComparison.Ordinal);
+		Assert.DoesNotContain("Updating options", completed, StringComparison.Ordinal);
 		Assert.DoesNotContain("Processing request", completed, StringComparison.Ordinal);
 		await ExitAsync(terminal);
 	}
@@ -93,24 +99,24 @@ public sealed class TerminalCornerProgressPtyTests
 		var checkpointRoot = GetCheckpointRoot(dataRoot);
 		await WaitForCheckpointAsync(checkpointRoot, "background-refresh");
 		var screen = await terminal.WaitForScreenAsync(
-			"Updating...",
+			"Updating options...",
 			cancellationToken: TestContext.Current.CancellationToken);
 		var heading = screen.Split('\n')[0];
 		Assert.DoesNotContain('⠋', heading);
-		Assert.DoesNotContain("| Updating", heading, StringComparison.Ordinal);
-		Assert.DoesNotContain("/ Updating", heading, StringComparison.Ordinal);
-		Assert.DoesNotContain("- Updating", heading, StringComparison.Ordinal);
-		Assert.DoesNotContain("\\ Updating", heading, StringComparison.Ordinal);
+		Assert.DoesNotContain("| Updating options", heading, StringComparison.Ordinal);
+		Assert.DoesNotContain("/ Updating options", heading, StringComparison.Ordinal);
+		Assert.DoesNotContain("- Updating options", heading, StringComparison.Ordinal);
+		Assert.DoesNotContain("\\ Updating options", heading, StringComparison.Ordinal);
 		Assert.DoesNotContain("Processing request", screen, StringComparison.Ordinal);
 		ReleaseCheckpoint(checkpointRoot, "background-refresh");
 		await terminal.WaitForScreenWithoutAsync(
-			"Updating...",
+			"Updating options...",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await ExitAsync(terminal);
 	}
 
 	[Fact(Timeout = 90_000)]
-	public async Task FastContentRefreshNeverPaintsTheDelayedSlot()
+	public async Task FastSettingsRefreshDoesNotPaintTheOptionsPhase()
 	{
 		using var project = CreateProject();
 		await using var terminal = await StartAsync(
@@ -132,7 +138,8 @@ public sealed class TerminalCornerProgressPtyTests
 		while (stopwatch.Elapsed < TimeSpan.FromMilliseconds(750))
 		{
 			var screen = terminal.CaptureScreen();
-			painted |= screen.Contains("Updating…", StringComparison.Ordinal);
+			painted |= screen.Contains("Updating options…", StringComparison.Ordinal);
+			Assert.DoesNotContain("Processing request", screen, StringComparison.Ordinal);
 			Assert.False(terminal.HasExited);
 			await Task.Delay(10, TestContext.Current.CancellationToken);
 		}
@@ -174,19 +181,22 @@ public sealed class TerminalCornerProgressPtyTests
 		var checkpointRoot = GetCheckpointRoot(dataRoot);
 		await WaitForCheckpointAsync(checkpointRoot, "background-refresh");
 		await terminal.WaitForScreenAsync(
-			"Updating…",
+			"Building tree…",
 			cancellationToken: TestContext.Current.CancellationToken);
 		ReleaseCheckpoint(checkpointRoot, "background-refresh");
 
 		var error = await terminal.WaitForScreenAsync(
 			"DPX-GIT-TRACKED-INDEX-UNAVAILABLE",
 			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.DoesNotContain("Updating", error, StringComparison.Ordinal);
+		Assert.DoesNotContain("Building tree", error, StringComparison.Ordinal);
 		Assert.DoesNotContain("Processing request", error, StringComparison.Ordinal);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenWithoutAsync(
 			"DPX-GIT-TRACKED-INDEX-UNAVAILABLE",
 			cancellationToken: TestContext.Current.CancellationToken);
+		var rolledBack = terminal.CaptureScreen();
+		Assert.Contains("[x] Use .gitignore", rolledBack, StringComparison.Ordinal);
+		Assert.Contains("[ ] Tracked Git files only", rolledBack, StringComparison.Ordinal);
 		await ExitAsync(terminal);
 	}
 
@@ -203,6 +213,7 @@ public sealed class TerminalCornerProgressPtyTests
 			plain ? "> PARAMETERS" : "> PARAMETERS",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
+		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 	}
 
 	private static Task<TerminalPtyHarness> StartAsync(

@@ -23,7 +23,7 @@
 │                                                     ││internal sealed class LargeMarker120 { }                      ┃│
 │                                                     ││xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx▼│
 │                                                     ││◄━···························································► │
-│                                                     ││ / 1/1  |  F 117-120/120  |  L 698-718/718  |  C 1-62/5 500    │
+│                                                     ││ <SPINNER> 1/1  |  F 117-120/120  |  L 698-718/718  |  C 1-62/5 500    │
 └─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
 
  Files 120 · Folders 2 · 649.34 KB · ~<TOKENS> tokens · Warnings 0 · Errors 0

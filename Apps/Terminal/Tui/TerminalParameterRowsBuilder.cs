@@ -10,22 +10,39 @@ internal sealed class TerminalParameterRowsBuilder(
 {
 	public IReadOnlyList<TerminalParameterRow> BuildContent(
 		ProjectContextPlan plan,
-		SecretRedactionSnapshot? snapshot)
+		SecretRedactionSnapshot? snapshot,
+		ProjectSelectionSpec? selectionOverride = null)
 	{
 		ArgumentNullException.ThrowIfNull(plan);
+		var selection = selectionOverride ?? plan.Selection;
 		return ProjectPresentationCatalog.ContentTransformations.Select(descriptor =>
 			new TerminalParameterRow(
 				$"content:{descriptor.Token}",
 				TerminalParameterRowKind.ContentTransformation,
-				fitLabel(FormatContentTransformationLabel(descriptor, plan, snapshot)),
-				IsContentTransformationEnabled(plan.Selection, descriptor.LegacyOptionId),
+				fitLabel(FormatContentTransformationLabel(descriptor, selection, snapshot)),
+				IsContentTransformationEnabled(selection, descriptor.LegacyOptionId),
 				ContentTransformation: descriptor.LegacyOptionId)).ToArray();
 	}
 
-	public IReadOnlyList<TerminalParameterRow> BuildExclusions(ProjectContextPlan plan)
+	public TerminalParameterRow BuildContentAggregate(ProjectSelectionSpec selection)
+	{
+		ArgumentNullException.ThrowIfNull(selection);
+		var count = ProjectPresentationCatalog.ContentTransformations.Count;
+		return new TerminalParameterRow(
+			"content:all",
+			TerminalParameterRowKind.ToggleAllContent,
+			FormatAggregateLabel(count),
+			count > 0 && ProjectPresentationCatalog.ContentTransformations.All(descriptor =>
+				IsContentTransformationEnabled(selection, descriptor.LegacyOptionId)));
+	}
+
+	public IReadOnlyList<TerminalParameterRow> BuildExclusions(
+		ProjectContextPlan plan,
+		ProjectSelectionSpec? selectionOverride = null)
 	{
 		ArgumentNullException.ThrowIfNull(plan);
-		var exclusions = (plan.Selection.Exclusions ?? []).ToHashSet();
+		var selection = selectionOverride ?? plan.Selection;
+		var exclusions = (selection.Exclusions ?? []).ToHashSet();
 		var rows = new List<TerminalParameterRow>();
 		rows.AddRange(ProjectPresentationCatalog.GitFiltering
 			.Where(static descriptor => descriptor.Id != GitFilteringMode.None)
@@ -33,7 +50,7 @@ internal sealed class TerminalParameterRowsBuilder(
 				$"git:{descriptor.Token}",
 				TerminalParameterRowKind.GitMode,
 				fitLabel(localize(descriptor.LabelKey)),
-				plan.GitReadiness.Mode == descriptor.Id,
+				(selection.GitMode ?? plan.GitReadiness.Mode) == descriptor.Id,
 				GitMode: descriptor.Id)));
 		rows.AddRange(ProjectPresentationCatalog.Exclusions.Select(descriptor =>
 			new TerminalParameterRow(
@@ -45,23 +62,31 @@ internal sealed class TerminalParameterRowsBuilder(
 		return rows;
 	}
 
-	public TerminalParameterRow BuildExclusionAggregate(ProjectContextPlan plan)
+	public TerminalParameterRow BuildExclusionAggregate(
+		ProjectContextPlan plan,
+		ProjectSelectionSpec? selectionOverride = null)
 	{
 		ArgumentNullException.ThrowIfNull(plan);
-		var exclusions = (plan.Selection.Exclusions ?? []).ToHashSet();
+		var selection = selectionOverride ?? plan.Selection;
+		var exclusions = (selection.Exclusions ?? []).ToHashSet();
+		var count = ProjectPresentationCatalog.GitFiltering.Count - 1 +
+		            ProjectPresentationCatalog.Exclusions.Count;
 		return new TerminalParameterRow(
 			"exclusions:all",
 			TerminalParameterRowKind.ToggleAllExclusions,
-			fitLabel(localize("Settings.All")),
-			plan.GitReadiness.Mode != GitFilteringMode.None &&
+			FormatAggregateLabel(count),
+			(selection.GitMode ?? plan.GitReadiness.Mode) != GitFilteringMode.None &&
 			ProjectPresentationCatalog.Exclusions.All(descriptor =>
 				exclusions.Contains(descriptor.RequireId())));
 	}
 
-	public IReadOnlyList<TerminalParameterRow> BuildExtensions(ProjectContextPlan plan)
+	public IReadOnlyList<TerminalParameterRow> BuildExtensions(
+		ProjectContextPlan plan,
+		IReadOnlyCollection<string>? selectedExtensionsOverride = null)
 	{
 		ArgumentNullException.ThrowIfNull(plan);
-		var selectedExtensions = plan.SelectedExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase);
+		var selectedExtensions = (selectedExtensionsOverride ?? plan.SelectedExtensions)
+			.ToHashSet(StringComparer.OrdinalIgnoreCase);
 		var rows = new List<TerminalParameterRow>();
 		rows.AddRange(plan.AvailableExtensions.Select(extension =>
 			new TerminalParameterRow(
@@ -84,14 +109,17 @@ internal sealed class TerminalParameterRowsBuilder(
 		return rows;
 	}
 
-	public TerminalParameterRow BuildExtensionAggregate(ProjectContextPlan plan)
+	public TerminalParameterRow BuildExtensionAggregate(
+		ProjectContextPlan plan,
+		IReadOnlyCollection<string>? selectedExtensionsOverride = null)
 	{
 		ArgumentNullException.ThrowIfNull(plan);
-		var selectedExtensions = plan.SelectedExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase);
+		var selectedExtensions = (selectedExtensionsOverride ?? plan.SelectedExtensions)
+			.ToHashSet(StringComparer.OrdinalIgnoreCase);
 		return new TerminalParameterRow(
 			"extensions:all",
 			TerminalParameterRowKind.ToggleAllExtensions,
-			fitLabel(localize("Settings.All")),
+			FormatAggregateLabel(plan.AvailableExtensions.Count),
 			plan.AvailableExtensions.Count == selectedExtensions.Count &&
 			plan.AvailableExtensions.All(selectedExtensions.Contains));
 	}
@@ -111,11 +139,11 @@ internal sealed class TerminalParameterRowsBuilder(
 
 	private string FormatContentTransformationLabel(
 		ProjectExclusionDescriptor descriptor,
-		ProjectContextPlan plan,
+		ProjectSelectionSpec selection,
 		SecretRedactionSnapshot? snapshot)
 	{
 		if (snapshot is null ||
-			!IsContentTransformationEnabled(plan.Selection, descriptor.LegacyOptionId))
+			!IsContentTransformationEnabled(selection, descriptor.LegacyOptionId))
 		{
 			return localize(descriptor.LabelKey);
 		}
@@ -135,4 +163,8 @@ internal sealed class TerminalParameterRowsBuilder(
 			_ => localize(descriptor.LabelKey)
 		};
 	}
+
+	private string FormatAggregateLabel(int count) => count == 0
+		? localize("Settings.All")
+		: $"{localize("Settings.All")} ({count:N0})";
 }

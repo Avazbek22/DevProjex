@@ -374,7 +374,7 @@ internal static partial class TerminalScreenSnapshot
 	[GeneratedRegex(@"(?m)(?<prefix>(?:^|│)\s*)[|/\\\-⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏](?<suffix>\s+)")]
 	private static partial Regex SpinnerFramePattern();
 
-	[GeneratedRegex(@"[|/\\\-⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏](?=\s+Updating…)")]
+	[GeneratedRegex(@"[|/\\\-⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏](?=\s+(?:Updating options|Building tree|Building preview)…)")]
 	private static partial Regex HeaderSpinnerFramePattern();
 
 	[GeneratedRegex(@"(?<=\d)[, \u202F](?=\d{3}(?:\D|$))")]

@@ -2,6 +2,7 @@ using DevProjex.Terminal.Execution;
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Application.Compression;
 using DevProjex.Application.Secrets;
+using DevProjex.Application.Selection;
 
 namespace DevProjex.Terminal.Tui;
 
@@ -105,19 +106,17 @@ public sealed class TerminalWorkspaceController(
 		IReadOnlyCollection<ProjectExclusion> exclusions,
 		CancellationToken cancellationToken)
 	{
-		var plan = await BuildPlanAsync(
-				state.Plan.SourceRoot,
+		var result = await BuildSettingsPlanAsync(
+				state.Plan,
 				state.BuildSelection() with
 				{
 					GitMode = mode,
 					Exclusions = exclusions
 				},
-				state.Plan.SourceIdentity,
+				state.ExtensionOptionStates,
 				cancellationToken)
 			.ConfigureAwait(false);
-		// Keep the last usable plan when an explicit tracked-mode request cannot be honored.
-		ThrowIfTrackedModeIsUnavailable(plan);
-		state.ReplacePlan(plan);
+		ApplySettingsPlan(state, result);
 	}
 
 	public async Task SetExclusionsAsync(
@@ -125,9 +124,10 @@ public sealed class TerminalWorkspaceController(
 		IReadOnlyCollection<ProjectExclusion> exclusions,
 		CancellationToken cancellationToken)
 	{
-		await RebuildAsync(
+		await SetPathFilteringAsync(
 				state,
-				state.BuildSelection() with { Exclusions = exclusions },
+				state.Plan.GitReadiness.Mode,
+				exclusions,
 				cancellationToken)
 			.ConfigureAwait(false);
 	}
@@ -174,11 +174,117 @@ public sealed class TerminalWorkspaceController(
 	public Task SetExtensionsAsync(
 		TerminalWorkspaceState state,
 		IReadOnlyCollection<string>? extensions,
-		CancellationToken cancellationToken) =>
-		RebuildAsync(
-			state,
-			state.BuildSelection() with { Extensions = extensions },
-			cancellationToken);
+		CancellationToken cancellationToken) => SetExtensionsCoreAsync(
+		state,
+		extensions ?? [],
+		cancellationToken);
+
+	private async Task SetExtensionsCoreAsync(
+		TerminalWorkspaceState state,
+		IReadOnlyCollection<string> extensions,
+		CancellationToken cancellationToken)
+	{
+		var result = await BuildSettingsPlanAsync(
+				state.Plan,
+				state.BuildSelection() with { Extensions = extensions },
+				state.BuildExtensionOptionStates(extensions),
+				cancellationToken)
+			.ConfigureAwait(false);
+		ApplySettingsPlan(state, result);
+	}
+
+	internal void ApplySettingsPlan(
+		TerminalWorkspaceState state,
+		TerminalSettingsPlanResult result)
+	{
+		ArgumentNullException.ThrowIfNull(state);
+		ArgumentNullException.ThrowIfNull(result);
+		var redactionWasEnabled = state.Plan.Selection.HideSecrets == true ||
+		                          state.Plan.Selection.HidePrivateData == true;
+		state.ReplacePlan(result.Plan, result.ExtensionOptionStates);
+		if (redactionWasEnabled &&
+		    result.Plan.Selection.HideSecrets != true &&
+		    result.Plan.Selection.HidePrivateData != true)
+		{
+			services.SecretRedactionSession.Disable();
+		}
+	}
+
+	internal async Task<TerminalSettingsPlanResult> BuildSettingsPlanAsync(
+		ProjectContextPlan baseline,
+		ProjectSelectionSpec selection,
+		IReadOnlyDictionary<string, bool> extensionOptionStates,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(baseline);
+		ArgumentNullException.ThrowIfNull(selection);
+		ArgumentNullException.ThrowIfNull(extensionOptionStates);
+
+		if (!RequiresStructuralRefresh(baseline.Selection, selection))
+		{
+			var contentPlan = services.ContextPlanner.ApplyContentTransformationSelection(
+				baseline,
+				selection.HideSecrets == true,
+				selection.CompressCode,
+				selection.StripComments,
+				selection.StripBlankLines,
+				selection.HidePrivateData);
+			return new TerminalSettingsPlanResult(contentPlan, extensionOptionStates);
+		}
+
+		var plan = await BuildPlanAsync(
+				baseline.SourceRoot,
+				selection,
+				baseline.SourceIdentity,
+				cancellationToken)
+			.ConfigureAwait(false);
+		// Keep the last usable plan when an explicit tracked-mode request cannot be honored.
+		ThrowIfTrackedModeIsUnavailable(plan);
+
+		var previousSelection = new HashSet<string>(
+			selection.Extensions ?? baseline.SelectedExtensions,
+			StringComparer.OrdinalIgnoreCase);
+		var evolution = SelectionEvolutionPolicy.Reconcile(
+			plan.AvailableExtensions,
+			previousSelection,
+			extensionOptionStates,
+			static _ => true,
+			StringComparer.OrdinalIgnoreCase);
+		if (!plan.SelectedExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase)
+				.SetEquals(evolution.SelectedItems))
+		{
+			plan = await BuildPlanAsync(
+					baseline.SourceRoot,
+					selection with
+					{
+						Extensions = evolution.SelectedItems
+							.Order(StringComparer.OrdinalIgnoreCase)
+							.ToArray()
+					},
+					baseline.SourceIdentity,
+					cancellationToken)
+				.ConfigureAwait(false);
+			ThrowIfTrackedModeIsUnavailable(plan);
+		}
+
+		return new TerminalSettingsPlanResult(plan, evolution.KnownStates);
+	}
+
+	internal static bool RequiresStructuralRefresh(
+		ProjectSelectionSpec baseline,
+		ProjectSelectionSpec candidate) =>
+		baseline.GitMode != candidate.GitMode ||
+		!SelectionSetEquals(baseline.Exclusions, candidate.Exclusions) ||
+		!SelectionSetEquals(
+			baseline.Extensions,
+			candidate.Extensions,
+			StringComparer.OrdinalIgnoreCase);
+
+	private static bool SelectionSetEquals<T>(
+		IReadOnlyCollection<T>? left,
+		IReadOnlyCollection<T>? right,
+		IEqualityComparer<T>? comparer = null) =>
+		new HashSet<T>(left ?? [], comparer).SetEquals(right ?? []);
 
 	public async Task<ProjectContextPlan> BuildCurrentPlanAsync(
 		TerminalWorkspaceState state,
@@ -785,3 +891,7 @@ public sealed class TerminalWorkspaceController(
 		_ = ProjectPresentationCatalog.Get(format);
 
 }
+
+internal sealed record TerminalSettingsPlanResult(
+	ProjectContextPlan Plan,
+	IReadOnlyDictionary<string, bool> ExtensionOptionStates);

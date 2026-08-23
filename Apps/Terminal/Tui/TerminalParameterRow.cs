@@ -7,6 +7,7 @@ internal enum TerminalParameterRowKind
 	Information,
 	GitMode,
 	ContentTransformation,
+	ToggleAllContent,
 	ToggleAllExclusions,
 	Exclusion,
 	ToggleAllExtensions,

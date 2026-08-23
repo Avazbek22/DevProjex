@@ -68,6 +68,7 @@ internal static class Program
 internal sealed class FileTerminalOperationObserver : ITerminalOperationObserver
 {
 	private readonly string _directory;
+	private readonly object _observationSync = new();
 	private readonly Queue<int> _pendingPercentages;
 	private readonly HashSet<TerminalOperationPhase> _pendingPhases;
 
@@ -109,12 +110,27 @@ internal sealed class FileTerminalOperationObserver : ITerminalOperationObserver
 		TerminalOperationPhase phase,
 		CancellationToken cancellationToken)
 	{
+		var token = ToToken(phase);
+		RecordObservation(token);
 		if (!_pendingPhases.Remove(phase))
 			return ValueTask.CompletedTask;
 
 		return new ValueTask(Task.Run(
-			() => PauseAt(ToToken(phase), cancellationToken),
+			() => PauseAt(token, cancellationToken),
 			CancellationToken.None));
+	}
+
+	private void RecordObservation(string checkpoint)
+	{
+		lock (_observationSync)
+		{
+			File.AppendAllText(
+				Path.Combine(
+					_directory,
+					TerminalProgressCheckpointProtocol.GetObservedFileName(checkpoint)),
+				checkpoint + Environment.NewLine,
+				new UTF8Encoding(false));
+		}
 	}
 
 	public void ObserveProgress(
