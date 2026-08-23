@@ -5,7 +5,7 @@
     <DevProjexAssemblyVersion Condition="'$(DevProjexAssemblyVersion)'==''">5.1.0.0</DevProjexAssemblyVersion>
     <DevProjexFileVersion Condition="'$(DevProjexFileVersion)'==''">$(DevProjexAssemblyVersion)</DevProjexFileVersion>
     <DevProjexInformationalVersion Condition="'$(DevProjexInformationalVersion)'==''">$(DevProjexVersion)</DevProjexInformationalVersion>
-    <DevProjexStorePackageVersion Condition="'$(DevProjexStorePackageVersion)'==''">5.0.0.0</DevProjexStorePackageVersion>
+    <DevProjexStorePackageVersion Condition="'$(DevProjexStorePackageVersion)'==''">5.1.0.0</DevProjexStorePackageVersion>
     <Version>$(DevProjexVersion)</Version>
     <AssemblyVersion>$(DevProjexAssemblyVersion)</AssemblyVersion>
     <FileVersion>$(DevProjexFileVersion)</FileVersion>
