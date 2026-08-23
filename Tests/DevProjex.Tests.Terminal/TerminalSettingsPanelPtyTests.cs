@@ -89,6 +89,10 @@ public sealed class TerminalSettingsPanelPtyTests
 		var parameters = await WaitForStableScreenAsync(terminal, "Saved settings:");
 		Assert.Contains("Saved project set", parameters, StringComparison.Ordinal);
 		Assert.Contains("Content processing", parameters, StringComparison.Ordinal);
+		Assert.Contains('▲', ExtractPanel(parameters, "Exclusions", "File types"));
+		var fileTypes = ExtractPanel(parameters, "File types", null);
+		Assert.DoesNotContain('▲', fileTypes);
+		Assert.DoesNotContain('▼', fileTypes);
 		await ExitAsync(terminal);
 	}
 
@@ -206,7 +210,13 @@ public sealed class TerminalSettingsPanelPtyTests
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> CONTEXT PREVIEW",
+			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> PARAMETERS",
+			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
 		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
@@ -314,6 +324,101 @@ public sealed class TerminalSettingsPanelPtyTests
 		Assert.DoesNotContain('◄', collapsedTree);
 		Assert.DoesNotContain('►', collapsedTree);
 
+		await ExitAsync(terminal);
+	}
+
+	[Fact(Timeout = 120_000)]
+	public async Task KeyboardEnablesEveryTransformationAndExportsTheTransformedProject()
+	{
+		const string secret = "ghp_a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL";
+		const string privateEmail = "ivan.petrov@corp.internal";
+		using var project = CreatePanelProject();
+		project.WriteFile(
+			"src/App.cs",
+			$$"""
+			namespace Sample;
+
+			// remove this comment
+			internal sealed class App
+			{
+				private const string Token = "{{secret}}";
+				private const string Email = "{{privateEmail}}";
+
+				public void Run()
+				{
+					Console.WriteLine(Token);
+				}
+			}
+			""");
+		using var output = new TemporaryDirectory();
+		var destination = Path.Combine(output.Path, "transformed-project");
+		await using var terminal = await StartAsync(project.Path, columns: 100, rows: 30);
+
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> CONTEXT PREVIEW",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> PARAMETERS",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
+		foreach (var expected in new[]
+			{
+				"Hide secrets",
+				"Hide private data",
+				"Compress code",
+				"Strip comments",
+				"Strip blank lines"
+			})
+		{
+			await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+			await WaitForPanelContainsAsync(
+				terminal,
+				"Content processing",
+				"Exclusions",
+				$"[x] {expected}");
+			if (expected != "Strip blank lines")
+				await terminal.SendDownAsync(TestContext.Current.CancellationToken);
+		}
+
+		await terminal.SendAsync("Z", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Choose the physical output kind",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Project copy with hidden data",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Exact destination:",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendCtrlAAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync(destination, TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Export?",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Export completed:",
+			timeout: TimeSpan.FromSeconds(45),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var exported = await File.ReadAllTextAsync(
+			Path.Combine(destination, "src", "App.cs"),
+			TestContext.Current.CancellationToken);
+		Assert.DoesNotContain(secret, exported, StringComparison.Ordinal);
+		Assert.DoesNotContain(privateEmail, exported, StringComparison.Ordinal);
+		Assert.DoesNotContain("remove this comment", exported, StringComparison.Ordinal);
+		Assert.DoesNotContain("\n\n", exported.Replace("\r\n", "\n", StringComparison.Ordinal), StringComparison.Ordinal);
+		Assert.DoesNotContain("Console.WriteLine(Token)", exported, StringComparison.Ordinal);
 		await ExitAsync(terminal);
 	}
 
