@@ -56,7 +56,7 @@ internal sealed class TerminalParameterListView : ListView
 			_lastPressedViewportColumn = position.X;
 			_lastPressedAt = now;
 		}
-		if (position.X is >= 2 and <= 4)
+		if (position.X is >= 0 and <= 2)
 			SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
 		return true;
 	}
