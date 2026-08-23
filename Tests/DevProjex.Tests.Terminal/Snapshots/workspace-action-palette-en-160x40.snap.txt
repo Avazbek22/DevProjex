@@ -4,33 +4,33 @@
 │v [x] <PROJECT>   ││<PROJECT>                                             ││┌┤Content processing [ ] All (5) ──┐│
 │  > [x] src                              ││├── src                                                                      │││[ ] Hide secrets                  ││
 │    [x] global.json                      │││   ├── Feature                                                              │││[ ] Hide private data             ││
-│    [x] readme.md                        │││   │   └── Handler.cs                                                       │││[ ] Compress code                 ││
-│                                 ┌┤Action palette├─────────────────────────────────────────────────────────────────────────┐ ] Strip comments                ││
-│                                 │ Filter actions:                                                                         │ ] Strip blank lines             ││
+│    [x] readme.md                ┌┤Action palette├─────────────────────────────────────────────────────────────────────────┐ ] Compress code                 ││
+│                                 │ Filter actions:                                                                         │ ] Strip comments                ││
+│                                 │                                                                                         │ ] Strip blank lines             ││
 │                                 │                                                                                         │─────────────────────────────────┘│
-│                                 │                                                                                         │Exclusions├────── [x] All (10) ──┐│
-│                                 │ Analyze  [A]                                                                            │x] Use .gitignore                ││
-│                                 │ Search  [/]                    :filter [text]                                           │ ] Tracked Git files only        ││
-│                                 │ Preview mode: Tree  [1/2/3]    :view <tree|content|tree-content>                        │x] Smart ignore                  ││
-│                                 │ Preview format: ASCII  [F]     :format <text|markdown|json|xml>                         │x] Empty folders                 ││
+│                                 │ Analyze  [A]                   :analyze                                                 │Exclusions├────── [x] All (10) ──┐│
+│                                 │ Search  [/]                    :filter [text]                                           │x] Use .gitignore                ││
+│                                 │ Preview mode: Tree  [1/2/3]    :view <tree|content|tree-content>                        │ ] Tracked Git files only        ││
+│                                 │ Preview format: ASCII  [F]     :format <text|markdown|json|xml>                         │x] Smart ignore                  ││
+│                                 │ Copy preview                   :copy [tree|content|tree-content] [text|markdown|json|…  │x] Empty folders                 ││
 │                                 │ Git filtering: Use .gitignor…  :set <option> <on|off>                                   │x] Empty files                   ││
 │                                 │ Exclusions: 8  [X]             :set <option> <on|off>                                   │x] Hidden folders                ││
 │                                 │ File types: All (3)  [T]       :type <.ext> [<.ext>...] <on|off>                        │x] Hidden files                  ││
 │                                 │ Export context  [E]            :export context [format] [path]                          │x] dot folders                   ││
 │                                 │ To Folder…  [Z]                :export folder <path>                                    │x] dot files                     ││
 │                                 │ To ZIP Archive…  [Z]           :export zip <path>                                       │x] Files without extension       ││
-│                                 │ Export settings...  [P]                                                                 │                                 ││
-│                                 │                                                                                         │─────────────────────────────────┘│
-│                                 │ Diagnostics · Analyze                                                                   │File types├─────── [x] All (3) ──┐│
-│                                 │ Analyze the effective project context.                                                  │x] .cs                           ││
-│                                 │                                                                                         │x] .json                         ││
-│                                 │                                                                                         │x] .md                           ││
+│                                 │ Export settings...  [P]        :profile save [name]                                     │                                 ││
+│                                 │ Open Desktop  [G]                                                                       │─────────────────────────────────┘│
+│                                 │                                                                                         │File types├─────── [x] All (3) ──┐│
+│                                 │ Diagnostics · Analyze                                                                   │x] .cs                           ││
+│                                 │ :analyze                                                                                │x] .json                         ││
+│                                 │ Analyze the effective project context.                                                  │x] .md                           ││
+│                                 │                                                                                         │                                 ││
 │                                 │                                                                                         │                                 ││
 │                                 │                                                                                         │                                 ││
 │                                 │                                  ⟦ Back ⟧▖ ⟦► Run ◄⟧▖                                   │                                 ││
 │                                 │                                  ▝▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▘                                   │                                 ││
 │                                 └─────────────────────────────────────────────────────────────────────────────────────────┘                                 ││
-│                                         ││                                                                             │││                                  ││
 │                                         ││                                                                             │││                                  ││
 │                                         ││                                                                             │││                                  ││
 │                                         ││ Files 4  |  Lines 1-8/8                                                     ││└──────────────────────────────────┘│
