@@ -152,6 +152,13 @@ public sealed class TerminalSettingsPanelPtyTests
 		Assert.Contains("[ ] Use .gitignore", exclusionsCleared, StringComparison.Ordinal);
 		Assert.Contains("[ ] .cs", exclusionsCleared, StringComparison.Ordinal);
 
+		await terminal.SendUpAsync(TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await WaitForPanelContainsAsync(terminal, "Exclusions", "File types", "[x] All");
+		var exclusionsRestored = await WaitForStableScreenAsync(terminal, "[x] Use .gitignore");
+		Assert.Contains("[x] Smart ignore", exclusionsRestored, StringComparison.Ordinal);
+		Assert.Contains("[ ] .cs", exclusionsRestored, StringComparison.Ordinal);
+
 		await ExitAsync(terminal);
 	}
 
@@ -186,6 +193,98 @@ public sealed class TerminalSettingsPanelPtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Matches(@"Hide private data \([1-9][0-9]*(?:/[1-9][0-9]*)?\)", privateData);
 
+		await ExitAsync(terminal);
+	}
+
+	[Fact(Timeout = 120_000)]
+	public async Task SelectedRowSurvivesRefreshInEveryMiniPanel()
+	{
+		using var project = CreatePanelProject(includeFindings: true);
+		await using var terminal = await StartAsync(project.Path, columns: 100, rows: 30);
+
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
+		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Hide private data (",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await WaitForPanelContainsAsync(
+			terminal,
+			"Content processing",
+			"Exclusions",
+			"[ ] Hide private data");
+
+		await terminal.SendAsync("X", TestContext.Current.CancellationToken);
+		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
+		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
+		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await WaitForPanelContainsAsync(
+			terminal,
+			"Exclusions",
+			"File types",
+			"[ ] Smart ignore");
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await WaitForPanelContainsAsync(
+			terminal,
+			"Exclusions",
+			"File types",
+			"[x] Smart ignore");
+
+		await terminal.SendAsync("T", TestContext.Current.CancellationToken);
+		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await WaitForPanelContainsAsync(
+			terminal,
+			"File types",
+			null,
+			"[ ] .cs");
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await WaitForPanelContainsAsync(
+			terminal,
+			"File types",
+			null,
+			"[x] .cs");
+
+		await ExitAsync(terminal);
+	}
+
+	[Theory(Timeout = 90_000)]
+	[InlineData("ru", "Обработка содержимого", "Исключения")]
+	[InlineData("uz", "Kontentni qayta ishlash", "Istisnolar")]
+	public async Task LocalizedRedactionLabelsKeepTheirCountersWhenEllipsized(
+		string language,
+		string contentTitle,
+		string exclusionsTitle)
+	{
+		using var project = CreatePanelProject(includeFindings: true);
+		await using var terminal = await StartAsync(
+			project.Path,
+			columns: 160,
+			rows: 40,
+			language: language);
+
+		await terminal.WaitForScreenAsync(
+			contentTitle,
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
+		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+
+		var line = await WaitForSelectedCounterLineAsync(
+			terminal,
+			contentTitle,
+			exclusionsTitle);
+		Assert.Matches(@"\([1-9][0-9]*(?:/[0-9]+)?\)\s*│", line);
 		await ExitAsync(terminal);
 	}
 
@@ -341,11 +440,34 @@ public sealed class TerminalSettingsPanelPtyTests
 			$"Timed out waiting for '{expected}' in panel '{title}'.\n{terminal.CaptureScreen()}");
 	}
 
+	private static async Task<string> WaitForSelectedCounterLineAsync(
+		TerminalPtyHarness terminal,
+		string contentTitle,
+		string exclusionsTitle)
+	{
+		var timeout = Stopwatch.StartNew();
+		while (timeout.Elapsed < TimeSpan.FromSeconds(30))
+		{
+			var panel = ExtractPanel(terminal.CaptureScreen(), contentTitle, exclusionsTitle);
+			var line = panel.Split('\n').FirstOrDefault(candidate =>
+				candidate.Contains("[x]", StringComparison.Ordinal) &&
+				candidate.Contains('(') &&
+				candidate.Contains(')'));
+			if (line is not null)
+				return line;
+			await Task.Delay(75, TestContext.Current.CancellationToken);
+		}
+
+		throw new TimeoutException(
+			$"Timed out waiting for a localized redaction counter.\n{terminal.CaptureScreen()}");
+	}
+
 	private static Task<TerminalPtyHarness> StartAsync(
 		string projectPath,
 		int columns,
 		int rows,
 		string profile = "standard",
+		string language = "en",
 		Action<string>? initializeDataRoot = null) =>
 		TerminalPtyHarness.StartAsync(
 			projectPath,
@@ -358,7 +480,7 @@ public sealed class TerminalSettingsPanelPtyTests
 				"inline",
 				"--no-mouse",
 				"--language",
-				"en"
+				language
 			],
 			columns,
 			rows,

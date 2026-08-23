@@ -127,6 +127,17 @@ public sealed class TerminalParameterRowsBuilderTests
 		Assert.Equal(expected, row.IsSelected);
 	}
 
+	[Fact]
+	public void ExtensionAggregateTreatsUnavailableSelectionsAsOutsideTheAvailableSet()
+	{
+		var row = CreateBuilder().BuildExtensionAggregate(CreatePlan(
+			ProjectSelectionSpec.Standard with { Extensions = [".removed"] },
+			availableExtensions: [],
+			selectedExtensions: []));
+
+		Assert.True(row.IsSelected);
+	}
+
 	[Theory]
 	[InlineData("abcdef", 4, true, "abc…")]
 	[InlineData("界界界", 5, true, "界界…")]

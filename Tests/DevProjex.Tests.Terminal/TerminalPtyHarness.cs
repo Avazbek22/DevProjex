@@ -519,6 +519,29 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		}
 	}
 
+	public Task SendMouseWheelDownAsync(
+		int column,
+		int row,
+		CancellationToken cancellationToken = default) =>
+		SendMouseWheelAsync(column, row, buttonCode: 65, cancellationToken);
+
+	public Task SendMouseWheelUpAsync(
+		int column,
+		int row,
+		CancellationToken cancellationToken = default) =>
+		SendMouseWheelAsync(column, row, buttonCode: 64, cancellationToken);
+
+	private Task SendMouseWheelAsync(
+		int column,
+		int row,
+		int buttonCode,
+		CancellationToken cancellationToken)
+	{
+		var x = column + 1;
+		var y = row + 1;
+		return SendAsync($"\u001b[<{buttonCode};{x};{y}M", cancellationToken);
+	}
+
 	public async Task ResizeAsync(
 		int columns,
 		int rows,

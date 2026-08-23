@@ -315,7 +315,7 @@ internal sealed partial class TerminalWorkspaceSession
 		var panelWidth = _layoutMode == TerminalWorkspaceLayoutMode.Wide
 			? WideControlsWidth
 			: Math.Max(1, _terminalWidth);
-		return Math.Max(4, panelWidth - markerColumns - 2);
+		return Math.Max(4, panelWidth - markerColumns - 4);
 	}
 
 	private void TrackSelectedControl(TerminalControlSection section)
@@ -666,16 +666,10 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (_state is null)
 			return;
-		var mode = enabled
-			? _state.Plan.GitReadiness.Mode == GitFilteringMode.None
-				? _preferredGitMode
-				: _state.Plan.GitReadiness.Mode
-			: GitFilteringMode.None;
-		var exclusions = enabled
-			? ProjectPresentationCatalog.Exclusions
-				.Select(static descriptor => descriptor.RequireId())
-				.ToArray()
-			: [];
+		var (mode, exclusions) = TerminalAggregateSelectionPolicy.ResolveExclusions(
+			enabled,
+			_state.Plan.GitReadiness.Mode,
+			_preferredGitMode);
 		ApplyPathFilters(mode, exclusions);
 	}
 
