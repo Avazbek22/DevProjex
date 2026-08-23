@@ -76,6 +76,28 @@ public sealed class TerminalWorkspaceCommandParserTests
 		Assert.Equal("C:\\exports\\Dev Projex.zip", result.Command!.Destination);
 	}
 
+	[Fact]
+	public void Parse_ProfileSavePreservesAQuotedName()
+	{
+		var result = _parser.Parse("profile save \"My Name\"", Context);
+
+		Assert.True(result.IsSuccess);
+		Assert.Equal("save", result.Command!.Target);
+		Assert.Equal("My Name", result.Command.Text);
+	}
+
+	[Fact]
+	public void CompletionCoversCopyArgumentsAndProfileAction()
+	{
+		var copyView = _parser.GetCompletion("copy tr", 7, Context);
+		var copyFormat = _parser.GetCompletion("copy content ma", 15, Context);
+		var profile = _parser.GetCompletion("profile ", 8, Context);
+
+		Assert.Contains(copyView.Candidates, candidate => candidate.Token == "tree-content");
+		Assert.Contains(copyFormat.Candidates, candidate => candidate.Token == "markdown");
+		Assert.Contains(profile.Candidates, candidate => candidate.Token == "save");
+	}
+
 	[Theory]
 	[MemberData(nameof(InvalidCommands))]
 	internal void Parse_ReturnsStructuredErrors(
@@ -174,6 +196,16 @@ public sealed class TerminalWorkspaceCommandParserTests
 		["export context markdown output.md", TerminalWorkspaceCommandVerb.Export],
 		["export zip output.zip", TerminalWorkspaceCommandVerb.Export],
 		["export folder output", TerminalWorkspaceCommandVerb.Export],
+		["copy", TerminalWorkspaceCommandVerb.Copy],
+		["copy tree-content json", TerminalWorkspaceCommandVerb.Copy],
+		["analyze", TerminalWorkspaceCommandVerb.Analyze],
+		["branch", TerminalWorkspaceCommandVerb.Branch],
+		["branch feature/review", TerminalWorkspaceCommandVerb.Branch],
+		["update", TerminalWorkspaceCommandVerb.Update],
+		["recent", TerminalWorkspaceCommandVerb.Recent],
+		["profile save", TerminalWorkspaceCommandVerb.Profile],
+		["profile save \"My Name\"", TerminalWorkspaceCommandVerb.Profile],
+		["refresh", TerminalWorkspaceCommandVerb.Refresh],
 		["help", TerminalWorkspaceCommandVerb.Help],
 		["help export", TerminalWorkspaceCommandVerb.Help],
 		["quit", TerminalWorkspaceCommandVerb.Quit]
@@ -193,7 +225,16 @@ public sealed class TerminalWorkspaceCommandParserTests
 		["format yaml", TerminalWorkspaceCommandErrorCode.UnknownToken, 7, "xml"],
 		["export archive out.zip", TerminalWorkspaceCommandErrorCode.UnknownToken, 7, "zip"],
 		["export zip", TerminalWorkspaceCommandErrorCode.MissingArgument, 10, (string?)null],
-		["help unknown", TerminalWorkspaceCommandErrorCode.UnknownToken, 5, "view"],
+		["copy contents", TerminalWorkspaceCommandErrorCode.UnknownToken, 5, "content"],
+		["copy content yaml", TerminalWorkspaceCommandErrorCode.UnknownToken, 13, "xml"],
+		["analyze now", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 8, (string?)null],
+		["branch one two", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 11, (string?)null],
+		["update now", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 7, (string?)null],
+		["recent now", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 7, (string?)null],
+		["profile", TerminalWorkspaceCommandErrorCode.MissingArgument, 7, "save"],
+		["profile load", TerminalWorkspaceCommandErrorCode.UnknownToken, 8, "save"],
+		["refresh now", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 8, (string?)null],
+		["help unknown", TerminalWorkspaceCommandErrorCode.UnknownToken, 5, "analyze"],
 		["quit now", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 5, (string?)null],
 		["search \"unfinished", TerminalWorkspaceCommandErrorCode.UnterminatedQuote, 7, (string?)null]
 	];

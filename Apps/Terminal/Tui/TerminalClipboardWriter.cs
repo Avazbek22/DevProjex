@@ -39,10 +39,12 @@ internal sealed class TerminalClipboardWriter(
 		if (!canUseOsc52())
 			return new TerminalClipboardWriteResult(TerminalClipboardWriteStatus.Unavailable);
 
-		var sequence = EncodeOsc52(payload);
-		if (sequence.Length > MaximumOsc52SequenceLength)
+		var byteCount = Encoding.UTF8.GetByteCount(payload);
+		var encodedLength = ((long)byteCount + 2) / 3 * 4 + 8;
+		if (encodedLength > MaximumOsc52SequenceLength)
 			return new TerminalClipboardWriteResult(TerminalClipboardWriteStatus.PayloadTooLarge);
 
+		var sequence = EncodeOsc52(payload);
 		try
 		{
 			return writeRaw(sequence)
