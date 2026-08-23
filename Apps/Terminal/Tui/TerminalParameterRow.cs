@@ -26,9 +26,9 @@ internal sealed record TerminalParameterRow(
 	public override string ToString()
 	{
 		if (Kind == TerminalParameterRowKind.Information)
-			return $"  {Label}";
+			return Label;
 		var marker = IsSelected == true ? "[x]" : "[ ]";
-		return $"  {marker} {Label}";
+		return $"{marker} {Label}";
 	}
 
 	internal static string FitLabel(string value, int width, bool useUnicode)

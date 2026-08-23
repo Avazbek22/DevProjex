@@ -78,6 +78,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 	public int VisibleRowWidth { get; private set; } = 1;
 	public int SelectedFileCount => _selectedFiles.Count;
 	public int SelectedFolderCount => _selectedFolderCount;
+	public bool HasVisibleTreeItems => Plan.EffectiveTree.Children.Count > 0;
 	public string TreeFilterQuery => _treeFilterQuery;
 	public int TreeFilterMatchCount { get; private set; }
 	public bool HasTreeFilter => _treeFilterQuery.Length > 0;

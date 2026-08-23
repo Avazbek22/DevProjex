@@ -157,6 +157,20 @@ Changing checked nodes updates the selection projection without rescanning the
 filesystem. Structural changes use the canonical refresh pipeline. Preview
 refresh is cancelable, debounced, and bounded for large projects.
 
+If the effective filters leave the project without visible descendants, the
+real project root remains in the tree. A dim, non-selectable hint directs the
+user to File Types and Exclusions, and the status metrics report zero files,
+folders, and tokens. Restoring the selection removes the hint and restores the
+same tree rows.
+
+Non-blocking settings, Git-mode, selection-projection, parameter-availability,
+and Preview refreshes use a reserved slot at the right of the workspace heading.
+The slot appears only after 200 ms, is limited to 24 terminal columns, and takes
+priority over the project title when space is constrained. It disappears as
+soon as the work completes. Plain mode uses static text, and the too-small view
+does not render the slot. Cloning, repository updates, branch switching, and
+exports remain blocking operations and retain the modal progress surface.
+
 ## Keys
 
 | Key | Action |
@@ -195,7 +209,9 @@ Within Parameters, Up/Down and `j`/`k` move through the active mini-list. At a
 list boundary focus crosses to the adjacent mini-panel. Enter or Space toggles
 the selected row. Exclusions and File Types each expose an independent vertical
 scrollbar only when their content overflows. Project Tree exposes vertical and
-horizontal scrollbars under the same overflow-only policy.
+horizontal scrollbars under the same overflow-only policy. Parameter rows begin
+at the inner edge of their mini-panel; no padding from the former flat list is
+retained.
 
 When Hide Secrets has findings, `[` and `]` move between highlighted occurrences;
 `Enter` or `Space` toggles keep-as-is for the active occurrence. That decision is

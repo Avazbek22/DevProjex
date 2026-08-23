@@ -85,9 +85,11 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private FrameView? _treeFrame;
 	private FrameView? _previewFrame;
 	private Label? _treePanelHeading;
+	private Label? _treeEmptyHint;
 	private Label? _previewPanelHeading;
 	private Label? _workspaceHeading;
 	private Label? _workspacePath;
+	private TerminalCornerProgressView? _cornerProgress;
 	private Label? _status;
 	private Label? _footer;
 	private TerminalOperationProgressView? _operationProgress;
@@ -1075,6 +1077,20 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_tree.SelectionToggleRequested += (_, _) => ToggleCurrentTreeSelection();
 		_tree.ExpansionToggleRequested += (_, _) => ToggleCurrentTreeExpansion();
 		_tree.HasFocusChanged += (_, _) => UpdateWorkspaceFocus();
+		_treeEmptyHint = new TerminalLiteralLabel
+		{
+			X = 2,
+			Y = _options.Plain ? 2 : 1,
+			Width = Dim.Fill(2),
+			Height = 1,
+			CanFocus = false,
+			SchemeName = TerminalWorkspaceTheme.Secondary
+		};
+		_cornerProgress = new TerminalCornerProgressView(
+			_application,
+			_options.Plain,
+			_environment.SupportsUnicode,
+			UpdateWorkspaceHeaderLayout);
 
 		_preview = new TerminalVirtualizedPreviewView(
 			_environment.SupportsUnicode && !_options.Plain,
@@ -1097,7 +1113,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		};
 		_preview.VisibleRangeChanged += (_, _) => UpdatePreviewRange();
 		_preview.HasFocusChanged += (_, _) => UpdateWorkspaceFocus();
-		_treeFrame.Add(_treePanelHeading, _tree);
+		_treeFrame.Add(_treePanelHeading, _tree, _treeEmptyHint);
 		_previewFrame.Add(_previewPanelHeading, _preview, _previewRange);
 		CreateContextControls();
 		if (state.VisibleRows.Count > 0)
@@ -1124,6 +1140,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_root.Add(
 			_workspaceHeading,
 			_workspacePath,
+			_cornerProgress.View,
 			_treeFrame,
 			_previewFrame,
 			_controlsFrame!,
@@ -1177,6 +1194,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_suppressWorkspaceFocusTracking = previousFocusSuppression;
 		}
 		_tree.UpdateContentMetrics(_state.VisibleRowWidth, _state.VisibleRows.Count);
+		UpdateTreeEmptyHint();
 		View? controlToRestore = aggregateControlWasActive
 			? GetAggregateControlSection(focusedControlSection).List
 			: GetControlSection(focusedControlSection).List;
@@ -1236,9 +1254,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var errorCount = state.Plan.Diagnostics.Count(static diagnostic =>
 			diagnostic.Severity == ContextDiagnosticSeverity.Error);
 		var tokens = ResolveDisplayedTokenCount(state);
+		var folders = state.HasVisibleTreeItems ? state.SelectedFolderCount : 0;
 		if (width < 80)
 		{
-			return $"{state.SelectedFileCount:N0} F  {state.SelectedFolderCount:N0} D  " +
+			return $"{state.SelectedFileCount:N0} F  {folders:N0} D  " +
 				   $"~{tokens:N0} tok  " +
 				   $"{warningCount:N0} W  {errorCount:N0} E";
 		}
@@ -1247,7 +1266,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		return string.Join(
 			separator,
 			$"{L("Terminal.Analysis.Files")} {state.SelectedFileCount:N0}",
-			$"{L("Terminal.Analysis.Folders")} {state.SelectedFolderCount:N0}",
+			$"{L("Terminal.Analysis.Folders")} {folders:N0}",
 			TerminalWorkspace.FormatBytes(state.Plan.IncludedBytes),
 			$"~{tokens:N0} {L("Terminal.Tui.TokensShort")}",
 			$"{L("Terminal.Tui.Warnings")} {warningCount:N0}",
@@ -1256,10 +1275,44 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 
 	private static long ResolveDisplayedTokenCount(TerminalWorkspaceState state)
 	{
+		if (state.Plan.IncludedFiles.Count == 0)
+			return 0;
 		var reported = state.Plan.Analysis.Metrics.Content.Tokens;
 		if (reported > 0 || state.PreviewDocument.CharacterCount == 0)
 			return reported;
 		return Math.Max(1, (state.PreviewDocument.CharacterCount + 3) / 4);
+	}
+
+	private void UpdateWorkspaceHeaderLayout()
+	{
+		if (_workspaceHeading is null || _cornerProgress is null || _state is null)
+			return;
+
+		var reservedWidth = _cornerProgress.ReservedWidth;
+		var headingWidth = Math.Max(1, _terminalWidth - 2 - reservedWidth);
+		_workspaceHeading.Width = headingWidth;
+		var heading = FitEndToWidth(
+			BuildWorkspaceHeading(_state.Plan),
+			headingWidth);
+		_workspaceHeading.Text = heading + new string(
+			' ',
+			Math.Max(0, headingWidth - heading.GetColumns()));
+		_workspaceHeading.SetNeedsDraw();
+	}
+
+	private void UpdateTreeEmptyHint()
+	{
+		if (_treeEmptyHint is null || _tree is null || _state is null)
+			return;
+
+		var visible = !_state.HasVisibleTreeItems && !_state.HasTreeFilter;
+		_treeEmptyHint.Visible = visible;
+		_treeEmptyHint.Text = visible
+			? FitEndToWidth(
+				L("Terminal.Tui.Tree.Empty"),
+				Math.Max(1, _tree.Viewport.Width - 3))
+			: string.Empty;
+		_treeEmptyHint.SetNeedsDraw();
 	}
 
 	private void UpdatePreviewRange()
@@ -1611,14 +1664,13 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				_controlsFrame,
 				_status,
 				_footer);
+			_cornerProgress?.ApplyLayout(tooSmall);
 			_tooSmall.Visible = tooSmall;
 			if (tooSmall)
 				return;
 
 			var contentWidth = Math.Max(1, _terminalWidth - 2);
-			_workspaceHeading.Text = FitEndToWidth(
-				_state is null ? "DevProjex Terminal" : BuildWorkspaceHeading(_state.Plan),
-				contentWidth);
+			UpdateWorkspaceHeaderLayout();
 			_workspacePath.Text = FitPathToWidth(
 				_state is null ? string.Empty : GetProjectDisplaySource(_state.Plan),
 				contentWidth);
@@ -2492,25 +2544,41 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private async Task RunOperationAsync(
 		string operationName,
 		Func<CancellationToken, Task<string?>> operation,
-		Func<string, string>? equivalentCommand = null)
+		Func<string, string>? equivalentCommand = null,
+		bool modalProgress = false)
 	{
 		if (!await _operationGate.WaitAsync(0, _sessionCts.Token).ConfigureAwait(false))
 			return;
 		var operationCts = ReplaceActiveOperation();
+		var cornerProgressId = 0L;
 		try
 		{
-			SetWorkspaceBusy(
-				operationName,
-				L("Terminal.Tui.Progress.Working"));
+			if (modalProgress)
+			{
+				SetWorkspaceBusy(
+					operationName,
+					L("Terminal.Tui.Progress.Working"));
+			}
+			else
+			{
+				cornerProgressId = BeginCornerProgress();
+				await _operationObserver
+					.ObservePhaseAsync(
+						TerminalOperationPhase.BackgroundRefresh,
+						operationCts.Token)
+					.ConfigureAwait(false);
+			}
 			var result = await operation(operationCts.Token).ConfigureAwait(false);
 			if (_stopping)
 				return;
+			await CompleteCornerProgressAsync(cornerProgressId).ConfigureAwait(false);
+			cornerProgressId = 0;
 			await InvokeAsync(() =>
 			{
 				MarkActiveOperationFinished(operationCts);
 				RefreshWorkspace();
-				SchedulePreviewRefresh();
-				SetWorkspaceBusy(null);
+				if (modalProgress)
+					SetWorkspaceBusy(null);
 				if (!string.IsNullOrWhiteSpace(result))
 				{
 					var message = equivalentCommand is null
@@ -2518,16 +2586,20 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 						: $"{result}\n\n{L("Terminal.Tui.EquivalentCommand")}:\n{equivalentCommand(result)}";
 					ShowNotice(operationName, message, TerminalWorkspaceTheme.Success);
 				}
+				SchedulePreviewRefresh();
 				return true;
 			}).ConfigureAwait(false);
 		}
 		catch (OperationCanceledException) when (operationCts.IsCancellationRequested)
 		{
+			await CompleteCornerProgressAsync(cornerProgressId).ConfigureAwait(false);
+			cornerProgressId = 0;
 			if (!_stopping)
 			{
 				await InvokeAsync(() =>
 				{
-					SetWorkspaceBusy(null);
+					if (modalProgress)
+						SetWorkspaceBusy(null);
 					SetOperationStatus(L("Terminal.Tui.OperationCanceled"), TerminalWorkspaceTheme.Warning);
 					return true;
 				}).ConfigureAwait(false);
@@ -2535,23 +2607,31 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		}
 		catch (OutputDestinationConflictException)
 		{
+			await CompleteCornerProgressAsync(cornerProgressId).ConfigureAwait(false);
+			cornerProgressId = 0;
 			await ShowFailureAsync(
 				"DPX-EXPORT-DESTINATION-EXISTS",
 				L("Terminal.Tui.Error.DestinationExists")).ConfigureAwait(false);
 		}
 		catch (ProjectCopyExportException exception)
 		{
+			await CompleteCornerProgressAsync(cornerProgressId).ConfigureAwait(false);
+			cornerProgressId = 0;
 			var error = ProjectCopyTerminalErrorMapper.Map(exception, _services.Localization);
 			await ShowFailureAsync(error.Code, error.Message).ConfigureAwait(false);
 		}
 		catch (ProjectContextValidationException exception)
 		{
+			await CompleteCornerProgressAsync(cornerProgressId).ConfigureAwait(false);
+			cornerProgressId = 0;
 			await ShowFailureAsync(
 				exception.Code,
 				ResolveValidationErrorMessage(exception.Code)).ConfigureAwait(false);
 		}
 		catch (PortableProjectProfileException exception)
 		{
+			await CompleteCornerProgressAsync(cornerProgressId).ConfigureAwait(false);
+			cornerProgressId = 0;
 			var message = exception.Code == "DPX-PROFILE-DESTINATION-EXISTS"
 				? L("Terminal.Error.ProfileDestinationExists")
 				: L("Terminal.Error.ProfileWriteFailed");
@@ -2559,14 +2639,47 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		}
 		catch
 		{
+			await CompleteCornerProgressAsync(cornerProgressId).ConfigureAwait(false);
+			cornerProgressId = 0;
 			await ShowFailureAsync(
 				"DPX-TUI-OPERATION-FAILED",
 				L("Terminal.Tui.Error.OperationFailed")).ConfigureAwait(false);
 		}
 		finally
 		{
+			await CompleteCornerProgressAsync(cornerProgressId).ConfigureAwait(false);
 			ReleaseActiveOperation(operationCts);
 			_operationGate.Release();
+		}
+	}
+
+	private long BeginCornerProgress() =>
+		_screen == TerminalWorkspaceScreen.Workspace && _cornerProgress is not null
+			? _cornerProgress.Begin(L("Terminal.Tui.Progress.Refreshing"))
+			: 0;
+
+	private async Task CompleteCornerProgressAsync(long operationId)
+	{
+		if (operationId == 0 || _stopping || _sessionCts.IsCancellationRequested)
+			return;
+		try
+		{
+			await InvokeAsync(() =>
+			{
+				var wasVisible = _cornerProgress?.IsVisible == true;
+				_cornerProgress?.Complete(operationId);
+				if (wasVisible)
+				{
+					_root.SetNeedsLayout();
+					_root.SetNeedsDraw();
+					_application.LayoutAndDraw();
+				}
+				return true;
+			}).ConfigureAwait(false);
+		}
+		catch (OperationCanceledException) when (_sessionCts.IsCancellationRequested)
+		{
+			// Session shutdown owns disposal of the progress view and its timers.
 		}
 	}
 
@@ -2941,9 +3054,11 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var operationCts = _projectionCts;
 		_projectionTask = Task.Run(async () =>
 		{
+			var cornerProgressId = 0L;
 			try
 			{
 				await Task.Delay(180, operationCts.Token).ConfigureAwait(false);
+				cornerProgressId = await InvokeAsync(BeginCornerProgress).ConfigureAwait(false);
 				var plan = await _controller.BuildReprojectedPlanAsync(
 						sourcePlan,
 						selectedPaths,
@@ -2996,10 +3111,16 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					ReferenceEquals(_state, state) &&
 					ReferenceEquals(_projectionCts, operationCts))
 				{
+					await CompleteCornerProgressAsync(cornerProgressId).ConfigureAwait(false);
+					cornerProgressId = 0;
 					_application.Invoke(() => ShowError(
 						"DPX-TUI-PREVIEW-FAILED",
 						L("Terminal.Tui.Error.PreviewFailed")));
 				}
+			}
+			finally
+			{
+				await CompleteCornerProgressAsync(cornerProgressId).ConfigureAwait(false);
 			}
 		}, CancellationToken.None);
 	}
@@ -3017,6 +3138,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var requestId = Interlocked.Increment(ref _previewRequestId);
 		_previewCts = CancellationTokenSource.CreateLinkedTokenSource(_sessionCts.Token);
 		var operationCts = _previewCts;
+		var cornerProgressId = BeginCornerProgress();
 		_previewTask = Task.Run(async () =>
 		{
 			IPreviewTextDocument? pendingDocument = null;
@@ -3054,6 +3176,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					ReferenceEquals(_state, state) &&
 					ReferenceEquals(_previewCts, operationCts))
 				{
+					await CompleteCornerProgressAsync(cornerProgressId).ConfigureAwait(false);
+					cornerProgressId = 0;
 					_application.Invoke(() => ShowError(
 						"DPX-TUI-PREVIEW-FAILED",
 						L("Terminal.Tui.Error.PreviewFailed")));
@@ -3062,6 +3186,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			finally
 			{
 				pendingDocument?.Dispose();
+				await CompleteCornerProgressAsync(cornerProgressId).ConfigureAwait(false);
 			}
 		}, CancellationToken.None);
 	}
@@ -3702,6 +3827,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 
 	private void ShowError(string code, string message)
 	{
+		var cornerWasVisible = _cornerProgress?.IsVisible == true;
+		_cornerProgress?.Clear();
+		if (cornerWasVisible)
+		{
+			_root.SetNeedsLayout();
+			_root.SetNeedsDraw();
+			_application.LayoutAndDraw();
+		}
 		var title = L("Terminal.Tui.Error");
 		var displayMessage = _options.Plain ? $"{title}\n\n{message}" : message;
 		var contentWidth = displayMessage
@@ -4032,10 +4165,13 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private void ClearRoot()
 	{
 		DismissOperationProgress();
+		_cornerProgress?.Dispose();
+		_cornerProgress = null;
 		CancelTransientStatus();
 		var previousState = _state;
 		_state = null;
 		_tree = null;
+		_treeEmptyHint = null;
 		_preview = null;
 		_previewRange = null;
 		_treeFrame = null;
@@ -4186,6 +4322,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		CancelAndDispose(ref _previewSearchCts);
 		CancelAndDispose(ref _transientStatusCts);
 		DismissOperationProgress();
+		_cornerProgress?.Dispose();
+		_cornerProgress = null;
 		_sessionCts.Dispose();
 		_operationGate.Dispose();
 	}

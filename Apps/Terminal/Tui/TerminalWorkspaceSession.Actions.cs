@@ -284,13 +284,13 @@ internal sealed partial class TerminalWorkspaceSession
 	private string FitControlLabel(string value) =>
 		TerminalParameterRow.FitLabel(
 			value,
-			ResolveControlLabelWidth(markerColumns: 6),
+			ResolveControlLabelWidth(markerColumns: 4),
 			_environment.SupportsUnicode && !_options.Plain);
 
 	private string FitControlInformationLabel(string value) =>
 		TerminalParameterRow.FitLabel(
 			value,
-			ResolveControlLabelWidth(markerColumns: 2),
+			ResolveControlLabelWidth(markerColumns: 0),
 			_environment.SupportsUnicode && !_options.Plain);
 
 	private int ResolveControlLabelWidth(int markerColumns)
@@ -1142,7 +1142,8 @@ internal sealed partial class TerminalWorkspaceSession
 					.RebuildRepositoryAsync(_state, _state.BuildSelection(), token)
 					.ConfigureAwait(false);
 				return L("Terminal.Tui.RepositoryUpdated");
-			});
+			},
+			modalProgress: true);
 	}
 
 	private void SwitchRepositoryBranch()
@@ -1178,7 +1179,8 @@ internal sealed partial class TerminalWorkspaceSession
 					.RebuildRepositoryAsync(_state, _state.BuildSelection(), token)
 					.ConfigureAwait(false);
 				return $"{L("Terminal.Tui.RecentRepositories.Branch")}: {selected}";
-			});
+			},
+			modalProgress: true);
 	}
 
 	private void FocusPane(TerminalWorkspacePane pane)
