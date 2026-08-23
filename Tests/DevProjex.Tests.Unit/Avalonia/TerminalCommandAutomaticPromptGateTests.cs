@@ -28,6 +28,8 @@ public sealed class TerminalCommandAutomaticPromptGateTests
 	[InlineData("DevProjex.v.win-x64.exe")]
 	[InlineData("DevProjex.v4.9.5.freebsd-x64")]
 	[InlineData("DevProjex.v4.9.5.win-x64.exe.bak")]
+	[InlineData("DevProjex.v4.9.5.linux-x64.tar.gz")]
+	[InlineData("DevProjex.v4.9.5.osx-arm64.app.tar.gz")]
 	[InlineData("dotnet.exe")]
 	public void ShouldShowAutomaticTerminalCommandPrompt_RejectsNonReleaseExecutableNames(string fileName)
 	{
@@ -40,7 +42,7 @@ public sealed class TerminalCommandAutomaticPromptGateTests
 	}
 
 	[Fact]
-	public void ReleaseScript_EveryPublishedPortableArtifactPassesExecutableIdentityGate()
+	public void ReleaseScript_OnlyDirectExecutableArtifactsPassExecutableIdentityGate()
 	{
 		var scriptPath = Path.Combine(FindRepositoryRoot(), "Scripts", "release-all.ps1");
 		var script = File.ReadAllText(scriptPath);
@@ -52,9 +54,10 @@ public sealed class TerminalCommandAutomaticPromptGateTests
 		foreach (System.Text.RegularExpressions.Match match in matches)
 		{
 			var artifactName = match.Groups["name"].Value.Replace("$version", "4.9.5", StringComparison.Ordinal);
-			Assert.True(
-				CommandLineExecutableAliases.IsPublishedPortableFileName(artifactName),
-				$"Release artifact is not recognized by the automatic terminal setup gate: {artifactName}");
+			var isDirectExecutable = artifactName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase);
+			Assert.Equal(
+				isDirectExecutable,
+				CommandLineExecutableAliases.IsPublishedPortableFileName(artifactName));
 		}
 	}
 
