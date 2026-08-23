@@ -248,6 +248,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ---
 
-## License (GPL-3.0) 📄
+## License (Apache-2.0) 📄
 
-DevProjex is licensed under the **GNU General Public License v3.0** — this keeps the project, and any tool built on top of it, open source. Copyright (c) 2025–present Avazbek Olimov. See [LICENSE](LICENSE) for details.
+DevProjex is licensed under the **Apache License 2.0** — free to use, modify, and distribute, with an explicit patent grant. Copyright (c) 2025–present Avazbek Olimov. See [LICENSE](LICENSE) for details.

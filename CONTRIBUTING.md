@@ -188,4 +188,4 @@ or generated snapshots were added unintentionally.
 ## Contribution license
 
 By submitting a contribution, you agree that it is licensed under the
-project's [GNU General Public License v3.0](LICENSE).
+project's [Apache License 2.0](LICENSE).
