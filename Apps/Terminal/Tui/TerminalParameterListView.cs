@@ -21,6 +21,15 @@ internal sealed class TerminalParameterListView : ListView
 
 	public event EventHandler? SelectionToggleRequested;
 	public event EventHandler? InteractionStarted;
+	public event EventHandler? CommandLineRequested;
+
+	protected override bool OnKeyDown(Key key)
+	{
+		if (!TerminalWorkspaceCommandKey.IsActivation(key))
+			return base.OnKeyDown(key);
+		CommandLineRequested?.Invoke(this, EventArgs.Empty);
+		return true;
+	}
 
 	protected override bool OnMouseEvent(Mouse mouse)
 	{

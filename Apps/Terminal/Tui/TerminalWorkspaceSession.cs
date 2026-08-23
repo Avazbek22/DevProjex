@@ -30,6 +30,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private readonly TerminalWorkspaceController _controller;
 	private readonly TerminalParameterRowsBuilder _parameterRowsBuilder;
 	private readonly TerminalWorkspacePresentation _presentation;
+	private readonly TerminalWorkspaceCommandParser _commandParser = new();
+	private readonly TerminalCommandHistory _commandHistory;
 	private readonly ITerminalOperationObserver _operationObserver;
 	private readonly Action _prepareForShutdown;
 	private readonly CancellationTokenSource _sessionCts;
@@ -48,6 +50,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private CancellationTokenSource? _settingsRefreshCts;
 	private CancellationTokenSource? _previewSearchCts;
 	private CancellationTokenSource? _transientStatusCts;
+	private CancellationTokenSource? _commandResultCts;
 	private Task? _openTask;
 	private Task? _activeOperationTask;
 	private Task? _projectionTask;
@@ -55,6 +58,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private Task? _settingsRefreshTask;
 	private Task? _previewSearchTask;
 	private Task? _transientStatusTask;
+	private Task? _commandResultTask;
+	private Task? _commandHistorySaveTask;
 	private long _projectionRequestId;
 	private long _previewRequestId;
 	private long _settingsRefreshRequestId;
@@ -95,8 +100,11 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private TerminalCornerProgressView? _cornerProgress;
 	private Label? _status;
 	private Label? _footer;
+	private TerminalWorkspaceCommandLineView? _commandLine;
+	private TerminalWorkspaceCommand? _activeCommandResult;
 	private TerminalOperationProgressView? _operationProgress;
 	private TerminalWorkspacePane _activePane = TerminalWorkspacePane.Tree;
+	private TerminalWorkspacePane _commandReturnPane = TerminalWorkspacePane.Tree;
 	private TerminalWorkspacePane? _activePaneBeforeBusy;
 	private TerminalControlSection? _activeControlSectionBeforeBusy;
 	private TerminalControlSection? _aggregateControlSectionBeforeBusy;
@@ -139,6 +147,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			options.ColorMode,
 			options.Plain,
 			environment);
+		_commandHistory = new TerminalCommandHistory(
+			services.TerminalSettingsStore.LoadCommandHistory());
 		_sessionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 		var initialScreen = _application.Driver?.Screen ?? _application.Screen;
 		_terminalWidth = Math.Max(_environment.Width, initialScreen.Width);
@@ -242,7 +252,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				_previewTask,
 				_settingsRefreshTask,
 				_previewSearchTask,
-				_transientStatusTask
+				_transientStatusTask,
+				_commandResultTask,
+				_commandHistorySaveTask
 			}
 			.Where(static task => task is not null)
 			.Cast<Task>()
@@ -1081,6 +1093,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_tree.Accepted += (_, _) => ToggleCurrentTreeExpansion();
 		_tree.SelectionToggleRequested += (_, _) => ToggleCurrentTreeSelection();
 		_tree.ExpansionToggleRequested += (_, _) => ToggleCurrentTreeExpansion();
+		_tree.CommandLineRequested += (_, _) => OpenCommandLine();
 		_tree.HasFocusChanged += (_, _) => UpdateWorkspaceFocus();
 		_treeEmptyHint = new TerminalLiteralLabel
 		{
@@ -1108,6 +1121,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		};
 		_preview.SetDocument(state.PreviewDocument, preserveViewport: false);
 		_preview.RedactionToggleRequested += OnPreviewRedactionToggleRequested;
+		_preview.CommandLineRequested += (_, _) => OpenCommandLine();
 		_previewRange = new TerminalLiteralLabel
 		{
 			X = 1,
@@ -1141,6 +1155,23 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			Width = Dim.Fill(1),
 			SchemeName = TerminalWorkspaceTheme.Secondary
 		};
+		_commandLine = new TerminalWorkspaceCommandLineView(
+			_application,
+			(text, cursor) => _commandParser.GetCompletion(
+				text,
+				cursor,
+				BuildCommandParseContext()),
+			L,
+			_commandHistory,
+			_options.Plain,
+			_environment.SupportsUnicode)
+		{
+			X = 1,
+			Y = Pos.AnchorEnd(1),
+			Width = Dim.Fill(1)
+		};
+		_commandLine.Submitted += (_, text) => SubmitCommandLine(text);
+		_commandLine.Canceled += (_, _) => CancelCommandLine();
 		_tooSmall = CreateTooSmallLabel();
 		_root.Add(
 			_workspaceHeading,
@@ -1151,6 +1182,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_controlsFrame!,
 			_status,
 			_footer,
+			_commandLine,
 			_tooSmall);
 
 		_tree.SetFocus();
@@ -1444,7 +1476,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 
 	private void UpdateFooter()
 	{
-		if (_footer is null)
+		if (_footer is null || _commandLine?.Visible == true)
 			return;
 		var wide = _application.Screen.Width >= 110;
 		_footer.Text = _activePane switch
@@ -1647,7 +1679,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		if (_treeFrame is null || _previewFrame is null || _controlsFrame is null ||
 			_tooSmall is null ||
 			_workspaceHeading is null || _workspacePath is null ||
-			_status is null || _footer is null)
+			_status is null || _footer is null || _commandLine is null)
 		{
 			return;
 		}
@@ -1655,6 +1687,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var requestedPane = _activePane;
 		var requestedControlSection = _activeControlSection;
 		var requestedAggregateControlSection = _activeAggregateControlSection;
+		var commandWasEditing = _commandLine.IsEditing;
 		var tooSmall = _layoutMode == TerminalWorkspaceLayoutMode.TooSmall;
 		var previousFocusSuppression = _suppressWorkspaceFocusTracking;
 		_suppressWorkspaceFocusTracking = true;
@@ -1667,8 +1700,17 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				_treeFrame,
 				_previewFrame,
 				_controlsFrame,
-				_status,
-				_footer);
+				_status);
+			_footer.Visible = !tooSmall && !_commandLine.Visible;
+			if (tooSmall)
+			{
+				_commandLine.Close();
+				CancelCommandResult();
+			}
+			else
+			{
+				_commandLine.RefreshLayout();
+			}
 			_cornerProgress?.ApplyLayout(tooSmall);
 			_tooSmall.Visible = tooSmall;
 			if (tooSmall)
@@ -1723,7 +1765,11 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_activePane = requestedPane;
 			_activeControlSection = requestedControlSection;
 			_activeAggregateControlSection = requestedAggregateControlSection;
-			switch (requestedPane)
+			if (commandWasEditing)
+			{
+				_commandLine.RestoreInputFocus();
+			}
+			else switch (requestedPane)
 			{
 				case TerminalWorkspacePane.Tree:
 					_tree?.SetFocus();
@@ -1817,6 +1863,16 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	{
 		if (!ReferenceEquals(_application.TopRunnableView, _root))
 			return;
+		if (_commandLine?.IsEditing == true)
+			return;
+		if (_screen == TerminalWorkspaceScreen.Workspace &&
+			_layoutMode != TerminalWorkspaceLayoutMode.TooSmall &&
+			TerminalWorkspaceCommandKey.IsActivation(key))
+		{
+			key.Handled = true;
+			OpenCommandLine();
+			return;
+		}
 
 		if (key == Key.C.WithCtrl)
 		{
@@ -2180,7 +2236,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		SchedulePreviewSearch(query, showNoResults: true);
 	}
 
-	private void SchedulePreviewSearch(string query, bool showNoResults)
+	private void SchedulePreviewSearch(
+		string query,
+		bool showNoResults,
+		bool originatedFromCommandLine = false)
 	{
 		if (_preview is null || _state is null)
 			return;
@@ -2270,13 +2329,22 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					ReferenceEquals(_previewSearchCts, operationCts) &&
 					Volatile.Read(ref _previewSearchRequestId) == requestId)
 				{
-					_application.Invoke(() =>
+					if (originatedFromCommandLine)
 					{
-						_previewSearchInProgress = false;
-						ShowError(
+						await ShowCommandFailureAsync(
 							"DPX-TUI-PREVIEW-SEARCH-FAILED",
-							L("Terminal.Tui.Error.PreviewFailed"));
-					});
+							L("Terminal.Tui.Error.PreviewFailed")).ConfigureAwait(false);
+					}
+					else
+					{
+						_application.Invoke(() =>
+						{
+							_previewSearchInProgress = false;
+							ShowError(
+								"DPX-TUI-PREVIEW-SEARCH-FAILED",
+								L("Terminal.Tui.Error.PreviewFailed"));
+						});
+					}
 				}
 			}
 		}, CancellationToken.None);
@@ -2378,22 +2446,26 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		return _state.VisibleRows[selected].Node.FullPath;
 	}
 
-	private void ExportContext()
+	private void ExportContext(
+		ProjectContextDocumentFormat? requestedFormat = null,
+		string? requestedDestination = null,
+		bool originatedFromCommandLine = false)
 	{
 		if (_state is null)
 			return;
+		var selectedFormat = requestedFormat ?? _format;
 		var defaultPath = BuildDefaultExportPath(
 			_state.Plan.SourceRoot,
 			Directory.GetCurrentDirectory(),
 			$"{GetProjectDisplayName(_state.Plan)}-context" +
-			(_format switch
+			(selectedFormat switch
 			{
 				ProjectContextDocumentFormat.Json => ".json",
 				ProjectContextDocumentFormat.Xml => ".xml",
 				ProjectContextDocumentFormat.Text => ".txt",
 				_ => ".md"
 			}));
-		var destination = Prompt(
+		var destination = requestedDestination ?? Prompt(
 			L("Terminal.Tui.ExportContext"),
 			L("Terminal.Tui.Destination"),
 			defaultPath);
@@ -2405,14 +2477,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			token => _controller.PrepareContextExportAsync(
 				_state,
 				_previewView,
-				_format,
+				selectedFormat,
 				destination,
 				overwrite: false,
 				token),
 			async (_, token) => await _controller.ExportContextAsync(
 				_state,
 				_previewView,
-				_format,
+				selectedFormat,
 				destination,
 				overwrite: false,
 				token,
@@ -2421,12 +2493,16 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				TerminalWorkspaceController.BuildEquivalentContextCommand(
 					_state,
 					_previewView,
-					_format,
+					selectedFormat,
 					exactDestination,
-					dryRun));
+					dryRun),
+			originatedFromCommandLine);
 	}
 
-	private void ExportProject(ProjectCopyExportFormat? requestedFormat = null)
+	private void ExportProject(
+		ProjectCopyExportFormat? requestedFormat = null,
+		string? requestedDestination = null,
+		bool originatedFromCommandLine = false)
 	{
 		if (_state is null)
 			return;
@@ -2448,7 +2524,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			selectedKind == ProjectCopyExportFormat.Zip
 				? $"{GetProjectDisplayName(_state.Plan)}.zip"
 				: $"{GetProjectDisplayName(_state.Plan)}-export");
-		var destination = Prompt(
+		var destination = requestedDestination ?? Prompt(
 			L("Terminal.Tui.ExportProject"),
 			L("Terminal.Tui.ExactDestination"),
 			defaultPath);
@@ -2471,8 +2547,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			(exactDestination, dryRun) => TerminalWorkspaceController.BuildEquivalentProjectCommand(
 				_state,
 				selectedKind,
-				exactDestination,
-				dryRun));
+					exactDestination,
+					dryRun),
+			originatedFromCommandLine);
 	}
 
 	internal static string BuildDefaultExportPath(
@@ -2698,7 +2775,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		string operationName,
 		Func<CancellationToken, Task<TerminalExportSummary>> prepare,
 		Func<IProgress<ProjectCopyExportProgress>, CancellationToken, Task<string>> export,
-		Func<string, bool, string> equivalentCommand)
+		Func<string, bool, string> equivalentCommand,
+		bool originatedFromCommandLine = false)
 	{
 		if (!await _operationGate.WaitAsync(0, _sessionCts.Token).ConfigureAwait(false))
 			return;
@@ -2735,11 +2813,20 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				await InvokeAsync(() =>
 				{
 					RefreshWorkspace();
-					ShowNotice(
-						operationName,
-						$"{L("Terminal.Tui.DryRunReady")}\n\n" +
-						$"{L("Terminal.Tui.EquivalentCommand")}:\n{command}",
-						TerminalWorkspaceTheme.Success);
+					if (originatedFromCommandLine)
+					{
+						ShowCommandResult(
+							$"{L("Terminal.Tui.DryRunReady")} {command}",
+							success: true);
+					}
+					else
+					{
+						ShowNotice(
+							operationName,
+							$"{L("Terminal.Tui.DryRunReady")}\n\n" +
+							$"{L("Terminal.Tui.EquivalentCommand")}:\n{command}",
+							TerminalWorkspaceTheme.Success);
+					}
 					return true;
 				}).ConfigureAwait(false);
 				return;
@@ -2778,10 +2865,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				SetWorkspaceBusy(null);
 				RefreshWorkspace();
 				SchedulePreviewRefresh();
-				ShowTransientStatus(string.Format(
+				var completed = string.Format(
 					CultureInfo.CurrentCulture,
 					L("Terminal.Tui.ExportCompletedStatus"),
-					result));
+					result);
+				if (originatedFromCommandLine)
+					ShowCommandResult(completed, success: true);
+				else
+					ShowTransientStatus(completed);
 				return true;
 			}).ConfigureAwait(false);
 		}
@@ -2799,26 +2890,32 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		}
 		catch (OutputDestinationConflictException)
 		{
-			await ShowFailureAsync(
+			await ShowExportFailureAsync(
 				"DPX-EXPORT-DESTINATION-EXISTS",
-				L("Terminal.Tui.Error.DestinationExists")).ConfigureAwait(false);
+				L("Terminal.Tui.Error.DestinationExists"),
+				originatedFromCommandLine).ConfigureAwait(false);
 		}
 		catch (ProjectCopyExportException exception)
 		{
 			var error = ProjectCopyTerminalErrorMapper.Map(exception, _services.Localization);
-			await ShowFailureAsync(error.Code, error.Message).ConfigureAwait(false);
+			await ShowExportFailureAsync(
+				error.Code,
+				error.Message,
+				originatedFromCommandLine).ConfigureAwait(false);
 		}
 		catch (ProjectContextValidationException exception)
 		{
-			await ShowFailureAsync(
+			await ShowExportFailureAsync(
 				exception.Code,
-				ResolveValidationErrorMessage(exception.Code)).ConfigureAwait(false);
+				ResolveValidationErrorMessage(exception.Code),
+				originatedFromCommandLine).ConfigureAwait(false);
 		}
 		catch
 		{
-			await ShowFailureAsync(
+			await ShowExportFailureAsync(
 				"DPX-TUI-OPERATION-FAILED",
-				L("Terminal.Tui.Error.OperationFailed")).ConfigureAwait(false);
+				L("Terminal.Tui.Error.OperationFailed"),
+				originatedFromCommandLine).ConfigureAwait(false);
 		}
 		finally
 		{
@@ -3051,6 +3148,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_application.Invoke(() => ShowWelcomeStatus(text, schemeName));
 	}
 
+	private Task ShowExportFailureAsync(
+		string code,
+		string message,
+		bool originatedFromCommandLine) =>
+		originatedFromCommandLine
+			? ShowCommandFailureAsync(code, message)
+			: ShowFailureAsync(code, message);
+
 	private void ScheduleSettingsRefresh()
 	{
 		if (_state is null || _settingsDraftSelection is null)
@@ -3062,6 +3167,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var extensionStates = new Dictionary<string, bool>(
 			_settingsDraftExtensionStates ?? state.ExtensionOptionStates,
 			StringComparer.OrdinalIgnoreCase);
+		var originatedFromCommandLine = _settingsDraftOriginatedFromCommandLine;
 		CancelAndDispose(ref _settingsRefreshCts);
 		var requestId = Interlocked.Increment(ref _settingsRefreshRequestId);
 		_settingsRefreshCts = CancellationTokenSource.CreateLinkedTokenSource(_sessionCts.Token);
@@ -3073,6 +3179,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				baseline,
 				selection,
 				extensionStates,
+				originatedFromCommandLine,
 				requestId,
 				operationCts,
 				cornerProgressId),
@@ -3084,6 +3191,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		ProjectContextPlan baseline,
 		ProjectSelectionSpec selection,
 		IReadOnlyDictionary<string, bool> extensionStates,
+		bool originatedFromCommandLine,
 		long requestId,
 		CancellationTokenSource operationCts,
 		long cornerProgressId)
@@ -3124,6 +3232,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				_controller.ApplySettingsPlan(state, result);
 				ClearSettingsDraft();
 				RefreshWorkspace();
+				if (originatedFromCommandLine)
+					RefreshAppliedCommandResult();
 				SchedulePreviewRefresh();
 				return true;
 			}).ConfigureAwait(false);
@@ -3145,9 +3255,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			if (IsCurrentSettingsRefresh(state, operationCts, requestId))
 			{
 				await RollbackFailedSettingsRefreshAsync().ConfigureAwait(false);
-				await ShowFailureAsync(
+				await ShowSettingsFailureAsync(
 					exception.Code,
-					ResolveValidationErrorMessage(exception.Code)).ConfigureAwait(false);
+					ResolveValidationErrorMessage(exception.Code),
+					originatedFromCommandLine).ConfigureAwait(false);
 			}
 		}
 		catch
@@ -3155,9 +3266,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			if (IsCurrentSettingsRefresh(state, operationCts, requestId))
 			{
 				await RollbackFailedSettingsRefreshAsync().ConfigureAwait(false);
-				await ShowFailureAsync(
+				await ShowSettingsFailureAsync(
 					"DPX-TUI-OPERATION-FAILED",
-					L("Terminal.Tui.Error.OperationFailed")).ConfigureAwait(false);
+					L("Terminal.Tui.Error.OperationFailed"),
+					originatedFromCommandLine).ConfigureAwait(false);
 			}
 		}
 		finally
@@ -3168,6 +3280,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			operationCts.Dispose();
 		}
 	}
+
+	private Task ShowSettingsFailureAsync(
+		string code,
+		string message,
+		bool originatedFromCommandLine) =>
+		originatedFromCommandLine
+			? ShowCommandFailureAsync(code, message)
+			: ShowFailureAsync(code, message);
 
 	private async Task RollbackFailedSettingsRefreshAsync()
 	{
@@ -3312,6 +3432,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					}
 
 					RefreshWorkspace();
+					RefreshAppliedCommandResult();
 					return true;
 				}).ConfigureAwait(false);
 				if (applied)
@@ -4322,12 +4443,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_cornerProgress?.Dispose();
 		_cornerProgress = null;
 		CancelTransientStatus();
+		CancelCommandResult();
 		var previousState = _state;
 		_state = null;
 		_tree = null;
 		_treeEmptyHint = null;
 		_preview = null;
 		_previewRange = null;
+		_commandLine = null;
 		_treeFrame = null;
 		_previewFrame = null;
 		_contentControls = null;
@@ -4478,6 +4601,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		CancelAndDispose(ref _settingsRefreshCts);
 		CancelAndDispose(ref _previewSearchCts);
 		CancelAndDispose(ref _transientStatusCts);
+		CancelAndDispose(ref _commandResultCts);
 		DismissOperationProgress();
 		_cornerProgress?.Dispose();
 		_cornerProgress = null;

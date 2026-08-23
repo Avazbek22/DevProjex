@@ -1,3 +1,5 @@
+using Terminal.Gui.Input;
+
 namespace DevProjex.Terminal.Tui;
 
 internal enum TerminalWorkspaceCommandVerb
@@ -167,4 +169,13 @@ internal static class TerminalWorkspaceCommandCatalog
 			$"Terminal.Tui.Command.{verb}.Title",
 			$"Terminal.Tui.Command.{verb}.Description",
 			$"Terminal.Tui.Command.{verb}.Schema");
+}
+
+internal static class TerminalWorkspaceCommandKey
+{
+	public static bool IsActivation(Key key) =>
+		string.Equals(key.AsGrapheme, ":", StringComparison.Ordinal) ||
+		key.AsRune.Value == ':' ||
+		key.NoShift.AsRune.Value == ':' ||
+		(key.IsShift && key.NoShift.AsRune.Value == ';');
 }
