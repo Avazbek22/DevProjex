@@ -8,6 +8,7 @@ internal sealed class TerminalWorkspaceCommandParser
 	private static readonly string[] ToggleValues = ["on", "off"];
 	private static readonly string[] AggregateTargets = ["types", "exclusions", "content"];
 	private static readonly string[] ExportTargets = ["context", "zip", "folder"];
+	private static readonly string[] ProfileTargets = ["save"];
 
 	private static readonly IReadOnlyList<string> SetTargets =
 	[
@@ -54,7 +55,14 @@ internal sealed class TerminalWorkspaceCommandParser
 			TerminalWorkspaceCommandVerb.Search or TerminalWorkspaceCommandVerb.Filter =>
 				ParseText(definition, tokenization.Tokens),
 			TerminalWorkspaceCommandVerb.Export => ParseExport(definition, tokenization.Tokens),
+			TerminalWorkspaceCommandVerb.Copy => ParseCopy(definition, tokenization.Tokens),
+			TerminalWorkspaceCommandVerb.Branch => ParseOptionalText(definition, tokenization.Tokens),
+			TerminalWorkspaceCommandVerb.Profile => ParseProfile(definition, tokenization.Tokens),
 			TerminalWorkspaceCommandVerb.Help => ParseHelp(definition, tokenization.Tokens),
+			TerminalWorkspaceCommandVerb.Analyze or
+			TerminalWorkspaceCommandVerb.Update or
+			TerminalWorkspaceCommandVerb.Recent or
+			TerminalWorkspaceCommandVerb.Refresh or
 			TerminalWorkspaceCommandVerb.Quit => ParseWithoutArguments(definition, tokenization.Tokens),
 			_ => throw new ArgumentOutOfRangeException()
 		};
@@ -274,6 +282,61 @@ internal sealed class TerminalWorkspaceCommandParser
 			Destination: destination));
 	}
 
+	private static TerminalWorkspaceCommandParseResult ParseCopy(
+		TerminalWorkspaceCommandDefinition definition,
+		IReadOnlyList<ParsedToken> tokens)
+	{
+		if (tokens.Count > 3)
+			return Unexpected(tokens[3]);
+
+		ProjectContextView? view = null;
+		ProjectContextDocumentFormat? format = null;
+		if (tokens.Count >= 2)
+		{
+			if (!CliChoiceSets.ContextView.TryParse(tokens[1].Value, out var parsedView))
+				return Unknown(tokens[1], CliChoiceSets.ContextView.Tokens);
+			view = parsedView;
+		}
+		if (tokens.Count == 3)
+		{
+			if (!CliChoiceSets.ContextDocumentFormat.TryParse(tokens[2].Value, out var parsedFormat))
+				return Unknown(tokens[2], CliChoiceSets.ContextDocumentFormat.Tokens);
+			format = parsedFormat;
+		}
+
+		return TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
+			definition,
+			View: view,
+			Format: format));
+	}
+
+	private static TerminalWorkspaceCommandParseResult ParseOptionalText(
+		TerminalWorkspaceCommandDefinition definition,
+		IReadOnlyList<ParsedToken> tokens)
+	{
+		if (tokens.Count > 2)
+			return Unexpected(tokens[2]);
+		return TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
+			definition,
+			Text: tokens.Count == 2 ? tokens[1].Value : null));
+	}
+
+	private static TerminalWorkspaceCommandParseResult ParseProfile(
+		TerminalWorkspaceCommandDefinition definition,
+		IReadOnlyList<ParsedToken> tokens)
+	{
+		if (tokens.Count < 2)
+			return Missing(tokens, ProfileTargets);
+		if (!Contains(ProfileTargets, tokens[1].Value))
+			return Unknown(tokens[1], ProfileTargets);
+		if (tokens.Count > 3)
+			return Unexpected(tokens[3]);
+		return TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
+			definition,
+			Target: "save",
+			Text: tokens.Count == 3 ? tokens[2].Value : null));
+	}
+
 	private static TerminalWorkspaceCommandParseResult ParseHelp(
 		TerminalWorkspaceCommandDefinition definition,
 		IReadOnlyList<ParsedToken> tokens)
@@ -314,6 +377,9 @@ internal sealed class TerminalWorkspaceCommandParser
 			TerminalWorkspaceCommandVerb.Export when argumentIndex == 1 &&
 				tokens.Count > 1 && string.Equals(tokens[1].Value, "context", StringComparison.OrdinalIgnoreCase) =>
 				CliChoiceSets.ContextDocumentFormat.Tokens,
+			TerminalWorkspaceCommandVerb.Copy when argumentIndex == 0 => CliChoiceSets.ContextView.Tokens,
+			TerminalWorkspaceCommandVerb.Copy when argumentIndex == 1 => CliChoiceSets.ContextDocumentFormat.Tokens,
+			TerminalWorkspaceCommandVerb.Profile when argumentIndex == 0 => ProfileTargets,
 			TerminalWorkspaceCommandVerb.Help when argumentIndex == 0 => TerminalWorkspaceCommandCatalog.VerbTokens,
 			_ => []
 		};

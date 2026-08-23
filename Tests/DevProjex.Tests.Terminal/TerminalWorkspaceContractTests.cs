@@ -824,6 +824,73 @@ public sealed class TerminalWorkspaceContractTests
 		Assert.False(File.Exists(destination));
 	}
 
+	[Theory]
+	[InlineData(ProjectContextView.Tree, ProjectContextDocumentFormat.Text)]
+	[InlineData(ProjectContextView.Content, ProjectContextDocumentFormat.Json)]
+	public async Task CopyPayloadUsesTheExactContextPipelineForDefaultsAndOverrides(
+		ProjectContextView view,
+		ProjectContextDocumentFormat format)
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("src/app.cs", "class App {}");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		var payload = await controller.BuildCopyPayloadAsync(
+			state,
+			view,
+			format,
+			TestContext.Current.CancellationToken);
+		var expected = await CompleteContextDocumentTestHelper.BuildAsync(
+			services.ContextDocumentService,
+			state.Plan,
+			view,
+			format,
+			TestContext.Current.CancellationToken);
+
+		using var expectedDocument = new InMemoryPreviewTextDocument(expected);
+		Assert.Equal(
+			PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(expectedDocument),
+			payload);
+	}
+
+	[Fact]
+	public async Task RefreshSelectsANewFileAndPreservesAnExplicitlyClearedFile()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("src/kept.cs", "class Kept {}");
+		workspace.WriteFile("src/cleared.cs", "class Cleared {}");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+		var sourceIndex = state.VisibleRows
+			.Select((row, index) => (row, index))
+			.Single(item => Path.GetFileName(item.row.Node.FullPath) == "src")
+			.index;
+		state.Expand(sourceIndex);
+		var clearedIndex = state.VisibleRows
+			.Select((row, index) => (row, index))
+			.Single(item => Path.GetFileName(item.row.Node.FullPath) == "cleared.cs")
+			.index;
+		state.ToggleSelection(clearedIndex);
+		workspace.WriteFile("src/new.cs", "class New {}");
+
+		await controller.RefreshProjectAsync(state, TestContext.Current.CancellationToken);
+
+		Assert.Contains(state.Plan.IncludedFiles, path => Path.GetFileName(path) == "kept.cs");
+		Assert.Contains(state.Plan.IncludedFiles, path => Path.GetFileName(path) == "new.cs");
+		Assert.DoesNotContain(state.Plan.IncludedFiles, path => Path.GetFileName(path) == "cleared.cs");
+	}
+
 	[Fact]
 	public void ExportSummaryDistinguishesAnEmptySelectionFromUnavailableValues()
 	{

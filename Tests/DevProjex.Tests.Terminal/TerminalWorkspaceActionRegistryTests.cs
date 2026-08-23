@@ -52,6 +52,28 @@ public sealed class TerminalWorkspaceActionRegistryTests
 		Assert.False(invoked);
 	}
 
+	[Theory]
+	[InlineData(TerminalWorkspaceCommandVerb.Branch)]
+	[InlineData(TerminalWorkspaceCommandVerb.Update)]
+	internal void GitCloneOnlyActionReturnsItsContextSpecificUnavailableReason(
+		TerminalWorkspaceCommandVerb verb)
+	{
+		var target = TerminalWorkspaceCommandCatalog.Get(verb);
+		var registry = new TerminalWorkspaceActionRegistry(
+			[],
+			TerminalWorkspaceCommandCatalog.All.Select(definition =>
+				new TerminalWorkspaceCommandAction(
+					definition,
+					definition == target ? static () => false : static () => true,
+					static _ => TerminalWorkspaceCommandExecutionResult.Success(),
+					definition == target ? static () => "Git clone required" : null)));
+
+		var result = registry.Execute(new TerminalWorkspaceCommand(target));
+
+		Assert.Equal(TerminalWorkspaceCommandExecutionStatus.Unavailable, result.Status);
+		Assert.Equal("Git clone required", result.Message);
+	}
+
 	[Fact]
 	public void RegistryRejectsAMissingCommandHandler()
 	{

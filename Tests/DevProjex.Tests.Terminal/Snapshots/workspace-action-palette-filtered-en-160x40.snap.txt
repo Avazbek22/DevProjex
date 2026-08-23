@@ -4,12 +4,12 @@
 │v [x] <PROJECT>   ││<PROJECT>                                             ││┌┤Content processing [ ] All (5) ──┐│
 │  > [x] src                              ││├── src                                                                      │││[ ] Hide secrets                  ││
 │    [x] global.json                      │││   ├── Feature                                                              │││[ ] Hide private data             ││
-│    [x] readme.md                        │││   │   └── Handler.cs                                                       │││[ ] Compress code                 ││
-│                                 ┌┤Action palette├─────────────────────────────────────────────────────────────────────────┐ ] Strip comments                ││
-│                                 │ Filter actions:                                                                         │ ] Strip blank lines             ││
-│                                 │ Preview format                                                                          │─────────────────────────────────┘│
-│                                 │                                                                                         │Exclusions├────── [x] All (10) ──┐│
-│                                 │ Preview format: ASCII  …  :format <text|markdown|json|xml>                              │x] Use .gitignore                ││
+│    [x] readme.md                ┌┤Action palette├─────────────────────────────────────────────────────────────────────────┐ ] Compress code                 ││
+│                                 │ Filter actions:                                                                         │ ] Strip comments                ││
+│                                 │ Preview format                                                                          │ ] Strip blank lines             ││
+│                                 │                                                                                         │─────────────────────────────────┘│
+│                                 │ Preview format: ASCII  …  :format <text|markdown|json|xml>                              │Exclusions├────── [x] All (10) ──┐│
+│                                 │                                                                                         │x] Use .gitignore                ││
 │                                 │                                                                                         │ ] Tracked Git files only        ││
 │                                 │                                                                                         │x] Smart ignore                  ││
 │                                 │                                                                                         │x] Empty folders                 ││
@@ -21,16 +21,16 @@
 │                                 │                                                                                         │x] Files without extension       ││
 │                                 │                                                                                         │                                 ││
 │                                 │                                                                                         │─────────────────────────────────┘│
-│                                 │ CONTEXT PREVIEW · Preview format · ASCII                                                │File types├─────── [x] All (3) ──┐│
-│                                 │ :format <text|markdown|json|xml>                                                        │x] .cs                           ││
-│                                 │ Choose ASCII, JSON, XML, or Markdown for the tree.                                      │x] .json                         ││
-│                                 │                                                                                         │x] .md                           ││
+│                                 │                                                                                         │File types├─────── [x] All (3) ──┐│
+│                                 │ CONTEXT PREVIEW · Preview format · ASCII                                                │x] .cs                           ││
+│                                 │ :format <text|markdown|json|xml>                                                        │x] .json                         ││
+│                                 │ Choose ASCII, JSON, XML, or Markdown for the tree.                                      │x] .md                           ││
+│                                 │                                                                                         │                                 ││
 │                                 │                                                                                         │                                 ││
 │                                 │                                                                                         │                                 ││
 │                                 │                                  ⟦ Back ⟧▖ ⟦► Run ◄⟧▖                                   │                                 ││
 │                                 │                                  ▝▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▘                                   │                                 ││
 │                                 └─────────────────────────────────────────────────────────────────────────────────────────┘                                 ││
-│                                         ││                                                                             │││                                  ││
 │                                         ││                                                                             │││                                  ││
 │                                         ││                                                                             │││                                  ││
 │                                         ││ Files 4  |  Lines 1-8/8                                                     ││└──────────────────────────────────┘│
