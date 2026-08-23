@@ -1,19 +1,19 @@
  DevProjex Terminal | <ID>
  <PROJECT_ROOT>
 > PARAMETERS
+  [ ] All (5)
 [ ] Hide secrets
 [ ] Hide private data
 [ ] Compress code
 [ ] Strip comments
 [ ] Strip blank lines
 
-
-  [x] All
+  [x] All (10)
 [x] Use .gitignore                                                             ▲
 [ ] Tracked Git files only                                                     |
 [x] Smart ignore                                                               .
 [x] Empty folders                                                              ▼
-  [x] All
+  [x] All (3)
 [x] .cs
 [x] .json
 [x] .md

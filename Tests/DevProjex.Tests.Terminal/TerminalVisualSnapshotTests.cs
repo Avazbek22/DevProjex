@@ -275,7 +275,7 @@ public sealed class TerminalVisualSnapshotTests
 
 		await WaitForStableScreenAsync(terminal, "ПАРАМЕТРЫ");
 		var workspace = terminal.CaptureScreen();
-		Assert.Contains("Обработка содержимого", workspace, StringComparison.Ordinal);
+		Assert.Contains("Обработка содержи…", workspace, StringComparison.Ordinal);
 		Assert.Contains("Исключения", workspace, StringComparison.Ordinal);
 		Assert.Contains("Типы файлов", workspace, StringComparison.Ordinal);
 		Assert.DoesNotContain("КОРНЕВЫЕ ПАПКИ", workspace, StringComparison.Ordinal);

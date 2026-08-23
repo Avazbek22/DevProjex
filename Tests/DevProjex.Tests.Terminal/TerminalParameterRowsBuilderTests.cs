@@ -1,4 +1,5 @@
 using DevProjex.Application.Secrets;
+using DevProjex.Application.Presentation;
 using Terminal.Gui.Text;
 
 namespace DevProjex.Tests.Terminal;
@@ -76,6 +77,28 @@ public sealed class TerminalParameterRowsBuilderTests
 	}
 
 	[Fact]
+	public void ContentAggregateCountsAndTogglesAllFiveTransformations()
+	{
+		var builder = CreateBuilder();
+		var allOn = ProjectSelectionSpec.Standard with
+		{
+			HideSecrets = true,
+			HidePrivateData = true,
+			CompressCode = true,
+			StripComments = true,
+			StripBlankLines = true
+		};
+
+		var selected = builder.BuildContentAggregate(allOn);
+		var cleared = builder.BuildContentAggregate(ProjectSelectionSpec.Standard);
+
+		Assert.Equal(TerminalParameterRowKind.ToggleAllContent, selected.Kind);
+		Assert.Equal("Settings.All (5)", selected.Label);
+		Assert.True(selected.IsSelected);
+		Assert.False(cleared.IsSelected);
+	}
+
+	[Fact]
 	public void ExclusionAggregateRequiresPreferredGitModeAndEveryRule()
 	{
 		var builder = CreateBuilder();
@@ -88,6 +111,9 @@ public sealed class TerminalParameterRowsBuilderTests
 		}));
 
 		Assert.Equal(TerminalParameterRowKind.ToggleAllExclusions, selected.Kind);
+		Assert.Equal(
+			$"Settings.All ({ProjectPresentationCatalog.GitFiltering.Count - 1 + ProjectPresentationCatalog.Exclusions.Count})",
+			selected.Label);
 		Assert.True(selected.IsSelected);
 		Assert.False(cleared.IsSelected);
 	}
@@ -123,6 +149,7 @@ public sealed class TerminalParameterRowsBuilderTests
 			selectedExtensions: [".cs", ".removed"]));
 
 		Assert.Equal(TerminalParameterRowKind.ToggleAllExtensions, row.Kind);
+		Assert.Equal("Settings.All (2)", row.Label);
 		Assert.False(row.IsSelected);
 	}
 
@@ -144,6 +171,9 @@ public sealed class TerminalParameterRowsBuilderTests
 			selectedExtensions: selected));
 
 		Assert.Equal(expected, row.IsSelected);
+		Assert.Equal(
+			availableCount == 0 ? "Settings.All" : $"Settings.All ({availableCount})",
+			row.Label);
 	}
 
 	[Fact]

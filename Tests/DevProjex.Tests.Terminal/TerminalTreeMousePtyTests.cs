@@ -237,7 +237,10 @@ public sealed class TerminalTreeMousePtyTests
 		Assert.Contains("[ ] Tracked Git files only", gitChanged, StringComparison.Ordinal);
 		Assert.Contains("> PARAMETERS", gitChanged, StringComparison.Ordinal);
 
-		var (exclusionAllColumn, exclusionAllRow) = FindVisibleCell(gitChanged, "[ ] All", 1);
+		var (exclusionAllColumn, exclusionAllRow) = FindVisibleCell(
+			gitChanged,
+			"[ ] All (10)",
+			1);
 		Assert.True(exclusionAllColumn >= 0 && exclusionAllRow >= 0);
 		await terminal.SendMouseClickAsync(
 			exclusionAllColumn,
@@ -264,9 +267,8 @@ public sealed class TerminalTreeMousePtyTests
 
 		var (extensionAllColumn, extensionAllRow) = FindVisibleCell(
 			gitChanged,
-			"[x] All",
-			1,
-			useLastOccurrence: true);
+			"[x] All (2)",
+			1);
 		Assert.True(extensionAllColumn >= 0 && extensionAllRow >= 0);
 		await terminal.SendMouseClickAsync(
 			extensionAllColumn,

@@ -210,6 +210,11 @@ public sealed class TerminalClonePtyTests
 			"> PARAMETERS",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"[x] All (5)",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
 		foreach (var expected in new[]
 			{
 				"Hide secrets",
@@ -219,13 +224,10 @@ public sealed class TerminalClonePtyTests
 				"Strip blank lines"
 			})
 		{
-			await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-			await terminal.WaitForScreenAsync(
+			Assert.Contains(
 				$"[x] {expected}",
-				timeout: TimeSpan.FromSeconds(30),
-				cancellationToken: TestContext.Current.CancellationToken);
-			if (expected != "Strip blank lines")
-				await terminal.SendDownAsync(TestContext.Current.CancellationToken);
+				terminal.CaptureScreen(),
+				StringComparison.Ordinal);
 		}
 
 		await terminal.SendAsync("Z", TestContext.Current.CancellationToken);

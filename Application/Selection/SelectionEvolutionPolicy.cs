@@ -16,7 +16,9 @@ public static class SelectionEvolutionPolicy
 		ArgumentNullException.ThrowIfNull(defaultForNewItem);
 
 		comparer ??= EqualityComparer<T>.Default;
-		var updatedStates = new Dictionary<T, bool>(knownStates, comparer);
+		var updatedStates = new Dictionary<T, bool>(comparer);
+		foreach (var (item, isSelected) in knownStates)
+			updatedStates[item] = isSelected;
 		foreach (var item in previousSelection)
 			updatedStates.TryAdd(item, true);
 

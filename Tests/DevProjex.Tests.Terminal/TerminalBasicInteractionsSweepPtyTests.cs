@@ -55,6 +55,7 @@ public sealed partial class TerminalBasicInteractionsSweepPtyTests
 			"Strip blank lines"
 		};
 		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
+		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 		for (var index = 0; index < labels.Length; index++)
 		{
 			await ToggleCurrentRowAndRestoreAsync(
@@ -78,24 +79,32 @@ public sealed partial class TerminalBasicInteractionsSweepPtyTests
 
 		await ToggleAndWaitAsync(
 			terminal,
-			screen => screen.Contains("[ ] Use .gitignore", StringComparison.Ordinal));
+			screen => screen.Contains("[ ] Use .gitignore", StringComparison.Ordinal) &&
+			          screen.Contains("[x] .generated", StringComparison.Ordinal));
+		var unfiltered = terminal.CaptureScreen();
+		Assert.Contains("[x] .generated", unfiltered, StringComparison.Ordinal);
+		Assert.Contains("[x] All (4)", ExtractPanel(unfiltered, "File types", null), StringComparison.Ordinal);
 		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 		await ToggleAndWaitAsync(
 			terminal,
-			screen => screen.Contains("[x] Tracked Git files only", StringComparison.Ordinal));
+			screen => screen.Contains("[x] Tracked Git files only", StringComparison.Ordinal) &&
+			          !screen.Contains(".generated", StringComparison.Ordinal));
 		var tracked = terminal.CaptureScreen();
 		Assert.Contains("[ ] Use .gitignore", tracked, StringComparison.Ordinal);
 
 		await ToggleAndWaitAsync(
 			terminal,
-			screen => screen.Contains("[ ] Tracked Git files only", StringComparison.Ordinal));
+			screen => screen.Contains("[ ] Tracked Git files only", StringComparison.Ordinal) &&
+			          screen.Contains("[x] .generated", StringComparison.Ordinal));
 		var bothOff = terminal.CaptureScreen();
 		Assert.Contains("[ ] Use .gitignore", bothOff, StringComparison.Ordinal);
+		Assert.Contains("[x] .generated", bothOff, StringComparison.Ordinal);
 
 		await terminal.SendUpAsync(TestContext.Current.CancellationToken);
 		await ToggleAndWaitAsync(
 			terminal,
-			screen => screen.Contains("[x] Use .gitignore", StringComparison.Ordinal));
+			screen => screen.Contains("[x] Use .gitignore", StringComparison.Ordinal) &&
+			          !screen.Contains(".generated", StringComparison.Ordinal));
 		await AssertTreeRestoredAsync(terminal, baselineTreeRows, columns);
 	}
 
@@ -211,7 +220,7 @@ public sealed partial class TerminalBasicInteractionsSweepPtyTests
 		Assert.Contains("> PARAMETERS", terminal.CaptureScreen(), StringComparison.Ordinal);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		var stopwatch = Stopwatch.StartNew();
-		var stableSamples = 0;
+		var stable = Stopwatch.StartNew();
 		var previous = string.Empty;
 		while (stopwatch.Elapsed < TimeSpan.FromSeconds(30))
 		{
@@ -222,12 +231,11 @@ public sealed partial class TerminalBasicInteractionsSweepPtyTests
 			Assert.DoesNotContain("Esc or Ctrl+C cancels this operation", screen, StringComparison.Ordinal);
 			AssertPanelHasNoDrawingArtifacts(screen, terminal.Columns);
 
-			if (completed(screen) && !screen.Contains("Updating…", StringComparison.Ordinal))
+			if (completed(screen) && !HasBackgroundRefresh(screen))
 			{
-				stableSamples = string.Equals(previous, screen, StringComparison.Ordinal)
-					? stableSamples + 1
-					: 0;
-				if (stableSamples >= 2)
+				if (!string.Equals(previous, screen, StringComparison.Ordinal))
+					stable.Restart();
+				if (stable.Elapsed >= TimeSpan.FromMilliseconds(250))
 				{
 					AssertStatusIsCoherent(screen);
 					return;
@@ -235,7 +243,7 @@ public sealed partial class TerminalBasicInteractionsSweepPtyTests
 			}
 			else
 			{
-				stableSamples = 0;
+				stable.Restart();
 			}
 			previous = screen;
 			await Task.Delay(25, TestContext.Current.CancellationToken);
@@ -243,6 +251,11 @@ public sealed partial class TerminalBasicInteractionsSweepPtyTests
 
 		throw new TimeoutException($"The setting operation did not settle.\n{terminal.CaptureScreen()}");
 	}
+
+	private static bool HasBackgroundRefresh(string screen) =>
+		screen.Contains("Updating options…", StringComparison.Ordinal) ||
+		screen.Contains("Building tree…", StringComparison.Ordinal) ||
+		screen.Contains("Building preview…", StringComparison.Ordinal);
 
 	private static async Task AssertTreeRestoredAsync(
 		TerminalPtyHarness terminal,
@@ -388,6 +401,8 @@ public sealed partial class TerminalBasicInteractionsSweepPtyTests
 		project.WriteFile("src/App.cs", "internal sealed class App { }");
 		project.WriteFile("docs/readme.md", "# Project");
 		project.WriteFile("config/settings.json", "{}");
+		project.WriteFile("src/ignored.generated", "generated");
+		project.WriteFile(".gitignore", "*.generated\n");
 		project.WriteFile(".hidden.cs", "internal sealed class Hidden { }");
 		project.WriteFile("src/no-extension", "content");
 		RunGit(project.Path, "init", "--quiet");

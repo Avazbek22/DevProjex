@@ -157,6 +157,16 @@ Changing checked nodes updates the selection projection without rescanning the
 filesystem. Structural changes use the canonical refresh pipeline. Preview
 refresh is cancelable, debounced, and bounded for large projects.
 
+Parameters apply immediately in Terminal Workspace, so it intentionally has no
+Apply command. Rapid changes are coalesced into the latest requested state;
+batch-oriented workflows belong to the terminal command line rather than a
+second commit model inside the TUI.
+
+When filtering changes which options are available, a newly discovered option is
+selected by default. An option already seen during the session keeps its explicit
+checked or unchecked state if it disappears and later returns. This is the same
+selection-evolution policy used by Desktop.
+
 If the effective filters leave the project without visible descendants, the
 real project root remains in the tree. A dim, non-selectable hint directs the
 user to File Types and Exclusions, and the status metrics report zero files,

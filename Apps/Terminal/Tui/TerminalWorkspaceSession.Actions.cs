@@ -24,11 +24,13 @@ internal sealed partial class TerminalWorkspaceSession
 	private FrameView? _extensionControlsFrame;
 	private View? _filterControlsHost;
 	private TerminalParameterListView? _contentControls;
+	private TerminalAggregateControl? _contentAllControl;
 	private TerminalAggregateControl? _exclusionAllControl;
 	private TerminalParameterListView? _exclusionControls;
 	private TerminalAggregateControl? _extensionAllControl;
 	private TerminalParameterListView? _extensionControls;
 	private ObservableCollection<TerminalParameterRow>? _contentControlRows;
+	private ObservableCollection<TerminalParameterRow>? _contentAllControlRows;
 	private ObservableCollection<TerminalParameterRow>? _exclusionAllControlRows;
 	private ObservableCollection<TerminalParameterRow>? _exclusionControlRows;
 	private ObservableCollection<TerminalParameterRow>? _extensionAllControlRows;
@@ -39,6 +41,8 @@ internal sealed partial class TerminalWorkspaceSession
 	private TerminalControlSection _activeControlSection = TerminalControlSection.Content;
 	private TerminalControlSection? _activeAggregateControlSection;
 	private GitFilteringMode _preferredGitMode = GitFilteringMode.RespectGitIgnore;
+	private ProjectSelectionSpec? _settingsDraftSelection;
+	private Dictionary<string, bool>? _settingsDraftExtensionStates;
 
 	private void CreateContextControls()
 	{
@@ -60,6 +64,10 @@ internal sealed partial class TerminalWorkspaceSession
 			NormalizeControlTitle(L("Settings.Secrets.Title")),
 			TerminalControlSection.Content,
 			showVerticalScrollBar: false);
+		_contentAllControl = AddAggregateControl(
+			_contentControlsFrame,
+			_contentControls,
+			TerminalControlSection.Content);
 		_contentControlsFrame.Y = _options.Plain ? 1 : 0;
 		_contentControlsFrame.Height = ContentControlsFrameHeight;
 
@@ -186,7 +194,7 @@ internal sealed partial class TerminalWorkspaceSession
 
 	private void RefreshContextControls()
 	{
-		if (_state is null || _contentControls is null ||
+		if (_state is null || _contentAllControl is null || _contentControls is null ||
 			_exclusionAllControl is null || _exclusionControls is null ||
 			_extensionAllControl is null || _extensionControls is null)
 			return;
@@ -194,20 +202,25 @@ internal sealed partial class TerminalWorkspaceSession
 		TrackSelectedControl(TerminalControlSection.Content);
 		TrackSelectedControl(TerminalControlSection.Exclusions);
 		TrackSelectedControl(TerminalControlSection.Extensions);
+		var selection = GetDisplayedSettingsSelection();
+		var selectedExtensions = selection.Extensions ?? _state.Plan.SelectedExtensions;
+		_contentAllControlRows = ReplaceAggregateRow(
+			_contentAllControl,
+			_parameterRowsBuilder.BuildContentAggregate(selection));
 		_contentControlRows = ReplaceControlRows(
 			_contentControls,
 			BuildContentParameterRows(),
 			_selectedContentControlKey);
 		_exclusionAllControlRows = ReplaceAggregateRow(
 			_exclusionAllControl,
-			_parameterRowsBuilder.BuildExclusionAggregate(_state.Plan));
+			_parameterRowsBuilder.BuildExclusionAggregate(_state.Plan, selection));
 		_exclusionControlRows = ReplaceControlRows(
 			_exclusionControls,
 			BuildExclusionParameterRows(),
 			_selectedExclusionControlKey);
 		_extensionAllControlRows = ReplaceAggregateRow(
 			_extensionAllControl,
-			_parameterRowsBuilder.BuildExtensionAggregate(_state.Plan));
+			_parameterRowsBuilder.BuildExtensionAggregate(_state.Plan, selectedExtensions));
 		_extensionControlRows = ReplaceControlRows(
 			_extensionControls,
 			BuildExtensionParameterRows(),
@@ -252,13 +265,25 @@ internal sealed partial class TerminalWorkspaceSession
 			? []
 			: _parameterRowsBuilder.BuildContent(
 				_state.Plan,
-				GetContentRedactionSnapshot(_state.Plan));
+				GetContentRedactionSnapshot(_state.Plan),
+				GetDisplayedSettingsSelection());
 
 	private IReadOnlyList<TerminalParameterRow> BuildExclusionParameterRows() =>
-		_state is null ? [] : _parameterRowsBuilder.BuildExclusions(_state.Plan);
+		_state is null
+			? []
+			: _parameterRowsBuilder.BuildExclusions(
+				_state.Plan,
+				GetDisplayedSettingsSelection());
 
 	private IReadOnlyList<TerminalParameterRow> BuildExtensionParameterRows() =>
-		_state is null ? [] : _parameterRowsBuilder.BuildExtensions(_state.Plan);
+		_state is null
+			? []
+			: _parameterRowsBuilder.BuildExtensions(
+				_state.Plan,
+				GetDisplayedSettingsSelection().Extensions ?? _state.Plan.SelectedExtensions);
+
+	private ProjectSelectionSpec GetDisplayedSettingsSelection() =>
+		_settingsDraftSelection ?? _state?.Plan.Selection ?? ProjectSelectionSpec.Standard;
 
 	private SecretRedactionSnapshot? GetContentRedactionSnapshot(ProjectContextPlan plan)
 	{
@@ -352,7 +377,9 @@ internal sealed partial class TerminalWorkspaceSession
 	private void RefreshControlTitles()
 	{
 		if (_contentControlsFrame is not null)
-			_contentControlsFrame.Title = NormalizeControlTitle(L("Settings.Secrets.Title"));
+			_contentControlsFrame.Title = ResolveAggregateFrameTitle(
+				L("Settings.Secrets.Title"),
+				_contentAllControl);
 		if (_exclusionControlsFrame is not null)
 			_exclusionControlsFrame.Title = ResolveAggregateFrameTitle(
 				L("Terminal.Tui.Exclusions"),
@@ -381,7 +408,7 @@ internal sealed partial class TerminalWorkspaceSession
 	}
 
 	private bool ControlsHaveFocus =>
-		_contentControls?.HasFocus == true ||
+		_contentAllControl?.HasFocus == true || _contentControls?.HasFocus == true ||
 		_exclusionAllControl?.HasFocus == true ||
 		_exclusionControls?.HasFocus == true ||
 		_extensionAllControl?.HasFocus == true ||
@@ -392,7 +419,7 @@ internal sealed partial class TerminalWorkspaceSession
 			? TerminalControlSection.Exclusions
 			: _extensionAllControl?.HasFocus == true || _extensionControls?.HasFocus == true
 				? TerminalControlSection.Extensions
-				: _contentControls?.HasFocus == true
+				: _contentAllControl?.HasFocus == true || _contentControls?.HasFocus == true
 					? TerminalControlSection.Content
 					: _activeControlSection;
 
@@ -586,6 +613,7 @@ internal sealed partial class TerminalWorkspaceSession
 		GetAggregateControlSection(TerminalControlSection section) =>
 		section switch
 		{
+			TerminalControlSection.Content => (_contentAllControl, _contentAllControlRows),
 			TerminalControlSection.Exclusions => (_exclusionAllControl, _exclusionAllControlRows),
 			TerminalControlSection.Extensions => (_extensionAllControl, _extensionAllControlRows),
 			_ => (null, null)
@@ -622,6 +650,9 @@ internal sealed partial class TerminalWorkspaceSession
 			case TerminalParameterRowKind.GitMode when row.GitMode is { } mode:
 				ApplyGitMode(mode);
 				return;
+			case TerminalParameterRowKind.ToggleAllContent:
+				ApplyAllContentTransformations(row.IsSelected != true);
+				return;
 			case TerminalParameterRowKind.ToggleAllExclusions:
 				ApplyAllExclusions(row.IsSelected != true);
 				return;
@@ -631,7 +662,7 @@ internal sealed partial class TerminalWorkspaceSession
 				return;
 			case TerminalParameterRowKind.Exclusion when row.Exclusion is { } exclusion:
 				{
-					var values = (_state?.Plan.Selection.Exclusions ?? []).ToHashSet();
+					var values = (GetDisplayedSettingsSelection().Exclusions ?? []).ToHashSet();
 					if (!values.Add(exclusion))
 						values.Remove(exclusion);
 					ApplyExclusions(values);
@@ -645,7 +676,8 @@ internal sealed partial class TerminalWorkspaceSession
 				return;
 			case TerminalParameterRowKind.Extension when row.Value is { } extension:
 				{
-					var values = (_state?.Plan.SelectedExtensions ?? [])
+					var values = (GetDisplayedSettingsSelection().Extensions ??
+					              _state?.Plan.SelectedExtensions ?? [])
 						.ToHashSet(StringComparer.OrdinalIgnoreCase);
 					if (!values.Add(extension))
 						values.Remove(extension);
@@ -659,21 +691,23 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (_state is null)
 			return;
-		var target = _state.Plan.GitReadiness.Mode == mode
+		var selection = GetDisplayedSettingsSelection();
+		var target = (selection.GitMode ?? _state.Plan.GitReadiness.Mode) == mode
 			? GitFilteringMode.None
 			: mode;
 		if (target != GitFilteringMode.None)
 			_preferredGitMode = target;
-		ApplyPathFilters(target, _state.Plan.Selection.Exclusions ?? []);
+		ApplyPathFilters(target, selection.Exclusions ?? []);
 	}
 
 	private void ApplyAllExclusions(bool enabled)
 	{
 		if (_state is null)
 			return;
+		var selection = GetDisplayedSettingsSelection();
 		var (mode, exclusions) = TerminalAggregateSelectionPolicy.ResolveExclusions(
 			enabled,
-			_state.Plan.GitReadiness.Mode,
+			selection.GitMode ?? _state.Plan.GitReadiness.Mode,
 			_preferredGitMode);
 		ApplyPathFilters(mode, exclusions);
 	}
@@ -682,7 +716,9 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (_state is null)
 			return;
-		ApplyPathFilters(_state.Plan.GitReadiness.Mode, exclusions);
+		ApplyPathFilters(
+			GetDisplayedSettingsSelection().GitMode ?? _state.Plan.GitReadiness.Mode,
+			exclusions);
 	}
 
 	private void ApplyPathFilters(
@@ -692,15 +728,12 @@ internal sealed partial class TerminalWorkspaceSession
 		if (_state is null)
 			return;
 		PreserveControlFocusForOperation(TerminalControlSection.Exclusions);
-		var state = _state;
-		_activeOperationTask = RunOperationAsync(
-			L("Terminal.Tui.Exclusions"),
-			async token =>
-			{
-				await _controller.SetPathFilteringAsync(state, mode, exclusions, token)
-					.ConfigureAwait(false);
-				return null;
-			});
+		var selection = EnsureSettingsDraft() with
+		{
+			GitMode = mode,
+			Exclusions = exclusions.ToArray()
+		};
+		PublishOptimisticSettings(selection);
 	}
 
 	private void ApplyContentTransformation(IgnoreOptionId optionId, bool enabled)
@@ -708,14 +741,24 @@ internal sealed partial class TerminalWorkspaceSession
 		if (_state is null)
 			return;
 		PreserveControlFocusForOperation(TerminalControlSection.Content);
-		var state = _state;
-		_activeOperationTask = RunOperationAsync(
-			L("Settings.Secrets.Title"),
-			token =>
-			{
-				_controller.SetContentTransformation(state, optionId, enabled, token);
-				return Task.FromResult<string?>(null);
-			});
+		var selection = SetContentTransformation(EnsureSettingsDraft(), optionId, enabled);
+		PublishOptimisticSettings(selection);
+	}
+
+	private void ApplyAllContentTransformations(bool enabled)
+	{
+		if (_state is null)
+			return;
+		PreserveControlFocusForOperation(TerminalControlSection.Content);
+		var selection = EnsureSettingsDraft() with
+		{
+			HideSecrets = enabled,
+			HidePrivateData = enabled,
+			CompressCode = enabled,
+			StripComments = enabled,
+			StripBlankLines = enabled
+		};
+		PublishOptimisticSettings(selection);
 	}
 
 	private void ApplyExtensions(IReadOnlyCollection<string> extensions)
@@ -723,15 +766,58 @@ internal sealed partial class TerminalWorkspaceSession
 		if (_state is null)
 			return;
 		PreserveControlFocusForOperation(TerminalControlSection.Extensions);
-		var state = _state;
-		_activeOperationTask = RunOperationAsync(
-			L("Terminal.Tui.FileTypes"),
-			async token =>
-			{
-				await _controller.SetExtensionsAsync(state, extensions, token).ConfigureAwait(false);
-				return null;
-			});
+		var selection = EnsureSettingsDraft() with { Extensions = extensions.ToArray() };
+		UpdateDraftExtensionStates(extensions);
+		PublishOptimisticSettings(selection);
 	}
+
+	private ProjectSelectionSpec EnsureSettingsDraft()
+	{
+		if (_state is null)
+			return ProjectSelectionSpec.Standard;
+		_settingsDraftSelection ??= _state.BuildSelection();
+		_settingsDraftExtensionStates ??= new Dictionary<string, bool>(
+			_state.ExtensionOptionStates,
+			StringComparer.OrdinalIgnoreCase);
+		return _settingsDraftSelection;
+	}
+
+	private void UpdateDraftExtensionStates(IReadOnlyCollection<string> selectedExtensions)
+	{
+		if (_state is null)
+			return;
+		_settingsDraftExtensionStates = new Dictionary<string, bool>(
+			_state.BuildExtensionOptionStates(selectedExtensions),
+			StringComparer.OrdinalIgnoreCase);
+	}
+
+	private void PublishOptimisticSettings(ProjectSelectionSpec selection)
+	{
+		_settingsDraftSelection = selection;
+		RefreshContextControls();
+		_controlsFrame?.SetNeedsDraw();
+		_application.LayoutAndDraw();
+		ScheduleSettingsRefresh();
+	}
+
+	private void ClearSettingsDraft()
+	{
+		_settingsDraftSelection = null;
+		_settingsDraftExtensionStates = null;
+	}
+
+	private static ProjectSelectionSpec SetContentTransformation(
+		ProjectSelectionSpec selection,
+		IgnoreOptionId optionId,
+		bool enabled) => optionId switch
+		{
+			IgnoreOptionId.HideSecrets => selection with { HideSecrets = enabled },
+			IgnoreOptionId.HidePrivateData => selection with { HidePrivateData = enabled },
+			IgnoreOptionId.CompressCode => selection with { CompressCode = enabled },
+			IgnoreOptionId.StripComments => selection with { StripComments = enabled },
+			IgnoreOptionId.StripBlankLines => selection with { StripBlankLines = enabled },
+			_ => throw new ArgumentOutOfRangeException(nameof(optionId), optionId, null)
+		};
 
 	private void PreserveControlFocusForOperation(TerminalControlSection section)
 	{

@@ -1,4 +1,5 @@
 using DevProjex.Application.Presentation;
+using DevProjex.Application.Services;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -44,6 +45,75 @@ public sealed class TerminalSettingsStateContractTests
 			Assert.Same(tree, state.Plan.EffectiveTree);
 			Assert.Equal(revision + 2, state.Revision);
 		}
+	}
+
+	[Fact]
+	public async Task SettingsPlanContentRefreshPreservesTheTreeAndKnownExtensionStates()
+	{
+		using var workspace = CreateWorkspace();
+		var (controller, state) = await OpenAsync(workspace);
+		using (state)
+		{
+			var baseline = state.Plan;
+			var knownStates = state.ExtensionOptionStates.ToDictionary(
+				static pair => pair.Key,
+				static pair => pair.Value,
+				StringComparer.OrdinalIgnoreCase);
+
+			var result = await controller.BuildSettingsPlanAsync(
+				baseline,
+				state.BuildSelection() with { HideSecrets = true },
+				knownStates,
+				TestContext.Current.CancellationToken);
+
+			Assert.Same(baseline.EffectiveTree, result.Plan.EffectiveTree);
+			Assert.True(result.Plan.Selection.HideSecrets);
+			Assert.Equal(knownStates.Count, result.ExtensionOptionStates.Count);
+			Assert.All(knownStates, pair =>
+				Assert.Equal(pair.Value, result.ExtensionOptionStates[pair.Key]));
+		}
+	}
+
+	[Fact]
+	public async Task ApplyingLatestSettingsPlanDisablesUnusedRedactionSession()
+	{
+		using var workspace = CreateWorkspace();
+		workspace.WriteFile(
+			"src/Secrets.cs",
+			"internal static class Secrets { private const string Token = \"ghp_1234567890abcdefghijklmnopqrstuvwxyz\"; }");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(
+			services,
+			new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+		controller.SetContentTransformation(
+			state,
+			IgnoreOptionId.HideSecrets,
+			enabled: true,
+			TestContext.Current.CancellationToken);
+		using var preview = await controller.BuildPreviewDocumentAsync(
+			state,
+			ProjectContextView.Content,
+			ProjectContextDocumentFormat.Markdown,
+			TestContext.Current.CancellationToken);
+		Assert.NotNull(services.SecretRedactionSession.GetSnapshot(
+			state.Plan.SourceRoot,
+			state.Plan.IncludedFiles));
+
+		var result = await controller.BuildSettingsPlanAsync(
+			state.Plan,
+			state.BuildSelection() with { HideSecrets = false },
+			state.ExtensionOptionStates,
+			TestContext.Current.CancellationToken);
+		controller.ApplySettingsPlan(state, result);
+
+		Assert.Null(services.SecretRedactionSession.GetSnapshot(
+			state.Plan.SourceRoot,
+			state.Plan.IncludedFiles));
 	}
 
 	[Fact]
@@ -97,6 +167,115 @@ public sealed class TerminalSettingsStateContractTests
 			Assert.Equal(
 				available.Order(StringComparer.OrdinalIgnoreCase),
 				state.Plan.SelectedExtensions.Order(StringComparer.OrdinalIgnoreCase));
+		}
+	}
+
+	[Fact]
+	public async Task GitIgnoreAvailabilityEvolutionMatchesDesktopSelectionPolicy()
+	{
+		using var workspace = CreateWorkspace();
+		workspace.WriteFile(".gitignore", "*.generated\n");
+		workspace.WriteFile("src/hidden.generated", "generated");
+		var (controller, state) = await OpenAsync(workspace);
+		using (state)
+		{
+			Assert.DoesNotContain(".generated", state.Plan.AvailableExtensions);
+			await controller.SetExtensionsAsync(
+				state,
+				[".json"],
+				TestContext.Current.CancellationToken);
+			var knownBefore = state.ExtensionOptionStates.ToDictionary(
+				static pair => pair.Key,
+				static pair => pair.Value,
+				StringComparer.OrdinalIgnoreCase);
+
+			await controller.SetPathFilteringAsync(
+				state,
+				GitFilteringMode.None,
+				state.Plan.Selection.Exclusions ?? [],
+				TestContext.Current.CancellationToken);
+
+			var desktop = new FilterOptionSelectionService().BuildExtensionOptions(
+				state.Plan.AvailableExtensions,
+				new HashSet<string>([".json"], StringComparer.OrdinalIgnoreCase),
+				knownBefore);
+			var desktopSelected = desktop
+				.Where(static option => option.IsChecked)
+				.Select(static option => option.Name)
+				.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+			Assert.Contains(".generated", state.Plan.AvailableExtensions);
+			Assert.Contains(".generated", state.Plan.SelectedExtensions);
+			Assert.DoesNotContain(".cs", state.Plan.SelectedExtensions);
+			Assert.True(desktopSelected.SetEquals(state.Plan.SelectedExtensions));
+
+			await controller.SetExtensionsAsync(
+				state,
+				state.Plan.SelectedExtensions
+					.Where(static extension => extension != ".generated")
+					.ToArray(),
+				TestContext.Current.CancellationToken);
+			await controller.SetPathFilteringAsync(
+				state,
+				GitFilteringMode.RespectGitIgnore,
+				state.Plan.Selection.Exclusions ?? [],
+				TestContext.Current.CancellationToken);
+			Assert.DoesNotContain(".generated", state.Plan.AvailableExtensions);
+
+			await controller.SetPathFilteringAsync(
+				state,
+				GitFilteringMode.None,
+				state.Plan.Selection.Exclusions ?? [],
+				TestContext.Current.CancellationToken);
+			Assert.Contains(".generated", state.Plan.AvailableExtensions);
+			Assert.DoesNotContain(".generated", state.Plan.SelectedExtensions);
+		}
+	}
+
+	[Fact]
+	public async Task ExclusionAvailabilityEvolutionChecksNewExtensionsAndRemembersExplicitState()
+	{
+		using var workspace = CreateWorkspace();
+		workspace.WriteFile("src/hidden.generated", string.Empty);
+		var (controller, state) = await OpenAsync(workspace);
+		using (state)
+		{
+			Assert.DoesNotContain(".generated", state.Plan.AvailableExtensions);
+			await controller.SetExtensionsAsync(
+				state,
+				[".json"],
+				TestContext.Current.CancellationToken);
+			var withoutEmptyFiles = (state.Plan.Selection.Exclusions ?? [])
+				.Where(static exclusion => exclusion != ProjectExclusion.EmptyFiles)
+				.ToArray();
+
+			await controller.SetExclusionsAsync(
+				state,
+				withoutEmptyFiles,
+				TestContext.Current.CancellationToken);
+
+			Assert.Contains(".generated", state.Plan.AvailableExtensions);
+			Assert.Contains(".generated", state.Plan.SelectedExtensions);
+			Assert.DoesNotContain(".cs", state.Plan.SelectedExtensions);
+
+			await controller.SetExtensionsAsync(
+				state,
+				state.Plan.SelectedExtensions
+					.Where(static extension => extension != ".generated")
+					.ToArray(),
+				TestContext.Current.CancellationToken);
+			await controller.SetExclusionsAsync(
+				state,
+				[.. withoutEmptyFiles, ProjectExclusion.EmptyFiles],
+				TestContext.Current.CancellationToken);
+			Assert.DoesNotContain(".generated", state.Plan.AvailableExtensions);
+
+			await controller.SetExclusionsAsync(
+				state,
+				withoutEmptyFiles,
+				TestContext.Current.CancellationToken);
+			Assert.Contains(".generated", state.Plan.AvailableExtensions);
+			Assert.DoesNotContain(".generated", state.Plan.SelectedExtensions);
 		}
 	}
 

@@ -1,14 +1,14 @@
  DevProjex Terminal · <PROJECT>
  <PROJECT_ROOT>
 ┌┤> PROJECT TREE├─────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · XML├─────────────────────────────────────────────┐┌┤  PARAMETERS├──────────────────────┐
-│v [x] <PROJECT>   ││<d n="<PROJECT>">                                     ││┌┤Content processing├──────────────┐│
+│v [x] <PROJECT>   ││<d n="<PROJECT>">                                     ││┌┤Content processing [ ] All (5) ──┐│
 │  > [x] src                              ││  <d n="src">                                                                │││[ ] Hide secrets                  ││
 │    [x] global.json                      ││    <d n="Feature">                                                          │││[ ] Hide private data             ││
 │    [x] readme.md                        ││      <f>Handler.cs</f>                                                      │││[ ] Compress code                 ││
 │                                         ││    </d>                                                                     │││[ ] Strip comments                ││
 │                                         ││    <f>App.cs</f>                                                            │││[ ] Strip blank lines             ││
 │                                         ││  </d>                                                                       ││└──────────────────────────────────┘│
-│                                         ││  <f>global.json</f>                                                         ││┌┤Exclusions├─────────── [x] All ──┐│
+│                                         ││  <f>global.json</f>                                                         ││┌┤Exclusions├────── [x] All (10) ──┐│
 │                                         ││  <f>readme.md</f>                                                           │││[x] Use .gitignore                ││
 │                                         ││</d>                                                                         │││[ ] Tracked Git files only        ││
 │                                         ││                                                                             │││[x] Smart ignore                  ││
@@ -21,7 +21,7 @@
 │                                         ││                                                                             │││[x] Files without extension       ││
 │                                         ││                                                                             │││                                  ││
 │                                         ││                                                                             ││└──────────────────────────────────┘│
-│                                         ││                                                                             ││┌┤File types├─────────── [x] All ──┐│
+│                                         ││                                                                             ││┌┤File types├─────── [x] All (3) ──┐│
 │                                         ││                                                                             │││[x] .cs                           ││
 │                                         ││                                                                             │││[x] .json                         ││
 │                                         ││                                                                             │││[x] .md                           ││

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using DevProjex.Application.Presentation;
 using DevProjex.Infrastructure.ProjectProfiles;
 
 namespace DevProjex.Tests.Terminal;
@@ -117,8 +118,9 @@ public sealed class TerminalSettingsPanelPtyTests
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		var contentFocused = await WaitForStableScreenAsync(terminal, "> PARAMETERS");
-		AssertFrameAggregate(contentFocused, "Exclusions");
-		AssertFrameAggregate(contentFocused, "File types");
+		AssertFrameAggregate(contentFocused, "Content processing", expectedCount: 5);
+		AssertFrameAggregate(contentFocused, "Exclusions", ExpectedExclusionCount);
+		AssertFrameAggregate(contentFocused, "File types", expectedCount: 3);
 		Assert.DoesNotContain("Content processing:", contentFocused, StringComparison.Ordinal);
 		AssertOnlyRowIsHighlighted(
 			terminal,
@@ -190,6 +192,55 @@ public sealed class TerminalSettingsPanelPtyTests
 	}
 
 	[Fact(Timeout = 90_000)]
+	public async Task ContentAggregateTogglesAllFiveTransformations()
+	{
+		using var project = CreatePanelProject();
+		await using var terminal = await StartAsync(project.Path, columns: 100, rows: 30);
+
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> PARAMETERS",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+
+		var enabled = await terminal.WaitForScreenAsync(
+			"[x] All (5)",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.All(
+			new[]
+			{
+				"Hide secrets",
+				"Hide private data",
+				"Compress code",
+				"Strip comments",
+				"Strip blank lines"
+			},
+			label => Assert.Contains($"[x] {label}", enabled, StringComparison.Ordinal));
+
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		var disabled = await terminal.WaitForScreenAsync(
+			"[ ] All (5)",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.All(
+			new[]
+			{
+				"Hide secrets",
+				"Hide private data",
+				"Compress code",
+				"Strip comments",
+				"Strip blank lines"
+			},
+			label => Assert.Contains($"[ ] {label}", disabled, StringComparison.Ordinal));
+
+		await ExitAsync(terminal);
+	}
+
+	[Fact(Timeout = 90_000)]
 	public async Task PlainModeKeepsAggregateControlsAsPinnedFirstRows()
 	{
 		using var project = CreatePanelProject();
@@ -208,14 +259,17 @@ public sealed class TerminalSettingsPanelPtyTests
 		var lines = screen.Split('\n');
 		var aggregateRows = lines
 			.Select((line, index) => (line, index))
-			.Where(static pair => pair.line.Contains("[x] All", StringComparison.Ordinal))
+			.Where(static pair => pair.line.Contains("] All (", StringComparison.Ordinal))
 			.Select(static pair => pair.index)
 			.ToArray();
-		Assert.Equal(2, aggregateRows.Length);
+		Assert.Equal(3, aggregateRows.Length);
 		Assert.True(aggregateRows[0] < Array.FindIndex(
 			lines,
-			line => line.Contains("Use .gitignore", StringComparison.Ordinal)));
+			line => line.Contains("Hide secrets", StringComparison.Ordinal)));
 		Assert.True(aggregateRows[1] < Array.FindIndex(
+			lines,
+			line => line.Contains("Use .gitignore", StringComparison.Ordinal)));
+		Assert.True(aggregateRows[2] < Array.FindIndex(
 			lines,
 			line => line.Contains("[x] .cs", StringComparison.Ordinal)));
 		TerminalScreenSnapshot.Verify(
@@ -242,8 +296,9 @@ public sealed class TerminalSettingsPanelPtyTests
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		var screen = await WaitForStableScreenAsync(terminal, "> PARAMETERS");
-		AssertFrameAggregate(screen, "Exclusions");
-		AssertFrameAggregate(screen, "File types");
+		AssertFrameAggregate(screen, "Content processing", expectedCount: 5);
+		AssertFrameAggregate(screen, "Exclusions", ExpectedExclusionCount);
+		AssertFrameAggregate(screen, "File types", expectedCount: 3);
 
 		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
 		await terminal.CompleteShellRestorationHandshakeAsync(
@@ -436,6 +491,7 @@ public sealed class TerminalSettingsPanelPtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
+		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		var secrets = await terminal.WaitForScreenAsync(
 			"Hide secrets (",
@@ -472,6 +528,7 @@ public sealed class TerminalSettingsPanelPtyTests
 			"> PARAMETERS",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
+		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
@@ -521,8 +578,8 @@ public sealed class TerminalSettingsPanelPtyTests
 	}
 
 	[Theory(Timeout = 90_000)]
-	[InlineData("ru", "Обработка содержимого", "Исключения")]
-	[InlineData("uz", "Kontentni qayta ishlash", "Istisnolar")]
+	[InlineData("ru", "Обработка содержи…", "Исключения")]
+	[InlineData("uz", "Kontentni qa…", "Istisnolar")]
 	public async Task LocalizedRedactionLabelsKeepTheirCountersWhenEllipsized(
 		string language,
 		string contentTitle,
@@ -541,6 +598,7 @@ public sealed class TerminalSettingsPanelPtyTests
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
+		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 
@@ -620,6 +678,7 @@ public sealed class TerminalSettingsPanelPtyTests
 			"> PARAMETERS",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
+		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 		foreach (var expected in new[]
 			{
 				"Hide secrets",
@@ -692,8 +751,9 @@ public sealed class TerminalSettingsPanelPtyTests
 		Assert.True(screen.Contains("Strip blank lines", StringComparison.Ordinal), screen);
 		Assert.DoesNotContain("Content processing:", screen, StringComparison.Ordinal);
 		Assert.DoesNotContain("Saved settings", screen, StringComparison.Ordinal);
-		AssertFrameAggregate(screen, "Exclusions");
-		AssertFrameAggregate(screen, "File types");
+		AssertFrameAggregate(screen, "Content processing", expectedCount: 5);
+		AssertFrameAggregate(screen, "Exclusions", ExpectedExclusionCount);
+		AssertFrameAggregate(screen, "File types", expectedCount: 3);
 		Assert.DoesNotContain("ROOT FOLDERS", screen, StringComparison.Ordinal);
 		TerminalScreenSnapshot.Verify(
 			snapshotName,
@@ -702,11 +762,20 @@ public sealed class TerminalSettingsPanelPtyTests
 		return screen;
 	}
 
-	private static void AssertFrameAggregate(string screen, string title)
+	private static void AssertFrameAggregate(
+		string screen,
+		string title,
+		int? expectedCount = null)
 	{
 		var titleLine = screen.Split('\n').Single(line => line.Contains(title, StringComparison.Ordinal));
-		Assert.Contains("[x] All", titleLine, StringComparison.Ordinal);
+		var marker = title == "Content processing" ? "[ ]" : "[x]";
+		var suffix = expectedCount is { } count ? $" ({count})" : " (";
+		Assert.Contains($"{marker} All{suffix}", titleLine, StringComparison.Ordinal);
 	}
+
+	private static int ExpectedExclusionCount =>
+		ProjectPresentationCatalog.GitFiltering.Count - 1 +
+		ProjectPresentationCatalog.Exclusions.Count;
 
 	private static (int Row, int Column) FindFrameAggregate(
 		string screen,
@@ -893,9 +962,10 @@ public sealed class TerminalSettingsPanelPtyTests
 		{
 			var panel = ExtractPanel(terminal.CaptureScreen(), contentTitle, exclusionsTitle);
 			var line = panel.Split('\n').FirstOrDefault(candidate =>
-				candidate.Contains("[x]", StringComparison.Ordinal) &&
-				candidate.Contains('(') &&
-				candidate.Contains(')'));
+				candidate.Split('│').Any(segment =>
+					segment.Contains("[x]", StringComparison.Ordinal) &&
+					segment.Contains('(') &&
+					segment.Contains(')')));
 			if (line is not null)
 				return line;
 			await Task.Delay(75, TestContext.Current.CancellationToken);

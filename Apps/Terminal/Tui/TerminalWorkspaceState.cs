@@ -47,6 +47,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 	private readonly Dictionary<string, TreeNodeDescriptor> _nodesByPath = new(PathComparer.Default);
 	private readonly Dictionary<string, string?> _parentsByPath = new(PathComparer.Default);
 	private readonly Dictionary<string, TerminalTreeCheckState> _checkStates = new(PathComparer.Default);
+	private readonly Dictionary<string, bool> _extensionOptionStates = new(StringComparer.OrdinalIgnoreCase);
 	private readonly List<string> _orderedPaths = [];
 	private readonly List<IPreviewTextDocument> _retiredPreviewDocuments = [];
 	private readonly object _previewSync = new();
@@ -58,6 +59,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 	public TerminalWorkspaceState(ProjectContextPlan plan)
 	{
 		Plan = plan;
+		UpdateExtensionOptionStates(plan);
 		IndexTree(plan.EffectiveTree, parentPath: null);
 		foreach (var file in plan.IncludedFiles)
 			_selectedFiles.Add(file);
@@ -79,6 +81,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 	public int SelectedFileCount => _selectedFiles.Count;
 	public int SelectedFolderCount => _selectedFolderCount;
 	public bool HasVisibleTreeItems => Plan.EffectiveTree.Children.Count > 0;
+	public IReadOnlyDictionary<string, bool> ExtensionOptionStates => _extensionOptionStates;
 	public string TreeFilterQuery => _treeFilterQuery;
 	public int TreeFilterMatchCount { get; private set; }
 	public bool HasTreeFilter => _treeFilterQuery.Length > 0;
@@ -86,11 +89,20 @@ public sealed class TerminalWorkspaceState : IDisposable
 	public IPreviewTextDocument PreviewDocument { get; private set; }
 	public string PreviewText => PreviewDocument.GetFullText();
 
-	public void ReplacePlan(ProjectContextPlan plan)
+	public void ReplacePlan(
+		ProjectContextPlan plan,
+		IReadOnlyDictionary<string, bool>? extensionOptionStates = null)
 	{
 		Interlocked.Increment(ref _revision);
 		var expandedPaths = _expandedPaths.ToArray();
 		Plan = plan;
+		if (extensionOptionStates is not null)
+		{
+			_extensionOptionStates.Clear();
+			foreach (var (extension, isSelected) in extensionOptionStates)
+				_extensionOptionStates[extension] = isSelected;
+		}
+		UpdateExtensionOptionStates(plan);
 		_nodesByPath.Clear();
 		_parentsByPath.Clear();
 		_orderedPaths.Clear();
@@ -114,6 +126,27 @@ public sealed class TerminalWorkspaceState : IDisposable
 		RecomputeCheckStates();
 		RebuildVisibleRows();
 		SetPreviewDocument(new InMemoryPreviewTextDocument(BuildTreePreview()));
+	}
+
+	public IReadOnlyDictionary<string, bool> BuildExtensionOptionStates(
+		IReadOnlyCollection<string> selectedExtensions)
+	{
+		var selected = new HashSet<string>(selectedExtensions, StringComparer.OrdinalIgnoreCase);
+		var result = new Dictionary<string, bool>(_extensionOptionStates, StringComparer.OrdinalIgnoreCase);
+		foreach (var extension in Plan.AvailableExtensions)
+			result[extension] = selected.Contains(extension);
+		foreach (var extension in selected)
+			result.TryAdd(extension, true);
+		return result;
+	}
+
+	private void UpdateExtensionOptionStates(ProjectContextPlan plan)
+	{
+		var selected = new HashSet<string>(plan.SelectedExtensions, StringComparer.OrdinalIgnoreCase);
+		foreach (var extension in plan.AvailableExtensions)
+			_extensionOptionStates[extension] = selected.Contains(extension);
+		foreach (var extension in plan.Selection.Extensions ?? [])
+			_extensionOptionStates.TryAdd(extension, true);
 	}
 
 	public void ReplaceContentTransformationPlan(ProjectContextPlan plan)

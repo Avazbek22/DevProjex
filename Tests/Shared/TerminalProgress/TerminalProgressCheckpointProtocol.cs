@@ -13,4 +13,7 @@ internal static class TerminalProgressCheckpointProtocol
 
 	public static string GetReleaseFileName(string checkpoint) =>
 		$"release-{checkpoint}";
+
+	public static string GetObservedFileName(string checkpoint) =>
+		$"observed-{checkpoint}.log";
 }

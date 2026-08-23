@@ -77,4 +77,22 @@ public sealed class SelectionEvolutionPolicyTests
 		Assert.Empty(result.SelectedItems);
 		Assert.Single(result.KnownStates);
 	}
+
+	[Fact]
+	public void Reconcile_NormalizesKnownStatesThatCollideUnderTheSuppliedComparer()
+	{
+		var result = SelectionEvolutionPolicy.Reconcile(
+			[".cs"],
+			new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+			new Dictionary<string, bool>(StringComparer.Ordinal)
+			{
+				[".cs"] = true,
+				[".CS"] = false
+			},
+			static _ => true,
+			StringComparer.OrdinalIgnoreCase);
+
+		Assert.Empty(result.SelectedItems);
+		Assert.Single(result.KnownStates);
+	}
 }
