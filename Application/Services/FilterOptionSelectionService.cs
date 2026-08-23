@@ -17,8 +17,23 @@ public sealed class FilterOptionSelectionService
 		IReadOnlySet<string> previousSelections,
 		IReadOnlyDictionary<string, bool>? previousStateCache)
 	{
-		var list = new List<SelectionOption>();
 		var ordered = extensions.OrderBy(e => e, StringComparer.OrdinalIgnoreCase).ToList();
+		if (previousStateCache is not null)
+		{
+			var evolution = SelectionEvolutionPolicy.Reconcile(
+				ordered,
+				previousSelections,
+				previousStateCache,
+				static _ => true,
+				StringComparer.OrdinalIgnoreCase);
+			return ordered
+				.Select(extension => new SelectionOption(
+					extension,
+					evolution.SelectedItems.Contains(extension)))
+				.ToArray();
+		}
+
+		var list = new List<SelectionOption>(ordered.Count);
 		var resolver = new SelectionStateResolver(previousSelections, previousStateCache);
 		foreach (var ext in ordered)
 		{
@@ -37,11 +52,27 @@ public sealed class FilterOptionSelectionService
 		bool hasPreviousSelections = false,
 		IReadOnlyDictionary<string, bool>? previousStateCache = null)
 	{
-		var list = new List<SelectionOption>();
+		var available = rootFolders.ToArray();
+		if (previousStateCache is not null)
+		{
+			var evolution = SelectionEvolutionPolicy.Reconcile(
+				available,
+				previousSelections,
+				previousStateCache,
+				name => !IsIgnoredByRules(name, ignoreRules),
+				PathComparer.Default);
+			return available
+				.Select(name => new SelectionOption(
+					name,
+					evolution.SelectedItems.Contains(name)))
+				.ToArray();
+		}
+
+		var list = new List<SelectionOption>(available.Length);
 		var resolver = new SelectionStateResolver(previousSelections, previousStateCache);
 		var hasPrevious = hasPreviousSelections || previousSelections.Count > 0;
 
-		foreach (var name in rootFolders)
+		foreach (var name in available)
 		{
 			var isChecked = previousStateCache is not null
 				? resolver.Resolve(name, defaultForNewEntry: !IsIgnoredByRules(name, ignoreRules))
