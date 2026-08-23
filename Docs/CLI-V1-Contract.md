@@ -350,13 +350,10 @@ legal Unix and macOS directory names containing `:` remain local. An explicit
 Cached repositories are reusable offline. A successful first clone records the
 safe URL in recent-repository history. Cancellation removes clone staging;
 network and clone failures return runtime exit `1` without opening or exporting
-partial content. The generated cache path is internal and never replaces the
-result of a direct URL-source command. In particular, successful `open URL` writes the safe
-repository URL rather than the physical cache checkout path. Profile commands
-and `tree` accept local directories only. The interactive Terminal Workspace is
-the sole documented exception: its repository-details view exposes the managed
-cache path for diagnostics. Unifying that TUI presentation is outside this CLI
-contract phase.
+partial content. The generated cache path is internal and is never reported by
+direct URL-source commands or Terminal Workspace repository details. In particular,
+successful `open URL` writes the safe repository URL rather than the physical cache
+checkout path. Profile commands and `tree` accept local directories only.
 
 ## Command Contracts
 

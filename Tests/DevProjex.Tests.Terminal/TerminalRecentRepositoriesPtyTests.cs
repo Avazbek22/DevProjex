@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using DevProjex.Infrastructure.Git;
 using DevProjex.Infrastructure.RecentProjects;
 
 namespace DevProjex.Tests.Terminal;
@@ -65,6 +66,30 @@ public sealed class TerminalRecentRepositoriesPtyTests
 			"recent-repositories-workspace-en-150x35",
 			terminal,
 			welcomeDirectory.Path);
+
+		await terminal.SendAsync("\u0010", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Filter actions:",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("metadata", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Inspect project source and repository metadata.",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		var details = await terminal.WaitForScreenAsync(
+			"Last opened",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains(RepositoryUrl, details, StringComparison.Ordinal);
+		Assert.Contains("Branch: main", details, StringComparison.Ordinal);
+		Assert.Contains("Size:", details, StringComparison.Ordinal);
+		Assert.DoesNotContain("Internal cache path", details, StringComparison.Ordinal);
+		Assert.DoesNotContain(CacheFolderName, details, StringComparison.Ordinal);
+		Assert.DoesNotContain("Source reference", details, StringComparison.Ordinal);
+		Verify(
+			"repository-source-details-en-150x35",
+			terminal,
+			welcomeDirectory.Path);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 
 		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
 		Assert.Equal(
@@ -180,6 +205,12 @@ public sealed class TerminalRecentRepositoriesPtyTests
 			Path.Combine(cachePath, "README.md"),
 			"# DevProjex",
 			new UTF8Encoding(false));
+		var cache = new RepoCacheService(Path.Combine(dataRoot, "RepoCache"));
+		cache.RecordIndexedRepository(
+			RepositoryUrl,
+			cachePath,
+			"main",
+			"0123456789abcdef0123456789abcdef01234567");
 		var store = new RecentProjectsStore(() => dataRoot);
 		store.AddRepository(store.Load(), RepositoryUrl);
 	}

@@ -4,7 +4,6 @@ namespace DevProjex.Terminal.Tui;
 
 internal enum TerminalParameterRowKind
 {
-	Information,
 	GitMode,
 	ContentTransformation,
 	ToggleAllContent,
@@ -26,8 +25,6 @@ internal sealed record TerminalParameterRow(
 {
 	public override string ToString()
 	{
-		if (Kind == TerminalParameterRowKind.Information)
-			return Label;
 		var marker = IsSelected == true ? "[x]" : "[ ]";
 		return $"{marker} {Label}";
 	}

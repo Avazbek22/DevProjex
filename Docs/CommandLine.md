@@ -264,9 +264,8 @@ a validated branch for a URL source and is rejected for local paths and with
 heuristic, so legal Unix and macOS names containing `:` remain local; an explicit
 `scheme://` source is always treated as a URL. The lease is
 held for the complete operation and released afterward; generated cache paths are
-never reported as results of direct URL-source commands. The interactive Terminal
-Workspace is the documented exception: its repository-details view displays the
-managed cache path for diagnostics. This TUI presentation will be unified separately.
+never reported. Terminal Workspace repository details show the safe repository URL
+and cache metadata without exposing the physical checkout path.
 
 ```text
 devprojex export context https://github.com/owner/repo -o -

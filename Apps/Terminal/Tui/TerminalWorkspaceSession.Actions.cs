@@ -315,12 +315,6 @@ internal sealed partial class TerminalWorkspaceSession
 			ResolveControlLabelWidth(markerColumns: 4),
 			_environment.SupportsUnicode && !_options.Plain);
 
-	private string FitControlInformationLabel(string value) =>
-		TerminalParameterRow.FitLabel(
-			value,
-			ResolveControlLabelWidth(markerColumns: 0),
-			_environment.SupportsUnicode && !_options.Plain);
-
 	private int ResolveControlLabelWidth(int markerColumns)
 	{
 		var panelWidth = _layoutMode == TerminalWorkspaceLayoutMode.Wide
@@ -472,6 +466,9 @@ internal sealed partial class TerminalWorkspaceSession
 			return [];
 
 		var plan = _state.Plan;
+		var selection = GetDisplayedSettingsSelection();
+		var displayedExtensions = selection.Extensions ?? plan.SelectedExtensions;
+		var displayedExtensionSet = displayedExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase);
 		var actions = new List<TerminalWorkspaceAction>
 		{
 			CreateAction(
@@ -521,7 +518,7 @@ internal sealed partial class TerminalWorkspaceSession
 				"Terminal.Tui.GitFiltering",
 				"Terminal.Tui.Action.FocusExclusions.Description",
 				"M",
-				FormatGitMode(plan.GitReadiness.Mode),
+				FormatGitMode(selection.GitMode ?? plan.GitReadiness.Mode),
 				TerminalWorkspaceCommandCatalog.Get(TerminalWorkspaceCommandVerb.Set).Syntax,
 				execute: () => FocusControlSection(TerminalControlSection.Exclusions)),
 			CreateAction(
@@ -530,7 +527,7 @@ internal sealed partial class TerminalWorkspaceSession
 				"Terminal.Tui.Exclusions",
 				"Terminal.Tui.Action.FocusExclusions.Description",
 				"X",
-				FormatExclusions(plan.Selection.Exclusions ?? []),
+				FormatExclusions(selection.Exclusions ?? []),
 				TerminalWorkspaceCommandCatalog.Get(TerminalWorkspaceCommandVerb.Set).Syntax,
 				execute: () => FocusControlSection(TerminalControlSection.Exclusions)),
 			CreateAction(
@@ -540,7 +537,7 @@ internal sealed partial class TerminalWorkspaceSession
 				"Terminal.Tui.Action.FocusFileTypes.Description",
 				"T",
 				FormatSelectionCount(
-					plan.SelectedExtensions.Count,
+					plan.AvailableExtensions.Count(displayedExtensionSet.Contains),
 					plan.AvailableExtensions.Count),
 				TerminalWorkspaceCommandCatalog.Get(TerminalWorkspaceCommandVerb.Type).Syntax,
 				execute: () => FocusControlSection(TerminalControlSection.Extensions)),
@@ -654,9 +651,7 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		var pathExclusionCount = ProjectPresentationCatalog.Exclusions.Count(
 			descriptor => exclusions.Contains(descriptor.RequireId()));
-		return pathExclusionCount == 0
-			? L("Terminal.Tui.NoneAvailable")
-			: pathExclusionCount.ToString("N0", CultureInfo.CurrentCulture);
+		return pathExclusionCount.ToString("N0", CultureInfo.CurrentCulture);
 	}
 
 	private string FormatSelectionCount(int selected, int available) =>
@@ -700,8 +695,6 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		switch (row.Kind)
 		{
-			case TerminalParameterRowKind.Information:
-				return;
 			case TerminalParameterRowKind.GitMode when row.GitMode is { } mode:
 				ApplyGitMode(mode);
 				return;
@@ -1268,27 +1261,18 @@ internal sealed partial class TerminalWorkspaceSession
 		if (_state is null)
 			return;
 		var identity = _state.Plan.SourceIdentity;
-		var text = new StringBuilder()
-			.Append(L("Terminal.Tui.Source")).Append(": ")
-			.AppendLine(GetProjectDisplayName(_state.Plan))
-			.Append(L("Terminal.Tui.SourceReference")).Append(": ")
-			.AppendLine(identity?.SourceReference ?? _state.Plan.SourceRoot);
-		if (identity?.RepositoryUrl is { Length: > 0 } repositoryUrl)
-			text.Append(L("Terminal.Tui.RepositoryUrl")).AppendLine().AppendLine(repositoryUrl);
-		if (identity?.Branch is { Length: > 0 } branch)
-			text.Append(L("Terminal.Tui.RecentRepositories.Branch")).Append(": ").AppendLine(branch);
-		if (identity?.CommitHash is { Length: > 0 } commit)
-			text.Append(L("Terminal.Tui.Commit")).Append(": ").AppendLine(commit[..Math.Min(12, commit.Length)]);
-		if (identity?.IsCachedRepository == true)
-		{
-			text.AppendLine()
-				.Append(L("Terminal.Tui.InternalCachePath"))
-				.AppendLine(":")
-				.Append(_state.Plan.SourceRoot);
-		}
+		var cacheEntry = identity?.RepositoryUrl is { Length: > 0 } repositoryUrl
+			? _services.RepoCacheService.FindIndexedRepository(repositoryUrl)
+			: null;
+		var text = TerminalSourceDetailsFormatter.Format(
+			_state.Plan.SourceRoot,
+			identity,
+			cacheEntry,
+			L,
+			CultureInfo.CurrentCulture);
 		ShowNotice(
 			L("Terminal.Tui.Details"),
-			text.ToString(),
+			text,
 			TerminalWorkspaceTheme.Dialog);
 	}
 

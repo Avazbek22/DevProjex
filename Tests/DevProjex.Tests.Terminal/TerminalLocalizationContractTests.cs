@@ -227,12 +227,15 @@ public sealed partial class TerminalLocalizationContractTests
 			Assert.DoesNotContain("Terminal.Tui.Preview.Raw", catalog.Keys);
 			Assert.DoesNotContain("Terminal.Tui.Action.Presentation", catalog.Keys);
 			Assert.DoesNotContain("Terminal.Tui.Action.Presentation.Description", catalog.Keys);
+			Assert.DoesNotContain("Terminal.Tui.InternalCachePath", catalog.Keys);
 		}
 
 		Assert.Equal("Settings", catalogs["en"]["Terminal.Tui.Profile"]);
 		Assert.Equal("Settings file:", catalogs["en"]["Terminal.Tui.ProfileFile"]);
 		Assert.Equal("Параметры", catalogs["ru"]["Terminal.Tui.Profile"]);
 		Assert.Equal("Файл параметров:", catalogs["ru"]["Terminal.Tui.ProfileFile"]);
+		Assert.Equal("Project folder", catalogs["en"]["Terminal.Tui.SourceReference"]);
+		Assert.Equal("Папка проекта", catalogs["ru"]["Terminal.Tui.SourceReference"]);
 	}
 
 	[Fact]

@@ -2,7 +2,6 @@ using Terminal.Gui.App;
 using Terminal.Gui.Input;
 using Terminal.Gui.Text;
 using Terminal.Gui.ViewBase;
-using Terminal.Gui.Views;
 
 namespace DevProjex.Terminal.Tui;
 
@@ -15,7 +14,7 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 	private readonly bool _plain;
 	private readonly bool _useUnicode;
 	private readonly TerminalLiteralLabel _prompt;
-	private readonly TextField _input;
+	private readonly TerminalTransparentTextEditor _input;
 	private readonly TerminalLiteralLabel _ghost;
 	private readonly TerminalLiteralLabel _result;
 	private IReadOnlyList<TerminalWorkspaceCommandCompletionCandidate> _cycleCandidates = [];
@@ -41,6 +40,7 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 		CanFocus = true;
 		Height = 1;
 		Visible = false;
+		ViewportSettings |= ViewportSettingsFlags.Transparent;
 		_prompt = new TerminalLiteralLabel
 		{
 			X = 0,
@@ -50,7 +50,7 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 			Text = ":",
 			SchemeName = TerminalWorkspaceTheme.Accent
 		};
-		_input = new TextField
+		_input = new TerminalTransparentTextEditor
 		{
 			X = 1,
 			Y = 0,
@@ -69,18 +69,18 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 		{
 			X = 0,
 			Y = 0,
-			Width = Dim.Fill(),
+			Width = 1,
 			Height = 1,
 			CanFocus = false,
 			Visible = false
 		};
-		_input.TextChanged += (_, _) =>
+		_input.ValueChanged += (_, _) =>
 		{
 			if (!_applyingCompletion)
 				ResetCompletionCycle();
 			UpdateGhost();
 		};
-		_input.KeyDown += OnInputKeyDown;
+		_input.KeyPressed += OnInputKeyDown;
 		Add(_prompt, _input, _ghost, _result);
 	}
 
@@ -89,7 +89,7 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 
 	public bool IsEditing { get; private set; }
 	public bool IsShowingResult => Visible && _result.Visible;
-	public string InputText => _input.Text?.ToString() ?? string.Empty;
+	public string InputText => _input.Value;
 
 	public void Open(string initialText = "")
 	{
@@ -133,6 +133,7 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 			$"{marker} {text}",
 			Math.Max(1, Viewport.Width),
 			_useUnicode && !_plain);
+		_result.Width = Math.Max(1, (_result.Text?.ToString() ?? string.Empty).GetColumns());
 		SetNeedsDraw();
 	}
 
@@ -144,6 +145,7 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 				_result.Text?.ToString() ?? string.Empty,
 				Math.Max(1, Viewport.Width),
 				_useUnicode && !_plain);
+			_result.Width = Math.Max(1, (_result.Text?.ToString() ?? string.Empty).GetColumns());
 		}
 		UpdateGhost();
 	}
@@ -154,7 +156,7 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 			_input.SetFocus();
 	}
 
-	private void OnInputKeyDown(object? sender, Key key)
+	private void OnInputKeyDown(Key key)
 	{
 		if (key == Key.Esc)
 		{
@@ -217,7 +219,7 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 		_applyingCompletion = true;
 		try
 		{
-			_input.Text = candidate.CompletedText;
+			_input.Value = candidate.CompletedText;
 			_input.InsertionPoint = TerminalTextPosition.Utf16ToRuneIndex(
 				candidate.CompletedText,
 				candidate.CursorPosition);
@@ -234,7 +236,7 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 		_applyingCompletion = true;
 		try
 		{
-			_input.Text = text;
+			_input.Value = text;
 			_input.MoveEnd();
 		}
 		finally
@@ -281,11 +283,11 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 		var rendered = _plain ? $" [{ghost.Trim()}]" : ghost;
 		_ghost.Visible = true;
 		_ghost.X = x;
-		_ghost.Width = maximumColumns;
 		_ghost.Text = TerminalParameterRow.FitLabel(
 			rendered,
 			maximumColumns,
 			_useUnicode && !_plain);
+		_ghost.Width = Math.Max(1, (_ghost.Text?.ToString() ?? string.Empty).GetColumns());
 		_ghost.SetNeedsDraw();
 	}
 

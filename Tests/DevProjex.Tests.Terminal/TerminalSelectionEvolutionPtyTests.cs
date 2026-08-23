@@ -49,6 +49,7 @@ public sealed class TerminalSelectionEvolutionPtyTests
 			timeout: TimeSpan.FromSeconds(30),
 			cancellationToken: TestContext.Current.CancellationToken);
 		AssertFrameAggregate(revealed, "File types", "[x] All (4)");
+		Assert.DoesNotContain("Unavailable:", revealed, StringComparison.Ordinal);
 		TerminalScreenSnapshot.Verify(
 			"workspace-selection-evolution-en-160x50",
 			revealed,
@@ -67,7 +68,9 @@ public sealed class TerminalSelectionEvolutionPtyTests
 		await terminal.WaitForScreenWithoutAsync(
 			".generated",
 			cancellationToken: TestContext.Current.CancellationToken);
-		AssertFrameAggregate(terminal.CaptureScreen(), "File types", "[x] All (3)");
+		var hiddenAgain = terminal.CaptureScreen();
+		AssertFrameAggregate(hiddenAgain, "File types", "[x] All (3)");
+		Assert.DoesNotContain("Unavailable:", hiddenAgain, StringComparison.Ordinal);
 
 		await ToggleGitIgnoreAsync(terminal, expectedSelected: false);
 		var returned = await terminal.WaitForScreenAsync(
@@ -75,6 +78,7 @@ public sealed class TerminalSelectionEvolutionPtyTests
 			timeout: TimeSpan.FromSeconds(30),
 			cancellationToken: TestContext.Current.CancellationToken);
 		AssertFrameAggregate(returned, "File types", "[ ] All (4)");
+		Assert.DoesNotContain("Unavailable:", returned, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 		await ExitAsync(terminal);
 	}

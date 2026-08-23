@@ -1,0 +1,35 @@
+ DevProjex Terminal · DevProjex
+ https://github.com/Avazbek22/DevProjex
+┌┤> PROJECT TREE├──────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├────────────────────────────────────┐┌┤  PARAMETERS├──────────────────────┐
+│v [x] DevProjex                       ││DevProjex                                                             ││┌┤Content processing [ ] All (5) ──┐│
+│  > [x] src                           ││├── src                                                               │││[ ] Hide secrets                  ││
+│    [x] README.md                     │││   └── RepositoryMarker.cs                                           │││[ ] Hide private data             ││
+│                                      ││└── README.md                                                         │││[ ] Compress code                 ││
+│                                      ││                                                                      │││[ ] Strip comments                ││
+│                                      ││                                                                      │││[ ] Strip blank lines             ││
+│                                      ││                                                                      ││└──────────────────────────────────┘│
+│                                      ││                                                                      ││┌┤Exclusions├────── [x] All (10) ──┐│
+│                                 ┌┤Details├──────────────────────────────────────────────────────────────────────┐x] Use .gitignore               ▲││
+│                                 │ Repository URL: https://github.com/Avazbek22/DevProjex                        │ ] Tracked Git files only       ┃││
+│                                 │ Branch: main                                                                  │x] Smart ignore                 ┃││
+│                                 │ Commit: <ID-PART>                                                          │x] Empty folders                ┃││
+│                                 │ Size: 0 B                                                                     │x] Empty files                  ┃││
+│                                 │ Last opened: <TIMESTAMP>│x] Hidden folders               ·││
+│                                 │                                                                               │x] Hidden files                 ·││
+│                                 │                                                                               │x] dot folders                  ▼││
+│                                 │                                 ⟦► Close ◄⟧▖                                  │─────────────────────────────────┘│
+│                                 │                                 ▝▀▀▀▀▀▀▀▀▀▀▘                                  │File types├─────── [x] All (2) ──┐│
+│                                 └───────────────────────────────────────────────────────────────────────────────┘x] .cs                           ││
+│                                      ││                                                                      │││[x] .md                           ││
+│                                      ││                                                                      │││                                  ││
+│                                      ││                                                                      │││                                  ││
+│                                      ││                                                                      │││                                  ││
+│                                      ││                                                                      │││                                  ││
+│                                      ││                                                                      │││                                  ││
+│                                      ││                                                                      │││                                  ││
+│                                      ││                                                                      │││                                  ││
+│                                      ││ Files 2  |  Lines 1-5/5                                              ││└──────────────────────────────────┘│
+└──────────────────────────────────────┘└──────────────────────────────────────────────────────────────────────┘└────────────────────────────────────┘
+
+ Files 2 · Folders 2 · 52 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
+ Up/Down Navigate   Enter Expand   Space Toggle   / Search   Tab/F6 Preview   Ctrl+P Actions   ? Help
