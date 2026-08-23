@@ -7,7 +7,7 @@
     1) asks for a version in 2-4 segment format (4.6 / 4.7.1 / 4.7.1.0)
     2) copies repo to a temporary isolated workspace
     3) builds GitHub artifacts in Release mode
-    4) builds Microsoft Store package in ReleaseStore mode
+    4) optionally builds the Microsoft Store package in ReleaseStore mode
     5) copies final artifacts back to local publish folders only
 
   The script never writes build artifacts into your working source tree
@@ -23,12 +23,14 @@
 param(
     [string]$Version = "",
     [switch]$ValidateConfigOnly,
-    [switch]$SmokeStoreBuildOnly
+    [switch]$SmokeStoreBuildOnly,
+    [switch]$GitHubArtifactsOnly
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "release-helpers.ps1")
+. (Join-Path $PSScriptRoot "release-archive-helpers.ps1")
 
 $script:IsolatedWorkspaceRoot = $null
 $script:IsolatedRepoRoot = $null
@@ -496,6 +498,24 @@ function Invoke-StoreListingValidationScript([string]$repoRoot) {
     & $validationScriptPath -RepositoryRoot $repoRoot
 }
 
+function Assert-MacPackagingSourceContract([string]$repoRoot) {
+    $iconSetPath = Join-Path $repoRoot "Assets\AppIcon\MacOS\AppIconSet"
+    $pngSignature = [byte[]]@(137, 80, 78, 71, 13, 10, 26, 10)
+    foreach ($fileName in @("16.png", "32.png", "64.png", "128.png", "256.png", "512.png", "1024.png")) {
+        $iconPath = Join-Path $iconSetPath $fileName
+        Assert-Condition (Test-Path -LiteralPath $iconPath -PathType Leaf) "Required macOS icon source was not found: $iconPath"
+        $iconBytes = [System.IO.File]::ReadAllBytes($iconPath)
+        Assert-Condition ($iconBytes.Length -gt $pngSignature.Length) "Required macOS icon source is empty or truncated: $iconPath"
+        for ($index = 0; $index -lt $pngSignature.Length; $index++) {
+            Assert-Condition ($iconBytes[$index] -eq $pngSignature[$index]) "Required macOS icon source is not a PNG file: $iconPath"
+        }
+    }
+
+    $templatePath = Join-Path $repoRoot "Packaging\MacOS\Info.plist.template"
+    Assert-Condition (Test-Path -LiteralPath $templatePath -PathType Leaf) "macOS Info.plist template was not found: $templatePath"
+    [void](Get-MacInfoPlistContent -templatePath $templatePath -version "0.0.1")
+}
+
 function Invoke-ReleaseConfigValidation([string]$repoRoot) {
     $versionInfo = Get-DefaultReleaseVersionInfo -repoRoot $repoRoot
 
@@ -534,6 +554,7 @@ function Invoke-ReleaseConfigValidation([string]$repoRoot) {
     $releaseAllPath = Join-Path $repoRoot "Scripts\release-all.ps1"
     $releaseAllContent = Get-Content -Path $releaseAllPath -Raw
     Assert-Condition ($releaseAllContent.Contains('release-helpers.ps1')) "release-all.ps1 must use release-helpers.ps1 for shared release metadata."
+    Assert-Condition ($releaseAllContent.Contains('release-archive-helpers.ps1')) "release-all.ps1 must use release-archive-helpers.ps1 for portable archives."
 
     $wingetScriptPath = Join-Path $repoRoot "Scripts\winget-update.ps1"
     $wingetScriptContent = Get-Content -Path $wingetScriptPath -Raw
@@ -543,7 +564,8 @@ function Invoke-ReleaseConfigValidation([string]$repoRoot) {
 
     $macReadmePath = Join-Path $repoRoot "Packaging\MacOS\README.md"
     $macReadmeContent = Get-Content -Path $macReadmePath -Raw
-    Assert-Condition ($macReadmeContent.Contains('YOUR_RELEASE_VERSION')) "Packaging/MacOS/README.md must use a release-version placeholder instead of a stale hardcoded example."
+    Assert-Condition ($macReadmeContent.Contains('release-all.ps1')) "Packaging/MacOS/README.md must identify release-all.ps1 as the official bundle builder."
+    Assert-MacPackagingSourceContract -repoRoot $repoRoot
 
     Write-Host "Release configuration is consistent."
     Write-Host "  DisplayVersion      : $($versionInfo.DisplayVersion)"
@@ -689,13 +711,72 @@ function Configure-IsolatedNuGetCache() {
     New-Item -ItemType Directory -Path $isolatedPlugins -Force | Out-Null
 
     # Always use isolated per-run caches to keep local developer environment untouched.
-    $env:NUGET_PACKAGES = $isolatedPackages
+    # NuGetPackageRoot is consumed as an MSBuild directory prefix by Infrastructure.csproj.
+    # Preserve the trailing separator that NuGet's default global-packages path provides.
+    $env:NUGET_PACKAGES = $isolatedPackages + [System.IO.Path]::DirectorySeparatorChar
     $env:NUGET_HTTP_CACHE_PATH = $isolatedHttp
     $env:NUGET_PLUGINS_CACHE_PATH = $isolatedPlugins
 }
 
+function Get-IsolatedWorkspaceSourceSize([string]$sourceRoot) {
+    $rootDirectory = [System.IO.DirectoryInfo]::new([System.IO.Path]::GetFullPath($sourceRoot))
+    $rootExclusions = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($name in @(".git", ".idea", ".vs", ".codex", ".claude", "artifacts", ".artifacts", "publish", ".release-cache", "TestResults")) {
+        [void]$rootExclusions.Add($name)
+    }
+
+    $directoryExclusions = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($name in @("bin", "obj", "artifacts", ".artifacts", "publish", ".release-cache", "TestResults")) {
+        [void]$directoryExclusions.Add($name)
+    }
+
+    $pendingDirectories = New-Object 'System.Collections.Generic.Stack[System.IO.DirectoryInfo]'
+    $pendingDirectories.Push($rootDirectory)
+    [long]$totalBytes = 0
+
+    while ($pendingDirectories.Count -gt 0) {
+        $currentDirectory = $pendingDirectories.Pop()
+        foreach ($entry in $currentDirectory.EnumerateFileSystemInfos()) {
+            if ($entry -is [System.IO.DirectoryInfo]) {
+                $isRootChild = [System.StringComparer]::OrdinalIgnoreCase.Equals($currentDirectory.FullName, $rootDirectory.FullName)
+                if (($isRootChild -and $rootExclusions.Contains($entry.Name)) -or
+                    $directoryExclusions.Contains($entry.Name) -or
+                    $entry.Name.StartsWith(".verify-", [System.StringComparison]::OrdinalIgnoreCase) -or
+                    (($entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+                    continue
+                }
+
+                $pendingDirectories.Push($entry)
+                continue
+            }
+
+            if ($entry -is [System.IO.FileInfo]) {
+                $totalBytes += $entry.Length
+            }
+        }
+    }
+
+    return $totalBytes
+}
+
+function Assert-IsolatedWorkspaceCapacity([string]$sourceRoot) {
+    [long]$sourceBytes = Get-IsolatedWorkspaceSourceSize -sourceRoot $sourceRoot
+    [long]$buildReserveBytes = 20GB
+    [long]$requiredFreeBytes = ($sourceBytes * 2) + $buildReserveBytes
+    $tempRoot = [System.IO.Path]::GetPathRoot([System.IO.Path]::GetFullPath($env:TEMP))
+    $drive = New-Object System.IO.DriveInfo($tempRoot)
+
+    Write-Host ("Eligible source size: {0:N2} GiB" -f ($sourceBytes / 1GB))
+    Write-Host ("Temporary drive free: {0:N2} GiB" -f ($drive.AvailableFreeSpace / 1GB))
+    if ($drive.AvailableFreeSpace -lt $requiredFreeBytes) {
+        throw ("Insufficient temporary-drive capacity. At least {0:N2} GiB is required for the isolated source copy and build reserve; {1:N2} GiB is available." -f ($requiredFreeBytes / 1GB), ($drive.AvailableFreeSpace / 1GB))
+    }
+}
+
 function Create-IsolatedWorkspace([string]$sourceRoot) {
     Write-Step "Preparing isolated workspace"
+
+    Assert-IsolatedWorkspaceCapacity -sourceRoot $sourceRoot
 
     $script:IsolatedWorkspaceRoot = Join-Path $env:TEMP ("devprojex-release-work\" + [Guid]::NewGuid().ToString("N"))
     $script:IsolatedRepoRoot = Join-Path $script:IsolatedWorkspaceRoot "repo"
@@ -718,8 +799,19 @@ function Create-IsolatedWorkspace([string]$sourceRoot) {
         (Join-Path $sourceRoot ".vs"),
         (Join-Path $sourceRoot ".codex"),
         (Join-Path $sourceRoot ".claude"),
+        (Join-Path $sourceRoot "artifacts"),
+        (Join-Path $sourceRoot ".artifacts"),
         (Join-Path $sourceRoot "publish"),
-        (Join-Path $sourceRoot ".release-cache")
+        (Join-Path $sourceRoot ".release-cache"),
+        (Join-Path $sourceRoot "TestResults"),
+        "bin",
+        "obj",
+        "artifacts",
+        ".artifacts",
+        "publish",
+        ".release-cache",
+        "TestResults",
+        ".verify-*"
     )
 
     & robocopy @robocopyArgs | Out-Null
@@ -744,6 +836,116 @@ function Create-IsolatedWorkspace([string]$sourceRoot) {
     }
 }
 
+function New-ReleaseArchiveEntry(
+    [string]$name,
+    [int]$mode,
+    [bool]$isDirectory,
+    [string]$sourcePath = "",
+    [byte[]]$bytes = $null
+) {
+    return [pscustomobject]@{
+        Name = $name
+        Mode = $mode
+        IsDirectory = $isDirectory
+        SourcePath = $sourcePath
+        Bytes = $bytes
+    }
+}
+
+function Invoke-ExternalTarValidation([string]$archivePath) {
+    $tarCommand = Get-Command tar -ErrorAction SilentlyContinue
+    if ($null -eq $tarCommand) {
+        throw "tar is required for independent archive validation but was not found in PATH."
+    }
+
+    $tarPath = if (-not [string]::IsNullOrWhiteSpace([string]$tarCommand.Source)) {
+        [string]$tarCommand.Source
+    }
+    else {
+        [string]$tarCommand.Name
+    }
+    Invoke-ExternalCommand `
+        -filePath $tarPath `
+        -arguments @("-tvf", $archivePath) `
+        -failureMessage "External tar validation failed for '$archivePath'"
+}
+
+function Assert-ReleaseArchive(
+    [string]$archivePath,
+    [object[]]$expectedEntries,
+    [string]$version = ""
+) {
+    $plistEntryName = "DevProjex.app/Contents/Info.plist"
+    $captureNames = if ([string]::IsNullOrWhiteSpace($version)) { @() } else { @($plistEntryName) }
+    $actualEntries = @(Read-UstarGzipArchive -archivePath $archivePath -captureEntryNames $captureNames)
+    Assert-Condition ($actualEntries.Count -eq $expectedEntries.Count) "Archive '$archivePath' contains $($actualEntries.Count) entries; expected $($expectedEntries.Count)."
+
+    for ($index = 0; $index -lt $expectedEntries.Count; $index++) {
+        $expected = $expectedEntries[$index]
+        $actual = $actualEntries[$index]
+        Assert-Condition ([System.StringComparer]::Ordinal.Equals([string]$actual.Name, [string]$expected.Name)) "Archive '$archivePath' entry $index must be '$($expected.Name)'. Found: '$($actual.Name)'."
+        Assert-Condition ([int]$actual.Mode -eq [int]$expected.Mode) "Archive '$archivePath' entry '$($actual.Name)' has mode $([System.Convert]::ToString([int]$actual.Mode, 8)); expected $([System.Convert]::ToString([int]$expected.Mode, 8))."
+        Assert-Condition ([bool]$actual.IsDirectory -eq [bool]$expected.IsDirectory) "Archive '$archivePath' entry '$($actual.Name)' has an unexpected type."
+        if (-not [bool]$actual.IsDirectory) {
+            Assert-Condition ([long]$actual.Size -gt 0) "Archive '$archivePath' entry '$($actual.Name)' is empty."
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($version)) {
+        $plistEntry = $actualEntries | Where-Object { $_.Name -eq $plistEntryName } | Select-Object -First 1
+        Assert-Condition ($null -ne $plistEntry -and $null -ne $plistEntry.Bytes) "Archive '$archivePath' does not expose Info.plist for validation."
+        $plistContent = [System.Text.Encoding]::UTF8.GetString($plistEntry.Bytes)
+        Assert-Condition (-not $plistContent.Contains('YOUR_RELEASE_VERSION')) "Archive '$archivePath' contains an unresolved Info.plist version placeholder."
+        [xml]$plistDocument = $plistContent
+        Assert-Condition ((Get-PlistStringValue -document $plistDocument -key 'CFBundleVersion') -eq $version) "Archive '$archivePath' contains the wrong CFBundleVersion."
+        Assert-Condition ((Get-PlistStringValue -document $plistDocument -key 'CFBundleShortVersionString') -eq $version) "Archive '$archivePath' contains the wrong CFBundleShortVersionString."
+    }
+
+    Invoke-ExternalTarValidation -archivePath $archivePath
+}
+
+function New-LinuxReleaseArchive(
+    [string]$binaryPath,
+    [string]$archivePath
+) {
+    $entries = @(
+        (New-ReleaseArchiveEntry -name "DevProjex" -mode 493 -isDirectory $false -sourcePath $binaryPath)
+    )
+    New-UstarGzipArchive -archivePath $archivePath -entries $entries
+    Assert-ReleaseArchive -archivePath $archivePath -expectedEntries $entries
+}
+
+function New-MacReleaseArchive(
+    [string]$repoRoot,
+    [string]$binaryPath,
+    [string]$archivePath,
+    [string]$version,
+    [string]$workDirectory
+) {
+    $iconPath = Join-Path $workDirectory "app.icns"
+    New-DeterministicIcns `
+        -iconSetPath (Join-Path $repoRoot "Assets\AppIcon\MacOS\AppIconSet") `
+        -outputPath $iconPath
+
+    $plistContent = Get-MacInfoPlistContent `
+        -templatePath (Join-Path $repoRoot "Packaging\MacOS\Info.plist.template") `
+        -version $version
+    $utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
+    $plistBytes = $utf8WithoutBom.GetBytes($plistContent)
+
+    $entries = @(
+        (New-ReleaseArchiveEntry -name "DevProjex.app/" -mode 493 -isDirectory $true),
+        (New-ReleaseArchiveEntry -name "DevProjex.app/Contents/" -mode 493 -isDirectory $true),
+        (New-ReleaseArchiveEntry -name "DevProjex.app/Contents/Info.plist" -mode 420 -isDirectory $false -bytes $plistBytes),
+        (New-ReleaseArchiveEntry -name "DevProjex.app/Contents/MacOS/" -mode 493 -isDirectory $true),
+        (New-ReleaseArchiveEntry -name "DevProjex.app/Contents/MacOS/DevProjex" -mode 493 -isDirectory $false -sourcePath $binaryPath),
+        (New-ReleaseArchiveEntry -name "DevProjex.app/Contents/Resources/" -mode 493 -isDirectory $true),
+        (New-ReleaseArchiveEntry -name "DevProjex.app/Contents/Resources/app.icns" -mode 420 -isDirectory $false -sourcePath $iconPath)
+    )
+    New-UstarGzipArchive -archivePath $archivePath -entries $entries
+    Assert-ReleaseArchive -archivePath $archivePath -expectedEntries $entries -version $version
+}
+
 function Build-GitHubArtifactsInWorkspace(
     [string]$version,
     [string]$configuration,
@@ -760,12 +962,12 @@ function Build-GitHubArtifactsInWorkspace(
     $workDir = Join-Path $releaseDir "_work"
 
     $targets = @(
-        @{ Rid = "win-x64"; Binary = "DevProjex.exe"; Name = "DevProjex.v$version.win-x64.exe" },
-        @{ Rid = "win-arm64"; Binary = "DevProjex.exe"; Name = "DevProjex.v$version.win-arm64.exe" },
-        @{ Rid = "linux-x64"; Binary = "DevProjex"; Name = "DevProjex.v$version.linux-x64.portable" },
-        @{ Rid = "linux-arm64"; Binary = "DevProjex"; Name = "DevProjex.v$version.linux-arm64.portable" },
-        @{ Rid = "osx-x64"; Binary = "DevProjex"; Name = "DevProjex.v$version.osx-x64" },
-        @{ Rid = "osx-arm64"; Binary = "DevProjex"; Name = "DevProjex.v$version.osx-arm64" }
+        @{ Rid = "win-x64"; Binary = "DevProjex.exe"; Kind = "Windows"; Name = "DevProjex.v$version.win-x64.exe" },
+        @{ Rid = "win-arm64"; Binary = "DevProjex.exe"; Kind = "Windows"; Name = "DevProjex.v$version.win-arm64.exe" },
+        @{ Rid = "linux-x64"; Binary = "DevProjex"; Kind = "Linux"; Name = "DevProjex.v$version.linux-x64.tar.gz" },
+        @{ Rid = "linux-arm64"; Binary = "DevProjex"; Kind = "Linux"; Name = "DevProjex.v$version.linux-arm64.tar.gz" },
+        @{ Rid = "osx-x64"; Binary = "DevProjex"; Kind = "MacOS"; Name = "DevProjex.v$version.osx-x64.app.tar.gz" },
+        @{ Rid = "osx-arm64"; Binary = "DevProjex"; Kind = "MacOS"; Name = "DevProjex.v$version.osx-arm64.app.tar.gz" }
     )
 
     if (Test-Path $releaseDir) {
@@ -822,10 +1024,27 @@ function Build-GitHubArtifactsInWorkspace(
         }
 
         $destinationPath = Join-Path $releaseDir ([string]$target.Name)
-        Copy-Item -LiteralPath $sourcePath -Destination $destinationPath -Force
-
-        if ($rid.StartsWith("win-", [System.StringComparison]::OrdinalIgnoreCase)) {
-            Assert-WindowsArtifactVersion -artifactPath $destinationPath -displayVersion $version -storePackageVersion $storePackageVersion
+        switch ([string]$target.Kind) {
+            "Windows" {
+                Copy-Item -LiteralPath $sourcePath -Destination $destinationPath -Force
+                Assert-WindowsArtifactVersion -artifactPath $destinationPath -displayVersion $version -storePackageVersion $storePackageVersion
+            }
+            "Linux" {
+                New-LinuxReleaseArchive -binaryPath $sourcePath -archivePath $destinationPath
+            }
+            "MacOS" {
+                $packageWorkDirectory = Join-Path $workDir "$rid-package"
+                New-Item -ItemType Directory -Path $packageWorkDirectory -Force | Out-Null
+                New-MacReleaseArchive `
+                    -repoRoot $script:IsolatedRepoRoot `
+                    -binaryPath $sourcePath `
+                    -archivePath $destinationPath `
+                    -version $version `
+                    -workDirectory $packageWorkDirectory
+            }
+            default {
+                throw "Unsupported GitHub artifact kind '$($target.Kind)' for $rid."
+            }
         }
     }
 
@@ -835,7 +1054,7 @@ function Build-GitHubArtifactsInWorkspace(
         Where-Object { $_.Name -ne "SHA256SUMS.txt" } |
         Sort-Object Name |
         ForEach-Object {
-            $hash = (Get-FileHash -Algorithm SHA256 -Path $_.FullName).Hash.ToLowerInvariant()
+            $hash = Get-FileSha256Hex -path $_.FullName
             $hashLines += "$hash *$($_.Name)"
         }
 
@@ -1327,7 +1546,11 @@ function Invoke-WackValidationInWorkspace() {
     }
 }
 
-function Publish-ArtifactsToSource([string]$sourceRoot, [string]$version) {
+function Publish-ArtifactsToSource(
+    [string]$sourceRoot,
+    [string]$version,
+    [switch]$GitHubOnly
+) {
     Write-Step "Publishing artifacts to source publish folder"
 
     $isolatedGitHubDir = Join-Path $script:IsolatedRepoRoot "publish\github\v$version"
@@ -1341,6 +1564,13 @@ function Publish-ArtifactsToSource([string]$sourceRoot, [string]$version) {
     }
     New-Item -ItemType Directory -Path $sourceGitHubDir -Force | Out-Null
     Copy-Item -Path (Join-Path $isolatedGitHubDir "*") -Destination $sourceGitHubDir -Recurse -Force
+
+    if ($GitHubOnly) {
+        return @{
+            GitHub = $sourceGitHubDir
+            Store = $null
+        }
+    }
 
     $storeArtifacts = Get-StoreArtifactPaths
     if ($null -eq $storeArtifacts -or $storeArtifacts.Count -eq 0) {
@@ -1475,8 +1705,9 @@ function Cleanup-IsolatedWorkspace() {
 Ensure-DotnetAvailable
 $repoRoot = Get-DevProjexRepoRoot -startPath $PSScriptRoot
 
-if ($ValidateConfigOnly -and $SmokeStoreBuildOnly) {
-    throw "Use either -ValidateConfigOnly or -SmokeStoreBuildOnly, not both."
+if (($ValidateConfigOnly -and $SmokeStoreBuildOnly) -or
+    ($GitHubArtifactsOnly -and ($ValidateConfigOnly -or $SmokeStoreBuildOnly))) {
+    throw "Use only one of -ValidateConfigOnly, -SmokeStoreBuildOnly, or -GitHubArtifactsOnly."
 }
 
 if ($ValidateConfigOnly) {
@@ -1502,8 +1733,13 @@ Write-Host "Version: $resolvedVersion"
 Write-Host "Store package version: $storePackageVersion"
 Write-Host "Build mode  : isolated workspace (local source tree untouched)"
 Write-Host "GitHub build: Release (single-file, self-contained)"
-Write-Host "Store build : ReleaseStore (.msixupload, x64|arm64)"
-Write-Host "Store check : WACK (must pass before artifacts are published)"
+if ($GitHubArtifactsOnly) {
+    Write-Host "Store build : skipped (-GitHubArtifactsOnly)"
+}
+else {
+    Write-Host "Store build : ReleaseStore (.msixupload, x64|arm64)"
+    Write-Host "Store check : WACK (must pass before artifacts are published)"
+}
 Write-Host "Store listing CSV: not modified"
 Write-Step "Validating release config"
 Invoke-ReleaseConfigValidation -repoRoot $repoRoot
@@ -1515,16 +1751,23 @@ try {
     Write-Step "Building GitHub artifacts in isolated workspace"
     Build-GitHubArtifactsInWorkspace -version $resolvedVersion -configuration "Release" -storePackageVersion $storePackageVersion
 
-    Write-Step "Building Microsoft Store package in isolated workspace"
-    Build-StoreArtifactsInWorkspace -displayVersion $resolvedVersion -configuration "ReleaseStore" -platform "x64" -bundlePlatforms "x64|arm64" -packageVersion $storePackageVersion
+    if (-not $GitHubArtifactsOnly) {
+        Write-Step "Building Microsoft Store package in isolated workspace"
+        Build-StoreArtifactsInWorkspace -displayVersion $resolvedVersion -configuration "ReleaseStore" -platform "x64" -bundlePlatforms "x64|arm64" -packageVersion $storePackageVersion
 
-    Invoke-WackValidationInWorkspace
+        Invoke-WackValidationInWorkspace
+    }
 
-    $finalPaths = Publish-ArtifactsToSource -sourceRoot $sourceRoot -version $resolvedVersion
+    $finalPaths = Publish-ArtifactsToSource `
+        -sourceRoot $sourceRoot `
+        -version $resolvedVersion `
+        -GitHubOnly:$GitHubArtifactsOnly
 
     Write-Step "Done"
     Write-Host "GitHub artifacts: $($finalPaths.GitHub)"
-    Write-Host "MS Store artifacts: $($finalPaths.Store)"
+    if (-not $GitHubArtifactsOnly) {
+        Write-Host "MS Store artifacts: $($finalPaths.Store)"
+    }
 }
 finally {
     Restore-NuGetEnvironment

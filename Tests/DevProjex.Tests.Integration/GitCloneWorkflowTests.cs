@@ -294,6 +294,7 @@ public sealed class GitCloneWorkflowTests : IAsyncLifetime, IDisposable
 				Assert.NotNull(reopened);
 			}
 			_cacheService.DeleteRepositoryDirectory(currentCachedRepoPath);
+			await AssertCacheEventuallyDeletedAsync(currentCachedRepoPath);
 			Assert.Null(_cacheService.FindIndexedRepository(TestRepoUrl));
 			currentCachedRepoPath = null;
         }

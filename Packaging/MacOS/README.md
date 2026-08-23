@@ -7,65 +7,42 @@ This folder contains information for packaging DevProjex on macOS.
 Icon PNGs are located in `Assets/AppIcon/MacOS/AppIconSet/`:
 - 16.png, 32.png, 64.png, 128.png, 256.png, 512.png, 1024.png
 
-## Generating app.icns
+## Official Release Artifact
 
-The `.icns` file is required for macOS application bundles. It must be generated on macOS using `iconutil`.
+`Scripts/release-all.ps1` builds the official unsigned macOS artifacts:
 
-### Option 1: Using the provided script (macOS only)
-
-```bash
-./Scripts/generate-app-icns.sh
+```powershell
+./Scripts/release-all.ps1 -Version 5.1 -GitHubArtifactsOnly
 ```
 
-This will create `Assets/AppIcon/MacOS/app.icns`.
+The resulting files are named `DevProjex.v<version>.osx-<architecture>.app.tar.gz`.
+Each archive contains one Finder-ready `DevProjex.app` bundle:
 
-### Option 2: Manual generation (macOS only)
-
-```bash
-# Create iconset directory with proper naming
-mkdir -p Assets/AppIcon/MacOS/app.iconset
-
-cp Assets/AppIcon/MacOS/AppIconSet/16.png   Assets/AppIcon/MacOS/app.iconset/icon_16x16.png
-cp Assets/AppIcon/MacOS/AppIconSet/32.png   Assets/AppIcon/MacOS/app.iconset/icon_16x16@2x.png
-cp Assets/AppIcon/MacOS/AppIconSet/32.png   Assets/AppIcon/MacOS/app.iconset/icon_32x32.png
-cp Assets/AppIcon/MacOS/AppIconSet/64.png   Assets/AppIcon/MacOS/app.iconset/icon_32x32@2x.png
-cp Assets/AppIcon/MacOS/AppIconSet/128.png  Assets/AppIcon/MacOS/app.iconset/icon_128x128.png
-cp Assets/AppIcon/MacOS/AppIconSet/256.png  Assets/AppIcon/MacOS/app.iconset/icon_128x128@2x.png
-cp Assets/AppIcon/MacOS/AppIconSet/256.png  Assets/AppIcon/MacOS/app.iconset/icon_256x256.png
-cp Assets/AppIcon/MacOS/AppIconSet/512.png  Assets/AppIcon/MacOS/app.iconset/icon_256x256@2x.png
-cp Assets/AppIcon/MacOS/AppIconSet/512.png  Assets/AppIcon/MacOS/app.iconset/icon_512x512.png
-cp Assets/AppIcon/MacOS/AppIconSet/1024.png Assets/AppIcon/MacOS/app.iconset/icon_512x512@2x.png
-
-# Generate icns
-iconutil -c icns Assets/AppIcon/MacOS/app.iconset -o Assets/AppIcon/MacOS/app.icns
-
-# Cleanup
-rm -rf Assets/AppIcon/MacOS/app.iconset
+```text
+DevProjex.app/
+└── Contents/
+    ├── Info.plist
+    ├── MacOS/
+    │   └── DevProjex
+    └── Resources/
+        └── app.icns
 ```
 
-### Option 3: Cross-platform using png2icns (Node.js)
+The release script generates `app.icns` deterministically from the committed PNGs,
+fills `Packaging/MacOS/Info.plist.template` with the release version, preserves Unix
+permissions in a deterministic ustar archive, and verifies the result with both its
+own reader and `tar -tvf`. No macOS tools, Node.js packages, or network downloads are
+used during bundle assembly.
 
-```bash
-npm install -g png2icns
-png2icns Assets/AppIcon/MacOS/app.icns \
-    Assets/AppIcon/MacOS/AppIconSet/16.png \
-    Assets/AppIcon/MacOS/AppIconSet/32.png \
-    Assets/AppIcon/MacOS/AppIconSet/128.png \
-    Assets/AppIcon/MacOS/AppIconSet/256.png \
-    Assets/AppIcon/MacOS/AppIconSet/512.png \
-    Assets/AppIcon/MacOS/AppIconSet/1024.png
-```
+The raw RID publish directory must still contain exactly one file named `DevProjex`.
+It is an intermediate validation boundary and is not uploaded as the macOS release
+artifact. DevProjex targets .NET 10 and therefore requires macOS 14 or newer.
 
-## Raw Portable Publish and an Unprepared App Bundle
+## Reference Manual Bundle Recipe
 
-Release validation produces one raw self-contained `DevProjex` executable. It is
-the portable artifact used for CLI/TUI and advanced direct GUI launch, but it is
-not a prepared Finder distribution.
-
-The following maintainer example wraps that executable in an unprepared `.app`.
-The current release scripts do not build, sign, notarize, or execute this bundle,
-so do not present the example output as an official macOS distribution. DevProjex
-targets .NET 10 and therefore requires macOS 14 or newer.
+The following recipe documents the bundle layout for maintainers. Normal releases
+must use `release-all.ps1` so the icon, metadata, permissions, and validation remain
+reproducible.
 
 ```bash
 # Build for macOS
@@ -88,7 +65,8 @@ mkdir -p "DevProjex.app/Contents/Resources"
 # Copy executable
 cp ./publish/osx-x64/DevProjex "DevProjex.app/Contents/MacOS/DevProjex"
 
-# Copy icon
+# Generate or copy a valid app.icns into the bundle
+./Scripts/generate-app-icns.sh
 cp Assets/AppIcon/MacOS/app.icns "DevProjex.app/Contents/Resources/app.icns"
 
 # Create Info.plist (example - customize as needed)
@@ -122,10 +100,8 @@ cat > "DevProjex.app/Contents/Info.plist" << 'EOF'
 EOF
 ```
 
-The raw publish directory must contain exactly one file named `DevProjex`; that is
-the artifact checked by release validation. The subsequent `.app` also contains
-bundle metadata and an icon and is not the one-file portable artifact. Native
-libraries can be extracted by the .NET single-file host at startup; set
+This manual output is unsigned and not notarized. Native libraries can be extracted
+by the .NET single-file host at startup; set
 `DOTNET_BUNDLE_EXTRACT_BASE_DIR` to a private writable directory if the process
 has no usable home directory.
 
