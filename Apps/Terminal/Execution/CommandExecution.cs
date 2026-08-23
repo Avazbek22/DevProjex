@@ -53,8 +53,10 @@ internal static class CommandExecution
 			return WriteError(environment, outputOptions, text, new TerminalError(
 				exception.Code,
 				SafeMessageFor(exception.Code, text),
+				HintFor(exception.Code, text),
 				ExitCode: CommandLineExitCodes.UsageError,
-				Exception: exception));
+				Exception: exception,
+				ContextPath: exception.ContextPath));
 		}
 		catch (DesktopControl.DesktopControlException exception)
 		{
@@ -148,6 +150,7 @@ internal static class CommandExecution
 		"DPX-PROJECT-PATH-REQUIRED" => localization["Terminal.Error.ProjectPathRequired"],
 		"DPX-PROJECT-NOT-FOUND" => localization["Terminal.Error.ProjectNotFound"],
 		"DPX-SELECTION-PATH-INVALID" => localization["Terminal.Error.SelectionPathInvalid"],
+		"DPX-SELECTION-PATH-MISSING" => localization["Terminal.Diagnostic.SelectedPathMissing"],
 		"DPX-CLI-SELECT-FROM-INVALID" => localization["Terminal.Error.SelectFromInvalid"],
 		"DPX-CLI-GIT-URL-INVALID" => localization["Terminal.Error.RepositoryUrlInvalid"],
 		"DPX-CLI-GIT-BRANCH-INVALID" => localization["Terminal.Error.BranchInvalid"],
@@ -173,5 +176,11 @@ internal static class CommandExecution
 		var value when value.StartsWith("DPX-DESKTOP-", StringComparison.Ordinal) =>
 			localization["Terminal.Error.DesktopRequestFailed"],
 		_ => localization["Terminal.Error.CommandInvalid"]
+	};
+
+	private static string? HintFor(string code, LocalizationService localization) => code switch
+	{
+		"DPX-CLI-PROFILE-NOT-FOUND" => localization["Terminal.Hint.ProfileStandard"],
+		_ => null
 	};
 }

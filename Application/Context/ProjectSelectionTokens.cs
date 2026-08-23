@@ -35,4 +35,15 @@ public static class ProjectSelectionTokens
 
 	public static string ToToken(ProjectExclusion exclusion) =>
 		ProjectPresentationCatalog.Get(exclusion).Token;
+
+	public static IReadOnlyList<ProjectExclusion> OrderExclusions(
+		IEnumerable<ProjectExclusion> exclusions)
+	{
+		ArgumentNullException.ThrowIfNull(exclusions);
+		return exclusions
+			.Where(static exclusion => exclusion != ProjectExclusion.HideSecrets)
+			.Distinct()
+			.OrderBy(static exclusion => ProjectPresentationCatalog.Get(exclusion).Order)
+			.ToArray();
+	}
 }

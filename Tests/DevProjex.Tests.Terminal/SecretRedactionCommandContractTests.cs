@@ -224,6 +224,97 @@ public sealed class SecretRedactionCommandContractTests
 	}
 
 	[Fact]
+	public async Task EffectiveFindingsFromDetectorFixtureAreRedactedInContextAndZipAtTheirSourceRanges()
+	{
+		using var workspace = CreateWorkspace(includeSecret: false);
+		File.Delete(Path.Combine(workspace.ProjectRoot, "src", "app.cs"));
+		Directory.Delete(Path.Combine(workspace.ProjectRoot, "src"));
+		var repositoryRoot = PublishedApplicationLocator.FindRepositoryRoot();
+		var source = await File.ReadAllTextAsync(
+			Path.Combine(repositoryRoot, "Tests", "DevProjex.Tests.Unit", "PrivateDataDetectorTests.cs"),
+			TestContext.Current.CancellationToken);
+		var sourcePath = workspace.Temporary.WriteFile("project/PrivateDataDetectorTests.cs", source);
+		var findingsEnvironment = new TestTerminalEnvironment();
+
+		var findingsExitCode = await RunAsync(
+			workspace,
+			findingsEnvironment,
+			[
+				"analyze", workspace.ProjectRoot,
+				"--git-mode", "none",
+				"--hide-secrets", "--hide-private-data",
+				"--findings", "--format", "json", "--plain", "-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, findingsExitCode);
+		using var findingsDocument = JsonDocument.Parse(findingsEnvironment.StandardOutput);
+		var descriptors = findingsDocument.RootElement.GetProperty("findings").EnumerateArray().ToArray();
+		Assert.NotEmpty(descriptors);
+
+		var services = new TerminalServiceFactory(() => workspace.AppDataRoot).Create(AppLanguage.En);
+		var redactionScope = services.SecretRedactionSession.BeginOutput(
+			workspace.ProjectRoot,
+			[sourcePath],
+			features: SecretRedactionFeatures.Secrets | SecretRedactionFeatures.PrivateData);
+		var expected = redactionScope.Redact(
+			sourcePath,
+			source,
+			TestContext.Current.CancellationToken);
+		_ = redactionScope.Complete();
+		Assert.Equal(expected.DetectedCount, descriptors.Length);
+		Assert.Equal(expected.DetectedCount, expected.RedactedCount);
+
+		var contextPath = Path.Combine(workspace.OutputRoot, "redacted-context.json");
+		var zipPath = Path.Combine(workspace.OutputRoot, "redacted-project.zip");
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				new TestTerminalEnvironment(),
+				[
+					"export", "context", workspace.ProjectRoot,
+					"--git-mode", "none",
+					"--hide-secrets", "--hide-private-data",
+					"--view", "content", "--format", "json", "--plain", "-o", contextPath
+				]));
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				new TestTerminalEnvironment(),
+				[
+					"export", "project", workspace.ProjectRoot,
+					"--git-mode", "none",
+					"--hide-secrets", "--hide-private-data",
+					"--as", "zip", "-o", zipPath
+				]));
+
+		using var contextDocument = JsonDocument.Parse(await File.ReadAllTextAsync(
+			contextPath,
+			TestContext.Current.CancellationToken));
+		var contextFile = Assert.Single(contextDocument.RootElement.GetProperty("files").EnumerateArray());
+		var contextContent = contextFile.GetProperty("content").GetString();
+		using var archive = System.IO.Compression.ZipFile.OpenRead(zipPath);
+		var entry = Assert.Single(
+			archive.Entries,
+			static candidate => candidate.FullName.EndsWith(
+				"PrivateDataDetectorTests.cs",
+				StringComparison.Ordinal));
+		using var reader = new StreamReader(entry.Open(), Encoding.UTF8);
+		var zipContent = await reader.ReadToEndAsync(TestContext.Current.CancellationToken);
+
+		Assert.Equal(expected.Text, contextContent);
+		Assert.Equal(expected.Text, zipContent);
+		Assert.All(expected.Spans, span =>
+		{
+			Assert.Equal(SecretPreviewSpanState.Redacted, span.State);
+			var rawValue = source.Substring(span.SourceStart, span.SourceLength);
+			Assert.NotEqual(rawValue, contextContent!.Substring(span.Start, span.Length));
+			Assert.NotEqual(rawValue, zipContent.Substring(span.Start, span.Length));
+		});
+	}
+
+	[Fact]
 	public async Task FailOnFindingsWritesTheReportAndReturnsPolicyFailure()
 	{
 		using var workspace = CreateWorkspace();

@@ -121,6 +121,10 @@ public sealed class DoctorCommandContractTests
 			document.RootElement.GetProperty("checks").EnumerateArray(),
 			static check => check.GetProperty("name").GetString() == "desktop-ipc");
 		Assert.Contains("stale=1", ipc.GetProperty("detail").GetString(), StringComparison.Ordinal);
+		var hint = ipc.GetProperty("hint").GetString();
+		Assert.Contains("removed automatically", hint, StringComparison.Ordinal);
+		Assert.Contains("Desktop", hint, StringComparison.Ordinal);
+		Assert.DoesNotContain("Run devprojex ui list", hint, StringComparison.Ordinal);
 		Assert.True(File.Exists(paths.GetRegistrationPath(stale.InstanceId)));
 	}
 }

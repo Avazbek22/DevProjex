@@ -154,6 +154,52 @@ public sealed class CliExpansionCommandTests
 	}
 
 	[Fact]
+	public async Task TreeOutputInsideTheExactOpenedRootIsRejected()
+	{
+		using var container = new TemporaryDirectory();
+		using var data = new TemporaryDirectory();
+		var project = container.CreateDirectory("Tests/Unit");
+		container.WriteFile("Tests/Unit/src/App.cs", "internal sealed class App { }\n");
+		var destination = Path.Combine(project, "Docs", "tree.md");
+		Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(() => data.Path))
+			.RunAsync(
+				["tree", project, "--git-mode", "none", "-f", "markdown", "-o", destination],
+				TestContext.Current.CancellationToken);
+
+		Assert.NotEqual(CommandLineExitCodes.Success, exitCode);
+		Assert.False(File.Exists(destination));
+		Assert.Empty(environment.StandardOutput);
+	}
+
+	[Fact]
+	public async Task TreeOutputOutsideNestedProjectButInsideContainingRepositoryIsAllowed()
+	{
+		using var container = new TemporaryDirectory();
+		using var data = new TemporaryDirectory();
+		var project = container.CreateDirectory("Tests/Unit");
+		container.WriteFile("Tests/Unit/src/App.cs", "internal sealed class App { }\n");
+		var destination = Path.Combine(container.CreateDirectory("Docs"), "tree.md");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(() => data.Path))
+			.RunAsync(
+				["tree", project, "--git-mode", "none", "-f", "markdown", "-o", destination],
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.True(File.Exists(destination));
+		Assert.Equal(Path.GetFullPath(destination) + Environment.NewLine, environment.StandardOutput);
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
 	public async Task TreeHelpDoesNotExposeContentTransformations()
 	{
 		var environment = new TestTerminalEnvironment();

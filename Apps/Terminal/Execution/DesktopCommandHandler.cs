@@ -8,7 +8,8 @@ public sealed class DesktopCommandHandler(
 	ITerminalEnvironment environment,
 	DesktopControlClient? client = null,
 	DesktopProcessLauncher? launcher = null,
-	bool writeOutput = true)
+	bool writeOutput = true,
+	LocalizationService? localization = null)
 {
 	private static readonly JsonSerializerOptions MachineJsonOptions = new()
 	{
@@ -18,6 +19,8 @@ public sealed class DesktopCommandHandler(
 
 	private readonly DesktopControlClient _client = client ?? new DesktopControlClient();
 	private readonly DesktopProcessLauncher _launcher = launcher ?? new DesktopProcessLauncher();
+	private readonly LocalizationService _localization = localization ??
+		new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);
 
 	public async Task<int> OpenAsync(
 		DesktopOpenRequest request,
@@ -110,6 +113,11 @@ public sealed class DesktopCommandHandler(
 		}
 		else
 		{
+			if (instances.Count == 0)
+			{
+				environment.Output.WriteLine(_localization["Terminal.Ui.NoInstances"]);
+				return CommandLineExitCodes.Success;
+			}
 			foreach (var instance in instances)
 				environment.Output.WriteLine($"{instance.InstanceId}\t{instance.ProcessId}\t{instance.ProjectPath ?? "-"}");
 		}

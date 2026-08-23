@@ -70,20 +70,20 @@ public sealed class SelectedPathsContractTests
 	}
 
 	[Fact]
-	public async Task MissingExplicitSelectionNeverFallsBackToWholeTree()
+	public async Task MissingExplicitSelectionIsAUsageErrorWithoutOutput()
 	{
 		using var workspace = CreateWorkspace();
+		var environment = new TestTerminalEnvironment();
 
-		using var document = await ExportJsonWithDiagnosticAsync(
+		var exitCode = await RunAsync(
 			workspace.Path,
-			"DPX-SELECTION-PATH-MISSING",
+			environment,
 			"--select", "missing.cs");
 
-		Assert.Empty(ReadFilePaths(document));
-		Assert.Equal(0, document.RootElement.GetProperty("metrics").GetProperty("files").GetInt32());
-		Assert.Contains(
-			document.RootElement.GetProperty("diagnostics").EnumerateArray(),
-			static item => item.GetProperty("code").GetString() == "DPX-SELECTION-PATH-MISSING");
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("DPX-SELECTION-PATH-MISSING", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("missing.cs", environment.StandardError, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -344,17 +344,87 @@ public sealed class SelectedPathsContractTests
 	{
 		using var workspace = CreateWorkspace();
 
-		using var document = OperatingSystem.IsWindows()
-			? await ExportJsonAsync(workspace.Path, "--select", "SRC/A.CS")
-			: await ExportJsonWithDiagnosticAsync(
-				workspace.Path,
-				"DPX-SELECTION-PATH-MISSING",
-				"--select", "SRC/A.CS");
-
 		if (OperatingSystem.IsWindows())
+		{
+			using var document = await ExportJsonAsync(workspace.Path, "--select", "SRC/A.CS");
 			Assert.Equal(FullContentPaths(workspace.Path, "src/a.cs"), ReadFilePaths(document));
+		}
 		else
-			Assert.Empty(ReadFilePaths(document));
+		{
+			var environment = new TestTerminalEnvironment();
+			var exitCode = await RunAsync(workspace.Path, environment, "--select", "SRC/A.CS");
+			Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+			Assert.Contains("DPX-SELECTION-PATH-MISSING", environment.StandardError, StringComparison.Ordinal);
+		}
+	}
+
+	[Theory]
+	[InlineData("analyze", "select")]
+	[InlineData("analyze", "select-from")]
+	[InlineData("tree", "select")]
+	[InlineData("tree", "select-from")]
+	[InlineData("context", "select")]
+	[InlineData("context", "select-from")]
+	[InlineData("project", "select")]
+	[InlineData("project", "select-from")]
+	public async Task PhysicallyMissingSelectionFailsBeforeAnyCommandWritesOutput(
+		string command,
+		string selectionSource)
+	{
+		using var workspace = CreateWorkspace();
+		using var output = new TemporaryDirectory();
+		var environment = new TestTerminalEnvironment();
+		var selectedValue = "missing/path.cs";
+		if (selectionSource == "select-from")
+			selectedValue = output.WriteFile("selection.txt", selectedValue + "\n");
+		var destination = Path.Combine(output.Path, command == "project" ? "result.zip" : "result.txt");
+
+		var exitCode = await RunSelectionCommandAsync(
+			command,
+			workspace.Path,
+			destination,
+			environment,
+			$"--{selectionSource}",
+			selectedValue);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("DPX-SELECTION-PATH-MISSING", environment.StandardError, StringComparison.Ordinal);
+		Assert.False(File.Exists(destination));
+		Assert.False(Directory.Exists(destination));
+	}
+
+	[Theory]
+	[InlineData("analyze", "select")]
+	[InlineData("analyze", "select-from")]
+	[InlineData("tree", "select")]
+	[InlineData("tree", "select-from")]
+	[InlineData("context", "select")]
+	[InlineData("context", "select-from")]
+	public async Task ExistingSelectionExcludedFromEffectiveTreeRemainsAWarning(
+		string command,
+		string selectionSource)
+	{
+		using var workspace = CreateWorkspace();
+		using var output = new TemporaryDirectory();
+		var environment = new TestTerminalEnvironment();
+		var selectedValue = "src/a.cs";
+		if (selectionSource == "select-from")
+			selectedValue = output.WriteFile("selection.txt", selectedValue + "\n");
+		var destination = Path.Combine(output.Path, "result.txt");
+
+		var exitCode = await RunSelectionCommandAsync(
+			command,
+			workspace.Path,
+			destination,
+			environment,
+			"--extension", "md",
+			$"--{selectionSource}", selectedValue);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Contains("DPX-SELECTION-PATH-MISSING", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("src/a.cs", environment.StandardError, StringComparison.Ordinal);
+		Assert.True(File.Exists(destination));
 	}
 
 	[Fact]
@@ -481,6 +551,39 @@ public sealed class SelectedPathsContractTests
 
 		public override ValueTask<string?> ReadLineAsync(CancellationToken cancellationToken) =>
 			throw new InvalidOperationException("Interactive stdin must not be read.");
+	}
+
+	private static Task<int> RunSelectionCommandAsync(
+		string command,
+		string projectPath,
+		string destination,
+		TestTerminalEnvironment environment,
+		params string[] selectionArguments)
+	{
+		var arguments = command switch
+		{
+			"analyze" => new List<string>
+			{
+				"analyze", projectPath, "--format", "json", "--git-mode", "none", "-o", destination
+			},
+			"tree" => new List<string>
+			{
+				"tree", projectPath, "--format", "text", "--git-mode", "none", "-o", destination
+			},
+			"context" => new List<string>
+			{
+				"export", "context", projectPath, "--view", "content", "--format", "text",
+				"--git-mode", "none", "-o", destination
+			},
+			"project" => new List<string>
+			{
+				"export", "project", projectPath, "--as", "zip", "--git-mode", "none", "-o", destination
+			},
+			_ => throw new ArgumentOutOfRangeException(nameof(command), command, null)
+		};
+		arguments.AddRange(selectionArguments);
+		return new TerminalApplication(environment, new TerminalServiceFactory())
+			.RunAsync(arguments, TestContext.Current.CancellationToken);
 	}
 
 	private sealed class OversizedSingleLineReader(long length) : TextReader

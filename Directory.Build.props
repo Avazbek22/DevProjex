@@ -1,8 +1,8 @@
 <Project>
   <PropertyGroup>
     <ImplicitUsings>enable</ImplicitUsings>
-    <DevProjexVersion Condition="'$(DevProjexVersion)'==''">5.0</DevProjexVersion>
-    <DevProjexAssemblyVersion Condition="'$(DevProjexAssemblyVersion)'==''">5.0.0.0</DevProjexAssemblyVersion>
+    <DevProjexVersion Condition="'$(DevProjexVersion)'==''">5.1</DevProjexVersion>
+    <DevProjexAssemblyVersion Condition="'$(DevProjexAssemblyVersion)'==''">5.1.0.0</DevProjexAssemblyVersion>
     <DevProjexFileVersion Condition="'$(DevProjexFileVersion)'==''">$(DevProjexAssemblyVersion)</DevProjexFileVersion>
     <DevProjexInformationalVersion Condition="'$(DevProjexInformationalVersion)'==''">$(DevProjexVersion)</DevProjexInformationalVersion>
     <DevProjexStorePackageVersion Condition="'$(DevProjexStorePackageVersion)'==''">5.0.0.0</DevProjexStorePackageVersion>

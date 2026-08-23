@@ -468,11 +468,13 @@ public sealed class ReleaseHardeningOutputRegressionTests
 			"--git-mode", "none",
 			"--exclude", "none",
 			"--dry-run",
-			"-o", "-");
+			"-o", "-",
+			"--language", "en");
 
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
 		Assert.Empty(environment.StandardOutput);
-		Assert.NotEmpty(environment.StandardError);
+		Assert.Contains("Destination: stdout", environment.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain("Destination: -", environment.StandardError, StringComparison.Ordinal);
 		Assert.Equal("class App {}\n", await File.ReadAllTextAsync(
 			source,
 			TestContext.Current.CancellationToken));

@@ -209,13 +209,17 @@ public sealed class ProfileCommandHandler(
 				kind = PortableProjectProfileService.DocumentKind,
 				selection = new
 				{
-					roots = selection.Roots,
-					extensions = selection.Extensions,
-					selectedPaths = selection.SelectedPaths ?? [],
+					roots = selection.Roots?.OrderBy(static value => value, PathComparer.Default).ToArray(),
+					extensions = selection.Extensions?
+						.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
+						.ToArray(),
+					selectedPaths = (selection.SelectedPaths ?? [])
+						.OrderBy(static value => value, PathComparer.Default)
+						.ToArray(),
 					gitMode = selection.GitMode is { } gitMode
 						? ProjectSelectionTokens.ToToken(gitMode)
 						: null,
-					exclusions = (selection.Exclusions ?? [])
+					exclusions = ProjectSelectionTokens.OrderExclusions(selection.Exclusions ?? [])
 						.Select(ProjectSelectionTokens.ToToken)
 						.ToArray(),
 					hideSecrets = selection.HideSecrets == true,
