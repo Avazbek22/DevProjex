@@ -1,16 +1,15 @@
  DevProjex Terminal · <PROJECT>
  <PROJECT_ROOT>
 ┌┤> PROJECT TREE├─────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├───────────────────────────────────────────┐┌┤  PARAMETERS├──────────────────────┐
-│v [x] <PROJECT>   ││<PROJECT>                                             ││┌┤Content processing:├─────────────┐│
+│v [x] <PROJECT>   ││<PROJECT>                                             ││┌┤Content processing├──────────────┐│
 │  > [x] src                              ││├── src                                                                      │││  [ ] Hide secrets                ││
 │    [x] global.json                      │││   ├── Feature                                                              │││  [ ] Hide private data           ││
 │    [x] readme.md                        │││   │   └── Handler.cs                                                       │││  [ ] Compress code               ││
 │                                 ┌┤Action palette├─────────────────────────────────────────────────────────────────────────┐ [ ] Strip comments              ││
 │                                 │ Filter actions:                                                                         │ [ ] Strip blank lines           ││
 │                                 │ Preview format                                                                          │─────────────────────────────────┘│
-│                                 │                                                                                         │Exclusions├──────────────────────┐│
-│                                 │ Preview format: ASCII  [F]                                                              │ [x] All                         ││
-│                                 │                                                                                         │ [x] Use .gitignore              ││
+│                                 │                                                                                         │Exclusions├─────────── [x] All ──┐│
+│                                 │ Preview format: ASCII  [F]                                                              │ [x] Use .gitignore              ││
 │                                 │                                                                                         │ [ ] Tracked Git files only      ││
 │                                 │                                                                                         │ [x] Smart ignore                ││
 │                                 │                                                                                         │ [x] Empty folders               ││
@@ -20,12 +19,13 @@
 │                                 │                                                                                         │ [x] dot folders                 ││
 │                                 │                                                                                         │ [x] dot files                   ││
 │                                 │                                                                                         │ [x] Files without extension     ││
+│                                 │                                                                                         │                                 ││
 │                                 │                                                                                         │─────────────────────────────────┘│
-│                                 │ CONTEXT PREVIEW · Preview format · ASCII                                                │File types├──────────────────────┐│
-│                                 │ Choose ASCII, JSON, XML, or Markdown for the tree.                                      │ [x] All                         ││
-│                                 │                                                                                         │ [x] .cs                         ││
+│                                 │ CONTEXT PREVIEW · Preview format · ASCII                                                │File types├─────────── [x] All ──┐│
+│                                 │ Choose ASCII, JSON, XML, or Markdown for the tree.                                      │ [x] .cs                         ││
 │                                 │                                                                                         │ [x] .json                       ││
 │                                 │                                                                                         │ [x] .md                         ││
+│                                 │                                                                                         │                                 ││
 │                                 │                                                                                         │                                 ││
 │                                 │                                  ⟦ Back ⟧▖ ⟦► Run ◄⟧▖                                   │                                 ││
 │                                 │                                  ▝▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▘                                   │                                 ││

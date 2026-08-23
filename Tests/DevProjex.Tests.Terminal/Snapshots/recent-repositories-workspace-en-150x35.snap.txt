@@ -1,15 +1,14 @@
  DevProjex Terminal · DevProjex
  https://github.com/Avazbek22/DevProjex
 ┌┤> PROJECT TREE├──────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├────────────────────────────────────┐┌┤  PARAMETERS├──────────────────────┐
-│v [x] DevProjex                       ││DevProjex                                                             ││┌┤Content processing:├─────────────┐│
+│v [x] DevProjex                       ││DevProjex                                                             ││┌┤Content processing├──────────────┐│
 │  > [x] src                           ││├── src                                                               │││  [ ] Hide secrets                ││
 │    [x] README.md                     │││   └── RepositoryMarker.cs                                           │││  [ ] Hide private data           ││
 │                                      ││└── README.md                                                         │││  [ ] Compress code               ││
 │                                      ││                                                                      │││  [ ] Strip comments              ││
 │                                      ││                                                                      │││  [ ] Strip blank lines           ││
 │                                      ││                                                                      ││└──────────────────────────────────┘│
-│                                      ││                                                                      ││┌┤Exclusions├──────────────────────┐│
-│                                      ││                                                                      │││  [x] All                         ││
+│                                      ││                                                                      ││┌┤Exclusions├─────────── [x] All ──┐│
 │                                      ││                                                                      │││  [x] Use .gitignore              ││
 │                                      ││                                                                      │││  [ ] Tracked Git files only      ││
 │                                      ││                                                                      │││  [x] Smart ignore                ││
@@ -17,11 +16,12 @@
 │                                      ││                                                                      │││  [x] Empty files                 ││
 │                                      ││                                                                      │││  [x] Hidden folders              ││
 │                                      ││                                                                      │││  [x] Hidden files                ││
+│                                      ││                                                                      │││  [x] dot folders                 ││
 │                                      ││                                                                      ││└──────────────────────────────────┘│
-│                                      ││                                                                      ││┌┤File types├──────────────────────┐│
-│                                      ││                                                                      │││  [x] All                         ││
+│                                      ││                                                                      ││┌┤File types├─────────── [x] All ──┐│
 │                                      ││                                                                      │││  [x] .cs                         ││
 │                                      ││                                                                      │││  [x] .md                         ││
+│                                      ││                                                                      │││                                  ││
 │                                      ││                                                                      │││                                  ││
 │                                      ││                                                                      │││                                  ││
 │                                      ││                                                                      │││                                  ││

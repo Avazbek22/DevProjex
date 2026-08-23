@@ -1,0 +1,24 @@
+ DevProjex Terminal | <ID>
+ <PROJECT_ROOT>
+> PARAMETERS
+  [ ] Hide secrets
+  [ ] Hide private data
+  [ ] Compress code
+  [ ] Strip comments
+  [ ] Strip blank lines
+
+
+  [x] All
+  [x] Use .gitignore                                                           ▲
+  [ ] Tracked Git files only                                                   |
+  [x] Smart ignore                                                             .
+  [x] Empty folders                                                            ▼
+  [x] All
+  [x] .cs
+  [x] .json
+  [x] .md
+
+
+
+ Files 3 | Folders 2 | 40 B | ~<TOKENS> tokens | Warnings 0 | Errors 0
+ Up/Down Move  Enter Change  Tab/F6 Tree  Ctrl+P Actions  ? Help

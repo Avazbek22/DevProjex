@@ -1,31 +1,31 @@
  DevProjex Terminal · <PROJECT>
  <PROJECT_ROOT>
 ┌┤> PROJECT TREE├─────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├───────────────────────────────────────────┐┌┤  PARAMETERS├──────────────────────┐
-│v [x] <PROJECT>   ││<PROJECT>                                             ││┌┤Content processing:├─────────────┐│
+│v [x] <PROJECT>   ││<PROJECT>                                             ││┌┤Content processing├──────────────┐│
 │  > [x] src                              ││├── src                                                                      │││  [ ] Hide secrets                ││
 │    [x] global.json                      │││   ├── Feature                                                              │││  [ ] Hide private data           ││
 │    [x] readme.md                        │││   │   └── Handler.cs                                                       │││  [ ] Compress code               ││
 │                                 ┌┤Action palette├─────────────────────────────────────────────────────────────────────────┐ [ ] Strip comments              ││
 │                                 │ Filter actions:                                                                         │ [ ] Strip blank lines           ││
 │                                 │                                                                                         │─────────────────────────────────┘│
-│                                 │                                                                                         │Exclusions├──────────────────────┐│
-│                                 │ Analyze  [A]                                                                            │ [x] All                         ││
-│                                 │ Search  [/]                                                                             │ [x] Use .gitignore              ││
-│                                 │ Preview mode: Tree  [1/2/3]                                                             │ [ ] Tracked Git files only      ││
-│                                 │ Preview format: ASCII  [F]                                                              │ [x] Smart ignore                ││
-│                                 │ Git filtering: Use .gitignore  [M]                                                      │ [x] Empty folders               ││
-│                                 │ Exclusions: 8  [X]                                                                      │ [x] Empty files                 ││
-│                                 │ File types: All (3)  [T]                                                                │ [x] Hidden folders              ││
-│                                 │ Export context  [E]                                                                     │ [x] Hidden files                ││
-│                                 │ To Folder…  [Z]                                                                         │ [x] dot folders                 ││
-│                                 │ To ZIP Archive…  [Z]                                                                    │ [x] dot files                   ││
-│                                 │ Export settings...  [P]                                                                 │ [x] Files without extension     ││
+│                                 │                                                                                         │Exclusions├─────────── [x] All ──┐│
+│                                 │ Analyze  [A]                                                                            │ [x] Use .gitignore              ││
+│                                 │ Search  [/]                                                                             │ [ ] Tracked Git files only      ││
+│                                 │ Preview mode: Tree  [1/2/3]                                                             │ [x] Smart ignore                ││
+│                                 │ Preview format: ASCII  [F]                                                              │ [x] Empty folders               ││
+│                                 │ Git filtering: Use .gitignore  [M]                                                      │ [x] Empty files                 ││
+│                                 │ Exclusions: 8  [X]                                                                      │ [x] Hidden folders              ││
+│                                 │ File types: All (3)  [T]                                                                │ [x] Hidden files                ││
+│                                 │ Export context  [E]                                                                     │ [x] dot folders                 ││
+│                                 │ To Folder…  [Z]                                                                         │ [x] dot files                   ││
+│                                 │ To ZIP Archive…  [Z]                                                                    │ [x] Files without extension     ││
+│                                 │ Export settings...  [P]                                                                 │                                 ││
 │                                 │                                                                                         │─────────────────────────────────┘│
-│                                 │ Diagnostics · Analyze                                                                   │File types├──────────────────────┐│
-│                                 │ Analyze the effective project context.                                                  │ [x] All                         ││
-│                                 │                                                                                         │ [x] .cs                         ││
+│                                 │ Diagnostics · Analyze                                                                   │File types├─────────── [x] All ──┐│
+│                                 │ Analyze the effective project context.                                                  │ [x] .cs                         ││
 │                                 │                                                                                         │ [x] .json                       ││
 │                                 │                                                                                         │ [x] .md                         ││
+│                                 │                                                                                         │                                 ││
 │                                 │                                                                                         │                                 ││
 │                                 │                                  ⟦ Back ⟧▖ ⟦► Run ◄⟧▖                                   │                                 ││
 │                                 │                                  ▝▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▘                                   │                                 ││

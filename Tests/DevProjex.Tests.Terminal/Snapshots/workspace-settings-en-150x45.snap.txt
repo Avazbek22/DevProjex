@@ -1,15 +1,14 @@
  DevProjex Terminal · <ID>
  <PROJECT_ROOT>
 ┌┤  PROJECT TREE├──────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├────────────────────────────────────┐┌┤> PARAMETERS├──────────────────────┐
-│v [x] <ID>││<ID>                                      ││┌┤Content processing:├─────────────┐│
+│v [x] <ID>││<ID>                                      ││┌┤Content processing├──────────────┐│
 │  > [x] src                           ││├── src                                                               │││  [ ] Hide secrets                ││
 │    [x] global.json                   │││   └── App.cs                                                        │││  [ ] Hide private data           ││
 │    [x] readme.md                     ││├── global.json                                                       │││  [ ] Compress code               ││
 │                                      ││└── readme.md                                                         │││  [ ] Strip comments              ││
 │                                      ││                                                                      │││  [ ] Strip blank lines           ││
 │                                      ││                                                                      ││└──────────────────────────────────┘│
-│                                      ││                                                                      ││┌┤Exclusions├──────────────────────┐│
-│                                      ││                                                                      │││  [x] All                         ││
+│                                      ││                                                                      ││┌┤Exclusions├─────────── [x] All ──┐│
 │                                      ││                                                                      │││  [x] Use .gitignore              ││
 │                                      ││                                                                      │││  [ ] Tracked Git files only      ││
 │                                      ││                                                                      │││  [x] Smart ignore                ││
@@ -22,12 +21,13 @@
 │                                      ││                                                                      │││  [x] Files without extension     ││
 │                                      ││                                                                      │││                                  ││
 │                                      ││                                                                      │││                                  ││
+│                                      ││                                                                      │││                                  ││
 │                                      ││                                                                      ││└──────────────────────────────────┘│
-│                                      ││                                                                      ││┌┤File types├──────────────────────┐│
-│                                      ││                                                                      │││  [x] All                         ││
+│                                      ││                                                                      ││┌┤File types├─────────── [x] All ──┐│
 │                                      ││                                                                      │││  [x] .cs                         ││
 │                                      ││                                                                      │││  [x] .json                       ││
 │                                      ││                                                                      │││  [x] .md                         ││
+│                                      ││                                                                      │││                                  ││
 │                                      ││                                                                      │││                                  ││
 │                                      ││                                                                      │││                                  ││
 │                                      ││                                                                      │││                                  ││

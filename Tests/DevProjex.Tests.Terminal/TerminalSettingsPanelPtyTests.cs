@@ -65,7 +65,7 @@ public sealed class TerminalSettingsPanelPtyTests
 	}
 
 	[Fact(Timeout = 90_000)]
-	public async Task LocalProfileIndicatorUsesOnlyItsOwnLayoutRow()
+	public async Task LocalProfileDoesNotAddASettingsPanelRow()
 	{
 		using var project = CreatePanelProject();
 		await using var terminal = await StartAsync(
@@ -86,20 +86,176 @@ public sealed class TerminalSettingsPanelPtyTests
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 
-		var parameters = await WaitForStableScreenAsync(terminal, "Saved settings:");
-		Assert.Contains("Saved project set", parameters, StringComparison.Ordinal);
+		var parameters = await WaitForStableScreenAsync(terminal, "Content processing");
+		Assert.DoesNotContain("Saved settings", parameters, StringComparison.Ordinal);
 		Assert.Contains("Content processing", parameters, StringComparison.Ordinal);
+		TerminalScreenSnapshot.Verify(
+			"workspace-settings-local-en-100x30",
+			parameters,
+			(project.Path, "<PROJECT_ROOT>"));
 		Assert.Contains('▲', ExtractPanel(parameters, "Exclusions", "File types"));
 		var fileTypes = ExtractPanel(parameters, "File types", null);
 		Assert.DoesNotContain('▲', fileTypes);
 		Assert.DoesNotContain('▼', fileTypes);
 
 		await terminal.ResizeAsync(160, 30, TestContext.Current.CancellationToken);
-		var wide = await WaitForStableScreenAsync(
-			terminal,
-			"Saved settings: Saved project s…");
+		var wide = await WaitForStableScreenAsync(terminal, "Content processing");
+		Assert.DoesNotContain("Saved settings", wide, StringComparison.Ordinal);
 		Assert.Contains("Content processing", wide, StringComparison.Ordinal);
 		await ExitAsync(terminal);
+	}
+
+	[Fact(Timeout = 90_000)]
+	public async Task AggregateControlsRenderOnFramesAndOnlyFocusedSectionHighlightsSelection()
+	{
+		using var project = CreatePanelProject();
+		await using var terminal = await StartAsync(project.Path, columns: 160, rows: 50);
+
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		var contentFocused = await WaitForStableScreenAsync(terminal, "> PARAMETERS");
+		AssertFrameAggregate(contentFocused, "Exclusions");
+		AssertFrameAggregate(contentFocused, "File types");
+		Assert.DoesNotContain("Content processing:", contentFocused, StringComparison.Ordinal);
+		AssertOnlyRowIsHighlighted(
+			terminal,
+			contentFocused,
+			activeText: "Hide secrets",
+			inactiveTexts: ["Use .gitignore", ".cs"]);
+		TerminalScreenSnapshot.Verify(
+			"workspace-settings-content-focused-en-160x50",
+			contentFocused,
+			(project.Path, "<PROJECT_ROOT>"));
+
+		await terminal.SendAsync("X", TestContext.Current.CancellationToken);
+		var exclusionsFocused = await WaitForStableScreenAsync(terminal, "Exclusions");
+		AssertOnlyRowIsHighlighted(
+			terminal,
+			exclusionsFocused,
+			activeText: "[x] All",
+			inactiveTexts: ["Hide secrets", ".cs"]);
+		TerminalScreenSnapshot.Verify(
+			"workspace-settings-exclusions-focused-en-160x50",
+			exclusionsFocused,
+			(project.Path, "<PROJECT_ROOT>"));
+
+		await terminal.SendAsync("T", TestContext.Current.CancellationToken);
+		var extensionsFocused = await WaitForStableScreenAsync(terminal, "File types");
+		AssertOnlyRowIsHighlighted(
+			terminal,
+			extensionsFocused,
+			activeText: "[x] All",
+			inactiveTexts: ["Hide secrets", "Use .gitignore"],
+			lastOccurrence: true);
+		TerminalScreenSnapshot.Verify(
+			"workspace-settings-extensions-focused-en-160x50",
+			extensionsFocused,
+			(project.Path, "<PROJECT_ROOT>"));
+
+		await ExitAsync(terminal);
+	}
+
+	[Fact(Timeout = 90_000)]
+	public async Task MouseClickOnFrameAggregateTogglesOnlyItsSection()
+	{
+		using var project = CreatePanelProject();
+		await using var terminal = await StartAsync(
+			project.Path,
+			columns: 100,
+			rows: 30,
+			mouse: true);
+
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		var screen = await WaitForStableScreenAsync(terminal, "Exclusions");
+		var (row, column) = FindFrameAggregate(screen, "Exclusions", "[x] All");
+		await terminal.SendMouseClickAsync(
+			column,
+			row,
+			cancellationToken: TestContext.Current.CancellationToken);
+		var cleared = await WaitForFrameAggregateAsync(
+			terminal,
+			"Exclusions",
+			"[ ] All");
+		Assert.Contains("[ ] Use .gitignore", cleared, StringComparison.Ordinal);
+		Assert.Contains("[x] .cs", cleared, StringComparison.Ordinal);
+
+		await ExitAsync(terminal);
+	}
+
+	[Fact(Timeout = 90_000)]
+	public async Task PlainModeKeepsAggregateControlsAsPinnedFirstRows()
+	{
+		using var project = CreatePanelProject();
+		await using var terminal = await StartAsync(
+			project.Path,
+			columns: 80,
+			rows: 24,
+			plain: true);
+
+		await terminal.WaitForScreenAsync(
+			"> PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		var screen = await WaitForStableScreenAsync(terminal, "> PARAMETERS");
+		var lines = screen.Split('\n');
+		var aggregateRows = lines
+			.Select((line, index) => (line, index))
+			.Where(static pair => pair.line.Contains("[x] All", StringComparison.Ordinal))
+			.Select(static pair => pair.index)
+			.ToArray();
+		Assert.Equal(2, aggregateRows.Length);
+		Assert.True(aggregateRows[0] < Array.FindIndex(
+			lines,
+			line => line.Contains("Use .gitignore", StringComparison.Ordinal)));
+		Assert.True(aggregateRows[1] < Array.FindIndex(
+			lines,
+			line => line.Contains("[x] .cs", StringComparison.Ordinal)));
+		TerminalScreenSnapshot.Verify(
+			"workspace-settings-plain-en-80x24",
+			screen,
+			(project.Path, "<PROJECT_ROOT>"));
+
+		await ExitAsync(terminal);
+	}
+
+	[Fact(Timeout = 90_000)]
+	public async Task RealProcessPanelExitRestoresParentTerminal()
+	{
+		using var project = CreatePanelProject();
+		await using var terminal = await StartAsync(
+			project.Path,
+			columns: 100,
+			rows: 30,
+			writeShellCompletionMarker: true);
+
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		var screen = await WaitForStableScreenAsync(terminal, "> PARAMETERS");
+		AssertFrameAggregate(screen, "Exclusions");
+		AssertFrameAggregate(screen, "File types");
+
+		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.CompleteShellRestorationHandshakeAsync(
+			TestContext.Current.CancellationToken);
+		TerminalPtyStateAssertions.AssertRestoredAtShellCompletion(
+			terminal.RawOutput,
+			"inline");
+		await terminal.ReleaseParentShellAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
 	}
 
 	[Fact(Timeout = 90_000)]
@@ -442,12 +598,96 @@ public sealed class TerminalSettingsPanelPtyTests
 		Assert.True(screen.Contains("File types", StringComparison.Ordinal), screen);
 		Assert.True(screen.Contains("Hide private data", StringComparison.Ordinal), screen);
 		Assert.True(screen.Contains("Strip blank lines", StringComparison.Ordinal), screen);
+		Assert.DoesNotContain("Content processing:", screen, StringComparison.Ordinal);
+		Assert.DoesNotContain("Saved settings", screen, StringComparison.Ordinal);
+		AssertFrameAggregate(screen, "Exclusions");
+		AssertFrameAggregate(screen, "File types");
 		Assert.DoesNotContain("ROOT FOLDERS", screen, StringComparison.Ordinal);
 		TerminalScreenSnapshot.Verify(
 			snapshotName,
 			screen,
 			(projectPath, "<PROJECT_ROOT>"));
 		return screen;
+	}
+
+	private static void AssertFrameAggregate(string screen, string title)
+	{
+		var titleLine = screen.Split('\n').Single(line => line.Contains(title, StringComparison.Ordinal));
+		Assert.Contains("[x] All", titleLine, StringComparison.Ordinal);
+	}
+
+	private static (int Row, int Column) FindFrameAggregate(
+		string screen,
+		string title,
+		string aggregate)
+	{
+		var lines = screen.Split('\n');
+		var row = Array.FindIndex(
+			lines,
+			line => line.Contains(title, StringComparison.Ordinal) &&
+			        line.Contains(aggregate, StringComparison.Ordinal));
+		Assert.True(row >= 0, $"Frame aggregate '{aggregate}' was not rendered.\n{screen}");
+		return (row, lines[row].IndexOf(aggregate, StringComparison.Ordinal) + 1);
+	}
+
+	private static async Task<string> WaitForFrameAggregateAsync(
+		TerminalPtyHarness terminal,
+		string title,
+		string aggregate)
+	{
+		var timeout = Stopwatch.StartNew();
+		while (timeout.Elapsed < TimeSpan.FromSeconds(15))
+		{
+			var screen = terminal.CaptureScreen();
+			if (screen.Split('\n').Any(line =>
+				    line.Contains(title, StringComparison.Ordinal) &&
+				    line.Contains(aggregate, StringComparison.Ordinal)))
+			{
+				return screen;
+			}
+			await Task.Delay(75, TestContext.Current.CancellationToken);
+		}
+		throw new TimeoutException(
+			$"Timed out waiting for '{aggregate}' on the '{title}' frame.\n" +
+			terminal.CaptureScreen());
+	}
+
+	private static void AssertOnlyRowIsHighlighted(
+		TerminalPtyHarness terminal,
+		string screen,
+		string activeText,
+		IReadOnlyList<string> inactiveTexts,
+		bool lastOccurrence = false)
+	{
+		var activeStyle = CaptureTextStyle(terminal, screen, activeText, lastOccurrence);
+		var activeVisual = (activeStyle.BackgroundMode, activeStyle.Background, activeStyle.Inverse);
+		var inactiveVisuals = new List<(int BackgroundMode, int Background, bool Inverse)>();
+		foreach (var inactiveText in inactiveTexts)
+		{
+			var inactiveStyle = CaptureTextStyle(terminal, screen, inactiveText);
+			var inactiveVisual = (
+				inactiveStyle.BackgroundMode,
+				inactiveStyle.Background,
+				inactiveStyle.Inverse);
+			Assert.NotEqual(activeVisual, inactiveVisual);
+			inactiveVisuals.Add(inactiveVisual);
+		}
+		Assert.Single(inactiveVisuals.Distinct());
+	}
+
+	private static TerminalCellStyle CaptureTextStyle(
+		TerminalPtyHarness terminal,
+		string screen,
+		string text,
+		bool lastOccurrence = false)
+	{
+		var lines = screen.Split('\n');
+		var row = lastOccurrence
+			? Array.FindLastIndex(lines, line => line.Contains(text, StringComparison.Ordinal))
+			: Array.FindIndex(lines, line => line.Contains(text, StringComparison.Ordinal));
+		Assert.True(row >= 0, $"Text '{text}' was not rendered.\n{screen}");
+		var column = lines[row].IndexOf(text, StringComparison.Ordinal);
+		return terminal.CaptureCellStyle(row, column);
 	}
 
 	private static bool IsCompletedSettingsLayout(string screen, bool expectWide)
@@ -579,24 +819,34 @@ public sealed class TerminalSettingsPanelPtyTests
 		int rows,
 		string profile = "standard",
 		string language = "en",
-		Action<string>? initializeDataRoot = null) =>
-		TerminalPtyHarness.StartAsync(
+		Action<string>? initializeDataRoot = null,
+		bool mouse = false,
+		bool plain = false,
+		bool writeShellCompletionMarker = false)
+	{
+		var arguments = new List<string>
+		{
+			"tui",
 			projectPath,
-			[
-				"tui",
-				projectPath,
-				"--profile",
-				profile,
-				"--screen",
-				"inline",
-				"--no-mouse",
-				"--language",
-				language
-			],
+			"--profile",
+			profile,
+			"--screen",
+			"inline",
+			mouse ? "--mouse" : "--no-mouse",
+			"--language",
+			language
+		};
+		if (plain)
+			arguments.Add("--plain");
+		return TerminalPtyHarness.StartAsync(
+			projectPath,
+			arguments,
 			columns,
 			rows,
 			initializeDataRoot: initializeDataRoot,
+			writeShellCompletionMarker: writeShellCompletionMarker,
 			cancellationToken: TestContext.Current.CancellationToken);
+	}
 
 	private static TemporaryDirectory CreatePanelProject(bool includeFindings = false)
 	{

@@ -1,31 +1,31 @@
  DevProjex Terminal · <PROJECT>
  <PROJECT_ROOT>
 ┌┤> PROJECT TREE├─────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├───────────────────────────────────────────┐┌┤  PARAMETERS├──────────────────────┐
-│v [x] <PROJECT>   ││<PROJECT>                                             ││┌┤Content processing:├─────────────┐│
+│v [x] <PROJECT>   ││<PROJECT>                                             ││┌┤Content processing├──────────────┐│
 │  > [x] src                              ││├── src                                                                      │││  [ ] Hide secrets                ││
 │    [x] global.json                      │││   ├── Feature                                                              │││  [ ] Hide private data           ││
 │    [x] readme.md                        │││   │   └── Handler.cs                                                       │││  [ ] Compress code               ││
 │                                         │││   └── App.cs                                                               │││  [ ] Strip comments              ││
 │                                         ││├── global.json                                                              │││  [ ] Strip blank lines           ││
 │                                         ││└── readme.md                                                                ││└──────────────────────────────────┘│
-│                                         ││                                                                             ││┌┤Exclusions├──────────────────────┐│
-│                                         ││                                                                             │││  [x] All                         ││
+│                                         ││                                                                             ││┌┤Exclusions├─────────── [x] All ──┐│
 │                                         ││                                                                             │││  [x] Use .gitignore              ││
-│                                         ││        ┌┤Preview format├─────────────────────────────────────┐              │││  [ ] Tracked Git files only      ││
-│                                         ││        │ Choose ASCII, JSON, XML, or Markdown for the tree.  │              │││  [x] Smart ignore                ││
-│                                         ││        │                                                     │              │││  [x] Empty folders               ││
-│                                         ││        │ ASCII                                               │              │││  [x] Empty files                 ││
-│                                         ││        │ JSON                                                │              │││  [x] Hidden folders              ││
-│                                         ││        │ XML                                                 │              │││  [x] Hidden files                ││
-│                                         ││        │ Markdown                                            │              │││  [x] dot folders                 ││
-│                                         ││        │                                                     │              │││  [x] dot files                   ││
+│                                         ││                                                                             │││  [ ] Tracked Git files only      ││
+│                                         ││        ┌┤Preview format├─────────────────────────────────────┐              │││  [x] Smart ignore                ││
+│                                         ││        │ Choose ASCII, JSON, XML, or Markdown for the tree.  │              │││  [x] Empty folders               ││
+│                                         ││        │                                                     │              │││  [x] Empty files                 ││
+│                                         ││        │ ASCII                                               │              │││  [x] Hidden folders              ││
+│                                         ││        │ JSON                                                │              │││  [x] Hidden files                ││
+│                                         ││        │ XML                                                 │              │││  [x] dot folders                 ││
+│                                         ││        │ Markdown                                            │              │││  [x] dot files                   ││
 │                                         ││        │                                                     │              │││  [x] Files without extension     ││
+│                                         ││        │                                                     │              │││                                  ││
 │                                         ││        │                     ⟦► Back ◄⟧▖                     │              ││└──────────────────────────────────┘│
-│                                         ││        │                     ▝▀▀▀▀▀▀▀▀▀▘                     │              ││┌┤File types├──────────────────────┐│
-│                                         ││        └─────────────────────────────────────────────────────┘              │││  [x] All                         ││
-│                                         ││                                                                             │││  [x] .cs                         ││
+│                                         ││        │                     ▝▀▀▀▀▀▀▀▀▀▘                     │              ││┌┤File types├─────────── [x] All ──┐│
+│                                         ││        └─────────────────────────────────────────────────────┘              │││  [x] .cs                         ││
 │                                         ││                                                                             │││  [x] .json                       ││
 │                                         ││                                                                             │││  [x] .md                         ││
+│                                         ││                                                                             │││                                  ││
 │                                         ││                                                                             │││                                  ││
 │                                         ││                                                                             │││                                  ││
 │                                         ││                                                                             │││                                  ││
