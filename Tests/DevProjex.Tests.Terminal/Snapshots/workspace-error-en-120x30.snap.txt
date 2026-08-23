@@ -1,30 +1,30 @@
  DevProjex Terminal · <PROJECT>
  <PROJECT_ROOT>
-┌┤> PROJECT TREE├─────────────────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├─────────────────────────────┐
-│v [x] <PROJECT>               ││<PROJECT>                               │
-│  > [x] src                                          ││├── src                                                        │
-│    [x] global.json                                  │││   ├── Feature                                                │
-│    [x] readme.md                                    │││   │   └── Handler.cs                                         │
-│                                                     │││   └── App.cs                                                 │
-│                                                     ││├── global.json                                                │
-│                                                     ││└── readme.md                                                  │
-│                  ┌┤Error [DPX-GIT-TRACKED-INDEX-UNAVAILABLE]├────────────────────────────────────┐                   │
-│                  │ Tracked Git mode requires at least one readable repository index.             │                   │
-│                  │                                                                               │                   │
-│                  │                                                                               │                   │
-│                  │                                                                               │                   │
-│                  │                                 ⟦► Close ◄⟧▖                                  │                   │
-│                  │                                 ▝▀▀▀▀▀▀▀▀▀▀▘                                  │                   │
-│                  └───────────────────────────────────────────────────────────────────────────────┘                   │
-│                                                     ││                                                               │
-│                                                     ││                                                               │
-│                                                     ││                                                               │
-│                                                     ││                                                               │
-│                                                     ││                                                               │
-│                                                     ││                                                               │
-│                                                     ││                                                               │
-│                                                     ││ Files 4  |  Lines 1-8/8                                       │
-└─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
+┌┤> PARAMETERS├────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│Saved settings: Default settings                                                                                      │
+│┌┤Content processing:├───────────────────────────────────────────────────────────────────────────────────────────────┐│
+││  [ ] Hide secrets                                                                                                  ││
+││  [ ] Hide private data                                                                                             ││
+││  [ ] Compress code                                                                                                 ││
+││  [ ] Strip comments                                                                                                ││
+││  [ ] Strip blank lines                                                                                             ││
+│└──────────────────────┌┤Error├─────────────────────────────────────────────────────────────┐────────────────────────┘│
+│┌┤Exclusions├──────────│ Tracked Git mode requires at least one readable repository index.  │────────────────────────┐│
+││  [x] All             │                                                                    │                       ▲││
+││  [x] Use .gitignore  │ DPX-GIT-TRACKED-INDEX-UNAVAILABLE                                  │                       ┃││
+││  [ ] Tracked Git file│                                                                    │                       ·││
+││  [x] Smart ignore    │                            ⟦► Close ◄⟧▖                            │                       ·││
+││  [x] Empty folders   │                            ▝▀▀▀▀▀▀▀▀▀▀▘                            │                       ▼││
+│└──────────────────────└────────────────────────────────────────────────────────────────────┘────────────────────────┘│
+│┌┤File types├────────────────────────────────────────────────────────────────────────────────────────────────────────┐│
+││  [x] All                                                                                                           ││
+││  [x] .cs                                                                                                           ││
+││  [x] .json                                                                                                         ││
+││  [x] .md                                                                                                           ││
+││                                                                                                                    ││
+││                                                                                                                    ││
+│└────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘│
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 
  Files 4 · Folders 3 · 76 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
- Up/Down Navigate   Enter Expand   Space Toggle   / Search   Tab/F6 Preview   Ctrl+P Actions   ? Help
+ Up/Down or j/k Navigate   Enter Change   Tab/F6 Tree   Ctrl+P Action palette   ? Help

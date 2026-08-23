@@ -1,40 +1,40 @@
  DevProjex Terminal · <PROJECT>
  <PROJECT_ROOT>
-┌┤> PROJECT TREE├─────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├────────────────────────────┐┌┤  PARAMETERS├─────────────────────────────────────┐
-│v [x] <PROJECT>   ││<PROJECT>                              ││  GIT FILTERING                                    │
-│  > [x] src                              ││├── src                                                       ││  ( ) No Git filtering                             │
-│    [x] global.json                      │││   ├── Feature                                               ││  (*) Use .gitignore                               │
-│    [x] readme.md                ┌┤Action palette├─────────────────────────────────────────────────────────────────────────┐ files only                       │
-│                                 │ Filter actions:                                                                         │ING:                              │
-│                                 │                                                                                         │s                                 │
-│                                 │                                                                                         │                                  │
-│                                 │ Analyze  [A]                                                                            │                                  │
-│                                 │ Search  [/]                                                                             │e                                 │
-│                                 │ Preview mode: Tree  [1/2/3]                                                             │rs                                │
-│                                 │ Preview format: ASCII  [F]                                                              │                                  │
-│                                 │ Git filtering: Use .gitignore  [M]                                                      │ers                               │
-│                                 │ Exclusions: 8  [X]                                                                      │s                                 │
-│                                 │ Root folders: All (1)  [R]                                                              │                                  │
-│                                 │ File types: All (3)  [T]                                                                │                                  │
-│                                 │ Export context  [E]                                                                     │ut extension                      │
-│                                 │ To Folder…  [Z]                                                                         │                                  │
-│                                 │ To ZIP Archive…  [Z]                                                                    │                                  │
-│                                 │ Export settings...  [P]                                                                 │                                  │
-│                                 │                                                                                         │                                  │
-│                                 │ Diagnostics · Analyze                                                                   │                                  │
-│                                 │ Analyze the effective project context.                                                  │                                  │
-│                                 │                                                                                         │                                  │
-│                                 │                                                                                         │                                  │
-│                                 │                                                                                         │                                  │
-│                                 │                                                                                         │                                  │
-│                                 │                                  ⟦ Back ⟧▖ ⟦► Run ◄⟧▖                                   │                                  │
-│                                 │                                  ▝▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▘                                   │                                  │
-│                                 └─────────────────────────────────────────────────────────────────────────────────────────┘                                  │
-│                                         ││                                                              ││                                                   │
-│                                         ││                                                              ││                                                   │
-│                                         ││                                                              ││                                                   │
-│                                         ││ Files 4  |  Lines 1-8/8                                      ││                                                   │
-└─────────────────────────────────────────┘└──────────────────────────────────────────────────────────────┘└───────────────────────────────────────────────────┘
+┌┤> PROJECT TREE├─────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├───────────────────────────────────────────┐┌┤  PARAMETERS├──────────────────────┐
+│v [x] <PROJECT>   ││<PROJECT>                                             ││Saved settings: Default settings    │
+│  > [x] src                              ││├── src                                                                      ││┌┤Content processing:├─────────────┐│
+│    [x] global.json                      │││   ├── Feature                                                              │││  [ ] Hide secrets                ││
+│    [x] readme.md                        │││   │   └── Handler.cs                                                       │││  [ ] Hide private data           ││
+│                                 ┌┤Action palette├─────────────────────────────────────────────────────────────────────────┐ [ ] Compress code               ││
+│                                 │ Filter actions:                                                                         │ [ ] Strip comments              ││
+│                                 │                                                                                         │ [ ] Strip blank lines           ││
+│                                 │                                                                                         │─────────────────────────────────┘│
+│                                 │ Analyze  [A]                                                                            │Exclusions├──────────────────────┐│
+│                                 │ Search  [/]                                                                             │ [x] All                        ▲││
+│                                 │ Preview mode: Tree  [1/2/3]                                                             │ [x] Use .gitignore             ┃││
+│                                 │ Preview format: ASCII  [F]                                                              │ [ ] Tracked Git files only     ┃││
+│                                 │ Git filtering: Use .gitignore  [M]                                                      │ [x] Smart ignore               ┃││
+│                                 │ Exclusions: 8  [X]                                                                      │ [x] Empty folders              ┃││
+│                                 │ File types: All (3)  [T]                                                                │ [x] Empty files                ┃││
+│                                 │ Export context  [E]                                                                     │ [x] Hidden folders             ┃││
+│                                 │ To Folder…  [Z]                                                                         │ [x] Hidden files               ┃││
+│                                 │ To ZIP Archive…  [Z]                                                                    │ [x] dot folders                ·││
+│                                 │ Export settings...  [P]                                                                 │ [x] dot files                  ▼││
+│                                 │                                                                                         │─────────────────────────────────┘│
+│                                 │ Diagnostics · Analyze                                                                   │File types├──────────────────────┐│
+│                                 │ Analyze the effective project context.                                                  │ [x] All                         ││
+│                                 │                                                                                         │ [x] .cs                         ││
+│                                 │                                                                                         │ [x] .json                       ││
+│                                 │                                                                                         │ [x] .md                         ││
+│                                 │                                                                                         │                                 ││
+│                                 │                                  ⟦ Back ⟧▖ ⟦► Run ◄⟧▖                                   │                                 ││
+│                                 │                                  ▝▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▘                                   │                                 ││
+│                                 └─────────────────────────────────────────────────────────────────────────────────────────┘                                 ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││ Files 4  |  Lines 1-8/8                                                     ││└──────────────────────────────────┘│
+└─────────────────────────────────────────┘└─────────────────────────────────────────────────────────────────────────────┘└────────────────────────────────────┘
 
  Files 4 · Folders 3 · 76 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
  Up/Down Navigate   Enter Expand   Space Toggle   / Search   Tab/F6 Preview   Ctrl+P Actions   ? Help

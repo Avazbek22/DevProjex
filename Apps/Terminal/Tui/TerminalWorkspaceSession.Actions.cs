@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
+using DevProjex.Application.Secrets;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
@@ -10,11 +11,27 @@ namespace DevProjex.Terminal.Tui;
 
 internal sealed partial class TerminalWorkspaceSession
 {
+	private const int WideControlsWidth = 38;
+	private const int ContentControlsFrameHeight = 7;
+
 	private FrameView? _controlsFrame;
 	private Label? _controlsPanelHeading;
-	private TerminalParameterListView? _controls;
-	private ObservableCollection<TerminalParameterRow>? _controlRows;
-	private string? _selectedControlKey;
+	private Label? _profileSourceLabel;
+	private FrameView? _contentControlsFrame;
+	private FrameView? _exclusionControlsFrame;
+	private FrameView? _extensionControlsFrame;
+	private View? _filterControlsHost;
+	private TerminalParameterListView? _contentControls;
+	private TerminalParameterListView? _exclusionControls;
+	private TerminalParameterListView? _extensionControls;
+	private ObservableCollection<TerminalParameterRow>? _contentControlRows;
+	private ObservableCollection<TerminalParameterRow>? _exclusionControlRows;
+	private ObservableCollection<TerminalParameterRow>? _extensionControlRows;
+	private string? _selectedContentControlKey;
+	private string? _selectedExclusionControlKey;
+	private string? _selectedExtensionControlKey;
+	private TerminalControlSection _activeControlSection = TerminalControlSection.Content;
+	private GitFilteringMode _preferredGitMode = GitFilteringMode.RespectGitIgnore;
 
 	private void CreateContextControls()
 	{
@@ -32,196 +49,297 @@ internal sealed partial class TerminalWorkspaceSession
 			Visible = _options.Plain,
 			SchemeName = TerminalWorkspaceTheme.Secondary
 		};
-		_controls = new TerminalParameterListView
+		_profileSourceLabel = new TerminalLiteralLabel
 		{
 			X = 0,
 			Y = _options.Plain ? 1 : 0,
+			Width = Dim.Fill(),
+			Height = 1,
+			SchemeName = TerminalWorkspaceTheme.Secondary
+		};
+
+		(_contentControlsFrame, _contentControls) = CreateControlSection(
+			L("Settings.Secrets.Title"),
+			TerminalControlSection.Content,
+			showVerticalScrollBar: false);
+		_contentControlsFrame.Y = (_options.Plain ? 1 : 0) + 1;
+		_contentControlsFrame.Height = ContentControlsFrameHeight;
+
+		_filterControlsHost = new View
+		{
+			X = 0,
+			Y = Pos.Bottom(_contentControlsFrame),
+			Width = Dim.Fill(),
+			Height = Dim.Fill()
+		};
+		(_exclusionControlsFrame, _exclusionControls) = CreateControlSection(
+			L("Terminal.Tui.Exclusions"),
+			TerminalControlSection.Exclusions,
+			showVerticalScrollBar: true);
+		_exclusionControlsFrame.Height = Dim.Percent(50);
+		(_extensionControlsFrame, _extensionControls) = CreateControlSection(
+			L("Terminal.Tui.FileTypes"),
+			TerminalControlSection.Extensions,
+			showVerticalScrollBar: true);
+		_extensionControlsFrame.Y = Pos.Bottom(_exclusionControlsFrame);
+		_extensionControlsFrame.Height = Dim.Fill();
+		_filterControlsHost.Add(_exclusionControlsFrame, _extensionControlsFrame);
+		_controlsFrame.Add(
+			_controlsPanelHeading,
+			_profileSourceLabel,
+			_contentControlsFrame,
+			_filterControlsHost);
+		if (_state?.Plan.GitReadiness.Mode is not GitFilteringMode.None and { } mode)
+			_preferredGitMode = mode;
+		RefreshContextControls();
+	}
+
+	private (FrameView Frame, TerminalParameterListView List) CreateControlSection(
+		string title,
+		TerminalControlSection section,
+		bool showVerticalScrollBar)
+	{
+		var frame = new TerminalLiteralFrameView
+		{
+			X = 0,
+			Y = 0,
+			Width = Dim.Fill(),
+			Title = title,
+			BorderStyle = _presentation.BorderStyle,
+			SchemeName = TerminalWorkspaceTheme.Panel
+		};
+		var list = new TerminalParameterListView(
+			showVerticalScrollBar,
+			_environment.SupportsUnicode && !_options.Plain)
+		{
+			X = 0,
+			Y = 0,
 			Width = Dim.Fill(),
 			Height = Dim.Fill(),
 			ShowMarks = false,
 			SchemeName = TerminalWorkspaceTheme.List
 		};
-		_controls.Accepted += (_, _) => _application.Invoke(ActivateSelectedControl);
-		_controls.SelectionToggleRequested += (_, _) =>
-			_application.Invoke(ActivateSelectedControl);
-		_controls.ValueChanged += (_, _) => TrackSelectedControl();
-		_controls.HasFocusChanged += (_, _) => UpdateWorkspaceFocus();
-		_controlsFrame.Add(_controlsPanelHeading, _controls);
-		RefreshContextControls();
+		list.SelectionToggleRequested += (_, _) =>
+			_application.Invoke(() =>
+			{
+				_activePane = TerminalWorkspacePane.Controls;
+				_activeControlSection = section;
+				UpdateWorkspaceFocus();
+				ActivateSelectedControl(section);
+			});
+		list.ValueChanged += (_, _) => TrackSelectedControl(section);
+		list.HasFocusChanged += (_, _) =>
+		{
+			if (list.HasFocus && !_suppressWorkspaceFocusTracking)
+				_activeControlSection = section;
+			UpdateWorkspaceFocus();
+		};
+		frame.Add(list);
+		return (frame, list);
 	}
 
 	private void RefreshContextControls()
 	{
-		if (_state is null || _controls is null)
+		if (_state is null || _contentControls is null ||
+			_exclusionControls is null || _extensionControls is null)
 			return;
 
-		TrackSelectedControl();
-		_controlRows = new ObservableCollection<TerminalParameterRow>(
-			BuildParameterRows());
-		_controls.SetSource(_controlRows);
-		if (_controlRows.Count > 0)
+		TrackSelectedControl(TerminalControlSection.Content);
+		TrackSelectedControl(TerminalControlSection.Exclusions);
+		TrackSelectedControl(TerminalControlSection.Extensions);
+		_contentControlRows = ReplaceControlRows(
+			_contentControls,
+			BuildContentParameterRows(),
+			_selectedContentControlKey);
+		_exclusionControlRows = ReplaceControlRows(
+			_exclusionControls,
+			BuildExclusionParameterRows(),
+			_selectedExclusionControlKey);
+		_extensionControlRows = ReplaceControlRows(
+			_extensionControls,
+			BuildExtensionParameterRows(),
+			_selectedExtensionControlKey);
+		RefreshControlTitles();
+		if (_profileSourceLabel is not null)
 		{
-			var selectedIndex = _selectedControlKey is null
-				? 1
-				: _controlRows
+			var profile = FormatSettingsSource(_state.Plan.Selection.ProfileSource ??
+											  ProjectProfileReference.Standard);
+			_profileSourceLabel.Text = FitControlInformationLabel(
+				$"{L("Terminal.Tui.SavedSettings")}: {profile}");
+		}
+	}
+
+	private ObservableCollection<TerminalParameterRow> ReplaceControlRows(
+		TerminalParameterListView list,
+		IReadOnlyList<TerminalParameterRow> rows,
+		string? selectedKey)
+	{
+		var source = new ObservableCollection<TerminalParameterRow>(rows);
+		list.SetSource(source);
+		if (source.Count > 0)
+		{
+			var selectedIndex = selectedKey is null
+				? 0
+				: source
 					.Select((row, index) => (row, index))
-					.FirstOrDefault(pair => pair.row.Key == _selectedControlKey)
+					.FirstOrDefault(pair => pair.row.Key == selectedKey)
 					.index;
-			_controls.SelectedItem = Math.Clamp(selectedIndex, 0, _controlRows.Count - 1);
+			list.SelectedItem = Math.Clamp(selectedIndex, 0, source.Count - 1);
 		}
+		return source;
 	}
 
-	private IReadOnlyList<TerminalParameterRow> BuildParameterRows()
+	private IReadOnlyList<TerminalParameterRow> BuildContentParameterRows() =>
+		_state is null
+			? []
+			: _parameterRowsBuilder.BuildContent(
+				_state.Plan,
+				GetContentRedactionSnapshot(_state.Plan));
+
+	private IReadOnlyList<TerminalParameterRow> BuildExclusionParameterRows() =>
+		_state is null ? [] : _parameterRowsBuilder.BuildExclusions(_state.Plan);
+
+	private IReadOnlyList<TerminalParameterRow> BuildExtensionParameterRows() =>
+		_state is null ? [] : _parameterRowsBuilder.BuildExtensions(_state.Plan);
+
+	private SecretRedactionSnapshot? GetContentRedactionSnapshot(ProjectContextPlan plan)
 	{
-		if (_state is null)
-			return [];
-		var plan = _state.Plan;
-		var exclusions = (plan.Selection.Exclusions ?? [])
-			.ToHashSet();
-		var selectedExtensions = plan.SelectedExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase);
-		var selectedRoots = plan.SelectedRoots.ToHashSet(PathComparer.Default);
-		var rows = new List<TerminalParameterRow>();
-		if (plan.Selection.ProfileSource?.Kind is
-		    ProjectProfileSourceKind.Local or ProjectProfileSourceKind.Portable)
-		{
-			rows.Add(new TerminalParameterRow(
-				"section:settings",
-				TerminalParameterRowKind.Section,
-				L("Terminal.Tui.Profile")));
-			rows.Add(new TerminalParameterRow(
-				"settings:source",
-				TerminalParameterRowKind.Information,
-				FormatSettingsSource(plan.Selection.ProfileSource)));
-		}
-		rows.Add(
-			new("section:git", TerminalParameterRowKind.Section, L("Terminal.Tui.GitFiltering"))
-		);
-		rows.AddRange(ProjectPresentationCatalog.GitFiltering.Select(descriptor =>
-			new TerminalParameterRow(
-				$"git:{descriptor.Token}",
-				TerminalParameterRowKind.GitMode,
-				L(descriptor.LabelKey),
-				plan.GitReadiness.Mode == descriptor.Id,
-				GitMode: descriptor.Id)));
-		// Selected by id, not by Single(): there is more than one content transformation now, and the
-		// TUI deliberately surfaces only this one.
-		var secretDescriptor = ProjectPresentationCatalog.ContentTransformations
-			.Single(static descriptor => descriptor.LegacyOptionId == IgnoreOptionId.HideSecrets);
-		rows.Add(new TerminalParameterRow(
-			"section:secrets",
-			TerminalParameterRowKind.Section,
-			L("Settings.Secrets.Title")));
-		rows.Add(new TerminalParameterRow(
-			$"exclusion:{secretDescriptor.Token}",
-			TerminalParameterRowKind.Exclusion,
-			FormatExclusionLabel(secretDescriptor, plan),
+		var features = SecretRedactionFeatureSelection.Resolve(
 			plan.Selection.HideSecrets == true,
-			Exclusion: secretDescriptor.RequireId()));
-		rows.Add(new TerminalParameterRow(
-			"section:exclusions",
-			TerminalParameterRowKind.Section,
-			L("Terminal.Tui.Exclusions")));
-		rows.Add(new TerminalParameterRow(
-			"exclusions:all",
-			TerminalParameterRowKind.ToggleAllExclusions,
-			L("Settings.All"),
-			ProjectPresentationCatalog.Exclusions.All(descriptor => exclusions.Contains(descriptor.RequireId()))));
-		rows.AddRange(ProjectPresentationCatalog.Exclusions.Select(descriptor =>
-			new TerminalParameterRow(
-				$"exclusion:{descriptor.Token}",
-				TerminalParameterRowKind.Exclusion,
-				FormatExclusionLabel(descriptor, plan),
-				exclusions.Contains(descriptor.RequireId()),
-				Exclusion: descriptor.RequireId())));
-		rows.Add(new TerminalParameterRow(
-			"section:extensions",
-			TerminalParameterRowKind.Section,
-			L("Terminal.Tui.FileTypes")));
-		rows.Add(new TerminalParameterRow(
-			"extensions:all",
-			TerminalParameterRowKind.ToggleAllExtensions,
-			L("Settings.All"),
-			plan.AvailableExtensions.Count == selectedExtensions.Count));
-		rows.AddRange(plan.AvailableExtensions.Select(extension =>
-			new TerminalParameterRow(
-				$"extension:{extension}",
-				TerminalParameterRowKind.Extension,
-				extension,
-				selectedExtensions.Contains(extension),
-				Value: extension)));
-		var unavailableExtensions = (plan.Selection.Extensions ?? [])
-			.Where(extension => !plan.AvailableExtensions.Contains(
-				extension,
-				StringComparer.OrdinalIgnoreCase))
-			.Distinct(StringComparer.OrdinalIgnoreCase)
-			.Order(StringComparer.OrdinalIgnoreCase);
-		rows.AddRange(unavailableExtensions.Select(extension =>
-			new TerminalParameterRow(
-				$"extension-unavailable:{extension}",
-				TerminalParameterRowKind.Information,
-				$"{L("Terminal.Tui.Recent.Unavailable")}: {extension}")));
-		rows.Add(new TerminalParameterRow(
-			"section:roots",
-			TerminalParameterRowKind.Section,
-			L("Terminal.Tui.RootFolders")));
-		rows.Add(new TerminalParameterRow(
-			"roots:all",
-			TerminalParameterRowKind.ToggleAllRoots,
-			L("Settings.All"),
-			plan.AvailableRoots.Count == selectedRoots.Count));
-		rows.AddRange(plan.AvailableRoots.Select(root =>
-			new TerminalParameterRow(
-				$"root:{root}",
-				TerminalParameterRowKind.Root,
-				root,
-				selectedRoots.Contains(root),
-				Value: root)));
-		var unavailableRoots = (plan.Selection.Roots ?? [])
-			.Where(root => !plan.AvailableRoots.Contains(root, PathComparer.Default))
-			.Distinct(PathComparer.Default)
-			.Order(PathComparer.Default);
-		rows.AddRange(unavailableRoots.Select(root =>
-			new TerminalParameterRow(
-				$"root-unavailable:{root}",
-				TerminalParameterRowKind.Information,
-				$"{L("Terminal.Tui.Recent.Unavailable")}: {root}")));
-		return rows;
-	}
-
-	private string FormatExclusionLabel(
-		ProjectExclusionDescriptor descriptor,
-		ProjectContextPlan plan)
-	{
-		var label = L(descriptor.LabelKey);
-		if (descriptor.Id != ProjectExclusion.HideSecrets ||
-		    plan.Selection.HideSecrets != true)
-		{
-			return label;
-		}
-
-		var snapshot = _services.SecretRedactionSession.GetSnapshot(
+			plan.Selection.HidePrivateData == true);
+		if (features == SecretRedactionFeatures.None)
+			return null;
+		var kinds = CodeTransformIdentity.Resolve(
+			plan.Selection.CompressCode == true,
+			plan.Selection.StripComments == true,
+			plan.Selection.StripBlankLines == true);
+		var transformIdentity = kinds == CodeTransformKinds.None
+			? string.Empty
+			: _services.CodeCompressionSession.GetTransformIdentity(kinds);
+		return _services.SecretRedactionSession.GetSnapshot(
 			plan.SourceRoot,
-			plan.IncludedFiles);
-		// "No secrets" is a claim about every selected file. A discovery pass that skipped or
-		// failed some files may honestly report a count, but not a clean bill of health.
-		return snapshot switch
-		{
-			{ RedactedCount: > 0 } => $"{label} ({snapshot.RedactedCount:N0})",
-			{ RedactedCount: 0, IsComplete: true } => L("Settings.Ignore.HideSecrets.NoMatches"),
-			_ => label
-		};
+			plan.IncludedFiles,
+			transformIdentity,
+			features);
 	}
 
-	private void TrackSelectedControl()
+	private string FitControlLabel(string value) =>
+		TerminalParameterRow.FitLabel(
+			value,
+			ResolveControlLabelWidth(markerColumns: 6),
+			_environment.SupportsUnicode && !_options.Plain);
+
+	private string FitControlInformationLabel(string value) =>
+		TerminalParameterRow.FitLabel(
+			value,
+			ResolveControlLabelWidth(markerColumns: 2),
+			_environment.SupportsUnicode && !_options.Plain);
+
+	private int ResolveControlLabelWidth(int markerColumns)
 	{
-		if (_controlRows is null ||
-		    _controls?.SelectedItem is not { } index ||
-		    index < 0 ||
-		    index >= _controlRows.Count)
+		var panelWidth = _layoutMode == TerminalWorkspaceLayoutMode.Wide
+			? WideControlsWidth
+			: Math.Max(1, _terminalWidth);
+		return Math.Max(4, panelWidth - markerColumns - 2);
+	}
+
+	private void TrackSelectedControl(TerminalControlSection section)
+	{
+		var (list, rows) = GetControlSection(section);
+		if (list?.SelectedItem is not { } index || rows is null ||
+			index < 0 || index >= rows.Count)
 		{
 			return;
 		}
-		_selectedControlKey = _controlRows[index].Key;
+		SetSelectedControlKey(section, rows[index].Key);
+	}
+
+	private (TerminalParameterListView? List, ObservableCollection<TerminalParameterRow>? Rows)
+		GetControlSection(TerminalControlSection section) =>
+		section switch
+		{
+			TerminalControlSection.Content => (_contentControls, _contentControlRows),
+			TerminalControlSection.Exclusions => (_exclusionControls, _exclusionControlRows),
+			TerminalControlSection.Extensions => (_extensionControls, _extensionControlRows),
+			_ => throw new ArgumentOutOfRangeException(nameof(section), section, null)
+		};
+
+	private FrameView? GetControlSectionFrame(TerminalControlSection section) =>
+		section switch
+		{
+			TerminalControlSection.Content => _contentControlsFrame,
+			TerminalControlSection.Exclusions => _exclusionControlsFrame,
+			TerminalControlSection.Extensions => _extensionControlsFrame,
+			_ => throw new ArgumentOutOfRangeException(nameof(section), section, null)
+		};
+
+	private void SetSelectedControlKey(TerminalControlSection section, string key)
+	{
+		switch (section)
+		{
+			case TerminalControlSection.Content:
+				_selectedContentControlKey = key;
+				break;
+			case TerminalControlSection.Exclusions:
+				_selectedExclusionControlKey = key;
+				break;
+			case TerminalControlSection.Extensions:
+				_selectedExtensionControlKey = key;
+				break;
+			default:
+				throw new ArgumentOutOfRangeException(nameof(section), section, null);
+		}
+	}
+
+	private void RefreshControlTitles()
+	{
+		if (_contentControlsFrame is not null)
+			_contentControlsFrame.Title = L("Settings.Secrets.Title");
+		if (_exclusionControlsFrame is not null)
+			_exclusionControlsFrame.Title = L("Terminal.Tui.Exclusions");
+		if (_extensionControlsFrame is not null)
+			_extensionControlsFrame.Title = L("Terminal.Tui.FileTypes");
+	}
+
+	private bool ControlsHaveFocus =>
+		_contentControls?.HasFocus == true ||
+		_exclusionControls?.HasFocus == true ||
+		_extensionControls?.HasFocus == true;
+
+	private TerminalControlSection ResolveFocusedControlSection() =>
+		_exclusionControls?.HasFocus == true
+			? TerminalControlSection.Exclusions
+			: _extensionControls?.HasFocus == true
+				? TerminalControlSection.Extensions
+				: _contentControls?.HasFocus == true
+					? TerminalControlSection.Content
+					: _activeControlSection;
+
+	private TerminalParameterListView? ActiveControlList =>
+		GetControlSection(_activeControlSection).List;
+
+	private void FocusControlSection(TerminalControlSection section, bool movePane = true)
+	{
+		_activeControlSection = section;
+		if (movePane)
+		{
+			_activePane = TerminalWorkspacePane.Controls;
+			ApplyWorkspaceLayout();
+		}
+		var target = GetControlSection(section).List;
+		target?.SetFocus();
+		// Layout and focus notifications can report the previously focused list while a
+		// single-pane transition is being completed. The requested section is authoritative.
+		_activePane = TerminalWorkspacePane.Controls;
+		_activeControlSection = section;
+		UpdateWorkspaceFocus();
+	}
+
+	private enum TerminalControlSection
+	{
+		Content,
+		Exclusions,
+		Extensions
 	}
 
 	private IReadOnlyList<TerminalWorkspaceAction> BuildWorkspaceActions()
@@ -262,28 +380,21 @@ internal sealed partial class TerminalWorkspaceSession
 				TerminalWorkspaceActionKind.GitFiltering,
 				"Terminal.Tui.Selection",
 				"Terminal.Tui.GitFiltering",
-				"Terminal.Option.GitMode",
+				"Terminal.Tui.Action.FocusExclusions.Description",
 				"M",
 				FormatGitMode(plan.GitReadiness.Mode)),
 			CreateAction(
 				TerminalWorkspaceActionKind.Exclusions,
 				"Terminal.Tui.Selection",
 				"Terminal.Tui.Exclusions",
-				"Terminal.Analysis.Exclusions",
+				"Terminal.Tui.Action.FocusExclusions.Description",
 				"X",
 				FormatExclusions(plan.Selection.Exclusions ?? [])),
-			CreateAction(
-				TerminalWorkspaceActionKind.RootFolders,
-				"Terminal.Tui.Selection",
-				"Terminal.Tui.RootFolders",
-				"Terminal.Option.Root",
-				"R",
-				FormatSelectionCount(plan.SelectedRoots.Count, plan.AvailableRoots.Count)),
 			CreateAction(
 				TerminalWorkspaceActionKind.FileTypes,
 				"Terminal.Tui.Selection",
 				"Terminal.Tui.FileTypes",
-				"Terminal.Option.Extension",
+				"Terminal.Tui.Action.FocusFileTypes.Description",
 				"T",
 				FormatSelectionCount(
 					plan.SelectedExtensions.Count,
@@ -387,44 +498,39 @@ internal sealed partial class TerminalWorkspaceSession
 			_ => L("Terminal.Tui.Settings.Default")
 		};
 
-	private void ActivateSelectedControl()
+	private void ActivateSelectedControl(TerminalControlSection section)
 	{
-		if (_controlRows is null || _controls?.SelectedItem is not { } selected ||
-		    selected < 0 || selected >= _controlRows.Count)
+		var (list, rows) = GetControlSection(section);
+		if (rows is null || list?.SelectedItem is not { } selected ||
+			selected < 0 || selected >= rows.Count)
 		{
 			return;
 		}
 
-		var row = _controlRows[selected];
-		_selectedControlKey = row.Key;
+		var row = rows[selected];
+		SetSelectedControlKey(section, row.Key);
 		switch (row.Kind)
 		{
-			case TerminalParameterRowKind.Section:
 			case TerminalParameterRowKind.Information:
 				return;
 			case TerminalParameterRowKind.GitMode when row.GitMode is { } mode:
 				ApplyGitMode(mode);
 				return;
 			case TerminalParameterRowKind.ToggleAllExclusions:
-			{
-				var values = new HashSet<ProjectExclusion>();
-				if (row.IsSelected != true)
-					values.UnionWith(ProjectPresentationCatalog.Exclusions.Select(static descriptor => descriptor.RequireId()));
-				ApplyExclusions(values);
+				ApplyAllExclusions(row.IsSelected != true);
 				return;
-			}
-			case TerminalParameterRowKind.Exclusion
-				when row.Exclusion == ProjectExclusion.HideSecrets:
-				ApplyHideSecrets(row.IsSelected != true);
+			case TerminalParameterRowKind.ContentTransformation
+				when row.ContentTransformation is { } transformation:
+				ApplyContentTransformation(transformation, row.IsSelected != true);
 				return;
 			case TerminalParameterRowKind.Exclusion when row.Exclusion is { } exclusion:
-			{
-				var values = (_state?.Plan.Selection.Exclusions ?? []).ToHashSet();
-				if (!values.Add(exclusion))
-					values.Remove(exclusion);
-				ApplyExclusions(values);
-				return;
-			}
+				{
+					var values = (_state?.Plan.Selection.Exclusions ?? []).ToHashSet();
+					if (!values.Add(exclusion))
+						values.Remove(exclusion);
+					ApplyExclusions(values);
+					return;
+				}
 			case TerminalParameterRowKind.ToggleAllExtensions:
 				ApplyExtensions(
 					row.IsSelected == true
@@ -432,69 +538,82 @@ internal sealed partial class TerminalWorkspaceSession
 						: _state?.Plan.AvailableExtensions ?? []);
 				return;
 			case TerminalParameterRowKind.Extension when row.Value is { } extension:
-			{
-				var values = (_state?.Plan.SelectedExtensions ?? [])
-					.ToHashSet(StringComparer.OrdinalIgnoreCase);
-				if (!values.Add(extension))
-					values.Remove(extension);
-				ApplyExtensions(values);
-				return;
-			}
-			case TerminalParameterRowKind.ToggleAllRoots:
-				ApplyRoots(
-					row.IsSelected == true
-						? []
-						: _state?.Plan.AvailableRoots ?? []);
-				return;
-			case TerminalParameterRowKind.Root when row.Value is { } root:
-			{
-				var values = (_state?.Plan.SelectedRoots ?? []).ToHashSet(PathComparer.Default);
-				if (!values.Add(root))
-					values.Remove(root);
-				ApplyRoots(values);
-				return;
-			}
+				{
+					var values = (_state?.Plan.SelectedExtensions ?? [])
+						.ToHashSet(StringComparer.OrdinalIgnoreCase);
+					if (!values.Add(extension))
+						values.Remove(extension);
+					ApplyExtensions(values);
+					return;
+				}
 		}
 	}
 
 	private void ApplyGitMode(GitFilteringMode mode)
 	{
-		if (_state is null || mode == _state.Plan.GitReadiness.Mode)
+		if (_state is null)
 			return;
-		var state = _state;
-		_activeOperationTask = RunOperationAsync(
-			L("Terminal.Tui.GitFiltering"),
-			async token =>
-			{
-				await _controller.SetGitModeAsync(state, mode, token).ConfigureAwait(false);
-				return null;
-			});
+		var target = _state.Plan.GitReadiness.Mode == mode
+			? GitFilteringMode.None
+			: mode;
+		if (target != GitFilteringMode.None)
+			_preferredGitMode = target;
+		ApplyPathFilters(target, _state.Plan.Selection.Exclusions ?? []);
+	}
+
+	private void ApplyAllExclusions(bool enabled)
+	{
+		if (_state is null)
+			return;
+		var mode = enabled
+			? _state.Plan.GitReadiness.Mode == GitFilteringMode.None
+				? _preferredGitMode
+				: _state.Plan.GitReadiness.Mode
+			: GitFilteringMode.None;
+		var exclusions = enabled
+			? ProjectPresentationCatalog.Exclusions
+				.Select(static descriptor => descriptor.RequireId())
+				.ToArray()
+			: [];
+		ApplyPathFilters(mode, exclusions);
 	}
 
 	private void ApplyExclusions(IReadOnlyCollection<ProjectExclusion> exclusions)
 	{
 		if (_state is null)
 			return;
+		ApplyPathFilters(_state.Plan.GitReadiness.Mode, exclusions);
+	}
+
+	private void ApplyPathFilters(
+		GitFilteringMode mode,
+		IReadOnlyCollection<ProjectExclusion> exclusions)
+	{
+		if (_state is null)
+			return;
+		PreserveControlFocusForOperation(TerminalControlSection.Exclusions);
 		var state = _state;
 		_activeOperationTask = RunOperationAsync(
 			L("Terminal.Tui.Exclusions"),
 			async token =>
 			{
-				await _controller.SetExclusionsAsync(state, exclusions, token).ConfigureAwait(false);
+				await _controller.SetPathFilteringAsync(state, mode, exclusions, token)
+					.ConfigureAwait(false);
 				return null;
 			});
 	}
 
-	private void ApplyHideSecrets(bool enabled)
+	private void ApplyContentTransformation(IgnoreOptionId optionId, bool enabled)
 	{
 		if (_state is null)
 			return;
+		PreserveControlFocusForOperation(TerminalControlSection.Content);
 		var state = _state;
 		_activeOperationTask = RunOperationAsync(
 			L("Settings.Secrets.Title"),
 			token =>
 			{
-				_controller.SetHideSecrets(state, enabled, token);
+				_controller.SetContentTransformation(state, optionId, enabled, token);
 				return Task.FromResult<string?>(null);
 			});
 	}
@@ -503,6 +622,7 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (_state is null)
 			return;
+		PreserveControlFocusForOperation(TerminalControlSection.Extensions);
 		var state = _state;
 		_activeOperationTask = RunOperationAsync(
 			L("Terminal.Tui.FileTypes"),
@@ -513,18 +633,12 @@ internal sealed partial class TerminalWorkspaceSession
 			});
 	}
 
-	private void ApplyRoots(IReadOnlyCollection<string> roots)
+	private void PreserveControlFocusForOperation(TerminalControlSection section)
 	{
-		if (_state is null)
-			return;
-		var state = _state;
-		_activeOperationTask = RunOperationAsync(
-			L("Terminal.Tui.RootFolders"),
-			async token =>
-			{
-				await _controller.SetRootsAsync(state, roots, token).ConfigureAwait(false);
-				return null;
-			});
+		_activePane = TerminalWorkspacePane.Controls;
+		_activeControlSection = section;
+		_activePaneBeforeBusy = TerminalWorkspacePane.Controls;
+		_activeControlSectionBeforeBusy = section;
 	}
 
 	private void ExecuteWorkspaceAction(TerminalWorkspaceActionKind action)
@@ -547,16 +661,13 @@ internal sealed partial class TerminalWorkspaceSession
 				FocusPane(TerminalWorkspacePane.Controls);
 				break;
 			case TerminalWorkspaceActionKind.GitFiltering:
-				ChangeGitMode();
+				FocusControlSection(TerminalControlSection.Exclusions);
 				break;
 			case TerminalWorkspaceActionKind.Exclusions:
-				ChangeExclusions();
-				break;
-			case TerminalWorkspaceActionKind.RootFolders:
-				ChangeRootsOrTypes(roots: true);
+				FocusControlSection(TerminalControlSection.Exclusions);
 				break;
 			case TerminalWorkspaceActionKind.FileTypes:
-				ChangeRootsOrTypes(roots: false);
+				FocusControlSection(TerminalControlSection.Extensions);
 				break;
 			case TerminalWorkspaceActionKind.ExportContext:
 				ExportContext();
@@ -857,11 +968,11 @@ internal sealed partial class TerminalWorkspaceSession
 				var errors = plan.Diagnostics.Count(static diagnostic =>
 					diagnostic.Severity == ContextDiagnosticSeverity.Error);
 				return $"{L("Terminal.Analysis.Files")}: {plan.IncludedFiles.Count}\n" +
-				       $"{L("Terminal.Analysis.Folders")}: {plan.IncludedFolders.Count}\n" +
-				       $"{L("Terminal.Analysis.Characters")}: {plan.Analysis.Metrics.Content.Chars:N0}\n" +
-				       $"{L("Terminal.Analysis.Tokens")}: {plan.Analysis.Metrics.Content.Tokens:N0}\n" +
-				       $"{L("Terminal.Tui.Warnings")}: {warnings:N0}\n" +
-				       $"{L("Terminal.Label.Error")}: {errors:N0}";
+					   $"{L("Terminal.Analysis.Folders")}: {plan.IncludedFolders.Count}\n" +
+					   $"{L("Terminal.Analysis.Characters")}: {plan.Analysis.Metrics.Content.Chars:N0}\n" +
+					   $"{L("Terminal.Analysis.Tokens")}: {plan.Analysis.Metrics.Content.Tokens:N0}\n" +
+					   $"{L("Terminal.Tui.Warnings")}: {warnings:N0}\n" +
+					   $"{L("Terminal.Label.Error")}: {errors:N0}";
 			});
 	}
 
@@ -974,7 +1085,7 @@ internal sealed partial class TerminalWorkspaceSession
 		{
 			TerminalWorkspacePane.Tree => (View?)_tree,
 			TerminalWorkspacePane.Preview => _preview,
-			_ => _controls
+			_ => ActiveControlList
 		};
 		view?.SetFocus();
 		UpdateWorkspaceFocus();

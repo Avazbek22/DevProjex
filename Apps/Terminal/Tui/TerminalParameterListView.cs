@@ -1,4 +1,5 @@
 using Terminal.Gui.Input;
+using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
 
 namespace DevProjex.Terminal.Tui;
@@ -10,12 +11,20 @@ internal sealed class TerminalParameterListView : ListView
 	private int _lastPressedViewportRow = -1;
 	private long _lastPressedAt;
 
+	public TerminalParameterListView(
+		bool showVerticalScrollBar = false,
+		bool useUnicode = true)
+	{
+		if (showVerticalScrollBar)
+			TerminalScrollBarStyle.Apply(this, useUnicode, vertical: true, horizontal: false);
+	}
+
 	public event EventHandler? SelectionToggleRequested;
 
 	protected override bool OnMouseEvent(Mouse mouse)
 	{
 		if (mouse.Flags.HasFlag(MouseFlags.WheeledUp) ||
-		    mouse.Flags.HasFlag(MouseFlags.WheeledDown))
+			mouse.Flags.HasFlag(MouseFlags.WheeledDown))
 		{
 			return base.OnMouseEvent(mouse);
 		}
@@ -32,9 +41,9 @@ internal sealed class TerminalParameterListView : ListView
 		EnsureSelectedItemVisible();
 		var now = Environment.TickCount64;
 		if (!pressed &&
-		    _lastPressedViewportRow == position.Y &&
-		    _lastPressedViewportColumn == position.X &&
-		    now - _lastPressedAt <= PointerEventDeduplicationWindowMilliseconds)
+			_lastPressedViewportRow == position.Y &&
+			_lastPressedViewportColumn == position.X &&
+			now - _lastPressedAt <= PointerEventDeduplicationWindowMilliseconds)
 		{
 			return true;
 		}

@@ -36,14 +36,11 @@ public sealed class TerminalPtyRecoveryTests
 		Assert.Contains("Destination:", prompt, StringComparison.Ordinal);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Destination state: Ready",
+			"Export?",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Equivalent command:",
+			"Export completed:",
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.True(File.Exists(destination));
@@ -57,10 +54,6 @@ public sealed class TerminalPtyRecoveryTests
 			path => Path.GetFileName(path).Equals(
 				"Project-context.txt",
 				StringComparison.OrdinalIgnoreCase));
-		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			"Equivalent command:",
-			cancellationToken: TestContext.Current.CancellationToken);
 		await ExitAsync(terminal);
 	}
 
@@ -111,7 +104,9 @@ public sealed class TerminalPtyRecoveryTests
 		var initialMode = await terminal.WaitForScreenAsync(
 			"Tracked Git files only",
 			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.Contains("(*) Use .gitignore", initialMode, StringComparison.Ordinal);
+		Assert.Contains("[x] Use .gitignore", initialMode, StringComparison.Ordinal);
+		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
+		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
@@ -127,11 +122,8 @@ public sealed class TerminalPtyRecoveryTests
 		var recoveredMode = await terminal.WaitForScreenAsync(
 			"Tracked Git files only",
 			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.Contains("(*) Use .gitignore", recoveredMode, StringComparison.Ordinal);
-		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			"Tracked Git files only",
-			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("[x] Use .gitignore", recoveredMode, StringComparison.Ordinal);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		var recovered = await terminal.WaitForScreenAsync(
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
@@ -178,22 +170,13 @@ public sealed class TerminalPtyRecoveryTests
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await ReplacePromptTextAsync(terminal, folderDestination, "Exact destination:");
 		await terminal.WaitForScreenAsync(
-			"Destination state: Ready",
+			"Export?",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		var completed = await terminal.WaitForScreenAsync(
-			"Equivalent command:",
+			"Export completed:",
 			cancellationToken: TestContext.Current.CancellationToken);
-		if (!completed.Contains("project-export", StringComparison.Ordinal))
-		{
-			completed = await terminal.WaitForScreenAsync(
-				"project-export",
-				cancellationToken: TestContext.Current.CancellationToken);
-		}
-		Assert.Contains("Equivalent command:", completed, StringComparison.Ordinal);
+		Assert.Contains("Export completed:", completed, StringComparison.Ordinal);
 
 		Assert.True(File.Exists(Path.Combine(folderDestination, "src", "App.cs")));
 		Assert.Equal(
@@ -202,10 +185,6 @@ public sealed class TerminalPtyRecoveryTests
 				Path.Combine(folderDestination, "src", "App.cs"),
 				TestContext.Current.CancellationToken));
 		Assert.False(terminal.HasExited);
-		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			"Equivalent command:",
-			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);

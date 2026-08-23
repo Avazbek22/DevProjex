@@ -51,11 +51,8 @@ public sealed class TerminalProgressPtyTests
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await ReplacePromptTextAsync(terminal, destination);
 		await terminal.WaitForScreenAsync(
-			"Destination state: Ready",
+			"Export?",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 
 		Assert.NotNull(dataRoot);
@@ -92,20 +89,16 @@ public sealed class TerminalProgressPtyTests
 			destination,
 			TestContext.Current.CancellationToken);
 		var completed = await terminal.WaitForScreenAsync(
-			"Equivalent command:",
+			"Export completed:",
 			timeout: TimeSpan.FromSeconds(45),
 			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.Contains("Elapsed:", completed, StringComparison.Ordinal);
+		Assert.Contains("Export completed:", completed, StringComparison.Ordinal);
 		Assert.True(Directory.Exists(destination));
 		Assert.Equal(
 			1_001,
 			Directory.EnumerateFiles(destination, "*", SearchOption.AllDirectories).Count());
 		Assert.False(terminal.HasExited);
 
-		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			"Equivalent command:",
-			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"> CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);
@@ -161,11 +154,8 @@ public sealed class TerminalProgressPtyTests
 		await terminal.SendEnterAsync(cancellationToken);
 		await ReplacePromptTextAsync(terminal, destination);
 		await terminal.WaitForScreenAsync(
-			"Destination state: Ready",
+			"Export?",
 			cancellationToken: cancellationToken);
-		await terminal.SendTabAsync(cancellationToken);
-		await terminal.SendTabAsync(cancellationToken);
-		await terminal.SendTabAsync(cancellationToken);
 		await terminal.SendEnterAsync(cancellationToken);
 	}
 

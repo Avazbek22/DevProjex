@@ -1,40 +1,40 @@
  DevProjex Terminal · <PROJECT>
  <PROJECT_ROOT>
-┌┤> PROJECT TREE├─────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├────────────────────────────┐┌┤  PARAMETERS├─────────────────────────────────────┐
-│v [x] <PROJECT>   ││<PROJECT>                              ││  GIT FILTERING                                    │
-│  > [x] src                              ││├── src                                                       ││  ( ) No Git filtering                             │
-│    [x] global.json                      │││   ├── Feature                                               ││  (*) Use .gitignore                               │
-│    [x] readme.md                ┌┤Action palette├─────────────────────────────────────────────────────────────────────────┐ files only                       │
-│                                 │ Filter actions:                                                                         │ING:                              │
-│                                 │ Preview format                                                                          │s                                 │
-│                                 │                                                                                         │                                  │
-│                                 │ Preview format: ASCII  [F]                                                              │                                  │
-│                                 │                                                                                         │e                                 │
-│                                 │                                                                                         │rs                                │
-│                                 │                                                                                         │                                  │
-│                                 │                                                                                         │ers                               │
-│                                 │                                                                                         │s                                 │
-│                                 │                                                                                         │                                  │
-│                                 │                                                                                         │                                  │
-│                                 │                                                                                         │ut extension                      │
-│                                 │                                                                                         │                                  │
-│                                 │                                                                                         │                                  │
-│                                 │                                                                                         │                                  │
-│                                 │                                                                                         │                                  │
-│                                 │ CONTEXT PREVIEW · Preview format · ASCII                                                │                                  │
-│                                 │ Choose ASCII, JSON, XML, or Markdown for the tree.                                      │                                  │
-│                                 │                                                                                         │                                  │
-│                                 │                                                                                         │                                  │
-│                                 │                                                                                         │                                  │
-│                                 │                                                                                         │                                  │
-│                                 │                                  ⟦ Back ⟧▖ ⟦► Run ◄⟧▖                                   │                                  │
-│                                 │                                  ▝▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▘                                   │                                  │
-│                                 └─────────────────────────────────────────────────────────────────────────────────────────┘                                  │
-│                                         ││                                                              ││                                                   │
-│                                         ││                                                              ││                                                   │
-│                                         ││                                                              ││                                                   │
-│                                         ││ Files 4  |  Lines 1-8/8                                      ││                                                   │
-└─────────────────────────────────────────┘└──────────────────────────────────────────────────────────────┘└───────────────────────────────────────────────────┘
+┌┤> PROJECT TREE├─────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├───────────────────────────────────────────┐┌┤  PARAMETERS├──────────────────────┐
+│v [x] <PROJECT>   ││<PROJECT>                                             ││Saved settings: Default settings    │
+│  > [x] src                              ││├── src                                                                      ││┌┤Content processing:├─────────────┐│
+│    [x] global.json                      │││   ├── Feature                                                              │││  [ ] Hide secrets                ││
+│    [x] readme.md                        │││   │   └── Handler.cs                                                       │││  [ ] Hide private data           ││
+│                                 ┌┤Action palette├─────────────────────────────────────────────────────────────────────────┐ [ ] Compress code               ││
+│                                 │ Filter actions:                                                                         │ [ ] Strip comments              ││
+│                                 │ Preview format                                                                          │ [ ] Strip blank lines           ││
+│                                 │                                                                                         │─────────────────────────────────┘│
+│                                 │ Preview format: ASCII  [F]                                                              │Exclusions├──────────────────────┐│
+│                                 │                                                                                         │ [x] All                        ▲││
+│                                 │                                                                                         │ [x] Use .gitignore             ┃││
+│                                 │                                                                                         │ [ ] Tracked Git files only     ┃││
+│                                 │                                                                                         │ [x] Smart ignore               ┃││
+│                                 │                                                                                         │ [x] Empty folders              ┃││
+│                                 │                                                                                         │ [x] Empty files                ┃││
+│                                 │                                                                                         │ [x] Hidden folders             ┃││
+│                                 │                                                                                         │ [x] Hidden files               ┃││
+│                                 │                                                                                         │ [x] dot folders                ·││
+│                                 │                                                                                         │ [x] dot files                  ▼││
+│                                 │                                                                                         │─────────────────────────────────┘│
+│                                 │ CONTEXT PREVIEW · Preview format · ASCII                                                │File types├──────────────────────┐│
+│                                 │ Choose ASCII, JSON, XML, or Markdown for the tree.                                      │ [x] All                         ││
+│                                 │                                                                                         │ [x] .cs                         ││
+│                                 │                                                                                         │ [x] .json                       ││
+│                                 │                                                                                         │ [x] .md                         ││
+│                                 │                                                                                         │                                 ││
+│                                 │                                  ⟦ Back ⟧▖ ⟦► Run ◄⟧▖                                   │                                 ││
+│                                 │                                  ▝▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▘                                   │                                 ││
+│                                 └─────────────────────────────────────────────────────────────────────────────────────────┘                                 ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││ Files 4  |  Lines 1-8/8                                                     ││└──────────────────────────────────┘│
+└─────────────────────────────────────────┘└─────────────────────────────────────────────────────────────────────────────┘└────────────────────────────────────┘
 
  Files 4 · Folders 3 · 76 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
  Up/Down Navigate   Enter Expand   Space Toggle   / Search   Tab/F6 Preview   Ctrl+P Actions   ? Help

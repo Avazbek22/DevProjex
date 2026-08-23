@@ -15,15 +15,23 @@ internal sealed class TerminalProjectTreeView : ListView
 	private int _lastNamePressedRow = -1;
 	private long _lastNamePressedAt;
 
-	public TerminalProjectTreeView(Func<int, TerminalTreeRow?> rowResolver)
+	public TerminalProjectTreeView(
+		Func<int, TerminalTreeRow?> rowResolver,
+		bool useUnicode = true,
+		bool showScrollBars = true)
 	{
 		_rowResolver = rowResolver;
+		if (showScrollBars)
+			TerminalScrollBarStyle.Apply(this, useUnicode, vertical: true, horizontal: true);
 	}
 
 	public event EventHandler? SelectionToggleRequested;
 	public event EventHandler? ExpansionToggleRequested;
 
 	public int VerticalOffset => Viewport.Y;
+
+	public void UpdateContentMetrics(int rowWidth, int rowCount) =>
+		SetContentSize(new Size(Math.Max(1, rowWidth), Math.Max(1, rowCount)));
 
 	public void RestoreVerticalOffset(int offset, int rowCount)
 	{
@@ -39,7 +47,7 @@ internal sealed class TerminalProjectTreeView : ListView
 	protected override bool OnMouseEvent(Mouse mouse)
 	{
 		if (mouse.Flags.HasFlag(MouseFlags.WheeledUp) ||
-		    mouse.Flags.HasFlag(MouseFlags.WheeledDown))
+			mouse.Flags.HasFlag(MouseFlags.WheeledDown))
 		{
 			return base.OnMouseEvent(mouse);
 		}
@@ -60,9 +68,9 @@ internal sealed class TerminalProjectTreeView : ListView
 
 		var now = Environment.TickCount64;
 		if (!isPressed &&
-		    _lastPressedViewportRow == position.Y &&
-		    _lastPressedViewportColumn == position.X &&
-		    now - _lastPressedAt <= PointerEventDeduplicationWindowMilliseconds)
+			_lastPressedViewportRow == position.Y &&
+			_lastPressedViewportColumn == position.X &&
+			now - _lastPressedAt <= PointerEventDeduplicationWindowMilliseconds)
 		{
 			return true;
 		}
@@ -94,7 +102,7 @@ internal sealed class TerminalProjectTreeView : ListView
 			ExpansionToggleRequested?.Invoke(this, EventArgs.Empty);
 		}
 		else if (position.X >= checkboxStart &&
-		         position.X < checkboxStart + 3)
+				 position.X < checkboxStart + 3)
 		{
 			_lastNamePressedRow = -1;
 			SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
@@ -102,7 +110,7 @@ internal sealed class TerminalProjectTreeView : ListView
 		else if (position.X >= nameStart && row.Node.IsDirectory)
 		{
 			if (_lastNamePressedRow == rowIndex &&
-			    now - _lastNamePressedAt <= DoubleClickWindowMilliseconds)
+				now - _lastNamePressedAt <= DoubleClickWindowMilliseconds)
 			{
 				_lastNamePressedRow = -1;
 				ExpansionToggleRequested?.Invoke(this, EventArgs.Empty);

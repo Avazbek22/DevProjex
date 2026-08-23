@@ -121,9 +121,9 @@ public sealed class TerminalWorkspaceContractTests
 				return;
 			}
 			catch (Exception exception) when (exception is
-				       UnauthorizedAccessException or
-				       IOException or
-				       PlatformNotSupportedException)
+					   UnauthorizedAccessException or
+					   IOException or
+					   PlatformNotSupportedException)
 			{
 				Assert.Skip(
 					$"Directory symbolic links are unavailable: {exception.GetType().Name}.");
@@ -154,9 +154,9 @@ public sealed class TerminalWorkspaceContractTests
 				Assert.Skip("The test environment did not allow creating a Windows junction.");
 		}
 		catch (Exception exception) when (exception is
-			       InvalidOperationException or
-			       IOException or
-			       System.ComponentModel.Win32Exception)
+				   InvalidOperationException or
+				   IOException or
+				   System.ComponentModel.Win32Exception)
 		{
 			Assert.Skip($"Windows junction creation is unavailable: {exception.GetType().Name}.");
 		}
@@ -712,9 +712,9 @@ public sealed class TerminalWorkspaceContractTests
 			Directory.CreateSymbolicLink(alias, outputDirectory);
 		}
 		catch (Exception exception) when (exception is
-			       UnauthorizedAccessException or
-			       IOException or
-			       PlatformNotSupportedException)
+				   UnauthorizedAccessException or
+				   IOException or
+				   PlatformNotSupportedException)
 		{
 			Assert.Skip(
 				$"Directory symbolic links are unavailable: {exception.GetType().Name}.");
@@ -850,9 +850,11 @@ public sealed class TerminalWorkspaceContractTests
 		var text = new TerminalWorkspace(services, environment).BuildExportSummaryText(summary);
 
 		Assert.Equal(TerminalExportDestinationState.Conflict, summary.DestinationState);
-		Assert.Contains("Сводка", services.Localization["Terminal.Tui.ExportSummary"], StringComparison.Ordinal);
-		Assert.Contains("Конфликт", text, StringComparison.Ordinal);
+		Assert.Contains("Путь назначения", text, StringComparison.Ordinal);
+		Assert.Contains("Файлы", text, StringComparison.Ordinal);
+		Assert.Contains("Фильтры", text, StringComparison.Ordinal);
 		Assert.Contains(Path.GetFullPath(destination), text, StringComparison.Ordinal);
+		Assert.DoesNotContain("Конфликт", text, StringComparison.Ordinal);
 		Assert.Equal("existing", File.ReadAllText(destination));
 	}
 
@@ -885,6 +887,70 @@ public sealed class TerminalWorkspaceContractTests
 		Assert.NotEmpty(updates);
 		Assert.Equal(updates[^1].TotalEntryCount, updates[^1].ProcessedEntryCount);
 		Assert.True(updates[^1].BytesWritten > 0);
+	}
+
+	[Fact]
+	public async Task TuiProjectExportAppliesEverySelectedContentTransformation()
+	{
+		const string secret = "ghp_a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL";
+		const string privateEmail = "ivan.petrov@corp.internal";
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile(
+			"project/src/Config.cs",
+			$$"""
+			namespace Sample;
+
+			// remove this comment
+			public sealed class Config
+			{
+				public const string Token = "{{secret}}";
+				public const string Email = "{{privateEmail}}";
+
+				public void Run()
+				{
+					Console.WriteLine(Token);
+				}
+			}
+			""");
+		var destination = Path.Combine(workspace.CreateDirectory("output"), "project-copy");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			project,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+		foreach (var optionId in new[]
+			{
+				IgnoreOptionId.HideSecrets,
+				IgnoreOptionId.HidePrivateData,
+				IgnoreOptionId.CompressCode,
+				IgnoreOptionId.StripComments,
+				IgnoreOptionId.StripBlankLines
+			})
+		{
+			controller.SetContentTransformation(
+				state,
+				optionId,
+				enabled: true,
+				TestContext.Current.CancellationToken);
+		}
+
+		await controller.ExportProjectAsync(
+			state,
+			ProjectCopyExportFormat.Folder,
+			destination,
+			TestContext.Current.CancellationToken);
+
+		var exported = await File.ReadAllTextAsync(
+			Path.Combine(destination, "src", "Config.cs"),
+			TestContext.Current.CancellationToken);
+		Assert.DoesNotContain(secret, exported, StringComparison.Ordinal);
+		Assert.DoesNotContain(privateEmail, exported, StringComparison.Ordinal);
+		Assert.DoesNotContain("remove this comment", exported, StringComparison.Ordinal);
+		Assert.DoesNotContain($"{Environment.NewLine}{Environment.NewLine}", exported, StringComparison.Ordinal);
+		Assert.DoesNotContain("Console.WriteLine(Token)", exported, StringComparison.Ordinal);
 	}
 
 	private sealed class SynchronousProgress<T>(Action<T> report) : IProgress<T>

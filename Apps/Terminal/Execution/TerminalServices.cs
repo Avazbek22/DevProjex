@@ -7,6 +7,7 @@ public sealed record TerminalServices(
 	LocalizationService Localization,
 	ProjectAnalysisService AnalysisService,
 	IgnoreRulesService IgnoreRulesService,
+	IgnoreOptionsService IgnoreOptionsService,
 	ProjectContextPlanner ContextPlanner,
 	TerminalProjectContextFactory ContextFactory,
 	ProjectSourceIdentityResolver SourceIdentityResolver,

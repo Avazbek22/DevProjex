@@ -1,16 +1,16 @@
+using Terminal.Gui.Text;
+
 namespace DevProjex.Terminal.Tui;
 
 internal enum TerminalParameterRowKind
 {
-	Section,
 	Information,
 	GitMode,
+	ContentTransformation,
 	ToggleAllExclusions,
 	Exclusion,
 	ToggleAllExtensions,
-	Extension,
-	ToggleAllRoots,
-	Root
+	Extension
 }
 
 internal sealed record TerminalParameterRow(
@@ -20,17 +20,37 @@ internal sealed record TerminalParameterRow(
 	bool? IsSelected = null,
 	GitFilteringMode? GitMode = null,
 	ProjectExclusion? Exclusion = null,
+	IgnoreOptionId? ContentTransformation = null,
 	string? Value = null)
 {
 	public override string ToString()
 	{
-		if (Kind == TerminalParameterRowKind.Section)
-			return $"  {Label.ToUpperInvariant()}";
 		if (Kind == TerminalParameterRowKind.Information)
 			return $"  {Label}";
-		var marker = Kind == TerminalParameterRowKind.GitMode
-			? IsSelected == true ? "(*)" : "( )"
-			: IsSelected == true ? "[x]" : "[ ]";
+		var marker = IsSelected == true ? "[x]" : "[ ]";
 		return $"  {marker} {Label}";
+	}
+
+	internal static string FitLabel(string value, int width, bool useUnicode)
+	{
+		if (string.IsNullOrEmpty(value) || width <= 0)
+			return string.Empty;
+		if (value.GetColumns() <= width)
+			return value;
+
+		var suffix = useUnicode ? "…" : "...";
+		if (width <= suffix.GetColumns())
+			return new string('.', width);
+		var remaining = width - suffix.GetColumns();
+		var builder = new StringBuilder();
+		foreach (var rune in value.EnumerateRunes())
+		{
+			var columns = Math.Max(0, rune.GetColumns());
+			if (columns > remaining)
+				break;
+			builder.Append(rune);
+			remaining -= columns;
+		}
+		return builder.Append(suffix).ToString();
 	}
 }

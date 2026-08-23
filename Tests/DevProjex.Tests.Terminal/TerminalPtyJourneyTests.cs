@@ -497,36 +497,31 @@ public sealed class TerminalPtyJourneyTests
 
 		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"No Git filtering",
+			"[x] Use .gitignore",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			"No Git filtering",
+		await terminal.SendShiftTabAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendAsync("X", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Toggle all changes only this section",
+			"> PARAMETERS",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			"Toggle all changes only this section",
+		await terminal.SendShiftTabAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.SendAsync("R", TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
-			"Toggle all changes only this section",
-			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			"Toggle all changes only this section",
-			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.DoesNotContain("ROOT FOLDERS", terminal.CaptureScreen(), StringComparison.Ordinal);
 		await terminal.SendAsync("T", TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
-			"Toggle all changes only this section",
+		var fileTypes = await terminal.WaitForScreenAsync(
+			"> PARAMETERS",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			"Toggle all changes only this section",
+		Assert.Contains("File types", fileTypes, StringComparison.Ordinal);
+		await terminal.SendShiftTabAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.SendAsync("A", TestContext.Current.CancellationToken);
@@ -551,10 +546,9 @@ public sealed class TerminalPtyJourneyTests
 		await terminal.SendAsync(dryRunDestination, TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Destination state:",
+			"Export?",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.SendShiftTabAsync(TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"Validation completed",
@@ -571,13 +565,13 @@ public sealed class TerminalPtyJourneyTests
 
 		await terminal.ResizeAsync(80, 24, TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenWithoutAsync(
-			"CONTEXT PREVIEW",
-			cancellationToken: TestContext.Current.CancellationToken);
-		var compact = await terminal.WaitForScreenAsync(
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.Contains("PROJECT TREE", compact, StringComparison.Ordinal);
-		Assert.DoesNotContain("CONTEXT PREVIEW", compact, StringComparison.Ordinal);
+		var compact = await terminal.WaitForScreenAsync(
+			"CONTEXT PREVIEW",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("CONTEXT PREVIEW", compact, StringComparison.Ordinal);
+		Assert.DoesNotContain("PROJECT TREE", compact, StringComparison.Ordinal);
 		await terminal.ResizeAsync(120, 30, TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"CONTEXT PREVIEW",

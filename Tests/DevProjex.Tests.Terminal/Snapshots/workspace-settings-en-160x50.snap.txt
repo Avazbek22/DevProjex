@@ -1,13 +1,13 @@
- DevProjex Terminal · <PROJECT>
+ DevProjex Terminal · <ID>
  <PROJECT_ROOT>
-┌┤> PROJECT TREE├─────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├───────────────────────────────────────────┐┌┤  PARAMETERS├──────────────────────┐
-│v [x] <PROJECT>   ││<PROJECT>                                             ││Saved settings: Default settings    │
+┌┤  PROJECT TREE├─────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├───────────────────────────────────────────┐┌┤> PARAMETERS├──────────────────────┐
+│v [x] <ID>   ││<ID>                                             ││Saved settings: Default settings    │
 │  > [x] src                              ││├── src                                                                      ││┌┤Content processing:├─────────────┐│
-│    [x] global.json                      │││   ├── Feature                                                              │││  [ ] Hide secrets                ││
-│    [x] readme.md                        │││   │   └── Handler.cs                                                       │││  [ ] Hide private data           ││
-│                                         │││   └── App.cs                                                               │││  [ ] Compress code               ││
-│                                         ││├── global.json                                                              │││  [ ] Strip comments              ││
-│                                         ││└── readme.md                                                                │││  [ ] Strip blank lines           ││
+│    [x] global.json                      │││   └── App.cs                                                               │││  [ ] Hide secrets                ││
+│    [x] readme.md                        ││├── global.json                                                              │││  [ ] Hide private data           ││
+│                                         ││└── readme.md                                                                │││  [ ] Compress code               ││
+│                                         ││                                                                             │││  [ ] Strip comments              ││
+│                                         ││                                                                             │││  [ ] Strip blank lines           ││
 │                                         ││                                                                             ││└──────────────────────────────────┘│
 │                                         ││                                                                             ││┌┤Exclusions├──────────────────────┐│
 │                                         ││                                                                             │││  [x] All                         ││
@@ -20,6 +20,11 @@
 │                                         ││                                                                             │││  [x] Hidden files                ││
 │                                         ││                                                                             │││  [x] dot folders                 ││
 │                                         ││                                                                             │││  [x] dot files                   ││
+│                                         ││                                                                             │││  [x] Files without extension     ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
 │                                         ││                                                                             ││└──────────────────────────────────┘│
 │                                         ││                                                                             ││┌┤File types├──────────────────────┐│
 │                                         ││                                                                             │││  [x] All                         ││
@@ -33,8 +38,13 @@
 │                                         ││                                                                             │││                                  ││
 │                                         ││                                                                             │││                                  ││
 │                                         ││                                                                             │││                                  ││
-│                                         ││ Files 4  |  Lines 1-8/8                                                     ││└──────────────────────────────────┘│
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││ Files 3  |  Lines 1-6/6                                                     ││└──────────────────────────────────┘│
 └─────────────────────────────────────────┘└─────────────────────────────────────────────────────────────────────────────┘└────────────────────────────────────┘
 
- Files 4 · Folders 3 · 76 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
- Up/Down Navigate   Enter Expand   Space Toggle   / Search   Tab/F6 Preview   Ctrl+P Actions   ? Help
+ Files 3 · Folders 2 · 40 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
+ Up/Down or j/k Navigate   Enter Change   Tab/F6 Tree   Ctrl+P Action palette   ? Help

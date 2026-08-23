@@ -157,9 +157,10 @@ public sealed class TerminalRecentProjectsPtyTests
 		await terminal.ResizeAsync(160, 40, TestContext.Current.CancellationToken);
 		await terminal.SendShiftF6Async(TestContext.Current.CancellationToken);
 		var parameters = await terminal.WaitForScreenAsync(
-			"Saved project settings",
+			"Saved settings:",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("PARAMETERS", parameters, StringComparison.Ordinal);
+		Assert.Contains("Saved project set", parameters, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 		await ExitAsync(terminal);
 	}
@@ -438,8 +439,8 @@ public sealed class TerminalRecentProjectsPtyTests
 			{
 				await Task.Delay(150, cancellationToken);
 				if (terminal.CaptureScreen()
-				    .Split('\n')
-				    .Any(line => line.Contains($"> {action}", StringComparison.Ordinal)))
+					.Split('\n')
+					.Any(line => line.Contains($"> {action}", StringComparison.Ordinal)))
 				{
 					return;
 				}
