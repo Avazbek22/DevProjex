@@ -173,6 +173,53 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		await QuitAsync(terminal);
 	}
 
+	[Fact(Timeout = 180_000)]
+	public async Task FullCommandJourneyExportsRedactedContextAndRestoresAnEmptyTree()
+	{
+		using var project = CreateProject();
+		using var output = new TemporaryDirectory();
+		var destination = Path.Combine(output.Path, "redacted context.md");
+		await using var terminal = await StartAsync(project.Path, columns: 160, rows: 40);
+		await terminal.WaitForScreenAsync(
+			"Content processing",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await ExecuteAsync(terminal, "set hide-secrets on", "Hide secrets: enabled");
+		await ExecuteAsync(terminal, "set hide-private-data on", "Hide private data: enabled");
+		await ExecuteAsync(terminal, "view content", "CONTEXT PREVIEW: Content");
+		await terminal.SendAsync(
+			$":export context markdown \"{destination}\"\r",
+			TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Export?",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Export completed",
+			timeout: TimeSpan.FromSeconds(45),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.True(File.Exists(destination));
+		var exported = File.ReadAllText(destination);
+		Assert.Contains("App.cs", exported, StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			"ghp_a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL",
+			exported,
+			StringComparison.Ordinal);
+
+		await ExecuteAsync(terminal, "all types off", "All: disabled");
+		await terminal.WaitForScreenAsync(
+			"No visible items",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await ExecuteAsync(terminal, "all types on", "All: enabled");
+		await terminal.WaitForScreenAsync(
+			"App.cs",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.False(terminal.HasExited);
+		await QuitAsync(terminal);
+	}
+
 	[Fact(Timeout = 120_000)]
 	public async Task ActivationWorksFromEveryPaneAndSurvivesResizeAndPlainMode()
 	{
