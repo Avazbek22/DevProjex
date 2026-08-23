@@ -61,10 +61,11 @@ duplicate rows.
 
 Cloned workspaces use repository identity rather than the physical cache folder:
 the heading, tree root, Preview, analysis, and context documents show the clean
-repository name and original safe URL. The internal cache path is available only
-from explicit source details and diagnostics. Clone progress shows the repository,
-safe URL, elapsed time, current Git phase and real Git measurements when Git
-provides them; it never manufactures a percentage or prints credentials.
+repository name and original safe URL. Source details show the safe URL, branch,
+short commit, human-readable size, and last-opened time without exposing the
+physical cache path. Clone progress shows the repository, safe URL, elapsed time,
+current Git phase and real Git measurements when Git provides them; it never
+manufactures a percentage or prints credentials.
 
 ## Navigation Lifecycle
 

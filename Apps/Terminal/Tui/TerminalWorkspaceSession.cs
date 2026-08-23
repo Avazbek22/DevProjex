@@ -141,7 +141,6 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_parameterRowsBuilder = new TerminalParameterRowsBuilder(
 			L,
 			FitControlLabel,
-			FitControlInformationLabel,
 			services.IgnoreOptionsService.FormatContentRedactionLabel);
 		_presentation = TerminalWorkspacePresentationPolicy.Resolve(
 			options.ColorMode,

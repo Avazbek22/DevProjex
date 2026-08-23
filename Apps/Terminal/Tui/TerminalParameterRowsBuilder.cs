@@ -5,7 +5,6 @@ namespace DevProjex.Terminal.Tui;
 internal sealed class TerminalParameterRowsBuilder(
 	Func<string, string> localize,
 	Func<string, string> fitLabel,
-	Func<string, string> fitInformationLabel,
 	Func<IgnoreOptionId, SecretScanState, int?, int?, string> formatRedactionLabel)
 {
 	public IReadOnlyList<TerminalParameterRow> BuildContent(
@@ -87,26 +86,13 @@ internal sealed class TerminalParameterRowsBuilder(
 		ArgumentNullException.ThrowIfNull(plan);
 		var selectedExtensions = (selectedExtensionsOverride ?? plan.SelectedExtensions)
 			.ToHashSet(StringComparer.OrdinalIgnoreCase);
-		var rows = new List<TerminalParameterRow>();
-		rows.AddRange(plan.AvailableExtensions.Select(extension =>
+		return plan.AvailableExtensions.Select(extension =>
 			new TerminalParameterRow(
 				$"extension:{extension}",
 				TerminalParameterRowKind.Extension,
 				fitLabel(extension),
 				selectedExtensions.Contains(extension),
-				Value: extension)));
-		rows.AddRange((plan.Selection.Extensions ?? [])
-			.Where(extension => !plan.AvailableExtensions.Contains(
-				extension,
-				StringComparer.OrdinalIgnoreCase))
-			.Distinct(StringComparer.OrdinalIgnoreCase)
-			.Order(StringComparer.OrdinalIgnoreCase)
-			.Select(extension => new TerminalParameterRow(
-				$"extension-unavailable:{extension}",
-				TerminalParameterRowKind.Information,
-				fitInformationLabel(
-					$"{localize("Terminal.Tui.Recent.Unavailable")}: {extension}"))));
-		return rows;
+				Value: extension)).ToArray();
 	}
 
 	public TerminalParameterRow BuildExtensionAggregate(
@@ -120,7 +106,6 @@ internal sealed class TerminalParameterRowsBuilder(
 			"extensions:all",
 			TerminalParameterRowKind.ToggleAllExtensions,
 			FormatAggregateLabel(plan.AvailableExtensions.Count),
-			plan.AvailableExtensions.Count == selectedExtensions.Count &&
 			plan.AvailableExtensions.All(selectedExtensions.Contains));
 	}
 

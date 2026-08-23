@@ -7,19 +7,15 @@ namespace DevProjex.Tests.Terminal;
 public sealed class TerminalParameterRowsBuilderTests
 {
 	[Theory]
-	[InlineData(false, true, "[x] .cs")]
-	[InlineData(false, false, "[ ] .cs")]
-	[InlineData(true, null, "Unavailable")]
-	public void RowsStartAtTheMiniPanelContentEdge(
-		bool information,
-		bool? isSelected,
-		string expected)
+	[InlineData(true, "[x] .cs")]
+	[InlineData(false, "[ ] .cs")]
+	public void RowsStartAtTheMiniPanelContentEdge(bool isSelected, string expected)
 	{
-		var kind = information
-			? TerminalParameterRowKind.Information
-			: TerminalParameterRowKind.Extension;
-		var label = information ? "Unavailable" : ".cs";
-		var row = new TerminalParameterRow("row", kind, label, isSelected);
+		var row = new TerminalParameterRow(
+			"row",
+			TerminalParameterRowKind.Extension,
+			".cs",
+			isSelected);
 
 		Assert.Equal(expected, row.ToString());
 		Assert.False(row.ToString().StartsWith(' '));
@@ -119,7 +115,7 @@ public sealed class TerminalParameterRowsBuilderTests
 	}
 
 	[Fact]
-	public void ExtensionRowsAppendUnavailableProfileValuesAsInformation()
+	public void ExtensionRowsSilentlyOmitUnavailableRememberedValues()
 	{
 		var builder = CreateBuilder();
 		var selection = ProjectSelectionSpec.Standard with
@@ -135,22 +131,38 @@ public sealed class TerminalParameterRowsBuilderTests
 		Assert.Contains(rows, static row =>
 			row.Kind == TerminalParameterRowKind.Extension &&
 			row.Value == ".cs" && row.IsSelected == true);
-		Assert.Contains(rows, static row =>
-			row.Kind == TerminalParameterRowKind.Information &&
-			row.Label.Contains(".removed", StringComparison.Ordinal));
+		Assert.DoesNotContain(rows, static row =>
+			string.Equals(row.Value, ".removed", StringComparison.OrdinalIgnoreCase) ||
+			row.Label.Contains(".removed", StringComparison.OrdinalIgnoreCase));
 	}
 
 	[Fact]
-	public void ExtensionAggregateRequiresTheExactAvailableSet()
+	public void ExtensionAggregateIgnoresUnavailableRememberedSelections()
 	{
 		var row = CreateBuilder().BuildExtensionAggregate(CreatePlan(
 			ProjectSelectionSpec.Standard,
 			availableExtensions: [".cs", ".json"],
-			selectedExtensions: [".cs", ".removed"]));
+			selectedExtensions: [".cs", ".json", ".removed"]));
 
 		Assert.Equal(TerminalParameterRowKind.ToggleAllExtensions, row.Kind);
 		Assert.Equal("Settings.All (2)", row.Label);
-		Assert.False(row.IsSelected);
+		Assert.True(row.IsSelected);
+	}
+
+	[Fact]
+	public void ParameterIslandsNeverEmitInformationalPlaceholderRows()
+	{
+		var builder = CreateBuilder();
+		var plan = CreatePlan(
+			ProjectSelectionSpec.Standard with { Extensions = [".missing"] },
+			availableExtensions: [".cs"],
+			selectedExtensions: []);
+
+		var rows = builder.BuildContent(plan, snapshot: null)
+			.Concat(builder.BuildExclusions(plan))
+			.Concat(builder.BuildExtensions(plan));
+
+		Assert.All(rows, static row => Assert.NotNull(row.IsSelected));
 	}
 
 	[Theory]
@@ -223,7 +235,6 @@ public sealed class TerminalParameterRowsBuilderTests
 	private static TerminalParameterRowsBuilder CreateBuilder() =>
 		new(
 			static key => key,
-			static value => value,
 			static value => value,
 			static (option, _, matched, redacted) =>
 				$"{option}:{matched}/{redacted}");

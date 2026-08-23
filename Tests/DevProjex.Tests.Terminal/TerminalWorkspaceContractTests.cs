@@ -825,6 +825,35 @@ public sealed class TerminalWorkspaceContractTests
 	}
 
 	[Fact]
+	public void ExportSummaryDistinguishesAnEmptySelectionFromUnavailableValues()
+	{
+		using var workspace = new TemporaryDirectory();
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var summary = new TerminalExportSummary(
+			TerminalExportKind.Context,
+			ProjectContextView.Tree,
+			ProjectContextDocumentFormat.Markdown,
+			"stdout",
+			TerminalExportDestinationState.Ready,
+			FileCount: 0,
+			FolderCount: 1,
+			Bytes: 0,
+			Characters: 0,
+			EstimatedTokens: 0,
+			GitFilteringMode.None,
+			Exclusions: [],
+			DiagnosticCount: 0);
+
+		var text = new TerminalWorkspace(
+			services,
+			new TestTerminalEnvironment()).BuildExportSummaryText(summary);
+
+		Assert.Contains("No Git filtering; None", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("none available", text, StringComparison.OrdinalIgnoreCase);
+	}
+
+	[Fact]
 	public async Task PreparedExportReportsConflictAndLocalizedSummaryWithoutOverwriting()
 	{
 		using var workspace = new TemporaryDirectory();

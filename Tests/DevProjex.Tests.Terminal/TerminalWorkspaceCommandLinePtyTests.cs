@@ -5,6 +5,88 @@ namespace DevProjex.Tests.Terminal;
 [Collection(TerminalProcessCollection.Name)]
 public sealed class TerminalWorkspaceCommandLinePtyTests
 {
+	[Theory(Timeout = 120_000)]
+	[InlineData(160, 40, false)]
+	[InlineData(100, 30, false)]
+	[InlineData(100, 30, true)]
+	public async Task InputUsesTheWorkspaceBackgroundWithoutAFullWidthFill(
+		int columns,
+		int rows,
+		bool noColor)
+	{
+		using var project = CreateProject();
+		var environment = noColor
+			? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["NO_COLOR"] = "1" }
+			: null;
+		await using var terminal = await StartAsync(
+			project.Path,
+			columns,
+			rows,
+			environment);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.SendAsync(":vie", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			":view",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var commandRow = terminal.FindVisibleRow(":view");
+		var metricsRow = terminal.FindVisibleRow("Files 3 · Folders 2");
+		Assert.True(commandRow >= 0);
+		Assert.True(metricsRow >= 0);
+		AssertSameBackground(
+			terminal.CaptureCellStyle(commandRow, Math.Min(columns - 2, 80)),
+			terminal.CaptureCellStyle(metricsRow, Math.Min(columns - 2, 80)));
+
+		await terminal.SendMouseClickAsync(
+			column: 4,
+			row: 4,
+			cancellationToken: TestContext.Current.CancellationToken);
+		await Task.Delay(100, TestContext.Current.CancellationToken);
+		AssertSameBackground(
+			terminal.CaptureCellStyle(commandRow, Math.Min(columns - 2, 80)),
+			terminal.CaptureCellStyle(metricsRow, Math.Min(columns - 2, 80)));
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 90_000)]
+	public async Task ActionPaletteReportsAnEmptyExclusionSelectionAsZero()
+	{
+		using var project = CreateProject();
+		await using var terminal = await StartAsync(project.Path, columns: 120, rows: 30);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await ExecuteAsync(terminal, "all exclusions off", "All: disabled");
+
+		await terminal.SendAsync("\u0010", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Filter actions:",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync(
+			"Exclusions mini-panel",
+			TestContext.Current.CancellationToken);
+		var palette = await terminal.WaitForScreenAsync(
+			"Focus the Exclusions mini-panel.",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.True(
+			palette.Split('\n').Any(static line =>
+				line.Contains("Exclusions:", StringComparison.Ordinal) &&
+				line.Contains('0')),
+			$"The Exclusions palette row did not report zero selected rules.\n{palette}");
+		Assert.DoesNotContain("none available", palette, StringComparison.OrdinalIgnoreCase);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForStableScreenAsync(
+			required: "PROJECT TREE",
+			forbidden: "Building preview…",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await QuitAsync(terminal);
+	}
+
 	[Fact(Timeout = 90_000)]
 	public async Task CompletionEditingEscapeAndHistoryRemainResponsive()
 	{
@@ -601,4 +683,11 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 			name,
 			screen,
 			(projectPath, "<PROJECT_ROOT>"));
+
+	private static void AssertSameBackground(TerminalCellStyle actual, TerminalCellStyle expected)
+	{
+		Assert.Equal(expected.BackgroundMode, actual.BackgroundMode);
+		Assert.Equal(expected.Background, actual.Background);
+		Assert.Equal(expected.Inverse, actual.Inverse);
+	}
 }

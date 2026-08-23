@@ -226,7 +226,7 @@ public sealed class TerminalWorkspace
 	{
 		var gitMode = L(ProjectPresentationCatalog.Get(summary.GitMode).LabelKey);
 		var exclusions = summary.Exclusions.Count == 0
-			? L("Terminal.Tui.NoneAvailable")
+			? L("Terminal.Tui.NoneSelected")
 			: string.Join(", ", summary.Exclusions.Select(LocalizeExclusion));
 		string Fit(string value) => maximumValueColumns == int.MaxValue
 			? value
@@ -253,7 +253,7 @@ public sealed class TerminalWorkspace
 	internal static string FormatContextFormat(ProjectContextDocumentFormat format) =>
 		ProjectPresentationCatalog.Get(format).UserLabel;
 
-	internal static string FormatBytes(long bytes)
+	internal static string FormatBytes(long bytes, IFormatProvider? formatProvider = null)
 	{
 		string[] units = ["B", "KB", "MB", "GB", "TB"];
 		var value = Math.Max(0, bytes);
@@ -266,8 +266,8 @@ public sealed class TerminalWorkspace
 		}
 
 		return unit == 0
-			? $"{value} {units[unit]}"
-			: $"{display:0.##} {units[unit]}";
+			? $"{value.ToString(formatProvider)} {units[unit]}"
+			: $"{display.ToString("0.##", formatProvider)} {units[unit]}";
 	}
 
 	internal string FormatCount(long value) =>
