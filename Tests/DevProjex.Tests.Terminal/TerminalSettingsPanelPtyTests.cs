@@ -93,6 +93,12 @@ public sealed class TerminalSettingsPanelPtyTests
 		var fileTypes = ExtractPanel(parameters, "File types", null);
 		Assert.DoesNotContain('▲', fileTypes);
 		Assert.DoesNotContain('▼', fileTypes);
+
+		await terminal.ResizeAsync(160, 30, TestContext.Current.CancellationToken);
+		var wide = await WaitForStableScreenAsync(
+			terminal,
+			"Saved settings: Saved project s…");
+		Assert.Contains("Content processing", wide, StringComparison.Ordinal);
 		await ExitAsync(terminal);
 	}
 

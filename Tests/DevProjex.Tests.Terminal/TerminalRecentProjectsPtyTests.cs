@@ -160,7 +160,7 @@ public sealed class TerminalRecentProjectsPtyTests
 			"Saved settings:",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("PARAMETERS", parameters, StringComparison.Ordinal);
-		Assert.Contains("Saved project set", parameters, StringComparison.Ordinal);
+		Assert.Contains("Saved project", parameters, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 		await ExitAsync(terminal);
 	}

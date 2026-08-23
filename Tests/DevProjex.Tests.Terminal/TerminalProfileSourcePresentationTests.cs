@@ -20,6 +20,16 @@ public sealed class TerminalProfileSourcePresentationTests
 	}
 
 	[Fact]
+	public void LocalSourceIsEllipsizedWithinTheAvailableTerminalColumns()
+	{
+		var result = Assert.IsType<string>(
+			Format(ProjectProfileReference.Local, maxColumns: 32));
+
+		Assert.Equal("Saved settings: Saved project s…", result);
+		Assert.True(result.GetColumns() <= 32);
+	}
+
+	[Fact]
 	public void PortableSourceUsesOnlyTheProfileFileName()
 	{
 		var source = new ProjectProfileReference(

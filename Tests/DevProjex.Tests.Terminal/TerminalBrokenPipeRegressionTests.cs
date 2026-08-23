@@ -109,7 +109,7 @@ public sealed class TerminalBrokenPipeRegressionTests
 			source,
 			4 * 1024 * 1024,
 			TestContext.Current.CancellationToken);
-		var applicationAssembly = FindApplicationAssembly();
+		var applicationAssembly = PublishedApplicationLocator.FindApplicationAssembly();
 		Assert.True(
 			File.Exists(applicationAssembly),
 			$"Application assembly was not found: {applicationAssembly}");
@@ -195,24 +195,6 @@ public sealed class TerminalBrokenPipeRegressionTests
 				cancellationToken);
 			remaining -= count;
 		}
-	}
-
-	private static string FindApplicationAssembly()
-	{
-		var configuration = new DirectoryInfo(
-				AppContext.BaseDirectory.TrimEnd(
-					Path.DirectorySeparatorChar,
-					Path.AltDirectorySeparatorChar))
-			.Parent?
-			.Name ?? "Debug";
-		return Path.Combine(
-			PublishedApplicationLocator.FindRepositoryRoot(),
-			"Apps",
-			"Avalonia",
-			"bin",
-			configuration,
-			"net10.0",
-			"DevProjex.dll");
 	}
 
 	private sealed class NativeCodeIOException : IOException

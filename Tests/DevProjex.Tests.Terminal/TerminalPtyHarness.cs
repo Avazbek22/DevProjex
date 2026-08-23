@@ -970,6 +970,8 @@ internal static class PublishedApplicationLocator
 {
 	private const string ProgressCheckpointHostName =
 		"DevProjex.Tests.Terminal.ProgressHost";
+	private const string DebugConfiguration = "Debug";
+	private const string ReleaseConfiguration = "Release";
 
 	public static string FindExecutable()
 	{
@@ -978,11 +980,7 @@ internal static class PublishedApplicationLocator
 			return Path.GetFullPath(explicitPath);
 
 		var repository = FindRepositoryRoot();
-		var configuration = AppContext.BaseDirectory.Contains(
-			$"{Path.DirectorySeparatorChar}Release{Path.DirectorySeparatorChar}",
-			StringComparison.OrdinalIgnoreCase)
-			? "Release"
-			: "Debug";
+		var configuration = ResolveBuildConfiguration(AppContext.BaseDirectory);
 		var executableName = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
 			? "DevProjex.exe"
 			: "DevProjex";
@@ -1004,11 +1002,7 @@ internal static class PublishedApplicationLocator
 	public static string FindProgressCheckpointHostExecutable()
 	{
 		var repository = FindRepositoryRoot();
-		var configuration = AppContext.BaseDirectory.Contains(
-			$"{Path.DirectorySeparatorChar}Release{Path.DirectorySeparatorChar}",
-			StringComparison.OrdinalIgnoreCase)
-			? "Release"
-			: "Debug";
+		var configuration = ResolveBuildConfiguration(AppContext.BaseDirectory);
 		var executableName = OperatingSystem.IsWindows()
 			? $"{ProgressCheckpointHostName}.exe"
 			: ProgressCheckpointHostName;
@@ -1025,6 +1019,49 @@ internal static class PublishedApplicationLocator
 		throw new FileNotFoundException(
 			"Build the terminal progress checkpoint test host before running progress PTY tests.",
 			path);
+	}
+
+	public static string FindApplicationAssembly()
+	{
+		var path = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"bin",
+			ResolveBuildConfiguration(AppContext.BaseDirectory),
+			"net10.0",
+			"DevProjex.dll");
+		if (File.Exists(path))
+			return path;
+		throw new FileNotFoundException(
+			"Build the DevProjex Avalonia host before running process tests.",
+			path);
+	}
+
+	internal static string ResolveBuildConfiguration(string baseDirectory)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(baseDirectory);
+		var directory = new DirectoryInfo(baseDirectory);
+		while (directory is not null)
+		{
+			if (string.Equals(
+			    directory.Name,
+			    ReleaseConfiguration,
+			    StringComparison.OrdinalIgnoreCase))
+			{
+				return ReleaseConfiguration;
+			}
+			if (string.Equals(
+			    directory.Name,
+			    DebugConfiguration,
+			    StringComparison.OrdinalIgnoreCase))
+			{
+				return DebugConfiguration;
+			}
+			directory = directory.Parent;
+		}
+
+		return DebugConfiguration;
 	}
 
 	internal static string FindRepositoryRoot()
