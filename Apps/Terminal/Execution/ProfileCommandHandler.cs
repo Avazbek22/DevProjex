@@ -78,7 +78,7 @@ public sealed class ProfileCommandHandler(
 					.Write(plan.Diagnostics);
 				return CommandLineExitCodes.PolicyFailure;
 			}
-			var legacy = ToLegacyProfile(plan);
+			var legacy = ToLegacyProfile(plan, selection);
 			var saveResult = services.LocalProfileStore.TrySaveProfileWithResult(projectPath, legacy);
 			if (saveResult.WasTruncated)
 			{
@@ -131,19 +131,31 @@ public sealed class ProfileCommandHandler(
 		return CommandLineExitCodes.Success;
 	}
 
-	private static ProjectSelectionProfile ToLegacyProfile(ProjectContextPlan plan)
+	private static ProjectSelectionProfile ToLegacyProfile(
+		ProjectContextPlan plan,
+		ProjectSelectionSpec importedSelection)
 	{
-		var selectedRoots = plan.SelectedRoots.ToHashSet(PathComparer.Default);
-		var selectedExtensions = plan.SelectedExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase);
+		var inheritsAllRoots = importedSelection.Roots is null;
+		var inheritsAllExtensions = importedSelection.Extensions is null;
+		var selectedRoots = inheritsAllRoots
+			? new HashSet<string>(PathComparer.Default)
+			: plan.SelectedRoots.ToHashSet(PathComparer.Default);
+		var selectedExtensions = inheritsAllExtensions
+			? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+			: plan.SelectedExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase);
 		var selectedIgnoreOptions = ProjectSelectionAdapter.ToIgnoreOptions(plan.Selection).ToHashSet();
-		var rootStates = plan.AvailableRoots.ToDictionary(
-			static root => root,
-			selectedRoots.Contains,
-			PathComparer.Default);
-		var extensionStates = plan.AvailableExtensions.ToDictionary(
-			static extension => extension,
-			selectedExtensions.Contains,
-			StringComparer.OrdinalIgnoreCase);
+		var rootStates = inheritsAllRoots
+			? new Dictionary<string, bool>(PathComparer.Default)
+			: plan.AvailableRoots.ToDictionary(
+				static root => root,
+				selectedRoots.Contains,
+				PathComparer.Default);
+		var extensionStates = inheritsAllExtensions
+			? new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+			: plan.AvailableExtensions.ToDictionary(
+				static extension => extension,
+				selectedExtensions.Contains,
+				StringComparer.OrdinalIgnoreCase);
 		var ignoreStates = Enum.GetValues<IgnoreOptionId>().ToDictionary(
 			static option => option,
 			selectedIgnoreOptions.Contains);

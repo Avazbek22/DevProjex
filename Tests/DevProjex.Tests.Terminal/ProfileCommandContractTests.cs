@@ -307,6 +307,42 @@ public sealed class ProfileCommandContractTests
 	}
 
 	[Fact]
+	public async Task ExportImportExportPreservesImplicitAllSelections()
+	{
+		using var workspace = CreateWorkspace();
+		using var output = new TemporaryDirectory();
+		var first = Path.Combine(output.Path, "first.json");
+		var second = Path.Combine(output.Path, "second.json");
+
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				new TestTerminalEnvironment(),
+				"profile", "export", workspace.Path,
+				"--profile", "standard",
+				"-o", first));
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				new TestTerminalEnvironment(),
+				"profile", "import", first, workspace.Path, "--apply"));
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				new TestTerminalEnvironment(),
+				"profile", "export", workspace.Path,
+				"--profile", "local",
+				"-o", second));
+
+		Assert.Equal(
+			await File.ReadAllBytesAsync(first, TestContext.Current.CancellationToken),
+			await File.ReadAllBytesAsync(second, TestContext.Current.CancellationToken));
+	}
+
+	[Fact]
 	public async Task LocalProfilePersistenceFailuresReturnRuntimeErrorAtCommandBoundary()
 	{
 		using var workspace = CreateWorkspace();
