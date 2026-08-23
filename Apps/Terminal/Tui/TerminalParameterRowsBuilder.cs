@@ -26,16 +26,7 @@ internal sealed class TerminalParameterRowsBuilder(
 	{
 		ArgumentNullException.ThrowIfNull(plan);
 		var exclusions = (plan.Selection.Exclusions ?? []).ToHashSet();
-		var rows = new List<TerminalParameterRow>
-		{
-			new(
-				"exclusions:all",
-				TerminalParameterRowKind.ToggleAllExclusions,
-				fitLabel(localize("Settings.All")),
-				plan.GitReadiness.Mode != GitFilteringMode.None &&
-				ProjectPresentationCatalog.Exclusions.All(descriptor =>
-					exclusions.Contains(descriptor.RequireId())))
-		};
+		var rows = new List<TerminalParameterRow>();
 		rows.AddRange(ProjectPresentationCatalog.GitFiltering
 			.Where(static descriptor => descriptor.Id != GitFilteringMode.None)
 			.Select(descriptor => new TerminalParameterRow(
@@ -54,19 +45,24 @@ internal sealed class TerminalParameterRowsBuilder(
 		return rows;
 	}
 
+	public TerminalParameterRow BuildExclusionAggregate(ProjectContextPlan plan)
+	{
+		ArgumentNullException.ThrowIfNull(plan);
+		var exclusions = (plan.Selection.Exclusions ?? []).ToHashSet();
+		return new TerminalParameterRow(
+			"exclusions:all",
+			TerminalParameterRowKind.ToggleAllExclusions,
+			fitLabel(localize("Settings.All")),
+			plan.GitReadiness.Mode != GitFilteringMode.None &&
+			ProjectPresentationCatalog.Exclusions.All(descriptor =>
+				exclusions.Contains(descriptor.RequireId())));
+	}
+
 	public IReadOnlyList<TerminalParameterRow> BuildExtensions(ProjectContextPlan plan)
 	{
 		ArgumentNullException.ThrowIfNull(plan);
 		var selectedExtensions = plan.SelectedExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase);
-		var rows = new List<TerminalParameterRow>
-		{
-			new(
-				"extensions:all",
-				TerminalParameterRowKind.ToggleAllExtensions,
-				fitLabel(localize("Settings.All")),
-				plan.AvailableExtensions.Count == selectedExtensions.Count &&
-				plan.AvailableExtensions.All(selectedExtensions.Contains))
-		};
+		var rows = new List<TerminalParameterRow>();
 		rows.AddRange(plan.AvailableExtensions.Select(extension =>
 			new TerminalParameterRow(
 				$"extension:{extension}",
@@ -86,6 +82,18 @@ internal sealed class TerminalParameterRowsBuilder(
 				fitInformationLabel(
 					$"{localize("Terminal.Tui.Recent.Unavailable")}: {extension}"))));
 		return rows;
+	}
+
+	public TerminalParameterRow BuildExtensionAggregate(ProjectContextPlan plan)
+	{
+		ArgumentNullException.ThrowIfNull(plan);
+		var selectedExtensions = plan.SelectedExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase);
+		return new TerminalParameterRow(
+			"extensions:all",
+			TerminalParameterRowKind.ToggleAllExtensions,
+			fitLabel(localize("Settings.All")),
+			plan.AvailableExtensions.Count == selectedExtensions.Count &&
+			plan.AvailableExtensions.All(selectedExtensions.Contains));
 	}
 
 	internal static bool IsContentTransformationEnabled(

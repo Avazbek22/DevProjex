@@ -39,6 +39,14 @@ internal sealed record TerminalParameterRow(
 			return value;
 
 		var suffix = useUnicode ? "…" : "...";
+		var counterStart = value.LastIndexOf(" (", StringComparison.Ordinal);
+		if (counterStart > 0 && value.EndsWith(')'))
+		{
+			var counter = value[counterStart..];
+			var prefixWidth = width - counter.GetColumns();
+			if (prefixWidth > suffix.GetColumns())
+				return FitLabel(value[..counterStart], prefixWidth, useUnicode) + counter;
+		}
 		if (width <= suffix.GetColumns())
 			return new string('.', width);
 		var remaining = width - suffix.GetColumns();

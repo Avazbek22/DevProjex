@@ -1,25 +1,25 @@
  DevProjex Terminal · <PROJECT>
  <PROJECT_ROOT>
 ┌┤  PROJECT TREE├─────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · XML├─────────────────────────────────────────────┐┌┤> PARAMETERS├──────────────────────┐
-│v [x] <PROJECT>   ││<d n="<PROJECT>">                                     ││Saved settings: Default settings    │
-│  > [x] src                              ││  <d n="src">                                                                ││┌┤Content processing:├─────────────┐│
-│    [x] global.json                      ││    <d n="Feature">                                                          │││  [ ] Hide secrets                ││
-│    [x] readme.md                        ││      <f>Handler.cs</f>                                                      │││  [ ] Hide private data           ││
-│                                         ││    </d>                                                                     │││  [ ] Compress code               ││
-│                                         ││    <f>App.cs</f>                                                            │││  [ ] Strip comments              ││
-│                                         ││  </d>                                                                       │││  [ ] Strip blank lines           ││
-│                                         ││  <f>global.json</f>                                                         ││└──────────────────────────────────┘│
-│                                         ││  <f>readme.md</f>                                                           ││┌┤Exclusions├──────────────────────┐│
-│                                         ││</d>                                                                         │││  [x] All                        ▲││
-│                                         ││                                                                             │││  [x] Use .gitignore             ┃││
-│                                         ││                                                                             │││  [ ] Tracked Git files only     ┃││
-│                                         ││                                                                             │││  [x] Smart ignore               ┃││
-│                                         ││                                                                             │││  [x] Empty folders              ┃││
-│                                         ││                                                                             │││  [x] Empty files                ┃││
-│                                         ││                                                                             │││  [x] Hidden folders             ┃││
-│                                         ││                                                                             │││  [x] Hidden files               ┃││
-│                                         ││                                                                             │││  [x] dot folders                ·││
-│                                         ││                                                                             │││  [x] dot files                  ▼││
+│v [x] <PROJECT>   ││<d n="<PROJECT>">                                     ││┌┤Content processing:├─────────────┐│
+│  > [x] src                              ││  <d n="src">                                                                │││  [ ] Hide secrets                ││
+│    [x] global.json                      ││    <d n="Feature">                                                          │││  [ ] Hide private data           ││
+│    [x] readme.md                        ││      <f>Handler.cs</f>                                                      │││  [ ] Compress code               ││
+│                                         ││    </d>                                                                     │││  [ ] Strip comments              ││
+│                                         ││    <f>App.cs</f>                                                            │││  [ ] Strip blank lines           ││
+│                                         ││  </d>                                                                       ││└──────────────────────────────────┘│
+│                                         ││  <f>global.json</f>                                                         ││┌┤Exclusions├──────────────────────┐│
+│                                         ││  <f>readme.md</f>                                                           │││  [x] All                         ││
+│                                         ││</d>                                                                         │││  [x] Use .gitignore              ││
+│                                         ││                                                                             │││  [ ] Tracked Git files only      ││
+│                                         ││                                                                             │││  [x] Smart ignore                ││
+│                                         ││                                                                             │││  [x] Empty folders               ││
+│                                         ││                                                                             │││  [x] Empty files                 ││
+│                                         ││                                                                             │││  [x] Hidden folders              ││
+│                                         ││                                                                             │││  [x] Hidden files                ││
+│                                         ││                                                                             │││  [x] dot folders                 ││
+│                                         ││                                                                             │││  [x] dot files                   ││
+│                                         ││                                                                             │││  [x] Files without extension     ││
 │                                         ││                                                                             ││└──────────────────────────────────┘│
 │                                         ││                                                                             ││┌┤File types├──────────────────────┐│
 │                                         ││                                                                             │││  [x] All                         ││

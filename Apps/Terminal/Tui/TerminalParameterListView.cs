@@ -20,6 +20,7 @@ internal sealed class TerminalParameterListView : ListView
 	}
 
 	public event EventHandler? SelectionToggleRequested;
+	public event EventHandler? InteractionStarted;
 
 	protected override bool OnMouseEvent(Mouse mouse)
 	{
@@ -36,6 +37,7 @@ internal sealed class TerminalParameterListView : ListView
 			return base.OnMouseEvent(mouse);
 
 		SetFocus();
+		InteractionStarted?.Invoke(this, EventArgs.Empty);
 		var row = Viewport.Y + position.Y;
 		SelectedItem = row;
 		EnsureSelectedItemVisible();

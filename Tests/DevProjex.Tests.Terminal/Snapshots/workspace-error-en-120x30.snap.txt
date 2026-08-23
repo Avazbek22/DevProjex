@@ -1,20 +1,20 @@
  DevProjex Terminal · <PROJECT>
  <PROJECT_ROOT>
 ┌┤> PARAMETERS├────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│Saved settings: Default settings                                                                                      │
 │┌┤Content processing:├───────────────────────────────────────────────────────────────────────────────────────────────┐│
 ││  [ ] Hide secrets                                                                                                  ││
 ││  [ ] Hide private data                                                                                             ││
 ││  [ ] Compress code                                                                                                 ││
 ││  [ ] Strip comments                                                                                                ││
 ││  [ ] Strip blank lines                                                                                             ││
-│└──────────────────────┌┤Error├─────────────────────────────────────────────────────────────┐────────────────────────┘│
-│┌┤Exclusions├──────────│ Tracked Git mode requires at least one readable repository index.  │────────────────────────┐│
-││  [x] All             │                                                                    │                       ▲││
-││  [x] Use .gitignore  │ DPX-GIT-TRACKED-INDEX-UNAVAILABLE                                  │                       ┃││
-││  [ ] Tracked Git file│                                                                    │                       ·││
-││  [x] Smart ignore    │                            ⟦► Close ◄⟧▖                            │                       ·││
-││  [x] Empty folders   │                            ▝▀▀▀▀▀▀▀▀▀▀▘                            │                       ▼││
+│└────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘│
+│┌┤Exclusions├──────────┌┤Error├─────────────────────────────────────────────────────────────┐────────────────────────┐│
+││  [x] All             │ Tracked Git mode requires at least one readable repository index.  │                        ││
+││  [x] Use .gitignore  │                                                                    │                       ▲││
+││  [ ] Tracked Git file│ DPX-GIT-TRACKED-INDEX-UNAVAILABLE                                  │                       ┃││
+││  [x] Smart ignore    │                                                                    │                       ·││
+││  [x] Empty folders   │                            ⟦► Close ◄⟧▖                            │                       ·││
+││  [x] Empty files     │                            ▝▀▀▀▀▀▀▀▀▀▀▘                            │                       ▼││
 │└──────────────────────└────────────────────────────────────────────────────────────────────┘────────────────────────┘│
 │┌┤File types├────────────────────────────────────────────────────────────────────────────────────────────────────────┐│
 ││  [x] All                                                                                                           ││

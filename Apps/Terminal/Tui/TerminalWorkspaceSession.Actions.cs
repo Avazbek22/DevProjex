@@ -22,15 +22,20 @@ internal sealed partial class TerminalWorkspaceSession
 	private FrameView? _extensionControlsFrame;
 	private View? _filterControlsHost;
 	private TerminalParameterListView? _contentControls;
+	private TerminalParameterListView? _exclusionAllControl;
 	private TerminalParameterListView? _exclusionControls;
+	private TerminalParameterListView? _extensionAllControl;
 	private TerminalParameterListView? _extensionControls;
 	private ObservableCollection<TerminalParameterRow>? _contentControlRows;
+	private ObservableCollection<TerminalParameterRow>? _exclusionAllControlRows;
 	private ObservableCollection<TerminalParameterRow>? _exclusionControlRows;
+	private ObservableCollection<TerminalParameterRow>? _extensionAllControlRows;
 	private ObservableCollection<TerminalParameterRow>? _extensionControlRows;
 	private string? _selectedContentControlKey;
 	private string? _selectedExclusionControlKey;
 	private string? _selectedExtensionControlKey;
 	private TerminalControlSection _activeControlSection = TerminalControlSection.Content;
+	private TerminalControlSection? _activeAggregateControlSection;
 	private GitFilteringMode _preferredGitMode = GitFilteringMode.RespectGitIgnore;
 
 	private void CreateContextControls()
@@ -62,7 +67,7 @@ internal sealed partial class TerminalWorkspaceSession
 			L("Settings.Secrets.Title"),
 			TerminalControlSection.Content,
 			showVerticalScrollBar: false);
-		_contentControlsFrame.Y = (_options.Plain ? 1 : 0) + 1;
+		_contentControlsFrame.Y = _options.Plain ? 1 : 0;
 		_contentControlsFrame.Height = ContentControlsFrameHeight;
 
 		_filterControlsHost = new View
@@ -76,11 +81,19 @@ internal sealed partial class TerminalWorkspaceSession
 			L("Terminal.Tui.Exclusions"),
 			TerminalControlSection.Exclusions,
 			showVerticalScrollBar: true);
+		_exclusionAllControl = AddAggregateControl(
+			_exclusionControlsFrame,
+			_exclusionControls,
+			TerminalControlSection.Exclusions);
 		_exclusionControlsFrame.Height = Dim.Percent(50);
 		(_extensionControlsFrame, _extensionControls) = CreateControlSection(
 			L("Terminal.Tui.FileTypes"),
 			TerminalControlSection.Extensions,
 			showVerticalScrollBar: true);
+		_extensionAllControl = AddAggregateControl(
+			_extensionControlsFrame,
+			_extensionControls,
+			TerminalControlSection.Extensions);
 		_extensionControlsFrame.Y = Pos.Bottom(_exclusionControlsFrame);
 		_extensionControlsFrame.Height = Dim.Fill();
 		_filterControlsHost.Add(_exclusionControlsFrame, _extensionControlsFrame);
@@ -124,24 +137,65 @@ internal sealed partial class TerminalWorkspaceSession
 			{
 				_activePane = TerminalWorkspacePane.Controls;
 				_activeControlSection = section;
+				_activeAggregateControlSection = null;
 				UpdateWorkspaceFocus();
 				ActivateSelectedControl(section);
 			});
-		list.ValueChanged += (_, _) => TrackSelectedControl(section);
-		list.HasFocusChanged += (_, _) =>
+		list.InteractionStarted += (_, _) =>
 		{
-			if (list.HasFocus && !_suppressWorkspaceFocusTracking)
-				_activeControlSection = section;
+			_activePane = TerminalWorkspacePane.Controls;
+			_activeControlSection = section;
+			_activeAggregateControlSection = null;
 			UpdateWorkspaceFocus();
 		};
+		list.ValueChanged += (_, _) => TrackSelectedControl(section);
+		list.HasFocusChanged += (_, _) => UpdateWorkspaceFocus();
 		frame.Add(list);
 		return (frame, list);
+	}
+
+	private TerminalParameterListView AddAggregateControl(
+		FrameView frame,
+		TerminalParameterListView rows,
+		TerminalControlSection section)
+	{
+		rows.Y = 1;
+		rows.Height = Dim.Fill();
+		var aggregate = new TerminalParameterListView
+		{
+			X = 0,
+			Y = 0,
+			Width = Dim.Fill(),
+			Height = 1,
+			ShowMarks = false,
+			SchemeName = TerminalWorkspaceTheme.List
+		};
+		aggregate.SelectionToggleRequested += (_, _) =>
+			_application.Invoke(() =>
+			{
+				_activePane = TerminalWorkspacePane.Controls;
+				_activeControlSection = section;
+				_activeAggregateControlSection = section;
+				UpdateWorkspaceFocus();
+				ActivateAggregateControl(section);
+			});
+		aggregate.InteractionStarted += (_, _) =>
+		{
+			_activePane = TerminalWorkspacePane.Controls;
+			_activeControlSection = section;
+			_activeAggregateControlSection = section;
+			UpdateWorkspaceFocus();
+		};
+		aggregate.HasFocusChanged += (_, _) => UpdateWorkspaceFocus();
+		frame.Add(aggregate);
+		return aggregate;
 	}
 
 	private void RefreshContextControls()
 	{
 		if (_state is null || _contentControls is null ||
-			_exclusionControls is null || _extensionControls is null)
+			_exclusionAllControl is null || _exclusionControls is null ||
+			_extensionAllControl is null || _extensionControls is null)
 			return;
 
 		TrackSelectedControl(TerminalControlSection.Content);
@@ -151,22 +205,43 @@ internal sealed partial class TerminalWorkspaceSession
 			_contentControls,
 			BuildContentParameterRows(),
 			_selectedContentControlKey);
+		_exclusionAllControlRows = ReplaceControlRows(
+			_exclusionAllControl,
+			[_parameterRowsBuilder.BuildExclusionAggregate(_state.Plan)],
+			"exclusions:all");
 		_exclusionControlRows = ReplaceControlRows(
 			_exclusionControls,
 			BuildExclusionParameterRows(),
 			_selectedExclusionControlKey);
+		_extensionAllControlRows = ReplaceControlRows(
+			_extensionAllControl,
+			[_parameterRowsBuilder.BuildExtensionAggregate(_state.Plan)],
+			"extensions:all");
 		_extensionControlRows = ReplaceControlRows(
 			_extensionControls,
 			BuildExtensionParameterRows(),
 			_selectedExtensionControlKey);
 		RefreshControlTitles();
-		if (_profileSourceLabel is not null)
-		{
-			var profile = FormatSettingsSource(_state.Plan.Selection.ProfileSource ??
-											  ProjectProfileReference.Standard);
-			_profileSourceLabel.Text = FitControlInformationLabel(
-				$"{L("Terminal.Tui.SavedSettings")}: {profile}");
-		}
+		RefreshProfileSource();
+	}
+
+	private void RefreshProfileSource()
+	{
+		if (_profileSourceLabel is null || _contentControlsFrame is null)
+			return;
+		var text = TerminalProfileSourcePresentation.Format(
+			_state?.Plan.Selection.ProfileSource,
+			L("Terminal.Tui.SavedSettings"),
+			L("Terminal.Tui.Settings.Project"),
+			L("Terminal.Tui.Settings.File"),
+			ResolveControlLabelWidth(markerColumns: 2),
+			_environment.SupportsUnicode && !_options.Plain);
+		var visible = text is not null;
+		_profileSourceLabel.Visible = visible;
+		_profileSourceLabel.Text = text ?? string.Empty;
+		var headingHeight = _options.Plain ? 1 : 0;
+		_profileSourceLabel.Y = headingHeight;
+		_contentControlsFrame.Y = headingHeight + (visible ? 1 : 0);
 	}
 
 	private ObservableCollection<TerminalParameterRow> ReplaceControlRows(
@@ -303,13 +378,15 @@ internal sealed partial class TerminalWorkspaceSession
 
 	private bool ControlsHaveFocus =>
 		_contentControls?.HasFocus == true ||
+		_exclusionAllControl?.HasFocus == true ||
 		_exclusionControls?.HasFocus == true ||
+		_extensionAllControl?.HasFocus == true ||
 		_extensionControls?.HasFocus == true;
 
 	private TerminalControlSection ResolveFocusedControlSection() =>
-		_exclusionControls?.HasFocus == true
+		_exclusionAllControl?.HasFocus == true || _exclusionControls?.HasFocus == true
 			? TerminalControlSection.Exclusions
-			: _extensionControls?.HasFocus == true
+			: _extensionAllControl?.HasFocus == true || _extensionControls?.HasFocus == true
 				? TerminalControlSection.Extensions
 				: _contentControls?.HasFocus == true
 					? TerminalControlSection.Content
@@ -317,6 +394,15 @@ internal sealed partial class TerminalWorkspaceSession
 
 	private TerminalParameterListView? ActiveControlList =>
 		GetControlSection(_activeControlSection).List;
+
+	private View? ActiveControlView =>
+		IsAggregateControlFocused(_activeControlSection) ||
+		_activeAggregateControlSection == _activeControlSection
+			? GetAggregateControlSection(_activeControlSection).List ?? ActiveControlList
+			: ActiveControlList;
+
+	private bool IsAggregateControlFocused(TerminalControlSection section) =>
+		GetAggregateControlSection(section).List?.HasFocus == true;
 
 	private void FocusControlSection(TerminalControlSection section, bool movePane = true)
 	{
@@ -326,7 +412,10 @@ internal sealed partial class TerminalWorkspaceSession
 			_activePane = TerminalWorkspacePane.Controls;
 			ApplyWorkspaceLayout();
 		}
-		var target = GetControlSection(section).List;
+		var target = GetAggregateControlSection(section).List ?? GetControlSection(section).List;
+		_activeAggregateControlSection = GetAggregateControlSection(section).List is null
+			? null
+			: section;
 		target?.SetFocus();
 		// Layout and focus notifications can report the previously focused list while a
 		// single-pane transition is being completed. The requested section is authoritative.
@@ -488,15 +577,22 @@ internal sealed partial class TerminalWorkspaceSession
 			? $"{L("Settings.All")} ({available:N0})"
 			: $"{selected:N0}/{available:N0}";
 
-	private string FormatSettingsSource(ProjectProfileReference source) =>
-		source?.Kind switch
+	private (TerminalParameterListView? List, ObservableCollection<TerminalParameterRow>? Rows)
+		GetAggregateControlSection(TerminalControlSection section) =>
+		section switch
 		{
-			ProjectProfileSourceKind.Local => L("Terminal.Tui.Settings.Project"),
-			ProjectProfileSourceKind.Portable =>
-				$"{L("Terminal.Tui.Settings.File")}: " +
-				$"{Path.GetFileName(source.Path) ?? source.Path}",
-			_ => L("Terminal.Tui.Settings.Default")
+			TerminalControlSection.Exclusions => (_exclusionAllControl, _exclusionAllControlRows),
+			TerminalControlSection.Extensions => (_extensionAllControl, _extensionAllControlRows),
+			_ => (null, null)
 		};
+
+	private void ActivateAggregateControl(TerminalControlSection section)
+	{
+		var (_, rows) = GetAggregateControlSection(section);
+		if (rows is not { Count: > 0 })
+			return;
+		ActivateControlRow(section, rows[0]);
+	}
 
 	private void ActivateSelectedControl(TerminalControlSection section)
 	{
@@ -509,6 +605,11 @@ internal sealed partial class TerminalWorkspaceSession
 
 		var row = rows[selected];
 		SetSelectedControlKey(section, row.Key);
+		ActivateControlRow(section, row);
+	}
+
+	private void ActivateControlRow(TerminalControlSection section, TerminalParameterRow row)
+	{
 		switch (row.Kind)
 		{
 			case TerminalParameterRowKind.Information:
@@ -639,6 +740,10 @@ internal sealed partial class TerminalWorkspaceSession
 		_activeControlSection = section;
 		_activePaneBeforeBusy = TerminalWorkspacePane.Controls;
 		_activeControlSectionBeforeBusy = section;
+		_aggregateControlSectionBeforeBusy = IsAggregateControlFocused(section) ||
+			_activeAggregateControlSection == section
+			? section
+			: null;
 	}
 
 	private void ExecuteWorkspaceAction(TerminalWorkspaceActionKind action)
@@ -1085,7 +1190,7 @@ internal sealed partial class TerminalWorkspaceSession
 		{
 			TerminalWorkspacePane.Tree => (View?)_tree,
 			TerminalWorkspacePane.Preview => _preview,
-			_ => ActiveControlList
+			_ => ActiveControlView
 		};
 		view?.SetFocus();
 		UpdateWorkspaceFocus();

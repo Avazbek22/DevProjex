@@ -1,14 +1,13 @@
  DevProjex Terminal · <PROJECT>
  <PROJECT_ROOT>
 ┌┤> PROJECT TREE├─────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├───────────────────────────────────────────┐┌┤  PARAMETERS├──────────────────────┐
-│v [x] <PROJECT>   ││<PROJECT>                                             ││Saved settings: Default settings    │
-│  > [x] src                              ││├── src                                                                      ││┌┤Content processing:├─────────────┐│
-│    [x] global.json                      │││   ├── Feature                                                              │││  [ ] Hide secrets                ││
-│    [x] readme.md                        │││   │   └── Handler.cs                                                       │││  [ ] Hide private data           ││
-│                                         │││   └── App.cs                                                               │││  [ ] Compress code               ││
-│                                         ││├── global.json                                                              │││  [ ] Strip comments              ││
-│                                         ││└── readme.md                                                                │││  [ ] Strip blank lines           ││
-│                                         ││                                                                             ││└──────────────────────────────────┘│
+│v [x] <PROJECT>   ││<PROJECT>                                             ││┌┤Content processing:├─────────────┐│
+│  > [x] src                              ││├── src                                                                      │││  [ ] Hide secrets                ││
+│    [x] global.json                      │││   ├── Feature                                                              │││  [ ] Hide private data           ││
+│    [x] readme.md                        │││   │   └── Handler.cs                                                       │││  [ ] Compress code               ││
+│                                         │││   └── App.cs                                                               │││  [ ] Strip comments              ││
+│                                         ││├── global.json                                                              │││  [ ] Strip blank lines           ││
+│                                         ││└── readme.md                                                                ││└──────────────────────────────────┘│
 │                                         ││                                                                             ││┌┤Exclusions├──────────────────────┐│
 │                                         ││                                                                             │││  [x] All                         ││
 │                                         ││                                                                             │││  [x] Use .gitignore              ││
@@ -20,6 +19,7 @@
 │                                         ││                                                                             │││  [x] Hidden files                ││
 │                                         ││                                                                             │││  [x] dot folders                 ││
 │                                         ││                                                                             │││  [x] dot files                   ││
+│                                         ││                                                                             │││  [x] Files without extension     ││
 │                                         ││                                                                             ││└──────────────────────────────────┘│
 │                                         ││                                                                             ││┌┤File types├──────────────────────┐│
 │                                         ││                                                                             │││  [x] All                         ││

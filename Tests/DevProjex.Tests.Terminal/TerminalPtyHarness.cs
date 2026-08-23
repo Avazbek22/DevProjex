@@ -525,10 +525,19 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		CancellationToken cancellationToken = default)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
+		var outputLengthBeforeResize = RawOutput.Length;
 		lock (_terminalGate)
 			_terminal.Resize(columns, rows);
 		await _process.ResizeAsync(columns, rows, cancellationToken).ConfigureAwait(false);
-		await Task.Delay(100, cancellationToken).ConfigureAwait(false);
+		var minimumRedrawLength = Math.Max(64, columns * 2);
+		var timeout = Stopwatch.StartNew();
+		while (!HasExited &&
+		       RawOutput.Length - outputLengthBeforeResize < minimumRedrawLength &&
+		       timeout.Elapsed < TimeSpan.FromSeconds(3))
+		{
+			await Task.Delay(25, cancellationToken).ConfigureAwait(false);
+		}
+		await Task.Delay(50, cancellationToken).ConfigureAwait(false);
 	}
 
 	public string CaptureScreen()

@@ -94,6 +94,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private TerminalWorkspacePane _activePane = TerminalWorkspacePane.Tree;
 	private TerminalWorkspacePane? _activePaneBeforeBusy;
 	private TerminalControlSection? _activeControlSectionBeforeBusy;
+	private TerminalControlSection? _aggregateControlSectionBeforeBusy;
 	private ProjectContextView _previewView = ProjectContextView.Tree;
 	private ProjectContextDocumentFormat _format = ProjectContextDocumentFormat.Text;
 	private string? _searchQuery;
@@ -146,6 +147,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				return;
 			var requestedPane = _activePane;
 			var requestedControlSection = _activeControlSection;
+			var requestedAggregateControlSection = _activeAggregateControlSection;
 			var previousFocusSuppression = _suppressWorkspaceFocusTracking;
 			_suppressWorkspaceFocusTracking = true;
 			var sizeChanged = false;
@@ -159,6 +161,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			{
 				_activePane = requestedPane;
 				_activeControlSection = requestedControlSection;
+				_activeAggregateControlSection = requestedAggregateControlSection;
 				_suppressWorkspaceFocusTracking = previousFocusSuppression;
 			}
 			UpdateWorkspaceFocus();
@@ -171,6 +174,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			{
 				var requestedPane = _activePane;
 				var requestedControlSection = _activeControlSection;
+				var requestedAggregateControlSection = _activeAggregateControlSection;
 				var previousFocusSuppression = _suppressWorkspaceFocusTracking;
 				_suppressWorkspaceFocusTracking = true;
 				var sizeChanged = false;
@@ -189,6 +193,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				{
 					_activePane = requestedPane;
 					_activeControlSection = requestedControlSection;
+					_activeAggregateControlSection = requestedAggregateControlSection;
 					_suppressWorkspaceFocusTracking = previousFocusSuppression;
 				}
 				UpdateWorkspaceFocus();
@@ -1142,8 +1147,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var selected = FindSelectedTreeRow();
 		var treeHadFocus = _tree.HasFocus;
 		var previewHadFocus = _preview.HasFocus;
+		var controlsWereActive = _activePane == TerminalWorkspacePane.Controls;
 		var controlsHadFocus = ControlsHaveFocus;
-		var focusedControlSection = ResolveFocusedControlSection();
+		var focusedControlSection = _activeControlSection;
+		var aggregateControlWasActive = _activeAggregateControlSection == focusedControlSection;
 		var previewRow = _preview.FirstVisibleLine;
 		var previewColumn = _preview.HorizontalOffset;
 		if (_state.VisibleRows.Count > 0)
@@ -1170,10 +1177,17 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_suppressWorkspaceFocusTracking = previousFocusSuppression;
 		}
 		_tree.UpdateContentMetrics(_state.VisibleRowWidth, _state.VisibleRows.Count);
-		if (controlsHadFocus)
+		var controlToRestore = aggregateControlWasActive
+			? GetAggregateControlSection(focusedControlSection).List
+			: GetControlSection(focusedControlSection).List;
+		if (controlsHadFocus ||
+			(controlsWereActive && !HasActiveOperation && controlToRestore?.Enabled == true))
 		{
 			_activeControlSection = focusedControlSection;
-			GetControlSection(focusedControlSection).List?.SetFocus();
+			_activeAggregateControlSection = aggregateControlWasActive
+				? focusedControlSection
+				: null;
+			controlToRestore?.SetFocus();
 			_activeControlSection = focusedControlSection;
 		}
 		UpdatePreviewRange();
@@ -1390,7 +1404,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 
 	private void UpdateWorkspaceFocus()
 	{
-		if (_tree is null || _preview is null || ActiveControlList is null ||
+		if (_tree is null || _preview is null || ActiveControlView is null ||
 			_treeFrame is null || _previewFrame is null || _controlsFrame is null)
 			return;
 
@@ -1552,6 +1566,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 
 		var requestedPane = _activePane;
 		var requestedControlSection = _activeControlSection;
+		var requestedAggregateControlSection = _activeAggregateControlSection;
 		var tooSmall = _layoutMode == TerminalWorkspaceLayoutMode.TooSmall;
 		var previousFocusSuppression = _suppressWorkspaceFocusTracking;
 		_suppressWorkspaceFocusTracking = true;
@@ -1620,6 +1635,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			RefreshWorkspace();
 			_activePane = requestedPane;
 			_activeControlSection = requestedControlSection;
+			_activeAggregateControlSection = requestedAggregateControlSection;
 			switch (requestedPane)
 			{
 				case TerminalWorkspacePane.Tree:
@@ -1629,18 +1645,20 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					_preview?.SetFocus();
 					break;
 				case TerminalWorkspacePane.Controls:
-					GetControlSection(requestedControlSection).List?.SetFocus();
+					ActiveControlView?.SetFocus();
 					break;
 				default:
 					throw new ArgumentOutOfRangeException();
 			}
 			_activePane = requestedPane;
 			_activeControlSection = requestedControlSection;
+			_activeAggregateControlSection = requestedAggregateControlSection;
 		}
 		finally
 		{
 			_activePane = requestedPane;
 			_activeControlSection = requestedControlSection;
+			_activeAggregateControlSection = requestedAggregateControlSection;
 			_suppressWorkspaceFocusTracking = previousFocusSuppression;
 		}
 		UpdateWorkspaceFocus();
@@ -1809,6 +1827,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			return;
 		if (HasActiveOperation)
 			return;
+		var controlsAreActive = _activePane == TerminalWorkspacePane.Controls || ControlsHaveFocus;
 
 		if (key == Key.Esc)
 		{
@@ -1850,7 +1869,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			key.Handled = true;
 			if (_tree.HasFocus)
 				MoveListSelection(_tree, key.NoShift == Key.J ? 1 : -1);
-			else if (ControlsHaveFocus)
+			else if (controlsAreActive)
 				MoveControlSelection(key.NoShift == Key.J ? 1 : -1);
 			else
 				ScrollPreview(
@@ -1859,28 +1878,26 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 						: TerminalPreviewScroll.LineUp);
 			return;
 		}
-		if (ControlsHaveFocus && (key == Key.CursorUp || key == Key.CursorDown))
+		if (controlsAreActive && (key == Key.CursorUp || key == Key.CursorDown))
 		{
 			key.Handled = true;
 			MoveControlSelection(key == Key.CursorDown ? 1 : -1);
 			return;
 		}
-		if (ControlsHaveFocus && (key == Key.Home || key == Key.End))
+		if (controlsAreActive && (key == Key.Home || key == Key.End))
 		{
 			key.Handled = true;
-			var (list, rows) = GetControlSection(_activeControlSection);
-			if (list is not null && rows is { Count: > 0 })
-			{
-				list.SelectedItem = key == Key.Home ? 0 : rows.Count - 1;
-				list.EnsureSelectedItemVisible();
-				TrackSelectedControl(_activeControlSection);
-			}
+			FocusControlBoundary(_activeControlSection, first: key == Key.Home);
 			return;
 		}
-		if (ControlsHaveFocus && (key == Key.Enter || key == Key.Space))
+		if (controlsAreActive && (key == Key.Enter || key == Key.Space))
 		{
 			key.Handled = true;
-			ActivateSelectedControl(_activeControlSection);
+			if (IsAggregateControlFocused(_activeControlSection) ||
+				_activeAggregateControlSection == _activeControlSection)
+				ActivateAggregateControl(_activeControlSection);
+			else
+				ActivateSelectedControl(_activeControlSection);
 			return;
 		}
 		if (_preview.HasFocus && TryHandlePreviewNavigation(key))
@@ -2688,6 +2705,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			{
 				_activePaneBeforeBusy = _activePane;
 				_activeControlSectionBeforeBusy = ResolveFocusedControlSection();
+				_aggregateControlSectionBeforeBusy = IsAggregateControlFocused(
+					_activeControlSection)
+					? _activeControlSection
+					: _activeAggregateControlSection;
 			}
 			if (busy)
 				CancelTransientStatus();
@@ -2701,8 +2722,12 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					_preview.Enabled = !busy;
 				if (_contentControls is not null)
 					_contentControls.Enabled = !busy;
+				if (_exclusionAllControl is not null)
+					_exclusionAllControl.Enabled = !busy;
 				if (_exclusionControls is not null)
 					_exclusionControls.Enabled = !busy;
+				if (_extensionAllControl is not null)
+					_extensionAllControl.Enabled = !busy;
 				if (_extensionControls is not null)
 					_extensionControls.Enabled = !busy;
 				if (busy && _screen == TerminalWorkspaceScreen.Workspace)
@@ -2740,7 +2765,32 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 						_activePane = pane;
 					if (_activeControlSectionBeforeBusy is { } section)
 						_activeControlSection = section;
+					_activeAggregateControlSection = _aggregateControlSectionBeforeBusy;
+					var paneToRestore = _activePane;
+					var sectionToRestore = _activeControlSection;
+					var aggregateToRestore = _aggregateControlSectionBeforeBusy;
 					RestoreScreenFocus();
+					_application.Invoke(_ =>
+					{
+						if (_stopping || _screen != TerminalWorkspaceScreen.Workspace)
+							return;
+						_activePane = paneToRestore;
+						_activeControlSection = sectionToRestore;
+						_activeAggregateControlSection = aggregateToRestore;
+						if (paneToRestore == TerminalWorkspacePane.Controls)
+						{
+							ApplyWorkspaceLayout();
+							_activePane = paneToRestore;
+							_activeControlSection = sectionToRestore;
+							_activeAggregateControlSection = aggregateToRestore;
+							ActiveControlView?.SetFocus();
+							UpdateWorkspaceFocus();
+						}
+						else
+						{
+							RestoreScreenFocus();
+						}
+					});
 				}
 			}
 			finally
@@ -2751,6 +2801,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			{
 				_activePaneBeforeBusy = null;
 				_activeControlSectionBeforeBusy = null;
+				_aggregateControlSectionBeforeBusy = null;
 				var restoreFocusSuppression = _suppressWorkspaceFocusTracking;
 				_suppressWorkspaceFocusTracking = true;
 				try
@@ -3077,15 +3128,21 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var sections = Enum.GetValues<TerminalControlSection>();
 		var currentIndex = Array.IndexOf(sections, _activeControlSection);
 		var (list, rows) = GetControlSection(_activeControlSection);
-		if (list is null || rows is null || rows.Count == 0)
+		var aggregate = GetAggregateControlSection(_activeControlSection).List;
+		if (list is null || rows is null)
 			return;
-		var selected = Math.Clamp(list.SelectedItem ?? 0, 0, rows.Count - 1);
+		var aggregateOffset = aggregate is null ? 0 : 1;
+		var logicalCount = rows.Count + aggregateOffset;
+		if (logicalCount == 0)
+			return;
+		var selected = IsAggregateControlFocused(_activeControlSection) ||
+			_activeAggregateControlSection == _activeControlSection
+			? 0
+			: Math.Clamp(list.SelectedItem ?? 0, 0, Math.Max(0, rows.Count - 1)) + aggregateOffset;
 		var next = selected + Math.Sign(delta);
-		if (next >= 0 && next < rows.Count)
+		if (next >= 0 && next < logicalCount)
 		{
-			list.SelectedItem = next;
-			list.EnsureSelectedItemVisible();
-			TrackSelectedControl(_activeControlSection);
+			FocusControlPosition(_activeControlSection, next);
 			return;
 		}
 
@@ -3093,14 +3150,49 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		if (targetIndex < 0 || targetIndex >= sections.Length)
 			return;
 		var targetSection = sections[targetIndex];
-		var (target, targetRows) = GetControlSection(targetSection);
-		if (target is null || targetRows is null || targetRows.Count == 0)
+		var (_, targetRows) = GetControlSection(targetSection);
+		var targetAggregate = GetAggregateControlSection(targetSection).List;
+		var targetCount = (targetRows?.Count ?? 0) + (targetAggregate is null ? 0 : 1);
+		if (targetRows is null || targetCount == 0)
 			return;
-		_activeControlSection = targetSection;
-		target.SelectedItem = delta > 0 ? 0 : targetRows.Count - 1;
-		target.EnsureSelectedItemVisible();
-		target.SetFocus();
-		TrackSelectedControl(targetSection);
+		FocusControlPosition(targetSection, delta > 0 ? 0 : targetCount - 1);
+	}
+
+	private void FocusControlBoundary(TerminalControlSection section, bool first)
+	{
+		var (_, rows) = GetControlSection(section);
+		var aggregate = GetAggregateControlSection(section).List;
+		var count = (rows?.Count ?? 0) + (aggregate is null ? 0 : 1);
+		if (count > 0)
+			FocusControlPosition(section, first ? 0 : count - 1);
+	}
+
+	private void FocusControlPosition(TerminalControlSection section, int logicalIndex)
+	{
+		var (list, rows) = GetControlSection(section);
+		var aggregate = GetAggregateControlSection(section).List;
+		if (list is null || rows is null)
+			return;
+
+		_activePane = TerminalWorkspacePane.Controls;
+		_activeControlSection = section;
+		if (aggregate is not null && logicalIndex == 0)
+		{
+			_activeAggregateControlSection = section;
+			aggregate.SelectedItem = 0;
+			aggregate.SetFocus();
+		}
+		else
+		{
+			var rowIndex = logicalIndex - (aggregate is null ? 0 : 1);
+			if (rowIndex < 0 || rowIndex >= rows.Count)
+				return;
+			_activeAggregateControlSection = null;
+			list.SelectedItem = rowIndex;
+			list.EnsureSelectedItemVisible();
+			list.SetFocus();
+			TrackSelectedControl(section);
+		}
 		UpdateWorkspaceFocus();
 	}
 
@@ -3826,7 +3918,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				_preview?.SetFocus();
 				break;
 			case TerminalWorkspaceScreen.Workspace when _activePane == TerminalWorkspacePane.Controls:
-				ActiveControlList?.SetFocus();
+				ActiveControlView?.SetFocus();
 				break;
 			case TerminalWorkspaceScreen.Workspace:
 				_tree?.SetFocus();
@@ -3920,7 +4012,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_treeFrame = null;
 		_previewFrame = null;
 		_contentControls = null;
+		_exclusionAllControl = null;
 		_exclusionControls = null;
+		_extensionAllControl = null;
 		_extensionControls = null;
 		_controlsFrame = null;
 		_contentControlsFrame = null;
@@ -3929,8 +4023,11 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_filterControlsHost = null;
 		_profileSourceLabel = null;
 		_contentControlRows = null;
+		_exclusionAllControlRows = null;
 		_exclusionControlRows = null;
+		_extensionAllControlRows = null;
 		_extensionControlRows = null;
+		_activeAggregateControlSection = null;
 		_welcomeList = null;
 		_welcomeRows = null;
 		_welcomeDetail = null;

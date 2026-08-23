@@ -41,20 +41,36 @@ public sealed class TerminalParameterRowsBuilderTests
 	}
 
 	[Fact]
-	public void ExclusionRowsKeepAllAndMutuallyExclusiveGitModesInOneList()
+	public void ExclusionRowsKeepMutuallyExclusiveGitModesWithoutAggregateRow()
 	{
 		var builder = CreateBuilder();
 		var rows = builder.BuildExclusions(CreatePlan(ProjectSelectionSpec.Standard));
 
-		Assert.Equal(TerminalParameterRowKind.ToggleAllExclusions, rows[0].Kind);
+		Assert.DoesNotContain(rows, static row => row.Kind == TerminalParameterRowKind.ToggleAllExclusions);
+		Assert.Equal(GitFilteringMode.RespectGitIgnore, rows[0].GitMode);
 		Assert.True(rows[0].IsSelected);
-		Assert.Equal(GitFilteringMode.RespectGitIgnore, rows[1].GitMode);
-		Assert.True(rows[1].IsSelected);
-		Assert.Equal(GitFilteringMode.TrackedFilesOnly, rows[2].GitMode);
-		Assert.False(rows[2].IsSelected);
+		Assert.Equal(GitFilteringMode.TrackedFilesOnly, rows[1].GitMode);
+		Assert.False(rows[1].IsSelected);
 		Assert.DoesNotContain(
 			rows,
 			static row => row.GitMode == GitFilteringMode.None);
+	}
+
+	[Fact]
+	public void ExclusionAggregateRequiresPreferredGitModeAndEveryRule()
+	{
+		var builder = CreateBuilder();
+
+		var selected = builder.BuildExclusionAggregate(CreatePlan(ProjectSelectionSpec.Standard));
+		var cleared = builder.BuildExclusionAggregate(CreatePlan(ProjectSelectionSpec.Standard with
+		{
+			GitMode = GitFilteringMode.None,
+			Exclusions = []
+		}));
+
+		Assert.Equal(TerminalParameterRowKind.ToggleAllExclusions, selected.Kind);
+		Assert.True(selected.IsSelected);
+		Assert.False(cleared.IsSelected);
 	}
 
 	[Fact]
@@ -70,8 +86,7 @@ public sealed class TerminalParameterRowsBuilderTests
 			availableExtensions: [".cs", ".json"],
 			selectedExtensions: [".cs"]));
 
-		Assert.Equal(TerminalParameterRowKind.ToggleAllExtensions, rows[0].Kind);
-		Assert.False(rows[0].IsSelected);
+		Assert.DoesNotContain(rows, static row => row.Kind == TerminalParameterRowKind.ToggleAllExtensions);
 		Assert.Contains(rows, static row =>
 			row.Kind == TerminalParameterRowKind.Extension &&
 			row.Value == ".cs" && row.IsSelected == true);
@@ -81,14 +96,35 @@ public sealed class TerminalParameterRowsBuilderTests
 	}
 
 	[Fact]
-	public void ExtensionAllRequiresTheExactAvailableSet()
+	public void ExtensionAggregateRequiresTheExactAvailableSet()
 	{
-		var rows = CreateBuilder().BuildExtensions(CreatePlan(
+		var row = CreateBuilder().BuildExtensionAggregate(CreatePlan(
 			ProjectSelectionSpec.Standard,
 			availableExtensions: [".cs", ".json"],
 			selectedExtensions: [".cs", ".removed"]));
 
-		Assert.False(rows[0].IsSelected);
+		Assert.Equal(TerminalParameterRowKind.ToggleAllExtensions, row.Kind);
+		Assert.False(row.IsSelected);
+	}
+
+	[Theory]
+	[InlineData(0, 0, true)]
+	[InlineData(1, 1, true)]
+	[InlineData(1, 0, false)]
+	public void ExtensionAggregateHandlesEmptyAndSingleItemSets(
+		int availableCount,
+		int selectedCount,
+		bool expected)
+	{
+		var available = availableCount == 0 ? Array.Empty<string>() : [".cs"];
+		var selected = selectedCount == 0 ? Array.Empty<string>() : [".cs"];
+
+		var row = CreateBuilder().BuildExtensionAggregate(CreatePlan(
+			ProjectSelectionSpec.Standard,
+			availableExtensions: available,
+			selectedExtensions: selected));
+
+		Assert.Equal(expected, row.IsSelected);
 	}
 
 	[Theory]
@@ -104,6 +140,23 @@ public sealed class TerminalParameterRowsBuilderTests
 		var result = TerminalParameterRow.FitLabel(value, width, useUnicode);
 
 		Assert.Equal(expected, result);
+		Assert.True(result.GetColumns() <= width);
+	}
+
+	[Theory]
+	[InlineData("Очень длинная подпись личных данных (12/11)", 24, true, " (12/11)")]
+	[InlineData("Maxfiy ma'lumotlarning juda uzun nomi (7)", 22, false, " (7)")]
+	[InlineData("界界界界界界界界 (3/2)", 14, true, " (3/2)")]
+	public void FitLabelPreservesTrailingCounters(
+		string value,
+		int width,
+		bool useUnicode,
+		string counter)
+	{
+		var result = TerminalParameterRow.FitLabel(value, width, useUnicode);
+
+		Assert.EndsWith(counter, result, StringComparison.Ordinal);
+		Assert.Contains(useUnicode ? "…" : "...", result, StringComparison.Ordinal);
 		Assert.True(result.GetColumns() <= width);
 	}
 
