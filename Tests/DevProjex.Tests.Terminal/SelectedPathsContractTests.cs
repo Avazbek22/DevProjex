@@ -343,18 +343,32 @@ public sealed class SelectedPathsContractTests
 	public async Task SelectionPathCasingUsesThePlatformPathPolicy()
 	{
 		using var workspace = CreateWorkspace();
+		const string selectedPath = "SRC/A.CS";
 
 		if (OperatingSystem.IsWindows())
 		{
-			using var document = await ExportJsonAsync(workspace.Path, "--select", "SRC/A.CS");
+			using var document = await ExportJsonAsync(workspace.Path, "--select", selectedPath);
 			Assert.Equal(FullContentPaths(workspace.Path, "src/a.cs"), ReadFilePaths(document));
 		}
 		else
 		{
 			var environment = new TestTerminalEnvironment();
-			var exitCode = await RunAsync(workspace.Path, environment, "--select", "SRC/A.CS");
-			Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+			var exitCode = await RunAsync(workspace.Path, environment, "--select", selectedPath);
+			var caseVariantExists = File.Exists(Path.Combine(workspace.Path, "SRC", "A.CS"));
+			Assert.Equal(
+				caseVariantExists ? CommandLineExitCodes.Success : CommandLineExitCodes.UsageError,
+				exitCode);
 			Assert.Contains("DPX-SELECTION-PATH-MISSING", environment.StandardError, StringComparison.Ordinal);
+			Assert.Contains(selectedPath, environment.StandardError, StringComparison.Ordinal);
+			if (caseVariantExists)
+			{
+				using var document = JsonDocument.Parse(environment.StandardOutput);
+				Assert.Empty(ReadFilePaths(document));
+			}
+			else
+			{
+				Assert.Empty(environment.StandardOutput);
+			}
 		}
 	}
 
