@@ -91,10 +91,13 @@ focused detail pane, and contextual keyboard hints instead of a modal selector.
 
 After a project opens, the wide layout keeps Project Tree, Context Preview, and
 Parameters visible together. Parameters uses a fixed 38-column panel so excess
-width belongs to Preview. A saved-settings row precedes three framed mini-panels:
+width belongs to Preview. Parameters starts directly with three framed mini-panels:
 Content Processing, Exclusions, and File Types. Content Processing contains five
 fixed rows; Exclusions and File Types divide the remaining height and scroll
-independently. Narrow layouts present the same three mini-panels at the full
+independently. Their aggregate All controls remain fixed in the top frame while
+the lists scroll; plain mode renders the same controls as pinned first rows.
+Only the focused mini-panel renders a selection highlight. Narrow layouts present
+the same three mini-panels at the full
 available width without losing selection or navigation state. Export commands
 remain available from their shortcuts and the Action Palette instead of being
 mixed into the settings lists.

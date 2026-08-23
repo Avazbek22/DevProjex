@@ -1177,7 +1177,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_suppressWorkspaceFocusTracking = previousFocusSuppression;
 		}
 		_tree.UpdateContentMetrics(_state.VisibleRowWidth, _state.VisibleRows.Count);
-		var controlToRestore = aggregateControlWasActive
+		View? controlToRestore = aggregateControlWasActive
 			? GetAggregateControlSection(focusedControlSection).List
 			: GetControlSection(focusedControlSection).List;
 		if (controlsHadFocus ||
@@ -1436,8 +1436,38 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				? TerminalWorkspaceTheme.FocusedPanel
 				: TerminalWorkspaceTheme.Panel;
 		}
+		UpdateControlSelectionSchemes();
 		UpdatePanelTitles();
 		UpdateFooter();
+	}
+
+	private void UpdateControlSelectionSchemes()
+	{
+		foreach (var section in Enum.GetValues<TerminalControlSection>())
+		{
+			var list = GetControlSection(section).List;
+			var aggregate = GetAggregateControlSection(section).List;
+			var sectionIsActive = _activePane == TerminalWorkspacePane.Controls &&
+			                      section == _activeControlSection;
+			var aggregateIsActive = sectionIsActive && aggregate is not null &&
+			                        (aggregate.HasFocus ||
+			                         _activeAggregateControlSection == section);
+			if (list is not null)
+			{
+				list.SchemeName = sectionIsActive && !aggregateIsActive
+					? TerminalWorkspaceTheme.List
+					: TerminalWorkspaceTheme.InactiveList;
+				list.SetNeedsDraw();
+			}
+			if (aggregate is not null)
+			{
+				aggregate.SetActive(aggregateIsActive);
+				aggregate.SchemeName = aggregateIsActive
+					? TerminalWorkspaceTheme.List
+					: TerminalWorkspaceTheme.InactiveList;
+				aggregate.SetNeedsDraw();
+			}
+		}
 	}
 
 	private void ApplyCurrentLayout()
@@ -3179,7 +3209,6 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		if (aggregate is not null && logicalIndex == 0)
 		{
 			_activeAggregateControlSection = section;
-			aggregate.SelectedItem = 0;
 			aggregate.SetFocus();
 		}
 		else
@@ -4021,7 +4050,6 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_exclusionControlsFrame = null;
 		_extensionControlsFrame = null;
 		_filterControlsHost = null;
-		_profileSourceLabel = null;
 		_contentControlRows = null;
 		_exclusionAllControlRows = null;
 		_exclusionControlRows = null;
