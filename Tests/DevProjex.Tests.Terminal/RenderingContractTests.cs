@@ -146,7 +146,8 @@ public sealed class RenderingContractTests
 	public async Task RussianHumanDiagnosticNeverFallsBackToInternalEnglishMessage()
 	{
 		using var workspace = new TemporaryDirectory();
-		workspace.WriteFile("src/app.cs", "class App {}\n");
+		workspace.WriteFile("missing.cs", "class App {}\n");
+		workspace.WriteFile("README.md", "# Project\n");
 		var environment = new TestTerminalEnvironment();
 
 		var exitCode = await new TerminalApplication(
@@ -158,6 +159,8 @@ public sealed class RenderingContractTests
 				workspace.Path,
 				"--select",
 				"missing.cs",
+				"--extension",
+				"md",
 				"--git-mode",
 				"none",
 				"--exclude",
