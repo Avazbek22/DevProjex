@@ -149,9 +149,10 @@ applicable index, TUI keeps the last usable Git mode. It never silently substitu
 
 `Ctrl+P` opens a searchable Action Palette from Welcome or the workspace.
 Important features do not depend on memorizing letter shortcuts: the palette and
-Parameters and visible action bars call the same actions as the keyboard commands
-and restore the
-previous pane when canceled.
+Parameters and visible action bars call the same workspace action registry as
+keyboard shortcuts and the workspace command line, then restore the previous pane
+when canceled. Workspace palette rows show the corresponding `:` syntax when the
+action has a command-line form.
 
 Changing checked nodes updates the selection projection without rescanning the
 filesystem. Structural changes use the canonical refresh pipeline. Preview
@@ -159,8 +160,8 @@ refresh is cancelable, debounced, and bounded for large projects.
 
 Parameters apply immediately in Terminal Workspace, so it intentionally has no
 Apply command. Rapid changes are coalesced into the latest requested state;
-batch-oriented workflows belong to the terminal command line rather than a
-second commit model inside the TUI.
+batch-oriented workflows belong to direct CLI commands rather than a second
+commit model inside the TUI.
 
 When filtering changes which options are available, a newly discovered option is
 selected by default. An option already seen during the session keeps its explicit
@@ -181,6 +182,58 @@ soon as the work completes. Plain mode uses static text, and the too-small view
 does not render the slot. Cloning, repository updates, branch switching, and
 exports remain blocking operations and retain the modal progress surface.
 
+## Workspace Command Line
+
+Press `:` while Project Tree, Context Preview, or Parameters has normal focus to
+replace the contextual footer with the workspace command line. It controls the
+current live session; it is not a nested invocation of the direct DevProjex CLI.
+Dialogs and overlays keep ownership of their input, and the command line is not
+available in the too-small layout.
+
+Command verbs and choice tokens are stable English identifiers shared with the
+direct CLI presentation catalog. They are intentionally not localized. Argument
+schemas, help, completion hints, results, and errors are localized. Resolution is
+strict: only a complete token executes. Tab accepts or cycles completion, while an
+invalid token reports its position and up to three similar candidates. Arguments
+containing whitespace can use single or double quotes.
+
+| Syntax | Session action |
+|---|---|
+| `set <option> on\|off` | toggle one content, exclusion, or Git option |
+| `all types\|exclusions\|content on\|off` | apply the framed **All** action |
+| `type <.ext> [<.ext>...] on\|off` | toggle available file extensions |
+| `view tree\|content\|tree-content` | select Preview mode |
+| `format text\|markdown\|json\|xml` | select tree format |
+| `search [text]` | search Preview, or clear it with no text |
+| `filter [text]` | filter Project Tree, or clear it with no text |
+| `export context [format] [path]` | open the existing context-export confirmation |
+| `export zip <path>` / `export folder <path>` | open the existing project-export confirmation |
+| `help [verb]` | open the localized command cheat sheet |
+| `quit` | perform the same safe exit action as `q` |
+
+Examples:
+
+```text
+:set hide-secrets on
+:all types off
+:type .cs .md on
+:view content
+:search "connection string"
+:export context markdown "../review context.md"
+```
+
+Left/Right, Home/End, Backspace, and Delete edit the line. Esc cancels it,
+Enter executes it, and Up/Down traverses command history. The newest 50 commands
+are persisted in terminal settings across launches; adjacent duplicates are stored
+once. A ghost suffix previews completion without changing the input. Plain mode
+renders that hint in brackets instead of relying on dim color.
+
+Successful and failed results temporarily occupy the same footer row, then the
+contextual hints return. Execution failures never open an error dialog. Settings
+commands use the same optimistic update, cancellation/coalescing, corner progress,
+and rollback path as mouse and keyboard changes in Parameters. Export commands use
+the existing confirmation and blocking progress surfaces.
+
 ## Keys
 
 | Key | Action |
@@ -190,6 +243,7 @@ exports remain blocking operations and retain the modal progress surface.
 | Enter | open or activate |
 | Space | toggle the selected node |
 | `/` | search |
+| `:` | open the workspace command line |
 | Ctrl+P | searchable Action Palette |
 | Tab / F6 | focus the next major pane |
 | Shift+Tab / Shift+F6 | focus the previous major pane |
