@@ -799,7 +799,7 @@ public sealed class DevProjexCommandTree
 			CommandExecution.RunAsync(
 				environment,
 				new TerminalOutputOptions(),
-				() => new DesktopCommandHandler(environment).ListAsync(
+				() => new DesktopCommandHandler(environment, localization: _localization).ListAsync(
 					parseResult.GetValue(format) == CliTextJsonFormat.Json,
 					cancellationToken),
 				_localization));

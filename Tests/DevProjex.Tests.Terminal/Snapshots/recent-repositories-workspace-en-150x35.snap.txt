@@ -1,35 +1,35 @@
  DevProjex Terminal · DevProjex
  https://github.com/Avazbek22/DevProjex
-┌┤> PROJECT TREE├──────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├────────────────────────┐┌┤  PARAMETERS├──────────────────────────────────┐
-│v [x] DevProjex                       ││DevProjex                                                 ││  GIT FILTERING                                 │
-│  > [x] src                           ││├── src                                                   ││  ( ) No Git filtering                          │
-│    [x] README.md                     │││   └── RepositoryMarker.cs                               ││  (*) Use .gitignore                            │
-│                                      ││└── README.md                                             ││  ( ) Tracked Git files only                    │
-│                                      ││                                                          ││  CONTENT PROCESSING:                           │
-│                                      ││                                                          ││  [ ] Hide secrets                              │
-│                                      ││                                                          ││  EXCLUSIONS                                    │
-│                                      ││                                                          ││  [x] All                                       │
-│                                      ││                                                          ││  [x] Smart ignore                              │
-│                                      ││                                                          ││  [x] Empty folders                             │
-│                                      ││                                                          ││  [x] Empty files                               │
-│                                      ││                                                          ││  [x] Hidden folders                            │
-│                                      ││                                                          ││  [x] Hidden files                              │
-│                                      ││                                                          ││  [x] dot folders                               │
-│                                      ││                                                          ││  [x] dot files                                 │
-│                                      ││                                                          ││  [x] Files without extension                   │
-│                                      ││                                                          ││  FILE TYPES                                    │
-│                                      ││                                                          ││  [x] All                                       │
-│                                      ││                                                          ││  [x] .cs                                       │
-│                                      ││                                                          ││  [x] .md                                       │
-│                                      ││                                                          ││  ROOT FOLDERS                                  │
-│                                      ││                                                          ││  [x] All                                       │
-│                                      ││                                                          ││  [x] src                                       │
-│                                      ││                                                          ││                                                │
-│                                      ││                                                          ││                                                │
-│                                      ││                                                          ││                                                │
-│                                      ││                                                          ││                                                │
-│                                      ││ Files 2  |  Lines 1-5/5                                  ││                                                │
-└──────────────────────────────────────┘└──────────────────────────────────────────────────────────┘└────────────────────────────────────────────────┘
+┌┤> PROJECT TREE├──────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├────────────────────────────────────┐┌┤  PARAMETERS├──────────────────────┐
+│v [x] DevProjex                       ││DevProjex                                                             ││┌┤Content processing├──────────────┐│
+│  > [x] src                           ││├── src                                                               │││[ ] Hide secrets                  ││
+│    [x] README.md                     │││   └── RepositoryMarker.cs                                           │││[ ] Hide private data             ││
+│                                      ││└── README.md                                                         │││[ ] Compress code                 ││
+│                                      ││                                                                      │││[ ] Strip comments                ││
+│                                      ││                                                                      │││[ ] Strip blank lines             ││
+│                                      ││                                                                      ││└──────────────────────────────────┘│
+│                                      ││                                                                      ││┌┤Exclusions├─────────── [x] All ──┐│
+│                                      ││                                                                      │││[x] Use .gitignore                ││
+│                                      ││                                                                      │││[ ] Tracked Git files only        ││
+│                                      ││                                                                      │││[x] Smart ignore                  ││
+│                                      ││                                                                      │││[x] Empty folders                 ││
+│                                      ││                                                                      │││[x] Empty files                   ││
+│                                      ││                                                                      │││[x] Hidden folders                ││
+│                                      ││                                                                      │││[x] Hidden files                  ││
+│                                      ││                                                                      │││[x] dot folders                   ││
+│                                      ││                                                                      ││└──────────────────────────────────┘│
+│                                      ││                                                                      ││┌┤File types├─────────── [x] All ──┐│
+│                                      ││                                                                      │││[x] .cs                           ││
+│                                      ││                                                                      │││[x] .md                           ││
+│                                      ││                                                                      │││                                  ││
+│                                      ││                                                                      │││                                  ││
+│                                      ││                                                                      │││                                  ││
+│                                      ││                                                                      │││                                  ││
+│                                      ││                                                                      │││                                  ││
+│                                      ││                                                                      │││                                  ││
+│                                      ││                                                                      │││                                  ││
+│                                      ││ Files 2  |  Lines 1-5/5                                              ││└──────────────────────────────────┘│
+└──────────────────────────────────────┘└──────────────────────────────────────────────────────────────────────┘└────────────────────────────────────┘
 
  Files 2 · Folders 2 · 52 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
  Up/Down Navigate   Enter Expand   Space Toggle   / Search   Tab/F6 Preview   Ctrl+P Actions   ? Help

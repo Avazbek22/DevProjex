@@ -90,12 +90,17 @@ focused detail pane, and contextual keyboard hints instead of a modal selector.
 ![DevProjex Terminal Welcome](Media/terminal-workspace/welcome.png)
 
 After a project opens, the wide layout keeps Project Tree, Context Preview, and
-Parameters visible together. Parameters mirrors the Desktop concepts: Git
-filtering, Exclusions, File Types, and Root Folders. A subtle saved-settings
-indicator is shown only when saved project settings are active. Export commands
-remain visible through the action bar and Action Palette instead of being mixed
-into the settings list. Narrow terminals switch to focused panes without losing
-selection or navigation state.
+Parameters visible together. Parameters uses a fixed 38-column panel so excess
+width belongs to Preview. Parameters starts directly with three framed mini-panels:
+Content Processing, Exclusions, and File Types. Content Processing contains five
+fixed rows; Exclusions and File Types divide the remaining height and scroll
+independently. Their aggregate All controls remain fixed in the top frame while
+the lists scroll; plain mode renders the same controls as pinned first rows.
+Only the focused mini-panel renders a selection highlight. Narrow layouts present
+the same three mini-panels at the full
+available width without losing selection or navigation state. Export commands
+remain available from their shortcuts and the Action Palette instead of being
+mixed into the settings lists.
 
 ![DevProjex Terminal Workspace](Media/terminal-workspace/workspace.png)
 
@@ -121,10 +126,14 @@ The workspace supports:
 - lazy tree expansion and tri-state selection;
 - keyboard and mouse navigation;
 - a visible Tree Filter and a separate Preview Search;
-- root and extension selection;
-- one Git filtering choice: none, `.gitignore`, or tracked files;
+- extension selection;
+- two mutually exclusive Git filtering checkboxes for `.gitignore` and tracked
+  files; selecting an active checkbox again returns to no Git filtering;
 - ordinary Exclusions independent from Git filtering;
-- opt-in Hide Secrets redaction with a count after the current selection is scanned;
+- all five content-processing options: Hide Secrets, Hide Private Data,
+  Compress Code, Strip Comments, and Strip Blank Lines;
+- redaction counters for Hide Secrets and Hide Private Data after the current
+  selection is scanned;
 - tree, content, and tree-plus-content preview;
 - ASCII, JSON, XML, and Markdown formats;
 - file, folder, character, token, and byte metrics;
@@ -148,6 +157,20 @@ Changing checked nodes updates the selection projection without rescanning the
 filesystem. Structural changes use the canonical refresh pipeline. Preview
 refresh is cancelable, debounced, and bounded for large projects.
 
+If the effective filters leave the project without visible descendants, the
+real project root remains in the tree. A dim, non-selectable hint directs the
+user to File Types and Exclusions, and the status metrics report zero files,
+folders, and tokens. Restoring the selection removes the hint and restores the
+same tree rows.
+
+Non-blocking settings, Git-mode, selection-projection, parameter-availability,
+and Preview refreshes use a reserved slot at the right of the workspace heading.
+The slot appears only after 200 ms, is limited to 24 terminal columns, and takes
+priority over the project title when space is constrained. It disappears as
+soon as the work completes. Plain mode uses static text, and the too-small view
+does not render the slot. Cloning, repository updates, branch switching, and
+exports remain blocking operations and retain the modal progress surface.
+
 ## Keys
 
 | Key | Action |
@@ -162,10 +185,9 @@ refresh is cancelable, debounced, and bounded for large projects.
 | Shift+Tab / Shift+F6 | focus the previous major pane |
 | `1`, `2`, `3` | tree, content, tree plus content |
 | `F` | format |
-| `M` | Git filtering |
-| `X` | Exclusions |
-| `R` | roots |
-| `T` | file types |
+| `M` | focus Git filtering in Exclusions |
+| `X` | focus Exclusions |
+| `T` | focus File Types |
 | `E` | export context |
 | `Z` | export project or ZIP |
 | `A` | analyze |
@@ -182,6 +204,14 @@ Left/Right scroll horizontally when content overflows. In compact layouts,
 moving focus also makes the corresponding Tree, Preview, or Parameters pane visible. Pane
 focus and preview position survive Help, settings overlays, refreshes, exports,
 cancellation, and terminal resize.
+
+Within Parameters, Up/Down and `j`/`k` move through the active mini-list. At a
+list boundary focus crosses to the adjacent mini-panel. Enter or Space toggles
+the selected row. Exclusions and File Types each expose an independent vertical
+scrollbar only when their content overflows. Project Tree exposes vertical and
+horizontal scrollbars under the same overflow-only policy. Parameter rows begin
+at the inner edge of their mini-panel; no padding from the former flat list is
+retained.
 
 When Hide Secrets has findings, `[` and `]` move between highlighted occurrences;
 `Enter` or `Space` toggles keep-as-is for the active occurrence. That decision is
@@ -238,9 +268,11 @@ sequence at all. The upstream behavior is documented in the
 
 ## Export
 
-The export dialog reports output kind, view/format, destination, selected counts,
-estimated metrics, Git mode, Exclusions, conflicts, and warnings. After a
-successful interactive operation it shows an equivalent direct command.
+The export confirmation asks whether to export and presents a compact aligned
+table containing destination, file and folder counts, size, estimated tokens,
+filters, and diagnostics. Export is the default action. A destination conflict
+uses a short error containing only the conflicting path. Successful exports do
+not open another dialog; the result path appears transiently in the status bar.
 
 When Hide Secrets is enabled, project-copy confirmation states that matching text
 will change, binary files will remain unchanged, and the folder or ZIP may not
@@ -268,8 +300,8 @@ measured Git object/transfer progress is shown only when emitted by Git.
 
 Esc or Ctrl+C cancels active export work before it can quit the TUI. Cancellation
 removes staging data and returns to the same usable workspace and pane focus.
-Completion remains visible until dismissed and reports the output path, file and
-folder counts, size, measured duration, and equivalent direct command.
+Completion returns directly to the workspace and reports the output path in the
+status bar without interrupting keyboard navigation.
 
 For very large explicit selections, save a portable profile and use
 `--profile FILE` instead of producing a command with hundreds of `--select`

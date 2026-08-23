@@ -146,6 +146,7 @@ internal sealed class SelectionOptions
 		var selectedPaths = await ResolveSelectedPathsAsync(
 			parseResult,
 			cancellationToken).ConfigureAwait(false);
+		SelectedPathExistenceValidator.Validate(projectPath, selectedPaths);
 		var overrides = new ProjectSelectionSpec(
 			Roots: GetExplicitValues(parseResult, Roots),
 			Extensions: GetExplicitValues(parseResult, Extensions),

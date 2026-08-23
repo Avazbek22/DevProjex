@@ -158,44 +158,46 @@ public sealed partial class TerminalPreviewNavigationPtyTests
 
 		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Choose exactly one mode",
+			"> PARAMETERS",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
+		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			"Choose exactly one mode",
+		await terminal.WaitForScreenAsync(
+			"[ ] Use .gitignore",
 			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendShiftTabAsync(TestContext.Current.CancellationToken);
 		var afterGitRefresh = await terminal.WaitForScreenAsync(
 			"> CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("> CONTEXT PREVIEW", afterGitRefresh, StringComparison.Ordinal);
-		Assert.DoesNotContain("Git filtering:", afterGitRefresh, StringComparison.Ordinal);
 		await WaitForStableScreenAsync(
 			terminal,
 			TestContext.Current.CancellationToken);
 		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"(*) No Git filtering",
+			"[ ] Use .gitignore",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			"Choose exactly one mode",
+		await terminal.SendShiftTabAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.SendAsync("x", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Toggle all changes only this section",
+			"> PARAMETERS",
 			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
 		await terminal.SendSpaceAsync(TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			"Toggle all changes only this section",
+		await terminal.WaitForScreenAsync(
+			"[x] All",
 			cancellationToken: TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(
+			terminal,
+			TestContext.Current.CancellationToken);
+		await terminal.SendShiftTabAsync(TestContext.Current.CancellationToken);
 		var afterExclusionsRefresh = await terminal.WaitForScreenAsync(
-			"Files 62",
+			"> CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("> CONTEXT PREVIEW", afterExclusionsRefresh, StringComparison.Ordinal);
 		await WaitForStableScreenAsync(

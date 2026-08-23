@@ -877,7 +877,7 @@ public sealed class ProjectContextStreamingRegressionTests
 			largeSource,
 			largeFileSize,
 			TestContext.Current.CancellationToken);
-		var applicationAssembly = FindApplicationAssembly();
+		var applicationAssembly = PublishedApplicationLocator.FindApplicationAssembly();
 		Assert.True(
 			File.Exists(applicationAssembly),
 			$"Application assembly was not found: {applicationAssembly}");
@@ -994,24 +994,6 @@ public sealed class ProjectContextStreamingRegressionTests
 			await Task.Delay(TimeSpan.FromMilliseconds(10), cancellationToken);
 		}
 		return peakWorkingSet;
-	}
-
-	private static string FindApplicationAssembly()
-	{
-		var configuration = new DirectoryInfo(
-				AppContext.BaseDirectory.TrimEnd(
-					Path.DirectorySeparatorChar,
-					Path.AltDirectorySeparatorChar))
-			.Parent?
-			.Name ?? "Debug";
-		return Path.Combine(
-			PublishedApplicationLocator.FindRepositoryRoot(),
-			"Apps",
-			"Avalonia",
-			"bin",
-			configuration,
-			"net10.0",
-			"DevProjex.dll");
 	}
 
 	private static async Task WriteLargeTextFileAsync(

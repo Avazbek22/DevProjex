@@ -105,6 +105,7 @@ public sealed class TerminalServiceFactory(
 			Localization: localization,
 			AnalysisService: analysis,
 			IgnoreRulesService: ignoreRules,
+			IgnoreOptionsService: ignoreOptions,
 			ContextPlanner: contextPlanner,
 			ContextFactory: contextFactory,
 			SourceIdentityResolver: sourceIdentityResolver,

@@ -135,6 +135,7 @@ internal static partial class TerminalScreenSnapshot
 			normalized,
 			static match =>
 				$"{match.Groups["prefix"].Value}<SPINNER>{match.Groups["suffix"].Value}");
+		normalized = HeaderSpinnerFramePattern().Replace(normalized, "<SPINNER>");
 		normalized = FileUriPlaceholderPrefixPattern().Replace(normalized, "file:///");
 		normalized = NormalizePathPlaceholderSeparators(normalized);
 		normalized = PreviewColumnCountPattern().Replace(
@@ -370,8 +371,11 @@ internal static partial class TerminalScreenSnapshot
 		@"(?<label>Last opened|Zuletzt geöffnet|Última apertura|Dernière ouverture|Ultima apertura|Соңғы ашылуы|Última abertura|Последнее открытие|Кушодани охирин|So‘nggi ochilish):[^\n│]*")]
 	private static partial Regex RecentOpenedPattern();
 
-	[GeneratedRegex(@"(?m)(?<prefix>(?:^|│)\s{2})[|/\\-](?<suffix>\s{3,})")]
+	[GeneratedRegex(@"(?m)(?<prefix>(?:^|│)\s*)[|/\\\-⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏](?<suffix>\s+)")]
 	private static partial Regex SpinnerFramePattern();
+
+	[GeneratedRegex(@"[|/\\\-⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏](?=\s+Updating…)")]
+	private static partial Regex HeaderSpinnerFramePattern();
 
 	[GeneratedRegex(@"(?<=\d)[, \u202F](?=\d{3}(?:\D|$))")]
 	private static partial Regex GroupedNumberSeparatorPattern();

@@ -236,10 +236,110 @@ public sealed class ProfileCommandContractTests
 			"The selected profile could not be resolved.",
 			missingEnvironment.StandardError,
 			StringComparison.Ordinal);
+		Assert.Contains("--profile standard", missingEnvironment.StandardError, StringComparison.Ordinal);
 		Assert.DoesNotContain(
 			"The local project profile was not found",
 			missingEnvironment.StandardError,
 			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task ExportImportExportUsesOneCanonicalByteOrder()
+	{
+		using var workspace = CreateWorkspace();
+		using var output = new TemporaryDirectory();
+		var sourceProfile = output.WriteFile(
+			"source.json",
+			"""
+			{
+			  "schemaVersion": 1,
+			  "kind": "devprojex-profile",
+			  "selection": {
+			    "roots": ["src"],
+			    "extensions": [".cs"],
+			    "selectedPaths": ["src/app.cs"],
+			    "gitMode": "none",
+			    "exclusions": ["hidden-files", "empty-files", "smart-ignore"],
+			    "hideSecrets": true,
+			    "hidePrivateData": true,
+			    "compressCode": true,
+			    "stripComments": true,
+			    "stripBlankLines": true
+			  }
+			}
+			""");
+		var first = Path.Combine(output.Path, "first.json");
+		var second = Path.Combine(output.Path, "second.json");
+
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				new TestTerminalEnvironment(),
+				"profile", "export", workspace.Path,
+				"--profile", sourceProfile,
+				"-o", first));
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				new TestTerminalEnvironment(),
+				"profile", "import", first, workspace.Path, "--apply"));
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				new TestTerminalEnvironment(),
+				"profile", "export", workspace.Path,
+				"--profile", "local",
+				"-o", second));
+
+		Assert.Equal(
+			await File.ReadAllBytesAsync(first, TestContext.Current.CancellationToken),
+			await File.ReadAllBytesAsync(second, TestContext.Current.CancellationToken));
+		using var document = JsonDocument.Parse(await File.ReadAllTextAsync(
+			first,
+			TestContext.Current.CancellationToken));
+		Assert.Equal(
+			["smart-ignore", "empty-files", "hidden-files"],
+			document.RootElement.GetProperty("selection").GetProperty("exclusions")
+				.EnumerateArray().Select(static value => value.GetString()));
+	}
+
+	[Fact]
+	public async Task ExportImportExportPreservesImplicitAllSelections()
+	{
+		using var workspace = CreateWorkspace();
+		using var output = new TemporaryDirectory();
+		var first = Path.Combine(output.Path, "first.json");
+		var second = Path.Combine(output.Path, "second.json");
+
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				new TestTerminalEnvironment(),
+				"profile", "export", workspace.Path,
+				"--profile", "standard",
+				"-o", first));
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				new TestTerminalEnvironment(),
+				"profile", "import", first, workspace.Path, "--apply"));
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				new TestTerminalEnvironment(),
+				"profile", "export", workspace.Path,
+				"--profile", "local",
+				"-o", second));
+
+		Assert.Equal(
+			await File.ReadAllBytesAsync(first, TestContext.Current.CancellationToken),
+			await File.ReadAllBytesAsync(second, TestContext.Current.CancellationToken));
 	}
 
 	[Fact]

@@ -132,8 +132,12 @@ public sealed record ProjectContextRequest(
 	ProjectSelectionSpec Selection,
 	ProjectSourceIdentity? SourceIdentity = null);
 
-public sealed class ProjectContextValidationException(string code, string message)
+public sealed class ProjectContextValidationException(
+	string code,
+	string message,
+	string? contextPath = null)
 	: ArgumentException(message)
 {
 	public string Code { get; } = code;
+	public string? ContextPath { get; } = contextPath;
 }

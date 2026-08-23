@@ -630,7 +630,8 @@ public sealed class DirectCommandIntegrationTests
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
-		workspace.WriteFile("project/src/app.cs", "class App {}\n");
+		workspace.WriteFile("project/src/missing.cs", "class App {}\n");
+		workspace.WriteFile("project/README.md", "# Project\n");
 		var reportPath = Path.Combine(
 			workspace.CreateDirectory("output"),
 			"analysis.json");
@@ -644,7 +645,8 @@ public sealed class DirectCommandIntegrationTests
 				"analyze", project,
 				"--format", "json",
 				"--strict",
-				"--select", "missing.cs",
+				"--select", "src/missing.cs",
+				"--extension", "md",
 				"--git-mode", "none",
 				"--exclude", "none",
 				"-o", reportPath

@@ -519,16 +519,48 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		}
 	}
 
+	public Task SendMouseWheelDownAsync(
+		int column,
+		int row,
+		CancellationToken cancellationToken = default) =>
+		SendMouseWheelAsync(column, row, buttonCode: 65, cancellationToken);
+
+	public Task SendMouseWheelUpAsync(
+		int column,
+		int row,
+		CancellationToken cancellationToken = default) =>
+		SendMouseWheelAsync(column, row, buttonCode: 64, cancellationToken);
+
+	private Task SendMouseWheelAsync(
+		int column,
+		int row,
+		int buttonCode,
+		CancellationToken cancellationToken)
+	{
+		var x = column + 1;
+		var y = row + 1;
+		return SendAsync($"\u001b[<{buttonCode};{x};{y}M", cancellationToken);
+	}
+
 	public async Task ResizeAsync(
 		int columns,
 		int rows,
 		CancellationToken cancellationToken = default)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
+		var outputLengthBeforeResize = RawOutput.Length;
 		lock (_terminalGate)
 			_terminal.Resize(columns, rows);
 		await _process.ResizeAsync(columns, rows, cancellationToken).ConfigureAwait(false);
-		await Task.Delay(100, cancellationToken).ConfigureAwait(false);
+		var minimumRedrawLength = Math.Max(64, columns * 2);
+		var timeout = Stopwatch.StartNew();
+		while (!HasExited &&
+		       RawOutput.Length - outputLengthBeforeResize < minimumRedrawLength &&
+		       timeout.Elapsed < TimeSpan.FromSeconds(3))
+		{
+			await Task.Delay(25, cancellationToken).ConfigureAwait(false);
+		}
+		await Task.Delay(50, cancellationToken).ConfigureAwait(false);
 	}
 
 	public string CaptureScreen()
@@ -938,6 +970,8 @@ internal static class PublishedApplicationLocator
 {
 	private const string ProgressCheckpointHostName =
 		"DevProjex.Tests.Terminal.ProgressHost";
+	private const string DebugConfiguration = "Debug";
+	private const string ReleaseConfiguration = "Release";
 
 	public static string FindExecutable()
 	{
@@ -946,11 +980,7 @@ internal static class PublishedApplicationLocator
 			return Path.GetFullPath(explicitPath);
 
 		var repository = FindRepositoryRoot();
-		var configuration = AppContext.BaseDirectory.Contains(
-			$"{Path.DirectorySeparatorChar}Release{Path.DirectorySeparatorChar}",
-			StringComparison.OrdinalIgnoreCase)
-			? "Release"
-			: "Debug";
+		var configuration = ResolveBuildConfiguration(AppContext.BaseDirectory);
 		var executableName = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
 			? "DevProjex.exe"
 			: "DevProjex";
@@ -972,11 +1002,7 @@ internal static class PublishedApplicationLocator
 	public static string FindProgressCheckpointHostExecutable()
 	{
 		var repository = FindRepositoryRoot();
-		var configuration = AppContext.BaseDirectory.Contains(
-			$"{Path.DirectorySeparatorChar}Release{Path.DirectorySeparatorChar}",
-			StringComparison.OrdinalIgnoreCase)
-			? "Release"
-			: "Debug";
+		var configuration = ResolveBuildConfiguration(AppContext.BaseDirectory);
 		var executableName = OperatingSystem.IsWindows()
 			? $"{ProgressCheckpointHostName}.exe"
 			: ProgressCheckpointHostName;
@@ -993,6 +1019,49 @@ internal static class PublishedApplicationLocator
 		throw new FileNotFoundException(
 			"Build the terminal progress checkpoint test host before running progress PTY tests.",
 			path);
+	}
+
+	public static string FindApplicationAssembly()
+	{
+		var path = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"bin",
+			ResolveBuildConfiguration(AppContext.BaseDirectory),
+			"net10.0",
+			"DevProjex.dll");
+		if (File.Exists(path))
+			return path;
+		throw new FileNotFoundException(
+			"Build the DevProjex Avalonia host before running process tests.",
+			path);
+	}
+
+	internal static string ResolveBuildConfiguration(string baseDirectory)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(baseDirectory);
+		var directory = new DirectoryInfo(baseDirectory);
+		while (directory is not null)
+		{
+			if (string.Equals(
+			    directory.Name,
+			    ReleaseConfiguration,
+			    StringComparison.OrdinalIgnoreCase))
+			{
+				return ReleaseConfiguration;
+			}
+			if (string.Equals(
+			    directory.Name,
+			    DebugConfiguration,
+			    StringComparison.OrdinalIgnoreCase))
+			{
+				return DebugConfiguration;
+			}
+			directory = directory.Parent;
+		}
+
+		return DebugConfiguration;
 	}
 
 	internal static string FindRepositoryRoot()

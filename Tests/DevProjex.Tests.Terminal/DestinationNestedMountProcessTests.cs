@@ -27,7 +27,7 @@ public sealed class DestinationNestedMountProcessTests
 				$"Rootless mount namespaces are unavailable: {probe.StandardError.Trim()}");
 		}
 
-		var applicationAssembly = FindApplicationAssembly();
+		var applicationAssembly = PublishedApplicationLocator.FindApplicationAssembly();
 		Assert.True(
 			File.Exists(applicationAssembly),
 			$"The built unified application was not found: {applicationAssembly}");
@@ -179,7 +179,7 @@ public sealed class DestinationNestedMountProcessTests
 				$"Rootless mount namespaces are unavailable: {probe.StandardError.Trim()}");
 		}
 
-		var applicationAssembly = FindApplicationAssembly();
+		var applicationAssembly = PublishedApplicationLocator.FindApplicationAssembly();
 		Assert.True(
 			File.Exists(applicationAssembly),
 			$"The built unified application was not found: {applicationAssembly}");
@@ -256,7 +256,7 @@ public sealed class DestinationNestedMountProcessTests
 			Assert.Skip("Linux mount namespaces and a case-insensitive volume are required.");
 
 		var caseInsensitiveRoot = ResolveCaseInsensitiveRootOrSkip();
-		var applicationAssembly = FindApplicationAssembly();
+		var applicationAssembly = PublishedApplicationLocator.FindApplicationAssembly();
 		var result = await RunUnshareAsync(
 			"""
 			set -euo pipefail
@@ -373,24 +373,6 @@ public sealed class DestinationNestedMountProcessTests
 				await process.WaitForExitAsync(CancellationToken.None);
 			}
 		}
-	}
-
-	private static string FindApplicationAssembly()
-	{
-		var configuration = new DirectoryInfo(
-				AppContext.BaseDirectory.TrimEnd(
-					Path.DirectorySeparatorChar,
-					Path.AltDirectorySeparatorChar))
-			.Parent?
-			.Name ?? "Debug";
-		return Path.Combine(
-			PublishedApplicationLocator.FindRepositoryRoot(),
-			"Apps",
-			"Avalonia",
-			"bin",
-			configuration,
-			"net10.0",
-			"DevProjex.dll");
 	}
 
 	private static string ResolveCaseInsensitiveRootOrSkip()

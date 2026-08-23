@@ -229,6 +229,7 @@ internal sealed class FileTerminalOperationObserver : ITerminalOperationObserver
 		{
 			"clone-connecting" => TerminalOperationPhase.CloneConnecting,
 			"project-loading" => TerminalOperationPhase.ProjectLoading,
+			"background-refresh" => TerminalOperationPhase.BackgroundRefresh,
 			"preparing" => TerminalOperationPhase.Preparing,
 			"writing-context" => TerminalOperationPhase.WritingContext,
 			_ => null
@@ -239,6 +240,7 @@ internal sealed class FileTerminalOperationObserver : ITerminalOperationObserver
 		{
 			TerminalOperationPhase.CloneConnecting => "clone-connecting",
 			TerminalOperationPhase.ProjectLoading => "project-loading",
+			TerminalOperationPhase.BackgroundRefresh => "background-refresh",
 			TerminalOperationPhase.Preparing => "preparing",
 			TerminalOperationPhase.WritingContext => "writing-context",
 			_ => throw new ArgumentOutOfRangeException(nameof(phase), phase, null)

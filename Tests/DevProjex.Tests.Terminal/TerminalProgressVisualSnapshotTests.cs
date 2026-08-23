@@ -100,17 +100,13 @@ public sealed class TerminalProgressVisualSnapshotTests
 			(output.Path, "<OUTPUT_ROOT>"));
 		ReleaseCheckpoint(checkpointRoot, "90");
 
-		await WaitForStableScreenAsync(terminal, "Equivalent command:");
+		await WaitForStableScreenAsync(terminal, "Export completed:");
 		Verify(
 			"workspace-progress-complete-en-120x30",
 			terminal,
 			project.Path,
 			(output.Path, "<OUTPUT_ROOT>"));
 		Assert.True(File.Exists(Path.Combine(destination, "src", "File0100.bin")));
-		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			"Equivalent command:",
-			cancellationToken: TestContext.Current.CancellationToken);
 		await ExitAsync(terminal);
 	}
 
@@ -211,13 +207,9 @@ public sealed class TerminalProgressVisualSnapshotTests
 		ReleaseCheckpoint(checkpointRoot, "writing-context");
 
 		await terminal.WaitForScreenAsync(
-			"Equivalent command:",
+			"Export completed:",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.True(File.Exists(destination));
-		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			"Equivalent command:",
-			cancellationToken: TestContext.Current.CancellationToken);
 		await ExitAsync(terminal);
 	}
 
@@ -418,13 +410,8 @@ public sealed class TerminalProgressVisualSnapshotTests
 		CancellationToken cancellationToken,
 		string language = "en")
 	{
-		var ready = language == "ru"
-			? "Состояние назначения: Готово"
-			: "Destination state: Ready";
-		await terminal.WaitForScreenAsync(ready, cancellationToken: cancellationToken);
-		await terminal.SendTabAsync(cancellationToken);
-		await terminal.SendTabAsync(cancellationToken);
-		await terminal.SendTabAsync(cancellationToken);
+		var title = language == "ru" ? "Экспортировать?" : "Export?";
+		await terminal.WaitForScreenAsync(title, cancellationToken: cancellationToken);
 		await terminal.SendEnterAsync(cancellationToken);
 	}
 
@@ -495,7 +482,7 @@ public sealed class TerminalProgressVisualSnapshotTests
 		{
 			var screen = terminal.CaptureScreen();
 			if (!string.IsNullOrWhiteSpace(screen) &&
-			    screen.Contains(expected, StringComparison.Ordinal))
+				screen.Contains(expected, StringComparison.Ordinal))
 			{
 				stableSamples++;
 				if (stableSamples >= 3)

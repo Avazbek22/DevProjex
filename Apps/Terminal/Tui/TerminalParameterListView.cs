@@ -1,4 +1,5 @@
 using Terminal.Gui.Input;
+using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
 
 namespace DevProjex.Terminal.Tui;
@@ -10,12 +11,21 @@ internal sealed class TerminalParameterListView : ListView
 	private int _lastPressedViewportRow = -1;
 	private long _lastPressedAt;
 
+	public TerminalParameterListView(
+		bool showVerticalScrollBar = false,
+		bool useUnicode = true)
+	{
+		if (showVerticalScrollBar)
+			TerminalScrollBarStyle.Apply(this, useUnicode, vertical: true, horizontal: false);
+	}
+
 	public event EventHandler? SelectionToggleRequested;
+	public event EventHandler? InteractionStarted;
 
 	protected override bool OnMouseEvent(Mouse mouse)
 	{
 		if (mouse.Flags.HasFlag(MouseFlags.WheeledUp) ||
-		    mouse.Flags.HasFlag(MouseFlags.WheeledDown))
+			mouse.Flags.HasFlag(MouseFlags.WheeledDown))
 		{
 			return base.OnMouseEvent(mouse);
 		}
@@ -27,14 +37,15 @@ internal sealed class TerminalParameterListView : ListView
 			return base.OnMouseEvent(mouse);
 
 		SetFocus();
+		InteractionStarted?.Invoke(this, EventArgs.Empty);
 		var row = Viewport.Y + position.Y;
 		SelectedItem = row;
 		EnsureSelectedItemVisible();
 		var now = Environment.TickCount64;
 		if (!pressed &&
-		    _lastPressedViewportRow == position.Y &&
-		    _lastPressedViewportColumn == position.X &&
-		    now - _lastPressedAt <= PointerEventDeduplicationWindowMilliseconds)
+			_lastPressedViewportRow == position.Y &&
+			_lastPressedViewportColumn == position.X &&
+			now - _lastPressedAt <= PointerEventDeduplicationWindowMilliseconds)
 		{
 			return true;
 		}
@@ -45,7 +56,7 @@ internal sealed class TerminalParameterListView : ListView
 			_lastPressedViewportColumn = position.X;
 			_lastPressedAt = now;
 		}
-		if (position.X is >= 2 and <= 4)
+		if (position.X is >= 0 and <= 2)
 			SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
 		return true;
 	}

@@ -32,14 +32,14 @@ public sealed class TopMenuBarFormatSwitcherUiTests
 
 			viewModel.CompleteUpdateCheck(new ApplicationUpdateCheckResult(
 				ApplicationUpdateAvailability.UpdateAvailable,
-				"5.0",
+				"5.1",
 				"5.1"));
 			await FlushUiAsync();
 			Assert.True(indicator.IsVisible);
 
 			viewModel.CompleteUpdateCheck(new ApplicationUpdateCheckResult(
 				ApplicationUpdateAvailability.CheckFailed,
-				"5.0"));
+				"5.1"));
 			await FlushUiAsync();
 			Assert.True(indicator.IsVisible);
 

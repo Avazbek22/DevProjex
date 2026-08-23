@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using DevProjex.Infrastructure.ResourceStore;
 using DevProjex.Terminal.DesktopControl;
 using DevProjex.Terminal.Rendering;
 
@@ -84,6 +85,28 @@ public sealed class MachineSchemaContractTests
 		Assert.Empty(document.RootElement.GetProperty("instances").EnumerateArray());
 		Assert.Empty(environment.StandardError);
 		Assert.DoesNotContain("\u001b", environment.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task UiListTextExplainsThatNoDesktopInstancesAreRunning()
+	{
+		using var workspace = new TemporaryDirectory();
+		var environment = new TestTerminalEnvironment();
+		var paths = new DesktopControlPaths(() => workspace.CreateDirectory("desktop-control"));
+		var client = new DesktopControlClient(new DesktopInstanceRegistry(paths));
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.Ru);
+		var handler = new DesktopCommandHandler(
+			environment,
+			client,
+			localization: localization);
+
+		var exitCode = await handler.ListAsync(
+			json: false,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Equal("Запущенных экземпляров нет." + Environment.NewLine, environment.StandardOutput);
+		Assert.Empty(environment.StandardError);
 	}
 
 	[Fact]

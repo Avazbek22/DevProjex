@@ -83,26 +83,22 @@ public sealed class TerminalVisualSnapshotTests
 		Verify("workspace-en-120x30", terminal, project.Path);
 
 		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
-		await WaitForStableScreenAsync(terminal, "Choose exactly one mode");
+		await WaitForStableScreenAsync(terminal, "> PARAMETERS");
 		Verify("workspace-git-mode-en-120x30", terminal, project.Path);
-		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			"Choose exactly one mode",
-			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendShiftTabAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync("> CONTEXT PREVIEW", cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.SendAsync("X", TestContext.Current.CancellationToken);
-		await WaitForStableScreenAsync(terminal, "Toggle all changes only this section");
+		await WaitForStableScreenAsync(terminal, "> PARAMETERS");
 		Verify("workspace-exclusions-en-120x30", terminal, project.Path);
-		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			"Toggle all changes only this section",
-			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendShiftTabAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync("> CONTEXT PREVIEW", cancellationToken: TestContext.Current.CancellationToken);
 
 		using var output = new FixedTemporaryDirectory("DevProjex-Tui-Snapshot-Context");
 		var destination = Path.Combine(output.Path, "context-output.md");
 		await terminal.SendAsync("E", TestContext.Current.CancellationToken);
 		await ReplacePromptTextAsync(terminal, destination);
-		await WaitForStableScreenAsync(terminal, "Destination state: Ready");
+		await WaitForStableScreenAsync(terminal, "Export?");
 		Verify(
 			"workspace-context-export-en-120x30",
 			terminal,
@@ -110,17 +106,17 @@ public sealed class TerminalVisualSnapshotTests
 			(output.Path, "<OUTPUT_ROOT>"));
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenWithoutAsync(
-			"Destination state: Ready",
+			"Export?",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"PROJECT TREE",
+			"> CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.ResizeAsync(80, 24, TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenWithoutAsync(
-			"CONTEXT PREVIEW",
+			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await WaitForStableScreenAsync(terminal, "PROJECT TREE");
+		await WaitForStableScreenAsync(terminal, "> CONTEXT PREVIEW");
 		Verify("workspace-en-80x24", terminal, project.Path);
 
 		await terminal.ResizeAsync(120, 30, TestContext.Current.CancellationToken);
@@ -138,6 +134,8 @@ public sealed class TerminalVisualSnapshotTests
 		await WaitForStableScreenAsync(terminal, "PROJECT TREE");
 		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
 		await WaitForStableScreenAsync(terminal, "Tracked Git files only");
+		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
+		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await WaitForStableScreenAsync(terminal, "DPX-GIT-TRACKED-INDEX-UNAVAILABLE");
@@ -154,24 +152,17 @@ public sealed class TerminalVisualSnapshotTests
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await ReplacePromptTextAsync(terminal, destination, "Exact destination:");
-		await WaitForStableScreenAsync(terminal, "Destination state: Ready");
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(terminal, "Export?");
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		await WaitForStableScreenAsync(terminal, "Equivalent command:");
+		await WaitForStableScreenAsync(terminal, "Export completed:");
 		Verify(
 			"workspace-project-export-success-en-120x30",
 			terminal,
 			project.Path,
 			(output.Path, "<OUTPUT_ROOT>"));
 		Assert.True(File.Exists(Path.Combine(destination, "src", "App.cs")));
-		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			"Equivalent command:",
-			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"PROJECT TREE",
+			"> PARAMETERS",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await ExitAsync(terminal);
 	}
@@ -199,10 +190,12 @@ public sealed class TerminalVisualSnapshotTests
 
 		await WaitForStableScreenAsync(terminal, "PARAMETERS");
 		var parameters = terminal.CaptureScreen();
-		Assert.Contains("GIT FILTERING", parameters, StringComparison.Ordinal);
-		Assert.Contains("EXCLUSIONS", parameters, StringComparison.Ordinal);
-		Assert.Contains("FILE TYPES", parameters, StringComparison.Ordinal);
-		Assert.Contains("ROOT FOLDERS", parameters, StringComparison.Ordinal);
+		Assert.Contains("Content processing", parameters, StringComparison.Ordinal);
+		Assert.Contains("Exclusions", parameters, StringComparison.Ordinal);
+		Assert.Contains("File types", parameters, StringComparison.Ordinal);
+		Assert.DoesNotContain("ROOT FOLDERS", parameters, StringComparison.Ordinal);
+		Assert.Contains("Hide private data", parameters, StringComparison.Ordinal);
+		Assert.Contains("Compress code", parameters, StringComparison.Ordinal);
 		Assert.DoesNotContain("Profile: Standard", parameters, StringComparison.Ordinal);
 		Assert.DoesNotContain("Readable", parameters, StringComparison.Ordinal);
 		Assert.DoesNotContain("Raw output", parameters, StringComparison.Ordinal);
@@ -250,11 +243,11 @@ public sealed class TerminalVisualSnapshotTests
 		await terminal.SendAsync("?", TestContext.Current.CancellationToken);
 		await WaitForStableScreenAsync(
 			terminal,
-			"Up/Down or j/k selects a row");
+			"Content Processing contains five immediate transformations");
 		Verify("workspace-controls-help-en-160x40", terminal, project.Path);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenWithoutAsync(
-			"Up/Down or j/k selects a row",
+			"Content Processing contains five immediate transformations",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await ExitAsync(terminal);
 	}
@@ -282,10 +275,10 @@ public sealed class TerminalVisualSnapshotTests
 
 		await WaitForStableScreenAsync(terminal, "ПАРАМЕТРЫ");
 		var workspace = terminal.CaptureScreen();
-		Assert.Contains("GIT-ФИЛЬТРАЦИЯ", workspace, StringComparison.Ordinal);
-		Assert.Contains("ИСКЛЮЧЕНИЯ", workspace, StringComparison.Ordinal);
-		Assert.Contains("ТИПЫ ФАЙЛОВ", workspace, StringComparison.Ordinal);
-		Assert.Contains("КОРНЕВЫЕ ПАПКИ", workspace, StringComparison.Ordinal);
+		Assert.Contains("Обработка содержимого", workspace, StringComparison.Ordinal);
+		Assert.Contains("Исключения", workspace, StringComparison.Ordinal);
+		Assert.Contains("Типы файлов", workspace, StringComparison.Ordinal);
+		Assert.DoesNotContain("КОРНЕВЫЕ ПАПКИ", workspace, StringComparison.Ordinal);
 		Assert.Contains("Использовать .gitignore", workspace, StringComparison.Ordinal);
 		Assert.Contains("Скрытые папки", workspace, StringComparison.Ordinal);
 		Assert.DoesNotContain("[[", workspace, StringComparison.Ordinal);
@@ -388,7 +381,7 @@ public sealed class TerminalVisualSnapshotTests
 		{
 			var current = terminal.CaptureScreen();
 			if (current.Contains(expected, StringComparison.Ordinal) &&
-			    string.Equals(previous, current, StringComparison.Ordinal))
+				string.Equals(previous, current, StringComparison.Ordinal))
 			{
 				stableSamples++;
 				if (stableSamples >= 3)

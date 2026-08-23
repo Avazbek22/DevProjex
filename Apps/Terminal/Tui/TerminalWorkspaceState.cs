@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using Terminal.Gui.Text;
 
 namespace DevProjex.Terminal.Tui;
 
@@ -15,6 +16,8 @@ public sealed record TerminalTreeRow(
 	bool IsExpanded,
 	TerminalTreeCheckState CheckState)
 {
+	public int DisplayWidth => Depth * 2 + 6 + Node.DisplayName.GetColumns();
+
 	public override string ToString()
 	{
 		var indentation = new string(' ', Depth * 2);
@@ -72,8 +75,10 @@ public sealed class TerminalWorkspaceState : IDisposable
 
 	public ProjectContextPlan Plan { get; private set; }
 	public ObservableCollection<TerminalTreeRow> VisibleRows { get; } = [];
+	public int VisibleRowWidth { get; private set; } = 1;
 	public int SelectedFileCount => _selectedFiles.Count;
 	public int SelectedFolderCount => _selectedFolderCount;
+	public bool HasVisibleTreeItems => Plan.EffectiveTree.Children.Count > 0;
 	public string TreeFilterQuery => _treeFilterQuery;
 	public int TreeFilterMatchCount { get; private set; }
 	public bool HasTreeFilter => _treeFilterQuery.Length > 0;
@@ -115,7 +120,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 	{
 		ArgumentNullException.ThrowIfNull(plan);
 		if (!ReferenceEquals(Plan.EffectiveTree, plan.EffectiveTree) ||
-		    !ReferenceEquals(Plan.ProjectedTree, plan.ProjectedTree))
+			!ReferenceEquals(Plan.ProjectedTree, plan.ProjectedTree))
 		{
 			throw new ArgumentException(
 				"A content-only plan update must preserve both tree instances.",
@@ -231,8 +236,8 @@ public sealed class TerminalWorkspaceState : IDisposable
 				? Mod(currentIndex - offset, VisibleRows.Count)
 				: Mod(currentIndex + offset, VisibleRows.Count);
 			if (!VisibleRows[index].Node.DisplayName.Contains(
-				    query,
-				    StringComparison.OrdinalIgnoreCase))
+					query,
+					StringComparison.OrdinalIgnoreCase))
 				continue;
 
 			return index;
@@ -259,8 +264,8 @@ public sealed class TerminalWorkspaceState : IDisposable
 				: Mod(currentIndex + offset, _orderedPaths.Count);
 			var path = _orderedPaths[index];
 			if (!_nodesByPath[path].DisplayName.Contains(
-				    query,
-				    StringComparison.OrdinalIgnoreCase))
+					query,
+					StringComparison.OrdinalIgnoreCase))
 			{
 				continue;
 			}
@@ -344,8 +349,12 @@ public sealed class TerminalWorkspaceState : IDisposable
 		}
 
 		VisibleRows.Clear();
+		VisibleRowWidth = 1;
 		foreach (var row in rows)
+		{
 			VisibleRows.Add(row);
+			VisibleRowWidth = Math.Max(VisibleRowWidth, row.DisplayWidth);
+		}
 	}
 
 	private bool AppendFiltered(

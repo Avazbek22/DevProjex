@@ -12,9 +12,6 @@ internal sealed class TerminalVirtualizedPreviewView : View
 	private IPreviewTextDocument? _document;
 	private string _searchQuery = string.Empty;
 	private int _currentSearchMatchIndex = -1;
-	private readonly Rune _horizontalScrollThumb;
-	private readonly Rune _verticalScrollThumb;
-	private readonly Rune _scrollTrack;
 	private Dictionary<int, PreviewRedactionSpan[]> _redactionsByLine = [];
 	private List<PreviewRedactionSpan> _redactionOccurrences = [];
 	private string? _activeRedactionOccurrenceId;
@@ -23,25 +20,12 @@ internal sealed class TerminalVirtualizedPreviewView : View
 		bool useUnicode = true,
 		bool showScrollBars = true)
 	{
-		_horizontalScrollThumb = new Rune(useUnicode ? '━' : '-');
-		_verticalScrollThumb = new Rune(useUnicode ? '┃' : '|');
-		_scrollTrack = new Rune(useUnicode ? '·' : '.');
 		CanFocus = true;
 		SchemeName = TerminalWorkspaceTheme.Base;
 		if (!showScrollBars)
 			return;
 
-		ViewportSettings |= ViewportSettingsFlags.HasScrollBars;
-		VerticalScrollBar.SchemeName = TerminalWorkspaceTheme.Secondary;
-		HorizontalScrollBar.SchemeName = TerminalWorkspaceTheme.Secondary;
-		VerticalScrollBar.DrawingContent += (_, _) =>
-			DrawScrollTrack(VerticalScrollBar, _scrollTrack, vertical: true);
-		HorizontalScrollBar.DrawingContent += (_, _) =>
-			DrawScrollTrack(HorizontalScrollBar, _scrollTrack, vertical: false);
-		VerticalScrollBar.Slider.DrawingContent += (_, _) =>
-			DrawScrollThumb(VerticalScrollBar.Slider, _verticalScrollThumb);
-		HorizontalScrollBar.Slider.DrawingContent += (_, _) =>
-			DrawScrollThumb(HorizontalScrollBar.Slider, _horizontalScrollThumb);
+		TerminalScrollBarStyle.Apply(this, useUnicode, vertical: true, horizontal: true);
 		ViewportChanged += (_, _) => RaiseVisibleRangeChanged();
 	}
 
@@ -92,7 +76,7 @@ internal sealed class TerminalVirtualizedPreviewView : View
 		_document = document;
 		RebuildRedactionIndex(document.Redactions);
 		if (_activeRedactionOccurrenceId is not null &&
-		    !_redactionOccurrences.Any(span => span.OccurrenceId == _activeRedactionOccurrenceId))
+			!_redactionOccurrences.Any(span => span.OccurrenceId == _activeRedactionOccurrenceId))
 		{
 			_activeRedactionOccurrenceId = null;
 		}
@@ -349,7 +333,7 @@ internal sealed class TerminalVirtualizedPreviewView : View
 		if (_redactionOccurrences.Count == 0)
 			return null;
 		if (_activeRedactionOccurrenceId is not null &&
-		    _redactionOccurrences.Any(span => span.OccurrenceId == _activeRedactionOccurrenceId))
+			_redactionOccurrences.Any(span => span.OccurrenceId == _activeRedactionOccurrenceId))
 		{
 			return _activeRedactionOccurrenceId;
 		}
@@ -379,24 +363,6 @@ internal sealed class TerminalVirtualizedPreviewView : View
 
 	private void RaiseVisibleRangeChanged() =>
 		VisibleRangeChanged?.Invoke(this, EventArgs.Empty);
-
-	private static void DrawScrollThumb(View slider, Rune glyph)
-	{
-		slider.SetAttributeForRole(VisualRole.ReadOnly);
-		slider.FillRect(
-			new Rectangle(Point.Empty, slider.Viewport.Size),
-			glyph);
-	}
-
-	private static void DrawScrollTrack(View scrollBar, Rune glyph, bool vertical)
-	{
-		scrollBar.SetAttributeForRole(VisualRole.ReadOnly);
-		var track = vertical
-			? new Rectangle(0, 1, scrollBar.Viewport.Width, Math.Max(0, scrollBar.Viewport.Height - 2))
-			: new Rectangle(1, 0, Math.Max(0, scrollBar.Viewport.Width - 2), scrollBar.Viewport.Height);
-		if (track.Width > 0 && track.Height > 0)
-			scrollBar.FillRect(track, glyph);
-	}
 
 	private static string SliceColumns(string value, int startColumn, int maximumColumns)
 	{

@@ -203,7 +203,7 @@ public sealed class PortableProjectProfileService
 			Extensions: NormalizeNullableValues(document.Selection.Extensions, StringComparer.OrdinalIgnoreCase),
 			SelectedPaths: selectedPaths,
 			GitMode: gitMode,
-			Exclusions: exclusions.OrderBy(static exclusion => exclusion).ToArray(),
+			Exclusions: ProjectSelectionTokens.OrderExclusions(exclusions),
 			HideSecrets: document.Selection.HideSecrets ?? legacyHideSecrets,
 			HidePrivateData: document.Selection.HidePrivateData ?? false,
 			CompressCode: document.Selection.CompressCode ?? false,
@@ -231,10 +231,8 @@ public sealed class PortableProjectProfileService
 				Extensions = selection.Extensions?.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase).ToArray(),
 				SelectedPaths = (selection.SelectedPaths ?? []).OrderBy(static value => value, PathComparer.Default).ToArray(),
 				GitMode = ProjectSelectionTokens.ToToken(selection.GitMode.Value),
-				Exclusions = selection.Exclusions
-					.Where(static exclusion => exclusion != ProjectExclusion.HideSecrets)
+				Exclusions = ProjectSelectionTokens.OrderExclusions(selection.Exclusions)
 					.Select(ProjectSelectionTokens.ToToken)
-					.OrderBy(static value => value, StringComparer.Ordinal)
 					.ToArray(),
 				HideSecrets = selection.HideSecrets == true,
 				HidePrivateData = selection.HidePrivateData == true,

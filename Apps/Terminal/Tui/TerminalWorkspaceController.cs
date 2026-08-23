@@ -1,5 +1,6 @@
 using DevProjex.Terminal.Execution;
 using DevProjex.Terminal.CommandLine;
+using DevProjex.Application.Compression;
 using DevProjex.Application.Secrets;
 
 namespace DevProjex.Terminal.Tui;
@@ -91,10 +92,26 @@ public sealed class TerminalWorkspaceController(
 		TerminalWorkspaceState state,
 		GitFilteringMode mode,
 		CancellationToken cancellationToken)
+		=> await SetPathFilteringAsync(
+				state,
+				mode,
+				state.Plan.Selection.Exclusions ?? [],
+				cancellationToken)
+			.ConfigureAwait(false);
+
+	public async Task SetPathFilteringAsync(
+		TerminalWorkspaceState state,
+		GitFilteringMode mode,
+		IReadOnlyCollection<ProjectExclusion> exclusions,
+		CancellationToken cancellationToken)
 	{
 		var plan = await BuildPlanAsync(
 				state.Plan.SourceRoot,
-				state.BuildSelection() with { GitMode = mode },
+				state.BuildSelection() with
+				{
+					GitMode = mode,
+					Exclusions = exclusions
+				},
 				state.Plan.SourceIdentity,
 				cancellationToken)
 			.ConfigureAwait(false);
@@ -119,13 +136,29 @@ public sealed class TerminalWorkspaceController(
 		TerminalWorkspaceState state,
 		bool enabled,
 		CancellationToken cancellationToken)
+		=> SetContentTransformation(
+			state,
+			IgnoreOptionId.HideSecrets,
+			enabled,
+			cancellationToken);
+
+	public void SetContentTransformation(
+		TerminalWorkspaceState state,
+		IgnoreOptionId optionId,
+		bool enabled,
+		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
+		var selection = state.Plan.Selection;
 		var plan = services.ContextPlanner.ApplyContentTransformationSelection(
 			state.Plan,
-			enabled);
+			optionId == IgnoreOptionId.HideSecrets ? enabled : selection.HideSecrets == true,
+			compressCode: optionId == IgnoreOptionId.CompressCode ? enabled : null,
+			stripComments: optionId == IgnoreOptionId.StripComments ? enabled : null,
+			stripBlankLines: optionId == IgnoreOptionId.StripBlankLines ? enabled : null,
+			hidePrivateData: optionId == IgnoreOptionId.HidePrivateData ? enabled : null);
 		state.ReplaceContentTransformationPlan(plan);
-		if (!enabled)
+		if (plan.Selection.HideSecrets != true && plan.Selection.HidePrivateData != true)
 			services.SecretRedactionSession.Disable();
 	}
 
@@ -235,14 +268,14 @@ public sealed class TerminalWorkspaceController(
 		var files = view is ProjectContextView.Content or ProjectContextView.TreeContent
 			? plan.IncludedFiles
 			: [];
-		var redactionContext = CreateRedactionContext(plan);
-		if (view == ProjectContextView.Tree && redactionContext is not null)
+		var transformationContext = CreateTransformationContext(plan);
+		if (view == ProjectContextView.Tree && transformationContext?.Redaction is not null)
 		{
 			// The tree view ships no file content; this scan only measures the selection so the
-			// Hide Secrets row can show a count. Discovery keeps one unreadable file from failing
+			// redaction rows can show counts. Discovery keeps one unreadable file from failing
 			// the whole view - the label reads the snapshot and reports coverage honestly.
 			await services.SecretRedactionOutputPreparer
-				.DiscoverAsync(redactionContext, plan.IncludedFiles, cancellationToken)
+				.DiscoverAsync(transformationContext, plan.IncludedFiles, cancellationToken)
 				.ConfigureAwait(false);
 		}
 		string MapDisplayPath(string path) =>
@@ -259,7 +292,7 @@ public sealed class TerminalWorkspaceController(
 						cancellationToken,
 						MapDisplayPath,
 						includeOmissionMarkers: true,
-						transformationContext: redactionContext)
+						transformationContext: transformationContext)
 					.ConfigureAwait(false) ??
 				services.PreviewDocumentBuilder.CreateInMemory(string.Empty),
 			ProjectContextView.TreeContent => await services.PreviewDocumentBuilder
@@ -269,16 +302,32 @@ public sealed class TerminalWorkspaceController(
 					cancellationToken,
 					MapDisplayPath,
 					includeOmissionMarkers: true,
-					transformationContext: redactionContext)
+					transformationContext: transformationContext)
 				.ConfigureAwait(false),
 			_ => throw new ArgumentOutOfRangeException(nameof(view), view, null)
 		};
 	}
 
-	private SecretRedactionContext? CreateRedactionContext(ProjectContextPlan plan) =>
-		plan.Selection.HideSecrets == true
-			? new SecretRedactionContext(plan.SourceRoot, services.SecretRedactionSession)
-			: null;
+	private ContentTransformationContext? CreateTransformationContext(ProjectContextPlan plan)
+	{
+		var kinds = CodeTransformIdentity.Resolve(
+			plan.Selection.CompressCode == true,
+			plan.Selection.StripComments == true,
+			plan.Selection.StripBlankLines == true);
+		var features = SecretRedactionFeatureSelection.Resolve(
+			plan.Selection.HideSecrets == true,
+			plan.Selection.HidePrivateData == true);
+		return ContentTransformationContext.For(
+			kinds == CodeTransformKinds.None
+				? null
+				: new CodeCompressionContext(plan.SourceRoot, services.CodeCompressionSession, kinds),
+			features == SecretRedactionFeatures.None
+				? null
+				: new SecretRedactionContext(
+					plan.SourceRoot,
+					services.SecretRedactionSession,
+					features));
+	}
 
 	private static TreeTextFormat MapTreeFormat(ProjectContextDocumentFormat format) =>
 		format switch
@@ -392,7 +441,7 @@ public sealed class TerminalWorkspaceController(
 				new ProjectCopyExportRequest(
 					ProjectRootPath: plan.SourceRoot,
 					ProjectName: plan.SourceIdentity?.DisplayName ??
-					             Path.GetFileName(Path.TrimEndingDirectorySeparator(plan.SourceRoot)),
+								 Path.GetFileName(Path.TrimEndingDirectorySeparator(plan.SourceRoot)),
 					TreeRoot: plan.ProjectedTree,
 					SelectedPaths: new HashSet<string>(PathComparer.Default),
 					DestinationPath: requestedDestination,
@@ -401,7 +450,10 @@ public sealed class TerminalWorkspaceController(
 					ConflictPolicy: ProjectCopyConflictPolicy.Fail,
 					RedactSecrets: plan.Selection.HideSecrets == true,
 					CompressCode: plan.Selection.CompressCode == true,
-					NoticeText: ProjectCopyExportService.BuildProjectCopyNoticeText(services.Localization)),
+					StripComments: plan.Selection.StripComments == true,
+					StripBlankLines: plan.Selection.StripBlankLines == true,
+					NoticeText: ProjectCopyExportService.BuildProjectCopyNoticeText(services.Localization),
+					RedactPrivateData: plan.Selection.HidePrivateData == true),
 				progress,
 				cancellationToken: cancellationToken)
 			.ConfigureAwait(false);
@@ -666,6 +718,14 @@ public sealed class TerminalWorkspaceController(
 		}
 		if (plan.Selection.HideSecrets == true)
 			arguments.Add("--hide-secrets");
+		if (plan.Selection.HidePrivateData == true)
+			arguments.Add("--hide-private-data");
+		if (plan.Selection.CompressCode == true)
+			arguments.Add("--compress-code");
+		if (plan.Selection.StripComments == true)
+			arguments.Add("--strip-comments");
+		if (plan.Selection.StripBlankLines == true)
+			arguments.Add("--strip-blank-lines");
 
 		if (!SetEquals(plan.AvailableRoots, plan.SelectedRoots, PathComparer.Default))
 		{
@@ -677,9 +737,9 @@ public sealed class TerminalWorkspaceController(
 		}
 
 		if (!SetEquals(
-			    plan.AvailableExtensions,
-			    plan.SelectedExtensions,
-			    StringComparer.OrdinalIgnoreCase))
+				plan.AvailableExtensions,
+				plan.SelectedExtensions,
+				StringComparer.OrdinalIgnoreCase))
 		{
 			foreach (var extension in plan.SelectedExtensions)
 			{

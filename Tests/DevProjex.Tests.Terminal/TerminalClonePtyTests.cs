@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Security.Cryptography;
 
 namespace DevProjex.Tests.Terminal;
@@ -149,6 +150,131 @@ public sealed class TerminalClonePtyTests
 		Assert.Equal(sourceFingerprint, ComputeWorkingTreeFingerprint(origin));
 		Assert.Equal(sourceHead, RunGit(origin, "rev-parse", "HEAD"));
 		Assert.Empty(RunGit(origin, "status", "--porcelain=v1", "--untracked-files=all"));
+	}
+
+	[Fact(Timeout = 120_000)]
+	public async Task UrlWorkspaceAppliesEveryTransformationAndExportsRedactedZip()
+	{
+		const string secret = "ghp_a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL";
+		const string privateEmail = "ivan.petrov@corp.internal";
+		using var originRoot = new TemporaryDirectory();
+		var origin = originRoot.CreateDirectory("TransformationRepository");
+		Directory.CreateDirectory(Path.Combine(origin, "src"));
+		File.WriteAllText(
+			Path.Combine(origin, "src", "Config.cs"),
+			$$"""
+			namespace Sample;
+
+			// remove this comment
+			internal sealed class Config
+			{
+				private const string Token = "{{secret}}";
+				private const string Email = "{{privateEmail}}";
+
+				public void Run()
+				{
+					Console.WriteLine(Token);
+				}
+			}
+			""",
+			new UTF8Encoding(false));
+		InitializeGitRepository(origin);
+		using var welcomeDirectory = new TemporaryDirectory();
+		welcomeDirectory.WriteFile("notes.txt", "markerless directory");
+		using var output = new TemporaryDirectory();
+		var destination = Path.Combine(output.Path, "transformed-project.zip");
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			welcomeDirectory.Path,
+			["--language", "en"],
+			columns: 120,
+			rows: 30,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.WaitForScreenAsync(
+			"Choose a workspace action",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await StartCloneAsync(
+			terminal,
+			new Uri(origin).AbsoluteUri,
+			TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Config.cs",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> CONTEXT PREVIEW",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> PARAMETERS",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
+		foreach (var expected in new[]
+			{
+				"Hide secrets",
+				"Hide private data",
+				"Compress code",
+				"Strip comments",
+				"Strip blank lines"
+			})
+		{
+			await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+			await terminal.WaitForScreenAsync(
+				$"[x] {expected}",
+				timeout: TimeSpan.FromSeconds(30),
+				cancellationToken: TestContext.Current.CancellationToken);
+			if (expected != "Strip blank lines")
+				await terminal.SendDownAsync(TestContext.Current.CancellationToken);
+		}
+
+		await terminal.SendAsync("Z", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Choose the physical output kind",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Project copy with hidden data",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Exact destination:",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendCtrlAAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync(destination, TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Export?",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Export completed:",
+			timeout: TimeSpan.FromSeconds(45),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var extracted = output.CreateDirectory("extracted");
+		ZipFile.ExtractToDirectory(destination, extracted);
+		var exportedPath = Assert.Single(Directory.EnumerateFiles(
+			extracted,
+			"Config.cs",
+			SearchOption.AllDirectories));
+		var exported = await File.ReadAllTextAsync(
+			exportedPath,
+			TestContext.Current.CancellationToken);
+		Assert.DoesNotContain(secret, exported, StringComparison.Ordinal);
+		Assert.DoesNotContain(privateEmail, exported, StringComparison.Ordinal);
+		Assert.DoesNotContain("remove this comment", exported, StringComparison.Ordinal);
+		Assert.DoesNotContain("\n\n", exported.Replace("\r\n", "\n", StringComparison.Ordinal), StringComparison.Ordinal);
+		Assert.DoesNotContain("Console.WriteLine(Token)", exported, StringComparison.Ordinal);
+
+		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
 	}
 
 	[Fact(Timeout = 120_000)]

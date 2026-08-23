@@ -36,7 +36,13 @@ public sealed class ContextDiagnosticRenderer(
 				$"[{color}]{label}[[{Markup.Escape(diagnostic.Code)}]][/]:");
 			console.WriteLine(ResolveMessage(localization, diagnostic.Code));
 			if (!string.IsNullOrWhiteSpace(diagnostic.Path))
-				console.WriteLine($"{localization["Terminal.Label.Path"]}: {diagnostic.Path}");
+			{
+				var labelKey = diagnostic.Code == "DPX-PROJECT-SELECTION-WARNING"
+					? "Terminal.Label.Value"
+					: "Terminal.Label.Path";
+				console.WriteLine(
+					$"{localization[labelKey]}: {TerminalTextEscaping.EscapeSingleLine(diagnostic.Path)}");
+			}
 		}
 	}
 

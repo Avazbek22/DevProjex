@@ -9,7 +9,6 @@ internal enum TerminalWorkspaceActionKind
 	OpenControls,
 	GitFiltering,
 	Exclusions,
-	RootFolders,
 	FileTypes,
 	ExportContext,
 	ExportFolder,

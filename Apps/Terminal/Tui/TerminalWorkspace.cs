@@ -1,6 +1,7 @@
 using System.Globalization;
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.Execution;
+using DevProjex.Terminal.Rendering;
 using Terminal.Gui.App;
 using Terminal.Gui.Drawing;
 using Terminal.Gui.ViewBase;
@@ -58,8 +59,8 @@ public sealed class TerminalWorkspace
 		CancellationToken cancellationToken)
 	{
 		if (!environment.IsInputInteractive ||
-		    !environment.IsOutputInteractive ||
-		    environment.IsTermDumb)
+			!environment.IsOutputInteractive ||
+			environment.IsTermDumb)
 		{
 			environment.Error.WriteLine("error[DPX-TUI-NOT-INTERACTIVE]:");
 			environment.Error.WriteLine(L("Terminal.Tui.Error.NotInteractive"));
@@ -99,7 +100,7 @@ public sealed class TerminalWorkspace
 			var rootWidth = environment.Width;
 			var rootHeight = environment.Height;
 			if (screenMode == TerminalScreenMode.Inline &&
-			    application.Driver is { } driver)
+				application.Driver is { } driver)
 			{
 				rootWidth = Math.Max(environment.Width, driver.Screen.Width);
 				rootHeight = Math.Max(environment.Height, driver.Screen.Height);
@@ -219,45 +220,28 @@ public sealed class TerminalWorkspace
 		return true;
 	}
 
-	internal string BuildExportSummaryText(TerminalExportSummary summary)
+	internal string BuildExportSummaryText(
+		TerminalExportSummary summary,
+		int maximumValueColumns = int.MaxValue)
 	{
-		var outputKind = summary.Kind switch
-		{
-			TerminalExportKind.Context => L("Terminal.Tui.ExportContext"),
-			TerminalExportKind.Folder => L("Terminal.Tui.Folder"),
-			_ => "ZIP"
-		};
-		var destinationState = summary.DestinationState == TerminalExportDestinationState.Ready
-			? L("Terminal.Tui.DestinationReady")
-			: L("Terminal.Tui.DestinationConflict");
 		var gitMode = L(ProjectPresentationCatalog.Get(summary.GitMode).LabelKey);
 		var exclusions = summary.Exclusions.Count == 0
 			? L("Terminal.Tui.NoneAvailable")
 			: string.Join(", ", summary.Exclusions.Select(LocalizeExclusion));
-		var lines = new List<string>
+		string Fit(string value) => maximumValueColumns == int.MaxValue
+			? value
+			: TerminalParameterRow.FitLabel(value, maximumValueColumns, useUnicode: true);
+		var rows = new List<string[]>
 		{
-			$"{L("Terminal.Tui.OutputKind")}: {outputKind}"
+			new[] { L("Terminal.Tui.Destination").TrimEnd(':'), Fit(summary.Destination) },
+			new[] { L("Terminal.Analysis.Files"), summary.FileCount.ToString("N0", CultureInfo.CurrentCulture) },
+			new[] { L("Terminal.Analysis.Folders"), summary.FolderCount.ToString("N0", CultureInfo.CurrentCulture) },
+			new[] { L("Terminal.Analysis.Size"), FormatBytes(summary.Bytes) },
+			new[] { L("Terminal.Analysis.Tokens"), summary.EstimatedTokens.ToString("N0", CultureInfo.CurrentCulture) },
+			new[] { L("Terminal.Tui.Filters"), Fit($"{gitMode}; {exclusions}") },
+			new[] { L("Terminal.Tui.Diagnostics"), summary.DiagnosticCount.ToString("N0", CultureInfo.CurrentCulture) }
 		};
-		if (summary.View is { } view)
-			lines.Add($"{L("Terminal.Tui.View")}: {LocalizeView(view)}");
-		if (summary.DocumentFormat is { } format)
-			lines.Add(
-				$"{L("Terminal.Tui.Format")}: " +
-				$"{ProjectPresentationCatalog.Get(format).UserLabel}");
-		lines.AddRange(
-		[
-			$"{L("Terminal.Analysis.Files")}: {summary.FileCount:N0}",
-			$"{L("Terminal.Analysis.Folders")}: {summary.FolderCount:N0}",
-			$"{L("Terminal.Analysis.Size")}: {FormatBytes(summary.Bytes)}",
-			$"{L("Terminal.Analysis.Characters")}: {summary.Characters:N0}",
-			$"{L("Terminal.Analysis.Tokens")}: {summary.EstimatedTokens:N0}",
-			$"{L("Terminal.Tui.Destination").TrimEnd(':')}: {summary.Destination}",
-			$"{L("Terminal.Tui.DestinationState")}: {destinationState}",
-			$"{L("Terminal.Tui.GitFiltering")}: {gitMode}",
-			$"{L("Terminal.Tui.Exclusions")}: {exclusions}",
-			$"{L("Terminal.Tui.Diagnostics")}: {summary.DiagnosticCount:N0}"
-		]);
-		return string.Join(Environment.NewLine, lines);
+		return string.Join(Environment.NewLine, TerminalColumnLayout.Format(rows));
 	}
 
 	internal string LocalizeView(ProjectContextView view) =>

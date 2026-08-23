@@ -797,8 +797,17 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			diagnostics.Add(new ContextDiagnostic(
 				"DPX-PROJECT-SELECTION-WARNING",
 				ContextDiagnosticSeverity.Warning,
-				warning));
+				warning,
+				ExtractSelectionWarningValue(warning)));
 		}
+	}
+
+	private static string? ExtractSelectionWarningValue(string warning)
+	{
+		var separator = warning.LastIndexOf(": ", StringComparison.Ordinal);
+		return separator >= 0 && separator + 2 < warning.Length
+			? warning[(separator + 2)..]
+			: null;
 	}
 
 	private static IReadOnlyList<string> NormalizeRelativeSelectionForOutput(

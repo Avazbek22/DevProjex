@@ -130,18 +130,11 @@ public sealed partial class TerminalPlainPtyTests
 		ReleaseCheckpoint(checkpointRoot, "writing-context");
 
 		await terminal.WaitForStableScreenAsync(
-			"Equivalent command:",
+			"Export completed:",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.True(File.Exists(destination));
-		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
-		var restoredWorkspace = await terminal.WaitForStableScreenAsync(
-			"> PROJECT TREE",
-			"Equivalent command:",
-			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.DoesNotContain(
-			"Equivalent command:",
-			restoredWorkspace,
-			StringComparison.Ordinal);
+		var restoredWorkspace = terminal.CaptureScreen();
+		Assert.Contains("> PROJECT TREE", restoredWorkspace, StringComparison.Ordinal);
 		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
@@ -183,11 +176,8 @@ public sealed partial class TerminalPlainPtyTests
 	private static async Task ConfirmExportSummaryAsync(TerminalPtyHarness terminal)
 	{
 		await terminal.WaitForScreenAsync(
-			"Destination state: Ready",
+			"Export?",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 	}
 

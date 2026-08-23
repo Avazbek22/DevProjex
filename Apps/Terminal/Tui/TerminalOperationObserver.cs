@@ -4,6 +4,7 @@ internal enum TerminalOperationPhase
 {
 	CloneConnecting,
 	ProjectLoading,
+	BackgroundRefresh,
 	Preparing,
 	WritingContext
 }

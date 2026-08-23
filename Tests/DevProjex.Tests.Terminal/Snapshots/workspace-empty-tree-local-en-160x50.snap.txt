@@ -1,0 +1,50 @@
+ DevProjex Terminal · <ID>
+ <PROJECT_ROOT>
+┌┤  PROJECT TREE├─────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├───────────────────────────────────────────┐┌┤> PARAMETERS├──────────────────────┐
+│v [x] <ID>   ││<ID>                                             ││┌┤Content processing├──────────────┐│
+│  No visible items — check file types..  ││                                                                             │││[ ] Hide secrets                  ││
+│                                         ││                                                                             │││[ ] Hide private data             ││
+│                                         ││                                                                             │││[ ] Compress code                 ││
+│                                         ││                                                                             │││[ ] Strip comments                ││
+│                                         ││                                                                             │││[ ] Strip blank lines             ││
+│                                         ││                                                                             ││└──────────────────────────────────┘│
+│                                         ││                                                                             ││┌┤Exclusions├─────────── [ ] All ──┐│
+│                                         ││                                                                             │││[ ] Use .gitignore                ││
+│                                         ││                                                                             │││[ ] Tracked Git files only        ││
+│                                         ││                                                                             │││[ ] Smart ignore                  ││
+│                                         ││                                                                             │││[x] Empty folders                 ││
+│                                         ││                                                                             │││[ ] Empty files                   ││
+│                                         ││                                                                             │││[ ] Hidden folders                ││
+│                                         ││                                                                             │││[ ] Hidden files                  ││
+│                                         ││                                                                             │││[ ] dot folders                   ││
+│                                         ││                                                                             │││[ ] dot files                     ││
+│                                         ││                                                                             │││[ ] Files without extension       ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             ││└──────────────────────────────────┘│
+│                                         ││                                                                             ││┌┤File types├─────────── [ ] All ──┐│
+│                                         ││                                                                             │││[ ] .cs                           ││
+│                                         ││                                                                             │││[ ] .json                         ││
+│                                         ││                                                                             │││[ ] .md                           ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││ Files 0  |  Lines 1-2/2                                                     ││└──────────────────────────────────┘│
+└─────────────────────────────────────────┘└─────────────────────────────────────────────────────────────────────────────┘└────────────────────────────────────┘
+
+ Files 0 · Folders 0 · 0 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
+ Up/Down or j/k Navigate   Enter Change   Tab/F6 Tree   Ctrl+P Action palette   ? Help

@@ -9,7 +9,10 @@ internal static class DryRunRenderer
 		LocalizationService localization,
 		string destination)
 	{
+		var displayDestination = destination == "-"
+			? localization["Terminal.Value.Stdout"]
+			: destination;
 		environment.Error.WriteLine(
-			localization.Format("Terminal.DryRun.Ready", destination));
+			localization.Format("Terminal.DryRun.Ready", displayDestination));
 	}
 }

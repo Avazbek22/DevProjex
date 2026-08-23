@@ -1,0 +1,285 @@
+using System.Diagnostics;
+
+namespace DevProjex.Tests.Terminal;
+
+[Collection(TerminalProcessCollection.Name)]
+public sealed class TerminalCornerProgressPtyTests
+{
+	[Fact(Timeout = 90_000)]
+	public async Task DelayedRefreshUsesTheHeaderSlotAcrossResizeAndThenDisappears()
+	{
+		using var project = CreateProject();
+		string? dataRoot = null;
+		await using var terminal = await StartAsync(
+			project.Path,
+			columns: 160,
+			rows: 50,
+			plain: false,
+			new Dictionary<string, string>
+			{
+				[TerminalProgressCheckpointProtocol.PhasesVariable] = "background-refresh"
+			},
+			path => dataRoot = path,
+			useProgressCheckpointHost: true);
+
+		await FocusFirstContentOptionAsync(terminal);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		var checkpointRoot = GetCheckpointRoot(dataRoot);
+		await WaitForCheckpointAsync(checkpointRoot, "background-refresh");
+		var wide = await terminal.WaitForScreenAsync(
+			"Updating…",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.DoesNotContain("Processing request", wide, StringComparison.Ordinal);
+		TerminalScreenSnapshot.Verify(
+			"workspace-corner-progress-en-160x50",
+			wide,
+			(project.Path, "<PROJECT_ROOT>"));
+
+		await terminal.ResizeAsync(100, 30, TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenWithoutAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> PARAMETERS",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Updating…",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await Task.Delay(250, TestContext.Current.CancellationToken);
+		var tabbed = terminal.CaptureScreen();
+		TerminalScreenSnapshot.Verify(
+			"workspace-corner-progress-en-100x30",
+			tabbed,
+			(project.Path, "<PROJECT_ROOT>"));
+
+		await terminal.ResizeAsync(59, 19, TestContext.Current.CancellationToken);
+		var tooSmall = await terminal.WaitForScreenAsync(
+			"Terminal too small",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.DoesNotContain("Updating", tooSmall, StringComparison.Ordinal);
+
+		await terminal.ResizeAsync(160, 50, TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Updating…",
+			cancellationToken: TestContext.Current.CancellationToken);
+		ReleaseCheckpoint(checkpointRoot, "background-refresh");
+		var completed = await terminal.WaitForScreenAsync(
+			"[x] Hide secrets",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.DoesNotContain("Updating", completed, StringComparison.Ordinal);
+		Assert.DoesNotContain("Processing request", completed, StringComparison.Ordinal);
+		await ExitAsync(terminal);
+	}
+
+	[Fact(Timeout = 90_000)]
+	public async Task PlainModeUsesStaticCornerTextWithoutASpinner()
+	{
+		using var project = CreateProject();
+		string? dataRoot = null;
+		await using var terminal = await StartAsync(
+			project.Path,
+			columns: 100,
+			rows: 30,
+			plain: true,
+			new Dictionary<string, string>
+			{
+				[TerminalProgressCheckpointProtocol.PhasesVariable] = "background-refresh"
+			},
+			path => dataRoot = path,
+			useProgressCheckpointHost: true);
+
+		await FocusFirstContentOptionAsync(terminal, plain: true);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		var checkpointRoot = GetCheckpointRoot(dataRoot);
+		await WaitForCheckpointAsync(checkpointRoot, "background-refresh");
+		var screen = await terminal.WaitForScreenAsync(
+			"Updating...",
+			cancellationToken: TestContext.Current.CancellationToken);
+		var heading = screen.Split('\n')[0];
+		Assert.DoesNotContain('⠋', heading);
+		Assert.DoesNotContain("| Updating", heading, StringComparison.Ordinal);
+		Assert.DoesNotContain("/ Updating", heading, StringComparison.Ordinal);
+		Assert.DoesNotContain("- Updating", heading, StringComparison.Ordinal);
+		Assert.DoesNotContain("\\ Updating", heading, StringComparison.Ordinal);
+		Assert.DoesNotContain("Processing request", screen, StringComparison.Ordinal);
+		ReleaseCheckpoint(checkpointRoot, "background-refresh");
+		await terminal.WaitForScreenWithoutAsync(
+			"Updating...",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await ExitAsync(terminal);
+	}
+
+	[Fact(Timeout = 90_000)]
+	public async Task FastContentRefreshNeverPaintsTheDelayedSlot()
+	{
+		using var project = CreateProject();
+		await using var terminal = await StartAsync(
+			project.Path,
+			columns: 100,
+			rows: 30,
+			plain: false,
+			environment: null,
+			initializeDataRoot: null,
+			useProgressCheckpointHost: false);
+
+		await FocusFirstContentOptionAsync(terminal);
+		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
+		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+
+		var stopwatch = Stopwatch.StartNew();
+		var painted = false;
+		while (stopwatch.Elapsed < TimeSpan.FromMilliseconds(750))
+		{
+			var screen = terminal.CaptureScreen();
+			painted |= screen.Contains("Updating…", StringComparison.Ordinal);
+			Assert.False(terminal.HasExited);
+			await Task.Delay(10, TestContext.Current.CancellationToken);
+		}
+
+		Assert.False(painted);
+		Assert.Contains("[x] Compress code", terminal.CaptureScreen(), StringComparison.Ordinal);
+		await ExitAsync(terminal);
+	}
+
+	[Fact(Timeout = 90_000)]
+	public async Task FailedBackgroundRefreshClearsTheCornerBeforeShowingTheError()
+	{
+		using var project = CreateProject();
+		string? dataRoot = null;
+		await using var terminal = await StartAsync(
+			project.Path,
+			columns: 100,
+			rows: 30,
+			plain: false,
+			new Dictionary<string, string>
+			{
+				[TerminalProgressCheckpointProtocol.PhasesVariable] = "background-refresh"
+			},
+			path => dataRoot = path,
+			useProgressCheckpointHost: true);
+
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Tracked Git files only",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
+		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
+		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+
+		var checkpointRoot = GetCheckpointRoot(dataRoot);
+		await WaitForCheckpointAsync(checkpointRoot, "background-refresh");
+		await terminal.WaitForScreenAsync(
+			"Updating…",
+			cancellationToken: TestContext.Current.CancellationToken);
+		ReleaseCheckpoint(checkpointRoot, "background-refresh");
+
+		var error = await terminal.WaitForScreenAsync(
+			"DPX-GIT-TRACKED-INDEX-UNAVAILABLE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.DoesNotContain("Updating", error, StringComparison.Ordinal);
+		Assert.DoesNotContain("Processing request", error, StringComparison.Ordinal);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenWithoutAsync(
+			"DPX-GIT-TRACKED-INDEX-UNAVAILABLE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await ExitAsync(terminal);
+	}
+
+	private static async Task FocusFirstContentOptionAsync(
+		TerminalPtyHarness terminal,
+		bool plain = false)
+	{
+		await terminal.WaitForScreenAsync(
+			plain ? "> PROJECT TREE" : "PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			plain ? "> PARAMETERS" : "> PARAMETERS",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
+	}
+
+	private static Task<TerminalPtyHarness> StartAsync(
+		string projectPath,
+		int columns,
+		int rows,
+		bool plain,
+		IReadOnlyDictionary<string, string>? environment,
+		Action<string>? initializeDataRoot,
+		bool useProgressCheckpointHost)
+	{
+		var arguments = new List<string>
+		{
+			"tui",
+			projectPath,
+			"--profile",
+			"standard",
+			"--screen",
+			"inline",
+			"--no-mouse",
+			"--language",
+			"en"
+		};
+		if (plain)
+			arguments.Add("--plain");
+		return TerminalPtyHarness.StartAsync(
+			projectPath,
+			arguments,
+			columns,
+			rows,
+			environment,
+			TestContext.Current.CancellationToken,
+			initializeDataRoot,
+			useProgressCheckpointHost: useProgressCheckpointHost);
+	}
+
+	private static TemporaryDirectory CreateProject()
+	{
+		var project = new TemporaryDirectory();
+		project.WriteFile("global.json", "{}");
+		project.WriteFile("src/App.cs", "internal sealed class App { }");
+		project.WriteFile("readme.md", "# Project");
+		return project;
+	}
+
+	private static string GetCheckpointRoot(string? dataRoot)
+	{
+		Assert.False(string.IsNullOrWhiteSpace(dataRoot));
+		return Path.Combine(dataRoot!, TerminalProgressCheckpointProtocol.DirectoryName);
+	}
+
+	private static async Task WaitForCheckpointAsync(string root, string checkpoint)
+	{
+		var path = Path.Combine(
+			root,
+			TerminalProgressCheckpointProtocol.GetReachedFileName(checkpoint));
+		var stopwatch = Stopwatch.StartNew();
+		while (stopwatch.Elapsed < TimeSpan.FromSeconds(15))
+		{
+			if (File.Exists(path))
+				return;
+			await Task.Delay(25, TestContext.Current.CancellationToken);
+		}
+		throw new TimeoutException($"Timed out waiting for progress checkpoint: {path}");
+	}
+
+	private static void ReleaseCheckpoint(string root, string checkpoint) =>
+		File.WriteAllText(
+			Path.Combine(root, TerminalProgressCheckpointProtocol.GetReleaseFileName(checkpoint)),
+			checkpoint);
+
+	private static async Task ExitAsync(TerminalPtyHarness terminal)
+	{
+		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
+	}
+}
