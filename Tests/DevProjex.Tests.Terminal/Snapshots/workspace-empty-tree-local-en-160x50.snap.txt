@@ -1,7 +1,7 @@
  DevProjex Terminal · <ID>
  <PROJECT_ROOT>
 ┌┤  PROJECT TREE├─────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├───────────────────────────────────────────┐┌┤> PARAMETERS├──────────────────────┐
-│v [x] <ID>   ││+ <ID>                                           ││┌┤Content processing├──────────────┐│
+│v [x] <ID>   ││<ID>                                             ││┌┤Content processing├──────────────┐│
 │  No visible items — check file types..  ││                                                                             │││[ ] Hide secrets                  ││
 │                                         ││                                                                             │││[ ] Hide private data             ││
 │                                         ││                                                                             │││[ ] Compress code                 ││
@@ -43,7 +43,7 @@
 │                                         ││                                                                             │││                                  ││
 │                                         ││                                                                             │││                                  ││
 │                                         ││                                                                             │││                                  ││
-│                                         ││ Files 0  |  Lines 1-1/1                                                     ││└──────────────────────────────────┘│
+│                                         ││ Files 0  |  Lines 1-2/2                                                     ││└──────────────────────────────────┘│
 └─────────────────────────────────────────┘└─────────────────────────────────────────────────────────────────────────────┘└────────────────────────────────────┘
 
  Files 0 · Folders 0 · 0 B · ~<TOKENS> tokens · Warnings 0 · Errors 0

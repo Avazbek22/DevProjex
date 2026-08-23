@@ -312,9 +312,10 @@ public sealed class TerminalSettingsPanelPtyTests
 		await terminal.SendAsync("T", TestContext.Current.CancellationToken);
 		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		var empty = await terminal.WaitForScreenAsync(
+		var empty = await WaitForStableScreenAsync(
+			terminal,
 			"No visible items",
-			cancellationToken: TestContext.Current.CancellationToken);
+			screen => screen.Contains("Lines 1-2/2", StringComparison.Ordinal));
 		Assert.Contains("Files 0", empty, StringComparison.Ordinal);
 		Assert.Contains("Folders 0", empty, StringComparison.Ordinal);
 		Assert.Contains("~0 tokens", empty, StringComparison.Ordinal);
