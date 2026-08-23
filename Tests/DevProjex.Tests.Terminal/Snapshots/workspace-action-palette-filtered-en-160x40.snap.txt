@@ -2,29 +2,29 @@
  <PROJECT_ROOT>
 ┌┤> PROJECT TREE├─────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├───────────────────────────────────────────┐┌┤  PARAMETERS├──────────────────────┐
 │v [x] <PROJECT>   ││<PROJECT>                                             ││┌┤Content processing├──────────────┐│
-│  > [x] src                              ││├── src                                                                      │││  [ ] Hide secrets                ││
-│    [x] global.json                      │││   ├── Feature                                                              │││  [ ] Hide private data           ││
-│    [x] readme.md                        │││   │   └── Handler.cs                                                       │││  [ ] Compress code               ││
-│                                 ┌┤Action palette├─────────────────────────────────────────────────────────────────────────┐ [ ] Strip comments              ││
-│                                 │ Filter actions:                                                                         │ [ ] Strip blank lines           ││
+│  > [x] src                              ││├── src                                                                      │││[ ] Hide secrets                  ││
+│    [x] global.json                      │││   ├── Feature                                                              │││[ ] Hide private data             ││
+│    [x] readme.md                        │││   │   └── Handler.cs                                                       │││[ ] Compress code                 ││
+│                                 ┌┤Action palette├─────────────────────────────────────────────────────────────────────────┐ ] Strip comments                ││
+│                                 │ Filter actions:                                                                         │ ] Strip blank lines             ││
 │                                 │ Preview format                                                                          │─────────────────────────────────┘│
 │                                 │                                                                                         │Exclusions├─────────── [x] All ──┐│
-│                                 │ Preview format: ASCII  [F]                                                              │ [x] Use .gitignore              ││
-│                                 │                                                                                         │ [ ] Tracked Git files only      ││
-│                                 │                                                                                         │ [x] Smart ignore                ││
-│                                 │                                                                                         │ [x] Empty folders               ││
-│                                 │                                                                                         │ [x] Empty files                 ││
-│                                 │                                                                                         │ [x] Hidden folders              ││
-│                                 │                                                                                         │ [x] Hidden files                ││
-│                                 │                                                                                         │ [x] dot folders                 ││
-│                                 │                                                                                         │ [x] dot files                   ││
-│                                 │                                                                                         │ [x] Files without extension     ││
+│                                 │ Preview format: ASCII  [F]                                                              │x] Use .gitignore                ││
+│                                 │                                                                                         │ ] Tracked Git files only        ││
+│                                 │                                                                                         │x] Smart ignore                  ││
+│                                 │                                                                                         │x] Empty folders                 ││
+│                                 │                                                                                         │x] Empty files                   ││
+│                                 │                                                                                         │x] Hidden folders                ││
+│                                 │                                                                                         │x] Hidden files                  ││
+│                                 │                                                                                         │x] dot folders                   ││
+│                                 │                                                                                         │x] dot files                     ││
+│                                 │                                                                                         │x] Files without extension       ││
 │                                 │                                                                                         │                                 ││
 │                                 │                                                                                         │─────────────────────────────────┘│
 │                                 │ CONTEXT PREVIEW · Preview format · ASCII                                                │File types├─────────── [x] All ──┐│
-│                                 │ Choose ASCII, JSON, XML, or Markdown for the tree.                                      │ [x] .cs                         ││
-│                                 │                                                                                         │ [x] .json                       ││
-│                                 │                                                                                         │ [x] .md                         ││
+│                                 │ Choose ASCII, JSON, XML, or Markdown for the tree.                                      │x] .cs                           ││
+│                                 │                                                                                         │x] .json                         ││
+│                                 │                                                                                         │x] .md                           ││
 │                                 │                                                                                         │                                 ││
 │                                 │                                                                                         │                                 ││
 │                                 │                                  ⟦ Back ⟧▖ ⟦► Run ◄⟧▖                                   │                                 ││

@@ -4,10 +4,10 @@
 │+ <PROJECT>                                            │
 │  + src                                                                       │
 │    + Feature                                                                 │
-│      - Handler.cs                                                            │
-│    - App.cs                                                                  │
-│  - global.json                                                               │
-│  - readme.md                                                                 │
+│      <SPINNER> Handler.cs                                                            │
+│    <SPINNER> App.cs                                                                  │
+│  <SPINNER> global.json                                                               │
+│  <SPINNER> readme.md                                                                 │
 │                                                                              │
 │                                                                              │
 │                                                                              │

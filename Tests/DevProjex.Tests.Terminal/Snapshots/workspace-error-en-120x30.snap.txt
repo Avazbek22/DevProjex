@@ -2,24 +2,24 @@
  <PROJECT_ROOT>
 ┌┤> PARAMETERS├────────────────────────────────────────────────────────────────────────────────────────────────────────┐
 │┌┤Content processing├────────────────────────────────────────────────────────────────────────────────────────────────┐│
-││  [ ] Hide secrets                                                                                                  ││
-││  [ ] Hide private data                                                                                             ││
-││  [ ] Compress code                                                                                                 ││
-││  [ ] Strip comments                                                                                                ││
-││  [ ] Strip blank lines                                                                                             ││
+││[ ] Hide secrets                                                                                                    ││
+││[ ] Hide private data                                                                                               ││
+││[ ] Compress code                                                                                                   ││
+││[ ] Strip comments                                                                                                  ││
+││[ ] Strip blank lines                                                                                               ││
 │└────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘│
 │┌┤Exclusions├──────────┌┤Error├─────────────────────────────────────────────────────────────┐───────────── [x] All ──┐│
-││  [x] Use .gitignore  │ Tracked Git mode requires at least one readable repository index.  │                       ▲││
-││  [ ] Tracked Git file│                                                                    │                       ┃││
-││  [x] Smart ignore    │ DPX-GIT-TRACKED-INDEX-UNAVAILABLE                                  │                       ┃││
-││  [x] Empty folders   │                                                                    │                       ·││
-││  [x] Empty files     │                            ⟦► Close ◄⟧▖                            │                       ·││
-││  [x] Hidden folders  │                            ▝▀▀▀▀▀▀▀▀▀▀▘                            │                       ▼││
+││[x] Use .gitignore    │ Tracked Git mode requires at least one readable repository index.  │                       ▲││
+││[ ] Tracked Git files │                                                                    │                       ┃││
+││[x] Smart ignore      │ DPX-GIT-TRACKED-INDEX-UNAVAILABLE                                  │                       ┃││
+││[x] Empty folders     │                                                                    │                       ·││
+││[x] Empty files       │                            ⟦► Close ◄⟧▖                            │                       ·││
+││[x] Hidden folders    │                            ▝▀▀▀▀▀▀▀▀▀▀▘                            │                       ▼││
 │└──────────────────────└────────────────────────────────────────────────────────────────────┘────────────────────────┘│
 │┌┤File types├───────────────────────────────────────────────────────────────────────────────────────────── [x] All ──┐│
-││  [x] .cs                                                                                                           ││
-││  [x] .json                                                                                                         ││
-││  [x] .md                                                                                                           ││
+││[x] .cs                                                                                                             ││
+││[x] .json                                                                                                           ││
+││[x] .md                                                                                                             ││
 ││                                                                                                                    ││
 ││                                                                                                                    ││
 ││                                                                                                                    ││
