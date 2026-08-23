@@ -21,9 +21,12 @@ public sealed class PublishedApplicationLocatorTests
 	[Fact]
 	public void ResolveBuildConfigurationDefaultsToDebugWithoutAConfigurationSegment()
 	{
+		using var workspace = new TemporaryDirectory();
+		var baseDirectory = workspace.CreateDirectory(
+			Path.Combine("artifacts", "bin", "Tests"));
+
 		Assert.Equal(
 			"Debug",
-			PublishedApplicationLocator.ResolveBuildConfiguration(
-				Path.Combine("artifacts", "bin", "Tests")));
+			PublishedApplicationLocator.ResolveBuildConfiguration(baseDirectory));
 	}
 }
