@@ -12,7 +12,10 @@ public sealed class CommandTreeContractTests
 		var root = new DevProjexCommandTree(environment).Build();
 
 		Assert.Equal(
-			["analyze", "completion", "doctor", "export", "open", "profile", "tui", "ui"],
+			[
+				"analyze", "cache", "completion", "doctor", "export", "help", "open", "profile",
+				"recent", "tree", "tui", "ui"
+			],
 			root.Subcommands
 				.Where(static command => !command.Hidden)
 				.Select(static command => command.Name)
@@ -48,6 +51,7 @@ public sealed class CommandTreeContractTests
 
 	[Theory]
 	[InlineData("export")]
+	[InlineData("cache")]
 	[InlineData("profile")]
 	[InlineData("ui")]
 	public async Task ParentCommandWithoutChildPrintsHelp(string command)

@@ -300,7 +300,9 @@ public sealed class RepoCacheService : IRepoCacheService
 				entry.LastOpenedUtc,
 				Math.Max(0, entry.ApproximateSizeBytes),
 				ResolveContentKind(entry),
-				entry.LocalPath));
+				entry.LocalPath,
+				entry.CommitHash,
+				entry.State));
 		}
 
 		catalog.Sort(static (left, right) =>
@@ -312,6 +314,81 @@ public sealed class RepoCacheService : IRepoCacheService
 		});
 		return catalog.ToArray();
 	}
+
+	public RepositoryCacheManagementListResult ListCacheEntriesForManagement()
+	{
+		var catalog = new List<RepositoryCacheCatalogEntry>();
+		var unavailableRootCount = 0;
+		foreach (var searchRoot in CacheSearchRootPaths)
+		{
+			var fileSet = GetIndexFileSet(searchRoot);
+			if (!File.Exists(fileSet.PrimaryPath) && !File.Exists(fileSet.BackupPath))
+				continue;
+			if (!CrossProcessFileLock.TryAcquire(fileSet, IndexLockTimeout, out var heldLock))
+			{
+				unavailableRootCount++;
+				continue;
+			}
+
+			using (heldLock)
+			{
+				if (HasUnsupportedIndexDocument(fileSet))
+				{
+					unavailableRootCount++;
+					continue;
+				}
+
+				var document = LoadIndex(fileSet);
+				List<RepositoryCacheIndexEntry>? retained = null;
+				for (var index = 0; index < document.Entries.Count; index++)
+				{
+					var entry = document.Entries[index];
+					if (!Directory.Exists(entry.LocalPath))
+					{
+						if (retained is null)
+						{
+							retained = new List<RepositoryCacheIndexEntry>(document.Entries.Count - 1);
+							for (var retainedIndex = 0; retainedIndex < index; retainedIndex++)
+								retained.Add(document.Entries[retainedIndex]);
+						}
+						continue;
+					}
+
+					retained?.Add(entry);
+					catalog.Add(ToCatalogEntry(entry));
+				}
+
+				if (retained is not null)
+					WriteIndex(fileSet, retained);
+			}
+		}
+
+		catalog.Sort(static (left, right) =>
+		{
+			var byLastOpened = right.LastOpenedUtc.CompareTo(left.LastOpenedUtc);
+			if (byLastOpened != 0)
+				return byLastOpened;
+			var byUrl = StringComparer.OrdinalIgnoreCase.Compare(left.RepositoryUrl, right.RepositoryUrl);
+			return byUrl != 0
+				? byUrl
+				: PathComparer.Default.Compare(left.LocalPath, right.LocalPath);
+		});
+		return new RepositoryCacheManagementListResult(
+			catalog.ToArray(),
+			unavailableRootCount);
+	}
+
+	private static RepositoryCacheCatalogEntry ToCatalogEntry(RepositoryCacheIndexEntry entry) =>
+		new(
+			RepositoryUrlUtility.ToSafeDisplay(entry.RepositoryUrl),
+			RepositoryUrlUtility.GetRepositoryName(entry.RepositoryUrl),
+			entry.Branch,
+			entry.LastOpenedUtc,
+			Math.Max(0, entry.ApproximateSizeBytes),
+			ResolveContentKind(entry),
+			entry.LocalPath,
+			entry.CommitHash,
+			entry.State);
 
 	public async Task<IRepositoryCacheSession?> TryAcquireRepositorySessionAsync(
 		string repositoryUrl,
@@ -480,6 +557,257 @@ public sealed class RepoCacheService : IRepoCacheService
 	{
 		foreach (var cacheRoot in CacheSearchRootPaths)
 			ClearCacheRoot(cacheRoot);
+	}
+
+	public CacheClearResult ClearAllCacheWithResult()
+	{
+		var result = new CacheClearResult(0, 0, 0);
+		foreach (var cacheRoot in CacheSearchRootPaths)
+			result += RemoveCacheEntriesWithResult(cacheRoot, identity: null);
+		return result;
+	}
+
+	public CacheClearResult RemoveCachedRepositoryWithResult(string repositoryUrl)
+	{
+		string identity;
+		try
+		{
+			identity = RepositoryUrlUtility.GetComparisonKey(repositoryUrl);
+		}
+		catch
+		{
+			return new CacheClearResult(0, 0, 1);
+		}
+		if (identity.Length == 0)
+			return new CacheClearResult(0, 0, 1);
+
+		var result = new CacheClearResult(0, 0, 0);
+		foreach (var cacheRoot in CacheSearchRootPaths)
+			result += RemoveCacheEntriesWithResult(cacheRoot, identity);
+		return result;
+	}
+
+	private CacheClearResult RemoveCacheEntriesWithResult(string cacheRoot, string? identity)
+	{
+		var fileSet = GetIndexFileSet(cacheRoot);
+		if (!Directory.Exists(cacheRoot) &&
+		    !File.Exists(fileSet.PrimaryPath) &&
+		    !File.Exists(fileSet.BackupPath))
+		{
+			return new CacheClearResult(0, 0, 0);
+		}
+		if (!CrossProcessFileLock.TryAcquire(fileSet, IndexLockTimeout, out var heldLock))
+			return CacheRootFailure(cacheRoot);
+
+		var trashPaths = new List<string>();
+		CacheClearResult result;
+		using (heldLock)
+		{
+			if (HasUnsupportedIndexDocument(fileSet))
+				return CacheRootFailure(cacheRoot);
+
+			var document = LoadIndex(fileSet);
+			var indexedEntries = new List<CacheRemovalEntry>(document.Entries.Count);
+			var indexedContainers = new HashSet<string>(PathComparer.Default);
+			var containersWithNonTargets = new HashSet<string>(PathComparer.Default);
+			foreach (var entry in document.Entries)
+			{
+				var isTarget = identity is null || string.Equals(
+					entry.Identity,
+					identity,
+					StringComparison.OrdinalIgnoreCase);
+				var container = TryResolveCacheContainer(entry.LocalPath);
+				indexedEntries.Add(new CacheRemovalEntry(entry, container, isTarget));
+				if (container is null)
+					continue;
+				indexedContainers.Add(container);
+				if (!isTarget)
+					containersWithNonTargets.Add(container);
+			}
+
+			var unindexedContainers = identity is null
+				? EnumerateRepositoryRootDirectories(cacheRoot)
+					.Where(directory => !indexedContainers.Contains(directory))
+					.ToArray()
+				: [];
+			var retainedEntries = new List<RepositoryCacheIndexEntry>(document.Entries.Count);
+			var containerOutcomes = new Dictionary<string, CacheRemovalOutcome>(PathComparer.Default);
+			var indexedRemoved = 0;
+			var unindexedRemoved = 0;
+			var retained = 0;
+			var failed = 0;
+			foreach (var candidate in indexedEntries)
+			{
+				if (!candidate.IsTarget)
+				{
+					retainedEntries.Add(candidate.Entry);
+					continue;
+				}
+
+				var outcome = ResolveRemovalOutcome(
+					candidate,
+					containersWithNonTargets,
+					containerOutcomes,
+					trashPaths);
+				switch (outcome)
+				{
+					case CacheRemovalOutcome.Removed:
+						indexedRemoved++;
+						break;
+					case CacheRemovalOutcome.Retained:
+						retained++;
+						retainedEntries.Add(candidate.Entry);
+						break;
+					case CacheRemovalOutcome.Failed:
+						failed++;
+						retainedEntries.Add(candidate.Entry);
+						break;
+					default:
+						throw new ArgumentOutOfRangeException();
+				}
+			}
+
+			foreach (var directory in unindexedContainers)
+			{
+				var outcome = ResolveUnindexedRemovalOutcome(directory, trashPaths);
+				switch (outcome)
+				{
+					case CacheRemovalOutcome.Removed:
+						unindexedRemoved++;
+						break;
+					case CacheRemovalOutcome.Retained:
+						retained++;
+						break;
+					case CacheRemovalOutcome.Failed:
+						failed++;
+						break;
+					default:
+						throw new ArgumentOutOfRangeException();
+				}
+			}
+
+			if (indexedRemoved > 0 && !WriteIndex(fileSet, retainedEntries))
+			{
+				failed = checked(failed + indexedRemoved);
+				indexedRemoved = 0;
+			}
+			result = new CacheClearResult(
+				checked(indexedRemoved + unindexedRemoved),
+				retained,
+				failed);
+		}
+
+		CleanupMovedCacheContainers(trashPaths);
+		return result;
+	}
+
+	private CacheRemovalOutcome ResolveRemovalOutcome(
+		CacheRemovalEntry candidate,
+		IReadOnlySet<string> containersWithNonTargets,
+		IDictionary<string, CacheRemovalOutcome> containerOutcomes,
+		ICollection<string> trashPaths)
+	{
+		if (candidate.Container is null || containersWithNonTargets.Contains(candidate.Container))
+			return CacheRemovalOutcome.Failed;
+		if (containerOutcomes.TryGetValue(candidate.Container, out var existing))
+			return existing;
+
+		var outcome = ResolveUnindexedRemovalOutcome(candidate.Container, trashPaths);
+		containerOutcomes[candidate.Container] = outcome;
+		return outcome;
+	}
+
+	private CacheRemovalOutcome ResolveUnindexedRemovalOutcome(
+		string container,
+		ICollection<string> trashPaths)
+	{
+		if (!Directory.Exists(container))
+			return CacheRemovalOutcome.Removed;
+		if (!TryAcquireAllRepositoryLeases(container, out var leases))
+			return CacheRemovalOutcome.Retained;
+
+		leases!.Dispose();
+		if (!TryMoveCacheContainerToTrash(container, out var trashPath))
+			return CacheRemovalOutcome.Failed;
+		if (trashPath is not null)
+			trashPaths.Add(trashPath);
+		return CacheRemovalOutcome.Removed;
+	}
+
+	private bool TryMoveCacheContainerToTrash(string path, out string? trashPath)
+	{
+		trashPath = null;
+		if (!Directory.Exists(path))
+			return true;
+		if (!IsInCache(path))
+			return false;
+
+		try
+		{
+			var trashRoot = RepositoryCacheLayout.GetTrashRoot(GetOwningCacheRoot(path));
+			Directory.CreateDirectory(trashRoot);
+			var destination = Path.Combine(trashRoot, $"trash-{Guid.NewGuid():N}");
+			Directory.Move(path, destination);
+			trashPath = destination;
+			return true;
+		}
+		catch (Exception exception) when (exception is
+		       IOException or
+		       UnauthorizedAccessException or
+		       System.Security.SecurityException or
+		       ArgumentException or
+		       NotSupportedException)
+		{
+			return false;
+		}
+	}
+
+	private static void CleanupMovedCacheContainers(IEnumerable<string> trashPaths)
+	{
+		foreach (var path in trashPaths)
+		{
+			TryDeleteTree(path);
+			var parent = Path.GetDirectoryName(path);
+			if (parent is not null)
+				TryDeleteEmptyDirectory(parent);
+		}
+	}
+
+	private static string? TryResolveCacheContainer(string path)
+	{
+		try
+		{
+			return RepositoryCacheLayout.GetContainer(path);
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+		{
+			return null;
+		}
+	}
+
+	private static CacheClearResult CacheRootFailure(string cacheRoot)
+	{
+		var failed = 0;
+		try
+		{
+			failed = EnumerateRepositoryRootDirectories(cacheRoot).Count();
+		}
+		catch
+		{
+		}
+		return new CacheClearResult(0, 0, Math.Max(1, failed));
+	}
+
+	private sealed record CacheRemovalEntry(
+		RepositoryCacheIndexEntry Entry,
+		string? Container,
+		bool IsTarget);
+
+	private enum CacheRemovalOutcome
+	{
+		Removed,
+		Retained,
+		Failed
 	}
 
 	private void ClearCacheRoot(string cacheRoot)

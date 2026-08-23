@@ -4,12 +4,15 @@ namespace DevProjex.Terminal.CommandLine;
 
 internal sealed class SelectionOptions
 {
+	private readonly ITerminalEnvironment _environment;
 	private readonly bool _includeHidePrivateData;
+	private readonly bool _includeContentTransformations;
 	public Option<CliProfileValue> Profile { get; }
 
 	public Option<string[]> Roots { get; }
 	public Option<string[]> Extensions { get; }
 	public Option<string[]> SelectedPaths { get; }
+	public Option<string?> SelectedPathsSource { get; }
 	public Option<GitFilteringMode?> GitMode { get; }
 	public Option<CliExclusionValue[]> Exclusions { get; }
 	public Option<bool> HideSecrets { get; }
@@ -21,10 +24,14 @@ internal sealed class SelectionOptions
 
 	public SelectionOptions(
 		LocalizationService localization,
+		ITerminalEnvironment environment,
 		string defaultProfile = "standard",
-		bool includeHidePrivateData = true)
+		bool includeHidePrivateData = true,
+		bool includeContentTransformations = true)
 	{
-		_includeHidePrivateData = includeHidePrivateData;
+		_environment = environment;
+		_includeContentTransformations = includeContentTransformations;
+		_includeHidePrivateData = includeContentTransformations && includeHidePrivateData;
 		Profile = CliChoiceSymbols.ProfileOption(
 			localization["Terminal.Option.Profile"],
 			defaultProfile,
@@ -44,6 +51,16 @@ internal sealed class SelectionOptions
 			localization["Terminal.Option.Select"],
 			"RELATIVE_PATH",
 			FileSystemCompletionKind.FilesAndDirectories);
+		SelectedPathsSource = new Option<string?>("--select-from")
+		{
+			Description = localization["Terminal.Option.SelectFrom"],
+			HelpName = "FILE|-"
+		};
+		SelectedPathsSource.CompletionSources.Add(context =>
+			FileSystemCompletionSource.Complete(
+				context,
+				FileSystemCompletionKind.FilesAndDirectories,
+				FileSystemCompletionSource.ResolveProjectDirectory(context)));
 		GitMode = CliChoiceSymbols.NullableOption(
 			"--git-mode",
 			localization["Terminal.Option.GitMode"],
@@ -58,7 +75,7 @@ internal sealed class SelectionOptions
 		{
 			Description = localization["Terminal.Option.HidePrivateData"]
 		};
-		CompressCode = new Option<bool>("--compress")
+		CompressCode = new Option<bool>("--compress-code")
 		{
 			Description = localization["Terminal.Option.CompressCode"]
 		};
@@ -78,14 +95,18 @@ internal sealed class SelectionOptions
 		command.Options.Add(Roots);
 		command.Options.Add(Extensions);
 		command.Options.Add(SelectedPaths);
+		command.Options.Add(SelectedPathsSource);
 		command.Options.Add(GitMode);
 		command.Options.Add(Exclusions);
-		command.Options.Add(HideSecrets);
-		if (_includeHidePrivateData)
-			command.Options.Add(HidePrivateData);
-		command.Options.Add(CompressCode);
-		command.Options.Add(StripComments);
-		command.Options.Add(StripBlankLines);
+		if (_includeContentTransformations)
+		{
+			command.Options.Add(HideSecrets);
+			if (_includeHidePrivateData)
+				command.Options.Add(HidePrivateData);
+			command.Options.Add(CompressCode);
+			command.Options.Add(StripComments);
+			command.Options.Add(StripBlankLines);
+		}
 	}
 
 	public async Task<ProjectSelectionSpec> ResolveAsync(
@@ -102,26 +123,33 @@ internal sealed class SelectionOptions
 		var exclusions = parseResult.GetResult(Exclusions) is null
 			? null
 			: ParseExclusions(parseResult.GetValue(Exclusions) ?? []);
-		bool? hideSecrets = parseResult.GetResult(HideSecrets) is { Implicit: false }
+		bool? hideSecrets = _includeContentTransformations &&
+		                    parseResult.GetResult(HideSecrets) is { Implicit: false }
 			? parseResult.GetValue(HideSecrets)
 			: null;
 		bool? hidePrivateData = _includeHidePrivateData &&
 		                        parseResult.GetResult(HidePrivateData) is { Implicit: false }
 			? parseResult.GetValue(HidePrivateData)
 			: null;
-		bool? compressCode = parseResult.GetResult(CompressCode) is { Implicit: false }
+		bool? compressCode = _includeContentTransformations &&
+		                     parseResult.GetResult(CompressCode) is { Implicit: false }
 			? parseResult.GetValue(CompressCode)
 			: null;
-		bool? stripComments = parseResult.GetResult(StripComments) is { Implicit: false }
+		bool? stripComments = _includeContentTransformations &&
+		                      parseResult.GetResult(StripComments) is { Implicit: false }
 			? parseResult.GetValue(StripComments)
 			: null;
-		bool? stripBlankLines = parseResult.GetResult(StripBlankLines) is { Implicit: false }
+		bool? stripBlankLines = _includeContentTransformations &&
+		                        parseResult.GetResult(StripBlankLines) is { Implicit: false }
 			? parseResult.GetValue(StripBlankLines)
 			: null;
+		var selectedPaths = await ResolveSelectedPathsAsync(
+			parseResult,
+			cancellationToken).ConfigureAwait(false);
 		var overrides = new ProjectSelectionSpec(
 			Roots: GetExplicitValues(parseResult, Roots),
 			Extensions: GetExplicitValues(parseResult, Extensions),
-			SelectedPaths: GetExplicitValues(parseResult, SelectedPaths),
+			SelectedPaths: selectedPaths,
 			GitMode: gitMode,
 			Exclusions: exclusions,
 			HideSecrets: hideSecrets,
@@ -135,6 +163,35 @@ internal sealed class SelectionOptions
 			.ResolveAsync(projectPath, profile, overrides, cancellationToken)
 			.ConfigureAwait(false);
 	}
+
+	private async Task<IReadOnlyCollection<string>?> ResolveSelectedPathsAsync(
+		ParseResult parseResult,
+		CancellationToken cancellationToken)
+	{
+		var direct = GetExplicitValues(parseResult, SelectedPaths);
+		var sourceResult = parseResult.GetResult(SelectedPathsSource);
+		if (direct is null && sourceResult is null)
+			return null;
+
+		var selected = new HashSet<string>(PathComparer.Default);
+		if (direct is not null)
+			selected.UnionWith(direct);
+		if (sourceResult is not null)
+		{
+			var source = parseResult.GetValue(SelectedPathsSource);
+			if (string.IsNullOrWhiteSpace(source))
+				throw InvalidSelectionSource();
+			selected.UnionWith(await SelectionPathListReader.ReadAsync(
+				source,
+				_environment,
+				cancellationToken).ConfigureAwait(false));
+		}
+
+		return selected.ToArray();
+	}
+
+	private static ProjectContextValidationException InvalidSelectionSource() =>
+		new("DPX-CLI-SELECT-FROM-INVALID", "Selection source is invalid.");
 
 	private static IReadOnlyCollection<ProjectExclusion> ParseExclusions(
 		IReadOnlyList<CliExclusionValue> values)

@@ -120,7 +120,8 @@ public sealed record ProjectContextPlan(
 	SecretRedactionSummary? Redaction = null,
 	CodeCompressionSummary? Compression = null,
 	PrivateDataRedactionSummary? Privacy = null,
-	IReadOnlyList<UnscannableFile>? UnscannableFiles = null)
+	IReadOnlyList<UnscannableFile>? UnscannableFiles = null,
+	IReadOnlyList<EffectiveRedactionFinding>? Findings = null)
 {
 	public bool HasErrors => Diagnostics.Any(static diagnostic =>
 		diagnostic.Severity == ContextDiagnosticSeverity.Error);

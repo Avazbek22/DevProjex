@@ -2673,7 +2673,9 @@ public sealed class SecretRedactionScope
 				displayCandidate.SessionMarkId,
 				displayCandidate.PersistentMarkId,
 				relativePath,
-				cascadedOccurrenceIds);
+				cascadedOccurrenceIds,
+				displayCandidate.Category,
+				displayCandidate.RawStart);
 			outputDelta = checked(outputDelta + outputLength - segment.Length);
 		}
 

@@ -72,6 +72,14 @@ internal static class CommandExecution
 			var error = ProjectCopyTerminalErrorMapper.Map(exception, text);
 			return WriteError(environment, outputOptions, text, error);
 		}
+		catch (TerminalProjectSourceException exception)
+		{
+			return WriteError(environment, outputOptions, text, new TerminalError(
+				exception.Code,
+				SafeMessageFor(exception.Code, text),
+				ExitCode: exception.ExitCode,
+				Exception: exception));
+		}
 		catch (SecretScanLimitExceededException exception)
 		{
 			return WriteError(environment, outputOptions, text, new TerminalError(
@@ -140,6 +148,14 @@ internal static class CommandExecution
 		"DPX-PROJECT-PATH-REQUIRED" => localization["Terminal.Error.ProjectPathRequired"],
 		"DPX-PROJECT-NOT-FOUND" => localization["Terminal.Error.ProjectNotFound"],
 		"DPX-SELECTION-PATH-INVALID" => localization["Terminal.Error.SelectionPathInvalid"],
+		"DPX-CLI-SELECT-FROM-INVALID" => localization["Terminal.Error.SelectFromInvalid"],
+		"DPX-CLI-GIT-URL-INVALID" => localization["Terminal.Error.RepositoryUrlInvalid"],
+		"DPX-CLI-GIT-BRANCH-INVALID" => localization["Terminal.Error.BranchInvalid"],
+		"DPX-CLI-GIT-BRANCH-LOCAL" => localization["Terminal.Error.BranchLocal"],
+		"DPX-CLI-GIT-BRANCH-UNAVAILABLE" => localization["Terminal.Error.BranchUnavailable"],
+		"DPX-CLI-GIT-UNAVAILABLE" => localization["Terminal.Error.GitUnavailable"],
+		"DPX-CLI-GIT-CLONE-FAILED" => localization["Terminal.Error.CloneFailed"],
+		"DPX-CLI-GIT-CACHE-FAILED" => localization["Terminal.Error.CloneCacheFailed"],
 		"DPX-CLI-PROFILE-NOT-FOUND" => localization["Terminal.Error.ProfileUnresolved"],
 		"DPX-CLI-PROFILE-UNRESOLVED" => localization["Terminal.Error.ProfileUnresolved"],
 		"DPX-CLI-PROFILE-INVALID" => localization["Terminal.Error.ProfileInvalid"],

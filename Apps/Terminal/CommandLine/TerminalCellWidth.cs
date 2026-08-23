@@ -8,6 +8,35 @@ internal static class TerminalCellWidth
 	public static int Measure(string value) =>
 		string.IsNullOrEmpty(value) ? 0 : value.GetColumns();
 
+	public static string Truncate(string value, int width)
+	{
+		if (string.IsNullOrEmpty(value) || width <= 0)
+			return string.Empty;
+		if (Measure(value) <= width)
+			return value;
+
+		var result = new StringBuilder(value.Length);
+		var resultWidth = 0;
+		var enumerator = StringInfo.GetTextElementEnumerator(value);
+		while (enumerator.MoveNext())
+		{
+			var textElement = enumerator.GetTextElement();
+			var textElementWidth = Math.Max(0, Measure(textElement));
+			if (resultWidth + textElementWidth > width)
+				break;
+			result.Append(textElement);
+			resultWidth += textElementWidth;
+		}
+
+		return result.ToString();
+	}
+
+	public static string PadRight(string value, int width)
+	{
+		var padding = Math.Max(0, width - Measure(value));
+		return padding == 0 ? value : value + new string(' ', padding);
+	}
+
 	public static IReadOnlyList<string> Wrap(string value, int width)
 	{
 		var effectiveWidth = Math.Max(1, width);

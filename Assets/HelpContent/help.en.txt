@@ -91,9 +91,11 @@ Examples:
 * `devprojex` — open the interactive Terminal Workspace.
 * `devprojex open . --preview` — open the current folder in Desktop Preview.
 * `devprojex analyze . --format json` — analyze the current project as JSON.
+* `devprojex tree .` — print the project tree to the terminal.
 * `devprojex export context . --format markdown -o ../devprojex-context.md` — save AI-ready context outside the source project.
 * `devprojex export project . --as folder -o ../devprojex-submission` — export the effective project tree to an exact folder.
 * `devprojex export project . --as zip -o ../devprojex-submission.zip` — export the effective project tree to a ZIP archive.
+* `devprojex export context https://github.com/owner/repo -o -` — pack a remote repository without cloning it yourself.
 * `devprojex analyze . --git-mode tracked --exclude smart-ignore` — analyze tracked Git files with Smart Ignore.
 
 Notes:
@@ -102,6 +104,9 @@ Notes:
 * `--git-mode` selects no Git filtering, `.gitignore`, or tracked Git files;
 * `--exclude` controls ordinary exclusions separately from Git filtering;
 * analysis and export commands are deterministic and do not open the desktop interface;
+* `tui`, `open`, `analyze`, and both `export` commands also accept a Git repository URL; the clone goes into a managed cache (`devprojex cache`);
+* commands have documented aliases and short flags — for example `export ctx`, `-f`, `-n`; `devprojex help` shows them;
+* `analyze --findings` lists redaction findings without their values, and `--fail-on-findings` returns a nonzero exit code for CI;
 * the command does not modify project files — DevProjex works in read-only mode.
 
 If the `devprojex` command does not work, open in DevProjex:

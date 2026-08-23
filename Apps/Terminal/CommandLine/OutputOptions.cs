@@ -27,6 +27,10 @@ internal sealed class OutputOptions
 			TerminalVerbosity.Normal,
 			CliChoiceSets.Verbosity,
 			localization);
+		Quiet = new Option<bool>("-q")
+		{
+			Description = localization["Terminal.Option.Quiet"]
+		};
 		Plain = new Option<bool>("--plain")
 		{
 			Description = localization["Terminal.Option.Plain"]
@@ -36,6 +40,7 @@ internal sealed class OutputOptions
 	public Option<TerminalColorMode> Color { get; }
 	public Option<TerminalProgressMode> Progress { get; }
 	public Option<TerminalVerbosity> Verbosity { get; }
+	public Option<bool> Quiet { get; }
 	public Option<bool> Plain { get; }
 
 	public void AddTo(Command command, bool includeProgress = true)
@@ -44,6 +49,7 @@ internal sealed class OutputOptions
 		if (includeProgress)
 			command.Options.Add(Progress);
 		command.Options.Add(Verbosity);
+		command.Options.Add(Quiet);
 		command.Options.Add(Plain);
 		CompletionAvailabilityRegistry.RegisterOption(
 			Plain,
@@ -58,6 +64,11 @@ internal sealed class OutputOptions
 				!plain);
 		command.Validators.Add(result =>
 		{
+			if (result.GetValue(Quiet) && result.GetResult(Verbosity) is { Implicit: false })
+			{
+				result.AddError(LocalizedParseError.Create(
+					_localization["Terminal.Validation.QuietVerbosityConflict"]));
+			}
 			if (CliParseValue.TryGet(result, Plain, out var plain) &&
 			    plain &&
 			    CliParseValue.TryGet(result, Color, out var color) &&
@@ -73,6 +84,8 @@ internal sealed class OutputOptions
 		new(
 			parseResult.GetValue(Color),
 			parseResult.GetValue(Progress),
-			parseResult.GetValue(Verbosity),
+			parseResult.GetValue(Quiet)
+				? TerminalVerbosity.Quiet
+				: parseResult.GetValue(Verbosity),
 			parseResult.GetValue(Plain));
 }

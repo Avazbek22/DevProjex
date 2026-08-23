@@ -34,7 +34,7 @@ internal static class ContextAwareCompletionEngine
 			.ToDictionary(static item => item.Token, static item => item.Option, StringComparer.Ordinal);
 		var visibleCommands = command.Subcommands
 			.Where(static child => !child.Hidden)
-			.Select(static child => child.Name)
+			.SelectMany(static child => new[] { child.Name }.Concat(child.Aliases))
 			.ToHashSet(StringComparer.Ordinal);
 		var completionContext = parseResult.GetCompletionContext();
 		var wordToComplete = completionContext.WordToComplete;
@@ -226,14 +226,15 @@ internal static class ContextAwareCompletionEngine
 			return acceptsDataCandidates;
 
 		var hiddenCommand = command.Subcommands.Any(child =>
-			child.Hidden && child.Name.Equals(value, StringComparison.Ordinal));
+			child.Hidden &&
+			(new[] { child.Name }.Concat(child.Aliases)).Contains(value, StringComparer.Ordinal));
 		if (hiddenCommand)
 			return false;
 		if (visibleCommands.Contains(value))
 			return true;
 		return acceptsDataCandidates &&
 		       !command.Subcommands.Any(child =>
-			       child.Name.Equals(value, StringComparison.Ordinal));
+			       new[] { child.Name }.Concat(child.Aliases).Contains(value, StringComparer.Ordinal));
 	}
 
 	private static bool IsAvailable(

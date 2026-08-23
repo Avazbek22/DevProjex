@@ -67,15 +67,22 @@ devprojex
 ├── tui
 ├── open
 ├── analyze
+├── tree
 ├── export
-│   ├── context
-│   └── project
+│   ├── context, ctx
+│   └── project, proj
 ├── profile
 │   ├── show
 │   ├── export
 │   ├── import
 │   ├── validate
 │   └── reset
+├── recent
+├── cache
+│   ├── path
+│   ├── list
+│   ├── remove
+│   └── clear
 ├── ui
 │   ├── list
 │   ├── status
@@ -95,6 +102,7 @@ devprojex
 │       ├── previous
 │       └── clear
 ├── doctor
+├── help
 └── completion
 ```
 
@@ -141,10 +149,12 @@ remains a usage error instead of silently selecting a later command.
 --root <PATH>                         repeatable
 --extension <EXT>                    repeatable
 --select <RELATIVE_PATH>             repeatable
+--select-from <FILE|->
 --git-mode <none|gitignore|tracked>
 --exclude <NAME>                     repeatable
 --hide-secrets [<true|false>]
---compress [<true|false>]
+--hide-private-data [<true|false>]
+--compress-code [<true|false>]
 --strip-comments [<true|false>]
 --strip-blank-lines [<true|false>]
 ```
@@ -165,6 +175,21 @@ none
 
 `--exclude none` is an exact empty exclusion set. Repeating `none` is idempotent,
 but combining it with another exclusion is a usage error.
+
+`--select` and `--select-from` form one explicit selected-path override. The
+latter reads UTF-8 source-relative entries, one per line, from a file or
+redirected stdin (`-`), ignores empty lines, and rejects interactive stdin.
+Inputs are capped at 100,000 entries and 16 MiB. Entries from both options are
+combined and deduplicated with project path semantics.
+
+`tree` accepts the path-selection subset (`--profile`, `--root`, `--extension`,
+`--select`, `--select-from`, `--git-mode`, and `--exclude`) and intentionally
+omits all content-transformation options.
+
+The documented aliases are stable syntax: `export ctx`, `export proj`, `-f` for
+every public `--format`, `-n` for export `--dry-run`, and `-q` for the existing
+quiet verbosity. Aliases appear in help and completion; none are implicit or
+hidden.
 
 The normative `standard` profile has Git mode `gitignore` and contains all eight
 exclusion groups: `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`,
@@ -199,7 +224,7 @@ from current help and completion choices. Resolution migrates it to the separate
 `selection.exclusions`. An explicit `--hide-secrets true|false` takes precedence
 over the legacy token.
 
-`--compress` is a separate, additive content transformation and is off in the
+`--compress-code` is a separate, additive content transformation and is off in the
 `standard` profile. It preserves declarations and replaces executable bodies with
 syntax-valid placeholders in the curated C, C++, C#, Go, Java, JavaScript, Kotlin, PHP, Python,
 Ruby, Rust, Scala, TSX, and TypeScript language set. Ruby removes complete method-body lines between
@@ -218,7 +243,7 @@ transformed bytes; source files are never modified.
 `--strip-comments` is an independent, additive content transformation and is off in the
 `standard` profile. It removes syntax-tree comments in the 14 body-compression languages plus
 comments-only HTML, CSS, TOML, Bash, XML, and YAML packs, for 20 comment-capable languages in
-total. The six comments-only packs remain unsupported when only `--compress` is enabled. It also
+total. The six comments-only packs remain unsupported when only `--compress-code` is enabled. It also
 removes leading Python module/class/function docstrings. A shebang at byte offset zero is
 preserved. Strings, heredocs, attributes, annotations, and compiler directives are not
 comments; pragma comments intended for compilers or linters are removed. Compression-only
@@ -301,15 +326,37 @@ Direct commands default to `standard`. TUI and `open` default to `local` when a
 valid local profile exists, otherwise `standard`.
 
 `open --last` resolves the last project itself. It cannot be combined with a
-project argument or any selection override because silently discarding those
-overrides is forbidden.
+project argument, `--branch`, or any selection override because silently
+discarding those overrides is forbidden.
+
+## Project Sources
+
+`tui`, `open`, `analyze`, `export context`, and `export project` accept a local
+directory or a Git repository URL as `PROJECT`. URL sources are resolved through
+the shared managed clone cache; no second clone mechanism exists. One cache
+session lease spans the complete operation. `--branch NAME` is valid only for a
+URL source, conflicts with `open --last`, and branch names are validated before
+Git starts. An existing local directory wins over SCP-like source detection, so
+legal Unix and macOS directory names containing `:` remain local. An explicit
+`scheme://` source is always interpreted as a URL.
+
+Cached repositories are reusable offline. A successful first clone records the
+safe URL in recent-repository history. Cancellation removes clone staging;
+network and clone failures return runtime exit `1` without opening or exporting
+partial content. The generated cache path is internal and never replaces the
+result of a direct URL-source command. In particular, successful `open URL` writes the safe
+repository URL rather than the physical cache checkout path. Profile commands
+and `tree` accept local directories only. The interactive Terminal Workspace is
+the sole documented exception: its repository-details view exposes the managed
+cache path for diagnostics. Unifying that TUI presentation is outside this CLI
+contract phase.
 
 ## Command Contracts
 
 ### `tui`
 
 ```text
-devprojex tui [PROJECT]
+devprojex tui [PROJECT|URL]
   --profile <auto|standard|local|FILE>
                                       default: auto
   --screen <auto|alternate|inline>    default: stored setting, then auto
@@ -317,6 +364,7 @@ devprojex tui [PROJECT]
   --no-mouse
   --color <auto|always|never>         default: auto
   --plain
+  --branch <NAME>                     URL source only
 ```
 
 `PROJECT` defaults to the current directory. Any readable directory is valid.
@@ -343,7 +391,7 @@ recoverable clone error instead of taking over `/dev/tty`.
 ### `open`
 
 ```text
-devprojex open [PROJECT]
+devprojex open [PROJECT|URL]
   --last
   --new-window
   --wait
@@ -352,6 +400,7 @@ devprojex open [PROJECT]
   --tree-format <text|markdown|json|xml>
   --filter <QUERY>
   --search <QUERY>
+  --branch <NAME>                     URL source only
   <shared selection options>
 ```
 
@@ -361,22 +410,52 @@ project and state have been applied, not until Desktop closes.
 `--profile auto` is accepted by `open` and resolves `local` when a valid local
 profile exists, otherwise `standard`.
 
-On success, stdout contains the accepted absolute project path when a project was
-resolved. Operational and handoff diagnostics use stderr.
+On success, stdout contains the accepted absolute project path for a local source
+or the safe repository URL for a URL source. A generated cache path is never
+reported. Operational and handoff diagnostics use stderr.
 
 ### `analyze`
 
 ```text
-devprojex analyze [PROJECT]
-  --format <text|json>                default: text
+devprojex analyze [PROJECT|URL]
+  -f, --format <text|json>            default: text
   -o, --output <PATH|->               default: -
   --strict
+  --findings
+  --fail-on-findings
+  --branch <NAME>                     URL source only
   <shared selection options>
   <shared output options>
 ```
 
 Analysis is already read-only, so it has no `--dry-run` option. `--strict` writes
 the requested report first and returns `3` when policy diagnostics exist.
+`--findings` adds only sanitized effective descriptors (`ruleId`, `category`,
+`relativePath`, and one-based `lineNumber`). `lineNumber` identifies the line in
+the original decoded source file before code compression, comment removal, or
+blank-line removal; LF, CRLF, and lone CR are line boundaries. The list count
+equals the combined effective matched counters from the same output session.
+Descriptors are materialized only when `--findings` is requested. Values, source
+text, assignment context, fingerprints, and raw detector exceptions are forbidden.
+Text output places descriptors in a separate, localized three-column findings table
+after the main analysis table. Plain output aligns the same columns with spaces and
+never emits tab characters.
+`--fail-on-findings` writes the report and returns `3` when that effective count
+is nonzero; it is independent from `--strict`.
+
+### `tree`
+
+```text
+devprojex tree [PROJECT]
+  -f, --format <text|markdown|json|xml> default: text
+  -o, --output <PATH|->                 default: -
+  <path-selection options>
+  <shared output options>
+```
+
+Tree output uses the shared tree export serializer and is byte-identical to the
+tree section exported by Desktop for the same projected tree and format. It has
+no content-transformation flags and accepts only a local project directory.
 
 For text output, one canonical serializer defines fields, ordering, values, and
 exactly one platform-native final line separator. Redirected stdout, `--plain`,
@@ -390,12 +469,13 @@ There is no analysis `--force` option in v1.
 ### `export context`
 
 ```text
-devprojex export context [PROJECT]
+devprojex export context|ctx [PROJECT|URL]
   --view <tree|content|tree-content>  default: tree-content
-  --format <text|markdown|json|xml>   default: markdown
+  -f, --format <text|markdown|json|xml> default: markdown
   -o, --output <PATH|->               default: -
   --force
-  --dry-run
+  -n, --dry-run
+  --branch <NAME>                     URL source only
   <shared selection options>
   <shared output options>
 ```
@@ -406,11 +486,12 @@ It is a usage error with stdout.
 ### `export project`
 
 ```text
-devprojex export project [PROJECT]
+devprojex export project|proj [PROJECT|URL]
   --as <folder|zip>                   required
   -o, --output <PATH>                 required
   --force
-  --dry-run
+  -n, --dry-run
+  --branch <NAME>                     URL source only
   <shared selection options>
   <shared output options>
 ```
@@ -424,12 +505,64 @@ When `--hide-secrets` is selected, text findings are replaced. Such a copy is in
 and may not build or run. Binary files remain unchanged. The normal confirmation
 and dry-run plan state this before writing.
 
+### `recent`
+
+```text
+devprojex recent
+  --kind <all|folder|repository>      default: all
+  --limit <N>                        default: 48; range: 1..100000
+  -f, --format <text|json>            default: text
+```
+
+This is a read-only projection of the 32-entry folder history and 16-entry
+repository-URL history, newest first. JSON schema version 1 uses kind
+`devprojex-recent` and stable `kind`, `path`/`url`, `name`, `parent`, and
+`lastOpened` properties. Text output uses display-cell-aligned, space-separated
+columns and renders the timestamp in local time as `yyyy-MM-dd HH:mm`; JSON retains
+the full UTC ISO-8601 value.
+
+### `cache`
+
+```text
+devprojex cache path
+devprojex cache list [-f text|json]
+devprojex cache remove <URL> --force
+devprojex cache clear --force
+```
+
+The group manages only the shared Git clone cache. Destructive commands never
+prompt and require `--force`. Their result reports removed, retained, and failed
+entries from the same index-locked operation. Leased repositories are retained;
+an unavailable index lock, an unsupported future index schema, or a failed index
+update is reported as a failure rather than an empty success. Unindexed cache
+containers are included by `clear`. A retained or failed entry returns policy exit
+`3`, never clean success. Cache listing includes both ready and damaged indexed
+entries; damaged entries publish `state: "damaged"`. Cache-list JSON schema version
+1 uses kind `devprojex-repository-cache` and publishes URL, state, branch, commit,
+internal local path, approximate size, and last-use timestamp. Text output aligns
+columns by display-cell width, renders binary sizes such as `68.2 MiB`, and uses
+local `yyyy-MM-dd HH:mm` timestamps without tab characters. If any cache root
+cannot be read because its index lock is unavailable or its schema is newer, the
+command emits all available entries, writes a localized warning to stderr, and
+returns policy exit `3`. JSON adds `"incomplete": true` only for this partial
+result; complete schema-version-1 output omits that additive field.
+
+### `help`
+
+```text
+devprojex help [COMMAND...]
+```
+
+The command resolves canonical command names or documented aliases and invokes
+the same structured renderer as `--help` for that node. Unknown command paths
+return usage exit `2`.
+
 ### Profiles
 
 ```text
 devprojex profile show [PROJECT]
   --profile <standard|local|FILE>     default: standard
-  --format <text|json>                default: text
+  -f, --format <text|json>            default: text
 
 devprojex profile export [PROJECT]
   --profile <standard|local|FILE>     default: local
@@ -556,25 +689,29 @@ that prevents an accepted option from becoming a no-op.
 | `tui` | `--mouse`, `--no-mouse` | capability-based auto policy | enables or disables input handling for this session | mutually exclusive | terminal screen; conflict exits `2`; tracking restores on exit | parser, workspace, PTY lifecycle |
 | `tui` | `--color`, `--plain` | `auto`, off | selects color policy or strict plain presentation/export rendering | `--plain --color always` exits `2` | terminal screen; no payload stream repurposing | parser, presentation, plain PTY |
 | `open` | `--last` | off | resolves the most recent workspace | conflicts with `PROJECT` and every selection override | accepted absolute path on stdout; conflict exits `2` | parser, handler, Desktop IPC |
-| `open` | `--new-window` | off | requests a new Desktop instance | none | accepted path on stdout; handoff failures use stderr and `5` | handler, Desktop IPC |
-| `open` | `--wait` | off | guarantees that the requested project/state is applied before return | does not wait for Desktop termination | accepted path on stdout; timeout uses stderr and `5` | handler, Desktop IPC |
-| `open` | `--preview`, `--view`, `--tree-format` | closed; no explicit view/format | opens preview and applies its typed view/tree format | `--view` implies preview | accepted path on stdout; invalid value exits `2` | parser, handler, Desktop IPC |
-| `open` | `--filter`, `--search` | absent | applies the requested Desktop filter or preview search | mutually exclusive; search implies preview | accepted path on stdout; conflict exits `2` | parser, handler, Desktop IPC |
-| analyze/context/project/open | `--profile` | `standard`; `open`: `auto` | resolves `standard`, `local`, or a portable profile before explicit overrides | `auto` is accepted only by `open`; conflicts with `open --last` | requested payload/path stays on stdout; unresolved profile exits `2` | parser, resolver, handler, process |
-| analyze/context/project/open | `--root` | profile roots | replaces the profile root set with each repeated top-level relative path | repeatable; conflicts with `open --last`; invalid/out-of-source path exits `2` | requested payload/path stays on stdout | parser, resolver, handler, process |
-| analyze/context/project/open | `--extension` | profile extensions | replaces the profile extension set with each repeated normalized extension | repeatable; conflicts with `open --last` | requested payload/path stays on stdout | parser, resolver, handler, process |
-| analyze/context/project/open | `--select` | profile selected paths | replaces the profile explicit path set with each repeated source-relative path | repeatable; conflicts with `open --last`; invalid/out-of-source path exits `2` | requested payload/path stays on stdout | parser, resolver, handler, process |
-| analyze/context/project/open | `--git-mode` | profile Git mode | replaces the profile mode with `none`, `gitignore`, or `tracked` | conflicts with `open --last`; `tracked` requires Git CLI and at least one readable applicable index | on unavailable index, `analyze` preserves its requested report; context/project/open create no artifact and emit no success payload; diagnostic uses stderr and exit `3` | parser, resolver, handler, process |
-| analyze/context/project/open | `--exclude` | profile exclusions | replaces the path-exclusion set with repeated typed values | repeatable; `none` conflicts with every other value; conflicts with `open --last` | requested payload/path stays on stdout; invalid value exits `2` | parser, resolver, handler, process |
+| `open` | `--new-window` | off | requests a new Desktop instance | none | accepted local path or safe source URL on stdout; handoff failures use stderr and `5` | handler, Desktop IPC |
+| `open` | `--wait` | off | guarantees that the requested project/state is applied before return | does not wait for Desktop termination | accepted local path or safe source URL on stdout; timeout uses stderr and `5` | handler, Desktop IPC |
+| `open` | `--preview`, `--view`, `--tree-format` | closed; no explicit view/format | opens preview and applies its typed view/tree format | `--view` implies preview | accepted local path or safe source URL on stdout; invalid value exits `2` | parser, handler, Desktop IPC |
+| `open` | `--filter`, `--search` | absent | applies the requested Desktop filter or preview search | mutually exclusive; search implies preview | accepted local path or safe source URL on stdout; conflict exits `2` | parser, handler, Desktop IPC |
+| analyze/tree/context/project/open | `--profile` | `standard`; `open`: `auto` | resolves `standard`, `local`, or a portable profile before explicit overrides | `auto` is accepted only by `open`; conflicts with `open --last` | requested payload/path stays on stdout; unresolved profile exits `2` | parser, resolver, handler, process |
+| analyze/tree/context/project/open | `--root` | profile roots | replaces the profile root set with each repeated top-level relative path | repeatable; conflicts with `open --last`; invalid/out-of-source path exits `2` | requested payload/path stays on stdout | parser, resolver, handler, process |
+| analyze/tree/context/project/open | `--extension` | profile extensions | replaces the profile extension set with each repeated normalized extension | repeatable; conflicts with `open --last` | requested payload/path stays on stdout | parser, resolver, handler, process |
+| analyze/tree/context/project/open | `--select`, `--select-from` | profile selected paths | combines direct paths with strict UTF-8 file/redirected-stdin entries into one explicit path override | optional UTF-8 BOM is accepted; UTF-16/UTF-32, interactive stdin, oversized input, invalid/out-of-source paths, and `open --last` fail with exit `2`; the byte limit is enforced during reading | requested payload/path stays on stdout | parser, reader, resolver, process |
+| analyze/tree/context/project/open | `--git-mode` | profile Git mode | replaces the profile mode with `none`, `gitignore`, or `tracked` | conflicts with `open --last`; `tracked` requires Git CLI and at least one readable applicable index | on unavailable index, `analyze` preserves its requested report; tree/context/project/open create no artifact and emit no success payload; diagnostic uses stderr and exit `3` | parser, resolver, handler, process |
+| analyze/tree/context/project/open | `--exclude` | profile exclusions | replaces the path-exclusion set with repeated typed values | repeatable; `none` conflicts with every other value; conflicts with `open --last` | requested payload/path stays on stdout; invalid value exits `2` | parser, resolver, handler, process |
 | analyze/context/project/open | `--hide-secrets` | profile content-transformation state | independently enables or disables detected-value redaction without changing path filters | optional explicit Boolean; conflicts with `open --last` | requested payload/path stays on stdout; inspection failure exits `1` without a complete artifact | parser, resolver, handler, process |
-| analyze/context/project/open | `--compress` | profile content-transformation state | independently enables or disables syntax-aware body compression without changing path filters | optional explicit Boolean; conflicts with `open --last` | requested payload/path stays on stdout; unsupported or rejected files remain complete | parser, resolver, handler, process |
+| analyze/context/project/open | `--hide-private-data` | profile content-transformation state | independently enables or disables private-data redaction without changing path filters | optional explicit Boolean; conflicts with `open --last` | requested payload/path stays on stdout; inspection failure exits `1` without a complete artifact | parser, resolver, handler, process |
+| analyze/context/project/open | `--compress-code` | profile content-transformation state | independently enables or disables syntax-aware body compression without changing path filters | optional explicit Boolean; conflicts with `open --last` | requested payload/path stays on stdout; unsupported or rejected files remain complete | parser, resolver, handler, process |
 | analyze/context/project/open | `--strip-comments` | profile content-transformation state | independently removes syntax-tree comments and Python docstrings without changing path filters | optional explicit Boolean; conflicts with `open --last` | requested payload/path stays on stdout; unsupported or rejected files remain complete | parser, resolver, handler, process |
 | analyze/context/project/open | `--strip-blank-lines` | profile content-transformation state | independently removes unprotected whitespace-only source lines without changing path filters | optional explicit Boolean; conflicts with `open --last` | requested payload/path stays on stdout; unsupported or rejected files remain complete | parser, resolver, handler, process |
 | `analyze` | `--format` | `text` | selects the canonical text serializer or analysis JSON | none | document on stdout or in the selected file; invalid value exits `2` | parser, serializer, handler, process |
 | `analyze` | `-o`, `--output` | `-` | selects stdout or an exact new report file | existing/unsafe file is rejected; no force or dry-run | document or real absolute path on stdout; conflict exits `4` | handler, destination, process |
 | `analyze` | `--strict` | off | writes the report, then treats policy diagnostics as failure | none | requested report remains intact; policy result exits `3` | handler, process |
+| `analyze` | `--findings` | off | adds sanitized effective redaction descriptors | values, source fragments, fingerprints, and raw detector errors are forbidden | report stays on stdout/file | serializer, sanitation, process |
+| `analyze` | `--fail-on-findings` | off | writes the report, then gates on effective findings | independent from `--strict` | requested report remains intact; a nonzero finding count exits `3` | handler, process |
+| URL-capable commands | `--branch` | remote default branch | selects a validated repository branch under an operation lease | rejected for local paths and with `open --last` | ordinary command payload remains on stdout; clone/branch failure exits `1` or invalid name exits `2` | parser, resolver, Git fixture |
 | analyze/context/project | `--color` | `auto` | selects ANSI color policy independently for the relevant human stream | `always` conflicts with `--plain`; `never` does not force ASCII | requested payload stays on stdout; conflict exits `2` | parser, rendering, process |
-| analyze/context/project | `--progress` | `auto` | selects automatic, forced, or disabled operational progress on stderr | quiet/minimal suppress optional progress; plain forced progress is static ASCII | requested payload stays on stdout | parser, rendering, process |
+| analyze/context/project | `--progress` | `auto` | selects automatic, forced, or disabled operational progress on stderr | quiet/minimal suppress optional progress; URL-source Git operations use bounded milestones when rewriting is unavailable | requested payload stays byte-clean on stdout | parser, rendering, process |
 | analyze/context/project | `--verbosity` | `normal` | controls optional operational stderr from quiet through safe diagnostic context | never removes requested stdout or suppresses errors | requested payload stays on stdout; invalid value exits `2` | parser, rendering, process |
 | analyze/context/project | `--plain` | off | selects line-oriented ASCII human output and disables ANSI, markup, decoration, and animation | conflicts with `--color always` | machine schema and requested payload stay unchanged; conflict exits `2` | parser, rendering, process |
 | `export context` | `--view`, `--format` | `tree-content`, `markdown` | selects typed document sections and serializer | none | document on stdout/file; invalid value exits `2` | parser, serializer, process |
@@ -585,6 +722,9 @@ that prevents an accepted option from becoming a no-op.
 | `export project` | `-o`, `--output` | required | selects the exact destination | folder must be absent; ZIP path ends in `.zip`; destination outside source | real absolute created destination on stdout; conflict exits `4` | parser, destination, integration |
 | `export project` | `--force` | off | atomically replaces an existing ZIP | invalid for folder output | success path on stdout; invalid combination exits `2` | parser, destination, integration |
 | `export project` | `--dry-run` | off | validates plan, kind, and exact destination without copying | creates no folder, ZIP, parent, or staging | stdout empty; one readiness plan on stderr | handler, filesystem-effects, process |
+| `recent` | `--kind`, `--limit`, `-f`/`--format` | `all`, `48`, `text` | filters and bounds newest-first workspace history and selects text or JSON | limit range is `1..100000` | requested list on stdout; invalid value exits `2` | parser, schema, process |
+| `cache list` | `-f`, `--format` | `text` | selects text or versioned cache JSON | a busy index lock or future-schema root marks the result incomplete | available entries stay on stdout; warning on stderr and exit `3`; JSON adds `incomplete: true` only for a partial list | parser, schema, process |
+| `cache remove`, `cache clear` | `--force` | off | authorizes non-interactive destructive cleanup | required | result on stdout; retained/failed entries exit `3`, missing URL exits `1` | parser, leases, process |
 | `profile show` | `--profile`, `--format` | `standard`, `text` | resolves a profile and selects text or profile JSON | `auto` is not accepted | document on stdout; invalid/unresolved value exits `2` | parser, profile handler |
 | `profile export` | `--profile`, `-o`/`--output`, `--force` | `local`, required, off | resolves and atomically writes an exact portable profile outside the source; parent must exist | source safety precedes conflict; existing file needs force; directories always conflict | real committed absolute path on stdout; runtime write failure exits `1`, safety exits `3`, conflict exits `4` | parser, profile handler, filesystem effects |
 | `profile import` | `--apply` | off | persists the validated imported profile as local state | absent means validation-only | status/path contract on stdout; invalid profile exits `2`; local-store write failure exits `1` | profile handler, persistence |
@@ -606,7 +746,7 @@ stdout is the payload channel:
 
 - analysis and context documents;
 - one real absolute result path after a file, folder, or ZIP was created;
-- an accepted project path from `open`;
+- an accepted local project path or safe repository URL from `open`;
 - requested Desktop control payloads;
 - help, version, and completion scripts.
 
@@ -668,12 +808,12 @@ Color precedence is:
 
 `TERM=dumb` disables ANSI, interactive progress, and TUI startup. Direct commands
 remain usable. stdout and stderr capabilities are evaluated independently.
-Automatic progress animates only when stderr is interactive and CI is not active.
-`--plain --progress always` emits bounded static ASCII progress lines on stderr;
-plain `auto` remains suppressed. Explicit `--progress always` also falls back to
-bounded static lines when stderr is redirected or `TERM=dumb`, even if
-`--color always` was requested. `quiet` and `minimal` suppress optional progress
-even when `always` is requested.
+Automatic animated progress runs only when stderr is interactive and CI is not
+active. URL-source Git operations use a single carriage-return-updated line in that
+mode. Redirected stderr, CI, `TERM=dumb`, and `--plain` use at most six static
+milestone lines for URL-source Git progress in both `auto` and `always` modes.
+`--progress never`, `quiet`, and `minimal` suppress that progress completely.
+All progress remains on stderr and never changes the requested stdout payload.
 
 ## Destination and Atomicity
 
@@ -805,6 +945,8 @@ The v1 kinds are:
 
 ```text
 devprojex-analysis
+devprojex-recent
+devprojex-repository-cache
 devprojex-context
 devprojex-doctor
 devprojex-profile
@@ -820,7 +962,18 @@ Context XML uses `devprojexContext`, numeric text `schemaVersion="1"`, and
 XML must parse with standard parsers.
 
 Analysis v1 contains inventory, effective selection, metrics, diagnostics, and
-fingerprint. Timings are not part of the stable v1 analysis schema.
+fingerprint. With `--findings`, it adds an ordered `findings` array whose entries
+contain only `ruleId`, `category`, `relativePath`, and `lineNumber`. The one-based
+line number is measured in the original decoded source before content
+transformations. Timings and secret values are not part of the stable v1 analysis
+schema.
+
+Recent JSON contains `schemaVersion`, kind `devprojex-recent`, and `items` with
+stable `kind`, nullable `path`/`url`, `name`, `parent`, and `lastOpened` fields.
+Cache-list JSON contains `schemaVersion`, kind `devprojex-repository-cache`, and
+`items` with `url`, `state`, `branch`, `commit`, `localPath`,
+`approximateSizeBytes`, and `lastUsed` fields. `state` is `ready` or `damaged`;
+damaged indexed entries remain visible for explicit cache management.
 
 ## Stable After v1
 

@@ -48,6 +48,7 @@ public sealed class CliV1ParserRegressionTests
 		AssertCompleteChoiceSet(CliChoiceSets.CompletionShell);
 		AssertCompleteChoiceSet(CliChoiceSets.DeveloperScenario);
 		AssertCompleteChoiceSet(CliChoiceSets.Language);
+		AssertCompleteChoiceSet(CliChoiceSets.RecentKind);
 
 		Assert.Equal(
 			Enum.GetValues<ProjectExclusion>().Order(),
@@ -454,8 +455,15 @@ public sealed class CliV1ParserRegressionTests
 	[InlineData("--root|src")]
 	[InlineData("--extension|.cs")]
 	[InlineData("--select|src/app.cs")]
+	[InlineData("--select-from|selection.txt")]
 	[InlineData("--git-mode|none")]
 	[InlineData("--exclude|none")]
+	[InlineData("--hide-secrets")]
+	[InlineData("--hide-private-data")]
+	[InlineData("--compress-code")]
+	[InlineData("--strip-comments")]
+	[InlineData("--strip-blank-lines")]
+	[InlineData("--branch|main")]
 	public void OpenLastRejectsEveryExplicitSelectionOverride(string selectionOverride)
 	{
 		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
@@ -628,7 +636,8 @@ public sealed class CliV1ParserRegressionTests
 		var localization = new LocalizationService(
 			new JsonLocalizationCatalog(),
 			AppLanguage.En);
-		var selection = new SelectionOptions(localization, "auto");
+		var environment = new TestTerminalEnvironment();
+		var selection = new SelectionOptions(localization, environment, "auto");
 		var command = new RootCommand();
 		selection.AddTo(command);
 		var parseResult = command.Parse([]);
@@ -641,6 +650,32 @@ public sealed class CliV1ParserRegressionTests
 
 		Assert.Equal(ProjectProfileSourceKind.Local, resolved.ProfileSource?.Kind);
 		Assert.Equal([".cs"], resolved.Extensions);
+	}
+
+	[Fact]
+	public async Task OpenSelectionResolvesExplicitHidePrivateDataIntent()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = CreateProject(workspace);
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("open-private-data"))
+			.Create(AppLanguage.En);
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);
+		var environment = new TestTerminalEnvironment();
+		var selection = new SelectionOptions(localization, environment, "auto");
+		var command = new RootCommand();
+		selection.AddTo(command);
+		var parseResult = command.Parse(["--hide-private-data"]);
+
+		var resolved = await selection.ResolveAsync(
+			parseResult,
+			project,
+			services,
+			TestContext.Current.CancellationToken);
+
+		Assert.True(resolved.HidePrivateData);
+		Assert.Equal(
+			ProjectSelectionApplicationMode.ApplyResolvedValue,
+			resolved.ApplicationIntent?.HidePrivateData);
 	}
 
 	private static TerminalApplication CreateApplication(

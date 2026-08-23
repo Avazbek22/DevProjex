@@ -9,6 +9,13 @@ internal enum CliTextJsonFormat
 	Json
 }
 
+internal enum CliRecentKind
+{
+	All,
+	Folder,
+	Repository
+}
+
 internal readonly record struct CliExclusionValue(ProjectExclusion? Exclusion)
 {
 	public bool IsNone => Exclusion is null;
@@ -100,6 +107,11 @@ internal static class CliChoiceSets
 	public static CliChoiceSet<CliTextJsonFormat> TextJson { get; } = new(
 		new("text", CliTextJsonFormat.Text),
 		new("json", CliTextJsonFormat.Json));
+
+	public static CliChoiceSet<CliRecentKind> RecentKind { get; } = new(
+		new("all", CliRecentKind.All),
+		new("folder", CliRecentKind.Folder),
+		new("repository", CliRecentKind.Repository));
 
 	public static CliChoiceSet<ProjectContextView> ContextView { get; } = new(
 		ProjectPresentationCatalog.PreviewModes

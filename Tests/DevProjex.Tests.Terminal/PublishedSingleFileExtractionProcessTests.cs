@@ -7,6 +7,174 @@ namespace DevProjex.Tests.Terminal;
 public sealed class PublishedSingleFileExtractionProcessTests
 {
 	private static readonly TimeSpan ProcessTimeout = TimeSpan.FromSeconds(60);
+	private const string ProcessSecret = "ghp_" + "Q7wE9rT2yU4iO6pA8sD0fG1hJ3kL5zX7cV9b";
+
+	[Fact]
+	public async Task ExpandedCliCommandsHonorProcessContractsAndRedirectedStdin()
+	{
+		var application = GetPublishedSingleFileOrSkip();
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("cli/project");
+		workspace.WriteFile(
+			"cli/project/src/app.cs",
+			$"internal static class App {{ private const string Token = \"{ProcessSecret}\"; }}\n");
+		var home = workspace.CreateDirectory("cli/home");
+		var temporary = workspace.CreateDirectory("cli/temp");
+		var dataRoot = workspace.CreateDirectory("cli/data");
+		var environment = CreateEnvironment(home, temporary, dataRoot, bundleExtractionRoot: null);
+
+		var help = await RunAsync(
+			application,
+			["help", "tree", "--language", "en"],
+			environment,
+			project,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(CommandLineExitCodes.Success, help.ExitCode);
+		Assert.Contains("devprojex tree", help.StandardOutput, StringComparison.Ordinal);
+
+		var tree = await RunAsync(
+			application,
+			["tree", project, "--git-mode", "none", "--format", "json", "-o", "-", "--plain"],
+			environment,
+			project,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(CommandLineExitCodes.Success, tree.ExitCode);
+		Assert.Contains("app.cs", tree.StandardOutput, StringComparison.Ordinal);
+
+		var recent = await RunAsync(
+			application,
+			["recent", "--format", "json", "--language", "en"],
+			environment,
+			project,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(CommandLineExitCodes.Success, recent.ExitCode);
+		using (var document = JsonDocument.Parse(recent.StandardOutput))
+			Assert.Equal("devprojex-recent", document.RootElement.GetProperty("kind").GetString());
+
+		var cacheList = await RunAsync(
+			application,
+			["cache", "list", "--format", "json", "--language", "en"],
+			environment,
+			project,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(CommandLineExitCodes.Success, cacheList.ExitCode);
+		using (var document = JsonDocument.Parse(cacheList.StandardOutput))
+			Assert.Equal("devprojex-repository-cache", document.RootElement.GetProperty("kind").GetString());
+
+		var cacheClear = await RunAsync(
+			application,
+			["cache", "clear", "--force", "--language", "en"],
+			environment,
+			project,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(CommandLineExitCodes.Success, cacheClear.ExitCode);
+		Assert.Contains("Removed: 0. Retained: 0. Failed: 0.", cacheClear.StandardOutput, StringComparison.Ordinal);
+
+		var findings = await RunAsync(
+			application,
+			[
+				"analyze", project,
+				"--git-mode", "none", "--hide-secrets", "--findings", "--fail-on-findings",
+				"--format", "json", "-o", "-", "--plain"
+			],
+			environment,
+			project,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(CommandLineExitCodes.PolicyFailure, findings.ExitCode);
+		Assert.DoesNotContain(ProcessSecret, findings.StandardOutput, StringComparison.Ordinal);
+		using (var document = JsonDocument.Parse(findings.StandardOutput))
+			Assert.Single(document.RootElement.GetProperty("findings").EnumerateArray());
+
+		var selectedTree = await RunAsync(
+			application,
+			[
+				"tree", project, "--git-mode", "none", "--select-from", "-",
+				"--format", "json", "-o", "-", "--plain"
+			],
+			environment,
+			project,
+			"src/app.cs\n",
+			TestContext.Current.CancellationToken);
+		Assert.Equal(CommandLineExitCodes.Success, selectedTree.ExitCode);
+		Assert.Contains("app.cs", selectedTree.StandardOutput, StringComparison.Ordinal);
+
+		Assert.All(
+			new[] { help, tree, recent, cacheList, cacheClear, findings, selectedTree },
+			static result => Assert.DoesNotContain('\u001b', result.StandardOutput + result.StandardError));
+	}
+
+	[Fact]
+	public async Task UrlSourcesExportThroughThePublishedProcess()
+	{
+		var application = GetPublishedSingleFileOrSkip();
+		if (!IsGitAvailable())
+			Assert.Skip("Git is unavailable on this test host.");
+
+		using var workspace = new TemporaryDirectory();
+		var source = workspace.CreateDirectory("url/source");
+		RunGit(source, "init", "--initial-branch=main");
+		RunGit(source, "config", "user.email", "terminal-tests@devprojex.local");
+		RunGit(source, "config", "user.name", "DevProjex Terminal Tests");
+		workspace.WriteFile("url/source/src/remote.cs", "internal sealed class PublishedRemoteMarker {}\n");
+		RunGit(source, "add", ".");
+		RunGit(source, "commit", "-m", "initial");
+		var bare = Path.Combine(workspace.Path, "url", "origin.git");
+		RunGit(workspace.Path, "clone", "--bare", source, bare);
+		var repositoryUrl = new Uri(bare + Path.DirectorySeparatorChar).AbsoluteUri;
+		var home = workspace.CreateDirectory("url/home");
+		var temporary = workspace.CreateDirectory("url/temp");
+		var dataRoot = workspace.CreateDirectory("url/data");
+		var environment = CreateEnvironment(home, temporary, dataRoot, bundleExtractionRoot: null);
+
+		var context = await RunAsync(
+			application,
+			[
+				"export", "context", repositoryUrl,
+				"--git-mode", "none", "--view", "content", "--format", "text", "-o", "-", "--plain",
+				"--language", "en"
+			],
+			environment,
+			workspace.Path,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(CommandLineExitCodes.Success, context.ExitCode);
+		Assert.Contains("PublishedRemoteMarker", context.StandardOutput, StringComparison.Ordinal);
+		var progressLines = context.StandardError
+			.ReplaceLineEndings("\n")
+			.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+		Assert.InRange(progressLines.Length, 2, 6);
+		Assert.StartsWith("Cloning ", progressLines[0], StringComparison.Ordinal);
+		Assert.Equal("Clone completed.", progressLines[^1]);
+
+		var quietContext = await RunAsync(
+			application,
+			[
+				"export", "context", repositoryUrl,
+				"--git-mode", "none", "--view", "content", "--format", "text", "-o", "-", "--plain",
+				"--language", "en", "--progress", "never"
+			],
+			environment,
+			workspace.Path,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(CommandLineExitCodes.Success, quietContext.ExitCode);
+		Assert.Equal(context.StandardOutput, quietContext.StandardOutput);
+		Assert.Empty(quietContext.StandardError);
+
+		var destination = Path.Combine(workspace.Path, "url", "exported");
+		var project = await RunAsync(
+			application,
+			[
+				"export", "project", repositoryUrl,
+				"--git-mode", "none", "--as", "folder", "-o", destination, "--plain"
+			],
+			environment,
+			workspace.Path,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(CommandLineExitCodes.Success, project.ExitCode);
+		Assert.Equal(
+			"internal sealed class PublishedRemoteMarker {}\n",
+			File.ReadAllText(Path.Combine(destination, "src", "remote.cs")).ReplaceLineEndings("\n"));
+		Assert.Empty(project.StandardError);
+	}
 
 	[Fact]
 	public async Task WritableDefaultExtractionSupportsColdAndWarmDirectCli()
@@ -402,7 +570,7 @@ public sealed class PublishedSingleFileExtractionProcessTests
 		var environment = CreateEnvironment(home, temporary, dataRoot, extractionRoot);
 		var common = new[]
 		{
-			"--compress",
+			"--compress-code",
 			"--git-mode", "none",
 			"--exclude", "none",
 			"--progress", "never",
@@ -585,6 +753,84 @@ public sealed class PublishedSingleFileExtractionProcessTests
 		IReadOnlyList<string> arguments,
 		IReadOnlyDictionary<string, string?> environment,
 		string? workingDirectory,
+		CancellationToken cancellationToken) =>
+		await RunAsync(
+			application,
+			arguments,
+			environment,
+			workingDirectory,
+			standardInput: null,
+			cancellationToken);
+
+	private static bool IsGitAvailable()
+	{
+		try
+		{
+			using var process = Process.Start(CreateGitStartInfo(null, ["--version"]));
+			process?.WaitForExit(5_000);
+			return process is { HasExited: true, ExitCode: 0 };
+		}
+		catch
+		{
+			return false;
+		}
+	}
+
+	private static void RunGit(string workingDirectory, params string[] arguments)
+	{
+		using var process = new Process
+		{
+			StartInfo = CreateGitStartInfo(workingDirectory, arguments)
+		};
+		Assert.True(process.Start(), "Could not start git.");
+		var standardOutput = process.StandardOutput.ReadToEnd();
+		var standardError = process.StandardError.ReadToEnd();
+		Assert.True(process.WaitForExit(30_000), "Git did not exit within the test timeout.");
+		Assert.True(
+			process.ExitCode == 0,
+			$"git {string.Join(' ', arguments)} failed: {standardOutput}{standardError}");
+	}
+
+	private static ProcessStartInfo CreateGitStartInfo(
+		string? workingDirectory,
+		IReadOnlyList<string> arguments)
+	{
+		var startInfo = new ProcessStartInfo
+		{
+			FileName = "git",
+			UseShellExecute = false,
+			CreateNoWindow = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true
+		};
+		if (workingDirectory is not null)
+			startInfo.WorkingDirectory = workingDirectory;
+		foreach (var argument in arguments)
+			startInfo.ArgumentList.Add(argument);
+		string[] repositoryOverrides =
+		[
+			"GIT_DIR",
+			"GIT_WORK_TREE",
+			"GIT_INDEX_FILE",
+			"GIT_OBJECT_DIRECTORY",
+			"GIT_ALTERNATE_OBJECT_DIRECTORIES",
+			"GIT_COMMON_DIR",
+			"GIT_NAMESPACE"
+		];
+		foreach (var variable in repositoryOverrides)
+		{
+			startInfo.Environment.Remove(variable);
+		}
+		startInfo.Environment["GIT_TERMINAL_PROMPT"] = "0";
+		return startInfo;
+	}
+
+	private static async Task<VersionProcessResult> RunAsync(
+		string application,
+		IReadOnlyList<string> arguments,
+		IReadOnlyDictionary<string, string?> environment,
+		string? workingDirectory,
+		string? standardInput,
 		CancellationToken cancellationToken)
 	{
 		var startInfo = new ProcessStartInfo
@@ -594,8 +840,11 @@ public sealed class PublishedSingleFileExtractionProcessTests
 			CreateNoWindow = true,
 			RedirectStandardOutput = true,
 			RedirectStandardError = true,
+			RedirectStandardInput = standardInput is not null,
 			WorkingDirectory = workingDirectory ?? Environment.CurrentDirectory
 		};
+		if (standardInput is not null)
+			startInfo.StandardInputEncoding = new UTF8Encoding(false);
 		foreach (var argument in arguments)
 			startInfo.ArgumentList.Add(argument);
 		foreach (var entry in environment)
@@ -608,6 +857,11 @@ public sealed class PublishedSingleFileExtractionProcessTests
 
 		using var process = new Process { StartInfo = startInfo };
 		Assert.True(process.Start(), $"Could not start {application}.");
+		if (standardInput is not null)
+		{
+			await process.StandardInput.WriteAsync(standardInput);
+			process.StandardInput.Close();
+		}
 		using var timeout = CancellationTokenSource.CreateLinkedTokenSource(
 			cancellationToken);
 		timeout.CancelAfter(ProcessTimeout);

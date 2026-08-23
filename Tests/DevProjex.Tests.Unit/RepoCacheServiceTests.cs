@@ -300,7 +300,86 @@ public class RepoCacheServiceTests : IDisposable
                 entry.GetProperty("repositoryUrl").GetString(),
                 missingLegacyUrl,
                 StringComparison.Ordinal));
+
+		var managementEntries = service.ListCacheEntriesForManagement();
+		Assert.True(managementEntries.IsComplete);
+		Assert.Contains(
+			managementEntries.Entries,
+			entry => entry.RepositoryUrl == damagedUrl &&
+			         entry.State == RepositoryCacheEntryState.Damaged);
+		Assert.Contains(
+			managementEntries.Entries,
+			entry => entry.LocalPath == newerDamagedDuplicate &&
+			         entry.State == RepositoryCacheEntryState.Damaged);
     }
+
+	[Fact]
+	public void ClearAllCacheWithResult_LockedIndexFailsClosedWithoutChangingCache()
+	{
+		const string repositoryUrl = "https://github.com/example/locked-index.git";
+		var published = PublishZip(_service, repositoryUrl);
+		var lockPath = Path.Combine(_testCacheRoot, "cache-index.json.lock");
+		using var heldLock = new FileStream(
+			lockPath,
+			FileMode.OpenOrCreate,
+			FileAccess.ReadWrite,
+			FileShare.None);
+
+		var result = _service.ClearAllCacheWithResult();
+
+		Assert.Equal(0, result.Removed);
+		Assert.Equal(0, result.Retained);
+		Assert.True(result.Failed > 0);
+		Assert.True(Directory.Exists(published));
+	}
+
+	[Fact]
+	public void ClearAllCacheWithResult_FutureSchemaFailsClosedWithoutRewritingIndex()
+	{
+		const string repositoryUrl = "https://github.com/example/future-index.git";
+		var repositoryPath = _service.CreateRepositoryDirectory(repositoryUrl);
+		var indexPath = Path.Combine(_testCacheRoot, "cache-index.json");
+		Directory.CreateDirectory(_testCacheRoot);
+		File.WriteAllText(
+			indexPath,
+			JsonSerializer.Serialize(new
+			{
+				SchemaVersion = 999,
+				Entries = new[]
+				{
+					new RepositoryCacheIndexEntry(
+						RepositoryUrlUtility.GetComparisonKey(repositoryUrl),
+						repositoryUrl,
+						repositoryPath,
+						null,
+						null,
+						DateTimeOffset.UtcNow,
+						RepositoryCacheEntryState.Ready)
+				}
+			}, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+		var before = File.ReadAllBytes(indexPath);
+
+		var result = _service.ClearAllCacheWithResult();
+
+		Assert.Equal(0, result.Removed);
+		Assert.Equal(0, result.Retained);
+		Assert.True(result.Failed > 0);
+		Assert.True(Directory.Exists(repositoryPath));
+		Assert.Equal(before, File.ReadAllBytes(indexPath));
+	}
+
+	[Fact]
+	public void ClearAllCacheWithResult_RemovesAndCountsUnindexedRepositoryDirectory()
+	{
+		var unindexed = Path.Combine(_testCacheRoot, "unindexed-repository");
+		Directory.CreateDirectory(unindexed);
+		File.WriteAllText(Path.Combine(unindexed, "payload.txt"), "cached");
+
+		var result = _service.ClearAllCacheWithResult();
+
+		Assert.Equal(new CacheClearResult(1, 0, 0), result);
+		Assert.False(Directory.Exists(unindexed));
+	}
 
     [Fact]
     public void ListIndexedRepositories_DoesNotChangeLastOpenedTimeOrIndexBytes()

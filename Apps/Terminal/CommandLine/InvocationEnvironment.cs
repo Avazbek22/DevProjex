@@ -5,6 +5,7 @@ namespace DevProjex.Terminal.CommandLine;
 public interface ITerminalEnvironment
 {
 	TextReader Input { get; }
+	Stream? RawInput => null;
 	TextWriter Output { get; }
 	TextWriter Error { get; }
 	bool IsInputInteractive { get; }
@@ -29,6 +30,7 @@ public sealed class InvocationEnvironment : ITerminalEnvironment
 	public const string DesktopRequestVariable = "DEVPROJEX_DESKTOP_REQUEST_FILE";
 	internal const string InternalDataRootVariable = "DEVPROJEX_INTERNAL_DATA_ROOT";
 	private readonly TextWriter _output;
+	private Stream? _rawInput;
 
 	public InvocationEnvironment(bool hasAttachedConsole)
 	{
@@ -48,11 +50,12 @@ public sealed class InvocationEnvironment : ITerminalEnvironment
 			StringComparison.OrdinalIgnoreCase);
 		IsNoColor = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("NO_COLOR"));
 		SupportsUnicode = DetectUnicodeCapability();
-		(Width, Height) = ReadTerminalSize();
+		Height = ReadTerminalSize().Height;
 		Variables = CaptureVariables();
 	}
 
 	public TextReader Input => Console.In;
+	public Stream? RawInput => _rawInput ??= Console.OpenStandardInput();
 	public TextWriter Output => _output;
 	public TextWriter Error => Console.Error;
 	public bool IsInputInteractive { get; }
@@ -64,7 +67,7 @@ public sealed class InvocationEnvironment : ITerminalEnvironment
 	public bool IsTermDumb { get; }
 	public bool IsNoColor { get; }
 	public bool SupportsUnicode { get; }
-	public int Width { get; }
+	public int Width => ReadTerminalSize().Width;
 	public int Height { get; }
 	public IReadOnlyDictionary<string, string?> Variables { get; }
 

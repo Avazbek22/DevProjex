@@ -40,15 +40,28 @@ public sealed class AnalyzeCommandHandler(
 					services.SecretRedactionSession,
 					redactionFeatures)
 				: null);
+		IReadOnlyList<EffectiveRedactionFinding> effectiveFindings = [];
+		var effectiveFindingCount = 0;
 		if (transformationContext is not null)
 		{
 			await using var prepared = await services.SecretRedactionOutputPreparer
 				.PrepareAsync(
 					transformationContext,
 					plan.IncludedFiles,
+					request.IncludeFindings,
 					cancellationToken)
 				.ConfigureAwait(false);
 			var transformedAnalyzer = services.SecretRedactionOutputPreparer.CreatePreparedAnalyzer(prepared);
+			effectiveFindingCount = prepared.Snapshot?.DetectedCount ?? 0;
+			if (request.IncludeFindings)
+			{
+				effectiveFindings = prepared.GetEffectiveFindings();
+				if (effectiveFindings.Count != effectiveFindingCount)
+				{
+					throw new SecretDetectionException(
+						"The effective redaction finding count did not match the published snapshot.");
+				}
+			}
 			var transformedMetrics = await ProjectContentMetricsCalculator
 				.CalculateAsync(transformedAnalyzer, plan.IncludedFiles, cancellationToken)
 				.ConfigureAwait(false);
@@ -86,6 +99,8 @@ public sealed class AnalyzeCommandHandler(
 				UnscannableFiles = prepared.UnscannableFiles
 			};
 		}
+		if (request.IncludeFindings)
+			plan = plan with { Findings = effectiveFindings };
 		new ContextDiagnosticRenderer(environment, request.Output, services.Localization)
 			.Write(plan.Diagnostics);
 
@@ -142,7 +157,9 @@ public sealed class AnalyzeCommandHandler(
 			environment.Output.WriteLine(writtenPath);
 		}
 
-		return plan.HasErrors || request.Strict && plan.Diagnostics.Count > 0
+		return plan.HasErrors ||
+		       request.Strict && plan.Diagnostics.Count > 0 ||
+		       request.FailOnFindings && effectiveFindingCount > 0
 			? CommandLineExitCodes.PolicyFailure
 			: CommandLineExitCodes.Success;
 	}
@@ -165,10 +182,18 @@ internal static class AnalysisTextFormatter
 	public static string Build(ProjectContextPlan plan, LocalizationService localization)
 	{
 		var rows = BuildRows(plan, localization);
-		return string.Join(
-			       Environment.NewLine,
-			       rows.Select(static row => $"{row.Label}: {row.Value}")) +
-		       Environment.NewLine;
+		var output = new StringBuilder();
+		foreach (var row in rows)
+			output.Append(row.Label).Append(": ").AppendLine(row.Value);
+
+		if (plan.Findings is { } findings)
+		{
+			output.AppendLine();
+			foreach (var line in BuildFindingTable(findings, localization))
+				output.AppendLine(line);
+		}
+
+		return output.ToString();
 	}
 
 	public static IReadOnlyList<AnalysisTextRow> BuildRows(
@@ -243,6 +268,12 @@ internal static class AnalysisTextFormatter
 					localization["PrivateDataRedaction.NoFindingsNotice"]));
 			}
 		}
+		if (plan.Findings is { } findings)
+		{
+			rows.Add(new AnalysisTextRow(
+				localization["Terminal.Analysis.Findings"],
+				findings.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+		}
 		if (plan.UnscannableFiles is { Count: > 0 } unscannableFiles)
 		{
 			rows.Add(new AnalysisTextRow(
@@ -293,6 +324,34 @@ internal static class AnalysisTextFormatter
 		return rows;
 	}
 
+	internal static IReadOnlyList<string> BuildFindingTable(
+		IReadOnlyList<EffectiveRedactionFinding> findings,
+		LocalizationService localization)
+	{
+		var rows = new List<string[]>(findings.Count + 1)
+		{
+			new[]
+			{
+				localization["Terminal.Analysis.FindingCategory"],
+				localization["Terminal.Analysis.FindingRule"],
+				localization["Terminal.Analysis.FindingLocation"]
+			}
+		};
+		rows.AddRange(findings.Select(CreateFindingColumns));
+		return TerminalColumnLayout.Format(rows);
+	}
+
+	internal static string FormatFinding(EffectiveRedactionFinding finding) =>
+		TerminalColumnLayout.Format([CreateFindingColumns(finding)])[0];
+
+	internal static string[] CreateFindingColumns(EffectiveRedactionFinding finding) =>
+	[
+		ToCategoryToken(finding.Category),
+		TerminalTextEscaping.EscapeSingleLine(finding.RuleId),
+		$"{TerminalTextEscaping.EscapeSingleLine(finding.RelativePath.Replace('\\', '/'))}:" +
+		finding.LineNumber.ToString(System.Globalization.CultureInfo.InvariantCulture)
+	];
+
 	private static string FormatProfile(ProjectProfileReference? profile) =>
 		profile?.Kind switch
 		{
@@ -301,6 +360,14 @@ internal static class AnalysisTextFormatter
 			ProjectProfileSourceKind.Local => "local",
 			ProjectProfileSourceKind.Portable => profile.Path ?? "portable",
 			_ => throw new ArgumentOutOfRangeException(nameof(profile), profile, null)
+		};
+
+	private static string ToCategoryToken(RedactionFindingCategory category) =>
+		category switch
+		{
+			RedactionFindingCategory.Secrets => "secret",
+			RedactionFindingCategory.PrivateData => "private-data",
+			_ => throw new ArgumentOutOfRangeException(nameof(category), category, null)
 		};
 }
 

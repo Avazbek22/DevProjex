@@ -78,7 +78,10 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 			fingerprint = plan.Fingerprint
 		};
 		var json = JsonSerializer.Serialize(document, JsonOptions);
-		if (plan.Redaction is not null || plan.Privacy is not null || plan.Compression is not null)
+		if (plan.Redaction is not null ||
+		    plan.Privacy is not null ||
+		    plan.Compression is not null ||
+		    plan.Findings is not null)
 		{
 			var root = JsonNode.Parse(json)?.AsObject() ??
 			           throw new JsonException("The analysis document could not be materialized.");
@@ -116,6 +119,19 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 					["commentTransformedFiles"] = compression.CommentTransformedFiles,
 					["blankLineTransformedFiles"] = compression.BlankLineTransformedFiles
 				};
+			}
+			if (plan.Findings is { } findings)
+			{
+				root["findings"] = new JsonArray(findings.Select(finding =>
+					(JsonNode)new JsonObject
+					{
+						["ruleId"] = finding.RuleId,
+						["category"] = finding.Category == RedactionFindingCategory.Secrets
+							? "secret"
+							: "private-data",
+						["relativePath"] = finding.RelativePath.Replace('\\', '/'),
+						["lineNumber"] = finding.LineNumber
+					}).ToArray());
 			}
 			if (plan.UnscannableFiles is { Count: > 0 } unscannableFiles)
 			{

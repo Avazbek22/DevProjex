@@ -21,7 +21,8 @@ public sealed class DesktopCommandHandler(
 
 	public async Task<int> OpenAsync(
 		DesktopOpenRequest request,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		string? repositoryUrlSource = null)
 	{
 		if (request.NewWindow)
 		{
@@ -39,7 +40,7 @@ public sealed class DesktopCommandHandler(
 				DesktopInstanceRegistry.TryDelete(launched.RequestPath);
 				throw;
 			}
-			WriteOutput(ResolveAcceptedProjectPath(request, state));
+			WriteOutput(ResolveAcceptedProjectPath(request, state, repositoryUrlSource));
 			return CommandLineExitCodes.Success;
 		}
 
@@ -68,7 +69,7 @@ public sealed class DesktopCommandHandler(
 				DesktopInstanceRegistry.TryDelete(launched.RequestPath);
 				throw;
 			}
-			WriteOutput(ResolveAcceptedProjectPath(request, state));
+			WriteOutput(ResolveAcceptedProjectPath(request, state, repositoryUrlSource));
 			return CommandLineExitCodes.Success;
 		}
 
@@ -79,7 +80,7 @@ public sealed class DesktopCommandHandler(
 			request.WaitForCompletion ? TimeSpan.FromMinutes(2) : TimeSpan.FromSeconds(10),
 			cancellationToken).ConfigureAwait(false);
 		EnsureSuccess(response);
-		WriteOutput(ResolveAcceptedProjectPath(request, response.State));
+		WriteOutput(ResolveAcceptedProjectPath(request, response.State, repositoryUrlSource));
 		return CommandLineExitCodes.Success;
 	}
 
@@ -223,8 +224,11 @@ public sealed class DesktopCommandHandler(
 
 	private static string ResolveAcceptedProjectPath(
 		DesktopOpenRequest request,
-		IReadOnlyDictionary<string, object?>? state)
+		IReadOnlyDictionary<string, object?>? state,
+		string? repositoryUrlSource)
 	{
+		if (!string.IsNullOrWhiteSpace(repositoryUrlSource))
+			return repositoryUrlSource;
 		if (!string.IsNullOrWhiteSpace(request.ProjectPath))
 			return PathUtility.Normalize(request.ProjectPath);
 		if (DesktopOpenReadiness.TryGetProjectPath(state, out var projectPath))

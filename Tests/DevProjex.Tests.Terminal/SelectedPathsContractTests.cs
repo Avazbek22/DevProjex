@@ -167,6 +167,179 @@ public sealed class SelectedPathsContractTests
 	}
 
 	[Fact]
+	public async Task SelectFromFileCombinesWithDirectSelectionAndDeduplicates()
+	{
+		using var workspace = CreateWorkspace();
+		var selectionFile = workspace.WriteFile(
+			"selection.txt",
+			"src/a.cs\n\ndocs/readme.md\nsrc/a.cs\n");
+
+		using var document = await ExportJsonAsync(
+			workspace.Path,
+			"--select", "src/nested/b.cs",
+			"--select-from", selectionFile);
+
+		Assert.Equal(
+			FullContentPaths(workspace.Path, "docs/readme.md", "src/a.cs", "src/nested/b.cs"),
+			ReadFilePaths(document));
+		Assert.Equal(
+			["docs/readme.md", "src/a.cs", "src/nested/b.cs"],
+			ReadSelectedPaths(document).Order(StringComparer.Ordinal));
+	}
+
+	[Fact]
+	public async Task SelectFromFileAcceptsUtf8Bom()
+	{
+		using var workspace = CreateWorkspace();
+		var selectionFile = Path.Combine(workspace.Path, "selection-utf8-bom.txt");
+		await File.WriteAllTextAsync(
+			selectionFile,
+			"src/a.cs\n",
+			new UTF8Encoding(encoderShouldEmitUTF8Identifier: true),
+			TestContext.Current.CancellationToken);
+
+		using var document = await ExportJsonAsync(
+			workspace.Path,
+			"--select-from", selectionFile);
+
+		Assert.Equal(FullContentPaths(workspace.Path, "src/a.cs"), ReadFilePaths(document));
+	}
+
+	[Fact]
+	public async Task SelectFromFileRejectsUtf16Bom()
+	{
+		using var workspace = CreateWorkspace();
+		var selectionFile = Path.Combine(workspace.Path, "selection-utf16.txt");
+		await File.WriteAllTextAsync(
+			selectionFile,
+			"src/a.cs\n",
+			Encoding.Unicode,
+			TestContext.Current.CancellationToken);
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace.Path,
+			environment,
+			"--select-from", selectionFile);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("DPX-CLI-SELECT-FROM-INVALID", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task SelectFromRedirectedStdinReadsUtf8Paths()
+	{
+		using var workspace = CreateWorkspace();
+		workspace.WriteFile("данные/привет.cs", "class Привет {}\n");
+		var environment = new TestTerminalEnvironment
+		{
+			Input = new StringReader("данные/привет.cs\n"),
+			IsInputInteractive = false
+		};
+
+		var exitCode = await RunAsync(
+			workspace.Path,
+			environment,
+			"--select-from", "-");
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		Assert.Equal(
+			FullContentPaths(workspace.Path, "данные/привет.cs"),
+			ReadFilePaths(document));
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
+	public async Task SelectFromInteractiveStdinFailsWithoutReading()
+	{
+		using var workspace = CreateWorkspace();
+		var environment = new TestTerminalEnvironment
+		{
+			Input = new ThrowingTextReader(),
+			IsInputInteractive = true
+		};
+
+		var exitCode = await RunAsync(
+			workspace.Path,
+			environment,
+			"--select-from", "-");
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("DPX-CLI-SELECT-FROM-INVALID", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task SelectFromRejectsMoreThanTheEntryLimit()
+	{
+		using var workspace = CreateWorkspace();
+		var input = string.Concat(Enumerable.Repeat("src/a.cs\n", 100_001));
+		var environment = new TestTerminalEnvironment
+		{
+			Input = new StringReader(input),
+			IsInputInteractive = false
+		};
+
+		var exitCode = await RunAsync(
+			workspace.Path,
+			environment,
+			"--select-from", "-");
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("DPX-CLI-SELECT-FROM-INVALID", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task SelectFromRejectsAnOversizedSingleLineThroughBoundedReads()
+	{
+		using var workspace = CreateWorkspace();
+		var input = new OversizedSingleLineReader(SelectionPathListReader.MaximumBytes + 1);
+		var environment = new TestTerminalEnvironment
+		{
+			Input = input,
+			IsInputInteractive = false
+		};
+
+		var exitCode = await RunAsync(
+			workspace.Path,
+			environment,
+			"--select-from", "-");
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("DPX-CLI-SELECT-FROM-INVALID", environment.StandardError, StringComparison.Ordinal);
+		Assert.InRange(input.MaximumRequestedCharacters, 1, 16 * 1024);
+		Assert.InRange(
+			input.CharactersReturned,
+			SelectionPathListReader.MaximumBytes + 1,
+			SelectionPathListReader.MaximumBytes + 16 * 1024);
+	}
+
+	[Fact]
+	public async Task SelectFromRawStdinRejectsInvalidUtf8()
+	{
+		using var workspace = CreateWorkspace();
+		using var input = new MemoryStream([0x73, 0x72, 0x63, 0x2F, 0xC3, 0x28]);
+		var environment = new TestTerminalEnvironment
+		{
+			RawInput = input,
+			IsInputInteractive = false
+		};
+
+		var exitCode = await RunAsync(
+			workspace.Path,
+			environment,
+			"--select-from", "-");
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("DPX-CLI-SELECT-FROM-INVALID", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task SelectionPathCasingUsesThePlatformPathPolicy()
 	{
 		using var workspace = CreateWorkspace();
@@ -300,4 +473,36 @@ public sealed class SelectedPathsContractTests
 			.Select(path => Path.Combine(rootPath, path.Replace('/', Path.DirectorySeparatorChar)))
 			.OrderBy(static path => path, StringComparer.Ordinal)
 			.ToArray();
+
+	private sealed class ThrowingTextReader : TextReader
+	{
+		public override Task<string?> ReadLineAsync() =>
+			throw new InvalidOperationException("Interactive stdin must not be read.");
+
+		public override ValueTask<string?> ReadLineAsync(CancellationToken cancellationToken) =>
+			throw new InvalidOperationException("Interactive stdin must not be read.");
+	}
+
+	private sealed class OversizedSingleLineReader(long length) : TextReader
+	{
+		private long _remaining = length;
+
+		public int MaximumRequestedCharacters { get; private set; }
+		public long CharactersReturned { get; private set; }
+
+		public override ValueTask<int> ReadAsync(
+			Memory<char> buffer,
+			CancellationToken cancellationToken = default)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			MaximumRequestedCharacters = Math.Max(MaximumRequestedCharacters, buffer.Length);
+			var count = (int)Math.Min(buffer.Length, _remaining);
+			if (count == 0)
+				return ValueTask.FromResult(0);
+			buffer.Span[..count].Fill('x');
+			_remaining -= count;
+			CharactersReturned += count;
+			return ValueTask.FromResult(count);
+		}
+	}
 }

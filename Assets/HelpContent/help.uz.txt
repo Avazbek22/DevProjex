@@ -91,9 +91,11 @@ Misollar:
 * `devprojex` — interaktiv terminal ish maydonini ochish.
 * `devprojex open . --preview` — joriy papkani Desktop ko‘rib chiqish rejimida ochish.
 * `devprojex analyze . --format json` — joriy loyihani JSON sifatida tahlil qilish.
+* `devprojex tree .` — loyiha daraxtini terminalga chiqarish.
 * `devprojex export context . --format markdown -o ../devprojex-context.md` — AI uchun tayyor kontekstni manba loyihasidan tashqarida saqlash.
 * `devprojex export project . --as folder -o ../devprojex-submission` — samarali loyiha daraxtini aniq papkaga eksport qilish.
 * `devprojex export project . --as zip -o ../devprojex-submission.zip` — samarali loyiha daraxtini ZIP arxiviga eksport qilish.
+* `devprojex export context https://github.com/owner/repo -o -` — masofaviy repozitoriyni qo‘lda klonlamasdan qadoqlash.
 * `devprojex analyze . --git-mode tracked --exclude smart-ignore` — Git kuzatuvidagi fayllarni Smart Ignore bilan tahlil qilish.
 
 Xususiyatlar:
@@ -102,6 +104,9 @@ Xususiyatlar:
 * `--git-mode` Git filtrlashsiz, `.gitignore` yoki faqat Git kuzatuvidagi fayllarni tanlaydi;
 * `--exclude` oddiy istisnolarni Git filtrlashdan alohida boshqaradi;
 * tahlil va eksport buyruqlari deterministik bo‘lib, grafik interfeysni ochmaydi;
+* `tui`, `open`, `analyze` va ikkala `export` buyrug‘i Git repozitoriysi URL manzilini ham qabul qiladi; klon boshqariladigan keshga tushadi (`devprojex cache`);
+* buyruqlarning hujjatlashtirilgan aliaslari va qisqa bayroqlari bor — masalan `export ctx`, `-f`, `-n`; ularni `devprojex help` ko‘rsatadi;
+* `analyze --findings` maskalash topilmalarini qiymatlarisiz ro‘yxatlaydi, `--fail-on-findings` esa CI uchun noldan farqli chiqish kodini qaytaradi;
 * buyruq loyiha fayllarini o‘zgartirmaydi — DevProjex read-only rejimida ishlaydi.
 
 Agar `devprojex` buyrug‘i ishlamasa, DevProjex ichida oching:

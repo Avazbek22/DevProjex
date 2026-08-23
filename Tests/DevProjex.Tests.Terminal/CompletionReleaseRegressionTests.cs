@@ -130,6 +130,46 @@ public sealed class CompletionReleaseRegressionTests
 			candidates);
 	}
 
+	[Fact]
+	public async Task NewCommandsAliasesAndShortOptionsParticipateInUnifiedCompletion()
+	{
+		var roots = await CompleteAsync("devprojex ");
+		var exportChildren = await CompleteAsync("devprojex export ");
+		var aliasOptions = await CompleteAsync("devprojex export ctx . -");
+		var recentOptions = await CompleteAsync("devprojex recent --");
+		var recentShortOptions = await CompleteAsync("devprojex recent -");
+
+		Assert.Contains("tree", roots);
+		Assert.Contains("recent", roots);
+		Assert.Contains("cache", roots);
+		Assert.Contains("help", roots);
+		Assert.Contains("context", exportChildren);
+		Assert.Contains("ctx", exportChildren);
+		Assert.Contains("project", exportChildren);
+		Assert.Contains("proj", exportChildren);
+		Assert.Contains("-f", aliasOptions);
+		Assert.Contains("-n", aliasOptions);
+		Assert.Contains("--select-from", aliasOptions);
+		Assert.Contains("-f", recentShortOptions);
+		Assert.Contains("--limit", recentOptions);
+	}
+
+	[Fact]
+	public async Task HelpCompletionFollowsTheResolvedCommandPath()
+	{
+		var root = await CompleteAsync("devprojex help ");
+		var exportChildren = await CompleteAsync("devprojex help export ");
+
+		Assert.Contains("export", root);
+		Assert.Contains("analyze", root);
+		Assert.Contains("context", exportChildren);
+		Assert.Contains("ctx", exportChildren);
+		Assert.Contains("project", exportChildren);
+		Assert.Contains("proj", exportChildren);
+		Assert.DoesNotContain("analyze", exportChildren);
+		Assert.DoesNotContain("cache", exportChildren);
+	}
+
 	[Theory]
 	[InlineData("devprojex analyze . --format=j")]
 	[InlineData("devprojex analyze . --plain --color ")]

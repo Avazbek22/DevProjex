@@ -1143,6 +1143,39 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 	}
 
 	[Fact]
+	public async Task PrepareWithoutFindingCapturePublishesCountsWithoutMaterializingDescriptors()
+	{
+		const string secret = "capture-only-on-request-secret-value-42";
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("finding-capture-project");
+		var path = temporary.CreateFile(
+			"finding-capture-project/State.cs",
+			$"internal static class State {{ public const string Token = \"{secret}\"; }}");
+		using var redactionSession = new SecretRedactionSession(new ExactValueDetector(secret));
+		var context = ContentTransformationContext.For(
+			compression: null,
+			redaction: new SecretRedactionContext(sourceRoot, redactionSession))!;
+		var preparer = new SecretRedactionOutputPreparer(new FileContentAnalyzer());
+
+		await using var withoutCapture = await preparer.PrepareAsync(
+			context,
+			[path],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, Assert.IsType<SecretRedactionSnapshot>(withoutCapture.Snapshot).DetectedCount);
+		Assert.Empty(withoutCapture.GetEffectiveFindings());
+
+		await using var withCapture = await preparer.PrepareAsync(
+			context,
+			[path],
+			captureEffectiveFindings: true,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, Assert.IsType<SecretRedactionSnapshot>(withCapture.Snapshot).DetectedCount);
+		Assert.Single(withCapture.GetEffectiveFindings());
+	}
+
+	[Fact]
 	public async Task StripComments_KeepsLaterSecretOffsetsValidAfterBlankLineCollapse()
 	{
 		const string secret = "later-secret-value-42";

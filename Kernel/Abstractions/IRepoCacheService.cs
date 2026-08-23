@@ -43,6 +43,13 @@ public interface IRepoCacheService
     IReadOnlyList<RepositoryCacheCatalogEntry> ListIndexedRepositories();
 
     /// <summary>
+    /// Lists every existing indexed cache entry for explicit cache management, including damaged
+    /// entries that normal repository discovery must not offer for opening, and reports cache
+    /// roots that could not be read safely.
+    /// </summary>
+    RepositoryCacheManagementListResult ListCacheEntriesForManagement();
+
+    /// <summary>
     /// Pins a cache checkout for an indexed repository. Cache roots must be on a local file system;
     /// exclusive file-handle leases are not reliable on every network file system.
     /// </summary>
@@ -91,6 +98,17 @@ public interface IRepoCacheService
     /// Locked files will be cleaned up on next startup.
     /// </summary>
     void ClearAllCache();
+
+    /// <summary>
+    /// Clears all cached repositories and reports entries removed, retained by leases,
+    /// or left behind after a failed cleanup.
+    /// </summary>
+    CacheClearResult ClearAllCacheWithResult();
+
+    /// <summary>
+    /// Removes cached entries for an equivalent repository URL and reports the outcome.
+    /// </summary>
+    CacheClearResult RemoveCachedRepositoryWithResult(string repositoryUrl);
 
     /// <summary>
     /// Cleans up abandoned staging directories. Completed repositories are retained

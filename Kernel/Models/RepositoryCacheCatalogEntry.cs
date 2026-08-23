@@ -10,4 +10,6 @@ public sealed record RepositoryCacheCatalogEntry(
 	DateTimeOffset LastOpenedUtc,
 	long ApproximateSizeBytes,
 	RepositoryCacheContentKind ContentKind,
-	string LocalPath);
+	string LocalPath,
+	string? CommitHash = null,
+	RepositoryCacheEntryState State = RepositoryCacheEntryState.Ready);
