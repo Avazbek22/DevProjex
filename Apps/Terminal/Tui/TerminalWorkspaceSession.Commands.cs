@@ -485,7 +485,12 @@ internal sealed partial class TerminalWorkspaceSession
 		_activeCommandResult = success ? command : null;
 		if (_footer is not null)
 			_footer.Visible = false;
-		_commandLine.ShowResult(message, success);
+		var singleLineMessage = string.Join(
+			" · ",
+			message.Split(
+				["\r\n", "\n", "\r"],
+				StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+		_commandLine.ShowResult(singleLineMessage, success);
 		_application.LayoutAndDraw();
 		var resultCts = CancellationTokenSource.CreateLinkedTokenSource(_sessionCts.Token);
 		_commandResultCts = resultCts;

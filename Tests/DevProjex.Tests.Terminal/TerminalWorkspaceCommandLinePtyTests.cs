@@ -25,6 +25,33 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		await QuitAsync(terminal);
 	}
 
+	[Fact(Timeout = 120_000)]
+	public async Task AnalyzeCommandPublishesEveryMetricOnOneResultLine()
+	{
+		using var project = CreateProject();
+		await using var terminal = await StartAsync(
+			project.Path,
+			columns: 160,
+			rows: 30,
+			language: "ru");
+		await terminal.WaitForScreenAsync(
+			"ДЕРЕВО ПРОЕКТА",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.SendAsync(":analyze\r", TestContext.Current.CancellationToken);
+		var result = await terminal.WaitForScreenAsync(
+			"Символы",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+		var resultLine = Assert.Single(
+			result.Split('\n'),
+			static line => line.Contains("Символы", StringComparison.Ordinal));
+
+		Assert.Contains("Примерное число токенов", resultLine, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await QuitAsync(terminal);
+	}
+
 	[Theory(Timeout = 120_000)]
 	[InlineData(160, 40, false)]
 	[InlineData(100, 30, false)]
@@ -581,7 +608,8 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		int columns,
 		int rows,
 		IReadOnlyDictionary<string, string>? environment = null,
-		bool plain = false)
+		bool plain = false,
+		string language = "en")
 	{
 		var arguments = new List<string>
 		{
@@ -593,7 +621,7 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 			"inline",
 			"--no-mouse",
 			"--language",
-			"en"
+			language
 		};
 		if (plain)
 			arguments.Add("--plain");
