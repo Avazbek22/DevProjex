@@ -37,6 +37,8 @@ public sealed partial class TerminalLocalizationContractTests
 		"Terminal.Tui.ProfileInvalidRecovery",
 		"Terminal.Tui.Progress.CopyingFiles",
 		"Terminal.Tui.Progress.CancelHint",
+		"Terminal.Tui.Command.Set.Description",
+		"Terminal.Tui.Command.Error.UnknownToken",
 		"Terminal.Exit.Runtime",
 		"Terminal.Doctor.current-directory",
 		"Content.Classification.Binary"
@@ -123,6 +125,40 @@ public sealed partial class TerminalLocalizationContractTests
 		Assert.Equal(
 			["ASCII", "JSON", "XML", "Markdown"],
 			ProjectPresentationCatalog.Formats.Select(static descriptor => descriptor.UserLabel));
+	}
+
+	[Fact]
+	public void WorkspaceCommandCatalogAndContextHelpAreCompleteInEveryLocale()
+	{
+		var catalogs = ReadCatalogs();
+		var commandKeys = TerminalWorkspaceCommandCatalog.All
+			.SelectMany(static definition => new[]
+			{
+				definition.TitleKey,
+				definition.DescriptionKey,
+				definition.SchemaKey
+			})
+			.Append("Terminal.Tui.Command.Help.OverlayTitle")
+			.Append("Terminal.Tui.Command.Error.Similar")
+			.Distinct(StringComparer.Ordinal)
+			.ToArray();
+		var contextualHelpKeys = new[]
+		{
+			"Terminal.Tui.Help.Tree",
+			"Terminal.Tui.Help.Preview",
+			"Terminal.Tui.Help.Controls"
+		};
+
+		foreach (var (locale, catalog) in catalogs)
+		{
+			Assert.All(commandKeys, key =>
+			{
+				Assert.True(catalog.TryGetValue(key, out var value), $"{key} is missing in {locale}.json.");
+				Assert.False(string.IsNullOrWhiteSpace(value), $"{key} is empty in {locale}.json.");
+			});
+			Assert.All(contextualHelpKeys, key =>
+				Assert.Contains(":", catalog[key], StringComparison.Ordinal));
+		}
 	}
 
 	[Fact]

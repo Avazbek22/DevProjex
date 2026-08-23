@@ -9,7 +9,7 @@
 │                                 │ Filter actions:                                                                         │ ] Strip blank lines             ││
 │                                 │ Preview format                                                                          │─────────────────────────────────┘│
 │                                 │                                                                                         │Exclusions├────── [x] All (10) ──┐│
-│                                 │ Preview format: ASCII  [F]                                                              │x] Use .gitignore                ││
+│                                 │ Preview format: ASCII  …  :format <text|markdown|json|xml>                              │x] Use .gitignore                ││
 │                                 │                                                                                         │ ] Tracked Git files only        ││
 │                                 │                                                                                         │x] Smart ignore                  ││
 │                                 │                                                                                         │x] Empty folders                 ││
@@ -22,8 +22,8 @@
 │                                 │                                                                                         │                                 ││
 │                                 │                                                                                         │─────────────────────────────────┘│
 │                                 │ CONTEXT PREVIEW · Preview format · ASCII                                                │File types├─────── [x] All (3) ──┐│
-│                                 │ Choose ASCII, JSON, XML, or Markdown for the tree.                                      │x] .cs                           ││
-│                                 │                                                                                         │x] .json                         ││
+│                                 │ :format <text|markdown|json|xml>                                                        │x] .cs                           ││
+│                                 │ Choose ASCII, JSON, XML, or Markdown for the tree.                                      │x] .json                         ││
 │                                 │                                                                                         │x] .md                           ││
 │                                 │                                                                                         │                                 ││
 │                                 │                                                                                         │                                 ││

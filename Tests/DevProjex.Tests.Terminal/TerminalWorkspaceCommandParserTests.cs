@@ -1,3 +1,5 @@
+using Terminal.Gui.Input;
+
 namespace DevProjex.Tests.Terminal;
 
 public sealed class TerminalWorkspaceCommandParserTests
@@ -139,6 +141,15 @@ public sealed class TerminalWorkspaceCommandParserTests
 
 		Assert.Equal("view tree-content", treeContent.CompletedText);
 		Assert.Equal(treeContent.CompletedText.Length, treeContent.CursorPosition);
+	}
+
+	[Theory]
+	[InlineData(':', true)]
+	[InlineData(';', false)]
+	[InlineData('a', false)]
+	public void ActivationKeyRecognizesOnlyTheCommandPrefix(char character, bool expected)
+	{
+		Assert.Equal(expected, TerminalWorkspaceCommandKey.IsActivation(new Key(character)));
 	}
 
 	public static IEnumerable<object[]> ValidCommands =>
