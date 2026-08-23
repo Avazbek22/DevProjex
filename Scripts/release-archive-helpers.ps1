@@ -312,16 +312,60 @@ function Write-BigEndianUInt32([System.IO.Stream]$stream, [uint32]$value) {
     $stream.Write($bytes, 0, $bytes.Length)
 }
 
+function Read-BigEndianUInt32(
+    [byte[]]$bytes,
+    [int]$offset
+) {
+    if ($null -eq $bytes -or $offset -lt 0 -or $bytes.Length -lt ($offset + 4)) {
+        throw "Cannot read a big-endian UInt32 at offset $offset."
+    }
+
+    return [uint32](
+        ([uint32]$bytes[$offset] * 16777216) +
+        ([uint32]$bytes[$offset + 1] * 65536) +
+        ([uint32]$bytes[$offset + 2] * 256) +
+        [uint32]$bytes[$offset + 3])
+}
+
+function Assert-PngDimensions(
+    [byte[]]$payload,
+    [string]$sourcePath,
+    [string]$slotType,
+    [int]$expectedSize
+) {
+    $pngSignature = [byte[]]@(137, 80, 78, 71, 13, 10, 26, 10)
+    if ($null -eq $payload -or $payload.Length -lt 24) {
+        throw "macOS icon source for $slotType is not a complete PNG: $sourcePath"
+    }
+    for ($index = 0; $index -lt $pngSignature.Length; $index++) {
+        if ($payload[$index] -ne $pngSignature[$index]) {
+            throw "macOS icon source for $slotType is not a PNG: $sourcePath"
+        }
+    }
+
+    $ihdrLength = Read-BigEndianUInt32 -bytes $payload -offset 8
+    $ihdrType = [System.Text.Encoding]::ASCII.GetString($payload, 12, 4)
+    if ($ihdrLength -ne 13 -or $ihdrType -ne 'IHDR') {
+        throw "macOS icon source for $slotType has an invalid PNG IHDR: $sourcePath"
+    }
+
+    $width = Read-BigEndianUInt32 -bytes $payload -offset 16
+    $height = Read-BigEndianUInt32 -bytes $payload -offset 20
+    if ($width -ne $expectedSize -or $height -ne $expectedSize) {
+        throw "macOS icon source for $slotType must be ${expectedSize}x${expectedSize}px; found ${width}x${height}px: $sourcePath"
+    }
+}
+
 function New-DeterministicIcns([string]$iconSetPath, [string]$outputPath) {
     $slots = @(
-        [pscustomobject]@{ Type = 'ic07'; File = '128.png' },
-        [pscustomobject]@{ Type = 'ic08'; File = '256.png' },
-        [pscustomobject]@{ Type = 'ic09'; File = '512.png' },
-        [pscustomobject]@{ Type = 'ic10'; File = '1024.png' },
-        [pscustomobject]@{ Type = 'ic11'; File = '32.png' },
-        [pscustomobject]@{ Type = 'ic12'; File = '64.png' },
-        [pscustomobject]@{ Type = 'ic13'; File = '512.png' },
-        [pscustomobject]@{ Type = 'ic14'; File = '1024.png' }
+        [pscustomobject]@{ Type = 'ic07'; File = '128.png'; Size = 128 },
+        [pscustomobject]@{ Type = 'ic08'; File = '256.png'; Size = 256 },
+        [pscustomobject]@{ Type = 'ic09'; File = '512.png'; Size = 512 },
+        [pscustomobject]@{ Type = 'ic10'; File = '1024.png'; Size = 1024 },
+        [pscustomobject]@{ Type = 'ic11'; File = '32.png'; Size = 32 },
+        [pscustomobject]@{ Type = 'ic12'; File = '64.png'; Size = 64 },
+        [pscustomobject]@{ Type = 'ic13'; File = '256.png'; Size = 256 },
+        [pscustomobject]@{ Type = 'ic14'; File = '512.png'; Size = 512 }
     )
 
     $slotPayloads = New-Object 'System.Collections.Generic.List[object]'
@@ -335,6 +379,11 @@ function New-DeterministicIcns([string]$iconSetPath, [string]$outputPath) {
         if ($payload.Length -eq 0) {
             throw "Required macOS icon source is empty: $sourcePath"
         }
+        Assert-PngDimensions `
+            -payload $payload `
+            -sourcePath $sourcePath `
+            -slotType ([string]$slot.Type) `
+            -expectedSize ([int]$slot.Size)
         $slotPayloads.Add([pscustomobject]@{ Type = $slot.Type; Bytes = $payload })
         $totalLength += 8 + $payload.Length
     }

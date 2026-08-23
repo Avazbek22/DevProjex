@@ -31,6 +31,31 @@ public sealed class ReleaseArchivePackagingIntegrationTests
 		}
 	}
 
+	[Fact]
+	public void IcnsHelper_MapsEverySlotAndRejectsMismatchedPngDimensions()
+	{
+		using var workspace = new TemporaryDirectory();
+		var helperPath = Path.Combine(RepoRoot.Value, "Scripts", "release-archive-helpers.ps1");
+		var iconSetPath = Path.Combine(RepoRoot.Value, "Assets", "AppIcon", "MacOS", "AppIconSet");
+		var scriptPath = workspace.CreateFile(
+			"verify-release-icns.ps1",
+			BuildIcnsVerificationScript(helperPath, iconSetPath));
+		var shells = OperatingSystem.IsWindows()
+			? new[] { "powershell", "pwsh" }
+			: new[] { "pwsh" };
+
+		foreach (var shell in shells)
+		{
+			var result = RunPowerShell(shell, scriptPath, workspace.Path);
+			Assert.True(
+				result.ExitCode == 0,
+				$"ICNS verification failed in {shell}.{Environment.NewLine}" +
+				$"STDOUT:{Environment.NewLine}{result.StandardOutput}{Environment.NewLine}" +
+				$"STDERR:{Environment.NewLine}{result.StandardError}");
+			Assert.Contains("icns-contract-ok", result.StandardOutput, StringComparison.Ordinal);
+		}
+	}
+
 	private static string BuildVerificationScript(string helperPath)
 	{
 		var escapedHelperPath = helperPath.Replace("'", "''", StringComparison.Ordinal);
@@ -59,6 +84,61 @@ public sealed class ReleaseArchivePackagingIntegrationTests
 			& tar -tvf $firstArchive
 			if ($LASTEXITCODE -ne 0) { throw "tar -tvf failed with exit code $LASTEXITCODE." }
 			Write-Output 'archive-contract-ok'
+			""";
+	}
+
+	private static string BuildIcnsVerificationScript(string helperPath, string iconSetPath)
+	{
+		var escapedHelperPath = helperPath.Replace("'", "''", StringComparison.Ordinal);
+		var escapedIconSetPath = iconSetPath.Replace("'", "''", StringComparison.Ordinal);
+		return $$"""
+			$ErrorActionPreference = 'Stop'
+			. '{{escapedHelperPath}}'
+			$iconSetPath = '{{escapedIconSetPath}}'
+			$outputPath = Join-Path $PSScriptRoot 'app.icns'
+			New-DeterministicIcns -iconSetPath $iconSetPath -outputPath $outputPath
+			$actual = [System.IO.File]::ReadAllBytes($outputPath)
+			$expected = @(
+			    [pscustomobject]@{ Type = 'ic07'; File = '128.png' },
+			    [pscustomobject]@{ Type = 'ic08'; File = '256.png' },
+			    [pscustomobject]@{ Type = 'ic09'; File = '512.png' },
+			    [pscustomobject]@{ Type = 'ic10'; File = '1024.png' },
+			    [pscustomobject]@{ Type = 'ic11'; File = '32.png' },
+			    [pscustomobject]@{ Type = 'ic12'; File = '64.png' },
+			    [pscustomobject]@{ Type = 'ic13'; File = '256.png' },
+			    [pscustomobject]@{ Type = 'ic14'; File = '512.png' }
+			)
+			$offset = 8
+			foreach ($slot in $expected) {
+			    $type = [System.Text.Encoding]::ASCII.GetString($actual, $offset, 4)
+			    $entryLength = [int](Read-BigEndianUInt32 -bytes $actual -offset ($offset + 4))
+			    $expectedPayload = [System.IO.File]::ReadAllBytes((Join-Path $iconSetPath $slot.File))
+			    if ($type -ne $slot.Type -or $entryLength -ne (8 + $expectedPayload.Length)) {
+			        throw "ICNS slot mismatch for $($slot.Type)."
+			    }
+			    for ($index = 0; $index -lt $expectedPayload.Length; $index++) {
+			        if ($actual[$offset + 8 + $index] -ne $expectedPayload[$index]) {
+			            throw "ICNS payload mismatch for $($slot.Type)."
+			        }
+			    }
+			    $offset += $entryLength
+			}
+			if ($offset -ne $actual.Length) { throw 'ICNS contains unexpected trailing data.' }
+
+			$badIconSetPath = Join-Path $PSScriptRoot 'bad-icon-set'
+			New-Item -ItemType Directory -Path $badIconSetPath -Force | Out-Null
+			Get-ChildItem -LiteralPath $iconSetPath -Filter '*.png' | Copy-Item -Destination $badIconSetPath -Force
+			Copy-Item -LiteralPath (Join-Path $iconSetPath '128.png') -Destination (Join-Path $badIconSetPath '256.png') -Force
+			$rejected = $false
+			try {
+			    New-DeterministicIcns -iconSetPath $badIconSetPath -outputPath (Join-Path $PSScriptRoot 'bad.icns')
+			}
+			catch {
+			    if ($_.Exception.Message -notlike '*ic08*256x256px*128x128px*') { throw }
+			    $rejected = $true
+			}
+			if (-not $rejected) { throw 'Mismatched PNG dimensions were accepted.' }
+			Write-Output 'icns-contract-ok'
 			""";
 	}
 
