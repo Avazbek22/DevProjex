@@ -2,31 +2,31 @@
  <PROJECT_ROOT>
 ┌┤  PROJECT TREE├──────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├────────────────────────────────────┐┌┤> PARAMETERS├──────────────────────┐
 │v [x] <ID>││<ID>                                      ││┌┤Content processing├──────────────┐│
-│  > [x] src                           ││├── src                                                               │││  [ ] Hide secrets                ││
-│    [x] global.json                   │││   └── App.cs                                                        │││  [ ] Hide private data           ││
-│    [x] readme.md                     ││├── global.json                                                       │││  [ ] Compress code               ││
-│                                      ││└── readme.md                                                         │││  [ ] Strip comments              ││
-│                                      ││                                                                      │││  [ ] Strip blank lines           ││
+│  > [x] src                           ││├── src                                                               │││[ ] Hide secrets                  ││
+│    [x] global.json                   │││   └── App.cs                                                        │││[ ] Hide private data             ││
+│    [x] readme.md                     ││├── global.json                                                       │││[ ] Compress code                 ││
+│                                      ││└── readme.md                                                         │││[ ] Strip comments                ││
+│                                      ││                                                                      │││[ ] Strip blank lines             ││
 │                                      ││                                                                      ││└──────────────────────────────────┘│
 │                                      ││                                                                      ││┌┤Exclusions├─────────── [x] All ──┐│
-│                                      ││                                                                      │││  [x] Use .gitignore              ││
-│                                      ││                                                                      │││  [ ] Tracked Git files only      ││
-│                                      ││                                                                      │││  [x] Smart ignore                ││
-│                                      ││                                                                      │││  [x] Empty folders               ││
-│                                      ││                                                                      │││  [x] Empty files                 ││
-│                                      ││                                                                      │││  [x] Hidden folders              ││
-│                                      ││                                                                      │││  [x] Hidden files                ││
-│                                      ││                                                                      │││  [x] dot folders                 ││
-│                                      ││                                                                      │││  [x] dot files                   ││
-│                                      ││                                                                      │││  [x] Files without extension     ││
+│                                      ││                                                                      │││[x] Use .gitignore                ││
+│                                      ││                                                                      │││[ ] Tracked Git files only        ││
+│                                      ││                                                                      │││[x] Smart ignore                  ││
+│                                      ││                                                                      │││[x] Empty folders                 ││
+│                                      ││                                                                      │││[x] Empty files                   ││
+│                                      ││                                                                      │││[x] Hidden folders                ││
+│                                      ││                                                                      │││[x] Hidden files                  ││
+│                                      ││                                                                      │││[x] dot folders                   ││
+│                                      ││                                                                      │││[x] dot files                     ││
+│                                      ││                                                                      │││[x] Files without extension       ││
 │                                      ││                                                                      │││                                  ││
 │                                      ││                                                                      │││                                  ││
 │                                      ││                                                                      │││                                  ││
 │                                      ││                                                                      ││└──────────────────────────────────┘│
 │                                      ││                                                                      ││┌┤File types├─────────── [x] All ──┐│
-│                                      ││                                                                      │││  [x] .cs                         ││
-│                                      ││                                                                      │││  [x] .json                       ││
-│                                      ││                                                                      │││  [x] .md                         ││
+│                                      ││                                                                      │││[x] .cs                           ││
+│                                      ││                                                                      │││[x] .json                         ││
+│                                      ││                                                                      │││[x] .md                           ││
 │                                      ││                                                                      │││                                  ││
 │                                      ││                                                                      │││                                  ││
 │                                      ││                                                                      │││                                  ││

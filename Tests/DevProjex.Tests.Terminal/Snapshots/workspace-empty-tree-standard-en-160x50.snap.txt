@@ -1,11 +1,11 @@
  DevProjex Terminal · <ID>
  <PROJECT_ROOT>
 ┌┤  PROJECT TREE├─────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├───────────────────────────────────────────┐┌┤> PARAMETERS├──────────────────────┐
-│v [x] <ID>   ││<ID>                                             ││┌┤Content processing├──────────────┐│
-│  > [x] src                              ││├── src                                                                      │││[ ] Hide secrets                  ││
-│    [x] global.json                      │││   └── App.cs                                                               │││[ ] Hide private data             ││
-│    [x] readme.md                        ││├── global.json                                                              │││[ ] Compress code                 ││
-│                                         ││└── readme.md                                                                │││[ ] Strip comments                ││
+│v [x] <ID>   ││+ <ID>                                           ││┌┤Content processing├──────────────┐│
+│  No visible items — check file types..  ││                                                                             │││[ ] Hide secrets                  ││
+│                                         ││                                                                             │││[ ] Hide private data             ││
+│                                         ││                                                                             │││[ ] Compress code                 ││
+│                                         ││                                                                             │││[ ] Strip comments                ││
 │                                         ││                                                                             │││[ ] Strip blank lines             ││
 │                                         ││                                                                             ││└──────────────────────────────────┘│
 │                                         ││                                                                             ││┌┤Exclusions├─────────── [x] All ──┐│
@@ -26,10 +26,10 @@
 │                                         ││                                                                             │││                                  ││
 │                                         ││                                                                             │││                                  ││
 │                                         ││                                                                             ││└──────────────────────────────────┘│
-│                                         ││                                                                             ││┌┤File types├─────────── [x] All ──┐│
-│                                         ││                                                                             │││[x] .cs                           ││
-│                                         ││                                                                             │││[x] .json                         ││
-│                                         ││                                                                             │││[x] .md                           ││
+│                                         ││                                                                             ││┌┤File types├─────────── [ ] All ──┐│
+│                                         ││                                                                             │││[ ] .cs                           ││
+│                                         ││                                                                             │││[ ] .json                         ││
+│                                         ││                                                                             │││[ ] .md                           ││
 │                                         ││                                                                             │││                                  ││
 │                                         ││                                                                             │││                                  ││
 │                                         ││                                                                             │││                                  ││
@@ -43,8 +43,8 @@
 │                                         ││                                                                             │││                                  ││
 │                                         ││                                                                             │││                                  ││
 │                                         ││                                                                             │││                                  ││
-│                                         ││ Files 3  |  Lines 1-6/6                                                     ││└──────────────────────────────────┘│
+│                                         ││ Files 0  |  Lines 1-1/1                                                     ││└──────────────────────────────────┘│
 └─────────────────────────────────────────┘└─────────────────────────────────────────────────────────────────────────────┘└────────────────────────────────────┘
 
- Files 3 · Folders 2 · 40 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
+ Files 0 · Folders 0 · 0 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
  Up/Down or j/k Navigate   Enter Change   Tab/F6 Tree   Ctrl+P Action palette   ? Help

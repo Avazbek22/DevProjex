@@ -3,6 +3,19 @@ namespace DevProjex.Tests.Terminal;
 public sealed class TerminalWorkspaceStateTests
 {
 	[Fact]
+	public void EmptyEffectiveTreeRetainsOnlyTheRealRoot()
+	{
+		var root = CreateSyntheticRoot("empty-effective-tree");
+		var tree = new TreeNodeDescriptor("project", root, true, false, "folder", []);
+		using var state = new TerminalWorkspaceState(CreatePlan(tree, [], [root]));
+
+		var row = Assert.Single(state.VisibleRows);
+		Assert.Same(tree, row.Node);
+		Assert.False(state.HasVisibleTreeItems);
+		Assert.Empty(state.Plan.IncludedFiles);
+	}
+
+	[Fact]
 	public void CompleteSelectionUsesCanonicalEmptySelectedPaths()
 	{
 		var state = new TerminalWorkspaceState(CreatePlan());

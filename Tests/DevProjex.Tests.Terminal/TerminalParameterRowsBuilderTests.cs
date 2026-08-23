@@ -5,6 +5,25 @@ namespace DevProjex.Tests.Terminal;
 
 public sealed class TerminalParameterRowsBuilderTests
 {
+	[Theory]
+	[InlineData(false, true, "[x] .cs")]
+	[InlineData(false, false, "[ ] .cs")]
+	[InlineData(true, null, "Unavailable")]
+	public void RowsStartAtTheMiniPanelContentEdge(
+		bool information,
+		bool? isSelected,
+		string expected)
+	{
+		var kind = information
+			? TerminalParameterRowKind.Information
+			: TerminalParameterRowKind.Extension;
+		var label = information ? "Unavailable" : ".cs";
+		var row = new TerminalParameterRow("row", kind, label, isSelected);
+
+		Assert.Equal(expected, row.ToString());
+		Assert.False(row.ToString().StartsWith(' '));
+	}
+
 	[Fact]
 	public void ContentRowsExposeAllTransformationsAndSeparateRedactionCounters()
 	{

@@ -2,21 +2,21 @@
  <PROJECT_ROOT>
 ┌┤> PARAMETERS├──────────────────────────────────────────────────────┐
 │┌┤Content processing├──────────────────────────────────────────────┐│
-││  [ ] Hide secrets                                                ││
-││  [ ] Hide private data                                           ││
-││  [ ] Compress code                                               ││
-││  [ ] Strip comments                                              ││
-││  [ ] Strip blank lines                                           ││
+││[ ] Hide secrets                                                  ││
+││[ ] Hide private data                                             ││
+││[ ] Compress code                                                 ││
+││[ ] Strip comments                                                ││
+││[ ] Strip blank lines                                             ││
 │└──────────────────────────────────────────────────────────────────┘│
 │┌┤Exclusions├─────────────────────────────────────────── [x] All ──┐│
-││  [x] Use .gitignore                                             ▲││
-││  [ ] Tracked Git files only                                     ┃││
-││  [x] Smart ignore                                               ▼││
+││[x] Use .gitignore                                               ▲││
+││[ ] Tracked Git files only                                       ┃││
+││[x] Smart ignore                                                 ▼││
 │└──────────────────────────────────────────────────────────────────┘│
 │┌┤File types├─────────────────────────────────────────── [x] All ──┐│
-││  [x] .cs                                                         ││
-││  [x] .json                                                       ││
-││  [x] .md                                                         ││
+││[x] .cs                                                           ││
+││[x] .json                                                         ││
+││[x] .md                                                           ││
 │└──────────────────────────────────────────────────────────────────┘│
 └────────────────────────────────────────────────────────────────────┘
 

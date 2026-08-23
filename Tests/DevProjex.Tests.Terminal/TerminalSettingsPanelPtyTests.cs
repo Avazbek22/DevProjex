@@ -279,6 +279,66 @@ public sealed class TerminalSettingsPanelPtyTests
 		await ExitAsync(terminal);
 	}
 
+	[Theory(Timeout = 90_000)]
+	[InlineData("standard", "workspace-empty-tree-standard-en-160x50")]
+	[InlineData("local", "workspace-empty-tree-local-en-160x50")]
+	public async Task EmptyTreeHintKeepsTheRootForStandardAndLocalProfiles(
+		string profile,
+		string snapshot)
+	{
+		using var project = CreatePanelProject();
+		await using var terminal = await StartAsync(
+			project.Path,
+			columns: 160,
+			rows: 50,
+			profile: profile,
+			initializeDataRoot: profile == "local"
+				? dataRoot => new ProjectProfileStore(() => dataRoot).SaveProfile(
+					project.Path,
+					new ProjectSelectionProfile(
+						SelectedRootFolders: [],
+						SelectedExtensions: [".cs", ".json", ".md"],
+						SelectedIgnoreOptions: []))
+				: null);
+
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> PARAMETERS",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("T", TestContext.Current.CancellationToken);
+		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		var empty = await terminal.WaitForScreenAsync(
+			"No visible items",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("Files 0", empty, StringComparison.Ordinal);
+		Assert.Contains("Folders 0", empty, StringComparison.Ordinal);
+		Assert.Contains("~0 tokens", empty, StringComparison.Ordinal);
+		Assert.Contains("v [x]", ExtractFirstPanel(empty), StringComparison.Ordinal);
+		Assert.DoesNotContain("Processing request", empty, StringComparison.Ordinal);
+		TerminalScreenSnapshot.Verify(snapshot, empty, (project.Path, "<PROJECT_ROOT>"));
+		foreach (var viewShortcut in new[] { "1", "2", "3" })
+		{
+			await terminal.SendAsync(viewShortcut, TestContext.Current.CancellationToken);
+			await Task.Delay(250, TestContext.Current.CancellationToken);
+			var view = terminal.CaptureScreen();
+			Assert.False(terminal.HasExited);
+			Assert.Contains("Files 0", view, StringComparison.Ordinal);
+			Assert.DoesNotContain("DPX-TUI-PREVIEW-FAILED", view, StringComparison.Ordinal);
+		}
+
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		var restored = await terminal.WaitForScreenAsync(
+			"Files 3",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.DoesNotContain("No visible items", restored, StringComparison.Ordinal);
+		await ExitAsync(terminal);
+	}
+
 	[Fact(Timeout = 90_000)]
 	public async Task ArrowKeysCrossMiniPanelBoundariesAndAllAffectsOnlyItsPanel()
 	{
@@ -304,10 +364,41 @@ public sealed class TerminalSettingsPanelPtyTests
 		await terminal.WaitForScreenAsync(
 			"Files 0",
 			cancellationToken: TestContext.Current.CancellationToken);
-		var extensionsCleared = await WaitForStableScreenAsync(terminal, "[ ] .cs");
-		Assert.Contains("[ ] Hide secrets", extensionsCleared, StringComparison.Ordinal);
-		Assert.Contains("[ ] All", ExtractPanel(extensionsCleared, "File types", null));
+		var controlsWithExtensionsCleared = await WaitForStableScreenAsync(terminal, "[ ] .cs");
+		Assert.DoesNotContain("Processing request", controlsWithExtensionsCleared, StringComparison.Ordinal);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		var extensionsCleared = await WaitForStableScreenAsync(
+			terminal,
+			"No visible items — check file types and exclusions");
+		Assert.Contains("[ ] Hide secrets", controlsWithExtensionsCleared, StringComparison.Ordinal);
+		Assert.Contains("[ ] All", ExtractPanel(controlsWithExtensionsCleared, "File types", null));
+		Assert.Contains("project", ExtractFirstPanel(extensionsCleared), StringComparison.OrdinalIgnoreCase);
+		Assert.Contains("Files 0", extensionsCleared, StringComparison.Ordinal);
+		Assert.Contains("Folders 0", extensionsCleared, StringComparison.Ordinal);
+		Assert.Contains("~0 tokens", extensionsCleared, StringComparison.Ordinal);
+		Assert.DoesNotContain("Processing request", extensionsCleared, StringComparison.Ordinal);
 
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		var extensionsRestored = await WaitForStableScreenAsync(terminal, "[x] .cs");
+		Assert.DoesNotContain(
+			"No visible items — check file types and exclusions",
+			extensionsRestored,
+			StringComparison.Ordinal);
+		Assert.Contains("Files 3", extensionsRestored, StringComparison.Ordinal);
+
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"No visible items — check file types and exclusions",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> PARAMETERS",
+			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendAsync("X", TestContext.Current.CancellationToken);
 		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
