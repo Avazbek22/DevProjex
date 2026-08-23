@@ -8,6 +8,7 @@ internal enum TerminalWorkspaceActionKind
 	Search,
 	PreviewView,
 	PreviewFormat,
+	Copy,
 	OpenControls,
 	GitFiltering,
 	Exclusions,
@@ -21,6 +22,7 @@ internal enum TerminalWorkspaceActionKind
 	GetUpdates,
 	SwitchBranch,
 	RecentWorkspaces,
+	Refresh,
 	ReturnToWelcome,
 	Help
 }
@@ -112,8 +114,8 @@ internal sealed record TerminalWorkspaceCommandExecutionResult(
 	public static TerminalWorkspaceCommandExecutionResult Failure(string message) =>
 		new(TerminalWorkspaceCommandExecutionStatus.Failure, message);
 
-	public static TerminalWorkspaceCommandExecutionResult Unavailable() =>
-		new(TerminalWorkspaceCommandExecutionStatus.Unavailable);
+	public static TerminalWorkspaceCommandExecutionResult Unavailable(string? message = null) =>
+		new(TerminalWorkspaceCommandExecutionStatus.Unavailable, message);
 
 	public static TerminalWorkspaceCommandExecutionResult Deferred() =>
 		new(TerminalWorkspaceCommandExecutionStatus.Deferred);
@@ -122,7 +124,8 @@ internal sealed record TerminalWorkspaceCommandExecutionResult(
 internal sealed record TerminalWorkspaceCommandAction(
 	TerminalWorkspaceCommandDefinition Definition,
 	Func<bool> IsAvailable,
-	Func<TerminalWorkspaceCommand, TerminalWorkspaceCommandExecutionResult> Execute);
+	Func<TerminalWorkspaceCommand, TerminalWorkspaceCommandExecutionResult> Execute,
+	Func<string?>? UnavailableMessage = null);
 
 internal sealed class TerminalWorkspaceActionRegistry
 {
@@ -186,7 +189,8 @@ internal sealed class TerminalWorkspaceActionRegistry
 			return TerminalWorkspaceCommandExecutionResult.Failure(command.Definition.Id);
 		return action.IsAvailable()
 			? action.Execute(command)
-			: TerminalWorkspaceCommandExecutionResult.Unavailable();
+			: TerminalWorkspaceCommandExecutionResult.Unavailable(
+				action.UnavailableMessage?.Invoke());
 	}
 
 	public TerminalWorkspaceCommandExecutionResult Execute(TerminalPaletteItem item)

@@ -68,6 +68,72 @@ public sealed class TerminalWorkspaceController(
 		state.ReplacePlan(plan);
 	}
 
+	public async Task RefreshProjectAsync(
+		TerminalWorkspaceState state,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(state);
+		services.IgnoreRulesService.RevalidateCaches(state.Plan.SourceRoot, cancellationToken);
+		var sourceIdentity = await services.SourceIdentityResolver
+			.ResolveAsync(state.Plan.SourceRoot, cancellationToken: cancellationToken)
+			.ConfigureAwait(false);
+		var selection = state.BuildSelection() with { SelectedPaths = [] };
+		var discovered = await BuildPlanAsync(
+				state.Plan.SourceRoot,
+				selection,
+				sourceIdentity,
+				cancellationToken)
+			.ConfigureAwait(false);
+		ThrowIfTrackedModeIsUnavailable(discovered);
+
+		var previousExtensions = new HashSet<string>(
+			state.Plan.Selection.Extensions ?? state.Plan.SelectedExtensions,
+			StringComparer.OrdinalIgnoreCase);
+		var extensionEvolution = SelectionEvolutionPolicy.Reconcile(
+			discovered.AvailableExtensions,
+			previousExtensions,
+			state.ExtensionOptionStates,
+			static _ => true,
+			StringComparer.OrdinalIgnoreCase);
+		selection = selection with
+		{
+			Extensions = extensionEvolution.SelectedItems
+				.Order(StringComparer.OrdinalIgnoreCase)
+				.ToArray()
+		};
+		discovered = await BuildPlanAsync(
+				state.Plan.SourceRoot,
+				selection,
+				sourceIdentity,
+				cancellationToken)
+			.ConfigureAwait(false);
+		ThrowIfTrackedModeIsUnavailable(discovered);
+
+		var availablePaths = TerminalWorkspaceState.BuildSelectableRelativePaths(
+			discovered.EffectiveTree,
+			discovered.SourceRoot);
+		var pathEvolution = SelectionEvolutionPolicy.Reconcile(
+			availablePaths,
+			state.BuildSelectedItemRelativePaths(),
+			state.PathOptionStates,
+			static _ => true,
+			PathComparer.Default);
+		selection = selection with
+		{
+			SelectedPaths = pathEvolution.SelectedItems.Count == availablePaths.Count
+				? []
+				: pathEvolution.SelectedItems.Order(StringComparer.Ordinal).ToArray()
+		};
+		var plan = await BuildPlanAsync(
+				state.Plan.SourceRoot,
+				selection,
+				sourceIdentity,
+				cancellationToken)
+			.ConfigureAwait(false);
+		ThrowIfTrackedModeIsUnavailable(plan);
+		state.ReplacePlan(plan, extensionEvolution.KnownStates, pathEvolution.KnownStates);
+	}
+
 	public async Task ReprojectSelectionAsync(
 		TerminalWorkspaceState state,
 		CancellationToken cancellationToken)
@@ -363,6 +429,22 @@ public sealed class TerminalWorkspaceController(
 				stream,
 				token),
 			cancellationToken);
+	}
+
+	public async Task<string> BuildCopyPayloadAsync(
+		TerminalWorkspaceState state,
+		ProjectContextView view,
+		ProjectContextDocumentFormat format,
+		CancellationToken cancellationToken)
+	{
+		await BuildCurrentPlanAsync(state, cancellationToken).ConfigureAwait(false);
+		using var document = await BuildExactExportDocumentAsync(
+				state,
+				view,
+				format,
+				cancellationToken)
+			.ConfigureAwait(false);
+		return PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(document);
 	}
 
 	private async Task<IPreviewTextDocument> BuildInteractivePreviewAsync(

@@ -31,6 +31,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private readonly TerminalParameterRowsBuilder _parameterRowsBuilder;
 	private readonly TerminalWorkspacePresentation _presentation;
 	private readonly TerminalWorkspaceCommandParser _commandParser = new();
+	private readonly TerminalClipboardWriter _clipboardWriter;
 	private readonly TerminalCommandHistory _commandHistory;
 	private readonly ITerminalOperationObserver _operationObserver;
 	private readonly Action _prepareForShutdown;
@@ -138,6 +139,17 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_prepareForShutdown = prepareForShutdown ??
 			throw new ArgumentNullException(nameof(prepareForShutdown));
 		_controller = new TerminalWorkspaceController(services, environment);
+		_clipboardWriter = new TerminalClipboardWriter(
+			() => _application.Clipboard,
+			sequence =>
+			{
+				var driver = _application.Driver;
+				if (driver is null)
+					return false;
+				driver.WriteRaw(sequence);
+				return true;
+			},
+			() => _environment.IsOutputInteractive && !_environment.IsTermDumb);
 		_parameterRowsBuilder = new TerminalParameterRowsBuilder(
 			L,
 			FitControlLabel,
@@ -2599,18 +2611,24 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		}
 	}
 
-	private void SaveProfile()
+	private void SaveProfile(string? name = null, bool originatedFromCommandLine = false)
 	{
 		if (_state is null)
 			return;
-		var defaultPath = BuildDefaultExportPath(
-			_state.Plan.SourceRoot,
-			Directory.GetCurrentDirectory(),
-			"devprojex-profile.json");
-		var destination = Prompt(
-			L("Terminal.Tui.SaveProfile"),
-			L("Terminal.Tui.ProfileDestination"),
-			defaultPath);
+		var destination = string.IsNullOrWhiteSpace(name)
+			? Prompt(
+				L("Terminal.Tui.SaveProfile"),
+				L("Terminal.Tui.ProfileDestination"),
+				BuildDefaultExportPath(
+					_state.Plan.SourceRoot,
+					Directory.GetCurrentDirectory(),
+					"devprojex-profile.json"))
+			: BuildDefaultExportPath(
+				_state.Plan.SourceRoot,
+				Directory.GetCurrentDirectory(),
+				name.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+					? name
+					: name + ".json");
 		if (string.IsNullOrWhiteSpace(destination))
 			return;
 		_activeOperationTask = RunOperationAsync(
@@ -2619,14 +2637,17 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				_state,
 				destination,
 				overwrite: false,
-				token).ConfigureAwait(false));
+				token).ConfigureAwait(false),
+			originatedFromCommandLine: originatedFromCommandLine);
 	}
 
 	private async Task RunOperationAsync(
 		string operationName,
 		Func<CancellationToken, Task<string?>> operation,
 		Func<string, string>? equivalentCommand = null,
-		bool modalProgress = false)
+		bool modalProgress = false,
+		bool originatedFromCommandLine = false,
+		string? cornerProgressLabel = null)
 	{
 		if (!await _operationGate.WaitAsync(0, _sessionCts.Token).ConfigureAwait(false))
 			return;
@@ -2642,7 +2663,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			}
 			else
 			{
-				cornerProgressId = BeginCornerProgress(L("Terminal.Tui.Progress.Refreshing"));
+				cornerProgressId = BeginCornerProgress(
+					cornerProgressLabel ?? L("Terminal.Tui.Progress.Refreshing"));
 				await _operationObserver
 					.ObservePhaseAsync(
 						TerminalOperationPhase.BackgroundRefresh,
@@ -2665,7 +2687,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					var message = equivalentCommand is null
 						? result
 						: $"{result}\n\n{L("Terminal.Tui.EquivalentCommand")}:\n{equivalentCommand(result)}";
-					ShowNotice(operationName, message, TerminalWorkspaceTheme.Success);
+					if (originatedFromCommandLine)
+						ShowCommandResult(message, success: true);
+					else
+						ShowNotice(operationName, message, TerminalWorkspaceTheme.Success);
 				}
 				SchedulePreviewRefresh();
 				return true;
@@ -2690,24 +2715,29 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		{
 			await CompleteCornerProgressAsync(cornerProgressId).ConfigureAwait(false);
 			cornerProgressId = 0;
-			await ShowFailureAsync(
+			await ShowOperationFailureAsync(
 				"DPX-EXPORT-DESTINATION-EXISTS",
-				L("Terminal.Tui.Error.DestinationExists")).ConfigureAwait(false);
+				L("Terminal.Tui.Error.DestinationExists"),
+				originatedFromCommandLine).ConfigureAwait(false);
 		}
 		catch (ProjectCopyExportException exception)
 		{
 			await CompleteCornerProgressAsync(cornerProgressId).ConfigureAwait(false);
 			cornerProgressId = 0;
 			var error = ProjectCopyTerminalErrorMapper.Map(exception, _services.Localization);
-			await ShowFailureAsync(error.Code, error.Message).ConfigureAwait(false);
+			await ShowOperationFailureAsync(
+				error.Code,
+				error.Message,
+				originatedFromCommandLine).ConfigureAwait(false);
 		}
 		catch (ProjectContextValidationException exception)
 		{
 			await CompleteCornerProgressAsync(cornerProgressId).ConfigureAwait(false);
 			cornerProgressId = 0;
-			await ShowFailureAsync(
+			await ShowOperationFailureAsync(
 				exception.Code,
-				ResolveValidationErrorMessage(exception.Code)).ConfigureAwait(false);
+				ResolveValidationErrorMessage(exception.Code),
+				originatedFromCommandLine).ConfigureAwait(false);
 		}
 		catch (PortableProjectProfileException exception)
 		{
@@ -2716,15 +2746,38 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			var message = exception.Code == "DPX-PROFILE-DESTINATION-EXISTS"
 				? L("Terminal.Error.ProfileDestinationExists")
 				: L("Terminal.Error.ProfileWriteFailed");
-			await ShowFailureAsync(exception.Code, message).ConfigureAwait(false);
+			await ShowOperationFailureAsync(
+				exception.Code,
+				message,
+				originatedFromCommandLine).ConfigureAwait(false);
+		}
+		catch (TerminalWorkspaceOperationException exception)
+		{
+			await CompleteCornerProgressAsync(cornerProgressId).ConfigureAwait(false);
+			cornerProgressId = 0;
+			var messageKey = exception.Code switch
+			{
+				"DPX-TUI-CLIPBOARD-PAYLOAD-TOO-LARGE" =>
+					"Terminal.Tui.Command.Copy.Error.PayloadTooLarge",
+				"DPX-TUI-CLIPBOARD-UNAVAILABLE" =>
+					"Terminal.Tui.Command.Copy.Error.Unavailable",
+				"DPX-TUI-GIT-BRANCH-NOT-FOUND" =>
+					"Terminal.Tui.Command.Branch.Error.NotFound",
+				_ => "Terminal.Tui.Error.OperationFailed"
+			};
+			await ShowOperationFailureAsync(
+				exception.Code,
+				L(messageKey),
+				originatedFromCommandLine).ConfigureAwait(false);
 		}
 		catch
 		{
 			await CompleteCornerProgressAsync(cornerProgressId).ConfigureAwait(false);
 			cornerProgressId = 0;
-			await ShowFailureAsync(
+			await ShowOperationFailureAsync(
 				"DPX-TUI-OPERATION-FAILED",
-				L("Terminal.Tui.Error.OperationFailed")).ConfigureAwait(false);
+				L("Terminal.Tui.Error.OperationFailed"),
+				originatedFromCommandLine).ConfigureAwait(false);
 		}
 		finally
 		{
@@ -2733,6 +2786,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_operationGate.Release();
 		}
 	}
+
+	private Task ShowOperationFailureAsync(
+		string code,
+		string message,
+		bool originatedFromCommandLine) =>
+		originatedFromCommandLine
+			? ShowCommandFailureAsync(code, message)
+			: ShowFailureAsync(code, message);
 
 	private long BeginCornerProgress(string label) =>
 		_screen == TerminalWorkspaceScreen.Workspace && _cornerProgress is not null

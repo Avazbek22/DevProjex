@@ -477,7 +477,9 @@ internal sealed partial class TerminalWorkspaceSession
 				"Terminal.Tui.Analyze",
 				"Terminal.Command.Analyze",
 				"A",
-				execute: AnalyzeCurrentContext),
+				commandSyntax: TerminalWorkspaceCommandCatalog.Get(
+					TerminalWorkspaceCommandVerb.Analyze).Syntax,
+				execute: () => AnalyzeCurrentContext()),
 			CreateAction(
 				TerminalWorkspaceActionKind.Search,
 				"Terminal.Tui.Selection",
@@ -512,6 +514,16 @@ internal sealed partial class TerminalWorkspaceSession
 				TerminalWorkspace.FormatContextFormat(_format),
 				TerminalWorkspaceCommandCatalog.Get(TerminalWorkspaceCommandVerb.Format).Syntax,
 				execute: SelectPreviewFormat),
+			CreateAction(
+				TerminalWorkspaceActionKind.Copy,
+				"Terminal.Tui.Preview",
+				"Terminal.Tui.Command.Copy.Title",
+				"Terminal.Tui.Command.Copy.Description",
+				string.Empty,
+				commandSyntax: TerminalWorkspaceCommandCatalog.Get(
+					TerminalWorkspaceCommandVerb.Copy).Syntax,
+				execute: () => CopyCurrentContext(new TerminalWorkspaceCommand(
+					TerminalWorkspaceCommandCatalog.Get(TerminalWorkspaceCommandVerb.Copy)))),
 			CreateAction(
 				TerminalWorkspaceActionKind.GitFiltering,
 				"Terminal.Tui.Selection",
@@ -574,7 +586,9 @@ internal sealed partial class TerminalWorkspaceSession
 				"Terminal.Tui.SaveProfile",
 				"Terminal.Command.ProfileExport",
 				"P",
-				execute: SaveProfile),
+				commandSyntax: TerminalWorkspaceCommandCatalog.Get(
+					TerminalWorkspaceCommandVerb.Profile).Syntax,
+				execute: () => SaveProfile()),
 			CreateAction(
 				TerminalWorkspaceActionKind.OpenDesktop,
 				"Terminal.Tui.Profile",
@@ -588,7 +602,29 @@ internal sealed partial class TerminalWorkspaceSession
 				"Terminal.Tui.Details",
 				"Terminal.Tui.Action.SourceDetails.Description",
 				string.Empty,
-				execute: ShowSourceDetails)
+				execute: ShowSourceDetails),
+			CreateAction(
+				TerminalWorkspaceActionKind.RecentWorkspaces,
+				"Terminal.Tui.Source",
+				"Terminal.Tui.Welcome.Recent",
+				"Terminal.Tui.Welcome.Recent.Description",
+				string.Empty,
+				commandSyntax: TerminalWorkspaceCommandCatalog.Get(
+					TerminalWorkspaceCommandVerb.Recent).Syntax,
+				execute: () =>
+				{
+					ShowWelcome();
+					_application.Invoke(OpenRecentWorkspaces);
+				}),
+			CreateAction(
+				TerminalWorkspaceActionKind.Refresh,
+				"Terminal.Tui.Source",
+				"Terminal.Tui.Command.Refresh.Title",
+				"Terminal.Tui.Command.Refresh.Description",
+				string.Empty,
+				commandSyntax: TerminalWorkspaceCommandCatalog.Get(
+					TerminalWorkspaceCommandVerb.Refresh).Syntax,
+				execute: () => RefreshCurrentProject())
 		};
 
 		if (plan.SourceIdentity?.SourceType == ProjectSourceType.GitClone)
@@ -599,25 +635,18 @@ internal sealed partial class TerminalWorkspaceSession
 				"Terminal.Tui.Action.GetUpdates",
 				"Terminal.Tui.Action.GetUpdates.Description",
 				string.Empty,
-				execute: GetRepositoryUpdates));
+				commandSyntax: TerminalWorkspaceCommandCatalog.Get(
+					TerminalWorkspaceCommandVerb.Update).Syntax,
+				execute: () => GetRepositoryUpdates()));
 			actions.Add(CreateAction(
 				TerminalWorkspaceActionKind.SwitchBranch,
 				"Terminal.Tui.RecentRepositories.Repository",
 				"Terminal.Tui.Action.SwitchBranch",
 				"Terminal.Tui.Action.SwitchBranch.Description",
 				string.Empty,
-				execute: SwitchRepositoryBranch));
-			actions.Add(CreateAction(
-				TerminalWorkspaceActionKind.RecentWorkspaces,
-				"Terminal.Tui.RecentRepositories.Repository",
-				"Terminal.Tui.Welcome.Recent",
-				"Terminal.Tui.Welcome.Recent.Description",
-				string.Empty,
-				execute: () =>
-				{
-					ShowWelcome();
-					_application.Invoke(OpenRecentWorkspaces);
-				}));
+				commandSyntax: TerminalWorkspaceCommandCatalog.Get(
+					TerminalWorkspaceCommandVerb.Branch).Syntax,
+				execute: () => SwitchRepositoryBranch()));
 		}
 
 		return actions;
@@ -1217,7 +1246,7 @@ internal sealed partial class TerminalWorkspaceSession
 		SchedulePreviewRefresh();
 	}
 
-	private void AnalyzeCurrentContext()
+	private void AnalyzeCurrentContext(bool originatedFromCommandLine = false)
 	{
 		if (_state is null)
 			return;
@@ -1237,7 +1266,58 @@ internal sealed partial class TerminalWorkspaceSession
 					   $"{L("Terminal.Analysis.Tokens")}: {plan.Analysis.Metrics.Content.Tokens:N0}\n" +
 					   $"{L("Terminal.Tui.Warnings")}: {warnings:N0}\n" +
 					   $"{L("Terminal.Label.Error")}: {errors:N0}";
-			});
+			},
+			originatedFromCommandLine: originatedFromCommandLine);
+	}
+
+	private void CopyCurrentContext(TerminalWorkspaceCommand command)
+	{
+		if (_state is null)
+			return;
+		var view = command.View ?? _previewView;
+		var format = command.Format ?? _format;
+		_activeOperationTask = RunOperationAsync(
+			L("Terminal.Tui.Command.Copy.Title"),
+			async token =>
+			{
+				var payload = await _controller.BuildCopyPayloadAsync(
+						_state,
+						view,
+						format,
+						token)
+					.ConfigureAwait(false);
+				var clipboardResult = await InvokeAsync(() => _clipboardWriter.Write(payload))
+					.ConfigureAwait(false);
+				if (!clipboardResult.IsSuccess)
+				{
+					throw new TerminalWorkspaceOperationException(
+						clipboardResult.Status == TerminalClipboardWriteStatus.PayloadTooLarge
+							? "DPX-TUI-CLIPBOARD-PAYLOAD-TOO-LARGE"
+							: "DPX-TUI-CLIPBOARD-UNAVAILABLE");
+				}
+				return string.Format(
+					CultureInfo.CurrentCulture,
+					L("Terminal.Tui.Command.Copy.Result"),
+					L(ProjectPresentationCatalog.Get(view).LabelKey),
+					payload.Length);
+			},
+			originatedFromCommandLine: true,
+			cornerProgressLabel: L("Terminal.Tui.Progress.BuildingPreview"));
+	}
+
+	private void RefreshCurrentProject(bool originatedFromCommandLine = false)
+	{
+		if (_state is null)
+			return;
+		_activeOperationTask = RunOperationAsync(
+			L("Terminal.Tui.Command.Refresh.Title"),
+			async token =>
+			{
+				await _controller.RefreshProjectAsync(_state, token).ConfigureAwait(false);
+				return L("Terminal.Tui.Command.Refresh.Result");
+			},
+			originatedFromCommandLine: originatedFromCommandLine,
+			cornerProgressLabel: L("Terminal.Tui.Progress.RefreshingProject"));
 	}
 
 	private void OpenCurrentStateInDesktop()
@@ -1276,7 +1356,7 @@ internal sealed partial class TerminalWorkspaceSession
 			TerminalWorkspaceTheme.Dialog);
 	}
 
-	private void GetRepositoryUpdates()
+	private void GetRepositoryUpdates(bool originatedFromCommandLine = false)
 	{
 		if (_state?.Plan.SourceIdentity?.SourceType != ProjectSourceType.GitClone)
 			return;
@@ -1294,10 +1374,13 @@ internal sealed partial class TerminalWorkspaceSession
 					.ConfigureAwait(false);
 				return L("Terminal.Tui.RepositoryUpdated");
 			},
-			modalProgress: true);
+			modalProgress: true,
+			originatedFromCommandLine: originatedFromCommandLine);
 	}
 
-	private void SwitchRepositoryBranch()
+	private void SwitchRepositoryBranch(
+		string? requestedBranch = null,
+		bool originatedFromCommandLine = false)
 	{
 		if (_state?.Plan.SourceIdentity?.SourceType != ProjectSourceType.GitClone)
 			return;
@@ -1312,12 +1395,19 @@ internal sealed partial class TerminalWorkspaceSession
 					.Select(static branch => branch.Name)
 					.Distinct(StringComparer.Ordinal)
 					.ToArray();
-				var selected = await InvokeAsync(() => SelectFromList(
-					L("Terminal.Tui.Action.SwitchBranch"),
-					L("Terminal.Tui.Action.SwitchBranch.Description"),
-					branchNames)).ConfigureAwait(false);
+				var selected = string.IsNullOrWhiteSpace(requestedBranch)
+					? await InvokeAsync(() => SelectFromList(
+						L("Terminal.Tui.Action.SwitchBranch"),
+						L("Terminal.Tui.Action.SwitchBranch.Description"),
+						branchNames)).ConfigureAwait(false)
+					: branchNames.FirstOrDefault(branch =>
+						string.Equals(branch, requestedBranch, StringComparison.Ordinal));
 				if (string.IsNullOrWhiteSpace(selected))
+				{
+					if (!string.IsNullOrWhiteSpace(requestedBranch))
+						throw new TerminalWorkspaceOperationException("DPX-TUI-GIT-BRANCH-NOT-FOUND");
 					return null;
+				}
 				var switched = await _services.GitRepositoryService
 					.SwitchBranchAsync(
 						_state.Plan.SourceRoot,
@@ -1331,7 +1421,8 @@ internal sealed partial class TerminalWorkspaceSession
 					.ConfigureAwait(false);
 				return $"{L("Terminal.Tui.RecentRepositories.Branch")}: {selected}";
 			},
-			modalProgress: true);
+			modalProgress: true,
+			originatedFromCommandLine: originatedFromCommandLine);
 	}
 
 	private void FocusPane(TerminalWorkspacePane pane)

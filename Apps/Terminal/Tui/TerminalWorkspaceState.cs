@@ -48,6 +48,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 	private readonly Dictionary<string, string?> _parentsByPath = new(PathComparer.Default);
 	private readonly Dictionary<string, TerminalTreeCheckState> _checkStates = new(PathComparer.Default);
 	private readonly Dictionary<string, bool> _extensionOptionStates = new(StringComparer.OrdinalIgnoreCase);
+	private readonly Dictionary<string, bool> _pathOptionStates = new(PathComparer.Default);
 	private readonly List<string> _orderedPaths = [];
 	private readonly List<IPreviewTextDocument> _retiredPreviewDocuments = [];
 	private readonly object _previewSync = new();
@@ -71,6 +72,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 
 		_expandedPaths.Add(plan.EffectiveTree.FullPath);
 		RecomputeCheckStates();
+		UpdatePathOptionStates(plan);
 		RebuildVisibleRows();
 		PreviewDocument = new InMemoryPreviewTextDocument(BuildTreePreview());
 	}
@@ -82,6 +84,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 	public int SelectedFolderCount => _selectedFolderCount;
 	public bool HasVisibleTreeItems => Plan.EffectiveTree.Children.Count > 0;
 	public IReadOnlyDictionary<string, bool> ExtensionOptionStates => _extensionOptionStates;
+	public IReadOnlyDictionary<string, bool> PathOptionStates => _pathOptionStates;
 	public string TreeFilterQuery => _treeFilterQuery;
 	public int TreeFilterMatchCount { get; private set; }
 	public bool HasTreeFilter => _treeFilterQuery.Length > 0;
@@ -91,7 +94,8 @@ public sealed class TerminalWorkspaceState : IDisposable
 
 	public void ReplacePlan(
 		ProjectContextPlan plan,
-		IReadOnlyDictionary<string, bool>? extensionOptionStates = null)
+		IReadOnlyDictionary<string, bool>? extensionOptionStates = null,
+		IReadOnlyDictionary<string, bool>? pathOptionStates = null)
 	{
 		Interlocked.Increment(ref _revision);
 		var expandedPaths = _expandedPaths.ToArray();
@@ -103,6 +107,12 @@ public sealed class TerminalWorkspaceState : IDisposable
 				_extensionOptionStates[extension] = isSelected;
 		}
 		UpdateExtensionOptionStates(plan);
+		if (pathOptionStates is not null)
+		{
+			_pathOptionStates.Clear();
+			foreach (var (path, isSelected) in pathOptionStates)
+				_pathOptionStates[path] = isSelected;
+		}
 		_nodesByPath.Clear();
 		_parentsByPath.Clear();
 		_orderedPaths.Clear();
@@ -124,6 +134,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 				_expandedPaths.Add(path);
 		}
 		RecomputeCheckStates();
+		UpdatePathOptionStates(plan);
 		RebuildVisibleRows();
 		SetPreviewDocument(new InMemoryPreviewTextDocument(BuildTreePreview()));
 	}
@@ -140,6 +151,33 @@ public sealed class TerminalWorkspaceState : IDisposable
 		return result;
 	}
 
+	public IReadOnlySet<string> BuildSelectedItemRelativePaths() =>
+		_selectedFiles
+			.Concat(_selectedEmptyDirectories)
+			.Select(ToRelativePath)
+			.ToHashSet(PathComparer.Default);
+
+	internal static IReadOnlyList<string> BuildSelectableRelativePaths(
+		TreeNodeDescriptor root,
+		string sourceRoot)
+	{
+		var result = new List<string>();
+		var stack = new Stack<TreeNodeDescriptor>();
+		stack.Push(root);
+		while (stack.Count > 0)
+		{
+			var node = stack.Pop();
+			if (!node.IsDirectory || node.Children.Count == 0)
+			{
+				result.Add(NormalizeRelativePath(sourceRoot, node.FullPath));
+				continue;
+			}
+			for (var index = node.Children.Count - 1; index >= 0; index--)
+				stack.Push(node.Children[index]);
+		}
+		return result;
+	}
+
 	private void UpdateExtensionOptionStates(ProjectContextPlan plan)
 	{
 		var selected = new HashSet<string>(plan.SelectedExtensions, StringComparer.OrdinalIgnoreCase);
@@ -147,6 +185,12 @@ public sealed class TerminalWorkspaceState : IDisposable
 			_extensionOptionStates[extension] = selected.Contains(extension);
 		foreach (var extension in plan.Selection.Extensions ?? [])
 			_extensionOptionStates.TryAdd(extension, true);
+	}
+
+	private void UpdatePathOptionStates(ProjectContextPlan plan)
+	{
+		foreach (var path in BuildSelectableRelativePaths(plan.EffectiveTree, plan.SourceRoot))
+			_pathOptionStates[path] = IsRelativePathSelected(path);
 	}
 
 	public void ReplaceContentTransformationPlan(ProjectContextPlan plan)
@@ -460,6 +504,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 					_selectedFiles.Add(current.FullPath);
 				else
 					_selectedFiles.Remove(current.FullPath);
+				_pathOptionStates[ToRelativePath(current.FullPath)] = selected;
 				continue;
 			}
 
@@ -469,12 +514,30 @@ public sealed class TerminalWorkspaceState : IDisposable
 					_selectedEmptyDirectories.Add(current.FullPath);
 				else
 					_selectedEmptyDirectories.Remove(current.FullPath);
+				_pathOptionStates[ToRelativePath(current.FullPath)] = selected;
 				continue;
 			}
 
 			for (var index = current.Children.Count - 1; index >= 0; index--)
 				stack.Push(current.Children[index]);
 		}
+	}
+
+	private bool IsRelativePathSelected(string path)
+	{
+		var fullPath = Path.GetFullPath(Path.Combine(
+			Plan.SourceRoot,
+			path.Replace('/', Path.DirectorySeparatorChar)));
+		return _selectedFiles.Contains(fullPath) || _selectedEmptyDirectories.Contains(fullPath);
+	}
+
+	private string ToRelativePath(string fullPath) =>
+		NormalizeRelativePath(Plan.SourceRoot, fullPath);
+
+	private static string NormalizeRelativePath(string sourceRoot, string fullPath)
+	{
+		var relative = Path.GetRelativePath(sourceRoot, fullPath);
+		return relative == "." ? "." : relative.Replace('\\', '/');
 	}
 
 	private bool CollectMinimalSelection(TreeNodeDescriptor node, List<string> result)

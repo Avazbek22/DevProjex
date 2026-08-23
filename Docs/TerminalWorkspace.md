@@ -209,6 +209,13 @@ containing whitespace can use single or double quotes.
 | `filter [text]` | filter Project Tree, or clear it with no text |
 | `export context [format] [path]` | open the existing context-export confirmation |
 | `export zip <path>` / `export folder <path>` | open the existing project-export confirmation |
+| `copy [tree\|content\|tree-content] [text\|markdown\|json\|xml]` | copy an exact context document without changing the current view or format |
+| `analyze` | analyze the current context |
+| `branch [name]` | switch the cloned repository branch, or open branch selection |
+| `update` | get updates for the cloned repository |
+| `recent` | open recent projects and repositories |
+| `profile save [name]` | save the current settings as a portable profile |
+| `refresh` | rescan the working copy from disk without network access |
 | `help [verb]` | open the localized command cheat sheet |
 | `quit` | perform the same safe exit action as `q` |
 
@@ -220,8 +227,16 @@ Examples:
 :type .cs .md on
 :view content
 :search "connection string"
+:copy content markdown
+:refresh
 :export context markdown "../review context.md"
 ```
+
+`copy` first uses the platform clipboard exposed by Terminal.Gui. When that is not
+available, an interactive terminal receives a complete OSC 52 clipboard sequence.
+Oversized OSC 52 payloads are never truncated; the command reports an error and
+directs the user to `export` instead. A view or format supplied to `copy` applies
+only to that operation.
 
 Left/Right, Home/End, Backspace, and Delete edit the line. Esc cancels it,
 Enter executes it, and Up/Down traverses command history. The newest 50 commands

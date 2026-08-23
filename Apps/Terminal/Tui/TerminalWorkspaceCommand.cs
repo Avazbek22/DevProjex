@@ -12,6 +12,13 @@ internal enum TerminalWorkspaceCommandVerb
 	Search,
 	Filter,
 	Export,
+	Copy,
+	Analyze,
+	Branch,
+	Update,
+	Recent,
+	Profile,
+	Refresh,
 	Help,
 	Quit
 }
@@ -130,6 +137,41 @@ internal static class TerminalWorkspaceCommandCatalog
 			"export",
 			"export <context|zip|folder> ...",
 			"export context markdown context.md"),
+		Define(
+			TerminalWorkspaceCommandVerb.Copy,
+			"copy",
+			"copy [tree|content|tree-content] [text|markdown|json|xml]",
+			"copy content markdown"),
+		Define(
+			TerminalWorkspaceCommandVerb.Analyze,
+			"analyze",
+			"analyze",
+			"analyze"),
+		Define(
+			TerminalWorkspaceCommandVerb.Branch,
+			"branch",
+			"branch [name]",
+			"branch feature/review"),
+		Define(
+			TerminalWorkspaceCommandVerb.Update,
+			"update",
+			"update",
+			"update"),
+		Define(
+			TerminalWorkspaceCommandVerb.Recent,
+			"recent",
+			"recent",
+			"recent"),
+		Define(
+			TerminalWorkspaceCommandVerb.Profile,
+			"profile",
+			"profile save [name]",
+			"profile save \"Review Settings\""),
+		Define(
+			TerminalWorkspaceCommandVerb.Refresh,
+			"refresh",
+			"refresh",
+			"refresh"),
 		Define(
 			TerminalWorkspaceCommandVerb.Help,
 			"help",

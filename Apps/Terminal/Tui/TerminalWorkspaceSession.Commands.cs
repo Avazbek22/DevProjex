@@ -17,6 +17,21 @@ internal sealed partial class TerminalWorkspaceSession
 		CreateCommandAction(TerminalWorkspaceCommandVerb.Search, ExecuteSearchCommand),
 		CreateCommandAction(TerminalWorkspaceCommandVerb.Filter, ExecuteFilterCommand),
 		CreateCommandAction(TerminalWorkspaceCommandVerb.Export, ExecuteExportCommand),
+		CreateCommandAction(TerminalWorkspaceCommandVerb.Copy, ExecuteCopyCommand),
+		CreateCommandAction(TerminalWorkspaceCommandVerb.Analyze, ExecuteAnalyzeCommand),
+		CreateCommandAction(
+			TerminalWorkspaceCommandVerb.Branch,
+			ExecuteBranchCommand,
+			IsGitCloneCommandAvailable,
+			() => L("Terminal.Tui.Command.Error.GitCloneRequired")),
+		CreateCommandAction(
+			TerminalWorkspaceCommandVerb.Update,
+			ExecuteUpdateCommand,
+			IsGitCloneCommandAvailable,
+			() => L("Terminal.Tui.Command.Error.GitCloneRequired")),
+		CreateCommandAction(TerminalWorkspaceCommandVerb.Recent, ExecuteRecentCommand),
+		CreateCommandAction(TerminalWorkspaceCommandVerb.Profile, ExecuteProfileCommand),
+		CreateCommandAction(TerminalWorkspaceCommandVerb.Refresh, ExecuteRefreshCommand),
 		CreateCommandAction(
 			TerminalWorkspaceCommandVerb.Help,
 			ExecuteHelpCommand,
@@ -30,12 +45,19 @@ internal sealed partial class TerminalWorkspaceSession
 	private TerminalWorkspaceCommandAction CreateCommandAction(
 		TerminalWorkspaceCommandVerb verb,
 		Func<TerminalWorkspaceCommand, TerminalWorkspaceCommandExecutionResult> execute,
-		Func<bool>? isAvailable = null) =>
+		Func<bool>? isAvailable = null,
+		Func<string?>? unavailableMessage = null) =>
 		new(
 			TerminalWorkspaceCommandCatalog.Get(verb),
 			isAvailable ?? (() => _screen == TerminalWorkspaceScreen.Workspace &&
 				_state is not null && !HasActiveOperation),
-			execute);
+			execute,
+			unavailableMessage);
+
+	private bool IsGitCloneCommandAvailable() =>
+		_screen == TerminalWorkspaceScreen.Workspace &&
+		_state?.Plan.SourceIdentity?.SourceType == ProjectSourceType.GitClone &&
+		!HasActiveOperation;
 
 	private TerminalWorkspaceCommandExecutionResult ExecuteSetCommand(
 		TerminalWorkspaceCommand command)
@@ -226,6 +248,70 @@ internal sealed partial class TerminalWorkspaceSession
 		return TerminalWorkspaceCommandExecutionResult.Deferred();
 	}
 
+	private TerminalWorkspaceCommandExecutionResult ExecuteCopyCommand(
+		TerminalWorkspaceCommand command)
+	{
+		CopyCurrentContext(command);
+		return TerminalWorkspaceCommandExecutionResult.Deferred();
+	}
+
+	private TerminalWorkspaceCommandExecutionResult ExecuteAnalyzeCommand(
+		TerminalWorkspaceCommand command)
+	{
+		AnalyzeCurrentContext(originatedFromCommandLine: true);
+		return TerminalWorkspaceCommandExecutionResult.Deferred();
+	}
+
+	private TerminalWorkspaceCommandExecutionResult ExecuteBranchCommand(
+		TerminalWorkspaceCommand command)
+	{
+		SwitchRepositoryBranch(command.Text, originatedFromCommandLine: true);
+		return TerminalWorkspaceCommandExecutionResult.Deferred();
+	}
+
+	private TerminalWorkspaceCommandExecutionResult ExecuteUpdateCommand(
+		TerminalWorkspaceCommand command)
+	{
+		GetRepositoryUpdates(originatedFromCommandLine: true);
+		return TerminalWorkspaceCommandExecutionResult.Deferred();
+	}
+
+	private TerminalWorkspaceCommandExecutionResult ExecuteRecentCommand(
+		TerminalWorkspaceCommand command)
+	{
+		ShowWelcome();
+		_application.Invoke(OpenRecentWorkspaces);
+		return TerminalWorkspaceCommandExecutionResult.Deferred();
+	}
+
+	private TerminalWorkspaceCommandExecutionResult ExecuteProfileCommand(
+		TerminalWorkspaceCommand command)
+	{
+		if (command.Target != "save")
+			return InvalidCommandExecution();
+		if (!string.IsNullOrWhiteSpace(command.Text) && !IsValidProfileName(command.Text))
+		{
+			return TerminalWorkspaceCommandExecutionResult.Failure(
+				L("Terminal.Tui.Command.Error.InvalidProfileName"));
+		}
+		SaveProfile(command.Text, originatedFromCommandLine: true);
+		return TerminalWorkspaceCommandExecutionResult.Deferred();
+	}
+
+	private TerminalWorkspaceCommandExecutionResult ExecuteRefreshCommand(
+		TerminalWorkspaceCommand command)
+	{
+		RefreshCurrentProject(originatedFromCommandLine: true);
+		return TerminalWorkspaceCommandExecutionResult.Deferred();
+	}
+
+	private static bool IsValidProfileName(string name) =>
+		!string.IsNullOrWhiteSpace(name) &&
+		!Path.IsPathRooted(name) &&
+		name.IndexOfAny(Path.GetInvalidFileNameChars()) < 0 &&
+		!name.Contains(Path.DirectorySeparatorChar) &&
+		!name.Contains(Path.AltDirectorySeparatorChar);
+
 	private TerminalWorkspaceCommandExecutionResult ExecuteHelpCommand(
 		TerminalWorkspaceCommand command)
 	{
@@ -347,7 +433,9 @@ internal sealed partial class TerminalWorkspaceSession
 				ShowCommandResult(result.Message ?? L("Terminal.Tui.Command.Error.InvalidState"), false);
 				break;
 			case TerminalWorkspaceCommandExecutionStatus.Unavailable:
-				ShowCommandResult(L("Terminal.Tui.Command.Error.Unavailable"), false);
+				ShowCommandResult(
+					result.Message ?? L("Terminal.Tui.Command.Error.Unavailable"),
+					false);
 				break;
 			case TerminalWorkspaceCommandExecutionStatus.Deferred:
 				RestoreCommandFooterAndFocus();
