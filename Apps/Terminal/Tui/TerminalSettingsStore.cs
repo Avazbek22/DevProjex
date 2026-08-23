@@ -7,83 +7,132 @@ namespace DevProjex.Terminal.Tui;
 public sealed class TerminalSettingsStore(Func<string>? appDataPathProvider = null)
 {
 	private const int CurrentSchemaVersion = 1;
+	private const int MaximumPersistedCommandLength = 4_096;
 	private readonly Func<string> _appDataPathProvider =
 		appDataPathProvider ?? UserDataPathResolver.GetConfigurationRoot;
+	private readonly SemaphoreSlim _writeGate = new(1, 1);
 
-	public TerminalScreenMode LoadScreenMode()
+	public TerminalScreenMode LoadScreenMode() =>
+		LoadDocument()?.ScreenMode is { } screenMode && Enum.IsDefined(screenMode)
+			? screenMode
+			: TerminalScreenMode.Auto;
+
+	public IReadOnlyList<string> LoadCommandHistory() =>
+		new TerminalCommandHistory(LoadDocument()?.CommandHistory).Entries.ToArray();
+
+	public async Task SaveScreenModeAsync(
+		TerminalScreenMode screenMode,
+		CancellationToken cancellationToken = default)
+	{
+		await UpdateAsync(
+			current => current with { ScreenMode = screenMode },
+			cancellationToken).ConfigureAwait(false);
+	}
+
+	public async Task SaveCommandHistoryAsync(
+		IReadOnlyList<string> history,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(history);
+		var normalized = new TerminalCommandHistory(history)
+			.Entries
+			.Select(command => command.Length <= MaximumPersistedCommandLength
+				? command
+				: command[..MaximumPersistedCommandLength])
+			.ToArray();
+		await UpdateAsync(
+			current => current with { CommandHistory = normalized },
+			cancellationToken).ConfigureAwait(false);
+	}
+
+	internal string GetPath() =>
+		Path.Combine(_appDataPathProvider(), "DevProjex", "terminal-settings.json");
+
+	private TerminalSettingsDocument? LoadDocument()
 	{
 		try
 		{
 			var path = GetPath();
 			if (!File.Exists(path))
-				return TerminalScreenMode.Auto;
+				return null;
 
 			using var stream = File.OpenRead(path);
 			var document = JsonSerializer.Deserialize<TerminalSettingsDocument>(stream);
-			return document is { SchemaVersion: CurrentSchemaVersion } &&
-			       Enum.IsDefined(document.ScreenMode)
-				? document.ScreenMode
-				: TerminalScreenMode.Auto;
+			return document is { SchemaVersion: CurrentSchemaVersion }
+				? document
+				: null;
 		}
 		catch (Exception exception) when (exception is
 			       IOException or
 			       UnauthorizedAccessException or
 			       JsonException)
 		{
-			return TerminalScreenMode.Auto;
+			return null;
 		}
 	}
 
-	public async Task SaveScreenModeAsync(
-		TerminalScreenMode screenMode,
-		CancellationToken cancellationToken = default)
+	private async Task UpdateAsync(
+		Func<TerminalSettingsDocument, TerminalSettingsDocument> update,
+		CancellationToken cancellationToken)
 	{
-		var path = GetPath();
-		var directory = Path.GetDirectoryName(path)!;
-		Directory.CreateDirectory(directory);
-		var temporaryPath = Path.Combine(
-			directory,
-			$".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+		await _writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
 		try
 		{
-			await using (var stream = new FileStream(
-				             temporaryPath,
-				             FileMode.CreateNew,
-				             FileAccess.Write,
-				             FileShare.None,
-				             4 * 1024,
-				             FileOptions.Asynchronous | FileOptions.SequentialScan))
+			var current = LoadDocument() ??
+			              new TerminalSettingsDocument(
+				              CurrentSchemaVersion,
+				              TerminalScreenMode.Auto,
+				              []);
+			var document = update(current) with { SchemaVersion = CurrentSchemaVersion };
+			var path = GetPath();
+			var directory = Path.GetDirectoryName(path)!;
+			Directory.CreateDirectory(directory);
+			var temporaryPath = Path.Combine(
+				directory,
+				$".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+			try
 			{
-				await JsonSerializer.SerializeAsync(
-						stream,
-						new TerminalSettingsDocument(CurrentSchemaVersion, screenMode),
-						cancellationToken: cancellationToken)
-					.ConfigureAwait(false);
-				await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
-			}
+				await using (var stream = new FileStream(
+					             temporaryPath,
+					             FileMode.CreateNew,
+					             FileAccess.Write,
+					             FileShare.None,
+					             4 * 1024,
+					             FileOptions.Asynchronous | FileOptions.SequentialScan))
+				{
+					await JsonSerializer.SerializeAsync(
+							stream,
+							document,
+							cancellationToken: cancellationToken)
+						.ConfigureAwait(false);
+					await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+				}
 
-			File.Move(temporaryPath, path, overwrite: true);
+				File.Move(temporaryPath, path, overwrite: true);
+			}
+			finally
+			{
+				try
+				{
+					if (File.Exists(temporaryPath))
+						File.Delete(temporaryPath);
+				}
+				catch (Exception exception) when (exception is
+					       IOException or
+					       UnauthorizedAccessException)
+				{
+					// A unique temporary settings file is harmless if a platform delays handle release.
+				}
+			}
 		}
 		finally
 		{
-			try
-			{
-				if (File.Exists(temporaryPath))
-					File.Delete(temporaryPath);
-			}
-			catch (Exception exception) when (exception is
-				       IOException or
-				       UnauthorizedAccessException)
-			{
-				// A unique temporary settings file is harmless if a platform delays handle release.
-			}
+			_writeGate.Release();
 		}
 	}
 
-	internal string GetPath() =>
-		Path.Combine(_appDataPathProvider(), "DevProjex", "terminal-settings.json");
-
 	private sealed record TerminalSettingsDocument(
 		int SchemaVersion,
-		TerminalScreenMode ScreenMode);
+		TerminalScreenMode ScreenMode,
+		IReadOnlyList<string>? CommandHistory = null);
 }

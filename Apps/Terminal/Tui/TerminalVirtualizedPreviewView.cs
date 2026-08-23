@@ -31,6 +31,15 @@ internal sealed class TerminalVirtualizedPreviewView : View
 
 	public event EventHandler? VisibleRangeChanged;
 	public event EventHandler<TerminalPreviewRedactionToggleRequestedEventArgs>? RedactionToggleRequested;
+	public event EventHandler? CommandLineRequested;
+
+	protected override bool OnKeyDown(Key key)
+	{
+		if (!TerminalWorkspaceCommandKey.IsActivation(key))
+			return base.OnKeyDown(key);
+		CommandLineRequested?.Invoke(this, EventArgs.Empty);
+		return true;
+	}
 
 	public int FirstVisibleLine => Viewport.Y;
 

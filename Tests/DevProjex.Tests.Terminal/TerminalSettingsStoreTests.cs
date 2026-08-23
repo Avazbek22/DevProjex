@@ -54,4 +54,42 @@ public sealed class TerminalSettingsStoreTests
 			TerminalScreenMode.Auto,
 			new TerminalSettingsStore(() => appData).LoadScreenMode());
 	}
+
+	[Fact]
+	public async Task ScreenModeAndCommandHistoryRoundTripWithoutOverwritingEachOther()
+	{
+		using var workspace = new TemporaryDirectory();
+		var store = new TerminalSettingsStore(() => workspace.Path);
+
+		await store.SaveCommandHistoryAsync(
+			["view content", "set hide-secrets on"],
+			TestContext.Current.CancellationToken);
+		await store.SaveScreenModeAsync(
+			TerminalScreenMode.Inline,
+			TestContext.Current.CancellationToken);
+
+		var reloaded = new TerminalSettingsStore(() => workspace.Path);
+		Assert.Equal(TerminalScreenMode.Inline, reloaded.LoadScreenMode());
+		Assert.Equal(
+			["view content", "set hide-secrets on"],
+			reloaded.LoadCommandHistory());
+	}
+
+	[Fact]
+	public async Task CommandHistoryIsNormalizedAndBoundedBeforePersistence()
+	{
+		using var workspace = new TemporaryDirectory();
+		var store = new TerminalSettingsStore(() => workspace.Path);
+		var commands = Enumerable.Range(0, 55)
+			.Select(index => $"search item-{index}")
+			.Append("search item-54")
+			.ToArray();
+
+		await store.SaveCommandHistoryAsync(commands, TestContext.Current.CancellationToken);
+
+		var history = new TerminalSettingsStore(() => workspace.Path).LoadCommandHistory();
+		Assert.Equal(50, history.Count);
+		Assert.Equal("search item-5", history[0]);
+		Assert.Equal("search item-54", history[^1]);
+	}
 }

@@ -43,6 +43,7 @@ internal sealed partial class TerminalWorkspaceSession
 	private GitFilteringMode _preferredGitMode = GitFilteringMode.RespectGitIgnore;
 	private ProjectSelectionSpec? _settingsDraftSelection;
 	private Dictionary<string, bool>? _settingsDraftExtensionStates;
+	private bool _settingsDraftOriginatedFromCommandLine;
 
 	private void CreateContextControls()
 	{
@@ -150,6 +151,7 @@ internal sealed partial class TerminalWorkspaceSession
 		};
 		list.ValueChanged += (_, _) => TrackSelectedControl(section);
 		list.HasFocusChanged += (_, _) => UpdateWorkspaceFocus();
+		list.CommandLineRequested += (_, _) => OpenCommandLine();
 		frame.Add(list);
 		return (frame, list);
 	}
@@ -185,6 +187,7 @@ internal sealed partial class TerminalWorkspaceSession
 			UpdateWorkspaceFocus();
 		};
 		aggregate.HasFocusChanged += (_, _) => UpdateWorkspaceFocus();
+		aggregate.CommandLineRequested += (_, _) => OpenCommandLine();
 		if (onBorder)
 			frame.Border.View!.Add(aggregate);
 		else
@@ -476,41 +479,60 @@ internal sealed partial class TerminalWorkspaceSession
 				"Terminal.Tui.Diagnostics",
 				"Terminal.Tui.Analyze",
 				"Terminal.Command.Analyze",
-				"A"),
+				"A",
+				execute: AnalyzeCurrentContext),
 			CreateAction(
 				TerminalWorkspaceActionKind.Search,
 				"Terminal.Tui.Selection",
 				"Terminal.Tui.Search",
 				"Terminal.Tui.SearchPrompt",
-				"/"),
+				"/",
+				commandSyntax: _activePane == TerminalWorkspacePane.Preview
+					? TerminalWorkspaceCommandCatalog.Get(TerminalWorkspaceCommandVerb.Search).Syntax
+					: TerminalWorkspaceCommandCatalog.Get(TerminalWorkspaceCommandVerb.Filter).Syntax,
+				execute: () =>
+				{
+					if (_activePane == TerminalWorkspacePane.Preview)
+						SearchPreview();
+					else
+						SearchTree();
+				}),
 			CreateAction(
 				TerminalWorkspaceActionKind.PreviewView,
 				"Terminal.Tui.Preview",
 				"Terminal.Tui.Action.PreviewView",
 				"Terminal.Tui.Action.PreviewView.Description",
 				"1/2/3",
-				_workspace.LocalizeView(_previewView)),
+				_workspace.LocalizeView(_previewView),
+				TerminalWorkspaceCommandCatalog.Get(TerminalWorkspaceCommandVerb.View).Syntax,
+				execute: SelectPreviewView),
 			CreateAction(
 				TerminalWorkspaceActionKind.PreviewFormat,
 				"Terminal.Tui.Preview",
 				"Terminal.Tui.Action.Format",
 				"Terminal.Tui.Action.Format.Description",
 				"F",
-				TerminalWorkspace.FormatContextFormat(_format)),
+				TerminalWorkspace.FormatContextFormat(_format),
+				TerminalWorkspaceCommandCatalog.Get(TerminalWorkspaceCommandVerb.Format).Syntax,
+				execute: SelectPreviewFormat),
 			CreateAction(
 				TerminalWorkspaceActionKind.GitFiltering,
 				"Terminal.Tui.Selection",
 				"Terminal.Tui.GitFiltering",
 				"Terminal.Tui.Action.FocusExclusions.Description",
 				"M",
-				FormatGitMode(plan.GitReadiness.Mode)),
+				FormatGitMode(plan.GitReadiness.Mode),
+				TerminalWorkspaceCommandCatalog.Get(TerminalWorkspaceCommandVerb.Set).Syntax,
+				execute: () => FocusControlSection(TerminalControlSection.Exclusions)),
 			CreateAction(
 				TerminalWorkspaceActionKind.Exclusions,
 				"Terminal.Tui.Selection",
 				"Terminal.Tui.Exclusions",
 				"Terminal.Tui.Action.FocusExclusions.Description",
 				"X",
-				FormatExclusions(plan.Selection.Exclusions ?? [])),
+				FormatExclusions(plan.Selection.Exclusions ?? []),
+				TerminalWorkspaceCommandCatalog.Get(TerminalWorkspaceCommandVerb.Set).Syntax,
+				execute: () => FocusControlSection(TerminalControlSection.Exclusions)),
 			CreateAction(
 				TerminalWorkspaceActionKind.FileTypes,
 				"Terminal.Tui.Selection",
@@ -519,43 +541,57 @@ internal sealed partial class TerminalWorkspaceSession
 				"T",
 				FormatSelectionCount(
 					plan.SelectedExtensions.Count,
-					plan.AvailableExtensions.Count)),
+					plan.AvailableExtensions.Count),
+				TerminalWorkspaceCommandCatalog.Get(TerminalWorkspaceCommandVerb.Type).Syntax,
+				execute: () => FocusControlSection(TerminalControlSection.Extensions)),
 			CreateAction(
 				TerminalWorkspaceActionKind.ExportContext,
 				"Terminal.Tui.Export",
 				"Terminal.Tui.ExportContext",
 				"Terminal.Command.ExportContext",
-				"E"),
+				"E",
+				commandSyntax: "export context [format] [path]",
+				isAvailable: () => !HasActiveOperation,
+				execute: () => ExportContext()),
 			CreateAction(
 				TerminalWorkspaceActionKind.ExportFolder,
 				"Terminal.Tui.Export",
 				"Menu.File.ExportProjectCopy.Folder",
 				"Menu.File.ExportProjectCopy.Folder.Help",
-				"Z"),
+				"Z",
+				commandSyntax: "export folder <path>",
+				isAvailable: () => !HasActiveOperation,
+				execute: () => ExportProject(ProjectCopyExportFormat.Folder)),
 			CreateAction(
 				TerminalWorkspaceActionKind.ExportZip,
 				"Terminal.Tui.Export",
 				"Menu.File.ExportProjectCopy.Zip",
 				"Menu.File.ExportProjectCopy.Zip.Help",
-				"Z"),
+				"Z",
+				commandSyntax: "export zip <path>",
+				isAvailable: () => !HasActiveOperation,
+				execute: () => ExportProject(ProjectCopyExportFormat.Zip)),
 			CreateAction(
 				TerminalWorkspaceActionKind.SaveProfile,
 				"Terminal.Tui.Profile",
 				"Terminal.Tui.SaveProfile",
 				"Terminal.Command.ProfileExport",
-				"P"),
+				"P",
+				execute: SaveProfile),
 			CreateAction(
 				TerminalWorkspaceActionKind.OpenDesktop,
 				"Terminal.Tui.Profile",
 				"Terminal.Tui.Welcome.OpenDesktop",
 				"Terminal.Tui.Welcome.OpenDesktop.Description",
-				"G"),
+				"G",
+				execute: OpenCurrentStateInDesktop),
 			CreateAction(
 				TerminalWorkspaceActionKind.SourceDetails,
 				"Terminal.Tui.Source",
 				"Terminal.Tui.Details",
 				"Terminal.Tui.Action.SourceDetails.Description",
-				string.Empty)
+				string.Empty,
+				execute: ShowSourceDetails)
 		};
 
 		if (plan.SourceIdentity?.SourceType == ProjectSourceType.GitClone)
@@ -565,19 +601,26 @@ internal sealed partial class TerminalWorkspaceSession
 				"Terminal.Tui.RecentRepositories.Repository",
 				"Terminal.Tui.Action.GetUpdates",
 				"Terminal.Tui.Action.GetUpdates.Description",
-				string.Empty));
+				string.Empty,
+				execute: GetRepositoryUpdates));
 			actions.Add(CreateAction(
 				TerminalWorkspaceActionKind.SwitchBranch,
 				"Terminal.Tui.RecentRepositories.Repository",
 				"Terminal.Tui.Action.SwitchBranch",
 				"Terminal.Tui.Action.SwitchBranch.Description",
-				string.Empty));
+				string.Empty,
+				execute: SwitchRepositoryBranch));
 			actions.Add(CreateAction(
 				TerminalWorkspaceActionKind.RecentWorkspaces,
 				"Terminal.Tui.RecentRepositories.Repository",
 				"Terminal.Tui.Welcome.Recent",
 				"Terminal.Tui.Welcome.Recent.Description",
-				string.Empty));
+				string.Empty,
+				execute: () =>
+				{
+					ShowWelcome();
+					_application.Invoke(OpenRecentWorkspaces);
+				}));
 		}
 
 		return actions;
@@ -589,8 +632,20 @@ internal sealed partial class TerminalWorkspaceSession
 		string titleKey,
 		string descriptionKey,
 		string shortcut,
-		string? value = null) =>
-		new(kind, L(categoryKey), L(titleKey), L(descriptionKey), shortcut, value);
+		string? value = null,
+		string? commandSyntax = null,
+		Func<bool>? isAvailable = null,
+		Action? execute = null) =>
+		new(
+			kind,
+			L(categoryKey),
+			L(titleKey),
+			L(descriptionKey),
+			shortcut,
+			value,
+			commandSyntax,
+			isAvailable,
+			execute);
 
 	private string FormatGitMode(GitFilteringMode mode) =>
 		L(ProjectPresentationCatalog.Get(mode).LabelKey);
@@ -700,7 +755,7 @@ internal sealed partial class TerminalWorkspaceSession
 		ApplyPathFilters(target, selection.Exclusions ?? []);
 	}
 
-	private void ApplyAllExclusions(bool enabled)
+	private void ApplyAllExclusions(bool enabled, bool originatedFromCommandLine = false)
 	{
 		if (_state is null)
 			return;
@@ -709,47 +764,59 @@ internal sealed partial class TerminalWorkspaceSession
 			enabled,
 			selection.GitMode ?? _state.Plan.GitReadiness.Mode,
 			_preferredGitMode);
-		ApplyPathFilters(mode, exclusions);
+		ApplyPathFilters(mode, exclusions, originatedFromCommandLine);
 	}
 
-	private void ApplyExclusions(IReadOnlyCollection<ProjectExclusion> exclusions)
+	private void ApplyExclusions(
+		IReadOnlyCollection<ProjectExclusion> exclusions,
+		bool originatedFromCommandLine = false)
 	{
 		if (_state is null)
 			return;
 		ApplyPathFilters(
 			GetDisplayedSettingsSelection().GitMode ?? _state.Plan.GitReadiness.Mode,
-			exclusions);
+			exclusions,
+			originatedFromCommandLine);
 	}
 
 	private void ApplyPathFilters(
 		GitFilteringMode mode,
-		IReadOnlyCollection<ProjectExclusion> exclusions)
+		IReadOnlyCollection<ProjectExclusion> exclusions,
+		bool originatedFromCommandLine = false)
 	{
 		if (_state is null)
 			return;
-		PreserveControlFocusForOperation(TerminalControlSection.Exclusions);
+		if (!originatedFromCommandLine)
+			PreserveControlFocusForOperation(TerminalControlSection.Exclusions);
 		var selection = EnsureSettingsDraft() with
 		{
 			GitMode = mode,
 			Exclusions = exclusions.ToArray()
 		};
-		PublishOptimisticSettings(selection);
+		PublishOptimisticSettings(selection, originatedFromCommandLine);
 	}
 
-	private void ApplyContentTransformation(IgnoreOptionId optionId, bool enabled)
+	private void ApplyContentTransformation(
+		IgnoreOptionId optionId,
+		bool enabled,
+		bool originatedFromCommandLine = false)
 	{
 		if (_state is null)
 			return;
-		PreserveControlFocusForOperation(TerminalControlSection.Content);
+		if (!originatedFromCommandLine)
+			PreserveControlFocusForOperation(TerminalControlSection.Content);
 		var selection = SetContentTransformation(EnsureSettingsDraft(), optionId, enabled);
-		PublishOptimisticSettings(selection);
+		PublishOptimisticSettings(selection, originatedFromCommandLine);
 	}
 
-	private void ApplyAllContentTransformations(bool enabled)
+	private void ApplyAllContentTransformations(
+		bool enabled,
+		bool originatedFromCommandLine = false)
 	{
 		if (_state is null)
 			return;
-		PreserveControlFocusForOperation(TerminalControlSection.Content);
+		if (!originatedFromCommandLine)
+			PreserveControlFocusForOperation(TerminalControlSection.Content);
 		var selection = EnsureSettingsDraft() with
 		{
 			HideSecrets = enabled,
@@ -758,17 +825,20 @@ internal sealed partial class TerminalWorkspaceSession
 			StripComments = enabled,
 			StripBlankLines = enabled
 		};
-		PublishOptimisticSettings(selection);
+		PublishOptimisticSettings(selection, originatedFromCommandLine);
 	}
 
-	private void ApplyExtensions(IReadOnlyCollection<string> extensions)
+	private void ApplyExtensions(
+		IReadOnlyCollection<string> extensions,
+		bool originatedFromCommandLine = false)
 	{
 		if (_state is null)
 			return;
-		PreserveControlFocusForOperation(TerminalControlSection.Extensions);
+		if (!originatedFromCommandLine)
+			PreserveControlFocusForOperation(TerminalControlSection.Extensions);
 		var selection = EnsureSettingsDraft() with { Extensions = extensions.ToArray() };
 		UpdateDraftExtensionStates(extensions);
-		PublishOptimisticSettings(selection);
+		PublishOptimisticSettings(selection, originatedFromCommandLine);
 	}
 
 	private ProjectSelectionSpec EnsureSettingsDraft()
@@ -791,9 +861,12 @@ internal sealed partial class TerminalWorkspaceSession
 			StringComparer.OrdinalIgnoreCase);
 	}
 
-	private void PublishOptimisticSettings(ProjectSelectionSpec selection)
+	private void PublishOptimisticSettings(
+		ProjectSelectionSpec selection,
+		bool originatedFromCommandLine = false)
 	{
 		_settingsDraftSelection = selection;
+		_settingsDraftOriginatedFromCommandLine = originatedFromCommandLine;
 		RefreshContextControls();
 		_controlsFrame?.SetNeedsDraw();
 		_application.LayoutAndDraw();
@@ -804,6 +877,7 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		_settingsDraftSelection = null;
 		_settingsDraftExtensionStates = null;
+		_settingsDraftOriginatedFromCommandLine = false;
 	}
 
 	private static ProjectSelectionSpec SetContentTransformation(
@@ -831,79 +905,12 @@ internal sealed partial class TerminalWorkspaceSession
 			: null;
 	}
 
-	private void ExecuteWorkspaceAction(TerminalWorkspaceActionKind action)
-	{
-		switch (action)
-		{
-			case TerminalWorkspaceActionKind.Analyze:
-				AnalyzeCurrentContext();
-				break;
-			case TerminalWorkspaceActionKind.Search:
-				SearchTree();
-				break;
-			case TerminalWorkspaceActionKind.PreviewView:
-				SelectPreviewView();
-				break;
-			case TerminalWorkspaceActionKind.PreviewFormat:
-				SelectPreviewFormat();
-				break;
-			case TerminalWorkspaceActionKind.OpenControls:
-				FocusPane(TerminalWorkspacePane.Controls);
-				break;
-			case TerminalWorkspaceActionKind.GitFiltering:
-				FocusControlSection(TerminalControlSection.Exclusions);
-				break;
-			case TerminalWorkspaceActionKind.Exclusions:
-				FocusControlSection(TerminalControlSection.Exclusions);
-				break;
-			case TerminalWorkspaceActionKind.FileTypes:
-				FocusControlSection(TerminalControlSection.Extensions);
-				break;
-			case TerminalWorkspaceActionKind.ExportContext:
-				ExportContext();
-				break;
-			case TerminalWorkspaceActionKind.ExportFolder:
-				ExportProject(ProjectCopyExportFormat.Folder);
-				break;
-			case TerminalWorkspaceActionKind.ExportZip:
-				ExportProject(ProjectCopyExportFormat.Zip);
-				break;
-			case TerminalWorkspaceActionKind.SaveProfile:
-				SaveProfile();
-				break;
-			case TerminalWorkspaceActionKind.OpenDesktop:
-				OpenCurrentStateInDesktop();
-				break;
-			case TerminalWorkspaceActionKind.SourceDetails:
-				ShowSourceDetails();
-				break;
-			case TerminalWorkspaceActionKind.GetUpdates:
-				GetRepositoryUpdates();
-				break;
-			case TerminalWorkspaceActionKind.SwitchBranch:
-				SwitchRepositoryBranch();
-				break;
-			case TerminalWorkspaceActionKind.RecentWorkspaces:
-				ShowWelcome();
-				_application.Invoke(OpenRecentWorkspaces);
-				break;
-			case TerminalWorkspaceActionKind.ReturnToWelcome:
-				if (Confirm(L("Terminal.Tui.BackToWelcome"), L("Terminal.Tui.ConfirmBackToWelcome")))
-					ShowWelcome();
-				break;
-			case TerminalWorkspaceActionKind.Help:
-				ShowHelp(welcome: false);
-				break;
-			default:
-				throw new ArgumentOutOfRangeException(nameof(action), action, null);
-		}
-	}
-
 	private void ShowActionPalette()
 	{
-		var items = _screen == TerminalWorkspaceScreen.Welcome
-			? BuildWelcomePaletteItems()
-			: BuildWorkspacePaletteItems();
+		var registry = _screen == TerminalWorkspaceScreen.Welcome
+			? null
+			: BuildWorkspaceActionRegistry();
+		var items = registry?.PaletteItems ?? BuildWelcomePaletteItems();
 		if (items.Count == 0)
 			return;
 
@@ -955,14 +962,19 @@ internal sealed partial class TerminalWorkspaceSession
 		{
 			var filter = input.Text?.ToString() ?? string.Empty;
 			var filtered = items
-				.Where(item =>
-					filter.Length == 0 ||
-					item.Title.Contains(filter, StringComparison.CurrentCultureIgnoreCase) ||
-					item.Description.Contains(filter, StringComparison.CurrentCultureIgnoreCase))
+				.Where(item => item.IsAvailable())
+				.Where(item => MatchesPaletteFilter(item, filter))
 				.ToArray();
+			var rowWidth = Math.Max(20, width - 6);
+			var titleWidth = Math.Clamp(
+				filtered.Select(item =>
+					(item.Title + (string.IsNullOrWhiteSpace(item.Value) ? string.Empty : $": {item.Value}"))
+					.GetColumns()).DefaultIfEmpty(24).Max(),
+				24,
+				Math.Max(24, rowWidth / 2));
 			rows.Clear();
 			foreach (var item in filtered)
-				rows.Add(new TerminalPaletteRow(item));
+				rows.Add(new TerminalPaletteRow(item, titleWidth, rowWidth));
 			if (rows.Count > 0)
 				list.SelectedItem = 0;
 			detail.Text = rows.Count > 0
@@ -1028,7 +1040,15 @@ internal sealed partial class TerminalWorkspaceSession
 		Refresh();
 		RunOverlay(dialog, input);
 		if (selectedItem is not null)
-			_application.Invoke(selectedItem.Execute);
+		{
+			_application.Invoke(() =>
+			{
+				if (registry is null)
+					selectedItem.Execute();
+				else
+					registry.Execute(selectedItem);
+			});
+		}
 	}
 
 	private IReadOnlyList<TerminalPaletteItem> BuildWorkspacePaletteItems()
@@ -1039,27 +1059,42 @@ internal sealed partial class TerminalWorkspaceSession
 			"Terminal.Tui.Source",
 			"Terminal.Tui.ContextControls",
 			"Terminal.Tui.Action.OpenControls.Description",
-			"Tab/F6"));
+			"Tab/F6",
+			commandSyntax: TerminalWorkspaceCommandCatalog.Get(TerminalWorkspaceCommandVerb.All).Syntax,
+			execute: () => FocusPane(TerminalWorkspacePane.Controls)));
 		actions.Add(CreateAction(
 			TerminalWorkspaceActionKind.ReturnToWelcome,
 			"Terminal.Tui.Source",
 			"Terminal.Tui.BackToWelcome",
 			"Terminal.Tui.ConfirmBackToWelcome",
-			"Esc"));
+			"Esc",
+			execute: () =>
+			{
+				if (Confirm(L("Terminal.Tui.BackToWelcome"), L("Terminal.Tui.ConfirmBackToWelcome")))
+					ShowWelcome();
+			}));
 		actions.Add(CreateAction(
 			TerminalWorkspaceActionKind.Help,
 			"Terminal.Tui.Source",
 			"Terminal.Tui.Help",
 			"Terminal.Tui.Welcome.Help.Description",
-			"?"));
+			"?",
+			commandSyntax: TerminalWorkspaceCommandCatalog.Get(TerminalWorkspaceCommandVerb.Help).Syntax,
+			execute: () => ShowHelp(welcome: false)));
 		return actions
+			.Where(action => action.IsAvailable?.Invoke() != false)
 			.Select(action => new TerminalPaletteItem(
+				$"workspace.palette.{action.Kind}",
 				action.Category,
 				action.Title,
 				action.Description,
-				action.Shortcut,
-				action.Value,
-				() => ExecuteWorkspaceAction(action.Kind)))
+					action.Shortcut,
+					action.Value,
+					action.CommandSyntax,
+					ResolvePaletteCommandId(action.CommandSyntax),
+					action.IsAvailable ?? (static () => true),
+				action.Execute ?? throw new InvalidOperationException(
+					$"Palette action '{action.Kind}' has no handler.")))
 			.ToArray();
 	}
 
@@ -1069,20 +1104,40 @@ internal sealed partial class TerminalWorkspaceSession
 			return [];
 		return BuildWelcomeActions(_welcomeContext)
 			.Select(action => new TerminalPaletteItem(
+				$"welcome.palette.{action.Kind}",
 				L("Terminal.Tui.Actions"),
 				action.Title,
 				action.Description,
 				string.Empty,
 				null,
+				null,
+				null,
+				static () => true,
 				() => ActivateWelcomeAction(action.Kind)))
 			.Append(new TerminalPaletteItem(
+				"welcome.palette.open-profile",
 				L("Terminal.Tui.Actions"),
 				L("Terminal.Tui.Welcome.OpenProfile"),
 				L("Terminal.Tui.Welcome.OpenProfile.Description"),
 				string.Empty,
 				null,
+				null,
+				null,
+				static () => true,
 				OpenPortableProfile))
 			.ToArray();
+	}
+
+	private static string? ResolvePaletteCommandId(string? syntax)
+	{
+		if (string.IsNullOrWhiteSpace(syntax))
+			return null;
+		var separator = syntax.IndexOf(' ');
+		var token = separator < 0 ? syntax : syntax[..separator];
+		if (TerminalWorkspaceCommandCatalog.TryGet(token, out var definition))
+			return definition.Id;
+		throw new InvalidOperationException(
+			$"Palette command syntax '{syntax}' does not name a workspace command.");
 	}
 
 	private string BuildPaletteDetail(TerminalPaletteItem item)
@@ -1090,7 +1145,33 @@ internal sealed partial class TerminalWorkspaceSession
 		var value = string.IsNullOrWhiteSpace(item.Value)
 			? string.Empty
 			: $"{PanelSeparator}{item.Value}";
-		return $"{item.Category}{PanelSeparator}{item.Title}{value}\n{item.Description}";
+		var syntax = string.IsNullOrWhiteSpace(item.CommandSyntax)
+			? string.Empty
+			: $"\n:{item.CommandSyntax}";
+		return $"{item.Category}{PanelSeparator}{item.Title}{value}{syntax}\n{item.Description}";
+	}
+
+	private static bool MatchesPaletteFilter(TerminalPaletteItem item, string filter)
+	{
+		if (string.IsNullOrWhiteSpace(filter))
+			return true;
+		var searchable = string.Join(
+			' ',
+			item.Title,
+			item.Description,
+			item.CommandSyntax ?? string.Empty);
+		var candidateIndex = 0;
+		foreach (var character in filter.Where(static character => !char.IsWhiteSpace(character)))
+		{
+			candidateIndex = searchable.IndexOf(
+				character.ToString(),
+				candidateIndex,
+				StringComparison.CurrentCultureIgnoreCase);
+			if (candidateIndex < 0)
+				return false;
+			candidateIndex++;
+		}
+		return true;
 	}
 
 	private void ActivateWelcomeAction(TerminalWelcomeActionKind kind)

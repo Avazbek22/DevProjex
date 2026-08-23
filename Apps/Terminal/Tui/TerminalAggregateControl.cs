@@ -23,6 +23,7 @@ internal sealed class TerminalAggregateControl : Label
 
 	public event EventHandler? SelectionToggleRequested;
 	public event EventHandler? InteractionStarted;
+	public event EventHandler? CommandLineRequested;
 	public bool IsOnBorder { get; }
 
 	public void SetRow(TerminalParameterRow row)
@@ -43,6 +44,14 @@ internal sealed class TerminalAggregateControl : Label
 			return;
 		_isActive = value;
 		SetNeedsDraw();
+	}
+
+	protected override bool OnKeyDown(Key key)
+	{
+		if (!TerminalWorkspaceCommandKey.IsActivation(key))
+			return base.OnKeyDown(key);
+		CommandLineRequested?.Invoke(this, EventArgs.Empty);
+		return true;
 	}
 
 	protected override bool OnDrawingContent(DrawContext? context)

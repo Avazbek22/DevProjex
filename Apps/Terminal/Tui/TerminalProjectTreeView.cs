@@ -27,6 +27,7 @@ internal sealed class TerminalProjectTreeView : ListView
 
 	public event EventHandler? SelectionToggleRequested;
 	public event EventHandler? ExpansionToggleRequested;
+	public event EventHandler? CommandLineRequested;
 
 	public int VerticalOffset => Viewport.Y;
 
@@ -42,6 +43,14 @@ internal sealed class TerminalProjectTreeView : ListView
 			Viewport.Width,
 			Viewport.Height);
 		SetNeedsDraw();
+	}
+
+	protected override bool OnKeyDown(Key key)
+	{
+		if (!TerminalWorkspaceCommandKey.IsActivation(key))
+			return base.OnKeyDown(key);
+		CommandLineRequested?.Invoke(this, EventArgs.Empty);
+		return true;
 	}
 
 	protected override bool OnMouseEvent(Mouse mouse)

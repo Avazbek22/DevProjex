@@ -1,0 +1,55 @@
+namespace DevProjex.Tests.Terminal;
+
+public sealed class TerminalCommandHistoryTests
+{
+	[Fact]
+	public void AddRetainsTheNewestFiftyCommands()
+	{
+		var history = new TerminalCommandHistory();
+
+		for (var index = 0; index < 55; index++)
+			history.Add($"search item-{index}");
+
+		Assert.Equal(TerminalCommandHistory.MaximumEntries, history.Entries.Count);
+		Assert.Equal("search item-5", history.Entries[0]);
+		Assert.Equal("search item-54", history.Entries[^1]);
+	}
+
+	[Fact]
+	public void AddDeduplicatesOnlyConsecutiveCommands()
+	{
+		var history = new TerminalCommandHistory();
+
+		Assert.True(history.Add("  view content  "));
+		Assert.False(history.Add("view content"));
+		Assert.True(history.Add("view tree"));
+		Assert.True(history.Add("view content"));
+
+		Assert.Equal(["view content", "view tree", "view content"], history.Entries);
+	}
+
+	[Fact]
+	public void NavigationRestoresTheDraftAfterTheNewestCommand()
+	{
+		var history = new TerminalCommandHistory(["view tree", "format json"]);
+
+		Assert.Equal("format json", history.Previous("set hide-secrets "));
+		Assert.Equal("view tree", history.Previous("ignored"));
+		Assert.Equal("view tree", history.Previous("ignored"));
+		Assert.Equal("format json", history.Next());
+		Assert.Equal("set hide-secrets ", history.Next());
+		Assert.Equal("set hide-secrets ", history.Next());
+	}
+
+	[Fact]
+	public void ConstructorNormalizesPersistedHistory()
+	{
+		var history = new TerminalCommandHistory([
+			" ",
+			"view tree",
+			"view tree",
+			" format json "]);
+
+		Assert.Equal(["view tree", "format json"], history.Entries);
+	}
+}
