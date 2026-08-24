@@ -227,15 +227,15 @@ public sealed partial class TerminalLocalizationContractTests
 	public void LocalizationText_PreservesTypographyAndBrandContracts()
 	{
 		var catalogs = ReadCatalogs();
+		var punctuationViolations = new List<string>();
 		foreach (var (locale, catalog) in catalogs)
 		{
 			foreach (var (key, value) in catalog)
 			{
-				if (!string.Equals(locale, "fr", StringComparison.Ordinal))
+				if (!string.Equals(locale, "fr", StringComparison.Ordinal)
+					&& ForbiddenSpaceBeforePunctuationRegex().IsMatch(RemoveTechnicalLiterals(value)))
 				{
-					Assert.False(
-						ForbiddenSpaceBeforePunctuationRegex().IsMatch(RemoveTechnicalLiterals(value)),
-						$"Forbidden punctuation spacing in {locale}.json/{key}.");
+					punctuationViolations.Add($"{locale}.json/{key}");
 				}
 
 				AssertBalancedParentheses(value, $"{locale}.json/{key}");
@@ -253,11 +253,10 @@ public sealed partial class TerminalLocalizationContractTests
 		{
 			var help = File.ReadAllText(path);
 			var locale = Path.GetFileNameWithoutExtension(path)["help.".Length..];
-			if (!string.Equals(locale, "fr", StringComparison.Ordinal))
+			if (!string.Equals(locale, "fr", StringComparison.Ordinal)
+				&& ForbiddenSpaceBeforePunctuationRegex().IsMatch(RemoveTechnicalLiterals(help)))
 			{
-				Assert.False(
-					ForbiddenSpaceBeforePunctuationRegex().IsMatch(RemoveTechnicalLiterals(help)),
-					$"Forbidden punctuation spacing in {Path.GetFileName(path)}.");
+				punctuationViolations.Add(Path.GetFileName(path));
 			}
 
 			AssertBalancedParentheses(
@@ -266,6 +265,28 @@ public sealed partial class TerminalLocalizationContractTests
 			Assert.DoesNotMatch(DuplicateBrandRegex(), help);
 			Assert.Contains("DevProjex", help, StringComparison.Ordinal);
 		}
+
+		Assert.True(
+			punctuationViolations.Count == 0,
+			$"Forbidden punctuation spacing:{Environment.NewLine}{string.Join(Environment.NewLine, punctuationViolations)}");
+	}
+
+	[Theory]
+	[InlineData("devprojex analyze .")]
+	[InlineData("devprojex export context . -o context.md")]
+	[InlineData("devprojex mcp --root .")]
+	public void LocalizationTypography_AllowsCurrentDirectoryCommandArguments(string value)
+	{
+		Assert.DoesNotMatch(ForbiddenSpaceBeforePunctuationRegex(), RemoveTechnicalLiterals(value));
+	}
+
+	[Theory]
+	[InlineData("word .")]
+	[InlineData("{0} .")]
+	[InlineData("Cloning {0} ...")]
+	public void LocalizationTypography_RejectsDetachedPunctuation(string value)
+	{
+		Assert.Matches(ForbiddenSpaceBeforePunctuationRegex(), RemoveTechnicalLiterals(value));
 	}
 
 	[Fact]
@@ -338,16 +359,18 @@ public sealed partial class TerminalLocalizationContractTests
 	}
 
 	private static string RemoveTechnicalLiterals(string value) =>
-		StandalonePathRegex().Replace(
-			StandaloneCommandLineShortcutRegex().Replace(
-				StandaloneHelpShortcutRegex().Replace(
-					WorkspaceCommandTokenRegex().Replace(
-						WorkspaceCommandListRegex().Replace(
-							InlineCodeRegex().Replace(value, "literal"),
-							"commands"),
-						"command"),
-					"shortcut"),
-				"command-line"),
+		CurrentDirectoryCommandRegex().Replace(
+			CommandVariadicSchemaRegex().Replace(
+				StandaloneCommandLineShortcutRegex().Replace(
+					StandaloneHelpShortcutRegex().Replace(
+						WorkspaceCommandTokenRegex().Replace(
+							WorkspaceCommandListRegex().Replace(
+								InlineCodeRegex().Replace(value, "literal"),
+								"commands"),
+							"command"),
+						"shortcut"),
+					"command-line"),
+				"arguments"),
 			"path");
 
 	private static Dictionary<string, string> ReadCatalog(string path)
@@ -365,7 +388,7 @@ public sealed partial class TerminalLocalizationContractTests
 	[GeneratedRegex(@"\{\d+\}", RegexOptions.CultureInvariant)]
 	private static partial Regex PlaceholderRegex();
 
-	[GeneratedRegex(@" (?=[,:;!?\)]|\.(?:\s|$))", RegexOptions.CultureInvariant)]
+	[GeneratedRegex(@" (?=[,:;!?\)]|\.\.\.|\.(?:\s|$))", RegexOptions.CultureInvariant)]
 	private static partial Regex ForbiddenSpaceBeforePunctuationRegex();
 
 	[GeneratedRegex(@"DevProjex\s+DevProjex", RegexOptions.CultureInvariant)]
@@ -380,8 +403,11 @@ public sealed partial class TerminalLocalizationContractTests
 	[GeneratedRegex(@"(?<!\S):(?=\s|\p{L})", RegexOptions.CultureInvariant)]
 	private static partial Regex StandaloneCommandLineShortcutRegex();
 
-	[GeneratedRegex(@"(?<!\S)\.(?=\s|$)", RegexOptions.CultureInvariant)]
-	private static partial Regex StandalonePathRegex();
+	[GeneratedRegex(@"\bdevprojex(?:\s+(?:[a-z][a-z-]*|--[a-z][a-z-]*)){1,5}\s+\.(?=\s|$)", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
+	private static partial Regex CurrentDirectoryCommandRegex();
+
+	[GeneratedRegex(@"(?<=>) \.\.\.", RegexOptions.CultureInvariant)]
+	private static partial Regex CommandVariadicSchemaRegex();
 
 	[GeneratedRegex(@"(?<!\S):[a-z][a-z-]*", RegexOptions.CultureInvariant)]
 	private static partial Regex WorkspaceCommandTokenRegex();
