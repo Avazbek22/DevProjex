@@ -1,5 +1,6 @@
 using System.IO.Pipelines;
 using DevProjex.Mcp;
+using ModelContextProtocol;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
 
@@ -227,6 +228,111 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task LongRunningToolsReportOrderedProgressOnlyForRequestedTokens()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		for (var index = 0; index < 8; index++)
+		{
+			File.WriteAllText(
+				Path.Combine(project, $"File{index:D2}.cs"),
+				$"internal static class File{index:D2} {{ public const int Value = {index}; }}\n");
+		}
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var cases = new[]
+		{
+			new ProgressCase(
+				"pack_context",
+				new Dictionary<string, object?>
+				{
+					["view"] = "content",
+					["format"] = "text"
+				},
+				["selecting files", "transforming content", "writing pack"]),
+			new ProgressCase(
+				"analyze",
+				new Dictionary<string, object?>(),
+				["selecting files", "transforming content", "analyzing content"])
+		};
+
+		foreach (var testCase in cases)
+		{
+			var progress = new InlineProgress<ProgressNotificationValue>();
+			var firstMessage = server.WireMessageCount;
+			var firstInputMessage = server.InputWireMessageCount;
+			var result = await server.CallAsync(
+				testCase.ToolName,
+				testCase.Arguments,
+				progress);
+
+			Assert.NotEqual(true, result.IsError);
+			var request = Assert.Single(
+				server.GetInputWireMessages(firstInputMessage),
+				static message => message.TryGetProperty("method", out var method) &&
+				                  method.GetString() == RequestMethods.ToolsCall);
+			var requestToken = request.GetProperty("params")
+				.GetProperty("_meta")
+				.GetProperty("progressToken");
+			var messages = server.GetWireMessages(firstMessage);
+			var progressMessages = messages
+				.Select((message, index) => (Message: message, Index: index))
+				.Where(static item =>
+					item.Message.TryGetProperty("method", out var method) &&
+					method.GetString() == NotificationMethods.ProgressNotification)
+				.ToArray();
+			Assert.NotEmpty(progressMessages);
+			var resultIndex = Array.FindIndex(
+				messages,
+				static message => message.TryGetProperty("result", out var wireResult) &&
+				                  wireResult.TryGetProperty("content", out _));
+			Assert.True(resultIndex >= 0, "The tool result was not recorded on the wire.");
+			Assert.All(progressMessages, item => Assert.True(item.Index < resultIndex));
+
+			var values = progressMessages
+				.Select(static item => item.Message.GetProperty("params"))
+				.ToArray();
+			Assert.All(values, value =>
+			{
+				Assert.True(JsonElement.DeepEquals(
+					requestToken,
+					value.GetProperty("progressToken")));
+				Assert.Equal(100f, value.GetProperty("total").GetSingle());
+			});
+			for (var index = 1; index < values.Length; index++)
+			{
+				Assert.True(
+					values[index].GetProperty("progress").GetSingle() >
+					values[index - 1].GetProperty("progress").GetSingle());
+			}
+			foreach (var phase in testCase.ExpectedPhases)
+			{
+				Assert.Contains(
+					values,
+					value => value.GetProperty("message").GetString()!
+						.StartsWith(phase, StringComparison.Ordinal));
+			}
+			Assert.NotEmpty(progress.Values);
+
+			firstMessage = server.WireMessageCount;
+			firstInputMessage = server.InputWireMessageCount;
+			result = await server.CallAsync(testCase.ToolName, testCase.Arguments);
+			Assert.NotEqual(true, result.IsError);
+			request = Assert.Single(
+				server.GetInputWireMessages(firstInputMessage),
+				static message => message.TryGetProperty("method", out var method) &&
+				                  method.GetString() == RequestMethods.ToolsCall);
+			if (request.GetProperty("params").TryGetProperty("_meta", out var requestMeta))
+				Assert.False(requestMeta.TryGetProperty("progressToken", out _));
+			Assert.DoesNotContain(
+				server.GetWireMessages(firstMessage),
+				static message =>
+					message.TryGetProperty("method", out var method) &&
+					method.GetString() == NotificationMethods.ProgressNotification);
+		}
+	}
+
+	[Fact]
 	public async Task DetailSignaturesCompressesMetricsAndContentWithoutWeakeningRedaction()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -442,6 +548,32 @@ public sealed class McpServerIntegrationTests
 	private static string Text(CallToolResult result) =>
 		Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
 
+	private sealed record ProgressCase(
+		string ToolName,
+		IReadOnlyDictionary<string, object?> Arguments,
+		IReadOnlyList<string> ExpectedPhases);
+
+	private sealed class InlineProgress<T> : IProgress<T>
+	{
+		private readonly List<T> _values = [];
+		private readonly object _sync = new();
+
+		public IReadOnlyList<T> Values
+		{
+			get
+			{
+				lock (_sync)
+					return _values.ToArray();
+			}
+		}
+
+		public void Report(T value)
+		{
+			lock (_sync)
+				_values.Add(value);
+		}
+	}
+
 	private static void AssertSpotlighted(CallToolResult result)
 	{
 		var text = Text(result);
@@ -499,6 +631,7 @@ public sealed class McpServerIntegrationTests
 		private readonly Pipe _clientToServer;
 		private readonly Pipe _serverToClient;
 		private readonly Task _serverTask;
+		private readonly RecordingWriteStream _recordingInput;
 		private readonly RecordingReadStream _recordingOutput;
 
 		private McpTestServer(
@@ -506,12 +639,14 @@ public sealed class McpServerIntegrationTests
 			Pipe clientToServer,
 			Pipe serverToClient,
 			Task serverTask,
+			RecordingWriteStream recordingInput,
 			RecordingReadStream recordingOutput)
 		{
 			Client = client;
 			_clientToServer = clientToServer;
 			_serverToClient = serverToClient;
 			_serverTask = serverTask;
+			_recordingInput = recordingInput;
 			_recordingOutput = recordingOutput;
 		}
 
@@ -528,27 +663,58 @@ public sealed class McpServerIntegrationTests
 				TestContext.Current.CancellationToken,
 				() => Path.Combine(sandbox, "app-data"),
 				Path.Combine(sandbox, "temp"));
+			var recordingInput = new RecordingWriteStream(clientToServer.Writer.AsStream());
 			var recordingOutput = new RecordingReadStream(serverToClient.Reader.AsStream());
 			var transport = new StreamClientTransport(
-				clientToServer.Writer.AsStream(),
+				recordingInput,
 				recordingOutput);
 			var client = await McpClient.CreateAsync(
 				transport,
 				clientOptions: null,
 				loggerFactory: null,
 				TestContext.Current.CancellationToken);
-			return new McpTestServer(client, clientToServer, serverToClient, serverTask, recordingOutput);
+			return new McpTestServer(
+				client,
+				clientToServer,
+				serverToClient,
+				serverTask,
+				recordingInput,
+				recordingOutput);
 		}
 
 		public Task<CallToolResult> CallAsync(
 			string name,
-			IReadOnlyDictionary<string, object?>? arguments = null) =>
+			IReadOnlyDictionary<string, object?>? arguments = null,
+			IProgress<ProgressNotificationValue>? progress = null,
+			RequestOptions? options = null) =>
 			Client.CallToolAsync(
 				name,
 				arguments ?? new Dictionary<string, object?>(),
-				progress: null,
-				options: null,
+				progress,
+				options,
 				TestContext.Current.CancellationToken).AsTask();
+
+		public int WireMessageCount => GetWireMessages(0).Length;
+		public int InputWireMessageCount => GetInputWireMessages(0).Length;
+
+		public JsonElement[] GetInputWireMessages(int startIndex) =>
+			ParseMessages(_recordingInput.GetRecordedText(), startIndex);
+
+		public JsonElement[] GetWireMessages(int startIndex) =>
+			ParseMessages(_recordingOutput.GetRecordedText(), startIndex);
+
+		private static JsonElement[] ParseMessages(string transcript, int startIndex)
+		{
+			var lines = transcript
+				.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+			var messages = new List<JsonElement>(Math.Max(0, lines.Length - startIndex));
+			for (var index = startIndex; index < lines.Length; index++)
+			{
+				using var document = JsonDocument.Parse(lines[index].TrimEnd('\r'));
+				messages.Add(document.RootElement.Clone());
+			}
+			return messages.ToArray();
+		}
 
 		public JsonElement GetLastToolCallWireResult()
 		{
@@ -574,6 +740,72 @@ public sealed class McpServerIntegrationTests
 			await _clientToServer.Writer.CompleteAsync();
 			await _serverToClient.Reader.CompleteAsync();
 			await _serverTask.WaitAsync(TimeSpan.FromSeconds(10));
+		}
+
+		private sealed class RecordingWriteStream(Stream destination) : Stream
+		{
+			private readonly MemoryStream _recording = new();
+			private readonly object _sync = new();
+
+			public string GetRecordedText()
+			{
+				lock (_sync)
+					return Encoding.UTF8.GetString(_recording.ToArray());
+			}
+
+			public override async ValueTask WriteAsync(
+				ReadOnlyMemory<byte> buffer,
+				CancellationToken cancellationToken = default)
+			{
+				await destination.WriteAsync(buffer, cancellationToken).ConfigureAwait(false);
+				lock (_sync)
+					_recording.Write(buffer.Span);
+			}
+
+			public override async Task WriteAsync(
+				byte[] buffer,
+				int offset,
+				int count,
+				CancellationToken cancellationToken)
+			{
+				await destination.WriteAsync(buffer.AsMemory(offset, count), cancellationToken)
+					.ConfigureAwait(false);
+				lock (_sync)
+					_recording.Write(buffer, offset, count);
+			}
+
+			public override void Write(byte[] buffer, int offset, int count)
+			{
+				destination.Write(buffer, offset, count);
+				lock (_sync)
+					_recording.Write(buffer, offset, count);
+			}
+
+			protected override void Dispose(bool disposing)
+			{
+				if (disposing)
+				{
+					destination.Dispose();
+					_recording.Dispose();
+				}
+				base.Dispose(disposing);
+			}
+
+			public override bool CanRead => false;
+			public override bool CanSeek => false;
+			public override bool CanWrite => true;
+			public override long Length => throw new NotSupportedException();
+			public override long Position
+			{
+				get => throw new NotSupportedException();
+				set => throw new NotSupportedException();
+			}
+			public override void Flush() => destination.Flush();
+			public override Task FlushAsync(CancellationToken cancellationToken) =>
+				destination.FlushAsync(cancellationToken);
+			public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+			public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+			public override void SetLength(long value) => throw new NotSupportedException();
 		}
 
 		private sealed class RecordingReadStream(Stream source) : Stream
