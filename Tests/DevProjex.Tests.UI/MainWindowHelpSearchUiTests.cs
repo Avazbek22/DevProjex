@@ -4,6 +4,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Styling;
 using Avalonia.VisualTree;
+using DevProjex.Avalonia.Controls;
 
 namespace DevProjex.Tests.UI;
 
@@ -87,12 +88,15 @@ public sealed class MainWindowHelpSearchUiTests
             var previousButton = GetRequiredControl<Button>(help, "HelpSearchPreviousButton");
             var nextButton = GetRequiredControl<Button>(help, "HelpSearchNextButton");
             var matchSummary = GetRequiredControl<TextBlock>(help, "HelpSearchMatchSummary");
+            var markerBar = GetRequiredControl<PreviewMarkerBar>(help, "HelpSearchMarkerBar");
             help.SearchBoxControl.Text = "p";
             await Task.Delay(50);
             await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
             Assert.Equal(0, help.SearchMatchCount);
             Assert.False(matchSummary.IsVisible);
             Assert.Empty(GetHighlightedRuns(help));
+            Assert.Equal(0, help.SearchMarkerCount);
+            Assert.Empty(markerBar.MarkerTicks);
 
             help.SearchBoxControl.Text = "no-such-help-search-result-4f22";
             await UiTestDriver.WaitForConditionAsync(
@@ -109,12 +113,21 @@ public sealed class MainWindowHelpSearchUiTests
             Assert.Empty(GetHighlightedRuns(help));
             await UiTestDriver.WaitForConditionAsync(
                 window,
-                () => help.SearchMatchCount > 3 && help.CurrentSearchMatchIndex == 1,
+                () => help.SearchMatchCount > 3 &&
+                      help.CurrentSearchMatchIndex == 1 &&
+                      help.SearchMarkerCount > 0 &&
+                      markerBar.MarkerTicks.Count > 0 &&
+                      markerBar.IsVisible,
                 "help search matches");
 
             var initialMatchCount = help.SearchMatchCount;
             Assert.Equal($"(1 / {initialMatchCount:N0})", matchSummary.Text);
             AssertHighlightBrushes(help, initialMatchCount);
+            Assert.All(
+                markerBar.MarkerTicks,
+                static tick => Assert.Equal(PreviewMarkerCategory.Search, tick.Target.Category));
+            Assert.True(markerBar.IsVisible);
+            AssertSearchMarkerBrush(markerBar);
 
             var popupRoot = Assert.IsAssignableFrom<TopLevel>(TopLevel.GetTopLevel(help.SearchBoxControl));
             await UiTestDriver.RaiseButtonClickAsync(nextButton);
@@ -132,6 +145,74 @@ public sealed class MainWindowHelpSearchUiTests
             await UiTestDriver.PressKeyAsync(popupRoot, Key.Enter);
             Assert.Equal(1, help.CurrentSearchMatchIndex);
 
+            var bodyPanel = GetRequiredControl<StackPanel>(help, "BodyPanel");
+            var bodyScrollViewer = GetRequiredControl<ScrollViewer>(help, "HelpBodyScrollViewer");
+            var verticalScrollBar = Assert.Single(
+                bodyScrollViewer.GetVisualDescendants().OfType<ScrollBar>(),
+                static scrollBar => scrollBar.Orientation == Orientation.Vertical);
+            var targetTick = markerBar.MarkerTicks
+                .Where(static tick => tick.Target.Category == PreviewMarkerCategory.Search)
+                .OrderByDescending(static tick => tick.Y)
+                .First();
+            var expectedMarkerMatch = help.ResolveSearchMarkerMatchIndex(targetTick.Target);
+            Assert.InRange(expectedMarkerMatch, 2, initialMatchCount);
+            var markerPoint = Assert.IsType<Point>(markerBar.TranslatePoint(
+                new Point(markerBar.Bounds.Width - 1, targetTick.Y),
+                popupRoot));
+            var originalAllowAutoHide = verticalScrollBar.AllowAutoHide;
+
+            popupRoot.MouseMove(markerPoint, RawInputModifiers.None);
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
+            var markerHit = Assert.IsAssignableFrom<InputElement>(popupRoot.InputHitTest(markerPoint));
+            Assert.Equal("Hand", markerHit.Cursor?.ToString());
+
+            popupRoot.MouseDown(
+                markerPoint,
+                MouseButton.Left,
+                RawInputModifiers.LeftMouseButton);
+            popupRoot.MouseUp(markerPoint, MouseButton.Left, RawInputModifiers.None);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => help.CurrentSearchMatchIndex == expectedMarkerMatch,
+                "help search marker click to activate its exact match");
+            var currentMatchControl = Assert.IsType<TextBlock>(help.CurrentSearchMatchControl);
+            var currentMatchOrigin = Assert.IsType<Point>(
+                currentMatchControl.TranslatePoint(default, bodyPanel));
+            var expectedOffset = Math.Clamp(
+                currentMatchOrigin.Y + (currentMatchControl.Bounds.Height / 2) -
+                (bodyScrollViewer.Viewport.Height / 2),
+                0,
+                Math.Max(0, bodyScrollViewer.Extent.Height - bodyScrollViewer.Viewport.Height));
+            Assert.InRange(Math.Abs(bodyScrollViewer.Offset.Y - expectedOffset), 0, 1);
+
+            var offsetBeforeDrag = bodyScrollViewer.Offset.Y;
+            var dragDelta = offsetBeforeDrag > 20 ? -36 : 36;
+            var dragTarget = new Point(markerPoint.X, markerPoint.Y + dragDelta);
+            popupRoot.MouseMove(markerPoint, RawInputModifiers.None);
+            popupRoot.MouseDown(
+                markerPoint,
+                MouseButton.Left,
+                RawInputModifiers.LeftMouseButton);
+            popupRoot.MouseMove(dragTarget, RawInputModifiers.LeftMouseButton);
+            Assert.Equal("Arrow", bodyScrollViewer.Cursor?.ToString());
+            Assert.False(verticalScrollBar.AllowAutoHide);
+            popupRoot.MouseUp(dragTarget, MouseButton.Left, RawInputModifiers.None);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => dragDelta < 0
+                    ? bodyScrollViewer.Offset.Y < offsetBeforeDrag - 1
+                    : bodyScrollViewer.Offset.Y > offsetBeforeDrag + 1,
+                "help search marker drag to move the scrollbar continuously");
+
+            var bodyPoint = Assert.IsType<Point>(bodyScrollViewer.TranslatePoint(
+                new Point(12, bodyScrollViewer.Bounds.Height / 2),
+                popupRoot));
+            popupRoot.MouseMove(bodyPoint, RawInputModifiers.None);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => verticalScrollBar.AllowAutoHide == originalAllowAutoHide,
+                "help search marker interaction to restore scrollbar auto-hide");
+
             await UiTestDriver.RaiseButtonClickAsync(GetRequiredControl<Button>(
                 help,
                 "HelpSearchCloseButton"));
@@ -143,6 +224,9 @@ public sealed class MainWindowHelpSearchUiTests
 
             Assert.Equal(0, help.SearchMatchCount);
             Assert.Empty(GetHighlightedRuns(help));
+            Assert.Equal(0, help.SearchMarkerCount);
+            Assert.Empty(markerBar.MarkerTicks);
+            Assert.False(markerBar.IsVisible);
             Assert.Equal(1, searchButton.Opacity);
             Assert.True(searchButton.IsHitTestVisible);
         }
@@ -200,6 +284,14 @@ public sealed class MainWindowHelpSearchUiTests
         Assert.Single(runs, run => ReferenceEquals(run.Background, current));
         Assert.Equal(expectedMatchCount - 1, runs.Count(run => ReferenceEquals(run.Background, highlight)));
         Assert.All(runs, run => Assert.Same(text, run.Foreground));
+    }
+
+    private static void AssertSearchMarkerBrush(PreviewMarkerBar markerBar)
+    {
+        var application = Assert.IsType<App>(global::Avalonia.Application.Current);
+        var theme = application.ActualThemeVariant ?? ThemeVariant.Light;
+        Assert.True(application.TryFindResource("TreeSearchHighlightBrush", theme, out var highlight));
+        Assert.Same(highlight, markerBar.SearchBrush);
     }
 
     private static List<Run> GetHighlightedRuns(HelpPopoverView help)

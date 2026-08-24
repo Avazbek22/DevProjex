@@ -22,11 +22,27 @@ public partial class HelpPopoverView : UserControl
     public event EventHandler<RoutedEventArgs>? CloseRequested;
     private readonly List<HelpTextEntry> _searchEntries = [];
     private readonly List<HelpSearchMatch> _searchMatches = [];
+    private readonly Dictionary<int, int> _searchMarkerMatchIndices = [];
     private Border _searchPanel = null!;
     private Grid _searchContent = null!;
+    private Grid _bodySurface = null!;
     private TextBox _searchBox = null!;
     private TextBlock _searchMatchSummary = null!;
     private Button _searchButton = null!;
+    private ScrollViewer _bodyScrollViewer = null!;
+    private PreviewMarkerBar _searchMarkerBar = null!;
+    private ScrollBar? _bodyVerticalScrollBar;
+    private PreviewMarkerSnapshot _searchMarkerSnapshot = PreviewMarkerSnapshot.Empty;
+    private Cursor? _searchMarkerHandCursor;
+    private Cursor? _searchMarkerDragCursor;
+    private InputElement? _searchMarkerCursorTarget;
+    private IPointer? _searchMarkerDragPointer;
+    private double _searchMarkerDragStartY;
+    private double _searchMarkerDragStartOffsetY;
+    private bool _searchMarkerDragging;
+    private bool _searchMarkerScrollBarAllowAutoHide;
+    private bool _searchMarkerScrollBarInteractionActive;
+    private bool _searchMarkerRailPointerOver;
     private DispatcherTimer? _searchDebounceTimer;
     private MainWindowViewModel? _boundViewModel;
     private int _currentSearchMatchIndex = -1;
@@ -42,13 +58,42 @@ public partial class HelpPopoverView : UserControl
         DataContextChanged += OnDataContextChanged;
         AttachedToVisualTree += OnAttachedToVisualTree;
         DetachedFromVisualTree += OnDetachedFromVisualTree;
+        _bodyScrollViewer.LayoutUpdated += OnBodyScrollViewerLayoutUpdated;
+        _bodySurface.AddHandler(
+            InputElement.PointerPressedEvent,
+            OnSearchMarkerPointerPressed,
+            RoutingStrategies.Tunnel,
+            handledEventsToo: true);
+        _bodySurface.AddHandler(
+            InputElement.PointerMovedEvent,
+            OnSearchMarkerPointerMoved,
+            RoutingStrategies.Tunnel,
+            handledEventsToo: true);
+        _bodySurface.AddHandler(
+            InputElement.PointerReleasedEvent,
+            OnSearchMarkerPointerReleased,
+            RoutingStrategies.Tunnel,
+            handledEventsToo: true);
+        _bodySurface.PointerExited += OnSearchMarkerPointerExited;
+        _bodyScrollViewer.PointerCaptureLost += OnSearchMarkerPointerCaptureLost;
         KeyDown += OnHelpKeyDown;
     }
 
     internal bool IsSearchOpen => _isSearchOpen;
     internal int SearchMatchCount => _searchMatches.Count;
     internal int CurrentSearchMatchIndex => _currentSearchMatchIndex + 1;
+    internal int SearchMarkerCount => _searchMarkerSnapshot.Markers.Length;
     internal TextBox SearchBoxControl => _searchBox;
+    internal TextBlock? CurrentSearchMatchControl =>
+        _currentSearchMatchIndex >= 0 && _currentSearchMatchIndex < _searchMatches.Count
+            ? _searchMatches[_currentSearchMatchIndex].Entry.Control
+            : null;
+
+    internal int ResolveSearchMarkerMatchIndex(PreviewMarkerTarget target)
+        => target.Category == PreviewMarkerCategory.Search &&
+           _searchMarkerMatchIndices.TryGetValue(target.LineNumber, out var matchIndex)
+            ? matchIndex + 1
+            : 0;
 
     private void OnDataContextChanged(object? sender, EventArgs e)
     {
@@ -256,6 +301,7 @@ public partial class HelpPopoverView : UserControl
         }
 
         DetachThemeHandler();
+        EndSearchMarkerInteraction();
         ForceSearchClosed(clearQuery: true);
     }
 
@@ -380,6 +426,7 @@ public partial class HelpPopoverView : UserControl
 
         ApplySearchHighlights();
         UpdateSearchControls();
+        UpdateSearchMarkers();
         if (_currentSearchMatchIndex >= 0)
             ScrollCurrentMatchIntoView();
     }
@@ -461,6 +508,7 @@ public partial class HelpPopoverView : UserControl
             RestorePlainText(entry);
 
         UpdateSearchControls();
+        SetSearchMarkerSnapshot(PreviewMarkerSnapshot.Empty);
     }
 
     private static void RestorePlainText(HelpTextEntry entry)
@@ -478,12 +526,29 @@ public partial class HelpPopoverView : UserControl
         _searchMatchSummary.IsVisible = hasQuery;
     }
 
-    private void ScrollCurrentMatchIntoView()
+    private void ScrollCurrentMatchIntoView(bool centerInViewport = false)
     {
         if (_currentSearchMatchIndex < 0 || _currentSearchMatchIndex >= _searchMatches.Count)
             return;
 
         var control = _searchMatches[_currentSearchMatchIndex].Entry.Control;
+        if (centerInViewport && GetBodyPanel() is { } bodyPanel &&
+            control.TranslatePoint(default, bodyPanel) is { } origin)
+        {
+            var maximumOffset = Math.Max(
+                0,
+                _bodyScrollViewer.Extent.Height - _bodyScrollViewer.Viewport.Height);
+            var targetOffset = Math.Clamp(
+                origin.Y + (control.Bounds.Height / 2) -
+                (_bodyScrollViewer.Viewport.Height / 2),
+                0,
+                maximumOffset);
+            _bodyScrollViewer.Offset = new Vector(
+                _bodyScrollViewer.Offset.X,
+                targetOffset);
+            return;
+        }
+
         Dispatcher.UIThread.Post(control.BringIntoView, DispatcherPriority.Background);
     }
 
@@ -644,6 +709,314 @@ public partial class HelpPopoverView : UserControl
         _searchBox = GetRequiredControl<TextBox>("HelpSearchBox");
         _searchMatchSummary = GetRequiredControl<TextBlock>("HelpSearchMatchSummary");
         _searchButton = GetRequiredControl<Button>("HelpSearchButton");
+        _bodySurface = GetRequiredControl<Grid>("HelpBodySurface");
+        _bodyScrollViewer = GetRequiredControl<ScrollViewer>("HelpBodyScrollViewer");
+        _searchMarkerBar = GetRequiredControl<PreviewMarkerBar>("HelpSearchMarkerBar");
+    }
+
+    private void OnBodyScrollViewerLayoutUpdated(object? sender, EventArgs e)
+    {
+        UpdateSearchMarkers();
+        UpdateSearchMarkerTrackGeometry();
+    }
+
+    private void UpdateSearchMarkers()
+    {
+        _searchMarkerMatchIndices.Clear();
+        if (_searchMatches.Count == 0 || GetBodyPanel() is not { } bodyPanel)
+        {
+            SetSearchMarkerSnapshot(PreviewMarkerSnapshot.Empty);
+            return;
+        }
+
+        var extentHeight = _bodyScrollViewer.Extent.Height;
+        if (!double.IsFinite(extentHeight) || extentHeight <= 0)
+        {
+            SetSearchMarkerSnapshot(PreviewMarkerSnapshot.Empty);
+            return;
+        }
+
+        var totalLineCount = (int)Math.Clamp(
+            Math.Ceiling(extentHeight),
+            1,
+            int.MaxValue);
+        var lineHeight = extentHeight / totalLineCount;
+        var markers = new List<PreviewMarkerSource>(_searchMatches.Count);
+        HelpTextEntry? previousEntry = null;
+        for (var matchIndex = 0; matchIndex < _searchMatches.Count; matchIndex++)
+        {
+            var match = _searchMatches[matchIndex];
+            if (ReferenceEquals(previousEntry, match.Entry))
+                continue;
+
+            previousEntry = match.Entry;
+            if (match.Entry.Control.TranslatePoint(default, bodyPanel) is not { } origin)
+                continue;
+
+            var center = Math.Clamp(
+                origin.Y + (match.Entry.Control.Bounds.Height / 2),
+                0,
+                Math.Max(0, extentHeight - double.Epsilon));
+            var lineNumber = Math.Clamp(
+                (int)Math.Floor(center / lineHeight) + 1,
+                1,
+                totalLineCount);
+            if (_searchMarkerMatchIndices.TryAdd(lineNumber, matchIndex))
+                markers.Add(new PreviewMarkerSource(lineNumber, PreviewMarkerCategory.Search));
+        }
+
+        SetSearchMarkerSnapshot(markers.Count == 0
+            ? PreviewMarkerSnapshot.Empty
+            : new PreviewMarkerSnapshot(totalLineCount, [.. markers]));
+    }
+
+    private void SetSearchMarkerSnapshot(PreviewMarkerSnapshot snapshot)
+    {
+        if (_searchMarkerSnapshot.TotalLineCount == snapshot.TotalLineCount &&
+            _searchMarkerSnapshot.Markers.AsSpan().SequenceEqual(snapshot.Markers))
+        {
+            return;
+        }
+
+        _searchMarkerSnapshot = snapshot;
+        _searchMarkerBar.SetMarkers(snapshot);
+        if (snapshot.Markers.Length == 0)
+            EndSearchMarkerInteraction();
+    }
+
+    private void UpdateSearchMarkerTrackGeometry()
+    {
+        _bodyVerticalScrollBar ??= _bodyScrollViewer
+            .GetVisualDescendants()
+            .OfType<ScrollBar>()
+            .FirstOrDefault(static scrollBar => scrollBar.Orientation == Orientation.Vertical);
+
+        var hasVerticalScrollBar = _bodyVerticalScrollBar is { IsVisible: true };
+        _searchMarkerBar.IsMarkerDisplayEnabled = hasVerticalScrollBar;
+
+        var margin = default(Thickness);
+        if (_bodyVerticalScrollBar is { IsVisible: true } scrollBar &&
+            scrollBar.GetVisualDescendants().OfType<Track>().FirstOrDefault() is { } track &&
+            track.GetVisualDescendants().OfType<Thumb>().FirstOrDefault() is { } thumb &&
+            track.TranslatePoint(default, _bodyScrollViewer) is { } origin)
+        {
+            var availableHeight = Math.Max(0, _bodyScrollViewer.Bounds.Height);
+            var top = Math.Clamp(origin.Y, 0, availableHeight);
+            var bottom = Math.Clamp(
+                availableHeight - top - track.Bounds.Height,
+                0,
+                availableHeight);
+            margin = new Thickness(0, top, 0, bottom);
+
+            var totalLineCount = Math.Max(1, _searchMarkerSnapshot.TotalLineCount);
+            var extentHeight = _bodyScrollViewer.Extent.Height;
+            var lineHeight = double.IsFinite(extentHeight) && extentHeight > 0
+                ? extentHeight / totalLineCount
+                : 1;
+            _searchMarkerBar.SetScrollMetrics(new PreviewMarkerScrollMetrics(
+                extentHeight,
+                _bodyScrollViewer.Viewport.Height,
+                thumb.Bounds.Height,
+                FirstLineTop: 0,
+                lineHeight));
+        }
+        else
+        {
+            _searchMarkerBar.SetScrollMetrics(null);
+        }
+
+        if (_searchMarkerBar.Margin != margin)
+            _searchMarkerBar.Margin = margin;
+    }
+
+    private void OnSearchMarkerPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!e.GetCurrentPoint(_bodyScrollViewer).Properties.IsLeftButtonPressed ||
+            _searchMarkerBar.FindTargetAt(e.GetPosition(_searchMarkerBar)) is not { } target ||
+            !TryNavigateToSearchMarker(target))
+        {
+            return;
+        }
+
+        _searchMarkerDragPointer = e.Pointer;
+        _searchMarkerDragStartY = e.GetPosition(_searchMarkerBar).Y;
+        _searchMarkerDragStartOffsetY = _bodyScrollViewer.Offset.Y;
+        _searchMarkerDragging = false;
+        e.Pointer.Capture(_bodyScrollViewer);
+        BeginSearchMarkerScrollBarInteraction();
+        SetSearchMarkerCursor(_bodyScrollViewer, isDragging: true);
+        e.Handled = true;
+    }
+
+    private void OnSearchMarkerPointerMoved(object? sender, PointerEventArgs e)
+    {
+        UpdateSearchMarkerRailPointerState(IsPointerWithinSearchScrollBar(e));
+        if (ReferenceEquals(_searchMarkerDragPointer, e.Pointer) &&
+            e.GetCurrentPoint(_bodyScrollViewer).Properties.IsLeftButtonPressed)
+        {
+            var deltaY = e.GetPosition(_searchMarkerBar).Y - _searchMarkerDragStartY;
+            _searchMarkerDragging |= Math.Abs(deltaY) >= 2;
+            if (_searchMarkerDragging)
+            {
+                KeepSearchMarkerScrollBarActive();
+                SetSearchMarkerCursor(_bodyScrollViewer, isDragging: true);
+                ScrollFromSearchMarkerDrag(deltaY);
+            }
+
+            e.Handled = true;
+            return;
+        }
+
+        var markerTarget = _searchMarkerBar.FindTargetAt(e.GetPosition(_searchMarkerBar));
+        SetSearchMarkerCursor(
+            markerTarget is not null || _searchMarkerRailPointerOver
+                ? e.Source as InputElement
+                : null,
+            isDragging: markerTarget is null && _searchMarkerRailPointerOver);
+    }
+
+    private void OnSearchMarkerPointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (!ReferenceEquals(_searchMarkerDragPointer, e.Pointer))
+            return;
+
+        UpdateSearchMarkerRailPointerState(IsPointerWithinSearchScrollBar(e));
+        EndSearchMarkerDrag(releaseCapture: true);
+        var markerTarget = _searchMarkerBar.FindTargetAt(e.GetPosition(_searchMarkerBar));
+        SetSearchMarkerCursor(
+            markerTarget is not null || _searchMarkerRailPointerOver
+                ? e.Source as InputElement
+                : null,
+            isDragging: markerTarget is null && _searchMarkerRailPointerOver);
+        e.Handled = true;
+    }
+
+    private void OnSearchMarkerPointerCaptureLost(object? sender, PointerCaptureLostEventArgs e)
+    {
+        if (!ReferenceEquals(_searchMarkerDragPointer, e.Pointer))
+            return;
+
+        EndSearchMarkerDrag(releaseCapture: false);
+        SetSearchMarkerCursor(null);
+    }
+
+    private bool TryNavigateToSearchMarker(PreviewMarkerTarget target)
+    {
+        var matchNumber = ResolveSearchMarkerMatchIndex(target);
+        if (matchNumber <= 0 || matchNumber > _searchMatches.Count)
+            return false;
+
+        _currentSearchMatchIndex = matchNumber - 1;
+        ApplySearchHighlights();
+        UpdateSearchControls();
+        ScrollCurrentMatchIntoView(centerInViewport: true);
+        return true;
+    }
+
+    private void ScrollFromSearchMarkerDrag(double deltaY)
+    {
+        if (_bodyVerticalScrollBar?.GetVisualDescendants().OfType<Track>().FirstOrDefault() is not { } track ||
+            track.GetVisualDescendants().OfType<Thumb>().FirstOrDefault() is not { } thumb)
+        {
+            return;
+        }
+
+        var maximumOffset = Math.Max(
+            0,
+            _bodyScrollViewer.Extent.Height - _bodyScrollViewer.Viewport.Height);
+        var thumbTravel = Math.Max(1, track.Bounds.Height - thumb.Bounds.Height);
+        var targetY = Math.Clamp(
+            _searchMarkerDragStartOffsetY + ((deltaY / thumbTravel) * maximumOffset),
+            0,
+            maximumOffset);
+        _bodyScrollViewer.Offset = new Vector(_bodyScrollViewer.Offset.X, targetY);
+    }
+
+    private void EndSearchMarkerDrag(bool releaseCapture)
+    {
+        var pointer = _searchMarkerDragPointer;
+        _searchMarkerDragPointer = null;
+        _searchMarkerDragging = false;
+        if (releaseCapture && ReferenceEquals(pointer?.Captured, _bodyScrollViewer))
+            pointer.Capture(null);
+
+        if (!_searchMarkerRailPointerOver)
+            EndSearchMarkerScrollBarInteraction();
+    }
+
+    private bool IsPointerWithinSearchScrollBar(PointerEventArgs e)
+        => _searchMarkerBar.IsVisible &&
+           _bodyVerticalScrollBar is { IsVisible: true, Bounds.Width: > 0 } scrollBar &&
+           new Rect(scrollBar.Bounds.Size).Contains(e.GetPosition(scrollBar));
+
+    private void UpdateSearchMarkerRailPointerState(bool pointerOver)
+    {
+        if (_searchMarkerRailPointerOver == pointerOver)
+            return;
+
+        _searchMarkerRailPointerOver = pointerOver;
+        if (pointerOver)
+            BeginSearchMarkerScrollBarInteraction();
+        else if (_searchMarkerDragPointer is null)
+            EndSearchMarkerScrollBarInteraction();
+    }
+
+    private void BeginSearchMarkerScrollBarInteraction()
+    {
+        if (_searchMarkerScrollBarInteractionActive)
+        {
+            KeepSearchMarkerScrollBarActive();
+            return;
+        }
+
+        _searchMarkerScrollBarAllowAutoHide = _bodyVerticalScrollBar?.AllowAutoHide ?? true;
+        _searchMarkerScrollBarInteractionActive = true;
+        KeepSearchMarkerScrollBarActive();
+    }
+
+    private void KeepSearchMarkerScrollBarActive()
+        => _bodyVerticalScrollBar?.SetCurrentValue(ScrollBar.AllowAutoHideProperty, false);
+
+    private void EndSearchMarkerScrollBarInteraction()
+    {
+        if (!_searchMarkerScrollBarInteractionActive)
+            return;
+
+        _searchMarkerScrollBarInteractionActive = false;
+        _bodyVerticalScrollBar?.SetCurrentValue(
+            ScrollBar.AllowAutoHideProperty,
+            _searchMarkerScrollBarAllowAutoHide);
+    }
+
+    private void OnSearchMarkerPointerExited(object? sender, PointerEventArgs e)
+    {
+        UpdateSearchMarkerRailPointerState(pointerOver: false);
+        SetSearchMarkerCursor(null);
+    }
+
+    private void EndSearchMarkerInteraction()
+    {
+        EndSearchMarkerDrag(releaseCapture: true);
+        _searchMarkerRailPointerOver = false;
+        EndSearchMarkerScrollBarInteraction();
+        SetSearchMarkerCursor(null);
+    }
+
+    private void SetSearchMarkerCursor(InputElement? target, bool isDragging = false)
+    {
+        var cursor = isDragging
+            ? _searchMarkerDragCursor ??= new Cursor(StandardCursorType.Arrow)
+            : _searchMarkerHandCursor ??= new Cursor(StandardCursorType.Hand);
+        if (ReferenceEquals(_searchMarkerCursorTarget, target) &&
+            ReferenceEquals(target?.Cursor, cursor))
+        {
+            return;
+        }
+
+        _searchMarkerCursorTarget?.ClearValue(InputElement.CursorProperty);
+        _searchMarkerCursorTarget = target;
+        if (target is not null)
+            target.Cursor = cursor;
     }
 
     private T GetRequiredControl<T>(string name)
