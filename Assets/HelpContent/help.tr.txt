@@ -31,7 +31,7 @@ Yol artık diskte mevcut değilse, öğeyi dosya yöneticisinde açmak veya içe
 * En Son — yakın zamanda açılan yerel klasörlerin listesi
 * Yenile — yerel bir klasörü yeniden tarayın ve ağacı yeniden oluşturun (F5)
 * Dosyaya aktar:
-  * İhracat ağacı
+  * Ağacı dışa aktar
   * İçeriği dışa aktar
   * Ağacı ve içeriği dışa aktar
 * Projeyi dışa aktar:
@@ -47,7 +47,7 @@ Metin ve ikili dosyalar kopyalanır ve dahil edilen boş klasörler korunur. Kay
 Dışa aktarma sırasında ağacı veya ayarları değiştiremez, filtreyi kullanamaz, formatı veya önizleme modunu değiştiremez, Git komutlarını çalıştıramaz, yenileyemez veya başka bir proje açamazsınız.
 
 Biçim kuralları:
-* İhracat ağacı:
+* Ağacı dışa aktar:
   * ASCII -> yalnızca `.txt`.
   * JSON -> varsayılan `.json`, Kaydet iletişim kutusunda hem `.json` hem de `.txt` mevcuttur.
   * XML -> varsayılan `.xml`, Kaydet iletişim kutusunda hem `.xml` hem de `.txt` mevcuttur.
@@ -88,26 +88,26 @@ Komut zaten ayarlanmışsa bir terminal açın ve şunu çalıştırın:
 Bu, üst düzey komutları ve seçenekleri listeler. Bu komutun kendi seçeneklerini ve örneklerini görmek için `devprojex help <command>` komutunu çalıştırın.
 
 Örnekler:
-* `devprojex` — etkileşimli Terminal Çalışma Alanını açın. Çalışma alanı içinde, eylemleri `:` komut satırı aracılığıyla yönlendirin (örneğin `:copy`, `:analyze`, `:branch` ); Tam komut listesi için yerleşik çalışma alanı yardımına ve proje belgelerine bakın.
-* `devprojex tui.` — belirtilen klasörü doğrudan Terminal Çalışma Alanında açın.
-* `devprojex open. --preview` — geçerli klasörü Masaüstü Önizleme'de açar.
-* `devprojex analyze. --format json` — mevcut projeyi JSON olarak analiz edin.
-* `devprojex tree.` — proje ağacını terminale yazdırır.
-* `devprojex export context. --format markdown -o../devprojex-context.md` — Yapay zekaya hazır içeriği kaynak projenin dışına kaydedin.
-* `devprojex export project. --as folder -o../devprojex-submission` — etkili proje ağacını tam bir klasöre aktarın.
-* `devprojex export project. --as zip -o../devprojex-submission.zip` — etkili proje ağacını bir ZIP arşivine aktarın.
+* `devprojex` — etkileşimli Terminal Çalışma Alanını açın. Çalışma alanı içinde, eylemleri `:` komut satırı aracılığıyla yönlendirin (örneğin `:copy`, `:analyze`, `:branch`); Tam komut listesi için yerleşik çalışma alanı yardımına ve proje belgelerine bakın.
+* `devprojex tui .` — belirtilen klasörü doğrudan Terminal Çalışma Alanında açın.
+* `devprojex open . --preview` — geçerli klasörü Masaüstü Önizleme'de açar.
+* `devprojex analyze . --format json` — mevcut projeyi JSON olarak analiz edin.
+* `devprojex tree .` — proje ağacını terminale yazdırır.
+* `devprojex export context . --format markdown -o ../devprojex-context.md` — Yapay zekaya hazır içeriği kaynak projenin dışına kaydedin.
+* `devprojex export project . --as folder -o ../devprojex-submission` — etkili proje ağacını tam bir klasöre aktarın.
+* `devprojex export project . --as zip -o ../devprojex-submission.zip` — etkili proje ağacını bir ZIP arşivine aktarın.
 * `devprojex export context https://github.com/owner/repo -o -` — uzaktaki bir depoyu kendiniz klonlamadan paketleyin.
-* `devprojex analyze. --git-mode tracked --exclude smart-ignore` — izlenen Git dosyalarını Smart Ignore ile analiz edin.
-* `devprojex mcp --root.` — AI aracılarının projeyi güvenli bir şekilde okuyabilmesi için yerel salt okunur MCP sunucusunu başlatın.
+* `devprojex analyze . --git-mode tracked --exclude smart-ignore` — izlenen Git dosyalarını Smart Ignore ile analiz edin.
+* `devprojex mcp --root .` — AI aracılarının projeyi güvenli bir şekilde okuyabilmesi için yerel salt okunur MCP sunucusunu başlatın.
 
 Notlar:
 * `.` geçerli terminal klasörü anlamına gelir;
 * boşluk içeren yollar tırnak içine alınmalıdır;
-* `--git-mode` Git filtrelemesini, `.gitignore` veya izlenen Git dosyalarını seçmez;
+* `--git-mode`, Git filtrelemesi yok, `.gitignore` veya yalnızca izlenen Git dosyaları seçeneklerinden birini belirler;
 * `--exclude` sıradan hariç tutmaları Git filtrelemesinden ayrı olarak kontrol eder;
 * analiz ve dışa aktarma komutları belirleyicidir ve masaüstü arayüzünü açmaz;
-* `tui`, `open`, `analyze` " ve her iki `export` komutu da Git deposu URL'sini kabul eder; klon, yönetilen bir önbelleğe ( `devprojex cache` ) gider;
-* komutlar belgelenmiş takma adlara ve kısa işaretlere sahiptir - örneğin `export ctx`, `-f`, `-n` ; `devprojex help` bunları gösterir;
+* `tui`, `open`, `analyze` " ve her iki `export` komutu da Git deposu URL'sini kabul eder; klon, yönetilen bir önbelleğe (`devprojex cache`) gider;
+* komutlar belgelenmiş takma adlara ve kısa işaretlere sahiptir - örneğin `export ctx`, `-f`, `-n`; `devprojex help` bunları gösterir;
 * `analyze --findings` redaksiyon bulgularını değerleri olmadan listeler ve `--fail-on-findings` CI için sıfırdan farklı bir çıkış kodu döndürür;
 * komut proje dosyalarını değiştirmez — DevProjex salt okunur modda çalışır.
 
@@ -115,7 +115,7 @@ Notlar:
 “Yardım → Terminalden başlat”.
 
 ## 5) Git
-Git menüsü yalnızca DevProjex ( Git Clone) aracılığıyla klonlanan projeler için kullanılabilir. Uygulama dosyalarınıza dokunmaz; yalnızca önbellekle çalışır.
+Git menüsü yalnızca DevProjex (Git Clone) aracılığıyla klonlanan projeler için kullanılabilir. Uygulama dosyalarınıza dokunmaz; yalnızca önbellekle çalışır.
 
 Önbellek kullanıcının sistem önbellek dizininde saklanır. Çözümlenen yolu görmek için `devprojex doctor` çalıştırın.
 
@@ -148,7 +148,7 @@ Geçiş, ağacın çıktının parçası olduğu işlemler için ağaç gösteri
 Geçiş şunları etkiler:
 * Ağacı kopyala
 * Ağacı + içeriği kopyala
-* İhracat ağacı
+* Ağacı dışa aktar
 * Ağacı ve içeriği dışa aktar
 
 Geçiş şunları etkilemez:
@@ -186,8 +186,8 @@ JSON:
 * JSON dışa aktarma şu ağaç biçimini kullanır: diziler dosyaları içerir, nesneler alt klasörleri içerir, `/` geçerli klasördeki dosyaları içerir ve `[]` boş bir klasörü temsil eder.
 
 XML:
-* kök düğüm `<t r="...">` ;
-* klasörler `<d n="...">` ;
+* kök düğüm `<t r="...">`;
+* klasörler `<d n="...">`;
 * dosyalar `<f>File.cs</f>`.
 
 Doktor:
@@ -206,7 +206,7 @@ Ağaç + içerik:
 
 Farenin yan düğmeleri tarayıcı tarzı gezinmeyi takip eder: İleri, Önizleme modunu açar ve Geri, onu kapatır. Geçerli yönü tekrarlamanın hiçbir etkisi yoktur.
 
-{mod}{shift}F, Önizleme'de dosya içeriklerinde aramayı açar veya kapatır. Enter veya F3 bir sonraki maça gider; {shift}Enter veya {shift}F3 önceki maça gider.
+{mod}{shift}F, Önizleme'de dosya içeriklerinde aramayı açar veya kapatır. Enter veya F3 bir sonraki eşleşmeye gider; {shift}Enter veya {shift}F3 önceki eşleşmeye gider.
 
 Nihai sonucu ağacın yanındaki ayrı bir çalışma alanında gösterir. Bu mod, panoya kopyalamaz ve tek başına bir dosyaya aktarmaz; bu bir görüntüleme modudur.
 
@@ -320,7 +320,7 @@ Her listede bir Tümü geçişi bulunur.
 
 İçerik işleme:
 * ağacı değiştirmeden seçilen metin dosyalarının içeriğini dönüştürür;
-* Sırları gizle ve Özel verileri gizle, tespit edilen değerlerin yerini alır (bölüm 12.3 ve 12.4);
+* Gizli bilgileri sakla ve Kişisel verileri gizle, algılanan değerleri değiştirir (bölüm 12.3 ve 12.4);
 * Sıkıştırılmış kod, 14 dilde adlandırılmış uygulamaları kısaltırken bildirimleri korur;
 * Yorumları şeritle, 20 dil paketindeki yorumları ve belge yorumlarını kaldırır;
 * Boş satırları şeritle, çok satırlı değişmez değerleri korurken aynı paketlerdeki yalnızca boşluk içeren satırları kaldırır;
@@ -389,18 +389,18 @@ Bazı bağımlılık depoları ve hizmet dizinleri, açıkça tespit edilen bir 
 Proje kapsamı keşfi sınırlıdır, dolayısıyla büyük bir kullanıcı klasörünün yüklenmesi her dizinin tam olarak tekrarlanan bir analizi haline gelmez. Düzenli yapılar sığ keşif kullanır, tanınan monorepolar ise daha derinlemesine araştırılır. Bir kapsam bulunduktan sonra Smart Ignore, derinlik sınırı olmadan alt ağacın tamamına uygulanır.
 
 ### 12.3 Sırları Gizle
-"Sırları Gizle" varsayılan olarak kapalıdır. Yalnızca seçilen metin içeriğini tarar ve algılanan her değeri yerinde değiştirerek dosyayı ve çevresindeki kodu korur. Seçenek kapalıyken tarama yapılmaz ve sayım gösterilmez. Geçerli seçim tarandıktan sonra etiket, algılanan değerlerin sayısını gösterir; Olduğu gibi tutma kararları daha az değeri gizli bırakırsa, algılanan/gizlenen değerini gösterir ve satırın ? gösterge her iki sayıyı da rapor eder.
+"Sırları Gizle" varsayılan olarak kapalıdır. Yalnızca seçilen metin içeriğini tarar ve algılanan her değeri yerinde değiştirerek dosyayı ve çevresindeki kodu korur. Seçenek kapalıyken tarama yapılmaz ve sayım gösterilmez. Geçerli seçim tarandıktan sonra etiket, algılanan değerlerin sayısını gösterir; Olduğu gibi tutma kararları daha az değeri gizli bırakırsa, algılanan/gizlenen değerini gösterir ve satırın? gösterge her iki sayıyı da rapor eder.
 
-Düzenlenen aralıklar Önizleme'de vurgulanır. Yalnızca o oluşumu olduğu gibi tutmak için birini tıklayın; {alt}↓ / {alt}↑ bulgular arasında geçiş yapar ve Enter etkin olana geçiş yapar. Terminal Çalışma Alanında, oluşumlar arasında geçiş yapmak için `[` ve `]` tuşunu, etkin olana geçiş yapmak için ise `Enter` veya `Space` tuşunu kullanın. Karar, geçerli oturumun Önizleme, pano, içerik dışa aktarma, klasör kopyalama ve ZIP için geçerlidir; proje profiline kaydedilmez.
+Maskelenen aralıklar Önizleme'de vurgulanır. Yalnızca o oluşumu olduğu gibi bırakmak için aralığı tıklayın; bulgular arasında {alt}↓ / {alt}↑ ile gezinin ve etkin bulguyu Enter ile değiştirin. Terminal Çalışma Alanında oluşumlar arasında `[` ve `]` ile gezinin, etkin oluşumu `Enter` veya `Space` ile değiştirin. Karar geçerli oturumdaki Önizleme, pano, bağlam dışa aktarma, klasör kopyalama ve ZIP için geçerlidir; proje profiline kaydedilmez.
 
-Önizleme içerik menüsü bu kararları genişletir. Kuralının tüm tekrarlarını veya tespit edilen tüm tekrarlarını tek bir eylemle aynı dosyada tutmak veya tekrar gizlemek için, tespit edilen bir vakayı sağ tıklayın. Dosya içeriğinde seçilen bir değeri manuel olarak işaretlemek için sağ tıklayın: "Burada... gizle" yalnızca oturumdaki o oluşumu gizler, "Her zaman gizle..." değerin her geçtiği yerde kalıcı bir işaret oluşturur ve "... özel veri olarak gizle" Özel verileri gizle tarafından kontrol edilen kalıcı bir işaret oluşturur. Manuel işarette "İşareti kaldır" görünür ve onu siler; hala dedektör tarafından eşleşen bir değer gizli kalır. Manüel değer, dosya içeriğinde seçilen 8 ila 512 karakterden oluşan tek bir satır olmalıdır. Bir işaretin oluşturulması, ilgili seçeneğin otomatik olarak etkinleştirilmesini sağlar. Kalıcı işaretler yalnızca anahtarlı değer kimliğini ve sınıfını saklar, orijinal metni asla saklamaz.
+Önizleme içerik menüsü bu kararları genişletir. Algılanan bir oluşuma sağ tıklayarak kuralına ait tüm oluşumları veya aynı dosyada algılanan tüm oluşumları tek işlemde olduğu gibi bırakabilir ya da yeniden gizleyebilirsiniz. Dosya içeriğinde seçilen bir değeri elle işaretlemek için sağ tıklayın: "Burada gizle..." yalnızca o oluşumu oturum boyunca gizler, "Her zaman gizle..." değerin her oluşumu için kalıcı bir işaret oluşturur, "... kişisel veri olarak gizle" ise Kişisel verileri gizle seçeneğinin denetlediği kalıcı bir işaret oluşturur. Elle eklenen işarette görünen "İşareti kaldır" seçeneği işareti siler; algılayıcının hâlâ eşleştirdiği değer gizli kalır. Elle seçilen değer, dosya içeriğinde seçilmiş 8–512 karakterlik tek satır olmalıdır. İşaret oluşturmak ilgili seçeneği otomatik olarak etkinleştirir. Kalıcı işaretler yalnızca anahtarlanmış değer kimliğini ve sınıfını saklar; özgün metni hiçbir zaman saklamaz.
 
 Bir klasör veya ZIP kopyası da eşleşen metni değiştirir ve artık oluşturulmayabilir veya çalıştırılamayabilir. İkili dosyalar değiştirilmeden kopyalanır ve taranmaz. 16 MiB'in üzerinde seçilen bir metin dosyası veya bir algılama hatası, denetlenmemiş metni dışa aktarmak yerine işlemi durdurur.
 
 Rapor sayımı kuralı yalnızca eşleşir. Sıfır, projenin güvenli olduğu anlamına gelmez. CLI `--hide-secrets` kullanır; teknik ayrıntılar ve sınırlar `Docs/HideSecrets.md` dosyasındadır.
 
-### 12.4 Özel verileri gizle
-"Özel verileri gizle" varsayılan olarak kapalıdır. Seçilen metin dosyalarındaki e-posta adreslerini, global IP adreslerini, yollardaki yerel kullanıcı adlarını, MAC adreslerini ve uluslararası telefon numaralarını algılar. Bulgular, Sırları Gizle ile aynı Önizleme kararlarını ve aynı çıktı hattını kullanır; "Özel veri olarak gizle" ile oluşturulan manuel işaretler bu sınıfa aittir ve bu anahtarı takip eder (bölüm 12.3). Oluşturulan yol başlıklarındaki ve ağaç kökündeki yerel kullanıcı adları, tek bir paylaşılan bulgu olarak maskelenir: sayaç bunu tek bir değer olarak içerir; ? göstergesi gizli mi yoksa gösterilen mi olduğunu bildirir ve tek tıklamayla her maskeli yol arasında geçiş yapılır.
+### 12.4 Kişisel verileri gizle
+"Kişisel verileri gizle" varsayılan olarak kapalıdır. Seçilen metin dosyalarındaki e-posta adreslerini, genel IP adreslerini, yollardaki yerel kullanıcı adlarını, MAC adreslerini ve uluslararası telefon numaralarını algılar. Bulgular, "Gizli bilgileri sakla" ile aynı Önizleme kararlarını ve çıktı hattını kullanır; "Kişisel veri olarak gizle" ile oluşturulan manuel işaretler de bu sınıfa aittir ve bu anahtara uyar (bölüm 12.3). Oluşturulan yol başlıklarındaki ve ağaç kökündeki yerel kullanıcı adları tek bir paylaşılan bulgu olarak maskelenir: sayaç bunu tek değer olarak sayar,? göstergesi gizli veya görünür olduğunu bildirir ve tek tıklama tüm maskelenen yolları değiştirir.
 
 Belge aralıkları ve ana bilgisayarlar, ortak CI kullanıcı adları, iyi bilinen genel DNS çözümleyicileri ve belgelenmiş kurgusal telefon aralıkları görünür kalır. Sıfır eşleşme gizlilik garantisi değildir. CLI `--hide-private-data` yı kullanır; kuralların tamamı ve birinci aşama sınırları `Docs/HidePrivateData.md` dosyasındadır.
 
@@ -428,7 +428,7 @@ Yerleşik `standard` profil, `gitignore` artı `smart-ignore`, `hidden-folders`,
 ### 12.6 Yalnızca izlenen Git dosyaları
 "Yalnızca İzlenen Git dosyaları", her okunabilir Git dizininde kayıtlı mevcut çalışma ağacı dosyalarından ağacın Git aşamasını oluşturur. Değiştirilen izlenen dosyalar ve aşamalı eklemeler dahil olmaya devam eder; izlenmeyen dosyalar hariç tutulur. Bu, `HEAD` veya uzak bir havuzun geçmiş anlık görüntüsü değil, mevcut çalışma ağacıdır.
 
-Erişilebilir her iç içe depo ve çalışma ağacı, ulaşılabilir herhangi bir iç içe yerleştirme düzeyinde bağımsız olarak çözümlenir. Bir alt depo, izlenen yolları üst öğesinden veya kardeşinden devralmaz. Bu mod Git CLI gerektirir; okunabilir bir boş dizin geçerlidir. Terminal Çalışma Alanı ( TUI ) bu modda başlarsa ve uygulanabilir bir dizin yüklenemezse çalışma alanı açılmaz. Mod, açık bir TUI çalışma alanında etkileşimli olarak seçilirse ve uygulanabilir bir dizin yüklenemezse, değişiklik reddedilir ve son kullanılabilen Git modu etkin kalır. Aynı durumda, doğrudan komutlar bir politika veya kontrol hatası döndürür. DevProjex asla sessizce `.gitignore` geri dönmez. Geçerli başka bir dizin okunabilirse, kullanılamayan iç içe kapsamlar bir uyarıyla hariç tutulur.
+Erişilebilir her iç içe depo ve çalışma ağacı, ulaşılabilir herhangi bir iç içe yerleştirme düzeyinde bağımsız olarak çözümlenir. Bir alt depo, izlenen yolları üst öğesinden veya kardeşinden devralmaz. Bu mod Git CLI gerektirir; okunabilir bir boş dizin geçerlidir. Terminal Çalışma Alanı ( TUI) bu modda başlarsa ve uygulanabilir bir dizin yüklenemezse çalışma alanı açılmaz. Mod, açık bir TUI çalışma alanında etkileşimli olarak seçilirse ve uygulanabilir bir dizin yüklenemezse, değişiklik reddedilir ve son kullanılabilen Git modu etkin kalır. Aynı durumda, doğrudan komutlar bir politika veya kontrol hatası döndürür. DevProjex asla sessizce `.gitignore` geri dönmez. Geçerli başka bir dizin okunabilirse, kullanılamayan iç içe kapsamlar bir uyarıyla hariç tutulur.
 
 Zaten açık olan bir Masaüstü çalışma alanında, açıkça izlenen seçim görünür durumda kalır ve arıza durumunda kapatılır: hazırlık başarısız olduğunda çıktı ve dışa aktarma engellenir, kısmi hazırlık ise yerelleştirilmiş bir uyarıyla devam eder.
 
@@ -486,9 +486,9 @@ Durum çubuğunun iki bloğu vardır:
 * İçerik — dışa aktarılan dosya içeriği çıktısının ölçümleri.
 
 Biçim:
-* çizgiler
+* Satırlar
 * Karakterler
-* ~Jetonlar (yaklaşık)
+* ~Token (yaklaşık)
 
 Büyük değerler kompakt soneklerle (K/M) gösterilir.
 
@@ -504,7 +504,7 @@ Ağaç ölçümleri:
 İçerik ölçümleri:
 * içerik kopyalama/dışa aktarma ile aynı kurallara uyun;
 * ikili dosyalar hariçtir;
-* boş ve yalnızca boşluk içeren dosyalar, hizmet işaretçileri aracılığıyla sayılır ( `[No Content, 0 bytes]`, `[Whitespace, N bytes]` ).
+* boş ve yalnızca boşluk içeren dosyalar, hizmet işaretçileri aracılığıyla sayılır ( `[No Content, 0 bytes]`, `[Whitespace, N bytes]`).
 
 ### 13.3 Sayaçlar güncellendiğinde
 Yeniden hesaplama çalışır:
@@ -525,7 +525,7 @@ Simge seçim sırası:
 Tema bölümü Sistem, Açık veya Koyu'yu ve bir arka plan efektini seçmenizi sağlar:
 * Şeffaflık
 * Bulanıklık
-* Mika
+* Mica
 
 Sistem varsayılan olarak seçilidir ve işletim sistemi tema değişikliklerini takip eder. İlk başlatmanın veya ayarların sıfırlanmasının ardından, açık sistem teması normal opak bir arka planla başlarken, karanlık sistem teması Bulanıklaştırma ile başlar. Sistem tercihi belirlenemiyorsa DevProjex Dark with Blur'u kullanır. Aydınlık ve Karanlık, etkilerini bağımsız olarak hatırlar. Açık bir Açık veya Koyu seçimi, Sistem yeniden seçilene kadar sistem değişikliklerini yok sayar.
 
@@ -537,7 +537,7 @@ Mevcut ayarlar:
 * Menü şeffaflığı — ana menüye ve onun alt menülerine eşit şekilde uygulanır.
 * Kenarlık görünürlüğü — arayüz sınırlarının ne kadar güçlü gösterileceğini ayarlar.
 
-Mica, platformun sistem malzemesini kullanır ve ayrı bir arka plan şeffaflığı ayarına sahip değildir. Seçilen Bulanıklaştırma veya Mika efekti kullanılamıyorsa uygulama önce diğer yerel efekti dener. Normal bir opak arka plan yalnızca Bulanıklaştırma veya Mika mevcut olmadığında kullanılır.
+Mica, platformun sistem malzemesini kullanır ve ayrı bir arka plan şeffaflığı ayarına sahip değildir. Seçilen Bulanıklaştırma veya Mica efekti kullanılamıyorsa uygulama önce diğer yerel efekti dener. Normal bir opak arka plan yalnızca Bulanıklaştırma veya Mica mevcut olmadığında kullanılır.
 
 Şeffaflık modunda ana pencerenin arka planı şeffaf kalır. Menüler, alt menüler ve diğer açılır yüzeyler desteklendiğinde Bulanıklaştırma'yı kullanır, böylece arkalarındaki ağaç ve içerik öğeleri okunabilirliği etkilemez.
 

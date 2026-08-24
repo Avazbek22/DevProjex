@@ -53,7 +53,7 @@ Aturan format:
   * XML -> default `.xml`, dengan `.xml` dan `.txt` tersedia di dialog Simpan.
   * MD -> default `.md`, dengan `.md` dan `.txt` tersedia di dialog Simpan.
 * Ekspor konten — selalu dalam format konten teks, file `.txt` (pengalih format pohon tidak berlaku).
-* Ekspor pohon dan konten — selalu file `.txt` ; format pohon yang dipilih hanya mempengaruhi format blok pohon di dalam hasilnya.
+* Ekspor pohon dan konten — selalu file `.txt`; format pohon yang dipilih hanya mempengaruhi format blok pohon di dalam hasilnya.
 
 File ekspor ditulis dalam UTF-8 tanpa BOM.
 
@@ -88,34 +88,34 @@ Jika perintah sudah diatur, buka terminal dan jalankan:
 Ini mencantumkan perintah dan opsi tingkat atas. Jalankan `devprojex help <command>` untuk melihat opsi dan contoh perintah tersebut.
 
 Contoh:
-* `devprojex` — membuka Terminal Workspace interaktif. Di dalam ruang kerja, dorong tindakan melalui baris perintah `:` (misalnya `:copy`, `:analyze`, `:branch` ); lihat bantuan ruang kerja bawaan dan dokumentasi proyek untuk daftar perintah lengkap.
-* `devprojex tui.` — membuka folder yang ditentukan langsung di Terminal Workspace.
-* `devprojex open. --preview` — membuka folder saat ini di Pratinjau Desktop.
-* `devprojex analyze. --format json` — menganalisis proyek saat ini sebagai JSON.
-* `devprojex tree.` — mencetak pohon proyek ke terminal.
-* `devprojex export context. --format markdown -o../devprojex-context.md` — menyimpan konteks siap AI di luar proyek sumber.
-* `devprojex export project. --as folder -o../devprojex-submission` — mengekspor pohon proyek yang efektif ke folder yang tepat.
-* `devprojex export project. --as zip -o../devprojex-submission.zip` — mengekspor pohon proyek yang efektif ke arsip ZIP.
+* `devprojex` — membuka Terminal Workspace interaktif. Di dalam ruang kerja, dorong tindakan melalui baris perintah `:` (misalnya `:copy`, `:analyze`, `:branch`); lihat bantuan ruang kerja bawaan dan dokumentasi proyek untuk daftar perintah lengkap.
+* `devprojex tui .` — membuka folder yang ditentukan langsung di Terminal Workspace.
+* `devprojex open . --preview` — membuka folder saat ini di Pratinjau Desktop.
+* `devprojex analyze . --format json` — menganalisis proyek saat ini sebagai JSON.
+* `devprojex tree .` — mencetak pohon proyek ke terminal.
+* `devprojex export context . --format markdown -o ../devprojex-context.md` — menyimpan konteks siap AI di luar proyek sumber.
+* `devprojex export project . --as folder -o ../devprojex-submission` — mengekspor pohon proyek yang efektif ke folder yang tepat.
+* `devprojex export project . --as zip -o ../devprojex-submission.zip` — mengekspor pohon proyek yang efektif ke arsip ZIP.
 * `devprojex export context https://github.com/owner/repo -o -` — mengemas repositori jarak jauh tanpa mengkloningnya sendiri.
-* `devprojex analyze. --git-mode tracked --exclude smart-ignore` — menganalisis file Git yang dilacak dengan Smart Ignore.
-* `devprojex mcp --root.` — memulai server MCP lokal hanya-baca sehingga agen AI dapat membaca proyek dengan aman.
+* `devprojex analyze . --git-mode tracked --exclude smart-ignore` — menganalisis file Git yang dilacak dengan Smart Ignore.
+* `devprojex mcp --root .` — memulai server MCP lokal hanya-baca sehingga agen AI dapat membaca proyek dengan aman.
 
 Catatan:
 * `.` berarti folder terminal saat ini;
 * jalur dengan spasi harus diapit tanda kutip;
-* `--git-mode` tidak memilih pemfilteran Git, `.gitignore`, atau file Git yang dilacak;
-* `--exclude` mengontrol pengecualian biasa secara terpisah dari pemfilteran Git ;
+* `--git-mode` memilih tanpa pemfilteran Git, `.gitignore`, atau hanya file Git yang dilacak;
+* `--exclude` mengontrol pengecualian biasa secara terpisah dari pemfilteran Git;
 * perintah analisis dan ekspor bersifat deterministik dan tidak membuka antarmuka desktop;
-* `tui`, `open`, `analyze`, dan kedua perintah `export` juga menerima URL repositori Git ; klon masuk ke cache yang dikelola ( `devprojex cache` );
-* perintah telah mendokumentasikan alias dan tanda pendek — misalnya `export ctx`, `-f`, `-n` ; `devprojex help` menunjukkannya;
-* `analyze --findings` mencantumkan temuan redaksi tanpa nilainya, dan `--fail-on-findings` mengembalikan kode keluar bukan nol untuk CI ;
+* `tui`, `open`, `analyze`, dan kedua perintah `export` juga menerima URL repositori Git; klon masuk ke cache yang dikelola (`devprojex cache`);
+* perintah telah mendokumentasikan alias dan tanda pendek — misalnya `export ctx`, `-f`, `-n`; `devprojex help` menunjukkannya;
+* `analyze --findings` mencantumkan temuan penyamaran tanpa nilai aslinya, dan `--fail-on-findings` mengembalikan kode keluar bukan nol untuk CI;
 * perintah tidak mengubah file proyek — DevProjex bekerja dalam mode baca-saja.
 
 Jika perintah `devprojex` tidak berfungsi, buka di DevProjex:
 “Bantuan → Luncurkan dari terminal”.
 
 ## 5) Git
-Menu Git hanya tersedia untuk proyek yang dikloning melalui DevProjex ( Git Clone). Aplikasi ini tidak menyentuh file Anda — aplikasi hanya berfungsi dengan cache.
+Menu Git hanya tersedia untuk proyek yang dikloning melalui DevProjex (Git Clone). Aplikasi ini tidak menyentuh file Anda — aplikasi hanya berfungsi dengan cache.
 
 Cache disimpan di direktori cache sistem pengguna. Jalankan `devprojex doctor` untuk melihat jalur yang diselesaikan.
 
@@ -186,19 +186,19 @@ JSON:
 * Ekspor JSON menggunakan format pohon ini: array berisi file, objek berisi subfolder, `/` berisi file dalam folder saat ini, dan `[]` mewakili folder kosong.
 
 XML:
-* simpul akar adalah `<t r="...">` ;
-* foldernya adalah `<d n="...">` ;
+* simpul akar adalah `<t r="...">`;
+* foldernya adalah `<d n="...">`;
 * file adalah `<f>File.cs</f>`.
 
 dokter:
-* dimulai dengan `Root:...` ;
+* dimulai dengan `Root:...`;
 * menggunakan daftar bersarang penurunan harga;
 * folder diakhiri dengan `/`.
 
 Pohon + konten:
 * format pohon yang dipilih berlaku untuk blok pohon;
 * blok konten tetap berupa teks;
-* header file di blok konten menggunakan jalur relatif dengan `/` ;
+* header file di blok konten menggunakan jalur relatif dengan `/`;
 * diekspor sebagai `.txt`.
 
 ## 7) Modus pratinjau
@@ -206,7 +206,7 @@ Dibuka dengan tombol ikon mata di bar atas atau dengan {mod}B.
 
 Tombol samping mouse mengikuti navigasi gaya browser: Maju membuka mode Pratinjau, dan Kembali menutupnya. Mengulangi arah saat ini tidak berpengaruh.
 
-{mod}{shift}F membuka atau menutup pencarian isi file di Pratinjau. Enter atau F3 melanjutkan ke pertandingan berikutnya; {shift}Enter atau {shift}F3 menuju pertandingan sebelumnya.
+{mod}{shift}F membuka atau menutup pencarian isi file di Pratinjau. Enter atau F3 berpindah ke hasil berikutnya; {shift}Enter atau {shift}F3 berpindah ke hasil sebelumnya.
 
 Menampilkan hasil akhir di ruang kerja terpisah di sebelah pohon. Mode ini tidak menyalin ke clipboard dan tidak mengekspor ke file sendiri — ini adalah mode tampilan.
 
@@ -228,7 +228,7 @@ Aturan yang sama seperti penyalinan dan ekspor juga diterapkan:
 Selain itu:
 * file dalam pratinjau dipisahkan oleh garis horizontal;
 * saat menggulir, jalur file saat ini disematkan di bagian atas; mengklik jalur yang disematkan akan menggulir kembali ke awal file itu;
-* bilah gulir pratinjau menandai kecocokan pencarian dan baris dengan temuan redaksi; mengklik penanda akan melompat ke garisnya; temuan yang disimpan apa adanya tetap ditandai, dan header jalur bertopeng menambahkan satu penanda pada baris pertamanya;
+* bilah gulir pratinjau menandai hasil pencarian dan baris yang berisi temuan penyamaran; mengklik penanda akan berpindah ke baris tersebut; temuan yang dibiarkan apa adanya tetap ditandai, dan header jalur yang disamarkan menambahkan satu penanda pada baris pertamanya;
 * pohon dan pratinjau zoom dapat hidup mandiri.
 * dalam mode Pratinjau, Anda dapat menyalin hasil lengkap saat ini atau blok file yang terlihat saat ini tanpa membuka menu Salin.
 
@@ -280,7 +280,7 @@ Membuka bilah pencarian, menyorot kecocokan, dan mengizinkan navigasi.
 * Esc — tutup
 
 Pencarian otomatis memperluas hanya cabang yang dibutuhkan; menghapus kueri akan meruntuhkan pohon (kecuali root).
-Garis yang cocok juga ditandai pada bilah gulir pohon; mengklik penanda akan melompat ke pertandingan itu.
+Baris yang cocok juga ditandai pada bilah gulir pohon; mengklik penanda akan berpindah ke hasil tersebut.
 Untuk kumpulan pencocokan yang sangat besar, aplikasi mungkin membatasi perluasan otomatis dan penyorotan global agar UI tetap responsif.
 Saat bilah pencarian ditutup, kueri akan dihapus setelah animasi penutupan selesai.
 
@@ -389,20 +389,20 @@ Beberapa penyimpanan ketergantungan dan direktori layanan dapat dikenali dari ka
 Penemuan cakupan proyek dibatasi sehingga memuat folder pengguna yang besar tidak menjadi analisis berulang yang penuh pada setiap direktori. Struktur reguler menggunakan penemuan dangkal, sedangkan monorepos yang dikenali dicari lebih dalam. Setelah cakupan ditemukan, Smart Ignore diterapkan ke seluruh subpohonnya tanpa batas kedalaman.
 
 ### 12.3 Sembunyikan Rahasia
-"Sembunyikan Rahasia" dinonaktifkan secara default. Ini hanya memindai konten teks yang dipilih dan menggantikan setiap nilai yang terdeteksi, menjaga file dan kode di sekitarnya. Saat opsi ini tidak aktif, tidak ada pemindaian yang dijalankan dan tidak ada penghitungan yang ditampilkan. Setelah pilihan saat ini dipindai, label menunjukkan jumlah nilai yang terdeteksi; jika keputusan tetap apa adanya membiarkan lebih sedikit nilai yang disembunyikan, ini akan menunjukkan terdeteksi/disembunyikan, dan baris ? indikator melaporkan kedua hal tersebut.
+"Sembunyikan Rahasia" dinonaktifkan secara default. Ini hanya memindai konten teks yang dipilih dan menggantikan setiap nilai yang terdeteksi, menjaga file dan kode di sekitarnya. Saat opsi ini tidak aktif, tidak ada pemindaian yang dijalankan dan tidak ada penghitungan yang ditampilkan. Setelah pilihan saat ini dipindai, label menunjukkan jumlah nilai yang terdeteksi; jika keputusan tetap apa adanya membiarkan lebih sedikit nilai yang disembunyikan, ini akan menunjukkan terdeteksi/disembunyikan, dan baris? indikator melaporkan kedua hal tersebut.
 
-Rentang yang disunting disorot di Pratinjau. Klik salah satu untuk menyimpan kejadian tersebut apa adanya; {alt}↓ / {alt}↑ berpindah antar temuan dan Enter akan mengaktifkan yang aktif. Di Terminal Workspace, gunakan `[` dan `]` untuk berpindah antar kemunculan dan `Enter` atau `Space` untuk mengganti kemunculan yang aktif. Keputusan ini berlaku untuk Pratinjau, papan klip, ekspor konteks, penyalinan folder, dan ZIP untuk sesi saat ini; itu tidak disimpan di profil proyek.
+Rentang yang disamarkan disorot di Pratinjau. Klik rentang untuk membiarkan hanya kemunculan tersebut apa adanya; gunakan {alt}↓ / {alt}↑ untuk berpindah antar temuan dan Enter untuk mengalihkan temuan aktif. Di Terminal Workspace, gunakan `[` dan `]` untuk berpindah antar kemunculan serta `Enter` atau `Space` untuk mengalihkan kemunculan aktif. Keputusan berlaku untuk Pratinjau, papan klip, ekspor konteks, penyalinan folder, dan ZIP pada sesi saat ini; keputusan tidak disimpan dalam profil proyek.
 
 Menu konteks Pratinjau memperluas keputusan ini. Klik kanan kejadian yang terdeteksi untuk menyimpan — atau menyembunyikan lagi — semua kejadian pada aturannya atau semua kejadian yang terdeteksi dalam file yang sama dalam satu tindakan. Klik kanan nilai yang dipilih di dalam konten file untuk menandainya secara manual: "Sembunyikan … di sini" hanya menyembunyikan kejadian tersebut untuk sesi tersebut, "Selalu sembunyikan …" membuat tanda persisten untuk setiap kemunculan nilai, dan "Sembunyikan … sebagai data pribadi" membuat tanda persisten yang dikontrol oleh Sembunyikan data pribadi. "Hapus tanda" muncul pada tanda manual dan menghapusnya; nilai yang masih cocok dengan detektor tetap tersembunyi. Nilai manual harus berupa satu baris berisi 8 hingga 512 karakter yang dipilih di dalam konten file. Membuat tanda mengaktifkan opsi terkait secara otomatis. Tanda persisten hanya menyimpan identitas nilai yang dikunci dan kelasnya, tidak pernah menyimpan teks aslinya.
 
 Folder atau salinan ZIP juga mengubah teks yang cocok dan mungkin tidak lagi dibuat atau dijalankan. File biner disalin tanpa perubahan dan tidak dipindai. File teks yang dipilih di atas 16 MiB atau kegagalan deteksi menghentikan operasi alih-alih mengekspor teks yang tidak diperiksa.
 
-Aturan laporan penghitungan hanya cocok. Nol tidak berarti proyek tersebut aman. CLI menggunakan `--hide-secrets` ; detail dan batasan teknis ada di `Docs/HideSecrets.md`.
+Aturan laporan penghitungan hanya cocok. Nol tidak berarti proyek tersebut aman. CLI menggunakan `--hide-secrets`; detail dan batasan teknis ada di `Docs/HideSecrets.md`.
 
 ### 12.4 Menyembunyikan data pribadi
-"Sembunyikan data pribadi" dinonaktifkan secara default. Ini mendeteksi alamat email, alamat IP global, nama pengguna lokal di jalur, alamat MAC, dan nomor telepon internasional dalam file teks yang dipilih. Temuan menggunakan keputusan Pratinjau yang sama dan saluran keluaran yang sama seperti Sembunyikan Rahasia; tanda manual yang dibuat dengan "Sembunyikan… sebagai data pribadi" termasuk dalam kelas ini dan ikuti peralihan ini (bagian 12.3). Nama pengguna lokal di header jalur yang dihasilkan dan akar pohon disamarkan sebagai satu temuan bersama: penghitung menyertakannya sebagai satu nilai, ? indikator melaporkan apakah itu disembunyikan atau ditampilkan, dan satu klik akan mengubah setiap jalur yang disamarkan.
+"Sembunyikan data pribadi" dinonaktifkan secara default. Ini mendeteksi alamat email, alamat IP global, nama pengguna lokal di jalur, alamat MAC, dan nomor telepon internasional dalam file teks yang dipilih. Temuan menggunakan keputusan Pratinjau yang sama dan saluran keluaran yang sama seperti Sembunyikan Rahasia; tanda manual yang dibuat dengan "Sembunyikan… sebagai data pribadi" termasuk dalam kelas ini dan ikuti peralihan ini (bagian 12.3). Nama pengguna lokal di header jalur yang dihasilkan dan akar pohon disamarkan sebagai satu temuan bersama: penghitung menyertakannya sebagai satu nilai,? indikator melaporkan apakah itu disembunyikan atau ditampilkan, dan satu klik akan mengubah setiap jalur yang disamarkan.
 
-Rentang dokumentasi dan host, nama pengguna CI umum, pemecah DNS publik yang terkenal, dan rentang telepon fiktif yang terdokumentasi tetap terlihat. Nol kecocokan bukanlah jaminan privasi. CLI menggunakan `--hide-private-data` ; aturan lengkap dan batasan fase pertama ada di `Docs/HidePrivateData.md`.
+Rentang dokumentasi dan host, nama pengguna CI umum, pemecah DNS publik yang terkenal, dan rentang telepon fiktif yang terdokumentasi tetap terlihat. Nol kecocokan bukanlah jaminan privasi. CLI menggunakan `--hide-private-data`; aturan lengkap dan batasan fase pertama ada di `Docs/HidePrivateData.md`.
 
 ### 12.5 Gunakan.gitignore
 Jika diaktifkan, DevProjex menerapkan setiap `.gitignore` yang dapat dijangkau, tidak hanya file di akar folder yang dibuka.
@@ -419,16 +419,16 @@ Untuk jalur tertentu, aturan diproses dari `.gitignore` induk menuju file yang l
 
 Aturan yang dimulai dengan `!` membatalkan pengecualian Git sebelumnya hanya dalam cakupannya. Itu tidak dapat memulihkan file sementara folder induknya tetap dikecualikan. `.gitignore` di dalam folder yang sepenuhnya dikecualikan dan tidak dapat dijangkau tidak berpartisipasi dalam evaluasi.
 
-Garis yang formatnya salah atau tidak didukung dilewati secara independen. Aturan valid lainnya dalam file tersebut dan aturan dalam cakupan yang berdekatan terus berfungsi.
+Baris yang formatnya salah atau tidak didukung dilewati secara terpisah. Aturan valid lainnya dalam file tersebut dan aturan dalam cakupan terkait tetap berfungsi.
 
-Opsi ini hanya mencakup file `.gitignore` pohon kerja biasa. Aturan dari `.git/info/exclude` dan aturan pengecualian Git global tidak diterapkan; pengaturan perbandingan jalur repositori yang efektif seperti `core.ignoreCase` dan, di macOS, `core.precomposeUnicode` dipatuhi. Tautan simbolik bernama `.gitignore` tidak diikuti, cocok dengan perilaku file kontrol Git. Jika `.gitignore` biasa tidak dapat dibaca, cakupan direktorinya dikecualikan dari kegagalan-penutupan dan pemindaian melaporkan akses parsial alih-alih menyertakan file secara diam-diam tanpa evaluasi aturan lengkap. Ketika indeks yang dapat dibaca untuk cakupan repositori milik jalur tersedia, file yang dilacak tetap terlihat meskipun cocok dengan `.gitignore` ; tanpa indeks tersebut atau Git CLI, cakupan tersebut dengan aman kembali ke evaluasi pola saja.
+Opsi ini hanya mencakup file `.gitignore` pohon kerja biasa. Aturan dari `.git/info/exclude` dan aturan pengecualian Git global tidak diterapkan; pengaturan perbandingan jalur repositori yang efektif seperti `core.ignoreCase` dan, di macOS, `core.precomposeUnicode` dipatuhi. Tautan simbolik bernama `.gitignore` tidak diikuti, cocok dengan perilaku file kontrol Git. Jika `.gitignore` biasa tidak dapat dibaca, cakupan direktorinya dikecualikan dari kegagalan-penutupan dan pemindaian melaporkan akses parsial alih-alih menyertakan file secara diam-diam tanpa evaluasi aturan lengkap. Ketika indeks yang dapat dibaca untuk cakupan repositori milik jalur tersedia, file yang dilacak tetap terlihat meskipun cocok dengan `.gitignore`; tanpa indeks tersebut atau Git CLI, cakupan tersebut dengan aman kembali ke evaluasi pola saja.
 
 Profil `standard` bawaan memilih `gitignore` plus `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files`, dan `extensionless-files`.
 
 ### 12.6 Hanya file Git yang dilacak
 "Hanya file Git yang dilacak" membangun tahapan Git dari pohon dari file pohon kerja yang ada yang dicatat di setiap indeks Git yang dapat dibaca. File terlacak yang dimodifikasi dan penambahan bertahap tetap disertakan; file yang tidak terlacak dikecualikan. Ini adalah pohon kerja saat ini, bukan cuplikan riwayat `HEAD` atau repositori jarak jauh.
 
-Setiap repositori dan pohon kerja bersarang yang dapat dijangkau diselesaikan secara independen di tingkat sarang mana pun yang dapat dijangkau. Repositori anak tidak mewarisi jalur yang dilacak dari induk atau saudaranya. Mode ini memerlukan Git CLI ; indeks kosong yang dapat dibaca valid. Jika Terminal Workspace ( TUI ) dimulai dalam mode ini dan tidak ada indeks yang berlaku yang dapat dimuat, ruang kerja tidak akan terbuka. Jika mode dipilih secara interaktif di ruang kerja TUI terbuka dan tidak ada indeks yang berlaku yang dapat dimuat, perubahan akan ditolak dan mode Git terakhir yang dapat digunakan tetap aktif. Dalam situasi yang sama, perintah langsung mengembalikan kebijakan atau memeriksa kegagalan. DevProjex tidak pernah diam-diam kembali ke `.gitignore`. Jika indeks lain yang berlaku dapat dibaca, cakupan bertingkat yang tidak tersedia akan dikecualikan dengan peringatan.
+Setiap repositori dan pohon kerja bersarang yang dapat dijangkau diselesaikan secara independen di tingkat sarang mana pun yang dapat dijangkau. Repositori anak tidak mewarisi jalur yang dilacak dari induk atau saudaranya. Mode ini memerlukan Git CLI; indeks kosong yang dapat dibaca valid. Jika Terminal Workspace ( TUI) dimulai dalam mode ini dan tidak ada indeks yang berlaku yang dapat dimuat, ruang kerja tidak akan terbuka. Jika mode dipilih secara interaktif di ruang kerja TUI terbuka dan tidak ada indeks yang berlaku yang dapat dimuat, perubahan akan ditolak dan mode Git terakhir yang dapat digunakan tetap aktif. Dalam situasi yang sama, perintah langsung mengembalikan kebijakan atau memeriksa kegagalan. DevProjex tidak pernah diam-diam kembali ke `.gitignore`. Jika indeks lain yang berlaku dapat dibaca, cakupan bertingkat yang tidak tersedia akan dikecualikan dengan peringatan.
 
 Di ruang kerja Desktop yang sudah terbuka, pilihan terlacak secara eksplisit tetap terlihat dan gagal ditutup: output dan ekspor diblokir ketika kesiapan gagal, sementara kesiapan parsial berlanjut dengan peringatan yang dilokalkan.
 
@@ -486,14 +486,14 @@ Bilah status memiliki dua blok:
 * Konten — metrik keluaran konten file yang diekspor.
 
 Format:
-* Garis
+* Baris
 * karakter
 * ~Token (perkiraan)
 
 Nilai besar ditunjukkan dengan sufiks kompak (K/M).
 
 Penting:
-* "Garis" di blok "Pohon" berarti jumlah baris dalam representasi pohon akhir, bukan jumlah file pada disk;
+* "Baris" di blok "Pohon" berarti jumlah baris dalam representasi pohon akhir, bukan jumlah file pada disk;
 * nilai ini mencakup folder, file, dan elemen layanan pohon (misalnya, node yang aksesnya ditolak).
 
 ### 13.2 Bagaimana metrik dihitung
@@ -504,7 +504,7 @@ Metrik pohon:
 Metrik konten:
 * ikuti aturan yang sama seperti penyalinan/ekspor konten;
 * file biner dikecualikan;
-* file kosong dan hanya spasi putih dihitung melalui penanda layanan ( `[No Content, 0 bytes]`, `[Whitespace, N bytes]` ).
+* file kosong dan hanya spasi putih dihitung melalui penanda layanan ( `[No Content, 0 bytes]`, `[Whitespace, N bytes]`).
 
 ### 13.3 Kapan penghitung diperbarui
 Perhitungan ulang berjalan:
@@ -525,7 +525,7 @@ Urutan pemilihan ikon:
 Bagian Tema memungkinkan Anda memilih Sistem, Terang, atau Gelap dan satu efek latar belakang:
 * Transparansi
 * Mengaburkan
-* Mika
+* Mica
 
 Sistem dipilih secara default dan mengikuti perubahan tema sistem operasi. Setelah peluncuran pertama atau pengaturan ulang, tema sistem terang dimulai dengan latar belakang buram biasa, sedangkan tema sistem gelap dimulai dengan Blur. Jika preferensi sistem tidak dapat ditentukan, DevProjex menggunakan Gelap dengan Blur. Terang dan Gelap mengingat efeknya secara mandiri. Pilihan Terang atau Gelap yang eksplisit mengabaikan perubahan sistem hingga Sistem dipilih kembali.
 

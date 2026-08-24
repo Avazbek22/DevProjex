@@ -53,7 +53,7 @@ Zasady formatu:
   * XML -> domyślny `.xml`, z `.xml` i `.txt` dostępnymi w oknie dialogowym Zapisz.
   * MD -> domyślny `.md`, z `.md` i `.txt` dostępnymi w oknie dialogowym Zapisz.
 * Eksportuj zawartość — zawsze format zawartości tekstowej, plik `.txt` (przełączanie formatu drzewa nie ma zastosowania).
-* Eksportuj drzewo i zawartość — zawsze plik `.txt` ; wybrany format drzewa wpływa tylko na format bloku drzewa wewnątrz wyniku.
+* Eksportuj drzewo i zawartość — zawsze plik `.txt`; wybrany format drzewa wpływa tylko na format bloku drzewa wewnątrz wyniku.
 
 Pliki eksportu są zapisywane w formacie UTF-8 bez BOM.
 
@@ -88,38 +88,38 @@ Jeśli polecenie jest już skonfigurowane, otwórz terminal i uruchom:
 Zawiera listę poleceń i opcji najwyższego poziomu. Uruchom `devprojex help <command>`, aby zobaczyć opcje i przykłady tego polecenia.
 
 Przykłady:
-* `devprojex` — otwórz interaktywny obszar roboczy terminala. W obszarze roboczym kieruj akcjami za pomocą wiersza poleceń `:` (na przykład `:copy`, `:analyze`, `:branch` ); pełną listę poleceń znajdziesz w pomocy wbudowanego obszaru roboczego i dokumentacji projektu.
-* `devprojex tui.` — otwórz określony folder bezpośrednio w obszarze roboczym terminala.
-* `devprojex open. --preview` — otwórz bieżący folder w podglądzie pulpitu.
-* `devprojex analyze. --format json` — analizuje bieżący projekt jako JSON.
-* `devprojex tree.` — wydrukuj drzewo projektu na terminalu.
-* `devprojex export context. --format markdown -o../devprojex-context.md` — zapisz kontekst gotowy na AI poza projektem źródłowym.
-* `devprojex export project. --as folder -o../devprojex-submission` — wyeksportuj efektywne drzewo projektu do dokładnego folderu.
-* `devprojex export project. --as zip -o../devprojex-submission.zip` — wyeksportuj efektywne drzewo projektu do archiwum ZIP.
+* `devprojex` — otwórz interaktywny obszar roboczy terminala. W obszarze roboczym kieruj akcjami za pomocą wiersza poleceń `:` (na przykład `:copy`, `:analyze`, `:branch`); pełną listę poleceń znajdziesz w pomocy wbudowanego obszaru roboczego i dokumentacji projektu.
+* `devprojex tui .` — otwórz określony folder bezpośrednio w obszarze roboczym terminala.
+* `devprojex open . --preview` — otwórz bieżący folder w podglądzie pulpitu.
+* `devprojex analyze . --format json` — analizuje bieżący projekt jako JSON.
+* `devprojex tree .` — wydrukuj drzewo projektu na terminalu.
+* `devprojex export context . --format markdown -o ../devprojex-context.md` — zapisz kontekst gotowy na AI poza projektem źródłowym.
+* `devprojex export project . --as folder -o ../devprojex-submission` — wyeksportuj efektywne drzewo projektu do dokładnego folderu.
+* `devprojex export project . --as zip -o ../devprojex-submission.zip` — wyeksportuj efektywne drzewo projektu do archiwum ZIP.
 * `devprojex export context https://github.com/owner/repo -o -` — spakuj zdalne repozytorium bez klonowania go samodzielnie.
-* `devprojex analyze. --git-mode tracked --exclude smart-ignore` — analizuj śledzone pliki Git za pomocą Smart Ignore.
-* `devprojex mcp --root.` — uruchom lokalny serwer MCP tylko do odczytu, aby agenci AI mogli bezpiecznie odczytać projekt.
+* `devprojex analyze . --git-mode tracked --exclude smart-ignore` — analizuj śledzone pliki Git za pomocą Smart Ignore.
+* `devprojex mcp --root .` — uruchom lokalny serwer MCP tylko do odczytu, aby agenci AI mogli bezpiecznie odczytać projekt.
 
 Uwagi:
 * `.` oznacza bieżący folder terminala;
 * ścieżki ze spacjami muszą być ujęte w cudzysłów;
-* `--git-mode` nie wybiera filtrowania Git, `.gitignore` ani śledzonych plików Git ;
-* `--exclude` kontroluje zwykłe wykluczenia niezależnie od filtrowania Git ;
+* `--git-mode` wybiera brak filtrowania Git, `.gitignore` albo wyłącznie śledzone pliki Git;
+* `--exclude` kontroluje zwykłe wykluczenia niezależnie od filtrowania Git;
 * polecenia analizy i eksportu są deterministyczne i nie otwierają interfejsu pulpitu;
-* `tui`, `open`, `analyze` i oba polecenia `export` również akceptują adres URL repozytorium Git ; klon trafia do zarządzanej pamięci podręcznej ( `devprojex cache` );
-* polecenia mają udokumentowane aliasy i krótkie flagi — na przykład `export ctx`, `-f`, `-n` ; `devprojex help` pokazuje je;
-* `analyze --findings` wyświetla wyniki redakcji bez ich wartości, a `--fail-on-findings` zwraca niezerowy kod wyjścia dla CI ;
+* `tui`, `open`, `analyze` i oba polecenia `export` również akceptują adres URL repozytorium Git; klon trafia do zarządzanej pamięci podręcznej (`devprojex cache`);
+* polecenia mają udokumentowane aliasy i krótkie flagi — na przykład `export ctx`, `-f`, `-n`; `devprojex help` pokazuje je;
+* `analyze --findings` wyświetla wyniki maskowania bez wartości źródłowych, a `--fail-on-findings` zwraca niezerowy kod wyjścia dla CI;
 * polecenie nie modyfikuje plików projektu — DevProjex działa w trybie tylko do odczytu.
 
 Jeśli polecenie `devprojex` nie działa, otwórz w DevProjex:
 „Pomoc → Uruchom z terminala”.
 
 ## 5) Git
-Menu Git jest dostępne tylko dla projektów sklonowanych za pomocą DevProjex ( Git Clone). Aplikacja nie ma wpływu na Twoje pliki — działa tylko z pamięcią podręczną.
+Menu Git jest dostępne tylko dla projektów sklonowanych za pomocą DevProjex (Git Clone). Aplikacja nie ma wpływu na Twoje pliki — działa tylko z pamięcią podręczną.
 
 Pamięć podręczna jest przechowywana w katalogu pamięci podręcznej systemu użytkownika. Uruchom `devprojex doctor`, aby zobaczyć rozwiązaną ścieżkę.
 
-* Oddział — wyświetla listę dostępnych oddziałów z zaznaczeniem aktywnego; przełączanie aktualizuje drzewo do wybranej gałęzi. Jeśli oddział już istnieje lokalnie, przełączanie odbywa się w trybie offline (bez aktualizacji). Jeśli nie istnieje lokalnie, jest pobierany i tworzony.
+* Gałąź — wyświetla listę dostępnych gałęzi z zaznaczeniem aktywnej; przełączenie aktualizuje drzewo do wybranej gałęzi. Jeśli gałąź istnieje lokalnie, przełączenie odbywa się offline (bez pobierania aktualizacji). W przeciwnym razie gałąź zostaje pobrana i utworzona.
 * Pobierz aktualizacje — aktualizuje tylko bieżącą gałąź: pobierz i zresetuj do Origin/<branch>. W przypadku projektu Git Clone klawisz F5 wykonuje tę samą akcję; zwykłe polecenie „Plik → Odśwież” jest wyłączone.
 
 ### Okno klonowania
@@ -166,7 +166,7 @@ Kopiuje zawartość pliku:
 * jeśli sprawdzane są pliki — tylko te; w przeciwnym razie — wszystkie pliki projektu;
 * każdy plik poprzedzony jest nagłówkiem z pełną ścieżką lokalną (w przypadku projektów Git Clone — ścieżka WWW repozytorium);
 * pliki inne niż tekstowe są ignorowane (w tym pliki binarne);
-* w przypadku pustych plików tekstowych wyświetlana jest ścieżka i linia `[No Content, 0 bytes]` ;
+* w przypadku pustych plików tekstowych wyświetlana jest ścieżka i linia `[No Content, 0 bytes]`;
 * dla plików zawierających tylko białe znaki/podziały linii, wydawana jest ścieżka i linia `[Whitespace, N bytes]`.
 Skrót klawiszowy: {mod}{alt}V.
 
@@ -186,19 +186,19 @@ JSON:
 * Eksport JSON wykorzystuje ten format drzewa: tablice zawierają pliki, obiekty zawierają podfoldery, `/` zawiera pliki w bieżącym folderze, a `[]` oznacza pusty folder.
 
 XML:
-* węzeł główny to `<t r="...">` ;
-* foldery to `<d n="...">` ;
+* węzeł główny to `<t r="...">`;
+* foldery to `<d n="...">`;
 * pliki to `<f>File.cs</f>`.
 
 Lekarz:
-* zaczyna się od `Root:...` ;
+* zaczyna się od `Root:...`;
 * używa zagnieżdżonej listy Markdown;
 * foldery kończą się znakiem `/`.
 
 Drzewo + zawartość:
 * wybrany format drzewa dotyczy bloku drzewa;
 * blok treści pozostaje tekstem;
-* nagłówki plików w bloku treści używają ścieżek względnych z `/` ;
+* nagłówki plików w bloku treści używają ścieżek względnych z `/`;
 * wyeksportowany jako `.txt`.
 
 ## 7) Tryb podglądu
@@ -320,7 +320,7 @@ Uwaga dotycząca „rozszerzeń”:
 
 Przetwarzanie treści:
 * przekształca zawartość wybranych plików tekstowych bez zmiany drzewa;
-* Ukryj sekrety i Ukryj prywatne dane zastąp wykryte wartości (sekcje 12.3 i 12.4);
+* Ukryj sekrety i Ukryj dane osobowe zastępują wykryte wartości (sekcje 12.3 i 12.4);
 * Kompresuj kod przechowujący deklaracje, jednocześnie skracając nazwane implementacje w 14 językach;
 * Usuń komentarze usuwa komentarze i komentarze do dokumentacji z 20 pakietów językowych;
 * Usuń puste linie usuwa linie zawierające tylko białe znaki w tych samych paczkach, zachowując jednocześnie literały wielowierszowe;
@@ -389,20 +389,20 @@ Niektóre magazyny zależności i katalogi usług można rozpoznać po ich chara
 Odkrywanie zakresu projektu jest ograniczone, więc ładowanie dużego folderu użytkownika nie staje się pełną, powtarzaną analizą każdego katalogu. Regularne struktury wykorzystują płytkie odkrywanie, podczas gdy rozpoznane monorepo są przeszukiwane głębiej. Po znalezieniu zakresu Smart Ignore dotyczy całego poddrzewa bez ograniczenia głębokości.
 
 ### 12.3 Ukryj tajemnice
-Opcja „Ukryj sekrety” jest domyślnie wyłączona. Skanuje tylko wybraną treść tekstową i zastępuje każdą wykrytą wartość na miejscu, zachowując plik i otaczający go kod. Gdy opcja jest wyłączona, skanowanie nie jest uruchamiane i nie jest wyświetlany żaden licznik. Po zeskanowaniu bieżącego wyboru na etykiecie wyświetlana jest liczba wykrytych wartości; jeśli decyzje o pozostawieniu mniejszej liczby wartości pozostaną ukryte, wyświetli się informacja o wykryciu/ukryciu, a wiersz ? wskaźnik podaje oba liczniki.
+Opcja „Ukryj sekrety” jest domyślnie wyłączona. Skanuje tylko wybraną treść tekstową i zastępuje każdą wykrytą wartość na miejscu, zachowując plik i otaczający go kod. Gdy opcja jest wyłączona, skanowanie nie jest uruchamiane i nie jest wyświetlany żaden licznik. Po zeskanowaniu bieżącego wyboru na etykiecie wyświetlana jest liczba wykrytych wartości; jeśli decyzje o pozostawieniu mniejszej liczby wartości pozostaną ukryte, wyświetli się informacja o wykryciu/ukryciu, a wiersz? wskaźnik podaje oba liczniki.
 
-Zredagowane zakresy są wyróżnione w Podglądzie. Kliknij jedno, aby zachować tylko to wystąpienie w niezmienionej postaci; {alt}↓ / {alt}↑ poruszaj się między wynikami, a Enter przełącza aktywny. W Terminal Workspace użyj `[` i `]`, aby poruszać się między wystąpieniami, oraz `Enter` lub `Space`, aby przełączać aktywne. Decyzja dotyczy podglądu, schowka, eksportu kontekstu, kopiowania folderów i ZIP dla bieżącej sesji; nie jest on zapisywany w profilu projektu.
+Zamaskowane zakresy są wyróżnione w Podglądzie. Kliknij zakres, aby pozostawić tylko to wystąpienie bez zmian; poruszaj się między wynikami za pomocą {alt}↓ / {alt}↑, a aktywny wynik przełączaj klawiszem Enter. W Terminal Workspace użyj `[` i `]` do przechodzenia między wystąpieniami oraz `Enter` lub `Space` do przełączania aktywnego wystąpienia. Decyzja obowiązuje w bieżącej sesji dla podglądu, schowka, eksportu kontekstu, kopiowania folderu i ZIP; nie jest zapisywana w profilu projektu.
 
-Menu kontekstowe Podgląd rozszerza te decyzje. Kliknij prawym przyciskiem myszy wykryte wystąpienie, aby zachować — lub ponownie ukryć — wszystkie wystąpienia jego reguły lub wszystkie wykryte wystąpienia w tym samym pliku w ramach jednej akcji. Kliknij prawym przyciskiem myszy wybraną wartość w zawartości pliku, aby oznaczyć ją ręcznie: „Ukryj… tutaj” ukrywa tylko to wystąpienie w sesji, „Zawsze ukrywaj…” tworzy trwały znacznik dla każdego wystąpienia wartości, a „Ukryj… jako dane prywatne” tworzy trwały znacznik kontrolowany przez opcję Ukryj dane prywatne. Na znaku ręcznym pojawia się komunikat „Usuń znak” i usuwa go; wartość nadal dopasowana przez detektor pozostaje ukryta. Wartość ręczna musi być pojedynczą linią zawierającą od 8 do 512 znaków wybraną w zawartości pliku. Utworzenie znaku automatycznie aktywuje odpowiednią opcję. Znaki trwałe przechowują tylko kluczową tożsamość wartości i jej klasę, nigdy oryginalny tekst.
+Menu kontekstowe Podglądu rozszerza te decyzje. Kliknij wykryte wystąpienie prawym przyciskiem myszy, aby jednym działaniem pozostawić bez zmian lub ponownie ukryć wszystkie wystąpienia danej reguły albo wszystkie wykryte wystąpienia w tym samym pliku. Aby ręcznie oznaczyć wartość wybraną w zawartości pliku, kliknij ją prawym przyciskiem: „Ukryj… tutaj” ukrywa tylko to wystąpienie w bieżącej sesji, „Zawsze ukrywaj…” tworzy trwały znacznik dla każdego wystąpienia wartości, a „Ukryj… jako dane osobowe” tworzy trwały znacznik kontrolowany przez opcję „Ukryj dane osobowe”. Polecenie „Usuń znacznik” usuwa ręczny znacznik; wartość nadal wykrywana przez detektor pozostaje ukryta. Ręczna wartość musi być jednym wierszem o długości od 8 do 512 znaków, wybranym w zawartości pliku. Utworzenie znacznika automatycznie włącza odpowiednią opcję. Trwałe znaczniki przechowują wyłącznie kluczowany identyfikator wartości i jej klasę, nigdy tekst źródłowy.
 
 Kopia folderu lub ZIP również zmienia pasujący tekst i nie można go już budować ani uruchamiać. Pliki binarne są kopiowane w niezmienionej postaci i nie są skanowane. Wybrany plik tekstowy większy niż 16 MiB lub błąd wykrywania powoduje zatrzymanie operacji zamiast eksportowania niesprawdzonego tekstu.
 
-Reguła raportów zliczania pasuje tylko do siebie. Zero nie oznacza, że ​​projekt jest bezpieczny. CLI używa `--hide-secrets` ; szczegóły techniczne i ograniczenia znajdują się w `Docs/HideSecrets.md`.
+Reguła raportów zliczania pasuje tylko do siebie. Zero nie oznacza, że ​​projekt jest bezpieczny. CLI używa `--hide-secrets`; szczegóły techniczne i ograniczenia znajdują się w `Docs/HideSecrets.md`.
 
-### 12.4 Ukryj prywatne dane
-Opcja „Ukryj prywatne dane” jest domyślnie wyłączona. Wykrywa adresy e-mail, globalne adresy IP, lokalne nazwy użytkowników w ścieżkach, adresy MAC i międzynarodowe numery telefonów w wybranych plikach tekstowych. Wyniki korzystają z tych samych decyzji dotyczących podglądu i tego samego potoku wyjściowego, co w przypadku funkcji Ukryj wpisy tajne; ręczne znaczniki utworzone za pomocą opcji „Ukryj… jako dane prywatne” należą do tej klasy i należy zastosować ten przełącznik (sekcja 12.3). Lokalne nazwy użytkowników w wygenerowanych nagłówkach ścieżek i katalogu głównym drzewa są maskowane jako jedno wspólne ustalenie: licznik uwzględnia je jako jedną wartość, ? wskaźnik informuje, czy jest ukryty, czy pokazany, a jedno kliknięcie przełącza każdą zamaskowaną ścieżkę.
+### 12.4 Ukryj dane osobowe
+Opcja „Ukryj dane osobowe” jest domyślnie wyłączona. Wykrywa adresy e-mail, globalne adresy IP, lokalne nazwy użytkowników w ścieżkach, adresy MAC i międzynarodowe numery telefonów w wybranych plikach tekstowych. Wyniki korzystają z tych samych decyzji w Podglądzie i tego samego potoku wyjściowego co „Ukryj sekrety”; ręczne znaczniki utworzone przez „Ukryj… jako dane osobowe” należą do tej klasy i podlegają temu przełącznikowi (sekcja 12.3). Lokalne nazwy użytkowników w wygenerowanych nagłówkach ścieżek i katalogu głównym drzewa są maskowane jako jedno wspólne znalezisko: licznik uwzględnia je jako jedną wartość,? wskaźnik informuje, czy jest ukryte, czy widoczne, a jedno kliknięcie przełącza wszystkie zamaskowane ścieżki.
 
-Zakresy dokumentacji i hosty, popularne nazwy użytkowników CI, dobrze znane publiczne programy rozpoznawania nazw DNS i udokumentowane fikcyjne zakresy telefonów pozostają widoczne. Zero dopasowań nie gwarantuje prywatności. CLI używa `--hide-private-data` ; pełne zasady i ograniczenia pierwszego etapu znajdują się w `Docs/HidePrivateData.md`.
+Zakresy dokumentacji i hosty, popularne nazwy użytkowników CI, dobrze znane publiczne programy rozpoznawania nazw DNS i udokumentowane fikcyjne zakresy telefonów pozostają widoczne. Zero dopasowań nie gwarantuje prywatności. CLI używa `--hide-private-data`; pełne zasady i ograniczenia pierwszego etapu znajdują się w `Docs/HidePrivateData.md`.
 
 ### 12.5 Użyj.gitignore
 Gdy ta opcja jest włączona, DevProjex stosuje każdy osiągalny plik `.gitignore`, a nie tylko plik w katalogu głównym otwartego folderu.
@@ -421,14 +421,14 @@ Reguła rozpoczynająca się od `!` anuluje wcześniejsze wykluczenie Git tylko 
 
 Zniekształcona lub nieobsługiwana linia jest niezależnie pomijana. Inne prawidłowe reguły w tym pliku i reguły w sąsiednich zakresach nadal działają.
 
-Ta opcja obejmuje tylko pliki `.gitignore` zwykłego drzewa roboczego. Reguły z `.git/info/exclude` i globalne reguły wykluczeń Git nie są stosowane; przestrzegane są efektywne ustawienia porównywania ścieżek repozytoriów, takie jak `core.ignoreCase` i, w macOS, `core.precomposeUnicode`. Nie jest stosowane łącze symboliczne o nazwie `.gitignore`, co odpowiada zachowaniu pliku sterującego Git. Jeśli nie można odczytać zwykłego pliku `.gitignore`, zakres jego katalogu jest wykluczony i zamknięty, a skanowanie zgłasza częściowy dostęp zamiast cichego włączania plików bez pełnej oceny reguł. Gdy dostępny jest czytelny indeks zakresu repozytorium będącego właścicielem ścieżki, śledzone pliki pozostają widoczne, nawet jeśli pasują do `.gitignore` ; bez tego indeksu lub interfejsu CLI Git zakres ten bezpiecznie powraca do oceny wyłącznie wzorców.
+Ta opcja obejmuje tylko pliki `.gitignore` zwykłego drzewa roboczego. Reguły z `.git/info/exclude` i globalne reguły wykluczeń Git nie są stosowane; przestrzegane są efektywne ustawienia porównywania ścieżek repozytoriów, takie jak `core.ignoreCase` i, w macOS, `core.precomposeUnicode`. Nie jest stosowane łącze symboliczne o nazwie `.gitignore`, co odpowiada zachowaniu pliku sterującego Git. Jeśli nie można odczytać zwykłego pliku `.gitignore`, zakres jego katalogu jest wykluczony i zamknięty, a skanowanie zgłasza częściowy dostęp zamiast cichego włączania plików bez pełnej oceny reguł. Gdy dostępny jest czytelny indeks zakresu repozytorium będącego właścicielem ścieżki, śledzone pliki pozostają widoczne, nawet jeśli pasują do `.gitignore`; bez tego indeksu lub interfejsu CLI Git zakres ten bezpiecznie powraca do oceny wyłącznie wzorców.
 
 Wbudowany profil `standard` wybiera `gitignore` oraz `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` i `extensionless-files`.
 
 ### 12.6 Tylko śledzone pliki Git
 Opcja „Tylko śledzone pliki Git ” buduje etap Git drzewa z istniejących plików drzewa roboczego zapisanych w każdym czytelnym indeksie Git. Zmodyfikowane pliki śledzone i dodatki etapowe pozostają uwzględnione; nieśledzone pliki są wykluczone. To jest bieżące działające drzewo, a nie historyczna migawka `HEAD` lub zdalne repozytorium.
 
-Każde osiągalne zagnieżdżone repozytorium i drzewo robocze jest rozwiązywane niezależnie na dowolnym osiągalnym poziomie zagnieżdżenia. Repozytorium podrzędne nie dziedziczy śledzonych ścieżek od swojego rodzica ani rodzeństwa. Ten tryb wymaga interfejsu Git CLI ; ważny jest czytelny pusty indeks. Jeśli obszar roboczy terminala ( TUI ) zostanie uruchomiony w tym trybie i nie można załadować odpowiedniego indeksu, obszar roboczy nie zostanie otwarty. Jeśli tryb zostanie wybrany interaktywnie w otwartym obszarze roboczym TUI i nie będzie można załadować odpowiedniego indeksu, zmiana zostanie odrzucona, a ostatni możliwy do użycia tryb Git pozostanie aktywny. W tej samej sytuacji polecenia bezpośrednie zwracają politykę lub sprawdzają niepowodzenie. DevProjex nigdy po cichu nie wraca do `.gitignore`. Jeśli można odczytać inny odpowiedni indeks, niedostępne zakresy zagnieżdżone zostaną wykluczone z ostrzeżeniem.
+Każde osiągalne zagnieżdżone repozytorium i drzewo robocze jest rozwiązywane niezależnie na dowolnym osiągalnym poziomie zagnieżdżenia. Repozytorium podrzędne nie dziedziczy śledzonych ścieżek od swojego rodzica ani rodzeństwa. Ten tryb wymaga interfejsu Git CLI; ważny jest czytelny pusty indeks. Jeśli obszar roboczy terminala ( TUI) zostanie uruchomiony w tym trybie i nie można załadować odpowiedniego indeksu, obszar roboczy nie zostanie otwarty. Jeśli tryb zostanie wybrany interaktywnie w otwartym obszarze roboczym TUI i nie będzie można załadować odpowiedniego indeksu, zmiana zostanie odrzucona, a ostatni możliwy do użycia tryb Git pozostanie aktywny. W tej samej sytuacji polecenia bezpośrednie zwracają politykę lub sprawdzają niepowodzenie. DevProjex nigdy po cichu nie wraca do `.gitignore`. Jeśli można odczytać inny odpowiedni indeks, niedostępne zakresy zagnieżdżone zostaną wykluczone z ostrzeżeniem.
 
 W już otwartym obszarze roboczym Desktop jawny śledzony wybór pozostaje widoczny i zabezpieczony przed awarią: dane wyjściowe i eksport są blokowane w przypadku niepowodzenia gotowości, natomiast częściowa gotowość jest kontynuowana ze zlokalizowanym ostrzeżeniem.
 
@@ -486,7 +486,7 @@ Pasek stanu składa się z dwóch bloków:
 * Treść — metryki wyjściowej zawartości eksportowanego pliku.
 
 Format:
-* Kwestia
+* Wiersze
 * Znaki
 * ~Tokeny (w przybliżeniu)
 
@@ -504,7 +504,7 @@ Metryki drzewa:
 Dane dotyczące treści:
 * postępuj zgodnie z tymi samymi zasadami, co kopiowanie/eksport treści;
 * pliki binarne są wykluczone;
-* puste i zawierające tylko białe znaki pliki są zliczane za pomocą znaczników usług ( `[No Content, 0 bytes]`, `[Whitespace, N bytes]` ).
+* puste i zawierające tylko białe znaki pliki są zliczane za pomocą znaczników usług ( `[No Content, 0 bytes]`, `[Whitespace, N bytes]`).
 
 ### 13.3 Kiedy liczniki się aktualizują
 Przeliczenia przebiegają:
@@ -524,10 +524,10 @@ Kolejność wyboru ikon:
 ## 15) Motyw i efekty
 W sekcji Motyw możesz wybrać opcję System, Jasny lub Ciemny oraz jeden efekt tła:
 * Przezroczystość
-* Plama
-* Mika
+* Rozmycie
+* Mica
 
-System jest wybrany domyślnie i podąża za zmianami motywu systemu operacyjnego. Po pierwszym uruchomieniu lub zresetowaniu ustawień jasny motyw systemowy zaczyna się od zwykłego, nieprzezroczystego tła, podczas gdy ciemny motyw systemowy zaczyna się od Rozmycia. Jeśli nie można określić preferencji systemowych, DevProjex używa Dark with Blur. Światło i Ciemność zapamiętują swoje efekty niezależnie. Wyraźny wybór Jasny lub Ciemny ignoruje zmiany systemowe do czasu ponownego wybrania Systemu.
+System jest wybrany domyślnie i podąża za zmianami motywu systemu operacyjnego. Po pierwszym uruchomieniu lub zresetowaniu ustawień jasny motyw systemowy zaczyna się od zwykłego, nieprzezroczystego tła, podczas gdy ciemny motyw systemowy zaczyna się od Rozmycia. Jeśli nie można określić preferencji systemowych, DevProjex używa Dark with Blur. Jasny i Ciemny zapamiętują swoje efekty niezależnie. Wyraźny wybór Jasny lub Ciemny ignoruje zmiany systemowe do czasu ponownego wybrania Systemu.
 
 Efekty wykluczają się wzajemnie. Ponowne kliknięcie wybranego efektu wyłącza go i przywraca regularne, nieprzezroczyste tło.
 
