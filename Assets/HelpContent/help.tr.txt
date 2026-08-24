@@ -18,7 +18,7 @@ Kısayol tuşları:
 Bir düğüme sağ tıklayın veya odaklanılan düğümde {shift}F10'a veya Menü tuşuna basın:
 * Dosya Gezgini'nde Göster / Finder'da Göster / Dosya yöneticisinde aç — öğeyi sistem dosya yöneticisinde gösterir; etiket mevcut platformla eşleşiyor.
 * Tam yolu kopyala — öğenin mutlak yolu.
-* Göreli yolu kopyala — kök klasör adıyla başlayan, proje kökündeki yol, örneğin `project/src/File.cs` .
+* Göreli yolu kopyala — kök klasör adıyla başlayan, proje kökündeki yol, örneğin `project/src/File.cs`.
 * İçerikleri kopyala — dosyalar için: içeriği, uygulanan içerik dönüşümleriyle tam olarak kopyalama ve dışa aktarmanın ürettiği şekilde kopyalar.
 * Yalnızca bunu seç — yalnızca bu düğümü kontrol eder ve gerisini temizler; yalnızca başka bir öğe de işaretlendiğinde gösterilir.
 * Şubeyi genişlet / Şubeyi daralt — klasörler için.
@@ -48,10 +48,10 @@ Dışa aktarma sırasında ağacı veya ayarları değiştiremez, filtreyi kulla
 
 Biçim kuralları:
 * İhracat ağacı:
-  * ASCII -> yalnızca `.txt` .
-  * JSON -> varsayılan `.json` , Kaydet iletişim kutusunda hem `.json` hem de `.txt` mevcuttur.
-  * XML -> varsayılan `.xml` , Kaydet iletişim kutusunda hem `.xml` hem de `.txt` mevcuttur.
-  * MD -> varsayılan `.md` , Kaydet iletişim kutusunda hem `.md` hem de `.txt` mevcuttur.
+  * ASCII -> yalnızca `.txt`.
+  * JSON -> varsayılan `.json`, Kaydet iletişim kutusunda hem `.json` hem de `.txt` mevcuttur.
+  * XML -> varsayılan `.xml`, Kaydet iletişim kutusunda hem `.xml` hem de `.txt` mevcuttur.
+  * MD -> varsayılan `.md`, Kaydet iletişim kutusunda hem `.md` hem de `.txt` mevcuttur.
 * İçeriği dışa aktar — her zaman metin içerik biçimi, `.txt` dosyası (ağaç biçimi geçişi geçerli değildir).
 * Ağacı ve içeriği dışa aktarın — her zaman `.txt` dosyası; seçilen ağaç formatı yalnızca sonucun içindeki ağaç bloğu formatını etkiler.
 
@@ -77,7 +77,7 @@ Tüzük:
 * 32'ye kadar yeni klasör saklanır;
 * geçmiş, uygulamanın başlatılması arasında korunur.
 
-Her öğe ana klasörü ve proje adını gösterir; örneğin `Projects / App` .
+Her öğe ana klasörü ve proje adını gösterir; örneğin `Projects / App`.
 
 ## 4) Terminalden başlatma
 DevProjex etkileşimli bir Terminal Çalışma Alanı ve komut dosyaları ve CI için doğrudan komutlar sağlar.
@@ -88,17 +88,17 @@ Komut zaten ayarlanmışsa bir terminal açın ve şunu çalıştırın:
 Bu, üst düzey komutları ve seçenekleri listeler. Bu komutun kendi seçeneklerini ve örneklerini görmek için `devprojex help <command>` komutunu çalıştırın.
 
 Örnekler:
-* `devprojex` — etkileşimli Terminal Çalışma Alanını açın. Çalışma alanı içinde, eylemleri `:` komut satırı aracılığıyla yönlendirin (örneğin `:copy` , `:analyze` , `:branch` ); Tam komut listesi için yerleşik çalışma alanı yardımına ve proje belgelerine bakın.
-* `devprojex tui .` — belirtilen klasörü doğrudan Terminal Çalışma Alanında açın.
-* `devprojex open . --preview` — geçerli klasörü Masaüstü Önizleme'de açar.
-* `devprojex analyze . --format json` — mevcut projeyi JSON olarak analiz edin.
-* `devprojex tree .` — proje ağacını terminale yazdırır.
-* `devprojex export context . --format markdown -o ../devprojex-context.md` — Yapay zekaya hazır içeriği kaynak projenin dışına kaydedin.
-* `devprojex export project . --as folder -o ../devprojex-submission` — etkili proje ağacını tam bir klasöre aktarın.
-* `devprojex export project . --as zip -o ../devprojex-submission.zip` — etkili proje ağacını bir ZIP arşivine aktarın.
+* `devprojex` — etkileşimli Terminal Çalışma Alanını açın. Çalışma alanı içinde, eylemleri `:` komut satırı aracılığıyla yönlendirin (örneğin `:copy`, `:analyze`, `:branch` ); Tam komut listesi için yerleşik çalışma alanı yardımına ve proje belgelerine bakın.
+* `devprojex tui.` — belirtilen klasörü doğrudan Terminal Çalışma Alanında açın.
+* `devprojex open. --preview` — geçerli klasörü Masaüstü Önizleme'de açar.
+* `devprojex analyze. --format json` — mevcut projeyi JSON olarak analiz edin.
+* `devprojex tree.` — proje ağacını terminale yazdırır.
+* `devprojex export context. --format markdown -o../devprojex-context.md` — Yapay zekaya hazır içeriği kaynak projenin dışına kaydedin.
+* `devprojex export project. --as folder -o../devprojex-submission` — etkili proje ağacını tam bir klasöre aktarın.
+* `devprojex export project. --as zip -o../devprojex-submission.zip` — etkili proje ağacını bir ZIP arşivine aktarın.
 * `devprojex export context https://github.com/owner/repo -o -` — uzaktaki bir depoyu kendiniz klonlamadan paketleyin.
-* `devprojex analyze . --git-mode tracked --exclude smart-ignore` — izlenen Git dosyalarını Smart Ignore ile analiz edin.
-* `devprojex mcp --root .` — AI aracılarının projeyi güvenli bir şekilde okuyabilmesi için yerel salt okunur MCP sunucusunu başlatın.
+* `devprojex analyze. --git-mode tracked --exclude smart-ignore` — izlenen Git dosyalarını Smart Ignore ile analiz edin.
+* `devprojex mcp --root.` — AI aracılarının projeyi güvenli bir şekilde okuyabilmesi için yerel salt okunur MCP sunucusunu başlatın.
 
 Notlar:
 * `.` geçerli terminal klasörü anlamına gelir;
@@ -106,8 +106,8 @@ Notlar:
 * `--git-mode` Git filtrelemesini, `.gitignore` veya izlenen Git dosyalarını seçmez;
 * `--exclude` sıradan hariç tutmaları Git filtrelemesinden ayrı olarak kontrol eder;
 * analiz ve dışa aktarma komutları belirleyicidir ve masaüstü arayüzünü açmaz;
-* `tui` , `open` , `analyze` " ve her iki `export` komutu da Git deposu URL'sini kabul eder; klon, yönetilen bir önbelleğe ( `devprojex cache` ) gider;
-* komutlar belgelenmiş takma adlara ve kısa işaretlere sahiptir - örneğin `export ctx` , `-f` , `-n` ; `devprojex help` bunları gösterir;
+* `tui`, `open`, `analyze` " ve her iki `export` komutu da Git deposu URL'sini kabul eder; klon, yönetilen bir önbelleğe ( `devprojex cache` ) gider;
+* komutlar belgelenmiş takma adlara ve kısa işaretlere sahiptir - örneğin `export ctx`, `-f`, `-n` ; `devprojex help` bunları gösterir;
 * `analyze --findings` redaksiyon bulgularını değerleri olmadan listeler ve `--fail-on-findings` CI için sıfırdan farklı bir çıkış kodu döndürür;
 * komut proje dosyalarını değiştirmez — DevProjex salt okunur modda çalışır.
 
@@ -180,18 +180,18 @@ Kısayol tuşu: {mod}{shift}V.
 ### Ağaç temsilleri
 Ağaç formatları, seçilen aynı proje ağacı için farklı gösterimler kullanır.
 
-JSON :
+JSON:
 * `rootPath` — `/` ile normalleştirilmiş mutlak kök yol.
 * `tree` — kök klasörün içeriği.
 * JSON dışa aktarma şu ağaç biçimini kullanır: diziler dosyaları içerir, nesneler alt klasörleri içerir, `/` geçerli klasördeki dosyaları içerir ve `[]` boş bir klasörü temsil eder.
 
-XML :
+XML:
 * kök düğüm `<t r="...">` ;
 * klasörler `<d n="...">` ;
-* dosyalar `<f>File.cs</f>` .
+* dosyalar `<f>File.cs</f>`.
 
 Doktor:
-* `Root: ...` ile başlar;
+* `Root:...` ile başlar;
 * Markdown iç içe geçmiş bir liste kullanır;
 * klasörler `/` ile biter.
 
@@ -329,7 +329,7 @@ Her listede bir Tümü geçişi bulunur.
 {mod}P — paneli göster/gizle.
 
 ### 11.1 Yerel proje parametre profilleri
-DevProjex , yerel klasörler için en son uygulanan proje parametrelerini hatırlar:
+DevProjex, yerel klasörler için en son uygulanan proje parametrelerini hatırlar:
 * seçilen dosya türleri;
 * "Hariç Tutulanlar" bölümünde seçilen seçenekler.
 
@@ -356,7 +356,7 @@ Yoksayma kuralları birikimlidir. En az bir etkin kural bir öğeyi gizlerse ba�
 Proje içeriğine bağlı olarak aşağıdaki seçenekler gösterilebilir:
 
 * Smart Ignore
-* .gitignore'u kullanın
+*.gitignore'u kullanın
 * Yalnızca izlenen Git dosyaları
 * Boş klasörler
 * Boş dosyalar
@@ -380,20 +380,20 @@ DevProjex öncelikle proje türünü yapısından ve işaretleyici dosyalarında
 * `pyproject.toml`
 * `Cargo.toml`
 
-İlgili yığının kuralları daha sonra tespit edilen proje kapsamında uygulanır. Örneğin, .NET kuralları komşu Python veya JavaScript projesine genişletilmez.
+İlgili yığının kuralları daha sonra tespit edilen proje kapsamında uygulanır. Örneğin,.NET kuralları komşu Python veya JavaScript projesine genişletilmez.
 
-Tek başına bir klasör adı her zaman yeterli değildir. `build` , `vendor` , `packages` , `cache` , `pkg` ' veya `Library` gibi belirsiz adlar da içerikleriyle doğrulanır. Bu, sıradan bir kullanıcı klasörünün yalnızca benzer bir ada sahip olması nedeniyle gizlenmesini önler.
+Tek başına bir klasör adı her zaman yeterli değildir. `build`, `vendor`, `packages`, `cache`, `pkg` ' veya `Library` gibi belirsiz adlar da içerikleriyle doğrulanır. Bu, sıradan bir kullanıcı klasörünün yalnızca benzer bir ada sahip olması nedeniyle gizlenmesini önler.
 
 Bazı bağımlılık depoları ve hizmet dizinleri, açıkça tespit edilen bir projenin dışında bile karakteristik iç yapılarıyla tanınabilir.
 
-Proje kapsamı keşfi sınırlıdır, dolayısıyla büyük bir kullanıcı klasörünün yüklenmesi her dizinin tam olarak tekrarlanan bir analizi haline gelmez. Düzenli yapılar sığ keşif kullanır, tanınan monorepolar ise daha derinlemesine araştırılır. Bir kapsam bulunduktan sonra Smart Ignore , derinlik sınırı olmadan alt ağacın tamamına uygulanır.
+Proje kapsamı keşfi sınırlıdır, dolayısıyla büyük bir kullanıcı klasörünün yüklenmesi her dizinin tam olarak tekrarlanan bir analizi haline gelmez. Düzenli yapılar sığ keşif kullanır, tanınan monorepolar ise daha derinlemesine araştırılır. Bir kapsam bulunduktan sonra Smart Ignore, derinlik sınırı olmadan alt ağacın tamamına uygulanır.
 
 ### 12.3 Sırları Gizle
 "Sırları Gizle" varsayılan olarak kapalıdır. Yalnızca seçilen metin içeriğini tarar ve algılanan her değeri yerinde değiştirerek dosyayı ve çevresindeki kodu korur. Seçenek kapalıyken tarama yapılmaz ve sayım gösterilmez. Geçerli seçim tarandıktan sonra etiket, algılanan değerlerin sayısını gösterir; Olduğu gibi tutma kararları daha az değeri gizli bırakırsa, algılanan/gizlenen değerini gösterir ve satırın ? gösterge her iki sayıyı da rapor eder.
 
 Düzenlenen aralıklar Önizleme'de vurgulanır. Yalnızca o oluşumu olduğu gibi tutmak için birini tıklayın; {alt}↓ / {alt}↑ bulgular arasında geçiş yapar ve Enter etkin olana geçiş yapar. Terminal Çalışma Alanında, oluşumlar arasında geçiş yapmak için `[` ve `]` tuşunu, etkin olana geçiş yapmak için ise `Enter` veya `Space` tuşunu kullanın. Karar, geçerli oturumun Önizleme, pano, içerik dışa aktarma, klasör kopyalama ve ZIP için geçerlidir; proje profiline kaydedilmez.
 
-Önizleme içerik menüsü bu kararları genişletir. Kuralının tüm tekrarlarını veya tespit edilen tüm tekrarlarını tek bir eylemle aynı dosyada tutmak veya tekrar gizlemek için, tespit edilen bir vakayı sağ tıklayın. Dosya içeriğinde seçilen bir değeri manuel olarak işaretlemek için sağ tıklayın: "Burada ... gizle" yalnızca oturumdaki o oluşumu gizler, "Her zaman gizle..." değerin her geçtiği yerde kalıcı bir işaret oluşturur ve "... özel veri olarak gizle" Özel verileri gizle tarafından kontrol edilen kalıcı bir işaret oluşturur. Manuel işarette "İşareti kaldır" görünür ve onu siler; hala dedektör tarafından eşleşen bir değer gizli kalır. Manüel değer, dosya içeriğinde seçilen 8 ila 512 karakterden oluşan tek bir satır olmalıdır. Bir işaretin oluşturulması, ilgili seçeneğin otomatik olarak etkinleştirilmesini sağlar. Kalıcı işaretler yalnızca anahtarlı değer kimliğini ve sınıfını saklar, orijinal metni asla saklamaz.
+Önizleme içerik menüsü bu kararları genişletir. Kuralının tüm tekrarlarını veya tespit edilen tüm tekrarlarını tek bir eylemle aynı dosyada tutmak veya tekrar gizlemek için, tespit edilen bir vakayı sağ tıklayın. Dosya içeriğinde seçilen bir değeri manuel olarak işaretlemek için sağ tıklayın: "Burada... gizle" yalnızca oturumdaki o oluşumu gizler, "Her zaman gizle..." değerin her geçtiği yerde kalıcı bir işaret oluşturur ve "... özel veri olarak gizle" Özel verileri gizle tarafından kontrol edilen kalıcı bir işaret oluşturur. Manuel işarette "İşareti kaldır" görünür ve onu siler; hala dedektör tarafından eşleşen bir değer gizli kalır. Manüel değer, dosya içeriğinde seçilen 8 ila 512 karakterden oluşan tek bir satır olmalıdır. Bir işaretin oluşturulması, ilgili seçeneğin otomatik olarak etkinleştirilmesini sağlar. Kalıcı işaretler yalnızca anahtarlı değer kimliğini ve sınıfını saklar, orijinal metni asla saklamaz.
 
 Bir klasör veya ZIP kopyası da eşleşen metni değiştirir ve artık oluşturulmayabilir veya çalıştırılamayabilir. İkili dosyalar değiştirilmeden kopyalanır ve taranmaz. 16 MiB'in üzerinde seçilen bir metin dosyası veya bir algılama hatası, denetlenmemiş metni dışa aktarmak yerine işlemi durdurur.
 
@@ -404,7 +404,7 @@ Rapor sayımı kuralı yalnızca eşleşir. Sıfır, projenin güvenli olduğu a
 
 Belge aralıkları ve ana bilgisayarlar, ortak CI kullanıcı adları, iyi bilinen genel DNS çözümleyicileri ve belgelenmiş kurgusal telefon aralıkları görünür kalır. Sıfır eşleşme gizlilik garantisi değildir. CLI `--hide-private-data` yı kullanır; kuralların tamamı ve birinci aşama sınırları `Docs/HidePrivateData.md` dosyasındadır.
 
-### 12.5 .gitignore'u kullanın
+### 12.5.gitignore'u kullanın
 Etkinleştirildiğinde, DevProjex yalnızca açılan klasörün kökündeki dosyayı değil, erişilebilen her `.gitignore` dosyasını uygular.
 
 Her `.gitignore` geçerlidir:
@@ -423,7 +423,7 @@ Hatalı biçimlendirilmiş veya desteklenmeyen bir satır bağımsız olarak atl
 
 Bu seçenek yalnızca normal çalışma ağacı `.gitignore` dosyalarını kapsar. `.git/info/exclude` kuralları ve genel Git hariç tutma kuralları uygulanmaz; `core.ignoreCase` ve macOS `core.precomposeUnicode` gibi etkili depo yolu karşılaştırma ayarlarına uyulur. Git kontrol dosyası davranışıyla eşleşen `.gitignore` adlı sembolik bir bağlantı izlenmiyor. Normal bir `.gitignore` okunamıyorsa, dizin kapsamı başarısız şekilde kapatılır ve tarama, dosyaları tam kural değerlendirmesi olmadan sessizce dahil etmek yerine kısmi erişimi bildirir. Yolun sahip olduğu veri havuzu kapsamı için okunabilir bir dizin mevcut olduğunda, izlenen dosyalar `.gitignore` ile eşleşseler bile görünür kalır; bu dizin veya Git CLI olmadan, bu kapsam güvenli bir şekilde yalnızca kalıp değerlendirmesine geri döner.
 
-Yerleşik `standard` profil, `gitignore` artı `smart-ignore` , `hidden-folders` , `hidden-files` , `dot-folders` ', `dot-files` , `empty-folders` ', `empty-files` ' ve `extensionless-files` seçer.
+Yerleşik `standard` profil, `gitignore` artı `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders` ', `dot-files`, `empty-folders` ', `empty-files` ' ve `extensionless-files` seçer.
 
 ### 12.6 Yalnızca izlenen Git dosyaları
 "Yalnızca İzlenen Git dosyaları", her okunabilir Git dizininde kayıtlı mevcut çalışma ağacı dosyalarından ağacın Git aşamasını oluşturur. Değiştirilen izlenen dosyalar ve aşamalı eklemeler dahil olmaya devam eder; izlenmeyen dosyalar hariç tutulur. Bu, `HEAD` veya uzak bir havuzun geçmiş anlık görüntüsü değil, mevcut çalışma ağacıdır.
@@ -448,7 +448,7 @@ Smart Ignore seçilen Git modu zaten tüm adayları kapsıyorken gizli kalabilir
 
 "Boş dosyalar", boyutu 0 bayt olan dosyaları gizler.
 
-"Uzantısı olmayan dosyalar" `Dockerfile` , `Makefile` ve `README` gibi dosyaları gizler.
+"Uzantısı olmayan dosyalar" `Dockerfile`, `Makefile` ve `README` gibi dosyaları gizler.
 
 "Boş klasörler" mantıksal olarak boş klasörleri gizler. Seçilen dosya türleri ve diğer tüm kurallar uygulandıktan sonra görünür bir dosya veya alt klasör kalmadığında, klasör mantıksal olarak boştur.
 
@@ -461,15 +461,15 @@ Bir öğe aynı anda birden fazla örtüşen sayaçla ilişkilendirilmez. Örne�
 
 Bir hariç tutmanın sahibini seçmek için sabit bir sıra kullanılır:
 
-* klasörler: `.gitignore` , Smart Ignore , nokta önekli ad, sistem Gizli özelliği;
-* dosyalar: `.gitignore` , Smart Ignore , nokta önekli ad, uzantı yok, boş dosya, sistem Gizli özelliği.
+* klasörler: `.gitignore`, Smart Ignore, nokta önekli ad, sistem Gizli özelliği;
+* dosyalar: `.gitignore`, Smart Ignore, nokta önekli ad, uzantı yok, boş dosya, sistem Gizli özelliği.
 
 Bu sıralama yalnızca sayaçları etkiler. Nihai görünürlük daha basit bir kurala tabidir: Etkinleştirilmiş herhangi bir mekanizma onu dışlıyorsa bir öğe gizlenir.
 
 ### 12.10 Değişikliklerin uygulanması
 Onay kutularının değiştirilmesi öncelikle paneldeki mevcut ayarları ve sayaçları günceller. "Ayarları uygula" seçildikten sonra son ağaç yeniden oluşturulur.
 
-Ayarların hazırlanması iptal edilirse DevProjex , paneli tamamen tamamlanmış son durumuna döndürür. Kısmen hesaplanan kurallar uygulanmaz.
+Ayarların hazırlanması iptal edilirse DevProjex, paneli tamamen tamamlanmış son durumuna döndürür. Kısmen hesaplanan kurallar uygulanmaz.
 
 ## 13) Ağaç ve metrikler nasıl hesaplanır?
 Sonuç şunlara bağlıdır:
@@ -504,7 +504,7 @@ Ağaç ölçümleri:
 İçerik ölçümleri:
 * içerik kopyalama/dışa aktarma ile aynı kurallara uyun;
 * ikili dosyalar hariçtir;
-* boş ve yalnızca boşluk içeren dosyalar, hizmet işaretçileri aracılığıyla sayılır ( `[No Content, 0 bytes]` , `[Whitespace, N bytes]` ).
+* boş ve yalnızca boşluk içeren dosyalar, hizmet işaretçileri aracılığıyla sayılır ( `[No Content, 0 bytes]`, `[Whitespace, N bytes]` ).
 
 ### 13.3 Sayaçlar güncellendiğinde
 Yeniden hesaplama çalışır:
@@ -544,7 +544,7 @@ Mica, platformun sistem malzemesini kullanır ve ayrı bir arka plan şeffaflı�
 ## 16) Yardım
 
 ### 16.1 Güncellemeler
-“Yardım → Güncellemeler” mevcut sürümü en son kararlı GitHub sürümüyle karşılaştırır. Otomatik denetimler varsayılan olarak kapalıdır; Etkinleştirildiğinde DevProjex , önceki başarılı kontrolün üzerinden en az yedi gün geçtikten sonra başlangıçta kontrol yapar. Onay kutusu hemen etkili olur. En son başarılı sonuç, uygulama çalıştırmaları arasında korunur ve daha sonraki bir ağ arızası nedeniyle silinmez. Kurulum bir kullanıcı eylemi olarak kalır.
+“Yardım → Güncellemeler” mevcut sürümü en son kararlı GitHub sürümüyle karşılaştırır. Otomatik denetimler varsayılan olarak kapalıdır; Etkinleştirildiğinde DevProjex, önceki başarılı kontrolün üzerinden en az yedi gün geçtikten sonra başlangıçta kontrol yapar. Onay kutusu hemen etkili olur. En son başarılı sonuç, uygulama çalıştırmaları arasında korunur ve daha sonraki bir ağ arızası nedeniyle silinmez. Kurulum bir kullanıcı eylemi olarak kalır.
 
 ### 16.2 Ayarları sıfırla
 Ayarları sıfırla (Yardım → Ayarları sıfırla) varsayılan temayı, efektleri, Kompakt modu, Ağaç genişletme animasyonunu ve arayüz dilini geri yükler. Proje profilleri, geçmiş ve diskteki dosyalar değiştirilmez.
