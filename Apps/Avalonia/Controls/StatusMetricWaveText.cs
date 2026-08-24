@@ -9,9 +9,9 @@ public enum StatusMetricWaveDirection
 public sealed class StatusMetricWaveText : Control
 {
     private static readonly TimeSpan CharacterRiseDuration =
-        UiTimingProfile.Scale(TimeSpan.FromMilliseconds(260));
+        UiTimingProfile.Scale(TimeSpan.FromMilliseconds(300));
     private static readonly TimeSpan MaximumWaveTravelDuration =
-        UiTimingProfile.Scale(TimeSpan.FromMilliseconds(520));
+        UiTimingProfile.Scale(TimeSpan.FromMilliseconds(500));
     private static readonly TimeSpan FrameInterval = TimeSpan.FromMilliseconds(16);
 
     private readonly List<WaveGlyph> _glyphs = [];
@@ -64,7 +64,7 @@ public sealed class StatusMetricWaveText : Control
 
     public StatusMetricWaveText()
     {
-        ClipToBounds = true;
+        ClipToBounds = false;
         IsHitTestVisible = false;
         UseLayoutRounding = true;
         TextOptions.SetTextHintingMode(this, TextHintingMode.Strong);
@@ -169,7 +169,9 @@ public sealed class StatusMetricWaveText : Control
             if (progress <= 0)
                 continue;
 
-            var (offsetY, revealOpacity) = ResolveCharacterPresentation(progress);
+            var (offsetY, revealOpacity) = ResolveCharacterPresentation(
+                progress,
+                _contentHeight);
             using (context.PushOpacity(glyph.BaseOpacity * revealOpacity))
             {
                 context.DrawText(glyph.Text, new Point(glyph.X, top + offsetY));
@@ -235,22 +237,25 @@ public sealed class StatusMetricWaveText : Control
             1);
     }
 
-    private static (double OffsetY, double Opacity) ResolveCharacterPresentation(double progress)
+    private static (double OffsetY, double Opacity) ResolveCharacterPresentation(
+        double progress,
+        double characterHeight)
     {
-        const double overshootCue = 0.78;
+        const double overshootCue = 0.82;
+        var startingOffset = Math.Max(15, characterHeight + 4);
         double offsetY;
         if (progress < overshootCue)
         {
             var rise = CubicEaseOut(progress / overshootCue);
-            offsetY = Lerp(7, -0.65, rise);
+            offsetY = Lerp(startingOffset, -0.45, rise);
         }
         else
         {
             var settle = CubicEaseInOut((progress - overshootCue) / (1 - overshootCue));
-            offsetY = Lerp(-0.65, 0, settle);
+            offsetY = Lerp(-0.45, 0, settle);
         }
 
-        var opacity = CubicEaseOut(Math.Clamp(progress / 0.68, 0, 1));
+        var opacity = CubicEaseOut(Math.Clamp(progress / 0.34, 0, 1));
         return (offsetY, opacity);
     }
 
