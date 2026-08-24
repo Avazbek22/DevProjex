@@ -6,9 +6,20 @@ public static class ProjectContentMetricsCalculator
 	private const int MaximumConcurrentReads = 4;
 	private const int BatchSize = 1024;
 
+	public static Task<ExportOutputMetrics> CalculateAsync(
+		IFileContentAnalyzer analyzer,
+		IReadOnlyList<string>? orderedFilePaths,
+		CancellationToken cancellationToken = default)
+		=> CalculateAsync(
+			analyzer,
+			orderedFilePaths,
+			progress: null,
+			cancellationToken);
+
 	public static async Task<ExportOutputMetrics> CalculateAsync(
 		IFileContentAnalyzer analyzer,
 		IReadOnlyList<string>? orderedFilePaths,
+		IProgress<ProjectCopyExportProgress>? progress,
 		CancellationToken cancellationToken = default)
 	{
 		ArgumentNullException.ThrowIfNull(analyzer);
@@ -24,6 +35,7 @@ public static class ProjectContentMetricsCalculator
 		};
 		var accumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
 		var batchMetrics = new FileContentMetricsResult?[Math.Min(BatchSize, orderedFilePaths.Count)];
+		var processedFiles = 0;
 		for (var batchStart = 0; batchStart < orderedFilePaths.Count; batchStart += batchMetrics.Length)
 		{
 			var batchCount = Math.Min(batchMetrics.Length, orderedFilePaths.Count - batchStart);
@@ -36,6 +48,13 @@ public static class ProjectContentMetricsCalculator
 					batchMetrics[batchIndex] = await analyzer
 						.GetClassifiedMetricsAsync(orderedFilePaths[batchStart + batchIndex], token)
 						.ConfigureAwait(false);
+					var processed = Interlocked.Increment(ref processedFiles);
+					var percentage = processed * 100d / orderedFilePaths.Count;
+					progress?.Report(new ProjectCopyExportProgress(
+						processed,
+						orderedFilePaths.Count,
+						BytesWritten: 0,
+						Percentage: percentage));
 				}).ConfigureAwait(false);
 
 			for (var batchIndex = 0; batchIndex < batchCount; batchIndex++)

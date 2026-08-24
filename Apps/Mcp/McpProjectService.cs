@@ -115,12 +115,24 @@ internal sealed class McpProjectService(McpRootRegistry roots, McpServices servi
 				SecretRedactionFeatures.Secrets | SecretRedactionFeatures.PrivateData))!;
 	}
 
-	public async Task<PreparedSecretRedactionOutput> PrepareAsync(
+	public Task<PreparedSecretRedactionOutput> PrepareAsync(
 		ProjectContextPlan plan,
 		McpDetailLevel detail,
 		CancellationToken cancellationToken) =>
+		PrepareAsync(plan, detail, progress: null, cancellationToken);
+
+	public async Task<PreparedSecretRedactionOutput> PrepareAsync(
+		ProjectContextPlan plan,
+		McpDetailLevel detail,
+		IProgress<ProjectCopyExportProgress>? progress,
+		CancellationToken cancellationToken) =>
 		await services.OutputPreparer
-			.PrepareAsync(CreateTransformationContext(plan, detail), plan.IncludedFiles, cancellationToken)
+			.PrepareAsync(
+				CreateTransformationContext(plan, detail),
+				plan.IncludedFiles,
+				captureEffectiveFindings: false,
+				cancellationToken,
+				progress)
 			.ConfigureAwait(false);
 
 	public Task<PreparedSecretRedactionOutput> PrepareAsync(

@@ -48,17 +48,34 @@ public sealed class SecretRedactionOutputPreparer
 			captureEffectiveFindings: false,
 			cancellationToken);
 
+	public Task<PreparedSecretRedactionOutput> PrepareAsync(
+		ContentTransformationContext context,
+		IReadOnlyList<string> orderedFilePaths,
+		IProgress<ProjectCopyExportProgress> progress,
+		CancellationToken cancellationToken = default) =>
+		PrepareAsync(
+			context,
+			orderedFilePaths,
+			captureEffectiveFindings: false,
+			cancellationToken,
+			progress);
+
 	public async Task<PreparedSecretRedactionOutput> PrepareAsync(
 		ContentTransformationContext context,
 		IReadOnlyList<string> orderedFilePaths,
 		bool captureEffectiveFindings,
-		CancellationToken cancellationToken = default)
+		CancellationToken cancellationToken = default,
+		IProgress<ProjectCopyExportProgress>? progress = null)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(orderedFilePaths);
 		if (context is { Compression: not null, Redaction: null })
 		{
-			return await PrepareCompressionOnlyAsync(context, orderedFilePaths, cancellationToken)
+			return await PrepareCompressionOnlyAsync(
+					context,
+					orderedFilePaths,
+					progress,
+					cancellationToken)
 				.ConfigureAwait(false);
 		}
 
@@ -88,6 +105,9 @@ public sealed class SecretRedactionOutputPreparer
 				}
 			}
 		}
+		var processedFiles = preparedFiles.Count;
+		if (processedFiles > 0)
+			ReportProgress(progress, processedFiles, orderedFilePaths.Count);
 		try
 		{
 			await foreach (var prepared in PrepareOrderedTransformationEntriesAsync(
@@ -98,98 +118,112 @@ public sealed class SecretRedactionOutputPreparer
 			                   requiredInspectionScope).ConfigureAwait(false))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				var sourcePath = prepared.SourcePath;
-				var result = prepared.ReadResult;
-				var metadataAfterRead = prepared.Metadata;
-
-				switch (result.Classification)
+				var completed = false;
+				try
 				{
-					case FileContentClassification.Binary:
-						scope?.AnalyzeBinary(sourcePath, metadataAfterRead);
-						preparedFiles[sourcePath] = PreparedSecretFile.Binary(sourcePath);
-						continue;
-					case FileContentClassification.TooLarge:
-					case FileContentClassification.UnsupportedEncoding:
-						// A per-file inspection limitation degrades that file, not the whole run.
-						// Redaction cannot promise anything about text it never decoded or fully read,
-						// so every output withholds the content and reports the exact reason.
-						if (scope is not null &&
-						    scope.GetContentInspectionMode(sourcePath) != SecretContentInspectionMode.None)
-						{
-							scope.AnalyzeUnscannable(sourcePath, metadataAfterRead, result.Classification);
-							preparedFiles[sourcePath] = PreparedSecretFile.Unscannable(
-								sourcePath,
-								result.Classification);
-							unscannableFiles.Add(new UnscannableFile(sourcePath, result.Classification));
+					var sourcePath = prepared.SourcePath;
+					var result = prepared.ReadResult;
+					var metadataAfterRead = prepared.Metadata;
+
+					switch (result.Classification)
+					{
+						case FileContentClassification.Binary:
+							scope?.AnalyzeBinary(sourcePath, metadataAfterRead);
+							preparedFiles[sourcePath] = PreparedSecretFile.Binary(sourcePath);
+							completed = true;
 							continue;
-						}
+						case FileContentClassification.TooLarge:
+						case FileContentClassification.UnsupportedEncoding:
+							// A per-file inspection limitation degrades that file, not the whole run.
+							// Redaction cannot promise anything about text it never decoded or fully read,
+							// so every output withholds the content and reports the exact reason.
+							if (scope is not null &&
+							    scope.GetContentInspectionMode(sourcePath) != SecretContentInspectionMode.None)
+							{
+								scope.AnalyzeUnscannable(sourcePath, metadataAfterRead, result.Classification);
+								preparedFiles[sourcePath] = PreparedSecretFile.Unscannable(
+									sourcePath,
+									result.Classification);
+								unscannableFiles.Add(new UnscannableFile(sourcePath, result.Classification));
+								completed = true;
+								continue;
+							}
 
-						// Compression has no redaction promise to break, and detector policy may
-						// exclude this path before content inspection. In both cases the original
-						// remains the authoritative unchanged output.
-						preparedFiles[sourcePath] = PreparedSecretFile.Unchanged(sourcePath);
-						continue;
-					case FileContentClassification.Text:
-						break;
-					default:
-						throw new SecretDetectionException(
-							$"Hide Secrets could not inspect '{sourcePath}' ({result.Classification}).");
-				}
+							// Compression has no redaction promise to break, and detector policy may
+							// exclude this path before content inspection. In both cases the original
+							// remains the authoritative unchanged output.
+							preparedFiles[sourcePath] = PreparedSecretFile.Unchanged(sourcePath);
+							completed = true;
+							continue;
+						case FileContentClassification.Text:
+							break;
+						default:
+							throw new SecretDetectionException(
+								$"Hide Secrets could not inspect '{sourcePath}' ({result.Classification}).");
+					}
 
-				var content = result.Content ??
-				              throw new SecretDetectionException(
-					              $"Hide Secrets received no text for '{sourcePath}'.");
-				// Compression first: the redaction plan, its spans and its counts all describe the
-				// text that actually leaves, not the text on disk.
-				var compressed = prepared.Compression;
-				var transformedText = compressed.Text;
-				var plan = scope?.CreatePlan(
-					sourcePath,
-					transformedText,
-					compressed.Map,
-					prepared.Metadata,
-					compressed.Map.IsIdentity
-						? prepared.SourceFingerprint
-						: null,
-					cancellationToken);
-				var redactions = plan?.Spans
-					.Where(static span => span.State == SecretPreviewSpanState.Redacted)
-					.Select(static span => new PreparedSecretSpan(span.Start, span.Length))
-					.ToArray() ?? [];
-				IReadOnlyList<EffectiveRedactionFinding> findings = plan is null || !captureEffectiveFindings
-					? []
-					: BuildEffectiveFindings(plan.Spans, content.Content, compressed.Map);
-				if (ReferenceEquals(transformedText, content.Content) && redactions.Length == 0)
-				{
-					preparedFiles[sourcePath] = findings.Count == 0
-						? PreparedSecretFile.Unchanged(sourcePath)
-						: new PreparedSecretFile(
-							sourcePath,
-							sourcePath,
-							FileContentClassification.Text,
-							result.Encoding,
-							[],
-							findings);
-					continue;
-				}
-
-				var encoding = result.Encoding ?? TextFileEncoding.Utf8;
-				workingDirectory ??= CreateWorkingDirectory();
-				var preparedPath = Path.Combine(workingDirectory.Path, $"{prepared.Index:D8}.redacted.txt");
-				await WritePreparedTextAsync(
-						preparedPath,
+					var content = result.Content ??
+					              throw new SecretDetectionException(
+						              $"Hide Secrets received no text for '{sourcePath}'.");
+					// Compression first: the redaction plan, its spans and its counts all describe the
+					// text that actually leaves, not the text on disk.
+					var compressed = prepared.Compression;
+					var transformedText = compressed.Text;
+					var plan = scope?.CreatePlan(
+						sourcePath,
 						transformedText,
-						plan,
-						ResolveEncoding(encoding),
-						cancellationToken)
-					.ConfigureAwait(false);
-				preparedFiles[sourcePath] = new PreparedSecretFile(
-					sourcePath,
-					preparedPath,
-					FileContentClassification.Text,
-					encoding,
-					redactions,
-					findings);
+						compressed.Map,
+						prepared.Metadata,
+						compressed.Map.IsIdentity
+							? prepared.SourceFingerprint
+							: null,
+						cancellationToken);
+					var redactions = plan?.Spans
+						.Where(static span => span.State == SecretPreviewSpanState.Redacted)
+						.Select(static span => new PreparedSecretSpan(span.Start, span.Length))
+						.ToArray() ?? [];
+					IReadOnlyList<EffectiveRedactionFinding> findings = plan is null || !captureEffectiveFindings
+						? []
+						: BuildEffectiveFindings(plan.Spans, content.Content, compressed.Map);
+					if (ReferenceEquals(transformedText, content.Content) && redactions.Length == 0)
+					{
+						preparedFiles[sourcePath] = findings.Count == 0
+							? PreparedSecretFile.Unchanged(sourcePath)
+							: new PreparedSecretFile(
+								sourcePath,
+								sourcePath,
+								FileContentClassification.Text,
+								result.Encoding,
+								[],
+								findings);
+						completed = true;
+						continue;
+					}
+
+					var encoding = result.Encoding ?? TextFileEncoding.Utf8;
+					workingDirectory ??= CreateWorkingDirectory();
+					var preparedPath = Path.Combine(workingDirectory.Path, $"{prepared.Index:D8}.redacted.txt");
+					await WritePreparedTextAsync(
+							preparedPath,
+							transformedText,
+							plan,
+							ResolveEncoding(encoding),
+							cancellationToken)
+						.ConfigureAwait(false);
+					preparedFiles[sourcePath] = new PreparedSecretFile(
+						sourcePath,
+						preparedPath,
+						FileContentClassification.Text,
+						encoding,
+						redactions,
+						findings);
+					completed = true;
+				}
+				finally
+				{
+					if (completed)
+						ReportProgress(progress, ++processedFiles, orderedFilePaths.Count);
+				}
 			}
 
 			var snapshot = scope?.Complete(
@@ -480,6 +514,7 @@ public sealed class SecretRedactionOutputPreparer
 	private async Task<PreparedSecretRedactionOutput> PrepareCompressionOnlyAsync(
 		ContentTransformationContext context,
 		IReadOnlyList<string> orderedFilePaths,
+		IProgress<ProjectCopyExportProgress>? progress,
 		CancellationToken cancellationToken)
 	{
 		var workingDirectory = new Lazy<SecretRedactionTempDirectory>(
@@ -498,6 +533,7 @@ public sealed class SecretRedactionOutputPreparer
 		}
 
 		using var transformationScope = context.BeginOutput(orderedFilePaths);
+		var processedFiles = 0;
 		try
 		{
 			if (parallelWork.Count > 0)
@@ -519,6 +555,10 @@ public sealed class SecretRedactionOutputPreparer
 							workingDirectory,
 							workItem,
 							token).ConfigureAwait(false);
+						ReportProgress(
+							progress,
+							Interlocked.Increment(ref processedFiles),
+							orderedFilePaths.Count);
 					}).ConfigureAwait(false);
 			}
 
@@ -530,6 +570,10 @@ public sealed class SecretRedactionOutputPreparer
 					workingDirectory,
 					workItem,
 					cancellationToken).ConfigureAwait(false);
+				ReportProgress(
+					progress,
+					Interlocked.Increment(ref processedFiles),
+					orderedFilePaths.Count);
 			}
 
 			var preparedFiles = new Dictionary<string, PreparedSecretFile>(
@@ -556,6 +600,23 @@ public sealed class SecretRedactionOutputPreparer
 				workingDirectory.Value.Dispose();
 			throw;
 		}
+	}
+
+	private static void ReportProgress(
+		IProgress<ProjectCopyExportProgress>? progress,
+		int processedFiles,
+		int totalFiles)
+	{
+		if (progress is null)
+			return;
+		var percentage = totalFiles == 0
+			? 100d
+			: Math.Clamp(processedFiles * 100d / totalFiles, 0d, 100d);
+		progress.Report(new ProjectCopyExportProgress(
+			processedFiles,
+			totalFiles,
+			BytesWritten: 0,
+			Percentage: percentage));
 	}
 
 	private async Task<PreparedSecretFile> PrepareCompressedFileAsync(
