@@ -157,8 +157,6 @@ public sealed class StatusMetricWaveTextTests
             Assert.False(control.IsAnimationActive);
 
             control.IsVisible = true;
-            await FlushUiAsync();
-
             Assert.True(control.IsAnimationActive);
             Assert.False(control.IsInitialRevealActive);
         }

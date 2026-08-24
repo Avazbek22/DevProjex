@@ -4584,7 +4584,8 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				window,
 				() => viewModel.SettingsCompressionNotice.StartsWith(
 					"Compressed ",
-					StringComparison.Ordinal),
+					StringComparison.Ordinal) &&
+				      !viewModel.StatusBusy,
 				"the real compression prewarm to finish before injecting status states");
 			viewModel.SetCompressionPreparationStatus(isActive: true);
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
@@ -4891,7 +4892,8 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				() => string.Equals(
 					viewModel.SettingsSecretsNotice,
 					"Found: 1. Hidden: 1.",
-					StringComparison.Ordinal),
+					StringComparison.Ordinal) &&
+				      !viewModel.StatusBusy,
 				"the opt-in secret discovery to complete");
 			analyzer.Reset();
 
