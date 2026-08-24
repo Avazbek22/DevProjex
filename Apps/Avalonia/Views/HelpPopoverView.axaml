@@ -12,12 +12,161 @@
           MaxHeight="{Binding HelpPopoverMaxHeight}">
     <Grid RowDefinitions="Auto,*,Auto">
       <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,10">
-        <TextBlock Text="{Binding HelpHelpTitle}" FontSize="17" FontWeight="SemiBold" />
-        <Button Grid.Column="1"
-                Content="✕"
+        <TextBlock Text="{Binding HelpHelpTitle}"
+                   FontSize="17"
+                   FontWeight="SemiBold"
+                   VerticalAlignment="Center" />
+        <StackPanel Grid.Column="1"
+                    Orientation="Horizontal">
+          <Border Name="HelpSearchPanel"
+                  Width="0"
+                  Opacity="0"
+                  Margin="0"
+                  ClipToBounds="True"
+                  IsHitTestVisible="False"
+                  VerticalAlignment="Center">
+            <Grid Name="HelpSearchContent"
+                  Width="390"
+                  ColumnDefinitions="*,Auto,Auto,Auto,Auto"
+                  ColumnSpacing="4"
+                  HorizontalAlignment="Right"
+                  UseLayoutRounding="True"
+                  RenderTransformOrigin="100%,50%">
+              <Grid.RenderTransform>
+                <TranslateTransform X="16" />
+              </Grid.RenderTransform>
+              <TextBox Name="HelpSearchBox"
+                       Grid.Column="0"
+                       Height="32"
+                       MinWidth="150"
+                       PlaceholderText="{Binding MenuSearch}"
+                       FocusAdorner="{x:Null}"
+                       TextChanged="OnSearchTextChanged"
+                       KeyDown="OnSearchBoxKeyDown" />
+              <TextBlock Name="HelpSearchMatchSummary"
+                         Grid.Column="1"
+                         Width="58"
+                         IsVisible="False"
+                         FontSize="14"
+                         Opacity="0.92"
+                         VerticalAlignment="Center"
+                         HorizontalAlignment="Right"
+                         TextAlignment="Right" />
+              <Button Name="HelpSearchPreviousButton"
+                      Grid.Column="2"
+                      Width="30"
+                      Height="30"
+                      MinWidth="0"
+                      Padding="0"
+                      HorizontalContentAlignment="Center"
+                      VerticalContentAlignment="Center"
+                      ToolTip.Tip="{Binding SearchPreviousTooltip}"
+                      Click="OnSearchPrevious">
+                <Viewbox Width="14"
+                         Height="14"
+                         Stretch="Uniform">
+                  <Canvas Width="16" Height="16">
+                    <Path Data="M 3.5,10.5 L 8,6 L 12.5,10.5"
+                          Stroke="{DynamicResource AppTextBrush}"
+                          StrokeThickness="1.8"
+                          StrokeLineCap="Round"
+                          StrokeJoin="Round" />
+                  </Canvas>
+                </Viewbox>
+              </Button>
+              <Button Name="HelpSearchNextButton"
+                      Grid.Column="3"
+                      Width="30"
+                      Height="30"
+                      MinWidth="0"
+                      Padding="0"
+                      HorizontalContentAlignment="Center"
+                      VerticalContentAlignment="Center"
+                      ToolTip.Tip="{Binding SearchNextTooltip}"
+                      Click="OnSearchNext">
+                <Viewbox Width="14"
+                         Height="14"
+                         Stretch="Uniform">
+                  <Canvas Width="16" Height="16">
+                    <Path Data="M 3.5,5.5 L 8,10 L 12.5,5.5"
+                          Stroke="{DynamicResource AppTextBrush}"
+                          StrokeThickness="1.8"
+                          StrokeLineCap="Round"
+                          StrokeJoin="Round" />
+                  </Canvas>
+                </Viewbox>
+              </Button>
+              <Button Name="HelpSearchCloseButton"
+                      Grid.Column="4"
+                      Width="30"
+                      Height="30"
+                      MinWidth="0"
+                      Padding="0"
+                      HorizontalContentAlignment="Center"
+                      VerticalContentAlignment="Center"
+                      ToolTip.Tip="{Binding HelpHelpCloseSearch}"
+                      Click="OnSearchClose">
+                <Viewbox Width="14"
+                         Height="14"
+                         Stretch="Uniform">
+                  <Canvas Width="16" Height="16">
+                    <Path Data="M 5.5,3.5 L 10,8 L 5.5,12.5"
+                          Stroke="{DynamicResource AppTextBrush}"
+                          StrokeThickness="1.8"
+                          StrokeLineCap="Round"
+                          StrokeJoin="Round" />
+                  </Canvas>
+                </Viewbox>
+              </Button>
+            </Grid>
+          </Border>
+          <Button Name="HelpSearchButton"
+                  Width="32"
+                  Height="32"
+                  MinWidth="0"
+                  Margin="0,0,4,0"
+                  Classes="menu-icon-button"
+                  HorizontalContentAlignment="Center"
+                  VerticalContentAlignment="Center"
+                  ToolTip.Tip="{Binding MenuSearch}"
+                  Click="OnSearchOpen">
+            <Viewbox Width="16"
+                     Height="16"
+                     Stretch="Uniform">
+              <Canvas Width="18" Height="18">
+                <Ellipse Canvas.Left="2.25"
+                         Canvas.Top="2.25"
+                         Width="10"
+                         Height="10"
+                         Stroke="{DynamicResource AppTextBrush}"
+                         StrokeThickness="1.75" />
+                <Path Data="M 10.5,10.5 L 15.75,15.75"
+                      Stroke="{DynamicResource AppTextBrush}"
+                      StrokeThickness="1.75"
+                      StrokeLineCap="Round" />
+              </Canvas>
+            </Viewbox>
+          </Button>
+          <Button Name="HelpCloseButton"
                 Classes="menu-icon-button"
+                Width="32"
+                Height="32"
                 Padding="4"
-                Click="OnClose" />
+                HorizontalContentAlignment="Center"
+                VerticalContentAlignment="Center"
+                Click="OnClose">
+            <Viewbox Width="14"
+                     Height="14"
+                     Stretch="Uniform">
+              <Canvas Width="16" Height="16">
+                <Path Data="M 3.5,3.5 L 12.5,12.5 M 12.5,3.5 L 3.5,12.5"
+                      Stroke="{DynamicResource AppTextBrush}"
+                      StrokeThickness="1.7"
+                      StrokeLineCap="Round" />
+              </Canvas>
+            </Viewbox>
+          </Button>
+        </StackPanel>
       </Grid>
 
       <ScrollViewer Grid.Row="1"

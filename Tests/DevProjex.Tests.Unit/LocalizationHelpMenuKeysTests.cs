@@ -10,6 +10,7 @@ public sealed class LocalizationHelpMenuKeysTests
 		"Menu.Help.About",
 		"Menu.Help.ResetSettings",
 		"Menu.Help.ResetData",
+		"Help.Help.CloseSearch",
 		"Update.Title",
 		"Update.Prompt",
 		"Update.AutomaticWeekly",

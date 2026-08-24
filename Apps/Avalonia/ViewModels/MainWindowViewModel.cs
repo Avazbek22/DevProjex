@@ -1683,6 +1683,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string HelpHelpTitle { get; private set; } = string.Empty;
     public string HelpHelpBody { get; private set; } = string.Empty;
     public string HelpHelpCopyAll { get; private set; } = string.Empty;
+    public string HelpHelpCloseSearch { get; private set; } = string.Empty;
     public string HelpAboutTitle { get; private set; } = string.Empty;
     public string HelpAboutBody { get; private set; } = string.Empty;
     public string HelpAboutSupport { get; private set; } = string.Empty;
@@ -1874,6 +1875,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         HelpHelpTitle = _localization["Help.Help.Title"];
         HelpHelpBody = _helpContentProvider.GetHelpBody(_localization.CurrentLanguage);
         HelpHelpCopyAll = _localization["Help.Help.CopyAll"];
+        HelpHelpCloseSearch = _localization["Help.Help.CloseSearch"];
         HelpAboutTitle = _localization["Help.About.Title"];
         HelpAboutBody = _localization.Format("Help.About.Body", DateTime.Now.Year);
         HelpAboutSupport = _localization["Help.About.Support"];
@@ -2048,6 +2050,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(HelpHelpTitle));
         RaisePropertyChanged(nameof(HelpHelpBody));
         RaisePropertyChanged(nameof(HelpHelpCopyAll));
+        RaisePropertyChanged(nameof(HelpHelpCloseSearch));
         RaisePropertyChanged(nameof(HelpAboutTitle));
         RaisePropertyChanged(nameof(HelpAboutBody));
         RaisePropertyChanged(nameof(HelpAboutSupport));
