@@ -119,9 +119,19 @@ public sealed class LocalizationLanguageCoverageIntegrationTests
                 "LanguageItMenuItem",
                 "LanguageTgMenuItem",
                 "LanguageUzMenuItem",
-                "LanguageKkMenuItem"
+                "LanguageKkMenuItem",
+                "LanguageZhCnMenuItem",
+                "LanguageZhTwMenuItem",
+                "LanguageJaMenuItem",
+                "LanguageKoMenuItem",
+                "LanguageTrMenuItem",
+                "LanguageUkMenuItem",
+                "LanguagePlMenuItem",
+                "LanguageViMenuItem",
+                "LanguageIdMenuItem"
             ],
             languageItems.Select(static item => item.Name));
+        Assert.Equal(20, languageItems.Length);
         Assert.Equal("Español", languageItems[2].Header);
         Assert.Equal("Português (Brasil)", languageItems[3].Header);
         Assert.Equal("Português (Portugal)", languageItems[4].Header);

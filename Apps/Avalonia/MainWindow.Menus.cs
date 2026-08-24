@@ -317,6 +317,9 @@ public partial class MainWindow
 
     private void RefreshLanguageMenuChecks()
     {
+        if (_topMenuBar?.LanguageMenuItemControl is { } languageMenuItem)
+            MenuScrollBehavior.SetScrollable(languageMenuItem, languageMenuItem.Items.Count);
+
         foreach (var (item, language, label) in EnumerateLanguageMenuItems())
         {
             if (item is null)
@@ -343,6 +346,15 @@ public partial class MainWindow
         yield return (topMenuBar.LanguageTgMenuItemControl, AppLanguage.Tg, "Тоҷикӣ");
         yield return (topMenuBar.LanguageUzMenuItemControl, AppLanguage.Uz, "Oʻzbek");
         yield return (topMenuBar.LanguageKkMenuItemControl, AppLanguage.Kk, "Қазақ");
+        yield return (topMenuBar.LanguageZhCnMenuItemControl, AppLanguage.ZhCn, "中文（简体）");
+        yield return (topMenuBar.LanguageZhTwMenuItemControl, AppLanguage.ZhTw, "中文（繁體）");
+        yield return (topMenuBar.LanguageJaMenuItemControl, AppLanguage.Ja, "日本語");
+        yield return (topMenuBar.LanguageKoMenuItemControl, AppLanguage.Ko, "한국어");
+        yield return (topMenuBar.LanguageTrMenuItemControl, AppLanguage.Tr, "Türkçe");
+        yield return (topMenuBar.LanguageUkMenuItemControl, AppLanguage.Uk, "Українська");
+        yield return (topMenuBar.LanguagePlMenuItemControl, AppLanguage.Pl, "Polski");
+        yield return (topMenuBar.LanguageViMenuItemControl, AppLanguage.Vi, "Tiếng Việt");
+        yield return (topMenuBar.LanguageIdMenuItemControl, AppLanguage.Id, "Bahasa Indonesia");
     }
 
     private static string CreateCheckedMenuHeader(bool isChecked, string label)

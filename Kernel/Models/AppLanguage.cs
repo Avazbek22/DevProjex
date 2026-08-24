@@ -12,5 +12,14 @@ public enum AppLanguage
 	It,
 	Es,
 	Pt,
-	PtPt
+	PtPt,
+	ZhCn,
+	ZhTw,
+	Ja,
+	Ko,
+	Tr,
+	Uk,
+	Pl,
+	Vi,
+	Id
 }

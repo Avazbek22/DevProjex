@@ -89,6 +89,9 @@ public sealed class MainWindowHelpSearchUiTests
             var nextButton = GetRequiredControl<Button>(help, "HelpSearchNextButton");
             var matchSummary = GetRequiredControl<TextBlock>(help, "HelpSearchMatchSummary");
             var markerBar = GetRequiredControl<PreviewMarkerBar>(help, "HelpSearchMarkerBar");
+            var application = Assert.IsType<App>(global::Avalonia.Application.Current);
+            var theme = application.ActualThemeVariant ?? ThemeVariant.Light;
+            Assert.True(application.TryFindResource("TreeSearchHighlightBrush", theme, out var searchBrush));
             help.SearchBoxControl.Text = "p";
             await Task.Delay(50);
             await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
@@ -117,7 +120,8 @@ public sealed class MainWindowHelpSearchUiTests
                       help.CurrentSearchMatchIndex == 1 &&
                       help.SearchMarkerCount > 0 &&
                       markerBar.MarkerTicks.Count > 0 &&
-                      markerBar.IsVisible,
+                      markerBar.IsVisible &&
+                      ReferenceEquals(markerBar.SearchBrush, searchBrush),
                 "help search matches");
 
             var initialMatchCount = help.SearchMatchCount;

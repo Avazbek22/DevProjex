@@ -35,7 +35,7 @@ the long-running desktop from retaining redirected CLI streams.
 
 `System.CommandLine` owns parsing, validation, hierarchy, help metadata, and
 completion. There is no manual flat argument loop or parallel public parser.
-Human descriptions come from the shared 11-locale localization catalog.
+Human descriptions come from the shared 20-locale localization catalog.
 
 One bounded parser-boundary integrity check retains the distinction that
 System.CommandLine 2.0.10 loses for an empty inline assignment: `--name=`.

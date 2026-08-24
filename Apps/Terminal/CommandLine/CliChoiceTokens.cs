@@ -211,7 +211,16 @@ internal static class CliChoiceSets
 		new("pt-pt", AppLanguage.PtPt),
 		new("kk", AppLanguage.Kk),
 		new("tg", AppLanguage.Tg),
-		new("uz", AppLanguage.Uz));
+		new("uz", AppLanguage.Uz),
+		new("zh-cn", AppLanguage.ZhCn),
+		new("zh-tw", AppLanguage.ZhTw),
+		new("ja", AppLanguage.Ja),
+		new("ko", AppLanguage.Ko),
+		new("tr", AppLanguage.Tr),
+		new("uk", AppLanguage.Uk),
+		new("pl", AppLanguage.Pl),
+		new("vi", AppLanguage.Vi),
+		new("id", AppLanguage.Id));
 
 	private static DesktopPreviewView ToDesktopPreviewView(ProjectContextView view) =>
 		view switch

@@ -43,6 +43,15 @@ public partial class TopMenuBarView : UserControl
     public event EventHandler<RoutedEventArgs>? LanguageEsRequested;
     public event EventHandler<RoutedEventArgs>? LanguagePtRequested;
     public event EventHandler<RoutedEventArgs>? LanguagePtPtRequested;
+    public event EventHandler<RoutedEventArgs>? LanguageZhCnRequested;
+    public event EventHandler<RoutedEventArgs>? LanguageZhTwRequested;
+    public event EventHandler<RoutedEventArgs>? LanguageJaRequested;
+    public event EventHandler<RoutedEventArgs>? LanguageKoRequested;
+    public event EventHandler<RoutedEventArgs>? LanguageTrRequested;
+    public event EventHandler<RoutedEventArgs>? LanguageUkRequested;
+    public event EventHandler<RoutedEventArgs>? LanguagePlRequested;
+    public event EventHandler<RoutedEventArgs>? LanguageViRequested;
+    public event EventHandler<RoutedEventArgs>? LanguageIdRequested;
     public event EventHandler<RoutedEventArgs>? HelpRequested;
     public event EventHandler<RoutedEventArgs>? UpdateCheckMenuRequested;
     public event EventHandler<RoutedEventArgs>? UpdateCheckRequested;
@@ -82,6 +91,7 @@ public partial class TopMenuBarView : UserControl
     public Menu? MainMenuControl => MainMenu;
     public MenuItem? RecentMenuItemControl => RecentMenuItem;
     public MenuItem? TreeFontMenuItemControl => TreeFontMenuItem;
+    public MenuItem? LanguageMenuItemControl => LanguageMenuItem;
     public MenuItem? LanguageRuMenuItemControl => LanguageRuMenuItem;
     public MenuItem? LanguageEnMenuItemControl => LanguageEnMenuItem;
     public MenuItem? LanguageUzMenuItemControl => LanguageUzMenuItem;
@@ -93,6 +103,15 @@ public partial class TopMenuBarView : UserControl
     public MenuItem? LanguageEsMenuItemControl => LanguageEsMenuItem;
     public MenuItem? LanguagePtMenuItemControl => LanguagePtMenuItem;
     public MenuItem? LanguagePtPtMenuItemControl => LanguagePtPtMenuItem;
+    public MenuItem? LanguageZhCnMenuItemControl => LanguageZhCnMenuItem;
+    public MenuItem? LanguageZhTwMenuItemControl => LanguageZhTwMenuItem;
+    public MenuItem? LanguageJaMenuItemControl => LanguageJaMenuItem;
+    public MenuItem? LanguageKoMenuItemControl => LanguageKoMenuItem;
+    public MenuItem? LanguageTrMenuItemControl => LanguageTrMenuItem;
+    public MenuItem? LanguageUkMenuItemControl => LanguageUkMenuItem;
+    public MenuItem? LanguagePlMenuItemControl => LanguagePlMenuItem;
+    public MenuItem? LanguageViMenuItemControl => LanguageViMenuItem;
+    public MenuItem? LanguageIdMenuItemControl => LanguageIdMenuItem;
 
     private void OnOpenFolder(object? sender, RoutedEventArgs e) => OpenFolderRequested?.Invoke(sender, e);
 
@@ -228,6 +247,24 @@ public partial class TopMenuBarView : UserControl
     private void OnLangPt(object? sender, RoutedEventArgs e) => LanguagePtRequested?.Invoke(sender, e);
 
     private void OnLangPtPt(object? sender, RoutedEventArgs e) => LanguagePtPtRequested?.Invoke(sender, e);
+
+    private void OnLangZhCn(object? sender, RoutedEventArgs e) => LanguageZhCnRequested?.Invoke(sender, e);
+
+    private void OnLangZhTw(object? sender, RoutedEventArgs e) => LanguageZhTwRequested?.Invoke(sender, e);
+
+    private void OnLangJa(object? sender, RoutedEventArgs e) => LanguageJaRequested?.Invoke(sender, e);
+
+    private void OnLangKo(object? sender, RoutedEventArgs e) => LanguageKoRequested?.Invoke(sender, e);
+
+    private void OnLangTr(object? sender, RoutedEventArgs e) => LanguageTrRequested?.Invoke(sender, e);
+
+    private void OnLangUk(object? sender, RoutedEventArgs e) => LanguageUkRequested?.Invoke(sender, e);
+
+    private void OnLangPl(object? sender, RoutedEventArgs e) => LanguagePlRequested?.Invoke(sender, e);
+
+    private void OnLangVi(object? sender, RoutedEventArgs e) => LanguageViRequested?.Invoke(sender, e);
+
+    private void OnLangId(object? sender, RoutedEventArgs e) => LanguageIdRequested?.Invoke(sender, e);
 
     private void OnHelp(object? sender, RoutedEventArgs e) => HelpRequested?.Invoke(sender, e);
 

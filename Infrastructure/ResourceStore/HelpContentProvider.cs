@@ -56,7 +56,16 @@ public sealed class HelpContentProvider
             [AppLanguage.It] = CreateResource(assembly, "it", platform),
             [AppLanguage.Es] = CreateResource(assembly, "es", platform),
             [AppLanguage.Pt] = CreateResource(assembly, "pt", platform),
-            [AppLanguage.PtPt] = CreateResource(assembly, "pt-pt", platform)
+            [AppLanguage.PtPt] = CreateResource(assembly, "pt-pt", platform),
+            [AppLanguage.ZhCn] = CreateResource(assembly, "zh-cn", platform),
+            [AppLanguage.ZhTw] = CreateResource(assembly, "zh-tw", platform),
+            [AppLanguage.Ja] = CreateResource(assembly, "ja", platform),
+            [AppLanguage.Ko] = CreateResource(assembly, "ko", platform),
+            [AppLanguage.Tr] = CreateResource(assembly, "tr", platform),
+            [AppLanguage.Uk] = CreateResource(assembly, "uk", platform),
+            [AppLanguage.Pl] = CreateResource(assembly, "pl", platform),
+            [AppLanguage.Vi] = CreateResource(assembly, "vi", platform),
+            [AppLanguage.Id] = CreateResource(assembly, "id", platform)
         };
     }
 

@@ -49,7 +49,7 @@ public sealed class McpCommandContractTests
 
 		var localizationDirectory = Path.Combine(repository, "Assets", "Localization");
 		var localeFiles = Directory.EnumerateFiles(localizationDirectory, "*.json").OrderBy(static path => path).ToArray();
-		Assert.Equal(11, localeFiles.Length);
+		Assert.Equal(Enum.GetValues<AppLanguage>().Length, localeFiles.Length);
 		Assert.All(localeFiles, static path =>
 		{
 			using var document = JsonDocument.Parse(File.ReadAllText(path));

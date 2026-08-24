@@ -5,21 +5,6 @@ namespace DevProjex.Tests.Terminal;
 
 public sealed partial class TerminalLocalizationContractTests
 {
-	private static readonly string[] Locales =
-	[
-		"en",
-		"ru",
-		"de",
-		"fr",
-		"it",
-		"es",
-		"pt",
-		"pt-pt",
-		"kk",
-		"tg",
-		"uz"
-	];
-
 	private static readonly string[] NativeTranslationKeys =
 	[
 		"Terminal.Command.Root",
@@ -53,7 +38,7 @@ public sealed partial class TerminalLocalizationContractTests
 			.ToHashSet(StringComparer.Ordinal);
 
 		Assert.NotEmpty(expectedKeys);
-		foreach (var locale in Locales)
+		foreach (var locale in catalogs.Keys)
 		{
 			var actual = catalogs[locale]
 				.Where(static entry => entry.Key.StartsWith("Terminal.", StringComparison.Ordinal))
@@ -91,7 +76,7 @@ public sealed partial class TerminalLocalizationContractTests
 			.ToArray();
 
 		Assert.NotEmpty(sourceKeys);
-		foreach (var locale in Locales)
+		foreach (var locale in catalogs.Keys)
 		{
 			var missing = sourceKeys
 				.Where(key => !catalogs[locale].ContainsKey(key))
@@ -113,7 +98,7 @@ public sealed partial class TerminalLocalizationContractTests
 			.Distinct(StringComparer.Ordinal)
 			.ToArray();
 
-		foreach (var locale in Locales)
+		foreach (var locale in catalogs.Keys)
 		{
 			Assert.All(labelKeys, key =>
 			{
@@ -167,7 +152,7 @@ public sealed partial class TerminalLocalizationContractTests
 		var catalogs = ReadCatalogs();
 		var english = catalogs["en"];
 
-		foreach (var locale in Locales)
+		foreach (var locale in catalogs.Keys)
 		{
 			foreach (var (key, expectedValue) in english.Where(static entry =>
 				         entry.Key.StartsWith("Terminal.", StringComparison.Ordinal)))
@@ -185,7 +170,7 @@ public sealed partial class TerminalLocalizationContractTests
 		var catalogs = ReadCatalogs();
 		var english = catalogs["en"];
 
-		foreach (var locale in Locales.Where(static locale => locale != "en"))
+		foreach (var locale in catalogs.Keys.Where(static locale => locale != "en"))
 		{
 			foreach (var key in NativeTranslationKeys)
 				Assert.NotEqual(english[key], catalogs[locale][key]);
@@ -239,6 +224,72 @@ public sealed partial class TerminalLocalizationContractTests
 	}
 
 	[Fact]
+	public void LocalizationText_PreservesTypographyAndBrandContracts()
+	{
+		var catalogs = ReadCatalogs();
+		var punctuationViolations = new List<string>();
+		foreach (var (locale, catalog) in catalogs)
+		{
+			foreach (var (key, value) in catalog)
+			{
+				if (!string.Equals(locale, "fr", StringComparison.Ordinal)
+					&& ForbiddenSpaceBeforePunctuationRegex().IsMatch(RemoveTechnicalLiterals(value)))
+				{
+					punctuationViolations.Add($"{locale}.json/{key}");
+				}
+
+				AssertBalancedParentheses(value, $"{locale}.json/{key}");
+				Assert.DoesNotMatch(DuplicateBrandRegex(), value);
+			}
+
+			Assert.Contains(
+				"DevProjex",
+				catalog["Help.About.Body"],
+				StringComparison.Ordinal);
+		}
+
+		var helpDirectory = Path.Combine(FindRepositoryRoot(), "Assets", "HelpContent");
+		foreach (var path in Directory.GetFiles(helpDirectory, "help.*.txt", SearchOption.TopDirectoryOnly))
+		{
+			var help = File.ReadAllText(path);
+			var locale = Path.GetFileNameWithoutExtension(path)["help.".Length..];
+			if (!string.Equals(locale, "fr", StringComparison.Ordinal)
+				&& ForbiddenSpaceBeforePunctuationRegex().IsMatch(RemoveTechnicalLiterals(help)))
+			{
+				punctuationViolations.Add(Path.GetFileName(path));
+			}
+
+			AssertBalancedParentheses(
+				NumberedMarkerRegex().Replace(help, string.Empty),
+				Path.GetFileName(path));
+			Assert.DoesNotMatch(DuplicateBrandRegex(), help);
+			Assert.Contains("DevProjex", help, StringComparison.Ordinal);
+		}
+
+		Assert.True(
+			punctuationViolations.Count == 0,
+			$"Forbidden punctuation spacing:{Environment.NewLine}{string.Join(Environment.NewLine, punctuationViolations)}");
+	}
+
+	[Theory]
+	[InlineData("devprojex analyze .")]
+	[InlineData("devprojex export context . -o context.md")]
+	[InlineData("devprojex mcp --root .")]
+	public void LocalizationTypography_AllowsCurrentDirectoryCommandArguments(string value)
+	{
+		Assert.DoesNotMatch(ForbiddenSpaceBeforePunctuationRegex(), RemoveTechnicalLiterals(value));
+	}
+
+	[Theory]
+	[InlineData("word .")]
+	[InlineData("{0} .")]
+	[InlineData("Cloning {0} ...")]
+	public void LocalizationTypography_RejectsDetachedPunctuation(string value)
+	{
+		Assert.Matches(ForbiddenSpaceBeforePunctuationRegex(), RemoveTechnicalLiterals(value));
+	}
+
+	[Fact]
 	public void ContentProcessingTitleAndStatusUseOneSharedDesktopAndTuiContract()
 	{
 		var catalogs = ReadCatalogs();
@@ -289,11 +340,38 @@ public sealed partial class TerminalLocalizationContractTests
 	private static Dictionary<string, Dictionary<string, string>> ReadCatalogs()
 	{
 		var directory = Path.Combine(FindRepositoryRoot(), "Assets", "Localization");
-		return Locales.ToDictionary(
-			static locale => locale,
-			locale => ReadCatalog(Path.Combine(directory, $"{locale}.json")),
-			StringComparer.Ordinal);
+		return Directory.GetFiles(directory, "*.json", SearchOption.TopDirectoryOnly)
+			.Order(StringComparer.Ordinal)
+			.ToDictionary(
+				static path => Path.GetFileNameWithoutExtension(path),
+				ReadCatalog,
+				StringComparer.Ordinal);
 	}
+
+	private static void AssertBalancedParentheses(string value, string source)
+	{
+		var asciiOpen = value.Count(static character => character == '(');
+		var asciiClose = value.Count(static character => character == ')');
+		var fullWidthOpen = value.Count(static character => character == '（');
+		var fullWidthClose = value.Count(static character => character == '）');
+		Assert.True(asciiOpen == asciiClose, $"Unbalanced ASCII parentheses in {source}.");
+		Assert.True(fullWidthOpen == fullWidthClose, $"Unbalanced full-width parentheses in {source}.");
+	}
+
+	private static string RemoveTechnicalLiterals(string value) =>
+		CurrentDirectoryCommandRegex().Replace(
+			CommandVariadicSchemaRegex().Replace(
+				StandaloneCommandLineShortcutRegex().Replace(
+					StandaloneHelpShortcutRegex().Replace(
+						WorkspaceCommandTokenRegex().Replace(
+							WorkspaceCommandListRegex().Replace(
+								InlineCodeRegex().Replace(value, "literal"),
+								"commands"),
+							"command"),
+						"shortcut"),
+					"command-line"),
+				"arguments"),
+			"path");
 
 	private static Dictionary<string, string> ReadCatalog(string path)
 	{
@@ -309,6 +387,36 @@ public sealed partial class TerminalLocalizationContractTests
 
 	[GeneratedRegex(@"\{\d+\}", RegexOptions.CultureInvariant)]
 	private static partial Regex PlaceholderRegex();
+
+	[GeneratedRegex(@" (?=[,:;!?\)]|\.\.\.|\.(?:\s|$))", RegexOptions.CultureInvariant)]
+	private static partial Regex ForbiddenSpaceBeforePunctuationRegex();
+
+	[GeneratedRegex(@"DevProjex\s+DevProjex", RegexOptions.CultureInvariant)]
+	private static partial Regex DuplicateBrandRegex();
+
+	[GeneratedRegex(@"`[^`\r\n]+`", RegexOptions.CultureInvariant)]
+	private static partial Regex InlineCodeRegex();
+
+	[GeneratedRegex(@"(?<!\S)\?(?=\s|\p{L}|-)", RegexOptions.CultureInvariant)]
+	private static partial Regex StandaloneHelpShortcutRegex();
+
+	[GeneratedRegex(@"(?<!\S):(?=\s|\p{L})", RegexOptions.CultureInvariant)]
+	private static partial Regex StandaloneCommandLineShortcutRegex();
+
+	[GeneratedRegex(@"\bdevprojex(?:\s+(?:[a-z][a-z-]*|--[a-z][a-z-]*)){1,5}\s+\.(?=\s|$)", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
+	private static partial Regex CurrentDirectoryCommandRegex();
+
+	[GeneratedRegex(@"(?<=>) \.\.\.", RegexOptions.CultureInvariant)]
+	private static partial Regex CommandVariadicSchemaRegex();
+
+	[GeneratedRegex(@"(?<!\S):[a-z][a-z-]*", RegexOptions.CultureInvariant)]
+	private static partial Regex WorkspaceCommandTokenRegex();
+
+	[GeneratedRegex(@"\(:[a-z][a-z-]*(?:,\s*:[a-z][a-z-]*)+\)", RegexOptions.CultureInvariant)]
+	private static partial Regex WorkspaceCommandListRegex();
+
+	[GeneratedRegex(@"(?m)^\s*(?:#{1,6}\s*)?\d+\)", RegexOptions.CultureInvariant)]
+	private static partial Regex NumberedMarkerRegex();
 
 	[GeneratedRegex("\"((?:Terminal|Content)\\.[A-Za-z0-9_.-]+)\"", RegexOptions.CultureInvariant)]
 	private static partial Regex SourceLocalizationKeyRegex();

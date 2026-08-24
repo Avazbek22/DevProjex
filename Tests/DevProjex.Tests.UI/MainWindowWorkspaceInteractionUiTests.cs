@@ -4,6 +4,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.VisualTree;
 using DevProjex.Avalonia.Controls;
+using DevProjex.Avalonia.Coordinators;
 using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Kernel.Abstractions;
 
@@ -1044,14 +1045,36 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
         {
             var englishItem = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "LanguageEnMenuItem");
             var russianItem = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "LanguageRuMenuItem");
+            var simplifiedChineseItem = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "LanguageZhCnMenuItem");
+            var languageMenu = Assert.IsType<MenuItem>(englishItem.Parent);
 
+            Assert.Equal(20, languageMenu.Items.OfType<MenuItem>().Count());
+            Assert.Contains(MenuScrollBehavior.ScrollableClass, languageMenu.Classes);
             Assert.StartsWith("✓ ", englishItem.Header?.ToString());
             Assert.StartsWith("   ", russianItem.Header?.ToString());
+
+            languageMenu.IsSubMenuOpen = true;
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 12);
+
+            var popup = Assert.Single(
+                languageMenu.GetVisualDescendants().OfType<Popup>(),
+                static candidate => candidate.IsOpen);
+            var popupRoot = Assert.IsAssignableFrom<Visual>(popup.Child);
+            var scrollViewer = Assert.Single(popupRoot.GetVisualDescendants().OfType<ScrollViewer>());
+            Assert.Equal(ScrollBarVisibility.Hidden, scrollViewer.VerticalScrollBarVisibility);
+            Assert.Single(
+                popupRoot.GetVisualDescendants().OfType<Control>(),
+                control => control.Classes.Contains(MenuScrollBehavior.ExternalScrollBarClass));
 
             await UiTestDriver.RaiseMenuItemClickAsync(russianItem);
 
             Assert.StartsWith("   ", englishItem.Header?.ToString());
             Assert.StartsWith("✓ ", russianItem.Header?.ToString());
+
+            await UiTestDriver.RaiseMenuItemClickAsync(simplifiedChineseItem);
+
+            Assert.StartsWith("   ", russianItem.Header?.ToString());
+            Assert.StartsWith("✓ ", simplifiedChineseItem.Header?.ToString());
         }
         finally
         {

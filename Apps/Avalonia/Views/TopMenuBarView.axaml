@@ -190,7 +190,7 @@
       </MenuItem>
       <MenuItem Header="{Binding MenuSearch}" IsEnabled="{Binding IsSearchAvailable}" Click="OnToggleSearch" />
       <MenuItem Header="{Binding MenuOptions}" IsEnabled="{Binding IsProjectLoaded}" Click="OnToggleSettings" />
-      <MenuItem Header="{Binding MenuLanguage}">
+      <MenuItem Name="LanguageMenuItem" Header="{Binding MenuLanguage}">
         <MenuItem Name="LanguageEnMenuItem" Header="English" Click="OnLangEn" />
         <MenuItem Name="LanguageRuMenuItem" Header="Русский" Click="OnLangRu" />
         <MenuItem Name="LanguageEsMenuItem" Header="Español" Click="OnLangEs" />
@@ -202,6 +202,15 @@
         <MenuItem Name="LanguageTgMenuItem" Header="Тоҷикӣ" Click="OnLangTg" />
         <MenuItem Name="LanguageUzMenuItem" Header="Oʻzbek" Click="OnLangUz" />
         <MenuItem Name="LanguageKkMenuItem" Header="Қазақ" Click="OnLangKk" />
+        <MenuItem Name="LanguageZhCnMenuItem" Header="中文（简体）" Click="OnLangZhCn" />
+        <MenuItem Name="LanguageZhTwMenuItem" Header="中文（繁體）" Click="OnLangZhTw" />
+        <MenuItem Name="LanguageJaMenuItem" Header="日本語" Click="OnLangJa" />
+        <MenuItem Name="LanguageKoMenuItem" Header="한국어" Click="OnLangKo" />
+        <MenuItem Name="LanguageTrMenuItem" Header="Türkçe" Click="OnLangTr" />
+        <MenuItem Name="LanguageUkMenuItem" Header="Українська" Click="OnLangUk" />
+        <MenuItem Name="LanguagePlMenuItem" Header="Polski" Click="OnLangPl" />
+        <MenuItem Name="LanguageViMenuItem" Header="Tiếng Việt" Click="OnLangVi" />
+        <MenuItem Name="LanguageIdMenuItem" Header="Bahasa Indonesia" Click="OnLangId" />
       </MenuItem>
       <MenuItem Name="ThemeMenuItem" Header="{Binding MenuTheme}" Click="OnThemeMenuClick" />
       <MenuItem Name="HelpMenuItem" Header="{Binding MenuHelp}">
