@@ -4,6 +4,7 @@ using DevProjex.Terminal.DesktopControl;
 using DevProjex.Terminal.Execution;
 using DevProjex.Terminal.Rendering;
 using DevProjex.Terminal.Tui;
+using DevProjex.Mcp;
 
 namespace DevProjex.Terminal.CommandLine;
 
@@ -64,6 +65,7 @@ public sealed class DevProjexCommandTree
 		_language.Recursive = true;
 		root.Options.Add(_language);
 		root.Subcommands.Add(BuildTuiCommand());
+		root.Subcommands.Add(BuildMcpCommand());
 		root.Subcommands.Add(BuildOpenCommand());
 		root.Subcommands.Add(BuildAnalyzeCommand());
 		root.Subcommands.Add(BuildTreeCommand());
@@ -82,6 +84,50 @@ public sealed class DevProjexCommandTree
 			"devprojex analyze .",
 			"devprojex export context . -o ../devprojex-context.md");
 		return root;
+	}
+
+	private Command BuildMcpCommand()
+	{
+		var command = new Command("mcp", L("Terminal.Command.Mcp"));
+		var roots = new Option<string[]>("--root")
+		{
+			Description = L("Terminal.Option.McpRoot"),
+			HelpName = "PATH",
+			Arity = ArgumentArity.OneOrMore,
+			AllowMultipleArgumentsPerToken = false
+		};
+		roots.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
+			context,
+			FileSystemCompletionKind.Directories,
+			Directory.GetCurrentDirectory()));
+		command.Options.Add(roots);
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex mcp",
+			"devprojex mcp --root . --root ../shared");
+		command.SetAction(async (parseResult, cancellationToken) =>
+		{
+			var explicitRoots = parseResult.GetValue(roots) ?? [];
+			var resolvedRoots = McpRootSourceResolver.Resolve(
+				explicitRoots,
+				environment.Variables,
+				Directory.GetCurrentDirectory());
+			try
+			{
+				await McpServerHost.RunAsync(resolvedRoots, cancellationToken).ConfigureAwait(false);
+				return CommandLineExitCodes.Success;
+			}
+			catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+			{
+				return CommandLineExitCodes.Success;
+			}
+			catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException)
+			{
+				environment.Error.WriteLine($"DPX-MCP-STARTUP: {exception.Message}");
+				return CommandLineExitCodes.UsageError;
+			}
+		});
+		return command;
 	}
 
 	private Command BuildTuiCommand()

@@ -212,6 +212,7 @@ public sealed class InvocationEnvironment : ITerminalEnvironment
 			["TMUX"] = Environment.GetEnvironmentVariable("TMUX"),
 			["ZELLIJ"] = Environment.GetEnvironmentVariable("ZELLIJ"),
 			["WT_SESSION"] = Environment.GetEnvironmentVariable("WT_SESSION"),
+			["CLAUDE_PROJECT_DIR"] = Environment.GetEnvironmentVariable("CLAUDE_PROJECT_DIR"),
 			[TerminalHostVariable] = Environment.GetEnvironmentVariable(TerminalHostVariable),
 			[InternalDataRootVariable] = Environment.GetEnvironmentVariable(InternalDataRootVariable)
 		};
