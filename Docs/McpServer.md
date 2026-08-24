@@ -46,17 +46,20 @@ The tool order is stable.
 | Tool | Parameters | Result and limits |
 |---|---|---|
 | `list_projects` | none | Allowed roots with path, name, type, and available local profiles. |
-| `get_tree` | `project?`, `include_patterns?`, `exclude_patterns?`, `max_depth?` | Effective text tree; at most 2,000 lines. |
-| `analyze` | `project?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?` | File, character, and token metrics plus the ten largest files by tokens. |
-| `pack_context` | `project?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `view?`, `format?` | Exact DevProjex context pipeline. Inline through 50,000 characters; otherwise returns a session-scoped `pack_id` and tree. |
+| `get_tree` | `project?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `max_depth?` | Effective text tree; at most 2,000 lines. |
+| `analyze` | `project?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?` | File, character, and token metrics plus the ten largest files by tokens. Metrics reflect the effective detail level. |
+| `pack_context` | `project?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `view?`, `format?` | Exact DevProjex context pipeline. Inline through 50,000 characters; otherwise returns a session-scoped `pack_id` and tree. |
 | `read_pack` | `pack_id`, `start_line?`, `end_line?` | Inclusive, 1-based range; at most 1,000 lines or 50,000 characters per call. Call `pack_context` again after server restart. |
-| `search_project` | `project?`, `pattern`, `include_patterns?`, `exclude_patterns?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style redacted matches. Regex timeout is 2 seconds; `max_results` cannot exceed 200. |
+| `search_project` | `project?`, `pattern`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style redacted matches. Regex timeout is 2 seconds; `max_results` cannot exceed 200. |
 | `get_file` | `project?`, `path`, `start_line?`, `end_line?` | Redacted text from one effective file; at most 1,000 lines. |
 
 Defaults:
 
 - `pack_context.view`: `tree-content`
 - `pack_context.format`: `markdown`
+- `pack_context.detail`: `full`
+- `analyze.detail`: `full`
+- `tracked_only`: `false`
 - `search_project.context_lines`: `2`
 - `search_project.ignore_case`: `true`
 - `search_project.max_results`: `50`
@@ -64,10 +67,31 @@ Defaults:
 `include_patterns` and `exclude_patterns` are arrays of project-relative globs
 using `/`. `paths` contains existing project-relative files or directories.
 Numeric parameters accept JSON numbers and decimal numeric strings.
+Boolean parameters accept JSON booleans and the exact strings `"true"` and
+`"false"`.
+
+When `tracked_only` is `true`, only paths present in the Git index are selected.
+The option can strengthen a profile but cannot disable tracked-only filtering
+already enabled by that profile. A non-Git project rejects the option with an
+actionable error instead of returning an empty result.
 
 Profiles use the existing project profile mechanism: `standard`, `local`, or a
 portable profile JSON path inside the project root. Profile selection can enable
 compression or stripping, but cannot disable MCP redaction.
+
+## Detail Levels
+
+`detail` controls additional code reduction for `analyze` and `pack_context`:
+
+- `full` applies no agent-requested code reduction.
+- `compact` removes supported comments and blank lines.
+- `signatures` also collapses supported method and function bodies.
+
+Unsupported languages remain unchanged. Detail is monotonic: transformations
+enabled by the selected user profile are unioned with the requested level, so an
+agent can reduce context further but cannot restore bodies, comments, or blank
+lines removed by the profile. The structured result reports the effective detail
+tier.
 
 ## Client Configuration
 
