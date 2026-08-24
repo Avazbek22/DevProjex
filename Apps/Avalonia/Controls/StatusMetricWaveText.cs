@@ -24,9 +24,11 @@ public sealed class StatusMetricWaveText : Control
     private long _lastAnimationFrameTimestamp;
     private TimeSpan _animationElapsed;
     private MetricRollTransition? _metricRollTransition;
-    private string _lastText = string.Empty;
+    private PendingMetricRoll? _pendingMetricRoll;
+    private string _lastNonEmptyText = string.Empty;
     private bool _isAttached;
     private bool _glyphsDirty = true;
+    private bool _hasPresentedText;
     private bool _revealStarted;
     private bool _revealCompleted;
     private double _layoutWidth;
@@ -131,6 +133,9 @@ public sealed class StatusMetricWaveText : Control
         _revealStarted && !_revealCompleted ||
         _metricRollTransition is not null;
 
+    internal bool IsInitialRevealActive =>
+        _revealStarted && !_revealCompleted;
+
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
@@ -163,20 +168,39 @@ public sealed class StatusMetricWaveText : Control
 
         if (change.Property == TextProperty)
         {
-            var previousText = _lastText;
-            _lastText = Text;
             if (string.IsNullOrEmpty(Text))
-                ResetReveal();
+            {
+                PrepareForEmptyText();
+                return;
+            }
+
+            var previousText = _lastNonEmptyText;
+            _lastNonEmptyText = Text;
+            if (!_hasPresentedText)
+            {
+                _hasPresentedText = true;
+                if (!IsAnimationEnabled)
+                    ApplyTextWithoutAnimation(previousText, Text);
+                else
+                    TryStartReveal();
+            }
+            else if (!_revealCompleted)
+            {
+                TryStartReveal();
+            }
             else if (!IsAnimationEnabled)
+            {
                 ApplyTextWithoutAnimation(previousText, Text);
-            else if (_revealCompleted &&
-                     !string.IsNullOrEmpty(previousText) &&
+            }
+            else if (!string.IsNullOrEmpty(previousText) &&
                      !string.Equals(previousText, Text, StringComparison.Ordinal))
             {
-                StartMetricRoll(previousText, Text);
+                StartOrDeferMetricRoll(previousText, Text);
             }
             else
-                TryStartReveal();
+            {
+                ApplyTextWithoutAnimation(previousText, Text);
+            }
         }
         else if (change.Property == IsAnimationEnabledProperty)
         {
@@ -184,7 +208,8 @@ public sealed class StatusMetricWaveText : Control
         }
         else if (change.Property == IsVisibleProperty)
         {
-            TryStartReveal();
+            if (!TryStartPendingMetricRoll())
+                TryStartReveal();
         }
     }
 
@@ -192,7 +217,8 @@ public sealed class StatusMetricWaveText : Control
     {
         base.OnAttachedToVisualTree(e);
         _isAttached = true;
-        TryStartReveal();
+        if (!TryStartPendingMetricRoll())
+            TryStartReveal();
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
@@ -261,6 +287,39 @@ public sealed class StatusMetricWaveText : Control
         _animationTimer ??= CreateAnimationTimer();
         _animationTimer.Start();
         InvalidateVisual();
+    }
+
+    private void StartOrDeferMetricRoll(string previousText, string currentText)
+    {
+        if (!_isAttached || !IsVisible)
+        {
+            var transitionStart = _pendingMetricRoll?.PreviousText ?? previousText;
+            _pendingMetricRoll = new PendingMetricRoll(transitionStart, currentText);
+            _metricRollTransition = null;
+            StopAnimationTimer();
+            return;
+        }
+
+        _pendingMetricRoll = null;
+        StartMetricRoll(previousText, currentText);
+    }
+
+    private bool TryStartPendingMetricRoll()
+    {
+        if (_pendingMetricRoll is not { } pending ||
+            !_isAttached ||
+            !IsVisible)
+        {
+            return false;
+        }
+
+        _pendingMetricRoll = null;
+        if (!IsAnimationEnabled)
+            ApplyTextWithoutAnimation(pending.PreviousText, pending.CurrentText);
+        else
+            StartMetricRoll(pending.PreviousText, pending.CurrentText);
+
+        return true;
     }
 
     private void StartMetricRoll(string previousText, string currentText)
@@ -796,10 +855,12 @@ public sealed class StatusMetricWaveText : Control
         return glyph.X + glyph.Text.WidthIncludingTrailingWhitespace;
     }
 
-    private void ResetReveal()
+    private void PrepareForEmptyText()
     {
-        _revealStarted = false;
-        _revealCompleted = false;
+        if (_revealStarted)
+            _revealCompleted = true;
+
+        _pendingMetricRoll = null;
         _metricRollTransition = null;
         _layoutWidth = 0;
         _reservedContentWidth = 0;
@@ -810,6 +871,7 @@ public sealed class StatusMetricWaveText : Control
 
     private void CompleteAnimationImmediately()
     {
+        _pendingMetricRoll = null;
         _metricRollTransition = null;
         StopAnimationTimer();
         _revealStarted = !string.IsNullOrEmpty(Text);
@@ -821,6 +883,7 @@ public sealed class StatusMetricWaveText : Control
 
     private void ApplyTextWithoutAnimation(string previousText, string currentText)
     {
+        _pendingMetricRoll = null;
         var currentLayout = BuildGlyphLayout(currentText);
         if (!string.IsNullOrEmpty(previousText))
         {
@@ -911,4 +974,8 @@ public sealed class StatusMetricWaveText : Control
         double PreviousLayoutOffset,
         double CurrentLayoutOffset,
         TimeSpan Duration);
+
+    private sealed record PendingMetricRoll(
+        string PreviousText,
+        string CurrentText);
 }

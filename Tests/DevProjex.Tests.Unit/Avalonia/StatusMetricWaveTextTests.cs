@@ -132,6 +132,42 @@ public sealed class StatusMetricWaveTextTests
         Assert.False(control.IsAnimationActive);
     }
 
+    [AvaloniaFact]
+    public async Task ProjectSwitch_AfterInitialReveal_UsesMetricRollWithoutRepeatingWave()
+    {
+        var control = new StatusMetricWaveText
+        {
+            Label = "Tree",
+            Text = "Lines: 10 · Characters: 100 · Tokens: 25"
+        };
+        var window = new Window { Content = control };
+
+        try
+        {
+            window.Show();
+            await FlushUiAsync();
+            Assert.True(control.IsInitialRevealActive);
+
+            control.IsAnimationEnabled = false;
+            control.IsAnimationEnabled = true;
+            control.IsVisible = false;
+            control.Text = string.Empty;
+            control.Text = "Lines: 20 · Characters: 200 · Tokens: 50";
+
+            Assert.False(control.IsAnimationActive);
+
+            control.IsVisible = true;
+            await FlushUiAsync();
+
+            Assert.True(control.IsAnimationActive);
+            Assert.False(control.IsInitialRevealActive);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
     private static async Task FlushUiAsync()
     {
         await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
