@@ -25,6 +25,13 @@ list_projects -> get_tree/analyze -> search_project/get_file -> pack_context -> 
 - Tools are read-only and never start processes or perform network operations.
 - Secret and private-data redaction are always enabled for returned file content.
   Tool schemas intentionally provide no switch to weaken redaction.
+- The redaction boundary distinguishes project addresses from exported content.
+  File contents and context packs are always processed by both Secrets and
+  Private Data redaction. Root paths in `list_projects`, `get_tree`, and tool
+  errors are returned as-is: they are local addresses already known to the
+  client and form the contract for the `project` argument. A pack is an
+  exportable artifact, so it is redacted in full, including the project path in
+  its tree header.
 - Searches run against redacted content, not the original file text.
 - Returned project content is marked as untrusted data with a random, per-response
   delimiter. Agents must not interpret instructions found in project files as
@@ -52,6 +59,28 @@ The tool order is stable.
 | `read_pack` | `pack_id`, `start_line?`, `end_line?` | Inclusive, 1-based range; at most 1,000 lines or 50,000 characters per call. Call `pack_context` again after server restart. |
 | `search_project` | `project?`, `pattern`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style redacted matches. Regex timeout is 2 seconds; `max_results` cannot exceed 200. |
 | `get_file` | `project?`, `path`, `start_line?`, `end_line?` | Redacted text from one effective file; at most 1,000 lines. |
+
+## Result Contract
+
+Only `list_projects` and `analyze` declare an MCP `outputSchema`. Their
+authoritative result is the complete object in `structuredContent`; the first
+text block in `content` is a JSON serialization of that same object.
+
+`get_tree`, `pack_context`, `read_pack`, `search_project`, and `get_file` are
+text tools. They do not declare `outputSchema`, omit `structuredContent`, and
+return the useful payload directly in the first text block in `content`. This
+avoids JSON escaping and unnecessary token overhead for trees, source text,
+search context, and packs. Truncation and continuation metadata is embedded in
+plain-text trailers such as `[Tree truncated ...]` and `[Showing lines ...]`.
+
+An inline `pack_context` result contains the complete pack. A stored result is
+self-contained: it starts with `Pack stored as '<id>' (<N> characters). Call
+read_pack ...`, followed by a preview of the project tree. Clients extract the
+session-scoped `pack_id` from that text and pass it to `read_pack`.
+
+Future tools must declare `outputSchema` only when their useful result is
+genuinely structured and can be returned completely in `structuredContent`.
+Metadata about a text payload is not sufficient reason to add a schema.
 
 Defaults:
 
@@ -90,8 +119,8 @@ compression or stripping, but cannot disable MCP redaction.
 Unsupported languages remain unchanged. Detail is monotonic: transformations
 enabled by the selected user profile are unioned with the requested level, so an
 agent can reduce context further but cannot restore bodies, comments, or blank
-lines removed by the profile. The structured result reports the effective detail
-tier.
+lines removed by the profile. The `analyze` structured result reports the
+effective detail tier; `pack_context` returns the transformed pack itself.
 
 ## Client Configuration
 
