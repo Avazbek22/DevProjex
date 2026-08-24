@@ -41,10 +41,14 @@ public sealed class McpServerIntegrationTests
 			Assert.False(protocol.Annotations?.OpenWorldHint);
 			Assert.False(protocol.Annotations?.DestructiveHint);
 			Assert.Equal(JsonValueKind.False, protocol.InputSchema.GetProperty("additionalProperties").ValueKind);
-			Assert.NotNull(protocol.OutputSchema);
 			Assert.DoesNotContain("hide_secrets", protocol.InputSchema.GetRawText(), StringComparison.OrdinalIgnoreCase);
 			Assert.DoesNotContain("hide_private", protocol.InputSchema.GetRawText(), StringComparison.OrdinalIgnoreCase);
 		});
+		Assert.Equal(
+			["list_projects", "analyze"],
+			tools
+				.Where(static tool => tool.ProtocolTool.OutputSchema is not null)
+				.Select(static tool => tool.Name));
 		Assert.Equal(
 			200_000,
 			tools.Single(static tool => tool.Name == "pack_context")
@@ -97,7 +101,7 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
-	public async Task ToolsCompleteTheRedactedInlineAndStoredPackWorkflow()
+	public async Task ToolCallsExposeTextAndStructuredPayloadsAccordingToSchemaContract()
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
@@ -107,26 +111,42 @@ public sealed class McpServerIntegrationTests
 			$"// Contact {PrivateEmail}\nsearch-marker\n");
 		File.WriteAllText(Path.Combine(project, "Large.cs"), "large-marker\n" + new string('x', 60_000));
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+		var tools = await server.Client.ListToolsAsync(
+			options: null,
+			TestContext.Current.CancellationToken);
 
 		var projects = await server.CallAsync("list_projects");
-		Assert.Contains(project, Text(projects), PathComparison);
+		var projectsStructured = AssertStructuredResult(
+			server,
+			projects,
+			Assert.IsType<JsonElement>(tools.Single(static tool => tool.Name == "list_projects").ProtocolTool.OutputSchema));
+		var listedProject = projectsStructured.GetProperty("projects")[0].GetProperty("path").GetString();
+		Assert.True(
+			string.Equals(project, listedProject, PathComparison),
+			$"Expected listed project '{project}', got '{listedProject}'.");
 
 		var tree = await server.CallAsync("get_tree", new Dictionary<string, object?> { ["max_depth"] = "10" });
-		Assert.Contains("Secret.cs", Text(tree), StringComparison.Ordinal);
+		AssertTextOnlyResult(server, tree, "Secret.cs");
 		AssertSpotlighted(tree);
 
 		var analysis = await server.CallAsync("analyze");
 		Assert.True(analysis.StructuredContent?.GetProperty("files").GetInt32() >= 2);
+		var analysisStructured = AssertStructuredResult(
+			server,
+			analysis,
+			Assert.IsType<JsonElement>(tools.Single(static tool => tool.Name == "analyze").ProtocolTool.OutputSchema));
+		Assert.True(analysisStructured.GetProperty("files").GetInt32() >= 2);
 
 		var file = await server.CallAsync(
 			"get_file",
 			new Dictionary<string, object?> { ["path"] = "Secret.cs", ["start_line"] = "1" });
+		AssertTextOnlyResult(server, file, "search-marker");
 		AssertRedactedAndSpotlighted(file);
 
 		var search = await server.CallAsync(
 			"search_project",
 			new Dictionary<string, object?> { ["pattern"] = "search-marker", ["max_results"] = "5" });
-		Assert.Contains("Secret.cs:3:", Text(search), StringComparison.Ordinal);
+		AssertTextOnlyResult(server, search, "Secret.cs:3:");
 		AssertRedactedAndSpotlighted(search);
 
 		var inline = await server.CallAsync(
@@ -137,7 +157,8 @@ public sealed class McpServerIntegrationTests
 				["view"] = "content",
 				["format"] = "markdown"
 			});
-		Assert.False(inline.StructuredContent?.GetProperty("stored").GetBoolean());
+		AssertTextOnlyResult(server, inline, "Secret.cs");
+		Assert.Contains("search-marker", Text(inline), StringComparison.Ordinal);
 		AssertRedactedAndSpotlighted(inline);
 
 		var stored = await server.CallAsync(
@@ -147,13 +168,14 @@ public sealed class McpServerIntegrationTests
 				["view"] = "content",
 				["format"] = "text"
 			});
-		Assert.True(stored.StructuredContent?.GetProperty("stored").GetBoolean());
-		var packId = stored.StructuredContent?.GetProperty("packId").GetString();
-		Assert.False(string.IsNullOrWhiteSpace(packId));
+		AssertTextOnlyResult(server, stored, "Pack stored as '");
+		Assert.Contains("Large.cs", Text(stored), StringComparison.Ordinal);
+		var packId = ExtractPackId(Text(stored));
 
 		var page = await server.CallAsync(
 			"read_pack",
-			new Dictionary<string, object?> { ["pack_id"] = packId!, ["start_line"] = "1" });
+			new Dictionary<string, object?> { ["pack_id"] = packId, ["start_line"] = "1" });
+		AssertTextOnlyResult(server, page, "Large.cs");
 		AssertRedactedAndSpotlighted(page);
 
 		var expired = await server.CallAsync(
@@ -162,6 +184,45 @@ public sealed class McpServerIntegrationTests
 		Assert.True(expired.IsError);
 		Assert.Null(expired.StructuredContent);
 		Assert.Contains(McpErrorCodes.PackExpired, Text(expired), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task SchemaAwareClientReceivesCompleteTreeFileAndSearchPayloads()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(
+			Path.Combine(project, "Sample.cs"),
+			"before-context\nneedle-value\nafter-context\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+		var tools = (await server.Client.ListToolsAsync(
+				options: null,
+				TestContext.Current.CancellationToken))
+			.ToDictionary(static tool => tool.Name, StringComparer.Ordinal);
+
+		var tree = ReadLikeSchemaAwareClient(
+			tools["get_tree"],
+			await server.CallAsync("get_tree"));
+		var file = ReadLikeSchemaAwareClient(
+			tools["get_file"],
+			await server.CallAsync(
+				"get_file",
+				new Dictionary<string, object?> { ["path"] = "Sample.cs" }));
+		var search = ReadLikeSchemaAwareClient(
+			tools["search_project"],
+			await server.CallAsync(
+				"search_project",
+				new Dictionary<string, object?>
+				{
+					["pattern"] = "needle-value",
+					["context_lines"] = 1
+				}));
+
+		Assert.Contains("Sample.cs", tree, StringComparison.Ordinal);
+		Assert.Contains("needle-value", file, StringComparison.Ordinal);
+		Assert.Contains("Sample.cs:2:needle-value", search, StringComparison.Ordinal);
+		Assert.Contains("Sample.cs-1-before-context", search, StringComparison.Ordinal);
+		Assert.Contains("Sample.cs-3-after-context", search, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -210,7 +271,7 @@ public sealed class McpServerIntegrationTests
 		Assert.True(
 			signatures.StructuredContent?.GetProperty("tokens").GetInt64() <
 			full.StructuredContent?.GetProperty("tokens").GetInt64());
-		Assert.Equal("signatures", packed.StructuredContent?.GetProperty("detail").GetString());
+		Assert.Null(packed.StructuredContent);
 		Assert.Contains("Calculate", Text(packed), StringComparison.Ordinal);
 		Assert.Contains("private const string Token", Text(packed), StringComparison.Ordinal);
 		Assert.DoesNotContain(bodyMarker, Text(packed), StringComparison.Ordinal);
@@ -265,6 +326,113 @@ public sealed class McpServerIntegrationTests
 		Assert.True(error.IsError);
 		Assert.Contains(McpErrorCodes.InvalidArguments, Text(error), StringComparison.Ordinal);
 		Assert.Contains("omit tracked_only", Text(error), StringComparison.Ordinal);
+	}
+
+	private static string ReadLikeSchemaAwareClient(McpClientTool tool, CallToolResult result)
+	{
+		if (tool.ProtocolTool.OutputSchema is null)
+		{
+			Assert.Null(result.StructuredContent);
+			return Text(result);
+		}
+
+		Assert.NotNull(result.StructuredContent);
+		return result.StructuredContent.Value.GetRawText();
+	}
+
+	private static string ExtractPackId(string text)
+	{
+		var match = Regex.Match(
+			text,
+			"Pack stored as '([^']+)' \\(\\d+ characters\\)\\.",
+			RegexOptions.CultureInvariant);
+		Assert.True(match.Success, $"Stored pack response did not contain a pack id: {text}");
+		return match.Groups[1].Value;
+	}
+
+	private static void AssertTextOnlyResult(
+		McpTestServer server,
+		CallToolResult result,
+		string expectedPayload)
+	{
+		Assert.NotEqual(true, result.IsError);
+		Assert.Null(result.StructuredContent);
+		Assert.Contains(expectedPayload, Text(result), StringComparison.Ordinal);
+
+		var wireResult = server.GetLastToolCallWireResult();
+		Assert.False(wireResult.TryGetProperty("structuredContent", out _));
+		var block = wireResult.GetProperty("content")[0];
+		Assert.Equal("text", block.GetProperty("type").GetString());
+		Assert.Equal(Text(result), block.GetProperty("text").GetString());
+	}
+
+	private static JsonElement AssertStructuredResult(
+		McpTestServer server,
+		CallToolResult result,
+		JsonElement outputSchema)
+	{
+		Assert.NotEqual(true, result.IsError);
+		Assert.NotNull(result.StructuredContent);
+		var structured = result.StructuredContent.Value;
+		AssertMatchesSchema(structured, outputSchema);
+
+		using var textDocument = JsonDocument.Parse(Text(result));
+		Assert.True(JsonElement.DeepEquals(structured, textDocument.RootElement));
+		var wireResult = server.GetLastToolCallWireResult();
+		Assert.True(wireResult.TryGetProperty("structuredContent", out var wireStructured));
+		Assert.True(JsonElement.DeepEquals(structured, wireStructured));
+		return structured;
+	}
+
+	private static void AssertMatchesSchema(JsonElement value, JsonElement schema, string path = "$")
+	{
+		var expectedType = schema.GetProperty("type").GetString();
+		switch (expectedType)
+		{
+			case "object":
+				Assert.True(value.ValueKind == JsonValueKind.Object, $"{path} must be an object.");
+				var properties = schema.GetProperty("properties");
+				if (schema.TryGetProperty("required", out var required))
+				{
+					foreach (var requiredProperty in required.EnumerateArray())
+					{
+						var name = requiredProperty.GetString()!;
+						Assert.True(value.TryGetProperty(name, out _), $"{path}.{name} is required.");
+					}
+				}
+
+				foreach (var property in value.EnumerateObject())
+				{
+					Assert.True(
+						properties.TryGetProperty(property.Name, out var propertySchema),
+						$"{path}.{property.Name} is not declared by the schema.");
+					AssertMatchesSchema(property.Value, propertySchema, $"{path}.{property.Name}");
+				}
+				break;
+			case "array":
+				Assert.True(value.ValueKind == JsonValueKind.Array, $"{path} must be an array.");
+				var itemSchema = schema.GetProperty("items");
+				var index = 0;
+				foreach (var item in value.EnumerateArray())
+					AssertMatchesSchema(item, itemSchema, $"{path}[{index++}]");
+				break;
+			case "string":
+				Assert.True(value.ValueKind == JsonValueKind.String, $"{path} must be a string.");
+				if (schema.TryGetProperty("enum", out var allowed))
+				{
+					Assert.Contains(
+						value.GetString(),
+						allowed.EnumerateArray().Select(static item => item.GetString()));
+				}
+				break;
+			case "integer":
+				Assert.True(
+					value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out _),
+					$"{path} must be an integer.");
+				break;
+			default:
+				throw new Xunit.Sdk.XunitException($"Unsupported contract schema type '{expectedType}' at {path}.");
+		}
 	}
 
 	private static StringComparison PathComparison =>
@@ -330,17 +498,20 @@ public sealed class McpServerIntegrationTests
 		private readonly Pipe _clientToServer;
 		private readonly Pipe _serverToClient;
 		private readonly Task _serverTask;
+		private readonly RecordingReadStream _recordingOutput;
 
 		private McpTestServer(
 			McpClient client,
 			Pipe clientToServer,
 			Pipe serverToClient,
-			Task serverTask)
+			Task serverTask,
+			RecordingReadStream recordingOutput)
 		{
 			Client = client;
 			_clientToServer = clientToServer;
 			_serverToClient = serverToClient;
 			_serverTask = serverTask;
+			_recordingOutput = recordingOutput;
 		}
 
 		public McpClient Client { get; }
@@ -356,15 +527,16 @@ public sealed class McpServerIntegrationTests
 				TestContext.Current.CancellationToken,
 				() => Path.Combine(sandbox, "app-data"),
 				Path.Combine(sandbox, "temp"));
+			var recordingOutput = new RecordingReadStream(serverToClient.Reader.AsStream());
 			var transport = new StreamClientTransport(
 				clientToServer.Writer.AsStream(),
-				serverToClient.Reader.AsStream());
+				recordingOutput);
 			var client = await McpClient.CreateAsync(
 				transport,
 				clientOptions: null,
 				loggerFactory: null,
 				TestContext.Current.CancellationToken);
-			return new McpTestServer(client, clientToServer, serverToClient, serverTask);
+			return new McpTestServer(client, clientToServer, serverToClient, serverTask, recordingOutput);
 		}
 
 		public Task<CallToolResult> CallAsync(
@@ -377,12 +549,90 @@ public sealed class McpServerIntegrationTests
 				options: null,
 				TestContext.Current.CancellationToken).AsTask();
 
+		public JsonElement GetLastToolCallWireResult()
+		{
+			var messages = _recordingOutput.GetRecordedText()
+				.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+			for (var index = messages.Length - 1; index >= 0; index--)
+			{
+				using var document = JsonDocument.Parse(messages[index].TrimEnd('\r'));
+				if (document.RootElement.TryGetProperty("result", out var result) &&
+				    result.ValueKind == JsonValueKind.Object &&
+				    result.TryGetProperty("content", out _))
+				{
+					return result.Clone();
+				}
+			}
+
+			throw new Xunit.Sdk.XunitException("No tools/call result was recorded on the MCP wire.");
+		}
+
 		public async ValueTask DisposeAsync()
 		{
 			await Client.DisposeAsync();
 			await _clientToServer.Writer.CompleteAsync();
 			await _serverToClient.Reader.CompleteAsync();
 			await _serverTask.WaitAsync(TimeSpan.FromSeconds(10));
+		}
+
+		private sealed class RecordingReadStream(Stream source) : Stream
+		{
+			private readonly MemoryStream _recording = new();
+			private readonly object _sync = new();
+
+			public string GetRecordedText()
+			{
+				lock (_sync)
+					return Encoding.UTF8.GetString(_recording.ToArray());
+			}
+
+			public override async ValueTask<int> ReadAsync(
+				Memory<byte> buffer,
+				CancellationToken cancellationToken = default)
+			{
+				var read = await source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+				if (read > 0)
+				{
+					lock (_sync)
+						_recording.Write(buffer.Span[..read]);
+				}
+				return read;
+			}
+
+			public override int Read(byte[] buffer, int offset, int count)
+			{
+				var read = source.Read(buffer, offset, count);
+				if (read > 0)
+				{
+					lock (_sync)
+						_recording.Write(buffer, offset, read);
+				}
+				return read;
+			}
+
+			protected override void Dispose(bool disposing)
+			{
+				if (disposing)
+				{
+					source.Dispose();
+					_recording.Dispose();
+				}
+				base.Dispose(disposing);
+			}
+
+			public override bool CanRead => source.CanRead;
+			public override bool CanSeek => false;
+			public override bool CanWrite => false;
+			public override long Length => throw new NotSupportedException();
+			public override long Position
+			{
+				get => throw new NotSupportedException();
+				set => throw new NotSupportedException();
+			}
+			public override void Flush() => throw new NotSupportedException();
+			public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+			public override void SetLength(long value) => throw new NotSupportedException();
+			public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 		}
 	}
 }
