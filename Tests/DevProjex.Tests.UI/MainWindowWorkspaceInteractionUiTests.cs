@@ -1044,7 +1044,10 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
         {
             var englishItem = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "LanguageEnMenuItem");
             var russianItem = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "LanguageRuMenuItem");
+            var simplifiedChineseItem = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "LanguageZhCnMenuItem");
+            var languageMenu = Assert.IsType<MenuItem>(englishItem.Parent);
 
+            Assert.Equal(20, languageMenu.Items.OfType<MenuItem>().Count());
             Assert.StartsWith("✓ ", englishItem.Header?.ToString());
             Assert.StartsWith("   ", russianItem.Header?.ToString());
 
@@ -1052,6 +1055,11 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
 
             Assert.StartsWith("   ", englishItem.Header?.ToString());
             Assert.StartsWith("✓ ", russianItem.Header?.ToString());
+
+            await UiTestDriver.RaiseMenuItemClickAsync(simplifiedChineseItem);
+
+            Assert.StartsWith("   ", russianItem.Header?.ToString());
+            Assert.StartsWith("✓ ", simplifiedChineseItem.Header?.ToString());
         }
         finally
         {

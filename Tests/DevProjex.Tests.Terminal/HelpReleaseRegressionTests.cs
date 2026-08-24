@@ -16,7 +16,8 @@ public sealed class HelpReleaseRegressionTests
 		Assert.Contains("Repeatable.", help, StringComparison.Ordinal);
 		Assert.Contains("--strip-blank-lines", help, StringComparison.Ordinal);
 		Assert.Contains("Remove blank lines from supported source files.", help, StringComparison.Ordinal);
-		Assert.Contains("--language <en|ru|de|fr|it|es|pt|pt-pt|kk|tg|uz>", help, StringComparison.Ordinal);
+		Assert.Contains("--language", help, StringComparison.Ordinal);
+		Assert.Contains("<en|ru|de|fr|it|es|pt|pt-pt|kk|tg|uz|zh-cn|zh-tw|ja|ko|tr|uk|pl|vi|id>", help, StringComparison.Ordinal);
 	}
 
 	[Fact]

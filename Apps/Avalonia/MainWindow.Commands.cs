@@ -83,6 +83,15 @@ public partial class MainWindow
     private void OnLangEs(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.Es);
     private void OnLangPt(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.Pt);
     private void OnLangPtPt(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.PtPt);
+    private void OnLangZhCn(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.ZhCn);
+    private void OnLangZhTw(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.ZhTw);
+    private void OnLangJa(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.Ja);
+    private void OnLangKo(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.Ko);
+    private void OnLangTr(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.Tr);
+    private void OnLangUk(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.Uk);
+    private void OnLangPl(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.Pl);
+    private void OnLangVi(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.Vi);
+    private void OnLangId(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.Id);
 
     private void OnAbout(object? sender, RoutedEventArgs e)
     {
