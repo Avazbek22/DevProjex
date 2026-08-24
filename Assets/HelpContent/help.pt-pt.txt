@@ -380,7 +380,7 @@ O DevProjex identifica primeiro o tipo de projeto a partir da sua estrutura e do
 * `pyproject.toml`
 * `Cargo.toml`
 
-As regras para a pilha correspondente são então aplicadas no âmbito do projeto detetado. Por exemplo, as regras . NET não se estendem a um projeto Python ou JavaScript vizinho.
+As regras para a pilha correspondente são então aplicadas no âmbito do projeto detetado. Por exemplo, as regras .NET não se estendem a um projeto Python ou JavaScript vizinho.
 
 O nome da pasta por si só nem sempre é suficiente. Nomes ambíguos como `build`, `vendor`, `packages`, `cache`, `pkg` ou `Library` também são verificados pelo seu conteúdo. Isto evita que uma pasta de utilizador comum seja ocultada apenas porque tem um nome semelhante.
 

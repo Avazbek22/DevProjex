@@ -862,7 +862,7 @@
   "Terminal.Cache.NotFound": "没有缓存的存储库匹配：{0}",
   "Terminal.Cache.ListIncomplete": "缓存列表不完整。无法读取的缓存根：{0}。",
   "Terminal.Cache.Result": "已删除：{0}。保留：{1}。失败：{2}。",
-  "Terminal.Progress.Clone.Start": "克隆{0} ...",
+  "Terminal.Progress.Clone.Start": "克隆{0}...",
   "Terminal.Progress.Clone.Completed": "克隆完成。",
   "Terminal.Analysis.Findings": "检测结果",
   "Terminal.Analysis.Finding": "检测结果",

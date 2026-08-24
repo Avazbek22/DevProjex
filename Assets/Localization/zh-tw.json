@@ -862,7 +862,7 @@
   "Terminal.Cache.NotFound": "沒有快取的儲存庫匹配：{0}",
   "Terminal.Cache.ListIncomplete": "快取列表不完整。無法讀取的快取根：{0}。",
   "Terminal.Cache.Result": "已刪除：{0}。保留：{1}。失敗：{2}。",
-  "Terminal.Progress.Clone.Start": "克隆{0} ...",
+  "Terminal.Progress.Clone.Start": "克隆{0}...",
   "Terminal.Progress.Clone.Completed": "克隆完成。",
   "Terminal.Analysis.Findings": "偵測結果",
   "Terminal.Analysis.Finding": "偵測結果",
