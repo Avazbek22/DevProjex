@@ -304,10 +304,13 @@ public sealed class ProjectCopyExportUiContractTests
 
     private static bool IsMenuItem(XElement element) => element.Name.LocalName == "MenuItem";
 
-    private static string? Attribute(XElement element, string localName) =>
-        element.Attributes().SingleOrDefault(attribute =>
-            attribute.Name.LocalName == localName ||
+    private static string? Attribute(XElement element, string localName)
+    {
+        var exact = element.Attributes().SingleOrDefault(attribute =>
+            attribute.Name.LocalName == localName);
+        return exact?.Value ?? element.Attributes().SingleOrDefault(attribute =>
             attribute.Name.LocalName.EndsWith($".{localName}", StringComparison.Ordinal))?.Value;
+    }
 
     private static string ReadRepositoryFile(params string[] parts) =>
         File.ReadAllText(Path.Combine([FindRepositoryRoot(), .. parts]));

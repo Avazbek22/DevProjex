@@ -8,7 +8,7 @@ internal interface IRefreshTreePipelineHost
 
     TreeRefreshInput? CaptureTreeRefreshInput(bool preserveCheckedPaths);
 
-    void BeforeFullTreeRefresh(bool preserveStatusMetrics = false);
+    void BeforeFullTreeRefresh(bool preserveStatusMetrics);
 
     void BeforeInteractiveFilterRefresh();
 

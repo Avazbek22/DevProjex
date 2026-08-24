@@ -205,6 +205,23 @@ internal sealed class AppearanceSettingsController(
 
     public void ResetThemeSettings()
     {
+        var resetViewSettings = new AppViewSettings
+        {
+            IsTerminalCommandPromptDismissed =
+                ViewSettings.IsTerminalCommandPromptDismissed
+        };
+        _userSettings.ViewSettings = resetViewSettings;
+        userSettingsStore.TryPersistViewSettings(_userSettings);
+        ApplyViewSettings(resetViewSettings);
+
+        var resetLanguage =
+            commandLineLanguage ?? AppLanguageUtility.DetectSystemLanguage();
+        if (localization.CurrentLanguage != resetLanguage)
+        {
+            localization.SetLanguage(resetLanguage);
+            viewModel.UpdateLocalization();
+        }
+
         var resetDocument = themeSettingsStore.ResetToDefaults();
         var resetSession =
             new ThemePresetSession(

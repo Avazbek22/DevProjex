@@ -141,6 +141,42 @@ public sealed class AvaloniaCompiledBindingContractTests
 	}
 
 	[Fact]
+	public void ViewMenu_GroupsAnimationPreferencesBeforeCompactMode()
+	{
+		var viewFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"Views",
+			"TopMenuBarView.axaml");
+		var document = XDocument.Load(viewFile);
+		var root = Assert.IsType<XElement>(document.Root);
+		var avaloniaNamespace = root.Name.Namespace;
+		var animations = root
+			.Descendants(avaloniaNamespace + "MenuItem")
+			.Single(element => element.Attribute("Name")?.Value == "AnimationsMenuItem");
+		var animationItems = animations
+			.Elements(avaloniaNamespace + "MenuItem")
+			.Select(element => element.Attribute("Name")?.Value)
+			.OfType<string>()
+			.ToArray();
+
+		Assert.Equal(
+			[
+				"TreeExpansionAnimationMenuItem",
+				"StatusMetricsAnimationMenuItem",
+				"ToolAnimationMenuItem"
+			],
+			animationItems);
+		var compactMode = root
+			.Descendants(avaloniaNamespace + "MenuItem")
+			.Single(element => element.Attribute("Name")?.Value == "CompactModeMenuItem");
+		Assert.Same(animations.Parent, compactMode.Parent);
+		Assert.True(
+			animations.ElementsBeforeSelf().Count() < compactMode.ElementsBeforeSelf().Count());
+	}
+
+	[Fact]
 	public void HelpMenu_UpdateIndicatorUsesKnownAvailabilityAndAccentColor()
 	{
 		var viewFile = Path.Combine(

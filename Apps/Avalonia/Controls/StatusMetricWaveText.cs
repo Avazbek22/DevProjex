@@ -151,6 +151,16 @@ public sealed class StatusMetricWaveText : Control
             _reservedContentWidth = 0;
         }
 
+        if (change.Property != TextProperty &&
+            (change.Property == LabelProperty ||
+             change.Property == RevealDirectionProperty ||
+             change.Property == TextFontFamilyProperty ||
+             change.Property == TextFontSizeProperty ||
+             change.Property == TextBrushProperty))
+        {
+            CompleteMetricRollForPresentationChange();
+        }
+
         if (change.Property == TextProperty)
         {
             var previousText = _lastText;
@@ -158,7 +168,7 @@ public sealed class StatusMetricWaveText : Control
             if (string.IsNullOrEmpty(Text))
                 ResetReveal();
             else if (!IsAnimationEnabled)
-                CompleteAnimationImmediately();
+                ApplyTextWithoutAnimation(previousText, Text);
             else if (_revealCompleted &&
                      !string.IsNullOrEmpty(previousText) &&
                      !string.Equals(previousText, Text, StringComparison.Ordinal))
@@ -188,7 +198,7 @@ public sealed class StatusMetricWaveText : Control
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         _isAttached = false;
-        StopAnimationTimer();
+        CompleteAnimationImmediately();
         base.OnDetachedFromVisualTree(e);
     }
 
@@ -261,13 +271,37 @@ public sealed class StatusMetricWaveText : Control
             return;
         }
 
-        if (!_isAttached || !IsVisible)
-            return;
-
         var previousLayout = BuildGlyphLayout(previousText);
         var currentLayout = BuildGlyphLayout(currentText);
         var previousRuns = FindNumericRuns(previousLayout);
         var currentRuns = FindNumericRuns(currentLayout);
+        if (!HaveEquivalentMetricShape(
+                previousLayout,
+                previousRuns,
+                currentLayout,
+                currentRuns))
+        {
+            _metricRollTransition = null;
+            StopAnimationTimer();
+            _reservedContentWidth = 0;
+            ApplyGlyphLayout(currentLayout);
+            _glyphsDirty = false;
+            InvalidateMeasure();
+            InvalidateVisual();
+            return;
+        }
+
+        if (!_isAttached || !IsVisible)
+        {
+            _metricRollTransition = null;
+            StopAnimationTimer();
+            ApplyGlyphLayout(currentLayout);
+            _glyphsDirty = false;
+            InvalidateMeasure();
+            InvalidateVisual();
+            return;
+        }
+
         var changedGlyphs = new bool[currentLayout.Glyphs.Count];
         var cells = new List<MetricRollCell>();
         var maximumDelayRank = 0;
@@ -668,6 +702,44 @@ public sealed class StatusMetricWaveText : Control
         return runs;
     }
 
+    private static bool HaveEquivalentMetricShape(
+        GlyphLayout previous,
+        IReadOnlyList<NumericGlyphRun> previousRuns,
+        GlyphLayout current,
+        IReadOnlyList<NumericGlyphRun> currentRuns)
+    {
+        if (previousRuns.Count != currentRuns.Count)
+            return false;
+
+        return string.Equals(
+            BuildMetricShape(previous, previousRuns),
+            BuildMetricShape(current, currentRuns),
+            StringComparison.Ordinal);
+    }
+
+    private static string BuildMetricShape(
+        GlyphLayout layout,
+        IReadOnlyList<NumericGlyphRun> runs)
+    {
+        var shape = new StringBuilder();
+        var runIndex = 0;
+        for (var glyphIndex = 0; glyphIndex < layout.Glyphs.Count;)
+        {
+            if (runIndex < runs.Count && glyphIndex == runs[runIndex].Start)
+            {
+                shape.Append('#');
+                glyphIndex = runs[runIndex].EndExclusive;
+                runIndex++;
+                continue;
+            }
+
+            shape.Append(layout.Glyphs[glyphIndex].Element);
+            glyphIndex++;
+        }
+
+        return shape.ToString();
+    }
+
     private static bool IsDigitGlyph(WaveGlyph glyph)
     {
         if (!glyph.IsMetricText)
@@ -742,6 +814,46 @@ public sealed class StatusMetricWaveText : Control
         StopAnimationTimer();
         _revealStarted = !string.IsNullOrEmpty(Text);
         _revealCompleted = _revealStarted;
+        _glyphsDirty = true;
+        InvalidateMeasure();
+        InvalidateVisual();
+    }
+
+    private void ApplyTextWithoutAnimation(string previousText, string currentText)
+    {
+        var currentLayout = BuildGlyphLayout(currentText);
+        if (!string.IsNullOrEmpty(previousText))
+        {
+            var previousLayout = BuildGlyphLayout(previousText);
+            if (!HaveEquivalentMetricShape(
+                    previousLayout,
+                    FindNumericRuns(previousLayout),
+                    currentLayout,
+                    FindNumericRuns(currentLayout)))
+            {
+                _reservedContentWidth = 0;
+            }
+        }
+
+        _metricRollTransition = null;
+        StopAnimationTimer();
+        _revealStarted = true;
+        _revealCompleted = true;
+        ApplyGlyphLayout(currentLayout);
+        _glyphsDirty = false;
+        InvalidateMeasure();
+        InvalidateVisual();
+    }
+
+    private void CompleteMetricRollForPresentationChange()
+    {
+        if (_metricRollTransition is null)
+            return;
+
+        _metricRollTransition = null;
+        StopAnimationTimer();
+        _glyphsDirty = true;
+        InvalidateMeasure();
         InvalidateVisual();
     }
 

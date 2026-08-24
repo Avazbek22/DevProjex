@@ -214,6 +214,8 @@ public sealed class InfrastructureJsonPersistenceTests
 		{
 			IsCompactMode = true,
 			IsTreeExpansionAnimationEnabled = false,
+			IsStatusMetricsAnimationEnabled = false,
+			IsToolAnimationEnabled = false,
 			IsTerminalCommandPromptDismissed = true,
 			PreferredLanguage = AppLanguage.Ru
 		};
@@ -236,12 +238,16 @@ public sealed class InfrastructureJsonPersistenceTests
 		Assert.False(preset.TryGetProperty("theme", out _));
 		Assert.False(preset.TryGetProperty("effect", out _));
 		Assert.True(viewSettings.GetProperty("isTerminalCommandPromptDismissed").GetBoolean());
+		Assert.False(viewSettings.GetProperty("isStatusMetricsAnimationEnabled").GetBoolean());
+		Assert.False(viewSettings.GetProperty("isToolAnimationEnabled").GetBoolean());
 		Assert.Equal("ru", viewSettings.GetProperty("preferredLanguage").GetString());
 		Assert.False(userDocument.RootElement.TryGetProperty("presets", out _));
 
 		var loaded = store.Load();
 		Assert.True(loaded.ViewSettings.IsCompactMode);
 		Assert.False(loaded.ViewSettings.IsTreeExpansionAnimationEnabled);
+		Assert.False(loaded.ViewSettings.IsStatusMetricsAnimationEnabled);
+		Assert.False(loaded.ViewSettings.IsToolAnimationEnabled);
 		Assert.True(loaded.ViewSettings.IsTerminalCommandPromptDismissed);
 		Assert.Equal(AppLanguage.Ru, loaded.ViewSettings.PreferredLanguage);
 		Assert.Equal(42, themeStore.Load().Presets["Dark.Acrylic"].BackgroundTransparency);

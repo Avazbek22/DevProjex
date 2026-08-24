@@ -112,6 +112,52 @@ public sealed class MainWindowApplySettingsMemoryCleanupUiTests
     }
 
     [AvaloniaFact]
+    public async Task ApplySettings_KeepsPublishedStatusMetricsVisibleAcrossFastAndStructuralPaths()
+    {
+        using var project = UiTestProject.CreateWithDynamicIgnoreEntries();
+        var (window, _) = await CreateMeasuredWindowAsync(project);
+        var viewModel = UiTestDriver.GetViewModel(window);
+        var visibilityChanges = new ConcurrentQueue<bool>();
+        PropertyChangedEventHandler recorder = (_, args) =>
+        {
+            if (string.Equals(
+                    args.PropertyName,
+                    nameof(viewModel.StatusMetricsVisible),
+                    StringComparison.Ordinal))
+            {
+                visibilityChanges.Enqueue(viewModel.StatusMetricsVisible);
+            }
+        };
+
+        try
+        {
+            await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
+            Assert.True(viewModel.StatusMetricsVisible);
+            viewModel.PropertyChanged += recorder;
+
+            await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(
+                window,
+                IgnoreOptionId.CompressCode);
+            await UiTestDriver.ClickApplySettingsAsync(window);
+            await UiTestDriver.WaitForStatusMetricsReadyAsync(window);
+
+            await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(
+                window,
+                IgnoreOptionId.EmptyFiles);
+            await UiTestDriver.ClickApplySettingsAsync(window);
+            await UiTestDriver.WaitForStatusMetricsReadyAsync(window);
+
+            Assert.True(viewModel.StatusMetricsVisible);
+            Assert.DoesNotContain(false, visibilityChanges);
+        }
+        finally
+        {
+            viewModel.PropertyChanged -= recorder;
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task SecretDiscovery_CompletedScanSchedulesCleanup()
     {
         using var project = UiTestProject.CreateWithSecretRedactionWorkspace();
@@ -215,7 +261,8 @@ public sealed class MainWindowApplySettingsMemoryCleanupUiTests
 				TestContext.Current.CancellationToken);
 
 			await Dispatcher.UIThread.InvokeAsync(
-				() => ((IRefreshTreePipelineHost)window).BeforeFullTreeRefresh());
+				() => ((IRefreshTreePipelineHost)window).BeforeFullTreeRefresh(
+					preserveStatusMetrics: false));
 			await analyzer.FirstScanCanceled.WaitAsync(
 				TimeSpan.FromSeconds(5),
 				TestContext.Current.CancellationToken);

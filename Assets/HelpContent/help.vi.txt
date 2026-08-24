@@ -264,8 +264,8 @@ Phạm vi: 6–28, đặt lại là 15.
 Làm cho giao diện người dùng dày đặc hơn: khoảng cách trong cây và cài đặt nhỏ hơn.
 Trong khi không gian làm việc xem trước đang hoạt động, Chế độ thu gọn sẽ tự động được bật.
 
-### Hoạt hình mở rộng cây
-Xoay hình chữ V một cách mượt mà và mở rộng hoặc thu gọn một nhánh cây trong khi di chuyển các hàng liền kề. Được bật theo mặc định; khi bị vô hiệu hóa, việc mở rộng sẽ diễn ra ngay lập tức.
+### Hoạt ảnh
+Trong “Xem → Hoạt ảnh”, bạn có thể điều khiển riêng việc mở rộng cây, bộ đếm trạng thái và lần xuất hiện đầu tiên của các công cụ. Cả ba hoạt ảnh đều được bật theo mặc định; hoạt ảnh bị tắt sẽ hiển thị trạng thái cuối ngay lập tức.
 
 ### Phông chữ cây
 Phông chữ cây được chọn thông qua “Chế độ xem → Phông chữ cây”.
@@ -547,7 +547,7 @@ Mica sử dụng vật liệu hệ thống của nền tảng và không có cà
 “Trợ giúp → Cập nhật” so sánh phiên bản hiện tại với bản phát hành GitHub ổn định mới nhất. Kiểm tra tự động bị tắt theo mặc định; khi được bật, DevProjex sẽ kiểm tra khi khởi động sau ít nhất bảy ngày kể từ lần kiểm tra thành công trước đó. Hộp kiểm có hiệu lực ngay lập tức. Kết quả thành công mới nhất được giữ lại giữa các lần chạy ứng dụng và không bị xóa do lỗi mạng sau này. Việc cài đặt vẫn là một hành động của người dùng.
 
 ### 16.2 Đặt lại cài đặt
-Đặt lại cài đặt (Trợ giúp → Đặt lại cài đặt) khôi phục chủ đề, hiệu ứng, Chế độ thu gọn, Hoạt ảnh mở rộng cây và ngôn ngữ giao diện mặc định. Hồ sơ dự án, lịch sử và tệp trên đĩa không bị thay đổi.
+Đặt lại cài đặt (Trợ giúp → Đặt lại cài đặt) khôi phục chủ đề, hiệu ứng, Chế độ thu gọn, cài đặt hoạt ảnh và ngôn ngữ giao diện mặc định. Hồ sơ dự án, lịch sử và tệp trên đĩa không bị thay đổi.
 
 ### 16.3 Đặt lại dữ liệu
 Đặt lại dữ liệu (Trợ giúp → Đặt lại dữ liệu) xóa các cấu hình tham số dự án cục bộ đã lưu:

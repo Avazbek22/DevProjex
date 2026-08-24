@@ -169,7 +169,8 @@
           <!-- Populated dynamically from the tree-font list. -->
         </MenuItem>
         <Separator IsVisible="{Binding IsTreePaneVisible}" />
-        <MenuItem Header="{Binding MenuViewAnimations}">
+        <MenuItem Name="AnimationsMenuItem"
+                  Header="{Binding MenuViewAnimations}">
           <MenuItem Name="TreeExpansionAnimationMenuItem"
                     Click="OnToggleTreeExpansionAnimation"
                     IsVisible="{Binding IsTreePaneVisible}">
@@ -179,14 +180,16 @@
                         IsHitTestVisible="False"/>
             </MenuItem.Header>
           </MenuItem>
-          <MenuItem Click="OnToggleStatusMetricsAnimation">
+          <MenuItem Name="StatusMetricsAnimationMenuItem"
+                    Click="OnToggleStatusMetricsAnimation">
             <MenuItem.Header>
               <CheckBox Content="{Binding MenuViewStatusMetricsAnimation}"
                         IsChecked="{Binding IsStatusMetricsAnimationEnabled}"
                         IsHitTestVisible="False"/>
             </MenuItem.Header>
           </MenuItem>
-          <MenuItem Click="OnToggleToolAnimation">
+          <MenuItem Name="ToolAnimationMenuItem"
+                    Click="OnToggleToolAnimation">
             <MenuItem.Header>
               <CheckBox Content="{Binding MenuViewToolAnimation}"
                         IsChecked="{Binding IsToolAnimationEnabled}"
@@ -194,7 +197,8 @@
             </MenuItem.Header>
           </MenuItem>
         </MenuItem>
-        <MenuItem Click="OnToggleCompactMode"
+        <MenuItem Name="CompactModeMenuItem"
+                  Click="OnToggleCompactMode"
                   IsVisible="{Binding IsTreePaneVisible}"
                   IsEnabled="{Binding CanToggleCompactMode}">
           <MenuItem.Header>

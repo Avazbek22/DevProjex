@@ -264,8 +264,8 @@ Rango: 6–28, el reinicio es 15.
 Hace que la interfaz de usuario sea más densa: menor espacio en el árbol y la configuración.
 Mientras el espacio de trabajo de vista previa está activo, el modo compacto se habilita automáticamente.
 
-### Animación de expansión del árbol
-Gira suavemente la flecha y expande o contrae una rama desplazando las filas adyacentes. Está habilitada de forma predeterminada; al deshabilitarla, la expansión es inmediata.
+### Animaciones
+«Ver → Animaciones» permite controlar por separado la expansión del árbol, los contadores de estado y la aparición inicial de las herramientas. Las tres animaciones están activadas de forma predeterminada; al desactivar una, se muestra de inmediato su estado final.
 
 ### fuente de árbol
 La fuente del árbol se selecciona mediante “Ver → Fuente del árbol”.
@@ -549,7 +549,7 @@ En el modo Transparencia, el fondo de la ventana principal permanece transparent
 «Ayuda → Actualizaciones» compara la versión actual con la última versión estable publicada en GitHub. Las comprobaciones automáticas están desactivadas de forma predeterminada; si se activan, DevProjex comprueba al iniciarse cuando han pasado al menos siete días desde la última comprobación correcta. La casilla se aplica inmediatamente. El último resultado correcto se conserva entre ejecuciones de la aplicación y no se borra por un error de red posterior. La instalación sigue siendo una acción del usuario.
 
 ### 16.2 Restablecer configuración
-Restablecer configuración (Ayuda → Restablecer configuración) restaura el tema, los efectos, el modo compacto, la animación de expansión del árbol y el idioma de la interfaz predeterminados. Los perfiles, el historial y los archivos del proyecto en el disco no se modifican.
+Restablecer configuración (Ayuda → Restablecer configuración) restaura el tema, los efectos, el modo compacto, la configuración de las animaciones y el idioma de la interfaz predeterminados. Los perfiles, el historial y los archivos del proyecto en el disco no se modifican.
 
 ### 16.3 Restablecer datos
 Restablecer datos (Ayuda → Restablecer datos) elimina los perfiles de parámetros del proyecto local guardados:

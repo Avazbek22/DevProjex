@@ -264,8 +264,8 @@ Aralık: 6–28, sıfırlama 15'tir.
 Kullanıcı arayüzünü daha yoğun hale getirir: ağaçta ve ayarlarda daha küçük boşluklar.
 Önizleme çalışma alanı etkinken Kompakt Mod otomatik olarak etkinleştirilir.
 
-### Ağaç genişletme animasyonu
-Şeriti düzgün bir şekilde döndürür ve bitişik sıraları hareket ettirirken bir ağaç dalını genişletir veya daraltır. Varsayılan olarak etkindir; devre dışı bırakıldığında genişleme anında gerçekleşir.
+### Animasyonlar
+“Görünüm → Animasyonlar” altında ağaç genişletme, durum sayaçları ve araçların ilk görünümü birbirinden bağımsız olarak ayarlanır. Üç animasyon da varsayılan olarak etkindir; devre dışı bırakılan bir animasyon son durumunu hemen gösterir.
 
 ### Ağaç yazı tipi
 Ağaç yazı tipi “Görünüm → Ağaç yazı tipi” aracılığıyla seçilir.
@@ -547,7 +547,7 @@ Mica, platformun sistem malzemesini kullanır ve ayrı bir arka plan şeffaflı�
 “Yardım → Güncellemeler” mevcut sürümü en son kararlı GitHub sürümüyle karşılaştırır. Otomatik denetimler varsayılan olarak kapalıdır; Etkinleştirildiğinde DevProjex, önceki başarılı kontrolün üzerinden en az yedi gün geçtikten sonra başlangıçta kontrol yapar. Onay kutusu hemen etkili olur. En son başarılı sonuç, uygulama çalıştırmaları arasında korunur ve daha sonraki bir ağ arızası nedeniyle silinmez. Kurulum bir kullanıcı eylemi olarak kalır.
 
 ### 16.2 Ayarları sıfırla
-Ayarları sıfırla (Yardım → Ayarları sıfırla) varsayılan temayı, efektleri, Kompakt modu, Ağaç genişletme animasyonunu ve arayüz dilini geri yükler. Proje profilleri, geçmiş ve diskteki dosyalar değiştirilmez.
+Ayarları sıfırla (Yardım → Ayarları sıfırla) varsayılan temayı, efektleri, Kompakt modu, animasyon ayarlarını ve arayüz dilini geri yükler. Proje profilleri, geçmiş ve diskteki dosyalar değiştirilmez.
 
 ### 16.3 Verileri sıfırla
 Verileri sıfırla (Yardım → Verileri sıfırla) kayıtlı yerel proje parametre profillerini kaldırır:

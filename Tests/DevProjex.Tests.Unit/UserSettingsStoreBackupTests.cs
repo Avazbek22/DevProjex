@@ -27,6 +27,8 @@ public sealed class UserSettingsStoreBackupTests
         {
             IsCompactMode = true,
             IsTreeExpansionAnimationEnabled = false,
+            IsStatusMetricsAnimationEnabled = false,
+            IsToolAnimationEnabled = false,
             PreferredLanguage = AppLanguage.De
         };
 
@@ -37,6 +39,8 @@ public sealed class UserSettingsStoreBackupTests
 
         Assert.True(recovered.ViewSettings.IsCompactMode);
         Assert.False(recovered.ViewSettings.IsTreeExpansionAnimationEnabled);
+        Assert.False(recovered.ViewSettings.IsStatusMetricsAnimationEnabled);
+        Assert.False(recovered.ViewSettings.IsToolAnimationEnabled);
         Assert.Equal(AppLanguage.De, recovered.ViewSettings.PreferredLanguage);
         Assert.DoesNotContain("{ invalid", File.ReadAllText(store.GetPath()), StringComparison.Ordinal);
     }

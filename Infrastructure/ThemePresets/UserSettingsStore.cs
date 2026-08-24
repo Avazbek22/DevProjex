@@ -4,7 +4,7 @@ namespace DevProjex.Infrastructure.ThemePresets;
 
 public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
 {
-    private const int CurrentSchemaVersion = 8;
+    private const int CurrentSchemaVersion = 9;
     private const string FolderName = "DevProjex";
     private const string FileName = "user-settings.json";
 
@@ -161,7 +161,9 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
         return database;
     }
 
-    private UserSettingsDb NormalizeAfterRead(UserSettingsDb database)
+    private UserSettingsDb NormalizeAfterRead(
+        UserSettingsDb database,
+        StoredAnimationPreferences animationPreferences)
     {
         var sourceSchemaVersion = database.SchemaVersion;
         Normalize(database);
@@ -176,6 +178,13 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
                 IsTreeExpansionAnimationEnabled = true
             };
         }
+
+        database.ViewSettings = database.ViewSettings with
+        {
+            IsStatusMetricsAnimationEnabled =
+                animationPreferences.StatusMetrics ?? true,
+            IsToolAnimationEnabled = animationPreferences.Tools ?? true
+        };
 
         return database;
     }
@@ -236,14 +245,57 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
     }
 
     private bool TryRead(string path, out UserSettingsDb database, out bool requiresRewrite)
-        => JsonStorePersistence.TryReadNormalized(
+    {
+        var animationPreferences = ReadStoredAnimationPreferences(path);
+        return JsonStorePersistence.TryReadNormalized(
             path,
             SerializerOptions,
             CreateDefaultDb,
-            NormalizeAfterRead,
+            value => NormalizeAfterRead(value, animationPreferences),
             out database,
             out requiresRewrite,
             JsonStorePersistence.SmallDocumentMaximumBytes);
+    }
+
+    private static StoredAnimationPreferences ReadStoredAnimationPreferences(string path)
+    {
+        try
+        {
+            if (!File.Exists(path) ||
+                new FileInfo(path).Length > JsonStorePersistence.SmallDocumentMaximumBytes)
+            {
+                return default;
+            }
+
+            using var document = JsonDocument.Parse(File.ReadAllText(path));
+            if (!document.RootElement.TryGetProperty("viewSettings", out var viewSettings) ||
+                viewSettings.ValueKind != JsonValueKind.Object)
+            {
+                return default;
+            }
+
+            return new StoredAnimationPreferences(
+                ReadOptionalBoolean(viewSettings, "isStatusMetricsAnimationEnabled"),
+                ReadOptionalBoolean(viewSettings, "isToolAnimationEnabled"));
+        }
+        catch
+        {
+            return default;
+        }
+    }
+
+    private static bool? ReadOptionalBoolean(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var value))
+            return null;
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            _ => null
+        };
+    }
 
     private bool EnsureStorageExistsCore(JsonStoreFileSet fileSet)
     {
@@ -281,4 +333,8 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
 
     private static bool TrySaveInternal(JsonStoreFileSet fileSet, UserSettingsDb database)
         => JsonStorePersistence.TryWriteAtomic(fileSet, database, SerializerOptions);
+
+    private readonly record struct StoredAnimationPreferences(
+        bool? StatusMetrics,
+        bool? Tools);
 }
