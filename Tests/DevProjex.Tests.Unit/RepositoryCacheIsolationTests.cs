@@ -145,16 +145,16 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 	[Fact]
 	public async Task GitSessionReturnsBeforeRepositorySizeRefreshAndBackgroundRefreshUpdatesIndex()
 	{
-		using var refreshStarted = new ManualResetEventSlim();
+		var refreshStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 		using var allowRefresh = new ManualResetEventSlim();
 		var refreshCompleted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 		var hooks = new RepoCacheTestHooks
 		{
 			BeforeRepositorySizeRefresh = _ =>
 			{
-				refreshStarted.Set();
+				refreshStarted.TrySetResult();
 				Assert.True(allowRefresh.Wait(
-					TimeSpan.FromSeconds(3),
+					BackgroundOperationTimeout,
 					TestContext.Current.CancellationToken));
 			},
 			AfterRepositorySizeRefresh = _ => refreshCompleted.TrySetResult()
@@ -177,14 +177,14 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 
 		Assert.NotNull(first);
 		Assert.NotNull(second);
-		Assert.True(refreshStarted.Wait(
-			TimeSpan.FromSeconds(2),
-			TestContext.Current.CancellationToken));
+		await refreshStarted.Task.WaitAsync(
+			BackgroundOperationTimeout,
+			TestContext.Current.CancellationToken);
 		Assert.Equal(initialSize, service.FindIndexedRepository(RepositoryUrl)!.ApproximateSizeBytes);
 
 		allowRefresh.Set();
 		await refreshCompleted.Task.WaitAsync(
-			TimeSpan.FromSeconds(3),
+			BackgroundOperationTimeout,
 			TestContext.Current.CancellationToken);
 		Assert.True(service.FindIndexedRepository(RepositoryUrl)!.ApproximateSizeBytes > initialSize);
 		Assert.True(Directory.Exists(basePath));

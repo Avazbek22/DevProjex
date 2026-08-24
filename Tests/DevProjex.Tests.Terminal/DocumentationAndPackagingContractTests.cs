@@ -101,6 +101,10 @@ public sealed class DocumentationAndPackagingContractTests
 			"DevProjexGrammarRuntimeIdentifier=$(RuntimeIdentifier)");
 		AssertProjectReferenceProperty(
 			desktopProject,
+			"DevProjex.Mcp.csproj",
+			"DevProjexGrammarRuntimeIdentifier=$(RuntimeIdentifier)");
+		AssertProjectReferenceProperty(
+			desktopProject,
 			"DevProjex.Terminal.csproj",
 			"DevProjexGrammarRuntimeIdentifier=$(RuntimeIdentifier)");
 		AssertProjectReferenceProperty(

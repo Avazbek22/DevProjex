@@ -41,6 +41,10 @@
       Include="..\..\Infrastructure\Infrastructure.csproj">
       <AdditionalProperties Condition="'$(RuntimeIdentifier)'!=''">DevProjexGrammarRuntimeIdentifier=$(RuntimeIdentifier)</AdditionalProperties>
     </ProjectReference>
+    <!-- Keep the flattened publish graph on the same RID-specific MCP configuration as Terminal. -->
+    <ProjectReference Include="..\Mcp\DevProjex.Mcp.csproj">
+      <AdditionalProperties Condition="'$(RuntimeIdentifier)'!=''">DevProjexGrammarRuntimeIdentifier=$(RuntimeIdentifier)</AdditionalProperties>
+    </ProjectReference>
     <ProjectReference
       Include="..\Terminal\DevProjex.Terminal.csproj">
       <AdditionalProperties Condition="'$(RuntimeIdentifier)'!=''">DevProjexGrammarRuntimeIdentifier=$(RuntimeIdentifier)</AdditionalProperties>
