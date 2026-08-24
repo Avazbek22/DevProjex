@@ -61,6 +61,7 @@
   "Menu.View.Animations": "動畫",
   "Menu.View.TreeExpansionAnimation": "樹展開動畫",
   "Menu.View.StatusMetricsAnimation": "計數器動畫",
+  "Menu.View.ToolAnimation": "工具動畫",
   "Menu.Theme": "主題",
   "Theme.ModeLabel": "主題模式",
   "Theme.EffectsLabel": "背景效果",

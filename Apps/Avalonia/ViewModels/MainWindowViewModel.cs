@@ -97,6 +97,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _isCompactMode;
     private bool _isTreeExpansionAnimationEnabled = true;
     private bool _isStatusMetricsAnimationEnabled = true;
+    private bool _isToolAnimationEnabled = true;
     private bool _filterVisible;
     private ExportFormat _selectedExportFormat = ExportFormat.Ascii;
     private PreviewContentMode _selectedPreviewContentMode = PreviewContentMode.Tree;
@@ -820,6 +821,17 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         {
             if (_isStatusMetricsAnimationEnabled == value) return;
             _isStatusMetricsAnimationEnabled = value;
+            RaisePropertyChanged();
+        }
+    }
+
+    public bool IsToolAnimationEnabled
+    {
+        get => _isToolAnimationEnabled;
+        set
+        {
+            if (_isToolAnimationEnabled == value) return;
+            _isToolAnimationEnabled = value;
             RaisePropertyChanged();
         }
     }
@@ -1685,6 +1697,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     public string MenuViewAnimations { get; private set; } = string.Empty;
     public string MenuViewTreeExpansionAnimation { get; private set; } = string.Empty;
     public string MenuViewStatusMetricsAnimation { get; private set; } = string.Empty;
+    public string MenuViewToolAnimation { get; private set; } = string.Empty;
     public string MenuOptions { get; private set; } = string.Empty;
     public string MenuOptionsTreeSettings { get; private set; } = string.Empty;
     public string MenuLanguage { get; private set; } = string.Empty;
@@ -1880,6 +1893,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
             _localization["Menu.View.TreeExpansionAnimation"];
         MenuViewStatusMetricsAnimation =
             _localization["Menu.View.StatusMetricsAnimation"];
+        MenuViewToolAnimation = _localization["Menu.View.ToolAnimation"];
         MenuOptions = _localization["Menu.Options"];
         MenuOptionsTreeSettings = _localization["Menu.Options.TreeSettings"];
         MenuLanguage = _localization["Menu.Language"];
@@ -2057,6 +2071,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         RaisePropertyChanged(nameof(MenuViewAnimations));
         RaisePropertyChanged(nameof(MenuViewTreeExpansionAnimation));
         RaisePropertyChanged(nameof(MenuViewStatusMetricsAnimation));
+        RaisePropertyChanged(nameof(MenuViewToolAnimation));
         RaisePropertyChanged(nameof(MenuOptions));
         RaisePropertyChanged(nameof(MenuOptionsTreeSettings));
         RaisePropertyChanged(nameof(MenuLanguage));

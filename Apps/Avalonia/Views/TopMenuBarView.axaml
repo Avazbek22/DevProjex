@@ -169,15 +169,6 @@
           <!-- Populated dynamically from the tree-font list. -->
         </MenuItem>
         <Separator IsVisible="{Binding IsTreePaneVisible}" />
-        <MenuItem Click="OnToggleCompactMode"
-                  IsVisible="{Binding IsTreePaneVisible}"
-                  IsEnabled="{Binding CanToggleCompactMode}">
-          <MenuItem.Header>
-            <CheckBox Content="{Binding MenuViewCompactMode}"
-                      IsChecked="{Binding IsCompactModeEffective}"
-                      IsHitTestVisible="False"/>
-          </MenuItem.Header>
-        </MenuItem>
         <MenuItem Header="{Binding MenuViewAnimations}">
           <MenuItem Name="TreeExpansionAnimationMenuItem"
                     Click="OnToggleTreeExpansionAnimation"
@@ -195,6 +186,22 @@
                         IsHitTestVisible="False"/>
             </MenuItem.Header>
           </MenuItem>
+          <MenuItem Click="OnToggleToolAnimation">
+            <MenuItem.Header>
+              <CheckBox Content="{Binding MenuViewToolAnimation}"
+                        IsChecked="{Binding IsToolAnimationEnabled}"
+                        IsHitTestVisible="False"/>
+            </MenuItem.Header>
+          </MenuItem>
+        </MenuItem>
+        <MenuItem Click="OnToggleCompactMode"
+                  IsVisible="{Binding IsTreePaneVisible}"
+                  IsEnabled="{Binding CanToggleCompactMode}">
+          <MenuItem.Header>
+            <CheckBox Content="{Binding MenuViewCompactMode}"
+                      IsChecked="{Binding IsCompactModeEffective}"
+                      IsHitTestVisible="False"/>
+          </MenuItem.Header>
         </MenuItem>
       </MenuItem>
       <MenuItem Header="{Binding MenuSearch}" IsEnabled="{Binding IsSearchAvailable}" Click="OnToggleSearch" />

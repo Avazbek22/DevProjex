@@ -1,3 +1,5 @@
+using Avalonia.Animation;
+using Avalonia.Animation.Easings;
 using Avalonia.Controls.Primitives.PopupPositioning;
 using DevProjex.Avalonia.Services;
 
@@ -6,6 +8,19 @@ namespace DevProjex.Avalonia.Views;
 public partial class TopMenuBarView : UserControl
 {
     private const double LargePopupViewportInset = 8;
+    private const double ProjectToolHiddenOffset = 7;
+    private static readonly TimeSpan ProjectToolFadeDuration =
+        UiTimingProfile.Scale(TimeSpan.FromMilliseconds(220));
+    private static readonly TimeSpan ProjectToolLiftDuration =
+        UiTimingProfile.Scale(TimeSpan.FromMilliseconds(280));
+    private static readonly TimeSpan ProjectToolStagger =
+        UiTimingProfile.Scale(TimeSpan.FromMilliseconds(65));
+    private readonly TranslateTransform _formatToolTransform;
+    private readonly TranslateTransform _previewToolTransform;
+    private readonly TranslateTransform _filterToolTransform;
+    private CancellationTokenSource? _projectToolsRevealCts;
+    private long _projectToolsRevealVersion;
+    private bool _projectToolsRevealPrepared;
     private bool _ownedControlHandlersAttached;
 
     public event EventHandler<RoutedEventArgs>? OpenFolderRequested;
@@ -28,6 +43,7 @@ public partial class TopMenuBarView : UserControl
     public event EventHandler<RoutedEventArgs>? ToggleCompactModeRequested;
     public event EventHandler<RoutedEventArgs>? ToggleTreeExpansionAnimationRequested;
     public event EventHandler<RoutedEventArgs>? ToggleStatusMetricsAnimationRequested;
+    public event EventHandler<RoutedEventArgs>? ToggleToolAnimationRequested;
     public event EventHandler<RoutedEventArgs>? ToggleSearchRequested;
     public event EventHandler<RoutedEventArgs>? ToggleSettingsRequested;
     public event EventHandler<RoutedEventArgs>? TogglePreviewRequested;
@@ -82,6 +98,9 @@ public partial class TopMenuBarView : UserControl
     public TopMenuBarView()
     {
         InitializeComponent();
+        _formatToolTransform = ConfigureProjectTool(FormatSegmentedControl);
+        _previewToolTransform = ConfigureProjectTool(PreviewToggleButton);
+        _filterToolTransform = ConfigureProjectTool(FilterToggleButton);
         HelpPopup.CustomPopupPlacementCallback = ConfigureLargePopupPlacement;
         HelpDocsPopup.CustomPopupPlacementCallback = ConfigureLargePopupPlacement;
         UpdatePopup.CustomPopupPlacementCallback = ConfigureLargePopupPlacement;
@@ -113,6 +132,75 @@ public partial class TopMenuBarView : UserControl
     public MenuItem? LanguagePlMenuItemControl => LanguagePlMenuItem;
     public MenuItem? LanguageViMenuItemControl => LanguageViMenuItem;
     public MenuItem? LanguageIdMenuItemControl => LanguageIdMenuItem;
+
+    public void PrepareProjectToolsReveal(bool animate)
+    {
+        Interlocked.Increment(ref _projectToolsRevealVersion);
+        CancelProjectToolsReveal();
+        _projectToolsRevealPrepared = animate;
+        SetProjectToolsImmediately(visible: !animate);
+    }
+
+    public async Task RevealProjectToolsAsync(
+        bool animate,
+        CancellationToken cancellationToken)
+    {
+        if (!_projectToolsRevealPrepared)
+            return;
+
+        if (!animate)
+        {
+            CompleteProjectToolsReveal();
+            return;
+        }
+
+        var version = Volatile.Read(ref _projectToolsRevealVersion);
+        var revealCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var previousCts = Interlocked.Exchange(ref _projectToolsRevealCts, revealCts);
+        previousCts?.Cancel();
+        previousCts?.Dispose();
+
+        try
+        {
+            await DispatcherTaskSchedulerProvider
+                .YieldAsync(DispatcherPriority.Render)
+                .WaitAsync(revealCts.Token);
+            RevealProjectTool(FilterToggleButton, _filterToolTransform);
+            await Task.Delay(ProjectToolStagger, revealCts.Token);
+            RevealProjectTool(PreviewToggleButton, _previewToolTransform);
+            await Task.Delay(ProjectToolStagger, revealCts.Token);
+            RevealProjectTool(FormatSegmentedControl, _formatToolTransform);
+            await Task.Delay(
+                ProjectToolLiftDuration + UiTimingProfile.AnimationSettleBuffer,
+                revealCts.Token);
+        }
+        catch (OperationCanceledException) when (revealCts.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            if (version == Volatile.Read(ref _projectToolsRevealVersion))
+            {
+                _projectToolsRevealPrepared = false;
+                SetProjectToolsImmediately(visible: true);
+            }
+
+            if (ReferenceEquals(
+                    Interlocked.CompareExchange(ref _projectToolsRevealCts, null, revealCts),
+                    revealCts))
+            {
+                revealCts.Dispose();
+            }
+        }
+    }
+
+    public void CompleteProjectToolsReveal()
+    {
+        Interlocked.Increment(ref _projectToolsRevealVersion);
+        CancelProjectToolsReveal();
+        _projectToolsRevealPrepared = false;
+        SetProjectToolsImmediately(visible: true);
+    }
 
     private void OnOpenFolder(object? sender, RoutedEventArgs e) => OpenFolderRequested?.Invoke(sender, e);
 
@@ -178,6 +266,11 @@ public partial class TopMenuBarView : UserControl
         object? sender,
         RoutedEventArgs e)
         => ToggleStatusMetricsAnimationRequested?.Invoke(sender, e);
+
+    private void OnToggleToolAnimation(
+        object? sender,
+        RoutedEventArgs e)
+        => ToggleToolAnimationRequested?.Invoke(sender, e);
 
     private void OnToggleSettings(object? sender, RoutedEventArgs e) => ToggleSettingsRequested?.Invoke(sender, e);
 
@@ -596,6 +689,75 @@ public partial class TopMenuBarView : UserControl
 
     private void OnDetachedFromVisualTree(object? sender, VisualTreeAttachmentEventArgs e)
     {
+        CompleteProjectToolsReveal();
         DetachOwnedControlHandlers();
+    }
+
+    private static TranslateTransform ConfigureProjectTool(Control control)
+    {
+        var transform = control.RenderTransform as TranslateTransform ?? new TranslateTransform();
+        control.RenderTransform = transform;
+        ConfigureProjectToolTransitions(control, transform);
+        return transform;
+    }
+
+    private static void ConfigureProjectToolTransitions(
+        Control control,
+        TranslateTransform transform)
+    {
+        control.Transitions =
+        [
+            new DoubleTransition
+            {
+                Property = Visual.OpacityProperty,
+                Duration = ProjectToolFadeDuration,
+                Easing = new CubicEaseOut()
+            }
+        ];
+        transform.Transitions =
+        [
+            new DoubleTransition
+            {
+                Property = TranslateTransform.YProperty,
+                Duration = ProjectToolLiftDuration,
+                Easing = new CubicEaseOut()
+            }
+        ];
+    }
+
+    private static void RevealProjectTool(
+        Control control,
+        TranslateTransform transform)
+    {
+        control.IsHitTestVisible = true;
+        control.Opacity = 1;
+        transform.Y = 0;
+    }
+
+    private void SetProjectToolsImmediately(bool visible)
+    {
+        SetProjectToolImmediately(FormatSegmentedControl, _formatToolTransform, visible);
+        SetProjectToolImmediately(PreviewToggleButton, _previewToolTransform, visible);
+        SetProjectToolImmediately(FilterToggleButton, _filterToolTransform, visible);
+    }
+
+    private static void SetProjectToolImmediately(
+        Control control,
+        TranslateTransform transform,
+        bool visible)
+    {
+        control.Transitions = null;
+        transform.Transitions = null;
+        control.Opacity = visible ? 1 : 0;
+        transform.Y = visible ? 0 : ProjectToolHiddenOffset;
+        control.IsHitTestVisible = visible;
+        ConfigureProjectToolTransitions(control, transform);
+    }
+
+    private void CancelProjectToolsReveal()
+    {
+        var revealCts = Interlocked.Exchange(ref _projectToolsRevealCts, null);
+        revealCts?.Cancel();
+        revealCts?.Dispose();
     }
 }

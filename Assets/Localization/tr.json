@@ -61,6 +61,7 @@
   "Menu.View.Animations": "Animasyonlar",
   "Menu.View.TreeExpansionAnimation": "Ağaç genişletme animasyonu",
   "Menu.View.StatusMetricsAnimation": "Sayaç animasyonu",
+  "Menu.View.ToolAnimation": "Araç animasyonu",
   "Menu.Theme": "Tema",
   "Theme.ModeLabel": "Tema modu",
   "Theme.EffectsLabel": "Arka plan efektleri",

@@ -205,6 +205,7 @@
                           ToggleCompactModeRequested="OnToggleCompactMode"
                           ToggleTreeExpansionAnimationRequested="OnToggleTreeExpansionAnimation"
                           ToggleStatusMetricsAnimationRequested="OnToggleStatusMetricsAnimation"
+                          ToggleToolAnimationRequested="OnToggleToolAnimation"
                           ToggleSearchRequested="OnToggleSearch"
                           ToggleSettingsRequested="OnToggleSettings"
                           TogglePreviewRequested="OnTogglePreview"

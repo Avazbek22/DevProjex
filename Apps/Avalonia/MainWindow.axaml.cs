@@ -1790,8 +1790,12 @@ public partial class MainWindow : Window
         Task projectLoadFinalizationTask,
         CancellationToken cancellationToken)
     {
+        Task settingsRevealTask;
         if (_workspacePresentation.IsSettingsAnimating)
-            return _workspacePresentation.SettingsAnimationTask;
+        {
+            settingsRevealTask = _workspacePresentation.SettingsAnimationTask;
+            return RevealProjectToolsAfterSettingsAsync(settingsRevealTask, cancellationToken);
+        }
 
         // A visible-width island is already on screen (notably during F5). Treating it as a new
         // reveal would delay metrics and make existing status values disappear and jump again.
@@ -1800,10 +1804,26 @@ public partial class MainWindow : Window
                 settingsAnimating: false,
                 _workspacePresentation.HasVisibleSettingsPanelWidth()))
         {
-            return Task.CompletedTask;
+            return RevealProjectToolsAfterSettingsAsync(Task.CompletedTask, cancellationToken);
         }
 
-        return AnimateSettingsPanelWhenTreeReadyAsync(projectLoadFinalizationTask, cancellationToken);
+        settingsRevealTask = AnimateSettingsPanelWhenTreeReadyAsync(
+            projectLoadFinalizationTask,
+            cancellationToken);
+        return RevealProjectToolsAfterSettingsAsync(settingsRevealTask, cancellationToken);
+    }
+
+    private async Task RevealProjectToolsAfterSettingsAsync(
+        Task settingsRevealTask,
+        CancellationToken cancellationToken)
+    {
+        await settingsRevealTask.WaitAsync(cancellationToken);
+        if (_topMenuBar is not null)
+        {
+            await _topMenuBar.RevealProjectToolsAsync(
+                _viewModel.IsToolAnimationEnabled,
+                cancellationToken);
+        }
     }
 
     private async Task AnimateSettingsPanelWhenTreeReadyAsync(
@@ -2047,6 +2067,7 @@ public partial class MainWindow : Window
 
     private void RestorePreviousProjectStateAfterCancellation(ProjectLoadCancellationSnapshot snapshot)
     {
+        _topMenuBar?.CompleteProjectToolsReveal();
         _currentPath = snapshot.Path;
         _currentProjectDisplayName = snapshot.ProjectDisplayName;
         _currentRepositoryUrl = snapshot.RepositoryUrl;
@@ -2186,6 +2207,7 @@ public partial class MainWindow : Window
 
     private void ResetToInitialProjectStateAfterCancellation()
     {
+        _topMenuBar?.CompleteProjectToolsReveal();
         _projectLoadCancellation.Clear();
         _metrics.CancelBackgroundCalculation();
         CancelPreviewRefresh();

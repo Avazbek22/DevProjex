@@ -61,6 +61,7 @@
   "Menu.View.Animations": "Анимации",
   "Menu.View.TreeExpansionAnimation": "Анимация раскрытия дерева",
   "Menu.View.StatusMetricsAnimation": "Анимация счётчиков",
+  "Menu.View.ToolAnimation": "Анимация инструментов",
   "Menu.Theme": "Тема",
   "Theme.ModeLabel": "Режим темы",
   "Theme.EffectsLabel": "Эффекты фона",

@@ -61,6 +61,7 @@
   "Menu.View.Animations": "アニメーション",
   "Menu.View.TreeExpansionAnimation": "ツリー展開アニメーション",
   "Menu.View.StatusMetricsAnimation": "カウンターアニメーション",
+  "Menu.View.ToolAnimation": "ツールアニメーション",
   "Menu.Theme": "テーマ",
   "Theme.ModeLabel": "テーマモード",
   "Theme.EffectsLabel": "背景効果",

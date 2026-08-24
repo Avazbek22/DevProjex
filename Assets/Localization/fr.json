@@ -61,6 +61,7 @@
   "Menu.View.Animations": "Animations",
   "Menu.View.TreeExpansionAnimation": "Animation de déploiement de l’arborescence",
   "Menu.View.StatusMetricsAnimation": "Animation des compteurs",
+  "Menu.View.ToolAnimation": "Animation des outils",
   "Menu.Theme": "Thème",
   "Theme.ModeLabel": "Mode du thème",
   "Theme.EffectsLabel": "Effets d'arrière-plan",

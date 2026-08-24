@@ -31,6 +31,13 @@ public partial class MainWindow
         RoutedEventArgs e)
         => _appearanceSettings.ToggleStatusMetricsAnimation();
 
+    private void OnToggleToolAnimation(object? sender, RoutedEventArgs e)
+    {
+        _appearanceSettings.ToggleToolAnimation();
+        if (!_viewModel.IsToolAnimationEnabled)
+            _topMenuBar?.CompleteProjectToolsReveal();
+    }
+
     private void OnThemeMenuClick(object? sender, RoutedEventArgs e)
     {
         _viewModel.UpdatePopoverOpen = false;
