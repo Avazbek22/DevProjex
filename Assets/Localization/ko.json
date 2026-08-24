@@ -122,7 +122,7 @@
   "Help.Help.CopyAll": "모두 복사",
   "Help.Help.CloseSearch": "검색 닫기",
   "Help.About.Title": "에 대한",
-  "Help.About.Body": "DevProjex 구조 분석, 유연한 파일 선택, 제외 구성, 트리 또는 콘텐츠 미리보기, 복사 및 내보내기 등 프로젝트 컨텍스트를 신속하게 준비하기 위한 크로스 플랫폼 오픈 소스 도구입니다. GUI, TUI 및 CLI 사용하면 로컬 폴더 및 Git 리포지토리로 작업하여 AI 보조자, 코드 검토, 학습 및 문서화를 위한 명확한 컨텍스트를 생성할 수 있습니다.\n\n처리는 로컬이며 열린 프로젝트는 읽기 전용으로 유지됩니다. DevProjex 소스 파일을 수정하거나 해당 콘텐츠를 외부 서비스에 업로드하지 않으며 원격 측정을 수집하지 않습니다.\n\n소스 코드는 연구 및 수정을 위해 공개되어 있습니다. 프로젝트 개발의 일부로 아키텍처 제안 및 개선(PR)을 환영합니다.\n\n스택: .NET 10 · Avalonia UI\n개발자: Avazbek Olimov (Avazbek22)\n저작권 © 2025– {0}Avazbek Olimov",
+  "Help.About.Body": "DevProjex 구조 분석, 유연한 파일 선택, 제외 구성, 트리 또는 콘텐츠 미리보기, 복사 및 내보내기 등 프로젝트 컨텍스트를 신속하게 준비하기 위한 크로스 플랫폼 오픈 소스 도구입니다. GUI, TUI 및 CLI 사용하면 로컬 폴더 및 Git 리포지토리로 작업하여 AI 보조자, 코드 검토, 학습 및 문서화를 위한 명확한 컨텍스트를 생성할 수 있습니다.\n\n처리는 로컬이며 열린 프로젝트는 읽기 전용으로 유지됩니다. DevProjex 소스 파일을 수정하거나 해당 콘텐츠를 외부 서비스에 업로드하지 않으며 원격 측정을 수집하지 않습니다.\n\n소스 코드는 연구 및 수정을 위해 공개되어 있습니다. 프로젝트 개발의 일부로 아키텍처 제안 및 개선(PR)을 환영합니다.\n\n스택: .NET 10 · Avalonia UI\n개발자: Avazbek Olimov (Avazbek22)\n저작권 © 2025– {0} Avazbek Olimov",
   "Help.About.OpenLink": "GitHub 저장소 열기",
   "Help.About.Support": "지원 (부스티)",
   "Dialog.SelectRoot": "프로젝트 루트 폴더를 선택하세요",

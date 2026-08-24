@@ -122,7 +122,7 @@
   "Help.Help.CopyAll": "全部複製",
   "Help.Help.CloseSearch": "關閉搜尋",
   "Help.About.Title": "關於",
-  "Help.About.Body": "DevProjex是一個跨平台開源工具，用於快速準備專案上下文：分析結構、靈活選擇檔案、設定排除、預覽、複製和匯出樹或內容。 GUI、 TUI和CLI可讓您使用本機資料夾和Git儲存庫，為 AI 助理、程式碼審查、學習和文件建立乾淨的上下文。\n\n處理是本地的，開啟的專案保持唯讀： DevProjex不會修改原始檔案或將其內容上傳到外部服務，並且不會收集遙測資料。\n\n原始碼開放供研究和修改；作為專案開發的一部分，歡迎提出架構建議和改進 (PR)。\n\n堆疊：.NET 10 · Avalonia UI\n開發商： Avazbek Olimov (Avazbek22)\n版權所有 © 2025– {0}阿瓦茲別克‧奧利莫夫",
+  "Help.About.Body": "DevProjex是一個跨平台開源工具，用於快速準備專案上下文：分析結構、靈活選擇檔案、設定排除、預覽、複製和匯出樹或內容。 GUI、 TUI和CLI可讓您使用本機資料夾和Git儲存庫，為 AI 助理、程式碼審查、學習和文件建立乾淨的上下文。\n\n處理是本地的，開啟的專案保持唯讀： DevProjex不會修改原始檔案或將其內容上傳到外部服務，並且不會收集遙測資料。\n\n原始碼開放供研究和修改；作為專案開發的一部分，歡迎提出架構建議和改進 (PR)。\n\n堆疊：.NET 10 · Avalonia UI\n開發者：Avazbek Olimov (Avazbek22)\n版權所有 © 2025– {0} Avazbek Olimov",
   "Help.About.OpenLink": "開啟GitHub儲存庫",
   "Help.About.Support": "支持（助推）",
   "Dialog.SelectRoot": "選擇項目根資料夾",
