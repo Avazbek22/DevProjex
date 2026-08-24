@@ -85,7 +85,7 @@ DevProjex bietet einen interaktiven Terminal-Arbeitsbereich und direkte Befehle 
 Wenn der Befehl bereits eingerichtet ist, öffnen Sie ein Terminal und führen Sie aus:
 `devprojex --help`
 
-So sehen Sie alle verfügbaren Befehle, Optionen und Beispiele.
+So sehen Sie die Befehle und Optionen der obersten Ebene. Die Optionen und Beispiele eines einzelnen Befehls zeigt `devprojex help <command>`.
 
 Beispiele:
 * `devprojex` — den interaktiven Terminal-Arbeitsbereich öffnen.
@@ -97,6 +97,7 @@ Beispiele:
 * `devprojex export project . --as zip -o ../devprojex-submission.zip` — den effektiven Projektbaum in ein ZIP-Archiv exportieren.
 * `devprojex export context https://github.com/owner/repo -o -` — ein entferntes Repository packen, ohne es selbst zu klonen.
 * `devprojex analyze . --git-mode tracked --exclude smart-ignore` — von Git verfolgte Dateien mit Smart Ignore analysieren.
+* `devprojex mcp --root .` — den lokalen MCP-Server im Nur-Lese-Modus starten, damit KI-Agenten das Projekt sicher lesen.
 
 Hinweise:
 * `.` bedeutet den aktuellen Terminal-Ordner;

@@ -85,7 +85,7 @@ DevProjex offre uno spazio di lavoro interattivo nel terminale e comandi diretti
 Se il comando è già configurato, apri un terminale ed esegui:
 `devprojex --help`
 
-Così vedrai tutti i comandi, le opzioni e gli esempi disponibili.
+Così vedrai i comandi e le opzioni di primo livello. Le opzioni e gli esempi di un singolo comando si mostrano con `devprojex help <command>`.
 
 Esempi:
 * `devprojex` — aprire lo spazio di lavoro interattivo del terminale.
@@ -97,6 +97,7 @@ Esempi:
 * `devprojex export project . --as zip -o ../devprojex-submission.zip` — esportare l’albero effettivo in un archivio ZIP.
 * `devprojex export context https://github.com/owner/repo -o -` — impacchettare un repository remoto senza clonarlo manualmente.
 * `devprojex analyze . --git-mode tracked --exclude smart-ignore` — analizzare i file tracciati da Git con Smart Ignore.
+* `devprojex mcp --root .` — avviare il server MCP locale in sola lettura perché gli agenti IA leggano il progetto in sicurezza.
 
 Note:
 * `.` indica la cartella corrente del terminale;

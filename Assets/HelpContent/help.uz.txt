@@ -85,7 +85,7 @@ DevProjex interaktiv terminal ish maydoni hamda skriptlar va CI uchun to‘g‘r
 Agar buyruq allaqachon sozlangan bo‘lsa, terminalni ochib bajaring:
 `devprojex --help`
 
-Shunda barcha mavjud buyruqlar, parametrlar va misollarni ko‘rasiz.
+Shunda yuqori darajadagi buyruqlar va parametrlarni ko‘rasiz. Muayyan buyruqning parametrlari va misollarini `devprojex help <command>` ko‘rsatadi.
 
 Misollar:
 * `devprojex` — interaktiv terminal ish maydonini ochish.
@@ -97,6 +97,7 @@ Misollar:
 * `devprojex export project . --as zip -o ../devprojex-submission.zip` — samarali loyiha daraxtini ZIP arxiviga eksport qilish.
 * `devprojex export context https://github.com/owner/repo -o -` — masofaviy repozitoriyni qo‘lda klonlamasdan qadoqlash.
 * `devprojex analyze . --git-mode tracked --exclude smart-ignore` — Git kuzatuvidagi fayllarni Smart Ignore bilan tahlil qilish.
+* `devprojex mcp --root .` — AI agentlar loyihani xavfsiz o‘qishi uchun mahalliy faqat o‘qiladigan MCP serverini ishga tushirish.
 
 Xususiyatlar:
 * `.` terminaldagi joriy papkani bildiradi;

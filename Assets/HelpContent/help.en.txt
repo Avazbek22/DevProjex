@@ -85,7 +85,7 @@ DevProjex provides an interactive Terminal Workspace and direct commands for scr
 If the command is already set up, open a terminal and run:
 `devprojex --help`
 
-This shows all available commands, options, and examples.
+This lists the top-level commands and options. Run `devprojex help <command>` to see that command's own options and examples.
 
 Examples:
 * `devprojex` — open the interactive Terminal Workspace.
@@ -97,6 +97,7 @@ Examples:
 * `devprojex export project . --as zip -o ../devprojex-submission.zip` — export the effective project tree to a ZIP archive.
 * `devprojex export context https://github.com/owner/repo -o -` — pack a remote repository without cloning it yourself.
 * `devprojex analyze . --git-mode tracked --exclude smart-ignore` — analyze tracked Git files with Smart Ignore.
+* `devprojex mcp --root .` — start the local read-only MCP server so AI agents can read the project safely.
 
 Notes:
 * `.` means the current terminal folder;
