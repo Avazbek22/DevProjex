@@ -25,7 +25,7 @@ internal sealed class DevProjexMcpTools(
 				{
 					path = root,
 					name = ResolveProjectName(root),
-					type = IsGitRepository(root) ? "git-repository" : "local-folder"
+					type = McpProjectService.IsGitRepository(root) ? "git-repository" : "local-folder"
 				})
 				.ToArray();
 			var profiles = roots.Roots
@@ -49,13 +49,15 @@ internal sealed class DevProjexMcpTools(
 				"project",
 				"include_patterns",
 				"exclude_patterns",
-				"max_depth");
+				"max_depth",
+				"tracked_only");
 			var plan = await projects.BuildPlanAsync(
 				arguments.OptionalString("project"),
 				paths: null,
 				arguments.OptionalStringArray("include_patterns"),
 				arguments.OptionalStringArray("exclude_patterns"),
 				profile: null,
+				arguments.OptionalBoolean("tracked_only", false),
 				cancellationToken).ConfigureAwait(false);
 			var depth = arguments.OptionalInteger("max_depth", 0, 1_000);
 			var renderedTree = depth is null
@@ -82,9 +84,11 @@ internal sealed class DevProjexMcpTools(
 		CancellationToken cancellationToken) =>
 		RunProjectAsync(async () =>
 		{
-			var arguments = SelectionArguments(request.Params, includeProfile: true);
+			var arguments = SelectionArguments(request.Params);
+			var detail = McpDetailPolicy.Parse(arguments.OptionalString("detail"));
 			var plan = await BuildSelectionAsync(arguments, cancellationToken).ConfigureAwait(false);
-			await using var prepared = await projects.PrepareAsync(plan, cancellationToken).ConfigureAwait(false);
+			var effectiveDetail = projects.ResolveDetail(plan, detail);
+			await using var prepared = await projects.PrepareAsync(plan, detail, cancellationToken).ConfigureAwait(false);
 			var analyzer = projects.CreatePreparedAnalyzer(prepared);
 			var metrics = await ProjectContentMetricsCalculator
 				.CalculateAsync(analyzer, plan.IncludedFiles, cancellationToken)
@@ -110,6 +114,7 @@ internal sealed class DevProjexMcpTools(
 				files = plan.IncludedFiles.Count,
 				characters = metrics.Chars,
 				tokens = metrics.Tokens,
+				detail = effectiveDetail.Token,
 				topFiles = top
 			};
 			var text = JsonSerializer.Serialize(envelope, new JsonSerializerOptions { WriteIndented = true });
@@ -130,8 +135,13 @@ internal sealed class DevProjexMcpTools(
 				"exclude_patterns",
 				"profile",
 				"view",
-				"format");
+				"format",
+				"detail",
+				"tracked_only");
+			var detail = McpDetailPolicy.Parse(arguments.OptionalString("detail"));
 			var plan = await BuildSelectionAsync(arguments, cancellationToken).ConfigureAwait(false);
+			var effectiveDetail = projects.ResolveDetail(plan, detail);
+			plan = projects.ApplyDetail(plan, effectiveDetail);
 			var view = ParseView(arguments.OptionalString("view") ?? "tree-content");
 			var format = ParseFormat(arguments.OptionalString("format") ?? "markdown");
 			var pack = await packs.CreateAsync(
@@ -152,6 +162,7 @@ internal sealed class DevProjexMcpTools(
 				files = plan.IncludedFiles.Count,
 				characters = pack.Characters,
 				lines = pack.Lines,
+				detail = effectiveDetail.Token,
 				stored = pack.Characters > MaximumInlinePackCharacters,
 				packId = pack.Characters > MaximumInlinePackCharacters ? pack.Id : null
 			};
@@ -222,7 +233,8 @@ internal sealed class DevProjexMcpTools(
 				"exclude_patterns",
 				"context_lines",
 				"ignore_case",
-				"max_results");
+				"max_results",
+				"tracked_only");
 			var pattern = arguments.RequiredString("pattern");
 			var contextLines = arguments.OptionalInteger("context_lines", 0, 20) ?? 2;
 			var ignoreCase = arguments.OptionalBoolean("ignore_case", true);
@@ -235,6 +247,7 @@ internal sealed class DevProjexMcpTools(
 				arguments.OptionalStringArray("include_patterns"),
 				arguments.OptionalStringArray("exclude_patterns"),
 				profile: null,
+				arguments.OptionalBoolean("tracked_only", false),
 				cancellationToken).ConfigureAwait(false);
 			await using var prepared = await projects.PrepareAsync(plan, cancellationToken).ConfigureAwait(false);
 			var analyzer = projects.CreatePreparedAnalyzer(prepared);
@@ -288,6 +301,7 @@ internal sealed class DevProjexMcpTools(
 				includePatterns: null,
 				excludePatterns: null,
 				profile: null,
+				trackedOnly: false,
 				cancellationToken).ConfigureAwait(false);
 			var file = projects.ResolveFile(plan, arguments.RequiredString("path"));
 			await using var prepared = await projects.PrepareAsync(plan with { IncludedFiles = [file] }, cancellationToken)
@@ -323,16 +337,16 @@ internal sealed class DevProjexMcpTools(
 				});
 		});
 
-	private McpJsonArguments SelectionArguments(CallToolRequestParams request, bool includeProfile) =>
-		includeProfile
-			? McpJsonArguments.Create(
-				request,
-				"project",
-				"paths",
-				"include_patterns",
-				"exclude_patterns",
-				"profile")
-			: McpJsonArguments.Create(request, "project", "paths", "include_patterns", "exclude_patterns");
+	private McpJsonArguments SelectionArguments(CallToolRequestParams request) =>
+		McpJsonArguments.Create(
+			request,
+			"project",
+			"paths",
+			"include_patterns",
+			"exclude_patterns",
+			"profile",
+			"detail",
+			"tracked_only");
 
 	private Task<ProjectContextPlan> BuildSelectionAsync(
 		McpJsonArguments arguments,
@@ -343,6 +357,7 @@ internal sealed class DevProjexMcpTools(
 			arguments.OptionalStringArray("include_patterns"),
 			arguments.OptionalStringArray("exclude_patterns"),
 			arguments.OptionalString("profile"),
+			arguments.OptionalBoolean("tracked_only", false),
 			cancellationToken);
 
 	private async Task<CallToolResult> RunProjectAsync(Func<Task<CallToolResult>> operation)
@@ -460,9 +475,6 @@ internal sealed class DevProjexMcpTools(
 		.Replace("\r", "\\r", StringComparison.Ordinal)
 		.Replace("\n", "\\n", StringComparison.Ordinal)
 		.Replace("\t", "\\t", StringComparison.Ordinal);
-
-	private static bool IsGitRepository(string root) =>
-		Directory.Exists(Path.Combine(root, ".git")) || File.Exists(Path.Combine(root, ".git"));
 
 	private static string ResolveProjectName(string root)
 	{

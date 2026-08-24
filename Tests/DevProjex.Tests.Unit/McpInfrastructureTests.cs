@@ -1,3 +1,5 @@
+using DevProjex.Application.Compression;
+using DevProjex.Application.Context;
 using DevProjex.Mcp;
 using ModelContextProtocol.Protocol;
 
@@ -65,6 +67,77 @@ public sealed class McpInfrastructureTests
 		var arguments = McpJsonArguments.Create(request, "limit");
 
 		Assert.Equal(expected, arguments.OptionalInteger("limit", 1, 100));
+	}
+
+	[Theory]
+	[InlineData(true, true)]
+	[InlineData(false, false)]
+	[InlineData("true", true)]
+	[InlineData("false", false)]
+	public void JsonArgumentsAcceptBooleanValuesAndExactBooleanStrings(object value, bool expected)
+	{
+		var request = new CallToolRequestParams
+		{
+			Name = "test",
+			Arguments = new Dictionary<string, JsonElement>
+			{
+				["enabled"] = JsonSerializer.SerializeToElement(value)
+			}
+		};
+
+		var arguments = McpJsonArguments.Create(request, "enabled");
+
+		Assert.Equal(expected, arguments.OptionalBoolean("enabled", defaultValue: false));
+	}
+
+	[Theory]
+	[InlineData("TRUE")]
+	[InlineData("yes")]
+	[InlineData(1)]
+	public void JsonArgumentsRejectOtherBooleanRepresentations(object value)
+	{
+		var request = new CallToolRequestParams
+		{
+			Name = "test",
+			Arguments = new Dictionary<string, JsonElement>
+			{
+				["enabled"] = JsonSerializer.SerializeToElement(value)
+			}
+		};
+
+		var exception = Assert.Throws<McpToolException>(() =>
+			McpJsonArguments.Create(request, "enabled").OptionalBoolean("enabled", defaultValue: false));
+
+		Assert.Equal(McpErrorCodes.InvalidArguments, exception.Code);
+	}
+
+	[Fact]
+	public void DetailPolicyMapsLevelsAndUnionsThemWithProfileTransformations()
+	{
+		var full = McpDetailPolicy.Resolve(new ProjectSelectionSpec(), McpDetailLevel.Full);
+		var compact = McpDetailPolicy.Resolve(new ProjectSelectionSpec(), McpDetailLevel.Compact);
+		var signatures = McpDetailPolicy.Resolve(new ProjectSelectionSpec(), McpDetailLevel.Signatures);
+		var union = McpDetailPolicy.Resolve(
+			new ProjectSelectionSpec(CompressCode: true),
+			McpDetailLevel.Compact);
+
+		Assert.Equal(CodeTransformKinds.None, full.Kinds);
+		Assert.Equal("full", full.Token);
+		Assert.Equal(CodeTransformKinds.Comments | CodeTransformKinds.BlankLines, compact.Kinds);
+		Assert.Equal("compact", compact.Token);
+		Assert.Equal(
+			CodeTransformKinds.Bodies | CodeTransformKinds.Comments | CodeTransformKinds.BlankLines,
+			signatures.Kinds);
+		Assert.Equal(signatures, union);
+	}
+
+	[Fact]
+	public void DetailPolicyRejectsUnknownTokensWithActionableValues()
+	{
+		var exception = Assert.Throws<McpToolException>(() => McpDetailPolicy.Parse("summary"));
+
+		Assert.Equal(McpErrorCodes.InvalidArguments, exception.Code);
+		Assert.Contains("full, compact, signatures", exception.Message, StringComparison.Ordinal);
 	}
 
 	[Fact]

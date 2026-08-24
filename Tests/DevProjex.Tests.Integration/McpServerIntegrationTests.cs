@@ -53,6 +53,47 @@ public sealed class McpServerIntegrationTests
 			200_000,
 			tools.Single(static tool => tool.Name == "read_pack")
 				.ProtocolTool.Meta!["anthropic/maxResultSizeChars"]!.GetValue<int>());
+
+		var expectedParameters = new Dictionary<string, string[]>(StringComparer.Ordinal)
+		{
+			["list_projects"] = [],
+			["get_tree"] = ["project", "include_patterns", "exclude_patterns", "tracked_only", "max_depth"],
+			["analyze"] = ["project", "paths", "include_patterns", "exclude_patterns", "profile", "detail", "tracked_only"],
+			["pack_context"] = ["project", "paths", "include_patterns", "exclude_patterns", "profile", "detail", "tracked_only", "view", "format"],
+			["read_pack"] = ["pack_id", "start_line", "end_line"],
+			["search_project"] = ["project", "pattern", "include_patterns", "exclude_patterns", "tracked_only", "context_lines", "ignore_case", "max_results"],
+			["get_file"] = ["project", "path", "start_line", "end_line"]
+		};
+		foreach (var tool in tools)
+		{
+			var schema = tool.ProtocolTool.InputSchema;
+			Assert.Equal(
+				expectedParameters[tool.Name],
+				schema.GetProperty("properties").EnumerateObject().Select(static property => property.Name));
+			var required = schema.TryGetProperty("required", out var requiredElement)
+				? requiredElement.EnumerateArray().Select(static item => item.GetString()).ToArray()
+				: [];
+			Assert.DoesNotContain("detail", required);
+			Assert.DoesNotContain("tracked_only", required);
+		}
+		var searchBoolean = tools.Single(static tool => tool.Name == "search_project")
+			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("ignore_case");
+		Assert.Equal(2, searchBoolean.GetProperty("oneOf").GetArrayLength());
+		foreach (var name in new[] { "analyze", "pack_context" })
+		{
+			var detail = tools.Single(tool => tool.Name == name)
+				.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("detail");
+			Assert.Equal("full", detail.GetProperty("default").GetString());
+			Assert.Equal(
+				["full", "compact", "signatures"],
+				detail.GetProperty("enum").EnumerateArray().Select(static item => item.GetString()));
+		}
+		foreach (var name in new[] { "get_tree", "analyze", "pack_context", "search_project" })
+		{
+			var trackedOnly = tools.Single(tool => tool.Name == name)
+				.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("tracked_only");
+			Assert.Equal(2, trackedOnly.GetProperty("oneOf").GetArrayLength());
+		}
 	}
 
 	[Fact]
@@ -123,6 +164,109 @@ public sealed class McpServerIntegrationTests
 		Assert.Contains(McpErrorCodes.PackExpired, Text(expired), StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public async Task DetailSignaturesCompressesMetricsAndContentWithoutWeakeningRedaction()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		const string bodyMarker = "body-marker-that-must-be-collapsed";
+		File.WriteAllText(
+			Path.Combine(project, "Sample.cs"),
+			$$"""
+			internal static class Sample
+			{
+				private const string Token = "{{Secret}}";
+
+				// This comment is removed at compact detail.
+				public static int Calculate(int value)
+				{
+					var first = value + 10;
+					var second = first * 20;
+					var marker = "{{bodyMarker}}";
+					return second + marker.Length;
+				}
+			}
+			""");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var full = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["paths"] = new[] { "Sample.cs" }, ["detail"] = "full" });
+		var signatures = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["paths"] = new[] { "Sample.cs" }, ["detail"] = "signatures" });
+		var packed = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "Sample.cs" },
+				["view"] = "content",
+				["format"] = "text",
+				["detail"] = "signatures"
+			});
+
+		Assert.Equal("full", full.StructuredContent?.GetProperty("detail").GetString());
+		Assert.Equal("signatures", signatures.StructuredContent?.GetProperty("detail").GetString());
+		Assert.True(
+			signatures.StructuredContent?.GetProperty("tokens").GetInt64() <
+			full.StructuredContent?.GetProperty("tokens").GetInt64());
+		Assert.Equal("signatures", packed.StructuredContent?.GetProperty("detail").GetString());
+		Assert.Contains("Calculate", Text(packed), StringComparison.Ordinal);
+		Assert.Contains("private const string Token", Text(packed), StringComparison.Ordinal);
+		Assert.DoesNotContain(bodyMarker, Text(packed), StringComparison.Ordinal);
+		AssertRedactedAndSpotlighted(packed);
+	}
+
+	[Fact]
+	public async Task TrackedOnlyStringFiltersEverySelectionToolAndRejectsNonGitRoots()
+	{
+		using var workspace = new TemporaryDirectory();
+		var repository = workspace.CreateDirectory("repository");
+		File.WriteAllText(Path.Combine(repository, "Tracked.cs"), "// tracked-marker");
+		File.WriteAllText(Path.Combine(repository, "Untracked.cs"), "// untracked-marker");
+		InitializeGitIndex(repository, "Tracked.cs");
+
+		await using (var server = await McpTestServer.StartAsync(repository, workspace.Path))
+		{
+			var tracked = new Dictionary<string, object?> { ["tracked_only"] = "true" };
+			var tree = await server.CallAsync("get_tree", tracked);
+			var pack = await server.CallAsync(
+				"pack_context",
+				new Dictionary<string, object?>
+				{
+					["tracked_only"] = "true",
+					["view"] = "content",
+					["format"] = "text"
+				});
+			var search = await server.CallAsync(
+				"search_project",
+				new Dictionary<string, object?>
+				{
+					["tracked_only"] = "true",
+					["pattern"] = "tracked-marker|untracked-marker",
+					["ignore_case"] = "false"
+				});
+
+			Assert.Contains("Tracked.cs", Text(tree), StringComparison.Ordinal);
+			Assert.DoesNotContain("Untracked.cs", Text(tree), StringComparison.Ordinal);
+			Assert.Contains("tracked-marker", Text(pack), StringComparison.Ordinal);
+			Assert.DoesNotContain("untracked-marker", Text(pack), StringComparison.Ordinal);
+			Assert.Contains("Tracked.cs:1:", Text(search), StringComparison.Ordinal);
+			Assert.DoesNotContain("Untracked.cs", Text(search), StringComparison.Ordinal);
+		}
+
+		var localFolder = workspace.CreateDirectory("local-folder");
+		File.WriteAllText(Path.Combine(localFolder, "Local.cs"), "local");
+		await using var localServer = await McpTestServer.StartAsync(localFolder, workspace.Path);
+		var error = await localServer.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["tracked_only"] = "true" });
+
+		Assert.True(error.IsError);
+		Assert.Contains(McpErrorCodes.InvalidArguments, Text(error), StringComparison.Ordinal);
+		Assert.Contains("omit tracked_only", Text(error), StringComparison.Ordinal);
+	}
+
 	private static StringComparison PathComparison =>
 		OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
@@ -143,6 +287,42 @@ public sealed class McpServerIntegrationTests
 		AssertSpotlighted(result);
 		Assert.DoesNotContain(Secret, Text(result), StringComparison.Ordinal);
 		Assert.DoesNotContain(PrivateEmail, Text(result), StringComparison.Ordinal);
+	}
+
+	private static void InitializeGitIndex(string repository, params string[] trackedPaths)
+	{
+		try
+		{
+			RunGit(repository, "init", "--quiet");
+			RunGit(repository, ["add", "-f", "--", .. trackedPaths]);
+		}
+		catch (System.ComponentModel.Win32Exception)
+		{
+			Assert.Skip("Git is not available in this test environment.");
+		}
+	}
+
+	private static void RunGit(string repository, params string[] arguments)
+	{
+		var startInfo = new ProcessStartInfo("git")
+		{
+			WorkingDirectory = repository,
+			UseShellExecute = false,
+			CreateNoWindow = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true
+		};
+		foreach (var argument in arguments)
+			startInfo.ArgumentList.Add(argument);
+		using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Could not start git.");
+		var output = process.StandardOutput.ReadToEnd();
+		var error = process.StandardError.ReadToEnd();
+		if (!process.WaitForExit(20_000))
+		{
+			process.Kill(entireProcessTree: true);
+			throw new TimeoutException("Git command did not complete within 20 seconds.");
+		}
+		Assert.True(process.ExitCode == 0, $"git failed ({process.ExitCode}): {error}{output}");
 	}
 
 	private sealed class McpTestServer : IAsyncDisposable

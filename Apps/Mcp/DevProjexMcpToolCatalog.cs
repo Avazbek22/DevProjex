@@ -126,6 +126,23 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
+	private const string DetailProperty = """
+	"detail": {
+	  "type": "string",
+	  "enum": ["full", "compact", "signatures"],
+	  "default": "full",
+	  "description": "Collapse code to signatures or strip comments/blank lines to fit large projects into a budget; unsupported languages are returned unchanged."
+	}
+	""";
+
+	private const string TrackedOnlyProperty = """
+	"tracked_only": {
+	  "description": "Restrict results to files tracked by Git; accepts a boolean or the string 'true' or 'false'.",
+	  "default": false,
+	  "oneOf": [ { "type": "boolean" }, { "type": "string", "enum": ["true", "false"] } ]
+	}
+	""";
+
 	private static readonly string ListProjectsInput = EmptyInput;
 
 	private static readonly string GetTreeInput = $$"""
@@ -135,6 +152,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{ProjectProperty}},
 	    {{IncludeProperty}},
 	    {{ExcludeProperty}},
+	    {{TrackedOnlyProperty}},
 	    "max_depth": {
 	      "description": "Maximum tree depth from 0 to 1000; accepts an integer or numeric string.",
 	      "oneOf": [ { "type": "integer", "minimum": 0, "maximum": 1000 }, { "type": "string", "pattern": "^[0-9]+$" } ]
@@ -144,7 +162,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
-	private static readonly string SelectionInput = $$"""
+	private static readonly string AnalyzeInput = $$"""
 	{
 	  "type": "object",
 	  "properties": {
@@ -152,13 +170,13 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{PathsProperty}},
 	    {{IncludeProperty}},
 	    {{ExcludeProperty}},
-	    {{ProfileProperty}}
+	    {{ProfileProperty}},
+	    {{DetailProperty}},
+	    {{TrackedOnlyProperty}}
 	  },
 	  "additionalProperties": false
 	}
 	""";
-
-	private static readonly string AnalyzeInput = SelectionInput;
 
 	private static readonly string PackContextInput = $$"""
 	{
@@ -169,6 +187,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{IncludeProperty}},
 	    {{ExcludeProperty}},
 	    {{ProfileProperty}},
+	    {{DetailProperty}},
+	    {{TrackedOnlyProperty}},
 	    "view": { "type": "string", "enum": ["tree", "content", "tree-content"], "default": "tree-content" },
 	    "format": { "type": "string", "enum": ["text", "markdown", "json", "xml"], "default": "markdown" }
 	  },
@@ -197,8 +217,9 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    "pattern": { "type": "string", "description": "A .NET regular expression evaluated against redacted text with a 2-second timeout." },
 	    {{IncludeProperty}},
 	    {{ExcludeProperty}},
+	    {{TrackedOnlyProperty}},
 	    "context_lines": { "description": "Context lines from 0 to 20; default 2; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 0, "maximum": 20 }, { "type": "string", "pattern": "^[0-9]+$" } ] },
-	    "ignore_case": { "type": "boolean", "default": true },
+	    "ignore_case": { "description": "Case-insensitive matching; accepts a boolean or the string 'true' or 'false'.", "default": true, "oneOf": [ { "type": "boolean" }, { "type": "string", "enum": ["true", "false"] } ] },
 	    "max_results": { "description": "Maximum matches from 1 to 200; default 50; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1, "maximum": 200 }, { "type": "string", "pattern": "^[0-9]+$" } ] }
 	  },
 	  "required": ["pattern"],
@@ -275,6 +296,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    "files": { "type": "integer" },
 	    "characters": { "type": "integer" },
 	    "tokens": { "type": "integer" },
+	    "detail": { "type": "string", "enum": ["full", "compact", "signatures"] },
 	    "topFiles": {
 	      "type": "array",
 	      "items": {
@@ -288,7 +310,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	      }
 	    }
 	  },
-	  "required": ["files", "characters", "tokens", "topFiles"],
+	  "required": ["files", "characters", "tokens", "detail", "topFiles"],
 	  "additionalProperties": false
 	}
 	""";
@@ -300,10 +322,11 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    "files": { "type": "integer" },
 	    "characters": { "type": "integer" },
 	    "lines": { "type": "integer" },
+	    "detail": { "type": "string", "enum": ["full", "compact", "signatures"] },
 	    "stored": { "type": "boolean" },
 	    "packId": { "type": ["string", "null"] }
 	  },
-	  "required": ["files", "characters", "lines", "stored", "packId"],
+	  "required": ["files", "characters", "lines", "detail", "stored", "packId"],
 	  "additionalProperties": false
 	}
 	""";
