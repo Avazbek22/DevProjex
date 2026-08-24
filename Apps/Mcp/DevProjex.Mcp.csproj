@@ -23,7 +23,7 @@
     <ProjectReference Include="..\..\Application\Application.csproj" GlobalPropertiesToRemove="DevProjexGrammarRuntimeIdentifier" />
     <ProjectReference Include="..\..\Assets\Assets.csproj" GlobalPropertiesToRemove="DevProjexGrammarRuntimeIdentifier" />
     <ProjectReference Include="..\..\Infrastructure\Infrastructure.csproj">
-      <AdditionalProperties Condition="'$(DevProjexGrammarRuntimeIdentifier)' != ''">DevProjexGrammarRuntimeIdentifier=$(DevProjexGrammarRuntimeIdentifier)</AdditionalProperties>
+      <AdditionalProperties Condition="'$(DevProjexGrammarRuntimeIdentifier)'!=''">DevProjexGrammarRuntimeIdentifier=$(DevProjexGrammarRuntimeIdentifier)</AdditionalProperties>
     </ProjectReference>
     <ProjectReference Include="..\..\Kernel\Kernel.csproj" GlobalPropertiesToRemove="DevProjexGrammarRuntimeIdentifier" />
   </ItemGroup>

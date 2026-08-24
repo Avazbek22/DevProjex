@@ -13,7 +13,7 @@ public sealed class CommandTreeContractTests
 
 		Assert.Equal(
 			[
-				"analyze", "cache", "completion", "doctor", "export", "help", "open", "profile",
+				"analyze", "cache", "completion", "doctor", "export", "help", "mcp", "open", "profile",
 				"recent", "tree", "tui", "ui"
 			],
 			root.Subcommands
