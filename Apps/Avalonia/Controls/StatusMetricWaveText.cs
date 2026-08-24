@@ -17,11 +17,12 @@ public sealed class StatusMetricWaveText : Control
     private static readonly TimeSpan MetricRollStagger =
         UiTimingProfile.Scale(TimeSpan.FromMilliseconds(20));
     private static readonly TimeSpan FrameInterval = TimeSpan.FromMilliseconds(16);
+    private static readonly TimeSpan MaximumFrameAdvance = TimeSpan.FromMilliseconds(34);
 
     private readonly List<WaveGlyph> _glyphs = [];
     private DispatcherTimer? _animationTimer;
-    private long _animationStartedTimestamp;
-    private long _metricRollStartedTimestamp;
+    private long _lastAnimationFrameTimestamp;
+    private TimeSpan _animationElapsed;
     private MetricRollTransition? _metricRollTransition;
     private string _lastText = string.Empty;
     private bool _isAttached;
@@ -115,6 +116,10 @@ public sealed class StatusMetricWaveText : Control
         get => GetValue(TextBrushProperty);
         set => SetValue(TextBrushProperty, value);
     }
+
+    internal bool IsAnimationActive =>
+        _revealStarted && !_revealCompleted ||
+        _metricRollTransition is not null;
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
@@ -220,7 +225,7 @@ public sealed class StatusMetricWaveText : Control
         }
 
         _revealStarted = true;
-        _animationStartedTimestamp = Stopwatch.GetTimestamp();
+        RestartAnimationClock();
         _animationTimer ??= CreateAnimationTimer();
         _animationTimer.Start();
         InvalidateVisual();
@@ -314,7 +319,7 @@ public sealed class StatusMetricWaveText : Control
             previousLayoutOffset,
             currentLayoutOffset,
             MetricRollDuration + TimeSpan.FromTicks(MetricRollStagger.Ticks * maximumDelayRank));
-        _metricRollStartedTimestamp = Stopwatch.GetTimestamp();
+        RestartAnimationClock();
         _animationTimer ??= CreateAnimationTimer();
         _animationTimer.Start();
         InvalidateMeasure();
@@ -340,7 +345,7 @@ public sealed class StatusMetricWaveText : Control
                 transition.CurrentLayoutOffset);
         }
 
-        var elapsed = Stopwatch.GetElapsedTime(_metricRollStartedTimestamp);
+        var elapsed = _animationElapsed;
         var previousTop = Math.Max(0, (Bounds.Height - transition.Previous.Height) / 2);
         var travelDistance = Math.Max(transition.Previous.Height, transition.Current.Height) + 1;
         using (context.PushClip(new Rect(0, 0, Bounds.Width, Bounds.Height)))
@@ -409,9 +414,10 @@ public sealed class StatusMetricWaveText : Control
 
     private void OnAnimationFrame(object? sender, EventArgs e)
     {
+        AdvanceAnimationClock();
         if (_metricRollTransition is { } metricRoll)
         {
-            if (Stopwatch.GetElapsedTime(_metricRollStartedTimestamp) >= metricRoll.Duration)
+            if (_animationElapsed >= metricRoll.Duration)
             {
                 _metricRollTransition = null;
                 ApplyGlyphLayout(metricRoll.Current);
@@ -435,8 +441,24 @@ public sealed class StatusMetricWaveText : Control
 
     private TimeSpan ResolveAnimationElapsed() =>
         _revealStarted && !_revealCompleted
-            ? Stopwatch.GetElapsedTime(_animationStartedTimestamp)
+            ? _animationElapsed
             : CharacterRiseDuration + MaximumWaveTravelDuration;
+
+    private void RestartAnimationClock()
+    {
+        _animationElapsed = TimeSpan.Zero;
+        _lastAnimationFrameTimestamp = Stopwatch.GetTimestamp();
+    }
+
+    private void AdvanceAnimationClock()
+    {
+        var timestamp = Stopwatch.GetTimestamp();
+        var elapsed = Stopwatch.GetElapsedTime(_lastAnimationFrameTimestamp, timestamp);
+        _lastAnimationFrameTimestamp = timestamp;
+        _animationElapsed += elapsed > MaximumFrameAdvance
+            ? MaximumFrameAdvance
+            : elapsed;
+    }
 
     private double ResolveCharacterProgress(int index, int count, TimeSpan elapsed)
     {

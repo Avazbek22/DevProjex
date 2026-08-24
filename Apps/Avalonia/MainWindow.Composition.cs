@@ -814,6 +814,8 @@ public partial class MainWindow
     private Border? _previewSettingsSplitter;
     private Border? _treeIsland;
     private Border? _previewIsland;
+    private StatusMetricWaveText? _statusTreeMetricsWave;
+    private StatusMetricWaveText? _statusContentMetricsWave;
     private Border? _previewLineNumbersBackground;
     private Border? _previewStickyHeaderCap;
     private Border? _previewStickyHeaderContainer;
@@ -1071,6 +1073,8 @@ public partial class MainWindow
         _previewSettingsSplitter = this.FindControl<Border>("PreviewSettingsSplitter");
         _treeIsland = this.FindControl<Border>("TreeIsland");
         _previewIsland = this.FindControl<Border>("PreviewIsland");
+        _statusTreeMetricsWave = this.FindControl<StatusMetricWaveText>("StatusTreeMetricsWave");
+        _statusContentMetricsWave = this.FindControl<StatusMetricWaveText>("StatusContentMetricsWave");
         _toastHost = this.FindControl<ItemsControl>("ToastHost");
         if (_workspaceGrid is not null && _workspaceGrid.ColumnDefinitions.Count >= 3)
         {
@@ -1268,6 +1272,8 @@ public partial class MainWindow
             () => IsVisible &&
                   !_viewModel.StatusBusy &&
                   !_viewModel.IsPreviewLoading &&
+                  _statusTreeMetricsWave?.IsAnimationActive != true &&
+                  _statusContentMetricsWave?.IsAnimationActive != true &&
                   !_workspacePresentation.IsSettingsAnimating &&
                   !_workspacePresentation.IsPreviewPaneAnimating &&
                   !_workspacePresentation.IsTreePaneAnimating &&
