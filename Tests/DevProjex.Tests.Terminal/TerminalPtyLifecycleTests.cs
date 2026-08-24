@@ -125,6 +125,8 @@ public sealed class TerminalPtyLifecycleTests
 	[InlineData("fr", "Espaces de travail récents", "Quitter")]
 	[InlineData("de", "Letzte Arbeitsbereiche", "Beenden")]
 	[InlineData("zh-cn", "最近的工作空间", "退出")]
+	[InlineData("ja", "最近のワークスペース", "終了")]
+	[InlineData("ko", "최근 작업공간", "종료")]
 	public async Task CompactWelcomeShowsLongestLocalizedActionsWithoutClipping(
 		string language,
 		string recentWorkspacesAction,
