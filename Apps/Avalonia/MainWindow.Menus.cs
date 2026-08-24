@@ -317,6 +317,9 @@ public partial class MainWindow
 
     private void RefreshLanguageMenuChecks()
     {
+        if (_topMenuBar?.LanguageMenuItemControl is { } languageMenuItem)
+            MenuScrollBehavior.SetScrollable(languageMenuItem, languageMenuItem.Items.Count);
+
         foreach (var (item, language, label) in EnumerateLanguageMenuItems())
         {
             if (item is null)

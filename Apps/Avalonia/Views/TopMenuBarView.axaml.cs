@@ -91,6 +91,7 @@ public partial class TopMenuBarView : UserControl
     public Menu? MainMenuControl => MainMenu;
     public MenuItem? RecentMenuItemControl => RecentMenuItem;
     public MenuItem? TreeFontMenuItemControl => TreeFontMenuItem;
+    public MenuItem? LanguageMenuItemControl => LanguageMenuItem;
     public MenuItem? LanguageRuMenuItemControl => LanguageRuMenuItem;
     public MenuItem? LanguageEnMenuItemControl => LanguageEnMenuItem;
     public MenuItem? LanguageUzMenuItemControl => LanguageUzMenuItem;
