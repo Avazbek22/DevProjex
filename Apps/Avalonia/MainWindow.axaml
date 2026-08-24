@@ -256,25 +256,18 @@
     <Border DockPanel.Dock="Bottom" Classes="status-strip" IsVisible="{Binding IsProjectLoaded}">
       <Grid ColumnDefinitions="Auto,*,Auto">
         <!-- Left: Tree metrics -->
-        <StackPanel Grid.Column="0"
-                    Orientation="Horizontal"
-                    VerticalAlignment="Center"
-                    IsVisible="{Binding StatusMetricsVisible}">
-          <TextBlock Text="{Binding StatusTreeLabel}"
-                     FontSize="12"
-                     FontWeight="SemiBold"
-                     Opacity="0.9"
-                     VerticalAlignment="Center" />
-          <TextBlock Text=" - "
-                     FontSize="12"
-                     Opacity="0.6"
-                     VerticalAlignment="Center" />
-          <TextBlock Text="{Binding StatusTreeStatsText}"
-                     FontSize="12"
-                     Foreground="{DynamicResource AppTextBrush}"
-                     Opacity="0.88"
-                     VerticalAlignment="Center" />
-        </StackPanel>
+        <controls:StatusMetricWaveText Name="StatusTreeMetricsWave"
+                                       Grid.Column="0"
+                                       Label="{Binding StatusTreeLabel}"
+                                       Text="{Binding StatusTreeStatsText}"
+                                       TextFontSize="12"
+                                       TextBrush="{DynamicResource AppTextBrush}"
+                                       RevealDirection="LeftToRight"
+                                       HorizontalAlignment="Left"
+                                       VerticalAlignment="Center"
+                                       IsVisible="{Binding StatusMetricsVisible}"
+                                       AutomationProperties.Name="{Binding StatusTreeLabel}"
+                                       AutomationProperties.HelpText="{Binding StatusTreeStatsText}" />
 
         <!-- Center: Progress bar with operation text -->
         <StackPanel Grid.Column="1"
@@ -329,25 +322,18 @@
         </StackPanel>
 
         <!-- Right: Content metrics -->
-        <StackPanel Grid.Column="2"
-                    Orientation="Horizontal"
-                    VerticalAlignment="Center"
-                    IsVisible="{Binding StatusMetricsVisible}">
-          <TextBlock Text="{Binding StatusContentLabel}"
-                     FontSize="12"
-                     FontWeight="SemiBold"
-                     Opacity="0.9"
-                     VerticalAlignment="Center" />
-          <TextBlock Text=" - "
-                     FontSize="12"
-                     Opacity="0.6"
-                     VerticalAlignment="Center" />
-          <TextBlock Text="{Binding StatusContentStatsText}"
-                     FontSize="12"
-                     Foreground="{DynamicResource AppTextBrush}"
-                     Opacity="0.88"
-                     VerticalAlignment="Center" />
-        </StackPanel>
+        <controls:StatusMetricWaveText Name="StatusContentMetricsWave"
+                                       Grid.Column="2"
+                                       Label="{Binding StatusContentLabel}"
+                                       Text="{Binding StatusContentStatsText}"
+                                       TextFontSize="12"
+                                       TextBrush="{DynamicResource AppTextBrush}"
+                                       RevealDirection="RightToLeft"
+                                       HorizontalAlignment="Right"
+                                       VerticalAlignment="Center"
+                                       IsVisible="{Binding StatusMetricsVisible}"
+                                       AutomationProperties.Name="{Binding StatusContentLabel}"
+                                       AutomationProperties.HelpText="{Binding StatusContentStatsText}" />
       </Grid>
     </Border>
 
