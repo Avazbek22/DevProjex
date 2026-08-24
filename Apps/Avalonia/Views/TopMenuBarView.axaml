@@ -178,14 +178,23 @@
                       IsHitTestVisible="False"/>
           </MenuItem.Header>
         </MenuItem>
-        <MenuItem Name="TreeExpansionAnimationMenuItem"
-                  Click="OnToggleTreeExpansionAnimation"
-                  IsVisible="{Binding IsTreePaneVisible}">
-          <MenuItem.Header>
-            <CheckBox Content="{Binding MenuViewTreeExpansionAnimation}"
-                      IsChecked="{Binding IsTreeExpansionAnimationEnabled}"
-                      IsHitTestVisible="False"/>
-          </MenuItem.Header>
+        <MenuItem Header="{Binding MenuViewAnimations}">
+          <MenuItem Name="TreeExpansionAnimationMenuItem"
+                    Click="OnToggleTreeExpansionAnimation"
+                    IsVisible="{Binding IsTreePaneVisible}">
+            <MenuItem.Header>
+              <CheckBox Content="{Binding MenuViewTreeExpansionAnimation}"
+                        IsChecked="{Binding IsTreeExpansionAnimationEnabled}"
+                        IsHitTestVisible="False"/>
+            </MenuItem.Header>
+          </MenuItem>
+          <MenuItem Click="OnToggleStatusMetricsAnimation">
+            <MenuItem.Header>
+              <CheckBox Content="{Binding MenuViewStatusMetricsAnimation}"
+                        IsChecked="{Binding IsStatusMetricsAnimationEnabled}"
+                        IsHitTestVisible="False"/>
+            </MenuItem.Header>
+          </MenuItem>
         </MenuItem>
       </MenuItem>
       <MenuItem Header="{Binding MenuSearch}" IsEnabled="{Binding IsSearchAvailable}" Click="OnToggleSearch" />

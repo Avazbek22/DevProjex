@@ -145,6 +145,13 @@ internal sealed class AppearanceSettingsController(
         SaveCurrentViewSettings();
     }
 
+    public void ToggleStatusMetricsAnimation()
+    {
+        viewModel.IsStatusMetricsAnimationEnabled =
+            !viewModel.IsStatusMetricsAnimationEnabled;
+        SaveCurrentViewSettings();
+    }
+
     public void ToggleThemePopover()
         => viewModel.ThemePopoverOpen = !viewModel.ThemePopoverOpen;
 
@@ -331,6 +338,8 @@ internal sealed class AppearanceSettingsController(
         viewModel.IsCompactMode = settings.IsCompactMode;
         viewModel.IsTreeExpansionAnimationEnabled =
             settings.IsTreeExpansionAnimationEnabled;
+        viewModel.IsStatusMetricsAnimationEnabled =
+            settings.IsStatusMetricsAnimationEnabled;
         workspace.UpdateCompactModeVisualState();
     }
 
@@ -364,6 +373,8 @@ internal sealed class AppearanceSettingsController(
             IsCompactMode = viewModel.IsCompactMode,
             IsTreeExpansionAnimationEnabled =
                 viewModel.IsTreeExpansionAnimationEnabled,
+            IsStatusMetricsAnimationEnabled =
+                viewModel.IsStatusMetricsAnimationEnabled,
             IsTerminalCommandPromptDismissed =
                 current.IsTerminalCommandPromptDismissed,
             PreferredLanguage = current.PreferredLanguage

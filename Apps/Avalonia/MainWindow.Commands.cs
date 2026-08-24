@@ -26,6 +26,11 @@ public partial class MainWindow
         RoutedEventArgs e)
         => _appearanceSettings.ToggleTreeExpansionAnimation();
 
+    private void OnToggleStatusMetricsAnimation(
+        object? sender,
+        RoutedEventArgs e)
+        => _appearanceSettings.ToggleStatusMetricsAnimation();
+
     private void OnThemeMenuClick(object? sender, RoutedEventArgs e)
     {
         _viewModel.UpdatePopoverOpen = false;

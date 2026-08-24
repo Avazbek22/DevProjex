@@ -40,6 +40,9 @@ public sealed class StatusMetricWaveText : Control
     public static readonly StyledProperty<string> TextProperty =
         AvaloniaProperty.Register<StatusMetricWaveText, string>(nameof(Text), string.Empty);
 
+    public static readonly StyledProperty<bool> IsAnimationEnabledProperty =
+        AvaloniaProperty.Register<StatusMetricWaveText, bool>(nameof(IsAnimationEnabled), true);
+
     public static readonly StyledProperty<StatusMetricWaveDirection> RevealDirectionProperty =
         AvaloniaProperty.Register<StatusMetricWaveText, StatusMetricWaveDirection>(
             nameof(RevealDirection),
@@ -66,6 +69,7 @@ public sealed class StatusMetricWaveText : Control
         AffectsRender<StatusMetricWaveText>(
             LabelProperty,
             TextProperty,
+            IsAnimationEnabledProperty,
             RevealDirectionProperty,
             TextFontFamilyProperty,
             TextFontSizeProperty,
@@ -91,6 +95,12 @@ public sealed class StatusMetricWaveText : Control
     {
         get => GetValue(TextProperty);
         set => SetValue(TextProperty, value);
+    }
+
+    public bool IsAnimationEnabled
+    {
+        get => GetValue(IsAnimationEnabledProperty);
+        set => SetValue(IsAnimationEnabledProperty, value);
     }
 
     public StatusMetricWaveDirection RevealDirection
@@ -147,6 +157,8 @@ public sealed class StatusMetricWaveText : Control
             _lastText = Text;
             if (string.IsNullOrEmpty(Text))
                 ResetReveal();
+            else if (!IsAnimationEnabled)
+                CompleteAnimationImmediately();
             else if (_revealCompleted &&
                      !string.IsNullOrEmpty(previousText) &&
                      !string.Equals(previousText, Text, StringComparison.Ordinal))
@@ -155,6 +167,10 @@ public sealed class StatusMetricWaveText : Control
             }
             else
                 TryStartReveal();
+        }
+        else if (change.Property == IsAnimationEnabledProperty)
+        {
+            CompleteAnimationImmediately();
         }
         else if (change.Property == IsVisibleProperty)
         {
@@ -218,6 +234,12 @@ public sealed class StatusMetricWaveText : Control
 
     private void TryStartReveal()
     {
+        if (!IsAnimationEnabled)
+        {
+            CompleteAnimationImmediately();
+            return;
+        }
+
         if (!_isAttached || !IsVisible || string.IsNullOrEmpty(Text) ||
             _revealStarted || _revealCompleted)
         {
@@ -233,6 +255,12 @@ public sealed class StatusMetricWaveText : Control
 
     private void StartMetricRoll(string previousText, string currentText)
     {
+        if (!IsAnimationEnabled)
+        {
+            CompleteAnimationImmediately();
+            return;
+        }
+
         if (!_isAttached || !IsVisible)
             return;
 
@@ -705,6 +733,15 @@ public sealed class StatusMetricWaveText : Control
         _reservedContentWidth = 0;
         _contentWidth = 0;
         StopAnimationTimer();
+        InvalidateVisual();
+    }
+
+    private void CompleteAnimationImmediately()
+    {
+        _metricRollTransition = null;
+        StopAnimationTimer();
+        _revealStarted = !string.IsNullOrEmpty(Text);
+        _revealCompleted = _revealStarted;
         InvalidateVisual();
     }
 
