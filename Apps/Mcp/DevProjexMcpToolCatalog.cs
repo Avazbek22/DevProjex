@@ -14,12 +14,12 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 		_tools =
 		[
 			Create(target, nameof(DevProjexMcpTools.ListProjects), "list_projects", "List projects", ListProjectsInput, ListProjectsOutput),
-			Create(target, nameof(DevProjexMcpTools.GetTree), "get_tree", "Get project tree", GetTreeInput, TruncationOutput),
+			Create(target, nameof(DevProjexMcpTools.GetTree), "get_tree", "Get project tree", GetTreeInput),
 			Create(target, nameof(DevProjexMcpTools.Analyze), "analyze", "Analyze project", AnalyzeInput, AnalyzeOutput),
-			Create(target, nameof(DevProjexMcpTools.PackContext), "pack_context", "Pack project context", PackContextInput, PackOutput, largeResult: true),
-			Create(target, nameof(DevProjexMcpTools.ReadPack), "read_pack", "Read context pack", ReadPackInput, PageOutput, largeResult: true),
-			Create(target, nameof(DevProjexMcpTools.SearchProject), "search_project", "Search project", SearchInput, SearchOutput),
-			Create(target, nameof(DevProjexMcpTools.GetFile), "get_file", "Get project file", GetFileInput, FileOutput)
+			Create(target, nameof(DevProjexMcpTools.PackContext), "pack_context", "Pack project context", PackContextInput, largeResult: true),
+			Create(target, nameof(DevProjexMcpTools.ReadPack), "read_pack", "Read context pack", ReadPackInput, largeResult: true),
+			Create(target, nameof(DevProjexMcpTools.SearchProject), "search_project", "Search project", SearchInput),
+			Create(target, nameof(DevProjexMcpTools.GetFile), "get_file", "Get project file", GetFileInput)
 		];
 	}
 
@@ -44,7 +44,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 		string name,
 		string title,
 		string inputSchema,
-		string outputSchema,
+		string? outputSchema = null,
 		bool largeResult = false)
 	{
 		var method = typeof(DevProjexMcpTools).GetMethod(
@@ -52,21 +52,22 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 			BindingFlags.Instance | BindingFlags.Public) ??
 		             throw new MissingMethodException(typeof(DevProjexMcpTools).FullName, methodName);
 		var description = method.GetCustomAttribute<System.ComponentModel.DescriptionAttribute>()?.Description;
-		var tool = McpServerTool.Create(
-			method,
-			target,
-			new McpServerToolCreateOptions
-			{
-				Name = name,
-				Title = title,
-				Description = description,
-				ReadOnly = true,
-				Destructive = false,
-				Idempotent = true,
-				OpenWorld = false,
-				UseStructuredContent = true,
-				OutputSchema = ParseSchema(outputSchema)
-			});
+		var options = new McpServerToolCreateOptions
+		{
+			Name = name,
+			Title = title,
+			Description = description,
+			ReadOnly = true,
+			Destructive = false,
+			Idempotent = true,
+			OpenWorld = false
+		};
+		if (outputSchema is not null)
+		{
+			options.UseStructuredContent = true;
+			options.OutputSchema = ParseSchema(outputSchema);
+		}
+		var tool = McpServerTool.Create(method, target, options);
 		tool.ProtocolTool.InputSchema = ParseSchema(inputSchema);
 		if (largeResult)
 		{
@@ -276,19 +277,6 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
-	private const string TruncationOutput = """
-	{
-	  "type": "object",
-	  "properties": {
-	    "lines": { "type": "integer" },
-	    "totalLines": { "type": "integer" },
-	    "truncated": { "type": "boolean" }
-	  },
-	  "required": ["lines", "totalLines", "truncated"],
-	  "additionalProperties": false
-	}
-	""";
-
 	private const string AnalyzeOutput = """
 	{
 	  "type": "object",
@@ -315,61 +303,4 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
-	private const string PackOutput = """
-	{
-	  "type": "object",
-	  "properties": {
-	    "files": { "type": "integer" },
-	    "characters": { "type": "integer" },
-	    "lines": { "type": "integer" },
-	    "detail": { "type": "string", "enum": ["full", "compact", "signatures"] },
-	    "stored": { "type": "boolean" },
-	    "packId": { "type": ["string", "null"] }
-	  },
-	  "required": ["files", "characters", "lines", "detail", "stored", "packId"],
-	  "additionalProperties": false
-	}
-	""";
-
-	private const string PageOutput = """
-	{
-	  "type": "object",
-	  "properties": {
-	    "startLine": { "type": "integer" },
-	    "endLine": { "type": "integer" },
-	    "totalLines": { "type": "integer" },
-	    "truncated": { "type": "boolean" }
-	  },
-	  "required": ["startLine", "endLine", "totalLines", "truncated"],
-	  "additionalProperties": false
-	}
-	""";
-
-	private const string SearchOutput = """
-	{
-	  "type": "object",
-	  "properties": {
-	    "matches": { "type": "integer" },
-	    "shown": { "type": "integer" },
-	    "truncated": { "type": "boolean" }
-	  },
-	  "required": ["matches", "shown", "truncated"],
-	  "additionalProperties": false
-	}
-	""";
-
-	private const string FileOutput = """
-	{
-	  "type": "object",
-	  "properties": {
-	    "path": { "type": "string" },
-	    "startLine": { "type": "integer" },
-	    "endLine": { "type": "integer" },
-	    "totalLines": { "type": "integer" },
-	    "truncated": { "type": "boolean" }
-	  },
-	  "required": ["path", "startLine", "endLine", "totalLines", "truncated"],
-	  "additionalProperties": false
-	}
-	""";
 }
