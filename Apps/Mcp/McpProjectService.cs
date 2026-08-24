@@ -8,15 +8,25 @@ internal sealed class McpProjectService(McpRootRegistry roots, McpServices servi
 		IReadOnlyList<string>? includePatterns,
 		IReadOnlyList<string>? excludePatterns,
 		string? profile,
+		bool trackedOnly,
 		CancellationToken cancellationToken)
 	{
 		var projectRoot = roots.ResolveProject(project);
+		if (trackedOnly && !IsGitRepository(projectRoot))
+		{
+			throw new McpToolException(
+				McpErrorCodes.InvalidArguments,
+				$"{McpErrorCodes.InvalidArguments}: project is not a git repository; omit tracked_only or choose a Git repository returned by list_projects.");
+		}
 		var profileReference = ResolveProfile(projectRoot, profile);
 		var selection = await services.SelectionResolver
 			.ResolveAsync(
 				projectRoot,
 				profileReference,
-				new ProjectSelectionSpec(HideSecrets: true, HidePrivateData: true),
+				new ProjectSelectionSpec(
+					GitMode: trackedOnly ? GitFilteringMode.TrackedFilesOnly : null,
+					HideSecrets: true,
+					HidePrivateData: true),
 				cancellationToken)
 			.ConfigureAwait(false);
 		var marks = ProjectSelectionMarkedSecretsResolver.Resolve(selection);
@@ -84,12 +94,17 @@ internal sealed class McpProjectService(McpRootRegistry roots, McpServices servi
 		};
 	}
 
-	public ContentTransformationContext CreateTransformationContext(ProjectContextPlan plan)
+	public McpDetailResolution ResolveDetail(ProjectContextPlan plan, McpDetailLevel detail) =>
+		McpDetailPolicy.Resolve(plan.Selection, detail);
+
+	public ProjectContextPlan ApplyDetail(ProjectContextPlan plan, McpDetailResolution resolution) =>
+		plan with { Selection = McpDetailPolicy.Apply(plan.Selection, resolution) };
+
+	public ContentTransformationContext CreateTransformationContext(
+		ProjectContextPlan plan,
+		McpDetailLevel detail = McpDetailLevel.Full)
 	{
-		var transformKinds = CodeTransformIdentity.Resolve(
-			plan.Selection.CompressCode == true,
-			plan.Selection.StripComments == true,
-			plan.Selection.StripBlankLines == true);
+		var transformKinds = ResolveDetail(plan, detail).Kinds;
 		return ContentTransformationContext.For(
 			transformKinds == CodeTransformKinds.None
 				? null
@@ -102,10 +117,16 @@ internal sealed class McpProjectService(McpRootRegistry roots, McpServices servi
 
 	public async Task<PreparedSecretRedactionOutput> PrepareAsync(
 		ProjectContextPlan plan,
+		McpDetailLevel detail,
 		CancellationToken cancellationToken) =>
 		await services.OutputPreparer
-			.PrepareAsync(CreateTransformationContext(plan), plan.IncludedFiles, cancellationToken)
+			.PrepareAsync(CreateTransformationContext(plan, detail), plan.IncludedFiles, cancellationToken)
 			.ConfigureAwait(false);
+
+	public Task<PreparedSecretRedactionOutput> PrepareAsync(
+		ProjectContextPlan plan,
+		CancellationToken cancellationToken) =>
+		PrepareAsync(plan, McpDetailLevel.Full, cancellationToken);
 
 	public IFileContentAnalyzer CreatePreparedAnalyzer(PreparedSecretRedactionOutput prepared) =>
 		services.OutputPreparer.CreatePreparedAnalyzer(prepared);
@@ -178,4 +199,7 @@ internal sealed class McpProjectService(McpRootRegistry roots, McpServices servi
 
 	internal static string ToRelative(string root, string path) =>
 		Path.GetRelativePath(root, path).Replace('\\', '/');
+
+	internal static bool IsGitRepository(string root) =>
+		Directory.Exists(Path.Combine(root, ".git")) || File.Exists(Path.Combine(root, ".git"));
 }

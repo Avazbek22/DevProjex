@@ -59,9 +59,18 @@ internal sealed class McpJsonArguments(
 	{
 		if (!_values.TryGetValue(name, out var value) || value.ValueKind == JsonValueKind.Null)
 			return defaultValue;
-		if (value.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
-			throw Invalid(name, "a boolean");
-		return value.GetBoolean();
+		if (value.ValueKind is JsonValueKind.True or JsonValueKind.False)
+			return value.GetBoolean();
+		if (value.ValueKind == JsonValueKind.String)
+		{
+			return value.GetString() switch
+			{
+				"true" => true,
+				"false" => false,
+				_ => throw Invalid(name, "a boolean or the string 'true' or 'false'")
+			};
+		}
+		throw Invalid(name, "a boolean or the string 'true' or 'false'");
 	}
 
 	public int? OptionalInteger(string name, int minimum, int maximum)
