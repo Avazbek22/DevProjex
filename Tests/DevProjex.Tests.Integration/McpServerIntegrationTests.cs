@@ -121,9 +121,10 @@ public sealed class McpServerIntegrationTests
 			projects,
 			Assert.IsType<JsonElement>(tools.Single(static tool => tool.Name == "list_projects").ProtocolTool.OutputSchema));
 		var listedProject = projectsStructured.GetProperty("projects")[0].GetProperty("path").GetString();
+		var expectedProject = McpRootRegistry.ResolvePhysicalExistingPath(project, requireDirectory: true);
 		Assert.True(
-			string.Equals(project, listedProject, PathComparison),
-			$"Expected listed project '{project}', got '{listedProject}'.");
+			string.Equals(expectedProject, listedProject, PathComparison),
+			$"Expected listed project '{expectedProject}', got '{listedProject}'.");
 
 		var tree = await server.CallAsync("get_tree", new Dictionary<string, object?> { ["max_depth"] = "10" });
 		AssertTextOnlyResult(server, tree, "Secret.cs");

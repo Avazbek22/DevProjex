@@ -51,8 +51,12 @@ public sealed class McpServerProcessTests
 			Assert.NotNull(result.StructuredContent);
 			var structured = result.StructuredContent.Value;
 			var listedProject = structured.GetProperty("projects")[0].GetProperty("path").GetString();
-			Assert.True(string.Equals(project, listedProject, PathComparison));
-			Assert.False(string.Equals(ignoredEnvironmentRoot, listedProject, PathComparison));
+			var expectedProject = McpRootRegistry.ResolvePhysicalExistingPath(project, requireDirectory: true);
+			var expectedIgnoredEnvironmentRoot = McpRootRegistry.ResolvePhysicalExistingPath(
+				ignoredEnvironmentRoot,
+				requireDirectory: true);
+			Assert.True(string.Equals(expectedProject, listedProject, PathComparison));
+			Assert.False(string.Equals(expectedIgnoredEnvironmentRoot, listedProject, PathComparison));
 			var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
 			using var textDocument = JsonDocument.Parse(text);
 			Assert.True(JsonElement.DeepEquals(structured, textDocument.RootElement));
