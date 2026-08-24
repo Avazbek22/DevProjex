@@ -60,6 +60,8 @@
                       Padding="0"
                       HorizontalContentAlignment="Center"
                       VerticalContentAlignment="Center"
+                      ToolTip.Placement="BottomEdgeAlignedRight"
+                      ToolTip.VerticalOffset="5"
                       ToolTip.Tip="{Binding SearchPreviousTooltip}"
                       Click="OnSearchPrevious">
                 <Viewbox Width="14"
@@ -82,6 +84,8 @@
                       Padding="0"
                       HorizontalContentAlignment="Center"
                       VerticalContentAlignment="Center"
+                      ToolTip.Placement="BottomEdgeAlignedRight"
+                      ToolTip.VerticalOffset="5"
                       ToolTip.Tip="{Binding SearchNextTooltip}"
                       Click="OnSearchNext">
                 <Viewbox Width="14"
@@ -104,6 +108,8 @@
                       Padding="0"
                       HorizontalContentAlignment="Center"
                       VerticalContentAlignment="Center"
+                      ToolTip.Placement="BottomEdgeAlignedRight"
+                      ToolTip.VerticalOffset="5"
                       ToolTip.Tip="{Binding HelpHelpCloseSearch}"
                       Click="OnSearchClose">
                 <Viewbox Width="14"
@@ -128,6 +134,8 @@
                   Classes="menu-icon-button"
                   HorizontalContentAlignment="Center"
                   VerticalContentAlignment="Center"
+                  ToolTip.Placement="BottomEdgeAlignedRight"
+                  ToolTip.VerticalOffset="5"
                   ToolTip.Tip="{Binding MenuSearch}"
                   Click="OnSearchOpen">
             <Viewbox Width="16"

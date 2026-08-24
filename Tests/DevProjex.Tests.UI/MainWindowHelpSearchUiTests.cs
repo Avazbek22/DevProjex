@@ -34,6 +34,10 @@ public sealed class MainWindowHelpSearchUiTests
             AssertNavigationButtonPresentation(nextButton);
             AssertNavigationButtonPresentation(closeSearchButton);
             AssertNavigationButtonPresentation(closeHelpButton);
+            AssertTooltipOpensBelowAndInward(previousButton);
+            AssertTooltipOpensBelowAndInward(nextButton);
+            AssertTooltipOpensBelowAndInward(closeSearchButton);
+            AssertTooltipOpensBelowAndInward(searchButton);
             Assert.Equal(UiTestDriver.GetViewModel(window).HelpHelpCloseSearch, ToolTip.GetTip(closeSearchButton));
             Assert.NotNull(searchPanel.Transitions);
             Assert.Equal(3, searchPanel.Transitions.Count);
@@ -65,7 +69,7 @@ public sealed class MainWindowHelpSearchUiTests
     }
 
     [AvaloniaFact]
-    public async Task Search_HighlightsEveryMatchNavigatesWithWrapAroundAndClosesCleanly()
+    public async Task Search_DebouncesTwoCharacterQueriesNavigatesWithWrapAroundAndClosesCleanly()
     {
         using var project = UiTestProject.CreateDefault();
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
@@ -82,6 +86,14 @@ public sealed class MainWindowHelpSearchUiTests
 
             var previousButton = GetRequiredControl<Button>(help, "HelpSearchPreviousButton");
             var nextButton = GetRequiredControl<Button>(help, "HelpSearchNextButton");
+            var matchSummary = GetRequiredControl<TextBlock>(help, "HelpSearchMatchSummary");
+            help.SearchBoxControl.Text = "p";
+            await Task.Delay(50);
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+            Assert.Equal(0, help.SearchMatchCount);
+            Assert.False(matchSummary.IsVisible);
+            Assert.Empty(GetHighlightedRuns(help));
+
             help.SearchBoxControl.Text = "no-such-help-search-result-4f22";
             await UiTestDriver.WaitForConditionAsync(
                 window,
@@ -93,15 +105,15 @@ public sealed class MainWindowHelpSearchUiTests
             Assert.Equal(1, nextButton.Opacity);
 
             help.SearchBoxControl.Text = "project";
+            Assert.Equal(0, help.SearchMatchCount);
+            Assert.Empty(GetHighlightedRuns(help));
             await UiTestDriver.WaitForConditionAsync(
                 window,
                 () => help.SearchMatchCount > 3 && help.CurrentSearchMatchIndex == 1,
                 "help search matches");
 
             var initialMatchCount = help.SearchMatchCount;
-            Assert.Equal($"(1 / {initialMatchCount:N0})", GetRequiredControl<TextBlock>(
-                help,
-                "HelpSearchMatchSummary").Text);
+            Assert.Equal($"(1 / {initialMatchCount:N0})", matchSummary.Text);
             AssertHighlightBrushes(help, initialMatchCount);
 
             var popupRoot = Assert.IsAssignableFrom<TopLevel>(TopLevel.GetTopLevel(help.SearchBoxControl));
@@ -167,6 +179,12 @@ public sealed class MainWindowHelpSearchUiTests
         Assert.Equal(HorizontalAlignment.Center, button.HorizontalContentAlignment);
         Assert.Equal(VerticalAlignment.Center, button.VerticalContentAlignment);
         Assert.IsType<Viewbox>(button.Content);
+    }
+
+    private static void AssertTooltipOpensBelowAndInward(Button button)
+    {
+        Assert.Equal(PlacementMode.BottomEdgeAlignedRight, ToolTip.GetPlacement(button));
+        Assert.Equal(5, ToolTip.GetVerticalOffset(button));
     }
 
     private static void AssertHighlightBrushes(HelpPopoverView help, int expectedMatchCount)

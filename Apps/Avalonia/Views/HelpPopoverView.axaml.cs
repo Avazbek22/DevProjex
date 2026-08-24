@@ -9,12 +9,15 @@ public partial class HelpPopoverView : UserControl
     private const double SearchPanelWidth = 390;
     private const double SearchButtonWidth = 32;
     private const double SearchContentOffset = 16;
+    private const int MinimumSearchQueryLength = 2;
     private static readonly TimeSpan SearchPanelAnimationDuration =
         UiTimingProfile.Scale(TimeSpan.FromMilliseconds(220));
     private static readonly TimeSpan SearchContentAnimationDuration =
         UiTimingProfile.Scale(TimeSpan.FromMilliseconds(180));
     private static readonly TimeSpan SearchFadeDuration =
         UiTimingProfile.Scale(TimeSpan.FromMilliseconds(150));
+    private static readonly TimeSpan SearchDebounceInterval =
+        UiTimingProfile.Scale(TimeSpan.FromMilliseconds(200));
 
     public event EventHandler<RoutedEventArgs>? CloseRequested;
     private readonly List<HelpTextEntry> _searchEntries = [];
@@ -24,6 +27,7 @@ public partial class HelpPopoverView : UserControl
     private TextBox _searchBox = null!;
     private TextBlock _searchMatchSummary = null!;
     private Button _searchButton = null!;
+    private DispatcherTimer? _searchDebounceTimer;
     private MainWindowViewModel? _boundViewModel;
     private int _currentSearchMatchIndex = -1;
     private long _searchAnimationVersion;
@@ -77,6 +81,7 @@ public partial class HelpPopoverView : UserControl
 
         if (_boundViewModel is null)
         {
+            CancelPendingSearch();
             bodyPanel.Children.Clear();
             _searchEntries.Clear();
             ClearSearchResults();
@@ -100,6 +105,7 @@ public partial class HelpPopoverView : UserControl
 
     private void BuildBody(StackPanel bodyPanel, string? rawText)
     {
+        CancelPendingSearch();
         bodyPanel.Children.Clear();
         _searchEntries.Clear();
         ClearSearchResults();
@@ -291,7 +297,7 @@ public partial class HelpPopoverView : UserControl
     private void OnSearchTextChanged(object? sender, TextChangedEventArgs e)
     {
         if (_isSearchOpen)
-            RefreshSearch(navigateToFirstMatch: true);
+            ScheduleSearch();
     }
 
     private void OnSearchPrevious(object? sender, RoutedEventArgs e)
@@ -344,8 +350,8 @@ public partial class HelpPopoverView : UserControl
     private void RefreshSearch(bool navigateToFirstMatch)
     {
         _searchMatches.Clear();
-        var query = _searchBox.Text;
-        if (!string.IsNullOrWhiteSpace(query))
+        var query = GetEligibleSearchQuery();
+        if (query is not null)
         {
             foreach (var entry in _searchEntries)
             {
@@ -465,7 +471,7 @@ public partial class HelpPopoverView : UserControl
 
     private void UpdateSearchControls()
     {
-        var hasQuery = !string.IsNullOrWhiteSpace(_searchBox.Text);
+        var hasQuery = GetEligibleSearchQuery() is not null;
         var current = CurrentSearchMatchIndex.ToString("N0", CultureInfo.CurrentCulture);
         var total = SearchMatchCount.ToString("N0", CultureInfo.CurrentCulture);
         _searchMatchSummary.Text = $"({current} / {total})";
@@ -488,6 +494,7 @@ public partial class HelpPopoverView : UserControl
 
         _isSearchOpen = false;
         ++_searchAnimationVersion;
+        CancelPendingSearch();
         ClearSearchResults();
         _searchPanel.IsHitTestVisible = false;
         _searchPanel.Width = 0;
@@ -504,6 +511,7 @@ public partial class HelpPopoverView : UserControl
     {
         _isSearchOpen = false;
         ++_searchAnimationVersion;
+        CancelPendingSearch();
         if (clearQuery)
             _searchBox.Text = string.Empty;
 
@@ -517,6 +525,44 @@ public partial class HelpPopoverView : UserControl
         _searchButton.Width = SearchButtonWidth;
         _searchButton.Margin = new Thickness(0, 0, 4, 0);
         _searchButton.Opacity = 1;
+    }
+
+    private void ScheduleSearch()
+    {
+        CancelPendingSearch();
+        ClearSearchResults();
+        if (GetEligibleSearchQuery() is null)
+            return;
+
+        _searchDebounceTimer ??= CreateSearchDebounceTimer();
+        _searchDebounceTimer.Start();
+    }
+
+    private DispatcherTimer CreateSearchDebounceTimer()
+    {
+        var timer = new DispatcherTimer
+        {
+            Interval = SearchDebounceInterval
+        };
+        timer.Tick += OnSearchDebounceElapsed;
+        return timer;
+    }
+
+    private void OnSearchDebounceElapsed(object? sender, EventArgs e)
+    {
+        CancelPendingSearch();
+        if (_isSearchOpen)
+            RefreshSearch(navigateToFirstMatch: true);
+    }
+
+    private void CancelPendingSearch() => _searchDebounceTimer?.Stop();
+
+    private string? GetEligibleSearchQuery()
+    {
+        var query = _searchBox.Text?.Trim();
+        return query is { Length: >= MinimumSearchQueryLength }
+            ? query
+            : null;
     }
 
     private async Task FocusSearchAfterOpenAsync(long version)
