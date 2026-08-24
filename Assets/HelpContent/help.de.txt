@@ -88,7 +88,8 @@ Wenn der Befehl bereits eingerichtet ist, öffnen Sie ein Terminal und führen S
 So sehen Sie die Befehle und Optionen der obersten Ebene. Die Optionen und Beispiele eines einzelnen Befehls zeigt `devprojex help <command>`.
 
 Beispiele:
-* `devprojex` — den interaktiven Terminal-Arbeitsbereich öffnen.
+* `devprojex` — den interaktiven Terminal-Arbeitsbereich öffnen. Im Arbeitsbereich steuert die `:`-Befehlszeile die Aktionen (zum Beispiel `:copy`, `:analyze`, `:branch`); die vollständige Befehlsliste finden Sie in der integrierten Hilfe des Arbeitsbereichs und in der Projektdokumentation.
+* `devprojex tui .` — den angegebenen Ordner direkt im Terminal-Arbeitsbereich öffnen.
 * `devprojex open . --preview` — den aktuellen Ordner in der Desktop-Vorschau öffnen.
 * `devprojex analyze . --format json` — das aktuelle Projekt als JSON analysieren.
 * `devprojex tree .` — den Projektbaum im Terminal ausgeben.
