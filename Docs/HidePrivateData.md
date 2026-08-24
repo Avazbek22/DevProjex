@@ -279,7 +279,8 @@ This phase does not attempt to detect:
 * values assembled dynamically, encrypted, encoded, or obfuscated.
 
 Use `--hide-private-data` with `analyze`, `open`, `export context`, and `export project`. An
-explicit `--hide-private-data false` overrides a saved portable profile. The option is not
-exposed in the interactive Terminal Workspace during this phase. `analyze --findings` lists
-private-data findings by rule id, `private-data` category, relative path, and one-based source
-line — never the detected value.
+explicit `--hide-private-data false` overrides a saved portable profile. Terminal Workspace
+exposes the same transformation in Parameters and through `:set hide-private-data on|off`;
+its preview, context export, and project-copy paths use the same redaction session.
+`analyze --findings` lists private-data findings by rule id, `private-data` category, relative
+path, and one-based source line — never the detected value.

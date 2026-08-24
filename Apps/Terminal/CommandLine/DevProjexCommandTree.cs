@@ -680,8 +680,9 @@ public sealed class DevProjexCommandTree
 		var command = new Command("profile", L("Terminal.Command.Profile"));
 		CliExamplesRegistry.Set(
 			command,
-			"devprojex profile show .",
-			"devprojex profile validate ./.devprojex/profile.json");
+			"devprojex profile export . --profile standard -o ../devprojex-profile.json",
+			"devprojex profile validate ../devprojex-profile.json",
+			"devprojex profile show . --profile ../devprojex-profile.json --format json");
 		command.Subcommands.Add(BuildProfileShowCommand());
 		command.Subcommands.Add(BuildProfileExportCommand());
 		command.Subcommands.Add(BuildProfileImportCommand());
@@ -694,6 +695,10 @@ public sealed class DevProjexCommandTree
 	private Command BuildProfileShowCommand()
 	{
 		var command = new Command("show", L("Terminal.Command.ProfileShow"));
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex profile show .",
+			"devprojex profile show . --profile ../devprojex-profile.json --format json");
 		var project = ProjectArgument();
 		var profile = ProfileOption("standard");
 		var format = CliChoiceSymbols.Option(
@@ -725,6 +730,9 @@ public sealed class DevProjexCommandTree
 	private Command BuildProfileExportCommand()
 	{
 		var command = new Command("export", L("Terminal.Command.ProfileExport"));
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex profile export . --profile standard -o ../devprojex-profile.json");
 		var project = ProjectArgument();
 		var profile = ProfileOption("local");
 		var output = new Option<string>("--output", "-o")
@@ -761,6 +769,10 @@ public sealed class DevProjexCommandTree
 	private Command BuildProfileImportCommand()
 	{
 		var command = new Command("import", L("Terminal.Command.ProfileImport"));
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex profile import ../devprojex-profile.json .",
+			"devprojex profile import ../devprojex-profile.json . --apply");
 		var file = RequiredArgument("FILE");
 		var project = ProjectArgument();
 		var apply = new Option<bool>("--apply") { Description = L("Terminal.Option.ApplyProfile") };
@@ -781,6 +793,9 @@ public sealed class DevProjexCommandTree
 	private Command BuildProfileValidateCommand()
 	{
 		var command = new Command("validate", L("Terminal.Command.ProfileValidate"));
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex profile validate ../devprojex-profile.json");
 		var file = RequiredArgument("FILE");
 		command.Arguments.Add(file);
 		command.SetAction((parseResult, cancellationToken) =>
@@ -794,6 +809,9 @@ public sealed class DevProjexCommandTree
 	private Command BuildProfileResetCommand()
 	{
 		var command = new Command("reset", L("Terminal.Command.ProfileReset"));
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex profile reset .");
 		var project = ProjectArgument();
 		command.Arguments.Add(project);
 		command.SetAction(parseResult =>
@@ -820,8 +838,18 @@ public sealed class DevProjexCommandTree
 			"devprojex ui list",
 			"devprojex ui status");
 		command.Subcommands.Add(BuildUiListCommand());
-		command.Subcommands.Add(BuildUiSimpleCommand("status", L("Terminal.Command.UiStatus"), "status", static _ => new { }));
-		command.Subcommands.Add(BuildUiSimpleCommand("activate", L("Terminal.Command.UiActivate"), "activate", static _ => new { }));
+		command.Subcommands.Add(BuildUiSimpleCommand(
+			"status",
+			L("Terminal.Command.UiStatus"),
+			"status",
+			static _ => new { },
+			"devprojex ui status --project ."));
+		command.Subcommands.Add(BuildUiSimpleCommand(
+			"activate",
+			L("Terminal.Command.UiActivate"),
+			"activate",
+			static _ => new { },
+			"devprojex ui activate --project ."));
 		command.Subcommands.Add(BuildUiPreviewCommand());
 		command.Subcommands.Add(BuildUiTreeCommand());
 		command.Subcommands.Add(BuildUiFilterCommand());
@@ -833,6 +861,10 @@ public sealed class DevProjexCommandTree
 	private Command BuildUiListCommand()
 	{
 		var command = new Command("list", L("Terminal.Command.UiList"));
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex ui list",
+			"devprojex ui list --format json");
 		var format = CliChoiceSymbols.Option(
 			"--format",
 			L("Terminal.Option.Format"),
@@ -855,7 +887,14 @@ public sealed class DevProjexCommandTree
 	private Command BuildUiPreviewCommand()
 	{
 		var command = new Command("preview", L("Terminal.Command.UiPreview"));
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex ui preview open --view tree-content --project .",
+			"devprojex ui preview close --project .");
 		var open = new Command("open", L("Terminal.Command.UiPreviewOpen"));
+		CliExamplesRegistry.Set(
+			open,
+			"devprojex ui preview open --view tree-content --project .");
 		var openView = CliChoiceSymbols.NullableOption(
 			"--view",
 			L("Terminal.Option.PreviewView"),
@@ -872,9 +911,17 @@ public sealed class DevProjexCommandTree
 					: null
 			});
 		command.Subcommands.Add(open);
-		command.Subcommands.Add(BuildUiSimpleCommand("close", L("Terminal.Command.UiPreviewClose"), "preview.close", static _ => new { }));
+		command.Subcommands.Add(BuildUiSimpleCommand(
+			"close",
+			L("Terminal.Command.UiPreviewClose"),
+			"preview.close",
+			static _ => new { },
+			"devprojex ui preview close --project ."));
 
 		var setView = new Command("set-view", L("Terminal.Command.UiPreviewSetView"));
+		CliExamplesRegistry.Set(
+			setView,
+			"devprojex ui preview set-view tree-content --project .");
 		var view = CliChoiceSymbols.Argument(
 			"VIEW",
 			CliChoiceSets.DesktopView,
@@ -892,7 +939,13 @@ public sealed class DevProjexCommandTree
 	private Command BuildUiTreeCommand()
 	{
 		var command = new Command("tree", L("Terminal.Command.UiTree"));
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex ui tree set-format json --project .");
 		var setFormat = new Command("set-format", L("Terminal.Command.UiTreeSetFormat"));
+		CliExamplesRegistry.Set(
+			setFormat,
+			"devprojex ui tree set-format json --project .");
 		var format = CliChoiceSymbols.Argument(
 			"FORMAT",
 			CliChoiceSets.TreeFormat,
@@ -910,12 +963,24 @@ public sealed class DevProjexCommandTree
 	private Command BuildUiFilterCommand()
 	{
 		var command = new Command("filter", L("Terminal.Command.UiFilter"));
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex ui filter set Program --project .",
+			"devprojex ui filter clear --project .");
 		var set = new Command("set", L("Terminal.Command.UiFilterSet"));
+		CliExamplesRegistry.Set(
+			set,
+			"devprojex ui filter set Program --project .");
 		var query = RequiredArgument("QUERY");
 		set.Arguments.Add(query);
 		AddDesktopAction(set, "filter.set", result => new { query = result.GetValue(query) });
 		command.Subcommands.Add(set);
-		command.Subcommands.Add(BuildUiSimpleCommand("clear", L("Terminal.Command.UiFilterClear"), "filter.clear", static _ => new { }));
+		command.Subcommands.Add(BuildUiSimpleCommand(
+			"clear",
+			L("Terminal.Command.UiFilterClear"),
+			"filter.clear",
+			static _ => new { },
+			"devprojex ui filter clear --project ."));
 		SetParentHelpAction(command, "ui", "filter");
 		return command;
 	}
@@ -923,14 +988,37 @@ public sealed class DevProjexCommandTree
 	private Command BuildUiSearchCommand()
 	{
 		var command = new Command("search", L("Terminal.Command.UiSearch"));
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex ui search set TODO --project .",
+			"devprojex ui search next --project .",
+			"devprojex ui search clear --project .");
 		var set = new Command("set", L("Terminal.Command.UiSearchSet"));
+		CliExamplesRegistry.Set(
+			set,
+			"devprojex ui search set TODO --project .");
 		var query = RequiredArgument("QUERY");
 		set.Arguments.Add(query);
 		AddDesktopAction(set, "search.set", result => new { query = result.GetValue(query) });
 		command.Subcommands.Add(set);
-		command.Subcommands.Add(BuildUiSimpleCommand("next", L("Terminal.Command.UiSearchNext"), "search.next", static _ => new { }));
-		command.Subcommands.Add(BuildUiSimpleCommand("previous", L("Terminal.Command.UiSearchPrevious"), "search.previous", static _ => new { }));
-		command.Subcommands.Add(BuildUiSimpleCommand("clear", L("Terminal.Command.UiSearchClear"), "search.clear", static _ => new { }));
+		command.Subcommands.Add(BuildUiSimpleCommand(
+			"next",
+			L("Terminal.Command.UiSearchNext"),
+			"search.next",
+			static _ => new { },
+			"devprojex ui search next --project ."));
+		command.Subcommands.Add(BuildUiSimpleCommand(
+			"previous",
+			L("Terminal.Command.UiSearchPrevious"),
+			"search.previous",
+			static _ => new { },
+			"devprojex ui search previous --project ."));
+		command.Subcommands.Add(BuildUiSimpleCommand(
+			"clear",
+			L("Terminal.Command.UiSearchClear"),
+			"search.clear",
+			static _ => new { },
+			"devprojex ui search clear --project ."));
 		SetParentHelpAction(command, "ui", "search");
 		return command;
 	}
@@ -939,9 +1027,11 @@ public sealed class DevProjexCommandTree
 		string name,
 		string description,
 		string action,
-		Func<ParseResult, object> payload)
+		Func<ParseResult, object> payload,
+		params string[] examples)
 	{
 		var command = new Command(name, description);
+		CliExamplesRegistry.Set(command, examples);
 		AddDesktopAction(command, action, payload);
 		return command;
 	}
@@ -1068,10 +1158,14 @@ public sealed class DevProjexCommandTree
 		var command = new Command("cache", L("Terminal.Command.Cache"));
 		CliExamplesRegistry.Set(
 			command,
-			"devprojex cache list",
-			"devprojex cache clear --force");
+			"devprojex cache path",
+			"devprojex cache list --format json",
+			"devprojex cache remove https://github.com/owner/repo --force");
 
 		var path = new Command("path", L("Terminal.Command.CachePath"));
+		CliExamplesRegistry.Set(
+			path,
+			"devprojex cache path");
 		path.SetAction(parseResult =>
 			CommandExecution.RunAsync(
 				environment,
@@ -1083,6 +1177,10 @@ public sealed class DevProjexCommandTree
 				_localization));
 
 		var list = new Command("list", L("Terminal.Command.CacheList"));
+		CliExamplesRegistry.Set(
+			list,
+			"devprojex cache list",
+			"devprojex cache list --format json");
 		var format = CliChoiceSymbols.Option(
 			"--format",
 			L("Terminal.Option.Format"),
@@ -1102,6 +1200,9 @@ public sealed class DevProjexCommandTree
 				_localization));
 
 		var remove = new Command("remove", L("Terminal.Command.CacheRemove"));
+		CliExamplesRegistry.Set(
+			remove,
+			"devprojex cache remove https://github.com/owner/repo --force");
 		var repositoryUrl = new Argument<string>("URL")
 		{
 			Description = L("Terminal.Argument.RepositoryUrl"),
@@ -1125,6 +1226,9 @@ public sealed class DevProjexCommandTree
 				_localization));
 
 		var clear = new Command("clear", L("Terminal.Command.CacheClear"));
+		CliExamplesRegistry.Set(
+			clear,
+			"devprojex cache clear --force");
 		var clearForce = new Option<bool>("--force")
 		{
 			Description = L("Terminal.Option.CacheForce")

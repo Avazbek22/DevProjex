@@ -62,6 +62,62 @@ public sealed class HelpReleaseRegressionTests
 			StringComparison.Ordinal);
 	}
 
+	[Theory]
+	[InlineData("profile show", "devprojex profile show .")]
+	[InlineData("profile export", "devprojex profile export . --profile standard -o ../devprojex-profile.json")]
+	[InlineData("profile import", "devprojex profile import ../devprojex-profile.json .")]
+	[InlineData("profile validate", "devprojex profile validate ../devprojex-profile.json")]
+	[InlineData("profile reset", "devprojex profile reset .")]
+	[InlineData("cache path", "devprojex cache path")]
+	[InlineData("cache list", "devprojex cache list --format json")]
+	[InlineData("cache remove", "devprojex cache remove https://github.com/owner/repo --force")]
+	[InlineData("cache clear", "devprojex cache clear --force")]
+	[InlineData("ui list", "devprojex ui list --format json")]
+	[InlineData("ui status", "devprojex ui status --project .")]
+	[InlineData("ui activate", "devprojex ui activate --project .")]
+	[InlineData("ui preview open", "devprojex ui preview open --view tree-content --project .")]
+	[InlineData("ui preview close", "devprojex ui preview close --project .")]
+	[InlineData("ui preview set-view", "devprojex ui preview set-view tree-content --project .")]
+	[InlineData("ui tree set-format", "devprojex ui tree set-format json --project .")]
+	[InlineData("ui filter set", "devprojex ui filter set Program --project .")]
+	[InlineData("ui filter clear", "devprojex ui filter clear --project .")]
+	[InlineData("ui search set", "devprojex ui search set TODO --project .")]
+	[InlineData("ui search next", "devprojex ui search next --project .")]
+	[InlineData("ui search previous", "devprojex ui search previous --project .")]
+	[InlineData("ui search clear", "devprojex ui search clear --project .")]
+	public async Task PolishedLeafHelpUsesRealExamples(
+		string commandPath,
+		string expectedExample)
+	{
+		var path = commandPath.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+		var help = await RenderHelpAsync(120, "en", path);
+
+		Assert.Contains(expectedExample, help, StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			$"devprojex {commandPath} --help",
+			help,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task ProfileParentHelpShowsExportBeforePortableProfileUse()
+	{
+		var help = await RenderHelpAsync(120, "en", "profile");
+		var export = help.IndexOf(
+			"devprojex profile export . --profile standard -o ../devprojex-profile.json",
+			StringComparison.Ordinal);
+		var validate = help.IndexOf(
+			"devprojex profile validate ../devprojex-profile.json",
+			StringComparison.Ordinal);
+		var show = help.IndexOf(
+			"devprojex profile show . --profile ../devprojex-profile.json --format json",
+			StringComparison.Ordinal);
+
+		Assert.True(export >= 0, "The profile export example is missing.");
+		Assert.True(validate > export, "Profile validation must follow profile export.");
+		Assert.True(show > validate, "Portable profile use must follow profile export and validation.");
+	}
+
 	[Fact]
 	public void CellWidthWrappingPreservesCjkCombiningAndEmojiTextElements()
 	{

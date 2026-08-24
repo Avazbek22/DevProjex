@@ -43,6 +43,10 @@ Exclusions and remains off in the built-in `standard` profile. Individual
 keep-as-is decisions are session-only: profiles never store secret fingerprints,
 values, or occurrence locations.
 
+Hide Private Data is stored as the independent `hidePrivateData` Boolean and
+remains off in the built-in `standard` profile. Profiles created before this
+field was introduced load it as `false`.
+
 Code compression is stored as the independent `compressCode` Boolean and also
 remains off in the built-in `standard` profile. Profiles created before this field
 was introduced load it as `false`.
@@ -67,6 +71,7 @@ as `false`.
     "selectedPaths": [],
     "gitMode": "gitignore",
     "hideSecrets": false,
+    "hidePrivateData": false,
     "compressCode": false,
     "stripComments": false,
     "stripBlankLines": false,
@@ -88,6 +93,7 @@ Semantics:
 - a directory includes its effective subtree;
 - Git mode is exactly one of `none`, `gitignore`, or `tracked`;
 - `hideSecrets` independently enables the content transformation;
+- `hidePrivateData` independently enables private-data redaction;
 - `compressCode` independently enables syntax-aware code compression;
 - `stripComments` independently removes syntax-tree comments and Python docstrings from output;
 - `stripBlankLines` independently removes unprotected whitespace-only source lines from output;
@@ -98,8 +104,11 @@ v5 compatibility, a portable profile containing `hide-secrets` in `exclusions`
 still loads with the transformation enabled. The legacy token is removed from the
 canonical Exclusions collection, and an explicit `hideSecrets` property wins.
 
-Nonblank root values are exact top-level filesystem names. They are compared with the
-effective host path semantics and are not whitespace-trimmed.
+Portable-profile root arrays are normalized when they are loaded. Blank values are
+discarded, each remaining value is trimmed, and duplicates are removed before the
+values are sorted with the effective host path semantics (case-insensitive on Windows,
+ordinal on Linux and macOS). This makes hand-edited JSON resilient to incidental
+whitespace and duplicate entries and gives every consumer one deterministic root set.
 
 Unknown additive JSON properties are allowed for forward compatibility. A missing
 or unsupported schema, unknown required Git mode, unknown exclusion token, or

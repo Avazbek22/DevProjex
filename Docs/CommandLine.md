@@ -84,10 +84,20 @@ Commands, option names, enum tokens, JSON properties, and XML element names are
 stable English identifiers. `--language CODE` localizes human-readable help,
 status, diagnostics, and Terminal Workspace labels.
 
+## Version
+
+```shell
+devprojex --version
+devprojex -v
+```
+
+`--version` and `-v` are equivalent. They write the user-facing DevProjex version
+to stdout and exit with code `0` without opening Desktop or Terminal Workspace.
+
 ## Common Selection Options
 
-`analyze`, `export context`, `export project`, and `open` accept the same typed
-selection. `open` additionally accepts the `auto` profile:
+`analyze`, `tree`, `export context`, `export project`, and `open` accept the same
+typed path selection. `open` additionally accepts the `auto` profile:
 
 ```text
 --profile <standard|local|FILE>
@@ -406,13 +416,30 @@ devprojex analyze . --hide-secrets --findings --fail-on-findings
 ## Tree
 
 ```shell
-devprojex tree [PROJECT] [-f text|markdown|json|xml] [-o PATH|-]
+devprojex tree [PROJECT] [-f text|markdown|json|xml] [-o PATH|-] [options]
+```
+
+Output options:
+
+```text
+--color <auto|always|never>
+--progress <auto|always|never>
+--verbosity <quiet|minimal|normal|detailed|diagnostic>
+-q
+--plain
 ```
 
 `tree` writes the same tree payload as the shared Desktop export service and
 defaults to text on stdout. It accepts profile and path-selection options,
 including `--select-from`, but deliberately has no content-transformation flags.
-Its `PROJECT` argument is a local directory.
+Its `PROJECT` argument is a local directory. `-q` selects quiet verbosity and
+cannot be combined with an explicit `--verbosity`; `--plain` conflicts with
+`--color always`.
+
+For file output, the destination must be outside the source project, its parent
+directory must already exist, and the destination must not already exist. `tree`
+has no `--force` option. On success, stdout contains the tree document for `-o -`
+or one absolute committed path for file output; operational output stays on stderr.
 
 ## Export Context
 
@@ -560,9 +587,11 @@ devprojex profile validate FILE
 devprojex profile reset [PROJECT]
 ```
 
-Direct commands default to `standard`. Terminal Workspace uses `local` when
-available, then `standard`. Explicit CLI selection options override profile
-fields. See [CLI-Profiles.md](CLI-Profiles.md).
+`analyze`, `tree`, `export context`, `export project`, and `profile show` default
+to `standard`. `profile export` is the exception and defaults to `local`.
+Terminal Workspace and `open` use `local` when it is valid, then `standard`.
+Explicit CLI selection options override profile fields. See
+[CLI-Profiles.md](CLI-Profiles.md).
 
 Portable profile output must resolve outside the source project, including
 filesystem aliases, and its parent directory must already exist. Source safety is

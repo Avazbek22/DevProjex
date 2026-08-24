@@ -107,7 +107,7 @@ has no usable home directory.
 
 ## Optional Terminal Alias
 
-For terminal automation, use **Help -> Terminal command** in the app. DevProjex creates a user-level wrapper named `devprojex` in `~/.local/bin` and can repair it if the app bundle moves.
+For terminal automation, use **Help → Launch from terminal** in the app. DevProjex creates a user-level wrapper named `devprojex` in `~/.local/bin` and can repair it if the app bundle moves.
 
 Manual equivalent:
 

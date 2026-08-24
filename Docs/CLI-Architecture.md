@@ -56,7 +56,8 @@ renderers.
 - selected relative paths;
 - one Git filtering mode;
 - ordinary Exclusions;
-- the opt-in Hide Secrets content transformation;
+- five independent opt-in content transformations: Hide Secrets, Hide Private
+  Data, Compress Code, Strip Comments, and Strip Blank Lines;
 - profile source.
 
 `ProjectSelectionResolver` applies standard/local/portable profile precedence and
