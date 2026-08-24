@@ -8,16 +8,13 @@ namespace DevProjex.Avalonia.Views;
 public partial class TopMenuBarView : UserControl
 {
     private const double LargePopupViewportInset = 8;
-    private const double ProjectToolHiddenOffset = 7;
     private static readonly TimeSpan ProjectToolFadeDuration =
-        UiTimingProfile.Scale(TimeSpan.FromMilliseconds(220));
-    private static readonly TimeSpan ProjectToolLiftDuration =
-        UiTimingProfile.Scale(TimeSpan.FromMilliseconds(280));
-    private static readonly TimeSpan ProjectToolStagger =
-        UiTimingProfile.Scale(TimeSpan.FromMilliseconds(65));
-    private readonly TranslateTransform _formatToolTransform;
-    private readonly TranslateTransform _previewToolTransform;
-    private readonly TranslateTransform _filterToolTransform;
+        UiTimingProfile.Scale(TimeSpan.FromMilliseconds(240));
+    private static readonly TimeSpan ProjectToolRevealDuration =
+        UiTimingProfile.Scale(TimeSpan.FromMilliseconds(340));
+    private readonly ProjectToolClip _formatToolClip;
+    private readonly ProjectToolClip _previewToolClip;
+    private readonly ProjectToolClip _filterToolClip;
     private CancellationTokenSource? _projectToolsRevealCts;
     private long _projectToolsRevealVersion;
     private bool _projectToolsRevealPrepared;
@@ -98,9 +95,9 @@ public partial class TopMenuBarView : UserControl
     public TopMenuBarView()
     {
         InitializeComponent();
-        _formatToolTransform = ConfigureProjectTool(FormatSegmentedControl);
-        _previewToolTransform = ConfigureProjectTool(PreviewToggleButton);
-        _filterToolTransform = ConfigureProjectTool(FilterToggleButton);
+        _formatToolClip = ConfigureProjectTool(FormatSegmentedControl);
+        _previewToolClip = ConfigureProjectTool(PreviewToggleButton);
+        _filterToolClip = ConfigureProjectTool(FilterToggleButton);
         HelpPopup.CustomPopupPlacementCallback = ConfigureLargePopupPlacement;
         HelpDocsPopup.CustomPopupPlacementCallback = ConfigureLargePopupPlacement;
         UpdatePopup.CustomPopupPlacementCallback = ConfigureLargePopupPlacement;
@@ -165,13 +162,11 @@ public partial class TopMenuBarView : UserControl
             await DispatcherTaskSchedulerProvider
                 .YieldAsync(DispatcherPriority.Render)
                 .WaitAsync(revealCts.Token);
-            RevealProjectTool(FilterToggleButton, _filterToolTransform);
-            await Task.Delay(ProjectToolStagger, revealCts.Token);
-            RevealProjectTool(PreviewToggleButton, _previewToolTransform);
-            await Task.Delay(ProjectToolStagger, revealCts.Token);
-            RevealProjectTool(FormatSegmentedControl, _formatToolTransform);
+            RevealProjectTool(FilterToggleButton, _filterToolClip);
+            RevealProjectTool(PreviewToggleButton, _previewToolClip);
+            RevealProjectTool(FormatSegmentedControl, _formatToolClip);
             await Task.Delay(
-                ProjectToolLiftDuration + UiTimingProfile.AnimationSettleBuffer,
+                ProjectToolRevealDuration + UiTimingProfile.AnimationSettleBuffer,
                 revealCts.Token);
         }
         catch (OperationCanceledException) when (revealCts.IsCancellationRequested)
@@ -693,17 +688,16 @@ public partial class TopMenuBarView : UserControl
         DetachOwnedControlHandlers();
     }
 
-    private static TranslateTransform ConfigureProjectTool(Control control)
+    private static ProjectToolClip ConfigureProjectTool(Control control)
     {
-        var transform = control.RenderTransform as TranslateTransform ?? new TranslateTransform();
-        control.RenderTransform = transform;
-        ConfigureProjectToolTransitions(control, transform);
-        return transform;
+        var clip = new ProjectToolClip();
+        ConfigureProjectToolTransitions(control, clip);
+        return clip;
     }
 
     private static void ConfigureProjectToolTransitions(
         Control control,
-        TranslateTransform transform)
+        ProjectToolClip clip)
     {
         control.Transitions =
         [
@@ -714,44 +708,59 @@ public partial class TopMenuBarView : UserControl
                 Easing = new CubicEaseOut()
             }
         ];
-        transform.Transitions =
-        [
-            new DoubleTransition
-            {
-                Property = TranslateTransform.YProperty,
-                Duration = ProjectToolLiftDuration,
-                Easing = new CubicEaseOut()
-            }
-        ];
+        ConfigureProjectToolClipTransition(clip);
     }
 
     private static void RevealProjectTool(
         Control control,
-        TranslateTransform transform)
+        ProjectToolClip clip)
     {
+        clip.Scale.Transitions = null;
+        clip.UpdateBounds(control.Bounds);
+        clip.Scale.ScaleX = 0;
+        ConfigureProjectToolClipTransition(clip);
+        control.Clip = clip.Geometry;
         control.IsHitTestVisible = true;
         control.Opacity = 1;
-        transform.Y = 0;
+        clip.Scale.ScaleX = 1;
     }
 
     private void SetProjectToolsImmediately(bool visible)
     {
-        SetProjectToolImmediately(FormatSegmentedControl, _formatToolTransform, visible);
-        SetProjectToolImmediately(PreviewToggleButton, _previewToolTransform, visible);
-        SetProjectToolImmediately(FilterToggleButton, _filterToolTransform, visible);
+        SetProjectToolImmediately(FormatSegmentedControl, _formatToolClip, visible);
+        SetProjectToolImmediately(PreviewToggleButton, _previewToolClip, visible);
+        SetProjectToolImmediately(FilterToggleButton, _filterToolClip, visible);
     }
 
     private static void SetProjectToolImmediately(
         Control control,
-        TranslateTransform transform,
+        ProjectToolClip clip,
         bool visible)
     {
         control.Transitions = null;
-        transform.Transitions = null;
+        clip.Scale.Transitions = null;
         control.Opacity = visible ? 1 : 0;
-        transform.Y = visible ? 0 : ProjectToolHiddenOffset;
+        control.Clip = visible ? null : clip.Geometry;
+        if (!visible)
+        {
+            clip.UpdateBounds(control.Bounds);
+            clip.Scale.ScaleX = 0;
+        }
         control.IsHitTestVisible = visible;
-        ConfigureProjectToolTransitions(control, transform);
+        ConfigureProjectToolTransitions(control, clip);
+    }
+
+    private static void ConfigureProjectToolClipTransition(ProjectToolClip clip)
+    {
+        clip.Scale.Transitions =
+        [
+            new DoubleTransition
+            {
+                Property = ScaleTransform.ScaleXProperty,
+                Duration = ProjectToolRevealDuration,
+                Easing = new CubicEaseOut()
+            }
+        ];
     }
 
     private void CancelProjectToolsReveal()
@@ -759,5 +768,34 @@ public partial class TopMenuBarView : UserControl
         var revealCts = Interlocked.Exchange(ref _projectToolsRevealCts, null);
         revealCts?.Cancel();
         revealCts?.Dispose();
+    }
+
+    private sealed class ProjectToolClip
+    {
+        private readonly TranslateTransform _moveToOrigin = new();
+        private readonly TranslateTransform _moveFromOrigin = new();
+
+        public ProjectToolClip()
+        {
+            var transforms = new TransformGroup();
+            transforms.Children.Add(_moveToOrigin);
+            transforms.Children.Add(Scale);
+            transforms.Children.Add(_moveFromOrigin);
+            Geometry.Transform = transforms;
+        }
+
+        public RectangleGeometry Geometry { get; } = new();
+
+        public ScaleTransform Scale { get; } = new() { ScaleY = 1 };
+
+        public void UpdateBounds(Rect bounds)
+        {
+            var width = Math.Max(0, bounds.Width);
+            var height = Math.Max(0, bounds.Height);
+            var centerX = width / 2;
+            Geometry.Rect = new Rect(0, 0, width, height);
+            _moveToOrigin.X = -centerX;
+            _moveFromOrigin.X = centerX;
+        }
     }
 }
