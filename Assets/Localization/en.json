@@ -120,6 +120,7 @@
   "Menu.Help.ResetData": "Reset data",
   "Help.Help.Title": "Help",
   "Help.Help.CopyAll": "Copy all",
+  "Help.Help.CloseSearch": "Close search",
   "Help.About.Title": "About",
   "Help.About.Body": "DevProjex is a cross-platform open-source tool for quickly preparing project context: analyzing structure, flexibly selecting files, configuring exclusions, previewing, copying, and exporting the tree or contents. The GUI, TUI, and CLI let you work with local folders and Git repositories, creating clean context for AI assistants, code reviews, learning, and documentation.\n\nProcessing is local, and the opened project remains read-only: DevProjex does not modify source files or upload their contents to external services, and it collects no telemetry.\n\nThe source code is open for study and modification; architectural suggestions and improvements (PRs) are welcome as part of the project's development.\n\nStack: .NET 10 · Avalonia UI\nDeveloper: Avazbek Olimov (Avazbek22)\nCopyright © 2025–{0} Avazbek Olimov",
   "Help.About.OpenLink": "Open GitHub repository",
