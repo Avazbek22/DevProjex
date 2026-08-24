@@ -28,6 +28,8 @@ public sealed class StatusMetricWaveText : Control
     private bool _glyphsDirty = true;
     private bool _revealStarted;
     private bool _revealCompleted;
+    private double _layoutWidth;
+    private double _reservedContentWidth;
     private double _contentWidth;
     private double _contentHeight;
 
@@ -127,6 +129,13 @@ public sealed class StatusMetricWaveText : Control
             _glyphsDirty = true;
         }
 
+        if (change.Property == LabelProperty ||
+            change.Property == TextFontFamilyProperty ||
+            change.Property == TextFontSizeProperty)
+        {
+            _reservedContentWidth = 0;
+        }
+
         if (change.Property == TextProperty)
         {
             var previousText = _lastText;
@@ -195,7 +204,9 @@ public sealed class StatusMetricWaveText : Control
                 _contentHeight);
             using (context.PushOpacity(glyph.BaseOpacity * revealOpacity))
             {
-                context.DrawText(glyph.Text, new Point(glyph.X, top + offsetY));
+                context.DrawText(
+                    glyph.Text,
+                    new Point(glyph.X + ResolveLayoutOffset(_layoutWidth), top + offsetY));
             }
         }
     }
@@ -227,7 +238,9 @@ public sealed class StatusMetricWaveText : Control
         var changedGlyphs = new bool[currentLayout.Glyphs.Count];
         var cells = new List<MetricRollCell>();
         var maximumDelayRank = 0;
-        var transitionWidth = Math.Max(previousLayout.Width, currentLayout.Width);
+        var transitionWidth = Math.Max(
+            _reservedContentWidth,
+            Math.Max(previousLayout.Width, currentLayout.Width));
         var previousLayoutOffset = RevealDirection == StatusMetricWaveDirection.RightToLeft
             ? transitionWidth - previousLayout.Width
             : 0;
@@ -281,6 +294,7 @@ public sealed class StatusMetricWaveText : Control
             }
         }
 
+        _reservedContentWidth = transitionWidth;
         ApplyGlyphLayout(currentLayout);
         _glyphsDirty = false;
         if (cells.Count == 0)
@@ -291,7 +305,6 @@ public sealed class StatusMetricWaveText : Control
             return;
         }
 
-        _contentWidth = transitionWidth;
         _contentHeight = Math.Max(previousLayout.Height, currentLayout.Height);
         _metricRollTransition = new MetricRollTransition(
             previousLayout,
@@ -522,9 +535,16 @@ public sealed class StatusMetricWaveText : Control
     {
         _glyphs.Clear();
         _glyphs.AddRange(layout.Glyphs);
-        _contentWidth = layout.Width;
+        _layoutWidth = layout.Width;
+        _reservedContentWidth = Math.Max(_reservedContentWidth, layout.Width);
+        _contentWidth = _reservedContentWidth;
         _contentHeight = layout.Height;
     }
+
+    private double ResolveLayoutOffset(double layoutWidth) =>
+        RevealDirection == StatusMetricWaveDirection.RightToLeft
+            ? Math.Max(0, _contentWidth - layoutWidth)
+            : 0;
 
     private static void AppendGlyphs(
         List<WaveGlyph> glyphs,
@@ -659,6 +679,9 @@ public sealed class StatusMetricWaveText : Control
         _revealStarted = false;
         _revealCompleted = false;
         _metricRollTransition = null;
+        _layoutWidth = 0;
+        _reservedContentWidth = 0;
+        _contentWidth = 0;
         StopAnimationTimer();
         InvalidateVisual();
     }
