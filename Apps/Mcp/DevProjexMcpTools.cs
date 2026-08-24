@@ -32,10 +32,7 @@ internal sealed class DevProjexMcpTools(
 				.Where(projects.HasLocalProfile)
 				.Select(root => new { project = root, name = "local" })
 				.ToArray();
-			var text = string.Join(
-				'\n',
-				projectItems.Select(static item => $"{item.path}\t{item.name}\t{item.type}"));
-			return Task.FromResult(McpToolResults.Success(text, new { projects = projectItems, profiles }));
+			return Task.FromResult(McpToolResults.StructuredSuccess(new { projects = projectItems, profiles }));
 		});
 
 	[Description("Return the effective project tree after built-in, gitignore, profile, and optional agent glob filters.")]
@@ -73,9 +70,7 @@ internal sealed class DevProjexMcpTools(
 			var body = string.Join('\n', shown);
 			if (truncated)
 				body += "\n[Tree truncated at 2000 lines. Narrow include_patterns, exclude_patterns, or max_depth.]";
-			return McpToolResults.Success(
-				McpSpotlight.Wrap(body),
-				new { lines = shown.Count, totalLines = lines.Count, truncated });
+			return McpToolResults.TextSuccess(McpSpotlight.Wrap(body));
 		});
 
 	[Description("Measure a redacted project selection and list its ten largest text files by estimated tokens.")]
@@ -117,8 +112,7 @@ internal sealed class DevProjexMcpTools(
 				detail = effectiveDetail.Token,
 				topFiles = top
 			};
-			var text = JsonSerializer.Serialize(envelope, new JsonSerializerOptions { WriteIndented = true });
-			return McpToolResults.Success(text, envelope);
+			return McpToolResults.StructuredSuccess(envelope);
 		});
 
 	[Description("Build an exact redacted DevProjex context export. Large packs expire when this server process exits.")]
@@ -157,21 +151,11 @@ internal sealed class DevProjexMcpTools(
 						useUnifiedContentHeaders: true).ConfigureAwait(false);
 				},
 				cancellationToken).ConfigureAwait(false);
-			var metrics = new
-			{
-				files = plan.IncludedFiles.Count,
-				characters = pack.Characters,
-				lines = pack.Lines,
-				detail = effectiveDetail.Token,
-				stored = pack.Characters > MaximumInlinePackCharacters,
-				packId = pack.Characters > MaximumInlinePackCharacters ? pack.Id : null
-			};
-
 			if (pack.Characters <= MaximumInlinePackCharacters)
 			{
 				var content = await File.ReadAllTextAsync(pack.Path, cancellationToken).ConfigureAwait(false);
 				packs.Remove(pack.Id);
-				return McpToolResults.Success(McpSpotlight.Wrap(content), metrics, advertiseLargeResult: true);
+				return McpToolResults.TextSuccess(McpSpotlight.Wrap(content), advertiseLargeResult: true);
 			}
 
 			var tree = projects.TreeExportService.BuildFullTree(
@@ -184,7 +168,7 @@ internal sealed class DevProjexMcpTools(
 			var message = $"Pack stored as '{pack.Id}' ({pack.Characters} characters). " +
 			              "Call read_pack with this pack_id to read ranges, or search_project to locate source content.\n" +
 			              McpSpotlight.Wrap(tree);
-			return McpToolResults.Success(message, metrics, advertiseLargeResult: true);
+			return McpToolResults.TextSuccess(message, advertiseLargeResult: true);
 		});
 
 	[Description("Read a 1-based line range from a pack created by this server session.")]
@@ -207,15 +191,8 @@ internal sealed class DevProjexMcpTools(
 			}
 			if (page.CharacterLimitReached)
 				text += "\n[The current line exceeded the 50000-character response cap; use search_project to narrow the source.]";
-			return McpToolResults.Success(
+			return McpToolResults.TextSuccess(
 				McpSpotlight.Wrap(text),
-				new
-				{
-					startLine = page.StartLine,
-					endLine = page.EndLine,
-					totalLines = page.TotalLines,
-					truncated = page.IsTruncated
-				},
 				advertiseLargeResult: true);
 		});
 
@@ -278,9 +255,7 @@ internal sealed class DevProjexMcpTools(
 			var shown = Math.Min(totalMatches, maximumResults);
 			if (totalMatches > shown)
 				output.AppendLine($"[{totalMatches - shown} additional matches not shown; narrow the pattern or filters.]");
-			return McpToolResults.Success(
-				McpSpotlight.Wrap(output.ToString().TrimEnd()),
-				new { matches = totalMatches, shown, truncated = totalMatches > shown });
+			return McpToolResults.TextSuccess(McpSpotlight.Wrap(output.ToString().TrimEnd()));
 		});
 
 	[Description("Read redacted text from one effective project file using an optional 1-based line range.")]
@@ -325,16 +300,7 @@ internal sealed class DevProjexMcpTools(
 			var text = page.Text;
 			if (page.IsTruncated)
 				text += $"\n[Showing lines {page.StartLine}-{page.EndLine} of {page.TotalLines}; continue with start_line={page.EndLine + 1}.]";
-			return McpToolResults.Success(
-				McpSpotlight.Wrap(text),
-				new
-				{
-					path = McpProjectService.ToRelative(plan.SourceRoot, file),
-					startLine = page.StartLine,
-					endLine = page.EndLine,
-					totalLines = page.TotalLines,
-					truncated = page.IsTruncated
-				});
+			return McpToolResults.TextSuccess(McpSpotlight.Wrap(text));
 		});
 
 	private McpJsonArguments SelectionArguments(CallToolRequestParams request) =>

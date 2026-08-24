@@ -48,9 +48,18 @@ public sealed class McpServerProcessTests
 				progress: null,
 				options: null,
 				TestContext.Current.CancellationToken);
+			Assert.NotNull(result.StructuredContent);
+			var structured = result.StructuredContent.Value;
+			var listedProject = structured.GetProperty("projects")[0].GetProperty("path").GetString();
+			var expectedProject = McpRootRegistry.ResolvePhysicalExistingPath(project, requireDirectory: true);
+			var expectedIgnoredEnvironmentRoot = McpRootRegistry.ResolvePhysicalExistingPath(
+				ignoredEnvironmentRoot,
+				requireDirectory: true);
+			Assert.True(string.Equals(expectedProject, listedProject, PathComparison));
+			Assert.False(string.Equals(expectedIgnoredEnvironmentRoot, listedProject, PathComparison));
 			var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
-			Assert.Contains(project, text, PathComparison);
-			Assert.DoesNotContain(ignoredEnvironmentRoot, text, PathComparison);
+			using var textDocument = JsonDocument.Parse(text);
+			Assert.True(JsonElement.DeepEquals(structured, textDocument.RootElement));
 		}
 
 		process.StandardInput.Close();

@@ -3,19 +3,38 @@ namespace DevProjex.Mcp;
 internal static class McpToolResults
 {
 	private const string MaxResultSizeKey = "anthropic/maxResultSizeChars";
+	private static readonly JsonSerializerOptions StructuredTextOptions = new()
+	{
+		WriteIndented = true
+	};
 
-	public static CallToolResult Success(
+	public static CallToolResult TextSuccess(
 		string text,
-		object? structured = null,
 		bool advertiseLargeResult = false) =>
 		new()
 		{
 			Content = [new TextContentBlock { Text = text }],
-			StructuredContent = structured is null ? null : JsonSerializer.SerializeToElement(structured),
 			Meta = advertiseLargeResult
 				? new System.Text.Json.Nodes.JsonObject { [MaxResultSizeKey] = 200_000 }
 				: null
 		};
+
+	public static CallToolResult StructuredSuccess(object value)
+	{
+		ArgumentNullException.ThrowIfNull(value);
+		var structured = JsonSerializer.SerializeToElement(value);
+		return new CallToolResult
+		{
+			Content =
+			[
+				new TextContentBlock
+				{
+					Text = JsonSerializer.Serialize(structured, StructuredTextOptions)
+				}
+			],
+			StructuredContent = structured
+		};
+	}
 
 	public static CallToolResult Error(McpToolException exception) =>
 		new()
