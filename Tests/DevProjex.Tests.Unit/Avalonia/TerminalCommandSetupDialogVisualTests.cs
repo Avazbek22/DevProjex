@@ -175,7 +175,7 @@ public sealed class TerminalCommandSetupDialogVisualTests
 			.ToArray();
 
 		Assert.Contains("\n\n", ReadTextBlockText(message), StringComparison.Ordinal);
-		Assert.Equal(2, commandRuns.Length);
+		Assert.Equal(4, commandRuns.Length);
 		Assert.All(commandRuns, run => Assert.Equal(FontWeight.Bold, run.FontWeight));
 	}
 

@@ -261,7 +261,7 @@ public sealed class TerminalCommandSetupDialogTextTests
 		var combined = string.Join(Environment.NewLine, text.Title, text.Body, text.Details, text.CommandLine);
 
 		Assert.Equal(
-			"Сделать команду devprojex доступной в терминале?\n\nПриложение добавит команду devprojex в PATH для вашего пользователя.",
+			"Сделать команду devprojex доступной в терминале?\n\nВы получите интерактивное терминальное рабочее пространство, прямые CLI-команды для скриптов и CI и локальный MCP-сервер для ИИ-агентов.\n\nПриложение добавит команду devprojex в PATH для вашего пользователя. После этого откройте новое окно терминала и введите devprojex, чтобы начать, или devprojex --help для обзора команд.",
 			text.Body);
 		Assert.Contains("\n\n", text.Body, StringComparison.Ordinal);
 		Assert.Empty(text.Details);
