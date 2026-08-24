@@ -22,7 +22,7 @@ public sealed class LocalizationGitCacheKeysTests
 	public void EveryLocaleContainsNonEmptyGitCacheKeysWithMatchingParity()
 	{
 		var files = Directory.GetFiles(GetLocalizationDirectory(), "*.json");
-		Assert.Equal(11, files.Length);
+		Assert.Equal(Enum.GetValues<AppLanguage>().Length, files.Length);
 		HashSet<string>? expectedKeys = null;
 		foreach (var file in files)
 		{

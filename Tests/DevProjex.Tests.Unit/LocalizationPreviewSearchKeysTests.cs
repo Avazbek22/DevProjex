@@ -17,7 +17,7 @@ public sealed class LocalizationPreviewSearchKeysTests
 			"Assets",
 			"Localization");
 		var files = Directory.GetFiles(localizationDirectory, "*.json");
-		Assert.Equal(11, files.Length);
+		Assert.Equal(Enum.GetValues<AppLanguage>().Length, files.Length);
 
 		foreach (var file in files)
 		{

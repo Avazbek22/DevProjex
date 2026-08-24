@@ -90,7 +90,7 @@ public sealed class DesktopShortcutLocalizationContractTests
 		var files = Directory.GetFiles(
 			Path.Combine(FindRepositoryRoot(), "Assets", "Localization"),
 			"*.json");
-		Assert.Equal(11, files.Length);
+		Assert.Equal(Enum.GetValues<AppLanguage>().Length, files.Length);
 		return files;
 	}
 

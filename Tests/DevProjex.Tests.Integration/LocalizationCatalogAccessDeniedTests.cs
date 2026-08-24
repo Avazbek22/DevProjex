@@ -3,20 +3,7 @@ namespace DevProjex.Tests.Integration;
 public sealed class LocalizationCatalogAccessDeniedTests
 {
 	private const string Key = "Msg.AccessDeniedElevationRequired";
-	private static readonly AppLanguage[] SupportedLanguages =
-	[
-		AppLanguage.En,
-		AppLanguage.Ru,
-		AppLanguage.Uz,
-		AppLanguage.Tg,
-		AppLanguage.Kk,
-		AppLanguage.Fr,
-		AppLanguage.De,
-		AppLanguage.It,
-		AppLanguage.Es,
-		AppLanguage.Pt,
-		AppLanguage.PtPt
-	];
+	private static readonly AppLanguage[] SupportedLanguages = Enum.GetValues<AppLanguage>();
 
 	[Theory]
 	[MemberData(nameof(AllLanguageCases))]

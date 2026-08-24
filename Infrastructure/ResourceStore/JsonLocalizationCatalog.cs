@@ -29,7 +29,16 @@ public sealed class JsonLocalizationCatalog : ILocalizationCatalog
 			[AppLanguage.It] = CreateResource(assembly, "it"),
 			[AppLanguage.Es] = CreateResource(assembly, "es"),
 			[AppLanguage.Pt] = CreateResource(assembly, "pt"),
-			[AppLanguage.PtPt] = CreateResource(assembly, "pt-pt")
+			[AppLanguage.PtPt] = CreateResource(assembly, "pt-pt"),
+			[AppLanguage.ZhCn] = CreateResource(assembly, "zh-cn"),
+			[AppLanguage.ZhTw] = CreateResource(assembly, "zh-tw"),
+			[AppLanguage.Ja] = CreateResource(assembly, "ja"),
+			[AppLanguage.Ko] = CreateResource(assembly, "ko"),
+			[AppLanguage.Tr] = CreateResource(assembly, "tr"),
+			[AppLanguage.Uk] = CreateResource(assembly, "uk"),
+			[AppLanguage.Pl] = CreateResource(assembly, "pl"),
+			[AppLanguage.Vi] = CreateResource(assembly, "vi"),
+			[AppLanguage.Id] = CreateResource(assembly, "id")
 		}.ToFrozenDictionary();
 	}
 
