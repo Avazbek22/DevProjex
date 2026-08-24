@@ -326,11 +326,17 @@ appear after the profile was saved use the current product default, consistently
 Desktop, CLI, and TUI. Legacy selected-only local data is promoted at the storage
 boundary: its selected values become checked state entries and other rows use current
 defaults. Explicit CLI root, extension, Git-mode, or exclusion overrides are exact
-invocation-only fields and do not rewrite the local profile. Root names are exact
-nonblank filesystem names; DevProjex never trims legal leading or trailing whitespace.
+invocation-only fields and do not rewrite the local profile.
 
-Direct commands default to `standard`. TUI and `open` default to `local` when a
-valid local profile exists, otherwise `standard`.
+Portable-profile root arrays are normalized at the storage boundary. Blank values
+are discarded, remaining values are trimmed, and duplicates are removed before the
+values are sorted with effective host path semantics (case-insensitive on Windows,
+ordinal on Linux and macOS). Normalization makes manually edited JSON resilient to
+incidental whitespace and duplicate entries and produces one deterministic root set.
+
+`analyze`, `tree`, `export context`, `export project`, and `profile show` default
+to `standard`. `profile export` is the exception and defaults to `local`. TUI and
+`open` default to `local` when a valid local profile exists, otherwise `standard`.
 
 `open --last` resolves the last project itself. It cannot be combined with a
 project argument, `--branch`, or any selection override because silently
@@ -467,8 +473,9 @@ and file output use that
 canonical text. Interactive stdout without `--plain` may use a rich presentation,
 but it contains the same logical fields and values.
 
-An analysis file must be outside the source project and must not already exist.
-There is no analysis `--force` option in v1.
+A tree output file must be outside the source project, its parent directory must
+already exist, and the destination must not already exist. There is no tree
+`--force` option in v1.
 
 ### `export context`
 
@@ -656,13 +663,14 @@ not part of the public v1 syntax.
 
 ## Shared Output Options
 
-Direct analysis and export commands use:
+Direct analysis, tree, and export commands use:
 
 ```text
 --color <auto|always|never>           default: auto
 --progress <auto|always|never>        default: auto
 --verbosity <quiet|minimal|normal|detailed|diagnostic>
                                       default: normal
+-q                                    alias for --verbosity quiet
 --plain
 ```
 
@@ -714,10 +722,10 @@ that prevents an accepted option from becoming a no-op.
 | `analyze` | `--findings` | off | adds sanitized effective redaction descriptors | values, source fragments, fingerprints, and raw detector errors are forbidden | report stays on stdout/file | serializer, sanitation, process |
 | `analyze` | `--fail-on-findings` | off | writes the report, then gates on effective findings | independent from `--strict` | requested report remains intact; a nonzero finding count exits `3` | handler, process |
 | URL-capable commands | `--branch` | remote default branch | selects a validated repository branch under an operation lease | rejected for local paths and with `open --last` | ordinary command payload remains on stdout; clone/branch failure exits `1` or invalid name exits `2` | parser, resolver, Git fixture |
-| analyze/context/project | `--color` | `auto` | selects ANSI color policy independently for the relevant human stream | `always` conflicts with `--plain`; `never` does not force ASCII | requested payload stays on stdout; conflict exits `2` | parser, rendering, process |
-| analyze/context/project | `--progress` | `auto` | selects automatic, forced, or disabled operational progress on stderr | quiet/minimal suppress optional progress; URL-source Git operations use bounded milestones when rewriting is unavailable | requested payload stays byte-clean on stdout | parser, rendering, process |
-| analyze/context/project | `--verbosity` | `normal` | controls optional operational stderr from quiet through safe diagnostic context | never removes requested stdout or suppresses errors | requested payload stays on stdout; invalid value exits `2` | parser, rendering, process |
-| analyze/context/project | `--plain` | off | selects line-oriented ASCII human output and disables ANSI, markup, decoration, and animation | conflicts with `--color always` | machine schema and requested payload stay unchanged; conflict exits `2` | parser, rendering, process |
+| analyze/tree/context/project | `--color` | `auto` | selects ANSI color policy independently for the relevant human stream | `always` conflicts with `--plain`; `never` does not force ASCII | requested payload stays on stdout; conflict exits `2` | parser, rendering, process |
+| analyze/tree/context/project | `--progress` | `auto` | selects automatic, forced, or disabled operational progress on stderr | quiet/minimal suppress optional progress; URL-source Git operations use bounded milestones when rewriting is unavailable | requested payload stays byte-clean on stdout | parser, rendering, process |
+| analyze/tree/context/project | `--verbosity`, `-q` | `normal` | controls optional operational stderr from quiet through safe diagnostic context; `-q` selects `quiet` | `-q` conflicts with an explicit `--verbosity`; neither removes requested stdout nor suppresses errors | requested payload stays on stdout; invalid value or conflict exits `2` | parser, rendering, process |
+| analyze/tree/context/project | `--plain` | off | selects line-oriented ASCII human output and disables ANSI, markup, decoration, and animation | conflicts with `--color always` | machine schema and requested payload stay unchanged; conflict exits `2` | parser, rendering, process |
 | `export context` | `--view`, `--format` | `tree-content`, `markdown` | selects typed document sections and serializer | none | document on stdout/file; invalid value exits `2` | parser, serializer, process |
 | `export context` | `-o`, `--output` | `-` | selects streaming stdout or an exact context file | destination must be outside source | document or real absolute path on stdout | destination, streaming, process |
 | `export context` | `--force` | off | atomically replaces an existing context file | invalid with stdout | success path on stdout; conflict exits `4`, invalid combination `2` | parser, destination, handler |

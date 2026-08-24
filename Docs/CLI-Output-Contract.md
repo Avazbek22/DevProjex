@@ -56,16 +56,101 @@ project inventory, effective selection, metrics, diagnostics, and the
 deterministic context fingerprint available to the current engine. v1 does not
 publish a timings field.
 
-`selection.selectedRootFolders` is the validated structural root scope applied
-to that analysis. When no explicit CLI root override is supplied, it contains
-all effective project roots. An explicit `--root` override restricts it to the
-validated requested subset. `inventory.availableRootFolders` remains the set
-discovered before that explicit restriction. The removed Desktop root selector
-does not restrict analysis in the current model.
+The base shape is:
+
+```json
+{
+  "schemaVersion": 1,
+  "kind": "devprojex-analysis",
+  "project": {
+    "root": "/workspace/app",
+    "name": "app",
+    "source": null
+  },
+  "selection": {
+    "gitMode": "gitignore",
+    "exclusions": [],
+    "hideSecrets": false,
+    "hidePrivateData": false,
+    "compressCode": false,
+    "stripComments": false,
+    "stripBlankLines": false,
+    "roots": [],
+    "extensions": [],
+    "selectedPaths": []
+  },
+  "inventory": {
+    "files": 0,
+    "folders": 0
+  },
+  "metrics": {
+    "bytes": 0,
+    "tree": {
+      "lines": 0,
+      "chars": 0,
+      "tokens": 0
+    },
+    "content": {
+      "lines": 0,
+      "chars": 0,
+      "tokens": 0
+    }
+  },
+  "diagnostics": [],
+  "fingerprint": "..."
+}
+```
+
+`selection.roots` is the validated structural root scope applied to the
+analysis. With no explicit CLI root override it contains the effective profile
+roots; an explicit `--root` replaces it with the validated requested subset.
+Available roots discovered before that restriction are not exposed in analysis
+JSON. `inventory` contains only the projected `files` and `folders` counts.
+
+For a local source, `project.source` is null. For a cached Git source it is an
+object containing `type: "git"`, the safe `repositoryUrl`, and nullable `branch`
+and `commit` properties. Diagnostic entries contain `code`, `severity`, `message`,
+and nullable `path`; machine paths use `/` separators.
 
 When Hide Secrets is enabled, analysis adds a top-level `redaction` object with
 `matchedCount`, `redactedCount`, and a non-safety `notice`. Zero means the pinned
 rules matched nothing; it never means that the project is safe.
+
+When Hide Private Data is enabled, analysis adds a top-level `privacy` object
+with the same complete shape: `matchedCount`, `redactedCount`, and a non-privacy-
+guarantee `notice`. Zero means that the current rules matched nothing; it never
+guarantees that the project contains no private data.
+
+```json
+{
+  "privacy": {
+    "matchedCount": 0,
+    "redactedCount": 0,
+    "notice": "..."
+  }
+}
+```
+
+When enabled content inspection withholds one or more text files because they
+are too large or use an unsupported encoding, analysis adds:
+
+```json
+{
+  "contentInspection": {
+    "unscannableCount": 1,
+    "unscannableFiles": [
+      {
+        "path": "relative/path.txt",
+        "reason": "too-large"
+      }
+    ]
+  }
+}
+```
+
+`unscannableCount` equals the array length. Each entry contains a source-relative
+`path` with `/` separators and a `reason` token of exactly `too-large` or
+`unsupported-encoding`. The object is omitted when no files are withheld.
 
 With `--findings`, analysis adds an ordered top-level `findings` array. Each
 effective finding contains exactly `ruleId`, `category` (`secret` or
@@ -120,6 +205,42 @@ inside the index-locked operation. A busy index lock, unsupported future schema,
 or failed index update cannot be reported as empty success and produces policy
 exit code `3`. `cache clear` also counts unindexed cache containers.
 
+## Doctor JSON
+
+`doctor --format json` emits the stable schema:
+
+```json
+{
+  "schemaVersion": 1,
+  "kind": "devprojex-doctor",
+  "version": "5.1",
+  "os": "Microsoft Windows 10.0.26100",
+  "architecture": "x64",
+  "packageType": "portable",
+  "singleFile": true,
+  "checks": [
+    {
+      "name": "terminal-launcher",
+      "code": "DPX-DOCTOR-TERMINAL-LAUNCHER",
+      "status": "pass",
+      "severity": "info",
+      "detail": "...",
+      "hint": null,
+      "path": null
+    }
+  ]
+}
+```
+
+`architecture` is the lowercase .NET runtime architecture token. `packageType`
+is `store` or `portable`. Check `name` and `code` are stable English identifiers;
+`detail` and nullable `hint` are human-readable and may be localized. `status` is
+exactly `pass`, `warning`, `failure`, or `skip`; the severity mapping is
+`pass` -> `info`, `warning` -> `warning`, `failure` -> `error`, and `skip` ->
+`info`. Nullable `path` uses `/` separators. A document containing a `failure`
+check is still written in full and returns policy exit code `3`; warnings and
+skipped checks alone do not change the success code.
+
 For `open`, a local source reports its accepted absolute path. A repository URL
 source reports only its safe URL; the generated physical cache path is never a
 success payload.
@@ -150,6 +271,7 @@ The top-level shape is:
   "metrics": {
     "files": 0,
     "folders": 0,
+    "bytes": 0,
     "characters": 0,
     "estimatedTokens": 0
   },

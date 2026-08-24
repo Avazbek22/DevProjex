@@ -7,7 +7,7 @@ GitHub release page.
 
 - Download and run `DevProjex.v<version>.win-x64.exe` or
   `DevProjex.v<version>.win-arm64.exe`.
-- Install with WinGet: `winget install Avazbek22.DevProjex`.
+- Install with WinGet: `winget install OlimoffDev.DevProjex`.
 - Install the packaged version from Microsoft Store when it is available in your
   region.
 
