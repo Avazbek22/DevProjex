@@ -162,7 +162,6 @@ public partial class MainWindow
 	{
 		CaptureAppliedContentTransformationState();
 		_metrics.CancelAndDiscardBackgroundCalculation();
-		_viewModel.StatusMetricsVisible = false;
 		_codeCompressionSnapshot = null;
 		InvalidatePreviewCache();
 		InvalidateSecretRedactionCount(scheduleRefreshImmediately: false);

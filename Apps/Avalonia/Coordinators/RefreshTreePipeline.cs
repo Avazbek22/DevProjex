@@ -10,7 +10,8 @@ internal sealed class RefreshTreePipeline(IRefreshTreePipelineHost host) : IDisp
     public async Task<TreeRefreshOutcome> RefreshTreeAsync(
         bool interactiveFilter = false,
         CancellationToken cancellationToken = default,
-        MemoryCleanupReason? postLoadCleanupReason = null)
+        MemoryCleanupReason? postLoadCleanupReason = null,
+        bool preserveStatusMetrics = false)
     {
         var input = host.CaptureTreeRefreshInput(preserveCheckedPaths: true);
         if (input is null)
@@ -33,7 +34,7 @@ internal sealed class RefreshTreePipeline(IRefreshTreePipelineHost host) : IDisp
         if (interactiveFilter)
             host.BeforeInteractiveFilterRefresh();
         else
-            host.BeforeFullTreeRefresh();
+            host.BeforeFullTreeRefresh(preserveStatusMetrics);
 
         try
         {

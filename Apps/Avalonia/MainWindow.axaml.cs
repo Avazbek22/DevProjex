@@ -1568,11 +1568,13 @@ public partial class MainWindow : Window
     private Task<TreeRefreshOutcome> RefreshTreeAsync(
         bool interactiveFilter = false,
         CancellationToken cancellationToken = default,
-        MemoryCleanupReason? postLoadCleanupReason = null) =>
+        MemoryCleanupReason? postLoadCleanupReason = null,
+        bool preserveStatusMetrics = false) =>
         _refreshPipeline.RefreshTreeAsync(
             interactiveFilter,
             cancellationToken,
-            postLoadCleanupReason);
+            postLoadCleanupReason,
+            preserveStatusMetrics);
 
     private TreeNodeViewModel BuildTreeViewModel(TreeNodeDescriptor descriptor, TreeNodeViewModel? parent)
     {

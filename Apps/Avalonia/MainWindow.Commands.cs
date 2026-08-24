@@ -671,7 +671,8 @@ public partial class MainWindow
 
                     refreshOutcome = await RefreshTreeAsync(
                         cancellationToken: cancellationToken,
-                        postLoadCleanupReason: MemoryCleanupReason.ApplySettingsWorkCompleted);
+                        postLoadCleanupReason: MemoryCleanupReason.ApplySettingsWorkCompleted,
+                        preserveStatusMetrics: true);
 
                     // A checkbox can change while a large tree is being materialized. In that
                     // case the pipeline discards the obsolete graph and Apply converges again

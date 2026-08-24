@@ -2340,10 +2340,11 @@ public sealed class MainWindowCoordinatorRefactorTests
                 InteractiveFilterBaseTree: InteractiveFilterBaseTree);
         }
 
-        public void BeforeFullTreeRefresh()
+        public void BeforeFullTreeRefresh(bool preserveStatusMetrics = false)
         {
             BeforeFullTreeRefreshCount++;
-            viewModel.StatusMetricsVisible = false;
+            if (!preserveStatusMetrics)
+                viewModel.StatusMetricsVisible = false;
         }
 
         public void BeforeInteractiveFilterRefresh() =>
