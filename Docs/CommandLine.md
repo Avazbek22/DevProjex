@@ -35,6 +35,7 @@ detail and is not the supported shell entry point.
 ```text
 devprojex
 ├── tui
+├── mcp
 ├── open
 ├── analyze
 ├── tree
@@ -73,6 +74,11 @@ devprojex
 
 `dev` is a hidden maintainer namespace. See `CONTRIBUTING.md` for its supported
 diagnostic workflows.
+
+`devprojex mcp [--root PATH ...]` starts the local read-only MCP stdio server.
+Explicit roots take precedence over `CLAUDE_PROJECT_DIR` and the current
+directory. See [McpServer.md](McpServer.md) for its security model, tools, and
+client configuration.
 
 Commands, option names, enum tokens, JSON properties, and XML element names are
 stable English identifiers. `--language CODE` localizes human-readable help,

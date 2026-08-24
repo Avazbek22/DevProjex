@@ -44,6 +44,7 @@ RID publish contains exactly one primary DevProjex application executable.
 - `devprojex <command>` runs a direct command without initializing Avalonia.
 - `devprojex open` opens or reuses Desktop.
 - `devprojex ui` sends a semantic request to an existing Desktop instance.
+- `devprojex mcp` starts the local read-only MCP stdio server without initializing Desktop or Terminal Workspace.
 - A graphical launch starts Desktop.
 
 On Windows, `devprojex` means the installed App Execution Alias or the generated
@@ -68,6 +69,7 @@ extraction base. The v1 contract does not promise extraction-free startup.
 ```text
 devprojex
 ├── tui
+├── mcp
 ├── open
 ├── analyze
 ├── tree

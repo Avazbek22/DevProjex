@@ -80,6 +80,11 @@ public sealed class DocumentationAndPackagingContractTests
 			"Apps",
 			"Terminal",
 			"DevProjex.Terminal.csproj"));
+		var mcpProject = XDocument.Load(Path.Combine(
+			rootPath,
+			"Apps",
+			"Mcp",
+			"DevProjex.Mcp.csproj"));
 		var probeProject = XDocument.Load(Path.Combine(
 			rootPath,
 			"Packaging",
@@ -103,11 +108,22 @@ public sealed class DocumentationAndPackagingContractTests
 			"Infrastructure.csproj",
 			"DevProjexGrammarRuntimeIdentifier=$(DevProjexGrammarRuntimeIdentifier)");
 		AssertProjectReferenceProperty(
+			terminalProject,
+			"DevProjex.Mcp.csproj",
+			"DevProjexGrammarRuntimeIdentifier=$(DevProjexGrammarRuntimeIdentifier)");
+		AssertProjectReferenceProperty(
+			mcpProject,
+			"Infrastructure.csproj",
+			"DevProjexGrammarRuntimeIdentifier=$(DevProjexGrammarRuntimeIdentifier)");
+		AssertProjectReferenceProperty(
 			probeProject,
 			"Infrastructure.csproj",
 			"DevProjexGrammarRuntimeIdentifier=$(RuntimeIdentifier)");
-		AssertRidPropertyDoesNotFlowPastInfrastructure(terminalProject, "Infrastructure.csproj");
-		AssertRidPropertyDoesNotFlowPastInfrastructure(infrastructureProject, excludedProject: null);
+		AssertRidPropertyDoesNotFlowPastInfrastructure(
+			terminalProject,
+			["Infrastructure.csproj", "DevProjex.Mcp.csproj"]);
+		AssertRidPropertyDoesNotFlowPastInfrastructure(mcpProject, ["Infrastructure.csproj"]);
+		AssertRidPropertyDoesNotFlowPastInfrastructure(infrastructureProject, excludedProjects: null);
 	}
 
 	[Fact]
@@ -673,13 +689,14 @@ public sealed class DocumentationAndPackagingContractTests
 
 	private static void AssertRidPropertyDoesNotFlowPastInfrastructure(
 		XDocument project,
-		string? excludedProject)
+		IReadOnlyList<string>? excludedProjects)
 	{
 		var references = project
 			.Descendants("ProjectReference")
-			.Where(element => excludedProject is null ||
-				!(element.Attribute("Include")?.Value ?? string.Empty)
-				.EndsWith(excludedProject, StringComparison.OrdinalIgnoreCase))
+			.Where(element => excludedProjects is null ||
+				excludedProjects.All(excludedProject =>
+					!(element.Attribute("Include")?.Value ?? string.Empty)
+					.EndsWith(excludedProject, StringComparison.OrdinalIgnoreCase)))
 			.ToArray();
 		Assert.NotEmpty(references);
 		Assert.All(references, reference => Assert.Contains(

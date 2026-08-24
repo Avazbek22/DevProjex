@@ -23,6 +23,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Mcp\DevProjex.Mcp.csproj">
+      <AdditionalProperties Condition="'$(DevProjexGrammarRuntimeIdentifier)'!=''">DevProjexGrammarRuntimeIdentifier=$(DevProjexGrammarRuntimeIdentifier)</AdditionalProperties>
+    </ProjectReference>
     <ProjectReference
       Include="..\..\Application\Application.csproj"
       GlobalPropertiesToRemove="DevProjexGrammarRuntimeIdentifier" />
