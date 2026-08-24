@@ -13,9 +13,9 @@ public sealed class StatusMetricWaveText : Control
     private static readonly TimeSpan MaximumWaveTravelDuration =
         UiTimingProfile.Scale(TimeSpan.FromMilliseconds(500));
     private static readonly TimeSpan MetricRollDuration =
-        UiTimingProfile.Scale(TimeSpan.FromMilliseconds(300));
+        UiTimingProfile.Scale(TimeSpan.FromMilliseconds(380));
     private static readonly TimeSpan MetricRollStagger =
-        UiTimingProfile.Scale(TimeSpan.FromMilliseconds(18));
+        UiTimingProfile.Scale(TimeSpan.FromMilliseconds(20));
     private static readonly TimeSpan FrameInterval = TimeSpan.FromMilliseconds(16);
 
     private readonly List<WaveGlyph> _glyphs = [];
@@ -329,7 +329,7 @@ public sealed class StatusMetricWaveText : Control
 
         var elapsed = Stopwatch.GetElapsedTime(_metricRollStartedTimestamp);
         var previousTop = Math.Max(0, (Bounds.Height - transition.Previous.Height) / 2);
-        var travelDistance = Math.Max(transition.Previous.Height, transition.Current.Height) + 3;
+        var travelDistance = Math.Max(transition.Previous.Height, transition.Current.Height) + 1;
         using (context.PushClip(new Rect(0, 0, Bounds.Width, Bounds.Height)))
         {
             foreach (var cell in transition.Cells)
@@ -339,7 +339,7 @@ public sealed class StatusMetricWaveText : Control
                     (elapsed.TotalMilliseconds - delay) / MetricRollDuration.TotalMilliseconds,
                     0,
                     1);
-                var movement = CubicEaseInOut(progress);
+                var movement = SmootherStep(progress);
                 var outgoingDirection = cell.Increases ? -1 : 1;
 
                 if (cell.PreviousGlyphIndex is { } previousIndex)
@@ -349,7 +349,7 @@ public sealed class StatusMetricWaveText : Control
                         transition.Previous.Glyphs[previousIndex],
                         previousTop,
                         outgoingDirection * travelDistance * movement,
-                        CubicEaseOut(1 - progress),
+                        1,
                         transition.PreviousLayoutOffset + cell.PreviousXAdjustment);
                 }
 
@@ -360,7 +360,7 @@ public sealed class StatusMetricWaveText : Control
                         transition.Current.Glyphs[currentIndex],
                         currentTop,
                         -outgoingDirection * travelDistance * (1 - movement),
-                        CubicEaseOut(progress),
+                        1,
                         transition.CurrentLayoutOffset);
                 }
             }
@@ -678,6 +678,9 @@ public sealed class StatusMetricWaveText : Control
         value < 0.5
             ? 4 * value * value * value
             : 1 - Math.Pow(-2 * value + 2, 3) / 2;
+
+    private static double SmootherStep(double value) =>
+        value * value * value * (value * ((value * 6) - 15) + 10);
 
     private static double Lerp(double start, double end, double progress) =>
         start + ((end - start) * progress);
