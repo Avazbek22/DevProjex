@@ -14,6 +14,7 @@ public static class GitIgnoreFileReader
 	public static GitIgnoreFileContent Read(string path)
 	{
 		IgnorePipelineDiagnostics.RecordGitIgnoreSourceReadRequest();
+		UnixFileTypeInspector.EnsureRegularFile(path);
 		using var stream = new FileStream(
 			path,
 			FileMode.Open,

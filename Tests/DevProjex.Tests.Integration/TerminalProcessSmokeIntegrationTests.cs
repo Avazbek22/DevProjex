@@ -159,6 +159,35 @@ public sealed class TerminalProcessSmokeIntegrationTests
 	}
 
 	[Fact]
+	public async Task ContextExportDoesNotOpenFifoGitIgnore()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("Windows does not expose POSIX FIFO entries.");
+
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("fifo-gitignore-source");
+		await CreateFifoAsync(Path.Combine(project, ".gitignore"));
+		workspace.WriteFile("fifo-gitignore-source/App.cs", "class App {}");
+
+		var context = await RunAsync(
+		[
+			"export", "context", project,
+			"--view", "content",
+			"--format", "json",
+			"--output", "-",
+			"--git-mode", "gitignore",
+			"--exclude", "none",
+			"--progress", "never",
+			"--language", "en"
+		]);
+
+		Assert.Equal(CommandLineExitCodes.Success, context.ExitCode);
+		using var document = JsonDocument.Parse(context.StandardOutput);
+		Assert.Equal("devprojex-context", document.RootElement.GetProperty("kind").GetString());
+		Assert.Contains("DPX-PROJECT-PARTIAL-ACCESS", context.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task ParseFailuresKeepSpecificMachineCategoriesThroughTheRealEntryPoint()
 	{
 		var unknownCommand = await RunAsync(["analze", "--language", "en"]);

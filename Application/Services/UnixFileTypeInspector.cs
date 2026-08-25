@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 
 namespace DevProjex.Application.Services;
 
-internal static class UnixFileTypeInspector
+public static class UnixFileTypeInspector
 {
 	private const uint FileTypeMask = 0xF000;
 	private const uint RegularFileType = 0x8000;

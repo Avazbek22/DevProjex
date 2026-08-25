@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.ComponentModel;
+using DevProjex.Application.Services;
 using DevProjex.Infrastructure.Git;
 
 namespace DevProjex.Infrastructure.FileSystem;
@@ -475,7 +476,7 @@ internal static class GitTrackedPathIndexCache
 		out ulong fingerprint)
 	{
 		fingerprint = 0;
-		if (lengthBytes <= 0)
+		if (lengthBytes <= 0 || !UnixFileTypeInspector.IsRegularFile(indexPath))
 			return false;
 
 		Span<byte> tail = stackalloc byte[64];
@@ -523,7 +524,9 @@ internal static class GitTrackedPathIndexCache
 		}
 
 		var gitFileInfo = new FileInfo(gitMetadataPath);
-		if (!gitFileInfo.Exists || gitFileInfo.Length > GitFileMaximumLength)
+		if (!gitFileInfo.Exists ||
+		    !UnixFileTypeInspector.IsRegularFile(gitMetadataPath) ||
+		    gitFileInfo.Length > GitFileMaximumLength)
 			return false;
 
 		using var stream = new FileStream(

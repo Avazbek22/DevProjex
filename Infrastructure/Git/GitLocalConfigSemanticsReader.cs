@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Globalization;
+using DevProjex.Application.Services;
 
 namespace DevProjex.Infrastructure.Git;
 
@@ -220,6 +221,7 @@ internal static class GitLocalConfigSemanticsReader
 				return true;
 			if (fileInfo.Attributes.HasFlag(FileAttributes.ReparsePoint) ||
 			    !string.IsNullOrEmpty(fileInfo.LinkTarget) ||
+			    !UnixFileTypeInspector.IsRegularFile(path) ||
 			    fileInfo.Length > maximumLengthBytes)
 			{
 				return false;
