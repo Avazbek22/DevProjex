@@ -7,6 +7,7 @@ using Avalonia.VisualTree;
 using DevProjex.Infrastructure.Git;
 using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Kernel.Abstractions;
+using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Reflection;
 
@@ -907,7 +908,8 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 			"snapshot",
 			64,
 			git: false);
-		var window = await CreateWindowAsync(appDataPath, cache);
+		var toasts = new RecordingToastService();
+		var window = await CreateWindowAsync(appDataPath, cache, toastService: toasts);
 
 		try
 		{
@@ -929,7 +931,7 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 					"missing cache entry to be removed from the catalog");
 				await UiTestDriver.WaitForConditionAsync(
 					window,
-					() => UiTestDriver.GetToastService(window).Items.Any(toast =>
+					() => toasts.Items.Any(toast =>
 						toast.Message.Contains("no longer available", StringComparison.Ordinal)),
 					"missing cache toast to be shown");
 				Assert.True(cloneWindow.IsVisible);
@@ -1247,15 +1249,26 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 	private async Task<MainWindow> CreateWindowAsync(
 		string appDataPath,
 		RepoCacheService cache,
-		IGitRepositoryService? git = null) =>
+		IGitRepositoryService? git = null,
+		IToastService? toastService = null) =>
 		await UiTestDriver.CreateLoadedMainWindowAsync(
 			workspace.Project,
 			appDataPathOverride: appDataPath,
 			configureServices: services => services with
 			{
 				RepoCacheService = cache,
-				GitRepositoryService = git ?? services.GitRepositoryService
+				GitRepositoryService = git ?? services.GitRepositoryService,
+				ToastService = toastService ?? services.ToastService
 			});
+
+	private sealed class RecordingToastService : IToastService
+	{
+		public ObservableCollection<ToastMessageViewModel> Items { get; } = [];
+
+		public void Show(string message) => Items.Add(new ToastMessageViewModel(message));
+
+		public void Show(string message, TimeSpan duration) => Show(message);
+	}
 
 	private static string CreateCachedRepository(
 		RepoCacheService cache,
