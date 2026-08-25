@@ -55,12 +55,11 @@ public static class PathUtility
 	{
 		var root = Path.GetPathRoot(path);
 		if (string.IsNullOrEmpty(root))
-			return path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar, '\\');
+			return path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
 		if (PathComparer.Default.Equals(path, root))
 			return path;
 
-		// Normalize legacy persisted paths that may contain the other platform's separator.
-		return path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar, '\\');
+		return path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 	}
 }
