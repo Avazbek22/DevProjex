@@ -21,7 +21,7 @@ public sealed class FileBackedPreviewTextDocument(
         FileAccess.Read,
         FileShare.Read,
         bufferSize: 4096,
-        options: FileOptions.RandomAccess | FileOptions.SequentialScan);
+        options: FileOptions.RandomAccess | FileOptions.SequentialScan | FileOptions.DeleteOnClose);
     private bool _disposed;
 
     public int LineCount => Math.Max(1, lineOffsets.Length);

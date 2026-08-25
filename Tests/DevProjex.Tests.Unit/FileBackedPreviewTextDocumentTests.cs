@@ -32,7 +32,7 @@ public sealed class FileBackedPreviewTextDocumentTests
             ("", string.Empty),
             ("gamma", "gamma"));
 
-        Assert.True(File.Exists(storagePath));
+        Assert.Equal(OperatingSystem.IsWindows(), File.Exists(storagePath));
         Assert.Equal("alpha\n\ngamma", document.GetLineRangeText(1, 99));
 
         document.Dispose();
