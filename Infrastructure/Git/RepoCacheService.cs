@@ -16,6 +16,11 @@ public sealed class RepoCacheService : IRepoCacheService
 	private const string CacheFolderName = "RepoCache";
 	private const string CacheIndexFileName = "cache-index.json";
 	private const int CacheIndexSchemaVersion = 2;
+	private const int UniquePathSuffixLength = 29;
+	private const int MaximumRepositoryNameUtf16Length = 100;
+	private const int MaximumPortablePathComponentBytes = 255;
+	private const int MaximumRepositoryNameUtf8Bytes =
+		MaximumPortablePathComponentBytes - UniquePathSuffixLength - 1;
 	internal const long MaximumCacheIndexBytes = 64L * 1024 * 1024;
 	private const byte RepositorySizeRefreshRunning = 1;
 	private const byte RepositorySizeRefreshPending = 2;
@@ -2203,7 +2208,8 @@ public sealed class RepoCacheService : IRepoCacheService
 		var repositoryName = ExtractRepoName(repositoryUrl);
 		while (true)
 		{
-			var suffix = $"{DateTime.UtcNow.Ticks:X}{Guid.NewGuid():N}"[..29].ToUpperInvariant();
+			var suffix = $"{DateTime.UtcNow.Ticks:X}{Guid.NewGuid():N}"[..UniquePathSuffixLength]
+				.ToUpperInvariant();
 			var path = Path.Combine(root, $"{repositoryName}_{suffix}");
 			if (!Directory.Exists(path) && !File.Exists(path))
 				return path;
@@ -2266,16 +2272,20 @@ public sealed class RepoCacheService : IRepoCacheService
 				? string.Concat(name.AsSpan(0, dotIndex), "_repo", name.AsSpan(dotIndex))
 				: name + "_repo";
 		}
-		var boundedLength = Math.Min(name.Length, 100);
-		if (boundedLength < name.Length &&
-		    char.IsHighSurrogate(name[boundedLength - 1]) &&
-		    char.IsLowSurrogate(name[boundedLength]))
+		var bounded = new StringBuilder(Math.Min(name.Length, MaximumRepositoryNameUtf16Length));
+		var utf8Bytes = 0;
+		foreach (var rune in name.EnumerateRunes())
 		{
-			boundedLength--;
+			if (bounded.Length + rune.Utf16SequenceLength > MaximumRepositoryNameUtf16Length ||
+			    utf8Bytes + rune.Utf8SequenceLength > MaximumRepositoryNameUtf8Bytes)
+			{
+				break;
+			}
+			bounded.Append(rune);
+			utf8Bytes += rune.Utf8SequenceLength;
 		}
-		var bounded = name[..boundedLength];
-		bounded = TrimUnsafeTrailingCharacters(bounded);
-		return bounded.Length == 0 ? "repo" : bounded;
+		var result = TrimUnsafeTrailingCharacters(bounded.ToString());
+		return result.Length == 0 ? "repo" : result;
 	}
 
 	private static bool IsWindowsReservedFileName(ReadOnlySpan<char> name)

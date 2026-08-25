@@ -95,6 +95,23 @@ public sealed class RepoCacheServiceExtendedTests : IDisposable
     }
 
     [Fact]
+    public void CreateRepositoryDirectory_NameFitsPortableFileSystemComponentLimit()
+    {
+        var repositoryName = new string('界', 100);
+
+        var path = _service.CreateRepositoryDirectory($"https://example.test/{repositoryName}");
+
+        try
+        {
+            Assert.InRange(Encoding.UTF8.GetByteCount(Path.GetFileName(path)), 1, 255);
+        }
+        finally
+        {
+            _service.DeleteRepositoryDirectory(path);
+        }
+    }
+
+    [Fact]
     public void CreateRepositoryDirectory_SameUrl_DifferentPaths_DueToTimestamp()
     {
         // Arrange
