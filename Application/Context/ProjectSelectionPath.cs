@@ -9,7 +9,7 @@ public static class ProjectSelectionPath
 		if (string.IsNullOrEmpty(value) || value == ".")
 			return string.Empty;
 
-		if (IsRootedOnAnySupportedPlatform(value))
+		if (Path.IsPathRooted(value))
 		{
 			throw new ProjectContextValidationException(
 				InvalidPathCode,
@@ -30,11 +30,4 @@ public static class ProjectSelectionPath
 		return string.Join('/', segments.Where(static segment => segment != "."));
 	}
 
-	private static bool IsRootedOnAnySupportedPlatform(string value) =>
-		Path.IsPathRooted(value) ||
-		value.StartsWith('/') ||
-		value.StartsWith('\\') ||
-		(value.Length >= 2 &&
-		 char.IsAsciiLetter(value[0]) &&
-		 value[1] == ':');
 }

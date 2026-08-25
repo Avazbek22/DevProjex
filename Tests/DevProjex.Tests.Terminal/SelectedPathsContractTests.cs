@@ -246,6 +246,28 @@ public sealed class SelectedPathsContractTests
 		Assert.Equal([relativePath], ReadSelectedPaths(document));
 	}
 
+	[Theory]
+	[InlineData("\\leading-name.txt")]
+	[InlineData("C:drive-relative-name.txt")]
+	public async Task UnixSelectionUsesNativeRootedPathSemantics(string relativePath)
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Windows treats these values as rooted or drive-relative paths.");
+			return;
+		}
+
+		using var workspace = CreateWorkspace();
+		workspace.WriteFile(relativePath, "native Unix file name\n");
+
+		using var document = await ExportJsonAsync(
+			workspace.Path,
+			"--select", relativePath);
+
+		Assert.Equal(FullContentPaths(workspace.Path, relativePath), ReadFilePaths(document));
+		Assert.Equal([relativePath], ReadSelectedPaths(document));
+	}
+
 	[Fact]
 	public void SelectionPathNormalizationUsesOnlyNativeUnixSeparators()
 	{
