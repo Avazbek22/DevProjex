@@ -278,6 +278,25 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task GetFileBoundsLongLinesAndReportsTruncation()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Long.txt"), new string('x', 100_000));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "Long.txt" });
+
+		var text = Text(result);
+		Assert.True(text.Length <= 55_000, $"File response was {text.Length} characters.");
+		Assert.Contains("50000-character response cap", text, StringComparison.Ordinal);
+		Assert.Contains("narrow the source", text, StringComparison.Ordinal);
+		AssertSpotlighted(result);
+	}
+
+	[Fact]
 	public async Task TreeResponsesRedactLocalUserSegment()
 	{
 		var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);

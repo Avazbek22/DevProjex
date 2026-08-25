@@ -399,10 +399,12 @@ internal sealed class DevProjexMcpTools(
 				arguments.OptionalInteger("start_line", 1, int.MaxValue),
 				arguments.OptionalInteger("end_line", 1, int.MaxValue),
 				MaximumPageLines,
-				int.MaxValue);
+				MaximumPageCharacters);
 			var text = page.Text;
 			if (page.IsTruncated)
 				text += $"\n[Showing lines {page.StartLine}-{page.EndLine} of {page.TotalLines}; continue with start_line={page.EndLine + 1}.]";
+			if (page.CharacterLimitReached)
+				text += "\n[The current line exceeded the 50000-character response cap; use search_project to narrow the source.]";
 			return McpToolResults.TextSuccess(McpSpotlight.Wrap(text));
 		}, cancellationToken);
 
