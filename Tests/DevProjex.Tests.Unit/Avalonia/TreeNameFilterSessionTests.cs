@@ -108,6 +108,33 @@ public sealed class TreeNameFilterSessionTests
         }
     }
 
+    [Fact]
+    public void Build_DeepProjectionDoesNotDependOnTheCallStack()
+    {
+        const int depth = 16_000;
+        TreeNodeDescriptor branch = File("target.txt");
+        for (var index = depth - 1; index >= 0; index--)
+        {
+            branch = Directory(
+                $"directory-{index:D5}",
+                [branch, File($"other-{index:D5}.txt")]);
+        }
+        var baseTree = new BuildTreeResult(
+            Directory("root", [branch]),
+            RootAccessDenied: false,
+            HadAccessDenied: false);
+        var session = new TreeNameFilterSession();
+
+        var result = session.Build(
+            baseTree,
+            "target.txt",
+            TestContext.Current.CancellationToken);
+
+        var flattened = Flatten(result.Root);
+        Assert.Equal(depth + 2, flattened.Count);
+        Assert.Equal($"{depth + 1}:False:target.txt", flattened[^1]);
+    }
+
     private static BuildTreeResult CreateWideTree(int rootCount, int filesPerRoot)
     {
         var folders = new TreeNodeDescriptor[rootCount];
