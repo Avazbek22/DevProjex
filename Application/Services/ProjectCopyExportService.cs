@@ -311,11 +311,13 @@ public sealed class ProjectCopyExportService(
 
 				var destination = ResolveDestinationPath(stagingPath, file.RelativePath);
 				Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-				var contentPath = prepared?.GetFile(file.SourcePath).ContentPath ?? file.SourcePath;
+				var preparedFile = prepared?.GetFile(file.SourcePath);
+				var contentPath = preparedFile?.ContentPath ?? file.SourcePath;
 				var copiedBytes = await CopyFileAsync(
 						plan.ProjectRootPath,
 						file.SourcePath,
 						contentPath,
+						preparedFile,
 						destination,
 						buffer,
 						cancellationToken)
@@ -465,13 +467,16 @@ public sealed class ProjectCopyExportService(
 					var entryName = BuildZipEntryName(plan.ProjectName, file.RelativePath, isDirectory: false);
 					var entry = archive.CreateEntry(entryName, CompressionLevel.Optimal);
 					TrySetZipLastWriteTime(entry, file.SourcePath);
-					var contentPath = prepared?.GetFile(file.SourcePath).ContentPath ?? file.SourcePath;
+					var preparedFile = prepared?.GetFile(file.SourcePath);
+					var contentPath = preparedFile?.ContentPath ?? file.SourcePath;
 					await using var source = OpenValidatedSourceFile(
 						plan.ProjectRootPath,
 						file.SourcePath,
-						contentPath);
+						contentPath,
+						preparedFile);
 					await using var destination = entry.Open();
 					var copiedBytes = await CopyStreamAsync(source, destination, buffer, cancellationToken).ConfigureAwait(false);
+					preparedFile?.EnsureSourceVersion(source);
 					bytesWritten += copiedBytes;
 					processedEntries++;
 					processedFiles++;
@@ -1188,6 +1193,7 @@ public sealed class ProjectCopyExportService(
 		string projectRootPath,
 		string originalSourcePath,
 		string contentPath,
+		PreparedSecretFile? preparedFile,
 		string destinationPath,
 		byte[] buffer,
 		CancellationToken cancellationToken)
@@ -1195,15 +1201,19 @@ public sealed class ProjectCopyExportService(
 		await using var source = OpenValidatedSourceFile(
 			projectRootPath,
 			originalSourcePath,
-			contentPath);
+			contentPath,
+			preparedFile);
 		await using var destination = OpenDestinationFile(destinationPath);
-		return await CopyStreamAsync(source, destination, buffer, cancellationToken).ConfigureAwait(false);
+		var copiedBytes = await CopyStreamAsync(source, destination, buffer, cancellationToken).ConfigureAwait(false);
+		preparedFile?.EnsureSourceVersion(source);
+		return copiedBytes;
 	}
 
 	private static FileStream OpenValidatedSourceFile(
 		string projectRootPath,
 		string originalSourcePath,
-		string contentPath)
+		string contentPath,
+		PreparedSecretFile? preparedFile)
 	{
 		ValidateSourceFileForCopy(projectRootPath, originalSourcePath);
 		FileStream? source = null;
@@ -1211,6 +1221,7 @@ public sealed class ProjectCopyExportService(
 		{
 			source = OpenSourceFile(contentPath);
 			ValidateSourceFileForCopy(projectRootPath, originalSourcePath);
+			preparedFile?.EnsureSourceVersion(source);
 			return source;
 		}
 		catch

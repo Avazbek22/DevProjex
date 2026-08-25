@@ -1708,6 +1708,33 @@ public sealed record PreparedSecretFile(
 			SourceMetadata = sourceMetadata
 		};
 
+	internal void EnsureSourceVersion(FileStream? source = null)
+	{
+		if (SourceMetadata is not { } expected)
+			return;
+
+		SecretFileMetadata current;
+		try
+		{
+			current = source is not null && FileContentIdentity.TryCapture(source) is { } identity
+				? SecretFileMetadata.FromIdentity(identity)
+				: SecretFileMetadata.Capture(SourcePath);
+		}
+		catch (Exception exception) when (
+			exception is IOException or UnauthorizedAccessException)
+		{
+			throw new SecretDetectionException(
+				$"Code compression could not verify the prepared source file '{SourcePath}'.",
+				exception);
+		}
+
+		if (current != expected)
+		{
+			throw new SecretDetectionException(
+				$"Code compression source changed after preparation: '{SourcePath}'.");
+		}
+	}
+
 	/// <summary>Uninspected text: recorded, reported, and withheld from every prepared output.</summary>
 	public static PreparedSecretFile Unscannable(
 		string sourcePath,
@@ -1830,13 +1857,13 @@ public sealed class PreparedSecretFileContentAnalyzer(
 		if (!file.IsText && !file.IsUnscannable)
 			return new FileContentReadResult(FileContentClassification.Binary);
 
-		EnsureSourceVersion(file);
+		file.EnsureSourceVersion();
 		var result = await inner.ReadClassifiedAsync(
 				file.ContentPath,
 				ClampReadLimit(file, maxSizeForFullRead),
 				cancellationToken)
 			.ConfigureAwait(false);
-		EnsureSourceVersion(file);
+		file.EnsureSourceVersion();
 		return result;
 	}
 
@@ -1848,10 +1875,10 @@ public sealed class PreparedSecretFileContentAnalyzer(
 		if (!file.IsText && !file.IsUnscannable)
 			return false;
 
-		EnsureSourceVersion(file);
+		file.EnsureSourceVersion();
 		var result = await inner.IsTextFileAsync(file.ContentPath, cancellationToken)
 			.ConfigureAwait(false);
-		EnsureSourceVersion(file);
+		file.EnsureSourceVersion();
 		return result;
 	}
 
@@ -1863,10 +1890,10 @@ public sealed class PreparedSecretFileContentAnalyzer(
 		if (!file.IsText && !file.IsUnscannable)
 			return null;
 
-		EnsureSourceVersion(file);
+		file.EnsureSourceVersion();
 		var result = await inner.GetTextFileMetricsAsync(file.ContentPath, cancellationToken)
 			.ConfigureAwait(false);
-		EnsureSourceVersion(file);
+		file.EnsureSourceVersion();
 		return result;
 	}
 
@@ -1878,10 +1905,10 @@ public sealed class PreparedSecretFileContentAnalyzer(
 		if (!file.IsText && !file.IsUnscannable)
 			return new FileContentMetricsResult(FileContentClassification.Binary);
 
-		EnsureSourceVersion(file);
+		file.EnsureSourceVersion();
 		var result = await inner.GetClassifiedMetricsAsync(file.ContentPath, cancellationToken)
 			.ConfigureAwait(false);
-		EnsureSourceVersion(file);
+		file.EnsureSourceVersion();
 		return result;
 	}
 
@@ -1902,12 +1929,12 @@ public sealed class PreparedSecretFileContentAnalyzer(
 					.ConfigureAwait(false));
 		}
 
-		EnsureSourceVersion(file);
+		file.EnsureSourceVersion();
 		var snapshot = await inner.OpenCompleteSnapshotAsync(file.ContentPath, cancellationToken)
 			.ConfigureAwait(false);
 		try
 		{
-			EnsureSourceVersion(file);
+			file.EnsureSourceVersion();
 			return snapshot;
 		}
 		catch
@@ -1933,10 +1960,10 @@ public sealed class PreparedSecretFileContentAnalyzer(
 		if (!file.IsText)
 			return null;
 
-		EnsureSourceVersion(file);
+		file.EnsureSourceVersion();
 		var result = await inner.TryReadAsTextAsync(file.ContentPath, cancellationToken)
 			.ConfigureAwait(false);
-		EnsureSourceVersion(file);
+		file.EnsureSourceVersion();
 		return result;
 	}
 
@@ -1949,39 +1976,14 @@ public sealed class PreparedSecretFileContentAnalyzer(
 		if (!file.IsText && !file.IsUnscannable)
 			return null;
 
-		EnsureSourceVersion(file);
+		file.EnsureSourceVersion();
 		var result = await inner.TryReadAsTextAsync(
 				file.ContentPath,
 				ClampReadLimit(file, maxSizeForFullRead),
 				cancellationToken)
 			.ConfigureAwait(false);
-		EnsureSourceVersion(file);
+		file.EnsureSourceVersion();
 		return result;
-	}
-
-	private static void EnsureSourceVersion(PreparedSecretFile file)
-	{
-		if (file.SourceMetadata is not { } expected)
-			return;
-
-		SecretFileMetadata current;
-		try
-		{
-			current = SecretFileMetadata.Capture(file.SourcePath);
-		}
-		catch (Exception exception) when (
-			exception is IOException or UnauthorizedAccessException)
-		{
-			throw new SecretDetectionException(
-				$"Code compression could not verify the prepared source file '{file.SourcePath}'.",
-				exception);
-		}
-
-		if (current != expected)
-		{
-			throw new SecretDetectionException(
-				$"Code compression source changed after preparation: '{file.SourcePath}'.");
-		}
 	}
 
 	private sealed class UnscannableSnapshot(

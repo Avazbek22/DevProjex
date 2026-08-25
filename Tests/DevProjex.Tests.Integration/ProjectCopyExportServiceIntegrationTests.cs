@@ -1,11 +1,64 @@
 using System.IO.Compression;
 using DevProjex.Application.Secrets;
+using DevProjex.Infrastructure.Compression;
 using DevProjex.Infrastructure.Secrets;
 
 namespace DevProjex.Tests.Integration;
 
 public sealed class ProjectCopyExportServiceIntegrationTests
 {
+	[Theory]
+	[InlineData(ProjectCopyExportFormat.Folder)]
+	[InlineData(ProjectCopyExportFormat.Zip)]
+	public async Task CompressionOnlyExportRejectsAnUnchangedSourceModifiedAfterPreparation(
+		ProjectCopyExportFormat format)
+	{
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("Sample");
+		var exportRoot = temporary.CreateDirectory("exports");
+		var sourceFile = Path.Combine(sourceRoot, "Stable.cs");
+		File.WriteAllText(sourceFile, "namespace Sample; internal sealed class Stable;");
+		var tree = new TreeNodeDescriptor(
+			"Sample",
+			sourceRoot,
+			true,
+			false,
+			"folder",
+			[new TreeNodeDescriptor("Stable.cs", sourceFile, false, false, "file", [])]);
+		var destination = Path.Combine(
+			exportRoot,
+			format == ProjectCopyExportFormat.Zip ? "copy.zip" : "copy");
+		var changed = 0;
+		var progress = new CallbackProgress<ProjectCopyExportProgress>(_ =>
+		{
+			if (Interlocked.Exchange(ref changed, 1) == 0)
+				File.WriteAllText(sourceFile, "// changed after preparation\ninternal sealed class Changed { void Run() { } }");
+		});
+		using var compression = CodeCompressionFactory.CreateSession();
+		var service = new ProjectCopyExportService(
+			new ProjectCopyExportPlanBuilder(),
+			new FileContentAnalyzer(),
+			codeCompressionSession: compression);
+
+		var exception = await Assert.ThrowsAsync<ProjectCopyExportException>(
+			() => service.ExportAsync(
+				new ProjectCopyExportRequest(
+					sourceRoot,
+					"Sample",
+					tree,
+					new HashSet<string>(PathComparer.Default),
+					destination,
+					format,
+					ProjectCopyDestinationMode.Exact,
+					CompressCode: true),
+				progress,
+				TestContext.Current.CancellationToken));
+
+		Assert.Equal(ProjectCopyExportError.SecretDetectionFailed, exception.Error);
+		Assert.False(File.Exists(destination));
+		Assert.False(Directory.Exists(destination));
+	}
+
 	[Fact]
 	public async Task ZipExportPreservesBackslashesInsideUnixFileNames()
 	{
