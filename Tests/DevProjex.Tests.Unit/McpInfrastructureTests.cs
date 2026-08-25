@@ -316,6 +316,16 @@ public sealed class McpInfrastructureTests
 			Assert.Throws<McpToolException>(() => McpGlobSet.Create(["../*.cs"], null)).Code);
 	}
 
+	[Fact(Timeout = 2_000)]
+	public void GlobSetAlternatingWildcardsCannotCauseCatastrophicBacktracking()
+	{
+		var pattern = string.Concat(Enumerable.Repeat("*a", 12)) + "b";
+		var candidate = new string('a', 36) + "c";
+		var globs = McpGlobSet.Create([pattern], null);
+
+		Assert.False(globs.Includes(candidate));
+	}
+
 	[Fact]
 	public void SearchRegexRejectsInvalidPatternsAndTimesOutCatastrophicMatches()
 	{

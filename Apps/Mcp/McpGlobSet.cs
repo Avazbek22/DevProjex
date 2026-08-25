@@ -38,7 +38,7 @@ internal sealed class McpGlobSet
 			Validate(pattern, parameter);
 			result.Add(new Regex(
 				ToRegex(pattern),
-				RegexOptions.CultureInvariant,
+				RegexOptions.CultureInvariant | RegexOptions.NonBacktracking,
 				TimeSpan.FromSeconds(2)));
 		}
 		return result;
