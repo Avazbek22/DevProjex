@@ -2115,6 +2115,11 @@ public sealed class RepoCacheService : IRepoCacheService
 		{
 			if (!Directory.Exists(path))
 				return;
+			if (File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint))
+			{
+				Directory.Delete(path);
+				return;
+			}
 			foreach (var file in Directory.EnumerateFiles(path, "*", RecursiveCacheEnumeration))
 			{
 				try

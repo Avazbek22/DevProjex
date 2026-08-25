@@ -142,6 +142,43 @@ public sealed class RepoCacheServiceCleanupTests : IDisposable
     }
 
     [Fact]
+    public void DeleteRepositoryDirectory_LinkedCacheRoot_DoesNotTouchTargetAttributes()
+    {
+        var outsidePath = Path.Combine(
+            Path.GetTempPath(),
+            "DevProjex",
+            "Tests",
+            "CacheCleanupOutside",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(outsidePath);
+        var sentinelPath = Path.Combine(outsidePath, "sentinel.txt");
+        File.WriteAllText(sentinelPath, "keep");
+        File.SetAttributes(sentinelPath, FileAttributes.ReadOnly);
+        Directory.CreateDirectory(_testCacheRoot);
+        var linkPath = Path.Combine(_testCacheRoot, "linked");
+
+        try
+        {
+            if (!TryCreateDirectoryLink(linkPath, outsidePath))
+                Assert.Skip("The platform does not permit creating a directory link for this safety test.");
+
+            _service.DeleteRepositoryDirectory(linkPath);
+
+            Assert.True(File.Exists(sentinelPath));
+            Assert.True(File.GetAttributes(sentinelPath).HasFlag(FileAttributes.ReadOnly));
+        }
+        finally
+        {
+            if (File.Exists(sentinelPath))
+                File.SetAttributes(sentinelPath, FileAttributes.Normal);
+            if (Directory.Exists(linkPath))
+                Directory.Delete(linkPath);
+            if (Directory.Exists(outsidePath))
+                Directory.Delete(outsidePath, recursive: true);
+        }
+    }
+
+    [Fact]
     public void ClearAllCache_RemovesAllCachedRepositories()
     {
         // Arrange
@@ -317,5 +354,36 @@ public sealed class RepoCacheServiceCleanupTests : IDisposable
 
         // Assert - relative paths should be handled safely
         Assert.False(result);
+    }
+
+    private static bool TryCreateDirectoryLink(string linkPath, string targetPath)
+    {
+        try
+        {
+            Directory.CreateSymbolicLink(linkPath, targetPath);
+            return true;
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            if (!OperatingSystem.IsWindows())
+                return false;
+        }
+
+        var startInfo = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "cmd.exe",
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        startInfo.ArgumentList.Add("/d");
+        startInfo.ArgumentList.Add("/c");
+        startInfo.ArgumentList.Add("mklink");
+        startInfo.ArgumentList.Add("/J");
+        startInfo.ArgumentList.Add(linkPath);
+        startInfo.ArgumentList.Add(targetPath);
+        using var process = System.Diagnostics.Process.Start(startInfo);
+        process?.WaitForExit();
+        return process?.ExitCode == 0 && Directory.Exists(linkPath);
     }
 }
