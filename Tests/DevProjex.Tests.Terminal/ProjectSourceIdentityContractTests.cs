@@ -64,13 +64,14 @@ public sealed class ProjectSourceIdentityContractTests
 		}
 
 		using var temporary = new TemporaryDirectory();
-		var projectPath = temporary.CreateDirectory(" ");
+		temporary.CreateDirectory(" ");
 		temporary.WriteFile(" /App.cs", "class App {}\n");
 		var dataRoot = temporary.CreateDirectory("data");
 		var originalCurrentDirectory = Environment.CurrentDirectory;
 		try
 		{
 			Environment.CurrentDirectory = temporary.Path;
+			var expectedProjectPath = PathUtility.Normalize(" ");
 			var services = new TerminalServiceFactory(() => dataRoot).Create(AppLanguage.En);
 			var selection = await services.SelectionResolver.ResolveAsync(
 				" ",
@@ -82,7 +83,7 @@ public sealed class ProjectSourceIdentityContractTests
 				new ProjectContextRequest(" ", selection),
 				TestContext.Current.CancellationToken);
 
-			Assert.Equal(PathUtility.Normalize(projectPath), plan.SourceRoot);
+			Assert.Equal(expectedProjectPath, plan.SourceRoot);
 			Assert.Equal(" ", plan.EffectiveTree.DisplayName);
 		}
 		finally
