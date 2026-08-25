@@ -133,7 +133,7 @@ public sealed class StatusMetricWaveTextTests
     }
 
     [AvaloniaFact]
-    public async Task ProjectSwitch_AfterInitialReveal_UsesMetricRollWithoutRepeatingWave()
+    public void ProjectSwitch_AfterInitialReveal_UsesMetricRollWithoutRepeatingWave()
     {
         var control = new StatusMetricWaveText
         {
@@ -145,7 +145,6 @@ public sealed class StatusMetricWaveTextTests
         try
         {
             window.Show();
-            await FlushUiAsync();
             Assert.True(control.IsInitialRevealActive);
 
             control.IsAnimationEnabled = false;
