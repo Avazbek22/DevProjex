@@ -206,7 +206,8 @@ public class GitRepositoryServiceTests : IAsyncLifetime
         var service = new GitRepositoryService(executablePath);
         var targetDirectory = Path.Combine(probeDirectory, "clone");
         var authenticatedUrl =
-            $"https://oauth2:{Uri.EscapeDataString(password)}@example.test/owner/repository.git";
+            $"https://oauth2:{Uri.EscapeDataString(password)}@example.test/owner/repository.git" +
+            "?transport=opaque#fragment";
 
         var result = await service.CloneAsync(
             authenticatedUrl,
@@ -215,9 +216,13 @@ public class GitRepositoryServiceTests : IAsyncLifetime
 
         Assert.True(result.Success, result.ErrorMessage);
         var arguments = await File.ReadAllTextAsync(argumentLog, TestContext.Current.CancellationToken);
-        Assert.Contains("https://example.test/owner/repository.git", arguments, StringComparison.Ordinal);
+        Assert.Contains(
+            "https://example.test/owner/repository.git?transport=opaque#fragment",
+            arguments,
+            StringComparison.Ordinal);
         Assert.DoesNotContain(password, arguments, StringComparison.Ordinal);
         Assert.DoesNotContain("oauth2", arguments, StringComparison.Ordinal);
+        Assert.Equal("https://example.test/owner/repository.git", result.RepositoryUrl);
         Assert.Equal(
             password,
             (await File.ReadAllTextAsync(passwordLog, TestContext.Current.CancellationToken)).Trim());

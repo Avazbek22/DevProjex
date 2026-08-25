@@ -39,14 +39,18 @@ internal sealed record GitCloneAuthentication(
 		var separator = uri.UserInfo.IndexOf(':');
 		var encodedUserName = separator >= 0 ? uri.UserInfo[..separator] : uri.UserInfo;
 		var encodedPassword = separator >= 0 ? uri.UserInfo[(separator + 1)..] : string.Empty;
-		var safeUrl = RepositoryUrlUtility.ToSafeDisplay(repositoryUrl);
-		if (safeUrl.Length == 0)
-			return null;
-
 		try
 		{
+			var transportUrl = new UriBuilder(uri)
+			{
+				UserName = string.Empty,
+				Password = string.Empty
+			}.Uri.AbsoluteUri;
+			if (RepositoryUrlUtility.ToSafeDisplay(transportUrl).Length == 0)
+				return null;
+
 			return new GitCloneAuthentication(
-				safeUrl,
+				transportUrl,
 				Uri.UnescapeDataString(encodedUserName),
 				Uri.UnescapeDataString(encodedPassword));
 		}
