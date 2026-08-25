@@ -21,6 +21,26 @@ function Get-FileSha256Hex([string]$path) {
     return ([System.BitConverter]::ToString($hash) -replace '-', '').ToLowerInvariant()
 }
 
+function Write-ReleaseChecksumManifest(
+    [string]$path,
+    [string[]]$lines
+) {
+    foreach ($line in $lines) {
+        if ($line.Contains("`r") -or $line.Contains("`n")) {
+            throw "Release checksum entries must be single-line values."
+        }
+    }
+
+    $content = if ($lines.Count -eq 0) {
+        ''
+    }
+    else {
+        ($lines -join "`n") + "`n"
+    }
+    $utf8WithoutBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($path, $content, $utf8WithoutBom)
+}
+
 function Set-UstarAsciiField(
     [byte[]]$header,
     [int]$offset,

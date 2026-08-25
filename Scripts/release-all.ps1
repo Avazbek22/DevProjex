@@ -1058,7 +1058,7 @@ function Build-GitHubArtifactsInWorkspace(
             $hashLines += "$hash *$($_.Name)"
         }
 
-    Set-Content -Path $shaFile -Value $hashLines -Encoding UTF8
+    Write-ReleaseChecksumManifest -path $shaFile -lines $hashLines
 
     if (Test-Path $workDir) {
         Remove-Item -Path $workDir -Recurse -Force -ErrorAction SilentlyContinue
