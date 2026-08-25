@@ -886,6 +886,15 @@ public sealed class PreviewDocumentBuilder(
 	{
 		var previewDirectory = Path.Combine(Path.GetTempPath(), "DevProjex", "Preview");
 		Directory.CreateDirectory(previewDirectory);
+		if ((File.GetAttributes(previewDirectory) & FileAttributes.ReparsePoint) != 0)
+			throw new IOException("Preview storage cannot use a symbolic link or reparse point.");
+		if (!OperatingSystem.IsWindows())
+		{
+			File.SetUnixFileMode(
+				previewDirectory,
+				UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+		}
+		PreviewTextStorageScavenger.StartOnce(previewDirectory);
 		return Path.Combine(previewDirectory, $"{Guid.NewGuid():N}.preview.txt");
 	}
 
@@ -917,8 +926,109 @@ public sealed class PreviewDocumentBuilder(
         catch
         {
             // Best-effort cleanup only.
-        }
-    }
+	}
+}
+
+internal static class PreviewTextStorageScavenger
+{
+	private const string FileSuffix = ".preview.txt";
+	private const int MaximumFilesRemoved = 64;
+	internal static readonly TimeSpan MinimumAge = TimeSpan.FromHours(24);
+	private static int _started;
+
+	internal static void StartOnce(string previewDirectory)
+	{
+		if (Interlocked.Exchange(ref _started, 1) != 0)
+			return;
+
+		_ = Task.Run(() => Scavenge(previewDirectory, DateTime.UtcNow, MinimumAge));
+	}
+
+	internal static int Scavenge(string previewDirectory, DateTime utcNow, TimeSpan minimumAge)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(previewDirectory);
+		ArgumentOutOfRangeException.ThrowIfLessThan(minimumAge, TimeSpan.Zero);
+		var removed = 0;
+		try
+		{
+			if (!Directory.Exists(previewDirectory) ||
+			    (File.GetAttributes(previewDirectory) & FileAttributes.ReparsePoint) != 0)
+			{
+				return 0;
+			}
+
+			foreach (var path in Directory.EnumerateFiles(
+				         previewDirectory,
+				         $"*{FileSuffix}",
+				         SearchOption.TopDirectoryOnly))
+			{
+				if (removed >= MaximumFilesRemoved)
+					break;
+				if (!IsOwnedStaleFile(path, utcNow, minimumAge))
+					continue;
+
+				try
+				{
+					using var lease = new FileStream(
+						path,
+						FileMode.Open,
+						FileAccess.ReadWrite,
+						FileShare.None,
+						bufferSize: 1,
+						FileOptions.DeleteOnClose);
+					removed++;
+				}
+				catch (Exception exception) when (
+					exception is IOException or UnauthorizedAccessException)
+				{
+					// An active preview or another process owns this file.
+				}
+			}
+		}
+		catch (Exception exception) when (
+			exception is IOException or UnauthorizedAccessException or NotSupportedException)
+		{
+			// Cleanup is best effort and must not invalidate preview creation.
+		}
+
+		return removed;
+	}
+
+	private static bool IsOwnedStaleFile(string path, DateTime utcNow, TimeSpan minimumAge)
+	{
+		try
+		{
+			var fileName = Path.GetFileName(path);
+			var stem = fileName[..^FileSuffix.Length];
+			if (!Guid.TryParseExact(stem, "N", out var identifier) ||
+			    !string.Equals(fileName, $"{identifier:N}{FileSuffix}", StringComparison.Ordinal) ||
+			    (File.GetAttributes(path) & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0 ||
+			    utcNow - File.GetLastWriteTimeUtc(path) < minimumAge)
+			{
+				return false;
+			}
+
+			if (!OperatingSystem.IsWindows())
+			{
+				var sharedPermissions = UnixFileMode.GroupRead |
+				                        UnixFileMode.GroupWrite |
+				                        UnixFileMode.GroupExecute |
+				                        UnixFileMode.OtherRead |
+				                        UnixFileMode.OtherWrite |
+				                        UnixFileMode.OtherExecute;
+				if ((File.GetUnixFileMode(path) & sharedPermissions) != 0)
+					return false;
+			}
+
+			return true;
+		}
+		catch (Exception exception) when (
+			exception is IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException)
+		{
+			return false;
+		}
+	}
+}
 
     private sealed class PreviewTextStorageBuilder : IDisposable
     {

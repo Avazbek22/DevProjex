@@ -29,6 +29,33 @@ public sealed class PreviewDocumentBuilderTests
 		Assert.Equal("class Program {}", document.GetLineText(section.ContentStartLine));
 	}
 
+	[Fact]
+	public void PreviewStorageScavenger_RemovesOnlyStaleUnlockedOwnedFiles()
+	{
+		using var storage = new TemporaryDirectory();
+		var now = DateTime.UtcNow;
+		var stalePath = CreatePreviewStorageFile(storage.Path, now.AddDays(-2));
+		var freshPath = CreatePreviewStorageFile(storage.Path, now);
+		var activePath = CreatePreviewStorageFile(storage.Path, now.AddDays(-2));
+		var unrelatedPath = storage.CreateFile("unrelated.preview.txt", "preserve");
+		using var activeLease = new FileStream(
+			activePath,
+			FileMode.Open,
+			FileAccess.ReadWrite,
+			FileShare.None);
+
+		var removed = PreviewDocumentBuilder.PreviewTextStorageScavenger.Scavenge(
+			storage.Path,
+			now,
+			PreviewDocumentBuilder.PreviewTextStorageScavenger.MinimumAge);
+
+		Assert.Equal(1, removed);
+		Assert.False(File.Exists(stalePath));
+		Assert.True(File.Exists(freshPath));
+		Assert.True(File.Exists(activePath));
+		Assert.True(File.Exists(unrelatedPath));
+	}
+
     [Fact]
     public async Task BuildContentDocumentAsync_NoReadableFiles_ReturnsNull()
     {
@@ -451,7 +478,7 @@ public sealed class PreviewDocumentBuilderTests
 				transformationContext: transformation);
 	}
 
-    private static TextFileContent CreateTextContent(string content)
+	private static TextFileContent CreateTextContent(string content)
     {
         var normalized = content.Replace("\r\n", "\n");
         var lineCount = string.IsNullOrEmpty(normalized)
@@ -463,8 +490,18 @@ public sealed class PreviewDocumentBuilderTests
             LineCount: lineCount,
             CharCount: normalized.Replace("\n", string.Empty).Length,
             IsEmpty: false,
-            IsWhitespaceOnly: false);
-    }
+			IsWhitespaceOnly: false);
+	}
+
+	private static string CreatePreviewStorageFile(string directory, DateTime lastWriteTimeUtc)
+	{
+		var path = Path.Combine(directory, $"{Guid.NewGuid():N}.preview.txt");
+		File.WriteAllText(path, "preview");
+		if (!OperatingSystem.IsWindows())
+			File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+		File.SetLastWriteTimeUtc(path, lastWriteTimeUtc);
+		return path;
+	}
 
     private sealed class StubFileContentAnalyzer(IReadOnlyDictionary<string, TextFileContent?> contentByPath)
         : IFileContentAnalyzer
