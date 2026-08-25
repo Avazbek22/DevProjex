@@ -123,4 +123,25 @@ public sealed class TerminalSettingsStoreTests
 			[prefix],
 			new TerminalSettingsStore(() => workspace.Path).LoadCommandHistory());
 	}
+
+	[Fact]
+	public async Task PersistedSettingsArePrivateToTheCurrentUnixUser()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Unix file modes are not available on Windows.");
+			return;
+		}
+
+		using var workspace = new TemporaryDirectory();
+		var store = new TerminalSettingsStore(() => workspace.Path);
+
+		await store.SaveCommandHistoryAsync(
+			["search confidential-project-name"],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(
+			UnixFileMode.UserRead | UnixFileMode.UserWrite,
+			File.GetUnixFileMode(store.GetPath()));
+	}
 }

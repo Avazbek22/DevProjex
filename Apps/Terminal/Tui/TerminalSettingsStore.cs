@@ -111,13 +111,18 @@ public sealed class TerminalSettingsStore(Func<string>? appDataPathProvider = nu
 				$".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
 			try
 			{
-				await using (var stream = new FileStream(
-					             temporaryPath,
-					             FileMode.CreateNew,
-					             FileAccess.Write,
-					             FileShare.None,
-					             4 * 1024,
-					             FileOptions.Asynchronous | FileOptions.SequentialScan))
+				var streamOptions = new FileStreamOptions
+				{
+					Mode = FileMode.CreateNew,
+					Access = FileAccess.Write,
+					Share = FileShare.None,
+					BufferSize = 4 * 1024,
+					Options = FileOptions.Asynchronous | FileOptions.SequentialScan
+				};
+				if (!OperatingSystem.IsWindows())
+					streamOptions.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+
+				await using (var stream = new FileStream(temporaryPath, streamOptions))
 				{
 					await JsonSerializer.SerializeAsync(
 							stream,
