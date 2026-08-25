@@ -37,7 +37,7 @@ public sealed class IgnoreOwnershipAuditService
 				cancellationToken.ThrowIfCancellationRequested();
 
 				var name = Path.GetFileName(directoryPath);
-				if (string.IsNullOrWhiteSpace(name))
+				if (string.IsNullOrEmpty(name))
 					continue;
 				if (IsReparsePoint(directoryPath))
 					continue;

@@ -63,6 +63,24 @@ public sealed class IgnoreOwnershipAuditServiceContractTests
 	}
 
 	[Fact]
+	public void AuditRootDirectories_UnixWhitespaceOnlyDirectoryRemainsInOwnershipCounts()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("Win32 does not support whitespace-only directory names.");
+
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(" /payload.txt", "visible\n");
+
+		var audit = new IgnoreOwnershipAuditService().AuditRootDirectories(
+			temp.Path,
+			CreatePlainRules(ignoreDotFolders: false),
+			TestContext.Current.CancellationToken);
+
+		Assert.False(audit.HadAccessDenied);
+		Assert.Equal(1, audit.Count(IgnoreDecisionOwner.None));
+	}
+
+	[Fact]
 	public void AuditRootDirectories_PreCanceledToken_ThrowsBeforeReturningPartialCounts()
 	{
 		using var temp = new TemporaryDirectory();
