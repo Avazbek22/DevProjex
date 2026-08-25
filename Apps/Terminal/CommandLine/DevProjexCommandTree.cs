@@ -119,8 +119,15 @@ public sealed class DevProjexCommandTree
 			}
 			catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException)
 			{
+				var messageKey = exception switch
+				{
+					DirectoryNotFoundException or FileNotFoundException => "Terminal.Error.ProjectNotFound",
+					UnauthorizedAccessException => "Terminal.Error.AccessDenied",
+					IOException => "Terminal.Error.IoFailure",
+					_ => "Terminal.Error.CommandInvalid"
+				};
 				environment.Error.WriteLine(
-					$"error[DPX-MCP-STARTUP]: {TerminalTextEscaping.EscapeSingleLine(exception.Message)}");
+					$"error[DPX-MCP-STARTUP]: {L(messageKey)}");
 				return CommandLineExitCodes.UsageError;
 			}
 		});

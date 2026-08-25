@@ -39,7 +39,7 @@ public sealed class McpCommandContractTests
 	}
 
 	[Fact]
-	public async Task McpStartupErrorsEscapeControlCharactersFromRootPaths()
+	public async Task McpStartupErrorsDoNotSurfaceRawRootPaths()
 	{
 		var environment = new TestTerminalEnvironment();
 		var invalidRoot = Path.Combine(
@@ -52,8 +52,10 @@ public sealed class McpCommandContractTests
 
 		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
 		Assert.Empty(environment.StandardOutput);
-		Assert.StartsWith("error[DPX-MCP-STARTUP]: ", environment.StandardError, StringComparison.Ordinal);
-		Assert.Contains("\\r\\n\\u001B[31m", environment.StandardError, StringComparison.Ordinal);
+		Assert.Equal(
+			$"error[DPX-MCP-STARTUP]: The project directory was not found.{Environment.NewLine}",
+			environment.StandardError);
+		Assert.DoesNotContain("missing-", environment.StandardError, StringComparison.Ordinal);
 		Assert.DoesNotContain('\u001b', environment.StandardError);
 		Assert.Single(environment.StandardError.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries));
 	}
