@@ -171,6 +171,37 @@ public sealed class BuildTreeUseCaseTests
 			TestContext.Current.CancellationToken));
 	}
 
+	[Fact]
+	public void InventoryProjection_DeepTreeDoesNotDependOnTheCallStack()
+	{
+		const int depth = 4_096;
+		var inventory = CreateDeepInventory(depth);
+		var options = CreateOptions() with
+		{
+			AllowedExtensions = new HashSet<string>([".txt"], StringComparer.OrdinalIgnoreCase),
+			AllowedRootFolders = new HashSet<string>(["level-0001"], PathComparer.Default)
+		};
+		var catalog = new StubLocalizationCatalog(new Dictionary<AppLanguage, IReadOnlyDictionary<string, string>>
+		{
+			[AppLanguage.En] = new Dictionary<string, string>()
+		});
+		var presenter = new TreeNodePresentationService(
+			new LocalizationService(catalog, AppLanguage.En),
+			new StubIconMapper { IconKey = "folder" });
+
+		var projected = new DevProjex.Infrastructure.FileSystem.TreeBuilder().Build(
+			inventory,
+			options,
+			TestContext.Current.CancellationToken);
+		var result = presenter.BuildWithFilePaths(projected.Root);
+
+		var node = result.Root;
+		for (var level = 1; level <= depth; level++)
+			node = Assert.Single(node.Children);
+		Assert.False(node.IsDirectory);
+		Assert.Single(result.OrderedFilePaths);
+	}
+
 	private static TreeFilterOptions CreateOptions()
 	{
 		return new TreeFilterOptions(
@@ -198,6 +229,44 @@ public sealed class BuildTreeUseCaseTests
 					isHidden: false,
 					length: 0)
 			],
+			rootAccessDenied: false,
+			hadAccessDenied: false);
+	}
+
+	private static ProjectTreeInventorySnapshot CreateDeepInventory(int depth)
+	{
+		var entries = new List<ProjectTreeInventoryEntry>(depth + 1)
+		{
+			new(
+				"root",
+				"/root",
+				relativePath: string.Empty,
+				parentIndex: -1,
+				isDirectory: true,
+				isHidden: false,
+				length: 0)
+		};
+
+		for (var level = 1; level <= depth; level++)
+		{
+			var parent = entries[level - 1];
+			parent.FirstChildIndex = level;
+			parent.ChildCount = 1;
+			entries[level - 1] = parent;
+			var isDirectory = level < depth;
+			var name = isDirectory ? $"level-{level:D4}" : "leaf.txt";
+			entries.Add(new ProjectTreeInventoryEntry(
+				name,
+				$"/root/{name}-{level}",
+				name,
+				parentIndex: level - 1,
+				isDirectory,
+				isHidden: false,
+				length: isDirectory ? 0 : 1));
+		}
+
+		return new ProjectTreeInventorySnapshot(
+			entries,
 			rootAccessDenied: false,
 			hadAccessDenied: false);
 	}

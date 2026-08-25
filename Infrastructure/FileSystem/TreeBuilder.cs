@@ -311,7 +311,6 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 			return ProjectDirectory(
 				inventory,
 				entryIndex,
-				in entry,
 				options,
 				allowedExtensions,
 				gitIgnoreContext,
@@ -330,65 +329,130 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 	private static FileSystemNode? ProjectDirectory(
 		ProjectTreeInventorySnapshot inventory,
 		int entryIndex,
-		in ProjectTreeInventoryEntry entry,
 		TreeFilterOptions options,
 		AllowedExtensionLookup allowedExtensions,
 		IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
 		bool hasNameFilter,
 		CancellationToken cancellationToken)
 	{
+		var rootFrame = CreateDirectoryProjectionFrame(
+			inventory,
+			entryIndex,
+			options,
+			gitIgnoreContext);
+		if (rootFrame is null)
+			return null;
+
+		var pending = new List<DirectoryProjectionFrame> { rootFrame.Value };
+		while (pending.Count > 0)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var frameIndex = pending.Count - 1;
+			var frame = pending[frameIndex];
+			if (!frame.Entry.IsAccessDenied && frame.NextChildOffset < frame.Entry.ChildCount)
+			{
+				var childIndex = frame.Entry.FirstChildIndex + frame.NextChildOffset++;
+				pending[frameIndex] = frame;
+				ref readonly var childEntry = ref inventory.GetEntryRef(childIndex);
+				if (childEntry.IsDirectory)
+				{
+					var childFrame = CreateDirectoryProjectionFrame(
+						inventory,
+						childIndex,
+						options,
+						gitIgnoreContext);
+					if (childFrame is not null)
+						pending.Add(childFrame.Value);
+				}
+				else
+				{
+					var child = ProjectFile(
+						in childEntry,
+						options,
+						allowedExtensions,
+						gitIgnoreContext,
+						hasNameFilter,
+						frame.ShouldApplySmartIgnoreForFiles);
+					if (child is not null)
+					{
+						frame.AddChild(child);
+						pending[frameIndex] = frame;
+					}
+				}
+
+				continue;
+			}
+
+			pending.RemoveAt(frameIndex);
+			var projected = FinalizeDirectoryProjection(frame, options, hasNameFilter);
+			if (pending.Count == 0)
+				return projected;
+			if (projected is not null)
+			{
+				var parentIndex = pending.Count - 1;
+				var parent = pending[parentIndex];
+				parent.AddChild(projected);
+				pending[parentIndex] = parent;
+			}
+		}
+
+		return null;
+	}
+
+	private static DirectoryProjectionFrame? CreateDirectoryProjectionFrame(
+		ProjectTreeInventorySnapshot inventory,
+		int entryIndex,
+		TreeFilterOptions options,
+		IgnoreRules.GitIgnoreScanContext gitIgnoreContext)
+	{
+		var entry = inventory.GetEntry(entryIndex);
 		var directoryGitIgnore = options.IgnoreRules.IsGitIgnoreTraversalEnabled
 			? gitIgnoreContext.Evaluate(entry.FullPath, entry.RelativePath, isDirectory: true, entry.Name)
 			: IgnoreRules.GitIgnoreEvaluation.NotIgnored;
 		if (ShouldSkipDirectory(in entry, options.IgnoreRules, directoryGitIgnore))
 			return null;
 
-		var children = entry.ChildCount == 0
-			? FileSystemNode.EmptyChildren
-			: new List<FileSystemNode>(entry.ChildCount);
-		var dirNode = new FileSystemNode(
-			name: entry.Name,
-			fullPath: entry.FullPath,
-			isDirectory: true,
-			isAccessDenied: entry.IsAccessDenied,
-			children: children);
+		return new DirectoryProjectionFrame(
+			entry,
+			directoryGitIgnore,
+			options.IgnoreRules.ShouldApplySmartIgnore(entry.FullPath, isDirectory: true));
+	}
 
-		if (entry.ChildCount > 0)
-		{
-			ProjectChildren(
-				inventory,
-				dirNode,
-				entryIndex,
-				options,
-				allowedExtensions,
-				gitIgnoreContext,
-				hasNameFilter,
-				cancellationToken);
-		}
+	private static FileSystemNode? FinalizeDirectoryProjection(
+		DirectoryProjectionFrame frame,
+		TreeFilterOptions options,
+		bool hasNameFilter)
+	{
+		var entry = frame.Entry;
+		var directory = new FileSystemNode(
+			entry.Name,
+			entry.FullPath,
+			isDirectory: true,
+			entry.IsAccessDenied,
+			frame.Children);
 
 		if (options.IgnoreRules.IgnoreEmptyFolders &&
-		    dirNode.Children.Count == 0 &&
-		    !dirNode.IsAccessDenied)
+		    directory.Children.Count == 0 &&
+		    !directory.IsAccessDenied)
 		{
 			return null;
 		}
 
 		if (hasNameFilter)
 		{
-			var hasMatchingChildren = dirNode.Children.Count > 0;
 			var matchesName = entry.Name.Contains(options.NameFilter!, StringComparison.OrdinalIgnoreCase);
-			return hasMatchingChildren || matchesName ? dirNode : null;
+			return directory.Children.Count > 0 || matchesName ? directory : null;
 		}
 
-		if (directoryGitIgnore.IsIgnored &&
-		    directoryGitIgnore.ShouldTraverseIgnoredDirectory &&
-		    dirNode.Children.Count == 0 &&
-		    !dirNode.IsAccessDenied)
+		if (frame.DirectoryGitIgnore.IsIgnored &&
+		    frame.DirectoryGitIgnore.ShouldTraverseIgnoredDirectory &&
+		    directory.Children.Count == 0 &&
+		    !directory.IsAccessDenied)
 		{
 			return null;
 		}
 
-		return dirNode;
+		return directory;
 	}
 
 	private static FileSystemNode? ProjectFile(
@@ -500,5 +564,31 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 
 			return allowedExtensions.Contains(extension.ToString());
 		}
+	}
+
+	private struct DirectoryProjectionFrame
+	{
+		private List<FileSystemNode>? _children;
+		private readonly int _childCapacity;
+
+		public DirectoryProjectionFrame(
+			ProjectTreeInventoryEntry entry,
+			IgnoreRules.GitIgnoreEvaluation directoryGitIgnore,
+			bool shouldApplySmartIgnoreForFiles)
+		{
+			Entry = entry;
+			DirectoryGitIgnore = directoryGitIgnore;
+			ShouldApplySmartIgnoreForFiles = shouldApplySmartIgnoreForFiles;
+			_childCapacity = entry.ChildCount;
+		}
+
+		public ProjectTreeInventoryEntry Entry { get; }
+		public IgnoreRules.GitIgnoreEvaluation DirectoryGitIgnore { get; }
+		public bool ShouldApplySmartIgnoreForFiles { get; }
+		public IReadOnlyList<FileSystemNode> Children => _children ?? FileSystemNode.EmptyChildren;
+		public int NextChildOffset { get; set; }
+
+		public void AddChild(FileSystemNode child) =>
+			(_children ??= new List<FileSystemNode>(_childCapacity)).Add(child);
 	}
 }
