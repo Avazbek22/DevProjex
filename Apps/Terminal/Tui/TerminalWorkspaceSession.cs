@@ -2396,10 +2396,11 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	{
 		if (_preview is null)
 			return;
-		var horizontalOffset = match.Column < _preview.HorizontalOffset ||
-							   match.Column >=
+		var displayColumn = _preview.GetDisplayColumn(match.Line, match.Column);
+		var horizontalOffset = displayColumn < _preview.HorizontalOffset ||
+							   displayColumn >=
 							   _preview.HorizontalOffset + _preview.VisibleTextWidth
-			? Math.Max(0, match.Column - 4)
+			? Math.Max(0, displayColumn - 4)
 			: _preview.HorizontalOffset;
 		_preview.ScrollTo(match.Line, horizontalOffset);
 		UpdatePanelTitles();

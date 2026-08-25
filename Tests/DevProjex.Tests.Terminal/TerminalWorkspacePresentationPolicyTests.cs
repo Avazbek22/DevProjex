@@ -111,4 +111,30 @@ public sealed class TerminalWorkspacePresentationPolicyTests
 
 		Assert.Equal([firstOccurrence, secondOccurrence], toggled);
 	}
+
+	[Fact]
+	public void PreviewNavigationProjectsWidePrefixesToTerminalColumns()
+	{
+		const string occurrence = "wide-prefix";
+		using var document = new InMemoryPreviewTextDocument(
+			"界界DEVPROJEX_REDACTED[secret#1]",
+			redactions:
+			[
+				new PreviewRedactionSpan(
+					occurrence,
+					"secret",
+					1,
+					2,
+					30,
+					SecretPreviewSpanState.Redacted)
+			]);
+		using var view = new TerminalVirtualizedPreviewView();
+		view.SetDocument(document, preserveViewport: false);
+
+		Assert.Equal(4, view.GetDisplayColumn(0, 2));
+		Assert.True(view.MoveActiveRedaction(reverse: false));
+
+		Assert.Equal(2, view.HorizontalOffset);
+		Assert.True(view.MaxLineLength > document.MaxLineLength);
+	}
 }
