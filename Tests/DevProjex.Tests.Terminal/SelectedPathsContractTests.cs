@@ -137,6 +137,28 @@ public sealed class SelectedPathsContractTests
 	}
 
 	[Fact]
+	public async Task InvalidWindowsSelectionNameIsAUsageError()
+	{
+		if (!OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Asterisks are valid file-name characters on Unix filesystems.");
+			return;
+		}
+
+		using var workspace = CreateWorkspace();
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace.Path,
+			environment,
+			"--select", "bad*name.cs");
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("DPX-SELECTION-PATH-INVALID", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task UnicodeSelectionPreservesTheExactRelativePath()
 	{
 		using var workspace = CreateWorkspace();

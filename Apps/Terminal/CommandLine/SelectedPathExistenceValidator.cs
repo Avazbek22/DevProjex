@@ -2,6 +2,8 @@ namespace DevProjex.Terminal.CommandLine;
 
 internal static class SelectedPathExistenceValidator
 {
+	private const int WindowsInvalidName = 123;
+
 	public static void Validate(
 		string projectRoot,
 		IReadOnlyCollection<string>? selectedPaths)
@@ -22,6 +24,14 @@ internal static class SelectedPathExistenceValidator
 			{
 				throw Missing(selectedPath);
 			}
+			catch (PathTooLongException)
+			{
+				throw Invalid(selectedPath);
+			}
+			catch (IOException exception) when (IsInvalidWindowsPath(exception))
+			{
+				throw Invalid(selectedPath);
+			}
 		}
 	}
 
@@ -38,14 +48,22 @@ internal static class SelectedPathExistenceValidator
 					projectRoot,
 					relativePath.Replace('/', Path.DirectorySeparatorChar)));
 		}
-		catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
+		catch (Exception exception) when (
+			exception is ArgumentException or NotSupportedException or PathTooLongException)
 		{
-			throw new ProjectContextValidationException(
-				ProjectSelectionPath.InvalidPathCode,
-				"Selected path is invalid.",
-				originalPath);
+			throw Invalid(originalPath);
 		}
 	}
+
+	private static bool IsInvalidWindowsPath(IOException exception) =>
+		OperatingSystem.IsWindows() &&
+		(exception.HResult & 0xFFFF) == WindowsInvalidName;
+
+	private static ProjectContextValidationException Invalid(string path) =>
+		new(
+			ProjectSelectionPath.InvalidPathCode,
+			"Selected path is invalid.",
+			path);
 
 	private static ProjectContextValidationException Missing(string path) =>
 		new(
