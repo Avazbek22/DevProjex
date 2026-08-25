@@ -11,7 +11,7 @@ public sealed class McpRootRegistry
 		foreach (var root in roots)
 		{
 			if (IsMissingPath(root))
-				continue;
+				throw new ArgumentException("MCP roots cannot be empty.", nameof(roots));
 			var physical = ResolvePhysicalExistingPath(root, requireDirectory: true);
 			if (!normalized.Contains(physical, PathComparer.Default))
 				normalized.Add(physical);

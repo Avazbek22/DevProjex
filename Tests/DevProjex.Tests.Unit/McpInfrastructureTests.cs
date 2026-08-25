@@ -97,6 +97,16 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public void RootRegistryRejectsEmptyConfiguredRoot()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+
+		Assert.Throws<ArgumentException>(() =>
+			new McpRootRegistry([project, string.Empty]));
+	}
+
+	[Fact]
 	public void RootRegistryReportsMalformedPathsAsInvalidArguments()
 	{
 		using var workspace = new TemporaryDirectory();
