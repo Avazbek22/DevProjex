@@ -76,6 +76,25 @@ public sealed class RepoCacheServiceExtendedTests : IDisposable
     }
 
     [Fact]
+    public void CreateRepositoryDirectory_LengthLimitNeverSplitsAUnicodeScalar()
+    {
+        var repositoryName = new string('x', 99) + "😀tail";
+
+        var path = _service.CreateRepositoryDirectory($"https://example.test/{repositoryName}");
+
+        try
+        {
+            var boundedName = Path.GetFileName(path).Split('_')[0];
+            Assert.Equal(new string('x', 99), boundedName);
+            Assert.DoesNotContain(Rune.ReplacementChar, boundedName.EnumerateRunes());
+        }
+        finally
+        {
+            _service.DeleteRepositoryDirectory(path);
+        }
+    }
+
+    [Fact]
     public void CreateRepositoryDirectory_SameUrl_DifferentPaths_DueToTimestamp()
     {
         // Arrange

@@ -2266,7 +2266,14 @@ public sealed class RepoCacheService : IRepoCacheService
 				? string.Concat(name.AsSpan(0, dotIndex), "_repo", name.AsSpan(dotIndex))
 				: name + "_repo";
 		}
-		var bounded = name.Length > 100 ? name[..100] : name;
+		var boundedLength = Math.Min(name.Length, 100);
+		if (boundedLength < name.Length &&
+		    char.IsHighSurrogate(name[boundedLength - 1]) &&
+		    char.IsLowSurrogate(name[boundedLength]))
+		{
+			boundedLength--;
+		}
+		var bounded = name[..boundedLength];
 		bounded = TrimUnsafeTrailingCharacters(bounded);
 		return bounded.Length == 0 ? "repo" : bounded;
 	}
