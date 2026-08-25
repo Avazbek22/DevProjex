@@ -544,6 +544,42 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public async Task PackCreationCleanupPreservesTheOriginalWriterFailure()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var registry = new McpPackRegistry(workspace.Path);
+		var expected = new InvalidOperationException("writer failed");
+
+		var actual = await Assert.ThrowsAsync<InvalidOperationException>(() => registry.CreateAsync(
+			async (stream, _) =>
+			{
+				var path = ((FileStream)stream).Name;
+				await stream.DisposeAsync();
+				File.Delete(path);
+				Directory.CreateDirectory(path);
+				throw expected;
+			},
+			TestContext.Current.CancellationToken));
+
+		Assert.Same(expected, actual);
+	}
+
+	[Fact]
+	public async Task PackRemovalIgnoresCleanupAccessFailures()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var registry = new McpPackRegistry(workspace.Path);
+		var packId = await registry.StoreAsync("redacted context", TestContext.Current.CancellationToken);
+		var path = registry.Resolve(packId);
+		File.Delete(path);
+		Directory.CreateDirectory(path);
+
+		registry.Remove(packId);
+
+		Assert.True(Directory.Exists(path));
+	}
+
+	[Fact]
 	public async Task TextPageReaderHonorsLineAndCharacterCapsWithoutLoadingWholeStream()
 	{
 		await using var stream = new MemoryStream(Encoding.UTF8.GetBytes("one\r\ntwo\rthree\nfour\nfive"));

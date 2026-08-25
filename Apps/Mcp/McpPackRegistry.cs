@@ -84,13 +84,7 @@ public sealed class McpPackRegistry : IDisposable
 		}
 		catch
 		{
-			try
-			{
-				File.Delete(path);
-			}
-			catch (IOException)
-			{
-			}
+			TryDeletePackFile(path);
 			throw;
 		}
 	}
@@ -103,13 +97,7 @@ public sealed class McpPackRegistry : IDisposable
 			if (!_packs.Remove(packId, out entry))
 				return;
 		}
-		try
-		{
-			File.Delete(entry.Document.Path);
-		}
-		catch (IOException)
-		{
-		}
+		TryDeletePackFile(entry.Document.Path);
 	}
 
 	public string Resolve(string packId) => ResolveDocument(packId).Path;
@@ -207,6 +195,20 @@ public sealed class McpPackRegistry : IDisposable
 
 	private static bool IsLowerHexDigit(char value) =>
 		value is >= '0' and <= '9' or >= 'a' and <= 'f';
+
+	private static void TryDeletePackFile(string path)
+	{
+		try
+		{
+			File.Delete(path);
+		}
+		catch (IOException)
+		{
+		}
+		catch (UnauthorizedAccessException)
+		{
+		}
+	}
 
 	private static void SetPrivateDirectoryMode(string path)
 	{
