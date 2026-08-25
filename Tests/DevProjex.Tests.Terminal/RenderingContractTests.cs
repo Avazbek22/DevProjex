@@ -1,6 +1,7 @@
 using DevProjex.Terminal.Rendering;
 using DevProjex.Infrastructure.ResourceStore;
 using DevProjex.Application.Secrets;
+using DevProjex.Kernel.Abstractions;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -293,6 +294,85 @@ public sealed class RenderingContractTests
 		Assert.DoesNotContain('\r', formatted);
 		Assert.DoesNotContain('\t', formatted);
 		Assert.DoesNotContain('\u001b', formatted);
+	}
+
+	[Fact]
+	public async Task AnalysisRowsEscapeControlCharactersInUserDerivedFields()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("App.cs", "internal sealed class App {}");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var selection = await services.SelectionResolver.ResolveAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			new ProjectSelectionSpec(),
+			TestContext.Current.CancellationToken);
+		var plan = await services.ContextPlanner.BuildAsync(
+			new ProjectContextRequest(workspace.Path, selection),
+			TestContext.Current.CancellationToken);
+		plan = plan with
+		{
+			Selection = plan.Selection with
+			{
+				ProfileSource = new ProjectProfileReference(
+					ProjectProfileSourceKind.Portable,
+					"profile\rforged.json")
+			},
+			SelectedRoots = ["root\nforged"],
+			SelectedExtensions = [".cs\tforged"],
+			SourceIdentity = new ProjectSourceIdentity(
+				"project\nforged",
+				ProjectSourceType.GitClone,
+				"source",
+				"https://example.invalid/repo\rforged")
+		};
+
+		var rows = AnalysisTextFormatter.BuildRows(
+			plan,
+			new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En));
+
+		Assert.Contains(rows, static row => row.Value == "project\\nforged");
+		Assert.Contains(rows, static row => row.Value == "https://example.invalid/repo\\rforged");
+		Assert.Contains(rows, static row => row.Value == "profile\\rforged.json");
+		Assert.Contains(rows, static row => row.Value == "root\\nforged");
+		Assert.Contains(rows, static row => row.Value == ".cs\\tforged");
+		Assert.All(rows, static row =>
+		{
+			Assert.DoesNotContain('\r', row.Value);
+			Assert.DoesNotContain('\n', row.Value);
+			Assert.DoesNotContain('\t', row.Value);
+		});
+	}
+
+	[Fact]
+	public void DryRunEscapesControlCharactersInDestination()
+	{
+		var environment = new TestTerminalEnvironment();
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);
+
+		DryRunRenderer.WritePlan(environment, localization, "safe\nforged\tpath");
+
+		Assert.Contains("safe\\nforged\\tpath", environment.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain('\n', environment.StandardError.TrimEnd('\r', '\n'));
+		Assert.DoesNotContain('\t', environment.StandardError);
+	}
+
+	[Fact]
+	public void UnscannableSummaryEscapesControlCharactersInPaths()
+	{
+		var root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "DevProjexUnscannable"));
+		var path = Path.Combine(root, "safe\nforged\tfile.cs");
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);
+
+		var summary = UnscannableFileOutput.FormatSummary(
+			root,
+			[new UnscannableFile(path, FileContentClassification.TooLarge)],
+			localization);
+
+		Assert.Contains("safe\\nforged\\tfile.cs", summary, StringComparison.Ordinal);
+		Assert.DoesNotContain('\n', summary);
+		Assert.DoesNotContain('\t', summary);
 	}
 
 	[Fact]

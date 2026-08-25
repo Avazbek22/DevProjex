@@ -11,7 +11,7 @@ internal static class DryRunRenderer
 	{
 		var displayDestination = destination == "-"
 			? localization["Terminal.Value.Stdout"]
-			: destination;
+			: TerminalTextEscaping.EscapeSingleLine(destination);
 		environment.Error.WriteLine(
 			localization.Format("Terminal.DryRun.Ready", displayDestination));
 	}

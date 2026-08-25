@@ -3,6 +3,30 @@ namespace DevProjex.Tests.Terminal;
 public sealed class ProfileCommandContractTests
 {
 	[Fact]
+	public void TextProfileEscapesControlCharactersInSelectionValues()
+	{
+		using var workspace = new TemporaryDirectory();
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var handler = new ProfileCommandHandler(services, new TestTerminalEnvironment());
+		var selection = new ProjectSelectionSpec(
+			Roots: ["root\nforged"],
+			Extensions: [".cs\tforged"],
+			SelectedPaths: ["src/safe\rforged.cs"],
+			ProfileSource: new ProjectProfileReference(
+				ProjectProfileSourceKind.Portable,
+				"profile\nforged.json"));
+
+		var text = handler.BuildText(selection);
+
+		Assert.Contains("root\\nforged", text, StringComparison.Ordinal);
+		Assert.Contains(".cs\\tforged", text, StringComparison.Ordinal);
+		Assert.Contains("src/safe\\rforged.cs", text, StringComparison.Ordinal);
+		Assert.Contains("profile\\nforged.json", text, StringComparison.Ordinal);
+		Assert.DoesNotContain('\t', text);
+	}
+
+	[Fact]
 	public async Task StandardProfileIsDeterministicAndDoesNotReadLocalState()
 	{
 		using var workspace = CreateWorkspace();

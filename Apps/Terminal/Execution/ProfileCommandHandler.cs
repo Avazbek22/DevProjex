@@ -170,22 +170,22 @@ public sealed class ProfileCommandHandler(
 			plan.Selection.SelectedPaths?.ToArray() ?? []);
 	}
 
-	private string BuildText(ProjectSelectionSpec selection)
+	internal string BuildText(ProjectSelectionSpec selection)
 	{
 		var output = new StringBuilder();
 		var all = services.Localization["Terminal.Profile.All"];
 		output.Append(services.Localization["Terminal.Analysis.Profile"]).Append(": ")
-			.AppendLine(FormatProfile(selection.ProfileSource));
+			.AppendLine(TerminalTextEscaping.EscapeSingleLine(FormatProfile(selection.ProfileSource)));
 		output.Append(services.Localization["Terminal.Analysis.GitMode"]).Append(": ")
 			.AppendLine(selection.GitMode is { } gitMode
 				? ProjectSelectionTokens.ToToken(gitMode)
 				: ProjectSelectionTokens.ToToken(GitFilteringMode.None));
 		output.Append(services.Localization["Terminal.Analysis.Roots"]).Append(": ")
-			.AppendLine(selection.Roots is null ? all : string.Join(", ", selection.Roots));
+			.AppendLine(selection.Roots is null ? all : JoinEscaped(selection.Roots));
 		output.Append(services.Localization["Terminal.Analysis.Extensions"]).Append(": ")
-			.AppendLine(selection.Extensions is null ? all : string.Join(", ", selection.Extensions));
+			.AppendLine(selection.Extensions is null ? all : JoinEscaped(selection.Extensions));
 		output.Append(services.Localization["Terminal.Profile.SelectedPaths"]).Append(": ")
-			.AppendLine(string.Join(", ", selection.SelectedPaths ?? []));
+			.AppendLine(JoinEscaped(selection.SelectedPaths ?? []));
 		output.Append(services.Localization["Terminal.Analysis.Exclusions"]).Append(": ")
 			.AppendLine(string.Join(
 				", ",
@@ -202,6 +202,9 @@ public sealed class ProfileCommandHandler(
 			.AppendLine((selection.StripBlankLines == true).ToString(CultureInfo.InvariantCulture));
 		return output.ToString().TrimEnd('\r', '\n');
 	}
+
+	private static string JoinEscaped(IEnumerable<string> values) =>
+		string.Join(", ", values.Select(TerminalTextEscaping.EscapeSingleLine));
 
 	private static string FormatProfile(ProjectProfileReference? profile) =>
 		profile?.Kind switch

@@ -6,6 +6,7 @@ using System.Text.Json;
 using DevProjex.Infrastructure.Persistence;
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.DesktopControl;
+using DevProjex.Terminal.Rendering;
 
 namespace DevProjex.Terminal.Execution;
 
@@ -71,14 +72,18 @@ public sealed class DoctorCommandHandler(
 		else
 		{
 			environment.Output.WriteLine($"DevProjex {ResolveVersion()}");
-			environment.Output.WriteLine($"{RuntimeInformation.OSDescription} ({RuntimeInformation.ProcessArchitecture})");
+			environment.Output.WriteLine(
+				$"{TerminalTextEscaping.EscapeSingleLine(RuntimeInformation.OSDescription)} " +
+				$"({RuntimeInformation.ProcessArchitecture})");
 			foreach (var check in checks)
 			{
 				environment.Output.WriteLine(
-					$"{StatusMarker(check.Status)} {ResolveCheckName(check.Name)}: {check.Detail}");
+					$"{StatusMarker(check.Status)} {ResolveCheckName(check.Name)}: " +
+					TerminalTextEscaping.EscapeSingleLine(check.Detail));
 				if (!string.IsNullOrWhiteSpace(check.Hint))
 					environment.Output.WriteLine(
-						$"  {services.Localization["Terminal.Label.Hint"]}: {check.Hint}");
+						$"  {services.Localization["Terminal.Label.Hint"]}: " +
+						TerminalTextEscaping.EscapeSingleLine(check.Hint));
 			}
 		}
 
