@@ -36,6 +36,7 @@ public static class DesktopDiagnosticRequestStore
 	public static DesktopDiagnosticRequest? TryConsume()
 	{
 		var path = Environment.GetEnvironmentVariable(EnvironmentVariable);
+		string? safeRequestPath = null;
 		Environment.SetEnvironmentVariable(EnvironmentVariable, null);
 		if (string.IsNullOrWhiteSpace(path))
 			return null;
@@ -47,6 +48,7 @@ public static class DesktopDiagnosticRequestStore
 				Path.Combine(Path.GetTempPath(), "DevProjex", "desktop-diagnostics"));
 			if (!PathUtility.IsPathInside(fullPath, expectedDirectory))
 				return null;
+			safeRequestPath = fullPath;
 			return DesktopRequestEnvelopeReader.Read<DesktopDiagnosticRequest>(
 				fullPath,
 				JsonOptions);
@@ -57,7 +59,7 @@ public static class DesktopDiagnosticRequestStore
 		}
 		finally
 		{
-			Delete(path);
+			Delete(safeRequestPath);
 		}
 	}
 

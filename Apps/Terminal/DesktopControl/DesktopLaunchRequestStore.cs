@@ -57,6 +57,7 @@ public static class DesktopLaunchRequestStore
 		CancellationToken cancellationToken = default)
 	{
 		var path = Environment.GetEnvironmentVariable(InvocationEnvironment.DesktopRequestVariable);
+		string? safeRequestPath = null;
 		Environment.SetEnvironmentVariable(InvocationEnvironment.DesktopRequestVariable, null);
 		if (string.IsNullOrWhiteSpace(path))
 			return null;
@@ -68,6 +69,7 @@ public static class DesktopLaunchRequestStore
 				Path.Combine(Path.GetTempPath(), "DevProjex", "desktop-requests"));
 			if (!PathUtility.IsPathInside(fullPath, expectedDirectory))
 				return null;
+			safeRequestPath = fullPath;
 			return await DesktopRequestEnvelopeReader
 				.ReadAsync<DesktopOpenRequest>(fullPath, JsonOptions, cancellationToken)
 				.ConfigureAwait(false);
@@ -82,7 +84,8 @@ public static class DesktopLaunchRequestStore
 		}
 		finally
 		{
-			DesktopInstanceRegistry.TryDelete(path);
+			if (safeRequestPath is not null)
+				DesktopInstanceRegistry.TryDelete(safeRequestPath);
 		}
 	}
 }
