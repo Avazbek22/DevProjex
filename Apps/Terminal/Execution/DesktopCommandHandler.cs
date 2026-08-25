@@ -10,7 +10,8 @@ public sealed class DesktopCommandHandler(
 	DesktopControlClient? client = null,
 	DesktopProcessLauncher? launcher = null,
 	bool writeOutput = true,
-	LocalizationService? localization = null)
+	LocalizationService? localization = null,
+	TimeProvider? timeProvider = null)
 {
 	private static readonly JsonSerializerOptions MachineJsonOptions = new()
 	{
@@ -22,6 +23,7 @@ public sealed class DesktopCommandHandler(
 	private readonly DesktopProcessLauncher _launcher = launcher ?? new DesktopProcessLauncher();
 	private readonly LocalizationService _localization = localization ??
 		new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);
+	private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
 	public async Task<int> OpenAsync(
 		DesktopOpenRequest request,
@@ -195,11 +197,12 @@ public sealed class DesktopCommandHandler(
 		DesktopOpenRequest request,
 		CancellationToken cancellationToken)
 	{
-		var deadline = DateTimeOffset.UtcNow + (
+		var timeout =
 			request.WaitForCompletion
 				? TimeSpan.FromMinutes(2)
-				: TimeSpan.FromSeconds(10));
-		while (DateTimeOffset.UtcNow < deadline)
+				: TimeSpan.FromSeconds(10);
+		var startedAt = _timeProvider.GetTimestamp();
+		while (IsWithinLaunchWaitWindow(_timeProvider, startedAt, timeout))
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			var instances = await _client.ListAsync(cancellationToken).ConfigureAwait(false);
@@ -237,6 +240,12 @@ public sealed class DesktopCommandHandler(
 			"DPX-DESKTOP-TIMEOUT",
 			"DevProjex Desktop did not become ready before the timeout.");
 	}
+
+	internal static bool IsWithinLaunchWaitWindow(
+		TimeProvider timeProvider,
+		long startedAt,
+		TimeSpan timeout) =>
+		timeProvider.GetElapsedTime(startedAt) < timeout;
 
 	private static string ResolveAcceptedProjectPath(
 		DesktopOpenRequest request,

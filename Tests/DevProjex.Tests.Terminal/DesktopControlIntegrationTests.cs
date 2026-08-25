@@ -10,6 +10,20 @@ namespace DevProjex.Tests.Terminal;
 public sealed class DesktopControlIntegrationTests
 {
 	[Fact]
+	public void DesktopLaunchWaitUsesMonotonicTimeWhenUtcClockMovesBackward()
+	{
+		var timeProvider = new AdjustableTimeProvider();
+		var startedAt = timeProvider.GetTimestamp();
+		timeProvider.AdvanceTimestamp(TimeSpan.FromSeconds(11));
+		timeProvider.MoveUtcBackward(TimeSpan.FromHours(1));
+
+		Assert.False(DesktopCommandHandler.IsWithinLaunchWaitWindow(
+			timeProvider,
+			startedAt,
+			TimeSpan.FromSeconds(10)));
+	}
+
+	[Fact]
 	public async Task ServerRegistersHandlesAppliedStateAndRemovesRegistrationOnStop()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -85,6 +99,19 @@ public sealed class DesktopControlIntegrationTests
 			PathUtility.Normalize(lastProject) + Environment.NewLine,
 			lastEnvironment.StandardOutput);
 		Assert.DoesNotContain(server.InstanceId, lastEnvironment.StandardOutput, StringComparison.Ordinal);
+	}
+
+	private sealed class AdjustableTimeProvider : TimeProvider
+	{
+		private long _timestamp;
+		private DateTimeOffset _utcNow = DateTimeOffset.UtcNow;
+
+		public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+		public override long GetTimestamp() => _timestamp;
+		public override DateTimeOffset GetUtcNow() => _utcNow;
+
+		public void AdvanceTimestamp(TimeSpan value) => _timestamp += value.Ticks;
+		public void MoveUtcBackward(TimeSpan value) => _utcNow -= value;
 	}
 
 	[Fact]
