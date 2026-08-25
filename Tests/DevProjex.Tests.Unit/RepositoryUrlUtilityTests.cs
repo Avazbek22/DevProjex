@@ -43,6 +43,18 @@ public sealed class RepositoryUrlUtilityTests
 		Assert.DoesNotContain("access_token", display, StringComparison.Ordinal);
 	}
 
+	[Theory]
+	[InlineData("https://user:super-secret@[invalid/repo")]
+	[InlineData("ssh://user:super-secret@")]
+	[InlineData("user:super-secret@example.com:repo")]
+	public void SafeDisplayRejectsMalformedSourcesInsteadOfReturningCredentials(string source)
+	{
+		var display = RepositoryUrlUtility.ToSafeDisplay(source);
+
+		Assert.Empty(display);
+		Assert.DoesNotContain("super-secret", display, StringComparison.Ordinal);
+	}
+
 	[Fact]
 	public void SafeDisplayPreservesFileUriIdentityAcrossPlatforms()
 	{
