@@ -270,13 +270,14 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
-	public async Task SearchAcceptsWhitespaceRegexAndUnixWhitespaceOnlyFilePaths()
+	public async Task SearchAcceptsWhitespaceRegexAndRootRegistryAllowsUnixWhitespaceOnlyFilePaths()
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
 		File.WriteAllText(Path.Combine(project, "Sample.txt"), "alpha beta\n");
+		var whitespacePath = Path.Combine(project, " ");
 		if (!OperatingSystem.IsWindows())
-			File.WriteAllText(Path.Combine(project, " "), "whitespace-name\n");
+			File.WriteAllText(whitespacePath, "whitespace-name\n");
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 
 		var search = await server.CallAsync(
@@ -288,11 +289,8 @@ public sealed class McpServerIntegrationTests
 		if (OperatingSystem.IsWindows())
 			return;
 
-		var file = await server.CallAsync(
-			"get_file",
-			new Dictionary<string, object?> { ["path"] = " " });
-		Assert.NotEqual(true, file.IsError);
-		Assert.Contains("whitespace-name", Text(file), StringComparison.Ordinal);
+		var resolved = new McpRootRegistry([project]).ResolveExistingPath(project, " ");
+		Assert.Equal(whitespacePath, resolved, PathComparer.Default);
 	}
 
 	[Fact]
