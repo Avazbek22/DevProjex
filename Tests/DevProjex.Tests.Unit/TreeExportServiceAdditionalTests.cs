@@ -35,6 +35,31 @@ public sealed class TreeExportServiceAdditionalTests
 	}
 
 	[Fact]
+	public void HasSelectedDescendantOrSelf_DeepTreeDoesNotDependOnTheCallStack()
+	{
+		const int depth = 16_000;
+		const string selectedPath = "/leaf";
+		var root = new TreeNodeDescriptor("Leaf", selectedPath, false, false, "file", []);
+		for (var level = 0; level < depth; level++)
+		{
+			root = new TreeNodeDescriptor(
+				$"Node{level}",
+				$"/node-{level}",
+				true,
+				false,
+				"folder",
+				[root]);
+		}
+
+		Assert.True(TreeExportService.HasSelectedDescendantOrSelf(
+			root,
+			new HashSet<string> { selectedPath }));
+		Assert.False(TreeExportService.HasSelectedDescendantOrSelf(
+			root,
+			new HashSet<string> { "/missing" }));
+	}
+
+	[Fact]
 	// Verifies full tree output includes root path and top-level display name.
 	public void BuildFullTree_IncludesRootHeader()
 	{

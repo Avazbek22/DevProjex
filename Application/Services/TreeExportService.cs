@@ -311,12 +311,16 @@ public sealed class TreeExportService
 
 	public static bool HasSelectedDescendantOrSelf(TreeNodeDescriptor node, IReadOnlySet<string> selectedPaths)
 	{
-		if (selectedPaths.Contains(node.FullPath)) return true;
-
-		foreach (var child in node.Children)
+		var pending = new Stack<TreeNodeDescriptor>();
+		pending.Push(node);
+		while (pending.Count > 0)
 		{
-			if (HasSelectedDescendantOrSelf(child, selectedPaths))
+			var current = pending.Pop();
+			if (selectedPaths.Contains(current.FullPath))
 				return true;
+
+			for (var index = current.Children.Count - 1; index >= 0; index--)
+				pending.Push(current.Children[index]);
 		}
 
 		return false;
