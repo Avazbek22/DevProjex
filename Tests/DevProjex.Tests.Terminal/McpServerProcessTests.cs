@@ -74,7 +74,6 @@ public sealed class McpServerProcessTests
 				options: null,
 				TestContext.Current.CancellationToken);
 			Assert.NotEqual(true, pack.IsError);
-			Assert.NotEmpty(progress.Values);
 		}
 
 		process.StandardInput.Close();
@@ -87,6 +86,12 @@ public sealed class McpServerProcessTests
 		var transcript = recordingOutput.GetRecordedText();
 		var messages = transcript.Split('\n', StringSplitOptions.RemoveEmptyEntries);
 		Assert.NotEmpty(messages);
+		Assert.Contains(messages, static message =>
+		{
+			using var document = JsonDocument.Parse(message.TrimEnd('\r'));
+			return document.RootElement.TryGetProperty("method", out var method) &&
+			       method.GetString() == NotificationMethods.ProgressNotification;
+		});
 		Assert.All(messages, static message =>
 		{
 			using var document = JsonDocument.Parse(message.TrimEnd('\r'));
