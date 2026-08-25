@@ -16,7 +16,9 @@ internal static class UnixFileTypeInspector
 
 		NativeStatBuffer buffer;
 		var result = OperatingSystem.IsMacOS()
-			? MacOsLStat(path, out buffer)
+			? RuntimeInformation.ProcessArchitecture == Architecture.X64
+				? MacOsX64LStat(path, out buffer)
+				: MacOsLStat(path, out buffer)
 			: LinuxLStat(path, out buffer);
 		if (result != 0)
 			ThrowForLastError(path);
@@ -53,6 +55,11 @@ internal static class UnixFileTypeInspector
 
 	[DllImport("libSystem.B.dylib", EntryPoint = "lstat", SetLastError = true)]
 	private static extern int MacOsLStat(
+		[MarshalAs(UnmanagedType.LPUTF8Str)] string path,
+		out NativeStatBuffer buffer);
+
+	[DllImport("libSystem.B.dylib", EntryPoint = "lstat$INODE64", SetLastError = true)]
+	private static extern int MacOsX64LStat(
 		[MarshalAs(UnmanagedType.LPUTF8Str)] string path,
 		out NativeStatBuffer buffer);
 
