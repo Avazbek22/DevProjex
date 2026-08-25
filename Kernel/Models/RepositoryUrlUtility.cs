@@ -172,8 +172,11 @@ public static class RepositoryUrlUtility
 	private static string BuildVersionedHostPathKey(string host, int port, string path)
 	{
 		var normalizedHost = host.Trim().ToLowerInvariant();
-		var normalizedPath = TrimGitSuffix(NormalizePath(path));
-		if (CaseInsensitiveRepositoryPathHosts.Contains(normalizedHost))
+		var caseInsensitivePath = CaseInsensitiveRepositoryPathHosts.Contains(normalizedHost);
+		var normalizedPath = TrimGitSuffix(
+			NormalizePath(path),
+			caseInsensitivePath ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+		if (caseInsensitivePath)
 			normalizedPath = normalizedPath.ToLowerInvariant();
 		var portSuffix = port > 0 ? $":{port}" : string.Empty;
 		return VersionIdentity($"{normalizedHost}{portSuffix}/{normalizedPath.TrimStart('/')}");
@@ -201,8 +204,10 @@ public static class RepositoryUrlUtility
 	private static string NormalizePath(string value) =>
 		value.Replace('\\', '/').Trim().TrimEnd('/');
 
-	private static string TrimGitSuffix(string value) =>
-		value.EndsWith(".git", StringComparison.OrdinalIgnoreCase)
+	private static string TrimGitSuffix(
+		string value,
+		StringComparison comparison = StringComparison.OrdinalIgnoreCase) =>
+		value.EndsWith(".git", comparison)
 			? value[..^4]
 			: value;
 

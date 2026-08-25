@@ -54,6 +54,9 @@ public sealed class RepositoryUrlUtilityTests
 		Assert.False(RepositoryUrlUtility.AreEquivalent(
 			canonical,
 			"https://git.example.test/owner/repo"));
+		Assert.False(RepositoryUrlUtility.AreEquivalent(
+			canonical,
+			"https://git.example.test/Owner/Repo.GIT"));
 	}
 
 	[Fact]
