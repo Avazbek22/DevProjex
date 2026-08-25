@@ -714,8 +714,11 @@ public partial class MainWindow
 			_localization["Error.ProjectCopy.SecretScanLimitExceeded"],
 		SecretDetectionException =>
 			_localization["Error.ProjectCopy.SecretDetectionFailed"],
-		_ => exception.Message
+		_ => ResolveDesktopExceptionMessage(exception)
 	};
+
+	private string ResolveDesktopExceptionMessage(Exception exception) =>
+		DesktopExceptionPresentation.Format(_localization, exception);
 
     public MainWindow()
         : this(DesktopStartupOptions.Default, AvaloniaCompositionRoot.CreateDefault(DesktopStartupOptions.Default))
@@ -1170,7 +1173,7 @@ public partial class MainWindow
             (interactive, token) => RefreshTreeAsync(interactive, token),
             ResetInteractiveFilterCache,
             () => _lastInteractiveFilterUsedInMemory,
-            ex => ShowErrorAsync(ex.Message),
+			ex => ShowErrorAsync(ResolveDesktopExceptionMessage(ex)),
             ScheduleBackgroundMemoryCleanup,
             CancelAllMemoryCleanup,
             treeSearchMarkerBar: this.FindControl<PreviewMarkerBar>("TreeSearchMarkerBar") ??

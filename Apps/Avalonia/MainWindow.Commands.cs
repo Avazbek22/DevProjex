@@ -203,7 +203,7 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            await ShowErrorAsync(ex.Message);
+            await ShowErrorAsync(ResolveDesktopExceptionMessage(ex));
             e.Handled = true;
         }
     }
@@ -688,7 +688,7 @@ public partial class MainWindow
             }
             catch (Exception ex)
             {
-                await ShowErrorAsync(ex.Message);
+                await ShowErrorAsync(ResolveDesktopExceptionMessage(ex));
             }
         }
         finally

@@ -228,7 +228,7 @@ public partial class MainWindow
                         _taskbarProgress.MarkGitCloneError();
                         await ShowErrorAsync(_localization.Format(
                             "Git.Error.CloneFailed",
-                            result.ErrorMessage ?? "Unknown error"));
+							DesktopExceptionPresentation.Format(_localization, exception: null)));
                         _toastService.Show(_localization["Toast.Git.CloneError"]);
                         return;
                     }
@@ -292,7 +292,9 @@ public partial class MainWindow
             _gitCloneWindow?.Close();
             _gitCloneWindow = null;
             _taskbarProgress.MarkGitCloneError();
-            await ShowErrorAsync(_localization.Format("Git.Error.CloneFailed", ex.Message));
+			await ShowErrorAsync(_localization.Format(
+				"Git.Error.CloneFailed",
+				ResolveDesktopExceptionMessage(ex)));
             _toastService.Show(_localization["Toast.Git.CloneError"]);
         }
         finally
@@ -437,7 +439,9 @@ public partial class MainWindow
 		}
 		catch (Exception ex)
 		{
-			await ShowErrorAsync(_localization.Format("Git.Error.CloneFailed", ex.Message));
+			await ShowErrorAsync(_localization.Format(
+				"Git.Error.CloneFailed",
+				ResolveDesktopExceptionMessage(ex)));
 		}
 		finally
 		{
@@ -450,9 +454,11 @@ public partial class MainWindow
 	}
 
 	private string FormatRepositoryBranchUnavailableMessage(RepositoryBranchUnavailableException exception) =>
-		exception.Reason == RepositoryBranchUnavailableReason.WorktreeUnsupported
+		DesktopExceptionPresentation.AppendCode(
+			exception.Reason == RepositoryBranchUnavailableReason.WorktreeUnsupported
 			? _localization.Format("Git.Error.WorktreeBranchUnavailable", exception.Branch)
-			: _localization.Format("Git.Error.BranchSwitchFailed", exception.Branch);
+			: _localization.Format("Git.Error.BranchSwitchFailed", exception.Branch),
+			DesktopExceptionPresentation.ResourceUnavailableCode);
 
 	private void BeginGitCloneProgressPhase(string status)
 	{
@@ -671,7 +677,9 @@ public partial class MainWindow
             if (!success)
             {
                 _statusOperations.Complete(statusOperationId);
-                await ShowErrorAsync(_localization.Format("Git.Error.UpdateFailed", "Pull failed"));
+				await ShowErrorAsync(_localization.Format(
+					"Git.Error.UpdateFailed",
+					DesktopExceptionPresentation.Format(_localization, exception: null)));
                 return;
             }
 
@@ -708,7 +716,9 @@ public partial class MainWindow
         catch (Exception ex)
         {
             _statusOperations.Complete(statusOperationId);
-            await ShowErrorAsync(_localization.Format("Git.Error.UpdateFailed", ex.Message));
+			await ShowErrorAsync(_localization.Format(
+				"Git.Error.UpdateFailed",
+				ResolveDesktopExceptionMessage(ex)));
         }
         finally
         {
@@ -752,7 +762,9 @@ public partial class MainWindow
             if (!success)
             {
                 _statusOperations.Complete(statusOperationId);
-                await ShowErrorAsync(_localization.Format("Git.Error.BranchSwitchFailed", branchName));
+				await ShowErrorAsync(DesktopExceptionPresentation.AppendCode(
+					_localization.Format("Git.Error.BranchSwitchFailed", branchName),
+					DesktopExceptionPresentation.OperationFailedCode));
                 return;
             }
 
@@ -784,7 +796,9 @@ public partial class MainWindow
         catch (Exception ex)
         {
             _statusOperations.Complete(statusOperationId);
-            await ShowErrorAsync(_localization.Format("Git.Error.BranchSwitchFailed", ex.Message));
+			await ShowErrorAsync(_localization.Format(
+				"Git.Error.BranchSwitchFailed",
+				ResolveDesktopExceptionMessage(ex)));
         }
         finally
         {

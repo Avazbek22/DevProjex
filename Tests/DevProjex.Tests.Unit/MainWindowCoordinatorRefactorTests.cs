@@ -2243,6 +2243,8 @@ public sealed class MainWindowCoordinatorRefactorTests
 
         public bool EnsurePreviewTreeReady() => true;
 
+		public string ResolvePreviewErrorMessage(Exception exception) => exception.Message;
+
         public void ApplyPreviewNoDataText() =>
             viewModel.PreviewText = "No data";
 

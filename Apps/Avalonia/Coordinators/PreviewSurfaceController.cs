@@ -556,7 +556,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 		catch (Exception exception)
 		{
 			if (!_disposed && IsCurrentProject(operationProjectRoot))
-				await _showErrorAsync(exception.Message);
+				await _showErrorAsync(DesktopExceptionPresentation.Format(_localization, exception));
 		}
 	}
 
@@ -803,7 +803,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 		catch (Exception exception)
 		{
 			if (!_disposed && IsCurrentProject(operationProjectRoot))
-				await _showErrorAsync(exception.Message);
+				await _showErrorAsync(DesktopExceptionPresentation.Format(_localization, exception));
 		}
 	}
 
@@ -938,7 +938,7 @@ internal sealed class PreviewSurfaceController : IDisposable
         }
         catch (Exception ex)
         {
-            await _showErrorAsync(ex.Message);
+            await _showErrorAsync(DesktopExceptionPresentation.Format(_localization, ex));
         }
     }
 
@@ -967,7 +967,7 @@ internal sealed class PreviewSurfaceController : IDisposable
         }
         catch (Exception ex)
         {
-            await _showErrorAsync(ex.Message);
+            await _showErrorAsync(DesktopExceptionPresentation.Format(_localization, ex));
         }
     }
 

@@ -189,7 +189,7 @@ public partial class MainWindow
 		}
 		catch (Exception exception)
 		{
-			await ShowErrorAsync(exception.Message);
+			await ShowErrorAsync(ResolveDesktopExceptionMessage(exception));
 		}
     }
 

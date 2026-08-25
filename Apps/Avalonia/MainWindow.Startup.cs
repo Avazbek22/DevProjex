@@ -562,7 +562,7 @@ public partial class MainWindow
             if (_desktopStartupRequest is not null)
                 _desktopStartupErrorCode = "DPX-DESKTOP-STARTUP-FAILED";
             if (!cancellationToken.IsCancellationRequested && IsVisible)
-                await ShowErrorAsync(ex.Message);
+                await ShowErrorAsync(ResolveDesktopExceptionMessage(ex));
         }
         finally
         {
@@ -680,7 +680,7 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            await ShowErrorAsync(ex.Message);
+            await ShowErrorAsync(ResolveDesktopExceptionMessage(ex));
         }
     }
 

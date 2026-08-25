@@ -310,7 +310,7 @@ public partial class MainWindow : Window
         {
             _awaitingSystemDialogActivation = false;
             _systemDialogActivationTcs = null;
-            await ShowErrorAsync(ex.Message);
+            await ShowErrorAsync(ResolveDesktopExceptionMessage(ex));
         }
     }
 
@@ -368,7 +368,7 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             _statusOperations.Complete(statusOperationId);
-            await ShowErrorAsync(ex.Message);
+            await ShowErrorAsync(ResolveDesktopExceptionMessage(ex));
         }
         finally
         {
