@@ -554,7 +554,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				HadScanFailure: true);
 		}
 
-		names.Sort(StringComparer.OrdinalIgnoreCase);
+		names.Sort(ProjectInventoryNameComparer.Compare);
 		return new ScanResult<List<string>>(names, false, false);
 	}
 
