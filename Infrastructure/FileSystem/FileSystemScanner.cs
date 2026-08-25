@@ -3432,7 +3432,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 
 	private static bool IsSafeRelativeRootFolderName(string? selectedRootFolder)
 	{
-		return !string.IsNullOrWhiteSpace(selectedRootFolder) &&
+		return !string.IsNullOrEmpty(selectedRootFolder) &&
 		       !Path.IsPathRooted(selectedRootFolder) &&
 		       selectedRootFolder.IndexOf(Path.DirectorySeparatorChar) < 0 &&
 		       selectedRootFolder.IndexOf(Path.AltDirectorySeparatorChar) < 0;
