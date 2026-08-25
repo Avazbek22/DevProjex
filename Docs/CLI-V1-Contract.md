@@ -181,6 +181,11 @@ none
 `--exclude none` is an exact empty exclusion set. Repeating `none` is idempotent,
 but combining it with another exclusion is a usage error.
 
+For `analyze` and generated context content, `--hide-private-data` covers both
+selected file text and generated human-readable text such as trees and content
+headings. Stable machine metadata remains addressable: `project.root` is the
+absolute project path rather than a redacted display value.
+
 `--select` and `--select-from` form one explicit selected-path override. The
 latter reads UTF-8 source-relative entries, one per line, from a file or
 redirected stdin (`-`), ignores empty lines, and rejects interactive stdin.

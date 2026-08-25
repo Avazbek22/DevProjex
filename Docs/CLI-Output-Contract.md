@@ -126,6 +126,9 @@ When Hide Private Data is enabled, analysis adds a top-level `privacy` object
 with the same complete shape: `matchedCount`, `redactedCount`, and a non-privacy-
 guarantee `notice`. Zero means that the current rules matched nothing; it never
 guarantees that the project contains no private data.
+Private-data redaction also covers generated human-readable content, including
+tree text and content headings. Machine metadata remains directly addressable:
+`project.root` is the absolute project path and is not a redacted display value.
 
 ```json
 {

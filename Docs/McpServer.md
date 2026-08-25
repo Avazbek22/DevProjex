@@ -22,7 +22,9 @@ list_projects -> get_tree/analyze -> search_project/get_file -> pack_context -> 
 
 - Every exposed project is pinned when the process starts. Canonical path and
   symbolic-link checks reject access outside those roots.
-- Tools are read-only and never start processes or perform network operations.
+- Tools are read-only and perform no network operations. With `tracked_only`, the
+  server may start the local Git executable solely to read the repository index;
+  it never runs project executables or arbitrary project commands.
 - Secret and private-data redaction are always enabled for returned file content.
   Tool schemas intentionally provide no switch to weaken redaction.
 - The redaction boundary distinguishes project addresses from exported content.
