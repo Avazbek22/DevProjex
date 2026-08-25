@@ -1133,6 +1133,41 @@ public sealed class TerminalCommandSetupServiceTests
 	}
 
 	[Fact]
+	public void ConfigurePath_OversizedShellProfile_DoesNotReadOrMutateIt()
+	{
+		using var temp = new TemporaryDirectory();
+		var target = temp.CreateFile("app/DevProjex", "fake executable");
+		var userBin = temp.CreateFolder(".local/bin");
+		var wrapperPath = Path.Combine(userBin, CommandLineExecutableAliases.UnixCommand);
+		File.WriteAllText(wrapperPath, TerminalCommandSetupService.BuildWrapperContent(target));
+		SetUnixExecutableMode(wrapperPath);
+		var profilePath = Path.Combine(temp.Path, ".bashrc");
+		using (var profile = File.Create(profilePath))
+			profile.SetLength(TerminalCommandSetupService.MaximumShellProfileBytes + 1L);
+		var originalPath = Path.Combine(temp.Path, "other-bin");
+		var processPath = originalPath;
+		var writeCount = 0;
+		var service = CreateUnixPathSetupService(
+			temp.Path,
+			target,
+			"/bin/bash",
+			() => processPath,
+			value =>
+			{
+				writeCount++;
+				processPath = value;
+			});
+
+		var result = service.ConfigurePath();
+
+		Assert.False(result.Success);
+		Assert.Contains("shell profile exceeds", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+		Assert.Equal(TerminalCommandSetupService.MaximumShellProfileBytes + 1L, new FileInfo(profilePath).Length);
+		Assert.Equal(0, writeCount);
+		Assert.Equal(originalPath, processPath);
+	}
+
+	[Fact]
 	public void ConfigurePath_WindowsPortableLauncher_IsRejectedWithoutChangingPath()
 	{
 		using var temp = new TemporaryDirectory();

@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Runtime.InteropServices;
 using DevProjex.Infrastructure.Persistence;
 
@@ -58,6 +59,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 	private const string WindowsPathHint =
 		"DevProjex will add its terminal launcher folder to your user PATH. Restart already-open terminal windows after enabling it.";
 	private const int MaximumManagedLauncherBytes = 64 * 1024;
+	internal const int MaximumShellProfileBytes = 8 * 1024 * 1024;
 	private static readonly TimeSpan LauncherValidationTimeout = TimeSpan.FromSeconds(5);
 	// Cover lock-free probes and writes within one process; the named mutex still protects separate processes.
 	private static readonly object ProcessSetupSync = new();
@@ -1596,7 +1598,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 			Encoding.UTF8,
 			detectEncodingFromByteOrderMarks: true,
 			leaveOpen: true);
-		var content = reader.ReadToEnd();
+		var content = ReadBoundedShellProfile(stream, reader);
 		if (ContainsProfileLine(content, profile.SetupLine))
 			return;
 
@@ -1610,6 +1612,35 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		stream.Position = stream.Length;
 		stream.Write(bytes);
 		stream.Flush(flushToDisk: true);
+	}
+
+	private static string ReadBoundedShellProfile(FileStream stream, StreamReader reader)
+	{
+		if (stream.Length > MaximumShellProfileBytes)
+			throw new IOException($"The shell profile exceeds {MaximumShellProfileBytes} bytes.");
+
+		var content = new StringBuilder((int)Math.Min(stream.Length, 16 * 1024));
+		var buffer = ArrayPool<char>.Shared.Rent(4096);
+		try
+		{
+			while (true)
+			{
+				var charactersRead = reader.Read(buffer, 0, buffer.Length);
+				if (charactersRead == 0)
+					break;
+				if (stream.Position > MaximumShellProfileBytes ||
+				    content.Length > MaximumShellProfileBytes - charactersRead)
+				{
+					throw new IOException($"The shell profile exceeds {MaximumShellProfileBytes} bytes.");
+				}
+				content.Append(buffer, 0, charactersRead);
+			}
+			return content.ToString();
+		}
+		finally
+		{
+			ArrayPool<char>.Shared.Return(buffer, clearArray: true);
+		}
 	}
 
 	private static bool ContainsProfileLine(string content, string expectedLine)
