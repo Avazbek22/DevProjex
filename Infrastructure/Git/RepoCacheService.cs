@@ -15,6 +15,8 @@ public sealed class RepoCacheService : IRepoCacheService
 	private const string AppFolderName = "DevProjex";
 	private const string CacheFolderName = "RepoCache";
 	private const string CacheIndexFileName = "cache-index.json";
+	private const string LinkedCacheRootMessage =
+		"Repository cache root must not be a symbolic link or junction.";
 	private const int CacheIndexSchemaVersion = 2;
 	private const int UniquePathSuffixLength = 29;
 	private const int MaximumRepositoryNameUtf16Length = 100;
@@ -214,6 +216,8 @@ public sealed class RepoCacheService : IRepoCacheService
 		RepositoryCacheIndexEntry? matchingEntry = null;
 		foreach (var searchRoot in CacheSearchRootPaths)
 		{
+			if (IsLinkedCacheRoot(searchRoot))
+				continue;
 			var fileSet = GetIndexFileSet(searchRoot);
 			if (!PathComparer.Default.Equals(searchRoot, CacheRootPath) &&
 			    !File.Exists(fileSet.PrimaryPath) &&
@@ -258,6 +262,8 @@ public sealed class RepoCacheService : IRepoCacheService
 			StringComparer.OrdinalIgnoreCase);
 		foreach (var searchRoot in CacheSearchRootPaths)
 		{
+			if (IsLinkedCacheRoot(searchRoot))
+				continue;
 			var fileSet = GetIndexFileSet(searchRoot);
 			if (!File.Exists(fileSet.PrimaryPath) && !File.Exists(fileSet.BackupPath))
 				continue;
@@ -330,6 +336,11 @@ public sealed class RepoCacheService : IRepoCacheService
 		var unavailableRootCount = 0;
 		foreach (var searchRoot in CacheSearchRootPaths)
 		{
+			if (IsLinkedCacheRoot(searchRoot))
+			{
+				unavailableRootCount++;
+				continue;
+			}
 			var fileSet = GetIndexFileSet(searchRoot);
 			if (!File.Exists(fileSet.PrimaryPath) && !File.Exists(fileSet.BackupPath))
 				continue;
@@ -598,6 +609,8 @@ public sealed class RepoCacheService : IRepoCacheService
 
 	private CacheClearResult RemoveCacheEntriesWithResult(string cacheRoot, string? identity)
 	{
+		if (IsLinkedCacheRoot(cacheRoot))
+			return new CacheClearResult(0, 0, 1);
 		var fileSet = GetIndexFileSet(cacheRoot);
 		if (!Directory.Exists(cacheRoot) &&
 		    !File.Exists(fileSet.PrimaryPath) &&
@@ -821,7 +834,7 @@ public sealed class RepoCacheService : IRepoCacheService
 
 	private void ClearCacheRoot(string cacheRoot)
 	{
-		if (!Directory.Exists(cacheRoot))
+		if (!Directory.Exists(cacheRoot) || IsLinkedCacheRoot(cacheRoot))
 			return;
 
 		var fileSet = GetIndexFileSet(cacheRoot);
@@ -941,7 +954,7 @@ public sealed class RepoCacheService : IRepoCacheService
 	{
 		CleanupTrash();
 		CleanupStaging();
-		if (!Directory.Exists(CacheRootPath))
+		if (!Directory.Exists(CacheRootPath) || IsLinkedCacheRoot(CacheRootPath))
 			return;
 
 		var fileSet = GetIndexFileSet();
@@ -1036,7 +1049,8 @@ public sealed class RepoCacheService : IRepoCacheService
 
 		try
 		{
-			return CacheSearchRootPaths.Any(root => PathUtility.IsPathInside(path, root));
+			return CacheSearchRootPaths.Any(root =>
+				!IsLinkedCacheRoot(root) && PathUtility.IsPathInside(path, root));
 		}
 		catch
 		{
@@ -1973,6 +1987,8 @@ public sealed class RepoCacheService : IRepoCacheService
 
 	private static void CleanupTrash(string cacheRoot)
 	{
+		if (IsLinkedCacheRoot(cacheRoot))
+			return;
 		var trashRoot = RepositoryCacheLayout.GetTrashRoot(cacheRoot);
 		if (!Directory.Exists(trashRoot))
 			return;
@@ -2033,6 +2049,8 @@ public sealed class RepoCacheService : IRepoCacheService
 
 	private void CleanupStaging(string cacheRoot)
 	{
+		if (IsLinkedCacheRoot(cacheRoot))
+			return;
 		var stagingRoot = Path.Combine(cacheRoot, RepositoryCacheLayout.StagingDirectoryName);
 		if (!Directory.Exists(stagingRoot))
 			return;
@@ -2067,7 +2085,7 @@ public sealed class RepoCacheService : IRepoCacheService
 
 	private static IEnumerable<string> EnumerateRepositoryRootDirectories(string cacheRoot)
 	{
-		if (!Directory.Exists(cacheRoot))
+		if (!Directory.Exists(cacheRoot) || IsLinkedCacheRoot(cacheRoot))
 			yield break;
 
 		IEnumerable<string> directories;
@@ -2327,14 +2345,39 @@ public sealed class RepoCacheService : IRepoCacheService
 
 	private static void EnsurePrivateCacheDirectory(string path)
 	{
+		if (IsLinkedCacheRoot(path))
+			throw new IOException(LinkedCacheRootMessage);
+
 		if (OperatingSystem.IsWindows())
 		{
 			Directory.CreateDirectory(path);
+			if (IsLinkedCacheRoot(path))
+				throw new IOException(LinkedCacheRootMessage);
 			return;
 		}
 
 		Directory.CreateDirectory(path, PrivateUnixDirectoryMode);
+		if (IsLinkedCacheRoot(path))
+			throw new IOException(LinkedCacheRootMessage);
 		File.SetUnixFileMode(path, PrivateUnixDirectoryMode);
+	}
+
+	private static bool IsLinkedCacheRoot(string path)
+	{
+		try
+		{
+			return Directory.Exists(path) &&
+			       File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint);
+		}
+		catch (Exception exception) when (exception is
+			       IOException or
+			       UnauthorizedAccessException or
+			       ArgumentException or
+			       NotSupportedException or
+			       System.Security.SecurityException)
+		{
+			return true;
+		}
 	}
 
 	private static IReadOnlyList<string> BuildCacheSearchRoots(

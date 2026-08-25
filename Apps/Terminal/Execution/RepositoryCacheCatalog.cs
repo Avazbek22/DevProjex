@@ -125,7 +125,7 @@ public sealed class RepositoryCacheCatalog(
 		{
 			try
 			{
-				if (!Directory.Exists(searchRoot))
+				if (!IsSafeCacheCandidate(searchRoot))
 					continue;
 
 				candidates.AddRange(

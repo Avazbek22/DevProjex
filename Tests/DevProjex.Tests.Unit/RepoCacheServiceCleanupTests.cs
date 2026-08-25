@@ -179,6 +179,43 @@ public sealed class RepoCacheServiceCleanupTests : IDisposable
     }
 
     [Fact]
+    public void LinkedCacheRootFailsClosedWithoutTouchingTarget()
+    {
+        var linkedRoot = _testCacheRoot + "-link";
+        var outsidePath = _testCacheRoot + "-outside";
+        var foreignDirectory = Path.Combine(outsidePath, "foreign");
+        var sentinelPath = Path.Combine(foreignDirectory, "sentinel.txt");
+        Directory.CreateDirectory(foreignDirectory);
+        File.WriteAllText(sentinelPath, "keep");
+        Directory.CreateDirectory(Path.GetDirectoryName(linkedRoot)!);
+
+        try
+        {
+            if (!TryCreateDirectoryLink(linkedRoot, outsidePath))
+                Assert.Skip("The platform does not permit creating a directory link for this safety test.");
+
+            var service = new RepoCacheService(linkedRoot);
+
+            var clear = service.ClearAllCacheWithResult();
+            var list = service.ListCacheEntriesForManagement();
+            service.CleanupStaleCacheOnStartup();
+
+            Assert.Equal(new CacheClearResult(0, 0, 1), clear);
+            Assert.Equal(1, list.UnavailableRootCount);
+            Assert.Throws<IOException>(() => service.CreateRepositoryDirectory("https://example.com/owner/repo.git"));
+            Assert.True(File.Exists(sentinelPath));
+            Assert.Equal("keep", File.ReadAllText(sentinelPath));
+        }
+        finally
+        {
+            if (Directory.Exists(linkedRoot))
+                Directory.Delete(linkedRoot);
+            if (Directory.Exists(outsidePath))
+                Directory.Delete(outsidePath, recursive: true);
+        }
+    }
+
+    [Fact]
     public void ClearAllCache_RemovesAllCachedRepositories()
     {
         // Arrange
