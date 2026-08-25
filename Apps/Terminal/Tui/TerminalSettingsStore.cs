@@ -8,6 +8,7 @@ public sealed class TerminalSettingsStore(Func<string>? appDataPathProvider = nu
 {
 	private const int CurrentSchemaVersion = 1;
 	private const int MaximumPersistedCommandLength = 4_096;
+	private const int MaximumDocumentBytes = 512 * 1024;
 	private readonly Func<string> _appDataPathProvider =
 		appDataPathProvider ?? UserDataPathResolver.GetConfigurationRoot;
 	private readonly SemaphoreSlim _writeGate = new(1, 1);
@@ -65,7 +66,16 @@ public sealed class TerminalSettingsStore(Func<string>? appDataPathProvider = nu
 			if (!File.Exists(path))
 				return null;
 
-			using var stream = File.OpenRead(path);
+			using var stream = new MaximumLengthReadStream(
+				new FileStream(
+					path,
+					FileMode.Open,
+					FileAccess.Read,
+					FileShare.Read,
+					bufferSize: 4 * 1024,
+					FileOptions.SequentialScan),
+				MaximumDocumentBytes,
+				static () => new IOException("Terminal settings exceed the size limit."));
 			var document = JsonSerializer.Deserialize<TerminalSettingsDocument>(stream);
 			return document is { SchemaVersion: CurrentSchemaVersion }
 				? document
