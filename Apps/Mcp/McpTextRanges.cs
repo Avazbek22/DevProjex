@@ -238,6 +238,91 @@ internal static class McpTextRanges
 			characterLimit);
 	}
 
+	public static McpTextPage Slice(
+		string text,
+		int? startLine,
+		int? endLine,
+		int maximumLines,
+		int maximumCharacters,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(text);
+		cancellationToken.ThrowIfCancellationRequested();
+		var total = CountLines(text, cancellationToken);
+		if (total == 0)
+		{
+			if (startLine is > 1 || endLine is > 0)
+				throw InvalidRange(startLine ?? 1, endLine, total);
+			return new McpTextPage(string.Empty, 0, 0, 0, false, false);
+		}
+
+		var start = startLine ?? 1;
+		var requestedEnd = endLine ?? total;
+		if (start < 1 || start > total || requestedEnd < start || requestedEnd > total)
+			throw InvalidRange(start, endLine, total);
+
+		var upper = Math.Min(requestedEnd, checked(start + maximumLines - 1));
+		var builder = new StringBuilder();
+		var actualEnd = start - 1;
+		var characterLimit = false;
+		var hasAppendedLine = false;
+
+		bool CaptureLine(int offset, int length, int lineNumber)
+		{
+			if (lineNumber < start)
+				return true;
+			if (lineNumber > upper)
+				return false;
+
+			var line = text.AsSpan(offset, length);
+			var required = line.Length + (hasAppendedLine ? 1 : 0);
+			if ((long)builder.Length + required > maximumCharacters)
+			{
+				characterLimit = true;
+				if (!hasAppendedLine)
+				{
+					AppendBoundedPrefix(builder, line, maximumCharacters);
+					actualEnd = lineNumber;
+					hasAppendedLine = true;
+				}
+				return false;
+			}
+
+			if (hasAppendedLine)
+				builder.Append('\n');
+			builder.Append(line);
+			actualEnd = lineNumber;
+			hasAppendedLine = true;
+			return lineNumber < upper;
+		}
+
+		var lineStart = 0;
+		var lineNumber = 1;
+		var continueScanning = true;
+		for (var index = 0; index < text.Length && continueScanning; index++)
+		{
+			if ((index & 0xFFF) == 0)
+				cancellationToken.ThrowIfCancellationRequested();
+			if (text[index] is not ('\r' or '\n'))
+				continue;
+
+			continueScanning = CaptureLine(lineStart, index - lineStart, lineNumber++);
+			if (text[index] == '\r' && index + 1 < text.Length && text[index + 1] == '\n')
+				index++;
+			lineStart = index + 1;
+		}
+		if (continueScanning && lineNumber <= upper)
+			CaptureLine(lineStart, text.Length - lineStart, lineNumber);
+
+		return new McpTextPage(
+			builder.ToString(),
+			start,
+			actualEnd,
+			total,
+			actualEnd < requestedEnd,
+			characterLimit);
+	}
+
 	public static IReadOnlyList<string> SplitLines(
 		string text,
 		CancellationToken cancellationToken = default)
@@ -266,6 +351,12 @@ internal static class McpTextRanges
 	}
 
 	private static void AppendBoundedPrefix(StringBuilder builder, string line, int maximumCharacters)
+		=> AppendBoundedPrefix(builder, line.AsSpan(), maximumCharacters);
+
+	private static void AppendBoundedPrefix(
+		StringBuilder builder,
+		ReadOnlySpan<char> line,
+		int maximumCharacters)
 	{
 		var length = Math.Min(line.Length, maximumCharacters);
 		if (length > 0 &&
@@ -275,7 +366,31 @@ internal static class McpTextRanges
 		{
 			length--;
 		}
-		builder.Append(line.AsSpan(0, length));
+		builder.Append(line[..length]);
+	}
+
+	private static int CountLines(string text, CancellationToken cancellationToken)
+	{
+		if (text.Length == 0)
+			return 0;
+
+		var total = 1;
+		for (var index = 0; index < text.Length; index++)
+		{
+			if ((index & 0xFFF) == 0)
+				cancellationToken.ThrowIfCancellationRequested();
+			if (text[index] == '\r')
+			{
+				total++;
+				if (index + 1 < text.Length && text[index + 1] == '\n')
+					index++;
+			}
+			else if (text[index] == '\n')
+			{
+				total++;
+			}
+		}
+		return total;
 	}
 
 	private static McpToolException InvalidRange(int start, int? end, int total) =>

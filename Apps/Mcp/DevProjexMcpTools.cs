@@ -392,13 +392,13 @@ internal sealed class DevProjexMcpTools(
 					McpErrorCodes.PayloadTruncated,
 					$"{McpErrorCodes.PayloadTruncated}: file content is binary, unsupported, or exceeds the redaction scan limit and cannot be returned safely.");
 			}
-			var lines = McpTextRanges.SplitLines(content.Content, cancellationToken);
 			var page = McpTextRanges.Slice(
-				lines,
+				content.Content,
 				arguments.OptionalInteger("start_line", 1, int.MaxValue),
 				arguments.OptionalInteger("end_line", 1, int.MaxValue),
 				MaximumPageLines,
-				MaximumPageCharacters);
+				MaximumPageCharacters,
+				cancellationToken);
 			var text = page.Text;
 			if (page.IsTruncated)
 				text += $"\n[Showing lines {page.StartLine}-{page.EndLine} of {page.TotalLines}; continue with start_line={page.EndLine + 1}.]";

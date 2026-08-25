@@ -653,9 +653,17 @@ public sealed class McpInfrastructureTests
 			maximumCharacters: 100,
 			TestContext.Current.CancellationToken);
 		var sliced = McpTextRanges.Slice([string.Empty, "value"], 1, 2, 10, 100);
+		var direct = McpTextRanges.Slice(
+			"\r\nvalue\n",
+			1,
+			2,
+			10,
+			100,
+			TestContext.Current.CancellationToken);
 
 		Assert.Equal("\nvalue", streamed.Text);
 		Assert.Equal("\nvalue", sliced.Text);
+		Assert.Equal("\nvalue", direct.Text);
 	}
 
 	[Theory]
@@ -673,8 +681,16 @@ public sealed class McpInfrastructureTests
 			maximumLines: 10,
 			maximumCharacters: 100,
 			TestContext.Current.CancellationToken);
+		var direct = McpTextRanges.Slice(
+			content,
+			2,
+			2,
+			10,
+			100,
+			TestContext.Current.CancellationToken);
 
 		Assert.Equal(string.Empty, page.Text);
+		Assert.Equal(string.Empty, direct.Text);
 		Assert.Equal(2, page.StartLine);
 		Assert.Equal(2, page.EndLine);
 		Assert.Equal(2, page.TotalLines);
@@ -702,6 +718,26 @@ public sealed class McpInfrastructureTests
 
 		Assert.Throws<OperationCanceledException>(() =>
 			McpTextRanges.SplitLines(new string('\n', 1024 * 1024), cancellation.Token));
+	}
+
+	[Fact]
+	public void TextSliceDoesNotMaterializeEveryLineOfLargeContent()
+	{
+		var content = new string('\n', 8 * 1024 * 1024);
+		var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+
+		var page = McpTextRanges.Slice(
+			content,
+			startLine: 1,
+			endLine: null,
+			maximumLines: 1000,
+			maximumCharacters: 50_000,
+			TestContext.Current.CancellationToken);
+		var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+		Assert.Equal(8 * 1024 * 1024 + 1, page.TotalLines);
+		Assert.Equal(1000, page.EndLine);
+		Assert.InRange(allocatedBytes, 0, 2 * 1024 * 1024);
 	}
 
 	[Fact]
