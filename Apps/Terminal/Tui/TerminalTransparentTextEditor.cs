@@ -30,7 +30,7 @@ internal sealed class TerminalTransparentTextEditor : View
 		get => _value;
 		set
 		{
-			value ??= string.Empty;
+			value = TerminalCommandHistory.LimitLength(value ?? string.Empty);
 			if (string.Equals(_value, value, StringComparison.Ordinal))
 				return;
 			_value = value;
@@ -101,7 +101,7 @@ internal sealed class TerminalTransparentTextEditor : View
 		var text = key.GetPrintableText();
 		if (string.IsNullOrEmpty(text))
 			return base.OnKeyDown(key);
-		Insert(text);
+		InsertText(text);
 		return true;
 	}
 
@@ -132,8 +132,12 @@ internal sealed class TerminalTransparentTextEditor : View
 
 	private int RuneCount => _value.EnumerateRunes().Count();
 
-	private void Insert(string text)
+	internal void InsertText(string text)
 	{
+		var remaining = TerminalCommandHistory.MaximumCommandLength - _value.Length;
+		text = TerminalCommandHistory.LimitLength(text, remaining);
+		if (text.Length == 0)
+			return;
 		var utf16Index = TerminalTextPosition.RuneToUtf16Index(_value, _insertionPoint);
 		_value = _value.Insert(utf16Index, text);
 		_insertionPoint += text.EnumerateRunes().Count();

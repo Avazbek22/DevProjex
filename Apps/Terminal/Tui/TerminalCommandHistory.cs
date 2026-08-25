@@ -80,12 +80,21 @@ internal sealed class TerminalCommandHistory
 	private static string NormalizeCommand(string? command)
 	{
 		var normalized = command?.Trim() ?? string.Empty;
-		if (normalized.Length <= MaximumCommandLength)
-			return normalized;
+		return LimitLength(normalized);
+	}
 
-		var length = MaximumCommandLength;
-		if (char.IsHighSurrogate(normalized[length - 1]) && char.IsLowSurrogate(normalized[length]))
+	internal static string LimitLength(string value, int maximumLength = MaximumCommandLength)
+	{
+		ArgumentNullException.ThrowIfNull(value);
+		ArgumentOutOfRangeException.ThrowIfNegative(maximumLength);
+		if (value.Length <= maximumLength)
+			return value;
+		if (maximumLength == 0)
+			return string.Empty;
+
+		var length = maximumLength;
+		if (char.IsHighSurrogate(value[length - 1]) && char.IsLowSurrogate(value[length]))
 			length--;
-		return normalized[..length];
+		return value[..length];
 	}
 }
