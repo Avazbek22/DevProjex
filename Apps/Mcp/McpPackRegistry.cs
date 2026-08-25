@@ -5,6 +5,9 @@ namespace DevProjex.Mcp;
 
 public sealed class McpPackRegistry : IDisposable
 {
+	private const UnixFileMode PrivateDirectoryMode =
+		UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+	private const UnixFileMode PrivateFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
 	private static readonly TimeSpan StaleAge = TimeSpan.FromHours(24);
 	private static readonly ConcurrentDictionary<string, byte> ActiveSessions = new(PathComparer.Default);
 	private readonly Dictionary<string, PackEntry> _packs = new(StringComparer.Ordinal);
@@ -23,12 +26,13 @@ public sealed class McpPackRegistry : IDisposable
 		Scavenge(baseDirectory, TimeProvider.GetUtcNow());
 		_sessionDirectory = Path.Combine(baseDirectory, Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant());
 		EnsurePrivateDirectory(_sessionDirectory);
-		_sessionLease = new FileStream(
+		_sessionLease = OpenPrivateFile(
 			Path.Combine(_sessionDirectory, ".session.lock"),
 			FileMode.CreateNew,
 			FileAccess.ReadWrite,
-			FileShare.None);
-		SetPrivateFileMode(_sessionLease.Name);
+			FileShare.None,
+			bufferSize: 4096,
+			FileOptions.None);
 		ActiveSessions.TryAdd(_sessionDirectory, 0);
 	}
 
@@ -61,7 +65,7 @@ public sealed class McpPackRegistry : IDisposable
 		var path = Path.Combine(_sessionDirectory, id + ".pack");
 		try
 		{
-			await using (var stream = new FileStream(
+			await using (var stream = OpenPrivateFile(
 				             path,
 				             FileMode.CreateNew,
 				             FileAccess.Write,
@@ -69,7 +73,6 @@ public sealed class McpPackRegistry : IDisposable
 				             64 * 1024,
 				             FileOptions.Asynchronous | FileOptions.SequentialScan))
 			{
-				SetPrivateFileMode(path);
 				await writer(stream, cancellationToken).ConfigureAwait(false);
 			}
 
@@ -208,16 +211,15 @@ public sealed class McpPackRegistry : IDisposable
 	private static void SetPrivateDirectoryMode(string path)
 	{
 		if (!OperatingSystem.IsWindows())
-		{
-			File.SetUnixFileMode(
-				path,
-				UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-		}
+			File.SetUnixFileMode(path, PrivateDirectoryMode);
 	}
 
 	private static void EnsurePrivateDirectory(string path)
 	{
-		Directory.CreateDirectory(path);
+		if (OperatingSystem.IsWindows())
+			Directory.CreateDirectory(path);
+		else
+			Directory.CreateDirectory(path, PrivateDirectoryMode);
 		RejectLinkedDirectory(path);
 		SetPrivateDirectoryMode(path);
 		RejectLinkedDirectory(path);
@@ -229,10 +231,36 @@ public sealed class McpPackRegistry : IDisposable
 			throw new IOException("MCP temporary storage cannot use a symbolic link or reparse point.");
 	}
 
-	private static void SetPrivateFileMode(string path)
+	private static FileStream OpenPrivateFile(
+		string path,
+		FileMode mode,
+		FileAccess access,
+		FileShare share,
+		int bufferSize,
+		FileOptions options)
 	{
+		var streamOptions = new FileStreamOptions
+		{
+			Mode = mode,
+			Access = access,
+			Share = share,
+			BufferSize = bufferSize,
+			Options = options
+		};
 		if (!OperatingSystem.IsWindows())
-			File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+			streamOptions.UnixCreateMode = PrivateFileMode;
+		var stream = new FileStream(path, streamOptions);
+		try
+		{
+			if (!OperatingSystem.IsWindows())
+				File.SetUnixFileMode(path, PrivateFileMode);
+			return stream;
+		}
+		catch
+		{
+			stream.Dispose();
+			throw;
+		}
 	}
 
 	private static McpToolException Expired() =>
