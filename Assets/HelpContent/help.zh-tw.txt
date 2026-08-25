@@ -190,7 +190,7 @@ XML：
 * 資料夾是`<d n="...">`；
 * 檔案是`<f>File.cs</f>`。
 
-醫學博士：
+MD：
 * 以`Root: ...`開頭；
 * 使用Markdown嵌套清單；
 * 資料夾以`/`結尾。
@@ -423,7 +423,7 @@ DevProjex首先從其結構和標記檔案中識別項目類型，例如：
 
 此選項僅涵蓋常規工作樹`.gitignore`文件。不應用`.git/info/exclude`中的規則和全域Git排除規則；有效的儲存庫路徑比較設置，例如`core.ignoreCase`以及在macOS上的`core.precomposeUnicode`受到尊重。不遵循名為`.gitignore`的符號鏈接，這與Git的控製文件行為相符。如果無法讀取常規`.gitignore`，則其目錄範圍將被排除在故障關閉之外，並且掃描會報告部分訪問，而不是在沒有完整規則評估的情況下靜默包含文件。當路徑所屬儲存庫範圍的可讀索引可用時，追蹤的檔案即使符合`.gitignore`仍然可見；如果沒有該索引或Git CLI，該範圍將安全地退回到僅模式評估。
 
-內建的`standard`設定檔選擇`gitignore`加上`smart-ignore`、`hidden-folders` `hidden-files` `dot-folders`、「dot-folders」、`dot-files`、`empty-folders`、`empty-files`和`extensionless-files`。
+內建的`standard`設定檔選擇`gitignore`以及`smart-ignore`、`hidden-folders`、`hidden-files`、`dot-folders`、`dot-files`、`empty-folders`、`empty-files`和`extensionless-files`。
 
 ### 12.6 僅追蹤Git文件
 「僅追蹤的Git檔」根據每個可讀Git索引中記錄的現有工作樹檔案建立樹的Git階段。修改後的追蹤文件和分階段添加仍然包括在內；未追蹤的文件被排除。這是目前的工作樹，而不是`HEAD`或遠端儲存庫的歷史快照。

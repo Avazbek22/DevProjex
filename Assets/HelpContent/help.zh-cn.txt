@@ -190,7 +190,7 @@ XML：
 * 文件夹是`<d n="...">`；
 * 文件是`<f>File.cs</f>`。
 
-医学博士：
+MD：
 * 以`Root: ...`开头；
 * 使用Markdown嵌套列表；
 * 文件夹以`/`结尾。
@@ -423,7 +423,7 @@ DevProjex首先从其结构和标记文件中识别项目类型，例如：
 
 此选项仅涵盖常规工作树`.gitignore`文件。不应用`.git/info/exclude`中的规则和全局Git排除规则；有效的存储库路径比较设置，例如`core.ignoreCase`以及在macOS上的`core.precomposeUnicode`受到尊重。不遵循名为`.gitignore`的符号链接，这与Git的控制文件行为相匹配。如果无法读取常规`.gitignore`，则其目录范围将被排除在故障关闭之外，并且扫描会报告部分访问，而不是在没有完整规则评估的情况下静默包含文件。当路径所属存储库范围的可读索引可用时，跟踪的文件即使匹配`.gitignore`仍然可见；如果没有该索引或Git CLI，该范围将安全地退回到仅模式评估。
 
-内置的`standard`配置文件选择`gitignore`加上`smart-ignore`、`hidden-folders` ”、`hidden-files` `dot-folders`、“dot-folders”、`dot-files`、`empty-folders`、`empty-files`和`extensionless-files`。
+内置的`standard`配置文件选择`gitignore`以及`smart-ignore`、`hidden-folders`、`hidden-files`、`dot-folders`、`dot-files`、`empty-folders`、`empty-files`和`extensionless-files`。
 
 ### 12.6 仅跟踪Git文件
 “仅跟踪的Git文件”根据每个可读Git索引中记录的现有工作树文件构建树的Git阶段。修改后的跟踪文件和分阶段添加仍然包括在内；未跟踪的文件被排除。这是当前的工作树，而不是`HEAD`或远程存储库的历史快照。

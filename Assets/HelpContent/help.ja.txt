@@ -189,7 +189,7 @@ XML:
 * フォルダーは`<d n="...">`です。
 * ファイルは`<f>File.cs</f>`です。
 
-医学博士:
+MD:
 * `Root: ...`で始まります。
 * Markdownのネストされたリストを使用します。
 * フォルダーは`/`で終わります。
@@ -422,7 +422,7 @@ DevProjexまず、次のように構造ファイルとマーカー ファイル�
 
 このオプションは、通常の作業ツリー`.gitignore`ファイルのみを対象としています。`.git/info/exclude`のルールとグローバルGit除外ルールは適用されません。`core.ignoreCase`やmacOSの場合は`core.precomposeUnicode`などの効果的なリポジトリ パス比較設定が尊重されます。`.gitignore`という名前のシンボリック リンクはたどられず、Gitの制御ファイルの動作に一致します。通常の`.gitignore`読み取れない場合、そのディレクトリ スコープはフェイルクローズで除外され、完全なルール評価を行わずにファイルをサイレントに含めるのではなく、スキャンによって部分的なアクセスが報告されます。パスを所有するリポジトリ スコープの読み取り可能なインデックスが利用可能な場合、追跡されたファイルは`.gitignore`に一致する場合でも表示されたままになります。そのインデックスやGit CLIがなければ、そのスコープは安全にパターンのみの評価に戻ります。
 
-組み込みの`standard`プロファイルは、`gitignore`に加えて`smart-ignore`、`hidden-folders`、`hidden-files`、`dot-folders`、`dot-files`、`empty-folders`、`empty-files`、および`extensionless-files`選択します。
+組み込みの`standard`プロファイルは、`gitignore`に加えて`smart-ignore`、`hidden-folders`、`hidden-files`、`dot-folders`、`dot-files`、`empty-folders`、`empty-files`、および`extensionless-files`を選択します。
 
 ### 12.6 追跡されたGitファイルのみ
 「追跡されたGitファイルのみ」では、読み取り可能な各Gitインデックスに記録された既存の作業ツリー ファイルからツリーのGitステージが構築されます。変更された追跡ファイルと段階的な追加は引き続き含まれます。追跡されていないファイルは除外されます。これは現在の作業ツリーであり、`HEAD`またはリモート リポジトリの履歴スナップショットではありません。

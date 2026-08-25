@@ -190,8 +190,8 @@ XML:
 * foldernya adalah `<d n="...">`;
 * file adalah `<f>File.cs</f>`.
 
-dokter:
-* dimulai dengan `Root:...`;
+MD:
+* dimulai dengan `Root: ...`;
 * menggunakan daftar bersarang penurunan harga;
 * folder diakhiri dengan `/`.
 
@@ -423,7 +423,7 @@ Baris yang formatnya salah atau tidak didukung dilewati secara terpisah. Aturan 
 
 Opsi ini hanya mencakup file `.gitignore` pohon kerja biasa. Aturan dari `.git/info/exclude` dan aturan pengecualian Git global tidak diterapkan; pengaturan perbandingan jalur repositori yang efektif seperti `core.ignoreCase` dan, di macOS, `core.precomposeUnicode` dipatuhi. Tautan simbolik bernama `.gitignore` tidak diikuti, cocok dengan perilaku file kontrol Git. Jika `.gitignore` biasa tidak dapat dibaca, cakupan direktorinya dikecualikan dari kegagalan-penutupan dan pemindaian melaporkan akses parsial alih-alih menyertakan file secara diam-diam tanpa evaluasi aturan lengkap. Ketika indeks yang dapat dibaca untuk cakupan repositori milik jalur tersedia, file yang dilacak tetap terlihat meskipun cocok dengan `.gitignore`; tanpa indeks tersebut atau Git CLI, cakupan tersebut dengan aman kembali ke evaluasi pola saja.
 
-Profil `standard` bawaan memilih `gitignore` plus `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files`, dan `extensionless-files`.
+Profil `standard` bawaan memilih `gitignore` bersama `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files`, dan `extensionless-files`.
 
 ### 12.6 Hanya file Git yang dilacak
 "Hanya file Git yang dilacak" membangun tahapan Git dari pohon dari file pohon kerja yang ada yang dicatat di setiap indeks Git yang dapat dibaca. File terlacak yang dimodifikasi dan penambahan bertahap tetap disertakan; file yang tidak terlacak dikecualikan. Ini adalah pohon kerja saat ini, bukan cuplikan riwayat `HEAD` atau repositori jarak jauh.

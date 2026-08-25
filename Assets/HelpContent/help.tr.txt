@@ -106,7 +106,7 @@ Notlar:
 * `--git-mode`, Git filtrelemesi yok, `.gitignore` veya yalnızca izlenen Git dosyaları seçeneklerinden birini belirler;
 * `--exclude` sıradan hariç tutmaları Git filtrelemesinden ayrı olarak kontrol eder;
 * analiz ve dışa aktarma komutları belirleyicidir ve masaüstü arayüzünü açmaz;
-* `tui`, `open`, `analyze` " ve her iki `export` komutu da Git deposu URL'sini kabul eder; klon, yönetilen bir önbelleğe (`devprojex cache`) gider;
+* `tui`, `open`, `analyze` ve her iki `export` komutu da Git deposu URL'sini kabul eder; klon, yönetilen bir önbelleğe (`devprojex cache`) gider;
 * komutlar belgelenmiş takma adlara ve kısa işaretlere sahiptir - örneğin `export ctx`, `-f`, `-n`; `devprojex help` bunları gösterir;
 * `analyze --findings` redaksiyon bulgularını değerleri olmadan listeler ve `--fail-on-findings` CI için sıfırdan farklı bir çıkış kodu döndürür;
 * komut proje dosyalarını değiştirmez — DevProjex salt okunur modda çalışır.
@@ -190,8 +190,8 @@ XML:
 * klasörler `<d n="...">`;
 * dosyalar `<f>File.cs</f>`.
 
-Doktor:
-* `Root:...` ile başlar;
+MD:
+* `Root: ...` ile başlar;
 * Markdown iç içe geçmiş bir liste kullanır;
 * klasörler `/` ile biter.
 
@@ -423,7 +423,7 @@ Hatalı biçimlendirilmiş veya desteklenmeyen bir satır bağımsız olarak atl
 
 Bu seçenek yalnızca normal çalışma ağacı `.gitignore` dosyalarını kapsar. `.git/info/exclude` kuralları ve genel Git hariç tutma kuralları uygulanmaz; `core.ignoreCase` ve macOS `core.precomposeUnicode` gibi etkili depo yolu karşılaştırma ayarlarına uyulur. Git kontrol dosyası davranışıyla eşleşen `.gitignore` adlı sembolik bir bağlantı izlenmiyor. Normal bir `.gitignore` okunamıyorsa, dizin kapsamı başarısız şekilde kapatılır ve tarama, dosyaları tam kural değerlendirmesi olmadan sessizce dahil etmek yerine kısmi erişimi bildirir. Yolun sahip olduğu veri havuzu kapsamı için okunabilir bir dizin mevcut olduğunda, izlenen dosyalar `.gitignore` ile eşleşseler bile görünür kalır; bu dizin veya Git CLI olmadan, bu kapsam güvenli bir şekilde yalnızca kalıp değerlendirmesine geri döner.
 
-Yerleşik `standard` profil, `gitignore` artı `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders` ', `dot-files`, `empty-folders` ', `empty-files` ' ve `extensionless-files` seçer.
+Yerleşik `standard` profil; `gitignore`, `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` ve `extensionless-files` seçeneklerini belirler.
 
 ### 12.6 Yalnızca izlenen Git dosyaları
 "Yalnızca İzlenen Git dosyaları", her okunabilir Git dizininde kayıtlı mevcut çalışma ağacı dosyalarından ağacın Git aşamasını oluşturur. Değiştirilen izlenen dosyalar ve aşamalı eklemeler dahil olmaya devam eder; izlenmeyen dosyalar hariç tutulur. Bu, `HEAD` veya uzak bir havuzun geçmiş anlık görüntüsü değil, mevcut çalışma ağacıdır.

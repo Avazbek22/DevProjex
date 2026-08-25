@@ -297,6 +297,8 @@ public sealed partial class TerminalLocalizationContractTests
 		foreach (var path in Directory.GetFiles(helpDirectory, "help.*.txt", SearchOption.TopDirectoryOnly))
 		{
 			var help = File.ReadAllText(path);
+			Assert.Matches("(?m)^MD\\s*[:：]$", help.ReplaceLineEndings("\n"));
+			Assert.Contains("`Root: ...`", help, StringComparison.Ordinal);
 			Assert.Contains(
 				"`devprojex export context . --format markdown -o ../devprojex-context.md`",
 				help,

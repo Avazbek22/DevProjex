@@ -422,7 +422,7 @@ DevProjex 먼저 구조와 마커 파일에서 프로젝트 유형을 식별합�
 
 이 옵션은 일반 작업 트리 `.gitignore` 파일에만 적용됩니다. `.git/info/exclude` 의 규칙과 전역 Git 제외 규칙은 적용되지 않습니다. `core.ignoreCase` 및 macOS 에서는 `core.precomposeUnicode` 와 같은 효과적인 저장소 경로 비교 설정이 존중됩니다. Git 의 제어 파일 동작과 일치하여 `.gitignore` 라는 심볼릭 링크를 따르지 않습니다. 일반 `.gitignore` 읽을 수 없는 경우 해당 디렉토리 범위는 페일클로즈로 제외되고 스캔에서는 완전한 규칙 평가 없이 파일을 자동으로 포함하는 대신 부분 액세스를 보고합니다. 경로를 소유한 저장소 범위에 대한 읽기 가능한 인덱스를 사용할 수 있는 경우 추적된 파일은 `.gitignore` 와 일치하더라도 계속 표시됩니다. 해당 인덱스나 Git CLI 없으면 해당 범위는 패턴 전용 평가로 안전하게 대체됩니다.
 
-내장된 `standard` 프로필은 `gitignore` 와 `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` 및 `extensionless-files`.
+내장된 `standard` 프로필은 `gitignore`, `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` 및 `extensionless-files`를 선택합니다.
 
 ### 12.6 추적된 Git 파일만
 "추적된 Git 파일만"은 읽을 수 있는 각 Git 인덱스에 기록된 기존 작업 트리 파일에서 트리의 Git 단계를 구축합니다. 수정된 추적 파일과 단계적 추가는 계속 포함됩니다. 추적되지 않은 파일은 제외됩니다. 이것은 `HEAD` 의 기록 스냅샷이나 원격 저장소가 아닌 현재 작업 트리입니다.
