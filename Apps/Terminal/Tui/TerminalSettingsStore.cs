@@ -5,13 +5,26 @@ using DevProjex.Terminal.CommandLine;
 
 namespace DevProjex.Terminal.Tui;
 
-public sealed class TerminalSettingsStore(Func<string>? appDataPathProvider = null)
+public sealed class TerminalSettingsStore
 {
 	private const int CurrentSchemaVersion = 1;
 	private const int MaximumDocumentBytes = 512 * 1024;
-	private readonly Func<string> _appDataPathProvider =
-		appDataPathProvider ?? UserDataPathResolver.GetConfigurationRoot;
+	private readonly Func<string> _appDataPathProvider;
+	private readonly Action? _afterReadOpened;
 	private readonly SemaphoreSlim _writeGate = new(1, 1);
+
+	public TerminalSettingsStore(Func<string>? appDataPathProvider = null)
+		: this(appDataPathProvider, afterReadOpened: null)
+	{
+	}
+
+	internal TerminalSettingsStore(
+		Func<string>? appDataPathProvider,
+		Action? afterReadOpened)
+	{
+		_appDataPathProvider = appDataPathProvider ?? UserDataPathResolver.GetConfigurationRoot;
+		_afterReadOpened = afterReadOpened;
+	}
 
 	public TerminalScreenMode LoadScreenMode() =>
 		LoadDocument()?.ScreenMode is { } screenMode && Enum.IsDefined(screenMode)
@@ -58,14 +71,16 @@ public sealed class TerminalSettingsStore(Func<string>? appDataPathProvider = nu
 			if (!File.Exists(path))
 				return null;
 
+			using var source = new FileStream(
+				path,
+				FileMode.Open,
+				FileAccess.Read,
+				FileShare.ReadWrite | FileShare.Delete,
+				bufferSize: 4 * 1024,
+				FileOptions.SequentialScan);
+			_afterReadOpened?.Invoke();
 			using var stream = new MaximumLengthReadStream(
-				new FileStream(
-					path,
-					FileMode.Open,
-					FileAccess.Read,
-					FileShare.Read,
-					bufferSize: 4 * 1024,
-					FileOptions.SequentialScan),
+				source,
 				MaximumDocumentBytes,
 				static () => new IOException("Terminal settings exceed the size limit."));
 			var document = JsonSerializer.Deserialize<TerminalSettingsDocument>(stream);
@@ -130,7 +145,21 @@ public sealed class TerminalSettingsStore(Func<string>? appDataPathProvider = nu
 					await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
 				}
 
-				File.Move(temporaryPath, path, overwrite: true);
+				if (File.Exists(path))
+				{
+					try
+					{
+						File.Replace(temporaryPath, path, destinationBackupFileName: null);
+					}
+					catch (NotSupportedException)
+					{
+						File.Move(temporaryPath, path, overwrite: true);
+					}
+				}
+				else
+				{
+					File.Move(temporaryPath, path);
+				}
 			}
 			finally
 			{

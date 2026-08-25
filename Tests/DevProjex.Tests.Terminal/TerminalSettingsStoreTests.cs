@@ -121,6 +121,48 @@ public sealed class TerminalSettingsStoreTests
 	}
 
 	[Fact]
+	public async Task ConcurrentReaderDoesNotBlockAtomicReplacement()
+	{
+		using var workspace = new TemporaryDirectory();
+		var writer = new TerminalSettingsStore(() => workspace.Path);
+		await writer.SaveScreenModeAsync(
+			TerminalScreenMode.Auto,
+			TestContext.Current.CancellationToken);
+		using var readerOpened = new ManualResetEventSlim();
+		using var releaseReader = new ManualResetEventSlim();
+		var reader = new TerminalSettingsStore(
+			() => workspace.Path,
+			() =>
+			{
+				readerOpened.Set();
+				if (!releaseReader.Wait(
+					    TimeSpan.FromSeconds(5),
+					    TestContext.Current.CancellationToken))
+					throw new TimeoutException("The settings reader was not released by the test.");
+			});
+		var read = Task.Run(reader.LoadScreenMode, TestContext.Current.CancellationToken);
+		Assert.True(readerOpened.Wait(
+			TimeSpan.FromSeconds(5),
+			TestContext.Current.CancellationToken));
+
+		try
+		{
+			await writer.SaveScreenModeAsync(
+				TerminalScreenMode.Inline,
+				TestContext.Current.CancellationToken);
+		}
+		finally
+		{
+			releaseReader.Set();
+		}
+
+		Assert.Equal(TerminalScreenMode.Auto, await read);
+		Assert.Equal(
+			TerminalScreenMode.Inline,
+			new TerminalSettingsStore(() => workspace.Path).LoadScreenMode());
+	}
+
+	[Fact]
 	public async Task CommandHistoryIsNormalizedAndBoundedBeforePersistence()
 	{
 		using var workspace = new TemporaryDirectory();
