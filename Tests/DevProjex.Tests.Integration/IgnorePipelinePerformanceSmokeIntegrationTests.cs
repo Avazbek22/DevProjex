@@ -2,6 +2,13 @@ using DevProjex.Application.Diagnostics;
 
 namespace DevProjex.Tests.Integration;
 
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class IgnorePipelinePerformanceCollection
+{
+	public const string Name = "Ignore pipeline performance";
+}
+
+[Collection(IgnorePipelinePerformanceCollection.Name)]
 [Trait("Category", "LocalPerformance")]
 public sealed class IgnorePipelinePerformanceSmokeIntegrationTests
 {
