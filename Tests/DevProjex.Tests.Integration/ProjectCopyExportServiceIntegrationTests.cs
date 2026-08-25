@@ -91,6 +91,85 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 			updates.Select(update => update.ProcessedEntryCount).Order()));
 	}
 
+	[Theory]
+	[InlineData(ProjectCopyExportFormat.Folder)]
+	[InlineData(ProjectCopyExportFormat.Zip)]
+	public async Task Export_SourceReplacedByFilesystemAliasAfterValidation_IsRejected(
+		ProjectCopyExportFormat format)
+	{
+		const string externalContent = "outside-project-content-must-not-be-copied";
+		using var workspace = ProjectCopyWorkspace.Create();
+		var sourcePath = workspace.Paths["unicode"];
+		var sourceDirectory = Path.GetDirectoryName(sourcePath)!;
+		var externalDirectory = Directory.CreateDirectory(
+			Path.Combine(workspace.DestinationParent, "external-source")).FullName;
+		await File.WriteAllTextAsync(
+			Path.Combine(externalDirectory, Path.GetFileName(sourcePath)),
+			externalContent,
+			TestContext.Current.CancellationToken);
+		VerifyAliasSupport();
+		var sourceReplaced = false;
+		var progress = new CallbackProgress<ProjectCopyExportProgress>(_ =>
+		{
+			if (sourceReplaced)
+				return;
+			sourceReplaced = true;
+			if (OperatingSystem.IsWindows())
+			{
+				Directory.Delete(sourceDirectory, recursive: true);
+				CreateWindowsJunctionOrSkip(sourceDirectory, externalDirectory);
+			}
+			else
+			{
+				File.Delete(sourcePath);
+				File.CreateSymbolicLink(
+					sourcePath,
+					Path.Combine(externalDirectory, Path.GetFileName(sourcePath)));
+			}
+		});
+		var destination = format == ProjectCopyExportFormat.Folder
+			? workspace.DestinationParent
+			: Path.Combine(workspace.DestinationParent, "alias-copy.zip");
+
+		try
+		{
+			var exception = await Assert.ThrowsAsync<ProjectCopyExportException>(() =>
+				workspace.ExportAsync(
+					format,
+					destination,
+					[sourcePath],
+					progress: progress,
+					cancellationToken: TestContext.Current.CancellationToken));
+
+			Assert.True(sourceReplaced);
+			Assert.Equal(ProjectCopyExportError.SymbolicLinkNotSupported, exception.Error);
+		}
+		finally
+		{
+			if (OperatingSystem.IsWindows())
+				DeleteDirectoryLink(sourceDirectory);
+			else if (File.Exists(sourcePath))
+				File.Delete(sourcePath);
+		}
+
+		void VerifyAliasSupport()
+		{
+			if (OperatingSystem.IsWindows())
+			{
+				var probe = Path.Combine(workspace.DestinationParent, "junction-probe");
+				CreateWindowsJunctionOrSkip(probe, externalDirectory);
+				DeleteDirectoryLink(probe);
+				return;
+			}
+
+			var symlinkProbe = Path.Combine(workspace.DestinationParent, "symlink-probe");
+			CreateFileLinkOrSkip(
+				symlinkProbe,
+				Path.Combine(externalDirectory, Path.GetFileName(sourcePath)));
+			File.Delete(symlinkProbe);
+		}
+	}
+
 	[Fact]
 	public async Task RedactedFolderExport_CountsOnlyProjectEntriesAndDoesNotChangeSource()
 	{

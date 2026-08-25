@@ -312,7 +312,13 @@ public sealed class ProjectCopyExportService(
 				var destination = ResolveDestinationPath(stagingPath, file.RelativePath);
 				Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
 				var contentPath = prepared?.GetFile(file.SourcePath).ContentPath ?? file.SourcePath;
-				var copiedBytes = await CopyFileAsync(contentPath, destination, buffer, cancellationToken)
+				var copiedBytes = await CopyFileAsync(
+						plan.ProjectRootPath,
+						file.SourcePath,
+						contentPath,
+						destination,
+						buffer,
+						cancellationToken)
 					.ConfigureAwait(false);
 				bytesWritten += copiedBytes;
 				processedEntries++;
@@ -460,7 +466,10 @@ public sealed class ProjectCopyExportService(
 					var entry = archive.CreateEntry(entryName, CompressionLevel.Optimal);
 					TrySetZipLastWriteTime(entry, file.SourcePath);
 					var contentPath = prepared?.GetFile(file.SourcePath).ContentPath ?? file.SourcePath;
-					await using var source = OpenSourceFile(contentPath);
+					await using var source = OpenValidatedSourceFile(
+						plan.ProjectRootPath,
+						file.SourcePath,
+						contentPath);
 					await using var destination = entry.Open();
 					var copiedBytes = await CopyStreamAsync(source, destination, buffer, cancellationToken).ConfigureAwait(false);
 					bytesWritten += copiedBytes;
@@ -1155,14 +1164,49 @@ public sealed class ProjectCopyExportService(
 	}
 
 	private static async Task<long> CopyFileAsync(
-		string sourcePath,
+		string projectRootPath,
+		string originalSourcePath,
+		string contentPath,
 		string destinationPath,
 		byte[] buffer,
 		CancellationToken cancellationToken)
 	{
-		await using var source = OpenSourceFile(sourcePath);
+		await using var source = OpenValidatedSourceFile(
+			projectRootPath,
+			originalSourcePath,
+			contentPath);
 		await using var destination = OpenDestinationFile(destinationPath);
 		return await CopyStreamAsync(source, destination, buffer, cancellationToken).ConfigureAwait(false);
+	}
+
+	private static FileStream OpenValidatedSourceFile(
+		string projectRootPath,
+		string originalSourcePath,
+		string contentPath)
+	{
+		ValidateSourceFileForCopy(projectRootPath, originalSourcePath);
+		FileStream? source = null;
+		try
+		{
+			source = OpenSourceFile(contentPath);
+			ValidateSourceFileForCopy(projectRootPath, originalSourcePath);
+			return source;
+		}
+		catch
+		{
+			source?.Dispose();
+			throw;
+		}
+	}
+
+	private static void ValidateSourceFileForCopy(string projectRootPath, string sourcePath)
+	{
+		ValidateNoReparsePoints(
+			projectRootPath,
+			sourcePath,
+			new HashSet<string>(PathComparer.Default));
+		if (!File.Exists(sourcePath))
+			throw SourceUnavailable($"A source file is no longer available: {sourcePath}");
 	}
 
 	private static async Task<long> CopyStreamAsync(
