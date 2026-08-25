@@ -211,11 +211,14 @@ public sealed class TerminalApplication
 			else
 			{
 				var localized = LocalizedParseError.Resolve(error.Message, localization);
-				item = new PresentedParseError(
-					error.Message.StartsWith(LocalizedParseError.Prefix, StringComparison.Ordinal)
-						? "DPX-CLI-INVALID-VALUE"
-						: "DPX-CLI-INVALID-SYNTAX",
-					localization.Format("Terminal.Error.InvalidSyntax", localized));
+				var explicitCode = LocalizedParseError.ResolveCode(error.Message);
+				item = explicitCode is not null
+					? new PresentedParseError(explicitCode, localized)
+					: new PresentedParseError(
+						error.Message.StartsWith(LocalizedParseError.Prefix, StringComparison.Ordinal)
+							? "DPX-CLI-INVALID-VALUE"
+							: "DPX-CLI-INVALID-SYNTAX",
+						localization.Format("Terminal.Error.InvalidSyntax", localized));
 			}
 
 			if (!presented.Contains(item))

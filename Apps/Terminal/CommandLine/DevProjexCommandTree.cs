@@ -487,6 +487,26 @@ public sealed class DevProjexCommandTree
 				outputKind == ProjectCopyExportFormat.Zip &&
 				(!CliParseValue.TryGet(result, outputPath, out var destination) ||
 				 destination != "-"));
+		command.Validators.Add(result =>
+		{
+			if (!CliParseValue.TryGet(result, kind, out var outputKind))
+				return;
+			if (outputKind == ProjectCopyExportFormat.Folder && result.GetValue(force))
+			{
+				result.AddError(LocalizedParseError.Create(
+					"DPX-CLI-FORCE-NOT-SUPPORTED",
+					L("Terminal.Error.ForceNotSupported")));
+			}
+			if (outputKind == ProjectCopyExportFormat.Zip &&
+			    CliParseValue.TryGet(result, outputPath, out var destination) &&
+			    destination is not null &&
+			    !destination.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+			{
+				result.AddError(LocalizedParseError.Create(
+					"DPX-CLI-ZIP-EXTENSION-REQUIRED",
+					L("Terminal.Error.ZipExtensionRequired")));
+			}
+		});
 		command.SetAction(async (parseResult, cancellationToken) =>
 		{
 			var outputOptions = output.Get(parseResult);

@@ -451,6 +451,32 @@ public sealed class CliV1ParserRegressionTests
 	}
 
 	[Theory]
+	[InlineData("folder", "output", true, true)]
+	[InlineData("zip", "output.txt", false, true)]
+	[InlineData("folder", "output", false, false)]
+	[InlineData("zip", "output.ZIP", true, false)]
+	public void ProjectExportUsageIsValidatedBeforeSourceResolution(
+		string kind,
+		string destination,
+		bool force,
+		bool expectsError)
+	{
+		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
+		var arguments = new List<string>
+		{
+			"export", "project", "https://example.com/owner/repository.git",
+			"--as", kind,
+			"--output", destination
+		};
+		if (force)
+			arguments.Add("--force");
+
+		var parseResult = root.Parse(arguments);
+
+		Assert.Equal(expectsError, parseResult.Errors.Count > 0);
+	}
+
+	[Theory]
 	[InlineData("--profile|standard")]
 	[InlineData("--root|src")]
 	[InlineData("--extension|.cs")]
