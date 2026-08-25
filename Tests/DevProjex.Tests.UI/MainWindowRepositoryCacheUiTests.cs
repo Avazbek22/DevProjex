@@ -1035,7 +1035,7 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 			git.ReleasePull.TrySetResult();
 			await UiTestDriver.WaitForConditionAsync(
 				window,
-				() => !cloneWindow.IsVisible,
+				() => !cloneWindow.IsVisible && !viewModel.GitCloneInProgress,
 				"cached repository operation to complete");
 		}
 		finally

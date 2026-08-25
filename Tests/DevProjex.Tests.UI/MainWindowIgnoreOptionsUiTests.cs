@@ -4948,8 +4948,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			configureServices: services => services with
 			{
 				FileContentAnalyzer = analyzer.Attach(services.FileContentAnalyzer)
-			},
-			waitForStatusIdle: false);
+			});
 		try
 		{
 			var viewModel = UiTestDriver.GetViewModel(window);
@@ -5015,8 +5014,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			configureServices: services => services with
 			{
 				FileContentAnalyzer = analyzer.Attach(services.FileContentAnalyzer)
-			},
-			waitForStatusIdle: false);
+			});
 		try
 		{
 			var viewModel = UiTestDriver.GetViewModel(window);
