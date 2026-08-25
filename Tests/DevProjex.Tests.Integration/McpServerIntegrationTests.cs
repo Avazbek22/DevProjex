@@ -254,7 +254,7 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
-	public async Task StoredPackTreePreviewRedactsLocalUserSegment()
+	public async Task TreeResponsesRedactLocalUserSegment()
 	{
 		var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 		if (string.IsNullOrWhiteSpace(userProfile))
@@ -276,7 +276,8 @@ public sealed class McpServerIntegrationTests
 				"\n}\n");
 			await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 
-			var result = await server.CallAsync(
+			var tree = await server.CallAsync("get_tree");
+			var pack = await server.CallAsync(
 				"pack_context",
 				new Dictionary<string, object?>
 				{
@@ -284,9 +285,11 @@ public sealed class McpServerIntegrationTests
 					["format"] = "text"
 				});
 
-			Assert.Contains("Pack stored as '", Text(result), StringComparison.Ordinal);
-			Assert.Contains(protectedProject, Text(result), StringComparison.Ordinal);
-			Assert.DoesNotContain(project, Text(result), StringComparison.Ordinal);
+			Assert.Contains(protectedProject, Text(tree), StringComparison.Ordinal);
+			Assert.DoesNotContain(project, Text(tree), StringComparison.Ordinal);
+			Assert.Contains("Pack stored as '", Text(pack), StringComparison.Ordinal);
+			Assert.Contains(protectedProject, Text(pack), StringComparison.Ordinal);
+			Assert.DoesNotContain(project, Text(pack), StringComparison.Ordinal);
 		}
 		finally
 		{
