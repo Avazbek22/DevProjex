@@ -21,6 +21,8 @@ public sealed class McpPackRegistry : IDisposable
 			"DevProjex",
 			"mcp");
 		Directory.CreateDirectory(baseDirectory);
+		if ((File.GetAttributes(baseDirectory) & FileAttributes.ReparsePoint) != 0)
+			throw new IOException("MCP temporary storage cannot use a symbolic link or reparse point.");
 		SetPrivateDirectoryMode(baseDirectory);
 		Scavenge(baseDirectory, TimeProvider.GetUtcNow());
 		_sessionDirectory = Path.Combine(baseDirectory, Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant());

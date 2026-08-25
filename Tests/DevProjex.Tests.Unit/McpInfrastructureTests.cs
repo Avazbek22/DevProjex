@@ -469,6 +469,30 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public void PackStorageRejectsASymbolicLinkBaseDirectory()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var target = new TemporaryDirectory();
+		var productDirectory = Path.Combine(workspace.Path, "DevProjex");
+		Directory.CreateDirectory(productDirectory);
+		var link = Path.Combine(productDirectory, "mcp");
+		try
+		{
+			Directory.CreateSymbolicLink(link, target.Path);
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		{
+			Assert.Skip("Creating directory symbolic links is unavailable in this environment.");
+			return;
+		}
+
+		var storageException = Assert.Throws<IOException>(() => new McpPackRegistry(workspace.Path));
+
+		Assert.Contains("symbolic link", storageException.Message, StringComparison.Ordinal);
+		Assert.Empty(Directory.EnumerateFileSystemEntries(target.Path));
+	}
+
+	[Fact]
 	public async Task PackStorageIsPrivateToTheCurrentUnixUser()
 	{
 		if (OperatingSystem.IsWindows())
