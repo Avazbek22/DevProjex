@@ -1,6 +1,7 @@
 using System.Text.Encodings.Web;
 using DevProjex.Application.Context;
 using DevProjex.Application.Services;
+using DevProjex.Kernel.IO;
 
 namespace DevProjex.Infrastructure.ProjectProfiles;
 
@@ -19,6 +20,7 @@ public sealed class PortableProjectProfileService
 {
 	public const int CurrentSchemaVersion = 1;
 	public const string DocumentKind = "devprojex-profile";
+	internal const long MaximumDocumentBytes = ProjectProfileStorageLimits.MaximumJsonBytes;
 
 	private static readonly JsonSerializerOptions ReadOptions = new()
 	{
@@ -42,13 +44,16 @@ public sealed class PortableProjectProfileService
 		var fullPath = NormalizeProfilePath(path);
 		try
 		{
-			await using var stream = new FileStream(
-				fullPath,
-				FileMode.Open,
-				FileAccess.Read,
-				FileShare.Read,
-				16 * 1024,
-				FileOptions.Asynchronous | FileOptions.SequentialScan);
+			await using var stream = new MaximumLengthReadStream(
+				new FileStream(
+					fullPath,
+					FileMode.Open,
+					FileAccess.Read,
+					FileShare.Read,
+					16 * 1024,
+					FileOptions.Asynchronous | FileOptions.SequentialScan),
+				MaximumDocumentBytes,
+				static () => new IOException("Portable profile exceeds the document limit."));
 			var document = await JsonSerializer
 				.DeserializeAsync<PortableProfileDocument>(stream, ReadOptions, cancellationToken)
 				.ConfigureAwait(false);

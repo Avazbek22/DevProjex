@@ -1,6 +1,6 @@
-namespace DevProjex.Terminal.CommandLine;
+namespace DevProjex.Kernel.IO;
 
-internal sealed class MaximumLengthReadStream(
+public sealed class MaximumLengthReadStream(
 	Stream inner,
 	long maximumBytes,
 	Func<Exception> limitExceededExceptionFactory) : Stream

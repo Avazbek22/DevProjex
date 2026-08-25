@@ -5,6 +5,32 @@ namespace DevProjex.Tests.Unit;
 public sealed class PortableProjectProfileServiceTests
 {
 	[Fact]
+	public async Task LoadAsyncRejectsProfileThatGrowsPastDocumentLimit()
+	{
+		using var workspace = new TemporaryDirectory();
+		var path = Path.Combine(workspace.Path, "oversized.json");
+		var prefix = """
+		             {
+		               "schemaVersion": 1,
+		               "kind": "devprojex-profile",
+		               "selection": { "gitMode": "none", "exclusions": [] }
+		             }
+		             """;
+		await File.WriteAllTextAsync(
+			path,
+			prefix + new string(' ', checked((int)PortableProjectProfileService.MaximumDocumentBytes)),
+			TestContext.Current.CancellationToken);
+
+		var exception = await Assert.ThrowsAsync<PortableProjectProfileException>(() =>
+			new PortableProjectProfileService().LoadAsync(
+				path,
+				TestContext.Current.CancellationToken));
+
+		Assert.Equal("DPX-CLI-PROFILE-INVALID", exception.Code);
+		Assert.IsType<IOException>(exception.InnerException);
+	}
+
+	[Fact]
 	public async Task SelectedPathsRoundTripSignificantWhitespace()
 	{
 		using var workspace = new TemporaryDirectory();

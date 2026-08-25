@@ -1,6 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
-using DevProjex.Terminal.CommandLine;
+using DevProjex.Kernel.IO;
 
 namespace DevProjex.Terminal.DesktopControl;
 

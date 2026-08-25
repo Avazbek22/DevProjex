@@ -1,6 +1,7 @@
 using System.Security;
 using System.Text;
 using System.Buffers;
+using DevProjex.Kernel.IO;
 
 namespace DevProjex.Terminal.CommandLine;
 
