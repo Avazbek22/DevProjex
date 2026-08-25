@@ -251,66 +251,78 @@ internal sealed class TreeNameFilterSession
         string query,
         CancellationToken cancellationToken)
     {
-        var filteredNodes = new Dictionary<TreeNodeDescriptor, TreeNodeDescriptor?>(
-            ReferenceEqualityComparer.Instance);
-        var stack = new Stack<(TreeNodeDescriptor Node, bool Visited)>();
-        stack.Push((node, false));
-        while (stack.Count > 0)
+        var pending = new List<FilterFrame>
+        {
+            new(node, query)
+        };
+        while (pending.Count > 0)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var (current, visited) = stack.Pop();
-            if (!visited && current.Children.Count > 0)
+            var frameIndex = pending.Count - 1;
+            var frame = pending[frameIndex];
+            if (frame.NextChildIndex < frame.Node.Children.Count)
             {
-                stack.Push((current, true));
-                for (var index = current.Children.Count - 1; index >= 0; index--)
-                    stack.Push((current.Children[index], false));
+                var child = frame.Node.Children[frame.NextChildIndex++];
+                pending[frameIndex] = frame;
+                pending.Add(new FilterFrame(child, query));
                 continue;
             }
 
-            var selfMatches = current.DisplayName.Contains(
-                query,
-                StringComparison.OrdinalIgnoreCase);
-            if (current.Children.Count == 0)
-            {
-                filteredNodes[current] = selfMatches ? current : null;
-                continue;
-            }
+            pending.RemoveAt(frameIndex);
+            var filteredNode = frame.Complete();
+            if (pending.Count == 0)
+                return filteredNode;
 
-            List<TreeNodeDescriptor>? filteredChildren = null;
-            var originalChildren = current.Children;
-            var matchedChildrenCount = 0;
-            for (var index = 0; index < originalChildren.Count; index++)
-            {
-                var originalChild = originalChildren[index];
-                var filteredChild = filteredNodes[originalChild];
-                if (filteredChild is null)
-                {
-                    filteredChildren ??= CopyPrefix(originalChildren, index, capacityLimit: 8);
-                    continue;
-                }
-
-                matchedChildrenCount++;
-                if (filteredChildren is not null)
-                {
-                    filteredChildren.Add(filteredChild);
-                    continue;
-                }
-
-                if (!ReferenceEquals(filteredChild, originalChild))
-                {
-                    filteredChildren = CopyPrefix(originalChildren, index, capacityLimit: 8);
-                    filteredChildren.Add(filteredChild);
-                }
-            }
-
-            filteredNodes[current] = !selfMatches && matchedChildrenCount == 0
-                ? null
-                : filteredChildren is null
-                    ? current
-                    : current with { Children = filteredChildren };
+            var parentIndex = pending.Count - 1;
+            var parent = pending[parentIndex];
+            parent.AcceptChild(filteredNode);
+            pending[parentIndex] = parent;
         }
 
-        return filteredNodes[node];
+        throw new InvalidOperationException("Tree filtering did not produce a root node.");
+    }
+
+    private struct FilterFrame(TreeNodeDescriptor node, string query)
+    {
+        private List<TreeNodeDescriptor>? _filteredChildren;
+        private int _matchedChildrenCount;
+
+        public TreeNodeDescriptor Node { get; } = node;
+        public bool SelfMatches { get; } = node.DisplayName.Contains(
+            query,
+            StringComparison.OrdinalIgnoreCase);
+        public int NextChildIndex { get; set; }
+
+        public void AcceptChild(TreeNodeDescriptor? filteredChild)
+        {
+            var childIndex = NextChildIndex - 1;
+            if (filteredChild is null)
+            {
+                _filteredChildren ??= CopyPrefix(Node.Children, childIndex, capacityLimit: 8);
+                return;
+            }
+
+            _matchedChildrenCount++;
+            if (_filteredChildren is not null)
+            {
+                _filteredChildren.Add(filteredChild);
+                return;
+            }
+
+            var originalChild = Node.Children[childIndex];
+            if (!ReferenceEquals(filteredChild, originalChild))
+            {
+                _filteredChildren = CopyPrefix(Node.Children, childIndex, capacityLimit: 8);
+                _filteredChildren.Add(filteredChild);
+            }
+        }
+
+        public TreeNodeDescriptor? Complete() =>
+            !SelfMatches && _matchedChildrenCount == 0
+                ? null
+                : _filteredChildren is null
+                    ? Node
+                    : Node with { Children = _filteredChildren };
     }
 
     private static List<TreeNodeDescriptor> CopyPrefix(
