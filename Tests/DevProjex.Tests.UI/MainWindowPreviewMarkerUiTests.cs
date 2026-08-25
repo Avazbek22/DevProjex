@@ -114,7 +114,11 @@ public sealed class MainWindowPreviewMarkerUiTests
 				"scrollbar hover to move the sticky path away and keep the rail active");
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
 			window.MouseMove(markerPoint, RawInputModifiers.None);
-			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => window.InputHitTest(markerPoint) is InputElement { Cursor: not null } hit &&
+				      string.Equals(hit.Cursor.ToString(), "Hand", StringComparison.Ordinal),
+				"the revealed marker to own the pointer cursor");
 			var revealedHit = Assert.IsAssignableFrom<InputElement>(window.InputHitTest(markerPoint));
 			Assert.Equal("Hand", revealedHit.Cursor?.ToString());
 			Assert.False(
