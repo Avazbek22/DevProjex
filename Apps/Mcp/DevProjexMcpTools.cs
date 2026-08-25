@@ -11,7 +11,7 @@ internal sealed class DevProjexMcpTools(
 	private const int MaximumInlinePackCharacters = 50_000;
 	private const int MaximumPageLines = 1_000;
 	private const int MaximumPageCharacters = 50_000;
-	private readonly SemaphoreSlim _projectOperation = new(1, 1);
+	private readonly McpProjectOperationGate _projectOperation = new();
 
 	[Description("List the project roots this server is allowed to read and their saved local profiles.")]
 	public Task<CallToolResult> ListProjects(
@@ -71,7 +71,7 @@ internal sealed class DevProjexMcpTools(
 			if (truncated)
 				body += "\n[Tree truncated at 2000 lines. Narrow include_patterns, exclude_patterns, or max_depth.]";
 			return McpToolResults.TextSuccess(McpSpotlight.Wrap(body));
-		});
+		}, cancellationToken);
 
 	[Description("Measure a redacted project selection and list its ten largest text files by estimated tokens.")]
 	public Task<CallToolResult> Analyze(
@@ -149,7 +149,7 @@ internal sealed class DevProjexMcpTools(
 			};
 			operationProgress.Milestone(100, "building analysis");
 			return McpToolResults.StructuredSuccess(envelope);
-		});
+		}, cancellationToken);
 
 	[Description("Build an exact redacted DevProjex context export. Large packs expire when this server process exits.")]
 	public Task<CallToolResult> PackContext(
@@ -251,7 +251,7 @@ internal sealed class DevProjexMcpTools(
 				100,
 				$"writing pack {writtenFileCount}/{writtenFileCount}");
 			return McpToolResults.TextSuccess(message, advertiseLargeResult: true);
-		});
+		}, cancellationToken);
 
 	[Description("Read a 1-based line range from a pack created by this server session.")]
 	public Task<CallToolResult> ReadPack(
@@ -338,7 +338,7 @@ internal sealed class DevProjexMcpTools(
 			if (totalMatches > shown)
 				output.AppendLine($"[{totalMatches - shown} additional matches not shown; narrow the pattern or filters.]");
 			return McpToolResults.TextSuccess(McpSpotlight.Wrap(output.ToString().TrimEnd()));
-		});
+		}, cancellationToken);
 
 	[Description("Read redacted text from one effective project file using an optional 1-based line range.")]
 	public Task<CallToolResult> GetFile(
@@ -383,7 +383,7 @@ internal sealed class DevProjexMcpTools(
 			if (page.IsTruncated)
 				text += $"\n[Showing lines {page.StartLine}-{page.EndLine} of {page.TotalLines}; continue with start_line={page.EndLine + 1}.]";
 			return McpToolResults.TextSuccess(McpSpotlight.Wrap(text));
-		});
+		}, cancellationToken);
 
 	private McpJsonArguments SelectionArguments(CallToolRequestParams request) =>
 		McpJsonArguments.Create(
@@ -408,18 +408,10 @@ internal sealed class DevProjexMcpTools(
 			arguments.OptionalBoolean("tracked_only", false),
 			cancellationToken);
 
-	private async Task<CallToolResult> RunProjectAsync(Func<Task<CallToolResult>> operation)
-	{
-		await _projectOperation.WaitAsync().ConfigureAwait(false);
-		try
-		{
-			return await ExecuteAsync(operation).ConfigureAwait(false);
-		}
-		finally
-		{
-			_projectOperation.Release();
-		}
-	}
+	private Task<CallToolResult> RunProjectAsync(
+		Func<Task<CallToolResult>> operation,
+		CancellationToken cancellationToken) =>
+		_projectOperation.RunAsync(() => ExecuteAsync(operation), cancellationToken);
 
 	private static async Task<CallToolResult> ExecuteAsync(Func<Task<CallToolResult>> operation)
 	{

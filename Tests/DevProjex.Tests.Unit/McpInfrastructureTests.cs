@@ -8,6 +8,40 @@ namespace DevProjex.Tests.Unit;
 public sealed class McpInfrastructureTests
 {
 	[Fact]
+	public async Task ProjectOperationGateCancelsARequestWaitingBehindAnotherOperation()
+	{
+		var gate = new McpProjectOperationGate();
+		var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var first = gate.RunAsync(
+			async () =>
+			{
+				firstStarted.SetResult();
+				await releaseFirst.Task;
+				return 1;
+			},
+			CancellationToken.None);
+		await firstStarted.Task;
+		using var cancellation = new CancellationTokenSource();
+		var waiting = gate.RunAsync(() => Task.FromResult(2), cancellation.Token);
+
+		cancellation.Cancel();
+
+		try
+		{
+			await Assert.ThrowsAnyAsync<OperationCanceledException>(
+				() => waiting.WaitAsync(
+					TimeSpan.FromSeconds(1),
+					TestContext.Current.CancellationToken));
+		}
+		finally
+		{
+			releaseFirst.TrySetResult();
+		}
+		Assert.Equal(1, await first);
+	}
+
+	[Fact]
 	public void RootRegistryRejectsTraversalAndAbsolutePathsOutsideRoot()
 	{
 		using var workspace = new TemporaryDirectory();
