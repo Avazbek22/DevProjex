@@ -30,7 +30,7 @@ or `arm64`) before running:
 
 ```bash
 curl -fL "https://github.com/Avazbek22/DevProjex/releases/download/v<version>/DevProjex.v<version>.osx-<architecture>.app.tar.gz" | tar xz
-mv DevProjex.app /Applications/
+sudo mv DevProjex.app /Applications/
 ```
 
 The current bundle is unsigned and not notarized. For a browser download, start it
