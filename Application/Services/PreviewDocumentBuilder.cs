@@ -559,14 +559,19 @@ public sealed class PreviewDocumentBuilder(
 			AdvancePosition(result.Text.AsSpan(sourcePosition, span.Start - sourcePosition), ref line, ref column);
 			var spanText = result.Text.AsSpan(span.Start, span.Length);
 			var segmentStart = 0;
-			for (var index = 0; index <= spanText.Length; index++)
+			var index = 0;
+			while (index <= spanText.Length)
 			{
-				if (index < spanText.Length && spanText[index] != '\n')
+				var lineBreakLength = index < spanText.Length
+					? GetLineBreakLength(spanText, index)
+					: 0;
+				if (index < spanText.Length && lineBreakLength == 0)
+				{
+					index++;
 					continue;
+				}
 
 				var segmentLength = index - segmentStart;
-				if (segmentLength > 0 && spanText[index - 1] == '\r')
-					segmentLength--;
 				if (segmentLength > 0)
 				{
 					destination.Add(new PreviewRedactionSpan(
@@ -587,15 +592,17 @@ public sealed class PreviewDocumentBuilder(
 						span.CascadedOccurrenceIds));
 				}
 
-				if (index < spanText.Length)
+				if (lineBreakLength > 0)
 				{
 					line++;
 					column = 0;
-					segmentStart = index + 1;
+					index += lineBreakLength;
+					segmentStart = index;
 				}
 				else
 				{
 					column += segmentLength;
+					break;
 				}
 			}
 			sourcePosition = span.Start + span.Length;
@@ -652,18 +659,30 @@ public sealed class PreviewDocumentBuilder(
 
 	private static void AdvancePosition(ReadOnlySpan<char> text, ref int line, ref int column)
 	{
-		foreach (var character in text)
+		for (var index = 0; index < text.Length;)
 		{
-			if (character == '\n')
+			var lineBreakLength = GetLineBreakLength(text, index);
+			if (lineBreakLength > 0)
 			{
 				line++;
 				column = 0;
+				index += lineBreakLength;
 			}
-			else if (character != '\r')
+			else
 			{
 				column++;
+				index++;
 			}
 		}
+	}
+
+	private static int GetLineBreakLength(ReadOnlySpan<char> text, int index)
+	{
+		if (text[index] == '\n')
+			return 1;
+		if (text[index] != '\r')
+			return 0;
+		return index + 1 < text.Length && text[index + 1] == '\n' ? 2 : 1;
 	}
 
     private string GetOmissionMarker(FileContentClassification classification)
@@ -705,26 +724,25 @@ public sealed class PreviewDocumentBuilder(
         var wroteAnyLine = false;
         var lineStart = 0;
 
-        for (var i = 0; i < text.Length; i++)
+        for (var index = 0; index < text.Length;)
         {
-            if (text[i] != '\n')
+            var lineBreakLength = GetLineBreakLength(text, index);
+            if (lineBreakLength == 0)
+            {
+                index++;
                 continue;
+            }
 
-            var line = text.Slice(lineStart, i - lineStart);
-            if (line.Length > 0 && line[^1] == '\r')
-                line = line[..^1];
-
+            var line = text.Slice(lineStart, index - lineStart);
             builder.AppendLine(line);
             wroteAnyLine = true;
-            lineStart = i + 1;
+            index += lineBreakLength;
+            lineStart = index;
         }
 
         if (lineStart < text.Length)
         {
             var line = text[lineStart..];
-            if (line.Length > 0 && line[^1] == '\r')
-                line = line[..^1];
-
             builder.AppendLine(line);
             wroteAnyLine = true;
         }

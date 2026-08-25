@@ -88,6 +88,29 @@ public sealed class PreviewDocumentBuilderTests
     }
 
     [Fact]
+    public async Task BuildContentDocumentAsync_NormalizesStandaloneCarriageReturnLines()
+    {
+        using var temp = new TemporaryDirectory();
+        var path = temp.CreateFile("legacy.txt", string.Empty);
+        var analyzer = new StubFileContentAnalyzer(new Dictionary<string, TextFileContent?>
+        {
+            [path] = CreateTextContent("alpha\rbeta\rgamma\r")
+        });
+        var builder = new PreviewDocumentBuilder(analyzer);
+
+        using var document = await builder.BuildContentDocumentAsync(
+            [path],
+            TestContext.Current.CancellationToken,
+            Path.GetFileName);
+
+        Assert.NotNull(document);
+        Assert.Equal(5, document.LineCount);
+        Assert.Equal(
+            string.Join('\n', "legacy.txt:", BlankLine, "alpha", "beta", "gamma"),
+            document.GetLineRangeText(1, document.LineCount));
+    }
+
+    [Fact]
     public async Task BuildContentDocumentAsync_FinalEstimatedEntry_DoesNotLeaveTrailingEmptyLine()
     {
         using var temp = new TemporaryDirectory();
