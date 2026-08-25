@@ -63,6 +63,30 @@ public sealed class TerminalRepositoryCloneCoordinatorTests
 		Assert.Single(cache.ListIndexedRepositories());
 	}
 
+	[Fact]
+	public void StaleProjectOpen_DoesNotPublishOrReplaceActiveRepositorySession()
+	{
+		var active = new TrackingCacheSession("active");
+		var stale = new TrackingCacheSession("stale");
+		IRepositoryCacheSession? owned = active;
+		var published = false;
+
+		var accepted = TerminalRepositorySessionOwnership.TryPublishAndReplace(
+			operationIsCurrent: false,
+			() => published = true,
+			ref owned,
+			stale);
+
+		Assert.False(accepted);
+		Assert.False(published);
+		Assert.Same(active, owned);
+		Assert.False(active.IsDisposed);
+		Assert.False(stale.IsDisposed);
+
+		stale.Dispose();
+		active.Dispose();
+	}
+
 	private sealed class CountingCloneService(TimeSpan? delay = null) : IGitRepositoryService
 	{
 		private int _cloneCount;
@@ -125,5 +149,16 @@ public sealed class TerminalRepositoryCloneCoordinatorTests
 		public Task<string?> GetRemoteUrlAsync(
 			string repositoryPath,
 			CancellationToken cancellationToken = default) => throw new NotSupportedException();
+	}
+
+	private sealed class TrackingCacheSession(string repositoryPath) : IRepositoryCacheSession
+	{
+		public string RepositoryPath { get; } = repositoryPath;
+		public string RepositoryUrl => "https://example.test/owner/repository.git";
+		public string? Branch => null;
+		public RepositoryCacheContentKind ContentKind => RepositoryCacheContentKind.Git;
+		public bool IsDisposed { get; private set; }
+
+		public void Dispose() => IsDisposed = true;
 	}
 }

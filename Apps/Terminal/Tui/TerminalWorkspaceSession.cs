@@ -896,11 +896,15 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				.ConfigureAwait(false);
 			if (_stopping || operationCts.IsCancellationRequested)
 				return;
-			var previousSession = Interlocked.Exchange(
-				ref _ownedRepositorySession,
-				preparedRepositorySession);
-			previousSession?.Dispose();
-			sessionAccepted = true;
+			sessionAccepted = await InvokeAsync(() =>
+				TerminalRepositorySessionOwnership.TryPublishAndReplace(
+					ReferenceEquals(_activeOperationCts, operationCts),
+					() => ShowWorkspace(state),
+					ref _ownedRepositorySession,
+					preparedRepositorySession)).ConfigureAwait(false);
+			if (!sessionAccepted)
+				return;
+
 			if (state.Plan.SourceIdentity?.RepositoryUrl is { Length: > 0 } repositoryUrl)
 			{
 				_recentProjectsSnapshot = _services.RecentProjectsStore.AddRepository(
@@ -913,12 +917,6 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					_recentProjectsSnapshot,
 					state.Plan.SourceRoot);
 			}
-			await InvokeAsync(() =>
-			{
-				if (ReferenceEquals(_activeOperationCts, operationCts))
-					ShowWorkspace(state);
-				return true;
-			}).ConfigureAwait(false);
 		}
 		catch (OperationCanceledException) when (operationCts.IsCancellationRequested)
 		{
