@@ -1,6 +1,7 @@
 using System.Text.Json;
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.DesktopControl;
+using DevProjex.Terminal.Rendering;
 
 namespace DevProjex.Terminal.Execution;
 
@@ -119,11 +120,18 @@ public sealed class DesktopCommandHandler(
 				return CommandLineExitCodes.Success;
 			}
 			foreach (var instance in instances)
-				environment.Output.WriteLine($"{instance.InstanceId}\t{instance.ProcessId}\t{instance.ProjectPath ?? "-"}");
+				environment.Output.WriteLine(FormatTextInstance(instance));
 		}
 
 		return CommandLineExitCodes.Success;
 	}
+
+	internal static string FormatTextInstance(DesktopInstanceRegistration instance) =>
+		string.Join(
+			'\t',
+			TerminalTextEscaping.EscapeSingleLine(instance.InstanceId),
+			instance.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+			TerminalTextEscaping.EscapeSingleLine(instance.ProjectPath ?? "-"));
 
 	public async Task<int> SendAsync(
 		DesktopTarget target,

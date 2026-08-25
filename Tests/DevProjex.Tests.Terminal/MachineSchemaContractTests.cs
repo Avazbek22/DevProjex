@@ -110,6 +110,27 @@ public sealed class MachineSchemaContractTests
 	}
 
 	[Fact]
+	public void UiListTextEscapesUntrustedRegistrationFields()
+	{
+		var registration = new DesktopInstanceRegistration(
+			DesktopProtocol.CurrentVersion,
+			"instance\nspoof",
+			42,
+			0,
+			"project\tname\rnext",
+			DateTimeOffset.UnixEpoch,
+			"pipe",
+			"endpoint");
+
+		var line = DesktopCommandHandler.FormatTextInstance(registration);
+
+		Assert.Equal("instance\\nspoof\t42\tproject\\tname\\rnext", line);
+		Assert.DoesNotContain('\r', line);
+		Assert.DoesNotContain('\n', line);
+		Assert.Equal(2, line.Count(static character => character == '\t'));
+	}
+
+	[Fact]
 	public async Task UiListJsonNormalizesRegisteredProjectPaths()
 	{
 		using var workspace = new TemporaryDirectory();
