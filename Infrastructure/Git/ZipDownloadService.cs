@@ -114,11 +114,11 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
                 throw;
             }
 
+            await using var archiveStream = OpenTemporaryArchive(tempZipPath);
             using (response)
             {
                 var totalBytes = response.Content.Headers.ContentLength;
                 await using var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-                await using var fileStream = OpenAsyncFileForWrite(tempZipPath);
 
                 var buffer = ArrayPool<byte>.Shared.Rent(StreamBufferSize);
                 long totalRead = 0;
@@ -138,7 +138,7 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
                                 "downloaded archive size",
                                 _limits.MaxDownloadedArchiveBytes);
 
-                        await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken).ConfigureAwait(false);
+                        await archiveStream.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken).ConfigureAwait(false);
                         totalRead += bytesRead;
 
                         if (totalBytes.HasValue && totalBytes.Value > 0)
@@ -164,8 +164,10 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
             // Notify caller that we're switching to extraction phase
             progress?.Report("::EXTRACTING::");
 
+            await archiveStream.FlushAsync(cancellationToken).ConfigureAwait(false);
+            archiveStream.Position = 0;
             await ExtractArchiveAsync(
-                    tempZipPath,
+                    archiveStream,
                     extractionStagingPath,
                     progress,
                     cancellationToken)
@@ -215,17 +217,16 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
     }
 
     private async Task ExtractArchiveAsync(
-        string archivePath,
+        Stream archiveStream,
         string targetDirectory,
         IProgress<string>? progress,
         CancellationToken cancellationToken)
     {
-        await using var archiveStream = OpenAsyncFileForRead(archivePath);
         var archiveSize = archiveStream.Length;
         using var archive = await ZipArchive.CreateAsync(
                 archiveStream,
                 ZipArchiveMode.Read,
-                leaveOpen: false,
+                leaveOpen: true,
                 entryNameEncoding: null,
                 cancellationToken)
             .ConfigureAwait(false);
@@ -659,14 +660,20 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
                path.StartsWith(normalizedDirectory, comparison);
     }
 
-    private static FileStream OpenAsyncFileForRead(string path)
-        => new(
-            path,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.Read,
-            StreamBufferSize,
-            FileOptions.Asynchronous | FileOptions.SequentialScan);
+    internal static FileStream OpenTemporaryArchive(string path)
+    {
+        var options = new FileStreamOptions
+        {
+            Access = FileAccess.ReadWrite,
+            Mode = FileMode.CreateNew,
+            Share = FileShare.None,
+            BufferSize = StreamBufferSize,
+            Options = FileOptions.Asynchronous | FileOptions.SequentialScan | FileOptions.DeleteOnClose
+        };
+        if (!OperatingSystem.IsWindows())
+            options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        return new FileStream(path, options);
+    }
 
     private static FileStream OpenAsyncFileForWrite(string path)
         => new(
