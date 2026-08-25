@@ -21,6 +21,27 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public void TopFileRanking_RemainsBoundedAndUsesStableContractOrder()
+	{
+		var ranking = new McpTopFileRanking(capacity: 3);
+		foreach (var item in new[]
+		         {
+			         ("z.cs", 10L),
+			         ("b.cs", 30L),
+			         ("a.cs", 30L),
+			         ("c.cs", 20L),
+			         ("ignored.cs", 1L)
+		         })
+		{
+			ranking.Add(item.Item1, item.Item2);
+		}
+
+		Assert.Equal(
+			[new McpFileWeight("a.cs", 30), new McpFileWeight("b.cs", 30), new McpFileWeight("c.cs", 20)],
+			ranking.Items);
+	}
+
+	[Fact]
 	public async Task ProjectOperationGateCancelsARequestWaitingBehindAnotherOperation()
 	{
 		var gate = new McpProjectOperationGate();

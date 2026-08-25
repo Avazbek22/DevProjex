@@ -108,42 +108,21 @@ internal sealed class DevProjexMcpTools(
 				$"transforming content {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");
 			var analyzer = projects.CreatePreparedAnalyzer(prepared);
 			operationProgress.Milestone(61, $"analyzing content 0/{plan.IncludedFiles.Count}");
+			var largest = new McpTopFileRanking(capacity: 10);
 			var metrics = await ProjectContentMetricsCalculator
 				.CalculateAsync(
 					analyzer,
 					plan.IncludedFiles,
-					operationProgress.Measure("analyzing content", 62, 89),
+					fileMetrics => largest.Add(
+						McpProjectService.ToRelative(plan.SourceRoot, fileMetrics.Path),
+						CodeCompressionSnapshot.EstimateTokens(fileMetrics.CharCount)),
+					operationProgress.Measure("analyzing content", 62, 98),
 					cancellationToken)
 				.ConfigureAwait(false);
 			operationProgress.Milestone(
-				90,
-				$"analyzing content {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");
-			var largest = new List<FileWeight>();
-			var rankedFiles = 0;
-			var rankingProgress = operationProgress.Measure("ranking files", 91, 98);
-			foreach (var file in plan.IncludedFiles)
-			{
-				var result = await analyzer.GetClassifiedMetricsAsync(file, cancellationToken).ConfigureAwait(false);
-				rankingProgress.Report(new ProjectCopyExportProgress(
-					++rankedFiles,
-					plan.IncludedFiles.Count,
-					BytesWritten: 0,
-					Percentage: plan.IncludedFiles.Count == 0
-						? 100d
-						: rankedFiles * 100d / plan.IncludedFiles.Count));
-				if (result.Metrics is not { } fileMetrics || !result.IsText)
-					continue;
-				largest.Add(new FileWeight(
-					McpProjectService.ToRelative(plan.SourceRoot, file),
-					CodeCompressionSnapshot.EstimateTokens(fileMetrics.CharCount)));
-			}
-			operationProgress.Milestone(
 				99,
-				$"ranking files {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");
-			var top = largest
-				.OrderByDescending(static item => item.Tokens)
-				.ThenBy(static item => item.Path, StringComparer.Ordinal)
-				.Take(10)
+				$"analyzing content {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");
+			var top = largest.Items
 				.Select(static item => new { path = item.Path, tokens = item.Tokens })
 				.ToArray();
 			var envelope = new
@@ -538,5 +517,4 @@ internal sealed class DevProjexMcpTools(
 		return string.IsNullOrEmpty(name) ? root : name;
 	}
 
-	private sealed record FileWeight(string Path, long Tokens);
 }
