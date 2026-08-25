@@ -869,7 +869,7 @@ public sealed class ProjectContextDocumentService(
 			var truncatedAtCharacterBoundary = false;
 			if (fileContent.Length > remainingCharacters)
 			{
-				fileContent = fileContent[..remainingCharacters];
+				fileContent = fileContent[..ClampToCompleteUnicodeScalar(fileContent, remainingCharacters)];
 				isTruncated = true;
 				truncatedAtCharacterBoundary = true;
 			}
@@ -905,6 +905,17 @@ public sealed class ProjectContextDocumentService(
 		}
 
 		return new ContextFileReadResult(files, isTruncated);
+	}
+
+	private static int ClampToCompleteUnicodeScalar(string value, int maximumLength)
+	{
+		var length = Math.Min(value.Length, maximumLength);
+		return length > 0 &&
+		       length < value.Length &&
+		       char.IsHighSurrogate(value[length - 1]) &&
+		       char.IsLowSurrogate(value[length])
+			? length - 1
+			: length;
 	}
 
 	private string BuildText(
