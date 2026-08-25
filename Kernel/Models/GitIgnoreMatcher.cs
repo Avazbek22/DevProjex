@@ -209,7 +209,7 @@ public sealed class GitIgnoreMatcher
 
     public IgnoreEvaluation EvaluateRelative(string relativePath, bool isDirectory, string name)
     {
-        if (_rules.Count == 0 || string.IsNullOrWhiteSpace(relativePath))
+        if (_rules.Count == 0 || string.IsNullOrEmpty(relativePath))
             return default;
 
         return EvaluateRelativeCore(NormalizeRelativePathForComparison(relativePath), isDirectory, name);
@@ -220,7 +220,7 @@ public sealed class GitIgnoreMatcher
         bool isDirectory,
         string name)
     {
-        if (_rules.Count == 0 || relativePath.IsWhiteSpace())
+        if (_rules.Count == 0 || relativePath.IsEmpty)
             return default;
 
         return EvaluateRelativeNormalizedCore(relativePath, isDirectory, name);
@@ -240,7 +240,7 @@ public sealed class GitIgnoreMatcher
         bool isDirectory,
         string name)
     {
-        if (_rules.Count == 0 || relativePath.IsWhiteSpace())
+        if (_rules.Count == 0 || relativePath.IsEmpty)
             return default;
 
         var normalizedName = string.IsNullOrEmpty(name) ? Path.GetFileName(relativePath).ToString() : name;
@@ -391,7 +391,7 @@ public sealed class GitIgnoreMatcher
 
     public bool ShouldTraverseIgnoredDirectoryRelative(string relativePath, string name)
     {
-        if (!HasNegationRules || string.IsNullOrWhiteSpace(relativePath))
+        if (!HasNegationRules || string.IsNullOrEmpty(relativePath))
             return false;
 
         return ShouldTraverseIgnoredDirectoryRelativeCore(NormalizeRelativePathForComparison(relativePath), name);
@@ -399,7 +399,7 @@ public sealed class GitIgnoreMatcher
 
     internal bool ShouldTraverseIgnoredDirectoryRelativeNormalized(ReadOnlySpan<char> relativePath, string name)
     {
-        if (!HasNegationRules || relativePath.IsWhiteSpace())
+        if (!HasNegationRules || relativePath.IsEmpty)
             return false;
 
         if (!RequiresComparisonNormalization(relativePath))

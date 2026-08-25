@@ -191,6 +191,7 @@ public sealed class IgnoreDecisionEngineContractTests
 	[InlineData("", false)]
 	[InlineData(".", false)]
 	[InlineData(".env", false)]
+	[InlineData(" ", true)]
 	[InlineData("Dockerfile", true)]
 	[InlineData("file.", true)]
 	[InlineData("readme.txt", false)]

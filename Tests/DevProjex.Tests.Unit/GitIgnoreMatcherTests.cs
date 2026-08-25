@@ -79,6 +79,15 @@ public sealed class GitIgnoreMatcherTests
 	}
 
 	[Fact]
+	public void Build_EscapedWhitespaceOnlyNameRemainsMatchable()
+	{
+		var matcher = GitIgnoreMatcher.Build("/repo", [@"\ "]);
+
+		Assert.True(matcher.IsIgnored("/repo/ ", false, " "));
+		Assert.True(matcher.EvaluateRelative(" ", false, " ").IsIgnored);
+	}
+
+	[Fact]
 	public void Build_UnescapedTrailingSpacesAreDiscardedButLeadingSpacesRemainSignificant()
 	{
 		var matcher = GitIgnoreMatcher.Build("/repo", ["trimmed.txt   ", " leading.txt"]);
