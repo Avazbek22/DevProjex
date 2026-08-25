@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 
 namespace DevProjex.Mcp;
@@ -5,6 +6,7 @@ namespace DevProjex.Mcp;
 public sealed class McpPackRegistry : IDisposable
 {
 	private static readonly TimeSpan StaleAge = TimeSpan.FromHours(24);
+	private static readonly ConcurrentDictionary<string, byte> ActiveSessions = new(PathComparer.Default);
 	private readonly Dictionary<string, PackEntry> _packs = new(StringComparer.Ordinal);
 	private readonly string _sessionDirectory;
 	private readonly FileStream _sessionLease;
@@ -28,8 +30,9 @@ public sealed class McpPackRegistry : IDisposable
 			Path.Combine(_sessionDirectory, ".session.lock"),
 			FileMode.CreateNew,
 			FileAccess.ReadWrite,
-			FileShare.Read);
+			FileShare.None);
 		SetPrivateFileMode(_sessionLease.Name);
+		ActiveSessions.TryAdd(_sessionDirectory, 0);
 	}
 
 	internal TimeProvider TimeProvider { get; }
@@ -129,17 +132,24 @@ public sealed class McpPackRegistry : IDisposable
 		if (_disposed)
 			return;
 		_disposed = true;
-		_sessionLease.Dispose();
 		try
 		{
-			if (Directory.Exists(_sessionDirectory))
-				Directory.Delete(_sessionDirectory, recursive: true);
+			_sessionLease.Dispose();
+			try
+			{
+				if (Directory.Exists(_sessionDirectory))
+					Directory.Delete(_sessionDirectory, recursive: true);
+			}
+			catch (IOException)
+			{
+			}
+			catch (UnauthorizedAccessException)
+			{
+			}
 		}
-		catch (IOException)
+		finally
 		{
-		}
-		catch (UnauthorizedAccessException)
-		{
+			ActiveSessions.TryRemove(_sessionDirectory, out _);
 		}
 	}
 
@@ -152,6 +162,8 @@ public sealed class McpPackRegistry : IDisposable
 			try
 			{
 				if (!IsOwnedSessionDirectory(directory))
+					continue;
+				if (ActiveSessions.ContainsKey(directory))
 					continue;
 				if (now - Directory.GetLastWriteTimeUtc(directory) <= StaleAge)
 					continue;
