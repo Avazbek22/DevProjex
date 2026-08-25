@@ -53,6 +53,13 @@ public sealed class EmbeddedGrammarLibraryLocator : IGrammarLibraryLocator, IDis
 
 	private static readonly StringComparer PathComparer =
 		OperatingSystem.IsLinux() ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase;
+	private static readonly EnumerationOptions CleanupEnumerationOptions = new()
+	{
+		RecurseSubdirectories = true,
+		AttributesToSkip = FileAttributes.ReparsePoint,
+		IgnoreInaccessible = false,
+		ReturnSpecialDirectories = false
+	};
 
 	private readonly Assembly _assembly;
 	private readonly string _resourcePrefix;
@@ -292,6 +299,8 @@ public sealed class EmbeddedGrammarLibraryLocator : IGrammarLibraryLocator, IDis
 		List<FileStream>? cleanupLeases = null;
 		try
 		{
+			if (File.GetAttributes(directory).HasFlag(FileAttributes.ReparsePoint))
+				return;
 			if (Directory.GetLastWriteTimeUtc(directory) > DateTime.UtcNow - AbandonedAfter)
 				return;
 			if (!TryAcquireCleanupLeases(directory, out cleanupLeases))
@@ -319,17 +328,22 @@ public sealed class EmbeddedGrammarLibraryLocator : IGrammarLibraryLocator, IDis
 		leases = [];
 		try
 		{
+			if (File.GetAttributes(directory).HasFlag(FileAttributes.ReparsePoint))
+				return false;
 			var leasePaths = Directory
-				.EnumerateFiles(directory, LeaseFileName, SearchOption.AllDirectories)
-				.Append(Path.Combine(directory, LeaseFileName))
+				.EnumerateFiles(directory, LeaseFileName, CleanupEnumerationOptions)
 				.Distinct(PathComparer)
 				.OrderBy(static path => path, PathComparer)
 				.ToArray();
+			if (leasePaths.Length == 0)
+				return false;
 			foreach (var leasePath in leasePaths)
 			{
+				if (File.GetAttributes(leasePath).HasFlag(FileAttributes.ReparsePoint))
+					throw new IOException($"Grammar lease '{leasePath}' is a symbolic link.");
 				var lease = new FileStream(
 					leasePath,
-					FileMode.OpenOrCreate,
+					FileMode.Open,
 					FileAccess.ReadWrite,
 					FileShare.Delete);
 				var lockResult = TryAcquireUnixLock(lease, UnixLockExclusive);
