@@ -298,6 +298,35 @@ public sealed class DesktopControlIntegrationTests
 	}
 
 	[Fact]
+	public async Task RegistryNeverDeletesAnEndpointOutsideItsOwnedSocketPath()
+	{
+		using var workspace = new TemporaryDirectory();
+		var paths = new DesktopControlPaths(() => workspace.CreateDirectory("ipc"));
+		var registry = new DesktopInstanceRegistry(paths);
+		var protectedDirectory = workspace.CreateDirectory("project");
+		var protectedFile = Path.Combine(protectedDirectory, "source.txt");
+		await File.WriteAllTextAsync(
+			protectedFile,
+			"keep",
+			TestContext.Current.CancellationToken);
+		var stale = new DesktopInstanceRegistration(
+			DesktopProtocol.CurrentVersion,
+			"forged",
+			Environment.ProcessId,
+			Process.GetCurrentProcess().StartTime.ToUniversalTime().Ticks - TimeSpan.FromHours(1).Ticks,
+			workspace.Path,
+			DateTimeOffset.UtcNow,
+			"unix",
+			protectedFile);
+		await registry.RegisterAsync(stale, TestContext.Current.CancellationToken);
+
+		Assert.Empty(await registry.ListAsync(TestContext.Current.CancellationToken));
+
+		Assert.True(File.Exists(protectedFile));
+		Assert.False(File.Exists(paths.GetRegistrationPath(stale.InstanceId)));
+	}
+
+	[Fact]
 	public async Task RegistryRejectsAnOversizedRegistrationBeforeUsingIt()
 	{
 		using var workspace = new TemporaryDirectory();

@@ -72,7 +72,7 @@ public sealed class DesktopInstanceRegistry(DesktopControlPaths? paths = null)
 				if (removeStale)
 				{
 					TryDelete(path);
-					if (registration?.Transport == "unix")
+					if (registration is not null && IsOwnedUnixEndpoint(registration))
 						TryDelete(registration.Endpoint);
 				}
 				staleEntryCount++;
@@ -88,6 +88,23 @@ public sealed class DesktopInstanceRegistry(DesktopControlPaths? paths = null)
 				.ThenBy(static registration => registration.InstanceId, StringComparer.Ordinal)
 				.ToArray(),
 			staleEntryCount);
+	}
+
+	private bool IsOwnedUnixEndpoint(DesktopInstanceRegistration registration)
+	{
+		if (!registration.Transport.Equals("unix", StringComparison.Ordinal))
+			return false;
+		try
+		{
+			return PathComparer.Default.Equals(
+				Path.GetFullPath(registration.Endpoint),
+				Path.GetFullPath(_paths.GetSocketPath(registration.InstanceId)));
+		}
+		catch (Exception exception) when (
+			exception is ArgumentException or NotSupportedException or PathTooLongException)
+		{
+			return false;
+		}
 	}
 
 	private static async Task<DesktopInstanceRegistration?> TryReadAsync(
