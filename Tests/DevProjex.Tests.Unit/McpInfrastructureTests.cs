@@ -297,6 +297,44 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public async Task TextPageReaderDoesNotMaterializeAnOversizedSingleLine()
+	{
+		await using var stream = new RepeatingByteStream((byte)'x', 8 * 1024 * 1024);
+		var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+
+		var page = await McpTextRanges.ReadPageAsync(
+			stream,
+			startLine: 1,
+			endLine: null,
+			maximumLines: 1,
+			maximumCharacters: 50_000,
+			TestContext.Current.CancellationToken);
+		var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+		Assert.Equal(50_000, page.Text.Length);
+		Assert.True(page.CharacterLimitReached);
+		Assert.InRange(allocatedBytes, 0, 2 * 1024 * 1024);
+	}
+
+	[Fact]
+	public async Task TextRangesPreserveLeadingEmptyLines()
+	{
+		await using var stream = new MemoryStream(Encoding.UTF8.GetBytes("\r\nvalue\n"));
+
+		var streamed = await McpTextRanges.ReadPageAsync(
+			stream,
+			startLine: 1,
+			endLine: 2,
+			maximumLines: 10,
+			maximumCharacters: 100,
+			TestContext.Current.CancellationToken);
+		var sliced = McpTextRanges.Slice([string.Empty, "value"], 1, 2, 10, 100);
+
+		Assert.Equal("\nvalue", streamed.Text);
+		Assert.Equal("\nvalue", sliced.Text);
+	}
+
+	[Fact]
 	public void TextRangesRejectInvalidRangesAndReportCharacterTruncation()
 	{
 		var page = McpTextRanges.Slice(["123456", "next"], 1, 2, 1000, 4);
@@ -326,5 +364,49 @@ public sealed class McpInfrastructureTests
 
 		Assert.Equal("x", streamed.Text);
 		Assert.Equal("x", sliced.Text);
+	}
+
+	private sealed class RepeatingByteStream(byte value, long length) : Stream
+	{
+		private long _position;
+
+		public override bool CanRead => true;
+		public override bool CanSeek => false;
+		public override bool CanWrite => false;
+		public override long Length => length;
+		public override long Position
+		{
+			get => _position;
+			set => throw new NotSupportedException();
+		}
+
+		public override int Read(byte[] buffer, int offset, int count) =>
+			Read(buffer.AsSpan(offset, count));
+
+		public override int Read(Span<byte> buffer)
+		{
+			var count = (int)Math.Min(buffer.Length, length - _position);
+			if (count <= 0)
+				return 0;
+			buffer[..count].Fill(value);
+			_position += count;
+			return count;
+		}
+
+		public override ValueTask<int> ReadAsync(
+			Memory<byte> buffer,
+			CancellationToken cancellationToken = default)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			return ValueTask.FromResult(Read(buffer.Span));
+		}
+
+		public override void Flush()
+		{
+		}
+
+		public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+		public override void SetLength(long value) => throw new NotSupportedException();
+		public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 	}
 }

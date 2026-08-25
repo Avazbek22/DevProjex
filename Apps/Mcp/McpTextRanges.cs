@@ -1,3 +1,5 @@
+using System.Buffers;
+
 namespace DevProjex.Mcp;
 
 internal sealed record McpTextPage(
@@ -31,31 +33,104 @@ internal static class McpTextRanges
 			bufferSize: 16 * 1024,
 			leaveOpen: true);
 		var builder = new StringBuilder();
+		var lineBuilder = new StringBuilder(Math.Min(maximumCharacters, 16 * 1024));
+		var readBuffer = ArrayPool<char>.Shared.Rent(16 * 1024);
 		var total = 0;
 		var actualEnd = start - 1;
 		var characterLimit = false;
-		while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
+		var hasAppendedLine = false;
+		var currentLineHasContent = false;
+		var currentLineOverflowed = false;
+		var previousWasCarriageReturn = false;
+		var bufferedLineLimit = maximumCharacters == int.MaxValue
+			? int.MaxValue
+			: maximumCharacters + 1;
+
+		bool ShouldCaptureLine(int lineNumber) =>
+			lineNumber >= start &&
+			lineNumber <= requestedEnd &&
+			lineNumber - start < maximumLines;
+
+		void CompleteLine()
 		{
-			total++;
-			if (total < start || total > requestedEnd || total >= start + maximumLines)
-				continue;
-			if (characterLimit)
-				continue;
-			var required = line.Length + (builder.Length == 0 ? 0 : 1);
-			if (builder.Length + required > maximumCharacters)
+			var lineNumber = ++total;
+			if (ShouldCaptureLine(lineNumber) && !characterLimit)
 			{
-				characterLimit = true;
-				if (builder.Length == 0)
+				var separatorLength = hasAppendedLine ? 1 : 0;
+				var exceedsLimit = currentLineOverflowed ||
+				                   (long)builder.Length + separatorLength + lineBuilder.Length > maximumCharacters;
+				if (exceedsLimit)
 				{
-					AppendBoundedPrefix(builder, line, maximumCharacters);
-					actualEnd = total;
+					characterLimit = true;
+					if (!hasAppendedLine)
+					{
+						AppendBoundedPrefix(builder, lineBuilder.ToString(), maximumCharacters);
+						actualEnd = lineNumber;
+						hasAppendedLine = true;
+					}
 				}
-				continue;
+				else
+				{
+					if (hasAppendedLine)
+						builder.Append('\n');
+					builder.Append(lineBuilder.ToString());
+					actualEnd = lineNumber;
+					hasAppendedLine = true;
+				}
 			}
-			if (builder.Length > 0)
-				builder.Append('\n');
-			builder.Append(line);
-			actualEnd = total;
+
+			lineBuilder.Clear();
+			currentLineHasContent = false;
+			currentLineOverflowed = false;
+		}
+
+		try
+		{
+			while (true)
+			{
+				var read = await reader
+					.ReadAsync(readBuffer.AsMemory(), cancellationToken)
+					.ConfigureAwait(false);
+				if (read == 0)
+					break;
+
+				foreach (var character in readBuffer.AsSpan(0, read))
+				{
+					if (character == '\n')
+					{
+						if (previousWasCarriageReturn)
+						{
+							previousWasCarriageReturn = false;
+							continue;
+						}
+						CompleteLine();
+						continue;
+					}
+
+					if (character == '\r')
+					{
+						previousWasCarriageReturn = true;
+						CompleteLine();
+						continue;
+					}
+
+					previousWasCarriageReturn = false;
+					currentLineHasContent = true;
+					if (characterLimit || !ShouldCaptureLine(total + 1))
+						continue;
+					if (lineBuilder.Length < bufferedLineLimit)
+						lineBuilder.Append(character);
+					else
+						currentLineOverflowed = true;
+				}
+			}
+
+			if (currentLineHasContent)
+				CompleteLine();
+		}
+		finally
+		{
+			ArrayPool<char>.Shared.Return(readBuffer);
 		}
 
 		if (total == 0)
@@ -101,24 +176,27 @@ internal static class McpTextRanges
 		var builder = new StringBuilder();
 		var actualEnd = start - 1;
 		var characterLimit = false;
+		var hasAppendedLine = false;
 		for (var lineNumber = start; lineNumber <= upper; lineNumber++)
 		{
 			var line = lines[lineNumber - 1];
-			var required = line.Length + (builder.Length == 0 ? 0 : 1);
+			var required = line.Length + (hasAppendedLine ? 1 : 0);
 			if (builder.Length + required > maximumCharacters)
 			{
-			characterLimit = true;
-			if (builder.Length == 0)
-			{
-				AppendBoundedPrefix(builder, line, maximumCharacters);
-				actualEnd = lineNumber;
-			}
+				characterLimit = true;
+				if (!hasAppendedLine)
+				{
+					AppendBoundedPrefix(builder, line, maximumCharacters);
+					actualEnd = lineNumber;
+					hasAppendedLine = true;
+				}
 				break;
 			}
-			if (builder.Length > 0)
+			if (hasAppendedLine)
 				builder.Append('\n');
 			builder.Append(line);
 			actualEnd = lineNumber;
+			hasAppendedLine = true;
 		}
 
 		var truncated = actualEnd < requestedEnd;
