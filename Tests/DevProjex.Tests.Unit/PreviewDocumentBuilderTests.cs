@@ -76,6 +76,54 @@ public sealed class PreviewDocumentBuilderTests
 		Assert.True(File.Exists(unrelatedPath));
 	}
 
+	[Fact]
+	public void PreviewStorage_RejectsLinkedProductDirectory()
+	{
+		using var storage = new TemporaryDirectory();
+		var target = Path.Combine(storage.Path, "target");
+		Directory.CreateDirectory(target);
+		var productDirectory = Path.Combine(storage.Path, "DevProjex");
+		try
+		{
+			Directory.CreateSymbolicLink(productDirectory, target);
+		}
+		catch (Exception exception) when (
+			exception is IOException or UnauthorizedAccessException or NotSupportedException)
+		{
+			Assert.Skip($"Directory symbolic links are unavailable: {exception.GetType().Name}.");
+		}
+
+		var failure = Assert.Throws<IOException>(() =>
+			PreviewDocumentBuilder.PrepareStorageDirectory(storage.Path));
+
+		Assert.Contains("symbolic link or reparse point", failure.Message, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void PreviewStorage_PreparesOwnedDirectory()
+	{
+		using var storage = new TemporaryDirectory();
+		var productDirectory = Path.Combine(storage.Path, "DevProjex");
+		Directory.CreateDirectory(productDirectory);
+		if (!OperatingSystem.IsWindows())
+		{
+			File.SetUnixFileMode(productDirectory, UnixFileMode.UserRead | UnixFileMode.UserWrite |
+			                                           UnixFileMode.UserExecute | UnixFileMode.GroupRead |
+			                                           UnixFileMode.OtherRead);
+		}
+
+		var previewDirectory = PreviewDocumentBuilder.PrepareStorageDirectory(storage.Path);
+
+		Assert.True(Directory.Exists(previewDirectory));
+		if (OperatingSystem.IsWindows())
+			return;
+
+		const UnixFileMode expected =
+			UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+		Assert.Equal(expected, File.GetUnixFileMode(productDirectory));
+		Assert.Equal(expected, File.GetUnixFileMode(previewDirectory));
+	}
+
     [Fact]
     public async Task BuildContentDocumentAsync_NoReadableFiles_ReturnsNull()
     {

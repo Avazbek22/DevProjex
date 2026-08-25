@@ -892,18 +892,38 @@ public sealed class PreviewDocumentBuilder(
 
 	private static string CreateStoragePath()
 	{
-		var previewDirectory = Path.Combine(Path.GetTempPath(), "DevProjex", "Preview");
-		Directory.CreateDirectory(previewDirectory);
-		if ((File.GetAttributes(previewDirectory) & FileAttributes.ReparsePoint) != 0)
-			throw new IOException("Preview storage cannot use a symbolic link or reparse point.");
+		var previewDirectory = PrepareStorageDirectory(Path.GetTempPath());
+		PreviewTextStorageScavenger.StartOnce(previewDirectory);
+		return Path.Combine(previewDirectory, $"{Guid.NewGuid():N}.preview.txt");
+	}
+
+	internal static string PrepareStorageDirectory(string tempRoot)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(tempRoot);
+		var productDirectory = Path.Combine(tempRoot, "DevProjex");
+		EnsurePrivateStorageDirectory(productDirectory);
+		var previewDirectory = Path.Combine(productDirectory, "Preview");
+		EnsurePrivateStorageDirectory(previewDirectory);
+		return previewDirectory;
+	}
+
+	private static void EnsurePrivateStorageDirectory(string path)
+	{
+		Directory.CreateDirectory(path);
+		RejectLinkedStorageDirectory(path);
 		if (!OperatingSystem.IsWindows())
 		{
 			File.SetUnixFileMode(
-				previewDirectory,
+				path,
 				UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
 		}
-		PreviewTextStorageScavenger.StartOnce(previewDirectory);
-		return Path.Combine(previewDirectory, $"{Guid.NewGuid():N}.preview.txt");
+		RejectLinkedStorageDirectory(path);
+	}
+
+	private static void RejectLinkedStorageDirectory(string path)
+	{
+		if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+			throw new IOException("Preview storage cannot use a symbolic link or reparse point.");
 	}
 
 	private static FileStream OpenStorageFile(string storagePath, FileOptions options)
