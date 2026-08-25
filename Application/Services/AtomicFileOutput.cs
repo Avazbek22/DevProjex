@@ -39,7 +39,8 @@ public static class ExactFileOutputDestinationPolicy
 		if (Directory.Exists(fullPath) ||
 		    Directory.Exists(resolvedPath) ||
 		    (!overwrite &&
-		     (Path.Exists(fullPath) || Path.Exists(resolvedPath))))
+		     (AtomicFileCommit.DestinationEntryExists(fullPath) ||
+		      AtomicFileCommit.DestinationEntryExists(resolvedPath))))
 		{
 			throw new AtomicFileOutputConflictException(fullPath);
 		}
@@ -75,7 +76,7 @@ public static class AtomicFileOutput
 		try
 		{
 			RevalidateResolvedPath(fullPath, validateDestination);
-			if (!overwrite && Path.Exists(fullPath))
+			if (!overwrite && AtomicFileCommit.DestinationEntryExists(fullPath))
 				throw new AtomicFileOutputConflictException(fullPath);
 		}
 		catch (AtomicFileOutputConflictException exception)
@@ -148,13 +149,10 @@ public static class AtomicFileOutput
 		bool overwrite)
 	{
 		if (!overwrite)
-			return DestinationEntryExists(destinationPath);
+			return AtomicFileCommit.DestinationEntryExists(destinationPath);
 
 		return Directory.Exists(destinationPath);
 	}
-
-	private static bool DestinationEntryExists(string path) =>
-		Path.Exists(path) || AtomicFileCommit.DestinationIsSymbolicLink(path);
 
 	private static void RevalidateResolvedPath(
 		string resolvedPath,

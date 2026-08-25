@@ -694,10 +694,11 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 		var destination = Path.Combine(workspace.DestinationParent, "export.zip");
 		CreateFileLinkOrSkip(destination, safeTarget);
 
-		await workspace.ExportReplacingAsync(
+		await workspace.ExportExactAsync(
 			ProjectCopyExportFormat.Zip,
 			destination,
-			[]);
+			[],
+			ProjectCopyConflictPolicy.ReplaceAtomically);
 
 		Assert.Equal(
 			"TARGET",
@@ -707,6 +708,27 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 		Assert.Null(new FileInfo(destination).LinkTarget);
 		using var archive = ZipFile.OpenRead(destination);
 		Assert.Contains(archive.Entries, static entry => entry.FullName == "Sample/README.md");
+	}
+
+	[Theory]
+	[InlineData(ProjectCopyExportFormat.Folder, "export")]
+	[InlineData(ProjectCopyExportFormat.Zip, "export.zip")]
+	public async Task ExactExportReportsDanglingDestinationLinkAsConflict(
+		ProjectCopyExportFormat format,
+		string destinationName)
+	{
+		using var workspace = ProjectCopyWorkspace.Create();
+		var destination = Path.Combine(workspace.DestinationParent, destinationName);
+		CreateFileLinkOrSkip(
+			destination,
+			Path.Combine(workspace.DestinationParent, "missing-target"));
+
+		var exception = await Assert.ThrowsAsync<ProjectCopyExportException>(() =>
+			workspace.ExportExactAsync(format, destination, []));
+
+		Assert.Equal(ProjectCopyExportError.DestinationConflict, exception.Error);
+		Assert.NotNull(new FileInfo(destination).LinkTarget);
+		Assert.Empty(FindStagingArtifacts(workspace.DestinationParent));
 	}
 
 	[Fact]
@@ -1801,10 +1823,11 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 				progress,
 				cancellationToken == default ? TestContext.Current.CancellationToken : cancellationToken);
 
-		public Task<ProjectCopyExportResult> ExportReplacingAsync(
+		public Task<ProjectCopyExportResult> ExportExactAsync(
 			ProjectCopyExportFormat format,
 			string destination,
-			IEnumerable<string> selected) =>
+			IEnumerable<string> selected,
+			ProjectCopyConflictPolicy conflictPolicy = ProjectCopyConflictPolicy.Fail) =>
 			_service.ExportAsync(
 				new ProjectCopyExportRequest(
 					SourceRoot,
@@ -1814,7 +1837,7 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 					destination,
 					format,
 					ProjectCopyDestinationMode.Exact,
-					ProjectCopyConflictPolicy.ReplaceAtomically),
+					conflictPolicy),
 				progress: null,
 				TestContext.Current.CancellationToken);
 

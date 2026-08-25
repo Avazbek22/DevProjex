@@ -502,7 +502,7 @@ public sealed class ProjectCopyExportService(
 				                conflictPolicy == ProjectCopyConflictPolicy.ReplaceAtomically;
 				CommitZipArchive(stagingPath, destinationPath, overwrite);
 			}
-			catch (IOException exception) when (Path.Exists(destinationPath))
+			catch (IOException exception) when (AtomicFileCommit.DestinationEntryExists(destinationPath))
 			{
 				throw DestinationConflict(
 					ResolveReportedDestinationPath(
@@ -632,7 +632,7 @@ public sealed class ProjectCopyExportService(
 		string path,
 		string? requestedPath = null)
 	{
-		if (Path.Exists(path))
+		if (AtomicFileCommit.DestinationEntryExists(path))
 		{
 			throw DestinationConflict(
 				requestedPath is null
@@ -1112,7 +1112,7 @@ public sealed class ProjectCopyExportService(
 		{
 			var name = suffix == 1 ? baseName : $"{baseName} ({suffix})";
 			var candidate = Path.Combine(parentPath, name);
-			if (!Path.Exists(candidate))
+			if (!AtomicFileCommit.DestinationEntryExists(candidate))
 				return candidate;
 		}
 	}
@@ -1136,7 +1136,7 @@ public sealed class ProjectCopyExportService(
 				Directory.Move(stagingPath, candidate);
 				return candidate;
 			}
-			catch (IOException) when (Path.Exists(candidate))
+			catch (IOException) when (AtomicFileCommit.DestinationEntryExists(candidate))
 			{
 				candidate = ResolveAvailableDirectoryPath(destinationParent, $"{projectName}-copy");
 			}
@@ -1159,7 +1159,7 @@ public sealed class ProjectCopyExportService(
 			Directory.Move(stagingPath, destinationPath);
 			return destinationPath;
 		}
-		catch (IOException exception) when (Path.Exists(destinationPath))
+		catch (IOException exception) when (AtomicFileCommit.DestinationEntryExists(destinationPath))
 		{
 			throw DestinationConflict(
 				ResolveReportedDestinationPath(

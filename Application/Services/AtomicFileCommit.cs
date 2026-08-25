@@ -46,4 +46,7 @@ internal static class AtomicFileCommit
 			return false;
 		}
 	}
+
+	public static bool DestinationEntryExists(string path) =>
+		Path.Exists(path) || DestinationIsSymbolicLink(path);
 }
