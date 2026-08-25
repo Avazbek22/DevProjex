@@ -7,6 +7,9 @@ internal static class JsonStorePersistence
 {
     internal const long SmallDocumentMaximumBytes = 8 * 1024 * 1024;
 	private const UnixFileMode PrivateUnixFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+    private static readonly Encoding StrictUtf8 = new UTF8Encoding(
+        encoderShouldEmitUTF8Identifier: false,
+        throwOnInvalidBytes: true);
     private static readonly Encoding StrictUtf16LittleEndian = new UnicodeEncoding(
         bigEndian: false,
         byteOrderMark: true,
@@ -54,7 +57,14 @@ internal static class JsonStorePersistence
             string json;
             if (maximumDocumentBytes == long.MaxValue)
             {
-                json = File.ReadAllText(path);
+                using var stream = new FileStream(
+                    path,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete,
+                    bufferSize: 16 * 1024,
+                    FileOptions.SequentialScan);
+                json = ReadAllTextStrict(stream);
             }
             else if (maximumDocumentBytes > int.MaxValue ||
                      !TryReadAllTextWithinSizeLimit(path, (int)maximumDocumentBytes, out json))
@@ -302,14 +312,15 @@ internal static class JsonStorePersistence
             return false;
 
         using (content)
-        using (var reader = new StreamReader(
-                   content,
-                   Encoding.UTF8,
-                   detectEncodingFromByteOrderMarks: true,
-                   bufferSize: 1024,
-                   leaveOpen: true))
         {
-            text = reader.ReadToEnd();
+            try
+            {
+                text = ReadAllTextStrict(content);
+            }
+            catch (DecoderFallbackException)
+            {
+                return false;
+            }
         }
         return true;
     }
@@ -443,7 +454,19 @@ internal static class JsonStorePersistence
         return JsonDocument.Parse(reader.ReadToEnd());
     }
 
-    private static Encoding? DetectUnicodeEncoding(FileStream stream)
+    private static string ReadAllTextStrict(Stream stream)
+    {
+        var encoding = DetectUnicodeEncoding(stream) ?? StrictUtf8;
+        using var reader = new StreamReader(
+            stream,
+            encoding,
+            detectEncodingFromByteOrderMarks: true,
+            bufferSize: 1024,
+            leaveOpen: true);
+        return reader.ReadToEnd();
+    }
+
+    private static Encoding? DetectUnicodeEncoding(Stream stream)
     {
         Span<byte> prefix = stackalloc byte[4];
         var bytesRead = stream.Read(prefix);

@@ -297,6 +297,45 @@ public sealed class InfrastructureJsonPersistenceTests
 		Assert.Equal("{ invalid json", File.ReadAllText(fileSet.PrimaryPath));
 	}
 
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public void JsonStorePersistence_TryReadNormalized_RejectsMalformedUtf8WithoutMutatingPrimary(
+		bool useBoundedReader)
+	{
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "settings.json");
+		Directory.CreateDirectory(fileSet.DirectoryPath);
+		var prefix = Encoding.UTF8.GetBytes("{\"name\":\"");
+		var suffix = Encoding.UTF8.GetBytes("\",\"count\":3}");
+		var payload = prefix.Concat([byte.MaxValue]).Concat(suffix).ToArray();
+		File.WriteAllBytes(fileSet.PrimaryPath, payload);
+
+		TestDocument document;
+		bool requiresRewrite;
+		var result = useBoundedReader
+			? JsonStorePersistence.TryReadNormalized(
+				fileSet.PrimaryPath,
+				JsonOptions,
+				static () => new TestDocument("default", 0),
+				static document => document,
+				out document,
+				out requiresRewrite,
+				maximumDocumentBytes: 256)
+			: JsonStorePersistence.TryReadNormalized(
+				fileSet.PrimaryPath,
+				JsonOptions,
+				static () => new TestDocument("default", 0),
+				static document => document,
+				out document,
+				out requiresRewrite);
+
+		Assert.False(result);
+		Assert.False(requiresRewrite);
+		Assert.Equal(new TestDocument("default", 0), document);
+		Assert.Equal(payload, File.ReadAllBytes(fileSet.PrimaryPath));
+	}
+
 	[Fact]
 	public void JsonStorePersistence_TryReadNormalized_ReportsRewriteOnlyAfterSuccessfulNormalization()
 	{
