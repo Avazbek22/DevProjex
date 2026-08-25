@@ -96,6 +96,7 @@
   "Preview.FilePath.Copy.Tooltip": "현재 파일 복사",
   "Preview.Selection.Copy": "복사",
   "Preview.Selection.SelectAll": "모두 선택",
+  "Preview.Selection.ClipboardTooLarge": "{0:N0}자가 선택되었습니다. 클립보드로 처리하기에는 너무 큽니다. 내보내기로 저장하시겠습니까?",
   "Menu.Options": "옵션",
   "Menu.Options.TreeSettings": "트리 설정",
   "Menu.Language": "언어",

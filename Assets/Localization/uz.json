@@ -96,6 +96,7 @@
   "Preview.FilePath.Copy.Tooltip": "Joriy faylni nusxalash",
   "Preview.Selection.Copy": "Nusxa olish",
   "Preview.Selection.SelectAll": "Hammasini tanlash",
+  "Preview.Selection.ClipboardTooLarge": "{0:N0} ta belgi tanlandi — almashish buferi buncha maʼlumotni sigʻdira olmaydi. Eksport orqali saqlansinmi?",
   "Menu.Options": "Sozlamalar",
   "Menu.Options.TreeSettings": "Daraxt sozlamalari",
   "Menu.Language": "Til",

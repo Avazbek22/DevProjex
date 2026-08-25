@@ -96,6 +96,7 @@
   "Preview.FilePath.Copy.Tooltip": "Нусхаи файли ҷорӣ",
   "Preview.Selection.Copy": "Нусха",
   "Preview.Selection.SelectAll": "Ҳамаро интихоб кардан",
+  "Preview.Selection.ClipboardTooLarge": "{0:N0} аломат интихоб шудааст — буфери мубодила ин қадар маълумотро нигоҳ дошта наметавонад. Тавассути Содирот захира карда шавад?",
   "Menu.Options": "Танзимот",
   "Menu.Options.TreeSettings": "Танзимоти дарахт",
   "Menu.Language": "Забон",

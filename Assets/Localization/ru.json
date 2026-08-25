@@ -96,6 +96,7 @@
   "Preview.FilePath.Copy.Tooltip": "Скопировать текущий файл",
   "Preview.Selection.Copy": "Скопировать",
   "Preview.Selection.SelectAll": "Выделить все",
+  "Preview.Selection.ClipboardTooLarge": "Выделено {0:N0} символов — буфер обмена не сможет вместить такой объём. Сохранить через экспорт?",
   "Menu.Options": "Параметры",
   "Menu.Options.TreeSettings": "Настройки дерева",
   "Menu.Language": "Язык",

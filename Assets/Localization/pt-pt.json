@@ -96,6 +96,7 @@
     "Preview.FilePath.Copy.Tooltip":  "Copiar ficheiro atual",
     "Preview.Selection.Copy":  "Copiar",
     "Preview.Selection.SelectAll":  "Selecionar tudo",
+    "Preview.Selection.ClipboardTooLarge":  "Foram selecionados {0:N0} carateres; a área de transferência não suporta este volume. Guardar através de Exportar?",
     "Menu.Options":  "Opções",
     "Menu.Options.TreeSettings":  "Configurações de árvore",
     "Menu.Language":  "Idioma",

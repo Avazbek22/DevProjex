@@ -20,6 +20,7 @@ internal sealed class PreviewSurfaceController : IDisposable
     private const int PreviewWarmupContentFileLimit = 6;
     private const int PreviewWarmupMaxFileBytes = 64 * 1024;
     private const int PreviewWarmupMaxCharacters = 96 * 1024;
+	internal const long MaximumClipboardSelectionBytes = 256L * 1024 * 1024;
     private static readonly IReadOnlySet<string> EmptySelectedPaths =
         new HashSet<string>(PathComparer.Default);
     private static readonly TimeSpan SelectionMetricsDebounceInterval =
@@ -1849,8 +1850,35 @@ internal sealed class PreviewSurfaceController : IDisposable
                 _viewModel.PreviewDocument) is not null;
     }
 
-    private void OnCopyingToClipboard(object? sender, CancelEventArgs e)
-        => e.Cancel = !_ensureClipboardOutputReady();
+	private void OnCopyingToClipboard(object? sender, CancelEventArgs e)
+	{
+		if (sender is VirtualizedPreviewTextControl preview &&
+		    ExceedsClipboardSelectionLimit(preview.PendingClipboardCharacterCount))
+		{
+			e.Cancel = true;
+			_ = ShowClipboardSelectionTooLargeAsync(preview.PendingClipboardCharacterCount);
+			return;
+		}
+
+		e.Cancel = !_ensureClipboardOutputReady();
+	}
+
+	internal static bool ExceedsClipboardSelectionLimit(long characterCount) =>
+		characterCount > MaximumClipboardSelectionBytes / sizeof(char);
+
+	private async Task ShowClipboardSelectionTooLargeAsync(long characterCount)
+	{
+		try
+		{
+			await _showErrorAsync(_localization.Format(
+				"Preview.Selection.ClipboardTooLarge",
+				characterCount));
+		}
+		catch
+		{
+			// Dialog failures must not turn a rejected clipboard operation into an application crash.
+		}
+	}
 
     private void OnCopiedToClipboard(object? sender, EventArgs e)
     {

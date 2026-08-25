@@ -96,6 +96,7 @@
   "Preview.FilePath.Copy.Tooltip": "複製目前文件",
   "Preview.Selection.Copy": "複製",
   "Preview.Selection.SelectAll": "選擇全部",
+  "Preview.Selection.ClipboardTooLarge": "已選取{0:N0}個字元；剪貼簿無法容納這麼多內容。是否透過「匯出」儲存？",
   "Menu.Options": "選項",
   "Menu.Options.TreeSettings": "樹設定",
   "Menu.Language": "語言",

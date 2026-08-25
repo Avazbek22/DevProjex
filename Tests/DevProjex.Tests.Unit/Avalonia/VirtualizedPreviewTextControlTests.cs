@@ -1191,6 +1191,39 @@ public sealed class VirtualizedPreviewTextControlTests
         Assert.Equal(new PreviewSelectionRange(1, 0, 2, 3), selectionRange);
     }
 
+	[AvaloniaFact]
+	public async Task CopySelection_PublishesBoundedSizeBeforeBuildingClipboardPayload()
+	{
+		using var document = new InMemoryPreviewTextDocument("alpha\nbeta");
+		var control = new VirtualizedPreviewTextControl { Document = document };
+		control.SelectAll();
+		long observedCharacterCount = 0;
+		control.CopyingToClipboard += (_, eventArgs) =>
+		{
+			observedCharacterCount = control.PendingClipboardCharacterCount;
+			eventArgs.Cancel = true;
+		};
+
+		var copyMethod = typeof(VirtualizedPreviewTextControl).GetMethod(
+			"CopySelectionToClipboardAsync",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		var copyTask = Assert.IsAssignableFrom<Task>(copyMethod?.Invoke(control, null));
+		await copyTask;
+
+		Assert.Equal($"alpha{Environment.NewLine}beta".Length, observedCharacterCount);
+		Assert.Equal(0, control.PendingClipboardCharacterCount);
+	}
+
+	[Fact]
+	public void ClipboardSelectionLimit_IsInclusiveAt256MiBOfUtf16Text()
+	{
+		var maximumCharacters =
+			PreviewSurfaceController.MaximumClipboardSelectionBytes / sizeof(char);
+
+		Assert.False(PreviewSurfaceController.ExceedsClipboardSelectionLimit(maximumCharacters));
+		Assert.True(PreviewSurfaceController.ExceedsClipboardSelectionLimit(maximumCharacters + 1));
+	}
+
     [AvaloniaFact]
     public void ClearSelection_AfterSelectAll_RemovesSelectionAndRaisesEvent()
     {

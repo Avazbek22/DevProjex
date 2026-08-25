@@ -96,6 +96,7 @@
   "Preview.FilePath.Copy.Tooltip": "Copier le fichier actuel",
   "Preview.Selection.Copy": "Copier",
   "Preview.Selection.SelectAll": "Tout sélectionner",
+  "Preview.Selection.ClipboardTooLarge": "{0:N0} caractères sont sélectionnés ; le presse-papiers ne peut pas contenir autant de données. Enregistrer via Exporter ?",
   "Menu.Options": "Options",
   "Menu.Options.TreeSettings": "Paramètres de l'arborescence",
   "Menu.Language": "Langue",

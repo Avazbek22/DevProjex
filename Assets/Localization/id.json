@@ -96,6 +96,7 @@
   "Preview.FilePath.Copy.Tooltip": "Salin file saat ini",
   "Preview.Selection.Copy": "Salin",
   "Preview.Selection.SelectAll": "Pilih semua",
+  "Preview.Selection.ClipboardTooLarge": "{0:N0} karakter dipilih; papan klip tidak dapat menampung sebanyak ini. Simpan melalui Ekspor?",
   "Menu.Options": "Pilihan",
   "Menu.Options.TreeSettings": "Pengaturan pohon",
   "Menu.Language": "Bahasa",

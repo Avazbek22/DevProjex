@@ -96,6 +96,7 @@
   "Preview.FilePath.Copy.Tooltip": "現在のファイルをコピーする",
   "Preview.Selection.Copy": "コピー",
   "Preview.Selection.SelectAll": "すべて選択",
+  "Preview.Selection.ClipboardTooLarge": "{0:N0}文字が選択されています。クリップボードではこの量を処理できません。エクスポートで保存しますか？",
   "Menu.Options": "オプション",
   "Menu.Options.TreeSettings": "ツリー設定",
   "Menu.Language": "言語",

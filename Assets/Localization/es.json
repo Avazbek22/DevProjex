@@ -96,6 +96,7 @@
     "Preview.FilePath.Copy.Tooltip":  "Copiar archivo actual",
     "Preview.Selection.Copy":  "Copiar",
     "Preview.Selection.SelectAll":  "Seleccionar todo",
+    "Preview.Selection.ClipboardTooLarge":  "Se han seleccionado {0:N0} caracteres; el portapapeles no admite tanto contenido. ¿Guardarlo mediante Exportar?",
     "Menu.Options":  "Opciones",
     "Menu.Options.TreeSettings":  "Configuración del árbol",
     "Menu.Language":  "Idioma",

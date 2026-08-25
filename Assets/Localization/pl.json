@@ -96,6 +96,7 @@
   "Preview.FilePath.Copy.Tooltip": "Skopiuj bieżący plik",
   "Preview.Selection.Copy": "Kopiuj",
   "Preview.Selection.SelectAll": "Zaznacz wszystko",
+  "Preview.Selection.ClipboardTooLarge": "Wybrano {0:N0} znaków; schowek nie pomieści takiej ilości danych. Zapisać przez Eksport?",
   "Menu.Options": "Opcje",
   "Menu.Options.TreeSettings": "Ustawienia drzewa",
   "Menu.Language": "Język",

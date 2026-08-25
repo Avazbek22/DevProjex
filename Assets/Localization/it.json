@@ -96,6 +96,7 @@
   "Preview.FilePath.Copy.Tooltip": "Copia il file corrente",
   "Preview.Selection.Copy": "Copia",
   "Preview.Selection.SelectAll": "Seleziona tutto",
+  "Preview.Selection.ClipboardTooLarge": "Sono selezionati {0:N0} caratteri; gli Appunti non possono contenerne così tanti. Salvare tramite Esporta?",
   "Menu.Options": "Opzioni",
   "Menu.Options.TreeSettings": "Impostazioni albero",
   "Menu.Language": "Lingua",

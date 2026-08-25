@@ -96,6 +96,7 @@
   "Preview.FilePath.Copy.Tooltip": "Копіювати поточний файл",
   "Preview.Selection.Copy": "Копіювати",
   "Preview.Selection.SelectAll": "Вибрати все",
+  "Preview.Selection.ClipboardTooLarge": "Вибрано {0:N0} символів — буфер обміну не вмістить такий обсяг. Зберегти через експорт?",
   "Menu.Options": "Опції",
   "Menu.Options.TreeSettings": "Налаштування дерева",
   "Menu.Language": "Мова",

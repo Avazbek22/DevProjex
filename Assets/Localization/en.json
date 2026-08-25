@@ -96,6 +96,7 @@
   "Preview.FilePath.Copy.Tooltip": "Copy current file",
   "Preview.Selection.Copy": "Copy",
   "Preview.Selection.SelectAll": "Select all",
+  "Preview.Selection.ClipboardTooLarge": "Selected {0:N0} characters; the clipboard cannot carry this much. Save through Export?",
   "Menu.Options": "Options",
   "Menu.Options.TreeSettings": "Tree settings",
   "Menu.Language": "Language",

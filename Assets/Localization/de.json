@@ -96,6 +96,7 @@
   "Preview.FilePath.Copy.Tooltip": "Aktuelle Datei kopieren",
   "Preview.Selection.Copy": "Kopieren",
   "Preview.Selection.SelectAll": "Alles auswählen",
+  "Preview.Selection.ClipboardTooLarge": "Es sind {0:N0} Zeichen ausgewählt – so viele kann die Zwischenablage nicht aufnehmen. Über ‚Exportieren‘ speichern?",
   "Menu.Options": "Optionen",
   "Menu.Options.TreeSettings": "Baumeinstellungen",
   "Menu.Language": "Sprache",

@@ -96,6 +96,7 @@
   "Preview.FilePath.Copy.Tooltip": "Ағымдағы файлды көшіру",
   "Preview.Selection.Copy": "Көшіру",
   "Preview.Selection.SelectAll": "Барлығын таңдау",
+  "Preview.Selection.ClipboardTooLarge": "{0:N0} таңба таңдалды — алмасу буфері мұндай көлемді сыйғыза алмайды. Экспорт арқылы сақтау керек пе?",
   "Menu.Options": "Параметрлер",
   "Menu.Options.TreeSettings": "Ағаш параметрлері",
   "Menu.Language": "Тіл",

@@ -96,6 +96,7 @@
   "Preview.FilePath.Copy.Tooltip": "Geçerli dosyayı kopyala",
   "Preview.Selection.Copy": "Kopyala",
   "Preview.Selection.SelectAll": "Tümünü seç",
+  "Preview.Selection.ClipboardTooLarge": "{0:N0} karakter seçildi; pano bu kadar veriyi taşıyamaz. Dışa Aktar ile kaydedilsin mi?",
   "Menu.Options": "Seçenekler",
   "Menu.Options.TreeSettings": "Ağaç ayarları",
   "Menu.Language": "Dil",

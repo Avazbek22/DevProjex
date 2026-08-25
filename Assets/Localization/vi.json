@@ -96,6 +96,7 @@
   "Preview.FilePath.Copy.Tooltip": "Sao chép tập tin hiện tại",
   "Preview.Selection.Copy": "Sao chép",
   "Preview.Selection.SelectAll": "Chọn tất cả",
+  "Preview.Selection.ClipboardTooLarge": "Đã chọn {0:N0} ký tự; bảng nhớ tạm không thể chứa lượng dữ liệu này. Lưu bằng Xuất?",
   "Menu.Options": "Tùy chọn",
   "Menu.Options.TreeSettings": "Cài đặt cây",
   "Menu.Language": "Ngôn ngữ",
