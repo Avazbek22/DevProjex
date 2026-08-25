@@ -198,6 +198,28 @@ public sealed class DocumentationAndPackagingContractTests
 	}
 
 	[Fact]
+	public void CliContractListsEverySupportedLanguageCode()
+	{
+		var rootPath = FindRepositoryRoot();
+		var contract = File.ReadAllText(Path.Combine(rootPath, "Docs", "CLI-V1-Contract.md"));
+		var tokenBlock = Regex.Match(
+			contract,
+			"supported canonical tokens are:\\s*```text\\s*(?<tokens>[^`]+)```",
+			RegexOptions.CultureInvariant);
+		var documentedCodes = tokenBlock.Groups["tokens"].Value
+			.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+			.Order(StringComparer.Ordinal)
+			.ToArray();
+		var supportedCodes = Enum.GetValues<DevProjex.Kernel.Models.AppLanguage>()
+			.Select(DevProjex.Kernel.Models.AppLanguageUtility.ToCode)
+			.Order(StringComparer.Ordinal)
+			.ToArray();
+
+		Assert.True(tokenBlock.Success, "The CLI contract language-token block is missing.");
+		Assert.Equal(supportedCodes, documentedCodes);
+	}
+
+	[Fact]
 	public void UserDocumentationDoesNotAdvertiseTheRemovedFlatCli()
 	{
 		var rootPath = FindRepositoryRoot();

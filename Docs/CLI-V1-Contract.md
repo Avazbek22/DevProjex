@@ -135,7 +135,7 @@ data.
 supported canonical tokens are:
 
 ```text
-en ru de fr it es pt pt-pt kk tg uz
+en ru de fr it es pt pt-pt kk tg uz zh-cn zh-tw ja ko tr uk pl vi id
 ```
 
 The default is the detected application language. It affects human help,
