@@ -480,7 +480,8 @@ public sealed class TerminalWorkspaceController(
 						cancellationToken,
 						MapDisplayPath,
 						includeOmissionMarkers: true,
-						transformationContext: transformationContext)
+						transformationContext: transformationContext,
+						projectRoot: plan.SourceRoot)
 					.ConfigureAwait(false) ??
 				services.PreviewDocumentBuilder.CreateInMemory(string.Empty),
 			ProjectContextView.TreeContent => await services.PreviewDocumentBuilder
@@ -490,7 +491,8 @@ public sealed class TerminalWorkspaceController(
 					cancellationToken,
 					MapDisplayPath,
 					includeOmissionMarkers: true,
-					transformationContext: transformationContext)
+					transformationContext: transformationContext,
+					projectRoot: plan.SourceRoot)
 				.ConfigureAwait(false),
 			_ => throw new ArgumentOutOfRangeException(nameof(view), view, null)
 		};

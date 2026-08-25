@@ -1335,7 +1335,8 @@ internal sealed class PreviewSurfaceController : IDisposable
 						transformationContext: transformationContext,
 						includeSourceCoordinateMaps: true,
 						displayRootPath: null,
-						outputPathRedaction: outputPathRedaction)
+						outputPathRedaction: outputPathRedaction,
+						projectRoot: currentPath)
                     .GetAwaiter()
                     .GetResult();
             return new PreviewBuildResult(
@@ -1409,7 +1410,8 @@ internal sealed class PreviewSurfaceController : IDisposable
                     transformationContext: transformationContext,
 					includeSourceCoordinateMaps: true,
 					outputPathRedaction: outputPathRedaction,
-					treeRootPresentation: treeRootPathPresentation)
+					treeRootPresentation: treeRootPathPresentation,
+					projectRoot: currentPath)
                 .GetAwaiter()
                 .GetResult();
         return new PreviewBuildResult(document);

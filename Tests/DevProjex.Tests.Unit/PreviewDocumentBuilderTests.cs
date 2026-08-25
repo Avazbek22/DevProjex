@@ -77,6 +77,64 @@ public sealed class PreviewDocumentBuilderTests
 	}
 
 	[Fact]
+	public async Task BuildContentDocumentAsync_RejectsAPathOutsideTheProjectRoot()
+	{
+		using var workspace = new TemporaryDirectory();
+		var projectRoot = workspace.CreateFolder("project");
+		var externalPath = workspace.CreateFile("outside.txt", "external private content");
+		var builder = new PreviewDocumentBuilder(new FileContentAnalyzer());
+
+		using var document = await builder.BuildContentDocumentAsync(
+			[externalPath],
+			TestContext.Current.CancellationToken,
+			Path.GetFileName,
+			includeOmissionMarkers: true,
+			projectRoot: projectRoot);
+
+		Assert.NotNull(document);
+		Assert.DoesNotContain(
+			"external private content",
+			document.GetFullText(),
+			StringComparison.Ordinal);
+		Assert.Contains("[File could not be read]", document.GetFullText(), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task BuildContentDocumentAsync_RejectsAStaleSymbolicLinkFromTheSelection()
+	{
+		using var workspace = new TemporaryDirectory();
+		var projectRoot = workspace.CreateFolder("project");
+		var externalPath = workspace.CreateFile("outside.txt", "external private content");
+		var selectedPath = Path.Combine(projectRoot, "selected.txt");
+		try
+		{
+			File.CreateSymbolicLink(selectedPath, externalPath);
+			if (!File.GetAttributes(selectedPath).HasFlag(FileAttributes.ReparsePoint))
+				Assert.Skip("File symbolic links are not exposed as reparse points on this host.");
+		}
+		catch (Exception exception) when (
+			exception is IOException or UnauthorizedAccessException or NotSupportedException)
+		{
+			Assert.Skip($"File symbolic links are unavailable: {exception.GetType().Name}.");
+		}
+
+		var builder = new PreviewDocumentBuilder(new FileContentAnalyzer());
+		using var document = await builder.BuildContentDocumentAsync(
+			[selectedPath],
+			TestContext.Current.CancellationToken,
+			Path.GetFileName,
+			includeOmissionMarkers: true,
+			projectRoot: projectRoot);
+
+		Assert.NotNull(document);
+		Assert.DoesNotContain(
+			"external private content",
+			document.GetFullText(),
+			StringComparison.Ordinal);
+		Assert.Contains("[File could not be read]", document.GetFullText(), StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void PreviewStorage_RejectsLinkedProductDirectory()
 	{
 		using var storage = new TemporaryDirectory();

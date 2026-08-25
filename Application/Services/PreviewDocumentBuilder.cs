@@ -90,7 +90,8 @@ public sealed class PreviewDocumentBuilder(
 		ContentTransformationContext? transformationContext = null,
 		bool includeSourceCoordinateMaps = false,
 		string? displayRootPath = null,
-		OutputPathRedactionDecision? outputPathRedaction = null)
+		OutputPathRedactionDecision? outputPathRedaction = null,
+		string? projectRoot = null)
     {
         var orderedFiles = BuildOrderedUniqueFiles(filePaths);
 		outputPathRedaction ??= OutputRootPathPresentation.CaptureRedactionDecision(transformationContext);
@@ -130,6 +131,7 @@ public sealed class PreviewDocumentBuilder(
 			redactions,
 			includeSourceCoordinateMaps,
 			outputPathRedaction,
+			projectRoot,
             cancellationToken).ConfigureAwait(false);
 
 		CompleteTransformation(transformationScope, transformationContext);
@@ -148,7 +150,8 @@ public sealed class PreviewDocumentBuilder(
 		ContentTransformationContext? transformationContext = null,
 		bool includeSourceCoordinateMaps = false,
 		OutputPathRedactionDecision? outputPathRedaction = null,
-		OutputPathPresentationResult? treeRootPresentation = null)
+		OutputPathPresentationResult? treeRootPresentation = null,
+		string? projectRoot = null)
     {
         var orderedFiles = BuildOrderedUniqueFiles(filePaths);
 		outputPathRedaction ??= OutputRootPathPresentation.CaptureRedactionDecision(transformationContext);
@@ -182,6 +185,7 @@ public sealed class PreviewDocumentBuilder(
 			redactions,
 			includeSourceCoordinateMaps,
 			outputPathRedaction,
+			projectRoot,
             cancellationToken).ConfigureAwait(false);
 		CompleteTransformation(transformationScope, transformationContext);
 
@@ -228,6 +232,7 @@ public sealed class PreviewDocumentBuilder(
 		ICollection<PreviewRedactionSpan> redactions,
 		bool includeSourceCoordinateMaps,
 		OutputPathRedactionDecision? outputPathRedaction,
+		string? projectRoot,
         CancellationToken cancellationToken)
     {
         var anyWritten = false;
@@ -238,6 +243,7 @@ public sealed class PreviewDocumentBuilder(
                            displayPathMapper,
                            redactionScope,
                            transformationScope,
+						   projectRoot,
                            cancellationToken).ConfigureAwait(false))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -393,6 +399,7 @@ public sealed class PreviewDocumentBuilder(
         Func<string, string>? displayPathMapper,
         SecretRedactionScope? redactionScope,
         ContentTransformationScope? transformationScope,
+		string? projectRoot,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         if (transformationScope?.Compression is null)
@@ -404,6 +411,7 @@ public sealed class PreviewDocumentBuilder(
                         displayPathMapper,
                         redactionScope,
                         transformationScope,
+						projectRoot,
                         cancellationToken)
                     .ConfigureAwait(false);
             }
@@ -422,6 +430,7 @@ public sealed class PreviewDocumentBuilder(
                                    displayPathMapper,
                                    redactionScope,
                                    transformationScope,
+								   projectRoot,
                                    cancellationToken).ConfigureAwait(false))
                 {
                     yield return entry;
@@ -433,6 +442,7 @@ public sealed class PreviewDocumentBuilder(
                         displayPathMapper,
                         redactionScope,
                         transformationScope,
+						projectRoot,
                         cancellationToken)
                     .ConfigureAwait(false);
                 continue;
@@ -447,6 +457,7 @@ public sealed class PreviewDocumentBuilder(
                                displayPathMapper,
                                redactionScope,
                                transformationScope,
+							   projectRoot,
                                cancellationToken).ConfigureAwait(false))
             {
                 yield return entry;
@@ -460,6 +471,7 @@ public sealed class PreviewDocumentBuilder(
                            displayPathMapper,
                            redactionScope,
                            transformationScope,
+						   projectRoot,
                            cancellationToken).ConfigureAwait(false))
         {
             yield return entry;
@@ -471,6 +483,7 @@ public sealed class PreviewDocumentBuilder(
         Func<string, string>? displayPathMapper,
         SecretRedactionScope? redactionScope,
         ContentTransformationScope transformationScope,
+		string? projectRoot,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         if (files.Count == 0)
@@ -486,6 +499,7 @@ public sealed class PreviewDocumentBuilder(
                     displayPathMapper,
                     redactionScope,
                     transformationScope,
+					projectRoot,
                     cancellationToken).AsTask(),
                 cancellationToken);
         }
@@ -500,20 +514,34 @@ public sealed class PreviewDocumentBuilder(
         Func<string, string>? displayPathMapper,
         SecretRedactionScope? redactionScope,
         ContentTransformationScope? transformationScope,
+		string? projectRoot,
         CancellationToken cancellationToken)
     {
         var maximumFileBytes = redactionScope is null
             ? MaximumInteractiveFileBytes
             : SecretRedactionOutputPreparer.MaximumScannableFileBytes;
-		var readFact = await contentAnalyzer
-			.ReadFactAsync(file, maximumFileBytes, cancellationToken)
-			.ConfigureAwait(false);
-		var readResult = readFact.ToReadResult();
+		var unavailable = ClassifyUnavailableSource(projectRoot, file);
+		ContentReadFact? readFact = null;
+		FileContentReadResult readResult;
+		if (unavailable is { } unavailableBeforeRead)
+		{
+			readResult = new FileContentReadResult(unavailableBeforeRead);
+		}
+		else
+		{
+			readFact = await contentAnalyzer
+				.ReadFactAsync(file, maximumFileBytes, cancellationToken)
+				.ConfigureAwait(false);
+			var unavailableAfterRead = ClassifyUnavailableSource(projectRoot, file);
+			readResult = unavailableAfterRead is { } classification
+				? new FileContentReadResult(classification)
+				: readFact.ToReadResult();
+		}
         var displayPath = MapDisplayPath(file, displayPathMapper);
         var content = readResult.Content;
 		var compression = readResult.IsText &&
 		                  content is { IsEstimated: false, IsEmpty: false, IsWhitespaceOnly: false }
-			? readFact.Fingerprint is { } fingerprint
+			? readFact?.Fingerprint is { } fingerprint
 				? transformationScope?.Compress(
 					file,
 					displayPath,
@@ -528,6 +556,13 @@ public sealed class PreviewDocumentBuilder(
 			: null;
         return new PreparedContentEntry(file, displayPath, readResult, compression);
     }
+
+	private static FileContentClassification? ClassifyUnavailableSource(
+		string? projectRoot,
+		string path) =>
+		string.IsNullOrWhiteSpace(projectRoot)
+			? null
+			: ProjectSourcePathPolicy.ClassifyUnavailable(projectRoot, path);
 
     private static bool IsSmallFile(string path)
     {
