@@ -98,6 +98,16 @@ public sealed class TerminalWorkspaceCommandParserTests
 		Assert.Contains(profile.Candidates, candidate => candidate.Token == "save");
 	}
 
+	[Fact]
+	public void CompletionReplacesTheWholeTokenWhenTheCursorIsInsideIt()
+	{
+		var completion = _parser.GetCompletion("viw content", 2, Context);
+
+		var candidate = Assert.Single(completion.Candidates, static item => item.Token == "view");
+		Assert.Equal("view content", candidate.CompletedText);
+		Assert.Equal(4, candidate.CursorPosition);
+	}
+
 	[Theory]
 	[MemberData(nameof(InvalidCommands))]
 	internal void Parse_ReturnsStructuredErrors(
