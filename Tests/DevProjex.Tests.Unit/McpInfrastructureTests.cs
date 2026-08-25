@@ -334,6 +334,29 @@ public sealed class McpInfrastructureTests
 		Assert.Equal("\nvalue", sliced.Text);
 	}
 
+	[Theory]
+	[InlineData("value\n")]
+	[InlineData("value\r\n")]
+	[InlineData("value\r")]
+	public async Task TextPageReaderPreservesTheTrailingEmptyLine(string content)
+	{
+		await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(content));
+
+		var page = await McpTextRanges.ReadPageAsync(
+			stream,
+			startLine: 2,
+			endLine: 2,
+			maximumLines: 10,
+			maximumCharacters: 100,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(string.Empty, page.Text);
+		Assert.Equal(2, page.StartLine);
+		Assert.Equal(2, page.EndLine);
+		Assert.Equal(2, page.TotalLines);
+		Assert.False(page.IsTruncated);
+	}
+
 	[Fact]
 	public void TextRangesRejectInvalidRangesAndReportCharacterTruncation()
 	{

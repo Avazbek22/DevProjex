@@ -42,6 +42,7 @@ internal static class McpTextRanges
 		var currentLineHasContent = false;
 		var currentLineOverflowed = false;
 		var previousWasCarriageReturn = false;
+		var endedWithLineBreak = false;
 		var bufferedLineLimit = maximumCharacters == int.MaxValue
 			? int.MaxValue
 			: maximumCharacters + 1;
@@ -98,6 +99,7 @@ internal static class McpTextRanges
 				{
 					if (character == '\n')
 					{
+						endedWithLineBreak = true;
 						if (previousWasCarriageReturn)
 						{
 							previousWasCarriageReturn = false;
@@ -109,12 +111,14 @@ internal static class McpTextRanges
 
 					if (character == '\r')
 					{
+						endedWithLineBreak = true;
 						previousWasCarriageReturn = true;
 						CompleteLine();
 						continue;
 					}
 
 					previousWasCarriageReturn = false;
+					endedWithLineBreak = false;
 					currentLineHasContent = true;
 					if (characterLimit || !ShouldCaptureLine(total + 1))
 						continue;
@@ -125,7 +129,7 @@ internal static class McpTextRanges
 				}
 			}
 
-			if (currentLineHasContent)
+			if (currentLineHasContent || endedWithLineBreak)
 				CompleteLine();
 		}
 		finally
