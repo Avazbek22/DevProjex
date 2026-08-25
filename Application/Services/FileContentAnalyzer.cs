@@ -33,6 +33,7 @@ public sealed class FileContentAnalyzer :
 
 	// Buffer size for streaming read (balance between memory and I/O efficiency)
 	private const int StreamingBufferSize = 8192;
+	private const FileShare SourceReadShare = FileShare.Read | FileShare.Delete;
 
 	// Known binary extensions - skip file read entirely (fast path)
 	private static readonly FrozenSet<string> KnownBinaryExtensions = new[]
@@ -157,7 +158,7 @@ public sealed class FileContentAnalyzer :
 					null);
 			}
 
-			using var stream = _openSequentialRead(path, StreamingBufferSize, FileShare.Read, false);
+			using var stream = _openSequentialRead(path, StreamingBufferSize, SourceReadShare, false);
 			var reservation = EstimateMaximumRetainedFactBytes(stream.Length, maximumReadBytes);
 			lease = await byteBudget.AcquireAsync(reservation, cancellationToken).ConfigureAwait(false);
 			await decodeScratchGate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -257,7 +258,7 @@ public sealed class FileContentAnalyzer :
 			using var stream = _openSequentialRead(
 				path,
 				1,
-				FileShare.Read | FileShare.Delete,
+				SourceReadShare,
 				false);
 			var sizeBytes = stream.Length;
 			if (sizeBytes == 0)
@@ -423,7 +424,7 @@ public sealed class FileContentAnalyzer :
 					null);
 
 			// Decoding owns pooled byte/char buffers; a second FileStream buffer only duplicates memory.
-			using var stream = _openSequentialRead(path, 1, FileShare.Read, false);
+			using var stream = _openSequentialRead(path, 1, SourceReadShare, false);
 			var sizeBytes = stream.Length;
 
 			if (sizeBytes == 0)
@@ -542,7 +543,7 @@ public sealed class FileContentAnalyzer :
 			stream = _openSequentialRead(
 				path,
 				StreamingBufferSize,
-				FileShare.Read | FileShare.Delete,
+				SourceReadShare,
 				true);
 			var sizeBytes = stream.Length;
 			if (sizeBytes == 0)
@@ -670,7 +671,7 @@ public sealed class FileContentAnalyzer :
 					null);
 			}
 
-			using var stream = _openSequentialRead(path, StreamingBufferSize, FileShare.Read, false);
+			using var stream = _openSequentialRead(path, StreamingBufferSize, SourceReadShare, false);
 			var fact = ReadFactFromOpenStream(stream, maxSizeForFullRead, cancellationToken);
 			return new IdentifiedContentReadFact(fact, FileContentIdentity.TryCapture(stream));
 		}

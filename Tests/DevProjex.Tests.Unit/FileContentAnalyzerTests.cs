@@ -85,6 +85,57 @@ public sealed class FileContentAnalyzerTests
 		Assert.Equal("unexpected prewarm failure", exception.Message);
 	}
 
+	[Fact]
+	public async Task SourceReadsAllowAtomicReplacementButNotInPlaceMutation()
+	{
+		using var temp = new TemporaryDirectory();
+		var path = temp.CreateFile("source.txt", "ordinary text");
+		var observedShares = new List<FileShare>();
+		var analyzer = new FileContentAnalyzer(
+			(filePath, bufferSize, share, asynchronous) =>
+			{
+				observedShares.Add(share);
+				return new FileStream(
+					filePath,
+					FileMode.Open,
+					FileAccess.Read,
+					share,
+					bufferSize,
+					FileOptions.SequentialScan |
+					(asynchronous ? FileOptions.Asynchronous : FileOptions.None));
+			});
+
+		await analyzer.GetClassifiedMetricsAsync(path, TestContext.Current.CancellationToken);
+		await analyzer.ReadFactAsync(path, 1024, TestContext.Current.CancellationToken);
+		await using (await analyzer.OpenCompleteTextBufferAsync(
+			path,
+			1024,
+			TestContext.Current.CancellationToken))
+		{
+		}
+		await using (await analyzer.OpenCompleteSnapshotAsync(
+			path,
+			TestContext.Current.CancellationToken))
+		{
+		}
+		using var byteBudget = new WeightedByteBudget(4096);
+		using var decodeGate = new SemaphoreSlim(1, 1);
+		var budgeted = await ((IPrewarmFileContentAnalyzer)analyzer).ReadFactWithBudgetAsync(
+			path,
+			1024,
+			byteBudget,
+			decodeGate,
+			TestContext.Current.CancellationToken);
+		budgeted.Lease?.Dispose();
+
+		Assert.NotEmpty(observedShares);
+		Assert.All(observedShares, static share =>
+		{
+			Assert.True(share.HasFlag(FileShare.Delete));
+			Assert.False(share.HasFlag(FileShare.Write));
+		});
+	}
+
 	private static async Task<FileContentClassification> ClassifyAsync(
 		FileContentAnalyzer analyzer,
 		string path,
