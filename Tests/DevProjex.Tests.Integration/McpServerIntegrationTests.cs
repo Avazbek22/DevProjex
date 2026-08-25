@@ -270,6 +270,32 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task SearchAcceptsWhitespaceRegexAndUnixWhitespaceOnlyFilePaths()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Sample.txt"), "alpha beta\n");
+		if (!OperatingSystem.IsWindows())
+			File.WriteAllText(Path.Combine(project, " "), "whitespace-name\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var search = await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?> { ["pattern"] = " ", ["context_lines"] = 0 });
+
+		Assert.NotEqual(true, search.IsError);
+		Assert.Contains("Sample.txt:1:alpha beta", Text(search), StringComparison.Ordinal);
+		if (OperatingSystem.IsWindows())
+			return;
+
+		var file = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = " " });
+		Assert.NotEqual(true, file.IsError);
+		Assert.Contains("whitespace-name", Text(file), StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task LongRunningToolsReportOrderedProgressOnlyForRequestedTokens()
 	{
 		using var workspace = new TemporaryDirectory();

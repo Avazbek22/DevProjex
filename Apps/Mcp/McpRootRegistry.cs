@@ -10,7 +10,7 @@ public sealed class McpRootRegistry
 		var normalized = new List<string>();
 		foreach (var root in roots)
 		{
-			if (string.IsNullOrWhiteSpace(root))
+			if (IsMissingPath(root))
 				continue;
 			var physical = ResolvePhysicalExistingPath(root, requireDirectory: true);
 			if (!normalized.Contains(physical, PathComparer.Default))
@@ -52,7 +52,7 @@ public sealed class McpRootRegistry
 
 	public string ResolveExistingPath(string projectRoot, string path, bool requireDirectory = false)
 	{
-		if (string.IsNullOrWhiteSpace(path))
+		if (IsMissingPath(path))
 			throw InvalidPath();
 
 		string candidate;
@@ -135,6 +135,10 @@ public sealed class McpRootRegistry
 				? StringComparison.OrdinalIgnoreCase
 				: StringComparison.Ordinal);
 	}
+
+	private static bool IsMissingPath(string? path) =>
+		string.IsNullOrEmpty(path) ||
+		(OperatingSystem.IsWindows() && string.IsNullOrWhiteSpace(path));
 
 	private McpToolException UnknownProject(string project) =>
 		new(

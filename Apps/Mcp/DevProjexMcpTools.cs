@@ -301,7 +301,7 @@ internal sealed class DevProjexMcpTools(
 				"ignore_case",
 				"max_results",
 				"tracked_only");
-			var pattern = arguments.RequiredString("pattern");
+			var pattern = arguments.RequiredString("pattern", allowWhitespace: true);
 			var contextLines = arguments.OptionalInteger("context_lines", 0, 20) ?? 2;
 			var ignoreCase = arguments.OptionalBoolean("ignore_case", true);
 			var maximumResults = arguments.OptionalInteger("max_results", 1, 200) ?? 50;
@@ -367,7 +367,7 @@ internal sealed class DevProjexMcpTools(
 				profile: null,
 				trackedOnly: false,
 				cancellationToken).ConfigureAwait(false);
-			var file = projects.ResolveFile(plan, arguments.RequiredString("path"));
+			var file = projects.ResolveFile(plan, arguments.RequiredString("path", allowWhitespace: true));
 			await using var prepared = await projects.PrepareAsync(plan with { IncludedFiles = [file] }, cancellationToken)
 				.ConfigureAwait(false);
 			var content = await projects.CreatePreparedAnalyzer(prepared)
@@ -408,7 +408,7 @@ internal sealed class DevProjexMcpTools(
 		CancellationToken cancellationToken) =>
 		projects.BuildPlanAsync(
 			arguments.OptionalString("project"),
-			arguments.OptionalStringArray("paths"),
+			arguments.OptionalStringArray("paths", allowWhitespace: true),
 			arguments.OptionalStringArray("include_patterns"),
 			arguments.OptionalStringArray("exclude_patterns"),
 			arguments.OptionalString("profile"),

@@ -184,7 +184,9 @@ internal sealed class McpProjectService(McpRootRegistry roots, McpServices servi
 
 	private ProjectProfileReference ResolveProfile(string projectRoot, string? profile)
 	{
-		if (string.IsNullOrWhiteSpace(profile) || profile.Equals("standard", StringComparison.Ordinal))
+		if (string.IsNullOrEmpty(profile) ||
+		    (OperatingSystem.IsWindows() && string.IsNullOrWhiteSpace(profile)) ||
+		    profile.Equals("standard", StringComparison.Ordinal))
 			return ProjectProfileReference.Standard;
 		if (profile.Equals("local", StringComparison.Ordinal))
 			return ProjectProfileReference.Local;

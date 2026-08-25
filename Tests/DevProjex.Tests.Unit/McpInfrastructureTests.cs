@@ -190,6 +190,28 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public void JsonArgumentsPreserveWhitespaceForContentPatternsAndPaths()
+	{
+		var request = new CallToolRequestParams
+		{
+			Name = "test",
+			Arguments = new Dictionary<string, JsonElement>
+			{
+				["pattern"] = JsonSerializer.SerializeToElement(" "),
+				["paths"] = JsonSerializer.SerializeToElement(new[] { " " }),
+				["pack_id"] = JsonSerializer.SerializeToElement(" ")
+			}
+		};
+		var arguments = McpJsonArguments.Create(request, "pattern", "paths", "pack_id");
+
+		Assert.Equal(" ", arguments.RequiredString("pattern", allowWhitespace: true));
+		Assert.Equal([" "], arguments.OptionalStringArray("paths", allowWhitespace: true));
+		Assert.Equal(
+			McpErrorCodes.InvalidArguments,
+			Assert.Throws<McpToolException>(() => arguments.RequiredString("pack_id")).Code);
+	}
+
+	[Fact]
 	public void DetailPolicyMapsLevelsAndUnionsThemWithProfileTransformations()
 	{
 		var full = McpDetailPolicy.Resolve(new ProjectSelectionSpec(), McpDetailLevel.Full);
