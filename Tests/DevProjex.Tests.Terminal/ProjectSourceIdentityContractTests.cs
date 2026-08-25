@@ -1,5 +1,6 @@
 namespace DevProjex.Tests.Terminal;
 
+[Collection(EnvironmentVariableCollection.Name)]
 public sealed class ProjectSourceIdentityContractTests
 {
 	[Fact]
@@ -51,6 +52,43 @@ public sealed class ProjectSourceIdentityContractTests
 		Assert.Equal(projectName, identity.DisplayName);
 		Assert.Equal(projectName, plan.EffectiveTree.DisplayName);
 		Assert.Equal(projectName, plan.ProjectedTree.DisplayName);
+	}
+
+	[Fact]
+	public async Task ContextPlanAcceptsRelativeWhitespaceOnlyUnixProjectPath()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Windows does not support this directory name through ordinary APIs.");
+			return;
+		}
+
+		using var temporary = new TemporaryDirectory();
+		var projectPath = temporary.CreateDirectory(" ");
+		temporary.WriteFile(" /App.cs", "class App {}\n");
+		var dataRoot = temporary.CreateDirectory("data");
+		var originalCurrentDirectory = Environment.CurrentDirectory;
+		try
+		{
+			Environment.CurrentDirectory = temporary.Path;
+			var services = new TerminalServiceFactory(() => dataRoot).Create(AppLanguage.En);
+			var selection = await services.SelectionResolver.ResolveAsync(
+				" ",
+				ProjectProfileReference.Standard,
+				new ProjectSelectionSpec(),
+				TestContext.Current.CancellationToken);
+
+			var plan = await services.ContextPlanner.BuildAsync(
+				new ProjectContextRequest(" ", selection),
+				TestContext.Current.CancellationToken);
+
+			Assert.Equal(PathUtility.Normalize(projectPath), plan.SourceRoot);
+			Assert.Equal(" ", plan.EffectiveTree.DisplayName);
+		}
+		finally
+		{
+			Environment.CurrentDirectory = originalCurrentDirectory;
+		}
 	}
 
 	[Fact]

@@ -336,7 +336,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 
 	private static string NormalizeSourceRoot(string path)
 	{
-		if (string.IsNullOrWhiteSpace(path))
+		if (string.IsNullOrEmpty(path) ||
+		    (OperatingSystem.IsWindows() && string.IsNullOrWhiteSpace(path)))
 			throw new ProjectContextValidationException("DPX-PROJECT-PATH-REQUIRED", "Project path is required.");
 
 		var normalized = PathUtility.Normalize(path);
