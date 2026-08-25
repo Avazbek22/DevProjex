@@ -280,6 +280,40 @@ public sealed partial class TerminalLocalizationContractTests
 		Assert.DoesNotMatch(ForbiddenSpaceBeforePunctuationRegex(), RemoveTechnicalLiterals(value));
 	}
 
+	[Fact]
+	public void EveryLocalePreservesExecutableQuickStartAndHelpCommands()
+	{
+		foreach (var (locale, catalog) in ReadCatalogs())
+		{
+			var quickStart = catalog["Terminal.Tui.Welcome.QuickStart"];
+			Assert.Contains("devprojex analyze .", quickStart, StringComparison.Ordinal);
+			Assert.Contains(
+				"devprojex export context . -o context.md",
+				quickStart,
+				StringComparison.Ordinal);
+		}
+
+		var helpDirectory = Path.Combine(FindRepositoryRoot(), "Assets", "HelpContent");
+		foreach (var path in Directory.GetFiles(helpDirectory, "help.*.txt", SearchOption.TopDirectoryOnly))
+		{
+			var help = File.ReadAllText(path);
+			Assert.Matches("(?m)^MD\\s*[:：]$", help.ReplaceLineEndings("\n"));
+			Assert.Contains("`Root: ...`", help, StringComparison.Ordinal);
+			Assert.Contains(
+				"`devprojex export context . --format markdown -o ../devprojex-context.md`",
+				help,
+				StringComparison.Ordinal);
+			Assert.Contains(
+				"`devprojex export project . --as folder -o ../devprojex-submission`",
+				help,
+				StringComparison.Ordinal);
+			Assert.Contains(
+				"`devprojex export project . --as zip -o ../devprojex-submission.zip`",
+				help,
+				StringComparison.Ordinal);
+		}
+	}
+
 	[Theory]
 	[InlineData("word .")]
 	[InlineData("{0} .")]

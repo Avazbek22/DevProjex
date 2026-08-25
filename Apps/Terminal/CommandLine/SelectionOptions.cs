@@ -115,6 +115,24 @@ internal sealed class SelectionOptions
 		Execution.TerminalServices services,
 		CancellationToken cancellationToken)
 	{
+		var selectedPaths = await ReadSelectedPathsAsync(
+			parseResult,
+			cancellationToken).ConfigureAwait(false);
+		return await ResolveAsync(
+			parseResult,
+			projectPath,
+			services,
+			selectedPaths,
+			cancellationToken).ConfigureAwait(false);
+	}
+
+	public async Task<ProjectSelectionSpec> ResolveAsync(
+		ParseResult parseResult,
+		string projectPath,
+		Execution.TerminalServices services,
+		IReadOnlyCollection<string>? selectedPaths,
+		CancellationToken cancellationToken)
+	{
 		var profileValue = parseResult.GetValue(Profile);
 		var profile = profileValue.Resolve(projectPath, services);
 		GitFilteringMode? gitMode = parseResult.GetResult(GitMode) is null
@@ -143,9 +161,6 @@ internal sealed class SelectionOptions
 		                        parseResult.GetResult(StripBlankLines) is { Implicit: false }
 			? parseResult.GetValue(StripBlankLines)
 			: null;
-		var selectedPaths = await ResolveSelectedPathsAsync(
-			parseResult,
-			cancellationToken).ConfigureAwait(false);
 		SelectedPathExistenceValidator.Validate(projectPath, selectedPaths);
 		var overrides = new ProjectSelectionSpec(
 			Roots: GetExplicitValues(parseResult, Roots),
@@ -165,7 +180,7 @@ internal sealed class SelectionOptions
 			.ConfigureAwait(false);
 	}
 
-	private async Task<IReadOnlyCollection<string>?> ResolveSelectedPathsAsync(
+	public async Task<IReadOnlyCollection<string>?> ReadSelectedPathsAsync(
 		ParseResult parseResult,
 		CancellationToken cancellationToken)
 	{

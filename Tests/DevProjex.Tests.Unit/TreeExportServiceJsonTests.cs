@@ -221,6 +221,9 @@ public sealed class TreeExportServiceJsonTests
 	[Fact]
 	public void BuildFullTree_JsonTree_NormalizesWindowsRootPathToForwardSlashes()
 	{
+		if (!OperatingSystem.IsWindows())
+			Assert.Skip("A Windows drive path is not an absolute filesystem path on Unix.");
+
 		var rootPath = @"C:\Users\name\Project";
 		var root = new TreeNodeDescriptor(
 			"Project",

@@ -297,6 +297,45 @@ public sealed class InfrastructureJsonPersistenceTests
 		Assert.Equal("{ invalid json", File.ReadAllText(fileSet.PrimaryPath));
 	}
 
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public void JsonStorePersistence_TryReadNormalized_RejectsMalformedUtf8WithoutMutatingPrimary(
+		bool useBoundedReader)
+	{
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "settings.json");
+		Directory.CreateDirectory(fileSet.DirectoryPath);
+		var prefix = Encoding.UTF8.GetBytes("{\"name\":\"");
+		var suffix = Encoding.UTF8.GetBytes("\",\"count\":3}");
+		var payload = prefix.Concat([byte.MaxValue]).Concat(suffix).ToArray();
+		File.WriteAllBytes(fileSet.PrimaryPath, payload);
+
+		TestDocument document;
+		bool requiresRewrite;
+		var result = useBoundedReader
+			? JsonStorePersistence.TryReadNormalized(
+				fileSet.PrimaryPath,
+				JsonOptions,
+				static () => new TestDocument("default", 0),
+				static document => document,
+				out document,
+				out requiresRewrite,
+				maximumDocumentBytes: 256)
+			: JsonStorePersistence.TryReadNormalized(
+				fileSet.PrimaryPath,
+				JsonOptions,
+				static () => new TestDocument("default", 0),
+				static document => document,
+				out document,
+				out requiresRewrite);
+
+		Assert.False(result);
+		Assert.False(requiresRewrite);
+		Assert.Equal(new TestDocument("default", 0), document);
+		Assert.Equal(payload, File.ReadAllBytes(fileSet.PrimaryPath));
+	}
+
 	[Fact]
 	public void JsonStorePersistence_TryReadNormalized_ReportsRewriteOnlyAfterSuccessfulNormalization()
 	{
@@ -393,6 +432,22 @@ public sealed class InfrastructureJsonPersistenceTests
 		Assert.Equal(257, new FileInfo(fileSet.PrimaryPath).Length);
 	}
 
+	[Fact]
+	public void JsonStorePersistence_ContainsFutureDocument_DefaultLimitProtectsGrowingStores()
+	{
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "settings.json");
+		Directory.CreateDirectory(fileSet.DirectoryPath);
+		using (var stream = new FileStream(fileSet.PrimaryPath, FileMode.CreateNew, FileAccess.Write))
+			stream.SetLength(JsonStorePersistence.SmallDocumentMaximumBytes + 1);
+
+		var protectedDocument = JsonStorePersistence.ContainsFutureDocument(
+			fileSet,
+			currentSchemaVersion: 1);
+
+		Assert.True(protectedDocument);
+	}
+
 	[Theory]
 	[InlineData("utf16-le")]
 	[InlineData("utf16-be")]
@@ -464,6 +519,28 @@ public sealed class InfrastructureJsonPersistenceTests
 		Assert.Equal(File.ReadAllText(fileSet.PrimaryPath), File.ReadAllText(fileSet.BackupPath));
 		Assert.Empty(Directory.EnumerateFiles(fileSet.DirectoryPath, "*.tmp"));
 		Assert.Contains("\"name\":\"committed\"", File.ReadAllText(fileSet.PrimaryPath));
+	}
+
+	[Fact]
+	public void JsonStorePersistence_TryWriteAtomic_RestrictsUnixStoreCopiesToCurrentUser()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Unix file modes do not apply on Windows.");
+			return;
+		}
+
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "settings.json");
+
+		Assert.True(JsonStorePersistence.TryWriteAtomic(
+			fileSet,
+			new TestDocument("private", 1),
+			JsonOptions));
+
+		const UnixFileMode expected = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+		Assert.Equal(expected, File.GetUnixFileMode(fileSet.PrimaryPath));
+		Assert.Equal(expected, File.GetUnixFileMode(fileSet.BackupPath));
 	}
 
 	[Fact]

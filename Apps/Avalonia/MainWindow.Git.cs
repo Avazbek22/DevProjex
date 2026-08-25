@@ -414,9 +414,9 @@ public partial class MainWindow
 				cancellationToken);
 			if (session is null)
 			{
-				_toastService.Show(_localization["Toast.Git.CacheEntryMissing"]);
 				if (_gitCloneWindow is not null)
 					await RefreshGitCloneCacheAsync(_gitCloneWindow, cancellationToken);
+				_toastService.Show(_localization["Toast.Git.CacheEntryMissing"]);
 				return;
 			}
 

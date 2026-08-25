@@ -1,4 +1,5 @@
 using System.Globalization;
+using DevProjex.Terminal.Rendering;
 
 namespace DevProjex.Terminal.Tui;
 
@@ -485,17 +486,20 @@ internal sealed partial class TerminalWorkspaceSession
 		_activeCommandResult = success ? command : null;
 		if (_footer is not null)
 			_footer.Visible = false;
-		var singleLineMessage = string.Join(
-			" · ",
-			message.Split(
-				["\r\n", "\n", "\r"],
-				StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+		var singleLineMessage = NormalizeCommandResult(message);
 		_commandLine.ShowResult(singleLineMessage, success);
 		_application.LayoutAndDraw();
 		var resultCts = CancellationTokenSource.CreateLinkedTokenSource(_sessionCts.Token);
 		_commandResultCts = resultCts;
 		_commandResultTask = RestoreCommandFooterAfterDelayAsync(resultCts);
 	}
+
+	internal static string NormalizeCommandResult(string message) =>
+		TerminalTextEscaping.EscapeSingleLine(string.Join(
+			" · ",
+			message.Split(
+				["\r\n", "\n", "\r"],
+				StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)));
 
 	private async Task RestoreCommandFooterAfterDelayAsync(CancellationTokenSource resultCts)
 	{

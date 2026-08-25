@@ -28,7 +28,7 @@ public sealed class ErrorRenderer(
 			TerminalCapabilities.Resolve(environment, options, forStandardError: true));
 		console.MarkupLine(
 			$"[red]{Markup.Escape(_localization["Terminal.Label.Error"])}[[{Markup.Escape(error.Code)}]][/]:");
-		console.WriteLine(error.Message);
+		console.WriteLine(TerminalTextEscaping.EscapeSingleLine(error.Message));
 		if (!string.IsNullOrWhiteSpace(error.ContextPath))
 		{
 			// Paths are observable diagnostic values. Spectre inserts layout newlines at
@@ -40,7 +40,7 @@ public sealed class ErrorRenderer(
 		{
 			console.WriteLine();
 			console.MarkupLine($"[cyan]{Markup.Escape(_localization["Terminal.Label.Hint"])}:[/]");
-			console.WriteLine(error.Hint);
+			console.WriteLine(TerminalTextEscaping.EscapeSingleLine(error.Hint));
 		}
 
 		if (options.Verbosity == TerminalVerbosity.Diagnostic && error.Exception is not null)

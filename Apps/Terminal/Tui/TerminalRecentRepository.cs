@@ -1,4 +1,5 @@
 using DevProjex.Terminal.Execution;
+using DevProjex.Terminal.Rendering;
 
 namespace DevProjex.Terminal.Tui;
 
@@ -8,6 +9,8 @@ internal sealed record TerminalRecentRepository(
 	CachedRepository Cache)
 {
 	public string Name => Cache.RepositoryName;
+	public string SafeDisplayUrl => TerminalTextEscaping.EscapeSingleLine(
+		RepositoryUrlUtility.ToSafeDisplay(Url));
 }
 
 internal sealed class TerminalRecentRepositoryRow(TerminalRecentRepository repository)
@@ -23,7 +26,8 @@ internal sealed class TerminalRecentRepositoryRow(TerminalRecentRepository repos
 			RepositoryCacheState.Damaged => "[!]",
 			_ => "[-]"
 		};
-		return $"{(IsSelected ? ">" : " ")} {state} {Repository.Name}";
+		return $"{(IsSelected ? ">" : " ")} {state} " +
+		       TerminalTextEscaping.EscapeSingleLine(Repository.Name);
 	}
 }
 

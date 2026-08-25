@@ -113,6 +113,26 @@ public sealed class CommandTreeContractTests
 		Assert.Contains("devprojex analyze --format", environment.StandardError, StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public async Task ParserErrorsEscapeControlCharactersFromArguments()
+	{
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment)
+			.RunAsync(
+				["analyze", ".", "--forged\r\nline\t\u001b[31m", "--language", "en"],
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Contains("--forged\\r\\nline\\t\\u001B[31m", environment.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain('\u001b', environment.StandardError);
+		Assert.Equal(
+			2,
+			environment.StandardError
+				.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+				.Length);
+	}
+
 	[Theory]
 	[InlineData("--version")]
 	[InlineData("-v")]

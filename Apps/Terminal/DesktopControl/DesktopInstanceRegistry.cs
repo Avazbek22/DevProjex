@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using DevProjex.Kernel.IO;
 
 namespace DevProjex.Terminal.DesktopControl;
 
@@ -7,14 +8,28 @@ public sealed record DesktopRegistrySnapshot(
 	IReadOnlyList<DesktopInstanceRegistration> Instances,
 	int StaleEntryCount);
 
-public sealed class DesktopInstanceRegistry(DesktopControlPaths? paths = null)
+public sealed class DesktopInstanceRegistry
 {
 	private static readonly JsonSerializerOptions JsonOptions = new()
 	{
 		PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
 		WriteIndented = true
 	};
-	private readonly DesktopControlPaths _paths = paths ?? new DesktopControlPaths();
+	private readonly DesktopControlPaths _paths;
+	private readonly Action? _afterRegistrationReadOpened;
+
+	public DesktopInstanceRegistry(DesktopControlPaths? paths = null)
+		: this(paths, afterRegistrationReadOpened: null)
+	{
+	}
+
+	internal DesktopInstanceRegistry(
+		DesktopControlPaths? paths,
+		Action? afterRegistrationReadOpened)
+	{
+		_paths = paths ?? new DesktopControlPaths();
+		_afterRegistrationReadOpened = afterRegistrationReadOpened;
+	}
 
 	internal string RegistryDirectory => _paths.RegistryDirectory;
 
@@ -22,6 +37,10 @@ public sealed class DesktopInstanceRegistry(DesktopControlPaths? paths = null)
 		DesktopInstanceRegistration registration,
 		CancellationToken cancellationToken = default)
 	{
+		ArgumentNullException.ThrowIfNull(registration);
+		if (!HasValidFields(registration))
+			throw new ArgumentException("Desktop registration fields are invalid.", nameof(registration));
+
 		EnsurePrivateDirectory(_paths.RegistryDirectory);
 		var target = _paths.GetRegistrationPath(registration.InstanceId);
 		var temp = target + $".{Guid.NewGuid():N}.tmp";
@@ -34,7 +53,7 @@ public sealed class DesktopInstanceRegistry(DesktopControlPaths? paths = null)
 				new UTF8Encoding(false),
 				cancellationToken).ConfigureAwait(false);
 			SetPrivateFileMode(temp);
-			File.Move(temp, target, overwrite: true);
+			CommitRegistration(temp, target);
 			SetPrivateFileMode(target);
 		}
 		finally
@@ -45,7 +64,8 @@ public sealed class DesktopInstanceRegistry(DesktopControlPaths? paths = null)
 
 	public Task UnregisterAsync(string instanceId)
 	{
-		TryDelete(_paths.GetRegistrationPath(instanceId));
+		if (IsValidInstanceId(instanceId))
+			TryDelete(_paths.GetRegistrationPath(instanceId));
 		return Task.CompletedTask;
 	}
 
@@ -71,7 +91,7 @@ public sealed class DesktopInstanceRegistry(DesktopControlPaths? paths = null)
 				if (removeStale)
 				{
 					TryDelete(path);
-					if (registration?.Transport == "unix")
+					if (registration is not null && IsOwnedUnixEndpoint(registration))
 						TryDelete(registration.Endpoint);
 				}
 				staleEntryCount++;
@@ -89,15 +109,48 @@ public sealed class DesktopInstanceRegistry(DesktopControlPaths? paths = null)
 			staleEntryCount);
 	}
 
-	private static async Task<DesktopInstanceRegistration?> TryReadAsync(
+	private bool IsOwnedUnixEndpoint(DesktopInstanceRegistration registration)
+	{
+		if (!string.Equals(registration.Transport, "unix", StringComparison.Ordinal))
+			return false;
+		try
+		{
+			return PathComparer.Default.Equals(
+				Path.GetFullPath(registration.Endpoint),
+				Path.GetFullPath(_paths.GetSocketPath(registration.InstanceId)));
+		}
+		catch (Exception exception) when (
+			exception is ArgumentException or NotSupportedException or PathTooLongException)
+		{
+			return false;
+		}
+	}
+
+	private async Task<DesktopInstanceRegistration?> TryReadAsync(
 		string path,
 		CancellationToken cancellationToken)
 	{
 		try
 		{
-			var json = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
-			var registration = JsonSerializer.Deserialize<DesktopInstanceRegistration>(json, JsonOptions);
-			return registration?.ProtocolVersion == DesktopProtocol.CurrentVersion
+			await using var source = new FileStream(
+				path,
+				FileMode.Open,
+				FileAccess.Read,
+				FileShare.ReadWrite | FileShare.Delete,
+				bufferSize: 4 * 1024,
+				FileOptions.Asynchronous | FileOptions.SequentialScan);
+			_afterRegistrationReadOpened?.Invoke();
+			await using var stream = new MaximumLengthReadStream(
+				source,
+				DesktopProtocol.MaximumMessageBytes,
+				static () => new IOException("Desktop registration exceeds the protocol limit."));
+			var registration = await JsonSerializer
+				.DeserializeAsync<DesktopInstanceRegistration>(
+					stream,
+					JsonOptions,
+					cancellationToken)
+				.ConfigureAwait(false);
+			return registration is not null && IsValidRegistrationFile(registration, path)
 				? registration
 				: null;
 		}
@@ -108,6 +161,52 @@ public sealed class DesktopInstanceRegistry(DesktopControlPaths? paths = null)
 		catch
 		{
 			return null;
+		}
+	}
+
+	private static bool IsValidRegistrationFile(
+		DesktopInstanceRegistration registration,
+		string path) =>
+		HasValidFields(registration) &&
+		string.Equals(
+			Path.GetFileNameWithoutExtension(path),
+			registration.InstanceId,
+			StringComparison.Ordinal);
+
+	private static bool HasValidFields(DesktopInstanceRegistration registration) =>
+		registration.ProtocolVersion == DesktopProtocol.CurrentVersion &&
+		IsValidInstanceId(registration.InstanceId) &&
+		registration.ProcessId > 0 &&
+		registration.ProcessStartTimeUtcTicks > 0 &&
+		registration.Transport is "pipe" or "unix" &&
+		!string.IsNullOrWhiteSpace(registration.Endpoint) &&
+		!registration.Endpoint.Any(char.IsControl);
+
+	private static bool IsValidInstanceId(string? instanceId) =>
+		!string.IsNullOrEmpty(instanceId) &&
+		instanceId.Length <= 128 &&
+		instanceId.All(static character =>
+			char.IsAsciiLetterOrDigit(character) || character is '-' or '_');
+
+	private static void CommitRegistration(string temporaryPath, string targetPath)
+	{
+		if (!File.Exists(targetPath))
+		{
+			File.Move(temporaryPath, targetPath);
+			return;
+		}
+
+		try
+		{
+			File.Replace(temporaryPath, targetPath, destinationBackupFileName: null);
+		}
+		catch (FileNotFoundException) when (!File.Exists(targetPath))
+		{
+			File.Move(temporaryPath, targetPath);
+		}
+		catch (NotSupportedException)
+		{
+			File.Move(temporaryPath, targetPath, overwrite: true);
 		}
 	}
 
@@ -149,8 +248,7 @@ public sealed class DesktopInstanceRegistry(DesktopControlPaths? paths = null)
 	{
 		try
 		{
-			if (File.Exists(path))
-				File.Delete(path);
+			File.Delete(path);
 		}
 		catch
 		{

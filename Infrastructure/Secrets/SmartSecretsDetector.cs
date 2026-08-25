@@ -1652,11 +1652,21 @@ internal static class StructuredSecretDetector
 		}
 
 		lineStart = nextLineStart;
-		var relativeEnd = content[lineStart..].IndexOf('\n');
+		var relativeEnd = content[lineStart..].IndexOfAny('\r', '\n');
 		var lineEnd = relativeEnd < 0 ? content.Length : lineStart + relativeEnd;
-		var contentEnd = lineEnd > lineStart && content[lineEnd - 1] == '\r' ? lineEnd - 1 : lineEnd;
-		line = content[lineStart..contentEnd];
-		nextLineStart = relativeEnd < 0 ? content.Length + 1 : lineEnd + 1;
+		line = content[lineStart..lineEnd];
+		if (relativeEnd < 0)
+		{
+			nextLineStart = content.Length + 1;
+			return true;
+		}
+
+		var separatorLength = content[lineEnd] == '\r' &&
+		                      lineEnd + 1 < content.Length &&
+		                      content[lineEnd + 1] == '\n'
+			? 2
+			: 1;
+		nextLineStart = lineEnd + separatorLength;
 		return true;
 	}
 

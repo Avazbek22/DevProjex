@@ -132,6 +132,24 @@ public sealed class PersistentSecretMarkStoreTests
 	}
 
 	[Fact]
+	public async Task SourceBoundMark_WhitespaceOnlyRelativePath_RoundTrips()
+	{
+		using var temporary = new TemporaryDirectory();
+		var project = temporary.CreateFolder("project");
+		var mark = new MarkedSecretProfileEntry(V2Hash, "TOKEN", 10, " ", 0);
+		var writer = new ProjectProfileStore(() => temporary.Path);
+
+		var added = await writer.AddMarkAsync(project, mark, TestContext.Current.CancellationToken);
+		var loaded = await new ProjectProfileStore(() => temporary.Path).LoadMarksAsync(
+			project,
+			TestContext.Current.CancellationToken);
+
+		Assert.True(added.Succeeded);
+		Assert.True(loaded.Succeeded);
+		Assert.Equal(mark, Assert.Single(loaded.Snapshot!.Marks));
+	}
+
+	[Fact]
 	public async Task SchemaThreeMarks_MigrateToSecretClassAndClassIdentityRemainsIndependent()
 	{
 		using var temporary = new TemporaryDirectory();

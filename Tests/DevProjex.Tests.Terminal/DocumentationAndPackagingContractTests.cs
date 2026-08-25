@@ -176,6 +176,23 @@ public sealed class DocumentationAndPackagingContractTests
 	}
 
 	[Fact]
+	public void ReadmeReportsTheShippedLocalizationCount()
+	{
+		var rootPath = FindRepositoryRoot();
+		var readme = File.ReadAllText(Path.Combine(rootPath, "README.md"));
+		var advertised = Regex.Match(
+			readme,
+			"Localization in (?<count>\\d+) languages",
+			RegexOptions.CultureInvariant);
+		var shippedCount = Directory
+			.EnumerateFiles(Path.Combine(rootPath, "Assets", "Localization"), "*.json")
+			.Count();
+
+		Assert.True(advertised.Success, "README localization count is missing.");
+		Assert.Equal(shippedCount, int.Parse(advertised.Groups["count"].Value));
+	}
+
+	[Fact]
 	public void CliDocumentationCoversEveryPublicCommandAndRequiredContractDocument()
 	{
 		var rootPath = FindRepositoryRoot();
@@ -195,6 +212,28 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("--git-mode <none|gitignore|tracked>", commandLine, StringComparison.Ordinal);
 		Assert.Contains("stdout", commandLine, StringComparison.Ordinal);
 		Assert.Contains("stderr", commandLine, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void CliContractListsEverySupportedLanguageCode()
+	{
+		var rootPath = FindRepositoryRoot();
+		var contract = File.ReadAllText(Path.Combine(rootPath, "Docs", "CLI-V1-Contract.md"));
+		var tokenBlock = Regex.Match(
+			contract,
+			"supported canonical tokens are:\\s*```text\\s*(?<tokens>[^`]+)```",
+			RegexOptions.CultureInvariant);
+		var documentedCodes = tokenBlock.Groups["tokens"].Value
+			.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+			.Order(StringComparer.Ordinal)
+			.ToArray();
+		var supportedCodes = Enum.GetValues<DevProjex.Kernel.Models.AppLanguage>()
+			.Select(DevProjex.Kernel.Models.AppLanguageUtility.ToCode)
+			.Order(StringComparer.Ordinal)
+			.ToArray();
+
+		Assert.True(tokenBlock.Success, "The CLI contract language-token block is missing.");
+		Assert.Equal(supportedCodes, documentedCodes);
 	}
 
 	[Fact]

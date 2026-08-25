@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using DevProjex.Terminal.Rendering;
 using Terminal.Gui.App;
 using Terminal.Gui.Drawing;
 using Terminal.Gui.Text;
@@ -44,7 +45,7 @@ internal sealed class TerminalOperationProgressView : IDisposable
 	{
 		_application = application;
 		_elapsedFormatter = elapsedFormatter;
-		_sourceText = source ?? string.Empty;
+		_sourceText = SanitizeSource(source);
 		_useTextProgress = useTextProgress;
 		_allowMotion = !plain;
 		_frame = new TerminalLiteralFrameView
@@ -248,6 +249,9 @@ internal sealed class TerminalOperationProgressView : IDisposable
 		}
 		return stablePrefix + "..." + string.Concat(runes.AsSpan(start).ToArray());
 	}
+
+	internal static string SanitizeSource(string? source) =>
+		TerminalTextEscaping.EscapeSingleLine(source ?? string.Empty);
 
 	private static string BuildTextProgress(double fraction, int frameWidth)
 	{

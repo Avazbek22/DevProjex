@@ -22,6 +22,27 @@ public sealed class McpServerIntegrationTests
 	];
 
 	[Fact]
+	public async Task StreamServerReleasesItsPackSessionWhenInputReachesEndOfStream()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var temporaryRoot = workspace.CreateDirectory("temp");
+		await using var input = new MemoryStream();
+		await using var output = new MemoryStream();
+
+		await McpServerHost.RunAsync(
+			[project],
+			input,
+			output,
+			TestContext.Current.CancellationToken,
+			() => workspace.CreateDirectory("app-data"),
+			temporaryRoot);
+
+		var packRoot = Path.Combine(temporaryRoot, "DevProjex", "mcp");
+		Assert.Empty(Directory.EnumerateDirectories(packRoot));
+	}
+
+	[Fact]
 	public async Task StreamServerHandshakeListsExactlyTheStrictReadOnlyToolsInContractOrder()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -98,6 +119,34 @@ public sealed class McpServerIntegrationTests
 			var trackedOnly = tools.Single(tool => tool.Name == name)
 				.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("tracked_only");
 			Assert.Equal(2, trackedOnly.GetProperty("oneOf").GetArrayLength());
+		}
+	}
+
+	[Fact]
+	public async Task ListProjectsRejectsConfiguredRootReplacedByDirectoryAlias()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var outside = workspace.CreateDirectory("outside");
+		var aliasProbe = Path.Combine(workspace.Path, "alias-probe");
+		CreateDirectoryAliasOrSkip(aliasProbe, outside);
+		Directory.Delete(aliasProbe);
+
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+		var original = Path.Combine(workspace.Path, "original-project");
+		Directory.Move(project, original);
+		CreateDirectoryAliasOrSkip(project, outside);
+		try
+		{
+			var result = await server.CallAsync("list_projects");
+
+			Assert.True(result.IsError);
+			Assert.Contains(McpErrorCodes.UnknownProject, Text(result), StringComparison.Ordinal);
+		}
+		finally
+		{
+			Directory.Delete(project);
+			Directory.Move(original, project);
 		}
 	}
 
@@ -189,6 +238,107 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task SearchProjectEscapesTerminalControlCharactersFromProjectText()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Control.txt"), "match\u001B[31m\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?> { ["pattern"] = "match" });
+
+		Assert.DoesNotContain("\u001B", Text(result), StringComparison.Ordinal);
+		Assert.Contains("\\u001B", Text(result), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task SearchProjectBoundsLongMatchingLinesAndReportsTruncation()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(
+			Path.Combine(project, "Long.txt"),
+			"needle-" + new string('x', 100_000));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?>
+			{
+				["pattern"] = "needle",
+				["context_lines"] = 0
+			});
+
+		var text = Text(result);
+		Assert.True(text.Length <= 55_000, $"Search response was {text.Length} characters.");
+		Assert.Contains("\n[1 additional matches not shown", text.Replace("\r\n", "\n", StringComparison.Ordinal));
+		Assert.Contains("narrow the pattern or filters", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task GetFileBoundsLongLinesAndReportsTruncation()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Long.txt"), new string('x', 100_000));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "Long.txt" });
+
+		var text = Text(result);
+		Assert.True(text.Length <= 55_000, $"File response was {text.Length} characters.");
+		Assert.Contains("50000-character response cap", text, StringComparison.Ordinal);
+		Assert.Contains("narrow the source", text, StringComparison.Ordinal);
+		AssertSpotlighted(result);
+	}
+
+	[Fact]
+	public async Task StoredPackTreePreviewRedactsLocalUserSegment()
+	{
+		var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+		if (string.IsNullOrWhiteSpace(userProfile))
+			Assert.Skip("The environment does not expose a user profile directory.");
+		var project = Path.Combine(userProfile, "DevProjexMcpTest-" + Guid.NewGuid().ToString("N"));
+		var protectedProject = OutputRootPathPresentation.MaskLocalUserSegment(project);
+		if (protectedProject == project)
+			Assert.Skip("The user profile path does not use a supported local-user layout.");
+
+		using var workspace = new TemporaryDirectory();
+		Directory.CreateDirectory(project);
+		try
+		{
+			File.WriteAllText(
+				Path.Combine(project, "Large.cs"),
+				"internal static class Large\n{\n" +
+				string.Join('\n', Enumerable.Range(0, 1_500).Select(static index =>
+					$"    private const string Value{index:D4} = \"{new string('x', 48)}\";")) +
+				"\n}\n");
+			await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+			var result = await server.CallAsync(
+				"pack_context",
+				new Dictionary<string, object?>
+				{
+					["view"] = "content",
+					["format"] = "text"
+				});
+
+			Assert.Contains("Pack stored as '", Text(result), StringComparison.Ordinal);
+			Assert.Contains(protectedProject, Text(result), StringComparison.Ordinal);
+			Assert.DoesNotContain(project, Text(result), StringComparison.Ordinal);
+		}
+		finally
+		{
+			if (Directory.Exists(project))
+				Directory.Delete(project, recursive: true);
+		}
+	}
+
+	[Fact]
 	public async Task SchemaAwareClientReceivesCompleteTreeFileAndSearchPayloads()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -225,6 +375,34 @@ public sealed class McpServerIntegrationTests
 		Assert.Contains("Sample.cs:2:needle-value", search, StringComparison.Ordinal);
 		Assert.Contains("Sample.cs-1-before-context", search, StringComparison.Ordinal);
 		Assert.Contains("Sample.cs-3-after-context", search, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task SearchAcceptsWhitespaceRegexAndRootRegistryAllowsUnixWhitespaceOnlyFilePaths()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Sample.txt"), "alpha beta\n");
+		var whitespacePath = Path.Combine(project, " ");
+		if (!OperatingSystem.IsWindows())
+			File.WriteAllText(whitespacePath, "whitespace-name\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var search = await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?> { ["pattern"] = " ", ["context_lines"] = 0 });
+
+		Assert.False(search.IsError is true, Text(search));
+		Assert.Contains("Sample.txt:1:alpha beta", Text(search), StringComparison.Ordinal);
+		if (OperatingSystem.IsWindows())
+			return;
+
+		var registry = new McpRootRegistry([project]);
+		var resolved = registry.ResolveExistingPath(registry.Roots[0], " ");
+		var expected = McpRootRegistry.ResolvePhysicalExistingPath(
+			whitespacePath,
+			requireDirectory: false);
+		Assert.Equal(expected, resolved, PathComparer.Default);
 	}
 
 	[Fact]
@@ -600,6 +778,46 @@ public sealed class McpServerIntegrationTests
 		catch (System.ComponentModel.Win32Exception)
 		{
 			Assert.Skip("Git is not available in this test environment.");
+		}
+	}
+
+	private static void CreateDirectoryAliasOrSkip(string linkPath, string targetPath)
+	{
+		if (!OperatingSystem.IsWindows())
+		{
+			try
+			{
+				Directory.CreateSymbolicLink(linkPath, targetPath);
+				return;
+			}
+			catch (Exception exception) when (
+				exception is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
+			{
+				Assert.Skip($"Directory symbolic links are unavailable: {exception.GetType().Name}.");
+			}
+		}
+
+		using var process = Process.Start(new ProcessStartInfo("cmd.exe")
+		{
+			UseShellExecute = false,
+			CreateNoWindow = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			ArgumentList = { "/c", "mklink", "/J", linkPath, targetPath }
+		});
+		if (process is null ||
+		    !process.WaitForExit(TimeSpan.FromSeconds(5)) ||
+		    process.ExitCode != 0 ||
+		    !Directory.Exists(linkPath))
+		{
+			try
+			{
+				process?.Kill(entireProcessTree: true);
+			}
+			catch (InvalidOperationException)
+			{
+			}
+			Assert.Skip("Windows junction creation is unavailable.");
 		}
 	}
 

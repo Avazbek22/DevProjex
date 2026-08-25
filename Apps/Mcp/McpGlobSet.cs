@@ -20,7 +20,7 @@ internal sealed class McpGlobSet
 
 	public bool Includes(string relativePath)
 	{
-		var normalized = relativePath.Replace('\\', '/');
+		var normalized = PathUtility.NormalizeSeparators(relativePath);
 		return (_includes.Count == 0 || _includes.Any(regex => regex.IsMatch(normalized))) &&
 		       !_excludes.Any(regex => regex.IsMatch(normalized));
 	}
@@ -38,7 +38,7 @@ internal sealed class McpGlobSet
 			Validate(pattern, parameter);
 			result.Add(new Regex(
 				ToRegex(pattern),
-				RegexOptions.CultureInvariant,
+				RegexOptions.CultureInvariant | RegexOptions.NonBacktracking,
 				TimeSpan.FromSeconds(2)));
 		}
 		return result;

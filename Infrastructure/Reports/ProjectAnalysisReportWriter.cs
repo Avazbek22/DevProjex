@@ -1,3 +1,5 @@
+using DevProjex.Application.Services;
+
 namespace DevProjex.Infrastructure.Reports;
 
 public sealed class ProjectAnalysisReportWriter
@@ -25,31 +27,13 @@ public sealed class ProjectAnalysisReportWriter
 			Directory.CreateDirectory(directory);
 
 		await FileWriteLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-
-		var tempPath = string.Empty;
 		try
 		{
-			tempPath = BuildTemporaryPath(fullPath);
-			await using (var stream = new FileStream(
-				             tempPath,
-				             FileMode.Create,
-				             FileAccess.Write,
-				             FileShare.None,
-				             bufferSize: 16 * 1024,
-				             FileOptions.Asynchronous | FileOptions.SequentialScan))
-			{
-				await JsonSerializer.SerializeAsync(stream, report, JsonOptions, cancellationToken)
-					.ConfigureAwait(false);
-				await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
-			}
-
-			File.Move(tempPath, fullPath, overwrite: true);
-		}
-		catch
-		{
-			if (!string.IsNullOrEmpty(tempPath))
-				TryDeleteTempFile(tempPath);
-			throw;
+			await AtomicFileOutput.WriteAsync(
+				fullPath,
+				overwrite: true,
+				(stream, token) => JsonSerializer.SerializeAsync(stream, report, JsonOptions, token),
+				cancellationToken).ConfigureAwait(false);
 		}
 		finally
 		{
@@ -66,28 +50,5 @@ public sealed class ProjectAnalysisReportWriter
 
 		var json = JsonSerializer.Serialize(report, JsonOptions);
 		await writer.WriteLineAsync(json.AsMemory(), cancellationToken).ConfigureAwait(false);
-	}
-
-	private static string BuildTemporaryPath(string fullPath)
-	{
-		var directory = Path.GetDirectoryName(fullPath);
-		var fileName = Path.GetFileName(fullPath);
-		var tempFileName = $".{fileName}.{Guid.NewGuid():N}.tmp";
-		return string.IsNullOrWhiteSpace(directory)
-			? tempFileName
-			: Path.Combine(directory, tempFileName);
-	}
-
-	private static void TryDeleteTempFile(string tempPath)
-	{
-		try
-		{
-			if (File.Exists(tempPath))
-				File.Delete(tempPath);
-		}
-		catch
-		{
-			// Best effort cleanup: the next write uses a unique temp file and remains safe.
-		}
 	}
 }

@@ -15,6 +15,7 @@ internal sealed class TerminalVirtualizedPreviewView : View
 	private Dictionary<int, PreviewRedactionSpan[]> _redactionsByLine = [];
 	private List<PreviewRedactionSpan> _redactionOccurrences = [];
 	private string? _activeRedactionOccurrenceId;
+	private int _maximumDisplayColumns;
 
 	public TerminalVirtualizedPreviewView(
 		bool useUnicode = true,
@@ -52,7 +53,7 @@ internal sealed class TerminalVirtualizedPreviewView : View
 	public int VisibleLastLine =>
 		Math.Min(LineCount, FirstVisibleLine + PageSize);
 
-	public int MaxLineLength => _document?.MaxLineLength ?? 0;
+	public int MaxLineLength => _maximumDisplayColumns;
 
 	public int VisibleTextWidth => Math.Max(1, Viewport.Width);
 
@@ -83,6 +84,7 @@ internal sealed class TerminalVirtualizedPreviewView : View
 
 		var previousLocation = Viewport.Location;
 		_document = document;
+		_maximumDisplayColumns = document.MaxLineLength;
 		RebuildRedactionIndex(document.Redactions);
 		if (_activeRedactionOccurrenceId is not null &&
 			!_redactionOccurrences.Any(span => span.OccurrenceId == _activeRedactionOccurrenceId))
@@ -90,7 +92,7 @@ internal sealed class TerminalVirtualizedPreviewView : View
 			_activeRedactionOccurrenceId = null;
 		}
 		SetContentSize(new Size(
-			Math.Max(1, document.MaxLineLength),
+			Math.Max(1, _maximumDisplayColumns),
 			Math.Max(1, document.LineCount)));
 		_searchMatches.Clear();
 		_currentSearchMatchIndex = -1;
@@ -114,9 +116,21 @@ internal sealed class TerminalVirtualizedPreviewView : View
 			: currentIndex < 0 || currentIndex == occurrences.Count - 1 ? 0 : currentIndex + 1;
 		var next = occurrences[nextIndex];
 		_activeRedactionOccurrenceId = next.OccurrenceId;
-		ScrollTo(Math.Max(0, next.LineNumber - 1), Math.Max(0, next.StartColumn - 2));
+		var displayColumn = GetDisplayColumn(next.LineNumber - 1, next.StartColumn);
+		ScrollTo(Math.Max(0, next.LineNumber - 1), Math.Max(0, displayColumn - 2));
 		SetNeedsDraw();
 		return true;
+	}
+
+	public int GetDisplayColumn(int zeroBasedLine, int utf16Column)
+	{
+		if (_document is null || zeroBasedLine < 0 || zeroBasedLine >= _document.LineCount)
+			return Math.Max(0, utf16Column);
+
+		var line = _document.GetLineText(zeroBasedLine + 1);
+		EnsureContentWidth(line);
+		var characterIndex = Math.Clamp(utf16Column, 0, line.Length);
+		return GetColumns(line.AsSpan(0, characterIndex));
 	}
 
 	public bool TryToggleActiveRedaction()
@@ -224,14 +238,19 @@ internal sealed class TerminalVirtualizedPreviewView : View
 		if (_document is null)
 			return true;
 
+		var maximumVisibleWidth = _maximumDisplayColumns;
 		for (var row = 0; row < Viewport.Height; row++)
 		{
 			var lineIndex = FirstVisibleLine + row;
 			if (lineIndex >= LineCount)
 				break;
 
-			DrawPreviewLine(_document.GetLineText(lineIndex + 1), lineIndex + 1, row);
+			var line = _document.GetLineText(lineIndex + 1);
+			maximumVisibleWidth = Math.Max(maximumVisibleWidth, GetColumns(line.AsSpan()));
+			DrawPreviewLine(line, lineIndex + 1, row);
 		}
+		if (maximumVisibleWidth > _maximumDisplayColumns)
+			SetContentWidth(maximumVisibleWidth);
 
 		return true;
 	}
@@ -405,6 +424,21 @@ internal sealed class TerminalVirtualizedPreviewView : View
 		foreach (var rune in value.EnumerateRunes())
 			columns += Math.Max(0, rune.GetColumns());
 		return columns;
+	}
+
+	private void EnsureContentWidth(string line)
+	{
+		var displayColumns = GetColumns(line.AsSpan());
+		if (displayColumns > _maximumDisplayColumns)
+			SetContentWidth(displayColumns);
+	}
+
+	private void SetContentWidth(int displayColumns)
+	{
+		_maximumDisplayColumns = displayColumns;
+		SetContentSize(new Size(
+			Math.Max(1, _maximumDisplayColumns),
+			Math.Max(1, LineCount)));
 	}
 }
 

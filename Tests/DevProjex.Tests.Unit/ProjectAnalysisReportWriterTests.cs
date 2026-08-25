@@ -39,6 +39,30 @@ public sealed class ProjectAnalysisReportWriterTests
 	}
 
 	[Fact]
+	public async Task WriteAsync_AtomicReplacementPreservesExistingReaders()
+	{
+		using var temp = new TemporaryDirectory();
+		var path = Path.Combine(temp.Path, "report.json");
+		var writer = new ProjectAnalysisReportWriter();
+		await writer.WriteAsync(CreateReport("first"), path, TestContext.Current.CancellationToken);
+		await using var existingReader = new FileStream(
+			path,
+			FileMode.Open,
+			FileAccess.Read,
+			FileShare.ReadWrite | FileShare.Delete);
+
+		await writer.WriteAsync(CreateReport("second"), path, TestContext.Current.CancellationToken);
+
+		using var originalDocument = await JsonDocument.ParseAsync(
+			existingReader,
+			cancellationToken: TestContext.Current.CancellationToken);
+		using var replacementDocument = JsonDocument.Parse(
+			await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken));
+		Assert.Equal("first", originalDocument.RootElement.GetProperty("rootPath").GetString());
+		Assert.Equal("second", replacementDocument.RootElement.GetProperty("rootPath").GetString());
+	}
+
+	[Fact]
 	public async Task WriteAsync_CanceledWriteLeavesNoReportOrTemporaryFile()
 	{
 		using var temp = new TemporaryDirectory();

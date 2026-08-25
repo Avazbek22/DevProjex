@@ -39,7 +39,8 @@ public static class ExactFileOutputDestinationPolicy
 		if (Directory.Exists(fullPath) ||
 		    Directory.Exists(resolvedPath) ||
 		    (!overwrite &&
-		     (Path.Exists(fullPath) || Path.Exists(resolvedPath))))
+		     (AtomicFileCommit.DestinationEntryExists(fullPath) ||
+		      AtomicFileCommit.DestinationEntryExists(resolvedPath))))
 		{
 			throw new AtomicFileOutputConflictException(fullPath);
 		}
@@ -75,7 +76,7 @@ public static class AtomicFileOutput
 		try
 		{
 			RevalidateResolvedPath(fullPath, validateDestination);
-			if (!overwrite && Path.Exists(fullPath))
+			if (!overwrite && AtomicFileCommit.DestinationEntryExists(fullPath))
 				throw new AtomicFileOutputConflictException(fullPath);
 		}
 		catch (AtomicFileOutputConflictException exception)
@@ -88,7 +89,7 @@ public static class AtomicFileOutput
 
 		var tempPath = Path.Combine(
 			directory,
-			$".{Path.GetFileName(fullPath)}.{Guid.NewGuid():N}.tmp");
+			$".devprojex-{Guid.NewGuid():N}.tmp");
 		Exception? operationException = null;
 		try
 		{
@@ -106,7 +107,7 @@ public static class AtomicFileOutput
 			cancellationToken.ThrowIfCancellationRequested();
 			RevalidateResolvedPath(fullPath, validateDestination);
 			cancellationToken.ThrowIfCancellationRequested();
-			File.Move(tempPath, fullPath, overwrite);
+			AtomicFileCommit.Commit(tempPath, fullPath, overwrite);
 		}
 		catch (Exception exception) when (
 			(exception is IOException or UnauthorizedAccessException) &&
@@ -148,27 +149,9 @@ public static class AtomicFileOutput
 		bool overwrite)
 	{
 		if (!overwrite)
-			return DestinationEntryExists(destinationPath);
+			return AtomicFileCommit.DestinationEntryExists(destinationPath);
 
-		return Directory.Exists(destinationPath) ||
-		       DestinationIsSymbolicLink(destinationPath);
-	}
-
-	private static bool DestinationEntryExists(string path) =>
-		Path.Exists(path) || DestinationIsSymbolicLink(path);
-
-	private static bool DestinationIsSymbolicLink(string path)
-	{
-		try
-		{
-			return new FileInfo(path).LinkTarget is not null ||
-			       new DirectoryInfo(path).LinkTarget is not null;
-		}
-		catch (Exception exception) when (
-			exception is IOException or UnauthorizedAccessException)
-		{
-			return false;
-		}
+		return Directory.Exists(destinationPath);
 	}
 
 	private static void RevalidateResolvedPath(

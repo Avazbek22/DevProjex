@@ -11,7 +11,8 @@ internal sealed class DevProjexMcpTools(
 	private const int MaximumInlinePackCharacters = 50_000;
 	private const int MaximumPageLines = 1_000;
 	private const int MaximumPageCharacters = 50_000;
-	private readonly SemaphoreSlim _projectOperation = new(1, 1);
+	private const int MaximumSearchContentCharacters = 49_000;
+	private readonly McpProjectOperationGate _projectOperation = new();
 
 	[Description("List the project roots this server is allowed to read and their saved local profiles.")]
 	public Task<CallToolResult> ListProjects(
@@ -20,7 +21,10 @@ internal sealed class DevProjexMcpTools(
 		ExecuteAsync(() =>
 		{
 			_ = McpJsonArguments.Create(request.Params);
-			var projectItems = roots.Roots
+			var validatedRoots = roots.Roots
+				.Select(root => roots.ResolveProject(root))
+				.ToArray();
+			var projectItems = validatedRoots
 				.Select(root => new
 				{
 					path = root,
@@ -28,7 +32,7 @@ internal sealed class DevProjexMcpTools(
 					type = McpProjectService.IsGitRepository(root) ? "git-repository" : "local-folder"
 				})
 				.ToArray();
-			var profiles = roots.Roots
+			var profiles = validatedRoots
 				.Where(projects.HasLocalProfile)
 				.Select(root => new { project = root, name = "local" })
 				.ToArray();
@@ -60,18 +64,25 @@ internal sealed class DevProjexMcpTools(
 			var renderedTree = depth is null
 				? plan.ProjectedTree
 				: PruneToDepth(plan.ProjectedTree, depth.Value);
-			var tree = projects.TreeExportService.BuildFullTree(
-				plan.SourceRoot,
-				renderedTree,
-				TreeTextFormat.Ascii);
-			var lines = McpTextRanges.SplitLines(tree);
-			var truncated = lines.Count > MaximumTreeLines;
-			var shown = truncated ? lines.Take(MaximumTreeLines).ToArray() : lines;
-			var body = string.Join('\n', shown);
-			if (truncated)
+			using var treeWriter = new McpBoundedLineTextWriter(MaximumTreeLines);
+			try
+			{
+				await projects.TreeExportService.WriteFullTreeAsync(
+						treeWriter,
+						plan.SourceRoot,
+						renderedTree,
+						cancellationToken: cancellationToken)
+					.ConfigureAwait(false);
+			}
+			catch (McpLineLimitReachedException)
+			{
+			}
+
+			var body = treeWriter.Text;
+			if (treeWriter.IsTruncated)
 				body += "\n[Tree truncated at 2000 lines. Narrow include_patterns, exclude_patterns, or max_depth.]";
 			return McpToolResults.TextSuccess(McpSpotlight.Wrap(body));
-		});
+		}, cancellationToken);
 
 	[Description("Measure a redacted project selection and list its ten largest text files by estimated tokens.")]
 	public Task<CallToolResult> Analyze(
@@ -101,42 +112,21 @@ internal sealed class DevProjexMcpTools(
 				$"transforming content {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");
 			var analyzer = projects.CreatePreparedAnalyzer(prepared);
 			operationProgress.Milestone(61, $"analyzing content 0/{plan.IncludedFiles.Count}");
+			var largest = new McpTopFileRanking(capacity: 10);
 			var metrics = await ProjectContentMetricsCalculator
 				.CalculateAsync(
 					analyzer,
 					plan.IncludedFiles,
-					operationProgress.Measure("analyzing content", 62, 89),
+					fileMetrics => largest.Add(
+						McpProjectService.ToRelative(plan.SourceRoot, fileMetrics.Path),
+						CodeCompressionSnapshot.EstimateTokens(fileMetrics.CharCount)),
+					operationProgress.Measure("analyzing content", 62, 98),
 					cancellationToken)
 				.ConfigureAwait(false);
 			operationProgress.Milestone(
-				90,
-				$"analyzing content {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");
-			var largest = new List<FileWeight>();
-			var rankedFiles = 0;
-			var rankingProgress = operationProgress.Measure("ranking files", 91, 98);
-			foreach (var file in plan.IncludedFiles)
-			{
-				var result = await analyzer.GetClassifiedMetricsAsync(file, cancellationToken).ConfigureAwait(false);
-				rankingProgress.Report(new ProjectCopyExportProgress(
-					++rankedFiles,
-					plan.IncludedFiles.Count,
-					BytesWritten: 0,
-					Percentage: plan.IncludedFiles.Count == 0
-						? 100d
-						: rankedFiles * 100d / plan.IncludedFiles.Count));
-				if (result.Metrics is not { } fileMetrics || !result.IsText)
-					continue;
-				largest.Add(new FileWeight(
-					McpProjectService.ToRelative(plan.SourceRoot, file),
-					CodeCompressionSnapshot.EstimateTokens(fileMetrics.CharCount)));
-			}
-			operationProgress.Milestone(
 				99,
-				$"ranking files {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");
-			var top = largest
-				.OrderByDescending(static item => item.Tokens)
-				.ThenBy(static item => item.Path, StringComparer.Ordinal)
-				.Take(10)
+				$"analyzing content {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");
+			var top = largest.Items
 				.Select(static item => new { path = item.Path, tokens = item.Tokens })
 				.ToArray();
 			var envelope = new
@@ -149,7 +139,7 @@ internal sealed class DevProjexMcpTools(
 			};
 			operationProgress.Milestone(100, "building analysis");
 			return McpToolResults.StructuredSuccess(envelope);
-		});
+		}, cancellationToken);
 
 	[Description("Build an exact redacted DevProjex context export. Large packs expire when this server process exits.")]
 	public Task<CallToolResult> PackContext(
@@ -237,13 +227,24 @@ internal sealed class DevProjexMcpTools(
 				return McpToolResults.TextSuccess(McpSpotlight.Wrap(content), advertiseLargeResult: true);
 			}
 
-			var tree = projects.TreeExportService.BuildFullTree(
-				plan.SourceRoot,
-				plan.ProjectedTree,
-				TreeTextFormat.Ascii);
-			var treeLines = McpTextRanges.SplitLines(tree);
-			if (treeLines.Count > MaximumTreeLines)
-				tree = string.Join('\n', treeLines.Take(MaximumTreeLines)) + "\n[Tree truncated at 2000 lines.]";
+			using var treeWriter = new McpBoundedLineTextWriter(MaximumTreeLines);
+			try
+			{
+				await projects.TreeExportService.WriteFullTreeAsync(
+						treeWriter,
+						plan.SourceRoot,
+						plan.ProjectedTree,
+						projects.ResolveProtectedDocumentRoot(plan),
+						includeFinalLineEnding: false,
+						cancellationToken: cancellationToken)
+					.ConfigureAwait(false);
+			}
+			catch (McpLineLimitReachedException)
+			{
+			}
+			var tree = treeWriter.Text;
+			if (treeWriter.IsTruncated)
+				tree += "\n[Tree truncated at 2000 lines.]";
 			var message = $"Pack stored as '{pack.Id}' ({pack.Characters} characters). " +
 			              "Call read_pack with this pack_id to read ranges, or search_project to locate source content.\n" +
 			              McpSpotlight.Wrap(tree);
@@ -251,7 +252,7 @@ internal sealed class DevProjexMcpTools(
 				100,
 				$"writing pack {writtenFileCount}/{writtenFileCount}");
 			return McpToolResults.TextSuccess(message, advertiseLargeResult: true);
-		});
+		}, cancellationToken);
 
 	[Description("Read a 1-based line range from a pack created by this server session.")]
 	public Task<CallToolResult> ReadPack(
@@ -263,8 +264,14 @@ internal sealed class DevProjexMcpTools(
 			var packId = arguments.RequiredString("pack_id");
 			var start = arguments.OptionalInteger("start_line", 1, int.MaxValue);
 			var end = arguments.OptionalInteger("end_line", 1, int.MaxValue);
-			var path = packs.Resolve(packId);
-			var page = await ReadFilePageAsync(path, start, end, cancellationToken).ConfigureAwait(false);
+			var pack = packs.ResolveDocument(packId);
+			var page = await ReadFilePageAsync(
+					pack.Path,
+					pack.Lines,
+					start,
+					end,
+					cancellationToken)
+				.ConfigureAwait(false);
 			var text = page.Text;
 			if (page.IsTruncated)
 			{
@@ -294,7 +301,7 @@ internal sealed class DevProjexMcpTools(
 				"ignore_case",
 				"max_results",
 				"tracked_only");
-			var pattern = arguments.RequiredString("pattern");
+			var pattern = arguments.RequiredString("pattern", allowWhitespace: true);
 			var contextLines = arguments.OptionalInteger("context_lines", 0, 20) ?? 2;
 			var ignoreCase = arguments.OptionalBoolean("ignore_case", true);
 			var maximumResults = arguments.OptionalInteger("max_results", 1, 200) ?? 50;
@@ -312,33 +319,48 @@ internal sealed class DevProjexMcpTools(
 			var analyzer = projects.CreatePreparedAnalyzer(prepared);
 			var output = new StringBuilder();
 			var totalMatches = 0;
+			var shownMatches = 0;
+			var responseLimitReached = false;
 			foreach (var file in plan.IncludedFiles)
 			{
 				var content = await analyzer.TryReadAsTextAsync(file, cancellationToken).ConfigureAwait(false);
 				if (content is null)
 					continue;
-				var lines = McpTextRanges.SplitLines(content.Content);
-				for (var index = 0; index < lines.Count; index++)
+				var scan = McpSearchTextScanner.Scan(
+					content.Content,
+					regex,
+					contextLines,
+					Math.Max(0, maximumResults - totalMatches),
+					cancellationToken);
+				totalMatches += scan.TotalMatches;
+				if (responseLimitReached)
+					continue;
+
+				foreach (var match in scan.Matches)
 				{
-					var matches = regex.IsMatch(lines[index]);
-					if (!matches)
-						continue;
-					totalMatches++;
-					if (totalMatches > maximumResults)
-						continue;
-					AppendSearchResult(
+					if (AppendSearchResult(
 						output,
 						McpProjectService.ToRelative(plan.SourceRoot, file),
-						lines,
-						index,
-						contextLines);
+						content.Content,
+						match,
+						MaximumSearchContentCharacters))
+					{
+						shownMatches++;
+					}
+					else
+					{
+						responseLimitReached = true;
+					}
 				}
 			}
-			var shown = Math.Min(totalMatches, maximumResults);
-			if (totalMatches > shown)
-				output.AppendLine($"[{totalMatches - shown} additional matches not shown; narrow the pattern or filters.]");
+			if (totalMatches > shownMatches)
+			{
+				if (output.Length > 0 && output[^1] is not ('\r' or '\n'))
+					output.AppendLine();
+				output.AppendLine($"[{totalMatches - shownMatches} additional matches not shown; narrow the pattern or filters.]");
+			}
 			return McpToolResults.TextSuccess(McpSpotlight.Wrap(output.ToString().TrimEnd()));
-		});
+		}, cancellationToken);
 
 	[Description("Read redacted text from one effective project file using an optional 1-based line range.")]
 	public Task<CallToolResult> GetFile(
@@ -360,7 +382,7 @@ internal sealed class DevProjexMcpTools(
 				profile: null,
 				trackedOnly: false,
 				cancellationToken).ConfigureAwait(false);
-			var file = projects.ResolveFile(plan, arguments.RequiredString("path"));
+			var file = projects.ResolveFile(plan, arguments.RequiredString("path", allowWhitespace: true));
 			await using var prepared = await projects.PrepareAsync(plan with { IncludedFiles = [file] }, cancellationToken)
 				.ConfigureAwait(false);
 			var content = await projects.CreatePreparedAnalyzer(prepared)
@@ -372,18 +394,20 @@ internal sealed class DevProjexMcpTools(
 					McpErrorCodes.PayloadTruncated,
 					$"{McpErrorCodes.PayloadTruncated}: file content is binary, unsupported, or exceeds the redaction scan limit and cannot be returned safely.");
 			}
-			var lines = McpTextRanges.SplitLines(content.Content);
 			var page = McpTextRanges.Slice(
-				lines,
+				content.Content,
 				arguments.OptionalInteger("start_line", 1, int.MaxValue),
 				arguments.OptionalInteger("end_line", 1, int.MaxValue),
 				MaximumPageLines,
-				int.MaxValue);
+				MaximumPageCharacters,
+				cancellationToken);
 			var text = page.Text;
 			if (page.IsTruncated)
 				text += $"\n[Showing lines {page.StartLine}-{page.EndLine} of {page.TotalLines}; continue with start_line={page.EndLine + 1}.]";
+			if (page.CharacterLimitReached)
+				text += "\n[The current line exceeded the 50000-character response cap; use search_project to narrow the source.]";
 			return McpToolResults.TextSuccess(McpSpotlight.Wrap(text));
-		});
+		}, cancellationToken);
 
 	private McpJsonArguments SelectionArguments(CallToolRequestParams request) =>
 		McpJsonArguments.Create(
@@ -401,25 +425,17 @@ internal sealed class DevProjexMcpTools(
 		CancellationToken cancellationToken) =>
 		projects.BuildPlanAsync(
 			arguments.OptionalString("project"),
-			arguments.OptionalStringArray("paths"),
+			arguments.OptionalStringArray("paths", allowWhitespace: true),
 			arguments.OptionalStringArray("include_patterns"),
 			arguments.OptionalStringArray("exclude_patterns"),
 			arguments.OptionalString("profile"),
 			arguments.OptionalBoolean("tracked_only", false),
 			cancellationToken);
 
-	private async Task<CallToolResult> RunProjectAsync(Func<Task<CallToolResult>> operation)
-	{
-		await _projectOperation.WaitAsync().ConfigureAwait(false);
-		try
-		{
-			return await ExecuteAsync(operation).ConfigureAwait(false);
-		}
-		finally
-		{
-			_projectOperation.Release();
-		}
-	}
+	private Task<CallToolResult> RunProjectAsync(
+		Func<Task<CallToolResult>> operation,
+		CancellationToken cancellationToken) =>
+		_projectOperation.RunAsync(() => ExecuteAsync(operation), cancellationToken);
 
 	private static async Task<CallToolResult> ExecuteAsync(Func<Task<CallToolResult>> operation)
 	{
@@ -480,6 +496,7 @@ internal sealed class DevProjexMcpTools(
 
 	private static async Task<McpTextPage> ReadFilePageAsync(
 		string path,
+		int totalLines,
 		int? startLine,
 		int? endLine,
 		CancellationToken cancellationToken)
@@ -497,38 +514,75 @@ internal sealed class DevProjexMcpTools(
 			endLine,
 			MaximumPageLines,
 			MaximumPageCharacters,
-			cancellationToken).ConfigureAwait(false);
+			cancellationToken,
+			totalLines).ConfigureAwait(false);
 	}
 
-	private static void AppendSearchResult(
+	private static bool AppendSearchResult(
 		StringBuilder output,
 		string relativePath,
-		IReadOnlyList<string> lines,
-		int matchIndex,
-		int contextLines)
+		string content,
+		McpSearchMatchContext match,
+		int maximumCharacters)
 	{
 		var safePath = EscapeSingleLine(relativePath);
-		var first = Math.Max(0, matchIndex - contextLines);
-		var last = Math.Min(lines.Count - 1, matchIndex + contextLines);
-		for (var index = first; index <= last; index++)
+		foreach (var line in match.Lines)
 		{
-			var marker = index == matchIndex ? ':' : '-';
-			output.Append(safePath).Append(marker).Append(index + 1).Append(marker)
-				.AppendLine(EscapeSingleLine(lines[index]));
+			var marker = line.LineNumber == match.MatchLineNumber ? ':' : '-';
+			var prefix = $"{safePath}{marker}{line.LineNumber}{marker}";
+			var remaining = maximumCharacters - output.Length;
+			if (prefix.Length > remaining)
+			{
+				AppendBoundedPrefix(output, prefix, Math.Max(0, remaining));
+				return false;
+			}
+			output.Append(prefix);
+
+			remaining = maximumCharacters - output.Length;
+			var sourceLength = Math.Min(line.Length, Math.Max(0, remaining));
+			if (sourceLength > 0 &&
+			    sourceLength < line.Length &&
+			    char.IsHighSurrogate(content[line.Offset + sourceLength - 1]) &&
+			    char.IsLowSurrogate(content[line.Offset + sourceLength]))
+			{
+				sourceLength--;
+			}
+			var escaped = McpTextEscaping.EscapeSingleLine(
+				content.Substring(line.Offset, sourceLength));
+			var suffix = escaped + Environment.NewLine;
+			if (sourceLength == line.Length && suffix.Length <= remaining)
+			{
+				output.Append(suffix);
+				continue;
+			}
+
+			AppendBoundedPrefix(output, suffix, Math.Max(0, remaining));
+			return false;
 		}
+		return true;
 	}
 
-	private static string EscapeSingleLine(string value) => value
-		.Replace("\\", "\\\\", StringComparison.Ordinal)
-		.Replace("\r", "\\r", StringComparison.Ordinal)
-		.Replace("\n", "\\n", StringComparison.Ordinal)
-		.Replace("\t", "\\t", StringComparison.Ordinal);
+	private static void AppendBoundedPrefix(StringBuilder output, string value, int maximumCharacters)
+	{
+		var length = Math.Min(value.Length, maximumCharacters);
+		if (length > 0 &&
+		    length < value.Length &&
+		    char.IsHighSurrogate(value[length - 1]) &&
+		    char.IsLowSurrogate(value[length]))
+		{
+			length--;
+		}
+		output.Append(value.AsSpan(0, length));
+	}
+
+	private static string EscapeSingleLine(string value) =>
+		McpTextEscaping.EscapeSingleLine(
+			value.Replace("\\", "\\\\", StringComparison.Ordinal));
 
 	private static string ResolveProjectName(string root)
 	{
 		var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(root));
-		return string.IsNullOrWhiteSpace(name) ? root : name;
+		return string.IsNullOrEmpty(name) ? root : name;
 	}
 
-	private sealed record FileWeight(string Path, long Tokens);
 }

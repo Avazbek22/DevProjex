@@ -105,6 +105,24 @@ public sealed class MainWindowDropAndTitleBehaviorTests
     }
 
     [Fact]
+    public void BuildWindowTitle_GitMode_NeverFallsBackToUnsafeRepositoryUrl()
+    {
+        var method = GetPrivateStaticMethod("BuildWindowTitle");
+
+        var title = (string)method.Invoke(null,
+        [
+            @"C:\cache\repo",
+            true,
+            "https://user:super-secret@[invalid/repo",
+            "main",
+            "repo"
+        ])!;
+
+        Assert.Equal($"{MainWindowViewModel.BaseTitle} - repo [main]", title);
+        Assert.DoesNotContain("super-secret", title, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void BuildWindowTitle_LocalMode_UsesProjectDisplayNameWhenAvailable()
     {
         var method = GetPrivateStaticMethod("BuildWindowTitle");

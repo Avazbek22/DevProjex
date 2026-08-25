@@ -115,6 +115,20 @@ internal sealed class McpProjectService(McpRootRegistry roots, McpServices servi
 				SecretRedactionFeatures.Secrets | SecretRedactionFeatures.PrivateData))!;
 	}
 
+	public string ResolveProtectedDocumentRoot(ProjectContextPlan plan)
+	{
+		var displayRoot = plan.SourceIdentity is
+		{
+			SourceType: ProjectSourceType.GitClone,
+			SourceReference.Length: > 0
+		} identity
+			? identity.SourceReference
+			: plan.SourceRoot;
+		var pathRedaction = OutputRootPathPresentation.CaptureRedactionDecision(
+			CreateTransformationContext(plan));
+		return OutputRootPathPresentation.ResolvePath(displayRoot, pathRedaction).Text;
+	}
+
 	public Task<PreparedSecretRedactionOutput> PrepareAsync(
 		ProjectContextPlan plan,
 		McpDetailLevel detail,
@@ -170,7 +184,9 @@ internal sealed class McpProjectService(McpRootRegistry roots, McpServices servi
 
 	private ProjectProfileReference ResolveProfile(string projectRoot, string? profile)
 	{
-		if (string.IsNullOrWhiteSpace(profile) || profile.Equals("standard", StringComparison.Ordinal))
+		if (string.IsNullOrEmpty(profile) ||
+		    (OperatingSystem.IsWindows() && string.IsNullOrWhiteSpace(profile)) ||
+		    profile.Equals("standard", StringComparison.Ordinal))
 			return ProjectProfileReference.Standard;
 		if (profile.Equals("local", StringComparison.Ordinal))
 			return ProjectProfileReference.Local;
@@ -210,7 +226,7 @@ internal sealed class McpProjectService(McpRootRegistry roots, McpServices servi
 	}
 
 	internal static string ToRelative(string root, string path) =>
-		Path.GetRelativePath(root, path).Replace('\\', '/');
+		PathUtility.GetPortableRelativePath(root, path);
 
 	internal static bool IsGitRepository(string root) =>
 		Directory.Exists(Path.Combine(root, ".git")) || File.Exists(Path.Combine(root, ".git"));

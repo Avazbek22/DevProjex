@@ -2,6 +2,7 @@ using System.CommandLine;
 using System.CommandLine.Help;
 using System.CommandLine.Parsing;
 using DevProjex.Terminal.Execution;
+using DevProjex.Terminal.Rendering;
 using DevProjex.Terminal.Tui;
 
 namespace DevProjex.Terminal.CommandLine;
@@ -117,7 +118,10 @@ public sealed class TerminalApplication
 		{
 			var errors = PresentParseErrors(parseResult, localization);
 			foreach (var error in errors)
-				environment.Error.WriteLine($"error[{error.Code}]: {error.Message}");
+			{
+				environment.Error.WriteLine(
+					$"error[{error.Code}]: {TerminalTextEscaping.EscapeSingleLine(error.Message)}");
+			}
 			if (TryBuildSuggestion(root, parseResult, out var suggestion))
 				environment.Error.WriteLine(localization.Format("Terminal.Hint.DidYouMean", suggestion));
 			else
@@ -207,11 +211,14 @@ public sealed class TerminalApplication
 			else
 			{
 				var localized = LocalizedParseError.Resolve(error.Message, localization);
-				item = new PresentedParseError(
-					error.Message.StartsWith(LocalizedParseError.Prefix, StringComparison.Ordinal)
-						? "DPX-CLI-INVALID-VALUE"
-						: "DPX-CLI-INVALID-SYNTAX",
-					localization.Format("Terminal.Error.InvalidSyntax", localized));
+				var explicitCode = LocalizedParseError.ResolveCode(error.Message);
+				item = explicitCode is not null
+					? new PresentedParseError(explicitCode, localized)
+					: new PresentedParseError(
+						error.Message.StartsWith(LocalizedParseError.Prefix, StringComparison.Ordinal)
+							? "DPX-CLI-INVALID-VALUE"
+							: "DPX-CLI-INVALID-SYNTAX",
+						localization.Format("Terminal.Error.InvalidSyntax", localized));
 			}
 
 			if (!presented.Contains(item))

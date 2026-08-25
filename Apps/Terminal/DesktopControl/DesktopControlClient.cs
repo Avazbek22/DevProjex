@@ -83,7 +83,7 @@ public sealed class DesktopControlClient(
 			var response = JsonSerializer.Deserialize<DesktopProtocolResponse>(responseJson, JsonOptions) ??
 			               throw new JsonException();
 			if (response.ProtocolVersion != DesktopProtocol.CurrentVersion ||
-			    !response.RequestId.Equals(requestId, StringComparison.Ordinal))
+			    !string.Equals(response.RequestId, requestId, StringComparison.Ordinal))
 			{
 				throw new DesktopControlException(
 					"DPX-DESKTOP-PROTOCOL-MISMATCH",
@@ -159,22 +159,11 @@ public sealed class DesktopControlClient(
 
 	private static async Task<string> ReadMessageAsync(
 		Stream stream,
-		CancellationToken cancellationToken)
-	{
-		var buffer = new byte[4096];
-		using var message = new MemoryStream();
-		while (true)
-		{
-			var read = await stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
-			if (read == 0)
-				throw new EndOfStreamException();
-			var newline = Array.IndexOf(buffer, (byte)'\n', 0, read);
-			var count = newline >= 0 ? newline : read;
-			if (message.Length + count > DesktopProtocol.MaximumMessageBytes)
-				throw new DesktopControlException("DPX-DESKTOP-PAYLOAD-TOO-LARGE", "The desktop response exceeds the size limit.");
-			message.Write(buffer, 0, count);
-			if (newline >= 0)
-				return Encoding.UTF8.GetString(message.GetBuffer(), 0, checked((int)message.Length));
-		}
-	}
+		CancellationToken cancellationToken) =>
+		await DesktopProtocolMessageReader.ReadAsync(
+			stream,
+			static () => new DesktopControlException(
+				"DPX-DESKTOP-PAYLOAD-TOO-LARGE",
+				"The desktop response exceeds the size limit."),
+			cancellationToken).ConfigureAwait(false);
 }

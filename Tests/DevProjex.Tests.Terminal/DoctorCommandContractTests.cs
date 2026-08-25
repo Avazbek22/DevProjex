@@ -86,6 +86,33 @@ public sealed class DoctorCommandContractTests
 	}
 
 	[Fact]
+	public async Task TextDoctorEscapesControlCharactersFromEnvironmentValues()
+	{
+		using var workspace = new TemporaryDirectory();
+		var environment = new TestTerminalEnvironment
+		{
+			Variables = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+			{
+				["TERM"] = "xterm\n[x] forged"
+			}
+		};
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var registry = new DesktopInstanceRegistry(
+			new DesktopControlPaths(() => workspace.CreateDirectory("ipc")));
+
+		_ = await new DoctorCommandHandler(
+				services,
+				environment,
+				registry,
+				() => workspace.Path)
+			.ExecuteAsync(json: false, TestContext.Current.CancellationToken);
+
+		Assert.Contains("TERM=xterm\\n[x] forged", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("TERM=xterm\n[x] forged", environment.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task DoctorReportsButDoesNotDeleteStaleDesktopRegistration()
 	{
 		using var workspace = new TemporaryDirectory();

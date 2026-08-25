@@ -42,6 +42,49 @@ public sealed class CliUrlSourceCommandTests
 		Assert.Contains("DPX-TUI-NOT-INTERACTIVE", environment.StandardError, StringComparison.Ordinal);
 	}
 
+	[Theory]
+	[InlineData("analyze")]
+	[InlineData("context")]
+	[InlineData("project")]
+	[InlineData("open")]
+	public async Task InvalidSelectionFileFailsBeforeGitOrCacheAccess(string command)
+	{
+		using var data = new TemporaryDirectory();
+		var git = new CountingGitRepositoryService();
+		var services = new TerminalServiceFactory(() => data.Path).Create(AppLanguage.En) with
+		{
+			GitRepositoryService = git
+		};
+		var environment = new TestTerminalEnvironment();
+		var missingSelectionFile = Path.Combine(data.Path, "missing-selection.txt");
+		var repositoryUrl = "https://github.com/example/repository.git";
+		var arguments = command switch
+		{
+			"analyze" => new[] { "analyze", repositoryUrl },
+			"context" => new[] { "export", "context", repositoryUrl },
+			"project" =>
+			[
+				"export", "project", repositoryUrl,
+				"--as", "zip", "-o", Path.Combine(data.Path, "output.zip")
+			],
+			"open" => new[] { "open", repositoryUrl },
+			_ => throw new ArgumentOutOfRangeException(nameof(command), command, null)
+		};
+
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(_ => services))
+			.RunAsync(
+				[.. arguments, "--select-from", missingSelectionFile],
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Equal(0, git.CallCount);
+		Assert.Empty(services.RepoCacheService.ListCacheEntriesForManagement().Entries);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("DPX-CLI-SELECT-FROM-INVALID", environment.StandardError, StringComparison.Ordinal);
+	}
+
 	[Fact]
 	public async Task ExistingUnixDirectoryWithColonIsAnalyzedLocallyWithoutClone()
 	{
@@ -350,26 +393,20 @@ public sealed class CliUrlSourceCommandTests
 
 	private static void RunGit(string workingDirectory, params string[] arguments)
 	{
-		using var process = new Process
+		var startInfo = new ProcessStartInfo("git")
 		{
-			StartInfo = new ProcessStartInfo("git")
-			{
-				WorkingDirectory = workingDirectory,
-				UseShellExecute = false,
-				RedirectStandardOutput = true,
-				RedirectStandardError = true,
-				CreateNoWindow = true
-			}
+			WorkingDirectory = workingDirectory,
+			UseShellExecute = false,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			CreateNoWindow = true
 		};
 		foreach (var argument in arguments)
-			process.StartInfo.ArgumentList.Add(argument);
-		process.Start();
-		var standardOutput = process.StandardOutput.ReadToEnd();
-		var standardError = process.StandardError.ReadToEnd();
-		process.WaitForExit();
+			startInfo.ArgumentList.Add(argument);
+		var result = TerminalTestProcess.Run(startInfo);
 		Assert.True(
-			process.ExitCode == 0,
-			$"git {string.Join(' ', arguments)} failed: {standardOutput}{standardError}");
+			result.ExitCode == 0,
+			$"git {string.Join(' ', arguments)} failed: {result.StandardOutput}{result.StandardError}");
 	}
 
 	private sealed class BlockingCloneService : IGitRepositoryService

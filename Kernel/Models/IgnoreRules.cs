@@ -145,7 +145,7 @@ public sealed record IgnoreRules(
 			var relativePath = Path.GetRelativePath(scanRootPath, scopeRootPath);
 			scopeRelativePath = relativePath == "."
 				? string.Empty
-				: relativePath.Replace('\\', '/').Trim('/');
+				: PathUtility.NormalizeSeparators(relativePath).Trim('/');
 			return true;
 		}
 		catch
@@ -804,7 +804,7 @@ public sealed record IgnoreRules(
 		bool isDirectory,
 		string name)
 	{
-		var evaluation = matcher.EvaluateRelative(relativePath, isDirectory, name);
+		var evaluation = matcher.EvaluateRelativeNormalized(relativePath.AsSpan(), isDirectory, name);
 		if (!evaluation.HasMatch || !evaluation.IsIgnored)
 			return GitIgnoreEvaluation.NotIgnored;
 
@@ -813,7 +813,9 @@ public sealed record IgnoreRules(
 
 		return new GitIgnoreEvaluation(
 			IsIgnored: true,
-			ShouldTraverseIgnoredDirectory: matcher.ShouldTraverseIgnoredDirectoryRelative(relativePath, name));
+			ShouldTraverseIgnoredDirectory: matcher.ShouldTraverseIgnoredDirectoryRelativeNormalized(
+				relativePath.AsSpan(),
+				name));
 	}
 
 	public readonly struct GitIgnoreScanContext

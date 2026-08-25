@@ -16,9 +16,22 @@ public static class ProjectContentMetricsCalculator
 			progress: null,
 			cancellationToken);
 
+	public static Task<ExportOutputMetrics> CalculateAsync(
+		IFileContentAnalyzer analyzer,
+		IReadOnlyList<string>? orderedFilePaths,
+		IProgress<ProjectCopyExportProgress>? progress,
+		CancellationToken cancellationToken = default)
+		=> CalculateAsync(
+			analyzer,
+			orderedFilePaths,
+			fileMetricsObserver: null,
+			progress,
+			cancellationToken);
+
 	public static async Task<ExportOutputMetrics> CalculateAsync(
 		IFileContentAnalyzer analyzer,
 		IReadOnlyList<string>? orderedFilePaths,
+		Action<ContentFileMetrics>? fileMetricsObserver,
 		IProgress<ProjectCopyExportProgress>? progress,
 		CancellationToken cancellationToken = default)
 	{
@@ -65,7 +78,7 @@ public static class ProjectContentMetricsCalculator
 				if (metrics is null)
 					continue;
 
-				accumulator.AppendFile(new ContentFileMetrics(
+				var fileMetrics = new ContentFileMetrics(
 					Path: orderedFilePaths[batchStart + batchIndex],
 					SizeBytes: metrics.SizeBytes,
 					LineCount: metrics.LineCount,
@@ -75,7 +88,9 @@ public static class ProjectContentMetricsCalculator
 					IsEstimated: metrics.IsEstimated,
 					CrLfPairCount: metrics.CrLfPairCount,
 					TrailingNewlineChars: metrics.TrailingNewlineChars,
-					TrailingNewlineLineBreaks: metrics.TrailingNewlineLineBreaks));
+					TrailingNewlineLineBreaks: metrics.TrailingNewlineLineBreaks);
+				accumulator.AppendFile(fileMetrics);
+				fileMetricsObserver?.Invoke(fileMetrics);
 			}
 
 			Array.Clear(batchMetrics, 0, batchCount);

@@ -67,25 +67,7 @@ public static class RecentProjectPresentationService
 	}
 
 	private static string NormalizeRepositoryUrl(string repositoryUrl)
-	{
-		var trimmed = repositoryUrl.Trim();
-		if (string.IsNullOrWhiteSpace(trimmed))
-			return string.Empty;
-
-		trimmed = trimmed.Replace('\\', '/').TrimEnd('/');
-		if (Uri.TryCreate(trimmed, UriKind.Absolute, out var uri))
-		{
-			var builder = new UriBuilder(uri)
-			{
-				Fragment = string.Empty,
-				Query = string.Empty
-			};
-
-			return builder.Uri.GetLeftPart(UriPartial.Path).TrimEnd('/');
-		}
-
-		return trimmed;
-	}
+		=> RepositoryUrlUtility.ToSafeDisplay(repositoryUrl);
 
 	private static string TrimGitSuffix(string value)
 		=> value.EndsWith(".git", StringComparison.OrdinalIgnoreCase)

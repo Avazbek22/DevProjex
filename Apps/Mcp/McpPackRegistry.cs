@@ -1,10 +1,15 @@
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 
 namespace DevProjex.Mcp;
 
 public sealed class McpPackRegistry : IDisposable
 {
+	private const UnixFileMode PrivateDirectoryMode =
+		UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+	private const UnixFileMode PrivateFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
 	private static readonly TimeSpan StaleAge = TimeSpan.FromHours(24);
+	private static readonly ConcurrentDictionary<string, byte> ActiveSessions = new(PathComparer.Default);
 	private readonly Dictionary<string, PackEntry> _packs = new(StringComparer.Ordinal);
 	private readonly string _sessionDirectory;
 	private readonly FileStream _sessionLease;
@@ -14,18 +19,21 @@ public sealed class McpPackRegistry : IDisposable
 	public McpPackRegistry(string? tempRoot = null, TimeProvider? timeProvider = null)
 	{
 		TimeProvider = timeProvider ?? TimeProvider.System;
-		var baseDirectory = Path.Combine(
-			tempRoot ?? Path.GetTempPath(),
-			"DevProjex",
-			"mcp");
+		var productDirectory = Path.Combine(tempRoot ?? Path.GetTempPath(), "DevProjex");
+		EnsurePrivateDirectory(productDirectory);
+		var baseDirectory = Path.Combine(productDirectory, "mcp");
+		EnsurePrivateDirectory(baseDirectory);
 		Scavenge(baseDirectory, TimeProvider.GetUtcNow());
 		_sessionDirectory = Path.Combine(baseDirectory, Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant());
-		Directory.CreateDirectory(_sessionDirectory);
-		_sessionLease = new FileStream(
+		EnsurePrivateDirectory(_sessionDirectory);
+		_sessionLease = OpenPrivateFile(
 			Path.Combine(_sessionDirectory, ".session.lock"),
 			FileMode.CreateNew,
 			FileAccess.ReadWrite,
-			FileShare.Read);
+			FileShare.None,
+			bufferSize: 4096,
+			FileOptions.None);
+		ActiveSessions.TryAdd(_sessionDirectory, 0);
 	}
 
 	internal TimeProvider TimeProvider { get; }
@@ -33,15 +41,18 @@ public sealed class McpPackRegistry : IDisposable
 
 	public async Task<string> StoreAsync(string content, CancellationToken cancellationToken)
 	{
-		ObjectDisposedException.ThrowIf(_disposed, this);
-		var id = Convert.ToHexString(RandomNumberGenerator.GetBytes(24)).ToLowerInvariant();
-		var path = Path.Combine(_sessionDirectory, id + ".pack");
-		await File.WriteAllTextAsync(path, content, new UTF8Encoding(false), cancellationToken)
-			.ConfigureAwait(false);
-		var entry = new PackEntry(path, TimeProvider.GetUtcNow());
-		lock (_sync)
-			_packs.Add(id, entry);
-		return id;
+		var document = await CreateAsync(
+			async (stream, token) =>
+			{
+				await using var writer = new StreamWriter(
+					stream,
+					new UTF8Encoding(false),
+					bufferSize: 16 * 1024,
+					leaveOpen: true);
+				await writer.WriteAsync(content.AsMemory(), token).ConfigureAwait(false);
+			},
+			cancellationToken).ConfigureAwait(false);
+		return document.Id;
 	}
 
 	public async Task<McpPackDocument> CreateAsync(
@@ -54,7 +65,7 @@ public sealed class McpPackRegistry : IDisposable
 		var path = Path.Combine(_sessionDirectory, id + ".pack");
 		try
 		{
-			await using (var stream = new FileStream(
+			await using (var stream = OpenPrivateFile(
 				             path,
 				             FileMode.CreateNew,
 				             FileAccess.Write,
@@ -66,19 +77,14 @@ public sealed class McpPackRegistry : IDisposable
 			}
 
 			var (characters, lines) = await MeasureAsync(path, cancellationToken).ConfigureAwait(false);
+			var document = new McpPackDocument(id, path, lines, characters);
 			lock (_sync)
-				_packs.Add(id, new PackEntry(path, TimeProvider.GetUtcNow()));
-			return new McpPackDocument(id, path, lines, characters);
+				_packs.Add(id, new PackEntry(document, TimeProvider.GetUtcNow()));
+			return document;
 		}
 		catch
 		{
-			try
-			{
-				File.Delete(path);
-			}
-			catch (IOException)
-			{
-			}
+			TryDeletePackFile(path);
 			throw;
 		}
 	}
@@ -91,16 +97,12 @@ public sealed class McpPackRegistry : IDisposable
 			if (!_packs.Remove(packId, out entry))
 				return;
 		}
-		try
-		{
-			File.Delete(entry.Path);
-		}
-		catch (IOException)
-		{
-		}
+		TryDeletePackFile(entry.Document.Path);
 	}
 
-	public string Resolve(string packId)
+	public string Resolve(string packId) => ResolveDocument(packId).Path;
+
+	internal McpPackDocument ResolveDocument(string packId)
 	{
 		ObjectDisposedException.ThrowIf(_disposed, this);
 		if (string.IsNullOrWhiteSpace(packId))
@@ -108,9 +110,9 @@ public sealed class McpPackRegistry : IDisposable
 		PackEntry? entry;
 		lock (_sync)
 			_packs.TryGetValue(packId, out entry);
-		if (entry is null || !File.Exists(entry.Path))
+		if (entry is null || !File.Exists(entry.Document.Path))
 			throw Expired();
-		return entry.Path;
+		return entry.Document;
 	}
 
 	public void Dispose()
@@ -118,17 +120,24 @@ public sealed class McpPackRegistry : IDisposable
 		if (_disposed)
 			return;
 		_disposed = true;
-		_sessionLease.Dispose();
 		try
 		{
-			if (Directory.Exists(_sessionDirectory))
-				Directory.Delete(_sessionDirectory, recursive: true);
+			_sessionLease.Dispose();
+			try
+			{
+				if (Directory.Exists(_sessionDirectory))
+					Directory.Delete(_sessionDirectory, recursive: true);
+			}
+			catch (IOException)
+			{
+			}
+			catch (UnauthorizedAccessException)
+			{
+			}
 		}
-		catch (IOException)
+		finally
 		{
-		}
-		catch (UnauthorizedAccessException)
-		{
+			ActiveSessions.TryRemove(_sessionDirectory, out _);
 		}
 	}
 
@@ -140,12 +149,18 @@ public sealed class McpPackRegistry : IDisposable
 		{
 			try
 			{
+				if (!IsOwnedSessionDirectory(directory))
+					continue;
+				if (ActiveSessions.ContainsKey(directory))
+					continue;
 				if (now - Directory.GetLastWriteTimeUtc(directory) <= StaleAge)
 					continue;
 				var leasePath = Path.Combine(directory, ".session.lock");
-				using var lease = File.Exists(leasePath)
-					? new FileStream(leasePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None)
-					: null;
+				using var lease = new FileStream(
+					leasePath,
+					FileMode.Open,
+					FileAccess.ReadWrite,
+					FileShare.Delete);
 				Directory.Delete(directory, recursive: true);
 			}
 			catch (IOException)
@@ -157,12 +172,105 @@ public sealed class McpPackRegistry : IDisposable
 		}
 	}
 
+	private static bool IsOwnedSessionDirectory(string directory)
+	{
+		var name = Path.GetFileName(directory);
+		if (name.Length != 32 || !name.All(IsLowerHexDigit))
+			return false;
+
+		var directoryAttributes = File.GetAttributes(directory);
+		if (!directoryAttributes.HasFlag(FileAttributes.Directory) ||
+		    directoryAttributes.HasFlag(FileAttributes.ReparsePoint))
+		{
+			return false;
+		}
+
+		var leasePath = Path.Combine(directory, ".session.lock");
+		if (!File.Exists(leasePath))
+			return false;
+		var leaseAttributes = File.GetAttributes(leasePath);
+		return !leaseAttributes.HasFlag(FileAttributes.Directory) &&
+		       !leaseAttributes.HasFlag(FileAttributes.ReparsePoint);
+	}
+
+	private static bool IsLowerHexDigit(char value) =>
+		value is >= '0' and <= '9' or >= 'a' and <= 'f';
+
+	private static void TryDeletePackFile(string path)
+	{
+		try
+		{
+			File.Delete(path);
+		}
+		catch (IOException)
+		{
+		}
+		catch (UnauthorizedAccessException)
+		{
+		}
+	}
+
+	private static void SetPrivateDirectoryMode(string path)
+	{
+		if (!OperatingSystem.IsWindows())
+			File.SetUnixFileMode(path, PrivateDirectoryMode);
+	}
+
+	private static void EnsurePrivateDirectory(string path)
+	{
+		if (OperatingSystem.IsWindows())
+			Directory.CreateDirectory(path);
+		else
+			Directory.CreateDirectory(path, PrivateDirectoryMode);
+		RejectLinkedDirectory(path);
+		SetPrivateDirectoryMode(path);
+		RejectLinkedDirectory(path);
+	}
+
+	private static void RejectLinkedDirectory(string path)
+	{
+		if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+			throw new IOException("MCP temporary storage cannot use a symbolic link or reparse point.");
+	}
+
+	private static FileStream OpenPrivateFile(
+		string path,
+		FileMode mode,
+		FileAccess access,
+		FileShare share,
+		int bufferSize,
+		FileOptions options)
+	{
+		var streamOptions = new FileStreamOptions
+		{
+			Mode = mode,
+			Access = access,
+			Share = share,
+			BufferSize = bufferSize,
+			Options = options
+		};
+		if (!OperatingSystem.IsWindows())
+			streamOptions.UnixCreateMode = PrivateFileMode;
+		var stream = new FileStream(path, streamOptions);
+		try
+		{
+			if (!OperatingSystem.IsWindows())
+				File.SetUnixFileMode(path, PrivateFileMode);
+			return stream;
+		}
+		catch
+		{
+			stream.Dispose();
+			throw;
+		}
+	}
+
 	private static McpToolException Expired() =>
 		new(
 			McpErrorCodes.PackExpired,
 			$"{McpErrorCodes.PackExpired}: pack expired or belongs to another server session; call pack_context again.");
 
-	private sealed record PackEntry(string Path, DateTimeOffset CreatedUtc);
+	private sealed record PackEntry(McpPackDocument Document, DateTimeOffset CreatedUtc);
 
 	private static async Task<(long Characters, int Lines)> MeasureAsync(
 		string path,

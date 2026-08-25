@@ -25,8 +25,8 @@ public sealed class ProjectProfilePersistenceMatrixIntegrationTests
 
 		Assert.True(store.TryLoadProfile(canonicalPath, out var loaded));
 		AssertSetEqual(
-			SanitizeStringValues(roots),
-			new HashSet<string>(loaded.SelectedRootFolders, StringComparer.OrdinalIgnoreCase));
+			SanitizeRootValues(roots),
+			new HashSet<string>(loaded.SelectedRootFolders, PathComparer.Default));
 		AssertSetEqual(
 			SanitizeStringValues(extensions),
 			new HashSet<string>(loaded.SelectedExtensions, StringComparer.OrdinalIgnoreCase));
@@ -60,8 +60,8 @@ public sealed class ProjectProfilePersistenceMatrixIntegrationTests
 
 		Assert.True(store.TryLoadProfile(canonicalPath, out var loaded));
 		AssertSetEqual(
-			SanitizeStringValues(secondRoots),
-			new HashSet<string>(loaded.SelectedRootFolders, StringComparer.OrdinalIgnoreCase));
+			SanitizeRootValues(secondRoots),
+			new HashSet<string>(loaded.SelectedRootFolders, PathComparer.Default));
 		AssertSetEqual(
 			SanitizeStringValues(secondExtensions),
 			new HashSet<string>(loaded.SelectedExtensions, StringComparer.OrdinalIgnoreCase));
@@ -246,6 +246,15 @@ public sealed class ProjectProfilePersistenceMatrixIntegrationTests
 		return values
 			.Where(value => !string.IsNullOrWhiteSpace(value))
 			.ToHashSet(StringComparer.OrdinalIgnoreCase);
+	}
+
+	private static HashSet<string> SanitizeRootValues(IEnumerable<string> values)
+	{
+		return values
+			.Where(value =>
+				!string.IsNullOrEmpty(value) &&
+				(!OperatingSystem.IsWindows() || !string.IsNullOrWhiteSpace(value)))
+			.ToHashSet(PathComparer.Default);
 	}
 
 	private static HashSet<IgnoreOptionId> SanitizeIgnoreValues(IEnumerable<IgnoreOptionId> values)

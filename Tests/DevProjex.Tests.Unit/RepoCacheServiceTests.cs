@@ -313,6 +313,33 @@ public class RepoCacheServiceTests : IDisposable
 			         entry.State == RepositoryCacheEntryState.Damaged);
     }
 
+    [Fact]
+    public void CreateRepositoryDirectory_RestrictsExistingUnixCacheRootToCurrentUser()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Unix directory modes do not apply on Windows.");
+            return;
+        }
+
+        Directory.CreateDirectory(_testCacheRoot);
+        File.SetUnixFileMode(
+            _testCacheRoot,
+            UnixFileMode.UserRead |
+            UnixFileMode.UserWrite |
+            UnixFileMode.UserExecute |
+            UnixFileMode.GroupRead |
+            UnixFileMode.GroupExecute |
+            UnixFileMode.OtherRead |
+            UnixFileMode.OtherExecute);
+
+        _service.CreateRepositoryDirectory("https://github.com/user/private-repo");
+
+        Assert.Equal(
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
+            File.GetUnixFileMode(_testCacheRoot));
+    }
+
 	[Fact]
 	public void ClearAllCacheWithResult_LockedIndexFailsClosedWithoutChangingCache()
 	{
@@ -884,6 +911,41 @@ public class RepoCacheServiceTests : IDisposable
 
         Assert.Null(indexed);
     }
+
+	[Fact]
+	public void FindIndexedRepository_DoesNotReturnCredentialsFromPersistedUrl()
+	{
+		const string unsafeUrl = "https://user:super-secret@example.com/owner/repository.git?token=hidden";
+		const string safeUrl = "https://example.com/owner/repository.git";
+		var repositoryPath = _service.CreateRepositoryDirectory(safeUrl);
+		Directory.CreateDirectory(_testCacheRoot);
+		File.WriteAllText(
+			Path.Combine(_testCacheRoot, "cache-index.json"),
+			JsonSerializer.Serialize(
+				new
+				{
+					SchemaVersion = 1,
+					Entries = new[]
+					{
+						new RepositoryCacheIndexEntry(
+							RepositoryUrlUtility.GetComparisonKey(unsafeUrl),
+							unsafeUrl,
+							repositoryPath,
+							"main",
+							"0123456789abcdef",
+							DateTimeOffset.UtcNow,
+							RepositoryCacheEntryState.Ready)
+					}
+				},
+				new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+
+		var indexed = _service.FindIndexedRepository(safeUrl);
+
+		Assert.NotNull(indexed);
+		Assert.Equal(safeUrl, indexed.RepositoryUrl);
+		Assert.DoesNotContain("super-secret", indexed.RepositoryUrl, StringComparison.Ordinal);
+		Assert.DoesNotContain("token=", indexed.RepositoryUrl, StringComparison.Ordinal);
+	}
 
     [Fact]
     public void CreateRepositoryDirectory_SanitizesUrl()

@@ -296,7 +296,9 @@ the existing root/name representation and omit `source`.
 XML uses the root element `devprojexContext` with `schemaVersion="1"` and
 `kind="devprojex-context"`. It contains corresponding `project`, `selection`,
 `metrics`, `tree`, `files`, `diagnostics`, and `fingerprint` elements. XML is a
-complete well-formed UTF-8 document with escaped values.
+complete well-formed UTF-8 document with escaped values. Characters forbidden by
+XML 1.0 are replaced with `U+FFFD` so file content and metadata cannot invalidate
+the document.
 
 ## Markdown and Text
 

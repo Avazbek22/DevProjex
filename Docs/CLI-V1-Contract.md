@@ -135,7 +135,7 @@ data.
 supported canonical tokens are:
 
 ```text
-en ru de fr it es pt pt-pt kk tg uz
+en ru de fr it es pt pt-pt kk tg uz zh-cn zh-tw ja ko tr uk pl vi id
 ```
 
 The default is the detected application language. It affects human help,
@@ -330,11 +330,11 @@ boundary: its selected values become checked state entries and other rows use cu
 defaults. Explicit CLI root, extension, Git-mode, or exclusion overrides are exact
 invocation-only fields and do not rewrite the local profile.
 
-Portable-profile root arrays are normalized at the storage boundary. Blank values
-are discarded, remaining values are trimmed, and duplicates are removed before the
-values are sorted with effective host path semantics (case-insensitive on Windows,
-ordinal on Linux and macOS). Normalization makes manually edited JSON resilient to
-incidental whitespace and duplicate entries and produces one deterministic root set.
+Portable-profile root arrays are normalized at the storage boundary. Empty values
+are discarded, while non-empty names retain significant whitespace because it can
+be part of a valid path on Unix. Duplicates are removed before values are sorted
+with effective host path semantics (case-insensitive on Windows, ordinal on Linux
+and macOS), producing one deterministic root set without changing path names.
 
 `analyze`, `tree`, `export context`, `export project`, and `profile show` default
 to `standard`. `profile export` is the exception and defaults to `local`. TUI and

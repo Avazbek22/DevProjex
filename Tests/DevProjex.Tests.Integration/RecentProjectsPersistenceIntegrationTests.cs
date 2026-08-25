@@ -106,7 +106,7 @@ public sealed class RecentProjectsPersistenceIntegrationTests
 		  "schemaVersion": 0,
 		  "recentFolders": [
 		    { "path": "__VALID_FOLDER__", "openedUtc": "2026-03-30T10:00:00Z" },
-		    { "path": "__VALID_FOLDER__\\", "openedUtc": "2026-03-29T10:00:00Z" },
+		    { "path": "__VALID_FOLDER_TRAILING__", "openedUtc": "2026-03-29T10:00:00Z" },
 		    { "path": "__REPO_CACHE__", "openedUtc": "2026-03-28T10:00:00Z" }
 		  ],
 		  "recentRepositories": [
@@ -120,6 +120,9 @@ public sealed class RecentProjectsPersistenceIntegrationTests
 		File.WriteAllText(
 			filePath,
 			legacyPayload
+				.Replace(
+					"__VALID_FOLDER_TRAILING__",
+					(validFolder + Path.DirectorySeparatorChar).Replace("\\", "\\\\"))
 				.Replace("__VALID_FOLDER__", validFolder.Replace("\\", "\\\\"))
 				.Replace("__REPO_CACHE__", repoCachePath.Replace("\\", "\\\\")));
 

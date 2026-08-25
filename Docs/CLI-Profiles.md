@@ -104,11 +104,11 @@ v5 compatibility, a portable profile containing `hide-secrets` in `exclusions`
 still loads with the transformation enabled. The legacy token is removed from the
 canonical Exclusions collection, and an explicit `hideSecrets` property wins.
 
-Portable-profile root arrays are normalized when they are loaded. Blank values are
-discarded, each remaining value is trimmed, and duplicates are removed before the
-values are sorted with the effective host path semantics (case-insensitive on Windows,
-ordinal on Linux and macOS). This makes hand-edited JSON resilient to incidental
-whitespace and duplicate entries and gives every consumer one deterministic root set.
+Portable-profile root arrays are normalized when they are loaded. Empty values are
+discarded, while non-empty names retain significant whitespace because it can be part
+of a valid path on Unix. Duplicates are removed before values are sorted with the
+effective host path semantics (case-insensitive on Windows, ordinal on Linux and
+macOS), giving every consumer one deterministic root set without changing path names.
 
 Unknown additive JSON properties are allowed for forward compatibility. A missing
 or unsupported schema, unknown required Git mode, unknown exclusion token, or

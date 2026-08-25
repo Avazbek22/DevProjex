@@ -106,6 +106,33 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 	}
 
 	[Fact]
+	public async Task CompressionOnlyPreparationRejectsAnUnchangedSourceModifiedBeforeOutput()
+	{
+		using var temporary = new TemporaryDirectory();
+		var projectRoot = temporary.CreateDirectory("project");
+		var path = Path.Combine(projectRoot, "Stable.cs");
+		File.WriteAllText(path, "namespace Sample; internal sealed class Stable;");
+		using var session = CodeCompressionFactory.CreateSession();
+		var analyzer = new FileContentAnalyzer();
+		var preparer = new SecretRedactionOutputPreparer(analyzer);
+
+		await using var prepared = await preparer.PrepareAsync(
+			new ContentTransformationContext(new CodeCompressionContext(projectRoot, session), null),
+			[path],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(path, prepared.GetFile(path).ContentPath);
+		File.WriteAllText(path, "// changed after preparation\ninternal sealed class Changed { void Run() { } }");
+		var preparedAnalyzer = new PreparedSecretFileContentAnalyzer(analyzer, prepared);
+
+		var exception = await Assert.ThrowsAsync<SecretDetectionException>(
+			async () => await preparedAnalyzer.TryReadAsTextAsync(
+				path,
+				TestContext.Current.CancellationToken));
+		Assert.Contains("changed after preparation", exception.Message, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task CompressionOnlyPreparationTransformsEverySupportedFileInTheParallelBatch()
 	{
 		using var temporary = new TemporaryDirectory();

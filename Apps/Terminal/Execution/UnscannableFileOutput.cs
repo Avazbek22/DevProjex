@@ -1,4 +1,5 @@
 using DevProjex.Application.Secrets;
+using DevProjex.Terminal.Rendering;
 
 namespace DevProjex.Terminal.Execution;
 
@@ -45,11 +46,12 @@ internal static class UnscannableFileOutput
 	{
 		try
 		{
-			return Path.GetRelativePath(projectRoot, path).Replace('\\', '/');
+			return TerminalTextEscaping.EscapeSingleLine(
+				PathUtility.GetPortableRelativePath(projectRoot, path));
 		}
 		catch (ArgumentException)
 		{
-			return Path.GetFileName(path);
+			return TerminalTextEscaping.EscapeSingleLine(Path.GetFileName(path));
 		}
 	}
 

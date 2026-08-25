@@ -54,12 +54,15 @@ public static class GitIgnoreFileReader
 	public static IReadOnlyList<string> ReadLines(string path) =>
 		SplitLines(ReadAllText(path));
 
-	public static IReadOnlyList<string> SplitLines(string content)
-	{
-		if (content.Length == 0)
-			return [];
+	public static IReadOnlyList<string> SplitLines(string content) =>
+		EnumerateLines(content).ToArray();
 
-		var lines = new List<string>();
+	public static IEnumerable<string> EnumerateLines(string content)
+	{
+		ArgumentNullException.ThrowIfNull(content);
+		if (content.Length == 0)
+			yield break;
+
 		var lineStart = 0;
 		for (var index = 0; index < content.Length; index++)
 		{
@@ -69,14 +72,12 @@ public static class GitIgnoreFileReader
 			var lineEnd = index;
 			if (lineEnd > lineStart && content[lineEnd - 1] == '\r')
 				lineEnd--;
-			lines.Add(content[lineStart..lineEnd]);
+			yield return content[lineStart..lineEnd];
 			lineStart = index + 1;
 		}
 
 		if (lineStart < content.Length)
-			lines.Add(content[lineStart..]);
-
-		return lines;
+			yield return content[lineStart..];
 	}
 
 	private static bool HasUtf8ByteOrderMark(ReadOnlySpan<byte> bytes) =>

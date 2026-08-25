@@ -93,6 +93,44 @@ public static class ProjectTreeSelectionProjection
 		return orderedPaths;
 	}
 
+	internal static TreeNodeDescriptor? BuildProjectedTree(
+		TreeNodeDescriptor root,
+		IReadOnlySet<string> includedPaths)
+	{
+		if (!includedPaths.Contains(root.FullPath))
+			return null;
+
+		var pending = new List<ProjectionFrame>
+		{
+			new(root)
+		};
+		while (pending.Count > 0)
+		{
+			var frameIndex = pending.Count - 1;
+			var frame = pending[frameIndex];
+			if (frame.NextChildIndex < frame.Node.Children.Count)
+			{
+				var child = frame.Node.Children[frame.NextChildIndex++];
+				pending[frameIndex] = frame;
+				if (includedPaths.Contains(child.FullPath))
+					pending.Add(new ProjectionFrame(child));
+				continue;
+			}
+
+			pending.RemoveAt(frameIndex);
+			var projectedNode = frame.Complete();
+			if (pending.Count == 0)
+				return projectedNode;
+
+			var parentIndex = pending.Count - 1;
+			var parent = pending[parentIndex];
+			parent.AddChild(projectedNode);
+			pending[parentIndex] = parent;
+		}
+
+		throw new InvalidOperationException("Tree projection did not produce a root node.");
+	}
+
 	public static void CollectSelectedFilePaths(
 		TreeNodeDescriptor node,
 		IReadOnlySet<string> selectedPaths,
@@ -100,23 +138,22 @@ public static class ProjectTreeSelectionProjection
 		int maxCount,
 		bool ensureExists)
 	{
-		if (uniquePaths.Count >= maxCount)
-			return;
-
-		if (selectedPaths.Contains(node.FullPath))
+		var pending = new Stack<TreeNodeDescriptor>();
+		pending.Push(node);
+		while (pending.Count > 0 && uniquePaths.Count < maxCount)
 		{
-			CollectAllFilePaths(node, uniquePaths, maxCount, ensureExists);
-			return;
-		}
+			var current = pending.Pop();
+			if (selectedPaths.Contains(current.FullPath))
+			{
+				CollectAllFilePaths(current, uniquePaths, maxCount, ensureExists);
+				continue;
+			}
 
-		if (!node.IsDirectory)
-			return;
+			if (!current.IsDirectory)
+				continue;
 
-		foreach (var child in node.Children)
-		{
-			CollectSelectedFilePaths(child, selectedPaths, uniquePaths, maxCount, ensureExists);
-			if (uniquePaths.Count >= maxCount)
-				break;
+			for (var index = current.Children.Count - 1; index >= 0; index--)
+				pending.Push(current.Children[index]);
 		}
 	}
 
@@ -126,27 +163,46 @@ public static class ProjectTreeSelectionProjection
 		bool ancestorSelected,
 		Action<TreeNodeDescriptor> include)
 	{
-		var nodeSelected = ancestorSelected || selectedPaths.Contains(node.FullPath);
-		if (!node.IsDirectory)
+		var pending = new List<SelectionTraversalFrame>
 		{
-			if (nodeSelected)
-				include(node);
+			new(node, ancestorSelected || selectedPaths.Contains(node.FullPath))
+		};
+		var rootIncluded = false;
+		while (pending.Count > 0)
+		{
+			var frameIndex = pending.Count - 1;
+			var frame = pending[frameIndex];
+			if (frame.Node.IsDirectory && frame.NextChildIndex < frame.Node.Children.Count)
+			{
+				var child = frame.Node.Children[frame.NextChildIndex++];
+				pending[frameIndex] = frame;
+				pending.Add(new SelectionTraversalFrame(
+					child,
+					frame.NodeSelected || selectedPaths.Contains(child.FullPath)));
+				continue;
+			}
 
-			return nodeSelected;
+			pending.RemoveAt(frameIndex);
+			var isIncluded = frame.NodeSelected || frame.HasIncludedChild;
+			if (isIncluded)
+				include(frame.Node);
+
+			if (pending.Count == 0)
+			{
+				rootIncluded = isIncluded;
+				continue;
+			}
+
+			if (isIncluded)
+			{
+				var parentIndex = pending.Count - 1;
+				var parent = pending[parentIndex];
+				parent.HasIncludedChild = true;
+				pending[parentIndex] = parent;
+			}
 		}
 
-		var hasIncludedChild = false;
-		foreach (var child in node.Children)
-		{
-			if (VisitIncludedTree(child, selectedPaths, nodeSelected, include))
-				hasIncludedChild = true;
-		}
-
-		if (!nodeSelected && !hasIncludedChild)
-			return false;
-
-		include(node);
-		return true;
+		return rootIncluded;
 	}
 
 	private static void CollectAllFilePaths(
@@ -170,5 +226,31 @@ public static class ProjectTreeSelectionProjection
 			for (var index = current.Children.Count - 1; index >= 0; index--)
 				stack.Push(current.Children[index]);
 		}
+	}
+
+	private struct SelectionTraversalFrame(
+		TreeNodeDescriptor node,
+		bool nodeSelected)
+	{
+		public TreeNodeDescriptor Node { get; } = node;
+		public bool NodeSelected { get; } = nodeSelected;
+		public int NextChildIndex { get; set; }
+		public bool HasIncludedChild { get; set; }
+	}
+
+	private struct ProjectionFrame(TreeNodeDescriptor node)
+	{
+		private List<TreeNodeDescriptor>? _children;
+
+		public TreeNodeDescriptor Node { get; } = node;
+		public int NextChildIndex { get; set; }
+
+		public void AddChild(TreeNodeDescriptor child) =>
+			(_children ??= new List<TreeNodeDescriptor>(Node.Children.Count)).Add(child);
+
+		public TreeNodeDescriptor Complete() =>
+			!Node.IsDirectory || Node.Children.Count == 0
+				? Node
+				: Node with { Children = _children ?? [] };
 	}
 }

@@ -435,7 +435,7 @@ public sealed class IgnoreRulesService(
 
 			var matcher = GitIgnoreMatcher.Build(
 				rootPath,
-				GitIgnoreFileReader.SplitLines(source.Content),
+				GitIgnoreFileReader.EnumerateLines(source.Content),
 				comparisonSemantics);
 			lock (CacheSync)
 			{

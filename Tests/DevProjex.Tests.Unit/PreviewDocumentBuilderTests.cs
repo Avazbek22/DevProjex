@@ -29,6 +29,159 @@ public sealed class PreviewDocumentBuilderTests
 		Assert.Equal("class Program {}", document.GetLineText(section.ContentStartLine));
 	}
 
+	[Fact]
+	public async Task BuildContentDocumentAsync_EscapesControlCharactersInGeneratedPaths()
+	{
+		using var project = new TemporaryDirectory();
+		var path = project.CreateFile("Program.cs", "class Program {}");
+		var builder = new PreviewDocumentBuilder(new FileContentAnalyzer());
+
+		using var document = await builder.BuildContentDocumentAsync(
+			[path],
+			TestContext.Current.CancellationToken,
+			static _ => "src/line\nbreak\t\u001B.cs",
+			displayRootPath: "root\rname");
+
+		Assert.NotNull(document);
+		Assert.Equal("root\\rname:", document.GetLineText(1));
+		var section = Assert.Single(document.Sections);
+		Assert.Equal("src/line\\nbreak\\t\\u001B.cs", section.DisplayPath);
+		Assert.Equal($"{section.DisplayPath}:", document.GetLineText(section.StartLine));
+	}
+
+	[Fact]
+	public void PreviewStorageScavenger_RemovesOnlyStaleUnlockedOwnedFiles()
+	{
+		using var storage = new TemporaryDirectory();
+		var now = DateTime.UtcNow;
+		var stalePath = CreatePreviewStorageFile(storage.Path, now.AddDays(-2));
+		var freshPath = CreatePreviewStorageFile(storage.Path, now);
+		var activePath = CreatePreviewStorageFile(storage.Path, now.AddDays(-2));
+		var unrelatedPath = storage.CreateFile("unrelated.preview.txt", "preserve");
+		using var activeLease = new FileStream(
+			activePath,
+			FileMode.Open,
+			FileAccess.ReadWrite,
+			FileShare.None);
+
+		var removed = PreviewDocumentBuilder.PreviewTextStorageScavenger.Scavenge(
+			storage.Path,
+			now,
+			PreviewDocumentBuilder.PreviewTextStorageScavenger.MinimumAge);
+
+		Assert.Equal(1, removed);
+		Assert.False(File.Exists(stalePath));
+		Assert.True(File.Exists(freshPath));
+		Assert.True(File.Exists(activePath));
+		Assert.True(File.Exists(unrelatedPath));
+	}
+
+	[Fact]
+	public async Task BuildContentDocumentAsync_RejectsAPathOutsideTheProjectRoot()
+	{
+		using var workspace = new TemporaryDirectory();
+		var projectRoot = workspace.CreateFolder("project");
+		var externalPath = workspace.CreateFile("outside.txt", "external private content");
+		var builder = new PreviewDocumentBuilder(new FileContentAnalyzer());
+
+		using var document = await builder.BuildContentDocumentAsync(
+			[externalPath],
+			TestContext.Current.CancellationToken,
+			Path.GetFileName,
+			includeOmissionMarkers: true,
+			projectRoot: projectRoot);
+
+		Assert.NotNull(document);
+		Assert.DoesNotContain(
+			"external private content",
+			document.GetFullText(),
+			StringComparison.Ordinal);
+		Assert.Contains("[File could not be read]", document.GetFullText(), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task BuildContentDocumentAsync_RejectsAStaleSymbolicLinkFromTheSelection()
+	{
+		using var workspace = new TemporaryDirectory();
+		var projectRoot = workspace.CreateFolder("project");
+		var externalPath = workspace.CreateFile("outside.txt", "external private content");
+		var selectedPath = Path.Combine(projectRoot, "selected.txt");
+		try
+		{
+			File.CreateSymbolicLink(selectedPath, externalPath);
+			if (!File.GetAttributes(selectedPath).HasFlag(FileAttributes.ReparsePoint))
+				Assert.Skip("File symbolic links are not exposed as reparse points on this host.");
+		}
+		catch (Exception exception) when (
+			exception is IOException or UnauthorizedAccessException or NotSupportedException)
+		{
+			Assert.Skip($"File symbolic links are unavailable: {exception.GetType().Name}.");
+		}
+
+		var builder = new PreviewDocumentBuilder(new FileContentAnalyzer());
+		using var document = await builder.BuildContentDocumentAsync(
+			[selectedPath],
+			TestContext.Current.CancellationToken,
+			Path.GetFileName,
+			includeOmissionMarkers: true,
+			projectRoot: projectRoot);
+
+		Assert.NotNull(document);
+		Assert.DoesNotContain(
+			"external private content",
+			document.GetFullText(),
+			StringComparison.Ordinal);
+		Assert.Contains("[File could not be read]", document.GetFullText(), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void PreviewStorage_RejectsLinkedProductDirectory()
+	{
+		using var storage = new TemporaryDirectory();
+		var target = Path.Combine(storage.Path, "target");
+		Directory.CreateDirectory(target);
+		var productDirectory = Path.Combine(storage.Path, "DevProjex");
+		try
+		{
+			Directory.CreateSymbolicLink(productDirectory, target);
+		}
+		catch (Exception exception) when (
+			exception is IOException or UnauthorizedAccessException or NotSupportedException)
+		{
+			Assert.Skip($"Directory symbolic links are unavailable: {exception.GetType().Name}.");
+		}
+
+		var failure = Assert.Throws<IOException>(() =>
+			PreviewDocumentBuilder.PrepareStorageDirectory(storage.Path));
+
+		Assert.Contains("symbolic link or reparse point", failure.Message, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void PreviewStorage_PreparesOwnedDirectory()
+	{
+		using var storage = new TemporaryDirectory();
+		var productDirectory = Path.Combine(storage.Path, "DevProjex");
+		Directory.CreateDirectory(productDirectory);
+		if (!OperatingSystem.IsWindows())
+		{
+			File.SetUnixFileMode(productDirectory, UnixFileMode.UserRead | UnixFileMode.UserWrite |
+			                                           UnixFileMode.UserExecute | UnixFileMode.GroupRead |
+			                                           UnixFileMode.OtherRead);
+		}
+
+		var previewDirectory = PreviewDocumentBuilder.PrepareStorageDirectory(storage.Path);
+
+		Assert.True(Directory.Exists(previewDirectory));
+		if (OperatingSystem.IsWindows())
+			return;
+
+		const UnixFileMode expected =
+			UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+		Assert.Equal(expected, File.GetUnixFileMode(productDirectory));
+		Assert.Equal(expected, File.GetUnixFileMode(previewDirectory));
+	}
+
     [Fact]
     public async Task BuildContentDocumentAsync_NoReadableFiles_ReturnsNull()
     {
@@ -84,6 +237,29 @@ public sealed class PreviewDocumentBuilderTests
                 "whitespace.txt:",
                 BlankLine,
                 "[Whitespace, 3 bytes]"),
+            document.GetLineRangeText(1, document.LineCount));
+    }
+
+    [Fact]
+    public async Task BuildContentDocumentAsync_NormalizesStandaloneCarriageReturnLines()
+    {
+        using var temp = new TemporaryDirectory();
+        var path = temp.CreateFile("legacy.txt", string.Empty);
+        var analyzer = new StubFileContentAnalyzer(new Dictionary<string, TextFileContent?>
+        {
+            [path] = CreateTextContent("alpha\rbeta\rgamma\r")
+        });
+        var builder = new PreviewDocumentBuilder(analyzer);
+
+        using var document = await builder.BuildContentDocumentAsync(
+            [path],
+            TestContext.Current.CancellationToken,
+            Path.GetFileName);
+
+        Assert.NotNull(document);
+        Assert.Equal(5, document.LineCount);
+        Assert.Equal(
+            string.Join('\n', "legacy.txt:", BlankLine, "alpha", "beta", "gamma"),
             document.GetLineRangeText(1, document.LineCount));
     }
 
@@ -428,7 +604,7 @@ public sealed class PreviewDocumentBuilderTests
 				transformationContext: transformation);
 	}
 
-    private static TextFileContent CreateTextContent(string content)
+	private static TextFileContent CreateTextContent(string content)
     {
         var normalized = content.Replace("\r\n", "\n");
         var lineCount = string.IsNullOrEmpty(normalized)
@@ -440,8 +616,18 @@ public sealed class PreviewDocumentBuilderTests
             LineCount: lineCount,
             CharCount: normalized.Replace("\n", string.Empty).Length,
             IsEmpty: false,
-            IsWhitespaceOnly: false);
-    }
+			IsWhitespaceOnly: false);
+	}
+
+	private static string CreatePreviewStorageFile(string directory, DateTime lastWriteTimeUtc)
+	{
+		var path = Path.Combine(directory, $"{Guid.NewGuid():N}.preview.txt");
+		File.WriteAllText(path, "preview");
+		if (!OperatingSystem.IsWindows())
+			File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+		File.SetLastWriteTimeUtc(path, lastWriteTimeUtc);
+		return path;
+	}
 
     private sealed class StubFileContentAnalyzer(IReadOnlyDictionary<string, TextFileContent?> contentByPath)
         : IFileContentAnalyzer

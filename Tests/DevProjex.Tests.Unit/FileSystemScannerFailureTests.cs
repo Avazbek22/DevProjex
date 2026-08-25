@@ -5,6 +5,14 @@ namespace DevProjex.Tests.Unit;
 public sealed class FileSystemScannerFailureTests
 {
 	[Fact]
+	public void InventoryNameOrder_DistinguishesCaseDistinctFilesystemEntries()
+	{
+		Assert.True(ProjectInventoryNameComparer.Compare("A.cs", "a.cs") < 0);
+		Assert.True(ProjectInventoryNameComparer.Compare("a.cs", "A.cs") > 0);
+		Assert.Equal(0, ProjectInventoryNameComparer.Compare("A.cs", "A.cs"));
+	}
+
+	[Fact]
 	public void ScanProjectWorkspace_WhenNestedEnumerationFails_ReturnsPartialDataMarkedIncomplete()
 	{
 		using var project = new TemporaryDirectory();

@@ -27,7 +27,7 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 			kind = "devprojex-analysis",
 			project = new
 			{
-				root = ResolveDocumentRoot(plan).Replace('\\', '/'),
+				root = MachinePathPresentation.Normalize(ResolveDocumentRoot(plan)),
 				name = plan.SourceIdentity?.DisplayName ??
 				       Path.GetFileName(Path.TrimEndingDirectorySeparator(plan.SourceRoot)),
 				source = plan.SourceIdentity is
@@ -73,7 +73,7 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 				code = diagnostic.Code,
 				severity = diagnostic.Severity.ToString().ToLowerInvariant(),
 				message = diagnostic.Message,
-				path = diagnostic.Path?.Replace('\\', '/')
+				path = diagnostic.Path is null ? null : MachinePathPresentation.Normalize(diagnostic.Path)
 			}),
 			fingerprint = plan.Fingerprint
 		};
@@ -129,7 +129,7 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 						["category"] = finding.Category == RedactionFindingCategory.Secrets
 							? "secret"
 							: "private-data",
-						["relativePath"] = finding.RelativePath.Replace('\\', '/'),
+						["relativePath"] = PathUtility.NormalizeSeparators(finding.RelativePath),
 						["lineNumber"] = finding.LineNumber
 					}).ToArray());
 			}
@@ -141,7 +141,7 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 					["unscannableFiles"] = new JsonArray(unscannableFiles.Select(file =>
 						(JsonNode)new JsonObject
 						{
-							["path"] = Path.GetRelativePath(plan.SourceRoot, file.Path).Replace('\\', '/'),
+							["path"] = PathUtility.GetPortableRelativePath(plan.SourceRoot, file.Path),
 							["reason"] = UnscannableFileOutput.ToReasonToken(file.Classification)
 						}).ToArray())
 				};

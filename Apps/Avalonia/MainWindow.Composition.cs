@@ -178,6 +178,7 @@ public partial class MainWindow
 				token,
 				StatusOperationPresentation.ExtendedDelay),
 			MemoryCleanupReason.ApplySettingsWorkCompleted,
+			Volatile.Read(ref _secretRedactionCountRefreshVersion),
 			cancellationToken);
 	}
 
@@ -203,7 +204,7 @@ public partial class MainWindow
 
 	private CodeCompressionContext? CreateCodeCompressionContext()
 	{
-		// Syntax transformations are drafts until «Apply settings» publishes a tree. Only the
+		// Syntax transformations are drafts until "Apply settings" publishes a tree. Only the
 		// captured state drives output, previews and counters; uncommitted checkboxes do no work.
 		if (string.IsNullOrWhiteSpace(_currentPath))
 			return null;

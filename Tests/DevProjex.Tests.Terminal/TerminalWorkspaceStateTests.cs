@@ -16,6 +16,20 @@ public sealed class TerminalWorkspaceStateTests
 	}
 
 	[Fact]
+	public void TreePreviewEscapesControlCharactersInDisplayNames()
+	{
+		var root = CreateSyntheticRoot("unsafe-tree-preview");
+		var filePath = System.IO.Path.Combine(root, "file.cs");
+		var file = new TreeNodeDescriptor("line\nbreak\t\u001B.cs", filePath, false, false, "file", []);
+		var tree = new TreeNodeDescriptor("project\rname", root, true, false, "folder", [file]);
+		using var state = new TerminalWorkspaceState(CreatePlan(tree, [filePath], [root]));
+
+		Assert.Equal(
+			$"+ project\\rname{Environment.NewLine}  - line\\nbreak\\t\\u001B.cs",
+			state.PreviewText);
+	}
+
+	[Fact]
 	public void CompleteSelectionUsesCanonicalEmptySelectedPaths()
 	{
 		var state = new TerminalWorkspaceState(CreatePlan());
@@ -311,6 +325,59 @@ public sealed class TerminalWorkspaceStateTests
 		Assert.Equal(TerminalTreeCheckState.Indeterminate, state.VisibleRows[0].CheckState);
 		Assert.Equal(TerminalTreeCheckState.Checked, state.VisibleRows[1].CheckState);
 		Assert.Equal(TerminalTreeCheckState.Unchecked, state.VisibleRows[2].CheckState);
+	}
+
+	[Fact]
+	public void DeepTreeInteractionDoesNotDependOnTheCallStack()
+	{
+		const int depth = 16_000;
+		var rootPath = CreateSyntheticRoot("deep-interaction");
+		var targetPath = Path.Combine(rootPath, "target.cs");
+		TreeNodeDescriptor tree = new(
+			"target.cs",
+			targetPath,
+			IsDirectory: false,
+			IsAccessDenied: false,
+			"file",
+			[]);
+		for (var index = depth - 1; index >= 0; index--)
+		{
+			var siblingPath = Path.Combine(rootPath, $"unselected-{index:D5}.cs");
+			var sibling = new TreeNodeDescriptor(
+				Path.GetFileName(siblingPath),
+				siblingPath,
+				IsDirectory: false,
+				IsAccessDenied: false,
+				"file",
+				[]);
+			var directoryPath = Path.Combine(rootPath, $"directory-{index:D5}");
+			tree = new TreeNodeDescriptor(
+				Path.GetFileName(directoryPath),
+				directoryPath,
+				IsDirectory: true,
+				IsAccessDenied: false,
+				"folder",
+				[tree, sibling]);
+		}
+		tree = new TreeNodeDescriptor(
+			"project",
+			rootPath,
+			IsDirectory: true,
+			IsAccessDenied: false,
+			"folder",
+			[tree]);
+
+		using var state = new TerminalWorkspaceState(CreatePlan(
+			tree,
+			includedFiles: [targetPath],
+			includedFolders: []));
+
+		Assert.Equal(["target.cs"], state.BuildSelectedRelativePaths());
+		state.ApplyTreeFilter("target.cs");
+		Assert.Equal(depth + 2, state.VisibleRows.Count);
+		state.ApplyTreeFilter(null);
+		var match = state.FindNext("target.cs", startIndex: -1);
+		Assert.Equal(targetPath, state.VisibleRows[match].Node.FullPath);
 	}
 
 	[Theory]

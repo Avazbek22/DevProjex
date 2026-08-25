@@ -117,13 +117,10 @@ public sealed class DevProjexCommandTree
 				await McpServerHost.RunAsync(resolvedRoots, cancellationToken).ConfigureAwait(false);
 				return CommandLineExitCodes.Success;
 			}
-			catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-			{
-				return CommandLineExitCodes.Success;
-			}
 			catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException)
 			{
-				environment.Error.WriteLine($"DPX-MCP-STARTUP: {exception.Message}");
+				environment.Error.WriteLine(
+					$"error[DPX-MCP-STARTUP]: {TerminalTextEscaping.EscapeSingleLine(exception.Message)}");
 				return CommandLineExitCodes.UsageError;
 			}
 		});
@@ -292,6 +289,9 @@ public sealed class DevProjexCommandTree
 				async () =>
 				{
 					var services = CreateServices(parseResult);
+					var selectedPaths = await selection.ReadSelectedPathsAsync(
+						parseResult,
+						cancellationToken).ConfigureAwait(false);
 					var projectSource = parseResult.GetValue(project) ?? Directory.GetCurrentDirectory();
 					await using var resolvedSource = await new TerminalProjectSourceResolver(
 							services,
@@ -304,6 +304,7 @@ public sealed class DevProjexCommandTree
 						parseResult,
 						projectPath,
 						services,
+						selectedPaths,
 						cancellationToken).ConfigureAwait(false);
 					return await new AnalyzeCommandHandler(services, environment)
 						.ExecuteAsync(
@@ -408,6 +409,9 @@ public sealed class DevProjexCommandTree
 				async () =>
 				{
 					var services = CreateServices(parseResult);
+					var selectedPaths = await selection.ReadSelectedPathsAsync(
+						parseResult,
+						cancellationToken).ConfigureAwait(false);
 					var projectSource = parseResult.GetValue(project) ?? Directory.GetCurrentDirectory();
 					await using var resolvedSource = await new TerminalProjectSourceResolver(
 							services,
@@ -420,6 +424,7 @@ public sealed class DevProjexCommandTree
 						parseResult,
 						projectPath,
 						services,
+						selectedPaths,
 						cancellationToken).ConfigureAwait(false);
 					return await new ExportContextCommandHandler(services, environment)
 						.ExecuteAsync(
@@ -483,6 +488,26 @@ public sealed class DevProjexCommandTree
 				outputKind == ProjectCopyExportFormat.Zip &&
 				(!CliParseValue.TryGet(result, outputPath, out var destination) ||
 				 destination != "-"));
+		command.Validators.Add(result =>
+		{
+			if (!CliParseValue.TryGet(result, kind, out var outputKind))
+				return;
+			if (outputKind == ProjectCopyExportFormat.Folder && result.GetValue(force))
+			{
+				result.AddError(LocalizedParseError.Create(
+					"DPX-CLI-FORCE-NOT-SUPPORTED",
+					L("Terminal.Error.ForceNotSupported")));
+			}
+			if (outputKind == ProjectCopyExportFormat.Zip &&
+			    CliParseValue.TryGet(result, outputPath, out var destination) &&
+			    destination is not null &&
+			    !destination.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+			{
+				result.AddError(LocalizedParseError.Create(
+					"DPX-CLI-ZIP-EXTENSION-REQUIRED",
+					L("Terminal.Error.ZipExtensionRequired")));
+			}
+		});
 		command.SetAction(async (parseResult, cancellationToken) =>
 		{
 			var outputOptions = output.Get(parseResult);
@@ -492,6 +517,9 @@ public sealed class DevProjexCommandTree
 				async () =>
 				{
 					var services = CreateServices(parseResult);
+					var selectedPaths = await selection.ReadSelectedPathsAsync(
+						parseResult,
+						cancellationToken).ConfigureAwait(false);
 					var projectSource = parseResult.GetValue(project) ?? Directory.GetCurrentDirectory();
 					await using var resolvedSource = await new TerminalProjectSourceResolver(
 							services,
@@ -504,6 +532,7 @@ public sealed class DevProjexCommandTree
 						parseResult,
 						projectPath,
 						services,
+						selectedPaths,
 						cancellationToken).ConfigureAwait(false);
 					return await new ExportProjectCommandHandler(services, environment)
 						.ExecuteAsync(
@@ -612,6 +641,9 @@ public sealed class DevProjexCommandTree
 				async () =>
 				{
 					var useLast = parseResult.GetValue(last);
+					var selectedPaths = await selection.ReadSelectedPathsAsync(
+						parseResult,
+						cancellationToken).ConfigureAwait(false);
 					var projectSource = useLast
 						? null
 						: parseResult.GetValue(project) ?? Directory.GetCurrentDirectory();
@@ -636,6 +668,7 @@ public sealed class DevProjexCommandTree
 							parseResult,
 							projectPath,
 							services!,
+							selectedPaths,
 							cancellationToken).ConfigureAwait(false);
 						var readinessExitCode = ValidateDesktopOpenGitReadiness(
 							services!,

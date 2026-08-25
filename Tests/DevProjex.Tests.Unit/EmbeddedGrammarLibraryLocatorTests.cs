@@ -49,6 +49,7 @@ public sealed class EmbeddedGrammarLibraryLocatorTests
 		Directory.SetLastWriteTimeUtc(unrelated, DateTime.UtcNow - TimeSpan.FromDays(2));
 		var localRepair = Directory.CreateDirectory(
 			Path.Combine(root, "repair-1234")).FullName;
+		File.WriteAllText(Path.Combine(localRepair, ".devprojex.lease"), string.Empty);
 		Directory.SetLastWriteTimeUtc(localRepair, DateTime.UtcNow - TimeSpan.FromDays(2));
 		var locator = CreateLocator(root);
 
@@ -69,12 +70,25 @@ public sealed class EmbeddedGrammarLibraryLocatorTests
 		var currentVersion = Path.Combine(grammars, "tree-sitter-current");
 		var currentRid = Directory.CreateDirectory(
 			Path.Combine(currentVersion, GrammarPlatform.RuntimeIdentifier)).FullName;
-		var staleVersion = Directory.CreateDirectory(
-			Path.Combine(grammars, "tree-sitter-stale")).FullName;
+		var staleVersion = Path.Combine(grammars, "tree-sitter-stale");
+		var staleVersionRid = Directory.CreateDirectory(
+			Path.Combine(staleVersion, "obsolete-rid")).FullName;
+		File.WriteAllText(Path.Combine(staleVersionRid, ".devprojex.lease"), string.Empty);
 		var staleRid = Directory.CreateDirectory(
 			Path.Combine(currentVersion, "obsolete-rid")).FullName;
+		File.WriteAllText(Path.Combine(staleRid, ".devprojex.lease"), string.Empty);
+		var foreignVersion = Directory.CreateDirectory(
+			Path.Combine(grammars, "unrelated-data")).FullName;
+		var foreignVersionFile = Path.Combine(foreignVersion, "keep.txt");
+		File.WriteAllText(foreignVersionFile, "keep");
+		var foreignRid = Directory.CreateDirectory(
+			Path.Combine(currentVersion, "unrelated-data")).FullName;
+		var foreignRidFile = Path.Combine(foreignRid, "keep.txt");
+		File.WriteAllText(foreignRidFile, "keep");
 		Directory.SetLastWriteTimeUtc(staleVersion, DateTime.UtcNow - TimeSpan.FromDays(2));
 		Directory.SetLastWriteTimeUtc(staleRid, DateTime.UtcNow - TimeSpan.FromDays(2));
+		Directory.SetLastWriteTimeUtc(foreignVersion, DateTime.UtcNow - TimeSpan.FromDays(2));
+		Directory.SetLastWriteTimeUtc(foreignRid, DateTime.UtcNow - TimeSpan.FromDays(2));
 		var locator = CreateLocator(currentRid);
 
 		var removed = locator.PruneAbandonedDirectories();
@@ -82,8 +96,12 @@ public sealed class EmbeddedGrammarLibraryLocatorTests
 		Assert.True(Directory.Exists(currentRid));
 		Assert.False(Directory.Exists(staleVersion));
 		Assert.False(Directory.Exists(staleRid));
+		Assert.True(File.Exists(foreignVersionFile));
+		Assert.True(File.Exists(foreignRidFile));
 		Assert.Contains(staleVersion, removed, PathComparer.Default);
 		Assert.Contains(staleRid, removed, PathComparer.Default);
+		Assert.DoesNotContain(foreignVersion, removed, PathComparer.Default);
+		Assert.DoesNotContain(foreignRid, removed, PathComparer.Default);
 	}
 
 	[Fact]

@@ -47,8 +47,13 @@ public static class TreeSearchEngine
         Func<TNode, bool> hasChildren,
         Action<TNode, bool> setExpanded)
     {
-        foreach (var node in roots)
-            ApplySmartExpandForSearchNode(node, query, getName, getChildren, hasChildren, setExpanded);
+        ApplySmartExpansion(
+            roots,
+            query,
+            getName,
+            getChildren,
+            setExpanded,
+            collapseWhenNoMatch: hasChildren);
     }
 
     public static void ApplySmartExpandForFilter<TNode>(
@@ -58,8 +63,13 @@ public static class TreeSearchEngine
         Func<TNode, IEnumerable<TNode>> getChildren,
         Action<TNode, bool> setExpanded)
     {
-        foreach (var node in roots)
-            ApplySmartExpandForFilterNode(node, query, getName, getChildren, setExpanded);
+        ApplySmartExpansion(
+            roots,
+            query,
+            getName,
+            getChildren,
+            setExpanded,
+            collapseWhenNoMatch: static _ => true);
     }
 
     public static FilterPresentationResult ApplyFilterPresentation<TNode>(
@@ -125,64 +135,79 @@ public static class TreeSearchEngine
         return new FilterPresentationResult(matchCount, entries.Count);
     }
 
-    private static bool ApplySmartExpandForSearchNode<TNode>(
-        TNode node,
+    private static void ApplySmartExpansion<TNode>(
+        IEnumerable<TNode> roots,
         string query,
         Func<TNode, string> getName,
         Func<TNode, IEnumerable<TNode>> getChildren,
-        Func<TNode, bool> hasChildren,
-        Action<TNode, bool> setExpanded)
+        Action<TNode, bool> setExpanded,
+        Func<TNode, bool> collapseWhenNoMatch)
     {
-        bool hasMatchingDescendant = false;
-        bool selfMatches = getName(node).Contains(query, StringComparison.OrdinalIgnoreCase);
+        var entries = new List<SmartExpansionEntry<TNode>>();
+        var stack = new Stack<(TNode Node, int ParentIndex)>();
+        foreach (var root in roots)
+            stack.Push((root, ParentIndex: -1));
 
-        foreach (var child in getChildren(node))
+        while (stack.Count > 0)
         {
-            if (ApplySmartExpandForSearchNode(child, query, getName, getChildren, hasChildren, setExpanded))
-                hasMatchingDescendant = true;
+            var (node, parentIndex) = stack.Pop();
+            var nodeIndex = entries.Count;
+            entries.Add(new SmartExpansionEntry<TNode>(
+                node,
+                parentIndex,
+                getName(node).Contains(query, StringComparison.OrdinalIgnoreCase),
+                HasMatchingDescendant: false));
+
+            foreach (var child in getChildren(node))
+                stack.Push((child, nodeIndex));
         }
 
-        if (hasMatchingDescendant)
-            setExpanded(node, true);
-        else if (!selfMatches && hasChildren(node))
-            setExpanded(node, false);
-
-        return selfMatches || hasMatchingDescendant;
-    }
-
-    private static bool ApplySmartExpandForFilterNode<TNode>(
-        TNode node,
-        string query,
-        Func<TNode, string> getName,
-        Func<TNode, IEnumerable<TNode>> getChildren,
-        Action<TNode, bool> setExpanded)
-    {
-        bool hasMatchingDescendant = false;
-        bool selfMatches = getName(node).Contains(query, StringComparison.OrdinalIgnoreCase);
-
-        foreach (var child in getChildren(node))
+        for (var index = entries.Count - 1; index >= 0; index--)
         {
-            if (ApplySmartExpandForFilterNode(child, query, getName, getChildren, setExpanded))
-                hasMatchingDescendant = true;
+            var entry = entries[index];
+            if (entry.HasMatchingDescendant)
+                setExpanded(entry.Node, true);
+            else if (!entry.SelfMatches && collapseWhenNoMatch(entry.Node))
+                setExpanded(entry.Node, false);
+
+            if (entry.ParentIndex < 0 ||
+                !entry.SelfMatches && !entry.HasMatchingDescendant)
+            {
+                continue;
+            }
+
+            var parent = entries[entry.ParentIndex];
+            entries[entry.ParentIndex] = parent with { HasMatchingDescendant = true };
         }
-
-        if (hasMatchingDescendant)
-            setExpanded(node, true);
-        else if (!selfMatches)
-            setExpanded(node, false);
-
-        return selfMatches || hasMatchingDescendant;
     }
 
     private static IEnumerable<TNode> Traverse<TNode>(
         IEnumerable<TNode> roots,
         Func<TNode, IEnumerable<TNode>> getChildren)
     {
-        foreach (var root in roots)
+        var enumerators = new Stack<IEnumerator<TNode>>();
+        enumerators.Push(roots.GetEnumerator());
+        try
         {
-            yield return root;
-            foreach (var child in Traverse(getChildren(root), getChildren))
-                yield return child;
+            while (enumerators.Count > 0)
+            {
+                var current = enumerators.Peek();
+                if (!current.MoveNext())
+                {
+                    current.Dispose();
+                    enumerators.Pop();
+                    continue;
+                }
+
+                var node = current.Current;
+                yield return node;
+                enumerators.Push(getChildren(node).GetEnumerator());
+            }
+        }
+        finally
+        {
+            while (enumerators.TryPop(out var enumerator))
+                enumerator.Dispose();
         }
     }
 
@@ -190,6 +215,12 @@ public static class TreeSearchEngine
         TNode Node,
         int ParentIndex,
         bool IsRoot,
+        bool SelfMatches,
+        bool HasMatchingDescendant);
+
+    private readonly record struct SmartExpansionEntry<TNode>(
+        TNode Node,
+        int ParentIndex,
         bool SelfMatches,
         bool HasMatchingDescendant);
 }

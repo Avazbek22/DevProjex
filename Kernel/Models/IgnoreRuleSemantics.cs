@@ -35,7 +35,7 @@ public static class IgnoreRuleSemantics
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public static bool IsExtensionlessFileName(string fileName)
 	{
-		if (string.IsNullOrWhiteSpace(fileName))
+		if (string.IsNullOrEmpty(fileName))
 			return false;
 
 		var dotIndex = fileName.AsSpan().LastIndexOf('.');

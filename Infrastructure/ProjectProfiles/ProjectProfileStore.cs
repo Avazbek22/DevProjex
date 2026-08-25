@@ -394,14 +394,14 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		profile.SelectedRootFolders ??= [];
 		profile.SelectedExtensions ??= [];
 		profile.SelectedIgnoreOptions ??= [];
-		profile.RootFolderStates = NormalizeStringStateDictionary(profile.RootFolderStates, PathComparer.Default);
+		profile.RootFolderStates = NormalizeRootStateDictionary(profile.RootFolderStates, PathComparer.Default);
 		profile.ExtensionStates = NormalizeStringStateDictionary(profile.ExtensionStates, StringComparer.OrdinalIgnoreCase);
 		profile.IgnoreOptionStates ??= [];
 		profile.SelectedPaths ??= [];
 		profile.MarkedSecrets ??= [];
 
 		profile.SelectedRootFolders = profile.SelectedRootFolders
-			.Where(IsValidStoredString)
+			.Where(IsValidStoredPath)
 			.Distinct(PathComparer.Default)
 			.Take(ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection)
 			.ToList();
@@ -415,8 +415,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			.Take(Enum.GetValues<IgnoreOptionId>().Length)
 			.ToList();
 		profile.SelectedPaths = profile.SelectedPaths
-			.Where(IsValidStoredString)
-			.Select(static item => item.Trim().Replace('\\', '/'))
+			.Where(IsValidStoredPath)
+			.Select(PathUtility.NormalizeSeparators)
 			.Distinct(PathComparer.Default)
 			.OrderBy(static item => item, PathComparer.Default)
 			.Take(ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection)
@@ -470,7 +470,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		out bool wasTruncated)
 	{
 		var selectedRootFolders = profile.SelectedRootFolders
-			.Where(IsValidStoredString)
+			.Where(IsValidStoredPath)
 			.Distinct(PathComparer.Default)
 			.Take(ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection + 1)
 			.ToList();
@@ -482,7 +482,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		var selectedIgnoreOptions = profile.SelectedIgnoreOptions
 			.Distinct()
 			.ToList();
-		var rootFolderStates = NormalizeStringStateDictionary(
+		var rootFolderStates = NormalizeRootStateDictionary(
 			profile.RootFolderStates,
 			PathComparer.Default,
 			out var rootFolderStatesTruncated);
@@ -498,8 +498,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		ReconcileSelectedIgnoreOptions(selectedIgnoreOptions, ignoreOptionStates);
 		NormalizeGitFilteringState(selectedIgnoreOptions, ignoreOptionStates);
 		var selectedPaths = (profile.SelectedPaths ?? [])
-			.Where(IsValidStoredString)
-			.Select(static item => item.Trim().Replace('\\', '/'))
+			.Where(IsValidStoredPath)
+			.Select(PathUtility.NormalizeSeparators)
 			.Distinct(PathComparer.Default)
 			.OrderBy(static item => item, PathComparer.Default)
 			.Take(ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection + 1)
@@ -600,7 +600,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		int? sourceOffset = null;
 		if (mark.RelativePath is not null || mark.SourceOffset is not null)
 		{
-			if (string.IsNullOrWhiteSpace(mark.RelativePath) || mark.SourceOffset is null or < 0)
+			if (string.IsNullOrEmpty(mark.RelativePath) || mark.SourceOffset is null or < 0)
 			{
 				normalized = null!;
 				return false;
@@ -676,11 +676,29 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 	private static Dictionary<string, bool> NormalizeStringStateDictionary(
 		IEnumerable<KeyValuePair<string, bool>>? states,
 		StringComparer comparer) =>
-		NormalizeStringStateDictionary(states, comparer, out _);
+		NormalizeStateDictionary(states, comparer, IsValidStoredString, out _);
+
+	private static Dictionary<string, bool> NormalizeRootStateDictionary(
+		IEnumerable<KeyValuePair<string, bool>>? states,
+		StringComparer comparer) =>
+		NormalizeStateDictionary(states, comparer, IsValidStoredPath, out _);
 
 	private static Dictionary<string, bool> NormalizeStringStateDictionary(
 		IEnumerable<KeyValuePair<string, bool>>? states,
 		StringComparer comparer,
+		out bool wasTruncated)
+		=> NormalizeStateDictionary(states, comparer, IsValidStoredString, out wasTruncated);
+
+	private static Dictionary<string, bool> NormalizeRootStateDictionary(
+		IEnumerable<KeyValuePair<string, bool>>? states,
+		StringComparer comparer,
+		out bool wasTruncated)
+		=> NormalizeStateDictionary(states, comparer, IsValidStoredPath, out wasTruncated);
+
+	private static Dictionary<string, bool> NormalizeStateDictionary(
+		IEnumerable<KeyValuePair<string, bool>>? states,
+		StringComparer comparer,
+		Func<string?, bool> isValid,
 		out bool wasTruncated)
 	{
 		wasTruncated = false;
@@ -690,7 +708,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 
 		foreach (var (name, isChecked) in states)
 		{
-			if (!IsValidStoredString(name))
+			if (!isValid(name))
 				continue;
 			if (normalized.ContainsKey(name))
 			{
@@ -807,6 +825,11 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 
 	private static bool IsValidStoredString(string? value) =>
 		!string.IsNullOrWhiteSpace(value) &&
+		value.Length <= ProjectProfileStorageLimits.MaximumStateNameLength;
+
+	private static bool IsValidStoredPath(string? value) =>
+		!string.IsNullOrEmpty(value) &&
+		(!OperatingSystem.IsWindows() || !string.IsNullOrWhiteSpace(value)) &&
 		value.Length <= ProjectProfileStorageLimits.MaximumStateNameLength;
 
 	private static bool TryParseDatabase(

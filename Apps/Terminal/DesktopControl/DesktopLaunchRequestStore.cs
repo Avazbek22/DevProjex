@@ -40,7 +40,7 @@ public static class DesktopLaunchRequestStore
 		DesktopOpenRequest request,
 		CancellationToken cancellationToken = default)
 	{
-		var directory = Path.Combine(Path.GetTempPath(), "DevProjex", "desktop-requests");
+		var directory = new DesktopControlPaths().RequestDirectory;
 		DesktopInstanceRegistry.EnsurePrivateDirectory(directory);
 		var path = Path.Combine(directory, $"{Guid.NewGuid():N}.json");
 		var json = JsonSerializer.Serialize(request, JsonOptions);
@@ -57,6 +57,7 @@ public static class DesktopLaunchRequestStore
 		CancellationToken cancellationToken = default)
 	{
 		var path = Environment.GetEnvironmentVariable(InvocationEnvironment.DesktopRequestVariable);
+		string? safeRequestPath = null;
 		Environment.SetEnvironmentVariable(InvocationEnvironment.DesktopRequestVariable, null);
 		if (string.IsNullOrWhiteSpace(path))
 			return null;
@@ -65,14 +66,13 @@ public static class DesktopLaunchRequestStore
 		{
 			var fullPath = Path.GetFullPath(path);
 			var expectedDirectory = Path.GetFullPath(
-				Path.Combine(Path.GetTempPath(), "DevProjex", "desktop-requests"));
+				new DesktopControlPaths().RequestDirectory);
 			if (!PathUtility.IsPathInside(fullPath, expectedDirectory))
 				return null;
-			var file = new FileInfo(fullPath);
-			if (!file.Exists || file.Length > DesktopProtocol.MaximumMessageBytes)
-				return null;
-			var json = await File.ReadAllTextAsync(fullPath, cancellationToken).ConfigureAwait(false);
-			return JsonSerializer.Deserialize<DesktopOpenRequest>(json, JsonOptions);
+			safeRequestPath = fullPath;
+			return await DesktopRequestEnvelopeReader
+				.ReadAsync<DesktopOpenRequest>(fullPath, JsonOptions, cancellationToken)
+				.ConfigureAwait(false);
 		}
 		catch (OperationCanceledException)
 		{
@@ -84,7 +84,8 @@ public static class DesktopLaunchRequestStore
 		}
 		finally
 		{
-			DesktopInstanceRegistry.TryDelete(path);
+			if (safeRequestPath is not null)
+				DesktopInstanceRegistry.TryDelete(safeRequestPath);
 		}
 	}
 }

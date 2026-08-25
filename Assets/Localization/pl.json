@@ -593,7 +593,7 @@
   "Terminal.Tui.Welcome.OpenDesktop.Description": "Uruchom lub aktywuj DevProjex Desktop i zachowaj dostępność tej sesji terminala.",
   "Terminal.Tui.Welcome.Help.Description": "Otwórz pomoc dotyczącą nawigacji i przepływu pracy, a następnie wróć do tego konkretnego wyboru.",
   "Terminal.Tui.Welcome.Exit.Description": "Opuść terminal DevProjex i przywróć stan terminala.",
-  "Terminal.Tui.Welcome.QuickStart": "Automatyzacja bezpośrednia: devprojex analyze. | devprojex export context. -o kontekst.md",
+  "Terminal.Tui.Welcome.QuickStart": "Automatyzacja bezpośrednia: devprojex analyze .  |  devprojex export context . -o context.md",
   "Terminal.Tui.Footer.Welcome": "W górę/w dół lub j/k Nawiguj Enter Wybierz Ctrl+P Działania? Pomoc q Wyjdź",
   "Terminal.Tui.Footer.Loading": "Esc Anuluj operację  ? Pomoc",
   "Terminal.Tui.Footer.Tree": "↑/↓ Ruch  Enter Otwórz  Space Przełącz  Tab/F6 Podgląd  Ctrl+P Akcje",

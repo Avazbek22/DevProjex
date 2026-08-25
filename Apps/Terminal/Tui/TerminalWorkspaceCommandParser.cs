@@ -409,7 +409,10 @@ internal sealed class TerminalWorkspaceCommandParser
 		if (matches.Length == 0)
 			return TerminalWorkspaceCommandCompletion.Empty;
 
-		var suffix = fullText[cursorPosition..];
+		var replacementEnd = cursorPosition;
+		while (replacementEnd < fullText.Length && !char.IsWhiteSpace(fullText[replacementEnd]))
+			replacementEnd++;
+		var suffix = fullText[replacementEnd..];
 		var candidates = matches.Select(candidate =>
 		{
 			var completed = fullText[..replacementStart] + candidate + suffix;

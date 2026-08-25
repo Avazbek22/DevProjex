@@ -6,6 +6,10 @@ namespace DevProjex.Infrastructure.Persistence;
 internal static class JsonStorePersistence
 {
     internal const long SmallDocumentMaximumBytes = 8 * 1024 * 1024;
+	private const UnixFileMode PrivateUnixFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+    private static readonly Encoding StrictUtf8 = new UTF8Encoding(
+        encoderShouldEmitUTF8Identifier: false,
+        throwOnInvalidBytes: true);
     private static readonly Encoding StrictUtf16LittleEndian = new UnicodeEncoding(
         bigEndian: false,
         byteOrderMark: true,
@@ -29,7 +33,7 @@ internal static class JsonStorePersistence
         JsonStoreFileSet fileSet,
         int currentSchemaVersion,
         int? currentDefaultsRevision = null,
-        long maximumDocumentBytes = long.MaxValue) =>
+        long maximumDocumentBytes = SmallDocumentMaximumBytes) =>
         IsFutureDocument(fileSet.PrimaryPath, currentSchemaVersion, currentDefaultsRevision, maximumDocumentBytes) ||
         IsFutureDocument(fileSet.BackupPath, currentSchemaVersion, currentDefaultsRevision, maximumDocumentBytes);
 
@@ -53,7 +57,14 @@ internal static class JsonStorePersistence
             string json;
             if (maximumDocumentBytes == long.MaxValue)
             {
-                json = File.ReadAllText(path);
+                using var stream = new FileStream(
+                    path,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete,
+                    bufferSize: 16 * 1024,
+                    FileOptions.SequentialScan);
+                json = ReadAllTextStrict(stream);
             }
             else if (maximumDocumentBytes > int.MaxValue ||
                      !TryReadAllTextWithinSizeLimit(path, (int)maximumDocumentBytes, out json))
@@ -169,13 +180,7 @@ internal static class JsonStorePersistence
 			if (payload.LongLength > maximumPayloadBytes)
 				return false;
 			tempPath = Path.Combine(fileSet.DirectoryPath, $"{fileSet.FileName}.{Guid.NewGuid():N}.tmp");
-			using (var stream = new FileStream(
-				       tempPath,
-				       FileMode.CreateNew,
-				       FileAccess.Write,
-				       FileShare.None,
-				       bufferSize: 16 * 1024,
-				       flushToDisk ? FileOptions.WriteThrough : FileOptions.None))
+			using (var stream = new FileStream(tempPath, CreatePrivateWriteOptions(flushToDisk)))
 			{
 				stream.Write(payload);
 				stream.Flush(flushToDisk);
@@ -197,6 +202,8 @@ internal static class JsonStorePersistence
             {
 				File.Move(tempPath, fileSet.PrimaryPath);
             }
+
+			EnsurePrivateUnixFileMode(fileSet.PrimaryPath);
 
 			var backupMirrored = TryMirrorPrimaryToBackup(fileSet, writeOperations);
 			return backupMirrored || !requireBackup;
@@ -221,6 +228,27 @@ internal static class JsonStorePersistence
 		}
     }
 
+	private static FileStreamOptions CreatePrivateWriteOptions(bool flushToDisk)
+	{
+		var options = new FileStreamOptions
+		{
+			Mode = FileMode.CreateNew,
+			Access = FileAccess.Write,
+			Share = FileShare.None,
+			BufferSize = 16 * 1024,
+			Options = flushToDisk ? FileOptions.WriteThrough : FileOptions.None
+		};
+		if (!OperatingSystem.IsWindows())
+			options.UnixCreateMode = PrivateUnixFileMode;
+		return options;
+	}
+
+	private static void EnsurePrivateUnixFileMode(string path)
+	{
+		if (!OperatingSystem.IsWindows())
+			File.SetUnixFileMode(path, PrivateUnixFileMode);
+	}
+
 	private static bool TryMirrorPrimaryToBackup(
 		JsonStoreFileSet fileSet,
 		JsonStoreWriteOperations writeOperations)
@@ -230,7 +258,10 @@ internal static class JsonStorePersistence
             // The backup must mirror the final committed primary snapshot.
             // This keeps recovery deterministic across multiple processes.
             if (File.Exists(fileSet.PrimaryPath))
+			{
 				writeOperations.Copy(fileSet.PrimaryPath, fileSet.BackupPath, overwrite: true);
+				EnsurePrivateUnixFileMode(fileSet.BackupPath);
+			}
 			return true;
         }
         catch
@@ -281,14 +312,15 @@ internal static class JsonStorePersistence
             return false;
 
         using (content)
-        using (var reader = new StreamReader(
-                   content,
-                   Encoding.UTF8,
-                   detectEncodingFromByteOrderMarks: true,
-                   bufferSize: 1024,
-                   leaveOpen: true))
         {
-            text = reader.ReadToEnd();
+            try
+            {
+                text = ReadAllTextStrict(content);
+            }
+            catch (DecoderFallbackException)
+            {
+                return false;
+            }
         }
         return true;
     }
@@ -422,7 +454,19 @@ internal static class JsonStorePersistence
         return JsonDocument.Parse(reader.ReadToEnd());
     }
 
-    private static Encoding? DetectUnicodeEncoding(FileStream stream)
+    private static string ReadAllTextStrict(Stream stream)
+    {
+        var encoding = DetectUnicodeEncoding(stream) ?? StrictUtf8;
+        using var reader = new StreamReader(
+            stream,
+            encoding,
+            detectEncodingFromByteOrderMarks: true,
+            bufferSize: 1024,
+            leaveOpen: true);
+        return reader.ReadToEnd();
+    }
+
+    private static Encoding? DetectUnicodeEncoding(Stream stream)
     {
         Span<byte> prefix = stackalloc byte[4];
         var bytesRead = stream.Read(prefix);

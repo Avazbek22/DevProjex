@@ -71,10 +71,10 @@ public sealed class TreeExportService
 		string? displayRootName = null,
 		bool includeRootPath = true)
 	{
-		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath)
+		var outputRootPath = EscapeTextValue(string.IsNullOrWhiteSpace(displayRootPath)
 			? rootPath
-			: displayRootPath;
-		var outputRootName = ResolveRootDisplayName(root, displayRootName);
+			: displayRootPath);
+		var outputRootName = EscapeTextValue(ResolveRootDisplayName(root, displayRootName));
 		var output = new StringBuilder();
 		if (includeRootPath)
 		{
@@ -180,6 +180,8 @@ public sealed class TreeExportService
 		TreeNodeDescriptor root,
 		bool includeRootPath = true)
 	{
+		outputRootPath = EscapeTextValue(outputRootPath);
+		outputRootName = EscapeTextValue(outputRootName);
 		var sb = new StringBuilder();
 		if (includeRootPath)
 		{
@@ -267,6 +269,8 @@ public sealed class TreeExportService
 		TreeNodeDescriptor root,
 		IReadOnlySet<string> includedPaths)
 	{
+		outputRootPath = EscapeTextValue(outputRootPath);
+		outputRootName = EscapeTextValue(outputRootName);
 		var sb = new StringBuilder();
 		sb.Append(outputRootPath).AppendLine(":");
 		sb.AppendLine();
@@ -307,12 +311,16 @@ public sealed class TreeExportService
 
 	public static bool HasSelectedDescendantOrSelf(TreeNodeDescriptor node, IReadOnlySet<string> selectedPaths)
 	{
-		if (selectedPaths.Contains(node.FullPath)) return true;
-
-		foreach (var child in node.Children)
+		var pending = new Stack<TreeNodeDescriptor>();
+		pending.Push(node);
+		while (pending.Count > 0)
 		{
-			if (HasSelectedDescendantOrSelf(child, selectedPaths))
+			var current = pending.Pop();
+			if (selectedPaths.Contains(current.FullPath))
 				return true;
+
+			for (var index = current.Children.Count - 1; index >= 0; index--)
+				pending.Push(current.Children[index]);
 		}
 
 		return false;
@@ -338,7 +346,9 @@ public sealed class TreeExportService
 			var child = node.Children[i];
 			bool last = i == childCount - 1;
 
-			sb.Append(indent).Append(last ? BranchLast : BranchMiddle).AppendLine(child.DisplayName);
+			sb.Append(indent)
+				.Append(last ? BranchLast : BranchMiddle)
+				.AppendLine(EscapeTextValue(child.DisplayName));
 
 			if (child.Children.Count > 0)
 			{
@@ -369,10 +379,10 @@ public sealed class TreeExportService
 		ArgumentNullException.ThrowIfNull(root);
 		cancellationToken.ThrowIfCancellationRequested();
 
-		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath)
+		var outputRootPath = EscapeTextValue(string.IsNullOrWhiteSpace(displayRootPath)
 			? rootPath
-			: displayRootPath;
-		var outputRootName = ResolveRootDisplayName(root, displayRootName);
+			: displayRootPath);
+		var outputRootName = EscapeTextValue(ResolveRootDisplayName(root, displayRootName));
 		var output = new TreeTextLineWriter(destination, cancellationToken);
 		var ancestorBranches = new List<bool>();
 
@@ -428,7 +438,7 @@ public sealed class TreeExportService
 						? plain ? PlainBranchLast : BranchLast
 						: plain ? PlainBranchMiddle : BranchMiddle)
 				.ConfigureAwait(false);
-			await output.WriteAsync(child.DisplayName).ConfigureAwait(false);
+			await output.WriteAsync(EscapeTextValue(child.DisplayName)).ConfigureAwait(false);
 
 			if (child.Children.Count == 0)
 				continue;
@@ -526,7 +536,7 @@ public sealed class TreeExportService
 			output
 				.Append(indent)
 				.Append(isLast ? PlainBranchLast : PlainBranchMiddle)
-				.AppendLine(child.DisplayName);
+				.AppendLine(EscapeTextValue(child.DisplayName));
 			if (child.Children.Count == 0)
 				continue;
 
@@ -556,7 +566,9 @@ public sealed class TreeExportService
 			currentIndex++;
 			bool last = currentIndex == visibleCount;
 
-			sb.Append(indent).Append(last ? BranchLast : BranchMiddle).AppendLine(child.DisplayName);
+			sb.Append(indent)
+				.Append(last ? BranchLast : BranchMiddle)
+				.AppendLine(EscapeTextValue(child.DisplayName));
 
 			if (child.Children.Count > 0)
 			{
@@ -721,7 +733,7 @@ public sealed class TreeExportService
 		IReadOnlySet<string>? includedPaths)
 	{
 		var sb = new StringBuilder();
-		sb.Append("Root: ").AppendLine(ResolveStructuredRootPath(localRootPath));
+		sb.Append("Root: ").AppendLine(EscapeTextValue(ResolveStructuredRootPath(localRootPath)));
 		sb.AppendLine();
 		WriteMarkdownTreeContents(sb, root, includedPaths);
 		return sb.ToString();
@@ -919,7 +931,7 @@ public sealed class TreeExportService
 		if (string.IsNullOrEmpty(name))
 			return name;
 
-		var sanitized = name.Replace("\r", "\\r").Replace("\n", "\\n").Replace("\t", "\\t");
+		var sanitized = EscapeTextValue(name);
 		return sanitized[0] is '-' or '*' or '+' or '['
 			? "\\" + sanitized
 			: sanitized;
@@ -1058,12 +1070,18 @@ public sealed class TreeExportService
 		TreeNodeDescriptor root,
 		string outputRootName)
 	{
-		var chars = 0;
-		var lineBreaks = 0;
+		long chars = 0;
+		long lineBreaks = 0;
 
-		AppendAsciiLineMetrics(outputRootPath.Length + 1, ref chars, ref lineBreaks); // "<rootPath>:"
+		AppendAsciiLineMetrics(
+			(long)EscapeTextValue(outputRootPath).Length + 1,
+			ref chars,
+			ref lineBreaks); // "<rootPath>:"
 		AppendAsciiLineMetrics(0, ref chars, ref lineBreaks); // blank separator line
-		AppendAsciiLineMetrics(BranchMiddle.Length + outputRootName.Length, ref chars, ref lineBreaks);
+		AppendAsciiLineMetrics(
+			(long)BranchMiddle.Length + EscapeTextValue(outputRootName).Length,
+			ref chars,
+			ref lineBreaks);
 		AppendFullAsciiChildMetrics(root, IndentPipe.Length, ref chars, ref lineBreaks);
 
 		return CreateMetricsFromNormalizedCounts(chars, lineBreaks);
@@ -1075,12 +1093,18 @@ public sealed class TreeExportService
 		IReadOnlySet<string> includedPaths,
 		string outputRootName)
 	{
-		var chars = 0;
-		var lineBreaks = 0;
+		long chars = 0;
+		long lineBreaks = 0;
 
-		AppendAsciiLineMetrics(outputRootPath.Length + 1, ref chars, ref lineBreaks); // "<rootPath>:"
+		AppendAsciiLineMetrics(
+			(long)EscapeTextValue(outputRootPath).Length + 1,
+			ref chars,
+			ref lineBreaks); // "<rootPath>:"
 		AppendAsciiLineMetrics(0, ref chars, ref lineBreaks); // blank separator line
-		AppendAsciiLineMetrics(BranchMiddle.Length + outputRootName.Length, ref chars, ref lineBreaks);
+		AppendAsciiLineMetrics(
+			(long)BranchMiddle.Length + EscapeTextValue(outputRootName).Length,
+			ref chars,
+			ref lineBreaks);
 		AppendSelectedAsciiChildMetrics(root, includedPaths, IndentPipe.Length, ref chars, ref lineBreaks);
 
 		return CreateMetricsFromNormalizedCounts(chars, lineBreaks);
@@ -1089,8 +1113,8 @@ public sealed class TreeExportService
 	private static void AppendFullAsciiChildMetrics(
 		TreeNodeDescriptor node,
 		int indentLength,
-		ref int chars,
-		ref int lineBreaks)
+		ref long chars,
+		ref long lineBreaks)
 	{
 		var childCount = node.Children.Count;
 		for (var index = 0; index < childCount; index++)
@@ -1098,7 +1122,10 @@ public sealed class TreeExportService
 			var child = node.Children[index];
 			var branchLength = index == childCount - 1 ? BranchLast.Length : BranchMiddle.Length;
 
-			AppendAsciiLineMetrics(indentLength + branchLength + child.DisplayName.Length, ref chars, ref lineBreaks);
+			AppendAsciiLineMetrics(
+				(long)indentLength + branchLength + EscapeTextValue(child.DisplayName).Length,
+				ref chars,
+				ref lineBreaks);
 
 			if (child.Children.Count > 0)
 				AppendFullAsciiChildMetrics(child, indentLength + IndentPipe.Length, ref chars, ref lineBreaks);
@@ -1109,8 +1136,8 @@ public sealed class TreeExportService
 		TreeNodeDescriptor node,
 		IReadOnlySet<string> includedPaths,
 		int indentLength,
-		ref int chars,
-		ref int lineBreaks)
+		ref long chars,
+		ref long lineBreaks)
 	{
 		var visibleCount = 0;
 		foreach (var child in node.Children)
@@ -1128,31 +1155,36 @@ public sealed class TreeExportService
 			visibleIndex++;
 			var branchLength = visibleIndex == visibleCount ? BranchLast.Length : BranchMiddle.Length;
 
-			AppendAsciiLineMetrics(indentLength + branchLength + child.DisplayName.Length, ref chars, ref lineBreaks);
+			AppendAsciiLineMetrics(
+				(long)indentLength + branchLength + EscapeTextValue(child.DisplayName).Length,
+				ref chars,
+				ref lineBreaks);
 
 			if (child.Children.Count > 0)
 				AppendSelectedAsciiChildMetrics(child, includedPaths, indentLength + IndentPipe.Length, ref chars, ref lineBreaks);
 		}
 	}
 
-	private static void AppendAsciiLineMetrics(int renderedChars, ref int chars, ref int lineBreaks)
+	private static void AppendAsciiLineMetrics(long renderedChars, ref long chars, ref long lineBreaks)
 	{
 		chars += renderedChars + 1; // Normalize any platform newline to a single logical line-break char.
 		lineBreaks++;
 	}
 
-	private static ExportOutputMetrics CreateMetricsFromNormalizedCounts(int chars, int lineBreaks)
+	private static ExportOutputMetrics CreateMetricsFromNormalizedCounts(long chars, long lineBreaks)
 	{
 		if (chars <= 0)
 			return ExportOutputMetrics.Empty;
 
 		var lines = lineBreaks + 1;
-		var tokens = (chars + 3) / 4;
+		var tokens = (chars / 4) + (chars % 4 == 0 ? 0 : 1);
 		return new ExportOutputMetrics(lines, chars, tokens);
 	}
 
 	private static string ResolveRootDisplayName(TreeNodeDescriptor root, string? displayRootName)
 		=> string.IsNullOrWhiteSpace(displayRootName) ? root.DisplayName : displayRootName;
+
+	private static string EscapeTextValue(string value) => SingleLineTextEscaping.Escape(value);
 
 	private static string ResolveStructuredRootPath(string localRootPath)
 	{
@@ -1172,5 +1204,5 @@ public sealed class TreeExportService
 	private static bool IsAbsoluteDisplayUri(string value)
 		=> Uri.TryCreate(value, UriKind.Absolute, out var uri) && !uri.IsFile;
 
-	private static string NormalizeStructuredPath(string path) => path.Replace('\\', '/');
+	private static string NormalizeStructuredPath(string path) => PathUtility.NormalizeSeparators(path);
 }

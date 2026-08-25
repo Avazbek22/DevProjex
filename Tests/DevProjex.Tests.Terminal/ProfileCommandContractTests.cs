@@ -3,6 +3,30 @@ namespace DevProjex.Tests.Terminal;
 public sealed class ProfileCommandContractTests
 {
 	[Fact]
+	public void TextProfileEscapesControlCharactersInSelectionValues()
+	{
+		using var workspace = new TemporaryDirectory();
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var handler = new ProfileCommandHandler(services, new TestTerminalEnvironment());
+		var selection = new ProjectSelectionSpec(
+			Roots: ["root\nforged"],
+			Extensions: [".cs\tforged"],
+			SelectedPaths: ["src/safe\rforged.cs"],
+			ProfileSource: new ProjectProfileReference(
+				ProjectProfileSourceKind.Portable,
+				"profile\nforged.json"));
+
+		var text = handler.BuildText(selection);
+
+		Assert.Contains("root\\nforged", text, StringComparison.Ordinal);
+		Assert.Contains(".cs\\tforged", text, StringComparison.Ordinal);
+		Assert.Contains("src/safe\\rforged.cs", text, StringComparison.Ordinal);
+		Assert.Contains("profile\\nforged.json", text, StringComparison.Ordinal);
+		Assert.DoesNotContain('\t', text);
+	}
+
+	[Fact]
 	public async Task StandardProfileIsDeterministicAndDoesNotReadLocalState()
 	{
 		using var workspace = CreateWorkspace();
@@ -573,6 +597,7 @@ public sealed class ProfileCommandContractTests
 	[InlineData("/absolute/path")]
 	[InlineData("C:\\absolute\\path")]
 	[InlineData("\\\\server\\share\\path")]
+	[InlineData("src\\..\\outside")]
 	public async Task ProfileValidationRejectsPathsUnsafeOnAnySupportedPlatform(
 		string selectedPath)
 	{
@@ -601,6 +626,25 @@ public sealed class ProfileCommandContractTests
 		Assert.Contains("DPX-CLI-PROFILE-INVALID", environment.StandardError, StringComparison.Ordinal);
 		Assert.DoesNotContain(selectedPath, environment.StandardError, StringComparison.Ordinal);
 		Assert.Empty(environment.StandardOutput);
+	}
+
+	[Theory]
+	[InlineData("C:\\absolute\\path")]
+	[InlineData("\\\\server\\share\\path")]
+	public void PortableSelectionRejectsForeignRootSyntaxOnEveryHost(string selectedPath)
+	{
+		var exception = Assert.Throws<ProjectContextValidationException>(
+			() => ProjectSelectionPath.NormalizePortableRelative(selectedPath));
+
+		Assert.Equal(ProjectSelectionPath.InvalidPathCode, exception.Code);
+	}
+
+	[Fact]
+	public void PortableSelectionCanonicalizesEitherDirectorySeparator()
+	{
+		Assert.Equal(
+			"src/app.cs",
+			ProjectSelectionPath.NormalizePortableRelative("src\\app.cs"));
 	}
 
 	private static TemporaryDirectory CreateWorkspace()

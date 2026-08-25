@@ -151,12 +151,12 @@ public sealed class TreeAndContentExportService(
 				return GetFallbackContentHeaderPath(filePath);
 
 			var relativePath = Path.GetRelativePath(normalizedRootPath, filePath);
-			if (!string.IsNullOrWhiteSpace(relativePath) &&
+			if (!string.IsNullOrEmpty(relativePath) &&
 			    relativePath != "." &&
-			    !IsOutsideRoot(relativePath) &&
+			    !PathUtility.IsRelativePathOutsideRoot(relativePath) &&
 			    !Path.IsPathRooted(relativePath))
 			{
-				return relativePath.Replace('\\', '/');
+				return PathUtility.NormalizeSeparators(relativePath);
 			}
 		}
 		catch
@@ -171,13 +171,8 @@ public sealed class TreeAndContentExportService(
 	private static string GetFallbackContentHeaderPath(string filePath)
 	{
 		var fileName = Path.GetFileName(filePath);
-		return string.IsNullOrWhiteSpace(fileName) ? filePath.Replace('\\', '/') : fileName;
+		return string.IsNullOrEmpty(fileName) ? PathUtility.NormalizeSeparators(filePath) : fileName;
 	}
-
-	private static bool IsOutsideRoot(string relativePath) =>
-		relativePath.Equals("..", StringComparison.Ordinal) ||
-		relativePath.StartsWith("../", StringComparison.Ordinal) ||
-		relativePath.StartsWith(@"..\", StringComparison.Ordinal);
 
 	private static void AppendClipboardBlankLine(StringBuilder sb) => sb.AppendLine(ClipboardBlankLine);
 

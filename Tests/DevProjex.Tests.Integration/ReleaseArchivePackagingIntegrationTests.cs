@@ -76,6 +76,16 @@ public sealed class ReleaseArchivePackagingIntegrationTests
 			$firstHash = Get-FileSha256Hex -path $firstArchive
 			$secondHash = Get-FileSha256Hex -path $secondArchive
 			if ($firstHash -ne $secondHash) { throw 'Archive output is not deterministic.' }
+			$checksumPath = Join-Path $PSScriptRoot 'SHA256SUMS.txt'
+			$checksumLines = @("$firstHash *first.tar.gz", "$secondHash *second.tar.gz")
+			Write-ReleaseChecksumManifest -path $checksumPath -lines $checksumLines
+			$checksumBytes = [System.IO.File]::ReadAllBytes($checksumPath)
+			if ($checksumBytes.Length -ge 3 -and $checksumBytes[0] -eq 0xef -and $checksumBytes[1] -eq 0xbb -and $checksumBytes[2] -eq 0xbf) {
+			    throw 'Checksum manifest contains a UTF-8 BOM.'
+			}
+			$expectedChecksumText = ($checksumLines -join "`n") + "`n"
+			$actualChecksumText = [System.Text.Encoding]::UTF8.GetString($checksumBytes)
+			if ($actualChecksumText -cne $expectedChecksumText) { throw 'Checksum manifest is not deterministic UTF-8 with LF endings.' }
 			$actual = @(Read-UstarGzipArchive -archivePath $firstArchive -captureEntryNames @('bundle/Info.plist'))
 			if ($actual.Count -ne 3) { throw "Unexpected entry count: $($actual.Count)." }
 			if ($actual[0].Name -ne 'bundle/' -or -not $actual[0].IsDirectory -or $actual[0].Mode -ne 493) { throw 'Directory entry mismatch.' }

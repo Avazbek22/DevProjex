@@ -28,17 +28,18 @@ internal sealed class McpJsonArguments(
 		return value.GetString();
 	}
 
-	public string RequiredString(string name)
+	public string RequiredString(string name, bool allowWhitespace = false)
 	{
 		var value = OptionalString(name);
-		if (string.IsNullOrWhiteSpace(value))
+		if (string.IsNullOrEmpty(value) || (!allowWhitespace && string.IsNullOrWhiteSpace(value)))
 			throw new McpToolException(
 				McpErrorCodes.InvalidArguments,
-				$"{McpErrorCodes.InvalidArguments}: '{name}' is required and must be a non-empty string.");
+				$"{McpErrorCodes.InvalidArguments}: '{name}' is required and must be a " +
+				(allowWhitespace ? "non-empty string." : "non-whitespace string."));
 		return value;
 	}
 
-	public IReadOnlyList<string>? OptionalStringArray(string name)
+	public IReadOnlyList<string>? OptionalStringArray(string name, bool allowWhitespace = false)
 	{
 		if (!_values.TryGetValue(name, out var value) || value.ValueKind == JsonValueKind.Null)
 			return null;
@@ -48,9 +49,12 @@ internal sealed class McpJsonArguments(
 		var result = new List<string>();
 		foreach (var item in value.EnumerateArray())
 		{
-			if (item.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(item.GetString()))
+			var itemValue = item.ValueKind == JsonValueKind.String ? item.GetString() : null;
+			if (item.ValueKind != JsonValueKind.String ||
+			    string.IsNullOrEmpty(itemValue) ||
+			    (!allowWhitespace && string.IsNullOrWhiteSpace(itemValue)))
 				throw Invalid(name, "an array of non-empty strings");
-			result.Add(item.GetString()!);
+			result.Add(itemValue);
 		}
 		return result;
 	}

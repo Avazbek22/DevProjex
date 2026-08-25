@@ -4587,6 +4587,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 					StringComparison.Ordinal) &&
 				      !viewModel.StatusBusy,
 				"the real compression prewarm to finish before injecting status states");
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
 			viewModel.SetCompressionPreparationStatus(isActive: true);
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
 			Assert.Equal("Compressing code…", option.StatusText);
@@ -4895,6 +4896,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 					StringComparison.Ordinal) &&
 				      !viewModel.StatusBusy,
 				"the opt-in secret discovery to complete");
+			await UiTestDriver.WaitForSecretDiscoveryIdleAsync(window);
 			analyzer.Reset();
 
 			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.EmptyFiles);
@@ -4911,6 +4913,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 					StringComparison.Ordinal) &&
 				      !viewModel.StatusBusy,
 				"the expanded selection secret discovery to settle");
+			await UiTestDriver.WaitForSecretDiscoveryIdleAsync(window);
 
 			Assert.Equal(0, analyzer.GetReadCount("Secrets.cs"));
 			Assert.Equal(0, analyzer.GetReadCount("README.md"));
@@ -4929,6 +4932,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 					StringComparison.Ordinal) &&
 				      !viewModel.StatusBusy,
 				"the restored selection secret discovery to settle");
+			await UiTestDriver.WaitForSecretDiscoveryIdleAsync(window);
 
 			Assert.Equal(1, analyzer.TotalReadCount);
 		}

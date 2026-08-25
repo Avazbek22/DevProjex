@@ -193,6 +193,40 @@ public sealed class TerminalSelectionEvolutionPtyTests
 		await ExitAsync(terminal);
 	}
 
+	[Fact(Timeout = 60_000)]
+	public async Task ExitCancelsBlockedSettingsRefresh()
+	{
+		using var project = CreateGitIgnoreProject();
+		string? dataRoot = null;
+		await using var terminal = await StartAsync(
+			project.Path,
+			new Dictionary<string, string>
+			{
+				[TerminalProgressCheckpointProtocol.PhasesVariable] = "background-refresh"
+			},
+			path => dataRoot = path);
+
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync("X", TestContext.Current.CancellationToken);
+		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await WaitForCheckpointAsync(
+			GetCheckpointRoot(dataRoot),
+			"background-refresh");
+
+		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				timeout: TimeSpan.FromSeconds(5),
+				cancellationToken: TestContext.Current.CancellationToken));
+	}
+
 	private static async Task ToggleGitIgnoreAsync(
 		TerminalPtyHarness terminal,
 		bool expectedSelected)

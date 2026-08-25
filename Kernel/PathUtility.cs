@@ -10,7 +10,7 @@ public static class PathUtility
 
 	public static string Normalize(string path)
 	{
-		if (string.IsNullOrWhiteSpace(path))
+		if (IsMissingPath(path))
 			return path;
 
 		var fullPath = Path.GetFullPath(path);
@@ -25,9 +25,33 @@ public static class PathUtility
 			: normalized;
 	}
 
+	public static string NormalizeSeparators(string path)
+	{
+		ArgumentNullException.ThrowIfNull(path);
+		return OperatingSystem.IsWindows()
+			? path.Replace('\\', '/')
+			: path;
+	}
+
+	public static string GetPortableRelativePath(string rootPath, string path) =>
+		NormalizeSeparators(Path.GetRelativePath(rootPath, path));
+
+	public static bool IsRelativePathOutsideRoot(string relativePath)
+	{
+		ArgumentNullException.ThrowIfNull(relativePath);
+		if (Path.IsPathRooted(relativePath) || relativePath.Equals("..", StringComparison.Ordinal))
+			return true;
+
+		if (relativePath.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+			return true;
+
+		return Path.AltDirectorySeparatorChar != Path.DirectorySeparatorChar &&
+		       relativePath.StartsWith($"..{Path.AltDirectorySeparatorChar}", StringComparison.Ordinal);
+	}
+
 	public static bool IsPathInside(string path, string rootPath)
 	{
-		if (string.IsNullOrWhiteSpace(path) || string.IsNullOrWhiteSpace(rootPath))
+		if (IsMissingPath(path) || IsMissingPath(rootPath))
 			return false;
 
 		var normalizedPath = Normalize(path);
@@ -51,16 +75,19 @@ public static class PathUtility
 	private static bool IsDirectorySeparator(char value) =>
 		value == Path.DirectorySeparatorChar || value == Path.AltDirectorySeparatorChar;
 
+	private static bool IsMissingPath(string? path) =>
+		string.IsNullOrEmpty(path) ||
+		(OperatingSystem.IsWindows() && string.IsNullOrWhiteSpace(path));
+
 	private static string TrimTrailingSeparators(string path)
 	{
 		var root = Path.GetPathRoot(path);
 		if (string.IsNullOrEmpty(root))
-			return path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar, '\\');
+			return path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
 		if (PathComparer.Default.Equals(path, root))
 			return path;
 
-		// Normalize legacy persisted paths that may contain the other platform's separator.
-		return path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar, '\\');
+		return path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 	}
 }

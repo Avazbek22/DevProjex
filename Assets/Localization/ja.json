@@ -593,7 +593,7 @@
   "Terminal.Tui.Welcome.OpenDesktop.Description": "DevProjex Desktopを起動またはアクティブ化し、このターミナル セッションを利用可能な状態に保ちます。",
   "Terminal.Tui.Welcome.Help.Description": "ナビゲーションとワークフローのヘルプを開き、この選択内容に戻ります。",
   "Terminal.Tui.Welcome.Exit.Description": "DevProjexターミナルを終了し、ターミナル状態を復元します。",
-  "Terminal.Tui.Welcome.QuickStart": "直接自動化: devprojex analyze。| devprojex export context。-o context.md",
+  "Terminal.Tui.Welcome.QuickStart": "直接自動化: devprojex analyze .  |  devprojex export context . -o context.md",
   "Terminal.Tui.Footer.Welcome": "Up/Downまたはj/kナビゲートEnter選択Ctrl+Pアクション?ヘルプq終了",
   "Terminal.Tui.Footer.Loading": "Esc 操作をキャンセル  ? ヘルプ",
   "Terminal.Tui.Footer.Tree": "↑/↓ 移動  Enter 開く  Space 切替  Tab/F6 プレビュー  Ctrl+P 操作",

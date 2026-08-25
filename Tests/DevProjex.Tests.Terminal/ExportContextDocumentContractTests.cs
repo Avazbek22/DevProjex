@@ -74,6 +74,22 @@ public sealed class ExportContextDocumentContractTests
 	}
 
 	[Fact]
+	public async Task XmlDocumentRemainsWellFormedWhenTextContainsInvalidXmlCharacters()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("src/control.txt", "before\u000Bafter\n");
+		var environment = new TestTerminalEnvironment();
+
+		Assert.Equal(CommandLineExitCodes.Success, await RunAsync(workspace, environment, "xml"));
+
+		var document = XDocument.Parse(environment.StandardOutput);
+		var file = Assert.Single(document.Root!.Element("files")!.Elements("file"));
+		var content = file.Element("content")?.Value;
+		Assert.NotNull(content);
+		Assert.Equal("before\uFFFDafter\n", content);
+	}
+
+	[Fact]
 	public async Task MarkdownUsesSafeDynamicFenceAndCodeSpanForSpecialPath()
 	{
 		using var workspace = new TemporaryDirectory();

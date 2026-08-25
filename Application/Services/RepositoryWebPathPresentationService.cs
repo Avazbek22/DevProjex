@@ -36,29 +36,10 @@ public sealed class RepositoryWebPathPresentationService
 
     private static string NormalizeRepositoryUrl(string repositoryUrl)
     {
-        var normalized = repositoryUrl.Trim();
-        if (!Uri.TryCreate(normalized, UriKind.Absolute, out var uri))
-        {
-            var fallback = normalized.TrimEnd('/');
-            if (fallback.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
-                fallback = fallback[..^4];
-            return fallback;
-        }
-
-        var builder = new UriBuilder(uri)
-        {
-            UserName = string.Empty,
-            Password = string.Empty,
-            Query = string.Empty,
-            Fragment = string.Empty
-        };
-
-        var normalizedPath = builder.Path.TrimEnd('/');
-        if (normalizedPath.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
-            normalizedPath = normalizedPath[..^4];
-        builder.Path = normalizedPath;
-
-        return builder.Uri.ToString().TrimEnd('/');
+        var normalized = RepositoryUrlUtility.ToSafeDisplay(repositoryUrl).TrimEnd('/');
+        return normalized.EndsWith(".git", StringComparison.OrdinalIgnoreCase)
+            ? normalized[..^4]
+            : normalized;
     }
 
     private static string MapToFileWebPath(string fullPath, string localRootPath, string rootWebPath)
@@ -76,13 +57,13 @@ public sealed class RepositoryWebPathPresentationService
             return fullPath;
         }
 
-        if (string.IsNullOrWhiteSpace(relativePath) || relativePath == ".")
+        if (string.IsNullOrEmpty(relativePath) || relativePath == ".")
             return rootWebPath;
 
-        if (relativePath.StartsWith("..", StringComparison.Ordinal))
+        if (PathUtility.IsRelativePathOutsideRoot(relativePath))
             return fullPath;
 
-        var relativeUnixPath = relativePath.Replace('\\', '/');
+        var relativeUnixPath = PathUtility.NormalizeSeparators(relativePath);
         var encodedRelativePath = EncodePathSegments(relativeUnixPath);
 
         return $"{rootWebPath}/{encodedRelativePath}";
@@ -104,7 +85,7 @@ public sealed class RepositoryWebPathPresentationService
 
     private static string EncodePathSegments(string path)
     {
-        if (string.IsNullOrWhiteSpace(path))
+        if (string.IsNullOrEmpty(path))
             return string.Empty;
 
         var span = path.AsSpan();

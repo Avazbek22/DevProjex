@@ -3,6 +3,41 @@ namespace DevProjex.Tests.Unit;
 public sealed class ProjectProfileStoreTests
 {
 	[Fact]
+	public void SelectedPathsRoundTripSignificantWhitespace()
+	{
+		using var temporary = new TemporaryDirectory();
+		var projectPath = temporary.CreateFolder("project");
+		var store = CreateStore(temporary.Path);
+		string[] selectedPaths = OperatingSystem.IsWindows()
+			? [" folder/file .cs "]
+			: [" ", " folder/file .cs "];
+		string[] roots = OperatingSystem.IsWindows()
+			? [" source "]
+			: [" ", " source "];
+
+		store.SaveProfile(
+			projectPath,
+			new ProjectSelectionProfile(
+				roots,
+				[],
+				[],
+				RootFolderStates: roots.ToDictionary(
+					static root => root,
+					static _ => true,
+					PathComparer.Default),
+				SelectedPaths: selectedPaths));
+
+		Assert.True(store.TryLoadProfile(projectPath, out var loaded));
+		Assert.Equal(
+			selectedPaths.OrderBy(static path => path, PathComparer.Default),
+			loaded.SelectedPaths);
+		Assert.Equal(
+			roots.OrderBy(static path => path, PathComparer.Default),
+			loaded.SelectedRootFolders);
+		Assert.All(roots, root => Assert.True(loaded.RootFolderStates![root]));
+	}
+
+	[Fact]
 	public void TrySaveProfileWithResult_WhenSelectionExceedsLimit_RejectsWithoutPersistingTruncatedProfile()
 	{
 		using var temporary = new TemporaryDirectory();

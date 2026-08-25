@@ -8,6 +8,7 @@ public sealed class PreviewContentCoordinateMapTests
 	[Theory]
 	[InlineData("first\nsecond", 1, 6, 12)]
 	[InlineData("first\r\nsecond", 1, 6, 13)]
+	[InlineData("first\rsecond", 1, 6, 12)]
 	[InlineData("first\n", 1, 0, 6)]
 	public void IdentityMap_ResolvesColumnsWithoutIncludingLineTerminators(
 		string content,

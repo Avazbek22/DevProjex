@@ -467,7 +467,7 @@ public sealed class TerminalWorkspaceController(
 				.ConfigureAwait(false);
 		}
 		string MapDisplayPath(string path) =>
-			Path.GetRelativePath(plan.SourceRoot, path).Replace('\\', '/');
+			PathUtility.GetPortableRelativePath(plan.SourceRoot, path);
 
 		return view switch
 		{
@@ -480,7 +480,8 @@ public sealed class TerminalWorkspaceController(
 						cancellationToken,
 						MapDisplayPath,
 						includeOmissionMarkers: true,
-						transformationContext: transformationContext)
+						transformationContext: transformationContext,
+						projectRoot: plan.SourceRoot)
 					.ConfigureAwait(false) ??
 				services.PreviewDocumentBuilder.CreateInMemory(string.Empty),
 			ProjectContextView.TreeContent => await services.PreviewDocumentBuilder
@@ -490,7 +491,8 @@ public sealed class TerminalWorkspaceController(
 					cancellationToken,
 					MapDisplayPath,
 					includeOmissionMarkers: true,
-					transformationContext: transformationContext)
+					transformationContext: transformationContext,
+					projectRoot: plan.SourceRoot)
 				.ConfigureAwait(false),
 			_ => throw new ArgumentOutOfRangeException(nameof(view), view, null)
 		};

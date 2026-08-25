@@ -17,7 +17,7 @@ The archive preserves the executable permission. Replace `<version>` and
 `<architecture>` (`x64` or `arm64`) before running:
 
 ```bash
-curl -L "https://github.com/Avazbek22/DevProjex/releases/download/v<version>/DevProjex.v<version>.linux-<architecture>.tar.gz" | tar xz
+curl -fL "https://github.com/Avazbek22/DevProjex/releases/download/v<version>/DevProjex.v<version>.linux-<architecture>.tar.gz" | tar xz
 ./DevProjex
 ```
 
@@ -29,8 +29,8 @@ DevProjex requires macOS 14 or newer. Replace `<version>` and `<architecture>` (
 or `arm64`) before running:
 
 ```bash
-curl -L "https://github.com/Avazbek22/DevProjex/releases/download/v<version>/DevProjex.v<version>.osx-<architecture>.app.tar.gz" | tar xz
-mv DevProjex.app /Applications/
+curl -fL "https://github.com/Avazbek22/DevProjex/releases/download/v<version>/DevProjex.v<version>.osx-<architecture>.app.tar.gz" | tar xz
+sudo mv DevProjex.app /Applications/
 ```
 
 The current bundle is unsigned and not notarized. For a browser download, start it

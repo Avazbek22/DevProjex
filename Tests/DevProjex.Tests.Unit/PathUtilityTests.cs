@@ -11,7 +11,9 @@ public sealed class PathUtilityTests
 		var withLegacySeparator = folderPath + '\\';
 
 		Assert.Equal(folderPath, PathUtility.Normalize(withSeparator));
-		Assert.Equal(folderPath, PathUtility.Normalize(withLegacySeparator));
+		Assert.Equal(
+			OperatingSystem.IsWindows() ? folderPath : withLegacySeparator,
+			PathUtility.Normalize(withLegacySeparator));
 
 		var rootPath = Path.GetPathRoot(Path.GetTempPath())!;
 		Assert.Equal(rootPath, PathUtility.Normalize(rootPath));
@@ -28,6 +30,70 @@ public sealed class PathUtilityTests
 		var second = PathUtility.NormalizeForCacheKey(alteredCasePath);
 
 		Assert.Equal(OperatingSystem.IsWindows(), string.Equals(first, second, StringComparison.Ordinal));
+	}
+
+	[Fact]
+	public void Normalize_PreservesARealTrailingBackslashInUnixNames()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("Windows treats a backslash as a directory separator.");
+
+		using var temp = new TemporaryDirectory();
+		var ordinary = temp.CreateFolder("project");
+		var withBackslash = temp.CreateFolder("project\\");
+
+		Assert.NotEqual(PathUtility.Normalize(ordinary), PathUtility.Normalize(withBackslash));
+		Assert.Equal(withBackslash, PathUtility.Normalize(withBackslash));
+		Assert.False(PathUtility.IsPathInside(withBackslash, ordinary));
+	}
+
+	[Fact]
+	public void Normalize_CanonicalizesAWhitespaceOnlyUnixPath()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("Win32 path normalization rejects whitespace-only names.");
+
+		using var temp = new TemporaryDirectory();
+		var whitespacePath = temp.CreateFolder(" ");
+		var relativePath = Path.GetRelativePath(Environment.CurrentDirectory, whitespacePath);
+
+		Assert.Equal(whitespacePath, PathUtility.Normalize(relativePath));
+		Assert.True(PathUtility.IsPathInside(whitespacePath, temp.Path));
+	}
+
+	[Fact]
+	public void PortableRelativePathsPreserveUnixBackslashesAsNameCharacters()
+	{
+		using var temp = new TemporaryDirectory();
+		var project = temp.CreateFolder("project");
+		var relative = OperatingSystem.IsWindows()
+			? Path.Combine("folder", "name.txt")
+			: "literal\\name.txt";
+		var path = Path.Combine(project, relative);
+
+		Assert.Equal(
+			OperatingSystem.IsWindows() ? "folder/name.txt" : "literal\\name.txt",
+			PathUtility.GetPortableRelativePath(project, path));
+	}
+
+	[Theory]
+	[InlineData("..", true)]
+	[InlineData("../file.txt", true)]
+	[InlineData("..cache/file.txt", false)]
+	[InlineData("folder/file.txt", false)]
+	public void RelativeOutsideRootDetectionRequiresACompleteParentSegment(
+		string relativePath,
+		bool expected)
+	{
+		Assert.Equal(expected, PathUtility.IsRelativePathOutsideRoot(relativePath));
+	}
+
+	[Fact]
+	public void RelativeOutsideRootDetectionTreatsBackslashAsSeparatorOnlyOnWindows()
+	{
+		Assert.Equal(
+			OperatingSystem.IsWindows(),
+			PathUtility.IsRelativePathOutsideRoot(@"..\file.txt"));
 	}
 
 	[Fact]
@@ -72,14 +138,14 @@ public sealed class PathUtilityTests
 	}
 
 	[Fact]
-	public void IsPathInside_ReturnsTrue_ForLegacyTrailingSeparatorVariant()
+	public void IsPathInside_TreatsBackslashAsASeparatorOnlyOnWindows()
 	{
 		using var temp = new TemporaryDirectory();
 		var cacheRoot = temp.CreateFolder("RepoCache");
 		var child = temp.CreateFolder(Path.Combine("RepoCache", "repo"));
 		var legacyRoot = cacheRoot + '\\';
 
-		Assert.True(PathUtility.IsPathInside(child, legacyRoot));
+		Assert.Equal(OperatingSystem.IsWindows(), PathUtility.IsPathInside(child, legacyRoot));
 		Assert.True(PathUtility.IsPathInside(legacyRoot, legacyRoot));
 	}
 }

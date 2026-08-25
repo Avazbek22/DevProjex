@@ -54,7 +54,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			.ToHashSet(PathComparer.Default);
 		var projectedTree = selectsNoEffectivePaths
 			? loaded.Tree.Root with { Children = [] }
-			: BuildProjectedTree(effectiveRoot, includedPathSet) ??
+			: ProjectTreeSelectionProjection.BuildProjectedTree(effectiveRoot, includedPathSet) ??
 			  effectiveRoot with { Children = [] };
 		var includedFiles = selectsNoEffectivePaths
 			? []
@@ -167,7 +167,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			.ToHashSet(PathComparer.Default);
 		var projectedTree = selectsNoEffectivePaths
 			? baseline.EffectiveTree with { Children = [] }
-			: BuildProjectedTree(baseline.EffectiveTree, includedPathSet) ??
+			: ProjectTreeSelectionProjection.BuildProjectedTree(baseline.EffectiveTree, includedPathSet) ??
 			  baseline.EffectiveTree with { Children = [] };
 		var includedFiles = selectsNoEffectivePaths
 			? []
@@ -336,7 +336,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 
 	private static string NormalizeSourceRoot(string path)
 	{
-		if (string.IsNullOrWhiteSpace(path))
+		if (string.IsNullOrEmpty(path) ||
+		    (OperatingSystem.IsWindows() && string.IsNullOrWhiteSpace(path)))
 			throw new ProjectContextValidationException("DPX-PROJECT-PATH-REQUIRED", "Project path is required.");
 
 		var normalized = PathUtility.Normalize(path);
@@ -355,7 +356,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		ProjectSourceIdentity? sourceIdentity)
 	{
 		var fallbackName = Path.GetFileName(Path.TrimEndingDirectorySeparator(sourceRoot));
-		if (string.IsNullOrWhiteSpace(fallbackName))
+		if (string.IsNullOrEmpty(fallbackName))
 			fallbackName = sourceRoot;
 
 		if (sourceIdentity is null)
@@ -366,14 +367,26 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				sourceRoot);
 		}
 
-		return sourceIdentity with
+		var normalizedIdentity = sourceIdentity with
 		{
-			DisplayName = string.IsNullOrWhiteSpace(sourceIdentity.DisplayName)
+			DisplayName = sourceIdentity.SourceType == ProjectSourceType.LocalFolder
 				? fallbackName
-				: sourceIdentity.DisplayName.Trim(),
+				: string.IsNullOrWhiteSpace(sourceIdentity.DisplayName)
+					? fallbackName
+					: sourceIdentity.DisplayName.Trim(),
 			SourceReference = string.IsNullOrWhiteSpace(sourceIdentity.SourceReference)
 				? sourceRoot
 				: sourceIdentity.SourceReference
+		};
+		if (normalizedIdentity.SourceType != ProjectSourceType.GitClone)
+			return normalizedIdentity;
+
+		var safeRepositoryUrl = RepositoryUrlUtility.ToSafeDisplay(
+			normalizedIdentity.RepositoryUrl ?? normalizedIdentity.SourceReference);
+		return normalizedIdentity with
+		{
+			SourceReference = safeRepositoryUrl.Length > 0 ? safeRepositoryUrl : fallbackName,
+			RepositoryUrl = safeRepositoryUrl.Length > 0 ? safeRepositoryUrl : null
 		};
 	}
 
@@ -749,28 +762,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 	}
 
 	private static string NormalizePathSeparators(string path) =>
-		path.Replace('\\', '/');
-
-	private static TreeNodeDescriptor? BuildProjectedTree(
-		TreeNodeDescriptor node,
-		IReadOnlySet<string> includedPaths)
-	{
-		if (!includedPaths.Contains(node.FullPath))
-			return null;
-
-		if (!node.IsDirectory || node.Children.Count == 0)
-			return node;
-
-		var children = new List<TreeNodeDescriptor>();
-		foreach (var child in node.Children)
-		{
-			var projected = BuildProjectedTree(child, includedPaths);
-			if (projected is not null)
-				children.Add(projected);
-		}
-
-		return node with { Children = children };
-	}
+		PathUtility.NormalizeSeparators(path);
 
 	private static void AddAnalysisDiagnostics(
 		ProjectAnalysisReport analysis,

@@ -640,6 +640,20 @@ public class ZipDownloadServiceTests : IAsyncLifetime
     #region Cleanup Tests
 
     [Fact]
+    public void TemporaryArchiveHandle_DeletesStorageWhenClosed()
+    {
+        var path = Path.Combine(_tempDir!, $"{Guid.NewGuid():N}.zip");
+
+        using (var stream = ZipDownloadService.OpenTemporaryArchive(path))
+        {
+            stream.WriteByte(1);
+            Assert.Equal(1, stream.Length);
+        }
+
+        Assert.False(File.Exists(path));
+    }
+
+    [Fact]
     public async Task DownloadAndExtractAsync_CleansUpTempFile_OnSuccess()
     {
         // Verify that temporary ZIP file is deleted after extraction

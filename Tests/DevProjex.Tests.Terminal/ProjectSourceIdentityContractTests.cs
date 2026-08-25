@@ -1,7 +1,97 @@
 namespace DevProjex.Tests.Terminal;
 
+[Collection(EnvironmentVariableCollection.Name)]
 public sealed class ProjectSourceIdentityContractTests
 {
+	[Fact]
+	public async Task LocalIdentityPreservesWhitespaceOnlyPosixProjectName()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Windows does not support this directory name through ordinary APIs.");
+			return;
+		}
+
+		using var temporary = new TemporaryDirectory();
+		var projectPath = temporary.CreateDirectory(" ");
+		var services = new TerminalServiceFactory(() => temporary.Path).Create(AppLanguage.En);
+
+		var identity = await services.SourceIdentityResolver.ResolveAsync(
+			projectPath,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Equal(" ", identity.DisplayName);
+	}
+
+	[Theory]
+	[InlineData(" ")]
+	[InlineData(" leading-and-trailing ")]
+	public async Task ContextPlanPreservesExactUnixProjectName(string projectName)
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Windows normalizes these directory names through ordinary APIs.");
+			return;
+		}
+
+		using var temporary = new TemporaryDirectory();
+		var projectPath = temporary.CreateDirectory(projectName);
+		temporary.WriteFile($"{projectName}/App.cs", "class App {}\n");
+		var services = new TerminalServiceFactory(() => temporary.Path).Create(AppLanguage.En);
+		var selection = await services.SelectionResolver.ResolveAsync(
+			projectPath,
+			ProjectProfileReference.Standard,
+			new ProjectSelectionSpec(),
+			TestContext.Current.CancellationToken);
+
+		var plan = await services.ContextPlanner.BuildAsync(
+			new ProjectContextRequest(projectPath, selection),
+			TestContext.Current.CancellationToken);
+
+		var identity = Assert.IsType<ProjectSourceIdentity>(plan.SourceIdentity);
+		Assert.Equal(projectName, identity.DisplayName);
+		Assert.Equal(projectName, plan.EffectiveTree.DisplayName);
+		Assert.Equal(projectName, plan.ProjectedTree.DisplayName);
+	}
+
+	[Fact]
+	public async Task ContextPlanAcceptsRelativeWhitespaceOnlyUnixProjectPath()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Windows does not support this directory name through ordinary APIs.");
+			return;
+		}
+
+		using var temporary = new TemporaryDirectory();
+		temporary.CreateDirectory(" ");
+		temporary.WriteFile(" /App.cs", "class App {}\n");
+		var dataRoot = temporary.CreateDirectory("data");
+		var originalCurrentDirectory = Environment.CurrentDirectory;
+		try
+		{
+			Environment.CurrentDirectory = temporary.Path;
+			var expectedProjectPath = PathUtility.Normalize(" ");
+			var services = new TerminalServiceFactory(() => dataRoot).Create(AppLanguage.En);
+			var selection = await services.SelectionResolver.ResolveAsync(
+				" ",
+				ProjectProfileReference.Standard,
+				new ProjectSelectionSpec(),
+				TestContext.Current.CancellationToken);
+
+			var plan = await services.ContextPlanner.BuildAsync(
+				new ProjectContextRequest(" ", selection),
+				TestContext.Current.CancellationToken);
+
+			Assert.Equal(expectedProjectPath, plan.SourceRoot);
+			Assert.Equal(" ", plan.EffectiveTree.DisplayName);
+		}
+		finally
+		{
+			Environment.CurrentDirectory = originalCurrentDirectory;
+		}
+	}
+
 	[Fact]
 	public async Task CloneCacheSuffixNeverLeaksIntoTreeOrContextDocuments()
 	{
@@ -55,5 +145,45 @@ public sealed class ProjectSourceIdentityContractTests
 			"DevProjex_8DEEC71CEE019B1",
 			json,
 			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task ContextDocumentsNeverExposeRepositoryCredentialsFromCallerIdentity()
+	{
+		const string unsafeUrl = "https://user:top-secret@example.com/owner/repository.git";
+		const string safeUrl = "https://example.com/owner/repository.git";
+		using var temporary = new TemporaryDirectory();
+		temporary.WriteFile("src/App.cs", "class App {}\n");
+		var services = new TerminalServiceFactory(() => temporary.Path).Create(AppLanguage.En);
+		var selection = await services.SelectionResolver.ResolveAsync(
+			temporary.Path,
+			ProjectProfileReference.Standard,
+			new ProjectSelectionSpec(),
+			TestContext.Current.CancellationToken);
+		var unsafeIdentity = new ProjectSourceIdentity(
+			"repository",
+			ProjectSourceType.GitClone,
+			unsafeUrl,
+			unsafeUrl);
+
+		var plan = await services.ContextPlanner.BuildAsync(
+			new ProjectContextRequest(temporary.Path, selection, unsafeIdentity),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(safeUrl, plan.SourceIdentity?.SourceReference);
+		Assert.Equal(safeUrl, plan.SourceIdentity?.RepositoryUrl);
+		foreach (var format in Enum.GetValues<ProjectContextDocumentFormat>())
+		{
+			var document = await CompleteContextDocumentTestHelper.BuildAsync(
+				services.ContextDocumentService,
+				plan,
+				ProjectContextView.TreeContent,
+				format,
+				TestContext.Current.CancellationToken);
+
+			Assert.DoesNotContain("top-secret", document, StringComparison.Ordinal);
+			Assert.DoesNotContain("user:", document, StringComparison.Ordinal);
+			Assert.Contains(safeUrl, document, StringComparison.Ordinal);
+		}
 	}
 }

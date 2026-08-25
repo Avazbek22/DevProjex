@@ -141,11 +141,11 @@ public sealed class ProjectCopyExportService(
 	{
 		try
 		{
-			return Path.GetRelativePath(projectRoot, fullPath).Replace('\\', '/');
+			return SingleLineTextEscaping.Escape(PathUtility.GetPortableRelativePath(projectRoot, fullPath));
 		}
 		catch (ArgumentException)
 		{
-			return Path.GetFileName(fullPath);
+			return SingleLineTextEscaping.Escape(Path.GetFileName(fullPath));
 		}
 	}
 
@@ -311,8 +311,16 @@ public sealed class ProjectCopyExportService(
 
 				var destination = ResolveDestinationPath(stagingPath, file.RelativePath);
 				Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-				var contentPath = prepared?.GetFile(file.SourcePath).ContentPath ?? file.SourcePath;
-				var copiedBytes = await CopyFileAsync(contentPath, destination, buffer, cancellationToken)
+				var preparedFile = prepared?.GetFile(file.SourcePath);
+				var contentPath = preparedFile?.ContentPath ?? file.SourcePath;
+				var copiedBytes = await CopyFileAsync(
+						plan.ProjectRootPath,
+						file.SourcePath,
+						contentPath,
+						preparedFile,
+						destination,
+						buffer,
+						cancellationToken)
 					.ConfigureAwait(false);
 				bytesWritten += copiedBytes;
 				processedEntries++;
@@ -422,7 +430,7 @@ public sealed class ProjectCopyExportService(
 			EnsureDestinationDoesNotExist(destinationPath, requestedDestinationPath);
 		}
 
-		var stagingPath = Path.Combine(destinationDirectory, $".{Path.GetFileName(destinationPath)}.{Guid.NewGuid():N}.tmp");
+		var stagingPath = Path.Combine(destinationDirectory, $".devprojex-{Guid.NewGuid():N}.tmp");
 		ValidateDestinationOutsideSource(plan.ProjectRootPath, stagingPath);
 		var buffer = ArrayPool<byte>.Shared.Rent(CopyBufferSize);
 		var processedEntries = 0;
@@ -459,10 +467,16 @@ public sealed class ProjectCopyExportService(
 					var entryName = BuildZipEntryName(plan.ProjectName, file.RelativePath, isDirectory: false);
 					var entry = archive.CreateEntry(entryName, CompressionLevel.Optimal);
 					TrySetZipLastWriteTime(entry, file.SourcePath);
-					var contentPath = prepared?.GetFile(file.SourcePath).ContentPath ?? file.SourcePath;
-					await using var source = OpenSourceFile(contentPath);
+					var preparedFile = prepared?.GetFile(file.SourcePath);
+					var contentPath = preparedFile?.ContentPath ?? file.SourcePath;
+					await using var source = OpenValidatedSourceFile(
+						plan.ProjectRootPath,
+						file.SourcePath,
+						contentPath,
+						preparedFile);
 					await using var destination = entry.Open();
 					var copiedBytes = await CopyStreamAsync(source, destination, buffer, cancellationToken).ConfigureAwait(false);
+					ValidatePreparedSourceVersion(preparedFile, source);
 					bytesWritten += copiedBytes;
 					processedEntries++;
 					processedFiles++;
@@ -491,9 +505,9 @@ public sealed class ProjectCopyExportService(
 			{
 				var overwrite = destinationMode == ProjectCopyDestinationMode.AutomaticName ||
 				                conflictPolicy == ProjectCopyConflictPolicy.ReplaceAtomically;
-				File.Move(stagingPath, destinationPath, overwrite);
+				CommitZipArchive(stagingPath, destinationPath, overwrite);
 			}
-			catch (IOException exception) when (Path.Exists(destinationPath))
+			catch (IOException exception) when (AtomicFileCommit.DestinationEntryExists(destinationPath))
 			{
 				throw DestinationConflict(
 					ResolveReportedDestinationPath(
@@ -530,6 +544,12 @@ public sealed class ProjectCopyExportService(
 			}
 		}
 	}
+
+	private static void CommitZipArchive(
+		string stagingPath,
+		string destinationPath,
+		bool overwrite) =>
+		AtomicFileCommit.Commit(stagingPath, destinationPath, overwrite);
 
 	private static void ValidateSources(ProjectCopyExportPlan plan, CancellationToken cancellationToken)
 	{
@@ -617,7 +637,7 @@ public sealed class ProjectCopyExportService(
 		string path,
 		string? requestedPath = null)
 	{
-		if (Path.Exists(path))
+		if (AtomicFileCommit.DestinationEntryExists(path))
 		{
 			throw DestinationConflict(
 				requestedPath is null
@@ -640,7 +660,10 @@ public sealed class ProjectCopyExportService(
 		EnsureDestinationOutsideProject(rootPath, path);
 	}
 
-	private static string ResolveSafeDestinationOutsideSource(string rootPath, string path)
+	private static string ResolveSafeDestinationOutsideSource(
+		string rootPath,
+		string path,
+		bool allowExistingFileLeafReplacement = false)
 	{
 		var normalizedRoot = PathUtility.Normalize(rootPath);
 		var normalizedDestination = PathUtility.Normalize(path);
@@ -664,7 +687,8 @@ public sealed class ProjectCopyExportService(
 		EnsureDestinationIdentityOutsideSource(
 			canonicalRoot,
 			canonicalDestination,
-			normalizedDestination);
+			normalizedDestination,
+			allowExistingFileLeafReplacement);
 
 		return canonicalDestination;
 	}
@@ -764,7 +788,8 @@ public sealed class ProjectCopyExportService(
 			var normalizedDestination = PathUtility.Normalize(destinationPath);
 			_ = ResolveSafeDestinationOutsideSource(
 				projectRootPath,
-				normalizedDestination);
+				normalizedDestination,
+				allowExistingFileLeafReplacement: true);
 			var destinationParent = Path.GetDirectoryName(normalizedDestination);
 			if (string.IsNullOrWhiteSpace(destinationParent))
 				throw UnsafeDestination($"The destination parent is unavailable: {normalizedDestination}");
@@ -811,7 +836,8 @@ public sealed class ProjectCopyExportService(
 	private static void EnsureDestinationIdentityOutsideSource(
 		string canonicalRoot,
 		string canonicalDestination,
-		string requestedDestination)
+		string requestedDestination,
+		bool allowExistingFileLeafReplacement)
 	{
 		if (!OperatingSystem.IsWindows() &&
 		    !OperatingSystem.IsLinux() &&
@@ -861,12 +887,19 @@ public sealed class ProjectCopyExportService(
 		var current = ResolveNearestExistingPath(canonicalDestination);
 		if (current is not null)
 		{
+			var isReplaceableFileLeaf = allowExistingFileLeafReplacement &&
+			                            PathComparer.Default.Equals(
+				                            current,
+				                            canonicalDestination) &&
+			                            File.Exists(canonicalDestination) &&
+			                            !Directory.Exists(canonicalDestination);
 			if (!FileSystemPathIdentity.TryReadLocation(current, out var destinationLocation))
 			{
 				throw UnsafeDestination(
 					$"The destination filesystem location cannot be established safely: {current}");
 			}
-			if (protectedBoundaries.Any(boundary =>
+			if (!isReplaceableFileLeaf &&
+			    protectedBoundaries.Any(boundary =>
 				    boundary.Location.NamespaceId.Equals(
 					    destinationLocation.NamespaceId,
 					    StringComparison.Ordinal) &&
@@ -885,7 +918,9 @@ public sealed class ProjectCopyExportService(
 				throw UnsafeDestination(
 					$"The destination path identity cannot be established safely: {current}");
 			}
-			foreach (var boundary in protectedBoundaries)
+			foreach (var boundary in isReplaceableFileLeaf
+			         ? []
+			         : protectedBoundaries)
 			{
 				if (!TryResolveEquivalentSourcePath(
 					    boundary.Location,
@@ -1097,7 +1132,7 @@ public sealed class ProjectCopyExportService(
 		{
 			var name = suffix == 1 ? baseName : $"{baseName} ({suffix})";
 			var candidate = Path.Combine(parentPath, name);
-			if (!Path.Exists(candidate))
+			if (!AtomicFileCommit.DestinationEntryExists(candidate))
 				return candidate;
 		}
 	}
@@ -1121,7 +1156,7 @@ public sealed class ProjectCopyExportService(
 				Directory.Move(stagingPath, candidate);
 				return candidate;
 			}
-			catch (IOException) when (Path.Exists(candidate))
+			catch (IOException) when (AtomicFileCommit.DestinationEntryExists(candidate))
 			{
 				candidate = ResolveAvailableDirectoryPath(destinationParent, $"{projectName}-copy");
 			}
@@ -1144,7 +1179,7 @@ public sealed class ProjectCopyExportService(
 			Directory.Move(stagingPath, destinationPath);
 			return destinationPath;
 		}
-		catch (IOException exception) when (Path.Exists(destinationPath))
+		catch (IOException exception) when (AtomicFileCommit.DestinationEntryExists(destinationPath))
 		{
 			throw DestinationConflict(
 				ResolveReportedDestinationPath(
@@ -1155,14 +1190,71 @@ public sealed class ProjectCopyExportService(
 	}
 
 	private static async Task<long> CopyFileAsync(
-		string sourcePath,
+		string projectRootPath,
+		string originalSourcePath,
+		string contentPath,
+		PreparedSecretFile? preparedFile,
 		string destinationPath,
 		byte[] buffer,
 		CancellationToken cancellationToken)
 	{
-		await using var source = OpenSourceFile(sourcePath);
+		await using var source = OpenValidatedSourceFile(
+			projectRootPath,
+			originalSourcePath,
+			contentPath,
+			preparedFile);
 		await using var destination = OpenDestinationFile(destinationPath);
-		return await CopyStreamAsync(source, destination, buffer, cancellationToken).ConfigureAwait(false);
+		var copiedBytes = await CopyStreamAsync(source, destination, buffer, cancellationToken).ConfigureAwait(false);
+		ValidatePreparedSourceVersion(preparedFile, source);
+		return copiedBytes;
+	}
+
+	private static FileStream OpenValidatedSourceFile(
+		string projectRootPath,
+		string originalSourcePath,
+		string contentPath,
+		PreparedSecretFile? preparedFile)
+	{
+		ValidateSourceFileForCopy(projectRootPath, originalSourcePath);
+		FileStream? source = null;
+		try
+		{
+			source = OpenSourceFile(contentPath);
+			ValidateSourceFileForCopy(projectRootPath, originalSourcePath);
+			ValidatePreparedSourceVersion(preparedFile, source);
+			return source;
+		}
+		catch
+		{
+			source?.Dispose();
+			throw;
+		}
+	}
+
+	private static void ValidatePreparedSourceVersion(
+		PreparedSecretFile? preparedFile,
+		FileStream source)
+	{
+		try
+		{
+			preparedFile?.EnsureSourceVersion(source);
+		}
+		catch (SecretDetectionException exception)
+		{
+			throw SourceUnavailable(
+				$"A source file changed during content transformation: {preparedFile?.SourcePath}",
+				exception);
+		}
+	}
+
+	private static void ValidateSourceFileForCopy(string projectRootPath, string sourcePath)
+	{
+		ValidateNoReparsePoints(
+			projectRootPath,
+			sourcePath,
+			new HashSet<string>(PathComparer.Default));
+		if (!File.Exists(sourcePath))
+			throw SourceUnavailable($"A source file is no longer available: {sourcePath}");
 	}
 
 	private static async Task<long> CopyStreamAsync(
@@ -1183,11 +1275,11 @@ public sealed class ProjectCopyExportService(
 		}
 	}
 
-	private static FileStream OpenSourceFile(string path) => new(
+	internal static FileStream OpenSourceFile(string path) => new(
 		path,
 		FileMode.Open,
 		FileAccess.Read,
-		FileShare.Read,
+		SourceFileReadPolicy.Share,
 		CopyBufferSize,
 		FileOptions.Asynchronous | FileOptions.SequentialScan);
 
@@ -1201,7 +1293,7 @@ public sealed class ProjectCopyExportService(
 
 	private static string BuildZipEntryName(string projectName, string relativePath, bool isDirectory)
 	{
-		var normalizedRelative = relativePath.Replace('\\', '/');
+		var normalizedRelative = PathUtility.NormalizeSeparators(relativePath);
 		var name = string.IsNullOrEmpty(normalizedRelative)
 			? projectName
 			: $"{projectName}/{normalizedRelative}";

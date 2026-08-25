@@ -137,6 +137,28 @@ public sealed class SelectedPathsContractTests
 	}
 
 	[Fact]
+	public async Task InvalidWindowsSelectionNameIsAUsageError()
+	{
+		if (!OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Asterisks are valid file-name characters on Unix filesystems.");
+			return;
+		}
+
+		using var workspace = CreateWorkspace();
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace.Path,
+			environment,
+			"--select", "bad*name.cs");
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("DPX-SELECTION-PATH-INVALID", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task UnicodeSelectionPreservesTheExactRelativePath()
 	{
 		using var workspace = CreateWorkspace();
@@ -148,6 +170,114 @@ public sealed class SelectedPathsContractTests
 
 		Assert.Equal(FullContentPaths(workspace.Path, "данные/привет.cs"), ReadFilePaths(document));
 		Assert.Equal(["данные/привет.cs"], ReadSelectedPaths(document));
+	}
+
+	[Fact]
+	public async Task UnixSelectionPreservesLeadingAndTrailingSpacesInFileName()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("Windows normalizes trailing spaces in ordinary file names.");
+
+		using var workspace = CreateWorkspace();
+		const string relativePath = " leading-and-trailing .cs ";
+		workspace.WriteFile(relativePath, "class SpacedName {}\n");
+
+		using var document = await ExportJsonAsync(
+			workspace.Path,
+			"--select", relativePath);
+
+		Assert.Equal(FullContentPaths(workspace.Path, relativePath), ReadFilePaths(document));
+		Assert.Equal([relativePath], ReadSelectedPaths(document));
+	}
+
+	[Fact]
+	public async Task UnixSelectionPreservesAWhitespaceOnlyFileName()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Windows does not support this file name through ordinary APIs.");
+			return;
+		}
+
+		using var workspace = CreateWorkspace();
+		const string relativePath = " ";
+		workspace.WriteFile(relativePath, "whitespace-only file name\n");
+
+		using var document = await ExportJsonAsync(
+			workspace.Path,
+			"--select", relativePath);
+
+		Assert.Equal(FullContentPaths(workspace.Path, relativePath), ReadFilePaths(document));
+		Assert.Equal([relativePath], ReadSelectedPaths(document));
+	}
+
+	[Fact]
+	public void SelectionPathNormalizationPreservesSignificantWhitespace()
+	{
+		const string relativePath = " leading-and-trailing .cs ";
+
+		Assert.Equal(relativePath, ProjectSelectionPath.NormalizeRelative(relativePath));
+	}
+
+	[Fact]
+	public void SelectionPathNormalizationPreservesAWhitespaceOnlyName()
+	{
+		Assert.Equal(" ", ProjectSelectionPath.NormalizeRelative(" "));
+	}
+
+	[Fact]
+	public async Task UnixSelectionPreservesALiteralBackslashInFileName()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Windows treats a backslash as a directory separator.");
+			return;
+		}
+
+		using var workspace = CreateWorkspace();
+		const string relativePath = "literal\\name.txt";
+		workspace.WriteFile(relativePath, "literal backslash file name\n");
+
+		using var document = await ExportJsonAsync(
+			workspace.Path,
+			"--select", relativePath);
+
+		Assert.Equal(FullContentPaths(workspace.Path, relativePath), ReadFilePaths(document));
+		Assert.Equal([relativePath], ReadSelectedPaths(document));
+	}
+
+	[Theory]
+	[InlineData("\\leading-name.txt")]
+	[InlineData("C:drive-relative-name.txt")]
+	public async Task UnixSelectionUsesNativeRootedPathSemantics(string relativePath)
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Windows treats these values as rooted or drive-relative paths.");
+			return;
+		}
+
+		using var workspace = CreateWorkspace();
+		workspace.WriteFile(relativePath, "native Unix file name\n");
+
+		using var document = await ExportJsonAsync(
+			workspace.Path,
+			"--select", relativePath);
+
+		Assert.Equal(FullContentPaths(workspace.Path, relativePath), ReadFilePaths(document));
+		Assert.Equal([relativePath], ReadSelectedPaths(document));
+	}
+
+	[Fact]
+	public void SelectionPathNormalizationUsesOnlyNativeUnixSeparators()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Windows treats a backslash as a directory separator.");
+			return;
+		}
+
+		Assert.Equal("literal\\name.txt", ProjectSelectionPath.NormalizeRelative("literal\\name.txt"));
 	}
 
 	[Fact]

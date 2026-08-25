@@ -126,7 +126,7 @@ public sealed class ProjectSourceIdentityResolver(
 	private static string GetPathName(string path)
 	{
 		var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(path));
-		return string.IsNullOrWhiteSpace(name) ? path : name;
+		return string.IsNullOrEmpty(name) ? path : name;
 	}
 
 	private static string RemoveCacheSuffix(string name)

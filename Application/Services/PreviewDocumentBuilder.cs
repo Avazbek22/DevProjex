@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Runtime.CompilerServices;
 using DevProjex.Application.Secrets;
+using DevProjex.Kernel;
 
 namespace DevProjex.Application.Services;
 
@@ -89,7 +90,8 @@ public sealed class PreviewDocumentBuilder(
 		ContentTransformationContext? transformationContext = null,
 		bool includeSourceCoordinateMaps = false,
 		string? displayRootPath = null,
-		OutputPathRedactionDecision? outputPathRedaction = null)
+		OutputPathRedactionDecision? outputPathRedaction = null,
+		string? projectRoot = null)
     {
         var orderedFiles = BuildOrderedUniqueFiles(filePaths);
 		outputPathRedaction ??= OutputRootPathPresentation.CaptureRedactionDecision(transformationContext);
@@ -109,7 +111,7 @@ public sealed class PreviewDocumentBuilder(
 		var wroteRoot = false;
 		if (!string.IsNullOrWhiteSpace(displayRootPath))
 		{
-			var rootPresentation = OutputRootPathPresentation.ResolvePath(
+			var rootPresentation = ResolveSingleLinePathPresentation(
 				displayRootPath,
 				outputPathRedaction);
 			var rootLine = builder.LineCount + 1;
@@ -129,6 +131,7 @@ public sealed class PreviewDocumentBuilder(
 			redactions,
 			includeSourceCoordinateMaps,
 			outputPathRedaction,
+			projectRoot,
             cancellationToken).ConfigureAwait(false);
 
 		CompleteTransformation(transformationScope, transformationContext);
@@ -147,7 +150,8 @@ public sealed class PreviewDocumentBuilder(
 		ContentTransformationContext? transformationContext = null,
 		bool includeSourceCoordinateMaps = false,
 		OutputPathRedactionDecision? outputPathRedaction = null,
-		OutputPathPresentationResult? treeRootPresentation = null)
+		OutputPathPresentationResult? treeRootPresentation = null,
+		string? projectRoot = null)
     {
         var orderedFiles = BuildOrderedUniqueFiles(filePaths);
 		outputPathRedaction ??= OutputRootPathPresentation.CaptureRedactionDecision(transformationContext);
@@ -181,6 +185,7 @@ public sealed class PreviewDocumentBuilder(
 			redactions,
 			includeSourceCoordinateMaps,
 			outputPathRedaction,
+			projectRoot,
             cancellationToken).ConfigureAwait(false);
 		CompleteTransformation(transformationScope, transformationContext);
 
@@ -227,6 +232,7 @@ public sealed class PreviewDocumentBuilder(
 		ICollection<PreviewRedactionSpan> redactions,
 		bool includeSourceCoordinateMaps,
 		OutputPathRedactionDecision? outputPathRedaction,
+		string? projectRoot,
         CancellationToken cancellationToken)
     {
         var anyWritten = false;
@@ -237,6 +243,7 @@ public sealed class PreviewDocumentBuilder(
                            displayPathMapper,
                            redactionScope,
                            transformationScope,
+						   projectRoot,
                            cancellationToken).ConfigureAwait(false))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -272,7 +279,7 @@ public sealed class PreviewDocumentBuilder(
             anyWritten = true;
             trimTrailingEstimatedLine = false;
 
-			var displayPathPresentation = OutputRootPathPresentation.ResolvePath(
+			var displayPathPresentation = ResolveSingleLinePathPresentation(
 				prepared.DisplayPath,
 				outputPathRedaction);
 			var displayPath = displayPathPresentation.Text;
@@ -392,6 +399,7 @@ public sealed class PreviewDocumentBuilder(
         Func<string, string>? displayPathMapper,
         SecretRedactionScope? redactionScope,
         ContentTransformationScope? transformationScope,
+		string? projectRoot,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         if (transformationScope?.Compression is null)
@@ -403,6 +411,7 @@ public sealed class PreviewDocumentBuilder(
                         displayPathMapper,
                         redactionScope,
                         transformationScope,
+						projectRoot,
                         cancellationToken)
                     .ConfigureAwait(false);
             }
@@ -421,6 +430,7 @@ public sealed class PreviewDocumentBuilder(
                                    displayPathMapper,
                                    redactionScope,
                                    transformationScope,
+								   projectRoot,
                                    cancellationToken).ConfigureAwait(false))
                 {
                     yield return entry;
@@ -432,6 +442,7 @@ public sealed class PreviewDocumentBuilder(
                         displayPathMapper,
                         redactionScope,
                         transformationScope,
+						projectRoot,
                         cancellationToken)
                     .ConfigureAwait(false);
                 continue;
@@ -446,6 +457,7 @@ public sealed class PreviewDocumentBuilder(
                                displayPathMapper,
                                redactionScope,
                                transformationScope,
+							   projectRoot,
                                cancellationToken).ConfigureAwait(false))
             {
                 yield return entry;
@@ -459,6 +471,7 @@ public sealed class PreviewDocumentBuilder(
                            displayPathMapper,
                            redactionScope,
                            transformationScope,
+						   projectRoot,
                            cancellationToken).ConfigureAwait(false))
         {
             yield return entry;
@@ -470,6 +483,7 @@ public sealed class PreviewDocumentBuilder(
         Func<string, string>? displayPathMapper,
         SecretRedactionScope? redactionScope,
         ContentTransformationScope transformationScope,
+		string? projectRoot,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         if (files.Count == 0)
@@ -485,6 +499,7 @@ public sealed class PreviewDocumentBuilder(
                     displayPathMapper,
                     redactionScope,
                     transformationScope,
+					projectRoot,
                     cancellationToken).AsTask(),
                 cancellationToken);
         }
@@ -499,20 +514,34 @@ public sealed class PreviewDocumentBuilder(
         Func<string, string>? displayPathMapper,
         SecretRedactionScope? redactionScope,
         ContentTransformationScope? transformationScope,
+		string? projectRoot,
         CancellationToken cancellationToken)
     {
         var maximumFileBytes = redactionScope is null
             ? MaximumInteractiveFileBytes
             : SecretRedactionOutputPreparer.MaximumScannableFileBytes;
-		var readFact = await contentAnalyzer
-			.ReadFactAsync(file, maximumFileBytes, cancellationToken)
-			.ConfigureAwait(false);
-		var readResult = readFact.ToReadResult();
+		var unavailable = ClassifyUnavailableSource(projectRoot, file);
+		ContentReadFact? readFact = null;
+		FileContentReadResult readResult;
+		if (unavailable is { } unavailableBeforeRead)
+		{
+			readResult = new FileContentReadResult(unavailableBeforeRead);
+		}
+		else
+		{
+			readFact = await contentAnalyzer
+				.ReadFactAsync(file, maximumFileBytes, cancellationToken)
+				.ConfigureAwait(false);
+			var unavailableAfterRead = ClassifyUnavailableSource(projectRoot, file);
+			readResult = unavailableAfterRead is { } classification
+				? new FileContentReadResult(classification)
+				: readFact.ToReadResult();
+		}
         var displayPath = MapDisplayPath(file, displayPathMapper);
         var content = readResult.Content;
 		var compression = readResult.IsText &&
 		                  content is { IsEstimated: false, IsEmpty: false, IsWhitespaceOnly: false }
-			? readFact.Fingerprint is { } fingerprint
+			? readFact?.Fingerprint is { } fingerprint
 				? transformationScope?.Compress(
 					file,
 					displayPath,
@@ -527,6 +556,13 @@ public sealed class PreviewDocumentBuilder(
 			: null;
         return new PreparedContentEntry(file, displayPath, readResult, compression);
     }
+
+	private static FileContentClassification? ClassifyUnavailableSource(
+		string? projectRoot,
+		string path) =>
+		string.IsNullOrWhiteSpace(projectRoot)
+			? null
+			: ProjectSourcePathPolicy.ClassifyUnavailable(projectRoot, path);
 
     private static bool IsSmallFile(string path)
     {
@@ -559,14 +595,19 @@ public sealed class PreviewDocumentBuilder(
 			AdvancePosition(result.Text.AsSpan(sourcePosition, span.Start - sourcePosition), ref line, ref column);
 			var spanText = result.Text.AsSpan(span.Start, span.Length);
 			var segmentStart = 0;
-			for (var index = 0; index <= spanText.Length; index++)
+			var index = 0;
+			while (index <= spanText.Length)
 			{
-				if (index < spanText.Length && spanText[index] != '\n')
+				var lineBreakLength = index < spanText.Length
+					? GetLineBreakLength(spanText, index)
+					: 0;
+				if (index < spanText.Length && lineBreakLength == 0)
+				{
+					index++;
 					continue;
+				}
 
 				var segmentLength = index - segmentStart;
-				if (segmentLength > 0 && spanText[index - 1] == '\r')
-					segmentLength--;
 				if (segmentLength > 0)
 				{
 					destination.Add(new PreviewRedactionSpan(
@@ -587,15 +628,17 @@ public sealed class PreviewDocumentBuilder(
 						span.CascadedOccurrenceIds));
 				}
 
-				if (index < spanText.Length)
+				if (lineBreakLength > 0)
 				{
 					line++;
 					column = 0;
-					segmentStart = index + 1;
+					index += lineBreakLength;
+					segmentStart = index;
 				}
 				else
 				{
 					column += segmentLength;
+					break;
 				}
 			}
 			sourcePosition = span.Start + span.Length;
@@ -620,6 +663,13 @@ public sealed class PreviewDocumentBuilder(
 			presentation.SourceLength,
 			SecretFindingSource.GeneratedPath));
 	}
+
+	private static OutputPathPresentationResult ResolveSingleLinePathPresentation(
+		string path,
+		OutputPathRedactionDecision? redactionDecision) =>
+		OutputRootPathPresentation.ResolvePath(
+			SingleLineTextEscaping.Escape(path),
+			redactionDecision);
 
 	private static void AppendGeneratedPathRedactionFromText(
 		ICollection<PreviewRedactionSpan> destination,
@@ -652,18 +702,30 @@ public sealed class PreviewDocumentBuilder(
 
 	private static void AdvancePosition(ReadOnlySpan<char> text, ref int line, ref int column)
 	{
-		foreach (var character in text)
+		for (var index = 0; index < text.Length;)
 		{
-			if (character == '\n')
+			var lineBreakLength = GetLineBreakLength(text, index);
+			if (lineBreakLength > 0)
 			{
 				line++;
 				column = 0;
+				index += lineBreakLength;
 			}
-			else if (character != '\r')
+			else
 			{
 				column++;
+				index++;
 			}
 		}
+	}
+
+	private static int GetLineBreakLength(ReadOnlySpan<char> text, int index)
+	{
+		if (text[index] == '\n')
+			return 1;
+		if (text[index] != '\r')
+			return 0;
+		return index + 1 < text.Length && text[index + 1] == '\n' ? 2 : 1;
 	}
 
     private string GetOmissionMarker(FileContentClassification classification)
@@ -705,26 +767,25 @@ public sealed class PreviewDocumentBuilder(
         var wroteAnyLine = false;
         var lineStart = 0;
 
-        for (var i = 0; i < text.Length; i++)
+        for (var index = 0; index < text.Length;)
         {
-            if (text[i] != '\n')
+            var lineBreakLength = GetLineBreakLength(text, index);
+            if (lineBreakLength == 0)
+            {
+                index++;
                 continue;
+            }
 
-            var line = text.Slice(lineStart, i - lineStart);
-            if (line.Length > 0 && line[^1] == '\r')
-                line = line[..^1];
-
+            var line = text.Slice(lineStart, index - lineStart);
             builder.AppendLine(line);
             wroteAnyLine = true;
-            lineStart = i + 1;
+            index += lineBreakLength;
+            lineStart = index;
         }
 
         if (lineStart < text.Length)
         {
             var line = text[lineStart..];
-            if (line.Length > 0 && line[^1] == '\r')
-                line = line[..^1];
-
             builder.AppendLine(line);
             wroteAnyLine = true;
         }
@@ -866,9 +927,38 @@ public sealed class PreviewDocumentBuilder(
 
 	private static string CreateStoragePath()
 	{
-		var previewDirectory = Path.Combine(Path.GetTempPath(), "DevProjex", "Preview");
-		Directory.CreateDirectory(previewDirectory);
+		var previewDirectory = PrepareStorageDirectory(Path.GetTempPath());
+		PreviewTextStorageScavenger.StartOnce(previewDirectory);
 		return Path.Combine(previewDirectory, $"{Guid.NewGuid():N}.preview.txt");
+	}
+
+	internal static string PrepareStorageDirectory(string tempRoot)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(tempRoot);
+		var productDirectory = Path.Combine(tempRoot, "DevProjex");
+		EnsurePrivateStorageDirectory(productDirectory);
+		var previewDirectory = Path.Combine(productDirectory, "Preview");
+		EnsurePrivateStorageDirectory(previewDirectory);
+		return previewDirectory;
+	}
+
+	private static void EnsurePrivateStorageDirectory(string path)
+	{
+		Directory.CreateDirectory(path);
+		RejectLinkedStorageDirectory(path);
+		if (!OperatingSystem.IsWindows())
+		{
+			File.SetUnixFileMode(
+				path,
+				UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+		}
+		RejectLinkedStorageDirectory(path);
+	}
+
+	private static void RejectLinkedStorageDirectory(string path)
+	{
+		if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+			throw new IOException("Preview storage cannot use a symbolic link or reparse point.");
 	}
 
 	private static FileStream OpenStorageFile(string storagePath, FileOptions options)
@@ -899,8 +989,109 @@ public sealed class PreviewDocumentBuilder(
         catch
         {
             // Best-effort cleanup only.
-        }
-    }
+	}
+}
+
+internal static class PreviewTextStorageScavenger
+{
+	private const string FileSuffix = ".preview.txt";
+	private const int MaximumFilesRemoved = 64;
+	internal static readonly TimeSpan MinimumAge = TimeSpan.FromHours(24);
+	private static int _started;
+
+	internal static void StartOnce(string previewDirectory)
+	{
+		if (Interlocked.Exchange(ref _started, 1) != 0)
+			return;
+
+		_ = Task.Run(() => Scavenge(previewDirectory, DateTime.UtcNow, MinimumAge));
+	}
+
+	internal static int Scavenge(string previewDirectory, DateTime utcNow, TimeSpan minimumAge)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(previewDirectory);
+		ArgumentOutOfRangeException.ThrowIfLessThan(minimumAge, TimeSpan.Zero);
+		var removed = 0;
+		try
+		{
+			if (!Directory.Exists(previewDirectory) ||
+			    (File.GetAttributes(previewDirectory) & FileAttributes.ReparsePoint) != 0)
+			{
+				return 0;
+			}
+
+			foreach (var path in Directory.EnumerateFiles(
+				         previewDirectory,
+				         $"*{FileSuffix}",
+				         SearchOption.TopDirectoryOnly))
+			{
+				if (removed >= MaximumFilesRemoved)
+					break;
+				if (!IsOwnedStaleFile(path, utcNow, minimumAge))
+					continue;
+
+				try
+				{
+					using var lease = new FileStream(
+						path,
+						FileMode.Open,
+						FileAccess.ReadWrite,
+						FileShare.None,
+						bufferSize: 1,
+						FileOptions.DeleteOnClose);
+					removed++;
+				}
+				catch (Exception exception) when (
+					exception is IOException or UnauthorizedAccessException)
+				{
+					// An active preview or another process owns this file.
+				}
+			}
+		}
+		catch (Exception exception) when (
+			exception is IOException or UnauthorizedAccessException or NotSupportedException)
+		{
+			// Cleanup is best effort and must not invalidate preview creation.
+		}
+
+		return removed;
+	}
+
+	private static bool IsOwnedStaleFile(string path, DateTime utcNow, TimeSpan minimumAge)
+	{
+		try
+		{
+			var fileName = Path.GetFileName(path);
+			var stem = fileName[..^FileSuffix.Length];
+			if (!Guid.TryParseExact(stem, "N", out var identifier) ||
+			    !string.Equals(fileName, $"{identifier:N}{FileSuffix}", StringComparison.Ordinal) ||
+			    (File.GetAttributes(path) & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0 ||
+			    utcNow - File.GetLastWriteTimeUtc(path) < minimumAge)
+			{
+				return false;
+			}
+
+			if (!OperatingSystem.IsWindows())
+			{
+				var sharedPermissions = UnixFileMode.GroupRead |
+				                        UnixFileMode.GroupWrite |
+				                        UnixFileMode.GroupExecute |
+				                        UnixFileMode.OtherRead |
+				                        UnixFileMode.OtherWrite |
+				                        UnixFileMode.OtherExecute;
+				if ((File.GetUnixFileMode(path) & sharedPermissions) != 0)
+					return false;
+			}
+
+			return true;
+		}
+		catch (Exception exception) when (
+			exception is IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException)
+		{
+			return false;
+		}
+	}
+}
 
     private sealed class PreviewTextStorageBuilder : IDisposable
     {

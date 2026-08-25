@@ -6,7 +6,7 @@
 
 # 
 
-# DevProjex is a desktop application that helps users visualize folder/project structures, optionally read the contents of user-selected text files, and copy the results to the clipboard. The app is designed to be read-only with respect to user files.
+# DevProjex is a desktop application that helps users visualize folder/project structures, optionally read the contents of user-selected text files, and copy or export generated results. The app is designed to be read-only with respect to the source projects you open.
 
 # 
 
@@ -26,7 +26,7 @@
 
 # If you choose a “copy content” action, the app reads the contents of the selected text files in order to place that text into your clipboard.
 
-# DevProjex does not modify, delete, or upload your files.
+# DevProjex does not modify, delete, or upload files in the source projects you open. When you explicitly export a context document, folder copy, ZIP archive, or profile, the app writes that generated result to the destination you choose.
 
 # 
 
@@ -50,7 +50,7 @@
 
 # DevProjex stores application settings locally on your device (such as UI preferences, language, themes/effects, and ignore rules).
 
-# If you use Git features, repository data may be temporarily cached locally. The cache is intended to be removable/cleaned by the app when you close it.
+# If you use Git features, repository data may be cached locally between sessions to avoid unnecessary downloads. You can inspect or remove this managed cache through DevProjex.
 
 # 
 

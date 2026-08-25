@@ -8,6 +8,8 @@ namespace DevProjex.Kernel.Models;
 
 public sealed class GitIgnoreMatcher
 {
+    internal const int MaximumEffectiveRuleCount = 8_192;
+
     private readonly string _normalizedRootPath;
     private readonly IReadOnlyList<Rule> _rules;
     private readonly StringComparison _pathComparison;
@@ -80,7 +82,9 @@ public sealed class GitIgnoreMatcher
             return Empty;
 
         var rules = new List<Rule>();
-        var regexOptions = RegexOptions.Compiled | RegexOptions.CultureInvariant;
+        var regexOptions = RegexOptions.Compiled |
+                           RegexOptions.CultureInvariant |
+                           RegexOptions.NonBacktracking;
 
         foreach (var raw in lines)
         {
@@ -143,6 +147,11 @@ public sealed class GitIgnoreMatcher
             var hasSlash = line.Contains('/');
             var matchByNameOnly = !anchored && !hasSlash && !directoryOnly;
             var relativeToMatcherRoot = anchored || hasSlash;
+            if (rules.Count == MaximumEffectiveRuleCount)
+            {
+                throw new IOException(
+                    $"The .gitignore source exceeds the safe limit of {MaximumEffectiveRuleCount} effective rules.");
+            }
 
             var matchKind = GetRuleMatchKind(line, relativeToMatcherRoot, directoryOnly, matchByNameOnly, hasEscapes);
             Regex? pattern = null;
@@ -209,7 +218,7 @@ public sealed class GitIgnoreMatcher
 
     public IgnoreEvaluation EvaluateRelative(string relativePath, bool isDirectory, string name)
     {
-        if (_rules.Count == 0 || string.IsNullOrWhiteSpace(relativePath))
+        if (_rules.Count == 0 || string.IsNullOrEmpty(relativePath))
             return default;
 
         return EvaluateRelativeCore(NormalizeRelativePathForComparison(relativePath), isDirectory, name);
@@ -220,7 +229,7 @@ public sealed class GitIgnoreMatcher
         bool isDirectory,
         string name)
     {
-        if (_rules.Count == 0 || relativePath.IsWhiteSpace())
+        if (_rules.Count == 0 || relativePath.IsEmpty)
             return default;
 
         return EvaluateRelativeNormalizedCore(relativePath, isDirectory, name);
@@ -240,7 +249,7 @@ public sealed class GitIgnoreMatcher
         bool isDirectory,
         string name)
     {
-        if (_rules.Count == 0 || relativePath.IsWhiteSpace())
+        if (_rules.Count == 0 || relativePath.IsEmpty)
             return default;
 
         var normalizedName = string.IsNullOrEmpty(name) ? Path.GetFileName(relativePath).ToString() : name;
@@ -391,7 +400,7 @@ public sealed class GitIgnoreMatcher
 
     public bool ShouldTraverseIgnoredDirectoryRelative(string relativePath, string name)
     {
-        if (!HasNegationRules || string.IsNullOrWhiteSpace(relativePath))
+        if (!HasNegationRules || string.IsNullOrEmpty(relativePath))
             return false;
 
         return ShouldTraverseIgnoredDirectoryRelativeCore(NormalizeRelativePathForComparison(relativePath), name);
@@ -399,7 +408,7 @@ public sealed class GitIgnoreMatcher
 
     internal bool ShouldTraverseIgnoredDirectoryRelativeNormalized(ReadOnlySpan<char> relativePath, string name)
     {
-        if (!HasNegationRules || relativePath.IsWhiteSpace())
+        if (!HasNegationRules || relativePath.IsEmpty)
             return false;
 
         if (!RequiresComparisonNormalization(relativePath))
@@ -981,7 +990,7 @@ public sealed class GitIgnoreMatcher
         if (!span.Contains('\\'))
             return path;
 
-        return path.Replace('\\', '/');
+        return PathUtility.NormalizeSeparators(path);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

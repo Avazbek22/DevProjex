@@ -123,6 +123,36 @@ public sealed class ProjectContextStreamingRegressionTests
 	}
 
 	[Fact]
+	public async Task BoundedDocumentCharacterLimitNeverSplitsAUnicodeScalar()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/content.txt", "x😀tail");
+		var services = new TerminalServiceFactory(
+				() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var plan = await services.ContextFactory.BuildAsync(
+			project,
+			new ProjectSelectionSpec(GitMode: GitFilteringMode.None, Exclusions: []),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var document = await services.ContextDocumentService.BuildAsync(
+			plan,
+			ProjectContextView.Content,
+			ProjectContextDocumentFormat.Json,
+			new ProjectContextDocumentLimits(
+				MaximumTreeNodes: 10,
+				MaximumFiles: 1,
+				MaximumCharacters: 2,
+				MaximumFileBytes: 4_096),
+			TestContext.Current.CancellationToken);
+
+		using var json = JsonDocument.Parse(document);
+		var file = Assert.Single(json.RootElement.GetProperty("files").EnumerateArray());
+		Assert.Equal("x", file.GetProperty("content").GetString());
+	}
+
+	[Fact]
 	public async Task DocumentServiceRejectsUnknownViewBeforeWritingAnyBytes()
 	{
 		using var workspace = new TemporaryDirectory();

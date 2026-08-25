@@ -190,8 +190,8 @@ XML:
 * foldery to `<d n="...">`;
 * pliki to `<f>File.cs</f>`.
 
-Lekarz:
-* zaczyna się od `Root:...`;
+MD:
+* zaczyna się od `Root: ...`;
 * używa zagnieżdżonej listy Markdown;
 * foldery kończą się znakiem `/`.
 

@@ -22,7 +22,9 @@ public static class DesktopDiagnosticRequestStore
 	public static string Create(DesktopDiagnosticRequest request)
 	{
 		ArgumentNullException.ThrowIfNull(request);
-		var directory = Path.Combine(Path.GetTempPath(), "DevProjex", "desktop-diagnostics");
+		if (!IsValid(request))
+			throw new ArgumentException("Desktop diagnostic request fields are invalid.", nameof(request));
+		var directory = new DesktopControlPaths().DiagnosticDirectory;
 		DesktopInstanceRegistry.EnsurePrivateDirectory(directory);
 		var path = Path.Combine(directory, $"{Guid.NewGuid():N}.json");
 		File.WriteAllText(
@@ -36,6 +38,7 @@ public static class DesktopDiagnosticRequestStore
 	public static DesktopDiagnosticRequest? TryConsume()
 	{
 		var path = Environment.GetEnvironmentVariable(EnvironmentVariable);
+		string? safeRequestPath = null;
 		Environment.SetEnvironmentVariable(EnvironmentVariable, null);
 		if (string.IsNullOrWhiteSpace(path))
 			return null;
@@ -44,15 +47,14 @@ public static class DesktopDiagnosticRequestStore
 		{
 			var fullPath = Path.GetFullPath(path);
 			var expectedDirectory = Path.GetFullPath(
-				Path.Combine(Path.GetTempPath(), "DevProjex", "desktop-diagnostics"));
+				new DesktopControlPaths().DiagnosticDirectory);
 			if (!PathUtility.IsPathInside(fullPath, expectedDirectory))
 				return null;
-			var file = new FileInfo(fullPath);
-			if (!file.Exists || file.Length > DesktopProtocol.MaximumMessageBytes)
-				return null;
-			return JsonSerializer.Deserialize<DesktopDiagnosticRequest>(
-				File.ReadAllText(fullPath),
+			safeRequestPath = fullPath;
+			var request = DesktopRequestEnvelopeReader.Read<DesktopDiagnosticRequest>(
+				fullPath,
 				JsonOptions);
+			return IsValid(request) ? request : null;
 		}
 		catch
 		{
@@ -60,7 +62,7 @@ public static class DesktopDiagnosticRequestStore
 		}
 		finally
 		{
-			Delete(path);
+			Delete(safeRequestPath);
 		}
 	}
 
@@ -69,4 +71,10 @@ public static class DesktopDiagnosticRequestStore
 		if (!string.IsNullOrWhiteSpace(path))
 			DesktopInstanceRegistry.TryDelete(path);
 	}
+
+	private static bool IsValid(DesktopDiagnosticRequest? request) =>
+		request is not null &&
+		!string.IsNullOrWhiteSpace(request.ProjectPath) &&
+		!string.IsNullOrWhiteSpace(request.OutputPath) &&
+		!string.IsNullOrWhiteSpace(request.Scenario);
 }

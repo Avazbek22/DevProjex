@@ -24,7 +24,15 @@ public static class RepositoryUrlUtility
 			return $"{scp.UserPrefix}{scp.Host.ToLowerInvariant()}:{NormalizePath(scp.Path)}";
 
 		if (!Uri.TryCreate(trimmed.Replace('\\', '/'), UriKind.Absolute, out var uri))
-			return trimmed.Replace('\\', '/').TrimEnd('/');
+			return trimmed.Contains("://", StringComparison.Ordinal)
+				? string.Empty
+				: trimmed.Replace('\\', '/').TrimEnd('/');
+		if (uri.Host.Length == 0 &&
+		    !uri.IsFile &&
+		    trimmed.Contains('@', StringComparison.Ordinal))
+		{
+			return string.Empty;
+		}
 
 		try
 		{

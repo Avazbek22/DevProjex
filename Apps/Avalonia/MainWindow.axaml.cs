@@ -257,11 +257,19 @@ public partial class MainWindow : Window
     {
         // Show error relative to Git Clone window if it's open, otherwise relative to main window
         var owner = _gitCloneWindow ?? (Window)this;
-        await MessageDialog.ShowAsync(owner, _localization["Msg.ErrorTitle"], message);
+        await MessageDialog.ShowAsync(
+            owner,
+            _localization["Msg.ErrorTitle"],
+            message,
+            _localization["Dialog.OK"]);
     }
 
     private async Task ShowInfoAsync(string message) =>
-        await MessageDialog.ShowAsync(this, _localization["Msg.InfoTitle"], message);
+        await MessageDialog.ShowAsync(
+            this,
+            _localization["Msg.InfoTitle"],
+            message,
+            _localization["Dialog.OK"]);
 
     private async void OnOpenFolder(object? sender, RoutedEventArgs e)
     {
@@ -1719,6 +1727,7 @@ public partial class MainWindow : Window
         // Project lifecycle operations already committed to visible progress. Their compression
         // and metrics phases must continue that feedback immediately once the reveal gate opens.
         // Interactive option changes keep the delayed presentation to avoid flashing on fast work.
+		var secretRefreshVersion = Volatile.Read(ref _secretRedactionCountRefreshVersion);
         ObserveDetachedTask(
             RunPostLoadBackgroundWorkAsync(
                 postLoadVisualReadyTask,
@@ -1726,6 +1735,7 @@ public partial class MainWindow : Window
                 statusPresentation,
                 initializeMetricsAsync,
                 cleanupAfterCompletion,
+				secretRefreshVersion,
                 cancellationToken),
             "RunPostLoadBackgroundWork");
     }
@@ -1736,6 +1746,7 @@ public partial class MainWindow : Window
         StatusOperationPresentation statusPresentation,
         Func<CancellationToken, Task> initializeMetricsAsync,
         MemoryCleanupReason? cleanupAfterCompletion,
+		long secretRefreshVersion,
         CancellationToken cancellationToken)
     {
         try
@@ -1748,7 +1759,11 @@ public partial class MainWindow : Window
                     statusPresentation,
                     retainReadFactsForNextMetricsPass: true),
                 initializeMetricsAsync,
-				() => ScheduleSecretRedactionCountRefresh(statusPresentation),
+				() =>
+				{
+					if (secretRefreshVersion == Volatile.Read(ref _secretRedactionCountRefreshVersion))
+						ScheduleSecretRedactionCountRefresh(statusPresentation);
+				},
                 cleanupAfterCompletion,
                 ScheduleBackgroundMemoryCleanup,
                 cancellationToken);
@@ -1922,7 +1937,9 @@ public partial class MainWindow : Window
         {
             var displayRepositoryUrl = RepositoryWebPathPresentationService.NormalizeForDisplay(currentRepositoryUrl);
             if (string.IsNullOrWhiteSpace(displayRepositoryUrl))
-                displayRepositoryUrl = currentRepositoryUrl;
+                displayRepositoryUrl = currentProjectDisplayName;
+            if (string.IsNullOrWhiteSpace(displayRepositoryUrl))
+                return MainWindowViewModel.BaseTitle;
 
             var branchDisplay = !string.IsNullOrEmpty(currentBranch)
                 ? $" [{currentBranch}]"

@@ -8,6 +8,20 @@ namespace DevProjex.Tests.Terminal;
 public sealed class MachineSchemaContractTests
 {
 	[Fact]
+	public void MachinePathsNormalizeForeignWindowsRootsWithoutReinterpretingUnixNames()
+	{
+		Assert.Equal(
+			"C:/workspace/Project",
+			MachinePathPresentation.Normalize(@"C:\workspace\Project"));
+
+		if (!OperatingSystem.IsWindows())
+		{
+			const string unixPath = "/workspace/literal\\name.cs";
+			Assert.Equal(unixPath, MachinePathPresentation.Normalize(unixPath));
+		}
+	}
+
+	[Fact]
 	public async Task AnalysisJsonNormalizesDiagnosticPathsAndUsesStableDiagnosticTokens()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -107,6 +121,27 @@ public sealed class MachineSchemaContractTests
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
 		Assert.Equal("Запущенных экземпляров нет." + Environment.NewLine, environment.StandardOutput);
 		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
+	public void UiListTextEscapesUntrustedRegistrationFields()
+	{
+		var registration = new DesktopInstanceRegistration(
+			DesktopProtocol.CurrentVersion,
+			"instance\nspoof",
+			42,
+			0,
+			"project\tname\rnext",
+			DateTimeOffset.UnixEpoch,
+			"pipe",
+			"endpoint");
+
+		var line = DesktopCommandHandler.FormatTextInstance(registration);
+
+		Assert.Equal("instance\\nspoof\t42\tproject\\tname\\rnext", line);
+		Assert.DoesNotContain('\r', line);
+		Assert.DoesNotContain('\n', line);
+		Assert.Equal(2, line.Count(static character => character == '\t'));
 	}
 
 	[Fact]

@@ -902,7 +902,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				exception.Code,
 				L("Terminal.Error.ProfileInvalid"),
 				projectPath,
-				source);
+				source,
+				sourceIdentity);
 		}
 		catch (ProjectContextValidationException exception)
 		{
@@ -911,7 +912,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				exception.Code,
 				ResolveValidationErrorMessage(exception.Code),
 				projectPath,
-				source);
+				source,
+				sourceIdentity);
 		}
 		catch
 		{
@@ -920,7 +922,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				"DPX-TUI-PROJECT-OPEN-FAILED",
 				L("Terminal.Tui.Error.ProjectUnavailable"),
 				projectPath,
-				source);
+				source,
+				sourceIdentity);
 		}
 		finally
 		{
@@ -934,15 +937,27 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		string code,
 		string message,
 		string projectPath,
-		TerminalProjectOpenSource source)
+		TerminalProjectOpenSource source,
+		ProjectSourceIdentity? sourceIdentity)
 	{
 		if (source is TerminalProjectOpenSource.Recent or
 			TerminalProjectOpenSource.RecentRepository)
 		{
-			ReturnToRepositoryHistoryWithError(operationCts, code, $"{message}\n\n{projectPath}");
+			var detail = ResolveProjectOpenErrorDetail(projectPath, sourceIdentity);
+			ReturnToRepositoryHistoryWithError(operationCts, code, $"{message}\n\n{detail}");
 			return;
 		}
 		ReturnToWelcomeWithError(operationCts, code, message);
+	}
+
+	internal static string ResolveProjectOpenErrorDetail(
+		string projectPath,
+		ProjectSourceIdentity? sourceIdentity)
+	{
+		var displaySource = sourceIdentity is { SourceType: ProjectSourceType.GitClone } identity
+			? RepositoryUrlUtility.ToSafeDisplay(identity.RepositoryUrl ?? identity.SourceReference)
+			: projectPath;
+		return TerminalTextEscaping.EscapeSingleLine(displaySource);
 	}
 
 	private void ReturnToWelcomeAfterCancellation(CancellationTokenSource operationCts)
@@ -2396,10 +2411,11 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	{
 		if (_preview is null)
 			return;
-		var horizontalOffset = match.Column < _preview.HorizontalOffset ||
-							   match.Column >=
+		var displayColumn = _preview.GetDisplayColumn(match.Line, match.Column);
+		var horizontalOffset = displayColumn < _preview.HorizontalOffset ||
+							   displayColumn >=
 							   _preview.HorizontalOffset + _preview.VisibleTextWidth
-			? Math.Max(0, match.Column - 4)
+			? Math.Max(0, displayColumn - 4)
 			: _preview.HorizontalOffset;
 		_preview.ScrollTo(match.Line, horizontalOffset);
 		UpdatePanelTitles();
@@ -4259,6 +4275,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 
 	internal static string FitPathToWidth(string value, int width)
 	{
+		value = TerminalTextEscaping.EscapeSingleLine(value);
 		if (string.IsNullOrEmpty(value) || width <= 0)
 			return string.Empty;
 		if (value.GetColumns() <= width)
@@ -4611,11 +4628,12 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private static string GetProjectDisplayName(ProjectContextPlan? plan)
 	{
 		if (plan?.SourceIdentity?.DisplayName is { Length: > 0 } displayName)
-			return displayName;
+			return TerminalTextEscaping.EscapeSingleLine(displayName);
 		if (plan is null)
 			return string.Empty;
 		var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(plan.SourceRoot));
-		return string.IsNullOrWhiteSpace(name) ? plan.SourceRoot : name;
+		return TerminalTextEscaping.EscapeSingleLine(
+			string.IsNullOrEmpty(name) ? plan.SourceRoot : name);
 	}
 
 	private string BuildWorkspaceHeading(ProjectContextPlan plan)

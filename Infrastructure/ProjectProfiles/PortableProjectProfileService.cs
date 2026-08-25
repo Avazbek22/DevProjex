@@ -1,6 +1,7 @@
 using System.Text.Encodings.Web;
 using DevProjex.Application.Context;
 using DevProjex.Application.Services;
+using DevProjex.Kernel.IO;
 
 namespace DevProjex.Infrastructure.ProjectProfiles;
 
@@ -19,6 +20,7 @@ public sealed class PortableProjectProfileService
 {
 	public const int CurrentSchemaVersion = 1;
 	public const string DocumentKind = "devprojex-profile";
+	internal const long MaximumDocumentBytes = ProjectProfileStorageLimits.MaximumJsonBytes;
 
 	private static readonly JsonSerializerOptions ReadOptions = new()
 	{
@@ -42,13 +44,16 @@ public sealed class PortableProjectProfileService
 		var fullPath = NormalizeProfilePath(path);
 		try
 		{
-			await using var stream = new FileStream(
-				fullPath,
-				FileMode.Open,
-				FileAccess.Read,
-				FileShare.Read,
-				16 * 1024,
-				FileOptions.Asynchronous | FileOptions.SequentialScan);
+			await using var stream = new MaximumLengthReadStream(
+				new FileStream(
+					fullPath,
+					FileMode.Open,
+					FileAccess.Read,
+					FileShare.ReadWrite | FileShare.Delete,
+					16 * 1024,
+					FileOptions.Asynchronous | FileOptions.SequentialScan),
+				MaximumDocumentBytes,
+				static () => new IOException("Portable profile exceeds the document limit."));
 			var document = await JsonSerializer
 				.DeserializeAsync<PortableProfileDocument>(stream, ReadOptions, cancellationToken)
 				.ConfigureAwait(false);
@@ -185,22 +190,11 @@ public sealed class PortableProjectProfileService
 				exclusions.Add(exclusion);
 		}
 
-		IReadOnlyCollection<string> selectedPaths;
-		try
-		{
-			selectedPaths = NormalizeSelectedPaths(document.Selection.SelectedPaths);
-		}
-		catch (ProjectContextValidationException exception)
-		{
-			throw new PortableProjectProfileException(
-				"DPX-CLI-PROFILE-INVALID",
-				"Portable profile contains an unsafe selected path.",
-				exception);
-		}
+		var selectedPaths = NormalizeSelectedPathsOrThrow(document.Selection.SelectedPaths);
 
 		return new ProjectSelectionSpec(
-			Roots: NormalizeNullableValues(document.Selection.Roots, PathComparer.Default),
-			Extensions: NormalizeNullableValues(document.Selection.Extensions, StringComparer.OrdinalIgnoreCase),
+			Roots: NormalizeRootNames(document.Selection.Roots),
+			Extensions: NormalizeExtensionNames(document.Selection.Extensions),
 			SelectedPaths: selectedPaths,
 			GitMode: gitMode,
 			Exclusions: ProjectSelectionTokens.OrderExclusions(exclusions),
@@ -221,6 +215,7 @@ public sealed class PortableProjectProfileService
 				"Only a fully resolved selection can be saved as a portable profile.");
 		}
 
+		var selectedPaths = NormalizeSelectedPathsOrThrow(selection.SelectedPaths);
 		return new PortableProfileDocument
 		{
 			SchemaVersion = CurrentSchemaVersion,
@@ -229,7 +224,7 @@ public sealed class PortableProjectProfileService
 			{
 				Roots = selection.Roots?.OrderBy(static value => value, PathComparer.Default).ToArray(),
 				Extensions = selection.Extensions?.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase).ToArray(),
-				SelectedPaths = (selection.SelectedPaths ?? []).OrderBy(static value => value, PathComparer.Default).ToArray(),
+				SelectedPaths = selectedPaths.ToArray(),
 				GitMode = ProjectSelectionTokens.ToToken(selection.GitMode.Value),
 				Exclusions = ProjectSelectionTokens.OrderExclusions(selection.Exclusions)
 					.Select(ProjectSelectionTokens.ToToken)
@@ -265,30 +260,51 @@ public sealed class PortableProjectProfileService
 		}
 	}
 
-	private static IReadOnlyCollection<string>? NormalizeNullableValues(
-		IReadOnlyCollection<string>? values,
-		StringComparer comparer) =>
-		values is null ? null : NormalizeValues(values, comparer);
+	private static IReadOnlyCollection<string>? NormalizeExtensionNames(
+		IReadOnlyCollection<string>? values) =>
+		values is null
+			? null
+			: values
+				.Where(static value => !string.IsNullOrEmpty(value))
+				.Distinct(StringComparer.OrdinalIgnoreCase)
+				.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
+				.ToArray();
 
-	private static IReadOnlyCollection<string> NormalizeValues(
-		IReadOnlyCollection<string>? values,
-		StringComparer comparer) =>
-		(values ?? [])
-		.Where(static value => !string.IsNullOrWhiteSpace(value))
-		.Select(static value => value.Trim())
-		.Distinct(comparer)
-		.OrderBy(static value => value, comparer)
-		.ToArray();
+	private static IReadOnlyCollection<string>? NormalizeRootNames(
+		IReadOnlyCollection<string>? values) =>
+		values is null
+			? null
+			: values
+				.Where(static value => !string.IsNullOrEmpty(value))
+				.Distinct(PathComparer.Default)
+				.OrderBy(static value => value, PathComparer.Default)
+				.ToArray();
 
 	private static IReadOnlyCollection<string> NormalizeSelectedPaths(
 		IReadOnlyCollection<string>? values) =>
 		(values ?? [])
-		.Where(static value => !string.IsNullOrWhiteSpace(value))
-		.Select(ProjectSelectionPath.NormalizeRelative)
+		.Where(static value => !string.IsNullOrEmpty(value))
+		.Select(ProjectSelectionPath.NormalizePortableRelative)
 		.Where(static value => value.Length > 0)
 		.Distinct(PathComparer.Default)
 		.OrderBy(static value => value, PathComparer.Default)
 		.ToArray();
+
+	private static IReadOnlyCollection<string> NormalizeSelectedPathsOrThrow(
+		IReadOnlyCollection<string>? values)
+	{
+		try
+		{
+			return NormalizeSelectedPaths(values);
+		}
+		catch (ProjectContextValidationException exception)
+		{
+			throw new PortableProjectProfileException(
+				"DPX-CLI-PROFILE-INVALID",
+				"Portable profile contains an unsafe selected path.",
+				exception);
+		}
+	}
 
 	private sealed class PortableProfileDocument
 	{

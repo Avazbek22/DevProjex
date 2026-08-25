@@ -41,6 +41,15 @@ public sealed class GitIgnoreMatcherTests
 	}
 
 	[Fact]
+	public void Build_RejectsAnUnboundedNumberOfEffectiveRules()
+	{
+		var lines = Enumerable.Range(0, GitIgnoreMatcher.MaximumEffectiveRuleCount + 1)
+			.Select(static index => $"literal-{index}");
+
+		Assert.Throws<IOException>(() => GitIgnoreMatcher.Build("/repo", lines));
+	}
+
+	[Fact]
 	public void Build_HandlesEscapedHash()
 	{
 		var matcher = GitIgnoreMatcher.Build("/repo", [@"\#important"]);
@@ -76,6 +85,15 @@ public sealed class GitIgnoreMatcherTests
 		var matcher = GitIgnoreMatcher.Build("/repo", [pattern]);
 
 		Assert.True(matcher.IsIgnored($"/repo/{fileName}", false, fileName));
+	}
+
+	[Fact]
+	public void Build_EscapedWhitespaceOnlyNameRemainsMatchable()
+	{
+		var matcher = GitIgnoreMatcher.Build("/repo", [@"\ "]);
+
+		Assert.True(matcher.IsIgnored("/repo/ ", false, " "));
+		Assert.True(matcher.EvaluateRelative(" ", false, " ").IsIgnored);
 	}
 
 	[Fact]
@@ -677,6 +695,9 @@ public sealed class GitIgnoreMatcherTests
 	[Fact]
 	public void IsIgnored_WindowsStylePaths_NormalizedCorrectly()
 	{
+		if (!OperatingSystem.IsWindows())
+			Assert.Skip("Backslashes are valid file-name characters on Unix.");
+
 		var matcher = GitIgnoreMatcher.Build(@"C:\repo", ["bin/", "*.log"]);
 
 		Assert.True(matcher.IsIgnored(@"C:\repo\bin", true, "bin"));
@@ -726,6 +747,21 @@ public sealed class GitIgnoreMatcherTests
 		Assert.True(matcher.EvaluateRelative("src/generated/app.cs", isDirectory: false, "app.cs").IsIgnored);
 		Assert.True(matcher.EvaluateRelative(@"src\debug.tmp", isDirectory: false, "debug.tmp").IsIgnored);
 		Assert.False(matcher.EvaluateRelative("lib/generated/app.cs", isDirectory: false, "app.cs").IsIgnored);
+	}
+
+	[Fact]
+	public void Evaluate_PreservesBackslashesInsideUnixFileNames()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("Windows treats a backslash as a directory separator.");
+
+		using var temp = new TemporaryDirectory();
+		var root = temp.CreateFolder("repo");
+		var filePath = Path.Combine(root, @"literal\name.txt");
+		File.WriteAllText(filePath, "content");
+		var matcher = GitIgnoreMatcher.Build(root, ["literal/name.txt"]);
+
+		Assert.False(matcher.Evaluate(filePath, isDirectory: false, Path.GetFileName(filePath)).IsIgnored);
 	}
 
 	#endregion
@@ -1122,6 +1158,16 @@ public sealed class GitIgnoreMatcherTests
 		var matcher = GitIgnoreMatcher.Build("/repo", [longPattern]);
 
 		Assert.True(matcher.IsIgnored("/repo/" + longPattern, false, longPattern));
+	}
+
+	[Fact(Timeout = 2_000)]
+	public void IsIgnored_AlternatingWildcardsCannotCauseCatastrophicBacktracking()
+	{
+		var pattern = string.Concat(Enumerable.Repeat("*a", 12)) + "b";
+		var candidate = new string('a', 36) + "c";
+		var matcher = GitIgnoreMatcher.Build("/repo", [pattern]);
+
+		Assert.False(matcher.IsIgnored($"/repo/{candidate}", false, candidate));
 	}
 
 	#endregion

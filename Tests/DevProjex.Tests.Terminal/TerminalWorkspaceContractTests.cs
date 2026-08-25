@@ -7,6 +7,25 @@ namespace DevProjex.Tests.Terminal;
 public sealed class TerminalWorkspaceContractTests
 {
 	[Fact]
+	public void ProjectOpenErrorsHideManagedRepositoryCachePaths()
+	{
+		var cachePath = Path.Combine(Path.GetTempPath(), "DevProjex", "cache", "owner-repo");
+		var repository = new ProjectSourceIdentity(
+			"repo",
+			ProjectSourceType.GitClone,
+			"https://example.test/owner/repo.git",
+			"https://example.test/owner/repo.git",
+			IsCachedRepository: true);
+
+		Assert.Equal(
+			"https://example.test/owner/repo.git",
+			TerminalWorkspaceSession.ResolveProjectOpenErrorDetail(cachePath, repository));
+		Assert.Equal(
+			cachePath,
+			TerminalWorkspaceSession.ResolveProjectOpenErrorDetail(cachePath, sourceIdentity: null));
+	}
+
+	[Fact]
 	public void CanceledTextDialogNeverReturnsItsSuggestedValue()
 	{
 		Assert.Null(TerminalWorkspace.CompletePrompt(

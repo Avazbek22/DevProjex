@@ -1,8 +1,11 @@
+using DevProjex.Terminal.Rendering;
+
 namespace DevProjex.Terminal.Tui;
 
 internal sealed class TerminalCommandHistory
 {
 	public const int MaximumEntries = 50;
+	public const int MaximumCommandLength = 4_096;
 	private readonly List<string> _entries;
 	private int _navigationIndex;
 	private string _draft = string.Empty;
@@ -17,7 +20,7 @@ internal sealed class TerminalCommandHistory
 
 	public bool Add(string? command)
 	{
-		var normalized = command?.Trim() ?? string.Empty;
+		var normalized = NormalizeCommand(command);
 		ResetNavigation();
 		if (normalized.Length == 0 ||
 			_entries.Count > 0 && string.Equals(_entries[^1], normalized, StringComparison.Ordinal))
@@ -63,7 +66,7 @@ internal sealed class TerminalCommandHistory
 		var normalized = new List<string>();
 		foreach (var entry in entries)
 		{
-			var value = entry?.Trim() ?? string.Empty;
+			var value = NormalizeCommand(entry);
 			if (value.Length == 0 ||
 				normalized.Count > 0 && string.Equals(normalized[^1], value, StringComparison.Ordinal))
 			{
@@ -74,5 +77,26 @@ internal sealed class TerminalCommandHistory
 		if (normalized.Count > MaximumEntries)
 			normalized.RemoveRange(0, normalized.Count - MaximumEntries);
 		return normalized;
+	}
+
+	private static string NormalizeCommand(string? command)
+	{
+		var normalized = command?.Trim() ?? string.Empty;
+		return LimitLength(TerminalTextEscaping.EscapeSingleLine(normalized));
+	}
+
+	internal static string LimitLength(string value, int maximumLength = MaximumCommandLength)
+	{
+		ArgumentNullException.ThrowIfNull(value);
+		ArgumentOutOfRangeException.ThrowIfNegative(maximumLength);
+		if (value.Length <= maximumLength)
+			return value;
+		if (maximumLength == 0)
+			return string.Empty;
+
+		var length = maximumLength;
+		if (char.IsHighSurrogate(value[length - 1]) && char.IsLowSurrogate(value[length]))
+			length--;
+		return value[..length];
 	}
 }

@@ -191,7 +191,7 @@ XML:
 * các tập tin là `<f>File.cs</f>`.
 
 MD:
-* bắt đầu bằng `Root:...`;
+* bắt đầu bằng `Root: ...`;
 * sử dụng danh sách lồng nhau Markdown;
 * các thư mục kết thúc bằng `/`.
 
@@ -423,7 +423,7 @@ Một dòng không đúng định dạng hoặc không được hỗ trợ sẽ 
 
 Tùy chọn này chỉ bao gồm các tệp `.gitignore` của cây làm việc thông thường. Các quy tắc từ `.git/info/exclude` và quy tắc loại trừ Git toàn cầu không được áp dụng; các cài đặt so sánh đường dẫn kho lưu trữ hiệu quả như `core.ignoreCase` và, trên macOS, `core.precomposeUnicode` đều được tôn trọng. Một liên kết tượng trưng có tên `.gitignore` không được theo dõi, phù hợp với hành vi của tệp điều khiển của Git. Nếu không thể đọc được `.gitignore` thông thường, phạm vi thư mục của nó sẽ bị loại trừ do đóng không thành công và quá trình quét sẽ báo cáo quyền truy cập một phần thay vì âm thầm bao gồm các tệp mà không đánh giá quy tắc hoàn chỉnh. Khi có sẵn chỉ mục có thể đọc được cho phạm vi kho lưu trữ sở hữu của đường dẫn, các tệp được theo dõi vẫn hiển thị ngay cả khi chúng khớp với `.gitignore`; không có chỉ mục đó hoặc Git CLI, phạm vi đó sẽ quay trở lại đánh giá chỉ theo mẫu một cách an toàn.
 
-Cấu hình `standard` tích hợp chọn `gitignore` plus `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files`, và `extensionless-files`.
+Cấu hình `standard` tích hợp chọn `gitignore` cùng với `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` và `extensionless-files`.
 
 ### 12.6 Chỉ các tệp Git được theo dõi
 "Chỉ các tệp Git được theo dõi" xây dựng giai đoạn Git của cây từ các tệp cây làm việc hiện có được ghi trong mỗi chỉ mục Git có thể đọc được. Các tệp được theo dõi đã sửa đổi và các phần bổ sung theo giai đoạn vẫn được bao gồm; các tập tin không bị theo dõi sẽ bị loại trừ. Đây là cây làm việc hiện tại, không phải ảnh chụp nhanh lịch sử của `HEAD` hoặc kho lưu trữ từ xa.

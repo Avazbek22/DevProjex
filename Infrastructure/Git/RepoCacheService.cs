@@ -15,7 +15,16 @@ public sealed class RepoCacheService : IRepoCacheService
 	private const string AppFolderName = "DevProjex";
 	private const string CacheFolderName = "RepoCache";
 	private const string CacheIndexFileName = "cache-index.json";
+	private const string LinkedCacheRootMessage =
+		"Repository cache root must not be a symbolic link or junction.";
 	private const int CacheIndexSchemaVersion = 2;
+	private const int UniquePathSuffixLength = 29;
+	private const int MaximumRepositoryNameUtf16Length = 100;
+	private const int MaximumPortablePathComponentBytes = 255;
+	private const int MaximumRepositoryNameUtf8Bytes =
+		MaximumPortablePathComponentBytes - UniquePathSuffixLength - 1;
+	private const UnixFileMode PrivateUnixDirectoryMode =
+		UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
 	internal const long MaximumCacheIndexBytes = 64L * 1024 * 1024;
 	private const byte RepositorySizeRefreshRunning = 1;
 	private const byte RepositorySizeRefreshPending = 2;
@@ -126,6 +135,7 @@ public sealed class RepoCacheService : IRepoCacheService
 
 	public string CreateRepositoryDirectory(string repositoryUrl)
 	{
+		EnsurePrivateCacheDirectory(CacheRootPath);
 		var path = CreateUniqueRepositoryPath(CacheRootPath, repositoryUrl);
 		Directory.CreateDirectory(path);
 		return path;
@@ -133,6 +143,7 @@ public sealed class RepoCacheService : IRepoCacheService
 
 	public string CreateRepositoryStagingDirectory(string repositoryUrl)
 	{
+		EnsurePrivateCacheDirectory(CacheRootPath);
 		var stagingRoot = Path.Combine(CacheRootPath, RepositoryCacheLayout.StagingDirectoryName);
 		var path = CreateUniqueRepositoryPath(stagingRoot, repositoryUrl);
 		Directory.CreateDirectory(path);
@@ -150,7 +161,7 @@ public sealed class RepoCacheService : IRepoCacheService
 			throw new InvalidOperationException("Repository staging path is invalid.");
 		}
 
-		Directory.CreateDirectory(CacheRootPath);
+		EnsurePrivateCacheDirectory(CacheRootPath);
 		var container = CreateUniqueRepositoryPath(CacheRootPath, repositoryUrl);
 		Directory.CreateDirectory(container);
 		var contentKind = Directory.Exists(Path.Combine(normalizedStagingPath, ".git"))
@@ -205,6 +216,8 @@ public sealed class RepoCacheService : IRepoCacheService
 		RepositoryCacheIndexEntry? matchingEntry = null;
 		foreach (var searchRoot in CacheSearchRootPaths)
 		{
+			if (IsLinkedCacheRoot(searchRoot))
+				continue;
 			var fileSet = GetIndexFileSet(searchRoot);
 			if (!PathComparer.Default.Equals(searchRoot, CacheRootPath) &&
 			    !File.Exists(fileSet.PrimaryPath) &&
@@ -249,6 +262,8 @@ public sealed class RepoCacheService : IRepoCacheService
 			StringComparer.OrdinalIgnoreCase);
 		foreach (var searchRoot in CacheSearchRootPaths)
 		{
+			if (IsLinkedCacheRoot(searchRoot))
+				continue;
 			var fileSet = GetIndexFileSet(searchRoot);
 			if (!File.Exists(fileSet.PrimaryPath) && !File.Exists(fileSet.BackupPath))
 				continue;
@@ -321,6 +336,11 @@ public sealed class RepoCacheService : IRepoCacheService
 		var unavailableRootCount = 0;
 		foreach (var searchRoot in CacheSearchRootPaths)
 		{
+			if (IsLinkedCacheRoot(searchRoot))
+			{
+				unavailableRootCount++;
+				continue;
+			}
 			var fileSet = GetIndexFileSet(searchRoot);
 			if (!File.Exists(fileSet.PrimaryPath) && !File.Exists(fileSet.BackupPath))
 				continue;
@@ -589,6 +609,8 @@ public sealed class RepoCacheService : IRepoCacheService
 
 	private CacheClearResult RemoveCacheEntriesWithResult(string cacheRoot, string? identity)
 	{
+		if (IsLinkedCacheRoot(cacheRoot))
+			return new CacheClearResult(0, 0, 1);
 		var fileSet = GetIndexFileSet(cacheRoot);
 		if (!Directory.Exists(cacheRoot) &&
 		    !File.Exists(fileSet.PrimaryPath) &&
@@ -812,7 +834,7 @@ public sealed class RepoCacheService : IRepoCacheService
 
 	private void ClearCacheRoot(string cacheRoot)
 	{
-		if (!Directory.Exists(cacheRoot))
+		if (!Directory.Exists(cacheRoot) || IsLinkedCacheRoot(cacheRoot))
 			return;
 
 		var fileSet = GetIndexFileSet(cacheRoot);
@@ -932,7 +954,7 @@ public sealed class RepoCacheService : IRepoCacheService
 	{
 		CleanupTrash();
 		CleanupStaging();
-		if (!Directory.Exists(CacheRootPath))
+		if (!Directory.Exists(CacheRootPath) || IsLinkedCacheRoot(CacheRootPath))
 			return;
 
 		var fileSet = GetIndexFileSet();
@@ -1027,7 +1049,8 @@ public sealed class RepoCacheService : IRepoCacheService
 
 		try
 		{
-			return CacheSearchRootPaths.Any(root => PathUtility.IsPathInside(path, root));
+			return CacheSearchRootPaths.Any(root =>
+				!IsLinkedCacheRoot(root) && PathUtility.IsPathInside(path, root));
 		}
 		catch
 		{
@@ -1402,7 +1425,9 @@ public sealed class RepoCacheService : IRepoCacheService
 			cancellationToken);
 		try
 		{
-			await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+			await GitRepositoryService
+				.WaitForExitOrTerminateAsync(process, cancellationToken)
+				.ConfigureAwait(false);
 			await Task.WhenAll(output, error).ConfigureAwait(false);
 			var standardOutput = await output.ConfigureAwait(false);
 			var standardError = await error.ConfigureAwait(false);
@@ -1414,14 +1439,6 @@ public sealed class RepoCacheService : IRepoCacheService
 		}
 		catch (OperationCanceledException)
 		{
-			try
-			{
-				if (!process.HasExited)
-					process.Kill(entireProcessTree: true);
-			}
-			catch (Exception exception) when (exception is InvalidOperationException or Win32Exception)
-			{
-			}
 			await GitProcessOutputReader
 				.ObserveCompletionAsync(output, error)
 				.ConfigureAwait(false);
@@ -1970,6 +1987,8 @@ public sealed class RepoCacheService : IRepoCacheService
 
 	private static void CleanupTrash(string cacheRoot)
 	{
+		if (IsLinkedCacheRoot(cacheRoot))
+			return;
 		var trashRoot = RepositoryCacheLayout.GetTrashRoot(cacheRoot);
 		if (!Directory.Exists(trashRoot))
 			return;
@@ -2030,6 +2049,8 @@ public sealed class RepoCacheService : IRepoCacheService
 
 	private void CleanupStaging(string cacheRoot)
 	{
+		if (IsLinkedCacheRoot(cacheRoot))
+			return;
 		var stagingRoot = Path.Combine(cacheRoot, RepositoryCacheLayout.StagingDirectoryName);
 		if (!Directory.Exists(stagingRoot))
 			return;
@@ -2064,7 +2085,7 @@ public sealed class RepoCacheService : IRepoCacheService
 
 	private static IEnumerable<string> EnumerateRepositoryRootDirectories(string cacheRoot)
 	{
-		if (!Directory.Exists(cacheRoot))
+		if (!Directory.Exists(cacheRoot) || IsLinkedCacheRoot(cacheRoot))
 			yield break;
 
 		IEnumerable<string> directories;
@@ -2112,6 +2133,11 @@ public sealed class RepoCacheService : IRepoCacheService
 		{
 			if (!Directory.Exists(path))
 				return;
+			if (File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint))
+			{
+				Directory.Delete(path);
+				return;
+			}
 			foreach (var file in Directory.EnumerateFiles(path, "*", RecursiveCacheEnumeration))
 			{
 				try
@@ -2203,7 +2229,8 @@ public sealed class RepoCacheService : IRepoCacheService
 		var repositoryName = ExtractRepoName(repositoryUrl);
 		while (true)
 		{
-			var suffix = $"{DateTime.UtcNow.Ticks:X}{Guid.NewGuid():N}"[..29].ToUpperInvariant();
+			var suffix = $"{DateTime.UtcNow.Ticks:X}{Guid.NewGuid():N}"[..UniquePathSuffixLength]
+				.ToUpperInvariant();
 			var path = Path.Combine(root, $"{repositoryName}_{suffix}");
 			if (!Directory.Exists(path) && !File.Exists(path))
 				return path;
@@ -2266,9 +2293,20 @@ public sealed class RepoCacheService : IRepoCacheService
 				? string.Concat(name.AsSpan(0, dotIndex), "_repo", name.AsSpan(dotIndex))
 				: name + "_repo";
 		}
-		var bounded = name.Length > 100 ? name[..100] : name;
-		bounded = TrimUnsafeTrailingCharacters(bounded);
-		return bounded.Length == 0 ? "repo" : bounded;
+		var bounded = new StringBuilder(Math.Min(name.Length, MaximumRepositoryNameUtf16Length));
+		var utf8Bytes = 0;
+		foreach (var rune in name.EnumerateRunes())
+		{
+			if (bounded.Length + rune.Utf16SequenceLength > MaximumRepositoryNameUtf16Length ||
+			    utf8Bytes + rune.Utf8SequenceLength > MaximumRepositoryNameUtf8Bytes)
+			{
+				break;
+			}
+			bounded.Append(rune);
+			utf8Bytes += rune.Utf8SequenceLength;
+		}
+		var result = TrimUnsafeTrailingCharacters(bounded.ToString());
+		return result.Length == 0 ? "repo" : result;
 	}
 
 	private static bool IsWindowsReservedFileName(ReadOnlySpan<char> name)
@@ -2300,8 +2338,46 @@ public sealed class RepoCacheService : IRepoCacheService
 
 	private static JsonStoreFileSet GetIndexFileSet(string cacheRoot)
 	{
+		EnsurePrivateCacheDirectory(cacheRoot);
 		var primaryPath = Path.Combine(cacheRoot, CacheIndexFileName);
 		return new JsonStoreFileSet(primaryPath, $"{primaryPath}.bak", $"{primaryPath}.lock");
+	}
+
+	private static void EnsurePrivateCacheDirectory(string path)
+	{
+		if (IsLinkedCacheRoot(path))
+			throw new IOException(LinkedCacheRootMessage);
+
+		if (OperatingSystem.IsWindows())
+		{
+			Directory.CreateDirectory(path);
+			if (IsLinkedCacheRoot(path))
+				throw new IOException(LinkedCacheRootMessage);
+			return;
+		}
+
+		Directory.CreateDirectory(path, PrivateUnixDirectoryMode);
+		if (IsLinkedCacheRoot(path))
+			throw new IOException(LinkedCacheRootMessage);
+		File.SetUnixFileMode(path, PrivateUnixDirectoryMode);
+	}
+
+	private static bool IsLinkedCacheRoot(string path)
+	{
+		try
+		{
+			return Directory.Exists(path) &&
+			       File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint);
+		}
+		catch (Exception exception) when (exception is
+			       IOException or
+			       UnauthorizedAccessException or
+			       ArgumentException or
+			       NotSupportedException or
+			       System.Security.SecurityException)
+		{
+			return true;
+		}
 	}
 
 	private static IReadOnlyList<string> BuildCacheSearchRoots(
@@ -2383,12 +2459,14 @@ public sealed class RepoCacheService : IRepoCacheService
 	{
 		try
 		{
-			var identity = RepositoryUrlUtility.GetComparisonKey(entry.RepositoryUrl);
+			var safeUrl = RepositoryUrlUtility.ToSafeDisplay(entry.RepositoryUrl);
+			var identity = RepositoryUrlUtility.GetComparisonKey(safeUrl);
 			if (identity.Length == 0)
 				return null;
 			return entry with
 			{
 				Identity = identity,
+				RepositoryUrl = safeUrl,
 				LastUsedUtc = entry.LastUsedUtc <= DateTimeOffset.UnixEpoch ||
 				              entry.LastUsedUtc > maximumAcceptedTimestamp
 					? DateTimeOffset.UnixEpoch

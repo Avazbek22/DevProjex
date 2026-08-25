@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using DevProjex.Application.Compression;
 using DevProjex.Application.Context;
 using DevProjex.Mcp;
@@ -7,6 +8,74 @@ namespace DevProjex.Tests.Unit;
 
 public sealed class McpInfrastructureTests
 {
+	[Fact]
+	public async Task BoundedTreeWriter_StopsBeforeMaterializingLinesBeyondTheLimit()
+	{
+		using var writer = new McpBoundedLineTextWriter(maximumLines: 2);
+		await writer.WriteAsync("first\r\nsecond\n".AsMemory(), TestContext.Current.CancellationToken);
+
+		await Assert.ThrowsAsync<McpLineLimitReachedException>(async () =>
+			await writer.WriteAsync("third".AsMemory(), TestContext.Current.CancellationToken));
+
+		Assert.True(writer.IsTruncated);
+		Assert.Equal("first\nsecond", writer.Text);
+	}
+
+	[Fact]
+	public void TopFileRanking_RemainsBoundedAndUsesStableContractOrder()
+	{
+		var ranking = new McpTopFileRanking(capacity: 3);
+		foreach (var item in new[]
+		         {
+			         ("z.cs", 10L),
+			         ("b.cs", 30L),
+			         ("a.cs", 30L),
+			         ("c.cs", 20L),
+			         ("ignored.cs", 1L)
+		         })
+		{
+			ranking.Add(item.Item1, item.Item2);
+		}
+
+		Assert.Equal(
+			[new McpFileWeight("a.cs", 30), new McpFileWeight("b.cs", 30), new McpFileWeight("c.cs", 20)],
+			ranking.Items);
+	}
+
+	[Fact]
+	public async Task ProjectOperationGateCancelsARequestWaitingBehindAnotherOperation()
+	{
+		var gate = new McpProjectOperationGate();
+		var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var first = gate.RunAsync(
+			async () =>
+			{
+				firstStarted.SetResult();
+				await releaseFirst.Task;
+				return 1;
+			},
+			CancellationToken.None);
+		await firstStarted.Task;
+		using var cancellation = new CancellationTokenSource();
+		var waiting = gate.RunAsync(() => Task.FromResult(2), cancellation.Token);
+
+		cancellation.Cancel();
+
+		try
+		{
+			await Assert.ThrowsAnyAsync<OperationCanceledException>(
+				() => waiting.WaitAsync(
+					TimeSpan.FromSeconds(1),
+					TestContext.Current.CancellationToken));
+		}
+		finally
+		{
+			releaseFirst.TrySetResult();
+		}
+		Assert.Equal(1, await first);
+	}
+
 	[Fact]
 	public void RootRegistryRejectsTraversalAndAbsolutePathsOutsideRoot()
 	{
@@ -29,6 +98,30 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public void RootRegistryRejectsEmptyConfiguredRoot()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+
+		Assert.Throws<ArgumentException>(() =>
+			new McpRootRegistry([project, string.Empty]));
+	}
+
+	[Fact]
+	public void RootRegistryReportsMalformedPathsAsInvalidArguments()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var registry = new McpRootRegistry([project]);
+
+		var exception = Assert.Throws<McpToolException>(() =>
+			registry.ResolveExistingPath(project, "invalid\0path.txt"));
+
+		Assert.Equal(McpErrorCodes.InvalidArguments, exception.Code);
+		Assert.Contains("valid path inside the project", exception.Message, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void RootRegistryRejectsSymlinkEscapeWhenSymlinksAreAvailable()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -48,6 +141,99 @@ public sealed class McpInfrastructureTests
 		var exception = Assert.Throws<McpToolException>(() =>
 			registry.ResolveExistingPath(project, "escape"));
 		Assert.Equal(McpErrorCodes.RootViolation, exception.Code);
+	}
+
+	[Fact]
+	public void RootRegistryRevalidatesTheImplicitSingleRootAfterFilesystemReplacement()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var original = Path.Combine(workspace.Path, "original-project");
+		var outside = workspace.CreateFolder("outside");
+		var registry = new McpRootRegistry([project]);
+		Directory.Move(project, original);
+		CreateDirectoryAliasOrSkip(project, outside);
+		try
+		{
+			var exception = Assert.Throws<McpToolException>(() => registry.ResolveProject(project: null));
+
+			Assert.Equal(McpErrorCodes.UnknownProject, exception.Code);
+		}
+		finally
+		{
+			if (Directory.Exists(project))
+				Directory.Delete(project);
+		}
+	}
+
+	[Fact]
+	public void ToolErrorsEscapeControlCharactersIntoOneSafeLine()
+	{
+		var result = McpToolResults.Error(new McpToolException(
+			McpErrorCodes.RootViolation,
+			$"{McpErrorCodes.RootViolation}: bad\r\npath\t\u001b[31m\u2028tail"));
+
+		var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
+		Assert.True(result.IsError);
+		Assert.Equal(
+			$"{McpErrorCodes.RootViolation}: bad\\r\\npath\\t\\u001B[31m\\u2028tail",
+			text);
+		Assert.DoesNotContain('\r', text);
+		Assert.DoesNotContain('\n', text);
+		Assert.DoesNotContain('\u001b', text);
+	}
+
+	private static void CreateDirectoryAliasOrSkip(string linkPath, string targetPath)
+	{
+		if (!OperatingSystem.IsWindows())
+		{
+			try
+			{
+				Directory.CreateSymbolicLink(linkPath, targetPath);
+				return;
+			}
+			catch (Exception exception) when (
+				exception is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
+			{
+				Assert.Skip($"Directory symbolic links are unavailable: {exception.GetType().Name}.");
+			}
+		}
+
+		using var process = Process.Start(new ProcessStartInfo("cmd.exe")
+		{
+			UseShellExecute = false,
+			CreateNoWindow = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			ArgumentList = { "/c", "mklink", "/J", linkPath, targetPath }
+		});
+		if (process is null ||
+		    !process.WaitForExit(TimeSpan.FromSeconds(5)) ||
+		    process.ExitCode != 0 ||
+		    !Directory.Exists(linkPath))
+		{
+			try
+			{
+				process?.Kill(entireProcessTree: true);
+			}
+			catch (InvalidOperationException)
+			{
+			}
+			Assert.Skip("Windows junction creation is unavailable.");
+		}
+	}
+
+	[Fact]
+	public void McpRelativePathsPreserveUnixBackslashesAsNameCharacters()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("Windows treats a backslash as a directory separator.");
+
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var file = workspace.CreateFile("project/literal\\name.txt", "content");
+
+		Assert.Equal("literal\\name.txt", McpProjectService.ToRelative(project, file));
 	}
 
 	[Theory]
@@ -109,6 +295,28 @@ public sealed class McpInfrastructureTests
 			McpJsonArguments.Create(request, "enabled").OptionalBoolean("enabled", defaultValue: false));
 
 		Assert.Equal(McpErrorCodes.InvalidArguments, exception.Code);
+	}
+
+	[Fact]
+	public void JsonArgumentsPreserveWhitespaceForContentPatternsAndPaths()
+	{
+		var request = new CallToolRequestParams
+		{
+			Name = "test",
+			Arguments = new Dictionary<string, JsonElement>
+			{
+				["pattern"] = JsonSerializer.SerializeToElement(" "),
+				["paths"] = JsonSerializer.SerializeToElement(new[] { " " }),
+				["pack_id"] = JsonSerializer.SerializeToElement(" ")
+			}
+		};
+		var arguments = McpJsonArguments.Create(request, "pattern", "paths", "pack_id");
+
+		Assert.Equal(" ", arguments.RequiredString("pattern", allowWhitespace: true));
+		Assert.Equal([" "], arguments.OptionalStringArray("paths", allowWhitespace: true));
+		Assert.Equal(
+			McpErrorCodes.InvalidArguments,
+			Assert.Throws<McpToolException>(() => arguments.RequiredString("pack_id")).Code);
 	}
 
 	[Fact]
@@ -182,6 +390,16 @@ public sealed class McpInfrastructureTests
 			Assert.Throws<McpToolException>(() => McpGlobSet.Create(["../*.cs"], null)).Code);
 	}
 
+	[Fact(Timeout = 2_000)]
+	public void GlobSetAlternatingWildcardsCannotCauseCatastrophicBacktracking()
+	{
+		var pattern = string.Concat(Enumerable.Repeat("*a", 12)) + "b";
+		var candidate = new string('a', 36) + "c";
+		var globs = McpGlobSet.Create([pattern], null);
+
+		Assert.False(globs.Includes(candidate));
+	}
+
 	[Fact]
 	public void SearchRegexRejectsInvalidPatternsAndTimesOutCatastrophicMatches()
 	{
@@ -196,21 +414,169 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
-	public void PackSweepRemovesStaleSessionsButPreservesAnActiveLease()
+	public void PackSweepRemovesOnlyStaleOwnedSessionsAndPreservesAnActiveLease()
 	{
 		using var workspace = new TemporaryDirectory();
 		var baseDirectory = Path.Combine(workspace.Path, "DevProjex", "mcp");
-		var stale = Path.Combine(baseDirectory, "stale-session");
+		var stale = Path.Combine(baseDirectory, new string('a', 32));
 		Directory.CreateDirectory(stale);
+		File.WriteAllText(Path.Combine(stale, ".session.lock"), string.Empty);
 		File.WriteAllText(Path.Combine(stale, "pack.tmp"), "stale");
 		Directory.SetLastWriteTimeUtc(stale, DateTime.UtcNow.AddDays(-2));
+		var foreign = Path.Combine(baseDirectory, "unrelated-old-data");
+		Directory.CreateDirectory(foreign);
+		var protectedFile = Path.Combine(foreign, "keep.txt");
+		File.WriteAllText(protectedFile, "keep");
+		Directory.SetLastWriteTimeUtc(foreign, DateTime.UtcNow.AddDays(-2));
 
 		using var active = new McpPackRegistry(workspace.Path);
 		Directory.SetLastWriteTimeUtc(active.SessionDirectory, DateTime.UtcNow.AddDays(-2));
 		using var next = new McpPackRegistry(workspace.Path);
 
 		Assert.False(Directory.Exists(stale));
+		Assert.True(File.Exists(protectedFile));
 		Assert.True(Directory.Exists(active.SessionDirectory));
+	}
+
+	[Fact]
+	public void PackSweepNeverTraversesASymbolicLinkSessionDirectory()
+	{
+		using var workspace = new TemporaryDirectory();
+		var target = Path.Combine(workspace.Path, "protected-target");
+		Directory.CreateDirectory(target);
+		File.WriteAllText(Path.Combine(target, ".session.lock"), string.Empty);
+		var protectedFile = Path.Combine(target, "keep.txt");
+		File.WriteAllText(protectedFile, "keep");
+		Directory.SetLastWriteTimeUtc(target, DateTime.UtcNow.AddDays(-2));
+
+		var baseDirectory = Path.Combine(workspace.Path, "DevProjex", "mcp");
+		Directory.CreateDirectory(baseDirectory);
+		var link = Path.Combine(baseDirectory, new string('b', 32));
+		try
+		{
+			Directory.CreateSymbolicLink(link, target);
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		{
+			Assert.Skip("Creating directory symbolic links is unavailable in this environment.");
+			return;
+		}
+
+		using var registry = new McpPackRegistry(workspace.Path);
+
+		Assert.True(File.Exists(protectedFile));
+		Assert.True(Directory.Exists(link));
+	}
+
+	[Fact]
+	public void PackStorageRejectsASymbolicLinkBaseDirectory()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var target = new TemporaryDirectory();
+		var productDirectory = Path.Combine(workspace.Path, "DevProjex");
+		Directory.CreateDirectory(productDirectory);
+		var link = Path.Combine(productDirectory, "mcp");
+		try
+		{
+			Directory.CreateSymbolicLink(link, target.Path);
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		{
+			Assert.Skip("Creating directory symbolic links is unavailable in this environment.");
+			return;
+		}
+
+		var storageException = Assert.Throws<IOException>(() => new McpPackRegistry(workspace.Path));
+
+		Assert.Contains("symbolic link", storageException.Message, StringComparison.Ordinal);
+		Assert.Empty(Directory.EnumerateFileSystemEntries(target.Path));
+	}
+
+	[Fact]
+	public void PackStorageRejectsASymbolicLinkProductDirectory()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var target = new TemporaryDirectory();
+		var link = Path.Combine(workspace.Path, "DevProjex");
+		try
+		{
+			Directory.CreateSymbolicLink(link, target.Path);
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		{
+			Assert.Skip("Creating directory symbolic links is unavailable in this environment.");
+			return;
+		}
+
+		var storageException = Assert.Throws<IOException>(() => new McpPackRegistry(workspace.Path));
+
+		Assert.Contains("symbolic link", storageException.Message, StringComparison.Ordinal);
+		Assert.Empty(Directory.EnumerateFileSystemEntries(target.Path));
+	}
+
+	[Fact]
+	public async Task PackStorageIsPrivateToTheCurrentUnixUser()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Unix file modes do not apply on Windows.");
+			return;
+		}
+
+		using var workspace = new TemporaryDirectory();
+		using var registry = new McpPackRegistry(workspace.Path);
+		var pack = await registry.CreateAsync(
+			async (stream, token) =>
+			{
+				await stream.WriteAsync("redacted context"u8.ToArray(), token);
+			},
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(
+			UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
+			File.GetUnixFileMode(registry.SessionDirectory));
+		Assert.Equal(
+			UnixFileMode.UserRead | UnixFileMode.UserWrite,
+			File.GetUnixFileMode(Path.Combine(registry.SessionDirectory, ".session.lock")));
+		Assert.Equal(
+			UnixFileMode.UserRead | UnixFileMode.UserWrite,
+			File.GetUnixFileMode(pack.Path));
+	}
+
+	[Fact]
+	public async Task PackCreationCleanupPreservesTheOriginalWriterFailure()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var registry = new McpPackRegistry(workspace.Path);
+		var expected = new InvalidOperationException("writer failed");
+
+		var actual = await Assert.ThrowsAsync<InvalidOperationException>(() => registry.CreateAsync(
+			async (stream, _) =>
+			{
+				var path = ((FileStream)stream).Name;
+				await stream.DisposeAsync();
+				File.Delete(path);
+				Directory.CreateDirectory(path);
+				throw expected;
+			},
+			TestContext.Current.CancellationToken));
+
+		Assert.Same(expected, actual);
+	}
+
+	[Fact]
+	public async Task PackRemovalIgnoresCleanupAccessFailures()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var registry = new McpPackRegistry(workspace.Path);
+		var packId = await registry.StoreAsync("redacted context", TestContext.Current.CancellationToken);
+		var path = registry.Resolve(packId);
+		File.Delete(path);
+		Directory.CreateDirectory(path);
+
+		registry.Remove(packId);
+
+		Assert.True(Directory.Exists(path));
 	}
 
 	[Fact]
@@ -234,6 +600,104 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public async Task TextPageReaderDoesNotMaterializeAnOversizedSingleLine()
+	{
+		await using var stream = new RepeatingByteStream((byte)'x', 8 * 1024 * 1024);
+		var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+
+		var page = await McpTextRanges.ReadPageAsync(
+			stream,
+			startLine: 1,
+			endLine: null,
+			maximumLines: 1,
+			maximumCharacters: 50_000,
+			TestContext.Current.CancellationToken);
+		var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+		Assert.Equal(50_000, page.Text.Length);
+		Assert.True(page.CharacterLimitReached);
+		Assert.InRange(allocatedBytes, 0, 2 * 1024 * 1024);
+	}
+
+	[Fact]
+	public async Task TextPageReaderUsesKnownPackMetricsWithoutScanningTheUnreadTail()
+	{
+		var content = Encoding.UTF8.GetBytes("first\n" + new string('x', 2 * 1024 * 1024));
+		await using var stream = new MemoryStream(content);
+
+		var page = await McpTextRanges.ReadPageAsync(
+			stream,
+			startLine: 1,
+			endLine: null,
+			maximumLines: 1,
+			maximumCharacters: 100,
+			TestContext.Current.CancellationToken,
+			knownTotalLines: 2);
+
+		Assert.Equal("first", page.Text);
+		Assert.Equal(2, page.TotalLines);
+		Assert.True(page.IsTruncated);
+		Assert.InRange(stream.Position, 1, 32 * 1024);
+	}
+
+	[Fact]
+	public async Task TextRangesPreserveLeadingEmptyLines()
+	{
+		await using var stream = new MemoryStream(Encoding.UTF8.GetBytes("\r\nvalue\n"));
+
+		var streamed = await McpTextRanges.ReadPageAsync(
+			stream,
+			startLine: 1,
+			endLine: 2,
+			maximumLines: 10,
+			maximumCharacters: 100,
+			TestContext.Current.CancellationToken);
+		var sliced = McpTextRanges.Slice([string.Empty, "value"], 1, 2, 10, 100);
+		var direct = McpTextRanges.Slice(
+			"\r\nvalue\n",
+			1,
+			2,
+			10,
+			100,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal("\nvalue", streamed.Text);
+		Assert.Equal("\nvalue", sliced.Text);
+		Assert.Equal("\nvalue", direct.Text);
+	}
+
+	[Theory]
+	[InlineData("value\n")]
+	[InlineData("value\r\n")]
+	[InlineData("value\r")]
+	public async Task TextPageReaderPreservesTheTrailingEmptyLine(string content)
+	{
+		await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(content));
+
+		var page = await McpTextRanges.ReadPageAsync(
+			stream,
+			startLine: 2,
+			endLine: 2,
+			maximumLines: 10,
+			maximumCharacters: 100,
+			TestContext.Current.CancellationToken);
+		var direct = McpTextRanges.Slice(
+			content,
+			2,
+			2,
+			10,
+			100,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(string.Empty, page.Text);
+		Assert.Equal(string.Empty, direct.Text);
+		Assert.Equal(2, page.StartLine);
+		Assert.Equal(2, page.EndLine);
+		Assert.Equal(2, page.TotalLines);
+		Assert.False(page.IsTruncated);
+	}
+
+	[Fact]
 	public void TextRangesRejectInvalidRangesAndReportCharacterTruncation()
 	{
 		var page = McpTextRanges.Slice(["123456", "next"], 1, 2, 1000, 4);
@@ -244,5 +708,137 @@ public sealed class McpInfrastructureTests
 		var exception = Assert.Throws<McpToolException>(() =>
 			McpTextRanges.Slice(["one"], 2, null, 1000, 50_000));
 		Assert.Equal(McpErrorCodes.InvalidRange, exception.Code);
+	}
+
+	[Fact]
+	public void TextSliceDoesNotMaterializeEveryLineOfLargeContent()
+	{
+		var content = new string('\n', 8 * 1024 * 1024);
+		var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+
+		var page = McpTextRanges.Slice(
+			content,
+			startLine: 1,
+			endLine: null,
+			maximumLines: 1000,
+			maximumCharacters: 50_000,
+			TestContext.Current.CancellationToken);
+		var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+		Assert.Equal(8 * 1024 * 1024 + 1, page.TotalLines);
+		Assert.Equal(1000, page.EndLine);
+		Assert.InRange(allocatedBytes, 0, 2 * 1024 * 1024);
+	}
+
+	[Fact]
+	public void SearchScannerKeepsOnlyBoundedMatchContext()
+	{
+		const string content = "before\r\nneedle\rcontext\nneedle-again\rafter";
+
+		var result = McpSearchTextScanner.Scan(
+			content,
+			new McpSearchRegex("needle", ignoreCase: false),
+			contextLines: 1,
+			maximumStoredMatches: 1,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(2, result.TotalMatches);
+		var match = Assert.Single(result.Matches);
+		Assert.Equal(2, match.MatchLineNumber);
+		Assert.Equal(
+			["before", "needle", "context"],
+			match.Lines.Select(line => content.Substring(line.Offset, line.Length)));
+
+		using var cancellation = new CancellationTokenSource();
+		cancellation.Cancel();
+		Assert.Throws<OperationCanceledException>(() => McpSearchTextScanner.Scan(
+			content,
+			new McpSearchRegex("needle", ignoreCase: false),
+			contextLines: 1,
+			maximumStoredMatches: 1,
+			cancellation.Token));
+	}
+
+	[Fact]
+	public void SearchScannerDoesNotAllocateOneObjectPerSourceLine()
+	{
+		var content = new string('\n', 1024 * 1024);
+		var regex = new McpSearchRegex("needle", ignoreCase: false);
+		var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+
+		var result = McpSearchTextScanner.Scan(
+			content,
+			regex,
+			contextLines: 2,
+			maximumStoredMatches: 50,
+			TestContext.Current.CancellationToken);
+		var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+		Assert.Equal(0, result.TotalMatches);
+		Assert.Empty(result.Matches);
+		Assert.InRange(allocatedBytes, 0, 2 * 1024 * 1024);
+	}
+
+	[Fact]
+	public async Task TextRangeCharacterCapsNeverSplitAUnicodeScalar()
+	{
+		const string line = "x😀tail";
+		await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(line));
+
+		var streamed = await McpTextRanges.ReadPageAsync(
+			stream,
+			startLine: 1,
+			endLine: null,
+			maximumLines: 1,
+			maximumCharacters: 2,
+			TestContext.Current.CancellationToken);
+		var sliced = McpTextRanges.Slice([line], 1, null, 1, 2);
+
+		Assert.Equal("x", streamed.Text);
+		Assert.Equal("x", sliced.Text);
+	}
+
+	private sealed class RepeatingByteStream(byte value, long length) : Stream
+	{
+		private long _position;
+
+		public override bool CanRead => true;
+		public override bool CanSeek => false;
+		public override bool CanWrite => false;
+		public override long Length => length;
+		public override long Position
+		{
+			get => _position;
+			set => throw new NotSupportedException();
+		}
+
+		public override int Read(byte[] buffer, int offset, int count) =>
+			Read(buffer.AsSpan(offset, count));
+
+		public override int Read(Span<byte> buffer)
+		{
+			var count = (int)Math.Min(buffer.Length, length - _position);
+			if (count <= 0)
+				return 0;
+			buffer[..count].Fill(value);
+			_position += count;
+			return count;
+		}
+
+		public override ValueTask<int> ReadAsync(
+			Memory<byte> buffer,
+			CancellationToken cancellationToken = default)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			return ValueTask.FromResult(Read(buffer.Span));
+		}
+
+		public override void Flush()
+		{
+		}
+
+		public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+		public override void SetLength(long value) => throw new NotSupportedException();
+		public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 	}
 }

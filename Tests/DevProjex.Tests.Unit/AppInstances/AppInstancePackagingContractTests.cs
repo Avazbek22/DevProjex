@@ -277,7 +277,12 @@ public sealed class AppInstancePackagingContractTests
         Assert.Contains("\"obj\"", releaseScript, StringComparison.Ordinal);
         Assert.Contains("Assert-IsolatedWorkspaceCapacity -sourceRoot $sourceRoot", releaseScript, StringComparison.Ordinal);
         Assert.Contains("$sourceBytes * 2", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("\"/XJ\"", releaseScript, StringComparison.Ordinal);
         Assert.Contains("$isolatedPackages + [System.IO.Path]::DirectorySeparatorChar", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("Resolve-IsolatedWorkspaceCleanupTarget", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("FileAttributes]::ReparsePoint", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("Remove-Item -LiteralPath $cleanupTarget -Recurse", releaseScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("cmd /c", releaseScript, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("linux-x64.portable", releaseScript, StringComparison.Ordinal);
         Assert.DoesNotContain("linux-arm64.portable", releaseScript, StringComparison.Ordinal);
         Assert.Contains("\"/p:PublishSingleFile=true\"", releaseScript, StringComparison.Ordinal);
@@ -350,6 +355,7 @@ public sealed class AppInstancePackagingContractTests
         Assert.Contains("<string>14.0</string>", readme, StringComparison.Ordinal);
         Assert.Contains("DevProjex.v<version>.osx-<architecture>.app.tar.gz", readme, StringComparison.Ordinal);
         Assert.Contains("generates `app.icns` deterministically", readme, StringComparison.Ordinal);
+        Assert.DoesNotContain("generate-app-icns.sh", readme, StringComparison.Ordinal);
         Assert.Contains("does not modify shell profiles or global environment variables", readme, StringComparison.Ordinal);
         Assert.DoesNotContain(CommandLineExecutableAliases.WindowsStoreAlias, readme, StringComparison.Ordinal);
     }

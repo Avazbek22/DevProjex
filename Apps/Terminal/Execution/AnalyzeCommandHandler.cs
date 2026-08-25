@@ -204,13 +204,18 @@ internal static class AnalysisTextFormatter
 		{
 			new(
 				localization["Terminal.Analysis.Project"],
-				plan.SourceIdentity?.DisplayName ?? plan.SourceRoot)
+				TerminalTextEscaping.EscapeSingleLine(
+					plan.SourceIdentity?.DisplayName ?? plan.SourceRoot))
 		};
 		if (plan.SourceIdentity?.RepositoryUrl is { Length: > 0 } repositoryUrl)
-			rows.Add(new AnalysisTextRow(localization["Terminal.Analysis.Source"], repositoryUrl));
+		{
+			rows.Add(new AnalysisTextRow(
+				localization["Terminal.Analysis.Source"],
+				TerminalTextEscaping.EscapeSingleLine(repositoryUrl)));
+		}
 		rows.Add(new AnalysisTextRow(
 			localization["Terminal.Analysis.Profile"],
-			FormatProfile(plan.Selection.ProfileSource)));
+			TerminalTextEscaping.EscapeSingleLine(FormatProfile(plan.Selection.ProfileSource))));
 		rows.Add(new AnalysisTextRow(
 			localization["Terminal.Analysis.GitMode"],
 			ProjectSelectionTokens.ToToken(plan.Selection.GitMode!.Value)));
@@ -219,10 +224,10 @@ internal static class AnalysisTextFormatter
 			string.Join(", ", plan.Selection.Exclusions!.Select(ProjectSelectionTokens.ToToken))));
 		rows.Add(new AnalysisTextRow(
 			localization["Terminal.Analysis.Roots"],
-			string.Join(", ", plan.SelectedRoots)));
+			JoinEscaped(plan.SelectedRoots)));
 		rows.Add(new AnalysisTextRow(
 			localization["Terminal.Analysis.Extensions"],
-			string.Join(", ", plan.SelectedExtensions)));
+			JoinEscaped(plan.SelectedExtensions)));
 		rows.Add(new AnalysisTextRow(
 			localization["Terminal.Analysis.Files"],
 			plan.IncludedFiles.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)));
@@ -324,6 +329,9 @@ internal static class AnalysisTextFormatter
 		return rows;
 	}
 
+	private static string JoinEscaped(IEnumerable<string> values) =>
+		string.Join(", ", values.Select(TerminalTextEscaping.EscapeSingleLine));
+
 	internal static IReadOnlyList<string> BuildFindingTable(
 		IReadOnlyList<EffectiveRedactionFinding> findings,
 		LocalizationService localization)
@@ -348,7 +356,7 @@ internal static class AnalysisTextFormatter
 	[
 		ToCategoryToken(finding.Category),
 		TerminalTextEscaping.EscapeSingleLine(finding.RuleId),
-		$"{TerminalTextEscaping.EscapeSingleLine(finding.RelativePath.Replace('\\', '/'))}:" +
+		$"{TerminalTextEscaping.EscapeSingleLine(PathUtility.NormalizeSeparators(finding.RelativePath))}:" +
 		finding.LineNumber.ToString(System.Globalization.CultureInfo.InvariantCulture)
 	];
 

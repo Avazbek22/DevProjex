@@ -52,4 +52,23 @@ public sealed class TerminalCommandHistoryTests
 
 		Assert.Equal(["view tree", "format json"], history.Entries);
 	}
+
+	[Fact]
+	public void ConstructorBoundsPersistedCommandsWithoutSplittingUnicodeScalars()
+	{
+		var prefix = new string('x', 4_095);
+
+		var history = new TerminalCommandHistory([prefix + "😀tail"]);
+
+		Assert.Equal([prefix], history.Entries);
+	}
+
+	[Fact]
+	public void ConstructorEscapesControlCharactersFromPersistedHistory()
+	{
+		var history = new TerminalCommandHistory([" search first\r\nsecond\t\u001B "]);
+
+		Assert.Equal([@"search first\r\nsecond\t\u001B"], history.Entries);
+		Assert.DoesNotContain(history.Entries[0], char.IsControl);
+	}
 }

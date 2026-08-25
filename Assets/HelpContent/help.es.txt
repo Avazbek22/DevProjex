@@ -190,7 +190,7 @@ XML:
 * las carpetas son `<d n="...">`;
 * Los archivos son `<f>File.cs</f>`.
 
-Médico:
+MD:
 * comienza con `Root: ...`;
 * utiliza una lista anidada de Markdown;
 * Las carpetas terminan con `/`.

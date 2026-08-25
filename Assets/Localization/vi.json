@@ -593,7 +593,7 @@
   "Terminal.Tui.Welcome.OpenDesktop.Description": "Khởi chạy hoặc kích hoạt DevProjex Desktop và duy trì phiên cuối này.",
   "Terminal.Tui.Welcome.Help.Description": "Mở trợ giúp điều hướng và quy trình làm việc, sau đó quay lại lựa chọn chính xác này.",
   "Terminal.Tui.Welcome.Exit.Description": "Rời khỏi DevProjex Terminal và khôi phục trạng thái terminal.",
-  "Terminal.Tui.Welcome.QuickStart": "Tự động hóa trực tiếp: devprojex analyze. | devprojex export context. -o bối cảnh.md",
+  "Terminal.Tui.Welcome.QuickStart": "Tự động hóa trực tiếp: devprojex analyze .  |  devprojex export context . -o context.md",
   "Terminal.Tui.Footer.Welcome": "Lên/Xuống hoặc j/k Điều hướng Enter Chọn Ctrl+P Hành động? Trợ giúp q Thoát",
   "Terminal.Tui.Footer.Loading": "Esc Hủy thao tác  ? Trợ giúp",
   "Terminal.Tui.Footer.Tree": "↑/↓ Di chuyển  Enter Mở  Space Chuyển  Tab/F6 Xem trước  Ctrl+P Hành động",

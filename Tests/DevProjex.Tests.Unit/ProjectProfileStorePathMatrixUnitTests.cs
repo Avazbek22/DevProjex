@@ -23,7 +23,7 @@ public sealed class ProjectProfileStorePathMatrixUnitTests
 			store.SaveProfile(savePath, new ProjectSelectionProfile(roots, extensions, ignoreOptions));
 
 			Assert.True(store.TryLoadProfile(canonicalPath, out var loaded));
-			Assert.Equal(SanitizeStrings(roots), new HashSet<string>(loaded.SelectedRootFolders, StringComparer.OrdinalIgnoreCase));
+			Assert.Equal(SanitizeRoots(roots), new HashSet<string>(loaded.SelectedRootFolders, PathComparer.Default));
 			Assert.Equal(SanitizeStrings(extensions), new HashSet<string>(loaded.SelectedExtensions, StringComparer.OrdinalIgnoreCase));
 			Assert.Equal(SanitizeIgnore(ignoreOptions), [..loaded.SelectedIgnoreOptions]);
 		}
@@ -69,11 +69,11 @@ public sealed class ProjectProfileStorePathMatrixUnitTests
 			Assert.True(store.TryLoadProfile(canonicalPathA, out var loadedA));
 			Assert.True(store.TryLoadProfile(canonicalPathB, out var loadedB));
 
-			Assert.Equal(SanitizeStrings(secondRoots), new HashSet<string>(loadedA.SelectedRootFolders, StringComparer.OrdinalIgnoreCase));
+			Assert.Equal(SanitizeRoots(secondRoots), new HashSet<string>(loadedA.SelectedRootFolders, PathComparer.Default));
 			Assert.Equal(SanitizeStrings(secondExtensions), new HashSet<string>(loadedA.SelectedExtensions, StringComparer.OrdinalIgnoreCase));
 			Assert.Equal(SanitizeIgnore(secondIgnore), [..loadedA.SelectedIgnoreOptions]);
 
-			Assert.Equal(SanitizeStrings(secondRoots), new HashSet<string>(loadedB.SelectedRootFolders, StringComparer.OrdinalIgnoreCase));
+			Assert.Equal(SanitizeRoots(secondRoots), new HashSet<string>(loadedB.SelectedRootFolders, PathComparer.Default));
 			Assert.Equal(SanitizeStrings(secondExtensions), new HashSet<string>(loadedB.SelectedExtensions, StringComparer.OrdinalIgnoreCase));
 			Assert.Equal(SanitizeIgnore(secondIgnore), [..loadedB.SelectedIgnoreOptions]);
 		}
@@ -184,6 +184,14 @@ public sealed class ProjectProfileStorePathMatrixUnitTests
 		return values
 			.Where(value => !string.IsNullOrWhiteSpace(value))
 			.ToHashSet(StringComparer.OrdinalIgnoreCase);
+	}
+
+	private static HashSet<string> SanitizeRoots(IEnumerable<string> values)
+	{
+		return values
+			.Where(value => !string.IsNullOrEmpty(value) &&
+			                (!OperatingSystem.IsWindows() || !string.IsNullOrWhiteSpace(value)))
+			.ToHashSet(PathComparer.Default);
 	}
 
 	private static HashSet<IgnoreOptionId> SanitizeIgnore(IEnumerable<IgnoreOptionId> values)

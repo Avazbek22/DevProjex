@@ -101,7 +101,7 @@ internal sealed class RecentCommandHandler(
 		return separator > 0 ? normalized[..separator] : null;
 	}
 
-	private static string NormalizePath(string path) => path.Replace('\\', '/');
+	private static string NormalizePath(string path) => PathUtility.NormalizeSeparators(path);
 
 	internal static IReadOnlyList<string> FormatTextEntries(
 		IReadOnlyList<RecentOutputEntry> entries) =>

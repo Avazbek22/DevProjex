@@ -923,6 +923,39 @@ public sealed class TerminalCommandSetupServiceTests
 	}
 
 	[Fact]
+	public void Probe_UnixPathLookup_PreservesWhitespaceInShadowingDirectory()
+	{
+		if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+			return;
+
+		using var temp = new TemporaryDirectory();
+		var target = temp.CreateFile("app/DevProjex", "fake executable");
+		var shadowDirectory = temp.CreateFolder("shadow ");
+		var shadowCommand = temp.CreateFile("shadow /devprojex", "#!/bin/sh\nexit 0\n");
+		var userBin = temp.CreateFolder(".local/bin");
+		var managedCommand = temp.CreateFile(
+			".local/bin/devprojex",
+			TerminalCommandSetupService.BuildWrapperContent(target));
+		var executableMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+		File.SetUnixFileMode(shadowCommand, executableMode);
+		File.SetUnixFileMode(managedCommand, executableMode);
+		var service = new TerminalCommandSetupService(new TerminalCommandSetupServiceOptions
+		{
+			Platform = OperatingSystem.IsMacOS()
+				? TerminalCommandHostPlatform.MacOS
+				: TerminalCommandHostPlatform.Linux,
+			HomeDirectoryProvider = () => temp.Path,
+			PathVariableProvider = () => string.Join(Path.PathSeparator, shadowDirectory, userBin),
+			ExecutablePathProvider = () => target
+		});
+
+		var snapshot = service.Probe();
+
+		Assert.Equal(TerminalCommandSetupState.CommandShadowed, snapshot.State);
+		Assert.Equal(shadowCommand, snapshot.ResolvedCommandPath);
+	}
+
+	[Fact]
 	public void InstallOrRepair_UnixMissingCommand_CreatesManagedWrapperAndProbeBecomesInstalled()
 	{
 		using var temp = new TemporaryDirectory();
@@ -1079,6 +1112,33 @@ public sealed class TerminalCommandSetupServiceTests
 	}
 
 	[Fact]
+	public void ConfigurePath_UnixPreservesWhitespaceInExistingPathEntries()
+	{
+		using var temp = new TemporaryDirectory();
+		var target = temp.CreateFile("app/DevProjex", "fake executable");
+		var userBin = temp.CreateFolder(".local/bin");
+		var wrapperPath = Path.Combine(userBin, CommandLineExecutableAliases.UnixCommand);
+		File.WriteAllText(wrapperPath, TerminalCommandSetupService.BuildWrapperContent(target));
+		SetUnixExecutableMode(wrapperPath);
+		var existingPath = $" leading-space{Path.PathSeparator}trailing-space ";
+		var processPath = existingPath;
+		var service = CreateUnixPathSetupService(
+			temp.Path,
+			target,
+			"/bin/bash",
+			() => processPath,
+			value => processPath = value);
+
+		var result = service.ConfigurePath();
+
+		Assert.True(result.Success, result.ErrorMessage);
+		var entries = processPath.Split(Path.PathSeparator);
+		Assert.Equal(3, entries.Length);
+		Assert.Equal(" leading-space", entries[1]);
+		Assert.Equal("trailing-space ", entries[2]);
+	}
+
+	[Fact]
 	public void ConfigurePath_ExistingEquivalentProfileLine_DoesNotRewriteUserProfile()
 	{
 		using var temp = new TemporaryDirectory();
@@ -1130,6 +1190,41 @@ public sealed class TerminalCommandSetupServiceTests
 		Assert.Equal(0, writeCount);
 		Assert.Equal(originalPath, processPath);
 		Assert.Equal(TerminalCommandSetupState.InstalledPathMissing, result.Snapshot.State);
+	}
+
+	[Fact]
+	public void ConfigurePath_OversizedShellProfile_DoesNotReadOrMutateIt()
+	{
+		using var temp = new TemporaryDirectory();
+		var target = temp.CreateFile("app/DevProjex", "fake executable");
+		var userBin = temp.CreateFolder(".local/bin");
+		var wrapperPath = Path.Combine(userBin, CommandLineExecutableAliases.UnixCommand);
+		File.WriteAllText(wrapperPath, TerminalCommandSetupService.BuildWrapperContent(target));
+		SetUnixExecutableMode(wrapperPath);
+		var profilePath = Path.Combine(temp.Path, ".bashrc");
+		using (var profile = File.Create(profilePath))
+			profile.SetLength(TerminalCommandSetupService.MaximumShellProfileBytes + 1L);
+		var originalPath = Path.Combine(temp.Path, "other-bin");
+		var processPath = originalPath;
+		var writeCount = 0;
+		var service = CreateUnixPathSetupService(
+			temp.Path,
+			target,
+			"/bin/bash",
+			() => processPath,
+			value =>
+			{
+				writeCount++;
+				processPath = value;
+			});
+
+		var result = service.ConfigurePath();
+
+		Assert.False(result.Success);
+		Assert.Contains("shell profile exceeds", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+		Assert.Equal(TerminalCommandSetupService.MaximumShellProfileBytes + 1L, new FileInfo(profilePath).Length);
+		Assert.Equal(0, writeCount);
+		Assert.Equal(originalPath, processPath);
 	}
 
 	[Fact]
@@ -1220,6 +1315,27 @@ public sealed class TerminalCommandSetupServiceTests
 	}
 
 	[Fact]
+	public void Probe_OversizedLauncherWithManagedHeader_RemainsAProtectedConflict()
+	{
+		using var temp = new TemporaryDirectory();
+		var target = temp.CreateFile("app/DevProjex", "fake executable");
+		var userBin = temp.CreateFolder(".local/bin");
+		var wrapperPath = Path.Combine(userBin, CommandLineExecutableAliases.UnixCommand);
+		File.WriteAllText(
+			wrapperPath,
+			TerminalCommandSetupService.BuildWrapperContent(target) + new string('x', 64 * 1024));
+		var service = CreateService(TerminalCommandHostPlatform.Linux, temp.Path, userBin, target);
+
+		var snapshot = service.Probe();
+		var install = service.InstallOrRepair();
+
+		Assert.Equal(TerminalCommandSetupState.ConflictingCommand, snapshot.State);
+		Assert.False(snapshot.CanRepair);
+		Assert.False(install.Success);
+		Assert.Equal(TerminalCommandInstallOutcome.ConflictingCommand, install.Outcome);
+	}
+
+	[Fact]
 	public void ValidateLauncher_DotnetHostCompletesVersionCheck()
 	{
 		var result = TerminalCommandSetupService.ValidateLauncher("dotnet", TimeSpan.FromSeconds(5));
@@ -1241,6 +1357,31 @@ public sealed class TerminalCommandSetupServiceTests
 		var result = TerminalCommandSetupService.ValidateLauncher(commandPath, TimeSpan.FromSeconds(5));
 
 		Assert.True(result.Success, result.ErrorMessage);
+	}
+
+	[Fact]
+	public void ValidateLauncher_WindowsCommandDirectoryWithEnvironmentSyntax_IsNotExpandedByCmd()
+	{
+		if (!OperatingSystem.IsWindows())
+			return;
+
+		using var temp = new TemporaryDirectory();
+		var variableName = $"DPX_LAUNCHER_{Guid.NewGuid():N}";
+		try
+		{
+			Environment.SetEnvironmentVariable(variableName, "expanded-away");
+			var commandPath = Path.GetFullPath(temp.CreateFile(
+				$"folder-%{variableName}%/devprojex.cmd",
+				"@echo off\r\necho 5.1\r\nexit /b 0\r\n"));
+
+			var result = TerminalCommandSetupService.ValidateLauncher(commandPath, TimeSpan.FromSeconds(5));
+
+			Assert.True(result.Success, result.ErrorMessage);
+		}
+		finally
+		{
+			Environment.SetEnvironmentVariable(variableName, null);
+		}
 	}
 
 	[Fact]
@@ -1625,6 +1766,44 @@ public sealed class TerminalCommandSetupServiceTests
 		Assert.Equal(TerminalCommandSetupService.BuildWindowsLauncherContent(target), File.ReadAllText(commandPath));
 		Assert.Empty(Directory.GetFiles(userBin, ".devprojex.*.tmp"));
 		Assert.Equal(TerminalCommandSetupState.Installed, services[0].Probe().State);
+	}
+
+	[Fact]
+	public void InstallOrRepair_WindowsManagedLauncherReplacementPreservesExistingReader()
+	{
+		if (!OperatingSystem.IsWindows())
+			Assert.Skip("Windows file replacement semantics are required.");
+
+		using var temp = new TemporaryDirectory();
+		var previousTarget = temp.CreateFile("previous/DevProjex.exe", "previous executable");
+		var currentTarget = temp.CreateFile("current/DevProjex.exe", "current executable");
+		var userBin = temp.CreateFolder("DevProjex/bin");
+		var commandPath = Path.Combine(
+			userBin,
+			CommandLineExecutableAliases.WindowsPortableCommandFileName);
+		var previousContent = TerminalCommandSetupService.BuildWindowsLauncherContent(previousTarget);
+		File.WriteAllText(commandPath, previousContent);
+		using var existingReader = new FileStream(
+			commandPath,
+			FileMode.Open,
+			FileAccess.Read,
+			FileShare.ReadWrite | FileShare.Delete);
+		var service = CreateWindowsPortableService(
+			temp.Path,
+			processPath: string.Empty,
+			() => userBin,
+			_ => throw new InvalidOperationException("Installed PATH must not be rewritten."),
+			currentTarget);
+
+		var result = service.InstallOrRepair();
+
+		Assert.True(result.Success, result.ErrorMessage);
+		using var reader = new StreamReader(existingReader, leaveOpen: true);
+		Assert.Equal(previousContent, reader.ReadToEnd());
+		Assert.Equal(
+			TerminalCommandSetupService.BuildWindowsLauncherContent(currentTarget),
+			File.ReadAllText(commandPath));
+		Assert.Empty(Directory.GetFiles(userBin, ".devprojex.*.tmp"));
 	}
 
 	[Fact]

@@ -3,6 +3,57 @@ namespace DevProjex.Tests.Integration;
 public sealed class ProjectAnalysisServiceIntegrationTests
 {
 	[Fact]
+	public void Load_UnixWhitespaceOnlyRootName_RemainsSelectable()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Windows does not support this directory name through ordinary APIs.");
+			return;
+		}
+
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine(" ", "Selected.cs"), "class Selected {}\n");
+		temp.CreateFile(Path.Combine("other", "Excluded.cs"), "class Excluded {}\n");
+
+		var loaded = CreateService().Load(
+			new ProjectAnalysisRequest(
+				temp.Path,
+				SelectedRootFolders: [" "],
+				SelectedIgnoreOptions: []),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal([" "], loaded.SelectedRootFolders);
+		var selectedRoot = Assert.Single(loaded.Tree.Root.Children);
+		Assert.Equal(" ", selectedRoot.DisplayName);
+		Assert.Equal("Selected.cs", Assert.Single(selectedRoot.Children).DisplayName);
+	}
+
+	[Fact]
+	public void Load_UnixExtensionWithTrailingSpace_RemainsSelectable()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Windows normalizes trailing spaces in ordinary file names.");
+			return;
+		}
+
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("Selected.cs ", "class Selected {}\n");
+		temp.CreateFile("Excluded.cs", "class Excluded {}\n");
+
+		var loaded = CreateService().Load(
+			new ProjectAnalysisRequest(
+				temp.Path,
+				SelectedExtensions: [".cs "],
+				SelectedIgnoreOptions: []),
+			TestContext.Current.CancellationToken);
+
+		Assert.Contains(".cs ", loaded.AvailableExtensions, StringComparer.OrdinalIgnoreCase);
+		Assert.Equal([".cs "], loaded.SelectedExtensions);
+		Assert.Equal("Selected.cs ", Assert.Single(loaded.Tree.Root.Children).DisplayName);
+	}
+
+	[Fact]
 	public void Load_ExplicitRootSelectionDiscoversDeepRepositoryDefault()
 	{
 		using var temp = new TemporaryDirectory();

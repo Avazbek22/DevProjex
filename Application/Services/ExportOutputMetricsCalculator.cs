@@ -28,7 +28,7 @@ public static class ExportOutputMetricsCalculator
 		var ordered = new List<ContentFileMetrics>();
 		foreach (var file in files)
 		{
-			if (string.IsNullOrWhiteSpace(file.Path))
+			if (string.IsNullOrEmpty(file.Path))
 				continue;
 
 			if (!uniquePaths.Add(file.Path))
@@ -95,7 +95,7 @@ public static class ExportOutputMetricsCalculator
 
 		public void AppendFile(ContentFileMetrics file)
 		{
-			if (string.IsNullOrWhiteSpace(file.Path))
+			if (string.IsNullOrEmpty(file.Path))
 				return;
 
 			if (_hasRootHeader || _anyFileWritten)

@@ -157,7 +157,7 @@ public sealed class FileContentAnalyzer :
 					null);
 			}
 
-			using var stream = _openSequentialRead(path, StreamingBufferSize, FileShare.Read, false);
+			using var stream = _openSequentialRead(path, StreamingBufferSize, SourceFileReadPolicy.Share, false);
 			var reservation = EstimateMaximumRetainedFactBytes(stream.Length, maximumReadBytes);
 			lease = await byteBudget.AcquireAsync(reservation, cancellationToken).ConfigureAwait(false);
 			await decodeScratchGate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -257,7 +257,7 @@ public sealed class FileContentAnalyzer :
 			using var stream = _openSequentialRead(
 				path,
 				1,
-				FileShare.Read | FileShare.Delete,
+				SourceFileReadPolicy.Share,
 				false);
 			var sizeBytes = stream.Length;
 			if (sizeBytes == 0)
@@ -423,7 +423,7 @@ public sealed class FileContentAnalyzer :
 					null);
 
 			// Decoding owns pooled byte/char buffers; a second FileStream buffer only duplicates memory.
-			using var stream = _openSequentialRead(path, 1, FileShare.Read, false);
+			using var stream = _openSequentialRead(path, 1, SourceFileReadPolicy.Share, false);
 			var sizeBytes = stream.Length;
 
 			if (sizeBytes == 0)
@@ -456,7 +456,7 @@ public sealed class FileContentAnalyzer :
 						FileContentClassification.TooLarge,
 						new TextFileMetrics(
 						SizeBytes: sizeBytes,
-						LineCount: Math.Max(1, (int)(sizeBytes / EstimatedCharsPerLine)),
+						LineCount: EstimateLineCount(sizeBytes),
 						CharCount: (int)Math.Min(sizeBytes, int.MaxValue),
 						IsEmpty: false,
 						IsWhitespaceOnly: false,
@@ -542,7 +542,7 @@ public sealed class FileContentAnalyzer :
 			stream = _openSequentialRead(
 				path,
 				StreamingBufferSize,
-				FileShare.Read | FileShare.Delete,
+				SourceFileReadPolicy.Share,
 				true);
 			var sizeBytes = stream.Length;
 			if (sizeBytes == 0)
@@ -670,7 +670,7 @@ public sealed class FileContentAnalyzer :
 					null);
 			}
 
-			using var stream = _openSequentialRead(path, StreamingBufferSize, FileShare.Read, false);
+			using var stream = _openSequentialRead(path, StreamingBufferSize, SourceFileReadPolicy.Share, false);
 			var fact = ReadFactFromOpenStream(stream, maxSizeForFullRead, cancellationToken);
 			return new IdentifiedContentReadFact(fact, FileContentIdentity.TryCapture(stream));
 		}
@@ -736,7 +736,7 @@ public sealed class FileContentAnalyzer :
 				FileContentClassification.TooLarge,
 				new TextFileMetrics(
 					sizeBytes,
-					Math.Max(1, (int)(sizeBytes / EstimatedCharsPerLine)),
+					EstimateLineCount(sizeBytes),
 					(int)Math.Min(sizeBytes, int.MaxValue),
 					false,
 					false,
@@ -769,6 +769,9 @@ public sealed class FileContentAnalyzer :
 			return TextFileEncoding.Utf32BigEndian;
 		throw new ArgumentOutOfRangeException(nameof(bomEncoding));
 	}
+
+	internal static int EstimateLineCount(long sizeBytes) =>
+		(int)Math.Clamp(sizeBytes / EstimatedCharsPerLine, 1L, int.MaxValue);
 
 	/// <summary>
 	/// Checks first 512 bytes for null bytes to detect binary content.

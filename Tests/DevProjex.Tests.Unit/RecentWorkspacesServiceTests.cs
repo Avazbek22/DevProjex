@@ -84,6 +84,28 @@ public sealed class RecentWorkspacesServiceTests
 	}
 
 	[Fact]
+	public void Project_UnixWhitespaceFolderPreservesItsExactDisplayName()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Win32 path normalization rejects whitespace-only names.");
+			return;
+		}
+
+		var folder = Path.Combine(Path.GetTempPath(), " ");
+
+		var workspace = Assert.Single(_service.Project(
+		[
+			new RecentWorkspaceSource(
+				RecentWorkspaceKind.Folder,
+				folder,
+				DateTimeOffset.UtcNow)
+		]));
+
+		Assert.Equal(" ", workspace.DisplayName);
+	}
+
+	[Fact]
 	public void Project_RemovesCredentialsAndQueryFromRepositoryDisplay()
 	{
 		var workspace = Assert.Single(_service.Project(

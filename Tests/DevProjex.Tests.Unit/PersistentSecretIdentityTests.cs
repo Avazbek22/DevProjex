@@ -10,6 +10,28 @@ public sealed class PersistentSecretIdentityTests
 	private const string Secret = "persistent-secret-value-012345";
 
 	[Fact]
+	public void RelativePathIdentityPreservesBackslashesInsideUnixFileNames()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("Windows treats a backslash as a directory separator.");
+
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var literalBackslash = workspace.CreateFile("project/literal\\name.txt", "content");
+		var nested = workspace.CreateFile("project/literal/name.txt", "content");
+
+		Assert.Equal(
+			"literal\\name.txt",
+			SecretRedactionSession.NormalizeRelativePath(project, literalBackslash));
+		Assert.Equal(
+			"literal/name.txt",
+			SecretRedactionSession.NormalizeRelativePath(project, nested));
+		Assert.NotEqual(
+			SecretRedactionSession.NormalizeRelativePath(project, literalBackslash),
+			SecretRedactionSession.NormalizeRelativePath(project, nested));
+	}
+
+	[Fact]
 	public void V2Identity_IsDeterministicFullHmacAndMatcherFindsIt()
 	{
 		var provider = new TestIdentityProvider();
@@ -75,6 +97,34 @@ public sealed class PersistentSecretIdentityTests
 
 		var changed = source.Remove(sourceOffset, Secret.Length).Insert(sourceOffset, new string('x', Secret.Length));
 		Assert.Empty(matcher.Match(relativePath, changed, TestContext.Current.CancellationToken));
+	}
+
+	[Fact]
+	public void V2SourceBoundMark_PreservesWhitespaceOnlyRelativePath()
+	{
+		const string relativePath = " ";
+		var content = $"TOKEN={Secret}";
+		var sourceOffset = content.IndexOf(Secret, StringComparison.Ordinal);
+		var provider = new TestIdentityProvider();
+		Assert.True(PersistentSecretIdentity.TryCreateV2(provider, Secret, out var identity));
+		var mark = new MarkedSecretProfileEntry(
+			identity,
+			"TOKEN",
+			Secret.Length,
+			relativePath,
+			sourceOffset);
+		using var session = SecretRedactionSession.CreateWithPrivateData(
+			new EmptyDetector(),
+			new EmptyDetector(),
+			persistentIdentityProvider: provider);
+
+		session.ReplaceMarkedSecrets([mark]);
+		var stored = Assert.Single(session.GetMarkedSecrets());
+		var matcher = new MarkedSecretsMatcher([stored], [], provider);
+
+		Assert.Equal(relativePath, stored.RelativePath);
+		Assert.Single(matcher.Match(relativePath, content, TestContext.Current.CancellationToken));
+		Assert.Empty(matcher.Match("other.txt", content, TestContext.Current.CancellationToken));
 	}
 
 	[Fact]

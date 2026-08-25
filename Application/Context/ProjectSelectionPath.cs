@@ -6,20 +6,42 @@ public static class ProjectSelectionPath
 
 	public static string NormalizeRelative(string value)
 	{
-		if (string.IsNullOrWhiteSpace(value) || value.Trim() == ".")
+		if (string.IsNullOrEmpty(value) || value == ".")
 			return string.Empty;
 
-		var trimmed = value.Trim();
-		if (IsRootedOnAnySupportedPlatform(trimmed))
+		if (Path.IsPathRooted(value))
 		{
 			throw new ProjectContextValidationException(
 				InvalidPathCode,
 				"Selected paths must be relative to the project root.");
 		}
 
-		var segments = trimmed.Split(
-			[Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar, '/', '\\'],
-			StringSplitOptions.RemoveEmptyEntries);
+		var separators = OperatingSystem.IsWindows()
+			? new[] { '\\', '/' }
+			: ['/'];
+		return NormalizeSegments(value, separators);
+	}
+
+	public static string NormalizePortableRelative(string value)
+	{
+		if (string.IsNullOrEmpty(value) || value == ".")
+			return string.Empty;
+
+		if (IsRootedOnAnySupportedPlatform(value))
+		{
+			throw new ProjectContextValidationException(
+				InvalidPathCode,
+				"Selected paths must be relative on every supported platform.");
+		}
+
+		return NormalizeSegments(value, ['\\', '/']);
+	}
+
+	private static string NormalizeSegments(
+		string value,
+		char[] separators)
+	{
+		var segments = value.Split(separators, StringSplitOptions.RemoveEmptyEntries);
 		if (segments.Any(static segment => segment == ".."))
 		{
 			throw new ProjectContextValidationException(

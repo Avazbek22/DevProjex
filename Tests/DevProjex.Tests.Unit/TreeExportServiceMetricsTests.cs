@@ -149,6 +149,38 @@ public sealed class TreeExportServiceMetricsTests
 		Assert.Equal(ExportOutputMetrics.Empty, actual);
 	}
 
+	[Fact]
+	public void CalculateFullTreeMetrics_PreservesCountsBeyondInt32Range()
+	{
+		const int childCount = 70_000;
+		var displayName = new string('x', 32_768);
+		var child = new TreeNodeDescriptor(
+			displayName,
+			"/root/file",
+			IsDirectory: false,
+			IsAccessDenied: false,
+			IconKey: "file",
+			Children: []);
+		var root = new TreeNodeDescriptor(
+			"root",
+			"/root",
+			IsDirectory: true,
+			IsAccessDenied: false,
+			IconKey: "folder",
+			Children: Enumerable.Repeat(child, childCount).ToArray());
+		var expectedCharacters = 17L + childCount * (displayName.Length + 9L);
+
+		var actual = new TreeExportService().CalculateFullTreeMetrics(
+			"/root",
+			root,
+			TreeTextFormat.Ascii);
+
+		Assert.True(actual.Chars > int.MaxValue);
+		Assert.Equal(expectedCharacters, actual.Chars);
+		Assert.Equal(childCount + 4L, actual.Lines);
+		Assert.Equal((expectedCharacters + 3) / 4, actual.Tokens);
+	}
+
 	private static TreeNodeDescriptor CreateWorkspaceTree()
 	{
 		return new TreeNodeDescriptor(

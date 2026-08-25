@@ -39,7 +39,7 @@ internal static class McpToolResults
 	public static CallToolResult Error(McpToolException exception) =>
 		new()
 		{
-			Content = [new TextContentBlock { Text = exception.Message }],
+			Content = [new TextContentBlock { Text = McpTextEscaping.EscapeSingleLine(exception.Message) }],
 			IsError = true
 		};
 

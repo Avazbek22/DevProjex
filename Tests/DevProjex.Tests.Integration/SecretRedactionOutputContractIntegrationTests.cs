@@ -866,6 +866,80 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		Assert.Contains("oversized.txt", notice, StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public async Task TransformationNotice_EscapesControlCharactersInExcludedFileNames()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("Windows does not allow line breaks in file names.");
+
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("notice-path-project");
+		var exportRoot = temporary.CreateDirectory("notice-path-exports");
+		const string unsafeFileName = "legacy\nforged.txt";
+		File.WriteAllBytes(
+			Path.Combine(sourceRoot, unsafeFileName),
+			[0xEF, 0xBB, 0xBF, 0xC3, 0x28]);
+		var analyzer = new FileContentAnalyzer();
+		using var session = new SecretRedactionSession(CreateDetector());
+		var plan = await BuildPlanAsync(sourceRoot, hideSecrets: true);
+
+		var result = await new ProjectCopyExportService(
+				new ProjectCopyExportPlanBuilder(),
+				analyzer,
+				session)
+			.ExportAsync(
+				new ProjectCopyExportRequest(
+					plan.SourceRoot,
+					"project",
+					plan.ProjectedTree,
+					new HashSet<string>(PathComparer.Default),
+					Path.Combine(exportRoot, "copy"),
+					ProjectCopyExportFormat.Folder,
+					ProjectCopyDestinationMode.Exact,
+					RedactSecrets: true,
+					NoticeText: new ProjectCopyNoticeText(
+						"redaction notice",
+						"compression notice",
+						"excluded notice")),
+				cancellationToken: TestContext.Current.CancellationToken);
+
+		var notice = await File.ReadAllTextAsync(
+			Path.Combine(result.DestinationPath, ProjectCopyExportService.TransformationNoticeFileName),
+			TestContext.Current.CancellationToken);
+		Assert.Contains("legacy\\nforged.txt", notice, StringComparison.Ordinal);
+		Assert.DoesNotContain(unsafeFileName, notice, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task ContextTextExport_EscapesControlCharactersInFilesystemNames()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("Windows does not allow line breaks in file names.");
+
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("context-path-project");
+		const string unsafeFileName = "safe\nforged\t\u001b.txt";
+		const string escapedFileName = "safe\\nforged\\t\\u001B.txt";
+		await File.WriteAllTextAsync(
+			Path.Combine(sourceRoot, unsafeFileName),
+			"content",
+			TestContext.Current.CancellationToken);
+		using var session = new SecretRedactionSession(CreateDetector());
+		var plan = await BuildPlanAsync(sourceRoot, hideSecrets: true);
+		var service = new ProjectContextDocumentService(
+			new TreeExportService(),
+			new FileContentAnalyzer(),
+			secretRedactionSession: session);
+
+		var document = await WriteContextAsync(
+			service,
+			plan,
+			ProjectContextDocumentFormat.Text);
+
+		Assert.Contains(escapedFileName, document, StringComparison.Ordinal);
+		Assert.DoesNotContain(unsafeFileName, document, StringComparison.Ordinal);
+	}
+
 	/// <summary>
 	/// The count behind the checkbox is advisory. A file it may not read is one file missing from
 	/// the count, never a modal error and never a project the user cannot measure at all.
@@ -2052,6 +2126,36 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		await prepared.DisposeAsync();
 
 		Assert.False(Directory.Exists(workingDirectory));
+	}
+
+	[Fact]
+	public async Task PreparedCleanRedactionSnapshot_IsolatedFromSecretInsertedAfterScan()
+	{
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("clean-snapshot-project");
+		var sourcePath = temporary.CreateFile("clean-snapshot-project/app.cs", "const string value = \"safe\";\n");
+		var analyzer = new FileContentAnalyzer();
+		var session = new SecretRedactionSession(CreateDetector());
+		await using var prepared = await new SecretRedactionOutputPreparer(analyzer).PrepareAsync(
+			new ContentTransformationContext(
+				Compression: null,
+				Redaction: new SecretRedactionContext(sourceRoot, session)),
+			[sourcePath],
+			TestContext.Current.CancellationToken);
+
+		await File.WriteAllTextAsync(
+			sourcePath,
+			$"const string value = \"{GithubToken}\";\n",
+			TestContext.Current.CancellationToken);
+		var snapshotRead = await new PreparedSecretFileContentAnalyzer(analyzer, prepared)
+			.ReadClassifiedAsync(
+				sourcePath,
+				SecretRedactionOutputPreparer.MaximumScannableFileBytes,
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(FileContentClassification.Text, snapshotRead.Classification);
+		Assert.Contains("\"safe\"", snapshotRead.Content!.Content, StringComparison.Ordinal);
+		Assert.DoesNotContain(GithubToken, snapshotRead.Content.Content, StringComparison.Ordinal);
 	}
 
 	[Fact]

@@ -262,12 +262,15 @@ public sealed class UserSettingsStore(Func<string>? appDataPathProvider = null)
         try
         {
             if (!File.Exists(path) ||
-                new FileInfo(path).Length > JsonStorePersistence.SmallDocumentMaximumBytes)
+                !JsonStorePersistence.TryReadAllTextWithinSizeLimit(
+                    path,
+                    checked((int)JsonStorePersistence.SmallDocumentMaximumBytes),
+                    out var json))
             {
                 return default;
             }
 
-            using var document = JsonDocument.Parse(File.ReadAllText(path));
+            using var document = JsonDocument.Parse(json);
             if (!document.RootElement.TryGetProperty("viewSettings", out var viewSettings) ||
                 viewSettings.ValueKind != JsonValueKind.Object)
             {

@@ -179,6 +179,44 @@ public sealed class TreeSearchEngineTests
 		Assert.All(childEnumerationCounts.Values, count => Assert.Equal(1, count));
 	}
 
+	[Fact]
+	public void SearchAndSmartExpansion_DeepTreeDoNotDependOnTheCallStack()
+	{
+		const int depth = 20_000;
+		var root = new TestNode("root");
+		var current = root;
+		for (var index = 1; index < depth; index++)
+		{
+			var child = new TestNode(index == depth - 1 ? "target" : $"level-{index}");
+			current.Children.Add(child);
+			current = child;
+		}
+
+		var result = TreeSearchEngine.CollectMatchesWithStats(
+			[root],
+			"target",
+			node => node.Name,
+			node => node.Children,
+			StringComparison.Ordinal);
+		TreeSearchEngine.ApplySmartExpandForSearch(
+			[root],
+			"target",
+			node => node.Name,
+			node => node.Children,
+			node => node.Children.Count > 0,
+			(node, expanded) => node.Expanded = expanded);
+		TreeSearchEngine.ApplySmartExpandForFilter(
+			[root],
+			"target",
+			node => node.Name,
+			node => node.Children,
+			(node, expanded) => node.Expanded = expanded);
+
+		Assert.Equal(depth, result.VisitedCount);
+		Assert.Equal("target", Assert.Single(result.Matches).Name);
+		Assert.True(root.Expanded);
+	}
+
 	private static IReadOnlyList<TestNode> BuildTree(out Dictionary<string, TestNode> nodes)
 	{
 		var root = new TestNode("Root");

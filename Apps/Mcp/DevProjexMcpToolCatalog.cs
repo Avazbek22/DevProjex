@@ -115,7 +115,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	private const string PathsProperty = """
 	"paths": {
 	  "type": "array",
-	  "items": { "type": "string" },
+	  "items": { "type": "string", "minLength": 1 },
 	  "description": "Existing project-relative files or directories that narrow the selection."
 	}
 	""";
@@ -123,6 +123,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	private const string ProfileProperty = """
 	"profile": {
 	  "type": "string",
+	  "minLength": 1,
 	  "description": "Selection profile: 'standard', 'local', or a portable profile JSON path inside the project root."
 	}
 	""";
@@ -201,7 +202,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	{
 	  "type": "object",
 	  "properties": {
-	    "pack_id": { "type": "string", "description": "Session-scoped id returned by pack_context." },
+	    "pack_id": { "type": "string", "minLength": 1, "description": "Session-scoped id returned by pack_context." },
 	    "start_line": { "description": "First 1-based line; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^[0-9]+$" } ] },
 	    "end_line": { "description": "Last 1-based line, inclusive; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^[0-9]+$" } ] }
 	  },
@@ -215,7 +216,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	  "type": "object",
 	  "properties": {
 	    {{ProjectProperty}},
-	    "pattern": { "type": "string", "description": "A .NET regular expression evaluated against redacted text with a 2-second timeout." },
+	    "pattern": { "type": "string", "minLength": 1, "description": "A .NET regular expression evaluated against redacted text with a 2-second timeout." },
 	    {{IncludeProperty}},
 	    {{ExcludeProperty}},
 	    {{TrackedOnlyProperty}},
@@ -233,7 +234,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	  "type": "object",
 	  "properties": {
 	    {{ProjectProperty}},
-	    "path": { "type": "string", "description": "Existing file path inside the effective project selection." },
+	    "path": { "type": "string", "minLength": 1, "description": "Existing file path inside the effective project selection." },
 	    "start_line": { "description": "First 1-based line; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^[0-9]+$" } ] },
 	    "end_line": { "description": "Last 1-based line, inclusive; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^[0-9]+$" } ] }
 	  },

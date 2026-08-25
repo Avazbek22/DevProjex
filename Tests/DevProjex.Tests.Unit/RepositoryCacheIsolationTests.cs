@@ -334,7 +334,7 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 					return;
 				collectionStarted.Set();
 				Assert.True(allowCollection.Wait(
-					TimeSpan.FromSeconds(3),
+					BackgroundOperationTimeout,
 					TestContext.Current.CancellationToken));
 			},
 			AfterScheduledGarbageCollection = () =>
@@ -367,7 +367,7 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 			Assert.Equal(1, Volatile.Read(ref collectionCount));
 			allowCollection.Set();
 			await secondPassCompleted.Task.WaitAsync(
-				TimeSpan.FromSeconds(3),
+				BackgroundOperationTimeout,
 				TestContext.Current.CancellationToken);
 			await Task.Delay(100, TestContext.Current.CancellationToken);
 			Assert.Equal(2, Volatile.Read(ref collectionCount));

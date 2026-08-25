@@ -491,6 +491,31 @@ public sealed class MainWindowCoordinatorRefactorTests
     }
 
 	[Fact]
+	public void StatusOperationCoordinator_BackgroundMetricsDoesNotReplaceExplicitSecretAnalysis()
+	{
+		var viewModel = CreateViewModel();
+		var coordinator = new StatusOperationCoordinator(
+			viewModel,
+			isBackgroundMetricsActive: () => true,
+			metricsOperationTextProvider: () => "Calculating data");
+
+		var secretAnalysis = coordinator.Begin(
+			"Searching for secrets",
+			operationType: StatusOperationType.SecretAnalysis);
+		var metrics = coordinator.Begin(
+			"Calculating data",
+			operationType: StatusOperationType.MetricsCalculation);
+
+		Assert.True(coordinator.IsActive(secretAnalysis));
+		Assert.False(coordinator.IsActive(metrics));
+		Assert.Equal("Searching for secrets", viewModel.StatusOperationText);
+
+		coordinator.Complete(metrics);
+		Assert.True(coordinator.IsActive(secretAnalysis));
+		Assert.Equal("Searching for secrets", viewModel.StatusOperationText);
+	}
+
+	[Fact]
 	public async Task ProjectLoadPipeline_FailureBeforePublicationRestoresStableProject()
 	{
 		var viewModel = CreateViewModel();

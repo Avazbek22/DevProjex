@@ -37,12 +37,8 @@ public static class StoreScreenshotCaptureRequestStore
 				return null;
 			safeRequestPath = fullRequestPath;
 
-			var file = new FileInfo(fullRequestPath);
-			if (!file.Exists || file.Length > DesktopProtocol.MaximumMessageBytes)
-				return null;
-
-			var request = JsonSerializer.Deserialize<StoreScreenshotCaptureRequest>(
-				File.ReadAllText(fullRequestPath),
+			var request = DesktopRequestEnvelopeReader.Read<StoreScreenshotCaptureRequest>(
+				fullRequestPath,
 				JsonOptions);
 			return IsValid(request, sessionRoot) ? request : null;
 		}

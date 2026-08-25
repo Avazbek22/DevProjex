@@ -190,7 +190,7 @@ XML:
 * as pastas são `<d n="...">`;
 * os arquivos são `<f>File.cs</f>`.
 
-Médico:
+MD:
 * começa com `Root: ...`;
 * usa uma lista aninhada Markdown;
 * as pastas terminam com `/`.

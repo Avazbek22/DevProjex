@@ -1,16 +1,30 @@
 using System.Text.Json;
 using DevProjex.Infrastructure.Persistence;
+using DevProjex.Kernel.IO;
 using DevProjex.Terminal.CommandLine;
 
 namespace DevProjex.Terminal.Tui;
 
-public sealed class TerminalSettingsStore(Func<string>? appDataPathProvider = null)
+public sealed class TerminalSettingsStore
 {
 	private const int CurrentSchemaVersion = 1;
-	private const int MaximumPersistedCommandLength = 4_096;
-	private readonly Func<string> _appDataPathProvider =
-		appDataPathProvider ?? UserDataPathResolver.GetConfigurationRoot;
+	private const int MaximumDocumentBytes = 512 * 1024;
+	private readonly Func<string> _appDataPathProvider;
+	private readonly Action? _afterReadOpened;
 	private readonly SemaphoreSlim _writeGate = new(1, 1);
+
+	public TerminalSettingsStore(Func<string>? appDataPathProvider = null)
+		: this(appDataPathProvider, afterReadOpened: null)
+	{
+	}
+
+	internal TerminalSettingsStore(
+		Func<string>? appDataPathProvider,
+		Action? afterReadOpened)
+	{
+		_appDataPathProvider = appDataPathProvider ?? UserDataPathResolver.GetConfigurationRoot;
+		_afterReadOpened = afterReadOpened;
+	}
 
 	public TerminalScreenMode LoadScreenMode() =>
 		LoadDocument()?.ScreenMode is { } screenMode && Enum.IsDefined(screenMode)
@@ -36,9 +50,6 @@ public sealed class TerminalSettingsStore(Func<string>? appDataPathProvider = nu
 		ArgumentNullException.ThrowIfNull(history);
 		var normalized = new TerminalCommandHistory(history)
 			.Entries
-			.Select(command => command.Length <= MaximumPersistedCommandLength
-				? command
-				: command[..MaximumPersistedCommandLength])
 			.ToArray();
 		await UpdateAsync(
 			current => current with { CommandHistory = normalized },
@@ -49,18 +60,41 @@ public sealed class TerminalSettingsStore(Func<string>? appDataPathProvider = nu
 		Path.Combine(_appDataPathProvider(), "DevProjex", "terminal-settings.json");
 
 	private TerminalSettingsDocument? LoadDocument()
+		=> LoadDocument(out _);
+
+	private TerminalSettingsDocument? LoadDocument(out bool hasFutureSchema)
 	{
+		hasFutureSchema = false;
 		try
 		{
 			var path = GetPath();
 			if (!File.Exists(path))
 				return null;
 
-			using var stream = File.OpenRead(path);
+			using var source = new FileStream(
+				path,
+				FileMode.Open,
+				FileAccess.Read,
+				FileShare.ReadWrite | FileShare.Delete,
+				bufferSize: 4 * 1024,
+				FileOptions.SequentialScan);
+			_afterReadOpened?.Invoke();
+			using var stream = new MaximumLengthReadStream(
+				source,
+				MaximumDocumentBytes,
+				static () => new TerminalSettingsLimitException());
 			var document = JsonSerializer.Deserialize<TerminalSettingsDocument>(stream);
+			hasFutureSchema = document is { SchemaVersion: > CurrentSchemaVersion };
 			return document is { SchemaVersion: CurrentSchemaVersion }
 				? document
 				: null;
+		}
+		catch (TerminalSettingsLimitException)
+		{
+			// The schema cannot be classified within this version's resource limit. Preserve the
+			// document exactly as a potentially valid settings file written by a newer version.
+			hasFutureSchema = true;
+			return null;
 		}
 		catch (Exception exception) when (exception is
 			       IOException or
@@ -78,13 +112,18 @@ public sealed class TerminalSettingsStore(Func<string>? appDataPathProvider = nu
 		await _writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
 		try
 		{
-			var current = LoadDocument() ??
-			              new TerminalSettingsDocument(
-				              CurrentSchemaVersion,
-				              TerminalScreenMode.Auto,
-				              []);
-			var document = update(current) with { SchemaVersion = CurrentSchemaVersion };
 			var path = GetPath();
+			using var persistenceLock = await PersistenceFileLock
+				.AcquireAsync(path, cancellationToken)
+				.ConfigureAwait(false);
+			var current = LoadDocument(out var hasFutureSchema);
+			if (hasFutureSchema)
+				return;
+			current ??= new TerminalSettingsDocument(
+				CurrentSchemaVersion,
+				TerminalScreenMode.Auto,
+				[]);
+			var document = update(current) with { SchemaVersion = CurrentSchemaVersion };
 			var directory = Path.GetDirectoryName(path)!;
 			Directory.CreateDirectory(directory);
 			var temporaryPath = Path.Combine(
@@ -92,13 +131,18 @@ public sealed class TerminalSettingsStore(Func<string>? appDataPathProvider = nu
 				$".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
 			try
 			{
-				await using (var stream = new FileStream(
-					             temporaryPath,
-					             FileMode.CreateNew,
-					             FileAccess.Write,
-					             FileShare.None,
-					             4 * 1024,
-					             FileOptions.Asynchronous | FileOptions.SequentialScan))
+				var streamOptions = new FileStreamOptions
+				{
+					Mode = FileMode.CreateNew,
+					Access = FileAccess.Write,
+					Share = FileShare.None,
+					BufferSize = 4 * 1024,
+					Options = FileOptions.Asynchronous | FileOptions.SequentialScan
+				};
+				if (!OperatingSystem.IsWindows())
+					streamOptions.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+
+				await using (var stream = new FileStream(temporaryPath, streamOptions))
 				{
 					await JsonSerializer.SerializeAsync(
 							stream,
@@ -108,7 +152,21 @@ public sealed class TerminalSettingsStore(Func<string>? appDataPathProvider = nu
 					await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
 				}
 
-				File.Move(temporaryPath, path, overwrite: true);
+				if (File.Exists(path))
+				{
+					try
+					{
+						File.Replace(temporaryPath, path, destinationBackupFileName: null);
+					}
+					catch (NotSupportedException)
+					{
+						File.Move(temporaryPath, path, overwrite: true);
+					}
+				}
+				else
+				{
+					File.Move(temporaryPath, path);
+				}
 			}
 			finally
 			{
@@ -135,4 +193,7 @@ public sealed class TerminalSettingsStore(Func<string>? appDataPathProvider = nu
 		int SchemaVersion,
 		TerminalScreenMode ScreenMode,
 		IReadOnlyList<string>? CommandHistory = null);
+
+	private sealed class TerminalSettingsLimitException()
+		: IOException("Terminal settings exceed the size limit.");
 }

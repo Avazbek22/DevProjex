@@ -10,6 +10,20 @@ namespace DevProjex.Tests.Terminal;
 public sealed class DesktopControlIntegrationTests
 {
 	[Fact]
+	public void DesktopLaunchWaitUsesMonotonicTimeWhenUtcClockMovesBackward()
+	{
+		var timeProvider = new AdjustableTimeProvider();
+		var startedAt = timeProvider.GetTimestamp();
+		timeProvider.AdvanceTimestamp(TimeSpan.FromSeconds(11));
+		timeProvider.MoveUtcBackward(TimeSpan.FromHours(1));
+
+		Assert.False(DesktopCommandHandler.IsWithinLaunchWaitWindow(
+			timeProvider,
+			startedAt,
+			TimeSpan.FromSeconds(10)));
+	}
+
+	[Fact]
 	public async Task ServerRegistersHandlesAppliedStateAndRemovesRegistrationOnStop()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -85,6 +99,19 @@ public sealed class DesktopControlIntegrationTests
 			PathUtility.Normalize(lastProject) + Environment.NewLine,
 			lastEnvironment.StandardOutput);
 		Assert.DoesNotContain(server.InstanceId, lastEnvironment.StandardOutput, StringComparison.Ordinal);
+	}
+
+	private sealed class AdjustableTimeProvider : TimeProvider
+	{
+		private long _timestamp;
+		private DateTimeOffset _utcNow = DateTimeOffset.UtcNow;
+
+		public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+		public override long GetTimestamp() => _timestamp;
+		public override DateTimeOffset GetUtcNow() => _utcNow;
+
+		public void AdvanceTimestamp(TimeSpan value) => _timestamp += value.Ticks;
+		public void MoveUtcBackward(TimeSpan value) => _utcNow -= value;
 	}
 
 	[Fact]
@@ -275,6 +302,53 @@ public sealed class DesktopControlIntegrationTests
 	}
 
 	[Fact]
+	public async Task ClientRejectsStructurallyIncompleteProtocolResponse()
+	{
+		var uniqueSuffix = Guid.NewGuid().ToString("N");
+		var pipeName = $"dpx-{uniqueSuffix[..16]}";
+		await using var server = new NamedPipeServerStream(
+			pipeName,
+			PipeDirection.InOut,
+			1,
+			PipeTransmissionMode.Byte,
+			PipeOptions.Asynchronous);
+		var registration = new DesktopInstanceRegistration(
+			DesktopProtocol.CurrentVersion,
+			"incomplete-response",
+			Environment.ProcessId,
+			Process.GetCurrentProcess().StartTime.ToUniversalTime().Ticks,
+			ProjectPath: null,
+			DateTimeOffset.UtcNow,
+			"pipe",
+			pipeName);
+		var responseTask = Task.Run(async () =>
+		{
+			await server.WaitForConnectionAsync(TestContext.Current.CancellationToken);
+			using var reader = new StreamReader(
+				server,
+				new UTF8Encoding(false),
+				detectEncodingFromByteOrderMarks: false,
+				leaveOpen: true);
+			_ = await reader.ReadLineAsync(TestContext.Current.CancellationToken);
+			await server.WriteAsync(
+				"{\"protocolVersion\":1}\n"u8.ToArray(),
+				TestContext.Current.CancellationToken);
+			await server.FlushAsync(TestContext.Current.CancellationToken);
+		}, TestContext.Current.CancellationToken);
+
+		var exception = await Assert.ThrowsAsync<DesktopControlException>(() =>
+			new DesktopControlClient().SendAsync(
+				registration,
+				"status",
+				new { },
+				TimeSpan.FromSeconds(5),
+				TestContext.Current.CancellationToken));
+		await responseTask;
+
+		Assert.Equal("DPX-DESKTOP-PROTOCOL-MISMATCH", exception.Code);
+	}
+
+	[Fact]
 	public async Task RegistryRemovesStaleProcessIdentity()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -295,6 +369,157 @@ public sealed class DesktopControlIntegrationTests
 
 		Assert.Empty(await registry.ListAsync(TestContext.Current.CancellationToken));
 		Assert.False(File.Exists(paths.GetRegistrationPath(stale.InstanceId)));
+	}
+
+	[Fact]
+	public async Task RegistryRemovesDanglingRegistrationLinksOnUnix()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("This regression covers Unix dangling-link cleanup semantics.");
+
+		using var workspace = new TemporaryDirectory();
+		var paths = new DesktopControlPaths(() => workspace.Path);
+		Directory.CreateDirectory(paths.RegistryDirectory);
+		var link = paths.GetRegistrationPath("dangling");
+		File.CreateSymbolicLink(link, Path.Combine(workspace.Path, "missing-registration.json"));
+		var registry = new DesktopInstanceRegistry(paths);
+
+		Assert.Empty(await registry.ListAsync(TestContext.Current.CancellationToken));
+
+		Assert.DoesNotContain(
+			link,
+			Directory.EnumerateFileSystemEntries(paths.RegistryDirectory),
+			PathComparer.Default);
+	}
+
+	[Fact]
+	public async Task RegistryNeverDeletesAnEndpointOutsideItsOwnedSocketPath()
+	{
+		using var workspace = new TemporaryDirectory();
+		var paths = new DesktopControlPaths(() => workspace.CreateDirectory("ipc"));
+		var registry = new DesktopInstanceRegistry(paths);
+		var protectedDirectory = workspace.CreateDirectory("project");
+		var protectedFile = Path.Combine(protectedDirectory, "source.txt");
+		await File.WriteAllTextAsync(
+			protectedFile,
+			"keep",
+			TestContext.Current.CancellationToken);
+		var stale = new DesktopInstanceRegistration(
+			DesktopProtocol.CurrentVersion,
+			"forged",
+			Environment.ProcessId,
+			Process.GetCurrentProcess().StartTime.ToUniversalTime().Ticks - TimeSpan.FromHours(1).Ticks,
+			workspace.Path,
+			DateTimeOffset.UtcNow,
+			"unix",
+			protectedFile);
+		await registry.RegisterAsync(stale, TestContext.Current.CancellationToken);
+
+		Assert.Empty(await registry.ListAsync(TestContext.Current.CancellationToken));
+
+		Assert.True(File.Exists(protectedFile));
+		Assert.False(File.Exists(paths.GetRegistrationPath(stale.InstanceId)));
+	}
+
+	[Fact]
+	public async Task RegistryRejectsAnOversizedRegistrationBeforeUsingIt()
+	{
+		using var workspace = new TemporaryDirectory();
+		var paths = new DesktopControlPaths(() => workspace.Path);
+		var registry = new DesktopInstanceRegistry(paths);
+		using var process = Process.GetCurrentProcess();
+		var registration = CreateLiveRegistration(
+			"oversized",
+			workspace.Path,
+			process.StartTime.ToUniversalTime().Ticks);
+		await registry.RegisterAsync(registration, TestContext.Current.CancellationToken);
+		await File.AppendAllTextAsync(
+			paths.GetRegistrationPath(registration.InstanceId),
+			new string(' ', DesktopProtocol.MaximumMessageBytes),
+			TestContext.Current.CancellationToken);
+
+		var snapshot = await registry.ProbeAsync(
+			removeStale: false,
+			TestContext.Current.CancellationToken);
+
+		Assert.Empty(snapshot.Instances);
+		Assert.Equal(1, snapshot.StaleEntryCount);
+	}
+
+	[Fact]
+	public async Task RegistryTreatsStructurallyIncompleteRegistrationAsStale()
+	{
+		using var workspace = new TemporaryDirectory();
+		var paths = new DesktopControlPaths(() => workspace.Path);
+		DesktopInstanceRegistry.EnsurePrivateDirectory(paths.RegistryDirectory);
+		var registrationPath = paths.GetRegistrationPath("incomplete");
+		await File.WriteAllTextAsync(
+			registrationPath,
+			"{\"protocolVersion\":1}",
+			TestContext.Current.CancellationToken);
+		var registry = new DesktopInstanceRegistry(paths);
+
+		var snapshot = await registry.ProbeAsync(
+			removeStale: true,
+			TestContext.Current.CancellationToken);
+
+		Assert.Empty(snapshot.Instances);
+		Assert.Equal(1, snapshot.StaleEntryCount);
+		Assert.False(File.Exists(registrationPath));
+	}
+
+	[Fact]
+	public async Task RegistryReaderDoesNotBlockAtomicRegistrationReplacement()
+	{
+		using var workspace = new TemporaryDirectory();
+		var paths = new DesktopControlPaths(() => workspace.Path);
+		using var process = Process.GetCurrentProcess();
+		var processStart = process.StartTime.ToUniversalTime().Ticks;
+		var initialProject = workspace.CreateDirectory("initial");
+		var updatedProject = workspace.CreateDirectory("updated");
+		var initial = CreateLiveRegistration("concurrent", initialProject, processStart);
+		await new DesktopInstanceRegistry(paths).RegisterAsync(
+			initial,
+			TestContext.Current.CancellationToken);
+		using var readOpened = new ManualResetEventSlim();
+		using var releaseRead = new ManualResetEventSlim();
+		var reader = new DesktopInstanceRegistry(
+			paths,
+			() =>
+			{
+				readOpened.Set();
+				releaseRead.Wait(TestContext.Current.CancellationToken);
+			});
+		var readTask = Task.Run(
+			() => reader.ProbeAsync(
+				removeStale: false,
+				TestContext.Current.CancellationToken),
+			TestContext.Current.CancellationToken);
+
+		try
+		{
+			Assert.True(readOpened.Wait(
+				TimeSpan.FromSeconds(5),
+				TestContext.Current.CancellationToken));
+			await new DesktopInstanceRegistry(paths).RegisterAsync(
+				initial with
+				{
+					ProjectPath = updatedProject,
+					LastActiveUtc = initial.LastActiveUtc.AddMinutes(1)
+				},
+				TestContext.Current.CancellationToken);
+		}
+		finally
+		{
+			releaseRead.Set();
+		}
+
+		var concurrentSnapshot = await readTask;
+		Assert.Equal(initialProject, Assert.Single(concurrentSnapshot.Instances).ProjectPath);
+		var currentSnapshot = await new DesktopInstanceRegistry(paths).ProbeAsync(
+			removeStale: false,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(updatedProject, Assert.Single(currentSnapshot.Instances).ProjectPath);
 	}
 
 	[Fact]
@@ -392,6 +617,7 @@ public sealed class DesktopControlIntegrationTests
 	[InlineData("")]
 	[InlineData("{")]
 	[InlineData("[]")]
+	[InlineData("{\"protocolVersion\":1}")]
 	public async Task MalformedProtocolPayloadIsRejectedWithoutInvokingDesktop(string payload)
 	{
 		using var workspace = new TemporaryDirectory();
@@ -442,6 +668,63 @@ public sealed class DesktopControlIntegrationTests
 			"DPX-DESKTOP-PAYLOAD-TOO-LARGE",
 			response.RootElement.GetProperty("error").GetProperty("code").GetString());
 		Assert.Empty(handler.Requests);
+	}
+
+	[Fact]
+	public async Task InvalidUtf8RequestIsRejectedWithoutPoisoningTheListener()
+	{
+		using var workspace = new TemporaryDirectory();
+		var paths = new DesktopControlPaths(() => workspace.Path);
+		var handler = new RecordingDesktopHandler();
+		await using var server = await DesktopControlServer.StartAsync(
+			handler,
+			paths: paths,
+			cancellationToken: TestContext.Current.CancellationToken);
+		var registry = new DesktopInstanceRegistry(paths);
+		var registration = Assert.Single(
+			await registry.ListAsync(TestContext.Current.CancellationToken));
+		var prefix = Encoding.UTF8.GetBytes(
+			"{\"protocolVersion\":1,\"requestId\":\"damaged");
+		var suffix = Encoding.UTF8.GetBytes(
+			$"\",\"instanceId\":\"{registration.InstanceId}\",\"action\":\"status\",\"payload\":{{}}}}");
+		byte[] payload = [.. prefix, 0xff, .. suffix];
+
+		var responseJson = await SendRawAsync(
+			registration,
+			payload,
+			TestContext.Current.CancellationToken);
+		using (var response = JsonDocument.Parse(responseJson))
+		{
+			Assert.False(response.RootElement.GetProperty("ok").GetBoolean());
+			Assert.Equal(
+				"DPX-DESKTOP-INVALID-PAYLOAD",
+				response.RootElement.GetProperty("error").GetProperty("code").GetString());
+		}
+		Assert.Empty(handler.Requests);
+
+		var validResponse = await new DesktopControlClient(registry).SendAsync(
+			registration,
+			"status",
+			new { },
+			TimeSpan.FromSeconds(5),
+			TestContext.Current.CancellationToken);
+
+		Assert.True(validResponse.Ok);
+		Assert.IsType<DesktopStatusRequest>(Assert.Single(handler.Requests));
+	}
+
+	[Fact]
+	public async Task IncompleteRequestIsRejectedAfterTheReceiveDeadline()
+	{
+		await using var stream = new CancellationBoundReadStream();
+
+		var exception = await Assert.ThrowsAsync<DesktopControlException>(() =>
+			DesktopControlServer.ReadMessageAsync(
+				stream,
+				TimeSpan.FromMilliseconds(25),
+				TestContext.Current.CancellationToken));
+
+		Assert.Equal("DPX-DESKTOP-TIMEOUT", exception.Code);
 	}
 
 	[Fact]
@@ -758,11 +1041,22 @@ public sealed class DesktopControlIntegrationTests
 	private static async Task<string> SendRawAsync(
 		DesktopInstanceRegistration registration,
 		string json,
+		CancellationToken cancellationToken) =>
+		await SendRawAsync(
+			registration,
+			Encoding.UTF8.GetBytes(json),
+			cancellationToken);
+
+	private static async Task<string> SendRawAsync(
+		DesktopInstanceRegistration registration,
+		ReadOnlyMemory<byte> payload,
 		CancellationToken cancellationToken)
 	{
 		await using var stream = await ConnectRawAsync(registration, cancellationToken);
-		var bytes = Encoding.UTF8.GetBytes(json + "\n");
-		await stream.WriteAsync(bytes, cancellationToken);
+		var frame = new byte[payload.Length + 1];
+		payload.CopyTo(frame);
+		frame[^1] = (byte)'\n';
+		await stream.WriteAsync(frame, cancellationToken);
 		await stream.FlushAsync(cancellationToken);
 		using var reader = new StreamReader(
 			stream,
@@ -812,6 +1106,35 @@ public sealed class DesktopControlIntegrationTests
 					["projectPath"] = @"C:\workspace\Project"
 				}));
 		}
+	}
+
+	private sealed class CancellationBoundReadStream : Stream
+	{
+		public override bool CanRead => true;
+		public override bool CanSeek => false;
+		public override bool CanWrite => false;
+		public override long Length => throw new NotSupportedException();
+		public override long Position
+		{
+			get => throw new NotSupportedException();
+			set => throw new NotSupportedException();
+		}
+
+		public override int Read(byte[] buffer, int offset, int count) =>
+			throw new NotSupportedException();
+
+		public override async ValueTask<int> ReadAsync(
+			Memory<byte> buffer,
+			CancellationToken cancellationToken = default)
+		{
+			await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+			return 0;
+		}
+
+		public override void Flush() => throw new NotSupportedException();
+		public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+		public override void SetLength(long value) => throw new NotSupportedException();
+		public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 	}
 
 	private sealed class OpenStateDesktopHandler(string lastProject) : IDesktopInteractionHandler
