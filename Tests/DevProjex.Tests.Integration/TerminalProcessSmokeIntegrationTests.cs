@@ -167,7 +167,7 @@ public sealed class TerminalProcessSmokeIntegrationTests
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("fifo-gitignore-source");
 		await CreateFifoAsync(Path.Combine(project, ".gitignore"));
-		workspace.WriteFile("fifo-gitignore-source/App.cs", "class App {}");
+		workspace.CreateFile("fifo-gitignore-source/App.cs", "class App {}");
 
 		var context = await RunAsync(
 		[
