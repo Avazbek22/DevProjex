@@ -500,7 +500,7 @@ public sealed class ProjectCopyExportService(
 			{
 				var overwrite = destinationMode == ProjectCopyDestinationMode.AutomaticName ||
 				                conflictPolicy == ProjectCopyConflictPolicy.ReplaceAtomically;
-				File.Move(stagingPath, destinationPath, overwrite);
+				CommitZipArchive(stagingPath, destinationPath, overwrite);
 			}
 			catch (IOException exception) when (Path.Exists(destinationPath))
 			{
@@ -537,6 +537,31 @@ public sealed class ProjectCopyExportService(
 					cleanupException.Message,
 					new AggregateException(operationException, cleanupException));
 			}
+		}
+	}
+
+	private static void CommitZipArchive(
+		string stagingPath,
+		string destinationPath,
+		bool overwrite)
+	{
+		if (!overwrite || !File.Exists(destinationPath))
+		{
+			File.Move(stagingPath, destinationPath, overwrite);
+			return;
+		}
+
+		try
+		{
+			File.Replace(stagingPath, destinationPath, destinationBackupFileName: null);
+		}
+		catch (FileNotFoundException) when (!File.Exists(destinationPath))
+		{
+			File.Move(stagingPath, destinationPath, overwrite: true);
+		}
+		catch (NotSupportedException)
+		{
+			File.Move(stagingPath, destinationPath, overwrite: true);
 		}
 	}
 

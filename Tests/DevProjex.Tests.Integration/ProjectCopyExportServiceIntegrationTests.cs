@@ -62,6 +62,39 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 		Assert.True(File.Exists(Path.Combine(result.DestinationPath, "LICENSE")));
 	}
 
+	[Fact]
+	public async Task ZipAtomicReplacementPreservesExistingReaders()
+	{
+		using var workspace = ProjectCopyWorkspace.Create();
+		var destination = Path.Combine(workspace.DestinationParent, "existing.zip");
+		var originalBytes = "existing archive"u8.ToArray();
+		await File.WriteAllBytesAsync(destination, originalBytes, TestContext.Current.CancellationToken);
+		await using var existingReader = new FileStream(
+			destination,
+			FileMode.Open,
+			FileAccess.Read,
+			FileShare.ReadWrite | FileShare.Delete);
+
+		var result = await new ProjectCopyExportService(new ProjectCopyExportPlanBuilder()).ExportAsync(
+			new ProjectCopyExportRequest(
+				workspace.SourceRoot,
+				"Sample",
+				workspace.Root,
+				new HashSet<string>(PathComparer.Default),
+				destination,
+				ProjectCopyExportFormat.Zip,
+				ProjectCopyDestinationMode.Exact,
+				ProjectCopyConflictPolicy.ReplaceAtomically),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var observedOriginalBytes = new byte[originalBytes.Length];
+		await existingReader.ReadExactlyAsync(observedOriginalBytes, TestContext.Current.CancellationToken);
+		Assert.Equal(originalBytes, observedOriginalBytes);
+		Assert.Equal(destination, result.DestinationPath);
+		using var replacement = ZipFile.OpenRead(destination);
+		Assert.Contains(replacement.Entries, static entry => entry.FullName == "Sample/README.md");
+	}
+
 	[Theory]
 	[InlineData(ProjectCopyExportFormat.Folder)]
 	[InlineData(ProjectCopyExportFormat.Zip)]
