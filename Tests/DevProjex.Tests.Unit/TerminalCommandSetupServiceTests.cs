@@ -1742,6 +1742,44 @@ public sealed class TerminalCommandSetupServiceTests
 	}
 
 	[Fact]
+	public void InstallOrRepair_WindowsManagedLauncherReplacementPreservesExistingReader()
+	{
+		if (!OperatingSystem.IsWindows())
+			Assert.Skip("Windows file replacement semantics are required.");
+
+		using var temp = new TemporaryDirectory();
+		var previousTarget = temp.CreateFile("previous/DevProjex.exe", "previous executable");
+		var currentTarget = temp.CreateFile("current/DevProjex.exe", "current executable");
+		var userBin = temp.CreateFolder("DevProjex/bin");
+		var commandPath = Path.Combine(
+			userBin,
+			CommandLineExecutableAliases.WindowsPortableCommandFileName);
+		var previousContent = TerminalCommandSetupService.BuildWindowsLauncherContent(previousTarget);
+		File.WriteAllText(commandPath, previousContent);
+		using var existingReader = new FileStream(
+			commandPath,
+			FileMode.Open,
+			FileAccess.Read,
+			FileShare.ReadWrite | FileShare.Delete);
+		var service = CreateWindowsPortableService(
+			temp.Path,
+			processPath: string.Empty,
+			() => userBin,
+			_ => throw new InvalidOperationException("Installed PATH must not be rewritten."),
+			currentTarget);
+
+		var result = service.InstallOrRepair();
+
+		Assert.True(result.Success, result.ErrorMessage);
+		using var reader = new StreamReader(existingReader, leaveOpen: true);
+		Assert.Equal(previousContent, reader.ReadToEnd());
+		Assert.Equal(
+			TerminalCommandSetupService.BuildWindowsLauncherContent(currentTarget),
+			File.ReadAllText(commandPath));
+		Assert.Empty(Directory.GetFiles(userBin, ".devprojex.*.tmp"));
+	}
+
+	[Fact]
 	public void Probe_UnsupportedPlatform_ReturnsNonActionableSnapshotAndInstallIsNotSupported()
 	{
 		using var temp = new TemporaryDirectory();

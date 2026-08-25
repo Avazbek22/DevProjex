@@ -263,7 +263,10 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 			}
 
 			// A new foreign file must win the final race instead of being overwritten.
-			File.Move(tempPath, commandPath, overwrite: commandExistedBeforeReplacement);
+			CommitCommandFile(
+				tempPath,
+				commandPath,
+				commandExistedBeforeReplacement);
 			if (_options.Platform is TerminalCommandHostPlatform.Windows)
 				EnsureWindowsUserBinDirectoryIsInPath(initial.UserBinDirectory);
 			else
@@ -924,6 +927,31 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 			stream,
 			MaximumManagedLauncherBytes,
 			out content);
+	}
+
+	private static void CommitCommandFile(
+		string temporaryPath,
+		string commandPath,
+		bool overwrite)
+	{
+		if (!overwrite || !File.Exists(commandPath))
+		{
+			File.Move(temporaryPath, commandPath, overwrite: false);
+			return;
+		}
+
+		try
+		{
+			File.Replace(temporaryPath, commandPath, destinationBackupFileName: null);
+		}
+		catch (FileNotFoundException) when (!File.Exists(commandPath))
+		{
+			File.Move(temporaryPath, commandPath, overwrite: false);
+		}
+		catch (NotSupportedException)
+		{
+			File.Move(temporaryPath, commandPath, overwrite: true);
+		}
 	}
 
 	private static bool HasUnixExecutableMode(string commandPath)
