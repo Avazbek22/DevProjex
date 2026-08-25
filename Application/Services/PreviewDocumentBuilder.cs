@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Runtime.CompilerServices;
 using DevProjex.Application.Secrets;
+using DevProjex.Kernel;
 
 namespace DevProjex.Application.Services;
 
@@ -109,7 +110,7 @@ public sealed class PreviewDocumentBuilder(
 		var wroteRoot = false;
 		if (!string.IsNullOrWhiteSpace(displayRootPath))
 		{
-			var rootPresentation = OutputRootPathPresentation.ResolvePath(
+			var rootPresentation = ResolveSingleLinePathPresentation(
 				displayRootPath,
 				outputPathRedaction);
 			var rootLine = builder.LineCount + 1;
@@ -272,7 +273,7 @@ public sealed class PreviewDocumentBuilder(
             anyWritten = true;
             trimTrailingEstimatedLine = false;
 
-			var displayPathPresentation = OutputRootPathPresentation.ResolvePath(
+			var displayPathPresentation = ResolveSingleLinePathPresentation(
 				prepared.DisplayPath,
 				outputPathRedaction);
 			var displayPath = displayPathPresentation.Text;
@@ -627,6 +628,13 @@ public sealed class PreviewDocumentBuilder(
 			presentation.SourceLength,
 			SecretFindingSource.GeneratedPath));
 	}
+
+	private static OutputPathPresentationResult ResolveSingleLinePathPresentation(
+		string path,
+		OutputPathRedactionDecision? redactionDecision) =>
+		OutputRootPathPresentation.ResolvePath(
+			SingleLineTextEscaping.Escape(path),
+			redactionDecision);
 
 	private static void AppendGeneratedPathRedactionFromText(
 		ICollection<PreviewRedactionSpan> destination,

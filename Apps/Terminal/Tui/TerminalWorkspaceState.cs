@@ -401,7 +401,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 
 			output.Append(' ', depth * 2)
 				.Append(node.IsDirectory ? "+ " : "- ")
-				.AppendLine(node.DisplayName);
+				.AppendLine(TerminalTextEscaping.EscapeSingleLine(node.DisplayName));
 			written++;
 
 			for (var index = node.Children.Count - 1; index >= 0; index--)

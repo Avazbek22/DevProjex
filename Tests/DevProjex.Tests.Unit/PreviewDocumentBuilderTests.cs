@@ -30,6 +30,26 @@ public sealed class PreviewDocumentBuilderTests
 	}
 
 	[Fact]
+	public async Task BuildContentDocumentAsync_EscapesControlCharactersInGeneratedPaths()
+	{
+		using var project = new TemporaryDirectory();
+		var path = project.CreateFile("Program.cs", "class Program {}");
+		var builder = new PreviewDocumentBuilder(new FileContentAnalyzer());
+
+		using var document = await builder.BuildContentDocumentAsync(
+			[path],
+			TestContext.Current.CancellationToken,
+			static _ => "src/line\nbreak\t\u001B.cs",
+			displayRootPath: "root\rname");
+
+		Assert.NotNull(document);
+		Assert.Equal("root\\rname:", document.GetLineText(1));
+		var section = Assert.Single(document.Sections);
+		Assert.Equal("src/line\\nbreak\\t\\u001B.cs", section.DisplayPath);
+		Assert.Equal($"{section.DisplayPath}:", document.GetLineText(section.StartLine));
+	}
+
+	[Fact]
 	public void PreviewStorageScavenger_RemovesOnlyStaleUnlockedOwnedFiles()
 	{
 		using var storage = new TemporaryDirectory();

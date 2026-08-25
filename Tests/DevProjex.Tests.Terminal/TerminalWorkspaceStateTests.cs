@@ -16,6 +16,20 @@ public sealed class TerminalWorkspaceStateTests
 	}
 
 	[Fact]
+	public void TreePreviewEscapesControlCharactersInDisplayNames()
+	{
+		var root = CreateSyntheticRoot("unsafe-tree-preview");
+		var filePath = System.IO.Path.Combine(root, "file.cs");
+		var file = new TreeNodeDescriptor("line\nbreak\t\u001B.cs", filePath, false, false, "file", []);
+		var tree = new TreeNodeDescriptor("project\rname", root, true, false, "folder", [file]);
+		using var state = new TerminalWorkspaceState(CreatePlan(tree, [filePath], [root]));
+
+		Assert.Equal(
+			$"+ project\\rname{Environment.NewLine}  - line\\nbreak\\t\\u001B.cs",
+			state.PreviewText);
+	}
+
+	[Fact]
 	public void CompleteSelectionUsesCanonicalEmptySelectedPaths()
 	{
 		var state = new TerminalWorkspaceState(CreatePlan());
