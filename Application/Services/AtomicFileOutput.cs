@@ -106,7 +106,7 @@ public static class AtomicFileOutput
 			cancellationToken.ThrowIfCancellationRequested();
 			RevalidateResolvedPath(fullPath, validateDestination);
 			cancellationToken.ThrowIfCancellationRequested();
-			CommitTemporaryFile(tempPath, fullPath, overwrite);
+			AtomicFileCommit.Commit(tempPath, fullPath, overwrite);
 		}
 		catch (Exception exception) when (
 			(exception is IOException or UnauthorizedAccessException) &&
@@ -143,36 +143,6 @@ public static class AtomicFileOutput
 				fullPath);
 	}
 
-	private static void CommitTemporaryFile(
-		string temporaryPath,
-		string destinationPath,
-		bool overwrite)
-	{
-		if (!overwrite || !File.Exists(destinationPath))
-		{
-			File.Move(temporaryPath, destinationPath, overwrite);
-			return;
-		}
-		if (DestinationIsSymbolicLink(destinationPath))
-		{
-			File.Move(temporaryPath, destinationPath, overwrite: true);
-			return;
-		}
-
-		try
-		{
-			File.Replace(temporaryPath, destinationPath, destinationBackupFileName: null);
-		}
-		catch (FileNotFoundException) when (!File.Exists(destinationPath))
-		{
-			File.Move(temporaryPath, destinationPath, overwrite: true);
-		}
-		catch (NotSupportedException)
-		{
-			File.Move(temporaryPath, destinationPath, overwrite: true);
-		}
-	}
-
 	private static bool CommitFailureIsDestinationConflict(
 		string destinationPath,
 		bool overwrite)
@@ -184,21 +154,7 @@ public static class AtomicFileOutput
 	}
 
 	private static bool DestinationEntryExists(string path) =>
-		Path.Exists(path) || DestinationIsSymbolicLink(path);
-
-	private static bool DestinationIsSymbolicLink(string path)
-	{
-		try
-		{
-			return new FileInfo(path).LinkTarget is not null ||
-			       new DirectoryInfo(path).LinkTarget is not null;
-		}
-		catch (Exception exception) when (
-			exception is IOException or UnauthorizedAccessException)
-		{
-			return false;
-		}
-	}
+		Path.Exists(path) || AtomicFileCommit.DestinationIsSymbolicLink(path);
 
 	private static void RevalidateResolvedPath(
 		string resolvedPath,

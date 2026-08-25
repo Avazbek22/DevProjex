@@ -543,27 +543,8 @@ public sealed class ProjectCopyExportService(
 	private static void CommitZipArchive(
 		string stagingPath,
 		string destinationPath,
-		bool overwrite)
-	{
-		if (!overwrite || !File.Exists(destinationPath))
-		{
-			File.Move(stagingPath, destinationPath, overwrite);
-			return;
-		}
-
-		try
-		{
-			File.Replace(stagingPath, destinationPath, destinationBackupFileName: null);
-		}
-		catch (FileNotFoundException) when (!File.Exists(destinationPath))
-		{
-			File.Move(stagingPath, destinationPath, overwrite: true);
-		}
-		catch (NotSupportedException)
-		{
-			File.Move(stagingPath, destinationPath, overwrite: true);
-		}
-	}
+		bool overwrite) =>
+		AtomicFileCommit.Commit(stagingPath, destinationPath, overwrite);
 
 	private static void ValidateSources(ProjectCopyExportPlan plan, CancellationToken cancellationToken)
 	{

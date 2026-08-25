@@ -683,6 +683,33 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 	}
 
 	[Fact]
+	public async Task ZipReplacementReplacesSafeFileLinkWithoutChangingTarget()
+	{
+		using var workspace = ProjectCopyWorkspace.Create();
+		var safeTarget = Path.Combine(workspace.DestinationParent, "target.zip");
+		await File.WriteAllTextAsync(
+			safeTarget,
+			"TARGET",
+			TestContext.Current.CancellationToken);
+		var destination = Path.Combine(workspace.DestinationParent, "export.zip");
+		CreateFileLinkOrSkip(destination, safeTarget);
+
+		await workspace.ExportReplacingAsync(
+			ProjectCopyExportFormat.Zip,
+			destination,
+			[]);
+
+		Assert.Equal(
+			"TARGET",
+			await File.ReadAllTextAsync(
+				safeTarget,
+				TestContext.Current.CancellationToken));
+		Assert.Null(new FileInfo(destination).LinkTarget);
+		using var archive = ZipFile.OpenRead(destination);
+		Assert.Contains(archive.Entries, static entry => entry.FullName == "README.md");
+	}
+
+	[Fact]
 	public async Task AtomicFileForceRaceWithDirectoryReturnsConflictAndCleansStaging()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -1773,6 +1800,23 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 					format),
 				progress,
 				cancellationToken == default ? TestContext.Current.CancellationToken : cancellationToken);
+
+		public Task<ProjectCopyExportResult> ExportReplacingAsync(
+			ProjectCopyExportFormat format,
+			string destination,
+			IEnumerable<string> selected) =>
+			_service.ExportAsync(
+				new ProjectCopyExportRequest(
+					SourceRoot,
+					"Sample",
+					Root,
+					selected.ToHashSet(PathComparer.Default),
+					destination,
+					format,
+					ProjectCopyDestinationMode.Exact,
+					ProjectCopyConflictPolicy.ReplaceAtomically),
+				progress: null,
+				TestContext.Current.CancellationToken);
 
 		public void CreateIgnoredFilesOutsideDescriptor()
 		{
