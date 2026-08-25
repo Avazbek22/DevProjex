@@ -153,7 +153,7 @@ public sealed class TerminalProcessSmokeIntegrationTests
 		Assert.Equal(CommandLineExitCodes.Success, context.ExitCode);
 		using var document = JsonDocument.Parse(context.StandardOutput);
 		var file = Assert.Single(document.RootElement.GetProperty("files").EnumerateArray());
-		Assert.Equal("events.txt", file.GetProperty("path").GetString());
+		Assert.Equal(fifoPath, file.GetProperty("path").GetString());
 		Assert.Equal("unreadable", file.GetProperty("classification").GetString());
 		Assert.Equal(JsonValueKind.Null, file.GetProperty("content").ValueKind);
 	}
