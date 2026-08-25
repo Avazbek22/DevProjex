@@ -8,14 +8,28 @@ public sealed record DesktopRegistrySnapshot(
 	IReadOnlyList<DesktopInstanceRegistration> Instances,
 	int StaleEntryCount);
 
-public sealed class DesktopInstanceRegistry(DesktopControlPaths? paths = null)
+public sealed class DesktopInstanceRegistry
 {
 	private static readonly JsonSerializerOptions JsonOptions = new()
 	{
 		PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
 		WriteIndented = true
 	};
-	private readonly DesktopControlPaths _paths = paths ?? new DesktopControlPaths();
+	private readonly DesktopControlPaths _paths;
+	private readonly Action? _afterRegistrationReadOpened;
+
+	public DesktopInstanceRegistry(DesktopControlPaths? paths = null)
+		: this(paths, afterRegistrationReadOpened: null)
+	{
+	}
+
+	internal DesktopInstanceRegistry(
+		DesktopControlPaths? paths,
+		Action? afterRegistrationReadOpened)
+	{
+		_paths = paths ?? new DesktopControlPaths();
+		_afterRegistrationReadOpened = afterRegistrationReadOpened;
+	}
 
 	internal string RegistryDirectory => _paths.RegistryDirectory;
 
@@ -35,7 +49,7 @@ public sealed class DesktopInstanceRegistry(DesktopControlPaths? paths = null)
 				new UTF8Encoding(false),
 				cancellationToken).ConfigureAwait(false);
 			SetPrivateFileMode(temp);
-			File.Move(temp, target, overwrite: true);
+			CommitRegistration(temp, target);
 			SetPrivateFileMode(target);
 		}
 		finally
@@ -107,20 +121,22 @@ public sealed class DesktopInstanceRegistry(DesktopControlPaths? paths = null)
 		}
 	}
 
-	private static async Task<DesktopInstanceRegistration?> TryReadAsync(
+	private async Task<DesktopInstanceRegistration?> TryReadAsync(
 		string path,
 		CancellationToken cancellationToken)
 	{
 		try
 		{
+			await using var source = new FileStream(
+				path,
+				FileMode.Open,
+				FileAccess.Read,
+				FileShare.ReadWrite | FileShare.Delete,
+				bufferSize: 4 * 1024,
+				FileOptions.Asynchronous | FileOptions.SequentialScan);
+			_afterRegistrationReadOpened?.Invoke();
 			await using var stream = new MaximumLengthReadStream(
-				new FileStream(
-					path,
-					FileMode.Open,
-					FileAccess.Read,
-					FileShare.Read,
-					bufferSize: 4 * 1024,
-					FileOptions.Asynchronous | FileOptions.SequentialScan),
+				source,
 				DesktopProtocol.MaximumMessageBytes,
 				static () => new IOException("Desktop registration exceeds the protocol limit."));
 			var registration = await JsonSerializer
@@ -140,6 +156,28 @@ public sealed class DesktopInstanceRegistry(DesktopControlPaths? paths = null)
 		catch
 		{
 			return null;
+		}
+	}
+
+	private static void CommitRegistration(string temporaryPath, string targetPath)
+	{
+		if (!File.Exists(targetPath))
+		{
+			File.Move(temporaryPath, targetPath);
+			return;
+		}
+
+		try
+		{
+			File.Replace(temporaryPath, targetPath, destinationBackupFileName: null);
+		}
+		catch (FileNotFoundException) when (!File.Exists(targetPath))
+		{
+			File.Move(temporaryPath, targetPath);
+		}
+		catch (NotSupportedException)
+		{
+			File.Move(temporaryPath, targetPath, overwrite: true);
 		}
 	}
 

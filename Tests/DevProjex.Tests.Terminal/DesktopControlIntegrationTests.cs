@@ -352,6 +352,60 @@ public sealed class DesktopControlIntegrationTests
 	}
 
 	[Fact]
+	public async Task RegistryReaderDoesNotBlockAtomicRegistrationReplacement()
+	{
+		using var workspace = new TemporaryDirectory();
+		var paths = new DesktopControlPaths(() => workspace.Path);
+		using var process = Process.GetCurrentProcess();
+		var processStart = process.StartTime.ToUniversalTime().Ticks;
+		var initialProject = workspace.CreateDirectory("initial");
+		var updatedProject = workspace.CreateDirectory("updated");
+		var initial = CreateLiveRegistration("concurrent", initialProject, processStart);
+		await new DesktopInstanceRegistry(paths).RegisterAsync(
+			initial,
+			TestContext.Current.CancellationToken);
+		using var readOpened = new ManualResetEventSlim();
+		using var releaseRead = new ManualResetEventSlim();
+		var reader = new DesktopInstanceRegistry(
+			paths,
+			() =>
+			{
+				readOpened.Set();
+				releaseRead.Wait(TestContext.Current.CancellationToken);
+			});
+		var readTask = Task.Run(
+			() => reader.ProbeAsync(
+				removeStale: false,
+				TestContext.Current.CancellationToken),
+			TestContext.Current.CancellationToken);
+
+		try
+		{
+			Assert.True(readOpened.Wait(
+				TimeSpan.FromSeconds(5),
+				TestContext.Current.CancellationToken));
+			await new DesktopInstanceRegistry(paths).RegisterAsync(
+				initial with
+				{
+					ProjectPath = updatedProject,
+					LastActiveUtc = initial.LastActiveUtc.AddMinutes(1)
+				},
+				TestContext.Current.CancellationToken);
+		}
+		finally
+		{
+			releaseRead.Set();
+		}
+
+		var concurrentSnapshot = await readTask;
+		Assert.Equal(initialProject, Assert.Single(concurrentSnapshot.Instances).ProjectPath);
+		var currentSnapshot = await new DesktopInstanceRegistry(paths).ProbeAsync(
+			removeStale: false,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(updatedProject, Assert.Single(currentSnapshot.Instances).ProjectPath);
+	}
+
+	[Fact]
 	public async Task TargetResolutionRequiresOneUnambiguousInstance()
 	{
 		using var workspace = new TemporaryDirectory();
