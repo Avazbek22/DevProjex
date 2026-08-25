@@ -62,7 +62,8 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
         IProgress<string>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        var repoName = ExtractRepositoryName(repositoryUrl);
+        var resultRepositoryUrl = RepositoryUrlUtility.ToSafeDisplay(repositoryUrl);
+        var repoName = RepositoryUrlUtility.GetRepositoryName(resultRepositoryUrl);
 
         if (!TryGetGitHubRepository(repositoryUrl, out var owner, out var repository))
         {
@@ -72,7 +73,7 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
                 SourceType: ProjectSourceType.ZipDownload,
                 DefaultBranch: null,
                 RepositoryName: repoName,
-                RepositoryUrl: repositoryUrl,
+                RepositoryUrl: resultRepositoryUrl,
                 ErrorMessage: "Could not determine ZIP download URL");
         }
 
@@ -180,7 +181,7 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
                 SourceType: ProjectSourceType.ZipDownload,
                 DefaultBranch: branch,
                 RepositoryName: repoName,
-                RepositoryUrl: repositoryUrl,
+                RepositoryUrl: resultRepositoryUrl,
                 ErrorMessage: null);
         }
         catch (OperationCanceledException)
@@ -195,7 +196,7 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
                 SourceType: ProjectSourceType.ZipDownload,
                 DefaultBranch: null,
                 RepositoryName: repoName,
-                RepositoryUrl: repositoryUrl,
+                RepositoryUrl: resultRepositoryUrl,
                 ErrorMessage: ex.Message);
         }
         catch (Exception ex)
@@ -206,7 +207,7 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
                 SourceType: ProjectSourceType.ZipDownload,
                 DefaultBranch: null,
                 RepositoryName: repoName,
-                RepositoryUrl: repositoryUrl,
+                RepositoryUrl: resultRepositoryUrl,
                 ErrorMessage: ex.Message);
         }
         finally
@@ -381,30 +382,6 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
 
         _httpClient.Dispose();
         _disposed = true;
-    }
-
-    private static string ExtractRepositoryName(string url)
-    {
-		if (TryGetGitHubRepository(url, out _, out var repository))
-			return repository;
-
-        // Fallback
-        try
-        {
-            var trimmed = url.Trim();
-            if (trimmed.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
-                trimmed = trimmed[..^4];
-
-            var lastSlash = trimmed.LastIndexOf('/');
-            if (lastSlash >= 0 && lastSlash < trimmed.Length - 1)
-                return trimmed[(lastSlash + 1)..];
-        }
-        catch
-        {
-            // Ignore
-        }
-
-        return "repository";
     }
 
 	private async Task<string?> TryGetDefaultBranchAsync(

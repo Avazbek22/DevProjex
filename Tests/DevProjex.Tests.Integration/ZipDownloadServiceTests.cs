@@ -635,6 +635,22 @@ public class ZipDownloadServiceTests : IAsyncLifetime
         Assert.Equal(originalUrl, result.RepositoryUrl);
     }
 
+    [Fact]
+    public async Task DownloadAndExtractAsync_ResultOmitsCredentialsQueryAndFragment()
+    {
+        var targetDir = Path.Combine(_tempDir!, "safe-url-result-test");
+
+        var result = await _service.DownloadAndExtractAsync(
+            "https://oauth2:secret@github.com/octocat/Hello-World.git?transport=opaque#fragment",
+            targetDir,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.Equal("https://github.com/octocat/Hello-World.git", result.RepositoryUrl);
+        Assert.Equal(TestRepoName, result.RepositoryName);
+        Assert.DoesNotContain("secret", result.RepositoryUrl, StringComparison.Ordinal);
+    }
+
     #endregion
 
     #region Cleanup Tests

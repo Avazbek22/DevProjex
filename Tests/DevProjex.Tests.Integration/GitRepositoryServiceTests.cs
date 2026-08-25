@@ -263,6 +263,7 @@ public class GitRepositoryServiceTests : IAsyncLifetime
 
         Assert.True(result.Success, result.ErrorMessage);
         Assert.Equal("https://example.test/owner/repository.git", result.RepositoryUrl);
+        Assert.Equal("repository", result.RepositoryName);
         Assert.Contains(
             "?transport=opaque#fragment",
             await File.ReadAllTextAsync(argumentLog, TestContext.Current.CancellationToken),

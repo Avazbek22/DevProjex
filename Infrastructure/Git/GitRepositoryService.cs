@@ -78,7 +78,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
             out var cloneUrl,
             out var authentication);
         var resultRepositoryUrl = RepositoryUrlUtility.ToSafeDisplay(cloneUrl);
-        var repoName = ExtractRepositoryName(cloneUrl);
+        var repoName = RepositoryUrlUtility.GetRepositoryName(resultRepositoryUrl);
 
         try
         {
@@ -230,37 +230,8 @@ public sealed class GitRepositoryService : IGitRepositoryService
     /// - https://github.com/user/repo.git -> repo
     /// - https://github.com/user/repo -> repo
     /// </summary>
-    internal static string ExtractRepositoryName(string url)
-    {
-        try
-        {
-            var trimmed = url.Trim();
-
-            // Remove .git suffix if present
-            if (trimmed.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
-                trimmed = trimmed[..^4];
-
-            // Parse as URI and extract last path segment
-            var uri = new Uri(trimmed);
-            var segments = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
-            if (segments.Length >= 1)
-                return segments[^1];
-        }
-        catch
-        {
-            // Fallback: simple string parsing for malformed URLs
-            var lastSlash = url.LastIndexOf('/');
-            if (lastSlash >= 0 && lastSlash < url.Length - 1)
-            {
-                var name = url[(lastSlash + 1)..];
-                if (name.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
-                    name = name[..^4];
-                return name;
-            }
-        }
-
-        return "repository";
-    }
+    internal static string ExtractRepositoryName(string url) =>
+        RepositoryUrlUtility.GetRepositoryName(url);
 
     /// <summary>
     /// Gets list of all branches available in the repository.
