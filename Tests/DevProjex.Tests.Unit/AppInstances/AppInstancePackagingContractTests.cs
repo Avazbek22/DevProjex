@@ -350,6 +350,7 @@ public sealed class AppInstancePackagingContractTests
         Assert.Contains("<string>14.0</string>", readme, StringComparison.Ordinal);
         Assert.Contains("DevProjex.v<version>.osx-<architecture>.app.tar.gz", readme, StringComparison.Ordinal);
         Assert.Contains("generates `app.icns` deterministically", readme, StringComparison.Ordinal);
+        Assert.DoesNotContain("generate-app-icns.sh", readme, StringComparison.Ordinal);
         Assert.Contains("does not modify shell profiles or global environment variables", readme, StringComparison.Ordinal);
         Assert.DoesNotContain(CommandLineExecutableAliases.WindowsStoreAlias, readme, StringComparison.Ordinal);
     }

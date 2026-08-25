@@ -65,9 +65,19 @@ mkdir -p "DevProjex.app/Contents/Resources"
 # Copy executable
 cp ./publish/osx-x64/DevProjex "DevProjex.app/Contents/MacOS/DevProjex"
 
-# Generate or copy a valid app.icns into the bundle
-./Scripts/generate-app-icns.sh
-cp Assets/AppIcon/MacOS/app.icns "DevProjex.app/Contents/Resources/app.icns"
+# Generate app.icns with the standard macOS icon compiler
+mkdir -p app.iconset
+cp Assets/AppIcon/MacOS/AppIconSet/16.png app.iconset/icon_16x16.png
+cp Assets/AppIcon/MacOS/AppIconSet/32.png app.iconset/icon_16x16@2x.png
+cp Assets/AppIcon/MacOS/AppIconSet/32.png app.iconset/icon_32x32.png
+cp Assets/AppIcon/MacOS/AppIconSet/64.png app.iconset/icon_32x32@2x.png
+cp Assets/AppIcon/MacOS/AppIconSet/128.png app.iconset/icon_128x128.png
+cp Assets/AppIcon/MacOS/AppIconSet/256.png app.iconset/icon_128x128@2x.png
+cp Assets/AppIcon/MacOS/AppIconSet/256.png app.iconset/icon_256x256.png
+cp Assets/AppIcon/MacOS/AppIconSet/512.png app.iconset/icon_256x256@2x.png
+cp Assets/AppIcon/MacOS/AppIconSet/512.png app.iconset/icon_512x512.png
+cp Assets/AppIcon/MacOS/AppIconSet/1024.png app.iconset/icon_512x512@2x.png
+iconutil -c icns app.iconset -o "DevProjex.app/Contents/Resources/app.icns"
 
 # Create Info.plist (example - customize as needed)
 cat > "DevProjex.app/Contents/Info.plist" << 'EOF'
