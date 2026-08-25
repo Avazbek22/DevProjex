@@ -1,7 +1,5 @@
 namespace DevProjex.Tests.Integration;
 
-using DevProjex.Avalonia.Coordinators;
-
 [Collection(GitNetworkTestCollection.Name)]
 public sealed class CachedRepositoryRefreshIntegrationTests : IDisposable
 {

@@ -377,6 +377,9 @@ DevProjex never manufactures a percentage.
 Repository cloning and project loading use the same operation surface. Stages
 without an honest total remain indeterminate and show their current phase;
 measured Git object/transfer progress is shown only when emitted by Git.
+Explicit Clone actions use the shared managed repository cache and its operation
+lease. Reopening an equivalent URL reuses and refreshes the existing cache, and
+concurrent clone requests cannot publish duplicate repository containers.
 
 Esc or Ctrl+C cancels active export work before it can quit the TUI. Cancellation
 removes staging data and returns to the same usable workspace and pane focus.
