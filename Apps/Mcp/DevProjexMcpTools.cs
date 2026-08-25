@@ -353,7 +353,11 @@ internal sealed class DevProjexMcpTools(
 				}
 			}
 			if (totalMatches > shownMatches)
+			{
+				if (output.Length > 0 && output[^1] is not ('\r' or '\n'))
+					output.AppendLine();
 				output.AppendLine($"[{totalMatches - shownMatches} additional matches not shown; narrow the pattern or filters.]");
+			}
 			return McpToolResults.TextSuccess(McpSpotlight.Wrap(output.ToString().TrimEnd()));
 		}, cancellationToken);
 

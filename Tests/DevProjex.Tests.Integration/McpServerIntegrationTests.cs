@@ -273,6 +273,7 @@ public sealed class McpServerIntegrationTests
 
 		var text = Text(result);
 		Assert.True(text.Length <= 55_000, $"Search response was {text.Length} characters.");
+		Assert.Contains("\n[1 additional matches not shown", text.Replace("\r\n", "\n", StringComparison.Ordinal));
 		Assert.Contains("narrow the pattern or filters", text, StringComparison.Ordinal);
 	}
 
