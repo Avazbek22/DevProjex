@@ -528,7 +528,7 @@ internal sealed class DevProjexMcpTools(
 	private static string ResolveProjectName(string root)
 	{
 		var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(root));
-		return string.IsNullOrWhiteSpace(name) ? root : name;
+		return string.IsNullOrEmpty(name) ? root : name;
 	}
 
 	private sealed record FileWeight(string Path, long Tokens);

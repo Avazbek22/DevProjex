@@ -4615,7 +4615,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		if (plan is null)
 			return string.Empty;
 		var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(plan.SourceRoot));
-		return string.IsNullOrWhiteSpace(name) ? plan.SourceRoot : name;
+		return string.IsNullOrEmpty(name) ? plan.SourceRoot : name;
 	}
 
 	private string BuildWorkspaceHeading(ProjectContextPlan plan)

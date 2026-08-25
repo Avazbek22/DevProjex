@@ -355,7 +355,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		ProjectSourceIdentity? sourceIdentity)
 	{
 		var fallbackName = Path.GetFileName(Path.TrimEndingDirectorySeparator(sourceRoot));
-		if (string.IsNullOrWhiteSpace(fallbackName))
+		if (string.IsNullOrEmpty(fallbackName))
 			fallbackName = sourceRoot;
 
 		if (sourceIdentity is null)

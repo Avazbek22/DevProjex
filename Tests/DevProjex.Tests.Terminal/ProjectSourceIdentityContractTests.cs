@@ -3,6 +3,55 @@ namespace DevProjex.Tests.Terminal;
 public sealed class ProjectSourceIdentityContractTests
 {
 	[Fact]
+	public async Task LocalIdentityPreservesWhitespaceOnlyPosixProjectName()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Windows does not support this directory name through ordinary APIs.");
+			return;
+		}
+
+		using var temporary = new TemporaryDirectory();
+		var projectPath = temporary.CreateDirectory(" ");
+		var services = new TerminalServiceFactory(() => temporary.Path).Create(AppLanguage.En);
+
+		var identity = await services.SourceIdentityResolver.ResolveAsync(
+			projectPath,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Equal(" ", identity.DisplayName);
+	}
+
+	[Fact]
+	public async Task ContextPlanPreservesWhitespaceOnlyUnixProjectName()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Windows does not support this directory name through ordinary APIs.");
+			return;
+		}
+
+		using var temporary = new TemporaryDirectory();
+		var projectPath = temporary.CreateDirectory(" ");
+		temporary.WriteFile(" /App.cs", "class App {}\n");
+		var services = new TerminalServiceFactory(() => temporary.Path).Create(AppLanguage.En);
+		var selection = await services.SelectionResolver.ResolveAsync(
+			projectPath,
+			ProjectProfileReference.Standard,
+			new ProjectSelectionSpec(),
+			TestContext.Current.CancellationToken);
+
+		var plan = await services.ContextPlanner.BuildAsync(
+			new ProjectContextRequest(projectPath, selection),
+			TestContext.Current.CancellationToken);
+
+		var identity = Assert.IsType<ProjectSourceIdentity>(plan.SourceIdentity);
+		Assert.Equal(" ", identity.DisplayName);
+		Assert.Equal(" ", plan.EffectiveTree.DisplayName);
+		Assert.Equal(" ", plan.ProjectedTree.DisplayName);
+	}
+
+	[Fact]
 	public async Task CloneCacheSuffixNeverLeaksIntoTreeOrContextDocuments()
 	{
 		using var temporary = new TemporaryDirectory();
