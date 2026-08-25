@@ -6,18 +6,17 @@ public static class ProjectSelectionPath
 
 	public static string NormalizeRelative(string value)
 	{
-		if (string.IsNullOrWhiteSpace(value) || value.Trim() == ".")
+		if (string.IsNullOrWhiteSpace(value) || value == ".")
 			return string.Empty;
 
-		var trimmed = value.Trim();
-		if (IsRootedOnAnySupportedPlatform(trimmed))
+		if (IsRootedOnAnySupportedPlatform(value))
 		{
 			throw new ProjectContextValidationException(
 				InvalidPathCode,
 				"Selected paths must be relative to the project root.");
 		}
 
-		var segments = trimmed.Split(
+		var segments = value.Split(
 			[Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar, '/', '\\'],
 			StringSplitOptions.RemoveEmptyEntries);
 		if (segments.Any(static segment => segment == ".."))

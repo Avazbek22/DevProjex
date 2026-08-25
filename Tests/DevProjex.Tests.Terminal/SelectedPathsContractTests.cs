@@ -151,6 +151,32 @@ public sealed class SelectedPathsContractTests
 	}
 
 	[Fact]
+	public async Task UnixSelectionPreservesLeadingAndTrailingSpacesInFileName()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("Windows normalizes trailing spaces in ordinary file names.");
+
+		using var workspace = CreateWorkspace();
+		const string relativePath = " leading-and-trailing .cs ";
+		workspace.WriteFile(relativePath, "class SpacedName {}\n");
+
+		using var document = await ExportJsonAsync(
+			workspace.Path,
+			"--select", relativePath);
+
+		Assert.Equal(FullContentPaths(workspace.Path, relativePath), ReadFilePaths(document));
+		Assert.Equal([relativePath], ReadSelectedPaths(document));
+	}
+
+	[Fact]
+	public void SelectionPathNormalizationPreservesSignificantWhitespace()
+	{
+		const string relativePath = " leading-and-trailing .cs ";
+
+		Assert.Equal(relativePath, ProjectSelectionPath.NormalizeRelative(relativePath));
+	}
+
+	[Fact]
 	public async Task SelectionsAcrossMultipleRootFoldersAreCombinedWithoutFallback()
 	{
 		using var workspace = CreateWorkspace();
