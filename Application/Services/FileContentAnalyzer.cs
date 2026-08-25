@@ -456,7 +456,7 @@ public sealed class FileContentAnalyzer :
 						FileContentClassification.TooLarge,
 						new TextFileMetrics(
 						SizeBytes: sizeBytes,
-						LineCount: Math.Max(1, (int)(sizeBytes / EstimatedCharsPerLine)),
+						LineCount: EstimateLineCount(sizeBytes),
 						CharCount: (int)Math.Min(sizeBytes, int.MaxValue),
 						IsEmpty: false,
 						IsWhitespaceOnly: false,
@@ -736,7 +736,7 @@ public sealed class FileContentAnalyzer :
 				FileContentClassification.TooLarge,
 				new TextFileMetrics(
 					sizeBytes,
-					Math.Max(1, (int)(sizeBytes / EstimatedCharsPerLine)),
+					EstimateLineCount(sizeBytes),
 					(int)Math.Min(sizeBytes, int.MaxValue),
 					false,
 					false,
@@ -769,6 +769,9 @@ public sealed class FileContentAnalyzer :
 			return TextFileEncoding.Utf32BigEndian;
 		throw new ArgumentOutOfRangeException(nameof(bomEncoding));
 	}
+
+	internal static int EstimateLineCount(long sizeBytes) =>
+		(int)Math.Clamp(sizeBytes / EstimatedCharsPerLine, 1L, int.MaxValue);
 
 	/// <summary>
 	/// Checks first 512 bytes for null bytes to detect binary content.

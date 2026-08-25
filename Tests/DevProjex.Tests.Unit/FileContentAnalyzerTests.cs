@@ -21,6 +21,16 @@ public sealed class FileContentAnalyzerTests
 	}
 
 	[Theory]
+	[InlineData(0L, 1)]
+	[InlineData(60L, 1)]
+	[InlineData(120L, 2)]
+	[InlineData(long.MaxValue, int.MaxValue)]
+	public void EstimateLineCount_SaturatesAtMetricBoundary(long sizeBytes, int expected)
+	{
+		Assert.Equal(expected, FileContentAnalyzer.EstimateLineCount(sizeBytes));
+	}
+
+	[Theory]
 	[InlineData(ProbeOperation.CompleteTextBuffer)]
 	[InlineData(ProbeOperation.StreamingMetrics)]
 	[InlineData(ProbeOperation.CompleteSnapshot)]
