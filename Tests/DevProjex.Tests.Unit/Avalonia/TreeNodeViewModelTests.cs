@@ -346,6 +346,27 @@ public sealed class TreeNodeViewModelTests
     }
 
     [Fact]
+    public void SetExpandedRecursive_DeepTreeDoesNotDependOnTheCallStack()
+    {
+        const int depth = 16_000;
+        var root = CreateNode("Root");
+        var current = root;
+
+        for (var level = 0; level < depth; level++)
+        {
+            var child = new TreeNodeViewModel(CreateDescriptor($"Node{level}"), current, null);
+            current.Children.Add(child);
+            current = child;
+        }
+
+        root.SetExpandedRecursive(true);
+        Assert.True(current.IsExpanded);
+
+        root.SetExpandedRecursive(false);
+        Assert.False(current.IsExpanded);
+    }
+
+    [Fact]
     public void EnsureParentsExpanded_DoesNotChangeLeafSelection()
     {
         var root = CreateTree();

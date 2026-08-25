@@ -540,12 +540,19 @@ public sealed class TreeNodeViewModel(
         bool expanded,
         bool realizeLazyChildren)
     {
-        node.IsExpanded = expanded;
-        var children = realizeLazyChildren
-            ? node.EnsureChildrenRealized()
-            : node._children;
-        foreach (var child in children)
-            SetExpandedRecursiveCore(child, expanded, realizeLazyChildren);
+        var stack = new Stack<TreeNodeViewModel>();
+        stack.Push(node);
+
+        while (stack.Count > 0)
+        {
+            var current = stack.Pop();
+            current.IsExpanded = expanded;
+            var children = realizeLazyChildren
+                ? current.EnsureChildrenRealized()
+                : current._children;
+            for (var index = children.Count - 1; index >= 0; index--)
+                stack.Push(children[index]);
+        }
     }
 
     private IList<TreeNodeViewModel> EnsureChildrenRealized()
