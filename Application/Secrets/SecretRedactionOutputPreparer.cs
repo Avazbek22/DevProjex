@@ -641,13 +641,16 @@ public sealed class SecretRedactionOutputPreparer
 		if (result.Classification != FileContentClassification.Text)
 		{
 			return result.Classification == FileContentClassification.TooLarge
-				? PreparedSecretFile.Unchanged(sourcePath)
+				? PreparedSecretFile.Unchanged(sourcePath, coherentRead.Metadata)
 				: new PreparedSecretFile(
 					sourcePath,
 					sourcePath,
 					result.Classification,
 					null,
-					[]);
+					[])
+				{
+					SourceMetadata = coherentRead.Metadata
+				};
 		}
 
 		if (result.Content is null)
@@ -1923,10 +1926,13 @@ public sealed class PreparedSecretFileContentAnalyzer(
 		// unscannable file may not be read with. Streamed metrics stay available; text does not.
 		if (file.IsUnscannable)
 		{
+			file.EnsureSourceVersion();
+			var metrics = await inner.GetClassifiedMetricsAsync(file.ContentPath, cancellationToken)
+				.ConfigureAwait(false);
+			file.EnsureSourceVersion();
 			return new UnscannableSnapshot(
 				file.Classification,
-				await inner.GetClassifiedMetricsAsync(file.ContentPath, cancellationToken)
-					.ConfigureAwait(false));
+				metrics);
 		}
 
 		file.EnsureSourceVersion();
@@ -1951,10 +1957,13 @@ public sealed class PreparedSecretFileContentAnalyzer(
 		var file = prepared.GetFile(path);
 		if (file.IsUnscannable)
 		{
-			return await inner.TryReadAsTextAsync(
+			file.EnsureSourceVersion();
+			var unscannable = await inner.TryReadAsTextAsync(
 				file.ContentPath,
 				SecretRedactionOutputPreparer.MaximumScannableFileBytes,
 				cancellationToken).ConfigureAwait(false);
+			file.EnsureSourceVersion();
+			return unscannable;
 		}
 
 		if (!file.IsText)
