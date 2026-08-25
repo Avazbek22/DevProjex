@@ -380,6 +380,7 @@
   "Error.ProjectCopy.UnsafeDestinationPath": "Tanlangan manzil yo‘li xavfsiz emas yoki asl loyiha ichiga olib boradi.",
   "Error.ProjectCopy.DestinationConflict": "Tanlangan manzil allaqachon mavjud.",
   "Error.ProjectCopy.UnexpectedFailure": "Loyiha nusxasini eksport qilib bo‘lmadi.",
+  "Error.ProjectCopy.ReservedNoticeNameConflict": "Manba loyihada DEVPROJEX-NOTICE.txt fayli allaqachon mavjud. O‘zgartirilgan nusxani eksport qilishdan oldin fayl nomini o‘zgartiring yoki uni o‘chiring.",
   "Toast.Operation.PreviewCanceled": "Ko'rib chiqish tayyorlash bekor qilindi",
   "Status.Metric.Lines": "Qatorlar: {0}",
   "Status.Metric.Chars": "Belgilar: {0}",

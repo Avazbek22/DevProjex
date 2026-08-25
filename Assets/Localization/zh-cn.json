@@ -374,6 +374,7 @@
   "Error.ProjectCopy.UnsafeDestinationPath": "所选目标路径不安全或通向源项目内部。",
   "Error.ProjectCopy.DestinationConflict": "所选目标位置已存在。",
   "Error.ProjectCopy.UnexpectedFailure": "无法导出项目副本。",
+  "Error.ProjectCopy.ReservedNoticeNameConflict": "源项目已包含DEVPROJEX-NOTICE.txt。请在导出转换后的副本前重命名或删除该文件。",
   "Toast.Operation.PreviewCanceled": "预览准备工作取消",
   "Status.Metric.Lines": "行数：{0}",
   "Status.Metric.Chars": "字符：{0}",

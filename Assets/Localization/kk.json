@@ -380,6 +380,7 @@
   "Error.ProjectCopy.UnsafeDestinationPath": "Таңдалған сақтау жолы қауіпсіз емес немесе бастапқы жобаның ішіне апарады.",
   "Error.ProjectCopy.DestinationConflict": "Таңдалған сақтау орны бұрыннан бар.",
   "Error.ProjectCopy.UnexpectedFailure": "Жоба көшірмесін экспорттау мүмкін болмады.",
+  "Error.ProjectCopy.ReservedNoticeNameConflict": "Бастапқы жобада DEVPROJEX-NOTICE.txt файлы бұрыннан бар. Түрлендірілген көшірмені экспорттамас бұрын оның атын өзгертіңіз немесе жойыңыз.",
   "Toast.Operation.PreviewCanceled": "Алдын ала қарауды дайындау тоқтатылды",
   "Status.Metric.Lines": "Жолдар: {0}",
   "Status.Metric.Chars": "Таңбалар: {0}",

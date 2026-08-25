@@ -374,6 +374,7 @@
     "Error.ProjectCopy.UnsafeDestinationPath":  "La ruta de destino seleccionada no es segura o conduce al interior del proyecto de origen.",
     "Error.ProjectCopy.DestinationConflict":  "El destino seleccionado ya existe.",
     "Error.ProjectCopy.UnexpectedFailure":  "No se pudo exportar la copia del proyecto.",
+    "Error.ProjectCopy.ReservedNoticeNameConflict":  "El proyecto de origen ya contiene DEVPROJEX-NOTICE.txt. Cambie el nombre del archivo o elimínelo antes de exportar una copia transformada.",
     "Toast.Operation.PreviewCanceled":  "Preparación de vista previa cancelada",
     "Status.Metric.Lines":  "Líneas: {0}",
     "Status.Metric.Chars":  "Caracteres: {0}",

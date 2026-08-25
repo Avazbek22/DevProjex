@@ -67,6 +67,11 @@ internal static class ProjectCopyTerminalErrorMapper
 				ExitCode: CommandLineExitCodes.RuntimeError,
 				Exception: exception,
 				ContextPath: exception.PathContext),
+			ProjectCopyExportError.ReservedNoticeNameConflict => new TerminalError(
+				"DPX-EXPORT-RESERVED-NAME",
+				localization["Error.ProjectCopy.ReservedNoticeNameConflict"],
+				ExitCode: CommandLineExitCodes.PolicyFailure,
+				Exception: exception),
 			ProjectCopyExportError.UnexpectedFailure => new TerminalError(
 				"DPX-EXPORT-FAILED",
 				localization["Terminal.Error.ExportFailed"],

@@ -34,7 +34,8 @@ public enum ProjectCopyExportError
 	UnexpectedFailure = 9,
 	DestinationConflict = 10,
 	SecretDetectionFailed = 11,
-	SecretScanLimitExceeded = 12
+	SecretScanLimitExceeded = 12,
+	ReservedNoticeNameConflict = 13
 }
 
 public sealed record ProjectCopyExportRequest(

@@ -36,6 +36,8 @@ public sealed class ProjectCopyExportService(
 			                           request.StripComments || request.StripBlankLines
 				? await PrepareRedactedOutputAsync(plan, request, cancellationToken).ConfigureAwait(false)
 				: null;
+			var transformationNotice = BuildTransformationNotice(prepared, plan, request.NoticeText);
+			ValidateTransformationNoticeCollision(plan, transformationNotice);
 			return request.Format switch
 			{
 				ProjectCopyExportFormat.Folder => await ExportFolderAsync(
@@ -44,7 +46,7 @@ public sealed class ProjectCopyExportService(
 					request.DestinationMode,
 					request.ConflictPolicy,
 					prepared,
-					request.NoticeText,
+					transformationNotice,
 					progress,
 					cancellationToken).ConfigureAwait(false),
 				ProjectCopyExportFormat.Zip => await ExportZipAsync(
@@ -53,7 +55,7 @@ public sealed class ProjectCopyExportService(
 					request.DestinationMode,
 					request.ConflictPolicy,
 					prepared,
-					request.NoticeText,
+					transformationNotice,
 					progress,
 					cancellationToken).ConfigureAwait(false),
 				_ => throw new ProjectCopyExportException(
@@ -129,6 +131,23 @@ public sealed class ProjectCopyExportService(
 	/// </summary>
 	private static bool ShouldExcludeUnscannable(PreparedSecretRedactionOutput prepared) =>
 		prepared.Snapshot is not null;
+
+	private static void ValidateTransformationNoticeCollision(
+		ProjectCopyExportPlan plan,
+		string? transformationNotice)
+	{
+		if (transformationNotice is null ||
+		    !plan.Entries.Any(static entry =>
+			    !entry.IsDirectory &&
+			    PathComparer.Default.Equals(entry.RelativePath, TransformationNoticeFileName)))
+		{
+			return;
+		}
+
+		throw new ProjectCopyExportException(
+			ProjectCopyExportError.ReservedNoticeNameConflict,
+			$"The source project already contains the reserved file name '{TransformationNoticeFileName}'.");
+	}
 
 	private static bool IsExcludedFromCopy(
 		PreparedSecretRedactionOutput? prepared,
@@ -247,7 +266,7 @@ public sealed class ProjectCopyExportService(
 		ProjectCopyDestinationMode destinationMode,
 		ProjectCopyConflictPolicy conflictPolicy,
 		PreparedSecretRedactionOutput? prepared,
-		ProjectCopyNoticeText? noticeText,
+		string? transformationNotice,
 		IProgress<ProjectCopyExportProgress>? progress,
 		CancellationToken cancellationToken)
 	{
@@ -333,7 +352,7 @@ public sealed class ProjectCopyExportService(
 				ReportProgress(progress, 0, 0, 0);
 
 			cancellationToken.ThrowIfCancellationRequested();
-			if (BuildTransformationNotice(prepared, plan, noticeText) is { } notice)
+			if (transformationNotice is { } notice)
 			{
 				await File.WriteAllTextAsync(
 						Path.Combine(stagingPath, TransformationNoticeFileName),
@@ -396,7 +415,7 @@ public sealed class ProjectCopyExportService(
 		ProjectCopyDestinationMode destinationMode,
 		ProjectCopyConflictPolicy conflictPolicy,
 		PreparedSecretRedactionOutput? prepared,
-		ProjectCopyNoticeText? noticeText,
+		string? transformationNotice,
 		IProgress<ProjectCopyExportProgress>? progress,
 		CancellationToken cancellationToken)
 	{
@@ -486,7 +505,7 @@ public sealed class ProjectCopyExportService(
 				if (totalEntries == 0)
 					ReportProgress(progress, 0, 0, 0);
 
-				if (BuildTransformationNotice(prepared, plan, noticeText) is { } notice)
+				if (transformationNotice is { } notice)
 				{
 					var noticeEntry = archive.CreateEntry(
 						BuildZipEntryName(plan.ProjectName, TransformationNoticeFileName, isDirectory: false),

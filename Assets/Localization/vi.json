@@ -374,6 +374,7 @@
   "Error.ProjectCopy.UnsafeDestinationPath": "Đường dẫn đích đã chọn không an toàn hoặc dẫn vào bên trong dự án nguồn.",
   "Error.ProjectCopy.DestinationConflict": "Điểm đến được chọn đã tồn tại.",
   "Error.ProjectCopy.UnexpectedFailure": "Bản sao dự án không thể xuất được.",
+  "Error.ProjectCopy.ReservedNoticeNameConflict": "Dự án nguồn đã chứa DEVPROJEX-NOTICE.txt. Hãy đổi tên hoặc xóa tệp này trước khi xuất bản sao đã biến đổi.",
   "Toast.Operation.PreviewCanceled": "Đã hủy quá trình chuẩn bị xem trước",
   "Status.Metric.Lines": "Dòng: {0}",
   "Status.Metric.Chars": "Ký tự: {0}",

@@ -380,6 +380,7 @@
   "Error.ProjectCopy.UnsafeDestinationPath": "Роҳи таъиноти интихобшуда хатарнок аст ё ба дохили лоиҳаи аслӣ мебарад.",
   "Error.ProjectCopy.DestinationConflict": "Ҷойи таъиноти интихобшуда аллакай мавҷуд аст.",
   "Error.ProjectCopy.UnexpectedFailure": "Содироти нусхаи лоиҳа иҷро нашуд.",
+  "Error.ProjectCopy.ReservedNoticeNameConflict": "Лоиҳаи манбаъ аллакай файли DEVPROJEX-NOTICE.txt дорад. Пеш аз содир кардани нусхаи тағйирдодашуда номи онро иваз кунед ё файлро нест кунед.",
   "Toast.Operation.PreviewCanceled": "Омодасозии пешнамоиш бекор карда шуд",
   "Status.Metric.Lines": "Сатрҳо: {0}",
   "Status.Metric.Chars": "Аломатҳо: {0}",

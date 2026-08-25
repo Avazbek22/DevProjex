@@ -1,5 +1,6 @@
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.Rendering;
+using DevProjex.Application.Compression;
 using DevProjex.Application.Secrets;
 
 namespace DevProjex.Terminal.Execution;
@@ -86,7 +87,10 @@ public sealed class ExportProjectCommandHandler(
 					services.Localization);
 			}
 
-			if (plan.Selection.CompressCode == true)
+			if (CodeTransformIdentity.Resolve(
+				    plan.Selection.CompressCode == true,
+				    plan.Selection.StripComments == true,
+				    plan.Selection.StripBlankLines == true) != CodeTransformKinds.None)
 				environment.Error.WriteLine(services.Localization["Compression.CopyNotice"]);
 			return CommandLineExitCodes.Success;
 		}

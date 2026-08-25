@@ -374,6 +374,7 @@
   "Error.ProjectCopy.UnsafeDestinationPath": "Jalur tujuan yang dipilih tidak aman atau mengarah ke dalam proyek sumber.",
   "Error.ProjectCopy.DestinationConflict": "Tujuan yang dipilih sudah ada.",
   "Error.ProjectCopy.UnexpectedFailure": "Salinan proyek tidak dapat diekspor.",
+  "Error.ProjectCopy.ReservedNoticeNameConflict": "Proyek sumber sudah berisi DEVPROJEX-NOTICE.txt. Ubah nama atau hapus file tersebut sebelum mengekspor salinan yang ditransformasi.",
   "Toast.Operation.PreviewCanceled": "Persiapan pratinjau dibatalkan",
   "Status.Metric.Lines": "Baris: {0}",
   "Status.Metric.Chars": "Karakter: {0}",

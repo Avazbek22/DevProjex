@@ -380,6 +380,7 @@
   "Error.ProjectCopy.UnsafeDestinationPath": "Il percorso di destinazione selezionato non è sicuro o conduce all’interno del progetto di origine.",
   "Error.ProjectCopy.DestinationConflict": "La destinazione selezionata esiste già.",
   "Error.ProjectCopy.UnexpectedFailure": "Impossibile esportare la copia del progetto.",
+  "Error.ProjectCopy.ReservedNoticeNameConflict": "Il progetto di origine contiene già DEVPROJEX-NOTICE.txt. Rinomina o rimuovi il file prima di esportare una copia trasformata.",
   "Toast.Operation.PreviewCanceled": "Preparazione anteprima annullata",
   "Status.Metric.Lines": "Righe: {0}",
   "Status.Metric.Chars": "Caratteri: {0}",

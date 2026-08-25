@@ -374,6 +374,7 @@
   "Error.ProjectCopy.UnsafeDestinationPath": "선택한 대상 경로가 안전하지 않거나 소스 프로젝트 내부로 연결됩니다.",
   "Error.ProjectCopy.DestinationConflict": "선택한 대상이 이미 존재합니다.",
   "Error.ProjectCopy.UnexpectedFailure": "프로젝트 사본을 내보낼 수 없습니다.",
+  "Error.ProjectCopy.ReservedNoticeNameConflict": "원본 프로젝트에 DEVPROJEX-NOTICE.txt가 이미 있습니다. 변환된 사본을 내보내기 전에 이 파일의 이름을 바꾸거나 삭제하세요.",
   "Toast.Operation.PreviewCanceled": "미리보기 준비가 취소되었습니다.",
   "Status.Metric.Lines": "줄: {0}",
   "Status.Metric.Chars": "문자: {0}",

@@ -374,6 +374,7 @@
   "Error.ProjectCopy.UnsafeDestinationPath": "Seçilen hedef yol güvenli değil veya kaynak projenin içine giriyor.",
   "Error.ProjectCopy.DestinationConflict": "Seçilen hedef zaten mevcut.",
   "Error.ProjectCopy.UnexpectedFailure": "Proje kopyası dışa aktarılamadı.",
+  "Error.ProjectCopy.ReservedNoticeNameConflict": "Kaynak projede zaten DEVPROJEX-NOTICE.txt bulunuyor. Dönüştürülmüş bir kopyayı dışa aktarmadan önce dosyayı yeniden adlandırın veya kaldırın.",
   "Toast.Operation.PreviewCanceled": "Önizleme hazırlığı iptal edildi",
   "Status.Metric.Lines": "Satırlar: {0}",
   "Status.Metric.Chars": "Karakterler: {0}",

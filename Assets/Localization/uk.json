@@ -374,6 +374,7 @@
   "Error.ProjectCopy.UnsafeDestinationPath": "Вибраний цільовий шлях є небезпечним або веде всередину вихідного проекту.",
   "Error.ProjectCopy.DestinationConflict": "Вибраний пункт призначення вже існує.",
   "Error.ProjectCopy.UnexpectedFailure": "Не вдалося експортувати копію проекту.",
+  "Error.ProjectCopy.ReservedNoticeNameConflict": "Вихідний проєкт уже містить DEVPROJEX-NOTICE.txt. Перейменуйте або видаліть цей файл перед експортом перетвореної копії.",
   "Toast.Operation.PreviewCanceled": "Підготовку попереднього перегляду скасовано",
   "Status.Metric.Lines": "Рядків: {0}",
   "Status.Metric.Chars": "Символів: {0}",

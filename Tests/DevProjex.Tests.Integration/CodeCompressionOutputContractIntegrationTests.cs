@@ -775,6 +775,27 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 				StringComparison.Ordinal));
 	}
 
+	[Theory]
+	[InlineData(ProjectCopyExportFormat.Folder)]
+	[InlineData(ProjectCopyExportFormat.Zip)]
+	public async Task TransformedCopyRejectsReservedNoticeNameCollision(ProjectCopyExportFormat format)
+	{
+		using var workspace = CompressionWorkspace.Create(CompressibleSource);
+		workspace.CreateExtraFile(ProjectCopyExportService.TransformationNoticeFileName, "source notice");
+		var destination = format == ProjectCopyExportFormat.Folder
+			? Path.Combine(workspace.DestinationParent, "collision-copy")
+			: Path.Combine(workspace.DestinationParent, "collision-copy.zip");
+
+		var exception = await Assert.ThrowsAsync<ProjectCopyExportException>(() =>
+			workspace.ExportAsyncForTest(destination, format, compress: true));
+
+		Assert.Equal(ProjectCopyExportError.ReservedNoticeNameConflict, exception.Error);
+		Assert.False(Path.Exists(destination));
+		Assert.Empty(Directory.EnumerateFileSystemEntries(
+			workspace.DestinationParent,
+			".devprojex-*.tmp"));
+	}
+
 	[Fact]
 	public async Task ContextFolderAndZipKeepFieldsAndPropertiesWhileCompressingMethods()
 	{
@@ -1486,6 +1507,14 @@ public sealed class CodeCompressionOutputContractIntegrationTests
 				compress,
 				stripComments,
 				stripBlankLines);
+
+		public Task<ProjectCopyExportResult> ExportAsyncForTest(
+			string destination,
+			ProjectCopyExportFormat format,
+			bool compress,
+			bool stripComments = false,
+			bool stripBlankLines = false) =>
+			ExportAsync(destination, format, compress, stripComments, stripBlankLines);
 
 		private async Task<ProjectCopyExportResult> ExportAsync(
 			string destination,

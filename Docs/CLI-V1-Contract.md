@@ -272,6 +272,12 @@ not removed. XML and HTML whitespace inside text nodes is character data and rem
 syntax transformations support all eight flag combinations and share one parse, merged plan,
 application, reverse parse, and structural gate.
 
+Every project copy that actually changes or omits content carries the reserved root file
+`DEVPROJEX-NOTICE.txt`. If the selected source root already contains that file, folder and ZIP
+exports fail with `DPX-EXPORT-RESERVED-NAME` rather than overwrite or duplicate it. Project
+`--dry-run` announces the notice for any effective `--compress-code`, `--strip-comments`, or
+`--strip-blank-lines` option, matching the real export contract.
+
 `gitignore` mode reads regular `.gitignore` files reachable in the selected working
 tree. When the selected path is below its owning repository/worktree root, the
 ancestor rule chain from that root through the selected path is applied before

@@ -374,6 +374,7 @@
   "Error.ProjectCopy.UnsafeDestinationPath": "Wybrana ścieżka docelowa jest niebezpieczna lub prowadzi do projektu źródłowego.",
   "Error.ProjectCopy.DestinationConflict": "Wybrany cel już istnieje.",
   "Error.ProjectCopy.UnexpectedFailure": "Nie można wyeksportować kopii projektu.",
+  "Error.ProjectCopy.ReservedNoticeNameConflict": "Projekt źródłowy zawiera już plik DEVPROJEX-NOTICE.txt. Zmień jego nazwę lub usuń go przed wyeksportowaniem przekształconej kopii.",
   "Toast.Operation.PreviewCanceled": "Przygotowanie podglądu zostało anulowane",
   "Status.Metric.Lines": "Linie: {0}",
   "Status.Metric.Chars": "Znaki: {0}",

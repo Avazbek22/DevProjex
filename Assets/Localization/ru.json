@@ -380,6 +380,7 @@
   "Error.ProjectCopy.UnsafeDestinationPath": "Выбранный путь назначения небезопасен или ведёт внутрь исходного проекта.",
   "Error.ProjectCopy.DestinationConflict": "Выбранное место назначения уже существует.",
   "Error.ProjectCopy.UnexpectedFailure": "Не удалось экспортировать копию проекта.",
+  "Error.ProjectCopy.ReservedNoticeNameConflict": "Исходный проект уже содержит DEVPROJEX-NOTICE.txt. Переименуйте или удалите этот файл перед экспортом преобразованной копии.",
   "Toast.Operation.PreviewCanceled": "Подготовка превью отменена",
   "Status.Metric.Lines": "Строки: {0}",
   "Status.Metric.Chars": "Символы: {0}",

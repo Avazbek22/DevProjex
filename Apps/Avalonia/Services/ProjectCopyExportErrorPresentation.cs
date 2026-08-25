@@ -29,6 +29,7 @@ public static class ProjectCopyExportErrorPresentation
         ProjectCopyExportError.DestinationConflict => "Error.ProjectCopy.DestinationConflict",
 		ProjectCopyExportError.SecretDetectionFailed => "Error.ProjectCopy.SecretDetectionFailed",
 		ProjectCopyExportError.SecretScanLimitExceeded => "Error.ProjectCopy.SecretScanLimitExceeded",
+		ProjectCopyExportError.ReservedNoticeNameConflict => "Error.ProjectCopy.ReservedNoticeNameConflict",
         ProjectCopyExportError.UnexpectedFailure => "Error.ProjectCopy.UnexpectedFailure",
         _ => "Error.ProjectCopy.UnexpectedFailure"
     };

@@ -374,6 +374,7 @@
   "Error.ProjectCopy.UnsafeDestinationPath": "選択した宛先パスは安全でないか、ソース プロジェクト内につながっています。",
   "Error.ProjectCopy.DestinationConflict": "選択した宛先はすでに存在します。",
   "Error.ProjectCopy.UnexpectedFailure": "プロジェクトのコピーをエクスポートできませんでした。",
+  "Error.ProjectCopy.ReservedNoticeNameConflict": "ソースプロジェクトには既にDEVPROJEX-NOTICE.txtが含まれています。変換済みコピーをエクスポートする前に、このファイルの名前を変更するか削除してください。",
   "Toast.Operation.PreviewCanceled": "プレビュー準備がキャンセルされました",
   "Status.Metric.Lines": "行数: {0}",
   "Status.Metric.Chars": "文字: {0}",

@@ -338,6 +338,10 @@ The readiness line is the requested dry-run result and remains visible at
 A project-copy dry run with Hide Secrets enabled also states that detected text
 will be changed, binary files will remain unchanged, and the result may not build
 or run. This warning does not create or scan an output artifact.
+Any effective code-transformation option (`--compress-code`, `--strip-comments`, or
+`--strip-blank-lines`) also announces that a transformed copy carries
+`DEVPROJEX-NOTICE.txt`. A real folder or ZIP export fails with
+`DPX-EXPORT-RESERVED-NAME` if that reserved root file already exists in the source.
 
 With code compression enabled, context, folder, and ZIP exports all consume the
 same validated transformed snapshot. Unsupported or rejected source files remain
