@@ -109,7 +109,7 @@ jobs:
           fi
 
       - name: Run ${{ matrix.suite_name }} Tests
-        if: ${{ matrix.os_id != 'linux' }}
+        if: ${{ matrix.os_id != 'linux' && matrix.suite_id != 'ui' }}
         shell: pwsh
         run: >
           dotnet test ${{ matrix.project_path }}
@@ -123,8 +123,22 @@ jobs:
           --blame-hang-timeout 8m
           --blame-hang-dump-type mini
 
+      - name: Run UI Tests
+        if: ${{ matrix.os_id != 'linux' && matrix.suite_id == 'ui' }}
+        shell: pwsh
+        run: >
+          dotnet test ${{ matrix.project_path }}
+          -c Release
+          --no-build
+          --verbosity minimal
+          --
+          --results-directory "TestResults/${{ matrix.suite_id }}"
+          --report-xunit-trx
+          --report-xunit-trx-filename "${{ matrix.trx_name }}"
+          --timeout 8m
+
       - name: Run ${{ matrix.suite_name }} Tests (Linux headless)
-        if: ${{ matrix.os_id == 'linux' }}
+        if: ${{ matrix.os_id == 'linux' && matrix.suite_id != 'ui' }}
         shell: bash
         run: >
           xvfb-run -a dotnet test ${{ matrix.project_path }}
@@ -137,6 +151,20 @@ jobs:
           --blame-hang
           --blame-hang-timeout 8m
           --blame-hang-dump-type mini
+
+      - name: Run UI Tests (Linux headless)
+        if: ${{ matrix.os_id == 'linux' && matrix.suite_id == 'ui' }}
+        shell: bash
+        run: >
+          xvfb-run -a dotnet test ${{ matrix.project_path }}
+          -c Release
+          --no-build
+          --verbosity minimal
+          --
+          --results-directory "TestResults/${{ matrix.suite_id }}"
+          --report-xunit-trx
+          --report-xunit-trx-filename "${{ matrix.trx_name }}"
+          --timeout 8m
 
       - name: Print Test Runner Logs
         if: ${{ failure() }}
