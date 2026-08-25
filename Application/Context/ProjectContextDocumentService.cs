@@ -375,8 +375,10 @@ public sealed class ProjectContextDocumentService(
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 				var path = plan.IncludedFiles[index];
-				await using var snapshot = await contentAnalyzer
-					.OpenCompleteSnapshotAsync(path, cancellationToken)
+				await using var snapshot = await OpenSourceSnapshotAsync(
+						plan.SourceRoot,
+						path,
+						cancellationToken)
 					.ConfigureAwait(false);
 				var file = CreateCompleteFileDocument(
 					path,
@@ -479,8 +481,10 @@ public sealed class ProjectContextDocumentService(
 			foreach (var path in plan.IncludedFiles)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				await using var snapshot = await contentAnalyzer
-					.OpenCompleteSnapshotAsync(path, cancellationToken)
+				await using var snapshot = await OpenSourceSnapshotAsync(
+						plan.SourceRoot,
+						path,
+						cancellationToken)
 					.ConfigureAwait(false);
 				var file = CreateCompleteFileDocument(
 					path,
@@ -564,8 +568,10 @@ public sealed class ProjectContextDocumentService(
 			foreach (var path in plan.IncludedFiles)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				await using var snapshot = await contentAnalyzer
-					.OpenCompleteSnapshotAsync(path, cancellationToken)
+				await using var snapshot = await OpenSourceSnapshotAsync(
+						plan.SourceRoot,
+						path,
+						cancellationToken)
 					.ConfigureAwait(false);
 				var file = CreateCompleteFileDocument(
 					path,
@@ -649,8 +655,10 @@ public sealed class ProjectContextDocumentService(
 			foreach (var path in plan.IncludedFiles)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				await using var snapshot = await contentAnalyzer
-					.OpenCompleteSnapshotAsync(path, cancellationToken)
+				await using var snapshot = await OpenSourceSnapshotAsync(
+						plan.SourceRoot,
+						path,
+						cancellationToken)
 					.ConfigureAwait(false);
 				var file = CreateCompleteFileDocument(
 					path,
@@ -725,6 +733,45 @@ public sealed class ProjectContextDocumentService(
 			totalFiles,
 			BytesWritten: 0,
 			Percentage: percentage));
+	}
+
+	private async ValueTask<IFileContentSnapshot> OpenSourceSnapshotAsync(
+		string projectRoot,
+		string path,
+		CancellationToken cancellationToken)
+	{
+		var classification = ProjectSourcePathPolicy.ClassifyUnavailable(projectRoot, path);
+		if (classification is { } unavailable)
+			return new UnavailableSourceSnapshot(unavailable);
+
+		var snapshot = await contentAnalyzer
+			.OpenCompleteSnapshotAsync(path, cancellationToken)
+			.ConfigureAwait(false);
+		classification = ProjectSourcePathPolicy.ClassifyUnavailable(projectRoot, path);
+		if (classification is null)
+			return snapshot;
+
+		await snapshot.DisposeAsync().ConfigureAwait(false);
+		return new UnavailableSourceSnapshot(classification.Value);
+	}
+
+	private async ValueTask<FileContentReadResult> ReadSourceClassifiedAsync(
+		string projectRoot,
+		string path,
+		long maximumFileBytes,
+		CancellationToken cancellationToken)
+	{
+		var classification = ProjectSourcePathPolicy.ClassifyUnavailable(projectRoot, path);
+		if (classification is { } unavailable)
+			return new FileContentReadResult(unavailable);
+
+		var result = await contentAnalyzer
+			.ReadClassifiedAsync(path, maximumFileBytes, cancellationToken)
+			.ConfigureAwait(false);
+		classification = ProjectSourcePathPolicy.ClassifyUnavailable(projectRoot, path);
+		return classification is { } unavailableAfterRead
+			? new FileContentReadResult(unavailableAfterRead)
+			: result;
 	}
 
 	private static ContextFileDocument CreateCompleteFileDocument(
@@ -841,8 +888,11 @@ public sealed class ProjectContextDocumentService(
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			var relativePath = NormalizeRelativePath(plan.SourceRoot, path);
-			var result = await contentAnalyzer
-				.ReadClassifiedAsync(path, maximumFileBytes, cancellationToken)
+			var result = await ReadSourceClassifiedAsync(
+					plan.SourceRoot,
+					path,
+					maximumFileBytes,
+					cancellationToken)
 				.ConfigureAwait(false);
 			var content = result.Content;
 			if (!result.IsText || content is null)
@@ -1558,6 +1608,20 @@ public sealed class ProjectContextDocumentService(
 		TextFileMetrics? Metrics = null)
 	{
 		public bool IsBinary => Classification == FileContentClassification.Binary;
+	}
+
+	private sealed class UnavailableSourceSnapshot(
+		FileContentClassification classification) : IFileContentSnapshot
+	{
+		public FileContentMetricsResult Result { get; } = new(classification);
+
+		public ValueTask CopyTextToAsync(
+			int maximumCharacters,
+			Func<ReadOnlyMemory<char>, CancellationToken, ValueTask> writeChunk,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromException(new IOException("The source snapshot does not contain readable text."));
+
+		public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 	}
 
 	private sealed class EncodingReportingTextWriter(

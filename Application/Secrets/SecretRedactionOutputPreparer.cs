@@ -69,6 +69,7 @@ public sealed class SecretRedactionOutputPreparer
 	{
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(orderedFilePaths);
+		EnsureSourcePathsAvailable(context, orderedFilePaths);
 		if (context is { Compression: not null, Redaction: null })
 		{
 			return await PrepareCompressionOnlyAsync(
@@ -464,8 +465,10 @@ public sealed class SecretRedactionOutputPreparer
 		CompressionWorkItem item,
 		CancellationToken cancellationToken)
 	{
+		EnsureSourcePathAvailable(context, item.SourcePath);
 		var coherentRead = await ReadFactCoherentlyAsync(item.SourcePath, cancellationToken)
 			.ConfigureAwait(false);
+		EnsureSourcePathAvailable(context, item.SourcePath);
 		var readFact = coherentRead.Fact;
 		var result = readFact.ToReadResult();
 		IDisposable? contentLease = null;
@@ -627,8 +630,10 @@ public sealed class SecretRedactionOutputPreparer
 		CancellationToken cancellationToken)
 	{
 		var sourcePath = workItem.SourcePath;
+		EnsureSourcePathAvailable(context, sourcePath);
 		var coherentRead = await ReadFactCoherentlyAsync(sourcePath, cancellationToken)
 			.ConfigureAwait(false);
+		EnsureSourcePathAvailable(context, sourcePath);
 		var readFact = coherentRead.Fact;
 		var result = readFact.ToReadResult();
 
@@ -680,6 +685,38 @@ public sealed class SecretRedactionOutputPreparer
 			FileContentClassification.Text,
 			encoding,
 			[]);
+	}
+
+	private static void EnsureSourcePathsAvailable(
+		ContentTransformationContext context,
+		IReadOnlyList<string> orderedFilePaths)
+	{
+		foreach (var sourcePath in orderedFilePaths)
+			EnsureSourcePathAvailable(context, sourcePath);
+	}
+
+	private static void EnsureSourcePathAvailable(
+		ContentTransformationContext context,
+		string sourcePath)
+	{
+		var projectRoot = context.Redaction?.ProjectRoot ?? context.Compression?.ProjectRoot;
+		if (projectRoot is null)
+			return;
+
+		var classification = ProjectSourcePathPolicy.ClassifyUnavailable(projectRoot, sourcePath);
+		if (classification is null)
+			return;
+
+		throw classification.Value switch
+		{
+			FileContentClassification.Missing => new FileNotFoundException(
+				"A selected source file is no longer available.",
+				sourcePath),
+			FileContentClassification.AccessDenied => new UnauthorizedAccessException(
+				$"Access was denied while inspecting the selected source file '{sourcePath}'."),
+			_ => new SecretDetectionException(
+				$"Content transformation could not safely inspect '{sourcePath}' ({classification.Value}).")
+		};
 	}
 
 	private readonly record struct CompressionWorkItem(int Index, string SourcePath);
