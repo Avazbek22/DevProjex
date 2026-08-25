@@ -388,6 +388,30 @@ public sealed class TreeNodeViewModelTests
     }
 
     [Fact]
+    public void CheckedStateAndCollection_DeepTreeDoNotDependOnTheCallStack()
+    {
+        const int depth = 16_000;
+        var root = CreateNode("Root");
+        var current = root;
+        for (var level = 0; level < depth; level++)
+        {
+            var child = new TreeNodeViewModel(CreateDescriptor($"Node{level}"), current, null);
+            current.Children.Add(child);
+            current = child;
+        }
+
+        root.IsChecked = true;
+        Assert.True(current.IsChecked);
+
+        current.IsChecked = false;
+        Assert.False(root.IsChecked);
+
+        var selected = new HashSet<string>();
+        root.CollectCheckedPaths(selected);
+        Assert.Empty(selected);
+    }
+
+    [Fact]
     public void IsChecked_ParentIndeterminate_ClickSetsChildrenUnchecked()
     {
         var root = CreateTree();
