@@ -223,14 +223,24 @@ internal sealed class DevProjexMcpTools(
 				return McpToolResults.TextSuccess(McpSpotlight.Wrap(content), advertiseLargeResult: true);
 			}
 
-			var tree = projects.TreeExportService.BuildFullTree(
-				plan.SourceRoot,
-				plan.ProjectedTree,
-				TreeTextFormat.Ascii,
-				projects.ResolveProtectedDocumentRoot(plan));
-			var treeLines = McpTextRanges.SplitLines(tree);
-			if (treeLines.Count > MaximumTreeLines)
-				tree = string.Join('\n', treeLines.Take(MaximumTreeLines)) + "\n[Tree truncated at 2000 lines.]";
+			using var treeWriter = new McpBoundedLineTextWriter(MaximumTreeLines);
+			try
+			{
+				await projects.TreeExportService.WriteFullTreeAsync(
+						treeWriter,
+						plan.SourceRoot,
+						plan.ProjectedTree,
+						projects.ResolveProtectedDocumentRoot(plan),
+						includeFinalLineEnding: false,
+						cancellationToken: cancellationToken)
+					.ConfigureAwait(false);
+			}
+			catch (McpLineLimitReachedException)
+			{
+			}
+			var tree = treeWriter.Text;
+			if (treeWriter.IsTruncated)
+				tree += "\n[Tree truncated at 2000 lines.]";
 			var message = $"Pack stored as '{pack.Id}' ({pack.Characters} characters). " +
 			              "Call read_pack with this pack_id to read ranges, or search_project to locate source content.\n" +
 			              McpSpotlight.Wrap(tree);
