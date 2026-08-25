@@ -68,11 +68,9 @@ public static class DesktopLaunchRequestStore
 				Path.Combine(Path.GetTempPath(), "DevProjex", "desktop-requests"));
 			if (!PathUtility.IsPathInside(fullPath, expectedDirectory))
 				return null;
-			var file = new FileInfo(fullPath);
-			if (!file.Exists || file.Length > DesktopProtocol.MaximumMessageBytes)
-				return null;
-			var json = await File.ReadAllTextAsync(fullPath, cancellationToken).ConfigureAwait(false);
-			return JsonSerializer.Deserialize<DesktopOpenRequest>(json, JsonOptions);
+			return await DesktopRequestEnvelopeReader
+				.ReadAsync<DesktopOpenRequest>(fullPath, JsonOptions, cancellationToken)
+				.ConfigureAwait(false);
 		}
 		catch (OperationCanceledException)
 		{

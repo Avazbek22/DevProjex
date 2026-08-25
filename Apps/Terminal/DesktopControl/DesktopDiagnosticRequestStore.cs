@@ -47,11 +47,8 @@ public static class DesktopDiagnosticRequestStore
 				Path.Combine(Path.GetTempPath(), "DevProjex", "desktop-diagnostics"));
 			if (!PathUtility.IsPathInside(fullPath, expectedDirectory))
 				return null;
-			var file = new FileInfo(fullPath);
-			if (!file.Exists || file.Length > DesktopProtocol.MaximumMessageBytes)
-				return null;
-			return JsonSerializer.Deserialize<DesktopDiagnosticRequest>(
-				File.ReadAllText(fullPath),
+			return DesktopRequestEnvelopeReader.Read<DesktopDiagnosticRequest>(
+				fullPath,
 				JsonOptions);
 		}
 		catch
