@@ -36,18 +36,24 @@ public sealed class TerminalSettingsStoreTests
 	}
 
 	[Fact]
-	public void OversizedSettingsSafelyFallBackWithoutDeserializingTheDocument()
+	public async Task OversizedSettingsSafelyFallBackWithoutOverwritingTheDocument()
 	{
 		using var workspace = new TemporaryDirectory();
 		var store = new TerminalSettingsStore(() => workspace.Path);
 		Directory.CreateDirectory(Path.GetDirectoryName(store.GetPath())!);
-		File.WriteAllText(
-			store.GetPath(),
+		var oversizedDocument =
 			"{\"SchemaVersion\":1,\"ScreenMode\":2,\"CommandHistory\":[]}" +
-			new string(' ', 1024 * 1024));
+			new string(' ', 1024 * 1024);
+		File.WriteAllText(store.GetPath(), oversizedDocument);
 
 		Assert.Equal(TerminalScreenMode.Auto, store.LoadScreenMode());
 		Assert.Empty(store.LoadCommandHistory());
+
+		await store.SaveScreenModeAsync(
+			TerminalScreenMode.Inline,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(oversizedDocument, File.ReadAllText(store.GetPath()));
 	}
 
 	[Fact]

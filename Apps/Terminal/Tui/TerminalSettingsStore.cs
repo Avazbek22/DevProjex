@@ -82,12 +82,19 @@ public sealed class TerminalSettingsStore
 			using var stream = new MaximumLengthReadStream(
 				source,
 				MaximumDocumentBytes,
-				static () => new IOException("Terminal settings exceed the size limit."));
+				static () => new TerminalSettingsLimitException());
 			var document = JsonSerializer.Deserialize<TerminalSettingsDocument>(stream);
 			hasFutureSchema = document is { SchemaVersion: > CurrentSchemaVersion };
 			return document is { SchemaVersion: CurrentSchemaVersion }
 				? document
 				: null;
+		}
+		catch (TerminalSettingsLimitException)
+		{
+			// The schema cannot be classified within this version's resource limit. Preserve the
+			// document exactly as a potentially valid settings file written by a newer version.
+			hasFutureSchema = true;
+			return null;
 		}
 		catch (Exception exception) when (exception is
 			       IOException or
@@ -186,4 +193,7 @@ public sealed class TerminalSettingsStore
 		int SchemaVersion,
 		TerminalScreenMode ScreenMode,
 		IReadOnlyList<string>? CommandHistory = null);
+
+	private sealed class TerminalSettingsLimitException()
+		: IOException("Terminal settings exceed the size limit.");
 }
