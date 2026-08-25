@@ -6,7 +6,7 @@ public static class ProjectSelectionPath
 
 	public static string NormalizeRelative(string value)
 	{
-		if (string.IsNullOrWhiteSpace(value) || value == ".")
+		if (string.IsNullOrEmpty(value) || value == ".")
 			return string.Empty;
 
 		if (IsRootedOnAnySupportedPlatform(value))
