@@ -103,7 +103,8 @@ public sealed class ProjectContextDocumentService(
 		Stream destination,
 		CancellationToken cancellationToken = default,
 		bool plain = false,
-		bool useUnifiedContentHeaders = false)
+		bool useUnifiedContentHeaders = false,
+		IProgress<ProjectCopyExportProgress>? writeProgress = null)
 	{
 		_ = await WriteCompleteWithReportAsync(
 				plan,
@@ -112,7 +113,8 @@ public sealed class ProjectContextDocumentService(
 				destination,
 				cancellationToken,
 				plain,
-				useUnifiedContentHeaders)
+				useUnifiedContentHeaders,
+				writeProgress)
 			.ConfigureAwait(false);
 	}
 
@@ -123,7 +125,8 @@ public sealed class ProjectContextDocumentService(
 		Stream destination,
 		CancellationToken cancellationToken = default,
 		bool plain = false,
-		bool useUnifiedContentHeaders = false)
+		bool useUnifiedContentHeaders = false,
+		IProgress<ProjectCopyExportProgress>? writeProgress = null)
 	{
 		ArgumentNullException.ThrowIfNull(plan);
 		ArgumentNullException.ThrowIfNull(destination);
@@ -147,7 +150,8 @@ public sealed class ProjectContextDocumentService(
 					cancellationToken,
 					plain,
 					useUnifiedContentHeaders,
-					effectivePathRedaction)
+					effectivePathRedaction,
+					writeProgress)
 				.ConfigureAwait(false);
 		}
 		using var cancellationDestination = new CancellationBoundWriteStream(
@@ -164,6 +168,7 @@ public sealed class ProjectContextDocumentService(
 						plain,
 						effectivePathRedaction,
 						contentPathMapper,
+						writeProgress,
 						cancellationToken)
 					.ConfigureAwait(false);
 				break;
@@ -175,6 +180,7 @@ public sealed class ProjectContextDocumentService(
 						plain,
 						effectivePathRedaction,
 						contentPathMapper,
+						writeProgress,
 						cancellationToken)
 					.ConfigureAwait(false);
 				break;
@@ -185,6 +191,7 @@ public sealed class ProjectContextDocumentService(
 						cancellationDestination,
 						effectivePathRedaction,
 						contentPathMapper,
+						writeProgress,
 						cancellationToken)
 					.ConfigureAwait(false);
 				break;
@@ -195,6 +202,7 @@ public sealed class ProjectContextDocumentService(
 						cancellationDestination,
 						effectivePathRedaction,
 						contentPathMapper,
+						writeProgress,
 						cancellationToken)
 					.ConfigureAwait(false);
 				break;
@@ -202,6 +210,41 @@ public sealed class ProjectContextDocumentService(
 				throw new ArgumentOutOfRangeException(nameof(format), format, null);
 		}
 		return ProjectContextWriteResult.Empty;
+	}
+
+	public async Task WritePreparedCompleteAsync(
+		ProjectContextPlan plan,
+		ProjectContextView view,
+		ProjectContextDocumentFormat format,
+		Stream destination,
+		PreparedSecretRedactionOutput prepared,
+		CancellationToken cancellationToken = default,
+		bool plain = false,
+		bool useUnifiedContentHeaders = false,
+		IProgress<ProjectCopyExportProgress>? writeProgress = null)
+	{
+		ArgumentNullException.ThrowIfNull(prepared);
+		var pathRedaction = outputPathRedactionDecision ??
+		                    OutputRootPathPresentation.CaptureRedactionDecision(
+			                    CreateTransformationContext(plan));
+		var analyzer = new PreparedSecretFileContentAnalyzer(contentAnalyzer, prepared);
+		var service = new ProjectContextDocumentService(
+			treeExportService,
+			analyzer,
+			omissionMessageProvider,
+			secretRedactionSession: null,
+			codeCompressionSession: null,
+			outputPathRedactionDecision: pathRedaction);
+		await service.WriteCompleteAsync(
+				plan,
+				view,
+				format,
+				destination,
+				cancellationToken,
+				plain,
+				useUnifiedContentHeaders,
+				writeProgress)
+			.ConfigureAwait(false);
 	}
 
 	// One gate for both transformations: whichever is enabled, the document is built from prepared
@@ -271,7 +314,8 @@ public sealed class ProjectContextDocumentService(
 		CancellationToken cancellationToken,
 		bool plain,
 		bool useUnifiedContentHeaders,
-		OutputPathRedactionDecision? pathRedaction)
+		OutputPathRedactionDecision? pathRedaction,
+		IProgress<ProjectCopyExportProgress>? writeProgress)
 	{
 		var context = CreateTransformationContext(plan)!;
 		var preparer = new SecretRedactionOutputPreparer(contentAnalyzer);
@@ -293,7 +337,8 @@ public sealed class ProjectContextDocumentService(
 				destination,
 				cancellationToken,
 				plain,
-				useUnifiedContentHeaders)
+				useUnifiedContentHeaders,
+				writeProgress)
 			.ConfigureAwait(false);
 		return new ProjectContextWriteResult(prepared.UnscannableFiles);
 	}
@@ -305,6 +350,7 @@ public sealed class ProjectContextDocumentService(
 		bool plain,
 		OutputPathRedactionDecision? pathRedaction,
 		Func<string, string>? contentPathMapper,
+		IProgress<ProjectCopyExportProgress>? writeProgress,
 		CancellationToken cancellationToken)
 	{
 		await using var writer = CreateStreamWriter(destination);
@@ -374,6 +420,7 @@ public sealed class ProjectContextDocumentService(
 					}
 				}
 				hasOutput = true;
+				ReportProgress(writeProgress, index + 1, plan.IncludedFiles.Count);
 			}
 		}
 
@@ -387,6 +434,7 @@ public sealed class ProjectContextDocumentService(
 		bool plain,
 		OutputPathRedactionDecision? pathRedaction,
 		Func<string, string>? contentPathMapper,
+		IProgress<ProjectCopyExportProgress>? writeProgress,
 		CancellationToken cancellationToken)
 	{
 		await using var writer = CreateStreamWriter(destination);
@@ -427,6 +475,7 @@ public sealed class ProjectContextDocumentService(
 
 		if (IncludesContent(view))
 		{
+			var processedFiles = 0;
 			foreach (var path in plan.IncludedFiles)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
@@ -471,6 +520,7 @@ public sealed class ProjectContextDocumentService(
 					await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
 					await writer.WriteAsync(fence.AsMemory(), cancellationToken).ConfigureAwait(false);
 				}
+				ReportProgress(writeProgress, ++processedFiles, plan.IncludedFiles.Count);
 			}
 		}
 
@@ -483,6 +533,7 @@ public sealed class ProjectContextDocumentService(
 		Stream destination,
 		OutputPathRedactionDecision? pathRedaction,
 		Func<string, string>? contentPathMapper,
+		IProgress<ProjectCopyExportProgress>? writeProgress,
 		CancellationToken cancellationToken)
 	{
 		using var writer = new Utf8JsonWriter(destination, new JsonWriterOptions
@@ -509,6 +560,7 @@ public sealed class ProjectContextDocumentService(
 		writer.WriteStartArray("files");
 		if (IncludesContent(view))
 		{
+			var processedFiles = 0;
 			foreach (var path in plan.IncludedFiles)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
@@ -547,6 +599,7 @@ public sealed class ProjectContextDocumentService(
 						isFinalSegment: true);
 				}
 				writer.WriteEndObject();
+				ReportProgress(writeProgress, ++processedFiles, plan.IncludedFiles.Count);
 			}
 		}
 		writer.WriteEndArray();
@@ -562,6 +615,7 @@ public sealed class ProjectContextDocumentService(
 		Stream destination,
 		OutputPathRedactionDecision? pathRedaction,
 		Func<string, string>? contentPathMapper,
+		IProgress<ProjectCopyExportProgress>? writeProgress,
 		CancellationToken cancellationToken)
 	{
 		using var writer = XmlWriter.Create(destination, new XmlWriterSettings
@@ -591,6 +645,7 @@ public sealed class ProjectContextDocumentService(
 		writer.WriteStartElement("files");
 		if (IncludesContent(view))
 		{
+			var processedFiles = 0;
 			foreach (var path in plan.IncludedFiles)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
@@ -632,6 +687,7 @@ public sealed class ProjectContextDocumentService(
 					writer.WriteEndElement();
 				}
 				writer.WriteEndElement();
+				ReportProgress(writeProgress, ++processedFiles, plan.IncludedFiles.Count);
 			}
 		}
 		writer.WriteEndElement();
@@ -652,6 +708,23 @@ public sealed class ProjectContextDocumentService(
 		writer.WriteEndDocument();
 		await writer.FlushAsync()
 			.ConfigureAwait(false);
+	}
+
+	private static void ReportProgress(
+		IProgress<ProjectCopyExportProgress>? progress,
+		int processedFiles,
+		int totalFiles)
+	{
+		if (progress is null)
+			return;
+		var percentage = totalFiles == 0
+			? 100d
+			: Math.Clamp(processedFiles * 100d / totalFiles, 0d, 100d);
+		progress.Report(new ProjectCopyExportProgress(
+			processedFiles,
+			totalFiles,
+			BytesWritten: 0,
+			Percentage: percentage));
 	}
 
 	private static ContextFileDocument CreateCompleteFileDocument(

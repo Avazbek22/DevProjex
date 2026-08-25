@@ -82,6 +82,16 @@ Future tools must declare `outputSchema` only when their useful result is
 genuinely structured and can be returned completely in `structuredContent`.
 Metadata about a text payload is not sufficient reason to add a schema.
 
+## Progress Notifications
+
+`pack_context` and `analyze` report measured selection, content-transformation,
+and output phases through MCP `notifications/progress`. Notifications are sent
+only when the caller supplies a `progressToken` in the request `_meta`; without
+that token the server sends none. `progressToken` is transport metadata, not a
+tool argument, so tool input schemas are unchanged. Progress is monotonic and
+intermediate file-count updates are rate-limited; the other five tools do not
+report progress.
+
 Defaults:
 
 - `pack_context.view`: `tree-content`

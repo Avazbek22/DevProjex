@@ -14,6 +14,7 @@ global using DevProjex.Kernel;
 global using DevProjex.Kernel.Abstractions;
 global using DevProjex.Kernel.Contracts;
 global using DevProjex.Kernel.Models;
+global using ModelContextProtocol;
 global using ModelContextProtocol.Protocol;
 global using ModelContextProtocol.Server;
 global using System.Text;

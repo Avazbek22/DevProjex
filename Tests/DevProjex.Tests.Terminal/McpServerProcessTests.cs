@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using DevProjex.Mcp;
+using ModelContextProtocol;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
 
@@ -60,6 +61,20 @@ public sealed class McpServerProcessTests
 			var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
 			using var textDocument = JsonDocument.Parse(text);
 			Assert.True(JsonElement.DeepEquals(structured, textDocument.RootElement));
+
+			var progress = new InlineProgress<ProgressNotificationValue>();
+			var pack = await client.CallToolAsync(
+				"pack_context",
+				new Dictionary<string, object?>
+				{
+					["view"] = "content",
+					["format"] = "text"
+				},
+				progress,
+				options: null,
+				TestContext.Current.CancellationToken);
+			Assert.NotEqual(true, pack.IsError);
+			Assert.NotEmpty(progress.Values);
 		}
 
 		process.StandardInput.Close();
@@ -81,6 +96,27 @@ public sealed class McpServerProcessTests
 
 	private static StringComparison PathComparison =>
 		OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
+	private sealed class InlineProgress<T> : IProgress<T>
+	{
+		private readonly List<T> _values = [];
+		private readonly object _sync = new();
+
+		public IReadOnlyList<T> Values
+		{
+			get
+			{
+				lock (_sync)
+					return _values.ToArray();
+			}
+		}
+
+		public void Report(T value)
+		{
+			lock (_sync)
+				_values.Add(value);
+		}
+	}
 
 	private sealed class RecordingReadStream(Stream source) : Stream
 	{
