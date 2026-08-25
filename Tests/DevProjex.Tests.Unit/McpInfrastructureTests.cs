@@ -84,6 +84,23 @@ public sealed class McpInfrastructureTests
 		Assert.Equal(McpErrorCodes.RootViolation, exception.Code);
 	}
 
+	[Fact]
+	public void ToolErrorsEscapeControlCharactersIntoOneSafeLine()
+	{
+		var result = McpToolResults.Error(new McpToolException(
+			McpErrorCodes.RootViolation,
+			$"{McpErrorCodes.RootViolation}: bad\r\npath\t\u001b[31m\u2028tail"));
+
+		var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
+		Assert.True(result.IsError);
+		Assert.Equal(
+			$"{McpErrorCodes.RootViolation}: bad\\r\\npath\\t\\u001B[31m\\u2028tail",
+			text);
+		Assert.DoesNotContain('\r', text);
+		Assert.DoesNotContain('\n', text);
+		Assert.DoesNotContain('\u001b', text);
+	}
+
 	[Theory]
 	[InlineData("42", 42)]
 	[InlineData(42, 42)]
