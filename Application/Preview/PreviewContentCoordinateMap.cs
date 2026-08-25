@@ -31,38 +31,55 @@ public sealed class PreviewContentCoordinateMap
 		ArgumentNullException.ThrowIfNull(sourceTransformMap);
 		redactionTransformMap ??= ContentTransformMap.Identity;
 		var lineCount = 1;
-		foreach (var character in transformedContent)
+		for (var index = 0; index < transformedContent.Length;)
 		{
-			if (character == '\n')
-				lineCount++;
+			var lineBreakLength = GetLineBreakLength(transformedContent, index);
+			if (lineBreakLength == 0)
+			{
+				index++;
+				continue;
+			}
+
+			lineCount++;
+			index += lineBreakLength;
 		}
 
 		var lineStarts = new int[lineCount];
 		var lineEnds = new int[lineCount];
 		var lineIndex = 0;
 		var lineStart = 0;
-		for (var index = 0; index < transformedContent.Length; index++)
+		for (var index = 0; index < transformedContent.Length;)
 		{
-			if (transformedContent[index] != '\n')
+			var lineBreakLength = GetLineBreakLength(transformedContent, index);
+			if (lineBreakLength == 0)
+			{
+				index++;
 				continue;
+			}
 
 			lineStarts[lineIndex] = lineStart;
-			lineEnds[lineIndex] = index > lineStart && transformedContent[index - 1] == '\r'
-				? index - 1
-				: index;
-			lineStart = index + 1;
+			lineEnds[lineIndex] = index;
+			lineStart = index + lineBreakLength;
 			lineIndex++;
+			index = lineStart;
 		}
 		lineStarts[lineIndex] = lineStart;
-		lineEnds[lineIndex] = transformedContent.Length > lineStart && transformedContent[^1] == '\r'
-			? transformedContent.Length - 1
-			: transformedContent.Length;
+		lineEnds[lineIndex] = transformedContent.Length;
 
 		return new PreviewContentCoordinateMap(
 			sourceTransformMap,
 			redactionTransformMap,
 			lineStarts,
 			lineEnds);
+	}
+
+	private static int GetLineBreakLength(ReadOnlySpan<char> text, int index)
+	{
+		if (text[index] == '\n')
+			return 1;
+		if (text[index] != '\r')
+			return 0;
+		return index + 1 < text.Length && text[index + 1] == '\n' ? 2 : 1;
 	}
 
 	public bool TryToSourceOffset(int lineIndex, int column, out int sourceOffset)
