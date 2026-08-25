@@ -204,6 +204,39 @@ public sealed class SelectedPathsContractTests
 	}
 
 	[Fact]
+	public async Task UnixSelectionPreservesALiteralBackslashInFileName()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Windows treats a backslash as a directory separator.");
+			return;
+		}
+
+		using var workspace = CreateWorkspace();
+		const string relativePath = "literal\\name.txt";
+		workspace.WriteFile(relativePath, "literal backslash file name\n");
+
+		using var document = await ExportJsonAsync(
+			workspace.Path,
+			"--select", relativePath);
+
+		Assert.Equal(FullContentPaths(workspace.Path, relativePath), ReadFilePaths(document));
+		Assert.Equal([relativePath], ReadSelectedPaths(document));
+	}
+
+	[Fact]
+	public void SelectionPathNormalizationUsesOnlyNativeUnixSeparators()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Windows treats a backslash as a directory separator.");
+			return;
+		}
+
+		Assert.Equal("literal\\name.txt", ProjectSelectionPath.NormalizeRelative("literal\\name.txt"));
+	}
+
+	[Fact]
 	public async Task SelectionsAcrossMultipleRootFoldersAreCombinedWithoutFallback()
 	{
 		using var workspace = CreateWorkspace();

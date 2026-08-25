@@ -16,9 +16,10 @@ public static class ProjectSelectionPath
 				"Selected paths must be relative to the project root.");
 		}
 
-		var segments = value.Split(
-			[Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar, '/', '\\'],
-			StringSplitOptions.RemoveEmptyEntries);
+		var separators = OperatingSystem.IsWindows()
+			? new[] { '\\', '/' }
+			: ['/'];
+		var segments = value.Split(separators, StringSplitOptions.RemoveEmptyEntries);
 		if (segments.Any(static segment => segment == ".."))
 		{
 			throw new ProjectContextValidationException(
