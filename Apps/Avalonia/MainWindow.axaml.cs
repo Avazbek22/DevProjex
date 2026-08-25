@@ -1922,7 +1922,9 @@ public partial class MainWindow : Window
         {
             var displayRepositoryUrl = RepositoryWebPathPresentationService.NormalizeForDisplay(currentRepositoryUrl);
             if (string.IsNullOrWhiteSpace(displayRepositoryUrl))
-                displayRepositoryUrl = currentRepositoryUrl;
+                displayRepositoryUrl = currentProjectDisplayName;
+            if (string.IsNullOrWhiteSpace(displayRepositoryUrl))
+                return MainWindowViewModel.BaseTitle;
 
             var branchDisplay = !string.IsNullOrEmpty(currentBranch)
                 ? $" [{currentBranch}]"

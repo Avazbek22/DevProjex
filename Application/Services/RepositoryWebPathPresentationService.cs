@@ -36,29 +36,10 @@ public sealed class RepositoryWebPathPresentationService
 
     private static string NormalizeRepositoryUrl(string repositoryUrl)
     {
-        var normalized = repositoryUrl.Trim();
-        if (!Uri.TryCreate(normalized, UriKind.Absolute, out var uri))
-        {
-            var fallback = normalized.TrimEnd('/');
-            if (fallback.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
-                fallback = fallback[..^4];
-            return fallback;
-        }
-
-        var builder = new UriBuilder(uri)
-        {
-            UserName = string.Empty,
-            Password = string.Empty,
-            Query = string.Empty,
-            Fragment = string.Empty
-        };
-
-        var normalizedPath = builder.Path.TrimEnd('/');
-        if (normalizedPath.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
-            normalizedPath = normalizedPath[..^4];
-        builder.Path = normalizedPath;
-
-        return builder.Uri.ToString().TrimEnd('/');
+        var normalized = RepositoryUrlUtility.ToSafeDisplay(repositoryUrl).TrimEnd('/');
+        return normalized.EndsWith(".git", StringComparison.OrdinalIgnoreCase)
+            ? normalized[..^4]
+            : normalized;
     }
 
     private static string MapToFileWebPath(string fullPath, string localRootPath, string rootWebPath)

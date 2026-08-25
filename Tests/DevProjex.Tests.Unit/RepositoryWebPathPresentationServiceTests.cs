@@ -24,6 +24,16 @@ public sealed class RepositoryWebPathPresentationServiceTests
 	}
 
 	[Fact]
+	public void NormalizeForDisplay_RejectsMalformedCredentialBearingUrl()
+	{
+		var normalized = RepositoryWebPathPresentationService.NormalizeForDisplay(
+			"https://user:super-secret@[invalid/repo");
+
+		Assert.Empty(normalized);
+		Assert.DoesNotContain("super-secret", normalized, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void TryCreate_ReturnsNull_ForInvalidInputs()
 	{
 		var service = new RepositoryWebPathPresentationService();
