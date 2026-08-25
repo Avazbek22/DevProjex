@@ -675,6 +675,30 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 	}
 
 	[Fact]
+	public async Task AtomicFileOutputSupportsAValidDestinationNearTheComponentLengthLimit()
+	{
+		using var workspace = new TemporaryDirectory();
+		var destination = Path.Combine(workspace.Path, new string('a', 240) + ".txt");
+
+		var writtenPath = await AtomicFileOutput.WriteAsync(
+			destination,
+			overwrite: false,
+			async (stream, cancellationToken) =>
+			{
+				await stream.WriteAsync("content"u8.ToArray(), cancellationToken);
+			},
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(destination, writtenPath);
+		Assert.Equal("content", await File.ReadAllTextAsync(
+			destination,
+			TestContext.Current.CancellationToken));
+		Assert.DoesNotContain(
+			Directory.EnumerateFiles(workspace.Path),
+			static path => Path.GetFileName(path).StartsWith(".devprojex-", StringComparison.Ordinal));
+	}
+
+	[Fact]
 	public void ExistingDestinationFileLinkIntoSourceIsRejectedWithoutEffects()
 	{
 		using var workspace = new TemporaryDirectory();

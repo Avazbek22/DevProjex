@@ -89,7 +89,7 @@ public static class AtomicFileOutput
 
 		var tempPath = Path.Combine(
 			directory,
-			$".{Path.GetFileName(fullPath)}.{Guid.NewGuid():N}.tmp");
+			$".devprojex-{Guid.NewGuid():N}.tmp");
 		Exception? operationException = null;
 		try
 		{
