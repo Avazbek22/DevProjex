@@ -278,6 +278,9 @@ public sealed class AppInstancePackagingContractTests
         Assert.Contains("Assert-IsolatedWorkspaceCapacity -sourceRoot $sourceRoot", releaseScript, StringComparison.Ordinal);
         Assert.Contains("$sourceBytes * 2", releaseScript, StringComparison.Ordinal);
         Assert.Contains("$isolatedPackages + [System.IO.Path]::DirectorySeparatorChar", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("Resolve-IsolatedWorkspaceCleanupTarget", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("Remove-Item -LiteralPath $cleanupTarget -Recurse", releaseScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("cmd /c", releaseScript, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("linux-x64.portable", releaseScript, StringComparison.Ordinal);
         Assert.DoesNotContain("linux-arm64.portable", releaseScript, StringComparison.Ordinal);
         Assert.Contains("\"/p:PublishSingleFile=true\"", releaseScript, StringComparison.Ordinal);

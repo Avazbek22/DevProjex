@@ -1604,6 +1604,7 @@ function Publish-ArtifactsToSource(
 }
 
 function Start-DeferredCleanup([string]$targetPath) {
+    $targetPath = Resolve-IsolatedWorkspaceCleanupTarget -targetPath $targetPath
     $cleanupScriptPath = Join-Path $env:TEMP ("devprojex-cleanup-" + [Guid]::NewGuid().ToString("N") + ".ps1")
     $scriptContent = @'
 param(
@@ -1612,18 +1613,18 @@ param(
 )
 
 for ($attempt = 1; $attempt -le 120; $attempt++) {
-    if (-not (Test-Path $TargetPath)) {
+    if (-not (Test-Path -LiteralPath $TargetPath)) {
         break
     }
 
     try {
-        Remove-Item -Path $TargetPath -Recurse -Force -ErrorAction Stop
+        Remove-Item -LiteralPath $TargetPath -Recurse -Force -ErrorAction Stop
     }
     catch {
         # Keep retrying; file handles can be released with delay after build tooling exits.
     }
 
-    if (-not (Test-Path $TargetPath)) {
+    if (-not (Test-Path -LiteralPath $TargetPath)) {
         break
     }
 
@@ -1631,7 +1632,7 @@ for ($attempt = 1; $attempt -le 120; $attempt++) {
 }
 
 try {
-    Remove-Item -Path $SelfScriptPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $SelfScriptPath -Force -ErrorAction SilentlyContinue
 }
 catch {
     # Ignore cleanup script self-delete failures.
@@ -1651,18 +1652,51 @@ catch {
     return $cleanupScriptPath
 }
 
+function Resolve-IsolatedWorkspaceCleanupTarget([string]$targetPath) {
+    if ([string]::IsNullOrWhiteSpace($targetPath)) {
+        throw "The isolated workspace cleanup target is empty."
+    }
+
+    $comparison = if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+        [System.StringComparison]::OrdinalIgnoreCase
+    }
+    else {
+        [System.StringComparison]::Ordinal
+    }
+    $separator = [System.IO.Path]::DirectorySeparatorChar
+    $alternateSeparator = [System.IO.Path]::AltDirectorySeparatorChar
+    $allowedRoot = [System.IO.Path]::GetFullPath(
+        (Join-Path $env:TEMP "devprojex-release-work")).TrimEnd($separator, $alternateSeparator)
+    $resolvedTarget = [System.IO.Path]::GetFullPath($targetPath).TrimEnd($separator, $alternateSeparator)
+    $allowedPrefix = $allowedRoot + $separator
+    if (-not $resolvedTarget.StartsWith($allowedPrefix, $comparison)) {
+        throw "Refusing to remove a path outside the isolated release workspace: $resolvedTarget"
+    }
+
+    $workspaceName = $resolvedTarget.Substring($allowedPrefix.Length)
+    $workspaceId = [Guid]::Empty
+    if ($workspaceName.Contains([string]$separator) -or
+        $workspaceName.Contains([string]$alternateSeparator) -or
+        -not [Guid]::TryParseExact($workspaceName, "N", [ref]$workspaceId)) {
+        throw "Refusing to remove an invalid isolated release workspace: $resolvedTarget"
+    }
+
+    return $resolvedTarget
+}
+
 function Cleanup-IsolatedWorkspace() {
     if ([string]::IsNullOrWhiteSpace($script:IsolatedWorkspaceRoot)) {
         return
     }
 
-    if (-not (Test-Path $script:IsolatedWorkspaceRoot)) {
+    $cleanupTarget = Resolve-IsolatedWorkspaceCleanupTarget -targetPath $script:IsolatedWorkspaceRoot
+    if (-not (Test-Path -LiteralPath $cleanupTarget)) {
         return
     }
 
     # Remove read-only flag from files/folders in case package tools produced protected artifacts.
     try {
-        Get-ChildItem -Path $script:IsolatedWorkspaceRoot -Recurse -Force -ErrorAction SilentlyContinue |
+        Get-ChildItem -LiteralPath $cleanupTarget -Recurse -Force -ErrorAction SilentlyContinue |
             ForEach-Object {
                 try {
                     if (($_.Attributes -band [System.IO.FileAttributes]::ReadOnly) -ne 0) {
@@ -1681,8 +1715,8 @@ function Cleanup-IsolatedWorkspace() {
     $maxAttempts = 20
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
         try {
-            Remove-Item -Path $script:IsolatedWorkspaceRoot -Recurse -Force -ErrorAction Stop
-            if (-not (Test-Path $script:IsolatedWorkspaceRoot)) {
+            Remove-Item -LiteralPath $cleanupTarget -Recurse -Force -ErrorAction Stop
+            if (-not (Test-Path -LiteralPath $cleanupTarget)) {
                 return
             }
         }
@@ -1693,11 +1727,9 @@ function Cleanup-IsolatedWorkspace() {
         Start-Sleep -Milliseconds (500 * $attempt)
     }
 
-    # Fallback to cmd rmdir for stubborn directory trees.
-    cmd /c "rmdir /s /q ""$script:IsolatedWorkspaceRoot""" | Out-Null
-    if (Test-Path $script:IsolatedWorkspaceRoot) {
-        $deferredScript = Start-DeferredCleanup -targetPath $script:IsolatedWorkspaceRoot
-        Write-Warning "Immediate cleanup failed. Scheduled deferred cleanup for: $script:IsolatedWorkspaceRoot"
+    if (Test-Path -LiteralPath $cleanupTarget) {
+        $deferredScript = Start-DeferredCleanup -targetPath $cleanupTarget
+        Write-Warning "Immediate cleanup failed. Scheduled deferred cleanup for: $cleanupTarget"
         Write-Warning "Deferred cleanup helper: $deferredScript"
     }
 }
