@@ -368,7 +368,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 			// Values reject the overwhelming majority of source-code delimiters. Only a
 			// plausible literal pays for the bounded key-vocabulary probe.
-			var lineStart = content[..delimiterStart].LastIndexOf('\n') + 1;
+			var lineStart = content[..delimiterStart].LastIndexOfAny('\r', '\n') + 1;
 			var keyWindowStart = Math.Max(lineStart, delimiterStart - 40);
 			var keyWindow = content[keyWindowStart..delimiterStart];
 			if (!HasCompatibleGenericKey(keyWindow))
@@ -879,12 +879,10 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 
 	private static string GetContainingLine(ReadOnlySpan<char> content, int matchStart, int matchLength)
 	{
-		var lineStart = content[..Math.Max(0, matchStart)].LastIndexOf('\n') + 1;
+		var lineStart = content[..Math.Max(0, matchStart)].LastIndexOfAny('\r', '\n') + 1;
 		var matchEnd = Math.Min(content.Length, matchStart + matchLength);
-		var relativeLineEnd = content[matchEnd..].IndexOf('\n');
+		var relativeLineEnd = content[matchEnd..].IndexOfAny('\r', '\n');
 		var lineEnd = relativeLineEnd < 0 ? content.Length : matchEnd + relativeLineEnd;
-		if (lineEnd > lineStart && content[lineEnd - 1] == '\r')
-			lineEnd--;
 		return content[lineStart..lineEnd].ToString();
 	}
 

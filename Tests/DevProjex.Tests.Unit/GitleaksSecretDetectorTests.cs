@@ -212,6 +212,19 @@ public sealed class GitleaksSecretDetectorTests
 	}
 
 	[Fact]
+	public void Detect_GitleaksAllowMarker_DoesNotSuppressFollowingCarriageReturnLine()
+	{
+		const string token = "ghp_" + "a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL";
+		const string content = "// gitleaks:allow\rconst token = \"" + token + "\";";
+
+		var finding = Assert.Single(
+			Detector.Detect("src/example.cs", content, TestContext.Current.CancellationToken),
+			static match => match.RuleId == "github-pat");
+
+		Assert.Equal(token, finding.Value);
+	}
+
+	[Fact]
 	public void Detect_GlobalPathAllowlist_IsAppliedBeforeRules()
 	{
 		const string content = "const token = \"ghp_" + "a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL\";";
