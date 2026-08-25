@@ -58,6 +58,42 @@ internal static class CrossProcessFileLock
         }
     }
 
+	public static async ValueTask<IDisposable> AcquireAsync(
+		JsonStoreFileSet fileSet,
+		TimeSpan timeout,
+		CancellationToken cancellationToken)
+	{
+		if (string.IsNullOrWhiteSpace(fileSet.DirectoryPath))
+			throw new IOException("The store directory path cannot be resolved.");
+
+		Directory.CreateDirectory(fileSet.DirectoryPath);
+		var startedTimestamp = Stopwatch.GetTimestamp();
+		while (true)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			try
+			{
+				return new HeldLock(new FileStream(
+					fileSet.LockPath,
+					FileMode.OpenOrCreate,
+					FileAccess.ReadWrite,
+					FileShare.None));
+			}
+			catch (Exception exception) when (
+				exception is IOException or UnauthorizedAccessException)
+			{
+				var elapsed = Stopwatch.GetElapsedTime(startedTimestamp);
+				if (elapsed >= timeout)
+					throw;
+
+				var delay = timeout - elapsed;
+				if (delay > RetryDelay)
+					delay = RetryDelay;
+				await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+			}
+		}
+	}
+
     private sealed class HeldLock(FileStream stream) : IDisposable
     {
         public void Dispose() => stream.Dispose();

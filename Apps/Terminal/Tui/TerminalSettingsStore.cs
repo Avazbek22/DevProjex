@@ -85,13 +85,16 @@ public sealed class TerminalSettingsStore(Func<string>? appDataPathProvider = nu
 		await _writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
 		try
 		{
+			var path = GetPath();
+			using var persistenceLock = await PersistenceFileLock
+				.AcquireAsync(path, cancellationToken)
+				.ConfigureAwait(false);
 			var current = LoadDocument() ??
 			              new TerminalSettingsDocument(
 				              CurrentSchemaVersion,
 				              TerminalScreenMode.Auto,
 				              []);
 			var document = update(current) with { SchemaVersion = CurrentSchemaVersion };
-			var path = GetPath();
 			var directory = Path.GetDirectoryName(path)!;
 			Directory.CreateDirectory(directory);
 			var temporaryPath = Path.Combine(

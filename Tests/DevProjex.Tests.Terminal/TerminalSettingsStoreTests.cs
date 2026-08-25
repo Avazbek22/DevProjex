@@ -91,6 +91,36 @@ public sealed class TerminalSettingsStoreTests
 	}
 
 	[Fact]
+	public async Task UpdateWaitsForTheSharedStoreLockAndPreservesTheCommittedDocument()
+	{
+		using var workspace = new TemporaryDirectory();
+		var store = new TerminalSettingsStore(() => workspace.Path);
+		var settingsPath = store.GetPath();
+		Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
+		using var heldLock = new FileStream(
+			settingsPath + ".lock",
+			FileMode.OpenOrCreate,
+			FileAccess.ReadWrite,
+			FileShare.None);
+
+		var update = store.SaveScreenModeAsync(
+			TerminalScreenMode.Inline,
+			TestContext.Current.CancellationToken);
+		await Task.Delay(100, TestContext.Current.CancellationToken);
+		Assert.False(update.IsCompleted);
+
+		File.WriteAllText(
+			settingsPath,
+			"{\"SchemaVersion\":1,\"ScreenMode\":0,\"CommandHistory\":[\"external command\"]}");
+		heldLock.Dispose();
+		await update.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+		var reloaded = new TerminalSettingsStore(() => workspace.Path);
+		Assert.Equal(TerminalScreenMode.Inline, reloaded.LoadScreenMode());
+		Assert.Equal(["external command"], reloaded.LoadCommandHistory());
+	}
+
+	[Fact]
 	public async Task CommandHistoryIsNormalizedAndBoundedBeforePersistence()
 	{
 		using var workspace = new TemporaryDirectory();
