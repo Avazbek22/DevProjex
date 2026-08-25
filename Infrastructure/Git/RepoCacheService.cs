@@ -159,7 +159,7 @@ public sealed class RepoCacheService : IRepoCacheService
 			throw new InvalidOperationException("Repository staging path is invalid.");
 		}
 
-		Directory.CreateDirectory(CacheRootPath);
+		EnsurePrivateCacheDirectory(CacheRootPath);
 		var container = CreateUniqueRepositoryPath(CacheRootPath, repositoryUrl);
 		Directory.CreateDirectory(container);
 		var contentKind = Directory.Exists(Path.Combine(normalizedStagingPath, ".git"))
