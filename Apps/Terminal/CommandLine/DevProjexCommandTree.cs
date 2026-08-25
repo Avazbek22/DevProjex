@@ -296,6 +296,9 @@ public sealed class DevProjexCommandTree
 				async () =>
 				{
 					var services = CreateServices(parseResult);
+					var selectedPaths = await selection.ReadSelectedPathsAsync(
+						parseResult,
+						cancellationToken).ConfigureAwait(false);
 					var projectSource = parseResult.GetValue(project) ?? Directory.GetCurrentDirectory();
 					await using var resolvedSource = await new TerminalProjectSourceResolver(
 							services,
@@ -308,6 +311,7 @@ public sealed class DevProjexCommandTree
 						parseResult,
 						projectPath,
 						services,
+						selectedPaths,
 						cancellationToken).ConfigureAwait(false);
 					return await new AnalyzeCommandHandler(services, environment)
 						.ExecuteAsync(
@@ -412,6 +416,9 @@ public sealed class DevProjexCommandTree
 				async () =>
 				{
 					var services = CreateServices(parseResult);
+					var selectedPaths = await selection.ReadSelectedPathsAsync(
+						parseResult,
+						cancellationToken).ConfigureAwait(false);
 					var projectSource = parseResult.GetValue(project) ?? Directory.GetCurrentDirectory();
 					await using var resolvedSource = await new TerminalProjectSourceResolver(
 							services,
@@ -424,6 +431,7 @@ public sealed class DevProjexCommandTree
 						parseResult,
 						projectPath,
 						services,
+						selectedPaths,
 						cancellationToken).ConfigureAwait(false);
 					return await new ExportContextCommandHandler(services, environment)
 						.ExecuteAsync(
@@ -516,6 +524,9 @@ public sealed class DevProjexCommandTree
 				async () =>
 				{
 					var services = CreateServices(parseResult);
+					var selectedPaths = await selection.ReadSelectedPathsAsync(
+						parseResult,
+						cancellationToken).ConfigureAwait(false);
 					var projectSource = parseResult.GetValue(project) ?? Directory.GetCurrentDirectory();
 					await using var resolvedSource = await new TerminalProjectSourceResolver(
 							services,
@@ -528,6 +539,7 @@ public sealed class DevProjexCommandTree
 						parseResult,
 						projectPath,
 						services,
+						selectedPaths,
 						cancellationToken).ConfigureAwait(false);
 					return await new ExportProjectCommandHandler(services, environment)
 						.ExecuteAsync(
@@ -636,6 +648,9 @@ public sealed class DevProjexCommandTree
 				async () =>
 				{
 					var useLast = parseResult.GetValue(last);
+					var selectedPaths = await selection.ReadSelectedPathsAsync(
+						parseResult,
+						cancellationToken).ConfigureAwait(false);
 					var projectSource = useLast
 						? null
 						: parseResult.GetValue(project) ?? Directory.GetCurrentDirectory();
@@ -660,6 +675,7 @@ public sealed class DevProjexCommandTree
 							parseResult,
 							projectPath,
 							services!,
+							selectedPaths,
 							cancellationToken).ConfigureAwait(false);
 						var readinessExitCode = ValidateDesktopOpenGitReadiness(
 							services!,

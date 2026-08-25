@@ -42,6 +42,49 @@ public sealed class CliUrlSourceCommandTests
 		Assert.Contains("DPX-TUI-NOT-INTERACTIVE", environment.StandardError, StringComparison.Ordinal);
 	}
 
+	[Theory]
+	[InlineData("analyze")]
+	[InlineData("context")]
+	[InlineData("project")]
+	[InlineData("open")]
+	public async Task InvalidSelectionFileFailsBeforeGitOrCacheAccess(string command)
+	{
+		using var data = new TemporaryDirectory();
+		var git = new CountingGitRepositoryService();
+		var services = new TerminalServiceFactory(() => data.Path).Create(AppLanguage.En) with
+		{
+			GitRepositoryService = git
+		};
+		var environment = new TestTerminalEnvironment();
+		var missingSelectionFile = Path.Combine(data.Path, "missing-selection.txt");
+		var repositoryUrl = "https://github.com/example/repository.git";
+		var arguments = command switch
+		{
+			"analyze" => new[] { "analyze", repositoryUrl },
+			"context" => new[] { "export", "context", repositoryUrl },
+			"project" =>
+			[
+				"export", "project", repositoryUrl,
+				"--as", "zip", "-o", Path.Combine(data.Path, "output.zip")
+			],
+			"open" => new[] { "open", repositoryUrl },
+			_ => throw new ArgumentOutOfRangeException(nameof(command), command, null)
+		};
+
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(_ => services))
+			.RunAsync(
+				[.. arguments, "--select-from", missingSelectionFile],
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Equal(0, git.CallCount);
+		Assert.Empty(services.RepoCacheService.ListCacheEntriesForManagement().Entries);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("DPX-CLI-SELECT-FROM-INVALID", environment.StandardError, StringComparison.Ordinal);
+	}
+
 	[Fact]
 	public async Task ExistingUnixDirectoryWithColonIsAnalyzedLocallyWithoutClone()
 	{
