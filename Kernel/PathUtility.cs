@@ -10,7 +10,7 @@ public static class PathUtility
 
 	public static string Normalize(string path)
 	{
-		if (string.IsNullOrWhiteSpace(path))
+		if (IsMissingPath(path))
 			return path;
 
 		var fullPath = Path.GetFullPath(path);
@@ -51,7 +51,7 @@ public static class PathUtility
 
 	public static bool IsPathInside(string path, string rootPath)
 	{
-		if (string.IsNullOrWhiteSpace(path) || string.IsNullOrWhiteSpace(rootPath))
+		if (IsMissingPath(path) || IsMissingPath(rootPath))
 			return false;
 
 		var normalizedPath = Normalize(path);
@@ -74,6 +74,10 @@ public static class PathUtility
 
 	private static bool IsDirectorySeparator(char value) =>
 		value == Path.DirectorySeparatorChar || value == Path.AltDirectorySeparatorChar;
+
+	private static bool IsMissingPath(string? path) =>
+		string.IsNullOrEmpty(path) ||
+		(OperatingSystem.IsWindows() && string.IsNullOrWhiteSpace(path));
 
 	private static string TrimTrailingSeparators(string path)
 	{

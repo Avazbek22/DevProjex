@@ -48,6 +48,20 @@ public sealed class PathUtilityTests
 	}
 
 	[Fact]
+	public void Normalize_CanonicalizesAWhitespaceOnlyUnixPath()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("Win32 path normalization rejects whitespace-only names.");
+
+		using var temp = new TemporaryDirectory();
+		var whitespacePath = temp.CreateFolder(" ");
+		var relativePath = Path.GetRelativePath(Environment.CurrentDirectory, whitespacePath);
+
+		Assert.Equal(whitespacePath, PathUtility.Normalize(relativePath));
+		Assert.True(PathUtility.IsPathInside(whitespacePath, temp.Path));
+	}
+
+	[Fact]
 	public void PortableRelativePathsPreserveUnixBackslashesAsNameCharacters()
 	{
 		using var temp = new TemporaryDirectory();
