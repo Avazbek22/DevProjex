@@ -2,6 +2,11 @@ using System.Security;
 
 namespace DevProjex.Application.Services;
 
+internal static class SourceFileReadPolicy
+{
+	internal const FileShare Share = FileShare.Read | FileShare.Delete;
+}
+
 /// <summary>
 /// Identifies the file version observed through the same handle that supplied its content.
 /// Length and last-write time deliberately avoid another content hash. A same-length rewrite with

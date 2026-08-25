@@ -1227,11 +1227,11 @@ public sealed class ProjectCopyExportService(
 		}
 	}
 
-	private static FileStream OpenSourceFile(string path) => new(
+	internal static FileStream OpenSourceFile(string path) => new(
 		path,
 		FileMode.Open,
 		FileAccess.Read,
-		FileShare.Read,
+		SourceFileReadPolicy.Share,
 		CopyBufferSize,
 		FileOptions.Asynchronous | FileOptions.SequentialScan);
 
