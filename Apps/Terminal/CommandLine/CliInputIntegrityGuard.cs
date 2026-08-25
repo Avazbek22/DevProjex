@@ -29,6 +29,28 @@ internal static class CliInputIntegrityGuard
 				static group => group.First().Option,
 				StringComparer.Ordinal);
 
+		for (var index = 0; index < arguments.Count; index++)
+		{
+			var argument = arguments[index];
+			if (argument == "--")
+				break;
+			if (!applicableOptions.TryGetValue(argument, out var option) ||
+			    option.Arity.MinimumNumberOfValues == 0)
+			{
+				continue;
+			}
+
+			if (index + 1 >= arguments.Count ||
+			    arguments[index + 1] == "--" ||
+			    applicableOptions.ContainsKey(arguments[index + 1]))
+			{
+				error = new CliInputIntegrityError(
+					CliInputIntegrityErrorKind.MissingOptionValue,
+					option.Name);
+				return true;
+			}
+		}
+
 		foreach (var argument in arguments)
 		{
 			if (argument == "--")

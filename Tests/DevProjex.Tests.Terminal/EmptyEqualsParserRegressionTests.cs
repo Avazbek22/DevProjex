@@ -170,6 +170,24 @@ public sealed class EmptyEqualsParserRegressionTests
 	}
 
 	[Fact]
+	public void RequiredValueFollowedByARecognizedOptionIsMissing()
+	{
+		string[] arguments = ["export", "project", "--as", "--language", "en"];
+		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
+		var parseResult = root.Parse(arguments);
+
+		var detected = CliInputIntegrityGuard.TryFindError(
+			arguments,
+			root,
+			parseResult,
+			out var error);
+
+		Assert.True(detected);
+		Assert.Equal(CliInputIntegrityErrorKind.MissingOptionValue, error.Kind);
+		Assert.Equal("--as", error.SymbolName);
+	}
+
+	[Fact]
 	public void PublicValueOptionTokensAndAritiesAreFrozen()
 	{
 		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
