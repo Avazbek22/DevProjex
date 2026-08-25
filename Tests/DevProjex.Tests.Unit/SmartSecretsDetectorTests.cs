@@ -381,6 +381,19 @@ public sealed class SmartSecretsDetectorTests
 	}
 
 	[Fact]
+	public void Detect_EnvironmentAssignments_RecognizesStandaloneCarriageReturns()
+	{
+		const string content = "APP_NAME=DevProjex\rDB_PASSWORD=Admin123!";
+
+		var finding = Assert.Single(
+			Detector.Detect(".env", content, TestContext.Current.CancellationToken),
+			static match => match.RuleId == "environment-secret");
+
+		Assert.Equal("Admin123!", finding.Value);
+		Assert.Equal(content.IndexOf("Admin123!", StringComparison.Ordinal), finding.Start);
+	}
+
+	[Fact]
 	public void Detect_PlaceholderWordInsideRealCredential_DoesNotSuppressTheWholeValue()
 	{
 		const string key = "AKIAIOSFODNN7EXAMPLE";
