@@ -1425,6 +1425,30 @@ internal static class UiTestDriver
         await WaitForSettledFramesAsync(frameCount: 6);
     }
 
+    public static async Task WaitForSecretDiscoveryIdleAsync(MainWindow window, TimeSpan? timeout = null)
+    {
+        var effectiveTimeout = timeout ?? TimeSpan.FromSeconds(30);
+        await WaitForSelectionRefreshIdleAsync(window, effectiveTimeout);
+        await WaitForConditionAsync(
+            window,
+            () =>
+            {
+                var cancellationField = typeof(MainWindow).GetField(
+                    "_secretRedactionCountCts",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                var requestField = typeof(MainWindow).GetField(
+                    "_activeSecretDiscoveryRequest",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.NotNull(cancellationField);
+                Assert.NotNull(requestField);
+                return cancellationField!.GetValue(window) is null &&
+                       requestField!.GetValue(window) is null;
+            },
+            "secret discovery to release its active request",
+            effectiveTimeout);
+        await WaitForSettledFramesAsync(frameCount: 4);
+    }
+
     public static async Task WaitForInitialMetricsBaselineAsync(
         MainWindow window,
         TimeSpan? timeout = null)
