@@ -3,6 +3,27 @@ namespace DevProjex.Tests.Unit;
 public sealed class IgnoreRulesServiceGitIgnoreTests
 {
 	[Fact]
+	public void ScanContextPreservesLiteralBackslashesInsideUnixFileNames()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Windows treats a backslash as a directory separator.");
+			return;
+		}
+
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(".gitignore", "literal/name.txt\n");
+		var filePath = temp.CreateFile("literal\\name.txt", "content");
+		var rules = new IgnoreRulesService(new SmartIgnoreService([]))
+			.Build(temp.Path, [IgnoreOptionId.UseGitIgnore]);
+
+		var evaluation = rules.CreateGitIgnoreScanContext(temp.Path)
+			.Evaluate(filePath, "literal\\name.txt", isDirectory: false, "literal\\name.txt");
+
+		Assert.False(evaluation.IsIgnored);
+	}
+
+	[Fact]
 	public void AdministrativeNameMatrix_DependsOnSelectedGitModeAndPlatformPathSemantics()
 	{
 		using var temp = new TemporaryDirectory();
