@@ -100,43 +100,35 @@ public static class ProjectTreeSelectionProjection
 		if (!includedPaths.Contains(root.FullPath))
 			return null;
 
-		var projectedNodes = new Dictionary<TreeNodeDescriptor, TreeNodeDescriptor?>(
-			ReferenceEqualityComparer.Instance);
-		var stack = new Stack<(TreeNodeDescriptor Node, bool Visited)>();
-		stack.Push((root, false));
-		while (stack.Count > 0)
+		var pending = new List<ProjectionFrame>
 		{
-			var (node, visited) = stack.Pop();
-			if (!includedPaths.Contains(node.FullPath))
+			new(root)
+		};
+		while (pending.Count > 0)
+		{
+			var frameIndex = pending.Count - 1;
+			var frame = pending[frameIndex];
+			if (frame.NextChildIndex < frame.Node.Children.Count)
 			{
-				projectedNodes[node] = null;
+				var child = frame.Node.Children[frame.NextChildIndex++];
+				pending[frameIndex] = frame;
+				if (includedPaths.Contains(child.FullPath))
+					pending.Add(new ProjectionFrame(child));
 				continue;
 			}
 
-			if (!visited && node.IsDirectory && node.Children.Count > 0)
-			{
-				stack.Push((node, true));
-				for (var index = node.Children.Count - 1; index >= 0; index--)
-					stack.Push((node.Children[index], false));
-				continue;
-			}
+			pending.RemoveAt(frameIndex);
+			var projectedNode = frame.Complete();
+			if (pending.Count == 0)
+				return projectedNode;
 
-			if (!node.IsDirectory || node.Children.Count == 0)
-			{
-				projectedNodes[node] = node;
-				continue;
-			}
-
-			var children = new List<TreeNodeDescriptor>(node.Children.Count);
-			foreach (var child in node.Children)
-			{
-				if (projectedNodes[child] is { } projectedChild)
-					children.Add(projectedChild);
-			}
-			projectedNodes[node] = node with { Children = children };
+			var parentIndex = pending.Count - 1;
+			var parent = pending[parentIndex];
+			parent.AddChild(projectedNode);
+			pending[parentIndex] = parent;
 		}
 
-		return projectedNodes[root];
+		throw new InvalidOperationException("Tree projection did not produce a root node.");
 	}
 
 	public static void CollectSelectedFilePaths(
@@ -244,5 +236,21 @@ public static class ProjectTreeSelectionProjection
 		public bool NodeSelected { get; } = nodeSelected;
 		public int NextChildIndex { get; set; }
 		public bool HasIncludedChild { get; set; }
+	}
+
+	private struct ProjectionFrame(TreeNodeDescriptor node)
+	{
+		private List<TreeNodeDescriptor>? _children;
+
+		public TreeNodeDescriptor Node { get; } = node;
+		public int NextChildIndex { get; set; }
+
+		public void AddChild(TreeNodeDescriptor child) =>
+			(_children ??= new List<TreeNodeDescriptor>(Node.Children.Count)).Add(child);
+
+		public TreeNodeDescriptor Complete() =>
+			!Node.IsDirectory || Node.Children.Count == 0
+				? Node
+				: Node with { Children = _children ?? [] };
 	}
 }
