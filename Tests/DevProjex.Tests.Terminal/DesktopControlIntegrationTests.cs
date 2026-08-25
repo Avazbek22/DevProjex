@@ -670,6 +670,49 @@ public sealed class DesktopControlIntegrationTests
 	}
 
 	[Fact]
+	public async Task InvalidUtf8RequestIsRejectedWithoutPoisoningTheListener()
+	{
+		using var workspace = new TemporaryDirectory();
+		var paths = new DesktopControlPaths(() => workspace.Path);
+		var handler = new RecordingDesktopHandler();
+		await using var server = await DesktopControlServer.StartAsync(
+			handler,
+			paths: paths,
+			cancellationToken: TestContext.Current.CancellationToken);
+		var registry = new DesktopInstanceRegistry(paths);
+		var registration = Assert.Single(
+			await registry.ListAsync(TestContext.Current.CancellationToken));
+		var prefix = Encoding.UTF8.GetBytes(
+			"{\"protocolVersion\":1,\"requestId\":\"damaged");
+		var suffix = Encoding.UTF8.GetBytes(
+			$"\",\"instanceId\":\"{registration.InstanceId}\",\"action\":\"status\",\"payload\":{{}}}}");
+		byte[] payload = [.. prefix, 0xff, .. suffix];
+
+		var responseJson = await SendRawAsync(
+			registration,
+			payload,
+			TestContext.Current.CancellationToken);
+		using (var response = JsonDocument.Parse(responseJson))
+		{
+			Assert.False(response.RootElement.GetProperty("ok").GetBoolean());
+			Assert.Equal(
+				"DPX-DESKTOP-INVALID-PAYLOAD",
+				response.RootElement.GetProperty("error").GetProperty("code").GetString());
+		}
+		Assert.Empty(handler.Requests);
+
+		var validResponse = await new DesktopControlClient(registry).SendAsync(
+			registration,
+			"status",
+			new { },
+			TimeSpan.FromSeconds(5),
+			TestContext.Current.CancellationToken);
+
+		Assert.True(validResponse.Ok);
+		Assert.IsType<DesktopStatusRequest>(Assert.Single(handler.Requests));
+	}
+
+	[Fact]
 	public async Task IncompleteRequestIsRejectedAfterTheReceiveDeadline()
 	{
 		await using var stream = new CancellationBoundReadStream();
@@ -997,11 +1040,22 @@ public sealed class DesktopControlIntegrationTests
 	private static async Task<string> SendRawAsync(
 		DesktopInstanceRegistration registration,
 		string json,
+		CancellationToken cancellationToken) =>
+		await SendRawAsync(
+			registration,
+			Encoding.UTF8.GetBytes(json),
+			cancellationToken);
+
+	private static async Task<string> SendRawAsync(
+		DesktopInstanceRegistration registration,
+		ReadOnlyMemory<byte> payload,
 		CancellationToken cancellationToken)
 	{
 		await using var stream = await ConnectRawAsync(registration, cancellationToken);
-		var bytes = Encoding.UTF8.GetBytes(json + "\n");
-		await stream.WriteAsync(bytes, cancellationToken);
+		var frame = new byte[payload.Length + 1];
+		payload.CopyTo(frame);
+		frame[^1] = (byte)'\n';
+		await stream.WriteAsync(frame, cancellationToken);
 		await stream.FlushAsync(cancellationToken);
 		using var reader = new StreamReader(
 			stream,

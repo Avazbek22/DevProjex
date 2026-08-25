@@ -299,30 +299,16 @@ public sealed class DesktopControlServer : IAsyncDisposable
 			throw new ArgumentOutOfRangeException(nameof(receiveTimeout));
 		using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 		timeout.CancelAfter(receiveTimeout);
-		var buffer = new byte[4096];
-		using var message = new MemoryStream();
 		try
 		{
-			while (true)
-			{
-				var read = await stream.ReadAsync(buffer, timeout.Token).ConfigureAwait(false);
-				if (read == 0)
-					throw new EndOfStreamException();
-
-				var newline = Array.IndexOf(buffer, (byte)'\n', 0, read);
-				var count = newline >= 0 ? newline : read;
-				if (message.Length + count > DesktopProtocol.MaximumMessageBytes)
-				{
-					throw new DesktopControlException(
+			return await DesktopProtocolMessageReader.ReadAsync(
+					stream,
+					static () => new DesktopControlException(
 						"DPX-DESKTOP-PAYLOAD-TOO-LARGE",
 						"The desktop request exceeds the size limit.",
-						CommandLineExitCodes.UsageError);
-				}
-
-				message.Write(buffer, 0, count);
-				if (newline >= 0)
-					return Encoding.UTF8.GetString(message.GetBuffer(), 0, checked((int)message.Length));
-			}
+						CommandLineExitCodes.UsageError),
+					timeout.Token)
+				.ConfigureAwait(false);
 		}
 		catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
 		{
