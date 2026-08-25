@@ -283,7 +283,7 @@ public sealed class PortableProjectProfileService
 	private static IReadOnlyCollection<string> NormalizeSelectedPaths(
 		IReadOnlyCollection<string>? values) =>
 		(values ?? [])
-		.Where(static value => !string.IsNullOrWhiteSpace(value))
+		.Where(static value => !string.IsNullOrEmpty(value))
 		.Select(ProjectSelectionPath.NormalizeRelative)
 		.Where(static value => value.Length > 0)
 		.Distinct(PathComparer.Default)

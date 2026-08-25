@@ -5,6 +5,34 @@ namespace DevProjex.Tests.Unit;
 public sealed class PortableProjectProfileServiceTests
 {
 	[Fact]
+	public async Task SelectedPathsRoundTripSignificantWhitespace()
+	{
+		using var workspace = new TemporaryDirectory();
+		var sourceRoot = workspace.CreateFolder("project");
+		var destination = Path.Combine(workspace.Path, "portable.json");
+		string[] selectedPaths = [" ", " folder/file .cs "];
+		var service = new PortableProjectProfileService();
+
+		await service.SaveAsync(
+			sourceRoot,
+			destination,
+			new ProjectSelectionSpec(
+				SelectedPaths: selectedPaths,
+				GitMode: GitFilteringMode.None,
+				Exclusions: []),
+			overwrite: false,
+			TestContext.Current.CancellationToken);
+
+		var loaded = await service.LoadAsync(
+			destination,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(
+			selectedPaths.OrderBy(static path => path, PathComparer.Default),
+			loaded.SelectedPaths);
+	}
+
+	[Fact]
 	public async Task SaveAsyncMapsSharedDestinationConflictToProfileContract()
 	{
 		using var workspace = new TemporaryDirectory();

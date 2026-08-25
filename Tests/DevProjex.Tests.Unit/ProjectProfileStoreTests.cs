@@ -3,6 +3,24 @@ namespace DevProjex.Tests.Unit;
 public sealed class ProjectProfileStoreTests
 {
 	[Fact]
+	public void SelectedPathsRoundTripSignificantWhitespace()
+	{
+		using var temporary = new TemporaryDirectory();
+		var projectPath = temporary.CreateFolder("project");
+		var store = CreateStore(temporary.Path);
+		string[] selectedPaths = [" ", " folder/file .cs "];
+
+		store.SaveProfile(
+			projectPath,
+			new ProjectSelectionProfile([], [], [], SelectedPaths: selectedPaths));
+
+		Assert.True(store.TryLoadProfile(projectPath, out var loaded));
+		Assert.Equal(
+			selectedPaths.OrderBy(static path => path, PathComparer.Default),
+			loaded.SelectedPaths);
+	}
+
+	[Fact]
 	public void TrySaveProfileWithResult_WhenSelectionExceedsLimit_RejectsWithoutPersistingTruncatedProfile()
 	{
 		using var temporary = new TemporaryDirectory();

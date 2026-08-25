@@ -415,8 +415,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			.Take(Enum.GetValues<IgnoreOptionId>().Length)
 			.ToList();
 		profile.SelectedPaths = profile.SelectedPaths
-			.Where(IsValidStoredString)
-			.Select(static item => PathUtility.NormalizeSeparators(item.Trim()))
+			.Where(IsValidStoredPath)
+			.Select(PathUtility.NormalizeSeparators)
 			.Distinct(PathComparer.Default)
 			.OrderBy(static item => item, PathComparer.Default)
 			.Take(ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection)
@@ -498,8 +498,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		ReconcileSelectedIgnoreOptions(selectedIgnoreOptions, ignoreOptionStates);
 		NormalizeGitFilteringState(selectedIgnoreOptions, ignoreOptionStates);
 		var selectedPaths = (profile.SelectedPaths ?? [])
-			.Where(IsValidStoredString)
-			.Select(static item => PathUtility.NormalizeSeparators(item.Trim()))
+			.Where(IsValidStoredPath)
+			.Select(PathUtility.NormalizeSeparators)
 			.Distinct(PathComparer.Default)
 			.OrderBy(static item => item, PathComparer.Default)
 			.Take(ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection + 1)
@@ -807,6 +807,10 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 
 	private static bool IsValidStoredString(string? value) =>
 		!string.IsNullOrWhiteSpace(value) &&
+		value.Length <= ProjectProfileStorageLimits.MaximumStateNameLength;
+
+	private static bool IsValidStoredPath(string? value) =>
+		!string.IsNullOrEmpty(value) &&
 		value.Length <= ProjectProfileStorageLimits.MaximumStateNameLength;
 
 	private static bool TryParseDatabase(
