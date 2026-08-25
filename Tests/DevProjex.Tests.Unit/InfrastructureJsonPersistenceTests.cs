@@ -393,6 +393,22 @@ public sealed class InfrastructureJsonPersistenceTests
 		Assert.Equal(257, new FileInfo(fileSet.PrimaryPath).Length);
 	}
 
+	[Fact]
+	public void JsonStorePersistence_ContainsFutureDocument_DefaultLimitProtectsGrowingStores()
+	{
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "settings.json");
+		Directory.CreateDirectory(fileSet.DirectoryPath);
+		using (var stream = new FileStream(fileSet.PrimaryPath, FileMode.CreateNew, FileAccess.Write))
+			stream.SetLength(JsonStorePersistence.SmallDocumentMaximumBytes + 1);
+
+		var protectedDocument = JsonStorePersistence.ContainsFutureDocument(
+			fileSet,
+			currentSchemaVersion: 1);
+
+		Assert.True(protectedDocument);
+	}
+
 	[Theory]
 	[InlineData("utf16-le")]
 	[InlineData("utf16-be")]

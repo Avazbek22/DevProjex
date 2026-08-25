@@ -29,7 +29,7 @@ internal static class JsonStorePersistence
         JsonStoreFileSet fileSet,
         int currentSchemaVersion,
         int? currentDefaultsRevision = null,
-        long maximumDocumentBytes = long.MaxValue) =>
+        long maximumDocumentBytes = SmallDocumentMaximumBytes) =>
         IsFutureDocument(fileSet.PrimaryPath, currentSchemaVersion, currentDefaultsRevision, maximumDocumentBytes) ||
         IsFutureDocument(fileSet.BackupPath, currentSchemaVersion, currentDefaultsRevision, maximumDocumentBytes);
 
