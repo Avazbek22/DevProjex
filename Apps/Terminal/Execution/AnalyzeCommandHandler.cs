@@ -348,7 +348,7 @@ internal static class AnalysisTextFormatter
 	[
 		ToCategoryToken(finding.Category),
 		TerminalTextEscaping.EscapeSingleLine(finding.RuleId),
-		$"{TerminalTextEscaping.EscapeSingleLine(finding.RelativePath.Replace('\\', '/'))}:" +
+		$"{TerminalTextEscaping.EscapeSingleLine(PathUtility.NormalizeSeparators(finding.RelativePath))}:" +
 		finding.LineNumber.ToString(System.Globalization.CultureInfo.InvariantCulture)
 	];
 

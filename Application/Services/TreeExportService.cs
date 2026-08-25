@@ -1172,5 +1172,5 @@ public sealed class TreeExportService
 	private static bool IsAbsoluteDisplayUri(string value)
 		=> Uri.TryCreate(value, UriKind.Absolute, out var uri) && !uri.IsFile;
 
-	private static string NormalizeStructuredPath(string path) => path.Replace('\\', '/');
+	private static string NormalizeStructuredPath(string path) => PathUtility.NormalizeSeparators(path);
 }

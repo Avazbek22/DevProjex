@@ -101,6 +101,19 @@ public sealed class McpInfrastructureTests
 		Assert.DoesNotContain('\u001b', text);
 	}
 
+	[Fact]
+	public void McpRelativePathsPreserveUnixBackslashesAsNameCharacters()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("Windows treats a backslash as a directory separator.");
+
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var file = workspace.CreateFile("project/literal\\name.txt", "content");
+
+		Assert.Equal("literal\\name.txt", McpProjectService.ToRelative(project, file));
+	}
+
 	[Theory]
 	[InlineData("42", 42)]
 	[InlineData(42, 42)]

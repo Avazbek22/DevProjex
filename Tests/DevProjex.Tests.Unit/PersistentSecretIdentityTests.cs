@@ -10,6 +10,28 @@ public sealed class PersistentSecretIdentityTests
 	private const string Secret = "persistent-secret-value-012345";
 
 	[Fact]
+	public void RelativePathIdentityPreservesBackslashesInsideUnixFileNames()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("Windows treats a backslash as a directory separator.");
+
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var literalBackslash = workspace.CreateFile("project/literal\\name.txt", "content");
+		var nested = workspace.CreateFile("project/literal/name.txt", "content");
+
+		Assert.Equal(
+			"literal\\name.txt",
+			SecretRedactionSession.NormalizeRelativePath(project, literalBackslash));
+		Assert.Equal(
+			"literal/name.txt",
+			SecretRedactionSession.NormalizeRelativePath(project, nested));
+		Assert.NotEqual(
+			SecretRedactionSession.NormalizeRelativePath(project, literalBackslash),
+			SecretRedactionSession.NormalizeRelativePath(project, nested));
+	}
+
+	[Fact]
 	public void V2Identity_IsDeterministicFullHmacAndMatcherFindsIt()
 	{
 		var provider = new TestIdentityProvider();

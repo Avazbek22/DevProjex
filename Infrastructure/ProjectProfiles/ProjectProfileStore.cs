@@ -416,7 +416,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			.ToList();
 		profile.SelectedPaths = profile.SelectedPaths
 			.Where(IsValidStoredString)
-			.Select(static item => item.Trim().Replace('\\', '/'))
+			.Select(static item => PathUtility.NormalizeSeparators(item.Trim()))
 			.Distinct(PathComparer.Default)
 			.OrderBy(static item => item, PathComparer.Default)
 			.Take(ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection)
@@ -499,7 +499,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		NormalizeGitFilteringState(selectedIgnoreOptions, ignoreOptionStates);
 		var selectedPaths = (profile.SelectedPaths ?? [])
 			.Where(IsValidStoredString)
-			.Select(static item => item.Trim().Replace('\\', '/'))
+			.Select(static item => PathUtility.NormalizeSeparators(item.Trim()))
 			.Distinct(PathComparer.Default)
 			.OrderBy(static item => item, PathComparer.Default)
 			.Take(ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection + 1)

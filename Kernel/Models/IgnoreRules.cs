@@ -145,7 +145,7 @@ public sealed record IgnoreRules(
 			var relativePath = Path.GetRelativePath(scanRootPath, scopeRootPath);
 			scopeRelativePath = relativePath == "."
 				? string.Empty
-				: relativePath.Replace('\\', '/').Trim('/');
+				: PathUtility.NormalizeSeparators(relativePath).Trim('/');
 			return true;
 		}
 		catch

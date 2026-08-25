@@ -376,7 +376,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 		CollectMinimalSelection(Plan.EffectiveTree, result);
 		return result
 			.Select(path => Path.GetRelativePath(Plan.SourceRoot, path))
-			.Select(static path => path == "." ? "." : path.Replace('\\', '/'))
+			.Select(static path => path == "." ? "." : PathUtility.NormalizeSeparators(path))
 			.OrderBy(static path => path, StringComparer.Ordinal)
 			.ToArray();
 	}
@@ -537,7 +537,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 	private static string NormalizeRelativePath(string sourceRoot, string fullPath)
 	{
 		var relative = Path.GetRelativePath(sourceRoot, fullPath);
-		return relative == "." ? "." : relative.Replace('\\', '/');
+		return relative == "." ? "." : PathUtility.NormalizeSeparators(relative);
 	}
 
 	private bool CollectMinimalSelection(TreeNodeDescriptor node, List<string> result)

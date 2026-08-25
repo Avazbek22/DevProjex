@@ -981,7 +981,7 @@ public sealed class GitIgnoreMatcher
         if (!span.Contains('\\'))
             return path;
 
-        return path.Replace('\\', '/');
+        return PathUtility.NormalizeSeparators(path);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

@@ -467,7 +467,7 @@ public sealed class TerminalWorkspaceController(
 				.ConfigureAwait(false);
 		}
 		string MapDisplayPath(string path) =>
-			Path.GetRelativePath(plan.SourceRoot, path).Replace('\\', '/');
+			PathUtility.GetPortableRelativePath(plan.SourceRoot, path);
 
 		return view switch
 		{

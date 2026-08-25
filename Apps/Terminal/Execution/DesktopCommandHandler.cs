@@ -180,7 +180,7 @@ public sealed class DesktopCommandHandler(
 	}
 
 	private static string? NormalizeMachinePath(string? path) =>
-		path?.Replace('\\', '/');
+		path is null ? null : PathUtility.NormalizeSeparators(path);
 
 	private async Task<IReadOnlyDictionary<string, object?>?> WaitForLaunchedInstanceAsync(
 		int processId,

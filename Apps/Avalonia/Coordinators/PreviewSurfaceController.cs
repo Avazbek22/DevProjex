@@ -870,7 +870,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 		if (string.IsNullOrWhiteSpace(sourcePath) || string.IsNullOrWhiteSpace(projectRoot))
 			return section.DisplayPath;
 
-		return Path.GetRelativePath(projectRoot, sourcePath).Replace('\\', '/');
+		return PathUtility.GetPortableRelativePath(projectRoot, sourcePath);
 	}
 
     public bool HasSelectionMetricsSnapshot =>

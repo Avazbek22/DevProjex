@@ -25,6 +25,17 @@ public static class PathUtility
 			: normalized;
 	}
 
+	public static string NormalizeSeparators(string path)
+	{
+		ArgumentNullException.ThrowIfNull(path);
+		return OperatingSystem.IsWindows()
+			? path.Replace('\\', '/')
+			: path;
+	}
+
+	public static string GetPortableRelativePath(string rootPath, string path) =>
+		NormalizeSeparators(Path.GetRelativePath(rootPath, path));
+
 	public static bool IsPathInside(string path, string rootPath)
 	{
 		if (string.IsNullOrWhiteSpace(path) || string.IsNullOrWhiteSpace(rootPath))

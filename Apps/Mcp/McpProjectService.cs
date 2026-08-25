@@ -210,7 +210,7 @@ internal sealed class McpProjectService(McpRootRegistry roots, McpServices servi
 	}
 
 	internal static string ToRelative(string root, string path) =>
-		Path.GetRelativePath(root, path).Replace('\\', '/');
+		PathUtility.GetPortableRelativePath(root, path);
 
 	internal static bool IsGitRepository(string root) =>
 		Directory.Exists(Path.Combine(root, ".git")) || File.Exists(Path.Combine(root, ".git"));

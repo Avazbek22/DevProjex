@@ -632,7 +632,7 @@ public sealed class DoctorCommandHandler(
 		};
 
 	private static string NormalizeMachinePath(string path) =>
-		path.Replace('\\', '/');
+		PathUtility.NormalizeSeparators(path);
 
 	private enum DoctorCheckStatus
 	{

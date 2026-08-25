@@ -728,6 +728,21 @@ public sealed class GitIgnoreMatcherTests
 		Assert.False(matcher.EvaluateRelative("lib/generated/app.cs", isDirectory: false, "app.cs").IsIgnored);
 	}
 
+	[Fact]
+	public void Evaluate_PreservesBackslashesInsideUnixFileNames()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("Windows treats a backslash as a directory separator.");
+
+		using var temp = new TemporaryDirectory();
+		var root = temp.CreateFolder("repo");
+		var filePath = Path.Combine(root, @"literal\name.txt");
+		File.WriteAllText(filePath, "content");
+		var matcher = GitIgnoreMatcher.Build(root, ["literal/name.txt"]);
+
+		Assert.False(matcher.Evaluate(filePath, isDirectory: false, Path.GetFileName(filePath)).IsIgnored);
+	}
+
 	#endregion
 
 	#region Real-World .gitignore Patterns - Visual Studio / .NET

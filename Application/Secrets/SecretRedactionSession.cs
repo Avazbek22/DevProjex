@@ -751,7 +751,7 @@ public sealed class SecretRedactionSession : IDisposable
 			throw new ArgumentException("Only an add delta can replace a session source anchor.", nameof(delta));
 		var normalizedProjectRoot = PathUtility.Normalize(projectRoot);
 		var anchor = new SessionMarkedSecret(
-			relativePath.Replace('\\', '/'),
+			PathUtility.NormalizeSeparators(relativePath),
 			sourceOffset,
 			value.Length,
 			value.Hash,
@@ -1242,7 +1242,7 @@ public sealed class SecretRedactionSession : IDisposable
 		ArgumentNullException.ThrowIfNull(value);
 		ValidateManualRedactionClass(classification);
 		var mark = new SessionMarkedSecret(
-			relativePath.Replace('\\', '/'),
+			PathUtility.NormalizeSeparators(relativePath),
 			sourceOffset,
 			value.Length,
 			value.Hash,
@@ -2014,7 +2014,7 @@ public sealed class SecretRedactionSession : IDisposable
 
 	internal static string NormalizeRelativePath(string projectRoot, string filePath)
 	{
-		var relative = Path.GetRelativePath(projectRoot, filePath).Replace('\\', '/');
+		var relative = PathUtility.GetPortableRelativePath(projectRoot, filePath);
 		return relative == "." ? Path.GetFileName(filePath) : relative;
 	}
 

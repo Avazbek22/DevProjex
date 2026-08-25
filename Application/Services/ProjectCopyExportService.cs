@@ -141,7 +141,7 @@ public sealed class ProjectCopyExportService(
 	{
 		try
 		{
-			return Path.GetRelativePath(projectRoot, fullPath).Replace('\\', '/');
+			return PathUtility.GetPortableRelativePath(projectRoot, fullPath);
 		}
 		catch (ArgumentException)
 		{
@@ -1201,7 +1201,7 @@ public sealed class ProjectCopyExportService(
 
 	private static string BuildZipEntryName(string projectName, string relativePath, bool isDirectory)
 	{
-		var normalizedRelative = relativePath.Replace('\\', '/');
+		var normalizedRelative = PathUtility.NormalizeSeparators(relativePath);
 		var name = string.IsNullOrEmpty(normalizedRelative)
 			? projectName
 			: $"{projectName}/{normalizedRelative}";

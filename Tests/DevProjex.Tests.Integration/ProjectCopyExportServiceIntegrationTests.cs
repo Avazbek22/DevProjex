@@ -7,6 +7,43 @@ namespace DevProjex.Tests.Integration;
 public sealed class ProjectCopyExportServiceIntegrationTests
 {
 	[Fact]
+	public async Task ZipExportPreservesBackslashesInsideUnixFileNames()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("Windows treats a backslash as a directory separator.");
+
+		using var workspace = new TemporaryDirectory();
+		var sourceRoot = workspace.CreateDirectory("Sample");
+		var destinationRoot = workspace.CreateDirectory("exports");
+		var sourceFile = Path.Combine(sourceRoot, "literal\\name.txt");
+		await File.WriteAllTextAsync(sourceFile, "content", TestContext.Current.CancellationToken);
+		var file = new TreeNodeDescriptor(
+			Path.GetFileName(sourceFile),
+			sourceFile,
+			false,
+			false,
+			"file",
+			[]);
+		var root = new TreeNodeDescriptor("Sample", sourceRoot, true, false, "folder", [file]);
+		var destination = Path.Combine(destinationRoot, "copy.zip");
+
+		var result = await new ProjectCopyExportService(new ProjectCopyExportPlanBuilder()).ExportAsync(
+			new ProjectCopyExportRequest(
+				sourceRoot,
+				"Sample",
+				root,
+				new HashSet<string>(PathComparer.Default),
+				destination,
+				ProjectCopyExportFormat.Zip,
+				ProjectCopyDestinationMode.Exact),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		using var archive = ZipFile.OpenRead(result.DestinationPath);
+		Assert.Contains(archive.Entries, static entry => entry.FullName == "Sample/literal\\name.txt");
+		Assert.DoesNotContain(archive.Entries, static entry => entry.FullName == "Sample/literal/name.txt");
+	}
+
+	[Fact]
 	public async Task FolderExport_NoSelectionCopiesCompleteEffectiveTreeByteForByte()
 	{
 		using var workspace = ProjectCopyWorkspace.Create();

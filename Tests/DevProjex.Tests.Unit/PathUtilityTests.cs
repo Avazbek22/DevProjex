@@ -48,6 +48,21 @@ public sealed class PathUtilityTests
 	}
 
 	[Fact]
+	public void PortableRelativePathsPreserveUnixBackslashesAsNameCharacters()
+	{
+		using var temp = new TemporaryDirectory();
+		var project = temp.CreateFolder("project");
+		var relative = OperatingSystem.IsWindows()
+			? Path.Combine("folder", "name.txt")
+			: "literal\\name.txt";
+		var path = Path.Combine(project, relative);
+
+		Assert.Equal(
+			OperatingSystem.IsWindows() ? "folder/name.txt" : "literal\\name.txt",
+			PathUtility.GetPortableRelativePath(project, path));
+	}
+
+	[Fact]
 	public void IsPathInside_ReturnsTrue_ForRootAndDescendant()
 	{
 		using var temp = new TemporaryDirectory();

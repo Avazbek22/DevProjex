@@ -124,7 +124,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		ArgumentNullException.ThrowIfNull(repositoryRelativePath);
 		try
 		{
-			var normalizedPath = repositoryRelativePath.Replace('\\', '/');
+			var normalizedPath = PathUtility.NormalizeSeparators(repositoryRelativePath);
 			return ShouldInspectPath(_configuration.Value, normalizedPath);
 		}
 		catch (RegexMatchTimeoutException exception)
@@ -140,7 +140,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	{
 		ArgumentNullException.ThrowIfNull(repositoryRelativePath);
 		var configuration = _configuration.Value;
-		var normalizedPath = repositoryRelativePath.Replace('\\', '/');
+		var normalizedPath = PathUtility.NormalizeSeparators(repositoryRelativePath);
 		Span<ulong> candidates = stackalloc ulong[GetCandidateWordCount(configuration.Rules.Count)];
 		configuration.KeywordPrefilter.FindCandidates(content, candidates, cancellationToken);
 		var candidateCount = 0;
@@ -164,7 +164,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	{
 		ArgumentNullException.ThrowIfNull(repositoryRelativePath);
 		var configuration = _configuration.Value;
-		var normalizedPath = repositoryRelativePath.Replace('\\', '/');
+		var normalizedPath = PathUtility.NormalizeSeparators(repositoryRelativePath);
 		Span<ulong> candidates = stackalloc ulong[GetCandidateWordCount(configuration.Rules.Count)];
 		configuration.KeywordPrefilter.FindCandidates(content, candidates, cancellationToken);
 		var ids = new List<string>();
@@ -184,7 +184,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 	{
 		ArgumentNullException.ThrowIfNull(repositoryRelativePath);
 		var configuration = _configuration.Value;
-		var normalizedPath = repositoryRelativePath.Replace('\\', '/');
+		var normalizedPath = PathUtility.NormalizeSeparators(repositoryRelativePath);
 		Span<ulong> candidates = stackalloc ulong[GetCandidateWordCount(configuration.Rules.Count)];
 		configuration.KeywordPrefilter.FindCandidates(content, candidates, cancellationToken);
 		var ids = new List<string>();
@@ -259,7 +259,7 @@ public sealed class GitleaksSecretDetector : ISecretDetector
 		foreach (var allowlist in configuration.GlobalAllowlists)
 			budget.RunRuleInitialization(allowlist.EnsureCompiled);
 		budget.Checkpoint(cancellationToken);
-		var normalizedPath = repositoryRelativePath.Replace('\\', '/');
+		var normalizedPath = PathUtility.NormalizeSeparators(repositoryRelativePath);
 		if (!ShouldInspectPath(configuration, normalizedPath))
 			return [];
 		Span<ulong> candidateRules = stackalloc ulong[GetCandidateWordCount(configuration.Rules.Count)];

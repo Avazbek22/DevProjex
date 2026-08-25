@@ -17,7 +17,7 @@ internal sealed record SessionMarkedSecret(
 	public string Id { get; } = SecretRedactionSession.HashValue(
 		$"{NormalizePath(RelativePath)}\n{SourceOffset}\n{Length}\n{Hash}\n{Class}".AsSpan());
 
-	private static string NormalizePath(string path) => path.Replace('\\', '/');
+	private static string NormalizePath(string path) => PathUtility.NormalizeSeparators(path);
 }
 
 internal sealed class MarkedSecretsMatcher
@@ -451,7 +451,7 @@ internal sealed class MarkedSecretsMatcher
 		hash.Length == MarkedSecretValueNormalizer.PersistedHashLength &&
 		hash.All(char.IsAsciiHexDigit);
 
-	private static string NormalizePath(string path) => path.Replace('\\', '/');
+	private static string NormalizePath(string path) => PathUtility.NormalizeSeparators(path);
 
 	private sealed record PersistentHashGroup(
 		int Length,

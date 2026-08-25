@@ -45,7 +45,7 @@ internal static class UnscannableFileOutput
 	{
 		try
 		{
-			return Path.GetRelativePath(projectRoot, path).Replace('\\', '/');
+			return PathUtility.GetPortableRelativePath(projectRoot, path);
 		}
 		catch (ArgumentException)
 		{

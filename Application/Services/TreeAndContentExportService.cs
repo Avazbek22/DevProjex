@@ -156,7 +156,7 @@ public sealed class TreeAndContentExportService(
 			    !IsOutsideRoot(relativePath) &&
 			    !Path.IsPathRooted(relativePath))
 			{
-				return relativePath.Replace('\\', '/');
+				return PathUtility.NormalizeSeparators(relativePath);
 			}
 		}
 		catch
@@ -171,7 +171,7 @@ public sealed class TreeAndContentExportService(
 	private static string GetFallbackContentHeaderPath(string filePath)
 	{
 		var fileName = Path.GetFileName(filePath);
-		return string.IsNullOrWhiteSpace(fileName) ? filePath.Replace('\\', '/') : fileName;
+		return string.IsNullOrWhiteSpace(fileName) ? PathUtility.NormalizeSeparators(filePath) : fileName;
 	}
 
 	private static bool IsOutsideRoot(string relativePath) =>

@@ -84,7 +84,7 @@ internal sealed class CacheCommandHandler(
 			_ => throw new ArgumentOutOfRangeException(nameof(state), state, null)
 		};
 
-	private static string NormalizePath(string path) => path.Replace('\\', '/');
+	private static string NormalizePath(string path) => PathUtility.NormalizeSeparators(path);
 
 	internal static IReadOnlyList<string> FormatTextEntries(
 		IReadOnlyList<RepositoryCacheCatalogEntry> entries) =>

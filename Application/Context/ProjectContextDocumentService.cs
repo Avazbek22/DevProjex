@@ -1409,11 +1409,11 @@ public sealed class ProjectContextDocumentService(
 
 	private static string NormalizeRelativePath(string root, string path)
 	{
-		var relative = Path.GetRelativePath(root, path);
-		return relative == "." ? "." : NormalizePath(relative);
+		var relative = PathUtility.GetPortableRelativePath(root, path);
+		return relative == "." ? "." : relative;
 	}
 
-	private static string NormalizePath(string path) => path.Replace('\\', '/');
+	private static string NormalizePath(string path) => PathUtility.NormalizeSeparators(path);
 
 	private static string GetProjectName(ProjectContextPlan plan) =>
 		plan.SourceIdentity?.DisplayName is { Length: > 0 } displayName

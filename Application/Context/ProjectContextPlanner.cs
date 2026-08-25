@@ -749,7 +749,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 	}
 
 	private static string NormalizePathSeparators(string path) =>
-		path.Replace('\\', '/');
+		PathUtility.NormalizeSeparators(path);
 
 	private static TreeNodeDescriptor? BuildProjectedTree(
 		TreeNodeDescriptor node,

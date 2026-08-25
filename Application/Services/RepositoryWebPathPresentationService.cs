@@ -82,7 +82,7 @@ public sealed class RepositoryWebPathPresentationService
         if (relativePath.StartsWith("..", StringComparison.Ordinal))
             return fullPath;
 
-        var relativeUnixPath = relativePath.Replace('\\', '/');
+        var relativeUnixPath = PathUtility.NormalizeSeparators(relativePath);
         var encodedRelativePath = EncodePathSegments(relativeUnixPath);
 
         return $"{rootWebPath}/{encodedRelativePath}";
