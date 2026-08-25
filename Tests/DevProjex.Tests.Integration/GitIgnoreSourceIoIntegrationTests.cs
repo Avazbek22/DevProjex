@@ -366,6 +366,28 @@ public sealed class GitIgnoreSourceIoIntegrationTests
 	}
 
 	[Fact]
+	public void ExcessiveEffectiveRuleCountHasTypedReadFailureOutcome()
+	{
+		const int excessiveRuleCount = 8_193;
+		using var temp = new TemporaryDirectory();
+		var content = string.Join(
+			'\n',
+			Enumerable.Range(0, excessiveRuleCount)
+				.Select(static index => $"literal-{index}"));
+		var gitIgnorePath = Path.Combine(temp.Path, ".gitignore");
+		CreateSparseFile(gitIgnorePath, content.Length);
+		var source = new GitIgnoreFileContent(content, content.Length, "excessive-rules-source");
+
+		var result = GitIgnoreMatcherFileCache.Load(
+			temp.Path,
+			gitIgnorePath,
+			_ => source);
+
+		Assert.Equal(GitIgnoreMatcherLoadStatus.ReadFailure, result.Status);
+		Assert.Null(result.Matcher);
+	}
+
+	[Fact]
 	public void SmallUnchangedSourceReusesMatcherByLengthAndContentFingerprint()
 	{
 		using var temp = new TemporaryDirectory();

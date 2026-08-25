@@ -41,6 +41,15 @@ public sealed class GitIgnoreMatcherTests
 	}
 
 	[Fact]
+	public void Build_RejectsAnUnboundedNumberOfEffectiveRules()
+	{
+		var lines = Enumerable.Range(0, GitIgnoreMatcher.MaximumEffectiveRuleCount + 1)
+			.Select(static index => $"literal-{index}");
+
+		Assert.Throws<IOException>(() => GitIgnoreMatcher.Build("/repo", lines));
+	}
+
+	[Fact]
 	public void Build_HandlesEscapedHash()
 	{
 		var matcher = GitIgnoreMatcher.Build("/repo", [@"\#important"]);

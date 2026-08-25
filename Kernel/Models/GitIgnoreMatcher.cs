@@ -8,6 +8,8 @@ namespace DevProjex.Kernel.Models;
 
 public sealed class GitIgnoreMatcher
 {
+    internal const int MaximumEffectiveRuleCount = 8_192;
+
     private readonly string _normalizedRootPath;
     private readonly IReadOnlyList<Rule> _rules;
     private readonly StringComparison _pathComparison;
@@ -145,6 +147,11 @@ public sealed class GitIgnoreMatcher
             var hasSlash = line.Contains('/');
             var matchByNameOnly = !anchored && !hasSlash && !directoryOnly;
             var relativeToMatcherRoot = anchored || hasSlash;
+            if (rules.Count == MaximumEffectiveRuleCount)
+            {
+                throw new IOException(
+                    $"The .gitignore source exceeds the safe limit of {MaximumEffectiveRuleCount} effective rules.");
+            }
 
             var matchKind = GetRuleMatchKind(line, relativeToMatcherRoot, directoryOnly, matchByNameOnly, hasEscapes);
             Regex? pattern = null;
