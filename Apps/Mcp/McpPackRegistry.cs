@@ -400,13 +400,13 @@ public sealed class McpPackRegistry : IDisposable
 		protected override void Dispose(bool disposing)
 		{
 			if (disposing)
-				inner.Flush();
+				inner.Dispose();
 			base.Dispose(disposing);
 		}
 
 		public override async ValueTask DisposeAsync()
 		{
-			await inner.FlushAsync().ConfigureAwait(false);
+			await inner.DisposeAsync().ConfigureAwait(false);
 			GC.SuppressFinalize(this);
 		}
 	}

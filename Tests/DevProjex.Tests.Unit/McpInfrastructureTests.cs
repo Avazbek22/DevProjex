@@ -553,7 +553,7 @@ public sealed class McpInfrastructureTests
 		var actual = await Assert.ThrowsAsync<InvalidOperationException>(() => registry.CreateAsync(
 			async (stream, _) =>
 			{
-				var path = ((FileStream)stream).Name;
+				var path = Assert.Single(Directory.EnumerateFiles(registry.SessionDirectory, "*.pack"));
 				await stream.DisposeAsync();
 				File.Delete(path);
 				Directory.CreateDirectory(path);
