@@ -240,7 +240,8 @@ internal sealed class DevProjexMcpTools(
 			var tree = projects.TreeExportService.BuildFullTree(
 				plan.SourceRoot,
 				plan.ProjectedTree,
-				TreeTextFormat.Ascii);
+				TreeTextFormat.Ascii,
+				projects.ResolveProtectedDocumentRoot(plan));
 			var treeLines = McpTextRanges.SplitLines(tree);
 			if (treeLines.Count > MaximumTreeLines)
 				tree = string.Join('\n', treeLines.Take(MaximumTreeLines)) + "\n[Tree truncated at 2000 lines.]";

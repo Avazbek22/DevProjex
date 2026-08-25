@@ -115,6 +115,20 @@ internal sealed class McpProjectService(McpRootRegistry roots, McpServices servi
 				SecretRedactionFeatures.Secrets | SecretRedactionFeatures.PrivateData))!;
 	}
 
+	public string ResolveProtectedDocumentRoot(ProjectContextPlan plan)
+	{
+		var displayRoot = plan.SourceIdentity is
+		{
+			SourceType: ProjectSourceType.GitClone,
+			SourceReference.Length: > 0
+		} identity
+			? identity.SourceReference
+			: plan.SourceRoot;
+		var pathRedaction = OutputRootPathPresentation.CaptureRedactionDecision(
+			CreateTransformationContext(plan));
+		return OutputRootPathPresentation.ResolvePath(displayRoot, pathRedaction).Text;
+	}
+
 	public Task<PreparedSecretRedactionOutput> PrepareAsync(
 		ProjectContextPlan plan,
 		McpDetailLevel detail,

@@ -189,6 +189,48 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task StoredPackTreePreviewRedactsLocalUserSegment()
+	{
+		var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+		if (string.IsNullOrWhiteSpace(userProfile))
+			Assert.Skip("The environment does not expose a user profile directory.");
+		var project = Path.Combine(userProfile, "DevProjexMcpTest-" + Guid.NewGuid().ToString("N"));
+		var protectedProject = OutputRootPathPresentation.MaskLocalUserSegment(project);
+		if (protectedProject == project)
+			Assert.Skip("The user profile path does not use a supported local-user layout.");
+
+		using var workspace = new TemporaryDirectory();
+		Directory.CreateDirectory(project);
+		try
+		{
+			File.WriteAllText(
+				Path.Combine(project, "Large.cs"),
+				"internal static class Large\n{\n" +
+				string.Join('\n', Enumerable.Range(0, 1_500).Select(static index =>
+					$"    private const string Value{index:D4} = \"{new string('x', 48)}\";")) +
+				"\n}\n");
+			await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+			var result = await server.CallAsync(
+				"pack_context",
+				new Dictionary<string, object?>
+				{
+					["view"] = "content",
+					["format"] = "text"
+				});
+
+			Assert.Contains("Pack stored as '", Text(result), StringComparison.Ordinal);
+			Assert.Contains(protectedProject, Text(result), StringComparison.Ordinal);
+			Assert.DoesNotContain(project, Text(result), StringComparison.Ordinal);
+		}
+		finally
+		{
+			if (Directory.Exists(project))
+				Directory.Delete(project, recursive: true);
+		}
+	}
+
+	[Fact]
 	public async Task SchemaAwareClientReceivesCompleteTreeFileAndSearchPayloads()
 	{
 		using var workspace = new TemporaryDirectory();
