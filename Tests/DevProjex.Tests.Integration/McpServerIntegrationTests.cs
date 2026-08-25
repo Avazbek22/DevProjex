@@ -289,8 +289,12 @@ public sealed class McpServerIntegrationTests
 		if (OperatingSystem.IsWindows())
 			return;
 
-		var resolved = new McpRootRegistry([project]).ResolveExistingPath(project, " ");
-		Assert.Equal(whitespacePath, resolved, PathComparer.Default);
+		var registry = new McpRootRegistry([project]);
+		var resolved = registry.ResolveExistingPath(registry.Roots[0], " ");
+		var expected = McpRootRegistry.ResolvePhysicalExistingPath(
+			whitespacePath,
+			requireDirectory: false);
+		Assert.Equal(expected, resolved, PathComparer.Default);
 	}
 
 	[Fact]
