@@ -8,8 +8,12 @@ public sealed class ProjectProfileStoreTests
 		using var temporary = new TemporaryDirectory();
 		var projectPath = temporary.CreateFolder("project");
 		var store = CreateStore(temporary.Path);
-		string[] selectedPaths = [" ", " folder/file .cs "];
-		string[] roots = [" ", " source "];
+		string[] selectedPaths = OperatingSystem.IsWindows()
+			? [" folder/file .cs "]
+			: [" ", " folder/file .cs "];
+		string[] roots = OperatingSystem.IsWindows()
+			? [" source "]
+			: [" ", " source "];
 
 		store.SaveProfile(
 			projectPath,
