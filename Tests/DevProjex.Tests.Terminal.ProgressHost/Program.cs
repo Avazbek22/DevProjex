@@ -20,6 +20,12 @@ internal static class Program
 			Console.Out.Write("completed");
 			return CommandLineExitCodes.Success;
 		}
+		if (args is ["--stdin-eof"])
+		{
+			_ = Console.In.ReadToEnd();
+			Console.Out.Write("eof");
+			return CommandLineExitCodes.Success;
+		}
 
 		if (string.Equals(
 			    Environment.GetEnvironmentVariable(
