@@ -21,6 +21,8 @@ public sealed class RepoCacheService : IRepoCacheService
 	private const int MaximumPortablePathComponentBytes = 255;
 	private const int MaximumRepositoryNameUtf8Bytes =
 		MaximumPortablePathComponentBytes - UniquePathSuffixLength - 1;
+	private const UnixFileMode PrivateUnixDirectoryMode =
+		UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
 	internal const long MaximumCacheIndexBytes = 64L * 1024 * 1024;
 	private const byte RepositorySizeRefreshRunning = 1;
 	private const byte RepositorySizeRefreshPending = 2;
@@ -131,6 +133,7 @@ public sealed class RepoCacheService : IRepoCacheService
 
 	public string CreateRepositoryDirectory(string repositoryUrl)
 	{
+		EnsurePrivateCacheDirectory(CacheRootPath);
 		var path = CreateUniqueRepositoryPath(CacheRootPath, repositoryUrl);
 		Directory.CreateDirectory(path);
 		return path;
@@ -138,6 +141,7 @@ public sealed class RepoCacheService : IRepoCacheService
 
 	public string CreateRepositoryStagingDirectory(string repositoryUrl)
 	{
+		EnsurePrivateCacheDirectory(CacheRootPath);
 		var stagingRoot = Path.Combine(CacheRootPath, RepositoryCacheLayout.StagingDirectoryName);
 		var path = CreateUniqueRepositoryPath(stagingRoot, repositoryUrl);
 		Directory.CreateDirectory(path);
@@ -2311,8 +2315,21 @@ public sealed class RepoCacheService : IRepoCacheService
 
 	private static JsonStoreFileSet GetIndexFileSet(string cacheRoot)
 	{
+		EnsurePrivateCacheDirectory(cacheRoot);
 		var primaryPath = Path.Combine(cacheRoot, CacheIndexFileName);
 		return new JsonStoreFileSet(primaryPath, $"{primaryPath}.bak", $"{primaryPath}.lock");
+	}
+
+	private static void EnsurePrivateCacheDirectory(string path)
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Directory.CreateDirectory(path);
+			return;
+		}
+
+		Directory.CreateDirectory(path, PrivateUnixDirectoryMode);
+		File.SetUnixFileMode(path, PrivateUnixDirectoryMode);
 	}
 
 	private static IReadOnlyList<string> BuildCacheSearchRoots(
