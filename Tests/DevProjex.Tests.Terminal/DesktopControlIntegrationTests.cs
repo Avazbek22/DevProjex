@@ -304,7 +304,8 @@ public sealed class DesktopControlIntegrationTests
 	[Fact]
 	public async Task ClientRejectsStructurallyIncompleteProtocolResponse()
 	{
-		var pipeName = $"devprojex-test-{Guid.NewGuid():N}";
+		var uniqueSuffix = Guid.NewGuid().ToString("N");
+		var pipeName = $"dpx-{uniqueSuffix[..16]}";
 		await using var server = new NamedPipeServerStream(
 			pipeName,
 			PipeDirection.InOut,
