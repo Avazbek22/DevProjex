@@ -655,7 +655,10 @@ public sealed class ProjectCopyExportService(
 		EnsureDestinationOutsideProject(rootPath, path);
 	}
 
-	private static string ResolveSafeDestinationOutsideSource(string rootPath, string path)
+	private static string ResolveSafeDestinationOutsideSource(
+		string rootPath,
+		string path,
+		bool allowExistingFileLeafReplacement = false)
 	{
 		var normalizedRoot = PathUtility.Normalize(rootPath);
 		var normalizedDestination = PathUtility.Normalize(path);
@@ -679,7 +682,8 @@ public sealed class ProjectCopyExportService(
 		EnsureDestinationIdentityOutsideSource(
 			canonicalRoot,
 			canonicalDestination,
-			normalizedDestination);
+			normalizedDestination,
+			allowExistingFileLeafReplacement);
 
 		return canonicalDestination;
 	}
@@ -779,7 +783,8 @@ public sealed class ProjectCopyExportService(
 			var normalizedDestination = PathUtility.Normalize(destinationPath);
 			_ = ResolveSafeDestinationOutsideSource(
 				projectRootPath,
-				normalizedDestination);
+				normalizedDestination,
+				allowExistingFileLeafReplacement: true);
 			var destinationParent = Path.GetDirectoryName(normalizedDestination);
 			if (string.IsNullOrWhiteSpace(destinationParent))
 				throw UnsafeDestination($"The destination parent is unavailable: {normalizedDestination}");
@@ -826,7 +831,8 @@ public sealed class ProjectCopyExportService(
 	private static void EnsureDestinationIdentityOutsideSource(
 		string canonicalRoot,
 		string canonicalDestination,
-		string requestedDestination)
+		string requestedDestination,
+		bool allowExistingFileLeafReplacement)
 	{
 		if (!OperatingSystem.IsWindows() &&
 		    !OperatingSystem.IsLinux() &&
@@ -876,12 +882,19 @@ public sealed class ProjectCopyExportService(
 		var current = ResolveNearestExistingPath(canonicalDestination);
 		if (current is not null)
 		{
+			var isReplaceableFileLeaf = allowExistingFileLeafReplacement &&
+			                            PathComparer.Default.Equals(
+				                            current,
+				                            canonicalDestination) &&
+			                            File.Exists(canonicalDestination) &&
+			                            !Directory.Exists(canonicalDestination);
 			if (!FileSystemPathIdentity.TryReadLocation(current, out var destinationLocation))
 			{
 				throw UnsafeDestination(
 					$"The destination filesystem location cannot be established safely: {current}");
 			}
-			if (protectedBoundaries.Any(boundary =>
+			if (!isReplaceableFileLeaf &&
+			    protectedBoundaries.Any(boundary =>
 				    boundary.Location.NamespaceId.Equals(
 					    destinationLocation.NamespaceId,
 					    StringComparison.Ordinal) &&
@@ -900,7 +913,9 @@ public sealed class ProjectCopyExportService(
 				throw UnsafeDestination(
 					$"The destination path identity cannot be established safely: {current}");
 			}
-			foreach (var boundary in protectedBoundaries)
+			foreach (var boundary in isReplaceableFileLeaf
+			         ? []
+			         : protectedBoundaries)
 			{
 				if (!TryResolveEquivalentSourcePath(
 					    boundary.Location,
