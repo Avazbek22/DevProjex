@@ -75,7 +75,7 @@ internal static class GitIgnoreMatcherFileCache
 
 			var matcher = GitIgnoreMatcher.Build(
 				scopeRootPath,
-				GitIgnoreFileReader.SplitLines(source.Content),
+				GitIgnoreFileReader.EnumerateLines(source.Content),
 				comparisonSemantics);
 			var scopedMatcher = new ScopedGitIgnoreMatcher(Path.GetFullPath(scopeRootPath), matcher);
 			lock (CacheSync)

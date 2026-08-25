@@ -346,6 +346,26 @@ public sealed class GitIgnoreSourceIoIntegrationTests
 	}
 
 	[Fact]
+	public void NewlineDenseSourceDoesNotMaterializeEveryLineBeforeMatching()
+	{
+		using var temp = new TemporaryDirectory();
+		var content = new string('\n', 1024 * 1024);
+		var gitIgnorePath = Path.Combine(temp.Path, ".gitignore");
+		CreateSparseFile(gitIgnorePath, content.Length);
+		var source = new GitIgnoreFileContent(content, content.Length, "newline-dense-source");
+		var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+
+		var result = GitIgnoreMatcherFileCache.Load(
+			temp.Path,
+			gitIgnorePath,
+			_ => source);
+		var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+		Assert.Equal(GitIgnoreMatcherLoadStatus.Loaded, result.Status);
+		Assert.InRange(allocatedBytes, 0, 4 * 1024 * 1024);
+	}
+
+	[Fact]
 	public void SmallUnchangedSourceReusesMatcherByLengthAndContentFingerprint()
 	{
 		using var temp = new TemporaryDirectory();
