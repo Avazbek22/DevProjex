@@ -443,33 +443,53 @@ public sealed class TerminalWorkspaceState : IDisposable
 		List<TerminalTreeRow> rows,
 		ref int matchCount)
 	{
-		var insertionIndex = rows.Count;
-		// Reserve the parent's preorder slot before visiting descendants. The slot is
-		// always populated or removed before this frame returns, so no placeholder escapes.
-		rows.Add(null!);
-		var selfMatches = node.DisplayName.Contains(
-			_treeFilterQuery,
-			StringComparison.OrdinalIgnoreCase);
-		if (selfMatches)
-			matchCount++;
-		var descendantMatches = false;
-		if (node.IsDirectory)
+		var includedPaths = new HashSet<string>(PathComparer.Default);
+		var traversal = new Stack<(TreeNodeDescriptor Node, bool Visited)>();
+		traversal.Push((node, false));
+		while (traversal.Count > 0)
 		{
-			foreach (var child in node.Children)
-				descendantMatches |= AppendFiltered(child, depth + 1, rows, ref matchCount);
+			var (current, visited) = traversal.Pop();
+			if (!visited && current.IsDirectory && current.Children.Count > 0)
+			{
+				traversal.Push((current, true));
+				for (var index = current.Children.Count - 1; index >= 0; index--)
+					traversal.Push((current.Children[index], false));
+				continue;
+			}
+
+			var selfMatches = current.DisplayName.Contains(
+				_treeFilterQuery,
+				StringComparison.OrdinalIgnoreCase);
+			if (selfMatches)
+				matchCount++;
+			var descendantMatches = current.IsDirectory &&
+				current.Children.Any(child => includedPaths.Contains(child.FullPath));
+			if (selfMatches || descendantMatches)
+				includedPaths.Add(current.FullPath);
 		}
 
-		if (!selfMatches && !descendantMatches)
-		{
-			rows.RemoveAt(insertionIndex);
+		if (!includedPaths.Contains(node.FullPath))
 			return false;
-		}
 
-		rows[insertionIndex] = new TerminalTreeRow(
-			node,
-			depth,
-			node.IsDirectory && descendantMatches,
-			GetCheckState(node));
+		var projection = new Stack<(TreeNodeDescriptor Node, int Depth)>();
+		projection.Push((node, depth));
+		while (projection.Count > 0)
+		{
+			var (current, currentDepth) = projection.Pop();
+			var descendantMatches = current.IsDirectory &&
+				current.Children.Any(child => includedPaths.Contains(child.FullPath));
+			rows.Add(new TerminalTreeRow(
+				current,
+				currentDepth,
+				descendantMatches,
+				GetCheckState(current)));
+			for (var index = current.Children.Count - 1; index >= 0; index--)
+			{
+				var child = current.Children[index];
+				if (includedPaths.Contains(child.FullPath))
+					projection.Push((child, currentDepth + 1));
+			}
+		}
 		return true;
 	}
 
@@ -478,13 +498,19 @@ public sealed class TerminalWorkspaceState : IDisposable
 		int depth,
 		ICollection<TerminalTreeRow> rows)
 	{
-		var expanded = node.IsDirectory && _expandedPaths.Contains(node.FullPath);
-		rows.Add(new TerminalTreeRow(node, depth, expanded, GetCheckState(node)));
-		if (!expanded)
-			return;
+		var stack = new Stack<(TreeNodeDescriptor Node, int Depth)>();
+		stack.Push((node, depth));
+		while (stack.Count > 0)
+		{
+			var (current, currentDepth) = stack.Pop();
+			var expanded = current.IsDirectory && _expandedPaths.Contains(current.FullPath);
+			rows.Add(new TerminalTreeRow(current, currentDepth, expanded, GetCheckState(current)));
+			if (!expanded)
+				continue;
 
-		foreach (var child in node.Children)
-			AppendVisible(child, depth + 1, rows);
+			for (var index = current.Children.Count - 1; index >= 0; index--)
+				stack.Push((current.Children[index], currentDepth + 1));
+		}
 	}
 
 	private TerminalTreeCheckState GetCheckState(TreeNodeDescriptor node)
@@ -543,37 +569,25 @@ public sealed class TerminalWorkspaceState : IDisposable
 		return relative == "." ? "." : PathUtility.NormalizeSeparators(relative);
 	}
 
-	private bool CollectMinimalSelection(TreeNodeDescriptor node, List<string> result)
+	private void CollectMinimalSelection(TreeNodeDescriptor node, ICollection<string> result)
 	{
-		if (!node.IsDirectory)
+		var stack = new Stack<TreeNodeDescriptor>();
+		stack.Push(node);
+		while (stack.Count > 0)
 		{
-			if (!_selectedFiles.Contains(node.FullPath))
-				return false;
-			result.Add(node.FullPath);
-			return true;
-		}
-		if (node.Children.Count == 0)
-		{
-			if (!_selectedEmptyDirectories.Contains(node.FullPath))
-				return false;
-			result.Add(node.FullPath);
-			return true;
-		}
+			var current = stack.Pop();
+			var state = GetCheckState(current);
+			if (state == TerminalTreeCheckState.Unchecked)
+				continue;
+			if (state == TerminalTreeCheckState.Checked)
+			{
+				result.Add(current.FullPath);
+				continue;
+			}
 
-		var selectedBefore = result.Count;
-		var allSelected = true;
-		foreach (var child in node.Children)
-		{
-			if (!CollectMinimalSelection(child, result))
-				allSelected = false;
+			for (var index = current.Children.Count - 1; index >= 0; index--)
+				stack.Push(current.Children[index]);
 		}
-
-		if (!allSelected)
-			return false;
-
-		result.RemoveRange(selectedBefore, result.Count - selectedBefore);
-		result.Add(node.FullPath);
-		return true;
 	}
 
 	private void RecomputeCheckStates()
@@ -627,11 +641,17 @@ public sealed class TerminalWorkspaceState : IDisposable
 
 	private void IndexTree(TreeNodeDescriptor node, string? parentPath)
 	{
-		_nodesByPath[node.FullPath] = node;
-		_parentsByPath[node.FullPath] = parentPath;
-		_orderedPaths.Add(node.FullPath);
-		foreach (var child in node.Children)
-			IndexTree(child, node.FullPath);
+		var stack = new Stack<(TreeNodeDescriptor Node, string? ParentPath)>();
+		stack.Push((node, parentPath));
+		while (stack.Count > 0)
+		{
+			var (current, currentParentPath) = stack.Pop();
+			_nodesByPath[current.FullPath] = current;
+			_parentsByPath[current.FullPath] = currentParentPath;
+			_orderedPaths.Add(current.FullPath);
+			for (var index = current.Children.Count - 1; index >= 0; index--)
+				stack.Push((current.Children[index], current.FullPath));
+		}
 	}
 
 	private void ExpandAncestors(string path)
