@@ -71,7 +71,6 @@ internal sealed class DevProjexMcpTools(
 						treeWriter,
 						plan.SourceRoot,
 						renderedTree,
-						projects.ResolveProtectedDocumentRoot(plan),
 						cancellationToken: cancellationToken)
 					.ConfigureAwait(false);
 			}
