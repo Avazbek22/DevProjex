@@ -5,6 +5,15 @@ namespace DevProjex.Kernel.Models;
 
 public static class RepositoryUrlUtility
 {
+	private const string ComparisonIdentityVersionPrefix = "v2:";
+	private static readonly HashSet<string> CaseInsensitiveRepositoryPathHosts = new(
+		StringComparer.OrdinalIgnoreCase)
+	{
+		"github.com",
+		"gitlab.com",
+		"bitbucket.org"
+	};
+
 	public static bool TryNormalize(string? repositoryUrl, out string normalizedUrl)
 	{
 		normalizedUrl = Normalize(repositoryUrl);
@@ -64,30 +73,30 @@ public static class RepositoryUrlUtility
 			return string.Empty;
 
 		if (TryParseScpSyntax(normalized, out var scp))
-			return BuildHostPathKey(scp.Host, -1, scp.Path);
+			return BuildVersionedHostPathKey(scp.Host, -1, scp.Path);
 
 		if (Uri.TryCreate(normalized, UriKind.Absolute, out var uri) &&
 		    uri.Scheme is "http" or "https" or "ssh" or "git")
 		{
-			return BuildHostPathKey(
+			return BuildVersionedHostPathKey(
 				uri.Host,
 				uri.IsDefaultPort ? -1 : uri.Port,
 				uri.AbsolutePath);
 		}
 		if (uri?.IsFile == true)
-			return BuildFileSystemKey(uri.LocalPath);
+			return BuildVersionedFileSystemKey(uri.LocalPath);
 
 		try
 		{
 			if (Path.IsPathFullyQualified(normalized))
-				return BuildFileSystemKey(normalized);
+				return BuildVersionedFileSystemKey(normalized);
 		}
 		catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
 		{
 			return string.Empty;
 		}
 
-		return TrimGitSuffix(normalized);
+		return VersionIdentity(TrimGitSuffix(normalized));
 	}
 
 	public static bool AreEquivalent(string? left, string? right)
@@ -95,7 +104,7 @@ public static class RepositoryUrlUtility
 		var leftKey = GetComparisonKey(left);
 		var rightKey = GetComparisonKey(right);
 		return leftKey.Length > 0 &&
-		       string.Equals(leftKey, rightKey, StringComparison.OrdinalIgnoreCase);
+		       string.Equals(leftKey, rightKey, StringComparison.Ordinal);
 	}
 
 	public static string GetRepositoryName(string? repositoryUrl)
@@ -160,19 +169,25 @@ public static class RepositoryUrlUtility
 		}
 	}
 
-	private static string BuildHostPathKey(string host, int port, string path)
+	private static string BuildVersionedHostPathKey(string host, int port, string path)
 	{
 		var normalizedHost = host.Trim().ToLowerInvariant();
 		var normalizedPath = TrimGitSuffix(NormalizePath(path));
+		if (CaseInsensitiveRepositoryPathHosts.Contains(normalizedHost))
+			normalizedPath = normalizedPath.ToLowerInvariant();
 		var portSuffix = port > 0 ? $":{port}" : string.Empty;
-		return $"{normalizedHost}{portSuffix}/{normalizedPath.TrimStart('/')}";
+		return VersionIdentity($"{normalizedHost}{portSuffix}/{normalizedPath.TrimStart('/')}");
 	}
 
-	private static string BuildFileSystemKey(string path)
+	private static string BuildVersionedFileSystemKey(string path)
 	{
 		var normalizedPath = PathUtility.NormalizeForCacheKey(TrimGitSuffix(path));
-		return $"file/{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalizedPath)))}";
+		return VersionIdentity(
+			$"file/{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalizedPath)))}");
 	}
+
+	private static string VersionIdentity(string identity) =>
+		$"{ComparisonIdentityVersionPrefix}{identity}";
 
 	private static string GetLastPathSegment(string value)
 	{

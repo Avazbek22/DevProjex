@@ -551,30 +551,78 @@ public class RepoCacheServiceTests : IDisposable
     }
 
     [Fact]
-    public void LegacyLocalRepositoryIdentityIsNormalizedWhenIndexIsRead()
+    public void RemoteRepositoryCacheIdentityUsesHostSpecificPathCaseSemantics()
     {
-        var sourcePath = Path.Combine(_testCacheRoot, "source", "legacy.git");
-        var repositoryUrl = new Uri(sourcePath).AbsoluteUri;
-        var cachePath = _service.CreateRepositoryDirectory(repositoryUrl);
-        var legacyIdentity = RepositoryUrlUtility.Normalize(repositoryUrl)[..^4];
+        const string githubUrl = "https://github.com/Owner/Repo.git";
+        var githubCachePath = _service.CreateRepositoryDirectory(githubUrl);
+        _service.RecordIndexedRepository(githubUrl, githubCachePath, "main");
+
+        const string selfHostedUpperUrl = "https://git.example.test/Owner/Repo.git";
+        const string selfHostedLowerUrl = "https://git.example.test/owner/repo.git";
+        var selfHostedUpperPath = _service.CreateRepositoryDirectory(selfHostedUpperUrl);
+        var selfHostedLowerPath = _service.CreateRepositoryDirectory(selfHostedLowerUrl);
+        _service.RecordIndexedRepository(selfHostedUpperUrl, selfHostedUpperPath, "upper");
+        _service.RecordIndexedRepository(selfHostedLowerUrl, selfHostedLowerPath, "lower");
+
+        Assert.Equal(
+            githubCachePath,
+            Assert.IsType<RepositoryCacheIndexEntry>(
+                _service.FindIndexedRepository("https://GITHUB.com/owner/repo")).LocalPath,
+            PathComparer.Default);
+        Assert.Equal(
+            selfHostedUpperPath,
+            Assert.IsType<RepositoryCacheIndexEntry>(
+                _service.FindIndexedRepository(selfHostedUpperUrl)).LocalPath,
+            PathComparer.Default);
+        Assert.Equal(
+            selfHostedLowerPath,
+            Assert.IsType<RepositoryCacheIndexEntry>(
+                _service.FindIndexedRepository(selfHostedLowerUrl)).LocalPath,
+            PathComparer.Default);
+    }
+
+    [Fact]
+    public void LegacyRepositoryIdentityRemainsUnchangedAndCoexistsAfterVersionedCacheMiss()
+    {
+        const string repositoryUrl = "https://example.com/Owner/Repo.git";
+        const string legacyIdentity = "example.com/owner/repo";
+        var legacyCachePath = _service.CreateRepositoryDirectory(repositoryUrl);
         WriteCacheIndex(
             _testCacheRoot,
             [
                 new RepositoryCacheIndexEntry(
                     legacyIdentity,
                     repositoryUrl,
-                    cachePath,
+                    legacyCachePath,
                     "main",
                     null,
                     DateTimeOffset.UtcNow,
                     RepositoryCacheEntryState.Ready,
                     ContentKind: RepositoryCacheContentKind.Zip)
             ]);
+        var indexPath = Path.Combine(_testCacheRoot, "cache-index.json");
+        var legacyIndexBytes = File.ReadAllBytes(indexPath);
 
-        var entry = Assert.IsType<RepositoryCacheIndexEntry>(_service.FindIndexedRepository(repositoryUrl));
+        Assert.Null(_service.FindIndexedRepository(repositoryUrl));
+        Assert.Equal(legacyIndexBytes, File.ReadAllBytes(indexPath));
 
-        Assert.Equal(RepositoryUrlUtility.GetComparisonKey(repositoryUrl), entry.Identity);
-        Assert.Equal(cachePath, entry.LocalPath, PathComparer.Default);
+        var currentCachePath = _service.CreateRepositoryDirectory(repositoryUrl);
+        _service.RecordIndexedRepository(
+            repositoryUrl,
+            currentCachePath,
+            "main");
+
+        var entries = _service.ListIndexedRepositories();
+        var indexPayload = File.ReadAllText(indexPath);
+
+        Assert.Equal(2, entries.Count);
+        Assert.Contains(entries, entry => PathComparer.Default.Equals(entry.LocalPath, legacyCachePath));
+        Assert.Contains(entries, entry => PathComparer.Default.Equals(entry.LocalPath, currentCachePath));
+        Assert.Contains($"\"identity\": \"{legacyIdentity}\"", indexPayload, StringComparison.Ordinal);
+        Assert.Contains(
+            $"\"identity\": \"{RepositoryUrlUtility.GetComparisonKey(repositoryUrl)}\"",
+            indexPayload,
+            StringComparison.Ordinal);
     }
 
     [Fact]

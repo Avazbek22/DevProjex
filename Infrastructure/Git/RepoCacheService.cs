@@ -259,7 +259,7 @@ public sealed class RepoCacheService : IRepoCacheService
 	public IReadOnlyList<RepositoryCacheCatalogEntry> ListIndexedRepositories()
 	{
 		var latestByIdentity = new Dictionary<string, RepositoryCacheIndexEntry>(
-			StringComparer.OrdinalIgnoreCase);
+			StringComparer.Ordinal);
 		foreach (var searchRoot in CacheSearchRootPaths)
 		{
 			if (IsLinkedCacheRoot(searchRoot))
@@ -560,7 +560,7 @@ public sealed class RepoCacheService : IRepoCacheService
 						.Where(candidate => !string.Equals(
 							candidate.Identity,
 							entry.Identity,
-							StringComparison.OrdinalIgnoreCase))
+							StringComparison.Ordinal))
 						.ToList();
 					if (!WriteIndex(fileSet, entries))
 						return;
@@ -637,7 +637,7 @@ public sealed class RepoCacheService : IRepoCacheService
 				var isTarget = identity is null || string.Equals(
 					entry.Identity,
 					identity,
-					StringComparison.OrdinalIgnoreCase);
+					StringComparison.Ordinal);
 				var container = TryResolveCacheContainer(entry.LocalPath);
 				indexedEntries.Add(new CacheRemovalEntry(entry, container, isTarget));
 				if (container is null)
@@ -1035,7 +1035,7 @@ public sealed class RepoCacheService : IRepoCacheService
 					.Select(candidate => string.Equals(
 						candidate.Identity,
 						entry.Identity,
-						StringComparison.OrdinalIgnoreCase)
+						StringComparison.Ordinal)
 						? candidate with { ApproximateSizeBytes = size }
 						: candidate)
 					.ToList());
@@ -1320,7 +1320,7 @@ public sealed class RepoCacheService : IRepoCacheService
 					.Where(candidate => !string.Equals(
 						candidate.Identity,
 						identity,
-						StringComparison.OrdinalIgnoreCase))
+						StringComparison.Ordinal))
 					.Append(updated)
 					.OrderByDescending(static candidate => candidate.LastOpenedUtc)
 					.ToList()))
@@ -1723,7 +1723,7 @@ public sealed class RepoCacheService : IRepoCacheService
 				resolvedKind);
 			var entries = document.Entries
 				.Where(candidate =>
-					!string.Equals(candidate.Identity, identity, StringComparison.OrdinalIgnoreCase) &&
+					!string.Equals(candidate.Identity, identity, StringComparison.Ordinal) &&
 					!ArePathsInSameRepository(candidate.LocalPath, normalizedPath))
 				.ToList();
 			entries.Add(entry);
@@ -1783,7 +1783,7 @@ public sealed class RepoCacheService : IRepoCacheService
 					.Where(candidate => !string.Equals(
 						candidate.Identity,
 						identity,
-						StringComparison.OrdinalIgnoreCase))
+						StringComparison.Ordinal))
 					.Append(migrated)
 					.ToList();
 				if (WriteIndex(fileSet, entries))
@@ -1852,7 +1852,7 @@ public sealed class RepoCacheService : IRepoCacheService
 		RepositoryCacheIndexDocument document,
 		string identity) =>
 		document.Entries
-			.Where(entry => string.Equals(entry.Identity, identity, StringComparison.OrdinalIgnoreCase))
+			.Where(entry => string.Equals(entry.Identity, identity, StringComparison.Ordinal))
 			.OrderByDescending(static entry => entry.LastOpenedUtc)
 			.FirstOrDefault();
 
@@ -2446,7 +2446,7 @@ public sealed class RepoCacheService : IRepoCacheService
 			.Select(entry => NormalizeIndexEntryOrNull(entry, maximumAcceptedTimestamp))
 			.Where(static entry => entry is not null)
 			.Select(static entry => entry!)
-			.GroupBy(static entry => entry.Identity, StringComparer.OrdinalIgnoreCase)
+			.GroupBy(static entry => entry.Identity, StringComparer.Ordinal)
 			.Select(static group => group.OrderByDescending(entry => entry.LastOpenedUtc).First())
 			.OrderByDescending(static entry => entry.LastOpenedUtc)
 			.ToList();
@@ -2460,12 +2460,10 @@ public sealed class RepoCacheService : IRepoCacheService
 		try
 		{
 			var safeUrl = RepositoryUrlUtility.ToSafeDisplay(entry.RepositoryUrl);
-			var identity = RepositoryUrlUtility.GetComparisonKey(safeUrl);
-			if (identity.Length == 0)
+			if (safeUrl.Length == 0)
 				return null;
 			return entry with
 			{
-				Identity = identity,
 				RepositoryUrl = safeUrl,
 				LastUsedUtc = entry.LastUsedUtc <= DateTimeOffset.UnixEpoch ||
 				              entry.LastUsedUtc > maximumAcceptedTimestamp
