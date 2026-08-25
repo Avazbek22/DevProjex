@@ -1152,7 +1152,7 @@ public sealed class TreeExportService
 	}
 
 	private static string ResolveRootDisplayName(TreeNodeDescriptor root, string? displayRootName)
-		=> string.IsNullOrEmpty(displayRootName) ? root.DisplayName : displayRootName;
+		=> string.IsNullOrWhiteSpace(displayRootName) ? root.DisplayName : displayRootName;
 
 	private static string ResolveStructuredRootPath(string localRootPath)
 	{

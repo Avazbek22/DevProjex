@@ -21,11 +21,15 @@ public sealed class ProjectProfileRootNameIdentityTests
 		store.SaveProfile(project.Path, profile);
 
 		Assert.True(store.TryLoadProfile(project.Path, out var loaded));
-		Assert.Equal(
-			new HashSet<string>([" source "], PathComparer.Default),
-			loaded.SelectedRootFolders.ToHashSet(PathComparer.Default));
+		var expectedRoots = OperatingSystem.IsWindows()
+			? new HashSet<string>([" source "], PathComparer.Default)
+			: new HashSet<string>([" source ", "   "], PathComparer.Default);
+		Assert.Equal(expectedRoots, loaded.SelectedRootFolders.ToHashSet(PathComparer.Default));
 		Assert.NotNull(loaded.RootFolderStates);
 		Assert.True(loaded.RootFolderStates![" source "]);
-		Assert.DoesNotContain("   ", loaded.RootFolderStates.Keys);
+		if (OperatingSystem.IsWindows())
+			Assert.DoesNotContain("   ", loaded.RootFolderStates.Keys);
+		else
+			Assert.False(loaded.RootFolderStates["   "]);
 	}
 }

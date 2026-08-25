@@ -829,6 +829,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 
 	private static bool IsValidStoredPath(string? value) =>
 		!string.IsNullOrEmpty(value) &&
+		(!OperatingSystem.IsWindows() || !string.IsNullOrWhiteSpace(value)) &&
 		value.Length <= ProjectProfileStorageLimits.MaximumStateNameLength;
 
 	private static bool TryParseDatabase(

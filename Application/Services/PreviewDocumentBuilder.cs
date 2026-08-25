@@ -752,7 +752,7 @@ public sealed class PreviewDocumentBuilder(
         try
         {
             var mapped = displayPathMapper(filePath);
-            return string.IsNullOrEmpty(mapped) ? filePath : mapped;
+            return string.IsNullOrWhiteSpace(mapped) ? filePath : mapped;
         }
         catch
         {

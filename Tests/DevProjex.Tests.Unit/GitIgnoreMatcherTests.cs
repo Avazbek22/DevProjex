@@ -686,6 +686,9 @@ public sealed class GitIgnoreMatcherTests
 	[Fact]
 	public void IsIgnored_WindowsStylePaths_NormalizedCorrectly()
 	{
+		if (!OperatingSystem.IsWindows())
+			Assert.Skip("Backslashes are valid file-name characters on Unix.");
+
 		var matcher = GitIgnoreMatcher.Build(@"C:\repo", ["bin/", "*.log"]);
 
 		Assert.True(matcher.IsIgnored(@"C:\repo\bin", true, "bin"));

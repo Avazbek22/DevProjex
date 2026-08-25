@@ -129,7 +129,7 @@ public sealed class ProjectProfileStoreAdditionalTests
 	}
 
 	[Fact]
-	public void SaveProfile_DropsWhitespaceAndDuplicateRootFolders()
+	public void SaveProfile_NormalizesRootFoldersUsingPlatformPathSemantics()
 	{
 		var tempRoot = CreateTempDirectory();
 		try
@@ -144,6 +144,8 @@ public sealed class ProjectProfileStoreAdditionalTests
 
 			Assert.True(store.TryLoadProfile(Path.Combine(tempRoot, "RepoA"), out var loaded));
 			var expectedRootFolders = new HashSet<string>(PathComparer.Default) { "src", "SRC", "tests" };
+			if (!OperatingSystem.IsWindows())
+				expectedRootFolders.Add("   ");
 			Assert.Equal(expectedRootFolders.Count, loaded.SelectedRootFolders.Count);
 			Assert.Contains("src", loaded.SelectedRootFolders);
 			Assert.Contains("tests", loaded.SelectedRootFolders);

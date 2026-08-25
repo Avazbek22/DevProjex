@@ -317,7 +317,7 @@ public sealed class RecentProjectsStoreTests
 		var folder = temp.CreateFolder("Workspace");
 
 		db = store.AddFolder(db, folder);
-		db = store.AddFolder(db, folder + '\\');
+		db = store.AddFolder(db, folder + Path.DirectorySeparatorChar);
 
 		Assert.Single(db.RecentFolders);
 		Assert.Equal(Path.GetFullPath(folder).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), db.RecentFolders[0].Path);
