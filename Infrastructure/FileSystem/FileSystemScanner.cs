@@ -2475,10 +2475,9 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		List<int>? directoryIndexes,
 		IReadOnlyList<EffectiveIgnoreScanNode> directories)
 	{
-		directoryIndexes?.Sort((left, right) => string.Compare(
+		directoryIndexes?.Sort((left, right) => ProjectInventoryNameComparer.Compare(
 			directories[left].Name,
-			directories[right].Name,
-			StringComparison.OrdinalIgnoreCase));
+			directories[right].Name));
 	}
 
 	private static void SortInventoryEntries(List<ProjectTreeInventoryEntry>? entries)
@@ -2491,14 +2490,14 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		if (left.IsDirectory != right.IsDirectory)
 			return left.IsDirectory ? -1 : 1;
 
-		return string.Compare(left.Name, right.Name, StringComparison.OrdinalIgnoreCase);
+		return ProjectInventoryNameComparer.Compare(left.Name, right.Name);
 	}
 
 	private static int CompareInventoryRootNames(ProjectTreeInventorySnapshot left, ProjectTreeInventorySnapshot right)
 	{
 		ref readonly var leftRoot = ref left.GetEntryRef(0);
 		ref readonly var rightRoot = ref right.GetEntryRef(0);
-		return string.Compare(leftRoot.Name, rightRoot.Name, StringComparison.OrdinalIgnoreCase);
+		return ProjectInventoryNameComparer.Compare(leftRoot.Name, rightRoot.Name);
 	}
 
 	private ScanResult<EffectiveIgnoreScanDiscovery> DiscoverEffectiveIgnoreScanNodes(
