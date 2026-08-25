@@ -2,6 +2,17 @@ namespace DevProjex.Tests.Unit;
 
 public sealed class ProjectRootFactsProviderTests
 {
+	[Fact]
+	public void ProjectRootFacts_OrdinaryDirectoryLookupPreservesWhitespaceOnlyNames()
+	{
+		var directory = new ProjectRootDirectoryFact(" ", "root/ ", IsReparsePoint: false);
+		var facts = new ProjectRootFacts("root", true, true, [], [directory], null);
+
+		Assert.True(facts.HasDirectory(" "));
+		Assert.True(facts.TryGetDirectory(" ", out var resolved));
+		Assert.Equal(directory, resolved);
+	}
+
 	[Theory]
 	[InlineData(15)]
 	[InlineData(16)]

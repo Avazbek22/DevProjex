@@ -675,7 +675,7 @@ public sealed class ProjectScopeDiscoveryService(
 		{
 			foreach (var folderName in selectedRootFolders)
 			{
-				if (string.IsNullOrWhiteSpace(folderName))
+				if (string.IsNullOrEmpty(folderName))
 					continue;
 
 				if (rootFacts.TryGetDirectory(folderName, out var directory) &&

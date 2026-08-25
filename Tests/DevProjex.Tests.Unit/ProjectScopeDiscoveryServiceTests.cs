@@ -3,6 +3,23 @@ namespace DevProjex.Tests.Unit;
 public sealed class ProjectScopeDiscoveryServiceTests
 {
 	[Fact]
+	public void Discover_UnixWhitespaceOnlySelectedRootRemainsAProjectScope()
+	{
+		if (OperatingSystem.IsWindows())
+			return;
+
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(" /package.json", "{}");
+		var discovery = CreateDiscovery();
+
+		var context = discovery.Discover(temp.Path, [" "]);
+
+		Assert.Contains(
+			context.Scopes,
+			scope => Path.GetFileName(scope.RootPath) == " " && scope.HasProjectMarker);
+	}
+
+	[Fact]
 	public void Invalidate_TrailingSeparatorAliasRefreshesCanonicalScope()
 	{
 		using var temp = new TemporaryDirectory();

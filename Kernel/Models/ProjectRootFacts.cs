@@ -160,14 +160,14 @@ public sealed class ProjectRootFacts
 	}
 
 	public bool HasDirectory(string directoryName) =>
-		!string.IsNullOrWhiteSpace(directoryName) && ContainsDirectoryName(
+		!string.IsNullOrEmpty(directoryName) && ContainsDirectoryName(
 			directoryName,
 			markerComparison: false,
 			includeReparsePoints: true);
 
 	public bool TryGetDirectory(string directoryName, out ProjectRootDirectoryFact directory)
 	{
-		if (string.IsNullOrWhiteSpace(directoryName))
+		if (string.IsNullOrEmpty(directoryName))
 		{
 			directory = default;
 			return false;
