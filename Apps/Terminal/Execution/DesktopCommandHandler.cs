@@ -267,7 +267,7 @@ public sealed class DesktopCommandHandler(
 	private void WriteOutput(string value)
 	{
 		if (writeOutput)
-			environment.Output.WriteLine(value);
+			TerminalTextEscaping.WriteSingleLine(environment.Output, value);
 	}
 
 	private static DesktopInstanceRegistration? FindSuitableInstance(

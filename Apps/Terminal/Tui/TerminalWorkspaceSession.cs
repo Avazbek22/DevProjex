@@ -4639,15 +4639,16 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private string BuildWorkspaceHeading(ProjectContextPlan plan)
 	{
 		var branch = plan.SourceIdentity?.Branch is { Length: > 0 } value
-			? $" [{value}]"
+			? $" [{TerminalTextEscaping.EscapeSingleLine(value)}]"
 			: string.Empty;
 		return $"DevProjex Terminal{PanelSeparator}{GetProjectDisplayName(plan)}{branch}";
 	}
 
 	private static string GetProjectDisplaySource(ProjectContextPlan plan) =>
-		plan.SourceIdentity?.SourceReference is { Length: > 0 } sourceReference
+		TerminalTextEscaping.EscapeSingleLine(
+			plan.SourceIdentity?.SourceReference is { Length: > 0 } sourceReference
 			? sourceReference
-			: plan.SourceRoot;
+			: plan.SourceRoot);
 
 	private static void CancelAndDispose(ref CancellationTokenSource? source)
 	{

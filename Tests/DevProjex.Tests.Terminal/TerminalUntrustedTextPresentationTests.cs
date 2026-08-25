@@ -1,5 +1,6 @@
 using DevProjex.Application.Workspaces;
 using DevProjex.Terminal.Execution;
+using DevProjex.Terminal.Rendering;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -59,6 +60,18 @@ public sealed class TerminalUntrustedTextPresentationTests
 
 		Assert.Equal("https://example.test/repository.git", repository.SafeDisplayUrl);
 		Assert.DoesNotContain(secret, repository.SafeDisplayUrl, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void SingleLineWriterEscapesEveryLineBreakingAndTerminalControlCharacter()
+	{
+		using var output = new StringWriter();
+
+		TerminalTextEscaping.WriteSingleLine(output, "result\r\n\t\u001B\u2028\u2029");
+
+		Assert.Equal(
+			"result\\r\\n\\t\\u001B\\u2028\\u2029" + Environment.NewLine,
+			output.ToString());
 	}
 
 	private static void AssertSafe(string rendered, string expected)

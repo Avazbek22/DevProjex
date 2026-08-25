@@ -51,7 +51,7 @@ public sealed class HumanOutputRenderer(
 
 	public void WriteSuccessPath(string path)
 	{
-		environment.Output.WriteLine(Path.GetFullPath(path));
+		TerminalTextEscaping.WriteSingleLine(environment.Output, Path.GetFullPath(path));
 	}
 
 	public void WriteStatus(string message)

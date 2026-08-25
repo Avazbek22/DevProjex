@@ -1,3 +1,5 @@
+using DevProjex.Terminal.Rendering;
+
 namespace DevProjex.Terminal.Tui;
 
 #pragma warning disable CS0618
@@ -9,6 +11,8 @@ internal sealed partial class TerminalWorkspaceSession
 
 	private void ShowCloneProgress(string repositoryName, string safeRepositoryUrl)
 	{
+		repositoryName = TerminalTextEscaping.EscapeSingleLine(repositoryName);
+		safeRepositoryUrl = TerminalTextEscaping.EscapeSingleLine(safeRepositoryUrl);
 		CancelWorkspaceRefreshes();
 		ClearRoot();
 		_screen = TerminalWorkspaceScreen.Loading;

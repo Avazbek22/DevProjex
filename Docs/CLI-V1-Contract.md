@@ -775,6 +775,13 @@ stderr is the operational channel:
 Direct commands never prompt. JSON and XML stdout never contain ANSI, progress,
 spinner frames, tables, warning lines, result paths, or summaries.
 
+Human-readable file names, paths, and one-line success-path payloads are display
+values rather than reversible filesystem identifiers. Carriage return, line feed,
+tab, other control characters, U+2028, and U+2029 are escaped as `\\r`, `\\n`,
+`\\t`, or `\\uXXXX`, so one filesystem entry cannot inject terminal control or
+forge another output line. Structured JSON and XML path/name values keep their
+exact machine-readable values and rely on their serializers for escaping.
+
 `--dry-run` performs source planning plus destination safety and conflict
 validation, creates no file, directory, ZIP, staging path, or parent directory,
 and leaves stdout empty. A localized readiness summary uses stderr. For stdout

@@ -18,7 +18,9 @@ internal sealed class CacheCommandHandler(
 
 	public int WritePath()
 	{
-		environment.Output.WriteLine(services.RepoCacheService.CacheRootPath);
+		TerminalTextEscaping.WriteSingleLine(
+			environment.Output,
+			services.RepoCacheService.CacheRootPath);
 		return CommandLineExitCodes.Success;
 	}
 

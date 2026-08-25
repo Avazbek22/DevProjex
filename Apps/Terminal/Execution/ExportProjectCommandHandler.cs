@@ -116,7 +116,9 @@ public sealed class ExportProjectCommandHandler(
 					progress,
 					cancellationToken))
 			.ConfigureAwait(false);
-		environment.Output.WriteLine(Path.GetFullPath(result.DestinationPath));
+		TerminalTextEscaping.WriteSingleLine(
+			environment.Output,
+			Path.GetFullPath(result.DestinationPath));
 		if (result.UnscannableFiles is { Count: > 0 })
 		{
 			environment.Error.WriteLine(
