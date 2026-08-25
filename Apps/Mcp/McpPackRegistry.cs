@@ -18,14 +18,18 @@ public sealed class McpPackRegistry : IDisposable
 			tempRoot ?? Path.GetTempPath(),
 			"DevProjex",
 			"mcp");
+		Directory.CreateDirectory(baseDirectory);
+		SetPrivateDirectoryMode(baseDirectory);
 		Scavenge(baseDirectory, TimeProvider.GetUtcNow());
 		_sessionDirectory = Path.Combine(baseDirectory, Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant());
 		Directory.CreateDirectory(_sessionDirectory);
+		SetPrivateDirectoryMode(_sessionDirectory);
 		_sessionLease = new FileStream(
 			Path.Combine(_sessionDirectory, ".session.lock"),
 			FileMode.CreateNew,
 			FileAccess.ReadWrite,
 			FileShare.Read);
+		SetPrivateFileMode(_sessionLease.Name);
 	}
 
 	internal TimeProvider TimeProvider { get; }
@@ -33,15 +37,18 @@ public sealed class McpPackRegistry : IDisposable
 
 	public async Task<string> StoreAsync(string content, CancellationToken cancellationToken)
 	{
-		ObjectDisposedException.ThrowIf(_disposed, this);
-		var id = Convert.ToHexString(RandomNumberGenerator.GetBytes(24)).ToLowerInvariant();
-		var path = Path.Combine(_sessionDirectory, id + ".pack");
-		await File.WriteAllTextAsync(path, content, new UTF8Encoding(false), cancellationToken)
-			.ConfigureAwait(false);
-		var entry = new PackEntry(path, TimeProvider.GetUtcNow());
-		lock (_sync)
-			_packs.Add(id, entry);
-		return id;
+		var document = await CreateAsync(
+			async (stream, token) =>
+			{
+				await using var writer = new StreamWriter(
+					stream,
+					new UTF8Encoding(false),
+					bufferSize: 16 * 1024,
+					leaveOpen: true);
+				await writer.WriteAsync(content.AsMemory(), token).ConfigureAwait(false);
+			},
+			cancellationToken).ConfigureAwait(false);
+		return document.Id;
 	}
 
 	public async Task<McpPackDocument> CreateAsync(
@@ -62,6 +69,7 @@ public sealed class McpPackRegistry : IDisposable
 				             64 * 1024,
 				             FileOptions.Asynchronous | FileOptions.SequentialScan))
 			{
+				SetPrivateFileMode(path);
 				await writer(stream, cancellationToken).ConfigureAwait(false);
 			}
 
@@ -155,6 +163,22 @@ public sealed class McpPackRegistry : IDisposable
 			{
 			}
 		}
+	}
+
+	private static void SetPrivateDirectoryMode(string path)
+	{
+		if (!OperatingSystem.IsWindows())
+		{
+			File.SetUnixFileMode(
+				path,
+				UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+		}
+	}
+
+	private static void SetPrivateFileMode(string path)
+	{
+		if (!OperatingSystem.IsWindows())
+			File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
 	}
 
 	private static McpToolException Expired() =>

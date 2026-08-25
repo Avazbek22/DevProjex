@@ -214,6 +214,35 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public async Task PackStorageIsPrivateToTheCurrentUnixUser()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Unix file modes do not apply on Windows.");
+			return;
+		}
+
+		using var workspace = new TemporaryDirectory();
+		using var registry = new McpPackRegistry(workspace.Path);
+		var pack = await registry.CreateAsync(
+			async (stream, token) =>
+			{
+				await stream.WriteAsync("redacted context"u8.ToArray(), token);
+			},
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(
+			UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
+			File.GetUnixFileMode(registry.SessionDirectory));
+		Assert.Equal(
+			UnixFileMode.UserRead | UnixFileMode.UserWrite,
+			File.GetUnixFileMode(Path.Combine(registry.SessionDirectory, ".session.lock")));
+		Assert.Equal(
+			UnixFileMode.UserRead | UnixFileMode.UserWrite,
+			File.GetUnixFileMode(pack.Path));
+	}
+
+	[Fact]
 	public async Task TextPageReaderHonorsLineAndCharacterCapsWithoutLoadingWholeStream()
 	{
 		await using var stream = new MemoryStream(Encoding.UTF8.GetBytes("one\r\ntwo\rthree\nfour\nfive"));
