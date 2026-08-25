@@ -22,18 +22,20 @@ public sealed class ProjectSourceIdentityContractTests
 		Assert.Equal(" ", identity.DisplayName);
 	}
 
-	[Fact]
-	public async Task ContextPlanPreservesWhitespaceOnlyUnixProjectName()
+	[Theory]
+	[InlineData(" ")]
+	[InlineData(" leading-and-trailing ")]
+	public async Task ContextPlanPreservesExactUnixProjectName(string projectName)
 	{
 		if (OperatingSystem.IsWindows())
 		{
-			Assert.Skip("Windows does not support this directory name through ordinary APIs.");
+			Assert.Skip("Windows normalizes these directory names through ordinary APIs.");
 			return;
 		}
 
 		using var temporary = new TemporaryDirectory();
-		var projectPath = temporary.CreateDirectory(" ");
-		temporary.WriteFile(" /App.cs", "class App {}\n");
+		var projectPath = temporary.CreateDirectory(projectName);
+		temporary.WriteFile($"{projectName}/App.cs", "class App {}\n");
 		var services = new TerminalServiceFactory(() => temporary.Path).Create(AppLanguage.En);
 		var selection = await services.SelectionResolver.ResolveAsync(
 			projectPath,
@@ -46,9 +48,9 @@ public sealed class ProjectSourceIdentityContractTests
 			TestContext.Current.CancellationToken);
 
 		var identity = Assert.IsType<ProjectSourceIdentity>(plan.SourceIdentity);
-		Assert.Equal(" ", identity.DisplayName);
-		Assert.Equal(" ", plan.EffectiveTree.DisplayName);
-		Assert.Equal(" ", plan.ProjectedTree.DisplayName);
+		Assert.Equal(projectName, identity.DisplayName);
+		Assert.Equal(projectName, plan.EffectiveTree.DisplayName);
+		Assert.Equal(projectName, plan.ProjectedTree.DisplayName);
 	}
 
 	[Fact]

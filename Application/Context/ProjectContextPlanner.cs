@@ -368,9 +368,11 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 
 		var normalizedIdentity = sourceIdentity with
 		{
-			DisplayName = string.IsNullOrWhiteSpace(sourceIdentity.DisplayName)
+			DisplayName = sourceIdentity.SourceType == ProjectSourceType.LocalFolder
 				? fallbackName
-				: sourceIdentity.DisplayName.Trim(),
+				: string.IsNullOrWhiteSpace(sourceIdentity.DisplayName)
+					? fallbackName
+					: sourceIdentity.DisplayName.Trim(),
 			SourceReference = string.IsNullOrWhiteSpace(sourceIdentity.SourceReference)
 				? sourceRoot
 				: sourceIdentity.SourceReference
