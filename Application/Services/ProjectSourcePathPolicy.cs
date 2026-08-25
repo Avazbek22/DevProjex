@@ -24,6 +24,8 @@ internal static class ProjectSourcePathPolicy
 				if (IsReparsePoint(currentPath))
 					return FileContentClassification.Unreadable;
 			}
+			if (!UnixFileTypeInspector.IsRegularFile(normalizedPath))
+				return FileContentClassification.Unreadable;
 
 			return null;
 		}
