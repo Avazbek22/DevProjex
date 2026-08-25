@@ -130,7 +130,7 @@ public partial class MainWindow : IRefreshTreePipelineHost
         _currentTree = result.Tree;
 		if (!interactiveFilter)
 		{
-			// «Apply settings» is the commit point for syntax transformations and section-wide
+			// "Apply settings" is the commit point for syntax transformations and section-wide
 			// content batches. Every non-interactive tree publication - load, refresh, Apply -
 			// captures the selected transformation state; until then its draft has no effect on
 			// produced content, preview, or counters. Name-filter publications deliberately keep

@@ -1719,6 +1719,7 @@ public partial class MainWindow : Window
         // Project lifecycle operations already committed to visible progress. Their compression
         // and metrics phases must continue that feedback immediately once the reveal gate opens.
         // Interactive option changes keep the delayed presentation to avoid flashing on fast work.
+		var secretRefreshVersion = Volatile.Read(ref _secretRedactionCountRefreshVersion);
         ObserveDetachedTask(
             RunPostLoadBackgroundWorkAsync(
                 postLoadVisualReadyTask,
@@ -1726,6 +1727,7 @@ public partial class MainWindow : Window
                 statusPresentation,
                 initializeMetricsAsync,
                 cleanupAfterCompletion,
+				secretRefreshVersion,
                 cancellationToken),
             "RunPostLoadBackgroundWork");
     }
@@ -1736,6 +1738,7 @@ public partial class MainWindow : Window
         StatusOperationPresentation statusPresentation,
         Func<CancellationToken, Task> initializeMetricsAsync,
         MemoryCleanupReason? cleanupAfterCompletion,
+		long secretRefreshVersion,
         CancellationToken cancellationToken)
     {
         try
@@ -1748,7 +1751,11 @@ public partial class MainWindow : Window
                     statusPresentation,
                     retainReadFactsForNextMetricsPass: true),
                 initializeMetricsAsync,
-				() => ScheduleSecretRedactionCountRefresh(statusPresentation),
+				() =>
+				{
+					if (secretRefreshVersion == Volatile.Read(ref _secretRedactionCountRefreshVersion))
+						ScheduleSecretRedactionCountRefresh(statusPresentation);
+				},
                 cleanupAfterCompletion,
                 ScheduleBackgroundMemoryCleanup,
                 cancellationToken);
