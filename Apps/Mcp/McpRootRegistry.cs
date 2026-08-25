@@ -52,11 +52,23 @@ public sealed class McpRootRegistry
 
 	public string ResolveExistingPath(string projectRoot, string path, bool requireDirectory = false)
 	{
-		ArgumentException.ThrowIfNullOrWhiteSpace(path);
-		var candidate = Path.IsPathFullyQualified(path)
-			? path
-			: Path.Combine(projectRoot, path);
-		var lexicalPath = Path.GetFullPath(candidate);
+		if (string.IsNullOrWhiteSpace(path))
+			throw InvalidPath();
+
+		string candidate;
+		string lexicalPath;
+		try
+		{
+			candidate = Path.IsPathFullyQualified(path)
+				? path
+				: Path.Combine(projectRoot, path);
+			lexicalPath = Path.GetFullPath(candidate);
+		}
+		catch (Exception exception) when (
+			exception is ArgumentException or NotSupportedException or PathTooLongException)
+		{
+			throw InvalidPath();
+		}
 		if (!IsWithin(projectRoot, lexicalPath))
 			throw RootViolation(path);
 		string physical;
@@ -135,6 +147,12 @@ public sealed class McpRootRegistry
 			McpErrorCodes.RootViolation,
 			$"{McpErrorCodes.RootViolation}: path '{path}' resolves outside the allowed project root. " +
 			$"Valid roots: {FormatRoots()}.");
+
+	private static McpToolException InvalidPath() =>
+		new(
+			McpErrorCodes.InvalidArguments,
+			$"{McpErrorCodes.InvalidArguments}: 'path' is not a valid filesystem path; " +
+			"provide a valid path inside the project.");
 
 	private string FormatRoots() => string.Join(", ", _roots.Select(static root => $"'{root}'"));
 }

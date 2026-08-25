@@ -63,6 +63,20 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public void RootRegistryReportsMalformedPathsAsInvalidArguments()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var registry = new McpRootRegistry([project]);
+
+		var exception = Assert.Throws<McpToolException>(() =>
+			registry.ResolveExistingPath(project, "invalid\0path.txt"));
+
+		Assert.Equal(McpErrorCodes.InvalidArguments, exception.Code);
+		Assert.Contains("valid path inside the project", exception.Message, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void RootRegistryRejectsSymlinkEscapeWhenSymlinksAreAvailable()
 	{
 		using var workspace = new TemporaryDirectory();
