@@ -2,6 +2,7 @@ using System.CommandLine;
 using System.CommandLine.Help;
 using System.CommandLine.Parsing;
 using DevProjex.Terminal.Execution;
+using DevProjex.Terminal.Rendering;
 using DevProjex.Terminal.Tui;
 
 namespace DevProjex.Terminal.CommandLine;
@@ -117,7 +118,10 @@ public sealed class TerminalApplication
 		{
 			var errors = PresentParseErrors(parseResult, localization);
 			foreach (var error in errors)
-				environment.Error.WriteLine($"error[{error.Code}]: {error.Message}");
+			{
+				environment.Error.WriteLine(
+					$"error[{error.Code}]: {TerminalTextEscaping.EscapeSingleLine(error.Message)}");
+			}
 			if (TryBuildSuggestion(root, parseResult, out var suggestion))
 				environment.Error.WriteLine(localization.Format("Terminal.Hint.DidYouMean", suggestion));
 			else

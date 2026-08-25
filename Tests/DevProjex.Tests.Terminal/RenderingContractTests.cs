@@ -259,6 +259,25 @@ public sealed class RenderingContractTests
 	}
 
 	[Fact]
+	public void RedirectedErrorEscapesControlCharactersInMessageAndHint()
+	{
+		var environment = new TestTerminalEnvironment();
+		var renderer = new ErrorRenderer(
+			environment,
+			new TerminalOutputOptions(Plain: true));
+
+		renderer.Write(new TerminalError(
+			"DPX-TEST",
+			"safe\r\nforged\u001b[31m",
+			"retry\twithout\u0007control"));
+
+		Assert.Contains("safe\\r\\nforged\\u001B[31m", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("retry\\twithout\\u0007control", environment.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain('\u001b', environment.StandardError);
+		Assert.DoesNotContain('\u0007', environment.StandardError);
+	}
+
+	[Fact]
 	public void TextFindingEscapesPathControlCharactersIntoOneLine()
 	{
 		var finding = new EffectiveRedactionFinding(

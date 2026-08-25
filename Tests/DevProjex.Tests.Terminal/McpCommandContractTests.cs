@@ -39,6 +39,25 @@ public sealed class McpCommandContractTests
 	}
 
 	[Fact]
+	public async Task McpStartupErrorsEscapeControlCharactersFromRootPaths()
+	{
+		var environment = new TestTerminalEnvironment();
+		var invalidRoot = Path.Combine(
+			Path.GetTempPath(),
+			$"missing-\r\n\u001b[31m-{Guid.NewGuid():N}");
+
+		var exitCode = await new TerminalApplication(environment).RunAsync(
+			["mcp", "--root", invalidRoot, "--language", "en"],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("\\r\\n\\u001B[31m", environment.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain('\u001b', environment.StandardError);
+		Assert.Single(environment.StandardError.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries));
+	}
+
+	[Fact]
 	public void PackageLocalizationAndSolutionContractsArePinned()
 	{
 		var repository = PublishedApplicationLocator.FindRepositoryRoot();
