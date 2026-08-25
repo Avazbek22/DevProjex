@@ -41,14 +41,14 @@ public sealed class IgnoreRulesBuildCacheKeyBuilderTests
 	}
 
 	[Fact]
-	public void Build_NullAndEmptyRootSelections_AreSeparateWhileBlankTokensAreRejected()
+	public void Build_NullEmptyAndWhitespaceRootSelections_HaveDistinctMeaning()
 	{
 		var nullRoots = IgnoreRulesBuildCacheKeyBuilder.Build("project", [], selectedRootFolders: null);
 		var emptyRoots = IgnoreRulesBuildCacheKeyBuilder.Build("project", [], []);
-		var whitespaceRoots = IgnoreRulesBuildCacheKeyBuilder.Build("project", [], ["", "   ", "\t"]);
+		var whitespaceRoots = IgnoreRulesBuildCacheKeyBuilder.Build("project", [], ["", " "]);
 
 		Assert.NotEqual(nullRoots, emptyRoots);
-		Assert.Equal(emptyRoots, whitespaceRoots);
+		Assert.NotEqual(emptyRoots, whitespaceRoots);
 	}
 
 	[Fact]

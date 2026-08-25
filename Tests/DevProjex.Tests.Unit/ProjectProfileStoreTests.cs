@@ -9,15 +9,28 @@ public sealed class ProjectProfileStoreTests
 		var projectPath = temporary.CreateFolder("project");
 		var store = CreateStore(temporary.Path);
 		string[] selectedPaths = [" ", " folder/file .cs "];
+		string[] roots = [" ", " source "];
 
 		store.SaveProfile(
 			projectPath,
-			new ProjectSelectionProfile([], [], [], SelectedPaths: selectedPaths));
+			new ProjectSelectionProfile(
+				roots,
+				[],
+				[],
+				RootFolderStates: roots.ToDictionary(
+					static root => root,
+					static _ => true,
+					PathComparer.Default),
+				SelectedPaths: selectedPaths));
 
 		Assert.True(store.TryLoadProfile(projectPath, out var loaded));
 		Assert.Equal(
 			selectedPaths.OrderBy(static path => path, PathComparer.Default),
 			loaded.SelectedPaths);
+		Assert.Equal(
+			roots.OrderBy(static path => path, PathComparer.Default),
+			loaded.SelectedRootFolders);
+		Assert.All(roots, root => Assert.True(loaded.RootFolderStates![root]));
 	}
 
 	[Fact]

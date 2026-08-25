@@ -3,6 +3,32 @@ namespace DevProjex.Tests.Integration;
 public sealed class ProjectAnalysisServiceIntegrationTests
 {
 	[Fact]
+	public void Load_UnixWhitespaceOnlyRootName_RemainsSelectable()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Windows does not support this directory name through ordinary APIs.");
+			return;
+		}
+
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine(" ", "Selected.cs"), "class Selected {}\n");
+		temp.CreateFile(Path.Combine("other", "Excluded.cs"), "class Excluded {}\n");
+
+		var loaded = CreateService().Load(
+			new ProjectAnalysisRequest(
+				temp.Path,
+				SelectedRootFolders: [" "],
+				SelectedIgnoreOptions: []),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal([" "], loaded.SelectedRootFolders);
+		var selectedRoot = Assert.Single(loaded.Tree.Root.Children);
+		Assert.Equal(" ", selectedRoot.DisplayName);
+		Assert.Equal("Selected.cs", Assert.Single(selectedRoot.Children).DisplayName);
+	}
+
+	[Fact]
 	public void Load_ExplicitRootSelectionDiscoversDeepRepositoryDefault()
 	{
 		using var temp = new TemporaryDirectory();

@@ -529,7 +529,7 @@ public sealed class ProjectAnalysisService(
 
 		return rootFolders
 			// Root folder names come from the filesystem. Do not trim legal POSIX names.
-			.Where(static value => !string.IsNullOrWhiteSpace(value))
+			.Where(static value => !string.IsNullOrEmpty(value))
 			.Distinct(PathComparer.Default)
 			.OrderBy(static value => value, PathComparer.Default)
 			.ToArray();

@@ -199,7 +199,7 @@ public sealed class PortableProjectProfileService
 		}
 
 		return new ProjectSelectionSpec(
-			Roots: NormalizeNullableValues(document.Selection.Roots, PathComparer.Default),
+			Roots: NormalizeRootNames(document.Selection.Roots),
 			Extensions: NormalizeNullableValues(document.Selection.Extensions, StringComparer.OrdinalIgnoreCase),
 			SelectedPaths: selectedPaths,
 			GitMode: gitMode,
@@ -269,6 +269,16 @@ public sealed class PortableProjectProfileService
 		IReadOnlyCollection<string>? values,
 		StringComparer comparer) =>
 		values is null ? null : NormalizeValues(values, comparer);
+
+	private static IReadOnlyCollection<string>? NormalizeRootNames(
+		IReadOnlyCollection<string>? values) =>
+		values is null
+			? null
+			: values
+				.Where(static value => !string.IsNullOrEmpty(value))
+				.Distinct(PathComparer.Default)
+				.OrderBy(static value => value, PathComparer.Default)
+				.ToArray();
 
 	private static IReadOnlyCollection<string> NormalizeValues(
 		IReadOnlyCollection<string>? values,

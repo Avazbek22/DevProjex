@@ -13,9 +13,9 @@ internal static class SelectionCacheKeyEncoder
 		var unique = new HashSet<string>(PathComparer.Default);
 		foreach (var value in values)
 		{
-			// A blank token is not a usable selection. Nonblank names remain exact:
-			// leading/trailing spaces, pipes, and sentinel-looking text are legal on POSIX.
-			if (!string.IsNullOrWhiteSpace(value))
+			// Empty tokens are not selections. Every non-empty name remains exact because
+			// whitespace-only names, pipes, and sentinel-looking text are legal on POSIX.
+			if (!string.IsNullOrEmpty(value))
 				unique.Add(NormalizeForPlatform(value));
 		}
 
