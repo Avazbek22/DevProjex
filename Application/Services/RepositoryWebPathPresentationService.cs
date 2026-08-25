@@ -76,10 +76,10 @@ public sealed class RepositoryWebPathPresentationService
             return fullPath;
         }
 
-        if (string.IsNullOrWhiteSpace(relativePath) || relativePath == ".")
+        if (string.IsNullOrEmpty(relativePath) || relativePath == ".")
             return rootWebPath;
 
-        if (relativePath.StartsWith("..", StringComparison.Ordinal))
+        if (PathUtility.IsRelativePathOutsideRoot(relativePath))
             return fullPath;
 
         var relativeUnixPath = PathUtility.NormalizeSeparators(relativePath);
@@ -104,7 +104,7 @@ public sealed class RepositoryWebPathPresentationService
 
     private static string EncodePathSegments(string path)
     {
-        if (string.IsNullOrWhiteSpace(path))
+        if (string.IsNullOrEmpty(path))
             return string.Empty;
 
         var span = path.AsSpan();

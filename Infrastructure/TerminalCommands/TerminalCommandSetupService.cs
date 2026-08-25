@@ -1560,7 +1560,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		if (!string.IsNullOrWhiteSpace(home))
 		{
 			var relative = Path.GetRelativePath(home, path);
-			if (!relative.StartsWith("..", StringComparison.Ordinal) && !Path.IsPathRooted(relative))
+			if (!PathUtility.IsRelativePathOutsideRoot(relative))
 				return "~/" + PathUtility.NormalizeSeparators(relative);
 		}
 

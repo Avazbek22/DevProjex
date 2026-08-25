@@ -62,6 +62,26 @@ public sealed class PathUtilityTests
 			PathUtility.GetPortableRelativePath(project, path));
 	}
 
+	[Theory]
+	[InlineData("..", true)]
+	[InlineData("../file.txt", true)]
+	[InlineData("..cache/file.txt", false)]
+	[InlineData("folder/file.txt", false)]
+	public void RelativeOutsideRootDetectionRequiresACompleteParentSegment(
+		string relativePath,
+		bool expected)
+	{
+		Assert.Equal(expected, PathUtility.IsRelativePathOutsideRoot(relativePath));
+	}
+
+	[Fact]
+	public void RelativeOutsideRootDetectionTreatsBackslashAsSeparatorOnlyOnWindows()
+	{
+		Assert.Equal(
+			OperatingSystem.IsWindows(),
+			PathUtility.IsRelativePathOutsideRoot(@"..\file.txt"));
+	}
+
 	[Fact]
 	public void IsPathInside_ReturnsTrue_ForRootAndDescendant()
 	{

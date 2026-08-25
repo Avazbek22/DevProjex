@@ -114,10 +114,7 @@ public sealed class TransformedFileContentReader(
 	}
 
 	private static bool IsOutsideRoot(string relativePath) =>
-		Path.IsPathRooted(relativePath) ||
-		relativePath == ".." ||
-		relativePath.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal) ||
-		relativePath.StartsWith($"..{Path.AltDirectorySeparatorChar}", StringComparison.Ordinal);
+		PathUtility.IsRelativePathOutsideRoot(relativePath);
 
 	private static bool IsReparsePoint(string path) =>
 		(File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;

@@ -64,6 +64,42 @@ public sealed class RepositoryWebPathPresentationServiceTests
 		Assert.Equal("https://github.com/Avazbek22/DevProjex/src/MainWindow.axaml.cs", mapped);
 	}
 
+	[Fact]
+	public void TryCreate_DotDotPrefixedDirectoryRemainsInsideRepository()
+	{
+		var service = new RepositoryWebPathPresentationService();
+		var repoRoot = BuildAbsolutePath("work", "repo");
+		var presentation = service.TryCreate(
+			repoRoot,
+			"https://github.com/Avazbek22/DevProjex.git");
+
+		Assert.NotNull(presentation);
+		var mapped = presentation!.MapFilePath(Path.Combine(repoRoot, "..cache", "state.json"));
+
+		Assert.Equal("https://github.com/Avazbek22/DevProjex/..cache/state.json", mapped);
+	}
+
+	[Fact]
+	public void TryCreate_WhitespaceOnlyFileNameRemainsAFilePath()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Windows normalizes this file name through ordinary path APIs.");
+			return;
+		}
+
+		var service = new RepositoryWebPathPresentationService();
+		var repoRoot = BuildAbsolutePath("work", "repo");
+		var presentation = service.TryCreate(
+			repoRoot,
+			"https://github.com/Avazbek22/DevProjex.git");
+
+		Assert.NotNull(presentation);
+		var mapped = presentation!.MapFilePath(Path.Combine(repoRoot, " "));
+
+		Assert.Equal("https://github.com/Avazbek22/DevProjex/%20", mapped);
+	}
+
 	[Theory]
 	[InlineData("https://github.com/user/repo", "repo")]
 	[InlineData("https://github.com/user/repo/", "repo")]

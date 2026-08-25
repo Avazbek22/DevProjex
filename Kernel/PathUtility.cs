@@ -36,6 +36,19 @@ public static class PathUtility
 	public static string GetPortableRelativePath(string rootPath, string path) =>
 		NormalizeSeparators(Path.GetRelativePath(rootPath, path));
 
+	public static bool IsRelativePathOutsideRoot(string relativePath)
+	{
+		ArgumentNullException.ThrowIfNull(relativePath);
+		if (Path.IsPathRooted(relativePath) || relativePath.Equals("..", StringComparison.Ordinal))
+			return true;
+
+		if (relativePath.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+			return true;
+
+		return Path.AltDirectorySeparatorChar != Path.DirectorySeparatorChar &&
+		       relativePath.StartsWith($"..{Path.AltDirectorySeparatorChar}", StringComparison.Ordinal);
+	}
+
 	public static bool IsPathInside(string path, string rootPath)
 	{
 		if (string.IsNullOrWhiteSpace(path) || string.IsNullOrWhiteSpace(rootPath))

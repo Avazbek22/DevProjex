@@ -153,7 +153,7 @@ public sealed class TreeAndContentExportService(
 			var relativePath = Path.GetRelativePath(normalizedRootPath, filePath);
 			if (!string.IsNullOrEmpty(relativePath) &&
 			    relativePath != "." &&
-			    !IsOutsideRoot(relativePath) &&
+			    !PathUtility.IsRelativePathOutsideRoot(relativePath) &&
 			    !Path.IsPathRooted(relativePath))
 			{
 				return PathUtility.NormalizeSeparators(relativePath);
@@ -173,11 +173,6 @@ public sealed class TreeAndContentExportService(
 		var fileName = Path.GetFileName(filePath);
 		return string.IsNullOrEmpty(fileName) ? PathUtility.NormalizeSeparators(filePath) : fileName;
 	}
-
-	private static bool IsOutsideRoot(string relativePath) =>
-		relativePath.Equals("..", StringComparison.Ordinal) ||
-		relativePath.StartsWith("../", StringComparison.Ordinal) ||
-		relativePath.StartsWith(@"..\", StringComparison.Ordinal);
 
 	private static void AppendClipboardBlankLine(StringBuilder sb) => sb.AppendLine(ClipboardBlankLine);
 

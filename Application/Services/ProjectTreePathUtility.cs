@@ -35,13 +35,8 @@ public static class ProjectTreePathUtility
 	}
 
 	private static bool IsOutsideRoot(string relativePath) =>
-		Path.IsPathRooted(relativePath) ||
-		relativePath == ".." ||
-		relativePath.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal) ||
-		relativePath.StartsWith($"..{Path.AltDirectorySeparatorChar}", StringComparison.Ordinal);
+		PathUtility.IsRelativePathOutsideRoot(relativePath);
 
 	private static string NormalizeSeparators(string path) =>
-		path
-			.Replace(Path.DirectorySeparatorChar, '/')
-			.Replace(Path.AltDirectorySeparatorChar, '/');
+		PathUtility.NormalizeSeparators(path);
 }
