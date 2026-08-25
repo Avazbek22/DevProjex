@@ -152,6 +152,60 @@ public sealed class ProjectContextStreamingRegressionTests
 		Assert.Equal("x", file.GetProperty("content").GetString());
 	}
 
+	[Theory]
+	[InlineData(ProjectContextDocumentFormat.Json)]
+	[InlineData(ProjectContextDocumentFormat.Xml)]
+	public async Task BoundedStructuredTreeDoesNotDependOnTheCallStack(
+		ProjectContextDocumentFormat format)
+	{
+		const int depth = 2_048;
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/seed.txt", string.Empty);
+		var services = new TerminalServiceFactory(
+				() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var plan = await services.ContextFactory.BuildAsync(
+			project,
+			new ProjectSelectionSpec(GitMode: GitFilteringMode.None, Exclusions: []),
+			cancellationToken: TestContext.Current.CancellationToken);
+		TreeNodeDescriptor deepTree = new(
+			"leaf.txt",
+			Path.Combine(project, "leaf.txt"),
+			false,
+			false,
+			"file",
+			[]);
+		for (var level = depth - 1; level >= 0; level--)
+		{
+			deepTree = new TreeNodeDescriptor(
+				$"level-{level:D4}",
+				Path.Combine(project, $"level-{level:D4}"),
+				true,
+				false,
+				"folder",
+				[deepTree]);
+		}
+		var deepPlan = plan with
+		{
+			EffectiveTree = deepTree,
+			ProjectedTree = deepTree,
+			IncludedFiles = [],
+			IncludedFolders = []
+		};
+
+		var document = await services.ContextDocumentService.BuildAsync(
+			deepPlan,
+			ProjectContextView.Tree,
+			format,
+			new ProjectContextDocumentLimits(MaximumTreeNodes: depth + 1),
+			TestContext.Current.CancellationToken);
+
+		Assert.Contains("level-0000", document, StringComparison.Ordinal);
+		Assert.Contains($"level-{depth - 1:D4}", document, StringComparison.Ordinal);
+		Assert.Contains("leaf.txt", document, StringComparison.Ordinal);
+	}
+
 	[Fact]
 	public async Task DocumentServiceRejectsUnknownViewBeforeWritingAnyBytes()
 	{

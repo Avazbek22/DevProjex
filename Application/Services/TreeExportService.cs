@@ -13,7 +13,8 @@ public sealed class TreeExportService
 	private static readonly JsonWriterOptions JsonWriterOptions = new()
 	{
 		Indented = true,
-		Encoder = JavaScriptEncoder.Create(UnicodeRanges.All)
+		Encoder = JavaScriptEncoder.Create(UnicodeRanges.All),
+		MaxDepth = int.MaxValue
 	};
 
 	private static readonly XmlWriterSettings XmlWriterSettings = new()
@@ -764,53 +765,65 @@ public sealed class TreeExportService
 		IReadOnlySet<string>? includedPaths)
 	{
 		var orderedChildren = GetOrderedStructuredChildren(children, includedPaths);
-		WriteJsonDirectoryProperties(writer, orderedChildren, includedPaths);
-		WriteJsonCurrentFolderFilesIfAny(writer, orderedChildren);
-	}
+		var operations = new Stack<JsonTreeWriteOperation>();
+		PushJsonDirectoryContents(operations, orderedChildren);
 
-	private static void WriteJsonDirectoryValue(
-		Utf8JsonWriter writer,
-		TreeNodeDescriptor directory,
-		IReadOnlySet<string>? includedPaths)
-	{
-		var orderedChildren = GetOrderedStructuredChildren(directory.Children, includedPaths);
-		var hasDirectories = HasDirectoryChild(orderedChildren);
-		var hasFiles = HasFileChild(orderedChildren);
-
-		if (!hasDirectories)
+		while (operations.TryPop(out var operation))
 		{
-			WriteJsonFileArray(writer, orderedChildren);
-			return;
-		}
+			switch (operation.Kind)
+			{
+				case JsonTreeWriteOperationKind.Directory:
+				{
+					var directory = operation.Directory!;
+					writer.WritePropertyName(directory.DisplayName);
+					var directoryChildren = GetOrderedStructuredChildren(
+						directory.Children,
+						includedPaths);
+					if (!HasDirectoryChild(directoryChildren))
+					{
+						WriteJsonFileArray(writer, directoryChildren);
+						break;
+					}
 
-		writer.WriteStartObject();
-		WriteJsonDirectoryProperties(writer, orderedChildren, includedPaths);
-		if (hasFiles)
-			WriteJsonCurrentFolderFiles(writer, orderedChildren);
-		writer.WriteEndObject();
-	}
-
-	private static void WriteJsonDirectoryProperties(
-		Utf8JsonWriter writer,
-		IReadOnlyList<TreeNodeDescriptor> orderedChildren,
-		IReadOnlySet<string>? includedPaths)
-	{
-		foreach (var child in orderedChildren)
-		{
-			if (!child.IsDirectory)
-				continue;
-
-			writer.WritePropertyName(child.DisplayName);
-			WriteJsonDirectoryValue(writer, child, includedPaths);
+					writer.WriteStartObject();
+					operations.Push(new JsonTreeWriteOperation(
+						JsonTreeWriteOperationKind.EndObject));
+					PushJsonDirectoryContents(operations, directoryChildren);
+					break;
+				}
+				case JsonTreeWriteOperationKind.Files:
+					WriteJsonCurrentFolderFiles(writer, operation.Children!);
+					break;
+				case JsonTreeWriteOperationKind.EndObject:
+					writer.WriteEndObject();
+					break;
+				default:
+					throw new InvalidOperationException("Unsupported JSON tree write operation.");
+			}
 		}
 	}
 
-	private static void WriteJsonCurrentFolderFilesIfAny(
-		Utf8JsonWriter writer,
+	private static void PushJsonDirectoryContents(
+		Stack<JsonTreeWriteOperation> operations,
 		IReadOnlyList<TreeNodeDescriptor> orderedChildren)
 	{
 		if (HasFileChild(orderedChildren))
-			WriteJsonCurrentFolderFiles(writer, orderedChildren);
+		{
+			operations.Push(new JsonTreeWriteOperation(
+				JsonTreeWriteOperationKind.Files,
+				Children: orderedChildren));
+		}
+
+		for (var index = orderedChildren.Count - 1; index >= 0; index--)
+		{
+			var child = orderedChildren[index];
+			if (!child.IsDirectory)
+				continue;
+
+			operations.Push(new JsonTreeWriteOperation(
+				JsonTreeWriteOperationKind.Directory,
+				Directory: child));
+		}
 	}
 
 	private static void WriteJsonCurrentFolderFiles(
@@ -843,40 +856,48 @@ public sealed class TreeExportService
 		TreeNodeDescriptor root,
 		IReadOnlySet<string>? includedPaths)
 	{
-		if (root.IsDirectory)
+		if (!root.IsDirectory)
 		{
-			WriteXmlChildren(writer, root.Children, includedPaths);
+			if (includedPaths is null || includedPaths.Contains(root.FullPath))
+				WriteXmlFile(writer, root);
 			return;
 		}
 
-		if (includedPaths is null || includedPaths.Contains(root.FullPath))
-			WriteXmlFile(writer, root);
-	}
+		var operations = new Stack<XmlTreeWriteOperation>();
+		PushXmlChildren(
+			operations,
+			GetOrderedStructuredChildren(root.Children, includedPaths));
 
-	private static void WriteXmlChildren(
-		XmlWriter writer,
-		IReadOnlyList<TreeNodeDescriptor> children,
-		IReadOnlySet<string>? includedPaths)
-	{
-		var orderedChildren = GetOrderedStructuredChildren(children, includedPaths);
-		foreach (var child in orderedChildren)
+		while (operations.TryPop(out var operation))
 		{
-			if (child.IsDirectory)
-				WriteXmlDirectory(writer, child, includedPaths);
-			else
-				WriteXmlFile(writer, child);
+			if (operation.IsEndElement)
+			{
+				writer.WriteEndElement();
+				continue;
+			}
+
+			var node = operation.Node!;
+			if (!node.IsDirectory)
+			{
+				WriteXmlFile(writer, node);
+				continue;
+			}
+
+			writer.WriteStartElement("d");
+			writer.WriteAttributeString("n", node.DisplayName);
+			operations.Push(XmlTreeWriteOperation.EndElement);
+			PushXmlChildren(
+				operations,
+				GetOrderedStructuredChildren(node.Children, includedPaths));
 		}
 	}
 
-	private static void WriteXmlDirectory(
-		XmlWriter writer,
-		TreeNodeDescriptor directory,
-		IReadOnlySet<string>? includedPaths)
+	private static void PushXmlChildren(
+		Stack<XmlTreeWriteOperation> operations,
+		IReadOnlyList<TreeNodeDescriptor> orderedChildren)
 	{
-		writer.WriteStartElement("d");
-		writer.WriteAttributeString("n", directory.DisplayName);
-		WriteXmlChildren(writer, directory.Children, includedPaths);
-		writer.WriteEndElement();
+		for (var index = orderedChildren.Count - 1; index >= 0; index--)
+			operations.Push(new XmlTreeWriteOperation(orderedChildren[index]));
 	}
 
 	private static void WriteXmlFile(XmlWriter writer, TreeNodeDescriptor file)
@@ -884,6 +905,25 @@ public sealed class TreeExportService
 		writer.WriteStartElement("f");
 		writer.WriteString(file.DisplayName);
 		writer.WriteEndElement();
+	}
+
+	private enum JsonTreeWriteOperationKind
+	{
+		Directory,
+		Files,
+		EndObject
+	}
+
+	private readonly record struct JsonTreeWriteOperation(
+		JsonTreeWriteOperationKind Kind,
+		TreeNodeDescriptor? Directory = null,
+		IReadOnlyList<TreeNodeDescriptor>? Children = null);
+
+	private readonly record struct XmlTreeWriteOperation(
+		TreeNodeDescriptor? Node,
+		bool IsEndElement = false)
+	{
+		public static XmlTreeWriteOperation EndElement { get; } = new(null, true);
 	}
 
 	private static void WriteMarkdownTreeContents(

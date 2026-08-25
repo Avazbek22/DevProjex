@@ -546,7 +546,8 @@ public sealed class ProjectContextDocumentService(
 		using var writer = new Utf8JsonWriter(destination, new JsonWriterOptions
 		{
 			Indented = true,
-			Encoder = JavaScriptEncoder.Create(UnicodeRanges.All)
+			Encoder = JavaScriptEncoder.Create(UnicodeRanges.All),
+			MaxDepth = int.MaxValue
 		});
 
 		writer.WriteStartObject();
@@ -1061,7 +1062,8 @@ public sealed class ProjectContextDocumentService(
 		using var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions
 		{
 			Indented = true,
-			Encoder = JavaScriptEncoder.Create(UnicodeRanges.All)
+			Encoder = JavaScriptEncoder.Create(UnicodeRanges.All),
+			MaxDepth = int.MaxValue
 		});
 
 		writer.WriteStartObject();
@@ -1214,27 +1216,49 @@ public sealed class ProjectContextDocumentService(
 	{
 		var remaining = Math.Max(1, maximumNodes);
 		var truncated = false;
-		var tree = Clone(root);
-		return (tree, truncated);
+		remaining--;
+		if (!root.IsDirectory || root.Children.Count == 0)
+			return (root, false);
 
-		TreeNodeDescriptor Clone(TreeNodeDescriptor node)
+		var frames = new Stack<BoundedTreeCloneFrame>();
+		frames.Push(new BoundedTreeCloneFrame(root));
+		TreeNodeDescriptor? completedTree = null;
+
+		while (frames.TryPeek(out var frame))
 		{
-			remaining--;
-			if (!node.IsDirectory || node.Children.Count == 0)
-				return node;
-
-			var children = new List<TreeNodeDescriptor>();
-			foreach (var child in node.Children)
+			if (remaining > 0 && frame.NextChildIndex < frame.Source.Children.Count)
 			{
-				if (remaining <= 0)
+				var child = frame.Source.Children[frame.NextChildIndex++];
+				remaining--;
+				if (!child.IsDirectory || child.Children.Count == 0)
+				{
+					frame.Children.Add(child);
+					continue;
+				}
+
+				if (remaining == 0)
 				{
 					truncated = true;
-					break;
+					frame.Children.Add(child with { Children = [] });
+					continue;
 				}
-				children.Add(Clone(child));
+
+				frames.Push(new BoundedTreeCloneFrame(child));
+				continue;
 			}
-			return node with { Children = children };
+
+			if (frame.NextChildIndex < frame.Source.Children.Count)
+				truncated = true;
+
+			var completedNode = frame.Source with { Children = frame.Children };
+			frames.Pop();
+			if (frames.TryPeek(out var parent))
+				parent.Children.Add(completedNode);
+			else
+				completedTree = completedNode;
 		}
+
+		return (completedTree!, truncated);
 	}
 
 	private static void AppendMarkdownFence(StringBuilder output, string content, string language)
@@ -1320,18 +1344,34 @@ public sealed class ProjectContextDocumentService(
 		TreeNodeDescriptor node,
 		string sourceRoot)
 	{
-		writer.WriteStartObject();
-		writer.WriteString("path", NormalizeRelativePath(sourceRoot, node.FullPath));
-		writer.WriteString("name", node.DisplayName);
-		writer.WriteString("type", node.IsDirectory ? "directory" : "file");
-		if (node.IsDirectory)
+		var operations = new Stack<ContextJsonTreeWriteOperation>();
+		operations.Push(new ContextJsonTreeWriteOperation(node));
+
+		while (operations.TryPop(out var operation))
 		{
+			if (operation.IsEndDirectory)
+			{
+				writer.WriteEndArray();
+				writer.WriteEndObject();
+				continue;
+			}
+
+			var current = operation.Node!;
+			writer.WriteStartObject();
+			writer.WriteString("path", NormalizeRelativePath(sourceRoot, current.FullPath));
+			writer.WriteString("name", current.DisplayName);
+			writer.WriteString("type", current.IsDirectory ? "directory" : "file");
+			if (!current.IsDirectory)
+			{
+				writer.WriteEndObject();
+				continue;
+			}
+
 			writer.WriteStartArray("children");
-			foreach (var child in node.Children)
-				WriteTreeNode(writer, child, sourceRoot);
-			writer.WriteEndArray();
+			operations.Push(ContextJsonTreeWriteOperation.EndDirectory);
+			for (var index = current.Children.Count - 1; index >= 0; index--)
+				operations.Push(new ContextJsonTreeWriteOperation(current.Children[index]));
 		}
-		writer.WriteEndObject();
 	}
 
 	private static void WriteDiagnostics(
@@ -1422,15 +1462,49 @@ public sealed class ProjectContextDocumentService(
 		TreeNodeDescriptor node,
 		string sourceRoot)
 	{
-		writer.WriteStartElement(node.IsDirectory ? "directory" : "file");
-		WriteSanitizedXmlAttributeString(
-			writer,
-			"path",
-			NormalizeRelativePath(sourceRoot, node.FullPath));
-		WriteSanitizedXmlAttributeString(writer, "name", node.DisplayName);
-		foreach (var child in node.Children)
-			WriteTreeNodeXml(writer, child, sourceRoot);
-		writer.WriteEndElement();
+		var operations = new Stack<ContextXmlTreeWriteOperation>();
+		operations.Push(new ContextXmlTreeWriteOperation(node));
+
+		while (operations.TryPop(out var operation))
+		{
+			if (operation.IsEndElement)
+			{
+				writer.WriteEndElement();
+				continue;
+			}
+
+			var current = operation.Node!;
+			writer.WriteStartElement(current.IsDirectory ? "directory" : "file");
+			WriteSanitizedXmlAttributeString(
+				writer,
+				"path",
+				NormalizeRelativePath(sourceRoot, current.FullPath));
+			WriteSanitizedXmlAttributeString(writer, "name", current.DisplayName);
+			operations.Push(ContextXmlTreeWriteOperation.EndElement);
+			for (var index = current.Children.Count - 1; index >= 0; index--)
+				operations.Push(new ContextXmlTreeWriteOperation(current.Children[index]));
+		}
+	}
+
+	private sealed class BoundedTreeCloneFrame(TreeNodeDescriptor source)
+	{
+		public TreeNodeDescriptor Source { get; } = source;
+		public List<TreeNodeDescriptor> Children { get; } = [];
+		public int NextChildIndex { get; set; }
+	}
+
+	private readonly record struct ContextJsonTreeWriteOperation(
+		TreeNodeDescriptor? Node,
+		bool IsEndDirectory = false)
+	{
+		public static ContextJsonTreeWriteOperation EndDirectory { get; } = new(null, true);
+	}
+
+	private readonly record struct ContextXmlTreeWriteOperation(
+		TreeNodeDescriptor? Node,
+		bool IsEndElement = false)
+	{
+		public static ContextXmlTreeWriteOperation EndElement { get; } = new(null, true);
 	}
 
 	private static void WriteStringCollectionXml(
