@@ -47,7 +47,7 @@ internal static class McpTextRanges
 				characterLimit = true;
 				if (builder.Length == 0)
 				{
-					builder.Append(line.AsSpan(0, Math.Min(line.Length, maximumCharacters)));
+					AppendBoundedPrefix(builder, line, maximumCharacters);
 					actualEnd = total;
 				}
 				continue;
@@ -107,12 +107,12 @@ internal static class McpTextRanges
 			var required = line.Length + (builder.Length == 0 ? 0 : 1);
 			if (builder.Length + required > maximumCharacters)
 			{
-				characterLimit = true;
-				if (builder.Length == 0)
-				{
-					builder.Append(line.AsSpan(0, Math.Min(line.Length, maximumCharacters)));
-					actualEnd = lineNumber;
-				}
+			characterLimit = true;
+			if (builder.Length == 0)
+			{
+				AppendBoundedPrefix(builder, line, maximumCharacters);
+				actualEnd = lineNumber;
+			}
 				break;
 			}
 			if (builder.Length > 0)
@@ -151,6 +151,19 @@ internal static class McpTextRanges
 		else if (text.Length > 0 && text[^1] is '\r' or '\n')
 			lines.Add(string.Empty);
 		return lines;
+	}
+
+	private static void AppendBoundedPrefix(StringBuilder builder, string line, int maximumCharacters)
+	{
+		var length = Math.Min(line.Length, maximumCharacters);
+		if (length > 0 &&
+		    length < line.Length &&
+		    char.IsHighSurrogate(line[length - 1]) &&
+		    char.IsLowSurrogate(line[length]))
+		{
+			length--;
+		}
+		builder.Append(line.AsSpan(0, length));
 	}
 
 	private static McpToolException InvalidRange(int start, int? end, int total) =>

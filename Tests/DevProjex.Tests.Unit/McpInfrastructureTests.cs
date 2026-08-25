@@ -245,4 +245,23 @@ public sealed class McpInfrastructureTests
 			McpTextRanges.Slice(["one"], 2, null, 1000, 50_000));
 		Assert.Equal(McpErrorCodes.InvalidRange, exception.Code);
 	}
+
+	[Fact]
+	public async Task TextRangeCharacterCapsNeverSplitAUnicodeScalar()
+	{
+		const string line = "x😀tail";
+		await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(line));
+
+		var streamed = await McpTextRanges.ReadPageAsync(
+			stream,
+			startLine: 1,
+			endLine: null,
+			maximumLines: 1,
+			maximumCharacters: 2,
+			TestContext.Current.CancellationToken);
+		var sliced = McpTextRanges.Slice([line], 1, null, 1, 2);
+
+		Assert.Equal("x", streamed.Text);
+		Assert.Equal("x", sliced.Text);
+	}
 }
