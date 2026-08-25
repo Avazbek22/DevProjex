@@ -695,6 +695,16 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public void SplitLinesHonorsCancellationBeforeScanningContent()
+	{
+		using var cancellation = new CancellationTokenSource();
+		cancellation.Cancel();
+
+		Assert.Throws<OperationCanceledException>(() =>
+			McpTextRanges.SplitLines(new string('\n', 1024 * 1024), cancellation.Token));
+	}
+
+	[Fact]
 	public async Task TextRangeCharacterCapsNeverSplitAUnicodeScalar()
 	{
 		const string line = "x😀tail";

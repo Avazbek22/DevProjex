@@ -326,7 +326,7 @@ internal sealed class DevProjexMcpTools(
 				var content = await analyzer.TryReadAsTextAsync(file, cancellationToken).ConfigureAwait(false);
 				if (content is null)
 					continue;
-				var lines = McpTextRanges.SplitLines(content.Content);
+				var lines = McpTextRanges.SplitLines(content.Content, cancellationToken);
 				for (var index = 0; index < lines.Count; index++)
 				{
 					var matches = regex.IsMatch(lines[index]);
@@ -392,7 +392,7 @@ internal sealed class DevProjexMcpTools(
 					McpErrorCodes.PayloadTruncated,
 					$"{McpErrorCodes.PayloadTruncated}: file content is binary, unsupported, or exceeds the redaction scan limit and cannot be returned safely.");
 			}
-			var lines = McpTextRanges.SplitLines(content.Content);
+			var lines = McpTextRanges.SplitLines(content.Content, cancellationToken);
 			var page = McpTextRanges.Slice(
 				lines,
 				arguments.OptionalInteger("start_line", 1, int.MaxValue),

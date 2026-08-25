@@ -238,14 +238,19 @@ internal static class McpTextRanges
 			characterLimit);
 	}
 
-	public static IReadOnlyList<string> SplitLines(string text)
+	public static IReadOnlyList<string> SplitLines(
+		string text,
+		CancellationToken cancellationToken = default)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		if (text.Length == 0)
 			return [];
 		var lines = new List<string>();
 		var start = 0;
 		for (var index = 0; index < text.Length; index++)
 		{
+			if ((index & 0xFFF) == 0)
+				cancellationToken.ThrowIfCancellationRequested();
 			if (text[index] is not ('\r' or '\n'))
 				continue;
 			lines.Add(text[start..index]);
