@@ -141,11 +141,11 @@ public sealed class ProjectCopyExportService(
 	{
 		try
 		{
-			return PathUtility.GetPortableRelativePath(projectRoot, fullPath);
+			return SingleLineTextEscaping.Escape(PathUtility.GetPortableRelativePath(projectRoot, fullPath));
 		}
 		catch (ArgumentException)
 		{
-			return Path.GetFileName(fullPath);
+			return SingleLineTextEscaping.Escape(Path.GetFileName(fullPath));
 		}
 	}
 

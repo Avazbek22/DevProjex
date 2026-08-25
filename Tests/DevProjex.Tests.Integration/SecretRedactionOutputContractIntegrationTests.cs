@@ -866,6 +866,50 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		Assert.Contains("oversized.txt", notice, StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public async Task TransformationNotice_EscapesControlCharactersInExcludedFileNames()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("Windows does not allow line breaks in file names.");
+
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("notice-path-project");
+		var exportRoot = temporary.CreateDirectory("notice-path-exports");
+		const string unsafeFileName = "legacy\nforged.txt";
+		File.WriteAllBytes(
+			Path.Combine(sourceRoot, unsafeFileName),
+			[0xEF, 0xBB, 0xBF, 0xC3, 0x28]);
+		var analyzer = new FileContentAnalyzer();
+		using var session = new SecretRedactionSession(CreateDetector());
+		var plan = await BuildPlanAsync(sourceRoot, hideSecrets: true);
+
+		var result = await new ProjectCopyExportService(
+				new ProjectCopyExportPlanBuilder(),
+				analyzer,
+				session)
+			.ExportAsync(
+				new ProjectCopyExportRequest(
+					plan.SourceRoot,
+					"project",
+					plan.ProjectedTree,
+					new HashSet<string>(PathComparer.Default),
+					Path.Combine(exportRoot, "copy"),
+					ProjectCopyExportFormat.Folder,
+					ProjectCopyDestinationMode.Exact,
+					RedactSecrets: true,
+					NoticeText: new ProjectCopyNoticeText(
+						"redaction notice",
+						"compression notice",
+						"excluded notice")),
+				cancellationToken: TestContext.Current.CancellationToken);
+
+		var notice = await File.ReadAllTextAsync(
+			Path.Combine(result.DestinationPath, ProjectCopyExportService.TransformationNoticeFileName),
+			TestContext.Current.CancellationToken);
+		Assert.Contains("legacy\\nforged.txt", notice, StringComparison.Ordinal);
+		Assert.DoesNotContain(unsafeFileName, notice, StringComparison.Ordinal);
+	}
+
 	/// <summary>
 	/// The count behind the checkbox is advisory. A file it may not read is one file missing from
 	/// the count, never a modal error and never a project the user cannot measure at all.
