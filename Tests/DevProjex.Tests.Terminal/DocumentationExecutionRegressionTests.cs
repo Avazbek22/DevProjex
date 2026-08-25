@@ -291,12 +291,10 @@ public sealed class DocumentationExecutionRegressionTests
 		};
 		foreach (var argument in arguments)
 			startInfo.ArgumentList.Add(argument);
-		using var process = Process.Start(startInfo);
-		Assert.NotNull(process);
-		process.WaitForExit();
+		var result = TerminalTestProcess.Run(startInfo);
 		Assert.True(
-			process.ExitCode == 0,
-			$"git {string.Join(' ', arguments)} failed: {process.StandardError.ReadToEnd()}");
+			result.ExitCode == 0,
+			$"git {string.Join(' ', arguments)} failed: {result.StandardOutput}{result.StandardError}");
 	}
 
 	private static string FindRepositoryRoot()

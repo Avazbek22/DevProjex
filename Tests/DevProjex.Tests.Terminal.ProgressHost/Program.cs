@@ -14,6 +14,13 @@ internal static class Program
 {
 	public static int Main(string[] args)
 	{
+		if (args is ["--pipe-flood"])
+		{
+			Console.Error.Write(new string('x', 1024 * 1024));
+			Console.Out.Write("completed");
+			return CommandLineExitCodes.Success;
+		}
+
 		if (string.Equals(
 			    Environment.GetEnvironmentVariable(
 				    TerminalSignalCheckpointProtocol.EnabledVariable),

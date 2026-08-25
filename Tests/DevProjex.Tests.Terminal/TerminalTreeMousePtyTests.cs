@@ -429,15 +429,11 @@ public sealed class TerminalTreeMousePtyTests
 		};
 		foreach (var argument in arguments)
 			startInfo.ArgumentList.Add(argument);
-		using var process = Process.Start(startInfo);
-		Assert.NotNull(process);
-		var standardOutput = process.StandardOutput.ReadToEnd();
-		var standardError = process.StandardError.ReadToEnd();
-		process.WaitForExit();
+		var result = TerminalTestProcess.Run(startInfo);
 		Assert.True(
-			process.ExitCode == 0,
-			$"git {string.Join(' ', arguments)} failed with exit code {process.ExitCode}.\n" +
-			$"{standardOutput}\n{standardError}");
+			result.ExitCode == 0,
+			$"git {string.Join(' ', arguments)} failed with exit code {result.ExitCode}.\n" +
+			$"{result.StandardOutput}\n{result.StandardError}");
 	}
 
 	private static async Task<int> WaitForVisibleTreeRowAsync(

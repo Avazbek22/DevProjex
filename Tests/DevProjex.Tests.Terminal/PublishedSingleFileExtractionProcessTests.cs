@@ -778,17 +778,10 @@ public sealed class PublishedSingleFileExtractionProcessTests
 
 	private static void RunGit(string workingDirectory, params string[] arguments)
 	{
-		using var process = new Process
-		{
-			StartInfo = CreateGitStartInfo(workingDirectory, arguments)
-		};
-		Assert.True(process.Start(), "Could not start git.");
-		var standardOutput = process.StandardOutput.ReadToEnd();
-		var standardError = process.StandardError.ReadToEnd();
-		Assert.True(process.WaitForExit(30_000), "Git did not exit within the test timeout.");
+		var result = TerminalTestProcess.Run(CreateGitStartInfo(workingDirectory, arguments));
 		Assert.True(
-			process.ExitCode == 0,
-			$"git {string.Join(' ', arguments)} failed: {standardOutput}{standardError}");
+			result.ExitCode == 0,
+			$"git {string.Join(' ', arguments)} failed: {result.StandardOutput}{result.StandardError}");
 	}
 
 	private static ProcessStartInfo CreateGitStartInfo(

@@ -350,26 +350,20 @@ public sealed class CliUrlSourceCommandTests
 
 	private static void RunGit(string workingDirectory, params string[] arguments)
 	{
-		using var process = new Process
+		var startInfo = new ProcessStartInfo("git")
 		{
-			StartInfo = new ProcessStartInfo("git")
-			{
-				WorkingDirectory = workingDirectory,
-				UseShellExecute = false,
-				RedirectStandardOutput = true,
-				RedirectStandardError = true,
-				CreateNoWindow = true
-			}
+			WorkingDirectory = workingDirectory,
+			UseShellExecute = false,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			CreateNoWindow = true
 		};
 		foreach (var argument in arguments)
-			process.StartInfo.ArgumentList.Add(argument);
-		process.Start();
-		var standardOutput = process.StandardOutput.ReadToEnd();
-		var standardError = process.StandardError.ReadToEnd();
-		process.WaitForExit();
+			startInfo.ArgumentList.Add(argument);
+		var result = TerminalTestProcess.Run(startInfo);
 		Assert.True(
-			process.ExitCode == 0,
-			$"git {string.Join(' ', arguments)} failed: {standardOutput}{standardError}");
+			result.ExitCode == 0,
+			$"git {string.Join(' ', arguments)} failed: {result.StandardOutput}{result.StandardError}");
 	}
 
 	private sealed class BlockingCloneService : IGitRepositoryService

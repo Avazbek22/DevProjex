@@ -532,16 +532,12 @@ public sealed class TerminalClonePtyTests
 		};
 		foreach (var argument in arguments)
 			startInfo.ArgumentList.Add(argument);
-		using var process = Process.Start(startInfo);
-		Assert.NotNull(process);
-		var standardOutput = process.StandardOutput.ReadToEnd();
-		var standardError = process.StandardError.ReadToEnd();
-		process.WaitForExit();
+		var result = TerminalTestProcess.Run(startInfo);
 		Assert.True(
-			process.ExitCode == 0,
-			$"git {string.Join(' ', arguments)} failed with exit code {process.ExitCode}.\n" +
-			$"{standardOutput}\n{standardError}");
-		return standardOutput.Trim();
+			result.ExitCode == 0,
+			$"git {string.Join(' ', arguments)} failed with exit code {result.ExitCode}.\n" +
+			$"{result.StandardOutput}\n{result.StandardError}");
+		return result.StandardOutput.Trim();
 	}
 
 	private static string ComputeWorkingTreeFingerprint(string root)

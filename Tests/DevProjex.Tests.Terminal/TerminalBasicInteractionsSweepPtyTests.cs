@@ -412,26 +412,21 @@ public sealed partial class TerminalBasicInteractionsSweepPtyTests
 
 	private static void RunGit(string workingDirectory, params string[] arguments)
 	{
-		using var process = new Process
+		var startInfo = new ProcessStartInfo
 		{
-			StartInfo = new ProcessStartInfo
-			{
-				FileName = "git",
-				WorkingDirectory = workingDirectory,
-				RedirectStandardOutput = true,
-				RedirectStandardError = true,
-				UseShellExecute = false,
-				CreateNoWindow = true
-			}
+			FileName = "git",
+			WorkingDirectory = workingDirectory,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			UseShellExecute = false,
+			CreateNoWindow = true
 		};
 		foreach (var argument in arguments)
-			process.StartInfo.ArgumentList.Add(argument);
-		Assert.True(process.Start());
-		var standardError = process.StandardError.ReadToEnd();
-		process.WaitForExit();
+			startInfo.ArgumentList.Add(argument);
+		var result = TerminalTestProcess.Run(startInfo);
 		Assert.True(
-			process.ExitCode == 0,
-			$"git {string.Join(' ', arguments)} failed: {standardError}");
+			result.ExitCode == 0,
+			$"git {string.Join(' ', arguments)} failed: {result.StandardOutput}{result.StandardError}");
 	}
 
 	[GeneratedRegex(@"\[[x \-]\]\s+\S")]
