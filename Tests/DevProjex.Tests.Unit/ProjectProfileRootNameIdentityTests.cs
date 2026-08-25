@@ -21,9 +21,7 @@ public sealed class ProjectProfileRootNameIdentityTests
 		store.SaveProfile(project.Path, profile);
 
 		Assert.True(store.TryLoadProfile(project.Path, out var loaded));
-		var expectedRoots = OperatingSystem.IsWindows()
-			? new HashSet<string>([" source "], PathComparer.Default)
-			: new HashSet<string>([" source ", "   "], PathComparer.Default);
+		var expectedRoots = new HashSet<string>([" source "], PathComparer.Default);
 		Assert.Equal(expectedRoots, loaded.SelectedRootFolders.ToHashSet(PathComparer.Default));
 		Assert.NotNull(loaded.RootFolderStates);
 		Assert.True(loaded.RootFolderStates![" source "]);

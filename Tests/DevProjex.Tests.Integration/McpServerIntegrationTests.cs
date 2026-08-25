@@ -283,7 +283,7 @@ public sealed class McpServerIntegrationTests
 			"search_project",
 			new Dictionary<string, object?> { ["pattern"] = " ", ["context_lines"] = 0 });
 
-		Assert.NotEqual(true, search.IsError);
+		Assert.False(search.IsError is true, Text(search));
 		Assert.Contains("Sample.txt:1:alpha beta", Text(search), StringComparison.Ordinal);
 		if (OperatingSystem.IsWindows())
 			return;
