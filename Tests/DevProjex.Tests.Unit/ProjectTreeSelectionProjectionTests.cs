@@ -142,6 +142,44 @@ public sealed class ProjectTreeSelectionProjectionTests
 		Assert.Equal(OperatingSystem.IsWindows() ? 1 : 2, plan.FileCount);
 	}
 
+	[Fact]
+	public void SparseSelection_DeepTreeDoesNotDependOnTheCallStack()
+	{
+		const int depth = 16_000;
+		var leafPath = "/root/leaf.txt";
+		TreeNodeDescriptor root = new("leaf.txt", leafPath, false, false, "file", []);
+		for (var level = depth - 1; level >= 0; level--)
+		{
+			root = new TreeNodeDescriptor(
+				$"level-{level:D4}",
+				$"/root/level-{level:D4}",
+				true,
+				false,
+				"folder",
+				[root]);
+		}
+		var selected = new HashSet<string>([leafPath], PathComparer.Default);
+
+		var included = ProjectTreeSelectionProjection.BuildIncludedNodes(root, selected);
+		var orderedFiles = ProjectTreeSelectionProjection.BuildOrderedSelectedFilePaths(
+			root,
+			selected,
+			ensureExists: false);
+		var collected = new HashSet<string>(PathComparer.Default);
+		ProjectTreeSelectionProjection.CollectSelectedFilePaths(
+			root,
+			selected,
+			collected,
+			maxCount: 1,
+			ensureExists: false);
+
+		Assert.Equal(depth + 1, included.Count);
+		Assert.Equal(leafPath, included[0].FullPath);
+		Assert.Equal(root.FullPath, included[^1].FullPath);
+		Assert.Equal(leafPath, Assert.Single(orderedFiles));
+		Assert.Equal(leafPath, Assert.Single(collected));
+	}
+
 	public static TheoryData<string, string[], string[]> SelectionCases => new()
 	{
 		{
