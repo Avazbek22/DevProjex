@@ -705,6 +705,20 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 						identity,
 						preparedSession)
 					.ConfigureAwait(false);
+				if (cloneLease.UpdateFailed)
+				{
+					await InvokeAsync(() =>
+					{
+						if (ReferenceEquals(_activeOperationCts, operationCts) &&
+						    _screen == TerminalWorkspaceScreen.Workspace)
+						{
+							SetOperationStatus(
+								L("Toast.Git.CachedUpdateFailed"),
+								TerminalWorkspaceTheme.Warning);
+						}
+						return true;
+					}).ConfigureAwait(false);
+				}
 			}
 			catch (OperationCanceledException) when (operationCts.IsCancellationRequested)
 			{
@@ -1041,7 +1055,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			ReadOnly = true,
 			WordWrap = true,
 			CanFocus = false,
-			Text = detail,
+			Text = TerminalTextEscaping.EscapeSingleLine(detail),
 			SchemeName = TerminalWorkspaceTheme.Secondary
 		};
 		var footer = new TerminalLiteralLabel
@@ -3213,14 +3227,15 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 
 	private void SetOperationStatus(string text, string schemeName)
 	{
+		var safeText = TerminalTextEscaping.EscapeSingleLine(text);
 		if (_screen == TerminalWorkspaceScreen.Workspace && _status is not null)
 		{
-			_status.Text = text;
+			_status.Text = safeText;
 			_status.SchemeName = schemeName;
 		}
 		else if (_screen == TerminalWorkspaceScreen.Welcome)
 		{
-			ShowWelcomeStatus(text, schemeName);
+			ShowWelcomeStatus(safeText, schemeName);
 		}
 	}
 
@@ -3230,7 +3245,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			return;
 		_welcomeQuickStart.Text = string.IsNullOrWhiteSpace(text)
 			? L("Terminal.Tui.Welcome.QuickStart")
-			: text;
+			: TerminalTextEscaping.EscapeSingleLine(text);
 		_welcomeQuickStart.SchemeName = schemeName;
 	}
 
@@ -4095,7 +4110,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				string.Format(
 					CultureInfo.CurrentCulture,
 					L("Terminal.Tui.Error.DestinationConflictPath"),
-					summary.Destination));
+					TerminalTextEscaping.EscapeSingleLine(summary.Destination)));
 			return TerminalExportDecision.Cancel;
 		}
 

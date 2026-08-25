@@ -44,6 +44,31 @@ public sealed class TerminalUntrustedTextPresentationTests
 		AssertSafe(TerminalRecentWorkspacePresentation.DisplayName(workspace), escapedName);
 		AssertSafe(TerminalRecentWorkspacePresentation.DisplaySource(workspace), escapedName);
 		AssertSafe(TerminalOperationProgressView.SanitizeSource(unsafeName), escapedName);
+		AssertSafe(TerminalOperationProgressView.SanitizeLine(unsafeName), escapedName);
+
+		using var data = new TemporaryDirectory();
+		var services = new TerminalServiceFactory(() => data.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var exportSummary = new TerminalExportSummary(
+			TerminalExportKind.Context,
+			ProjectContextView.Tree,
+			ProjectContextDocumentFormat.Text,
+			unsafeName,
+			TerminalExportDestinationState.Ready,
+			FileCount: 1,
+			FolderCount: 1,
+			Bytes: 1,
+			Characters: 1,
+			EstimatedTokens: 1,
+			GitFilteringMode.None,
+			Exclusions: [],
+			DiagnosticCount: 0);
+		var exportText = new TerminalWorkspace(
+			services,
+			new TestTerminalEnvironment()).BuildExportSummaryText(exportSummary);
+		Assert.Contains(escapedName, exportText, StringComparison.Ordinal);
+		Assert.DoesNotContain('', exportText);
+		Assert.DoesNotContain('	', exportText);
 	}
 
 	[Fact]

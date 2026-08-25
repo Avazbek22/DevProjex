@@ -233,7 +233,11 @@ public sealed class TerminalWorkspace
 			: TerminalParameterRow.FitLabel(value, maximumValueColumns, useUnicode: true);
 		var rows = new List<string[]>
 		{
-			new[] { L("Terminal.Tui.Destination").TrimEnd(':'), Fit(summary.Destination) },
+			new[]
+			{
+				L("Terminal.Tui.Destination").TrimEnd(':'),
+				Fit(TerminalTextEscaping.EscapeSingleLine(summary.Destination))
+			},
 			new[] { L("Terminal.Analysis.Files"), summary.FileCount.ToString("N0", CultureInfo.CurrentCulture) },
 			new[] { L("Terminal.Analysis.Folders"), summary.FolderCount.ToString("N0", CultureInfo.CurrentCulture) },
 			new[] { L("Terminal.Analysis.Size"), FormatBytes(summary.Bytes) },
