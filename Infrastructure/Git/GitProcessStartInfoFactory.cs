@@ -10,12 +10,14 @@ internal static class GitProcessStartInfoFactory
 	public static ProcessStartInfo Create(
 		string? workingDirectory,
 		IReadOnlyList<string> arguments,
-		bool redirectStandardInput = true)
+		bool redirectStandardInput = true,
+		string? executable = null,
+		GitAskPassSession? askPass = null)
 	{
 		ArgumentNullException.ThrowIfNull(arguments);
 		var startInfo = new ProcessStartInfo
 		{
-			FileName = GitExecutable,
+			FileName = executable ?? GitExecutable,
 			UseShellExecute = false,
 			CreateNoWindow = true,
 			RedirectStandardInput = redirectStandardInput,
@@ -38,6 +40,7 @@ internal static class GitProcessStartInfoFactory
 		startInfo.Environment["SSH_ASKPASS_REQUIRE"] = "never";
 		startInfo.Environment["GCM_INTERACTIVE"] = "Never";
 		startInfo.Environment["GCM_GUI_PROMPT"] = "false";
+		askPass?.Apply(startInfo);
 		return startInfo;
 	}
 }
