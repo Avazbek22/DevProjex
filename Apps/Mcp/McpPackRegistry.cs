@@ -16,18 +16,13 @@ public sealed class McpPackRegistry : IDisposable
 	public McpPackRegistry(string? tempRoot = null, TimeProvider? timeProvider = null)
 	{
 		TimeProvider = timeProvider ?? TimeProvider.System;
-		var baseDirectory = Path.Combine(
-			tempRoot ?? Path.GetTempPath(),
-			"DevProjex",
-			"mcp");
-		Directory.CreateDirectory(baseDirectory);
-		if ((File.GetAttributes(baseDirectory) & FileAttributes.ReparsePoint) != 0)
-			throw new IOException("MCP temporary storage cannot use a symbolic link or reparse point.");
-		SetPrivateDirectoryMode(baseDirectory);
+		var productDirectory = Path.Combine(tempRoot ?? Path.GetTempPath(), "DevProjex");
+		EnsurePrivateDirectory(productDirectory);
+		var baseDirectory = Path.Combine(productDirectory, "mcp");
+		EnsurePrivateDirectory(baseDirectory);
 		Scavenge(baseDirectory, TimeProvider.GetUtcNow());
 		_sessionDirectory = Path.Combine(baseDirectory, Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant());
-		Directory.CreateDirectory(_sessionDirectory);
-		SetPrivateDirectoryMode(_sessionDirectory);
+		EnsurePrivateDirectory(_sessionDirectory);
 		_sessionLease = new FileStream(
 			Path.Combine(_sessionDirectory, ".session.lock"),
 			FileMode.CreateNew,
@@ -218,6 +213,20 @@ public sealed class McpPackRegistry : IDisposable
 				path,
 				UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
 		}
+	}
+
+	private static void EnsurePrivateDirectory(string path)
+	{
+		Directory.CreateDirectory(path);
+		RejectLinkedDirectory(path);
+		SetPrivateDirectoryMode(path);
+		RejectLinkedDirectory(path);
+	}
+
+	private static void RejectLinkedDirectory(string path)
+	{
+		if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+			throw new IOException("MCP temporary storage cannot use a symbolic link or reparse point.");
 	}
 
 	private static void SetPrivateFileMode(string path)
