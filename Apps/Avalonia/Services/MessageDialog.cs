@@ -29,8 +29,8 @@ public static class MessageDialog
         Window owner,
         string title,
         string message,
-        string confirmButtonText = "Да",
-        string cancelButtonText = "Отмена",
+        string confirmButtonText,
+        string cancelButtonText,
         double width = 520,
         double height = 260)
     {
