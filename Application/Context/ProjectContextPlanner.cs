@@ -366,7 +366,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				sourceRoot);
 		}
 
-		return sourceIdentity with
+		var normalizedIdentity = sourceIdentity with
 		{
 			DisplayName = string.IsNullOrWhiteSpace(sourceIdentity.DisplayName)
 				? fallbackName
@@ -374,6 +374,16 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			SourceReference = string.IsNullOrWhiteSpace(sourceIdentity.SourceReference)
 				? sourceRoot
 				: sourceIdentity.SourceReference
+		};
+		if (normalizedIdentity.SourceType != ProjectSourceType.GitClone)
+			return normalizedIdentity;
+
+		var safeRepositoryUrl = RepositoryUrlUtility.ToSafeDisplay(
+			normalizedIdentity.RepositoryUrl ?? normalizedIdentity.SourceReference);
+		return normalizedIdentity with
+		{
+			SourceReference = safeRepositoryUrl.Length > 0 ? safeRepositoryUrl : fallbackName,
+			RepositoryUrl = safeRepositoryUrl.Length > 0 ? safeRepositoryUrl : null
 		};
 	}
 

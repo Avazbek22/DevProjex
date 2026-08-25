@@ -105,4 +105,44 @@ public sealed class ProjectSourceIdentityContractTests
 			json,
 			StringComparison.Ordinal);
 	}
+
+	[Fact]
+	public async Task ContextDocumentsNeverExposeRepositoryCredentialsFromCallerIdentity()
+	{
+		const string unsafeUrl = "https://user:top-secret@example.com/owner/repository.git";
+		const string safeUrl = "https://example.com/owner/repository.git";
+		using var temporary = new TemporaryDirectory();
+		temporary.WriteFile("src/App.cs", "class App {}\n");
+		var services = new TerminalServiceFactory(() => temporary.Path).Create(AppLanguage.En);
+		var selection = await services.SelectionResolver.ResolveAsync(
+			temporary.Path,
+			ProjectProfileReference.Standard,
+			new ProjectSelectionSpec(),
+			TestContext.Current.CancellationToken);
+		var unsafeIdentity = new ProjectSourceIdentity(
+			"repository",
+			ProjectSourceType.GitClone,
+			unsafeUrl,
+			unsafeUrl);
+
+		var plan = await services.ContextPlanner.BuildAsync(
+			new ProjectContextRequest(temporary.Path, selection, unsafeIdentity),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(safeUrl, plan.SourceIdentity?.SourceReference);
+		Assert.Equal(safeUrl, plan.SourceIdentity?.RepositoryUrl);
+		foreach (var format in Enum.GetValues<ProjectContextDocumentFormat>())
+		{
+			var document = await CompleteContextDocumentTestHelper.BuildAsync(
+				services.ContextDocumentService,
+				plan,
+				ProjectContextView.TreeContent,
+				format,
+				TestContext.Current.CancellationToken);
+
+			Assert.DoesNotContain("top-secret", document, StringComparison.Ordinal);
+			Assert.DoesNotContain("user:", document, StringComparison.Ordinal);
+			Assert.Contains(safeUrl, document, StringComparison.Ordinal);
+		}
+	}
 }
