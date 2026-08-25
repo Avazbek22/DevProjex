@@ -153,6 +153,11 @@ public static class AtomicFileOutput
 			File.Move(temporaryPath, destinationPath, overwrite);
 			return;
 		}
+		if (DestinationIsSymbolicLink(destinationPath))
+		{
+			File.Move(temporaryPath, destinationPath, overwrite: true);
+			return;
+		}
 
 		try
 		{
@@ -175,8 +180,7 @@ public static class AtomicFileOutput
 		if (!overwrite)
 			return DestinationEntryExists(destinationPath);
 
-		return Directory.Exists(destinationPath) ||
-		       DestinationIsSymbolicLink(destinationPath);
+		return Directory.Exists(destinationPath);
 	}
 
 	private static bool DestinationEntryExists(string path) =>
