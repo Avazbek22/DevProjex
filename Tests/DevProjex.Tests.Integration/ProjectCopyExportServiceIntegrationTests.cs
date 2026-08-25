@@ -706,7 +706,7 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 				TestContext.Current.CancellationToken));
 		Assert.Null(new FileInfo(destination).LinkTarget);
 		using var archive = ZipFile.OpenRead(destination);
-		Assert.Contains(archive.Entries, static entry => entry.FullName == "README.md");
+		Assert.Contains(archive.Entries, static entry => entry.FullName == "Sample/README.md");
 	}
 
 	[Fact]
