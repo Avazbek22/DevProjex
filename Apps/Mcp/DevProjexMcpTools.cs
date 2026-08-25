@@ -326,21 +326,23 @@ internal sealed class DevProjexMcpTools(
 				var content = await analyzer.TryReadAsTextAsync(file, cancellationToken).ConfigureAwait(false);
 				if (content is null)
 					continue;
-				var lines = McpTextRanges.SplitLines(content.Content, cancellationToken);
-				for (var index = 0; index < lines.Count; index++)
+				var scan = McpSearchTextScanner.Scan(
+					content.Content,
+					regex,
+					contextLines,
+					Math.Max(0, maximumResults - totalMatches),
+					cancellationToken);
+				totalMatches += scan.TotalMatches;
+				if (responseLimitReached)
+					continue;
+
+				foreach (var match in scan.Matches)
 				{
-					var matches = regex.IsMatch(lines[index]);
-					if (!matches)
-						continue;
-					totalMatches++;
-					if (totalMatches > maximumResults || responseLimitReached)
-						continue;
 					if (AppendSearchResult(
 						output,
 						McpProjectService.ToRelative(plan.SourceRoot, file),
-						lines,
-						index,
-						contextLines,
+						content.Content,
+						match,
 						MaximumSearchContentCharacters))
 					{
 						shownMatches++;
@@ -519,26 +521,42 @@ internal sealed class DevProjexMcpTools(
 	private static bool AppendSearchResult(
 		StringBuilder output,
 		string relativePath,
-		IReadOnlyList<string> lines,
-		int matchIndex,
-		int contextLines,
+		string content,
+		McpSearchMatchContext match,
 		int maximumCharacters)
 	{
 		var safePath = EscapeSingleLine(relativePath);
-		var first = Math.Max(0, matchIndex - contextLines);
-		var last = Math.Min(lines.Count - 1, matchIndex + contextLines);
-		for (var index = first; index <= last; index++)
+		foreach (var line in match.Lines)
 		{
-			var marker = index == matchIndex ? ':' : '-';
-			var line = $"{safePath}{marker}{index + 1}{marker}{EscapeSingleLine(lines[index])}{Environment.NewLine}";
+			var marker = line.LineNumber == match.MatchLineNumber ? ':' : '-';
+			var prefix = $"{safePath}{marker}{line.LineNumber}{marker}";
 			var remaining = maximumCharacters - output.Length;
-			if (line.Length <= remaining)
+			if (prefix.Length > remaining)
 			{
-				output.Append(line);
+				AppendBoundedPrefix(output, prefix, Math.Max(0, remaining));
+				return false;
+			}
+			output.Append(prefix);
+
+			remaining = maximumCharacters - output.Length;
+			var sourceLength = Math.Min(line.Length, Math.Max(0, remaining));
+			if (sourceLength > 0 &&
+			    sourceLength < line.Length &&
+			    char.IsHighSurrogate(content[line.Offset + sourceLength - 1]) &&
+			    char.IsLowSurrogate(content[line.Offset + sourceLength]))
+			{
+				sourceLength--;
+			}
+			var escaped = McpTextEscaping.EscapeSingleLine(
+				content.Substring(line.Offset, sourceLength));
+			var suffix = escaped + Environment.NewLine;
+			if (sourceLength == line.Length && suffix.Length <= remaining)
+			{
+				output.Append(suffix);
 				continue;
 			}
 
-			AppendBoundedPrefix(output, line, Math.Max(0, remaining));
+			AppendBoundedPrefix(output, suffix, Math.Max(0, remaining));
 			return false;
 		}
 		return true;

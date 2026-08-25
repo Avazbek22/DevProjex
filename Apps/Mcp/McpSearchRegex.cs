@@ -24,6 +24,18 @@ internal sealed class McpSearchRegex
 
 	public bool IsMatch(string input)
 	{
+		ArgumentNullException.ThrowIfNull(input);
+		return IsMatch(input.AsSpan());
+	}
+
+	public bool IsMatch(string input, int start, int length)
+	{
+		ArgumentNullException.ThrowIfNull(input);
+		return IsMatch(input.AsSpan(start, length));
+	}
+
+	private bool IsMatch(ReadOnlySpan<char> input)
+	{
 		try
 		{
 			return _regex.IsMatch(input);

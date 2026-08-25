@@ -711,16 +711,6 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
-	public void SplitLinesHonorsCancellationBeforeScanningContent()
-	{
-		using var cancellation = new CancellationTokenSource();
-		cancellation.Cancel();
-
-		Assert.Throws<OperationCanceledException>(() =>
-			McpTextRanges.SplitLines(new string('\n', 1024 * 1024), cancellation.Token));
-	}
-
-	[Fact]
 	public void TextSliceDoesNotMaterializeEveryLineOfLargeContent()
 	{
 		var content = new string('\n', 8 * 1024 * 1024);
@@ -737,6 +727,55 @@ public sealed class McpInfrastructureTests
 
 		Assert.Equal(8 * 1024 * 1024 + 1, page.TotalLines);
 		Assert.Equal(1000, page.EndLine);
+		Assert.InRange(allocatedBytes, 0, 2 * 1024 * 1024);
+	}
+
+	[Fact]
+	public void SearchScannerKeepsOnlyBoundedMatchContext()
+	{
+		const string content = "before\r\nneedle\rcontext\nneedle-again\rafter";
+
+		var result = McpSearchTextScanner.Scan(
+			content,
+			new McpSearchRegex("needle", ignoreCase: false),
+			contextLines: 1,
+			maximumStoredMatches: 1,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(2, result.TotalMatches);
+		var match = Assert.Single(result.Matches);
+		Assert.Equal(2, match.MatchLineNumber);
+		Assert.Equal(
+			["before", "needle", "context"],
+			match.Lines.Select(line => content.Substring(line.Offset, line.Length)));
+
+		using var cancellation = new CancellationTokenSource();
+		cancellation.Cancel();
+		Assert.Throws<OperationCanceledException>(() => McpSearchTextScanner.Scan(
+			content,
+			new McpSearchRegex("needle", ignoreCase: false),
+			contextLines: 1,
+			maximumStoredMatches: 1,
+			cancellation.Token));
+	}
+
+	[Fact]
+	public void SearchScannerDoesNotAllocateOneObjectPerSourceLine()
+	{
+		var content = new string('\n', 1024 * 1024);
+		var regex = new McpSearchRegex("needle", ignoreCase: false);
+		var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+
+		var result = McpSearchTextScanner.Scan(
+			content,
+			regex,
+			contextLines: 2,
+			maximumStoredMatches: 50,
+			TestContext.Current.CancellationToken);
+		var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+		Assert.Equal(0, result.TotalMatches);
+		Assert.Empty(result.Matches);
 		Assert.InRange(allocatedBytes, 0, 2 * 1024 * 1024);
 	}
 

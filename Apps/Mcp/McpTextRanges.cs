@@ -323,33 +323,6 @@ internal static class McpTextRanges
 			characterLimit);
 	}
 
-	public static IReadOnlyList<string> SplitLines(
-		string text,
-		CancellationToken cancellationToken = default)
-	{
-		cancellationToken.ThrowIfCancellationRequested();
-		if (text.Length == 0)
-			return [];
-		var lines = new List<string>();
-		var start = 0;
-		for (var index = 0; index < text.Length; index++)
-		{
-			if ((index & 0xFFF) == 0)
-				cancellationToken.ThrowIfCancellationRequested();
-			if (text[index] is not ('\r' or '\n'))
-				continue;
-			lines.Add(text[start..index]);
-			if (text[index] == '\r' && index + 1 < text.Length && text[index + 1] == '\n')
-				index++;
-			start = index + 1;
-		}
-		if (start < text.Length)
-			lines.Add(text[start..]);
-		else if (text.Length > 0 && text[^1] is '\r' or '\n')
-			lines.Add(string.Empty);
-		return lines;
-	}
-
 	private static void AppendBoundedPrefix(StringBuilder builder, string line, int maximumCharacters)
 		=> AppendBoundedPrefix(builder, line.AsSpan(), maximumCharacters);
 
