@@ -263,8 +263,14 @@ internal sealed class DevProjexMcpTools(
 			var packId = arguments.RequiredString("pack_id");
 			var start = arguments.OptionalInteger("start_line", 1, int.MaxValue);
 			var end = arguments.OptionalInteger("end_line", 1, int.MaxValue);
-			var path = packs.Resolve(packId);
-			var page = await ReadFilePageAsync(path, start, end, cancellationToken).ConfigureAwait(false);
+			var pack = packs.ResolveDocument(packId);
+			var page = await ReadFilePageAsync(
+					pack.Path,
+					pack.Lines,
+					start,
+					end,
+					cancellationToken)
+				.ConfigureAwait(false);
 			var text = page.Text;
 			if (page.IsTruncated)
 			{
@@ -472,6 +478,7 @@ internal sealed class DevProjexMcpTools(
 
 	private static async Task<McpTextPage> ReadFilePageAsync(
 		string path,
+		int totalLines,
 		int? startLine,
 		int? endLine,
 		CancellationToken cancellationToken)
@@ -489,7 +496,8 @@ internal sealed class DevProjexMcpTools(
 			endLine,
 			MaximumPageLines,
 			MaximumPageCharacters,
-			cancellationToken).ConfigureAwait(false);
+			cancellationToken,
+			totalLines).ConfigureAwait(false);
 	}
 
 	private static void AppendSearchResult(

@@ -317,6 +317,27 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public async Task TextPageReaderUsesKnownPackMetricsWithoutScanningTheUnreadTail()
+	{
+		var content = Encoding.UTF8.GetBytes("first\n" + new string('x', 2 * 1024 * 1024));
+		await using var stream = new MemoryStream(content);
+
+		var page = await McpTextRanges.ReadPageAsync(
+			stream,
+			startLine: 1,
+			endLine: null,
+			maximumLines: 1,
+			maximumCharacters: 100,
+			TestContext.Current.CancellationToken,
+			knownTotalLines: 2);
+
+		Assert.Equal("first", page.Text);
+		Assert.Equal(2, page.TotalLines);
+		Assert.True(page.IsTruncated);
+		Assert.InRange(stream.Position, 1, 32 * 1024);
+	}
+
+	[Fact]
 	public async Task TextRangesPreserveLeadingEmptyLines()
 	{
 		await using var stream = new MemoryStream(Encoding.UTF8.GetBytes("\r\nvalue\n"));

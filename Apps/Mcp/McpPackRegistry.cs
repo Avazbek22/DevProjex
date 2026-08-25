@@ -74,9 +74,10 @@ public sealed class McpPackRegistry : IDisposable
 			}
 
 			var (characters, lines) = await MeasureAsync(path, cancellationToken).ConfigureAwait(false);
+			var document = new McpPackDocument(id, path, lines, characters);
 			lock (_sync)
-				_packs.Add(id, new PackEntry(path, TimeProvider.GetUtcNow()));
-			return new McpPackDocument(id, path, lines, characters);
+				_packs.Add(id, new PackEntry(document, TimeProvider.GetUtcNow()));
+			return document;
 		}
 		catch
 		{
@@ -101,14 +102,16 @@ public sealed class McpPackRegistry : IDisposable
 		}
 		try
 		{
-			File.Delete(entry.Path);
+			File.Delete(entry.Document.Path);
 		}
 		catch (IOException)
 		{
 		}
 	}
 
-	public string Resolve(string packId)
+	public string Resolve(string packId) => ResolveDocument(packId).Path;
+
+	internal McpPackDocument ResolveDocument(string packId)
 	{
 		ObjectDisposedException.ThrowIf(_disposed, this);
 		if (string.IsNullOrWhiteSpace(packId))
@@ -116,9 +119,9 @@ public sealed class McpPackRegistry : IDisposable
 		PackEntry? entry;
 		lock (_sync)
 			_packs.TryGetValue(packId, out entry);
-		if (entry is null || !File.Exists(entry.Path))
+		if (entry is null || !File.Exists(entry.Document.Path))
 			throw Expired();
-		return entry.Path;
+		return entry.Document;
 	}
 
 	public void Dispose()
@@ -186,7 +189,7 @@ public sealed class McpPackRegistry : IDisposable
 			McpErrorCodes.PackExpired,
 			$"{McpErrorCodes.PackExpired}: pack expired or belongs to another server session; call pack_context again.");
 
-	private sealed record PackEntry(string Path, DateTimeOffset CreatedUtc);
+	private sealed record PackEntry(McpPackDocument Document, DateTimeOffset CreatedUtc);
 
 	private static async Task<(long Characters, int Lines)> MeasureAsync(
 		string path,

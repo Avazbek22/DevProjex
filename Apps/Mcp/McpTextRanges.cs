@@ -18,13 +18,29 @@ internal static class McpTextRanges
 		int? endLine,
 		int maximumLines,
 		int maximumCharacters,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		int? knownTotalLines = null)
 	{
 		ArgumentNullException.ThrowIfNull(stream);
+		if (knownTotalLines is < 0)
+			throw new ArgumentOutOfRangeException(nameof(knownTotalLines));
 		var start = startLine ?? 1;
 		var requestedEnd = endLine ?? int.MaxValue;
 		if (start < 1 || requestedEnd < start)
+			throw InvalidRange(start, endLine, knownTotalLines ?? 0);
+		if (knownTotalLines is 0 && (startLine is > 1 || endLine is > 0))
 			throw InvalidRange(start, endLine, 0);
+		if (knownTotalLines is { } knownTotal && knownTotal > 0 &&
+		    (start > knownTotal || endLine > knownTotal))
+		{
+			throw InvalidRange(start, endLine, knownTotal);
+		}
+		var maximumRequestedLine = (int)Math.Min(
+			int.MaxValue,
+			(long)start + maximumLines - 1);
+		var lastLineToRead = knownTotalLines is { } totalLines
+			? Math.Min(totalLines, Math.Min(requestedEnd, maximumRequestedLine))
+			: int.MaxValue;
 
 		using var reader = new StreamReader(
 			stream,
@@ -43,6 +59,7 @@ internal static class McpTextRanges
 		var currentLineOverflowed = false;
 		var previousWasCarriageReturn = false;
 		var endedWithLineBreak = false;
+		var requestedLinesRead = knownTotalLines is 0;
 		var bufferedLineLimit = maximumCharacters == int.MaxValue
 			? int.MaxValue
 			: maximumCharacters + 1;
@@ -83,12 +100,15 @@ internal static class McpTextRanges
 			lineBuilder.Clear();
 			currentLineHasContent = false;
 			currentLineOverflowed = false;
+			requestedLinesRead = knownTotalLines.HasValue && lineNumber >= lastLineToRead;
 		}
 
 		try
 		{
 			while (true)
 			{
+				if (requestedLinesRead)
+					break;
 				var read = await reader
 					.ReadAsync(readBuffer.AsMemory(), cancellationToken)
 					.ConfigureAwait(false);
@@ -106,6 +126,8 @@ internal static class McpTextRanges
 							continue;
 						}
 						CompleteLine();
+						if (requestedLinesRead)
+							break;
 						continue;
 					}
 
@@ -114,6 +136,8 @@ internal static class McpTextRanges
 						endedWithLineBreak = true;
 						previousWasCarriageReturn = true;
 						CompleteLine();
+						if (requestedLinesRead)
+							break;
 						continue;
 					}
 
@@ -129,7 +153,7 @@ internal static class McpTextRanges
 				}
 			}
 
-			if (currentLineHasContent || endedWithLineBreak)
+			if (!requestedLinesRead && (currentLineHasContent || endedWithLineBreak))
 				CompleteLine();
 		}
 		finally
@@ -137,20 +161,21 @@ internal static class McpTextRanges
 			ArrayPool<char>.Shared.Return(readBuffer);
 		}
 
-		if (total == 0)
+		var reportedTotal = knownTotalLines ?? total;
+		if (reportedTotal == 0)
 		{
 			if (startLine is > 1 || endLine is > 0)
-				throw InvalidRange(start, endLine, total);
+				throw InvalidRange(start, endLine, reportedTotal);
 			return new McpTextPage(string.Empty, 0, 0, 0, false, false);
 		}
-		if (start > total || endLine > total)
-			throw InvalidRange(start, endLine, total);
-		var effectiveEnd = endLine ?? total;
+		if (start > reportedTotal || endLine > reportedTotal)
+			throw InvalidRange(start, endLine, reportedTotal);
+		var effectiveEnd = endLine ?? reportedTotal;
 		return new McpTextPage(
 			builder.ToString(),
 			start,
 			actualEnd,
-			total,
+			reportedTotal,
 			actualEnd < effectiveEnd,
 			characterLimit);
 	}
