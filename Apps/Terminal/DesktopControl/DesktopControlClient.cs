@@ -83,7 +83,7 @@ public sealed class DesktopControlClient(
 			var response = JsonSerializer.Deserialize<DesktopProtocolResponse>(responseJson, JsonOptions) ??
 			               throw new JsonException();
 			if (response.ProtocolVersion != DesktopProtocol.CurrentVersion ||
-			    !response.RequestId.Equals(requestId, StringComparison.Ordinal))
+			    !string.Equals(response.RequestId, requestId, StringComparison.Ordinal))
 			{
 				throw new DesktopControlException(
 					"DPX-DESKTOP-PROTOCOL-MISMATCH",

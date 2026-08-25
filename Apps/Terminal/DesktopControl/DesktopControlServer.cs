@@ -194,13 +194,14 @@ public sealed class DesktopControlServer : IAsyncDisposable
 				cancellationToken).ConfigureAwait(false);
 			var request = JsonSerializer.Deserialize<DesktopProtocolRequest>(json, JsonOptions) ??
 			              throw new JsonException();
-			requestId = request.RequestId;
 			if (request.ProtocolVersion != DesktopProtocol.CurrentVersion)
 			{
 				throw new DesktopControlException(
 					"DPX-DESKTOP-PROTOCOL-MISMATCH",
 					"The desktop control protocol version is not supported.");
 			}
+			ValidateRequestEnvelope(request);
+			requestId = request.RequestId;
 			if (!string.IsNullOrWhiteSpace(request.InstanceId) &&
 			    !request.InstanceId.Equals(_registration.InstanceId, StringComparison.Ordinal))
 			{
@@ -248,6 +249,21 @@ public sealed class DesktopControlServer : IAsyncDisposable
 		var bytes = Encoding.UTF8.GetBytes(responseJson + "\n");
 		await stream.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
 		await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+	}
+
+	private static void ValidateRequestEnvelope(DesktopProtocolRequest request)
+	{
+		if (!string.IsNullOrWhiteSpace(request.RequestId) &&
+		    !string.IsNullOrWhiteSpace(request.Action) &&
+		    request.Payload.ValueKind == JsonValueKind.Object)
+		{
+			return;
+		}
+
+		throw new DesktopControlException(
+			"DPX-DESKTOP-INVALID-PAYLOAD",
+			"The desktop request is invalid.",
+			CommandLineExitCodes.UsageError);
 	}
 
 	private async Task TouchRegistrationAsync(

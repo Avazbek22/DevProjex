@@ -302,6 +302,52 @@ public sealed class DesktopControlIntegrationTests
 	}
 
 	[Fact]
+	public async Task ClientRejectsStructurallyIncompleteProtocolResponse()
+	{
+		var pipeName = $"devprojex-test-{Guid.NewGuid():N}";
+		await using var server = new NamedPipeServerStream(
+			pipeName,
+			PipeDirection.InOut,
+			1,
+			PipeTransmissionMode.Byte,
+			PipeOptions.Asynchronous);
+		var registration = new DesktopInstanceRegistration(
+			DesktopProtocol.CurrentVersion,
+			"incomplete-response",
+			Environment.ProcessId,
+			Process.GetCurrentProcess().StartTime.ToUniversalTime().Ticks,
+			ProjectPath: null,
+			DateTimeOffset.UtcNow,
+			"pipe",
+			pipeName);
+		var responseTask = Task.Run(async () =>
+		{
+			await server.WaitForConnectionAsync(TestContext.Current.CancellationToken);
+			using var reader = new StreamReader(
+				server,
+				new UTF8Encoding(false),
+				detectEncodingFromByteOrderMarks: false,
+				leaveOpen: true);
+			_ = await reader.ReadLineAsync(TestContext.Current.CancellationToken);
+			await server.WriteAsync(
+				"{\"protocolVersion\":1}\n"u8.ToArray(),
+				TestContext.Current.CancellationToken);
+			await server.FlushAsync(TestContext.Current.CancellationToken);
+		}, TestContext.Current.CancellationToken);
+
+		var exception = await Assert.ThrowsAsync<DesktopControlException>(() =>
+			new DesktopControlClient().SendAsync(
+				registration,
+				"status",
+				new { },
+				TimeSpan.FromSeconds(5),
+				TestContext.Current.CancellationToken));
+		await responseTask;
+
+		Assert.Equal("DPX-DESKTOP-PROTOCOL-MISMATCH", exception.Code);
+	}
+
+	[Fact]
 	public async Task RegistryRemovesStaleProcessIdentity()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -570,6 +616,7 @@ public sealed class DesktopControlIntegrationTests
 	[InlineData("")]
 	[InlineData("{")]
 	[InlineData("[]")]
+	[InlineData("{\"protocolVersion\":1}")]
 	public async Task MalformedProtocolPayloadIsRejectedWithoutInvokingDesktop(string payload)
 	{
 		using var workspace = new TemporaryDirectory();
