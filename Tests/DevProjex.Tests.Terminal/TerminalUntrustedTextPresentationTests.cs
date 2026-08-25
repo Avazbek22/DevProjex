@@ -40,6 +40,25 @@ public sealed class TerminalUntrustedTextPresentationTests
 		AssertSafe(recent.ToString(), escapedName);
 		AssertSafe(repository.ToString(), escapedName);
 		AssertSafe(TerminalWorkspaceSession.FitPathToWidth(unsafeName, 80), escapedName);
+		AssertSafe(TerminalRecentWorkspacePresentation.DisplayName(workspace), escapedName);
+		AssertSafe(TerminalRecentWorkspacePresentation.DisplaySource(workspace), escapedName);
+		AssertSafe(TerminalOperationProgressView.SanitizeSource(unsafeName), escapedName);
+	}
+
+	[Fact]
+	public void RecentRepositoryPresentationRemovesCredentials()
+	{
+		const string secret = "secret-value";
+		var repository = new TerminalRecentRepository(
+			$"https://user:{secret}@example.test/repository.git",
+			DateTimeOffset.UnixEpoch,
+			new CachedRepository(
+				"https://example.test/repository.git",
+				"repository",
+				RepositoryCacheState.Ready));
+
+		Assert.Equal("https://example.test/repository.git", repository.SafeDisplayUrl);
+		Assert.DoesNotContain(secret, repository.SafeDisplayUrl, StringComparison.Ordinal);
 	}
 
 	private static void AssertSafe(string rendered, string expected)

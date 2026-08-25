@@ -72,7 +72,8 @@ internal sealed partial class TerminalWorkspaceSession
 				{
 					var remove = ShowChoice(
 						L("Terminal.Tui.Error"),
-						$"{L("Terminal.Tui.Error.ProjectUnavailable")}\n\n{workspace.Source}",
+						$"{L("Terminal.Tui.Error.ProjectUnavailable")}\n\n" +
+						TerminalRecentWorkspacePresentation.DisplaySource(workspace),
 						L("Terminal.Tui.Back"),
 						L("Terminal.Tui.Recent.Remove"));
 					if (remove == 1)
@@ -190,7 +191,8 @@ internal sealed partial class TerminalWorkspaceSession
 			_recentWorkspaceSelectionKey = workspace.IdentityKey;
 			var sourceWidth = Math.Max(8, dialogWidth - 8);
 			details.Text =
-				$"{KindLabel(workspace.Kind)}{PanelSeparator}{workspace.DisplayName}\n" +
+				$"{KindLabel(workspace.Kind)}{PanelSeparator}" +
+				$"{TerminalRecentWorkspacePresentation.DisplayName(workspace)}\n" +
 				$"{FitPathToWidth(workspace.DisplaySource, sourceWidth)}\n" +
 				$"{L("Terminal.Tui.Recent.LastOpened")}: " +
 				workspace.OpenedUtc.ToLocalTime().ToString("g", CultureInfo.CurrentCulture);
@@ -296,7 +298,7 @@ internal sealed partial class TerminalWorkspaceSession
 			L("Terminal.Tui.Welcome.Recent"),
 			$"{L(damaged
 				? "Terminal.Tui.RecentRepositories.CacheDamaged"
-				: "Terminal.Tui.RecentRepositories.CacheMissing")}\n\n{repository.Url}",
+				: "Terminal.Tui.RecentRepositories.CacheMissing")}\n\n{repository.SafeDisplayUrl}",
 			L("Terminal.Tui.Back"),
 			L("Terminal.Tui.Recent.Remove"),
 			L("Terminal.Tui.RecentRepositories.CloneAgain"));
