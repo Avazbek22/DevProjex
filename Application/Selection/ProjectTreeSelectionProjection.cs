@@ -93,6 +93,52 @@ public static class ProjectTreeSelectionProjection
 		return orderedPaths;
 	}
 
+	internal static TreeNodeDescriptor? BuildProjectedTree(
+		TreeNodeDescriptor root,
+		IReadOnlySet<string> includedPaths)
+	{
+		if (!includedPaths.Contains(root.FullPath))
+			return null;
+
+		var projectedNodes = new Dictionary<TreeNodeDescriptor, TreeNodeDescriptor?>(
+			ReferenceEqualityComparer.Instance);
+		var stack = new Stack<(TreeNodeDescriptor Node, bool Visited)>();
+		stack.Push((root, false));
+		while (stack.Count > 0)
+		{
+			var (node, visited) = stack.Pop();
+			if (!includedPaths.Contains(node.FullPath))
+			{
+				projectedNodes[node] = null;
+				continue;
+			}
+
+			if (!visited && node.IsDirectory && node.Children.Count > 0)
+			{
+				stack.Push((node, true));
+				for (var index = node.Children.Count - 1; index >= 0; index--)
+					stack.Push((node.Children[index], false));
+				continue;
+			}
+
+			if (!node.IsDirectory || node.Children.Count == 0)
+			{
+				projectedNodes[node] = node;
+				continue;
+			}
+
+			var children = new List<TreeNodeDescriptor>(node.Children.Count);
+			foreach (var child in node.Children)
+			{
+				if (projectedNodes[child] is { } projectedChild)
+					children.Add(projectedChild);
+			}
+			projectedNodes[node] = node with { Children = children };
+		}
+
+		return projectedNodes[root];
+	}
+
 	public static void CollectSelectedFilePaths(
 		TreeNodeDescriptor node,
 		IReadOnlySet<string> selectedPaths,

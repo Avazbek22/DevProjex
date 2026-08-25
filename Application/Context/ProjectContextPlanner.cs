@@ -54,7 +54,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			.ToHashSet(PathComparer.Default);
 		var projectedTree = selectsNoEffectivePaths
 			? loaded.Tree.Root with { Children = [] }
-			: BuildProjectedTree(effectiveRoot, includedPathSet) ??
+			: ProjectTreeSelectionProjection.BuildProjectedTree(effectiveRoot, includedPathSet) ??
 			  effectiveRoot with { Children = [] };
 		var includedFiles = selectsNoEffectivePaths
 			? []
@@ -167,7 +167,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			.ToHashSet(PathComparer.Default);
 		var projectedTree = selectsNoEffectivePaths
 			? baseline.EffectiveTree with { Children = [] }
-			: BuildProjectedTree(baseline.EffectiveTree, includedPathSet) ??
+			: ProjectTreeSelectionProjection.BuildProjectedTree(baseline.EffectiveTree, includedPathSet) ??
 			  baseline.EffectiveTree with { Children = [] };
 		var includedFiles = selectsNoEffectivePaths
 			? []
@@ -762,27 +762,6 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 
 	private static string NormalizePathSeparators(string path) =>
 		PathUtility.NormalizeSeparators(path);
-
-	private static TreeNodeDescriptor? BuildProjectedTree(
-		TreeNodeDescriptor node,
-		IReadOnlySet<string> includedPaths)
-	{
-		if (!includedPaths.Contains(node.FullPath))
-			return null;
-
-		if (!node.IsDirectory || node.Children.Count == 0)
-			return node;
-
-		var children = new List<TreeNodeDescriptor>();
-		foreach (var child in node.Children)
-		{
-			var projected = BuildProjectedTree(child, includedPaths);
-			if (projected is not null)
-				children.Add(projected);
-		}
-
-		return node with { Children = children };
-	}
 
 	private static void AddAnalysisDiagnostics(
 		ProjectAnalysisReport analysis,

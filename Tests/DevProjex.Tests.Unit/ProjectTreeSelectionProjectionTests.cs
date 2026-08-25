@@ -63,12 +63,22 @@ public sealed class ProjectTreeSelectionProjectionTests
 			.Select(key => fixture.Paths[key])
 			.ToHashSet(PathComparer.Default);
 
-		var actual = ProjectTreeSelectionProjection.BuildIncludedNodes(fixture.Root, selected)
+		var includedNodes = ProjectTreeSelectionProjection.BuildIncludedNodes(fixture.Root, selected);
+		var actual = includedNodes
+			.Select(node => Path.GetRelativePath(fixture.Root.FullPath, node.FullPath).Replace('\\', '/'))
+			.OrderBy(path => path, StringComparer.Ordinal)
+			.ToArray();
+		var includedPaths = includedNodes
+			.Select(static node => node.FullPath)
+			.ToHashSet(PathComparer.Default);
+		var projected = ProjectTreeSelectionProjection.BuildProjectedTree(fixture.Root, includedPaths);
+		var projectedPaths = EnumerateNodes(projected!)
 			.Select(node => Path.GetRelativePath(fixture.Root.FullPath, node.FullPath).Replace('\\', '/'))
 			.OrderBy(path => path, StringComparer.Ordinal)
 			.ToArray();
 
 		Assert.Equal(expectedRelativePaths.OrderBy(path => path, StringComparer.Ordinal), actual);
+		Assert.Equal(expectedRelativePaths.OrderBy(path => path, StringComparer.Ordinal), projectedPaths);
 	}
 
 	[Fact]
@@ -161,6 +171,9 @@ public sealed class ProjectTreeSelectionProjectionTests
 		var selected = new HashSet<string>([leafPath], PathComparer.Default);
 
 		var included = ProjectTreeSelectionProjection.BuildIncludedNodes(root, selected);
+		var projected = ProjectTreeSelectionProjection.BuildProjectedTree(
+			root,
+			included.Select(static node => node.FullPath).ToHashSet(PathComparer.Default));
 		var orderedFiles = ProjectTreeSelectionProjection.BuildOrderedSelectedFilePaths(
 			root,
 			selected,
@@ -176,6 +189,7 @@ public sealed class ProjectTreeSelectionProjectionTests
 		Assert.Equal(depth + 1, included.Count);
 		Assert.Equal(leafPath, included[0].FullPath);
 		Assert.Equal(root.FullPath, included[^1].FullPath);
+		Assert.Equal(depth + 1, EnumerateNodes(projected!).Count());
 		Assert.Equal(leafPath, Assert.Single(orderedFiles));
 		Assert.Equal(leafPath, Assert.Single(collected));
 	}
@@ -218,6 +232,19 @@ public sealed class ProjectTreeSelectionProjectionTests
 			[".", "src", "src/Program.cs", "src/assets.bin"]
 		}
 	};
+
+	private static IEnumerable<TreeNodeDescriptor> EnumerateNodes(TreeNodeDescriptor root)
+	{
+		var stack = new Stack<TreeNodeDescriptor>();
+		stack.Push(root);
+		while (stack.Count > 0)
+		{
+			var node = stack.Pop();
+			yield return node;
+			for (var index = node.Children.Count - 1; index >= 0; index--)
+				stack.Push(node.Children[index]);
+		}
+	}
 
 	private sealed record SelectionFixture(
 		TreeNodeDescriptor Root,
