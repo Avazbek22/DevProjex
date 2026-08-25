@@ -176,6 +176,23 @@ public sealed class DocumentationAndPackagingContractTests
 	}
 
 	[Fact]
+	public void ReadmeReportsTheShippedLocalizationCount()
+	{
+		var rootPath = FindRepositoryRoot();
+		var readme = File.ReadAllText(Path.Combine(rootPath, "README.md"));
+		var advertised = Regex.Match(
+			readme,
+			"Localization in (?<count>\\d+) languages",
+			RegexOptions.CultureInvariant);
+		var shippedCount = Directory
+			.EnumerateFiles(Path.Combine(rootPath, "Assets", "Localization"), "*.json")
+			.Count();
+
+		Assert.True(advertised.Success, "README localization count is missing.");
+		Assert.Equal(shippedCount, int.Parse(advertised.Groups["count"].Value));
+	}
+
+	[Fact]
 	public void CliDocumentationCoversEveryPublicCommandAndRequiredContractDocument()
 	{
 		var rootPath = FindRepositoryRoot();

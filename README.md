@@ -98,7 +98,7 @@ Works with any language, repository, or project structure.
 * Light, dark, and system themes, with transparency and blur where supported
 * Platform-native keyboard shortcuts — ⌘-based on macOS, Ctrl-based on Windows and Linux
 * Tree context menu — reveal in the system file manager, copy full or relative paths, copy a file's transformed contents, select only one item, expand or collapse a branch
-* Localization in 11 languages
+* Localization in 20 languages
 * Stays smooth even on very large folders
 
 ---
