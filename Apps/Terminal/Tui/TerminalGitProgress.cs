@@ -1,4 +1,5 @@
 using DevProjex.Terminal.CommandLine;
+using DevProjex.Terminal.Rendering;
 
 namespace DevProjex.Terminal.Tui;
 
@@ -56,9 +57,10 @@ internal static class TerminalGitProgressParser
 			return string.Empty;
 		}
 
-		return TerminalCellWidth.Measure(value) > 180
-			? TerminalCellWidth.Truncate(value, 177) + "..."
-			: value;
+		var sanitized = TerminalTextEscaping.EscapeSingleLine(value);
+		return TerminalCellWidth.Measure(sanitized) > 180
+			? TerminalCellWidth.Truncate(sanitized, 177) + "..."
+			: sanitized;
 	}
 
 	private static bool TryParseStandalonePercent(string value, out int percent)
