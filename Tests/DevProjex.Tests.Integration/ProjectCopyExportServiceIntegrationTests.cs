@@ -54,7 +54,7 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 				progress,
 				TestContext.Current.CancellationToken));
 
-		Assert.Equal(ProjectCopyExportError.SecretDetectionFailed, exception.Error);
+		Assert.Equal(ProjectCopyExportError.SourceUnavailable, exception.Error);
 		Assert.False(File.Exists(destination));
 		Assert.False(Directory.Exists(destination));
 	}

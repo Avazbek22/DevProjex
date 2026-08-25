@@ -476,7 +476,7 @@ public sealed class ProjectCopyExportService(
 						preparedFile);
 					await using var destination = entry.Open();
 					var copiedBytes = await CopyStreamAsync(source, destination, buffer, cancellationToken).ConfigureAwait(false);
-					preparedFile?.EnsureSourceVersion(source);
+					ValidatePreparedSourceVersion(preparedFile, source);
 					bytesWritten += copiedBytes;
 					processedEntries++;
 					processedFiles++;
@@ -1205,7 +1205,7 @@ public sealed class ProjectCopyExportService(
 			preparedFile);
 		await using var destination = OpenDestinationFile(destinationPath);
 		var copiedBytes = await CopyStreamAsync(source, destination, buffer, cancellationToken).ConfigureAwait(false);
-		preparedFile?.EnsureSourceVersion(source);
+		ValidatePreparedSourceVersion(preparedFile, source);
 		return copiedBytes;
 	}
 
@@ -1221,13 +1221,29 @@ public sealed class ProjectCopyExportService(
 		{
 			source = OpenSourceFile(contentPath);
 			ValidateSourceFileForCopy(projectRootPath, originalSourcePath);
-			preparedFile?.EnsureSourceVersion(source);
+			ValidatePreparedSourceVersion(preparedFile, source);
 			return source;
 		}
 		catch
 		{
 			source?.Dispose();
 			throw;
+		}
+	}
+
+	private static void ValidatePreparedSourceVersion(
+		PreparedSecretFile? preparedFile,
+		FileStream source)
+	{
+		try
+		{
+			preparedFile?.EnsureSourceVersion(source);
+		}
+		catch (SecretDetectionException exception)
+		{
+			throw SourceUnavailable(
+				$"A source file changed during content transformation: {preparedFile?.SourcePath}",
+				exception);
 		}
 	}
 
