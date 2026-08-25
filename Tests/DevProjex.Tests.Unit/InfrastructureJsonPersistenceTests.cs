@@ -483,6 +483,28 @@ public sealed class InfrastructureJsonPersistenceTests
 	}
 
 	[Fact]
+	public void JsonStorePersistence_TryWriteAtomic_RestrictsUnixStoreCopiesToCurrentUser()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Unix file modes do not apply on Windows.");
+			return;
+		}
+
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "settings.json");
+
+		Assert.True(JsonStorePersistence.TryWriteAtomic(
+			fileSet,
+			new TestDocument("private", 1),
+			JsonOptions));
+
+		const UnixFileMode expected = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+		Assert.Equal(expected, File.GetUnixFileMode(fileSet.PrimaryPath));
+		Assert.Equal(expected, File.GetUnixFileMode(fileSet.BackupPath));
+	}
+
+	[Fact]
 	public void JsonStorePersistence_TryWriteAtomic_ReturnsFalseForUnresolvablePrimaryDirectory()
 	{
 		var fileSet = new JsonStoreFileSet("settings.json", "settings.json.bak", "settings.json.lock");

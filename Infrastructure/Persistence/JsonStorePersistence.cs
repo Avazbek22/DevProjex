@@ -6,6 +6,7 @@ namespace DevProjex.Infrastructure.Persistence;
 internal static class JsonStorePersistence
 {
     internal const long SmallDocumentMaximumBytes = 8 * 1024 * 1024;
+	private const UnixFileMode PrivateUnixFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
     private static readonly Encoding StrictUtf16LittleEndian = new UnicodeEncoding(
         bigEndian: false,
         byteOrderMark: true,
@@ -169,13 +170,7 @@ internal static class JsonStorePersistence
 			if (payload.LongLength > maximumPayloadBytes)
 				return false;
 			tempPath = Path.Combine(fileSet.DirectoryPath, $"{fileSet.FileName}.{Guid.NewGuid():N}.tmp");
-			using (var stream = new FileStream(
-				       tempPath,
-				       FileMode.CreateNew,
-				       FileAccess.Write,
-				       FileShare.None,
-				       bufferSize: 16 * 1024,
-				       flushToDisk ? FileOptions.WriteThrough : FileOptions.None))
+			using (var stream = new FileStream(tempPath, CreatePrivateWriteOptions(flushToDisk)))
 			{
 				stream.Write(payload);
 				stream.Flush(flushToDisk);
@@ -197,6 +192,8 @@ internal static class JsonStorePersistence
             {
 				File.Move(tempPath, fileSet.PrimaryPath);
             }
+
+			EnsurePrivateUnixFileMode(fileSet.PrimaryPath);
 
 			var backupMirrored = TryMirrorPrimaryToBackup(fileSet, writeOperations);
 			return backupMirrored || !requireBackup;
@@ -221,6 +218,27 @@ internal static class JsonStorePersistence
 		}
     }
 
+	private static FileStreamOptions CreatePrivateWriteOptions(bool flushToDisk)
+	{
+		var options = new FileStreamOptions
+		{
+			Mode = FileMode.CreateNew,
+			Access = FileAccess.Write,
+			Share = FileShare.None,
+			BufferSize = 16 * 1024,
+			Options = flushToDisk ? FileOptions.WriteThrough : FileOptions.None
+		};
+		if (!OperatingSystem.IsWindows())
+			options.UnixCreateMode = PrivateUnixFileMode;
+		return options;
+	}
+
+	private static void EnsurePrivateUnixFileMode(string path)
+	{
+		if (!OperatingSystem.IsWindows())
+			File.SetUnixFileMode(path, PrivateUnixFileMode);
+	}
+
 	private static bool TryMirrorPrimaryToBackup(
 		JsonStoreFileSet fileSet,
 		JsonStoreWriteOperations writeOperations)
@@ -230,7 +248,10 @@ internal static class JsonStorePersistence
             // The backup must mirror the final committed primary snapshot.
             // This keeps recovery deterministic across multiple processes.
             if (File.Exists(fileSet.PrimaryPath))
+			{
 				writeOperations.Copy(fileSet.PrimaryPath, fileSet.BackupPath, overwrite: true);
+				EnsurePrivateUnixFileMode(fileSet.BackupPath);
+			}
 			return true;
         }
         catch
