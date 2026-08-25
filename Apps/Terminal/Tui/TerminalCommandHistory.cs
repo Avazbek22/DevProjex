@@ -3,6 +3,7 @@ namespace DevProjex.Terminal.Tui;
 internal sealed class TerminalCommandHistory
 {
 	public const int MaximumEntries = 50;
+	public const int MaximumCommandLength = 4_096;
 	private readonly List<string> _entries;
 	private int _navigationIndex;
 	private string _draft = string.Empty;
@@ -17,7 +18,7 @@ internal sealed class TerminalCommandHistory
 
 	public bool Add(string? command)
 	{
-		var normalized = command?.Trim() ?? string.Empty;
+		var normalized = NormalizeCommand(command);
 		ResetNavigation();
 		if (normalized.Length == 0 ||
 			_entries.Count > 0 && string.Equals(_entries[^1], normalized, StringComparison.Ordinal))
@@ -63,7 +64,7 @@ internal sealed class TerminalCommandHistory
 		var normalized = new List<string>();
 		foreach (var entry in entries)
 		{
-			var value = entry?.Trim() ?? string.Empty;
+			var value = NormalizeCommand(entry);
 			if (value.Length == 0 ||
 				normalized.Count > 0 && string.Equals(normalized[^1], value, StringComparison.Ordinal))
 			{
@@ -74,5 +75,17 @@ internal sealed class TerminalCommandHistory
 		if (normalized.Count > MaximumEntries)
 			normalized.RemoveRange(0, normalized.Count - MaximumEntries);
 		return normalized;
+	}
+
+	private static string NormalizeCommand(string? command)
+	{
+		var normalized = command?.Trim() ?? string.Empty;
+		if (normalized.Length <= MaximumCommandLength)
+			return normalized;
+
+		var length = MaximumCommandLength;
+		if (char.IsHighSurrogate(normalized[length - 1]) && char.IsLowSurrogate(normalized[length]))
+			length--;
+		return normalized[..length];
 	}
 }

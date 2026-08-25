@@ -7,7 +7,6 @@ namespace DevProjex.Terminal.Tui;
 public sealed class TerminalSettingsStore(Func<string>? appDataPathProvider = null)
 {
 	private const int CurrentSchemaVersion = 1;
-	private const int MaximumPersistedCommandLength = 4_096;
 	private const int MaximumDocumentBytes = 512 * 1024;
 	private readonly Func<string> _appDataPathProvider =
 		appDataPathProvider ?? UserDataPathResolver.GetConfigurationRoot;
@@ -37,22 +36,10 @@ public sealed class TerminalSettingsStore(Func<string>? appDataPathProvider = nu
 		ArgumentNullException.ThrowIfNull(history);
 		var normalized = new TerminalCommandHistory(history)
 			.Entries
-			.Select(TruncateCommand)
 			.ToArray();
 		await UpdateAsync(
 			current => current with { CommandHistory = normalized },
 			cancellationToken).ConfigureAwait(false);
-	}
-
-	private static string TruncateCommand(string command)
-	{
-		if (command.Length <= MaximumPersistedCommandLength)
-			return command;
-
-		var length = MaximumPersistedCommandLength;
-		if (char.IsHighSurrogate(command[length - 1]) && char.IsLowSurrogate(command[length]))
-			length--;
-		return command[..length];
 	}
 
 	internal string GetPath() =>
