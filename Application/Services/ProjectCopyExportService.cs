@@ -430,7 +430,7 @@ public sealed class ProjectCopyExportService(
 			EnsureDestinationDoesNotExist(destinationPath, requestedDestinationPath);
 		}
 
-		var stagingPath = Path.Combine(destinationDirectory, $".{Path.GetFileName(destinationPath)}.{Guid.NewGuid():N}.tmp");
+		var stagingPath = Path.Combine(destinationDirectory, $".devprojex-{Guid.NewGuid():N}.tmp");
 		ValidateDestinationOutsideSource(plan.ProjectRootPath, stagingPath);
 		var buffer = ArrayPool<byte>.Shared.Rent(CopyBufferSize);
 		var processedEntries = 0;

@@ -699,6 +699,24 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 	}
 
 	[Fact]
+	public async Task ZipExportSupportsAValidDestinationNearTheComponentLengthLimit()
+	{
+		using var workspace = ProjectCopyWorkspace.Create();
+		var destination = Path.Combine(
+			workspace.DestinationParent,
+			new string('z', 240) + ".zip");
+
+		var result = await workspace.ExportExactAsync(
+			ProjectCopyExportFormat.Zip,
+			destination,
+			[]);
+
+		Assert.Equal(destination, result.DestinationPath);
+		using var archive = ZipFile.OpenRead(destination);
+		Assert.Contains(archive.Entries, static entry => entry.FullName == "Sample/README.md");
+	}
+
+	[Fact]
 	public void ExistingDestinationFileLinkIntoSourceIsRejectedWithoutEffects()
 	{
 		using var workspace = new TemporaryDirectory();
