@@ -2,7 +2,12 @@ namespace DevProjex.Avalonia.Services;
 
 public static class MessageDialog
 {
-    public static async Task ShowAsync(Window owner, string title, string message, double height = 200)
+    public static async Task ShowAsync(
+        Window owner,
+        string title,
+        string message,
+        string closeButtonText,
+        double height = 200)
     {
         var themeVariant = DialogSurfaceFactory.ResolveThemeVariant(owner);
         var brushes = DialogSurfaceFactory.ResolveBrushes(owner, themeVariant);
@@ -10,7 +15,7 @@ public static class MessageDialog
             title,
             themeVariant,
             brushes,
-            BuildContent(message),
+            BuildContent(message, closeButtonText),
             width: 420,
             height: height);
 
@@ -50,7 +55,7 @@ public static class MessageDialog
         return await completion.Task.ConfigureAwait(false);
     }
 
-    private static Control BuildContent(string message)
+    private static Control BuildContent(string message, string closeButtonText)
     {
         var text = new TextBlock
         {
@@ -62,7 +67,7 @@ public static class MessageDialog
 
         var button = new Button
         {
-            Content = "OK",
+            Content = closeButtonText,
             HorizontalAlignment = HorizontalAlignment.Right,
             Margin = new Thickness(12),
             Width = 80

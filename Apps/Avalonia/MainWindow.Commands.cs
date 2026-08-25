@@ -272,6 +272,7 @@ public partial class MainWindow
                     this,
                     _localization["Dialog.TerminalCommand.Title"],
                     _localization["Dialog.TerminalCommand.ReconfigureSucceeded"],
+                    _localization["Dialog.OK"],
                     height: 120);
             }
 

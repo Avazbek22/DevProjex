@@ -257,11 +257,19 @@ public partial class MainWindow : Window
     {
         // Show error relative to Git Clone window if it's open, otherwise relative to main window
         var owner = _gitCloneWindow ?? (Window)this;
-        await MessageDialog.ShowAsync(owner, _localization["Msg.ErrorTitle"], message);
+        await MessageDialog.ShowAsync(
+            owner,
+            _localization["Msg.ErrorTitle"],
+            message,
+            _localization["Dialog.OK"]);
     }
 
     private async Task ShowInfoAsync(string message) =>
-        await MessageDialog.ShowAsync(this, _localization["Msg.InfoTitle"], message);
+        await MessageDialog.ShowAsync(
+            this,
+            _localization["Msg.InfoTitle"],
+            message,
+            _localization["Dialog.OK"]);
 
     private async void OnOpenFolder(object? sender, RoutedEventArgs e)
     {
