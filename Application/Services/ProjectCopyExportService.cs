@@ -139,7 +139,7 @@ public sealed class ProjectCopyExportService(
 		if (transformationNotice is null)
 			return;
 
-		var sourceNoticePath = Path.Combine(plan.SourceRoot, TransformationNoticeFileName);
+		var sourceNoticePath = Path.Combine(plan.ProjectRootPath, TransformationNoticeFileName);
 		if (!Path.Exists(sourceNoticePath) &&
 		    !plan.Entries.Any(static entry =>
 			    PathComparer.Default.Equals(entry.RelativePath, TransformationNoticeFileName)))
