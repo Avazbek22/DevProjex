@@ -669,7 +669,7 @@ public sealed class SecretRedactionOutputPreparer
 				result.Content.Content,
 				cancellationToken);
 		if (ReferenceEquals(compressed.Text, result.Content.Content))
-			return PreparedSecretFile.Unchanged(sourcePath);
+			return PreparedSecretFile.Unchanged(sourcePath, coherentRead.Metadata);
 
 		var encoding = result.Encoding ?? TextFileEncoding.Utf8;
 		var preparedPath = Path.Combine(workingDirectory.Value.Path, $"{workItem.Index:D8}.compressed.txt");
@@ -1677,6 +1677,7 @@ public sealed record PreparedSecretFile(
 
 	public int RedactedCount => Redactions.Count;
 	public IReadOnlyList<EffectiveRedactionFinding> Findings => EffectiveFindings ?? [];
+	internal SecretFileMetadata? SourceMetadata { get; init; }
 
 	public int ClampLengthToCompleteRedactions(int requestedLength)
 	{
@@ -1698,6 +1699,14 @@ public sealed record PreparedSecretFile(
 	/// <summary>Text served straight from the original file, with no transformation applied.</summary>
 	public static PreparedSecretFile Unchanged(string sourcePath) =>
 		new(sourcePath, sourcePath, FileContentClassification.Text, null, []);
+
+	internal static PreparedSecretFile Unchanged(
+		string sourcePath,
+		SecretFileMetadata sourceMetadata) =>
+		new PreparedSecretFile(sourcePath, sourcePath, FileContentClassification.Text, null, [])
+		{
+			SourceMetadata = sourceMetadata
+		};
 
 	/// <summary>Uninspected text: recorded, reported, and withheld from every prepared output.</summary>
 	public static PreparedSecretFile Unscannable(
@@ -1812,46 +1821,68 @@ public sealed class PreparedSecretFileContentAnalyzer(
 		return file.IsText ? null : FileContentClassification.Binary;
 	}
 
-	public ValueTask<FileContentReadResult> ReadClassifiedAsync(
+	public async ValueTask<FileContentReadResult> ReadClassifiedAsync(
 		string path,
 		long maxSizeForFullRead,
 		CancellationToken cancellationToken = default)
 	{
 		var file = prepared.GetFile(path);
-		return file.IsText || file.IsUnscannable
-			? inner.ReadClassifiedAsync(
+		if (!file.IsText && !file.IsUnscannable)
+			return new FileContentReadResult(FileContentClassification.Binary);
+
+		EnsureSourceVersion(file);
+		var result = await inner.ReadClassifiedAsync(
 				file.ContentPath,
 				ClampReadLimit(file, maxSizeForFullRead),
 				cancellationToken)
-			: ValueTask.FromResult(new FileContentReadResult(FileContentClassification.Binary));
+			.ConfigureAwait(false);
+		EnsureSourceVersion(file);
+		return result;
 	}
 
-	public ValueTask<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default)
-	{
-		var file = prepared.GetFile(path);
-		return file.IsText || file.IsUnscannable
-			? inner.IsTextFileAsync(file.ContentPath, cancellationToken)
-			: ValueTask.FromResult(false);
-	}
-
-	public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+	public async ValueTask<bool> IsTextFileAsync(
 		string path,
 		CancellationToken cancellationToken = default)
 	{
 		var file = prepared.GetFile(path);
-		return file.IsText || file.IsUnscannable
-			? inner.GetTextFileMetricsAsync(file.ContentPath, cancellationToken)
-			: ValueTask.FromResult<TextFileMetrics?>(null);
+		if (!file.IsText && !file.IsUnscannable)
+			return false;
+
+		EnsureSourceVersion(file);
+		var result = await inner.IsTextFileAsync(file.ContentPath, cancellationToken)
+			.ConfigureAwait(false);
+		EnsureSourceVersion(file);
+		return result;
 	}
 
-	public ValueTask<FileContentMetricsResult> GetClassifiedMetricsAsync(
+	public async ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
 		string path,
 		CancellationToken cancellationToken = default)
 	{
 		var file = prepared.GetFile(path);
-		return file.IsText || file.IsUnscannable
-			? inner.GetClassifiedMetricsAsync(file.ContentPath, cancellationToken)
-			: ValueTask.FromResult(new FileContentMetricsResult(FileContentClassification.Binary));
+		if (!file.IsText && !file.IsUnscannable)
+			return null;
+
+		EnsureSourceVersion(file);
+		var result = await inner.GetTextFileMetricsAsync(file.ContentPath, cancellationToken)
+			.ConfigureAwait(false);
+		EnsureSourceVersion(file);
+		return result;
+	}
+
+	public async ValueTask<FileContentMetricsResult> GetClassifiedMetricsAsync(
+		string path,
+		CancellationToken cancellationToken = default)
+	{
+		var file = prepared.GetFile(path);
+		if (!file.IsText && !file.IsUnscannable)
+			return new FileContentMetricsResult(FileContentClassification.Binary);
+
+		EnsureSourceVersion(file);
+		var result = await inner.GetClassifiedMetricsAsync(file.ContentPath, cancellationToken)
+			.ConfigureAwait(false);
+		EnsureSourceVersion(file);
+		return result;
 	}
 
 	public async ValueTask<IFileContentSnapshot> OpenCompleteSnapshotAsync(
@@ -1871,40 +1902,86 @@ public sealed class PreparedSecretFileContentAnalyzer(
 					.ConfigureAwait(false));
 		}
 
-		return await inner.OpenCompleteSnapshotAsync(file.ContentPath, cancellationToken)
+		EnsureSourceVersion(file);
+		var snapshot = await inner.OpenCompleteSnapshotAsync(file.ContentPath, cancellationToken)
 			.ConfigureAwait(false);
+		try
+		{
+			EnsureSourceVersion(file);
+			return snapshot;
+		}
+		catch
+		{
+			await snapshot.DisposeAsync().ConfigureAwait(false);
+			throw;
+		}
 	}
 
-	public ValueTask<TextFileContent?> TryReadAsTextAsync(
+	public async ValueTask<TextFileContent?> TryReadAsTextAsync(
 		string path,
 		CancellationToken cancellationToken = default)
 	{
 		var file = prepared.GetFile(path);
 		if (file.IsUnscannable)
 		{
-			return inner.TryReadAsTextAsync(
+			return await inner.TryReadAsTextAsync(
 				file.ContentPath,
 				SecretRedactionOutputPreparer.MaximumScannableFileBytes,
-				cancellationToken);
+				cancellationToken).ConfigureAwait(false);
 		}
 
-		return file.IsText
-			? inner.TryReadAsTextAsync(file.ContentPath, cancellationToken)
-			: ValueTask.FromResult<TextFileContent?>(null);
+		if (!file.IsText)
+			return null;
+
+		EnsureSourceVersion(file);
+		var result = await inner.TryReadAsTextAsync(file.ContentPath, cancellationToken)
+			.ConfigureAwait(false);
+		EnsureSourceVersion(file);
+		return result;
 	}
 
-	public ValueTask<TextFileContent?> TryReadAsTextAsync(
+	public async ValueTask<TextFileContent?> TryReadAsTextAsync(
 		string path,
 		long maxSizeForFullRead,
 		CancellationToken cancellationToken = default)
 	{
 		var file = prepared.GetFile(path);
-		return file.IsText || file.IsUnscannable
-			? inner.TryReadAsTextAsync(
+		if (!file.IsText && !file.IsUnscannable)
+			return null;
+
+		EnsureSourceVersion(file);
+		var result = await inner.TryReadAsTextAsync(
 				file.ContentPath,
 				ClampReadLimit(file, maxSizeForFullRead),
 				cancellationToken)
-			: ValueTask.FromResult<TextFileContent?>(null);
+			.ConfigureAwait(false);
+		EnsureSourceVersion(file);
+		return result;
+	}
+
+	private static void EnsureSourceVersion(PreparedSecretFile file)
+	{
+		if (file.SourceMetadata is not { } expected)
+			return;
+
+		SecretFileMetadata current;
+		try
+		{
+			current = SecretFileMetadata.Capture(file.SourcePath);
+		}
+		catch (Exception exception) when (
+			exception is IOException or UnauthorizedAccessException)
+		{
+			throw new SecretDetectionException(
+				$"Code compression could not verify the prepared source file '{file.SourcePath}'.",
+				exception);
+		}
+
+		if (current != expected)
+		{
+			throw new SecretDetectionException(
+				$"Code compression source changed after preparation: '{file.SourcePath}'.");
+		}
 	}
 
 	private sealed class UnscannableSnapshot(
