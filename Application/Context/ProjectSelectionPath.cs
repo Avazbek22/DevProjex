@@ -19,6 +19,28 @@ public static class ProjectSelectionPath
 		var separators = OperatingSystem.IsWindows()
 			? new[] { '\\', '/' }
 			: ['/'];
+		return NormalizeSegments(value, separators);
+	}
+
+	public static string NormalizePortableRelative(string value)
+	{
+		if (string.IsNullOrEmpty(value) || value == ".")
+			return string.Empty;
+
+		if (IsRootedOnAnySupportedPlatform(value))
+		{
+			throw new ProjectContextValidationException(
+				InvalidPathCode,
+				"Selected paths must be relative on every supported platform.");
+		}
+
+		return NormalizeSegments(value, ['\\', '/']);
+	}
+
+	private static string NormalizeSegments(
+		string value,
+		char[] separators)
+	{
 		var segments = value.Split(separators, StringSplitOptions.RemoveEmptyEntries);
 		if (segments.Any(static segment => segment == ".."))
 		{
@@ -28,21 +50,6 @@ public static class ProjectSelectionPath
 		}
 
 		return string.Join('/', segments.Where(static segment => segment != "."));
-	}
-
-	public static string NormalizePortableRelative(string value)
-	{
-		if (string.IsNullOrEmpty(value) || value == ".")
-			return NormalizeRelative(value);
-
-		if (IsRootedOnAnySupportedPlatform(value))
-		{
-			throw new ProjectContextValidationException(
-				InvalidPathCode,
-				"Selected paths must be relative on every supported platform.");
-		}
-
-		return NormalizeRelative(value);
 	}
 
 	private static bool IsRootedOnAnySupportedPlatform(string value) =>

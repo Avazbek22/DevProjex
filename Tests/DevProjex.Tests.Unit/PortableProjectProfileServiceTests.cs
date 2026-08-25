@@ -69,6 +69,29 @@ public sealed class PortableProjectProfileServiceTests
 	}
 
 	[Fact]
+	public async Task SaveAsyncRejectsASelectedPathThatIsUnsafeOnAnotherPlatform()
+	{
+		using var workspace = new TemporaryDirectory();
+		var sourceRoot = workspace.CreateFolder("project");
+		var destination = Path.Combine(workspace.Path, "portable.json");
+		var service = new PortableProjectProfileService();
+
+		var exception = await Assert.ThrowsAsync<PortableProjectProfileException>(() =>
+			service.SaveAsync(
+				sourceRoot,
+				destination,
+				new ProjectSelectionSpec(
+					SelectedPaths: ["src\\..\\outside"],
+					GitMode: GitFilteringMode.None,
+					Exclusions: []),
+				overwrite: false,
+				TestContext.Current.CancellationToken));
+
+		Assert.Equal("DPX-CLI-PROFILE-INVALID", exception.Code);
+		Assert.False(File.Exists(destination));
+	}
+
+	[Fact]
 	public async Task SaveAsyncMapsSharedDestinationConflictToProfileContract()
 	{
 		using var workspace = new TemporaryDirectory();

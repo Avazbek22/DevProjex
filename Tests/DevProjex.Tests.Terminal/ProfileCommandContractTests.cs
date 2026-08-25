@@ -597,6 +597,7 @@ public sealed class ProfileCommandContractTests
 	[InlineData("/absolute/path")]
 	[InlineData("C:\\absolute\\path")]
 	[InlineData("\\\\server\\share\\path")]
+	[InlineData("src\\..\\outside")]
 	public async Task ProfileValidationRejectsPathsUnsafeOnAnySupportedPlatform(
 		string selectedPath)
 	{
@@ -636,6 +637,14 @@ public sealed class ProfileCommandContractTests
 			() => ProjectSelectionPath.NormalizePortableRelative(selectedPath));
 
 		Assert.Equal(ProjectSelectionPath.InvalidPathCode, exception.Code);
+	}
+
+	[Fact]
+	public void PortableSelectionCanonicalizesEitherDirectorySeparator()
+	{
+		Assert.Equal(
+			"src/app.cs",
+			ProjectSelectionPath.NormalizePortableRelative("src\\app.cs"));
 	}
 
 	private static TemporaryDirectory CreateWorkspace()

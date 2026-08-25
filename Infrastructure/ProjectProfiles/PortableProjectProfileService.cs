@@ -190,18 +190,7 @@ public sealed class PortableProjectProfileService
 				exclusions.Add(exclusion);
 		}
 
-		IReadOnlyCollection<string> selectedPaths;
-		try
-		{
-			selectedPaths = NormalizeSelectedPaths(document.Selection.SelectedPaths);
-		}
-		catch (ProjectContextValidationException exception)
-		{
-			throw new PortableProjectProfileException(
-				"DPX-CLI-PROFILE-INVALID",
-				"Portable profile contains an unsafe selected path.",
-				exception);
-		}
+		var selectedPaths = NormalizeSelectedPathsOrThrow(document.Selection.SelectedPaths);
 
 		return new ProjectSelectionSpec(
 			Roots: NormalizeRootNames(document.Selection.Roots),
@@ -226,6 +215,7 @@ public sealed class PortableProjectProfileService
 				"Only a fully resolved selection can be saved as a portable profile.");
 		}
 
+		var selectedPaths = NormalizeSelectedPathsOrThrow(selection.SelectedPaths);
 		return new PortableProfileDocument
 		{
 			SchemaVersion = CurrentSchemaVersion,
@@ -234,7 +224,7 @@ public sealed class PortableProjectProfileService
 			{
 				Roots = selection.Roots?.OrderBy(static value => value, PathComparer.Default).ToArray(),
 				Extensions = selection.Extensions?.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase).ToArray(),
-				SelectedPaths = (selection.SelectedPaths ?? []).OrderBy(static value => value, PathComparer.Default).ToArray(),
+				SelectedPaths = selectedPaths.ToArray(),
 				GitMode = ProjectSelectionTokens.ToToken(selection.GitMode.Value),
 				Exclusions = ProjectSelectionTokens.OrderExclusions(selection.Exclusions)
 					.Select(ProjectSelectionTokens.ToToken)
@@ -299,6 +289,22 @@ public sealed class PortableProjectProfileService
 		.Distinct(PathComparer.Default)
 		.OrderBy(static value => value, PathComparer.Default)
 		.ToArray();
+
+	private static IReadOnlyCollection<string> NormalizeSelectedPathsOrThrow(
+		IReadOnlyCollection<string>? values)
+	{
+		try
+		{
+			return NormalizeSelectedPaths(values);
+		}
+		catch (ProjectContextValidationException exception)
+		{
+			throw new PortableProjectProfileException(
+				"DPX-CLI-PROFILE-INVALID",
+				"Portable profile contains an unsafe selected path.",
+				exception);
+		}
+	}
 
 	private sealed class PortableProfileDocument
 	{
