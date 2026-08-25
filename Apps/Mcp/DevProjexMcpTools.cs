@@ -11,6 +11,7 @@ internal sealed class DevProjexMcpTools(
 	private const int MaximumInlinePackCharacters = 50_000;
 	private const int MaximumPageLines = 1_000;
 	private const int MaximumPageCharacters = 50_000;
+	private const int MaximumSearchContentCharacters = 49_000;
 	private readonly McpProjectOperationGate _projectOperation = new();
 
 	[Description("List the project roots this server is allowed to read and their saved local profiles.")]
@@ -319,6 +320,8 @@ internal sealed class DevProjexMcpTools(
 			var analyzer = projects.CreatePreparedAnalyzer(prepared);
 			var output = new StringBuilder();
 			var totalMatches = 0;
+			var shownMatches = 0;
+			var responseLimitReached = false;
 			foreach (var file in plan.IncludedFiles)
 			{
 				var content = await analyzer.TryReadAsTextAsync(file, cancellationToken).ConfigureAwait(false);
@@ -331,19 +334,26 @@ internal sealed class DevProjexMcpTools(
 					if (!matches)
 						continue;
 					totalMatches++;
-					if (totalMatches > maximumResults)
+					if (totalMatches > maximumResults || responseLimitReached)
 						continue;
-					AppendSearchResult(
+					if (AppendSearchResult(
 						output,
 						McpProjectService.ToRelative(plan.SourceRoot, file),
 						lines,
 						index,
-						contextLines);
+						contextLines,
+						MaximumSearchContentCharacters))
+					{
+						shownMatches++;
+					}
+					else
+					{
+						responseLimitReached = true;
+					}
 				}
 			}
-			var shown = Math.Min(totalMatches, maximumResults);
-			if (totalMatches > shown)
-				output.AppendLine($"[{totalMatches - shown} additional matches not shown; narrow the pattern or filters.]");
+			if (totalMatches > shownMatches)
+				output.AppendLine($"[{totalMatches - shownMatches} additional matches not shown; narrow the pattern or filters.]");
 			return McpToolResults.TextSuccess(McpSpotlight.Wrap(output.ToString().TrimEnd()));
 		}, cancellationToken);
 
@@ -501,12 +511,13 @@ internal sealed class DevProjexMcpTools(
 			totalLines).ConfigureAwait(false);
 	}
 
-	private static void AppendSearchResult(
+	private static bool AppendSearchResult(
 		StringBuilder output,
 		string relativePath,
 		IReadOnlyList<string> lines,
 		int matchIndex,
-		int contextLines)
+		int contextLines,
+		int maximumCharacters)
 	{
 		var safePath = EscapeSingleLine(relativePath);
 		var first = Math.Max(0, matchIndex - contextLines);
@@ -514,9 +525,31 @@ internal sealed class DevProjexMcpTools(
 		for (var index = first; index <= last; index++)
 		{
 			var marker = index == matchIndex ? ':' : '-';
-			output.Append(safePath).Append(marker).Append(index + 1).Append(marker)
-				.AppendLine(EscapeSingleLine(lines[index]));
+			var line = $"{safePath}{marker}{index + 1}{marker}{EscapeSingleLine(lines[index])}{Environment.NewLine}";
+			var remaining = maximumCharacters - output.Length;
+			if (line.Length <= remaining)
+			{
+				output.Append(line);
+				continue;
+			}
+
+			AppendBoundedPrefix(output, line, Math.Max(0, remaining));
+			return false;
 		}
+		return true;
+	}
+
+	private static void AppendBoundedPrefix(StringBuilder output, string value, int maximumCharacters)
+	{
+		var length = Math.Min(value.Length, maximumCharacters);
+		if (length > 0 &&
+		    length < value.Length &&
+		    char.IsHighSurrogate(value[length - 1]) &&
+		    char.IsLowSurrogate(value[length]))
+		{
+			length--;
+		}
+		output.Append(value.AsSpan(0, length));
 	}
 
 	private static string EscapeSingleLine(string value) =>

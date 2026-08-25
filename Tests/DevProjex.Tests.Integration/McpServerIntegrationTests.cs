@@ -254,6 +254,29 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task SearchProjectBoundsLongMatchingLinesAndReportsTruncation()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(
+			Path.Combine(project, "Long.txt"),
+			"needle-" + new string('x', 100_000));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?>
+			{
+				["pattern"] = "needle",
+				["context_lines"] = 0
+			});
+
+		var text = Text(result);
+		Assert.True(text.Length <= 55_000, $"Search response was {text.Length} characters.");
+		Assert.Contains("narrow the pattern or filters", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task TreeResponsesRedactLocalUserSegment()
 	{
 		var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
