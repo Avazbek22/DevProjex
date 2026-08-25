@@ -22,6 +22,8 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 	private int _cycleSeedCursor;
 	private int _cycleIndex = -1;
 	private bool _applyingCompletion;
+	private string _resultText = string.Empty;
+	private bool _resultSuccess;
 
 	public TerminalWorkspaceCommandLineView(
 		IApplication application,
@@ -126,28 +128,29 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 		_result.SchemeName = success
 			? TerminalWorkspaceTheme.Success
 			: TerminalWorkspaceTheme.Error;
-		var marker = _useUnicode && !_plain
-			? success ? "✓" : "✗"
-			: success ? "+" : "x";
-		_result.Text = TerminalParameterRow.FitLabel(
-			$"{marker} {text}",
-			Math.Max(1, Viewport.Width),
-			_useUnicode && !_plain);
-		_result.Width = Math.Max(1, (_result.Text?.ToString() ?? string.Empty).GetColumns());
+		_resultText = text;
+		_resultSuccess = success;
+		RenderResult();
 		SetNeedsDraw();
 	}
 
 	public void RefreshLayout()
 	{
 		if (_result.Visible)
-		{
-			_result.Text = TerminalParameterRow.FitLabel(
-				_result.Text?.ToString() ?? string.Empty,
-				Math.Max(1, Viewport.Width),
-				_useUnicode && !_plain);
-			_result.Width = Math.Max(1, (_result.Text?.ToString() ?? string.Empty).GetColumns());
-		}
+			RenderResult();
 		UpdateGhost();
+	}
+
+	private void RenderResult()
+	{
+		var marker = _useUnicode && !_plain
+			? _resultSuccess ? "✓" : "✗"
+			: _resultSuccess ? "+" : "x";
+		_result.Text = TerminalParameterRow.FitLabel(
+			$"{marker} {_resultText}",
+			Math.Max(1, Viewport.Width),
+			_useUnicode && !_plain);
+		_result.Width = Math.Max(1, (_result.Text?.ToString() ?? string.Empty).GetColumns());
 	}
 
 	public void RestoreInputFocus()
