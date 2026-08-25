@@ -210,6 +210,22 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task SearchProjectEscapesTerminalControlCharactersFromProjectText()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Control.txt"), "match\u001B[31m\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?> { ["pattern"] = "match" });
+
+		Assert.DoesNotContain("\u001B", Text(result), StringComparison.Ordinal);
+		Assert.Contains("\\u001B", Text(result), StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task StoredPackTreePreviewRedactsLocalUserSegment()
 	{
 		var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);

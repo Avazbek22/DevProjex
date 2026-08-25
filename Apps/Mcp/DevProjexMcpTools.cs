@@ -515,11 +515,9 @@ internal sealed class DevProjexMcpTools(
 		}
 	}
 
-	private static string EscapeSingleLine(string value) => value
-		.Replace("\\", "\\\\", StringComparison.Ordinal)
-		.Replace("\r", "\\r", StringComparison.Ordinal)
-		.Replace("\n", "\\n", StringComparison.Ordinal)
-		.Replace("\t", "\\t", StringComparison.Ordinal);
+	private static string EscapeSingleLine(string value) =>
+		McpTextEscaping.EscapeSingleLine(
+			value.Replace("\\", "\\\\", StringComparison.Ordinal));
 
 	private static string ResolveProjectName(string root)
 	{
