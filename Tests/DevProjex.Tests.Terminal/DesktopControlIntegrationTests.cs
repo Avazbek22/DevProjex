@@ -400,6 +400,28 @@ public sealed class DesktopControlIntegrationTests
 	}
 
 	[Fact]
+	public async Task RegistryTreatsStructurallyIncompleteRegistrationAsStale()
+	{
+		using var workspace = new TemporaryDirectory();
+		var paths = new DesktopControlPaths(() => workspace.Path);
+		DesktopInstanceRegistry.EnsurePrivateDirectory(paths.RegistryDirectory);
+		var registrationPath = paths.GetRegistrationPath("incomplete");
+		await File.WriteAllTextAsync(
+			registrationPath,
+			"{\"protocolVersion\":1}",
+			TestContext.Current.CancellationToken);
+		var registry = new DesktopInstanceRegistry(paths);
+
+		var snapshot = await registry.ProbeAsync(
+			removeStale: true,
+			TestContext.Current.CancellationToken);
+
+		Assert.Empty(snapshot.Instances);
+		Assert.Equal(1, snapshot.StaleEntryCount);
+		Assert.False(File.Exists(registrationPath));
+	}
+
+	[Fact]
 	public async Task RegistryReaderDoesNotBlockAtomicRegistrationReplacement()
 	{
 		using var workspace = new TemporaryDirectory();

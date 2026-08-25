@@ -37,6 +37,10 @@ public sealed class DesktopInstanceRegistry
 		DesktopInstanceRegistration registration,
 		CancellationToken cancellationToken = default)
 	{
+		ArgumentNullException.ThrowIfNull(registration);
+		if (!HasValidFields(registration))
+			throw new ArgumentException("Desktop registration fields are invalid.", nameof(registration));
+
 		EnsurePrivateDirectory(_paths.RegistryDirectory);
 		var target = _paths.GetRegistrationPath(registration.InstanceId);
 		var temp = target + $".{Guid.NewGuid():N}.tmp";
@@ -60,7 +64,8 @@ public sealed class DesktopInstanceRegistry
 
 	public Task UnregisterAsync(string instanceId)
 	{
-		TryDelete(_paths.GetRegistrationPath(instanceId));
+		if (IsValidInstanceId(instanceId))
+			TryDelete(_paths.GetRegistrationPath(instanceId));
 		return Task.CompletedTask;
 	}
 
@@ -106,7 +111,7 @@ public sealed class DesktopInstanceRegistry
 
 	private bool IsOwnedUnixEndpoint(DesktopInstanceRegistration registration)
 	{
-		if (!registration.Transport.Equals("unix", StringComparison.Ordinal))
+		if (!string.Equals(registration.Transport, "unix", StringComparison.Ordinal))
 			return false;
 		try
 		{
@@ -145,7 +150,7 @@ public sealed class DesktopInstanceRegistry
 					JsonOptions,
 					cancellationToken)
 				.ConfigureAwait(false);
-			return registration?.ProtocolVersion == DesktopProtocol.CurrentVersion
+			return registration is not null && IsValidRegistrationFile(registration, path)
 				? registration
 				: null;
 		}
@@ -158,6 +163,30 @@ public sealed class DesktopInstanceRegistry
 			return null;
 		}
 	}
+
+	private static bool IsValidRegistrationFile(
+		DesktopInstanceRegistration registration,
+		string path) =>
+		HasValidFields(registration) &&
+		string.Equals(
+			Path.GetFileNameWithoutExtension(path),
+			registration.InstanceId,
+			StringComparison.Ordinal);
+
+	private static bool HasValidFields(DesktopInstanceRegistration registration) =>
+		registration.ProtocolVersion == DesktopProtocol.CurrentVersion &&
+		IsValidInstanceId(registration.InstanceId) &&
+		registration.ProcessId > 0 &&
+		registration.ProcessStartTimeUtcTicks > 0 &&
+		registration.Transport is "pipe" or "unix" &&
+		!string.IsNullOrWhiteSpace(registration.Endpoint) &&
+		!registration.Endpoint.Any(char.IsControl);
+
+	private static bool IsValidInstanceId(string? instanceId) =>
+		!string.IsNullOrEmpty(instanceId) &&
+		instanceId.Length <= 128 &&
+		instanceId.All(static character =>
+			char.IsAsciiLetterOrDigit(character) || character is '-' or '_');
 
 	private static void CommitRegistration(string temporaryPath, string targetPath)
 	{
