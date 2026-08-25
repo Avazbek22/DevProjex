@@ -33,8 +33,8 @@ public static class McpServerHost
 		ArgumentNullException.ThrowIfNull(output);
 
 		var rootRegistry = new McpRootRegistry(roots);
-		var services = McpServices.Create(appDataPathProvider);
-		var packs = new McpPackRegistry(tempRoot);
+		using var services = McpServices.Create(appDataPathProvider);
+		using var packs = new McpPackRegistry(tempRoot);
 		var projectService = new McpProjectService(rootRegistry, services);
 		var tools = new DevProjexMcpTools(rootRegistry, projectService, packs);
 		var catalog = new DevProjexMcpToolCatalog(tools);
@@ -64,7 +64,8 @@ public static class McpServerHost
 				return result;
 			}));
 
-		await builder.Build().RunAsync(cancellationToken).ConfigureAwait(false);
+		using var host = builder.Build();
+		await host.RunAsync(cancellationToken).ConfigureAwait(false);
 	}
 
 	private static string ResolveVersion() =>

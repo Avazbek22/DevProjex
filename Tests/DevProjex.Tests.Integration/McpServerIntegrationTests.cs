@@ -22,6 +22,27 @@ public sealed class McpServerIntegrationTests
 	];
 
 	[Fact]
+	public async Task StreamServerReleasesItsPackSessionWhenInputReachesEndOfStream()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var temporaryRoot = workspace.CreateDirectory("temp");
+		await using var input = new MemoryStream();
+		await using var output = new MemoryStream();
+
+		await McpServerHost.RunAsync(
+			[project],
+			input,
+			output,
+			TestContext.Current.CancellationToken,
+			() => workspace.CreateDirectory("app-data"),
+			temporaryRoot);
+
+		var packRoot = Path.Combine(temporaryRoot, "DevProjex", "mcp");
+		Assert.Empty(Directory.EnumerateDirectories(packRoot));
+	}
+
+	[Fact]
 	public async Task StreamServerHandshakeListsExactlyTheStrictReadOnlyToolsInContractOrder()
 	{
 		using var workspace = new TemporaryDirectory();
