@@ -22,6 +22,8 @@ public static class DesktopDiagnosticRequestStore
 	public static string Create(DesktopDiagnosticRequest request)
 	{
 		ArgumentNullException.ThrowIfNull(request);
+		if (!IsValid(request))
+			throw new ArgumentException("Desktop diagnostic request fields are invalid.", nameof(request));
 		var directory = new DesktopControlPaths().DiagnosticDirectory;
 		DesktopInstanceRegistry.EnsurePrivateDirectory(directory);
 		var path = Path.Combine(directory, $"{Guid.NewGuid():N}.json");
@@ -49,9 +51,10 @@ public static class DesktopDiagnosticRequestStore
 			if (!PathUtility.IsPathInside(fullPath, expectedDirectory))
 				return null;
 			safeRequestPath = fullPath;
-			return DesktopRequestEnvelopeReader.Read<DesktopDiagnosticRequest>(
+			var request = DesktopRequestEnvelopeReader.Read<DesktopDiagnosticRequest>(
 				fullPath,
 				JsonOptions);
+			return IsValid(request) ? request : null;
 		}
 		catch
 		{
@@ -68,4 +71,10 @@ public static class DesktopDiagnosticRequestStore
 		if (!string.IsNullOrWhiteSpace(path))
 			DesktopInstanceRegistry.TryDelete(path);
 	}
+
+	private static bool IsValid(DesktopDiagnosticRequest? request) =>
+		request is not null &&
+		!string.IsNullOrWhiteSpace(request.ProjectPath) &&
+		!string.IsNullOrWhiteSpace(request.OutputPath) &&
+		!string.IsNullOrWhiteSpace(request.Scenario);
 }

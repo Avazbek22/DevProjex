@@ -93,6 +93,39 @@ public sealed class DesktopRequestStoreBoundaryTests
 		}
 	}
 
+	[Fact]
+	public void StructurallyIncompleteDiagnosticRequest_IsRejectedAndDeleted()
+	{
+		using var workspace = new TemporaryDirectory();
+		var previousDataRoot = Environment.GetEnvironmentVariable(
+			InvocationEnvironment.InternalDataRootVariable);
+		try
+		{
+			Environment.SetEnvironmentVariable(
+				InvocationEnvironment.InternalDataRootVariable,
+				workspace.Path);
+			var directory = new DesktopControlPaths().DiagnosticDirectory;
+			Directory.CreateDirectory(directory);
+			var requestPath = Path.Combine(directory, "incomplete.json");
+			File.WriteAllText(requestPath, "{}");
+			Environment.SetEnvironmentVariable(
+				DesktopDiagnosticRequestStore.EnvironmentVariable,
+				requestPath);
+
+			Assert.Null(DesktopDiagnosticRequestStore.TryConsume());
+			Assert.False(File.Exists(requestPath));
+		}
+		finally
+		{
+			Environment.SetEnvironmentVariable(
+				DesktopDiagnosticRequestStore.EnvironmentVariable,
+				null);
+			Environment.SetEnvironmentVariable(
+				InvocationEnvironment.InternalDataRootVariable,
+				previousDataRoot);
+		}
+	}
+
 	private static string CreateExternalEnvelope()
 	{
 		var directory = Path.Combine(
