@@ -47,7 +47,11 @@ public sealed class TerminalSettingsStore(Func<string>? appDataPathProvider = nu
 		Path.Combine(_appDataPathProvider(), "DevProjex", "terminal-settings.json");
 
 	private TerminalSettingsDocument? LoadDocument()
+		=> LoadDocument(out _);
+
+	private TerminalSettingsDocument? LoadDocument(out bool hasFutureSchema)
 	{
+		hasFutureSchema = false;
 		try
 		{
 			var path = GetPath();
@@ -65,6 +69,7 @@ public sealed class TerminalSettingsStore(Func<string>? appDataPathProvider = nu
 				MaximumDocumentBytes,
 				static () => new IOException("Terminal settings exceed the size limit."));
 			var document = JsonSerializer.Deserialize<TerminalSettingsDocument>(stream);
+			hasFutureSchema = document is { SchemaVersion: > CurrentSchemaVersion };
 			return document is { SchemaVersion: CurrentSchemaVersion }
 				? document
 				: null;
@@ -89,11 +94,13 @@ public sealed class TerminalSettingsStore(Func<string>? appDataPathProvider = nu
 			using var persistenceLock = await PersistenceFileLock
 				.AcquireAsync(path, cancellationToken)
 				.ConfigureAwait(false);
-			var current = LoadDocument() ??
-			              new TerminalSettingsDocument(
-				              CurrentSchemaVersion,
-				              TerminalScreenMode.Auto,
-				              []);
+			var current = LoadDocument(out var hasFutureSchema);
+			if (hasFutureSchema)
+				return;
+			current ??= new TerminalSettingsDocument(
+				CurrentSchemaVersion,
+				TerminalScreenMode.Auto,
+				[]);
 			var document = update(current) with { SchemaVersion = CurrentSchemaVersion };
 			var directory = Path.GetDirectoryName(path)!;
 			Directory.CreateDirectory(directory);

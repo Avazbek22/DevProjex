@@ -155,6 +155,29 @@ public sealed class TerminalSettingsStoreTests
 	}
 
 	[Fact]
+	public async Task FutureSchemaIsNeverOverwrittenByOlderStore()
+	{
+		using var workspace = new TemporaryDirectory();
+		var store = new TerminalSettingsStore(() => workspace.Path);
+		Directory.CreateDirectory(Path.GetDirectoryName(store.GetPath())!);
+		const string futureDocument =
+			"{\"SchemaVersion\":2,\"ScreenMode\":2,\"CommandHistory\":[\"future command\"],\"FutureValue\":true}";
+		File.WriteAllText(store.GetPath(), futureDocument);
+
+		Assert.Equal(TerminalScreenMode.Auto, store.LoadScreenMode());
+		Assert.Empty(store.LoadCommandHistory());
+
+		await store.SaveScreenModeAsync(
+			TerminalScreenMode.Inline,
+			TestContext.Current.CancellationToken);
+		await store.SaveCommandHistoryAsync(
+			["view content"],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(futureDocument, File.ReadAllText(store.GetPath()));
+	}
+
+	[Fact]
 	public async Task PersistedSettingsArePrivateToTheCurrentUnixUser()
 	{
 		if (OperatingSystem.IsWindows())
