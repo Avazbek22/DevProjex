@@ -40,7 +40,10 @@ list_projects -> get_tree/analyze -> search_project/get_file -> pack_context -> 
   Agent paths and globs can only narrow the effective selection.
 - Large packs are kept in an application-owned temporary session directory. Pack
   ids are random, valid only in the current server process, and removed at exit.
-  Stale session directories older than 24 hours are scavenged at startup.
+  Stale session directories older than 24 hours are scavenged at startup. A
+  stored pack is limited to 200 MiB and all packs in one server session are
+  limited to 1 GiB. The server does not evict valid packs; a request that would
+  exceed either limit returns `DPX-MCP-PACK-TOO-LARGE` with narrowing guidance.
 
 Errors returned by tools have `isError: true` and stable `DPX-MCP-*` codes. They
 describe the valid roots, ranges, or retry action. Malformed JSON-RPC traffic is

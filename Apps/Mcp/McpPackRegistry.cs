@@ -5,6 +5,8 @@ namespace DevProjex.Mcp;
 
 public sealed class McpPackRegistry : IDisposable
 {
+	internal const long MaximumPackBytes = 200L * 1024 * 1024;
+	internal const long MaximumSessionBytes = 1024L * 1024 * 1024;
 	private const UnixFileMode PrivateDirectoryMode =
 		UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
 	private const UnixFileMode PrivateFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
@@ -13,11 +15,27 @@ public sealed class McpPackRegistry : IDisposable
 	private readonly Dictionary<string, PackEntry> _packs = new(StringComparer.Ordinal);
 	private readonly string _sessionDirectory;
 	private readonly FileStream _sessionLease;
+	private readonly long _maximumPackBytes;
+	private readonly long _maximumSessionBytes;
 	private readonly object _sync = new();
+	private long _allocatedBytes;
 	private bool _disposed;
 
 	public McpPackRegistry(string? tempRoot = null, TimeProvider? timeProvider = null)
+		: this(tempRoot, timeProvider, MaximumPackBytes, MaximumSessionBytes)
 	{
+	}
+
+	internal McpPackRegistry(
+		string? tempRoot,
+		TimeProvider? timeProvider,
+		long maximumPackBytes,
+		long maximumSessionBytes)
+	{
+		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumPackBytes);
+		ArgumentOutOfRangeException.ThrowIfLessThan(maximumSessionBytes, maximumPackBytes);
+		_maximumPackBytes = maximumPackBytes;
+		_maximumSessionBytes = maximumSessionBytes;
 		TimeProvider = timeProvider ?? TimeProvider.System;
 		var productDirectory = Path.Combine(tempRoot ?? Path.GetTempPath(), "DevProjex");
 		EnsurePrivateDirectory(productDirectory);
@@ -63,6 +81,7 @@ public sealed class McpPackRegistry : IDisposable
 		ObjectDisposedException.ThrowIf(_disposed, this);
 		var id = Convert.ToHexString(RandomNumberGenerator.GetBytes(24)).ToLowerInvariant();
 		var path = Path.Combine(_sessionDirectory, id + ".pack");
+		var reservation = new PackReservation(this);
 		try
 		{
 			await using (var stream = OpenPrivateFile(
@@ -73,17 +92,20 @@ public sealed class McpPackRegistry : IDisposable
 				             64 * 1024,
 				             FileOptions.Asynchronous | FileOptions.SequentialScan))
 			{
-				await writer(stream, cancellationToken).ConfigureAwait(false);
+				await using var bounded = new QuotaWriteStream(stream, reservation);
+				await writer(bounded, cancellationToken).ConfigureAwait(false);
 			}
 
 			var (characters, lines) = await MeasureAsync(path, cancellationToken).ConfigureAwait(false);
-			var document = new McpPackDocument(id, path, lines, characters);
+			var document = new McpPackDocument(id, path, lines, characters, reservation.Bytes);
 			lock (_sync)
 				_packs.Add(id, new PackEntry(document, TimeProvider.GetUtcNow()));
+			reservation.Commit();
 			return document;
 		}
 		catch
 		{
+			reservation.Dispose();
 			TryDeletePackFile(path);
 			throw;
 		}
@@ -96,6 +118,7 @@ public sealed class McpPackRegistry : IDisposable
 		{
 			if (!_packs.Remove(packId, out entry))
 				return;
+			_allocatedBytes -= entry.Document.Bytes;
 		}
 		TryDeletePackFile(entry.Document.Path);
 	}
@@ -270,7 +293,123 @@ public sealed class McpPackRegistry : IDisposable
 			McpErrorCodes.PackExpired,
 			$"{McpErrorCodes.PackExpired}: pack expired or belongs to another server session; call pack_context again.");
 
+	private static McpToolException TooLarge() =>
+		new(
+			McpErrorCodes.PackTooLarge,
+			$"{McpErrorCodes.PackTooLarge}: pack storage limit exceeded. Narrow paths or include/exclude patterns, " +
+			"use a lower detail level, or enable tracked_only, then call pack_context again.");
+
+	private void Reserve(PackReservation reservation, int count)
+	{
+		if (count <= 0)
+			return;
+		lock (_sync)
+		{
+			if (count > _maximumPackBytes - reservation.Bytes ||
+			    count > _maximumSessionBytes - _allocatedBytes)
+			{
+				throw TooLarge();
+			}
+			reservation.Add(count);
+			_allocatedBytes += count;
+		}
+	}
+
+	private void Release(long bytes)
+	{
+		lock (_sync)
+			_allocatedBytes -= bytes;
+	}
+
 	private sealed record PackEntry(McpPackDocument Document, DateTimeOffset CreatedUtc);
+
+	private sealed class PackReservation(McpPackRegistry owner) : IDisposable
+	{
+		private bool _committed;
+		private bool _disposed;
+
+		public long Bytes { get; private set; }
+
+		public void Reserve(int count) => owner.Reserve(this, count);
+
+		public void Add(int count) => Bytes += count;
+
+		public void Commit() => _committed = true;
+
+		public void Dispose()
+		{
+			if (_disposed)
+				return;
+			_disposed = true;
+			if (!_committed)
+				owner.Release(Bytes);
+		}
+	}
+
+	private sealed class QuotaWriteStream(Stream inner, PackReservation reservation) : Stream
+	{
+		public override bool CanRead => false;
+		public override bool CanSeek => false;
+		public override bool CanWrite => true;
+		public override long Length => inner.Length;
+		public override long Position
+		{
+			get => inner.Position;
+			set => throw new NotSupportedException();
+		}
+
+		public override void Flush() => inner.Flush();
+
+		public override Task FlushAsync(CancellationToken cancellationToken) =>
+			inner.FlushAsync(cancellationToken);
+
+		public override void Write(byte[] buffer, int offset, int count)
+		{
+			reservation.Reserve(count);
+			inner.Write(buffer, offset, count);
+		}
+
+		public override void Write(ReadOnlySpan<byte> buffer)
+		{
+			reservation.Reserve(buffer.Length);
+			inner.Write(buffer);
+		}
+
+		public override async ValueTask WriteAsync(
+			ReadOnlyMemory<byte> buffer,
+			CancellationToken cancellationToken = default)
+		{
+			reservation.Reserve(buffer.Length);
+			await inner.WriteAsync(buffer, cancellationToken).ConfigureAwait(false);
+		}
+
+		public override Task WriteAsync(
+			byte[] buffer,
+			int offset,
+			int count,
+			CancellationToken cancellationToken)
+		{
+			reservation.Reserve(count);
+			return inner.WriteAsync(buffer, offset, count, cancellationToken);
+		}
+
+		public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+		public override void SetLength(long value) => throw new NotSupportedException();
+		public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+		protected override void Dispose(bool disposing)
+		{
+			if (disposing)
+				inner.Flush();
+			base.Dispose(disposing);
+		}
+
+		public override async ValueTask DisposeAsync()
+		{
+			await inner.FlushAsync().ConfigureAwait(false);
+			GC.SuppressFinalize(this);
+		}
+	}
 
 	private static async Task<(long Characters, int Lines)> MeasureAsync(
 		string path,
@@ -312,4 +451,4 @@ public sealed class McpPackRegistry : IDisposable
 	}
 }
 
-public sealed record McpPackDocument(string Id, string Path, int Lines, long Characters);
+public sealed record McpPackDocument(string Id, string Path, int Lines, long Characters, long Bytes);
