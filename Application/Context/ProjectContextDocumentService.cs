@@ -638,8 +638,11 @@ public sealed class ProjectContextDocumentService(
 		writer.WriteAttributeString("schemaVersion", XmlConvert.ToString(SchemaVersion));
 		writer.WriteAttributeString("kind", Kind);
 		writer.WriteStartElement("project");
-		writer.WriteElementString("root", NormalizePath(GetDocumentRoot(plan, pathRedaction)));
-		writer.WriteElementString("name", GetProjectName(plan));
+		WriteSanitizedXmlElementString(
+			writer,
+			"root",
+			NormalizePath(GetDocumentRoot(plan, pathRedaction)));
+		WriteSanitizedXmlElementString(writer, "name", GetProjectName(plan));
 		WriteRepositorySourceXml(writer, plan.SourceIdentity);
 		writer.WriteEndElement();
 		WriteSelectionXml(writer, plan);
@@ -666,7 +669,7 @@ public sealed class ProjectContextDocumentService(
 					contentPathMapper,
 					pathRedaction);
 				writer.WriteStartElement("file");
-				writer.WriteAttributeString("path", file.Path);
+				WriteSanitizedXmlAttributeString(writer, "path", file.Path);
 				writer.WriteAttributeString("isBinary", XmlConvert.ToString(file.IsBinary));
 				writer.WriteAttributeString("classification", ToToken(file.Classification));
 				if (file.Classification == FileContentClassification.Text)
@@ -676,7 +679,12 @@ public sealed class ProjectContextDocumentService(
 							file.Metrics?.CharCount ?? 0,
 							async (chunk, _) =>
 							{
-								if (MemoryMarshal.TryGetArray(chunk, out var segment))
+								if (TrySanitizeXmlText(chunk.Span, out var sanitized))
+								{
+									await writer.WriteStringAsync(sanitized)
+										.ConfigureAwait(false);
+								}
+								else if (MemoryMarshal.TryGetArray(chunk, out var segment))
 								{
 									await writer.WriteCharsAsync(
 											segment.Array!,
@@ -703,15 +711,15 @@ public sealed class ProjectContextDocumentService(
 		foreach (var diagnostic in plan.Diagnostics)
 		{
 			writer.WriteStartElement("diagnostic");
-			writer.WriteAttributeString("code", diagnostic.Code);
+			WriteSanitizedXmlAttributeString(writer, "code", diagnostic.Code);
 			writer.WriteAttributeString("severity", ToToken(diagnostic.Severity));
 			if (!string.IsNullOrWhiteSpace(diagnostic.Path))
-				writer.WriteAttributeString("path", NormalizePath(diagnostic.Path));
-			writer.WriteString(diagnostic.Message);
+				WriteSanitizedXmlAttributeString(writer, "path", NormalizePath(diagnostic.Path));
+			WriteSanitizedXmlString(writer, diagnostic.Message);
 			writer.WriteEndElement();
 		}
 		writer.WriteEndElement();
-		writer.WriteElementString("fingerprint", plan.Fingerprint);
+		WriteSanitizedXmlElementString(writer, "fingerprint", plan.Fingerprint);
 		writer.WriteEndElement();
 		writer.WriteEndDocument();
 		await writer.FlushAsync()
@@ -863,11 +871,11 @@ public sealed class ProjectContextDocumentService(
 	private static void WriteContextFileXml(XmlWriter writer, ContextFileDocument file)
 	{
 		writer.WriteStartElement("file");
-		writer.WriteAttributeString("path", file.Path);
+		WriteSanitizedXmlAttributeString(writer, "path", file.Path);
 		writer.WriteAttributeString("isBinary", XmlConvert.ToString(file.IsBinary));
 		writer.WriteAttributeString("classification", ToToken(file.Classification));
 		if (file.Classification == FileContentClassification.Text)
-			writer.WriteElementString("content", file.Content ?? string.Empty);
+			WriteSanitizedXmlElementString(writer, "content", file.Content ?? string.Empty);
 		writer.WriteEndElement();
 	}
 
@@ -1120,8 +1128,8 @@ public sealed class ProjectContextDocumentService(
 		writer.WriteAttributeString("schemaVersion", XmlConvert.ToString(SchemaVersion));
 		writer.WriteAttributeString("kind", Kind);
 		writer.WriteStartElement("project");
-		writer.WriteElementString("root", NormalizePath(GetDocumentRoot(plan)));
-		writer.WriteElementString("name", GetProjectName(plan));
+		WriteSanitizedXmlElementString(writer, "root", NormalizePath(GetDocumentRoot(plan)));
+		WriteSanitizedXmlElementString(writer, "name", GetProjectName(plan));
 		WriteRepositorySourceXml(writer, plan.SourceIdentity);
 		writer.WriteEndElement();
 		WriteSelectionXml(writer, plan);
@@ -1134,7 +1142,7 @@ public sealed class ProjectContextDocumentService(
 		foreach (var file in files)
 		{
 			writer.WriteStartElement("file");
-			writer.WriteAttributeString("path", file.Path);
+			WriteSanitizedXmlAttributeString(writer, "path", file.Path);
 			writer.WriteAttributeString("isBinary", XmlConvert.ToString(file.IsBinary));
 			writer.WriteAttributeString("classification", ToToken(file.Classification));
 			if (file.IsOmitted)
@@ -1142,7 +1150,7 @@ public sealed class ProjectContextDocumentService(
 			if (file.IsTruncated)
 				writer.WriteAttributeString("truncated", XmlConvert.ToString(true));
 			if (file.Classification == FileContentClassification.Text && !file.IsOmitted)
-				writer.WriteElementString("content", file.Content ?? string.Empty);
+				WriteSanitizedXmlElementString(writer, "content", file.Content ?? string.Empty);
 			writer.WriteEndElement();
 		}
 		writer.WriteEndElement();
@@ -1150,17 +1158,17 @@ public sealed class ProjectContextDocumentService(
 		foreach (var diagnostic in plan.Diagnostics)
 		{
 			writer.WriteStartElement("diagnostic");
-			writer.WriteAttributeString("code", diagnostic.Code);
+			WriteSanitizedXmlAttributeString(writer, "code", diagnostic.Code);
 			writer.WriteAttributeString("severity", ToToken(diagnostic.Severity));
 			if (!string.IsNullOrWhiteSpace(diagnostic.Path))
-				writer.WriteAttributeString("path", NormalizePath(diagnostic.Path));
-			writer.WriteString(diagnostic.Message);
+				WriteSanitizedXmlAttributeString(writer, "path", NormalizePath(diagnostic.Path));
+			WriteSanitizedXmlString(writer, diagnostic.Message);
 			writer.WriteEndElement();
 		}
 		writer.WriteEndElement();
 		if (truncated)
 			writer.WriteElementString("truncated", XmlConvert.ToString(true));
-		writer.WriteElementString("fingerprint", plan.Fingerprint);
+		WriteSanitizedXmlElementString(writer, "fingerprint", plan.Fingerprint);
 		writer.WriteEndElement();
 		writer.WriteEndDocument();
 		writer.Flush();
@@ -1355,7 +1363,10 @@ public sealed class ProjectContextDocumentService(
 	private static void WriteSelectionXml(XmlWriter writer, ProjectContextPlan plan)
 	{
 		writer.WriteStartElement("selection");
-		writer.WriteElementString("gitMode", ProjectSelectionTokens.ToToken(plan.Selection.GitMode!.Value));
+		WriteSanitizedXmlElementString(
+			writer,
+			"gitMode",
+			ProjectSelectionTokens.ToToken(plan.Selection.GitMode!.Value));
 		WriteStringCollectionXml(
 			writer,
 			"exclusions",
@@ -1382,11 +1393,11 @@ public sealed class ProjectContextDocumentService(
 
 		writer.WriteStartElement("source");
 		writer.WriteAttributeString("type", "git");
-		writer.WriteElementString("repositoryUrl", identity.RepositoryUrl);
+		WriteSanitizedXmlElementString(writer, "repositoryUrl", identity.RepositoryUrl);
 		if (!string.IsNullOrWhiteSpace(identity.Branch))
-			writer.WriteElementString("branch", identity.Branch);
+			WriteSanitizedXmlElementString(writer, "branch", identity.Branch);
 		if (!string.IsNullOrWhiteSpace(identity.CommitHash))
-			writer.WriteElementString("commit", identity.CommitHash);
+			WriteSanitizedXmlElementString(writer, "commit", identity.CommitHash);
 		writer.WriteEndElement();
 	}
 
@@ -1409,8 +1420,11 @@ public sealed class ProjectContextDocumentService(
 		string sourceRoot)
 	{
 		writer.WriteStartElement(node.IsDirectory ? "directory" : "file");
-		writer.WriteAttributeString("path", NormalizeRelativePath(sourceRoot, node.FullPath));
-		writer.WriteAttributeString("name", node.DisplayName);
+		WriteSanitizedXmlAttributeString(
+			writer,
+			"path",
+			NormalizeRelativePath(sourceRoot, node.FullPath));
+		WriteSanitizedXmlAttributeString(writer, "name", node.DisplayName);
 		foreach (var child in node.Children)
 			WriteTreeNodeXml(writer, child, sourceRoot);
 		writer.WriteEndElement();
@@ -1424,8 +1438,67 @@ public sealed class ProjectContextDocumentService(
 	{
 		writer.WriteStartElement(containerName);
 		foreach (var value in values)
-			writer.WriteElementString(itemName, value);
+			WriteSanitizedXmlElementString(writer, itemName, value);
 		writer.WriteEndElement();
+	}
+
+	private static void WriteSanitizedXmlAttributeString(
+		XmlWriter writer,
+		string localName,
+		string value) =>
+		writer.WriteAttributeString(localName, SanitizeXmlText(value));
+
+	private static void WriteSanitizedXmlElementString(
+		XmlWriter writer,
+		string localName,
+		string value) =>
+		writer.WriteElementString(localName, SanitizeXmlText(value));
+
+	private static void WriteSanitizedXmlString(XmlWriter writer, string value) =>
+		writer.WriteString(SanitizeXmlText(value));
+
+	private static string SanitizeXmlText(string value) =>
+		TrySanitizeXmlText(value.AsSpan(), out var sanitized)
+			? sanitized
+			: value;
+
+	private static bool TrySanitizeXmlText(
+		ReadOnlySpan<char> value,
+		out string sanitized)
+	{
+		StringBuilder? builder = null;
+		for (var index = 0; index < value.Length; index++)
+		{
+			var character = value[index];
+			if (char.IsHighSurrogate(character) &&
+			    index + 1 < value.Length &&
+			    char.IsLowSurrogate(value[index + 1]))
+			{
+				if (builder is not null)
+				{
+					builder.Append(character);
+					builder.Append(value[++index]);
+				}
+				else
+				{
+					index++;
+				}
+				continue;
+			}
+
+			if (XmlConvert.IsXmlChar(character))
+			{
+				builder?.Append(character);
+				continue;
+			}
+
+			builder ??= new StringBuilder(value.Length)
+				.Append(value[..index]);
+			builder.Append('\uFFFD');
+		}
+
+		sanitized = builder?.ToString() ?? string.Empty;
+		return builder is not null;
 	}
 
 	private static bool IncludesTree(ProjectContextView view) =>
