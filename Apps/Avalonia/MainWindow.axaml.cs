@@ -320,10 +320,9 @@ public partial class MainWindow : Window
         if (launchResult.Succeeded)
             return;
 
-        var details = string.IsNullOrWhiteSpace(launchResult.ErrorMessage)
-            ? "No launch candidate was available."
-            : launchResult.ErrorMessage;
-        await ShowErrorAsync(_localization.Format("Msg.NewWindowLaunchFailed", details));
+        await ShowErrorAsync(DesktopExceptionPresentation.FormatNewWindowLaunchFailure(
+            _localization,
+            launchResult));
     }
 
     private async void OnRefresh(object? sender, RoutedEventArgs e)

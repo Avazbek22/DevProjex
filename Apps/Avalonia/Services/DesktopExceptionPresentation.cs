@@ -42,6 +42,17 @@ internal static class DesktopExceptionPresentation
 		return AppendCode(localization[descriptor.LocalizationKey], descriptor.Code);
 	}
 
+	public static string FormatNewWindowLaunchFailure(
+		LocalizationService localization,
+		AppInstanceLaunchResult result)
+	{
+		ArgumentNullException.ThrowIfNull(localization);
+		ArgumentNullException.ThrowIfNull(result);
+		return localization.Format(
+			"Msg.NewWindowLaunchFailed",
+			Format(localization, exception: null));
+	}
+
 	public static string AppendCode(string message, string code) =>
 		$"{message}{Environment.NewLine}{Environment.NewLine}{code}";
 

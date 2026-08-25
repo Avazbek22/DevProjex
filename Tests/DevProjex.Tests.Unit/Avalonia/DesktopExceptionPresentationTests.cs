@@ -36,4 +36,19 @@ public sealed class DesktopExceptionPresentationTests
 		Assert.DoesNotContain(sensitivePath, message, StringComparison.Ordinal);
 		Assert.DoesNotContain("private-user", message, StringComparison.Ordinal);
 	}
+
+	[Fact]
+	public void NewWindowLaunchFailure_DoesNotExposeLauncherErrorMessage()
+	{
+		const string sensitivePath = @"C:\Users\private-user\DevProjex.exe";
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);
+
+		var message = DesktopExceptionPresentation.FormatNewWindowLaunchFailure(
+			localization,
+			AppInstanceLaunchResult.Failure($"Could not start {sensitivePath}."));
+
+		Assert.Contains(DesktopExceptionPresentation.OperationFailedCode, message, StringComparison.Ordinal);
+		Assert.DoesNotContain(sensitivePath, message, StringComparison.Ordinal);
+		Assert.DoesNotContain("private-user", message, StringComparison.Ordinal);
+	}
 }
