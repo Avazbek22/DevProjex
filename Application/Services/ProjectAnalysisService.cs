@@ -541,7 +541,7 @@ public sealed class ProjectAnalysisService(
 			return [];
 
 		return extensions
-			.Where(static value => !string.IsNullOrWhiteSpace(value))
+			.Where(static value => !string.IsNullOrEmpty(value))
 			.Select(NormalizeExtension)
 			.Where(static value => value.Length > 0)
 			.Distinct(StringComparer.OrdinalIgnoreCase)
@@ -556,8 +556,7 @@ public sealed class ProjectAnalysisService(
 			return [];
 
 		return extensions
-			.Where(static value => !string.IsNullOrWhiteSpace(value))
-			.Select(static value => value.Trim())
+			.Where(static value => !string.IsNullOrEmpty(value))
 			.Distinct(StringComparer.OrdinalIgnoreCase)
 			.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
 			.ToArray();
@@ -565,11 +564,10 @@ public sealed class ProjectAnalysisService(
 
 	private static string NormalizeExtension(string value)
 	{
-		var trimmed = value.Trim();
-		if (trimmed.Length == 0 || trimmed == ".")
+		if (value.Length == 0 || value == ".")
 			return string.Empty;
 
-		return trimmed[0] == '.' ? trimmed : "." + trimmed;
+		return value[0] == '.' ? value : "." + value;
 	}
 
 	private static ProjectOutputMetricsReport ToReportMetrics(ExportOutputMetrics metrics) =>

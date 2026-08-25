@@ -200,7 +200,7 @@ public sealed class PortableProjectProfileService
 
 		return new ProjectSelectionSpec(
 			Roots: NormalizeRootNames(document.Selection.Roots),
-			Extensions: NormalizeNullableValues(document.Selection.Extensions, StringComparer.OrdinalIgnoreCase),
+			Extensions: NormalizeExtensionNames(document.Selection.Extensions),
 			SelectedPaths: selectedPaths,
 			GitMode: gitMode,
 			Exclusions: ProjectSelectionTokens.OrderExclusions(exclusions),
@@ -265,10 +265,15 @@ public sealed class PortableProjectProfileService
 		}
 	}
 
-	private static IReadOnlyCollection<string>? NormalizeNullableValues(
-		IReadOnlyCollection<string>? values,
-		StringComparer comparer) =>
-		values is null ? null : NormalizeValues(values, comparer);
+	private static IReadOnlyCollection<string>? NormalizeExtensionNames(
+		IReadOnlyCollection<string>? values) =>
+		values is null
+			? null
+			: values
+				.Where(static value => !string.IsNullOrEmpty(value))
+				.Distinct(StringComparer.OrdinalIgnoreCase)
+				.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
+				.ToArray();
 
 	private static IReadOnlyCollection<string>? NormalizeRootNames(
 		IReadOnlyCollection<string>? values) =>
@@ -279,16 +284,6 @@ public sealed class PortableProjectProfileService
 				.Distinct(PathComparer.Default)
 				.OrderBy(static value => value, PathComparer.Default)
 				.ToArray();
-
-	private static IReadOnlyCollection<string> NormalizeValues(
-		IReadOnlyCollection<string>? values,
-		StringComparer comparer) =>
-		(values ?? [])
-		.Where(static value => !string.IsNullOrWhiteSpace(value))
-		.Select(static value => value.Trim())
-		.Distinct(comparer)
-		.OrderBy(static value => value, comparer)
-		.ToArray();
 
 	private static IReadOnlyCollection<string> NormalizeSelectedPaths(
 		IReadOnlyCollection<string>? values) =>

@@ -12,6 +12,7 @@ public sealed class PortableProjectProfileServiceTests
 		var destination = Path.Combine(workspace.Path, "portable.json");
 		string[] selectedPaths = [" ", " folder/file .cs "];
 		string[] roots = [" ", " source "];
+		string[] extensions = [". x", ".cs "];
 		var service = new PortableProjectProfileService();
 
 		await service.SaveAsync(
@@ -19,6 +20,7 @@ public sealed class PortableProjectProfileServiceTests
 			destination,
 			new ProjectSelectionSpec(
 				Roots: roots,
+				Extensions: extensions,
 				SelectedPaths: selectedPaths,
 				GitMode: GitFilteringMode.None,
 				Exclusions: []),
@@ -35,6 +37,9 @@ public sealed class PortableProjectProfileServiceTests
 		Assert.Equal(
 			roots.OrderBy(static path => path, PathComparer.Default),
 			loaded.Roots);
+		Assert.Equal(
+			extensions.OrderBy(static extension => extension, StringComparer.OrdinalIgnoreCase),
+			loaded.Extensions);
 	}
 
 	[Fact]

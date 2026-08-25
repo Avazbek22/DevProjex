@@ -29,6 +29,31 @@ public sealed class ProjectAnalysisServiceIntegrationTests
 	}
 
 	[Fact]
+	public void Load_UnixExtensionWithTrailingSpace_RemainsSelectable()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Windows normalizes trailing spaces in ordinary file names.");
+			return;
+		}
+
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("Selected.cs ", "class Selected {}\n");
+		temp.CreateFile("Excluded.cs", "class Excluded {}\n");
+
+		var loaded = CreateService().Load(
+			new ProjectAnalysisRequest(
+				temp.Path,
+				SelectedExtensions: [".cs "],
+				SelectedIgnoreOptions: []),
+			TestContext.Current.CancellationToken);
+
+		Assert.Contains(".cs ", loaded.AvailableExtensions, StringComparer.OrdinalIgnoreCase);
+		Assert.Equal([".cs "], loaded.SelectedExtensions);
+		Assert.Equal("Selected.cs ", Assert.Single(loaded.Tree.Root.Children).DisplayName);
+	}
+
+	[Fact]
 	public void Load_ExplicitRootSelectionDiscoversDeepRepositoryDefault()
 	{
 		using var temp = new TemporaryDirectory();
