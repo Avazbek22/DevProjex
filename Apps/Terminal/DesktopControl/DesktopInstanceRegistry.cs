@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using DevProjex.Terminal.CommandLine;
 
 namespace DevProjex.Terminal.DesktopControl;
 
@@ -95,8 +96,22 @@ public sealed class DesktopInstanceRegistry(DesktopControlPaths? paths = null)
 	{
 		try
 		{
-			var json = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
-			var registration = JsonSerializer.Deserialize<DesktopInstanceRegistration>(json, JsonOptions);
+			await using var stream = new MaximumLengthReadStream(
+				new FileStream(
+					path,
+					FileMode.Open,
+					FileAccess.Read,
+					FileShare.Read,
+					bufferSize: 4 * 1024,
+					FileOptions.Asynchronous | FileOptions.SequentialScan),
+				DesktopProtocol.MaximumMessageBytes,
+				static () => new IOException("Desktop registration exceeds the protocol limit."));
+			var registration = await JsonSerializer
+				.DeserializeAsync<DesktopInstanceRegistration>(
+					stream,
+					JsonOptions,
+					cancellationToken)
+				.ConfigureAwait(false);
 			return registration?.ProtocolVersion == DesktopProtocol.CurrentVersion
 				? registration
 				: null;

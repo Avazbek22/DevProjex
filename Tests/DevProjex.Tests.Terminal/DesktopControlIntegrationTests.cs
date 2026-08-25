@@ -298,6 +298,31 @@ public sealed class DesktopControlIntegrationTests
 	}
 
 	[Fact]
+	public async Task RegistryRejectsAnOversizedRegistrationBeforeUsingIt()
+	{
+		using var workspace = new TemporaryDirectory();
+		var paths = new DesktopControlPaths(() => workspace.Path);
+		var registry = new DesktopInstanceRegistry(paths);
+		using var process = Process.GetCurrentProcess();
+		var registration = CreateLiveRegistration(
+			"oversized",
+			workspace.Path,
+			process.StartTime.ToUniversalTime().Ticks);
+		await registry.RegisterAsync(registration, TestContext.Current.CancellationToken);
+		await File.AppendAllTextAsync(
+			paths.GetRegistrationPath(registration.InstanceId),
+			new string(' ', DesktopProtocol.MaximumMessageBytes),
+			TestContext.Current.CancellationToken);
+
+		var snapshot = await registry.ProbeAsync(
+			removeStale: false,
+			TestContext.Current.CancellationToken);
+
+		Assert.Empty(snapshot.Instances);
+		Assert.Equal(1, snapshot.StaleEntryCount);
+	}
+
+	[Fact]
 	public async Task TargetResolutionRequiresOneUnambiguousInstance()
 	{
 		using var workspace = new TemporaryDirectory();
