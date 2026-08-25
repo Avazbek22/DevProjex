@@ -778,7 +778,8 @@ function Create-IsolatedWorkspace([string]$sourceRoot) {
 
     Assert-IsolatedWorkspaceCapacity -sourceRoot $sourceRoot
 
-    $script:IsolatedWorkspaceRoot = Join-Path $env:TEMP ("devprojex-release-work\" + [Guid]::NewGuid().ToString("N"))
+    $script:IsolatedWorkspaceRoot = Resolve-IsolatedWorkspaceCleanupTarget -targetPath (
+        Join-Path $env:TEMP ("devprojex-release-work\" + [Guid]::NewGuid().ToString("N")))
     $script:IsolatedRepoRoot = Join-Path $script:IsolatedWorkspaceRoot "repo"
     New-Item -ItemType Directory -Path $script:IsolatedRepoRoot -Force | Out-Null
 
@@ -793,6 +794,7 @@ function Create-IsolatedWorkspace([string]$sourceRoot) {
         "/NJH",
         "/NJS",
         "/NP",
+        "/XJ",
         "/XD",
         (Join-Path $sourceRoot ".git"),
         (Join-Path $sourceRoot ".idea"),
@@ -1679,6 +1681,13 @@ function Resolve-IsolatedWorkspaceCleanupTarget([string]$targetPath) {
         $workspaceName.Contains([string]$alternateSeparator) -or
         -not [Guid]::TryParseExact($workspaceName, "N", [ref]$workspaceId)) {
         throw "Refusing to remove an invalid isolated release workspace: $resolvedTarget"
+    }
+
+    foreach ($path in @($allowedRoot, $resolvedTarget)) {
+        if ((Test-Path -LiteralPath $path) -and
+            (([System.IO.File]::GetAttributes($path) -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)) {
+            throw "Refusing to use a reparse point as an isolated release workspace: $path"
+        }
     }
 
     return $resolvedTarget
