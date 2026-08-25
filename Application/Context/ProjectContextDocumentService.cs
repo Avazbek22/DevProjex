@@ -749,7 +749,7 @@ public sealed class ProjectContextDocumentService(
 		try
 		{
 			var mapped = contentPathMapper(path);
-			return string.IsNullOrWhiteSpace(mapped) ? path : mapped;
+			return string.IsNullOrEmpty(mapped) ? path : mapped;
 		}
 		catch
 		{

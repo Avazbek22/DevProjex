@@ -28,6 +28,17 @@ public sealed class TreeAndContentExportServiceCrossPlatformTests
 	}
 
 	[Fact]
+	public void MapRelativeContentHeaderPath_WhitespaceOnlyUnixFileNameRemainsRelative()
+	{
+		using var temp = new TemporaryDirectory();
+		var file = Path.Combine(temp.Path, " ");
+
+		var mapped = TreeAndContentExportService.MapRelativeContentHeaderPath(temp.Path, file);
+
+		Assert.Equal(" ", mapped);
+	}
+
+	[Fact]
 	public void Build_Ascii_IncludesTreeAndContentSeparator()
 	{
 		using var temp = new TemporaryDirectory();

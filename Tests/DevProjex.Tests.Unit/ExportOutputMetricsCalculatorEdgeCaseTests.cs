@@ -39,10 +39,11 @@ public sealed class ExportOutputMetricsCalculatorEdgeCaseTests
 	}
 
 	[Fact]
-	public void FromContentFiles_IgnoresBlankPathsDeduplicatesAndKeepsFirstDuplicateMetrics()
+	public void FromContentFiles_IgnoresEmptyPathsAndPreservesWhitespaceOnlyFileNames()
 	{
 		var files = new[]
 		{
+			new ContentFileMetrics("", 0, 0, 0, IsEmpty: true, IsWhitespaceOnly: false),
 			new ContentFileMetrics(" ", 0, 0, 0, IsEmpty: true, IsWhitespaceOnly: false),
 			new ContentFileMetrics("b.txt", 4, 1, 4, IsEmpty: false, IsWhitespaceOnly: false),
 			new ContentFileMetrics("a.txt", 0, 0, 0, IsEmpty: true, IsWhitespaceOnly: false),
@@ -52,6 +53,16 @@ public sealed class ExportOutputMetricsCalculatorEdgeCaseTests
 		var expectedText = string.Join(
 			'\n',
 			[
+				"\t:",
+				ClipboardBlankLine,
+				"[No Content, 0 bytes]",
+				ClipboardBlankLine,
+				ClipboardBlankLine,
+				" :",
+				ClipboardBlankLine,
+				"[No Content, 0 bytes]",
+				ClipboardBlankLine,
+				ClipboardBlankLine,
 				"a.txt:",
 				ClipboardBlankLine,
 				"[No Content, 0 bytes]",
@@ -109,14 +120,16 @@ public sealed class ExportOutputMetricsCalculatorEdgeCaseTests
 	}
 
 	[Fact]
-	public void OrderedAccumulator_ReturnsEmptyWhenOnlyInvalidOrTrailingBlankRowsWereAppended()
+	public void OrderedAccumulator_IgnoresEmptyPathButPreservesWhitespaceOnlyFileName()
 	{
 		var accumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
 
 		accumulator.AppendFile(new ContentFileMetrics("", 0, 0, 0, IsEmpty: true, IsWhitespaceOnly: false));
 		accumulator.AppendFile(new ContentFileMetrics("   ", 0, 0, 0, IsEmpty: true, IsWhitespaceOnly: false));
 
-		Assert.Equal(ExportOutputMetrics.Empty, accumulator.ToMetrics());
+		var expected = ExportOutputMetricsCalculator.FromText(
+			$"   :\n{ClipboardBlankLine}\n[No Content, 0 bytes]");
+		Assert.Equal(expected, accumulator.ToMetrics());
 	}
 
 	[Fact]

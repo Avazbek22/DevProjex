@@ -345,7 +345,7 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		try
 		{
 			var mapped = displayPathMapper(filePath);
-			return string.IsNullOrWhiteSpace(mapped) ? filePath : mapped;
+			return string.IsNullOrEmpty(mapped) ? filePath : mapped;
 		}
 		catch
 		{

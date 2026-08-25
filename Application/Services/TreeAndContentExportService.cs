@@ -151,7 +151,7 @@ public sealed class TreeAndContentExportService(
 				return GetFallbackContentHeaderPath(filePath);
 
 			var relativePath = Path.GetRelativePath(normalizedRootPath, filePath);
-			if (!string.IsNullOrWhiteSpace(relativePath) &&
+			if (!string.IsNullOrEmpty(relativePath) &&
 			    relativePath != "." &&
 			    !IsOutsideRoot(relativePath) &&
 			    !Path.IsPathRooted(relativePath))
@@ -171,7 +171,7 @@ public sealed class TreeAndContentExportService(
 	private static string GetFallbackContentHeaderPath(string filePath)
 	{
 		var fileName = Path.GetFileName(filePath);
-		return string.IsNullOrWhiteSpace(fileName) ? PathUtility.NormalizeSeparators(filePath) : fileName;
+		return string.IsNullOrEmpty(fileName) ? PathUtility.NormalizeSeparators(filePath) : fileName;
 	}
 
 	private static bool IsOutsideRoot(string relativePath) =>
