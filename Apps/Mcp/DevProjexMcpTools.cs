@@ -20,7 +20,10 @@ internal sealed class DevProjexMcpTools(
 		ExecuteAsync(() =>
 		{
 			_ = McpJsonArguments.Create(request.Params);
-			var projectItems = roots.Roots
+			var validatedRoots = roots.Roots
+				.Select(root => roots.ResolveProject(root))
+				.ToArray();
+			var projectItems = validatedRoots
 				.Select(root => new
 				{
 					path = root,
@@ -28,7 +31,7 @@ internal sealed class DevProjexMcpTools(
 					type = McpProjectService.IsGitRepository(root) ? "git-repository" : "local-folder"
 				})
 				.ToArray();
-			var profiles = roots.Roots
+			var profiles = validatedRoots
 				.Where(projects.HasLocalProfile)
 				.Select(root => new { project = root, name = "local" })
 				.ToArray();

@@ -123,6 +123,34 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task ListProjectsRejectsConfiguredRootReplacedByDirectoryAlias()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var outside = workspace.CreateDirectory("outside");
+		var aliasProbe = Path.Combine(workspace.Path, "alias-probe");
+		CreateDirectoryAliasOrSkip(aliasProbe, outside);
+		Directory.Delete(aliasProbe);
+
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+		var original = Path.Combine(workspace.Path, "original-project");
+		Directory.Move(project, original);
+		CreateDirectoryAliasOrSkip(project, outside);
+		try
+		{
+			var result = await server.CallAsync("list_projects");
+
+			Assert.True(result.IsError);
+			Assert.Contains(McpErrorCodes.UnknownProject, Text(result), StringComparison.Ordinal);
+		}
+		finally
+		{
+			Directory.Delete(project);
+			Directory.Move(original, project);
+		}
+	}
+
+	[Fact]
 	public async Task ToolCallsExposeTextAndStructuredPayloadsAccordingToSchemaContract()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -707,6 +735,46 @@ public sealed class McpServerIntegrationTests
 		catch (System.ComponentModel.Win32Exception)
 		{
 			Assert.Skip("Git is not available in this test environment.");
+		}
+	}
+
+	private static void CreateDirectoryAliasOrSkip(string linkPath, string targetPath)
+	{
+		if (!OperatingSystem.IsWindows())
+		{
+			try
+			{
+				Directory.CreateSymbolicLink(linkPath, targetPath);
+				return;
+			}
+			catch (Exception exception) when (
+				exception is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
+			{
+				Assert.Skip($"Directory symbolic links are unavailable: {exception.GetType().Name}.");
+			}
+		}
+
+		using var process = Process.Start(new ProcessStartInfo("cmd.exe")
+		{
+			UseShellExecute = false,
+			CreateNoWindow = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			ArgumentList = { "/c", "mklink", "/J", linkPath, targetPath }
+		});
+		if (process is null ||
+		    !process.WaitForExit(TimeSpan.FromSeconds(5)) ||
+		    process.ExitCode != 0 ||
+		    !Directory.Exists(linkPath))
+		{
+			try
+			{
+				process?.Kill(entireProcessTree: true);
+			}
+			catch (InvalidOperationException)
+			{
+			}
+			Assert.Skip("Windows junction creation is unavailable.");
 		}
 	}
 
