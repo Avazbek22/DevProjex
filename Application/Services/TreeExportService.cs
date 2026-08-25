@@ -1058,12 +1058,12 @@ public sealed class TreeExportService
 		TreeNodeDescriptor root,
 		string outputRootName)
 	{
-		var chars = 0;
-		var lineBreaks = 0;
+		long chars = 0;
+		long lineBreaks = 0;
 
-		AppendAsciiLineMetrics(outputRootPath.Length + 1, ref chars, ref lineBreaks); // "<rootPath>:"
+		AppendAsciiLineMetrics((long)outputRootPath.Length + 1, ref chars, ref lineBreaks); // "<rootPath>:"
 		AppendAsciiLineMetrics(0, ref chars, ref lineBreaks); // blank separator line
-		AppendAsciiLineMetrics(BranchMiddle.Length + outputRootName.Length, ref chars, ref lineBreaks);
+		AppendAsciiLineMetrics((long)BranchMiddle.Length + outputRootName.Length, ref chars, ref lineBreaks);
 		AppendFullAsciiChildMetrics(root, IndentPipe.Length, ref chars, ref lineBreaks);
 
 		return CreateMetricsFromNormalizedCounts(chars, lineBreaks);
@@ -1075,12 +1075,12 @@ public sealed class TreeExportService
 		IReadOnlySet<string> includedPaths,
 		string outputRootName)
 	{
-		var chars = 0;
-		var lineBreaks = 0;
+		long chars = 0;
+		long lineBreaks = 0;
 
-		AppendAsciiLineMetrics(outputRootPath.Length + 1, ref chars, ref lineBreaks); // "<rootPath>:"
+		AppendAsciiLineMetrics((long)outputRootPath.Length + 1, ref chars, ref lineBreaks); // "<rootPath>:"
 		AppendAsciiLineMetrics(0, ref chars, ref lineBreaks); // blank separator line
-		AppendAsciiLineMetrics(BranchMiddle.Length + outputRootName.Length, ref chars, ref lineBreaks);
+		AppendAsciiLineMetrics((long)BranchMiddle.Length + outputRootName.Length, ref chars, ref lineBreaks);
 		AppendSelectedAsciiChildMetrics(root, includedPaths, IndentPipe.Length, ref chars, ref lineBreaks);
 
 		return CreateMetricsFromNormalizedCounts(chars, lineBreaks);
@@ -1089,8 +1089,8 @@ public sealed class TreeExportService
 	private static void AppendFullAsciiChildMetrics(
 		TreeNodeDescriptor node,
 		int indentLength,
-		ref int chars,
-		ref int lineBreaks)
+		ref long chars,
+		ref long lineBreaks)
 	{
 		var childCount = node.Children.Count;
 		for (var index = 0; index < childCount; index++)
@@ -1098,7 +1098,7 @@ public sealed class TreeExportService
 			var child = node.Children[index];
 			var branchLength = index == childCount - 1 ? BranchLast.Length : BranchMiddle.Length;
 
-			AppendAsciiLineMetrics(indentLength + branchLength + child.DisplayName.Length, ref chars, ref lineBreaks);
+			AppendAsciiLineMetrics((long)indentLength + branchLength + child.DisplayName.Length, ref chars, ref lineBreaks);
 
 			if (child.Children.Count > 0)
 				AppendFullAsciiChildMetrics(child, indentLength + IndentPipe.Length, ref chars, ref lineBreaks);
@@ -1109,8 +1109,8 @@ public sealed class TreeExportService
 		TreeNodeDescriptor node,
 		IReadOnlySet<string> includedPaths,
 		int indentLength,
-		ref int chars,
-		ref int lineBreaks)
+		ref long chars,
+		ref long lineBreaks)
 	{
 		var visibleCount = 0;
 		foreach (var child in node.Children)
@@ -1128,26 +1128,26 @@ public sealed class TreeExportService
 			visibleIndex++;
 			var branchLength = visibleIndex == visibleCount ? BranchLast.Length : BranchMiddle.Length;
 
-			AppendAsciiLineMetrics(indentLength + branchLength + child.DisplayName.Length, ref chars, ref lineBreaks);
+			AppendAsciiLineMetrics((long)indentLength + branchLength + child.DisplayName.Length, ref chars, ref lineBreaks);
 
 			if (child.Children.Count > 0)
 				AppendSelectedAsciiChildMetrics(child, includedPaths, indentLength + IndentPipe.Length, ref chars, ref lineBreaks);
 		}
 	}
 
-	private static void AppendAsciiLineMetrics(int renderedChars, ref int chars, ref int lineBreaks)
+	private static void AppendAsciiLineMetrics(long renderedChars, ref long chars, ref long lineBreaks)
 	{
 		chars += renderedChars + 1; // Normalize any platform newline to a single logical line-break char.
 		lineBreaks++;
 	}
 
-	private static ExportOutputMetrics CreateMetricsFromNormalizedCounts(int chars, int lineBreaks)
+	private static ExportOutputMetrics CreateMetricsFromNormalizedCounts(long chars, long lineBreaks)
 	{
 		if (chars <= 0)
 			return ExportOutputMetrics.Empty;
 
 		var lines = lineBreaks + 1;
-		var tokens = (chars + 3) / 4;
+		var tokens = (chars / 4) + (chars % 4 == 0 ? 0 : 1);
 		return new ExportOutputMetrics(lines, chars, tokens);
 	}
 
