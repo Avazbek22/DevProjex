@@ -47,13 +47,15 @@ public partial class MainWindow : IRefreshTreePipelineHost
             PreserveCheckedPaths: preserveCheckedPaths);
     }
 
-    void IRefreshTreePipelineHost.BeforeFullTreeRefresh()
+    void IRefreshTreePipelineHost.BeforeFullTreeRefresh(bool preserveStatusMetrics)
     {
 		CancelSecretRedactionDiscovery();
         // Full-tree refresh invalidates the active metrics baseline.
         // Cancel early so obsolete file reads stop before we start the next build.
         _metrics.CancelAndDiscardBackgroundCalculation();
-        _viewModel.StatusMetricsVisible = false;
+        // Apply keeps the last published snapshot visible until its replacement is ready.
+        if (!preserveStatusMetrics)
+            _viewModel.StatusMetricsVisible = false;
     }
 
     void IRefreshTreePipelineHost.BeforeInteractiveFilterRefresh()

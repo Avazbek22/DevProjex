@@ -264,8 +264,8 @@ Faixa: 6–28, a redefinição é 15.
 Torna a UI mais densa: menor espaçamento na árvore e nas configurações.
 Enquanto a área de trabalho de visualização estiver ativa, o Modo Compacto será ativado automaticamente.
 
-### Animação de expansão da árvore
-Gira suavemente a seta e expande ou recolhe um ramo, deslocando as linhas adjacentes. É ativada por padrão; quando desativada, a expansão é imediata.
+### Animações
+“Exibir → Animações” controla separadamente a expansão da árvore, os contadores de status e a exibição inicial das ferramentas. As três animações são ativadas por padrão; quando uma animação é desativada, seu estado final aparece imediatamente.
 
 ### Fonte de árvore
 A fonte da árvore é selecionada em “Exibir → Fonte da árvore”.
@@ -549,7 +549,7 @@ No modo Transparência, o fundo da janela principal permanece transparente. Menu
 “Ajuda → Atualizações” compara a versão atual com a versão estável mais recente publicada no GitHub. As verificações automáticas ficam desativadas por padrão; quando ativadas, o DevProjex verifica na inicialização após pelo menos sete dias desde a última verificação bem-sucedida. A caixa de seleção é aplicada imediatamente. O último resultado bem-sucedido é mantido entre as execuções do aplicativo e não é apagado por uma falha de rede posterior. A instalação continua sendo uma ação do usuário.
 
 ### 16.2 Redefinir configurações
-Redefinir configurações (Ajuda → Redefinir configurações) restaura o tema padrão, efeitos, modo compacto, animação de expansão da árvore e idioma da interface. Perfis de projeto, histórico e arquivos em disco não são alterados.
+Redefinir configurações (Ajuda → Redefinir configurações) restaura o tema padrão, efeitos, modo compacto, configurações de animação e idioma da interface. Perfis de projeto, histórico e arquivos em disco não são alterados.
 
 ### 16.3 Redefinir dados
 Redefinir dados (Ajuda → Redefinir dados) remove perfis de parâmetros de projeto local salvos:

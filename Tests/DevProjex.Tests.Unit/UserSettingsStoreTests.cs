@@ -16,6 +16,8 @@ public sealed class UserSettingsStoreTests
         Assert.False(File.Exists(store.GetPath()));
         Assert.False(database.ViewSettings.IsCompactMode);
         Assert.True(database.ViewSettings.IsTreeExpansionAnimationEnabled);
+        Assert.True(database.ViewSettings.IsStatusMetricsAnimationEnabled);
+        Assert.True(database.ViewSettings.IsToolAnimationEnabled);
         Assert.False(database.ViewSettings.IsTerminalCommandPromptDismissed);
         Assert.Null(database.ViewSettings.PreferredLanguage);
         Assert.False(database.UpdateCheckSettings.IsAutomaticCheckEnabled);
@@ -54,6 +56,8 @@ public sealed class UserSettingsStoreTests
         {
             IsCompactMode = true,
             IsTreeExpansionAnimationEnabled = false,
+            IsStatusMetricsAnimationEnabled = false,
+            IsToolAnimationEnabled = false,
             IsTerminalCommandPromptDismissed = true,
             PreferredLanguage = AppLanguage.It
         };
@@ -76,12 +80,15 @@ public sealed class UserSettingsStoreTests
         Assert.True(File.Exists(store.GetPath() + ".bak"));
         using var json = JsonDocument.Parse(File.ReadAllText(store.GetPath()));
         var root = json.RootElement;
-        Assert.Equal(8, root.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(9, root.GetProperty("schemaVersion").GetInt32());
         Assert.True(root.TryGetProperty("viewSettings", out _));
         Assert.True(root.TryGetProperty("updateCheckSettings", out _));
         Assert.False(root.TryGetProperty("presets", out _));
         Assert.False(root.TryGetProperty("lastSelected", out _));
         Assert.DoesNotContain("isAdvancedIgnoreCountsEnabled", root.GetRawText(), StringComparison.Ordinal);
+        var viewSettings = root.GetProperty("viewSettings");
+        Assert.True(viewSettings.GetProperty("isStatusMetricsAnimationEnabled").GetBoolean());
+        Assert.True(viewSettings.GetProperty("isToolAnimationEnabled").GetBoolean());
     }
 
     [Fact]
@@ -108,10 +115,12 @@ public sealed class UserSettingsStoreTests
 
         Assert.True(loaded.ViewSettings.IsCompactMode);
         Assert.True(loaded.ViewSettings.IsTreeExpansionAnimationEnabled);
+        Assert.True(loaded.ViewSettings.IsStatusMetricsAnimationEnabled);
+        Assert.True(loaded.ViewSettings.IsToolAnimationEnabled);
         Assert.True(loaded.ViewSettings.IsTerminalCommandPromptDismissed);
         Assert.Equal(AppLanguage.De, loaded.ViewSettings.PreferredLanguage);
         using var rewritten = JsonDocument.Parse(File.ReadAllText(store.GetPath()));
-        Assert.Equal(8, rewritten.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(9, rewritten.RootElement.GetProperty("schemaVersion").GetInt32());
         Assert.True(
             rewritten.RootElement
                 .GetProperty("viewSettings")
@@ -148,20 +157,24 @@ public sealed class UserSettingsStoreTests
 
         Assert.True(loaded.ViewSettings.IsCompactMode);
         Assert.True(loaded.ViewSettings.IsTreeExpansionAnimationEnabled);
+        Assert.True(loaded.ViewSettings.IsStatusMetricsAnimationEnabled);
+        Assert.True(loaded.ViewSettings.IsToolAnimationEnabled);
         using var rewritten = JsonDocument.Parse(File.ReadAllText(store.GetPath()));
         var viewSettings = rewritten.RootElement.GetProperty("viewSettings");
-        Assert.Equal(8, rewritten.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(9, rewritten.RootElement.GetProperty("schemaVersion").GetInt32());
         Assert.True(viewSettings.GetProperty("isTreeExpansionAnimationEnabled").GetBoolean());
         Assert.False(viewSettings.TryGetProperty("isTreeAnimationEnabled", out _));
     }
 
     [Theory]
-    [InlineData(false, false, false, null)]
-    [InlineData(true, false, true, AppLanguage.Ru)]
-    [InlineData(false, true, true, AppLanguage.Fr)]
+    [InlineData(false, false, false, false, false, null)]
+    [InlineData(true, false, true, false, true, AppLanguage.Ru)]
+    [InlineData(false, true, false, true, true, AppLanguage.Fr)]
     public void SaveLoad_RoundTripsEveryActiveViewSetting(
         bool compact,
         bool treeExpansionAnimation,
+        bool statusMetricsAnimation,
+        bool toolAnimation,
         bool terminalPromptDismissed,
         AppLanguage? language)
     {
@@ -172,6 +185,8 @@ public sealed class UserSettingsStoreTests
         {
             IsCompactMode = compact,
             IsTreeExpansionAnimationEnabled = treeExpansionAnimation,
+            IsStatusMetricsAnimationEnabled = statusMetricsAnimation,
+            IsToolAnimationEnabled = toolAnimation,
             IsTerminalCommandPromptDismissed = terminalPromptDismissed,
             PreferredLanguage = language
         };
@@ -180,6 +195,49 @@ public sealed class UserSettingsStoreTests
         var reloaded = new UserSettingsStore(() => temp.Path).Load();
 
         Assert.Equal(database.ViewSettings, reloaded.ViewSettings);
+    }
+
+    [Fact]
+    public void Load_SchemaEightAnimationSettings_ArePreservedAndUpgraded()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new UserSettingsStore(() => temp.Path);
+        WriteJson(store.GetPath(), """
+        {
+          "schemaVersion": 8,
+          "viewSettings": {
+            "isTreeExpansionAnimationEnabled": false,
+            "isStatusMetricsAnimationEnabled": false,
+            "isToolAnimationEnabled": false
+          }
+        }
+        """);
+
+        var loaded = store.Load();
+
+        Assert.False(loaded.ViewSettings.IsTreeExpansionAnimationEnabled);
+        Assert.False(loaded.ViewSettings.IsStatusMetricsAnimationEnabled);
+        Assert.False(loaded.ViewSettings.IsToolAnimationEnabled);
+        using var rewritten = JsonDocument.Parse(File.ReadAllText(store.GetPath()));
+        Assert.Equal(9, rewritten.RootElement.GetProperty("schemaVersion").GetInt32());
+    }
+
+    [Fact]
+    public void Load_CurrentSchemaWithMissingAnimationSettings_UsesDocumentedDefaults()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new UserSettingsStore(() => temp.Path);
+        WriteJson(store.GetPath(), """
+        {
+          "schemaVersion": 9,
+          "viewSettings": { "isCompactMode": true }
+        }
+        """);
+
+        var loaded = store.Load();
+
+        Assert.True(loaded.ViewSettings.IsStatusMetricsAnimationEnabled);
+        Assert.True(loaded.ViewSettings.IsToolAnimationEnabled);
     }
 
     [Fact]
@@ -339,7 +397,7 @@ public sealed class UserSettingsStoreTests
         {
             "corrupt" => "{ invalid-primary",
             "current" => """
-                         { "schemaVersion": 8, "viewSettings": { "isCompactMode": true } }
+                         { "schemaVersion": 9, "viewSettings": { "isCompactMode": true } }
                          """,
             _ => null
         };
@@ -399,7 +457,7 @@ public sealed class UserSettingsStoreTests
 
         Assert.True(reloaded.ViewSettings == databaseA.ViewSettings || reloaded.ViewSettings == databaseB.ViewSettings);
         using var document = JsonDocument.Parse(File.ReadAllText(storeA.GetPath()));
-        Assert.Equal(8, document.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(9, document.RootElement.GetProperty("schemaVersion").GetInt32());
     }
 
     private static void WriteJson(string path, string json)

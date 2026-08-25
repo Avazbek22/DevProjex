@@ -264,8 +264,8 @@ Rentang: 6–28, reset adalah 15.
 Membuat UI lebih padat: jarak lebih kecil pada pohon dan pengaturan.
 Saat ruang kerja pratinjau aktif, Mode Ringkas diaktifkan secara otomatis.
 
-### Animasi perluasan pohon
-Memutar chevron dengan mulus dan memperluas atau meruntuhkan cabang pohon sambil memindahkan baris yang berdekatan. Diaktifkan secara default; ketika dinonaktifkan, perluasan segera dilakukan.
+### Animasi
+“Tampilan → Animasi” mengatur perluasan pohon, penghitung status, dan kemunculan awal alat secara terpisah. Ketiganya diaktifkan secara default; animasi yang dinonaktifkan langsung menampilkan keadaan akhirnya.
 
 ### Fonta pohon
 Font pohon dipilih melalui “View → Tree font”.
@@ -547,7 +547,7 @@ Dalam mode Transparansi, latar belakang jendela utama tetap transparan. Menu, su
 “Bantuan → Pembaruan” membandingkan versi saat ini dengan rilis GitHub stabil terbaru. Pemeriksaan otomatis dinonaktifkan secara default; ketika diaktifkan, DevProjex memeriksa saat startup setelah setidaknya tujuh hari berlalu sejak pemeriksaan berhasil sebelumnya. Kotak centang akan segera berlaku. Hasil terakhir yang berhasil dipertahankan di antara aplikasi yang dijalankan dan tidak terhapus oleh kegagalan jaringan di kemudian hari. Instalasi tetap merupakan tindakan pengguna.
 
 ### 16.2 Atur ulang pengaturan
-Atur ulang pengaturan (Bantuan → Atur ulang pengaturan) memulihkan tema default, efek, mode Ringkas, animasi perluasan pohon, dan bahasa antarmuka. Profil proyek, riwayat, dan file di disk tidak diubah.
+Atur ulang pengaturan (Bantuan → Atur ulang pengaturan) memulihkan tema default, efek, mode Ringkas, pengaturan animasi, dan bahasa antarmuka. Profil proyek, riwayat, dan file di disk tidak diubah.
 
 ### 16.3 Mengatur ulang data
 Reset data (Bantuan → Reset data) menghapus profil parameter proyek lokal yang disimpan:

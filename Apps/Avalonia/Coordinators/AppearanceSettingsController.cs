@@ -145,6 +145,20 @@ internal sealed class AppearanceSettingsController(
         SaveCurrentViewSettings();
     }
 
+    public void ToggleStatusMetricsAnimation()
+    {
+        viewModel.IsStatusMetricsAnimationEnabled =
+            !viewModel.IsStatusMetricsAnimationEnabled;
+        SaveCurrentViewSettings();
+    }
+
+    public void ToggleToolAnimation()
+    {
+        viewModel.IsToolAnimationEnabled =
+            !viewModel.IsToolAnimationEnabled;
+        SaveCurrentViewSettings();
+    }
+
     public void ToggleThemePopover()
         => viewModel.ThemePopoverOpen = !viewModel.ThemePopoverOpen;
 
@@ -191,6 +205,23 @@ internal sealed class AppearanceSettingsController(
 
     public void ResetThemeSettings()
     {
+        var resetViewSettings = new AppViewSettings
+        {
+            IsTerminalCommandPromptDismissed =
+                ViewSettings.IsTerminalCommandPromptDismissed
+        };
+        _userSettings.ViewSettings = resetViewSettings;
+        userSettingsStore.TryPersistViewSettings(_userSettings);
+        ApplyViewSettings(resetViewSettings);
+
+        var resetLanguage =
+            commandLineLanguage ?? AppLanguageUtility.DetectSystemLanguage();
+        if (localization.CurrentLanguage != resetLanguage)
+        {
+            localization.SetLanguage(resetLanguage);
+            viewModel.UpdateLocalization();
+        }
+
         var resetDocument = themeSettingsStore.ResetToDefaults();
         var resetSession =
             new ThemePresetSession(
@@ -331,6 +362,10 @@ internal sealed class AppearanceSettingsController(
         viewModel.IsCompactMode = settings.IsCompactMode;
         viewModel.IsTreeExpansionAnimationEnabled =
             settings.IsTreeExpansionAnimationEnabled;
+        viewModel.IsStatusMetricsAnimationEnabled =
+            settings.IsStatusMetricsAnimationEnabled;
+        viewModel.IsToolAnimationEnabled =
+            settings.IsToolAnimationEnabled;
         workspace.UpdateCompactModeVisualState();
     }
 
@@ -364,6 +399,10 @@ internal sealed class AppearanceSettingsController(
             IsCompactMode = viewModel.IsCompactMode,
             IsTreeExpansionAnimationEnabled =
                 viewModel.IsTreeExpansionAnimationEnabled,
+            IsStatusMetricsAnimationEnabled =
+                viewModel.IsStatusMetricsAnimationEnabled,
+            IsToolAnimationEnabled =
+                viewModel.IsToolAnimationEnabled,
             IsTerminalCommandPromptDismissed =
                 current.IsTerminalCommandPromptDismissed,
             PreferredLanguage = current.PreferredLanguage

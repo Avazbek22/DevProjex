@@ -1432,6 +1432,27 @@ public sealed class MainWindowCoordinatorRefactorTests
         Assert.True(host.LastAppliedInput.PreserveExpandedPaths);
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    public async Task RefreshTreePipeline_FullRefresh_UsesRequestedStatusMetricsVisibilityPolicy(
+        bool preserveStatusMetrics,
+        bool expectedVisible)
+    {
+        var viewModel = CreateViewModel();
+        viewModel.StatusMetricsVisible = true;
+        var host = new RecordingRefreshTreeHost(viewModel);
+        using var pipeline = new RefreshTreePipeline(host);
+
+        var outcome = await pipeline.RefreshTreeAsync(
+            cancellationToken: TestContext.Current.CancellationToken,
+            preserveStatusMetrics: preserveStatusMetrics);
+
+        Assert.Equal(TreeRefreshOutcome.Applied, outcome);
+        Assert.Equal(preserveStatusMetrics, host.LastPreserveStatusMetrics);
+        Assert.Equal(expectedVisible, viewModel.StatusMetricsVisible);
+    }
+
 	[Fact]
 	public async Task RefreshTreePipeline_IncompleteInventoryKeepsPublishedTreeAndReportsOnce()
 	{
@@ -2310,6 +2331,8 @@ public sealed class MainWindowCoordinatorRefactorTests
 
         public int BeforeFullTreeRefreshCount { get; private set; }
 
+        public bool LastPreserveStatusMetrics { get; private set; }
+
         public int BeforeInteractiveFilterRefreshCount { get; private set; }
 
 		public int IncompleteScanReportCount { get; private set; }
@@ -2340,10 +2363,12 @@ public sealed class MainWindowCoordinatorRefactorTests
                 InteractiveFilterBaseTree: InteractiveFilterBaseTree);
         }
 
-        public void BeforeFullTreeRefresh()
+        public void BeforeFullTreeRefresh(bool preserveStatusMetrics)
         {
             BeforeFullTreeRefreshCount++;
-            viewModel.StatusMetricsVisible = false;
+            LastPreserveStatusMetrics = preserveStatusMetrics;
+            if (!preserveStatusMetrics)
+                viewModel.StatusMetricsVisible = false;
         }
 
         public void BeforeInteractiveFilterRefresh() =>

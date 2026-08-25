@@ -169,21 +169,41 @@
           <!-- Populated dynamically from the tree-font list. -->
         </MenuItem>
         <Separator IsVisible="{Binding IsTreePaneVisible}" />
-        <MenuItem Click="OnToggleCompactMode"
+        <MenuItem Name="AnimationsMenuItem"
+                  Header="{Binding MenuViewAnimations}">
+          <MenuItem Name="TreeExpansionAnimationMenuItem"
+                    Click="OnToggleTreeExpansionAnimation"
+                    IsVisible="{Binding IsTreePaneVisible}">
+            <MenuItem.Header>
+              <CheckBox Content="{Binding MenuViewTreeExpansionAnimation}"
+                        IsChecked="{Binding IsTreeExpansionAnimationEnabled}"
+                        IsHitTestVisible="False"/>
+            </MenuItem.Header>
+          </MenuItem>
+          <MenuItem Name="StatusMetricsAnimationMenuItem"
+                    Click="OnToggleStatusMetricsAnimation">
+            <MenuItem.Header>
+              <CheckBox Content="{Binding MenuViewStatusMetricsAnimation}"
+                        IsChecked="{Binding IsStatusMetricsAnimationEnabled}"
+                        IsHitTestVisible="False"/>
+            </MenuItem.Header>
+          </MenuItem>
+          <MenuItem Name="ToolAnimationMenuItem"
+                    Click="OnToggleToolAnimation">
+            <MenuItem.Header>
+              <CheckBox Content="{Binding MenuViewToolAnimation}"
+                        IsChecked="{Binding IsToolAnimationEnabled}"
+                        IsHitTestVisible="False"/>
+            </MenuItem.Header>
+          </MenuItem>
+        </MenuItem>
+        <MenuItem Name="CompactModeMenuItem"
+                  Click="OnToggleCompactMode"
                   IsVisible="{Binding IsTreePaneVisible}"
                   IsEnabled="{Binding CanToggleCompactMode}">
           <MenuItem.Header>
             <CheckBox Content="{Binding MenuViewCompactMode}"
                       IsChecked="{Binding IsCompactModeEffective}"
-                      IsHitTestVisible="False"/>
-          </MenuItem.Header>
-        </MenuItem>
-        <MenuItem Name="TreeExpansionAnimationMenuItem"
-                  Click="OnToggleTreeExpansionAnimation"
-                  IsVisible="{Binding IsTreePaneVisible}">
-          <MenuItem.Header>
-            <CheckBox Content="{Binding MenuViewTreeExpansionAnimation}"
-                      IsChecked="{Binding IsTreeExpansionAnimationEnabled}"
                       IsHitTestVisible="False"/>
           </MenuItem.Header>
         </MenuItem>

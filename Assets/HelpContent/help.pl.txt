@@ -264,8 +264,8 @@ Zakres: 6–28, reset wynosi 15.
 Sprawia, że ​​interfejs użytkownika jest gęstszy: mniejsze odstępy w drzewie i ustawieniach.
 Gdy obszar roboczy podglądu jest aktywny, tryb kompaktowy jest włączany automatycznie.
 
-### Animacja rozwijania drzewa
-Płynnie obraca jodełkę oraz rozwija lub zwija gałąź drzewa podczas przesuwania sąsiednich rzędów. Domyślnie włączone; gdy jest wyłączony, ekspansja jest natychmiastowa.
+### Animacje
+W sekcji „Widok → Animacje” można niezależnie sterować rozwijaniem drzewa, licznikami stanu i początkowym pojawianiem się narzędzi. Wszystkie trzy animacje są domyślnie włączone; wyłączenie animacji natychmiast pokazuje jej stan końcowy.
 
 ### Czcionka drzewa
 Czcionkę drzewiastą wybiera się poprzez „Widok → Czcionka drzewiasta”.
@@ -547,7 +547,7 @@ W trybie przezroczystości tło okna głównego pozostaje przezroczyste. Menu, p
 „Pomoc → Aktualizacje” porównuje aktualną wersję z najnowszą stabilną wersją GitHub. Automatyczne sprawdzanie jest domyślnie wyłączone; po włączeniu DevProjex sprawdza przy uruchomieniu po upływie co najmniej siedmiu dni od poprzedniego pomyślnego sprawdzenia. Pole wyboru zaczyna obowiązywać natychmiast. Ostatni pomyślny wynik jest zachowywany pomiędzy uruchomieniami aplikacji i nie zostanie usunięty w przypadku późniejszej awarii sieci. Instalacja pozostaje działaniem użytkownika.
 
 ### 16.2 Resetuj ustawienia
-Resetuj ustawienia (Pomoc → Resetuj ustawienia) przywraca domyślny motyw, efekty, tryb kompaktowy, animację rozwijania drzewa i język interfejsu. Profile projektów, historia i pliki na dysku nie ulegają zmianie.
+Resetuj ustawienia (Pomoc → Resetuj ustawienia) przywraca domyślny motyw, efekty, tryb kompaktowy, ustawienia animacji i język interfejsu. Profile projektów, historia i pliki na dysku nie ulegają zmianie.
 
 ### 16.3 Resetuj dane
 Resetuj dane (Pomoc → Resetuj dane) usuwa zapisane profile parametrów projektu lokalnego:

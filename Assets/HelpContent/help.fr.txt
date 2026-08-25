@@ -264,8 +264,8 @@ Plage : 6–28, reset : 15.
 Rend l’interface plus dense : moins d’espaces dans l’arbre et les paramètres.
 Quand l’espace de travail d’aperçu est actif, le mode compact est activé automatiquement.
 
-### Animation de déploiement de l’arborescence
-Fait pivoter la flèche et déploie ou replie une branche en déplaçant les lignes voisines. Activée par défaut ; lorsqu’elle est désactivée, le déploiement est immédiat.
+### Animations
+« Affichage → Animations » permet de régler séparément le déploiement de l’arborescence, les compteurs d’état et l’apparition initiale des outils. Les trois animations sont activées par défaut ; lorsqu’une animation est désactivée, son état final s’affiche immédiatement.
 
 ### Police de l’arborescence
 La police de l’arborescence se choisit via « Affichage → Police de l’arborescence ».
@@ -496,7 +496,7 @@ En mode Transparence, l’arrière-plan de la fenêtre principale reste transpar
 « Aide → Mises à jour » compare la version actuelle à la dernière version stable publiée sur GitHub. La vérification automatique est désactivée par défaut ; lorsqu’elle est activée, DevProjex effectue la vérification au démarrage si au moins sept jours se sont écoulés depuis la dernière vérification réussie. La case à cocher est appliquée immédiatement. Le dernier résultat réussi est conservé entre les exécutions de l’application et n’est pas effacé par une erreur réseau ultérieure. L’installation reste une action de l’utilisateur.
 
 ### 16.2 Réinitialiser les paramètres
-Réinitialiser les paramètres (Aide → Réinitialiser les paramètres) rétablit les valeurs par défaut du thème, des effets, du mode compact, de l’animation de déploiement de l’arborescence et de la langue de l’interface. Les profils de projet, l’historique et les fichiers sur le disque ne sont pas modifiés.
+Réinitialiser les paramètres (Aide → Réinitialiser les paramètres) rétablit les valeurs par défaut du thème, des effets, du mode compact, des paramètres d’animation et de la langue de l’interface. Les profils de projet, l’historique et les fichiers sur le disque ne sont pas modifiés.
 
 ### 16.3 Réinitialiser les données
 Réinitialiser les données (Aide → Réinitialiser les données) supprime les profils enregistrés de paramètres des projets locaux :

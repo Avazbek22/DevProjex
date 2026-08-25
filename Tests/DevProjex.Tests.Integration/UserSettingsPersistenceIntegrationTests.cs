@@ -41,6 +41,8 @@ public sealed class UserSettingsPersistenceIntegrationTests
 
         Assert.True(upgradedUserSettings.ViewSettings.IsCompactMode);
         Assert.True(upgradedUserSettings.ViewSettings.IsTreeExpansionAnimationEnabled);
+        Assert.True(upgradedUserSettings.ViewSettings.IsStatusMetricsAnimationEnabled);
+        Assert.True(upgradedUserSettings.ViewSettings.IsToolAnimationEnabled);
         Assert.True(upgradedUserSettings.ViewSettings.IsTerminalCommandPromptDismissed);
         Assert.Equal(AppLanguage.Uz, upgradedUserSettings.ViewSettings.PreferredLanguage);
         Assert.Equal(upgradedUserSettings.ViewSettings, restartedUserSettings.ViewSettings);
@@ -67,12 +69,16 @@ public sealed class UserSettingsPersistenceIntegrationTests
         {
             IsCompactMode = true,
             IsTreeExpansionAnimationEnabled = false,
+            IsStatusMetricsAnimationEnabled = false,
+            IsToolAnimationEnabled = false,
             PreferredLanguage = AppLanguage.De
         };
         secondSnapshot.ViewSettings = new AppViewSettings
         {
             IsCompactMode = false,
             IsTreeExpansionAnimationEnabled = true,
+            IsStatusMetricsAnimationEnabled = true,
+            IsToolAnimationEnabled = true,
             PreferredLanguage = AppLanguage.Fr
         };
         using var startGate = new ManualResetEventSlim(false);
@@ -96,10 +102,14 @@ public sealed class UserSettingsPersistenceIntegrationTests
         var matchesFirstSnapshot =
             reloaded.ViewSettings.IsCompactMode &&
             !reloaded.ViewSettings.IsTreeExpansionAnimationEnabled &&
+            !reloaded.ViewSettings.IsStatusMetricsAnimationEnabled &&
+            !reloaded.ViewSettings.IsToolAnimationEnabled &&
             reloaded.ViewSettings.PreferredLanguage == AppLanguage.De;
         var matchesSecondSnapshot =
             !reloaded.ViewSettings.IsCompactMode &&
             reloaded.ViewSettings.IsTreeExpansionAnimationEnabled &&
+            reloaded.ViewSettings.IsStatusMetricsAnimationEnabled &&
+            reloaded.ViewSettings.IsToolAnimationEnabled &&
             reloaded.ViewSettings.PreferredLanguage == AppLanguage.Fr;
 
         Assert.True(File.Exists(storeA.GetPath()));

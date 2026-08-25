@@ -7,6 +7,8 @@ using DevProjex.Avalonia.Controls;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Kernel.Abstractions;
+using System.Reflection;
+using System.Text.Json;
 
 namespace DevProjex.Tests.UI;
 
@@ -491,6 +493,82 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
         finally
         {
             await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task AnimationMenu_StatusAndToolPreferences_PersistAcrossWindows()
+    {
+        var appDataPath = Path.Combine(
+            workspace.Project.AppDataPath,
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(appDataPath);
+        var firstWindow = await UiTestDriver.CreateLoadedMainWindowAsync(
+            workspace.Project,
+            appDataPathOverride: appDataPath);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(firstWindow);
+            var animationsMenu = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(
+                firstWindow,
+                "AnimationsMenuItem");
+            var statusMenu = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(
+                firstWindow,
+                "StatusMetricsAnimationMenuItem");
+            var toolMenu = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(
+                firstWindow,
+                "ToolAnimationMenuItem");
+
+            Assert.Equal("Animations", animationsMenu.Header);
+            Assert.True(viewModel.IsStatusMetricsAnimationEnabled);
+            Assert.True(viewModel.IsToolAnimationEnabled);
+
+            await UiTestDriver.RaiseMenuItemClickAsync(statusMenu);
+            await UiTestDriver.RaiseMenuItemClickAsync(toolMenu);
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+
+            Assert.False(viewModel.IsStatusMetricsAnimationEnabled);
+            Assert.False(viewModel.IsToolAnimationEnabled);
+            Assert.False(Assert.IsType<CheckBox>(statusMenu.Header).IsChecked);
+            Assert.False(Assert.IsType<CheckBox>(toolMenu.Header).IsChecked);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(firstWindow, cleanupAppData: false);
+        }
+
+        var secondWindow = await UiTestDriver.CreateLoadedMainWindowAsync(
+            workspace.Project,
+            appDataPathOverride: appDataPath);
+        try
+        {
+            var restored = UiTestDriver.GetViewModel(secondWindow);
+            Assert.False(restored.IsStatusMetricsAnimationEnabled);
+            Assert.False(restored.IsToolAnimationEnabled);
+
+            var resetMethod = typeof(MainWindow).GetMethod(
+                "ResetThemeSettings",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(resetMethod);
+            resetMethod.Invoke(secondWindow, null);
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+
+            Assert.True(restored.IsTreeExpansionAnimationEnabled);
+            Assert.True(restored.IsStatusMetricsAnimationEnabled);
+            Assert.True(restored.IsToolAnimationEnabled);
+            Assert.False(restored.IsCompactMode);
+            using var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(
+                appDataPath,
+                "DevProjex",
+                "user-settings.json")));
+            var persisted = document.RootElement.GetProperty("viewSettings");
+            Assert.True(persisted.GetProperty("isStatusMetricsAnimationEnabled").GetBoolean());
+            Assert.True(persisted.GetProperty("isToolAnimationEnabled").GetBoolean());
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(secondWindow);
         }
     }
 

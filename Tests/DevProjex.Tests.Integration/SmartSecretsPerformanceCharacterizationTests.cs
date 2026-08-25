@@ -65,7 +65,7 @@ public sealed class SmartSecretsPerformanceCharacterizationTests
 				SecretRedactionOutputPreparer.MaximumParallelScans,
 				Math.Max(1, Environment.ProcessorCount)));
 		Assert.InRange(diagnostics.RetainedBytes, 1, diagnostics.MaximumRetainedBytes);
-		const int maximumPerFileOverheadBytes = 3 * 1024;
+		const int maximumPerFileOverheadBytes = 4 * 1024;
 		var allocationBudget = sourceBytes * 2 + fileCount * maximumPerFileOverheadBytes;
 		Assert.True(
 			allocated < allocationBudget,

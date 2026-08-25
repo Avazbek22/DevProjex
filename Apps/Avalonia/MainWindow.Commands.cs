@@ -26,6 +26,18 @@ public partial class MainWindow
         RoutedEventArgs e)
         => _appearanceSettings.ToggleTreeExpansionAnimation();
 
+    private void OnToggleStatusMetricsAnimation(
+        object? sender,
+        RoutedEventArgs e)
+        => _appearanceSettings.ToggleStatusMetricsAnimation();
+
+    private void OnToggleToolAnimation(object? sender, RoutedEventArgs e)
+    {
+        _appearanceSettings.ToggleToolAnimation();
+        if (!_viewModel.IsToolAnimationEnabled)
+            _topMenuBar?.CompleteProjectToolsReveal();
+    }
+
     private void OnThemeMenuClick(object? sender, RoutedEventArgs e)
     {
         _viewModel.UpdatePopoverOpen = false;
@@ -659,7 +671,8 @@ public partial class MainWindow
 
                     refreshOutcome = await RefreshTreeAsync(
                         cancellationToken: cancellationToken,
-                        postLoadCleanupReason: MemoryCleanupReason.ApplySettingsWorkCompleted);
+                        postLoadCleanupReason: MemoryCleanupReason.ApplySettingsWorkCompleted,
+                        preserveStatusMetrics: true);
 
                     // A checkbox can change while a large tree is being materialized. In that
                     // case the pipeline discards the obsolete graph and Apply converges again

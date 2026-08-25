@@ -264,8 +264,8 @@ Intervalo: 6–28, a reposição é 15.
 Torna a UI mais densa: menor espaçamento na árvore e nas definições.
 Enquanto a área de trabalho de visualização estiver ativa, o Modo Compacto será ativado automaticamente.
 
-### Animação de expansão da árvore
-Roda suavemente a seta e expande ou recolhe um ramo, deslocando as linhas adjacentes. Está ativada por predefinição; quando desativada, a expansão é imediata.
+### Animações
+“Ver → Animações” controla separadamente a expansão da árvore, os contadores de estado e a apresentação inicial das ferramentas. As três animações estão ativadas por predefinição; quando uma animação é desativada, o estado final é apresentado imediatamente.
 
 ### Fonte de árvore
 A fonte da árvore é selecionada em “Ver → Fonte da árvore”.
@@ -549,7 +549,7 @@ No modo Transparência, o fundo da janela principal permanece transparente. Os m
 «Ajuda → Atualizações» compara a versão atual com a versão estável mais recente publicada no GitHub. As verificações automáticas estão desativadas por predefinição; quando ativadas, o DevProjex verifica no arranque após terem passado pelo menos sete dias desde a última verificação bem-sucedida. A caixa de seleção é aplicada imediatamente. O último resultado bem-sucedido é mantido entre execuções da aplicação e não é apagado por uma falha de rede posterior. A instalação continua a ser uma ação do utilizador.
 
 ### 16.2 Repor configurações
-Repor definições (Ajuda → Repor definições) restaura o tema predefinido, os efeitos, o modo compacto, a animação de expansão da árvore e o idioma da interface. Os perfis de projeto, histórico e ficheiros em disco não são alterados.
+Repor definições (Ajuda → Repor definições) restaura o tema predefinido, os efeitos, o modo compacto, as definições de animação e o idioma da interface. Os perfis de projeto, histórico e ficheiros em disco não são alterados.
 
 ### 16.3 Repor dados
 Repor dados (Ajuda → Repor dados) remove os perfis de parâmetros de projeto local guardados:

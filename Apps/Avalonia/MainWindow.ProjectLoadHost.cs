@@ -35,6 +35,14 @@ public partial class MainWindow : IProjectLoadPipelineHost
     {
         _currentPath = path;
 		_viewModel.IsProjectLoadInProgress = true;
+        var shouldAnimateProjectTools =
+            _viewModel.IsToolAnimationEnabled &&
+            (_workspacePresentation.IsSettingsAnimating ||
+             SettingsPanelRevealPolicy.ShouldRunInitialReveal(
+                 settingsVisible: true,
+                 settingsAnimating: false,
+                 _workspacePresentation.HasVisibleSettingsPanelWidth()));
+        _topMenuBar?.PrepareProjectToolsReveal(shouldAnimateProjectTools);
         _viewModel.IsProjectLoaded = true;
         _viewModel.SettingsVisible = true;
         _viewModel.SearchVisible = false;

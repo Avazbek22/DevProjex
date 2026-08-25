@@ -264,8 +264,8 @@ Bereich: 6–28, Reset: 15.
 Macht die Oberfläche dichter: kleinere Abstände im Baum und in den Einstellungen.
 Während der Vorschau-Arbeitsbereich aktiv ist, wird der Kompaktmodus automatisch eingeschaltet.
 
-### Animation beim Aufklappen des Baums
-Dreht den Pfeil sanft und klappt einen Baumzweig auf oder zu, während benachbarte Zeilen verschoben werden. Standardmäßig aktiviert; bei Deaktivierung erfolgt das Aufklappen sofort.
+### Animationen
+Unter „Ansicht → Animationen“ lassen sich das Aufklappen des Baums, die Statuszähler und das erstmalige Einblenden der Werkzeuge unabhängig steuern. Alle drei Animationen sind standardmäßig aktiviert; eine deaktivierte Animation zeigt sofort ihren Endzustand.
 
 ### Baum-Schrift
 Die Baum-Schrift wird über „Ansicht → Baum-Schrift“ ausgewählt.
@@ -496,7 +496,7 @@ Im Transparenzmodus bleibt der Hintergrund des Hauptfensters transparent. Menüs
 „Hilfe → Updates“ vergleicht die aktuelle Version mit dem neuesten stabilen GitHub-Release. Automatische Prüfungen sind standardmäßig deaktiviert; wenn sie aktiviert sind, prüft DevProjex beim Start, sobald seit der letzten erfolgreichen Prüfung mindestens sieben Tage vergangen sind. Die Checkbox wird sofort angewendet. Das letzte erfolgreiche Ergebnis bleibt zwischen Anwendungsstarts erhalten und wird durch einen späteren Netzwerkfehler nicht gelöscht. Die Installation bleibt eine Benutzeraktion.
 
 ### 16.2 Einstellungen zurücksetzen
-Einstellungen zurücksetzen (Hilfe → Einstellungen zurücksetzen) stellt Theme, Effekte, Kompaktmodus, Animation beim Aufklappen des Baums und Oberflächensprache auf die Standardwerte zurück. Projektprofile, Verlauf und Dateien auf dem Datenträger bleiben unverändert.
+Einstellungen zurücksetzen (Hilfe → Einstellungen zurücksetzen) stellt Theme, Effekte, Kompaktmodus, Animationseinstellungen und Oberflächensprache auf die Standardwerte zurück. Projektprofile, Verlauf und Dateien auf dem Datenträger bleiben unverändert.
 
 ### 16.3 Daten zurücksetzen
 Daten zurücksetzen (Hilfe → Daten zurücksetzen) löscht gespeicherte Profile lokaler Projektparameter:
