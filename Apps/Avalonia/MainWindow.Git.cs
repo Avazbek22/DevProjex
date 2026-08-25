@@ -86,8 +86,7 @@ public partial class MainWindow
             return;
         }
 
-        // Validate URL format before attempting to clone
-        if (!IsValidGitRepositoryUrl(url))
+        if (!RepositoryUrlUtility.IsSupportedCloneSource(url))
         {
             await ShowErrorAsync(_viewModel.GitErrorInvalidUrl);
             return;
@@ -198,17 +197,6 @@ public partial class MainWindow
                 }
                 else
                 {
-                    var hasInternet = await CheckInternetConnectionAsync(cancellationToken);
-                    if (!hasInternet)
-                    {
-                        _viewModel.GitCloneInProgress = false;
-                        _gitCloneWindow?.Close();
-                        _gitCloneWindow = null;
-                        _taskbarProgress.MarkGitCloneError();
-                        await ShowErrorAsync(_viewModel.GitErrorNoInternetConnection);
-                        return;
-                    }
-
                     stagingPath = _repoCacheService.CreateRepositoryStagingDirectory(url);
                     var gitAvailable = await _gitService.IsGitAvailableAsync(cancellationToken);
                     if (gitAvailable)

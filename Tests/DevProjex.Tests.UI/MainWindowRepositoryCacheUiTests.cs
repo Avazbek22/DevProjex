@@ -1270,6 +1270,37 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 		public void Show(string message, TimeSpan duration) => Show(message);
 	}
 
+	[AvaloniaFact]
+	public async Task SelfHostedRepositoryStartsCloneWithoutExternalConnectivityPreflight()
+	{
+		var appDataPath = CreateAppDataPath();
+		var cache = new RepoCacheService(Path.Combine(appDataPath, "RepoCache"));
+		var git = new SuccessfulCloneGitRepositoryService();
+		var window = await CreateWindowAsync(appDataPath, cache, git);
+		const string repositoryUrl = "https://git.intranet.local/team/project";
+
+		try
+		{
+			var cloneWindow = await UiTestDriver.OpenGitCloneWindowAsync(window);
+			await WaitForCatalogAsync(window, expectedCount: 0);
+			UiTestDriver.GetViewModel(window).GitCloneUrl = repositoryUrl;
+
+			await UiTestDriver.RaiseButtonClickAsync(
+				Assert.IsType<Button>(cloneWindow.FindControl<Button>("StartCloneButton")));
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => git.CloneCount == 1 && !cloneWindow.IsVisible,
+				"self-hosted repository clone to complete");
+
+			Assert.Equal(repositoryUrl, git.CloneUrl);
+			Assert.Equal(ProjectSourceType.GitClone, UiTestDriver.GetViewModel(window).ProjectSourceType);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
 	private static string CreateCachedRepository(
 		RepoCacheService cache,
 		string repositoryUrl,
@@ -1431,6 +1462,60 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 			CloneCount++;
 			throw new InvalidOperationException("The cached URL must not be cloned again.");
 		}
+	}
+
+	private sealed class SuccessfulCloneGitRepositoryService : IGitRepositoryService
+	{
+		public int CloneCount { get; private set; }
+		public string? CloneUrl { get; private set; }
+
+		public Task<bool> IsGitAvailableAsync(CancellationToken cancellationToken = default) =>
+			Task.FromResult(true);
+
+		public Task<GitCloneResult> CloneAsync(
+			string url,
+			string targetDirectory,
+			IProgress<string>? progress = null,
+			CancellationToken cancellationToken = default)
+		{
+			CloneCount++;
+			CloneUrl = url;
+			InitializeGitRepository(targetDirectory, "main");
+			File.WriteAllText(Path.Combine(targetDirectory, "README.md"), "fixture");
+			RunGit(targetDirectory, ["add", "README.md"]);
+			RunGit(targetDirectory, ["commit", "-m", "clone fixture"]);
+			return Task.FromResult(new GitCloneResult(
+				true,
+				targetDirectory,
+				ProjectSourceType.GitClone,
+				"main",
+				"project",
+				url,
+				null));
+		}
+
+		public Task<IReadOnlyList<GitBranch>> GetBranchesAsync(
+			string repositoryPath,
+			CancellationToken cancellationToken = default) =>
+			Task.FromResult<IReadOnlyList<GitBranch>>([new GitBranch("main", true, false)]);
+
+		public Task<string?> GetDefaultBranchAsync(string repositoryPath, CancellationToken cancellationToken = default) =>
+			Task.FromResult<string?>("main");
+
+		public Task<bool> SwitchBranchAsync(string repositoryPath, string branchName, IProgress<string>? progress = null, CancellationToken cancellationToken = default) =>
+			Task.FromResult(true);
+
+		public Task<bool> PullUpdatesAsync(string repositoryPath, IProgress<string>? progress = null, CancellationToken cancellationToken = default) =>
+			Task.FromResult(true);
+
+		public Task<string?> GetHeadCommitAsync(string repositoryPath, CancellationToken cancellationToken = default) =>
+			Task.FromResult<string?>("fixture-head");
+
+		public Task<string?> GetCurrentBranchAsync(string repositoryPath, CancellationToken cancellationToken = default) =>
+			Task.FromResult<string?>("main");
+
+		public Task<string?> GetRemoteUrlAsync(string repositoryPath, CancellationToken cancellationToken = default) =>
+			Task.FromResult<string?>(CloneUrl);
 	}
 
 	private sealed class CancelableUpdateGitRepositoryService : IGitRepositoryService
