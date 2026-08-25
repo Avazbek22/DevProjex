@@ -226,7 +226,7 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			processedFileCount++;
 			if (!anyWritten && !string.IsNullOrWhiteSpace(displayRootPath))
 			{
-				sb.AppendLine($"{displayRootPath}:");
+				sb.AppendLine($"{SingleLineTextEscaping.Escape(displayRootPath)}:");
 				AppendClipboardBlankLine(sb);
 				AppendClipboardBlankLine(sb);
 			}
@@ -241,6 +241,7 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			var displayPath = OutputRootPathPresentation
 				.ResolvePath(rawDisplayPath, outputPathRedaction)
 				.Text;
+			displayPath = SingleLineTextEscaping.Escape(displayPath);
 			sb.AppendLine($"{displayPath}:");
 			AppendClipboardBlankLine(sb);
 

@@ -22,6 +22,41 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 	}
 
 	[Fact]
+	public async Task TextTreeAndContentHeaders_EscapeControlCharactersIntoSingleLines()
+	{
+		using var temp = new TemporaryDirectory();
+		var filePath = temp.CreateFile("safe.txt", "content");
+		const string unsafeName = "safe\nforged\t\u001b.txt";
+		const string escapedName = "safe\\nforged\\t\\u001B.txt";
+		var root = new TreeNodeDescriptor(
+			"root",
+			temp.Path,
+			true,
+			false,
+			"folder",
+			[new TreeNodeDescriptor(unsafeName, filePath, false, false, "text", [])]);
+		var treeExport = new TreeExportService();
+
+		var ascii = treeExport.BuildFullTree(temp.Path, root, TreeTextFormat.Ascii);
+		var plain = treeExport.BuildFullTreePlain(temp.Path, root);
+		var markdown = treeExport.BuildFullTree(temp.Path, root, TreeTextFormat.Markdown);
+		var content = await new SelectedContentExportService(new FileContentAnalyzer())
+			.BuildAsync(
+				[filePath],
+				TestContext.Current.CancellationToken,
+				_ => unsafeName);
+
+		foreach (var output in new[] { ascii, plain, markdown, content })
+		{
+			Assert.Contains(escapedName, output, StringComparison.Ordinal);
+			Assert.DoesNotContain(unsafeName, output, StringComparison.Ordinal);
+		}
+		Assert.Equal(
+			ExportOutputMetricsCalculator.FromText(ascii),
+			treeExport.CalculateFullTreeMetrics(temp.Path, root, TreeTextFormat.Ascii));
+	}
+
+	[Fact]
 	public async Task ExportJsonTreeToFile_WritesValidJsonWithoutBom()
 	{
 		using var temp = new TemporaryDirectory();

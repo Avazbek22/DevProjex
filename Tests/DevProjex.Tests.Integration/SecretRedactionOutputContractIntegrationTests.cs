@@ -910,6 +910,36 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		Assert.DoesNotContain(unsafeFileName, notice, StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public async Task ContextTextExport_EscapesControlCharactersInFilesystemNames()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("Windows does not allow line breaks in file names.");
+
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("context-path-project");
+		const string unsafeFileName = "safe\nforged\t\u001b.txt";
+		const string escapedFileName = "safe\\nforged\\t\\u001B.txt";
+		await File.WriteAllTextAsync(
+			Path.Combine(sourceRoot, unsafeFileName),
+			"content",
+			TestContext.Current.CancellationToken);
+		using var session = new SecretRedactionSession(CreateDetector());
+		var plan = await BuildPlanAsync(sourceRoot, hideSecrets: true);
+		var service = new ProjectContextDocumentService(
+			new TreeExportService(),
+			new FileContentAnalyzer(),
+			secretRedactionSession: session);
+
+		var document = await WriteContextAsync(
+			service,
+			plan,
+			ProjectContextDocumentFormat.Text);
+
+		Assert.Contains(escapedFileName, document, StringComparison.Ordinal);
+		Assert.DoesNotContain(unsafeFileName, document, StringComparison.Ordinal);
+	}
+
 	/// <summary>
 	/// The count behind the checkbox is advisory. A file it may not read is one file missing from
 	/// the count, never a modal error and never a project the user cannot measure at all.

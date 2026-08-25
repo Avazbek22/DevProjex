@@ -391,7 +391,10 @@ public sealed class ProjectContextDocumentService(
 					await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
 				}
 
-				await writer.WriteAsync(file.Path.AsMemory(), cancellationToken).ConfigureAwait(false);
+				await writer.WriteAsync(
+						SingleLineTextEscaping.Escape(file.Path).AsMemory(),
+						cancellationToken)
+					.ConfigureAwait(false);
 				await writer.WriteAsync(":".AsMemory(), cancellationToken).ConfigureAwait(false);
 				var isLast = index == plan.IncludedFiles.Count - 1;
 				var charactersToWrite = file.Classification == FileContentClassification.Text
@@ -1184,7 +1187,7 @@ public sealed class ProjectContextDocumentService(
 			if (output.Length > 0)
 				output.AppendLine().AppendLine();
 
-			output.Append(file.Path).AppendLine(":");
+			output.Append(SingleLineTextEscaping.Escape(file.Path)).AppendLine(":");
 			output.AppendLine();
 			output.Append(file.IsOmitted
 					? "[Large text file; content omitted from bounded preview]"
@@ -1597,11 +1600,11 @@ public sealed class ProjectContextDocumentService(
 	}
 
 	private static string EscapeMarkdownHeading(string value) =>
-		value.Replace("\\", "\\\\").Replace("#", "\\#").Replace("\r", " ").Replace("\n", " ");
+		SingleLineTextEscaping.Escape(value.Replace("\\", "\\\\").Replace("#", "\\#"));
 
 	private static string BuildMarkdownCodeSpan(string value)
 	{
-		var normalized = value.Replace("\r", "\\r").Replace("\n", "\\n");
+		var normalized = SingleLineTextEscaping.Escape(value);
 		var delimiter = new string('`', Math.Max(1, FindLongestBacktickRun(normalized) + 1));
 		var needsPadding =
 			normalized.StartsWith('`') ||
