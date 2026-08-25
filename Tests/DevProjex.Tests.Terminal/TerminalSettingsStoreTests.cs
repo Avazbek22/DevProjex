@@ -92,4 +92,20 @@ public sealed class TerminalSettingsStoreTests
 		Assert.Equal("search item-5", history[0]);
 		Assert.Equal("search item-54", history[^1]);
 	}
+
+	[Fact]
+	public async Task CommandHistoryLengthLimitNeverSplitsAUnicodeScalar()
+	{
+		using var workspace = new TemporaryDirectory();
+		var store = new TerminalSettingsStore(() => workspace.Path);
+		var prefix = new string('x', 4_095);
+
+		await store.SaveCommandHistoryAsync(
+			[prefix + "😀tail"],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(
+			[prefix],
+			new TerminalSettingsStore(() => workspace.Path).LoadCommandHistory());
+	}
 }

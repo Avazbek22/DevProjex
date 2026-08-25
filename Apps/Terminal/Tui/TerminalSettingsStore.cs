@@ -36,13 +36,22 @@ public sealed class TerminalSettingsStore(Func<string>? appDataPathProvider = nu
 		ArgumentNullException.ThrowIfNull(history);
 		var normalized = new TerminalCommandHistory(history)
 			.Entries
-			.Select(command => command.Length <= MaximumPersistedCommandLength
-				? command
-				: command[..MaximumPersistedCommandLength])
+			.Select(TruncateCommand)
 			.ToArray();
 		await UpdateAsync(
 			current => current with { CommandHistory = normalized },
 			cancellationToken).ConfigureAwait(false);
+	}
+
+	private static string TruncateCommand(string command)
+	{
+		if (command.Length <= MaximumPersistedCommandLength)
+			return command;
+
+		var length = MaximumPersistedCommandLength;
+		if (char.IsHighSurrogate(command[length - 1]) && char.IsLowSurrogate(command[length]))
+			length--;
+		return command[..length];
 	}
 
 	internal string GetPath() =>

@@ -57,4 +57,17 @@ public sealed class TerminalGitProgressTests
 		Assert.DoesNotContain("secret", result.Detail, StringComparison.OrdinalIgnoreCase);
 		Assert.DoesNotContain("token", result.Detail, StringComparison.OrdinalIgnoreCase);
 	}
+
+	[Fact]
+	public void LongProgressDetailNeverSplitsAUnicodeScalar()
+	{
+		var line = new string('x', 176) + "😀tail";
+
+		var result = TerminalGitProgressParser.Parse(
+			line,
+			"Terminal.Tui.Clone.Connecting",
+			currentPercent: null);
+
+		Assert.Equal(new string('x', 176) + "...", result.Detail);
+	}
 }
