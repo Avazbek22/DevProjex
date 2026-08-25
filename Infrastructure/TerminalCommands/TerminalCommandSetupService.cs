@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using DevProjex.Infrastructure.Persistence;
 
 namespace DevProjex.Infrastructure.TerminalCommands;
 
@@ -56,6 +57,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 	private const string WindowsEncodedTargetPrefix = "rem target-base64: ";
 	private const string WindowsPathHint =
 		"DevProjex will add its terminal launcher folder to your user PATH. Restart already-open terminal windows after enabling it.";
+	private const int MaximumManagedLauncherBytes = 64 * 1024;
 	private static readonly TimeSpan LauncherValidationTimeout = TimeSpan.FromSeconds(5);
 	// Cover lock-free probes and writes within one process; the named mutex still protects separate processes.
 	private static readonly object ProcessSetupSync = new();
@@ -531,8 +533,8 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 	{
 		try
 		{
-			return string.Equals(
-				ReadAllTextDuringAtomicReplacement(commandPath),
+			return TryReadManagedLauncher(commandPath, out var content) && string.Equals(
+				content,
 				BuildWindowsLauncherContent(targetPath),
 				StringComparison.Ordinal);
 		}
@@ -807,13 +809,9 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 	{
 		try
 		{
-			// Lock-free probes may read the previous complete launcher while a serialized writer atomically replaces it.
-			using var stream = new FileStream(
-				commandPath,
-				FileMode.Open,
-				FileAccess.Read,
-				FileShare.Read | FileShare.Delete);
-			using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+			if (!TryReadManagedLauncher(commandPath, out var content))
+				return new ManagedWrapperReadResult(ManagedWrapperReadStatus.Foreign, null);
+			using var reader = new StringReader(content);
 			var firstLine = reader.ReadLine();
 			var marker = firstLine;
 			var target = reader.ReadLine();
@@ -895,8 +893,8 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 	{
 		try
 		{
-			return string.Equals(
-				ReadAllTextDuringAtomicReplacement(commandPath),
+			return TryReadManagedLauncher(commandPath, out var content) && string.Equals(
+				content,
 				BuildWrapperContent(targetPath),
 				StringComparison.Ordinal);
 		}
@@ -910,7 +908,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		}
 	}
 
-	private static string ReadAllTextDuringAtomicReplacement(string path)
+	private static bool TryReadManagedLauncher(string path, out string content)
 	{
 		// Probes must not block the serialized writer from atomically replacing a complete launcher.
 		using var stream = new FileStream(
@@ -918,8 +916,10 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 			FileMode.Open,
 			FileAccess.Read,
 			FileShare.Read | FileShare.Delete);
-		using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
-		return reader.ReadToEnd();
+		return JsonStorePersistence.TryReadAllTextWithinSizeLimit(
+			stream,
+			MaximumManagedLauncherBytes,
+			out content);
 	}
 
 	private static bool HasUnixExecutableMode(string commandPath)

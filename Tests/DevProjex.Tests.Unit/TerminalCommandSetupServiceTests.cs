@@ -1220,6 +1220,27 @@ public sealed class TerminalCommandSetupServiceTests
 	}
 
 	[Fact]
+	public void Probe_OversizedLauncherWithManagedHeader_RemainsAProtectedConflict()
+	{
+		using var temp = new TemporaryDirectory();
+		var target = temp.CreateFile("app/DevProjex", "fake executable");
+		var userBin = temp.CreateFolder(".local/bin");
+		var wrapperPath = Path.Combine(userBin, CommandLineExecutableAliases.UnixCommand);
+		File.WriteAllText(
+			wrapperPath,
+			TerminalCommandSetupService.BuildWrapperContent(target) + new string('x', 64 * 1024));
+		var service = CreateService(TerminalCommandHostPlatform.Linux, temp.Path, userBin, target);
+
+		var snapshot = service.Probe();
+		var install = service.InstallOrRepair();
+
+		Assert.Equal(TerminalCommandSetupState.ConflictingCommand, snapshot.State);
+		Assert.False(snapshot.CanRepair);
+		Assert.False(install.Success);
+		Assert.Equal(TerminalCommandInstallOutcome.ConflictingCommand, install.Outcome);
+	}
+
+	[Fact]
 	public void ValidateLauncher_DotnetHostCompletesVersionCheck()
 	{
 		var result = TerminalCommandSetupService.ValidateLauncher("dotnet", TimeSpan.FromSeconds(5));
