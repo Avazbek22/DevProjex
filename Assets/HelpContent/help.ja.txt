@@ -93,9 +93,9 @@ DevProjexは、対話型のターミナルワークスペースと、スクリ�
 * `devprojex open . --preview` — 現在のフォルダーをデスクトップ プレビューで開きます。
 * `devprojex analyze . --format json` — 現在のプロジェクトをJSONとして分析します。
 * `devprojex tree .` — プロジェクト ツリーをターミナルに出力します。
-* `devprojex export context. --format markdown -o ../devprojex-context.md` — AI対応コンテキストをソース プロジェクトの外部に保存します。
-* `devprojex export project. --as folder -o ../devprojex-submission` — 有効なプロジェクト ツリーを正確なフォルダーにエクスポートします。
-* `devprojex export project. --as zip -o ../devprojex-submission.zip` — 有効なプロジェクト ツリーをZIPアーカイブにエクスポートします。
+* `devprojex export context . --format markdown -o ../devprojex-context.md` — AI対応コンテキストをソース プロジェクトの外部に保存します。
+* `devprojex export project . --as folder -o ../devprojex-submission` — 有効なプロジェクト ツリーを正確なフォルダーにエクスポートします。
+* `devprojex export project . --as zip -o ../devprojex-submission.zip` — 有効なプロジェクト ツリーをZIPアーカイブにエクスポートします。
 * `devprojex export context https://github.com/owner/repo -o -` — 自分でクローンを作成せずにリモート リポジトリをパックします。
 * `devprojex analyze . --git-mode tracked --exclude smart-ignore` — Smart Ignoreを使用して追跡されたGitファイルを分析します。
 * `devprojex mcp --root .` — AIエージェントがプロジェクトを安全に読み取れるように、ローカルの読み取り専用MCPサーバーを起動します。

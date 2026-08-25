@@ -593,7 +593,7 @@
   "Terminal.Tui.Welcome.OpenDesktop.Description": "DevProjex Desktop을 시작하거나 활성화하고 이 터미널 세션을 계속 사용할 수 있도록 유지하세요.",
   "Terminal.Tui.Welcome.Help.Description": "탐색 및 작업 흐름 도움말을 연 다음 정확한 선택 항목으로 돌아갑니다.",
   "Terminal.Tui.Welcome.Exit.Description": "DevProjex Terminal을 종료하고 터미널 상태를 복원합니다.",
-  "Terminal.Tui.Welcome.QuickStart": "직접 자동화: devprojex analyze. | devprojex export context. -o context.md",
+  "Terminal.Tui.Welcome.QuickStart": "직접 자동화: devprojex analyze .  |  devprojex export context . -o context.md",
   "Terminal.Tui.Footer.Welcome": "위/아래 또는 j/k 탐색 Enter 선택 Ctrl+P 동작? 도움말 q 종료",
   "Terminal.Tui.Footer.Loading": "Esc 작업 취소  ? 도움말",
   "Terminal.Tui.Footer.Tree": "↑/↓ 이동  Enter 열기  Space 전환  Tab/F6 미리 보기  Ctrl+P 작업",

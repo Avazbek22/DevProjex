@@ -93,9 +93,9 @@ DevProjex提供交互式终端工作区以及脚本和CI的直接命令。
 * `devprojex open . --preview` — 在桌面预览中打开当前文件夹。
 * `devprojex analyze . --format json` — 将当前项目分析为JSON。
 * `devprojex tree .` — 将项目树打印到终端。
-* `devprojex export context. --format markdown -o ../devprojex-context.md` — 在源项目外部保存AI就绪上下文。
-* `devprojex export project. --as folder -o ../devprojex-submission` — 将有效项目树导出到确切的文件夹。
-* `devprojex export project. --as zip -o ../devprojex-submission.zip` — 将有效项目树导出到ZIP存档。
+* `devprojex export context . --format markdown -o ../devprojex-context.md` — 在源项目外部保存AI就绪上下文。
+* `devprojex export project . --as folder -o ../devprojex-submission` — 将有效项目树导出到确切的文件夹。
+* `devprojex export project . --as zip -o ../devprojex-submission.zip` — 将有效项目树导出到ZIP存档。
 * `devprojex export context https://github.com/owner/repo -o -` — 打包远程存储库，无需自行克隆。
 * `devprojex analyze . --git-mode tracked --exclude smart-ignore` — 使用Smart Ignore分析跟踪的Git文件。
 * `devprojex mcp --root .` — 启动本地只读MCP服务器，以便AI代理可以安全地读取项目。

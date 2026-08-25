@@ -93,9 +93,9 @@ DevProjex提供互動式終端工作區以及腳本和CI的直接命令。
 * `devprojex open . --preview` — 在桌面預覽中開啟目前資料夾。
 * `devprojex analyze . --format json` — 將目前專案分析為JSON。
 * `devprojex tree .` — 將項目樹印到終端。
-* `devprojex export context. --format markdown -o ../devprojex-context.md` — 在來源專案外部儲存AI就緒上下文。
-* `devprojex export project. --as folder -o ../devprojex-submission` — 將有效項目樹匯出到確切的資料夾。
-* `devprojex export project. --as zip -o ../devprojex-submission.zip` — 將有效項目樹匯出到ZIP檔案。
+* `devprojex export context . --format markdown -o ../devprojex-context.md` — 在來源專案外部儲存AI就緒上下文。
+* `devprojex export project . --as folder -o ../devprojex-submission` — 將有效項目樹匯出到確切的資料夾。
+* `devprojex export project . --as zip -o ../devprojex-submission.zip` — 將有效項目樹匯出到ZIP檔案。
 * `devprojex export context https://github.com/owner/repo -o -` — 打包遠端儲存庫，無需自行複製。
 * `devprojex analyze . --git-mode tracked --exclude smart-ignore` — 使用Smart Ignore分析追蹤的Git檔。
 * `devprojex mcp --root .` — 啟動本機只讀MCP伺服器，以便AI代理程式可以安全地讀取專案。

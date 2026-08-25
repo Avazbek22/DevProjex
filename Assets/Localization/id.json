@@ -593,7 +593,7 @@
   "Terminal.Tui.Welcome.OpenDesktop.Description": "Luncurkan atau aktifkan DevProjex Desktop dan biarkan sesi terminal ini tetap tersedia.",
   "Terminal.Tui.Welcome.Help.Description": "Buka bantuan navigasi dan alur kerja, lalu kembali ke pilihan persis ini.",
   "Terminal.Tui.Welcome.Exit.Description": "Keluar dari Terminal DevProjex dan pulihkan status terminal.",
-  "Terminal.Tui.Welcome.QuickStart": "Otomatisasi langsung: devprojex analyze. | devprojex export context. -o konteks.md",
+  "Terminal.Tui.Welcome.QuickStart": "Otomatisasi langsung: devprojex analyze .  |  devprojex export context . -o context.md",
   "Terminal.Tui.Footer.Welcome": "Atas/Bawah atau j/k Navigasi Enter Pilih Ctrl+P Actions? Bantuan q Keluar",
   "Terminal.Tui.Footer.Loading": "Esc Batalkan operasi  ? Bantuan",
   "Terminal.Tui.Footer.Tree": "↑/↓ Pindah  Enter Buka  Space Alihkan  Tab/F6 Pratinjau  Ctrl+P Tindakan",
