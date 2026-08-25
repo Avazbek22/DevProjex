@@ -73,12 +73,26 @@ public sealed class GitRepositoryService : IGitRepositoryService
         IProgress<string>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        var authentication = GitCloneAuthentication.TryCreate(url);
-        var cloneUrl = authentication?.RepositoryUrl ?? url;
+        var sourceAccepted = GitCloneAuthentication.TryResolveCloneUrl(
+            url,
+            out var cloneUrl,
+            out var authentication);
         var repoName = ExtractRepositoryName(cloneUrl);
 
         try
         {
+            if (!sourceAccepted)
+            {
+                return new GitCloneResult(
+                    Success: false,
+                    LocalPath: targetDirectory,
+                    SourceType: ProjectSourceType.GitClone,
+                    DefaultBranch: null,
+                    RepositoryName: repoName,
+                    RepositoryUrl: cloneUrl,
+                    ErrorMessage: "Clone failed");
+            }
+
             // Note: progress status is set by caller to show localized message
             // We only report dynamic progress (git output with percentages)
 

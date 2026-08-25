@@ -157,6 +157,23 @@ public class GitRepositoryServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public void MalformedAuthenticatedCloneSourceIsRejectedBeforeBuildingGitArguments()
+    {
+        const string password = "super-secret";
+        const string source = $"https://oauth2:{password}@[invalid/repository.git";
+
+        var accepted = GitCloneAuthentication.TryResolveCloneUrl(
+            source,
+            out var cloneUrl,
+            out var authentication);
+
+        Assert.False(accepted);
+        Assert.Null(authentication);
+        Assert.DoesNotContain(password, cloneUrl, StringComparison.Ordinal);
+        Assert.DoesNotContain("oauth2", cloneUrl, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task AuthenticatedCloneUsesSanitizedArgvAndAskPassInChildProcess()
     {
         if (OperatingSystem.IsWindows())
