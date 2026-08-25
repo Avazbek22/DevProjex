@@ -117,10 +117,6 @@ public sealed class DevProjexCommandTree
 				await McpServerHost.RunAsync(resolvedRoots, cancellationToken).ConfigureAwait(false);
 				return CommandLineExitCodes.Success;
 			}
-			catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-			{
-				return CommandLineExitCodes.Success;
-			}
 			catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException)
 			{
 				environment.Error.WriteLine(

@@ -58,6 +58,24 @@ public sealed class McpCommandContractTests
 	}
 
 	[Fact]
+	public async Task McpCancellationUsesTheCliCanceledExitContract()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var environment = new TestTerminalEnvironment();
+		using var cancellation = new CancellationTokenSource();
+		cancellation.Cancel();
+
+		var exitCode = await new TerminalApplication(environment).RunAsync(
+			["mcp", "--root", project, "--language", "en"],
+			cancellation.Token);
+
+		Assert.Equal(CommandLineExitCodes.Canceled, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("DPX-CLI-CANCELED", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void PackageLocalizationAndSolutionContractsArePinned()
 	{
 		var repository = PublishedApplicationLocator.FindRepositoryRoot();
