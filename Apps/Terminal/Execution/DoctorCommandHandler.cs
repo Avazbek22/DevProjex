@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Security;
 using System.Text.Json;
 using DevProjex.Infrastructure.Persistence;
+using DevProjex.Infrastructure.Processes;
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.DesktopControl;
 using DevProjex.Terminal.Rendering;
@@ -23,6 +24,7 @@ public sealed class DoctorCommandHandler(
 	Func<string>? currentDirectoryProvider = null,
 	Func<DoctorStorageRoots>? storageRootsProvider = null)
 {
+	private const int MaximumGitVersionOutputCharacters = 64 * 1024;
 	private readonly DesktopInstanceRegistry _desktopRegistry =
 		desktopRegistry ?? new DesktopInstanceRegistry();
 	private readonly Func<string> _currentDirectoryProvider =
@@ -450,23 +452,38 @@ public sealed class DoctorCommandHandler(
 			process.StandardInput.Close();
 			using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 			timeoutSource.CancelAfter(TimeSpan.FromSeconds(3));
-			var outputTask = process.StandardOutput.ReadToEndAsync(timeoutSource.Token);
-			var errorTask = process.StandardError.ReadToEndAsync(timeoutSource.Token);
+			var outputTask = BoundedTextReader.ReadAsync(
+				process.StandardOutput,
+				MaximumGitVersionOutputCharacters,
+				timeoutSource.Token);
+			var errorTask = BoundedTextReader.ReadAsync(
+				process.StandardError,
+				MaximumGitVersionOutputCharacters,
+				timeoutSource.Token);
 			try
 			{
 				await process.WaitForExitAsync(timeoutSource.Token).ConfigureAwait(false);
-				var version = (await outputTask.ConfigureAwait(false)).Trim();
-				_ = await errorTask.ConfigureAwait(false);
+				var output = await outputTask.ConfigureAwait(false);
+				var error = await errorTask.ConfigureAwait(false);
+				if (output.ExceededLimit || error.ExceededLimit)
+					return (false, "unavailable");
+				var version = output.Text.Trim();
 				return (process.ExitCode == 0 && version.Length > 0, version);
 			}
 			catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
 			{
 				TryTerminate(process);
+				await BoundedTextReader
+					.ObserveCompletionAsync(outputTask, errorTask)
+					.ConfigureAwait(false);
 				return (false, "unavailable");
 			}
 			catch (OperationCanceledException)
 			{
 				TryTerminate(process);
+				await BoundedTextReader
+					.ObserveCompletionAsync(outputTask, errorTask)
+					.ConfigureAwait(false);
 				throw;
 			}
 		}

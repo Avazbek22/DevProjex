@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Runtime.InteropServices;
 using DevProjex.Infrastructure.Persistence;
+using DevProjex.Infrastructure.Processes;
 
 namespace DevProjex.Infrastructure.TerminalCommands;
 
@@ -59,6 +60,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 	private const string WindowsPathHint =
 		"DevProjex will add its terminal launcher folder to your user PATH. Restart already-open terminal windows after enabling it.";
 	private const int MaximumManagedLauncherBytes = 64 * 1024;
+	private const int MaximumLauncherValidationOutputCharacters = 64 * 1024;
 	internal const int MaximumShellProfileBytes = 8 * 1024 * 1024;
 	private static readonly TimeSpan LauncherValidationTimeout = TimeSpan.FromSeconds(5);
 	// Cover lock-free probes and writes within one process; the named mutex still protects separate processes.
@@ -1407,19 +1409,28 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 				return new TerminalCommandValidationResult(false, "The terminal launcher process could not be started.");
 			process.StandardInput.Close();
 
-			var standardOutput = process.StandardOutput.ReadToEndAsync();
-			var standardError = process.StandardError.ReadToEndAsync();
+			var standardOutput = BoundedTextReader.ReadAsync(
+				process.StandardOutput,
+				MaximumLauncherValidationOutputCharacters,
+				CancellationToken.None);
+			var standardError = BoundedTextReader.ReadAsync(
+				process.StandardError,
+				MaximumLauncherValidationOutputCharacters,
+				CancellationToken.None);
 			var completion = Task.WhenAll(process.WaitForExitAsync(), standardOutput, standardError);
 			if (!completion.Wait(timeout))
 			{
 				TryKillProcess(process);
+				_ = BoundedTextReader.ObserveCompletionAsync(standardOutput, standardError);
 				return new TerminalCommandValidationResult(false, "The terminal launcher validation timed out.");
 			}
+			if (standardOutput.Result.ExceededLimit || standardError.Result.ExceededLimit)
+				return new TerminalCommandValidationResult(false, "The terminal launcher returned too much output.");
 
 			if (process.ExitCode == 0)
 				return new TerminalCommandValidationResult(true);
 
-			var error = standardError.Result.Trim();
+			var error = standardError.Result.Text.Trim();
 			return new TerminalCommandValidationResult(
 				false,
 				string.IsNullOrWhiteSpace(error)
