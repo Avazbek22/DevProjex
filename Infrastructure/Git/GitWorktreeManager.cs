@@ -361,7 +361,9 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 			cancellationToken);
 		try
 		{
-			await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+			await GitRepositoryService
+				.WaitForExitOrTerminateAsync(process, cancellationToken)
+				.ConfigureAwait(false);
 			await Task.WhenAll(outputTask, errorTask).ConfigureAwait(false);
 			var output = await outputTask.ConfigureAwait(false);
 			var error = await errorTask.ConfigureAwait(false);
@@ -371,14 +373,6 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 		}
 		catch (OperationCanceledException)
 		{
-			try
-			{
-				if (!process.HasExited)
-					process.Kill(entireProcessTree: true);
-			}
-			catch
-			{
-			}
 			await GitProcessOutputReader
 				.ObserveCompletionAsync(outputTask, errorTask)
 				.ConfigureAwait(false);

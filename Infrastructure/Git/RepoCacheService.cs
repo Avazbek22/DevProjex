@@ -1407,7 +1407,9 @@ public sealed class RepoCacheService : IRepoCacheService
 			cancellationToken);
 		try
 		{
-			await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+			await GitRepositoryService
+				.WaitForExitOrTerminateAsync(process, cancellationToken)
+				.ConfigureAwait(false);
 			await Task.WhenAll(output, error).ConfigureAwait(false);
 			var standardOutput = await output.ConfigureAwait(false);
 			var standardError = await error.ConfigureAwait(false);
@@ -1419,14 +1421,6 @@ public sealed class RepoCacheService : IRepoCacheService
 		}
 		catch (OperationCanceledException)
 		{
-			try
-			{
-				if (!process.HasExited)
-					process.Kill(entireProcessTree: true);
-			}
-			catch (Exception exception) when (exception is InvalidOperationException or Win32Exception)
-			{
-			}
 			await GitProcessOutputReader
 				.ObserveCompletionAsync(output, error)
 				.ConfigureAwait(false);
