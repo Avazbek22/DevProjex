@@ -40,7 +40,7 @@ public static class DesktopLaunchRequestStore
 		DesktopOpenRequest request,
 		CancellationToken cancellationToken = default)
 	{
-		var directory = Path.Combine(Path.GetTempPath(), "DevProjex", "desktop-requests");
+		var directory = new DesktopControlPaths().RequestDirectory;
 		DesktopInstanceRegistry.EnsurePrivateDirectory(directory);
 		var path = Path.Combine(directory, $"{Guid.NewGuid():N}.json");
 		var json = JsonSerializer.Serialize(request, JsonOptions);
@@ -66,7 +66,7 @@ public static class DesktopLaunchRequestStore
 		{
 			var fullPath = Path.GetFullPath(path);
 			var expectedDirectory = Path.GetFullPath(
-				Path.Combine(Path.GetTempPath(), "DevProjex", "desktop-requests"));
+				new DesktopControlPaths().RequestDirectory);
 			if (!PathUtility.IsPathInside(fullPath, expectedDirectory))
 				return null;
 			safeRequestPath = fullPath;

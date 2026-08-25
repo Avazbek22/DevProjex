@@ -1,3 +1,4 @@
+using DevProjex.Application.DesktopControl;
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.DesktopControl;
 
@@ -6,6 +7,55 @@ namespace DevProjex.Tests.Terminal;
 [Collection(EnvironmentVariableCollection.Name)]
 public sealed class DesktopRequestStoreBoundaryTests
 {
+	[Fact]
+	public async Task RequestsUseTheIsolatedPerUserDesktopControlRoot()
+	{
+		using var workspace = new TemporaryDirectory();
+		var previousDataRoot = Environment.GetEnvironmentVariable(
+			InvocationEnvironment.InternalDataRootVariable);
+		try
+		{
+			Environment.SetEnvironmentVariable(
+				InvocationEnvironment.InternalDataRootVariable,
+				workspace.Path);
+			var paths = new DesktopControlPaths();
+
+			var launchPath = await DesktopLaunchRequestStore.CreateAsync(
+				new DesktopOpenRequest(ProjectPath: workspace.Path),
+				TestContext.Current.CancellationToken);
+			Assert.True(PathUtility.IsPathInside(launchPath, paths.RequestDirectory));
+			Environment.SetEnvironmentVariable(
+				InvocationEnvironment.DesktopRequestVariable,
+				launchPath);
+			var launchRequest = await DesktopLaunchRequestStore.TryConsumeFromEnvironmentAsync(
+				TestContext.Current.CancellationToken);
+			Assert.Equal(workspace.Path, launchRequest?.ProjectPath);
+			Assert.False(File.Exists(launchPath));
+
+			var diagnosticPath = DesktopDiagnosticRequestStore.Create(
+				new DesktopDiagnosticRequest(workspace.Path, "report.json", "startup"));
+			Assert.True(PathUtility.IsPathInside(diagnosticPath, paths.DiagnosticDirectory));
+			Environment.SetEnvironmentVariable(
+				DesktopDiagnosticRequestStore.EnvironmentVariable,
+				diagnosticPath);
+			var diagnosticRequest = DesktopDiagnosticRequestStore.TryConsume();
+			Assert.Equal(workspace.Path, diagnosticRequest?.ProjectPath);
+			Assert.False(File.Exists(diagnosticPath));
+		}
+		finally
+		{
+			Environment.SetEnvironmentVariable(
+				InvocationEnvironment.DesktopRequestVariable,
+				null);
+			Environment.SetEnvironmentVariable(
+				DesktopDiagnosticRequestStore.EnvironmentVariable,
+				null);
+			Environment.SetEnvironmentVariable(
+				InvocationEnvironment.InternalDataRootVariable,
+				previousDataRoot);
+		}
+	}
+
 	[Fact]
 	public async Task LaunchRequestOutsidePrivateRoot_IsRejectedWithoutDeletingCallerFile()
 	{

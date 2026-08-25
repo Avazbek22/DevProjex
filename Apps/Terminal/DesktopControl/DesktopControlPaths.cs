@@ -1,4 +1,5 @@
 using DevProjex.Infrastructure.Persistence;
+using DevProjex.Terminal.CommandLine;
 
 namespace DevProjex.Terminal.DesktopControl;
 
@@ -9,6 +10,8 @@ public sealed class DesktopControlPaths(Func<string>? dataRootProvider = null)
 	public string RootDirectory => Path.Combine(_dataRootProvider(), "DevProjex", "desktop-control");
 	public string RegistryDirectory => Path.Combine(RootDirectory, "instances");
 	public string SocketDirectory => Path.Combine(RootDirectory, "sockets");
+	public string RequestDirectory => Path.Combine(RootDirectory, "requests");
+	public string DiagnosticDirectory => Path.Combine(RootDirectory, "diagnostics");
 
 	public string GetRegistrationPath(string instanceId) =>
 		Path.Combine(RegistryDirectory, $"{instanceId}.json");
@@ -25,6 +28,14 @@ public sealed class DesktopControlPaths(Func<string>? dataRootProvider = null)
 
 	private static string ResolveDataRoot()
 	{
+		var isolatedRoot = Environment.GetEnvironmentVariable(
+			InvocationEnvironment.InternalDataRootVariable);
+		if (!string.IsNullOrWhiteSpace(isolatedRoot) &&
+		    Path.IsPathFullyQualified(isolatedRoot))
+		{
+			return Path.GetFullPath(isolatedRoot);
+		}
+
 		var xdgRuntime = Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR");
 		if (!OperatingSystem.IsWindows() &&
 		    !string.IsNullOrWhiteSpace(xdgRuntime) &&

@@ -22,7 +22,7 @@ public static class DesktopDiagnosticRequestStore
 	public static string Create(DesktopDiagnosticRequest request)
 	{
 		ArgumentNullException.ThrowIfNull(request);
-		var directory = Path.Combine(Path.GetTempPath(), "DevProjex", "desktop-diagnostics");
+		var directory = new DesktopControlPaths().DiagnosticDirectory;
 		DesktopInstanceRegistry.EnsurePrivateDirectory(directory);
 		var path = Path.Combine(directory, $"{Guid.NewGuid():N}.json");
 		File.WriteAllText(
@@ -45,7 +45,7 @@ public static class DesktopDiagnosticRequestStore
 		{
 			var fullPath = Path.GetFullPath(path);
 			var expectedDirectory = Path.GetFullPath(
-				Path.Combine(Path.GetTempPath(), "DevProjex", "desktop-diagnostics"));
+				new DesktopControlPaths().DiagnosticDirectory);
 			if (!PathUtility.IsPathInside(fullPath, expectedDirectory))
 				return null;
 			safeRequestPath = fullPath;
