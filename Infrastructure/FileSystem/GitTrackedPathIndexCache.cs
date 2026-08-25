@@ -210,30 +210,27 @@ internal static class GitTrackedPathIndexCache
 			return null;
 		}
 
-		using var cancellationRegistration = timeoutSource.Token.Register(
-			static state =>
-			{
-				var runningProcess = (Process)state!;
-				try
-				{
-					if (!runningProcess.HasExited)
-						runningProcess.Kill(entireProcessTree: true);
-				}
-				catch
-				{
-					// Cancellation and timeout cleanup are best-effort.
-				}
-			},
-			process);
-
 		var trackedPathsTask = ReadNullDelimitedPathsAsync(
 			process.StandardOutput,
 			timeoutSource.Token,
 			timeoutSource.Cancel);
 		var errorDrainTask = DrainAsync(process.StandardError, timeoutSource.Token);
-		await process.WaitForExitAsync(timeoutSource.Token).ConfigureAwait(false);
-		var trackedPaths = await trackedPathsTask.ConfigureAwait(false);
-		await errorDrainTask.ConfigureAwait(false);
+		List<string>? trackedPaths;
+		try
+		{
+			await GitRepositoryService
+				.WaitForExitOrTerminateAsync(process, timeoutSource.Token)
+				.ConfigureAwait(false);
+			trackedPaths = await trackedPathsTask.ConfigureAwait(false);
+			await errorDrainTask.ConfigureAwait(false);
+		}
+		catch (OperationCanceledException)
+		{
+			await GitProcessOutputReader
+				.ObserveCompletionAsync(trackedPathsTask, errorDrainTask)
+				.ConfigureAwait(false);
+			throw;
+		}
 
 		if (process.ExitCode != 0 || trackedPaths is null)
 			return null;
