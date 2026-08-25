@@ -641,6 +641,28 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public async Task RemovingAbandonedPackReclaimsSessionQuota()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var registry = new McpPackRegistry(
+			workspace.Path,
+			timeProvider: null,
+			maximumPackBytes: 8,
+			maximumSessionBytes: 8);
+		var abandoned = await registry.CreateAsync(
+			async (stream, token) => await stream.WriteAsync(new byte[8], token),
+			TestContext.Current.CancellationToken);
+
+		registry.Remove(abandoned.Id);
+		var replacement = await registry.CreateAsync(
+			async (stream, token) => await stream.WriteAsync(new byte[8], token),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(8, replacement.Bytes);
+		Assert.Single(Directory.EnumerateFiles(registry.SessionDirectory, "*.pack"));
+	}
+
+	[Fact]
 	public async Task TextPageReaderHonorsLineAndCharacterCapsWithoutLoadingWholeStream()
 	{
 		await using var stream = new MemoryStream(Encoding.UTF8.GetBytes("one\r\ntwo\rthree\nfour\nfive"));
