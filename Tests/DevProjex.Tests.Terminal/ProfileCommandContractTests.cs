@@ -627,6 +627,17 @@ public sealed class ProfileCommandContractTests
 		Assert.Empty(environment.StandardOutput);
 	}
 
+	[Theory]
+	[InlineData("C:\\absolute\\path")]
+	[InlineData("\\\\server\\share\\path")]
+	public void PortableSelectionRejectsForeignRootSyntaxOnEveryHost(string selectedPath)
+	{
+		var exception = Assert.Throws<ProjectContextValidationException>(
+			() => ProjectSelectionPath.NormalizePortableRelative(selectedPath));
+
+		Assert.Equal(ProjectSelectionPath.InvalidPathCode, exception.Code);
+	}
+
 	private static TemporaryDirectory CreateWorkspace()
 	{
 		var workspace = new TemporaryDirectory();

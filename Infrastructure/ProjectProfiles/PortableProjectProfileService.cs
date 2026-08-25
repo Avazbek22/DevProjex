@@ -294,7 +294,7 @@ public sealed class PortableProjectProfileService
 		IReadOnlyCollection<string>? values) =>
 		(values ?? [])
 		.Where(static value => !string.IsNullOrEmpty(value))
-		.Select(ProjectSelectionPath.NormalizeRelative)
+		.Select(ProjectSelectionPath.NormalizePortableRelative)
 		.Where(static value => value.Length > 0)
 		.Distinct(PathComparer.Default)
 		.OrderBy(static value => value, PathComparer.Default)
