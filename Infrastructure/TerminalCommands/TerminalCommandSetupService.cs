@@ -971,10 +971,10 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 
 	private bool IsDirectoryInPathValue(string directory, string? path)
 	{
-		if (string.IsNullOrWhiteSpace(path))
+		if (IsMissingPathValue(path))
 			return false;
 		var separator = _options.PathListSeparator ?? (_options.Platform == TerminalCommandHostPlatform.Windows ? ';' : ':');
-		foreach (var entry in SplitPathEntries(path, separator))
+		foreach (var entry in SplitPathEntries(path!, separator))
 		{
 			if (AreSameDirectory(entry, directory))
 				return true;
@@ -993,11 +993,11 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 
 	private string? FindFirstUnixCommand(string? path, string managedDirectory)
 	{
-		if (string.IsNullOrWhiteSpace(path))
+		if (IsMissingPathValue(path))
 			return null;
 
 		var separator = _options.PathListSeparator ?? ':';
-		foreach (var entry in SplitPathEntries(path, separator))
+		foreach (var entry in SplitPathEntries(path!, separator))
 		{
 			var candidate = Path.Combine(NormalizePath(entry), CommandLineExecutableAliases.UnixCommand);
 			if (File.Exists(candidate) && HasUnixExecutableMode(candidate))
@@ -1031,12 +1031,12 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 
 	private string? FindFirstWindowsCommand(string? path, string managedDirectory)
 	{
-		if (string.IsNullOrWhiteSpace(path))
+		if (IsMissingPathValue(path))
 			return null;
 
 		var separator = _options.PathListSeparator ?? ';';
 		var extensions = GetWindowsPathExtensions();
-		foreach (var entry in SplitPathEntries(path, separator))
+		foreach (var entry in SplitPathEntries(path!, separator))
 		{
 			var isManagedDirectory = AreSameDirectory(entry, managedDirectory);
 			// Use the known physical path after a Windows-semantic match so case-sensitive CI hosts do not probe a synthetic casing.
@@ -1348,6 +1348,11 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 			options |= StringSplitOptions.TrimEntries;
 		return value.Split(separator, options);
 	}
+
+	private bool IsMissingPathValue(string? value) =>
+		string.IsNullOrEmpty(value) ||
+		(_options.Platform == TerminalCommandHostPlatform.Windows &&
+		 string.IsNullOrWhiteSpace(value));
 
 	private string TrimTrailingDirectorySeparators(string value)
 	{
@@ -1709,9 +1714,9 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 			return;
 
 		var separator = _options.PathListSeparator ?? ':';
-		var entries = string.IsNullOrWhiteSpace(currentPath)
+		var entries = IsMissingPathValue(currentPath)
 			? new List<string>()
-			: currentPath.Split(separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+			: SplitPathEntries(currentPath!, separator).ToList();
 		entries.RemoveAll(entry => AreSameDirectory(entry, userBinDirectory));
 		entries.Insert(0, userBinDirectory);
 		var updatedPath = string.Join(separator, entries);

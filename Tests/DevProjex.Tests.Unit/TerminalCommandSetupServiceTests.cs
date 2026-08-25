@@ -1112,6 +1112,33 @@ public sealed class TerminalCommandSetupServiceTests
 	}
 
 	[Fact]
+	public void ConfigurePath_UnixPreservesWhitespaceInExistingPathEntries()
+	{
+		using var temp = new TemporaryDirectory();
+		var target = temp.CreateFile("app/DevProjex", "fake executable");
+		var userBin = temp.CreateFolder(".local/bin");
+		var wrapperPath = Path.Combine(userBin, CommandLineExecutableAliases.UnixCommand);
+		File.WriteAllText(wrapperPath, TerminalCommandSetupService.BuildWrapperContent(target));
+		SetUnixExecutableMode(wrapperPath);
+		var existingPath = $" leading-space{Path.PathSeparator}trailing-space ";
+		var processPath = existingPath;
+		var service = CreateUnixPathSetupService(
+			temp.Path,
+			target,
+			"/bin/bash",
+			() => processPath,
+			value => processPath = value);
+
+		var result = service.ConfigurePath();
+
+		Assert.True(result.Success, result.ErrorMessage);
+		var entries = processPath.Split(Path.PathSeparator);
+		Assert.Equal(3, entries.Length);
+		Assert.Equal(" leading-space", entries[1]);
+		Assert.Equal("trailing-space ", entries[2]);
+	}
+
+	[Fact]
 	public void ConfigurePath_ExistingEquivalentProfileLine_DoesNotRewriteUserProfile()
 	{
 		using var temp = new TemporaryDirectory();
