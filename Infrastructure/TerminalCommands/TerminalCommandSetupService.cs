@@ -1730,8 +1730,10 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 
 		if (OperatingSystem.IsWindows() && commandPath.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase))
 		{
+			var fullCommandPath = Path.GetFullPath(commandPath);
 			startInfo.FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe";
-			startInfo.Arguments = $"/d /c \"\"{commandPath}\" --version\"";
+			startInfo.WorkingDirectory = Path.GetDirectoryName(fullCommandPath)!;
+			startInfo.Arguments = $"/d /s /c \"\"{Path.GetFileName(fullCommandPath)}\" --version\"";
 		}
 		else
 		{

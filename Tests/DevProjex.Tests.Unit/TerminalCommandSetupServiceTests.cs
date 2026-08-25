@@ -1333,6 +1333,31 @@ public sealed class TerminalCommandSetupServiceTests
 	}
 
 	[Fact]
+	public void ValidateLauncher_WindowsCommandDirectoryWithEnvironmentSyntax_IsNotExpandedByCmd()
+	{
+		if (!OperatingSystem.IsWindows())
+			return;
+
+		using var temp = new TemporaryDirectory();
+		var variableName = $"DPX_LAUNCHER_{Guid.NewGuid():N}";
+		try
+		{
+			Environment.SetEnvironmentVariable(variableName, "expanded-away");
+			var commandPath = Path.GetFullPath(temp.CreateFile(
+				$"folder-%{variableName}%/devprojex.cmd",
+				"@echo off\r\necho 5.1\r\nexit /b 0\r\n"));
+
+			var result = TerminalCommandSetupService.ValidateLauncher(commandPath, TimeSpan.FromSeconds(5));
+
+			Assert.True(result.Success, result.ErrorMessage);
+		}
+		finally
+		{
+			Environment.SetEnvironmentVariable(variableName, null);
+		}
+	}
+
+	[Fact]
 	public void ValidateLauncher_UnixWrapperWithExecutableTarget_CompletesVersionCheck()
 	{
 		if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
