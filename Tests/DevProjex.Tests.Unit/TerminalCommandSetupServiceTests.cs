@@ -923,6 +923,39 @@ public sealed class TerminalCommandSetupServiceTests
 	}
 
 	[Fact]
+	public void Probe_UnixPathLookup_PreservesWhitespaceInShadowingDirectory()
+	{
+		if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+			return;
+
+		using var temp = new TemporaryDirectory();
+		var target = temp.CreateFile("app/DevProjex", "fake executable");
+		var shadowDirectory = temp.CreateFolder("shadow ");
+		var shadowCommand = temp.CreateFile("shadow /devprojex", "#!/bin/sh\nexit 0\n");
+		var userBin = temp.CreateFolder(".local/bin");
+		var managedCommand = temp.CreateFile(
+			".local/bin/devprojex",
+			TerminalCommandSetupService.BuildWrapperContent(target));
+		var executableMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+		File.SetUnixFileMode(shadowCommand, executableMode);
+		File.SetUnixFileMode(managedCommand, executableMode);
+		var service = new TerminalCommandSetupService(new TerminalCommandSetupServiceOptions
+		{
+			Platform = OperatingSystem.IsMacOS()
+				? TerminalCommandHostPlatform.MacOS
+				: TerminalCommandHostPlatform.Linux,
+			HomeDirectoryProvider = () => temp.Path,
+			PathVariableProvider = () => string.Join(Path.PathSeparator, shadowDirectory, userBin),
+			ExecutablePathProvider = () => target
+		});
+
+		var snapshot = service.Probe();
+
+		Assert.Equal(TerminalCommandSetupState.CommandShadowed, snapshot.State);
+		Assert.Equal(shadowCommand, snapshot.ResolvedCommandPath);
+	}
+
+	[Fact]
 	public void InstallOrRepair_UnixMissingCommand_CreatesManagedWrapperAndProbeBecomesInstalled()
 	{
 		using var temp = new TemporaryDirectory();

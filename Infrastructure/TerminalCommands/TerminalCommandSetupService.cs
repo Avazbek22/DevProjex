@@ -944,7 +944,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		if (string.IsNullOrWhiteSpace(path))
 			return false;
 		var separator = _options.PathListSeparator ?? (_options.Platform == TerminalCommandHostPlatform.Windows ? ';' : ':');
-		foreach (var entry in path.Split(separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+		foreach (var entry in SplitPathEntries(path, separator))
 		{
 			if (AreSameDirectory(entry, directory))
 				return true;
@@ -967,7 +967,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 			return null;
 
 		var separator = _options.PathListSeparator ?? ':';
-		foreach (var entry in path.Split(separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+		foreach (var entry in SplitPathEntries(path, separator))
 		{
 			var candidate = Path.Combine(NormalizePath(entry), CommandLineExecutableAliases.UnixCommand);
 			if (File.Exists(candidate) && HasUnixExecutableMode(candidate))
@@ -1006,7 +1006,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 
 		var separator = _options.PathListSeparator ?? ';';
 		var extensions = GetWindowsPathExtensions();
-		foreach (var entry in path.Split(separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+		foreach (var entry in SplitPathEntries(path, separator))
 		{
 			var isManagedDirectory = AreSameDirectory(entry, managedDirectory);
 			// Use the known physical path after a Windows-semantic match so case-sensitive CI hosts do not probe a synthetic casing.
@@ -1056,7 +1056,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		var separator = _options.PathListSeparator ?? ';';
 		var entries = string.IsNullOrWhiteSpace(userPath)
 			? new List<string>()
-			: userPath.Split(separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+			: SplitPathEntries(userPath, separator).ToList();
 
 		for (var index = entries.Count - 1; index >= 0; index--)
 		{
@@ -1294,21 +1294,29 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 
 	private string NormalizePath(string value)
 	{
-		var trimmed = value.Trim();
+		var normalized = value;
 		if (_options.Platform == TerminalCommandHostPlatform.Windows)
-			trimmed = Environment.ExpandEnvironmentVariables(trimmed.Trim('"'));
-		trimmed = TrimTrailingDirectorySeparators(trimmed);
-		if (trimmed.Length == 0)
-			return trimmed;
+			normalized = Environment.ExpandEnvironmentVariables(normalized.Trim().Trim('"'));
+		normalized = TrimTrailingDirectorySeparators(normalized);
+		if (normalized.Length == 0)
+			return normalized;
 
 		try
 		{
-			return TrimTrailingDirectorySeparators(Path.GetFullPath(trimmed));
+			return TrimTrailingDirectorySeparators(Path.GetFullPath(normalized));
 		}
 		catch
 		{
-			return trimmed;
+			return normalized;
 		}
+	}
+
+	private IEnumerable<string> SplitPathEntries(string value, char separator)
+	{
+		var options = StringSplitOptions.RemoveEmptyEntries;
+		if (_options.Platform == TerminalCommandHostPlatform.Windows)
+			options |= StringSplitOptions.TrimEntries;
+		return value.Split(separator, options);
 	}
 
 	private string TrimTrailingDirectorySeparators(string value)
