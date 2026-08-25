@@ -186,7 +186,8 @@ public sealed class SecretRedactionOutputPreparer
 					IReadOnlyList<EffectiveRedactionFinding> findings = plan is null || !captureEffectiveFindings
 						? []
 						: BuildEffectiveFindings(plan.Spans, content.Content, compressed.Map);
-					if (ReferenceEquals(transformedText, content.Content) && redactions.Length == 0)
+					// A completed redaction scan must remain authoritative if the source changes before output.
+					if (scope is null && ReferenceEquals(transformedText, content.Content) && redactions.Length == 0)
 					{
 						preparedFiles[sourcePath] = findings.Count == 0
 							? PreparedSecretFile.Unchanged(sourcePath)

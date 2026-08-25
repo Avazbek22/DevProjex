@@ -2055,6 +2055,36 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 	}
 
 	[Fact]
+	public async Task PreparedCleanRedactionSnapshot_IsolatedFromSecretInsertedAfterScan()
+	{
+		using var temporary = new TemporaryDirectory();
+		var sourceRoot = temporary.CreateDirectory("clean-snapshot-project");
+		var sourcePath = temporary.CreateFile("clean-snapshot-project/app.cs", "const string value = \"safe\";\n");
+		var analyzer = new FileContentAnalyzer();
+		var session = new SecretRedactionSession(CreateDetector());
+		await using var prepared = await new SecretRedactionOutputPreparer(analyzer).PrepareAsync(
+			new ContentTransformationContext(
+				Compression: null,
+				Redaction: new SecretRedactionContext(sourceRoot, session)),
+			[sourcePath],
+			TestContext.Current.CancellationToken);
+
+		await File.WriteAllTextAsync(
+			sourcePath,
+			$"const string value = \"{GithubToken}\";\n",
+			TestContext.Current.CancellationToken);
+		var snapshotRead = await new PreparedSecretFileContentAnalyzer(analyzer, prepared)
+			.ReadClassifiedAsync(
+				sourcePath,
+				SecretRedactionOutputPreparer.MaximumScannableFileBytes,
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(FileContentClassification.Text, snapshotRead.Classification);
+		Assert.Contains("\"safe\"", snapshotRead.Content!.Content, StringComparison.Ordinal);
+		Assert.DoesNotContain(GithubToken, snapshotRead.Content.Content, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task BoundedDocument_NeverCutsAGeneratedPlaceholderOrContinuesPastTheTruncatedFile()
 	{
 		using var temporary = new TemporaryDirectory();
