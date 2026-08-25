@@ -77,6 +77,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
             url,
             out var cloneUrl,
             out var authentication);
+        var resultRepositoryUrl = RepositoryUrlUtility.ToSafeDisplay(cloneUrl);
         var repoName = ExtractRepositoryName(cloneUrl);
 
         try
@@ -89,7 +90,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
                     SourceType: ProjectSourceType.GitClone,
                     DefaultBranch: null,
                     RepositoryName: repoName,
-                    RepositoryUrl: cloneUrl,
+                    RepositoryUrl: resultRepositoryUrl,
                     ErrorMessage: "Clone failed");
             }
 
@@ -120,7 +121,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
                     SourceType: ProjectSourceType.GitClone,
                     DefaultBranch: null,
                     RepositoryName: repoName,
-                    RepositoryUrl: cloneUrl,
+                    RepositoryUrl: resultRepositoryUrl,
                     ErrorMessage: errorMessage);
             }
 
@@ -133,7 +134,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
                 SourceType: ProjectSourceType.GitClone,
                 DefaultBranch: defaultBranch,
                 RepositoryName: repoName,
-                RepositoryUrl: cloneUrl,
+                RepositoryUrl: resultRepositoryUrl,
                 ErrorMessage: null);
         }
         catch (OperationCanceledException)
@@ -149,7 +150,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
                 SourceType: ProjectSourceType.GitClone,
                 DefaultBranch: null,
                 RepositoryName: repoName,
-                RepositoryUrl: cloneUrl,
+                RepositoryUrl: resultRepositoryUrl,
                 ErrorMessage: "Clone failed");
         }
     }

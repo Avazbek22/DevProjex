@@ -227,6 +227,49 @@ public class GitRepositoryServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CloneResultNeverExposesTransportQueryOrFragment()
+    {
+        if (OperatingSystem.IsWindows())
+            Assert.Skip("The process probe uses a POSIX executable script.");
+
+        var probeDirectory = Path.Combine(_tempDir!, "git-result-url-probe");
+        Directory.CreateDirectory(probeDirectory);
+        var executablePath = Path.Combine(probeDirectory, "git-probe");
+        var argumentLog = Path.Combine(probeDirectory, "arguments.txt");
+        var script =
+            "#!/bin/sh\n" +
+            $"printf '%s\\n' \"$@\" >> {ShellQuote(argumentLog)}\n" +
+            "if [ \"$1\" = clone ]; then\n" +
+            "  for target do :; done\n" +
+            "  mkdir -p \"$target/.git\"\n" +
+            "elif [ \"$1\" = symbolic-ref ]; then\n" +
+            "  printf 'refs/remotes/origin/main\\n'\n" +
+            "fi\n";
+        await File.WriteAllTextAsync(
+            executablePath,
+            script,
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+            TestContext.Current.CancellationToken);
+        MakeExecutable(executablePath);
+        var service = new GitRepositoryService(executablePath);
+        var targetDirectory = Path.Combine(probeDirectory, "clone");
+        const string sourceUrl =
+            "https://example.test/owner/repository.git?transport=opaque#fragment";
+
+        var result = await service.CloneAsync(
+            sourceUrl,
+            targetDirectory,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.Equal("https://example.test/owner/repository.git", result.RepositoryUrl);
+        Assert.Contains(
+            "?transport=opaque#fragment",
+            await File.ReadAllTextAsync(argumentLog, TestContext.Current.CancellationToken),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task CloneAsync_ReturnsError_ForNonGitUrl()
     {
         SkipIfNoGit();
