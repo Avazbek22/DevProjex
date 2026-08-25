@@ -1151,6 +1151,16 @@ public sealed class GitIgnoreMatcherTests
 		Assert.True(matcher.IsIgnored("/repo/" + longPattern, false, longPattern));
 	}
 
+	[Fact(Timeout = 2_000)]
+	public void IsIgnored_AlternatingWildcardsCannotCauseCatastrophicBacktracking()
+	{
+		var pattern = string.Concat(Enumerable.Repeat("*a", 12)) + "b";
+		var candidate = new string('a', 36) + "c";
+		var matcher = GitIgnoreMatcher.Build("/repo", [pattern]);
+
+		Assert.False(matcher.IsIgnored($"/repo/{candidate}", false, candidate));
+	}
+
 	#endregion
 
 	#region Multiple Rules Interaction

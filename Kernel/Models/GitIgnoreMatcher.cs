@@ -80,7 +80,9 @@ public sealed class GitIgnoreMatcher
             return Empty;
 
         var rules = new List<Rule>();
-        var regexOptions = RegexOptions.Compiled | RegexOptions.CultureInvariant;
+        var regexOptions = RegexOptions.Compiled |
+                           RegexOptions.CultureInvariant |
+                           RegexOptions.NonBacktracking;
 
         foreach (var raw in lines)
         {
