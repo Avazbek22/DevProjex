@@ -2394,12 +2394,14 @@ public sealed class RepoCacheService : IRepoCacheService
 	{
 		try
 		{
-			var identity = RepositoryUrlUtility.GetComparisonKey(entry.RepositoryUrl);
+			var safeUrl = RepositoryUrlUtility.ToSafeDisplay(entry.RepositoryUrl);
+			var identity = RepositoryUrlUtility.GetComparisonKey(safeUrl);
 			if (identity.Length == 0)
 				return null;
 			return entry with
 			{
 				Identity = identity,
+				RepositoryUrl = safeUrl,
 				LastUsedUtc = entry.LastUsedUtc <= DateTimeOffset.UnixEpoch ||
 				              entry.LastUsedUtc > maximumAcceptedTimestamp
 					? DateTimeOffset.UnixEpoch

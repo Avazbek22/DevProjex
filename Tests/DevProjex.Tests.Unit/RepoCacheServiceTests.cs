@@ -885,6 +885,41 @@ public class RepoCacheServiceTests : IDisposable
         Assert.Null(indexed);
     }
 
+	[Fact]
+	public void FindIndexedRepository_DoesNotReturnCredentialsFromPersistedUrl()
+	{
+		const string unsafeUrl = "https://user:super-secret@example.com/owner/repository.git?token=hidden";
+		const string safeUrl = "https://example.com/owner/repository.git";
+		var repositoryPath = _service.CreateRepositoryDirectory(safeUrl);
+		Directory.CreateDirectory(_testCacheRoot);
+		File.WriteAllText(
+			Path.Combine(_testCacheRoot, "cache-index.json"),
+			JsonSerializer.Serialize(
+				new
+				{
+					SchemaVersion = 1,
+					Entries = new[]
+					{
+						new RepositoryCacheIndexEntry(
+							RepositoryUrlUtility.GetComparisonKey(unsafeUrl),
+							unsafeUrl,
+							repositoryPath,
+							"main",
+							"0123456789abcdef",
+							DateTimeOffset.UtcNow,
+							RepositoryCacheEntryState.Ready)
+					}
+				},
+				new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+
+		var indexed = _service.FindIndexedRepository(safeUrl);
+
+		Assert.NotNull(indexed);
+		Assert.Equal(safeUrl, indexed.RepositoryUrl);
+		Assert.DoesNotContain("super-secret", indexed.RepositoryUrl, StringComparison.Ordinal);
+		Assert.DoesNotContain("token=", indexed.RepositoryUrl, StringComparison.Ordinal);
+	}
+
     [Fact]
     public void CreateRepositoryDirectory_SanitizesUrl()
     {
