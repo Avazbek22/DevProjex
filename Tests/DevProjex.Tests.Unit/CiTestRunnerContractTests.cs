@@ -18,7 +18,7 @@ public sealed class CiTestRunnerContractTests
 			Assert.Contains("matrix.suite_id == 'ui'", step, StringComparison.Ordinal);
 			Assert.Contains("--results-directory", step, StringComparison.Ordinal);
 			Assert.Contains("--report-xunit-trx", step, StringComparison.Ordinal);
-			Assert.Contains("--timeout 8m", step, StringComparison.Ordinal);
+			Assert.Contains("--timeout 10m", step, StringComparison.Ordinal);
 			Assert.DoesNotContain("--blame-hang", step, StringComparison.Ordinal);
 		}
 	}
