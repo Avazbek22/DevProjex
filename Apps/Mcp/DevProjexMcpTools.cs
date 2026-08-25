@@ -60,15 +60,22 @@ internal sealed class DevProjexMcpTools(
 			var renderedTree = depth is null
 				? plan.ProjectedTree
 				: PruneToDepth(plan.ProjectedTree, depth.Value);
-			var tree = projects.TreeExportService.BuildFullTree(
-				plan.SourceRoot,
-				renderedTree,
-				TreeTextFormat.Ascii);
-			var lines = McpTextRanges.SplitLines(tree);
-			var truncated = lines.Count > MaximumTreeLines;
-			var shown = truncated ? lines.Take(MaximumTreeLines).ToArray() : lines;
-			var body = string.Join('\n', shown);
-			if (truncated)
+			using var treeWriter = new McpBoundedLineTextWriter(MaximumTreeLines);
+			try
+			{
+				await projects.TreeExportService.WriteFullTreeAsync(
+						treeWriter,
+						plan.SourceRoot,
+						renderedTree,
+						cancellationToken: cancellationToken)
+					.ConfigureAwait(false);
+			}
+			catch (McpLineLimitReachedException)
+			{
+			}
+
+			var body = treeWriter.Text;
+			if (treeWriter.IsTruncated)
 				body += "\n[Tree truncated at 2000 lines. Narrow include_patterns, exclude_patterns, or max_depth.]";
 			return McpToolResults.TextSuccess(McpSpotlight.Wrap(body));
 		}, cancellationToken);

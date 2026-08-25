@@ -8,6 +8,19 @@ namespace DevProjex.Tests.Unit;
 public sealed class McpInfrastructureTests
 {
 	[Fact]
+	public async Task BoundedTreeWriter_StopsBeforeMaterializingLinesBeyondTheLimit()
+	{
+		using var writer = new McpBoundedLineTextWriter(maximumLines: 2);
+		await writer.WriteAsync("first\r\nsecond\n".AsMemory(), TestContext.Current.CancellationToken);
+
+		await Assert.ThrowsAsync<McpLineLimitReachedException>(async () =>
+			await writer.WriteAsync("third".AsMemory(), TestContext.Current.CancellationToken));
+
+		Assert.True(writer.IsTruncated);
+		Assert.Equal("first\nsecond", writer.Text);
+	}
+
+	[Fact]
 	public async Task ProjectOperationGateCancelsARequestWaitingBehindAnotherOperation()
 	{
 		var gate = new McpProjectOperationGate();
