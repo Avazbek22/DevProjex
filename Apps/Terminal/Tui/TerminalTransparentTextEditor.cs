@@ -1,4 +1,5 @@
 using System.Drawing;
+using DevProjex.Terminal.Rendering;
 using Terminal.Gui.Drawing;
 using Terminal.Gui.Drivers;
 using Terminal.Gui.Input;
@@ -30,7 +31,8 @@ internal sealed class TerminalTransparentTextEditor : View
 		get => _value;
 		set
 		{
-			value = TerminalCommandHistory.LimitLength(value ?? string.Empty);
+			value = TerminalCommandHistory.LimitLength(
+				TerminalTextEscaping.EscapeSingleLine(value ?? string.Empty));
 			if (string.Equals(_value, value, StringComparison.Ordinal))
 				return;
 			_value = value;
@@ -134,6 +136,7 @@ internal sealed class TerminalTransparentTextEditor : View
 
 	internal void InsertText(string text)
 	{
+		text = TerminalTextEscaping.EscapeSingleLine(text);
 		var remaining = TerminalCommandHistory.MaximumCommandLength - _value.Length;
 		text = TerminalCommandHistory.LimitLength(text, remaining);
 		if (text.Length == 0)

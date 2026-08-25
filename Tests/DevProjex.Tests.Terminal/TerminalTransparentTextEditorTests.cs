@@ -18,4 +18,15 @@ public sealed class TerminalTransparentTextEditorTests
 
 		Assert.Equal(new string('x', TerminalCommandHistory.MaximumCommandLength - 1), editor.Value);
 	}
+
+	[Fact]
+	public void CommandInputEscapesPastedControlCharacters()
+	{
+		var editor = new TerminalTransparentTextEditor { Value = "search first\nsecond" };
+		editor.MoveEnd();
+		editor.InsertText("\t\u001B");
+
+		Assert.Equal(@"search first\nsecond\t\u001B", editor.Value);
+		Assert.DoesNotContain(editor.Value, char.IsControl);
+	}
 }

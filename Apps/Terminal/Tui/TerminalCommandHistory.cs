@@ -1,3 +1,5 @@
+using DevProjex.Terminal.Rendering;
+
 namespace DevProjex.Terminal.Tui;
 
 internal sealed class TerminalCommandHistory
@@ -80,7 +82,7 @@ internal sealed class TerminalCommandHistory
 	private static string NormalizeCommand(string? command)
 	{
 		var normalized = command?.Trim() ?? string.Empty;
-		return LimitLength(normalized);
+		return LimitLength(TerminalTextEscaping.EscapeSingleLine(normalized));
 	}
 
 	internal static string LimitLength(string value, int maximumLength = MaximumCommandLength)

@@ -62,4 +62,13 @@ public sealed class TerminalCommandHistoryTests
 
 		Assert.Equal([prefix], history.Entries);
 	}
+
+	[Fact]
+	public void ConstructorEscapesControlCharactersFromPersistedHistory()
+	{
+		var history = new TerminalCommandHistory([" search first\r\nsecond\t\u001B "]);
+
+		Assert.Equal([@"search first\r\nsecond\t\u001B"], history.Entries);
+		Assert.DoesNotContain(history.Entries[0], char.IsControl);
+	}
 }
