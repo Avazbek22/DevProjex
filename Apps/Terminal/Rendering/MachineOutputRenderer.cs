@@ -27,7 +27,7 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 			kind = "devprojex-analysis",
 			project = new
 			{
-				root = PathUtility.NormalizeSeparators(ResolveDocumentRoot(plan)),
+				root = MachinePathPresentation.Normalize(ResolveDocumentRoot(plan)),
 				name = plan.SourceIdentity?.DisplayName ??
 				       Path.GetFileName(Path.TrimEndingDirectorySeparator(plan.SourceRoot)),
 				source = plan.SourceIdentity is
@@ -73,7 +73,7 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 				code = diagnostic.Code,
 				severity = diagnostic.Severity.ToString().ToLowerInvariant(),
 				message = diagnostic.Message,
-				path = diagnostic.Path is null ? null : PathUtility.NormalizeSeparators(diagnostic.Path)
+				path = diagnostic.Path is null ? null : MachinePathPresentation.Normalize(diagnostic.Path)
 			}),
 			fingerprint = plan.Fingerprint
 		};

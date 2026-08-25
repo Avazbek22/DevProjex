@@ -8,6 +8,20 @@ namespace DevProjex.Tests.Terminal;
 public sealed class MachineSchemaContractTests
 {
 	[Fact]
+	public void MachinePathsNormalizeForeignWindowsRootsWithoutReinterpretingUnixNames()
+	{
+		Assert.Equal(
+			"C:/workspace/Project",
+			MachinePathPresentation.Normalize(@"C:\workspace\Project"));
+
+		if (!OperatingSystem.IsWindows())
+		{
+			const string unixPath = "/workspace/literal\\name.cs";
+			Assert.Equal(unixPath, MachinePathPresentation.Normalize(unixPath));
+		}
+	}
+
+	[Fact]
 	public async Task AnalysisJsonNormalizesDiagnosticPathsAndUsesStableDiagnosticTokens()
 	{
 		using var workspace = new TemporaryDirectory();

@@ -188,7 +188,7 @@ public sealed class DesktopCommandHandler(
 	}
 
 	private static string? NormalizeMachinePath(string? path) =>
-		path is null ? null : PathUtility.NormalizeSeparators(path);
+		path is null ? null : MachinePathPresentation.Normalize(path);
 
 	private async Task<IReadOnlyDictionary<string, object?>?> WaitForLaunchedInstanceAsync(
 		int processId,
