@@ -902,7 +902,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				exception.Code,
 				L("Terminal.Error.ProfileInvalid"),
 				projectPath,
-				source);
+				source,
+				sourceIdentity);
 		}
 		catch (ProjectContextValidationException exception)
 		{
@@ -911,7 +912,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				exception.Code,
 				ResolveValidationErrorMessage(exception.Code),
 				projectPath,
-				source);
+				source,
+				sourceIdentity);
 		}
 		catch
 		{
@@ -920,7 +922,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				"DPX-TUI-PROJECT-OPEN-FAILED",
 				L("Terminal.Tui.Error.ProjectUnavailable"),
 				projectPath,
-				source);
+				source,
+				sourceIdentity);
 		}
 		finally
 		{
@@ -934,15 +937,27 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		string code,
 		string message,
 		string projectPath,
-		TerminalProjectOpenSource source)
+		TerminalProjectOpenSource source,
+		ProjectSourceIdentity? sourceIdentity)
 	{
 		if (source is TerminalProjectOpenSource.Recent or
 			TerminalProjectOpenSource.RecentRepository)
 		{
-			ReturnToRepositoryHistoryWithError(operationCts, code, $"{message}\n\n{projectPath}");
+			var detail = ResolveProjectOpenErrorDetail(projectPath, sourceIdentity);
+			ReturnToRepositoryHistoryWithError(operationCts, code, $"{message}\n\n{detail}");
 			return;
 		}
 		ReturnToWelcomeWithError(operationCts, code, message);
+	}
+
+	internal static string ResolveProjectOpenErrorDetail(
+		string projectPath,
+		ProjectSourceIdentity? sourceIdentity)
+	{
+		var displaySource = sourceIdentity is { SourceType: ProjectSourceType.GitClone } identity
+			? RepositoryUrlUtility.ToSafeDisplay(identity.RepositoryUrl ?? identity.SourceReference)
+			: projectPath;
+		return TerminalTextEscaping.EscapeSingleLine(displaySource);
 	}
 
 	private void ReturnToWelcomeAfterCancellation(CancellationTokenSource operationCts)
