@@ -1,3 +1,4 @@
+using DevProjex.Terminal.Rendering;
 using Terminal.Gui.Text;
 
 namespace DevProjex.Terminal.Tui;
@@ -31,6 +32,7 @@ internal sealed record TerminalParameterRow(
 
 	internal static string FitLabel(string value, int width, bool useUnicode)
 	{
+		value = TerminalTextEscaping.EscapeSingleLine(value);
 		if (string.IsNullOrEmpty(value) || width <= 0)
 			return string.Empty;
 		if (value.GetColumns() <= width)

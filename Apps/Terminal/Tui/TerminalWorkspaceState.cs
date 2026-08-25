@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using DevProjex.Terminal.Rendering;
 using Terminal.Gui.Text;
 
 namespace DevProjex.Terminal.Tui;
@@ -16,7 +17,9 @@ public sealed record TerminalTreeRow(
 	bool IsExpanded,
 	TerminalTreeCheckState CheckState)
 {
-	public int DisplayWidth => Depth * 2 + 6 + Node.DisplayName.GetColumns();
+	private string SafeDisplayName => TerminalTextEscaping.EscapeSingleLine(Node.DisplayName);
+
+	public int DisplayWidth => Depth * 2 + 6 + SafeDisplayName.GetColumns();
 
 	public override string ToString()
 	{
@@ -30,7 +33,7 @@ public sealed record TerminalTreeRow(
 			TerminalTreeCheckState.Indeterminate => "[-]",
 			_ => "[ ]"
 		};
-		return $"{indentation}{disclosure} {check} {Node.DisplayName}";
+		return $"{indentation}{disclosure} {check} {SafeDisplayName}";
 	}
 }
 

@@ -1,3 +1,4 @@
+using DevProjex.Terminal.Rendering;
 using Terminal.Gui.Text;
 
 namespace DevProjex.Terminal.Tui;
@@ -25,6 +26,7 @@ internal sealed class TerminalRecentWorkspaceRow(
 
 	internal static string FitToColumns(string value, int width)
 	{
+		value = TerminalTextEscaping.EscapeSingleLine(value);
 		if (string.IsNullOrEmpty(value) || width <= 0)
 			return string.Empty;
 		if (value.GetColumns() <= width)

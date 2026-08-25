@@ -4275,6 +4275,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 
 	internal static string FitPathToWidth(string value, int width)
 	{
+		value = TerminalTextEscaping.EscapeSingleLine(value);
 		if (string.IsNullOrEmpty(value) || width <= 0)
 			return string.Empty;
 		if (value.GetColumns() <= width)
@@ -4627,11 +4628,12 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private static string GetProjectDisplayName(ProjectContextPlan? plan)
 	{
 		if (plan?.SourceIdentity?.DisplayName is { Length: > 0 } displayName)
-			return displayName;
+			return TerminalTextEscaping.EscapeSingleLine(displayName);
 		if (plan is null)
 			return string.Empty;
 		var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(plan.SourceRoot));
-		return string.IsNullOrEmpty(name) ? plan.SourceRoot : name;
+		return TerminalTextEscaping.EscapeSingleLine(
+			string.IsNullOrEmpty(name) ? plan.SourceRoot : name);
 	}
 
 	private string BuildWorkspaceHeading(ProjectContextPlan plan)

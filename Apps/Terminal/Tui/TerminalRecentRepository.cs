@@ -1,4 +1,5 @@
 using DevProjex.Terminal.Execution;
+using DevProjex.Terminal.Rendering;
 
 namespace DevProjex.Terminal.Tui;
 
@@ -23,7 +24,8 @@ internal sealed class TerminalRecentRepositoryRow(TerminalRecentRepository repos
 			RepositoryCacheState.Damaged => "[!]",
 			_ => "[-]"
 		};
-		return $"{(IsSelected ? ">" : " ")} {state} {Repository.Name}";
+		return $"{(IsSelected ? ">" : " ")} {state} " +
+		       TerminalTextEscaping.EscapeSingleLine(Repository.Name);
 	}
 }
 

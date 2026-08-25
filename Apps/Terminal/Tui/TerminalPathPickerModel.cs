@@ -1,3 +1,5 @@
+using DevProjex.Terminal.Rendering;
+
 namespace DevProjex.Terminal.Tui;
 
 internal enum TerminalPathPickerMode
@@ -23,8 +25,8 @@ internal sealed record TerminalPathPickerEntry(
 		IsParent
 			? "[..] .."
 			: IsDirectory
-				? $"[D]  {Name}"
-				: $"[F]  {Name}";
+				? $"[D]  {TerminalTextEscaping.EscapeSingleLine(Name)}"
+				: $"[F]  {TerminalTextEscaping.EscapeSingleLine(Name)}";
 }
 
 internal sealed class TerminalPathPickerModel
