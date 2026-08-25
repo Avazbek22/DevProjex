@@ -1289,7 +1289,9 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 				Assert.IsType<Button>(cloneWindow.FindControl<Button>("StartCloneButton")));
 			await UiTestDriver.WaitForConditionAsync(
 				window,
-				() => git.CloneCount == 1 && !cloneWindow.IsVisible,
+				() => git.CloneCount == 1 &&
+				      !cloneWindow.IsVisible &&
+				      UiTestDriver.GetViewModel(window).ProjectSourceType == ProjectSourceType.GitClone,
 				"self-hosted repository clone to complete");
 
 			Assert.Equal(repositoryUrl, git.CloneUrl);
