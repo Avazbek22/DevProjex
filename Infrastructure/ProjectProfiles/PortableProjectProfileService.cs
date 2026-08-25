@@ -49,7 +49,7 @@ public sealed class PortableProjectProfileService
 					fullPath,
 					FileMode.Open,
 					FileAccess.Read,
-					FileShare.Read,
+					FileShare.ReadWrite | FileShare.Delete,
 					16 * 1024,
 					FileOptions.Asynchronous | FileOptions.SequentialScan),
 				MaximumDocumentBytes,

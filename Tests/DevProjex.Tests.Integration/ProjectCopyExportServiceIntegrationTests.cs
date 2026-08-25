@@ -557,6 +557,38 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 	}
 
 	[Fact]
+	public async Task AtomicFileReplacementAllowsConcurrentDeleteSharingReader()
+	{
+		using var workspace = new TemporaryDirectory();
+		var destination = workspace.CreateFile("report.txt", "ORIGINAL");
+		await using var reader = new FileStream(
+			destination,
+			FileMode.Open,
+			FileAccess.Read,
+			FileShare.ReadWrite | FileShare.Delete);
+
+		await AtomicFileOutput.WriteAsync(
+			destination,
+			overwrite: true,
+			async (stream, cancellationToken) =>
+			{
+				await stream.WriteAsync("REPLACED"u8.ToArray(), cancellationToken);
+			},
+			TestContext.Current.CancellationToken);
+
+		using var originalReader = new StreamReader(
+			reader,
+			Encoding.UTF8,
+			detectEncodingFromByteOrderMarks: false,
+			leaveOpen: true);
+		Assert.Equal("ORIGINAL", await originalReader.ReadToEndAsync(
+			TestContext.Current.CancellationToken));
+		Assert.Equal("REPLACED", await File.ReadAllTextAsync(
+			destination,
+			TestContext.Current.CancellationToken));
+	}
+
+	[Fact]
 	public void ExistingDestinationFileLinkIntoSourceIsRejectedWithoutEffects()
 	{
 		using var workspace = new TemporaryDirectory();

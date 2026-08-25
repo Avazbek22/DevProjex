@@ -106,7 +106,7 @@ public static class AtomicFileOutput
 			cancellationToken.ThrowIfCancellationRequested();
 			RevalidateResolvedPath(fullPath, validateDestination);
 			cancellationToken.ThrowIfCancellationRequested();
-			File.Move(tempPath, fullPath, overwrite);
+			CommitTemporaryFile(tempPath, fullPath, overwrite);
 		}
 		catch (Exception exception) when (
 			(exception is IOException or UnauthorizedAccessException) &&
@@ -141,6 +141,31 @@ public static class AtomicFileOutput
 			: ProjectCopyExportService.ResolveReportedDestinationPath(
 				requestedPath,
 				fullPath);
+	}
+
+	private static void CommitTemporaryFile(
+		string temporaryPath,
+		string destinationPath,
+		bool overwrite)
+	{
+		if (!overwrite || !File.Exists(destinationPath))
+		{
+			File.Move(temporaryPath, destinationPath, overwrite);
+			return;
+		}
+
+		try
+		{
+			File.Replace(temporaryPath, destinationPath, destinationBackupFileName: null);
+		}
+		catch (FileNotFoundException) when (!File.Exists(destinationPath))
+		{
+			File.Move(temporaryPath, destinationPath, overwrite: true);
+		}
+		catch (NotSupportedException)
+		{
+			File.Move(temporaryPath, destinationPath, overwrite: true);
+		}
 	}
 
 	private static bool CommitFailureIsDestinationConflict(
