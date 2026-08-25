@@ -100,6 +100,34 @@ public sealed class PersistentSecretIdentityTests
 	}
 
 	[Fact]
+	public void V2SourceBoundMark_PreservesWhitespaceOnlyRelativePath()
+	{
+		const string relativePath = " ";
+		var content = $"TOKEN={Secret}";
+		var sourceOffset = content.IndexOf(Secret, StringComparison.Ordinal);
+		var provider = new TestIdentityProvider();
+		Assert.True(PersistentSecretIdentity.TryCreateV2(provider, Secret, out var identity));
+		var mark = new MarkedSecretProfileEntry(
+			identity,
+			"TOKEN",
+			Secret.Length,
+			relativePath,
+			sourceOffset);
+		using var session = SecretRedactionSession.CreateWithPrivateData(
+			new EmptyDetector(),
+			new EmptyDetector(),
+			persistentIdentityProvider: provider);
+
+		session.ReplaceMarkedSecrets([mark]);
+		var stored = Assert.Single(session.GetMarkedSecrets());
+		var matcher = new MarkedSecretsMatcher([stored], [], provider);
+
+		Assert.Equal(relativePath, stored.RelativePath);
+		Assert.Single(matcher.Match(relativePath, content, TestContext.Current.CancellationToken));
+		Assert.Empty(matcher.Match("other.txt", content, TestContext.Current.CancellationToken));
+	}
+
+	[Fact]
 	public void V2SourceBoundMark_UsesUtf16SourceCoordinatesWithoutSplittingUnicode()
 	{
 		const string relativePath = "src/unicode.txt";

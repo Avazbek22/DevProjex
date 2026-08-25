@@ -600,7 +600,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		int? sourceOffset = null;
 		if (mark.RelativePath is not null || mark.SourceOffset is not null)
 		{
-			if (string.IsNullOrWhiteSpace(mark.RelativePath) || mark.SourceOffset is null or < 0)
+			if (string.IsNullOrEmpty(mark.RelativePath) || mark.SourceOffset is null or < 0)
 			{
 				normalized = null!;
 				return false;

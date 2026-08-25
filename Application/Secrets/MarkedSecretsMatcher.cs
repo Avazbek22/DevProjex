@@ -443,7 +443,7 @@ internal sealed class MarkedSecretsMatcher
 		PersistentSecretIdentity.IsSupported(mark.H) &&
 		(mark.RelativePath is null && mark.SourceOffset is null ||
 		 PersistentSecretIdentity.IsV2(mark.H) &&
-		 !string.IsNullOrWhiteSpace(mark.RelativePath) &&
+		 !string.IsNullOrEmpty(mark.RelativePath) &&
 		 mark.SourceOffset is >= 0);
 
 	private static bool IsValidHash(string? hash) =>

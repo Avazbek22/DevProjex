@@ -712,7 +712,7 @@ internal sealed class PersistentSecretMarkStore(
 		normalizedOffset = null;
 		if (relativePath is null && sourceOffset is null)
 			return true;
-		if (string.IsNullOrWhiteSpace(relativePath) || sourceOffset is null or < 0)
+		if (string.IsNullOrEmpty(relativePath) || sourceOffset is null or < 0)
 			return false;
 		try
 		{
