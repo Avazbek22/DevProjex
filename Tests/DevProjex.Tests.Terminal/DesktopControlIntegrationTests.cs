@@ -298,6 +298,27 @@ public sealed class DesktopControlIntegrationTests
 	}
 
 	[Fact]
+	public async Task RegistryRemovesDanglingRegistrationLinksOnUnix()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("This regression covers Unix dangling-link cleanup semantics.");
+
+		using var workspace = new TemporaryDirectory();
+		var paths = new DesktopControlPaths(() => workspace.Path);
+		Directory.CreateDirectory(paths.RegistryDirectory);
+		var link = paths.GetRegistrationPath("dangling");
+		File.CreateSymbolicLink(link, Path.Combine(workspace.Path, "missing-registration.json"));
+		var registry = new DesktopInstanceRegistry(paths);
+
+		Assert.Empty(await registry.ListAsync(TestContext.Current.CancellationToken));
+
+		Assert.DoesNotContain(
+			link,
+			Directory.EnumerateFileSystemEntries(paths.RegistryDirectory),
+			PathComparer.Default);
+	}
+
+	[Fact]
 	public async Task RegistryNeverDeletesAnEndpointOutsideItsOwnedSocketPath()
 	{
 		using var workspace = new TemporaryDirectory();
