@@ -120,7 +120,7 @@ public sealed class DevProjexCommandTree
 			catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException)
 			{
 				environment.Error.WriteLine(
-					$"DPX-MCP-STARTUP: {TerminalTextEscaping.EscapeSingleLine(exception.Message)}");
+					$"error[DPX-MCP-STARTUP]: {TerminalTextEscaping.EscapeSingleLine(exception.Message)}");
 				return CommandLineExitCodes.UsageError;
 			}
 		});

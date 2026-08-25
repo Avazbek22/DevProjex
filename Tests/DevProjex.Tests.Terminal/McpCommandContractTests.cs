@@ -52,6 +52,7 @@ public sealed class McpCommandContractTests
 
 		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
 		Assert.Empty(environment.StandardOutput);
+		Assert.StartsWith("error[DPX-MCP-STARTUP]: ", environment.StandardError, StringComparison.Ordinal);
 		Assert.Contains("\\r\\n\\u001B[31m", environment.StandardError, StringComparison.Ordinal);
 		Assert.DoesNotContain('\u001b', environment.StandardError);
 		Assert.Single(environment.StandardError.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries));
