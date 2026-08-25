@@ -470,6 +470,20 @@ public sealed class DesktopControlIntegrationTests
 	}
 
 	[Fact]
+	public async Task IncompleteRequestIsRejectedAfterTheReceiveDeadline()
+	{
+		await using var stream = new CancellationBoundReadStream();
+
+		var exception = await Assert.ThrowsAsync<DesktopControlException>(() =>
+			DesktopControlServer.ReadMessageAsync(
+				stream,
+				TimeSpan.FromMilliseconds(25),
+				TestContext.Current.CancellationToken));
+
+		Assert.Equal("DPX-DESKTOP-TIMEOUT", exception.Code);
+	}
+
+	[Fact]
 	public void OpenWaitReadinessRequiresEveryRequestedSemanticState()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -837,6 +851,35 @@ public sealed class DesktopControlIntegrationTests
 					["projectPath"] = @"C:\workspace\Project"
 				}));
 		}
+	}
+
+	private sealed class CancellationBoundReadStream : Stream
+	{
+		public override bool CanRead => true;
+		public override bool CanSeek => false;
+		public override bool CanWrite => false;
+		public override long Length => throw new NotSupportedException();
+		public override long Position
+		{
+			get => throw new NotSupportedException();
+			set => throw new NotSupportedException();
+		}
+
+		public override int Read(byte[] buffer, int offset, int count) =>
+			throw new NotSupportedException();
+
+		public override async ValueTask<int> ReadAsync(
+			Memory<byte> buffer,
+			CancellationToken cancellationToken = default)
+		{
+			await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+			return 0;
+		}
+
+		public override void Flush() => throw new NotSupportedException();
+		public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+		public override void SetLength(long value) => throw new NotSupportedException();
+		public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
 	}
 
 	private sealed class OpenStateDesktopHandler(string lastProject) : IDesktopInteractionHandler

@@ -7,6 +7,7 @@ namespace DevProjex.Terminal.DesktopControl;
 
 public sealed class DesktopControlServer : IAsyncDisposable
 {
+	internal static readonly TimeSpan RequestReceiveTimeout = TimeSpan.FromSeconds(5);
 	private static readonly JsonSerializerOptions JsonOptions = new()
 	{
 		PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -187,7 +188,10 @@ public sealed class DesktopControlServer : IAsyncDisposable
 		string requestId = string.Empty;
 		try
 		{
-			var json = await ReadMessageAsync(stream, cancellationToken).ConfigureAwait(false);
+			var json = await ReadMessageAsync(
+				stream,
+				RequestReceiveTimeout,
+				cancellationToken).ConfigureAwait(false);
 			var request = JsonSerializer.Deserialize<DesktopProtocolRequest>(json, JsonOptions) ??
 			              throw new JsonException();
 			requestId = request.RequestId;
@@ -269,31 +273,47 @@ public sealed class DesktopControlServer : IAsyncDisposable
 		await _registry.RegisterAsync(registration, cancellationToken).ConfigureAwait(false);
 	}
 
-	private static async Task<string> ReadMessageAsync(
+	internal static async Task<string> ReadMessageAsync(
 		Stream stream,
+		TimeSpan receiveTimeout,
 		CancellationToken cancellationToken)
 	{
+		ArgumentNullException.ThrowIfNull(stream);
+		if (receiveTimeout <= TimeSpan.Zero)
+			throw new ArgumentOutOfRangeException(nameof(receiveTimeout));
+		using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		timeout.CancelAfter(receiveTimeout);
 		var buffer = new byte[4096];
 		using var message = new MemoryStream();
-		while (true)
+		try
 		{
-			var read = await stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
-			if (read == 0)
-				throw new EndOfStreamException();
-
-			var newline = Array.IndexOf(buffer, (byte)'\n', 0, read);
-			var count = newline >= 0 ? newline : read;
-			if (message.Length + count > DesktopProtocol.MaximumMessageBytes)
+			while (true)
 			{
-				throw new DesktopControlException(
-					"DPX-DESKTOP-PAYLOAD-TOO-LARGE",
-					"The desktop request exceeds the size limit.",
-					CommandLineExitCodes.UsageError);
-			}
+				var read = await stream.ReadAsync(buffer, timeout.Token).ConfigureAwait(false);
+				if (read == 0)
+					throw new EndOfStreamException();
 
-			message.Write(buffer, 0, count);
-			if (newline >= 0)
-				return Encoding.UTF8.GetString(message.GetBuffer(), 0, checked((int)message.Length));
+				var newline = Array.IndexOf(buffer, (byte)'\n', 0, read);
+				var count = newline >= 0 ? newline : read;
+				if (message.Length + count > DesktopProtocol.MaximumMessageBytes)
+				{
+					throw new DesktopControlException(
+						"DPX-DESKTOP-PAYLOAD-TOO-LARGE",
+						"The desktop request exceeds the size limit.",
+						CommandLineExitCodes.UsageError);
+				}
+
+				message.Write(buffer, 0, count);
+				if (newline >= 0)
+					return Encoding.UTF8.GetString(message.GetBuffer(), 0, checked((int)message.Length));
+			}
+		}
+		catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+		{
+			throw new DesktopControlException(
+				"DPX-DESKTOP-TIMEOUT",
+				"The desktop request was not received before the timeout.",
+				innerException: exception);
 		}
 	}
 
