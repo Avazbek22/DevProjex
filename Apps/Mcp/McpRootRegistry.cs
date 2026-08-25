@@ -29,7 +29,7 @@ public sealed class McpRootRegistry
 		if (string.IsNullOrWhiteSpace(project))
 		{
 			if (_roots.Count == 1)
-				return _roots[0];
+				return ResolveProject(_roots[0]);
 			throw new McpToolException(
 				McpErrorCodes.UnknownProject,
 				$"{McpErrorCodes.UnknownProject}: 'project' is required because multiple roots are available. " +

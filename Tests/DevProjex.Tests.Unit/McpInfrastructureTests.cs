@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using DevProjex.Application.Compression;
 using DevProjex.Application.Context;
 using DevProjex.Mcp;
@@ -143,6 +144,29 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public void RootRegistryRevalidatesTheImplicitSingleRootAfterFilesystemReplacement()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var original = Path.Combine(workspace.Path, "original-project");
+		var outside = workspace.CreateFolder("outside");
+		var registry = new McpRootRegistry([project]);
+		Directory.Move(project, original);
+		CreateDirectoryAliasOrSkip(project, outside);
+		try
+		{
+			var exception = Assert.Throws<McpToolException>(() => registry.ResolveProject(project: null));
+
+			Assert.Equal(McpErrorCodes.UnknownProject, exception.Code);
+		}
+		finally
+		{
+			if (Directory.Exists(project))
+				Directory.Delete(project);
+		}
+	}
+
+	[Fact]
 	public void ToolErrorsEscapeControlCharactersIntoOneSafeLine()
 	{
 		var result = McpToolResults.Error(new McpToolException(
@@ -157,6 +181,46 @@ public sealed class McpInfrastructureTests
 		Assert.DoesNotContain('\r', text);
 		Assert.DoesNotContain('\n', text);
 		Assert.DoesNotContain('\u001b', text);
+	}
+
+	private static void CreateDirectoryAliasOrSkip(string linkPath, string targetPath)
+	{
+		if (!OperatingSystem.IsWindows())
+		{
+			try
+			{
+				Directory.CreateSymbolicLink(linkPath, targetPath);
+				return;
+			}
+			catch (Exception exception) when (
+				exception is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
+			{
+				Assert.Skip($"Directory symbolic links are unavailable: {exception.GetType().Name}.");
+			}
+		}
+
+		using var process = Process.Start(new ProcessStartInfo("cmd.exe")
+		{
+			UseShellExecute = false,
+			CreateNoWindow = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			ArgumentList = { "/c", "mklink", "/J", linkPath, targetPath }
+		});
+		if (process is null ||
+		    !process.WaitForExit(TimeSpan.FromSeconds(5)) ||
+		    process.ExitCode != 0 ||
+		    !Directory.Exists(linkPath))
+		{
+			try
+			{
+				process?.Kill(entireProcessTree: true);
+			}
+			catch (InvalidOperationException)
+			{
+			}
+			Assert.Skip("Windows junction creation is unavailable.");
+		}
 	}
 
 	[Fact]
