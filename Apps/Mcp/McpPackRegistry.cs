@@ -151,12 +151,16 @@ public sealed class McpPackRegistry : IDisposable
 		{
 			try
 			{
+				if (!IsOwnedSessionDirectory(directory))
+					continue;
 				if (now - Directory.GetLastWriteTimeUtc(directory) <= StaleAge)
 					continue;
 				var leasePath = Path.Combine(directory, ".session.lock");
-				using var lease = File.Exists(leasePath)
-					? new FileStream(leasePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None)
-					: null;
+				using var lease = new FileStream(
+					leasePath,
+					FileMode.Open,
+					FileAccess.ReadWrite,
+					FileShare.Delete);
 				Directory.Delete(directory, recursive: true);
 			}
 			catch (IOException)
@@ -167,6 +171,30 @@ public sealed class McpPackRegistry : IDisposable
 			}
 		}
 	}
+
+	private static bool IsOwnedSessionDirectory(string directory)
+	{
+		var name = Path.GetFileName(directory);
+		if (name.Length != 32 || !name.All(IsLowerHexDigit))
+			return false;
+
+		var directoryAttributes = File.GetAttributes(directory);
+		if (!directoryAttributes.HasFlag(FileAttributes.Directory) ||
+		    directoryAttributes.HasFlag(FileAttributes.ReparsePoint))
+		{
+			return false;
+		}
+
+		var leasePath = Path.Combine(directory, ".session.lock");
+		if (!File.Exists(leasePath))
+			return false;
+		var leaseAttributes = File.GetAttributes(leasePath);
+		return !leaseAttributes.HasFlag(FileAttributes.Directory) &&
+		       !leaseAttributes.HasFlag(FileAttributes.ReparsePoint);
+	}
+
+	private static bool IsLowerHexDigit(char value) =>
+		value is >= '0' and <= '9' or >= 'a' and <= 'f';
 
 	private static void SetPrivateDirectoryMode(string path)
 	{

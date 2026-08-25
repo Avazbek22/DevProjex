@@ -350,21 +350,58 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
-	public void PackSweepRemovesStaleSessionsButPreservesAnActiveLease()
+	public void PackSweepRemovesOnlyStaleOwnedSessionsAndPreservesAnActiveLease()
 	{
 		using var workspace = new TemporaryDirectory();
 		var baseDirectory = Path.Combine(workspace.Path, "DevProjex", "mcp");
-		var stale = Path.Combine(baseDirectory, "stale-session");
+		var stale = Path.Combine(baseDirectory, new string('a', 32));
 		Directory.CreateDirectory(stale);
+		File.WriteAllText(Path.Combine(stale, ".session.lock"), string.Empty);
 		File.WriteAllText(Path.Combine(stale, "pack.tmp"), "stale");
 		Directory.SetLastWriteTimeUtc(stale, DateTime.UtcNow.AddDays(-2));
+		var foreign = Path.Combine(baseDirectory, "unrelated-old-data");
+		Directory.CreateDirectory(foreign);
+		var protectedFile = Path.Combine(foreign, "keep.txt");
+		File.WriteAllText(protectedFile, "keep");
+		Directory.SetLastWriteTimeUtc(foreign, DateTime.UtcNow.AddDays(-2));
 
 		using var active = new McpPackRegistry(workspace.Path);
 		Directory.SetLastWriteTimeUtc(active.SessionDirectory, DateTime.UtcNow.AddDays(-2));
 		using var next = new McpPackRegistry(workspace.Path);
 
 		Assert.False(Directory.Exists(stale));
+		Assert.True(File.Exists(protectedFile));
 		Assert.True(Directory.Exists(active.SessionDirectory));
+	}
+
+	[Fact]
+	public void PackSweepNeverTraversesASymbolicLinkSessionDirectory()
+	{
+		using var workspace = new TemporaryDirectory();
+		var target = Path.Combine(workspace.Path, "protected-target");
+		Directory.CreateDirectory(target);
+		File.WriteAllText(Path.Combine(target, ".session.lock"), string.Empty);
+		var protectedFile = Path.Combine(target, "keep.txt");
+		File.WriteAllText(protectedFile, "keep");
+		Directory.SetLastWriteTimeUtc(target, DateTime.UtcNow.AddDays(-2));
+
+		var baseDirectory = Path.Combine(workspace.Path, "DevProjex", "mcp");
+		Directory.CreateDirectory(baseDirectory);
+		var link = Path.Combine(baseDirectory, new string('b', 32));
+		try
+		{
+			Directory.CreateSymbolicLink(link, target);
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		{
+			Assert.Skip("Creating directory symbolic links is unavailable in this environment.");
+			return;
+		}
+
+		using var registry = new McpPackRegistry(workspace.Path);
+
+		Assert.True(File.Exists(protectedFile));
+		Assert.True(Directory.Exists(link));
 	}
 
 	[Fact]
