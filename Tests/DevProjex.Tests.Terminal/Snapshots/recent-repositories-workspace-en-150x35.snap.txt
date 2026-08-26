@@ -1,4 +1,4 @@
- DevProjex Terminal · DevProjex
+ DevProjex Terminal · DevProjex [main]
  https://github.com/Avazbek22/DevProjex
 ┌┤> PROJECT TREE├──────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├────────────────────────────────────┐┌┤  PARAMETERS├──────────────────────┐
 │v [x] DevProjex                       ││DevProjex                                                             ││┌┤Content processing [ ] All (5) ──┐│

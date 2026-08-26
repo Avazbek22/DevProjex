@@ -849,7 +849,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		string projectPath,
 		ProjectProfileReference profile,
 		TerminalProjectOpenSource source = TerminalProjectOpenSource.Other,
-		ProjectSourceIdentity? sourceIdentity = null)
+		ProjectSourceIdentity? sourceIdentity = null,
+		IRepositoryCacheSession? preparedRepositorySession = null)
 	{
 		ShowLoading(
 			L("Terminal.Tui.LoadingProject"),
@@ -861,7 +862,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				profile,
 				operationCts,
 				source,
-				sourceIdentity: sourceIdentity),
+				sourceIdentity: sourceIdentity,
+				preparedRepositorySession: preparedRepositorySession),
 			CancellationToken.None));
 	}
 
