@@ -88,7 +88,7 @@ Nếu lệnh đã được thiết lập, hãy mở terminal và chạy:
 Điều này liệt kê các lệnh và tùy chọn cấp cao nhất. Chạy `devprojex help <command>` để xem các tùy chọn và ví dụ riêng của lệnh đó.
 
 Ví dụ:
-* `devprojex` — mở Terminal Workspace tương tác. Bên trong không gian làm việc, điều khiển các hành động thông qua dòng lệnh `:` (ví dụ `:copy`, `:analyze`, `:branch`); xem tài liệu dự án và trợ giúp về không gian làm việc tích hợp để biết danh sách lệnh đầy đủ.
+* `devprojex` — mở Terminal Workspace tương tác. Bên trong không gian làm việc, điều khiển các hành động thông qua dòng lệnh `:` (ví dụ `:copy`, `:analyze`, `:branch`, `:language`); xem tài liệu dự án và trợ giúp về không gian làm việc tích hợp để biết danh sách lệnh đầy đủ.
 * `devprojex tui .` — mở thư mục được chỉ định trực tiếp trong Terminal Workspace.
 * `devprojex open . --preview` — mở thư mục hiện tại trong Desktop Preview.
 * `devprojex analyze . --format json` — phân tích dự án hiện tại dưới dạng JSON.

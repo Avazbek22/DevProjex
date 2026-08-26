@@ -88,7 +88,7 @@ Komut zaten ayarlanmışsa bir terminal açın ve şunu çalıştırın:
 Bu, üst düzey komutları ve seçenekleri listeler. Bu komutun kendi seçeneklerini ve örneklerini görmek için `devprojex help <command>` komutunu çalıştırın.
 
 Örnekler:
-* `devprojex` — etkileşimli Terminal Çalışma Alanını açın. Çalışma alanı içinde, eylemleri `:` komut satırı aracılığıyla yönlendirin (örneğin `:copy`, `:analyze`, `:branch`); Tam komut listesi için yerleşik çalışma alanı yardımına ve proje belgelerine bakın.
+* `devprojex` — etkileşimli Terminal Çalışma Alanını açın. Çalışma alanı içinde, eylemleri `:` komut satırı aracılığıyla yönlendirin (örneğin `:copy`, `:analyze`, `:branch`, `:language`); Tam komut listesi için yerleşik çalışma alanı yardımına ve proje belgelerine bakın.
 * `devprojex tui .` — belirtilen klasörü doğrudan Terminal Çalışma Alanında açın.
 * `devprojex open . --preview` — geçerli klasörü Masaüstü Önizleme'de açar.
 * `devprojex analyze . --format json` — mevcut projeyi JSON olarak analiz edin.

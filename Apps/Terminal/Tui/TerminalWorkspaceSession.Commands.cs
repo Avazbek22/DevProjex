@@ -1,4 +1,5 @@
 using System.Globalization;
+using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.Rendering;
 
 namespace DevProjex.Terminal.Tui;
@@ -33,6 +34,10 @@ internal sealed partial class TerminalWorkspaceSession
 		CreateCommandAction(TerminalWorkspaceCommandVerb.Recent, ExecuteRecentCommand),
 		CreateCommandAction(TerminalWorkspaceCommandVerb.Profile, ExecuteProfileCommand),
 		CreateCommandAction(TerminalWorkspaceCommandVerb.Refresh, ExecuteRefreshCommand),
+		CreateCommandAction(
+			TerminalWorkspaceCommandVerb.Language,
+			ExecuteLanguageCommand,
+			static () => true),
 		CreateCommandAction(
 			TerminalWorkspaceCommandVerb.Help,
 			ExecuteHelpCommand,
@@ -305,6 +310,50 @@ internal sealed partial class TerminalWorkspaceSession
 		return TerminalWorkspaceCommandExecutionResult.Deferred();
 	}
 
+	private TerminalWorkspaceCommandExecutionResult ExecuteLanguageCommand(
+		TerminalWorkspaceCommand command)
+	{
+		var availableCodes = string.Join(' ', CliChoiceSets.Language.Tokens);
+		if (command.Text is null)
+		{
+			ShowScrollableOverlay(
+				L("Terminal.Tui.Command.Language.Title"),
+				string.Format(
+					CultureInfo.CurrentCulture,
+					L("Terminal.Tui.Command.Language.Result.Current"),
+					AppLanguageUtility.ToCode(_services.Localization.CurrentLanguage),
+					availableCodes),
+				TerminalWorkspaceTheme.Dialog,
+				preferredWidth: 88,
+				preferredHeight: 10);
+			return TerminalWorkspaceCommandExecutionResult.Deferred();
+		}
+
+		if (!AppLanguageUtility.TryParseCode(command.Text, out var language))
+			return InvalidCommandExecution();
+
+		_services.Localization.SetLanguage(language);
+		TrackBackgroundTask(PersistLanguageAsync(language));
+		return TerminalWorkspaceCommandExecutionResult.Success(string.Format(
+			CultureInfo.CurrentCulture,
+			L("Terminal.Tui.Command.Language.Result.Changed"),
+			AppLanguageUtility.ToCode(language)));
+	}
+
+	private async Task PersistLanguageAsync(AppLanguage language)
+	{
+		try
+		{
+			await _services.TerminalSettingsStore
+				.SaveLanguageAsync(language, CancellationToken.None)
+				.ConfigureAwait(false);
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		{
+			// A read-only configuration directory must not break the live language switch.
+		}
+	}
+
 	private static bool IsValidProfileName(string name) =>
 		!string.IsNullOrWhiteSpace(name) &&
 		!Path.IsPathRooted(name) &&
@@ -370,7 +419,7 @@ internal sealed partial class TerminalWorkspaceSession
 	private TerminalWorkspaceCommandParseContext BuildCommandParseContext() =>
 		new(_state?.Plan.AvailableExtensions ?? []);
 
-	private void OpenCommandLine()
+	private void OpenCommandLine(string initialText = "")
 	{
 		if (_screen != TerminalWorkspaceScreen.Workspace ||
 			_layoutMode == TerminalWorkspaceLayoutMode.TooSmall ||
@@ -383,7 +432,7 @@ internal sealed partial class TerminalWorkspaceSession
 		_commandReturnPane = _activePane;
 		if (_footer is not null)
 			_footer.Visible = false;
-		_commandLine.Open();
+		_commandLine.Open(initialText);
 		_application.LayoutAndDraw();
 		_application.AddTimeout(TimeSpan.Zero, () =>
 		{
@@ -457,9 +506,19 @@ internal sealed partial class TerminalWorkspaceSession
 			TerminalWorkspaceCommandErrorCode.UnexpectedArgument => "Terminal.Tui.Command.Error.Unexpected",
 			TerminalWorkspaceCommandErrorCode.UnknownToken => "Terminal.Tui.Command.Error.UnknownToken",
 			TerminalWorkspaceCommandErrorCode.InvalidValue => "Terminal.Tui.Command.Error.InvalidValue",
+			TerminalWorkspaceCommandErrorCode.UnknownLanguage =>
+				"Terminal.Tui.Command.Language.Error.Unknown",
 			_ => throw new ArgumentOutOfRangeException()
 		};
 		var value = error.Value ?? string.Empty;
+		if (error.Code == TerminalWorkspaceCommandErrorCode.UnknownLanguage)
+		{
+			return string.Format(
+				CultureInfo.CurrentCulture,
+				L(key),
+				value,
+				string.Join(' ', error.Candidates));
+		}
 		var message = string.Format(
 			CultureInfo.CurrentCulture,
 			L(key),

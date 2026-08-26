@@ -626,6 +626,15 @@ internal sealed partial class TerminalWorkspaceSession
 					TerminalWorkspaceCommandVerb.Refresh).Syntax,
 				execute: () => RefreshCurrentProject())
 		};
+		actions.Add(CreateAction(
+			TerminalWorkspaceActionKind.Language,
+			"Terminal.Tui.Source",
+			"Terminal.Tui.Command.Language.Title",
+			"Terminal.Tui.Command.Language.Description",
+			string.Empty,
+			AppLanguageUtility.ToCode(_services.Localization.CurrentLanguage),
+			TerminalWorkspaceCommandCatalog.Get(TerminalWorkspaceCommandVerb.Language).Syntax,
+			execute: () => OpenCommandLine("language ")));
 
 		if (plan.SourceIdentity?.SourceType == ProjectSourceType.GitClone)
 		{

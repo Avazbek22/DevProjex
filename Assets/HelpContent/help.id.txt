@@ -88,7 +88,7 @@ Jika perintah sudah diatur, buka terminal dan jalankan:
 Ini mencantumkan perintah dan opsi tingkat atas. Jalankan `devprojex help <command>` untuk melihat opsi dan contoh perintah tersebut.
 
 Contoh:
-* `devprojex` — membuka Terminal Workspace interaktif. Di dalam ruang kerja, dorong tindakan melalui baris perintah `:` (misalnya `:copy`, `:analyze`, `:branch`); lihat bantuan ruang kerja bawaan dan dokumentasi proyek untuk daftar perintah lengkap.
+* `devprojex` — membuka Terminal Workspace interaktif. Di dalam ruang kerja, dorong tindakan melalui baris perintah `:` (misalnya `:copy`, `:analyze`, `:branch`, `:language`); lihat bantuan ruang kerja bawaan dan dokumentasi proyek untuk daftar perintah lengkap.
 * `devprojex tui .` — membuka folder yang ditentukan langsung di Terminal Workspace.
 * `devprojex open . --preview` — membuka folder saat ini di Pratinjau Desktop.
 * `devprojex analyze . --format json` — menganalisis proyek saat ini sebagai JSON.

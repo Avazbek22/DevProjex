@@ -207,6 +207,7 @@ public sealed class DevProjexCommandTree
 				{
 					using var serviceScope = CreateServiceScope(parseResult);
 					var services = serviceScope.Services;
+					ApplyTuiLanguage(parseResult, services);
 					var projectSource = parseResult.GetValue(project) ?? Directory.GetCurrentDirectory();
 					await using var resolvedSource = await new TerminalProjectSourceResolver(
 							services,
@@ -1644,6 +1645,20 @@ public sealed class DevProjexCommandTree
 
 	private TerminalServiceScope CreateServiceScope(ParseResult parseResult) =>
 		_serviceFactory.CreateScope(parseResult.GetValue(_language));
+
+	private void ApplyTuiLanguage(ParseResult parseResult, TerminalServices services)
+	{
+		var commandLineLanguage = parseResult.GetValue(_language);
+		var explicitLanguage = parseResult.GetResult(_language) is { Implicit: false }
+			? commandLineLanguage
+			: (AppLanguage?)null;
+		var language = TerminalWorkspaceLanguagePolicy.Resolve(
+			commandLineLanguage,
+			explicitLanguage,
+			services.TerminalSettingsStore.LoadLanguage());
+		_localization.SetLanguage(language);
+		services.Localization.SetLanguage(language);
+	}
 
 	private Argument<string?> ProjectArgument() =>
 		new("PROJECT")

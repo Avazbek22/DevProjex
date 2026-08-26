@@ -88,7 +88,7 @@ Si la commande est déjà configurée, ouvrez un terminal et exécutez :
 Vous verrez ainsi les commandes et options de premier niveau. Les options et exemples d’une commande s’affichent avec `devprojex help <command>`.
 
 Exemples :
-* `devprojex` — ouvrir l’espace de travail interactif du terminal. Dans cet espace, les actions s’exécutent via la ligne de commande `:` (par exemple `:copy`, `:analyze`, `:branch`) ; la liste complète des commandes figure dans l’aide intégrée de l’espace de travail et dans la documentation du projet.
+* `devprojex` — ouvrir l’espace de travail interactif du terminal. Dans cet espace, les actions s’exécutent via la ligne de commande `:` (par exemple `:copy`, `:analyze`, `:branch`, `:language`) ; la liste complète des commandes figure dans l’aide intégrée de l’espace de travail et dans la documentation du projet.
 * `devprojex tui .` — ouvrir le dossier indiqué directement dans l’espace de travail du terminal.
 * `devprojex open . --preview` — ouvrir le dossier courant dans l’aperçu Desktop.
 * `devprojex analyze . --format json` — analyser le projet courant au format JSON.

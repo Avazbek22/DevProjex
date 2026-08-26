@@ -9,6 +9,7 @@ internal sealed class TerminalWorkspaceCommandParser
 	private static readonly string[] AggregateTargets = ["types", "exclusions", "content"];
 	private static readonly string[] ExportTargets = ["context", "zip", "folder"];
 	private static readonly string[] ProfileTargets = ["save"];
+	private static readonly IReadOnlyList<string> LanguageCodes = CliChoiceSets.Language.Tokens;
 
 	private static readonly IReadOnlyList<string> SetTargets =
 	[
@@ -58,6 +59,7 @@ internal sealed class TerminalWorkspaceCommandParser
 			TerminalWorkspaceCommandVerb.Copy => ParseCopy(definition, tokenization.Tokens),
 			TerminalWorkspaceCommandVerb.Branch => ParseOptionalText(definition, tokenization.Tokens),
 			TerminalWorkspaceCommandVerb.Profile => ParseProfile(definition, tokenization.Tokens),
+			TerminalWorkspaceCommandVerb.Language => ParseLanguage(definition, tokenization.Tokens),
 			TerminalWorkspaceCommandVerb.Help => ParseHelp(definition, tokenization.Tokens),
 			TerminalWorkspaceCommandVerb.Analyze or
 			TerminalWorkspaceCommandVerb.Update or
@@ -352,6 +354,28 @@ internal sealed class TerminalWorkspaceCommandParser
 			Target: command.Token));
 	}
 
+	private static TerminalWorkspaceCommandParseResult ParseLanguage(
+		TerminalWorkspaceCommandDefinition definition,
+		IReadOnlyList<ParsedToken> tokens)
+	{
+		if (tokens.Count > 2)
+			return Unexpected(tokens[2]);
+		if (tokens.Count == 1)
+			return TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(definition));
+		if (!AppLanguageUtility.TryParseCode(tokens[1].Value, out var language))
+		{
+			return Failure(
+				TerminalWorkspaceCommandErrorCode.UnknownLanguage,
+				tokens[1].Start,
+				tokens[1].Value,
+				LanguageCodes);
+		}
+
+		return TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
+			definition,
+			Text: AppLanguageUtility.ToCode(language)));
+	}
+
 	private static TerminalWorkspaceCommandParseResult ParseWithoutArguments(
 		TerminalWorkspaceCommandDefinition definition,
 		IReadOnlyList<ParsedToken> tokens) =>
@@ -380,6 +404,7 @@ internal sealed class TerminalWorkspaceCommandParser
 			TerminalWorkspaceCommandVerb.Copy when argumentIndex == 0 => CliChoiceSets.ContextView.Tokens,
 			TerminalWorkspaceCommandVerb.Copy when argumentIndex == 1 => CliChoiceSets.ContextDocumentFormat.Tokens,
 			TerminalWorkspaceCommandVerb.Profile when argumentIndex == 0 => ProfileTargets,
+			TerminalWorkspaceCommandVerb.Language when argumentIndex == 0 => LanguageCodes,
 			TerminalWorkspaceCommandVerb.Help when argumentIndex == 0 => TerminalWorkspaceCommandCatalog.VerbTokens,
 			_ => []
 		};

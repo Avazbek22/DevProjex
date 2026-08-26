@@ -88,7 +88,7 @@ Si el comando ya está configurado, abra una terminal y ejecute:
 Esto muestra los comandos y opciones de nivel superior. Las opciones y ejemplos de un comando concreto se muestran con `devprojex help <command>`.
 
 Ejemplos:
-* `devprojex`: abre el espacio de trabajo interactivo de la terminal. Dentro del espacio de trabajo, las acciones se ejecutan mediante la línea de comandos con `:` (por ejemplo, `:copy`, `:analyze`, `:branch`); la lista completa de comandos está en la ayuda integrada del espacio de trabajo y en la documentación del proyecto.
+* `devprojex`: abre el espacio de trabajo interactivo de la terminal. Dentro del espacio de trabajo, las acciones se ejecutan mediante la línea de comandos con `:` (por ejemplo, `:copy`, `:analyze`, `:branch`, `:language`); la lista completa de comandos está en la ayuda integrada del espacio de trabajo y en la documentación del proyecto.
 * `devprojex tui .`: abre la carpeta indicada directamente en el espacio de trabajo de la terminal.
 * `devprojex open . --preview`: abre la carpeta actual en la vista previa de Desktop.
 * `devprojex analyze . --format json`: analiza el proyecto actual como JSON.

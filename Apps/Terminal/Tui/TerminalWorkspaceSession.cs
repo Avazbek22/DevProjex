@@ -173,6 +173,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_terminalWidth = Math.Max(_environment.Width, initialScreen.Width);
 		_terminalHeight = Math.Max(_environment.Height, initialScreen.Height);
 		_application.Keyboard.KeyDown += OnRootKeyDown;
+		_services.Localization.LanguageChanged += OnLanguageChanged;
 		_screenChangedHandler = OnApplicationScreenChanged;
 		_application.ScreenChanged += _screenChangedHandler;
 		if (_application.Driver is { } driver)
@@ -181,6 +182,87 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_driverSizeChangedHandler = OnDriverSizeChanged;
 			driver.SizeChanged += _driverSizeChangedHandler;
 		}
+	}
+
+	private void OnLanguageChanged(object? sender, EventArgs args)
+	{
+		if (_disposed || _stopping)
+			return;
+
+		_application.Invoke(RefreshLocalizedSurface);
+	}
+
+	private void RefreshLocalizedSurface()
+	{
+		if (_disposed || _stopping)
+			return;
+
+		if (_tooSmall is not null)
+			_tooSmall.Text = L("Terminal.Tui.Error.Resize");
+		switch (_screen)
+		{
+			case TerminalWorkspaceScreen.Welcome:
+				RefreshWelcomeLocalization();
+				break;
+			case TerminalWorkspaceScreen.Workspace when _state is not null:
+				CancelTransientStatus();
+				RefreshWorkspace();
+				UpdateWorkspaceHeaderLayout();
+				UpdatePreviewRange();
+				_commandLine?.RefreshLayout();
+				SchedulePreviewRefresh();
+				break;
+		}
+
+		InvalidateViewHierarchy(_root);
+		_application.LayoutAndDraw();
+	}
+
+	private void RefreshWelcomeLocalization()
+	{
+		if (_welcomeContext is null || _welcomeRows is null || _welcomeList is null)
+			return;
+
+		var selectedKind = _welcomeList.SelectedItem is { } selected &&
+		                   selected >= 0 && selected < _welcomeRows.Count
+			? _welcomeRows[selected].Action.Kind
+			: (TerminalWelcomeActionKind?)null;
+		var actions = BuildWelcomeActions(_welcomeContext);
+		_welcomeRows.Clear();
+		foreach (var action in actions)
+			_welcomeRows.Add(new TerminalWelcomeActionRow(action));
+		var selectedIndex = selectedKind is null
+			? 0
+			: actions
+				.Select((action, index) => (action, index))
+				.FirstOrDefault(pair => pair.action.Kind == selectedKind)
+				.index;
+		if (_welcomeRows.Count > 0)
+			_welcomeList.SelectedItem = Math.Clamp(selectedIndex, 0, _welcomeRows.Count - 1);
+
+		if (_welcomeTagline is not null)
+			_welcomeTagline.Text = L("Terminal.Tui.Welcome.Description");
+		if (_welcomeCurrentTitle is not null)
+			_welcomeCurrentTitle.Text = L("Terminal.Tui.CurrentDirectory");
+		if (_welcomeCurrentStatus is not null)
+		{
+			_welcomeCurrentStatus.Text = _welcomeContext.CanOpenCurrentDirectory
+				? L("Terminal.Tui.WorkspaceDetected")
+				: L("Terminal.Tui.WorkspaceNotDetected");
+		}
+		if (_welcomeActionsFrame is not null)
+			_welcomeActionsFrame.Title = L("Terminal.Tui.Actions");
+		if (_welcomeActionsHeading is not null)
+			_welcomeActionsHeading.Text = $"> {L("Terminal.Tui.Actions")}";
+		if (_welcomeDetailFrame is not null)
+			_welcomeDetailFrame.Title = L("Terminal.Tui.Details");
+		if (_welcomeDetailHeading is not null)
+			_welcomeDetailHeading.Text = L("Terminal.Tui.Details");
+		if (_welcomeQuickStart is not null)
+			_welcomeQuickStart.Text = L("Terminal.Tui.Welcome.QuickStart");
+		if (_welcomeFooter is not null)
+			_welcomeFooter.Text = L("Terminal.Tui.Footer.Welcome");
+		UpdateWelcomeSelection();
 	}
 
 	private void OnApplicationScreenChanged(
@@ -4733,6 +4815,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			return;
 		_disposed = true;
 		_application.Keyboard.KeyDown -= OnRootKeyDown;
+		_services.Localization.LanguageChanged -= OnLanguageChanged;
 		_application.ScreenChanged -= _screenChangedHandler;
 		if (_subscribedDriver is not null && _driverSizeChangedHandler is not null)
 			_subscribedDriver.SizeChanged -= _driverSizeChangedHandler;

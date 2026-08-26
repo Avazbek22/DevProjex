@@ -19,6 +19,7 @@ internal enum TerminalWorkspaceCommandVerb
 	Recent,
 	Profile,
 	Refresh,
+	Language,
 	Help,
 	Quit
 }
@@ -52,7 +53,8 @@ internal enum TerminalWorkspaceCommandErrorCode
 	MissingArgument,
 	UnexpectedArgument,
 	UnknownToken,
-	InvalidValue
+	InvalidValue,
+	UnknownLanguage
 }
 
 internal sealed record TerminalWorkspaceCommandError(
@@ -172,6 +174,11 @@ internal static class TerminalWorkspaceCommandCatalog
 			"refresh",
 			"refresh",
 			"refresh"),
+		Define(
+			TerminalWorkspaceCommandVerb.Language,
+			"language",
+			"language [code]",
+			"language ja"),
 		Define(
 			TerminalWorkspaceCommandVerb.Help,
 			"help",

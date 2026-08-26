@@ -88,7 +88,7 @@ Jeśli polecenie jest już skonfigurowane, otwórz terminal i uruchom:
 Zawiera listę poleceń i opcji najwyższego poziomu. Uruchom `devprojex help <command>`, aby zobaczyć opcje i przykłady tego polecenia.
 
 Przykłady:
-* `devprojex` — otwórz interaktywny obszar roboczy terminala. W obszarze roboczym kieruj akcjami za pomocą wiersza poleceń `:` (na przykład `:copy`, `:analyze`, `:branch`); pełną listę poleceń znajdziesz w pomocy wbudowanego obszaru roboczego i dokumentacji projektu.
+* `devprojex` — otwórz interaktywny obszar roboczy terminala. W obszarze roboczym kieruj akcjami za pomocą wiersza poleceń `:` (na przykład `:copy`, `:analyze`, `:branch`, `:language`); pełną listę poleceń znajdziesz w pomocy wbudowanego obszaru roboczego i dokumentacji projektu.
 * `devprojex tui .` — otwórz określony folder bezpośrednio w obszarze roboczym terminala.
 * `devprojex open . --preview` — otwórz bieżący folder w podglądzie pulpitu.
 * `devprojex analyze . --format json` — analizuje bieżący projekt jako JSON.

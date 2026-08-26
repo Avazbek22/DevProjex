@@ -88,7 +88,7 @@ DevProjex는 대화형 터미널 작업 공간과 스크립트 및 CI에서 직�
 여기에는 최상위 명령과 옵션이 나열됩니다. 해당 명령의 자체 옵션과 예를 보려면 `devprojex help <command>` 를 실행하세요.
 
 예:
-* `devprojex` — 대화형 터미널 작업 공간을 엽니다. 작업 공간 내에서 `:` 명령줄(예 `:copy`, `:analyze`, `:branch`)을 통해 작업을 수행합니다. 전체 명령 목록을 보려면 내장된 작업 공간 도움말과 프로젝트 문서를 참조하세요.
+* `devprojex` — 대화형 터미널 작업 공간을 엽니다. 작업 공간 내에서 `:` 명령줄(예 `:copy`, `:analyze`, `:branch`, `:language`)을 통해 작업을 수행합니다. 전체 명령 목록을 보려면 내장된 작업 공간 도움말과 프로젝트 문서를 참조하세요.
 * `devprojex tui .` — 터미널 작업 공간에서 직접 지정된 폴더를 엽니다.
 * `devprojex open . --preview` — 데스크탑 미리보기에서 현재 폴더를 엽니다.
 * `devprojex analyze . --format json` — 현재 프로젝트를 JSON 으로 분석합니다.

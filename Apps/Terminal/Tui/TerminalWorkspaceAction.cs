@@ -23,6 +23,7 @@ internal enum TerminalWorkspaceActionKind
 	SwitchBranch,
 	RecentWorkspaces,
 	Refresh,
+	Language,
 	ReturnToWelcome,
 	Help
 }
