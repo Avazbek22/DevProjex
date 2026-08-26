@@ -31,7 +31,8 @@ public sealed class McpPackRegistry : IDisposable
 		string? tempRoot,
 		TimeProvider? timeProvider,
 		long maximumPackBytes,
-		long maximumSessionBytes)
+		long maximumSessionBytes,
+		Action<string>? onSessionDirectoryCreated = null)
 	{
 		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumPackBytes);
 		ArgumentOutOfRangeException.ThrowIfLessThan(maximumSessionBytes, maximumPackBytes);
@@ -44,14 +45,25 @@ public sealed class McpPackRegistry : IDisposable
 		EnsurePrivateDirectory(baseDirectory);
 		Scavenge(baseDirectory, TimeProvider.GetUtcNow());
 		_sessionDirectory = Path.Combine(baseDirectory, Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant());
-		EnsurePrivateDirectory(_sessionDirectory);
-		_sessionLease = OpenPrivateFile(
-			Path.Combine(_sessionDirectory, ".session.lock"),
-			FileMode.CreateNew,
-			FileAccess.ReadWrite,
-			FileShare.None,
-			bufferSize: 4096,
-			FileOptions.None);
+		var sessionDirectoryExisted = Directory.Exists(_sessionDirectory);
+		try
+		{
+			EnsurePrivateDirectory(_sessionDirectory);
+			onSessionDirectoryCreated?.Invoke(_sessionDirectory);
+			_sessionLease = OpenPrivateFile(
+				Path.Combine(_sessionDirectory, ".session.lock"),
+				FileMode.CreateNew,
+				FileAccess.ReadWrite,
+				FileShare.None,
+				bufferSize: 4096,
+				FileOptions.None);
+		}
+		catch
+		{
+			if (!sessionDirectoryExisted)
+				TryDeleteSessionDirectory(_sessionDirectory);
+			throw;
+		}
 		ActiveSessions.TryAdd(_sessionDirectory, 0);
 	}
 
@@ -198,17 +210,7 @@ public sealed class McpPackRegistry : IDisposable
 		try
 		{
 			_sessionLease.Dispose();
-			try
-			{
-				if (Directory.Exists(_sessionDirectory))
-					Directory.Delete(_sessionDirectory, recursive: true);
-			}
-			catch (IOException)
-			{
-			}
-			catch (UnauthorizedAccessException)
-			{
-			}
+			TryDeleteSessionDirectory(_sessionDirectory);
 		}
 		finally
 		{
@@ -276,6 +278,21 @@ public sealed class McpPackRegistry : IDisposable
 		try
 		{
 			File.Delete(path);
+		}
+		catch (IOException)
+		{
+		}
+		catch (UnauthorizedAccessException)
+		{
+		}
+	}
+
+	private static void TryDeleteSessionDirectory(string path)
+	{
+		try
+		{
+			if (Directory.Exists(path))
+				Directory.Delete(path, recursive: true);
 		}
 		catch (IOException)
 		{

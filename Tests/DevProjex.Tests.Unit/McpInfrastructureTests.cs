@@ -568,6 +568,28 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public void PackStorageRemovesItsSessionDirectoryWhenLeaseCreationFails()
+	{
+		using var workspace = new TemporaryDirectory();
+		string? sessionDirectory = null;
+
+		var exception = Record.Exception(() => new McpPackRegistry(
+			workspace.Path,
+			timeProvider: null,
+			maximumPackBytes: McpPackRegistry.MaximumPackBytes,
+			maximumSessionBytes: McpPackRegistry.MaximumSessionBytes,
+			onSessionDirectoryCreated: path =>
+			{
+				sessionDirectory = path;
+				Directory.CreateDirectory(Path.Combine(path, ".session.lock"));
+			}));
+
+		Assert.True(exception is IOException or UnauthorizedAccessException, exception?.ToString());
+		Assert.NotNull(sessionDirectory);
+		Assert.False(Directory.Exists(sessionDirectory));
+	}
+
+	[Fact]
 	public async Task PackCreationTracksUtf8MetricsAcrossWriteBoundaries()
 	{
 		using var workspace = new TemporaryDirectory();
