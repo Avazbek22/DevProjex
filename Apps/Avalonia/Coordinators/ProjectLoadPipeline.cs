@@ -6,18 +6,30 @@ internal sealed class ProjectLoadPipeline(
 {
     private CancellationTokenSource? _activeLoadCts;
 	private readonly SemaphoreSlim _loadGate = new(1, 1);
+	private readonly object _lifetimeGate = new();
 	private long _latestRequestId;
+	private int _activeCalls;
+	private bool _disposed;
+	private bool _loadGateDisposed;
 
     public async Task OpenFolderAsync(
         string path,
         bool fromDialog,
         bool recordRecentFolder)
     {
-		var requestId = Interlocked.Increment(ref _latestRequestId);
-		CancelActiveLoad();
-		await _loadGate.WaitAsync();
+		if (!TryEnterCall())
+			return;
+
+		var gateEntered = false;
 		try
 		{
+			var requestId = Interlocked.Increment(ref _latestRequestId);
+			CancelActiveLoad();
+			await _loadGate.WaitAsync();
+			gateEntered = true;
+			if (IsDisposed())
+				return;
+
 			if (requestId != Volatile.Read(ref _latestRequestId))
 				return;
 
@@ -25,7 +37,9 @@ internal sealed class ProjectLoadPipeline(
 		}
 		finally
 		{
-			_loadGate.Release();
+			if (gateEntered)
+				_loadGate.Release();
+			ExitCall();
 		}
 	}
 
@@ -114,36 +128,76 @@ internal sealed class ProjectLoadPipeline(
 
     public void CancelActiveLoad()
     {
-        _activeLoadCts?.Cancel();
+		try
+		{
+			_activeLoadCts?.Cancel();
+		}
+		catch (ObjectDisposedException)
+		{
+			// The load completed while cancellation was being requested.
+		}
     }
 
     public void Dispose()
     {
-        CancelAndDispose(ref _activeLoadCts);
-		_loadGate.Dispose();
+		var disposeLoadGate = false;
+		lock (_lifetimeGate)
+		{
+			if (_disposed)
+				return;
+
+			_disposed = true;
+			if (_activeCalls == 0)
+			{
+				_loadGateDisposed = true;
+				disposeLoadGate = true;
+			}
+		}
+
+		CancelActiveLoad();
+		if (disposeLoadGate)
+			_loadGate.Dispose();
     }
+
+	private bool TryEnterCall()
+	{
+		lock (_lifetimeGate)
+		{
+			if (_disposed)
+				return false;
+
+			_activeCalls++;
+			return true;
+		}
+	}
+
+	private bool IsDisposed()
+	{
+		lock (_lifetimeGate)
+			return _disposed;
+	}
+
+	private void ExitCall()
+	{
+		var disposeLoadGate = false;
+		lock (_lifetimeGate)
+		{
+			_activeCalls--;
+			if (_disposed && _activeCalls == 0 && !_loadGateDisposed)
+			{
+				_loadGateDisposed = true;
+				disposeLoadGate = true;
+			}
+		}
+
+		if (disposeLoadGate)
+			_loadGate.Dispose();
+	}
 
     private static void DisposeIfCurrent(ref CancellationTokenSource? target, CancellationTokenSource candidate)
     {
         var current = Interlocked.CompareExchange(ref target, null, candidate);
         if (ReferenceEquals(current, candidate))
             candidate.Dispose();
-    }
-
-    private static void CancelAndDispose(ref CancellationTokenSource? source)
-    {
-        var current = Interlocked.Exchange(ref source, null);
-        if (current is null)
-            return;
-
-        try
-        {
-            current.Cancel();
-        }
-        catch (ObjectDisposedException)
-        {
-        }
-
-        current.Dispose();
     }
 }

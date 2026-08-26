@@ -491,6 +491,39 @@ public sealed class MainWindowCoordinatorRefactorTests
     }
 
 	[Fact]
+	public async Task ProjectLoadPipeline_DisposeDuringLoad_CancelsAndCompletesWithoutFault()
+	{
+		var viewModel = CreateViewModel();
+		var reloadStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var host = new RecordingProjectLoadHost(viewModel)
+		{
+			ReloadHandler = async cancellationToken =>
+			{
+				reloadStarted.TrySetResult();
+				await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+			}
+		};
+		var status = new StatusOperationCoordinator(
+			viewModel,
+			isBackgroundMetricsActive: () => false,
+			metricsOperationTextProvider: () => viewModel.StatusOperationCalculatingData);
+		var pipeline = new ProjectLoadPipeline(host, status);
+
+		var loadTask = pipeline.OpenFolderAsync(
+			@"C:\Project",
+			fromDialog: false,
+			recordRecentFolder: false);
+		await reloadStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+
+		pipeline.Dispose();
+		await loadTask.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+		pipeline.Dispose();
+
+		Assert.False(viewModel.StatusBusy);
+		Assert.Contains(ProjectLoadHostCall.ApplyCancellationFallback, host.Calls);
+	}
+
+	[Fact]
 	public void StatusOperationCoordinator_BackgroundMetricsDoesNotReplaceExplicitSecretAnalysis()
 	{
 		var viewModel = CreateViewModel();
