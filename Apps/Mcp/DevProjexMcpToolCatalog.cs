@@ -79,7 +79,11 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 		return tool;
 	}
 
-	private static JsonElement ParseSchema(string json) => JsonDocument.Parse(json).RootElement.Clone();
+	private static JsonElement ParseSchema(string json)
+	{
+		using var document = JsonDocument.Parse(json);
+		return document.RootElement.Clone();
+	}
 
 	private const string EmptyInput = """
 	{
@@ -99,7 +103,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	private const string IncludeProperty = """
 	"include_patterns": {
 	  "type": "array",
-	  "items": { "type": "string" },
+	  "maxItems": 256,
+	  "items": { "type": "string", "minLength": 1, "maxLength": 512 },
 	  "description": "Project-relative glob patterns using '/'. They only narrow built-in and gitignore filtering."
 	}
 	""";
@@ -107,7 +112,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	private const string ExcludeProperty = """
 	"exclude_patterns": {
 	  "type": "array",
-	  "items": { "type": "string" },
+	  "maxItems": 256,
+	  "items": { "type": "string", "minLength": 1, "maxLength": 512 },
 	  "description": "Project-relative glob patterns using '/' to exclude additional paths."
 	}
 	""";

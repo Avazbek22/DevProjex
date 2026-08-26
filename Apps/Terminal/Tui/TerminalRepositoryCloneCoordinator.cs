@@ -49,8 +49,16 @@ internal sealed class TerminalRepositoryCloneCoordinator(
 					.TryAcquireRepositorySessionAsync(safeUrl, cancellationToken: cancellationToken)
 					.ConfigureAwait(false);
 				if (session is not null)
-					return await RefreshCachedAsync(session, progress, phaseChanged, cancellationToken)
+				{
+					var cachedLease = await RefreshCachedAsync(
+							session,
+							progress,
+							phaseChanged,
+							cancellationToken)
 						.ConfigureAwait(false);
+					session = null;
+					return cachedLease;
+				}
 
 				if (phaseChanged is not null)
 					await phaseChanged(TerminalRepositoryClonePhase.Cloning).ConfigureAwait(false);

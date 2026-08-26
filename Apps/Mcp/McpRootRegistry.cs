@@ -10,7 +10,7 @@ public sealed class McpRootRegistry
 		var normalized = new List<string>();
 		foreach (var root in roots)
 		{
-			if (IsMissingPath(root))
+			if (PathUtility.IsMissingPath(root))
 				throw new ArgumentException("MCP roots cannot be empty.", nameof(roots));
 			var physical = ResolvePhysicalExistingPath(root, requireDirectory: true);
 			if (!normalized.Contains(physical, PathComparer.Default))
@@ -19,14 +19,14 @@ public sealed class McpRootRegistry
 
 		if (normalized.Count == 0)
 			throw new ArgumentException("At least one existing MCP root is required.", nameof(roots));
-		_roots = normalized;
+		_roots = normalized.AsReadOnly();
 	}
 
 	public IReadOnlyList<string> Roots => _roots;
 
 	public string ResolveProject(string? project)
 	{
-		if (string.IsNullOrWhiteSpace(project))
+		if (PathUtility.IsMissingPath(project))
 		{
 			if (_roots.Count == 1)
 				return ResolveProject(_roots[0]);
@@ -35,24 +35,25 @@ public sealed class McpRootRegistry
 				$"{McpErrorCodes.UnknownProject}: 'project' is required because multiple roots are available. " +
 				$"Call list_projects and use one of: {FormatRoots()}.");
 		}
+		var requestedProject = project!;
 
 		string physical;
 		try
 		{
-			physical = ResolvePhysicalExistingPath(project, requireDirectory: true);
+			physical = ResolvePhysicalExistingPath(requestedProject, requireDirectory: true);
 		}
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
 		{
-			throw UnknownProject(project);
+			throw UnknownProject(requestedProject);
 		}
 
 		var match = _roots.FirstOrDefault(root => PathComparer.Default.Equals(root, physical));
-		return match ?? throw UnknownProject(project);
+		return match ?? throw UnknownProject(requestedProject);
 	}
 
 	public string ResolveExistingPath(string projectRoot, string path, bool requireDirectory = false)
 	{
-		if (IsMissingPath(path))
+		if (PathUtility.IsMissingPath(path))
 			throw InvalidPath();
 
 		string candidate;
@@ -135,10 +136,6 @@ public sealed class McpRootRegistry
 				? StringComparison.OrdinalIgnoreCase
 				: StringComparison.Ordinal);
 	}
-
-	private static bool IsMissingPath(string? path) =>
-		string.IsNullOrEmpty(path) ||
-		(OperatingSystem.IsWindows() && string.IsNullOrWhiteSpace(path));
 
 	private McpToolException UnknownProject(string project) =>
 		new(

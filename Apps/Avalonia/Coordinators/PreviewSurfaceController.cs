@@ -1359,30 +1359,35 @@ internal sealed class PreviewSurfaceController : IDisposable
 			pathPresentation,
 			outputPathRedaction);
 		var displayRootPath = treeRootPathPresentation.Text;
-		var treeText = selectedPaths.Count > 0
-            ? _treeExport.BuildSelectedTree(
+        var treeText = selectedPaths.Count > 0
+            ? _treeExport.BuildSelectedTreeWithCancellation(
                 currentPath,
                 currentTreeRoot,
                 selectedPaths,
                 treeFormat,
                 displayRootPath,
-                pathPresentation?.DisplayRootName)
-            : _treeExport.BuildFullTree(
+                pathPresentation?.DisplayRootName,
+                cancellationToken)
+            : _treeExport.BuildFullTreeWithCancellation(
                 currentPath,
                 currentTreeRoot,
                 treeFormat,
                 displayRootPath,
-                pathPresentation?.DisplayRootName);
+                pathPresentation?.DisplayRootName,
+                includeRootPath: true,
+                cancellationToken: cancellationToken);
 
         if (selectedPaths.Count > 0 &&
             string.IsNullOrWhiteSpace(treeText))
         {
-            treeText = _treeExport.BuildFullTree(
+            treeText = _treeExport.BuildFullTreeWithCancellation(
                 currentPath,
                 currentTreeRoot,
                 treeFormat,
                 displayRootPath,
-                pathPresentation?.DisplayRootName);
+                pathPresentation?.DisplayRootName,
+                includeRootPath: true,
+                cancellationToken: cancellationToken);
         }
 
         if (string.IsNullOrWhiteSpace(treeText))
@@ -1825,7 +1830,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 
     private async Task<bool> WaitForClipboardSourceReadyAsync()
     {
-        if (!_viewModel.IsAnyPreviewVisible)
+        if (_disposed || !_viewModel.IsAnyPreviewVisible)
             return false;
 
         if (!_viewModel.IsPreviewLoading)
@@ -1836,7 +1841,8 @@ internal sealed class PreviewSurfaceController : IDisposable
 
         var timeout = TimeSpan.FromSeconds(10);
         var stopwatch = Stopwatch.StartNew();
-        while (_viewModel.IsAnyPreviewVisible &&
+        while (!_disposed &&
+               _viewModel.IsAnyPreviewVisible &&
                _viewModel.IsPreviewLoading &&
                stopwatch.Elapsed < timeout)
         {
@@ -1845,7 +1851,8 @@ internal sealed class PreviewSurfaceController : IDisposable
             await Task.Delay(15).ConfigureAwait(true);
         }
 
-        return !_viewModel.IsPreviewLoading &&
+        return !_disposed &&
+               !_viewModel.IsPreviewLoading &&
                (_controls.TextControl.Document ??
                 _viewModel.PreviewDocument) is not null;
     }

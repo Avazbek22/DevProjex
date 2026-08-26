@@ -36,6 +36,23 @@ public sealed class TerminalSettingsStoreTests
 	}
 
 	[Fact]
+	public async Task NonObjectSettingsSafelyFallBackAndCanBeReplaced()
+	{
+		using var workspace = new TemporaryDirectory();
+		var store = new TerminalSettingsStore(() => workspace.Path);
+		Directory.CreateDirectory(Path.GetDirectoryName(store.GetPath())!);
+		File.WriteAllText(store.GetPath(), "[]");
+
+		Assert.Equal(TerminalScreenMode.Auto, store.LoadScreenMode());
+		Assert.Empty(store.LoadCommandHistory());
+
+		await store.SaveScreenModeAsync(
+			TerminalScreenMode.Inline,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(TerminalScreenMode.Inline, store.LoadScreenMode());
+	}
+
+	[Fact]
 	public async Task OversizedSettingsSafelyFallBackWithoutOverwritingTheDocument()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -226,6 +243,26 @@ public sealed class TerminalSettingsStoreTests
 	}
 
 	[Fact]
+	public async Task FutureSchemaWithIncompatibleKnownFieldIsNeverOverwritten()
+	{
+		using var workspace = new TemporaryDirectory();
+		var store = new TerminalSettingsStore(() => workspace.Path);
+		Directory.CreateDirectory(Path.GetDirectoryName(store.GetPath())!);
+		const string futureDocument =
+			"{\"SchemaVersion\":2,\"ScreenMode\":{\"mode\":\"inline\"},\"CommandHistory\":[\"future command\"]}";
+		File.WriteAllText(store.GetPath(), futureDocument);
+
+		await store.SaveScreenModeAsync(
+			TerminalScreenMode.Inline,
+			TestContext.Current.CancellationToken);
+		await store.SaveCommandHistoryAsync(
+			["view content"],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(futureDocument, File.ReadAllText(store.GetPath()));
+	}
+
+	[Fact]
 	public async Task PersistedSettingsArePrivateToTheCurrentUnixUser()
 	{
 		if (OperatingSystem.IsWindows())
@@ -244,5 +281,40 @@ public sealed class TerminalSettingsStoreTests
 		Assert.Equal(
 			UnixFileMode.UserRead | UnixFileMode.UserWrite,
 			File.GetUnixFileMode(store.GetPath()));
+	}
+
+	[Fact]
+	public async Task ExistingAndFutureSettingsAreRestrictedToTheCurrentUnixUser()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Unix file modes are not available on Windows.");
+			return;
+		}
+
+		using var workspace = new TemporaryDirectory();
+		var store = new TerminalSettingsStore(() => workspace.Path);
+		Directory.CreateDirectory(Path.GetDirectoryName(store.GetPath())!);
+		const UnixFileMode legacyMode = UnixFileMode.UserRead | UnixFileMode.UserWrite |
+		                                UnixFileMode.GroupRead | UnixFileMode.OtherRead;
+		const UnixFileMode expectedMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+		const string currentDocument =
+			"{\"SchemaVersion\":1,\"ScreenMode\":0,\"CommandHistory\":[\"confidential-project\"]}";
+		File.WriteAllText(store.GetPath(), currentDocument);
+		File.SetUnixFileMode(store.GetPath(), legacyMode);
+
+		Assert.Equal(["confidential-project"], store.LoadCommandHistory());
+		Assert.Equal(expectedMode, File.GetUnixFileMode(store.GetPath()));
+
+		const string futureDocument =
+			"{\"SchemaVersion\":2,\"ScreenMode\":0,\"CommandHistory\":[\"future\"],\"FutureValue\":true}";
+		File.WriteAllText(store.GetPath(), futureDocument);
+		File.SetUnixFileMode(store.GetPath(), legacyMode);
+		await store.SaveScreenModeAsync(
+			TerminalScreenMode.Inline,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(futureDocument, File.ReadAllText(store.GetPath()));
+		Assert.Equal(expectedMode, File.GetUnixFileMode(store.GetPath()));
 	}
 }

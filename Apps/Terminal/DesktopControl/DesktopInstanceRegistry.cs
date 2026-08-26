@@ -10,6 +10,7 @@ public sealed record DesktopRegistrySnapshot(
 
 public sealed class DesktopInstanceRegistry
 {
+	private static readonly TimeSpan StaleTemporaryFileAge = TimeSpan.FromHours(24);
 	private static readonly JsonSerializerOptions JsonOptions = new()
 	{
 		PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -79,6 +80,11 @@ public sealed class DesktopInstanceRegistry
 	{
 		if (!Directory.Exists(_paths.RegistryDirectory))
 			return new DesktopRegistrySnapshot([], 0);
+		if (!IsDirectPrivateDirectory(_paths.RegistryDirectory))
+			return new DesktopRegistrySnapshot([], 0);
+
+		if (removeStale)
+			RemoveStaleTemporaryFiles(cancellationToken);
 
 		var registrations = new List<DesktopInstanceRegistration>();
 		var staleEntryCount = 0;
@@ -86,17 +92,26 @@ public sealed class DesktopInstanceRegistry
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			var registration = await TryReadAsync(path, cancellationToken).ConfigureAwait(false);
-			if (registration is null || !IsLiveProcess(registration))
+			if (registration is null)
+			{
+				if (removeStale)
+					TryDelete(path);
+				staleEntryCount++;
+				continue;
+			}
+			if (!IsLiveProcess(registration))
 			{
 				if (removeStale)
 				{
 					TryDelete(path);
-					if (registration is not null && IsOwnedUnixEndpoint(registration))
+					if (IsOwnedUnixEndpoint(registration))
 						TryDelete(registration.Endpoint);
 				}
 				staleEntryCount++;
 				continue;
 			}
+			if (registration.ProtocolVersion != DesktopProtocol.CurrentVersion)
+				continue;
 
 			registrations.Add(registration);
 		}
@@ -167,7 +182,7 @@ public sealed class DesktopInstanceRegistry
 	private static bool IsValidRegistrationFile(
 		DesktopInstanceRegistration registration,
 		string path) =>
-		HasValidFields(registration) &&
+		HasValidStructuralFields(registration) &&
 		string.Equals(
 			Path.GetFileNameWithoutExtension(path),
 			registration.InstanceId,
@@ -175,6 +190,10 @@ public sealed class DesktopInstanceRegistry
 
 	private static bool HasValidFields(DesktopInstanceRegistration registration) =>
 		registration.ProtocolVersion == DesktopProtocol.CurrentVersion &&
+		HasValidStructuralFields(registration);
+
+	private static bool HasValidStructuralFields(DesktopInstanceRegistration registration) =>
+		registration.ProtocolVersion > 0 &&
 		IsValidInstanceId(registration.InstanceId) &&
 		registration.ProcessId > 0 &&
 		registration.ProcessStartTimeUtcTicks > 0 &&
@@ -187,6 +206,61 @@ public sealed class DesktopInstanceRegistry
 		instanceId.Length <= 128 &&
 		instanceId.All(static character =>
 			char.IsAsciiLetterOrDigit(character) || character is '-' or '_');
+
+	private void RemoveStaleTemporaryFiles(CancellationToken cancellationToken)
+	{
+		var cutoff = DateTime.UtcNow - StaleTemporaryFileAge;
+		foreach (var path in Directory.EnumerateFiles(_paths.RegistryDirectory, "*.tmp"))
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			try
+			{
+				if (!IsOwnedRegistrationTemporaryFile(path) ||
+				    File.GetLastWriteTimeUtc(path) > cutoff)
+				{
+					continue;
+				}
+
+				TryDelete(path);
+			}
+			catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+			{
+			}
+		}
+	}
+
+	private static bool IsOwnedRegistrationTemporaryFile(string path)
+	{
+		var fileName = Path.GetFileName(path);
+		if (!fileName.EndsWith(".tmp", StringComparison.Ordinal))
+			return false;
+
+		var withoutSuffix = fileName[..^4];
+		var nonceSeparator = withoutSuffix.LastIndexOf('.');
+		if (nonceSeparator <= 0)
+			return false;
+
+		var nonce = withoutSuffix.AsSpan(nonceSeparator + 1);
+		if (nonce.Length != 32 || !ContainsOnlyAsciiHexDigits(nonce))
+			return false;
+
+		var registrationFileName = withoutSuffix[..nonceSeparator];
+		if (!registrationFileName.EndsWith(".json", StringComparison.Ordinal))
+			return false;
+
+		return IsValidInstanceId(Path.GetFileNameWithoutExtension(registrationFileName));
+	}
+
+	private static bool ContainsOnlyAsciiHexDigits(ReadOnlySpan<char> value)
+	{
+		foreach (var character in value)
+		{
+			if (character is not (>= '0' and <= '9' or >= 'a' and <= 'f'))
+				return false;
+		}
+
+		return true;
+	}
 
 	private static void CommitRegistration(string temporaryPath, string targetPath)
 	{
@@ -228,13 +302,32 @@ public sealed class DesktopInstanceRegistry
 	internal static void EnsurePrivateDirectory(string path)
 	{
 		Directory.CreateDirectory(path);
+		if (!IsDirectPrivateDirectory(path))
+			throw new IOException("Desktop control storage cannot use a symbolic link or reparse point.");
 		if (!OperatingSystem.IsWindows())
 		{
 			File.SetUnixFileMode(
 				path,
 				UnixFileMode.UserRead |
 				UnixFileMode.UserWrite |
-				UnixFileMode.UserExecute);
+					UnixFileMode.UserExecute);
+		}
+		if (!IsDirectPrivateDirectory(path))
+			throw new IOException("Desktop control storage changed while it was being secured.");
+	}
+
+	private static bool IsDirectPrivateDirectory(string path)
+	{
+		try
+		{
+			var attributes = File.GetAttributes(path);
+			return attributes.HasFlag(FileAttributes.Directory) &&
+			       !attributes.HasFlag(FileAttributes.ReparsePoint);
+		}
+		catch (Exception exception) when (exception is
+		       IOException or UnauthorizedAccessException or NotSupportedException)
+		{
+			return false;
 		}
 	}
 
@@ -252,7 +345,7 @@ public sealed class DesktopInstanceRegistry
 		}
 		catch
 		{
-			// Stale entries are retried by the next registry probe.
+			// Cleanup is best-effort because another process may still own the entry.
 		}
 	}
 }

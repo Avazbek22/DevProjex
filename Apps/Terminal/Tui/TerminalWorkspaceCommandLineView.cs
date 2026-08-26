@@ -7,7 +7,6 @@ namespace DevProjex.Terminal.Tui;
 
 internal sealed class TerminalWorkspaceCommandLineView : View
 {
-	private readonly IApplication _application;
 	private readonly Func<string, int, TerminalWorkspaceCommandCompletion> _complete;
 	private readonly Func<string, string> _localize;
 	private readonly TerminalCommandHistory _history;
@@ -33,7 +32,6 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 		bool plain,
 		bool useUnicode)
 	{
-		_application = application;
 		_complete = complete;
 		_localize = localize;
 		_history = history;
@@ -78,8 +76,16 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 		};
 		_input.ValueChanged += (_, _) =>
 		{
-			if (!_applyingCompletion)
-				ResetCompletionCycle();
+			if (_applyingCompletion)
+				return;
+			ResetCompletionCycle();
+			UpdateGhost();
+		};
+		_input.InsertionPointChanged += (_, _) =>
+		{
+			if (_applyingCompletion)
+				return;
+			ResetCompletionCycle();
 			UpdateGhost();
 		};
 		_input.KeyPressed += OnInputKeyDown;
@@ -104,7 +110,6 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 		_history.ResetNavigation();
 		SetInputText(initialText);
 		_input.SetFocus();
-		UpdateGhost();
 		SetNeedsDraw();
 	}
 
@@ -191,16 +196,6 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 			CycleCompletion();
 			return;
 		}
-
-		if (key == Key.CursorLeft || key == Key.CursorRight || key == Key.Home || key == Key.End)
-		{
-			ResetCompletionCycle();
-			_application.AddTimeout(TimeSpan.Zero, () =>
-			{
-				UpdateGhost();
-				return false;
-			});
-		}
 	}
 
 	private void CycleCompletion()
@@ -271,10 +266,9 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 			return;
 		}
 
-		var visibleText = text.EnumerateRunes()
+		var inputColumns = text.EnumerateRunes()
 			.Skip(Math.Clamp(_input.ScrollOffset, 0, text.Length))
-			.ToArray();
-		var inputColumns = string.Concat(visibleText).GetColumns();
+			.Sum(static rune => Math.Max(0, rune.GetColumns()));
 		var x = 1 + inputColumns;
 		var maximumColumns = Math.Max(0, Viewport.Width - x);
 		if (maximumColumns == 0)

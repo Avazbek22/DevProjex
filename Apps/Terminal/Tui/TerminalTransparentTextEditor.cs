@@ -12,6 +12,7 @@ internal sealed class TerminalTransparentTextEditor : View
 {
 	private string _value = string.Empty;
 	private int _insertionPoint;
+	private int _runeCount;
 	private int _scrollOffset;
 	private int _lastDrawnColumns;
 
@@ -24,6 +25,7 @@ internal sealed class TerminalTransparentTextEditor : View
 	}
 
 	public event EventHandler? ValueChanged;
+	public event EventHandler? InsertionPointChanged;
 	public event Action<Key>? KeyPressed;
 
 	public string Value
@@ -36,7 +38,8 @@ internal sealed class TerminalTransparentTextEditor : View
 			if (string.Equals(_value, value, StringComparison.Ordinal))
 				return;
 			_value = value;
-			_insertionPoint = Math.Min(_insertionPoint, RuneCount);
+			_runeCount = value.EnumerateRunes().Count();
+			_insertionPoint = Math.Min(_insertionPoint, _runeCount);
 			EnsureCursorVisible();
 			ValueChanged?.Invoke(this, EventArgs.Empty);
 			InvalidateEditor();
@@ -53,6 +56,7 @@ internal sealed class TerminalTransparentTextEditor : View
 				return;
 			_insertionPoint = next;
 			EnsureCursorVisible();
+			InsertionPointChanged?.Invoke(this, EventArgs.Empty);
 			InvalidateEditor();
 		}
 	}
@@ -132,7 +136,7 @@ internal sealed class TerminalTransparentTextEditor : View
 		return true;
 	}
 
-	private int RuneCount => _value.EnumerateRunes().Count();
+	private int RuneCount => _runeCount;
 
 	internal void InsertText(string text)
 	{
@@ -143,7 +147,9 @@ internal sealed class TerminalTransparentTextEditor : View
 			return;
 		var utf16Index = TerminalTextPosition.RuneToUtf16Index(_value, _insertionPoint);
 		_value = _value.Insert(utf16Index, text);
-		_insertionPoint += text.EnumerateRunes().Count();
+		var insertedRuneCount = text.EnumerateRunes().Count();
+		_insertionPoint += insertedRuneCount;
+		_runeCount += insertedRuneCount;
 		EnsureCursorVisible();
 		ValueChanged?.Invoke(this, EventArgs.Empty);
 		InvalidateEditor();
@@ -154,6 +160,7 @@ internal sealed class TerminalTransparentTextEditor : View
 		var start = TerminalTextPosition.RuneToUtf16Index(_value, runeIndex);
 		var end = TerminalTextPosition.RuneToUtf16Index(_value, runeIndex + 1);
 		_value = _value.Remove(start, end - start);
+		_runeCount--;
 		if (runeIndex < _insertionPoint)
 			_insertionPoint--;
 		EnsureCursorVisible();
@@ -164,20 +171,26 @@ internal sealed class TerminalTransparentTextEditor : View
 	private void EnsureCursorVisible()
 	{
 		var width = Math.Max(1, Viewport.Width);
-		var runes = _value.EnumerateRunes().ToArray();
-		_scrollOffset = Math.Clamp(_scrollOffset, 0, runes.Length);
-		if (_insertionPoint < _scrollOffset)
-			_scrollOffset = _insertionPoint;
-		while (_scrollOffset < _insertionPoint &&
-		       Columns(runes, _scrollOffset, _insertionPoint) >= width)
+		var insertionPoint = Math.Clamp(_insertionPoint, 0, _runeCount);
+		var utf16Index = TerminalTextPosition.RuneToUtf16Index(_value, insertionPoint);
+		var columns = 0;
+		var offset = insertionPoint;
+		while (offset > 0 && utf16Index > 0)
 		{
-			_scrollOffset++;
+			_ = Rune.DecodeLastFromUtf16(
+				_value.AsSpan(0, utf16Index),
+				out var rune,
+				out var consumed);
+			if (consumed == 0)
+				break;
+			var nextColumns = Math.Max(0, rune.GetColumns());
+			if (columns + nextColumns >= width)
+				break;
+			columns += nextColumns;
+			utf16Index -= consumed;
+			offset--;
 		}
-		while (_scrollOffset > 0 &&
-		       Columns(runes, _scrollOffset - 1, _insertionPoint) < width)
-		{
-			_scrollOffset--;
-		}
+		_scrollOffset = offset;
 	}
 
 	private string GetVisibleText()
@@ -187,9 +200,10 @@ internal sealed class TerminalTransparentTextEditor : View
 			return string.Empty;
 		var builder = new StringBuilder();
 		var columns = 0;
-		foreach (var rune in _value.EnumerateRunes().Skip(_scrollOffset))
+		var start = TerminalTextPosition.RuneToUtf16Index(_value, _scrollOffset);
+		foreach (var rune in _value.AsSpan(start).EnumerateRunes())
 		{
-			var runeColumns = rune.ToString().GetColumns();
+			var runeColumns = Math.Max(0, rune.GetColumns());
 			if (columns + runeColumns > width)
 				break;
 			builder.Append(rune);
@@ -207,9 +221,8 @@ internal sealed class TerminalTransparentTextEditor : View
 			return;
 		}
 
-		var runes = _value.EnumerateRunes().ToArray();
 		var column = Math.Clamp(
-			Columns(runes, _scrollOffset, _insertionPoint),
+			Columns(_value, _scrollOffset, _insertionPoint),
 			0,
 			Math.Max(0, Viewport.Width - 1));
 		Cursor = new Cursor
@@ -220,15 +233,13 @@ internal sealed class TerminalTransparentTextEditor : View
 		SetCursorNeedsUpdate();
 	}
 
-	private static int Columns(IReadOnlyList<Rune> runes, int start, int end)
+	private static int Columns(string value, int start, int end)
 	{
 		var columns = 0;
-		for (var index = Math.Clamp(start, 0, runes.Count);
-		     index < Math.Clamp(end, 0, runes.Count);
-		     index++)
-		{
-			columns += runes[index].ToString().GetColumns();
-		}
+		var startIndex = TerminalTextPosition.RuneToUtf16Index(value, start);
+		var endIndex = TerminalTextPosition.RuneToUtf16Index(value, end);
+		foreach (var rune in value.AsSpan(startIndex, endIndex - startIndex).EnumerateRunes())
+			columns += Math.Max(0, rune.GetColumns());
 		return columns;
 	}
 

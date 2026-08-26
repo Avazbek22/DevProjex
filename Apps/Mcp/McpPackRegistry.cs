@@ -19,6 +19,7 @@ public sealed class McpPackRegistry : IDisposable
 	private readonly long _maximumSessionBytes;
 	private readonly object _sync = new();
 	private long _allocatedBytes;
+	private int _activeCreates;
 	private bool _disposed;
 
 	public McpPackRegistry(string? tempRoot = null, TimeProvider? timeProvider = null)
@@ -30,7 +31,8 @@ public sealed class McpPackRegistry : IDisposable
 		string? tempRoot,
 		TimeProvider? timeProvider,
 		long maximumPackBytes,
-		long maximumSessionBytes)
+		long maximumSessionBytes,
+		Action<string>? onSessionDirectoryCreated = null)
 	{
 		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumPackBytes);
 		ArgumentOutOfRangeException.ThrowIfLessThan(maximumSessionBytes, maximumPackBytes);
@@ -43,14 +45,25 @@ public sealed class McpPackRegistry : IDisposable
 		EnsurePrivateDirectory(baseDirectory);
 		Scavenge(baseDirectory, TimeProvider.GetUtcNow());
 		_sessionDirectory = Path.Combine(baseDirectory, Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant());
-		EnsurePrivateDirectory(_sessionDirectory);
-		_sessionLease = OpenPrivateFile(
-			Path.Combine(_sessionDirectory, ".session.lock"),
-			FileMode.CreateNew,
-			FileAccess.ReadWrite,
-			FileShare.None,
-			bufferSize: 4096,
-			FileOptions.None);
+		var sessionDirectoryExisted = Directory.Exists(_sessionDirectory);
+		try
+		{
+			EnsurePrivateDirectory(_sessionDirectory);
+			onSessionDirectoryCreated?.Invoke(_sessionDirectory);
+			_sessionLease = OpenPrivateFile(
+				Path.Combine(_sessionDirectory, ".session.lock"),
+				FileMode.CreateNew,
+				FileAccess.ReadWrite,
+				FileShare.None,
+				bufferSize: 4096,
+				FileOptions.None);
+		}
+		catch
+		{
+			if (!sessionDirectoryExisted)
+				TryDeleteSessionDirectory(_sessionDirectory);
+			throw;
+		}
 		ActiveSessions.TryAdd(_sessionDirectory, 0);
 	}
 
@@ -78,36 +91,54 @@ public sealed class McpPackRegistry : IDisposable
 		CancellationToken cancellationToken)
 	{
 		ArgumentNullException.ThrowIfNull(writer);
-		ObjectDisposedException.ThrowIf(_disposed, this);
-		var id = Convert.ToHexString(RandomNumberGenerator.GetBytes(24)).ToLowerInvariant();
-		var path = Path.Combine(_sessionDirectory, id + ".pack");
-		var reservation = new PackReservation(this);
+		cancellationToken.ThrowIfCancellationRequested();
+		BeginCreate();
 		try
 		{
-			await using (var stream = OpenPrivateFile(
-				             path,
-				             FileMode.CreateNew,
-				             FileAccess.Write,
-				             FileShare.None,
-				             64 * 1024,
-				             FileOptions.Asynchronous | FileOptions.SequentialScan))
+			var id = Convert.ToHexString(RandomNumberGenerator.GetBytes(24)).ToLowerInvariant();
+			var path = Path.Combine(_sessionDirectory, id + ".pack");
+			var reservation = new PackReservation(this);
+			try
 			{
-				await using var bounded = new QuotaWriteStream(stream, reservation);
-				await writer(bounded, cancellationToken).ConfigureAwait(false);
-			}
+				PackTextMetrics metrics;
+				await using (var stream = OpenPrivateFile(
+					             path,
+					             FileMode.CreateNew,
+					             FileAccess.Write,
+					             FileShare.None,
+					             64 * 1024,
+					             FileOptions.Asynchronous | FileOptions.SequentialScan))
+				{
+					await using var bounded = new QuotaWriteStream(stream, reservation);
+					await writer(bounded, cancellationToken).ConfigureAwait(false);
+					metrics = bounded.CompleteMetrics();
+				}
 
-			var (characters, lines) = await MeasureAsync(path, cancellationToken).ConfigureAwait(false);
-			var document = new McpPackDocument(id, path, lines, characters, reservation.Bytes);
-			lock (_sync)
-				_packs.Add(id, new PackEntry(document, TimeProvider.GetUtcNow()));
-			reservation.Commit();
-			return document;
+				var document = new McpPackDocument(
+					id,
+					path,
+					metrics.Lines,
+					metrics.Characters,
+					reservation.Bytes);
+				lock (_sync)
+				{
+					ObjectDisposedException.ThrowIf(_disposed, this);
+					cancellationToken.ThrowIfCancellationRequested();
+					_packs.Add(id, new PackEntry(document, TimeProvider.GetUtcNow()));
+				}
+				reservation.Commit();
+				return document;
+			}
+			catch
+			{
+				reservation.Dispose();
+				TryDeletePackFile(path);
+				throw;
+			}
 		}
-		catch
+		finally
 		{
-			reservation.Dispose();
-			TryDeletePackFile(path);
-			throw;
+			EndCreate();
 		}
 	}
 
@@ -127,12 +158,14 @@ public sealed class McpPackRegistry : IDisposable
 
 	internal McpPackDocument ResolveDocument(string packId)
 	{
-		ObjectDisposedException.ThrowIf(_disposed, this);
 		if (string.IsNullOrWhiteSpace(packId))
 			throw Expired();
 		PackEntry? entry;
 		lock (_sync)
+		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
 			_packs.TryGetValue(packId, out entry);
+		}
 		if (entry is null || !File.Exists(entry.Document.Path))
 			throw Expired();
 		return entry.Document;
@@ -140,23 +173,46 @@ public sealed class McpPackRegistry : IDisposable
 
 	public void Dispose()
 	{
-		if (_disposed)
-			return;
-		_disposed = true;
+		bool cleanupNow;
+		lock (_sync)
+		{
+			if (_disposed)
+				return;
+			_disposed = true;
+			cleanupNow = _activeCreates == 0;
+		}
+
+		if (cleanupNow)
+			CleanupSessionDirectory();
+	}
+
+	private void BeginCreate()
+	{
+		lock (_sync)
+		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
+			_activeCreates++;
+		}
+	}
+
+	private void EndCreate()
+	{
+		bool cleanupNow;
+		lock (_sync)
+		{
+			_activeCreates--;
+			cleanupNow = _disposed && _activeCreates == 0;
+		}
+		if (cleanupNow)
+			CleanupSessionDirectory();
+	}
+
+	private void CleanupSessionDirectory()
+	{
 		try
 		{
 			_sessionLease.Dispose();
-			try
-			{
-				if (Directory.Exists(_sessionDirectory))
-					Directory.Delete(_sessionDirectory, recursive: true);
-			}
-			catch (IOException)
-			{
-			}
-			catch (UnauthorizedAccessException)
-			{
-			}
+			TryDeleteSessionDirectory(_sessionDirectory);
 		}
 		finally
 		{
@@ -224,6 +280,21 @@ public sealed class McpPackRegistry : IDisposable
 		try
 		{
 			File.Delete(path);
+		}
+		catch (IOException)
+		{
+		}
+		catch (UnauthorizedAccessException)
+		{
+		}
+	}
+
+	private static void TryDeleteSessionDirectory(string path)
+	{
+		try
+		{
+			if (Directory.Exists(path))
+				Directory.Delete(path, recursive: true);
 		}
 		catch (IOException)
 		{
@@ -305,6 +376,7 @@ public sealed class McpPackRegistry : IDisposable
 			return;
 		lock (_sync)
 		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
 			if (count > _maximumPackBytes - reservation.Bytes ||
 			    count > _maximumSessionBytes - _allocatedBytes)
 			{
@@ -348,6 +420,13 @@ public sealed class McpPackRegistry : IDisposable
 
 	private sealed class QuotaWriteStream(Stream inner, PackReservation reservation) : Stream
 	{
+		private readonly Decoder _decoder = new UTF8Encoding(false, true).GetDecoder();
+		private readonly char[] _characterBuffer = new char[16 * 1024];
+		private long _characters;
+		private int _lineBreaks;
+		private bool _previousCarriageReturn;
+		private bool _metricsCompleted;
+
 		public override bool CanRead => false;
 		public override bool CanSeek => false;
 		public override bool CanWrite => true;
@@ -367,12 +446,14 @@ public sealed class McpPackRegistry : IDisposable
 		{
 			reservation.Reserve(count);
 			inner.Write(buffer, offset, count);
+			AppendMetrics(buffer.AsSpan(offset, count));
 		}
 
 		public override void Write(ReadOnlySpan<byte> buffer)
 		{
 			reservation.Reserve(buffer.Length);
 			inner.Write(buffer);
+			AppendMetrics(buffer);
 		}
 
 		public override async ValueTask WriteAsync(
@@ -381,16 +462,29 @@ public sealed class McpPackRegistry : IDisposable
 		{
 			reservation.Reserve(buffer.Length);
 			await inner.WriteAsync(buffer, cancellationToken).ConfigureAwait(false);
+			AppendMetrics(buffer.Span);
 		}
 
-		public override Task WriteAsync(
+		public override async Task WriteAsync(
 			byte[] buffer,
 			int offset,
 			int count,
 			CancellationToken cancellationToken)
 		{
 			reservation.Reserve(count);
-			return inner.WriteAsync(buffer, offset, count, cancellationToken);
+			await inner.WriteAsync(buffer, offset, count, cancellationToken).ConfigureAwait(false);
+			AppendMetrics(buffer.AsSpan(offset, count));
+		}
+
+		public PackTextMetrics CompleteMetrics()
+		{
+			if (_metricsCompleted)
+				throw new InvalidOperationException("Pack text metrics have already been completed.");
+			_metricsCompleted = true;
+			Decode([], flush: true);
+			return new PackTextMetrics(
+				_characters,
+				_characters == 0 ? 0 : checked(_lineBreaks + 1));
 		}
 
 		public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
@@ -409,46 +503,54 @@ public sealed class McpPackRegistry : IDisposable
 			await inner.DisposeAsync().ConfigureAwait(false);
 			GC.SuppressFinalize(this);
 		}
-	}
 
-	private static async Task<(long Characters, int Lines)> MeasureAsync(
-		string path,
-		CancellationToken cancellationToken)
-	{
-		using var reader = new StreamReader(
-			path,
-			new UTF8Encoding(false, true),
-			detectEncodingFromByteOrderMarks: false,
-			bufferSize: 16 * 1024);
-		var buffer = new char[16 * 1024];
-		long characters = 0;
-		var lineBreaks = 0;
-		var previousCarriageReturn = false;
-		while (true)
+		private void AppendMetrics(ReadOnlySpan<byte> bytes)
 		{
-			var read = await reader.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false);
-			if (read == 0)
-				break;
-			characters += read;
-			for (var index = 0; index < read; index++)
+			if (_metricsCompleted)
+				throw new InvalidOperationException("Cannot write after pack text metrics are completed.");
+			Decode(bytes, flush: false);
+		}
+
+		private void Decode(ReadOnlySpan<byte> bytes, bool flush)
+		{
+			do
 			{
-				var character = buffer[index];
+				_decoder.Convert(
+					bytes,
+					_characterBuffer,
+					flush,
+					out var bytesUsed,
+					out var charactersUsed,
+					out var completed);
+				bytes = bytes[bytesUsed..];
+				AppendCharacters(_characterBuffer.AsSpan(0, charactersUsed));
+				if (completed)
+					break;
+			} while (!bytes.IsEmpty || flush);
+		}
+
+		private void AppendCharacters(ReadOnlySpan<char> characters)
+		{
+			_characters += characters.Length;
+			foreach (var character in characters)
+			{
 				if (character == '\n')
 				{
-					if (!previousCarriageReturn)
-						lineBreaks++;
-					previousCarriageReturn = false;
+					if (!_previousCarriageReturn)
+						_lineBreaks++;
+					_previousCarriageReturn = false;
 				}
 				else
 				{
 					if (character == '\r')
-						lineBreaks++;
-					previousCarriageReturn = character == '\r';
+						_lineBreaks++;
+					_previousCarriageReturn = character == '\r';
 				}
 			}
 		}
-		return (characters, characters == 0 ? 0 : checked(lineBreaks + 1));
 	}
+
+	private readonly record struct PackTextMetrics(long Characters, int Lines);
 }
 
 public sealed record McpPackDocument(string Id, string Path, int Lines, long Characters, long Bytes);

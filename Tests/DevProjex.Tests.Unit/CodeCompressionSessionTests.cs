@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Reflection;
 using DevProjex.Application.Compression;
 using DevProjex.Application.Diagnostics;
 
@@ -146,6 +147,26 @@ public sealed class CodeCompressionSessionTests
 		Assert.Equal(1, session.Diagnostics.CacheHits);
 		Assert.Equal(1, session.Snapshot.TotalFiles);
 		Assert.Equal(0, session.Snapshot.CompressedFiles);
+	}
+
+	[Fact]
+	public async Task Prewarm_PreCanceledSnapshotSkipsRetentionClassification()
+	{
+		using var temp = new TemporaryDirectory();
+		var path = temp.CreateFile("sample.cs", "same-content");
+		using var compressor = new RecordingCompressor();
+		using var session = new CodeCompressionSession(compressor);
+		var context = new CodeCompressionContext(temp.Path, session);
+		var selection = ContentSelectionSnapshot.Create(temp.Path, [path]);
+		var analyzer = new TrackingFileContentAnalyzer();
+		using var cancellation = new CancellationTokenSource();
+		cancellation.Cancel();
+
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+			new CodeCompressionPrewarmer(analyzer)
+				.WarmAsync(context, selection, cancellation.Token));
+
+		Assert.Equal(0, analyzer.ClassifyWithoutReadingCalls);
 	}
 
 	[Fact]
@@ -874,6 +895,30 @@ public sealed class CodeCompressionSessionTests
 	}
 
 	[Fact]
+	public async Task Reset_WhileDisposeIsCompleting_DoesNotReplaceTheDisposedGeneration()
+	{
+		var compressor = new BlockingDisposeCompressor();
+		var session = new CodeCompressionSession(compressor);
+		var generationField = typeof(CodeCompressionSession).GetField(
+			"_generationCts",
+			BindingFlags.Instance | BindingFlags.NonPublic)!;
+		var disposedGeneration = Assert.IsType<CancellationTokenSource>(generationField.GetValue(session));
+		var dispose = Task.Run(session.Dispose, TestContext.Current.CancellationToken);
+
+		try
+		{
+			await compressor.DisposeStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+			Assert.Throws<ObjectDisposedException>(session.Reset);
+			Assert.Same(disposedGeneration, generationField.GetValue(session));
+		}
+		finally
+		{
+			compressor.AllowDisposeToComplete.TrySetResult();
+			await dispose;
+		}
+	}
+
+	[Fact]
 	public void ResetBeforeQueuedPrewarmBegins_CannotPopulateTheCurrentGenerationCache()
 	{
 		using var compressor = new RecordingCompressor();
@@ -1072,6 +1117,26 @@ public sealed class CodeCompressionSessionTests
 			public void Dispose()
 			{
 			}
+		}
+	}
+
+	private sealed class BlockingDisposeCompressor : ICodeCompressor, IDisposable
+	{
+		public string TransformIdentity => "blocking-dispose:v1";
+		public TaskCompletionSource DisposeStarted { get; } =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+		public TaskCompletionSource AllowDisposeToComplete { get; } =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+		public bool IsSupported(string relativePath) => false;
+
+		public ICodeCompressionScope CreateScope(string projectRoot) =>
+			throw new NotSupportedException();
+
+		public void Dispose()
+		{
+			DisposeStarted.TrySetResult();
+			AllowDisposeToComplete.Task.GetAwaiter().GetResult();
 		}
 	}
 
@@ -1309,14 +1374,19 @@ public sealed class CodeCompressionSessionTests
 	private sealed class TrackingFileContentAnalyzer : IFileContentAnalyzer, IPrewarmFileContentAnalyzer
 	{
 		private readonly FileContentAnalyzer inner = new();
+		private int _classifyWithoutReadingCalls;
 		private int _classifiedMetricsCalls;
 		private int _readFactCalls;
 
+		public int ClassifyWithoutReadingCalls => Volatile.Read(ref _classifyWithoutReadingCalls);
 		public int ClassifiedMetricsCalls => Volatile.Read(ref _classifiedMetricsCalls);
 		public int ReadFactCalls => Volatile.Read(ref _readFactCalls);
 
-		public FileContentClassification? ClassifyWithoutReading(string path) =>
-			inner.ClassifyWithoutReading(path);
+		public FileContentClassification? ClassifyWithoutReading(string path)
+		{
+			Interlocked.Increment(ref _classifyWithoutReadingCalls);
+			return inner.ClassifyWithoutReading(path);
+		}
 
 		public ValueTask<bool> IsTextFileAsync(
 			string path,

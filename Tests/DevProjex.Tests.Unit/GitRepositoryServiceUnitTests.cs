@@ -28,11 +28,14 @@ public class GitRepositoryServiceUnitTests
         Assert.Equal("never", startInfo.Environment["SSH_ASKPASS_REQUIRE"]);
         Assert.Equal("Never", startInfo.Environment["GCM_INTERACTIVE"]);
         Assert.Equal("false", startInfo.Environment["GCM_GUI_PROMPT"]);
-        Assert.Equal(["--version"], startInfo.ArgumentList);
+		var expectedArguments = OperatingSystem.IsWindows()
+			? new[] { "-c", "core.longpaths=true", "--version" }
+			: ["--version"];
+		Assert.Equal(expectedArguments, startInfo.ArgumentList);
     }
 
 	[Fact]
-	public async Task WorktreeSupportProbe_TransientFailureIsRetriedAndSuccessIsCached()
+	public async Task WorktreeSupportProbe_TransientFailureIsReportedAndSuccessIsCached()
 	{
 		var calls = 0;
 		var manager = new GitWorktreeManager(_ => Task.FromResult(
@@ -40,9 +43,15 @@ public class GitRepositoryServiceUnitTests
 				? WorktreeSupportState.TransientFailure
 				: WorktreeSupportState.Supported));
 
-		Assert.False(await manager.IsSupportedAsync("repo", TestContext.Current.CancellationToken));
-		Assert.True(await manager.IsSupportedAsync("repo", TestContext.Current.CancellationToken));
-		Assert.True(await manager.IsSupportedAsync("repo", TestContext.Current.CancellationToken));
+		Assert.Equal(
+			WorktreeSupportState.TransientFailure,
+			await manager.GetSupportStateAsync("repo", TestContext.Current.CancellationToken));
+		Assert.Equal(
+			WorktreeSupportState.Supported,
+			await manager.GetSupportStateAsync("repo", TestContext.Current.CancellationToken));
+		Assert.Equal(
+			WorktreeSupportState.Supported,
+			await manager.GetSupportStateAsync("repo", TestContext.Current.CancellationToken));
 		Assert.Equal(2, calls);
 	}
 
@@ -110,9 +119,13 @@ public class GitRepositoryServiceUnitTests
 				: Task.FromResult(WorktreeSupportState.Supported);
 		});
 
-		await Assert.ThrowsAsync<IOException>(() => manager.IsSupportedAsync("repo", CancellationToken.None));
-		Assert.True(await manager.IsSupportedAsync("repo", CancellationToken.None));
-		Assert.True(await manager.IsSupportedAsync("repo", CancellationToken.None));
+		await Assert.ThrowsAsync<IOException>(() => manager.GetSupportStateAsync("repo", CancellationToken.None));
+		Assert.Equal(
+			WorktreeSupportState.Supported,
+			await manager.GetSupportStateAsync("repo", CancellationToken.None));
+		Assert.Equal(
+			WorktreeSupportState.Supported,
+			await manager.GetSupportStateAsync("repo", CancellationToken.None));
 		Assert.Equal(2, calls);
 	}
 
@@ -127,13 +140,15 @@ public class GitRepositoryServiceUnitTests
 			: Task.FromResult(WorktreeSupportState.Supported));
 		using var cancellation = new CancellationTokenSource();
 
-		var canceledWaiter = manager.IsSupportedAsync("repository", cancellation.Token);
+		var canceledWaiter = manager.GetSupportStateAsync("repository", cancellation.Token);
 		cancellation.Cancel();
 		await Assert.ThrowsAnyAsync<OperationCanceledException>(() => canceledWaiter);
 		firstProbe.SetResult(WorktreeSupportState.TransientFailure);
 		await firstProbe.Task;
 
-		Assert.True(await manager.IsSupportedAsync("repository", TestContext.Current.CancellationToken));
+		Assert.Equal(
+			WorktreeSupportState.Supported,
+			await manager.GetSupportStateAsync("repository", TestContext.Current.CancellationToken));
 		Assert.Equal(2, calls);
 	}
 
@@ -161,11 +176,15 @@ public class GitRepositoryServiceUnitTests
 			},
 			TimeSpan.FromMilliseconds(50));
 
-		Assert.False(await manager.IsSupportedAsync("repository", TestContext.Current.CancellationToken));
+		Assert.Equal(
+			WorktreeSupportState.TransientFailure,
+			await manager.GetSupportStateAsync("repository", TestContext.Current.CancellationToken));
 		await cancellationObserved.Task.WaitAsync(
 			TimeSpan.FromSeconds(2),
 			TestContext.Current.CancellationToken);
-		Assert.True(await manager.IsSupportedAsync("repository", TestContext.Current.CancellationToken));
+		Assert.Equal(
+			WorktreeSupportState.Supported,
+			await manager.GetSupportStateAsync("repository", TestContext.Current.CancellationToken));
 		Assert.Equal(2, probeCount);
 	}
 
@@ -180,8 +199,12 @@ public class GitRepositoryServiceUnitTests
 				: Task.FromResult(new GitWorktreeManager.GitProcessResult(0, string.Empty, string.Empty)),
 			TimeSpan.FromSeconds(1));
 
-		Assert.False(await manager.IsSupportedAsync("repository", TestContext.Current.CancellationToken));
-		Assert.True(await manager.IsSupportedAsync("repository", TestContext.Current.CancellationToken));
+		Assert.Equal(
+			WorktreeSupportState.TransientFailure,
+			await manager.GetSupportStateAsync("repository", TestContext.Current.CancellationToken));
+		Assert.Equal(
+			WorktreeSupportState.Supported,
+			await manager.GetSupportStateAsync("repository", TestContext.Current.CancellationToken));
 		Assert.Equal(2, probeCount);
 	}
 
@@ -198,9 +221,46 @@ public class GitRepositoryServiceUnitTests
 			},
 			TimeSpan.FromSeconds(1));
 
-		Assert.False(await manager.IsSupportedAsync("repository", TestContext.Current.CancellationToken));
-		Assert.False(await manager.IsSupportedAsync("repository", TestContext.Current.CancellationToken));
+		Assert.Equal(
+			WorktreeSupportState.PermanentUnsupported,
+			await manager.GetSupportStateAsync("repository", TestContext.Current.CancellationToken));
+		Assert.Equal(
+			WorktreeSupportState.PermanentUnsupported,
+			await manager.GetSupportStateAsync("repository", TestContext.Current.CancellationToken));
 		Assert.Equal(1, probeCount);
+	}
+
+	[Fact]
+	public async Task DetachedWorktree_VerificationFailureIsNotMaskedByStalledCleanup()
+	{
+		var cleanupStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var manager = new GitWorktreeManager(
+			async (_, arguments, cancellationToken) =>
+			{
+				if (arguments is ["rev-parse", "--verify", "--quiet", _])
+					return new GitWorktreeManager.GitProcessResult(0, "0123456789abcdef\n", string.Empty);
+				if (arguments is ["worktree", "add", ..])
+					return new GitWorktreeManager.GitProcessResult(0, string.Empty, string.Empty);
+				if (arguments is ["rev-parse", "HEAD"])
+					throw new IOException("verification failed");
+				if (arguments is ["worktree", "remove", ..])
+				{
+					cleanupStarted.TrySetResult();
+					await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+				}
+				throw new InvalidOperationException("Unexpected git command.");
+			},
+			TimeSpan.FromSeconds(1),
+			TimeSpan.FromMilliseconds(25));
+
+		var exception = await Assert.ThrowsAsync<IOException>(() => manager.CreateDetachedAsync(
+			"repository",
+			"worktree",
+			branch: null,
+			TestContext.Current.CancellationToken));
+
+		Assert.Equal("verification failed", exception.Message);
+		Assert.True(cleanupStarted.Task.IsCompletedSuccessfully);
 	}
 
 	[Theory]
@@ -352,5 +412,28 @@ public class GitRepositoryServiceUnitTests
 		Assert.Equal(expectedPercent, classification.Percent);
 		Assert.Equal(expectedSafeProgressLine, classification.IsSafeProgressLine);
 		Assert.Equal(expectedRetainForError, classification.RetainForError);
+	}
+
+	[Fact]
+	public async Task GitProcessLinePump_SplitsEveryLineEndingAndBoundsFrames()
+	{
+		var frames = new List<GitProcessLineFrame>();
+		var input = new string('x', 4_095) + "\r\none\rtwo\n\nend";
+
+		await GitProcessLinePump.ReadAsync(
+			new StringReader(input),
+			maximumFrameCharacters: 10,
+			frames.Add,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(
+			[
+				new GitProcessLineFrame(new string('x', 10), ExceededLimit: true),
+				new GitProcessLineFrame("one", ExceededLimit: false),
+				new GitProcessLineFrame("two", ExceededLimit: false),
+				new GitProcessLineFrame(string.Empty, ExceededLimit: false),
+				new GitProcessLineFrame("end", ExceededLimit: false)
+			],
+			frames);
 	}
 }

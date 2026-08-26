@@ -491,6 +491,39 @@ public sealed class MainWindowCoordinatorRefactorTests
     }
 
 	[Fact]
+	public async Task ProjectLoadPipeline_DisposeDuringLoad_CancelsAndCompletesWithoutFault()
+	{
+		var viewModel = CreateViewModel();
+		var reloadStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var host = new RecordingProjectLoadHost(viewModel)
+		{
+			ReloadHandler = async cancellationToken =>
+			{
+				reloadStarted.TrySetResult();
+				await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+			}
+		};
+		var status = new StatusOperationCoordinator(
+			viewModel,
+			isBackgroundMetricsActive: () => false,
+			metricsOperationTextProvider: () => viewModel.StatusOperationCalculatingData);
+		var pipeline = new ProjectLoadPipeline(host, status);
+
+		var loadTask = pipeline.OpenFolderAsync(
+			@"C:\Project",
+			fromDialog: false,
+			recordRecentFolder: false);
+		await reloadStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+
+		pipeline.Dispose();
+		await loadTask.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+		pipeline.Dispose();
+
+		Assert.False(viewModel.StatusBusy);
+		Assert.Contains(ProjectLoadHostCall.ApplyCancellationFallback, host.Calls);
+	}
+
+	[Fact]
 	public void StatusOperationCoordinator_BackgroundMetricsDoesNotReplaceExplicitSecretAnalysis()
 	{
 		var viewModel = CreateViewModel();
@@ -817,6 +850,26 @@ public sealed class MainWindowCoordinatorRefactorTests
         Assert.Equal(0, host.PreviewDocumentCleanupRequestCount);
         Assert.True(pipeline.IsIdle);
         Assert.False(viewModel.IsPreviewLoading);
+    }
+
+    [Fact]
+    public void PreviewWorkspacePipeline_ScheduleAfterDisposeDoesNotRecreateTimer()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsProjectLoaded = true;
+        viewModel.PreviewWorkspaceMode = PreviewWorkspaceMode.TreeAndPreview;
+        var pipeline = new PreviewWorkspacePipeline(
+            new RecordingPreviewWorkspaceHost(viewModel),
+            TimeSpan.FromMilliseconds(1));
+
+        pipeline.Dispose();
+        pipeline.ScheduleRefresh();
+
+        var timer = typeof(PreviewWorkspacePipeline).GetField(
+            "_previewDebounceTimer",
+            BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(pipeline);
+        Assert.Null(timer);
+        Assert.False(pipeline.IsRefreshRequested);
     }
 
     [Fact]
@@ -1312,6 +1365,36 @@ public sealed class MainWindowCoordinatorRefactorTests
         Assert.Equal(0, host.ApplyCount);
     }
 
+	[Fact]
+	public async Task RefreshTreePipeline_CancelsViewModelMaterializationBeforeApplyingTree()
+	{
+		var viewModel = CreateViewModel();
+		var buildStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var releaseBuild = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var host = new RecordingRefreshTreeHost(viewModel)
+		{
+			BuildViewModelHandler = (input, result, token) =>
+			{
+				buildStarted.TrySetResult();
+				releaseBuild.Task.Wait(TestContext.Current.CancellationToken);
+				token.ThrowIfCancellationRequested();
+				return new TreeNodeViewModel(result.Root, parent: null, icon: null)
+				{
+					DisplayName = input.DisplayName
+				};
+			}
+		};
+		using var pipeline = new RefreshTreePipeline(host);
+
+		var refreshTask = pipeline.RefreshTreeAsync(cancellationToken: TestContext.Current.CancellationToken);
+		await buildStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+		pipeline.CancelActiveRefresh();
+		releaseBuild.SetResult();
+
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(() => refreshTask);
+		Assert.Equal(0, host.ApplyCount);
+	}
+
     [Fact]
     public async Task RefreshTreePipeline_LeavesStaleProjectTreeUntouched()
     {
@@ -1319,7 +1402,7 @@ public sealed class MainWindowCoordinatorRefactorTests
         RecordingRefreshTreeHost? host = null;
         host = new RecordingRefreshTreeHost(viewModel)
         {
-            BuildViewModelHandler = (input, result) =>
+			BuildViewModelHandler = (input, result, _) =>
             {
                 host!.CurrentPath = @"C:\ProjectB";
                 return new TreeNodeViewModel(result.Root, parent: null, icon: null)
@@ -2125,8 +2208,12 @@ public sealed class MainWindowCoordinatorRefactorTests
 		public void ReportIncompleteTreeScan() =>
 			IncompleteScanReportCount++;
 
-        public TreeNodeViewModel BuildTreeViewModel(TreeRefreshInput input, BuildTreeResult result)
+		public TreeNodeViewModel BuildTreeViewModel(
+			TreeRefreshInput input,
+			BuildTreeResult result,
+			CancellationToken cancellationToken)
         {
+			cancellationToken.ThrowIfCancellationRequested();
             Assert.Same(CapturedTreeInput, input);
             Calls.Add(ProjectLoadSnapshotHostCall.BuildTreeViewModel);
             return new TreeNodeViewModel(result.Root, parent: null, icon: null)
@@ -2350,7 +2437,11 @@ public sealed class MainWindowCoordinatorRefactorTests
 
         public Func<CancellationToken, BuildTreeSnapshotResult>? BuildTreeHandler { get; set; }
 
-        public Func<TreeRefreshInput, BuildTreeResult, TreeNodeViewModel>? BuildViewModelHandler { get; set; }
+		public Func<
+			TreeRefreshInput,
+			BuildTreeResult,
+			CancellationToken,
+			TreeNodeViewModel>? BuildViewModelHandler { get; set; }
 
         public int BuildTreeCount { get; private set; }
 
@@ -2418,9 +2509,13 @@ public sealed class MainWindowCoordinatorRefactorTests
 		public void ReportIncompleteTreeScan() =>
 			IncompleteScanReportCount++;
 
-        public TreeNodeViewModel BuildTreeViewModel(TreeRefreshInput input, BuildTreeResult result)
+		public TreeNodeViewModel BuildTreeViewModel(
+			TreeRefreshInput input,
+			BuildTreeResult result,
+			CancellationToken cancellationToken)
         {
-            return BuildViewModelHandler?.Invoke(input, result) ??
+			cancellationToken.ThrowIfCancellationRequested();
+			return BuildViewModelHandler?.Invoke(input, result, cancellationToken) ??
                    new TreeNodeViewModel(result.Root, parent: null, icon: null)
                    {
                        DisplayName = input.DisplayName

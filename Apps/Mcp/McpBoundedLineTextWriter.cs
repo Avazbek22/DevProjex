@@ -28,9 +28,12 @@ internal sealed class McpBoundedLineTextWriter : TextWriter
 		ReadOnlyMemory<char> buffer,
 		CancellationToken cancellationToken = default)
 	{
-		foreach (var character in buffer.Span)
+		var characters = buffer.Span;
+		for (var index = 0; index < characters.Length; index++)
 		{
-			cancellationToken.ThrowIfCancellationRequested();
+			if ((index & 0xFFF) == 0)
+				cancellationToken.ThrowIfCancellationRequested();
+			var character = characters[index];
 			if (character == '\n')
 			{
 				if (_previousWasCarriageReturn)

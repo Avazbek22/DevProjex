@@ -98,7 +98,10 @@ public sealed class RepositoryCacheRecentProjectsIndependenceTests : IDisposable
 
 	private sealed class UnsupportedWorktreeManager : IGitWorktreeManager
 	{
-		public Task<bool> IsSupportedAsync(string basePath, CancellationToken cancellationToken) => Task.FromResult(false);
+		public Task<WorktreeSupportState> GetSupportStateAsync(
+			string basePath,
+			CancellationToken cancellationToken) =>
+			Task.FromResult(WorktreeSupportState.PermanentUnsupported);
 		public Task<bool> PreparePrimaryAsync(string basePath, string? branch, CancellationToken cancellationToken) => Task.FromResult(true);
 		public Task<bool> CreateDetachedAsync(string basePath, string worktreePath, string? branch, CancellationToken cancellationToken) => Task.FromResult(false);
 		public Task RemoveAsync(string basePath, string worktreePath, CancellationToken cancellationToken) => Task.CompletedTask;

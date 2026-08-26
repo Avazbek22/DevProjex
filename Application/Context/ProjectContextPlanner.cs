@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Security.Cryptography;
 using DevProjex.Application.Selection;
 
@@ -5,8 +6,10 @@ namespace DevProjex.Application.Context;
 
 public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService)
 {
+	private const int FingerprintStackBufferBytes = 512;
 	private const string InvalidSelectedPathCode = ProjectSelectionPath.InvalidPathCode;
 	private const string MissingSelectedPathCode = "DPX-SELECTION-PATH-MISSING";
+	private static readonly byte[] FingerprintValueSeparator = [0];
 
 	public async Task<ProjectContextPlan> BuildAsync(
 		ProjectContextRequest request,
@@ -40,28 +43,32 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			sourceRoot,
 			selection.SelectedPaths,
 			diagnostics,
+			cancellationToken,
 			out var explicitSelectionHadMatch);
 		var selectsNoEffectivePaths =
 			selection.SelectedPaths is { Count: > 0 } &&
 			!explicitSelectionHadMatch;
 		var includedNodes = selectsNoEffectivePaths
 			? []
-			: ProjectTreeSelectionProjection.BuildIncludedNodes(
+			: ProjectTreeSelectionProjection.BuildIncludedNodesWithCancellation(
 				effectiveRoot,
-				selectedFullPaths);
-		var includedPathSet = includedNodes
-			.Select(static node => node.FullPath)
-			.ToHashSet(PathComparer.Default);
+				selectedFullPaths,
+				cancellationToken);
+		var includedPathSet = BuildIncludedPathSet(includedNodes, cancellationToken);
 		var projectedTree = selectsNoEffectivePaths
 			? loaded.Tree.Root with { Children = [] }
-			: ProjectTreeSelectionProjection.BuildProjectedTree(effectiveRoot, includedPathSet) ??
+			: ProjectTreeSelectionProjection.BuildProjectedTreeWithCancellation(
+				effectiveRoot,
+				includedPathSet,
+				cancellationToken) ??
 			  effectiveRoot with { Children = [] };
 		var includedFiles = selectsNoEffectivePaths
 			? []
-			: ProjectTreeSelectionProjection.BuildOrderedSelectedFilePaths(
+			: ProjectTreeSelectionProjection.BuildOrderedSelectedFilePathsWithCancellation(
 				effectiveRoot,
 				selectedFullPaths,
-				ensureExists: false);
+				ensureExists: false,
+				cancellationToken);
 		var effectiveFileSizes = BuildEffectiveFileSizes(
 			effectiveRoot,
 			loaded.TreeInventory,
@@ -70,11 +77,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			includedFiles,
 			effectiveFileSizes,
 			cancellationToken);
-		var includedFolders = includedNodes
-			.Where(static node => node.IsDirectory)
-			.Select(static node => node.FullPath)
-			.OrderBy(static path => path, PathComparer.Default)
-			.ToArray();
+		var includedFolders = BuildOrderedIncludedFolders(includedNodes, cancellationToken);
 
 		var projectedLoaded = loaded with
 		{
@@ -113,7 +116,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			StripBlankLines = ResolveStripBlankLinesIntent(selection, refreshedLocalState, loaded),
 			SelectedPaths = NormalizeRelativeSelectionForOutput(
 				sourceRoot,
-				selectedFullPaths),
+				selectedFullPaths,
+				cancellationToken),
 			LocalProfileState = refreshedLocalState
 		};
 
@@ -132,7 +136,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			Analysis: analysis,
 			Diagnostics: diagnostics,
 			GitReadiness: gitReadiness,
-			Fingerprint: BuildFingerprint(sourceRoot, effectiveSelection, includedNodes),
+			Fingerprint: BuildFingerprint(sourceRoot, effectiveSelection, includedNodes, cancellationToken),
 			IncludedBytes: includedBytes,
 			EffectiveFileSizes: effectiveFileSizes,
 			SourceIdentity: sourceIdentity);
@@ -153,42 +157,43 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			baseline.SourceRoot,
 			selectedPaths,
 			diagnostics,
+			cancellationToken,
 			out var explicitSelectionHadMatch);
 		var selectsNoEffectivePaths =
 			selectedPaths is { Count: > 0 } &&
 			!explicitSelectionHadMatch;
 		var includedNodes = selectsNoEffectivePaths
 			? []
-			: ProjectTreeSelectionProjection.BuildIncludedNodes(
+			: ProjectTreeSelectionProjection.BuildIncludedNodesWithCancellation(
 				baseline.EffectiveTree,
-				selectedFullPaths);
-		var includedPathSet = includedNodes
-			.Select(static node => node.FullPath)
-			.ToHashSet(PathComparer.Default);
+				selectedFullPaths,
+				cancellationToken);
+		var includedPathSet = BuildIncludedPathSet(includedNodes, cancellationToken);
 		var projectedTree = selectsNoEffectivePaths
 			? baseline.EffectiveTree with { Children = [] }
-			: ProjectTreeSelectionProjection.BuildProjectedTree(baseline.EffectiveTree, includedPathSet) ??
+			: ProjectTreeSelectionProjection.BuildProjectedTreeWithCancellation(
+				baseline.EffectiveTree,
+				includedPathSet,
+				cancellationToken) ??
 			  baseline.EffectiveTree with { Children = [] };
 		var includedFiles = selectsNoEffectivePaths
 			? []
-			: ProjectTreeSelectionProjection.BuildOrderedSelectedFilePaths(
+			: ProjectTreeSelectionProjection.BuildOrderedSelectedFilePathsWithCancellation(
 				baseline.EffectiveTree,
 				selectedFullPaths,
-				ensureExists: false);
+				ensureExists: false,
+				cancellationToken);
 		var includedBytes = CalculateIncludedBytes(
 			includedFiles,
 			baseline.EffectiveFileSizes,
 			cancellationToken);
-		var includedFolders = includedNodes
-			.Where(static node => node.IsDirectory)
-			.Select(static node => node.FullPath)
-			.OrderBy(static path => path, PathComparer.Default)
-			.ToArray();
+		var includedFolders = BuildOrderedIncludedFolders(includedNodes, cancellationToken);
 		var selection = baseline.Selection with
 		{
 			SelectedPaths = NormalizeRelativeSelectionForOutput(
 				baseline.SourceRoot,
-				selectedFullPaths)
+				selectedFullPaths,
+				cancellationToken)
 		};
 		var reportInput = new LoadedProjectAnalysisRequest(
 			RootPath: baseline.SourceRoot,
@@ -226,7 +231,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			Fingerprint = BuildFingerprint(
 				baseline.SourceRoot,
 				selection,
-				includedNodes),
+				includedNodes,
+				cancellationToken),
 			IncludedBytes = includedBytes
 		};
 	}
@@ -240,9 +246,27 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		bool? compressCode = null,
 		bool? stripComments = null,
 		bool? stripBlankLines = null,
-		bool? hidePrivateData = null)
+		bool? hidePrivateData = null) =>
+		ApplyContentTransformationSelectionWithCancellation(
+			baseline,
+			hideSecrets,
+			compressCode,
+			stripComments,
+			stripBlankLines,
+			hidePrivateData,
+			CancellationToken.None);
+
+	public ProjectContextPlan ApplyContentTransformationSelectionWithCancellation(
+		ProjectContextPlan baseline,
+		bool hideSecrets,
+		bool? compressCode,
+		bool? stripComments,
+		bool? stripBlankLines,
+		bool? hidePrivateData,
+		CancellationToken cancellationToken)
 	{
 		ArgumentNullException.ThrowIfNull(baseline);
+		cancellationToken.ThrowIfCancellationRequested();
 		var selection = baseline.Selection with
 		{
 			HideSecrets = hideSecrets,
@@ -251,13 +275,18 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			StripComments = stripComments ?? baseline.Selection.StripComments,
 			StripBlankLines = stripBlankLines ?? baseline.Selection.StripBlankLines
 		};
-		var includedNodes = ProjectTreeSelectionProjection.BuildIncludedNodes(
+		var includedNodes = ProjectTreeSelectionProjection.BuildIncludedNodesWithCancellation(
 			baseline.EffectiveTree,
-			baseline.SelectedFullPaths);
+			baseline.SelectedFullPaths,
+			cancellationToken);
 		return baseline with
 		{
 			Selection = selection,
-			Fingerprint = BuildFingerprint(baseline.SourceRoot, selection, includedNodes),
+			Fingerprint = BuildFingerprint(
+				baseline.SourceRoot,
+				selection,
+				includedNodes,
+				cancellationToken),
 			Redaction = null,
 			Privacy = null
 		};
@@ -336,8 +365,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 
 	private static string NormalizeSourceRoot(string path)
 	{
-		if (string.IsNullOrEmpty(path) ||
-		    (OperatingSystem.IsWindows() && string.IsNullOrWhiteSpace(path)))
+		if (PathUtility.IsMissingPath(path))
 			throw new ProjectContextValidationException("DPX-PROJECT-PATH-REQUIRED", "Project path is required.");
 
 		var normalized = PathUtility.Normalize(path);
@@ -676,16 +704,18 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		string sourceRoot,
 		IReadOnlyCollection<string>? selectedPaths,
 		List<ContextDiagnostic> diagnostics,
+		CancellationToken cancellationToken,
 		out bool explicitSelectionHadMatch)
 	{
 		explicitSelectionHadMatch = false;
 		if (selectedPaths is null || selectedPaths.Count == 0)
 			return new HashSet<string>(PathComparer.Default);
 
-		var effectivePathMap = BuildEffectivePathMap(root, sourceRoot);
+		var effectivePathMap = BuildEffectivePathMap(root, sourceRoot, cancellationToken);
 		var resolved = new HashSet<string>(PathComparer.Default);
 		foreach (var input in selectedPaths)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			var relativePath = ProjectSelectionPath.NormalizeRelative(input);
 			if (relativePath.Length == 0)
 			{
@@ -708,13 +738,15 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				relativePath));
 		}
 
-		return NormalizeSelectionFrontier(root, resolved);
+		return NormalizeSelectionFrontier(root, resolved, cancellationToken);
 	}
 
 	private static IReadOnlySet<string> NormalizeSelectionFrontier(
 		TreeNodeDescriptor root,
-		IReadOnlySet<string> selectedPaths)
+		IReadOnlySet<string> selectedPaths,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		if (selectedPaths.Contains(root.FullPath))
 			return new HashSet<string>(PathComparer.Default);
 
@@ -724,9 +756,11 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		var frontier = new HashSet<string>(selectedPaths, PathComparer.Default);
 		foreach (var selectedPath in selectedPaths)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			var parent = Directory.GetParent(selectedPath);
 			while (parent is not null)
 			{
+				cancellationToken.ThrowIfCancellationRequested();
 				if (frontier.Contains(parent.FullName))
 				{
 					frontier.Remove(selectedPath);
@@ -742,13 +776,15 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 
 	private static Dictionary<string, string> BuildEffectivePathMap(
 		TreeNodeDescriptor root,
-		string sourceRoot)
+		string sourceRoot,
+		CancellationToken cancellationToken)
 	{
 		var paths = new Dictionary<string, string>(PathComparer.Default);
 		var stack = new Stack<TreeNodeDescriptor>();
 		stack.Push(root);
 		while (stack.Count > 0)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			var node = stack.Pop();
 			var relativePath = Path.GetRelativePath(sourceRoot, node.FullPath);
 			var key = relativePath == "." ? string.Empty : NormalizePathSeparators(relativePath);
@@ -804,38 +840,67 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 
 	private static IReadOnlyList<string> NormalizeRelativeSelectionForOutput(
 		string sourceRoot,
-		IReadOnlySet<string> selectedFullPaths)
+		IReadOnlySet<string> selectedFullPaths,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		if (selectedFullPaths.Count == 0)
 			return [];
 
-		return selectedFullPaths
-			.Select(path => Path.GetRelativePath(sourceRoot, path))
-			.Select(static path => path == "." ? "." : NormalizePathSeparators(path))
-			.OrderBy(static path => path, StringComparer.Ordinal)
-			.ToArray();
+		var normalizedPaths = new List<string>(selectedFullPaths.Count);
+		foreach (var selectedPath in selectedFullPaths)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var relativePath = Path.GetRelativePath(sourceRoot, selectedPath);
+			normalizedPaths.Add(relativePath == "." ? "." : NormalizePathSeparators(relativePath));
+		}
+
+		CancellationAwareSort.Sort(normalizedPaths, StringComparer.Ordinal, cancellationToken);
+		return normalizedPaths;
 	}
 
 	private static string BuildFingerprint(
 		string sourceRoot,
 		ProjectSelectionSpec selection,
-		IReadOnlyList<TreeNodeDescriptor> includedNodes)
+		IReadOnlyList<TreeNodeDescriptor> includedNodes,
+		CancellationToken cancellationToken = default)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
 		Append(selection.GitMode!.Value.ToString());
 		foreach (var exclusion in selection.Exclusions!.OrderBy(static value => value))
+		{
+			cancellationToken.ThrowIfCancellationRequested();
 			Append(exclusion.ToString());
+		}
 		Append($"hide-secrets:{selection.HideSecrets == true}");
 		Append($"hide-private-data:{selection.HidePrivateData == true}");
 		Append($"compress-code:{selection.CompressCode == true}");
 		Append($"strip-comments:{selection.StripComments == true}");
 		Append($"strip-blank-lines:{selection.StripBlankLines == true}");
 		foreach (var root in selection.Roots ?? [])
-			Append("r:" + root);
-		foreach (var extension in selection.Extensions ?? [])
-			Append("e:" + extension);
-		foreach (var node in includedNodes.OrderBy(static node => node.FullPath, PathComparer.Default))
 		{
+			cancellationToken.ThrowIfCancellationRequested();
+			Append("r:" + root);
+		}
+		foreach (var extension in selection.Extensions ?? [])
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			Append("e:" + extension);
+		}
+		var orderedNodes = new List<TreeNodeDescriptor>(includedNodes.Count);
+		foreach (var node in includedNodes)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			orderedNodes.Add(node);
+		}
+		CancellationAwareSort.Sort(
+			orderedNodes,
+			(left, right) => PathComparer.Default.Compare(left.FullPath, right.FullPath),
+			cancellationToken);
+		foreach (var node in orderedNodes)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
 			var relativePath = Path.GetRelativePath(sourceRoot, node.FullPath);
 			Append((node.IsDirectory ? "d:" : "f:") + NormalizePathSeparators(relativePath));
 		}
@@ -844,9 +909,58 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 
 		void Append(string value)
 		{
-			var bytes = Encoding.UTF8.GetBytes(value);
-			hash.AppendData(bytes);
-			hash.AppendData([0]);
+			var byteCount = Encoding.UTF8.GetByteCount(value);
+			if (byteCount <= FingerprintStackBufferBytes)
+			{
+				Span<byte> bytes = stackalloc byte[byteCount];
+				Encoding.UTF8.GetBytes(value, bytes);
+				hash.AppendData(bytes);
+			}
+			else
+			{
+				var rented = ArrayPool<byte>.Shared.Rent(byteCount);
+				try
+				{
+					var written = Encoding.UTF8.GetBytes(value, rented);
+					hash.AppendData(rented.AsSpan(0, written));
+				}
+				finally
+				{
+					ArrayPool<byte>.Shared.Return(rented, clearArray: true);
+				}
+			}
+
+			hash.AppendData(FingerprintValueSeparator);
 		}
+	}
+
+	private static HashSet<string> BuildIncludedPathSet(
+		IReadOnlyList<TreeNodeDescriptor> includedNodes,
+		CancellationToken cancellationToken)
+	{
+		var includedPaths = new HashSet<string>(PathComparer.Default);
+		foreach (var node in includedNodes)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			includedPaths.Add(node.FullPath);
+		}
+
+		return includedPaths;
+	}
+
+	private static string[] BuildOrderedIncludedFolders(
+		IReadOnlyList<TreeNodeDescriptor> includedNodes,
+		CancellationToken cancellationToken)
+	{
+		var includedFolders = new List<string>();
+		foreach (var node in includedNodes)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (node.IsDirectory)
+				includedFolders.Add(node.FullPath);
+		}
+
+		CancellationAwareSort.Sort(includedFolders, PathComparer.Default, cancellationToken);
+		return includedFolders.ToArray();
 	}
 }

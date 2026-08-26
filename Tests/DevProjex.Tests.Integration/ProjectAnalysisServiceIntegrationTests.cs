@@ -1,7 +1,36 @@
 namespace DevProjex.Tests.Integration;
 
+[Collection(CurrentDirectoryTestCollection.Name)]
 public sealed class ProjectAnalysisServiceIntegrationTests
 {
+	[Fact]
+	public void Load_AcceptsRelativeWhitespaceOnlyUnixRoot()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Windows does not support this directory name through ordinary APIs.");
+			return;
+		}
+
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine(" ", "Selected.cs"), "class Selected {}\n");
+		var originalCurrentDirectory = Environment.CurrentDirectory;
+		try
+		{
+			Environment.CurrentDirectory = temp.Path;
+			var loaded = CreateService().Load(
+				new ProjectAnalysisRequest(" ", SelectedIgnoreOptions: []),
+				TestContext.Current.CancellationToken);
+
+			Assert.Equal(PathUtility.Normalize(" "), loaded.RootPath);
+			Assert.Equal("Selected.cs", Assert.Single(loaded.Tree.Root.Children).DisplayName);
+		}
+		finally
+		{
+			Environment.CurrentDirectory = originalCurrentDirectory;
+		}
+	}
+
 	[Fact]
 	public void Load_UnixWhitespaceOnlyRootName_RemainsSelectable()
 	{
@@ -327,6 +356,54 @@ public sealed class ProjectAnalysisServiceIntegrationTests
 		Assert.Equal(expected.Tokens, report.Metrics.Content.Tokens);
 	}
 
+	[Fact]
+	public async Task BuildReportFromTreeAsync_CancelsDuringSummaryTraversal()
+	{
+		using var cancellation = new CancellationTokenSource();
+		var child = new TreeNodeDescriptor("file.cs", "/root/file.cs", false, false, "file", []);
+		var root = new TreeNodeDescriptor(
+			"root",
+			"/root",
+			true,
+			false,
+			"folder",
+			new CancelOnSecondReadList<TreeNodeDescriptor>([child], cancellation));
+		var request = new LoadedProjectAnalysisRequest(
+			RootPath: "/root",
+			Tree: new BuildTreeResult(root, false, false, []),
+			AvailableRootFolders: [],
+			AvailableExtensions: [],
+			SelectedRootFolders: [],
+			SelectedExtensions: [],
+			SelectedIgnoreOptions: [],
+			RootAccessDenied: false,
+			HadAccessDenied: false);
+
+		await Assert.ThrowsAsync<OperationCanceledException>(() =>
+			CreateService().BuildReportFromTreeAsync(request, cancellation.Token));
+	}
+
+	[Fact]
+	public async Task BuildReportFromTreeAsync_CancelsDuringDiagnosticAssembly()
+	{
+		using var cancellation = new CancellationTokenSource();
+		var availableRoots = new CancelOnSecondReadList<string>(["available"], cancellation);
+		var root = new TreeNodeDescriptor("root", "/root", true, false, "folder", []);
+		var request = new LoadedProjectAnalysisRequest(
+			RootPath: "/root",
+			Tree: new BuildTreeResult(root, false, false, []),
+			AvailableRootFolders: availableRoots,
+			AvailableExtensions: [],
+			SelectedRootFolders: ["available"],
+			SelectedExtensions: [],
+			SelectedIgnoreOptions: [],
+			RootAccessDenied: false,
+			HadAccessDenied: false);
+
+		await Assert.ThrowsAsync<OperationCanceledException>(() =>
+			CreateService().BuildReportFromTreeAsync(request, cancellation.Token));
+	}
+
 	private static ProjectAnalysisService CreateService(IFileContentAnalyzer? fileContentAnalyzer = null)
 	{
 		var localization = new LocalizationService(new TestLocalizationCatalog(), AppLanguage.En);
@@ -461,5 +538,31 @@ public sealed class ProjectAnalysisServiceIntegrationTests
 	private sealed class TestIconMapper : IIconMapper
 	{
 		public string GetIconKey(FileSystemNode node) => node.IsDirectory ? "folder" : "file";
+	}
+
+	private sealed class CancelOnSecondReadList<T>(IReadOnlyList<T> items, CancellationTokenSource cancellation)
+		: IReadOnlyList<T>
+	{
+		private int _reads;
+
+		public int Count => items.Count;
+
+		public T this[int index]
+		{
+			get
+			{
+				if (Interlocked.Increment(ref _reads) == 2)
+					cancellation.Cancel();
+				return items[index];
+			}
+		}
+
+		public IEnumerator<T> GetEnumerator()
+		{
+			for (var index = 0; index < Count; index++)
+				yield return this[index];
+		}
+
+		System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
 	}
 }

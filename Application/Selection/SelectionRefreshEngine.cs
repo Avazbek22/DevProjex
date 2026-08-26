@@ -9,7 +9,11 @@ public sealed class SelectionRefreshEngine(
     FilterOptionSelectionService filterSelectionService,
     IgnoreOptionsService ignoreOptionsService,
     Func<string, IReadOnlyCollection<IgnoreOptionId>, IReadOnlyCollection<string>?, IgnoreRules> buildIgnoreRules,
-    Func<string, IReadOnlyCollection<string>, IgnoreOptionsAvailability> getIgnoreOptionsAvailability)
+    Func<string, IReadOnlyCollection<string>, IgnoreOptionsAvailability> getIgnoreOptionsAvailability,
+    Func<string, IReadOnlyCollection<IgnoreOptionId>, IReadOnlyCollection<string>?, CancellationToken, IgnoreRules>?
+        buildIgnoreRulesWithCancellation = null,
+    Func<string, IReadOnlyCollection<string>, CancellationToken, IgnoreOptionsAvailability>?
+        getIgnoreOptionsAvailabilityWithCancellation = null)
 {
     // Some dynamic chains need more than one follow-up pass:
     // controller -> directory toggle -> empty/extensionless toggle -> final scan scope.
@@ -23,7 +27,9 @@ public sealed class SelectionRefreshEngine(
         ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
         HasExtensionlessEntries: false,
         ExtensionlessEntriesCount: 0);
-    private readonly IgnoreRulesBuildCache _ignoreRulesBuildCache = new(buildIgnoreRules);
+    private readonly IgnoreRulesBuildCache _ignoreRulesBuildCache = new(
+        buildIgnoreRulesWithCancellation ??
+        ((path, options, roots, _) => buildIgnoreRules(path, options, roots)));
 
 	public void InvalidateCaches()
 	{
@@ -41,7 +47,8 @@ public sealed class SelectionRefreshEngine(
             context.Path,
             EmptyScanRoots,
             context,
-            context.CurrentSnapshotState);
+            context.CurrentSnapshotState,
+            cancellationToken: cancellationToken);
         var initialSelectedIgnoreOptions = BuildInitialFullRefreshIgnoreSelection(
             context,
             warmIgnore.SelectedIgnoreOptions);
@@ -120,9 +127,9 @@ public sealed class SelectionRefreshEngine(
         IReadOnlySet<IgnoreOptionId> selectedIgnoreOptions,
         CancellationToken cancellationToken)
     {
-        var discoveryRules = BuildIgnoreRules(context.Path, selectedIgnoreOptions, null);
+        var discoveryRules = BuildIgnoreRules(context.Path, selectedIgnoreOptions, null, cancellationToken);
         var scan = scanOptions.GetRootFolders(context.Path, discoveryRules, cancellationToken);
-        var ignoreRules = BuildIgnoreRules(context.Path, selectedIgnoreOptions, scan.Value);
+        var ignoreRules = BuildIgnoreRules(context.Path, selectedIgnoreOptions, scan.Value, cancellationToken);
         var visibleRootFolders = RootFolderVisibilityProjection.ApplyScopedControllerRules(
             context.Path,
             scan.Value,
@@ -290,7 +297,7 @@ public sealed class SelectionRefreshEngine(
         IgnoreSectionSnapshotState previousRuntimeSnapshotState,
         CancellationToken cancellationToken)
     {
-        var ignoreRules = BuildIgnoreRules(context.Path, selectedIgnoreOptions, selectedRoots);
+        var ignoreRules = BuildIgnoreRules(context.Path, selectedIgnoreOptions, selectedRoots, cancellationToken);
         var extensionScanRules = IgnoreRulesProjection.ForExtensionAvailability(ignoreRules);
         var effectiveExtensionPolicy = BuildEffectiveExtensionPolicy(context);
 
@@ -408,7 +415,8 @@ public sealed class SelectionRefreshEngine(
             context,
             snapshotState,
             ignoreStateCache,
-            selectedIgnoreOptions);
+            selectedIgnoreOptions,
+            cancellationToken);
 
         return new DynamicSectionSnapshot(
             RootOptions: null,
@@ -473,7 +481,8 @@ public sealed class SelectionRefreshEngine(
         SelectionRefreshContext context,
         IgnoreSectionSnapshotState snapshotState,
         IReadOnlyDictionary<IgnoreOptionId, bool>? stateCacheOverride = null,
-        IReadOnlySet<IgnoreOptionId>? previousSelectionOverride = null)
+        IReadOnlySet<IgnoreOptionId>? previousSelectionOverride = null,
+        CancellationToken cancellationToken = default)
     {
         var previousSelections = previousSelectionOverride ??
                                  (context.IgnoreSelectionInitialized
@@ -490,7 +499,8 @@ public sealed class SelectionRefreshEngine(
             selectedRoots,
             snapshotState,
             stateCache,
-            context.IgnoreOptionStateCacheIsComplete);
+            context.IgnoreOptionStateCacheIsComplete,
+            cancellationToken);
 
         var descriptors = ignoreOptionsService.GetOptions(availability);
         var defaultFallbackReferenceSelections = GetIgnoreDefaultFallbackReferenceSelections(
@@ -814,7 +824,8 @@ public sealed class SelectionRefreshEngine(
         IReadOnlyCollection<string> selectedRootFolders,
         IgnoreSectionSnapshotState snapshotState,
         IReadOnlyDictionary<IgnoreOptionId, bool> stateCache,
-        bool stateCacheIsComplete)
+        bool stateCacheIsComplete,
+        CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(path))
             return IgnoreOptionsAvailabilityResolver.CreateUnmeasured(
@@ -824,7 +835,12 @@ public sealed class SelectionRefreshEngine(
         try
         {
             return IgnoreOptionsAvailabilityResolver.Resolve(
-                getIgnoreOptionsAvailability(path, selectedRootFolders),
+                getIgnoreOptionsAvailabilityWithCancellation is null
+                    ? getIgnoreOptionsAvailability(path, selectedRootFolders)
+                    : getIgnoreOptionsAvailabilityWithCancellation(
+                        path,
+                        selectedRootFolders,
+                        cancellationToken),
                 snapshotState,
                 stateCache,
                 stateCacheIsComplete);
@@ -985,9 +1001,14 @@ public sealed class SelectionRefreshEngine(
     private IgnoreRules BuildIgnoreRules(
         string path,
         IReadOnlyCollection<IgnoreOptionId> selectedIgnoreOptions,
-        IReadOnlyCollection<string>? selectedRootFolders)
+        IReadOnlyCollection<string>? selectedRootFolders,
+        CancellationToken cancellationToken)
     {
-        return _ignoreRulesBuildCache.GetOrBuild(path, selectedIgnoreOptions, selectedRootFolders);
+        return _ignoreRulesBuildCache.GetOrBuildWithCancellation(
+            path,
+            selectedIgnoreOptions,
+            selectedRootFolders,
+            cancellationToken);
     }
 
 	private static HashSet<IgnoreOptionId> BuildSelectedIgnoreOptionSet(

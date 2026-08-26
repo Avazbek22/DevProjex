@@ -855,7 +855,7 @@ internal sealed class TreeSitterCompressionScope(
 		}
 		finally
 		{
-			ArrayPool<char>.Shared.Return(buffer);
+			ArrayPool<char>.Shared.Return(buffer, clearArray: true);
 		}
 	}
 

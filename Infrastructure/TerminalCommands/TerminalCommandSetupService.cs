@@ -338,7 +338,8 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		if (!string.IsNullOrWhiteSpace(Environment.ProcessPath))
 			return Environment.ProcessPath;
 
-		return Process.GetCurrentProcess().MainModule?.FileName;
+		using var process = Process.GetCurrentProcess();
+		return process.MainModule?.FileName;
 	}
 
 	internal static string BuildWrapperContent(string targetPath)
@@ -1434,6 +1435,9 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 	internal static TerminalCommandValidationResult ValidateLauncher(string commandPath, TimeSpan timeout)
 	{
 		Process? process = null;
+		CancellationTokenSource? outputCancellation = null;
+		Task<BoundedTextReadResult>? standardOutput = null;
+		Task<BoundedTextReadResult>? standardError = null;
 		try
 		{
 			var startInfo = CreateLauncherValidationStartInfo(commandPath);
@@ -1442,19 +1446,31 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 				return new TerminalCommandValidationResult(false, "The terminal launcher process could not be started.");
 			process.StandardInput.Close();
 
-			var standardOutput = BoundedTextReader.ReadAsync(
+			outputCancellation = new CancellationTokenSource();
+			standardOutput = BoundedTextReader.ReadAsync(
 				process.StandardOutput,
 				MaximumLauncherValidationOutputCharacters,
-				CancellationToken.None);
-			var standardError = BoundedTextReader.ReadAsync(
+				outputCancellation.Token);
+			standardError = BoundedTextReader.ReadAsync(
 				process.StandardError,
 				MaximumLauncherValidationOutputCharacters,
-				CancellationToken.None);
-			var completion = Task.WhenAll(process.WaitForExitAsync(), standardOutput, standardError);
-			if (!completion.Wait(timeout))
+				outputCancellation.Token);
+			var validationStopwatch = Stopwatch.StartNew();
+			var timeoutMilliseconds = ToProcessTimeoutMilliseconds(timeout);
+			if (!process.WaitForExit(timeoutMilliseconds) ||
+			    !Task.WhenAll(standardOutput, standardError).Wait(
+				    ToProcessTimeoutMilliseconds(
+					    timeout == Timeout.InfiniteTimeSpan
+						    ? timeout
+						    : timeout - validationStopwatch.Elapsed)))
 			{
+				outputCancellation.Cancel();
 				TryKillProcess(process);
-				_ = BoundedTextReader.ObserveCompletionAsync(standardOutput, standardError);
+				_ = process.WaitForExit(1000);
+				BoundedTextReader
+					.ObserveCompletionAsync(standardOutput, standardError)
+					.GetAwaiter()
+					.GetResult();
 				return new TerminalCommandValidationResult(false, "The terminal launcher validation timed out.");
 			}
 			if (standardOutput.Result.ExceededLimit || standardError.Result.ExceededLimit)
@@ -1472,13 +1488,44 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		}
 		catch (Exception ex)
 		{
+			outputCancellation?.Cancel();
 			TryKillProcess(process);
+			ObserveValidationReaders(standardOutput, standardError);
 			return new TerminalCommandValidationResult(false, ex.Message);
 		}
 		finally
 		{
+			outputCancellation?.Dispose();
 			process?.Dispose();
 		}
+	}
+
+	private static int ToProcessTimeoutMilliseconds(TimeSpan timeout)
+	{
+		if (timeout == Timeout.InfiniteTimeSpan)
+			return Timeout.Infinite;
+		if (timeout <= TimeSpan.Zero)
+			return 0;
+
+		return (int)Math.Min(Math.Ceiling(timeout.TotalMilliseconds), int.MaxValue);
+	}
+
+	private static void ObserveValidationReaders(
+		Task<BoundedTextReadResult>? standardOutput,
+		Task<BoundedTextReadResult>? standardError)
+	{
+		var readers = new List<Task>(capacity: 2);
+		if (standardOutput is not null)
+			readers.Add(standardOutput);
+		if (standardError is not null)
+			readers.Add(standardError);
+		if (readers.Count == 0)
+			return;
+
+		BoundedTextReader
+			.ObserveCompletionAsync(readers.ToArray())
+			.GetAwaiter()
+			.GetResult();
 	}
 
 	private static SetupLockLease AcquireSetupLock(string commandPath)

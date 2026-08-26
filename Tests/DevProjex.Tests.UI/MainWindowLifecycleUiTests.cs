@@ -1,7 +1,10 @@
 using System.Reflection;
 using Avalonia.Media;
 using DevProjex.Avalonia.Coordinators;
+using DevProjex.Application.Compression;
+using DevProjex.Application.Secrets;
 using DevProjex.Infrastructure.ThemePresets;
+using DevProjex.Terminal.DesktopControl;
 
 namespace DevProjex.Tests.UI;
 
@@ -19,6 +22,74 @@ public sealed class MainWindowLifecycleUiTests
 		new(null, "_gitCloneCts"),
 		new(null, "_gitOperationCts")
 	];
+
+	[AvaloniaFact]
+	public async Task ClosingWindow_BeforeDesktopServerPublication_DisposesLateServer()
+	{
+		var appDataPath = Path.Combine(Path.GetTempPath(), "DevProjexTests", Guid.NewGuid().ToString("N"));
+		var paths = new DesktopControlPaths(() => appDataPath);
+		var serverStarted = new TaskCompletionSource<DesktopControlServer>(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		var releasePublication = new TaskCompletionSource(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		DesktopControlServer? startedServer = null;
+		Directory.CreateDirectory(appDataPath);
+
+		var options = DesktopStartupOptions.Default;
+		var services = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath) with
+		{
+			DesktopControlServerFactory = async (handler, projectPath, _) =>
+			{
+				var server = await DesktopControlServer.StartAsync(
+					handler,
+					projectPath,
+					paths,
+					CancellationToken.None);
+				startedServer = server;
+				serverStarted.TrySetResult(server);
+				await releasePublication.Task;
+				return server;
+			}
+		};
+		var window = new MainWindow(options, services);
+		UiTestDriver.TrackTopLevelWindow(window);
+
+		try
+		{
+			window.Show();
+			_ = await serverStarted.Task.WaitAsync(TimeSpan.FromSeconds(2));
+			Assert.Single(Directory.EnumerateFiles(paths.RegistryDirectory, "*.json"));
+
+			window.Close();
+			await window.ShutdownCompletion.WaitAsync(TimeSpan.FromSeconds(2));
+			releasePublication.TrySetResult();
+
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => !Directory.Exists(paths.RegistryDirectory) ||
+				      !Directory.EnumerateFiles(paths.RegistryDirectory, "*.json").Any(),
+				"late desktop control server to be disposed",
+				TimeSpan.FromSeconds(2));
+			Assert.Null(GetPrivateFieldValue(window, new OwnedField(null, "_desktopControlServer")));
+		}
+		finally
+		{
+			releasePublication.TrySetResult();
+			if (window.IsVisible)
+				await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+			if (startedServer is not null)
+				await startedServer.DisposeAsync();
+
+			try
+			{
+				Directory.Delete(appDataPath, recursive: true);
+			}
+			catch
+			{
+				// Best effort test cleanup only.
+			}
+		}
+	}
 
 	[AvaloniaFact]
 	public async Task StartupRevealGate_KeepsContentVisibleAndRevealsNativeBackdropBehindIt()
@@ -138,6 +209,10 @@ public sealed class MainWindowLifecycleUiTests
 		var tokensByField = new Dictionary<string, CancellationToken>();
 		var sources = new List<CancellationTokenSource>();
 		var debounceTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(1) };
+		var redactionSession = Assert.IsType<SecretRedactionSession>(
+			GetPrivateFieldValue(window, new OwnedField(null, "_secretRedactionSession")));
+		var compressionSession = Assert.IsType<CodeCompressionSession>(
+			GetPrivateFieldValue(window, new OwnedField(null, "_codeCompressionSession")));
 		debounceTimer.Start();
 
 		try
@@ -167,6 +242,8 @@ public sealed class MainWindowLifecycleUiTests
 			}
 
 			Assert.False(debounceTimer.IsEnabled);
+			Assert.True(GetPrivateBooleanField(redactionSession, "_disposed"));
+			Assert.True(GetPrivateBooleanField(compressionSession, "_disposed"));
 		}
 		finally
 		{
@@ -337,6 +414,15 @@ public sealed class MainWindowLifecycleUiTests
 			BindingFlags.Instance | BindingFlags.NonPublic);
 		Assert.NotNull(ownerField);
 		return Assert.IsAssignableFrom<object>(ownerField!.GetValue(window));
+	}
+
+	private static bool GetPrivateBooleanField(object owner, string fieldName)
+	{
+		var field = owner.GetType().GetField(
+			fieldName,
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(field);
+		return Assert.IsType<bool>(field!.GetValue(owner));
 	}
 
 	private readonly record struct OwnedField(string? OwnerFieldName, string FieldName)

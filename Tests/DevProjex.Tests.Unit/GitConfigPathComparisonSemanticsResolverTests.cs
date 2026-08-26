@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace DevProjex.Tests.Unit;
 
 public sealed class GitConfigPathComparisonSemanticsResolverTests
@@ -136,5 +138,57 @@ public sealed class GitConfigPathComparisonSemanticsResolverTests
 		Assert.Equal(newer, newerResolution);
 		Assert.Equal(newer, resolver.Resolve(repositoryRoot));
 		Assert.Equal(2, resolutionCount);
+	}
+
+	[Fact]
+	public void TryRunGit_DescendantHoldingRedirectedPipesCannotStallTheProbe()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("The inherited Unix pipe scenario requires a POSIX shell script.");
+			return;
+		}
+
+		using var workspace = new TemporaryDirectory();
+		var repositoryRoot = workspace.CreateFolder("repository");
+		var childPidPath = Path.Combine(workspace.Path, "child.pid");
+		var executable = workspace.CreateFile(
+			"git-probe",
+			$"#!/bin/sh\n(sleep 30) &\necho $! > '{childPidPath.Replace("'", "'\\''", StringComparison.Ordinal)}'\n" +
+			"printf 'local core.repositoryformatversion true\\n'\nexit 0\n");
+		File.SetUnixFileMode(
+			executable,
+			UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+
+		try
+		{
+			var stopwatch = Stopwatch.StartNew();
+			var succeeded = GitConfigPathComparisonSemanticsResolver.TryRunGit(
+				repositoryRoot,
+				[],
+				out _,
+				out _,
+				executable);
+
+			Assert.False(succeeded);
+			Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(5), $"Probe took {stopwatch.Elapsed}.");
+		}
+		finally
+		{
+			if (File.Exists(childPidPath) &&
+			    int.TryParse(File.ReadAllText(childPidPath), out var processId))
+			{
+				try
+				{
+					using var process = Process.GetProcessById(processId);
+					if (!process.HasExited)
+						process.Kill(entireProcessTree: true);
+				}
+				catch (Exception exception) when (
+					exception is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
+				{
+				}
+			}
+		}
 	}
 }

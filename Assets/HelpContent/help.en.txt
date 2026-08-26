@@ -395,7 +395,7 @@ Redacted spans are highlighted in Preview. Click one to keep only that occurrenc
 
 The Preview context menu extends these decisions. Right-click a detected occurrence to keep — or hide again — all occurrences of its rule or all detected occurrences in the same file in one action. Right-click a selected value inside file content to mark it manually: "Hide … here" hides only that occurrence for the session, "Always hide …" creates a persistent mark for every occurrence of the value, and "Hide … as private data" creates a persistent mark controlled by Hide private data. "Remove mark" appears on a manual mark and deletes it; a value still matched by the detector stays hidden. A manual value must be a single line of 8 to 512 characters selected inside file content. Creating a mark enables the corresponding option automatically. Persistent marks store only a keyed value identity and its class, never the original text.
 
-A folder or ZIP copy also changes matching text and may no longer build or run. Binary files are copied unchanged and are not scanned. A selected text file above 16 MiB or a detection failure stops the operation instead of exporting uninspected text.
+A folder or ZIP copy also changes matching text and may no longer build or run. Binary files are copied unchanged and are not scanned. A selected text file above 16 MiB is omitted and reported while the remaining output completes. A detection failure stops the entire operation.
 
 The count reports rule matches only. Zero does not mean that the project is safe. CLI uses `--hide-secrets`; technical details and limits are in `Docs/HideSecrets.md`.
 

@@ -7,8 +7,10 @@ internal sealed class TestTerminalEnvironment : ITerminalEnvironment
 
 	public TextReader Input { get; init; } = new StringReader(string.Empty);
 	public Stream? RawInput { get; init; }
-	public TextWriter Output => _output;
-	public TextWriter Error => _error;
+	public TextWriter Output => OutputOverride ?? _output;
+	public TextWriter Error => ErrorOverride ?? _error;
+	public TextWriter? OutputOverride { get; init; }
+	public TextWriter? ErrorOverride { get; init; }
 	public bool IsInputInteractive { get; init; }
 	public bool IsOutputInteractive { get; init; }
 	public bool IsErrorInteractive { get; init; }

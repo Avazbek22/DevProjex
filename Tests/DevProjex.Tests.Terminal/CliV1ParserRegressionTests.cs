@@ -570,6 +570,16 @@ public sealed class CliV1ParserRegressionTests
 		Assert.NotEmpty(parseResult.Errors);
 	}
 
+	[Fact]
+	public void UiTimeoutBeyondCancellationTimerRangeIsRejectedBeforeTheAction()
+	{
+		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
+
+		var parseResult = root.Parse(["ui", "status", "--timeout=50.00:00:00"]);
+
+		Assert.NotEmpty(parseResult.Errors);
+	}
+
 	[Theory]
 	[InlineData("NaNs")]
 	[InlineData("Infinitys")]
@@ -594,6 +604,8 @@ public sealed class CliV1ParserRegressionTests
 	[InlineData("Infinitys", true)]
 	[InlineData("999999999999999999999999s", false)]
 	[InlineData("999999999999999999999999s", true)]
+	[InlineData("50.00:00:00", false)]
+	[InlineData("50.00:00:00", true)]
 	public async Task InvalidUiTimeoutIsASafeUsageError(
 		string token,
 		bool equalsSyntax)

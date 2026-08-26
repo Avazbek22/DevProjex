@@ -39,6 +39,19 @@ public sealed record SecretRedactionContext(
 		Session.BeginOutput(ProjectRoot, orderedFilePaths, transformIdentity, Features);
 
 	public SecretRedactionScope BeginOutput(
+		IReadOnlyList<string> orderedFilePaths,
+		CancellationToken cancellationToken,
+		string transformIdentity = "") =>
+		Session.BeginOutput(
+			ProjectRoot,
+			ContentSelectionSnapshot.CreateWithCancellation(
+				ProjectRoot,
+				orderedFilePaths,
+				cancellationToken),
+			transformIdentity,
+			Features);
+
+	public SecretRedactionScope BeginOutput(
 		ContentSelectionSnapshot selection,
 		string transformIdentity = "") =>
 		Session.BeginOutput(ProjectRoot, selection, transformIdentity, Features);

@@ -33,10 +33,15 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private readonly TerminalWorkspaceCommandParser _commandParser = new();
 	private readonly TerminalClipboardWriter _clipboardWriter;
 	private readonly TerminalCommandHistory _commandHistory;
+	private readonly TerminalCommandHistoryPersistenceQueue _commandHistoryPersistence;
 	private readonly ITerminalOperationObserver _operationObserver;
 	private readonly Action _prepareForShutdown;
+	private readonly EventHandler<global::Terminal.Gui.App.EventArgs<System.Drawing.Rectangle>> _screenChangedHandler;
+	private readonly EventHandler<SizeChangedEventArgs>? _driverSizeChangedHandler;
+	private readonly global::Terminal.Gui.Drivers.IDriver? _subscribedDriver;
 	private readonly CancellationTokenSource _sessionCts;
 	private readonly SemaphoreSlim _operationGate = new(1, 1);
+	private readonly TerminalBackgroundTaskTracker _backgroundTasks = new();
 
 	private TerminalWorkspaceScreen _screen;
 	private TerminalWorkspaceLayoutMode _layoutMode;
@@ -60,7 +65,6 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private Task? _previewSearchTask;
 	private Task? _transientStatusTask;
 	private Task? _commandResultTask;
-	private Task? _commandHistorySaveTask;
 	private IRepositoryCacheSession? _ownedRepositorySession;
 	private long _projectionRequestId;
 	private long _previewRequestId;
@@ -161,73 +165,81 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			environment);
 		_commandHistory = new TerminalCommandHistory(
 			services.TerminalSettingsStore.LoadCommandHistory());
+		_commandHistoryPersistence = new TerminalCommandHistoryPersistenceQueue(
+			services.TerminalSettingsStore.SaveCommandHistoryAsync);
 		_sessionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 		var initialScreen = _application.Driver?.Screen ?? _application.Screen;
 		_terminalWidth = Math.Max(_environment.Width, initialScreen.Width);
 		_terminalHeight = Math.Max(_environment.Height, initialScreen.Height);
 		_application.Keyboard.KeyDown += OnRootKeyDown;
-		_application.ScreenChanged += (_, _) =>
-		{
-			// Inline roots are resized in Driver.SizeChanged below. Applying the old
-			// geometry here would draw a split frame into the already resized buffer.
-			if (_application.AppModel == AppModel.Inline)
-				return;
-			var requestedPane = _activePane;
-			var requestedControlSection = _activeControlSection;
-			var requestedAggregateControlSection = _activeAggregateControlSection;
-			var previousFocusSuppression = _suppressWorkspaceFocusTracking;
-			_suppressWorkspaceFocusTracking = true;
-			var sizeChanged = false;
-			try
-			{
-				var screen = _application.Driver?.Screen ?? _application.Screen;
-				sizeChanged = UpdateTerminalSize(screen.Width, screen.Height);
-				ApplyCurrentLayout();
-			}
-			finally
-			{
-				_activePane = requestedPane;
-				_activeControlSection = requestedControlSection;
-				_activeAggregateControlSection = requestedAggregateControlSection;
-				_suppressWorkspaceFocusTracking = previousFocusSuppression;
-			}
-			UpdateWorkspaceFocus();
-			if (sizeChanged)
-				InvalidateAfterTerminalResize();
-		};
+		_screenChangedHandler = OnApplicationScreenChanged;
+		_application.ScreenChanged += _screenChangedHandler;
 		if (_application.Driver is { } driver)
 		{
-			driver.SizeChanged += (_, args) => _application.Invoke(() =>
-			{
-				var requestedPane = _activePane;
-				var requestedControlSection = _activeControlSection;
-				var requestedAggregateControlSection = _activeAggregateControlSection;
-				var previousFocusSuppression = _suppressWorkspaceFocusTracking;
-				_suppressWorkspaceFocusTracking = true;
-				var sizeChanged = false;
-				try
-				{
-					if (_application.AppModel == AppModel.Inline && args.Size is { } size)
-					{
-						_root.Width = size.Width;
-						_root.Height = size.Height;
-					}
-					if (args.Size is { } terminalSize)
-						sizeChanged = UpdateTerminalSize(terminalSize.Width, terminalSize.Height);
-					ApplyCurrentLayout();
-				}
-				finally
-				{
-					_activePane = requestedPane;
-					_activeControlSection = requestedControlSection;
-					_activeAggregateControlSection = requestedAggregateControlSection;
-					_suppressWorkspaceFocusTracking = previousFocusSuppression;
-				}
-				UpdateWorkspaceFocus();
-				if (sizeChanged)
-					InvalidateAfterTerminalResize();
-			});
+			_subscribedDriver = driver;
+			_driverSizeChangedHandler = OnDriverSizeChanged;
+			driver.SizeChanged += _driverSizeChangedHandler;
 		}
+	}
+
+	private void OnApplicationScreenChanged(
+		object? sender,
+		global::Terminal.Gui.App.EventArgs<System.Drawing.Rectangle> args)
+	{
+		if (_disposed)
+			return;
+		// Inline roots are resized in Driver.SizeChanged below. Applying the old
+		// geometry here would draw a split frame into the already resized buffer.
+		if (_application.AppModel == AppModel.Inline)
+			return;
+
+		ApplyTerminalResize((_application.Driver?.Screen ?? _application.Screen).Size);
+	}
+
+	private void OnDriverSizeChanged(object? sender, SizeChangedEventArgs args)
+	{
+		if (_disposed)
+			return;
+
+		_application.Invoke(() =>
+		{
+			if (_disposed)
+				return;
+			if (_application.AppModel == AppModel.Inline && args.Size is { } size)
+			{
+				_root.Width = size.Width;
+				_root.Height = size.Height;
+			}
+			if (args.Size is { } terminalSize)
+				ApplyTerminalResize(terminalSize);
+			else
+				ApplyTerminalResize((_application.Driver?.Screen ?? _application.Screen).Size);
+		});
+	}
+
+	private void ApplyTerminalResize(System.Drawing.Size terminalSize)
+	{
+		var requestedPane = _activePane;
+		var requestedControlSection = _activeControlSection;
+		var requestedAggregateControlSection = _activeAggregateControlSection;
+		var previousFocusSuppression = _suppressWorkspaceFocusTracking;
+		_suppressWorkspaceFocusTracking = true;
+		var sizeChanged = false;
+		try
+		{
+			sizeChanged = UpdateTerminalSize(terminalSize.Width, terminalSize.Height);
+			ApplyCurrentLayout();
+		}
+		finally
+		{
+			_activePane = requestedPane;
+			_activeControlSection = requestedControlSection;
+			_activeAggregateControlSection = requestedAggregateControlSection;
+			_suppressWorkspaceFocusTracking = previousFocusSuppression;
+		}
+		UpdateWorkspaceFocus();
+		if (sizeChanged)
+			InvalidateAfterTerminalResize();
 	}
 
 	public bool ExitRequested { get; private set; }
@@ -255,30 +267,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		CancelAndDispose(ref _settingsRefreshCts);
 		CancelAndDispose(ref _previewSearchCts);
 		CancelAndDispose(ref _transientStatusCts);
+		CancelAndDispose(ref _commandResultCts);
 
-		var pending = new[]
-			{
-				_openTask,
-				_activeOperationTask,
-				_projectionTask,
-				_previewTask,
-				_settingsRefreshTask,
-				_previewSearchTask,
-				_transientStatusTask,
-				_commandResultTask,
-				_commandHistorySaveTask
-			}
-			.Where(static task => task is not null)
-			.Cast<Task>()
-			.ToArray();
-		try
-		{
-			await Task.WhenAll(pending).ConfigureAwait(false);
-		}
-		catch
-		{
-			// Every background workflow already converts failures into a stable TUI state.
-		}
+		await _backgroundTasks.CompleteAsync().ConfigureAwait(false);
 	}
 
 	private void StartCore()
@@ -649,7 +640,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var repositoryName = RepositoryUrlUtility.GetRepositoryName(safeUrl);
 		ShowCloneProgress(repositoryName, safeUrl);
 		var operationCts = ReplaceActiveOperation();
-		_activeOperationTask = Task.Run(async () =>
+		_activeOperationTask = TrackBackgroundTask(Task.Run(async () =>
 		{
 			try
 			{
@@ -744,7 +735,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			{
 				ReleaseActiveOperation(operationCts);
 			}
-		}, CancellationToken.None);
+		}, CancellationToken.None));
 	}
 
 	private AutomaticProfileResolution ResolveAutomaticProfile(string projectPath)
@@ -812,7 +803,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	{
 		ShowWelcomeStatus(L("Terminal.Tui.OpeningDesktop"), TerminalWorkspaceTheme.Accent);
 		var operationCts = ReplaceActiveOperation();
-		_activeOperationTask = Task.Run(async () =>
+		_activeOperationTask = TrackBackgroundTask(Task.Run(async () =>
 		{
 			try
 			{
@@ -851,27 +842,29 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			{
 				ReleaseActiveOperation(operationCts);
 			}
-		}, CancellationToken.None);
+		}, CancellationToken.None));
 	}
 
 	private void BeginOpenProject(
 		string projectPath,
 		ProjectProfileReference profile,
 		TerminalProjectOpenSource source = TerminalProjectOpenSource.Other,
-		ProjectSourceIdentity? sourceIdentity = null)
+		ProjectSourceIdentity? sourceIdentity = null,
+		IRepositoryCacheSession? preparedRepositorySession = null)
 	{
 		ShowLoading(
 			L("Terminal.Tui.LoadingProject"),
 			sourceIdentity?.SourceReference ?? projectPath);
 		var operationCts = ReplaceActiveOperation();
-		_openTask = Task.Run(
+		_openTask = TrackBackgroundTask(Task.Run(
 			() => OpenProjectCoreAsync(
 				projectPath,
 				profile,
 				operationCts,
 				source,
-				sourceIdentity: sourceIdentity),
-			CancellationToken.None);
+				sourceIdentity: sourceIdentity,
+				preparedRepositorySession: preparedRepositorySession),
+			CancellationToken.None));
 	}
 
 	private async Task OpenProjectCoreAsync(
@@ -1300,7 +1293,6 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			controlToRestore?.SetFocus();
 			_activeControlSection = focusedControlSection;
 		}
-		UpdatePreviewRange();
 		UpdateWorkspaceFocus();
 		if (previewDocumentChanged && !string.IsNullOrWhiteSpace(_previewSearchQuery))
 			SchedulePreviewSearch(_previewSearchQuery, showNoResults: false);
@@ -2042,7 +2034,6 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				_preview.ClearSearch();
 				_previewSearchQuery = null;
 				UpdatePanelTitles();
-				UpdatePreviewRange();
 				UpdateFooter();
 				return;
 			}
@@ -2284,7 +2275,6 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		{
 			_preview.ClearSearch();
 			UpdatePanelTitles();
-			UpdatePreviewRange();
 			return;
 		}
 
@@ -2304,7 +2294,6 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			CancelPreviewSearch(clearQuery: true);
 			_preview.ClearSearch();
 			UpdatePanelTitles();
-			UpdatePreviewRange();
 			return;
 		}
 
@@ -2321,9 +2310,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_previewSearchInProgress = true;
 		_preview.BeginSearch(normalizedQuery);
 		UpdatePanelTitles();
-		UpdatePreviewRange();
 
-		_previewSearchTask = Task.Run(async () =>
+		_previewSearchTask = TrackBackgroundTask(Task.Run(async () =>
 		{
 			try
 			{
@@ -2402,7 +2390,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					}
 				}
 			}
-		}, CancellationToken.None);
+		}, CancellationToken.None));
 	}
 
 	private void CancelPreviewSearch(bool clearQuery)
@@ -2448,7 +2436,6 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			: _preview.HorizontalOffset;
 		_preview.ScrollTo(match.Line, horizontalOffset);
 		UpdatePanelTitles();
-		UpdatePreviewRange();
 	}
 
 	private void ClearTreeFilter()
@@ -2528,7 +2515,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		if (string.IsNullOrWhiteSpace(destination))
 			return;
 
-		_activeOperationTask = RunExportWorkflowAsync(
+		_activeOperationTask = TrackBackgroundTask(RunExportWorkflowAsync(
 			L("Terminal.Tui.ExportContext"),
 			token => _controller.PrepareContextExportAsync(
 				_state,
@@ -2552,7 +2539,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					selectedFormat,
 					exactDestination,
 					dryRun),
-			originatedFromCommandLine);
+			originatedFromCommandLine));
 	}
 
 	private void ExportProject(
@@ -2587,7 +2574,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		if (string.IsNullOrWhiteSpace(destination))
 			return;
 
-		_activeOperationTask = RunExportWorkflowAsync(
+		_activeOperationTask = TrackBackgroundTask(RunExportWorkflowAsync(
 			L("Terminal.Tui.ExportProject"),
 			token => _controller.PrepareProjectExportAsync(
 				_state,
@@ -2605,7 +2592,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				selectedKind,
 					exactDestination,
 					dryRun),
-			originatedFromCommandLine);
+			originatedFromCommandLine));
 	}
 
 	internal static string BuildDefaultExportPath(
@@ -2676,14 +2663,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					: name + ".json");
 		if (string.IsNullOrWhiteSpace(destination))
 			return;
-		_activeOperationTask = RunOperationAsync(
+		_activeOperationTask = TrackBackgroundTask(RunOperationAsync(
 			L("Terminal.Tui.SaveProfile"),
 			async token => await _controller.SavePortableProfileAsync(
 				_state,
 				destination,
 				overwrite: false,
 				token).ConfigureAwait(false),
-			originatedFromCommandLine: originatedFromCommandLine);
+			originatedFromCommandLine: originatedFromCommandLine));
 	}
 
 	private async Task RunOperationAsync(
@@ -3278,8 +3265,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var requestId = Interlocked.Increment(ref _settingsRefreshRequestId);
 		_settingsRefreshCts = CancellationTokenSource.CreateLinkedTokenSource(_sessionCts.Token);
 		var operationCts = _settingsRefreshCts;
+		var cancellationToken = operationCts.Token;
 		var cornerProgressId = BeginCornerProgress(L("Terminal.Tui.Progress.UpdatingOptions"));
-		_settingsRefreshTask = Task.Run(
+		_settingsRefreshTask = TrackBackgroundTask(Task.Run(
 			() => RunSettingsRefreshAsync(
 				state,
 				baseline,
@@ -3288,8 +3276,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				originatedFromCommandLine,
 				requestId,
 				operationCts,
+				cancellationToken,
 				cornerProgressId),
-			CancellationToken.None);
+			CancellationToken.None));
 	}
 
 	private async Task RunSettingsRefreshAsync(
@@ -3300,11 +3289,12 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		bool originatedFromCommandLine,
 		long requestId,
 		CancellationTokenSource operationCts,
+		CancellationToken cancellationToken,
 		long cornerProgressId)
 	{
 		try
 		{
-			await Task.Delay(75, operationCts.Token).ConfigureAwait(false);
+			await Task.Delay(75, cancellationToken).ConfigureAwait(false);
 			if (TerminalWorkspaceController.RequiresStructuralRefresh(
 				    baseline.Selection,
 				    selection))
@@ -3320,16 +3310,16 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			await _operationObserver
 				.ObservePhaseAsync(
 					TerminalOperationPhase.BackgroundRefresh,
-					operationCts.Token)
+					cancellationToken)
 				.ConfigureAwait(false);
 
 			var result = await _controller.BuildSettingsPlanAsync(
 					baseline,
 					selection,
 					extensionStates,
-					operationCts.Token)
+					cancellationToken)
 				.ConfigureAwait(false);
-			operationCts.Token.ThrowIfCancellationRequested();
+			cancellationToken.ThrowIfCancellationRequested();
 			await InvokeAsync(() =>
 			{
 				if (!IsCurrentSettingsRefresh(state, operationCts, requestId))
@@ -3344,7 +3334,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				return true;
 			}).ConfigureAwait(false);
 		}
-		catch (OperationCanceledException) when (operationCts.IsCancellationRequested)
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
 		{
 			if (IsCurrentSettingsRefresh(state, operationCts, requestId) && !_stopping)
 			{
@@ -3428,18 +3418,19 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		Interlocked.Increment(ref _previewRequestId);
 		_projectionCts = CancellationTokenSource.CreateLinkedTokenSource(_sessionCts.Token);
 		var operationCts = _projectionCts;
-		_projectionTask = Task.Run(async () =>
+		var cancellationToken = operationCts.Token;
+		_projectionTask = TrackBackgroundTask(Task.Run(async () =>
 		{
 			var cornerProgressId = 0L;
 			try
 			{
-				await Task.Delay(180, operationCts.Token).ConfigureAwait(false);
+				await Task.Delay(180, cancellationToken).ConfigureAwait(false);
 				cornerProgressId = await InvokeAsync(() =>
 					BeginCornerProgress(L("Terminal.Tui.Progress.BuildingTree"))).ConfigureAwait(false);
 				var plan = await _controller.BuildReprojectedPlanAsync(
 						sourcePlan,
 						selectedPaths,
-						operationCts.Token)
+						cancellationToken)
 					.ConfigureAwait(false);
 				var applied = await InvokeAsync(() =>
 				{
@@ -3499,7 +3490,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			{
 				await CompleteCornerProgressAsync(cornerProgressId).ConfigureAwait(false);
 			}
-		}, CancellationToken.None);
+		}, CancellationToken.None));
 	}
 
 	private void SchedulePreviewRefresh()
@@ -3515,8 +3506,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var requestId = Interlocked.Increment(ref _previewRequestId);
 		_previewCts = CancellationTokenSource.CreateLinkedTokenSource(_sessionCts.Token);
 		var operationCts = _previewCts;
+		var cancellationToken = operationCts.Token;
 		var cornerProgressId = BeginCornerProgress(L("Terminal.Tui.Progress.BuildingPreview"));
-		_previewTask = Task.Run(async () =>
+		_previewTask = TrackBackgroundTask(Task.Run(async () =>
 		{
 			IPreviewTextDocument? pendingDocument = null;
 			try
@@ -3525,7 +3517,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 						state,
 						view,
 						format,
-						operationCts.Token,
+						cancellationToken,
 						plain: _options.Plain)
 					.ConfigureAwait(false);
 				var document = pendingDocument;
@@ -3566,7 +3558,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				pendingDocument?.Dispose();
 				await CompleteCornerProgressAsync(cornerProgressId).ConfigureAwait(false);
 			}
-		}, CancellationToken.None);
+		}, CancellationToken.None));
 	}
 
 	private void CancelWorkspaceRefreshes()
@@ -3621,7 +3613,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var statusCts = CancellationTokenSource.CreateLinkedTokenSource(_sessionCts.Token);
 		_transientStatusCts = statusCts;
 		SetOperationStatus(text, TerminalWorkspaceTheme.Success);
-		_transientStatusTask = RestoreStatusAfterDelayAsync(statusCts);
+		_transientStatusTask = TrackBackgroundTask(RestoreStatusAfterDelayAsync(statusCts));
 	}
 
 	private async Task RestoreStatusAfterDelayAsync(CancellationTokenSource statusCts)
@@ -4498,8 +4490,17 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_activeOperationCts = null;
 	}
 
-	private void CancelActiveOperation() =>
-		_activeOperationCts?.Cancel();
+	private void CancelActiveOperation()
+	{
+		try
+		{
+			Volatile.Read(ref _activeOperationCts)?.Cancel();
+		}
+		catch (ObjectDisposedException)
+		{
+			// The operation completed while shutdown was requesting cancellation.
+		}
+	}
 
 	private bool HasActiveOperation =>
 		_activeOperationCts is { IsCancellationRequested: false };
@@ -4680,14 +4681,23 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			? sourceReference
 			: plan.SourceRoot);
 
-	private static void CancelAndDispose(ref CancellationTokenSource? source)
+	internal static void CancelAndDispose(ref CancellationTokenSource? source)
 	{
-		if (source is null)
+		var current = Interlocked.Exchange(ref source, null);
+		if (current is null)
 			return;
-		source.Cancel();
-		source.Dispose();
-		source = null;
+		try
+		{
+			current.Cancel();
+		}
+		catch (ObjectDisposedException)
+		{
+			// A completing background task can release the same source during shutdown.
+		}
+		current.Dispose();
 	}
+
+	private Task TrackBackgroundTask(Task task) => _backgroundTasks.Track(task);
 
 	private void ReleaseOwnedRepositorySession() =>
 		Interlocked.Exchange(ref _ownedRepositorySession, null)?.Dispose();
@@ -4706,6 +4716,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			return;
 		_disposed = true;
 		_application.Keyboard.KeyDown -= OnRootKeyDown;
+		_application.ScreenChanged -= _screenChangedHandler;
+		if (_subscribedDriver is not null && _driverSizeChangedHandler is not null)
+			_subscribedDriver.SizeChanged -= _driverSizeChangedHandler;
 		_sessionCts.Cancel();
 		CancelAndDispose(ref _activeOperationCts);
 		CancelAndDispose(ref _projectionCts);
@@ -4717,6 +4730,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		DismissOperationProgress();
 		_cornerProgress?.Dispose();
 		_cornerProgress = null;
+		var state = _state;
+		_state = null;
+		state?.Dispose();
 		ReleaseOwnedRepositorySession();
 		_sessionCts.Dispose();
 		_operationGate.Dispose();

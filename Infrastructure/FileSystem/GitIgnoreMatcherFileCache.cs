@@ -21,7 +21,20 @@ internal static class GitIgnoreMatcherFileCache
 		=> Load(
 			scopeRootPath,
 			gitIgnorePath,
-			GitIgnoreFileReader.Read,
+			static (path, _) => GitIgnoreFileReader.Read(path),
+			CancellationToken.None,
+			comparisonSemanticsResolver);
+
+	internal static GitIgnoreMatcherLoadResult LoadWithCancellation(
+		string scopeRootPath,
+		string gitIgnorePath,
+		CancellationToken cancellationToken,
+		IGitPathComparisonSemanticsResolver? comparisonSemanticsResolver = null)
+		=> Load(
+			scopeRootPath,
+			gitIgnorePath,
+			static (path, token) => GitIgnoreFileReader.ReadWithCancellation(path, token),
+			cancellationToken,
 			comparisonSemanticsResolver);
 
 	internal static GitIgnoreMatcherLoadResult Load(
@@ -29,7 +42,21 @@ internal static class GitIgnoreMatcherFileCache
 		string gitIgnorePath,
 		Func<string, GitIgnoreFileContent> sourceReader,
 		IGitPathComparisonSemanticsResolver? comparisonSemanticsResolver = null)
+		=> Load(
+			scopeRootPath,
+			gitIgnorePath,
+			(path, _) => sourceReader(path),
+			CancellationToken.None,
+			comparisonSemanticsResolver);
+
+	private static GitIgnoreMatcherLoadResult Load(
+		string scopeRootPath,
+		string gitIgnorePath,
+		Func<string, CancellationToken, GitIgnoreFileContent> sourceReader,
+		CancellationToken cancellationToken,
+		IGitPathComparisonSemanticsResolver? comparisonSemanticsResolver)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		try
 		{
 			var initialProbe = ProbeSource(gitIgnorePath);
@@ -47,7 +74,8 @@ internal static class GitIgnoreMatcherFileCache
 				return GitIgnoreMatcherLoadResult.ReadFailure;
 
 			// Exact content comparison handles rewrites that preserve timestamp and length.
-			var source = sourceReader(gitIgnorePath);
+			var source = sourceReader(gitIgnorePath, cancellationToken);
+			cancellationToken.ThrowIfCancellationRequested();
 			var finalProbe = ProbeSource(gitIgnorePath);
 			if (finalProbe.Status != SourceProbeStatus.RegularFile ||
 			    !finalProbe.Stamp.Equals(initialProbe.Stamp) ||
@@ -75,8 +103,9 @@ internal static class GitIgnoreMatcherFileCache
 
 			var matcher = GitIgnoreMatcher.Build(
 				scopeRootPath,
-				GitIgnoreFileReader.EnumerateLines(source.Content),
+				GitIgnoreFileReader.EnumerateLinesWithCancellation(source.Content, cancellationToken),
 				comparisonSemantics);
+			cancellationToken.ThrowIfCancellationRequested();
 			var scopedMatcher = new ScopedGitIgnoreMatcher(Path.GetFullPath(scopeRootPath), matcher);
 			lock (CacheSync)
 			{

@@ -1,3 +1,4 @@
+using System.Drawing;
 using DevProjex.Application.Preview;
 using DevProjex.Application.Secrets;
 using Terminal.Gui.Drawing;
@@ -136,5 +137,40 @@ public sealed class TerminalWorkspacePresentationPolicyTests
 
 		Assert.Equal(2, view.HorizontalOffset);
 		Assert.True(view.MaxLineLength > document.MaxLineLength);
+	}
+
+	[Theory]
+	[InlineData("界AB", 1, 2, " A")]
+	[InlineData("界AB", 2, 2, "AB")]
+	[InlineData("e\u0301x", 0, 2, "e\u0301x")]
+	public void PreviewHorizontalSlicePreservesTerminalColumns(
+		string value,
+		int startColumn,
+		int width,
+		string expected)
+	{
+		Assert.Equal(expected, TerminalVirtualizedPreviewView.SliceColumns(
+			value,
+			startColumn,
+			width));
+	}
+
+	[Theory]
+	[InlineData(true)]
+	[InlineData(false)]
+	public void PreviewScrollRaisesOneVisibleRangeChange(bool showScrollBars)
+	{
+		using var document = new InMemoryPreviewTextDocument("first\nsecond\nthird");
+		using var view = new TerminalVirtualizedPreviewView(showScrollBars: showScrollBars)
+		{
+			Frame = new Rectangle(0, 0, 20, 1)
+		};
+		view.SetDocument(document, preserveViewport: false);
+		var notifications = 0;
+		view.VisibleRangeChanged += (_, _) => notifications++;
+
+		view.ScrollTo(1, 0);
+
+		Assert.Equal(1, notifications);
 	}
 }

@@ -412,6 +412,35 @@ public sealed class RepositoryCacheWorktreeIntegrationTests
 	}
 
 	[Fact]
+	public async Task TransientWorktreeProbeFailure_DoesNotRejectRequestedBranch()
+	{
+		await using var source = await GitTestRepository.CreateAsync(
+			cancellationToken: TestContext.Current.CancellationToken);
+		using var cache = new TemporaryDirectory();
+		var publishingService = new RepoCacheService(cache.Path);
+		var git = new GitRepositoryService();
+		await PublishGitAsync(
+			publishingService,
+			git,
+			source,
+			TestContext.Current.CancellationToken);
+		var service = new RepoCacheService(
+			cache.Path,
+			RepositoryCachePolicy.Default,
+			TimeProvider.System,
+			new TransientProbeWorktreeManager());
+
+		using var session = await service.TryAcquireRepositorySessionAsync(
+			source.RepositoryUrl,
+			source.FeatureBranchName,
+			TestContext.Current.CancellationToken);
+
+		Assert.NotNull(session);
+		Assert.Equal(source.FeatureBranchName, session.Branch);
+		Assert.True(File.Exists(Path.Combine(session.RepositoryPath, "feature", "feature.txt")));
+	}
+
+	[Fact]
 	public async Task ReleasedRepository_IsEvictedAndNextOpenClonesAgain()
 	{
 		await using var source = await GitTestRepository.CreateAsync(
@@ -569,8 +598,10 @@ public sealed class RepositoryCacheWorktreeIntegrationTests
 
 	private sealed class UnsupportedWorktreeManager : IGitWorktreeManager
 	{
-		public Task<bool> IsSupportedAsync(string basePath, CancellationToken cancellationToken) =>
-			Task.FromResult(false);
+		public Task<WorktreeSupportState> GetSupportStateAsync(
+			string basePath,
+			CancellationToken cancellationToken) =>
+			Task.FromResult(WorktreeSupportState.PermanentUnsupported);
 
 		public Task<bool> PreparePrimaryAsync(
 			string basePath,
@@ -593,5 +624,37 @@ public sealed class RepositoryCacheWorktreeIntegrationTests
 
 		public Task PruneAsync(string basePath, CancellationToken cancellationToken) =>
 			throw new InvalidOperationException("The fallback must not prune worktrees.");
+	}
+
+	private sealed class TransientProbeWorktreeManager : IGitWorktreeManager
+	{
+		private readonly GitWorktreeManager _inner = new();
+
+		public Task<WorktreeSupportState> GetSupportStateAsync(
+			string basePath,
+			CancellationToken cancellationToken) =>
+			Task.FromResult(WorktreeSupportState.TransientFailure);
+
+		public Task<bool> PreparePrimaryAsync(
+			string basePath,
+			string? branch,
+			CancellationToken cancellationToken) =>
+			_inner.PreparePrimaryAsync(basePath, branch, cancellationToken);
+
+		public Task<bool> CreateDetachedAsync(
+			string basePath,
+			string worktreePath,
+			string? branch,
+			CancellationToken cancellationToken) =>
+			_inner.CreateDetachedAsync(basePath, worktreePath, branch, cancellationToken);
+
+		public Task RemoveAsync(
+			string basePath,
+			string worktreePath,
+			CancellationToken cancellationToken) =>
+			_inner.RemoveAsync(basePath, worktreePath, cancellationToken);
+
+		public Task PruneAsync(string basePath, CancellationToken cancellationToken) =>
+			_inner.PruneAsync(basePath, cancellationToken);
 	}
 }

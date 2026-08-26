@@ -12,9 +12,11 @@ internal sealed class WindowsTerminalInputShutdownGuard : IDisposable
 	private readonly Action cancelPendingRead;
 	private readonly TimeSpan retryInterval;
 	private readonly bool enabled;
+	private readonly object lifetimeGate = new();
 	private CancellationTokenSource? cancellationSource;
 	private Task? wakeTask;
-	private int armed;
+	private bool armed;
+	private bool disposed;
 
 	public WindowsTerminalInputShutdownGuard()
 		: this(CancelPendingRead, DefaultRetryInterval, OperatingSystem.IsWindows())
@@ -36,28 +38,56 @@ internal sealed class WindowsTerminalInputShutdownGuard : IDisposable
 
 	public void Arm()
 	{
-		if (!enabled || Interlocked.Exchange(ref armed, 1) != 0)
+		if (!enabled)
 			return;
 
-		var source = new CancellationTokenSource();
-		cancellationSource = source;
-		wakeTask = Task.Factory.StartNew(
-			() => WakeUntilDisposed(cancelPendingRead, source.Token),
-			CancellationToken.None,
-			TaskCreationOptions.LongRunning,
-			TaskScheduler.Default);
+		lock (lifetimeGate)
+		{
+			if (disposed || armed)
+				return;
+
+			var source = new CancellationTokenSource();
+			try
+			{
+				wakeTask = Task.Factory.StartNew(
+					() => WakeUntilDisposed(cancelPendingRead, source.Token),
+					CancellationToken.None,
+					TaskCreationOptions.LongRunning,
+					TaskScheduler.Default);
+				cancellationSource = source;
+				armed = true;
+			}
+			catch
+			{
+				source.Dispose();
+				throw;
+			}
+		}
 	}
 
 	public void Dispose()
 	{
-		var source = Interlocked.Exchange(ref cancellationSource, null);
+		CancellationTokenSource? source;
+		Task? worker;
+		lock (lifetimeGate)
+		{
+			if (disposed)
+				return;
+
+			disposed = true;
+			source = cancellationSource;
+			worker = wakeTask;
+			cancellationSource = null;
+			wakeTask = null;
+		}
+
 		if (source is null)
 			return;
 
 		source.Cancel();
 		try
 		{
-			wakeTask?.GetAwaiter().GetResult();
+			worker?.GetAwaiter().GetResult();
 		}
 		finally
 		{

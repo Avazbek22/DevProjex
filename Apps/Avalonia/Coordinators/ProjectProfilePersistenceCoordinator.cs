@@ -427,11 +427,9 @@ internal sealed class PersistentSecretMarkDeltaWriter(
 			for (var attempt = 0; attempt <= _retryDelays.Count; attempt++)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				lastResult = await Task.Run(
-					async () => await store
-						.ApplyMarkDeltaAsync(projectPath, delta, cancellationToken)
-						.ConfigureAwait(false),
-					cancellationToken).ConfigureAwait(false);
+				lastResult = await store
+					.ApplyMarkDeltaAsync(projectPath, delta, cancellationToken)
+					.ConfigureAwait(false);
 				if (lastResult.Succeeded || !IsRetryable(lastResult.Status) || attempt == _retryDelays.Count)
 					return lastResult;
 

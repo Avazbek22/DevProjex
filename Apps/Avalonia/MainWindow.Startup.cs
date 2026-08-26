@@ -520,7 +520,7 @@ public partial class MainWindow
 
                 if (opened)
                 {
-                    await TryApplyStartupSelectionOverridesAsync();
+                    await TryApplyStartupSelectionOverridesAsync(cancellationToken);
                     if (_desktopStartupRequest is not null &&
                         GetDesktopGitReadinessDiagnostic(_desktopStartupRequest) is
                             { Severity: ContextDiagnosticSeverity.Error } diagnostic)

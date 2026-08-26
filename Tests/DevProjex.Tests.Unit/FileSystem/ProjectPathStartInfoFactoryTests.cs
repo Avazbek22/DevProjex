@@ -1,5 +1,7 @@
 using DevProjex.Infrastructure.FileSystem;
 
+using System.Diagnostics;
+
 namespace DevProjex.Tests.Unit.FileSystem;
 
 public sealed class ProjectPathStartInfoFactoryTests
@@ -211,5 +213,55 @@ public sealed class ProjectPathStartInfoFactoryTests
 		Assert.Equal(ProjectPathLaunchFailure.LaunchFailed, result.Failure);
 		Assert.Equal("denied", result.ErrorMessage);
 		Assert.Equal(0, attempts);
+	}
+
+	[Fact]
+	public async Task LaunchCandidateAsync_RedirectedOutputIsDrainedWithoutBlockingProcessExit()
+	{
+		using var temp = new TemporaryDirectory();
+		var startInfo = CreateNoisyProcessStartInfo(temp);
+		var candidate = new ProjectPathLaunchCandidate(
+			startInfo,
+			RequiresSuccessfulExit: true);
+
+		var result = await ProjectPathLauncher
+			.LaunchCandidateAsync(candidate, TestContext.Current.CancellationToken)
+			.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+
+		Assert.True(result);
+	}
+
+	private static ProcessStartInfo CreateNoisyProcessStartInfo(TemporaryDirectory temp)
+	{
+		var payloadPath = temp.CreateFile(
+			"noisy-output.txt",
+			new string('x', 512 * 1024));
+		var startInfo = new ProcessStartInfo
+		{
+			UseShellExecute = false,
+			CreateNoWindow = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true
+		};
+		string scriptPath;
+		if (OperatingSystem.IsWindows())
+		{
+			scriptPath = temp.CreateFile(
+				"noisy-output.cmd",
+				$"@echo off\r\ntype \"{payloadPath}\"\r\ntype \"{payloadPath}\" 1>&2\r\n");
+			startInfo.FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe";
+			startInfo.ArgumentList.Add("/D");
+			startInfo.ArgumentList.Add("/C");
+		}
+		else
+		{
+			scriptPath = temp.CreateFile(
+				"noisy-output.sh",
+				$"cat \"{payloadPath}\"\ncat \"{payloadPath}\" >&2\n");
+			startInfo.FileName = "/bin/sh";
+		}
+
+		startInfo.ArgumentList.Add(scriptPath);
+		return startInfo;
 	}
 }

@@ -17,7 +17,11 @@ public sealed partial class SelectionSyncCoordinator(
     StatusOperationCoordinator? statusOperations = null,
     Action<IgnoreOptionId?>? contentTransformationChanged = null,
     Action? selectionContentChanged = null,
-    Action? scanIncomplete = null)
+    Action? scanIncomplete = null,
+    Func<string, IReadOnlyCollection<IgnoreOptionId>, IReadOnlyCollection<string>?, CancellationToken, IgnoreRules>?
+        buildIgnoreRulesWithCancellation = null,
+    Func<string, IReadOnlyCollection<string>, CancellationToken, IgnoreOptionsAvailability>?
+        getIgnoreOptionsAvailabilityWithCancellation = null)
     : IDisposable
 {
     // Store collection references for proper cleanup
@@ -73,14 +77,18 @@ public sealed partial class SelectionSyncCoordinator(
         ProjectContextGitReadiness.Evaluate(GitFilteringMode.None, 0, 0);
     private int _pendingApplyEvaluationDeferral;
     private bool _pendingApplyEvaluationRequested;
-    private readonly IgnoreRulesBuildCache _ignoreRulesBuildCache = new(buildIgnoreRules);
+    private readonly IgnoreRulesBuildCache _ignoreRulesBuildCache = new(
+        buildIgnoreRulesWithCancellation ??
+        ((path, options, roots, _) => buildIgnoreRules(path, options, roots)));
     private static readonly TraceSource RefreshTraceSource = new("DevProjex.SelectionRefresh");
     private readonly SelectionRefreshEngine _selectionRefreshEngine = new(
         scanOptions,
         filterSelectionService,
         ignoreOptionsService,
         buildIgnoreRules,
-        getIgnoreOptionsAvailability);
+        getIgnoreOptionsAvailability,
+        buildIgnoreRulesWithCancellation,
+        getIgnoreOptionsAvailabilityWithCancellation);
 
     public long CurrentSelectionRevision => _session.Revision;
     public ProjectContextGitReadiness AppliedGitReadiness => _appliedGitReadiness;
@@ -523,8 +531,6 @@ public sealed partial class SelectionSyncCoordinator(
         // Always scan extensions, even when rootFolders.Count == 0.
         // ScanOptionsUseCase.GetExtensionsForRootFolders will include root-level files.
         var selectedIgnoreOptions = GetSelectedIgnoreOptionIds();
-        var ignoreRules = GetOrBuildIgnoreRules(path, selectedIgnoreOptions, rootFolders);
-        var extensionScanRules = IgnoreRulesProjection.ForExtensionAvailability(ignoreRules);
         var forceAllExtensionsChecked =
             !ShouldSuppressAllTogglesOverride() && ResolveAllExtensionsCheckedForRefresh();
         const bool includeDirectoryToggleProbeRoots = true;
@@ -534,6 +540,13 @@ public sealed partial class SelectionSyncCoordinator(
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (IsStalePathRequest(path)) return;
+
+			var ignoreRules = GetOrBuildIgnoreRulesWithCancellation(
+				path,
+				selectedIgnoreOptions,
+				rootFolders,
+				cancellationToken);
+			var extensionScanRules = IgnoreRulesProjection.ForExtensionAvailability(ignoreRules);
 
             // The live ignore section needs extension availability and effective counts to come
             // from the same snapshot. Keeping them coupled removes a whole extra filesystem pass
@@ -618,7 +631,9 @@ public sealed partial class SelectionSyncCoordinator(
             return;
         var version = Interlocked.Increment(ref _ignoreOptionsVersion);
 
-        var availability = await Task.Run(() => ResolveIgnoreOptionsAvailability(path, rootFolders), cancellationToken)
+		var availability = await Task.Run(
+				() => ResolveIgnoreOptionsAvailability(path, rootFolders, cancellationToken),
+				cancellationToken)
             .ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
         var options = ignoreOptionsService.GetOptions(availability);
@@ -1326,7 +1341,8 @@ public sealed partial class SelectionSyncCoordinator(
 
     private IgnoreOptionsAvailability ResolveIgnoreOptionsAvailability(
         string? path,
-        IReadOnlyCollection<string> selectedRootFolders)
+        IReadOnlyCollection<string> selectedRootFolders,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(path))
             return IgnoreOptionsAvailabilityResolver.CreateUnmeasured(
@@ -1343,11 +1359,20 @@ public sealed partial class SelectionSyncCoordinator(
                 _extensionlessExtensionEntriesCount,
                 _gitWorkspaceEvidence);
             return IgnoreOptionsAvailabilityResolver.Resolve(
-                getIgnoreOptionsAvailability(path, selectedRootFolders),
+                getIgnoreOptionsAvailabilityWithCancellation is null
+                    ? getIgnoreOptionsAvailability(path, selectedRootFolders)
+                    : getIgnoreOptionsAvailabilityWithCancellation(
+                        path,
+                        selectedRootFolders,
+                        cancellationToken),
                 snapshotState,
                 _session.IgnoreOptions.OptionStateCache,
                 _session.IgnoreOptionStateCacheIsComplete);
         }
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+		{
+			throw;
+		}
         catch
         {
             return IgnoreOptionsAvailabilityResolver.CreateUnmeasured(
@@ -3014,12 +3039,17 @@ public sealed partial class SelectionSyncCoordinator(
             _extensionlessExtensionEntriesCount,
             _gitWorkspaceEvidence);
 
-    private IgnoreRules GetOrBuildIgnoreRules(
+    private IgnoreRules GetOrBuildIgnoreRulesWithCancellation(
         string path,
         IReadOnlyCollection<IgnoreOptionId> selectedIgnoreOptions,
-        IReadOnlyCollection<string>? selectedRootFolders)
+        IReadOnlyCollection<string>? selectedRootFolders,
+        CancellationToken cancellationToken)
     {
-        return _ignoreRulesBuildCache.GetOrBuild(path, selectedIgnoreOptions, selectedRootFolders);
+        return _ignoreRulesBuildCache.GetOrBuildWithCancellation(
+            path,
+            selectedIgnoreOptions,
+            selectedRootFolders,
+            cancellationToken);
     }
 
     private static void SetAllChecked<T>(

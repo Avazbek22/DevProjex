@@ -100,6 +100,26 @@ public sealed class TerminalBrokenPipeRegressionTests
 	}
 
 	[Fact]
+	public async Task HelpExitsCleanlyWhenStdoutConsumerClosesEarly()
+	{
+		string[][] invocations = [[], ["--help"]];
+		foreach (var arguments in invocations)
+		{
+			var environment = new TestTerminalEnvironment
+			{
+				OutputOverride = new BrokenPipeTextWriter()
+			};
+
+			var exitCode = await new TerminalApplication(environment).RunAsync(
+				arguments,
+				TestContext.Current.CancellationToken);
+
+			Assert.Equal(CommandLineExitCodes.Success, exitCode);
+			Assert.Empty(environment.StandardError);
+		}
+	}
+
+	[Fact]
 	public async Task ApplicationExitsCleanlyWhenStdoutConsumerClosesEarly()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -228,6 +248,13 @@ public sealed class TerminalBrokenPipeRegressionTests
 			ReadOnlyMemory<char> buffer,
 			CancellationToken cancellationToken = default) =>
 			Task.FromException(exception);
+	}
+
+	private sealed class BrokenPipeTextWriter : TextWriter
+	{
+		public override Encoding Encoding => Encoding.UTF8;
+
+		public override void Write(string? value) => throw new TerminalBrokenPipeException();
 	}
 
 	private sealed class ConsoleOutputScope : IDisposable

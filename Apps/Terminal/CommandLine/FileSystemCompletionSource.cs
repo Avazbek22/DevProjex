@@ -33,10 +33,11 @@ internal static class FileSystemCompletionSource
 	public static IEnumerable<string> Complete(
 		string word,
 		FileSystemCompletionKind kind,
-		string? baseDirectory = null)
+		string? baseDirectory = null,
+		string? userHomeDirectory = null)
 	{
 		ArgumentNullException.ThrowIfNull(word);
-		if (!TryResolveSearch(word, baseDirectory, out var search))
+		if (!TryResolveSearch(word, baseDirectory, userHomeDirectory, out var search))
 			return [];
 
 		try
@@ -44,21 +45,22 @@ internal static class FileSystemCompletionSource
 			var comparison = OperatingSystem.IsWindows()
 				? StringComparison.OrdinalIgnoreCase
 				: StringComparison.Ordinal;
-			return Directory
+			var candidates = Directory
 				.EnumerateFileSystemEntries(search.DirectoryPath)
 				.Select(path => new
 				{
 					Path = path,
-					Name = Path.GetFileName(path),
-					IsDirectory = Directory.Exists(path)
+					Name = Path.GetFileName(path)
 				})
 				.Where(entry =>
-					entry.Name.StartsWith(search.NamePrefix, comparison) &&
-					(kind == FileSystemCompletionKind.FilesAndDirectories ||
-					 entry.IsDirectory))
-				.OrderByDescending(static entry => entry.IsDirectory)
-				.ThenBy(static entry => entry.Name, StringComparer.Ordinal)
-				.Take(MaximumCandidateCount)
+					entry.Name.StartsWith(search.NamePrefix, comparison))
+				.Select(entry => new CompletionCandidate(
+					entry.Name,
+					Directory.Exists(entry.Path)))
+				.Where(entry =>
+					kind == FileSystemCompletionKind.FilesAndDirectories ||
+					entry.IsDirectory);
+			return SelectBestCandidates(candidates)
 				.Select(entry =>
 					search.DisplayPrefix +
 					entry.Name +
@@ -77,9 +79,29 @@ internal static class FileSystemCompletionSource
 		}
 	}
 
+	internal static IReadOnlyList<CompletionCandidate> SelectBestCandidates(
+		IEnumerable<CompletionCandidate> candidates,
+		int maximumCandidateCount = MaximumCandidateCount)
+	{
+		ArgumentNullException.ThrowIfNull(candidates);
+		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumCandidateCount);
+
+		var retained = new SortedSet<RankedCompletionCandidate>(RankedCompletionCandidateComparer.Instance);
+		long sequence = 0;
+		foreach (var candidate in candidates)
+		{
+			retained.Add(new RankedCompletionCandidate(candidate, sequence++));
+			if (retained.Count > maximumCandidateCount)
+				retained.Remove(retained.Max);
+		}
+
+		return retained.Select(static item => item.Candidate).ToArray();
+	}
+
 	private static bool TryResolveSearch(
 		string word,
 		string? baseDirectory,
+		string? userHomeDirectory,
 		out CompletionSearch search)
 	{
 		var separatorIndex = Math.Max(
@@ -97,9 +119,15 @@ internal static class FileSystemCompletionSource
 		try
 		{
 			var effectiveBaseDirectory = ResolveBaseDirectory(baseDirectory);
-			var directoryPath = Path.GetFullPath(
+			var directoryPath = ResolveDirectoryPath(
 				directoryText,
-				Path.GetFullPath(effectiveBaseDirectory));
+				effectiveBaseDirectory,
+				userHomeDirectory);
+			if (directoryPath is null)
+			{
+				search = default;
+				return false;
+			}
 			var separator = displayPrefix.EndsWith(Path.AltDirectorySeparatorChar)
 				? Path.AltDirectorySeparatorChar
 				: Path.DirectorySeparatorChar;
@@ -156,6 +184,58 @@ internal static class FileSystemCompletionSource
 		string DisplayPrefix,
 		string NamePrefix,
 		char Separator);
+
+	internal readonly record struct CompletionCandidate(string Name, bool IsDirectory);
+
+	private readonly record struct RankedCompletionCandidate(
+		CompletionCandidate Candidate,
+		long Sequence);
+
+	private sealed class RankedCompletionCandidateComparer : IComparer<RankedCompletionCandidate>
+	{
+		public static RankedCompletionCandidateComparer Instance { get; } = new();
+
+		public int Compare(RankedCompletionCandidate left, RankedCompletionCandidate right)
+		{
+			var result = right.Candidate.IsDirectory.CompareTo(left.Candidate.IsDirectory);
+			if (result != 0)
+				return result;
+
+			result = StringComparer.Ordinal.Compare(left.Candidate.Name, right.Candidate.Name);
+			return result != 0 ? result : left.Sequence.CompareTo(right.Sequence);
+		}
+	}
+
+	private static string? ResolveDirectoryPath(
+		string directoryText,
+		string baseDirectory,
+		string? userHomeDirectory)
+	{
+		if (directoryText.Length < 2 ||
+		    directoryText[0] != '~' ||
+		    !IsDirectorySeparator(directoryText[1]))
+		{
+			return Path.GetFullPath(
+				directoryText,
+				Path.GetFullPath(baseDirectory));
+		}
+
+		var homeDirectory = string.IsNullOrWhiteSpace(userHomeDirectory)
+			? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+			: userHomeDirectory;
+		if (string.IsNullOrWhiteSpace(homeDirectory))
+			return null;
+
+		var resolvedHomeDirectory = Path.GetFullPath(homeDirectory);
+		var relativeDirectory = directoryText[2..];
+		return relativeDirectory.Length == 0
+			? resolvedHomeDirectory
+			: Path.GetFullPath(relativeDirectory, resolvedHomeDirectory);
+	}
+
+	private static bool IsDirectorySeparator(char character) =>
+		character == Path.DirectorySeparatorChar ||
+		character == Path.AltDirectorySeparatorChar;
 
 	private sealed class BaseDirectoryScope(string? previous) : IDisposable
 	{

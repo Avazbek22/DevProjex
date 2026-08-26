@@ -1,47 +1,93 @@
-using System.Globalization;
 using System.Text;
 
 namespace DevProjex.Kernel;
 
 public static class SingleLineTextEscaping
 {
+	private const string HexDigits = "0123456789ABCDEF";
+
 	public static string Escape(string value)
 	{
 		ArgumentNullException.ThrowIfNull(value);
-		if (!value.Any(IsUnsafeCharacter))
+		if (!ContainsUnsafeCharacter(value))
 			return value;
 
 		var escaped = new StringBuilder(value.Length);
-		foreach (var character in value)
+		AppendBounded(escaped, value.AsSpan(), int.MaxValue);
+		return escaped.ToString();
+	}
+
+	public static bool AppendBounded(
+		StringBuilder destination,
+		ReadOnlySpan<char> value,
+		int maximumAdditionalCharacters)
+	{
+		ArgumentNullException.ThrowIfNull(destination);
+		ArgumentOutOfRangeException.ThrowIfNegative(maximumAdditionalCharacters);
+		var remaining = maximumAdditionalCharacters;
+		for (var index = 0; index < value.Length; index++)
 		{
+			var character = value[index];
+			var isSurrogatePair = char.IsHighSurrogate(character) &&
+			                      index + 1 < value.Length &&
+			                      char.IsLowSurrogate(value[index + 1]);
+			var required = GetEscapedLength(character, isSurrogatePair);
+			if (required > remaining)
+				return false;
+
 			switch (character)
 			{
 				case '\r':
-					escaped.Append("\\r");
+					destination.Append("\\r");
 					break;
 				case '\n':
-					escaped.Append("\\n");
+					destination.Append("\\n");
 					break;
 				case '\t':
-					escaped.Append("\\t");
+					destination.Append("\\t");
 					break;
 				default:
 					if (IsUnsafeCharacter(character))
 					{
-						escaped
+						destination
 							.Append("\\u")
-							.Append(((int)character).ToString("X4", CultureInfo.InvariantCulture));
+							.Append(HexDigits[(character >> 12) & 0xF])
+							.Append(HexDigits[(character >> 8) & 0xF])
+							.Append(HexDigits[(character >> 4) & 0xF])
+							.Append(HexDigits[character & 0xF]);
 					}
 					else
 					{
-						escaped.Append(character);
+						destination.Append(character);
+						if (isSurrogatePair)
+							destination.Append(value[++index]);
 					}
 					break;
 			}
+
+			remaining -= required;
 		}
 
-		return escaped.ToString();
+		return true;
 	}
+
+	private static bool ContainsUnsafeCharacter(string value)
+	{
+		foreach (var character in value)
+		{
+			if (IsUnsafeCharacter(character))
+				return true;
+		}
+
+		return false;
+	}
+
+	private static int GetEscapedLength(char character, bool isSurrogatePair) =>
+		character is '\r' or '\n' or '\t'
+			? 2
+			: IsUnsafeCharacter(character)
+				? 6
+				: isSurrogatePair ? 2 : 1;
 
 	private static bool IsUnsafeCharacter(char character) =>
 		char.IsControl(character) || character is '\u2028' or '\u2029';

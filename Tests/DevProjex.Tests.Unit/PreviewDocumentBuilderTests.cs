@@ -50,6 +50,20 @@ public sealed class PreviewDocumentBuilderTests
 	}
 
 	[Fact]
+	public async Task BuildContentDocumentAsync_CancellationDuringPathEnumerationStopsBeforeNextRead()
+	{
+		using var cancellation = new CancellationTokenSource();
+		var paths = new CancelThenRejectFurtherEnumeration("unused.txt", cancellation);
+		var builder = new PreviewDocumentBuilder(new FileContentAnalyzer());
+
+		await Assert.ThrowsAsync<OperationCanceledException>(() =>
+			builder.BuildContentDocumentAsync(
+				paths,
+				cancellation.Token,
+				displayPathMapper: null));
+	}
+
+	[Fact]
 	public void PreviewStorageScavenger_RemovesOnlyStaleUnlockedOwnedFiles()
 	{
 		using var storage = new TemporaryDirectory();
@@ -299,7 +313,10 @@ public sealed class PreviewDocumentBuilderTests
     {
         using var temp = new TemporaryDirectory();
         var largePath = temp.CreateFile("large.txt", string.Empty);
-        var largeContent = new string('x', 600_000);
+        var largeContent = string.Concat(
+            new string('x', 16_383),
+            "\U0001F642",
+            new string('\u65E5', 583_615));
 
         var analyzer = new StubFileContentAnalyzer(new Dictionary<string, TextFileContent?>
         {
@@ -316,13 +333,15 @@ public sealed class PreviewDocumentBuilderTests
         Assert.Equal(3, fileBacked.LineCount);
         Assert.Equal("large.txt:", fileBacked.GetLineText(1));
         Assert.Equal(BlankLine, fileBacked.GetLineText(2));
-        Assert.Equal(600_000, fileBacked.GetLineText(3).Length);
+        Assert.Equal(largeContent, fileBacked.GetLineText(3));
     }
 
     [Fact]
     public async Task CreateDocumentAsync_LargePayloadUsesFileBackingAndPreservesFinalLine()
     {
         var builder = new PreviewDocumentBuilder(new StubFileContentAnalyzer());
+        var largeLine = new string('x', 600_000);
+        const string finalLine = "final-marker-日本語";
 
         using var document = await builder.CreateDocumentAsync(
             async (stream, cancellationToken) =>
@@ -332,15 +351,17 @@ public sealed class PreviewDocumentBuilderTests
                     new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
                     bufferSize: 8192,
                     leaveOpen: true);
-                await writer.WriteLineAsync(new string('x', 600_000));
-                await writer.WriteAsync("final-marker".AsMemory(), cancellationToken);
+                await writer.WriteLineAsync(largeLine);
+                await writer.WriteAsync(finalLine.AsMemory(), cancellationToken);
                 await writer.FlushAsync(cancellationToken);
             },
             TestContext.Current.CancellationToken);
 
         var fileBacked = Assert.IsType<FileBackedPreviewTextDocument>(document);
         Assert.Equal(2, fileBacked.LineCount);
-        Assert.Equal("final-marker", fileBacked.GetLineText(2));
+        Assert.Equal(largeLine.Length, fileBacked.MaxLineLength);
+        Assert.Equal(largeLine.Length + Environment.NewLine.Length + finalLine.Length, fileBacked.CharacterCount);
+        Assert.Equal(finalLine, fileBacked.GetLineText(2));
     }
 
     [Fact]
@@ -764,6 +785,42 @@ public sealed class PreviewDocumentBuilderTests
 					transformIdentity);
 				return new CodeCompressionAnalysis(plan, plan.Apply(content));
 			}
+
+			public void Dispose()
+			{
+			}
+		}
+	}
+
+	private sealed class CancelThenRejectFurtherEnumeration(
+		string item,
+		CancellationTokenSource cancellation) : IEnumerable<string>
+	{
+		public IEnumerator<string> GetEnumerator() => new Enumerator(item, cancellation);
+
+		System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+
+		private sealed class Enumerator(
+			string item,
+			CancellationTokenSource cancellation) : IEnumerator<string>
+		{
+			private int _state;
+
+			public string Current { get; private set; } = string.Empty;
+
+			object System.Collections.IEnumerator.Current => Current;
+
+			public bool MoveNext()
+			{
+				if (_state++ != 0)
+					throw new InvalidOperationException("Enumeration continued after cancellation.");
+
+				Current = item;
+				cancellation.Cancel();
+				return true;
+			}
+
+			public void Reset() => throw new NotSupportedException();
 
 			public void Dispose()
 			{

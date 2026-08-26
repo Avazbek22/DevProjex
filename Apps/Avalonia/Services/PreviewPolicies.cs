@@ -754,17 +754,30 @@ internal static class PreviewFileCollectionPolicy
     }
 
     public static int BuildPathSetHash(IReadOnlySet<string> selectedPaths)
+		=> BuildPathSetHashWithCancellation(selectedPaths, CancellationToken.None);
+
+	public static int BuildPathSetHashWithCancellation(
+		IReadOnlySet<string> selectedPaths,
+		CancellationToken cancellationToken)
     {
+		cancellationToken.ThrowIfCancellationRequested();
         if (selectedPaths.Count == 0)
             return 0;
 
         var ordered = new List<string>(selectedPaths.Count);
-        ordered.AddRange(selectedPaths);
-        ordered.Sort(PathComparer.Default);
+		foreach (var path in selectedPaths)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			ordered.Add(path);
+		}
+		CancellationAwareSort.Sort(ordered, PathComparer.Default, cancellationToken);
 
         var hash = new HashCode();
         foreach (var path in ordered)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
             hash.Add(path, PathComparer.Default);
+		}
 
         return hash.ToHashCode();
     }
@@ -794,8 +807,25 @@ internal static class PreviewFileCollectionPolicy
         bool ensureExists = true) =>
         ProjectTreeSelectionProjection.BuildOrderedSelectedFilePaths(treeRoot, selectedPaths, ensureExists);
 
+	public static List<string> BuildOrderedSelectedFilePathsWithCancellation(
+		IReadOnlySet<string> selectedPaths,
+		TreeNodeDescriptor treeRoot,
+		bool ensureExists,
+		CancellationToken cancellationToken) =>
+		ProjectTreeSelectionProjection.BuildOrderedSelectedFilePathsWithCancellation(
+			treeRoot,
+			selectedPaths,
+			ensureExists,
+			cancellationToken);
+
     public static List<string> BuildOrderedAllFilePaths(TreeNodeDescriptor treeRoot)
+		=> BuildOrderedAllFilePathsWithCancellation(treeRoot, CancellationToken.None);
+
+	public static List<string> BuildOrderedAllFilePathsWithCancellation(
+		TreeNodeDescriptor treeRoot,
+		CancellationToken cancellationToken)
     {
+		cancellationToken.ThrowIfCancellationRequested();
         // Keep a path-based uniqueness pass even though runtime trees should already be unique.
         // Tests intentionally synthesize case-variant nodes to verify cross-platform comparer semantics.
         var uniquePaths = new HashSet<string>(PathComparer.Default);
@@ -804,6 +834,7 @@ internal static class PreviewFileCollectionPolicy
 
         while (stack.Count > 0)
         {
+			cancellationToken.ThrowIfCancellationRequested();
             var node = stack.Pop();
             if (!node.IsDirectory)
             {
@@ -812,13 +843,16 @@ internal static class PreviewFileCollectionPolicy
             }
 
             for (var index = node.Children.Count - 1; index >= 0; index--)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
                 stack.Push(node.Children[index]);
+			}
         }
 
         var orderedPaths = new List<string>(uniquePaths.Count);
         orderedPaths.AddRange(uniquePaths);
-        orderedPaths.Sort(PathComparer.Default);
-        return orderedPaths;
+		CancellationAwareSort.Sort(orderedPaths, PathComparer.Default, cancellationToken);
+		return orderedPaths;
     }
 
     public static IEnumerable<string> EnumerateFilePaths(TreeNodeDescriptor node)

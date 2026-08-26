@@ -216,11 +216,12 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 		return true;
 	}
 
-	private static bool TryRunGit(
+	internal static bool TryRunGit(
 		string repositoryRoot,
 		IReadOnlyList<string> arguments,
 		out string standardOutput,
-		out int exitCode)
+		out int exitCode,
+		string? executable = null)
 	{
 		standardOutput = string.Empty;
 		exitCode = -1;
@@ -228,28 +229,33 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 		{
 			using var process = new Process
 			{
-				StartInfo = CreateGitStartInfo(repositoryRoot, arguments)
+				StartInfo = CreateGitStartInfo(repositoryRoot, arguments, executable)
 			};
 			if (!process.Start())
 				return false;
 
 			process.StandardInput.Close();
+			using var readerCancellation = new CancellationTokenSource();
 			var outputTask = GitProcessOutputReader.ReadAsync(
 				process.StandardOutput,
 				GitProcessOutputReader.MaximumOutputCharacters,
-				CancellationToken.None);
+				readerCancellation.Token);
 			var errorTask = GitProcessOutputReader.ReadAsync(
 				process.StandardError,
 				GitProcessOutputReader.MaximumOutputCharacters,
-				CancellationToken.None);
+				readerCancellation.Token);
 			if (!process.WaitForExit(CommandTimeoutMilliseconds))
 			{
 				TryKill(process);
-				if (process.WaitForExit(KillWaitMilliseconds))
-				{
-					_ = outputTask.GetAwaiter().GetResult();
-					_ = errorTask.GetAwaiter().GetResult();
-				}
+				_ = process.WaitForExit(KillWaitMilliseconds);
+				StopReaders(process, readerCancellation, outputTask, errorTask);
+				return false;
+			}
+
+			var readers = Task.WhenAll(outputTask, errorTask);
+			if (!WaitForCompletion(readers, KillWaitMilliseconds))
+			{
+				StopReaders(process, readerCancellation, outputTask, errorTask);
 				return false;
 			}
 
@@ -272,16 +278,52 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 		}
 	}
 
+	private static bool WaitForCompletion(Task task, int timeoutMilliseconds) =>
+		task.IsCompleted || ReferenceEquals(
+			Task.WhenAny(task, Task.Delay(timeoutMilliseconds)).GetAwaiter().GetResult(),
+			task);
+
+	private static void StopReaders(
+		Process process,
+		CancellationTokenSource cancellation,
+		Task output,
+		Task error)
+	{
+		cancellation.Cancel();
+		try
+		{
+			process.StandardOutput.Dispose();
+		}
+		catch (Exception exception) when (exception is IOException or InvalidOperationException)
+		{
+		}
+		try
+		{
+			process.StandardError.Dispose();
+		}
+		catch (Exception exception) when (exception is IOException or InvalidOperationException)
+		{
+		}
+		GitProcessOutputReader
+			.ObserveCompletionAsync(output, error)
+			.GetAwaiter()
+			.GetResult();
+	}
+
 	private static ProcessStartInfo CreateGitStartInfo(
 		string repositoryRoot,
-		IReadOnlyList<string> arguments)
+		IReadOnlyList<string> arguments,
+		string? executable)
 	{
 		var allArguments = new string[arguments.Count + 2];
 		allArguments[0] = "-C";
 		allArguments[1] = repositoryRoot;
 		for (var index = 0; index < arguments.Count; index++)
 			allArguments[index + 2] = arguments[index];
-		var startInfo = GitProcessStartInfoFactory.Create(repositoryRoot, allArguments);
+		var startInfo = GitProcessStartInfoFactory.Create(
+			repositoryRoot,
+			allArguments,
+			executable: executable);
 		startInfo.Environment["GIT_OPTIONAL_LOCKS"] = "0";
 		return startInfo;
 	}

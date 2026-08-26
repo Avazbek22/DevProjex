@@ -1,3 +1,5 @@
+using DevProjex.Infrastructure.Processes;
+
 namespace DevProjex.Infrastructure.FileSystem;
 
 public enum DesktopPlatform
@@ -162,6 +164,8 @@ internal static class ProjectPathStartInfoFactory
 public sealed class ProjectPathLauncher : IProjectPathLauncher
 {
 	private static readonly TimeSpan CandidateTimeout = TimeSpan.FromSeconds(5);
+	private static readonly TimeSpan CandidateTerminationTimeout = TimeSpan.FromSeconds(1);
+	private const int MaximumCandidateOutputCharacters = 4 * 1024;
 	private readonly DesktopPlatform _platform;
 	private readonly Func<string, bool> _fileExists;
 	private readonly Func<string, bool> _directoryExists;
@@ -242,7 +246,7 @@ public sealed class ProjectPathLauncher : IProjectPathLauncher
 			lastError?.Message);
 	}
 
-	private static async Task<bool> LaunchCandidateAsync(
+	internal static async Task<bool> LaunchCandidateAsync(
 		ProjectPathLaunchCandidate candidate,
 		CancellationToken cancellationToken)
 	{
@@ -254,21 +258,66 @@ public sealed class ProjectPathLauncher : IProjectPathLauncher
 
 		using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 		timeout.CancelAfter(CandidateTimeout);
+		var outputReaders = StartOutputReaders(process, candidate.StartInfo, timeout.Token);
 		try
 		{
 			await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
+			await BoundedTextReader.ObserveCompletionAsync(outputReaders).ConfigureAwait(false);
 			return process.ExitCode == 0;
 		}
 		catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
 		{
-			TryKill(process);
+			await TerminateCandidateAsync(process, outputReaders).ConfigureAwait(false);
 			return false;
 		}
 		catch (OperationCanceledException)
 		{
-			TryKill(process);
+			await TerminateCandidateAsync(process, outputReaders).ConfigureAwait(false);
 			throw;
 		}
+	}
+
+	private static async Task TerminateCandidateAsync(Process process, Task[] outputReaders)
+	{
+		TryKill(process);
+		using var terminationTimeout = new CancellationTokenSource(CandidateTerminationTimeout);
+		try
+		{
+			await process.WaitForExitAsync(terminationTimeout.Token).ConfigureAwait(false);
+		}
+		catch (Exception exception) when (exception is
+		       OperationCanceledException or
+		       InvalidOperationException or
+		       System.ComponentModel.Win32Exception)
+		{
+		}
+
+		await BoundedTextReader.ObserveCompletionAsync(outputReaders).ConfigureAwait(false);
+	}
+
+	private static Task[] StartOutputReaders(
+		Process process,
+		ProcessStartInfo startInfo,
+		CancellationToken cancellationToken)
+	{
+		var readers = new List<Task>(capacity: 2);
+		if (startInfo.RedirectStandardOutput)
+		{
+			readers.Add(BoundedTextReader.ReadAsync(
+				process.StandardOutput,
+				MaximumCandidateOutputCharacters,
+				cancellationToken));
+		}
+
+		if (startInfo.RedirectStandardError)
+		{
+			readers.Add(BoundedTextReader.ReadAsync(
+				process.StandardError,
+				MaximumCandidateOutputCharacters,
+				cancellationToken));
+		}
+
+		return readers.ToArray();
 	}
 
 	private static void TryKill(Process process)
@@ -278,7 +327,10 @@ public sealed class ProjectPathLauncher : IProjectPathLauncher
 			if (!process.HasExited)
 				process.Kill(entireProcessTree: true);
 		}
-		catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
+		catch (Exception exception) when (exception is
+		       InvalidOperationException or
+		       NotSupportedException or
+		       System.ComponentModel.Win32Exception)
 		{
 		}
 	}

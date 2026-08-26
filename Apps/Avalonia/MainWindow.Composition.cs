@@ -481,41 +481,68 @@ public partial class MainWindow
 			return;
 		}
 
+		if (_windowLifetimeCts is not { IsCancellationRequested: false } lifetime)
+			return;
 		_orderedSelectionProjectionBuildVersion = selectionVersion;
 		_orderedSelectionProjectionPresentation = presentation;
+		var projectionCts = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+		var projectionToken = projectionCts.Token;
+		var previousProjectionCts = Interlocked.Exchange(
+			ref _orderedSelectionProjectionCts,
+			projectionCts);
+		previousProjectionCts?.Cancel();
+		previousProjectionCts?.Dispose();
 		var tree = _currentTree!;
 		var checkedPaths = _treeSelectionSnapshotCache.GetOrCreate(_viewModel.TreeNodes);
 		ObserveDetachedTask(
-			BuildOrderedSelectionProjectionAsync(tree, checkedPaths, selectionVersion),
+			BuildOrderedSelectionProjectionAsync(
+				tree,
+				checkedPaths,
+				selectionVersion,
+				projectionCts,
+				projectionToken),
 			"BuildOrderedSelectionProjection");
 	}
 
 	private async Task BuildOrderedSelectionProjectionAsync(
 		BuildTreeResult tree,
 		IReadOnlySet<string> checkedPaths,
-		long selectionVersion)
+		long selectionVersion,
+		CancellationTokenSource projectionCts,
+		CancellationToken cancellationToken)
 	{
-		var projection = await Task.Run(() => TreeSelectionSnapshotCache.BuildProjection(
-			tree.Root,
-			checkedPaths,
-			tree.OrderedFilePaths));
-		if (_orderedSelectionProjectionBuildVersion == selectionVersion)
-			_orderedSelectionProjectionBuildVersion = -1;
-		if (_windowLifetimeCts is not { IsCancellationRequested: false } ||
-		    !ReferenceEquals(_currentTree, tree) ||
-		    selectionVersion != _treeSelectionSnapshotCache.SelectionVersion)
+		try
 		{
-			// A newer selection or tree superseded this build; its own change already scheduled a
-			// refresh, so this stale projection is simply dropped.
-			return;
-		}
+			var projection = await Task.Run(
+				() => TreeSelectionSnapshotCache.BuildProjectionWithCancellation(
+					tree.Root,
+					checkedPaths,
+					tree.OrderedFilePaths,
+					cancellationToken),
+				cancellationToken);
+			cancellationToken.ThrowIfCancellationRequested();
+			if (_windowLifetimeCts is not { IsCancellationRequested: false } ||
+			    !ReferenceEquals(_currentTree, tree) ||
+			    selectionVersion != _treeSelectionSnapshotCache.SelectionVersion)
+			{
+				// A newer selection or tree superseded this build; its own change already scheduled a
+				// refresh, so this stale projection is simply dropped.
+				return;
+			}
 
-		_treeSelectionSnapshotCache.StoreProjection(
-			selectionVersion,
-			tree.Root,
-			projection.NormalizedPaths,
-			projection.OrderedFiles);
-		ScheduleSecretRedactionCountRefresh(_orderedSelectionProjectionPresentation);
+			_treeSelectionSnapshotCache.StoreProjection(
+				selectionVersion,
+				tree.Root,
+				projection.NormalizedPaths,
+				projection.OrderedFiles);
+			ScheduleSecretRedactionCountRefresh(_orderedSelectionProjectionPresentation);
+		}
+		finally
+		{
+			if (_orderedSelectionProjectionBuildVersion == selectionVersion)
+				_orderedSelectionProjectionBuildVersion = -1;
+			DisposeIfCurrent(ref _orderedSelectionProjectionCts, projectionCts);
+		}
 	}
 
 	/// <summary>
@@ -777,6 +804,8 @@ public partial class MainWindow
     private readonly ProjectProfilePersistenceCoordinator _projectProfiles;
     private readonly ProjectLoadCancellationCoordinator _projectLoadCancellation = new();
     private readonly TaskbarProgressCoordinator _taskbarProgress;
+	private readonly Func<IDesktopInteractionHandler, string?, CancellationToken, Task<DesktopControlServer>>
+		_desktopControlServerFactory;
     private readonly SemaphoreSlim _desktopInteractionGate = new(1, 1);
     private readonly TaskCompletionSource<bool> _shutdownCompletion =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -835,6 +864,7 @@ public partial class MainWindow
     private Task _latestApplySettingsTask = Task.CompletedTask;
     private CancellationTokenSource? _gitCloneCts;
 	private CancellationTokenSource? _gitCloneCatalogCts;
+	private int _gitCloneDialogOpenInProgress;
 	private int _gitCloneActionInProgress;
     private CancellationTokenSource? _gitOperationCts;
     private CancellationTokenSource? _projectCopyExportCts;
@@ -922,6 +952,7 @@ public partial class MainWindow
 	private SecretDiscoveryRequest? _activeSecretDiscoveryRequest;
 	private long _secretRedactionCountRefreshVersion;
 	private long _orderedSelectionProjectionBuildVersion = -1;
+	private CancellationTokenSource? _orderedSelectionProjectionCts;
 	private StatusOperationPresentation _orderedSelectionProjectionPresentation;
 	private int? _secretRedactionCount;
 	private int? _secretRedactionMatchedCount;
@@ -964,6 +995,7 @@ public partial class MainWindow
         _repoCacheService = services.RepoCacheService;
         _zipDownloadService = services.ZipDownloadService;
         _terminalCommandSetupService = services.TerminalCommandSetupService;
+		_desktopControlServerFactory = services.DesktopControlServerFactory;
         _sessionMetrics = services.SessionMetricsRecorder;
 		_secretRedactionSession = services.SecretRedactionSession;
 		_codeCompressionSession = services.CodeCompressionSession;
@@ -1022,7 +1054,9 @@ public partial class MainWindow
             () => _currentPath,
             _statusOperations,
             ApplyProgrammaticContentTransformationSelectionChange,
-			scanIncomplete: () => _toastService.Show(_localization["Scan.Error.Incomplete"]));
+			scanIncomplete: () => _toastService.Show(_localization["Scan.Error.Incomplete"]),
+			buildIgnoreRulesWithCancellation: BuildIgnoreRules,
+			getIgnoreOptionsAvailabilityWithCancellation: GetIgnoreOptionsAvailability);
         // User changes in this section remain drafts until Apply. The callback is reserved for
         // programmatic activation, such as enabling Hide Secrets for a manual mark.
         _projectLoadPipeline = new ProjectLoadPipeline(this, _statusOperations);

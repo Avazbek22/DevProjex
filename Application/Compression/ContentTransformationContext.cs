@@ -38,6 +38,18 @@ public sealed record ContentTransformationContext(
 		return BeginOutput(ContentSelectionSnapshot.Create(projectRoot, orderedFilePaths));
 	}
 
+	public ContentTransformationScope BeginOutput(
+		IReadOnlyList<string> orderedFilePaths,
+		CancellationToken cancellationToken)
+	{
+		var projectRoot = Compression?.ProjectRoot ?? Redaction?.ProjectRoot ??
+			throw new InvalidOperationException("A transformation context has no project root.");
+		return BeginOutput(ContentSelectionSnapshot.CreateWithCancellation(
+			projectRoot,
+			orderedFilePaths,
+			cancellationToken));
+	}
+
 	public ContentTransformationScope BeginOutput(ContentSelectionSnapshot selection) =>
 		new(
 			Compression?.BeginOutput(selection),

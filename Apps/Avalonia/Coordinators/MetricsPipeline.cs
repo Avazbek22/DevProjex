@@ -120,8 +120,12 @@ internal sealed class MetricsPipeline(
     private IReadOnlyList<string>? _allOrderedFilePathsCache;
     private bool _metricsCancellationRequestedByUser;
     private volatile bool _hasCompleteMetricsBaseline;
+    private int _disposed;
 
     public bool IsBackgroundActive => _isBackgroundMetricsActive;
+
+	internal bool IsCompressionPrewarmActive =>
+		Volatile.Read(ref _compressionPrewarmCts) is not null;
 
     public bool HasCompleteBaseline
     {
@@ -151,6 +155,9 @@ internal sealed class MetricsPipeline(
         MemoryCleanupReason? cleanupAfterCompletion = null,
         bool retainReadFactsForNextMetricsPass = false)
     {
+		if (Volatile.Read(ref _disposed) != 0)
+			return Task.CompletedTask;
+
 		// Only the explicitly sequenced post-load path guarantees a following metrics consumer.
 		// Standalone refreshes release their decoded content when prewarm completes.
 		ReleasePostLoadReadFacts();
@@ -166,8 +173,12 @@ internal sealed class MetricsPipeline(
 
         var selectedPaths = selectedPathsProvider();
         var filePaths = selectedPaths.Count > 0
-            ? BuildOrderedSelectedFilePaths(currentTree.Root, selectedPaths, ensureExists: false)
-            : GetOrBuildAllOrderedFilePaths(currentTree);
+			? PreviewFileCollectionPolicy.BuildOrderedSelectedFilePathsWithCancellation(
+				selectedPaths,
+				currentTree.Root,
+				ensureExists: false,
+				cancellationToken)
+			: GetOrBuildAllOrderedFilePathsWithCancellation(currentTree, cancellationToken);
         var prewarmCts = ReplaceCancellationSource(ref _compressionPrewarmCts);
 		var compressBodies = (compression.Kinds & CodeTransformKinds.Bodies) != 0;
 		var stripComments = (compression.Kinds & CodeTransformKinds.Comments) != 0;
@@ -214,6 +225,9 @@ internal sealed class MetricsPipeline(
 
     public void ScheduleRecalculate()
     {
+        if (Volatile.Read(ref _disposed) != 0)
+            return;
+
         // A parent checkbox can fire hundreds of child change notifications. Keep the
         // debounce timer inside the metrics pipeline so UI code does not own recalc state.
         if (_metricsDebounceTimer is null)
@@ -232,6 +246,9 @@ internal sealed class MetricsPipeline(
     public void Recalculate(
         MemoryCleanupReason? cleanupAfterCompletion = null)
     {
+        if (Volatile.Read(ref _disposed) != 0)
+            return;
+
         if (!viewModel.IsProjectLoaded || viewModel.TreeNodes.Count == 0)
         {
             UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0);
@@ -310,6 +327,9 @@ internal sealed class MetricsPipeline(
         StatusOperationPresentation presentation =
             StatusOperationPresentation.ExtendedDelay)
     {
+        if (Volatile.Read(ref _disposed) != 0)
+            return;
+
         var cacheGeneration = Volatile.Read(ref _metricsCacheGeneration);
         await WaitForInitialMetricsWarmupSlotAsync(cancellationToken);
 
@@ -317,7 +337,8 @@ internal sealed class MetricsPipeline(
         // with the raw reveal task lets file prewarming compete with the island's final layout and
         // causes visible stalls on large projects. F5 passes a completed task and stays immediate.
         await WaitForInitialVisualReadyAsync(initialVisualReadyTask, cancellationToken);
-        if (cacheGeneration != Volatile.Read(ref _metricsCacheGeneration))
+        if (Volatile.Read(ref _disposed) != 0 ||
+            cacheGeneration != Volatile.Read(ref _metricsCacheGeneration))
             return;
 
         await InitializeFileMetricsCacheAsync(
@@ -602,6 +623,9 @@ internal sealed class MetricsPipeline(
 
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+
         CancelAndDispose(ref _metricsCalculationCts);
         CancelAndDispose(ref _recalculateMetricsCts);
         CancelAndDispose(ref _compressionPrewarmCts);
@@ -720,6 +744,9 @@ internal sealed class MetricsPipeline(
         CancellationToken cancellationToken,
         StatusOperationPresentation presentation)
     {
+        if (Volatile.Read(ref _disposed) != 0)
+            return;
+
         using var _ = PerformanceMetrics.Measure("InitializeFileMetricsCacheAsync");
 
         var metricsCts = ReplaceCancellationSource(ref _metricsCalculationCts);
@@ -746,7 +773,9 @@ internal sealed class MetricsPipeline(
             using (PerformanceMetrics.Measure("CollectMetricsWarmupFilePaths"))
             {
                 filePaths = await Task.Run(
-                    () => GetOrBuildAllOrderedFilePaths(currentTree),
+					() => GetOrBuildAllOrderedFilePathsWithCancellation(
+						currentTree,
+						linkedCts.Token),
                     linkedCts.Token);
             }
             linkedCts.Token.ThrowIfCancellationRequested();
@@ -759,7 +788,10 @@ internal sealed class MetricsPipeline(
 			var projectRoot = ResolveTransformationProjectRoot();
 			if (candidateReadFacts is not null && projectRoot.Length > 0)
 			{
-				var selection = ContentSelectionSnapshot.Create(projectRoot, filePaths);
+				var selection = ContentSelectionSnapshot.CreateWithCancellation(
+					projectRoot,
+					filePaths,
+					linkedCts.Token);
 				if (string.Equals(
 						candidateReadFacts.Selection.SelectionFingerprint,
 						selection.SelectionFingerprint,
@@ -1153,8 +1185,12 @@ internal sealed class MetricsPipeline(
 
             var targetFilePaths = await Task.Run(
                 () => hasAnyChecked
-                    ? BuildOrderedSelectedFilePaths(currentTree.Root, selectedPaths, ensureExists: false)
-                    : GetOrBuildAllOrderedFilePaths(currentTree),
+                    ? PreviewFileCollectionPolicy.BuildOrderedSelectedFilePathsWithCancellation(
+	                    selectedPaths,
+	                    currentTree.Root,
+	                    ensureExists: false,
+	                    token)
+	                : GetOrBuildAllOrderedFilePathsWithCancellation(currentTree, token),
                 token);
 
             if (targetFilePaths.Count == 0)
@@ -1171,7 +1207,9 @@ internal sealed class MetricsPipeline(
                 return;
             }
 
-            var missingPaths = await Task.Run(() => CollectMissingMetricsFilePaths(targetFilePaths), token);
+            var missingPaths = await Task.Run(
+	            () => CollectMissingMetricsFilePaths(targetFilePaths, token),
+	            token);
             if (missingPaths.Count > 0)
             {
                 if (_isBackgroundMetricsActive)
@@ -1181,7 +1219,9 @@ internal sealed class MetricsPipeline(
                     if (token.IsCancellationRequested)
                         return;
 
-                    missingPaths = await Task.Run(() => CollectMissingMetricsFilePaths(targetFilePaths), token);
+					missingPaths = await Task.Run(
+						() => CollectMissingMetricsFilePaths(targetFilePaths, token),
+						token);
                 }
 
                 if (missingPaths.Count > 0)
@@ -1198,7 +1238,7 @@ internal sealed class MetricsPipeline(
                     var hadReadFailures = await EnsureSelectedFileMetricsAsync(missingPaths, token);
                     if (!hasAnyChecked &&
                         !hadReadFailures &&
-                        CollectMissingMetricsFilePaths(targetFilePaths).Count == 0)
+						CollectMissingMetricsFilePaths(targetFilePaths, token).Count == 0)
                     {
                         _hasCompleteMetricsBaseline = true;
                     }
@@ -1256,7 +1296,9 @@ internal sealed class MetricsPipeline(
         if (token.IsCancellationRequested)
             return;
 
-        var treeMetrics = await Task.Run(() => CalculateTreeMetrics(hasAnyChecked, selectedPaths, treeFormat), token);
+		var treeMetrics = await Task.Run(
+			() => CalculateTreeMetrics(hasAnyChecked, selectedPaths, treeFormat, token),
+			token);
 
         if (token.IsCancellationRequested)
             return;
@@ -1343,8 +1385,12 @@ internal sealed class MetricsPipeline(
             return;
         }
 
-        var treeMetricsTask = Task.Run(() => CalculateTreeMetrics(hasAnyChecked, selectedPaths, treeFormat), token);
-        var contentMetricsTask = Task.Run(() => CalculateContentMetrics(hasAnyChecked, selectedPaths, currentPath), token);
+		var treeMetricsTask = Task.Run(
+			() => CalculateTreeMetrics(hasAnyChecked, selectedPaths, treeFormat, token),
+			token);
+		var contentMetricsTask = Task.Run(
+			() => CalculateContentMetrics(hasAnyChecked, selectedPaths, currentPath, token),
+			token);
 
         await Task.WhenAll(treeMetricsTask, contentMetricsTask).ConfigureAwait(false);
 
@@ -1366,13 +1412,17 @@ internal sealed class MetricsPipeline(
         });
     }
 
-    private List<string> CollectMissingMetricsFilePaths(IReadOnlyList<string> orderedPaths)
+	private List<string> CollectMissingMetricsFilePaths(
+		IReadOnlyList<string> orderedPaths,
+		CancellationToken cancellationToken)
     {
+		cancellationToken.ThrowIfCancellationRequested();
         var missingPaths = new List<string>();
         lock (_metricsLock)
         {
             for (var index = 0; index < orderedPaths.Count; index++)
             {
+				cancellationToken.ThrowIfCancellationRequested();
                 var path = orderedPaths[index];
                 if (!_fileMetricsCache.TryGetValue(path, out var entry) ||
                     !entry.TryGet(_appliedTransformIdentity, out _))
@@ -1472,8 +1522,10 @@ internal sealed class MetricsPipeline(
     private ExportOutputMetrics CalculateTreeMetrics(
         bool hasSelection,
         IReadOnlySet<string> selectedPaths,
-        TreeTextFormat format)
+		TreeTextFormat format,
+		CancellationToken cancellationToken)
     {
+		cancellationToken.ThrowIfCancellationRequested();
         var currentTree = currentTreeProvider();
         var currentPath = currentPathProvider();
         if (currentTree is null || string.IsNullOrWhiteSpace(currentPath))
@@ -1494,7 +1546,11 @@ internal sealed class MetricsPipeline(
 			displayRootPath,
 			pathPresentation?.DisplayRootName);
         var selectedCount = effectiveHasSelection ? selectedPaths.Count : 0;
-        var selectedHash = effectiveHasSelection ? PreviewFileCollectionPolicy.BuildPathSetHash(selectedPaths) : 0;
+		var selectedHash = effectiveHasSelection
+			? PreviewFileCollectionPolicy.BuildPathSetHashWithCancellation(
+				selectedPaths,
+				cancellationToken)
+			: 0;
         var cacheKey = new TreeMetricsCacheKey(
             TreeIdentity: RuntimeHelpers.GetHashCode(currentTree.Root),
             Format: format,
@@ -1508,21 +1564,24 @@ internal sealed class MetricsPipeline(
                 return _treeMetricsCacheValue;
         }
 
-        var metrics = effectiveHasSelection
-            ? treeExport.CalculateSelectedTreeMetrics(
-                currentPath,
-                currentTree.Root,
-                selectedPaths,
-                format,
+		var metrics = effectiveHasSelection
+			? treeExport.CalculateSelectedTreeMetricsWithCancellation(
+				currentPath,
+				currentTree.Root,
+				selectedPaths,
+				format,
 				displayRootPath,
-                pathPresentation?.DisplayRootName)
-            : treeExport.CalculateFullTreeMetrics(
-                currentPath,
-                currentTree.Root,
-                format,
+				pathPresentation?.DisplayRootName,
+				cancellationToken)
+			: treeExport.CalculateFullTreeMetricsWithCancellation(
+				currentPath,
+				currentTree.Root,
+				format,
 				displayRootPath,
-                pathPresentation?.DisplayRootName);
+				pathPresentation?.DisplayRootName,
+				cancellationToken);
 
+		cancellationToken.ThrowIfCancellationRequested();
         lock (_computationCacheLock)
         {
             _hasTreeMetricsCache = true;
@@ -1536,8 +1595,10 @@ internal sealed class MetricsPipeline(
     private ContentMetricsPair CalculateContentMetrics(
         bool hasSelection,
         IReadOnlySet<string> selectedPaths,
-        string currentPath)
+		string currentPath,
+		CancellationToken cancellationToken)
     {
+		cancellationToken.ThrowIfCancellationRequested();
         var currentTree = currentTreeProvider();
         if (currentTree is null)
             return new ContentMetricsPair(ExportOutputMetrics.Empty, ExportOutputMetrics.Empty);
@@ -1554,7 +1615,11 @@ internal sealed class MetricsPipeline(
                 selectedPaths);
         var effectiveHasSelection = hasSelection && !isFullTreeSelection;
         var selectedCount = effectiveHasSelection ? selectedPaths.Count : 0;
-        var selectedHash = effectiveHasSelection ? PreviewFileCollectionPolicy.BuildPathSetHash(selectedPaths) : 0;
+		var selectedHash = effectiveHasSelection
+			? PreviewFileCollectionPolicy.BuildPathSetHashWithCancellation(
+				selectedPaths,
+				cancellationToken)
+			: 0;
         // The transformation belongs in the key rather than being reconciled here: this method only
         // reads the per-file cache, and clearing it mid-read would publish an empty project.
         // Reconciliation happens where a pass can still refill what it drops.
@@ -1577,8 +1642,12 @@ internal sealed class MetricsPipeline(
         }
 
         var orderedPaths = effectiveHasSelection
-            ? BuildOrderedSelectedFilePaths(currentTree.Root, selectedPaths, ensureExists: false)
-            : GetOrBuildAllOrderedFilePaths(currentTree);
+			? PreviewFileCollectionPolicy.BuildOrderedSelectedFilePathsWithCancellation(
+				selectedPaths,
+				currentTree.Root,
+				ensureExists: false,
+				cancellationToken)
+			: GetOrBuildAllOrderedFilePathsWithCancellation(currentTree, cancellationToken);
 
         if (orderedPaths.Count == 0)
             return new ContentMetricsPair(ExportOutputMetrics.Empty, ExportOutputMetrics.Empty);
@@ -1587,8 +1656,10 @@ internal sealed class MetricsPipeline(
 		var treeAndContentAccumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
 		lock (_metricsLock)
         {
-            foreach (var path in orderedPaths)
+			for (var index = 0; index < orderedPaths.Count; index++)
             {
+				cancellationToken.ThrowIfCancellationRequested();
+				var path = orderedPaths[index];
                 if (!_fileMetricsCache.TryGetValue(path, out var cacheEntry) ||
                     !cacheEntry.TryGet(_appliedTransformIdentity, out var variant) ||
                     !variant.HasMetrics)
@@ -1618,9 +1689,10 @@ internal sealed class MetricsPipeline(
             }
         }
 
-        var computed = new ContentMetricsPair(
+		var computed = new ContentMetricsPair(
             contentOnlyAccumulator.ToMetrics(),
             treeAndContentAccumulator.ToMetrics());
+		cancellationToken.ThrowIfCancellationRequested();
         lock (_computationCacheLock)
         {
             _hasContentMetricsCache = true;
@@ -1645,7 +1717,13 @@ internal sealed class MetricsPipeline(
     }
 
     public IReadOnlyList<string> GetOrBuildAllOrderedFilePaths(TreeNodeDescriptor treeRoot)
+		=> GetOrBuildAllOrderedFilePathsWithCancellation(treeRoot, CancellationToken.None);
+
+	private IReadOnlyList<string> GetOrBuildAllOrderedFilePathsWithCancellation(
+		TreeNodeDescriptor treeRoot,
+		CancellationToken cancellationToken)
     {
+		cancellationToken.ThrowIfCancellationRequested();
         var treeIdentity = RuntimeHelpers.GetHashCode(treeRoot);
         lock (_computationCacheLock)
         {
@@ -1656,8 +1734,11 @@ internal sealed class MetricsPipeline(
             }
         }
 
-        var orderedPaths = PreviewFileCollectionPolicy.BuildOrderedAllFilePaths(treeRoot);
+		var orderedPaths = PreviewFileCollectionPolicy.BuildOrderedAllFilePathsWithCancellation(
+			treeRoot,
+			cancellationToken);
 
+		cancellationToken.ThrowIfCancellationRequested();
         lock (_computationCacheLock)
         {
             _allOrderedFilePathsTreeIdentity = treeIdentity;
@@ -1667,9 +1748,15 @@ internal sealed class MetricsPipeline(
     }
 
     public IReadOnlyList<string> GetOrBuildAllOrderedFilePaths(BuildTreeResult currentTree)
+		=> GetOrBuildAllOrderedFilePathsWithCancellation(currentTree, CancellationToken.None);
+
+	private IReadOnlyList<string> GetOrBuildAllOrderedFilePathsWithCancellation(
+		BuildTreeResult currentTree,
+		CancellationToken cancellationToken)
     {
+		cancellationToken.ThrowIfCancellationRequested();
         if (currentTree.OrderedFilePaths is not { } orderedFilePaths)
-            return GetOrBuildAllOrderedFilePaths(currentTree.Root);
+			return GetOrBuildAllOrderedFilePathsWithCancellation(currentTree.Root, cancellationToken);
 
         var treeIdentity = RuntimeHelpers.GetHashCode(currentTree.Root);
         lock (_computationCacheLock)
@@ -1706,12 +1793,6 @@ internal sealed class MetricsPipeline(
             return StringComparer.Ordinal.GetHashCode(rootPath);
         }
     }
-
-    private static List<string> BuildOrderedSelectedFilePaths(
-        TreeNodeDescriptor treeRoot,
-        IReadOnlySet<string> selectedPaths,
-        bool ensureExists = true) =>
-        PreviewFileCollectionPolicy.BuildOrderedSelectedFilePaths(selectedPaths, treeRoot, ensureExists);
 
     private static string MapExportDisplayPath(string filePath, Func<string, string>? mapFilePath)
     {

@@ -156,7 +156,7 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
                 }
                 finally
                 {
-                    ArrayPool<byte>.Shared.Return(buffer);
+                    ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
                 }
             }
 
@@ -283,7 +283,7 @@ public sealed class ZipDownloadService : IZipDownloadService, IDisposable
         }
         finally
         {
-            ArrayPool<byte>.Shared.Return(buffer);
+            ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
         }
     }
 

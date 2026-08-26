@@ -16,6 +16,7 @@ internal sealed class TerminalVirtualizedPreviewView : View
 	private List<PreviewRedactionSpan> _redactionOccurrences = [];
 	private string? _activeRedactionOccurrenceId;
 	private int _maximumDisplayColumns;
+	private long _viewportChangeRevision;
 
 	public TerminalVirtualizedPreviewView(
 		bool useUnicode = true,
@@ -27,7 +28,11 @@ internal sealed class TerminalVirtualizedPreviewView : View
 			return;
 
 		TerminalScrollBarStyle.Apply(this, useUnicode, vertical: true, horizontal: true);
-		ViewportChanged += (_, _) => RaiseVisibleRangeChanged();
+		ViewportChanged += (_, _) =>
+		{
+			_viewportChangeRevision++;
+			RaiseVisibleRangeChanged();
+		};
 	}
 
 	public event EventHandler? VisibleRangeChanged;
@@ -152,13 +157,15 @@ internal sealed class TerminalVirtualizedPreviewView : View
 		var firstLine = Math.Clamp(zeroBasedLine, 0, maximumFirstLine);
 		var maximumColumn = Math.Max(0, MaxLineLength - VisibleTextWidth);
 		var firstColumn = Math.Clamp(horizontalOffset, 0, maximumColumn);
+		var viewportChangeRevision = _viewportChangeRevision;
 		Viewport = new Rectangle(
 			firstColumn,
 			firstLine,
 			Viewport.Width,
 			Viewport.Height);
 		SetNeedsDraw();
-		RaiseVisibleRangeChanged();
+		if (_viewportChangeRevision == viewportChangeRevision)
+			RaiseVisibleRangeChanged();
 	}
 
 	public PreviewTextSearchMatch? SetSearchQuery(
@@ -392,20 +399,37 @@ internal sealed class TerminalVirtualizedPreviewView : View
 	private void RaiseVisibleRangeChanged() =>
 		VisibleRangeChanged?.Invoke(this, EventArgs.Empty);
 
-	private static string SliceColumns(string value, int startColumn, int maximumColumns)
+	internal static string SliceColumns(string value, int startColumn, int maximumColumns)
 	{
 		if (string.IsNullOrEmpty(value) || maximumColumns <= 0)
 			return string.Empty;
 
 		var output = new StringBuilder(Math.Min(value.Length, maximumColumns));
-		var skippedColumns = 0;
+		var sourceColumn = 0;
 		var writtenColumns = 0;
 		foreach (var rune in value.EnumerateRunes())
 		{
 			var columns = Math.Max(0, rune.GetColumns());
-			if (skippedColumns + columns <= startColumn)
+			var runeStart = sourceColumn;
+			var runeEnd = runeStart + columns;
+			sourceColumn = runeEnd;
+			if (columns == 0)
 			{
-				skippedColumns += columns;
+				if (runeStart > startColumn)
+					output.Append(rune);
+				continue;
+			}
+			if (runeEnd <= startColumn)
+				continue;
+			if (runeStart < startColumn)
+			{
+				var padding = Math.Min(
+					runeEnd - startColumn,
+					maximumColumns - writtenColumns);
+				output.Append(' ', padding);
+				writtenColumns += padding;
+				if (writtenColumns == maximumColumns)
+					break;
 				continue;
 			}
 			if (writtenColumns + columns > maximumColumns)

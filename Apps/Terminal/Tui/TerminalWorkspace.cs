@@ -131,15 +131,10 @@ public sealed class TerminalWorkspace
 				operationObserver,
 				cancellationToken,
 				inputShutdownGuard.Arm);
-			session.Start();
-			try
-			{
-				await application.RunAsync(root, cancellationToken).ConfigureAwait(false);
-			}
-			finally
-			{
-				await session.CompleteAsync().ConfigureAwait(false);
-			}
+			await RunSessionLifecycleAsync(
+				session.Start,
+				() => application.RunAsync(root, cancellationToken),
+				session.CompleteAsync).ConfigureAwait(false);
 
 			return cancellationToken.IsCancellationRequested && !session.ExitRequested
 				? CommandLineExitCodes.Canceled
@@ -180,6 +175,25 @@ public sealed class TerminalWorkspace
 			TerminalMouseMode.Disabled => false,
 			_ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null)
 		};
+
+	internal static async Task RunSessionLifecycleAsync(
+		Action start,
+		Func<Task> runAsync,
+		Func<Task> completeAsync)
+	{
+		ArgumentNullException.ThrowIfNull(start);
+		ArgumentNullException.ThrowIfNull(runAsync);
+		ArgumentNullException.ThrowIfNull(completeAsync);
+		try
+		{
+			start();
+			await runAsync().ConfigureAwait(false);
+		}
+		finally
+		{
+			await completeAsync().ConfigureAwait(false);
+		}
+	}
 
 	private sealed class TerminalGuiMousePolicy : IDisposable
 	{

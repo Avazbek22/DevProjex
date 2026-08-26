@@ -61,7 +61,10 @@ internal sealed class McpProjectService(McpRootRegistry roots, McpServices servi
 				"Fix the reported project access or Git state and retry.");
 		}
 		foreach (var file in plan.IncludedFiles)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
 			_ = roots.ResolveExistingPath(projectRoot, file);
+		}
 		if ((paths is null || paths.Count == 0) &&
 		    (includePatterns is null || includePatterns.Count == 0) &&
 		    (excludePatterns is null || excludePatterns.Count == 0))
@@ -70,13 +73,19 @@ internal sealed class McpProjectService(McpRootRegistry roots, McpServices servi
 		}
 
 		var globs = McpGlobSet.Create(includePatterns, excludePatterns);
-		var requested = ResolveRequestedPaths(projectRoot, paths);
-		var selected = plan.IncludedFiles
-			.Where(path => MatchesRequested(path, requested))
-			.Where(path => globs.Includes(ToRelative(projectRoot, path)))
-			.Select(path => ToRelative(projectRoot, path))
-			.ToArray();
-		if (selected.Length > 0)
+		var requested = ResolveRequestedPaths(projectRoot, paths, cancellationToken);
+		var selected = new List<string>();
+		foreach (var path in plan.IncludedFiles)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (!MatchesRequested(path, requested.Paths, requested.Directories))
+				continue;
+
+			var relativePath = ToRelative(projectRoot, path);
+			if (globs.Includes(relativePath))
+				selected.Add(relativePath);
+		}
+		if (selected.Count > 0)
 		{
 			return await services.Planner
 				.ReprojectSelectionAsync(plan, selected, cancellationToken)
@@ -201,28 +210,62 @@ internal sealed class McpProjectService(McpRootRegistry roots, McpServices servi
 		return new ProjectProfileReference(ProjectProfileSourceKind.Portable, path);
 	}
 
-	private IReadOnlyList<string>? ResolveRequestedPaths(string projectRoot, IReadOnlyList<string>? paths)
+	private RequestedPathSelection ResolveRequestedPaths(
+		string projectRoot,
+		IReadOnlyList<string>? paths,
+		CancellationToken cancellationToken)
 	{
 		if (paths is null || paths.Count == 0)
-			return null;
-		return paths
-			.Select(path => roots.ResolveExistingPath(projectRoot, path))
-			.Distinct(PathComparer.Default)
-			.ToArray();
+			return RequestedPathSelection.Empty;
+
+		var resolved = new HashSet<string>(PathComparer.Default);
+		var directories = new HashSet<string>(PathComparer.Default);
+		foreach (var path in paths)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var fullPath = roots.ResolveExistingPath(projectRoot, path);
+			if (!resolved.Add(fullPath))
+				continue;
+			if (Directory.Exists(fullPath))
+				directories.Add(fullPath);
+		}
+
+		return new RequestedPathSelection(resolved, directories);
 	}
 
-	private static bool MatchesRequested(string file, IReadOnlyList<string>? requested)
+	internal static bool MatchesRequested(
+		string file,
+		IReadOnlySet<string> requestedPaths,
+		IReadOnlySet<string> requestedDirectories)
 	{
-		if (requested is null)
+		if (requestedPaths.Count == 0)
 			return true;
-		foreach (var path in requested)
+
+		var normalizedFile = PathUtility.Normalize(file);
+		if (requestedPaths.Contains(normalizedFile))
+			return true;
+
+		var ancestorPath = Path.GetDirectoryName(normalizedFile);
+		while (!string.IsNullOrEmpty(ancestorPath))
 		{
-			if (PathComparer.Default.Equals(file, path))
+			if (requestedDirectories.Contains(ancestorPath))
 				return true;
-			if (Directory.Exists(path) && PathUtility.IsPathInside(file, path))
-				return true;
+
+			var parentPath = Path.GetDirectoryName(ancestorPath);
+			if (PathComparer.Default.Equals(parentPath, ancestorPath))
+				break;
+			ancestorPath = parentPath;
 		}
 		return false;
+	}
+
+	private sealed record RequestedPathSelection(
+		IReadOnlySet<string> Paths,
+		IReadOnlySet<string> Directories)
+	{
+		public static RequestedPathSelection Empty { get; } = new(
+			new HashSet<string>(PathComparer.Default),
+			new HashSet<string>(PathComparer.Default));
 	}
 
 	internal static string ToRelative(string root, string path) =>

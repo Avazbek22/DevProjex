@@ -67,6 +67,34 @@ public sealed class TerminalPathPickerModelTests
 	}
 
 	[Fact]
+	public void BoundedOrderingRetainsOnlyTheRequestedBestEntriesInStableOrder()
+	{
+		const int maximumCount = 1_001;
+		var source = Enumerable.Range(0, 25_000)
+			.Select(index =>
+			{
+				var name = $"entry-{25_000 - index:D5}";
+				return new TerminalPathPickerEntry(
+					$"/synthetic/{name}",
+					name,
+					IsDirectory: index % 3 == 0,
+					IsParent: false);
+			})
+			.ToArray();
+		var expected = source
+			.OrderByDescending(static entry => entry.IsDirectory)
+			.ThenBy(static entry => entry.Name, StringComparer.CurrentCultureIgnoreCase)
+			.Take(maximumCount)
+			.Select(static entry => entry.Path)
+			.ToArray();
+
+		var actual = TerminalPathPickerModel.TakeOrderedEntries(source, maximumCount);
+
+		Assert.InRange(actual.Count, 0, maximumCount);
+		Assert.Equal(expected, actual.Select(static entry => entry.Path));
+	}
+
+	[Fact]
 	public void MissingInitialPathFallsBackToCurrentDirectory()
 	{
 		using var workspace = new TemporaryDirectory();

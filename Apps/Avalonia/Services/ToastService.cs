@@ -8,6 +8,7 @@ public sealed class ToastService : IToastService, IDisposable
 	private static readonly TimeSpan UiAnimationDelay = UiTimingProfile.Scale(TimeSpan.FromMilliseconds(10));
 
 	private readonly Dictionary<ToastMessageViewModel, CancellationTokenSource> _dismissTokens = new();
+	private int _disposed;
 
 	public ObservableCollection<ToastMessageViewModel> Items { get; } = [];
 
@@ -15,6 +16,8 @@ public sealed class ToastService : IToastService, IDisposable
 
 	public void Show(string message, TimeSpan duration)
 	{
+		if (Volatile.Read(ref _disposed) != 0)
+			return;
 		if (string.IsNullOrWhiteSpace(message))
 			return;
 		if (duration <= TimeSpan.Zero)
@@ -22,6 +25,9 @@ public sealed class ToastService : IToastService, IDisposable
 
 		Dispatcher.UIThread.Post(() =>
 		{
+			if (Volatile.Read(ref _disposed) != 0)
+				return;
+
 			var toast = new ToastMessageViewModel(message);
 			AddToast(toast);
 			ScheduleDismiss(toast, duration);
@@ -38,6 +44,9 @@ public sealed class ToastService : IToastService, IDisposable
 		Dispatcher.UIThread.Post(async () =>
 		{
 			await Task.Delay(UiAnimationDelay);
+			if (Volatile.Read(ref _disposed) != 0 || !Items.Contains(toast))
+				return;
+
 			toast.Opacity = 1;
 			toast.OffsetY = 0;
 		});
@@ -84,6 +93,9 @@ public sealed class ToastService : IToastService, IDisposable
 
 	public void Dispose()
 	{
+		if (Interlocked.Exchange(ref _disposed, 1) != 0)
+			return;
+
 		foreach (var cts in _dismissTokens.Values)
 		{
 			cts.Cancel();

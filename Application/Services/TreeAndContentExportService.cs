@@ -51,19 +51,45 @@ public sealed class TreeAndContentExportService(
 			pathPresentation,
 			outputPathRedaction);
 		var displayRootName = pathPresentation?.DisplayRootName;
-		bool hasSelection = selectedPaths.Count > 0 && TreeExportService.HasSelectedDescendantOrSelf(root, selectedPaths);
+		bool hasSelection = selectedPaths.Count > 0 &&
+		                    TreeExportService.HasSelectedDescendantOrSelfWithCancellation(
+			                    root,
+			                    selectedPaths,
+			                    cancellationToken);
 
 		string tree = hasSelection
-			? treeExport.BuildSelectedTree(rootPath, root, selectedPaths, format, displayRootPath, displayRootName)
-			: treeExport.BuildFullTree(rootPath, root, format, displayRootPath, displayRootName);
+			? treeExport.BuildSelectedTreeWithCancellation(
+				rootPath,
+				root,
+				selectedPaths,
+				format,
+				displayRootPath,
+				displayRootName,
+				cancellationToken)
+			: treeExport.BuildFullTreeWithCancellation(
+				rootPath,
+				root,
+				format,
+				displayRootPath,
+				displayRootName,
+				includeRootPath: true,
+				cancellationToken: cancellationToken);
 
 		if (hasSelection && string.IsNullOrWhiteSpace(tree))
-			tree = treeExport.BuildFullTree(rootPath, root, format, displayRootPath, displayRootName);
+			tree = treeExport.BuildFullTreeWithCancellation(
+				rootPath,
+				root,
+				format,
+				displayRootPath,
+				displayRootName,
+				includeRootPath: true,
+				cancellationToken: cancellationToken);
 
-		var files = ProjectTreeSelectionProjection.BuildOrderedSelectedFilePaths(
+		var files = ProjectTreeSelectionProjection.BuildOrderedSelectedFilePathsWithCancellation(
 			root,
 			hasSelection ? selectedPaths : EmptySelection,
-			ensureExists: hasSelection);
+			ensureExists: hasSelection,
+			cancellationToken);
 		var contentPathMapper = CreateRelativeContentHeaderPathMapper(rootPath);
 
 		var contentResult = await contentExport.BuildResultAsync(

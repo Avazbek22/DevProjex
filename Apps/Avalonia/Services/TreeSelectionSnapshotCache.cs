@@ -55,15 +55,35 @@ internal sealed class TreeSelectionSnapshotCache
 		TreeNodeDescriptor treeRoot,
 		IReadOnlySet<string> checkedPaths,
 		IReadOnlyList<string>? allOrderedFilePaths)
+		=> BuildProjectionWithCancellation(
+			treeRoot,
+			checkedPaths,
+			allOrderedFilePaths,
+			CancellationToken.None);
+
+	public static (IReadOnlySet<string> NormalizedPaths, IReadOnlyList<string> OrderedFiles)
+		BuildProjectionWithCancellation(
+			TreeNodeDescriptor treeRoot,
+			IReadOnlySet<string> checkedPaths,
+			IReadOnlyList<string>? allOrderedFilePaths,
+			CancellationToken cancellationToken)
 	{
 		ArgumentNullException.ThrowIfNull(treeRoot);
 		ArgumentNullException.ThrowIfNull(checkedPaths);
+		cancellationToken.ThrowIfCancellationRequested();
 		var normalizedPaths = ProjectTreeSelectionProjection.NormalizeSelectedPaths(
 			treeRoot,
 			checkedPaths);
 		var orderedFiles = normalizedPaths.Count > 0
-			? PreviewFileCollectionPolicy.BuildOrderedSelectedFilePaths(normalizedPaths, treeRoot)
-			: allOrderedFilePaths ?? PreviewFileCollectionPolicy.BuildOrderedAllFilePaths(treeRoot);
+			? PreviewFileCollectionPolicy.BuildOrderedSelectedFilePathsWithCancellation(
+				normalizedPaths,
+				treeRoot,
+				ensureExists: true,
+				cancellationToken)
+			: allOrderedFilePaths ?? PreviewFileCollectionPolicy.BuildOrderedAllFilePathsWithCancellation(
+				treeRoot,
+				cancellationToken);
+		cancellationToken.ThrowIfCancellationRequested();
 		return (normalizedPaths, orderedFiles);
 	}
 

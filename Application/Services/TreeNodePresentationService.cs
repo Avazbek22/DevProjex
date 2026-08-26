@@ -6,33 +6,54 @@ public sealed class TreeNodePresentationService(LocalizationService localization
 
 	public TreeNodeDescriptor Build(FileSystemNode root)
 	{
-		return BuildNode(root, isRoot: true, orderedFilePaths: null);
+		return BuildWithCancellation(root, CancellationToken.None);
+	}
+
+	public TreeNodeDescriptor BuildWithCancellation(
+		FileSystemNode root,
+		CancellationToken cancellationToken)
+	{
+		return BuildNode(root, isRoot: true, orderedFilePaths: null, cancellationToken);
 	}
 
 	public TreeNodePresentationResult BuildWithFilePaths(FileSystemNode root)
 	{
+		return BuildWithFilePathsWithCancellation(root, CancellationToken.None);
+	}
+
+	public TreeNodePresentationResult BuildWithFilePathsWithCancellation(
+		FileSystemNode root,
+		CancellationToken cancellationToken)
+	{
 		var orderedFilePaths = new List<string>();
-		var descriptor = BuildNode(root, isRoot: true, orderedFilePaths: orderedFilePaths);
+		var descriptor = BuildNode(root, isRoot: true, orderedFilePaths, cancellationToken);
 		return new TreeNodePresentationResult(descriptor, orderedFilePaths);
 	}
 
 	private TreeNodeDescriptor BuildNode(
 		FileSystemNode node,
 		bool isRoot,
-		List<string>? orderedFilePaths)
+		List<string>? orderedFilePaths,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		if (!isRoot)
-			return BuildSubtree(node, orderedFilePaths);
+			return BuildSubtree(node, orderedFilePaths, cancellationToken);
 
 		var header = CreateHeader(node, orderedFilePaths);
-		var children = BuildChildren(node.Children, allowParallelAtThisLevel: true, orderedFilePaths);
+		var children = BuildChildren(
+			node.Children,
+			allowParallelAtThisLevel: true,
+			orderedFilePaths,
+			cancellationToken);
 		return CreateDescriptor(header, children);
 	}
 
 	private IReadOnlyList<TreeNodeDescriptor> BuildChildren(
 		IReadOnlyList<FileSystemNode> children,
 		bool allowParallelAtThisLevel,
-		List<string>? orderedFilePaths)
+		List<string>? orderedFilePaths,
+		CancellationToken cancellationToken)
 	{
 		if (children.Count == 0)
 			return [];
@@ -54,12 +75,13 @@ public sealed class TreeNodePresentationService(LocalizationService localization
 				children.Count,
 				new ParallelOptions
 				{
+					CancellationToken = cancellationToken,
 					MaxDegreeOfParallelism = Math.Min(ScanParallelismPolicy.MaxDegreeOfParallelism, children.Count)
 				},
 				index =>
 				{
 					var localFilePaths = orderedFilePaths is null ? null : new List<string>();
-					projectedChildren[index] = BuildSubtree(children[index], localFilePaths);
+					projectedChildren[index] = BuildSubtree(children[index], localFilePaths, cancellationToken);
 					if (localFilePaths is { Count: > 0 })
 						orderedFilePathSegments![index] = localFilePaths;
 				});
@@ -68,6 +90,7 @@ public sealed class TreeNodePresentationService(LocalizationService localization
 			{
 				foreach (var segment in orderedFilePathSegments)
 				{
+					cancellationToken.ThrowIfCancellationRequested();
 					if (segment is not null)
 						orderedFilePaths!.AddRange(segment);
 				}
@@ -78,21 +101,24 @@ public sealed class TreeNodePresentationService(LocalizationService localization
 
 		var projected = new List<TreeNodeDescriptor>(children.Count);
 		foreach (var child in children)
-			projected.Add(BuildSubtree(child, orderedFilePaths));
+			projected.Add(BuildSubtree(child, orderedFilePaths, cancellationToken));
 
 		return projected;
 	}
 
 	private TreeNodeDescriptor BuildSubtree(
 		FileSystemNode root,
-		List<string>? orderedFilePaths)
+		List<string>? orderedFilePaths,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		var pending = new List<PresentationFrame>
 		{
 			new(CreateHeader(root, orderedFilePaths))
 		};
 		while (pending.Count > 0)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			var frameIndex = pending.Count - 1;
 			var frame = pending[frameIndex];
 			if (frame.NextChildIndex < frame.Header.Node.Children.Count)

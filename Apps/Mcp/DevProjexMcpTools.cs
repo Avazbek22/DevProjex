@@ -63,7 +63,10 @@ internal sealed class DevProjexMcpTools(
 			var depth = arguments.OptionalInteger("max_depth", 0, 1_000);
 			var renderedTree = depth is null
 				? plan.ProjectedTree
-				: PruneToDepth(plan.ProjectedTree, depth.Value);
+				: PruneToDepthWithCancellation(
+					plan.ProjectedTree,
+					depth.Value,
+					cancellationToken);
 			using var treeWriter = new McpBoundedLineTextWriter(MaximumTreeLines);
 			try
 			{
@@ -494,15 +497,57 @@ internal sealed class DevProjexMcpTools(
 			$"{McpErrorCodes.InvalidArguments}: invalid format '{token}'. Valid values: text, markdown, json, xml.")
 	};
 
-	private static TreeNodeDescriptor PruneToDepth(TreeNodeDescriptor node, int remainingDepth) =>
-		remainingDepth == 0
-			? node with { Children = [] }
-			: node with
+	internal static TreeNodeDescriptor PruneToDepth(TreeNodeDescriptor node, int remainingDepth) =>
+		PruneToDepthWithCancellation(node, remainingDepth, CancellationToken.None);
+
+	internal static TreeNodeDescriptor PruneToDepthWithCancellation(
+		TreeNodeDescriptor node,
+		int remainingDepth,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(node);
+		ArgumentOutOfRangeException.ThrowIfNegative(remainingDepth);
+		cancellationToken.ThrowIfCancellationRequested();
+
+		var stack = new Stack<TreeDepthFrame>();
+		stack.Push(new TreeDepthFrame(node, remainingDepth));
+		TreeNodeDescriptor? result = null;
+		while (stack.Count > 0)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var frame = stack.Peek();
+			if (frame.RemainingDepth > 0 && frame.NextChildIndex < frame.Node.Children.Count)
 			{
-				Children = node.Children
-					.Select(child => PruneToDepth(child, remainingDepth - 1))
-					.ToArray()
+				var child = frame.Node.Children[frame.NextChildIndex++];
+				stack.Push(new TreeDepthFrame(child, frame.RemainingDepth - 1));
+				continue;
+			}
+
+			var projected = frame.Node with
+			{
+				Children = frame.RemainingDepth == 0
+					? []
+					: frame.ProjectedChildren
 			};
+			stack.Pop();
+			if (stack.TryPeek(out var parent))
+				parent.ProjectedChildren[parent.NextProjectedChildIndex++] = projected;
+			else
+				result = projected;
+		}
+
+		return result!;
+	}
+
+	private sealed class TreeDepthFrame(TreeNodeDescriptor node, int remainingDepth)
+	{
+		public TreeNodeDescriptor Node { get; } = node;
+		public int RemainingDepth { get; } = remainingDepth;
+		public TreeNodeDescriptor[] ProjectedChildren { get; } =
+			remainingDepth == 0 ? [] : new TreeNodeDescriptor[node.Children.Count];
+		public int NextChildIndex { get; set; }
+		public int NextProjectedChildIndex { get; set; }
+	}
 
 	private static async Task<McpTextPage> ReadFilePageAsync(
 		string path,
@@ -549,25 +594,23 @@ internal sealed class DevProjexMcpTools(
 			output.Append(prefix);
 
 			remaining = maximumCharacters - output.Length;
-			var sourceLength = Math.Min(line.Length, Math.Max(0, remaining));
-			if (sourceLength > 0 &&
-			    sourceLength < line.Length &&
-			    char.IsHighSurrogate(content[line.Offset + sourceLength - 1]) &&
-			    char.IsLowSurrogate(content[line.Offset + sourceLength]))
+			var fullyEscaped = SingleLineTextEscaping.AppendBounded(
+				output,
+				content.AsSpan(line.Offset, line.Length),
+				Math.Max(0, remaining));
+			if (!fullyEscaped)
 			{
-				sourceLength--;
-			}
-			var escaped = McpTextEscaping.EscapeSingleLine(
-				content.Substring(line.Offset, sourceLength));
-			var suffix = escaped + Environment.NewLine;
-			if (sourceLength == line.Length && suffix.Length <= remaining)
-			{
-				output.Append(suffix);
-				continue;
+				return false;
 			}
 
-			AppendBoundedPrefix(output, suffix, Math.Max(0, remaining));
-			return false;
+			remaining = maximumCharacters - output.Length;
+			if (Environment.NewLine.Length > remaining)
+			{
+				AppendBoundedPrefix(output, Environment.NewLine, Math.Max(0, remaining));
+				return false;
+			}
+
+			output.Append(Environment.NewLine);
 		}
 		return true;
 	}

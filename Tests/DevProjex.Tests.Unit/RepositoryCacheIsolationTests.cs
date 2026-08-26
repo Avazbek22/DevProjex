@@ -717,8 +717,13 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 		public int PrunedCount { get; private set; }
 		public TaskCompletionSource RemovalStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 		public void ReleaseRemoval() => _releaseRemoval.TrySetResult();
-		public Task<bool> IsSupportedAsync(string basePath, CancellationToken cancellationToken) =>
-			Task.FromResult(_supported);
+		public Task<WorktreeSupportState> GetSupportStateAsync(
+			string basePath,
+			CancellationToken cancellationToken) =>
+			Task.FromResult(
+				_supported
+					? WorktreeSupportState.Supported
+					: WorktreeSupportState.PermanentUnsupported);
 		public Task<bool> PreparePrimaryAsync(
 			string basePath,
 			string? branch,

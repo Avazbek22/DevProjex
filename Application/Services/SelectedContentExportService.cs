@@ -104,10 +104,13 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		string? displayRootPath = null,
 		OutputPathRedactionDecision? outputPathRedaction = null)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
+
 		// Use HashSet for O(1) deduplication
 		var uniqueFiles = new HashSet<string>(PathComparer.Default);
 		foreach (var path in filePaths)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			if (!string.IsNullOrWhiteSpace(path))
 				uniqueFiles.Add(path);
 		}
@@ -117,7 +120,7 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 
 		// Convert to list and sort in-place
 		var files = new List<string>(uniqueFiles);
-		files.Sort(PathComparer.Default);
+		CancellationAwareSort.Sort(files, PathComparer.Default, cancellationToken);
 		var redactionContext = transformationContext?.Redaction;
 		outputPathRedaction ??= OutputRootPathPresentation.CaptureRedactionDecision(transformationContext);
 		if (redactionContext is not null)
@@ -126,7 +129,7 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 				.RefreshPersistentMarksAsync(redactionContext.ProjectRoot, cancellationToken)
 				.ConfigureAwait(false);
 		}
-		using var transformationScope = transformationContext?.BeginOutput(files);
+		using var transformationScope = transformationContext?.BeginOutput(files, cancellationToken);
 		var redactionScope = transformationScope?.Redaction;
 
 		var sb = new StringBuilder();

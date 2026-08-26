@@ -24,20 +24,39 @@ public sealed class TreeCommandHandler(
 		if (plan.HasErrors)
 			return CommandLineExitCodes.PolicyFailure;
 
-		var payload = BuildPayload(plan, request.Format, request.Output.Plain);
 		if (request.OutputPath is null or "-")
 		{
-			await environment.Output.WriteAsync(payload.AsMemory(), cancellationToken)
+			await WriteTreeAsync(
+					environment.Output,
+					plan,
+					request.Format,
+					request.Output.Plain,
+					cancellationToken)
 				.ConfigureAwait(false);
 			return CommandLineExitCodes.Success;
 		}
 
 		var requestedPath = Path.GetFullPath(request.OutputPath);
 		_ = ExactOutputDestinationValidator.ValidateAnalysis(plan.SourceRoot, requestedPath);
-		var writtenPath = await AtomicOutputWriter.WriteTextAsync(
+		var writtenPath = await AtomicOutputWriter.WriteAsync(
 				requestedPath,
-				payload,
 				overwrite: false,
+				async (destination, token) =>
+				{
+					await using var writer = new StreamWriter(
+						destination,
+						new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+						bufferSize: 16 * 1024,
+						leaveOpen: true);
+					await WriteTreeAsync(
+							writer,
+							plan,
+							request.Format,
+							request.Output.Plain,
+							token)
+						.ConfigureAwait(false);
+					await writer.FlushAsync(token).ConfigureAwait(false);
+				},
 				cancellationToken,
 				path => ExactOutputDestinationValidator.ValidateAnalysis(plan.SourceRoot, path))
 			.ConfigureAwait(false);
@@ -45,30 +64,39 @@ public sealed class TreeCommandHandler(
 		return CommandLineExitCodes.Success;
 	}
 
-	private string BuildPayload(
+	private Task WriteTreeAsync(
+		TextWriter destination,
 		ProjectContextPlan plan,
 		TreeTextFormat format,
-		bool plain)
+		bool plain,
+		CancellationToken cancellationToken)
 	{
-		var displayRootPath = plan.SourceIdentity is
+		var (displayRootPath, displayRootName) = ResolveDisplayIdentity(plan);
+		return plain && format == TreeTextFormat.Ascii
+			? services.TreeExportService.WriteFullTreePlainAsync(
+				destination,
+				plan.SourceRoot,
+				plan.ProjectedTree,
+				displayRootPath,
+				displayRootName,
+				cancellationToken: cancellationToken)
+			: services.TreeExportService.WriteFullTreeAsync(
+				destination,
+				plan.SourceRoot,
+				plan.ProjectedTree,
+				format,
+				displayRootPath,
+				displayRootName,
+				cancellationToken: cancellationToken);
+	}
+
+	private static (string Path, string? Name) ResolveDisplayIdentity(ProjectContextPlan plan) =>
+		(plan.SourceIdentity is
 		{
 			SourceType: ProjectSourceType.GitClone,
 			SourceReference.Length: > 0
 		} identity
 			? identity.SourceReference
-			: plan.SourceRoot;
-		var displayRootName = plan.SourceIdentity?.DisplayName;
-		return plain && format == TreeTextFormat.Ascii
-			? services.TreeExportService.BuildFullTreePlain(
-				plan.SourceRoot,
-				plan.ProjectedTree,
-				displayRootPath,
-				displayRootName)
-			: services.TreeExportService.BuildFullTree(
-				plan.SourceRoot,
-				plan.ProjectedTree,
-				format,
-				displayRootPath,
-				displayRootName);
-	}
+			: plan.SourceRoot,
+		plan.SourceIdentity?.DisplayName);
 }

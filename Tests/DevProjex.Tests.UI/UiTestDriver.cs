@@ -1457,13 +1457,14 @@ internal static class UiTestDriver
             window,
             "_metrics");
 
-        // Project load can be idle briefly before deferred post-load metrics become eligible.
-        // Tests that take ownership of StatusBusy must wait for the baseline itself, otherwise a
-        // later metrics completion can overwrite their synthetic status operation.
+        // Project load can be idle briefly before deferred post-load metrics or compression
+        // prewarm become eligible. Tests that take ownership of status presentation must wait for
+        // both pipelines, otherwise a late completion can overwrite their synthetic state.
         await WaitForConditionAsync(
             window,
             () => metrics.HasCompleteBaseline &&
                   !metrics.IsBackgroundActive &&
+                  !metrics.IsCompressionPrewarmActive &&
                   !GetViewModel(window).StatusBusy,
             "initial metrics baseline to finish",
             timeout);

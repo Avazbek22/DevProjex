@@ -75,7 +75,7 @@ public static class PathUtility
 	private static bool IsDirectorySeparator(char value) =>
 		value == Path.DirectorySeparatorChar || value == Path.AltDirectorySeparatorChar;
 
-	private static bool IsMissingPath(string? path) =>
+	public static bool IsMissingPath(string? path) =>
 		string.IsNullOrEmpty(path) ||
 		(OperatingSystem.IsWindows() && string.IsNullOrWhiteSpace(path));
 

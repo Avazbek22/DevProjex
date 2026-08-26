@@ -5,6 +5,54 @@ namespace DevProjex.Tests.Unit;
 public sealed class StartupInteractionControllerSelectionTests
 {
 	[Fact]
+	public void ResolveSelectedNodeStates_SelectsExactFilesAndDirectoryDescendants()
+	{
+		using var temp = new TemporaryDirectory();
+		var selectedDirectory = Path.Combine(temp.Path, "src");
+		var selectedFile = Path.Combine(temp.Path, "README.md");
+		var siblingFile = Path.Combine(temp.Path, "tests", "Test.cs");
+		Directory.CreateDirectory(selectedDirectory);
+		Directory.CreateDirectory(Path.GetDirectoryName(siblingFile)!);
+
+		var selectedPaths = new HashSet<string>(PathComparer.Default)
+		{
+			selectedDirectory,
+			selectedFile
+		};
+		var selectedDirectories = new HashSet<string>(PathComparer.Default)
+		{
+			selectedDirectory
+		};
+
+		var states = StartupInteractionController.ResolveSelectedNodeStates(
+			[
+				selectedDirectory,
+				Path.Combine(selectedDirectory, "nested", "File.cs"),
+				selectedFile,
+				siblingFile
+			],
+			selectedPaths,
+			selectedDirectories,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal([true, true, true, false], states);
+	}
+
+	[Fact]
+	public void ResolveSelectedNodeStates_AlreadyCanceled_StopsBeforeProjection()
+	{
+		using var cancellation = new CancellationTokenSource();
+		cancellation.Cancel();
+
+		Assert.Throws<OperationCanceledException>(() =>
+			StartupInteractionController.ResolveSelectedNodeStates(
+				[Path.GetFullPath("file.cs")],
+				new HashSet<string>(PathComparer.Default),
+				new HashSet<string>(PathComparer.Default),
+				cancellation.Token));
+	}
+
+	[Fact]
 	public void ApplyCheckedStates_RestoresLargeSelectionThroughOneBatchBoundary()
 	{
 		var callbackCount = 0;

@@ -1219,8 +1219,8 @@ public partial class MainWindow : Window
         return finalization;
     }
 
-    private Task TryApplyStartupSelectionOverridesAsync()
-        => _startupInteractions.ApplySelectionOverridesAsync();
+    private Task TryApplyStartupSelectionOverridesAsync(CancellationToken cancellationToken)
+        => _startupInteractions.ApplySelectionOverridesAsync(cancellationToken);
 
     private Task TryApplyStartupUiOptionsAsync()
         => _startupInteractions.ApplyUiOptionsAsync();
@@ -1583,21 +1583,28 @@ public partial class MainWindow : Window
             postLoadCleanupReason,
             preserveStatusMetrics);
 
-    private TreeNodeViewModel BuildTreeViewModel(TreeNodeDescriptor descriptor, TreeNodeViewModel? parent)
+	private TreeNodeViewModel BuildTreeViewModel(
+		TreeNodeDescriptor descriptor,
+		TreeNodeViewModel? parent,
+		CancellationToken cancellationToken = default)
     {
+		cancellationToken.ThrowIfCancellationRequested();
         return BuildTreeViewModelCore(
             descriptor,
             parent,
             materializeChildrenNow: parent is null,
-            allowParallelAtThisLevel: parent is null);
+			allowParallelAtThisLevel: parent is null,
+			cancellationToken);
     }
 
     private TreeNodeViewModel BuildTreeViewModelCore(
         TreeNodeDescriptor descriptor,
         TreeNodeViewModel? parent,
         bool materializeChildrenNow,
-        bool allowParallelAtThisLevel)
+		bool allowParallelAtThisLevel,
+		CancellationToken cancellationToken)
     {
+		cancellationToken.ThrowIfCancellationRequested();
         var icon = _iconCache.GetIcon(descriptor.IconKey);
         // Eagerly building the entire view-model graph was one of the biggest remaining
         // startup costs on large projects. We now materialize only the root-visible level
@@ -1614,7 +1621,11 @@ public partial class MainWindow : Window
         if (!materializeChildrenNow || descriptor.Children.Count == 0)
             return node;
 
-        foreach (var child in BuildImmediateChildViewModels(node, descriptor.Children, allowParallelAtThisLevel))
+		foreach (var child in BuildImmediateChildViewModels(
+			         node,
+			         descriptor.Children,
+			         allowParallelAtThisLevel,
+			         cancellationToken))
             node.Children.Add(child);
 
         return node;
@@ -1628,14 +1639,17 @@ public partial class MainWindow : Window
         return BuildImmediateChildViewModels(
             parent,
             parent.Descriptor.Children,
-            allowParallelAtThisLevel: false);
+			allowParallelAtThisLevel: false,
+			CancellationToken.None);
     }
 
     private List<TreeNodeViewModel> BuildImmediateChildViewModels(
         TreeNodeViewModel parent,
         IReadOnlyList<TreeNodeDescriptor> children,
-        bool allowParallelAtThisLevel)
+		bool allowParallelAtThisLevel,
+		CancellationToken cancellationToken)
     {
+		cancellationToken.ThrowIfCancellationRequested();
         if (children.Count == 0)
             return [];
 
@@ -1646,7 +1660,8 @@ public partial class MainWindow : Window
             var childNodes = new TreeNodeViewModel[children.Count];
             var parallelOptions = new ParallelOptions
             {
-                MaxDegreeOfParallelism = Math.Min(TreeViewModelBuildParallelism, children.Count)
+				MaxDegreeOfParallelism = Math.Min(TreeViewModelBuildParallelism, children.Count),
+				CancellationToken = cancellationToken
             };
 
             Parallel.For(0, children.Count, parallelOptions, index =>
@@ -1655,7 +1670,8 @@ public partial class MainWindow : Window
                     children[index],
                     parent,
                     materializeChildrenNow: false,
-                    allowParallelAtThisLevel: false);
+					allowParallelAtThisLevel: false,
+					cancellationToken);
             });
 
             return [.. childNodes];
@@ -1664,11 +1680,13 @@ public partial class MainWindow : Window
         var realizedChildren = new List<TreeNodeViewModel>(children.Count);
         foreach (var child in children)
         {
+			cancellationToken.ThrowIfCancellationRequested();
             var childViewModel = BuildTreeViewModelCore(
                 child,
                 parent,
                 materializeChildrenNow: false,
-                allowParallelAtThisLevel: false);
+				allowParallelAtThisLevel: false,
+				cancellationToken);
             realizedChildren.Add(childViewModel);
         }
 
@@ -1986,9 +2004,20 @@ public partial class MainWindow : Window
     private IgnoreRules BuildIgnoreRules(
         string rootPath,
         IReadOnlyCollection<IgnoreOptionId> selectedOptions,
-        IReadOnlyCollection<string>? selectedRootFolders)
+        IReadOnlyCollection<string>? selectedRootFolders) =>
+        BuildIgnoreRules(rootPath, selectedOptions, selectedRootFolders, CancellationToken.None);
+
+    private IgnoreRules BuildIgnoreRules(
+        string rootPath,
+        IReadOnlyCollection<IgnoreOptionId> selectedOptions,
+        IReadOnlyCollection<string>? selectedRootFolders,
+        CancellationToken cancellationToken)
     {
-        var rules = _ignoreRulesService.Build(rootPath, selectedOptions, selectedRootFolders);
+        var rules = _ignoreRulesService.BuildWithCancellation(
+            rootPath,
+            selectedOptions,
+            selectedRootFolders,
+            cancellationToken);
         if (!_viewModel.IsGitMode ||
             string.IsNullOrWhiteSpace(_currentCachedRepoPath) ||
             !PathComparer.Default.Equals(rootPath, _currentCachedRepoPath))
@@ -2001,9 +2030,18 @@ public partial class MainWindow : Window
 
     private IgnoreOptionsAvailability GetIgnoreOptionsAvailability(
         string rootPath,
-        IReadOnlyCollection<string> selectedRootFolders)
+        IReadOnlyCollection<string> selectedRootFolders) =>
+        GetIgnoreOptionsAvailability(rootPath, selectedRootFolders, CancellationToken.None);
+
+    private IgnoreOptionsAvailability GetIgnoreOptionsAvailability(
+        string rootPath,
+        IReadOnlyCollection<string> selectedRootFolders,
+        CancellationToken cancellationToken)
     {
-        var availability = _ignoreRulesService.GetIgnoreOptionsAvailability(rootPath, selectedRootFolders);
+        var availability = _ignoreRulesService.GetIgnoreOptionsAvailabilityWithCancellation(
+            rootPath,
+            selectedRootFolders,
+            cancellationToken);
 		return availability with
 		{
 			ShowAdvancedCounts = AdvancedIgnoreCountsAlwaysEnabled,
@@ -2269,13 +2307,10 @@ public partial class MainWindow : Window
             await clipboard.SetTextAsync(content);
     }
 
-    private static void OpenExternalLink(string url)
+    private void OpenExternalLink(string url)
     {
-        Process.Start(new ProcessStartInfo
-        {
-            FileName = url,
-            UseShellExecute = true
-        });
+        if (!ExternalLinkLauncher.TryOpen(url))
+            _toastService.Show(_localization["Desktop.Error.OperationFailed"]);
     }
 
     private bool EnsureTreeReady() => _currentTree is not null && !string.IsNullOrWhiteSpace(_currentPath);

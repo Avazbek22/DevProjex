@@ -116,9 +116,18 @@ public sealed class McpServerIntegrationTests
 		}
 		foreach (var name in new[] { "get_tree", "analyze", "pack_context", "search_project" })
 		{
-			var trackedOnly = tools.Single(tool => tool.Name == name)
-				.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("tracked_only");
+			var properties = tools.Single(tool => tool.Name == name)
+				.ProtocolTool.InputSchema.GetProperty("properties");
+			var trackedOnly = properties.GetProperty("tracked_only");
 			Assert.Equal(2, trackedOnly.GetProperty("oneOf").GetArrayLength());
+			foreach (var propertyName in new[] { "include_patterns", "exclude_patterns" })
+			{
+				var patterns = properties.GetProperty(propertyName);
+				Assert.Equal(256, patterns.GetProperty("maxItems").GetInt32());
+				var items = patterns.GetProperty("items");
+				Assert.Equal(1, items.GetProperty("minLength").GetInt32());
+				Assert.Equal(512, items.GetProperty("maxLength").GetInt32());
+			}
 		}
 	}
 

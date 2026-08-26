@@ -108,6 +108,25 @@ public sealed class TreeSearchCoordinatorDebounceTests
 		Assert.Null(GetPrivateField<CancellationTokenSource>(coordinator, "_highlightApplyCts"));
 	}
 
+	[AvaloniaFact]
+	public async Task DebounceContinuationAfterDispose_DoesNotRecreateSearchToken()
+	{
+		var (viewModel, treeView) = CreateContext();
+		var coordinator = new TreeSearchCoordinator(viewModel, treeView);
+		var runDebounce = typeof(TreeSearchCoordinator).GetMethod(
+			"RunSearchDebounceAsync",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(runDebounce);
+		var continuation = Assert.IsAssignableFrom<Task>(runDebounce!.Invoke(
+			coordinator,
+			[0, CancellationToken.None]));
+
+		coordinator.Dispose();
+		await continuation.WaitAsync(TimeSpan.FromSeconds(2));
+
+		Assert.Null(GetPrivateField<CancellationTokenSource>(coordinator, "_searchCts"));
+	}
+
 	private static (MainWindowViewModel viewModel, TreeView treeView) CreateContext()
 	{
 		var catalog = new StubLocalizationCatalog(new Dictionary<AppLanguage, IReadOnlyDictionary<string, string>>

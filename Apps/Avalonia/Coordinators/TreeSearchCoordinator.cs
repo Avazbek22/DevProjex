@@ -101,6 +101,7 @@ public sealed class TreeSearchCoordinator(
     private string? _lastComputedQuery;
     private int _searchVersion;
     private int _bringIntoViewVersion;
+    private int _disposed;
     private int _searchExpansionEpoch;
     private int _searchBranchReleaseVersion;
     private bool _searchExpansionStateInitialized;
@@ -140,9 +141,19 @@ public sealed class TreeSearchCoordinator(
             return;
         }
 
+        if (debounceToken.IsCancellationRequested ||
+            version != Volatile.Read(ref _searchVersion) ||
+            Volatile.Read(ref _disposed) != 0)
+        {
+            return;
+        }
+
         CancellationToken applyToken;
         lock (_searchCtsLock)
         {
+            if (_disposed != 0)
+                return;
+
             _searchCts?.Cancel();
             _searchCts?.Dispose();
             _searchCts = new CancellationTokenSource();
@@ -154,13 +165,16 @@ public sealed class TreeSearchCoordinator(
 
     public void OnSearchQueryChanged()
     {
-        viewModel.SetSearchInProgress(!string.IsNullOrWhiteSpace(viewModel.SearchQuery));
-        Interlocked.Increment(ref _bringIntoViewVersion);
+        if (Volatile.Read(ref _disposed) != 0)
+            return;
 
         CancellationToken token;
         int version;
         lock (_searchCtsLock)
         {
+            if (_disposed != 0)
+                return;
+
             _searchDebounceCts?.Cancel();
             _searchDebounceCts?.Dispose();
             _searchCts?.Cancel();
@@ -170,6 +184,8 @@ public sealed class TreeSearchCoordinator(
             version = Interlocked.Increment(ref _searchVersion);
         }
 
+        viewModel.SetSearchInProgress(!string.IsNullOrWhiteSpace(viewModel.SearchQuery));
+        Interlocked.Increment(ref _bringIntoViewVersion);
         _ = RunSearchDebounceAsync(version, token);
     }
 
@@ -395,6 +411,10 @@ public sealed class TreeSearchCoordinator(
 
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+
+        Interlocked.Increment(ref _searchVersion);
         Interlocked.Increment(ref _bringIntoViewVersion);
         RestoreTreeAutoScroll();
         CancelPendingHighlightApply();

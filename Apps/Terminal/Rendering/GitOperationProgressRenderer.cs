@@ -16,6 +16,7 @@ internal sealed class GitOperationProgressRenderer : IProgress<string>, IDisposa
 	private string? _milestonePhase;
 	private bool _started;
 	private bool _completed;
+	private bool _outputUnavailable;
 
 	private GitOperationProgressRenderer(
 		ITerminalEnvironment environment,
@@ -61,7 +62,7 @@ internal sealed class GitOperationProgressRenderer : IProgress<string>, IDisposa
 			if (_interactive)
 				RenderFrame(_startMessage);
 			else
-				_environment.Error.WriteLine(Sanitize(_startMessage));
+				TryWriteLine(Sanitize(_startMessage));
 		}
 	}
 
@@ -100,7 +101,7 @@ internal sealed class GitOperationProgressRenderer : IProgress<string>, IDisposa
 			if (_interactive)
 				ClearFrame();
 			else if (_started)
-				_environment.Error.WriteLine(Sanitize(_completionMessage));
+				TryWriteLine(Sanitize(_completionMessage));
 		}
 	}
 
@@ -121,12 +122,22 @@ internal sealed class GitOperationProgressRenderer : IProgress<string>, IDisposa
 		var frameWidth = TerminalCellWidth.Measure(frame);
 		var previousVisibleWidth = Math.Min(_previousFrameWidth, availableWidth);
 
-		_environment.Error.Write('\r');
-		_environment.Error.Write(frame);
-		if (frameWidth < previousVisibleWidth)
-			_environment.Error.Write(new string(' ', previousVisibleWidth - frameWidth));
-		_environment.Error.Flush();
-		_previousFrameWidth = frameWidth;
+		if (_outputUnavailable)
+			return;
+
+		try
+		{
+			_environment.Error.Write('\r');
+			_environment.Error.Write(frame);
+			if (frameWidth < previousVisibleWidth)
+				_environment.Error.Write(new string(' ', previousVisibleWidth - frameWidth));
+			_environment.Error.Flush();
+			_previousFrameWidth = frameWidth;
+		}
+		catch (TerminalBrokenPipeException)
+		{
+			MarkOutputUnavailable();
+		}
 	}
 
 	private void ClearFrame()
@@ -135,10 +146,23 @@ internal sealed class GitOperationProgressRenderer : IProgress<string>, IDisposa
 			return;
 
 		var clearWidth = Math.Min(_previousFrameWidth, Math.Max(1, _environment.Width - 1));
-		_environment.Error.Write('\r');
-		_environment.Error.Write(new string(' ', clearWidth));
-		_environment.Error.Write('\r');
-		_environment.Error.Flush();
+		if (_outputUnavailable)
+		{
+			_previousFrameWidth = 0;
+			return;
+		}
+
+		try
+		{
+			_environment.Error.Write('\r');
+			_environment.Error.Write(new string(' ', clearWidth));
+			_environment.Error.Write('\r');
+			_environment.Error.Flush();
+		}
+		catch (TerminalBrokenPipeException)
+		{
+			MarkOutputUnavailable();
+		}
 		_previousFrameWidth = 0;
 	}
 
@@ -161,7 +185,8 @@ internal sealed class GitOperationProgressRenderer : IProgress<string>, IDisposa
 			return;
 		}
 
-		_environment.Error.WriteLine(message);
+		if (!TryWriteLine(message))
+			return;
 		while (_nextMilestoneIndex < Milestones.Length &&
 		       percent >= Milestones[_nextMilestoneIndex])
 		{
@@ -212,5 +237,28 @@ internal sealed class GitOperationProgressRenderer : IProgress<string>, IDisposa
 		}
 
 		return false;
+	}
+
+	private bool TryWriteLine(string value)
+	{
+		if (_outputUnavailable)
+			return false;
+
+		try
+		{
+			_environment.Error.WriteLine(value);
+			return true;
+		}
+		catch (TerminalBrokenPipeException)
+		{
+			MarkOutputUnavailable();
+			return false;
+		}
+	}
+
+	private void MarkOutputUnavailable()
+	{
+		_outputUnavailable = true;
+		_previousFrameWidth = 0;
 	}
 }

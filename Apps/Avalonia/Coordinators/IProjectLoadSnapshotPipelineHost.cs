@@ -23,7 +23,10 @@ internal interface IProjectLoadSnapshotPipelineHost
 
 	void ReportIncompleteTreeScan();
 
-    TreeNodeViewModel BuildTreeViewModel(TreeRefreshInput input, BuildTreeResult result);
+	TreeNodeViewModel BuildTreeViewModel(
+		TreeRefreshInput input,
+		BuildTreeResult result,
+		CancellationToken cancellationToken);
 
     bool ApplyProjectLoadSnapshot(ProjectLoadSnapshot snapshot, CancellationToken cancellationToken);
 }

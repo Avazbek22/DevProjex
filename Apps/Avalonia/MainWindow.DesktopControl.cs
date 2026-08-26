@@ -9,13 +9,35 @@ public partial class MainWindow
 {
     private async Task EnsureDesktopControlServerAsync(CancellationToken cancellationToken)
     {
-        if (_desktopControlServer is not null)
+        if (Volatile.Read(ref _desktopControlServer) is not null)
             return;
 
-        _desktopControlServer = await DesktopControlServer.StartAsync(
+        var server = await _desktopControlServerFactory(
             new AvaloniaDesktopInteractionHandler(this),
             _currentPath,
-            cancellationToken: cancellationToken);
+            cancellationToken);
+        if (cancellationToken.IsCancellationRequested)
+        {
+            await server.DisposeAsync();
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+
+        if (Interlocked.CompareExchange(ref _desktopControlServer, server, null) is not null)
+        {
+            await server.DisposeAsync();
+            cancellationToken.ThrowIfCancellationRequested();
+            return;
+        }
+
+        if (cancellationToken.IsCancellationRequested &&
+            ReferenceEquals(
+                Interlocked.CompareExchange(ref _desktopControlServer, null, server),
+                server))
+        {
+            await server.DisposeAsync();
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
     }
 
     private async Task<DesktopInteractionResult> HandleDesktopInteractionAsync(
@@ -86,7 +108,7 @@ public partial class MainWindow
         var controller = CreateStartupInteractionController(
             request,
             diagnosticScenario: null);
-        await controller.ApplySelectionOverridesAsync();
+        await controller.ApplySelectionOverridesAsync(cancellationToken);
         var gitReadinessDiagnostic = GetDesktopGitReadinessDiagnostic(request);
         if (gitReadinessDiagnostic is { Severity: ContextDiagnosticSeverity.Error })
         {

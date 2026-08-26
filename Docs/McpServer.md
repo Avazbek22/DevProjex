@@ -109,7 +109,9 @@ Defaults:
 - `search_project.max_results`: `50`
 
 `include_patterns` and `exclude_patterns` are arrays of project-relative globs
-using `/`. `paths` contains existing project-relative files or directories.
+using `/`. Each array accepts at most 256 non-empty patterns, with at most 512
+characters per pattern. `paths` contains existing project-relative files or
+directories.
 Numeric parameters accept JSON numbers and decimal numeric strings.
 Boolean parameters accept JSON booleans and the exact strings `"true"` and
 `"false"`.

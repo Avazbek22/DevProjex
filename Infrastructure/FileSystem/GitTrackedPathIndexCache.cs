@@ -370,7 +370,7 @@ internal static class GitTrackedPathIndexCache
 		}
 		finally
 		{
-			ArrayPool<char>.Shared.Return(buffer);
+			ArrayPool<char>.Shared.Return(buffer, clearArray: true);
 		}
 	}
 
@@ -387,7 +387,7 @@ internal static class GitTrackedPathIndexCache
 		}
 		finally
 		{
-			ArrayPool<char>.Shared.Return(buffer);
+			ArrayPool<char>.Shared.Return(buffer, clearArray: true);
 		}
 	}
 

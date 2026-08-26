@@ -57,7 +57,10 @@ internal sealed class ProjectLoadSnapshotPipeline(IProjectLoadSnapshotPipelineHo
         using (PerformanceMetrics.Measure("ProjectLoadSnapshotPipeline.BuildTreeViewModel"))
         {
             treeRoot = await Task.Run(
-                () => host.BuildTreeViewModel(treeInput, treeBuild.Tree),
+				() => host.BuildTreeViewModel(
+					treeInput,
+					treeBuild.Tree,
+					cancellationToken),
                 cancellationToken);
         }
 

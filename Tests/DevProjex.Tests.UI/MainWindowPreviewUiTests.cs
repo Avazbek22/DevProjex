@@ -5,6 +5,7 @@ using Avalonia.VisualTree;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Application.Services;
 using System.ComponentModel;
+using System.Reflection;
 using System.Text.Json;
 using System.Xml.Linq;
 
@@ -13,6 +14,38 @@ namespace DevProjex.Tests.UI;
 [Collection(UiWorkspaceCollection.Name)]
 public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
 {
+    [AvaloniaFact]
+    public async Task ClipboardReadinessWait_StopsWhenPreviewControllerIsDisposed()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            await UiTestDriver.OpenPreviewAsync(window);
+            var viewModel = UiTestDriver.GetViewModel(window);
+            viewModel.IsPreviewLoading = true;
+
+            var controllerField = typeof(MainWindow).GetField(
+                "_previewSurfaceController",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var waitMethod = typeof(PreviewSurfaceController).GetMethod(
+                "WaitForClipboardSourceReadyAsync",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(controllerField);
+            Assert.NotNull(waitMethod);
+
+            var controller = Assert.IsType<PreviewSurfaceController>(controllerField!.GetValue(window));
+            var waitTask = Assert.IsAssignableFrom<Task<bool>>(waitMethod!.Invoke(controller, null));
+            controller.Dispose();
+
+            Assert.False(await waitTask.WaitAsync(TimeSpan.FromSeconds(1)));
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
     [AvaloniaFact]
     public async Task JsonTree_UserVisibleCopyAndPreviewRoutesKeepUnicodeNamesReadable()
     {

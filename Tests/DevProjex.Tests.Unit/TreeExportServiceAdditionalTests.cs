@@ -60,8 +60,10 @@ public sealed class TreeExportServiceAdditionalTests
 	}
 
 	[Theory]
+	[InlineData(TreeTextFormat.Ascii)]
 	[InlineData(TreeTextFormat.Json)]
 	[InlineData(TreeTextFormat.Xml)]
+	[InlineData(TreeTextFormat.Markdown)]
 	public void BuildFullTree_DeepStructuredTreeDoesNotDependOnTheCallStack(
 		TreeTextFormat format)
 	{
@@ -83,6 +85,63 @@ public sealed class TreeExportServiceAdditionalTests
 		Assert.Contains("level-0001", output, StringComparison.Ordinal);
 		Assert.Contains($"level-{depth - 1:D4}", output, StringComparison.Ordinal);
 		Assert.Contains("leaf.txt", output, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData(TreeTextFormat.Ascii)]
+	[InlineData(TreeTextFormat.Json)]
+	[InlineData(TreeTextFormat.Xml)]
+	[InlineData(TreeTextFormat.Markdown)]
+	public void BuildFullTree_StopsWhenCancellationArrivesDuringTraversal(TreeTextFormat format)
+	{
+		using var cancellation = new CancellationTokenSource();
+		var child = new TreeNodeDescriptor("child.txt", "/child.txt", false, false, "file", []);
+		var root = new TreeNodeDescriptor(
+			"root",
+			"/",
+			true,
+			false,
+			"folder",
+			new CancelOnAccessList(child, cancellation));
+
+		Assert.Throws<OperationCanceledException>(() => new TreeExportService().BuildFullTreeWithCancellation(
+			"/",
+			root,
+			format,
+			displayRootPath: null,
+			displayRootName: null,
+			includeRootPath: true,
+			cancellation.Token));
+	}
+
+	[Fact]
+	public void BuildSelectedTreeAndMetrics_DeepTreeDoNotDependOnTheCallStack()
+	{
+		const int depth = 2_048;
+		const string leafPath = "/leaf.txt";
+		var root = new TreeNodeDescriptor("leaf.txt", leafPath, false, false, "file", []);
+		for (var level = depth - 1; level >= 0; level--)
+		{
+			root = new TreeNodeDescriptor(
+				$"level-{level:D4}",
+				$"/level-{level:D4}",
+				true,
+				false,
+				"folder",
+				[root]);
+		}
+		var selectedPaths = new HashSet<string>(PathComparer.Default) { leafPath };
+		var service = new TreeExportService();
+
+		var output = service.BuildSelectedTree("/", root, selectedPaths, TreeTextFormat.Ascii);
+		var metrics = service.CalculateSelectedTreeMetrics(
+			"/",
+			root,
+			selectedPaths,
+			TreeTextFormat.Ascii);
+
+		Assert.Contains("leaf.txt", output, StringComparison.Ordinal);
+		Assert.Equal(ExportOutputMetricsCalculator.FromText(output), metrics);
 	}
 
 	[Fact]
@@ -194,5 +253,32 @@ public sealed class TreeExportServiceAdditionalTests
 		return new HashSet<string>(
 			selections.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
 			StringComparer.OrdinalIgnoreCase);
+	}
+
+	private sealed class CancelOnAccessList(
+		TreeNodeDescriptor item,
+		CancellationTokenSource cancellation) : IReadOnlyList<TreeNodeDescriptor>
+	{
+		public int Count => 1;
+
+		public TreeNodeDescriptor this[int index]
+		{
+			get
+			{
+				if (index != 0)
+					throw new ArgumentOutOfRangeException(nameof(index));
+				cancellation.Cancel();
+				return item;
+			}
+		}
+
+		public IEnumerator<TreeNodeDescriptor> GetEnumerator()
+		{
+			cancellation.Cancel();
+			yield return item;
+		}
+
+		System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() =>
+			GetEnumerator();
 	}
 }

@@ -23,7 +23,7 @@ public sealed class ProjectRootFactsProvider
 	private readonly TimeSpan _cacheTtl;
 	private readonly int _cacheLimit;
 	private readonly Func<DateTime> _utcNowProvider;
-	private readonly Func<string, ProjectRootFacts> _factsBuilder;
+	private readonly Func<string, CancellationToken, ProjectRootFacts> _factsBuilder;
 	private readonly Dictionary<string, long> _latestBuildSequences = new(PathComparer.Default);
 	private long _cacheGeneration;
 	private long _nextBuildSequence;
@@ -41,6 +41,19 @@ public sealed class ProjectRootFactsProvider
 		int cacheLimit,
 		Func<DateTime>? utcNowProvider,
 		Func<string, ProjectRootFacts> factsBuilder)
+		: this(
+			cacheTtl,
+			cacheLimit,
+			utcNowProvider,
+			(path, _) => factsBuilder(path))
+	{
+	}
+
+	private ProjectRootFactsProvider(
+		TimeSpan? cacheTtl,
+		int cacheLimit,
+		Func<DateTime>? utcNowProvider,
+		Func<string, CancellationToken, ProjectRootFacts> factsBuilder)
 	{
 		_cacheTtl = cacheTtl ?? DefaultCacheTtl;
 		_cacheLimit = Math.Max(0, cacheLimit);
@@ -48,10 +61,17 @@ public sealed class ProjectRootFactsProvider
 		_factsBuilder = factsBuilder ?? throw new ArgumentNullException(nameof(factsBuilder));
 	}
 
-	public ProjectRootFacts Get(string rootPath, bool forceRefresh = false)
+	public ProjectRootFacts Get(string rootPath, bool forceRefresh = false) =>
+		GetWithCancellation(rootPath, forceRefresh, CancellationToken.None);
+
+	public ProjectRootFacts GetWithCancellation(
+		string rootPath,
+		bool forceRefresh,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		IgnorePipelineDiagnostics.RecordRootFactsRequest();
-		if (string.IsNullOrWhiteSpace(rootPath))
+		if (PathUtility.IsMissingPath(rootPath))
 			return ProjectRootFacts.Missing(rootPath);
 
 		if (!TryNormalizePath(rootPath, out var normalizedRootPath))
@@ -78,7 +98,7 @@ public sealed class ProjectRootFactsProvider
 
 		IgnorePipelineDiagnostics.RecordRootFactsBuild();
 		if (_cacheLimit == 0)
-			return _factsBuilder(normalizedRootPath);
+			return _factsBuilder(normalizedRootPath, cancellationToken);
 
 		long cacheGeneration;
 		long buildSequence;
@@ -92,7 +112,7 @@ public sealed class ProjectRootFactsProvider
 		ProjectRootFacts facts;
 		try
 		{
-			facts = _factsBuilder(normalizedRootPath);
+			facts = _factsBuilder(normalizedRootPath, cancellationToken);
 		}
 		catch
 		{
@@ -174,10 +194,13 @@ public sealed class ProjectRootFactsProvider
 		_cacheLru.Remove(node);
 	}
 
-	private static ProjectRootFacts Build(string rootPath)
+	private static ProjectRootFacts Build(string rootPath, CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		if (!Directory.Exists(rootPath))
 			return ProjectRootFacts.Missing(rootPath);
+		if (!FileSystemRootEntryPolicy.IsPhysicalDirectory(rootPath))
+			return ProjectRootFacts.Inaccessible(rootPath);
 
 		var files = new List<ProjectRootFileFact>();
 		var directories = new List<ProjectRootDirectoryFact>();
@@ -186,6 +209,7 @@ public sealed class ProjectRootFactsProvider
 		{
 			foreach (var entry in EnumerateTopLevelEntries(rootPath))
 			{
+				cancellationToken.ThrowIfCancellationRequested();
 				if (entry.IsDirectory)
 				{
 					directories.Add(new ProjectRootDirectoryFact(
@@ -210,7 +234,10 @@ public sealed class ProjectRootFactsProvider
 			return ProjectRootFacts.Inaccessible(rootPath);
 		}
 
-		var gitIgnoreSignature = TryGetTopLevelGitIgnoreSignature(rootPath, files);
+		var gitIgnoreSignature = TryGetTopLevelGitIgnoreSignature(
+			rootPath,
+			files,
+			cancellationToken);
 		return new ProjectRootFacts(
 			rootPath,
 			exists: true,
@@ -240,7 +267,8 @@ public sealed class ProjectRootFactsProvider
 
 	private static ProjectRootFileSignature? TryGetTopLevelGitIgnoreSignature(
 		string rootPath,
-		IReadOnlyList<ProjectRootFileFact> files)
+		IReadOnlyList<ProjectRootFileFact> files,
+		CancellationToken cancellationToken)
 	{
 		var hasGitIgnore = false;
 		foreach (var file in files)
@@ -255,13 +283,21 @@ public sealed class ProjectRootFactsProvider
 		if (!hasGitIgnore)
 			return null;
 
-		return TryGetFileSignature(Path.Combine(rootPath, ".gitignore"));
+		return TryGetFileSignatureWithCancellation(
+			Path.Combine(rootPath, ".gitignore"),
+			cancellationToken);
 	}
 
-	public static ProjectRootFileSignature? TryGetFileSignature(string filePath)
+	public static ProjectRootFileSignature? TryGetFileSignature(string filePath) =>
+		TryGetFileSignatureWithCancellation(filePath, CancellationToken.None);
+
+	internal static ProjectRootFileSignature? TryGetFileSignatureWithCancellation(
+		string filePath,
+		CancellationToken cancellationToken)
 	{
 		try
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			UnixFileTypeInspector.EnsureRegularFile(filePath);
 			var linkInfo = new FileInfo(filePath);
 			if (!linkInfo.Exists)
@@ -274,7 +310,10 @@ public sealed class ProjectRootFactsProvider
 				return null;
 			var expectedLastWriteTicks = linkInfo.LastWriteTimeUtc.Ticks;
 			var expectedLength = linkInfo.Length;
-			var fingerprint = ComputeContentFingerprint(linkInfo.FullName, expectedLength);
+			var fingerprint = ComputeContentFingerprintWithCancellation(
+				linkInfo.FullName,
+				expectedLength,
+				cancellationToken);
 			linkInfo.Refresh();
 			if (!linkInfo.Exists ||
 			    linkInfo.LastWriteTimeUtc.Ticks != expectedLastWriteTicks ||
@@ -329,7 +368,10 @@ public sealed class ProjectRootFactsProvider
 		}
 	}
 
-	private static string ComputeContentFingerprint(string filePath, long expectedLength)
+	private static string ComputeContentFingerprintWithCancellation(
+		string filePath,
+		long expectedLength,
+		CancellationToken cancellationToken)
 	{
 		using var stream = new FileStream(
 			filePath,
@@ -338,10 +380,16 @@ public sealed class ProjectRootFactsProvider
 			FileShare.ReadWrite | FileShare.Delete,
 			bufferSize: 4096,
 			FileOptions.SequentialScan);
-		return ComputeContentFingerprint(stream, expectedLength);
+		return ComputeContentFingerprintWithCancellation(stream, expectedLength, cancellationToken);
 	}
 
-	internal static string ComputeContentFingerprint(Stream stream, long expectedLength)
+	internal static string ComputeContentFingerprint(Stream stream, long expectedLength) =>
+		ComputeContentFingerprintWithCancellation(stream, expectedLength, CancellationToken.None);
+
+	internal static string ComputeContentFingerprintWithCancellation(
+		Stream stream,
+		long expectedLength,
+		CancellationToken cancellationToken)
 	{
 		ArgumentNullException.ThrowIfNull(stream);
 		ArgumentOutOfRangeException.ThrowIfNegative(expectedLength);
@@ -355,6 +403,7 @@ public sealed class ProjectRootFactsProvider
 			var remaining = expectedLength;
 			while (remaining > 0)
 			{
+				cancellationToken.ThrowIfCancellationRequested();
 				var readSize = (int)Math.Min(buffer.Length, remaining);
 				var read = stream.Read(buffer, 0, readSize);
 				if (read == 0)
@@ -363,6 +412,7 @@ public sealed class ProjectRootFactsProvider
 				remaining -= read;
 			}
 
+			cancellationToken.ThrowIfCancellationRequested();
 			if (stream.Read(buffer, 0, 1) != 0 || stream.Length != expectedLength)
 				throw new IOException("The project root file changed while it was being hashed.");
 			return Convert.ToHexString(hash.GetHashAndReset());

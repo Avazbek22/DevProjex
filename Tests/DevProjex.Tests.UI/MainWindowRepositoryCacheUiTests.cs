@@ -706,8 +706,8 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 		var cache = new RepoCacheService(Path.Combine(appDataPath, "RepoCache"));
 		const string recentRepositoryUrl = "https://github.com/example/recent-intent.git";
 		const string localCacheRepositoryUrl = "https://github.com/example/local-cache-intent.git";
-		CreateCachedRepository(cache, recentRepositoryUrl, "main", 64, git: true);
-		CreateCachedRepository(cache, localCacheRepositoryUrl, "feature", 64, git: true);
+		CreateCachedRepository(cache, recentRepositoryUrl, "main", 64, git: true, initializeGit: true);
+		CreateCachedRepository(cache, localCacheRepositoryUrl, "feature", 64, git: true, initializeGit: true);
 		var recentStore = new RecentProjectsStore(() => appDataPath);
 		recentStore.AddRepository(recentStore.Load(), recentRepositoryUrl);
 		var git = new OfflineUpdateGitRepositoryService();
@@ -768,6 +768,7 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 				() => !cloneWindow.IsVisible,
 				"Enter to confirm the recent URL through the network path");
 			await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
+			Assert.Equal(ProjectSourceType.GitClone, viewModel.ProjectSourceType);
 			Assert.Equal(1, git.PullCount);
 			Assert.Equal(0, git.CloneCount);
 		}
@@ -785,9 +786,9 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 		const string recentRepositoryUrl = "https://github.com/example/recent-before-manual.git";
 		const string cacheRepositoryUrl = "https://github.com/example/cache-before-manual.git";
 		const string manualRepositoryUrl = "https://github.com/example/manual-intent.git";
-		CreateCachedRepository(cache, recentRepositoryUrl, "main", 64, git: true);
-		CreateCachedRepository(cache, cacheRepositoryUrl, "feature", 64, git: true);
-		CreateCachedRepository(cache, manualRepositoryUrl, "main", 64, git: true);
+		CreateCachedRepository(cache, recentRepositoryUrl, "main", 64, git: true, initializeGit: true);
+		CreateCachedRepository(cache, cacheRepositoryUrl, "feature", 64, git: true, initializeGit: true);
+		CreateCachedRepository(cache, manualRepositoryUrl, "main", 64, git: true, initializeGit: true);
 		var recentStore = new RecentProjectsStore(() => appDataPath);
 		recentStore.AddRepository(recentStore.Load(), recentRepositoryUrl);
 		var git = new OfflineUpdateGitRepositoryService();
@@ -828,6 +829,7 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 			Assert.Null(recentCombo.SelectedItem);
 			Assert.Equal(manualRepositoryUrl, urlTextBox.Text);
 			Assert.Equal(0, git.PullCount);
+			Assert.Equal(0, GetGitCloneActionState(window));
 
 			await UiTestDriver.PressKeyAsync(cloneWindow, Key.Enter);
 			await UiTestDriver.WaitForConditionAsync(
@@ -835,6 +837,7 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 				() => !cloneWindow.IsVisible,
 				"Enter to confirm the manually entered repository URL");
 			await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
+			Assert.Equal(ProjectSourceType.GitClone, viewModel.ProjectSourceType);
 			Assert.Equal(1, git.PullCount);
 			Assert.Equal(0, git.CloneCount);
 
@@ -953,7 +956,7 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 		var appDataPath = CreateAppDataPath();
 		var cache = new RepoCacheService(Path.Combine(appDataPath, "RepoCache"));
 		const string repositoryUrl = "https://github.com/example/network-fallback.git";
-		CreateCachedRepository(cache, repositoryUrl, "feature", 128, git: true);
+		CreateCachedRepository(cache, repositoryUrl, "feature", 128, git: true, initializeGit: true);
 		var git = new OfflineUpdateGitRepositoryService();
 		var window = await CreateWindowAsync(appDataPath, cache, git);
 
@@ -997,7 +1000,7 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 		var appDataPath = CreateAppDataPath();
 		var cache = new RepoCacheService(Path.Combine(appDataPath, "RepoCache"));
 		const string repositoryUrl = "https://github.com/example/progress.git";
-		CreateCachedRepository(cache, repositoryUrl, "main", 128, git: true);
+		CreateCachedRepository(cache, repositoryUrl, "main", 128, git: true, initializeGit: true);
 		var git = new PairedProgressGitRepositoryService();
 		var window = await CreateWindowAsync(appDataPath, cache, git);
 
@@ -1054,8 +1057,8 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 		var cache = new RepoCacheService(Path.Combine(appDataPath, "RepoCache"));
 		const string firstRepositoryUrl = "https://github.com/example/keyboard-first.git";
 		const string secondRepositoryUrl = "https://github.com/example/keyboard-second.git";
-		CreateCachedRepository(cache, firstRepositoryUrl, "main", 64, git: true);
-		CreateCachedRepository(cache, secondRepositoryUrl, "main", 64, git: true);
+		CreateCachedRepository(cache, firstRepositoryUrl, "main", 64, git: true, initializeGit: true);
+		CreateCachedRepository(cache, secondRepositoryUrl, "main", 64, git: true, initializeGit: true);
 		var recentStore = new RecentProjectsStore(() => appDataPath);
 		var recentProjects = recentStore.AddRepository(recentStore.Load(), firstRepositoryUrl);
 		recentStore.AddRepository(recentProjects, secondRepositoryUrl);
@@ -1146,7 +1149,13 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 		var appDataPath = CreateAppDataPath();
 		var cache = new RepoCacheService(Path.Combine(appDataPath, "RepoCache"));
 		const string repositoryUrl = "https://github.com/example/cancel-fetch.git";
-		var repositoryPath = CreateCachedRepository(cache, repositoryUrl, "feature", 64, git: true);
+		var repositoryPath = CreateCachedRepository(
+			cache,
+			repositoryUrl,
+			"feature",
+			64,
+			git: true,
+			initializeGit: true);
 		var git = new CancelableUpdateGitRepositoryService();
 		var window = await CreateWindowAsync(appDataPath, cache, git);
 

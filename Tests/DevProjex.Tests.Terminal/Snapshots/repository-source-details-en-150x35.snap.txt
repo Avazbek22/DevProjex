@@ -1,4 +1,4 @@
- DevProjex Terminal · DevProjex
+ DevProjex Terminal · DevProjex [main]
  https://github.com/Avazbek22/DevProjex
 ┌┤> PROJECT TREE├──────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├────────────────────────────────────┐┌┤  PARAMETERS├──────────────────────┐
 │v [x] DevProjex                       ││DevProjex                                                             ││┌┤Content processing [ ] All (5) ──┐│
@@ -13,7 +13,7 @@
 │                                 │ Repository URL: https://github.com/Avazbek22/DevProjex                        │ ] Tracked Git files only       ┃││
 │                                 │ Branch: main                                                                  │x] Smart ignore                 ┃││
 │                                 │ Commit: <ID-PART>                                                          │x] Empty folders                ┃││
-│                                 │ Size: 0 B                                                                     │x] Empty files                  ┃││
+│                                 │ Size: <REPOSITORY_SIZE>                                                       │x] Empty files                  ┃││
 │                                 │ Last opened: <TIMESTAMP>│x] Hidden folders               ·││
 │                                 │                                                                               │x] Hidden files                 ·││
 │                                 │                                                                               │x] dot folders                  ▼││

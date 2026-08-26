@@ -22,11 +22,25 @@ public static class CompletionScriptGenerator
 		"""
 		_devprojex_complete() {
 		    local command_path
+		    local candidate
+		    local has_filename_candidate=0
+		    local -a current_word_argument=()
 		    command_path="$(command -v devprojex)" || return
+		    if [[ -n "${2-}" ]]; then
+		        current_word_argument=(--bash-current-word="$2")
+		    fi
 		    COMPREPLY=()
-		    while IFS= read -r candidate; do
+		    while IFS= read -r -d '' candidate; do
 		        COMPREPLY+=("$candidate")
-		    done < <("$command_path" dev complete --position "$COMP_POINT" -- "$COMP_LINE")
+		        if [[ "$candidate" == */ || -e "$candidate" ]]; then
+		            has_filename_candidate=1
+		        fi
+		    done < <("$command_path" dev complete --position "$COMP_POINT" \
+		        --position-unit utf8-byte --null \
+		        "${current_word_argument[@]}" -- "$COMP_LINE")
+		    if (( has_filename_candidate )); then
+		        compopt -o filenames 2>/dev/null || true
+		    fi
 		}
 		complete -F _devprojex_complete devprojex
 		""";
@@ -36,10 +50,16 @@ public static class CompletionScriptGenerator
 		#compdef devprojex
 		_devprojex_complete() {
 		    local command_path
+		    local candidate
 		    local -a candidates
+		    local -a displays
 		    command_path="$(whence -p devprojex)" || return
-		    candidates=("${(@f)$("$command_path" dev complete --position "$CURSOR" -- "$BUFFER")}")
-		    _describe 'DevProjex values' candidates
+		    while IFS= read -r -d '' candidate; do
+		        candidates+=("$candidate")
+		        displays+=("${(V)candidate}")
+		    done < <("$command_path" dev complete --position "$CURSOR" \
+		        --position-unit unicode-scalar --null -- "$BUFFER")
+		    compadd -d displays -a candidates
 		}
 		compdef _devprojex_complete devprojex
 		""";
@@ -49,9 +69,10 @@ public static class CompletionScriptGenerator
 		function __devprojex_complete
 		    set -l command_path (command -s devprojex)
 		    test -n "$command_path"; or return
-		    $command_path dev complete --position (commandline -C) -- (commandline)
+		    $command_path dev complete --position (commandline -C) \
+		        --position-unit unicode-scalar --null -- (commandline)
 		end
-		complete -c devprojex -f -a '(__devprojex_complete)'
+		complete -c devprojex -f -a '(__devprojex_complete | string split0)'
 		""";
 
 	private const string PowerShell =

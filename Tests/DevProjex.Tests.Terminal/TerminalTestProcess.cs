@@ -5,6 +5,7 @@ namespace DevProjex.Tests.Terminal;
 internal static class TerminalTestProcess
 {
 	private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
+	private static readonly TimeSpan OutputDrainTimeout = TimeSpan.FromSeconds(2);
 	private static readonly object ExecutionSync = new();
 
 	public static TerminalTestProcessResult Run(
@@ -45,7 +46,20 @@ internal static class TerminalTestProcess
 				$"'{startInfo.FileName}' did not exit within {timeout.TotalSeconds:0} seconds.");
 		}
 
-		Task.WhenAll(standardOutput, standardError).GetAwaiter().GetResult();
+		var redirectedOutput = Task.WhenAll(standardOutput, standardError);
+		try
+		{
+			redirectedOutput.WaitAsync(OutputDrainTimeout).GetAwaiter().GetResult();
+		}
+		catch (TimeoutException)
+		{
+			process.StandardOutput.Dispose();
+			process.StandardError.Dispose();
+			ObserveReaders(standardOutput, standardError);
+			throw new TimeoutException(
+				$"'{startInfo.FileName}' exited, but its redirected output remained open for " +
+				$"more than {OutputDrainTimeout.TotalSeconds:0} seconds.");
+		}
 		return new TerminalTestProcessResult(
 			process.ExitCode,
 			standardOutput.Result,

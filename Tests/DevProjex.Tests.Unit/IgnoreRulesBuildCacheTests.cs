@@ -70,6 +70,52 @@ public sealed class IgnoreRulesBuildCacheTests
 		Assert.All(results, rules => Assert.Same(results[0], rules));
 	}
 
+	#pragma warning disable xUnit1051 // This test verifies cancellation with its own controlled token.
+	[Fact]
+	public async Task GetOrBuild_CancelledWaiterDoesNotWaitForActiveBuild()
+	{
+		var testCancellationToken = TestContext.Current.CancellationToken;
+		using var buildStarted = new ManualResetEventSlim();
+		using var releaseBuild = new ManualResetEventSlim();
+		using var waiterCancellation = new CancellationTokenSource();
+		var buildCount = 0;
+		var cache = new IgnoreRulesBuildCache((_, _, _, _) =>
+		{
+			Interlocked.Increment(ref buildCount);
+			buildStarted.Set();
+			releaseBuild.Wait(testCancellationToken);
+			return CreateRules();
+		});
+
+		var activeBuild = RunOnDedicatedThread(
+			() => cache.GetOrBuild(WorkspacePath, [], selectedRootFolders: null),
+			testCancellationToken);
+		Assert.True(buildStarted.Wait(TimeSpan.FromSeconds(2), testCancellationToken));
+
+		var waitingBuild = RunOnDedicatedThread(
+			() => Assert.ThrowsAny<OperationCanceledException>(() =>
+				cache.GetOrBuildWithCancellation(
+					WorkspacePath,
+					[IgnoreOptionId.SmartIgnore],
+					selectedRootFolders: null,
+					waiterCancellation.Token)),
+			testCancellationToken);
+		waiterCancellation.Cancel();
+
+		try
+		{
+			await waitingBuild.WaitAsync(TimeSpan.FromSeconds(2), testCancellationToken);
+		}
+		finally
+		{
+			releaseBuild.Set();
+		}
+
+		await activeBuild;
+		Assert.Equal(1, buildCount);
+	}
+	#pragma warning restore xUnit1051
+
 	[Fact]
 	public void GetOrBuild_ChangedSelectionAndInvalidationBothRebuild()
 	{

@@ -98,6 +98,25 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public void RootRegistryDoesNotExposeMutableAllowedRoots()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var outside = workspace.CreateFolder("outside");
+		var registry = new McpRootRegistry([project]);
+		var exposedRoots = Assert.IsAssignableFrom<IList<string>>(registry.Roots);
+
+		Assert.True(exposedRoots.IsReadOnly);
+		Assert.Throws<NotSupportedException>(() => exposedRoots[0] = outside);
+		Assert.Equal(
+			McpRootRegistry.ResolvePhysicalExistingPath(project, requireDirectory: true),
+			registry.ResolveProject(project));
+		Assert.Equal(
+			McpErrorCodes.UnknownProject,
+			Assert.Throws<McpToolException>(() => registry.ResolveProject(outside)).Code);
+	}
+
+	[Fact]
 	public void RootRegistryRejectsEmptyConfiguredRoot()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -105,6 +124,27 @@ public sealed class McpInfrastructureTests
 
 		Assert.Throws<ArgumentException>(() =>
 			new McpRootRegistry([project, string.Empty]));
+	}
+
+	[Fact]
+	public void RootRegistryAllowsSelectingAWhitespaceOnlyUnixRoot()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Whitespace-only path segments are invalid on Windows.");
+			return;
+		}
+
+		using var workspace = new TemporaryDirectory();
+		var whitespaceRoot = workspace.CreateFolder(" ");
+		var otherRoot = workspace.CreateFolder("other");
+		var registry = new McpRootRegistry([whitespaceRoot, otherRoot]);
+
+		var resolved = registry.ResolveProject(whitespaceRoot);
+
+		Assert.True(PathComparer.Default.Equals(
+			McpRootRegistry.ResolvePhysicalExistingPath(whitespaceRoot, requireDirectory: true),
+			resolved));
 	}
 
 	[Fact]
@@ -234,6 +274,38 @@ public sealed class McpInfrastructureTests
 		var file = workspace.CreateFile("project/literal\\name.txt", "content");
 
 		Assert.Equal("literal\\name.txt", McpProjectService.ToRelative(project, file));
+	}
+
+	[Fact]
+	public void McpRequestedPathsSelectExactFilesAndDirectoryDescendants()
+	{
+		using var workspace = new TemporaryDirectory();
+		var sourceDirectory = PathUtility.Normalize(workspace.CreateFolder("project/src"));
+		var exactFile = PathUtility.Normalize(workspace.CreateFile("project/README.md", "readme"));
+		var nestedFile = PathUtility.Normalize(workspace.CreateFile("project/src/nested/File.cs", "code"));
+		var siblingFile = PathUtility.Normalize(workspace.CreateFile("project/tests/Test.cs", "test"));
+		var requestedPaths = new HashSet<string>(PathComparer.Default)
+		{
+			sourceDirectory,
+			exactFile
+		};
+		var requestedDirectories = new HashSet<string>(PathComparer.Default)
+		{
+			sourceDirectory
+		};
+
+		Assert.True(McpProjectService.MatchesRequested(
+			exactFile,
+			requestedPaths,
+			requestedDirectories));
+		Assert.True(McpProjectService.MatchesRequested(
+			nestedFile,
+			requestedPaths,
+			requestedDirectories));
+		Assert.False(McpProjectService.MatchesRequested(
+			siblingFile,
+			requestedPaths,
+			requestedDirectories));
 	}
 
 	[Theory]
@@ -515,6 +587,76 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public void PackStorageRemovesItsSessionDirectoryWhenLeaseCreationFails()
+	{
+		using var workspace = new TemporaryDirectory();
+		string? sessionDirectory = null;
+
+		var exception = Record.Exception(() => new McpPackRegistry(
+			workspace.Path,
+			timeProvider: null,
+			maximumPackBytes: McpPackRegistry.MaximumPackBytes,
+			maximumSessionBytes: McpPackRegistry.MaximumSessionBytes,
+			onSessionDirectoryCreated: path =>
+			{
+				sessionDirectory = path;
+				Directory.CreateDirectory(Path.Combine(path, ".session.lock"));
+			}));
+
+		Assert.True(exception is IOException or UnauthorizedAccessException, exception?.ToString());
+		Assert.NotNull(sessionDirectory);
+		Assert.False(Directory.Exists(sessionDirectory));
+	}
+
+	[Fact]
+	public async Task PackCreationTracksUtf8MetricsAcrossWriteBoundaries()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var registry = new McpPackRegistry(workspace.Path);
+		const string content = "alpha α\r\nemoji 😀\rtail\n";
+		var bytes = Encoding.UTF8.GetBytes(content);
+
+		var pack = await registry.CreateAsync(
+			async (stream, token) =>
+			{
+				for (var index = 0; index < bytes.Length; index++)
+					await stream.WriteAsync(bytes.AsMemory(index, 1), token);
+			},
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(content.Length, pack.Characters);
+		Assert.Equal(4, pack.Lines);
+		Assert.Equal(bytes.Length, pack.Bytes);
+		Assert.Equal(content, await File.ReadAllTextAsync(pack.Path, TestContext.Current.CancellationToken));
+	}
+
+	[Fact]
+	public async Task PackCreationDoesNotPublishWhenCancellationArrivesAfterWriting()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var registry = new McpPackRegistry(
+			workspace.Path,
+			timeProvider: null,
+			maximumPackBytes: 16,
+			maximumSessionBytes: 16);
+		using var cancellation = new CancellationTokenSource();
+
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(() => registry.CreateAsync(
+			async (stream, _) =>
+			{
+				await stream.WriteAsync("redacted"u8.ToArray());
+				cancellation.Cancel();
+			},
+			cancellation.Token));
+
+		Assert.Empty(Directory.EnumerateFiles(registry.SessionDirectory, "*.pack"));
+		var replacement = await registry.CreateAsync(
+			async (stream, token) => await stream.WriteAsync(new byte[16], token),
+			TestContext.Current.CancellationToken);
+		Assert.Equal(16, replacement.Bytes);
+	}
+
+	[Fact]
 	public async Task PackStorageIsPrivateToTheCurrentUnixUser()
 	{
 		if (OperatingSystem.IsWindows())
@@ -562,6 +704,62 @@ public sealed class McpInfrastructureTests
 			TestContext.Current.CancellationToken));
 
 		Assert.Same(expected, actual);
+	}
+
+	[Fact]
+	public async Task PackRegistryDisposeDuringCreateRejectsPublicationAndRemovesSession()
+	{
+		using var workspace = new TemporaryDirectory();
+		var registry = new McpPackRegistry(workspace.Path);
+		var sessionDirectory = registry.SessionDirectory;
+		var writerStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var releaseWriter = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var create = registry.CreateAsync(
+			async (stream, token) =>
+			{
+				await stream.WriteAsync("first"u8.ToArray(), token);
+				writerStarted.TrySetResult();
+				await releaseWriter.Task.WaitAsync(token);
+				await stream.WriteAsync("second"u8.ToArray(), token);
+			},
+			TestContext.Current.CancellationToken);
+		await writerStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+
+		registry.Dispose();
+		releaseWriter.TrySetResult();
+
+		await Assert.ThrowsAsync<ObjectDisposedException>(() => create);
+		Assert.False(Directory.Exists(sessionDirectory));
+	}
+
+	[Fact]
+	public async Task PackRegistryDisposeDuringCreateKeepsSessionLeaseUntilWriterFinishes()
+	{
+		using var workspace = new TemporaryDirectory();
+		var registry = new McpPackRegistry(workspace.Path);
+		var leasePath = Path.Combine(registry.SessionDirectory, ".session.lock");
+		var writerStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var releaseWriter = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var create = registry.CreateAsync(
+			async (stream, token) =>
+			{
+				await stream.WriteAsync("first"u8.ToArray(), token);
+				writerStarted.TrySetResult();
+				await releaseWriter.Task.WaitAsync(token);
+			},
+			TestContext.Current.CancellationToken);
+		await writerStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+
+		registry.Dispose();
+
+		Assert.Throws<IOException>(() => new FileStream(
+			leasePath,
+			FileMode.Open,
+			FileAccess.ReadWrite,
+			FileShare.Delete));
+
+		releaseWriter.TrySetResult();
+		await Assert.ThrowsAsync<ObjectDisposedException>(() => create);
 	}
 
 	[Fact]

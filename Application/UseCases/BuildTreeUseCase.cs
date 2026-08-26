@@ -25,7 +25,7 @@ public sealed class BuildTreeUseCase(ITreeBuilder treeBuilder, TreeNodePresentat
 	public BuildTreeResult Execute(BuildTreeRequest request, CancellationToken cancellationToken = default)
 	{
 		var result = treeBuilder.Build(request.RootPath, request.Filter, cancellationToken);
-		var presentation = presenter.BuildWithFilePaths(result.Root);
+		var presentation = presenter.BuildWithFilePathsWithCancellation(result.Root, cancellationToken);
 
 		return new BuildTreeResult(
 			presentation.Root,
@@ -53,7 +53,7 @@ public sealed class BuildTreeUseCase(ITreeBuilder treeBuilder, TreeNodePresentat
 			inventory,
 			request.Filter,
 			cancellationToken);
-		var presentation = presenter.BuildWithFilePaths(result.Root);
+		var presentation = presenter.BuildWithFilePathsWithCancellation(result.Root, cancellationToken);
 		return new BuildTreeSnapshotResult(
 			new BuildTreeResult(
 				presentation.Root,
@@ -78,7 +78,7 @@ public sealed class BuildTreeUseCase(ITreeBuilder treeBuilder, TreeNodePresentat
 			inventory,
 			request.Filter,
 			cancellationToken);
-		var presentation = presenter.BuildWithFilePaths(result.Root);
+		var presentation = presenter.BuildWithFilePathsWithCancellation(result.Root, cancellationToken);
 		return new BuildTreeSnapshotResult(
 			new BuildTreeResult(
 				presentation.Root,

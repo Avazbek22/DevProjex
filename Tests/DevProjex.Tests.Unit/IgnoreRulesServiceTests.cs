@@ -120,5 +120,29 @@ public sealed class IgnoreRulesServiceTests
 		Assert.Contains("cache", rules.SmartIgnoredFolders);
 		Assert.Contains("thumbs.db", rules.SmartIgnoredFiles);
 	}
+
+	[Fact]
+	public void BuildWithCancellation_StopsWhenCancellationArrivesDuringScopedSmartIgnoreBuild()
+	{
+		using var temp = new TemporaryDirectory();
+		using var cancellation = new CancellationTokenSource();
+		var smart = new SmartIgnoreService([new CancelingSmartIgnoreRule(cancellation)]);
+		var service = new IgnoreRulesService(smart);
+
+		Assert.Throws<OperationCanceledException>(() => service.BuildWithCancellation(
+			temp.Path,
+			[IgnoreOptionId.SmartIgnore],
+			selectedRootFolders: null,
+			cancellation.Token));
+	}
+
+	private sealed class CancelingSmartIgnoreRule(CancellationTokenSource cancellation) : ISmartIgnoreRule
+	{
+		public SmartIgnoreResult Evaluate(string rootPath)
+		{
+			cancellation.Cancel();
+			return SmartIgnoreResult.Empty;
+		}
+	}
 }
 

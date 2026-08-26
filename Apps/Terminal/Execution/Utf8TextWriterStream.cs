@@ -10,6 +10,8 @@ internal sealed class Utf8TextWriterStream(
 		encoderShouldEmitUTF8Identifier: false,
 		throwOnInvalidBytes: true);
 	private readonly Decoder _decoder = StrictUtf8.GetDecoder();
+	private char[]? _characterBuffer = ArrayPool<char>.Shared.Rent(
+		StrictUtf8.GetMaxCharCount(16 * 1024));
 	private bool _completed;
 
 	public override bool CanRead => false;
@@ -32,6 +34,7 @@ internal sealed class Utf8TextWriterStream(
 			.ConfigureAwait(false);
 		await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
 		_completed = true;
+		ReleaseCharacterBuffer();
 	}
 
 	public override void Flush() => writer.Flush();
@@ -89,47 +92,58 @@ internal sealed class Utf8TextWriterStream(
 
 	protected override void Dispose(bool disposing)
 	{
-		if (disposing && !_completed)
+		if (disposing)
 		{
-			lifetimeCancellationToken.ThrowIfCancellationRequested();
-			Decode(ReadOnlySpan<byte>.Empty, flush: true);
-			writer.Flush();
-			_completed = true;
+			try
+			{
+				if (!_completed)
+				{
+					lifetimeCancellationToken.ThrowIfCancellationRequested();
+					Decode(ReadOnlySpan<byte>.Empty, flush: true);
+					writer.Flush();
+					_completed = true;
+				}
+			}
+			finally
+			{
+				_completed = true;
+				ReleaseCharacterBuffer();
+			}
 		}
 		base.Dispose(disposing);
 	}
 
 	public override async ValueTask DisposeAsync()
 	{
-		await CompleteAsync(lifetimeCancellationToken).ConfigureAwait(false);
-		GC.SuppressFinalize(this);
+		try
+		{
+			await CompleteAsync(lifetimeCancellationToken).ConfigureAwait(false);
+		}
+		finally
+		{
+			_completed = true;
+			ReleaseCharacterBuffer();
+			GC.SuppressFinalize(this);
+		}
 	}
 
 	private void Decode(ReadOnlySpan<byte> bytes, bool flush)
 	{
-		var characterBuffer = ArrayPool<char>.Shared.Rent(
-			Math.Max(1, StrictUtf8.GetMaxCharCount(Math.Min(bytes.Length, 16 * 1024))));
-		try
+		var characterBuffer = GetCharacterBuffer();
+		while (!bytes.IsEmpty || flush)
 		{
-			while (!bytes.IsEmpty || flush)
-			{
-				_decoder.Convert(
-					bytes,
-					characterBuffer,
-					flush,
-					out var bytesUsed,
-					out var charactersUsed,
-					out var completed);
-				if (charactersUsed > 0)
-					writer.Write(characterBuffer, 0, charactersUsed);
-				bytes = bytes[bytesUsed..];
-				if (completed)
-					break;
-			}
-		}
-		finally
-		{
-			ArrayPool<char>.Shared.Return(characterBuffer);
+			_decoder.Convert(
+				bytes,
+				characterBuffer,
+				flush,
+				out var bytesUsed,
+				out var charactersUsed,
+				out var completed);
+			if (charactersUsed > 0)
+				writer.Write(characterBuffer, 0, charactersUsed);
+			bytes = bytes[bytesUsed..];
+			if (completed)
+				break;
 		}
 	}
 
@@ -138,36 +152,38 @@ internal sealed class Utf8TextWriterStream(
 		bool flush,
 		CancellationToken cancellationToken)
 	{
-		var characterBuffer = ArrayPool<char>.Shared.Rent(
-			Math.Max(1, StrictUtf8.GetMaxCharCount(Math.Min(bytes.Length, 16 * 1024))));
-		try
+		var characterBuffer = GetCharacterBuffer();
+		while (!bytes.IsEmpty || flush)
 		{
-			while (!bytes.IsEmpty || flush)
+			cancellationToken.ThrowIfCancellationRequested();
+			_decoder.Convert(
+				bytes.Span,
+				characterBuffer,
+				flush,
+				out var bytesUsed,
+				out var charactersUsed,
+				out var completed);
+			if (charactersUsed > 0)
 			{
-				cancellationToken.ThrowIfCancellationRequested();
-				_decoder.Convert(
-					bytes.Span,
-					characterBuffer,
-					flush,
-					out var bytesUsed,
-					out var charactersUsed,
-					out var completed);
-				if (charactersUsed > 0)
-				{
-					await writer.WriteAsync(
-							characterBuffer.AsMemory(0, charactersUsed),
-							cancellationToken)
-						.ConfigureAwait(false);
-				}
-				bytes = bytes[bytesUsed..];
-				if (completed)
-					break;
+				await writer.WriteAsync(
+						characterBuffer.AsMemory(0, charactersUsed),
+						cancellationToken)
+					.ConfigureAwait(false);
 			}
+			bytes = bytes[bytesUsed..];
+			if (completed)
+				break;
 		}
-		finally
-		{
-			ArrayPool<char>.Shared.Return(characterBuffer);
-		}
+	}
+
+	private char[] GetCharacterBuffer() =>
+		_characterBuffer ?? throw new ObjectDisposedException(nameof(Utf8TextWriterStream));
+
+	private void ReleaseCharacterBuffer()
+	{
+		var buffer = Interlocked.Exchange(ref _characterBuffer, null);
+		if (buffer is not null)
+			ArrayPool<char>.Shared.Return(buffer, clearArray: true);
 	}
 
 	private void ThrowIfCompleted()

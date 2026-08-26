@@ -30,9 +30,11 @@ public sealed class TerminalRepositoryCloneCoordinatorTests
 			progress: null,
 			phaseChanged: null,
 			TestContext.Current.CancellationToken);
+		var retained = cache.ClearAllCacheWithResult();
 
 		Assert.Equal(1, git.CloneCount);
 		Assert.Equal(firstPath, second.Result.LocalPath, PathComparer.Default);
+		Assert.Equal(new CacheClearResult(0, 1, 0), retained);
 		Assert.Single(cache.ListIndexedRepositories());
 	}
 

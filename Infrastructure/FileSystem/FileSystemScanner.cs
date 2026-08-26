@@ -306,6 +306,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		if (!rootFilePolicyUnavailable && scanPlan.SelectedRoots.Count > 0)
 		{
 			var parallelOptions = ScanParallelismPolicy.CreateOptions(cancellationToken);
+			var fileScanParallelism = ScanParallelismPolicy.PartitionDegreeOfParallelism(
+				scanPlan.SelectedRoots.Count);
 			Parallel.ForEach(
 				scanPlan.SelectedRoots,
 				parallelOptions,
@@ -325,7 +327,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						includeRootDirectoryInRawCounts: true,
 						parallelOptions.CancellationToken,
 						inventoryCapture,
-						gitIgnoreLoadSession);
+						gitIgnoreLoadSession,
+						fileScanParallelism);
 
 					localState.Extensions.UnionWith(snapshot.Value.Extensions);
 					localState.EffectiveExtensions.UnionWith(snapshot.Value.VisibleExtensions);
@@ -430,7 +433,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					rootPath,
 					effectiveRules,
 					cancellationToken,
-					gitIgnoreLoadSession))
+					gitIgnoreLoadSession),
+				cancellationToken)
 			: null;
 		return new ScanResult<ProjectWorkspaceScanSnapshot>(
 			new ProjectWorkspaceScanSnapshot(ignoreSection, treeInventory),
@@ -495,7 +499,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		var gitIgnoreContext = rules.CreateGitIgnoreScanContext(rootPath);
 		var gitIgnoreLoadSession = CreateGitIgnoreLoadSession(rules);
 
-		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
+		if (PathUtility.IsMissingPath(rootPath) || !Directory.Exists(rootPath))
 			return new ScanResult<List<string>>(names, false, false);
 		if (!FileSystemRootEntryPolicy.IsPhysicalDirectory(rootPath))
 			return new ScanResult<List<string>>(names, RootAccessDenied: true, HadAccessDenied: true);
@@ -554,7 +558,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				HadScanFailure: true);
 		}
 
-		names.Sort(ProjectInventoryNameComparer.Compare);
+		CancellationAwareSort.Sort(names, ProjectInventoryNameComparer.Compare, cancellationToken);
 		return new ScanResult<List<string>>(names, false, false);
 	}
 
@@ -1017,7 +1021,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		var useGitIgnore = rules.IsGitIgnoreTraversalEnabled;
 		var gitIgnoreContext = rules.CreateGitIgnoreScanContext(rootPath);
 		var gitIgnoreCandidateContext = rules.CreateGitIgnoreCandidateScanContext(rootPath);
-		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
+		if (PathUtility.IsMissingPath(rootPath) || !Directory.Exists(rootPath))
 		{
 			return new ScanResult<ExtensionsScanData>(
 				new ExtensionsScanData(uniqueExtensions, IgnoreOptionCounts.Empty),
@@ -1384,7 +1388,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		var exts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		var useGitIgnore = rules.IsGitIgnoreTraversalEnabled;
 		var gitIgnoreContext = rules.CreateGitIgnoreScanContext(rootPath);
-		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
+		if (PathUtility.IsMissingPath(rootPath) || !Directory.Exists(rootPath))
 		{
 			return new ScanResult<ExtensionsScanData>(
 				new ExtensionsScanData(exts, IgnoreOptionCounts.Empty),
@@ -1547,7 +1551,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		var effectiveCounts = default(MutableIgnoreOptionCounts);
 		var controllerImpactCounts = IgnoreControllerImpactCounts.Empty;
 
-		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
+		if (PathUtility.IsMissingPath(rootPath) || !Directory.Exists(rootPath))
 		{
 			return new ScanResult<IgnoreSectionScanData>(
 				new IgnoreSectionScanData(
@@ -1765,7 +1769,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		bool includeRootDirectoryInRawCounts,
 		CancellationToken cancellationToken,
 		ProjectTreeInventoryCapture? treeInventoryCapture = null,
-		GitIgnoreMatcherLoadSession? gitIgnoreLoadSession = null)
+		GitIgnoreMatcherLoadSession? gitIgnoreLoadSession = null,
+		int? maximumFileScanParallelism = null)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 		gitIgnoreLoadSession ??= CreateGitIgnoreLoadSession(extensionDiscoveryRules, effectiveRules);
@@ -1987,7 +1992,9 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				return localMetrics;
 			}
 
-			var parallelOptions = ScanParallelismPolicy.CreateOptions(cancellationToken);
+			var parallelOptions = ScanParallelismPolicy.CreateOptions(
+				cancellationToken,
+				maximumFileScanParallelism);
 			Parallel.For(
 				0,
 				directories.Count,
@@ -2079,7 +2086,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					hadAccessDenied == 1,
 					hadScanFailure == 1,
 					discovery.Value.DiscoveredGitIgnoreMatchers,
-					discovery.Value.DiscoveredGitTrackedPathIndexes);
+					discovery.Value.DiscoveredGitTrackedPathIndexes,
+					cancellationToken);
 			}
 
 			return new ScanResult<IgnoreSectionScanData>(
@@ -2114,16 +2122,25 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		bool hadAccessDenied,
 		bool hadScanFailure,
 		IReadOnlyList<ScopedGitIgnoreMatcher> discoveredGitIgnoreMatchers,
-		IReadOnlyList<GitTrackedPathIndex> discoveredGitTrackedPathIndexes)
+		IReadOnlyList<GitTrackedPathIndex> discoveredGitTrackedPathIndexes,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		if (directories.Count == 0 || !treeInventoryDirectoryIncluded[0])
 			return null;
 
-		var childDirectories = BuildIncludedChildDirectoryIndex(directories, treeInventoryDirectoryIncluded);
+		var childDirectories = BuildIncludedChildDirectoryIndex(
+			directories,
+			treeInventoryDirectoryIncluded,
+			cancellationToken);
 		var entries = new List<ProjectTreeInventoryEntry>(Math.Max(1, directories.Count));
 
 		AddDirectoryShell(sourceIndex: 0, parentIndex: -1);
-		PopulateDirectory(sourceIndex: 0, targetIndex: 0);
+		var pendingDirectories = new Stack<(int SourceIndex, int TargetIndex)>();
+		pendingDirectories.Push((SourceIndex: 0, TargetIndex: 0));
+		while (pendingDirectories.TryPop(out var pending))
+			PopulateDirectory(pending.SourceIndex, pending.TargetIndex, pendingDirectories);
+
 		return new ProjectTreeInventorySnapshot(
 			entries,
 			rootAccessDenied,
@@ -2151,8 +2168,12 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			return targetIndex;
 		}
 
-		void PopulateDirectory(int sourceIndex, int targetIndex)
+		void PopulateDirectory(
+			int sourceIndex,
+			int targetIndex,
+			Stack<(int SourceIndex, int TargetIndex)> pending)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			var directoryChildren = childDirectories[sourceIndex];
 			var fileChildren = treeInventoryFiles[sourceIndex];
 			if ((directoryChildren is null || directoryChildren.Count == 0) &&
@@ -2161,8 +2182,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				return;
 			}
 
-			SortDirectoryIndexes(directoryChildren, directories);
-			SortInventoryEntries(fileChildren);
+			SortDirectoryIndexes(directoryChildren, directories, cancellationToken);
+			SortInventoryEntries(fileChildren, cancellationToken);
 
 			// ProjectTreeInventorySnapshot requires every node's direct children to occupy
 			// one contiguous range. Add directory shells and files first, then append each
@@ -2173,6 +2194,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			{
 				foreach (var childSourceIndex in directoryChildren)
 				{
+					cancellationToken.ThrowIfCancellationRequested();
 					var childTargetIndex = AddDirectoryShell(childSourceIndex, targetIndex);
 					childDirectoryPairs.Add((childSourceIndex, childTargetIndex));
 				}
@@ -2182,6 +2204,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			{
 				foreach (var file in fileChildren)
 				{
+					cancellationToken.ThrowIfCancellationRequested();
 					entries.Add(new ProjectTreeInventoryEntry(
 						file.Name,
 						file.FullPath,
@@ -2202,18 +2225,20 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				entries[targetIndex] = parent;
 			}
 
-			foreach (var (childSourceIndex, childTargetIndex) in childDirectoryPairs)
-				PopulateDirectory(childSourceIndex, childTargetIndex);
+			for (var index = childDirectoryPairs.Count - 1; index >= 0; index--)
+				pending.Push(childDirectoryPairs[index]);
 		}
 	}
 
 	private static List<int>?[] BuildIncludedChildDirectoryIndex(
 		IReadOnlyList<EffectiveIgnoreScanNode> directories,
-		bool[] includedDirectories)
+		bool[] includedDirectories,
+		CancellationToken cancellationToken)
 	{
 		var childDirectories = new List<int>?[directories.Count];
 		for (var index = 1; index < directories.Count; index++)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			if (!includedDirectories[index])
 				continue;
 
@@ -2235,8 +2260,10 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		bool hadAccessDenied,
 		bool hadScanFailure,
 		IReadOnlyList<ScopedGitIgnoreMatcher> rootFileGitIgnoreMatchers,
-		GitTrackedPathIndex? rootTrackedPathIndex)
+		GitTrackedPathIndex? rootTrackedPathIndex,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		var rootName = Path.GetFileName(rootPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
 		if (string.IsNullOrEmpty(rootName))
 			rootName = rootPath;
@@ -2254,20 +2281,23 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				length: 0)
 		};
 
-		subtreeInventories.Sort(CompareInventoryRootNames);
-		SortInventoryEntries(rootFileEntries);
+		CancellationAwareSort.Sort(subtreeInventories, CompareInventoryRootNames, cancellationToken);
+		SortInventoryEntries(rootFileEntries, cancellationToken);
 		var discoveredGitIgnoreMatchers = MergeDiscoveredGitIgnoreMatchers(
 			subtreeInventories,
-			rootFileGitIgnoreMatchers);
+			rootFileGitIgnoreMatchers,
+			cancellationToken);
 		var discoveredGitTrackedPathIndexes = MergeDiscoveredGitTrackedPathIndexes(
 			subtreeInventories,
-			rootTrackedPathIndex);
+			rootTrackedPathIndex,
+			cancellationToken);
 
 		var firstChildIndex = entries.Count;
 		var rootChildIndexes = new List<int>(subtreeInventories.Count);
 		var rootChildRelativePaths = new List<string>(subtreeInventories.Count);
 		foreach (var subtree in subtreeInventories)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			ref readonly var subtreeRoot = ref subtree.GetEntryRef(0);
 			var rootChildRelativePath = string.IsNullOrEmpty(subtreeRoot.RelativePath)
 				? subtreeRoot.Name
@@ -2290,6 +2320,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 
 		foreach (var file in rootFileEntries)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			entries.Add(new ProjectTreeInventoryEntry(
 				file.Name,
 				file.FullPath,
@@ -2311,11 +2342,13 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 
 		for (var subtreeIndex = 0; subtreeIndex < subtreeInventories.Count; subtreeIndex++)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			AppendSubtreeInventory(
 				entries,
 				rootChildIndexes[subtreeIndex],
 				rootChildRelativePaths[subtreeIndex],
-				subtreeInventories[subtreeIndex]);
+				subtreeInventories[subtreeIndex],
+				cancellationToken);
 		}
 
 		return new ProjectTreeInventorySnapshot(
@@ -2329,13 +2362,15 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 
 	private static IReadOnlyList<ScopedGitIgnoreMatcher> MergeDiscoveredGitIgnoreMatchers(
 		IReadOnlyList<ProjectTreeInventorySnapshot> inventories,
-		IReadOnlyList<ScopedGitIgnoreMatcher>? additionalMatchers = null)
+		IReadOnlyList<ScopedGitIgnoreMatcher>? additionalMatchers,
+		CancellationToken cancellationToken)
 	{
 		Dictionary<string, ScopedGitIgnoreMatcher>? unique = null;
 		if (additionalMatchers is not null)
 		{
 			foreach (var matcher in additionalMatchers)
 			{
+				cancellationToken.ThrowIfCancellationRequested();
 				unique ??= new Dictionary<string, ScopedGitIgnoreMatcher>(PathComparer.Default);
 				unique[matcher.ScopeRootPath] = matcher;
 			}
@@ -2343,8 +2378,10 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 
 		foreach (var inventory in inventories)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			foreach (var matcher in inventory.DiscoveredGitIgnoreMatchers)
 			{
+				cancellationToken.ThrowIfCancellationRequested();
 				unique ??= new Dictionary<string, ScopedGitIgnoreMatcher>(PathComparer.Default);
 				unique[matcher.ScopeRootPath] = matcher;
 			}
@@ -2354,19 +2391,22 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			return [];
 
 		var merged = unique.Values.ToList();
-		merged.Sort(CompareScopedGitIgnoreMatchers);
+		CancellationAwareSort.Sort(merged, CompareScopedGitIgnoreMatchers, cancellationToken);
 		return merged;
 	}
 
 	private static IReadOnlyList<GitTrackedPathIndex> MergeDiscoveredGitTrackedPathIndexes(
 		IReadOnlyList<ProjectTreeInventorySnapshot> inventories,
-		GitTrackedPathIndex? additionalIndex = null)
+		GitTrackedPathIndex? additionalIndex,
+		CancellationToken cancellationToken)
 	{
 		Dictionary<string, GitTrackedPathIndex>? unique = null;
 		foreach (var inventory in inventories)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			foreach (var index in inventory.DiscoveredGitTrackedPathIndexes)
 			{
+				cancellationToken.ThrowIfCancellationRequested();
 				unique ??= new Dictionary<string, GitTrackedPathIndex>(PathComparer.Default);
 				unique[index.RepositoryRootPath] = index;
 			}
@@ -2382,13 +2422,16 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			return [];
 
 		var merged = unique.Values.ToList();
-		merged.Sort(static (left, right) =>
-		{
-			var depth = left.RepositoryRootPath.Length.CompareTo(right.RepositoryRootPath.Length);
-			return depth != 0
-				? depth
-				: PathComparer.Default.Compare(left.RepositoryRootPath, right.RepositoryRootPath);
-		});
+		CancellationAwareSort.Sort(
+			merged,
+			static (left, right) =>
+			{
+				var depth = left.RepositoryRootPath.Length.CompareTo(right.RepositoryRootPath.Length);
+				return depth != 0
+					? depth
+					: PathComparer.Default.Compare(left.RepositoryRootPath, right.RepositoryRootPath);
+			},
+			cancellationToken);
 		return merged;
 	}
 
@@ -2416,7 +2459,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		List<ProjectTreeInventoryEntry> targetEntries,
 		int rootTargetIndex,
 		string rootRelativePath,
-		ProjectTreeInventorySnapshot subtree)
+		ProjectTreeInventorySnapshot subtree,
+		CancellationToken cancellationToken)
 	{
 		ref readonly var sourceRoot = ref subtree.GetEntryRef(0);
 		if (subtree.Entries.Count == 1)
@@ -2438,6 +2482,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 
 		for (var sourceIndex = 1; sourceIndex < subtree.Entries.Count; sourceIndex++)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			ref readonly var source = ref subtree.GetEntryRef(sourceIndex);
 			var parentIndex = source.ParentIndex == 0
 				? rootTargetIndex
@@ -2473,16 +2518,25 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 
 	private static void SortDirectoryIndexes(
 		List<int>? directoryIndexes,
-		IReadOnlyList<EffectiveIgnoreScanNode> directories)
+		IReadOnlyList<EffectiveIgnoreScanNode> directories,
+		CancellationToken cancellationToken)
 	{
-		directoryIndexes?.Sort((left, right) => ProjectInventoryNameComparer.Compare(
-			directories[left].Name,
-			directories[right].Name));
+		if (directoryIndexes is null)
+			return;
+		CancellationAwareSort.Sort(
+			directoryIndexes,
+			(left, right) => ProjectInventoryNameComparer.Compare(
+				directories[left].Name,
+				directories[right].Name),
+			cancellationToken);
 	}
 
-	private static void SortInventoryEntries(List<ProjectTreeInventoryEntry>? entries)
+	private static void SortInventoryEntries(
+		List<ProjectTreeInventoryEntry>? entries,
+		CancellationToken cancellationToken)
 	{
-		entries?.Sort(CompareInventoryEntries);
+		if (entries is not null)
+			CancellationAwareSort.Sort(entries, CompareInventoryEntries, cancellationToken);
 	}
 
 	private static int CompareInventoryEntries(ProjectTreeInventoryEntry left, ProjectTreeInventoryEntry right)
@@ -2510,7 +2564,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 
-		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
+		if (PathUtility.IsMissingPath(rootPath) || !Directory.Exists(rootPath))
 		{
 			return new ScanResult<EffectiveIgnoreScanDiscovery>(
 				new EffectiveIgnoreScanDiscovery([], [], [], GitWorkspaceEvidence.Empty),
@@ -2827,7 +2881,10 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			}
 		}
 
-		discoveredGitIgnoreMatchers.Sort(CompareScopedGitIgnoreMatchers);
+		CancellationAwareSort.Sort(
+			discoveredGitIgnoreMatchers,
+			CompareScopedGitIgnoreMatchers,
+			cancellationToken);
 		return new ScanResult<EffectiveIgnoreScanDiscovery>(
 			new EffectiveIgnoreScanDiscovery(
 				directories,
@@ -3238,7 +3295,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		var selectedRoots = new List<FileSystemDirectoryEntry>(selectedRootFolders.Count);
 		var directoryToggleCandidates = new List<DirectoryScanFacts>();
 		var controllerImpactCandidates = new List<DirectoryScanFacts>();
-		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
+		if (PathUtility.IsMissingPath(rootPath) || !Directory.Exists(rootPath))
 		{
 			return new RootSelectionScanPlan(
 				selectedRoots,
@@ -3653,7 +3710,10 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		var loadStatus = GitIgnoreMatcherLoadStatus.NotFound;
 		if (!string.IsNullOrWhiteSpace(gitIgnorePath))
 		{
-			var loadResult = loadSession.Load(directoryPath, gitIgnorePath);
+			var loadResult = loadSession.LoadWithCancellation(
+				directoryPath,
+				gitIgnorePath,
+				cancellationToken);
 			scopedMatcher = loadResult.Matcher;
 			loadStatus = loadResult.Status;
 		}

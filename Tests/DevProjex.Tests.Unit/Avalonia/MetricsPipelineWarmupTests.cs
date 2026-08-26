@@ -9,6 +9,33 @@ namespace DevProjex.Tests.Unit.Avalonia;
 [Collection("AvaloniaUI")]
 public sealed class MetricsPipelineWarmupTests
 {
+	[AvaloniaFact]
+	public void ScheduleRecalculate_AfterDispose_DoesNotRecreateDebounceTimer()
+	{
+		using var temp = new TemporaryDirectory();
+		var root = new TreeNodeDescriptor(
+			"root",
+			temp.Path,
+			true,
+			false,
+			"folder",
+			[]);
+		var viewModel = CreateViewModel();
+		var pipeline = CreateMetricsPipeline(
+			viewModel,
+			new BuildTreeResult(root, false, false, []),
+			temp.Path,
+			new FileContentAnalyzer());
+
+		pipeline.Dispose();
+		pipeline.ScheduleRecalculate();
+
+		var timer = typeof(MetricsPipeline).GetField(
+			"_metricsDebounceTimer",
+			BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(pipeline);
+		Assert.Null(timer);
+	}
+
     [AvaloniaFact]
     public async Task InitializeFileMetricsCacheAsync_PendingVisualGate_DefersAllFileIoUntilReveal()
     {

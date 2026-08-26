@@ -5,17 +5,26 @@ namespace DevProjex.Application.Services;
 public sealed class ProjectCopyExportPlanBuilder
 {
 	public ProjectCopyExportPlan Build(ProjectCopyExportRequest request)
+		=> Build(request, CancellationToken.None);
+
+	public ProjectCopyExportPlan Build(
+		ProjectCopyExportRequest request,
+		CancellationToken cancellationToken)
 	{
 		ArgumentNullException.ThrowIfNull(request);
 		ArgumentNullException.ThrowIfNull(request.TreeRoot);
 		ArgumentNullException.ThrowIfNull(request.SelectedPaths);
+		cancellationToken.ThrowIfCancellationRequested();
 
 		if (string.IsNullOrWhiteSpace(request.ProjectRootPath))
 			throw InvalidRequest("The project root path is required.");
 
 		var rootPath = PathUtility.Normalize(request.ProjectRootPath);
 		var projectName = NormalizeProjectName(request.ProjectName, rootPath);
-		var nodes = ProjectTreeSelectionProjection.BuildIncludedNodes(request.TreeRoot, request.SelectedPaths);
+		var nodes = ProjectTreeSelectionProjection.BuildIncludedNodesWithCancellation(
+			request.TreeRoot,
+			request.SelectedPaths,
+			cancellationToken);
 		if (nodes.Count == 0)
 			throw InvalidRequest("The selected paths do not belong to the effective project tree.");
 
@@ -23,6 +32,7 @@ public sealed class ProjectCopyExportPlanBuilder
 		var relativePaths = new HashSet<string>(PathComparer.Default);
 		foreach (var node in nodes)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			var sourcePath = PathUtility.Normalize(node.FullPath);
 			if (!PathUtility.IsPathInside(sourcePath, rootPath))
 			{
@@ -46,7 +56,7 @@ public sealed class ProjectCopyExportPlanBuilder
 				entries.Add(new ProjectCopyExportPlanEntry(sourcePath, relativePath, node.IsDirectory));
 		}
 
-		entries.Sort(CompareEntries);
+		CancellationAwareSort.Sort(entries, CompareEntries, cancellationToken);
 		return new ProjectCopyExportPlan(rootPath, projectName, entries);
 	}
 

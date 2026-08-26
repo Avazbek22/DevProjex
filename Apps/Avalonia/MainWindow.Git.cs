@@ -18,7 +18,7 @@ public partial class MainWindow
             e.Handled = true;
             return;
         }
-        if (Interlocked.CompareExchange(ref _gitCloneActionInProgress, 1, 0) != 0)
+        if (Interlocked.CompareExchange(ref _gitCloneDialogOpenInProgress, 1, 0) != 0)
         {
             e.Handled = true;
             return;
@@ -63,7 +63,7 @@ public partial class MainWindow
         }
         finally
         {
-            Volatile.Write(ref _gitCloneActionInProgress, 0);
+            Volatile.Write(ref _gitCloneDialogOpenInProgress, 0);
             e.Handled = true;
         }
     }

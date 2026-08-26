@@ -22,7 +22,7 @@ public sealed class ScanOptionsUseCase(IFileSystemScannerProjectWorkspaceScanner
 			effectiveExtensionPolicy: null,
 			captureTreeInventory: false,
 			cancellationToken: cancellationToken);
-		var extensions = SortExtensions(workspace.Value.IgnoreSection.Extensions);
+		var extensions = SortExtensions(workspace.Value.IgnoreSection.Extensions, cancellationToken);
 
 		return new ScanOptionsResult(
 			Extensions: extensions,
@@ -41,7 +41,7 @@ public sealed class ScanOptionsUseCase(IFileSystemScannerProjectWorkspaceScanner
 
 		var scan = scanner.GetRootFolderNames(rootPath, ignoreRules, cancellationToken);
 		var rootFolders = new List<string>(scan.Value);
-		rootFolders.Sort(PathComparer.Default);
+		CancellationAwareSort.Sort(rootFolders, PathComparer.Default, cancellationToken);
 		return new ScanResult<List<string>>(
 			rootFolders,
 			scan.RootAccessDenied,
@@ -244,10 +244,12 @@ public sealed class ScanOptionsUseCase(IFileSystemScannerProjectWorkspaceScanner
 			cancellationToken);
 	}
 
-	private static List<string> SortExtensions(IReadOnlyCollection<string> extensions)
+	private static List<string> SortExtensions(
+		IReadOnlyCollection<string> extensions,
+		CancellationToken cancellationToken)
 	{
 		var sorted = new List<string>(extensions);
-		sorted.Sort(StringComparer.OrdinalIgnoreCase);
+		CancellationAwareSort.Sort(sorted, StringComparer.OrdinalIgnoreCase, cancellationToken);
 		return sorted;
 	}
 }

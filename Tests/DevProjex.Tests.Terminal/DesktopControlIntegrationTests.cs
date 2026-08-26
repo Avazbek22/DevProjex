@@ -372,6 +372,112 @@ public sealed class DesktopControlIntegrationTests
 	}
 
 	[Fact]
+	public async Task RegistryPreservesLiveRegistrationWithUnsupportedProtocol()
+	{
+		using var workspace = new TemporaryDirectory();
+		var paths = new DesktopControlPaths(() => workspace.Path);
+		var registration = CreateLiveRegistration(
+			"future-live",
+			workspace.Path,
+			Process.GetCurrentProcess().StartTime.ToUniversalTime().Ticks) with
+		{
+			ProtocolVersion = DesktopProtocol.CurrentVersion + 1
+		};
+		await WriteRegistrationAsync(paths, registration);
+
+		var snapshot = await new DesktopInstanceRegistry(paths).ProbeAsync(
+			removeStale: true,
+			TestContext.Current.CancellationToken);
+
+		Assert.Empty(snapshot.Instances);
+		Assert.Equal(0, snapshot.StaleEntryCount);
+		Assert.True(File.Exists(paths.GetRegistrationPath(registration.InstanceId)));
+	}
+
+	[Fact]
+	public async Task RegistryRemovesStaleRegistrationWithUnsupportedProtocol()
+	{
+		using var workspace = new TemporaryDirectory();
+		var paths = new DesktopControlPaths(() => workspace.Path);
+		var registration = CreateLiveRegistration(
+			"future-stale",
+			workspace.Path,
+			Process.GetCurrentProcess().StartTime.ToUniversalTime().Ticks - TimeSpan.FromHours(1).Ticks) with
+		{
+			ProtocolVersion = DesktopProtocol.CurrentVersion + 1
+		};
+		await WriteRegistrationAsync(paths, registration);
+
+		var snapshot = await new DesktopInstanceRegistry(paths).ProbeAsync(
+			removeStale: true,
+			TestContext.Current.CancellationToken);
+
+		Assert.Empty(snapshot.Instances);
+		Assert.Equal(1, snapshot.StaleEntryCount);
+		Assert.False(File.Exists(paths.GetRegistrationPath(registration.InstanceId)));
+	}
+
+	[Fact]
+	public async Task RegistryProbeRemovesOnlyOwnedStaleRegistrationTemporaryFiles()
+	{
+		using var workspace = new TemporaryDirectory();
+		var paths = new DesktopControlPaths(() => workspace.Path);
+		Directory.CreateDirectory(paths.RegistryDirectory);
+		var oldOwned = Path.Combine(
+			paths.RegistryDirectory,
+			"stale.json.0123456789abcdef0123456789abcdef.tmp");
+		var freshOwned = Path.Combine(
+			paths.RegistryDirectory,
+			"fresh.json.abcdef0123456789abcdef0123456789.tmp");
+		var foreign = Path.Combine(paths.RegistryDirectory, "unrelated.tmp");
+		await File.WriteAllTextAsync(oldOwned, "partial", TestContext.Current.CancellationToken);
+		await File.WriteAllTextAsync(freshOwned, "partial", TestContext.Current.CancellationToken);
+		await File.WriteAllTextAsync(foreign, "keep", TestContext.Current.CancellationToken);
+		File.SetLastWriteTimeUtc(oldOwned, DateTime.UtcNow - TimeSpan.FromDays(2));
+
+		var snapshot = await new DesktopInstanceRegistry(paths).ProbeAsync(
+			removeStale: true,
+			TestContext.Current.CancellationToken);
+
+		Assert.Empty(snapshot.Instances);
+		Assert.Equal(0, snapshot.StaleEntryCount);
+		Assert.False(File.Exists(oldOwned));
+		Assert.True(File.Exists(freshOwned));
+		Assert.True(File.Exists(foreign));
+	}
+
+	[Fact]
+	public async Task RegistryProbeDoesNotTraverseLinkedRegistryDirectory()
+	{
+		using var workspace = new TemporaryDirectory();
+		var paths = new DesktopControlPaths(() => workspace.CreateDirectory("ipc"));
+		var protectedDirectory = workspace.CreateDirectory("protected");
+		var protectedRegistration = Path.Combine(protectedDirectory, "unrelated.json");
+		await File.WriteAllTextAsync(
+			protectedRegistration,
+			"keep",
+			TestContext.Current.CancellationToken);
+		Directory.CreateDirectory(paths.RootDirectory);
+		try
+		{
+			Directory.CreateSymbolicLink(paths.RegistryDirectory, protectedDirectory);
+		}
+		catch (Exception exception) when (exception is
+		       IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+		{
+			Assert.Skip("Directory symbolic links are unavailable in this test environment.");
+		}
+
+		var snapshot = await new DesktopInstanceRegistry(paths).ProbeAsync(
+			removeStale: true,
+			TestContext.Current.CancellationToken);
+
+		Assert.Empty(snapshot.Instances);
+		Assert.Equal(0, snapshot.StaleEntryCount);
+		Assert.True(File.Exists(protectedRegistration));
+	}
+
+	[Fact]
 	public async Task RegistryRemovesDanglingRegistrationLinksOnUnix()
 	{
 		if (OperatingSystem.IsWindows())
@@ -1037,6 +1143,20 @@ public sealed class DesktopControlIntegrationTests
 			OperatingSystem.IsWindows()
 				? $"devprojex-{instanceId}"
 				: Path.Combine(Path.GetTempPath(), $"dpx-{instanceId}.sock"));
+
+	private static async Task WriteRegistrationAsync(
+		DesktopControlPaths paths,
+		DesktopInstanceRegistration registration)
+	{
+		DesktopInstanceRegistry.EnsurePrivateDirectory(paths.RegistryDirectory);
+		await File.WriteAllTextAsync(
+			paths.GetRegistrationPath(registration.InstanceId),
+			JsonSerializer.Serialize(registration, new JsonSerializerOptions
+			{
+				PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+			}),
+			TestContext.Current.CancellationToken);
+	}
 
 	private static async Task<string> SendRawAsync(
 		DesktopInstanceRegistration registration,

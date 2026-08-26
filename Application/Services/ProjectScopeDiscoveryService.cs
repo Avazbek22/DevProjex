@@ -156,10 +156,17 @@ public sealed class ProjectScopeDiscoveryService(
 
 	public ProjectScanContext Discover(
 		string rootPath,
-		IReadOnlyCollection<string>? selectedRootFolders)
+		IReadOnlyCollection<string>? selectedRootFolders) =>
+		DiscoverWithCancellation(rootPath, selectedRootFolders, CancellationToken.None);
+
+	public ProjectScanContext DiscoverWithCancellation(
+		string rootPath,
+		IReadOnlyCollection<string>? selectedRootFolders,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		IgnorePipelineDiagnostics.RecordProjectScopeDiscovery();
-		if (string.IsNullOrWhiteSpace(rootPath))
+		if (PathUtility.IsMissingPath(rootPath))
 			return ProjectScanContext.Empty;
 
 		string normalizedRoot;
@@ -200,7 +207,9 @@ public sealed class ProjectScopeDiscoveryService(
 		ScopeDiscoveryStamp discoveryStamp;
 		try
 		{
-			var rootFactsCache = new ProjectRootFactsOperationCache(_rootFactsProvider);
+			var rootFactsCache = new ProjectRootFactsOperationCache(
+				_rootFactsProvider,
+				cancellationToken);
 			var rootFacts = rootFactsCache.Get(normalizedRoot);
 			if (!rootFacts.Exists)
 			{
@@ -208,8 +217,12 @@ public sealed class ProjectScopeDiscoveryService(
 				return ProjectScanContext.Empty;
 			}
 
-			context = BuildProjectScanContext(rootFacts, selectedRootFolders, rootFactsCache);
-			discoveryStamp = rootFactsCache.CreateDiscoveryStamp();
+			context = BuildProjectScanContext(
+				rootFacts,
+				selectedRootFolders,
+				rootFactsCache,
+				cancellationToken);
+			discoveryStamp = rootFactsCache.CreateDiscoveryStamp(cancellationToken);
 		}
 		catch
 		{
@@ -402,8 +415,10 @@ public sealed class ProjectScopeDiscoveryService(
 	private ProjectScanContext BuildProjectScanContext(
 		ProjectRootFacts rootFacts,
 		IReadOnlyCollection<string>? selectedRootFolders,
-		ProjectRootFactsOperationCache rootFactsCache)
+		ProjectRootFactsOperationCache rootFactsCache,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		var rootPath = rootFacts.RootPath;
 		var hasExplicitRootSelection = selectedRootFolders is not null && selectedRootFolders.Count > 0;
 		var rootHasGitIgnore = rootFacts.HasGitIgnoreFile;
@@ -413,7 +428,10 @@ public sealed class ProjectScopeDiscoveryService(
 		// The generic artifact matcher handles dependency/build/cache folders later, after
 		// the selected roots are known. Keeping discovery conservative prevents home-folder
 		// and monorepo opens from turning dependency forests into fake project scopes.
-		var candidateDirectories = ResolveCandidateDirectories(rootFacts, selectedRootFolders);
+		var candidateDirectories = ResolveCandidateDirectories(
+			rootFacts,
+			selectedRootFolders,
+			cancellationToken);
 
 		if (candidateDirectories.Count == 0)
 		{
@@ -434,7 +452,7 @@ public sealed class ProjectScopeDiscoveryService(
 		var scopedCandidatesSync = new object();
 		Parallel.ForEach(
 			candidateDirectories,
-			ScanParallelismPolicy.CreateOptions(),
+			ScanParallelismPolicy.CreateOptions(cancellationToken),
 			static () => new List<ProjectScope>(),
 			(directoryPath, _, localCandidates) =>
 			{
@@ -469,8 +487,11 @@ public sealed class ProjectScopeDiscoveryService(
 					scopedCandidates.AddRange(localCandidates);
 			});
 
-		var candidates = SortScopes(scopedCandidates).ToArray();
-		var expandedCandidates = ExpandCandidatesWithNestedProjectScopes(candidates, rootFactsCache);
+		var candidates = SortScopes(scopedCandidates, cancellationToken).ToArray();
+		var expandedCandidates = ExpandCandidatesWithNestedProjectScopes(
+			candidates,
+			rootFactsCache,
+			cancellationToken);
 
 		if (hasExplicitRootSelection)
 		{
@@ -525,8 +546,10 @@ public sealed class ProjectScopeDiscoveryService(
 
 	private ProjectScope[] ExpandCandidatesWithNestedProjectScopes(
 		IReadOnlyList<ProjectScope> candidates,
-		ProjectRootFactsOperationCache rootFactsCache)
+		ProjectRootFactsOperationCache rootFactsCache,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		if (candidates.Count == 0)
 			return [];
 
@@ -535,7 +558,7 @@ public sealed class ProjectScopeDiscoveryService(
 
 		Parallel.ForEach(
 			candidates,
-			ScanParallelismPolicy.CreateOptions(),
+			ScanParallelismPolicy.CreateOptions(cancellationToken),
 			static () => new List<ProjectScope>(),
 			(candidate, _, localScopes) =>
 			{
@@ -547,7 +570,8 @@ public sealed class ProjectScopeDiscoveryService(
 							 candidate.RootPath,
 							 probe.MaxDepth,
 							 probe.MaxDirectories,
-							 rootFactsCache))
+							 rootFactsCache,
+							 cancellationToken))
 				{
 					var childFacts = rootFactsCache.Get(childPath);
 					var hasGitIgnore = childFacts.HasGitIgnoreFile;
@@ -594,7 +618,7 @@ public sealed class ProjectScopeDiscoveryService(
 				cachedScope = scope;
 		}
 
-		return SortScopes(uniqueScopes.Values).ToArray();
+		return SortScopes(uniqueScopes.Values, cancellationToken).ToArray();
 	}
 
 	private static NestedProjectProbe ResolveNestedProjectProbe(ProjectRootFacts candidateFacts)
@@ -622,10 +646,15 @@ public sealed class ProjectScopeDiscoveryService(
 			DefaultNestedProjectProbeMaxDirectoriesPerScope);
 	}
 
-	private static List<ProjectScope> SortScopes(IEnumerable<ProjectScope> scopes)
+	private static List<ProjectScope> SortScopes(
+		IEnumerable<ProjectScope> scopes,
+		CancellationToken cancellationToken)
 	{
 		var result = new List<ProjectScope>(scopes);
-		result.Sort((a, b) => PathComparer.Default.Compare(a.RootPath, b.RootPath));
+		CancellationAwareSort.Sort(
+			result,
+			(a, b) => PathComparer.Default.Compare(a.RootPath, b.RootPath),
+			cancellationToken);
 		return result;
 	}
 
@@ -633,8 +662,10 @@ public sealed class ProjectScopeDiscoveryService(
 		string rootPath,
 		int maxDepth,
 		int maxDirectories,
-		ProjectRootFactsOperationCache rootFactsCache)
+		ProjectRootFactsOperationCache rootFactsCache,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		if (maxDepth <= 0 || maxDirectories <= 0)
 			yield break;
 
@@ -644,6 +675,7 @@ public sealed class ProjectScopeDiscoveryService(
 
 		while (queue.Count > 0 && discovered < maxDirectories)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			var (currentPath, currentDepth) = queue.Dequeue();
 			if (currentDepth >= maxDepth)
 				continue;
@@ -652,6 +684,7 @@ public sealed class ProjectScopeDiscoveryService(
 
 			foreach (var childPath in children)
 			{
+				cancellationToken.ThrowIfCancellationRequested();
 				if (ShouldSkipProjectScopeTraversal(childPath))
 					continue;
 
@@ -667,14 +700,17 @@ public sealed class ProjectScopeDiscoveryService(
 
 	private static List<string> ResolveCandidateDirectories(
 		ProjectRootFacts rootFacts,
-		IReadOnlyCollection<string>? selectedRootFolders)
+		IReadOnlyCollection<string>? selectedRootFolders,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		var uniqueCandidates = new HashSet<string>(PathStringComparer);
 
 		if (selectedRootFolders is not null && selectedRootFolders.Count > 0)
 		{
 			foreach (var folderName in selectedRootFolders)
 			{
+				cancellationToken.ThrowIfCancellationRequested();
 				if (string.IsNullOrEmpty(folderName))
 					continue;
 
@@ -688,11 +724,14 @@ public sealed class ProjectScopeDiscoveryService(
 		else
 		{
 			foreach (var dir in GetChildDirectoriesSafe(rootFacts))
+			{
+				cancellationToken.ThrowIfCancellationRequested();
 				uniqueCandidates.Add(Path.GetFullPath(dir));
+			}
 		}
 
 		var candidates = new List<string>(uniqueCandidates);
-		candidates.Sort(PathComparer.Default);
+		CancellationAwareSort.Sort(candidates, PathComparer.Default, cancellationToken);
 		return candidates;
 	}
 
@@ -779,7 +818,9 @@ public sealed class ProjectScopeDiscoveryService(
 		return directories;
 	}
 
-	private sealed class ProjectRootFactsOperationCache(ProjectRootFactsProvider provider)
+	private sealed class ProjectRootFactsOperationCache(
+		ProjectRootFactsProvider provider,
+		CancellationToken cancellationToken)
 	{
 		private readonly ConcurrentDictionary<string, Lazy<ProjectRootFacts>> _facts = new(PathStringComparer);
 
@@ -787,22 +828,34 @@ public sealed class ProjectScopeDiscoveryService(
 		{
 			var facts = _facts.GetOrAdd(
 				rootPath,
-				static (path, factsProvider) => new Lazy<ProjectRootFacts>(
-					() => factsProvider.Get(path, forceRefresh: true),
+				static (path, state) => new Lazy<ProjectRootFacts>(
+					() => state.Provider.GetWithCancellation(
+						path,
+						forceRefresh: true,
+						state.CancellationToken),
 					LazyThreadSafetyMode.ExecutionAndPublication),
-				provider).Value;
+				(Provider: provider, CancellationToken: cancellationToken)).Value;
 
 			return facts;
 		}
 
-		public ScopeDiscoveryStamp CreateDiscoveryStamp()
+		public ScopeDiscoveryStamp CreateDiscoveryStamp(CancellationToken cancellationToken)
 		{
-			return new ScopeDiscoveryStamp(
-				_facts
-					.Select(static pair => new { pair.Key, Facts = pair.Value.Value })
-					.OrderBy(static pair => pair.Key, PathComparer.Default)
-					.Select(static pair => ProjectRootFactsStamp.Capture(pair.Key, pair.Facts))
-					.ToArray());
+			var captured = new List<ProjectRootFactsStamp>(_facts.Count);
+			foreach (var pair in _facts)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				captured.Add(ProjectRootFactsStamp.Capture(
+					pair.Key,
+					pair.Value.Value,
+					cancellationToken));
+			}
+
+			CancellationAwareSort.Sort(
+				captured,
+				(left, right) => PathComparer.Default.Compare(left.Path, right.Path),
+				cancellationToken);
+			return new ScopeDiscoveryStamp(captured);
 		}
 	}
 
@@ -823,11 +876,15 @@ public sealed class ProjectScopeDiscoveryService(
 					// the already-probed roots is bounded and detects equal-timestamp topology.
 					observed = ProjectRootFactsStamp.Capture(
 						expected.Path,
-						provider.Get(expected.Path, forceRefresh: true));
+						provider.GetWithCancellation(
+							expected.Path,
+							forceRefresh: true,
+							cancellationToken),
+						cancellationToken);
 					observedFacts[expected.Path] = observed;
 				}
 
-				if (!expected.IsEquivalentTo(observed))
+				if (!expected.IsEquivalentTo(observed, cancellationToken))
 					return false;
 			}
 
@@ -842,14 +899,28 @@ public sealed class ProjectScopeDiscoveryService(
 		IReadOnlyList<ProjectRootEntryStamp> Entries,
 		ProjectRootFileSignature? GitIgnoreSignature)
 	{
-		public static ProjectRootFactsStamp Capture(string path, ProjectRootFacts facts)
+		public static ProjectRootFactsStamp Capture(
+			string path,
+			ProjectRootFacts facts,
+			CancellationToken cancellationToken)
 		{
 			var entries = new List<ProjectRootEntryStamp>(facts.Files.Count + facts.Directories.Count);
-			entries.AddRange(facts.Files.Select(static file =>
-				new ProjectRootEntryStamp(file.Name, IsDirectory: false, file.IsReparsePoint)));
-			entries.AddRange(facts.Directories.Select(static directory =>
-				new ProjectRootEntryStamp(directory.Name, IsDirectory: true, directory.IsReparsePoint)));
-			entries.Sort(ProjectRootEntryStampComparer.Instance);
+			foreach (var file in facts.Files)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				entries.Add(new ProjectRootEntryStamp(file.Name, IsDirectory: false, file.IsReparsePoint));
+			}
+
+			foreach (var directory in facts.Directories)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				entries.Add(new ProjectRootEntryStamp(directory.Name, IsDirectory: true, directory.IsReparsePoint));
+			}
+
+			CancellationAwareSort.Sort(
+				entries,
+				ProjectRootEntryStampComparer.Instance,
+				cancellationToken);
 
 			return new ProjectRootFactsStamp(
 				path,
@@ -859,12 +930,26 @@ public sealed class ProjectScopeDiscoveryService(
 				facts.GitIgnoreSignature);
 		}
 
-		public bool IsEquivalentTo(ProjectRootFactsStamp other)
+		public bool IsEquivalentTo(
+			ProjectRootFactsStamp other,
+			CancellationToken cancellationToken)
 		{
-			return Exists == other.Exists &&
-			       IsAccessible == other.IsAccessible &&
-			       Nullable.Equals(GitIgnoreSignature, other.GitIgnoreSignature) &&
-			       Entries.SequenceEqual(other.Entries);
+			if (Exists != other.Exists ||
+			    IsAccessible != other.IsAccessible ||
+			    !Nullable.Equals(GitIgnoreSignature, other.GitIgnoreSignature) ||
+			    Entries.Count != other.Entries.Count)
+			{
+				return false;
+			}
+
+			for (var index = 0; index < Entries.Count; index++)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				if (!Entries[index].Equals(other.Entries[index]))
+					return false;
+			}
+
+			return true;
 		}
 	}
 

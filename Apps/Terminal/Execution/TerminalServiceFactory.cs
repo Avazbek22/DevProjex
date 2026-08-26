@@ -54,13 +54,6 @@ public sealed class TerminalServiceFactory(
 		var treeExport = new TreeExportService();
 		var contentAnalyzer = new FileContentAnalyzer();
 		var localProfiles = new ProjectProfileStore(resolvedAppDataPathProvider);
-		var persistentSecretIdentity = new PersistentSecretIdentityProvider(resolvedAppDataPathProvider);
-		var secretRedactionSession = SecretRedactionSession.CreateWithPrivateData(
-			new SmartSecretsDetector(new GitleaksSecretDetector(), smartIgnore),
-			new PrivateDataDetector(),
-			localProfiles,
-			persistentSecretIdentity);
-		var codeCompressionSession = CodeCompressionFactory.CreateSession();
 		var analysis = new ProjectAnalysisService(
 			scanOptions,
 			buildTree,
@@ -72,17 +65,6 @@ public sealed class TerminalServiceFactory(
 		var contextPlanner = new ProjectContextPlanner(analysis);
 		string ResolveContentClassification(FileContentClassification classification) =>
 			localization[FileContentClassificationCatalog.Get(classification).LabelKey];
-		var contextDocumentService = new ProjectContextDocumentService(
-			treeExport,
-			contentAnalyzer,
-			ResolveContentClassification,
-			secretRedactionSession,
-			codeCompressionSession);
-		var projectCopyExportService = new ProjectCopyExportService(
-			new ProjectCopyExportPlanBuilder(),
-			contentAnalyzer,
-			secretRedactionSession,
-			codeCompressionSession);
 		var portableProfiles = new PortableProjectProfileService();
 		var selectionResolver = new ProjectSelectionResolver(
 			localProfiles,
@@ -96,39 +78,107 @@ public sealed class TerminalServiceFactory(
 		var gitRepository = new GitRepositoryService();
 		var sourceIdentityResolver = new ProjectSourceIdentityResolver(gitRepository, repoCache);
 		var repositoryCacheCatalog = new RepositoryCacheCatalog(gitRepository, repoCache);
-		var contextFactory = new TerminalProjectContextFactory(
-			contextPlanner,
-			sourceIdentityResolver,
-			secretRedactionSession);
+		var persistentSecretIdentity = new PersistentSecretIdentityProvider(resolvedAppDataPathProvider);
+		SecretRedactionSession secretRedactionSession;
+		try
+		{
+			secretRedactionSession = SecretRedactionSession.CreateWithPrivateData(
+				new SmartSecretsDetector(new GitleaksSecretDetector(), smartIgnore),
+				new PrivateDataDetector(),
+				localProfiles,
+				persistentSecretIdentity);
+		}
+		catch
+		{
+			persistentSecretIdentity.Dispose();
+			throw;
+		}
 
-		return new TerminalServices(
-			Localization: localization,
-			AnalysisService: analysis,
-			IgnoreRulesService: ignoreRules,
-			IgnoreOptionsService: ignoreOptions,
-			ContextPlanner: contextPlanner,
-			ContextFactory: contextFactory,
-			SourceIdentityResolver: sourceIdentityResolver,
-			RepositoryCacheCatalog: repositoryCacheCatalog,
-			ContextDocumentService: contextDocumentService,
-			TreeExportService: treeExport,
-			PreviewDocumentBuilder: new PreviewDocumentBuilder(
+		CodeCompressionSession codeCompressionSession;
+		try
+		{
+			codeCompressionSession = CodeCompressionFactory.CreateSession();
+		}
+		catch
+		{
+			secretRedactionSession.Dispose();
+			throw;
+		}
+
+		try
+		{
+			var contextDocumentService = new ProjectContextDocumentService(
+				treeExport,
 				contentAnalyzer,
-				ResolveContentClassification),
-			ProjectCopyExportService: projectCopyExportService,
-			AnalysisReportWriter: new ProjectAnalysisReportWriter(),
-			LocalProfileStore: localProfiles,
-			PortableProfileService: portableProfiles,
-			SelectionResolver: selectionResolver,
-			TerminalSettingsStore: new TerminalSettingsStore(resolvedAppDataPathProvider),
-			TerminalCommandSetupService: new TerminalCommandSetupService(),
-			GitTrackedModeReadinessProbe: new GitTrackedModeReadinessProbe(),
-			RecentWorkspacesService: new RecentWorkspacesService(),
-			RecentProjectsStore: recentProjects,
-			GitRepositoryService: gitRepository,
-			RepoCacheService: repoCache,
-			SecretRedactionSession: secretRedactionSession,
-			CodeCompressionSession: codeCompressionSession,
-			SecretRedactionOutputPreparer: new SecretRedactionOutputPreparer(contentAnalyzer));
+				ResolveContentClassification,
+				secretRedactionSession,
+				codeCompressionSession);
+			var projectCopyExportService = new ProjectCopyExportService(
+				new ProjectCopyExportPlanBuilder(),
+				contentAnalyzer,
+				secretRedactionSession,
+				codeCompressionSession);
+			var contextFactory = new TerminalProjectContextFactory(
+				contextPlanner,
+				sourceIdentityResolver,
+				secretRedactionSession);
+
+			return new TerminalServices(
+				Localization: localization,
+				AnalysisService: analysis,
+				IgnoreRulesService: ignoreRules,
+				IgnoreOptionsService: ignoreOptions,
+				ContextPlanner: contextPlanner,
+				ContextFactory: contextFactory,
+				SourceIdentityResolver: sourceIdentityResolver,
+				RepositoryCacheCatalog: repositoryCacheCatalog,
+				ContextDocumentService: contextDocumentService,
+				TreeExportService: treeExport,
+				PreviewDocumentBuilder: new PreviewDocumentBuilder(
+					contentAnalyzer,
+					ResolveContentClassification),
+				ProjectCopyExportService: projectCopyExportService,
+				AnalysisReportWriter: new ProjectAnalysisReportWriter(),
+				LocalProfileStore: localProfiles,
+				PortableProfileService: portableProfiles,
+				SelectionResolver: selectionResolver,
+				TerminalSettingsStore: new TerminalSettingsStore(resolvedAppDataPathProvider),
+				TerminalCommandSetupService: new TerminalCommandSetupService(),
+				GitTrackedModeReadinessProbe: new GitTrackedModeReadinessProbe(),
+				RecentWorkspacesService: new RecentWorkspacesService(),
+				RecentProjectsStore: recentProjects,
+				GitRepositoryService: gitRepository,
+				RepoCacheService: repoCache,
+				SecretRedactionSession: secretRedactionSession,
+				CodeCompressionSession: codeCompressionSession,
+				SecretRedactionOutputPreparer: new SecretRedactionOutputPreparer(contentAnalyzer))
+				.AttachOwnedLifetime();
+		}
+		catch
+		{
+			codeCompressionSession.Dispose();
+			secretRedactionSession.Dispose();
+			throw;
+		}
+	}
+
+	internal TerminalServiceScope CreateScope(AppLanguage language) =>
+		new(Create(language), ownsServices: _servicesProvider is null);
+}
+
+internal sealed class TerminalServiceScope(
+	TerminalServices services,
+	bool ownsServices) : IDisposable
+{
+	private TerminalServices? _services = services ?? throw new ArgumentNullException(nameof(services));
+
+	public TerminalServices Services =>
+		_services ?? throw new ObjectDisposedException(nameof(TerminalServiceScope));
+
+	public void Dispose()
+	{
+		var servicesToRelease = Interlocked.Exchange(ref _services, null);
+		if (ownsServices)
+			servicesToRelease?.Dispose();
 	}
 }

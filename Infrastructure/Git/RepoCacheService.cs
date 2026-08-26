@@ -1105,11 +1105,15 @@ public sealed class RepoCacheService : IRepoCacheService
 			initial = TryMigrateLegacyGitRepository(identity) ?? initial;
 			kind = ResolveContentKind(initial);
 		}
-		var worktreesSupported = kind == RepositoryCacheContentKind.Git &&
-		                         RepositoryCacheLayout.IsManaged(initial.LocalPath) &&
-		                         await _worktreeManager
-			                         .IsSupportedAsync(initial.LocalPath, cancellationToken)
-			                         .ConfigureAwait(false);
+		var worktreesSupported = false;
+		if (kind == RepositoryCacheContentKind.Git &&
+		    RepositoryCacheLayout.IsManaged(initial.LocalPath))
+		{
+			var supportState = await _worktreeManager
+				.GetSupportStateAsync(initial.LocalPath, cancellationToken)
+				.ConfigureAwait(false);
+			worktreesSupported = supportState != WorktreeSupportState.PermanentUnsupported;
+		}
 
 		var fileSet = GetIndexFileSet();
 		if (!CrossProcessFileLock.TryAcquire(fileSet, IndexLockTimeout, out var heldLock))

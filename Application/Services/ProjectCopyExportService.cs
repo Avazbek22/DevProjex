@@ -28,7 +28,7 @@ public sealed class ProjectCopyExportService(
 		ArgumentNullException.ThrowIfNull(request);
 		try
 		{
-			var plan = planBuilder.Build(request);
+			var plan = planBuilder.Build(request, cancellationToken);
 			ValidateDestination(plan.ProjectRootPath, request.DestinationPath, request.Format);
 
 			ValidateSources(plan, cancellationToken);

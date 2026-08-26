@@ -89,9 +89,10 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
 
     TreeNodeViewModel IProjectLoadSnapshotPipelineHost.BuildTreeViewModel(
         TreeRefreshInput input,
-        BuildTreeResult result)
+		BuildTreeResult result,
+		CancellationToken cancellationToken)
     {
-        var root = BuildTreeViewModel(result.Root, null);
+		var root = BuildTreeViewModel(result.Root, null, cancellationToken);
         root.DisplayName = input.DisplayName;
         return root;
     }

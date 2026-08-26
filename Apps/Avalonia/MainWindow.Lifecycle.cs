@@ -65,6 +65,7 @@ public partial class MainWindow
 		CancelAndDispose(ref _gitCloneCatalogCts);
         CancelAndDispose(ref _gitOperationCts);
         CancelAndDispose(ref _projectCopyExportCts);
+		CancelAndDispose(ref _orderedSelectionProjectionCts);
 		CancelSecretRedactionDiscovery();
     }
 
@@ -94,15 +95,13 @@ public partial class MainWindow
         try
         {
             CancelAndDispose(ref _windowLifetimeCts);
+            var desktopControlServer = Interlocked.Exchange(ref _desktopControlServer, null);
             // Avalonia cannot await a Closed event handler. Persist critical session state
             // before the first asynchronous boundary so process shutdown cannot overtake it.
             CompleteSessionMetricsRecording();
             FlushPersistedStateOnWindowClose();
-            if (_desktopControlServer is not null)
-            {
-                await _desktopControlServer.DisposeAsync();
-                _desktopControlServer = null;
-            }
+            if (desktopControlServer is not null)
+                await desktopControlServer.DisposeAsync();
 
             // Unsubscribe from window events
             PropertyChanged -= OnWindowPropertyChanged;
@@ -176,6 +175,8 @@ public partial class MainWindow
             _themeBrushCoordinator.Dispose();
             _applicationUpdates.Dispose();
             _statusOperations.Dispose();
+			_secretRedactionSession.Dispose();
+			_codeCompressionSession.Dispose();
 
             // Dispose ViewModel to clean up collection event handlers
             _viewModel.Dispose();

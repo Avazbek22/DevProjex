@@ -97,6 +97,32 @@ public sealed class TerminalReleaseContractRegressionTests
 	}
 
 	[Fact]
+	public async Task SessionCompletionRunsWhenStartFails()
+	{
+		var expected = new InvalidOperationException("start failed");
+		var runCalled = false;
+		var completionCalled = false;
+
+		var actual = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+			TerminalWorkspace.RunSessionLifecycleAsync(
+				() => throw expected,
+				() =>
+				{
+					runCalled = true;
+					return Task.CompletedTask;
+				},
+				() =>
+				{
+					completionCalled = true;
+					return Task.CompletedTask;
+				}));
+
+		Assert.Same(expected, actual);
+		Assert.False(runCalled);
+		Assert.True(completionCalled);
+	}
+
+	[Fact]
 	public async Task EquivalentCommandDoesNotEmitShellMetacharacterValuesAsRawTokens()
 	{
 		using var workspace = new TemporaryDirectory();
