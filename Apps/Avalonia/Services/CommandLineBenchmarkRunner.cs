@@ -150,7 +150,7 @@ internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext con
 		using var ignoreMeasurement = captureDiagnostics
 			? IgnorePipelineDiagnostics.BeginMeasurement()
 			: null;
-		var process = Process.GetCurrentProcess();
+		using var process = Process.GetCurrentProcess();
 		var cpuBefore = TryGetTotalProcessorTime(process);
 		var managedBefore = GC.GetTotalMemory(forceFullCollection: false);
 		var allocatedBefore = GC.GetTotalAllocatedBytes(precise: false);

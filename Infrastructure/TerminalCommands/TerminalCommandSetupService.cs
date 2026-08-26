@@ -338,7 +338,8 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		if (!string.IsNullOrWhiteSpace(Environment.ProcessPath))
 			return Environment.ProcessPath;
 
-		return Process.GetCurrentProcess().MainModule?.FileName;
+		using var process = Process.GetCurrentProcess();
+		return process.MainModule?.FileName;
 	}
 
 	internal static string BuildWrapperContent(string targetPath)
