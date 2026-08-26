@@ -1,6 +1,8 @@
 using System.Reflection;
 using Avalonia.Media;
 using DevProjex.Avalonia.Coordinators;
+using DevProjex.Application.Compression;
+using DevProjex.Application.Secrets;
 using DevProjex.Infrastructure.ThemePresets;
 
 namespace DevProjex.Tests.UI;
@@ -138,6 +140,10 @@ public sealed class MainWindowLifecycleUiTests
 		var tokensByField = new Dictionary<string, CancellationToken>();
 		var sources = new List<CancellationTokenSource>();
 		var debounceTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(1) };
+		var redactionSession = Assert.IsType<SecretRedactionSession>(
+			GetPrivateFieldValue(window, new OwnedField(null, "_secretRedactionSession")));
+		var compressionSession = Assert.IsType<CodeCompressionSession>(
+			GetPrivateFieldValue(window, new OwnedField(null, "_codeCompressionSession")));
 		debounceTimer.Start();
 
 		try
@@ -167,6 +173,8 @@ public sealed class MainWindowLifecycleUiTests
 			}
 
 			Assert.False(debounceTimer.IsEnabled);
+			Assert.True(GetPrivateBooleanField(redactionSession, "_disposed"));
+			Assert.True(GetPrivateBooleanField(compressionSession, "_disposed"));
 		}
 		finally
 		{
@@ -337,6 +345,15 @@ public sealed class MainWindowLifecycleUiTests
 			BindingFlags.Instance | BindingFlags.NonPublic);
 		Assert.NotNull(ownerField);
 		return Assert.IsAssignableFrom<object>(ownerField!.GetValue(window));
+	}
+
+	private static bool GetPrivateBooleanField(object owner, string fieldName)
+	{
+		var field = owner.GetType().GetField(
+			fieldName,
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(field);
+		return Assert.IsType<bool>(field!.GetValue(owner));
 	}
 
 	private readonly record struct OwnedField(string? OwnerFieldName, string FieldName)

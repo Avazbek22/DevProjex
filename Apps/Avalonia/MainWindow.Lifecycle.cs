@@ -176,6 +176,8 @@ public partial class MainWindow
             _themeBrushCoordinator.Dispose();
             _applicationUpdates.Dispose();
             _statusOperations.Dispose();
+			_secretRedactionSession.Dispose();
+			_codeCompressionSession.Dispose();
 
             // Dispose ViewModel to clean up collection event handlers
             _viewModel.Dispose();
