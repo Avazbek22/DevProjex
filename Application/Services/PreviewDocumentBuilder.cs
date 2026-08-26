@@ -592,7 +592,7 @@ public sealed class PreviewDocumentBuilder(
 		var sourcePosition = 0;
 		var line = firstContentLine;
 		var column = 0;
-		foreach (var span in result.Spans.OrderBy(static span => span.Start))
+		foreach (var span in result.Spans)
 		{
 			AdvancePosition(result.Text.AsSpan(sourcePosition, span.Start - sourcePosition), ref line, ref column);
 			var spanText = result.Text.AsSpan(span.Start, span.Length);

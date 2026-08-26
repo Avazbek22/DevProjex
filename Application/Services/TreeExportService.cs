@@ -23,7 +23,7 @@ public sealed class TreeExportService
 		Indent = true
 	};
 
-	// Pre-allocated indent segments to avoid string allocation in recursive tree rendering
+	// Reuse indent segments to avoid allocating one prefix per rendered tree node.
 	private const string IndentPipe = "│   ";
 	private const string IndentSpace = "    ";
 	private const string BranchMiddle = "├── ";
