@@ -30,6 +30,14 @@ public sealed class CompletionReleaseRegressionTests
 	}
 
 	[Fact]
+	public async Task McpCompletionOffersPrivateDataRedactionOption()
+	{
+		var candidates = await CompleteAsync("devprojex mcp --");
+
+		Assert.Contains("--hide-private-data", candidates);
+	}
+
+	[Fact]
 	public async Task OutputKindCompletionContainsOnlyCanonicalValues()
 	{
 		var candidates = await CompleteAsync("devprojex export project . --as ");
