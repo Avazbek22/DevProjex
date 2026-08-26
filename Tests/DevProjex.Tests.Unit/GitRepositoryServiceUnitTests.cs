@@ -203,6 +203,39 @@ public class GitRepositoryServiceUnitTests
 		Assert.Equal(1, probeCount);
 	}
 
+	[Fact]
+	public async Task DetachedWorktree_VerificationFailureIsNotMaskedByStalledCleanup()
+	{
+		var cleanupStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var manager = new GitWorktreeManager(
+			async (_, arguments, cancellationToken) =>
+			{
+				if (arguments is ["rev-parse", "--verify", "--quiet", _])
+					return new GitWorktreeManager.GitProcessResult(0, "0123456789abcdef\n", string.Empty);
+				if (arguments is ["worktree", "add", ..])
+					return new GitWorktreeManager.GitProcessResult(0, string.Empty, string.Empty);
+				if (arguments is ["rev-parse", "HEAD"])
+					throw new IOException("verification failed");
+				if (arguments is ["worktree", "remove", ..])
+				{
+					cleanupStarted.TrySetResult();
+					await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+				}
+				throw new InvalidOperationException("Unexpected git command.");
+			},
+			TimeSpan.FromSeconds(1),
+			TimeSpan.FromMilliseconds(25));
+
+		var exception = await Assert.ThrowsAsync<IOException>(() => manager.CreateDetachedAsync(
+			"repository",
+			"worktree",
+			branch: null,
+			TestContext.Current.CancellationToken));
+
+		Assert.Equal("verification failed", exception.Message);
+		Assert.True(cleanupStarted.Task.IsCompletedSuccessfully);
+	}
+
 	[Theory]
 	[InlineData("feature/space+plus")]
 	[InlineData("release/v1.2@beta")]

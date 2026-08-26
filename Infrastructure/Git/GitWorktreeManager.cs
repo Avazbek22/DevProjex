@@ -24,30 +24,42 @@ internal interface IGitWorktreeManager
 internal sealed class GitWorktreeManager : IGitWorktreeManager
 {
 	private static readonly TimeSpan SupportProbeTimeout = TimeSpan.FromSeconds(10);
+	private static readonly TimeSpan RecoveryCleanupTimeout = TimeSpan.FromSeconds(10);
 	internal const int MaximumProcessOutputCharacters = GitProcessOutputReader.MaximumOutputCharacters;
 	private readonly object _supportSync = new();
+	private readonly Func<string, IReadOnlyList<string>, CancellationToken, Task<GitProcessResult>> _runAsync;
 	private readonly Func<string, Task<WorktreeSupportState>> _probeSupport;
+	private readonly TimeSpan _recoveryCleanupTimeout;
 	private Task<WorktreeSupportState>? _supportProbe;
 	private WorktreeSupportState _cachedSupportState;
 
 	public GitWorktreeManager()
 	{
-		_probeSupport = basePath => ProbeSupportAsync(basePath, RunAsync, SupportProbeTimeout);
+		_runAsync = RunAsync;
+		_probeSupport = basePath => ProbeSupportAsync(basePath, _runAsync, SupportProbeTimeout);
+		_recoveryCleanupTimeout = RecoveryCleanupTimeout;
 	}
 
 	internal GitWorktreeManager(Func<string, Task<WorktreeSupportState>> probeSupport)
 	{
+		_runAsync = RunAsync;
 		_probeSupport = probeSupport ?? throw new ArgumentNullException(nameof(probeSupport));
+		_recoveryCleanupTimeout = RecoveryCleanupTimeout;
 	}
 
 	internal GitWorktreeManager(
 		Func<string, IReadOnlyList<string>, CancellationToken, Task<GitProcessResult>> runAsync,
-		TimeSpan supportProbeTimeout)
+		TimeSpan supportProbeTimeout,
+		TimeSpan? recoveryCleanupTimeout = null)
 	{
 		ArgumentNullException.ThrowIfNull(runAsync);
 		if (supportProbeTimeout <= TimeSpan.Zero)
 			throw new ArgumentOutOfRangeException(nameof(supportProbeTimeout));
-		_probeSupport = basePath => ProbeSupportAsync(basePath, runAsync, supportProbeTimeout);
+		if (recoveryCleanupTimeout is { } cleanupTimeout && cleanupTimeout <= TimeSpan.Zero)
+			throw new ArgumentOutOfRangeException(nameof(recoveryCleanupTimeout));
+		_runAsync = runAsync;
+		_probeSupport = basePath => ProbeSupportAsync(basePath, _runAsync, supportProbeTimeout);
+		_recoveryCleanupTimeout = recoveryCleanupTimeout ?? RecoveryCleanupTimeout;
 	}
 
 	public async Task<bool> IsSupportedAsync(string basePath, CancellationToken cancellationToken)
@@ -150,14 +162,28 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 		}
 		catch
 		{
-			await RemoveAsync(basePath, worktreePath, CancellationToken.None).ConfigureAwait(false);
-			TryDeletePartialWorktree(worktreePath);
+			await TryCleanupDetachedAsync(basePath, worktreePath).ConfigureAwait(false);
 			throw;
 		}
 
-		await RemoveAsync(basePath, worktreePath, CancellationToken.None).ConfigureAwait(false);
-		TryDeletePartialWorktree(worktreePath);
+		await TryCleanupDetachedAsync(basePath, worktreePath).ConfigureAwait(false);
 		return false;
+	}
+
+	private async Task TryCleanupDetachedAsync(string basePath, string worktreePath)
+	{
+		using var timeout = new CancellationTokenSource(_recoveryCleanupTimeout);
+		try
+		{
+			await RemoveAsync(basePath, worktreePath, timeout.Token).ConfigureAwait(false);
+		}
+		catch (Exception exception) when (exception is not StackOverflowException and not OutOfMemoryException)
+		{
+		}
+		finally
+		{
+			TryDeletePartialWorktree(worktreePath);
+		}
 	}
 
 	public async Task RemoveAsync(
@@ -225,7 +251,7 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 		return OperatingSystem.IsWindows() && exception.NativeErrorCode is 3 or 193 or 216;
 	}
 
-	private static async Task<string> ResolveRevisionAsync(
+	private async Task<string> ResolveRevisionAsync(
 		string basePath,
 		string? branch,
 		CancellationToken cancellationToken)
@@ -251,7 +277,7 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 			RepositoryBranchUnavailableReason.NotFound);
 	}
 
-	private static async Task<string> ResolveCommitAsync(
+	private async Task<string> ResolveCommitAsync(
 		string basePath,
 		string revision,
 		string? branch,
@@ -265,12 +291,12 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 			RepositoryBranchUnavailableReason.NotFound);
 	}
 
-	private static async Task<string?> TryResolveCommitAsync(
+	private async Task<string?> TryResolveCommitAsync(
 		string basePath,
 		string revision,
 		CancellationToken cancellationToken)
 	{
-		var result = await RunAsync(
+		var result = await _runAsync(
 			basePath,
 			["rev-parse", "--verify", "--quiet", $"{revision}^{{commit}}"],
 			cancellationToken).ConfigureAwait(false);
@@ -280,13 +306,13 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 		return commit.Length == 0 ? null : commit;
 	}
 
-	private static async Task<bool> VerifyAndRecordAsync(
+	private async Task<bool> VerifyAndRecordAsync(
 		string repositoryPath,
 		string expectedCommit,
 		string? branch,
 		CancellationToken cancellationToken)
 	{
-		var head = await RunAsync(repositoryPath, ["rev-parse", "HEAD"], cancellationToken)
+		var head = await _runAsync(repositoryPath, ["rev-parse", "HEAD"], cancellationToken)
 			.ConfigureAwait(false);
 		if (head.ExitCode != 0 ||
 		    !string.Equals(head.Output.Trim(), expectedCommit, StringComparison.OrdinalIgnoreCase))
@@ -299,7 +325,7 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 		return await RecordSessionBranchAsync(repositoryPath, branch, cancellationToken).ConfigureAwait(false);
 	}
 
-	private static async Task<bool> RecordSessionBranchAsync(
+	private async Task<bool> RecordSessionBranchAsync(
 		string repositoryPath,
 		string? branch,
 		CancellationToken cancellationToken)
@@ -330,11 +356,11 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 			.ConfigureAwait(false);
 	}
 
-	private static async Task<bool> RunSuccessfulAsync(
+	private async Task<bool> RunSuccessfulAsync(
 		string workingDirectory,
 		IReadOnlyList<string> arguments,
 		CancellationToken cancellationToken) =>
-		(await RunAsync(workingDirectory, arguments, cancellationToken).ConfigureAwait(false)).ExitCode == 0;
+		(await _runAsync(workingDirectory, arguments, cancellationToken).ConfigureAwait(false)).ExitCode == 0;
 
 	private static async Task<GitProcessResult> RunAsync(
 		string workingDirectory,
