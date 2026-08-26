@@ -63,6 +63,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 	private const int MaximumLauncherValidationOutputCharacters = 64 * 1024;
 	internal const int MaximumShellProfileBytes = 8 * 1024 * 1024;
 	private static readonly TimeSpan LauncherValidationTimeout = TimeSpan.FromSeconds(5);
+	private static readonly TimeSpan LauncherOutputDrainTimeout = TimeSpan.FromSeconds(2);
 	// Cover lock-free probes and writes within one process; the named mutex still protects separate processes.
 	private static readonly object ProcessSetupSync = new();
 
@@ -1467,10 +1468,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 				outputCancellation.Cancel();
 				TryKillProcess(process);
 				_ = process.WaitForExit(1000);
-				BoundedTextReader
-					.ObserveCompletionAsync(standardOutput, standardError)
-					.GetAwaiter()
-					.GetResult();
+				ObserveValidationReaders(process, standardOutput, standardError);
 				return new TerminalCommandValidationResult(false, "The terminal launcher validation timed out.");
 			}
 			if (standardOutput.Result.ExceededLimit || standardError.Result.ExceededLimit)
@@ -1490,7 +1488,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		{
 			outputCancellation?.Cancel();
 			TryKillProcess(process);
-			ObserveValidationReaders(standardOutput, standardError);
+			ObserveValidationReaders(process, standardOutput, standardError);
 			return new TerminalCommandValidationResult(false, ex.Message);
 		}
 		finally
@@ -1511,6 +1509,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 	}
 
 	private static void ObserveValidationReaders(
+		Process? process,
 		Task<BoundedTextReadResult>? standardOutput,
 		Task<BoundedTextReadResult>? standardError)
 	{
@@ -1522,10 +1521,35 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		if (readers.Count == 0)
 			return;
 
-		BoundedTextReader
-			.ObserveCompletionAsync(readers.ToArray())
-			.GetAwaiter()
-			.GetResult();
+		TryDisposeValidationReader(process, standardOutput: true);
+		TryDisposeValidationReader(process, standardOutput: false);
+		try
+		{
+			BoundedTextReader
+				.ObserveCompletionAsync(readers.ToArray())
+				.WaitAsync(LauncherOutputDrainTimeout)
+				.GetAwaiter()
+				.GetResult();
+		}
+		catch (TimeoutException)
+		{
+		}
+	}
+
+	private static void TryDisposeValidationReader(Process? process, bool standardOutput)
+	{
+		if (process is null)
+			return;
+		try
+		{
+			if (standardOutput)
+				process.StandardOutput.Dispose();
+			else
+				process.StandardError.Dispose();
+		}
+		catch (Exception exception) when (exception is IOException or InvalidOperationException)
+		{
+		}
 	}
 
 	private static SetupLockLease AcquireSetupLock(string commandPath)
