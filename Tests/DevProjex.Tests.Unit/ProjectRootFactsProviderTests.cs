@@ -82,6 +82,38 @@ public sealed class ProjectRootFactsProviderTests
 		Assert.False(facts.HasMarkerFile("src/App.cs"));
 	}
 
+	#pragma warning disable xUnit1051 // This test verifies a caller-owned cancellation token.
+	[Fact]
+	public void GetWithCancellation_PreCancelledRequestDoesNotBuildOrPopulateCache()
+	{
+		var rootPath = Path.GetFullPath(Path.Combine(
+			Path.GetTempPath(),
+			"DevProjex",
+			"RootFactsCancellation",
+			Guid.NewGuid().ToString("N")));
+		var buildCount = 0;
+		var provider = new ProjectRootFactsProvider(
+			cacheTtl: TimeSpan.FromMinutes(5),
+			cacheLimit: 4,
+			utcNowProvider: null,
+			factsBuilder: path =>
+			{
+				buildCount++;
+				return CreateFacts(path, "package.json");
+			});
+		using var cancellation = new CancellationTokenSource();
+		cancellation.Cancel();
+
+		Assert.ThrowsAny<OperationCanceledException>(() =>
+			provider.GetWithCancellation(rootPath, forceRefresh: false, cancellation.Token));
+		Assert.Equal(0, buildCount);
+
+		var facts = provider.Get(rootPath);
+		Assert.True(facts.HasMarkerFile("package.json"));
+		Assert.Equal(1, buildCount);
+	}
+	#pragma warning restore xUnit1051
+
 	[Fact]
 	public void Get_ReusesCachedSnapshotWithinTtl_AndForceRefreshUpdates()
 	{

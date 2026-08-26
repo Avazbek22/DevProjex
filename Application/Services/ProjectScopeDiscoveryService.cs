@@ -207,7 +207,9 @@ public sealed class ProjectScopeDiscoveryService(
 		ScopeDiscoveryStamp discoveryStamp;
 		try
 		{
-			var rootFactsCache = new ProjectRootFactsOperationCache(_rootFactsProvider);
+			var rootFactsCache = new ProjectRootFactsOperationCache(
+				_rootFactsProvider,
+				cancellationToken);
 			var rootFacts = rootFactsCache.Get(normalizedRoot);
 			if (!rootFacts.Exists)
 			{
@@ -811,7 +813,9 @@ public sealed class ProjectScopeDiscoveryService(
 		return directories;
 	}
 
-	private sealed class ProjectRootFactsOperationCache(ProjectRootFactsProvider provider)
+	private sealed class ProjectRootFactsOperationCache(
+		ProjectRootFactsProvider provider,
+		CancellationToken cancellationToken)
 	{
 		private readonly ConcurrentDictionary<string, Lazy<ProjectRootFacts>> _facts = new(PathStringComparer);
 
@@ -819,10 +823,13 @@ public sealed class ProjectScopeDiscoveryService(
 		{
 			var facts = _facts.GetOrAdd(
 				rootPath,
-				static (path, factsProvider) => new Lazy<ProjectRootFacts>(
-					() => factsProvider.Get(path, forceRefresh: true),
+				static (path, state) => new Lazy<ProjectRootFacts>(
+					() => state.Provider.GetWithCancellation(
+						path,
+						forceRefresh: true,
+						state.CancellationToken),
 					LazyThreadSafetyMode.ExecutionAndPublication),
-				provider).Value;
+				(Provider: provider, CancellationToken: cancellationToken)).Value;
 
 			return facts;
 		}
@@ -855,7 +862,10 @@ public sealed class ProjectScopeDiscoveryService(
 					// the already-probed roots is bounded and detects equal-timestamp topology.
 					observed = ProjectRootFactsStamp.Capture(
 						expected.Path,
-						provider.Get(expected.Path, forceRefresh: true));
+						provider.GetWithCancellation(
+							expected.Path,
+							forceRefresh: true,
+							cancellationToken));
 					observedFacts[expected.Path] = observed;
 				}
 

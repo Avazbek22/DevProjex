@@ -23,7 +23,7 @@ public sealed class ProjectRootFactsProvider
 	private readonly TimeSpan _cacheTtl;
 	private readonly int _cacheLimit;
 	private readonly Func<DateTime> _utcNowProvider;
-	private readonly Func<string, ProjectRootFacts> _factsBuilder;
+	private readonly Func<string, CancellationToken, ProjectRootFacts> _factsBuilder;
 	private readonly Dictionary<string, long> _latestBuildSequences = new(PathComparer.Default);
 	private long _cacheGeneration;
 	private long _nextBuildSequence;
@@ -41,6 +41,19 @@ public sealed class ProjectRootFactsProvider
 		int cacheLimit,
 		Func<DateTime>? utcNowProvider,
 		Func<string, ProjectRootFacts> factsBuilder)
+		: this(
+			cacheTtl,
+			cacheLimit,
+			utcNowProvider,
+			(path, _) => factsBuilder(path))
+	{
+	}
+
+	private ProjectRootFactsProvider(
+		TimeSpan? cacheTtl,
+		int cacheLimit,
+		Func<DateTime>? utcNowProvider,
+		Func<string, CancellationToken, ProjectRootFacts> factsBuilder)
 	{
 		_cacheTtl = cacheTtl ?? DefaultCacheTtl;
 		_cacheLimit = Math.Max(0, cacheLimit);
@@ -48,8 +61,15 @@ public sealed class ProjectRootFactsProvider
 		_factsBuilder = factsBuilder ?? throw new ArgumentNullException(nameof(factsBuilder));
 	}
 
-	public ProjectRootFacts Get(string rootPath, bool forceRefresh = false)
+	public ProjectRootFacts Get(string rootPath, bool forceRefresh = false) =>
+		GetWithCancellation(rootPath, forceRefresh, CancellationToken.None);
+
+	public ProjectRootFacts GetWithCancellation(
+		string rootPath,
+		bool forceRefresh,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		IgnorePipelineDiagnostics.RecordRootFactsRequest();
 		if (string.IsNullOrWhiteSpace(rootPath))
 			return ProjectRootFacts.Missing(rootPath);
@@ -78,7 +98,7 @@ public sealed class ProjectRootFactsProvider
 
 		IgnorePipelineDiagnostics.RecordRootFactsBuild();
 		if (_cacheLimit == 0)
-			return _factsBuilder(normalizedRootPath);
+			return _factsBuilder(normalizedRootPath, cancellationToken);
 
 		long cacheGeneration;
 		long buildSequence;
@@ -92,7 +112,7 @@ public sealed class ProjectRootFactsProvider
 		ProjectRootFacts facts;
 		try
 		{
-			facts = _factsBuilder(normalizedRootPath);
+			facts = _factsBuilder(normalizedRootPath, cancellationToken);
 		}
 		catch
 		{
@@ -174,8 +194,9 @@ public sealed class ProjectRootFactsProvider
 		_cacheLru.Remove(node);
 	}
 
-	private static ProjectRootFacts Build(string rootPath)
+	private static ProjectRootFacts Build(string rootPath, CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		if (!Directory.Exists(rootPath))
 			return ProjectRootFacts.Missing(rootPath);
 
@@ -186,6 +207,7 @@ public sealed class ProjectRootFactsProvider
 		{
 			foreach (var entry in EnumerateTopLevelEntries(rootPath))
 			{
+				cancellationToken.ThrowIfCancellationRequested();
 				if (entry.IsDirectory)
 				{
 					directories.Add(new ProjectRootDirectoryFact(
