@@ -233,7 +233,9 @@ public sealed class ProjectPathStartInfoFactoryTests
 
 	private static ProcessStartInfo CreateNoisyProcessStartInfo(TemporaryDirectory temp)
 	{
-		const int lineCount = 4_000;
+		var payloadPath = temp.CreateFile(
+			"noisy-output.txt",
+			new string('x', 512 * 1024));
 		var startInfo = new ProcessStartInfo
 		{
 			UseShellExecute = false,
@@ -246,10 +248,7 @@ public sealed class ProjectPathStartInfoFactoryTests
 		{
 			scriptPath = temp.CreateFile(
 				"noisy-output.cmd",
-				$"@echo off\r\nfor /L %%i in (1,1,{lineCount}) do (\r\n" +
-				"  echo stdout-01234567890123456789012345678901234567890123456789\r\n" +
-				"  echo stderr-01234567890123456789012345678901234567890123456789 1>&2\r\n" +
-				")\r\n");
+				$"@echo off\r\ntype \"{payloadPath}\"\r\ntype \"{payloadPath}\" 1>&2\r\n");
 			startInfo.FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe";
 			startInfo.ArgumentList.Add("/D");
 			startInfo.ArgumentList.Add("/C");
@@ -258,10 +257,7 @@ public sealed class ProjectPathStartInfoFactoryTests
 		{
 			scriptPath = temp.CreateFile(
 				"noisy-output.sh",
-				$"i=0\nwhile [ \"$i\" -lt {lineCount} ]; do\n" +
-				"  printf 'stdout-01234567890123456789012345678901234567890123456789\\n'\n" +
-				"  printf 'stderr-01234567890123456789012345678901234567890123456789\\n' >&2\n" +
-				"  i=$((i + 1))\ndone\n");
+				$"cat \"{payloadPath}\"\ncat \"{payloadPath}\" >&2\n");
 			startInfo.FileName = "/bin/sh";
 		}
 
