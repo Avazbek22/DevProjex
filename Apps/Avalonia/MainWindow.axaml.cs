@@ -2269,13 +2269,10 @@ public partial class MainWindow : Window
             await clipboard.SetTextAsync(content);
     }
 
-    private static void OpenExternalLink(string url)
+    private void OpenExternalLink(string url)
     {
-        using var process = Process.Start(new ProcessStartInfo
-        {
-            FileName = url,
-            UseShellExecute = true
-        });
+        if (!ExternalLinkLauncher.TryOpen(url))
+            _toastService.Show(_localization["Desktop.Error.OperationFailed"]);
     }
 
     private bool EnsureTreeReady() => _currentTree is not null && !string.IsNullOrWhiteSpace(_currentPath);
