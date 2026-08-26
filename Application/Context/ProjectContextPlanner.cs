@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Security.Cryptography;
 using DevProjex.Application.Selection;
 
@@ -5,8 +6,10 @@ namespace DevProjex.Application.Context;
 
 public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService)
 {
+	private const int FingerprintStackBufferBytes = 512;
 	private const string InvalidSelectedPathCode = ProjectSelectionPath.InvalidPathCode;
 	private const string MissingSelectedPathCode = "DPX-SELECTION-PATH-MISSING";
+	private static readonly byte[] FingerprintValueSeparator = [0];
 
 	public async Task<ProjectContextPlan> BuildAsync(
 		ProjectContextRequest request,
@@ -906,9 +909,28 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 
 		void Append(string value)
 		{
-			var bytes = Encoding.UTF8.GetBytes(value);
-			hash.AppendData(bytes);
-			hash.AppendData([0]);
+			var byteCount = Encoding.UTF8.GetByteCount(value);
+			if (byteCount <= FingerprintStackBufferBytes)
+			{
+				Span<byte> bytes = stackalloc byte[byteCount];
+				Encoding.UTF8.GetBytes(value, bytes);
+				hash.AppendData(bytes);
+			}
+			else
+			{
+				var rented = ArrayPool<byte>.Shared.Rent(byteCount);
+				try
+				{
+					var written = Encoding.UTF8.GetBytes(value, rented);
+					hash.AppendData(rented.AsSpan(0, written));
+				}
+				finally
+				{
+					ArrayPool<byte>.Shared.Return(rented);
+				}
+			}
+
+			hash.AppendData(FingerprintValueSeparator);
 		}
 	}
 
