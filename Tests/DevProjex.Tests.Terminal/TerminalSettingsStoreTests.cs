@@ -22,6 +22,53 @@ public sealed class TerminalSettingsStoreTests
 			SearchOption.TopDirectoryOnly));
 	}
 
+	[Theory]
+	[InlineData(AppLanguage.En)]
+	[InlineData(AppLanguage.Ja)]
+	[InlineData(AppLanguage.ZhCn)]
+	public async Task TerminalLanguageSurvivesANewStoreInstance(AppLanguage language)
+	{
+		using var workspace = new TemporaryDirectory();
+		var store = new TerminalSettingsStore(() => workspace.Path);
+
+		await store.SaveLanguageAsync(language, TestContext.Current.CancellationToken);
+
+		Assert.Equal(language, new TerminalSettingsStore(() => workspace.Path).LoadLanguage());
+		Assert.Contains(
+			$"\"Language\":\"{AppLanguageUtility.ToCode(language)}\"",
+			File.ReadAllText(store.GetPath()),
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task LanguageScreenModeAndHistoryRoundTripWithoutOverwritingEachOther()
+	{
+		using var workspace = new TemporaryDirectory();
+		var store = new TerminalSettingsStore(() => workspace.Path);
+
+		await store.SaveLanguageAsync(AppLanguage.Ja, TestContext.Current.CancellationToken);
+		await store.SaveCommandHistoryAsync(["language ja"], TestContext.Current.CancellationToken);
+		await store.SaveScreenModeAsync(TerminalScreenMode.Inline, TestContext.Current.CancellationToken);
+
+		var reloaded = new TerminalSettingsStore(() => workspace.Path);
+		Assert.Equal(AppLanguage.Ja, reloaded.LoadLanguage());
+		Assert.Equal(["language ja"], reloaded.LoadCommandHistory());
+		Assert.Equal(TerminalScreenMode.Inline, reloaded.LoadScreenMode());
+	}
+
+	[Fact]
+	public void UnsupportedPersistedLanguageIsIgnored()
+	{
+		using var workspace = new TemporaryDirectory();
+		var store = new TerminalSettingsStore(() => workspace.Path);
+		Directory.CreateDirectory(Path.GetDirectoryName(store.GetPath())!);
+		File.WriteAllText(
+			store.GetPath(),
+			"{\"SchemaVersion\":1,\"ScreenMode\":0,\"CommandHistory\":[],\"Language\":\"klingon\"}");
+
+		Assert.Null(store.LoadLanguage());
+	}
+
 	[Fact]
 	public void MissingOrCorruptSettingsSafelyFallBackToAuto()
 	{

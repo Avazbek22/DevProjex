@@ -88,7 +88,7 @@ DevProjex提供交互式终端工作区以及脚本和CI的直接命令。
 这列出了顶级命令和选项。运行`devprojex help <command>`以查看该命令自己的选项和示例。
 
 示例：
-* `devprojex` — 打开交互式终端工作区。在工作区中，通过`:`命令行驱动操作（例如`:copy`、`:analyze`、`:branch`）；有关完整命令列表，请参阅内置工作区帮助和项目文档。
+* `devprojex` — 打开交互式终端工作区。在工作区中，通过`:`命令行驱动操作（例如`:copy`、`:analyze`、`:branch`、`:language`）；有关完整命令列表，请参阅内置工作区帮助和项目文档。
 * `devprojex tui .` — 直接在终端工作区中打开指定的文件夹。
 * `devprojex open . --preview` — 在桌面预览中打开当前文件夹。
 * `devprojex analyze . --format json` — 将当前项目分析为JSON。

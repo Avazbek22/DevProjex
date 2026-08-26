@@ -216,6 +216,7 @@ containing whitespace can use single or double quotes.
 | `recent` | open recent projects and repositories |
 | `profile save [name]` | save the current settings as a portable profile |
 | `refresh` | rescan the working copy from disk without network access |
+| `language [code]` | show available language codes or switch the workspace language immediately |
 | `help [verb]` | open the localized command cheat sheet |
 | `quit` | perform the same safe exit action as `q` |
 
@@ -229,6 +230,7 @@ Examples:
 :search "connection string"
 :copy content markdown
 :refresh
+:language ja
 :export context markdown "../review context.md"
 ```
 
@@ -243,6 +245,13 @@ Enter executes it, and Up/Down traverses command history. The newest 50 commands
 are persisted in terminal settings across launches; adjacent duplicates are stored
 once. A ghost suffix previews completion without changing the input. Plain mode
 renders that hint in brackets instead of relying on dim color.
+
+`language` without an argument shows the current language and all supported codes.
+A language selected with `:language` is stored for future Terminal Workspace
+sessions. An explicit `--language` option overrides it for one launch without
+changing the stored choice; otherwise the workspace uses the stored choice and
+then falls back to system-language detection. Desktop language settings remain
+independent.
 
 Successful and failed results temporarily occupy the same footer row, then the
 contextual hints return. Execution failures never open an error dialog. Settings

@@ -98,6 +98,38 @@ public sealed class TerminalWorkspaceCommandParserTests
 		Assert.Contains(profile.Candidates, candidate => candidate.Token == "save");
 	}
 
+	[Theory]
+	[InlineData("language", null)]
+	[InlineData("language RU", "ru")]
+	[InlineData("language ZH_CN", "zh-cn")]
+	internal void Parse_LanguageUsesApplicationCodeSemantics(string text, string? expectedCode)
+	{
+		var result = _parser.Parse(text, Context);
+
+		Assert.True(result.IsSuccess, result.Error?.ToString());
+		Assert.Equal(TerminalWorkspaceCommandVerb.Language, result.Command!.Definition.Verb);
+		Assert.Equal(expectedCode, result.Command.Text);
+	}
+
+	[Fact]
+	public void Parse_UnknownLanguageReturnsEverySupportedCode()
+	{
+		var result = _parser.Parse("language klingon", Context);
+
+		Assert.False(result.IsSuccess);
+		Assert.Equal(TerminalWorkspaceCommandErrorCode.UnknownLanguage, result.Error!.Code);
+		Assert.Equal(CliChoiceSets.Language.Tokens, result.Error.Candidates);
+	}
+
+	[Fact]
+	public void CompletionOffersEverySupportedLanguageCode()
+	{
+		var completion = _parser.GetCompletion("language ", 9, Context);
+
+		Assert.Equal(CliChoiceSets.Language.Tokens, completion.Candidates.Select(static item => item.Token));
+		Assert.Equal("Terminal.Tui.Command.Language.Schema", completion.SchemaKey);
+	}
+
 	[Fact]
 	public void CompletionReplacesTheWholeTokenWhenTheCursorIsInsideIt()
 	{
@@ -216,6 +248,8 @@ public sealed class TerminalWorkspaceCommandParserTests
 		["profile save", TerminalWorkspaceCommandVerb.Profile],
 		["profile save \"My Name\"", TerminalWorkspaceCommandVerb.Profile],
 		["refresh", TerminalWorkspaceCommandVerb.Refresh],
+		["language", TerminalWorkspaceCommandVerb.Language],
+		["language zh-cn", TerminalWorkspaceCommandVerb.Language],
 		["help", TerminalWorkspaceCommandVerb.Help],
 		["help export", TerminalWorkspaceCommandVerb.Help],
 		["quit", TerminalWorkspaceCommandVerb.Quit]
@@ -244,6 +278,8 @@ public sealed class TerminalWorkspaceCommandParserTests
 		["profile", TerminalWorkspaceCommandErrorCode.MissingArgument, 7, "save"],
 		["profile load", TerminalWorkspaceCommandErrorCode.UnknownToken, 8, "save"],
 		["refresh now", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 8, (string?)null],
+		["language klingon", TerminalWorkspaceCommandErrorCode.UnknownLanguage, 9, "en"],
+		["language ru extra", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 12, (string?)null],
 		["help unknown", TerminalWorkspaceCommandErrorCode.UnknownToken, 5, "analyze"],
 		["quit now", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 5, (string?)null],
 		["search \"unfinished", TerminalWorkspaceCommandErrorCode.UnterminatedQuote, 7, (string?)null]

@@ -88,7 +88,7 @@ If the command is already set up, open a terminal and run:
 This lists the top-level commands and options. Run `devprojex help <command>` to see that command's own options and examples.
 
 Examples:
-* `devprojex` — open the interactive Terminal Workspace. Inside the workspace, drive actions through the `:` command line (for example `:copy`, `:analyze`, `:branch`); see the built-in workspace help and project documentation for the full command list.
+* `devprojex` — open the interactive Terminal Workspace. Inside the workspace, drive actions through the `:` command line (for example `:copy`, `:analyze`, `:branch`, `:language`); see the built-in workspace help and project documentation for the full command list.
 * `devprojex tui .` — open the specified folder directly in the Terminal Workspace.
 * `devprojex open . --preview` — open the current folder in Desktop Preview.
 * `devprojex analyze . --format json` — analyze the current project as JSON.

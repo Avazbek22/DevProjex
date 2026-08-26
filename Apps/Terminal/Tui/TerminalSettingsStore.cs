@@ -35,6 +35,14 @@ public sealed class TerminalSettingsStore
 	public IReadOnlyList<string> LoadCommandHistory() =>
 		new TerminalCommandHistory(LoadDocument()?.CommandHistory).Entries.ToArray();
 
+	public AppLanguage? LoadLanguage()
+	{
+		var code = LoadDocument()?.Language;
+		return AppLanguageUtility.TryParseCode(code, out var language)
+			? language
+			: null;
+	}
+
 	public async Task SaveScreenModeAsync(
 		TerminalScreenMode screenMode,
 		CancellationToken cancellationToken = default)
@@ -54,6 +62,15 @@ public sealed class TerminalSettingsStore
 			.ToArray();
 		await UpdateAsync(
 			current => current with { CommandHistory = normalized },
+			cancellationToken).ConfigureAwait(false);
+	}
+
+	public async Task SaveLanguageAsync(
+		AppLanguage language,
+		CancellationToken cancellationToken = default)
+	{
+		await UpdateAsync(
+			current => current with { Language = AppLanguageUtility.ToCode(language) },
 			cancellationToken).ConfigureAwait(false);
 	}
 
@@ -236,7 +253,8 @@ public sealed class TerminalSettingsStore
 	private sealed record TerminalSettingsDocument(
 		int SchemaVersion,
 		TerminalScreenMode ScreenMode,
-		IReadOnlyList<string>? CommandHistory = null);
+		IReadOnlyList<string>? CommandHistory = null,
+		string? Language = null);
 
 	private sealed class TerminalSettingsLimitException()
 		: IOException("Terminal settings exceed the size limit.");

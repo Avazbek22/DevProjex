@@ -297,6 +297,7 @@ public sealed partial class TerminalLocalizationContractTests
 		foreach (var path in Directory.GetFiles(helpDirectory, "help.*.txt", SearchOption.TopDirectoryOnly))
 		{
 			var help = File.ReadAllText(path);
+			Assert.Contains(":language", help, StringComparison.Ordinal);
 			Assert.Matches("(?m)^MD\\s*[:：]$", help.ReplaceLineEndings("\n"));
 			Assert.Contains("`Root: ...`", help, StringComparison.Ordinal);
 			Assert.Contains(

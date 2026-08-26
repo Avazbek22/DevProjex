@@ -88,7 +88,7 @@ Agar buyruq allaqachon sozlangan bo‘lsa, terminalni ochib bajaring:
 Shunda yuqori darajadagi buyruqlar va parametrlarni ko‘rasiz. Muayyan buyruqning parametrlari va misollarini `devprojex help <command>` ko‘rsatadi.
 
 Misollar:
-* `devprojex` — interaktiv terminal ish maydonini ochish. Ish maydonida amallar `:` orqali buyruq satrida bajariladi (masalan, `:copy`, `:analyze`, `:branch`); buyruqlarning to‘liq ro‘yxati ish maydonining ichki yordami va loyiha hujjatlarida berilgan.
+* `devprojex` — interaktiv terminal ish maydonini ochish. Ish maydonida amallar `:` orqali buyruq satrida bajariladi (masalan, `:copy`, `:analyze`, `:branch`, `:language`); buyruqlarning to‘liq ro‘yxati ish maydonining ichki yordami va loyiha hujjatlarida berilgan.
 * `devprojex tui .` — ko‘rsatilgan papkani darhol terminal ish maydonida ochish.
 * `devprojex open . --preview` — joriy papkani Desktop ko‘rib chiqish rejimida ochish.
 * `devprojex analyze . --format json` — joriy loyihani JSON sifatida tahlil qilish.

@@ -88,7 +88,7 @@ DevProjex提供互動式終端工作區以及腳本和CI的直接命令。
 這列出了頂級命令和選項。執行`devprojex help <command>`以查看該命令自己的選項和範例。
 
 範例：
-* `devprojex` — 開啟互動式終端機工作區。在工作區中，透過`:`命令列驅動操作（例如`:copy`、`:analyze`、`:branch`）；有關完整命令列表，請參閱內建工作區說明和專案文件。
+* `devprojex` — 開啟互動式終端機工作區。在工作區中，透過`:`命令列驅動操作（例如`:copy`、`:analyze`、`:branch`、`:language`）；有關完整命令列表，請參閱內建工作區說明和專案文件。
 * `devprojex tui .` — 直接在終端工作區中開啟指定的資料夾。
 * `devprojex open . --preview` — 在桌面預覽中開啟目前資料夾。
 * `devprojex analyze . --format json` — 將目前專案分析為JSON。
