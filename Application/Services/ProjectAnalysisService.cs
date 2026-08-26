@@ -481,7 +481,10 @@ public sealed class ProjectAnalysisService(
 		if (overrideOptions is not null)
 			return overrideOptions.Distinct().ToArray();
 
-		var availability = ignoreRules.GetIgnoreOptionsAvailability(rootPath, selectedRootFolders);
+		var availability = ignoreRules.GetIgnoreOptionsAvailabilityWithCancellation(
+			rootPath,
+			selectedRootFolders,
+			cancellationToken);
 		var discoveryOptions = ignoreOptions.GetOptions(availability)
 			.Where(static option => option.DefaultChecked)
 			.Select(static option => option.Id)
