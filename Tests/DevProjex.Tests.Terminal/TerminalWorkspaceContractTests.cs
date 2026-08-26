@@ -7,6 +7,22 @@ namespace DevProjex.Tests.Terminal;
 public sealed class TerminalWorkspaceContractTests
 {
 	[Fact]
+	public void CancellationSourceCleanupIsIdempotentAcrossBackgroundCompletion()
+	{
+		CancellationTokenSource? active = new();
+		var token = active.Token;
+		TerminalWorkspaceSession.CancelAndDispose(ref active);
+
+		Assert.Null(active);
+		Assert.True(token.IsCancellationRequested);
+
+		CancellationTokenSource? completed = new();
+		completed.Dispose();
+		TerminalWorkspaceSession.CancelAndDispose(ref completed);
+		Assert.Null(completed);
+	}
+
+	[Fact]
 	public void ProjectOpenErrorsHideManagedRepositoryCachePaths()
 	{
 		var cachePath = Path.Combine(Path.GetTempPath(), "DevProjex", "cache", "owner-repo");

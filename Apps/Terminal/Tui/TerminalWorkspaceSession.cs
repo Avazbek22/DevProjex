@@ -4486,8 +4486,17 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_activeOperationCts = null;
 	}
 
-	private void CancelActiveOperation() =>
-		_activeOperationCts?.Cancel();
+	private void CancelActiveOperation()
+	{
+		try
+		{
+			Volatile.Read(ref _activeOperationCts)?.Cancel();
+		}
+		catch (ObjectDisposedException)
+		{
+			// The operation completed while shutdown was requesting cancellation.
+		}
+	}
 
 	private bool HasActiveOperation =>
 		_activeOperationCts is { IsCancellationRequested: false };
@@ -4668,13 +4677,20 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			? sourceReference
 			: plan.SourceRoot);
 
-	private static void CancelAndDispose(ref CancellationTokenSource? source)
+	internal static void CancelAndDispose(ref CancellationTokenSource? source)
 	{
-		if (source is null)
+		var current = Interlocked.Exchange(ref source, null);
+		if (current is null)
 			return;
-		source.Cancel();
-		source.Dispose();
-		source = null;
+		try
+		{
+			current.Cancel();
+		}
+		catch (ObjectDisposedException)
+		{
+			// A completing background task can release the same source during shutdown.
+		}
+		current.Dispose();
 	}
 
 	private Task TrackBackgroundTask(Task task) => _backgroundTasks.Track(task);
