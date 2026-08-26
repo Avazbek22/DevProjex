@@ -226,6 +226,26 @@ public sealed class TerminalSettingsStoreTests
 	}
 
 	[Fact]
+	public async Task FutureSchemaWithIncompatibleKnownFieldIsNeverOverwritten()
+	{
+		using var workspace = new TemporaryDirectory();
+		var store = new TerminalSettingsStore(() => workspace.Path);
+		Directory.CreateDirectory(Path.GetDirectoryName(store.GetPath())!);
+		const string futureDocument =
+			"{\"SchemaVersion\":2,\"ScreenMode\":{\"mode\":\"inline\"},\"CommandHistory\":[\"future command\"]}";
+		File.WriteAllText(store.GetPath(), futureDocument);
+
+		await store.SaveScreenModeAsync(
+			TerminalScreenMode.Inline,
+			TestContext.Current.CancellationToken);
+		await store.SaveCommandHistoryAsync(
+			["view content"],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(futureDocument, File.ReadAllText(store.GetPath()));
+	}
+
+	[Fact]
 	public async Task PersistedSettingsArePrivateToTheCurrentUnixUser()
 	{
 		if (OperatingSystem.IsWindows())

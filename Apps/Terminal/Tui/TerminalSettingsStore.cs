@@ -83,10 +83,14 @@ public sealed class TerminalSettingsStore
 				source,
 				MaximumDocumentBytes,
 				static () => new TerminalSettingsLimitException());
-			var document = JsonSerializer.Deserialize<TerminalSettingsDocument>(stream);
-			hasFutureSchema = document is { SchemaVersion: > CurrentSchemaVersion };
-			return document is { SchemaVersion: CurrentSchemaVersion }
-				? document
+			using var json = JsonDocument.Parse(stream);
+			hasFutureSchema = IsFutureSchema(json.RootElement);
+			if (hasFutureSchema)
+				return null;
+
+			var settings = json.RootElement.Deserialize<TerminalSettingsDocument>();
+			return settings is { SchemaVersion: CurrentSchemaVersion }
+				? settings
 				: null;
 		}
 		catch (TerminalSettingsLimitException)
@@ -103,6 +107,15 @@ public sealed class TerminalSettingsStore
 		{
 			return null;
 		}
+	}
+
+	private static bool IsFutureSchema(JsonElement root)
+	{
+		if (!root.TryGetProperty("SchemaVersion", out var version))
+			return false;
+		if (version.TryGetInt64(out var signed))
+			return signed > CurrentSchemaVersion;
+		return version.TryGetUInt64(out var unsigned) && unsigned > CurrentSchemaVersion;
 	}
 
 	private async Task UpdateAsync(
