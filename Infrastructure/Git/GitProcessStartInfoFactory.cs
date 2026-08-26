@@ -28,6 +28,11 @@ internal static class GitProcessStartInfoFactory
 		};
 		if (!string.IsNullOrEmpty(workingDirectory))
 			startInfo.WorkingDirectory = workingDirectory;
+		if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+		{
+			startInfo.ArgumentList.Add("-c");
+			startInfo.ArgumentList.Add("core.longpaths=true");
+		}
 		foreach (var argument in arguments)
 			startInfo.ArgumentList.Add(argument);
 

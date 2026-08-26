@@ -28,7 +28,10 @@ public class GitRepositoryServiceUnitTests
         Assert.Equal("never", startInfo.Environment["SSH_ASKPASS_REQUIRE"]);
         Assert.Equal("Never", startInfo.Environment["GCM_INTERACTIVE"]);
         Assert.Equal("false", startInfo.Environment["GCM_GUI_PROMPT"]);
-        Assert.Equal(["--version"], startInfo.ArgumentList);
+		var expectedArguments = OperatingSystem.IsWindows()
+			? new[] { "-c", "core.longpaths=true", "--version" }
+			: ["--version"];
+		Assert.Equal(expectedArguments, startInfo.ArgumentList);
     }
 
 	[Fact]
