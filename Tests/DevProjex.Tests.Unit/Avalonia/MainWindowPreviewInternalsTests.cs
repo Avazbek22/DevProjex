@@ -378,6 +378,33 @@ public sealed class MainWindowPreviewInternalsTests
 				cancellation.Token));
 	}
 
+	[Fact]
+	public void BuildSelectionProjectionWithCancellation_StopsDuringTraversal()
+	{
+		using var cancellation = new CancellationTokenSource();
+		var child = new TreeNodeDescriptor(
+			"file.txt",
+			CreatePath("root", "file.txt"),
+			false,
+			false,
+			"file",
+			[]);
+		var root = new TreeNodeDescriptor(
+			"root",
+			CreatePath("root"),
+			true,
+			false,
+			"folder",
+			new CancelOnReadList<TreeNodeDescriptor>([child], cancellation));
+
+		Assert.Throws<OperationCanceledException>(() =>
+			TreeSelectionSnapshotCache.BuildProjectionWithCancellation(
+				root,
+				new HashSet<string>(PathComparer.Default),
+				allOrderedFilePaths: null,
+				cancellation.Token));
+	}
+
     [Fact]
     public void BuildPreviewCacheKey_SameArguments_ProduceEqualKey()
     {

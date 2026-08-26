@@ -481,41 +481,68 @@ public partial class MainWindow
 			return;
 		}
 
+		if (_windowLifetimeCts is not { IsCancellationRequested: false } lifetime)
+			return;
 		_orderedSelectionProjectionBuildVersion = selectionVersion;
 		_orderedSelectionProjectionPresentation = presentation;
+		var projectionCts = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token);
+		var projectionToken = projectionCts.Token;
+		var previousProjectionCts = Interlocked.Exchange(
+			ref _orderedSelectionProjectionCts,
+			projectionCts);
+		previousProjectionCts?.Cancel();
+		previousProjectionCts?.Dispose();
 		var tree = _currentTree!;
 		var checkedPaths = _treeSelectionSnapshotCache.GetOrCreate(_viewModel.TreeNodes);
 		ObserveDetachedTask(
-			BuildOrderedSelectionProjectionAsync(tree, checkedPaths, selectionVersion),
+			BuildOrderedSelectionProjectionAsync(
+				tree,
+				checkedPaths,
+				selectionVersion,
+				projectionCts,
+				projectionToken),
 			"BuildOrderedSelectionProjection");
 	}
 
 	private async Task BuildOrderedSelectionProjectionAsync(
 		BuildTreeResult tree,
 		IReadOnlySet<string> checkedPaths,
-		long selectionVersion)
+		long selectionVersion,
+		CancellationTokenSource projectionCts,
+		CancellationToken cancellationToken)
 	{
-		var projection = await Task.Run(() => TreeSelectionSnapshotCache.BuildProjection(
-			tree.Root,
-			checkedPaths,
-			tree.OrderedFilePaths));
-		if (_orderedSelectionProjectionBuildVersion == selectionVersion)
-			_orderedSelectionProjectionBuildVersion = -1;
-		if (_windowLifetimeCts is not { IsCancellationRequested: false } ||
-		    !ReferenceEquals(_currentTree, tree) ||
-		    selectionVersion != _treeSelectionSnapshotCache.SelectionVersion)
+		try
 		{
-			// A newer selection or tree superseded this build; its own change already scheduled a
-			// refresh, so this stale projection is simply dropped.
-			return;
-		}
+			var projection = await Task.Run(
+				() => TreeSelectionSnapshotCache.BuildProjectionWithCancellation(
+					tree.Root,
+					checkedPaths,
+					tree.OrderedFilePaths,
+					cancellationToken),
+				cancellationToken);
+			cancellationToken.ThrowIfCancellationRequested();
+			if (_windowLifetimeCts is not { IsCancellationRequested: false } ||
+			    !ReferenceEquals(_currentTree, tree) ||
+			    selectionVersion != _treeSelectionSnapshotCache.SelectionVersion)
+			{
+				// A newer selection or tree superseded this build; its own change already scheduled a
+				// refresh, so this stale projection is simply dropped.
+				return;
+			}
 
-		_treeSelectionSnapshotCache.StoreProjection(
-			selectionVersion,
-			tree.Root,
-			projection.NormalizedPaths,
-			projection.OrderedFiles);
-		ScheduleSecretRedactionCountRefresh(_orderedSelectionProjectionPresentation);
+			_treeSelectionSnapshotCache.StoreProjection(
+				selectionVersion,
+				tree.Root,
+				projection.NormalizedPaths,
+				projection.OrderedFiles);
+			ScheduleSecretRedactionCountRefresh(_orderedSelectionProjectionPresentation);
+		}
+		finally
+		{
+			if (_orderedSelectionProjectionBuildVersion == selectionVersion)
+				_orderedSelectionProjectionBuildVersion = -1;
+			DisposeIfCurrent(ref _orderedSelectionProjectionCts, projectionCts);
+		}
 	}
 
 	/// <summary>
@@ -922,6 +949,7 @@ public partial class MainWindow
 	private SecretDiscoveryRequest? _activeSecretDiscoveryRequest;
 	private long _secretRedactionCountRefreshVersion;
 	private long _orderedSelectionProjectionBuildVersion = -1;
+	private CancellationTokenSource? _orderedSelectionProjectionCts;
 	private StatusOperationPresentation _orderedSelectionProjectionPresentation;
 	private int? _secretRedactionCount;
 	private int? _secretRedactionMatchedCount;
