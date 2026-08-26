@@ -401,6 +401,37 @@ public sealed class DesktopControlIntegrationTests
 	}
 
 	[Fact]
+	public async Task RegistryProbeDoesNotTraverseLinkedRegistryDirectory()
+	{
+		using var workspace = new TemporaryDirectory();
+		var paths = new DesktopControlPaths(() => workspace.CreateDirectory("ipc"));
+		var protectedDirectory = workspace.CreateDirectory("protected");
+		var protectedRegistration = Path.Combine(protectedDirectory, "unrelated.json");
+		await File.WriteAllTextAsync(
+			protectedRegistration,
+			"keep",
+			TestContext.Current.CancellationToken);
+		Directory.CreateDirectory(paths.RootDirectory);
+		try
+		{
+			Directory.CreateSymbolicLink(paths.RegistryDirectory, protectedDirectory);
+		}
+		catch (Exception exception) when (exception is
+		       IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+		{
+			Assert.Skip("Directory symbolic links are unavailable in this test environment.");
+		}
+
+		var snapshot = await new DesktopInstanceRegistry(paths).ProbeAsync(
+			removeStale: true,
+			TestContext.Current.CancellationToken);
+
+		Assert.Empty(snapshot.Instances);
+		Assert.Equal(0, snapshot.StaleEntryCount);
+		Assert.True(File.Exists(protectedRegistration));
+	}
+
+	[Fact]
 	public async Task RegistryRemovesDanglingRegistrationLinksOnUnix()
 	{
 		if (OperatingSystem.IsWindows())

@@ -80,6 +80,8 @@ public sealed class DesktopInstanceRegistry
 	{
 		if (!Directory.Exists(_paths.RegistryDirectory))
 			return new DesktopRegistrySnapshot([], 0);
+		if (!IsDirectPrivateDirectory(_paths.RegistryDirectory))
+			return new DesktopRegistrySnapshot([], 0);
 
 		if (removeStale)
 			RemoveStaleTemporaryFiles(cancellationToken);
@@ -287,13 +289,32 @@ public sealed class DesktopInstanceRegistry
 	internal static void EnsurePrivateDirectory(string path)
 	{
 		Directory.CreateDirectory(path);
+		if (!IsDirectPrivateDirectory(path))
+			throw new IOException("Desktop control storage cannot use a symbolic link or reparse point.");
 		if (!OperatingSystem.IsWindows())
 		{
 			File.SetUnixFileMode(
 				path,
 				UnixFileMode.UserRead |
 				UnixFileMode.UserWrite |
-				UnixFileMode.UserExecute);
+					UnixFileMode.UserExecute);
+		}
+		if (!IsDirectPrivateDirectory(path))
+			throw new IOException("Desktop control storage changed while it was being secured.");
+	}
+
+	private static bool IsDirectPrivateDirectory(string path)
+	{
+		try
+		{
+			var attributes = File.GetAttributes(path);
+			return attributes.HasFlag(FileAttributes.Directory) &&
+			       !attributes.HasFlag(FileAttributes.ReparsePoint);
+		}
+		catch (Exception exception) when (exception is
+		       IOException or UnauthorizedAccessException or NotSupportedException)
+		{
+			return false;
 		}
 	}
 
