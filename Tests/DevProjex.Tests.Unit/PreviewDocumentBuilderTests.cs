@@ -323,6 +323,8 @@ public sealed class PreviewDocumentBuilderTests
     public async Task CreateDocumentAsync_LargePayloadUsesFileBackingAndPreservesFinalLine()
     {
         var builder = new PreviewDocumentBuilder(new StubFileContentAnalyzer());
+        var largeLine = new string('x', 600_000);
+        const string finalLine = "final-marker-日本語";
 
         using var document = await builder.CreateDocumentAsync(
             async (stream, cancellationToken) =>
@@ -332,15 +334,17 @@ public sealed class PreviewDocumentBuilderTests
                     new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
                     bufferSize: 8192,
                     leaveOpen: true);
-                await writer.WriteLineAsync(new string('x', 600_000));
-                await writer.WriteAsync("final-marker".AsMemory(), cancellationToken);
+                await writer.WriteLineAsync(largeLine);
+                await writer.WriteAsync(finalLine.AsMemory(), cancellationToken);
                 await writer.FlushAsync(cancellationToken);
             },
             TestContext.Current.CancellationToken);
 
         var fileBacked = Assert.IsType<FileBackedPreviewTextDocument>(document);
         Assert.Equal(2, fileBacked.LineCount);
-        Assert.Equal("final-marker", fileBacked.GetLineText(2));
+        Assert.Equal(largeLine.Length, fileBacked.MaxLineLength);
+        Assert.Equal(largeLine.Length + Environment.NewLine.Length + finalLine.Length, fileBacked.CharacterCount);
+        Assert.Equal(finalLine, fileBacked.GetLineText(2));
     }
 
     [Fact]

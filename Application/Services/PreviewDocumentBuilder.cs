@@ -73,7 +73,8 @@ public sealed class PreviewDocumentBuilder(
                 await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
             }
 
-            return BuildDocumentFromUtf8File(storagePath);
+            return await BuildDocumentFromUtf8FileAsync(storagePath, cancellationToken)
+                .ConfigureAwait(false);
         }
         catch
         {
@@ -823,109 +824,142 @@ public sealed class PreviewDocumentBuilder(
         }
     }
 
-    private static IPreviewTextDocument BuildDocumentFromUtf8File(string storagePath)
+    private static async Task<IPreviewTextDocument> BuildDocumentFromUtf8FileAsync(
+        string storagePath,
+        CancellationToken cancellationToken)
     {
-        var lineOffsets = BuildLineOffsets(storagePath);
-        var (characterCount, maxLineLength) = ReadTextMetrics(storagePath);
-        var fileLength = new FileInfo(storagePath).Length;
-        if (characterCount <= InMemoryDocumentThresholdChars)
+        var metrics = await ReadStorageMetricsAsync(storagePath, cancellationToken)
+            .ConfigureAwait(false);
+        if (metrics.CharacterCount <= InMemoryDocumentThresholdChars)
         {
-            var text = File.ReadAllText(storagePath, PreviewTextStorageBuilder.Utf8WithoutBom);
+            var text = await File.ReadAllTextAsync(
+                    storagePath,
+                    PreviewTextStorageBuilder.Utf8WithoutBom,
+                    cancellationToken)
+                .ConfigureAwait(false);
             DisposeStorageFile(storagePath);
             return new InMemoryPreviewTextDocument(text);
         }
 
         return new FileBackedPreviewTextDocument(
             storagePath,
-            lineOffsets,
-            fileLength,
-            maxLineLength,
-            characterCount);
+            metrics.LineOffsets,
+            metrics.FileLength,
+            metrics.MaxLineLength,
+            metrics.CharacterCount);
     }
 
-    private static long[] BuildLineOffsets(string storagePath)
+    private static async Task<PreviewStorageMetrics> ReadStorageMetricsAsync(
+        string storagePath,
+        CancellationToken cancellationToken)
     {
-        using var stream = new FileStream(
+        await using var stream = new FileStream(
             storagePath,
             FileMode.Open,
             FileAccess.Read,
             FileShare.Read,
             bufferSize: 8192,
-            options: FileOptions.SequentialScan);
+            options: FileOptions.Asynchronous | FileOptions.SequentialScan);
         if (stream.Length == 0)
-            return [];
+            return new PreviewStorageMetrics([], 0, 0, 0);
 
         var offsets = new List<long> { 0 };
-        var buffer = ArrayPool<byte>.Shared.Rent(8192);
+        var byteBuffer = ArrayPool<byte>.Shared.Rent(8192);
+        var charBuffer = ArrayPool<char>.Shared.Rent(
+            PreviewTextStorageBuilder.Utf8WithoutBom.GetMaxCharCount(byteBuffer.Length));
+        var decoder = PreviewTextStorageBuilder.Utf8WithoutBom.GetDecoder();
         try
         {
-            long absoluteOffset = 0;
-            int bytesRead;
-            while ((bytesRead = stream.Read(buffer, 0, buffer.Length)) > 0)
-            {
-                for (var index = 0; index < bytesRead; index++)
-                {
-                    if (buffer[index] == (byte)'\n')
-                        offsets.Add(absoluteOffset + index + 1);
-                }
-
-                absoluteOffset += bytesRead;
-            }
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(buffer);
-        }
-
-        return offsets.ToArray();
-    }
-
-    private static (long CharacterCount, int MaxLineLength) ReadTextMetrics(string storagePath)
-    {
-        using var stream = new FileStream(
-            storagePath,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.Read,
-            bufferSize: 8192,
-            options: FileOptions.SequentialScan);
-        using var reader = new StreamReader(
-            stream,
-            PreviewTextStorageBuilder.Utf8WithoutBom,
-            detectEncodingFromByteOrderMarks: true,
-            bufferSize: 8192);
-
-        var buffer = ArrayPool<char>.Shared.Rent(8192);
-        try
-        {
+            long fileOffset = 0;
             long characterCount = 0;
             var currentLineLength = 0;
             var maxLineLength = 0;
-            int charactersRead;
-            while ((charactersRead = reader.Read(buffer, 0, buffer.Length)) > 0)
+            var firstRead = true;
+            while (true)
             {
-                characterCount += charactersRead;
-                foreach (var character in buffer.AsSpan(0, charactersRead))
+                var bytesRead = firstRead
+                    ? await stream.ReadAtLeastAsync(
+                            byteBuffer.AsMemory(),
+                            minimumBytes: 3,
+                            throwOnEndOfStream: false,
+                            cancellationToken)
+                        .ConfigureAwait(false)
+                    : await stream.ReadAsync(byteBuffer.AsMemory(), cancellationToken)
+                        .ConfigureAwait(false);
+                if (bytesRead == 0)
+                    break;
+
+                for (var index = 0; index < bytesRead; index++)
                 {
-                    if (character == '\n')
-                    {
-                        maxLineLength = Math.Max(maxLineLength, currentLineLength);
-                        currentLineLength = 0;
-                    }
-                    else if (character != '\r')
-                    {
-                        currentLineLength++;
-                    }
+                    if (byteBuffer[index] == (byte)'\n')
+                        offsets.Add(fileOffset + index + 1);
                 }
+
+                var decodeOffset = firstRead &&
+                                   bytesRead >= 3 &&
+                                   byteBuffer[0] == 0xEF &&
+                                   byteBuffer[1] == 0xBB &&
+                                   byteBuffer[2] == 0xBF
+                    ? 3
+                    : 0;
+                Decode(
+                    byteBuffer.AsSpan(decodeOffset, bytesRead - decodeOffset),
+                    flush: false);
+                fileOffset += bytesRead;
+                firstRead = false;
             }
 
-            return (characterCount, Math.Max(maxLineLength, currentLineLength));
+            Decode(ReadOnlySpan<byte>.Empty, flush: true);
+            return new PreviewStorageMetrics(
+                offsets.ToArray(),
+                stream.Length,
+                characterCount,
+                Math.Max(maxLineLength, currentLineLength));
+
+            void Decode(ReadOnlySpan<byte> bytes, bool flush)
+            {
+                while (!bytes.IsEmpty || flush)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    decoder.Convert(
+                        bytes,
+                        charBuffer,
+                        flush,
+                        out var bytesUsed,
+                        out var charactersUsed,
+                        out var completed);
+                    characterCount += charactersUsed;
+                    foreach (var character in charBuffer.AsSpan(0, charactersUsed))
+                    {
+                        if (character == '\n')
+                        {
+                            maxLineLength = Math.Max(maxLineLength, currentLineLength);
+                            currentLineLength = 0;
+                        }
+                        else if (character != '\r')
+                        {
+                            currentLineLength++;
+                        }
+                    }
+
+                    bytes = bytes[bytesUsed..];
+                    if (completed)
+                        break;
+                }
+            }
         }
         finally
         {
-            ArrayPool<char>.Shared.Return(buffer);
+            ArrayPool<byte>.Shared.Return(byteBuffer);
+            ArrayPool<char>.Shared.Return(charBuffer);
         }
     }
+
+    private readonly record struct PreviewStorageMetrics(
+        long[] LineOffsets,
+        long FileLength,
+        long CharacterCount,
+        int MaxLineLength);
 
 	private static string CreateStoragePath()
 	{
