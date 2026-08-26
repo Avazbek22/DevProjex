@@ -168,15 +168,8 @@ public sealed class McpPackRegistry : IDisposable
 			cleanupNow = _activeCreates == 0;
 		}
 
-		try
-		{
-			_sessionLease.Dispose();
-		}
-		finally
-		{
-			if (cleanupNow)
-				CleanupSessionDirectory();
-		}
+		if (cleanupNow)
+			CleanupSessionDirectory();
 	}
 
 	private void BeginCreate()
@@ -204,6 +197,7 @@ public sealed class McpPackRegistry : IDisposable
 	{
 		try
 		{
+			_sessionLease.Dispose();
 			try
 			{
 				if (Directory.Exists(_sessionDirectory))

@@ -666,6 +666,36 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public async Task PackRegistryDisposeDuringCreateKeepsSessionLeaseUntilWriterFinishes()
+	{
+		using var workspace = new TemporaryDirectory();
+		var registry = new McpPackRegistry(workspace.Path);
+		var leasePath = Path.Combine(registry.SessionDirectory, ".session.lock");
+		var writerStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var releaseWriter = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var create = registry.CreateAsync(
+			async (stream, token) =>
+			{
+				await stream.WriteAsync("first"u8.ToArray(), token);
+				writerStarted.TrySetResult();
+				await releaseWriter.Task.WaitAsync(token);
+			},
+			TestContext.Current.CancellationToken);
+		await writerStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+
+		registry.Dispose();
+
+		Assert.Throws<IOException>(() => new FileStream(
+			leasePath,
+			FileMode.Open,
+			FileAccess.ReadWrite,
+			FileShare.Delete));
+
+		releaseWriter.TrySetResult();
+		await Assert.ThrowsAsync<ObjectDisposedException>(() => create);
+	}
+
+	[Fact]
 	public async Task PackRemovalIgnoresCleanupAccessFailures()
 	{
 		using var workspace = new TemporaryDirectory();
