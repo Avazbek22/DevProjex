@@ -2881,7 +2881,10 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			}
 		}
 
-		discoveredGitIgnoreMatchers.Sort(CompareScopedGitIgnoreMatchers);
+		CancellationAwareSort.Sort(
+			discoveredGitIgnoreMatchers,
+			CompareScopedGitIgnoreMatchers,
+			cancellationToken);
 		return new ScanResult<EffectiveIgnoreScanDiscovery>(
 			new EffectiveIgnoreScanDiscovery(
 				directories,
