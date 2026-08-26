@@ -853,6 +853,26 @@ public sealed class MainWindowCoordinatorRefactorTests
     }
 
     [Fact]
+    public void PreviewWorkspacePipeline_ScheduleAfterDisposeDoesNotRecreateTimer()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsProjectLoaded = true;
+        viewModel.PreviewWorkspaceMode = PreviewWorkspaceMode.TreeAndPreview;
+        var pipeline = new PreviewWorkspacePipeline(
+            new RecordingPreviewWorkspaceHost(viewModel),
+            TimeSpan.FromMilliseconds(1));
+
+        pipeline.Dispose();
+        pipeline.ScheduleRefresh();
+
+        var timer = typeof(PreviewWorkspacePipeline).GetField(
+            "_previewDebounceTimer",
+            BindingFlags.Instance | BindingFlags.NonPublic)?.GetValue(pipeline);
+        Assert.Null(timer);
+        Assert.False(pipeline.IsRefreshRequested);
+    }
+
+    [Fact]
     public async Task PreviewWorkspacePipeline_NewBuildSchedulesCleanupForAppliedDocument()
     {
         var viewModel = CreateViewModel();

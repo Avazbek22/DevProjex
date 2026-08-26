@@ -18,6 +18,7 @@ internal sealed class PreviewWorkspacePipeline(
     private long _requestedRefreshVersion;
     private long _completedRefreshVersion;
     private int _buildVersion;
+    private int _disposed;
 
     public bool IsIdle => !host.IsPreviewModeSwitchInProgress &&
                           !IsRefreshRequested;
@@ -28,6 +29,9 @@ internal sealed class PreviewWorkspacePipeline(
 
     public void ScheduleRefresh(bool immediate = false)
     {
+        if (Volatile.Read(ref _disposed) != 0)
+            return;
+
         var requestVersion = RequestRefresh();
 
         if (!host.ViewModel.IsProjectLoaded || !host.ViewModel.IsAnyPreviewVisible)
@@ -56,6 +60,13 @@ internal sealed class PreviewWorkspacePipeline(
         Task? publicationReady = null,
         bool deferPresentationUntilPublication = false)
     {
+        if (Volatile.Read(ref _disposed) != 0)
+        {
+            return new PreviewRefreshOperation(
+                Task.CompletedTask,
+                Task.CompletedTask);
+        }
+
         var requestVersion = RequestRefresh();
         var firstContentReady = new FirstContentReadySignal();
         var previousFirstContentReady = Interlocked.Exchange(
@@ -104,13 +115,15 @@ internal sealed class PreviewWorkspacePipeline(
     public void InvalidateCache() => _cachedPreviewKey = null;
 
     public Task RefreshAsync(bool allowDuringModeSwitch = false) =>
-        RefreshAsync(
-            allowDuringModeSwitch,
-            Volatile.Read(ref _requestedRefreshVersion),
-            Volatile.Read(ref _firstContentReady),
-            cancelSignalOnEarlyExit: false,
-            publicationReady: null,
-            deferPresentationUntilPublication: false);
+        Volatile.Read(ref _disposed) != 0
+            ? Task.CompletedTask
+            : RefreshAsync(
+                allowDuringModeSwitch,
+                Volatile.Read(ref _requestedRefreshVersion),
+                Volatile.Read(ref _firstContentReady),
+                cancelSignalOnEarlyExit: false,
+                publicationReady: null,
+                deferPresentationUntilPublication: false);
 
     private async Task RefreshAsync(
         bool allowDuringModeSwitch,
@@ -120,6 +133,13 @@ internal sealed class PreviewWorkspacePipeline(
         Task? publicationReady,
         bool deferPresentationUntilPublication)
     {
+        if (Volatile.Read(ref _disposed) != 0)
+        {
+            if (cancelSignalOnEarlyExit)
+                CancelTrackedFirstContentReady(firstContentReady);
+            return;
+        }
+
         if (!IsCurrentRefreshRequest(requestVersion) ||
             !host.ViewModel.IsProjectLoaded ||
             !host.ViewModel.IsAnyPreviewVisible)
@@ -351,6 +371,9 @@ internal sealed class PreviewWorkspacePipeline(
 
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+
         CancelRefresh();
         CancelAndDispose(ref _previewBuildCts);
         if (_previewDebounceTimer is not null)
