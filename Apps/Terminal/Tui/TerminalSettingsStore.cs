@@ -9,6 +9,7 @@ public sealed class TerminalSettingsStore
 {
 	private const int CurrentSchemaVersion = 1;
 	private const int MaximumDocumentBytes = 512 * 1024;
+	private const UnixFileMode PrivateUnixFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
 	private readonly Func<string> _appDataPathProvider;
 	private readonly Action? _afterReadOpened;
 	private readonly SemaphoreSlim _writeGate = new(1, 1);
@@ -70,6 +71,7 @@ public sealed class TerminalSettingsStore
 			var path = GetPath();
 			if (!File.Exists(path))
 				return null;
+			TryEnsurePrivateUnixFileMode(path);
 
 			using var source = new FileStream(
 				path,
@@ -111,11 +113,40 @@ public sealed class TerminalSettingsStore
 
 	private static bool IsFutureSchema(JsonElement root)
 	{
+		if (root.ValueKind != JsonValueKind.Object)
+			return false;
+
 		if (!root.TryGetProperty("SchemaVersion", out var version))
 			return false;
 		if (version.TryGetInt64(out var signed))
 			return signed > CurrentSchemaVersion;
 		return version.TryGetUInt64(out var unsigned) && unsigned > CurrentSchemaVersion;
+	}
+
+	private static void TryEnsurePrivateUnixFileMode(string path)
+	{
+		if (OperatingSystem.IsWindows())
+			return;
+
+		try
+		{
+			var attributes = File.GetAttributes(path);
+			if ((attributes & (FileAttributes.ReparsePoint | FileAttributes.Directory)) != 0)
+				return;
+
+			using var handle = File.OpenHandle(
+				path,
+				FileMode.Open,
+				FileAccess.Read,
+				FileShare.ReadWrite | FileShare.Delete);
+			if (File.GetUnixFileMode(handle) != PrivateUnixFileMode)
+				File.SetUnixFileMode(handle, PrivateUnixFileMode);
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+		                                      PlatformNotSupportedException or NotSupportedException)
+		{
+			// Unsupported permission metadata must not make terminal settings unreadable.
+		}
 	}
 
 	private async Task UpdateAsync(
@@ -153,7 +184,7 @@ public sealed class TerminalSettingsStore
 					Options = FileOptions.Asynchronous | FileOptions.SequentialScan
 				};
 				if (!OperatingSystem.IsWindows())
-					streamOptions.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+					streamOptions.UnixCreateMode = PrivateUnixFileMode;
 
 				await using (var stream = new FileStream(temporaryPath, streamOptions))
 				{
