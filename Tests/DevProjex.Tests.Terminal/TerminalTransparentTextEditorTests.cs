@@ -35,6 +35,7 @@ public sealed class TerminalTransparentTextEditorTests
 	[Theory]
 	[InlineData("abcdefgh", 5, 4)]
 	[InlineData("ab界cd", 5, 2)]
+	[InlineData("a😀界bc", 5, 2)]
 	[InlineData("abcdefgh", 1, 8)]
 	public void CommandInputKeepsCursorVisibleWithoutSplittingWideRunes(
 		string value,
