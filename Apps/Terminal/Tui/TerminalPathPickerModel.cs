@@ -66,15 +66,13 @@ internal sealed class TerminalPathPickerModel
 					IsParent: true));
 			}
 
-			var children = Directory
-				.EnumerateFileSystemEntries(normalized)
-				.Select(CreateEntry)
-				.Where(entry => entry.IsDirectory || IsVisibleFile(entry.Path))
-				.OrderByDescending(static entry => entry.IsDirectory)
-				.ThenBy(static entry => entry.Name, StringComparer.CurrentCultureIgnoreCase)
-				.Take(MaximumEntries + 1)
-				.ToArray();
-			IsTruncated = children.Length > MaximumEntries;
+			var children = TakeOrderedEntries(
+				Directory
+					.EnumerateFileSystemEntries(normalized)
+					.Select(CreateEntry)
+					.Where(entry => entry.IsDirectory || IsVisibleFile(entry.Path)),
+				MaximumEntries + 1);
+			IsTruncated = children.Count > MaximumEntries;
 			entries.AddRange(children.Take(MaximumEntries));
 			CurrentDirectory = normalized;
 			Entries = entries;
@@ -132,6 +130,40 @@ internal sealed class TerminalPathPickerModel
 		};
 	}
 
+	internal static IReadOnlyList<TerminalPathPickerEntry> TakeOrderedEntries(
+		IEnumerable<TerminalPathPickerEntry> source,
+		int maximumCount)
+	{
+		ArgumentNullException.ThrowIfNull(source);
+		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumCount);
+
+		var nameComparer = StringComparer.CurrentCultureIgnoreCase;
+		var orderedComparer = new PathPickerCandidateComparer(nameComparer, reverse: false);
+		var worstFirstComparer = new PathPickerCandidateComparer(nameComparer, reverse: true);
+		var retained = new PriorityQueue<PathPickerCandidate, PathPickerCandidate>(worstFirstComparer);
+		long sequence = 0;
+		foreach (var entry in source)
+		{
+			var candidate = new PathPickerCandidate(entry, sequence++);
+			if (retained.Count < maximumCount)
+			{
+				retained.Enqueue(candidate, candidate);
+			}
+			else if (orderedComparer.Compare(candidate, retained.Peek()) < 0)
+			{
+				retained.Dequeue();
+				retained.Enqueue(candidate, candidate);
+			}
+		}
+
+		var result = new PathPickerCandidate[retained.Count];
+		var index = 0;
+		foreach (var item in retained.UnorderedItems)
+			result[index++] = item.Element;
+		Array.Sort(result, orderedComparer);
+		return result.Select(static candidate => candidate.Entry).ToArray();
+	}
+
 	private bool IsVisibleFile(string path) =>
 		_mode == TerminalPathPickerMode.JsonFile &&
 		path.EndsWith(".json", StringComparison.OrdinalIgnoreCase);
@@ -157,5 +189,25 @@ internal sealed class TerminalPathPickerModel
 		}
 
 		return Directory.GetCurrentDirectory();
+	}
+
+	private readonly record struct PathPickerCandidate(
+		TerminalPathPickerEntry Entry,
+		long Sequence);
+
+	private sealed class PathPickerCandidateComparer(
+		StringComparer nameComparer,
+		bool reverse) : IComparer<PathPickerCandidate>
+	{
+		public int Compare(PathPickerCandidate left, PathPickerCandidate right) =>
+			reverse ? CompareCore(right, left) : CompareCore(left, right);
+
+		private int CompareCore(PathPickerCandidate left, PathPickerCandidate right)
+		{
+			if (left.Entry.IsDirectory != right.Entry.IsDirectory)
+				return left.Entry.IsDirectory ? -1 : 1;
+			var nameOrder = nameComparer.Compare(left.Entry.Name, right.Entry.Name);
+			return nameOrder != 0 ? nameOrder : left.Sequence.CompareTo(right.Sequence);
+		}
 	}
 }
