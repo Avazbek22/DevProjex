@@ -294,8 +294,148 @@ public sealed class CompletionReleaseRegressionTests
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
 		Assert.Contains("dev complete", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains(cursorMarker, environment.StandardOutput, StringComparison.Ordinal);
+		if (shell == "bash")
+		{
+			Assert.Contains(
+				"--bash-current-word=\"$2\"",
+				environment.StandardOutput,
+				StringComparison.Ordinal);
+		}
+		else
+		{
+			Assert.DoesNotContain(
+				"--bash-current-word",
+				environment.StandardOutput,
+				StringComparison.Ordinal);
+		}
+		if (shell is "bash" or "zsh" or "fish")
+		{
+			var expectedUnit = shell == "bash" ? "utf8-byte" : "unicode-scalar";
+			Assert.Contains(
+				$"--position-unit {expectedUnit}",
+				environment.StandardOutput,
+				StringComparison.Ordinal);
+		}
+		else
+		{
+			Assert.DoesNotContain(
+				"--position-unit",
+				environment.StandardOutput,
+				StringComparison.Ordinal);
+		}
 		Assert.DoesNotContain("\u001b", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Empty(environment.StandardError);
+	}
+
+	[Theory]
+	[InlineData("./Project\\ Space/So", "./Project Space/So")]
+	[InlineData("./Literal\\\\Name/So", "./Literal\\Name/So")]
+	[InlineData("\"./Project Space/So", "./Project Space/So")]
+	public void BashCurrentWordDecoderPreservesShellWordSemantics(
+		string rawWord,
+		string expected)
+	{
+		Assert.Equal(expected, BashCompletionWordDecoder.Decode(rawWord));
+	}
+
+	[Fact]
+	public async Task BashCurrentWordTransportCompletesAnEscapedDirectoryPath()
+	{
+		using var workspace = new TemporaryDirectory();
+		var completionDirectory = workspace.CreateDirectory("completion cwd");
+		Directory.CreateDirectory(Path.Combine(completionDirectory, "Project Space", "Source"));
+		const string rawCurrentWord = "./Project\\ Space/So";
+		const string line = $"devprojex analyze {rawCurrentWord}";
+		var encodedWorkingDirectory = Convert.ToBase64String(
+			Encoding.UTF8.GetBytes(completionDirectory));
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment).RunAsync(
+			[
+				"dev",
+				"complete",
+				"--position",
+				line.Length.ToString(CultureInfo.InvariantCulture),
+				"--null",
+				$"--bash-current-word={rawCurrentWord}",
+				"--working-directory-base64",
+				encodedWorkingDirectory,
+				"--",
+				line
+			],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Empty(environment.StandardError);
+		Assert.Contains(
+			"./Project Space/Source/",
+			environment.StandardOutput.Split('\0', StringSplitOptions.RemoveEmptyEntries));
+	}
+
+	[Fact]
+	public async Task BashTokenizationIncludesEscapedArgumentsBeforeTheCurrentWord()
+	{
+		const string line = "devprojex analyze ./Project\\ Space --format j";
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment).RunAsync(
+			[
+				"dev",
+				"complete",
+				"--position",
+				line.Length.ToString(CultureInfo.InvariantCulture),
+				"--bash-current-word=j",
+				"--",
+				line
+			],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Empty(environment.StandardError);
+		Assert.Equal(["json"], environment.StandardOutput.Split(
+			Environment.NewLine,
+			StringSplitOptions.RemoveEmptyEntries));
+	}
+
+	[Fact]
+	public void LeadingHomeCompletionResolvesAgainstHomeAndPreservesTildePrefix()
+	{
+		using var workspace = new TemporaryDirectory();
+		var homeDirectory = workspace.CreateDirectory("home");
+		var baseDirectory = workspace.CreateDirectory("cwd");
+		Directory.CreateDirectory(Path.Combine(homeDirectory, "Projects With Space"));
+
+		var candidates = FileSystemCompletionSource.Complete(
+			"~/Proj",
+			FileSystemCompletionKind.Directories,
+			baseDirectory,
+			homeDirectory);
+
+		Assert.Equal(["~/Projects With Space/"], candidates);
+	}
+
+	[Theory]
+	[InlineData(CompletionCursorPositionNormalizer.Utf8ByteUnit)]
+	[InlineData(CompletionCursorPositionNormalizer.UnicodeScalarUnit)]
+	public void PosixCursorUnitsNormalizeToTheUtf16Cursor(string positionUnit)
+	{
+		const string line = "devprojex analyze Проект 😀 --format j trailing";
+		var expectedPosition = line.IndexOf(" trailing", StringComparison.Ordinal);
+		var unicodeScalarPosition = 0;
+		foreach (var _ in line.AsSpan(0, expectedPosition).EnumerateRunes())
+			unicodeScalarPosition++;
+		var sourcePosition = positionUnit == CompletionCursorPositionNormalizer.Utf8ByteUnit
+			? Encoding.UTF8.GetByteCount(line.AsSpan(0, expectedPosition))
+			: unicodeScalarPosition;
+
+		var normalized = CompletionCursorPositionNormalizer.TryNormalize(
+			line,
+			sourcePosition,
+			positionUnit,
+			out var actualPosition);
+
+		Assert.True(normalized);
+		Assert.Equal(expectedPosition, actualPosition);
 	}
 
 	[Fact]

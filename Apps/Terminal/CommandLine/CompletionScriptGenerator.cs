@@ -31,7 +31,9 @@ public static class CompletionScriptGenerator
 		        if [[ "$candidate" == */ || -e "$candidate" ]]; then
 		            has_filename_candidate=1
 		        fi
-		    done < <("$command_path" dev complete --position "$COMP_POINT" --null -- "$COMP_LINE")
+		    done < <("$command_path" dev complete --position "$COMP_POINT" \
+		        --position-unit utf8-byte --null \
+		        --bash-current-word="$2" -- "$COMP_LINE")
 		    if (( has_filename_candidate )); then
 		        compopt -o filenames 2>/dev/null || true
 		    fi
@@ -51,7 +53,8 @@ public static class CompletionScriptGenerator
 		    while IFS= read -r -d '' candidate; do
 		        candidates+=("$candidate")
 		        displays+=("${(V)candidate}")
-		    done < <("$command_path" dev complete --position "$CURSOR" --null -- "$BUFFER")
+		    done < <("$command_path" dev complete --position "$CURSOR" \
+		        --position-unit unicode-scalar --null -- "$BUFFER")
 		    compadd -d displays -a candidates
 		}
 		compdef _devprojex_complete devprojex
@@ -62,7 +65,8 @@ public static class CompletionScriptGenerator
 		function __devprojex_complete
 		    set -l command_path (command -s devprojex)
 		    test -n "$command_path"; or return
-		    $command_path dev complete --position (commandline -C) --null -- (commandline)
+		    $command_path dev complete --position (commandline -C) \
+		        --position-unit unicode-scalar --null -- (commandline)
 		end
 		complete -c devprojex -f -a '(__devprojex_complete | string split0)'
 		""";

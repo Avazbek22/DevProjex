@@ -8,6 +8,7 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 	private const string CompletionShellsVariable =
 		"DEVPROJEX_COMPLETION_SHELLS";
 	private static readonly TimeSpan WindowsPowerShellProcessTimeout = TimeSpan.FromSeconds(60);
+	private static readonly TimeSpan ProcessCleanupTimeout = TimeSpan.FromSeconds(5);
 	private static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
 
 	[Theory]
@@ -771,28 +772,109 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 		CancellationToken cancellationToken,
 		TimeSpan? processTimeout = null)
 	{
-		using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-		timeout.CancelAfter(processTimeout ?? TimeSpan.FromSeconds(20));
+		using var processTimeoutCancellation = new CancellationTokenSource(
+			processTimeout ?? TimeSpan.FromSeconds(20));
+		using var processCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+			cancellationToken,
+			processTimeoutCancellation.Token);
+		using var outputCancellation = new CancellationTokenSource();
 		using var process = new Process { StartInfo = startInfo };
 		Assert.True(process.Start(), $"Could not start {startInfo.FileName}.");
-		var standardOutput = process.StandardOutput.ReadToEndAsync();
-		var standardError = process.StandardError.ReadToEndAsync();
+		var standardOutput = process.StandardOutput.ReadToEndAsync(outputCancellation.Token);
+		var standardError = process.StandardError.ReadToEndAsync(outputCancellation.Token);
 		process.StandardInput.Close();
 		try
 		{
-			await process.WaitForExitAsync(timeout.Token);
+			try
+			{
+				await process.WaitForExitAsync(processCancellation.Token);
+			}
+			catch (OperationCanceledException) when (processCancellation.IsCancellationRequested)
+			{
+				await TerminateProcessTreeAsync(process);
+				var cancelledOutput = await DrainProcessOutputAsync(
+					standardOutput,
+					standardError,
+					outputCancellation);
+				cancellationToken.ThrowIfCancellationRequested();
+				throw new TimeoutException(
+					$"{startInfo.FileName} completion integration timed out. " +
+					$"stdout=[{cancelledOutput.StandardOutput}] " +
+					$"stderr=[{cancelledOutput.StandardError}]");
+			}
+
+			var output = await DrainProcessOutputAsync(
+				standardOutput,
+				standardError,
+				outputCancellation);
+			if (!output.Completed)
+			{
+				throw new TimeoutException(
+					$"{startInfo.FileName} completion integration output did not close. " +
+					$"stdout=[{output.StandardOutput}] stderr=[{output.StandardError}]");
+			}
+
+			return new ShellProcessResult(
+				process.ExitCode,
+				output.StandardOutput,
+				output.StandardError);
 		}
-		catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+		finally
 		{
-			TryKill(process);
-			throw new TimeoutException(
-				$"{startInfo.FileName} completion integration timed out. " +
-				$"stdout=[{await standardOutput}] stderr=[{await standardError}]");
+			await TerminateProcessTreeAsync(process);
+			if (!standardOutput.IsCompleted || !standardError.IsCompleted)
+			{
+				outputCancellation.Cancel();
+				await ObserveReadersAsync(standardOutput, standardError);
+			}
 		}
-		return new ShellProcessResult(
-			process.ExitCode,
-			await standardOutput,
-			await standardError);
+	}
+
+	private static async Task<ProcessOutput> DrainProcessOutputAsync(
+		Task<string> standardOutput,
+		Task<string> standardError,
+		CancellationTokenSource outputCancellation)
+	{
+		try
+		{
+			var output = await Task
+				.WhenAll(standardOutput, standardError)
+				.WaitAsync(ProcessCleanupTimeout);
+			return new ProcessOutput(output[0], output[1], Completed: true);
+		}
+		catch (Exception exception) when (exception is
+			       TimeoutException or
+			       OperationCanceledException or
+			       IOException or
+			       ObjectDisposedException)
+		{
+			outputCancellation.Cancel();
+			return new ProcessOutput(
+				ReadCompletedOutput(standardOutput),
+				ReadCompletedOutput(standardError),
+				Completed: false);
+		}
+	}
+
+	private static string ReadCompletedOutput(Task<string> reader) =>
+		reader.Status == TaskStatus.RanToCompletion
+			? reader.Result
+			: "<output drain incomplete>";
+
+	private static async Task ObserveReadersAsync(params Task<string>[] readers)
+	{
+		try
+		{
+			await Task.WhenAll(readers).WaitAsync(ProcessCleanupTimeout);
+		}
+		catch (Exception exception) when (exception is
+			       TimeoutException or
+			       OperationCanceledException or
+			       IOException or
+			       ObjectDisposedException)
+		{
+			// The streams are disposed with the process after bounded cleanup.
+		}
 	}
 
 	private static ProcessStartInfo CreateRedirectedStartInfo(string executable) =>
@@ -912,9 +994,33 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 		}
 		catch
 		{
-			// Timeout cleanup is best effort.
+			// Process cleanup is best effort; the caller still bounds every wait.
 		}
 	}
+
+	private static async Task TerminateProcessTreeAsync(Process process)
+	{
+		TryKill(process);
+		try
+		{
+			if (process.HasExited)
+				return;
+
+			using var cleanupCancellation = new CancellationTokenSource(ProcessCleanupTimeout);
+			await process.WaitForExitAsync(cleanupCancellation.Token);
+		}
+		catch (Exception exception) when (exception is
+			       InvalidOperationException or
+			       OperationCanceledException)
+		{
+			// Cleanup must stay bounded even if the process cannot be observed or killed.
+		}
+	}
+
+	private sealed record ProcessOutput(
+		string StandardOutput,
+		string StandardError,
+		bool Completed);
 
 	private sealed record ShellProcessResult(
 		int ExitCode,

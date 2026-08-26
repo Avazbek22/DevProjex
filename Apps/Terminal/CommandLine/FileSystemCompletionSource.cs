@@ -33,10 +33,11 @@ internal static class FileSystemCompletionSource
 	public static IEnumerable<string> Complete(
 		string word,
 		FileSystemCompletionKind kind,
-		string? baseDirectory = null)
+		string? baseDirectory = null,
+		string? userHomeDirectory = null)
 	{
 		ArgumentNullException.ThrowIfNull(word);
-		if (!TryResolveSearch(word, baseDirectory, out var search))
+		if (!TryResolveSearch(word, baseDirectory, userHomeDirectory, out var search))
 			return [];
 
 		try
@@ -100,6 +101,7 @@ internal static class FileSystemCompletionSource
 	private static bool TryResolveSearch(
 		string word,
 		string? baseDirectory,
+		string? userHomeDirectory,
 		out CompletionSearch search)
 	{
 		var separatorIndex = Math.Max(
@@ -117,9 +119,15 @@ internal static class FileSystemCompletionSource
 		try
 		{
 			var effectiveBaseDirectory = ResolveBaseDirectory(baseDirectory);
-			var directoryPath = Path.GetFullPath(
+			var directoryPath = ResolveDirectoryPath(
 				directoryText,
-				Path.GetFullPath(effectiveBaseDirectory));
+				effectiveBaseDirectory,
+				userHomeDirectory);
+			if (directoryPath is null)
+			{
+				search = default;
+				return false;
+			}
 			var separator = displayPrefix.EndsWith(Path.AltDirectorySeparatorChar)
 				? Path.AltDirectorySeparatorChar
 				: Path.DirectorySeparatorChar;
@@ -197,6 +205,37 @@ internal static class FileSystemCompletionSource
 			return result != 0 ? result : left.Sequence.CompareTo(right.Sequence);
 		}
 	}
+
+	private static string? ResolveDirectoryPath(
+		string directoryText,
+		string baseDirectory,
+		string? userHomeDirectory)
+	{
+		if (directoryText.Length < 2 ||
+		    directoryText[0] != '~' ||
+		    !IsDirectorySeparator(directoryText[1]))
+		{
+			return Path.GetFullPath(
+				directoryText,
+				Path.GetFullPath(baseDirectory));
+		}
+
+		var homeDirectory = string.IsNullOrWhiteSpace(userHomeDirectory)
+			? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+			: userHomeDirectory;
+		if (string.IsNullOrWhiteSpace(homeDirectory))
+			return null;
+
+		var resolvedHomeDirectory = Path.GetFullPath(homeDirectory);
+		var relativeDirectory = directoryText[2..];
+		return relativeDirectory.Length == 0
+			? resolvedHomeDirectory
+			: Path.GetFullPath(relativeDirectory, resolvedHomeDirectory);
+	}
+
+	private static bool IsDirectorySeparator(char character) =>
+		character == Path.DirectorySeparatorChar ||
+		character == Path.AltDirectorySeparatorChar;
 
 	private sealed class BaseDirectoryScope(string? previous) : IDisposable
 	{

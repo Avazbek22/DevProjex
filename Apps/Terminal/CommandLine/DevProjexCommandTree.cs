@@ -1499,6 +1499,10 @@ public sealed class DevProjexCommandTree
 			HelpName = "OFFSET",
 			Required = true
 		};
+		var positionUnit = new Option<string?>("--position-unit")
+		{
+			Hidden = true
+		};
 		var commandLine = new Argument<string>("COMMAND_LINE")
 		{
 			Arity = ArgumentArity.ExactlyOne
@@ -1515,10 +1519,17 @@ public sealed class DevProjexCommandTree
 		{
 			Hidden = true
 		};
+		var bashCurrentWord = new Option<string?>("--bash-current-word")
+		{
+			Hidden = true,
+			Arity = ArgumentArity.ZeroOrOne
+		};
 		complete.Options.Add(position);
+		complete.Options.Add(positionUnit);
 		complete.Options.Add(base64);
 		complete.Options.Add(nullDelimited);
 		complete.Options.Add(workingDirectoryBase64);
+		complete.Options.Add(bashCurrentWord);
 		complete.Arguments.Add(commandLine);
 		complete.SetAction(parseResult =>
 		{
@@ -1541,6 +1552,16 @@ public sealed class DevProjexCommandTree
 				environment.Error.WriteLine(L("Terminal.Error.ParserRejected"));
 				return CommandLineExitCodes.UsageError;
 			}
+			if (!CompletionCursorPositionNormalizer.TryNormalize(
+				    completionCommandLine,
+				    parseResult.GetValue(position),
+				    parseResult.GetValue(positionUnit),
+				    out var completionPosition))
+			{
+				environment.Error.WriteLine("error[DPX-CLI-INVALID-SYNTAX]:");
+				environment.Error.WriteLine(L("Terminal.Error.ParserRejected"));
+				return CommandLineExitCodes.UsageError;
+			}
 
 			string? completionWorkingDirectory = null;
 			var encodedWorkingDirectory = parseResult.GetValue(workingDirectoryBase64);
@@ -1557,8 +1578,10 @@ public sealed class DevProjexCommandTree
 			foreach (var candidate in ContextAwareCompletionEngine.Complete(
 				         root,
 				         completionCommandLine,
-				         parseResult.GetValue(position),
-				         completionWorkingDirectory))
+				         completionPosition,
+				         completionWorkingDirectory,
+				         parseResult.GetValue(bashCurrentWord),
+				         parseResult.GetResult(bashCurrentWord) is not null))
 			{
 				if (useBase64Transport)
 				{
