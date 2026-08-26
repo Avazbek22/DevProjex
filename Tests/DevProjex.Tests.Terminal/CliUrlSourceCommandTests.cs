@@ -368,7 +368,10 @@ public sealed class CliUrlSourceCommandTests
 				"--format", "json", "-o", "-", "--progress", "never"
 			],
 			TestContext.Current.CancellationToken);
-		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.True(
+			exitCode == CommandLineExitCodes.Success,
+			$"Expected analyze to succeed, but it exited with {exitCode}.{Environment.NewLine}" +
+			environment.StandardError);
 		Assert.Empty(environment.StandardError);
 		return JsonDocument.Parse(environment.StandardOutput);
 	}

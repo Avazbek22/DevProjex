@@ -4,7 +4,7 @@ namespace DevProjex.Infrastructure.Git;
 
 internal interface IGitWorktreeManager
 {
-	Task<bool> IsSupportedAsync(string basePath, CancellationToken cancellationToken);
+	Task<WorktreeSupportState> GetSupportStateAsync(string basePath, CancellationToken cancellationToken);
 	Task<bool> PreparePrimaryAsync(
 		string basePath,
 		string? branch,
@@ -62,14 +62,16 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 		_recoveryCleanupTimeout = recoveryCleanupTimeout ?? RecoveryCleanupTimeout;
 	}
 
-	public async Task<bool> IsSupportedAsync(string basePath, CancellationToken cancellationToken)
+	public async Task<WorktreeSupportState> GetSupportStateAsync(
+		string basePath,
+		CancellationToken cancellationToken)
 	{
 		Task<WorktreeSupportState> probe;
 		lock (_supportSync)
 		{
 			PublishCompletedProbeLocked();
 			if (_cachedSupportState != WorktreeSupportState.Unknown)
-				return _cachedSupportState == WorktreeSupportState.Supported;
+				return _cachedSupportState;
 			_supportProbe ??= _probeSupport(basePath);
 			probe = _supportProbe;
 		}
@@ -98,7 +100,7 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 			}
 		}
 
-		return state == WorktreeSupportState.Supported;
+		return state;
 	}
 
 	private void PublishCompletedProbeLocked()
