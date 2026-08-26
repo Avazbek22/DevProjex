@@ -3,7 +3,9 @@ namespace DevProjex.Avalonia.Coordinators;
 internal sealed class ProjectTextOutputPipeline(
     TreeExportService treeExport,
     SelectedContentExportService contentExport,
-    TreeAndContentExportService treeAndContentExport)
+	TreeAndContentExportService treeAndContentExport,
+	PreviewDocumentBuilder previewDocumentBuilder,
+	TextFileExportService textFileExport)
 {
     public Task<ProjectTextOutputResult> BuildAsync(
         ProjectTextOutputMode mode,
@@ -20,6 +22,114 @@ internal sealed class ProjectTextOutputPipeline(
             () => BuildOnWorkerAsync(mode, effectiveSnapshot, cancellationToken),
             cancellationToken);
     }
+
+	public Task<ProjectTextDocumentOutputResult> BuildDocumentAsync(
+		ProjectTextOutputMode mode,
+		ProjectTextOutputSnapshot snapshot,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(snapshot);
+		cancellationToken.ThrowIfCancellationRequested();
+		var effectiveSnapshot = NormalizeSelection(snapshot);
+		return Task.Run(
+			() => BuildDocumentOnWorkerAsync(mode, effectiveSnapshot, cancellationToken),
+			cancellationToken);
+	}
+
+	private async Task<ProjectTextDocumentOutputResult> BuildDocumentOnWorkerAsync(
+		ProjectTextOutputMode mode,
+		ProjectTextOutputSnapshot snapshot,
+		CancellationToken cancellationToken)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
+		var outputPathRedaction = OutputRootPathPresentation.CaptureRedactionDecision(
+			snapshot.RedactionContext);
+		if (mode == ProjectTextOutputMode.Tree)
+		{
+			return new ProjectTextDocumentOutputResult(
+				previewDocumentBuilder.CreateDocument(
+					BuildTree(snapshot, cancellationToken, outputPathRedaction)),
+				CandidateFileCount: 0);
+		}
+
+		if (mode is not (ProjectTextOutputMode.Content or ProjectTextOutputMode.TreeAndContent))
+			throw new ArgumentOutOfRangeException(nameof(mode), mode, "Unsupported project text output mode.");
+
+		var files = ResolveContentFiles(snapshot);
+		var contentDocument = await BuildContentDocumentAsync(
+			files,
+			snapshot,
+			mode == ProjectTextOutputMode.Content
+				? snapshot.PathPresentation?.MapFilePath
+				: TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(
+					snapshot.RootPath),
+			outputPathRedaction,
+			cancellationToken).ConfigureAwait(false);
+		if (mode == ProjectTextOutputMode.Content)
+		{
+			return new ProjectTextDocumentOutputResult(
+				contentDocument,
+				files.Count);
+		}
+
+		using (contentDocument)
+		{
+			var tree = BuildTree(snapshot, cancellationToken, outputPathRedaction);
+			if (contentDocument.CharacterCount == 0)
+			{
+				return new ProjectTextDocumentOutputResult(
+					previewDocumentBuilder.CreateDocument(tree),
+					CandidateFileCount: 0);
+			}
+
+			var trimmedTree = tree.TrimEnd('\r', '\n');
+			var separator = string.Concat(
+				Environment.NewLine,
+				"\u00A0",
+				Environment.NewLine,
+				"\u00A0",
+				Environment.NewLine);
+			var combined = await previewDocumentBuilder.CreateDocumentAsync(
+				async (stream, writeCancellationToken) =>
+				{
+					await textFileExport.AppendAsync(
+						stream,
+						trimmedTree,
+						writeCancellationToken).ConfigureAwait(false);
+					await textFileExport.AppendAsync(
+						stream,
+						separator,
+						writeCancellationToken).ConfigureAwait(false);
+					await contentDocument
+						.WriteToAsync(stream, writeCancellationToken)
+						.ConfigureAwait(false);
+				},
+				cancellationToken).ConfigureAwait(false);
+			return new ProjectTextDocumentOutputResult(combined, CandidateFileCount: 0);
+		}
+	}
+
+	private async Task<IPreviewTextDocument> BuildContentDocumentAsync(
+		IReadOnlyList<string> files,
+		ProjectTextOutputSnapshot snapshot,
+		Func<string, string>? displayPathMapper,
+		OutputPathRedactionDecision? outputPathRedaction,
+		CancellationToken cancellationToken)
+	{
+		if (files.Count == 0)
+			return previewDocumentBuilder.CreateInMemory(string.Empty);
+
+		return await previewDocumentBuilder.CreateDocumentAsync(
+			(stream, writeCancellationToken) => contentExport.WriteAsync(
+				stream,
+				files,
+				writeCancellationToken,
+				displayPathMapper,
+				snapshot.RedactionContext,
+				displayRootPath: null,
+				outputPathRedaction),
+			cancellationToken).ConfigureAwait(false);
+	}
 
     private async Task<ProjectTextOutputResult> BuildOnWorkerAsync(
         ProjectTextOutputMode mode,
@@ -171,6 +281,13 @@ internal sealed record ProjectTextOutputSnapshot(
 internal sealed record ProjectTextOutputResult(
     string Content,
     int CandidateFileCount);
+
+internal sealed record ProjectTextDocumentOutputResult(
+	IPreviewTextDocument Document,
+	int CandidateFileCount) : IDisposable
+{
+	public void Dispose() => Document.Dispose();
+}
 
 internal enum ProjectTextOutputMode
 {

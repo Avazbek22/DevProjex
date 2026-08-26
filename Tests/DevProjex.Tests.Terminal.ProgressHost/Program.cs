@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using DevProjex.Application.Preview;
 using DevProjex.Application.Services;
 using DevProjex.Kernel;
 using DevProjex.Kernel.Models;
@@ -24,6 +25,19 @@ internal static class Program
 		{
 			_ = Console.In.ReadToEnd();
 			Console.Out.Write("eof");
+			return CommandLineExitCodes.Success;
+		}
+		if (args is ["--file-backed-export", var sourcePath, var destinationPath,
+		    var readyPath, var cancelPath, var outcomePath])
+		{
+			RunFileBackedExportAsync(
+					sourcePath,
+					destinationPath,
+					readyPath,
+					cancelPath,
+					outcomePath)
+				.GetAwaiter()
+				.GetResult();
 			return CommandLineExitCodes.Success;
 		}
 
@@ -57,6 +71,50 @@ internal static class Program
 			.RunAsync(args, cancellation.Token)
 			.GetAwaiter()
 			.GetResult();
+	}
+
+	private static async Task RunFileBackedExportAsync(
+		string sourcePath,
+		string destinationPath,
+		string readyPath,
+		string cancelPath,
+		string outcomePath)
+	{
+		var sourceLength = new FileInfo(sourcePath).Length;
+		using var document = new FileBackedPreviewTextDocument(
+			sourcePath,
+			[0],
+			sourceLength,
+			maxLineLength: 0,
+			characterCount: sourceLength);
+		await using var destinationFile = new FileStream(
+			destinationPath,
+			FileMode.CreateNew,
+			FileAccess.Write,
+			FileShare.Read,
+			bufferSize: 64 * 1024,
+			FileOptions.Asynchronous | FileOptions.SequentialScan);
+		using var cancellation = new CancellationTokenSource();
+		await using var destination = new DelayedWriteStream(
+			destinationFile,
+			cancelPath,
+			cancellation);
+		await File.WriteAllTextAsync(
+			readyPath,
+			Environment.WorkingSet.ToString(CultureInfo.InvariantCulture));
+
+		try
+		{
+			await new TextFileExportService().WriteAsync(
+				destination,
+				document,
+				cancellation.Token);
+			await File.WriteAllTextAsync(outcomePath, "completed");
+		}
+		catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+		{
+			await File.WriteAllTextAsync(outcomePath, "canceled");
+		}
 	}
 
 	private static int RunSignalCheckpointProtocol()

@@ -14,7 +14,7 @@ public sealed class FileBackedPreviewTextDocument(
 {
     private static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
 
-    private readonly object _sync = new();
+	private readonly SemaphoreSlim _streamGate = new(1, 1);
     private FileStream? _stream = new(
         storagePath,
         FileMode.Open,
@@ -41,6 +41,41 @@ public sealed class FileBackedPreviewTextDocument(
         ThrowIfDisposed();
         return ReadTextRange(0, fileLength, trimTrailingLineEnding: false);
     }
+
+	public async ValueTask WriteToAsync(
+		Stream destination,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(destination);
+		if (!destination.CanWrite)
+			throw new InvalidOperationException("Target stream must be writable.");
+
+		await _streamGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+		try
+		{
+			ThrowIfDisposed();
+			var stream = _stream!;
+			stream.Seek(0, SeekOrigin.Begin);
+			var buffer = new byte[PreviewTextStreamWriter.BufferSizeBytes];
+			while (true)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				var bytesRead = await stream
+					.ReadAsync(buffer, cancellationToken)
+					.ConfigureAwait(false);
+				if (bytesRead == 0)
+					break;
+
+				await destination
+					.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken)
+					.ConfigureAwait(false);
+			}
+		}
+		finally
+		{
+			_streamGate.Release();
+		}
+	}
 
     public string GetLineText(int lineNumber)
     {
@@ -85,11 +120,16 @@ public sealed class FileBackedPreviewTextDocument(
 
         _disposed = true;
 
-        lock (_sync)
+		_streamGate.Wait();
+		try
         {
             _stream?.Dispose();
             _stream = null;
         }
+		finally
+		{
+			_streamGate.Release();
+		}
 
         try
         {
@@ -104,7 +144,8 @@ public sealed class FileBackedPreviewTextDocument(
 
     private int ReadBytes(long startOffset, byte[] buffer, int byteCount)
     {
-        lock (_sync)
+		_streamGate.Wait();
+		try
         {
             ThrowIfDisposed();
 
@@ -123,6 +164,10 @@ public sealed class FileBackedPreviewTextDocument(
 
             return totalBytesRead;
         }
+		finally
+		{
+			_streamGate.Release();
+		}
     }
 
     private string ReadTextRange(

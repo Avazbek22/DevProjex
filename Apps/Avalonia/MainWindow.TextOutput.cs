@@ -105,12 +105,12 @@ public partial class MainWindow
                 return;
 
             var snapshot = CaptureProjectTextOutputSnapshot();
-            var result = await PrepareProjectTextOutputAsync(mode, snapshot);
+            using var result = await PrepareProjectTextDocumentOutputAsync(mode, snapshot);
             if (!await EnsureProjectTextOutputAvailableAsync(mode, snapshot, result))
                 return;
 
             var saved = await TryExportTextToFileAsync(
-                result.Content,
+				result.Document,
                 snapshot.RootPath,
                 suggestedFileName,
                 dialogTitle,
@@ -122,7 +122,7 @@ public partial class MainWindow
             _sessionMetrics.RecordFileExport(
                 metricsKind,
                 GetMetricsTreeFormat(mode, snapshot),
-                result.Content.Length,
+				(int)Math.Min(int.MaxValue, result.Document.CharacterCount),
                 success: true);
             _toastService.Show(_localization[toastKey]);
         }
@@ -181,15 +181,53 @@ public partial class MainWindow
         }
     }
 
+	private async Task<ProjectTextDocumentOutputResult> PrepareProjectTextDocumentOutputAsync(
+		ProjectTextOutputMode mode,
+		ProjectTextOutputSnapshot snapshot)
+	{
+		_metrics.CancelBackgroundCalculation();
+		var statusOperationId = BeginOutputPreparationStatus();
+		try
+		{
+			var cancellationToken = _windowLifetimeCts?.Token ?? CancellationToken.None;
+			return await _textOutputPipeline.BuildDocumentAsync(mode, snapshot, cancellationToken);
+		}
+		finally
+		{
+			CompleteStatusOperation(ref statusOperationId);
+		}
+	}
+
     private async Task<bool> EnsureProjectTextOutputAvailableAsync(
         ProjectTextOutputMode mode,
         ProjectTextOutputSnapshot snapshot,
         ProjectTextOutputResult result)
+		=> await EnsureProjectTextOutputAvailableAsync(
+			mode,
+			snapshot,
+			result.CandidateFileCount,
+			!string.IsNullOrWhiteSpace(result.Content));
+
+	private async Task<bool> EnsureProjectTextOutputAvailableAsync(
+		ProjectTextOutputMode mode,
+		ProjectTextOutputSnapshot snapshot,
+		ProjectTextDocumentOutputResult result) =>
+		await EnsureProjectTextOutputAvailableAsync(
+			mode,
+			snapshot,
+			result.CandidateFileCount,
+			result.Document.CharacterCount > 0);
+
+	private async Task<bool> EnsureProjectTextOutputAvailableAsync(
+		ProjectTextOutputMode mode,
+		ProjectTextOutputSnapshot snapshot,
+		int candidateFileCount,
+		bool hasContent)
     {
         if (mode != ProjectTextOutputMode.Content)
             return true;
 
-        if (result.CandidateFileCount == 0)
+        if (candidateFileCount == 0)
         {
             var messageKey = snapshot.SelectedPaths.Count > 0
                 ? "Msg.NoCheckedFiles"
@@ -198,7 +236,7 @@ public partial class MainWindow
             return false;
         }
 
-        if (!string.IsNullOrWhiteSpace(result.Content))
+		if (hasContent)
             return true;
 
         await ShowInfoAsync(_localization["Msg.NoTextContent"]);
@@ -252,14 +290,14 @@ public partial class MainWindow
     }
 
     private async Task<bool> TryExportTextToFileAsync(
-        string content,
+		IPreviewTextDocument document,
         string sourceRootPath,
         string suggestedFileName,
         string dialogTitle,
         string defaultExtension,
         IReadOnlyList<FilePickerFileType> fileTypeChoices)
     {
-        if (StorageProvider is null || string.IsNullOrWhiteSpace(content))
+		if (StorageProvider is null || document.CharacterCount == 0)
             return false;
 
         var windowLifetime = _windowLifetimeCts;
@@ -323,7 +361,7 @@ public partial class MainWindow
                     (stream, writeCancellationToken) =>
                         _textFileExport.WriteAsync(
                             stream,
-                            content,
+							document,
                             writeCancellationToken),
                     cancellationToken,
                     path => ProjectCopyExportService.ResolveDestinationOutsideProject(
