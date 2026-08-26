@@ -92,17 +92,26 @@ public sealed class DesktopInstanceRegistry
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			var registration = await TryReadAsync(path, cancellationToken).ConfigureAwait(false);
-			if (registration is null || !IsLiveProcess(registration))
+			if (registration is null)
+			{
+				if (removeStale)
+					TryDelete(path);
+				staleEntryCount++;
+				continue;
+			}
+			if (!IsLiveProcess(registration))
 			{
 				if (removeStale)
 				{
 					TryDelete(path);
-					if (registration is not null && IsOwnedUnixEndpoint(registration))
+					if (IsOwnedUnixEndpoint(registration))
 						TryDelete(registration.Endpoint);
 				}
 				staleEntryCount++;
 				continue;
 			}
+			if (registration.ProtocolVersion != DesktopProtocol.CurrentVersion)
+				continue;
 
 			registrations.Add(registration);
 		}
@@ -173,7 +182,7 @@ public sealed class DesktopInstanceRegistry
 	private static bool IsValidRegistrationFile(
 		DesktopInstanceRegistration registration,
 		string path) =>
-		HasValidFields(registration) &&
+		HasValidStructuralFields(registration) &&
 		string.Equals(
 			Path.GetFileNameWithoutExtension(path),
 			registration.InstanceId,
@@ -181,6 +190,10 @@ public sealed class DesktopInstanceRegistry
 
 	private static bool HasValidFields(DesktopInstanceRegistration registration) =>
 		registration.ProtocolVersion == DesktopProtocol.CurrentVersion &&
+		HasValidStructuralFields(registration);
+
+	private static bool HasValidStructuralFields(DesktopInstanceRegistration registration) =>
+		registration.ProtocolVersion > 0 &&
 		IsValidInstanceId(registration.InstanceId) &&
 		registration.ProcessId > 0 &&
 		registration.ProcessStartTimeUtcTicks > 0 &&

@@ -372,6 +372,52 @@ public sealed class DesktopControlIntegrationTests
 	}
 
 	[Fact]
+	public async Task RegistryPreservesLiveRegistrationWithUnsupportedProtocol()
+	{
+		using var workspace = new TemporaryDirectory();
+		var paths = new DesktopControlPaths(() => workspace.Path);
+		var registration = CreateLiveRegistration(
+			"future-live",
+			workspace.Path,
+			Process.GetCurrentProcess().StartTime.ToUniversalTime().Ticks) with
+		{
+			ProtocolVersion = DesktopProtocol.CurrentVersion + 1
+		};
+		await WriteRegistrationAsync(paths, registration);
+
+		var snapshot = await new DesktopInstanceRegistry(paths).ProbeAsync(
+			removeStale: true,
+			TestContext.Current.CancellationToken);
+
+		Assert.Empty(snapshot.Instances);
+		Assert.Equal(0, snapshot.StaleEntryCount);
+		Assert.True(File.Exists(paths.GetRegistrationPath(registration.InstanceId)));
+	}
+
+	[Fact]
+	public async Task RegistryRemovesStaleRegistrationWithUnsupportedProtocol()
+	{
+		using var workspace = new TemporaryDirectory();
+		var paths = new DesktopControlPaths(() => workspace.Path);
+		var registration = CreateLiveRegistration(
+			"future-stale",
+			workspace.Path,
+			Process.GetCurrentProcess().StartTime.ToUniversalTime().Ticks - TimeSpan.FromHours(1).Ticks) with
+		{
+			ProtocolVersion = DesktopProtocol.CurrentVersion + 1
+		};
+		await WriteRegistrationAsync(paths, registration);
+
+		var snapshot = await new DesktopInstanceRegistry(paths).ProbeAsync(
+			removeStale: true,
+			TestContext.Current.CancellationToken);
+
+		Assert.Empty(snapshot.Instances);
+		Assert.Equal(1, snapshot.StaleEntryCount);
+		Assert.False(File.Exists(paths.GetRegistrationPath(registration.InstanceId)));
+	}
+
+	[Fact]
 	public async Task RegistryProbeRemovesOnlyOwnedStaleRegistrationTemporaryFiles()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -1097,6 +1143,20 @@ public sealed class DesktopControlIntegrationTests
 			OperatingSystem.IsWindows()
 				? $"devprojex-{instanceId}"
 				: Path.Combine(Path.GetTempPath(), $"dpx-{instanceId}.sock"));
+
+	private static async Task WriteRegistrationAsync(
+		DesktopControlPaths paths,
+		DesktopInstanceRegistration registration)
+	{
+		DesktopInstanceRegistry.EnsurePrivateDirectory(paths.RegistryDirectory);
+		await File.WriteAllTextAsync(
+			paths.GetRegistrationPath(registration.InstanceId),
+			JsonSerializer.Serialize(registration, new JsonSerializerOptions
+			{
+				PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+			}),
+			TestContext.Current.CancellationToken);
+	}
 
 	private static async Task<string> SendRawAsync(
 		DesktopInstanceRegistration registration,
