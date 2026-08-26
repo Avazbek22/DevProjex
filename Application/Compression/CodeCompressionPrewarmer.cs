@@ -111,7 +111,7 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 					0));
 		}
 
-		var retainedPaths = BuildRetainedPathSet(context, candidates);
+		var retainedPaths = BuildRetainedPathSet(context, candidates, cancellationToken);
 		var retainedFacts = new ConcurrentDictionary<
 			string,
 			ContentReadFactSnapshot.RetainedContentReadFact>(PathComparer.Default);
@@ -439,12 +439,14 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 
 	private HashSet<string> BuildRetainedPathSet(
 		CodeCompressionContext context,
-		IReadOnlyList<string> paths)
+		IReadOnlyList<string> paths,
+		CancellationToken cancellationToken)
 	{
 		var retained = new HashSet<string>(PathComparer.Default);
 		long bytes = 0;
 		foreach (var path in paths)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			if (contentAnalyzer.ClassifyWithoutReading(path) == FileContentClassification.Binary)
 				continue;
 			var relativePath = BuildRelativePath(context.ProjectRoot, path);
