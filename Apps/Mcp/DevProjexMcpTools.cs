@@ -549,25 +549,23 @@ internal sealed class DevProjexMcpTools(
 			output.Append(prefix);
 
 			remaining = maximumCharacters - output.Length;
-			var sourceLength = Math.Min(line.Length, Math.Max(0, remaining));
-			if (sourceLength > 0 &&
-			    sourceLength < line.Length &&
-			    char.IsHighSurrogate(content[line.Offset + sourceLength - 1]) &&
-			    char.IsLowSurrogate(content[line.Offset + sourceLength]))
+			var fullyEscaped = SingleLineTextEscaping.AppendBounded(
+				output,
+				content.AsSpan(line.Offset, line.Length),
+				Math.Max(0, remaining));
+			if (!fullyEscaped)
 			{
-				sourceLength--;
-			}
-			var escaped = McpTextEscaping.EscapeSingleLine(
-				content.Substring(line.Offset, sourceLength));
-			var suffix = escaped + Environment.NewLine;
-			if (sourceLength == line.Length && suffix.Length <= remaining)
-			{
-				output.Append(suffix);
-				continue;
+				return false;
 			}
 
-			AppendBoundedPrefix(output, suffix, Math.Max(0, remaining));
-			return false;
+			remaining = maximumCharacters - output.Length;
+			if (Environment.NewLine.Length > remaining)
+			{
+				AppendBoundedPrefix(output, Environment.NewLine, Math.Max(0, remaining));
+				return false;
+			}
+
+			output.Append(Environment.NewLine);
 		}
 		return true;
 	}
