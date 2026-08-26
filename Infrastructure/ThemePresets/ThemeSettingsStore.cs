@@ -310,6 +310,12 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
             return true;
         }
 
+        var backupStatus = TryReadCurrent(fileSet.BackupPath, out var backup, out _);
+        if (backupStatus == ThemeDocumentReadStatus.Future)
+            return true;
+        if (backupStatus == ThemeDocumentReadStatus.Current)
+            return TrySaveInternal(fileSet, backup);
+
         return TrySaveInternal(fileSet, CreateFactoryDefaults());
     }
 
