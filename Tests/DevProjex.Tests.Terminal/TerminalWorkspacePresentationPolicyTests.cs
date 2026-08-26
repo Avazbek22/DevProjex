@@ -137,4 +137,20 @@ public sealed class TerminalWorkspacePresentationPolicyTests
 		Assert.Equal(2, view.HorizontalOffset);
 		Assert.True(view.MaxLineLength > document.MaxLineLength);
 	}
+
+	[Theory]
+	[InlineData("界AB", 1, 2, " A")]
+	[InlineData("界AB", 2, 2, "AB")]
+	[InlineData("e\u0301x", 0, 2, "e\u0301x")]
+	public void PreviewHorizontalSlicePreservesTerminalColumns(
+		string value,
+		int startColumn,
+		int width,
+		string expected)
+	{
+		Assert.Equal(expected, TerminalVirtualizedPreviewView.SliceColumns(
+			value,
+			startColumn,
+			width));
+	}
 }
