@@ -660,10 +660,14 @@ public sealed class TerminalClonePtyTests
 
 		foreach (var directory in Directory.EnumerateDirectories(cacheRoot))
 		{
-			if (!string.Equals(
-				    Path.GetFileName(directory),
-				    ".staging",
-				    StringComparison.Ordinal))
+			var name = Path.GetFileName(directory);
+			if (string.Equals(name, ".locks", StringComparison.Ordinal) ||
+			    string.Equals(name, "l", StringComparison.Ordinal))
+			{
+				continue;
+			}
+
+			if (!string.Equals(name, ".staging", StringComparison.Ordinal))
 			{
 				return false;
 			}

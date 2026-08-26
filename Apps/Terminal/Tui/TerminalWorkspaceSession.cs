@@ -20,6 +20,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 {
 	private const int WelcomeHorizontalMargin = 2;
 	private const int WelcomeWideActionsWidth = 42;
+	private const int SettingsRefreshDebounceMilliseconds = 200;
 
 	private readonly IApplication _application;
 	private readonly Window _root;
@@ -3302,7 +3303,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	{
 		try
 		{
-			await Task.Delay(75, cancellationToken).ConfigureAwait(false);
+			await Task.Delay(
+				SettingsRefreshDebounceMilliseconds,
+				cancellationToken).ConfigureAwait(false);
 			if (TerminalWorkspaceController.RequiresStructuralRefresh(
 				    baseline.Selection,
 				    selection))

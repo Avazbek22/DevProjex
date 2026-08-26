@@ -160,9 +160,10 @@ public sealed class TerminalSelectionEvolutionPtyTests
 		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
 		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 
-		await terminal.SendAsync(
-			"\r\u001b[B\r\u001b[B\r\u001b[B\r",
-			TestContext.Current.CancellationToken);
+		await SendSettingsActionAsync(terminal, "\r");
+		await SendSettingsActionAsync(terminal, "\u001b[B\r");
+		await SendSettingsActionAsync(terminal, "\u001b[B\r");
+		await terminal.SendAsync("\u001b[B\r", TestContext.Current.CancellationToken);
 		var optimistic = await terminal.WaitForScreenAsync(
 			"[x] Strip comments",
 			cancellationToken: TestContext.Current.CancellationToken);
@@ -214,9 +215,10 @@ public sealed class TerminalSelectionEvolutionPtyTests
 		await terminal.SendAsync("X", TestContext.Current.CancellationToken);
 		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 
-		await terminal.SendAsync(
-			"\r\u001b[B\u001b[B\r\u001b[B\r\u001b[B\r",
-			TestContext.Current.CancellationToken);
+		await SendSettingsActionAsync(terminal, "\r");
+		await SendSettingsActionAsync(terminal, "\u001b[B\u001b[B\r");
+		await SendSettingsActionAsync(terminal, "\u001b[B\r");
+		await terminal.SendAsync("\u001b[B\r", TestContext.Current.CancellationToken);
 		var optimistic = await terminal.WaitForScreenAsync(
 			"[ ] Empty files",
 			cancellationToken: TestContext.Current.CancellationToken);
@@ -290,6 +292,14 @@ public sealed class TerminalSelectionEvolutionPtyTests
 		await terminal.WaitForScreenAsync(
 			expectedSelected ? "[x] Use .gitignore" : "[ ] Use .gitignore",
 			cancellationToken: TestContext.Current.CancellationToken);
+	}
+
+	private static async Task SendSettingsActionAsync(
+		TerminalPtyHarness terminal,
+		string keys)
+	{
+		await terminal.SendAsync(keys, TestContext.Current.CancellationToken);
+		await Task.Delay(100, TestContext.Current.CancellationToken);
 	}
 
 	private static void AssertFrameAggregate(string screen, string title, string aggregate)
