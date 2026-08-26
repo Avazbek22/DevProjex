@@ -155,6 +155,33 @@ public sealed class TreeNodePresentationServiceTests
 		Assert.Equal(["/root/a.txt", "/root/src/b.cs", "/root/src/c.cs"], result.OrderedFilePaths);
 	}
 
+	[Fact]
+	public void BuildWithFilePaths_CancelsDuringProjection()
+	{
+		using var cancellation = new CancellationTokenSource();
+		var localization = new LocalizationService(
+			new StubLocalizationCatalog(new Dictionary<AppLanguage, IReadOnlyDictionary<string, string>>
+			{
+				[AppLanguage.En] = new Dictionary<string, string>()
+			}),
+			AppLanguage.En);
+		var service = new TreeNodePresentationService(
+			localization,
+			new CancellingIconMapper(cancellation, cancelOnCall: 3));
+		var children = Enumerable.Range(0, 8)
+			.Select(index => new FileSystemNode(
+				$"file-{index}.txt",
+				$"/root/file-{index}.txt",
+				false,
+				false,
+				FileSystemNode.EmptyChildren))
+			.ToArray();
+		var root = new FileSystemNode("root", "/root", true, false, children);
+
+		Assert.Throws<OperationCanceledException>(() =>
+			service.BuildWithFilePathsWithCancellation(root, cancellation.Token));
+	}
+
 	// Verifies access-denied child uses child-specific localization.
 	[Fact]
 	public void Build_UsesChildAccessDeniedLabelWhenRootAccessible()
@@ -218,6 +245,20 @@ public sealed class TreeNodePresentationServiceTests
 	{
 		public string GetIconKey(FileSystemNode node)
 		{
+			return node.IsDirectory ? "folder-icon" : "file-icon";
+		}
+	}
+
+	private sealed class CancellingIconMapper(
+		CancellationTokenSource cancellation,
+		int cancelOnCall) : IIconMapper
+	{
+		private int _callCount;
+
+		public string GetIconKey(FileSystemNode node)
+		{
+			if (Interlocked.Increment(ref _callCount) == cancelOnCall)
+				cancellation.Cancel();
 			return node.IsDirectory ? "folder-icon" : "file-icon";
 		}
 	}
