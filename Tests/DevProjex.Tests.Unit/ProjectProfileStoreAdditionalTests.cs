@@ -63,8 +63,98 @@ public sealed class ProjectProfileStoreAdditionalTests
 		try
 		{
 			var store = CreateStore(tempRoot);
-			store.ClearAllProfiles();
+			var result = store.ClearAllProfiles();
+			Assert.Equal(ProjectProfileClearStatus.Cleared, result);
 			Assert.False(File.Exists(store.GetPath()));
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
+	public void ClearAllProfiles_WhenStorageLockIsBusy_ReturnsBusyAndPreservesProfiles()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			var projectPath = Path.Combine(tempRoot, "RepoBusy");
+			store.SaveProfile(projectPath, CreateProfile());
+			using var heldLock = new FileStream(
+				store.GetPath() + ".lock",
+				FileMode.OpenOrCreate,
+				FileAccess.ReadWrite,
+				FileShare.None);
+
+			var result = store.ClearAllProfiles();
+
+			Assert.Equal(ProjectProfileClearStatus.Busy, result);
+			Assert.True(File.Exists(store.GetPath()));
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
+	public void ClearAllProfiles_WhenStorageUsesFutureSchema_ReturnsFutureSchemaAndPreservesDocument()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			var storagePath = store.GetPath();
+			Directory.CreateDirectory(Path.GetDirectoryName(storagePath)!);
+			const string futureDocument = "{\"schemaVersion\":2147483647,\"profiles\":{}}";
+			File.WriteAllText(storagePath, futureDocument);
+
+			var result = store.ClearAllProfiles();
+
+			Assert.Equal(ProjectProfileClearStatus.FutureSchema, result);
+			Assert.Equal(futureDocument, File.ReadAllText(storagePath));
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
+	public void ClearAllProfiles_WhenStoragePathIsInvalid_ReturnsFailed()
+	{
+		var store = new ProjectProfileStore(() => string.Concat("invalid", '\0', "root"));
+
+		var result = store.ClearAllProfiles();
+
+		Assert.Equal(ProjectProfileClearStatus.Failed, result);
+	}
+
+	[Fact]
+	public async Task ClearAllProfiles_ReturnsClearedOnlyAfterPersistentMarksAreRemoved()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			var projectPath = Path.Combine(tempRoot, "RepoWithMarks");
+			store.SaveProfile(projectPath, CreateProfile());
+			var write = await store.AddMarkAsync(
+				projectPath,
+				new MarkedSecretProfileEntry("9f2a4c1e8b3d", "TOKEN", 24),
+				TestContext.Current.CancellationToken);
+			Assert.True(write.Succeeded);
+
+			var result = store.ClearAllProfiles();
+			var marks = await store.LoadMarksAsync(
+				projectPath,
+				TestContext.Current.CancellationToken);
+
+			Assert.Equal(ProjectProfileClearStatus.Cleared, result);
+			Assert.True(marks.Succeeded);
+			Assert.Empty(Assert.IsType<PersistentSecretMarksSnapshot>(marks.Snapshot).Marks);
 		}
 		finally
 		{

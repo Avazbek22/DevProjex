@@ -113,7 +113,7 @@ public sealed class ProjectProfileShutdownProcessTests
 		public void SaveProfile(string localProjectPath, ProjectSelectionProfile profile) =>
 			_ = TrySaveProfile(localProjectPath, profile);
 
-		public void ClearAllProfiles() => inner.ClearAllProfiles();
+		public ProjectProfileClearStatus ClearAllProfiles() => inner.ClearAllProfiles();
 	}
 }
 

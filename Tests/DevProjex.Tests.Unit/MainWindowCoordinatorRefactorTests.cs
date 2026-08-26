@@ -1903,9 +1903,10 @@ public sealed class MainWindowCoordinatorRefactorTests
             TrySaveProfile(localProjectPath, profile);
         }
 
-        public void ClearAllProfiles()
+        public ProjectProfileClearStatus ClearAllProfiles()
         {
             _profiles.Clear();
+            return ProjectProfileClearStatus.Cleared;
         }
 
         public bool HasProfile(string path) => _profiles.ContainsKey(path);

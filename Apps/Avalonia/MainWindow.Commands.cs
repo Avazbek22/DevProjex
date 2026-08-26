@@ -345,10 +345,20 @@ public partial class MainWindow
             return;
         }
 
-        _projectProfiles.ClearAllProfiles();
-        _toastService.Show(_localization["Toast.Data.Reset"]);
+        var result = _projectProfiles.ClearAllProfiles();
+        _toastService.Show(_localization[ResolveResetDataResultLocalizationKey(result)]);
         e.Handled = true;
     }
+
+    internal static string ResolveResetDataResultLocalizationKey(ProjectProfileClearStatus status) =>
+        status switch
+        {
+            ProjectProfileClearStatus.Cleared => "Toast.Data.Reset",
+            ProjectProfileClearStatus.Busy => "Toast.Data.Reset.Busy",
+            ProjectProfileClearStatus.FutureSchema => "Toast.Data.Reset.FutureSchema",
+            ProjectProfileClearStatus.Failed => "Toast.Data.Reset.Failed",
+            _ => throw new ArgumentOutOfRangeException(nameof(status), status, null)
+        };
 
     private void ResetThemeSettings()
         => _appearanceSettings.ResetThemeSettings();

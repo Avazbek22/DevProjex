@@ -22,7 +22,10 @@ public sealed class LocalizationToastKeysTests
 		"Toast.Git.BranchSwitched",
 		"Toast.Refresh.Success",
 		"Toast.Settings.Reset",
-		"Toast.Data.Reset"
+		"Toast.Data.Reset",
+		"Toast.Data.Reset.Busy",
+		"Toast.Data.Reset.FutureSchema",
+		"Toast.Data.Reset.Failed"
 	];
 
 	[Fact]
@@ -76,6 +79,18 @@ public sealed class LocalizationToastKeysTests
 				$"Missing {key} in {Path.GetFileName(file)}");
 			Assert.Contains("{0}", value);
 		}
+	}
+
+	[Theory]
+	[InlineData(ProjectProfileClearStatus.Cleared, "Toast.Data.Reset")]
+	[InlineData(ProjectProfileClearStatus.Busy, "Toast.Data.Reset.Busy")]
+	[InlineData(ProjectProfileClearStatus.FutureSchema, "Toast.Data.Reset.FutureSchema")]
+	[InlineData(ProjectProfileClearStatus.Failed, "Toast.Data.Reset.Failed")]
+	public void ResetDataResult_MapsToAnExplicitLocalizedMessage(
+		ProjectProfileClearStatus status,
+		string expectedKey)
+	{
+		Assert.Equal(expectedKey, MainWindow.ResolveResetDataResultLocalizationKey(status));
 	}
 
 	private static HashSet<string> ReadKeys(string json)

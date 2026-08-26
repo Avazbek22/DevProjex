@@ -625,7 +625,11 @@ public sealed class ProjectProfilePersistenceCoordinatorTests
 		public bool TryLoadProfile(string localProjectPath, out ProjectSelectionProfile profile) =>
 			SavedProfiles.TryGetValue(Path.GetFullPath(localProjectPath), out profile!);
 
-		public void ClearAllProfiles() => SavedProfiles.Clear();
+		public ProjectProfileClearStatus ClearAllProfiles()
+		{
+			SavedProfiles.Clear();
+			return ProjectProfileClearStatus.Cleared;
+		}
 	}
 
 	private sealed class EmptySecretDetector : ISecretDetector
@@ -706,9 +710,7 @@ public sealed class ProjectProfilePersistenceCoordinatorTests
 		{
 		}
 
-		public void ClearAllProfiles()
-		{
-		}
+		public ProjectProfileClearStatus ClearAllProfiles() => ProjectProfileClearStatus.Cleared;
 
 		public ValueTask<PersistentSecretMarksLoadResult> LoadMarksAsync(
 			string localProjectPath,
@@ -781,9 +783,7 @@ public sealed class ProjectProfilePersistenceCoordinatorTests
 		public void SaveProfile(string localProjectPath, ProjectSelectionProfile profile) =>
 			TrySaveProfile(localProjectPath, profile);
 
-		public void ClearAllProfiles()
-		{
-		}
+		public ProjectProfileClearStatus ClearAllProfiles() => ProjectProfileClearStatus.Cleared;
 	}
 
 	private sealed class CancelingMarksReloadStore : IProjectProfileStore, IPersistentSecretMarkStore
@@ -854,9 +854,7 @@ public sealed class ProjectProfilePersistenceCoordinatorTests
 		public void SaveProfile(string localProjectPath, ProjectSelectionProfile profile) =>
 			TrySaveProfile(localProjectPath, profile);
 
-		public void ClearAllProfiles()
-		{
-		}
+		public ProjectProfileClearStatus ClearAllProfiles() => ProjectProfileClearStatus.Cleared;
 	}
 
 	private sealed class BlockingLookupProfileStore : IProjectProfileStore, IDisposable
@@ -896,9 +894,7 @@ public sealed class ProjectProfilePersistenceCoordinatorTests
 		public void SaveProfile(string localProjectPath, ProjectSelectionProfile profile) =>
 			TrySaveProfile(localProjectPath, profile);
 
-		public void ClearAllProfiles()
-		{
-		}
+		public ProjectProfileClearStatus ClearAllProfiles() => ProjectProfileClearStatus.Cleared;
 
 		public void Dispose()
 		{
@@ -969,8 +965,6 @@ public sealed class ProjectProfilePersistenceCoordinatorTests
 		public void SaveProfile(string localProjectPath, ProjectSelectionProfile profile) =>
 			TrySaveProfile(localProjectPath, profile);
 
-		public void ClearAllProfiles()
-		{
-		}
+		public ProjectProfileClearStatus ClearAllProfiles() => ProjectProfileClearStatus.Cleared;
 	}
 }

@@ -510,6 +510,10 @@ public sealed class MainWindowApplySettingsMemoryCleanupUiTests
 		public void SaveProfile(string localProjectPath, ProjectSelectionProfile profile) =>
 			_ = TrySaveProfile(localProjectPath, profile);
 
-		public void ClearAllProfiles() => _profiles.Clear();
+		public ProjectProfileClearStatus ClearAllProfiles()
+		{
+			_profiles.Clear();
+			return ProjectProfileClearStatus.Cleared;
+		}
 	}
 }

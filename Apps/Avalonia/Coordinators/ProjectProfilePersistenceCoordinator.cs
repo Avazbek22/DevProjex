@@ -31,7 +31,7 @@ public sealed class ProjectProfilePersistenceCoordinator(
 
     public bool EnsureStorageExists() => profileStore.EnsureStorageExists();
 
-    public void ClearAllProfiles() => profileStore.ClearAllProfiles();
+    public ProjectProfileClearStatus ClearAllProfiles() => profileStore.ClearAllProfiles();
 
 	public async Task PersistIfNeededAsync(
 		string? currentPath,

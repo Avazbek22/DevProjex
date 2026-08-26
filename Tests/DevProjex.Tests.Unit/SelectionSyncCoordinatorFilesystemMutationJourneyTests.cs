@@ -658,9 +658,7 @@ public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
 		public void SaveProfile(string localProjectPath, ProjectSelectionProfile profile) =>
 			_ = TrySaveProfile(localProjectPath, profile);
 
-		public void ClearAllProfiles()
-		{
-		}
+		public ProjectProfileClearStatus ClearAllProfiles() => ProjectProfileClearStatus.Cleared;
 	}
 
 	private sealed class EmptySecretDetector : ISecretDetector

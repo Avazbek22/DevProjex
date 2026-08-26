@@ -779,11 +779,12 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
         public void SaveProfile(string localProjectPath, ProjectSelectionProfile profile)
             => TrySaveProfile(localProjectPath, profile);
 
-        public void ClearAllProfiles()
+        public ProjectProfileClearStatus ClearAllProfiles()
         {
             _profiles.Clear();
             if (File.Exists(StoragePath))
                 File.Delete(StoragePath);
+            return ProjectProfileClearStatus.Cleared;
         }
 
         private static ProjectSelectionProfile CreateEmptyProfile()
