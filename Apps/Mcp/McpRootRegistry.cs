@@ -26,7 +26,7 @@ public sealed class McpRootRegistry
 
 	public string ResolveProject(string? project)
 	{
-		if (string.IsNullOrWhiteSpace(project))
+		if (IsMissingPath(project))
 		{
 			if (_roots.Count == 1)
 				return ResolveProject(_roots[0]);
@@ -35,19 +35,20 @@ public sealed class McpRootRegistry
 				$"{McpErrorCodes.UnknownProject}: 'project' is required because multiple roots are available. " +
 				$"Call list_projects and use one of: {FormatRoots()}.");
 		}
+		var requestedProject = project!;
 
 		string physical;
 		try
 		{
-			physical = ResolvePhysicalExistingPath(project, requireDirectory: true);
+			physical = ResolvePhysicalExistingPath(requestedProject, requireDirectory: true);
 		}
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
 		{
-			throw UnknownProject(project);
+			throw UnknownProject(requestedProject);
 		}
 
 		var match = _roots.FirstOrDefault(root => PathComparer.Default.Equals(root, physical));
-		return match ?? throw UnknownProject(project);
+		return match ?? throw UnknownProject(requestedProject);
 	}
 
 	public string ResolveExistingPath(string projectRoot, string path, bool requireDirectory = false)

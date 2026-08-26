@@ -108,6 +108,27 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public void RootRegistryAllowsSelectingAWhitespaceOnlyUnixRoot()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Whitespace-only path segments are invalid on Windows.");
+			return;
+		}
+
+		using var workspace = new TemporaryDirectory();
+		var whitespaceRoot = workspace.CreateFolder(" ");
+		var otherRoot = workspace.CreateFolder("other");
+		var registry = new McpRootRegistry([whitespaceRoot, otherRoot]);
+
+		var resolved = registry.ResolveProject(whitespaceRoot);
+
+		Assert.True(PathComparer.Default.Equals(
+			McpRootRegistry.ResolvePhysicalExistingPath(whitespaceRoot, requireDirectory: true),
+			resolved));
+	}
+
+	[Fact]
 	public void RootRegistryReportsMalformedPathsAsInvalidArguments()
 	{
 		using var workspace = new TemporaryDirectory();
