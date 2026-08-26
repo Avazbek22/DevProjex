@@ -356,6 +356,33 @@ public sealed class ProjectAnalysisServiceIntegrationTests
 		Assert.Equal(expected.Tokens, report.Metrics.Content.Tokens);
 	}
 
+	[Fact]
+	public async Task BuildReportFromTreeAsync_CancelsDuringSummaryTraversal()
+	{
+		using var cancellation = new CancellationTokenSource();
+		var child = new TreeNodeDescriptor("file.cs", "/root/file.cs", false, false, "file", []);
+		var root = new TreeNodeDescriptor(
+			"root",
+			"/root",
+			true,
+			false,
+			"folder",
+			new CancelOnSecondReadList<TreeNodeDescriptor>([child], cancellation));
+		var request = new LoadedProjectAnalysisRequest(
+			RootPath: "/root",
+			Tree: new BuildTreeResult(root, false, false, []),
+			AvailableRootFolders: [],
+			AvailableExtensions: [],
+			SelectedRootFolders: [],
+			SelectedExtensions: [],
+			SelectedIgnoreOptions: [],
+			RootAccessDenied: false,
+			HadAccessDenied: false);
+
+		await Assert.ThrowsAsync<OperationCanceledException>(() =>
+			CreateService().BuildReportFromTreeAsync(request, cancellation.Token));
+	}
+
 	private static ProjectAnalysisService CreateService(IFileContentAnalyzer? fileContentAnalyzer = null)
 	{
 		var localization = new LocalizationService(new TestLocalizationCatalog(), AppLanguage.En);
@@ -490,5 +517,31 @@ public sealed class ProjectAnalysisServiceIntegrationTests
 	private sealed class TestIconMapper : IIconMapper
 	{
 		public string GetIconKey(FileSystemNode node) => node.IsDirectory ? "folder" : "file";
+	}
+
+	private sealed class CancelOnSecondReadList<T>(IReadOnlyList<T> items, CancellationTokenSource cancellation)
+		: IReadOnlyList<T>
+	{
+		private int _reads;
+
+		public int Count => items.Count;
+
+		public T this[int index]
+		{
+			get
+			{
+				if (Interlocked.Increment(ref _reads) == 2)
+					cancellation.Cancel();
+				return items[index];
+			}
+		}
+
+		public IEnumerator<T> GetEnumerator()
+		{
+			for (var index = 0; index < Count; index++)
+				yield return this[index];
+		}
+
+		System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
 	}
 }

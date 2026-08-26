@@ -421,15 +421,22 @@ public sealed class ProjectAnalysisService(
 		cancellationToken.ThrowIfCancellationRequested();
 
 		var analysisStopwatch = Stopwatch.StartNew();
-		var treeMetrics = treeExport.CalculateFullTreeMetrics(request.RootPath, request.Tree.Root, TreeTextFormat.Ascii);
+		var treeMetrics = treeExport.CalculateFullTreeMetricsWithCancellation(
+			request.RootPath,
+			request.Tree.Root,
+			TreeTextFormat.Ascii,
+			displayRootPath: null,
+			displayRootName: null,
+			cancellationToken);
 		var contentMetrics = await CalculateContentMetricsAsync(request.Tree.OrderedFilePaths, cancellationToken)
 			.ConfigureAwait(false);
+		cancellationToken.ThrowIfCancellationRequested();
 		analysisStopwatch.Stop();
 
 		var loadingElapsed = request.KnownLoadingElapsed ?? TimeSpan.Zero;
 		var analysisElapsed = analysisStopwatch.Elapsed;
 		var totalElapsed = loadingElapsed + analysisElapsed;
-		var treeSummary = CountTree(request.Tree.Root);
+		var treeSummary = CountTree(request.Tree.Root, cancellationToken);
 
 		return new ProjectAnalysisReport(
 			SchemaVersion: ProjectAnalysisReport.CurrentSchemaVersion,
@@ -521,7 +528,9 @@ public sealed class ProjectAnalysisService(
 			.CalculateAsync(fileContentAnalyzer, orderedFilePaths, cancellationToken)
 			.ConfigureAwait(false);
 
-	private static ProjectTreeSummaryReport CountTree(TreeNodeDescriptor root)
+	private static ProjectTreeSummaryReport CountTree(
+		TreeNodeDescriptor root,
+		CancellationToken cancellationToken)
 	{
 		var directories = 0;
 		var files = 0;
@@ -531,6 +540,7 @@ public sealed class ProjectAnalysisService(
 
 		while (stack.Count > 0)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			var node = stack.Pop();
 			if (node.IsDirectory)
 			{
