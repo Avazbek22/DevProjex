@@ -49,6 +49,8 @@ public sealed partial class SelectionSyncCoordinator
 			_suppressIgnoreItemCheck = false;
 		}
 
+		SynchronizeDerivedAggregateSelectionState();
+
 		RequestPendingApplyEvaluation();
 		contentTransformationChanged?.Invoke(optionId);
 		return true;
@@ -108,15 +110,7 @@ public sealed partial class SelectionSyncCoordinator
 			_suppressExtensionItemCheck = false;
 		}
 
-		_suppressExtensionAllCheck = true;
-		try
-		{
-			viewModel.AllExtensionsChecked = true;
-		}
-		finally
-		{
-			_suppressExtensionAllCheck = false;
-		}
+		SynchronizeDerivedAggregateSelectionState();
 		return true;
 	}
 
