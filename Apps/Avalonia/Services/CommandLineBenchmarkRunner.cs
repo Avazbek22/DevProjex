@@ -482,6 +482,7 @@ internal sealed class CommandLineBenchmarkRunner(CommandLineBenchmarkContext con
 internal sealed class DefaultCommandLineBenchmarkProcessRunner : ICommandLineBenchmarkProcessRunner
 {
 	private static readonly TimeSpan MemoryPollInterval = TimeSpan.FromMilliseconds(50);
+	private static readonly TimeSpan ProcessTerminationTimeout = TimeSpan.FromSeconds(5);
 
 	public async Task<CommandLineBenchmarkProcessRun> RunAsync(
 		CommandLineBenchmarkProcessRequest request,
@@ -493,6 +494,8 @@ internal sealed class DefaultCommandLineBenchmarkProcessRunner : ICommandLineBen
 		var stopwatch = Stopwatch.StartNew();
 		var peakWorkingSetBytes = 0L;
 		var peakPrivateMemoryBytes = 0L;
+		Task<string>? stdoutTask = null;
+		Task<string>? stderrTask = null;
 
 		using var process = new Process
 		{
@@ -505,8 +508,8 @@ internal sealed class DefaultCommandLineBenchmarkProcessRunner : ICommandLineBen
 			if (!process.Start())
 				throw new InvalidOperationException("Failed to start benchmark child process.");
 
-			var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-			var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
+			stdoutTask = process.StandardOutput.ReadToEndAsync();
+			stderrTask = process.StandardError.ReadToEndAsync();
 			var exitTask = process.WaitForExitAsync(cancellationToken);
 			while (!exitTask.IsCompleted)
 			{
@@ -519,8 +522,11 @@ internal sealed class DefaultCommandLineBenchmarkProcessRunner : ICommandLineBen
 			await exitTask.ConfigureAwait(false);
 			stopwatch.Stop();
 
-			var stdout = await stdoutTask.ConfigureAwait(false);
-			var stderr = await stderrTask.ConfigureAwait(false);
+			var output = await Task.WhenAll(stdoutTask, stderrTask)
+				.WaitAsync(cancellationToken)
+				.ConfigureAwait(false);
+			var stdout = output[0];
+			var stderr = output[1];
 			return new CommandLineBenchmarkProcessRun(
 				Index: index,
 				IsWarmup: isWarmup,
@@ -535,9 +541,9 @@ internal sealed class DefaultCommandLineBenchmarkProcessRunner : ICommandLineBen
 				ExitCode: process.ExitCode,
 				Error: string.IsNullOrWhiteSpace(stderr) ? null : stderr.Trim());
 		}
-		catch (OperationCanceledException)
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
 		{
-			TryKill(process);
+			await TerminateProcessAsync(process, stdoutTask, stderrTask).ConfigureAwait(false);
 			throw;
 		}
 		catch (Exception ex)
@@ -632,12 +638,55 @@ internal sealed class DefaultCommandLineBenchmarkProcessRunner : ICommandLineBen
 
 	private static long? ZeroToNull(long value) => value <= 0 ? null : value;
 
-	private static void TryKill(Process process)
+	private static async Task TerminateProcessAsync(
+		Process process,
+		Task<string>? stdoutTask,
+		Task<string>? stderrTask)
+	{
+		TryKill(process, entireProcessTree: true);
+		using var timeout = new CancellationTokenSource(ProcessTerminationTimeout);
+		var outputCompletion = ObserveRedirectedOutputAsync(stdoutTask, stderrTask);
+		try
+		{
+			await Task.WhenAll(
+					process.WaitForExitAsync(timeout.Token),
+					outputCompletion)
+				.WaitAsync(timeout.Token)
+				.ConfigureAwait(false);
+		}
+		catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+		{
+			TryKill(process, entireProcessTree: false);
+		}
+		catch
+		{
+			// Cancellation owns the command result; cleanup failures must not replace it.
+			TryKill(process, entireProcessTree: false);
+		}
+	}
+
+	private static async Task ObserveRedirectedOutputAsync(
+		Task<string>? stdoutTask,
+		Task<string>? stderrTask)
+	{
+		try
+		{
+			await Task.WhenAll(
+				stdoutTask ?? Task.FromResult(string.Empty),
+				stderrTask ?? Task.FromResult(string.Empty)).ConfigureAwait(false);
+		}
+		catch
+		{
+			// Cancellation owns the command result; redirected reads still must be observed.
+		}
+	}
+
+	private static void TryKill(Process process, bool entireProcessTree)
 	{
 		try
 		{
 			if (!process.HasExited)
-				process.Kill(entireProcessTree: true);
+				process.Kill(entireProcessTree);
 		}
 		catch
 		{
