@@ -77,7 +77,10 @@ public sealed class ProjectContextDocumentService(
 		PreparedSecretRedactionOutput? prepared = null)
 	{
 		var (renderedTree, treeTruncated) = IncludesTree(view)
-			? BuildBoundedTree(plan.ProjectedTree, limits.MaximumTreeNodes)
+			? BuildBoundedTree(
+				plan.ProjectedTree,
+				limits.MaximumTreeNodes,
+				cancellationToken)
 			: (plan.ProjectedTree, false);
 		var fileResult = IncludesContent(view)
 			? await ReadFilesAsync(plan, limits, cancellationToken, prepared).ConfigureAwait(false)
@@ -1243,8 +1246,10 @@ public sealed class ProjectContextDocumentService(
 
 	private static (TreeNodeDescriptor Tree, bool IsTruncated) BuildBoundedTree(
 		TreeNodeDescriptor root,
-		int maximumNodes)
+		int maximumNodes,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		var remaining = Math.Max(1, maximumNodes);
 		var truncated = false;
 		remaining--;
@@ -1257,6 +1262,7 @@ public sealed class ProjectContextDocumentService(
 
 		while (frames.TryPeek(out var frame))
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			if (remaining > 0 && frame.NextChildIndex < frame.Source.Children.Count)
 			{
 				var child = frame.Source.Children[frame.NextChildIndex++];

@@ -207,6 +207,53 @@ public sealed class ProjectContextStreamingRegressionTests
 	}
 
 	[Fact]
+	public async Task BoundedTreeDocumentStopsCloningAfterCancellation()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/seed.txt", string.Empty);
+		var services = new TerminalServiceFactory(
+				() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var plan = await services.ContextFactory.BuildAsync(
+			project,
+			new ProjectSelectionSpec(GitMode: GitFilteringMode.None, Exclusions: []),
+			cancellationToken: TestContext.Current.CancellationToken);
+		using var cancellation = new CancellationTokenSource();
+		var child = new TreeNodeDescriptor(
+			"child",
+			Path.Combine(project, "child"),
+			true,
+			false,
+			"folder",
+			[]);
+		var root = new TreeNodeDescriptor(
+			"project",
+			project,
+			true,
+			false,
+			"folder",
+			new CancelThenRejectFurtherReadsList<TreeNodeDescriptor>(
+				[child, child],
+				cancellation));
+		var projectedPlan = plan with
+		{
+			EffectiveTree = root,
+			ProjectedTree = root,
+			IncludedFiles = [],
+			IncludedFolders = []
+		};
+
+		await Assert.ThrowsAsync<OperationCanceledException>(() =>
+			services.ContextDocumentService.BuildAsync(
+				projectedPlan,
+				ProjectContextView.Tree,
+				ProjectContextDocumentFormat.Text,
+				new ProjectContextDocumentLimits(MaximumTreeNodes: 3),
+				cancellation.Token));
+	}
+
+	[Fact]
 	public async Task DocumentServiceRejectsUnknownViewBeforeWritingAnyBytes()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -1554,4 +1601,30 @@ public sealed class ProjectContextStreamingRegressionTests
 		string StandardOutput,
 		string StandardError,
 		long PeakWorkingSetBytes);
+
+	private sealed class CancelThenRejectFurtherReadsList<T>(
+		IReadOnlyList<T> items,
+		CancellationTokenSource cancellation) : IReadOnlyList<T>
+	{
+		private int _reads;
+
+		public int Count => items.Count;
+
+		public T this[int index]
+		{
+			get
+			{
+				if (Interlocked.Increment(ref _reads) != 1)
+					throw new InvalidOperationException("Traversal continued after cancellation.");
+
+				var item = items[index];
+				cancellation.Cancel();
+				return item;
+			}
+		}
+
+		public IEnumerator<T> GetEnumerator() => items.GetEnumerator();
+
+		IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+	}
 }
