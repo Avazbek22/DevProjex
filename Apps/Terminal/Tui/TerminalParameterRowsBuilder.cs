@@ -55,7 +55,7 @@ internal sealed class TerminalParameterRowsBuilder(
 			new TerminalParameterRow(
 				$"exclusion:{descriptor.Token}",
 				TerminalParameterRowKind.Exclusion,
-				fitLabel(localize(descriptor.LabelKey)),
+				fitLabel(FormatPathExclusionLabel(descriptor, plan)),
 				exclusions.Contains(descriptor.RequireId()),
 				Exclusion: descriptor.RequireId())));
 		return rows;
@@ -106,6 +106,7 @@ internal sealed class TerminalParameterRowsBuilder(
 			"extensions:all",
 			TerminalParameterRowKind.ToggleAllExtensions,
 			FormatAggregateLabel(plan.AvailableExtensions.Count),
+			plan.AvailableExtensions.Count > 0 &&
 			plan.AvailableExtensions.All(selectedExtensions.Contains));
 	}
 
@@ -152,4 +153,31 @@ internal sealed class TerminalParameterRowsBuilder(
 	private string FormatAggregateLabel(int count) => count == 0
 		? localize("Settings.All")
 		: $"{localize("Settings.All")} ({count:N0})";
+
+	private string FormatPathExclusionLabel(
+		ProjectExclusionDescriptor descriptor,
+		ProjectContextPlan plan)
+	{
+		var label = localize(descriptor.LabelKey);
+		var impactCount = GetPathExclusionImpactCount(descriptor.RequireId(), plan.IgnoreOptionCounts);
+		return plan.HasIgnoreOptionCounts && impactCount is > 0
+			? $"{label} ({impactCount})"
+			: label;
+	}
+
+	private static int? GetPathExclusionImpactCount(
+		ProjectExclusion exclusion,
+		in IgnoreOptionCounts counts) =>
+		exclusion switch
+		{
+			ProjectExclusion.HiddenFolders => counts.HiddenFolders,
+			ProjectExclusion.HiddenFiles => counts.HiddenFiles,
+			ProjectExclusion.DotFolders => counts.DotFolders,
+			ProjectExclusion.DotFiles => counts.DotFiles,
+			ProjectExclusion.EmptyFolders => counts.EmptyFolders,
+			ProjectExclusion.EmptyFiles => counts.EmptyFiles,
+			ProjectExclusion.ExtensionlessFiles => counts.ExtensionlessFiles,
+			ProjectExclusion.SmartIgnore => null,
+			_ => throw new ArgumentOutOfRangeException(nameof(exclusion), exclusion, null)
+		};
 }

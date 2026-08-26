@@ -12,7 +12,7 @@
 │                                         ││                                                                             │││[x] Use .gitignore                ││
 │                                         ││                                                                             │││[ ] Tracked Git files only        ││
 │                                         ││                                                                             │││[x] Smart ignore                  ││
-│                                         ││                                                                             │││[x] Empty folders                 ││
+│                                         ││                                                                             │││[x] Empty folders (1)             ││
 │                                         ││                                                                             │││[x] Empty files                   ││
 │                                         ││                                                                             │││[x] Hidden folders                ││
 │                                         ││                                                                             │││[x] Hidden files                  ││

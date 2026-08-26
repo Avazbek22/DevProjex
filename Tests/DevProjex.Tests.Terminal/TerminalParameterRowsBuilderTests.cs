@@ -73,6 +73,37 @@ public sealed class TerminalParameterRowsBuilderTests
 	}
 
 	[Fact]
+	public void ExclusionRowsUseThePlansGuiEquivalentImpactCounts()
+	{
+		var counts = new IgnoreOptionCounts(
+			HiddenFolders: 2,
+			HiddenFiles: 3,
+			DotFolders: 4,
+			DotFiles: 5,
+			EmptyFolders: 6,
+			ExtensionlessFiles: 7,
+			EmptyFiles: 8);
+		var rows = CreateBuilder().BuildExclusions(CreatePlan(
+			ProjectSelectionSpec.Standard,
+			hasIgnoreOptionCounts: true,
+			ignoreOptionCounts: counts));
+
+		Assert.Equal(
+			"Settings.Ignore.HiddenFolders (2)",
+			rows.Single(static row => row.Exclusion == ProjectExclusion.HiddenFolders).Label);
+		Assert.Equal(
+			"Settings.Ignore.DotFiles (5)",
+			rows.Single(static row => row.Exclusion == ProjectExclusion.DotFiles).Label);
+		Assert.Equal(
+			"Settings.Ignore.EmptyFiles (8)",
+			rows.Single(static row => row.Exclusion == ProjectExclusion.EmptyFiles).Label);
+		Assert.DoesNotContain(
+			"(",
+			rows.Single(static row => row.Exclusion == ProjectExclusion.SmartIgnore).Label,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void ContentAggregateCountsAndTogglesAllFiveTransformations()
 	{
 		var builder = CreateBuilder();
@@ -166,7 +197,7 @@ public sealed class TerminalParameterRowsBuilderTests
 	}
 
 	[Theory]
-	[InlineData(0, 0, true)]
+	[InlineData(0, 0, false)]
 	[InlineData(1, 1, true)]
 	[InlineData(1, 0, false)]
 	public void ExtensionAggregateHandlesEmptyAndSingleItemSets(
@@ -196,7 +227,30 @@ public sealed class TerminalParameterRowsBuilderTests
 			availableExtensions: [],
 			selectedExtensions: []));
 
-		Assert.True(row.IsSelected);
+		Assert.False(row.IsSelected);
+	}
+
+	[Theory]
+	[InlineData(0, 0, 2, true, 0)]
+	[InlineData(4, 1, 8, true, 5)]
+	[InlineData(0, 2, 2, false, 2)]
+	[InlineData(4, 4, 8, false, 8)]
+	[InlineData(0, -1, 2, false, -1)]
+	public void ParameterListPointerSelectionRejectsRowsOutsideTheSource(
+		int viewportTop,
+		int pointerRow,
+		int itemCount,
+		bool expected,
+		int expectedIndex)
+	{
+		var resolved = TerminalParameterListView.TryResolveSelectionIndex(
+			viewportTop,
+			pointerRow,
+			itemCount,
+			out var selectionIndex);
+
+		Assert.Equal(expected, resolved);
+		Assert.Equal(expectedIndex, selectionIndex);
 	}
 
 	[Theory]
@@ -242,7 +296,9 @@ public sealed class TerminalParameterRowsBuilderTests
 	private static ProjectContextPlan CreatePlan(
 		ProjectSelectionSpec selection,
 		IReadOnlyList<string>? availableExtensions = null,
-		IReadOnlyList<string>? selectedExtensions = null)
+		IReadOnlyList<string>? selectedExtensions = null,
+		bool hasIgnoreOptionCounts = false,
+		IgnoreOptionCounts ignoreOptionCounts = default)
 	{
 		var root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "DevProjexTerminalRows"));
 		var tree = new TreeNodeDescriptor("project", root, true, false, "folder", []);
@@ -278,6 +334,8 @@ public sealed class TerminalParameterRowsBuilderTests
 				selection.GitMode ?? GitFilteringMode.None,
 				1,
 				true),
-			"rows");
+			"rows",
+			HasIgnoreOptionCounts: hasIgnoreOptionCounts,
+			IgnoreOptionCounts: ignoreOptionCounts);
 	}
 }

@@ -1357,14 +1357,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			$"{L("Terminal.Tui.Errors")} {errorCount:N0}");
 	}
 
-	private static long ResolveDisplayedTokenCount(TerminalWorkspaceState state)
+	internal static long ResolveDisplayedTokenCount(TerminalWorkspaceState state)
 	{
-		if (state.Plan.IncludedFiles.Count == 0)
-			return 0;
-		var reported = state.Plan.Analysis.Metrics.Content.Tokens;
-		if (reported > 0 || state.PreviewDocument.CharacterCount == 0)
-			return reported;
-		return Math.Max(1, (state.PreviewDocument.CharacterCount + 3) / 4);
+		ArgumentNullException.ThrowIfNull(state);
+		return state.PreviewOutputMetrics.Tokens;
 	}
 
 	private void UpdateWorkspaceHeaderLayout()
@@ -2534,7 +2530,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				selectedFormat,
 				destination,
 				overwrite: false,
-				token),
+				token,
+				plain: _options.Plain),
 			async (_, token) => await _controller.ExportContextAsync(
 				_state,
 				_previewView,
@@ -3531,11 +3528,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 						cancellationToken,
 						plain: _options.Plain)
 					.ConfigureAwait(false);
+				var outputMetrics = await ExportOutputMetricsCalculator
+					.FromDocumentAsync(pendingDocument, cancellationToken)
+					.ConfigureAwait(false);
 				var document = pendingDocument;
 				var applied = await InvokeAsync(() =>
 				{
 					if (!IsCurrentPreviewRequest(state, operationCts, requestId) ||
-						!state.TrySetPreviewDocument(document, expectedRevision))
+						!state.TrySetPreviewDocument(document, outputMetrics, expectedRevision))
 					{
 						return false;
 					}

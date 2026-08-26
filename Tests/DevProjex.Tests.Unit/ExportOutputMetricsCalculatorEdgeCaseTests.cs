@@ -1,3 +1,5 @@
+using DevProjex.Application.Preview;
+
 namespace DevProjex.Tests.Unit;
 
 public sealed class ExportOutputMetricsCalculatorEdgeCaseTests
@@ -36,6 +38,19 @@ public sealed class ExportOutputMetricsCalculatorEdgeCaseTests
 		Assert.Equal(3, metrics.Lines);
 		Assert.Equal(GetExpectedNormalizedCharCount(text), metrics.Chars);
 		Assert.Equal((metrics.Chars + 3) / 4, metrics.Tokens);
+	}
+
+	[Fact]
+	public async Task FromDocumentAsync_PreservesUtf8RunesAndEveryLineEndingAcrossChunks()
+	{
+		const string text = "A🙂\r\nБ\rC\n終";
+		using var document = new SingleByteChunkPreviewDocument(text);
+
+		var actual = await ExportOutputMetricsCalculator.FromDocumentAsync(
+			document,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(ExportOutputMetricsCalculator.FromText(text), actual);
 	}
 
 	[Fact]
@@ -173,5 +188,36 @@ public sealed class ExportOutputMetricsCalculatorEdgeCaseTests
 		}
 
 		return count;
+	}
+
+	private sealed class SingleByteChunkPreviewDocument(string text) : IPreviewTextDocument
+	{
+		public int LineCount => 1;
+		public int MaxLineLength => text.Length;
+		public long CharacterCount => text.Length;
+		public IReadOnlyList<PreviewDocumentSection> Sections => [];
+
+		public string GetFullText() => text;
+		public string GetLineText(int lineNumber) => text;
+		public string GetLineRangeText(int firstLine, int lastLine) => text;
+
+		public async ValueTask WriteToAsync(
+			Stream destination,
+			CancellationToken cancellationToken = default)
+		{
+			var bytes = Encoding.UTF8.GetBytes(text);
+			var singleByte = new byte[1];
+			foreach (var value in bytes)
+			{
+				singleByte[0] = value;
+				await destination
+					.WriteAsync(singleByte, cancellationToken)
+					.ConfigureAwait(false);
+			}
+		}
+
+		public void Dispose()
+		{
+		}
 	}
 }

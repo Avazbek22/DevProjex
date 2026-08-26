@@ -241,6 +241,7 @@ public sealed class ProjectAnalysisService(
 
 	private static bool CanUseUnifiedSelectionPipeline(ProjectAnalysisRequest request) =>
 		request.LocalProfileState is not null ||
+		request.CaptureIgnoreImpactCounts ||
 		(request.SelectedRootFolders is null &&
 		 request.SelectedExtensions is null &&
 		 request.SelectedIgnoreOptions is null);
@@ -333,7 +334,10 @@ public sealed class ProjectAnalysisService(
 			RequestedExtensionsForDiagnostics = selectionContext.ExtensionsSelectionInitialized
 				? selectionContext.ExtensionsSelectionCache
 				: selectedExtensions,
-			ResolvedIgnoreOptionStates = snapshot.IgnoreOptionStateCache
+			ResolvedIgnoreOptionStates = snapshot.IgnoreOptionStateCache,
+			HasIgnoreOptionCounts = snapshot.HasIgnoreOptionCounts,
+			IgnoreOptionCounts = snapshot.IgnoreOptionCounts,
+			IgnoreControllerImpactCounts = snapshot.ControllerImpactCounts
 		};
 	}
 
@@ -343,21 +347,32 @@ public sealed class ProjectAnalysisService(
 	{
 		if (request.LocalProfileState is not { } localState)
 		{
+			var rootsAreExplicit = request.SelectedRootFolders is not null;
+			var extensionsAreExplicit = request.SelectedExtensions is not null;
+			var ignoreOptionsAreExplicit = request.SelectedIgnoreOptions is not null;
+			var requestedIgnoreOptions = request.SelectedIgnoreOptions ?? EmptyIgnoreSelection;
 			return new SelectionRefreshContext(
 				Path: rootPath,
 				PreparedSelectionMode: PreparedSelectionMode.Defaults,
-				AllRootFoldersChecked: true,
-				AllExtensionsChecked: true,
-				RootSelectionInitialized: false,
-				RootSelectionCache: EmptyRootSelection,
-				ExtensionsSelectionInitialized: false,
-				ExtensionsSelectionCache: EmptyExtensionSelection,
-				IgnoreSelectionInitialized: false,
-				IgnoreSelectionCache: EmptyIgnoreSelection,
-				IgnoreOptionStateCache: EmptyIgnoreState,
+				AllRootFoldersChecked: !rootsAreExplicit,
+				AllExtensionsChecked: !extensionsAreExplicit,
+				RootSelectionInitialized: rootsAreExplicit,
+				RootSelectionCache: request.SelectedRootFolders?.ToHashSet(PathComparer.Default) ??
+				                    EmptyRootSelection,
+				ExtensionsSelectionInitialized: extensionsAreExplicit,
+				ExtensionsSelectionCache: request.SelectedExtensions?
+					.ToHashSet(StringComparer.OrdinalIgnoreCase) ?? EmptyExtensionSelection,
+				IgnoreSelectionInitialized: ignoreOptionsAreExplicit,
+				IgnoreSelectionCache: requestedIgnoreOptions.ToHashSet(),
+				IgnoreOptionStateCache: ignoreOptionsAreExplicit
+					? BuildExplicitIgnoreState(requestedIgnoreOptions)
+					: EmptyIgnoreState,
 				IgnoreAllPreference: null,
 				CurrentSnapshotState: default,
-				CaptureTreeInventory: true);
+				IgnoreOptionStateCacheIsComplete: ignoreOptionsAreExplicit,
+				CaptureTreeInventory: true,
+				RootSelectionIsExplicit: rootsAreExplicit,
+				ExtensionSelectionIsExplicit: extensionsAreExplicit);
 		}
 
 		var profile = localState.Profile;
@@ -656,6 +671,7 @@ public sealed record ProjectAnalysisRequest(
 	IReadOnlyCollection<IgnoreOptionId>? SelectedIgnoreOptions = null)
 {
 	internal LocalProjectSelectionState? LocalProfileState { get; init; }
+	internal bool CaptureIgnoreImpactCounts { get; init; }
 }
 
 public sealed record LoadedProjectAnalysisRequest(
@@ -676,4 +692,7 @@ public sealed record LoadedProjectAnalysisRequest(
 	internal IReadOnlyCollection<string>? RequestedRootFoldersForDiagnostics { get; init; }
 	internal IReadOnlyCollection<string>? RequestedExtensionsForDiagnostics { get; init; }
 	internal IReadOnlyDictionary<IgnoreOptionId, bool>? ResolvedIgnoreOptionStates { get; init; }
+	internal bool HasIgnoreOptionCounts { get; init; }
+	internal IgnoreOptionCounts IgnoreOptionCounts { get; init; }
+	internal IgnoreControllerImpactCounts IgnoreControllerImpactCounts { get; init; }
 }

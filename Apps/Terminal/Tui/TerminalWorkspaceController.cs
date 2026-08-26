@@ -47,56 +47,56 @@ public sealed class TerminalWorkspaceController(
 		state.ReplacePlan(plan);
 	}
 
-	public async Task RebuildRepositoryAsync(
+	public Task RebuildRepositoryAsync(
 		TerminalWorkspaceState state,
 		ProjectSelectionSpec selection,
-		CancellationToken cancellationToken)
-	{
-		// Pull and branch changes may add project markers, roots, extensions, or ignore
-		// controls without changing the TUI selection itself. Revalidate the shared
-		// Application cache before rebuilding so TUI, CLI, and Desktop see one topology.
-		services.IgnoreRulesService.RevalidateCaches(state.Plan.SourceRoot, cancellationToken);
-		var sourceIdentity = await services.SourceIdentityResolver
-			.ResolveAsync(state.Plan.SourceRoot, cancellationToken: cancellationToken)
-			.ConfigureAwait(false);
-		var plan = await BuildPlanAsync(
-				state.Plan.SourceRoot,
-				selection,
-				sourceIdentity,
-				cancellationToken)
-			.ConfigureAwait(false);
-		ThrowIfTrackedModeIsUnavailable(plan);
-		state.ReplacePlan(plan);
-	}
+		CancellationToken cancellationToken) =>
+		ReconcileProjectStructureAsync(state, selection, cancellationToken);
 
-	public async Task RefreshProjectAsync(
+	public Task RefreshProjectAsync(
 		TerminalWorkspaceState state,
 		CancellationToken cancellationToken)
 	{
 		ArgumentNullException.ThrowIfNull(state);
+		return ReconcileProjectStructureAsync(
+			state,
+			state.BuildSelection(),
+			cancellationToken);
+	}
+
+	private async Task ReconcileProjectStructureAsync(
+		TerminalWorkspaceState state,
+		ProjectSelectionSpec selection,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(state);
+		ArgumentNullException.ThrowIfNull(selection);
+		var previousExtensions = new HashSet<string>(
+			selection.Extensions ?? state.Plan.SelectedExtensions,
+			StringComparer.OrdinalIgnoreCase);
+		var previousPaths = state.BuildSelectedItemRelativePaths();
+
+		// Filesystem and repository changes can expose new roots, extensions, and paths.
+		// Discover without the tree projection, then apply the shared evolution policy.
 		services.IgnoreRulesService.RevalidateCaches(state.Plan.SourceRoot, cancellationToken);
 		var sourceIdentity = await services.SourceIdentityResolver
 			.ResolveAsync(state.Plan.SourceRoot, cancellationToken: cancellationToken)
 			.ConfigureAwait(false);
-		var selection = state.BuildSelection() with { SelectedPaths = [] };
 		var discovered = await BuildPlanAsync(
 				state.Plan.SourceRoot,
-				selection,
+				selection with { SelectedPaths = [] },
 				sourceIdentity,
 				cancellationToken)
 			.ConfigureAwait(false);
 		ThrowIfTrackedModeIsUnavailable(discovered);
 
-		var previousExtensions = new HashSet<string>(
-			state.Plan.Selection.Extensions ?? state.Plan.SelectedExtensions,
-			StringComparer.OrdinalIgnoreCase);
 		var extensionEvolution = SelectionEvolutionPolicy.Reconcile(
 			discovered.AvailableExtensions,
 			previousExtensions,
 			state.ExtensionOptionStates,
 			static _ => true,
 			StringComparer.OrdinalIgnoreCase);
-		selection = selection with
+		selection = discovered.Selection with
 		{
 			Extensions = extensionEvolution.SelectedItems
 				.Order(StringComparer.OrdinalIgnoreCase)
@@ -115,11 +115,11 @@ public sealed class TerminalWorkspaceController(
 			discovered.SourceRoot);
 		var pathEvolution = SelectionEvolutionPolicy.Reconcile(
 			availablePaths,
-			state.BuildSelectedItemRelativePaths(),
+			previousPaths,
 			state.PathOptionStates,
 			static _ => true,
 			PathComparer.Default);
-		selection = selection with
+		selection = discovered.Selection with
 		{
 			SelectedPaths = pathEvolution.SelectedItems.Count == availablePaths.Count
 				? []
@@ -422,7 +422,8 @@ public sealed class TerminalWorkspaceController(
 		TerminalWorkspaceState state,
 		ProjectContextView view,
 		ProjectContextDocumentFormat format,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		bool plain = false)
 	{
 		ValidateView(view);
 		ValidateDocumentFormat(format);
@@ -432,7 +433,8 @@ public sealed class TerminalWorkspaceController(
 				view,
 				format,
 				stream,
-				token),
+				token,
+				plain),
 			cancellationToken);
 	}
 
@@ -599,7 +601,8 @@ public sealed class TerminalWorkspaceController(
 		ProjectContextDocumentFormat format,
 		string destination,
 		bool overwrite,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		bool plain = false)
 	{
 		ValidateView(view);
 		ValidateDocumentFormat(format);
@@ -611,7 +614,17 @@ public sealed class TerminalWorkspaceController(
 				plan.SourceRoot,
 				path,
 				overwrite));
-		var (characters, tokens) = ResolveContextMetrics(plan, view);
+		var outputMetrics = await ExportOutputMetricsCalculator
+			.FromUtf8WriterAsync(
+				(stream, token) => services.ContextDocumentService.WriteCompleteAsync(
+					plan,
+					view,
+					format,
+					stream,
+					token,
+					plain),
+				cancellationToken)
+			.ConfigureAwait(false);
 		return CreateSummary(
 			plan,
 			TerminalExportKind.Context,
@@ -619,8 +632,8 @@ public sealed class TerminalWorkspaceController(
 			format,
 			exactDestination,
 			destinationState,
-			characters,
-			tokens);
+			outputMetrics.Chars,
+			outputMetrics.Tokens);
 	}
 
 	public async Task<string> ExportProjectAsync(
@@ -711,7 +724,8 @@ public sealed class TerminalWorkspaceController(
 			projectPath,
 			selection,
 			sourceIdentity,
-			cancellationToken);
+			cancellationToken,
+			captureIgnoreImpactCounts: true);
 
 	private static void ThrowIfTrackedModeIsUnavailable(ProjectContextPlan plan)
 	{
@@ -765,30 +779,6 @@ public sealed class TerminalWorkspaceController(
 			return (exception.Path, TerminalExportDestinationState.Conflict);
 		}
 	}
-
-	private static (long Characters, long Tokens) ResolveContextMetrics(
-		ProjectContextPlan plan,
-		ProjectContextView view) =>
-		view switch
-		{
-			ProjectContextView.Tree => (
-				plan.Analysis.Metrics.Tree.Chars,
-				plan.Analysis.Metrics.Tree.Tokens),
-			ProjectContextView.Content => (
-				plan.Analysis.Metrics.Content.Chars,
-				plan.Analysis.Metrics.Content.Tokens),
-			ProjectContextView.TreeContent => (
-				SaturatingAdd(
-					plan.Analysis.Metrics.Tree.Chars,
-					plan.Analysis.Metrics.Content.Chars),
-				SaturatingAdd(
-					plan.Analysis.Metrics.Tree.Tokens,
-					plan.Analysis.Metrics.Content.Tokens)),
-			_ => throw new ArgumentOutOfRangeException(nameof(view), view, null)
-		};
-
-	private static long SaturatingAdd(long left, long right) =>
-		left > long.MaxValue - right ? long.MaxValue : left + right;
 
 	private static void ValidateProjectDestinationExtension(
 		ProjectCopyExportFormat format,

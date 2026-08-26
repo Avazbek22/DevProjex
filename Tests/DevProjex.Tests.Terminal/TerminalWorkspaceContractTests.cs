@@ -453,7 +453,7 @@ public sealed class TerminalWorkspaceContractTests
 			ProjectContextView.Content,
 			ProjectContextDocumentFormat.Markdown,
 			TestContext.Current.CancellationToken);
-		state.SetPreviewDocument(preview);
+		await SetPreviewDocumentAsync(state, preview);
 
 		var document = Assert.IsType<FileBackedPreviewTextDocument>(state.PreviewDocument);
 		Assert.Equal(fileCount, document.Sections.Count);
@@ -511,7 +511,7 @@ public sealed class TerminalWorkspaceContractTests
 			ProjectContextView.Content,
 			ProjectContextDocumentFormat.Markdown,
 			TestContext.Current.CancellationToken);
-		state.SetPreviewDocument(preview);
+		await SetPreviewDocumentAsync(state, preview);
 
 		Assert.Equal(2, state.PreviewDocument.Sections.Count);
 		Assert.Contains(
@@ -540,11 +540,12 @@ public sealed class TerminalWorkspaceContractTests
 			ProjectProfileReference.Standard,
 			TestContext.Current.CancellationToken);
 
-		state.SetPreviewDocument(await controller.BuildPreviewDocumentAsync(
+		var localizedPreview = await controller.BuildPreviewDocumentAsync(
 			state,
 			ProjectContextView.Content,
 			ProjectContextDocumentFormat.Markdown,
-			TestContext.Current.CancellationToken));
+			TestContext.Current.CancellationToken);
+		await SetPreviewDocumentAsync(state, localizedPreview);
 
 		Assert.Contains(
 			"[Двоичный файл — содержимое пропущено.]",
@@ -581,7 +582,7 @@ public sealed class TerminalWorkspaceContractTests
 			ProjectContextView.TreeContent,
 			format,
 			TestContext.Current.CancellationToken);
-		state.SetPreviewDocument(preview);
+		await SetPreviewDocumentAsync(state, preview);
 		var exported = await CompleteContextDocumentTestHelper.BuildAsync(
 			services.ContextDocumentService,
 			state.Plan,
@@ -617,7 +618,7 @@ public sealed class TerminalWorkspaceContractTests
 			ProjectContextView.Content,
 			ProjectContextDocumentFormat.Markdown,
 			TestContext.Current.CancellationToken);
-		state.SetPreviewDocument(preview);
+		await SetPreviewDocumentAsync(state, preview);
 
 		var document = Assert.IsType<FileBackedPreviewTextDocument>(state.PreviewDocument);
 		Assert.True(document.CharacterCount > 500_000);
@@ -860,6 +861,87 @@ public sealed class TerminalWorkspaceContractTests
 	}
 
 	[Theory]
+	[InlineData(ProjectContextDocumentFormat.Text, true)]
+	[InlineData(ProjectContextDocumentFormat.Markdown, false)]
+	[InlineData(ProjectContextDocumentFormat.Json, false)]
+	[InlineData(ProjectContextDocumentFormat.Xml, false)]
+	public async Task PreparedContextExportMeasuresTheExactTransformedPayload(
+		ProjectContextDocumentFormat format,
+		bool plain)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile(
+			"project/src/App.cs",
+			"""
+			public sealed class App
+			{
+
+				// This comment is removed.
+				public void Run()
+				{
+					Console.WriteLine("Привет 🙂");
+				}
+			}
+			""");
+		var extension = format switch
+		{
+			ProjectContextDocumentFormat.Text => ".txt",
+			ProjectContextDocumentFormat.Markdown => ".md",
+			ProjectContextDocumentFormat.Json => ".json",
+			ProjectContextDocumentFormat.Xml => ".xml",
+			_ => throw new ArgumentOutOfRangeException(nameof(format), format, null)
+		};
+		var destination = Path.Combine(workspace.CreateDirectory("output"), "context" + extension);
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			project,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+		foreach (var option in new[]
+			{
+				IgnoreOptionId.CompressCode,
+				IgnoreOptionId.StripComments,
+				IgnoreOptionId.StripBlankLines
+			})
+		{
+			controller.SetContentTransformation(
+				state,
+				option,
+				enabled: true,
+				TestContext.Current.CancellationToken);
+		}
+
+		var summary = await controller.PrepareContextExportAsync(
+			state,
+			ProjectContextView.TreeContent,
+			format,
+			destination,
+			overwrite: false,
+			TestContext.Current.CancellationToken,
+			plain);
+		await controller.ExportContextAsync(
+			state,
+			ProjectContextView.TreeContent,
+			format,
+			destination,
+			overwrite: false,
+			TestContext.Current.CancellationToken,
+			plain);
+		var payload = await File.ReadAllTextAsync(
+			destination,
+			TestContext.Current.CancellationToken);
+		var expected = ExportOutputMetricsCalculator.FromText(payload);
+
+		Assert.Equal(expected.Chars, summary.Characters);
+		Assert.Equal(expected.Tokens, summary.EstimatedTokens);
+		Assert.DoesNotContain("This comment is removed", payload, StringComparison.Ordinal);
+		Assert.DoesNotContain("Console.WriteLine", payload, StringComparison.Ordinal);
+	}
+
+	[Theory]
 	[InlineData(ProjectContextView.Tree, ProjectContextDocumentFormat.Text)]
 	[InlineData(ProjectContextView.Content, ProjectContextDocumentFormat.Json)]
 	public async Task CopyPayloadUsesTheExactContextPipelineForDefaultsAndOverrides(
@@ -1098,6 +1180,16 @@ public sealed class TerminalWorkspaceContractTests
 	private sealed class SynchronousProgress<T>(Action<T> report) : IProgress<T>
 	{
 		public void Report(T value) => report(value);
+	}
+
+	private static async Task SetPreviewDocumentAsync(
+		TerminalWorkspaceState state,
+		IPreviewTextDocument document)
+	{
+		var metrics = await ExportOutputMetricsCalculator.FromDocumentAsync(
+			document,
+			TestContext.Current.CancellationToken);
+		state.SetPreviewDocument(document, metrics);
 	}
 
 	private sealed class NonMaterializablePreviewDocument(long characterCount) : IPreviewTextDocument

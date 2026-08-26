@@ -1,7 +1,25 @@
+using DevProjex.Application.Preview;
+
 namespace DevProjex.Tests.Terminal;
 
 public sealed class TerminalWorkspaceStateTests
 {
+	[Fact]
+	public void PreviewRefreshPublishesDocumentAndExactOutputMetricsTogether()
+	{
+		using var state = new TerminalWorkspaceState(CreatePlan());
+		const string payload = "tree\r\nПривет 🙂\rcontent";
+		var metrics = ExportOutputMetricsCalculator.FromText(payload);
+		var document = new InMemoryPreviewTextDocument(payload);
+
+		var applied = state.TrySetPreviewDocument(document, metrics, state.Revision);
+
+		Assert.True(applied);
+		Assert.Same(document, state.PreviewDocument);
+		Assert.Equal(metrics, state.PreviewOutputMetrics);
+		Assert.Equal(metrics.Tokens, TerminalWorkspaceSession.ResolveDisplayedTokenCount(state));
+	}
+
 	[Fact]
 	public void EmptyEffectiveTreeRetainsOnlyTheRealRoot()
 	{

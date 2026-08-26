@@ -11,7 +11,8 @@ public sealed class TerminalProjectContextFactory(
 		string projectPath,
 		ProjectSelectionSpec selection,
 		ProjectSourceIdentity? knownIdentity = null,
-		CancellationToken cancellationToken = default)
+		CancellationToken cancellationToken = default,
+		bool captureIgnoreImpactCounts = false)
 	{
 		var markedSecrets = ProjectSelectionMarkedSecretsResolver.Resolve(selection);
 		if (await secretRedactionSession
@@ -33,10 +34,11 @@ public sealed class TerminalProjectContextFactory(
 		var sourceIdentity = await sourceIdentityResolver
 			.ResolveAsync(projectPath, knownIdentity, cancellationToken)
 			.ConfigureAwait(false);
-		return await planner
-			.BuildAsync(
-				new ProjectContextRequest(projectPath, selection, sourceIdentity),
-				cancellationToken)
-			.ConfigureAwait(false);
+		var request = new ProjectContextRequest(projectPath, selection, sourceIdentity);
+		return captureIgnoreImpactCounts
+			? await planner
+				.BuildWithIgnoreImpactCountsAsync(request, cancellationToken)
+				.ConfigureAwait(false)
+			: await planner.BuildAsync(request, cancellationToken).ConfigureAwait(false);
 	}
 }
