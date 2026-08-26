@@ -176,9 +176,10 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 					case FileContentClassification.Binary:
 						continue;
 					case FileContentClassification.TooLarge:
-						// Estimated content carries no text, so this file contributes the same empty
-						// section it would with Hide Secrets off. One file the scanner may not read
-						// does not cost the user the rest of the selection.
+					case FileContentClassification.Unreadable:
+					case FileContentClassification.UnsupportedEncoding:
+						// Unavailable content contributes no text, matching the unredacted path.
+						// One unreadable file must not discard the rest of the selection.
 						break;
 					case FileContentClassification.Text when content is not null:
 						break;
