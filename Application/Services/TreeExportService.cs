@@ -367,18 +367,37 @@ public sealed class TreeExportService
 		return CalculateAsciiSelectedTreeMetrics(outputRootPath, root, includedPaths, outputRootName);
 	}
 
-	public static bool HasSelectedDescendantOrSelf(TreeNodeDescriptor node, IReadOnlySet<string> selectedPaths)
+	public static bool HasSelectedDescendantOrSelf(
+		TreeNodeDescriptor node,
+		IReadOnlySet<string> selectedPaths) =>
+		HasSelectedDescendantOrSelfWithCancellation(
+			node,
+			selectedPaths,
+			CancellationToken.None);
+
+	internal static bool HasSelectedDescendantOrSelfWithCancellation(
+		TreeNodeDescriptor node,
+		IReadOnlySet<string> selectedPaths,
+		CancellationToken cancellationToken)
 	{
+		ArgumentNullException.ThrowIfNull(node);
+		ArgumentNullException.ThrowIfNull(selectedPaths);
+		cancellationToken.ThrowIfCancellationRequested();
+
 		var pending = new Stack<TreeNodeDescriptor>();
 		pending.Push(node);
 		while (pending.Count > 0)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			var current = pending.Pop();
 			if (selectedPaths.Contains(current.FullPath))
 				return true;
 
 			for (var index = current.Children.Count - 1; index >= 0; index--)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
 				pending.Push(current.Children[index]);
+			}
 		}
 
 		return false;

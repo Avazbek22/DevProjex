@@ -51,7 +51,11 @@ public sealed class TreeAndContentExportService(
 			pathPresentation,
 			outputPathRedaction);
 		var displayRootName = pathPresentation?.DisplayRootName;
-		bool hasSelection = selectedPaths.Count > 0 && TreeExportService.HasSelectedDescendantOrSelf(root, selectedPaths);
+		bool hasSelection = selectedPaths.Count > 0 &&
+		                    TreeExportService.HasSelectedDescendantOrSelfWithCancellation(
+			                    root,
+			                    selectedPaths,
+			                    cancellationToken);
 
 		string tree = hasSelection
 			? treeExport.BuildSelectedTreeWithCancellation(
@@ -81,10 +85,11 @@ public sealed class TreeAndContentExportService(
 				includeRootPath: true,
 				cancellationToken: cancellationToken);
 
-		var files = ProjectTreeSelectionProjection.BuildOrderedSelectedFilePaths(
+		var files = ProjectTreeSelectionProjection.BuildOrderedSelectedFilePathsWithCancellation(
 			root,
 			hasSelection ? selectedPaths : EmptySelection,
-			ensureExists: hasSelection);
+			ensureExists: hasSelection,
+			cancellationToken);
 		var contentPathMapper = CreateRelativeContentHeaderPathMapper(rootPath);
 
 		var contentResult = await contentExport.BuildResultAsync(
