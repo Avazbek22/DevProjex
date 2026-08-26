@@ -99,7 +99,7 @@ public sealed class PreviewDocumentBuilder(
 		await EnsurePersistentIdentityReadyAsync(transformationContext, cancellationToken).ConfigureAwait(false);
         if (orderedFiles.Count == 0)
         {
-			using var emptyScope = transformationContext?.BeginOutput(orderedFiles);
+			using var emptyScope = transformationContext?.BeginOutput(orderedFiles, cancellationToken);
 			CompleteTransformation(emptyScope, transformationContext);
             return null;
 		}
@@ -107,7 +107,7 @@ public sealed class PreviewDocumentBuilder(
         using var builder = new PreviewTextStorageBuilder(InMemoryDocumentThresholdChars);
         var sections = new List<PreviewDocumentSection>(orderedFiles.Count);
 		var redactions = new List<PreviewRedactionSpan>();
-		using var transformationScope = transformationContext?.BeginOutput(orderedFiles);
+		using var transformationScope = transformationContext?.BeginOutput(orderedFiles, cancellationToken);
 		var redactionScope = transformationScope?.Redaction;
 		var wroteRoot = false;
 		if (!string.IsNullOrWhiteSpace(displayRootPath))
@@ -161,7 +161,7 @@ public sealed class PreviewDocumentBuilder(
 
         if (orderedFiles.Count == 0)
         {
-			using var emptyScope = transformationContext?.BeginOutput(orderedFiles);
+			using var emptyScope = transformationContext?.BeginOutput(orderedFiles, cancellationToken);
 			CompleteTransformation(emptyScope, transformationContext);
             return CreateInMemory(normalizedTreeText);
 		}
@@ -169,7 +169,7 @@ public sealed class PreviewDocumentBuilder(
         using var builder = new PreviewTextStorageBuilder(InMemoryDocumentThresholdChars);
         var sections = new List<PreviewDocumentSection>(orderedFiles.Count);
 		var redactions = new List<PreviewRedactionSpan>();
-		using var transformationScope = transformationContext?.BeginOutput(orderedFiles);
+		using var transformationScope = transformationContext?.BeginOutput(orderedFiles, cancellationToken);
 		var redactionScope = transformationScope?.Redaction;
         var wroteTree = AppendMultilineText(builder, normalizedTreeText.AsSpan());
 		if (treeRootPresentation is { } rootPresentation)

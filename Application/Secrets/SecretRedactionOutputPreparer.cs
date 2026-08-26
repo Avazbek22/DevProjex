@@ -92,7 +92,7 @@ public sealed class SecretRedactionOutputPreparer
 		SecretRedactionTempDirectory? workingDirectory = null;
 		var preparedFiles = new Dictionary<string, PreparedSecretFile>(PathComparer.Default);
 		var unscannableFiles = new List<UnscannableFile>();
-		using var transformationScope = context.BeginOutput(orderedFilePaths);
+		using var transformationScope = context.BeginOutput(orderedFilePaths, cancellationToken);
 		var scope = transformationScope.Redaction;
 		var requiredInspectionScope = context.Compression is null ? scope : null;
 		if (requiredInspectionScope is not null)
@@ -564,7 +564,7 @@ public sealed class SecretRedactionOutputPreparer
 				serialWork.Add(workItem);
 		}
 
-		using var transformationScope = context.BeginOutput(orderedFilePaths);
+		using var transformationScope = context.BeginOutput(orderedFilePaths, cancellationToken);
 		try
 		{
 			if (parallelWork.Count > 0)
@@ -826,7 +826,7 @@ public sealed class SecretRedactionOutputPreparer
 			throw new SecretDetectionException("The persistent secret identity key is unavailable.");
 		}
 		await context.EnsureWarmUpAsync(cancellationToken).ConfigureAwait(false);
-		var scope = context.BeginOutput(orderedFilePaths);
+		var scope = context.BeginOutput(orderedFilePaths, cancellationToken);
 		var entries = new SecretScanCacheEntry?[orderedFilePaths.Count];
 		var unscannableFiles = new List<UnscannableFile>();
 		var parallelWork = new List<SecretScanWorkItem>();
@@ -942,7 +942,7 @@ public sealed class SecretRedactionOutputPreparer
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(orderedFilePaths);
 		await context.EnsureWarmUpAsync(cancellationToken).ConfigureAwait(false);
-		var scope = context.BeginOutput(orderedFilePaths);
+		var scope = context.BeginOutput(orderedFilePaths, cancellationToken);
 		var entries = new SecretScanCacheEntry?[orderedFilePaths.Count];
 		var outcomes = new SecretDiscoveryFileOutcome[orderedFilePaths.Count];
 		var unscannableFiles = new List<UnscannableFile>();
@@ -1087,7 +1087,7 @@ public sealed class SecretRedactionOutputPreparer
 			throw new SecretDetectionException("The persistent secret identity key is unavailable.");
 		}
 		await redactionContext.EnsureWarmUpAsync(cancellationToken).ConfigureAwait(false);
-		using var transformationScope = context.BeginOutput(orderedFilePaths);
+		using var transformationScope = context.BeginOutput(orderedFilePaths, cancellationToken);
 		var redactionScope = transformationScope.Redaction ??
 		                     throw new InvalidOperationException(
 			                     "The transformation scope did not create secret redaction state.");
@@ -1178,7 +1178,7 @@ public sealed class SecretRedactionOutputPreparer
 		}
 
 		await redactionContext.EnsureWarmUpAsync(cancellationToken).ConfigureAwait(false);
-		using var transformationScope = context.BeginOutput(orderedFilePaths);
+		using var transformationScope = context.BeginOutput(orderedFilePaths, cancellationToken);
 		var redactionScope = transformationScope.Redaction ??
 		                     throw new InvalidOperationException(
 			                     "The transformation scope did not create secret redaction state.");

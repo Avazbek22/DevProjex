@@ -77,7 +77,10 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 		ArgumentNullException.ThrowIfNull(orderedFilePaths);
 		return WarmAsync(
 			context,
-			ContentSelectionSnapshot.Create(context.ProjectRoot, orderedFilePaths),
+			ContentSelectionSnapshot.CreateWithCancellation(
+				context.ProjectRoot,
+				orderedFilePaths,
+				cancellationToken),
 			cancellationToken,
 			progress);
 	}

@@ -18,21 +18,71 @@ public sealed record ContentSelectionSnapshot(
 		string projectRoot,
 		IReadOnlyList<string> orderedPaths,
 		long revision = 0)
+		=> CreateCore(projectRoot, orderedPaths, CancellationToken.None, revision);
+
+	public static ContentSelectionSnapshot CreateWithCancellation(
+		string projectRoot,
+		IReadOnlyList<string> orderedPaths,
+		CancellationToken cancellationToken,
+		long revision = 0)
+		=> CreateCore(projectRoot, orderedPaths, cancellationToken, revision);
+
+	private static ContentSelectionSnapshot CreateCore(
+		string projectRoot,
+		IReadOnlyList<string> orderedPaths,
+		CancellationToken cancellationToken,
+		long revision)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
 		ArgumentNullException.ThrowIfNull(orderedPaths);
+		cancellationToken.ThrowIfCancellationRequested();
 		var unique = new HashSet<string>(PathComparer.Default);
 		var paths = new List<string>(orderedPaths.Count);
-		foreach (var path in orderedPaths)
+		var pathsAreSorted = true;
+		string? previousPath = null;
+		for (var index = 0; index < orderedPaths.Count; index++)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var path = orderedPaths[index];
 			if (!string.IsNullOrWhiteSpace(path) && unique.Add(path))
+			{
+				if (previousPath is not null && PathComparer.Default.Compare(previousPath, path) > 0)
+					pathsAreSorted = false;
 				paths.Add(path);
+				previousPath = path;
+			}
 		}
 
 		using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
 		Append(hash, PathUtility.Normalize(projectRoot));
-		foreach (var path in paths.OrderBy(static path => path, PathComparer.Default))
+		IReadOnlyList<string> fingerprintPaths = paths;
+		if (!pathsAreSorted)
+		{
+			var sortedPaths = paths.ToArray();
+			if (!cancellationToken.CanBeCanceled)
+			{
+				Array.Sort(sortedPaths, PathComparer.Default);
+			}
+			else
+			{
+				var comparisons = 0u;
+				Array.Sort(sortedPaths, (left, right) =>
+				{
+					if ((++comparisons & 0x3FFu) == 0)
+						cancellationToken.ThrowIfCancellationRequested();
+					return PathComparer.Default.Compare(left, right);
+				});
+				cancellationToken.ThrowIfCancellationRequested();
+			}
+			fingerprintPaths = sortedPaths;
+		}
+
+		for (var index = 0; index < fingerprintPaths.Count; index++)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var path = fingerprintPaths[index];
 			Append(hash, path);
+		}
 		return new ContentSelectionSnapshot(
 			revision,
 			paths.ToArray(),

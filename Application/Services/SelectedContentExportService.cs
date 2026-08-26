@@ -143,7 +143,7 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 				.RefreshPersistentMarksAsync(redactionContext.ProjectRoot, cancellationToken)
 				.ConfigureAwait(false);
 		}
-		using var transformationScope = transformationContext?.BeginOutput(files);
+		using var transformationScope = transformationContext?.BeginOutput(files, cancellationToken);
 		var redactionScope = transformationScope?.Redaction;
 
 		var sb = new StringBuilder();

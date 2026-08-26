@@ -779,7 +779,10 @@ internal sealed class MetricsPipeline(
 			var projectRoot = ResolveTransformationProjectRoot();
 			if (candidateReadFacts is not null && projectRoot.Length > 0)
 			{
-				var selection = ContentSelectionSnapshot.Create(projectRoot, filePaths);
+				var selection = ContentSelectionSnapshot.CreateWithCancellation(
+					projectRoot,
+					filePaths,
+					linkedCts.Token);
 				if (string.Equals(
 						candidateReadFacts.Selection.SelectionFingerprint,
 						selection.SelectionFingerprint,
