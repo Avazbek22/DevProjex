@@ -30,7 +30,7 @@ public sealed class McpServerIntegrationTests
 		await using var input = new MemoryStream();
 		await using var output = new MemoryStream();
 
-		await McpServerHost.RunAsync(
+		await McpServerHost.RunWithStreamsAsync(
 			[project],
 			input,
 			output,
@@ -581,7 +581,7 @@ public sealed class McpServerIntegrationTests
 		var project = workspace.CreateDirectory("project");
 		File.WriteAllText(
 			Path.Combine(project, "Profiled.txt"),
-			$"token: {Secret}\ncontact: {PrivateEmail}\n");
+			$"token: {Secret}\ncontact: {PrivateEmail}\nprofile-policy-marker\n");
 		var appData = Path.Combine(workspace.Path, "app-data");
 		var physicalProject = McpRootRegistry.ResolvePhysicalExistingPath(project, requireDirectory: true);
 		new ProjectProfileStore(() => appData).SaveProfile(
@@ -609,6 +609,7 @@ public sealed class McpServerIntegrationTests
 			});
 
 		AssertSecretRedactedAndSpotlighted(result);
+		Assert.Contains("profile-policy-marker", Text(result), StringComparison.Ordinal);
 		Assert.Equal(!hidePrivateData, Text(result).Contains(PrivateEmail, StringComparison.Ordinal));
 	}
 
@@ -623,7 +624,7 @@ public sealed class McpServerIntegrationTests
 		var project = workspace.CreateDirectory("project");
 		File.WriteAllText(
 			Path.Combine(project, "Profiled.txt"),
-			$"token: {Secret}\ncontact: {PrivateEmail}\n");
+			$"token: {Secret}\ncontact: {PrivateEmail}\nprofile-policy-marker\n");
 		const string profileName = "portable.json";
 		File.WriteAllText(
 			Path.Combine(project, profileName),
@@ -657,6 +658,7 @@ public sealed class McpServerIntegrationTests
 			});
 
 		AssertSecretRedactedAndSpotlighted(result);
+		Assert.Contains("profile-policy-marker", Text(result), StringComparison.Ordinal);
 		Assert.Equal(!hidePrivateData, Text(result).Contains(PrivateEmail, StringComparison.Ordinal));
 	}
 
@@ -1228,7 +1230,7 @@ public sealed class McpServerIntegrationTests
 		{
 			var clientToServer = new Pipe();
 			var serverToClient = new Pipe();
-			var serverTask = McpServerHost.RunAsync(
+			var serverTask = McpServerHost.RunWithStreamsAsync(
 				[project],
 				clientToServer.Reader.AsStream(),
 				serverToClient.Writer.AsStream(),

@@ -19,8 +19,14 @@ public sealed class McpServerProcessTests
 	public async Task RealProcessAppliesServerRedactionPolicyAndStopsOnStandardInputEof(
 		bool hidePrivateData)
 	{
-		using var workspace = new TemporaryDirectory();
+		var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+		if (string.IsNullOrWhiteSpace(userProfile))
+			Assert.Skip("The environment does not expose a user profile directory.");
+		using var workspace = new TemporaryDirectory(userProfile);
 		var project = workspace.CreateDirectory("project");
+		var physicalProject = McpRootRegistry.ResolvePhysicalExistingPath(project, requireDirectory: true);
+		if (OutputRootPathPresentation.MaskLocalUserSegment(physicalProject) == physicalProject)
+			Assert.Skip("The user profile path does not use a supported local-user layout.");
 		var ignoredEnvironmentRoot = workspace.CreateDirectory("environment-root");
 		workspace.WriteFile(
 			"project/app.cs",
@@ -142,6 +148,15 @@ public sealed class McpServerProcessTests
 			using var document = JsonDocument.Parse(message);
 			Assert.Equal(JsonValueKind.Object, document.RootElement.ValueKind);
 			Assert.Equal("2.0", document.RootElement.GetProperty("jsonrpc").GetString());
+			var hasMethod = document.RootElement.TryGetProperty("method", out var method) &&
+			                method.ValueKind == JsonValueKind.String &&
+			                !string.IsNullOrWhiteSpace(method.GetString());
+			var hasId = document.RootElement.TryGetProperty("id", out _);
+			var hasResult = document.RootElement.TryGetProperty("result", out _);
+			var hasError = document.RootElement.TryGetProperty("error", out _);
+			Assert.True(
+				hasMethod ? !hasResult && !hasError : hasId && hasResult != hasError,
+				$"MCP stdout contained an invalid JSON-RPC message at index {index}: {message}");
 			messages[index] = message;
 		}
 
@@ -177,8 +192,7 @@ public sealed class McpServerProcessTests
 		var protectedProject = OutputRootPathPresentation.MaskLocalUserSegment(project);
 		var expectedProject = hidePrivateData ? protectedProject : project;
 		Assert.Contains(expectedProject, text, StringComparison.Ordinal);
-		if (!string.Equals(project, protectedProject, StringComparison.Ordinal))
-			Assert.DoesNotContain(hidePrivateData ? project : protectedProject, text, StringComparison.Ordinal);
+		Assert.DoesNotContain(hidePrivateData ? project : protectedProject, text, StringComparison.Ordinal);
 	}
 
 	private static StringComparison PathComparison =>

@@ -15,14 +15,14 @@ public static class McpServerHost
 		IReadOnlyList<string> roots,
 		bool hidePrivateData = false,
 		CancellationToken cancellationToken = default) =>
-		RunAsync(
+		RunWithStreamsAsync(
 			roots,
 			Console.OpenStandardInput(),
 			Console.OpenStandardOutput(),
 			hidePrivateData,
 			cancellationToken);
 
-	public static async Task RunAsync(
+	internal static async Task RunWithStreamsAsync(
 		IReadOnlyList<string> roots,
 		Stream input,
 		Stream output,
