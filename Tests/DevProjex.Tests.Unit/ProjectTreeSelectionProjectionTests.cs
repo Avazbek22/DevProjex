@@ -111,7 +111,7 @@ public sealed class ProjectTreeSelectionProjectionTests
 			fixture.Root,
 			new HashSet<string>(PathComparer.Default),
 			Path.GetTempPath(),
-			ProjectCopyExportFormat.Folder));
+			ProjectCopyExportFormat.Folder), TestContext.Current.CancellationToken);
 		var checkedRootPlan = builder.Build(new ProjectCopyExportRequest(
 			fixture.Root.FullPath,
 			"root",
@@ -121,7 +121,7 @@ public sealed class ProjectTreeSelectionProjectionTests
 				fixture.Root.FullPath
 			},
 			Path.GetTempPath(),
-			ProjectCopyExportFormat.Folder));
+			ProjectCopyExportFormat.Folder), TestContext.Current.CancellationToken);
 
 		Assert.Equal(implicitPlan.Entries, checkedRootPlan.Entries);
 		Assert.Equal(implicitPlan.FileCount, checkedRootPlan.FileCount);
@@ -147,7 +147,9 @@ public sealed class ProjectTreeSelectionProjectionTests
 			Path.GetTempPath(),
 			ProjectCopyExportFormat.Folder);
 
-		var plan = new ProjectCopyExportPlanBuilder().Build(request);
+		var plan = new ProjectCopyExportPlanBuilder().Build(
+			request,
+			TestContext.Current.CancellationToken);
 
 		Assert.Equal(OperatingSystem.IsWindows() ? 1 : 2, plan.FileCount);
 	}
@@ -212,6 +214,37 @@ public sealed class ProjectTreeSelectionProjectionTests
 				root,
 				new HashSet<string>(PathComparer.Default),
 				cancellation.Token));
+	}
+
+	[Fact]
+	public void ExportPlanWithCancellation_StopsDuringTreeProjection()
+	{
+		using var cancellation = new CancellationTokenSource();
+		var rootPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "project-copy-cancel-root"));
+		var child = new TreeNodeDescriptor(
+			"file.txt",
+			Path.Combine(rootPath, "file.txt"),
+			false,
+			false,
+			"file",
+			[]);
+		var root = new TreeNodeDescriptor(
+			"root",
+			rootPath,
+			true,
+			false,
+			"folder",
+			new CancelOnReadList<TreeNodeDescriptor>([child], cancellation));
+		var request = new ProjectCopyExportRequest(
+			rootPath,
+			"root",
+			root,
+			new HashSet<string>(PathComparer.Default),
+			Path.GetTempPath(),
+			ProjectCopyExportFormat.Folder);
+
+		Assert.Throws<OperationCanceledException>(() =>
+			new ProjectCopyExportPlanBuilder().Build(request, cancellation.Token));
 	}
 
 	public static TheoryData<string, string[], string[]> SelectionCases => new()
