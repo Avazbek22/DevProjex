@@ -216,9 +216,9 @@ public sealed class McpInfrastructureTests
 		CreateDirectoryAliasOrSkip(link, outside);
 		try
 		{
-			var candidate = Path.Combine(link, "secret.txt");
 			var registry = new McpRootRegistry([project]);
 			var canonicalProject = registry.ResolveProject(project);
+			var candidate = Path.Combine(canonicalProject, "alias", "secret.txt");
 			Assert.True(PathComparer.Default.Equals(canonicalProject, registry.FindLexicalRoot(candidate)));
 			var opener = new McpRootJailFileStreamOpener(registry);
 
