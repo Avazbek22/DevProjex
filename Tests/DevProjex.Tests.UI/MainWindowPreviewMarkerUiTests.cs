@@ -110,9 +110,11 @@ public sealed class MainWindowPreviewMarkerUiTests
 				() => stickyHeader.Margin.Right > 0.1 &&
 				      scrollViewer.AllowAutoHide == originalViewerAllowAutoHide &&
 				      !verticalScrollBar.AllowAutoHide &&
-				      !horizontalScrollBar.IsExpanded,
+					      !horizontalScrollBar.IsExpanded,
 				"scrollbar hover to move the sticky path away and keep the rail active");
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
+			window.MouseMove(railPoint, RawInputModifiers.None);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 1);
 			window.MouseMove(markerPoint, RawInputModifiers.None);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
