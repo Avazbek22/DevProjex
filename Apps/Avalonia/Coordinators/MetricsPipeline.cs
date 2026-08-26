@@ -120,6 +120,7 @@ internal sealed class MetricsPipeline(
     private IReadOnlyList<string>? _allOrderedFilePathsCache;
     private bool _metricsCancellationRequestedByUser;
     private volatile bool _hasCompleteMetricsBaseline;
+    private int _disposed;
 
     public bool IsBackgroundActive => _isBackgroundMetricsActive;
 
@@ -151,6 +152,9 @@ internal sealed class MetricsPipeline(
         MemoryCleanupReason? cleanupAfterCompletion = null,
         bool retainReadFactsForNextMetricsPass = false)
     {
+		if (Volatile.Read(ref _disposed) != 0)
+			return Task.CompletedTask;
+
 		// Only the explicitly sequenced post-load path guarantees a following metrics consumer.
 		// Standalone refreshes release their decoded content when prewarm completes.
 		ReleasePostLoadReadFacts();
@@ -214,6 +218,9 @@ internal sealed class MetricsPipeline(
 
     public void ScheduleRecalculate()
     {
+        if (Volatile.Read(ref _disposed) != 0)
+            return;
+
         // A parent checkbox can fire hundreds of child change notifications. Keep the
         // debounce timer inside the metrics pipeline so UI code does not own recalc state.
         if (_metricsDebounceTimer is null)
@@ -232,6 +239,9 @@ internal sealed class MetricsPipeline(
     public void Recalculate(
         MemoryCleanupReason? cleanupAfterCompletion = null)
     {
+        if (Volatile.Read(ref _disposed) != 0)
+            return;
+
         if (!viewModel.IsProjectLoaded || viewModel.TreeNodes.Count == 0)
         {
             UpdateStatusBarMetrics(0, 0, 0, 0, 0, 0);
@@ -310,6 +320,9 @@ internal sealed class MetricsPipeline(
         StatusOperationPresentation presentation =
             StatusOperationPresentation.ExtendedDelay)
     {
+        if (Volatile.Read(ref _disposed) != 0)
+            return;
+
         var cacheGeneration = Volatile.Read(ref _metricsCacheGeneration);
         await WaitForInitialMetricsWarmupSlotAsync(cancellationToken);
 
@@ -317,7 +330,8 @@ internal sealed class MetricsPipeline(
         // with the raw reveal task lets file prewarming compete with the island's final layout and
         // causes visible stalls on large projects. F5 passes a completed task and stays immediate.
         await WaitForInitialVisualReadyAsync(initialVisualReadyTask, cancellationToken);
-        if (cacheGeneration != Volatile.Read(ref _metricsCacheGeneration))
+        if (Volatile.Read(ref _disposed) != 0 ||
+            cacheGeneration != Volatile.Read(ref _metricsCacheGeneration))
             return;
 
         await InitializeFileMetricsCacheAsync(
@@ -602,6 +616,9 @@ internal sealed class MetricsPipeline(
 
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+
         CancelAndDispose(ref _metricsCalculationCts);
         CancelAndDispose(ref _recalculateMetricsCts);
         CancelAndDispose(ref _compressionPrewarmCts);
@@ -720,6 +737,9 @@ internal sealed class MetricsPipeline(
         CancellationToken cancellationToken,
         StatusOperationPresentation presentation)
     {
+        if (Volatile.Read(ref _disposed) != 0)
+            return;
+
         using var _ = PerformanceMetrics.Measure("InitializeFileMetricsCacheAsync");
 
         var metricsCts = ReplaceCancellationSource(ref _metricsCalculationCts);
