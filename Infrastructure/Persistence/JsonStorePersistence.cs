@@ -33,9 +33,21 @@ internal static class JsonStorePersistence
         JsonStoreFileSet fileSet,
         int currentSchemaVersion,
         int? currentDefaultsRevision = null,
-        long maximumDocumentBytes = SmallDocumentMaximumBytes) =>
-        IsFutureDocument(fileSet.PrimaryPath, currentSchemaVersion, currentDefaultsRevision, maximumDocumentBytes) ||
-        IsFutureDocument(fileSet.BackupPath, currentSchemaVersion, currentDefaultsRevision, maximumDocumentBytes);
+        long maximumDocumentBytes = SmallDocumentMaximumBytes)
+    {
+        TryEnsurePrivateUnixFileMode(fileSet.PrimaryPath);
+        TryEnsurePrivateUnixFileMode(fileSet.BackupPath);
+        return IsFutureDocument(
+                   fileSet.PrimaryPath,
+                   currentSchemaVersion,
+                   currentDefaultsRevision,
+                   maximumDocumentBytes) ||
+               IsFutureDocument(
+                   fileSet.BackupPath,
+                   currentSchemaVersion,
+                   currentDefaultsRevision,
+                   maximumDocumentBytes);
+    }
 
     public static bool TryReadNormalized<TDocument>(
         string path,
@@ -52,6 +64,7 @@ internal static class JsonStorePersistence
         if (!File.Exists(path))
             return false;
 
+        TryEnsurePrivateUnixFileMode(path);
         try
         {
             string json;
@@ -249,6 +262,33 @@ internal static class JsonStorePersistence
 			File.SetUnixFileMode(path, PrivateUnixFileMode);
 	}
 
+	private static void TryEnsurePrivateUnixFileMode(string path)
+	{
+		if (OperatingSystem.IsWindows() || !File.Exists(path))
+			return;
+
+		try
+		{
+			// Store recovery never follows a substituted link just to tighten permissions.
+			var attributes = File.GetAttributes(path);
+			if ((attributes & (FileAttributes.ReparsePoint | FileAttributes.Directory)) != 0)
+				return;
+
+			using var handle = File.OpenHandle(
+				path,
+				FileMode.Open,
+				FileAccess.Read,
+				FileShare.ReadWrite | FileShare.Delete);
+			if (File.GetUnixFileMode(handle) != PrivateUnixFileMode)
+				File.SetUnixFileMode(handle, PrivateUnixFileMode);
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+		                                      PlatformNotSupportedException or NotSupportedException)
+		{
+			// Reading a valid existing store remains possible on filesystems without Unix mode support.
+		}
+	}
+
 	private static bool TryMirrorPrimaryToBackup(
 		JsonStoreFileSet fileSet,
 		JsonStoreWriteOperations writeOperations)
@@ -290,6 +330,7 @@ internal static class JsonStorePersistence
         int maximumDocumentBytes,
         out string text)
     {
+        TryEnsurePrivateUnixFileMode(path);
         using var stream = new FileStream(
             path,
             FileMode.Open,

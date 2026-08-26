@@ -544,6 +544,35 @@ public sealed class InfrastructureJsonPersistenceTests
 	}
 
 	[Fact]
+	public void JsonStorePersistence_ContainsFutureDocument_RestrictsExistingUnixStoreCopiesWithoutRewriting()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Unix file modes do not apply on Windows.");
+			return;
+		}
+
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "settings.json");
+		Directory.CreateDirectory(fileSet.DirectoryPath);
+		const string payload = "{\"schemaVersion\":1,\"name\":\"existing\"}";
+		File.WriteAllText(fileSet.PrimaryPath, payload);
+		File.WriteAllText(fileSet.BackupPath, payload);
+		const UnixFileMode legacyMode = UnixFileMode.UserRead | UnixFileMode.UserWrite |
+		                                UnixFileMode.GroupRead | UnixFileMode.OtherRead;
+		File.SetUnixFileMode(fileSet.PrimaryPath, legacyMode);
+		File.SetUnixFileMode(fileSet.BackupPath, legacyMode);
+
+		Assert.False(JsonStorePersistence.ContainsFutureDocument(fileSet, currentSchemaVersion: 1));
+
+		const UnixFileMode expected = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+		Assert.Equal(payload, File.ReadAllText(fileSet.PrimaryPath));
+		Assert.Equal(payload, File.ReadAllText(fileSet.BackupPath));
+		Assert.Equal(expected, File.GetUnixFileMode(fileSet.PrimaryPath));
+		Assert.Equal(expected, File.GetUnixFileMode(fileSet.BackupPath));
+	}
+
+	[Fact]
 	public void JsonStorePersistence_TryWriteAtomic_ReturnsFalseForUnresolvablePrimaryDirectory()
 	{
 		var fileSet = new JsonStoreFileSet("settings.json", "settings.json.bak", "settings.json.lock");
