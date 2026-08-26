@@ -199,6 +199,8 @@ public sealed class ProjectRootFactsProvider
 		cancellationToken.ThrowIfCancellationRequested();
 		if (!Directory.Exists(rootPath))
 			return ProjectRootFacts.Missing(rootPath);
+		if (!FileSystemRootEntryPolicy.IsPhysicalDirectory(rootPath))
+			return ProjectRootFacts.Inaccessible(rootPath);
 
 		var files = new List<ProjectRootFileFact>();
 		var directories = new List<ProjectRootDirectoryFact>();

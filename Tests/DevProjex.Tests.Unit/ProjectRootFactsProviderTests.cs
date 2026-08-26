@@ -597,4 +597,33 @@ public sealed class ProjectRootFactsProviderTests
 		Assert.Null(facts.GitIgnoreSignature);
 		Assert.Null(ProjectRootFactsProvider.TryGetFileSignature(linkPath));
 	}
+
+	[Fact]
+	public void Get_SymbolicLinkRootDoesNotExposeTargetFacts()
+	{
+		using var temp = new TemporaryDirectory();
+		var targetPath = temp.CreateFolder("physical-project");
+		temp.CreateFile("physical-project/package.json", "{}");
+		var linkPath = Path.Combine(temp.Path, "linked-project");
+		try
+		{
+			Directory.CreateSymbolicLink(linkPath, targetPath);
+			if (!File.GetAttributes(linkPath).HasFlag(FileAttributes.ReparsePoint))
+				Assert.Skip("The created directory link is not reported as a reparse point.");
+		}
+		catch (Exception exception) when (exception is
+		       IOException or
+		       UnauthorizedAccessException or
+		       PlatformNotSupportedException)
+		{
+			Assert.Skip($"Directory symbolic links are unavailable: {exception.GetType().Name}.");
+		}
+
+		var facts = new ProjectRootFactsProvider().Get(linkPath);
+
+		Assert.True(facts.Exists);
+		Assert.False(facts.IsAccessible);
+		Assert.Empty(facts.Files);
+		Assert.Empty(facts.Directories);
+	}
 }
