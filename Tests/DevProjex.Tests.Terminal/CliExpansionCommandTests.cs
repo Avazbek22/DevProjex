@@ -153,6 +153,42 @@ public sealed class CliExpansionCommandTests
 		Assert.Empty(environment.StandardError);
 	}
 
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task TreeTextFileMatchesStreamedStandardOutput(bool plain)
+	{
+		using var project = new TemporaryDirectory();
+		using var data = new TemporaryDirectory();
+		project.WriteFile("src/App.cs", "internal sealed class App { }\n");
+		var destination = Path.Combine(data.Path, "tree.txt");
+		var factory = new TerminalServiceFactory(() => data.Path);
+		var standardOutput = new TestTerminalEnvironment();
+		var fileOutput = new TestTerminalEnvironment();
+		var common = new List<string>
+		{
+			"tree", project.Path,
+			"--format", "text",
+			"--git-mode", "none",
+			"--exclude", "none"
+		};
+		if (plain)
+			common.Add("--plain");
+
+		var standardExitCode = await new TerminalApplication(standardOutput, factory).RunAsync(
+			[.. common, "--output", "-"],
+			TestContext.Current.CancellationToken);
+		var fileExitCode = await new TerminalApplication(fileOutput, factory).RunAsync(
+			[.. common, "--output", destination],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, standardExitCode);
+		Assert.Equal(CommandLineExitCodes.Success, fileExitCode);
+		Assert.Equal(Encoding.UTF8.GetBytes(standardOutput.StandardOutput), File.ReadAllBytes(destination));
+		Assert.Empty(standardOutput.StandardError);
+		Assert.Empty(fileOutput.StandardError);
+	}
+
 	[Fact]
 	public async Task TreeOutputInsideTheExactOpenedRootIsRejected()
 	{
