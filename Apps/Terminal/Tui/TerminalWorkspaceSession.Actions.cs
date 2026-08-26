@@ -1250,7 +1250,7 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (_state is null)
 			return;
-		_activeOperationTask = RunOperationAsync(
+		_activeOperationTask = TrackBackgroundTask(RunOperationAsync(
 			L("Terminal.Tui.Analyze"),
 			async token =>
 			{
@@ -1267,7 +1267,7 @@ internal sealed partial class TerminalWorkspaceSession
 					   $"{L("Terminal.Tui.Warnings")}: {warnings:N0}\n" +
 					   $"{L("Terminal.Label.Error")}: {errors:N0}";
 			},
-			originatedFromCommandLine: originatedFromCommandLine);
+			originatedFromCommandLine: originatedFromCommandLine));
 	}
 
 	private void CopyCurrentContext(TerminalWorkspaceCommand command)
@@ -1276,7 +1276,7 @@ internal sealed partial class TerminalWorkspaceSession
 			return;
 		var view = command.View ?? _previewView;
 		var format = command.Format ?? _format;
-		_activeOperationTask = RunOperationAsync(
+		_activeOperationTask = TrackBackgroundTask(RunOperationAsync(
 			L("Terminal.Tui.Command.Copy.Title"),
 			async token =>
 			{
@@ -1302,14 +1302,14 @@ internal sealed partial class TerminalWorkspaceSession
 					payload.Length);
 			},
 			originatedFromCommandLine: true,
-			cornerProgressLabel: L("Terminal.Tui.Progress.BuildingPreview"));
+			cornerProgressLabel: L("Terminal.Tui.Progress.BuildingPreview")));
 	}
 
 	private void RefreshCurrentProject(bool originatedFromCommandLine = false)
 	{
 		if (_state is null)
 			return;
-		_activeOperationTask = RunOperationAsync(
+		_activeOperationTask = TrackBackgroundTask(RunOperationAsync(
 			L("Terminal.Tui.Command.Refresh.Title"),
 			async token =>
 			{
@@ -1317,14 +1317,14 @@ internal sealed partial class TerminalWorkspaceSession
 				return L("Terminal.Tui.Command.Refresh.Result");
 			},
 			originatedFromCommandLine: originatedFromCommandLine,
-			cornerProgressLabel: L("Terminal.Tui.Progress.RefreshingProject"));
+			cornerProgressLabel: L("Terminal.Tui.Progress.RefreshingProject")));
 	}
 
 	private void OpenCurrentStateInDesktop()
 	{
 		if (_state is null)
 			return;
-		_activeOperationTask = RunOperationAsync(
+		_activeOperationTask = TrackBackgroundTask(RunOperationAsync(
 			L("Terminal.Tui.Welcome.OpenDesktop"),
 			async token =>
 			{
@@ -1333,7 +1333,7 @@ internal sealed partial class TerminalWorkspaceSession
 				return exitCode == CommandLineExitCodes.Success
 					? L("Terminal.Tui.DesktopAccepted")
 					: throw new TerminalWorkspaceOperationException("DPX-DESKTOP-REQUEST-FAILED");
-			});
+			}));
 	}
 
 	private void ShowSourceDetails()
@@ -1360,7 +1360,7 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (_state?.Plan.SourceIdentity?.SourceType != ProjectSourceType.GitClone)
 			return;
-		_activeOperationTask = RunOperationAsync(
+		_activeOperationTask = TrackBackgroundTask(RunOperationAsync(
 			L("Terminal.Tui.Action.GetUpdates"),
 			async token =>
 			{
@@ -1375,7 +1375,7 @@ internal sealed partial class TerminalWorkspaceSession
 				return L("Terminal.Tui.RepositoryUpdated");
 			},
 			modalProgress: true,
-			originatedFromCommandLine: originatedFromCommandLine);
+			originatedFromCommandLine: originatedFromCommandLine));
 	}
 
 	private void SwitchRepositoryBranch(
@@ -1384,7 +1384,7 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (_state?.Plan.SourceIdentity?.SourceType != ProjectSourceType.GitClone)
 			return;
-		_activeOperationTask = RunOperationAsync(
+		_activeOperationTask = TrackBackgroundTask(RunOperationAsync(
 			L("Terminal.Tui.Action.SwitchBranch"),
 			async token =>
 			{
@@ -1422,7 +1422,7 @@ internal sealed partial class TerminalWorkspaceSession
 				return $"{L("Terminal.Tui.RecentRepositories.Branch")}: {selected}";
 			},
 			modalProgress: true,
-			originatedFromCommandLine: originatedFromCommandLine);
+			originatedFromCommandLine: originatedFromCommandLine));
 	}
 
 	private void FocusPane(TerminalWorkspacePane pane)

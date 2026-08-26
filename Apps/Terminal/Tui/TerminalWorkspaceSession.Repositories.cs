@@ -226,7 +226,7 @@ internal sealed partial class TerminalWorkspaceSession
 			L("Terminal.Tui.LoadingProject"),
 			workspace.DisplaySource);
 		var operationCts = ReplaceActiveOperation();
-		_activeOperationTask = Task.Run(async () =>
+		_activeOperationTask = TrackBackgroundTask(Task.Run(async () =>
 		{
 			try
 			{
@@ -287,7 +287,7 @@ internal sealed partial class TerminalWorkspaceSession
 			{
 				ReleaseActiveOperation(operationCts);
 			}
-		}, CancellationToken.None);
+		}, CancellationToken.None));
 	}
 
 	private bool HandleUnavailableRepository(

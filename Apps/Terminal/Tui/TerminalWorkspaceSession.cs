@@ -40,6 +40,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private readonly global::Terminal.Gui.Drivers.IDriver? _subscribedDriver;
 	private readonly CancellationTokenSource _sessionCts;
 	private readonly SemaphoreSlim _operationGate = new(1, 1);
+	private readonly TerminalBackgroundTaskTracker _backgroundTasks = new();
 
 	private TerminalWorkspaceScreen _screen;
 	private TerminalWorkspaceLayoutMode _layoutMode;
@@ -266,29 +267,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		CancelAndDispose(ref _transientStatusCts);
 		CancelAndDispose(ref _commandResultCts);
 
-		var pending = new[]
-			{
-				_openTask,
-				_activeOperationTask,
-				_projectionTask,
-				_previewTask,
-				_settingsRefreshTask,
-				_previewSearchTask,
-				_transientStatusTask,
-				_commandResultTask,
-				_commandHistorySaveTask
-			}
-			.Where(static task => task is not null)
-			.Cast<Task>()
-			.ToArray();
-		try
-		{
-			await Task.WhenAll(pending).ConfigureAwait(false);
-		}
-		catch
-		{
-			// Every background workflow already converts failures into a stable TUI state.
-		}
+		await _backgroundTasks.CompleteAsync().ConfigureAwait(false);
 	}
 
 	private void StartCore()
@@ -659,7 +638,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var repositoryName = RepositoryUrlUtility.GetRepositoryName(safeUrl);
 		ShowCloneProgress(repositoryName, safeUrl);
 		var operationCts = ReplaceActiveOperation();
-		_activeOperationTask = Task.Run(async () =>
+		_activeOperationTask = TrackBackgroundTask(Task.Run(async () =>
 		{
 			try
 			{
@@ -754,7 +733,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			{
 				ReleaseActiveOperation(operationCts);
 			}
-		}, CancellationToken.None);
+		}, CancellationToken.None));
 	}
 
 	private AutomaticProfileResolution ResolveAutomaticProfile(string projectPath)
@@ -822,7 +801,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	{
 		ShowWelcomeStatus(L("Terminal.Tui.OpeningDesktop"), TerminalWorkspaceTheme.Accent);
 		var operationCts = ReplaceActiveOperation();
-		_activeOperationTask = Task.Run(async () =>
+		_activeOperationTask = TrackBackgroundTask(Task.Run(async () =>
 		{
 			try
 			{
@@ -861,7 +840,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			{
 				ReleaseActiveOperation(operationCts);
 			}
-		}, CancellationToken.None);
+		}, CancellationToken.None));
 	}
 
 	private void BeginOpenProject(
@@ -874,14 +853,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			L("Terminal.Tui.LoadingProject"),
 			sourceIdentity?.SourceReference ?? projectPath);
 		var operationCts = ReplaceActiveOperation();
-		_openTask = Task.Run(
+		_openTask = TrackBackgroundTask(Task.Run(
 			() => OpenProjectCoreAsync(
 				projectPath,
 				profile,
 				operationCts,
 				source,
 				sourceIdentity: sourceIdentity),
-			CancellationToken.None);
+			CancellationToken.None));
 	}
 
 	private async Task OpenProjectCoreAsync(
@@ -2328,7 +2307,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_preview.BeginSearch(normalizedQuery);
 		UpdatePanelTitles();
 
-		_previewSearchTask = Task.Run(async () =>
+		_previewSearchTask = TrackBackgroundTask(Task.Run(async () =>
 		{
 			try
 			{
@@ -2407,7 +2386,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					}
 				}
 			}
-		}, CancellationToken.None);
+		}, CancellationToken.None));
 	}
 
 	private void CancelPreviewSearch(bool clearQuery)
@@ -2532,7 +2511,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		if (string.IsNullOrWhiteSpace(destination))
 			return;
 
-		_activeOperationTask = RunExportWorkflowAsync(
+		_activeOperationTask = TrackBackgroundTask(RunExportWorkflowAsync(
 			L("Terminal.Tui.ExportContext"),
 			token => _controller.PrepareContextExportAsync(
 				_state,
@@ -2556,7 +2535,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					selectedFormat,
 					exactDestination,
 					dryRun),
-			originatedFromCommandLine);
+			originatedFromCommandLine));
 	}
 
 	private void ExportProject(
@@ -2591,7 +2570,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		if (string.IsNullOrWhiteSpace(destination))
 			return;
 
-		_activeOperationTask = RunExportWorkflowAsync(
+		_activeOperationTask = TrackBackgroundTask(RunExportWorkflowAsync(
 			L("Terminal.Tui.ExportProject"),
 			token => _controller.PrepareProjectExportAsync(
 				_state,
@@ -2609,7 +2588,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				selectedKind,
 					exactDestination,
 					dryRun),
-			originatedFromCommandLine);
+			originatedFromCommandLine));
 	}
 
 	internal static string BuildDefaultExportPath(
@@ -2680,14 +2659,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					: name + ".json");
 		if (string.IsNullOrWhiteSpace(destination))
 			return;
-		_activeOperationTask = RunOperationAsync(
+		_activeOperationTask = TrackBackgroundTask(RunOperationAsync(
 			L("Terminal.Tui.SaveProfile"),
 			async token => await _controller.SavePortableProfileAsync(
 				_state,
 				destination,
 				overwrite: false,
 				token).ConfigureAwait(false),
-			originatedFromCommandLine: originatedFromCommandLine);
+			originatedFromCommandLine: originatedFromCommandLine));
 	}
 
 	private async Task RunOperationAsync(
@@ -3284,7 +3263,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var operationCts = _settingsRefreshCts;
 		var cancellationToken = operationCts.Token;
 		var cornerProgressId = BeginCornerProgress(L("Terminal.Tui.Progress.UpdatingOptions"));
-		_settingsRefreshTask = Task.Run(
+		_settingsRefreshTask = TrackBackgroundTask(Task.Run(
 			() => RunSettingsRefreshAsync(
 				state,
 				baseline,
@@ -3295,7 +3274,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				operationCts,
 				cancellationToken,
 				cornerProgressId),
-			CancellationToken.None);
+			CancellationToken.None));
 	}
 
 	private async Task RunSettingsRefreshAsync(
@@ -3436,7 +3415,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_projectionCts = CancellationTokenSource.CreateLinkedTokenSource(_sessionCts.Token);
 		var operationCts = _projectionCts;
 		var cancellationToken = operationCts.Token;
-		_projectionTask = Task.Run(async () =>
+		_projectionTask = TrackBackgroundTask(Task.Run(async () =>
 		{
 			var cornerProgressId = 0L;
 			try
@@ -3507,7 +3486,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			{
 				await CompleteCornerProgressAsync(cornerProgressId).ConfigureAwait(false);
 			}
-		}, CancellationToken.None);
+		}, CancellationToken.None));
 	}
 
 	private void SchedulePreviewRefresh()
@@ -3525,7 +3504,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var operationCts = _previewCts;
 		var cancellationToken = operationCts.Token;
 		var cornerProgressId = BeginCornerProgress(L("Terminal.Tui.Progress.BuildingPreview"));
-		_previewTask = Task.Run(async () =>
+		_previewTask = TrackBackgroundTask(Task.Run(async () =>
 		{
 			IPreviewTextDocument? pendingDocument = null;
 			try
@@ -3575,7 +3554,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				pendingDocument?.Dispose();
 				await CompleteCornerProgressAsync(cornerProgressId).ConfigureAwait(false);
 			}
-		}, CancellationToken.None);
+		}, CancellationToken.None));
 	}
 
 	private void CancelWorkspaceRefreshes()
@@ -3630,7 +3609,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var statusCts = CancellationTokenSource.CreateLinkedTokenSource(_sessionCts.Token);
 		_transientStatusCts = statusCts;
 		SetOperationStatus(text, TerminalWorkspaceTheme.Success);
-		_transientStatusTask = RestoreStatusAfterDelayAsync(statusCts);
+		_transientStatusTask = TrackBackgroundTask(RestoreStatusAfterDelayAsync(statusCts));
 	}
 
 	private async Task RestoreStatusAfterDelayAsync(CancellationTokenSource statusCts)
@@ -4698,6 +4677,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		source = null;
 	}
 
+	private Task TrackBackgroundTask(Task task) => _backgroundTasks.Track(task);
+
 	private void ReleaseOwnedRepositorySession() =>
 		Interlocked.Exchange(ref _ownedRepositorySession, null)?.Dispose();
 
@@ -4729,6 +4710,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		DismissOperationProgress();
 		_cornerProgress?.Dispose();
 		_cornerProgress = null;
+		var state = _state;
+		_state = null;
+		state?.Dispose();
 		ReleaseOwnedRepositorySession();
 		_sessionCts.Dispose();
 		_operationGate.Dispose();

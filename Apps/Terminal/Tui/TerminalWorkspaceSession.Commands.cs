@@ -409,9 +409,9 @@ internal sealed partial class TerminalWorkspaceSession
 		if (normalized.Length > 0)
 		{
 			_commandHistory.Add(normalized);
-			_commandHistorySaveTask = PersistCommandHistoryAsync(
+			_commandHistorySaveTask = TrackBackgroundTask(PersistCommandHistoryAsync(
 				_commandHistorySaveTask,
-				_commandHistory.Entries.ToArray());
+				_commandHistory.Entries.ToArray()));
 		}
 
 		var parse = _commandParser.Parse(text, BuildCommandParseContext());
@@ -491,7 +491,7 @@ internal sealed partial class TerminalWorkspaceSession
 		_application.LayoutAndDraw();
 		var resultCts = CancellationTokenSource.CreateLinkedTokenSource(_sessionCts.Token);
 		_commandResultCts = resultCts;
-		_commandResultTask = RestoreCommandFooterAfterDelayAsync(resultCts);
+		_commandResultTask = TrackBackgroundTask(RestoreCommandFooterAfterDelayAsync(resultCts));
 	}
 
 	internal static string NormalizeCommandResult(string message) =>
