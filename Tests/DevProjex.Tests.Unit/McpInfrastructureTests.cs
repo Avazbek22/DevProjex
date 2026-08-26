@@ -236,6 +236,38 @@ public sealed class McpInfrastructureTests
 		Assert.Equal("literal\\name.txt", McpProjectService.ToRelative(project, file));
 	}
 
+	[Fact]
+	public void McpRequestedPathsSelectExactFilesAndDirectoryDescendants()
+	{
+		using var workspace = new TemporaryDirectory();
+		var sourceDirectory = PathUtility.Normalize(workspace.CreateFolder("project/src"));
+		var exactFile = PathUtility.Normalize(workspace.CreateFile("project/README.md", "readme"));
+		var nestedFile = PathUtility.Normalize(workspace.CreateFile("project/src/nested/File.cs", "code"));
+		var siblingFile = PathUtility.Normalize(workspace.CreateFile("project/tests/Test.cs", "test"));
+		var requestedPaths = new HashSet<string>(PathComparer.Default)
+		{
+			sourceDirectory,
+			exactFile
+		};
+		var requestedDirectories = new HashSet<string>(PathComparer.Default)
+		{
+			sourceDirectory
+		};
+
+		Assert.True(McpProjectService.MatchesRequested(
+			exactFile,
+			requestedPaths,
+			requestedDirectories));
+		Assert.True(McpProjectService.MatchesRequested(
+			nestedFile,
+			requestedPaths,
+			requestedDirectories));
+		Assert.False(McpProjectService.MatchesRequested(
+			siblingFile,
+			requestedPaths,
+			requestedDirectories));
+	}
+
 	[Theory]
 	[InlineData("42", 42)]
 	[InlineData(42, 42)]
