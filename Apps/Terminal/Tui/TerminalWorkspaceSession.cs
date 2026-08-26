@@ -35,6 +35,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private readonly TerminalCommandHistory _commandHistory;
 	private readonly ITerminalOperationObserver _operationObserver;
 	private readonly Action _prepareForShutdown;
+	private readonly EventHandler<global::Terminal.Gui.App.EventArgs<System.Drawing.Rectangle>> _screenChangedHandler;
+	private readonly EventHandler<SizeChangedEventArgs>? _driverSizeChangedHandler;
+	private readonly global::Terminal.Gui.Drivers.IDriver? _subscribedDriver;
 	private readonly CancellationTokenSource _sessionCts;
 	private readonly SemaphoreSlim _operationGate = new(1, 1);
 
@@ -166,68 +169,74 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_terminalWidth = Math.Max(_environment.Width, initialScreen.Width);
 		_terminalHeight = Math.Max(_environment.Height, initialScreen.Height);
 		_application.Keyboard.KeyDown += OnRootKeyDown;
-		_application.ScreenChanged += (_, _) =>
-		{
-			// Inline roots are resized in Driver.SizeChanged below. Applying the old
-			// geometry here would draw a split frame into the already resized buffer.
-			if (_application.AppModel == AppModel.Inline)
-				return;
-			var requestedPane = _activePane;
-			var requestedControlSection = _activeControlSection;
-			var requestedAggregateControlSection = _activeAggregateControlSection;
-			var previousFocusSuppression = _suppressWorkspaceFocusTracking;
-			_suppressWorkspaceFocusTracking = true;
-			var sizeChanged = false;
-			try
-			{
-				var screen = _application.Driver?.Screen ?? _application.Screen;
-				sizeChanged = UpdateTerminalSize(screen.Width, screen.Height);
-				ApplyCurrentLayout();
-			}
-			finally
-			{
-				_activePane = requestedPane;
-				_activeControlSection = requestedControlSection;
-				_activeAggregateControlSection = requestedAggregateControlSection;
-				_suppressWorkspaceFocusTracking = previousFocusSuppression;
-			}
-			UpdateWorkspaceFocus();
-			if (sizeChanged)
-				InvalidateAfterTerminalResize();
-		};
+		_screenChangedHandler = OnApplicationScreenChanged;
+		_application.ScreenChanged += _screenChangedHandler;
 		if (_application.Driver is { } driver)
 		{
-			driver.SizeChanged += (_, args) => _application.Invoke(() =>
-			{
-				var requestedPane = _activePane;
-				var requestedControlSection = _activeControlSection;
-				var requestedAggregateControlSection = _activeAggregateControlSection;
-				var previousFocusSuppression = _suppressWorkspaceFocusTracking;
-				_suppressWorkspaceFocusTracking = true;
-				var sizeChanged = false;
-				try
-				{
-					if (_application.AppModel == AppModel.Inline && args.Size is { } size)
-					{
-						_root.Width = size.Width;
-						_root.Height = size.Height;
-					}
-					if (args.Size is { } terminalSize)
-						sizeChanged = UpdateTerminalSize(terminalSize.Width, terminalSize.Height);
-					ApplyCurrentLayout();
-				}
-				finally
-				{
-					_activePane = requestedPane;
-					_activeControlSection = requestedControlSection;
-					_activeAggregateControlSection = requestedAggregateControlSection;
-					_suppressWorkspaceFocusTracking = previousFocusSuppression;
-				}
-				UpdateWorkspaceFocus();
-				if (sizeChanged)
-					InvalidateAfterTerminalResize();
-			});
+			_subscribedDriver = driver;
+			_driverSizeChangedHandler = OnDriverSizeChanged;
+			driver.SizeChanged += _driverSizeChangedHandler;
 		}
+	}
+
+	private void OnApplicationScreenChanged(
+		object? sender,
+		global::Terminal.Gui.App.EventArgs<System.Drawing.Rectangle> args)
+	{
+		if (_disposed)
+			return;
+		// Inline roots are resized in Driver.SizeChanged below. Applying the old
+		// geometry here would draw a split frame into the already resized buffer.
+		if (_application.AppModel == AppModel.Inline)
+			return;
+
+		ApplyTerminalResize((_application.Driver?.Screen ?? _application.Screen).Size);
+	}
+
+	private void OnDriverSizeChanged(object? sender, SizeChangedEventArgs args)
+	{
+		if (_disposed)
+			return;
+
+		_application.Invoke(() =>
+		{
+			if (_disposed)
+				return;
+			if (_application.AppModel == AppModel.Inline && args.Size is { } size)
+			{
+				_root.Width = size.Width;
+				_root.Height = size.Height;
+			}
+			if (args.Size is { } terminalSize)
+				ApplyTerminalResize(terminalSize);
+			else
+				ApplyTerminalResize((_application.Driver?.Screen ?? _application.Screen).Size);
+		});
+	}
+
+	private void ApplyTerminalResize(System.Drawing.Size terminalSize)
+	{
+		var requestedPane = _activePane;
+		var requestedControlSection = _activeControlSection;
+		var requestedAggregateControlSection = _activeAggregateControlSection;
+		var previousFocusSuppression = _suppressWorkspaceFocusTracking;
+		_suppressWorkspaceFocusTracking = true;
+		var sizeChanged = false;
+		try
+		{
+			sizeChanged = UpdateTerminalSize(terminalSize.Width, terminalSize.Height);
+			ApplyCurrentLayout();
+		}
+		finally
+		{
+			_activePane = requestedPane;
+			_activeControlSection = requestedControlSection;
+			_activeAggregateControlSection = requestedAggregateControlSection;
+			_suppressWorkspaceFocusTracking = previousFocusSuppression;
+		}
+		UpdateWorkspaceFocus();
+		if (sizeChanged)
+			InvalidateAfterTerminalResize();
 	}
 
 	public bool ExitRequested { get; private set; }
@@ -4700,6 +4709,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			return;
 		_disposed = true;
 		_application.Keyboard.KeyDown -= OnRootKeyDown;
+		_application.ScreenChanged -= _screenChangedHandler;
+		if (_subscribedDriver is not null && _driverSizeChangedHandler is not null)
+			_subscribedDriver.SizeChanged -= _driverSizeChangedHandler;
 		_sessionCts.Cancel();
 		CancelAndDispose(ref _activeOperationCts);
 		CancelAndDispose(ref _projectionCts);
