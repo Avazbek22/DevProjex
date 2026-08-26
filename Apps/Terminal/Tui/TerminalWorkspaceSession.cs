@@ -3281,6 +3281,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var requestId = Interlocked.Increment(ref _settingsRefreshRequestId);
 		_settingsRefreshCts = CancellationTokenSource.CreateLinkedTokenSource(_sessionCts.Token);
 		var operationCts = _settingsRefreshCts;
+		var cancellationToken = operationCts.Token;
 		var cornerProgressId = BeginCornerProgress(L("Terminal.Tui.Progress.UpdatingOptions"));
 		_settingsRefreshTask = Task.Run(
 			() => RunSettingsRefreshAsync(
@@ -3291,6 +3292,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				originatedFromCommandLine,
 				requestId,
 				operationCts,
+				cancellationToken,
 				cornerProgressId),
 			CancellationToken.None);
 	}
@@ -3303,11 +3305,12 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		bool originatedFromCommandLine,
 		long requestId,
 		CancellationTokenSource operationCts,
+		CancellationToken cancellationToken,
 		long cornerProgressId)
 	{
 		try
 		{
-			await Task.Delay(75, operationCts.Token).ConfigureAwait(false);
+			await Task.Delay(75, cancellationToken).ConfigureAwait(false);
 			if (TerminalWorkspaceController.RequiresStructuralRefresh(
 				    baseline.Selection,
 				    selection))
@@ -3323,16 +3326,16 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			await _operationObserver
 				.ObservePhaseAsync(
 					TerminalOperationPhase.BackgroundRefresh,
-					operationCts.Token)
+					cancellationToken)
 				.ConfigureAwait(false);
 
 			var result = await _controller.BuildSettingsPlanAsync(
 					baseline,
 					selection,
 					extensionStates,
-					operationCts.Token)
+					cancellationToken)
 				.ConfigureAwait(false);
-			operationCts.Token.ThrowIfCancellationRequested();
+			cancellationToken.ThrowIfCancellationRequested();
 			await InvokeAsync(() =>
 			{
 				if (!IsCurrentSettingsRefresh(state, operationCts, requestId))
@@ -3347,7 +3350,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				return true;
 			}).ConfigureAwait(false);
 		}
-		catch (OperationCanceledException) when (operationCts.IsCancellationRequested)
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
 		{
 			if (IsCurrentSettingsRefresh(state, operationCts, requestId) && !_stopping)
 			{
@@ -3431,18 +3434,19 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		Interlocked.Increment(ref _previewRequestId);
 		_projectionCts = CancellationTokenSource.CreateLinkedTokenSource(_sessionCts.Token);
 		var operationCts = _projectionCts;
+		var cancellationToken = operationCts.Token;
 		_projectionTask = Task.Run(async () =>
 		{
 			var cornerProgressId = 0L;
 			try
 			{
-				await Task.Delay(180, operationCts.Token).ConfigureAwait(false);
+				await Task.Delay(180, cancellationToken).ConfigureAwait(false);
 				cornerProgressId = await InvokeAsync(() =>
 					BeginCornerProgress(L("Terminal.Tui.Progress.BuildingTree"))).ConfigureAwait(false);
 				var plan = await _controller.BuildReprojectedPlanAsync(
 						sourcePlan,
 						selectedPaths,
-						operationCts.Token)
+						cancellationToken)
 					.ConfigureAwait(false);
 				var applied = await InvokeAsync(() =>
 				{
@@ -3518,6 +3522,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var requestId = Interlocked.Increment(ref _previewRequestId);
 		_previewCts = CancellationTokenSource.CreateLinkedTokenSource(_sessionCts.Token);
 		var operationCts = _previewCts;
+		var cancellationToken = operationCts.Token;
 		var cornerProgressId = BeginCornerProgress(L("Terminal.Tui.Progress.BuildingPreview"));
 		_previewTask = Task.Run(async () =>
 		{
@@ -3528,7 +3533,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 						state,
 						view,
 						format,
-						operationCts.Token,
+						cancellationToken,
 						plain: _options.Plain)
 					.ConfigureAwait(false);
 				var document = pendingDocument;
