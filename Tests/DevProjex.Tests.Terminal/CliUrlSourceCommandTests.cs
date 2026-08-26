@@ -139,7 +139,10 @@ public sealed class CliUrlSourceCommandTests
 		var bare = Path.Combine(workspace.Path, "origin.git");
 		RunGit(workspace.Path, "clone", "--bare", source, bare);
 		var repositoryUrl = new Uri(bare + Path.DirectorySeparatorChar).AbsoluteUri;
-		var factory = new TerminalServiceFactory(() => data.Path);
+		var services = new TerminalServiceFactory(() => data.Path).Create(AppLanguage.En);
+		using var secretSession = services.SecretRedactionSession;
+		using var compressionSession = services.CodeCompressionSession;
+		var factory = new TerminalServiceFactory(_ => services);
 
 		using var main = await AnalyzeAsync(factory, repositoryUrl, "main");
 		using var feature = await AnalyzeAsync(factory, repositoryUrl, "feature/test");
@@ -157,13 +160,12 @@ public sealed class CliUrlSourceCommandTests
 			missingBranchEnvironment.StandardError,
 			StringComparison.Ordinal);
 
-		var cache = new RepoCacheService(Path.Combine(data.Path, "RepoCache"));
-		Assert.Single(cache.ListIndexedRepositories());
+		Assert.Single(services.RepoCacheService.ListIndexedRepositories());
 		var offlineOrigin = bare + ".offline";
 		Directory.Move(bare, offlineOrigin);
 		using var offline = await AnalyzeAsync(factory, repositoryUrl, "main");
 		Assert.Equal(1, offline.RootElement.GetProperty("inventory").GetProperty("files").GetInt32());
-		Assert.Single(cache.ListIndexedRepositories());
+		Assert.Single(services.RepoCacheService.ListIndexedRepositories());
 
 		var recentEnvironment = new TestTerminalEnvironment();
 		var recentExitCode = await new TerminalApplication(recentEnvironment, factory).RunAsync(
