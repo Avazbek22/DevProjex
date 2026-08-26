@@ -82,7 +82,7 @@ internal static class McpTextRanges
 					characterLimit = true;
 					if (!hasAppendedLine)
 					{
-						AppendBoundedPrefix(builder, lineBuilder.ToString(), maximumCharacters);
+						AppendBoundedPrefix(builder, lineBuilder, maximumCharacters);
 						actualEnd = lineNumber;
 						hasAppendedLine = true;
 					}
@@ -91,7 +91,7 @@ internal static class McpTextRanges
 				{
 					if (hasAppendedLine)
 						builder.Append('\n');
-					builder.Append(lineBuilder.ToString());
+					builder.Append(lineBuilder);
 					actualEnd = lineNumber;
 					hasAppendedLine = true;
 				}
@@ -325,6 +325,22 @@ internal static class McpTextRanges
 
 	private static void AppendBoundedPrefix(StringBuilder builder, string line, int maximumCharacters)
 		=> AppendBoundedPrefix(builder, line.AsSpan(), maximumCharacters);
+
+	private static void AppendBoundedPrefix(
+		StringBuilder builder,
+		StringBuilder line,
+		int maximumCharacters)
+	{
+		var length = Math.Min(line.Length, maximumCharacters);
+		if (length > 0 &&
+		    length < line.Length &&
+		    char.IsHighSurrogate(line[length - 1]) &&
+		    char.IsLowSurrogate(line[length]))
+		{
+			length--;
+		}
+		builder.Append(line, 0, length);
+	}
 
 	private static void AppendBoundedPrefix(
 		StringBuilder builder,
