@@ -47,10 +47,17 @@ public static class ProjectTreeSelectionProjection
 
 	public static IReadOnlyList<TreeNodeDescriptor> BuildIncludedNodes(
 		TreeNodeDescriptor root,
-		IReadOnlySet<string> selectedPaths)
+		IReadOnlySet<string> selectedPaths) =>
+		BuildIncludedNodesWithCancellation(root, selectedPaths, CancellationToken.None);
+
+	internal static IReadOnlyList<TreeNodeDescriptor> BuildIncludedNodesWithCancellation(
+		TreeNodeDescriptor root,
+		IReadOnlySet<string> selectedPaths,
+		CancellationToken cancellationToken)
 	{
 		ArgumentNullException.ThrowIfNull(root);
 		ArgumentNullException.ThrowIfNull(selectedPaths);
+		cancellationToken.ThrowIfCancellationRequested();
 
 		var effectiveSelectedPaths = NormalizeSelectedPaths(root, selectedPaths);
 		var included = new List<TreeNodeDescriptor>();
@@ -63,7 +70,8 @@ public static class ProjectTreeSelectionProjection
 			{
 				if (uniquePaths.Add(node.FullPath))
 					included.Add(node);
-			});
+			},
+			cancellationToken);
 
 		return included;
 	}
@@ -71,10 +79,22 @@ public static class ProjectTreeSelectionProjection
 	public static List<string> BuildOrderedSelectedFilePaths(
 		TreeNodeDescriptor root,
 		IReadOnlySet<string> selectedPaths,
-		bool ensureExists = true)
+		bool ensureExists = true) =>
+		BuildOrderedSelectedFilePathsWithCancellation(
+			root,
+			selectedPaths,
+			ensureExists,
+			CancellationToken.None);
+
+	internal static List<string> BuildOrderedSelectedFilePathsWithCancellation(
+		TreeNodeDescriptor root,
+		IReadOnlySet<string> selectedPaths,
+		bool ensureExists,
+		CancellationToken cancellationToken)
 	{
 		ArgumentNullException.ThrowIfNull(root);
 		ArgumentNullException.ThrowIfNull(selectedPaths);
+		cancellationToken.ThrowIfCancellationRequested();
 
 		var effectiveSelectedPaths = NormalizeSelectedPaths(root, selectedPaths);
 		var uniquePaths = new HashSet<string>(PathComparer.Default);
@@ -86,17 +106,30 @@ public static class ProjectTreeSelectionProjection
 			{
 				if (!node.IsDirectory && (!ensureExists || File.Exists(node.FullPath)))
 					uniquePaths.Add(node.FullPath);
-			});
+			},
+			cancellationToken);
 
+		cancellationToken.ThrowIfCancellationRequested();
 		var orderedPaths = new List<string>(uniquePaths);
-		orderedPaths.Sort(PathComparer.Default);
+		orderedPaths.Sort((left, right) =>
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			return PathComparer.Default.Compare(left, right);
+		});
 		return orderedPaths;
 	}
 
 	internal static TreeNodeDescriptor? BuildProjectedTree(
 		TreeNodeDescriptor root,
-		IReadOnlySet<string> includedPaths)
+		IReadOnlySet<string> includedPaths) =>
+		BuildProjectedTreeWithCancellation(root, includedPaths, CancellationToken.None);
+
+	internal static TreeNodeDescriptor? BuildProjectedTreeWithCancellation(
+		TreeNodeDescriptor root,
+		IReadOnlySet<string> includedPaths,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		if (!includedPaths.Contains(root.FullPath))
 			return null;
 
@@ -106,6 +139,7 @@ public static class ProjectTreeSelectionProjection
 		};
 		while (pending.Count > 0)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			var frameIndex = pending.Count - 1;
 			var frame = pending[frameIndex];
 			if (frame.NextChildIndex < frame.Node.Children.Count)
@@ -161,7 +195,8 @@ public static class ProjectTreeSelectionProjection
 		TreeNodeDescriptor node,
 		IReadOnlySet<string> selectedPaths,
 		bool ancestorSelected,
-		Action<TreeNodeDescriptor> include)
+		Action<TreeNodeDescriptor> include,
+		CancellationToken cancellationToken)
 	{
 		var pending = new List<SelectionTraversalFrame>
 		{
@@ -170,6 +205,7 @@ public static class ProjectTreeSelectionProjection
 		var rootIncluded = false;
 		while (pending.Count > 0)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			var frameIndex = pending.Count - 1;
 			var frame = pending[frameIndex];
 			if (frame.Node.IsDirectory && frame.NextChildIndex < frame.Node.Children.Count)

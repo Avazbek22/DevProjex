@@ -216,13 +216,14 @@ public sealed class TerminalWorkspaceController(
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 		var selection = state.Plan.Selection;
-		var plan = services.ContextPlanner.ApplyContentTransformationSelection(
+		var plan = services.ContextPlanner.ApplyContentTransformationSelectionWithCancellation(
 			state.Plan,
 			optionId == IgnoreOptionId.HideSecrets ? enabled : selection.HideSecrets == true,
 			compressCode: optionId == IgnoreOptionId.CompressCode ? enabled : null,
 			stripComments: optionId == IgnoreOptionId.StripComments ? enabled : null,
 			stripBlankLines: optionId == IgnoreOptionId.StripBlankLines ? enabled : null,
-			hidePrivateData: optionId == IgnoreOptionId.HidePrivateData ? enabled : null);
+			hidePrivateData: optionId == IgnoreOptionId.HidePrivateData ? enabled : null,
+			cancellationToken: cancellationToken);
 		state.ReplaceContentTransformationPlan(plan);
 		if (plan.Selection.HideSecrets != true && plan.Selection.HidePrivateData != true)
 			services.SecretRedactionSession.Disable();
@@ -288,13 +289,14 @@ public sealed class TerminalWorkspaceController(
 
 		if (!RequiresStructuralRefresh(baseline.Selection, selection))
 		{
-			var contentPlan = services.ContextPlanner.ApplyContentTransformationSelection(
+			var contentPlan = services.ContextPlanner.ApplyContentTransformationSelectionWithCancellation(
 				baseline,
 				selection.HideSecrets == true,
 				selection.CompressCode,
 				selection.StripComments,
 				selection.StripBlankLines,
-				selection.HidePrivateData);
+				selection.HidePrivateData,
+				cancellationToken);
 			return new TerminalSettingsPlanResult(contentPlan, extensionOptionStates);
 		}
 

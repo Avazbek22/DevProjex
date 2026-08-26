@@ -194,6 +194,26 @@ public sealed class ProjectTreeSelectionProjectionTests
 		Assert.Equal(leafPath, Assert.Single(collected));
 	}
 
+	[Fact]
+	public void BuildIncludedNodesWithCancellation_StopsDuringTraversal()
+	{
+		using var cancellation = new CancellationTokenSource();
+		var child = new TreeNodeDescriptor("file.txt", "/root/file.txt", false, false, "file", []);
+		var root = new TreeNodeDescriptor(
+			"root",
+			"/root",
+			true,
+			false,
+			"folder",
+			new CancelOnReadList<TreeNodeDescriptor>([child], cancellation));
+
+		Assert.Throws<OperationCanceledException>(() =>
+			ProjectTreeSelectionProjection.BuildIncludedNodesWithCancellation(
+				root,
+				new HashSet<string>(PathComparer.Default),
+				cancellation.Token));
+	}
+
 	public static TheoryData<string, string[], string[]> SelectionCases => new()
 	{
 		{
@@ -232,6 +252,27 @@ public sealed class ProjectTreeSelectionProjectionTests
 			[".", "src", "src/Program.cs", "src/assets.bin"]
 		}
 	};
+
+	private sealed class CancelOnReadList<T>(
+		IReadOnlyList<T> items,
+		CancellationTokenSource cancellation) : IReadOnlyList<T>
+	{
+		public int Count => items.Count;
+
+		public T this[int index]
+		{
+			get
+			{
+				var item = items[index];
+				cancellation.Cancel();
+				return item;
+			}
+		}
+
+		public IEnumerator<T> GetEnumerator() => items.GetEnumerator();
+
+		System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+	}
 
 	private static IEnumerable<TreeNodeDescriptor> EnumerateNodes(TreeNodeDescriptor root)
 	{
