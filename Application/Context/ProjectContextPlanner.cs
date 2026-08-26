@@ -926,7 +926,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				}
 				finally
 				{
-					ArrayPool<byte>.Shared.Return(rented);
+					ArrayPool<byte>.Shared.Return(rented, clearArray: true);
 				}
 			}
 

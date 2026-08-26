@@ -158,7 +158,7 @@ internal static class McpTextRanges
 		}
 		finally
 		{
-			ArrayPool<char>.Shared.Return(readBuffer);
+			ArrayPool<char>.Shared.Return(readBuffer, clearArray: true);
 		}
 
 		var reportedTotal = knownTotalLines ?? total;

@@ -107,7 +107,7 @@ public sealed record ContentSelectionSnapshot(
 		}
 		finally
 		{
-			ArrayPool<byte>.Shared.Return(rented);
+			ArrayPool<byte>.Shared.Return(rented, clearArray: true);
 		}
 	}
 }

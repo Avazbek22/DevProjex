@@ -954,8 +954,8 @@ public sealed class PreviewDocumentBuilder(
         }
         finally
         {
-            ArrayPool<byte>.Shared.Return(byteBuffer);
-            ArrayPool<char>.Shared.Return(charBuffer);
+            ArrayPool<byte>.Shared.Return(byteBuffer, clearArray: true);
+            ArrayPool<char>.Shared.Return(charBuffer, clearArray: true);
         }
     }
 
@@ -1142,12 +1142,12 @@ internal static class PreviewTextStorageScavenger
         private readonly string _storagePath;
         private readonly FileStream _stream;
         private readonly List<long> _lineOffsets = [];
-        private readonly List<int> _lineLengths = [];
         private readonly int _inMemoryThresholdChars;
         private readonly Encoder _utf8Encoder = Utf8WithoutBom.GetEncoder();
         private byte[]? _utf8WriteBuffer = ArrayPool<byte>.Shared.Rent(Utf8WriteBufferSize);
         private bool _built;
         private bool _disposed;
+        private bool _lastLineIsEmpty;
         private int _maxLineLength;
         private long _characterCount;
 
@@ -1165,7 +1165,7 @@ internal static class PreviewTextStorageScavenger
             ThrowIfDisposed();
 
             _lineOffsets.Add(_stream.Position);
-            _lineLengths.Add(line.Length);
+            _lastLineIsEmpty = line.Length == 0;
             _maxLineLength = Math.Max(_maxLineLength, line.Length);
             _characterCount += line.Length + 1;
 
@@ -1173,7 +1173,7 @@ internal static class PreviewTextStorageScavenger
             _stream.WriteByte((byte)'\n');
         }
 
-        public int LineCount => _lineLengths.Count;
+        public int LineCount => _lineOffsets.Count;
 
         public void AppendExactText(ReadOnlySpan<char> text)
         {
@@ -1198,7 +1198,7 @@ internal static class PreviewTextStorageScavenger
             else
             {
                 _lineOffsets.Add(_stream.Position);
-                _lineLengths.Add(0);
+                _lastLineIsEmpty = true;
             }
         }
 
@@ -1206,14 +1206,14 @@ internal static class PreviewTextStorageScavenger
         {
             ThrowIfDisposed();
 
-            if (_lineLengths.Count == 0 || _lineLengths[^1] != 0)
+            if (_lineOffsets.Count == 0 || !_lastLineIsEmpty)
                 return;
 
             var trailingLineStart = _lineOffsets[^1];
             _stream.SetLength(trailingLineStart);
             _stream.Position = trailingLineStart;
             _lineOffsets.RemoveAt(_lineOffsets.Count - 1);
-            _lineLengths.RemoveAt(_lineLengths.Count - 1);
+            _lastLineIsEmpty = false;
             _characterCount = Math.Max(0, _characterCount - 1);
         }
 
@@ -1231,7 +1231,8 @@ internal static class PreviewTextStorageScavenger
 			source._stream.CopyTo(_stream);
 			foreach (var offset in source._lineOffsets)
 				_lineOffsets.Add(destinationStart + offset);
-			_lineLengths.AddRange(source._lineLengths);
+			if (source._lineOffsets.Count > 0)
+				_lastLineIsEmpty = source._lastLineIsEmpty;
 			_maxLineLength = Math.Max(_maxLineLength, source._maxLineLength);
 			_characterCount += source._characterCount;
 		}
@@ -1329,7 +1330,7 @@ internal static class PreviewTextStorageScavenger
                 displayLength--;
             if (displayLength > 0 && rawLine[displayLength - 1] == '\r')
                 displayLength--;
-            _lineLengths.Add(displayLength);
+            _lastLineIsEmpty = displayLength == 0;
             _maxLineLength = Math.Max(_maxLineLength, displayLength);
             _characterCount += rawLine.Length;
             WriteUtf8(rawLine);
