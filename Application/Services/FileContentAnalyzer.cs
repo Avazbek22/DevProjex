@@ -8,6 +8,12 @@ using DevProjex.Application.Diagnostics;
 
 namespace DevProjex.Application.Services;
 
+public delegate FileStream FileContentReadStreamOpener(
+	string path,
+	int bufferSize,
+	FileShare fileShare,
+	bool asynchronous);
+
 /// <summary>
 /// Analyzes file content to determine if it's text or binary.
 ///
@@ -73,14 +79,14 @@ public sealed class FileContentAnalyzer :
 		bigEndian: true,
 		byteOrderMark: true,
 		throwOnInvalidCharacters: true);
-	private readonly Func<string, int, FileShare, bool, FileStream> _openSequentialRead;
+	private readonly FileContentReadStreamOpener _openSequentialRead;
 
 	public FileContentAnalyzer()
 		: this(OpenSequentialRead)
 	{
 	}
 
-	internal FileContentAnalyzer(Func<string, int, FileShare, bool, FileStream> openSequentialRead)
+	public FileContentAnalyzer(FileContentReadStreamOpener openSequentialRead)
 	{
 		ArgumentNullException.ThrowIfNull(openSequentialRead);
 		_openSequentialRead = openSequentialRead;

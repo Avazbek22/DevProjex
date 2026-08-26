@@ -2,11 +2,19 @@ namespace DevProjex.Mcp;
 
 internal sealed class McpSearchRegex
 {
+	internal const int MaximumPatternLength = 4096;
 	private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(2);
 	private readonly Regex _regex;
 
 	public McpSearchRegex(string pattern, bool ignoreCase, TimeSpan? timeout = null)
 	{
+		ArgumentNullException.ThrowIfNull(pattern);
+		if (pattern.Length > MaximumPatternLength)
+		{
+			throw new McpToolException(
+				McpErrorCodes.InvalidPattern,
+				$"{McpErrorCodes.InvalidPattern}: pattern must be at most {MaximumPatternLength} characters; shorten it and retry.");
+		}
 		try
 		{
 			_regex = new Regex(

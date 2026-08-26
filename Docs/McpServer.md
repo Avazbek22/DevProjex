@@ -21,7 +21,9 @@ list_projects -> get_tree/analyze -> search_project/get_file -> pack_context -> 
 ## Security Model
 
 - Every exposed project is pinned when the process starts. Canonical path and
-  symbolic-link checks reject access outside those roots.
+  symbolic-link checks reject access outside those roots. Content files are
+  opened before their final handle path is validated, and the validated handle
+  is the one read, so a path swap cannot escape the root jail.
 - Tools are read-only and perform no network operations. With `tracked_only`, the
   server may start the local Git executable solely to read the repository index;
   it never runs project executables or arbitrary project commands.
@@ -62,7 +64,7 @@ The tool order is stable.
 | `analyze` | `project?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?` | File, character, and token metrics plus the ten largest files by tokens. Metrics reflect the effective detail level. |
 | `pack_context` | `project?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `view?`, `format?` | Exact DevProjex context pipeline. Inline through 50,000 characters; otherwise returns a session-scoped `pack_id` and tree. |
 | `read_pack` | `pack_id`, `start_line?`, `end_line?` | Inclusive, 1-based range; at most 1,000 lines or 50,000 characters per call. Call `pack_context` again after server restart. |
-| `search_project` | `project?`, `pattern`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style redacted matches. Regex timeout is 2 seconds; `max_results` cannot exceed 200, and oversized text responses are explicitly truncated with a narrowing hint. |
+| `search_project` | `project?`, `pattern`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style redacted matches. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, and oversized text responses are explicitly truncated with a narrowing hint. |
 | `get_file` | `project?`, `path`, `start_line?`, `end_line?` | Redacted text from one effective file; at most 1,000 lines or 50,000 characters. |
 
 ## Result Contract

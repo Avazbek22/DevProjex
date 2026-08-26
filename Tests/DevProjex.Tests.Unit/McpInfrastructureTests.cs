@@ -184,6 +184,61 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public void RootJailFileOpenerReadsAnOrdinaryFileFromTheVerifiedHandle()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var source = workspace.CreateFile("project/source.txt", "verified content");
+		var registry = new McpRootRegistry([project]);
+		var opener = new McpRootJailFileStreamOpener(registry);
+
+		using var stream = opener.OpenRead(
+			source,
+			bufferSize: 4096,
+			FileShare.Read,
+			asynchronous: false);
+		using var reader = new StreamReader(stream);
+
+		Assert.Equal("verified content", reader.ReadToEnd());
+		Assert.True(PathComparer.Default.Equals(
+			McpRootRegistry.ResolvePhysicalExistingPath(source, requireDirectory: false),
+			McpRootJailFileStreamOpener.ResolveOpenedPath(stream.SafeFileHandle)));
+	}
+
+	[Fact]
+	public void RootJailFileOpenerRejectsAnAncestorSymlinkEscapeAfterLexicalAcceptance()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var outside = workspace.CreateFolder("outside");
+		workspace.CreateFile("outside/secret.txt", "outside");
+		var link = Path.Combine(project, "alias");
+		CreateDirectoryAliasOrSkip(link, outside);
+		try
+		{
+			var candidate = Path.Combine(link, "secret.txt");
+			var registry = new McpRootRegistry([project]);
+			Assert.True(PathComparer.Default.Equals(project, registry.FindLexicalRoot(candidate)));
+			var opener = new McpRootJailFileStreamOpener(registry);
+
+			var exception = Assert.Throws<McpToolException>(() =>
+				opener.OpenRead(
+					candidate,
+					bufferSize: 4096,
+					FileShare.Read,
+					asynchronous: false));
+
+			Assert.Equal(McpErrorCodes.RootViolation, exception.Code);
+			Assert.Contains(project, exception.Message, StringComparison.Ordinal);
+		}
+		finally
+		{
+			if (Directory.Exists(link))
+				Directory.Delete(link);
+		}
+	}
+
+	[Fact]
 	public void RootRegistryRevalidatesTheImplicitSingleRootAfterFilesystemReplacement()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -483,6 +538,13 @@ public sealed class McpInfrastructureTests
 		var timeout = Assert.Throws<McpToolException>(() => regex.IsMatch(new string('a', 100_000) + "!"));
 		Assert.Equal(McpErrorCodes.InvalidPattern, timeout.Code);
 		Assert.Contains("simplify", timeout.Message, StringComparison.Ordinal);
+
+		var oversized = Assert.Throws<McpToolException>(() =>
+			new McpSearchRegex(
+				new string('x', McpSearchRegex.MaximumPatternLength + 1),
+				ignoreCase: true));
+		Assert.Equal(McpErrorCodes.InvalidPattern, oversized.Code);
+		Assert.Contains("4096", oversized.Message, StringComparison.Ordinal);
 	}
 
 	[Fact]
