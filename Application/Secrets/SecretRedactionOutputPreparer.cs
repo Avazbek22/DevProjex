@@ -273,7 +273,7 @@ public sealed class SecretRedactionOutputPreparer
 			{
 				continue;
 			}
-			if (ClassifySourcePath(context, item.SourcePath) == FileContentClassification.Unreadable)
+			if (IsUnsupportedNonRegularSource(context, item.SourcePath))
 			{
 				await foreach (var prepared in PrepareTransformationBatchAsync(
 				                   context,
@@ -481,12 +481,12 @@ public sealed class SecretRedactionOutputPreparer
 		CompressionWorkItem item,
 		CancellationToken cancellationToken)
 	{
-		if (ClassifySourcePath(context, item.SourcePath) == FileContentClassification.Unreadable)
+		if (IsUnsupportedNonRegularSource(context, item.SourcePath))
 			return CreateUnreadableTransformationEntry(item);
 		EnsureSourcePathAvailable(context, item.SourcePath);
 		var coherentRead = await ReadFactCoherentlyAsync(item.SourcePath, cancellationToken)
 			.ConfigureAwait(false);
-		if (ClassifySourcePath(context, item.SourcePath) == FileContentClassification.Unreadable)
+		if (IsUnsupportedNonRegularSource(context, item.SourcePath))
 			return CreateUnreadableTransformationEntry(item, coherentRead.Metadata);
 		EnsureSourcePathAvailable(context, item.SourcePath);
 		var readFact = coherentRead.Fact;
@@ -550,7 +550,7 @@ public sealed class SecretRedactionOutputPreparer
 		for (var index = 0; index < orderedFilePaths.Count; index++)
 		{
 			var workItem = new CompressionWorkItem(index, orderedFilePaths[index]);
-			if (ClassifySourcePath(context, workItem.SourcePath) == FileContentClassification.Unreadable)
+			if (IsUnsupportedNonRegularSource(context, workItem.SourcePath))
 			{
 				prepared[index] = PreparedSecretFile.Unscannable(
 					workItem.SourcePath,
@@ -663,12 +663,12 @@ public sealed class SecretRedactionOutputPreparer
 		CancellationToken cancellationToken)
 	{
 		var sourcePath = workItem.SourcePath;
-		if (ClassifySourcePath(context, sourcePath) == FileContentClassification.Unreadable)
+		if (IsUnsupportedNonRegularSource(context, sourcePath))
 			return PreparedSecretFile.Unscannable(sourcePath, FileContentClassification.Unreadable);
 		EnsureSourcePathAvailable(context, sourcePath);
 		var coherentRead = await ReadFactCoherentlyAsync(sourcePath, cancellationToken)
 			.ConfigureAwait(false);
-		if (ClassifySourcePath(context, sourcePath) == FileContentClassification.Unreadable)
+		if (IsUnsupportedNonRegularSource(context, sourcePath))
 			return PreparedSecretFile.Unscannable(sourcePath, FileContentClassification.Unreadable);
 		EnsureSourcePathAvailable(context, sourcePath);
 		var readFact = coherentRead.Fact;
@@ -733,7 +733,7 @@ public sealed class SecretRedactionOutputPreparer
 	{
 		foreach (var sourcePath in orderedFilePaths)
 		{
-			if (ClassifySourcePath(context, sourcePath) != FileContentClassification.Unreadable)
+			if (!IsUnsupportedNonRegularSource(context, sourcePath))
 				EnsureSourcePathAvailable(context, sourcePath);
 		}
 	}
@@ -766,6 +766,15 @@ public sealed class SecretRedactionOutputPreparer
 		return projectRoot is null
 			? null
 			: ProjectSourcePathPolicy.ClassifyUnavailable(projectRoot, sourcePath);
+	}
+
+	private static bool IsUnsupportedNonRegularSource(
+		ContentTransformationContext context,
+		string sourcePath)
+	{
+		var projectRoot = context.Redaction?.ProjectRoot ?? context.Compression?.ProjectRoot;
+		return projectRoot is not null &&
+		       ProjectSourcePathPolicy.IsUnsupportedNonRegularFile(projectRoot, sourcePath);
 	}
 
 	private static PreparedTransformationEntry CreateUnreadableTransformationEntry(
