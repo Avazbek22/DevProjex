@@ -528,6 +528,25 @@ public sealed class CompletionReleaseRegressionTests
 		Assert.Contains(project + Path.DirectorySeparatorChar, candidates);
 	}
 
+	[Fact]
+	public void FileSystemCompletionRetainsOnlyTheBestCandidatesFromALargeStream()
+	{
+		const int candidateCount = 100_000;
+		const int retainedCount = 200;
+		var candidates = Enumerable.Range(0, candidateCount)
+			.Reverse()
+			.Select(index => new FileSystemCompletionSource.CompletionCandidate(
+				$"entry-{index:D6}",
+				IsDirectory: index % 2 == 0));
+
+		var retained = FileSystemCompletionSource.SelectBestCandidates(candidates, retainedCount);
+
+		Assert.Equal(retainedCount, retained.Count);
+		Assert.All(retained, static candidate => Assert.True(candidate.IsDirectory));
+		Assert.Equal("entry-000000", retained[0].Name);
+		Assert.Equal("entry-000398", retained[^1].Name);
+	}
+
 	private static async Task<IReadOnlyList<string>> CompleteAsync(string line)
 	{
 		var environment = new TestTerminalEnvironment();
