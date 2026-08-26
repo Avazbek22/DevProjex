@@ -11,7 +11,26 @@ internal readonly record struct PreviewSearchResult(
 
 internal static class PreviewSearchIndex
 {
+	internal const int MinimumQueryLength = 2;
 	internal const int MaximumMatches = 10_000;
+
+	public static bool CanSearch(string? query)
+	{
+		if (string.IsNullOrWhiteSpace(query) ||
+		    query.AsSpan().IndexOfAny('\r', '\n') >= 0)
+		{
+			return false;
+		}
+
+		var runeCount = 0;
+		foreach (var _ in query.EnumerateRunes())
+		{
+			if (++runeCount == MinimumQueryLength)
+				return true;
+		}
+
+		return false;
+	}
 
 	public static PreviewSearchResult Find(
 		IPreviewTextDocument document,
@@ -19,8 +38,7 @@ internal static class PreviewSearchIndex
 		CancellationToken cancellationToken = default)
 	{
 		ArgumentNullException.ThrowIfNull(document);
-		if (string.IsNullOrWhiteSpace(query) ||
-		    query.AsSpan().IndexOfAny('\r', '\n') >= 0)
+		if (!CanSearch(query))
 		{
 			return new PreviewSearchResult([], IsCapped: false);
 		}

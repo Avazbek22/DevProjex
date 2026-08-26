@@ -287,7 +287,7 @@ internal sealed class PreviewSearchInteractionController : IDisposable
 		var query = _viewModel.PreviewSearchQuery;
 		var document = _previewTextControl.Document;
 		if (!_viewModel.PreviewSearchVisible ||
-		    string.IsNullOrWhiteSpace(query) ||
+		    !PreviewSearchIndex.CanSearch(query) ||
 		    document is null)
 		{
 			return;
