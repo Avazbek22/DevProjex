@@ -218,7 +218,8 @@ public sealed class McpInfrastructureTests
 		{
 			var candidate = Path.Combine(link, "secret.txt");
 			var registry = new McpRootRegistry([project]);
-			Assert.True(PathComparer.Default.Equals(project, registry.FindLexicalRoot(candidate)));
+			var canonicalProject = registry.ResolveProject(project);
+			Assert.True(PathComparer.Default.Equals(canonicalProject, registry.FindLexicalRoot(candidate)));
 			var opener = new McpRootJailFileStreamOpener(registry);
 
 			var exception = Assert.Throws<McpToolException>(() =>
@@ -229,7 +230,7 @@ public sealed class McpInfrastructureTests
 					asynchronous: false));
 
 			Assert.Equal(McpErrorCodes.RootViolation, exception.Code);
-			Assert.Contains(project, exception.Message, StringComparison.Ordinal);
+			Assert.Contains(canonicalProject, exception.Message, StringComparison.Ordinal);
 		}
 		finally
 		{

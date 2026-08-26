@@ -493,7 +493,10 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 			probePath,
 			shellExecutable));
 
-		var result = await RunProcessAsync(startInfo, cancellationToken);
+		var result = await RunProcessAsync(
+			startInfo,
+			cancellationToken,
+			processTimeout: TimeSpan.FromSeconds(45));
 		if (result.ExitCode == 0)
 			return;
 

@@ -26,10 +26,10 @@ public sealed class FileBackedExportProcessTests
 		Assert.NotNull(process);
 		try
 		{
-			await WaitForFileAsync(readyPath, process!, TestContext.Current.CancellationToken);
-			var baselineWorkingSet = long.Parse(
-				await File.ReadAllTextAsync(readyPath, TestContext.Current.CancellationToken),
-				CultureInfo.InvariantCulture);
+			var baselineWorkingSet = await WaitForReadyWorkingSetAsync(
+				readyPath,
+				process!,
+				TestContext.Current.CancellationToken);
 			var peakWorkingSet = baselineWorkingSet;
 			await Task.Delay(150, TestContext.Current.CancellationToken);
 			var cancellationStarted = Stopwatch.StartNew();
@@ -138,17 +138,23 @@ public sealed class FileBackedExportProcessTests
 		throw new DirectoryNotFoundException("The repository root could not be resolved.");
 	}
 
-	private static async Task WaitForFileAsync(
+	private static async Task<long> WaitForReadyWorkingSetAsync(
 		string path,
 		Process process,
 		CancellationToken cancellationToken)
 	{
 		using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 		timeout.CancelAfter(TimeSpan.FromSeconds(10));
-		while (!File.Exists(path))
+		while (true)
 		{
 			if (process.HasExited)
 				throw new InvalidOperationException($"Export helper exited with code {process.ExitCode}.");
+			if (File.Exists(path))
+			{
+				var content = await File.ReadAllTextAsync(path, timeout.Token);
+				if (long.TryParse(content, NumberStyles.None, CultureInfo.InvariantCulture, out var workingSet))
+					return workingSet;
+			}
 			await Task.Delay(20, timeout.Token);
 		}
 	}
