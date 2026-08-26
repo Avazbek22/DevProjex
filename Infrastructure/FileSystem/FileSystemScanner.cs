@@ -306,6 +306,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		if (!rootFilePolicyUnavailable && scanPlan.SelectedRoots.Count > 0)
 		{
 			var parallelOptions = ScanParallelismPolicy.CreateOptions(cancellationToken);
+			var fileScanParallelism = ScanParallelismPolicy.PartitionDegreeOfParallelism(
+				scanPlan.SelectedRoots.Count);
 			Parallel.ForEach(
 				scanPlan.SelectedRoots,
 				parallelOptions,
@@ -325,7 +327,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						includeRootDirectoryInRawCounts: true,
 						parallelOptions.CancellationToken,
 						inventoryCapture,
-						gitIgnoreLoadSession);
+						gitIgnoreLoadSession,
+						fileScanParallelism);
 
 					localState.Extensions.UnionWith(snapshot.Value.Extensions);
 					localState.EffectiveExtensions.UnionWith(snapshot.Value.VisibleExtensions);
@@ -1765,7 +1768,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		bool includeRootDirectoryInRawCounts,
 		CancellationToken cancellationToken,
 		ProjectTreeInventoryCapture? treeInventoryCapture = null,
-		GitIgnoreMatcherLoadSession? gitIgnoreLoadSession = null)
+		GitIgnoreMatcherLoadSession? gitIgnoreLoadSession = null,
+		int? maximumFileScanParallelism = null)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 		gitIgnoreLoadSession ??= CreateGitIgnoreLoadSession(extensionDiscoveryRules, effectiveRules);
@@ -1987,7 +1991,9 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				return localMetrics;
 			}
 
-			var parallelOptions = ScanParallelismPolicy.CreateOptions(cancellationToken);
+			var parallelOptions = ScanParallelismPolicy.CreateOptions(
+				cancellationToken,
+				maximumFileScanParallelism);
 			Parallel.For(
 				0,
 				directories.Count,
