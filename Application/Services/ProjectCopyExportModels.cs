@@ -34,7 +34,8 @@ public enum ProjectCopyExportError
 	UnexpectedFailure = 9,
 	DestinationConflict = 10,
 	SecretDetectionFailed = 11,
-	SecretScanLimitExceeded = 12
+	SecretScanLimitExceeded = 12,
+	ReservedNoticeNameConflict = 13
 }
 
 public sealed record ProjectCopyExportRequest(
@@ -66,7 +67,8 @@ public sealed record ProjectCopyNoticeText(
 	string Compression,
 	string ExcludedUnscannable = "",
 	string TooLargeReason = "",
-	string UnsupportedEncodingReason = "");
+	string UnsupportedEncodingReason = "",
+	string UnreadableReason = "");
 
 public sealed record ProjectCopyExportResult(
 	string DestinationPath,

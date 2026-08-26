@@ -1,5 +1,6 @@
 using DevProjex.Application.Workspaces;
 using DevProjex.Terminal.Execution;
+using DevProjex.Terminal.Rendering;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -43,6 +44,31 @@ public sealed class TerminalUntrustedTextPresentationTests
 		AssertSafe(TerminalRecentWorkspacePresentation.DisplayName(workspace), escapedName);
 		AssertSafe(TerminalRecentWorkspacePresentation.DisplaySource(workspace), escapedName);
 		AssertSafe(TerminalOperationProgressView.SanitizeSource(unsafeName), escapedName);
+		AssertSafe(TerminalOperationProgressView.SanitizeLine(unsafeName), escapedName);
+
+		using var data = new TemporaryDirectory();
+		var services = new TerminalServiceFactory(() => data.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var exportSummary = new TerminalExportSummary(
+			TerminalExportKind.Context,
+			ProjectContextView.Tree,
+			ProjectContextDocumentFormat.Text,
+			unsafeName,
+			TerminalExportDestinationState.Ready,
+			FileCount: 1,
+			FolderCount: 1,
+			Bytes: 1,
+			Characters: 1,
+			EstimatedTokens: 1,
+			GitFilteringMode.None,
+			Exclusions: [],
+			DiagnosticCount: 0);
+		var exportText = new TerminalWorkspace(
+			services,
+			new TestTerminalEnvironment()).BuildExportSummaryText(exportSummary);
+		Assert.Contains(escapedName, exportText, StringComparison.Ordinal);
+		Assert.DoesNotContain('', exportText);
+		Assert.DoesNotContain('	', exportText);
 	}
 
 	[Fact]
@@ -59,6 +85,18 @@ public sealed class TerminalUntrustedTextPresentationTests
 
 		Assert.Equal("https://example.test/repository.git", repository.SafeDisplayUrl);
 		Assert.DoesNotContain(secret, repository.SafeDisplayUrl, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void SingleLineWriterEscapesEveryLineBreakingAndTerminalControlCharacter()
+	{
+		using var output = new StringWriter();
+
+		TerminalTextEscaping.WriteSingleLine(output, "result\r\n\t\u001B\u2028\u2029");
+
+		Assert.Equal(
+			"result\\r\\n\\t\\u001B\\u2028\\u2029" + Environment.NewLine,
+			output.ToString());
 	}
 
 	private static void AssertSafe(string rendered, string expected)

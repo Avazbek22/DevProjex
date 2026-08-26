@@ -264,6 +264,7 @@ public sealed class VirtualizedPreviewTextControl : Control
     private int _maxLineLength;
     private SelectionPosition? _selectionAnchor;
     private SelectionPosition? _selectionActive;
+	private long _pendingClipboardCharacterCount;
     private bool _isSelecting;
     private Point _selectionPointerViewportPoint;
     private ThemeVariant? _cachedSelectionTheme;
@@ -706,6 +707,8 @@ public sealed class VirtualizedPreviewTextControl : Control
     }
 
     public string GetSelectedText() => BuildSelectedText(normalizeForClipboard: false);
+
+	internal long PendingClipboardCharacterCount => _pendingClipboardCharacterCount;
 
     public bool TryGetSelectionRange(out PreviewSelectionRange selectionRange)
     {
@@ -2325,14 +2328,28 @@ public sealed class VirtualizedPreviewTextControl : Control
 
     private async Task CopySelectionToClipboardAsync()
     {
-        var selectedText = BuildSelectedText(normalizeForClipboard: true);
-        if (string.IsNullOrEmpty(selectedText))
-            return;
+		if (!TryGetNormalizedSelection(out var start, out var end))
+			return;
+
+		_pendingClipboardCharacterCount = MeasureSelectedTextLength(start, end, normalizeForClipboard: true);
+		if (_pendingClipboardCharacterCount <= 0)
+			return;
 
         var copying = new CancelEventArgs();
-        CopyingToClipboard?.Invoke(this, copying);
-        if (copying.Cancel)
-            return;
+		try
+		{
+			CopyingToClipboard?.Invoke(this, copying);
+			if (copying.Cancel)
+				return;
+		}
+		finally
+		{
+			_pendingClipboardCharacterCount = 0;
+		}
+
+		var selectedText = BuildSelectedText(normalizeForClipboard: true);
+		if (string.IsNullOrEmpty(selectedText))
+			return;
 
         var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
         if (clipboard is null)
@@ -2341,6 +2358,33 @@ public sealed class VirtualizedPreviewTextControl : Control
         await clipboard.SetTextAsync(selectedText);
         CopiedToClipboard?.Invoke(this, EventArgs.Empty);
     }
+
+	private long MeasureSelectedTextLength(
+		SelectionPosition start,
+		SelectionPosition end,
+		bool normalizeForClipboard)
+	{
+		long characterCount = 0;
+		for (var lineNumber = start.Line; lineNumber <= end.Line; lineNumber++)
+		{
+			var lineText = GetLineText(lineNumber);
+			var segmentStart = lineNumber == start.Line
+				? Math.Clamp(start.Column, 0, lineText.Length)
+				: 0;
+			var segmentEnd = lineNumber == end.Line
+				? Math.Clamp(end.Column, segmentStart, lineText.Length)
+				: lineText.Length;
+			characterCount += segmentEnd - segmentStart;
+			if (lineNumber < end.Line)
+			{
+				characterCount += normalizeForClipboard
+					? Environment.NewLine.Length
+					: 1;
+			}
+		}
+
+		return characterCount;
+	}
 
     public void SelectAll()
     {

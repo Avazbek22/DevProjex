@@ -217,41 +217,51 @@ internal sealed class DevProjexMcpTools(
 						.ConfigureAwait(false);
 				},
 				cancellationToken).ConfigureAwait(false);
-			if (pack.Characters <= MaximumInlinePackCharacters)
+			var retainPack = false;
+			try
 			{
-				var content = await File.ReadAllTextAsync(pack.Path, cancellationToken).ConfigureAwait(false);
-				packs.Remove(pack.Id);
+				if (pack.Characters <= MaximumInlinePackCharacters)
+				{
+					var content = await File.ReadAllTextAsync(pack.Path, cancellationToken).ConfigureAwait(false);
+					operationProgress.Milestone(
+						100,
+						$"writing pack {writtenFileCount}/{writtenFileCount}");
+					return McpToolResults.TextSuccess(McpSpotlight.Wrap(content), advertiseLargeResult: true);
+				}
+
+				using var treeWriter = new McpBoundedLineTextWriter(MaximumTreeLines);
+				try
+				{
+					await projects.TreeExportService.WriteFullTreeAsync(
+							treeWriter,
+							plan.SourceRoot,
+							plan.ProjectedTree,
+							projects.ResolveProtectedDocumentRoot(plan),
+							includeFinalLineEnding: false,
+							cancellationToken: cancellationToken)
+						.ConfigureAwait(false);
+				}
+				catch (McpLineLimitReachedException)
+				{
+				}
+				var tree = treeWriter.Text;
+				if (treeWriter.IsTruncated)
+					tree += "\n[Tree truncated at 2000 lines.]";
+				var message = $"Pack stored as '{pack.Id}' ({pack.Characters} characters). " +
+				              "Call read_pack with this pack_id to read ranges, or search_project to locate source content.\n" +
+				              McpSpotlight.Wrap(tree);
 				operationProgress.Milestone(
 					100,
 					$"writing pack {writtenFileCount}/{writtenFileCount}");
-				return McpToolResults.TextSuccess(McpSpotlight.Wrap(content), advertiseLargeResult: true);
+				var response = McpToolResults.TextSuccess(message, advertiseLargeResult: true);
+				retainPack = true;
+				return response;
 			}
-
-			using var treeWriter = new McpBoundedLineTextWriter(MaximumTreeLines);
-			try
+			finally
 			{
-				await projects.TreeExportService.WriteFullTreeAsync(
-						treeWriter,
-						plan.SourceRoot,
-						plan.ProjectedTree,
-						projects.ResolveProtectedDocumentRoot(plan),
-						includeFinalLineEnding: false,
-						cancellationToken: cancellationToken)
-					.ConfigureAwait(false);
+				if (!retainPack)
+					packs.Remove(pack.Id);
 			}
-			catch (McpLineLimitReachedException)
-			{
-			}
-			var tree = treeWriter.Text;
-			if (treeWriter.IsTruncated)
-				tree += "\n[Tree truncated at 2000 lines.]";
-			var message = $"Pack stored as '{pack.Id}' ({pack.Characters} characters). " +
-			              "Call read_pack with this pack_id to read ranges, or search_project to locate source content.\n" +
-			              McpSpotlight.Wrap(tree);
-			operationProgress.Milestone(
-				100,
-				$"writing pack {writtenFileCount}/{writtenFileCount}");
-			return McpToolResults.TextSuccess(message, advertiseLargeResult: true);
 		}, cancellationToken);
 
 	[Description("Read a 1-based line range from a pack created by this server session.")]

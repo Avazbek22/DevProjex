@@ -86,10 +86,23 @@ public sealed class FileContentAnalyzer :
 		_openSequentialRead = openSequentialRead;
 	}
 
-	public FileContentClassification? ClassifyWithoutReading(string path) =>
-		HasKnownBinaryExtension(path)
+	public FileContentClassification? ClassifyWithoutReading(string path)
+	{
+		try
+		{
+			if (!UnixFileTypeInspector.IsRegularFile(path))
+				return FileContentClassification.Unreadable;
+		}
+		catch (Exception exception) when (
+			exception is IOException or UnauthorizedAccessException or SecurityException)
+		{
+			return null;
+		}
+
+		return HasKnownBinaryExtension(path)
 			? FileContentClassification.Binary
 			: null;
+	}
 
 	public ValueTask<FileContentReadResult> ReadClassifiedAsync(
 		string path,
@@ -151,6 +164,7 @@ public sealed class FileContentAnalyzer :
 		{
 			if (HasKnownBinaryExtension(path))
 			{
+				UnixFileTypeInspector.EnsureRegularFile(path);
 				return new BudgetedContentReadResult(
 					new ContentReadFact(null, FileContentClassification.Binary, null, null),
 					null,
@@ -249,6 +263,7 @@ public sealed class FileContentAnalyzer :
 		{
 			if (HasKnownBinaryExtension(path))
 			{
+				UnixFileTypeInspector.EnsureRegularFile(path);
 				return new IdentifiedCompleteTextFileBuffer(
 					new ClassifiedCompleteTextFileBuffer(FileContentClassification.Binary),
 					null);
@@ -418,9 +433,12 @@ public sealed class FileContentAnalyzer :
 		try
 		{
 			if (HasKnownBinaryExtension(path))
+			{
+				UnixFileTypeInspector.EnsureRegularFile(path);
 				return new IdentifiedFileContentMetricsResult(
 					new FileContentMetricsResult(FileContentClassification.Binary),
 					null);
+			}
 
 			// Decoding owns pooled byte/char buffers; a second FileStream buffer only duplicates memory.
 			using var stream = _openSequentialRead(path, 1, SourceFileReadPolicy.Share, false);
@@ -535,6 +553,7 @@ public sealed class FileContentAnalyzer :
 		{
 			if (HasKnownBinaryExtension(path))
 			{
+				UnixFileTypeInspector.EnsureRegularFile(path);
 				return new ClassifiedFileContentSnapshot(
 					new FileContentMetricsResult(FileContentClassification.Binary));
 			}
@@ -665,6 +684,7 @@ public sealed class FileContentAnalyzer :
 			// Fast path: known binary extensions - no file I/O needed
 			if (HasKnownBinaryExtension(path))
 			{
+				UnixFileTypeInspector.EnsureRegularFile(path);
 				return new IdentifiedContentReadFact(
 					new ContentReadFact(null, FileContentClassification.Binary, null, null),
 					null);
@@ -850,6 +870,7 @@ public sealed class FileContentAnalyzer :
 		FileShare fileShare,
 		bool asynchronous = false)
 	{
+		UnixFileTypeInspector.EnsureRegularFile(path);
 		// Callers keep this handle for length, probing, and decoding. Besides saving an
 		// extra open/stat cycle, one handle gives each operation a more coherent file view.
 		return new FileStream(

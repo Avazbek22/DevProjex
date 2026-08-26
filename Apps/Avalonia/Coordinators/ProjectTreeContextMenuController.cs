@@ -235,7 +235,7 @@ internal sealed class ProjectTreeContextMenuController : IDisposable
 		}
 		catch (Exception exception)
 		{
-			await _showError(exception.Message);
+			await _showError(DesktopExceptionPresentation.Format(_localization, exception));
 		}
 	}
 

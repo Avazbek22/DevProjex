@@ -27,6 +27,7 @@ internal static class UnscannableFileOutput
 	public static string ToReasonToken(FileContentClassification classification) => classification switch
 	{
 		FileContentClassification.TooLarge => "too-large",
+		FileContentClassification.Unreadable => "unreadable",
 		FileContentClassification.UnsupportedEncoding => "unsupported-encoding",
 		_ => throw new ArgumentOutOfRangeException(nameof(classification), classification, null)
 	};
@@ -58,6 +59,7 @@ internal static class UnscannableFileOutput
 	private static string ResolveReasonKey(FileContentClassification classification) => classification switch
 	{
 		FileContentClassification.TooLarge => "Content.Redaction.Reason.TooLarge",
+		FileContentClassification.Unreadable => "Content.Classification.Unreadable",
 		FileContentClassification.UnsupportedEncoding => "Content.Redaction.Reason.UnsupportedEncoding",
 		_ => throw new ArgumentOutOfRangeException(nameof(classification), classification, null)
 	};

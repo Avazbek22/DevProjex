@@ -24,6 +24,12 @@ stderr is the operational channel:
 Direct commands never prompt. Redirected stdout never contains ANSI, progress,
 spinners, tables around a machine payload, or additional summary lines.
 
+Human-readable file names, paths, and one-line success-path payloads escape
+carriage return, line feed, tab, other control characters, U+2028, and U+2029 as
+visible `\\r`, `\\n`, `\\t`, or `\\uXXXX` sequences. This keeps every reported
+path on one physical line and prevents terminal control injection. JSON and XML
+retain exact machine values and use their format-native escaping instead.
+
 ## Terminal Modes
 
 Color and progress modes accept `auto`, `always`, or `never`. Their precedence is
@@ -120,6 +126,9 @@ When Hide Private Data is enabled, analysis adds a top-level `privacy` object
 with the same complete shape: `matchedCount`, `redactedCount`, and a non-privacy-
 guarantee `notice`. Zero means that the current rules matched nothing; it never
 guarantees that the project contains no private data.
+Private-data redaction also covers generated human-readable content, including
+tree text and content headings. Machine metadata remains directly addressable:
+`project.root` is the absolute project path and is not a redacted display value.
 
 ```json
 {
@@ -131,8 +140,9 @@ guarantees that the project contains no private data.
 }
 ```
 
-When enabled content inspection withholds one or more text files because they
-are too large or use an unsupported encoding, analysis adds:
+When enabled content inspection withholds one or more files because they are too
+large, unreadable, non-regular filesystem entries, or use an unsupported encoding,
+analysis adds:
 
 ```json
 {
@@ -149,8 +159,9 @@ are too large or use an unsupported encoding, analysis adds:
 ```
 
 `unscannableCount` equals the array length. Each entry contains a source-relative
-`path` with `/` separators and a `reason` token of exactly `too-large` or
-`unsupported-encoding`. The object is omitted when no files are withheld.
+`path` with `/` separators and a `reason` token of exactly `too-large`,
+`unreadable`, or `unsupported-encoding`. The object is omitted when no files are
+withheld.
 
 With `--findings`, analysis adds an ordered top-level `findings` array. Each
 effective finding contains exactly `ruleId`, `category` (`secret` or
@@ -332,6 +343,10 @@ The readiness line is the requested dry-run result and remains visible at
 A project-copy dry run with Hide Secrets enabled also states that detected text
 will be changed, binary files will remain unchanged, and the result may not build
 or run. This warning does not create or scan an output artifact.
+Any effective code-transformation option (`--compress-code`, `--strip-comments`, or
+`--strip-blank-lines`) also announces that a transformed copy carries
+`DEVPROJEX-NOTICE.txt`. A real folder or ZIP export fails with
+`DPX-EXPORT-RESERVED-NAME` if that reserved root file already exists in the source.
 
 With code compression enabled, context, folder, and ZIP exports all consume the
 same validated transformed snapshot. Unsupported or rejected source files remain

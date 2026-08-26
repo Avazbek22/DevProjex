@@ -2,6 +2,42 @@ namespace DevProjex.Application.Services;
 
 internal static class ProjectSourcePathPolicy
 {
+	public static bool IsUnsupportedNonRegularFile(string projectRoot, string path)
+	{
+		if (OperatingSystem.IsWindows())
+			return false;
+
+		try
+		{
+			var normalizedRoot = PathUtility.Normalize(projectRoot);
+			var normalizedPath = PathUtility.Normalize(path);
+			var relativePath = Path.GetRelativePath(normalizedRoot, normalizedPath);
+			if (PathUtility.IsRelativePathOutsideRoot(relativePath))
+				return false;
+
+			var currentPath = normalizedRoot;
+			if (IsReparsePoint(currentPath))
+				return false;
+
+			foreach (var segment in relativePath.Split(
+			         [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+			         StringSplitOptions.RemoveEmptyEntries))
+			{
+				currentPath = Path.Combine(currentPath, segment);
+				if (IsReparsePoint(currentPath))
+					return false;
+			}
+
+			return !UnixFileTypeInspector.IsRegularFile(normalizedPath);
+		}
+		catch (Exception exception) when (
+			exception is IOException or UnauthorizedAccessException or
+			ArgumentException or NotSupportedException or System.Security.SecurityException)
+		{
+			return false;
+		}
+	}
+
 	public static FileContentClassification? ClassifyUnavailable(string projectRoot, string path)
 	{
 		try
@@ -24,6 +60,8 @@ internal static class ProjectSourcePathPolicy
 				if (IsReparsePoint(currentPath))
 					return FileContentClassification.Unreadable;
 			}
+			if (!UnixFileTypeInspector.IsRegularFile(normalizedPath))
+				return FileContentClassification.Unreadable;
 
 			return null;
 		}

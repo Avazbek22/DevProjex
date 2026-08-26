@@ -61,6 +61,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private Task? _transientStatusTask;
 	private Task? _commandResultTask;
 	private Task? _commandHistorySaveTask;
+	private IRepositoryCacheSession? _ownedRepositorySession;
 	private long _projectionRequestId;
 	private long _previewRequestId;
 	private long _settingsRefreshRequestId;
@@ -305,6 +306,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 
 	private void ShowWelcome(TerminalWelcomeActionKind? selectedAction = null)
 	{
+		ReleaseOwnedRepositorySession();
 		CancelWorkspaceRefreshes();
 		ClearRoot();
 		_screen = TerminalWorkspaceScreen.Welcome;
@@ -649,29 +651,37 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var operationCts = ReplaceActiveOperation();
 		_activeOperationTask = Task.Run(async () =>
 		{
-			string? stagingPath = null;
 			try
 			{
-				stagingPath = _services.RepoCacheService.CreateRepositoryStagingDirectory(url);
-				UpdateClonePhaseSafe(
-					"Terminal.Tui.Clone.Connecting",
-					L("Terminal.Tui.Clone.StartingGit"));
-				await _operationObserver
-					.ObservePhaseAsync(
-						TerminalOperationPhase.CloneConnecting,
+				var progress = new SynchronousProgress<string>(UpdateCloneProgressSafe);
+				var cloneCoordinator = new TerminalRepositoryCloneCoordinator(
+					_services.GitRepositoryService,
+					_services.RepoCacheService);
+				using var cloneLease = await cloneCoordinator
+					.AcquireAsync(
+						url,
+						progress,
+						async phase =>
+						{
+							UpdateClonePhaseSafe(
+								phase == TerminalRepositoryClonePhase.SwitchingBranch
+									? "Terminal.Tui.Clone.CheckingOut"
+									: "Terminal.Tui.Clone.Connecting",
+								phase == TerminalRepositoryClonePhase.Cloning
+									? L("Terminal.Tui.Clone.StartingGit")
+									: L("Terminal.Tui.Action.GetUpdates"));
+							if (phase == TerminalRepositoryClonePhase.Cloning)
+							{
+								await _operationObserver
+									.ObservePhaseAsync(
+										TerminalOperationPhase.CloneConnecting,
+										operationCts.Token)
+									.ConfigureAwait(false);
+							}
+						},
 						operationCts.Token)
 					.ConfigureAwait(false);
-				var progress = new SynchronousProgress<string>(UpdateCloneProgressSafe);
-				var result = await _services.GitRepositoryService
-					.CloneAsync(url, stagingPath, progress, operationCts.Token)
-					.ConfigureAwait(false);
-				if (!result.Success || !Directory.Exists(result.LocalPath))
-					throw new TerminalWorkspaceOperationException("DPX-TUI-CLONE-FAILED");
-				var cachePath = _services.RepoCacheService.PublishRepositoryDirectory(
-					stagingPath,
-					result.RepositoryUrl ?? url);
-				stagingPath = null;
-				result = result with { LocalPath = cachePath };
+				var result = cloneLease.Result;
 
 				UpdateClonePhaseSafe(
 					"Terminal.Tui.Clone.PreparingWorkspace",
@@ -683,6 +693,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				UpdateClonePhaseSafe(
 					"Terminal.Tui.Clone.LoadingContext",
 					L("Terminal.Tui.Clone.ScanningProject"));
+				var preparedSession = cloneLease.DetachSession();
 				await OpenProjectCoreAsync(
 						result.LocalPath,
 						ResolveAutomaticProfile(result.LocalPath).Profile,
@@ -691,13 +702,26 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 							? TerminalProjectOpenSource.RecentRepository
 							: TerminalProjectOpenSource.Clone,
 						releaseOperation: false,
-						identity)
+						identity,
+						preparedSession)
 					.ConfigureAwait(false);
+				if (cloneLease.UpdateFailed)
+				{
+					await InvokeAsync(() =>
+					{
+						if (ReferenceEquals(_activeOperationCts, operationCts) &&
+						    _screen == TerminalWorkspaceScreen.Workspace)
+						{
+							SetOperationStatus(
+								L("Toast.Git.CachedUpdateFailed"),
+								TerminalWorkspaceTheme.Warning);
+						}
+						return true;
+					}).ConfigureAwait(false);
+				}
 			}
 			catch (OperationCanceledException) when (operationCts.IsCancellationRequested)
 			{
-				if (stagingPath is not null)
-					_services.RepoCacheService.DeleteRepositoryDirectory(stagingPath);
 				if (returnToRepositoryHistory)
 					ReturnToRepositoryHistoryAfterCancellation(operationCts);
 				else
@@ -705,8 +729,6 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			}
 			catch
 			{
-				if (stagingPath is not null)
-					_services.RepoCacheService.DeleteRepositoryDirectory(stagingPath);
 				if (returnToRepositoryHistory)
 					ReturnToRepositoryHistoryWithError(
 						operationCts,
@@ -858,8 +880,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		CancellationTokenSource operationCts,
 		TerminalProjectOpenSource source = TerminalProjectOpenSource.Other,
 		bool releaseOperation = true,
-		ProjectSourceIdentity? sourceIdentity = null)
+		ProjectSourceIdentity? sourceIdentity = null,
+		IRepositoryCacheSession? preparedRepositorySession = null)
 	{
+		var sessionAccepted = false;
 		try
 		{
 			await _operationObserver
@@ -872,6 +896,15 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				.ConfigureAwait(false);
 			if (_stopping || operationCts.IsCancellationRequested)
 				return;
+			sessionAccepted = await InvokeAsync(() =>
+				TerminalRepositorySessionOwnership.TryPublishAndReplace(
+					ReferenceEquals(_activeOperationCts, operationCts),
+					() => ShowWorkspace(state),
+					ref _ownedRepositorySession,
+					preparedRepositorySession)).ConfigureAwait(false);
+			if (!sessionAccepted)
+				return;
+
 			if (state.Plan.SourceIdentity?.RepositoryUrl is { Length: > 0 } repositoryUrl)
 			{
 				_recentProjectsSnapshot = _services.RecentProjectsStore.AddRepository(
@@ -884,12 +917,6 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					_recentProjectsSnapshot,
 					state.Plan.SourceRoot);
 			}
-			await InvokeAsync(() =>
-			{
-				if (ReferenceEquals(_activeOperationCts, operationCts))
-					ShowWorkspace(state);
-				return true;
-			}).ConfigureAwait(false);
 		}
 		catch (OperationCanceledException) when (operationCts.IsCancellationRequested)
 		{
@@ -927,6 +954,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		}
 		finally
 		{
+			if (!sessionAccepted)
+				preparedRepositorySession?.Dispose();
 			if (releaseOperation)
 				ReleaseActiveOperation(operationCts);
 		}
@@ -1024,7 +1053,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			ReadOnly = true,
 			WordWrap = true,
 			CanFocus = false,
-			Text = detail,
+			Text = TerminalTextEscaping.EscapeSingleLine(detail),
 			SchemeName = TerminalWorkspaceTheme.Secondary
 		};
 		var footer = new TerminalLiteralLabel
@@ -3196,14 +3225,15 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 
 	private void SetOperationStatus(string text, string schemeName)
 	{
+		var safeText = TerminalTextEscaping.EscapeSingleLine(text);
 		if (_screen == TerminalWorkspaceScreen.Workspace && _status is not null)
 		{
-			_status.Text = text;
+			_status.Text = safeText;
 			_status.SchemeName = schemeName;
 		}
 		else if (_screen == TerminalWorkspaceScreen.Welcome)
 		{
-			ShowWelcomeStatus(text, schemeName);
+			ShowWelcomeStatus(safeText, schemeName);
 		}
 	}
 
@@ -3213,7 +3243,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			return;
 		_welcomeQuickStart.Text = string.IsNullOrWhiteSpace(text)
 			? L("Terminal.Tui.Welcome.QuickStart")
-			: text;
+			: TerminalTextEscaping.EscapeSingleLine(text);
 		_welcomeQuickStart.SchemeName = schemeName;
 	}
 
@@ -4078,7 +4108,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				string.Format(
 					CultureInfo.CurrentCulture,
 					L("Terminal.Tui.Error.DestinationConflictPath"),
-					summary.Destination));
+					TerminalTextEscaping.EscapeSingleLine(summary.Destination)));
 			return TerminalExportDecision.Cancel;
 		}
 
@@ -4639,15 +4669,16 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private string BuildWorkspaceHeading(ProjectContextPlan plan)
 	{
 		var branch = plan.SourceIdentity?.Branch is { Length: > 0 } value
-			? $" [{value}]"
+			? $" [{TerminalTextEscaping.EscapeSingleLine(value)}]"
 			: string.Empty;
 		return $"DevProjex Terminal{PanelSeparator}{GetProjectDisplayName(plan)}{branch}";
 	}
 
 	private static string GetProjectDisplaySource(ProjectContextPlan plan) =>
-		plan.SourceIdentity?.SourceReference is { Length: > 0 } sourceReference
+		TerminalTextEscaping.EscapeSingleLine(
+			plan.SourceIdentity?.SourceReference is { Length: > 0 } sourceReference
 			? sourceReference
-			: plan.SourceRoot;
+			: plan.SourceRoot);
 
 	private static void CancelAndDispose(ref CancellationTokenSource? source)
 	{
@@ -4657,6 +4688,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		source.Dispose();
 		source = null;
 	}
+
+	private void ReleaseOwnedRepositorySession() =>
+		Interlocked.Exchange(ref _ownedRepositorySession, null)?.Dispose();
 
 	private string PanelSeparator => _options.Plain ? " | " : " · ";
 
@@ -4683,6 +4717,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		DismissOperationProgress();
 		_cornerProgress?.Dispose();
 		_cornerProgress = null;
+		ReleaseOwnedRepositorySession();
 		_sessionCts.Dispose();
 		_operationGate.Dispose();
 	}

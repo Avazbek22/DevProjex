@@ -1850,7 +1850,7 @@ public sealed class SecretRedactionSession : IDisposable
 	}
 
 	/// <summary>
-	/// Records a text file the scanner never read because it is past the scan limit.
+	/// Records a file the scanner could not read under its bounded inspection policy.
 	///
 	/// It is stored, not skipped, so a relabel does not re-stat it on every pass. The empty content
 	/// fingerprint is what tells a reader apart from a file that was scanned and found clean: no
@@ -1869,6 +1869,7 @@ public sealed class SecretRedactionSession : IDisposable
 		CancellationToken generationToken)
 	{
 		if (classification is not (FileContentClassification.TooLarge or
+		    FileContentClassification.Unreadable or
 		    FileContentClassification.UnsupportedEncoding))
 		{
 			throw new ArgumentOutOfRangeException(nameof(classification), classification, null);

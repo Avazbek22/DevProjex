@@ -84,7 +84,8 @@ public sealed class CommandExecutionTests
 		{ ProjectCopyExportError.IoFailure, "DPX-IO-FAILURE" },
 		{ ProjectCopyExportError.UnsafeDestinationPath, "DPX-EXPORT-UNSAFE-DESTINATION" },
 		{ ProjectCopyExportError.UnexpectedFailure, "DPX-EXPORT-FAILED" },
-		{ ProjectCopyExportError.DestinationConflict, "DPX-EXPORT-DESTINATION-EXISTS" }
+		{ ProjectCopyExportError.DestinationConflict, "DPX-EXPORT-DESTINATION-EXISTS" },
+		{ ProjectCopyExportError.ReservedNoticeNameConflict, "DPX-EXPORT-RESERVED-NAME" }
 	};
 
 	[Theory]

@@ -203,7 +203,7 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            await ShowErrorAsync(ex.Message);
+            await ShowErrorAsync(ResolveDesktopExceptionMessage(ex));
             e.Handled = true;
         }
     }
@@ -234,7 +234,7 @@ public partial class MainWindow
                 if (pathResult.Success)
                     return;
 
-                await ShowErrorAsync(pathResult.ErrorMessage ?? _localization["Dialog.TerminalCommand.InstallFailed"]);
+                await ShowErrorAsync(ResolveTerminalCommandSetupFailureMessage());
                 snapshot = pathResult.Snapshot;
                 isAutomaticPrompt = false;
                 continue;
@@ -250,7 +250,7 @@ public partial class MainWindow
                     : _terminalCommandSetupService.InstallOrRepair());
             if (ResolveTerminalCommandPostInstallUiAction(installResult) == TerminalCommandPostInstallUiAction.ShowError)
             {
-                await ShowErrorAsync(installResult.ErrorMessage ?? _localization["Dialog.TerminalCommand.InstallFailed"]);
+                await ShowErrorAsync(ResolveTerminalCommandSetupFailureMessage());
                 return;
             }
 
@@ -260,7 +260,7 @@ public partial class MainWindow
                 if (pathResult.Success)
                     return;
 
-                await ShowErrorAsync(pathResult.ErrorMessage ?? _localization["Dialog.TerminalCommand.InstallFailed"]);
+                await ShowErrorAsync(ResolveTerminalCommandSetupFailureMessage());
                 snapshot = pathResult.Snapshot;
                 isAutomaticPrompt = false;
                 continue;
@@ -285,6 +285,11 @@ public partial class MainWindow
         installResult.Success
             ? TerminalCommandPostInstallUiAction.None
             : TerminalCommandPostInstallUiAction.ShowError;
+
+	private string ResolveTerminalCommandSetupFailureMessage() =>
+		DesktopExceptionPresentation.AppendCode(
+			_localization["Dialog.TerminalCommand.InstallFailed"],
+			DesktopExceptionPresentation.OperationFailedCode);
 
     internal static bool RequiresTerminalCommandPathConfiguration(TerminalCommandSetupSnapshot snapshot) =>
         snapshot.State is
@@ -688,7 +693,7 @@ public partial class MainWindow
             }
             catch (Exception ex)
             {
-                await ShowErrorAsync(ex.Message);
+                await ShowErrorAsync(ResolveDesktopExceptionMessage(ex));
             }
         }
         finally

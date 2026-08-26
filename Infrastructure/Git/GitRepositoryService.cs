@@ -25,6 +25,17 @@ public sealed class GitRepositoryService : IGitRepositoryService
     private static readonly TimeSpan ProcessTerminationWaitTimeout = TimeSpan.FromSeconds(5);
     private const int ProcessTerminationFallbackWaitMilliseconds = 1_000;
     internal const string NonInteractiveSshCommand = "ssh -o BatchMode=yes";
+    private readonly string? _gitExecutable;
+
+    public GitRepositoryService()
+    {
+    }
+
+    internal GitRepositoryService(string gitExecutable)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(gitExecutable);
+        _gitExecutable = gitExecutable;
+    }
 
     /// <summary>
     /// Checks if Git CLI is available on the system by running "git --version".
@@ -62,21 +73,42 @@ public sealed class GitRepositoryService : IGitRepositoryService
         IProgress<string>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        var repoName = ExtractRepositoryName(url);
+        var sourceAccepted = GitCloneAuthentication.TryResolveCloneUrl(
+            url,
+            out var cloneUrl,
+            out var authentication);
+        var resultRepositoryUrl = RepositoryUrlUtility.ToSafeDisplay(cloneUrl);
+        var repoName = RepositoryUrlUtility.GetRepositoryName(resultRepositoryUrl);
 
         try
         {
+            if (!sourceAccepted)
+            {
+                return new GitCloneResult(
+                    Success: false,
+                    LocalPath: targetDirectory,
+                    SourceType: ProjectSourceType.GitClone,
+                    DefaultBranch: null,
+                    RepositoryName: repoName,
+                    RepositoryUrl: resultRepositoryUrl,
+                    ErrorMessage: "Clone failed");
+            }
+
             // Note: progress status is set by caller to show localized message
             // We only report dynamic progress (git output with percentages)
 
             // Git suppresses transfer progress when stderr is redirected. --progress is required
             // here so a long clone cannot look frozen while the external process is still active.
             // SHALLOW CLONE: --depth 1 downloads only 1 commit for speed.
+            using var askPass = authentication is null
+                ? null
+                : GitAskPassSession.Create(authentication);
             var result = await RunGitCommandAsync(
                 null,
-                ["clone", "--progress", "--depth", "1", url, targetDirectory],
+                ["clone", "--progress", "--depth", "1", cloneUrl, targetDirectory],
                 cancellationToken,
-                progress);
+                progress,
+                askPass);
 
             if (result.ExitCode != 0)
             {
@@ -89,7 +121,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
                     SourceType: ProjectSourceType.GitClone,
                     DefaultBranch: null,
                     RepositoryName: repoName,
-                    RepositoryUrl: url,
+                    RepositoryUrl: resultRepositoryUrl,
                     ErrorMessage: errorMessage);
             }
 
@@ -102,7 +134,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
                 SourceType: ProjectSourceType.GitClone,
                 DefaultBranch: defaultBranch,
                 RepositoryName: repoName,
-                RepositoryUrl: url,
+                RepositoryUrl: resultRepositoryUrl,
                 ErrorMessage: null);
         }
         catch (OperationCanceledException)
@@ -118,7 +150,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
                 SourceType: ProjectSourceType.GitClone,
                 DefaultBranch: null,
                 RepositoryName: repoName,
-                RepositoryUrl: url,
+                RepositoryUrl: resultRepositoryUrl,
                 ErrorMessage: "Clone failed");
         }
     }
@@ -198,37 +230,8 @@ public sealed class GitRepositoryService : IGitRepositoryService
     /// - https://github.com/user/repo.git -> repo
     /// - https://github.com/user/repo -> repo
     /// </summary>
-    internal static string ExtractRepositoryName(string url)
-    {
-        try
-        {
-            var trimmed = url.Trim();
-
-            // Remove .git suffix if present
-            if (trimmed.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
-                trimmed = trimmed[..^4];
-
-            // Parse as URI and extract last path segment
-            var uri = new Uri(trimmed);
-            var segments = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
-            if (segments.Length >= 1)
-                return segments[^1];
-        }
-        catch
-        {
-            // Fallback: simple string parsing for malformed URLs
-            var lastSlash = url.LastIndexOf('/');
-            if (lastSlash >= 0 && lastSlash < url.Length - 1)
-            {
-                var name = url[(lastSlash + 1)..];
-                if (name.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
-                    name = name[..^4];
-                return name;
-            }
-        }
-
-        return "repository";
-    }
+    internal static string ExtractRepositoryName(string url) =>
+        RepositoryUrlUtility.GetRepositoryName(url);
 
     /// <summary>
     /// Gets list of all branches available in the repository.
@@ -646,7 +649,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
         return null;
     }
 
-    private static async Task<bool> SwitchManagedWorktreeBranchAsync(
+    private async Task<bool> SwitchManagedWorktreeBranchAsync(
         string repositoryPath,
         string branchName,
         CancellationToken cancellationToken)
@@ -777,18 +780,23 @@ public sealed class GitRepositoryService : IGitRepositoryService
     /// - Supports cancellation with process termination
     /// - Uses UTF-8 encoding for international characters
     /// </summary>
-    private static async Task<GitCommandResult> RunGitCommandAsync(
+    private async Task<GitCommandResult> RunGitCommandAsync(
         string? workingDirectory,
         IReadOnlyList<string> arguments,
         CancellationToken cancellationToken,
-        IProgress<string>? progress = null)
+        IProgress<string>? progress = null,
+        GitAskPassSession? askPass = null)
     {
         // Honor pre-canceled tokens before spawning git. Without this guard a very fast
         // command such as "git --version" can complete before WaitForExitAsync observes
         // cancellation, which makes cancellation behavior platform-timing dependent.
         cancellationToken.ThrowIfCancellationRequested();
 
-        var startInfo = CreateGitCommandStartInfo(workingDirectory, arguments);
+        var startInfo = GitProcessStartInfoFactory.Create(
+            workingDirectory,
+            arguments,
+            executable: _gitExecutable,
+            askPass: askPass);
 
         using var process = new Process { StartInfo = startInfo };
 

@@ -254,6 +254,8 @@ public sealed class PreviewDocumentBuilder(
 			    readResult.Classification is not (
 				    FileContentClassification.Text or
 				    FileContentClassification.TooLarge or
+				    FileContentClassification.Unreadable or
+				    FileContentClassification.UnsupportedEncoding or
 				    FileContentClassification.Binary))
 			{
 				throw new SecretDetectionException(

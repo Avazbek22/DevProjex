@@ -1066,6 +1066,24 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 		Assert.Equal(2, analysis.SkippedFileCount);
 		Assert.Equal(0, analysis.FailedFileCount);
 
+		using var preview = await new PreviewDocumentBuilder(analyzer).BuildContentDocumentAsync(
+			plan.IncludedFiles,
+			TestContext.Current.CancellationToken,
+			TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(sourceRoot),
+			includeOmissionMarkers: true,
+			transformationContext: redaction,
+			projectRoot: sourceRoot);
+		var previewText = preview!.GetLineRangeText(1, preview.LineCount);
+		var selectedText = await new SelectedContentExportService(analyzer).BuildAsync(
+			plan.IncludedFiles,
+			TestContext.Current.CancellationToken,
+			TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(sourceRoot),
+			redaction);
+		Assert.DoesNotContain(legacySentinel, previewText, StringComparison.Ordinal);
+		Assert.DoesNotContain(legacySentinel, selectedText, StringComparison.Ordinal);
+		Assert.Contains("DEVPROJEX_REDACTED[", previewText, StringComparison.Ordinal);
+		Assert.Contains("DEVPROJEX_REDACTED[", selectedText, StringComparison.Ordinal);
+
 		var contextService = new ProjectContextDocumentService(
 			new TreeExportService(),
 			analyzer,

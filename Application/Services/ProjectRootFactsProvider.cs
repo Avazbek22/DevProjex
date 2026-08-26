@@ -262,6 +262,7 @@ public sealed class ProjectRootFactsProvider
 	{
 		try
 		{
+			UnixFileTypeInspector.EnsureRegularFile(filePath);
 			var linkInfo = new FileInfo(filePath);
 			if (!linkInfo.Exists)
 				return null;

@@ -1,16 +1,16 @@
-namespace DevProjex.Avalonia.Coordinators;
+namespace DevProjex.Application.Services;
 
-internal enum CachedRepositoryRefreshPhase
+public enum CachedRepositoryRefreshPhase
 {
 	SwitchingBranch,
 	GettingUpdates
 }
 
-internal readonly record struct CachedRepositoryRefreshResult(
+public readonly record struct CachedRepositoryRefreshResult(
 	string? Branch,
 	bool UpdateFailed);
 
-internal static class CachedRepositoryRefreshCoordinator
+public static class CachedRepositoryRefreshCoordinator
 {
 	public static async Task<CachedRepositoryRefreshResult> RefreshAsync(
 		IGitRepositoryService gitService,

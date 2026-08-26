@@ -124,6 +124,8 @@ internal static class GitIgnoreMatcherFileCache
 				return SourceProbeResult.SymbolicLink;
 			if (attributes.HasFlag(FileAttributes.Directory))
 				return SourceProbeResult.ReadFailure;
+			if (!UnixFileTypeInspector.IsRegularFile(path))
+				return SourceProbeResult.ReadFailure;
 
 			return SourceProbeResult.RegularFile(new SourceStamp(
 				source.Length,

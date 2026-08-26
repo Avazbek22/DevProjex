@@ -309,6 +309,22 @@ public sealed class MainWindowPreviewWarmupTests
     }
 
     [Fact]
+    public void CreateBoundedTreeProjection_DeepTreeDoesNotDependOnTheCallStack()
+    {
+        const int depth = 16_000;
+        var root = CreateNestedTree(depth);
+
+        var projection = PreviewWarmupPolicy.CreateBoundedTreeProjection(
+            root,
+            new HashSet<string>(PathComparer.Default),
+            maxNodeCount: depth);
+
+        Assert.NotNull(projection);
+        Assert.Equal(depth, CountNodes(projection!));
+        Assert.Equal($"node-{depth - 1}", EnumerateNodes(projection!).Last().DisplayName);
+    }
+
+    [Fact]
     public void CreateBoundedTreeProjection_PartialSelectionIncludesOnlyRequiredBranch()
     {
         var rootPath = CreatePath("root");

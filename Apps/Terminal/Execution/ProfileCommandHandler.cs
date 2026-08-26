@@ -51,7 +51,7 @@ public sealed class ProfileCommandHandler(
 				force,
 				cancellationToken)
 			.ConfigureAwait(false);
-		environment.Output.WriteLine(writtenPath);
+		TerminalTextEscaping.WriteSingleLine(environment.Output, writtenPath);
 		return CommandLineExitCodes.Success;
 	}
 
@@ -94,9 +94,11 @@ public sealed class ProfileCommandHandler(
 			}
 		}
 
-		environment.Output.WriteLine(apply
-			? PathUtility.Normalize(projectPath)
-			: Path.GetFullPath(profilePath));
+		TerminalTextEscaping.WriteSingleLine(
+			environment.Output,
+			apply
+				? PathUtility.Normalize(projectPath)
+				: Path.GetFullPath(profilePath));
 		return CommandLineExitCodes.Success;
 	}
 
@@ -127,7 +129,9 @@ public sealed class ProfileCommandHandler(
 				"The local project profile could not be reset.");
 		}
 
-		environment.Output.WriteLine(PathUtility.Normalize(projectPath));
+		TerminalTextEscaping.WriteSingleLine(
+			environment.Output,
+			PathUtility.Normalize(projectPath));
 		return CommandLineExitCodes.Success;
 	}
 

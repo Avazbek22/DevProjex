@@ -181,6 +181,11 @@ none
 `--exclude none` is an exact empty exclusion set. Repeating `none` is idempotent,
 but combining it with another exclusion is a usage error.
 
+For `analyze` and generated context content, `--hide-private-data` covers both
+selected file text and generated human-readable text such as trees and content
+headings. Stable machine metadata remains addressable: `project.root` is the
+absolute project path rather than a redacted display value.
+
 `--select` and `--select-from` form one explicit selected-path override. The
 latter reads UTF-8 source-relative entries, one per line, from a file or
 redirected stdin (`-`), ignores empty lines, and rejects interactive stdin.
@@ -227,6 +232,12 @@ and names it in `DEVPROJEX-NOTICE.txt`. `--dry-run` announces the same omission.
 Uninspected text is never emitted, a file left out of a copy is always named, and no
 result describes zero matches as safe or clean.
 
+On Linux and macOS, non-regular source entries such as FIFOs, sockets, and devices
+are never opened for content inspection and are reported with the `unreadable`
+classification. Redacted project copies leave them out and name them in the notice;
+an untransformed project copy rejects such an entry as an unavailable source instead
+of attempting a potentially blocking read.
+
 For v5 compatibility, `--exclude hide-secrets` remains parseable but is omitted
 from current help and completion choices. Resolution migrates it to the separate
 `selection.hideSecrets` Boolean and removes it from canonical
@@ -271,6 +282,12 @@ raw/template literals, heredocs, YAML block scalars, and multiline comments when
 not removed. XML and HTML whitespace inside text nodes is character data and remains. The three
 syntax transformations support all eight flag combinations and share one parse, merged plan,
 application, reverse parse, and structural gate.
+
+Every project copy that actually changes or omits content carries the reserved root file
+`DEVPROJEX-NOTICE.txt`. If the selected source root already contains that file, folder and ZIP
+exports fail with `DPX-EXPORT-RESERVED-NAME` rather than overwrite or duplicate it. Project
+`--dry-run` announces the notice for any effective `--compress-code`, `--strip-comments`, or
+`--strip-blank-lines` option, matching the real export contract.
 
 `gitignore` mode reads regular `.gitignore` files reachable in the selected working
 tree. When the selected path is below its owning repository/worktree root, the
@@ -774,6 +791,13 @@ stderr is the operational channel:
 
 Direct commands never prompt. JSON and XML stdout never contain ANSI, progress,
 spinner frames, tables, warning lines, result paths, or summaries.
+
+Human-readable file names, paths, and one-line success-path payloads are display
+values rather than reversible filesystem identifiers. Carriage return, line feed,
+tab, other control characters, U+2028, and U+2029 are escaped as `\\r`, `\\n`,
+`\\t`, or `\\uXXXX`, so one filesystem entry cannot inject terminal control or
+forge another output line. Structured JSON and XML path/name values keep their
+exact machine-readable values and rely on their serializers for escaping.
 
 `--dry-run` performs source planning plus destination safety and conflict
 validation, creates no file, directory, ZIP, staging path, or parent directory,

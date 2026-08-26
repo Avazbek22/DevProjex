@@ -36,6 +36,8 @@ public sealed class ProjectCopyExportService(
 			                           request.StripComments || request.StripBlankLines
 				? await PrepareRedactedOutputAsync(plan, request, cancellationToken).ConfigureAwait(false)
 				: null;
+			var transformationNotice = BuildTransformationNotice(prepared, plan, request.NoticeText);
+			ValidateTransformationNoticeCollision(plan, transformationNotice);
 			return request.Format switch
 			{
 				ProjectCopyExportFormat.Folder => await ExportFolderAsync(
@@ -44,7 +46,7 @@ public sealed class ProjectCopyExportService(
 					request.DestinationMode,
 					request.ConflictPolicy,
 					prepared,
-					request.NoticeText,
+					transformationNotice,
 					progress,
 					cancellationToken).ConfigureAwait(false),
 				ProjectCopyExportFormat.Zip => await ExportZipAsync(
@@ -53,7 +55,7 @@ public sealed class ProjectCopyExportService(
 					request.DestinationMode,
 					request.ConflictPolicy,
 					prepared,
-					request.NoticeText,
+					transformationNotice,
 					progress,
 					cancellationToken).ConfigureAwait(false),
 				_ => throw new ProjectCopyExportException(
@@ -130,6 +132,26 @@ public sealed class ProjectCopyExportService(
 	private static bool ShouldExcludeUnscannable(PreparedSecretRedactionOutput prepared) =>
 		prepared.Snapshot is not null;
 
+	private static void ValidateTransformationNoticeCollision(
+		ProjectCopyExportPlan plan,
+		string? transformationNotice)
+	{
+		if (transformationNotice is null)
+			return;
+
+		var sourceNoticePath = Path.Combine(plan.ProjectRootPath, TransformationNoticeFileName);
+		if (!Path.Exists(sourceNoticePath) &&
+		    !plan.Entries.Any(static entry =>
+			    PathComparer.Default.Equals(entry.RelativePath, TransformationNoticeFileName)))
+		{
+			return;
+		}
+
+		throw new ProjectCopyExportException(
+			ProjectCopyExportError.ReservedNoticeNameConflict,
+			$"The source project already contains the reserved file name '{TransformationNoticeFileName}'.");
+	}
+
 	private static bool IsExcludedFromCopy(
 		PreparedSecretRedactionOutput? prepared,
 		string sourcePath) =>
@@ -188,6 +210,7 @@ public sealed class ProjectCopyExportService(
 		FileContentClassification classification) => classification switch
 	{
 		FileContentClassification.TooLarge => noticeText.TooLargeReason,
+		FileContentClassification.Unreadable => noticeText.UnreadableReason,
 		FileContentClassification.UnsupportedEncoding => noticeText.UnsupportedEncodingReason,
 		_ => throw new ArgumentOutOfRangeException(nameof(classification), classification, null)
 	};
@@ -217,7 +240,8 @@ public sealed class ProjectCopyExportService(
 			localization["Compression.CopyNotice"],
 			localization["ProjectCopy.Notice.UnscannableExcluded"],
 			localization["Content.Redaction.Reason.TooLarge"],
-			localization["Content.Redaction.Reason.UnsupportedEncoding"]);
+			localization["Content.Redaction.Reason.UnsupportedEncoding"],
+			localization["Content.Classification.Unreadable"]);
 
 	public static void EnsureDestinationOutsideProject(string projectRootPath, string destinationPath)
 	{
@@ -247,7 +271,7 @@ public sealed class ProjectCopyExportService(
 		ProjectCopyDestinationMode destinationMode,
 		ProjectCopyConflictPolicy conflictPolicy,
 		PreparedSecretRedactionOutput? prepared,
-		ProjectCopyNoticeText? noticeText,
+		string? transformationNotice,
 		IProgress<ProjectCopyExportProgress>? progress,
 		CancellationToken cancellationToken)
 	{
@@ -333,7 +357,7 @@ public sealed class ProjectCopyExportService(
 				ReportProgress(progress, 0, 0, 0);
 
 			cancellationToken.ThrowIfCancellationRequested();
-			if (BuildTransformationNotice(prepared, plan, noticeText) is { } notice)
+			if (transformationNotice is { } notice)
 			{
 				await File.WriteAllTextAsync(
 						Path.Combine(stagingPath, TransformationNoticeFileName),
@@ -396,7 +420,7 @@ public sealed class ProjectCopyExportService(
 		ProjectCopyDestinationMode destinationMode,
 		ProjectCopyConflictPolicy conflictPolicy,
 		PreparedSecretRedactionOutput? prepared,
-		ProjectCopyNoticeText? noticeText,
+		string? transformationNotice,
 		IProgress<ProjectCopyExportProgress>? progress,
 		CancellationToken cancellationToken)
 	{
@@ -486,7 +510,7 @@ public sealed class ProjectCopyExportService(
 				if (totalEntries == 0)
 					ReportProgress(progress, 0, 0, 0);
 
-				if (BuildTransformationNotice(prepared, plan, noticeText) is { } notice)
+				if (transformationNotice is { } notice)
 				{
 					var noticeEntry = archive.CreateEntry(
 						BuildZipEntryName(plan.ProjectName, TransformationNoticeFileName, isDirectory: false),
@@ -1253,6 +1277,20 @@ public sealed class ProjectCopyExportService(
 			projectRootPath,
 			sourcePath,
 			new HashSet<string>(PathComparer.Default));
+		try
+		{
+			if (!UnixFileTypeInspector.IsRegularFile(sourcePath))
+				throw SourceUnavailable($"A source entry is not a regular file: {sourcePath}");
+		}
+		catch (ProjectCopyExportException)
+		{
+			throw;
+		}
+		catch (Exception exception) when (
+			exception is IOException or UnauthorizedAccessException)
+		{
+			throw SourceUnavailable($"A source file is no longer available: {sourcePath}", exception);
+		}
 		if (!File.Exists(sourcePath))
 			throw SourceUnavailable($"A source file is no longer available: {sourcePath}");
 	}

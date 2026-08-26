@@ -154,7 +154,7 @@ public sealed class AnalyzeCommandHandler(
 						plan.SourceRoot,
 						path))
 				.ConfigureAwait(false);
-			environment.Output.WriteLine(writtenPath);
+			TerminalTextEscaping.WriteSingleLine(environment.Output, writtenPath);
 		}
 
 		return plan.HasErrors ||

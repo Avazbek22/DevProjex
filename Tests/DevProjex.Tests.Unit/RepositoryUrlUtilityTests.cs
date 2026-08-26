@@ -28,8 +28,44 @@ public sealed class RepositoryUrlUtilityTests
 		Assert.True(RepositoryUrlUtility.AreEquivalent(left, right));
 		Assert.Equal(
 			RepositoryUrlUtility.GetComparisonKey(left),
-			RepositoryUrlUtility.GetComparisonKey(right),
-			ignoreCase: true);
+			RepositoryUrlUtility.GetComparisonKey(right));
+	}
+
+	[Theory]
+	[InlineData("https://GITHUB.com/Owner/Repo.git", "https://github.com/owner/repo")]
+	[InlineData("https://gitlab.com/Group/Repo.git", "git@gitlab.com:group/repo.git")]
+	[InlineData("https://BITBUCKET.org/Team/Repo.git", "https://bitbucket.org/team/repo")]
+	public void KnownRepositoryHostsUseCaseInsensitivePaths(string left, string right)
+	{
+		Assert.True(RepositoryUrlUtility.AreEquivalent(left, right));
+		Assert.Equal(
+			RepositoryUrlUtility.GetComparisonKey(left),
+			RepositoryUrlUtility.GetComparisonKey(right));
+	}
+
+	[Fact]
+	public void SelfHostedRepositoryUsesCaseInsensitiveHostAndCaseSensitivePath()
+	{
+		const string canonical = "https://Git.Example.test/Owner/Repo.git";
+
+		Assert.True(RepositoryUrlUtility.AreEquivalent(
+			canonical,
+			"https://git.example.test/Owner/Repo"));
+		Assert.False(RepositoryUrlUtility.AreEquivalent(
+			canonical,
+			"https://git.example.test/owner/repo"));
+		Assert.False(RepositoryUrlUtility.AreEquivalent(
+			canonical,
+			"https://git.example.test/Owner/Repo.GIT"));
+	}
+
+	[Fact]
+	public void ComparisonIdentityCarriesItsVersion()
+	{
+		Assert.StartsWith(
+			"v2:",
+			RepositoryUrlUtility.GetComparisonKey("https://example.com/Owner/Repo.git"),
+			StringComparison.Ordinal);
 	}
 
 	[Fact]

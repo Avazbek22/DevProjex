@@ -134,6 +134,7 @@ public sealed class SecretRedactionOutputPreparer
 							completed = true;
 							continue;
 						case FileContentClassification.TooLarge:
+						case FileContentClassification.Unreadable:
 						case FileContentClassification.UnsupportedEncoding:
 							// A per-file inspection limitation degrades that file, not the whole run.
 							// Redaction cannot promise anything about text it never decoded or fully read,
@@ -270,6 +271,20 @@ public sealed class SecretRedactionOutputPreparer
 			if (requiredInspectionScope?.GetContentInspectionMode(item.SourcePath) ==
 			    SecretContentInspectionMode.None)
 			{
+				continue;
+			}
+			if (IsUnsupportedNonRegularSource(context, item.SourcePath))
+			{
+				await foreach (var prepared in PrepareTransformationBatchAsync(
+				                   context,
+				                   transformationScope,
+				                   batch,
+				                   cancellationToken).ConfigureAwait(false))
+				{
+					yield return prepared;
+				}
+				batch.Clear();
+				yield return CreateUnreadableTransformationEntry(item);
 				continue;
 			}
 			if (SecretFileMetadata.Capture(item.SourcePath).Length > MaximumParallelScanFileBytes)
@@ -466,9 +481,13 @@ public sealed class SecretRedactionOutputPreparer
 		CompressionWorkItem item,
 		CancellationToken cancellationToken)
 	{
+		if (IsUnsupportedNonRegularSource(context, item.SourcePath))
+			return CreateUnreadableTransformationEntry(item);
 		EnsureSourcePathAvailable(context, item.SourcePath);
 		var coherentRead = await ReadFactCoherentlyAsync(item.SourcePath, cancellationToken)
 			.ConfigureAwait(false);
+		if (IsUnsupportedNonRegularSource(context, item.SourcePath))
+			return CreateUnreadableTransformationEntry(item, coherentRead.Metadata);
 		EnsureSourcePathAvailable(context, item.SourcePath);
 		var readFact = coherentRead.Fact;
 		var result = readFact.ToReadResult();
@@ -527,9 +546,18 @@ public sealed class SecretRedactionOutputPreparer
 		var prepared = new PreparedSecretFile?[orderedFilePaths.Count];
 		var parallelWork = new List<CompressionWorkItem>();
 		var serialWork = new List<CompressionWorkItem>();
+		var processedFiles = 0;
 		for (var index = 0; index < orderedFilePaths.Count; index++)
 		{
 			var workItem = new CompressionWorkItem(index, orderedFilePaths[index]);
+			if (IsUnsupportedNonRegularSource(context, workItem.SourcePath))
+			{
+				prepared[index] = PreparedSecretFile.Unscannable(
+					workItem.SourcePath,
+					FileContentClassification.Unreadable);
+				ReportProgress(progress, ++processedFiles, orderedFilePaths.Count);
+				continue;
+			}
 			if (SecretFileMetadata.Capture(workItem.SourcePath).Length <= MaximumParallelScanFileBytes)
 				parallelWork.Add(workItem);
 			else
@@ -537,7 +565,6 @@ public sealed class SecretRedactionOutputPreparer
 		}
 
 		using var transformationScope = context.BeginOutput(orderedFilePaths);
-		var processedFiles = 0;
 		try
 		{
 			if (parallelWork.Count > 0)
@@ -592,11 +619,16 @@ public sealed class SecretRedactionOutputPreparer
 			}
 
 			var snapshot = transformationScope.Compression?.Complete();
+			var unscannableFiles = prepared
+				.Where(static file => file?.IsUnscannable == true)
+				.Select(static file => new UnscannableFile(file!.SourcePath, file.Classification))
+				.ToArray();
 			return new PreparedSecretRedactionOutput(
 				workingDirectory.IsValueCreated ? workingDirectory.Value : null,
 				preparedFiles,
 				snapshot: null,
-				compressionSnapshot: snapshot);
+				compressionSnapshot: snapshot,
+				unscannableFiles: unscannableFiles);
 		}
 		catch
 		{
@@ -631,9 +663,13 @@ public sealed class SecretRedactionOutputPreparer
 		CancellationToken cancellationToken)
 	{
 		var sourcePath = workItem.SourcePath;
+		if (IsUnsupportedNonRegularSource(context, sourcePath))
+			return PreparedSecretFile.Unscannable(sourcePath, FileContentClassification.Unreadable);
 		EnsureSourcePathAvailable(context, sourcePath);
 		var coherentRead = await ReadFactCoherentlyAsync(sourcePath, cancellationToken)
 			.ConfigureAwait(false);
+		if (IsUnsupportedNonRegularSource(context, sourcePath))
+			return PreparedSecretFile.Unscannable(sourcePath, FileContentClassification.Unreadable);
 		EnsureSourcePathAvailable(context, sourcePath);
 		var readFact = coherentRead.Fact;
 		var result = readFact.ToReadResult();
@@ -696,18 +732,17 @@ public sealed class SecretRedactionOutputPreparer
 		IReadOnlyList<string> orderedFilePaths)
 	{
 		foreach (var sourcePath in orderedFilePaths)
-			EnsureSourcePathAvailable(context, sourcePath);
+		{
+			if (!IsUnsupportedNonRegularSource(context, sourcePath))
+				EnsureSourcePathAvailable(context, sourcePath);
+		}
 	}
 
 	private static void EnsureSourcePathAvailable(
 		ContentTransformationContext context,
 		string sourcePath)
 	{
-		var projectRoot = context.Redaction?.ProjectRoot ?? context.Compression?.ProjectRoot;
-		if (projectRoot is null)
-			return;
-
-		var classification = ProjectSourcePathPolicy.ClassifyUnavailable(projectRoot, sourcePath);
+		var classification = ClassifySourcePath(context, sourcePath);
 		if (classification is null)
 			return;
 
@@ -722,6 +757,37 @@ public sealed class SecretRedactionOutputPreparer
 				$"Content transformation could not safely inspect '{sourcePath}' ({classification.Value}).")
 		};
 	}
+
+	private static FileContentClassification? ClassifySourcePath(
+		ContentTransformationContext context,
+		string sourcePath)
+	{
+		var projectRoot = context.Redaction?.ProjectRoot ?? context.Compression?.ProjectRoot;
+		return projectRoot is null
+			? null
+			: ProjectSourcePathPolicy.ClassifyUnavailable(projectRoot, sourcePath);
+	}
+
+	private static bool IsUnsupportedNonRegularSource(
+		ContentTransformationContext context,
+		string sourcePath)
+	{
+		var projectRoot = context.Redaction?.ProjectRoot ?? context.Compression?.ProjectRoot;
+		return projectRoot is not null &&
+		       ProjectSourcePathPolicy.IsUnsupportedNonRegularFile(projectRoot, sourcePath);
+	}
+
+	private static PreparedTransformationEntry CreateUnreadableTransformationEntry(
+		CompressionWorkItem item,
+		SecretFileMetadata? metadata = null) =>
+		new(
+			item.Index,
+			item.SourcePath,
+			metadata ?? SecretFileMetadata.Capture(item.SourcePath),
+			new FileContentReadResult(FileContentClassification.Unreadable),
+			new CodeCompressionResult(string.Empty, ContentTransformMap.Identity),
+			sourceFingerprint: null,
+			contentLease: null);
 
 	private readonly record struct CompressionWorkItem(int Index, string SourcePath);
 
@@ -1042,6 +1108,7 @@ public sealed class SecretRedactionOutputPreparer
 					redactionScope.AnalyzeBinary(prepared.SourcePath, prepared.Metadata);
 					break;
 				case FileContentClassification.TooLarge:
+				case FileContentClassification.Unreadable:
 				case FileContentClassification.UnsupportedEncoding:
 					redactionScope.AnalyzeUnscannable(
 						prepared.SourcePath,
@@ -1166,6 +1233,7 @@ public sealed class SecretRedactionOutputPreparer
 						redactionScope.AnalyzeBinary(prepared.SourcePath, prepared.Metadata);
 						break;
 					case FileContentClassification.TooLarge:
+					case FileContentClassification.Unreadable:
 					case FileContentClassification.UnsupportedEncoding:
 						redactionScope.AnalyzeUnscannable(
 							prepared.SourcePath,
@@ -1442,6 +1510,7 @@ public sealed class SecretRedactionOutputPreparer
 			case FileContentClassification.Binary:
 				return scope.StoreBinary(sourcePath, metadata);
 			case FileContentClassification.TooLarge:
+			case FileContentClassification.Unreadable:
 			case FileContentClassification.UnsupportedEncoding:
 				// This scan only feeds the count on the checkbox. One file it may not read is a
 				// reason to leave that file out of the count, never to refuse the whole project -
@@ -1676,6 +1745,7 @@ public sealed record PreparedSecretFile(
 	/// redaction was ever planned for it. Its source content must not be served by prepared outputs.
 	/// </summary>
 	public bool IsUnscannable => Classification is FileContentClassification.TooLarge or
+		FileContentClassification.Unreadable or
 		FileContentClassification.UnsupportedEncoding;
 
 	public int RedactedCount => Redactions.Count;
@@ -1744,6 +1814,7 @@ public sealed record PreparedSecretFile(
 		FileContentClassification classification)
 	{
 		if (classification is not (FileContentClassification.TooLarge or
+		    FileContentClassification.Unreadable or
 		    FileContentClassification.UnsupportedEncoding))
 		{
 			throw new ArgumentOutOfRangeException(nameof(classification), classification, null);

@@ -553,7 +553,7 @@ public sealed class McpInfrastructureTests
 		var actual = await Assert.ThrowsAsync<InvalidOperationException>(() => registry.CreateAsync(
 			async (stream, _) =>
 			{
-				var path = ((FileStream)stream).Name;
+				var path = Assert.Single(Directory.EnumerateFiles(registry.SessionDirectory, "*.pack"));
 				await stream.DisposeAsync();
 				File.Delete(path);
 				Directory.CreateDirectory(path);
@@ -577,6 +577,89 @@ public sealed class McpInfrastructureTests
 		registry.Remove(packId);
 
 		Assert.True(Directory.Exists(path));
+	}
+
+	[Fact]
+	public async Task PackStorageEnforcesSinglePackLimitWhileWriting()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var registry = new McpPackRegistry(
+			workspace.Path,
+			timeProvider: null,
+			maximumPackBytes: 8,
+			maximumSessionBytes: 16);
+
+		var exception = await Assert.ThrowsAsync<McpToolException>(() => registry.CreateAsync(
+			async (stream, token) => await stream.WriteAsync(new byte[9], token),
+			TestContext.Current.CancellationToken));
+
+		Assert.Equal(McpErrorCodes.PackTooLarge, exception.Code);
+		Assert.Empty(Directory.EnumerateFiles(registry.SessionDirectory, "*.pack"));
+	}
+
+	[Fact]
+	public async Task PackStorageAccountsForConcurrentSessionReservationsAtomically()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var registry = new McpPackRegistry(
+			workspace.Path,
+			timeProvider: null,
+			maximumPackBytes: 8,
+			maximumSessionBytes: 10);
+		var bothWritersReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var readyWriters = 0;
+
+		Task<McpPackDocument> CreatePackAsync() => registry.CreateAsync(
+			async (stream, token) =>
+			{
+				if (Interlocked.Increment(ref readyWriters) == 2)
+					bothWritersReady.TrySetResult();
+				await bothWritersReady.Task.WaitAsync(token);
+				await stream.WriteAsync(new byte[6], token);
+			},
+			TestContext.Current.CancellationToken);
+		static async Task<object> CaptureAsync(Task<McpPackDocument> task)
+		{
+			try
+			{
+				return await task;
+			}
+			catch (Exception exception)
+			{
+				return exception;
+			}
+		}
+
+		var results = await Task.WhenAll(
+			CaptureAsync(CreatePackAsync()),
+			CaptureAsync(CreatePackAsync()));
+
+		Assert.Single(results, static result => result is McpPackDocument);
+		var failure = Assert.IsType<McpToolException>(Assert.Single(results, static result => result is Exception));
+		Assert.Equal(McpErrorCodes.PackTooLarge, failure.Code);
+		Assert.Single(Directory.EnumerateFiles(registry.SessionDirectory, "*.pack"));
+	}
+
+	[Fact]
+	public async Task RemovingAbandonedPackReclaimsSessionQuota()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var registry = new McpPackRegistry(
+			workspace.Path,
+			timeProvider: null,
+			maximumPackBytes: 8,
+			maximumSessionBytes: 8);
+		var abandoned = await registry.CreateAsync(
+			async (stream, token) => await stream.WriteAsync(new byte[8], token),
+			TestContext.Current.CancellationToken);
+
+		registry.Remove(abandoned.Id);
+		var replacement = await registry.CreateAsync(
+			async (stream, token) => await stream.WriteAsync(new byte[8], token),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(8, replacement.Bytes);
+		Assert.Single(Directory.EnumerateFiles(registry.SessionDirectory, "*.pack"));
 	}
 
 	[Fact]

@@ -310,7 +310,7 @@ public partial class MainWindow : Window
         {
             _awaitingSystemDialogActivation = false;
             _systemDialogActivationTcs = null;
-            await ShowErrorAsync(ex.Message);
+            await ShowErrorAsync(ResolveDesktopExceptionMessage(ex));
         }
     }
 
@@ -320,10 +320,9 @@ public partial class MainWindow : Window
         if (launchResult.Succeeded)
             return;
 
-        var details = string.IsNullOrWhiteSpace(launchResult.ErrorMessage)
-            ? "No launch candidate was available."
-            : launchResult.ErrorMessage;
-        await ShowErrorAsync(_localization.Format("Msg.NewWindowLaunchFailed", details));
+        await ShowErrorAsync(DesktopExceptionPresentation.FormatNewWindowLaunchFailure(
+            _localization,
+            launchResult));
     }
 
     private async void OnRefresh(object? sender, RoutedEventArgs e)
@@ -368,7 +367,7 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             _statusOperations.Complete(statusOperationId);
-            await ShowErrorAsync(ex.Message);
+            await ShowErrorAsync(ResolveDesktopExceptionMessage(ex));
         }
         finally
         {
@@ -2311,115 +2310,5 @@ public partial class MainWindow : Window
 				_viewModel.TreeNodes,
 				_currentTree.Root,
 				_currentTree.OrderedFilePaths);
-
-    /// <summary>
-    /// Validates that URL looks like a valid Git repository URL.
-    /// Accepts URLs from common Git hosting services (GitHub, GitLab, Bitbucket, etc.)
-    /// or any URL ending with .git
-    /// </summary>
-    private static bool IsValidGitRepositoryUrl(string url)
-    {
-        if (string.IsNullOrWhiteSpace(url))
-            return false;
-
-        try
-        {
-            // Try to parse as URI
-            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
-                return false;
-
-            // Must be HTTP or HTTPS
-            if (uri.Scheme != "http" && uri.Scheme != "https")
-                return false;
-
-            var host = uri.Host.ToLowerInvariant();
-            var path = uri.AbsolutePath.ToLowerInvariant();
-
-            // Check for common Git hosting services
-            var validHosts = new[]
-            {
-                "github.com",
-                "gitlab.com",
-                "bitbucket.org",
-                "gitea.com",
-                "codeberg.org",
-                "sourceforge.net",
-                "git.sr.ht"
-            };
-
-            // Allow subdomains (e.g., gitlab.mycompany.com)
-            var isKnownHost = validHosts.Any(h => host == h || host.EndsWith("." + h));
-
-            // Or URL ends with .git extension
-            var hasGitExtension = path.EndsWith(".git");
-
-            // Or contains /git/ in path (common for self-hosted instances)
-            var hasGitInPath = path.Contains("/git/");
-
-            return isKnownHost || hasGitExtension || hasGitInPath;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    /// <summary>
-    /// Checks if internet connection is available by attempting to connect to reliable hosts.
-    /// Returns true if connection successful, false otherwise.
-    /// This is a simple check - we try to resolve DNS and connect to well-known hosts.
-    /// </summary>
-    private static async Task<bool> CheckInternetConnectionAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            // Try to connect to multiple reliable hosts to avoid false negatives
-            // Use different providers to increase reliability
-            var hosts = new[]
-            {
-                "https://www.github.com",
-                "https://www.google.com",
-                "https://www.cloudflare.com"
-            };
-
-            using var httpClient = new HttpClient
-            {
-                Timeout = TimeSpan.FromSeconds(5)
-            };
-
-            // Try each host - if any succeeds, we have internet
-            foreach (var host in hosts)
-            {
-                try
-                {
-                    using var response = await httpClient.GetAsync(host, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-                    // If we get any response (even error status codes), it means we have connectivity
-                    return true;
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    throw;
-                }
-                catch
-                {
-                    // Try next host
-                    continue;
-                }
-            }
-
-            // All hosts failed
-            return false;
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch
-        {
-            // If exception occurs, assume no internet
-            return false;
-        }
-    }
-
 
 }

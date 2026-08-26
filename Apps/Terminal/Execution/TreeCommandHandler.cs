@@ -41,7 +41,7 @@ public sealed class TreeCommandHandler(
 				cancellationToken,
 				path => ExactOutputDestinationValidator.ValidateAnalysis(plan.SourceRoot, path))
 			.ConfigureAwait(false);
-		environment.Output.WriteLine(writtenPath);
+		TerminalTextEscaping.WriteSingleLine(environment.Output, writtenPath);
 		return CommandLineExitCodes.Success;
 	}
 

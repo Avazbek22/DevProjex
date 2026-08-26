@@ -124,7 +124,7 @@ public sealed class ExportContextCommandHandler(
 						path,
 						request.Force)))
 			.ConfigureAwait(false);
-		environment.Output.WriteLine(writtenPath);
+		TerminalTextEscaping.WriteSingleLine(environment.Output, writtenPath);
 		if (writeReport is not null)
 		{
 			UnscannableFileOutput.Write(

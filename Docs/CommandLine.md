@@ -164,6 +164,9 @@ files are not inspected, and no findings is not a security guarantee. See
 `--hide-private-data` is another independent, opt-in transformation. It detects the
 phase-one email, global IP, local-user path, MAC-address, and international-phone
 rules in selected text files. An explicit `false` overrides a portable profile.
+For `analyze` and context output, it also covers generated human-readable content,
+including tree text and content headings. Machine metadata such as `project.root`
+remains the absolute project address so automated consumers can identify the source.
 No findings is not a privacy guarantee. See
 [HidePrivateData.md](HidePrivateData.md).
 

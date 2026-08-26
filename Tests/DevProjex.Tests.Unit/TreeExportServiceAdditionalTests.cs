@@ -59,6 +59,32 @@ public sealed class TreeExportServiceAdditionalTests
 			new HashSet<string> { "/missing" }));
 	}
 
+	[Theory]
+	[InlineData(TreeTextFormat.Json)]
+	[InlineData(TreeTextFormat.Xml)]
+	public void BuildFullTree_DeepStructuredTreeDoesNotDependOnTheCallStack(
+		TreeTextFormat format)
+	{
+		const int depth = 2_048;
+		var root = new TreeNodeDescriptor("leaf.txt", "/leaf.txt", false, false, "file", []);
+		for (var level = depth - 1; level >= 0; level--)
+		{
+			root = new TreeNodeDescriptor(
+				$"level-{level:D4}",
+				$"/level-{level:D4}",
+				true,
+				false,
+				"folder",
+				[root]);
+		}
+
+		var output = new TreeExportService().BuildFullTree("/", root, format);
+
+		Assert.Contains("level-0001", output, StringComparison.Ordinal);
+		Assert.Contains($"level-{depth - 1:D4}", output, StringComparison.Ordinal);
+		Assert.Contains("leaf.txt", output, StringComparison.Ordinal);
+	}
+
 	[Fact]
 	// Verifies full tree output includes root path and top-level display name.
 	public void BuildFullTree_IncludesRootHeader()

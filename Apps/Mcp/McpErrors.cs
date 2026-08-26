@@ -5,6 +5,7 @@ internal static class McpErrorCodes
 	public const string RootViolation = "DPX-MCP-ROOT-VIOLATION";
 	public const string UnknownProject = "DPX-MCP-UNKNOWN-PROJECT";
 	public const string PackExpired = "DPX-MCP-PACK-EXPIRED";
+	public const string PackTooLarge = "DPX-MCP-PACK-TOO-LARGE";
 	public const string InvalidRange = "DPX-MCP-INVALID-RANGE";
 	public const string InvalidPattern = "DPX-MCP-INVALID-PATTERN";
 	public const string PayloadTruncated = "DPX-MCP-PAYLOAD-TRUNCATED";

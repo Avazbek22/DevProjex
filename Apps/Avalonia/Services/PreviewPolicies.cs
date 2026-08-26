@@ -104,11 +104,10 @@ internal static class PreviewWarmupPolicy
         if (selectionPlan is null || maxNodeCount <= 0)
             return null;
 
-        var remainingNodeCount = maxNodeCount;
-        return selectionPlan.SelectedRoot is not null
-            ? CloneSelectedNode(selectionPlan.SelectedRoot, ref remainingNodeCount)
-            // The final tree preview falls back to the full tree when every captured path is stale.
-            : CloneWholeSubtree(selectionPlan.Root, ref remainingNodeCount);
+        return CloneBoundedTree(
+            selectionPlan.SelectedRoot,
+            selectionPlan.Root,
+            maxNodeCount);
     }
 
     public static int CountSelectedFilesUpToLimit(
@@ -326,77 +325,92 @@ internal static class PreviewWarmupPolicy
         }
     }
 
-    private static TreeNodeDescriptor? CloneSelectedNode(
-        PreviewWarmupSelectedNode selectedNode,
-        ref int remainingNodeCount)
+    private static TreeNodeDescriptor CloneBoundedTree(
+        PreviewWarmupSelectedNode? selectedRoot,
+        TreeNodeDescriptor fallbackRoot,
+        int maximumNodeCount)
     {
-        if (remainingNodeCount <= 0)
-            return null;
+        var root = selectedRoot?.Source ?? fallbackRoot;
+        var remainingNodeCount = maximumNodeCount - 1;
+        if (!root.IsDirectory || remainingNodeCount == 0)
+            return root with { Children = [] };
 
-        var node = selectedNode.Source;
-        remainingNodeCount--;
-        if (!node.IsDirectory || remainingNodeCount == 0)
-            return node with { Children = [] };
+        var frames = new Stack<PreviewTreeCloneFrame>();
+        frames.Push(new PreviewTreeCloneFrame(root, selectedRoot));
+        TreeNodeDescriptor? completedTree = null;
 
-        if (selectedNode.IncludesWholeSubtree)
+        while (frames.TryPeek(out var frame))
         {
-            var wholeChildren = CloneWholeChildren(
-                node.Children,
-                ref remainingNodeCount);
-            return node with { Children = wholeChildren };
+            if (remainingNodeCount > 0 && frame.TryTakeNextChild(out var child, out var selectedChild))
+            {
+                remainingNodeCount--;
+                if (!child.IsDirectory || remainingNodeCount == 0)
+                {
+                    frame.Children.Add(child with { Children = [] });
+                    continue;
+                }
+
+                frames.Push(new PreviewTreeCloneFrame(child, selectedChild));
+                continue;
+            }
+
+            var completedNode = frame.Source with { Children = frame.Children };
+            frames.Pop();
+            if (frames.TryPeek(out var parent))
+                parent.Children.Add(completedNode);
+            else
+                completedTree = completedNode;
         }
 
-        var children = new List<TreeNodeDescriptor>(
-            Math.Min(selectedNode.Children.Count, remainingNodeCount));
-        foreach (var selectedChild in selectedNode.Children)
-        {
-            var projectedChild = CloneSelectedNode(
-                selectedChild,
-                ref remainingNodeCount);
-            if (projectedChild is not null)
-                children.Add(projectedChild);
-            if (remainingNodeCount == 0)
-                break;
-        }
-
-        return node with { Children = children };
+        return completedTree!;
     }
 
-    private static TreeNodeDescriptor? CloneWholeSubtree(
-        TreeNodeDescriptor node,
-        ref int remainingNodeCount)
+    private sealed class PreviewTreeCloneFrame(
+        TreeNodeDescriptor source,
+        PreviewWarmupSelectedNode? selectedNode)
     {
-        if (remainingNodeCount <= 0)
-            return null;
+        private readonly IReadOnlyList<TreeNodeDescriptor>? _wholeChildren =
+            selectedNode is null || selectedNode.IncludesWholeSubtree
+                ? source.Children
+                : null;
+        private readonly IReadOnlyList<PreviewWarmupSelectedNode>? _selectedChildren =
+            selectedNode is not null && !selectedNode.IncludesWholeSubtree
+                ? selectedNode.Children
+                : null;
+        private int _nextChildIndex;
 
-        remainingNodeCount--;
-        if (!node.IsDirectory || remainingNodeCount == 0)
-            return node with { Children = [] };
+        public TreeNodeDescriptor Source { get; } = source;
+        public List<TreeNodeDescriptor> Children { get; } = [];
 
-        var children = CloneWholeChildren(
-            node.Children,
-            ref remainingNodeCount);
-        return node with { Children = children };
-    }
-
-    private static IReadOnlyList<TreeNodeDescriptor> CloneWholeChildren(
-        IReadOnlyList<TreeNodeDescriptor> sourceChildren,
-        ref int remainingNodeCount)
-    {
-        var children = new List<TreeNodeDescriptor>(
-            Math.Min(sourceChildren.Count, remainingNodeCount));
-        foreach (var child in sourceChildren)
+        public bool TryTakeNextChild(
+            out TreeNodeDescriptor child,
+            out PreviewWarmupSelectedNode? selectedChild)
         {
-            var clonedChild = CloneWholeSubtree(
-                child,
-                ref remainingNodeCount);
-            if (clonedChild is not null)
-                children.Add(clonedChild);
-            if (remainingNodeCount == 0)
-                break;
-        }
+            if (_wholeChildren is not null)
+            {
+                if (_nextChildIndex >= _wholeChildren.Count)
+                {
+                    child = null!;
+                    selectedChild = null;
+                    return false;
+                }
 
-        return children;
+                child = _wholeChildren[_nextChildIndex++];
+                selectedChild = null;
+                return true;
+            }
+
+            if (_selectedChildren is not null && _nextChildIndex < _selectedChildren.Count)
+            {
+                selectedChild = _selectedChildren[_nextChildIndex++];
+                child = selectedChild.Source;
+                return true;
+            }
+
+            child = null!;
+            selectedChild = null;
+            return false;
+        }
     }
 
     private static SelectionPathTrieNode BuildSelectionTrie(
