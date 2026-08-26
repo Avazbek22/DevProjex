@@ -42,8 +42,26 @@ public sealed class TreeExportService
 		TreeTextFormat format,
 		string? displayRootPath = null,
 		string? displayRootName = null,
-		bool includeRootPath = true)
+		bool includeRootPath = true) =>
+		BuildFullTreeWithCancellation(
+			rootPath,
+			root,
+			format,
+			displayRootPath,
+			displayRootName,
+			includeRootPath,
+			CancellationToken.None);
+
+	public string BuildFullTreeWithCancellation(
+		string rootPath,
+		TreeNodeDescriptor root,
+		TreeTextFormat format,
+		string? displayRootPath,
+		string? displayRootName,
+		bool includeRootPath,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		ValidateFormat(format);
 		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath) ? rootPath : displayRootPath;
 		var outputRootName = ResolveRootDisplayName(root, displayRootName);
@@ -51,16 +69,16 @@ public sealed class TreeExportService
 		return format switch
 		{
 			TreeTextFormat.Ascii =>
-				BuildFullTreeAscii(outputRootPath, outputRootName, root, includeRootPath),
+				BuildFullTreeAscii(outputRootPath, outputRootName, root, includeRootPath, cancellationToken),
 			TreeTextFormat.Json => includeRootPath
-				? BuildFullTreeJson(outputRootPath, root)
-				: BuildNamedTreeJson(outputRootName, root),
+				? BuildFullTreeJson(outputRootPath, root, cancellationToken)
+				: BuildNamedTreeJson(outputRootName, root, cancellationToken),
 			TreeTextFormat.Xml => includeRootPath
-				? BuildFullTreeXml(outputRootPath, root)
-				: BuildNamedTreeXml(outputRootName, root),
+				? BuildFullTreeXml(outputRootPath, root, cancellationToken)
+				: BuildNamedTreeXml(outputRootName, root, cancellationToken),
 			TreeTextFormat.Markdown => includeRootPath
-				? BuildFullTreeMarkdown(outputRootPath, root)
-				: BuildNamedTreeMarkdown(outputRootName, root),
+				? BuildFullTreeMarkdown(outputRootPath, root, cancellationToken)
+				: BuildNamedTreeMarkdown(outputRootName, root, cancellationToken),
 			_ => throw new ArgumentOutOfRangeException(nameof(format), format, null)
 		};
 	}
@@ -70,8 +88,24 @@ public sealed class TreeExportService
 		TreeNodeDescriptor root,
 		string? displayRootPath = null,
 		string? displayRootName = null,
-		bool includeRootPath = true)
+		bool includeRootPath = true) =>
+		BuildFullTreePlainWithCancellation(
+			rootPath,
+			root,
+			displayRootPath,
+			displayRootName,
+			includeRootPath,
+			CancellationToken.None);
+
+	public string BuildFullTreePlainWithCancellation(
+		string rootPath,
+		TreeNodeDescriptor root,
+		string? displayRootPath,
+		string? displayRootName,
+		bool includeRootPath,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		var outputRootPath = EscapeTextValue(string.IsNullOrWhiteSpace(displayRootPath)
 			? rootPath
 			: displayRootPath);
@@ -82,12 +116,12 @@ public sealed class TreeExportService
 			output.Append(outputRootPath).AppendLine(":");
 			output.AppendLine();
 			output.Append(PlainBranchMiddle).AppendLine(outputRootName);
-			AppendPlain(root, PlainIndentPipe, output);
+			AppendPlain(root, PlainIndentPipe, output, cancellationToken);
 		}
 		else
 		{
 			output.AppendLine(outputRootName);
-			AppendPlain(root, string.Empty, output);
+			AppendPlain(root, string.Empty, output, cancellationToken);
 		}
 		return output.ToString();
 	}
@@ -179,7 +213,8 @@ public sealed class TreeExportService
 		string outputRootPath,
 		string outputRootName,
 		TreeNodeDescriptor root,
-		bool includeRootPath = true)
+		bool includeRootPath,
+		CancellationToken cancellationToken)
 	{
 		outputRootPath = EscapeTextValue(outputRootPath);
 		outputRootName = EscapeTextValue(outputRootName);
@@ -189,12 +224,12 @@ public sealed class TreeExportService
 			sb.Append(outputRootPath).AppendLine(":");
 			sb.AppendLine();
 			sb.Append("├── ").AppendLine(outputRootName);
-			AppendAscii(root, "│   ", sb);
+			AppendAscii(root, "│   ", sb, cancellationToken);
 		}
 		else
 		{
 			sb.AppendLine(outputRootName);
-			AppendAscii(root, string.Empty, sb);
+			AppendAscii(root, string.Empty, sb, cancellationToken);
 		}
 
 		return sb.ToString();
@@ -226,11 +261,29 @@ public sealed class TreeExportService
 		IReadOnlySet<string> selectedPaths,
 		TreeTextFormat format,
 		string? displayRootPath = null,
-		string? displayRootName = null)
+		string? displayRootName = null) =>
+		BuildSelectedTreeWithCancellation(
+			rootPath,
+			root,
+			selectedPaths,
+			format,
+			displayRootPath,
+			displayRootName,
+			CancellationToken.None);
+
+	public string BuildSelectedTreeWithCancellation(
+		string rootPath,
+		TreeNodeDescriptor root,
+		IReadOnlySet<string> selectedPaths,
+		TreeTextFormat format,
+		string? displayRootPath,
+		string? displayRootName,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		ValidateFormat(format);
 		var includedPaths = new HashSet<string>(PathComparer.Default);
-		if (!CollectIncludedPaths(root, selectedPaths, includedPaths))
+		if (!CollectIncludedPaths(root, selectedPaths, includedPaths, cancellationToken))
 			return string.Empty;
 
 		return BuildSelectedTreeFromIncludedPaths(
@@ -239,7 +292,8 @@ public sealed class TreeExportService
 			includedPaths,
 			format,
 			displayRootPath,
-			displayRootName);
+			displayRootName,
+			cancellationToken);
 	}
 
 	private static string BuildSelectedTreeFromIncludedPaths(
@@ -248,7 +302,8 @@ public sealed class TreeExportService
 		IReadOnlySet<string> includedPaths,
 		TreeTextFormat format,
 		string? displayRootPath,
-		string? displayRootName)
+		string? displayRootName,
+		CancellationToken cancellationToken)
 	{
 		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath) ? rootPath : displayRootPath;
 		var outputRootName = ResolveRootDisplayName(root, displayRootName);
@@ -256,10 +311,10 @@ public sealed class TreeExportService
 		return format switch
 		{
 			TreeTextFormat.Ascii =>
-				BuildSelectedTreeAscii(outputRootPath, outputRootName, root, includedPaths),
-			TreeTextFormat.Json => BuildSelectedTreeJson(outputRootPath, root, includedPaths),
-			TreeTextFormat.Xml => BuildSelectedTreeXml(outputRootPath, root, includedPaths),
-			TreeTextFormat.Markdown => BuildSelectedTreeMarkdown(outputRootPath, root, includedPaths),
+				BuildSelectedTreeAscii(outputRootPath, outputRootName, root, includedPaths, cancellationToken),
+			TreeTextFormat.Json => BuildSelectedTreeJson(outputRootPath, root, includedPaths, cancellationToken),
+			TreeTextFormat.Xml => BuildSelectedTreeXml(outputRootPath, root, includedPaths, cancellationToken),
+			TreeTextFormat.Markdown => BuildSelectedTreeMarkdown(outputRootPath, root, includedPaths, cancellationToken),
 			_ => throw new ArgumentOutOfRangeException(nameof(format), format, null)
 		};
 	}
@@ -268,7 +323,8 @@ public sealed class TreeExportService
 		string outputRootPath,
 		string outputRootName,
 		TreeNodeDescriptor root,
-		IReadOnlySet<string> includedPaths)
+		IReadOnlySet<string> includedPaths,
+		CancellationToken cancellationToken)
 	{
 		outputRootPath = EscapeTextValue(outputRootPath);
 		outputRootName = EscapeTextValue(outputRootName);
@@ -277,7 +333,7 @@ public sealed class TreeExportService
 		sb.AppendLine();
 
 		sb.Append("├── ").AppendLine(outputRootName);
-		AppendSelectedAscii(root, includedPaths, "│   ", sb);
+		AppendSelectedAscii(root, includedPaths, "│   ", sb, cancellationToken);
 
 		return sb.ToString();
 	}
@@ -292,7 +348,7 @@ public sealed class TreeExportService
 	{
 		ValidateFormat(format);
 		var includedPaths = new HashSet<string>(PathComparer.Default);
-		if (!CollectIncludedPaths(root, selectedPaths, includedPaths))
+		if (!CollectIncludedPaths(root, selectedPaths, includedPaths, CancellationToken.None))
 			return ExportOutputMetrics.Empty;
 
 		if (format != TreeTextFormat.Ascii)
@@ -303,7 +359,8 @@ public sealed class TreeExportService
 					includedPaths,
 					format,
 					displayRootPath,
-					displayRootName));
+					displayRootName,
+					CancellationToken.None));
 
 		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath) ? rootPath : displayRootPath;
 		var outputRootName = ResolveRootDisplayName(root, displayRootName);
@@ -339,8 +396,12 @@ public sealed class TreeExportService
 		}
 	}
 
-	private static void AppendAscii(TreeNodeDescriptor node, string indent, StringBuilder sb)
-		=> AppendAsciiCore(node, includedPaths: null, indent, sb, plain: false);
+	private static void AppendAscii(
+		TreeNodeDescriptor node,
+		string indent,
+		StringBuilder sb,
+		CancellationToken cancellationToken) =>
+		AppendAsciiCore(node, includedPaths: null, indent, sb, plain: false, cancellationToken);
 
 	private static async Task WriteFullTreeTextAsync(
 		TextWriter destination,
@@ -515,23 +576,31 @@ public sealed class TreeExportService
 	private static void AppendPlain(
 		TreeNodeDescriptor node,
 		string indent,
-		StringBuilder output)
-		=> AppendAsciiCore(node, includedPaths: null, indent, output, plain: true);
+		StringBuilder output,
+		CancellationToken cancellationToken) =>
+		AppendAsciiCore(node, includedPaths: null, indent, output, plain: true, cancellationToken);
 
-	private static void AppendSelectedAscii(TreeNodeDescriptor node, IReadOnlySet<string> selectedPaths, string indent, StringBuilder sb)
-		=> AppendAsciiCore(node, selectedPaths, indent, sb, plain: false);
+	private static void AppendSelectedAscii(
+		TreeNodeDescriptor node,
+		IReadOnlySet<string> selectedPaths,
+		string indent,
+		StringBuilder sb,
+		CancellationToken cancellationToken) =>
+		AppendAsciiCore(node, selectedPaths, indent, sb, plain: false, cancellationToken);
 
 	private static void AppendAsciiCore(
 		TreeNodeDescriptor node,
 		IReadOnlySet<string>? includedPaths,
 		string indent,
 		StringBuilder output,
-		bool plain)
+		bool plain,
+		CancellationToken cancellationToken)
 	{
 		var pending = new Stack<AsciiTreeWriteOperation>();
-		PushAsciiChildren(pending, node, includedPaths, indent);
+		PushAsciiChildren(pending, node, includedPaths, indent, cancellationToken);
 		while (pending.TryPop(out var operation))
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			output
 				.Append(operation.Indent)
 				.Append(operation.IsLast
@@ -546,7 +615,7 @@ public sealed class TreeExportService
 				operation.IsLast
 					? IndentSpace
 					: plain ? PlainIndentPipe : IndentPipe);
-			PushAsciiChildren(pending, operation.Node, includedPaths, nextIndent);
+			PushAsciiChildren(pending, operation.Node, includedPaths, nextIndent, cancellationToken);
 		}
 	}
 
@@ -554,11 +623,13 @@ public sealed class TreeExportService
 		Stack<AsciiTreeWriteOperation> pending,
 		TreeNodeDescriptor parent,
 		IReadOnlySet<string>? includedPaths,
-		string indent)
+		string indent,
+		CancellationToken cancellationToken)
 	{
 		var isLast = true;
 		for (var index = parent.Children.Count - 1; index >= 0; index--)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			var child = parent.Children[index];
 			if (includedPaths is not null && !includedPaths.Contains(child.FullPath))
 				continue;
@@ -570,15 +641,17 @@ public sealed class TreeExportService
 
 	private static string BuildFullTreeJson(
 		string localRootPath,
-		TreeNodeDescriptor root)
+		TreeNodeDescriptor root,
+		CancellationToken cancellationToken)
 	{
-		return BuildJsonDocument(localRootPath, root, includedPaths: null);
+		return BuildJsonDocument(localRootPath, root, includedPaths: null, cancellationToken);
 	}
 
 	private static string BuildSelectedTreeJson(
 		string localRootPath,
 		TreeNodeDescriptor root,
-		IReadOnlySet<string> includedPaths)
+		IReadOnlySet<string> includedPaths,
+		CancellationToken cancellationToken)
 	{
 		if (!includedPaths.Contains(root.FullPath) &&
 		    !HasIncludedChild(root.Children, includedPaths))
@@ -586,20 +659,22 @@ public sealed class TreeExportService
 			return string.Empty;
 		}
 
-		return BuildJsonDocument(localRootPath, root, includedPaths);
+		return BuildJsonDocument(localRootPath, root, includedPaths, cancellationToken);
 	}
 
 	private static string BuildFullTreeXml(
 		string localRootPath,
-		TreeNodeDescriptor root)
+		TreeNodeDescriptor root,
+		CancellationToken cancellationToken)
 	{
-		return BuildXmlDocument(localRootPath, root, includedPaths: null);
+		return BuildXmlDocument(localRootPath, root, includedPaths: null, cancellationToken);
 	}
 
 	private static string BuildSelectedTreeXml(
 		string localRootPath,
 		TreeNodeDescriptor root,
-		IReadOnlySet<string> includedPaths)
+		IReadOnlySet<string> includedPaths,
+		CancellationToken cancellationToken)
 	{
 		if (!includedPaths.Contains(root.FullPath) &&
 		    !HasIncludedChild(root.Children, includedPaths))
@@ -607,26 +682,28 @@ public sealed class TreeExportService
 			return string.Empty;
 		}
 
-		return BuildXmlDocument(localRootPath, root, includedPaths);
+		return BuildXmlDocument(localRootPath, root, includedPaths, cancellationToken);
 	}
 
 	private static string BuildFullTreeMarkdown(
 		string localRootPath,
-		TreeNodeDescriptor root)
+		TreeNodeDescriptor root,
+		CancellationToken cancellationToken)
 	{
-		return BuildMarkdownDocument(localRootPath, root, includedPaths: null);
+		return BuildMarkdownDocument(localRootPath, root, includedPaths: null, cancellationToken);
 	}
 
 	private static string BuildNamedTreeJson(
 		string rootName,
-		TreeNodeDescriptor root)
+		TreeNodeDescriptor root,
+		CancellationToken cancellationToken)
 	{
 		var buffer = new ArrayBufferWriter<byte>();
 		using (var writer = new Utf8JsonWriter(buffer, JsonWriterOptions))
 		{
 			writer.WriteStartObject();
 			writer.WritePropertyName(rootName);
-			WriteJsonTreeContents(writer, root, includedPaths: null);
+			WriteJsonTreeContents(writer, root, includedPaths: null, cancellationToken);
 			writer.WriteEndObject();
 			writer.Flush();
 		}
@@ -636,14 +713,15 @@ public sealed class TreeExportService
 
 	private static string BuildNamedTreeXml(
 		string rootName,
-		TreeNodeDescriptor root)
+		TreeNodeDescriptor root,
+		CancellationToken cancellationToken)
 	{
 		var output = new StringBuilder();
 		using (var writer = XmlWriter.Create(output, XmlWriterSettings))
 		{
 			writer.WriteStartElement("d");
 			writer.WriteAttributeString("n", rootName);
-			WriteXmlTreeContents(writer, root, includedPaths: null);
+			WriteXmlTreeContents(writer, root, includedPaths: null, cancellationToken);
 			writer.WriteEndElement();
 		}
 
@@ -652,19 +730,26 @@ public sealed class TreeExportService
 
 	private static string BuildNamedTreeMarkdown(
 		string rootName,
-		TreeNodeDescriptor root)
+		TreeNodeDescriptor root,
+		CancellationToken cancellationToken)
 	{
 		var output = new StringBuilder();
 		AppendMarkdownItem(output, level: 0, rootName, root.IsDirectory);
 		if (root.IsDirectory)
-			AppendMarkdownChildren(output, root.Children, includedPaths: null, level: 1);
+			AppendMarkdownChildren(
+				output,
+				root.Children,
+				includedPaths: null,
+				level: 1,
+				cancellationToken);
 		return output.ToString();
 	}
 
 	private static string BuildSelectedTreeMarkdown(
 		string localRootPath,
 		TreeNodeDescriptor root,
-		IReadOnlySet<string> includedPaths)
+		IReadOnlySet<string> includedPaths,
+		CancellationToken cancellationToken)
 	{
 		if (!includedPaths.Contains(root.FullPath) &&
 		    !HasIncludedChild(root.Children, includedPaths))
@@ -672,21 +757,23 @@ public sealed class TreeExportService
 			return string.Empty;
 		}
 
-		return BuildMarkdownDocument(localRootPath, root, includedPaths);
+		return BuildMarkdownDocument(localRootPath, root, includedPaths, cancellationToken);
 	}
 
 	private static string BuildJsonDocument(
 		string localRootPath,
 		TreeNodeDescriptor root,
-		IReadOnlySet<string>? includedPaths)
+		IReadOnlySet<string>? includedPaths,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		var buffer = new ArrayBufferWriter<byte>();
 		using (var writer = new Utf8JsonWriter(buffer, JsonWriterOptions))
 		{
 			writer.WriteStartObject();
 			writer.WriteString("rootPath", ResolveStructuredRootPath(localRootPath));
 			writer.WritePropertyName("tree");
-			WriteJsonTreeContents(writer, root, includedPaths);
+			WriteJsonTreeContents(writer, root, includedPaths, cancellationToken);
 			writer.WriteEndObject();
 			writer.Flush();
 		}
@@ -697,14 +784,16 @@ public sealed class TreeExportService
 	private static string BuildXmlDocument(
 		string localRootPath,
 		TreeNodeDescriptor root,
-		IReadOnlySet<string>? includedPaths)
+		IReadOnlySet<string>? includedPaths,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		var sb = new StringBuilder();
 		using (var writer = XmlWriter.Create(sb, XmlWriterSettings))
 		{
 			writer.WriteStartElement("t");
 			writer.WriteAttributeString("r", ResolveStructuredRootPath(localRootPath));
-			WriteXmlTreeContents(writer, root, includedPaths);
+			WriteXmlTreeContents(writer, root, includedPaths, cancellationToken);
 			writer.WriteEndElement();
 		}
 
@@ -714,29 +803,32 @@ public sealed class TreeExportService
 	private static string BuildMarkdownDocument(
 		string localRootPath,
 		TreeNodeDescriptor root,
-		IReadOnlySet<string>? includedPaths)
+		IReadOnlySet<string>? includedPaths,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		var sb = new StringBuilder();
 		sb.Append("Root: ").AppendLine(EscapeTextValue(ResolveStructuredRootPath(localRootPath)));
 		sb.AppendLine();
-		WriteMarkdownTreeContents(sb, root, includedPaths);
+		WriteMarkdownTreeContents(sb, root, includedPaths, cancellationToken);
 		return sb.ToString();
 	}
 
 	private static void WriteJsonTreeContents(
 		Utf8JsonWriter writer,
 		TreeNodeDescriptor root,
-		IReadOnlySet<string>? includedPaths)
+		IReadOnlySet<string>? includedPaths,
+		CancellationToken cancellationToken)
 	{
 		writer.WriteStartObject();
 
 		if (root.IsDirectory)
 		{
-			WriteJsonRootContents(writer, root.Children, includedPaths);
+			WriteJsonRootContents(writer, root.Children, includedPaths, cancellationToken);
 		}
 		else if (includedPaths is null || includedPaths.Contains(root.FullPath))
 		{
-			WriteJsonRootFiles(writer, [root]);
+			WriteJsonRootFiles(writer, [root], cancellationToken);
 		}
 
 		writer.WriteEndObject();
@@ -745,14 +837,16 @@ public sealed class TreeExportService
 	private static void WriteJsonRootContents(
 		Utf8JsonWriter writer,
 		IReadOnlyList<TreeNodeDescriptor> children,
-		IReadOnlySet<string>? includedPaths)
+		IReadOnlySet<string>? includedPaths,
+		CancellationToken cancellationToken)
 	{
-		var orderedChildren = GetOrderedStructuredChildren(children, includedPaths);
+		var orderedChildren = GetOrderedStructuredChildren(children, includedPaths, cancellationToken);
 		var operations = new Stack<JsonTreeWriteOperation>();
-		PushJsonDirectoryContents(operations, orderedChildren);
+		PushJsonDirectoryContents(operations, orderedChildren, cancellationToken);
 
 		while (operations.TryPop(out var operation))
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			switch (operation.Kind)
 			{
 				case JsonTreeWriteOperationKind.Directory:
@@ -761,21 +855,22 @@ public sealed class TreeExportService
 					writer.WritePropertyName(directory.DisplayName);
 					var directoryChildren = GetOrderedStructuredChildren(
 						directory.Children,
-						includedPaths);
-					if (!HasDirectoryChild(directoryChildren))
+						includedPaths,
+						cancellationToken);
+					if (!HasDirectoryChild(directoryChildren, cancellationToken))
 					{
-						WriteJsonFileArray(writer, directoryChildren);
+						WriteJsonFileArray(writer, directoryChildren, cancellationToken);
 						break;
 					}
 
 					writer.WriteStartObject();
 					operations.Push(new JsonTreeWriteOperation(
 						JsonTreeWriteOperationKind.EndObject));
-					PushJsonDirectoryContents(operations, directoryChildren);
+					PushJsonDirectoryContents(operations, directoryChildren, cancellationToken);
 					break;
 				}
 				case JsonTreeWriteOperationKind.Files:
-					WriteJsonCurrentFolderFiles(writer, operation.Children!);
+					WriteJsonCurrentFolderFiles(writer, operation.Children!, cancellationToken);
 					break;
 				case JsonTreeWriteOperationKind.EndObject:
 					writer.WriteEndObject();
@@ -788,9 +883,10 @@ public sealed class TreeExportService
 
 	private static void PushJsonDirectoryContents(
 		Stack<JsonTreeWriteOperation> operations,
-		IReadOnlyList<TreeNodeDescriptor> orderedChildren)
+		IReadOnlyList<TreeNodeDescriptor> orderedChildren,
+		CancellationToken cancellationToken)
 	{
-		if (HasFileChild(orderedChildren))
+		if (HasFileChild(orderedChildren, cancellationToken))
 		{
 			operations.Push(new JsonTreeWriteOperation(
 				JsonTreeWriteOperationKind.Files,
@@ -799,6 +895,7 @@ public sealed class TreeExportService
 
 		for (var index = orderedChildren.Count - 1; index >= 0; index--)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			var child = orderedChildren[index];
 			if (!child.IsDirectory)
 				continue;
@@ -811,23 +908,31 @@ public sealed class TreeExportService
 
 	private static void WriteJsonCurrentFolderFiles(
 		Utf8JsonWriter writer,
-		IReadOnlyList<TreeNodeDescriptor> orderedChildren)
+		IReadOnlyList<TreeNodeDescriptor> orderedChildren,
+		CancellationToken cancellationToken)
 	{
 		writer.WritePropertyName("/");
-		WriteJsonFileArray(writer, orderedChildren);
+		WriteJsonFileArray(writer, orderedChildren, cancellationToken);
 	}
 
-	private static void WriteJsonRootFiles(Utf8JsonWriter writer, IReadOnlyList<TreeNodeDescriptor> files)
+	private static void WriteJsonRootFiles(
+		Utf8JsonWriter writer,
+		IReadOnlyList<TreeNodeDescriptor> files,
+		CancellationToken cancellationToken)
 	{
 		writer.WritePropertyName("/");
-		WriteJsonFileArray(writer, files);
+		WriteJsonFileArray(writer, files, cancellationToken);
 	}
 
-	private static void WriteJsonFileArray(Utf8JsonWriter writer, IReadOnlyList<TreeNodeDescriptor> orderedChildren)
+	private static void WriteJsonFileArray(
+		Utf8JsonWriter writer,
+		IReadOnlyList<TreeNodeDescriptor> orderedChildren,
+		CancellationToken cancellationToken)
 	{
 		writer.WriteStartArray();
 		foreach (var child in orderedChildren)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			if (!child.IsDirectory)
 				writer.WriteStringValue(child.DisplayName);
 		}
@@ -837,7 +942,8 @@ public sealed class TreeExportService
 	private static void WriteXmlTreeContents(
 		XmlWriter writer,
 		TreeNodeDescriptor root,
-		IReadOnlySet<string>? includedPaths)
+		IReadOnlySet<string>? includedPaths,
+		CancellationToken cancellationToken)
 	{
 		if (!root.IsDirectory)
 		{
@@ -849,10 +955,12 @@ public sealed class TreeExportService
 		var operations = new Stack<XmlTreeWriteOperation>();
 		PushXmlChildren(
 			operations,
-			GetOrderedStructuredChildren(root.Children, includedPaths));
+			GetOrderedStructuredChildren(root.Children, includedPaths, cancellationToken),
+			cancellationToken);
 
 		while (operations.TryPop(out var operation))
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			if (operation.IsEndElement)
 			{
 				writer.WriteEndElement();
@@ -871,16 +979,21 @@ public sealed class TreeExportService
 			operations.Push(XmlTreeWriteOperation.EndElement);
 			PushXmlChildren(
 				operations,
-				GetOrderedStructuredChildren(node.Children, includedPaths));
+				GetOrderedStructuredChildren(node.Children, includedPaths, cancellationToken),
+				cancellationToken);
 		}
 	}
 
 	private static void PushXmlChildren(
 		Stack<XmlTreeWriteOperation> operations,
-		IReadOnlyList<TreeNodeDescriptor> orderedChildren)
+		IReadOnlyList<TreeNodeDescriptor> orderedChildren,
+		CancellationToken cancellationToken)
 	{
 		for (var index = orderedChildren.Count - 1; index >= 0; index--)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
 			operations.Push(new XmlTreeWriteOperation(orderedChildren[index]));
+		}
 	}
 
 	private static void WriteXmlFile(XmlWriter writer, TreeNodeDescriptor file)
@@ -916,11 +1029,12 @@ public sealed class TreeExportService
 	private static void WriteMarkdownTreeContents(
 		StringBuilder sb,
 		TreeNodeDescriptor root,
-		IReadOnlySet<string>? includedPaths)
+		IReadOnlySet<string>? includedPaths,
+		CancellationToken cancellationToken)
 	{
 		if (root.IsDirectory)
 		{
-			AppendMarkdownChildren(sb, root.Children, includedPaths, level: 0);
+			AppendMarkdownChildren(sb, root.Children, includedPaths, level: 0, cancellationToken);
 			return;
 		}
 
@@ -932,16 +1046,23 @@ public sealed class TreeExportService
 		StringBuilder sb,
 		IReadOnlyList<TreeNodeDescriptor> children,
 		IReadOnlySet<string>? includedPaths,
-		int level)
+		int level,
+		CancellationToken cancellationToken)
 	{
 		var pending = new Stack<MarkdownTreeWriteOperation>();
-		PushMarkdownChildren(pending, children, includedPaths, level);
+		PushMarkdownChildren(pending, children, includedPaths, level, cancellationToken);
 		while (pending.TryPop(out var operation))
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			var node = operation.Node;
 			AppendMarkdownItem(sb, operation.Level, node.DisplayName, node.IsDirectory);
 			if (node.IsDirectory)
-				PushMarkdownChildren(pending, node.Children, includedPaths, operation.Level + 1);
+				PushMarkdownChildren(
+					pending,
+					node.Children,
+					includedPaths,
+					operation.Level + 1,
+					cancellationToken);
 		}
 	}
 
@@ -949,11 +1070,15 @@ public sealed class TreeExportService
 		Stack<MarkdownTreeWriteOperation> pending,
 		IReadOnlyList<TreeNodeDescriptor> children,
 		IReadOnlySet<string>? includedPaths,
-		int level)
+		int level,
+		CancellationToken cancellationToken)
 	{
-		var orderedChildren = GetOrderedStructuredChildren(children, includedPaths);
+		var orderedChildren = GetOrderedStructuredChildren(children, includedPaths, cancellationToken);
 		for (var index = orderedChildren.Count - 1; index >= 0; index--)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
 			pending.Push(new MarkdownTreeWriteOperation(orderedChildren[index], level));
+		}
 	}
 
 	private static void AppendMarkdownItem(StringBuilder sb, int level, string name, bool isDirectory)
@@ -979,9 +1104,10 @@ public sealed class TreeExportService
 
 	private static IReadOnlyList<TreeNodeDescriptor> GetOrderedStructuredChildren(
 		IReadOnlyList<TreeNodeDescriptor> children,
-		IReadOnlySet<string>? includedPaths)
+		IReadOnlySet<string>? includedPaths,
+		CancellationToken cancellationToken)
 	{
-		if (includedPaths is null && IsStructuredTreeOrder(children))
+		if (includedPaths is null && IsStructuredTreeOrder(children, cancellationToken))
 		{
 			// Inventory projection already establishes this order for normal trees. Reusing
 			// the immutable child view avoids one list allocation and one sort per directory
@@ -993,20 +1119,28 @@ public sealed class TreeExportService
 		var ordered = new List<TreeNodeDescriptor>(children.Count);
 		foreach (var child in children)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			if (includedPaths is null || includedPaths.Contains(child.FullPath))
 				ordered.Add(child);
 		}
 
-		if (!IsStructuredTreeOrder(ordered))
+		if (!IsStructuredTreeOrder(ordered, cancellationToken))
+		{
+			cancellationToken.ThrowIfCancellationRequested();
 			ordered.Sort(CompareStructuredTreeNodes);
+			cancellationToken.ThrowIfCancellationRequested();
+		}
 
 		return ordered;
 	}
 
-	private static bool IsStructuredTreeOrder(IReadOnlyList<TreeNodeDescriptor> children)
+	private static bool IsStructuredTreeOrder(
+		IReadOnlyList<TreeNodeDescriptor> children,
+		CancellationToken cancellationToken)
 	{
 		for (var index = 1; index < children.Count; index++)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			if (CompareStructuredTreeNodes(children[index - 1], children[index]) > 0)
 				return false;
 		}
@@ -1038,10 +1172,13 @@ public sealed class TreeExportService
 		return false;
 	}
 
-	private static bool HasDirectoryChild(IReadOnlyList<TreeNodeDescriptor> children)
+	private static bool HasDirectoryChild(
+		IReadOnlyList<TreeNodeDescriptor> children,
+		CancellationToken cancellationToken)
 	{
 		foreach (var child in children)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			if (child.IsDirectory)
 				return true;
 		}
@@ -1049,10 +1186,13 @@ public sealed class TreeExportService
 		return false;
 	}
 
-	private static bool HasFileChild(IReadOnlyList<TreeNodeDescriptor> children)
+	private static bool HasFileChild(
+		IReadOnlyList<TreeNodeDescriptor> children,
+		CancellationToken cancellationToken)
 	{
 		foreach (var child in children)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			if (!child.IsDirectory)
 				return true;
 		}
@@ -1063,11 +1203,13 @@ public sealed class TreeExportService
 	private static bool CollectIncludedPaths(
 		TreeNodeDescriptor node,
 		IReadOnlySet<string> selectedPaths,
-		HashSet<string> includedPaths)
+		HashSet<string> includedPaths,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		if (selectedPaths.Contains(node.FullPath))
 		{
-			CollectSubtreePaths(node, includedPaths);
+			CollectSubtreePaths(node, includedPaths, cancellationToken);
 			return true;
 		}
 
@@ -1075,13 +1217,14 @@ public sealed class TreeExportService
 		pending.Push(new IncludedPathFrame(node));
 		while (pending.TryPeek(out var frame))
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			if (frame.NextChildIndex < frame.Node.Children.Count)
 			{
 				var child = frame.Node.Children[frame.NextChildIndex++];
 				if (selectedPaths.Contains(child.FullPath))
 				{
 					// Selecting a directory includes its complete subtree without realizing UI nodes.
-					CollectSubtreePaths(child, includedPaths);
+					CollectSubtreePaths(child, includedPaths, cancellationToken);
 					frame.HasIncludedChild = true;
 					continue;
 				}
@@ -1104,13 +1247,17 @@ public sealed class TreeExportService
 		return false;
 	}
 
-	private static void CollectSubtreePaths(TreeNodeDescriptor node, HashSet<string> includedPaths)
+	private static void CollectSubtreePaths(
+		TreeNodeDescriptor node,
+		HashSet<string> includedPaths,
+		CancellationToken cancellationToken)
 	{
 		var stack = new Stack<TreeNodeDescriptor>();
 		stack.Push(node);
 
 		while (stack.Count > 0)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			var current = stack.Pop();
 			includedPaths.Add(current.FullPath);
 

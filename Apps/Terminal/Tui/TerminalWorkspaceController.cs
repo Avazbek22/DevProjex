@@ -391,19 +391,21 @@ public sealed class TerminalWorkspaceController(
 		if (view is ProjectContextView.Tree or ProjectContextView.TreeContent)
 		{
 			tree = plain && format == ProjectContextDocumentFormat.Text
-				? services.TreeExportService.BuildFullTreePlain(
+				? services.TreeExportService.BuildFullTreePlainWithCancellation(
 					plan.SourceRoot,
 					plan.ProjectedTree,
 					GetDisplaySource(plan),
 					GetDisplayName(plan),
-					includeRootPath: false)
-				: services.TreeExportService.BuildFullTree(
+					includeRootPath: false,
+					cancellationToken: cancellationToken)
+				: services.TreeExportService.BuildFullTreeWithCancellation(
 					plan.SourceRoot,
 					plan.ProjectedTree,
 					MapTreeFormat(format),
 					GetDisplaySource(plan),
 					GetDisplayName(plan),
-					includeRootPath: false);
+					includeRootPath: false,
+					cancellationToken: cancellationToken);
 		}
 		return await BuildInteractivePreviewAsync(
 				plan,

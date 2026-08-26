@@ -12,7 +12,14 @@ public sealed class ProjectExportService(
 	{
 		return request.Mode switch
 		{
-			ProjectTextExportMode.Tree => treeExport.BuildFullTree(project.RootPath, project.Tree.Root, request.Format),
+			ProjectTextExportMode.Tree => treeExport.BuildFullTreeWithCancellation(
+				project.RootPath,
+				project.Tree.Root,
+				request.Format,
+				displayRootPath: null,
+				displayRootName: null,
+				includeRootPath: true,
+				cancellationToken: cancellationToken),
 			ProjectTextExportMode.Content => await contentExport
 				.BuildAsync(project.Tree.OrderedFilePaths ?? [], cancellationToken)
 				.ConfigureAwait(false),

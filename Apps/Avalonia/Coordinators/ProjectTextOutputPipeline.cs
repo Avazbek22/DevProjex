@@ -95,29 +95,34 @@ internal sealed class ProjectTextOutputPipeline(
         var displayRootName = snapshot.PathPresentation?.DisplayRootName;
         if (snapshot.SelectedPaths.Count == 0)
         {
-            return treeExport.BuildFullTree(
+            return treeExport.BuildFullTreeWithCancellation(
                 snapshot.RootPath,
                 snapshot.Root,
                 snapshot.TreeFormat,
                 displayRootPath,
-                displayRootName);
+                displayRootName,
+                includeRootPath: true,
+                cancellationToken: cancellationToken);
         }
 
-        var tree = treeExport.BuildSelectedTree(
+        var tree = treeExport.BuildSelectedTreeWithCancellation(
             snapshot.RootPath,
             snapshot.Root,
             snapshot.SelectedPaths,
             snapshot.TreeFormat,
             displayRootPath,
-            displayRootName);
+            displayRootName,
+            cancellationToken);
 
         return string.IsNullOrWhiteSpace(tree)
-            ? treeExport.BuildFullTree(
+            ? treeExport.BuildFullTreeWithCancellation(
                 snapshot.RootPath,
                 snapshot.Root,
                 snapshot.TreeFormat,
                 displayRootPath,
-                displayRootName)
+                displayRootName,
+                includeRootPath: true,
+                cancellationToken: cancellationToken)
             : tree;
     }
 

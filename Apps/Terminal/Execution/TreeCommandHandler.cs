@@ -37,7 +37,7 @@ public sealed class TreeCommandHandler(
 			}
 			else
 			{
-				var payload = BuildPayload(plan, request.Format);
+				var payload = BuildPayload(plan, request.Format, cancellationToken);
 				await environment.Output.WriteAsync(payload.AsMemory(), cancellationToken)
 					.ConfigureAwait(false);
 			}
@@ -66,7 +66,7 @@ public sealed class TreeCommandHandler(
 				.ConfigureAwait(false)
 			: await AtomicOutputWriter.WriteTextAsync(
 					requestedPath,
-					BuildPayload(plan, request.Format),
+					BuildPayload(plan, request.Format, cancellationToken),
 					overwrite: false,
 					cancellationToken,
 					path => ExactOutputDestinationValidator.ValidateAnalysis(plan.SourceRoot, path))
@@ -77,15 +77,18 @@ public sealed class TreeCommandHandler(
 
 	private string BuildPayload(
 		ProjectContextPlan plan,
-		TreeTextFormat format)
+		TreeTextFormat format,
+		CancellationToken cancellationToken)
 	{
 		var (displayRootPath, displayRootName) = ResolveDisplayIdentity(plan);
-		return services.TreeExportService.BuildFullTree(
+		return services.TreeExportService.BuildFullTreeWithCancellation(
 				plan.SourceRoot,
 				plan.ProjectedTree,
 				format,
 				displayRootPath,
-				displayRootName);
+				displayRootName,
+				includeRootPath: true,
+				cancellationToken: cancellationToken);
 	}
 
 	private Task WriteTextTreeAsync(

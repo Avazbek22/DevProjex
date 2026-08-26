@@ -89,8 +89,18 @@ public sealed class ProjectContextDocumentService(
 
 		return format switch
 		{
-			ProjectContextDocumentFormat.Text => BuildText(renderedPlan, view, fileResult.Files, truncated),
-			ProjectContextDocumentFormat.Markdown => BuildMarkdown(renderedPlan, view, fileResult.Files, truncated),
+			ProjectContextDocumentFormat.Text => BuildText(
+				renderedPlan,
+				view,
+				fileResult.Files,
+				truncated,
+				cancellationToken),
+			ProjectContextDocumentFormat.Markdown => BuildMarkdown(
+				renderedPlan,
+				view,
+				fileResult.Files,
+				truncated,
+				cancellationToken),
 			ProjectContextDocumentFormat.Json => BuildJson(renderedPlan, view, fileResult.Files, truncated),
 			ProjectContextDocumentFormat.Xml => BuildXml(renderedPlan, view, fileResult.Files, truncated),
 			_ => throw new ArgumentOutOfRangeException(nameof(format), format, null)
@@ -999,17 +1009,20 @@ public sealed class ProjectContextDocumentService(
 		ProjectContextPlan plan,
 		ProjectContextView view,
 		IReadOnlyList<ContextFileDocument> files,
-		bool truncated)
+		bool truncated,
+		CancellationToken cancellationToken)
 	{
 		var output = new StringBuilder();
 		if (IncludesTree(view))
 		{
-			output.Append(treeExportService.BuildFullTree(
+			output.Append(treeExportService.BuildFullTreeWithCancellation(
 				plan.SourceRoot,
 				plan.ProjectedTree,
 				TreeTextFormat.Ascii,
 				GetDocumentRoot(plan),
-				GetProjectName(plan)));
+				GetProjectName(plan),
+				includeRootPath: true,
+				cancellationToken: cancellationToken));
 		}
 		AppendTextFiles(output, files);
 		AppendTruncationNotice(output, truncated);
@@ -1020,7 +1033,8 @@ public sealed class ProjectContextDocumentService(
 		ProjectContextPlan plan,
 		ProjectContextView view,
 		IReadOnlyList<ContextFileDocument> files,
-		bool truncated)
+		bool truncated,
+		CancellationToken cancellationToken)
 	{
 		var output = new StringBuilder();
 		output.Append("# ").AppendLine(EscapeMarkdownHeading(GetProjectName(plan)));
@@ -1029,12 +1043,14 @@ public sealed class ProjectContextDocumentService(
 		{
 			output.AppendLine("## Project tree");
 			output.AppendLine();
-			var tree = treeExportService.BuildFullTree(
+			var tree = treeExportService.BuildFullTreeWithCancellation(
 				plan.SourceRoot,
 				plan.ProjectedTree,
 				TreeTextFormat.Ascii,
 				GetDocumentRoot(plan),
-				GetProjectName(plan)).TrimEnd('\r', '\n');
+				GetProjectName(plan),
+				includeRootPath: true,
+				cancellationToken: cancellationToken).TrimEnd('\r', '\n');
 			AppendMarkdownFence(output, tree, "text");
 		}
 

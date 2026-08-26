@@ -1359,30 +1359,35 @@ internal sealed class PreviewSurfaceController : IDisposable
 			pathPresentation,
 			outputPathRedaction);
 		var displayRootPath = treeRootPathPresentation.Text;
-		var treeText = selectedPaths.Count > 0
-            ? _treeExport.BuildSelectedTree(
+        var treeText = selectedPaths.Count > 0
+            ? _treeExport.BuildSelectedTreeWithCancellation(
                 currentPath,
                 currentTreeRoot,
                 selectedPaths,
                 treeFormat,
                 displayRootPath,
-                pathPresentation?.DisplayRootName)
-            : _treeExport.BuildFullTree(
+                pathPresentation?.DisplayRootName,
+                cancellationToken)
+            : _treeExport.BuildFullTreeWithCancellation(
                 currentPath,
                 currentTreeRoot,
                 treeFormat,
                 displayRootPath,
-                pathPresentation?.DisplayRootName);
+                pathPresentation?.DisplayRootName,
+                includeRootPath: true,
+                cancellationToken: cancellationToken);
 
         if (selectedPaths.Count > 0 &&
             string.IsNullOrWhiteSpace(treeText))
         {
-            treeText = _treeExport.BuildFullTree(
+            treeText = _treeExport.BuildFullTreeWithCancellation(
                 currentPath,
                 currentTreeRoot,
                 treeFormat,
                 displayRootPath,
-                pathPresentation?.DisplayRootName);
+                pathPresentation?.DisplayRootName,
+                includeRootPath: true,
+                cancellationToken: cancellationToken);
         }
 
         if (string.IsNullOrWhiteSpace(treeText))
