@@ -11,8 +11,14 @@ public static class GitIgnoreFileReader
 		encoderShouldEmitUTF8Identifier: false,
 		throwOnInvalidBytes: true);
 
-	public static GitIgnoreFileContent Read(string path)
+	public static GitIgnoreFileContent Read(string path) =>
+		ReadWithCancellation(path, CancellationToken.None);
+
+	internal static GitIgnoreFileContent ReadWithCancellation(
+		string path,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		IgnorePipelineDiagnostics.RecordGitIgnoreSourceReadRequest();
 		UnixFileTypeInspector.EnsureRegularFile(path);
 		using var stream = new FileStream(
@@ -27,16 +33,20 @@ public static class GitIgnoreFileReader
 			throw new IOException($"The .gitignore source exceeds {MaximumFileSizeBytes} bytes.");
 
 		var bytes = GC.AllocateUninitializedArray<byte>(checked((int)initialLength));
+		using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
 		var totalBytesRead = 0;
 		while (totalBytesRead < bytes.Length)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			var bytesRead = stream.Read(bytes.AsSpan(totalBytesRead));
 			if (bytesRead == 0)
 				throw new IOException("The .gitignore source changed while it was being read.");
 
+			hash.AppendData(bytes, totalBytesRead, bytesRead);
 			totalBytesRead += bytesRead;
 		}
 
+		cancellationToken.ThrowIfCancellationRequested();
 		Span<byte> overflowProbe = stackalloc byte[1];
 		if (stream.Read(overflowProbe) != 0 || stream.Length != initialLength)
 			throw new IOException("The .gitignore source changed while it was being read.");
@@ -47,7 +57,7 @@ public static class GitIgnoreFileReader
 		return new GitIgnoreFileContent(
 			content,
 			initialLength,
-			Convert.ToHexString(SHA256.HashData(bytes)));
+			Convert.ToHexString(hash.GetHashAndReset()));
 	}
 
 	public static string ReadAllText(string path) => Read(path).Content;
@@ -58,27 +68,39 @@ public static class GitIgnoreFileReader
 	public static IReadOnlyList<string> SplitLines(string content) =>
 		EnumerateLines(content).ToArray();
 
-	public static IEnumerable<string> EnumerateLines(string content)
+	public static IEnumerable<string> EnumerateLines(string content) =>
+		EnumerateLinesWithCancellation(content, CancellationToken.None);
+
+	internal static IEnumerable<string> EnumerateLinesWithCancellation(
+		string content,
+		CancellationToken cancellationToken)
 	{
 		ArgumentNullException.ThrowIfNull(content);
+		cancellationToken.ThrowIfCancellationRequested();
 		if (content.Length == 0)
 			yield break;
 
 		var lineStart = 0;
 		for (var index = 0; index < content.Length; index++)
 		{
+			if ((index & 0xFFF) == 0)
+				cancellationToken.ThrowIfCancellationRequested();
 			if (content[index] != '\n')
 				continue;
 
 			var lineEnd = index;
 			if (lineEnd > lineStart && content[lineEnd - 1] == '\r')
 				lineEnd--;
+			cancellationToken.ThrowIfCancellationRequested();
 			yield return content[lineStart..lineEnd];
 			lineStart = index + 1;
 		}
 
 		if (lineStart < content.Length)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
 			yield return content[lineStart..];
+		}
 	}
 
 	private static bool HasUtf8ByteOrderMark(ReadOnlySpan<byte> bytes) =>

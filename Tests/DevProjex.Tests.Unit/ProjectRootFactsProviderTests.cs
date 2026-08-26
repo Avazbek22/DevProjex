@@ -224,6 +224,22 @@ public sealed class ProjectRootFactsProviderTests
 	}
 
 	[Fact]
+	public void ContentFingerprint_StopsReadingWhenOperationIsCanceled()
+	{
+		using var cancellation = new CancellationTokenSource();
+		using var stream = new CancelAfterFirstReadStream(
+			new byte[64 * 1024],
+			cancellation);
+
+		Assert.Throws<OperationCanceledException>(() =>
+			ProjectRootFactsProvider.ComputeContentFingerprintWithCancellation(
+				stream,
+				stream.Length,
+				cancellation.Token));
+		Assert.InRange(stream.Position, 1, stream.Length - 1);
+	}
+
+	[Fact]
 	public void HasMatchingFileMetadata_ReportsContentRewriteOnlyWhenMetadataChanges()
 	{
 		using var temp = new TemporaryDirectory();
@@ -511,6 +527,26 @@ public sealed class ProjectRootFactsProviderTests
 		MemoryStream(buffer, writable: false)
 	{
 		public override long Length => reportedLength;
+	}
+
+	private sealed class CancelAfterFirstReadStream(
+		byte[] buffer,
+		CancellationTokenSource cancellation) :
+		MemoryStream(buffer, writable: false)
+	{
+		private bool _firstRead = true;
+
+		public override int Read(byte[] destination, int offset, int count)
+		{
+			var read = base.Read(destination, offset, count);
+			if (_firstRead)
+			{
+				_firstRead = false;
+				cancellation.Cancel();
+			}
+
+			return read;
+		}
 	}
 
 	[Fact]

@@ -232,7 +232,10 @@ public sealed class ProjectRootFactsProvider
 			return ProjectRootFacts.Inaccessible(rootPath);
 		}
 
-		var gitIgnoreSignature = TryGetTopLevelGitIgnoreSignature(rootPath, files);
+		var gitIgnoreSignature = TryGetTopLevelGitIgnoreSignature(
+			rootPath,
+			files,
+			cancellationToken);
 		return new ProjectRootFacts(
 			rootPath,
 			exists: true,
@@ -262,7 +265,8 @@ public sealed class ProjectRootFactsProvider
 
 	private static ProjectRootFileSignature? TryGetTopLevelGitIgnoreSignature(
 		string rootPath,
-		IReadOnlyList<ProjectRootFileFact> files)
+		IReadOnlyList<ProjectRootFileFact> files,
+		CancellationToken cancellationToken)
 	{
 		var hasGitIgnore = false;
 		foreach (var file in files)
@@ -277,13 +281,21 @@ public sealed class ProjectRootFactsProvider
 		if (!hasGitIgnore)
 			return null;
 
-		return TryGetFileSignature(Path.Combine(rootPath, ".gitignore"));
+		return TryGetFileSignatureWithCancellation(
+			Path.Combine(rootPath, ".gitignore"),
+			cancellationToken);
 	}
 
-	public static ProjectRootFileSignature? TryGetFileSignature(string filePath)
+	public static ProjectRootFileSignature? TryGetFileSignature(string filePath) =>
+		TryGetFileSignatureWithCancellation(filePath, CancellationToken.None);
+
+	internal static ProjectRootFileSignature? TryGetFileSignatureWithCancellation(
+		string filePath,
+		CancellationToken cancellationToken)
 	{
 		try
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			UnixFileTypeInspector.EnsureRegularFile(filePath);
 			var linkInfo = new FileInfo(filePath);
 			if (!linkInfo.Exists)
@@ -296,7 +308,10 @@ public sealed class ProjectRootFactsProvider
 				return null;
 			var expectedLastWriteTicks = linkInfo.LastWriteTimeUtc.Ticks;
 			var expectedLength = linkInfo.Length;
-			var fingerprint = ComputeContentFingerprint(linkInfo.FullName, expectedLength);
+			var fingerprint = ComputeContentFingerprintWithCancellation(
+				linkInfo.FullName,
+				expectedLength,
+				cancellationToken);
 			linkInfo.Refresh();
 			if (!linkInfo.Exists ||
 			    linkInfo.LastWriteTimeUtc.Ticks != expectedLastWriteTicks ||
@@ -351,7 +366,10 @@ public sealed class ProjectRootFactsProvider
 		}
 	}
 
-	private static string ComputeContentFingerprint(string filePath, long expectedLength)
+	private static string ComputeContentFingerprintWithCancellation(
+		string filePath,
+		long expectedLength,
+		CancellationToken cancellationToken)
 	{
 		using var stream = new FileStream(
 			filePath,
@@ -360,10 +378,16 @@ public sealed class ProjectRootFactsProvider
 			FileShare.ReadWrite | FileShare.Delete,
 			bufferSize: 4096,
 			FileOptions.SequentialScan);
-		return ComputeContentFingerprint(stream, expectedLength);
+		return ComputeContentFingerprintWithCancellation(stream, expectedLength, cancellationToken);
 	}
 
-	internal static string ComputeContentFingerprint(Stream stream, long expectedLength)
+	internal static string ComputeContentFingerprint(Stream stream, long expectedLength) =>
+		ComputeContentFingerprintWithCancellation(stream, expectedLength, CancellationToken.None);
+
+	internal static string ComputeContentFingerprintWithCancellation(
+		Stream stream,
+		long expectedLength,
+		CancellationToken cancellationToken)
 	{
 		ArgumentNullException.ThrowIfNull(stream);
 		ArgumentOutOfRangeException.ThrowIfNegative(expectedLength);
@@ -377,6 +401,7 @@ public sealed class ProjectRootFactsProvider
 			var remaining = expectedLength;
 			while (remaining > 0)
 			{
+				cancellationToken.ThrowIfCancellationRequested();
 				var readSize = (int)Math.Min(buffer.Length, remaining);
 				var read = stream.Read(buffer, 0, readSize);
 				if (read == 0)
@@ -385,6 +410,7 @@ public sealed class ProjectRootFactsProvider
 				remaining -= read;
 			}
 
+			cancellationToken.ThrowIfCancellationRequested();
 			if (stream.Read(buffer, 0, 1) != 0 || stream.Length != expectedLength)
 				throw new IOException("The project root file changed while it was being hashed.");
 			return Convert.ToHexString(hash.GetHashAndReset());
