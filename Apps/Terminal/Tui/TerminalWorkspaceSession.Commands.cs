@@ -410,6 +410,7 @@ internal sealed partial class TerminalWorkspaceSession
 		{
 			_commandHistory.Add(normalized);
 			_commandHistorySaveTask = PersistCommandHistoryAsync(
+				_commandHistorySaveTask,
 				_commandHistory.Entries.ToArray());
 		}
 
@@ -567,8 +568,22 @@ internal sealed partial class TerminalWorkspaceSession
 		_application.LayoutAndDraw();
 	}
 
-	private async Task PersistCommandHistoryAsync(IReadOnlyList<string> history)
+	private async Task PersistCommandHistoryAsync(
+		Task? precedingSave,
+		IReadOnlyList<string> history)
 	{
+		if (precedingSave is not null)
+		{
+			try
+			{
+				await precedingSave.ConfigureAwait(false);
+			}
+			catch
+			{
+				// One failed write must not poison later history persistence.
+			}
+		}
+
 		try
 		{
 			await _services.TerminalSettingsStore
