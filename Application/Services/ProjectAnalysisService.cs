@@ -457,14 +457,19 @@ public sealed class ProjectAnalysisService(
 				LoadingMilliseconds: ToMilliseconds(loadingElapsed),
 				AnalysisMilliseconds: ToMilliseconds(analysisElapsed),
 				TotalMilliseconds: ToMilliseconds(totalElapsed)),
-			Diagnostics: BuildDiagnostics(request));
+			Diagnostics: BuildDiagnostics(request, cancellationToken));
 	}
 
 	public static ProjectAnalysisDiagnosticsReport BuildDiagnostics(LoadedProjectAnalysisRequest request) =>
+		BuildDiagnostics(request, CancellationToken.None);
+
+	private static ProjectAnalysisDiagnosticsReport BuildDiagnostics(
+		LoadedProjectAnalysisRequest request,
+		CancellationToken cancellationToken) =>
 		new(
 			RootAccessDenied: request.RootAccessDenied,
 			HadAccessDenied: request.HadAccessDenied,
-			Warnings: BuildWarnings(request).ToArray());
+			Warnings: BuildWarnings(request, cancellationToken));
 
 	private IReadOnlyCollection<IgnoreOptionId> ResolveSelectedIgnoreOptions(
 		string rootPath,
@@ -560,21 +565,30 @@ public sealed class ProjectAnalysisService(
 		return new ProjectTreeSummaryReport(directories, files, accessDeniedDirectories);
 	}
 
-	private static IEnumerable<string> BuildWarnings(LoadedProjectAnalysisRequest request)
+	private static IReadOnlyList<string> BuildWarnings(
+		LoadedProjectAnalysisRequest request,
+		CancellationToken cancellationToken)
 	{
+		var warnings = new List<string>();
+		var availableRoots = request.AvailableRootFolders.ToHashSet(PathComparer.Default);
 		var requestedRoots = request.RequestedRootFoldersForDiagnostics ?? request.SelectedRootFolders;
 		foreach (var root in requestedRoots)
 		{
-			if (!request.AvailableRootFolders.Contains(root, PathComparer.Default))
-				yield return $"Selected root folder was not found in the current project: {root}";
+			cancellationToken.ThrowIfCancellationRequested();
+			if (!availableRoots.Contains(root))
+				warnings.Add($"Selected root folder was not found in the current project: {root}");
 		}
 
+		var availableExtensions = request.AvailableExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase);
 		var requestedExtensions = request.RequestedExtensionsForDiagnostics ?? request.SelectedExtensions;
 		foreach (var extension in requestedExtensions)
 		{
-			if (!request.AvailableExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase))
-				yield return $"Selected extension was not found in the current project: {extension}";
+			cancellationToken.ThrowIfCancellationRequested();
+			if (!availableExtensions.Contains(extension))
+				warnings.Add($"Selected extension was not found in the current project: {extension}");
 		}
+
+		return warnings;
 	}
 
 	private static IReadOnlyCollection<string> NormalizeRootFolders(IReadOnlyCollection<string>? rootFolders)

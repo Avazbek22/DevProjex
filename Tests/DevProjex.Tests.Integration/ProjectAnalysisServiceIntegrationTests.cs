@@ -383,6 +383,27 @@ public sealed class ProjectAnalysisServiceIntegrationTests
 			CreateService().BuildReportFromTreeAsync(request, cancellation.Token));
 	}
 
+	[Fact]
+	public async Task BuildReportFromTreeAsync_CancelsDuringDiagnosticAssembly()
+	{
+		using var cancellation = new CancellationTokenSource();
+		var availableRoots = new CancelOnSecondReadList<string>(["available"], cancellation);
+		var root = new TreeNodeDescriptor("root", "/root", true, false, "folder", []);
+		var request = new LoadedProjectAnalysisRequest(
+			RootPath: "/root",
+			Tree: new BuildTreeResult(root, false, false, []),
+			AvailableRootFolders: availableRoots,
+			AvailableExtensions: [],
+			SelectedRootFolders: ["available"],
+			SelectedExtensions: [],
+			SelectedIgnoreOptions: [],
+			RootAccessDenied: false,
+			HadAccessDenied: false);
+
+		await Assert.ThrowsAsync<OperationCanceledException>(() =>
+			CreateService().BuildReportFromTreeAsync(request, cancellation.Token));
+	}
+
 	private static ProjectAnalysisService CreateService(IFileContentAnalyzer? fileContentAnalyzer = null)
 	{
 		var localization = new LocalizationService(new TestLocalizationCatalog(), AppLanguage.En);
