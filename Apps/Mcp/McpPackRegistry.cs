@@ -19,6 +19,7 @@ public sealed class McpPackRegistry : IDisposable
 	private readonly long _maximumSessionBytes;
 	private readonly object _sync = new();
 	private long _allocatedBytes;
+	private int _activeCreates;
 	private bool _disposed;
 
 	public McpPackRegistry(string? tempRoot = null, TimeProvider? timeProvider = null)
@@ -78,36 +79,46 @@ public sealed class McpPackRegistry : IDisposable
 		CancellationToken cancellationToken)
 	{
 		ArgumentNullException.ThrowIfNull(writer);
-		ObjectDisposedException.ThrowIf(_disposed, this);
-		var id = Convert.ToHexString(RandomNumberGenerator.GetBytes(24)).ToLowerInvariant();
-		var path = Path.Combine(_sessionDirectory, id + ".pack");
-		var reservation = new PackReservation(this);
+		BeginCreate();
 		try
 		{
-			await using (var stream = OpenPrivateFile(
-				             path,
-				             FileMode.CreateNew,
-				             FileAccess.Write,
-				             FileShare.None,
-				             64 * 1024,
-				             FileOptions.Asynchronous | FileOptions.SequentialScan))
+			var id = Convert.ToHexString(RandomNumberGenerator.GetBytes(24)).ToLowerInvariant();
+			var path = Path.Combine(_sessionDirectory, id + ".pack");
+			var reservation = new PackReservation(this);
+			try
 			{
-				await using var bounded = new QuotaWriteStream(stream, reservation);
-				await writer(bounded, cancellationToken).ConfigureAwait(false);
-			}
+				await using (var stream = OpenPrivateFile(
+					             path,
+					             FileMode.CreateNew,
+					             FileAccess.Write,
+					             FileShare.None,
+					             64 * 1024,
+					             FileOptions.Asynchronous | FileOptions.SequentialScan))
+				{
+					await using var bounded = new QuotaWriteStream(stream, reservation);
+					await writer(bounded, cancellationToken).ConfigureAwait(false);
+				}
 
-			var (characters, lines) = await MeasureAsync(path, cancellationToken).ConfigureAwait(false);
-			var document = new McpPackDocument(id, path, lines, characters, reservation.Bytes);
-			lock (_sync)
-				_packs.Add(id, new PackEntry(document, TimeProvider.GetUtcNow()));
-			reservation.Commit();
-			return document;
+				var (characters, lines) = await MeasureAsync(path, cancellationToken).ConfigureAwait(false);
+				var document = new McpPackDocument(id, path, lines, characters, reservation.Bytes);
+				lock (_sync)
+				{
+					ObjectDisposedException.ThrowIf(_disposed, this);
+					_packs.Add(id, new PackEntry(document, TimeProvider.GetUtcNow()));
+				}
+				reservation.Commit();
+				return document;
+			}
+			catch
+			{
+				reservation.Dispose();
+				TryDeletePackFile(path);
+				throw;
+			}
 		}
-		catch
+		finally
 		{
-			reservation.Dispose();
-			TryDeletePackFile(path);
-			throw;
+			EndCreate();
 		}
 	}
 
@@ -127,12 +138,14 @@ public sealed class McpPackRegistry : IDisposable
 
 	internal McpPackDocument ResolveDocument(string packId)
 	{
-		ObjectDisposedException.ThrowIf(_disposed, this);
 		if (string.IsNullOrWhiteSpace(packId))
 			throw Expired();
 		PackEntry? entry;
 		lock (_sync)
+		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
 			_packs.TryGetValue(packId, out entry);
+		}
 		if (entry is null || !File.Exists(entry.Document.Path))
 			throw Expired();
 		return entry.Document;
@@ -140,12 +153,51 @@ public sealed class McpPackRegistry : IDisposable
 
 	public void Dispose()
 	{
-		if (_disposed)
-			return;
-		_disposed = true;
+		bool cleanupNow;
+		lock (_sync)
+		{
+			if (_disposed)
+				return;
+			_disposed = true;
+			cleanupNow = _activeCreates == 0;
+		}
+
 		try
 		{
 			_sessionLease.Dispose();
+		}
+		finally
+		{
+			if (cleanupNow)
+				CleanupSessionDirectory();
+		}
+	}
+
+	private void BeginCreate()
+	{
+		lock (_sync)
+		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
+			_activeCreates++;
+		}
+	}
+
+	private void EndCreate()
+	{
+		bool cleanupNow;
+		lock (_sync)
+		{
+			_activeCreates--;
+			cleanupNow = _disposed && _activeCreates == 0;
+		}
+		if (cleanupNow)
+			CleanupSessionDirectory();
+	}
+
+	private void CleanupSessionDirectory()
+	{
+		try
+		{
 			try
 			{
 				if (Directory.Exists(_sessionDirectory))
@@ -305,6 +357,7 @@ public sealed class McpPackRegistry : IDisposable
 			return;
 		lock (_sync)
 		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
 			if (count > _maximumPackBytes - reservation.Bytes ||
 			    count > _maximumSessionBytes - _allocatedBytes)
 			{
