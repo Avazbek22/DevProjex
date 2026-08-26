@@ -3710,7 +3710,10 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		var loadStatus = GitIgnoreMatcherLoadStatus.NotFound;
 		if (!string.IsNullOrWhiteSpace(gitIgnorePath))
 		{
-			var loadResult = loadSession.Load(directoryPath, gitIgnorePath);
+			var loadResult = loadSession.LoadWithCancellation(
+				directoryPath,
+				gitIgnorePath,
+				cancellationToken);
 			scopedMatcher = loadResult.Matcher;
 			loadStatus = loadResult.Status;
 		}

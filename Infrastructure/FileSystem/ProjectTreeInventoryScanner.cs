@@ -610,7 +610,10 @@ internal readonly record struct ProjectTreeGitIgnoreContexts(
 		ScopedGitIgnoreMatcher? matcher = null;
 		if (!string.IsNullOrWhiteSpace(gitIgnorePath))
 		{
-			var loadResult = gitIgnoreLoadSession.Load(directoryPath, gitIgnorePath);
+			var loadResult = gitIgnoreLoadSession.LoadWithCancellation(
+				directoryPath,
+				gitIgnorePath,
+				cancellationToken);
 			matcher = loadResult.Matcher;
 			gitIgnoreReadFailed = ReportGitIgnoreReadFailures &&
 			                      loadResult.Status == GitIgnoreMatcherLoadStatus.ReadFailure;

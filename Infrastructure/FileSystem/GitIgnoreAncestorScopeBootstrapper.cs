@@ -49,9 +49,10 @@ internal static class GitIgnoreAncestorScopeBootstrapper
 		foreach (var scopePath in scopePaths)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			var loadResult = loadSession.Load(
+			var loadResult = loadSession.LoadWithCancellation(
 				scopePath,
-				Path.Combine(scopePath, ".gitignore"));
+				Path.Combine(scopePath, ".gitignore"),
+				cancellationToken);
 			lastStatus = loadResult.Status;
 			if (loadResult.Status == GitIgnoreMatcherLoadStatus.ReadFailure)
 			{

@@ -14,7 +14,7 @@ public static class GitIgnoreFileReader
 	public static GitIgnoreFileContent Read(string path) =>
 		ReadWithCancellation(path, CancellationToken.None);
 
-	internal static GitIgnoreFileContent ReadWithCancellation(
+	public static GitIgnoreFileContent ReadWithCancellation(
 		string path,
 		CancellationToken cancellationToken)
 	{
@@ -71,7 +71,7 @@ public static class GitIgnoreFileReader
 	public static IEnumerable<string> EnumerateLines(string content) =>
 		EnumerateLinesWithCancellation(content, CancellationToken.None);
 
-	internal static IEnumerable<string> EnumerateLinesWithCancellation(
+	public static IEnumerable<string> EnumerateLinesWithCancellation(
 		string content,
 		CancellationToken cancellationToken)
 	{
