@@ -116,6 +116,26 @@ public sealed class NameFilterCoordinatorBehaviorTests
         Assert.False(busyState);
     }
 
+    [AvaloniaFact]
+    public async Task DebounceContinuationAfterDispose_DoesNotRecreateFilterOrApply()
+    {
+        var applyCount = 0;
+        var coordinator = new NameFilterCoordinator(_ => applyCount++);
+        var runDebounce = typeof(NameFilterCoordinator).GetMethod(
+            "RunDebounceAsync",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(runDebounce);
+        var continuation = Assert.IsAssignableFrom<Task>(runDebounce!.Invoke(
+            coordinator,
+            [0, CancellationToken.None]));
+
+        coordinator.Dispose();
+        await continuation.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.Equal(0, applyCount);
+        Assert.True(IsFilterCtsNull(coordinator));
+    }
+
     private static CancellationTokenSource? GetDebounceCts(NameFilterCoordinator coordinator)
     {
         var field = typeof(NameFilterCoordinator).GetField(

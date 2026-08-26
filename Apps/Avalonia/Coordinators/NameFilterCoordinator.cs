@@ -10,6 +10,7 @@ public sealed class NameFilterCoordinator(
     private CancellationTokenSource? _filterCts;
     private readonly object _ctsLock = new();
     private int _debounceVersion;
+    private int _disposed;
 
     private async Task RunDebounceAsync(int version, CancellationToken token)
     {
@@ -23,12 +24,17 @@ public sealed class NameFilterCoordinator(
             return;
         }
 
-        if (token.IsCancellationRequested || version != Volatile.Read(ref _debounceVersion))
+        if (token.IsCancellationRequested ||
+            version != Volatile.Read(ref _debounceVersion) ||
+            Volatile.Read(ref _disposed) != 0)
             return;
 
         CancellationToken applyToken;
         lock (_ctsLock)
         {
+            if (_disposed != 0)
+                return;
+
             _filterCts?.Cancel();
             _filterCts?.Dispose();
             _filterCts = new CancellationTokenSource();
@@ -44,13 +50,17 @@ public sealed class NameFilterCoordinator(
 
     public void OnNameFilterChanged()
     {
-        onFilterStateChanged?.Invoke(hasActiveQuery?.Invoke() == true);
+        if (Volatile.Read(ref _disposed) != 0)
+            return;
 
         CancellationToken token;
         int version;
 
         lock (_ctsLock)
         {
+            if (_disposed != 0)
+                return;
+
             _debounceCts?.Cancel();
             _debounceCts?.Dispose();
             _debounceCts = new CancellationTokenSource();
@@ -58,6 +68,7 @@ public sealed class NameFilterCoordinator(
             version = Interlocked.Increment(ref _debounceVersion);
         }
 
+        onFilterStateChanged?.Invoke(hasActiveQuery?.Invoke() == true);
         _ = RunDebounceAsync(version, token);
     }
 
@@ -77,6 +88,9 @@ public sealed class NameFilterCoordinator(
 
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+
         lock (_ctsLock)
         {
             _debounceCts?.Cancel();
