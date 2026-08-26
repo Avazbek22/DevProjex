@@ -16,6 +16,7 @@ internal sealed class TerminalVirtualizedPreviewView : View
 	private List<PreviewRedactionSpan> _redactionOccurrences = [];
 	private string? _activeRedactionOccurrenceId;
 	private int _maximumDisplayColumns;
+	private long _viewportChangeRevision;
 
 	public TerminalVirtualizedPreviewView(
 		bool useUnicode = true,
@@ -27,7 +28,11 @@ internal sealed class TerminalVirtualizedPreviewView : View
 			return;
 
 		TerminalScrollBarStyle.Apply(this, useUnicode, vertical: true, horizontal: true);
-		ViewportChanged += (_, _) => RaiseVisibleRangeChanged();
+		ViewportChanged += (_, _) =>
+		{
+			_viewportChangeRevision++;
+			RaiseVisibleRangeChanged();
+		};
 	}
 
 	public event EventHandler? VisibleRangeChanged;
@@ -152,13 +157,15 @@ internal sealed class TerminalVirtualizedPreviewView : View
 		var firstLine = Math.Clamp(zeroBasedLine, 0, maximumFirstLine);
 		var maximumColumn = Math.Max(0, MaxLineLength - VisibleTextWidth);
 		var firstColumn = Math.Clamp(horizontalOffset, 0, maximumColumn);
+		var viewportChangeRevision = _viewportChangeRevision;
 		Viewport = new Rectangle(
 			firstColumn,
 			firstLine,
 			Viewport.Width,
 			Viewport.Height);
 		SetNeedsDraw();
-		RaiseVisibleRangeChanged();
+		if (_viewportChangeRevision == viewportChangeRevision)
+			RaiseVisibleRangeChanged();
 	}
 
 	public PreviewTextSearchMatch? SetSearchQuery(

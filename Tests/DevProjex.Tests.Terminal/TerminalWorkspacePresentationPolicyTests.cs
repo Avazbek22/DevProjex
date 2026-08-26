@@ -1,3 +1,4 @@
+using System.Drawing;
 using DevProjex.Application.Preview;
 using DevProjex.Application.Secrets;
 using Terminal.Gui.Drawing;
@@ -152,5 +153,24 @@ public sealed class TerminalWorkspacePresentationPolicyTests
 			value,
 			startColumn,
 			width));
+	}
+
+	[Theory]
+	[InlineData(true)]
+	[InlineData(false)]
+	public void PreviewScrollRaisesOneVisibleRangeChange(bool showScrollBars)
+	{
+		using var document = new InMemoryPreviewTextDocument("first\nsecond\nthird");
+		using var view = new TerminalVirtualizedPreviewView(showScrollBars: showScrollBars)
+		{
+			Frame = new Rectangle(0, 0, 20, 1)
+		};
+		view.SetDocument(document, preserveViewport: false);
+		var notifications = 0;
+		view.VisibleRangeChanged += (_, _) => notifications++;
+
+		view.ScrollTo(1, 0);
+
+		Assert.Equal(1, notifications);
 	}
 }
