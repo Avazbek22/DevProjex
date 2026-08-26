@@ -24,7 +24,11 @@ public static class CompletionScriptGenerator
 		    local command_path
 		    local candidate
 		    local has_filename_candidate=0
+		    local -a current_word_argument=()
 		    command_path="$(command -v devprojex)" || return
+		    if [[ -n "${2-}" ]]; then
+		        current_word_argument=(--bash-current-word="$2")
+		    fi
 		    COMPREPLY=()
 		    while IFS= read -r -d '' candidate; do
 		        COMPREPLY+=("$candidate")
@@ -33,7 +37,7 @@ public static class CompletionScriptGenerator
 		        fi
 		    done < <("$command_path" dev complete --position "$COMP_POINT" \
 		        --position-unit utf8-byte --null \
-		        --bash-current-word="$2" -- "$COMP_LINE")
+		        "${current_word_argument[@]}" -- "$COMP_LINE")
 		    if (( has_filename_candidate )); then
 		        compopt -o filenames 2>/dev/null || true
 		    fi

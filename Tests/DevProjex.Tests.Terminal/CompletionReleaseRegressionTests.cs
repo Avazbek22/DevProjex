@@ -297,7 +297,11 @@ public sealed class CompletionReleaseRegressionTests
 		if (shell == "bash")
 		{
 			Assert.Contains(
-				"--bash-current-word=\"$2\"",
+				"current_word_argument=(--bash-current-word=\"$2\")",
+				environment.StandardOutput,
+				StringComparison.Ordinal);
+			Assert.Contains(
+				"if [[ -n \"${2-}\" ]]",
 				environment.StandardOutput,
 				StringComparison.Ordinal);
 		}
