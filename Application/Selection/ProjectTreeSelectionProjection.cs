@@ -86,7 +86,7 @@ public static class ProjectTreeSelectionProjection
 			ensureExists,
 			CancellationToken.None);
 
-	internal static List<string> BuildOrderedSelectedFilePathsWithCancellation(
+	public static List<string> BuildOrderedSelectedFilePathsWithCancellation(
 		TreeNodeDescriptor root,
 		IReadOnlySet<string> selectedPaths,
 		bool ensureExists,

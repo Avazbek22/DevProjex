@@ -241,15 +241,42 @@ public sealed class TreeExportService
 		TreeTextFormat format,
 		string? displayRootPath = null,
 		string? displayRootName = null)
+		=> CalculateFullTreeMetricsWithCancellation(
+			rootPath,
+			root,
+			format,
+			displayRootPath,
+			displayRootName,
+			CancellationToken.None);
+
+	public ExportOutputMetrics CalculateFullTreeMetricsWithCancellation(
+		string rootPath,
+		TreeNodeDescriptor root,
+		TreeTextFormat format,
+		string? displayRootPath,
+		string? displayRootName,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		ValidateFormat(format);
 		if (format != TreeTextFormat.Ascii)
 			return ExportOutputMetricsCalculator.FromText(
-				BuildFullTree(rootPath, root, format, displayRootPath, displayRootName));
+				BuildFullTreeWithCancellation(
+					rootPath,
+					root,
+					format,
+					displayRootPath,
+					displayRootName,
+					includeRootPath: true,
+					cancellationToken));
 
 		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath) ? rootPath : displayRootPath;
 		var outputRootName = ResolveRootDisplayName(root, displayRootName);
-		return CalculateAsciiFullTreeMetrics(outputRootPath, root, outputRootName);
+		return CalculateAsciiFullTreeMetrics(
+			outputRootPath,
+			root,
+			outputRootName,
+			cancellationToken);
 	}
 
 	public string BuildSelectedTree(string rootPath, TreeNodeDescriptor root, IReadOnlySet<string> selectedPaths)
@@ -345,10 +372,28 @@ public sealed class TreeExportService
 		TreeTextFormat format,
 		string? displayRootPath = null,
 		string? displayRootName = null)
+		=> CalculateSelectedTreeMetricsWithCancellation(
+			rootPath,
+			root,
+			selectedPaths,
+			format,
+			displayRootPath,
+			displayRootName,
+			CancellationToken.None);
+
+	public ExportOutputMetrics CalculateSelectedTreeMetricsWithCancellation(
+		string rootPath,
+		TreeNodeDescriptor root,
+		IReadOnlySet<string> selectedPaths,
+		TreeTextFormat format,
+		string? displayRootPath,
+		string? displayRootName,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		ValidateFormat(format);
 		var includedPaths = new HashSet<string>(PathComparer.Default);
-		if (!CollectIncludedPaths(root, selectedPaths, includedPaths, CancellationToken.None))
+		if (!CollectIncludedPaths(root, selectedPaths, includedPaths, cancellationToken))
 			return ExportOutputMetrics.Empty;
 
 		if (format != TreeTextFormat.Ascii)
@@ -360,11 +405,16 @@ public sealed class TreeExportService
 					format,
 					displayRootPath,
 					displayRootName,
-					CancellationToken.None));
+					cancellationToken));
 
 		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath) ? rootPath : displayRootPath;
 		var outputRootName = ResolveRootDisplayName(root, displayRootName);
-		return CalculateAsciiSelectedTreeMetrics(outputRootPath, root, includedPaths, outputRootName);
+		return CalculateAsciiSelectedTreeMetrics(
+			outputRootPath,
+			root,
+			includedPaths,
+			outputRootName,
+			cancellationToken);
 	}
 
 	public static bool HasSelectedDescendantOrSelf(
@@ -1295,8 +1345,10 @@ public sealed class TreeExportService
 	private static ExportOutputMetrics CalculateAsciiFullTreeMetrics(
 		string outputRootPath,
 		TreeNodeDescriptor root,
-		string outputRootName)
+		string outputRootName,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		long chars = 0;
 		long lineBreaks = 0;
 
@@ -1309,7 +1361,12 @@ public sealed class TreeExportService
 			(long)BranchMiddle.Length + EscapeTextValue(outputRootName).Length,
 			ref chars,
 			ref lineBreaks);
-		AppendFullAsciiChildMetrics(root, IndentPipe.Length, ref chars, ref lineBreaks);
+		AppendFullAsciiChildMetrics(
+			root,
+			IndentPipe.Length,
+			ref chars,
+			ref lineBreaks,
+			cancellationToken);
 
 		return CreateMetricsFromNormalizedCounts(chars, lineBreaks);
 	}
@@ -1318,8 +1375,10 @@ public sealed class TreeExportService
 		string outputRootPath,
 		TreeNodeDescriptor root,
 		IReadOnlySet<string> includedPaths,
-		string outputRootName)
+		string outputRootName,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		long chars = 0;
 		long lineBreaks = 0;
 
@@ -1332,7 +1391,13 @@ public sealed class TreeExportService
 			(long)BranchMiddle.Length + EscapeTextValue(outputRootName).Length,
 			ref chars,
 			ref lineBreaks);
-		AppendSelectedAsciiChildMetrics(root, includedPaths, IndentPipe.Length, ref chars, ref lineBreaks);
+		AppendSelectedAsciiChildMetrics(
+			root,
+			includedPaths,
+			IndentPipe.Length,
+			ref chars,
+			ref lineBreaks,
+			cancellationToken);
 
 		return CreateMetricsFromNormalizedCounts(chars, lineBreaks);
 	}
@@ -1341,28 +1406,44 @@ public sealed class TreeExportService
 		TreeNodeDescriptor node,
 		int indentLength,
 		ref long chars,
-		ref long lineBreaks)
-		=> AppendAsciiChildMetrics(node, includedPaths: null, indentLength, ref chars, ref lineBreaks);
+		ref long lineBreaks,
+		CancellationToken cancellationToken)
+		=> AppendAsciiChildMetrics(
+			node,
+			includedPaths: null,
+			indentLength,
+			ref chars,
+			ref lineBreaks,
+			cancellationToken);
 
 	private static void AppendSelectedAsciiChildMetrics(
 		TreeNodeDescriptor node,
 		IReadOnlySet<string> includedPaths,
 		int indentLength,
 		ref long chars,
-		ref long lineBreaks)
-		=> AppendAsciiChildMetrics(node, includedPaths, indentLength, ref chars, ref lineBreaks);
+		ref long lineBreaks,
+		CancellationToken cancellationToken)
+		=> AppendAsciiChildMetrics(
+			node,
+			includedPaths,
+			indentLength,
+			ref chars,
+			ref lineBreaks,
+			cancellationToken);
 
 	private static void AppendAsciiChildMetrics(
 		TreeNodeDescriptor node,
 		IReadOnlySet<string>? includedPaths,
 		int indentLength,
 		ref long chars,
-		ref long lineBreaks)
+		ref long lineBreaks,
+		CancellationToken cancellationToken)
 	{
 		var pending = new Stack<AsciiMetricOperation>();
-		PushAsciiMetricChildren(pending, node, includedPaths, indentLength);
+		PushAsciiMetricChildren(pending, node, includedPaths, indentLength, cancellationToken);
 		while (pending.TryPop(out var operation))
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			AppendAsciiLineMetrics(
 				(long)operation.IndentLength +
 				(operation.IsLast ? BranchLast.Length : BranchMiddle.Length) +
@@ -1375,7 +1456,8 @@ public sealed class TreeExportService
 					pending,
 					operation.Node,
 					includedPaths,
-					operation.IndentLength + IndentPipe.Length);
+					operation.IndentLength + IndentPipe.Length,
+					cancellationToken);
 			}
 		}
 	}
@@ -1384,11 +1466,13 @@ public sealed class TreeExportService
 		Stack<AsciiMetricOperation> pending,
 		TreeNodeDescriptor parent,
 		IReadOnlySet<string>? includedPaths,
-		int indentLength)
+		int indentLength,
+		CancellationToken cancellationToken)
 	{
 		var isLast = true;
 		for (var index = parent.Children.Count - 1; index >= 0; index--)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			var child = parent.Children[index];
 			if (includedPaths is not null && !includedPaths.Contains(child.FullPath))
 				continue;

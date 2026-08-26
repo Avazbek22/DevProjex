@@ -181,6 +181,29 @@ public sealed class TreeExportServiceMetricsTests
 		Assert.Equal((expectedCharacters + 3) / 4, actual.Tokens);
 	}
 
+	[Fact]
+	public void CalculateFullTreeMetricsWithCancellation_StopsDuringTraversal()
+	{
+		using var cancellation = new CancellationTokenSource();
+		var child = new TreeNodeDescriptor("file.txt", "/root/file.txt", false, false, "file", []);
+		var root = new TreeNodeDescriptor(
+			"root",
+			"/root",
+			true,
+			false,
+			"folder",
+			new CancelOnReadList<TreeNodeDescriptor>([child], cancellation));
+
+		Assert.Throws<OperationCanceledException>(() =>
+			new TreeExportService().CalculateFullTreeMetricsWithCancellation(
+				"/root",
+				root,
+				TreeTextFormat.Ascii,
+				displayRootPath: null,
+				displayRootName: null,
+				cancellation.Token));
+	}
+
 	private static TreeNodeDescriptor CreateWorkspaceTree()
 	{
 		return new TreeNodeDescriptor(
@@ -238,5 +261,26 @@ public sealed class TreeExportServiceMetricsTests
 					IconKey: "folder",
 					Children: [])
 			]);
+	}
+
+	private sealed class CancelOnReadList<T>(
+		IReadOnlyList<T> values,
+		CancellationTokenSource cancellation) : IReadOnlyList<T>
+	{
+		public int Count => values.Count;
+
+		public T this[int index]
+		{
+			get
+			{
+				var value = values[index];
+				cancellation.Cancel();
+				return value;
+			}
+		}
+
+		public IEnumerator<T> GetEnumerator() => values.GetEnumerator();
+
+		System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
 	}
 }

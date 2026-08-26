@@ -353,6 +353,31 @@ public sealed class MainWindowPreviewInternalsTests
         Assert.EndsWith("leaf.txt", result[0], StringComparison.OrdinalIgnoreCase);
     }
 
+	[Fact]
+	public void BuildOrderedAllFilePathsWithCancellation_StopsDuringTraversal()
+	{
+		using var cancellation = new CancellationTokenSource();
+		var child = new TreeNodeDescriptor(
+			"file.txt",
+			CreatePath("root", "file.txt"),
+			false,
+			false,
+			"file",
+			[]);
+		var root = new TreeNodeDescriptor(
+			"root",
+			CreatePath("root"),
+			true,
+			false,
+			"folder",
+			new CancelOnReadList<TreeNodeDescriptor>([child], cancellation));
+
+		Assert.Throws<OperationCanceledException>(() =>
+			PreviewFileCollectionPolicy.BuildOrderedAllFilePathsWithCancellation(
+				root,
+				cancellation.Token));
+	}
+
     [Fact]
     public void BuildPreviewCacheKey_SameArguments_ProduceEqualKey()
     {
@@ -460,4 +485,25 @@ public sealed class MainWindowPreviewInternalsTests
             ? Path.Combine(["C:\\", ..segments])
             : Path.Combine(["/", ..segments]);
     }
+
+	private sealed class CancelOnReadList<T>(
+		IReadOnlyList<T> values,
+		CancellationTokenSource cancellation) : IReadOnlyList<T>
+	{
+		public int Count => values.Count;
+
+		public T this[int index]
+		{
+			get
+			{
+				var value = values[index];
+				cancellation.Cancel();
+				return value;
+			}
+		}
+
+		public IEnumerator<T> GetEnumerator() => values.GetEnumerator();
+
+		System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+	}
 }
