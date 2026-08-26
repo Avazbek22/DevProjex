@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using DevProjex.Application.Services;
 using DevProjex.Mcp;
 using ModelContextProtocol;
 using ModelContextProtocol.Client;
@@ -8,13 +9,30 @@ namespace DevProjex.Tests.Terminal;
 
 public sealed class McpServerProcessTests
 {
-	[Fact]
-	public async Task RealProcessSpeaksOnlyJsonRpcAndStopsOnStandardInputEof()
+	private const string Secret = "ghp_" + "a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL";
+	private const string PrivateEmail = "alice.smith" + "@company.io";
+	private const string PrivatePath = "/home/alice-smith/DevProjexMcpProcessProbe/project";
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task RealProcessAppliesServerRedactionPolicyAndStopsOnStandardInputEof(
+		bool hidePrivateData)
 	{
-		using var workspace = new TemporaryDirectory();
+		var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+		if (string.IsNullOrWhiteSpace(userProfile))
+			Assert.Skip("The environment does not expose a user profile directory.");
+		using var workspace = new TemporaryDirectory(userProfile);
 		var project = workspace.CreateDirectory("project");
+		var physicalProject = McpRootRegistry.ResolvePhysicalExistingPath(project, requireDirectory: true);
+		if (OutputRootPathPresentation.MaskLocalUserSegment(physicalProject) == physicalProject)
+			Assert.Skip("The user profile path does not use a supported local-user layout.");
 		var ignoredEnvironmentRoot = workspace.CreateDirectory("environment-root");
-		workspace.WriteFile("project/app.cs", "internal sealed class ProcessMarker {}\n");
+		workspace.WriteFile(
+			"project/app.cs",
+			$"internal sealed class ProcessMarker {{ const string Token = \"{Secret}\"; }}\n" +
+			$"// Contact {PrivateEmail}\n" +
+			$"// Project {PrivatePath}\n");
 		var application = PublishedApplicationLocator.FindApplicationAssembly();
 		var startInfo = new ProcessStartInfo("dotnet")
 		{
@@ -29,6 +47,8 @@ public sealed class McpServerProcessTests
 		startInfo.ArgumentList.Add("mcp");
 		startInfo.ArgumentList.Add("--root");
 		startInfo.ArgumentList.Add(project);
+		if (hidePrivateData)
+			startInfo.ArgumentList.Add("--hide-private-data");
 		startInfo.Environment["CLAUDE_PROJECT_DIR"] = ignoredEnvironmentRoot;
 		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data");
 
@@ -62,41 +82,117 @@ public sealed class McpServerProcessTests
 			using var textDocument = JsonDocument.Parse(text);
 			Assert.True(JsonElement.DeepEquals(structured, textDocument.RootElement));
 
+			var file = await client.CallToolAsync(
+				"get_file",
+				new Dictionary<string, object?> { ["path"] = "app.cs" },
+				progress: null,
+				options: null,
+				TestContext.Current.CancellationToken);
+			AssertRedactionPolicy(file, hidePrivateData);
+
 			var progress = new InlineProgress<ProgressNotificationValue>();
 			var pack = await client.CallToolAsync(
 				"pack_context",
 				new Dictionary<string, object?>
 				{
-					["view"] = "content",
+					["view"] = "tree-content",
 					["format"] = "text"
 				},
 				progress,
 				options: null,
 				TestContext.Current.CancellationToken);
 			Assert.NotEqual(true, pack.IsError);
+			AssertRedactionPolicy(pack, hidePrivateData);
+			AssertGeneratedRootPathPolicy(pack, expectedProject, hidePrivateData);
 		}
 
 		process.StandardInput.Close();
-		await process.WaitForExitAsync(TestContext.Current.CancellationToken)
-			.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken);
+		var standardOutputEofTask = recordingOutput.DrainToEndAsync(TestContext.Current.CancellationToken);
+		await Task.WhenAll(
+			process.WaitForExitAsync(TestContext.Current.CancellationToken)
+				.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken),
+			standardOutputEofTask
+				.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken));
 		var standardError = await standardErrorTask;
 		Assert.Equal(0, process.ExitCode);
 		Assert.True(string.IsNullOrWhiteSpace(standardError), $"Unexpected stderr: {standardError}");
 
-		var transcript = recordingOutput.GetRecordedText();
-		var messages = transcript.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-		Assert.NotEmpty(messages);
+		var messages = ParseJsonRpcMessages(recordingOutput.GetRecordedText());
 		Assert.Contains(messages, static message =>
 		{
-			using var document = JsonDocument.Parse(message.TrimEnd('\r'));
+			using var document = JsonDocument.Parse(message);
 			return document.RootElement.TryGetProperty("method", out var method) &&
 			       method.GetString() == NotificationMethods.ProgressNotification;
 		});
-		Assert.All(messages, static message =>
+	}
+
+	private static IReadOnlyList<string> ParseJsonRpcMessages(string transcript)
+	{
+		var lines = transcript.Split('\n');
+		var messageCount = lines.Length;
+		if (messageCount > 0 && lines[^1].Length == 0)
+			messageCount--;
+
+		Assert.True(messageCount > 0, "MCP stdout did not contain any JSON-RPC messages.");
+		var messages = new string[messageCount];
+		for (var index = 0; index < messageCount; index++)
 		{
-			using var document = JsonDocument.Parse(message.TrimEnd('\r'));
+			var line = lines[index];
+			var message = line.EndsWith('\r') ? line[..^1] : line;
+			Assert.False(
+				string.IsNullOrWhiteSpace(message),
+				$"MCP stdout contained an empty non-protocol line at index {index}.");
+			Assert.DoesNotContain('\r', message);
+			Assert.StartsWith("{", message, StringComparison.Ordinal);
+			Assert.EndsWith("}", message, StringComparison.Ordinal);
+			using var document = JsonDocument.Parse(message);
+			Assert.Equal(JsonValueKind.Object, document.RootElement.ValueKind);
 			Assert.Equal("2.0", document.RootElement.GetProperty("jsonrpc").GetString());
-		});
+			var hasMethod = document.RootElement.TryGetProperty("method", out var method) &&
+			                method.ValueKind == JsonValueKind.String &&
+			                !string.IsNullOrWhiteSpace(method.GetString());
+			var hasId = document.RootElement.TryGetProperty("id", out _);
+			var hasResult = document.RootElement.TryGetProperty("result", out _);
+			var hasError = document.RootElement.TryGetProperty("error", out _);
+			Assert.True(
+				hasMethod ? !hasResult && !hasError : hasId && hasResult != hasError,
+				$"MCP stdout contained an invalid JSON-RPC message at index {index}: {message}");
+			messages[index] = message;
+		}
+
+		return messages;
+	}
+
+	private static void AssertRedactionPolicy(
+		CallToolResult result,
+		bool hidePrivateData)
+	{
+		var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
+		Assert.NotEqual(true, result.IsError);
+		Assert.Contains("ProcessMarker", text, StringComparison.Ordinal);
+		Assert.DoesNotContain(Secret, text, StringComparison.Ordinal);
+		if (hidePrivateData)
+		{
+			Assert.DoesNotContain(PrivateEmail, text, StringComparison.Ordinal);
+			Assert.DoesNotContain(PrivatePath, text, StringComparison.Ordinal);
+		}
+		else
+		{
+			Assert.Contains(PrivateEmail, text, StringComparison.Ordinal);
+			Assert.Contains(PrivatePath, text, StringComparison.Ordinal);
+		}
+	}
+
+	private static void AssertGeneratedRootPathPolicy(
+		CallToolResult result,
+		string project,
+		bool hidePrivateData)
+	{
+		var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
+		var protectedProject = OutputRootPathPresentation.MaskLocalUserSegment(project);
+		var expectedProject = hidePrivateData ? protectedProject : project;
+		Assert.Contains(expectedProject, text, StringComparison.Ordinal);
+		Assert.DoesNotContain(hidePrivateData ? project : protectedProject, text, StringComparison.Ordinal);
 	}
 
 	private static StringComparison PathComparison =>
@@ -125,13 +221,24 @@ public sealed class McpServerProcessTests
 
 	private sealed class RecordingReadStream(Stream source) : Stream
 	{
+		private static readonly Encoding StrictUtf8 = new UTF8Encoding(
+			encoderShouldEmitUTF8Identifier: false,
+			throwOnInvalidBytes: true);
 		private readonly MemoryStream _recording = new();
 		private readonly object _sync = new();
 
 		public string GetRecordedText()
 		{
 			lock (_sync)
-				return Encoding.UTF8.GetString(_recording.ToArray());
+				return StrictUtf8.GetString(_recording.ToArray());
+		}
+
+		public async Task DrainToEndAsync(CancellationToken cancellationToken)
+		{
+			var buffer = new byte[8 * 1024];
+			while (await ReadAsync(buffer, cancellationToken).ConfigureAwait(false) > 0)
+			{
+			}
 		}
 
 		public override async ValueTask<int> ReadAsync(

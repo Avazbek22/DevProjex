@@ -30,13 +30,14 @@ public sealed class McpServerIntegrationTests
 		await using var input = new MemoryStream();
 		await using var output = new MemoryStream();
 
-		await McpServerHost.RunAsync(
+		await McpServerHost.RunWithStreamsAsync(
 			[project],
 			input,
 			output,
-			TestContext.Current.CancellationToken,
-			() => workspace.CreateDirectory("app-data"),
-			temporaryRoot);
+			hidePrivateData: false,
+			cancellationToken: TestContext.Current.CancellationToken,
+			appDataPathProvider: () => workspace.CreateDirectory("app-data"),
+			tempRoot: temporaryRoot);
 
 		var packRoot = Path.Combine(temporaryRoot, "DevProjex", "mcp");
 		Assert.Empty(Directory.EnumerateDirectories(packRoot));
@@ -232,13 +233,15 @@ public sealed class McpServerIntegrationTests
 			"get_file",
 			new Dictionary<string, object?> { ["path"] = "Secret.cs", ["start_line"] = "1" });
 		AssertTextOnlyResult(server, file, "search-marker");
-		AssertRedactedAndSpotlighted(file);
+		AssertSecretRedactedAndSpotlighted(file);
+		Assert.Contains(PrivateEmail, Text(file), StringComparison.Ordinal);
 
 		var search = await server.CallAsync(
 			"search_project",
 			new Dictionary<string, object?> { ["pattern"] = "search-marker", ["max_results"] = "5" });
 		AssertTextOnlyResult(server, search, "Secret.cs:3:");
-		AssertRedactedAndSpotlighted(search);
+		AssertSecretRedactedAndSpotlighted(search);
+		Assert.Contains(PrivateEmail, Text(search), StringComparison.Ordinal);
 
 		var inline = await server.CallAsync(
 			"pack_context",
@@ -250,7 +253,8 @@ public sealed class McpServerIntegrationTests
 			});
 		AssertTextOnlyResult(server, inline, "Secret.cs");
 		Assert.Contains("search-marker", Text(inline), StringComparison.Ordinal);
-		AssertRedactedAndSpotlighted(inline);
+		AssertSecretRedactedAndSpotlighted(inline);
+		Assert.Contains(PrivateEmail, Text(inline), StringComparison.Ordinal);
 
 		var stored = await server.CallAsync(
 			"pack_context",
@@ -267,7 +271,7 @@ public sealed class McpServerIntegrationTests
 			"read_pack",
 			new Dictionary<string, object?> { ["pack_id"] = packId, ["start_line"] = "1" });
 		AssertTextOnlyResult(server, page, "Large.cs");
-		AssertRedactedAndSpotlighted(page);
+		AssertSecretRedactedAndSpotlighted(page);
 
 		var expired = await server.CallAsync(
 			"read_pack",
@@ -356,8 +360,11 @@ public sealed class McpServerIntegrationTests
 		AssertSpotlighted(result);
 	}
 
-	[Fact]
-	public async Task StoredPackTreePreviewRedactsLocalUserSegment()
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task StoredPackUsesServerPrivateDataPolicyForTreePreviewAndPackBody(
+		bool hidePrivateData)
 	{
 		var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 		if (string.IsNullOrWhiteSpace(userProfile))
@@ -377,25 +384,282 @@ public sealed class McpServerIntegrationTests
 				string.Join('\n', Enumerable.Range(0, 1_500).Select(static index =>
 					$"    private const string Value{index:D4} = \"{new string('x', 48)}\";")) +
 				"\n}\n");
-			await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+			await using var server = await McpTestServer.StartAsync(
+				project,
+				workspace.Path,
+				hidePrivateData);
 
 			var result = await server.CallAsync(
 				"pack_context",
 				new Dictionary<string, object?>
 				{
-					["view"] = "content",
+					["view"] = "tree-content",
 					["format"] = "text"
 				});
 
-			Assert.Contains("Pack stored as '", Text(result), StringComparison.Ordinal);
-			Assert.Contains(protectedProject, Text(result), StringComparison.Ordinal);
-			Assert.DoesNotContain(project, Text(result), StringComparison.Ordinal);
+			var resultText = Text(result);
+			Assert.Contains("Pack stored as '", resultText, StringComparison.Ordinal);
+			var page = await server.CallAsync(
+				"read_pack",
+				new Dictionary<string, object?>
+				{
+					["pack_id"] = ExtractPackId(resultText),
+					["start_line"] = 1
+				});
+			AssertPackPathPolicy(resultText, project, protectedProject, hidePrivateData);
+			AssertPackPathPolicy(Text(page), project, protectedProject, hidePrivateData);
 		}
 		finally
 		{
 			if (Directory.Exists(project))
 				Directory.Delete(project, recursive: true);
 		}
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task ContentToolsAlwaysRedactSecretsAndApplyServerPrivateDataPolicy(
+		bool hidePrivateData)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var sensitiveLines =
+			$"const string Token = \"{Secret}\";\n" +
+			$"contact: {PrivateEmail}\n" +
+			"search-marker\n";
+		File.WriteAllText(Path.Combine(project, "Small.txt"), sensitiveLines);
+		File.WriteAllText(
+			Path.Combine(project, "Large.txt"),
+			sensitiveLines + string.Join('\n', Enumerable.Repeat(new string('x', 80), 1_000)));
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			hidePrivateData);
+
+		var file = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "Small.txt" });
+		var search = await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?>
+			{
+				["pattern"] = "search-marker",
+				["context_lines"] = 2
+			});
+		var inlinePack = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "Small.txt" },
+				["view"] = "content",
+				["format"] = "text"
+			});
+		var storedPack = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "Large.txt" },
+				["view"] = "content",
+				["format"] = "text"
+			});
+		var storedPage = await server.CallAsync(
+			"read_pack",
+			new Dictionary<string, object?>
+			{
+				["pack_id"] = ExtractPackId(Text(storedPack)),
+				["start_line"] = 1
+			});
+
+		foreach (var result in new[] { file, search, inlinePack, storedPage })
+		{
+			AssertSecretRedactedAndSpotlighted(result);
+			Assert.Contains("search-marker", Text(result), StringComparison.Ordinal);
+			if (hidePrivateData)
+				Assert.DoesNotContain(PrivateEmail, Text(result), StringComparison.Ordinal);
+			else
+				Assert.Contains(PrivateEmail, Text(result), StringComparison.Ordinal);
+		}
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task SearchProjectSearchesTheEffectiveRedactedText(bool hidePrivateData)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(
+			Path.Combine(project, "Sensitive.txt"),
+			$"token: {Secret}\ncontact: {PrivateEmail}\n");
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			hidePrivateData);
+
+		var secretSearch = await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?>
+			{
+				["pattern"] = Regex.Escape(Secret),
+				["context_lines"] = 0,
+				["ignore_case"] = false
+			});
+		var privateDataSearch = await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?>
+			{
+				["pattern"] = Regex.Escape(PrivateEmail),
+				["context_lines"] = 0,
+				["ignore_case"] = false
+			});
+
+		AssertSpotlighted(secretSearch);
+		Assert.DoesNotContain(Secret, Text(secretSearch), StringComparison.Ordinal);
+		Assert.DoesNotContain("Sensitive.txt:", Text(secretSearch), StringComparison.Ordinal);
+		AssertSpotlighted(privateDataSearch);
+		if (hidePrivateData)
+		{
+			Assert.DoesNotContain(PrivateEmail, Text(privateDataSearch), StringComparison.Ordinal);
+			Assert.DoesNotContain("Sensitive.txt:", Text(privateDataSearch), StringComparison.Ordinal);
+		}
+		else
+		{
+			Assert.Contains(PrivateEmail, Text(privateDataSearch), StringComparison.Ordinal);
+			Assert.Contains("Sensitive.txt:2:", Text(privateDataSearch), StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
+	public async Task AnalyzeMetricsReflectServerPrivateDataPolicy()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var content = string.Join(
+			'\n',
+			Enumerable.Range(0, 100).Select(static index =>
+				$"contact-{index:D3}: alice.smith.long.identity.{index:D3}@company.io")) +
+			"\n";
+		File.WriteAllText(
+			Path.Combine(project, "Contacts.txt"),
+			content);
+
+		JsonElement unmaskedMetrics;
+		await using (var server = await McpTestServer.StartAsync(project, workspace.Path))
+		{
+			var result = await server.CallAsync("analyze");
+			Assert.NotEqual(true, result.IsError);
+			unmaskedMetrics = Assert.IsType<JsonElement>(result.StructuredContent).Clone();
+		}
+
+		JsonElement maskedMetrics;
+		await using (var server = await McpTestServer.StartAsync(project, workspace.Path, hidePrivateData: true))
+		{
+			var result = await server.CallAsync("analyze");
+			Assert.NotEqual(true, result.IsError);
+			maskedMetrics = Assert.IsType<JsonElement>(result.StructuredContent).Clone();
+		}
+
+		Assert.Equal(1, unmaskedMetrics.GetProperty("files").GetInt32());
+		Assert.Equal(1, maskedMetrics.GetProperty("files").GetInt32());
+		Assert.True(
+			maskedMetrics.GetProperty("characters").GetInt64() <
+			unmaskedMetrics.GetProperty("characters").GetInt64());
+		Assert.True(
+			maskedMetrics.GetProperty("tokens").GetInt64() <
+			unmaskedMetrics.GetProperty("tokens").GetInt64());
+	}
+
+	[Theory]
+	[InlineData(false, true)]
+	[InlineData(true, false)]
+	public async Task ServerPrivateDataPolicyOverridesOpposingLocalProfile(
+		bool hidePrivateData,
+		bool profileHidePrivateData)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(
+			Path.Combine(project, "Profiled.txt"),
+			$"token: {Secret}\ncontact: {PrivateEmail}\nprofile-policy-marker\n");
+		var appData = Path.Combine(workspace.Path, "app-data");
+		var physicalProject = McpRootRegistry.ResolvePhysicalExistingPath(project, requireDirectory: true);
+		new ProjectProfileStore(() => appData).SaveProfile(
+			physicalProject,
+			new ProjectSelectionProfile(
+				SelectedRootFolders: [],
+				SelectedExtensions: [".txt"],
+				SelectedIgnoreOptions: profileHidePrivateData ? [IgnoreOptionId.HidePrivateData] : [],
+				IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
+				{
+					[IgnoreOptionId.HidePrivateData] = profileHidePrivateData
+				}));
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			hidePrivateData);
+
+		var result = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["profile"] = "local",
+				["view"] = "content",
+				["format"] = "text"
+			});
+
+		AssertSecretRedactedAndSpotlighted(result);
+		Assert.Contains("profile-policy-marker", Text(result), StringComparison.Ordinal);
+		Assert.Equal(!hidePrivateData, Text(result).Contains(PrivateEmail, StringComparison.Ordinal));
+	}
+
+	[Theory]
+	[InlineData(false, true)]
+	[InlineData(true, false)]
+	public async Task ServerPrivateDataPolicyOverridesOpposingPortableProfile(
+		bool hidePrivateData,
+		bool profileHidePrivateData)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(
+			Path.Combine(project, "Profiled.txt"),
+			$"token: {Secret}\ncontact: {PrivateEmail}\nprofile-policy-marker\n");
+		const string profileName = "portable.json";
+		File.WriteAllText(
+			Path.Combine(project, profileName),
+			JsonSerializer.Serialize(new
+			{
+				schemaVersion = PortableProjectProfileService.CurrentSchemaVersion,
+				kind = PortableProjectProfileService.DocumentKind,
+				selection = new
+				{
+					roots = (string[]?)null,
+					extensions = new[] { ".txt" },
+					selectedPaths = Array.Empty<string>(),
+					gitMode = "none",
+					exclusions = Array.Empty<string>(),
+					hideSecrets = false,
+					hidePrivateData = profileHidePrivateData
+				}
+			}));
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			hidePrivateData);
+
+		var result = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["profile"] = profileName,
+				["view"] = "content",
+				["format"] = "text"
+			});
+
+		AssertSecretRedactedAndSpotlighted(result);
+		Assert.Contains("profile-policy-marker", Text(result), StringComparison.Ordinal);
+		Assert.Equal(!hidePrivateData, Text(result).Contains(PrivateEmail, StringComparison.Ordinal));
 	}
 
 	[Fact]
@@ -620,7 +884,7 @@ public sealed class McpServerIntegrationTests
 		Assert.Contains("Calculate", Text(packed), StringComparison.Ordinal);
 		Assert.Contains("private const string Token", Text(packed), StringComparison.Ordinal);
 		Assert.DoesNotContain(bodyMarker, Text(packed), StringComparison.Ordinal);
-		AssertRedactedAndSpotlighted(packed);
+		AssertSecretRedactedAndSpotlighted(packed);
 	}
 
 	[Fact]
@@ -821,11 +1085,27 @@ public sealed class McpServerIntegrationTests
 		Assert.DoesNotContain(result.Content, static block => block is EmbeddedResourceBlock);
 	}
 
-	private static void AssertRedactedAndSpotlighted(CallToolResult result)
+	private static void AssertSecretRedactedAndSpotlighted(CallToolResult result)
 	{
 		AssertSpotlighted(result);
 		Assert.DoesNotContain(Secret, Text(result), StringComparison.Ordinal);
-		Assert.DoesNotContain(PrivateEmail, Text(result), StringComparison.Ordinal);
+	}
+
+	private static void AssertPackPathPolicy(
+		string text,
+		string project,
+		string protectedProject,
+		bool hidePrivateData)
+	{
+		if (hidePrivateData)
+		{
+			Assert.Contains(protectedProject, text, StringComparison.Ordinal);
+			Assert.DoesNotContain(project, text, StringComparison.Ordinal);
+			return;
+		}
+
+		Assert.Contains(project, text, StringComparison.Ordinal);
+		Assert.DoesNotContain(protectedProject, text, StringComparison.Ordinal);
 	}
 
 	private static void InitializeGitIndex(string repository, params string[] trackedPaths)
@@ -943,14 +1223,18 @@ public sealed class McpServerIntegrationTests
 
 		public McpClient Client { get; }
 
-		public static async Task<McpTestServer> StartAsync(string project, string sandbox)
+		public static async Task<McpTestServer> StartAsync(
+			string project,
+			string sandbox,
+			bool hidePrivateData = false)
 		{
 			var clientToServer = new Pipe();
 			var serverToClient = new Pipe();
-			var serverTask = McpServerHost.RunAsync(
+			var serverTask = McpServerHost.RunWithStreamsAsync(
 				[project],
 				clientToServer.Reader.AsStream(),
 				serverToClient.Writer.AsStream(),
+				hidePrivateData,
 				TestContext.Current.CancellationToken,
 				() => Path.Combine(sandbox, "app-data"),
 				Path.Combine(sandbox, "temp"));

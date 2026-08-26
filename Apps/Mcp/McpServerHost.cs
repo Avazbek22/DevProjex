@@ -13,17 +13,20 @@ public static class McpServerHost
 
 	public static Task RunAsync(
 		IReadOnlyList<string> roots,
+		bool hidePrivateData = false,
 		CancellationToken cancellationToken = default) =>
-		RunAsync(
+		RunWithStreamsAsync(
 			roots,
 			Console.OpenStandardInput(),
 			Console.OpenStandardOutput(),
+			hidePrivateData,
 			cancellationToken);
 
-	public static async Task RunAsync(
+	internal static async Task RunWithStreamsAsync(
 		IReadOnlyList<string> roots,
 		Stream input,
 		Stream output,
+		bool hidePrivateData = false,
 		CancellationToken cancellationToken = default,
 		Func<string>? appDataPathProvider = null,
 		string? tempRoot = null)
@@ -35,7 +38,7 @@ public static class McpServerHost
 		var rootRegistry = new McpRootRegistry(roots);
 		using var services = McpServices.Create(rootRegistry, appDataPathProvider);
 		using var packs = new McpPackRegistry(tempRoot);
-		var projectService = new McpProjectService(rootRegistry, services);
+		var projectService = new McpProjectService(rootRegistry, services, hidePrivateData);
 		var tools = new DevProjexMcpTools(rootRegistry, projectService, packs);
 		var catalog = new DevProjexMcpToolCatalog(tools);
 

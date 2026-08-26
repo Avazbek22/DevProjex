@@ -98,15 +98,21 @@ public sealed class DevProjexCommandTree
 			Arity = ArgumentArity.OneOrMore,
 			AllowMultipleArgumentsPerToken = false
 		};
+		var hidePrivateData = new Option<bool>("--hide-private-data")
+		{
+			Description = L("Terminal.Option.HidePrivateData")
+		};
 		roots.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
 			context,
 			FileSystemCompletionKind.Directories,
 			Directory.GetCurrentDirectory()));
 		command.Options.Add(roots);
+		command.Options.Add(hidePrivateData);
 		CliExamplesRegistry.Set(
 			command,
 			"devprojex mcp",
-			"devprojex mcp --root . --root ../shared");
+			"devprojex mcp --root . --root ../shared",
+			"devprojex mcp --root . --hide-private-data");
 		command.SetAction(async (parseResult, cancellationToken) =>
 		{
 			var explicitRoots = parseResult.GetValue(roots) ?? [];
@@ -116,7 +122,11 @@ public sealed class DevProjexCommandTree
 				Directory.GetCurrentDirectory());
 			try
 			{
-				await McpServerHost.RunAsync(resolvedRoots, cancellationToken).ConfigureAwait(false);
+				await McpServerHost.RunAsync(
+						resolvedRoots,
+						parseResult.GetValue(hidePrivateData),
+						cancellationToken)
+					.ConfigureAwait(false);
 				return CommandLineExitCodes.Success;
 			}
 			catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException)
