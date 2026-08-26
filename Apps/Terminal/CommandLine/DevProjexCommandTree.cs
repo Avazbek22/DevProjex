@@ -1507,17 +1507,29 @@ public sealed class DevProjexCommandTree
 		{
 			Hidden = true
 		};
+		var nullDelimited = new Option<bool>("--null")
+		{
+			Hidden = true
+		};
 		var workingDirectoryBase64 = new Option<string?>("--working-directory-base64")
 		{
 			Hidden = true
 		};
 		complete.Options.Add(position);
 		complete.Options.Add(base64);
+		complete.Options.Add(nullDelimited);
 		complete.Options.Add(workingDirectoryBase64);
 		complete.Arguments.Add(commandLine);
 		complete.SetAction(parseResult =>
 		{
 			var useBase64Transport = parseResult.GetValue(base64);
+			var useNullDelimitedTransport = parseResult.GetValue(nullDelimited);
+			if (useBase64Transport && useNullDelimitedTransport)
+			{
+				environment.Error.WriteLine("error[DPX-CLI-INVALID-SYNTAX]:");
+				environment.Error.WriteLine(L("Terminal.Error.ParserRejected"));
+				return CommandLineExitCodes.UsageError;
+			}
 			var completionCommandLine =
 				parseResult.GetValue(commandLine) ?? string.Empty;
 			if (useBase64Transport &&
@@ -1548,10 +1560,20 @@ public sealed class DevProjexCommandTree
 				         parseResult.GetValue(position),
 				         completionWorkingDirectory))
 			{
-				environment.Output.WriteLine(
-					useBase64Transport
-						? CompletionCommandLineTransport.EncodeBase64(candidate)
-						: candidate);
+				if (useBase64Transport)
+				{
+					environment.Output.WriteLine(
+						CompletionCommandLineTransport.EncodeBase64(candidate));
+				}
+				else if (useNullDelimitedTransport)
+				{
+					environment.Output.Write(candidate);
+					environment.Output.Write('\0');
+				}
+				else
+				{
+					environment.Output.WriteLine(candidate);
+				}
 			}
 			return CommandLineExitCodes.Success;
 		});

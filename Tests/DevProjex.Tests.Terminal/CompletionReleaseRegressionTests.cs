@@ -529,6 +529,62 @@ public sealed class CompletionReleaseRegressionTests
 	}
 
 	[Fact]
+	public async Task CompletionTransportRejectsConflictingEncodings()
+	{
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment).RunAsync(
+			["dev", "complete", "--position", "0", "--base64", "--null", "ZA=="],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains(
+			"error[DPX-CLI-INVALID-SYNTAX]",
+			environment.StandardError,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task NullDelimitedCompletionTransportPreservesUnixControlCharacters()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Windows file names cannot contain the control characters covered by this transport test.");
+			return;
+		}
+
+		using var workspace = new TemporaryDirectory();
+		var completionDirectory = workspace.CreateDirectory("completion cwd");
+		const string directoryName = "Project\n\u001b]52;c;ignored\u0007";
+		Directory.CreateDirectory(Path.Combine(completionDirectory, directoryName));
+		const string line = "devprojex analyze ./Project";
+		var encodedWorkingDirectory = Convert.ToBase64String(
+			Encoding.UTF8.GetBytes(completionDirectory));
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment).RunAsync(
+			[
+				"dev",
+				"complete",
+				"--position",
+				line.Length.ToString(CultureInfo.InvariantCulture),
+				"--null",
+				"--working-directory-base64",
+				encodedWorkingDirectory,
+				line
+			],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Empty(environment.StandardError);
+		Assert.Equal(
+			[$"./{directoryName}/"],
+			environment.StandardOutput.Split('\0', StringSplitOptions.RemoveEmptyEntries));
+		Assert.EndsWith("\0", environment.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void FileSystemCompletionRetainsOnlyTheBestCandidatesFromALargeStream()
 	{
 		const int candidateCount = 100_000;

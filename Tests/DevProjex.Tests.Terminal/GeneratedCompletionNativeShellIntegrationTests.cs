@@ -560,7 +560,7 @@ public sealed class GeneratedCompletionNativeShellIntegrationTests
 				chmod +x "$wrapper_path"
 				export PATH="$integration_root:$PATH"
 				source "$completion_script"
-				_describe() { print -rl -- "${candidates[@]}"; }
+				compadd() { print -rl -- "${candidates[@]}"; }
 				BUFFER='{{CompletionLine}}'
 				CURSOR=${#BUFFER}
 				_devprojex_complete
