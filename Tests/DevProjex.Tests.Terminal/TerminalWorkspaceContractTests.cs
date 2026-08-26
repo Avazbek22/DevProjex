@@ -895,6 +895,17 @@ public sealed class TerminalWorkspaceContractTests
 	}
 
 	[Fact]
+	public void CopyPayloadRejectsAnOversizedDocumentBeforeReadingItsText()
+	{
+		using var document = new NonMaterializablePreviewDocument(
+			TerminalWorkspaceController.MaximumClipboardPayloadBytes / sizeof(char) + 1);
+
+		var payload = TerminalWorkspaceController.MaterializeCopyPayload(document);
+
+		Assert.Null(payload);
+	}
+
+	[Fact]
 	public async Task RefreshSelectsANewFileAndPreservesAnExplicitlyClearedFile()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -1087,5 +1098,22 @@ public sealed class TerminalWorkspaceContractTests
 	private sealed class SynchronousProgress<T>(Action<T> report) : IProgress<T>
 	{
 		public void Report(T value) => report(value);
+	}
+
+	private sealed class NonMaterializablePreviewDocument(long characterCount) : IPreviewTextDocument
+	{
+		public int LineCount => 1;
+		public int MaxLineLength => 1;
+		public long CharacterCount => characterCount;
+		public IReadOnlyList<PreviewDocumentSection> Sections => [];
+
+		public string GetFullText() => throw new InvalidOperationException("Text must not be materialized.");
+		public string GetLineText(int lineNumber) =>
+			throw new InvalidOperationException("Text must not be materialized.");
+		public string GetLineRangeText(int firstLine, int lastLine) =>
+			throw new InvalidOperationException("Text must not be materialized.");
+		public void Dispose()
+		{
+		}
 	}
 }

@@ -374,6 +374,7 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (_screen != TerminalWorkspaceScreen.Workspace ||
 			_layoutMode == TerminalWorkspaceLayoutMode.TooSmall ||
+			_operationProgress is not null ||
 			_commandLine is null)
 		{
 			return;

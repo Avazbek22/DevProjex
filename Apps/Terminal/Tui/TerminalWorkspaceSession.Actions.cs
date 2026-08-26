@@ -929,6 +929,9 @@ internal sealed partial class TerminalWorkspaceSession
 
 	private void ShowActionPalette()
 	{
+		if (_operationProgress is not null)
+			return;
+
 		var registry = _screen == TerminalWorkspaceScreen.Welcome
 			? null
 			: BuildWorkspaceActionRegistry();
@@ -1286,6 +1289,11 @@ internal sealed partial class TerminalWorkspaceSession
 						format,
 						token)
 					.ConfigureAwait(false);
+				if (payload is null)
+				{
+					throw new TerminalWorkspaceOperationException(
+						"DPX-TUI-CLIPBOARD-PAYLOAD-TOO-LARGE");
+				}
 				var clipboardResult = await InvokeAsync(() => _clipboardWriter.Write(payload))
 					.ConfigureAwait(false);
 				if (!clipboardResult.IsSuccess)

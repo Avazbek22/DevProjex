@@ -1912,6 +1912,11 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			return;
 		if (_commandLine?.IsEditing == true)
 			return;
+		if (_operationProgress is not null && IsOverlayActivationKey(key))
+		{
+			key.Handled = true;
+			return;
+		}
 		if (_screen == TerminalWorkspaceScreen.Workspace &&
 			_layoutMode != TerminalWorkspaceLayoutMode.TooSmall &&
 			TerminalWorkspaceCommandKey.IsActivation(key))
@@ -1994,6 +1999,12 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		if (_screen == TerminalWorkspaceScreen.Workspace)
 			HandleWorkspaceKey(key);
 	}
+
+	private static bool IsOverlayActivationKey(Key key) =>
+		TerminalWorkspaceCommandKey.IsActivation(key) ||
+		key == Key.F1 ||
+		key == new Key('?') ||
+		key == Key.P.WithCtrl;
 
 	private void HandleWelcomeKey(Key key)
 	{
@@ -4173,6 +4184,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 
 	private void ShowHelp(bool welcome)
 	{
+		if (_operationProgress is not null)
+			return;
+
 		var contextualBody = _activePane switch
 		{
 			TerminalWorkspacePane.Preview => L("Terminal.Tui.Help.Preview"),
