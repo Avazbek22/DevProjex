@@ -95,15 +95,13 @@ public partial class MainWindow
         try
         {
             CancelAndDispose(ref _windowLifetimeCts);
+            var desktopControlServer = Interlocked.Exchange(ref _desktopControlServer, null);
             // Avalonia cannot await a Closed event handler. Persist critical session state
             // before the first asynchronous boundary so process shutdown cannot overtake it.
             CompleteSessionMetricsRecording();
             FlushPersistedStateOnWindowClose();
-            if (_desktopControlServer is not null)
-            {
-                await _desktopControlServer.DisposeAsync();
-                _desktopControlServer = null;
-            }
+            if (desktopControlServer is not null)
+                await desktopControlServer.DisposeAsync();
 
             // Unsubscribe from window events
             PropertyChanged -= OnWindowPropertyChanged;

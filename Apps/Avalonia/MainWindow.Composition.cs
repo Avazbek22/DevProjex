@@ -804,6 +804,8 @@ public partial class MainWindow
     private readonly ProjectProfilePersistenceCoordinator _projectProfiles;
     private readonly ProjectLoadCancellationCoordinator _projectLoadCancellation = new();
     private readonly TaskbarProgressCoordinator _taskbarProgress;
+	private readonly Func<IDesktopInteractionHandler, string?, CancellationToken, Task<DesktopControlServer>>
+		_desktopControlServerFactory;
     private readonly SemaphoreSlim _desktopInteractionGate = new(1, 1);
     private readonly TaskCompletionSource<bool> _shutdownCompletion =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -993,6 +995,7 @@ public partial class MainWindow
         _repoCacheService = services.RepoCacheService;
         _zipDownloadService = services.ZipDownloadService;
         _terminalCommandSetupService = services.TerminalCommandSetupService;
+		_desktopControlServerFactory = services.DesktopControlServerFactory;
         _sessionMetrics = services.SessionMetricsRecorder;
 		_secretRedactionSession = services.SecretRedactionSession;
 		_codeCompressionSession = services.CodeCompressionSession;
