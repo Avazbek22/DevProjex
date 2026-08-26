@@ -163,6 +163,34 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task GetFileRejectsAProjectFileReplacedByAnOutsideSymlink()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var sourcePath = Path.Combine(project, "source.txt");
+		var outsidePath = Path.Combine(workspace.Path, "outside.txt");
+		File.WriteAllText(outsidePath, "outside content");
+		File.WriteAllText(sourcePath, "inside content");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		File.Delete(sourcePath);
+		CreateFileAliasOrSkip(sourcePath, outsidePath);
+		try
+		{
+			var result = await server.CallAsync(
+				"get_file",
+				new Dictionary<string, object?> { ["path"] = "source.txt" });
+
+			Assert.True(result.IsError);
+			Assert.Contains(McpErrorCodes.RootViolation, Text(result), StringComparison.Ordinal);
+		}
+		finally
+		{
+			File.Delete(sourcePath);
+		}
+	}
+
+	[Fact]
 	public async Task ToolCallsExposeTextAndStructuredPayloadsAccordingToSchemaContract()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -850,6 +878,19 @@ public sealed class McpServerIntegrationTests
 			{
 			}
 			Assert.Skip("Windows junction creation is unavailable.");
+		}
+	}
+
+	private static void CreateFileAliasOrSkip(string linkPath, string targetPath)
+	{
+		try
+		{
+			File.CreateSymbolicLink(linkPath, targetPath);
+		}
+		catch (Exception exception) when (
+			exception is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
+		{
+			Assert.Skip($"File symbolic links are unavailable: {exception.GetType().Name}.");
 		}
 	}
 
