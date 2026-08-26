@@ -35,7 +35,7 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
             Assert.NotNull(waitMethod);
 
             var controller = Assert.IsType<PreviewSurfaceController>(controllerField!.GetValue(window));
-            var waitTask = Assert.IsType<Task<bool>>(waitMethod!.Invoke(controller, null));
+            var waitTask = Assert.IsAssignableFrom<Task<bool>>(waitMethod!.Invoke(controller, null));
             controller.Dispose();
 
             Assert.False(await waitTask.WaitAsync(TimeSpan.FromSeconds(1)));
