@@ -24,6 +24,7 @@ internal sealed class TerminalCommandHistoryPersistenceQueue(
 
 	private async Task DrainAsync()
 	{
+		Exception? unexpectedFailure = null;
 		while (true)
 		{
 			IReadOnlyList<string> history;
@@ -41,6 +42,10 @@ internal sealed class TerminalCommandHistoryPersistenceQueue(
 			{
 				// Command execution remains usable when per-user history cannot be persisted.
 			}
+			catch (Exception exception)
+			{
+				unexpectedFailure ??= exception;
+			}
 
 			lock (_gate)
 			{
@@ -48,8 +53,13 @@ internal sealed class TerminalCommandHistoryPersistenceQueue(
 					continue;
 
 				_workerRunning = false;
-				return;
+				break;
 			}
 		}
+
+		if (unexpectedFailure is not null)
+			System.Runtime.ExceptionServices.ExceptionDispatchInfo
+				.Capture(unexpectedFailure)
+				.Throw();
 	}
 }

@@ -66,6 +66,41 @@ public sealed class TerminalCommandHistoryTests
 	}
 
 	[Fact]
+	public async Task PersistenceQueueRecoversAfterUnexpectedWriteFailure()
+	{
+		var firstWriteStarted = new TaskCompletionSource(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		var releaseFirstWrite = new TaskCompletionSource(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		var writes = new List<IReadOnlyList<string>>();
+		var queue = new TerminalCommandHistoryPersistenceQueue(async (history, cancellationToken) =>
+		{
+			writes.Add(history);
+			if (writes.Count != 1)
+				return;
+
+			firstWriteStarted.SetResult();
+			await releaseFirstWrite.Task.WaitAsync(cancellationToken);
+			throw new InvalidOperationException("Unexpected persistence failure.");
+		});
+
+		var failedDrain = queue.Enqueue(["first"]);
+		Assert.NotNull(failedDrain);
+		await firstWriteStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+		Assert.Null(queue.Enqueue(["latest"]));
+
+		releaseFirstWrite.SetResult();
+		await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+			await failedDrain.WaitAsync(TestContext.Current.CancellationToken));
+
+		Assert.Equal(["latest"], writes[1]);
+		var recoveredDrain = queue.Enqueue(["after-recovery"]);
+		Assert.NotNull(recoveredDrain);
+		await recoveredDrain.WaitAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(["after-recovery"], writes[2]);
+	}
+
+	[Fact]
 	public void AddRetainsTheNewestFiftyCommands()
 	{
 		var history = new TerminalCommandHistory();
