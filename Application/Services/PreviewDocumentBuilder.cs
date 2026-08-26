@@ -1135,6 +1135,8 @@ internal static class PreviewTextStorageScavenger
 
     private sealed class PreviewTextStorageBuilder : IDisposable
     {
+        private const int Utf8WriteBufferSize = 16 * 1024;
+
         internal static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
 
         private readonly string _storagePath;
@@ -1287,16 +1289,28 @@ internal static class PreviewTextStorageScavenger
             if (line.Length == 0)
                 return;
 
-            var maxByteCount = Utf8WithoutBom.GetMaxByteCount(line.Length);
-            var rentedBuffer = ArrayPool<byte>.Shared.Rent(maxByteCount);
+            var encoder = Utf8WithoutBom.GetEncoder();
+            var rentedBuffer = ArrayPool<byte>.Shared.Rent(Utf8WriteBufferSize);
             try
             {
-                var bytesWritten = Utf8WithoutBom.GetBytes(line, rentedBuffer);
-                _stream.Write(rentedBuffer, 0, bytesWritten);
+                var remaining = line;
+                do
+                {
+                    encoder.Convert(
+                        remaining,
+                        rentedBuffer.AsSpan(0, Utf8WriteBufferSize),
+                        flush: true,
+                        out var charsUsed,
+                        out var bytesUsed,
+                        out _);
+                    _stream.Write(rentedBuffer, 0, bytesUsed);
+                    remaining = remaining[charsUsed..];
+                }
+                while (!remaining.IsEmpty);
             }
             finally
             {
-                ArrayPool<byte>.Shared.Return(rentedBuffer);
+                ArrayPool<byte>.Shared.Return(rentedBuffer, clearArray: true);
             }
         }
 

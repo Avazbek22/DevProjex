@@ -313,7 +313,10 @@ public sealed class PreviewDocumentBuilderTests
     {
         using var temp = new TemporaryDirectory();
         var largePath = temp.CreateFile("large.txt", string.Empty);
-        var largeContent = new string('x', 600_000);
+        var largeContent = string.Concat(
+            new string('x', 16_383),
+            "\U0001F642",
+            new string('\u65E5', 583_615));
 
         var analyzer = new StubFileContentAnalyzer(new Dictionary<string, TextFileContent?>
         {
@@ -330,7 +333,7 @@ public sealed class PreviewDocumentBuilderTests
         Assert.Equal(3, fileBacked.LineCount);
         Assert.Equal("large.txt:", fileBacked.GetLineText(1));
         Assert.Equal(BlankLine, fileBacked.GetLineText(2));
-        Assert.Equal(600_000, fileBacked.GetLineText(3).Length);
+        Assert.Equal(largeContent, fileBacked.GetLineText(3));
     }
 
     [Fact]
