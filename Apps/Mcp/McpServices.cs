@@ -4,8 +4,6 @@ namespace DevProjex.Mcp;
 
 internal sealed class McpServices : IDisposable
 {
-	private readonly PersistentSecretIdentityProvider _persistentIdentity;
-
 	private McpServices(
 		ProjectContextPlanner planner,
 		ProjectContextDocumentService documentService,
@@ -15,8 +13,7 @@ internal sealed class McpServices : IDisposable
 		IProjectProfileStore profileStore,
 		SecretRedactionSession redactionSession,
 		CodeCompressionSession compressionSession,
-		SecretRedactionOutputPreparer outputPreparer,
-		PersistentSecretIdentityProvider persistentIdentity)
+		SecretRedactionOutputPreparer outputPreparer)
 	{
 		Planner = planner;
 		DocumentService = documentService;
@@ -27,7 +24,6 @@ internal sealed class McpServices : IDisposable
 		RedactionSession = redactionSession;
 		CompressionSession = compressionSession;
 		OutputPreparer = outputPreparer;
-		_persistentIdentity = persistentIdentity;
 	}
 
 	public ProjectContextPlanner Planner { get; }
@@ -66,12 +62,31 @@ internal sealed class McpServices : IDisposable
 		                       DevProjex.Infrastructure.Persistence.UserDataPathResolver.GetConfigurationRoot;
 		var profileStore = new ProjectProfileStore(resolvedDataPath);
 		var persistentIdentity = new PersistentSecretIdentityProvider(resolvedDataPath);
-		var redactionSession = SecretRedactionSession.CreateWithPrivateData(
-			new SmartSecretsDetector(new GitleaksSecretDetector(), smartIgnore),
-			new PrivateDataDetector(),
-			profileStore,
-			persistentIdentity);
-		var compressionSession = CodeCompressionFactory.CreateSession();
+		SecretRedactionSession redactionSession;
+		try
+		{
+			redactionSession = SecretRedactionSession.CreateWithPrivateData(
+				new SmartSecretsDetector(new GitleaksSecretDetector(), smartIgnore),
+				new PrivateDataDetector(),
+				profileStore,
+				persistentIdentity);
+		}
+		catch
+		{
+			persistentIdentity.Dispose();
+			throw;
+		}
+
+		CodeCompressionSession compressionSession;
+		try
+		{
+			compressionSession = CodeCompressionFactory.CreateSession();
+		}
+		catch
+		{
+			redactionSession.Dispose();
+			throw;
+		}
 		var analysis = new ProjectAnalysisService(
 			new ScanOptionsUseCase(scanner),
 			new BuildTreeUseCase(treeBuilder, treePresenter),
@@ -83,28 +98,35 @@ internal sealed class McpServices : IDisposable
 		string Omission(FileContentClassification classification) =>
 			localization[FileContentClassificationCatalog.Get(classification).LabelKey];
 
-		return new McpServices(
-			new ProjectContextPlanner(analysis),
-			new ProjectContextDocumentService(
+		try
+		{
+			return new McpServices(
+				new ProjectContextPlanner(analysis),
+				new ProjectContextDocumentService(
+					treeExport,
+					contentAnalyzer,
+					Omission,
+					redactionSession,
+					compressionSession),
 				treeExport,
 				contentAnalyzer,
-				Omission,
+				new ProjectSelectionResolver(profileStore, new PortableProjectProfileService().LoadAsync),
+				profileStore,
 				redactionSession,
-				compressionSession),
-			treeExport,
-			contentAnalyzer,
-			new ProjectSelectionResolver(profileStore, new PortableProjectProfileService().LoadAsync),
-			profileStore,
-			redactionSession,
-			compressionSession,
-			new SecretRedactionOutputPreparer(contentAnalyzer),
-			persistentIdentity);
+				compressionSession,
+				new SecretRedactionOutputPreparer(contentAnalyzer));
+		}
+		catch
+		{
+			compressionSession.Dispose();
+			redactionSession.Dispose();
+			throw;
+		}
 	}
 
 	public void Dispose()
 	{
 		RedactionSession.Dispose();
 		CompressionSession.Dispose();
-		_persistentIdentity.Dispose();
 	}
 }
