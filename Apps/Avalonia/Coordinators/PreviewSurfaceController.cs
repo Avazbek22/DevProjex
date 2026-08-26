@@ -1830,7 +1830,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 
     private async Task<bool> WaitForClipboardSourceReadyAsync()
     {
-        if (!_viewModel.IsAnyPreviewVisible)
+        if (_disposed || !_viewModel.IsAnyPreviewVisible)
             return false;
 
         if (!_viewModel.IsPreviewLoading)
@@ -1841,7 +1841,8 @@ internal sealed class PreviewSurfaceController : IDisposable
 
         var timeout = TimeSpan.FromSeconds(10);
         var stopwatch = Stopwatch.StartNew();
-        while (_viewModel.IsAnyPreviewVisible &&
+        while (!_disposed &&
+               _viewModel.IsAnyPreviewVisible &&
                _viewModel.IsPreviewLoading &&
                stopwatch.Elapsed < timeout)
         {
@@ -1850,7 +1851,8 @@ internal sealed class PreviewSurfaceController : IDisposable
             await Task.Delay(15).ConfigureAwait(true);
         }
 
-        return !_viewModel.IsPreviewLoading &&
+        return !_disposed &&
+               !_viewModel.IsPreviewLoading &&
                (_controls.TextControl.Document ??
                 _viewModel.PreviewDocument) is not null;
     }
