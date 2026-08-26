@@ -11,7 +11,7 @@ public sealed class GitTrackedModeReadinessProbe
 		string path,
 		CancellationToken cancellationToken = default)
 	{
-		if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
+		if (PathUtility.IsMissingPath(path) || !Directory.Exists(path))
 			return new GitTrackedModeReadiness(false, null, 0);
 
 		return GitTrackedPathIndexCache.TryLoadNearest(path, cancellationToken, out var index) &&

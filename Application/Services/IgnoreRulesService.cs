@@ -433,7 +433,7 @@ public sealed class IgnoreRulesService(
 		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
-		if (string.IsNullOrWhiteSpace(rootPath))
+		if (PathUtility.IsMissingPath(rootPath))
 			return GitIgnoreMatcher.Empty;
 
 		var gitIgnorePath = Path.Combine(rootPath, ".gitignore");

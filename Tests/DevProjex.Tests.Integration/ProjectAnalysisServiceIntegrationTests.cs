@@ -1,7 +1,36 @@
 namespace DevProjex.Tests.Integration;
 
+[Collection(CurrentDirectoryTestCollection.Name)]
 public sealed class ProjectAnalysisServiceIntegrationTests
 {
+	[Fact]
+	public void Load_AcceptsRelativeWhitespaceOnlyUnixRoot()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Windows does not support this directory name through ordinary APIs.");
+			return;
+		}
+
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine(" ", "Selected.cs"), "class Selected {}\n");
+		var originalCurrentDirectory = Environment.CurrentDirectory;
+		try
+		{
+			Environment.CurrentDirectory = temp.Path;
+			var loaded = CreateService().Load(
+				new ProjectAnalysisRequest(" ", SelectedIgnoreOptions: []),
+				TestContext.Current.CancellationToken);
+
+			Assert.Equal(PathUtility.Normalize(" "), loaded.RootPath);
+			Assert.Equal("Selected.cs", Assert.Single(loaded.Tree.Root.Children).DisplayName);
+		}
+		finally
+		{
+			Environment.CurrentDirectory = originalCurrentDirectory;
+		}
+	}
+
 	[Fact]
 	public void Load_UnixWhitespaceOnlyRootName_RemainsSelectable()
 	{

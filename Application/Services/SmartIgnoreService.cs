@@ -105,7 +105,7 @@ public sealed class SmartIgnoreService
 
 	public bool HasKnownProjectMarker(string rootPath)
 	{
-		if (string.IsNullOrWhiteSpace(rootPath))
+		if (PathUtility.IsMissingPath(rootPath))
 			return false;
 
 		return HasKnownProjectMarker(RootFactsProvider.Get(rootPath));

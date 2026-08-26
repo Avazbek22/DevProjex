@@ -499,7 +499,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		var gitIgnoreContext = rules.CreateGitIgnoreScanContext(rootPath);
 		var gitIgnoreLoadSession = CreateGitIgnoreLoadSession(rules);
 
-		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
+		if (PathUtility.IsMissingPath(rootPath) || !Directory.Exists(rootPath))
 			return new ScanResult<List<string>>(names, false, false);
 		if (!FileSystemRootEntryPolicy.IsPhysicalDirectory(rootPath))
 			return new ScanResult<List<string>>(names, RootAccessDenied: true, HadAccessDenied: true);
@@ -1021,7 +1021,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		var useGitIgnore = rules.IsGitIgnoreTraversalEnabled;
 		var gitIgnoreContext = rules.CreateGitIgnoreScanContext(rootPath);
 		var gitIgnoreCandidateContext = rules.CreateGitIgnoreCandidateScanContext(rootPath);
-		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
+		if (PathUtility.IsMissingPath(rootPath) || !Directory.Exists(rootPath))
 		{
 			return new ScanResult<ExtensionsScanData>(
 				new ExtensionsScanData(uniqueExtensions, IgnoreOptionCounts.Empty),
@@ -1388,7 +1388,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		var exts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		var useGitIgnore = rules.IsGitIgnoreTraversalEnabled;
 		var gitIgnoreContext = rules.CreateGitIgnoreScanContext(rootPath);
-		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
+		if (PathUtility.IsMissingPath(rootPath) || !Directory.Exists(rootPath))
 		{
 			return new ScanResult<ExtensionsScanData>(
 				new ExtensionsScanData(exts, IgnoreOptionCounts.Empty),
@@ -1551,7 +1551,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		var effectiveCounts = default(MutableIgnoreOptionCounts);
 		var controllerImpactCounts = IgnoreControllerImpactCounts.Empty;
 
-		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
+		if (PathUtility.IsMissingPath(rootPath) || !Directory.Exists(rootPath))
 		{
 			return new ScanResult<IgnoreSectionScanData>(
 				new IgnoreSectionScanData(
@@ -2564,7 +2564,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 
-		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
+		if (PathUtility.IsMissingPath(rootPath) || !Directory.Exists(rootPath))
 		{
 			return new ScanResult<EffectiveIgnoreScanDiscovery>(
 				new EffectiveIgnoreScanDiscovery([], [], [], GitWorkspaceEvidence.Empty),
@@ -3295,7 +3295,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		var selectedRoots = new List<FileSystemDirectoryEntry>(selectedRootFolders.Count);
 		var directoryToggleCandidates = new List<DirectoryScanFacts>();
 		var controllerImpactCandidates = new List<DirectoryScanFacts>();
-		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
+		if (PathUtility.IsMissingPath(rootPath) || !Directory.Exists(rootPath))
 		{
 			return new RootSelectionScanPlan(
 				selectedRoots,

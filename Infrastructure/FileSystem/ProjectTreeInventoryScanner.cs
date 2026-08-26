@@ -42,7 +42,7 @@ internal static class ProjectTreeInventoryScanner
 				length: 0)
 		};
 
-		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
+		if (PathUtility.IsMissingPath(rootPath) || !Directory.Exists(rootPath))
 			return new ProjectTreeInventorySnapshot(entries, rootAccessDenied: false, hadAccessDenied: false);
 		if (!FileSystemRootEntryPolicy.IsPhysicalDirectory(rootPath))
 		{

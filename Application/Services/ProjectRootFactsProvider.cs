@@ -71,7 +71,7 @@ public sealed class ProjectRootFactsProvider
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 		IgnorePipelineDiagnostics.RecordRootFactsRequest();
-		if (string.IsNullOrWhiteSpace(rootPath))
+		if (PathUtility.IsMissingPath(rootPath))
 			return ProjectRootFacts.Missing(rootPath);
 
 		if (!TryNormalizePath(rootPath, out var normalizedRootPath))

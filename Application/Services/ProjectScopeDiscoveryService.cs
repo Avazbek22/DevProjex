@@ -166,7 +166,7 @@ public sealed class ProjectScopeDiscoveryService(
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 		IgnorePipelineDiagnostics.RecordProjectScopeDiscovery();
-		if (string.IsNullOrWhiteSpace(rootPath))
+		if (PathUtility.IsMissingPath(rootPath))
 			return ProjectScanContext.Empty;
 
 		string normalizedRoot;

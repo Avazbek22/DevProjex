@@ -33,7 +33,8 @@ public sealed class ProjectAnalysisService(
 		ProjectAnalysisRequest request,
 		CancellationToken cancellationToken = default)
 	{
-		if (string.IsNullOrWhiteSpace(request.RootPath))
+		cancellationToken.ThrowIfCancellationRequested();
+		if (PathUtility.IsMissingPath(request.RootPath))
 			throw new ArgumentException("Root path is required.", nameof(request));
 
 		var rootPath = PathUtility.Normalize(request.RootPath);
