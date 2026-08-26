@@ -190,7 +190,6 @@ internal sealed partial class TerminalWorkspaceSession
 			CancelPreviewSearch(clearQuery: true);
 			_preview.ClearSearch();
 			UpdatePanelTitles();
-			UpdatePreviewRange();
 		}
 		else
 		{

@@ -1300,7 +1300,6 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			controlToRestore?.SetFocus();
 			_activeControlSection = focusedControlSection;
 		}
-		UpdatePreviewRange();
 		UpdateWorkspaceFocus();
 		if (previewDocumentChanged && !string.IsNullOrWhiteSpace(_previewSearchQuery))
 			SchedulePreviewSearch(_previewSearchQuery, showNoResults: false);
@@ -2042,7 +2041,6 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				_preview.ClearSearch();
 				_previewSearchQuery = null;
 				UpdatePanelTitles();
-				UpdatePreviewRange();
 				UpdateFooter();
 				return;
 			}
@@ -2284,7 +2282,6 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		{
 			_preview.ClearSearch();
 			UpdatePanelTitles();
-			UpdatePreviewRange();
 			return;
 		}
 
@@ -2304,7 +2301,6 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			CancelPreviewSearch(clearQuery: true);
 			_preview.ClearSearch();
 			UpdatePanelTitles();
-			UpdatePreviewRange();
 			return;
 		}
 
@@ -2321,7 +2317,6 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_previewSearchInProgress = true;
 		_preview.BeginSearch(normalizedQuery);
 		UpdatePanelTitles();
-		UpdatePreviewRange();
 
 		_previewSearchTask = Task.Run(async () =>
 		{
@@ -2448,7 +2443,6 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			: _preview.HorizontalOffset;
 		_preview.ScrollTo(match.Line, horizontalOffset);
 		UpdatePanelTitles();
-		UpdatePreviewRange();
 	}
 
 	private void ClearTreeFilter()
