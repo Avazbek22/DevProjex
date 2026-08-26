@@ -372,6 +372,35 @@ public sealed class DesktopControlIntegrationTests
 	}
 
 	[Fact]
+	public async Task RegistryProbeRemovesOnlyOwnedStaleRegistrationTemporaryFiles()
+	{
+		using var workspace = new TemporaryDirectory();
+		var paths = new DesktopControlPaths(() => workspace.Path);
+		Directory.CreateDirectory(paths.RegistryDirectory);
+		var oldOwned = Path.Combine(
+			paths.RegistryDirectory,
+			"stale.json.0123456789abcdef0123456789abcdef.tmp");
+		var freshOwned = Path.Combine(
+			paths.RegistryDirectory,
+			"fresh.json.abcdef0123456789abcdef0123456789.tmp");
+		var foreign = Path.Combine(paths.RegistryDirectory, "unrelated.tmp");
+		await File.WriteAllTextAsync(oldOwned, "partial", TestContext.Current.CancellationToken);
+		await File.WriteAllTextAsync(freshOwned, "partial", TestContext.Current.CancellationToken);
+		await File.WriteAllTextAsync(foreign, "keep", TestContext.Current.CancellationToken);
+		File.SetLastWriteTimeUtc(oldOwned, DateTime.UtcNow - TimeSpan.FromDays(2));
+
+		var snapshot = await new DesktopInstanceRegistry(paths).ProbeAsync(
+			removeStale: true,
+			TestContext.Current.CancellationToken);
+
+		Assert.Empty(snapshot.Instances);
+		Assert.Equal(0, snapshot.StaleEntryCount);
+		Assert.False(File.Exists(oldOwned));
+		Assert.True(File.Exists(freshOwned));
+		Assert.True(File.Exists(foreign));
+	}
+
+	[Fact]
 	public async Task RegistryRemovesDanglingRegistrationLinksOnUnix()
 	{
 		if (OperatingSystem.IsWindows())

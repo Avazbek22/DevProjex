@@ -10,6 +10,7 @@ public sealed record DesktopRegistrySnapshot(
 
 public sealed class DesktopInstanceRegistry
 {
+	private static readonly TimeSpan StaleTemporaryFileAge = TimeSpan.FromHours(24);
 	private static readonly JsonSerializerOptions JsonOptions = new()
 	{
 		PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -79,6 +80,9 @@ public sealed class DesktopInstanceRegistry
 	{
 		if (!Directory.Exists(_paths.RegistryDirectory))
 			return new DesktopRegistrySnapshot([], 0);
+
+		if (removeStale)
+			RemoveStaleTemporaryFiles(cancellationToken);
 
 		var registrations = new List<DesktopInstanceRegistration>();
 		var staleEntryCount = 0;
@@ -188,6 +192,61 @@ public sealed class DesktopInstanceRegistry
 		instanceId.All(static character =>
 			char.IsAsciiLetterOrDigit(character) || character is '-' or '_');
 
+	private void RemoveStaleTemporaryFiles(CancellationToken cancellationToken)
+	{
+		var cutoff = DateTime.UtcNow - StaleTemporaryFileAge;
+		foreach (var path in Directory.EnumerateFiles(_paths.RegistryDirectory, "*.tmp"))
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			try
+			{
+				if (!IsOwnedRegistrationTemporaryFile(path) ||
+				    File.GetLastWriteTimeUtc(path) > cutoff)
+				{
+					continue;
+				}
+
+				TryDelete(path);
+			}
+			catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+			{
+			}
+		}
+	}
+
+	private static bool IsOwnedRegistrationTemporaryFile(string path)
+	{
+		var fileName = Path.GetFileName(path);
+		if (!fileName.EndsWith(".tmp", StringComparison.Ordinal))
+			return false;
+
+		var withoutSuffix = fileName[..^4];
+		var nonceSeparator = withoutSuffix.LastIndexOf('.');
+		if (nonceSeparator <= 0)
+			return false;
+
+		var nonce = withoutSuffix.AsSpan(nonceSeparator + 1);
+		if (nonce.Length != 32 || !ContainsOnlyAsciiHexDigits(nonce))
+			return false;
+
+		var registrationFileName = withoutSuffix[..nonceSeparator];
+		if (!registrationFileName.EndsWith(".json", StringComparison.Ordinal))
+			return false;
+
+		return IsValidInstanceId(Path.GetFileNameWithoutExtension(registrationFileName));
+	}
+
+	private static bool ContainsOnlyAsciiHexDigits(ReadOnlySpan<char> value)
+	{
+		foreach (var character in value)
+		{
+			if (character is not (>= '0' and <= '9' or >= 'a' and <= 'f'))
+				return false;
+		}
+
+		return true;
+	}
+
 	private static void CommitRegistration(string temporaryPath, string targetPath)
 	{
 		if (!File.Exists(targetPath))
@@ -252,7 +311,7 @@ public sealed class DesktopInstanceRegistry
 		}
 		catch
 		{
-			// Stale entries are retried by the next registry probe.
+			// Cleanup is best-effort because another process may still own the entry.
 		}
 	}
 }
