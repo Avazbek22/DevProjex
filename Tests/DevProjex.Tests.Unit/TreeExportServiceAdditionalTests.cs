@@ -60,8 +60,10 @@ public sealed class TreeExportServiceAdditionalTests
 	}
 
 	[Theory]
+	[InlineData(TreeTextFormat.Ascii)]
 	[InlineData(TreeTextFormat.Json)]
 	[InlineData(TreeTextFormat.Xml)]
+	[InlineData(TreeTextFormat.Markdown)]
 	public void BuildFullTree_DeepStructuredTreeDoesNotDependOnTheCallStack(
 		TreeTextFormat format)
 	{
@@ -83,6 +85,36 @@ public sealed class TreeExportServiceAdditionalTests
 		Assert.Contains("level-0001", output, StringComparison.Ordinal);
 		Assert.Contains($"level-{depth - 1:D4}", output, StringComparison.Ordinal);
 		Assert.Contains("leaf.txt", output, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void BuildSelectedTreeAndMetrics_DeepTreeDoNotDependOnTheCallStack()
+	{
+		const int depth = 2_048;
+		const string leafPath = "/leaf.txt";
+		var root = new TreeNodeDescriptor("leaf.txt", leafPath, false, false, "file", []);
+		for (var level = depth - 1; level >= 0; level--)
+		{
+			root = new TreeNodeDescriptor(
+				$"level-{level:D4}",
+				$"/level-{level:D4}",
+				true,
+				false,
+				"folder",
+				[root]);
+		}
+		var selectedPaths = new HashSet<string>(PathComparer.Default) { leafPath };
+		var service = new TreeExportService();
+
+		var output = service.BuildSelectedTree("/", root, selectedPaths, TreeTextFormat.Ascii);
+		var metrics = service.CalculateSelectedTreeMetrics(
+			"/",
+			root,
+			selectedPaths,
+			TreeTextFormat.Ascii);
+
+		Assert.Contains("leaf.txt", output, StringComparison.Ordinal);
+		Assert.Equal(ExportOutputMetricsCalculator.FromText(output), metrics);
 	}
 
 	[Fact]

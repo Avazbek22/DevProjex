@@ -340,30 +340,7 @@ public sealed class TreeExportService
 	}
 
 	private static void AppendAscii(TreeNodeDescriptor node, string indent, StringBuilder sb)
-	{
-		var childCount = node.Children.Count;
-		for (int i = 0; i < childCount; i++)
-		{
-			var child = node.Children[i];
-			bool last = i == childCount - 1;
-
-			sb.Append(indent)
-				.Append(last ? BranchLast : BranchMiddle)
-				.AppendLine(EscapeTextValue(child.DisplayName));
-
-			if (child.Children.Count > 0)
-			{
-				// Build indent in StringBuilder directly to avoid string allocation
-				var indentLength = indent.Length;
-				var nextIndent = string.Create(indentLength + 4, (indent, last), static (span, state) =>
-				{
-					state.indent.AsSpan().CopyTo(span);
-					(state.last ? IndentSpace : IndentPipe).AsSpan().CopyTo(span[state.indent.Length..]);
-				});
-				AppendAscii(child, nextIndent, sb);
-			}
-		}
-	}
+		=> AppendAsciiCore(node, includedPaths: null, indent, sb, plain: false);
 
 	private static async Task WriteFullTreeTextAsync(
 		TextWriter destination,
@@ -477,6 +454,16 @@ public sealed class TreeExportService
 		public int NextChildIndex { get; set; }
 	}
 
+	private readonly record struct AsciiTreeWriteOperation(
+		TreeNodeDescriptor Node,
+		string Indent,
+		bool IsLast);
+
+	private readonly record struct AsciiMetricOperation(
+		TreeNodeDescriptor Node,
+		int IndentLength,
+		bool IsLast);
+
 	private sealed class TreeTextLineWriter(
 		TextWriter destination,
 		CancellationToken cancellationToken)
@@ -529,59 +516,55 @@ public sealed class TreeExportService
 		TreeNodeDescriptor node,
 		string indent,
 		StringBuilder output)
+		=> AppendAsciiCore(node, includedPaths: null, indent, output, plain: true);
+
+	private static void AppendSelectedAscii(TreeNodeDescriptor node, IReadOnlySet<string> selectedPaths, string indent, StringBuilder sb)
+		=> AppendAsciiCore(node, selectedPaths, indent, sb, plain: false);
+
+	private static void AppendAsciiCore(
+		TreeNodeDescriptor node,
+		IReadOnlySet<string>? includedPaths,
+		string indent,
+		StringBuilder output,
+		bool plain)
 	{
-		for (var index = 0; index < node.Children.Count; index++)
+		var pending = new Stack<AsciiTreeWriteOperation>();
+		PushAsciiChildren(pending, node, includedPaths, indent);
+		while (pending.TryPop(out var operation))
 		{
-			var child = node.Children[index];
-			var isLast = index == node.Children.Count - 1;
 			output
-				.Append(indent)
-				.Append(isLast ? PlainBranchLast : PlainBranchMiddle)
-				.AppendLine(EscapeTextValue(child.DisplayName));
-			if (child.Children.Count == 0)
+				.Append(operation.Indent)
+				.Append(operation.IsLast
+					? plain ? PlainBranchLast : BranchLast
+					: plain ? PlainBranchMiddle : BranchMiddle)
+				.AppendLine(EscapeTextValue(operation.Node.DisplayName));
+			if (operation.Node.Children.Count == 0)
 				continue;
 
-			AppendPlain(
-				child,
-				indent + (isLast ? IndentSpace : PlainIndentPipe),
-				output);
+			var nextIndent = string.Concat(
+				operation.Indent,
+				operation.IsLast
+					? IndentSpace
+					: plain ? PlainIndentPipe : IndentPipe);
+			PushAsciiChildren(pending, operation.Node, includedPaths, nextIndent);
 		}
 	}
 
-	private static void AppendSelectedAscii(TreeNodeDescriptor node, IReadOnlySet<string> selectedPaths, string indent, StringBuilder sb)
+	private static void PushAsciiChildren(
+		Stack<AsciiTreeWriteOperation> pending,
+		TreeNodeDescriptor parent,
+		IReadOnlySet<string>? includedPaths,
+		string indent)
 	{
-		// Count visible children without allocating a list
-		int visibleCount = 0;
-		foreach (var child in node.Children)
+		var isLast = true;
+		for (var index = parent.Children.Count - 1; index >= 0; index--)
 		{
-			if (selectedPaths.Contains(child.FullPath))
-				visibleCount++;
-		}
-
-		int currentIndex = 0;
-		foreach (var child in node.Children)
-		{
-			if (!selectedPaths.Contains(child.FullPath))
+			var child = parent.Children[index];
+			if (includedPaths is not null && !includedPaths.Contains(child.FullPath))
 				continue;
 
-			currentIndex++;
-			bool last = currentIndex == visibleCount;
-
-			sb.Append(indent)
-				.Append(last ? BranchLast : BranchMiddle)
-				.AppendLine(EscapeTextValue(child.DisplayName));
-
-			if (child.Children.Count > 0)
-			{
-				// Build indent using string.Create to avoid intermediate allocations
-				var indentLength = indent.Length;
-				var nextIndent = string.Create(indentLength + 4, (indent, last), static (span, state) =>
-				{
-					state.indent.AsSpan().CopyTo(span);
-					(state.last ? IndentSpace : IndentPipe).AsSpan().CopyTo(span[state.indent.Length..]);
-				});
-				AppendSelectedAscii(child, selectedPaths, nextIndent, sb);
-			}
+			pending.Push(new AsciiTreeWriteOperation(child, indent, isLast));
+			isLast = false;
 		}
 	}
 
@@ -926,6 +909,10 @@ public sealed class TreeExportService
 		public static XmlTreeWriteOperation EndElement { get; } = new(null, true);
 	}
 
+	private readonly record struct MarkdownTreeWriteOperation(
+		TreeNodeDescriptor Node,
+		int Level);
+
 	private static void WriteMarkdownTreeContents(
 		StringBuilder sb,
 		TreeNodeDescriptor root,
@@ -947,13 +934,26 @@ public sealed class TreeExportService
 		IReadOnlySet<string>? includedPaths,
 		int level)
 	{
-		var orderedChildren = GetOrderedStructuredChildren(children, includedPaths);
-		foreach (var child in orderedChildren)
+		var pending = new Stack<MarkdownTreeWriteOperation>();
+		PushMarkdownChildren(pending, children, includedPaths, level);
+		while (pending.TryPop(out var operation))
 		{
-			AppendMarkdownItem(sb, level, child.DisplayName, child.IsDirectory);
-			if (child.IsDirectory)
-				AppendMarkdownChildren(sb, child.Children, includedPaths, level + 1);
+			var node = operation.Node;
+			AppendMarkdownItem(sb, operation.Level, node.DisplayName, node.IsDirectory);
+			if (node.IsDirectory)
+				PushMarkdownChildren(pending, node.Children, includedPaths, operation.Level + 1);
 		}
+	}
+
+	private static void PushMarkdownChildren(
+		Stack<MarkdownTreeWriteOperation> pending,
+		IReadOnlyList<TreeNodeDescriptor> children,
+		IReadOnlySet<string>? includedPaths,
+		int level)
+	{
+		var orderedChildren = GetOrderedStructuredChildren(children, includedPaths);
+		for (var index = orderedChildren.Count - 1; index >= 0; index--)
+			pending.Push(new MarkdownTreeWriteOperation(orderedChildren[index], level));
 	}
 
 	private static void AppendMarkdownItem(StringBuilder sb, int level, string name, bool isDirectory)
@@ -1065,29 +1065,43 @@ public sealed class TreeExportService
 		IReadOnlySet<string> selectedPaths,
 		HashSet<string> includedPaths)
 	{
-		var includeSelf = selectedPaths.Contains(node.FullPath);
-		if (includeSelf)
+		if (selectedPaths.Contains(node.FullPath))
 		{
-			// Selecting a directory semantically means selecting the whole subtree.
-			// Expanding descendants here keeps tree export aligned with preview/content
-			// metrics without forcing the UI tree to materialize child view-models.
 			CollectSubtreePaths(node, includedPaths);
 			return true;
 		}
 
-		var includeByChildren = false;
-
-		foreach (var child in node.Children)
+		var pending = new Stack<IncludedPathFrame>();
+		pending.Push(new IncludedPathFrame(node));
+		while (pending.TryPeek(out var frame))
 		{
-			if (CollectIncludedPaths(child, selectedPaths, includedPaths))
-				includeByChildren = true;
+			if (frame.NextChildIndex < frame.Node.Children.Count)
+			{
+				var child = frame.Node.Children[frame.NextChildIndex++];
+				if (selectedPaths.Contains(child.FullPath))
+				{
+					// Selecting a directory includes its complete subtree without realizing UI nodes.
+					CollectSubtreePaths(child, includedPaths);
+					frame.HasIncludedChild = true;
+					continue;
+				}
+
+				pending.Push(new IncludedPathFrame(child));
+				continue;
+			}
+
+			pending.Pop();
+			if (!frame.HasIncludedChild)
+				continue;
+
+			includedPaths.Add(frame.Node.FullPath);
+			if (pending.TryPeek(out var parent))
+				parent.HasIncludedChild = true;
+			else
+				return true;
 		}
 
-		if (!includeSelf && !includeByChildren)
-			return false;
-
-		includedPaths.Add(node.FullPath);
-		return true;
+		return false;
 	}
 
 	private static void CollectSubtreePaths(TreeNodeDescriptor node, HashSet<string> includedPaths)
@@ -1103,6 +1117,13 @@ public sealed class TreeExportService
 			for (var index = current.Children.Count - 1; index >= 0; index--)
 				stack.Push(current.Children[index]);
 		}
+	}
+
+	private sealed class IncludedPathFrame(TreeNodeDescriptor node)
+	{
+		public TreeNodeDescriptor Node { get; } = node;
+		public int NextChildIndex { get; set; }
+		public bool HasIncludedChild { get; set; }
 	}
 
 	private static ExportOutputMetrics CalculateAsciiFullTreeMetrics(
@@ -1155,22 +1176,7 @@ public sealed class TreeExportService
 		int indentLength,
 		ref long chars,
 		ref long lineBreaks)
-	{
-		var childCount = node.Children.Count;
-		for (var index = 0; index < childCount; index++)
-		{
-			var child = node.Children[index];
-			var branchLength = index == childCount - 1 ? BranchLast.Length : BranchMiddle.Length;
-
-			AppendAsciiLineMetrics(
-				(long)indentLength + branchLength + EscapeTextValue(child.DisplayName).Length,
-				ref chars,
-				ref lineBreaks);
-
-			if (child.Children.Count > 0)
-				AppendFullAsciiChildMetrics(child, indentLength + IndentPipe.Length, ref chars, ref lineBreaks);
-		}
-	}
+		=> AppendAsciiChildMetrics(node, includedPaths: null, indentLength, ref chars, ref lineBreaks);
 
 	private static void AppendSelectedAsciiChildMetrics(
 		TreeNodeDescriptor node,
@@ -1178,30 +1184,51 @@ public sealed class TreeExportService
 		int indentLength,
 		ref long chars,
 		ref long lineBreaks)
+		=> AppendAsciiChildMetrics(node, includedPaths, indentLength, ref chars, ref lineBreaks);
+
+	private static void AppendAsciiChildMetrics(
+		TreeNodeDescriptor node,
+		IReadOnlySet<string>? includedPaths,
+		int indentLength,
+		ref long chars,
+		ref long lineBreaks)
 	{
-		var visibleCount = 0;
-		foreach (var child in node.Children)
+		var pending = new Stack<AsciiMetricOperation>();
+		PushAsciiMetricChildren(pending, node, includedPaths, indentLength);
+		while (pending.TryPop(out var operation))
 		{
-			if (includedPaths.Contains(child.FullPath))
-				visibleCount++;
-		}
-
-		var visibleIndex = 0;
-		foreach (var child in node.Children)
-		{
-			if (!includedPaths.Contains(child.FullPath))
-				continue;
-
-			visibleIndex++;
-			var branchLength = visibleIndex == visibleCount ? BranchLast.Length : BranchMiddle.Length;
-
 			AppendAsciiLineMetrics(
-				(long)indentLength + branchLength + EscapeTextValue(child.DisplayName).Length,
+				(long)operation.IndentLength +
+				(operation.IsLast ? BranchLast.Length : BranchMiddle.Length) +
+				EscapeTextValue(operation.Node.DisplayName).Length,
 				ref chars,
 				ref lineBreaks);
+			if (operation.Node.Children.Count > 0)
+			{
+				PushAsciiMetricChildren(
+					pending,
+					operation.Node,
+					includedPaths,
+					operation.IndentLength + IndentPipe.Length);
+			}
+		}
+	}
 
-			if (child.Children.Count > 0)
-				AppendSelectedAsciiChildMetrics(child, includedPaths, indentLength + IndentPipe.Length, ref chars, ref lineBreaks);
+	private static void PushAsciiMetricChildren(
+		Stack<AsciiMetricOperation> pending,
+		TreeNodeDescriptor parent,
+		IReadOnlySet<string>? includedPaths,
+		int indentLength)
+	{
+		var isLast = true;
+		for (var index = parent.Children.Count - 1; index >= 0; index--)
+		{
+			var child = parent.Children[index];
+			if (includedPaths is not null && !includedPaths.Contains(child.FullPath))
+				continue;
+
+			pending.Push(new AsciiMetricOperation(child, indentLength, isLast));
+			isLast = false;
 		}
 	}
 
