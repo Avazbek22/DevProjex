@@ -19,7 +19,7 @@ public sealed class McpRootRegistry
 
 		if (normalized.Count == 0)
 			throw new ArgumentException("At least one existing MCP root is required.", nameof(roots));
-		_roots = normalized;
+		_roots = normalized.AsReadOnly();
 	}
 
 	public IReadOnlyList<string> Roots => _roots;

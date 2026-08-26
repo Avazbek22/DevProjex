@@ -91,6 +91,7 @@ public sealed class McpPackRegistry : IDisposable
 		CancellationToken cancellationToken)
 	{
 		ArgumentNullException.ThrowIfNull(writer);
+		cancellationToken.ThrowIfCancellationRequested();
 		BeginCreate();
 		try
 		{
@@ -122,6 +123,7 @@ public sealed class McpPackRegistry : IDisposable
 				lock (_sync)
 				{
 					ObjectDisposedException.ThrowIf(_disposed, this);
+					cancellationToken.ThrowIfCancellationRequested();
 					_packs.Add(id, new PackEntry(document, TimeProvider.GetUtcNow()));
 				}
 				reservation.Commit();

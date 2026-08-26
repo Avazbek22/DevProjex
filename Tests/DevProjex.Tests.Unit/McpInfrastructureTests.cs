@@ -98,6 +98,23 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public void RootRegistryDoesNotExposeMutableAllowedRoots()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var outside = workspace.CreateFolder("outside");
+		var registry = new McpRootRegistry([project]);
+		var exposedRoots = Assert.IsAssignableFrom<IList<string>>(registry.Roots);
+
+		Assert.True(exposedRoots.IsReadOnly);
+		Assert.Throws<NotSupportedException>(() => exposedRoots[0] = outside);
+		Assert.Equal(Path.GetFullPath(project), registry.ResolveProject(project));
+		Assert.Equal(
+			McpErrorCodes.UnknownProject,
+			Assert.Throws<McpToolException>(() => registry.ResolveProject(outside)).Code);
+	}
+
+	[Fact]
 	public void RootRegistryRejectsEmptyConfiguredRoot()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -609,6 +626,32 @@ public sealed class McpInfrastructureTests
 		Assert.Equal(4, pack.Lines);
 		Assert.Equal(bytes.Length, pack.Bytes);
 		Assert.Equal(content, await File.ReadAllTextAsync(pack.Path, TestContext.Current.CancellationToken));
+	}
+
+	[Fact]
+	public async Task PackCreationDoesNotPublishWhenCancellationArrivesAfterWriting()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var registry = new McpPackRegistry(
+			workspace.Path,
+			timeProvider: null,
+			maximumPackBytes: 16,
+			maximumSessionBytes: 16);
+		using var cancellation = new CancellationTokenSource();
+
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(() => registry.CreateAsync(
+			async (stream, _) =>
+			{
+				await stream.WriteAsync("redacted"u8.ToArray());
+				cancellation.Cancel();
+			},
+			cancellation.Token));
+
+		Assert.Empty(Directory.EnumerateFiles(registry.SessionDirectory, "*.pack"));
+		var replacement = await registry.CreateAsync(
+			async (stream, token) => await stream.WriteAsync(new byte[16], token),
+			TestContext.Current.CancellationToken);
+		Assert.Equal(16, replacement.Bytes);
 	}
 
 	[Fact]
