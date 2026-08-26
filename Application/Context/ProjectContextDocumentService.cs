@@ -44,6 +44,7 @@ public sealed class ProjectContextDocumentService(
 {
 	private const int SchemaVersion = 1;
 	private const string Kind = "devprojex-context";
+	private const int StructuredTreeFlushNodeInterval = 512;
 	private static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
 	private static readonly RepositoryWebPathPresentationService WebPathPresentation = new();
 
@@ -562,7 +563,14 @@ public sealed class ProjectContextDocumentService(
 		WriteMetrics(writer, plan);
 		writer.WritePropertyName("tree");
 		if (IncludesTree(view))
-			WriteTreeNode(writer, plan.ProjectedTree, plan.SourceRoot);
+		{
+			await WriteTreeNodeAsync(
+					writer,
+					plan.ProjectedTree,
+					plan.SourceRoot,
+					cancellationToken)
+				.ConfigureAwait(false);
+		}
 		else
 			writer.WriteNullValue();
 		writer.WriteStartArray("files");
@@ -653,7 +661,14 @@ public sealed class ProjectContextDocumentService(
 		WriteMetricsXml(writer, plan);
 		writer.WriteStartElement("tree");
 		if (IncludesTree(view))
-			WriteTreeNodeXml(writer, plan.ProjectedTree, plan.SourceRoot);
+		{
+			await WriteTreeNodeXmlAsync(
+					writer,
+					plan.ProjectedTree,
+					plan.SourceRoot,
+					cancellationToken)
+				.ConfigureAwait(false);
+		}
 		writer.WriteEndElement();
 		writer.WriteStartElement("files");
 		if (IncludesContent(view))
@@ -1344,33 +1359,86 @@ public sealed class ProjectContextDocumentService(
 		TreeNodeDescriptor node,
 		string sourceRoot)
 	{
-		var operations = new Stack<ContextJsonTreeWriteOperation>();
-		operations.Push(new ContextJsonTreeWriteOperation(node));
-
-		while (operations.TryPop(out var operation))
+		var frames = new List<ContextTreeWriteFrame> { new(node) };
+		while (frames.Count > 0)
 		{
-			if (operation.IsEndDirectory)
+			var frame = frames[^1];
+			if (!frame.Started)
 			{
-				writer.WriteEndArray();
-				writer.WriteEndObject();
+				frame.Started = true;
+				var current = frame.Node;
+				writer.WriteStartObject();
+				writer.WriteString("path", NormalizeRelativePath(sourceRoot, current.FullPath));
+				writer.WriteString("name", current.DisplayName);
+				writer.WriteString("type", current.IsDirectory ? "directory" : "file");
+				if (!current.IsDirectory)
+				{
+					writer.WriteEndObject();
+					frames.RemoveAt(frames.Count - 1);
+					continue;
+				}
+				writer.WriteStartArray("children");
+			}
+
+			if (frame.NextChildIndex < frame.Node.Children.Count)
+			{
+				frames.Add(new ContextTreeWriteFrame(
+					frame.Node.Children[frame.NextChildIndex++]));
 				continue;
 			}
 
-			var current = operation.Node!;
-			writer.WriteStartObject();
-			writer.WriteString("path", NormalizeRelativePath(sourceRoot, current.FullPath));
-			writer.WriteString("name", current.DisplayName);
-			writer.WriteString("type", current.IsDirectory ? "directory" : "file");
-			if (!current.IsDirectory)
+			writer.WriteEndArray();
+			writer.WriteEndObject();
+			frames.RemoveAt(frames.Count - 1);
+		}
+	}
+
+	private static async Task WriteTreeNodeAsync(
+		Utf8JsonWriter writer,
+		TreeNodeDescriptor node,
+		string sourceRoot,
+		CancellationToken cancellationToken)
+	{
+		var frames = new List<ContextTreeWriteFrame> { new(node) };
+		var processedNodes = 0;
+		while (frames.Count > 0)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var frame = frames[^1];
+			if (!frame.Started)
 			{
-				writer.WriteEndObject();
+				frame.Started = true;
+				var current = frame.Node;
+				writer.WriteStartObject();
+				writer.WriteString("path", NormalizeRelativePath(sourceRoot, current.FullPath));
+				writer.WriteString("name", current.DisplayName);
+				writer.WriteString("type", current.IsDirectory ? "directory" : "file");
+				if (!current.IsDirectory)
+				{
+					writer.WriteEndObject();
+					frames.RemoveAt(frames.Count - 1);
+				}
+				else
+				{
+					writer.WriteStartArray("children");
+				}
+
+				if (++processedNodes % StructuredTreeFlushNodeInterval == 0)
+					await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+				if (!current.IsDirectory)
+					continue;
+			}
+
+			if (frame.NextChildIndex < frame.Node.Children.Count)
+			{
+				frames.Add(new ContextTreeWriteFrame(
+					frame.Node.Children[frame.NextChildIndex++]));
 				continue;
 			}
 
-			writer.WriteStartArray("children");
-			operations.Push(ContextJsonTreeWriteOperation.EndDirectory);
-			for (var index = current.Children.Count - 1; index >= 0; index--)
-				operations.Push(new ContextJsonTreeWriteOperation(current.Children[index]));
+			writer.WriteEndArray();
+			writer.WriteEndObject();
+			frames.RemoveAt(frames.Count - 1);
 		}
 	}
 
@@ -1462,27 +1530,67 @@ public sealed class ProjectContextDocumentService(
 		TreeNodeDescriptor node,
 		string sourceRoot)
 	{
-		var operations = new Stack<ContextXmlTreeWriteOperation>();
-		operations.Push(new ContextXmlTreeWriteOperation(node));
-
-		while (operations.TryPop(out var operation))
+		var frames = new List<ContextTreeWriteFrame> { new(node) };
+		while (frames.Count > 0)
 		{
-			if (operation.IsEndElement)
+			var frame = frames[^1];
+			if (!frame.Started)
 			{
-				writer.WriteEndElement();
+				frame.Started = true;
+				writer.WriteStartElement(frame.Node.IsDirectory ? "directory" : "file");
+				WriteSanitizedXmlAttributeString(
+					writer,
+					"path",
+					NormalizeRelativePath(sourceRoot, frame.Node.FullPath));
+				WriteSanitizedXmlAttributeString(writer, "name", frame.Node.DisplayName);
+			}
+
+			if (frame.NextChildIndex < frame.Node.Children.Count)
+			{
+				frames.Add(new ContextTreeWriteFrame(
+					frame.Node.Children[frame.NextChildIndex++]));
 				continue;
 			}
 
-			var current = operation.Node!;
-			writer.WriteStartElement(current.IsDirectory ? "directory" : "file");
-			WriteSanitizedXmlAttributeString(
-				writer,
-				"path",
-				NormalizeRelativePath(sourceRoot, current.FullPath));
-			WriteSanitizedXmlAttributeString(writer, "name", current.DisplayName);
-			operations.Push(ContextXmlTreeWriteOperation.EndElement);
-			for (var index = current.Children.Count - 1; index >= 0; index--)
-				operations.Push(new ContextXmlTreeWriteOperation(current.Children[index]));
+			writer.WriteEndElement();
+			frames.RemoveAt(frames.Count - 1);
+		}
+	}
+
+	private static async Task WriteTreeNodeXmlAsync(
+		XmlWriter writer,
+		TreeNodeDescriptor node,
+		string sourceRoot,
+		CancellationToken cancellationToken)
+	{
+		var frames = new List<ContextTreeWriteFrame> { new(node) };
+		var processedNodes = 0;
+		while (frames.Count > 0)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var frame = frames[^1];
+			if (!frame.Started)
+			{
+				frame.Started = true;
+				writer.WriteStartElement(frame.Node.IsDirectory ? "directory" : "file");
+				WriteSanitizedXmlAttributeString(
+					writer,
+					"path",
+					NormalizeRelativePath(sourceRoot, frame.Node.FullPath));
+				WriteSanitizedXmlAttributeString(writer, "name", frame.Node.DisplayName);
+				if (++processedNodes % StructuredTreeFlushNodeInterval == 0)
+					await writer.FlushAsync().ConfigureAwait(false);
+			}
+
+			if (frame.NextChildIndex < frame.Node.Children.Count)
+			{
+				frames.Add(new ContextTreeWriteFrame(
+					frame.Node.Children[frame.NextChildIndex++]));
+				continue;
+			}
+
+			writer.WriteEndElement();
+			frames.RemoveAt(frames.Count - 1);
 		}
 	}
 
@@ -1493,18 +1601,11 @@ public sealed class ProjectContextDocumentService(
 		public int NextChildIndex { get; set; }
 	}
 
-	private readonly record struct ContextJsonTreeWriteOperation(
-		TreeNodeDescriptor? Node,
-		bool IsEndDirectory = false)
+	private sealed class ContextTreeWriteFrame(TreeNodeDescriptor node)
 	{
-		public static ContextJsonTreeWriteOperation EndDirectory { get; } = new(null, true);
-	}
-
-	private readonly record struct ContextXmlTreeWriteOperation(
-		TreeNodeDescriptor? Node,
-		bool IsEndElement = false)
-	{
-		public static ContextXmlTreeWriteOperation EndElement { get; } = new(null, true);
+		public TreeNodeDescriptor Node { get; } = node;
+		public bool Started { get; set; }
+		public int NextChildIndex { get; set; }
 	}
 
 	private static void WriteStringCollectionXml(

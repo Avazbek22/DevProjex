@@ -422,6 +422,49 @@ public sealed class ProjectContextStreamingRegressionTests
 	}
 
 	[Theory]
+	[InlineData(ProjectContextDocumentFormat.Json)]
+	[InlineData(ProjectContextDocumentFormat.Xml)]
+	public async Task CompleteStructuredTreeStartsWritingBeforeEnumeratingEveryNode(
+		ProjectContextDocumentFormat format)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/seed.txt", string.Empty);
+		var services = new TerminalServiceFactory(
+				() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var plan = await services.ContextFactory.BuildAsync(
+			project,
+			new ProjectSelectionSpec(
+				GitMode: GitFilteringMode.None,
+				Exclusions: []),
+			cancellationToken: TestContext.Current.CancellationToken);
+		const int nodeCount = 50_000;
+		var children = new LazyWideTreeChildren(plan.SourceRoot, nodeCount);
+		var wideRoot = plan.ProjectedTree with { Children = children };
+		var widePlan = plan with
+		{
+			EffectiveTree = wideRoot,
+			ProjectedTree = wideRoot,
+			IncludedFiles = [],
+			IncludedFolders = []
+		};
+		await using var destination = new CountingDiscardStream(
+			() => children.AccessCount);
+
+		await services.ContextDocumentService.WriteCompleteAsync(
+			widePlan,
+			ProjectContextView.Tree,
+			format,
+			destination,
+			TestContext.Current.CancellationToken);
+
+		Assert.InRange(destination.AccessCountAtFirstWrite, 0, nodeCount - 1);
+		Assert.True(destination.WriteCount > 1);
+		Assert.True(destination.TotalBytesWritten > 1_000_000);
+	}
+
+	[Theory]
 	[InlineData(false)]
 	[InlineData(true)]
 	public async Task CompleteMarkdownTreePreservesExactFenceAndFinalNewlineContract(
