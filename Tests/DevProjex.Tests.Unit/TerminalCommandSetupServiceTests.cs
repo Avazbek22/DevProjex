@@ -1,6 +1,8 @@
 using DevProjex.Infrastructure.TerminalCommands;
 using DevProjex.Infrastructure.ThemePresets;
 
+using System.Diagnostics;
+
 namespace DevProjex.Tests.Unit;
 
 [Trait("Category", "TerminalCommand")]
@@ -1400,6 +1402,43 @@ public sealed class TerminalCommandSetupServiceTests
 		var result = TerminalCommandSetupService.ValidateLauncher(wrapper, TimeSpan.FromSeconds(5));
 
 		Assert.True(result.Success, result.ErrorMessage);
+	}
+
+	[Fact]
+	public void ValidateLauncher_NoisyHungProcessTimesOutWithoutLeakingPipeReaders()
+	{
+		using var temp = new TemporaryDirectory();
+		string launcherPath;
+		if (OperatingSystem.IsWindows())
+		{
+			launcherPath = temp.CreateFile(
+				"devprojex.cmd",
+				"@echo off\r\n:loop\r\n" +
+				"echo stdout-01234567890123456789012345678901234567890123456789\r\n" +
+				"echo stderr-01234567890123456789012345678901234567890123456789 1>&2\r\n" +
+				"goto loop\r\n");
+		}
+		else
+		{
+			launcherPath = temp.CreateFile(
+				"devprojex",
+				"#!/bin/sh\nwhile :; do\n" +
+				"  printf 'stdout-01234567890123456789012345678901234567890123456789\\n'\n" +
+				"  printf 'stderr-01234567890123456789012345678901234567890123456789\\n' >&2\n" +
+				"done\n");
+			File.SetUnixFileMode(
+				launcherPath,
+				UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+		}
+
+		var stopwatch = Stopwatch.StartNew();
+		var result = TerminalCommandSetupService.ValidateLauncher(
+			launcherPath,
+			TimeSpan.FromMilliseconds(200));
+
+		Assert.False(result.Success);
+		Assert.Contains("timed out", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+		Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(5), $"Validation took {stopwatch.Elapsed}.");
 	}
 
 	[Fact]
