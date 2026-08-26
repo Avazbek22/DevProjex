@@ -77,8 +77,7 @@ public sealed class TerminalApplication
 		}
 		else if (arguments.Count == 0)
 		{
-			new CommandHelpRenderer(environment, localization).Write(root);
-			return CommandLineExitCodes.Success;
+			return WriteHelp(localization, root);
 		}
 
 		var parseResult = root.Parse(
@@ -131,10 +130,10 @@ public sealed class TerminalApplication
 		if (parseResult.Action is HelpAction)
 		{
 			var command = parseResult.CommandResult.Command;
-			new CommandHelpRenderer(environment, localization).Write(
+			return WriteHelp(
+				localization,
 				command,
 				ResolveCommandPath(root, command));
-			return CommandLineExitCodes.Success;
 		}
 
 		var configuration = new InvocationConfiguration
@@ -169,6 +168,23 @@ public sealed class TerminalApplication
 			}
 			return CommandLineExitCodes.RuntimeError;
 		}
+	}
+
+	private int WriteHelp(
+		LocalizationService localization,
+		Command command,
+		IReadOnlyList<string>? commandPath = null)
+	{
+		try
+		{
+			new CommandHelpRenderer(environment, localization).Write(command, commandPath);
+		}
+		catch (TerminalBrokenPipeException)
+		{
+			// A closed stdout consumer is a successful pipeline termination.
+		}
+
+		return CommandLineExitCodes.Success;
 	}
 
 	private static IReadOnlyList<PresentedParseError> PresentParseErrors(

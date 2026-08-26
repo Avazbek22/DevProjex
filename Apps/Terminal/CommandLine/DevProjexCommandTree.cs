@@ -10,6 +10,8 @@ namespace DevProjex.Terminal.CommandLine;
 
 public sealed class DevProjexCommandTree
 {
+	private static readonly TimeSpan MaximumRequestTimeout = TimeSpan.FromTicks(
+		(uint.MaxValue - 1L) * TimeSpan.TicksPerMillisecond);
 	private readonly ITerminalEnvironment environment;
 	private readonly TerminalServiceFactory _serviceFactory;
 	private readonly IDeveloperCommandRunner? _developerCommandRunner;
@@ -1883,7 +1885,7 @@ public sealed class DevProjexCommandTree
 			    System.Globalization.CultureInfo.InvariantCulture,
 			    out duration))
 		{
-			return duration > TimeSpan.Zero;
+			return IsSupportedRequestTimeout(duration);
 		}
 		if (value.EndsWith('s') &&
 		    double.TryParse(value[..^1], System.Globalization.NumberStyles.Number,
@@ -1913,7 +1915,7 @@ public sealed class DevProjexCommandTree
 		try
 		{
 			duration = TimeSpan.FromSeconds(seconds);
-			return duration > TimeSpan.Zero;
+			return IsSupportedRequestTimeout(duration);
 		}
 		catch (ArgumentException)
 		{
@@ -1926,6 +1928,9 @@ public sealed class DevProjexCommandTree
 			return false;
 		}
 	}
+
+	private static bool IsSupportedRequestTimeout(TimeSpan duration) =>
+		duration > TimeSpan.Zero && duration <= MaximumRequestTimeout;
 
 	private static AppLanguage ResolveDefaultLanguage() =>
 		AppLanguageUtility.DetectSystemLanguage();
