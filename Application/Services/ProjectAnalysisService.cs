@@ -99,7 +99,10 @@ public sealed class ProjectAnalysisService(
 					treeInventory,
 					discoveryRules,
 					cancellationToken));
-			availableExtensions.Sort(StringComparer.OrdinalIgnoreCase);
+			CancellationAwareSort.Sort(
+				availableExtensions,
+				StringComparer.OrdinalIgnoreCase,
+				cancellationToken);
 			scan = new ScanOptionsResult(
 				Extensions: availableExtensions,
 				RootFolders: allowedRootFolders,

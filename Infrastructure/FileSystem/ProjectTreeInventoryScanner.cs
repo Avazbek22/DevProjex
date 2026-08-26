@@ -431,7 +431,7 @@ internal static class ProjectTreeInventoryScanner
 			entries.Add(entry);
 		}
 
-		entries.Sort(ProjectInventoryEntryComparer.Instance);
+		CancellationAwareSort.Sort(entries, ProjectInventoryEntryComparer.Instance, cancellationToken);
 		return entries;
 	}
 

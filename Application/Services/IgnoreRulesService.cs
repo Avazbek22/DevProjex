@@ -392,14 +392,17 @@ public sealed class IgnoreRulesService(
 			yield break;
 
 		// GitIgnore precedence is parent -> child, so scopes must be ordered by depth.
-		scopesWithGitIgnore.Sort((a, b) =>
-		{
-			var lengthComparison = a.RootPath.Length.CompareTo(b.RootPath.Length);
-			if (lengthComparison != 0)
-				return lengthComparison;
+		CancellationAwareSort.Sort(
+			scopesWithGitIgnore,
+			(a, b) =>
+			{
+				var lengthComparison = a.RootPath.Length.CompareTo(b.RootPath.Length);
+				if (lengthComparison != 0)
+					return lengthComparison;
 
-			return PathComparer.Default.Compare(a.RootPath, b.RootPath);
-		});
+				return PathComparer.Default.Compare(a.RootPath, b.RootPath);
+			},
+			cancellationToken);
 
 		foreach (var scope in scopesWithGitIgnore)
 		{

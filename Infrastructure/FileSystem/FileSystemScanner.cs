@@ -557,7 +557,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				HadScanFailure: true);
 		}
 
-		names.Sort(ProjectInventoryNameComparer.Compare);
+		CancellationAwareSort.Sort(names, ProjectInventoryNameComparer.Compare, cancellationToken);
 		return new ScanResult<List<string>>(names, false, false);
 	}
 

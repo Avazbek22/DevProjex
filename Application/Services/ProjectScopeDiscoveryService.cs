@@ -487,7 +487,7 @@ public sealed class ProjectScopeDiscoveryService(
 					scopedCandidates.AddRange(localCandidates);
 			});
 
-		var candidates = SortScopes(scopedCandidates).ToArray();
+		var candidates = SortScopes(scopedCandidates, cancellationToken).ToArray();
 		var expandedCandidates = ExpandCandidatesWithNestedProjectScopes(
 			candidates,
 			rootFactsCache,
@@ -618,7 +618,7 @@ public sealed class ProjectScopeDiscoveryService(
 				cachedScope = scope;
 		}
 
-		return SortScopes(uniqueScopes.Values).ToArray();
+		return SortScopes(uniqueScopes.Values, cancellationToken).ToArray();
 	}
 
 	private static NestedProjectProbe ResolveNestedProjectProbe(ProjectRootFacts candidateFacts)
@@ -646,10 +646,15 @@ public sealed class ProjectScopeDiscoveryService(
 			DefaultNestedProjectProbeMaxDirectoriesPerScope);
 	}
 
-	private static List<ProjectScope> SortScopes(IEnumerable<ProjectScope> scopes)
+	private static List<ProjectScope> SortScopes(
+		IEnumerable<ProjectScope> scopes,
+		CancellationToken cancellationToken)
 	{
 		var result = new List<ProjectScope>(scopes);
-		result.Sort((a, b) => PathComparer.Default.Compare(a.RootPath, b.RootPath));
+		CancellationAwareSort.Sort(
+			result,
+			(a, b) => PathComparer.Default.Compare(a.RootPath, b.RootPath),
+			cancellationToken);
 		return result;
 	}
 
@@ -726,7 +731,7 @@ public sealed class ProjectScopeDiscoveryService(
 		}
 
 		var candidates = new List<string>(uniqueCandidates);
-		candidates.Sort(PathComparer.Default);
+		CancellationAwareSort.Sort(candidates, PathComparer.Default, cancellationToken);
 		return candidates;
 	}
 
