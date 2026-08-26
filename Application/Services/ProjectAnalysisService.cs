@@ -58,7 +58,11 @@ public sealed class ProjectAnalysisService(
 			useAllRootFoldersForDefaults: request.SelectedRootFolders is null,
 			request.SelectedIgnoreOptions,
 			cancellationToken);
-		var discoveryRules = ignoreRules.Build(rootPath, selectedIgnoreOptions, selectedRootFolders);
+		var discoveryRules = ignoreRules.BuildWithCancellation(
+			rootPath,
+			selectedIgnoreOptions,
+			selectedRootFolders,
+			cancellationToken);
 		ScanOptionsResult scan;
 		ProjectTreeInventorySnapshot? treeInventory = null;
 		IReadOnlyList<string> allowedRootFolders;
@@ -67,13 +71,21 @@ public sealed class ProjectAnalysisService(
 		    buildTree.SupportsCompositeInventory)
 		{
 			var rootFolders = scanOptions.GetRootFolders(rootPath, discoveryRules, cancellationToken);
-			var rootProjectionRules = ignoreRules.Build(rootPath, selectedIgnoreOptions, rootFolders.Value);
+			var rootProjectionRules = ignoreRules.BuildWithCancellation(
+				rootPath,
+				selectedIgnoreOptions,
+				rootFolders.Value,
+				cancellationToken);
 			allowedRootFolders = RootFolderVisibilityProjection.ApplyScopedControllerRules(
 				rootPath,
 				rootFolders.Value,
 				rootProjectionRules,
 				cancellationToken);
-			rules = ignoreRules.Build(rootPath, selectedIgnoreOptions, allowedRootFolders);
+			rules = ignoreRules.BuildWithCancellation(
+				rootPath,
+				selectedIgnoreOptions,
+				allowedRootFolders,
+				cancellationToken);
 			var allowedRootFolderSet = allowedRootFolders.ToHashSet(PathComparer.Default);
 			treeInventory = buildTree.ReadCompositeInventory(
 				rootPath,
@@ -102,14 +114,22 @@ public sealed class ProjectAnalysisService(
 				scan = scanOptions.Execute(
 					new ScanOptionsRequest(rootPath, discoveryRules),
 					cancellationToken);
-				var rootProjectionRules = ignoreRules.Build(rootPath, selectedIgnoreOptions, scan.RootFolders);
+				var rootProjectionRules = ignoreRules.BuildWithCancellation(
+					rootPath,
+					selectedIgnoreOptions,
+					scan.RootFolders,
+					cancellationToken);
 				allowedRootFolders = RootFolderVisibilityProjection.ApplyScopedControllerRules(
 					rootPath,
 					scan.RootFolders,
 					rootProjectionRules,
 					cancellationToken);
 				scan = scan with { RootFolders = allowedRootFolders };
-				rules = ignoreRules.Build(rootPath, selectedIgnoreOptions, allowedRootFolders);
+				rules = ignoreRules.BuildWithCancellation(
+					rootPath,
+					selectedIgnoreOptions,
+					allowedRootFolders,
+					cancellationToken);
 			}
 			else
 			{
@@ -234,7 +254,20 @@ public sealed class ProjectAnalysisService(
 			(candidateRootPath, selectedOptions, selectedRootFolders) =>
 				ignoreRules.Build(candidateRootPath, selectedOptions, selectedRootFolders),
 			(candidateRootPath, selectedRootFolders) =>
-				ignoreRules.GetIgnoreOptionsAvailability(candidateRootPath, selectedRootFolders));
+				ignoreRules.GetIgnoreOptionsAvailability(candidateRootPath, selectedRootFolders),
+			buildIgnoreRulesWithCancellation:
+				(candidateRootPath, selectedOptions, selectedRootFolders, token) =>
+					ignoreRules.BuildWithCancellation(
+						candidateRootPath,
+						selectedOptions,
+						selectedRootFolders,
+						token),
+			getIgnoreOptionsAvailabilityWithCancellation:
+				(candidateRootPath, selectedRootFolders, token) =>
+					ignoreRules.GetIgnoreOptionsAvailabilityWithCancellation(
+						candidateRootPath,
+						selectedRootFolders,
+						token));
 		var selectionContext = BuildUnifiedSelectionContext(rootPath, request);
 		var snapshot = selectionRefreshEngine.ComputeFullRefreshSnapshot(
 			selectionContext,
@@ -254,7 +287,11 @@ public sealed class ProjectAnalysisService(
 			.ToArray();
 		var selectedIgnoreOptions = snapshot.EffectiveIgnoreOptions.ToArray();
 		var rules = snapshot.EffectiveRules ??
-		            ignoreRules.Build(rootPath, selectedIgnoreOptions, selectedRootFolders);
+		            ignoreRules.BuildWithCancellation(
+			            rootPath,
+			            selectedIgnoreOptions,
+			            selectedRootFolders,
+			            cancellationToken);
 		var treeRequest = new BuildTreeRequest(
 			rootPath,
 			new TreeFilterOptions(
@@ -433,7 +470,11 @@ public sealed class ProjectAnalysisService(
 			.Where(static option => option.DefaultChecked)
 			.Select(static option => option.Id)
 			.ToArray();
-		var discoveryRules = ignoreRules.Build(rootPath, discoveryOptions, selectedRootFolders);
+		var discoveryRules = ignoreRules.BuildWithCancellation(
+			rootPath,
+			discoveryOptions,
+			selectedRootFolders,
+			cancellationToken);
 		var discoveryRootFolders = useAllRootFoldersForDefaults
 			? scanOptions.GetRootFolders(rootPath, discoveryRules, cancellationToken).Value
 			: selectedRootFolders;

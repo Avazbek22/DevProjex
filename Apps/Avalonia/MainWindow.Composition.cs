@@ -1022,7 +1022,9 @@ public partial class MainWindow
             () => _currentPath,
             _statusOperations,
             ApplyProgrammaticContentTransformationSelectionChange,
-			scanIncomplete: () => _toastService.Show(_localization["Scan.Error.Incomplete"]));
+			scanIncomplete: () => _toastService.Show(_localization["Scan.Error.Incomplete"]),
+			buildIgnoreRulesWithCancellation: BuildIgnoreRules,
+			getIgnoreOptionsAvailabilityWithCancellation: GetIgnoreOptionsAvailability);
         // User changes in this section remain drafts until Apply. The callback is reserved for
         // programmatic activation, such as enabling Hide Secrets for a manual mark.
         _projectLoadPipeline = new ProjectLoadPipeline(this, _statusOperations);

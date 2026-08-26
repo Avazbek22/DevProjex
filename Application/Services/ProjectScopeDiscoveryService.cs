@@ -156,8 +156,15 @@ public sealed class ProjectScopeDiscoveryService(
 
 	public ProjectScanContext Discover(
 		string rootPath,
-		IReadOnlyCollection<string>? selectedRootFolders)
+		IReadOnlyCollection<string>? selectedRootFolders) =>
+		DiscoverWithCancellation(rootPath, selectedRootFolders, CancellationToken.None);
+
+	public ProjectScanContext DiscoverWithCancellation(
+		string rootPath,
+		IReadOnlyCollection<string>? selectedRootFolders,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		IgnorePipelineDiagnostics.RecordProjectScopeDiscovery();
 		if (string.IsNullOrWhiteSpace(rootPath))
 			return ProjectScanContext.Empty;
@@ -208,7 +215,11 @@ public sealed class ProjectScopeDiscoveryService(
 				return ProjectScanContext.Empty;
 			}
 
-			context = BuildProjectScanContext(rootFacts, selectedRootFolders, rootFactsCache);
+			context = BuildProjectScanContext(
+				rootFacts,
+				selectedRootFolders,
+				rootFactsCache,
+				cancellationToken);
 			discoveryStamp = rootFactsCache.CreateDiscoveryStamp();
 		}
 		catch
@@ -402,8 +413,10 @@ public sealed class ProjectScopeDiscoveryService(
 	private ProjectScanContext BuildProjectScanContext(
 		ProjectRootFacts rootFacts,
 		IReadOnlyCollection<string>? selectedRootFolders,
-		ProjectRootFactsOperationCache rootFactsCache)
+		ProjectRootFactsOperationCache rootFactsCache,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		var rootPath = rootFacts.RootPath;
 		var hasExplicitRootSelection = selectedRootFolders is not null && selectedRootFolders.Count > 0;
 		var rootHasGitIgnore = rootFacts.HasGitIgnoreFile;
@@ -413,7 +426,10 @@ public sealed class ProjectScopeDiscoveryService(
 		// The generic artifact matcher handles dependency/build/cache folders later, after
 		// the selected roots are known. Keeping discovery conservative prevents home-folder
 		// and monorepo opens from turning dependency forests into fake project scopes.
-		var candidateDirectories = ResolveCandidateDirectories(rootFacts, selectedRootFolders);
+		var candidateDirectories = ResolveCandidateDirectories(
+			rootFacts,
+			selectedRootFolders,
+			cancellationToken);
 
 		if (candidateDirectories.Count == 0)
 		{
@@ -434,7 +450,7 @@ public sealed class ProjectScopeDiscoveryService(
 		var scopedCandidatesSync = new object();
 		Parallel.ForEach(
 			candidateDirectories,
-			ScanParallelismPolicy.CreateOptions(),
+			ScanParallelismPolicy.CreateOptions(cancellationToken),
 			static () => new List<ProjectScope>(),
 			(directoryPath, _, localCandidates) =>
 			{
@@ -470,7 +486,10 @@ public sealed class ProjectScopeDiscoveryService(
 			});
 
 		var candidates = SortScopes(scopedCandidates).ToArray();
-		var expandedCandidates = ExpandCandidatesWithNestedProjectScopes(candidates, rootFactsCache);
+		var expandedCandidates = ExpandCandidatesWithNestedProjectScopes(
+			candidates,
+			rootFactsCache,
+			cancellationToken);
 
 		if (hasExplicitRootSelection)
 		{
@@ -525,8 +544,10 @@ public sealed class ProjectScopeDiscoveryService(
 
 	private ProjectScope[] ExpandCandidatesWithNestedProjectScopes(
 		IReadOnlyList<ProjectScope> candidates,
-		ProjectRootFactsOperationCache rootFactsCache)
+		ProjectRootFactsOperationCache rootFactsCache,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		if (candidates.Count == 0)
 			return [];
 
@@ -535,7 +556,7 @@ public sealed class ProjectScopeDiscoveryService(
 
 		Parallel.ForEach(
 			candidates,
-			ScanParallelismPolicy.CreateOptions(),
+			ScanParallelismPolicy.CreateOptions(cancellationToken),
 			static () => new List<ProjectScope>(),
 			(candidate, _, localScopes) =>
 			{
@@ -547,7 +568,8 @@ public sealed class ProjectScopeDiscoveryService(
 							 candidate.RootPath,
 							 probe.MaxDepth,
 							 probe.MaxDirectories,
-							 rootFactsCache))
+							 rootFactsCache,
+							 cancellationToken))
 				{
 					var childFacts = rootFactsCache.Get(childPath);
 					var hasGitIgnore = childFacts.HasGitIgnoreFile;
@@ -633,8 +655,10 @@ public sealed class ProjectScopeDiscoveryService(
 		string rootPath,
 		int maxDepth,
 		int maxDirectories,
-		ProjectRootFactsOperationCache rootFactsCache)
+		ProjectRootFactsOperationCache rootFactsCache,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		if (maxDepth <= 0 || maxDirectories <= 0)
 			yield break;
 
@@ -644,6 +668,7 @@ public sealed class ProjectScopeDiscoveryService(
 
 		while (queue.Count > 0 && discovered < maxDirectories)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			var (currentPath, currentDepth) = queue.Dequeue();
 			if (currentDepth >= maxDepth)
 				continue;
@@ -652,6 +677,7 @@ public sealed class ProjectScopeDiscoveryService(
 
 			foreach (var childPath in children)
 			{
+				cancellationToken.ThrowIfCancellationRequested();
 				if (ShouldSkipProjectScopeTraversal(childPath))
 					continue;
 
@@ -667,14 +693,17 @@ public sealed class ProjectScopeDiscoveryService(
 
 	private static List<string> ResolveCandidateDirectories(
 		ProjectRootFacts rootFacts,
-		IReadOnlyCollection<string>? selectedRootFolders)
+		IReadOnlyCollection<string>? selectedRootFolders,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		var uniqueCandidates = new HashSet<string>(PathStringComparer);
 
 		if (selectedRootFolders is not null && selectedRootFolders.Count > 0)
 		{
 			foreach (var folderName in selectedRootFolders)
 			{
+				cancellationToken.ThrowIfCancellationRequested();
 				if (string.IsNullOrEmpty(folderName))
 					continue;
 
@@ -688,7 +717,10 @@ public sealed class ProjectScopeDiscoveryService(
 		else
 		{
 			foreach (var dir in GetChildDirectoriesSafe(rootFacts))
+			{
+				cancellationToken.ThrowIfCancellationRequested();
 				uniqueCandidates.Add(Path.GetFullPath(dir));
+			}
 		}
 
 		var candidates = new List<string>(uniqueCandidates);

@@ -1986,9 +1986,20 @@ public partial class MainWindow : Window
     private IgnoreRules BuildIgnoreRules(
         string rootPath,
         IReadOnlyCollection<IgnoreOptionId> selectedOptions,
-        IReadOnlyCollection<string>? selectedRootFolders)
+        IReadOnlyCollection<string>? selectedRootFolders) =>
+        BuildIgnoreRules(rootPath, selectedOptions, selectedRootFolders, CancellationToken.None);
+
+    private IgnoreRules BuildIgnoreRules(
+        string rootPath,
+        IReadOnlyCollection<IgnoreOptionId> selectedOptions,
+        IReadOnlyCollection<string>? selectedRootFolders,
+        CancellationToken cancellationToken)
     {
-        var rules = _ignoreRulesService.Build(rootPath, selectedOptions, selectedRootFolders);
+        var rules = _ignoreRulesService.BuildWithCancellation(
+            rootPath,
+            selectedOptions,
+            selectedRootFolders,
+            cancellationToken);
         if (!_viewModel.IsGitMode ||
             string.IsNullOrWhiteSpace(_currentCachedRepoPath) ||
             !PathComparer.Default.Equals(rootPath, _currentCachedRepoPath))
@@ -2001,9 +2012,18 @@ public partial class MainWindow : Window
 
     private IgnoreOptionsAvailability GetIgnoreOptionsAvailability(
         string rootPath,
-        IReadOnlyCollection<string> selectedRootFolders)
+        IReadOnlyCollection<string> selectedRootFolders) =>
+        GetIgnoreOptionsAvailability(rootPath, selectedRootFolders, CancellationToken.None);
+
+    private IgnoreOptionsAvailability GetIgnoreOptionsAvailability(
+        string rootPath,
+        IReadOnlyCollection<string> selectedRootFolders,
+        CancellationToken cancellationToken)
     {
-        var availability = _ignoreRulesService.GetIgnoreOptionsAvailability(rootPath, selectedRootFolders);
+        var availability = _ignoreRulesService.GetIgnoreOptionsAvailabilityWithCancellation(
+            rootPath,
+            selectedRootFolders,
+            cancellationToken);
 		return availability with
 		{
 			ShowAdvancedCounts = AdvancedIgnoreCountsAlwaysEnabled,

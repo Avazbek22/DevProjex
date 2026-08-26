@@ -58,6 +58,68 @@ public sealed class ProjectScopeDiscoveryServiceTests
 			scope => ScopeEndsWith(scope, "nested"));
 	}
 
+	#pragma warning disable xUnit1051 // This test cancels discovery from the controlled facts provider.
+	[Fact]
+	public void Discover_CancelledDuringCandidateScanStopsBeforeInspectingEveryScope()
+	{
+		const int candidateCount = 256;
+		var rootPath = Path.GetFullPath(Path.Combine(
+			Path.GetTempPath(),
+			"DevProjex",
+			"ScopeCancellation",
+			Guid.NewGuid().ToString("N")));
+		var directories = Enumerable.Range(0, candidateCount)
+			.Select(index =>
+			{
+				var name = $"scope-{index:D3}";
+				return new ProjectRootDirectoryFact(
+					name,
+					Path.Combine(rootPath, name),
+					IsReparsePoint: false);
+			})
+			.ToArray();
+		using var cancellation = new CancellationTokenSource();
+		var inspectedCandidates = 0;
+		var factsProvider = new ProjectRootFactsProvider(
+			cacheTtl: TimeSpan.Zero,
+			cacheLimit: 0,
+			utcNowProvider: null,
+			factsBuilder: path =>
+			{
+				if (PathComparer.Default.Equals(path, rootPath))
+				{
+					return new ProjectRootFacts(
+						rootPath,
+						exists: true,
+						isAccessible: true,
+						files: [],
+						directories,
+						gitIgnoreSignature: null);
+				}
+
+				Interlocked.Increment(ref inspectedCandidates);
+				cancellation.Cancel();
+				return new ProjectRootFacts(
+					path,
+					exists: true,
+					isAccessible: true,
+					files: [new ProjectRootFileFact("package.json", ".json", IsReparsePoint: false)],
+					directories: [],
+					gitIgnoreSignature: null);
+			});
+		var discovery = new ProjectScopeDiscoveryService(
+			new SmartIgnoreService([]),
+			factsProvider);
+
+		Assert.ThrowsAny<OperationCanceledException>(() =>
+			discovery.DiscoverWithCancellation(
+				rootPath,
+				selectedRootFolders: null,
+				cancellation.Token));
+		Assert.InRange(Volatile.Read(ref inspectedCandidates), 1, candidateCount - 1);
+	}
+	#pragma warning restore xUnit1051
+
 	[Fact]
 	public async Task Discover_InvalidatedWhileFactsAreBuilding_DoesNotPublishStaleTopology()
 	{

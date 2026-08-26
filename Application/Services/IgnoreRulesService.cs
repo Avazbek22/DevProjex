@@ -22,7 +22,7 @@ public sealed class IgnoreRulesService(
 
 	private static readonly StringComparer PathStringComparer = PathComparer.Default;
 	public IgnoreRules Build(string rootPath, IReadOnlyCollection<IgnoreOptionId> selectedOptions) =>
-		Build(rootPath, selectedOptions, selectedRootFolders: null);
+		BuildWithCancellation(rootPath, selectedOptions, selectedRootFolders: null, CancellationToken.None);
 
 	public void InvalidateCaches(string rootPath)
 	{
@@ -65,10 +65,18 @@ public sealed class IgnoreRulesService(
 	public IgnoreRules Build(
 		string rootPath,
 		IReadOnlyCollection<IgnoreOptionId> selectedOptions,
-		IReadOnlyCollection<string>? selectedRootFolders)
+		IReadOnlyCollection<string>? selectedRootFolders) =>
+		BuildWithCancellation(rootPath, selectedOptions, selectedRootFolders, CancellationToken.None);
+
+	public IgnoreRules BuildWithCancellation(
+		string rootPath,
+		IReadOnlyCollection<IgnoreOptionId> selectedOptions,
+		IReadOnlyCollection<string>? selectedRootFolders,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		IgnorePipelineDiagnostics.RecordIgnoreRulesBuild();
-		var context = DiscoverProjectScanContext(rootPath, selectedRootFolders);
+		var context = DiscoverProjectScanContext(rootPath, selectedRootFolders, cancellationToken);
 		// A nested .gitignore can be discovered by the scanner after bounded project-scope
 		// discovery has completed. An explicit/default selection must therefore activate the
 		// traversal controller even when no prebuilt scope matcher exists yet.
@@ -163,9 +171,18 @@ public sealed class IgnoreRulesService(
 
 	public IgnoreOptionsAvailability GetIgnoreOptionsAvailability(
 		string rootPath,
-		IReadOnlyCollection<string> selectedRootFolders)
+		IReadOnlyCollection<string> selectedRootFolders) =>
+		GetIgnoreOptionsAvailabilityWithCancellation(
+			rootPath,
+			selectedRootFolders,
+			CancellationToken.None);
+
+	public IgnoreOptionsAvailability GetIgnoreOptionsAvailabilityWithCancellation(
+		string rootPath,
+		IReadOnlyCollection<string> selectedRootFolders,
+		CancellationToken cancellationToken)
 	{
-		var context = DiscoverProjectScanContext(rootPath, selectedRootFolders);
+		var context = DiscoverProjectScanContext(rootPath, selectedRootFolders, cancellationToken);
 		return BuildUiIgnoreOptionsAvailability(rootPath, context);
 	}
 
@@ -376,8 +393,9 @@ public sealed class IgnoreRulesService(
 
 	private ProjectScanContext DiscoverProjectScanContext(
 		string rootPath,
-		IReadOnlyCollection<string>? selectedRootFolders) =>
-		_projectScopeDiscovery.Discover(rootPath, selectedRootFolders);
+		IReadOnlyCollection<string>? selectedRootFolders,
+		CancellationToken cancellationToken) =>
+		_projectScopeDiscovery.DiscoverWithCancellation(rootPath, selectedRootFolders, cancellationToken);
 
 	private GitIgnoreMatcher TryBuildGitIgnoreMatcher(string rootPath, ProjectRootFacts? rootFacts = null)
 	{
