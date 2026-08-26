@@ -203,7 +203,8 @@ public sealed class DevProjexCommandTree
 				output,
 				async () =>
 				{
-					var services = CreateServices(parseResult);
+					using var serviceScope = CreateServiceScope(parseResult);
+					var services = serviceScope.Services;
 					var projectSource = parseResult.GetValue(project) ?? Directory.GetCurrentDirectory();
 					await using var resolvedSource = await new TerminalProjectSourceResolver(
 							services,
@@ -288,7 +289,8 @@ public sealed class DevProjexCommandTree
 				outputOptions,
 				async () =>
 				{
-					var services = CreateServices(parseResult);
+					using var serviceScope = CreateServiceScope(parseResult);
+					var services = serviceScope.Services;
 					var selectedPaths = await selection.ReadSelectedPathsAsync(
 						parseResult,
 						cancellationToken).ConfigureAwait(false);
@@ -408,7 +410,8 @@ public sealed class DevProjexCommandTree
 				outputOptions,
 				async () =>
 				{
-					var services = CreateServices(parseResult);
+					using var serviceScope = CreateServiceScope(parseResult);
+					var services = serviceScope.Services;
 					var selectedPaths = await selection.ReadSelectedPathsAsync(
 						parseResult,
 						cancellationToken).ConfigureAwait(false);
@@ -516,7 +519,8 @@ public sealed class DevProjexCommandTree
 				outputOptions,
 				async () =>
 				{
-					var services = CreateServices(parseResult);
+					using var serviceScope = CreateServiceScope(parseResult);
+					var services = serviceScope.Services;
 					var selectedPaths = await selection.ReadSelectedPathsAsync(
 						parseResult,
 						cancellationToken).ConfigureAwait(false);
@@ -648,13 +652,15 @@ public sealed class DevProjexCommandTree
 						? null
 						: parseResult.GetValue(project) ?? Directory.GetCurrentDirectory();
 					ProjectSelectionSpec? spec = null;
-					TerminalServices? services = null;
+					using var serviceScope = projectSource is null
+						? null
+						: CreateServiceScope(parseResult);
+					var services = serviceScope?.Services;
 					ResolvedTerminalProjectSource? resolvedSource = null;
 					if (projectSource is not null)
 					{
-						services = CreateServices(parseResult);
 						resolvedSource = await new TerminalProjectSourceResolver(
-								services,
+								services!,
 								environment,
 								outputOptions)
 							.ResolveAsync(projectSource, parseResult.GetValue(branch), cancellationToken)
@@ -853,9 +859,11 @@ public sealed class DevProjexCommandTree
 			return CommandExecution.RunAsync(
 					environment,
 					output,
-					() => Task.FromResult(
-						new ProfileCommandHandler(CreateServices(parseResult), environment)
-							.Reset(parseResult.GetValue(project) ?? Directory.GetCurrentDirectory())),
+					() => RunWithServicesAsync(
+						parseResult,
+						services => Task.FromResult(
+							new ProfileCommandHandler(services, environment)
+								.Reset(parseResult.GetValue(project) ?? Directory.GetCurrentDirectory()))),
 					_localization)
 				.GetAwaiter()
 				.GetResult();
@@ -1126,10 +1134,12 @@ public sealed class DevProjexCommandTree
 			CommandExecution.RunAsync(
 				environment,
 				new TerminalOutputOptions(),
-				() => new DoctorCommandHandler(CreateServices(parseResult), environment)
-					.ExecuteAsync(
-						parseResult.GetValue(format) == CliTextJsonFormat.Json,
-						cancellationToken),
+				() => RunWithServicesAsync(
+					parseResult,
+					services => new DoctorCommandHandler(services, environment)
+						.ExecuteAsync(
+							parseResult.GetValue(format) == CliTextJsonFormat.Json,
+							cancellationToken)),
 				_localization));
 		return command;
 	}
@@ -1175,13 +1185,15 @@ public sealed class DevProjexCommandTree
 			CommandExecution.RunAsync(
 				environment,
 				new TerminalOutputOptions(),
-				() => Task.FromResult(new RecentCommandHandler(
-						CreateServices(parseResult),
-						environment)
-					.Execute(
-						parseResult.GetValue(kind),
-						parseResult.GetValue(limit),
-						parseResult.GetValue(format))),
+				() => RunWithServicesAsync(
+					parseResult,
+					services => Task.FromResult(new RecentCommandHandler(
+							services,
+							environment)
+						.Execute(
+							parseResult.GetValue(kind),
+							parseResult.GetValue(limit),
+							parseResult.GetValue(format)))),
 				_localization));
 		return command;
 	}
@@ -1203,10 +1215,12 @@ public sealed class DevProjexCommandTree
 			CommandExecution.RunAsync(
 				environment,
 				new TerminalOutputOptions(),
-				() => Task.FromResult(new CacheCommandHandler(
-						CreateServices(parseResult),
-						environment)
-					.WritePath()),
+				() => RunWithServicesAsync(
+					parseResult,
+					services => Task.FromResult(new CacheCommandHandler(
+							services,
+							environment)
+						.WritePath())),
 				_localization));
 
 		var list = new Command("list", L("Terminal.Command.CacheList"));
@@ -1226,10 +1240,12 @@ public sealed class DevProjexCommandTree
 			CommandExecution.RunAsync(
 				environment,
 				new TerminalOutputOptions(),
-				() => Task.FromResult(new CacheCommandHandler(
-						CreateServices(parseResult),
-						environment)
-					.WriteList(parseResult.GetValue(format))),
+				() => RunWithServicesAsync(
+					parseResult,
+					services => Task.FromResult(new CacheCommandHandler(
+							services,
+							environment)
+						.WriteList(parseResult.GetValue(format)))),
 				_localization));
 
 		var remove = new Command("remove", L("Terminal.Command.CacheRemove"));
@@ -1252,10 +1268,12 @@ public sealed class DevProjexCommandTree
 			CommandExecution.RunAsync(
 				environment,
 				new TerminalOutputOptions(),
-				() => Task.FromResult(new CacheCommandHandler(
-						CreateServices(parseResult),
-						environment)
-					.Remove(parseResult.GetValue(repositoryUrl)!)),
+				() => RunWithServicesAsync(
+					parseResult,
+					services => Task.FromResult(new CacheCommandHandler(
+							services,
+							environment)
+						.Remove(parseResult.GetValue(repositoryUrl)!))),
 				_localization));
 
 		var clear = new Command("clear", L("Terminal.Command.CacheClear"));
@@ -1272,10 +1290,12 @@ public sealed class DevProjexCommandTree
 			CommandExecution.RunAsync(
 				environment,
 				new TerminalOutputOptions(),
-				() => Task.FromResult(new CacheCommandHandler(
-						CreateServices(parseResult),
-						environment)
-					.Clear()),
+				() => RunWithServicesAsync(
+					parseResult,
+					services => Task.FromResult(new CacheCommandHandler(
+							services,
+							environment)
+						.Clear())),
 				_localization));
 
 		command.Subcommands.Add(path);
@@ -1332,7 +1352,8 @@ public sealed class DevProjexCommandTree
 				outputOptions,
 				async () =>
 				{
-					var services = CreateServices(parseResult);
+					using var serviceScope = CreateServiceScope(parseResult);
+					var services = serviceScope.Services;
 					var projectPath = parseResult.GetValue(project) ?? Directory.GetCurrentDirectory();
 					var spec = await selection.ResolveAsync(
 						parseResult,
@@ -1557,16 +1578,25 @@ public sealed class DevProjexCommandTree
 		ParseResult parseResult,
 		Func<TerminalServices, ProfileCommandHandler, Task<int>> operation)
 	{
-		var services = CreateServices(parseResult);
 		return CommandExecution.RunAsync(
 			environment,
 			new TerminalOutputOptions(),
-			() => operation(services, new ProfileCommandHandler(services, environment)),
+			() => RunWithServicesAsync(
+				parseResult,
+				services => operation(services, new ProfileCommandHandler(services, environment))),
 			_localization);
 	}
 
-	private TerminalServices CreateServices(ParseResult parseResult) =>
-		_serviceFactory.Create(parseResult.GetValue(_language));
+	private async Task<int> RunWithServicesAsync(
+		ParseResult parseResult,
+		Func<TerminalServices, Task<int>> operation)
+	{
+		using var serviceScope = CreateServiceScope(parseResult);
+		return await operation(serviceScope.Services).ConfigureAwait(false);
+	}
+
+	private TerminalServiceScope CreateServiceScope(ParseResult parseResult) =>
+		_serviceFactory.CreateScope(parseResult.GetValue(_language));
 
 	private Argument<string?> ProjectArgument() =>
 		new("PROJECT")

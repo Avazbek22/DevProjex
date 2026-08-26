@@ -8,7 +8,7 @@ public sealed class TerminalServiceFactoryTests
 	[Fact]
 	public void DefaultServicesSeparateConfigurationStateAndCacheRoots()
 	{
-		var services = new TerminalServiceFactory().Create(AppLanguage.En);
+		using var services = new TerminalServiceFactory().Create(AppLanguage.En);
 
 		Assert.Equal(
 			Path.Combine(
@@ -32,12 +32,42 @@ public sealed class TerminalServiceFactoryTests
 		using var workspace = new TemporaryDirectory();
 		var dataRoot = workspace.CreateDirectory("app-data");
 
-		var services = new TerminalServiceFactory(() => dataRoot).Create(AppLanguage.En);
+		using var services = new TerminalServiceFactory(() => dataRoot).Create(AppLanguage.En);
 
 		var cache = Assert.IsType<RepoCacheService>(services.RepoCacheService);
 		Assert.Equal(
 			Path.Combine(dataRoot, "RepoCache"),
 			cache.CacheRootPath,
 			PathComparer.Default);
+	}
+
+	[Fact]
+	public void DefaultScopeDisposesOwnedSessionResources()
+	{
+		using var workspace = new TemporaryDirectory();
+		var scope = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.CreateScope(AppLanguage.En);
+		var services = scope.Services;
+
+		scope.Dispose();
+
+		Assert.Throws<ObjectDisposedException>(services.SecretRedactionSession.Reset);
+		Assert.Throws<ObjectDisposedException>(() =>
+			services.CodeCompressionSession.BeginMeasurement(workspace.Path));
+	}
+
+	[Fact]
+	public void InjectedScopeBorrowsSharedSessionResources()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		using (var scope = new TerminalServiceFactory(_ => services).CreateScope(AppLanguage.En))
+		{
+			Assert.Same(services, scope.Services);
+		}
+
+		services.SecretRedactionSession.Reset();
+		using var measurement = services.CodeCompressionSession.BeginMeasurement(workspace.Path);
 	}
 }
