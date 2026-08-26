@@ -546,6 +546,26 @@ public sealed class RenderingContractTests
 	}
 
 	[Fact]
+	public void RedirectedGitProgressStopsWritingAfterDiagnosticsPipeCloses()
+	{
+		var error = new BrokenPipeTextWriter(failOnAttempt: 2);
+		var environment = new TestTerminalEnvironment { ErrorOverride = error };
+		using var renderer = Assert.IsType<GitOperationProgressRenderer>(
+			GitOperationProgressRenderer.Create(
+				environment,
+				new TerminalOutputOptions(),
+				"start",
+				"complete"));
+
+		renderer.Start();
+		renderer.Report("Receiving objects: 25%");
+		renderer.Report("Receiving objects: 50%");
+		renderer.Complete();
+
+		Assert.Equal(2, error.WriteAttempts);
+	}
+
+	[Fact]
 	public async Task InteractiveStatusUsesOnlyStandardError()
 	{
 		var environment = new TestTerminalEnvironment
@@ -800,5 +820,19 @@ public sealed class RenderingContractTests
 				StringSplitOptions.RemoveEmptyEntries).Length,
 			1,
 			2);
+	}
+
+	private sealed class BrokenPipeTextWriter(int failOnAttempt) : TextWriter
+	{
+		private int _writeAttempts;
+
+		public override Encoding Encoding => Encoding.UTF8;
+		public int WriteAttempts => _writeAttempts;
+
+		public override void WriteLine(string? value)
+		{
+			if (++_writeAttempts >= failOnAttempt)
+				throw new TerminalBrokenPipeException();
+		}
 	}
 }

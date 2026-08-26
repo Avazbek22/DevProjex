@@ -413,4 +413,27 @@ public class GitRepositoryServiceUnitTests
 		Assert.Equal(expectedSafeProgressLine, classification.IsSafeProgressLine);
 		Assert.Equal(expectedRetainForError, classification.RetainForError);
 	}
+
+	[Fact]
+	public async Task GitProcessLinePump_SplitsEveryLineEndingAndBoundsFrames()
+	{
+		var frames = new List<GitProcessLineFrame>();
+		var input = new string('x', 4_095) + "\r\none\rtwo\n\nend";
+
+		await GitProcessLinePump.ReadAsync(
+			new StringReader(input),
+			maximumFrameCharacters: 10,
+			frames.Add,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(
+			[
+				new GitProcessLineFrame(new string('x', 10), ExceededLimit: true),
+				new GitProcessLineFrame("one", ExceededLimit: false),
+				new GitProcessLineFrame("two", ExceededLimit: false),
+				new GitProcessLineFrame(string.Empty, ExceededLimit: false),
+				new GitProcessLineFrame("end", ExceededLimit: false)
+			],
+			frames);
+	}
 }

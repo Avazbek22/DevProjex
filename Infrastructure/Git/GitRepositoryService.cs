@@ -1,3 +1,6 @@
+using System.Runtime.ExceptionServices;
+using DevProjex.Kernel;
+
 namespace DevProjex.Infrastructure.Git;
 
 /// <summary>
@@ -22,6 +25,7 @@ public sealed class GitRepositoryService : IGitRepositoryService
 {
     private const int CommandOutputBufferChars = 64 * 1024;
     private const int CommandErrorBufferChars = 64 * 1024;
+    internal const int MaximumProgressFrameCharacters = 4 * 1024;
     private static readonly TimeSpan ProcessTerminationWaitTimeout = TimeSpan.FromSeconds(5);
     private const int ProcessTerminationFallbackWaitMilliseconds = 1_000;
     internal const string NonInteractiveSshCommand = "ssh -o BatchMode=yes";
@@ -802,69 +806,90 @@ public sealed class GitRepositoryService : IGitRepositoryService
 
         var outputBuffer = new BoundedLineBuffer(CommandOutputBufferChars);
         var errorBuffer = new BoundedLineBuffer(CommandErrorBufferChars);
+        var progressObserver = progress is null ? null : new GitProgressObserver(progress);
         var lastReportedPercent = -1;
-
-        // Capture stdout
-        process.OutputDataReceived += (_, e) =>
-        {
-            if (e.Data is not null)
-            {
-                outputBuffer.Add(e.Data);
-            }
-        };
-
-        // Capture stderr - git writes progress information here
-        process.ErrorDataReceived += (_, e) =>
-        {
-            if (e.Data is not null)
-            {
-                var line = e.Data;
-                var classification = ClassifyGitStderrLine(line);
-                if (classification.Percent is { } percent)
-                {
-                    if (progress is not null)
-                    {
-                        var previousPercent = Interlocked.Exchange(ref lastReportedPercent, percent);
-                        if (classification.IsSafeProgressLine)
-                        {
-                            // Preserve the phase detail for richer consumers without also
-                            // emitting a second standalone percentage for the same Git line.
-                            progress.Report(line);
-                        }
-                        else if (previousPercent != percent)
-                        {
-                            progress.Report($"{percent}%");
-                        }
-                    }
-
-                    if (!classification.RetainForError)
-                    {
-                        // Progress lines can be very noisy during clone/fetch and are not
-                        // needed in the final error payload.
-                        return;
-                    }
-                }
-
-                errorBuffer.Add(line);
-
-                if (progress is not null &&
-                    classification.Percent is null &&
-                    classification.IsSafeProgressLine)
-                    progress.Report(line);
-            }
-        };
 
         process.Start();
         process.StandardInput.Close();
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
 
-        await WaitForExitOrTerminateAsync(process, cancellationToken);
+        var outputPump = GitProcessLinePump.ReadAsync(
+            process.StandardOutput,
+            CommandOutputBufferChars,
+            frame => outputBuffer.Add(frame.Text, frame.ExceededLimit),
+            cancellationToken);
+        var errorPump = GitProcessLinePump.ReadAsync(
+            process.StandardError,
+            CommandErrorBufferChars,
+            HandleErrorFrame,
+            cancellationToken);
+
+        try
+        {
+            await WaitForExitOrTerminateAsync(process, cancellationToken);
+            await Task.WhenAll(outputPump, errorPump).ConfigureAwait(false);
+            progressObserver?.ThrowIfFaulted();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            await GitProcessOutputReader
+                .ObserveCompletionAsync(outputPump, errorPump)
+                .ConfigureAwait(false);
+            throw;
+        }
 
         return new GitCommandResult(
             process.ExitCode,
             outputBuffer.ToString(),
             errorBuffer.ToString());
+
+        void HandleErrorFrame(GitProcessLineFrame frame)
+        {
+            var line = frame.Text;
+            var classification = ClassifyGitStderrLine(line);
+            if (classification.Percent is { } percent)
+            {
+                if (progressObserver is not null)
+                {
+                    var previousPercent = Interlocked.Exchange(ref lastReportedPercent, percent);
+                    if (classification.IsSafeProgressLine)
+                    {
+                        // Preserve the phase detail for richer consumers without also
+                        // emitting a second standalone percentage for the same Git line.
+                        progressObserver.Report(SanitizeProgressFrame(line));
+                    }
+                    else if (previousPercent != percent)
+                    {
+                        progressObserver.Report($"{percent}%");
+                    }
+                }
+
+                if (!classification.RetainForError)
+                {
+                    // Progress lines can be very noisy during clone/fetch and are not
+                    // needed in the final error payload.
+                    return;
+                }
+            }
+
+            errorBuffer.Add(line, frame.ExceededLimit);
+
+            if (progressObserver is not null &&
+                classification.Percent is null &&
+                classification.IsSafeProgressLine)
+            {
+                progressObserver.Report(SanitizeProgressFrame(line));
+            }
+        }
+    }
+
+    private static string SanitizeProgressFrame(string value)
+    {
+        var result = new StringBuilder(Math.Min(value.Length, MaximumProgressFrameCharacters));
+        SingleLineTextEscaping.AppendBounded(
+            result,
+            value.AsSpan(),
+            MaximumProgressFrameCharacters);
+        return result.ToString();
     }
 
     internal static ProcessStartInfo CreateGitCommandStartInfo(
@@ -1026,10 +1051,17 @@ public sealed class GitRepositoryService : IGitRepositoryService
         private readonly object _sync = new();
         private int _charCount;
 
-        public void Add(string line)
+        public void Add(string line, bool exceededLineLimit)
         {
             lock (_sync)
             {
+                if (exceededLineLimit)
+                {
+                    _lines.Clear();
+                    _charCount = 0;
+                    return;
+                }
+
                 _lines.Enqueue(line);
                 _charCount += line.Length + Environment.NewLine.Length;
 
@@ -1061,6 +1093,34 @@ public sealed class GitRepositoryService : IGitRepositoryService
                 return sb.ToString();
             }
         }
+    }
+
+    private sealed class GitProgressObserver(IProgress<string> destination)
+    {
+        private IProgress<string>? _destination = destination;
+        private ExceptionDispatchInfo? _failure;
+
+        public void Report(string value)
+        {
+            var current = Volatile.Read(ref _destination);
+            if (current is null)
+                return;
+
+            try
+            {
+                current.Report(value);
+            }
+            catch (Exception exception)
+            {
+                Interlocked.CompareExchange(
+                    ref _failure,
+                    ExceptionDispatchInfo.Capture(exception),
+                    null);
+                Interlocked.Exchange(ref _destination, null);
+            }
+        }
+
+        public void ThrowIfFaulted() => Volatile.Read(ref _failure)?.Throw();
     }
 
     /// <summary>
