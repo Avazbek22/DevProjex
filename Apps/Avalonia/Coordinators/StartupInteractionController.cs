@@ -31,8 +31,10 @@ internal sealed class StartupInteractionController(
     private static readonly TimeSpan UiDispatchProbeInterval =
         TimeSpan.FromMilliseconds(25);
 
-    public async Task ApplySelectionOverridesAsync()
+    public async Task ApplySelectionOverridesAsync(
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var selectionSpec = desktopRequest?.Selection;
         var currentPath = projectPathProvider();
         if (selectionSpec is null ||
@@ -112,15 +114,18 @@ internal sealed class StartupInteractionController(
 		if (pathSelectionChanged)
 		{
 			await selection.WaitForPendingRefreshesAsync();
+			cancellationToken.ThrowIfCancellationRequested();
 			await refreshTreeAsync();
+			cancellationToken.ThrowIfCancellationRequested();
 
 			await selection.UpdateLiveOptionsForProjectScopeIfDirtyAsync(
 				currentPath);
 			await selection.WaitForPendingRefreshesAsync();
+			cancellationToken.ThrowIfCancellationRequested();
 		}
 
         if (selectionSpec.SelectedPaths is { Count: > 0 })
-            await ApplySelectedPathsAsync(selectionSpec.SelectedPaths);
+            await ApplySelectedPathsAsync(selectionSpec.SelectedPaths, cancellationToken);
     }
 
     internal static HashSet<IgnoreOptionId> ResolveIgnoreSelectionOverride(
@@ -249,19 +254,28 @@ internal sealed class StartupInteractionController(
         };
 
     private async Task ApplySelectedPathsAsync(
-        IReadOnlyCollection<string> selectedPaths)
+        IReadOnlyCollection<string> selectedPaths,
+        CancellationToken cancellationToken)
     {
         var rootPath = projectPathProvider();
         if (string.IsNullOrWhiteSpace(rootPath))
             return;
 
         var selectedFullPaths = selectedPaths
-            .Select(path => ResolveSelectedPath(rootPath, path))
+            .Select(path =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                return PathUtility.Normalize(ResolveSelectedPath(rootPath, path));
+            })
             .ToHashSet(PathComparer.Default);
         var nodes = new List<TreeNodeViewModel>();
         TreeNodeViewModel.ForEachDescendant(
             viewModel.TreeNodes,
-            nodes.Add);
+            node =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                nodes.Add(node);
+            });
 
         var nodePaths = nodes
             .Select(static node => node.FullPath)
@@ -270,21 +284,65 @@ internal sealed class StartupInteractionController(
             () =>
             {
                 var selectedDirectories = selectedFullPaths
-                    .Where(Directory.Exists)
-                    .ToArray();
+                    .Where(path =>
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        return Directory.Exists(path);
+                    })
+                    .ToHashSet(PathComparer.Default);
 
-                return nodePaths
-                    .Select(nodePath =>
-                        selectedFullPaths.Contains(nodePath) ||
-                        selectedDirectories.Any(selectedDirectory =>
-                            PathUtility.IsPathInside(
-                                nodePath,
-                                selectedDirectory)))
-                    .ToArray();
-            });
+                return ResolveSelectedNodeStates(
+                    nodePaths,
+                    selectedFullPaths,
+                    selectedDirectories,
+                    cancellationToken);
+            },
+            cancellationToken);
 
+		cancellationToken.ThrowIfCancellationRequested();
 		ApplyCheckedStates(nodes, checkedStates, applyTreeSelectionBatch);
     }
+
+	internal static bool[] ResolveSelectedNodeStates(
+		IReadOnlyList<string> nodePaths,
+		IReadOnlySet<string> selectedPaths,
+		IReadOnlySet<string> selectedDirectories,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(nodePaths);
+		ArgumentNullException.ThrowIfNull(selectedPaths);
+		ArgumentNullException.ThrowIfNull(selectedDirectories);
+
+		var checkedStates = new bool[nodePaths.Count];
+		for (var index = 0; index < nodePaths.Count; index++)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var nodePath = PathUtility.Normalize(nodePaths[index]);
+			if (selectedPaths.Contains(nodePath))
+			{
+				checkedStates[index] = true;
+				continue;
+			}
+
+			var ancestorPath = Path.GetDirectoryName(nodePath);
+			while (!string.IsNullOrEmpty(ancestorPath))
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				if (selectedDirectories.Contains(ancestorPath))
+				{
+					checkedStates[index] = true;
+					break;
+				}
+
+				var parentPath = Path.GetDirectoryName(ancestorPath);
+				if (PathComparer.Default.Equals(parentPath, ancestorPath))
+					break;
+				ancestorPath = parentPath;
+			}
+		}
+
+		return checkedStates;
+	}
 
 	internal static void ApplyCheckedStates(
 		IReadOnlyList<TreeNodeViewModel> nodes,

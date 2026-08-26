@@ -86,7 +86,7 @@ public partial class MainWindow
         var controller = CreateStartupInteractionController(
             request,
             diagnosticScenario: null);
-        await controller.ApplySelectionOverridesAsync();
+        await controller.ApplySelectionOverridesAsync(cancellationToken);
         var gitReadinessDiagnostic = GetDesktopGitReadinessDiagnostic(request);
         if (gitReadinessDiagnostic is { Severity: ContextDiagnosticSeverity.Error })
         {

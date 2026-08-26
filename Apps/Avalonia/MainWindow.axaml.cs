@@ -1219,8 +1219,8 @@ public partial class MainWindow : Window
         return finalization;
     }
 
-    private Task TryApplyStartupSelectionOverridesAsync()
-        => _startupInteractions.ApplySelectionOverridesAsync();
+    private Task TryApplyStartupSelectionOverridesAsync(CancellationToken cancellationToken)
+        => _startupInteractions.ApplySelectionOverridesAsync(cancellationToken);
 
     private Task TryApplyStartupUiOptionsAsync()
         => _startupInteractions.ApplyUiOptionsAsync();
