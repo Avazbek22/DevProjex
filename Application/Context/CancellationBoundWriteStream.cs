@@ -6,6 +6,8 @@ internal sealed class CancellationBoundWriteStream(
 	Stream destination,
 	CancellationToken cancellationToken) : Stream
 {
+	private const int MaximumSynchronousWriteChunkBytes = 64 * 1024;
+
 	public override bool CanRead => false;
 	public override bool CanSeek => destination.CanSeek;
 	public override bool CanWrite => destination.CanWrite;
@@ -66,16 +68,23 @@ internal sealed class CancellationBoundWriteStream(
 		if (buffer.IsEmpty)
 			return;
 
-		var rented = ArrayPool<byte>.Shared.Rent(buffer.Length);
+		var rented = ArrayPool<byte>.Shared.Rent(
+			Math.Min(buffer.Length, MaximumSynchronousWriteChunkBytes));
 		try
 		{
-			buffer.CopyTo(rented);
-			destination
-				.WriteAsync(
-					rented.AsMemory(0, buffer.Length),
-					cancellationToken)
-				.GetAwaiter()
-				.GetResult();
+			while (!buffer.IsEmpty)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				var chunkLength = Math.Min(buffer.Length, rented.Length);
+				buffer[..chunkLength].CopyTo(rented);
+				destination
+					.WriteAsync(
+						rented.AsMemory(0, chunkLength),
+						cancellationToken)
+					.GetAwaiter()
+					.GetResult();
+				buffer = buffer[chunkLength..];
+			}
 		}
 		finally
 		{
