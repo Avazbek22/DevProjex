@@ -292,6 +292,112 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		await QuitAsync(second);
 	}
 
+	[Fact(Timeout = 240_000)]
+	public async Task LanguageSwitchRefreshesTheWorkspaceAndHonorsStartupPrecedence()
+	{
+		using var project = CreateProject();
+		using var settings = new TemporaryDirectory();
+		var environment = CreateSharedSettingsEnvironment(settings.Path);
+
+		await using (var first = await StartAsync(
+			             project.Path,
+			             columns: 160,
+			             rows: 36,
+			             environment,
+			             language: "en"))
+		{
+			await first.WaitForScreenAsync(
+				"PROJECT TREE",
+				cancellationToken: TestContext.Current.CancellationToken);
+
+			await first.SendAsync(":language\r", TestContext.Current.CancellationToken);
+			var overview = await first.WaitForScreenAsync(
+				"Current language: en",
+				cancellationToken: TestContext.Current.CancellationToken);
+			foreach (var code in CliChoiceSets.Language.Tokens)
+				Assert.Contains(code, overview, StringComparison.Ordinal);
+			await first.SendEscapeAsync(TestContext.Current.CancellationToken);
+
+			await first.SendAsync(":language klingon\r", TestContext.Current.CancellationToken);
+			var error = await first.WaitForScreenAsync(
+				"Unknown language code 'klingon'",
+				cancellationToken: TestContext.Current.CancellationToken);
+			Assert.Contains("en ru de", error, StringComparison.Ordinal);
+
+			await first.SendAsync(":language ja\r", TestContext.Current.CancellationToken);
+			await first.WaitForScreenAsync(
+				"言語をjaに切り替えました。",
+				cancellationToken: TestContext.Current.CancellationToken);
+			var japaneseWorkspace = await first.WaitForScreenAsync(
+				"↑/↓ 移動",
+				timeout: TimeSpan.FromSeconds(10),
+				cancellationToken: TestContext.Current.CancellationToken);
+			Assert.Contains("プロジェクトツリー", japaneseWorkspace, StringComparison.Ordinal);
+			Assert.Contains("コンテンツ処理", japaneseWorkspace, StringComparison.Ordinal);
+			await first.SendAsync(":language ", TestContext.Current.CancellationToken);
+			await first.WaitForScreenAsync(
+				"[コード]",
+				cancellationToken: TestContext.Current.CancellationToken);
+			await first.SendEscapeAsync(TestContext.Current.CancellationToken);
+
+			await first.SendAsync(":help\r", TestContext.Current.CancellationToken);
+			var help = await first.WaitForScreenAsync(
+				"ワークスペースコマンド",
+				cancellationToken: TestContext.Current.CancellationToken);
+			Assert.Contains("プロジェクトツリー", help, StringComparison.Ordinal);
+			await first.SendEscapeAsync(TestContext.Current.CancellationToken);
+			await first.SendAsync("\u0010", TestContext.Current.CancellationToken);
+			await first.WaitForScreenAsync(
+				"アクションパレット",
+				cancellationToken: TestContext.Current.CancellationToken);
+			await first.SendAsync("言語を切り替える", TestContext.Current.CancellationToken);
+			var palette = await first.WaitForScreenAsync(
+				"language [code]",
+				cancellationToken: TestContext.Current.CancellationToken);
+			Assert.Contains("言語を切り替える", palette, StringComparison.Ordinal);
+			await first.SendEscapeAsync(TestContext.Current.CancellationToken);
+			await QuitAsync(first);
+		}
+
+		await using (var persisted = await StartAsync(
+			             project.Path,
+			             columns: 160,
+			             rows: 36,
+			             environment,
+			             language: null))
+		{
+			await persisted.WaitForScreenAsync(
+				"プロジェクトツリー",
+				cancellationToken: TestContext.Current.CancellationToken);
+			await QuitAsync(persisted);
+		}
+
+		await using (var overridden = await StartAsync(
+			             project.Path,
+			             columns: 160,
+			             rows: 36,
+			             environment,
+			             language: "ru"))
+		{
+			var russianWorkspace = await overridden.WaitForScreenAsync(
+				"ДЕРЕВО ПРОЕКТА",
+				cancellationToken: TestContext.Current.CancellationToken);
+			Assert.DoesNotContain("プロジェクトツリー", russianWorkspace, StringComparison.Ordinal);
+			await QuitAsync(overridden);
+		}
+
+		await using var restored = await StartAsync(
+			project.Path,
+			columns: 160,
+			rows: 36,
+			environment,
+			language: null);
+		await restored.WaitForScreenAsync(
+			"プロジェクトツリー",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await QuitAsync(restored);
+	}
+
 	[Fact(Timeout = 180_000)]
 	public async Task EveryVerbExecutesInOneLiveWorkspaceWithoutStateDivergence()
 	{
@@ -658,7 +764,7 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		int rows,
 		IReadOnlyDictionary<string, string>? environment = null,
 		bool plain = false,
-		string language = "en")
+		string? language = "en")
 	{
 		var arguments = new List<string>
 		{
@@ -668,10 +774,13 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 			"standard",
 			"--screen",
 			"inline",
-			"--no-mouse",
-			"--language",
-			language
+			"--no-mouse"
 		};
+		if (language is not null)
+		{
+			arguments.Add("--language");
+			arguments.Add(language);
+		}
 		if (plain)
 			arguments.Add("--plain");
 		return TerminalPtyHarness.StartAsync(
