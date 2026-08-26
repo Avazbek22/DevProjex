@@ -191,18 +191,21 @@ internal static class ProjectTreeInventoryScanner
 
 		foreach (var result in subtreeResults)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			if (result.HadAccessDenied)
 				hadAccessDenied = true;
 			if (result.HadScanFailure)
 				hadScanFailure = true;
 
-			MergeSubtree(entries, result);
-			discoveredGitIgnoreMatchers.AddRange(result.DiscoveredGitIgnoreMatchers);
-			discoveredGitTrackedPathIndexes.AddRange(result.DiscoveredGitTrackedPathIndexes);
+			MergeSubtree(entries, result, cancellationToken);
+			AppendRange(discoveredGitIgnoreMatchers, result.DiscoveredGitIgnoreMatchers, cancellationToken);
+			AppendRange(discoveredGitTrackedPathIndexes, result.DiscoveredGitTrackedPathIndexes, cancellationToken);
 		}
 
-		var uniqueMatchers = MergeDiscoveredGitIgnoreMatchers(discoveredGitIgnoreMatchers);
-		var uniqueTrackedPathIndexes = MergeDiscoveredGitTrackedPathIndexes(discoveredGitTrackedPathIndexes);
+		var uniqueMatchers = MergeDiscoveredGitIgnoreMatchers(discoveredGitIgnoreMatchers, cancellationToken);
+		var uniqueTrackedPathIndexes = MergeDiscoveredGitTrackedPathIndexes(
+			discoveredGitTrackedPathIndexes,
+			cancellationToken);
 		return new ProjectTreeInventorySnapshot(
 			entries,
 			rootAccessDenied,
@@ -364,8 +367,10 @@ internal static class ProjectTreeInventoryScanner
 
 	private static void MergeSubtree(
 		List<ProjectTreeInventoryEntry> targetEntries,
-		SubtreeScanResult subtree)
+		SubtreeScanResult subtree,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		if (subtree.Entries.Count == 0)
 			return;
 
@@ -385,6 +390,7 @@ internal static class ProjectTreeInventoryScanner
 
 		for (var localIndex = 1; localIndex < subtree.Entries.Count; localIndex++)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			var entry = subtree.Entries[localIndex];
 			entry = RemapSubtreeEntry(entry, rootGlobalIndex, globalBaseIndex);
 			targetEntries.Add(entry);
@@ -454,45 +460,73 @@ internal static class ProjectTreeInventoryScanner
 	}
 
 	private static IReadOnlyList<ScopedGitIgnoreMatcher> MergeDiscoveredGitIgnoreMatchers(
-		IReadOnlyList<ScopedGitIgnoreMatcher> matchers)
+		IReadOnlyList<ScopedGitIgnoreMatcher> matchers,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		if (matchers.Count <= 1)
 			return matchers;
 
 		var unique = new Dictionary<string, ScopedGitIgnoreMatcher>(PathComparer.Default);
 		foreach (var matcher in matchers)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
 			unique[matcher.ScopeRootPath] = matcher;
+		}
 
 		var merged = unique.Values.ToList();
-		merged.Sort(static (left, right) =>
-		{
-			var depth = left.ScopeRootPath.Length.CompareTo(right.ScopeRootPath.Length);
-			return depth != 0
-				? depth
-				: PathComparer.Default.Compare(left.ScopeRootPath, right.ScopeRootPath);
-		});
+		CancellationAwareSort.Sort(
+			merged,
+			static (left, right) =>
+			{
+				var depth = left.ScopeRootPath.Length.CompareTo(right.ScopeRootPath.Length);
+				return depth != 0
+					? depth
+					: PathComparer.Default.Compare(left.ScopeRootPath, right.ScopeRootPath);
+			},
+			cancellationToken);
 		return merged;
 	}
 
 	private static IReadOnlyList<GitTrackedPathIndex> MergeDiscoveredGitTrackedPathIndexes(
-		IReadOnlyList<GitTrackedPathIndex> indexes)
+		IReadOnlyList<GitTrackedPathIndex> indexes,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		if (indexes.Count <= 1)
 			return indexes;
 
 		var unique = new Dictionary<string, GitTrackedPathIndex>(PathComparer.Default);
 		foreach (var index in indexes)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
 			unique[index.RepositoryRootPath] = index;
+		}
 
 		var merged = unique.Values.ToList();
-		merged.Sort(static (left, right) =>
-		{
-			var depth = left.RepositoryRootPath.Length.CompareTo(right.RepositoryRootPath.Length);
-			return depth != 0
-				? depth
-				: PathComparer.Default.Compare(left.RepositoryRootPath, right.RepositoryRootPath);
-		});
+		CancellationAwareSort.Sort(
+			merged,
+			static (left, right) =>
+			{
+				var depth = left.RepositoryRootPath.Length.CompareTo(right.RepositoryRootPath.Length);
+				return depth != 0
+					? depth
+					: PathComparer.Default.Compare(left.RepositoryRootPath, right.RepositoryRootPath);
+			},
+			cancellationToken);
 		return merged;
+	}
+
+	private static void AppendRange<T>(
+		List<T> target,
+		IReadOnlyList<T> source,
+		CancellationToken cancellationToken)
+	{
+		foreach (var item in source)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			target.Add(item);
+		}
 	}
 
 	private static void MarkAccessDenied(List<ProjectTreeInventoryEntry> entries, int index)
