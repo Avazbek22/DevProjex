@@ -26,6 +26,19 @@ public sealed class McpTreeDepthProjectionTests
 		Assert.Empty(current.Children);
 	}
 
+	[Fact]
+	public void PruneToDepthWithCancellationStopsDuringProjection()
+	{
+		using var cancellation = new CancellationTokenSource();
+		var child = CreateNode(1, []);
+		var root = CreateNode(
+			0,
+			new CancelOnReadList<TreeNodeDescriptor>([child], cancellation));
+
+		Assert.Throws<OperationCanceledException>(() =>
+			DevProjexMcpTools.PruneToDepthWithCancellation(root, 1, cancellation.Token));
+	}
+
 	private static TreeNodeDescriptor CreateNode(
 		int depth,
 		IReadOnlyList<TreeNodeDescriptor> children)
@@ -38,5 +51,26 @@ public sealed class McpTreeDepthProjectionTests
 			IsAccessDenied: false,
 			IconKey: "folder",
 			children);
+	}
+
+	private sealed class CancelOnReadList<T>(
+		IReadOnlyList<T> items,
+		CancellationTokenSource cancellation) : IReadOnlyList<T>
+	{
+		public int Count => items.Count;
+
+		public T this[int index]
+		{
+			get
+			{
+				var item = items[index];
+				cancellation.Cancel();
+				return item;
+			}
+		}
+
+		public IEnumerator<T> GetEnumerator() => items.GetEnumerator();
+
+		System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
 	}
 }

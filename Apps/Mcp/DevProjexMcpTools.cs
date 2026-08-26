@@ -63,7 +63,10 @@ internal sealed class DevProjexMcpTools(
 			var depth = arguments.OptionalInteger("max_depth", 0, 1_000);
 			var renderedTree = depth is null
 				? plan.ProjectedTree
-				: PruneToDepth(plan.ProjectedTree, depth.Value);
+				: PruneToDepthWithCancellation(
+					plan.ProjectedTree,
+					depth.Value,
+					cancellationToken);
 			using var treeWriter = new McpBoundedLineTextWriter(MaximumTreeLines);
 			try
 			{
@@ -494,16 +497,24 @@ internal sealed class DevProjexMcpTools(
 			$"{McpErrorCodes.InvalidArguments}: invalid format '{token}'. Valid values: text, markdown, json, xml.")
 	};
 
-	internal static TreeNodeDescriptor PruneToDepth(TreeNodeDescriptor node, int remainingDepth)
+	internal static TreeNodeDescriptor PruneToDepth(TreeNodeDescriptor node, int remainingDepth) =>
+		PruneToDepthWithCancellation(node, remainingDepth, CancellationToken.None);
+
+	internal static TreeNodeDescriptor PruneToDepthWithCancellation(
+		TreeNodeDescriptor node,
+		int remainingDepth,
+		CancellationToken cancellationToken)
 	{
 		ArgumentNullException.ThrowIfNull(node);
 		ArgumentOutOfRangeException.ThrowIfNegative(remainingDepth);
+		cancellationToken.ThrowIfCancellationRequested();
 
 		var stack = new Stack<TreeDepthFrame>();
 		stack.Push(new TreeDepthFrame(node, remainingDepth));
 		TreeNodeDescriptor? result = null;
 		while (stack.Count > 0)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			var frame = stack.Peek();
 			if (frame.RemainingDepth > 0 && frame.NextChildIndex < frame.Node.Children.Count)
 			{
