@@ -79,7 +79,11 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 		return tool;
 	}
 
-	private static JsonElement ParseSchema(string json) => JsonDocument.Parse(json).RootElement.Clone();
+	private static JsonElement ParseSchema(string json)
+	{
+		using var document = JsonDocument.Parse(json);
+		return document.RootElement.Clone();
+	}
 
 	private const string EmptyInput = """
 	{
