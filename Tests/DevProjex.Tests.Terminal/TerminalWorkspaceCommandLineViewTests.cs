@@ -29,11 +29,37 @@ public sealed class TerminalWorkspaceCommandLineViewTests
 		Assert.Contains(message, GetResultText(view), StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public void GhostUpdatesSynchronouslyWhenCursorMoves()
+	{
+		using var view = new TerminalWorkspaceCommandLineView(
+			null!,
+			static (_, _) => new TerminalWorkspaceCommandCompletion([], "y", null),
+			static key => key,
+			new TerminalCommandHistory(),
+			plain: false,
+			useUnicode: true)
+		{
+			Frame = new Rectangle(0, 0, 40, 1)
+		};
+
+		view.Open("cop");
+		var input = GetField<TerminalTransparentTextEditor>(view, "_input");
+		var ghost = GetField<TerminalLiteralLabel>(view, "_ghost");
+		Assert.True(ghost.Visible);
+
+		input.InsertionPoint = 0;
+
+		Assert.False(ghost.Visible);
+	}
+
 	private static string GetResultText(TerminalWorkspaceCommandLineView view)
 	{
-		var field = typeof(TerminalWorkspaceCommandLineView).GetField(
-			"_result",
-			BindingFlags.Instance | BindingFlags.NonPublic);
-		return Assert.IsType<TerminalLiteralLabel>(field?.GetValue(view)).Text?.ToString() ?? string.Empty;
+		return GetField<TerminalLiteralLabel>(view, "_result").Text?.ToString() ?? string.Empty;
 	}
+
+	private static T GetField<T>(TerminalWorkspaceCommandLineView view, string name) where T : class =>
+		Assert.IsType<T>(typeof(TerminalWorkspaceCommandLineView)
+			.GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)?
+			.GetValue(view));
 }

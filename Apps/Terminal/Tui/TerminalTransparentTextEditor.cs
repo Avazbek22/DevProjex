@@ -24,6 +24,7 @@ internal sealed class TerminalTransparentTextEditor : View
 	}
 
 	public event EventHandler? ValueChanged;
+	public event EventHandler? InsertionPointChanged;
 	public event Action<Key>? KeyPressed;
 
 	public string Value
@@ -53,6 +54,7 @@ internal sealed class TerminalTransparentTextEditor : View
 				return;
 			_insertionPoint = next;
 			EnsureCursorVisible();
+			InsertionPointChanged?.Invoke(this, EventArgs.Empty);
 			InvalidateEditor();
 		}
 	}
