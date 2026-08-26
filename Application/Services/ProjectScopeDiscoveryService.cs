@@ -222,7 +222,7 @@ public sealed class ProjectScopeDiscoveryService(
 				selectedRootFolders,
 				rootFactsCache,
 				cancellationToken);
-			discoveryStamp = rootFactsCache.CreateDiscoveryStamp();
+			discoveryStamp = rootFactsCache.CreateDiscoveryStamp(cancellationToken);
 		}
 		catch
 		{
@@ -839,14 +839,23 @@ public sealed class ProjectScopeDiscoveryService(
 			return facts;
 		}
 
-		public ScopeDiscoveryStamp CreateDiscoveryStamp()
+		public ScopeDiscoveryStamp CreateDiscoveryStamp(CancellationToken cancellationToken)
 		{
-			return new ScopeDiscoveryStamp(
-				_facts
-					.Select(static pair => new { pair.Key, Facts = pair.Value.Value })
-					.OrderBy(static pair => pair.Key, PathComparer.Default)
-					.Select(static pair => ProjectRootFactsStamp.Capture(pair.Key, pair.Facts))
-					.ToArray());
+			var captured = new List<ProjectRootFactsStamp>(_facts.Count);
+			foreach (var pair in _facts)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				captured.Add(ProjectRootFactsStamp.Capture(
+					pair.Key,
+					pair.Value.Value,
+					cancellationToken));
+			}
+
+			CancellationAwareSort.Sort(
+				captured,
+				(left, right) => PathComparer.Default.Compare(left.Path, right.Path),
+				cancellationToken);
+			return new ScopeDiscoveryStamp(captured);
 		}
 	}
 
@@ -870,11 +879,12 @@ public sealed class ProjectScopeDiscoveryService(
 						provider.GetWithCancellation(
 							expected.Path,
 							forceRefresh: true,
-							cancellationToken));
+							cancellationToken),
+						cancellationToken);
 					observedFacts[expected.Path] = observed;
 				}
 
-				if (!expected.IsEquivalentTo(observed))
+				if (!expected.IsEquivalentTo(observed, cancellationToken))
 					return false;
 			}
 
@@ -889,14 +899,28 @@ public sealed class ProjectScopeDiscoveryService(
 		IReadOnlyList<ProjectRootEntryStamp> Entries,
 		ProjectRootFileSignature? GitIgnoreSignature)
 	{
-		public static ProjectRootFactsStamp Capture(string path, ProjectRootFacts facts)
+		public static ProjectRootFactsStamp Capture(
+			string path,
+			ProjectRootFacts facts,
+			CancellationToken cancellationToken)
 		{
 			var entries = new List<ProjectRootEntryStamp>(facts.Files.Count + facts.Directories.Count);
-			entries.AddRange(facts.Files.Select(static file =>
-				new ProjectRootEntryStamp(file.Name, IsDirectory: false, file.IsReparsePoint)));
-			entries.AddRange(facts.Directories.Select(static directory =>
-				new ProjectRootEntryStamp(directory.Name, IsDirectory: true, directory.IsReparsePoint)));
-			entries.Sort(ProjectRootEntryStampComparer.Instance);
+			foreach (var file in facts.Files)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				entries.Add(new ProjectRootEntryStamp(file.Name, IsDirectory: false, file.IsReparsePoint));
+			}
+
+			foreach (var directory in facts.Directories)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				entries.Add(new ProjectRootEntryStamp(directory.Name, IsDirectory: true, directory.IsReparsePoint));
+			}
+
+			CancellationAwareSort.Sort(
+				entries,
+				ProjectRootEntryStampComparer.Instance,
+				cancellationToken);
 
 			return new ProjectRootFactsStamp(
 				path,
@@ -906,12 +930,26 @@ public sealed class ProjectScopeDiscoveryService(
 				facts.GitIgnoreSignature);
 		}
 
-		public bool IsEquivalentTo(ProjectRootFactsStamp other)
+		public bool IsEquivalentTo(
+			ProjectRootFactsStamp other,
+			CancellationToken cancellationToken)
 		{
-			return Exists == other.Exists &&
-			       IsAccessible == other.IsAccessible &&
-			       Nullable.Equals(GitIgnoreSignature, other.GitIgnoreSignature) &&
-			       Entries.SequenceEqual(other.Entries);
+			if (Exists != other.Exists ||
+			    IsAccessible != other.IsAccessible ||
+			    !Nullable.Equals(GitIgnoreSignature, other.GitIgnoreSignature) ||
+			    Entries.Count != other.Entries.Count)
+			{
+				return false;
+			}
+
+			for (var index = 0; index < Entries.Count; index++)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				if (!Entries[index].Equals(other.Entries[index]))
+					return false;
+			}
+
+			return true;
 		}
 	}
 
