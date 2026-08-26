@@ -1432,7 +1432,12 @@ public sealed class RepoCacheService : IRepoCacheService
 			await GitRepositoryService
 				.WaitForExitOrTerminateAsync(process, cancellationToken)
 				.ConfigureAwait(false);
-			await Task.WhenAll(output, error).ConfigureAwait(false);
+			if (!await GitProcessOutputReader
+				    .WaitForCompletionAfterExitAsync(process, output, error)
+				    .ConfigureAwait(false))
+			{
+				return null;
+			}
 			var standardOutput = await output.ConfigureAwait(false);
 			var standardError = await error.ConfigureAwait(false);
 			return process.ExitCode == 0 &&
@@ -1444,7 +1449,7 @@ public sealed class RepoCacheService : IRepoCacheService
 		catch (OperationCanceledException)
 		{
 			await GitProcessOutputReader
-				.ObserveCompletionAsync(output, error)
+				.ObserveAfterTerminationAsync(process, output, error)
 				.ConfigureAwait(false);
 			throw;
 		}
