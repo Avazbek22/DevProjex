@@ -1194,11 +1194,7 @@ public sealed class TreeExportService
 		}
 
 		if (!IsStructuredTreeOrder(ordered, cancellationToken))
-		{
-			cancellationToken.ThrowIfCancellationRequested();
-			ordered.Sort(CompareStructuredTreeNodes);
-			cancellationToken.ThrowIfCancellationRequested();
-		}
+			CancellationAwareSort.Sort(ordered, CompareStructuredTreeNodes, cancellationToken);
 
 		return ordered;
 	}
