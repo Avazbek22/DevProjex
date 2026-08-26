@@ -165,19 +165,18 @@ internal sealed class TerminalTransparentTextEditor : View
 	{
 		var width = Math.Max(1, Viewport.Width);
 		var runes = _value.EnumerateRunes().ToArray();
-		_scrollOffset = Math.Clamp(_scrollOffset, 0, runes.Length);
-		if (_insertionPoint < _scrollOffset)
-			_scrollOffset = _insertionPoint;
-		while (_scrollOffset < _insertionPoint &&
-		       Columns(runes, _scrollOffset, _insertionPoint) >= width)
+		var insertionPoint = Math.Clamp(_insertionPoint, 0, runes.Length);
+		var columns = 0;
+		var offset = insertionPoint;
+		while (offset > 0)
 		{
-			_scrollOffset++;
+			var nextColumns = Math.Max(0, runes[offset - 1].GetColumns());
+			if (columns + nextColumns >= width)
+				break;
+			columns += nextColumns;
+			offset--;
 		}
-		while (_scrollOffset > 0 &&
-		       Columns(runes, _scrollOffset - 1, _insertionPoint) < width)
-		{
-			_scrollOffset--;
-		}
+		_scrollOffset = offset;
 	}
 
 	private string GetVisibleText()
@@ -189,7 +188,7 @@ internal sealed class TerminalTransparentTextEditor : View
 		var columns = 0;
 		foreach (var rune in _value.EnumerateRunes().Skip(_scrollOffset))
 		{
-			var runeColumns = rune.ToString().GetColumns();
+			var runeColumns = Math.Max(0, rune.GetColumns());
 			if (columns + runeColumns > width)
 				break;
 			builder.Append(rune);
@@ -227,7 +226,7 @@ internal sealed class TerminalTransparentTextEditor : View
 		     index < Math.Clamp(end, 0, runes.Count);
 		     index++)
 		{
-			columns += runes[index].ToString().GetColumns();
+			columns += Math.Max(0, runes[index].GetColumns());
 		}
 		return columns;
 	}
