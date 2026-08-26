@@ -38,6 +38,12 @@ maps by retaining their selected values as checked entries; all other rows use c
 defaults consistently across surfaces. Explicit CLI fields are exact for that invocation
 and never mutate the stored maps.
 
+Desktop batches pending local-profile snapshots under one project-profile store lock
+when the window closes. The batch retains the existing atomic file-replacement format
+and has a ten-second shutdown budget; if contention outlives that budget, the last
+durable profile data remains intact and the unsaved snapshots are logged rather than
+blocking application exit indefinitely.
+
 The Hide Secrets content-transformation state is stored separately from path
 Exclusions and remains off in the built-in `standard` profile. Individual
 keep-as-is decisions are session-only: profiles never store secret fingerprints,

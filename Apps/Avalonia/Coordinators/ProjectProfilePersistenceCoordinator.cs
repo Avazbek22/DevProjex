@@ -2,6 +2,15 @@ using DevProjex.Application.Models;
 
 namespace DevProjex.Avalonia.Coordinators;
 
+public readonly record struct ProjectProfileFlushResult(
+	bool GateAcquired,
+	int Attempted,
+	int Saved,
+	int Remaining)
+{
+	public bool Succeeded => GateAcquired && Remaining == 0;
+}
+
 public sealed class ProjectProfilePersistenceCoordinator(
     MainWindowViewModel viewModel,
     SelectionSyncCoordinator selectionCoordinator,
@@ -184,7 +193,8 @@ public sealed class ProjectProfilePersistenceCoordinator(
 			_ => ProjectProfileLookupStatus.InvalidStorage
 		};
 
-    public void FlushPending() => _pendingWrites.Flush(CanPersistNormalizedPath);
+	public ProjectProfileFlushResult FlushPending(TimeSpan timeout) =>
+		_pendingWrites.Flush(timeout, CanPersistNormalizedPath);
 
     private bool IsApplicable(string? currentPath)
     {
@@ -283,6 +293,7 @@ public sealed class ProjectProfilePersistenceCoordinator(
 
 internal sealed class PendingProjectProfileWriteQueue(IProjectProfileStore profileStore)
 {
+	private static readonly TimeSpan DefaultFlushTimeout = TimeSpan.FromSeconds(5);
     private readonly Dictionary<string, PendingProfileWrite> _pending =
         new(PathComparer.Default);
 
@@ -346,7 +357,7 @@ internal sealed class PendingProjectProfileWriteQueue(IProjectProfileStore profi
 		DateTimeOffset updatedUtc,
 		Func<string, bool>? canPersist)
 	{
-		FlushCore(canPersist);
+		FlushCore(canPersist, DefaultFlushTimeout);
         var normalizedPath = Path.GetFullPath(projectPath);
 		if (canPersist is not null && !canPersist(normalizedPath))
 			return;
@@ -361,12 +372,24 @@ internal sealed class PendingProjectProfileWriteQueue(IProjectProfileStore profi
             updatedUtc);
     }
 
-	public void Flush(Func<string, bool>? canPersist = null)
+	public void Flush(Func<string, bool>? canPersist = null) =>
+		_ = Flush(DefaultFlushTimeout, canPersist);
+
+	public ProjectProfileFlushResult Flush(
+		TimeSpan timeout,
+		Func<string, bool>? canPersist = null)
 	{
-		_gate.Wait();
+		ArgumentOutOfRangeException.ThrowIfLessThan(timeout, TimeSpan.Zero);
+		var startedTimestamp = Stopwatch.GetTimestamp();
+		if (!_gate.Wait(timeout))
+			return new ProjectProfileFlushResult(false, 0, 0, -1);
+
 		try
 		{
-			FlushCore(canPersist);
+			var remaining = timeout - Stopwatch.GetElapsedTime(startedTimestamp);
+			if (remaining < TimeSpan.Zero)
+				remaining = TimeSpan.Zero;
+			return FlushCore(canPersist, remaining);
 		}
 		finally
 		{
@@ -374,23 +397,31 @@ internal sealed class PendingProjectProfileWriteQueue(IProjectProfileStore profi
 		}
 	}
 
-	private void FlushCore(Func<string, bool>? canPersist)
+	private ProjectProfileFlushResult FlushCore(
+		Func<string, bool>? canPersist,
+		TimeSpan lockTimeout)
 	{
-        foreach (var (path, pending) in _pending.ToArray())
-        {
-			if (canPersist is not null && !canPersist(path))
-				continue;
-            if (!profileStore.TrySaveProfile(
-                    path,
-                    ProjectSelectionProfileBuilder.Clone(pending.Profile),
-                    pending.UpdatedUtc))
-            {
-                continue;
-            }
+		var requests = _pending
+			.Where(entry => canPersist is null || canPersist(entry.Key))
+			.Select(static entry => new ProjectProfileSaveRequest(
+				entry.Key,
+				ProjectSelectionProfileBuilder.Clone(entry.Value.Profile),
+				entry.Value.UpdatedUtc))
+			.ToArray();
+		if (requests.Length == 0)
+			return new ProjectProfileFlushResult(true, 0, 0, _pending.Count);
 
-            _pending.Remove(path);
-        }
-    }
+		var result = profileStore.TrySaveProfilesWithResult(requests, lockTimeout);
+		var savedPaths = result.SavedProjectPaths.ToHashSet(PathComparer.Default);
+		foreach (var path in savedPaths)
+			_pending.Remove(path);
+
+		return new ProjectProfileFlushResult(
+			true,
+			requests.Length,
+			savedPaths.Count,
+			_pending.Count);
+	}
 
     private sealed record PendingProfileWrite(
         ProjectSelectionProfile Profile,
