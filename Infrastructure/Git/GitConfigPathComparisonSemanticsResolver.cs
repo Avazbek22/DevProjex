@@ -305,7 +305,7 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 		{
 		}
 		GitProcessOutputReader
-			.ObserveCompletionAsync(output, error)
+			.ObserveAfterTerminationAsync(process, output, error)
 			.GetAwaiter()
 			.GetResult();
 	}

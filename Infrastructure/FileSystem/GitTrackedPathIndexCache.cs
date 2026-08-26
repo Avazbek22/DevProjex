@@ -222,13 +222,19 @@ internal static class GitTrackedPathIndexCache
 			await GitRepositoryService
 				.WaitForExitOrTerminateAsync(process, timeoutSource.Token)
 				.ConfigureAwait(false);
+			if (!await GitProcessOutputReader
+				    .WaitForCompletionAfterExitAsync(process, trackedPathsTask, errorDrainTask)
+				    .ConfigureAwait(false))
+			{
+				return null;
+			}
 			trackedPaths = await trackedPathsTask.ConfigureAwait(false);
 			await errorDrainTask.ConfigureAwait(false);
 		}
 		catch (OperationCanceledException)
 		{
 			await GitProcessOutputReader
-				.ObserveCompletionAsync(trackedPathsTask, errorDrainTask)
+				.ObserveAfterTerminationAsync(process, trackedPathsTask, errorDrainTask)
 				.ConfigureAwait(false);
 			throw;
 		}
