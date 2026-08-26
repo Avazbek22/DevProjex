@@ -2271,7 +2271,7 @@ public partial class MainWindow : Window
 
     private static void OpenExternalLink(string url)
     {
-        Process.Start(new ProcessStartInfo
+        using var process = Process.Start(new ProcessStartInfo
         {
             FileName = url,
             UseShellExecute = true

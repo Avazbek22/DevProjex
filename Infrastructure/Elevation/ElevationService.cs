@@ -35,7 +35,7 @@ public sealed class ElevationService : IElevationService
 				exePath,
 				ProcessEntryPointResolver.ResolveManagedAssemblyPath(),
 				ProcessEntryPointResolver.ResolveCurrentAppHostPath());
-			Process.Start(psi);
+			using var process = Process.Start(psi);
 			return true;
 		}
 		catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
