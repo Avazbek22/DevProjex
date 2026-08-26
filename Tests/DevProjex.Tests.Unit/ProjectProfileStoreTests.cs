@@ -3,6 +3,35 @@ namespace DevProjex.Tests.Unit;
 public sealed class ProjectProfileStoreTests
 {
 	[Fact]
+	public void TrySaveProfilesWithResult_PersistsEveryProfileInOneBatch()
+	{
+		using var temporary = new TemporaryDirectory();
+		var firstProject = temporary.CreateFolder("first");
+		var secondProject = temporary.CreateFolder("second");
+		var store = CreateStore(temporary.Path);
+		var updatedUtc = DateTimeOffset.UtcNow;
+
+		var result = store.TrySaveProfilesWithResult(
+			[
+				new ProjectProfileSaveRequest(
+					firstProject,
+					new ProjectSelectionProfile([], [".cs"], []),
+					updatedUtc),
+				new ProjectProfileSaveRequest(
+					secondProject,
+					new ProjectSelectionProfile([], [".json"], []),
+					updatedUtc)
+			],
+			TimeSpan.FromSeconds(1));
+
+		Assert.Equal(2, result.SavedProjectPaths.Count);
+		Assert.True(store.TryLoadProfile(firstProject, out var first));
+		Assert.True(store.TryLoadProfile(secondProject, out var second));
+		Assert.Equal([".cs"], first.SelectedExtensions);
+		Assert.Equal([".json"], second.SelectedExtensions);
+	}
+
+	[Fact]
 	public void SelectedPathsRoundTripSignificantWhitespace()
 	{
 		using var temporary = new TemporaryDirectory();

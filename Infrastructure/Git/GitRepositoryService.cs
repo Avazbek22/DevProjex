@@ -826,13 +826,15 @@ public sealed class GitRepositoryService : IGitRepositoryService
         try
         {
             await WaitForExitOrTerminateAsync(process, cancellationToken);
-            await Task.WhenAll(outputPump, errorPump).ConfigureAwait(false);
+            _ = await GitProcessOutputReader
+                .WaitForCompletionAfterExitAsync(process, outputPump, errorPump)
+                .ConfigureAwait(false);
             progressObserver?.ThrowIfFaulted();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             await GitProcessOutputReader
-                .ObserveCompletionAsync(outputPump, errorPump)
+                .ObserveAfterTerminationAsync(process, outputPump, errorPump)
                 .ConfigureAwait(false);
             throw;
         }

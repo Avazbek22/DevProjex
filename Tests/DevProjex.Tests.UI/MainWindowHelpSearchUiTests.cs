@@ -104,7 +104,7 @@ public sealed class MainWindowHelpSearchUiTests
             help.SearchBoxControl.Text = "no-such-help-search-result-4f22";
             await UiTestDriver.WaitForConditionAsync(
                 window,
-                () => help.SearchMatchCount == 0,
+                () => help.SearchMatchCount == 0 && matchSummary.IsVisible,
                 "empty help search result");
             Assert.True(previousButton.IsEnabled);
             Assert.True(nextButton.IsEnabled);

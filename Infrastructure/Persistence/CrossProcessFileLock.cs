@@ -48,12 +48,14 @@ internal static class CrossProcessFileLock
                     FileShare.None);
                 return new HeldLock(stream);
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-				if (Stopwatch.GetElapsedTime(startedTimestamp) >= timeout)
+			catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+			{
+				var elapsed = Stopwatch.GetElapsedTime(startedTimestamp);
+				if (elapsed >= timeout)
                     throw;
 
-                Thread.Sleep(RetryDelay);
+				var remaining = timeout - elapsed;
+				Thread.Sleep(remaining < RetryDelay ? remaining : RetryDelay);
             }
         }
     }

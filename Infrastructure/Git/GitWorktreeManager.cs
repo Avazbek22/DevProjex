@@ -392,7 +392,12 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 			await GitRepositoryService
 				.WaitForExitOrTerminateAsync(process, cancellationToken)
 				.ConfigureAwait(false);
-			await Task.WhenAll(outputTask, errorTask).ConfigureAwait(false);
+			if (!await GitProcessOutputReader
+				    .WaitForCompletionAfterExitAsync(process, outputTask, errorTask)
+				    .ConfigureAwait(false))
+			{
+				return new GitProcessResult(-1, string.Empty, "Git process output did not close after exit.");
+			}
 			var output = await outputTask.ConfigureAwait(false);
 			var error = await errorTask.ConfigureAwait(false);
 			return output.ExceededLimit || error.ExceededLimit
@@ -402,7 +407,7 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 		catch (OperationCanceledException)
 		{
 			await GitProcessOutputReader
-				.ObserveCompletionAsync(outputTask, errorTask)
+				.ObserveAfterTerminationAsync(process, outputTask, errorTask)
 				.ConfigureAwait(false);
 
 			throw;

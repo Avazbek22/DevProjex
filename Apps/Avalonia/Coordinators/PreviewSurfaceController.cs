@@ -71,6 +71,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 	private bool _previewMarkerScrollBarAllowAutoHide;
 	private bool _previewMarkerScrollBarInteractionActive;
 	private bool _previewMarkerRailPointerOver;
+	private Point? _previewMarkerPointerPosition;
     private double _stickyHeaderScrollBarInset = -1;
 	private Vector? _pendingRedactionViewportOffset;
 	private PersistentSecretMarkId? _pendingMarkedSecretId;
@@ -195,6 +196,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 		object? sender,
 		PointerEventArgs e)
 	{
+		_previewMarkerPointerPosition = e.GetPosition(_window);
 		UpdatePreviewMarkerRailPointerState(IsPointerWithinPreviewScrollBar(e));
 		if (ReferenceEquals(_previewMarkerDragPointer, e.Pointer) &&
 		    e.GetCurrentPoint(_controls.TextScrollViewer).Properties.IsLeftButtonPressed)
@@ -212,12 +214,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 			return;
 		}
 
-		var markerTarget = _controls.MarkerBar.FindTargetAt(e.GetPosition(_controls.MarkerBar));
-		SetPreviewMarkerCursor(
-			markerTarget is not null || _previewMarkerRailPointerOver
-				? e.Source as InputElement
-				: null,
-			isDragging: markerTarget is null && _previewMarkerRailPointerOver);
+		RefreshPreviewMarkerCursor();
 	}
 
 	private void OnPreviewMarkerPointerReleased(
@@ -229,12 +226,8 @@ internal sealed class PreviewSurfaceController : IDisposable
 
 		UpdatePreviewMarkerRailPointerState(IsPointerWithinPreviewScrollBar(e));
 		EndPreviewMarkerDrag(releaseCapture: true);
-		var markerTarget = _controls.MarkerBar.FindTargetAt(e.GetPosition(_controls.MarkerBar));
-		SetPreviewMarkerCursor(
-			markerTarget is not null || _previewMarkerRailPointerOver
-				? e.Source as InputElement
-				: null,
-			isDragging: markerTarget is null && _previewMarkerRailPointerOver);
+		_previewMarkerPointerPosition = e.GetPosition(_window);
+		RefreshPreviewMarkerCursor();
 		e.Handled = true;
 	}
 
@@ -341,8 +334,33 @@ internal sealed class PreviewSurfaceController : IDisposable
 		object? sender,
 		PointerEventArgs e)
 	{
+		_previewMarkerPointerPosition = null;
 		UpdatePreviewMarkerRailPointerState(pointerOver: false);
 		SetPreviewMarkerCursor(null);
+	}
+
+	private void RefreshPreviewMarkerCursor()
+	{
+		if (_previewMarkerDragPointer is not null)
+		{
+			SetPreviewMarkerCursor(_controls.TextScrollViewer, isDragging: true);
+			return;
+		}
+
+		if (_previewMarkerPointerPosition is not { } pointerPosition ||
+		    _window.TranslatePoint(pointerPosition, _controls.MarkerBar) is not { } markerPosition)
+		{
+			SetPreviewMarkerCursor(null);
+			return;
+		}
+
+		var markerTarget = _controls.MarkerBar.FindTargetAt(markerPosition);
+		var cursorTarget = markerTarget is not null || _previewMarkerRailPointerOver
+			? _window.InputHitTest(pointerPosition) as InputElement
+			: null;
+		SetPreviewMarkerCursor(
+			cursorTarget,
+			isDragging: markerTarget is null && _previewMarkerRailPointerOver);
 	}
 
 	private void SetPreviewMarkerCursor(
@@ -381,8 +399,11 @@ internal sealed class PreviewSurfaceController : IDisposable
 
     private void OnTextScrollViewerLayoutUpdated(object? sender, EventArgs e)
     {
-        if (!_disposed)
-            UpdateStickyHeaderScrollBarInset();
+		if (_disposed)
+			return;
+
+		UpdateStickyHeaderScrollBarInset();
+		RefreshPreviewMarkerCursor();
     }
 
 	private async void OnManualSecretMarkRejected(

@@ -3091,12 +3091,26 @@ internal sealed class SecretFileRedactionPlan(
 	public async ValueTask WriteToAsync(
 		TextWriter destination,
 		string content,
+		CancellationToken cancellationToken) =>
+		await WriteToAsync(destination, content, content.Length, cancellationToken)
+			.ConfigureAwait(false);
+
+	public async ValueTask WriteToAsync(
+		TextWriter destination,
+		string content,
+		int sourceLength,
 		CancellationToken cancellationToken)
 	{
+		ArgumentOutOfRangeException.ThrowIfNegative(sourceLength);
+		ArgumentOutOfRangeException.ThrowIfGreaterThan(sourceLength, content.Length);
 		var sourceOffset = 0;
 		foreach (var replacement in Replacements)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
+			if (replacement.SourceStart >= sourceLength)
+				break;
+			if (replacement.SourceEnd > sourceLength)
+				throw new InvalidOperationException("A redaction span crosses the requested output boundary.");
 			await destination.WriteAsync(
 					content.AsMemory(sourceOffset, replacement.SourceStart - sourceOffset),
 					cancellationToken)
@@ -3115,6 +3129,8 @@ internal sealed class SecretFileRedactionPlan(
 			}
 			sourceOffset = replacement.SourceEnd;
 		}
-		await destination.WriteAsync(content.AsMemory(sourceOffset), cancellationToken).ConfigureAwait(false);
+		await destination.WriteAsync(
+			content.AsMemory(sourceOffset, sourceLength - sourceOffset),
+			cancellationToken).ConfigureAwait(false);
 	}
 }

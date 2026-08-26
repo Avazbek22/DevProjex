@@ -75,14 +75,31 @@ public sealed class PreviewSearchIndexTests
 	[Theory]
 	[InlineData("")]
 	[InlineData("   ")]
+	[InlineData("x")]
+	[InlineData("🙂")]
 	[InlineData("two\nlines")]
-	public void Find_RejectsEmptyOrMultilineQueryWithoutReadingDocument(string query)
+	public void Find_RejectsShortOrMultilineQueryWithoutReadingDocument(string query)
 	{
 		using var document = new TrackingDocument(["two lines"]);
 
 		var result = PreviewSearchIndex.Find(
 			document,
 			query,
+			TestContext.Current.CancellationToken);
+
+		Assert.Empty(result.Matches);
+		Assert.False(result.IsCapped);
+		Assert.Equal(0, document.LineReadCount);
+	}
+
+	[Fact]
+	public void Find_OneCharacterQueryDoesNotScanLargeDocument()
+	{
+		using var document = new RepeatedLineDocument(1_000_000, "x");
+
+		var result = PreviewSearchIndex.Find(
+			document,
+			"x",
 			TestContext.Current.CancellationToken);
 
 		Assert.Empty(result.Matches);

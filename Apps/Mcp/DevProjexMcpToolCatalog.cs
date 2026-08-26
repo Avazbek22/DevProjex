@@ -222,7 +222,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	  "type": "object",
 	  "properties": {
 	    {{ProjectProperty}},
-	    "pattern": { "type": "string", "minLength": 1, "description": "A .NET regular expression evaluated against redacted text with a 2-second timeout." },
+	    "pattern": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "A .NET regular expression evaluated against redacted text with a 2-second timeout." },
 	    {{IncludeProperty}},
 	    {{ExcludeProperty}},
 	    {{TrackedOnlyProperty}},

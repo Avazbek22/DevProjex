@@ -80,6 +80,15 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 	}
 
 	public bool HasExited => _exit.Task.IsCompleted;
+	public long PeakWorkingSetBytes
+	{
+		get
+		{
+			using var process = Process.GetProcessById(_process.ProcessId);
+			process.Refresh();
+			return process.PeakWorkingSet64;
+		}
+	}
 	public string RawOutput => CaptureRawOutput();
 	public int Columns
 	{

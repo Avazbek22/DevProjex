@@ -108,7 +108,7 @@ public sealed class TextFileExportServiceTests
 		var service = new TextFileExportService();
 		await using var stream = new MemoryStream();
 
-		await Assert.ThrowsAsync<ArgumentNullException>(() => service.WriteAsync(stream, null!, cancellationToken: TestContext.Current.CancellationToken));
+		await Assert.ThrowsAsync<ArgumentNullException>(() => service.WriteAsync(stream, (string)null!, cancellationToken: TestContext.Current.CancellationToken));
 	}
 
 	[Fact]

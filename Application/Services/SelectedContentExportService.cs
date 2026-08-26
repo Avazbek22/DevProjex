@@ -65,6 +65,39 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			displayRootPath,
 			outputPathRedaction);
 
+	public async Task WriteAsync(
+		Stream destination,
+		IEnumerable<string> filePaths,
+		CancellationToken cancellationToken,
+		Func<string, string>? displayPathMapper,
+		ContentTransformationContext? transformationContext = null,
+		string? displayRootPath = null,
+		OutputPathRedactionDecision? outputPathRedaction = null)
+	{
+		ArgumentNullException.ThrowIfNull(destination);
+		if (!destination.CanWrite)
+			throw new InvalidOperationException("Target stream must be writable.");
+
+		await using var writer = new StreamWriter(
+			destination,
+			new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+			bufferSize: 20 * 1024,
+			leaveOpen: true);
+		var output = new StreamingSelectedContentOutput(writer);
+		_ = await BuildCoreAsync(
+			filePaths,
+			cancellationToken,
+			displayPathMapper,
+			maxFileCount: null,
+			maxFileSizeForFullRead: null,
+			maxOutputCharacters: null,
+			transformationContext,
+			publishCompressionSnapshot: true,
+			displayRootPath,
+			outputPathRedaction,
+			output).ConfigureAwait(false);
+	}
+
 	public async Task<string> BuildBoundedPreviewAsync(
 		IEnumerable<string> filePaths,
 		int maxFileCount,
@@ -102,7 +135,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		ContentTransformationContext? transformationContext,
 		bool publishCompressionSnapshot,
 		string? displayRootPath = null,
-		OutputPathRedactionDecision? outputPathRedaction = null)
+		OutputPathRedactionDecision? outputPathRedaction = null,
+		SelectedContentOutput? destination = null)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 
@@ -132,7 +166,7 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		using var transformationScope = transformationContext?.BeginOutput(files, cancellationToken);
 		var redactionScope = transformationScope?.Redaction;
 
-		var sb = new StringBuilder();
+		var output = destination ?? new MaterializedSelectedContentOutput();
 		bool anyWritten = false;
 
 		var processedFileCount = 0;
@@ -230,14 +264,16 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			processedFileCount++;
 			if (!anyWritten && !string.IsNullOrWhiteSpace(displayRootPath))
 			{
-				sb.AppendLine($"{SingleLineTextEscaping.Escape(displayRootPath)}:");
-				AppendClipboardBlankLine(sb);
-				AppendClipboardBlankLine(sb);
+				await output.AppendLineAsync(
+					$"{SingleLineTextEscaping.Escape(displayRootPath)}:",
+					cancellationToken).ConfigureAwait(false);
+				await AppendClipboardBlankLineAsync(output, cancellationToken).ConfigureAwait(false);
+				await AppendClipboardBlankLineAsync(output, cancellationToken).ConfigureAwait(false);
 			}
 			if (anyWritten)
 			{
-				AppendClipboardBlankLine(sb);
-				AppendClipboardBlankLine(sb);
+				await AppendClipboardBlankLineAsync(output, cancellationToken).ConfigureAwait(false);
+				await AppendClipboardBlankLineAsync(output, cancellationToken).ConfigureAwait(false);
 			}
 
 			anyWritten = true;
@@ -246,16 +282,18 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 				.ResolvePath(rawDisplayPath, outputPathRedaction)
 				.Text;
 			displayPath = SingleLineTextEscaping.Escape(displayPath);
-			sb.AppendLine($"{displayPath}:");
-			AppendClipboardBlankLine(sb);
+			await output.AppendLineAsync($"{displayPath}:", cancellationToken).ConfigureAwait(false);
+			await AppendClipboardBlankLineAsync(output, cancellationToken).ConfigureAwait(false);
 
 			if (content.IsEmpty)
 			{
-				sb.AppendLine(NoContentMarker);
+				await output.AppendLineAsync(NoContentMarker, cancellationToken).ConfigureAwait(false);
 			}
 			else if (content.IsWhitespaceOnly)
 			{
-				sb.AppendLine($"{WhitespaceMarkerPrefix}{content.SizeBytes}{WhitespaceMarkerSuffix}");
+				await output.AppendLineAsync(
+					$"{WhitespaceMarkerPrefix}{content.SizeBytes}{WhitespaceMarkerSuffix}",
+					cancellationToken).ConfigureAwait(false);
 			}
 			else
 			{
@@ -268,19 +306,25 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 					sourceLength--;
 				if (redactionPlan is null)
 				{
-					sb.Append(transformedText.AsSpan(0, sourceLength));
-					sb.AppendLine();
+					await output.AppendAsync(
+						transformedText.AsMemory(0, sourceLength),
+						cancellationToken).ConfigureAwait(false);
+					await output.AppendLineAsync(string.Empty, cancellationToken).ConfigureAwait(false);
 				}
 				else
 				{
-					redactionPlan.AppendTo(sb, transformedText, sourceLength);
-					sb.AppendLine();
+					await output.AppendRedactedAsync(
+						redactionPlan,
+						transformedText,
+						sourceLength,
+						cancellationToken).ConfigureAwait(false);
+					await output.AppendLineAsync(string.Empty, cancellationToken).ConfigureAwait(false);
 				}
 			}
 
-			if (maxOutputCharacters is { } characterLimit && sb.Length >= characterLimit)
+			if (maxOutputCharacters is { } characterLimit && output.Length >= characterLimit)
 			{
-				sb.Length = characterLimit;
+				output.Truncate(characterLimit);
 				break;
 			}
 		}
@@ -296,7 +340,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		}
 		if (publishCompressionSnapshot)
 			transformationScope?.Compression?.Complete();
-		var textOutput = anyWritten ? sb.ToString().TrimEnd('\r', '\n') : string.Empty;
+		await output.CompleteAsync(cancellationToken).ConfigureAwait(false);
+		var textOutput = anyWritten ? output.GetMaterializedText() : string.Empty;
 
 		return new SelectedContentExportResult(textOutput, snapshot);
 	}
@@ -358,5 +403,128 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		}
 	}
 
-	private static void AppendClipboardBlankLine(StringBuilder sb) => sb.AppendLine(ClipboardBlankLine);
+	private static ValueTask AppendClipboardBlankLineAsync(
+		SelectedContentOutput output,
+		CancellationToken cancellationToken) =>
+		output.AppendLineAsync(ClipboardBlankLine, cancellationToken);
+
+	private abstract class SelectedContentOutput
+	{
+		public abstract int Length { get; }
+		public abstract ValueTask AppendAsync(
+			ReadOnlyMemory<char> value,
+			CancellationToken cancellationToken);
+
+		public async ValueTask AppendLineAsync(
+			string value,
+			CancellationToken cancellationToken)
+		{
+			if (value.Length > 0)
+				await AppendAsync(value.AsMemory(), cancellationToken).ConfigureAwait(false);
+			await AppendAsync(Environment.NewLine.AsMemory(), cancellationToken).ConfigureAwait(false);
+		}
+
+		public abstract ValueTask AppendRedactedAsync(
+			SecretFileRedactionPlan plan,
+			string content,
+			int sourceLength,
+			CancellationToken cancellationToken);
+		public abstract void Truncate(int length);
+		public abstract ValueTask CompleteAsync(CancellationToken cancellationToken);
+		public abstract string GetMaterializedText();
+	}
+
+	private sealed class MaterializedSelectedContentOutput : SelectedContentOutput
+	{
+		private readonly StringBuilder _builder = new();
+		public override int Length => _builder.Length;
+
+		public override ValueTask AppendAsync(
+			ReadOnlyMemory<char> value,
+			CancellationToken cancellationToken)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			_builder.Append(value.Span);
+			return ValueTask.CompletedTask;
+		}
+
+		public override ValueTask AppendRedactedAsync(
+			SecretFileRedactionPlan plan,
+			string content,
+			int sourceLength,
+			CancellationToken cancellationToken)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			plan.AppendTo(_builder, content, sourceLength);
+			return ValueTask.CompletedTask;
+		}
+
+		public override void Truncate(int length) => _builder.Length = length;
+		public override ValueTask CompleteAsync(CancellationToken cancellationToken) =>
+			ValueTask.CompletedTask;
+		public override string GetMaterializedText() => _builder.ToString().TrimEnd('\r', '\n');
+	}
+
+	private sealed class StreamingSelectedContentOutput(TextWriter writer) : SelectedContentOutput
+	{
+		private readonly TrailingLineEndingTextWriter _output = new(writer);
+		public override int Length => _output.Length;
+
+		public override ValueTask AppendAsync(
+			ReadOnlyMemory<char> value,
+			CancellationToken cancellationToken) =>
+			new(_output.WriteAsync(value, cancellationToken));
+
+		public override ValueTask AppendRedactedAsync(
+			SecretFileRedactionPlan plan,
+			string content,
+			int sourceLength,
+			CancellationToken cancellationToken) =>
+			plan.WriteToAsync(_output, content, sourceLength, cancellationToken);
+
+		public override void Truncate(int length) =>
+			throw new NotSupportedException("Streaming output cannot be truncated.");
+		public override ValueTask CompleteAsync(CancellationToken cancellationToken) =>
+			_output.CompleteAsync(cancellationToken);
+		public override string GetMaterializedText() => string.Empty;
+	}
+
+	private sealed class TrailingLineEndingTextWriter(TextWriter inner) : TextWriter
+	{
+		private readonly StringBuilder _trailing = new(2);
+		public override Encoding Encoding => inner.Encoding;
+		public int Length { get; private set; }
+
+		public override async Task WriteAsync(
+			ReadOnlyMemory<char> buffer,
+			CancellationToken cancellationToken = default)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var contentLength = buffer.Length;
+			while (contentLength > 0 && buffer.Span[contentLength - 1] is '\r' or '\n')
+				contentLength--;
+
+			if (contentLength > 0)
+			{
+				if (_trailing.Length > 0)
+				{
+					await inner.WriteAsync(
+						_trailing.ToString().AsMemory(),
+						cancellationToken).ConfigureAwait(false);
+					_trailing.Clear();
+				}
+				await inner.WriteAsync(buffer[..contentLength], cancellationToken).ConfigureAwait(false);
+			}
+
+			if (contentLength < buffer.Length)
+				_trailing.Append(buffer.Span[contentLength..]);
+			Length = checked(Length + buffer.Length);
+		}
+
+		public async ValueTask CompleteAsync(CancellationToken cancellationToken)
+		{
+			_trailing.Clear();
+			await inner.FlushAsync(cancellationToken).ConfigureAwait(false);
+		}
+	}
 }

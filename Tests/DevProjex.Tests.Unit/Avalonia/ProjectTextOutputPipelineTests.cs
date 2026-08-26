@@ -1,4 +1,5 @@
 using DevProjex.Application.Compression;
+using DevProjex.Application.Preview;
 using DevProjex.Application.Secrets;
 using DevProjex.Infrastructure.Secrets;
 
@@ -6,6 +7,53 @@ namespace DevProjex.Tests.Unit.Avalonia;
 
 public sealed class ProjectTextOutputPipelineTests
 {
+	[Theory]
+	[InlineData((int)ProjectTextOutputMode.Content)]
+	[InlineData((int)ProjectTextOutputMode.TreeAndContent)]
+	public async Task BuildDocumentAsync_LargeFileBackedOutputMatchesLegacyBytes(int modeValue)
+	{
+		using var project = new TemporaryDirectory();
+		var sourceFile = Path.Combine(project.Path, "large.txt");
+		var content = string.Concat(
+			Enumerable.Repeat("ASCII\r\nПривет🙂\rline\n", 32_000)) +
+			"tail";
+		await File.WriteAllTextAsync(
+			sourceFile,
+			content,
+			new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+			TestContext.Current.CancellationToken);
+		var root = DirectoryNode(project.Path, FileNode(sourceFile));
+		var snapshot = CreateSnapshot(
+			project.Path,
+			root,
+			new HashSet<string>(PathComparer.Default));
+		var pipeline = CreatePipeline();
+		var mode = (ProjectTextOutputMode)modeValue;
+
+		var legacy = await pipeline.BuildAsync(
+			mode,
+			snapshot,
+			TestContext.Current.CancellationToken);
+		using var streamed = await pipeline.BuildDocumentAsync(
+			mode,
+			snapshot,
+			TestContext.Current.CancellationToken);
+		Assert.IsType<FileBackedPreviewTextDocument>(streamed.Document);
+		await using var legacyBytes = new MemoryStream();
+		await using var streamedBytes = new MemoryStream();
+		var writer = new TextFileExportService();
+		await writer.WriteAsync(
+			legacyBytes,
+			legacy.Content,
+			TestContext.Current.CancellationToken);
+		await writer.WriteAsync(
+			streamedBytes,
+			streamed.Document,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(legacyBytes.ToArray(), streamedBytes.ToArray());
+	}
+
 	[Fact]
 	public async Task BuildAsync_ContentUsesTheOriginalPerFilePathFormat()
 	{
@@ -224,7 +272,9 @@ public sealed class ProjectTextOutputPipelineTests
         return new ProjectTextOutputPipeline(
             treeExport,
             contentExport,
-            new TreeAndContentExportService(treeExport, contentExport));
+			new TreeAndContentExportService(treeExport, contentExport),
+			new PreviewDocumentBuilder(new FileContentAnalyzer()),
+			new TextFileExportService());
     }
 
     private static ProjectTextOutputSnapshot CreateSnapshot(

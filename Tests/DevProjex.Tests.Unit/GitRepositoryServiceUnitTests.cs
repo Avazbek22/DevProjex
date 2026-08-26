@@ -108,6 +108,26 @@ public class GitRepositoryServiceUnitTests
 	}
 
 	[Fact]
+	public async Task ExitedProcessOutputDrainClosesStuckReadersWithinTheBoundedCleanup()
+	{
+		var reader = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var closeCount = 0;
+
+		var drainedNormally = await GitProcessOutputReader.WaitForCompletionAfterExitAsync(
+			() =>
+			{
+				Interlocked.Increment(ref closeCount);
+				reader.TrySetException(new IOException("Pipe closed."));
+			},
+			TimeSpan.FromMilliseconds(50),
+			reader.Task);
+
+		Assert.False(drainedNormally);
+		Assert.Equal(1, closeCount);
+		Assert.True(reader.Task.IsFaulted);
+	}
+
+	[Fact]
 	public async Task WorktreeSupportProbe_FaultedProbeIsRetriedOnNextRequest()
 	{
 		var calls = 0;

@@ -20,4 +20,9 @@ public interface IPreviewTextDocument : IDisposable
     string GetLineText(int lineNumber);
 
     string GetLineRangeText(int firstLine, int lastLine);
+
+	ValueTask WriteToAsync(
+		Stream destination,
+		CancellationToken cancellationToken = default) =>
+		PreviewTextStreamWriter.WriteAsync(destination, GetFullText(), cancellationToken);
 }

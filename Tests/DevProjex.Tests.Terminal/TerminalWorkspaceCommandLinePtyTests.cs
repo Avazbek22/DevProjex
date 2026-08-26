@@ -25,6 +25,33 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		await QuitAsync(terminal);
 	}
 
+	[Fact(Timeout = 240_000)]
+	public async Task CopyCommandRejectsAnOversizedDocumentBeforeStringMaterialization()
+	{
+		using var project = CreateOversizedCopyProject();
+		await using var terminal = await StartAsync(project.Path, columns: 120, rows: 30);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			timeout: TimeSpan.FromSeconds(45),
+			cancellationToken: TestContext.Current.CancellationToken);
+		var peakBefore = terminal.PeakWorkingSetBytes;
+		var stopwatch = Stopwatch.StartNew();
+
+		await terminal.SendAsync(":copy content text\r", TestContext.Current.CancellationToken);
+		var result = await terminal.WaitForScreenAsync(
+			"Use :export instead",
+			timeout: TimeSpan.FromSeconds(75),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains("too large", result, StringComparison.OrdinalIgnoreCase);
+		Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(75));
+		Assert.True(
+			terminal.PeakWorkingSetBytes - peakBefore < 192L * 1024 * 1024,
+			"The copy path allocated memory proportional to the oversized UTF-16 payload.");
+		Assert.False(terminal.HasExited);
+		await QuitAsync(terminal);
+	}
+
 	[Fact(Timeout = 120_000)]
 	public async Task AnalyzeCommandPublishesEveryMetricOnOneResultLine()
 	{
@@ -664,6 +691,32 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 			"src/App.cs",
 			"const string ApiKey = \"ghp_a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL\";");
 		project.WriteFile("readme.md", "# Command line test");
+		return project;
+	}
+
+	private static TemporaryDirectory CreateOversizedCopyProject()
+	{
+		var project = new TemporaryDirectory();
+		project.WriteFile("global.json", "{}");
+		var path = Path.Combine(project.Path, "oversized.txt");
+		var targetBytes = TerminalWorkspaceController.MaximumClipboardPayloadBytes /
+		                  sizeof(char) + 1024;
+		var buffer = Enumerable.Repeat((byte)'x', 80 * 1024).ToArray();
+		for (var index = 4095; index < buffer.Length; index += 4096)
+			buffer[index] = (byte)'\n';
+		using var stream = new FileStream(
+			path,
+			FileMode.CreateNew,
+			FileAccess.Write,
+			FileShare.None,
+			buffer.Length,
+			FileOptions.SequentialScan);
+		for (long written = 0; written < targetBytes;)
+		{
+			var count = (int)Math.Min(buffer.Length, targetBytes - written);
+			stream.Write(buffer, 0, count);
+			written += count;
+		}
 		return project;
 	}
 

@@ -95,6 +95,31 @@ public sealed class McpRootRegistry
 		return physical;
 	}
 
+	internal string? FindLexicalRoot(string path)
+	{
+		string fullPath;
+		try
+		{
+			fullPath = Path.GetFullPath(path);
+		}
+		catch (Exception exception) when (
+			exception is ArgumentException or NotSupportedException or PathTooLongException)
+		{
+			return null;
+		}
+
+		return _roots
+			.Where(root => IsWithin(root, fullPath))
+			.OrderByDescending(static root => root.Length)
+			.FirstOrDefault();
+	}
+
+	internal void EnsureOpenedPathIsWithin(string projectRoot, string requestedPath, string openedPath)
+	{
+		if (!IsWithin(projectRoot, Path.GetFullPath(openedPath)))
+			throw RootViolation(requestedPath);
+	}
+
 	public static string ResolvePhysicalExistingPath(string path, bool requireDirectory)
 	{
 		var fullPath = Path.GetFullPath(path);

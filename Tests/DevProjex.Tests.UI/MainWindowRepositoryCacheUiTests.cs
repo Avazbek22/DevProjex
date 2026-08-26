@@ -269,7 +269,7 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 				await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
 				var deleteButton = await OpenAndFindDeleteButtonAsync(window, comboBox, removed);
 
-				await UiTestDriver.ClickAsync(window, deleteButton);
+				await UiTestDriver.RaiseButtonClickAsync(deleteButton);
 				await UiTestDriver.WaitForConditionAsync(
 					window,
 					() => viewModel.CachedRepositories.Count == 1,

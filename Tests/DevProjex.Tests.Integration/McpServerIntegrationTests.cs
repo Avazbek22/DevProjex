@@ -105,6 +105,9 @@ public sealed class McpServerIntegrationTests
 		var searchBoolean = tools.Single(static tool => tool.Name == "search_project")
 			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("ignore_case");
 		Assert.Equal(2, searchBoolean.GetProperty("oneOf").GetArrayLength());
+		var searchPattern = tools.Single(static tool => tool.Name == "search_project")
+			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("pattern");
+		Assert.Equal(4096, searchPattern.GetProperty("maxLength").GetInt32());
 		foreach (var name in new[] { "analyze", "pack_context" })
 		{
 			var detail = tools.Single(tool => tool.Name == name)
@@ -156,6 +159,34 @@ public sealed class McpServerIntegrationTests
 		{
 			Directory.Delete(project);
 			Directory.Move(original, project);
+		}
+	}
+
+	[Fact]
+	public async Task GetFileRejectsAProjectFileReplacedByAnOutsideSymlink()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var sourcePath = Path.Combine(project, "source.txt");
+		var outsidePath = Path.Combine(workspace.Path, "outside.txt");
+		File.WriteAllText(outsidePath, "outside content");
+		File.WriteAllText(sourcePath, "inside content");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		File.Delete(sourcePath);
+		CreateFileAliasOrSkip(sourcePath, outsidePath);
+		try
+		{
+			var result = await server.CallAsync(
+				"get_file",
+				new Dictionary<string, object?> { ["path"] = "source.txt" });
+
+			Assert.True(result.IsError);
+			Assert.Contains(McpErrorCodes.RootViolation, Text(result), StringComparison.Ordinal);
+		}
+		finally
+		{
+			File.Delete(sourcePath);
 		}
 	}
 
@@ -244,6 +275,26 @@ public sealed class McpServerIntegrationTests
 		Assert.True(expired.IsError);
 		Assert.Null(expired.StructuredContent);
 		Assert.Contains(McpErrorCodes.PackExpired, Text(expired), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task SearchProjectRejectsPatternsLongerThanTheSchemaLimitAtRuntime()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "source.txt"), "content");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?>
+			{
+				["pattern"] = new string('x', McpSearchRegex.MaximumPatternLength + 1)
+			});
+
+		Assert.True(result.IsError);
+		Assert.Contains(McpErrorCodes.InvalidPattern, Text(result), StringComparison.Ordinal);
+		Assert.Contains("4096", Text(result), StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -827,6 +878,19 @@ public sealed class McpServerIntegrationTests
 			{
 			}
 			Assert.Skip("Windows junction creation is unavailable.");
+		}
+	}
+
+	private static void CreateFileAliasOrSkip(string linkPath, string targetPath)
+	{
+		try
+		{
+			File.CreateSymbolicLink(linkPath, targetPath);
+		}
+		catch (Exception exception) when (
+			exception is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
+		{
+			Assert.Skip($"File symbolic links are unavailable: {exception.GetType().Name}.");
 		}
 	}
 

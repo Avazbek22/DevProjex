@@ -11,6 +11,7 @@ public partial class MainWindow : Window
 {
     private const double BranchMenuItemHeight = 32;
     private const double TreeFontMenuItemHeight = 32;
+	private static readonly TimeSpan ShutdownPersistenceBudget = TimeSpan.FromSeconds(10);
 
     internal enum TerminalCommandPostInstallUiAction
     {
@@ -995,7 +996,8 @@ public partial class MainWindow : Window
         // Give persistence one last synchronous chance before the process exits.
         // This protects against transient IO failures that would otherwise make the UI look correct
         // during the session but leave no durable snapshot for the next launch.
-        _appearanceSettings.PersistPendingChanges();
+		var startedTimestamp = Stopwatch.GetTimestamp();
+		_appearanceSettings.PersistPendingChanges();
 
         if (_recentProjectsDb.RecentFolders.Count > 0 ||
             _recentProjectsDb.RecentFolderRemovals.Count > 0 ||
@@ -1004,7 +1006,16 @@ public partial class MainWindow : Window
             _recentProjectsStore.TryPersist(_recentProjectsDb);
         }
 
-        _projectProfiles.FlushPending();
+		var remaining = ShutdownPersistenceBudget - Stopwatch.GetElapsedTime(startedTimestamp);
+		if (remaining < TimeSpan.Zero)
+			remaining = TimeSpan.Zero;
+		var result = _projectProfiles.FlushPending(remaining);
+		if (!result.Succeeded)
+		{
+			Trace.TraceWarning(
+				$"Project profile shutdown persistence was incomplete: " +
+				$"attempted={result.Attempted}, saved={result.Saved}, remaining={result.Remaining}.");
+		}
     }
 
     private async Task<bool> TryOpenFolderAsync(

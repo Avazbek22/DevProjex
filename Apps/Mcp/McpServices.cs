@@ -36,8 +36,11 @@ internal sealed class McpServices : IDisposable
 	public CodeCompressionSession CompressionSession { get; }
 	public SecretRedactionOutputPreparer OutputPreparer { get; }
 
-	public static McpServices Create(Func<string>? appDataPathProvider = null)
+	public static McpServices Create(
+		McpRootRegistry roots,
+		Func<string>? appDataPathProvider = null)
 	{
+		ArgumentNullException.ThrowIfNull(roots);
 		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);
 		var scanner = new FileSystemScanner();
 		var treeBuilder = new TreeBuilder();
@@ -57,7 +60,8 @@ internal sealed class McpServices : IDisposable
 			new DartArtifactsIgnoreRule()
 		]);
 		var treeExport = new TreeExportService();
-		var contentAnalyzer = new FileContentAnalyzer();
+		var guardedFileOpener = new McpRootJailFileStreamOpener(roots);
+		var contentAnalyzer = new FileContentAnalyzer(guardedFileOpener.OpenRead);
 		var resolvedDataPath = appDataPathProvider ??
 		                       DevProjex.Infrastructure.Persistence.UserDataPathResolver.GetConfigurationRoot;
 		var profileStore = new ProjectProfileStore(resolvedDataPath);

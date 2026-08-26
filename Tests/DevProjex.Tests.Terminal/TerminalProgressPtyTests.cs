@@ -73,6 +73,14 @@ public sealed class TerminalProgressPtyTests
 		Assert.Contains("Esc or Ctrl+C", active, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 
+		await terminal.SendAsync(":\u001bOP\u0010", TestContext.Current.CancellationToken);
+		await Task.Delay(150, TestContext.Current.CancellationToken);
+		var gated = terminal.CaptureScreen();
+		Assert.Contains("Esc or Ctrl+C", gated, StringComparison.Ordinal);
+		Assert.DoesNotContain("Filter actions:", gated, StringComparison.Ordinal);
+		Assert.DoesNotContain(":set", gated, StringComparison.Ordinal);
+		Assert.DoesNotContain("ACTION PALETTE", gated, StringComparison.Ordinal);
+
 		await terminal.SendCtrlCAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"Operation canceled",
@@ -80,6 +88,14 @@ public sealed class TerminalProgressPtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.False(Directory.Exists(destination));
 		Assert.False(terminal.HasExited);
+		await terminal.WaitForScreenAsync(
+			"> CONTEXT PREVIEW",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync(":", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			":set",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"> CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);

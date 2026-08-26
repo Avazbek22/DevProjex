@@ -91,6 +91,96 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		ProjectSelectionProfile profile) =>
 		TrySaveProfileWithResult(localProjectPath, profile, DateTimeOffset.UtcNow);
 
+	public ProjectProfileBatchSaveResult TrySaveProfilesWithResult(
+		IReadOnlyList<ProjectProfileSaveRequest> requests,
+		TimeSpan lockTimeout)
+	{
+		ArgumentNullException.ThrowIfNull(requests);
+		ArgumentOutOfRangeException.ThrowIfLessThan(lockTimeout, TimeSpan.Zero);
+		if (requests.Count == 0)
+			return new ProjectProfileBatchSaveResult([]);
+
+		var preparedByPath = new Dictionary<string, PreparedProfileWrite>(PathComparer.Default);
+		foreach (var request in requests)
+		{
+			if (!TryNormalizePath(request.LocalProjectPath, out var normalizedPath))
+				continue;
+
+			var normalizedUpdatedUtc = NormalizeProfileTimestamp(request.UpdatedUtc);
+			var persistedProfile = ToPersistedProfile(
+				request.Profile,
+				normalizedUpdatedUtc,
+				out var wasTruncated);
+			if (wasTruncated)
+				continue;
+
+			if (!preparedByPath.TryGetValue(normalizedPath, out var previous) ||
+			    previous.UpdatedUtc <= normalizedUpdatedUtc)
+			{
+				preparedByPath[normalizedPath] = new PreparedProfileWrite(
+					normalizedPath,
+					persistedProfile,
+					normalizedUpdatedUtc);
+			}
+		}
+
+		if (preparedByPath.Count == 0)
+			return new ProjectProfileBatchSaveResult([]);
+
+		var startedTimestamp = Stopwatch.GetTimestamp();
+		if (!Monitor.TryEnter(_sync, lockTimeout))
+			return new ProjectProfileBatchSaveResult([]);
+
+		try
+		{
+			var remaining = lockTimeout - Stopwatch.GetElapsedTime(startedTimestamp);
+			if (remaining < TimeSpan.Zero)
+				remaining = TimeSpan.Zero;
+			var fileSet = GetFileSet();
+			if (!CrossProcessFileLock.TryAcquire(fileSet, remaining, out var heldLock))
+				return new ProjectProfileBatchSaveResult([]);
+
+			using var _ = heldLock;
+			if (HasOversizedDocument(fileSet) ||
+			    JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
+			{
+				return new ProjectProfileBatchSaveResult([]);
+			}
+
+			var db = LoadInternal(fileSet, persistRecovery: false);
+			db.SchemaVersion = CurrentSchemaVersion;
+			var alreadySaved = new List<string>();
+			var changedPaths = new List<string>();
+			foreach (var write in preparedByPath.Values)
+			{
+				if (db.Profiles.TryGetValue(write.NormalizedPath, out var existing) &&
+				    existing is not null &&
+				    existing.UpdatedUtc > write.UpdatedUtc)
+				{
+					alreadySaved.Add(write.NormalizedPath);
+					continue;
+				}
+
+				db.Profiles[write.NormalizedPath] = write.Profile;
+				changedPaths.Add(write.NormalizedPath);
+			}
+
+			if (changedPaths.Count == 0)
+				return new ProjectProfileBatchSaveResult(alreadySaved);
+
+			PruneProfiles(db);
+			if (!TrySaveInternal(fileSet, db))
+				return new ProjectProfileBatchSaveResult(alreadySaved);
+
+			alreadySaved.AddRange(changedPaths.Where(db.Profiles.ContainsKey));
+			return new ProjectProfileBatchSaveResult(alreadySaved);
+		}
+		finally
+		{
+			Monitor.Exit(_sync);
+		}
+	}
+
 	private ProjectProfileSaveResult TrySaveProfileWithResult(
 		string localProjectPath,
 		ProjectSelectionProfile profile,
@@ -307,11 +397,13 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			path,
 			ProjectProfileStorageLimits.MaximumJsonBytes);
 
-	private ProjectProfileDb LoadInternal(JsonStoreFileSet fileSet)
+	private ProjectProfileDb LoadInternal(
+		JsonStoreFileSet fileSet,
+		bool persistRecovery = true)
 	{
 		if (TryLoadFromPath(fileSet.PrimaryPath, out var primaryDb, out var primaryRequiresRewrite))
 		{
-			if (primaryRequiresRewrite)
+			if (primaryRequiresRewrite && persistRecovery)
 				TrySaveInternal(fileSet, primaryDb);
 
 			return primaryDb;
@@ -320,7 +412,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		// Recover from the last known-good snapshot when the primary profile document becomes unreadable.
 		if (TryLoadFromPath(fileSet.BackupPath, out var backupDb, out _))
 		{
-			TrySaveInternal(fileSet, backupDb);
+			if (persistRecovery)
+				TrySaveInternal(fileSet, backupDb);
 			return backupDb;
 		}
 
@@ -531,6 +624,11 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		timestamp <= DateTimeOffset.UnixEpoch || timestamp > MaximumSafeProfileTimestamp
 			? DateTimeOffset.UnixEpoch.AddTicks(1)
 			: timestamp;
+
+	private sealed record PreparedProfileWrite(
+		string NormalizedPath,
+		PersistedProjectProfile Profile,
+		DateTimeOffset UpdatedUtc);
 
 	private static ProjectSelectionProfile ToProfile(
 		PersistedProjectProfile profile,

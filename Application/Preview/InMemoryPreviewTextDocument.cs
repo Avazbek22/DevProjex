@@ -30,6 +30,11 @@ public sealed class InMemoryPreviewTextDocument : IPreviewTextDocument
 
     public string GetFullText() => _text;
 
+	public ValueTask WriteToAsync(
+		Stream destination,
+		CancellationToken cancellationToken = default) =>
+		PreviewTextStreamWriter.WriteAsync(destination, _text, cancellationToken);
+
     public string GetLineText(int lineNumber)
     {
         if (_text.Length == 0)

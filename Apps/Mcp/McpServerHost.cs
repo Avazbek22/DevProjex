@@ -33,7 +33,7 @@ public static class McpServerHost
 		ArgumentNullException.ThrowIfNull(output);
 
 		var rootRegistry = new McpRootRegistry(roots);
-		using var services = McpServices.Create(appDataPathProvider);
+		using var services = McpServices.Create(rootRegistry, appDataPathProvider);
 		using var packs = new McpPackRegistry(tempRoot);
 		var projectService = new McpProjectService(rootRegistry, services);
 		var tools = new DevProjexMcpTools(rootRegistry, projectService, packs);

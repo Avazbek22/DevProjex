@@ -10,6 +10,7 @@ public sealed class TerminalWorkspaceController(
 	TerminalServices services,
 	ITerminalEnvironment environment)
 {
+	internal const long MaximumClipboardPayloadBytes = 256L * 1024 * 1024;
 	private const string TrackedIndexUnavailableCode = "DPX-GIT-TRACKED-INDEX-UNAVAILABLE";
 	private static readonly ProjectContextDocumentLimits PreviewLimits = new();
 
@@ -435,7 +436,7 @@ public sealed class TerminalWorkspaceController(
 			cancellationToken);
 	}
 
-	public async Task<string> BuildCopyPayloadAsync(
+	public async Task<string?> BuildCopyPayloadAsync(
 		TerminalWorkspaceState state,
 		ProjectContextView view,
 		ProjectContextDocumentFormat format,
@@ -448,7 +449,15 @@ public sealed class TerminalWorkspaceController(
 				format,
 				cancellationToken)
 			.ConfigureAwait(false);
-		return PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(document);
+		return MaterializeCopyPayload(document);
+	}
+
+	internal static string? MaterializeCopyPayload(IPreviewTextDocument document)
+	{
+		ArgumentNullException.ThrowIfNull(document);
+		return document.CharacterCount > MaximumClipboardPayloadBytes / sizeof(char)
+			? null
+			: PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(document);
 	}
 
 	private async Task<IPreviewTextDocument> BuildInteractivePreviewAsync(

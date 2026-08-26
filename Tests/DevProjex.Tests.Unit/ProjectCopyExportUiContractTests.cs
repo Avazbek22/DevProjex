@@ -108,7 +108,7 @@ public sealed class ProjectCopyExportUiContractTests
             "Avalonia",
             "MainWindow.TextOutput.cs");
         Assert.Contains(
-            "result.Content,\n                snapshot.RootPath,",
+			"result.Document,\n                snapshot.RootPath,",
             source.ReplaceLineEndings("\n"),
             StringComparison.Ordinal);
         var methodStart = source.IndexOf(

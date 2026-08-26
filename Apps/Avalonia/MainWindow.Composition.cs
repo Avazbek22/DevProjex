@@ -1042,7 +1042,9 @@ public partial class MainWindow
         _textOutputPipeline = new ProjectTextOutputPipeline(
             _treeExport,
             _contentExport,
-            services.TreeAndContentExportService);
+			services.TreeAndContentExportService,
+			_previewDocumentBuilder,
+			_textFileExport);
         _selectionCoordinator = new SelectionSyncCoordinator(
             _viewModel,
             _scanOptions,
