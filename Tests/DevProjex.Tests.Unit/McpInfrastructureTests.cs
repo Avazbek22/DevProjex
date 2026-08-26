@@ -515,6 +515,28 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public async Task PackCreationTracksUtf8MetricsAcrossWriteBoundaries()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var registry = new McpPackRegistry(workspace.Path);
+		const string content = "alpha α\r\nemoji 😀\rtail\n";
+		var bytes = Encoding.UTF8.GetBytes(content);
+
+		var pack = await registry.CreateAsync(
+			async (stream, token) =>
+			{
+				for (var index = 0; index < bytes.Length; index++)
+					await stream.WriteAsync(bytes.AsMemory(index, 1), token);
+			},
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(content.Length, pack.Characters);
+		Assert.Equal(4, pack.Lines);
+		Assert.Equal(bytes.Length, pack.Bytes);
+		Assert.Equal(content, await File.ReadAllTextAsync(pack.Path, TestContext.Current.CancellationToken));
+	}
+
+	[Fact]
 	public async Task PackStorageIsPrivateToTheCurrentUnixUser()
 	{
 		if (OperatingSystem.IsWindows())

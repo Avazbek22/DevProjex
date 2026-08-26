@@ -87,6 +87,7 @@ public sealed class McpPackRegistry : IDisposable
 			var reservation = new PackReservation(this);
 			try
 			{
+				PackTextMetrics metrics;
 				await using (var stream = OpenPrivateFile(
 					             path,
 					             FileMode.CreateNew,
@@ -97,10 +98,15 @@ public sealed class McpPackRegistry : IDisposable
 				{
 					await using var bounded = new QuotaWriteStream(stream, reservation);
 					await writer(bounded, cancellationToken).ConfigureAwait(false);
+					metrics = bounded.CompleteMetrics();
 				}
 
-				var (characters, lines) = await MeasureAsync(path, cancellationToken).ConfigureAwait(false);
-				var document = new McpPackDocument(id, path, lines, characters, reservation.Bytes);
+				var document = new McpPackDocument(
+					id,
+					path,
+					metrics.Lines,
+					metrics.Characters,
+					reservation.Bytes);
 				lock (_sync)
 				{
 					ObjectDisposedException.ThrowIf(_disposed, this);
@@ -401,6 +407,13 @@ public sealed class McpPackRegistry : IDisposable
 
 	private sealed class QuotaWriteStream(Stream inner, PackReservation reservation) : Stream
 	{
+		private readonly Decoder _decoder = new UTF8Encoding(false, true).GetDecoder();
+		private readonly char[] _characterBuffer = new char[16 * 1024];
+		private long _characters;
+		private int _lineBreaks;
+		private bool _previousCarriageReturn;
+		private bool _metricsCompleted;
+
 		public override bool CanRead => false;
 		public override bool CanSeek => false;
 		public override bool CanWrite => true;
@@ -420,12 +433,14 @@ public sealed class McpPackRegistry : IDisposable
 		{
 			reservation.Reserve(count);
 			inner.Write(buffer, offset, count);
+			AppendMetrics(buffer.AsSpan(offset, count));
 		}
 
 		public override void Write(ReadOnlySpan<byte> buffer)
 		{
 			reservation.Reserve(buffer.Length);
 			inner.Write(buffer);
+			AppendMetrics(buffer);
 		}
 
 		public override async ValueTask WriteAsync(
@@ -434,16 +449,29 @@ public sealed class McpPackRegistry : IDisposable
 		{
 			reservation.Reserve(buffer.Length);
 			await inner.WriteAsync(buffer, cancellationToken).ConfigureAwait(false);
+			AppendMetrics(buffer.Span);
 		}
 
-		public override Task WriteAsync(
+		public override async Task WriteAsync(
 			byte[] buffer,
 			int offset,
 			int count,
 			CancellationToken cancellationToken)
 		{
 			reservation.Reserve(count);
-			return inner.WriteAsync(buffer, offset, count, cancellationToken);
+			await inner.WriteAsync(buffer, offset, count, cancellationToken).ConfigureAwait(false);
+			AppendMetrics(buffer.AsSpan(offset, count));
+		}
+
+		public PackTextMetrics CompleteMetrics()
+		{
+			if (_metricsCompleted)
+				throw new InvalidOperationException("Pack text metrics have already been completed.");
+			_metricsCompleted = true;
+			Decode([], flush: true);
+			return new PackTextMetrics(
+				_characters,
+				_characters == 0 ? 0 : checked(_lineBreaks + 1));
 		}
 
 		public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
@@ -462,46 +490,54 @@ public sealed class McpPackRegistry : IDisposable
 			await inner.DisposeAsync().ConfigureAwait(false);
 			GC.SuppressFinalize(this);
 		}
-	}
 
-	private static async Task<(long Characters, int Lines)> MeasureAsync(
-		string path,
-		CancellationToken cancellationToken)
-	{
-		using var reader = new StreamReader(
-			path,
-			new UTF8Encoding(false, true),
-			detectEncodingFromByteOrderMarks: false,
-			bufferSize: 16 * 1024);
-		var buffer = new char[16 * 1024];
-		long characters = 0;
-		var lineBreaks = 0;
-		var previousCarriageReturn = false;
-		while (true)
+		private void AppendMetrics(ReadOnlySpan<byte> bytes)
 		{
-			var read = await reader.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false);
-			if (read == 0)
-				break;
-			characters += read;
-			for (var index = 0; index < read; index++)
+			if (_metricsCompleted)
+				throw new InvalidOperationException("Cannot write after pack text metrics are completed.");
+			Decode(bytes, flush: false);
+		}
+
+		private void Decode(ReadOnlySpan<byte> bytes, bool flush)
+		{
+			do
 			{
-				var character = buffer[index];
+				_decoder.Convert(
+					bytes,
+					_characterBuffer,
+					flush,
+					out var bytesUsed,
+					out var charactersUsed,
+					out var completed);
+				bytes = bytes[bytesUsed..];
+				AppendCharacters(_characterBuffer.AsSpan(0, charactersUsed));
+				if (completed)
+					break;
+			} while (!bytes.IsEmpty || flush);
+		}
+
+		private void AppendCharacters(ReadOnlySpan<char> characters)
+		{
+			_characters += characters.Length;
+			foreach (var character in characters)
+			{
 				if (character == '\n')
 				{
-					if (!previousCarriageReturn)
-						lineBreaks++;
-					previousCarriageReturn = false;
+					if (!_previousCarriageReturn)
+						_lineBreaks++;
+					_previousCarriageReturn = false;
 				}
 				else
 				{
 					if (character == '\r')
-						lineBreaks++;
-					previousCarriageReturn = character == '\r';
+						_lineBreaks++;
+					_previousCarriageReturn = character == '\r';
 				}
 			}
 		}
-		return (characters, characters == 0 ? 0 : checked(lineBreaks + 1));
 	}
+
+	private readonly record struct PackTextMetrics(long Characters, int Lines);
 }
 
 public sealed record McpPackDocument(string Id, string Path, int Lines, long Characters, long Bytes);
