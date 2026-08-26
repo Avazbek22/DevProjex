@@ -264,6 +264,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		CancelAndDispose(ref _settingsRefreshCts);
 		CancelAndDispose(ref _previewSearchCts);
 		CancelAndDispose(ref _transientStatusCts);
+		CancelAndDispose(ref _commandResultCts);
 
 		var pending = new[]
 			{

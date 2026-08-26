@@ -52,6 +52,28 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		await QuitAsync(terminal);
 	}
 
+	[Fact(Timeout = 120_000)]
+	public async Task QuitDoesNotWaitForTheCommandResultTimer()
+	{
+		using var project = CreateProject();
+		await using var terminal = await StartAsync(project.Path, columns: 120, rows: 30);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.SendAsync(":unknown-command\r", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Unknown command",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				timeout: TimeSpan.FromSeconds(2),
+				cancellationToken: TestContext.Current.CancellationToken));
+	}
+
 	[Theory(Timeout = 120_000)]
 	[InlineData(160, 40, false)]
 	[InlineData(100, 30, false)]
