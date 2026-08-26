@@ -154,9 +154,12 @@ public sealed class CliExpansionCommandTests
 	}
 
 	[Theory]
-	[InlineData(false)]
-	[InlineData(true)]
-	public async Task TreeTextFileMatchesStreamedStandardOutput(bool plain)
+	[InlineData("text", false)]
+	[InlineData("text", true)]
+	[InlineData("markdown", false)]
+	[InlineData("json", false)]
+	[InlineData("xml", false)]
+	public async Task TreeFileMatchesStreamedStandardOutput(string format, bool plain)
 	{
 		using var project = new TemporaryDirectory();
 		using var data = new TemporaryDirectory();
@@ -168,7 +171,7 @@ public sealed class CliExpansionCommandTests
 		var common = new List<string>
 		{
 			"tree", project.Path,
-			"--format", "text",
+			"--format", format,
 			"--git-mode", "none",
 			"--exclude", "none"
 		};
