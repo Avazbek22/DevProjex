@@ -9,7 +9,7 @@ public static class SingleLineTextEscaping
 	public static string Escape(string value)
 	{
 		ArgumentNullException.ThrowIfNull(value);
-		if (!value.Any(IsUnsafeCharacter))
+		if (!ContainsUnsafeCharacter(value))
 			return value;
 
 		var escaped = new StringBuilder(value.Length);
@@ -69,6 +69,17 @@ public static class SingleLineTextEscaping
 		}
 
 		return true;
+	}
+
+	private static bool ContainsUnsafeCharacter(string value)
+	{
+		foreach (var character in value)
+		{
+			if (IsUnsafeCharacter(character))
+				return true;
+		}
+
+		return false;
 	}
 
 	private static int GetEscapedLength(char character, bool isSurrogatePair) =>
