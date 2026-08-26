@@ -1144,6 +1144,8 @@ internal static class PreviewTextStorageScavenger
         private readonly List<long> _lineOffsets = [];
         private readonly List<int> _lineLengths = [];
         private readonly int _inMemoryThresholdChars;
+        private readonly Encoder _utf8Encoder = Utf8WithoutBom.GetEncoder();
+        private byte[]? _utf8WriteBuffer = ArrayPool<byte>.Shared.Rent(Utf8WriteBufferSize);
         private bool _built;
         private bool _disposed;
         private int _maxLineLength;
@@ -1248,6 +1250,7 @@ internal static class PreviewTextStorageScavenger
 
             var fileLength = _stream.Length;
             _stream.Dispose();
+            ReleaseUtf8WriteBuffer();
 
             if (_characterCount <= _inMemoryThresholdChars)
             {
@@ -1281,6 +1284,7 @@ internal static class PreviewTextStorageScavenger
 
             _disposed = true;
             _stream.Dispose();
+            ReleaseUtf8WriteBuffer();
             DisposeStorageFile();
         }
 
@@ -1289,28 +1293,31 @@ internal static class PreviewTextStorageScavenger
             if (line.Length == 0)
                 return;
 
-            var encoder = Utf8WithoutBom.GetEncoder();
-            var rentedBuffer = ArrayPool<byte>.Shared.Rent(Utf8WriteBufferSize);
-            try
+            var buffer = _utf8WriteBuffer ??
+                         throw new ObjectDisposedException(nameof(PreviewTextStorageBuilder));
+            var remaining = line;
+            bool completed;
+            do
             {
-                var remaining = line;
-                do
-                {
-                    encoder.Convert(
-                        remaining,
-                        rentedBuffer.AsSpan(0, Utf8WriteBufferSize),
-                        flush: true,
-                        out var charsUsed,
-                        out var bytesUsed,
-                        out _);
-                    _stream.Write(rentedBuffer, 0, bytesUsed);
-                    remaining = remaining[charsUsed..];
-                }
-                while (!remaining.IsEmpty);
+                _utf8Encoder.Convert(
+                    remaining,
+                    buffer.AsSpan(0, Utf8WriteBufferSize),
+                    flush: true,
+                    out var charsUsed,
+                    out var bytesUsed,
+                    out completed);
+                _stream.Write(buffer, 0, bytesUsed);
+                remaining = remaining[charsUsed..];
             }
-            finally
+            while (!completed);
+        }
+
+        private void ReleaseUtf8WriteBuffer()
+        {
+            var buffer = Interlocked.Exchange(ref _utf8WriteBuffer, null);
+            if (buffer is not null)
             {
-                ArrayPool<byte>.Shared.Return(rentedBuffer, clearArray: true);
+                ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
             }
         }
 
