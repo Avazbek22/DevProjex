@@ -1,5 +1,7 @@
 using DevProjex.Infrastructure.FileSystem;
 
+using System.Diagnostics;
+
 namespace DevProjex.Tests.Unit.FileSystem;
 
 public sealed class ProjectPathStartInfoFactoryTests
@@ -211,5 +213,59 @@ public sealed class ProjectPathStartInfoFactoryTests
 		Assert.Equal(ProjectPathLaunchFailure.LaunchFailed, result.Failure);
 		Assert.Equal("denied", result.ErrorMessage);
 		Assert.Equal(0, attempts);
+	}
+
+	[Fact]
+	public async Task LaunchCandidateAsync_RedirectedOutputIsDrainedWithoutBlockingProcessExit()
+	{
+		using var temp = new TemporaryDirectory();
+		var startInfo = CreateNoisyProcessStartInfo(temp);
+		var candidate = new ProjectPathLaunchCandidate(
+			startInfo,
+			RequiresSuccessfulExit: true);
+
+		var result = await ProjectPathLauncher
+			.LaunchCandidateAsync(candidate, TestContext.Current.CancellationToken)
+			.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+
+		Assert.True(result);
+	}
+
+	private static ProcessStartInfo CreateNoisyProcessStartInfo(TemporaryDirectory temp)
+	{
+		const int lineCount = 4_000;
+		var startInfo = new ProcessStartInfo
+		{
+			UseShellExecute = false,
+			CreateNoWindow = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true
+		};
+		string scriptPath;
+		if (OperatingSystem.IsWindows())
+		{
+			scriptPath = temp.CreateFile(
+				"noisy-output.cmd",
+				$"@echo off\r\nfor /L %%i in (1,1,{lineCount}) do (\r\n" +
+				"  echo stdout-01234567890123456789012345678901234567890123456789\r\n" +
+				"  echo stderr-01234567890123456789012345678901234567890123456789 1>&2\r\n" +
+				")\r\n");
+			startInfo.FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe";
+			startInfo.ArgumentList.Add("/D");
+			startInfo.ArgumentList.Add("/C");
+		}
+		else
+		{
+			scriptPath = temp.CreateFile(
+				"noisy-output.sh",
+				$"i=0\nwhile [ \"$i\" -lt {lineCount} ]; do\n" +
+				"  printf 'stdout-01234567890123456789012345678901234567890123456789\\n'\n" +
+				"  printf 'stderr-01234567890123456789012345678901234567890123456789\\n' >&2\n" +
+				"  i=$((i + 1))\ndone\n");
+			startInfo.FileName = "/bin/sh";
+		}
+
+		startInfo.ArgumentList.Add(scriptPath);
+		return startInfo;
 	}
 }
