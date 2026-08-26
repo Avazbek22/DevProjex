@@ -494,15 +494,49 @@ internal sealed class DevProjexMcpTools(
 			$"{McpErrorCodes.InvalidArguments}: invalid format '{token}'. Valid values: text, markdown, json, xml.")
 	};
 
-	private static TreeNodeDescriptor PruneToDepth(TreeNodeDescriptor node, int remainingDepth) =>
-		remainingDepth == 0
-			? node with { Children = [] }
-			: node with
+	internal static TreeNodeDescriptor PruneToDepth(TreeNodeDescriptor node, int remainingDepth)
+	{
+		ArgumentNullException.ThrowIfNull(node);
+		ArgumentOutOfRangeException.ThrowIfNegative(remainingDepth);
+
+		var stack = new Stack<TreeDepthFrame>();
+		stack.Push(new TreeDepthFrame(node, remainingDepth));
+		TreeNodeDescriptor? result = null;
+		while (stack.Count > 0)
+		{
+			var frame = stack.Peek();
+			if (frame.RemainingDepth > 0 && frame.NextChildIndex < frame.Node.Children.Count)
 			{
-				Children = node.Children
-					.Select(child => PruneToDepth(child, remainingDepth - 1))
-					.ToArray()
+				var child = frame.Node.Children[frame.NextChildIndex++];
+				stack.Push(new TreeDepthFrame(child, frame.RemainingDepth - 1));
+				continue;
+			}
+
+			var projected = frame.Node with
+			{
+				Children = frame.RemainingDepth == 0
+					? []
+					: frame.ProjectedChildren
 			};
+			stack.Pop();
+			if (stack.TryPeek(out var parent))
+				parent.ProjectedChildren[parent.NextProjectedChildIndex++] = projected;
+			else
+				result = projected;
+		}
+
+		return result!;
+	}
+
+	private sealed class TreeDepthFrame(TreeNodeDescriptor node, int remainingDepth)
+	{
+		public TreeNodeDescriptor Node { get; } = node;
+		public int RemainingDepth { get; } = remainingDepth;
+		public TreeNodeDescriptor[] ProjectedChildren { get; } =
+			remainingDepth == 0 ? [] : new TreeNodeDescriptor[node.Children.Count];
+		public int NextChildIndex { get; set; }
+		public int NextProjectedChildIndex { get; set; }
+	}
 
 	private static async Task<McpTextPage> ReadFilePageAsync(
 		string path,
