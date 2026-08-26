@@ -108,7 +108,9 @@ public sealed class McpInfrastructureTests
 
 		Assert.True(exposedRoots.IsReadOnly);
 		Assert.Throws<NotSupportedException>(() => exposedRoots[0] = outside);
-		Assert.Equal(Path.GetFullPath(project), registry.ResolveProject(project));
+		Assert.Equal(
+			McpRootRegistry.ResolvePhysicalExistingPath(project, requireDirectory: true),
+			registry.ResolveProject(project));
 		Assert.Equal(
 			McpErrorCodes.UnknownProject,
 			Assert.Throws<McpToolException>(() => registry.ResolveProject(outside)).Code);
