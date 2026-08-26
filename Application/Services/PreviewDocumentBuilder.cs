@@ -94,7 +94,7 @@ public sealed class PreviewDocumentBuilder(
 		OutputPathRedactionDecision? outputPathRedaction = null,
 		string? projectRoot = null)
     {
-        var orderedFiles = BuildOrderedUniqueFiles(filePaths);
+		var orderedFiles = BuildOrderedUniqueFiles(filePaths, cancellationToken);
 		outputPathRedaction ??= OutputRootPathPresentation.CaptureRedactionDecision(transformationContext);
 		await EnsurePersistentIdentityReadyAsync(transformationContext, cancellationToken).ConfigureAwait(false);
         if (orderedFiles.Count == 0)
@@ -154,7 +154,7 @@ public sealed class PreviewDocumentBuilder(
 		OutputPathPresentationResult? treeRootPresentation = null,
 		string? projectRoot = null)
     {
-        var orderedFiles = BuildOrderedUniqueFiles(filePaths);
+		var orderedFiles = BuildOrderedUniqueFiles(filePaths, cancellationToken);
 		outputPathRedaction ??= OutputRootPathPresentation.CaptureRedactionDecision(transformationContext);
 		await EnsurePersistentIdentityReadyAsync(transformationContext, cancellationToken).ConfigureAwait(false);
         var normalizedTreeText = treeText.TrimEnd('\r', '\n');
@@ -747,18 +747,36 @@ public sealed class PreviewDocumentBuilder(
         };
     }
 
-    private static List<string> BuildOrderedUniqueFiles(IEnumerable<string> filePaths)
+	private static List<string> BuildOrderedUniqueFiles(
+		IEnumerable<string> filePaths,
+		CancellationToken cancellationToken)
     {
+		cancellationToken.ThrowIfCancellationRequested();
         var uniqueFiles = new HashSet<string>(PathComparer.Default);
         foreach (var path in filePaths)
         {
+			cancellationToken.ThrowIfCancellationRequested();
             if (!string.IsNullOrWhiteSpace(path))
                 uniqueFiles.Add(path);
         }
 
         var files = new List<string>(uniqueFiles.Count);
         files.AddRange(uniqueFiles);
-        files.Sort(PathComparer.Default);
+		if (!cancellationToken.CanBeCanceled)
+		{
+			files.Sort(PathComparer.Default);
+		}
+		else
+		{
+			var comparisons = 0u;
+			files.Sort((left, right) =>
+			{
+				if ((++comparisons & 0x3FFu) == 0)
+					cancellationToken.ThrowIfCancellationRequested();
+				return PathComparer.Default.Compare(left, right);
+			});
+			cancellationToken.ThrowIfCancellationRequested();
+		}
         return files;
     }
 
