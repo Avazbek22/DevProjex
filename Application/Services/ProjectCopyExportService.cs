@@ -210,6 +210,7 @@ public sealed class ProjectCopyExportService(
 		FileContentClassification classification) => classification switch
 	{
 		FileContentClassification.TooLarge => noticeText.TooLargeReason,
+		FileContentClassification.Unreadable => noticeText.UnreadableReason,
 		FileContentClassification.UnsupportedEncoding => noticeText.UnsupportedEncodingReason,
 		_ => throw new ArgumentOutOfRangeException(nameof(classification), classification, null)
 	};
@@ -239,7 +240,8 @@ public sealed class ProjectCopyExportService(
 			localization["Compression.CopyNotice"],
 			localization["ProjectCopy.Notice.UnscannableExcluded"],
 			localization["Content.Redaction.Reason.TooLarge"],
-			localization["Content.Redaction.Reason.UnsupportedEncoding"]);
+			localization["Content.Redaction.Reason.UnsupportedEncoding"],
+			localization["Content.Classification.Unreadable"]);
 
 	public static void EnsureDestinationOutsideProject(string projectRootPath, string destinationPath)
 	{
@@ -1275,6 +1277,20 @@ public sealed class ProjectCopyExportService(
 			projectRootPath,
 			sourcePath,
 			new HashSet<string>(PathComparer.Default));
+		try
+		{
+			if (!UnixFileTypeInspector.IsRegularFile(sourcePath))
+				throw SourceUnavailable($"A source entry is not a regular file: {sourcePath}");
+		}
+		catch (ProjectCopyExportException)
+		{
+			throw;
+		}
+		catch (Exception exception) when (
+			exception is IOException or UnauthorizedAccessException)
+		{
+			throw SourceUnavailable($"A source file is no longer available: {sourcePath}", exception);
+		}
 		if (!File.Exists(sourcePath))
 			throw SourceUnavailable($"A source file is no longer available: {sourcePath}");
 	}

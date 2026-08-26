@@ -140,8 +140,9 @@ tree text and content headings. Machine metadata remains directly addressable:
 }
 ```
 
-When enabled content inspection withholds one or more text files because they
-are too large or use an unsupported encoding, analysis adds:
+When enabled content inspection withholds one or more files because they are too
+large, unreadable, non-regular filesystem entries, or use an unsupported encoding,
+analysis adds:
 
 ```json
 {
@@ -158,8 +159,9 @@ are too large or use an unsupported encoding, analysis adds:
 ```
 
 `unscannableCount` equals the array length. Each entry contains a source-relative
-`path` with `/` separators and a `reason` token of exactly `too-large` or
-`unsupported-encoding`. The object is omitted when no files are withheld.
+`path` with `/` separators and a `reason` token of exactly `too-large`,
+`unreadable`, or `unsupported-encoding`. The object is omitted when no files are
+withheld.
 
 With `--findings`, analysis adds an ordered top-level `findings` array. Each
 effective finding contains exactly `ruleId`, `category` (`secret` or

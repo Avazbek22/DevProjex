@@ -146,6 +146,7 @@ public sealed class TerminalProcessSmokeIntegrationTests
 			"--output", "-",
 			"--git-mode", "none",
 			"--exclude", "none",
+			"--hide-secrets",
 			"--progress", "never",
 			"--language", "en"
 		]);
@@ -156,6 +157,34 @@ public sealed class TerminalProcessSmokeIntegrationTests
 		Assert.Equal(fifoPath, file.GetProperty("path").GetString());
 		Assert.Equal("unreadable", file.GetProperty("classification").GetString());
 		Assert.Equal(JsonValueKind.Null, file.GetProperty("content").ValueKind);
+		Assert.Contains("File could not be read.", context.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task ProjectExportRejectsFifoWithoutBlocking()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("Windows does not expose POSIX FIFO entries.");
+
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("fifo-copy-source");
+		await CreateFifoAsync(Path.Combine(project, "events.txt"));
+		var destination = Path.Combine(workspace.Path, "copy");
+
+		var context = await RunAsync(
+		[
+			"export", "project", project,
+			"--as", "folder",
+			"--output", destination,
+			"--git-mode", "none",
+			"--exclude", "none",
+			"--progress", "never",
+			"--language", "en"
+		]);
+
+		Assert.Equal(CommandLineExitCodes.RuntimeError, context.ExitCode);
+		Assert.Contains("DPX-EXPORT-SOURCE-UNAVAILABLE", context.StandardError, StringComparison.Ordinal);
+		Assert.False(Path.Exists(destination));
 	}
 
 	[Fact]

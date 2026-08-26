@@ -67,7 +67,8 @@ public sealed record ProjectCopyNoticeText(
 	string Compression,
 	string ExcludedUnscannable = "",
 	string TooLargeReason = "",
-	string UnsupportedEncodingReason = "");
+	string UnsupportedEncodingReason = "",
+	string UnreadableReason = "");
 
 public sealed record ProjectCopyExportResult(
 	string DestinationPath,

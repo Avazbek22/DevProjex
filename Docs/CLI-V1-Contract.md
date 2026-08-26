@@ -232,6 +232,12 @@ and names it in `DEVPROJEX-NOTICE.txt`. `--dry-run` announces the same omission.
 Uninspected text is never emitted, a file left out of a copy is always named, and no
 result describes zero matches as safe or clean.
 
+On Linux and macOS, non-regular source entries such as FIFOs, sockets, and devices
+are never opened for content inspection and are reported with the `unreadable`
+classification. Redacted project copies leave them out and name them in the notice;
+an untransformed project copy rejects such an entry as an unavailable source instead
+of attempting a potentially blocking read.
+
 For v5 compatibility, `--exclude hide-secrets` remains parseable but is omitted
 from current help and completion choices. Resolution migrates it to the separate
 `selection.hideSecrets` Boolean and removes it from canonical

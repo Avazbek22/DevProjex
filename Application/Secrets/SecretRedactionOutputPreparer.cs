@@ -134,6 +134,7 @@ public sealed class SecretRedactionOutputPreparer
 							completed = true;
 							continue;
 						case FileContentClassification.TooLarge:
+						case FileContentClassification.Unreadable:
 						case FileContentClassification.UnsupportedEncoding:
 							// A per-file inspection limitation degrades that file, not the whole run.
 							// Redaction cannot promise anything about text it never decoded or fully read,
@@ -1042,6 +1043,7 @@ public sealed class SecretRedactionOutputPreparer
 					redactionScope.AnalyzeBinary(prepared.SourcePath, prepared.Metadata);
 					break;
 				case FileContentClassification.TooLarge:
+				case FileContentClassification.Unreadable:
 				case FileContentClassification.UnsupportedEncoding:
 					redactionScope.AnalyzeUnscannable(
 						prepared.SourcePath,
@@ -1166,6 +1168,7 @@ public sealed class SecretRedactionOutputPreparer
 						redactionScope.AnalyzeBinary(prepared.SourcePath, prepared.Metadata);
 						break;
 					case FileContentClassification.TooLarge:
+					case FileContentClassification.Unreadable:
 					case FileContentClassification.UnsupportedEncoding:
 						redactionScope.AnalyzeUnscannable(
 							prepared.SourcePath,
@@ -1442,6 +1445,7 @@ public sealed class SecretRedactionOutputPreparer
 			case FileContentClassification.Binary:
 				return scope.StoreBinary(sourcePath, metadata);
 			case FileContentClassification.TooLarge:
+			case FileContentClassification.Unreadable:
 			case FileContentClassification.UnsupportedEncoding:
 				// This scan only feeds the count on the checkbox. One file it may not read is a
 				// reason to leave that file out of the count, never to refuse the whole project -
@@ -1676,6 +1680,7 @@ public sealed record PreparedSecretFile(
 	/// redaction was ever planned for it. Its source content must not be served by prepared outputs.
 	/// </summary>
 	public bool IsUnscannable => Classification is FileContentClassification.TooLarge or
+		FileContentClassification.Unreadable or
 		FileContentClassification.UnsupportedEncoding;
 
 	public int RedactedCount => Redactions.Count;
@@ -1744,6 +1749,7 @@ public sealed record PreparedSecretFile(
 		FileContentClassification classification)
 	{
 		if (classification is not (FileContentClassification.TooLarge or
+		    FileContentClassification.Unreadable or
 		    FileContentClassification.UnsupportedEncoding))
 		{
 			throw new ArgumentOutOfRangeException(nameof(classification), classification, null);
