@@ -99,9 +99,11 @@ internal static class Program
 			destinationFile,
 			cancelPath,
 			cancellation);
+		var pendingReadyPath = readyPath + ".pending";
 		await File.WriteAllTextAsync(
-			readyPath,
+			pendingReadyPath,
 			Environment.WorkingSet.ToString(CultureInfo.InvariantCulture));
+		File.Move(pendingReadyPath, readyPath);
 
 		try
 		{
