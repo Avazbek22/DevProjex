@@ -192,6 +192,46 @@ public sealed class TerminalSettingsPanelPtyTests
 	}
 
 	[Fact(Timeout = 90_000)]
+	public async Task MouseClickBelowTheLastFileTypeLeavesSelectionUnchanged()
+	{
+		using var project = CreatePanelProject();
+		await using var terminal = await StartAsync(
+			project.Path,
+			columns: 100,
+			rows: 30,
+			mouse: true);
+
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("T", TestContext.Current.CancellationToken);
+		var before = await WaitForStableScreenAsync(terminal, "[x] .md");
+		var lines = before.Split('\n');
+		var lastItemRow = Array.FindIndex(lines, static line =>
+			line.Contains("[x] .md", StringComparison.Ordinal));
+		Assert.True(lastItemRow >= 0, before);
+		var markerColumn = lines[lastItemRow].IndexOf("[x] .md", StringComparison.Ordinal);
+		Assert.True(markerColumn >= 0, before);
+
+		await terminal.SendMouseClickAsync(
+			markerColumn + 1,
+			lastItemRow + 1,
+			cancellationToken: TestContext.Current.CancellationToken);
+		await Task.Delay(500, TestContext.Current.CancellationToken);
+
+		var after = terminal.CaptureScreen();
+		Assert.False(terminal.HasExited);
+		Assert.Contains("[x] .cs", after, StringComparison.Ordinal);
+		Assert.Contains("[x] .json", after, StringComparison.Ordinal);
+		Assert.Contains("[x] .md", after, StringComparison.Ordinal);
+		Assert.Contains("[x] All (3)", ExtractPanel(after, "File types", null), StringComparison.Ordinal);
+		Assert.DoesNotContain("Updating options…", after, StringComparison.Ordinal);
+		Assert.DoesNotContain("Building tree…", after, StringComparison.Ordinal);
+
+		await ExitAsync(terminal);
+	}
+
+	[Fact(Timeout = 90_000)]
 	public async Task ContentAggregateTogglesAllFiveTransformations()
 	{
 		using var project = CreatePanelProject();
@@ -373,8 +413,9 @@ public sealed class TerminalSettingsPanelPtyTests
 			screen => screen.Contains("Lines 1-2/2", StringComparison.Ordinal));
 		Assert.Contains("Files 0", empty, StringComparison.Ordinal);
 		Assert.Contains("Folders 0", empty, StringComparison.Ordinal);
-		Assert.Contains("~0 tokens", empty, StringComparison.Ordinal);
+		Assert.Matches(@"~[1-9][0-9]* tokens", empty);
 		Assert.Contains("v [x]", ExtractFirstPanel(empty), StringComparison.Ordinal);
+		Assert.Contains("[ ] All (3)", ExtractPanel(empty, "File types", null), StringComparison.Ordinal);
 		Assert.DoesNotContain("Processing request", empty, StringComparison.Ordinal);
 		TerminalScreenSnapshot.Verify(snapshot, empty, (project.Path, "<PROJECT_ROOT>"));
 		foreach (var viewShortcut in new[] { "1", "2", "3" })
@@ -431,7 +472,7 @@ public sealed class TerminalSettingsPanelPtyTests
 		Assert.Contains("project", ExtractFirstPanel(extensionsCleared), StringComparison.OrdinalIgnoreCase);
 		Assert.Contains("Files 0", extensionsCleared, StringComparison.Ordinal);
 		Assert.Contains("Folders 0", extensionsCleared, StringComparison.Ordinal);
-		Assert.Contains("~0 tokens", extensionsCleared, StringComparison.Ordinal);
+		Assert.Matches(@"~[1-9][0-9]* tokens", extensionsCleared);
 		Assert.DoesNotContain("Processing request", extensionsCleared, StringComparison.Ordinal);
 
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);

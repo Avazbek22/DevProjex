@@ -14,6 +14,8 @@ public sealed class IgnoreSelectionState
 
 	public IReadOnlyDictionary<IgnoreOptionId, bool> OptionStateCache => _optionStateCache;
 
+	public GitFilteringMode PreferredGitFilteringMode => _preferredGitFilteringMode;
+
 	public HashSet<IgnoreOptionId> SnapshotSelectedOptions() => new(_selectedOptions);
 
 	public Dictionary<IgnoreOptionId, bool> SnapshotStateCache() => new(_optionStateCache);
@@ -76,13 +78,34 @@ public sealed class IgnoreSelectionState
 
 	public void ReplaceStateCache(IReadOnlyDictionary<IgnoreOptionId, bool> stateCache)
 	{
+		ReplaceStateCacheCore(stateCache, preserveRuntimePreferences: false);
+	}
+
+	public void ReplaceStateCachePreservingRuntimePreferences(
+		IReadOnlyDictionary<IgnoreOptionId, bool> stateCache)
+	{
+		ReplaceStateCacheCore(stateCache, preserveRuntimePreferences: true);
+	}
+
+	private void ReplaceStateCacheCore(
+		IReadOnlyDictionary<IgnoreOptionId, bool> stateCache,
+		bool preserveRuntimePreferences)
+	{
+		var previousAllPreference = AllPreference;
+		var previousPreferredGitFilteringMode = _preferredGitFilteringMode;
 		AllPreference = null;
 		_optionStateCache.Clear();
 		foreach (var (id, isChecked) in stateCache)
 			_optionStateCache[id] = isChecked;
 
 		GitFilteringModeResolver.Normalize(_optionStateCache);
-		_preferredGitFilteringMode = GitFilteringModeResolver.Resolve(_optionStateCache);
+		var activeGitFilteringMode = GitFilteringModeResolver.Resolve(_optionStateCache);
+		if (preserveRuntimePreferences)
+			AllPreference = previousAllPreference;
+		_preferredGitFilteringMode = preserveRuntimePreferences &&
+		                             activeGitFilteringMode == GitFilteringMode.None
+			? previousPreferredGitFilteringMode
+			: activeGitFilteringMode;
 		RebuildSelectedOptions();
 		IsInitialized = true;
 	}

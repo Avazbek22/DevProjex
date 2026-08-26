@@ -14,8 +14,6 @@ public sealed partial class SelectionSyncCoordinator
             IReadOnlyList<IgnoreOptionSnapshot> ignoreOptions,
             IReadOnlyList<IgnoreOptionDescriptor> ignoreDescriptors,
 			string? ignoreOptionsProjectPath,
-            bool allExtensionsChecked,
-            bool allIgnoreChecked,
             bool hasExtensionlessExtensionEntries,
             int extensionlessExtensionEntriesCount,
             bool hasIgnoreOptionCounts,
@@ -26,6 +24,7 @@ public sealed partial class SelectionSyncCoordinator
             SelectionRefreshRollbackSnapshot? reversibleSelectionSnapshot,
             AppliedSelectionState? appliedSelectionState,
             ProjectContextGitReadiness appliedGitReadiness,
+            bool selectionPersistenceBlockedByIncompleteScan,
             bool selectionRefreshDirty)
         {
             Session = session;
@@ -34,8 +33,6 @@ public sealed partial class SelectionSyncCoordinator
             IgnoreOptions = ignoreOptions;
             IgnoreDescriptors = ignoreDescriptors;
 			IgnoreOptionsProjectPath = ignoreOptionsProjectPath;
-            AllExtensionsChecked = allExtensionsChecked;
-            AllIgnoreChecked = allIgnoreChecked;
             HasExtensionlessExtensionEntries = hasExtensionlessExtensionEntries;
             ExtensionlessExtensionEntriesCount = extensionlessExtensionEntriesCount;
             HasIgnoreOptionCounts = hasIgnoreOptionCounts;
@@ -46,6 +43,7 @@ public sealed partial class SelectionSyncCoordinator
             ReversibleSelectionSnapshot = reversibleSelectionSnapshot;
             AppliedSelectionState = appliedSelectionState;
             AppliedGitReadiness = appliedGitReadiness;
+            SelectionPersistenceBlockedByIncompleteScan = selectionPersistenceBlockedByIncompleteScan;
             SelectionRefreshDirty = selectionRefreshDirty;
         }
 
@@ -55,8 +53,6 @@ public sealed partial class SelectionSyncCoordinator
         internal IReadOnlyList<IgnoreOptionSnapshot> IgnoreOptions { get; }
         internal IReadOnlyList<IgnoreOptionDescriptor> IgnoreDescriptors { get; }
 		internal string? IgnoreOptionsProjectPath { get; }
-        internal bool AllExtensionsChecked { get; }
-        internal bool AllIgnoreChecked { get; }
         internal bool HasExtensionlessExtensionEntries { get; }
         internal int ExtensionlessExtensionEntriesCount { get; }
         internal bool HasIgnoreOptionCounts { get; }
@@ -67,6 +63,7 @@ public sealed partial class SelectionSyncCoordinator
         internal SelectionRefreshRollbackSnapshot? ReversibleSelectionSnapshot { get; }
         internal AppliedSelectionState? AppliedSelectionState { get; }
         internal ProjectContextGitReadiness AppliedGitReadiness { get; }
+        internal bool SelectionPersistenceBlockedByIncompleteScan { get; }
         internal bool SelectionRefreshDirty { get; }
     }
 
@@ -93,8 +90,6 @@ public sealed partial class SelectionSyncCoordinator
             ignoreOptions,
             _ignoreOptions.ToArray(),
 			_ignoreOptionsProjectPath,
-            viewModel.AllExtensionsChecked,
-            viewModel.AllIgnoreChecked,
             _hasExtensionlessExtensionEntries,
             _extensionlessExtensionEntriesCount,
             _hasIgnoreOptionCounts,
@@ -105,6 +100,7 @@ public sealed partial class SelectionSyncCoordinator
             _reversibleSelectionSnapshot,
             _appliedSelectionState,
             _appliedGitReadiness,
+            _selectionPersistenceBlockedByIncompleteScan,
             HasDirtySelectionRefresh());
     }
 
@@ -146,9 +142,6 @@ public sealed partial class SelectionSyncCoordinator
             ReplaceCollectionItems(viewModel.Extensions, extensionOptions);
             ReplaceCollectionItems(viewModel.IgnoreOptions, ignoreOptions);
 
-            viewModel.AllExtensionsChecked = checkpoint.AllExtensionsChecked;
-            viewModel.AllIgnoreChecked = checkpoint.AllIgnoreChecked;
-
             _session.RestoreSnapshot(checkpoint.Session);
             _ignoreOptions = checkpoint.IgnoreDescriptors;
 			_ignoreOptionsProjectPath = checkpoint.IgnoreOptionsProjectPath;
@@ -162,6 +155,8 @@ public sealed partial class SelectionSyncCoordinator
             _reversibleSelectionSnapshot = checkpoint.ReversibleSelectionSnapshot;
             _appliedSelectionState = checkpoint.AppliedSelectionState;
             _appliedGitReadiness = checkpoint.AppliedGitReadiness;
+            _selectionPersistenceBlockedByIncompleteScan =
+                checkpoint.SelectionPersistenceBlockedByIncompleteScan;
             Volatile.Write(ref _selectionRefreshDirty, checkpoint.SelectionRefreshDirty ? 1 : 0);
 
             // Revision is a monotonic invalidation boundary. Restoring the old value would
@@ -175,6 +170,8 @@ public sealed partial class SelectionSyncCoordinator
             _suppressIgnoreAllCheck = false;
             _suppressIgnoreItemCheck = false;
         }
+
+        SynchronizeDerivedAggregateSelectionState();
 
         _pendingApplyEvaluationRequested = false;
         _selectionRefreshEngine.InvalidateCaches();

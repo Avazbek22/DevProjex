@@ -2,6 +2,18 @@ namespace DevProjex.Application.Context;
 
 public static class ProjectSelectionAdapter
 {
+	public static IReadOnlyDictionary<string, bool>? GetLocalProfileExtensionStates(
+		ProjectSelectionSpec selection)
+	{
+		ArgumentNullException.ThrowIfNull(selection);
+		var profileState = selection.LocalProfileState;
+		var extensionStates = profileState?.Profile.ExtensionStates;
+		if (profileState is null || profileState.ExtensionsOverridden || extensionStates is null)
+			return null;
+
+		return new Dictionary<string, bool>(extensionStates, StringComparer.OrdinalIgnoreCase);
+	}
+
 	public static IReadOnlyCollection<IgnoreOptionId> ToIgnoreOptions(ProjectSelectionSpec selection)
 	{
 		ArgumentNullException.ThrowIfNull(selection);

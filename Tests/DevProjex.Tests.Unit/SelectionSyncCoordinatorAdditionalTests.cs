@@ -501,6 +501,79 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	}
 
 	[AvaloniaFact]
+	public void ProjectCheckpoint_Restore_CompleteStateAfterIncompleteScan_AllowsPersistenceAgain()
+	{
+		const string path = @"C:\Project";
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel, currentPathProvider: () => path);
+		GetPrivateSession(coordinator).LastLoadedPath = path;
+		var snapshot = CreateReversibleSelectionRefreshSnapshot();
+		ApplySelectionRefreshSnapshot(coordinator, snapshot);
+		var completeCheckpoint = coordinator.CaptureProjectCheckpoint();
+
+		ApplySelectionRefreshSnapshotWithCompleteness(
+			coordinator,
+			snapshot,
+			cacheIsComplete: false);
+		Assert.False(coordinator.IsSelectionStateCompleteForPersistence);
+
+		coordinator.RestoreProjectCheckpoint(completeCheckpoint);
+
+		Assert.True(coordinator.IsSelectionStateCompleteForPersistence);
+	}
+
+	[AvaloniaFact]
+	public void ProjectCheckpoint_Restore_IncompleteStateAfterProjectSwitch_BlocksPersistenceAgain()
+	{
+		const string projectA = @"C:\ProjectA";
+		const string projectB = @"C:\ProjectB";
+		var currentPath = projectA;
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel, currentPathProvider: () => currentPath);
+		var session = GetPrivateSession(coordinator);
+		session.LastLoadedPath = projectA;
+		var snapshot = CreateReversibleSelectionRefreshSnapshot();
+		ApplySelectionRefreshSnapshotWithCompleteness(
+			coordinator,
+			snapshot,
+			cacheIsComplete: false);
+		var incompleteCheckpoint = coordinator.CaptureProjectCheckpoint();
+		Assert.False(coordinator.IsSelectionStateCompleteForPersistence);
+
+		currentPath = projectB;
+		session.LastLoadedPath = projectB;
+		ApplySelectionRefreshSnapshot(coordinator, snapshot);
+		Assert.True(coordinator.IsSelectionStateCompleteForPersistence);
+
+		currentPath = projectA;
+		coordinator.RestoreProjectCheckpoint(incompleteCheckpoint);
+
+		Assert.False(coordinator.IsSelectionStateCompleteForPersistence);
+	}
+
+	[AvaloniaFact]
+	public void SelectionRollback_RestoresIncompletePersistenceBoundary()
+	{
+		const string path = @"C:\Project";
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel, currentPathProvider: () => path);
+		GetPrivateSession(coordinator).LastLoadedPath = path;
+		var snapshot = CreateReversibleSelectionRefreshSnapshot();
+		ApplySelectionRefreshSnapshotWithCompleteness(
+			coordinator,
+			snapshot,
+			cacheIsComplete: false);
+		var incompleteSnapshot = GetStableSelectionSnapshot(coordinator);
+
+		ApplySelectionRefreshSnapshot(coordinator, snapshot);
+		Assert.True(coordinator.IsSelectionStateCompleteForPersistence);
+
+		RestoreStableSelectionSnapshot(coordinator, incompleteSnapshot);
+
+		Assert.False(coordinator.IsSelectionStateCompleteForPersistence);
+	}
+
+	[AvaloniaFact]
 	public async Task ProjectCheckpoint_Restore_DirtyCheckpoint_RequeuesConvergenceOnFreshGate()
 	{
 		const string path = @"C:\Project";
@@ -1350,6 +1423,113 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		Assert.False(viewModel.AllContentProcessingChecked);
 		Assert.True(viewModel.AllIgnoreChecked);
 		Assert.Empty(changedOptions);
+	}
+
+	[AvaloniaFact]
+	public void ProgrammaticContentOverride_RecomputesDerivedAllContentProcessingState()
+	{
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(
+			viewModel,
+			currentPathProvider: () => @"C:\Project");
+		ApplySelectionRefreshSnapshot(coordinator, CreateReversibleSelectionRefreshSnapshot());
+
+		Assert.True(viewModel.AllContentProcessingChecked);
+
+		Assert.True(coordinator.ApplyHideSecretsOverride(false));
+		Assert.False(viewModel.AllContentProcessingChecked);
+
+		Assert.True(coordinator.ApplyHideSecretsOverride(true));
+		Assert.True(viewModel.AllContentProcessingChecked);
+	}
+
+	[AvaloniaFact]
+	public void ProgrammaticIgnoreOverride_RecomputesDerivedAllIgnoreState()
+	{
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(
+			viewModel,
+			currentPathProvider: () => @"C:\Project");
+		ApplySelectionRefreshSnapshot(coordinator, CreateReversibleSelectionRefreshSnapshot());
+		var selectedOptions = viewModel.IgnoreOptions
+			.Where(static option => option.IsChecked && option.Id != IgnoreOptionId.HiddenFiles)
+			.Select(static option => option.Id)
+			.ToHashSet();
+
+		coordinator.ApplyIgnoreSelectionOverride(selectedOptions);
+
+		Assert.False(viewModel.IgnoreOptions.Single(
+			static option => option.Id == IgnoreOptionId.HiddenFiles).IsChecked);
+		Assert.False(viewModel.AllIgnoreChecked);
+		Assert.True(viewModel.AllContentProcessingChecked);
+	}
+
+	[AvaloniaFact]
+	public void ProjectCheckpoint_Restore_RecomputesDerivedAggregateStateFromRestoredItems()
+	{
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(
+			viewModel,
+			currentPathProvider: () => @"C:\Project");
+		ApplySelectionRefreshSnapshot(
+			coordinator,
+			CreateReversibleSelectionRefreshSnapshot(
+				uncheckedIgnoreOption: IgnoreOptionId.HideSecrets));
+		viewModel.Extensions.Single().IsChecked = false;
+		coordinator.UpdateExtensionsSelectionCache();
+		var checkpoint = coordinator.CaptureProjectCheckpoint();
+
+		viewModel.AllExtensionsChecked = true;
+		viewModel.AllIgnoreChecked = true;
+		viewModel.AllContentProcessingChecked = true;
+		coordinator.RestoreProjectCheckpoint(checkpoint);
+
+		Assert.False(viewModel.AllExtensionsChecked);
+		Assert.False(viewModel.AllContentProcessingChecked);
+		Assert.True(viewModel.AllIgnoreChecked);
+	}
+
+	[AvaloniaFact]
+	public async Task FailedRefreshRollback_AllOffWithTrackedPreference_AllOnRestoresTrackedMode()
+	{
+		const string path = @"C:\Project";
+		var failRefresh = false;
+		var scanner = new CountingRootSelectionSnapshotScanner
+		{
+			BeforeRootSelectionSnapshot = _ =>
+			{
+				if (failRefresh)
+					throw new IOException("Simulated refresh failure.");
+			}
+		};
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel, scanner, () => path);
+		var trackedSnapshot = WithGitMode(
+			CreateReversibleSelectionRefreshSnapshot(),
+			useGitIgnore: false,
+			trackedOnly: true);
+		ApplySelectionRefreshSnapshot(coordinator, trackedSnapshot);
+		HookAllOptionListeners(coordinator, viewModel);
+
+		coordinator.HandleIgnoreAllChanged(isChecked: false, currentPath: null);
+		var allOffSnapshot = WithGitMode(
+			trackedSnapshot,
+			useGitIgnore: false,
+			trackedOnly: false);
+		ApplySelectionRefreshSnapshot(coordinator, allOffSnapshot);
+		var rollbackSnapshot = GetStableSelectionSnapshot(coordinator);
+
+		failRefresh = true;
+		await Assert.ThrowsAsync<IOException>(() => coordinator.RefreshProjectSelectionAsync(
+			path,
+			TestContext.Current.CancellationToken));
+		RestoreStableSelectionSnapshot(coordinator, rollbackSnapshot);
+		coordinator.HandleIgnoreAllChanged(isChecked: true, currentPath: null);
+
+		Assert.False(viewModel.IgnoreOptions.Single(
+			static option => option.Id == IgnoreOptionId.UseGitIgnore).IsChecked);
+		Assert.True(viewModel.IgnoreOptions.Single(
+			static option => option.Id == IgnoreOptionId.TrackedGitFilesOnly).IsChecked);
 	}
 
 	[Fact]
@@ -2415,6 +2595,39 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 			BindingFlags.Instance | BindingFlags.NonPublic);
 		Assert.NotNull(method);
 		method!.Invoke(coordinator, [snapshot, retainPreviousSnapshot]);
+	}
+
+	private static void ApplySelectionRefreshSnapshotWithCompleteness(
+		SelectionSyncCoordinator coordinator,
+		SelectionRefreshSnapshot snapshot,
+		bool cacheIsComplete)
+	{
+		var method = typeof(SelectionSyncCoordinator).GetMethod(
+			"ApplySelectionRefreshSnapshotWithCompleteness",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(method);
+		method!.Invoke(coordinator, [snapshot, false, cacheIsComplete]);
+	}
+
+	private static SelectionRefreshRollbackSnapshot GetStableSelectionSnapshot(
+		SelectionSyncCoordinator coordinator)
+	{
+		var field = typeof(SelectionSyncCoordinator).GetField(
+			"_stableSelectionSnapshot",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(field);
+		return Assert.IsType<SelectionRefreshRollbackSnapshot>(field!.GetValue(coordinator));
+	}
+
+	private static void RestoreStableSelectionSnapshot(
+		SelectionSyncCoordinator coordinator,
+		SelectionRefreshRollbackSnapshot snapshot)
+	{
+		var method = typeof(SelectionSyncCoordinator).GetMethod(
+			"RestoreStableSelectionSnapshot",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(method);
+		method!.Invoke(coordinator, [snapshot]);
 	}
 
 	private static void ApplyCurrentSelectionState(

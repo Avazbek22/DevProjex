@@ -13,6 +13,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 	private const string FolderName = "DevProjex";
 	private const string FileName = "project-profiles.json";
 	private static readonly DateTimeOffset MaximumSafeProfileTimestamp = DateTimeOffset.MaxValue.AddDays(-1);
+	private static readonly TimeSpan ClearLockTimeout = TimeSpan.FromMilliseconds(200);
 
 	private static readonly JsonSerializerOptions SerializerOptions = new()
 	{
@@ -224,35 +225,52 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		}
 	}
 
-	public void ClearAllProfiles()
+	public ProjectProfileClearStatus ClearAllProfiles()
 	{
-		var selectionStoreCleared = false;
+		ProjectProfileClearStatus selectionStatus;
 		lock (_sync)
 		{
 			try
 			{
 				var fileSet = GetFileSet();
-				if (CrossProcessFileLock.TryAcquire(fileSet, out var heldLock))
+				PrepareStorageDirectoryForClear(fileSet);
+				IDisposable heldLock;
+				try
 				{
-					using var _ = heldLock;
-					if (!HasOversizedDocument(fileSet) &&
-					    JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
-						return;
-					if (File.Exists(fileSet.PrimaryPath))
-						File.Delete(fileSet.PrimaryPath);
-					if (File.Exists(fileSet.BackupPath))
-						File.Delete(fileSet.BackupPath);
-					selectionStoreCleared = true;
+					heldLock = CrossProcessFileLock.Acquire(fileSet, ClearLockTimeout);
 				}
+				catch (IOException)
+				{
+					return ProjectProfileClearStatus.Busy;
+				}
+
+				using var _ = heldLock;
+				if (HasOversizedDocument(fileSet))
+					return ProjectProfileClearStatus.Failed;
+				if (JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
+					return ProjectProfileClearStatus.FutureSchema;
+
+				File.Delete(fileSet.PrimaryPath);
+				File.Delete(fileSet.BackupPath);
+				selectionStatus = ProjectProfileClearStatus.Cleared;
 			}
 			catch
 			{
-				// Best effort: the app must stay stable even if persistence cleanup fails.
+				selectionStatus = ProjectProfileClearStatus.Failed;
 			}
 		}
 
-		if (selectionStoreCleared)
-			_persistentMarks.ClearAll();
+		return selectionStatus == ProjectProfileClearStatus.Cleared
+			? _persistentMarks.ClearAll()
+			: selectionStatus;
+	}
+
+	private static void PrepareStorageDirectoryForClear(JsonStoreFileSet fileSet)
+	{
+		if (string.IsNullOrWhiteSpace(fileSet.DirectoryPath))
+			throw new IOException("The profile storage directory path cannot be resolved.");
+		_ = Path.GetFullPath(fileSet.DirectoryPath);
+		Directory.CreateDirectory(fileSet.DirectoryPath);
 	}
 
 	public ProjectProfileLookupResult LookupProfile(

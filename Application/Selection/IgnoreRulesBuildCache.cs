@@ -1,8 +1,9 @@
 namespace DevProjex.Application.Selection;
 
 /// <summary>
-/// Retains only the latest rules graph. Building under the lock prevents duplicate
-/// filesystem-backed rule construction without keeping per-project entries alive.
+/// Retains only the latest rules graph. Each invalidation starts a new generation so
+/// filesystem-backed construction from the previous generation cannot block or publish
+/// into the current one.
 /// </summary>
 public sealed class IgnoreRulesBuildCache
 {
@@ -12,8 +13,7 @@ public sealed class IgnoreRulesBuildCache
 		IReadOnlyCollection<string>?,
 		CancellationToken,
 		IgnoreRules> _buildRules;
-	private readonly SemaphoreSlim _gate = new(1, 1);
-	private CacheEntry? _entry;
+	private CacheGeneration _generation = new();
 
 	public IgnoreRulesBuildCache(
 		Func<string, IReadOnlyCollection<IgnoreOptionId>, IReadOnlyCollection<string>?, IgnoreRules> buildRules)
@@ -53,33 +53,39 @@ public sealed class IgnoreRulesBuildCache
 		cancellationToken.ThrowIfCancellationRequested();
 
 		var key = IgnoreRulesBuildCacheKeyBuilder.Build(path, selectedIgnoreOptions, selectedRootFolders);
-		_gate.Wait(cancellationToken);
-		try
+		while (true)
 		{
-			if (_entry is not null && string.Equals(_entry.Key, key, StringComparison.Ordinal))
-				return _entry.Rules;
+			var generation = Volatile.Read(ref _generation);
+			generation.Gate.Wait(cancellationToken);
+			try
+			{
+				if (!ReferenceEquals(generation, Volatile.Read(ref _generation)))
+					continue;
 
-			var rules = _buildRules(path, selectedIgnoreOptions, selectedRootFolders, cancellationToken);
-			_entry = new CacheEntry(key, rules);
-			return rules;
-		}
-		finally
-		{
-			_gate.Release();
+				if (generation.Entry is not null &&
+				    string.Equals(generation.Entry.Key, key, StringComparison.Ordinal))
+				{
+					return generation.Entry.Rules;
+				}
+
+				var rules = _buildRules(path, selectedIgnoreOptions, selectedRootFolders, cancellationToken);
+				if (ReferenceEquals(generation, Volatile.Read(ref _generation)))
+					generation.Entry = new CacheEntry(key, rules);
+				return rules;
+			}
+			finally
+			{
+				generation.Gate.Release();
+			}
 		}
 	}
 
-	public void Invalidate()
+	public void Invalidate() => Interlocked.Exchange(ref _generation, new CacheGeneration());
+
+	private sealed class CacheGeneration
 	{
-		_gate.Wait();
-		try
-		{
-			_entry = null;
-		}
-		finally
-		{
-			_gate.Release();
-		}
+		public SemaphoreSlim Gate { get; } = new(1, 1);
+		public CacheEntry? Entry { get; set; }
 	}
 
 	private sealed record CacheEntry(string Key, IgnoreRules Rules);

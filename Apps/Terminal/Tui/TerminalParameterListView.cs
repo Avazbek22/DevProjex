@@ -47,7 +47,14 @@ internal sealed class TerminalParameterListView : ListView
 
 		SetFocus();
 		InteractionStarted?.Invoke(this, EventArgs.Empty);
-		var row = Viewport.Y + position.Y;
+		if (!TryResolveSelectionIndex(
+				Viewport.Y,
+				position.Y,
+				Source?.Count ?? 0,
+				out var row))
+		{
+			return true;
+		}
 		SelectedItem = row;
 		EnsureSelectedItemVisible();
 		var now = Environment.TickCount64;
@@ -68,5 +75,18 @@ internal sealed class TerminalParameterListView : ListView
 		if (position.X is >= 0 and <= 2)
 			SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
 		return true;
+	}
+
+	internal static bool TryResolveSelectionIndex(
+		int viewportTop,
+		int pointerRow,
+		int itemCount,
+		out int selectionIndex)
+	{
+		selectionIndex = viewportTop + pointerRow;
+		return viewportTop >= 0 &&
+		       pointerRow >= 0 &&
+		       selectionIndex >= 0 &&
+		       selectionIndex < itemCount;
 	}
 }

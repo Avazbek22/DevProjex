@@ -195,6 +195,33 @@ public sealed class IgnoreSelectionStateTests
 	}
 
 	[Fact]
+	public void RefreshStateReplacement_PreservesTrackedPreferenceWhileGitSlotIsOff()
+	{
+		var state = new IgnoreSelectionState();
+		state.ReplaceStateCache(new Dictionary<IgnoreOptionId, bool>
+		{
+			[IgnoreOptionId.UseGitIgnore] = false,
+			[IgnoreOptionId.TrackedGitFilesOnly] = true,
+			[IgnoreOptionId.SmartIgnore] = true
+		});
+		state.ApplyAllPreferenceToKnownStates(false);
+		state.AllPreference = false;
+
+		state.ReplaceStateCachePreservingRuntimePreferences(
+			new Dictionary<IgnoreOptionId, bool>
+			{
+				[IgnoreOptionId.UseGitIgnore] = false,
+				[IgnoreOptionId.TrackedGitFilesOnly] = false,
+				[IgnoreOptionId.SmartIgnore] = false
+			});
+		Assert.False(state.AllPreference);
+		state.ApplyAllPreferenceToKnownStates(true);
+
+		Assert.False(state.OptionStateCache[IgnoreOptionId.UseGitIgnore]);
+		Assert.True(state.OptionStateCache[IgnoreOptionId.TrackedGitFilesOnly]);
+	}
+
+	[Fact]
 	public void ReplaceStateCache_ClearsPreviousProjectAllPreference()
 	{
 		var state = new IgnoreSelectionState

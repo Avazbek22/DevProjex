@@ -166,27 +166,45 @@ internal sealed class PersistentSecretMarkStore(
 		}
 	}
 
-	internal void ClearAll()
+	internal ProjectProfileClearStatus ClearAll()
 	{
 		lock (_sync)
 		{
 			try
 			{
 				var fileSet = GetFileSet();
-				if (!CrossProcessFileLock.TryAcquire(fileSet, _lockTimeout, out var heldLock))
-					return;
+				PrepareStorageDirectoryForClear(fileSet);
+				IDisposable heldLock;
+				try
+				{
+					heldLock = CrossProcessFileLock.Acquire(fileSet, _lockTimeout);
+				}
+				catch (IOException)
+				{
+					return ProjectProfileClearStatus.Busy;
+				}
 				using var _ = heldLock;
-				if (!HasOversizedDocument(fileSet) &&
-				    JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
-					return;
+				if (HasOversizedDocument(fileSet))
+					return ProjectProfileClearStatus.Failed;
+				if (JsonStorePersistence.ContainsFutureDocument(fileSet, CurrentSchemaVersion))
+					return ProjectProfileClearStatus.FutureSchema;
 				File.Delete(fileSet.PrimaryPath);
 				File.Delete(fileSet.BackupPath);
+				return ProjectProfileClearStatus.Cleared;
 			}
 			catch
 			{
-				// Data reset remains best effort, matching the selection-profile store contract.
+				return ProjectProfileClearStatus.Failed;
 			}
 		}
+	}
+
+	private static void PrepareStorageDirectoryForClear(JsonStoreFileSet fileSet)
+	{
+		if (string.IsNullOrWhiteSpace(fileSet.DirectoryPath))
+			throw new IOException("The secret-mark storage directory path cannot be resolved.");
+		_ = Path.GetFullPath(fileSet.DirectoryPath);
+		Directory.CreateDirectory(fileSet.DirectoryPath);
 	}
 
 	private PersistentSecretMarkWriteResult ApplyDelta(

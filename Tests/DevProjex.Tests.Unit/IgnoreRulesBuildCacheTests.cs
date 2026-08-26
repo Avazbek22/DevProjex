@@ -159,7 +159,7 @@ public sealed class IgnoreRulesBuildCacheTests
 	}
 
 	[Fact]
-	public async Task Invalidate_DuringBuildForcesTheNextRequestToRebuild()
+	public async Task Invalidate_DuringBuildDoesNotWaitAndStaleBuildCannotReplaceCurrentGeneration()
 	{
 		var buildCount = 0;
 		var cancellationToken = TestContext.Current.CancellationToken;
@@ -183,21 +183,16 @@ public sealed class IgnoreRulesBuildCacheTests
 			TimeSpan.FromSeconds(2),
 			cancellationToken));
 
-		var invalidationStarted = new TaskCompletionSource(
-			TaskCreationOptions.RunContinuationsAsynchronously);
-		var invalidation = RunOnDedicatedThread(
-			() =>
-			{
-				invalidationStarted.SetResult();
-				cache.Invalidate();
-			},
-			cancellationToken);
-
+		IgnoreRules second;
 		try
 		{
-			await invalidationStarted.Task.WaitAsync(
-				TimeSpan.FromSeconds(2),
+			var invalidation = RunOnDedicatedThread(cache.Invalidate, cancellationToken);
+			await invalidation.WaitAsync(TimeSpan.FromSeconds(2), cancellationToken);
+
+			var secondBuild = RunOnDedicatedThread(
+				() => cache.GetOrBuild(WorkspacePath, [IgnoreOptionId.SmartIgnore], ["src"]),
 				cancellationToken);
+			second = await secondBuild.WaitAsync(TimeSpan.FromSeconds(2), cancellationToken);
 		}
 		finally
 		{
@@ -205,10 +200,10 @@ public sealed class IgnoreRulesBuildCacheTests
 		}
 
 		var first = await firstBuild;
-		await invalidation;
-		var second = cache.GetOrBuild(WorkspacePath, [IgnoreOptionId.SmartIgnore], ["src"]);
+		var cached = cache.GetOrBuild(WorkspacePath, [IgnoreOptionId.SmartIgnore], ["src"]);
 
 		Assert.NotSame(first, second);
+		Assert.Same(second, cached);
 		Assert.Equal(2, buildCount);
 	}
 

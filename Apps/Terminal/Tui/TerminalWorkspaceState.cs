@@ -63,6 +63,13 @@ public sealed class TerminalWorkspaceState : IDisposable
 	public TerminalWorkspaceState(ProjectContextPlan plan)
 	{
 		Plan = plan;
+		var profileExtensionStates = ProjectSelectionAdapter.GetLocalProfileExtensionStates(
+			plan.Selection);
+		if (profileExtensionStates is not null)
+		{
+			foreach (var (extension, isSelected) in profileExtensionStates)
+				_extensionOptionStates[extension] = isSelected;
+		}
 		UpdateExtensionOptionStates(plan);
 		IndexTree(plan.EffectiveTree, parentPath: null);
 		foreach (var file in plan.IncludedFiles)
@@ -77,7 +84,9 @@ public sealed class TerminalWorkspaceState : IDisposable
 		RecomputeCheckStates();
 		UpdatePathOptionStates(plan);
 		RebuildVisibleRows();
-		PreviewDocument = new InMemoryPreviewTextDocument(BuildTreePreview());
+		var initialPreview = BuildTreePreview();
+		PreviewDocument = new InMemoryPreviewTextDocument(initialPreview);
+		PreviewOutputMetrics = ExportOutputMetricsCalculator.FromText(initialPreview);
 	}
 
 	public ProjectContextPlan Plan { get; private set; }
@@ -93,6 +102,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 	public bool HasTreeFilter => _treeFilterQuery.Length > 0;
 	public long Revision => Volatile.Read(ref _revision);
 	public IPreviewTextDocument PreviewDocument { get; private set; }
+	public ExportOutputMetrics PreviewOutputMetrics { get; private set; }
 	public string PreviewText => PreviewDocument.GetFullText();
 
 	public void ReplacePlan(
@@ -139,7 +149,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 		RecomputeCheckStates();
 		UpdatePathOptionStates(plan);
 		RebuildVisibleRows();
-		SetPreviewDocument(new InMemoryPreviewTextDocument(BuildTreePreview()));
+		SetPreviewText(BuildTreePreview());
 	}
 
 	public IReadOnlyDictionary<string, bool> BuildExtensionOptionStates(
@@ -220,9 +230,13 @@ public sealed class TerminalWorkspaceState : IDisposable
 	}
 
 	public void SetPreviewText(string value) =>
-		SetPreviewDocument(new InMemoryPreviewTextDocument(value));
+		SetPreviewDocument(
+			new InMemoryPreviewTextDocument(value),
+			ExportOutputMetricsCalculator.FromText(value));
 
-	public void SetPreviewDocument(IPreviewTextDocument document)
+	public void SetPreviewDocument(
+		IPreviewTextDocument document,
+		ExportOutputMetrics outputMetrics)
 	{
 		ArgumentNullException.ThrowIfNull(document);
 		lock (_previewSync)
@@ -230,10 +244,14 @@ public sealed class TerminalWorkspaceState : IDisposable
 			ThrowIfDisposed();
 			_retiredPreviewDocuments.Add(PreviewDocument);
 			PreviewDocument = document;
+			PreviewOutputMetrics = outputMetrics;
 		}
 	}
 
-	public bool TrySetPreviewDocument(IPreviewTextDocument document, long expectedRevision)
+	public bool TrySetPreviewDocument(
+		IPreviewTextDocument document,
+		ExportOutputMetrics outputMetrics,
+		long expectedRevision)
 	{
 		ArgumentNullException.ThrowIfNull(document);
 		lock (_previewSync)
@@ -243,6 +261,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 
 			_retiredPreviewDocuments.Add(PreviewDocument);
 			PreviewDocument = document;
+			PreviewOutputMetrics = outputMetrics;
 			return true;
 		}
 	}

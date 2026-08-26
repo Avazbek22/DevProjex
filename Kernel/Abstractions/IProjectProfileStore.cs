@@ -33,5 +33,5 @@ public interface IProjectProfileStore
 	}
 	bool TryDeleteProfile(string localProjectPath) => false;
 	void SaveProfile(string localProjectPath, ProjectSelectionProfile profile);
-	void ClearAllProfiles();
+	ProjectProfileClearStatus ClearAllProfiles();
 }

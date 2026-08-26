@@ -1,3 +1,6 @@
+using System.Text;
+using DevProjex.Application.Preview;
+
 namespace DevProjex.Application.Services;
 
 public static class ExportOutputMetricsCalculator
@@ -20,6 +23,27 @@ public static class ExportOutputMetricsCalculator
 		long tokens = EstimateTokens(chars);
 
 		return new ExportOutputMetrics(lines, chars, tokens);
+	}
+
+	public static async Task<ExportOutputMetrics> FromDocumentAsync(
+		IPreviewTextDocument document,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(document);
+		return await FromUtf8WriterAsync(
+				(stream, token) => document.WriteToAsync(stream, token).AsTask(),
+				cancellationToken)
+			.ConfigureAwait(false);
+	}
+
+	public static async Task<ExportOutputMetrics> FromUtf8WriterAsync(
+		Func<Stream, CancellationToken, Task> writeAsync,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(writeAsync);
+		using var metricsStream = new Utf8MetricsStream();
+		await writeAsync(metricsStream, cancellationToken).ConfigureAwait(false);
+		return metricsStream.Complete(cancellationToken);
 	}
 
 	public static ExportOutputMetrics FromContentFiles(IEnumerable<ContentFileMetrics> files)
@@ -282,6 +306,171 @@ public static class ExportOutputMetricsCalculator
 	}
 
 	private readonly record struct NormalizedTextStats(int NormalizedChars, int LineBreaks);
+
+	private sealed class Utf8MetricsStream : Stream
+	{
+		private const int CharacterBufferSize = 4 * 1024;
+		private static readonly UTF8Encoding StrictUtf8 = new(
+			encoderShouldEmitUTF8Identifier: false,
+			throwOnInvalidBytes: true);
+		private readonly Decoder _decoder = StrictUtf8.GetDecoder();
+		private readonly char[] _characterBuffer = new char[CharacterBufferSize];
+		private long _normalizedCharacters;
+		private long _lineBreaks;
+		private bool _pendingCarriageReturn;
+		private bool _completed;
+
+		public override bool CanRead => false;
+		public override bool CanSeek => false;
+		public override bool CanWrite => true;
+		public override long Length => throw new NotSupportedException();
+		public override long Position
+		{
+			get => throw new NotSupportedException();
+			set => throw new NotSupportedException();
+		}
+
+		public ExportOutputMetrics Complete(CancellationToken cancellationToken)
+		{
+			if (!_completed)
+			{
+				Decode(ReadOnlySpan<byte>.Empty, flush: true, cancellationToken);
+				FlushPendingCarriageReturn();
+				_completed = true;
+			}
+
+			if (_normalizedCharacters == 0)
+				return ExportOutputMetrics.Empty;
+
+			return new ExportOutputMetrics(
+				_lineBreaks + 1,
+				_normalizedCharacters,
+				EstimateTokens(_normalizedCharacters));
+		}
+
+		public override void Flush()
+		{
+		}
+
+		public override Task FlushAsync(CancellationToken cancellationToken)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			return Task.CompletedTask;
+		}
+
+		public override void Write(byte[] buffer, int offset, int count)
+		{
+			ArgumentNullException.ThrowIfNull(buffer);
+			ArgumentOutOfRangeException.ThrowIfNegative(offset);
+			ArgumentOutOfRangeException.ThrowIfNegative(count);
+			if (offset > buffer.Length - count)
+				throw new ArgumentException("The write range exceeds the source buffer.", nameof(count));
+			Write(buffer.AsSpan(offset, count));
+		}
+
+		public override void Write(ReadOnlySpan<byte> buffer)
+		{
+			ThrowIfCompleted();
+			Decode(buffer, flush: false, CancellationToken.None);
+		}
+
+		public override ValueTask WriteAsync(
+			ReadOnlyMemory<byte> buffer,
+			CancellationToken cancellationToken = default)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			ThrowIfCompleted();
+			Decode(buffer.Span, flush: false, cancellationToken);
+			return ValueTask.CompletedTask;
+		}
+
+		public override Task WriteAsync(
+			byte[] buffer,
+			int offset,
+			int count,
+			CancellationToken cancellationToken)
+		{
+			ArgumentNullException.ThrowIfNull(buffer);
+			ArgumentOutOfRangeException.ThrowIfNegative(offset);
+			ArgumentOutOfRangeException.ThrowIfNegative(count);
+			if (offset > buffer.Length - count)
+				throw new ArgumentException("The write range exceeds the source buffer.", nameof(count));
+			cancellationToken.ThrowIfCancellationRequested();
+			ThrowIfCompleted();
+			Decode(buffer.AsSpan(offset, count), flush: false, cancellationToken);
+			return Task.CompletedTask;
+		}
+
+		public override int Read(byte[] buffer, int offset, int count) =>
+			throw new NotSupportedException();
+
+		public override long Seek(long offset, SeekOrigin origin) =>
+			throw new NotSupportedException();
+
+		public override void SetLength(long value) =>
+			throw new NotSupportedException();
+
+		private void Decode(
+			ReadOnlySpan<byte> bytes,
+			bool flush,
+			CancellationToken cancellationToken)
+		{
+			do
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				_decoder.Convert(
+					bytes,
+					_characterBuffer,
+					flush,
+					out var bytesUsed,
+					out var charactersUsed,
+					out var completed);
+				Count(_characterBuffer.AsSpan(0, charactersUsed));
+				bytes = bytes[bytesUsed..];
+				if (completed)
+					break;
+			}
+			while (!bytes.IsEmpty || flush);
+		}
+
+		private void Count(ReadOnlySpan<char> characters)
+		{
+			foreach (var character in characters)
+			{
+				if (_pendingCarriageReturn)
+				{
+					FlushPendingCarriageReturn();
+					if (character == '\n')
+						continue;
+				}
+
+				if (character == '\r')
+				{
+					_pendingCarriageReturn = true;
+					continue;
+				}
+
+				_normalizedCharacters++;
+				if (character == '\n')
+					_lineBreaks++;
+			}
+		}
+
+		private void FlushPendingCarriageReturn()
+		{
+			if (!_pendingCarriageReturn)
+				return;
+			_pendingCarriageReturn = false;
+			_normalizedCharacters++;
+			_lineBreaks++;
+		}
+
+		private void ThrowIfCompleted()
+		{
+			if (_completed)
+				throw new InvalidOperationException("Output metrics were already finalized.");
+		}
+	}
 }
 
 public readonly record struct ContentFileMetrics(

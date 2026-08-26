@@ -767,6 +767,7 @@ public sealed partial class SelectionSyncCoordinator(
 		DiscardSelectionSnapshotsForDifferentProject(projectPath);
         _session.ApplyProfile(projectPath, profile);
 		ApplyPreparedContentTransformationStates();
+		SynchronizeDerivedAggregateSelectionState();
 		_session.AdvanceRevision();
     }
 
@@ -778,21 +779,8 @@ public sealed partial class SelectionSyncCoordinator(
 		DiscardSelectionSnapshotsForDifferentProject(projectPath);
         _session.ResetToDefaultsForProject(projectPath);
 		ApplyPreparedContentTransformationStates();
+		SynchronizeDerivedAggregateSelectionState();
         _session.AdvanceRevision();
-
-        // Restore defaults for projects without a saved profile.
-		_suppressExtensionAllCheck = true;
-		_suppressIgnoreAllCheck = true;
-		try
-		{
-			viewModel.AllExtensionsChecked = true;
-			viewModel.AllIgnoreChecked = true;
-		}
-		finally
-		{
-			_suppressExtensionAllCheck = false;
-			_suppressIgnoreAllCheck = false;
-		}
     }
 
 	private void DiscardSelectionSnapshotsForDifferentProject(string projectPath)
@@ -1303,6 +1291,18 @@ public sealed partial class SelectionSyncCoordinator(
 
         _session.IgnoreOptions.ReplaceStateCache(stateCache);
         _session.IgnoreOptions.AllPreference = null;
+        _suppressIgnoreItemCheck = true;
+        try
+        {
+            foreach (var option in viewModel.IgnoreOptions)
+                option.IsChecked = stateCache.GetValueOrDefault(option.Id);
+        }
+        finally
+        {
+            _suppressIgnoreItemCheck = false;
+        }
+
+        SynchronizeDerivedAggregateSelectionState();
         _session.AdvanceRevision();
         RequestPendingApplyEvaluation();
     }
@@ -1623,6 +1623,15 @@ public sealed partial class SelectionSyncCoordinator(
         {
             QueueRefreshForIgnoreOptionChange(currentPath, changedOption?.Id);
         }
+    }
+
+    private void SynchronizeDerivedAggregateSelectionState()
+    {
+        SyncAllCheckbox(
+            viewModel.Extensions,
+            ref _suppressExtensionAllCheck,
+            value => viewModel.AllExtensionsChecked = value);
+        SyncIgnoreAllCheckbox();
     }
 
 	private static void RestorePreparedAllToggle(
@@ -2037,7 +2046,7 @@ public sealed partial class SelectionSyncCoordinator(
 
             _ignoreOptions = descriptors;
         }
-        _session.IgnoreOptions.ReplaceStateCache(stateCache);
+        _session.IgnoreOptions.ReplaceStateCachePreservingRuntimePreferences(stateCache);
         _session.IgnoreOptionStateCacheIsComplete = true;
         SyncIgnoreAllCheckbox();
         RequestPendingApplyEvaluation();
@@ -2140,18 +2149,15 @@ public sealed partial class SelectionSyncCoordinator(
             snapshot.HasIgnoreOptionCounts,
             snapshot.IgnoreOptionCounts,
             snapshot.ControllerImpactCounts,
-            snapshot.IgnoreOptionStateCache,
+            _session.IgnoreOptions.CaptureSnapshot(),
             _session.Extensions.SnapshotSelectedNames(),
             new Dictionary<string, bool>(
                 _session.Extensions.OptionStates,
                 StringComparer.OrdinalIgnoreCase),
             _session.Extensions.IsInitialized,
             _session.Extensions.HasFullState,
-            viewModel.AllExtensionsChecked,
-            viewModel.AllIgnoreChecked,
-            _session.IgnoreOptions.IsInitialized,
-            _session.IgnoreOptions.AllPreference,
             _session.IgnoreOptionStateCacheIsComplete,
+            _selectionPersistenceBlockedByIncompleteScan,
             // A live refresh can project known roots but cannot discover roots hidden by
             // its input filters. Structural rollback therefore requires a full snapshot.
             scanRootsAreAuthoritative && snapshot.RootOptions is not null,
@@ -2259,8 +2265,7 @@ public sealed partial class SelectionSyncCoordinator(
 
     private bool CurrentExtensionSelectionMatches(SelectionRefreshRollbackSnapshot snapshot)
     {
-        return viewModel.AllExtensionsChecked == snapshot.AllExtensionsChecked &&
-               SelectionOptionStatesMatch(viewModel.Extensions, snapshot.ExtensionOptions) &&
+        return SelectionOptionStatesMatch(viewModel.Extensions, snapshot.ExtensionOptions) &&
                SetStatesMatch(_session.Extensions.SelectedNames, snapshot.SelectedExtensions) &&
                DictionaryStatesMatch(
                    _session.Extensions.OptionStates,
@@ -2271,15 +2276,16 @@ public sealed partial class SelectionSyncCoordinator(
 
     private bool CurrentIgnoreSelectionMatches(SelectionRefreshRollbackSnapshot snapshot)
     {
-        return viewModel.AllIgnoreChecked == snapshot.AllIgnoreChecked &&
-               IgnoreOptionCheckStatesMatchExceptContentTransformations(
+        return IgnoreOptionCheckStatesMatchExceptContentTransformations(
                    viewModel.IgnoreOptions,
                    snapshot.IgnoreOptions) &&
                IgnoreDictionaryStatesMatchExceptContentTransformations(
                    _session.IgnoreOptions.OptionStateCache,
-                   snapshot.IgnoreOptionStateCache) &&
-               _session.IgnoreOptions.IsInitialized == snapshot.IgnoreOptionsInitialized &&
-               _session.IgnoreOptions.AllPreference == snapshot.IgnoreAllPreference &&
+                   snapshot.IgnoreSelectionState.OptionStateCache) &&
+               _session.IgnoreOptions.IsInitialized == snapshot.IgnoreSelectionState.IsInitialized &&
+               _session.IgnoreOptions.AllPreference == snapshot.IgnoreSelectionState.AllPreference &&
+               _session.IgnoreOptions.PreferredGitFilteringMode ==
+                   snapshot.IgnoreSelectionState.PreferredGitFilteringMode &&
                _session.IgnoreOptionStateCacheIsComplete == snapshot.IgnoreOptionStateCacheIsComplete;
     }
 
@@ -2293,14 +2299,17 @@ public sealed partial class SelectionSyncCoordinator(
 
         var changedId = changedIgnoreOptionId.Value;
         if (!IgnoreOptionIdentitiesMatch(viewModel.IgnoreOptions, stableSnapshot.IgnoreOptions) ||
-            !reversibleSnapshot.IgnoreOptionStateCache.TryGetValue(changedId, out var reversedState) ||
-            !stableSnapshot.IgnoreOptionStateCache.ContainsKey(changedId) ||
-            viewModel.AllIgnoreChecked != reversibleSnapshot.AllIgnoreChecked ||
-            _session.IgnoreOptions.IsInitialized != reversibleSnapshot.IgnoreOptionsInitialized ||
-            _session.IgnoreOptions.AllPreference != reversibleSnapshot.IgnoreAllPreference ||
+            !reversibleSnapshot.IgnoreSelectionState.OptionStateCache.TryGetValue(
+                changedId,
+                out var reversedState) ||
+            !stableSnapshot.IgnoreSelectionState.OptionStateCache.ContainsKey(changedId) ||
+            _session.IgnoreOptions.IsInitialized != reversibleSnapshot.IgnoreSelectionState.IsInitialized ||
+            _session.IgnoreOptions.AllPreference != reversibleSnapshot.IgnoreSelectionState.AllPreference ||
+            _session.IgnoreOptions.PreferredGitFilteringMode !=
+                reversibleSnapshot.IgnoreSelectionState.PreferredGitFilteringMode ||
             _session.IgnoreOptionStateCacheIsComplete != reversibleSnapshot.IgnoreOptionStateCacheIsComplete ||
             CountStructuralIgnoreStates(_session.IgnoreOptions.OptionStateCache) !=
-            CountStructuralIgnoreStates(stableSnapshot.IgnoreOptionStateCache))
+            CountStructuralIgnoreStates(stableSnapshot.IgnoreSelectionState.OptionStateCache))
         {
             return false;
         }
@@ -2310,8 +2319,8 @@ public sealed partial class SelectionSyncCoordinator(
             if (ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option.Id))
                 continue;
 
-            var stableState = stableSnapshot.IgnoreOptionStateCache.GetValueOrDefault(option.Id);
-            if (!reversibleSnapshot.IgnoreOptionStateCache.TryGetValue(
+            var stableState = stableSnapshot.IgnoreSelectionState.OptionStateCache.GetValueOrDefault(option.Id);
+            if (!reversibleSnapshot.IgnoreSelectionState.OptionStateCache.TryGetValue(
                     option.Id,
                     out var reversibleState) ||
                 (option.Id != changedId && reversibleState != stableState))
@@ -2325,7 +2334,7 @@ public sealed partial class SelectionSyncCoordinator(
             var expectedState = option.Id == changedId
                 ? reversedState
                 : stableState;
-            if (!stableSnapshot.IgnoreOptionStateCache.ContainsKey(option.Id) ||
+            if (!stableSnapshot.IgnoreSelectionState.OptionStateCache.ContainsKey(option.Id) ||
                 option.IsChecked != expectedState)
             {
                 return false;
@@ -2337,8 +2346,8 @@ public sealed partial class SelectionSyncCoordinator(
             if (ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(optionId))
                 continue;
 
-            var stableState = stableSnapshot.IgnoreOptionStateCache.GetValueOrDefault(optionId);
-            if (!reversibleSnapshot.IgnoreOptionStateCache.TryGetValue(
+            var stableState = stableSnapshot.IgnoreSelectionState.OptionStateCache.GetValueOrDefault(optionId);
+            if (!reversibleSnapshot.IgnoreSelectionState.OptionStateCache.TryGetValue(
                     optionId,
                     out var reversibleState) ||
                 (optionId != changedId && reversibleState != stableState))
@@ -2349,7 +2358,7 @@ public sealed partial class SelectionSyncCoordinator(
             var expectedState = optionId == changedId
                 ? reversedState
                 : stableState;
-            if (!stableSnapshot.IgnoreOptionStateCache.ContainsKey(optionId) ||
+            if (!stableSnapshot.IgnoreSelectionState.OptionStateCache.ContainsKey(optionId) ||
                 isChecked != expectedState)
             {
                 return false;
@@ -2365,19 +2374,6 @@ public sealed partial class SelectionSyncCoordinator(
         snapshot = RetainCurrentContentTransformationStates(
             RetainUnknownSelectionStates(snapshot));
 
-        _suppressExtensionAllCheck = true;
-        _suppressIgnoreAllCheck = true;
-        try
-        {
-            viewModel.AllExtensionsChecked = snapshot.AllExtensionsChecked;
-            viewModel.AllIgnoreChecked = snapshot.AllIgnoreChecked;
-        }
-        finally
-        {
-            _suppressExtensionAllCheck = false;
-            _suppressIgnoreAllCheck = false;
-        }
-
         Interlocked.Increment(ref _ignoreOptionsVersion);
         BeginPendingApplyEvaluationDeferral();
         try
@@ -2390,7 +2386,9 @@ public sealed partial class SelectionSyncCoordinator(
                 snapshot.IgnoreOptionCounts,
                 snapshot.ControllerImpactCounts,
                 snapshot.HasIgnoreOptionCounts);
-            ApplyResolvedIgnoreOptions(snapshot.IgnoreOptions, snapshot.IgnoreOptionStateCache);
+            ApplyResolvedIgnoreOptions(
+                snapshot.IgnoreOptions,
+                snapshot.IgnoreSelectionState.OptionStateCache);
         }
         finally
         {
@@ -2403,10 +2401,11 @@ public sealed partial class SelectionSyncCoordinator(
             snapshot.ExtensionOptionStateCache,
             snapshot.ExtensionSelectionInitialized,
             snapshot.ExtensionOptionStateCacheIsComplete);
-        _session.IgnoreOptions.IsInitialized = snapshot.IgnoreOptionsInitialized;
-        _session.IgnoreOptions.AllPreference = snapshot.IgnoreAllPreference;
+        _session.IgnoreOptions.RestoreSnapshot(snapshot.IgnoreSelectionState);
         _session.IgnoreOptionStateCacheIsComplete = snapshot.IgnoreOptionStateCacheIsComplete;
-		_selectionPersistenceBlockedByIncompleteScan = false;
+        _selectionPersistenceBlockedByIncompleteScan =
+            snapshot.SelectionPersistenceBlockedByIncompleteScan;
+        SynchronizeDerivedAggregateSelectionState();
         MarkSelectionRefreshClean();
 
         _ignoreRulesBuildCache.Invalidate();
@@ -2463,12 +2462,16 @@ public sealed partial class SelectionSyncCoordinator(
         SelectionRefreshRollbackSnapshot snapshot)
     {
         var states = SnapshotCurrentContentTransformationStates();
+        var ignoreSelectionState = snapshot.IgnoreSelectionState;
         return snapshot with
         {
             IgnoreOptions = OverlayContentTransformationStates(snapshot.IgnoreOptions, states),
-            IgnoreOptionStateCache = OverlayContentTransformationStates(
-                snapshot.IgnoreOptionStateCache,
-                states)
+            IgnoreSelectionState = ignoreSelectionState with
+            {
+                OptionStateCache = OverlayContentTransformationStates(
+                    ignoreSelectionState.OptionStateCache,
+                    states)
+            }
         };
     }
 
@@ -2539,12 +2542,16 @@ public sealed partial class SelectionSyncCoordinator(
     private static bool IgnorePreferencesAreCompatible(
         SelectionRefreshRollbackSnapshot stableSnapshot,
         SelectionRefreshRollbackSnapshot reversibleSnapshot) =>
-        stableSnapshot.IgnoreOptionsInitialized == reversibleSnapshot.IgnoreOptionsInitialized &&
-        stableSnapshot.IgnoreAllPreference == reversibleSnapshot.IgnoreAllPreference &&
+        stableSnapshot.IgnoreSelectionState.IsInitialized ==
+            reversibleSnapshot.IgnoreSelectionState.IsInitialized &&
+        stableSnapshot.IgnoreSelectionState.AllPreference ==
+            reversibleSnapshot.IgnoreSelectionState.AllPreference &&
+        stableSnapshot.IgnoreSelectionState.PreferredGitFilteringMode ==
+            reversibleSnapshot.IgnoreSelectionState.PreferredGitFilteringMode &&
         stableSnapshot.IgnoreOptionStateCacheIsComplete == reversibleSnapshot.IgnoreOptionStateCacheIsComplete &&
         IgnoreDictionaryStatesAreCompatibleExceptContentTransformations(
-            stableSnapshot.IgnoreOptionStateCache,
-            reversibleSnapshot.IgnoreOptionStateCache);
+            stableSnapshot.IgnoreSelectionState.OptionStateCache,
+            reversibleSnapshot.IgnoreSelectionState.OptionStateCache);
 
     private static void RetainUnknownSelectionStates(
         IReadOnlyDictionary<string, bool> currentStates,
@@ -2966,8 +2973,9 @@ public sealed partial class SelectionSyncCoordinator(
     }
 
     private bool ResolveAllExtensionsCheckedForRefresh() =>
-        viewModel.AllExtensionsChecked &&
-        !_session.Extensions.OptionStates.Values.Contains(false);
+        _session.PreparedMode == PreparedSelectionMode.Defaults ||
+        (viewModel.AllExtensionsChecked &&
+         !_session.Extensions.OptionStates.Values.Contains(false));
 
     private HashSet<IgnoreOptionId> SnapshotRuntimeSelectedIgnoreOptions()
     {

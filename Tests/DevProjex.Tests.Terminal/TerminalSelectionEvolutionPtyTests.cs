@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using DevProjex.Infrastructure.ProjectProfiles;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -84,6 +85,58 @@ public sealed class TerminalSelectionEvolutionPtyTests
 	}
 
 	[Fact(Timeout = 90_000)]
+	public async Task LocalProfileKeepsHiddenUncheckedExtensionOffWhenGitIgnoreIsDisabled()
+	{
+		using var project = CreateHiddenExtensionProfileProject();
+		await using var terminal = await StartAsync(
+			project.Path,
+			new Dictionary<string, string>(),
+			dataRoot => new ProjectProfileStore(() => dataRoot).SaveProfile(
+				project.Path,
+				new ProjectSelectionProfile(
+					SelectedRootFolders: ["src"],
+					SelectedExtensions: [".cs"],
+					SelectedIgnoreOptions: [IgnoreOptionId.UseGitIgnore],
+					RootFolderStates: new Dictionary<string, bool>(PathComparer.Default)
+					{
+						["src"] = true
+					},
+					ExtensionStates: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+					{
+						[".cs"] = true,
+						[".generated"] = false
+					},
+					IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
+					{
+						[IgnoreOptionId.UseGitIgnore] = true
+					})),
+			profile: "local",
+			useProgressCheckpointHost: false);
+
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		var before = await terminal.WaitForScreenAsync(
+			"[x] Use .gitignore",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.DoesNotContain(".generated", before, StringComparison.Ordinal);
+		AssertFrameAggregate(before, "File types", "[x] All (1)");
+
+		await ToggleGitIgnoreAsync(terminal, expectedSelected: false);
+		var revealed = await terminal.WaitForScreenAsync(
+			"[ ] .generated",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+		AssertFrameAggregate(revealed, "File types", "[ ] All (2)");
+		Assert.Contains("[x] .cs", revealed, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+
+		await ExitAsync(terminal);
+	}
+
+	[Fact(Timeout = 90_000)]
 	public async Task RapidTogglesCoalesceIntoOneFinalSettingsRefresh()
 	{
 		using var project = CreateGitIgnoreProject();
@@ -107,9 +160,10 @@ public sealed class TerminalSelectionEvolutionPtyTests
 		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
 		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 
-		await terminal.SendAsync(
-			"\r\u001b[B\r\u001b[B\r\u001b[B\r",
-			TestContext.Current.CancellationToken);
+		await SendSettingsActionAsync(terminal, "\r");
+		await SendSettingsActionAsync(terminal, "\u001b[B\r");
+		await SendSettingsActionAsync(terminal, "\u001b[B\r");
+		await terminal.SendAsync("\u001b[B\r", TestContext.Current.CancellationToken);
 		var optimistic = await terminal.WaitForScreenAsync(
 			"[x] Strip comments",
 			cancellationToken: TestContext.Current.CancellationToken);
@@ -161,9 +215,10 @@ public sealed class TerminalSelectionEvolutionPtyTests
 		await terminal.SendAsync("X", TestContext.Current.CancellationToken);
 		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 
-		await terminal.SendAsync(
-			"\r\u001b[B\u001b[B\r\u001b[B\r\u001b[B\r",
-			TestContext.Current.CancellationToken);
+		await SendSettingsActionAsync(terminal, "\r");
+		await SendSettingsActionAsync(terminal, "\u001b[B\u001b[B\r");
+		await SendSettingsActionAsync(terminal, "\u001b[B\r");
+		await terminal.SendAsync("\u001b[B\r", TestContext.Current.CancellationToken);
 		var optimistic = await terminal.WaitForScreenAsync(
 			"[ ] Empty files",
 			cancellationToken: TestContext.Current.CancellationToken);
@@ -239,6 +294,14 @@ public sealed class TerminalSelectionEvolutionPtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 	}
 
+	private static async Task SendSettingsActionAsync(
+		TerminalPtyHarness terminal,
+		string keys)
+	{
+		await terminal.SendAsync(keys, TestContext.Current.CancellationToken);
+		await Task.Delay(100, TestContext.Current.CancellationToken);
+	}
+
 	private static void AssertFrameAggregate(string screen, string title, string aggregate)
 	{
 		var titleLine = screen.Split('\n').Single(line =>
@@ -249,14 +312,16 @@ public sealed class TerminalSelectionEvolutionPtyTests
 	private static Task<TerminalPtyHarness> StartAsync(
 		string projectPath,
 		IReadOnlyDictionary<string, string> environment,
-		Action<string> initializeDataRoot) =>
+		Action<string> initializeDataRoot,
+		string profile = "standard",
+		bool useProgressCheckpointHost = true) =>
 		TerminalPtyHarness.StartAsync(
 			projectPath,
 			[
 				"tui",
 				projectPath,
 				"--profile",
-				"standard",
+				profile,
 				"--screen",
 				"inline",
 				"--no-mouse",
@@ -268,7 +333,7 @@ public sealed class TerminalSelectionEvolutionPtyTests
 			environment: environment,
 			cancellationToken: TestContext.Current.CancellationToken,
 			initializeDataRoot: initializeDataRoot,
-			useProgressCheckpointHost: true);
+			useProgressCheckpointHost: useProgressCheckpointHost);
 
 	private static TemporaryDirectory CreateGitIgnoreProject()
 	{
@@ -277,6 +342,15 @@ public sealed class TerminalSelectionEvolutionPtyTests
 		project.WriteFile("src/App.cs", "internal sealed class App { }");
 		project.WriteFile("src/settings.json", "{}");
 		project.WriteFile("docs/readme.md", "# Project");
+		project.WriteFile("src/ignored.generated", "generated");
+		project.WriteFile(".gitignore", "*.generated\n");
+		return project;
+	}
+
+	private static TemporaryDirectory CreateHiddenExtensionProfileProject()
+	{
+		var project = new TemporaryDirectory();
+		project.WriteFile("src/App.cs", "internal sealed class App { }");
 		project.WriteFile("src/ignored.generated", "generated");
 		project.WriteFile(".gitignore", "*.generated\n");
 		return project;

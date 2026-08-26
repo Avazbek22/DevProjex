@@ -153,6 +153,68 @@ public sealed class TerminalClonePtyTests
 	}
 
 	[Fact(Timeout = 120_000)]
+	public async Task RepositoryUpdateReconcilesAndSelectsANewExtension()
+	{
+		using var originRoot = new TemporaryDirectory();
+		var origin = originRoot.CreateDirectory("UpdateRepository");
+		File.WriteAllText(
+			Path.Combine(origin, "Existing.cs"),
+			"internal sealed class Existing {}",
+			new UTF8Encoding(false));
+		InitializeGitRepository(origin);
+		using var welcomeDirectory = new TemporaryDirectory();
+		welcomeDirectory.WriteFile("notes.txt", "markerless directory");
+
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			welcomeDirectory.Path,
+			["--language", "en"],
+			columns: 120,
+			rows: 30,
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Choose a workspace action",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await StartCloneAsync(
+			terminal,
+			new Uri(origin).AbsoluteUri,
+			TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Existing.cs",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		File.WriteAllText(
+			Path.Combine(origin, "NewView.qml"),
+			"import QtQuick\nItem {}\n",
+			new UTF8Encoding(false));
+		RunGit(origin, "add", "NewView.qml");
+		RunGit(origin, "commit", "-m", "Add QML view");
+
+		await terminal.SendAsync(":update\r", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Repository updated and project context rebuilt.",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"NewView.qml",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
+		var parameters = await terminal.WaitForScreenAsync(
+			"[x] .qml",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains("[x] .cs", parameters, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
+	}
+
+	[Fact(Timeout = 120_000)]
 	public async Task UrlWorkspaceAppliesEveryTransformationAndExportsRedactedZip()
 	{
 		const string secret = "ghp_a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL";
@@ -598,10 +660,14 @@ public sealed class TerminalClonePtyTests
 
 		foreach (var directory in Directory.EnumerateDirectories(cacheRoot))
 		{
-			if (!string.Equals(
-				    Path.GetFileName(directory),
-				    ".staging",
-				    StringComparison.Ordinal))
+			var name = Path.GetFileName(directory);
+			if (string.Equals(name, ".locks", StringComparison.Ordinal) ||
+			    string.Equals(name, "l", StringComparison.Ordinal))
+			{
+				continue;
+			}
+
+			if (!string.Equals(name, ".staging", StringComparison.Ordinal))
 			{
 				return false;
 			}

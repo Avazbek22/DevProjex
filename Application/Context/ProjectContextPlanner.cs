@@ -11,6 +11,16 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 	private const string MissingSelectedPathCode = "DPX-SELECTION-PATH-MISSING";
 	private static readonly byte[] FingerprintValueSeparator = [0];
 
+	public Task<ProjectContextPlan> BuildWithIgnoreImpactCountsAsync(
+		ProjectContextRequest request,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(request);
+		return BuildAsync(
+			request with { CaptureIgnoreImpactCounts = true },
+			cancellationToken);
+	}
+
 	public async Task<ProjectContextPlan> BuildAsync(
 		ProjectContextRequest request,
 		CancellationToken cancellationToken = default)
@@ -28,7 +38,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				selection.Extensions,
 				selectedIgnoreOptions)
 			{
-				LocalProfileState = selection.LocalProfileState
+				LocalProfileState = selection.LocalProfileState,
+				CaptureIgnoreImpactCounts = request.CaptureIgnoreImpactCounts
 			},
 			cancellationToken);
 		var sourceIdentity = ResolveSourceIdentity(sourceRoot, request.SourceIdentity);
@@ -100,20 +111,40 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			diagnostics.Add(gitDiagnostic);
 
 		var refreshedLocalState = RefreshLocalProfileState(selection.LocalProfileState, loaded);
+		var preserveRequestedSelectionIntent =
+			request.CaptureIgnoreImpactCounts && refreshedLocalState is null;
 		var effectiveSelection = selection with
 		{
 			// Selection is durable user intent; SelectedRoots/SelectedExtensions below are
 			// the effective rows that exist now. Keeping them separate preserves stale-profile
 			// diagnostics and hidden checkbox state without feeding phantom names to the tree.
-			Roots = ResolveRootSelectionIntent(selection, refreshedLocalState, loaded),
-			Extensions = ResolveExtensionSelectionIntent(selection, refreshedLocalState, loaded),
-			GitMode = ResolveGitModeIntent(selection, refreshedLocalState, loaded),
-			Exclusions = ResolveExclusionIntent(selection, refreshedLocalState, loaded),
-			HideSecrets = ResolveHideSecretsIntent(selection, refreshedLocalState, loaded),
-			HidePrivateData = ResolveHidePrivateDataIntent(selection, refreshedLocalState, loaded),
-			CompressCode = ResolveCompressCodeIntent(selection, refreshedLocalState, loaded),
-			StripComments = ResolveStripCommentsIntent(selection, refreshedLocalState, loaded),
-			StripBlankLines = ResolveStripBlankLinesIntent(selection, refreshedLocalState, loaded),
+			Roots = preserveRequestedSelectionIntent && selection.Roots is not null
+				? selection.Roots
+				: ResolveRootSelectionIntent(selection, refreshedLocalState, loaded),
+			Extensions = preserveRequestedSelectionIntent && selection.Extensions is not null
+				? selection.Extensions
+				: ResolveExtensionSelectionIntent(selection, refreshedLocalState, loaded),
+			GitMode = preserveRequestedSelectionIntent
+				? selection.GitMode
+				: ResolveGitModeIntent(selection, refreshedLocalState, loaded),
+			Exclusions = preserveRequestedSelectionIntent
+				? selection.Exclusions
+				: ResolveExclusionIntent(selection, refreshedLocalState, loaded),
+			HideSecrets = preserveRequestedSelectionIntent
+				? selection.HideSecrets
+				: ResolveHideSecretsIntent(selection, refreshedLocalState, loaded),
+			HidePrivateData = preserveRequestedSelectionIntent
+				? selection.HidePrivateData
+				: ResolveHidePrivateDataIntent(selection, refreshedLocalState, loaded),
+			CompressCode = preserveRequestedSelectionIntent
+				? selection.CompressCode
+				: ResolveCompressCodeIntent(selection, refreshedLocalState, loaded),
+			StripComments = preserveRequestedSelectionIntent
+				? selection.StripComments
+				: ResolveStripCommentsIntent(selection, refreshedLocalState, loaded),
+			StripBlankLines = preserveRequestedSelectionIntent
+				? selection.StripBlankLines
+				: ResolveStripBlankLinesIntent(selection, refreshedLocalState, loaded),
 			SelectedPaths = NormalizeRelativeSelectionForOutput(
 				sourceRoot,
 				selectedFullPaths,
@@ -139,7 +170,10 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			Fingerprint: BuildFingerprint(sourceRoot, effectiveSelection, includedNodes, cancellationToken),
 			IncludedBytes: includedBytes,
 			EffectiveFileSizes: effectiveFileSizes,
-			SourceIdentity: sourceIdentity);
+			SourceIdentity: sourceIdentity,
+			HasIgnoreOptionCounts: loaded.HasIgnoreOptionCounts,
+			IgnoreOptionCounts: loaded.IgnoreOptionCounts,
+			IgnoreControllerImpactCounts: loaded.IgnoreControllerImpactCounts);
 	}
 
 	public async Task<ProjectContextPlan> ReprojectSelectionAsync(

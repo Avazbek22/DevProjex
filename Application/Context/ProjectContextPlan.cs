@@ -121,7 +121,10 @@ public sealed record ProjectContextPlan(
 	CodeCompressionSummary? Compression = null,
 	PrivateDataRedactionSummary? Privacy = null,
 	IReadOnlyList<UnscannableFile>? UnscannableFiles = null,
-	IReadOnlyList<EffectiveRedactionFinding>? Findings = null)
+	IReadOnlyList<EffectiveRedactionFinding>? Findings = null,
+	bool HasIgnoreOptionCounts = false,
+	IgnoreOptionCounts IgnoreOptionCounts = default,
+	IgnoreControllerImpactCounts IgnoreControllerImpactCounts = default)
 {
 	public bool HasErrors => Diagnostics.Any(static diagnostic =>
 		diagnostic.Severity == ContextDiagnosticSeverity.Error);
@@ -130,7 +133,10 @@ public sealed record ProjectContextPlan(
 public sealed record ProjectContextRequest(
 	string ProjectPath,
 	ProjectSelectionSpec Selection,
-	ProjectSourceIdentity? SourceIdentity = null);
+	ProjectSourceIdentity? SourceIdentity = null)
+{
+	internal bool CaptureIgnoreImpactCounts { get; init; }
+}
 
 public sealed class ProjectContextValidationException(
 	string code,
