@@ -104,10 +104,13 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		string? displayRootPath = null,
 		OutputPathRedactionDecision? outputPathRedaction = null)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
+
 		// Use HashSet for O(1) deduplication
 		var uniqueFiles = new HashSet<string>(PathComparer.Default);
 		foreach (var path in filePaths)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			if (!string.IsNullOrWhiteSpace(path))
 				uniqueFiles.Add(path);
 		}
@@ -117,7 +120,21 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 
 		// Convert to list and sort in-place
 		var files = new List<string>(uniqueFiles);
-		files.Sort(PathComparer.Default);
+		if (!cancellationToken.CanBeCanceled)
+		{
+			files.Sort(PathComparer.Default);
+		}
+		else
+		{
+			var comparisons = 0u;
+			files.Sort((left, right) =>
+			{
+				if ((++comparisons & 0x3FFu) == 0)
+					cancellationToken.ThrowIfCancellationRequested();
+				return PathComparer.Default.Compare(left, right);
+			});
+			cancellationToken.ThrowIfCancellationRequested();
+		}
 		var redactionContext = transformationContext?.Redaction;
 		outputPathRedaction ??= OutputRootPathPresentation.CaptureRedactionDecision(transformationContext);
 		if (redactionContext is not null)
