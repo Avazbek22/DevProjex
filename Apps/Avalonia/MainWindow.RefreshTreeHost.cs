@@ -78,9 +78,12 @@ public partial class MainWindow : IRefreshTreePipelineHost
 	void IRefreshTreePipelineHost.ReportIncompleteTreeScan() =>
 		_toastService.Show(_localization["Scan.Error.Incomplete"]);
 
-    TreeNodeViewModel IRefreshTreePipelineHost.BuildTreeViewModel(TreeRefreshInput input, BuildTreeResult result)
+	TreeNodeViewModel IRefreshTreePipelineHost.BuildTreeViewModel(
+		TreeRefreshInput input,
+		BuildTreeResult result,
+		CancellationToken cancellationToken)
     {
-        var root = BuildTreeViewModel(result.Root, null);
+		var root = BuildTreeViewModel(result.Root, null, cancellationToken);
         root.DisplayName = input.DisplayName;
         return root;
     }

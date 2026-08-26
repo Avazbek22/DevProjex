@@ -1365,6 +1365,36 @@ public sealed class MainWindowCoordinatorRefactorTests
         Assert.Equal(0, host.ApplyCount);
     }
 
+	[Fact]
+	public async Task RefreshTreePipeline_CancelsViewModelMaterializationBeforeApplyingTree()
+	{
+		var viewModel = CreateViewModel();
+		var buildStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var releaseBuild = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var host = new RecordingRefreshTreeHost(viewModel)
+		{
+			BuildViewModelHandler = (input, result, token) =>
+			{
+				buildStarted.TrySetResult();
+				releaseBuild.Task.Wait(TestContext.Current.CancellationToken);
+				token.ThrowIfCancellationRequested();
+				return new TreeNodeViewModel(result.Root, parent: null, icon: null)
+				{
+					DisplayName = input.DisplayName
+				};
+			}
+		};
+		using var pipeline = new RefreshTreePipeline(host);
+
+		var refreshTask = pipeline.RefreshTreeAsync(cancellationToken: TestContext.Current.CancellationToken);
+		await buildStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+		pipeline.CancelActiveRefresh();
+		releaseBuild.SetResult();
+
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(() => refreshTask);
+		Assert.Equal(0, host.ApplyCount);
+	}
+
     [Fact]
     public async Task RefreshTreePipeline_LeavesStaleProjectTreeUntouched()
     {
@@ -1372,7 +1402,7 @@ public sealed class MainWindowCoordinatorRefactorTests
         RecordingRefreshTreeHost? host = null;
         host = new RecordingRefreshTreeHost(viewModel)
         {
-            BuildViewModelHandler = (input, result) =>
+			BuildViewModelHandler = (input, result, _) =>
             {
                 host!.CurrentPath = @"C:\ProjectB";
                 return new TreeNodeViewModel(result.Root, parent: null, icon: null)
@@ -2178,8 +2208,12 @@ public sealed class MainWindowCoordinatorRefactorTests
 		public void ReportIncompleteTreeScan() =>
 			IncompleteScanReportCount++;
 
-        public TreeNodeViewModel BuildTreeViewModel(TreeRefreshInput input, BuildTreeResult result)
+		public TreeNodeViewModel BuildTreeViewModel(
+			TreeRefreshInput input,
+			BuildTreeResult result,
+			CancellationToken cancellationToken)
         {
+			cancellationToken.ThrowIfCancellationRequested();
             Assert.Same(CapturedTreeInput, input);
             Calls.Add(ProjectLoadSnapshotHostCall.BuildTreeViewModel);
             return new TreeNodeViewModel(result.Root, parent: null, icon: null)
@@ -2403,7 +2437,11 @@ public sealed class MainWindowCoordinatorRefactorTests
 
         public Func<CancellationToken, BuildTreeSnapshotResult>? BuildTreeHandler { get; set; }
 
-        public Func<TreeRefreshInput, BuildTreeResult, TreeNodeViewModel>? BuildViewModelHandler { get; set; }
+		public Func<
+			TreeRefreshInput,
+			BuildTreeResult,
+			CancellationToken,
+			TreeNodeViewModel>? BuildViewModelHandler { get; set; }
 
         public int BuildTreeCount { get; private set; }
 
@@ -2471,9 +2509,13 @@ public sealed class MainWindowCoordinatorRefactorTests
 		public void ReportIncompleteTreeScan() =>
 			IncompleteScanReportCount++;
 
-        public TreeNodeViewModel BuildTreeViewModel(TreeRefreshInput input, BuildTreeResult result)
+		public TreeNodeViewModel BuildTreeViewModel(
+			TreeRefreshInput input,
+			BuildTreeResult result,
+			CancellationToken cancellationToken)
         {
-            return BuildViewModelHandler?.Invoke(input, result) ??
+			cancellationToken.ThrowIfCancellationRequested();
+			return BuildViewModelHandler?.Invoke(input, result, cancellationToken) ??
                    new TreeNodeViewModel(result.Root, parent: null, icon: null)
                    {
                        DisplayName = input.DisplayName

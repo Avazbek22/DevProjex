@@ -78,7 +78,7 @@ internal sealed class RefreshTreePipeline(IRefreshTreePipelineHost host) : IDisp
             using (PerformanceMetrics.Measure("BuildTreeViewModel"))
             {
                 root = await Task.Run(
-                    () => host.BuildTreeViewModel(input, result.Tree),
+					() => host.BuildTreeViewModel(input, result.Tree, linkedToken),
                     linkedToken);
             }
 
