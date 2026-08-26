@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Reflection;
 using DevProjex.Application.Compression;
 using DevProjex.Application.Diagnostics;
 
@@ -894,6 +895,30 @@ public sealed class CodeCompressionSessionTests
 	}
 
 	[Fact]
+	public async Task Reset_WhileDisposeIsCompleting_DoesNotReplaceTheDisposedGeneration()
+	{
+		var compressor = new BlockingDisposeCompressor();
+		var session = new CodeCompressionSession(compressor);
+		var generationField = typeof(CodeCompressionSession).GetField(
+			"_generationCts",
+			BindingFlags.Instance | BindingFlags.NonPublic)!;
+		var disposedGeneration = Assert.IsType<CancellationTokenSource>(generationField.GetValue(session));
+		var dispose = Task.Run(session.Dispose, TestContext.Current.CancellationToken);
+
+		try
+		{
+			await compressor.DisposeStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+			Assert.Throws<ObjectDisposedException>(session.Reset);
+			Assert.Same(disposedGeneration, generationField.GetValue(session));
+		}
+		finally
+		{
+			compressor.AllowDisposeToComplete.TrySetResult();
+			await dispose;
+		}
+	}
+
+	[Fact]
 	public void ResetBeforeQueuedPrewarmBegins_CannotPopulateTheCurrentGenerationCache()
 	{
 		using var compressor = new RecordingCompressor();
@@ -1092,6 +1117,26 @@ public sealed class CodeCompressionSessionTests
 			public void Dispose()
 			{
 			}
+		}
+	}
+
+	private sealed class BlockingDisposeCompressor : ICodeCompressor, IDisposable
+	{
+		public string TransformIdentity => "blocking-dispose:v1";
+		public TaskCompletionSource DisposeStarted { get; } =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+		public TaskCompletionSource AllowDisposeToComplete { get; } =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+		public bool IsSupported(string relativePath) => false;
+
+		public ICodeCompressionScope CreateScope(string projectRoot) =>
+			throw new NotSupportedException();
+
+		public void Dispose()
+		{
+			DisposeStarted.TrySetResult();
+			AllowDisposeToComplete.Task.GetAwaiter().GetResult();
 		}
 	}
 

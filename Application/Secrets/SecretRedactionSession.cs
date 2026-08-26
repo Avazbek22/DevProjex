@@ -147,7 +147,7 @@ public sealed class SecretRedactionSession : IDisposable
 
 	private static Task EnsureDetectorWarmUpLocked(ISecretDetector detector, ref Task? warmUpTask)
 	{
-		if (warmUpTask is not null)
+		if (warmUpTask is { IsFaulted: false, IsCanceled: false })
 			return warmUpTask;
 		warmUpTask = Task.Run(() => detector.WarmUp(CancellationToken.None));
 		_ = warmUpTask.ContinueWith(

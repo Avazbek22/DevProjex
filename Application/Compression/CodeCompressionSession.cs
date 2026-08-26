@@ -739,6 +739,7 @@ public sealed class CodeCompressionSession(ICodeCompressor compressor) : IDispos
 		CancellationTokenSource previousGeneration;
 		lock (_sync)
 		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
 			previousGeneration = _generationCts;
 			_generationCts = new CancellationTokenSource();
 			_generation++;
