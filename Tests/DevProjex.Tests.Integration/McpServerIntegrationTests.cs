@@ -490,8 +490,9 @@ public sealed class McpServerIntegrationTests
 			Path.Combine(project, "Profiled.txt"),
 			$"token: {Secret}\ncontact: {PrivateEmail}\n");
 		var appData = Path.Combine(workspace.Path, "app-data");
+		var physicalProject = McpRootRegistry.ResolvePhysicalExistingPath(project, requireDirectory: true);
 		new ProjectProfileStore(() => appData).SaveProfile(
-			project,
+			physicalProject,
 			new ProjectSelectionProfile(
 				SelectedRootFolders: [],
 				SelectedExtensions: [".txt"],

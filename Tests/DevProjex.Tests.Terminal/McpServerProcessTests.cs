@@ -10,6 +10,7 @@ public sealed class McpServerProcessTests
 {
 	private const string Secret = "ghp_" + "a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL";
 	private const string PrivateEmail = "alice.smith" + "@company.io";
+	private const string PrivatePath = "/home/alice-smith/DevProjexMcpProcessProbe/project";
 
 	[Theory]
 	[InlineData(false)]
@@ -20,15 +21,11 @@ public sealed class McpServerProcessTests
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
 		var ignoredEnvironmentRoot = workspace.CreateDirectory("environment-root");
-		var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-		var privatePath = string.IsNullOrWhiteSpace(userProfile)
-			? string.Empty
-			: Path.Combine(userProfile, "DevProjexMcpProcessProbe", "project");
 		workspace.WriteFile(
 			"project/app.cs",
 			$"internal sealed class ProcessMarker {{ const string Token = \"{Secret}\"; }}\n" +
 			$"// Contact {PrivateEmail}\n" +
-			$"// Project {privatePath}\n");
+			$"// Project {PrivatePath}\n");
 		var application = PublishedApplicationLocator.FindApplicationAssembly();
 		var startInfo = new ProcessStartInfo("dotnet")
 		{
@@ -84,7 +81,7 @@ public sealed class McpServerProcessTests
 				progress: null,
 				options: null,
 				TestContext.Current.CancellationToken);
-			AssertRedactionPolicy(file, privatePath, hidePrivateData);
+			AssertRedactionPolicy(file, hidePrivateData);
 
 			var progress = new InlineProgress<ProgressNotificationValue>();
 			var pack = await client.CallToolAsync(
@@ -98,7 +95,7 @@ public sealed class McpServerProcessTests
 				options: null,
 				TestContext.Current.CancellationToken);
 			Assert.NotEqual(true, pack.IsError);
-			AssertRedactionPolicy(pack, privatePath, hidePrivateData);
+			AssertRedactionPolicy(pack, hidePrivateData);
 		}
 
 		process.StandardInput.Close();
@@ -126,7 +123,6 @@ public sealed class McpServerProcessTests
 
 	private static void AssertRedactionPolicy(
 		CallToolResult result,
-		string project,
 		bool hidePrivateData)
 	{
 		var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
@@ -136,23 +132,14 @@ public sealed class McpServerProcessTests
 		if (hidePrivateData)
 		{
 			Assert.DoesNotContain(PrivateEmail, text, StringComparison.Ordinal);
-			if (CanRedactLocalUserPath(project))
-				Assert.DoesNotContain(project, text, StringComparison.Ordinal);
+			Assert.DoesNotContain(PrivatePath, text, StringComparison.Ordinal);
 		}
 		else
 		{
 			Assert.Contains(PrivateEmail, text, StringComparison.Ordinal);
-			if (!string.IsNullOrEmpty(project))
-				Assert.Contains(project, text, StringComparison.Ordinal);
+			Assert.Contains(PrivatePath, text, StringComparison.Ordinal);
 		}
 	}
-
-	private static bool CanRedactLocalUserPath(string path) =>
-		!string.IsNullOrEmpty(path) &&
-		!string.Equals(
-			path,
-			OutputRootPathPresentation.MaskLocalUserSegment(path),
-			StringComparison.Ordinal);
 
 	private static StringComparison PathComparison =>
 		OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
