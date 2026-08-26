@@ -770,21 +770,7 @@ internal static class PreviewFileCollectionPolicy
 			cancellationToken.ThrowIfCancellationRequested();
 			ordered.Add(path);
 		}
-		if (!cancellationToken.CanBeCanceled)
-		{
-			ordered.Sort(PathComparer.Default);
-		}
-		else
-		{
-			var comparisons = 0u;
-			ordered.Sort((left, right) =>
-			{
-				if ((++comparisons & 0x3FFu) == 0)
-					cancellationToken.ThrowIfCancellationRequested();
-				return PathComparer.Default.Compare(left, right);
-			});
-			cancellationToken.ThrowIfCancellationRequested();
-		}
+		CancellationAwareSort.Sort(ordered, PathComparer.Default, cancellationToken);
 
         var hash = new HashCode();
         foreach (var path in ordered)
@@ -865,22 +851,8 @@ internal static class PreviewFileCollectionPolicy
 
         var orderedPaths = new List<string>(uniquePaths.Count);
         orderedPaths.AddRange(uniquePaths);
-		if (!cancellationToken.CanBeCanceled)
-		{
-			orderedPaths.Sort(PathComparer.Default);
-		}
-		else
-		{
-			var comparisons = 0u;
-			orderedPaths.Sort((left, right) =>
-			{
-				if ((++comparisons & 0x3FFu) == 0)
-					cancellationToken.ThrowIfCancellationRequested();
-				return PathComparer.Default.Compare(left, right);
-			});
-			cancellationToken.ThrowIfCancellationRequested();
-		}
-        return orderedPaths;
+		CancellationAwareSort.Sort(orderedPaths, PathComparer.Default, cancellationToken);
+		return orderedPaths;
     }
 
     public static IEnumerable<string> EnumerateFilePaths(TreeNodeDescriptor node)

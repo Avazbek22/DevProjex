@@ -56,21 +56,7 @@ public sealed class ProjectCopyExportPlanBuilder
 				entries.Add(new ProjectCopyExportPlanEntry(sourcePath, relativePath, node.IsDirectory));
 		}
 
-		if (!cancellationToken.CanBeCanceled)
-		{
-			entries.Sort(CompareEntries);
-		}
-		else
-		{
-			var comparisons = 0u;
-			entries.Sort((left, right) =>
-			{
-				if ((++comparisons & 0x3FFu) == 0)
-					cancellationToken.ThrowIfCancellationRequested();
-				return CompareEntries(left, right);
-			});
-			cancellationToken.ThrowIfCancellationRequested();
-		}
+		CancellationAwareSort.Sort(entries, CompareEntries, cancellationToken);
 		return new ProjectCopyExportPlan(rootPath, projectName, entries);
 	}
 

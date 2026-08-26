@@ -120,21 +120,7 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 
 		// Convert to list and sort in-place
 		var files = new List<string>(uniqueFiles);
-		if (!cancellationToken.CanBeCanceled)
-		{
-			files.Sort(PathComparer.Default);
-		}
-		else
-		{
-			var comparisons = 0u;
-			files.Sort((left, right) =>
-			{
-				if ((++comparisons & 0x3FFu) == 0)
-					cancellationToken.ThrowIfCancellationRequested();
-				return PathComparer.Default.Compare(left, right);
-			});
-			cancellationToken.ThrowIfCancellationRequested();
-		}
+		CancellationAwareSort.Sort(files, PathComparer.Default, cancellationToken);
 		var redactionContext = transformationContext?.Redaction;
 		outputPathRedaction ??= OutputRootPathPresentation.CaptureRedactionDecision(transformationContext);
 		if (redactionContext is not null)

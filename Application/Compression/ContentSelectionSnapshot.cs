@@ -59,21 +59,7 @@ public sealed record ContentSelectionSnapshot(
 		if (!pathsAreSorted)
 		{
 			var sortedPaths = paths.ToArray();
-			if (!cancellationToken.CanBeCanceled)
-			{
-				Array.Sort(sortedPaths, PathComparer.Default);
-			}
-			else
-			{
-				var comparisons = 0u;
-				Array.Sort(sortedPaths, (left, right) =>
-				{
-					if ((++comparisons & 0x3FFu) == 0)
-						cancellationToken.ThrowIfCancellationRequested();
-					return PathComparer.Default.Compare(left, right);
-				});
-				cancellationToken.ThrowIfCancellationRequested();
-			}
+			CancellationAwareSort.Sort(sortedPaths, PathComparer.Default, cancellationToken);
 			fingerprintPaths = sortedPaths;
 		}
 

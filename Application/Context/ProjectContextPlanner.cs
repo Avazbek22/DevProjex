@@ -853,11 +853,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			normalizedPaths.Add(relativePath == "." ? "." : NormalizePathSeparators(relativePath));
 		}
 
-		normalizedPaths.Sort((left, right) =>
-		{
-			cancellationToken.ThrowIfCancellationRequested();
-			return StringComparer.Ordinal.Compare(left, right);
-		});
+		CancellationAwareSort.Sort(normalizedPaths, StringComparer.Ordinal, cancellationToken);
 		return normalizedPaths;
 	}
 
@@ -896,11 +892,10 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			cancellationToken.ThrowIfCancellationRequested();
 			orderedNodes.Add(node);
 		}
-		orderedNodes.Sort((left, right) =>
-		{
-			cancellationToken.ThrowIfCancellationRequested();
-			return PathComparer.Default.Compare(left.FullPath, right.FullPath);
-		});
+		CancellationAwareSort.Sort(
+			orderedNodes,
+			(left, right) => PathComparer.Default.Compare(left.FullPath, right.FullPath),
+			cancellationToken);
 		foreach (var node in orderedNodes)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -944,12 +939,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				includedFolders.Add(node.FullPath);
 		}
 
-		cancellationToken.ThrowIfCancellationRequested();
-		includedFolders.Sort((left, right) =>
-		{
-			cancellationToken.ThrowIfCancellationRequested();
-			return PathComparer.Default.Compare(left, right);
-		});
+		CancellationAwareSort.Sort(includedFolders, PathComparer.Default, cancellationToken);
 		return includedFolders.ToArray();
 	}
 }

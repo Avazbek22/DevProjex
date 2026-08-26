@@ -760,24 +760,10 @@ public sealed class PreviewDocumentBuilder(
                 uniqueFiles.Add(path);
         }
 
-        var files = new List<string>(uniqueFiles.Count);
-        files.AddRange(uniqueFiles);
-		if (!cancellationToken.CanBeCanceled)
-		{
-			files.Sort(PathComparer.Default);
-		}
-		else
-		{
-			var comparisons = 0u;
-			files.Sort((left, right) =>
-			{
-				if ((++comparisons & 0x3FFu) == 0)
-					cancellationToken.ThrowIfCancellationRequested();
-				return PathComparer.Default.Compare(left, right);
-			});
-			cancellationToken.ThrowIfCancellationRequested();
-		}
-        return files;
+		var files = new List<string>(uniqueFiles.Count);
+		files.AddRange(uniqueFiles);
+		CancellationAwareSort.Sort(files, PathComparer.Default, cancellationToken);
+		return files;
     }
 
     private static bool AppendMultilineText(PreviewTextStorageBuilder builder, ReadOnlySpan<char> text)

@@ -111,11 +111,7 @@ public static class ProjectTreeSelectionProjection
 
 		cancellationToken.ThrowIfCancellationRequested();
 		var orderedPaths = new List<string>(uniquePaths);
-		orderedPaths.Sort((left, right) =>
-		{
-			cancellationToken.ThrowIfCancellationRequested();
-			return PathComparer.Default.Compare(left, right);
-		});
+		CancellationAwareSort.Sort(orderedPaths, PathComparer.Default, cancellationToken);
 		return orderedPaths;
 	}
 
