@@ -45,6 +45,7 @@ RID publish contains exactly one primary DevProjex application executable.
 - `devprojex open` opens or reuses Desktop.
 - `devprojex ui` sends a semantic request to an existing Desktop instance.
 - `devprojex mcp` starts the local read-only MCP stdio server without initializing Desktop or Terminal Workspace.
+- `devprojex mcp --hide-private-data` enables private-data redaction for the server process. Secret redaction remains mandatory, and MCP tool schemas expose no redaction controls.
 - A graphical launch starts Desktop.
 
 On Windows, `devprojex` means the installed App Execution Alias or the generated
@@ -732,6 +733,7 @@ that prevents an accepted option from becoming a no-op.
 | analyze/tree/context/project/open | `--exclude` | profile exclusions | replaces the path-exclusion set with repeated typed values | repeatable; `none` conflicts with every other value; conflicts with `open --last` | requested payload/path stays on stdout; invalid value exits `2` | parser, resolver, handler, process |
 | analyze/context/project/open | `--hide-secrets` | profile content-transformation state | independently enables or disables detected-value redaction without changing path filters | optional explicit Boolean; conflicts with `open --last` | requested payload/path stays on stdout; inspection failure exits `1` without a complete artifact | parser, resolver, handler, process |
 | analyze/context/project/open | `--hide-private-data` | profile content-transformation state | independently enables or disables private-data redaction without changing path filters | optional explicit Boolean; conflicts with `open --last` | requested payload/path stays on stdout; inspection failure exits `1` without a complete artifact | parser, resolver, handler, process |
+| `mcp` | `--hide-private-data` | off | enables private-data redaction for the entire server process | startup-only; tool schemas and profiles cannot alter it; secret redaction remains mandatory | stdout remains JSON-RPC-only; startup failure exits `2` | parser, MCP contract, process |
 | analyze/context/project/open | `--compress-code` | profile content-transformation state | independently enables or disables syntax-aware body compression without changing path filters | optional explicit Boolean; conflicts with `open --last` | requested payload/path stays on stdout; unsupported or rejected files remain complete | parser, resolver, handler, process |
 | analyze/context/project/open | `--strip-comments` | profile content-transformation state | independently removes syntax-tree comments and Python docstrings without changing path filters | optional explicit Boolean; conflicts with `open --last` | requested payload/path stays on stdout; unsupported or rejected files remain complete | parser, resolver, handler, process |
 | analyze/context/project/open | `--strip-blank-lines` | profile content-transformation state | independently removes unprotected whitespace-only source lines without changing path filters | optional explicit Boolean; conflicts with `open --last` | requested payload/path stays on stdout; unsupported or rejected files remain complete | parser, resolver, handler, process |

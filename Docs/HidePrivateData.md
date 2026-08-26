@@ -282,5 +282,8 @@ Use `--hide-private-data` with `analyze`, `open`, `export context`, and `export 
 explicit `--hide-private-data false` overrides a saved portable profile. Terminal Workspace
 exposes the same transformation in Parameters and through `:set hide-private-data on|off`;
 its preview, context export, and project-copy paths use the same redaction session.
+For MCP, `devprojex mcp --hide-private-data` enables private-data redaction for the whole
+server process; it is off by default, tool calls and profiles cannot change it, and secret
+redaction remains mandatory in both modes.
 `analyze --findings` lists private-data findings by rule id, `private-data` category, relative
 path, and one-based source line — never the detected value.

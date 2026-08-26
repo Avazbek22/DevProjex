@@ -1,6 +1,9 @@
 namespace DevProjex.Mcp;
 
-internal sealed class McpProjectService(McpRootRegistry roots, McpServices services)
+internal sealed class McpProjectService(
+	McpRootRegistry roots,
+	McpServices services,
+	bool hidePrivateData)
 {
 	public async Task<ProjectContextPlan> BuildPlanAsync(
 		string? project,
@@ -26,7 +29,7 @@ internal sealed class McpProjectService(McpRootRegistry roots, McpServices servi
 				new ProjectSelectionSpec(
 					GitMode: trackedOnly ? GitFilteringMode.TrackedFilesOnly : null,
 					HideSecrets: true,
-					HidePrivateData: true),
+					HidePrivateData: hidePrivateData),
 				cancellationToken)
 			.ConfigureAwait(false);
 		var marks = ProjectSelectionMarkedSecretsResolver.Resolve(selection);
@@ -121,7 +124,9 @@ internal sealed class McpProjectService(McpRootRegistry roots, McpServices servi
 			new SecretRedactionContext(
 				plan.SourceRoot,
 				services.RedactionSession,
-				SecretRedactionFeatures.Secrets | SecretRedactionFeatures.PrivateData))!;
+				SecretRedactionFeatureSelection.Resolve(
+					hideSecrets: true,
+					hidePrivateData)))!;
 	}
 
 	public string ResolveProtectedDocumentRoot(ProjectContextPlan plan)

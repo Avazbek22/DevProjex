@@ -8,13 +8,27 @@ namespace DevProjex.Tests.Terminal;
 
 public sealed class McpServerProcessTests
 {
-	[Fact]
-	public async Task RealProcessSpeaksOnlyJsonRpcAndStopsOnStandardInputEof()
+	private const string Secret = "ghp_" + "a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL";
+	private const string PrivateEmail = "alice.smith" + "@company.io";
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task RealProcessAppliesServerRedactionPolicyAndStopsOnStandardInputEof(
+		bool hidePrivateData)
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
 		var ignoredEnvironmentRoot = workspace.CreateDirectory("environment-root");
-		workspace.WriteFile("project/app.cs", "internal sealed class ProcessMarker {}\n");
+		var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+		var privatePath = string.IsNullOrWhiteSpace(userProfile)
+			? string.Empty
+			: Path.Combine(userProfile, "DevProjexMcpProcessProbe", "project");
+		workspace.WriteFile(
+			"project/app.cs",
+			$"internal sealed class ProcessMarker {{ const string Token = \"{Secret}\"; }}\n" +
+			$"// Contact {PrivateEmail}\n" +
+			$"// Project {privatePath}\n");
 		var application = PublishedApplicationLocator.FindApplicationAssembly();
 		var startInfo = new ProcessStartInfo("dotnet")
 		{
@@ -29,6 +43,8 @@ public sealed class McpServerProcessTests
 		startInfo.ArgumentList.Add("mcp");
 		startInfo.ArgumentList.Add("--root");
 		startInfo.ArgumentList.Add(project);
+		if (hidePrivateData)
+			startInfo.ArgumentList.Add("--hide-private-data");
 		startInfo.Environment["CLAUDE_PROJECT_DIR"] = ignoredEnvironmentRoot;
 		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data");
 
@@ -62,6 +78,14 @@ public sealed class McpServerProcessTests
 			using var textDocument = JsonDocument.Parse(text);
 			Assert.True(JsonElement.DeepEquals(structured, textDocument.RootElement));
 
+			var file = await client.CallToolAsync(
+				"get_file",
+				new Dictionary<string, object?> { ["path"] = "app.cs" },
+				progress: null,
+				options: null,
+				TestContext.Current.CancellationToken);
+			AssertRedactionPolicy(file, privatePath, hidePrivateData);
+
 			var progress = new InlineProgress<ProgressNotificationValue>();
 			var pack = await client.CallToolAsync(
 				"pack_context",
@@ -74,6 +98,7 @@ public sealed class McpServerProcessTests
 				options: null,
 				TestContext.Current.CancellationToken);
 			Assert.NotEqual(true, pack.IsError);
+			AssertRedactionPolicy(pack, privatePath, hidePrivateData);
 		}
 
 		process.StandardInput.Close();
@@ -98,6 +123,36 @@ public sealed class McpServerProcessTests
 			Assert.Equal("2.0", document.RootElement.GetProperty("jsonrpc").GetString());
 		});
 	}
+
+	private static void AssertRedactionPolicy(
+		CallToolResult result,
+		string project,
+		bool hidePrivateData)
+	{
+		var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
+		Assert.NotEqual(true, result.IsError);
+		Assert.Contains("ProcessMarker", text, StringComparison.Ordinal);
+		Assert.DoesNotContain(Secret, text, StringComparison.Ordinal);
+		if (hidePrivateData)
+		{
+			Assert.DoesNotContain(PrivateEmail, text, StringComparison.Ordinal);
+			if (CanRedactLocalUserPath(project))
+				Assert.DoesNotContain(project, text, StringComparison.Ordinal);
+		}
+		else
+		{
+			Assert.Contains(PrivateEmail, text, StringComparison.Ordinal);
+			if (!string.IsNullOrEmpty(project))
+				Assert.Contains(project, text, StringComparison.Ordinal);
+		}
+	}
+
+	private static bool CanRedactLocalUserPath(string path) =>
+		!string.IsNullOrEmpty(path) &&
+		!string.Equals(
+			path,
+			OutputRootPathPresentation.MaskLocalUserSegment(path),
+			StringComparison.Ordinal);
 
 	private static StringComparison PathComparison =>
 		OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;

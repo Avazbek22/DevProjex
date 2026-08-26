@@ -14,16 +14,41 @@ public static class McpServerHost
 	public static Task RunAsync(
 		IReadOnlyList<string> roots,
 		CancellationToken cancellationToken = default) =>
+		RunAsync(roots, hidePrivateData: false, cancellationToken: cancellationToken);
+
+	public static Task RunAsync(
+		IReadOnlyList<string> roots,
+		bool hidePrivateData,
+		CancellationToken cancellationToken = default) =>
 		RunAsync(
 			roots,
 			Console.OpenStandardInput(),
 			Console.OpenStandardOutput(),
+			hidePrivateData,
 			cancellationToken);
 
 	public static async Task RunAsync(
 		IReadOnlyList<string> roots,
 		Stream input,
 		Stream output,
+		CancellationToken cancellationToken = default,
+		Func<string>? appDataPathProvider = null,
+		string? tempRoot = null) =>
+		await RunAsync(
+				roots,
+				input,
+				output,
+				false,
+				cancellationToken,
+				appDataPathProvider,
+				tempRoot)
+			.ConfigureAwait(false);
+
+	public static async Task RunAsync(
+		IReadOnlyList<string> roots,
+		Stream input,
+		Stream output,
+		bool hidePrivateData,
 		CancellationToken cancellationToken = default,
 		Func<string>? appDataPathProvider = null,
 		string? tempRoot = null)
@@ -35,7 +60,7 @@ public static class McpServerHost
 		var rootRegistry = new McpRootRegistry(roots);
 		using var services = McpServices.Create(rootRegistry, appDataPathProvider);
 		using var packs = new McpPackRegistry(tempRoot);
-		var projectService = new McpProjectService(rootRegistry, services);
+		var projectService = new McpProjectService(rootRegistry, services, hidePrivateData);
 		var tools = new DevProjexMcpTools(rootRegistry, projectService, packs);
 		var catalog = new DevProjexMcpToolCatalog(tools);
 

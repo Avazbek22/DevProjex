@@ -75,7 +75,10 @@ devprojex
 `dev` is a hidden maintainer namespace. See `CONTRIBUTING.md` for its supported
 diagnostic workflows.
 
-`devprojex mcp [--root PATH ...]` starts the local read-only MCP stdio server.
+`devprojex mcp [--root PATH ...] [--hide-private-data]` starts the local
+read-only MCP stdio server. Secret redaction is mandatory; private-data
+redaction is enabled only by the server startup flag and cannot be controlled by
+tools.
 Explicit roots take precedence over `CLAUDE_PROJECT_DIR` and the current
 directory. See [McpServer.md](McpServer.md) for its security model, tools, and
 client configuration.
