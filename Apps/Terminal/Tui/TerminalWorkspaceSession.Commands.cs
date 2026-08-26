@@ -409,9 +409,8 @@ internal sealed partial class TerminalWorkspaceSession
 		if (normalized.Length > 0)
 		{
 			_commandHistory.Add(normalized);
-			_commandHistorySaveTask = TrackBackgroundTask(PersistCommandHistoryAsync(
-				_commandHistorySaveTask,
-				_commandHistory.Entries.ToArray()));
+			if (_commandHistoryPersistence.Enqueue(_commandHistory.Entries.ToArray()) is { } saveTask)
+				TrackBackgroundTask(saveTask);
 		}
 
 		var parse = _commandParser.Parse(text, BuildCommandParseContext());
@@ -566,34 +565,6 @@ internal sealed partial class TerminalWorkspaceSession
 			return;
 		FocusPane(_commandReturnPane);
 		_application.LayoutAndDraw();
-	}
-
-	private async Task PersistCommandHistoryAsync(
-		Task? precedingSave,
-		IReadOnlyList<string> history)
-	{
-		if (precedingSave is not null)
-		{
-			try
-			{
-				await precedingSave.ConfigureAwait(false);
-			}
-			catch
-			{
-				// One failed write must not poison later history persistence.
-			}
-		}
-
-		try
-		{
-			await _services.TerminalSettingsStore
-				.SaveCommandHistoryAsync(history, CancellationToken.None)
-				.ConfigureAwait(false);
-		}
-		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-		{
-			// Command execution remains usable when the per-user history cannot be persisted.
-		}
 	}
 
 	private Task ShowCommandFailureAsync(string code, string message)

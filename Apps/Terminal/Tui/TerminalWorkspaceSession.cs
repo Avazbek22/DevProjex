@@ -33,6 +33,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private readonly TerminalWorkspaceCommandParser _commandParser = new();
 	private readonly TerminalClipboardWriter _clipboardWriter;
 	private readonly TerminalCommandHistory _commandHistory;
+	private readonly TerminalCommandHistoryPersistenceQueue _commandHistoryPersistence;
 	private readonly ITerminalOperationObserver _operationObserver;
 	private readonly Action _prepareForShutdown;
 	private readonly EventHandler<global::Terminal.Gui.App.EventArgs<System.Drawing.Rectangle>> _screenChangedHandler;
@@ -64,7 +65,6 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private Task? _previewSearchTask;
 	private Task? _transientStatusTask;
 	private Task? _commandResultTask;
-	private Task? _commandHistorySaveTask;
 	private IRepositoryCacheSession? _ownedRepositorySession;
 	private long _projectionRequestId;
 	private long _previewRequestId;
@@ -165,6 +165,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			environment);
 		_commandHistory = new TerminalCommandHistory(
 			services.TerminalSettingsStore.LoadCommandHistory());
+		_commandHistoryPersistence = new TerminalCommandHistoryPersistenceQueue(
+			services.TerminalSettingsStore.SaveCommandHistoryAsync);
 		_sessionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 		var initialScreen = _application.Driver?.Screen ?? _application.Screen;
 		_terminalWidth = Math.Max(_environment.Width, initialScreen.Width);
