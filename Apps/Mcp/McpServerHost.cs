@@ -13,12 +13,7 @@ public static class McpServerHost
 
 	public static Task RunAsync(
 		IReadOnlyList<string> roots,
-		CancellationToken cancellationToken = default) =>
-		RunAsync(roots, hidePrivateData: false, cancellationToken: cancellationToken);
-
-	public static Task RunAsync(
-		IReadOnlyList<string> roots,
-		bool hidePrivateData,
+		bool hidePrivateData = false,
 		CancellationToken cancellationToken = default) =>
 		RunAsync(
 			roots,
@@ -31,24 +26,7 @@ public static class McpServerHost
 		IReadOnlyList<string> roots,
 		Stream input,
 		Stream output,
-		CancellationToken cancellationToken = default,
-		Func<string>? appDataPathProvider = null,
-		string? tempRoot = null) =>
-		await RunAsync(
-				roots,
-				input,
-				output,
-				false,
-				cancellationToken,
-				appDataPathProvider,
-				tempRoot)
-			.ConfigureAwait(false);
-
-	public static async Task RunAsync(
-		IReadOnlyList<string> roots,
-		Stream input,
-		Stream output,
-		bool hidePrivateData,
+		bool hidePrivateData = false,
 		CancellationToken cancellationToken = default,
 		Func<string>? appDataPathProvider = null,
 		string? tempRoot = null)

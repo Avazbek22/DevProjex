@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using DevProjex.Application.Services;
 using DevProjex.Mcp;
 using ModelContextProtocol;
 using ModelContextProtocol.Client;
@@ -88,7 +89,7 @@ public sealed class McpServerProcessTests
 				"pack_context",
 				new Dictionary<string, object?>
 				{
-					["view"] = "content",
+					["view"] = "tree-content",
 					["format"] = "text"
 				},
 				progress,
@@ -96,29 +97,55 @@ public sealed class McpServerProcessTests
 				TestContext.Current.CancellationToken);
 			Assert.NotEqual(true, pack.IsError);
 			AssertRedactionPolicy(pack, hidePrivateData);
+			AssertGeneratedRootPathPolicy(pack, expectedProject, hidePrivateData);
 		}
 
 		process.StandardInput.Close();
-		await process.WaitForExitAsync(TestContext.Current.CancellationToken)
-			.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken);
+		var standardOutputEofTask = recordingOutput.DrainToEndAsync(TestContext.Current.CancellationToken);
+		await Task.WhenAll(
+			process.WaitForExitAsync(TestContext.Current.CancellationToken)
+				.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken),
+			standardOutputEofTask
+				.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken));
 		var standardError = await standardErrorTask;
 		Assert.Equal(0, process.ExitCode);
 		Assert.True(string.IsNullOrWhiteSpace(standardError), $"Unexpected stderr: {standardError}");
 
-		var transcript = recordingOutput.GetRecordedText();
-		var messages = transcript.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-		Assert.NotEmpty(messages);
+		var messages = ParseJsonRpcMessages(recordingOutput.GetRecordedText());
 		Assert.Contains(messages, static message =>
 		{
-			using var document = JsonDocument.Parse(message.TrimEnd('\r'));
+			using var document = JsonDocument.Parse(message);
 			return document.RootElement.TryGetProperty("method", out var method) &&
 			       method.GetString() == NotificationMethods.ProgressNotification;
 		});
-		Assert.All(messages, static message =>
+	}
+
+	private static IReadOnlyList<string> ParseJsonRpcMessages(string transcript)
+	{
+		var lines = transcript.Split('\n');
+		var messageCount = lines.Length;
+		if (messageCount > 0 && lines[^1].Length == 0)
+			messageCount--;
+
+		Assert.True(messageCount > 0, "MCP stdout did not contain any JSON-RPC messages.");
+		var messages = new string[messageCount];
+		for (var index = 0; index < messageCount; index++)
 		{
-			using var document = JsonDocument.Parse(message.TrimEnd('\r'));
+			var line = lines[index];
+			var message = line.EndsWith('\r') ? line[..^1] : line;
+			Assert.False(
+				string.IsNullOrWhiteSpace(message),
+				$"MCP stdout contained an empty non-protocol line at index {index}.");
+			Assert.DoesNotContain('\r', message);
+			Assert.StartsWith("{", message, StringComparison.Ordinal);
+			Assert.EndsWith("}", message, StringComparison.Ordinal);
+			using var document = JsonDocument.Parse(message);
+			Assert.Equal(JsonValueKind.Object, document.RootElement.ValueKind);
 			Assert.Equal("2.0", document.RootElement.GetProperty("jsonrpc").GetString());
-		});
+			messages[index] = message;
+		}
+
+		return messages;
 	}
 
 	private static void AssertRedactionPolicy(
@@ -139,6 +166,19 @@ public sealed class McpServerProcessTests
 			Assert.Contains(PrivateEmail, text, StringComparison.Ordinal);
 			Assert.Contains(PrivatePath, text, StringComparison.Ordinal);
 		}
+	}
+
+	private static void AssertGeneratedRootPathPolicy(
+		CallToolResult result,
+		string project,
+		bool hidePrivateData)
+	{
+		var text = Assert.IsType<TextContentBlock>(Assert.Single(result.Content)).Text;
+		var protectedProject = OutputRootPathPresentation.MaskLocalUserSegment(project);
+		var expectedProject = hidePrivateData ? protectedProject : project;
+		Assert.Contains(expectedProject, text, StringComparison.Ordinal);
+		if (!string.Equals(project, protectedProject, StringComparison.Ordinal))
+			Assert.DoesNotContain(hidePrivateData ? project : protectedProject, text, StringComparison.Ordinal);
 	}
 
 	private static StringComparison PathComparison =>
@@ -167,13 +207,24 @@ public sealed class McpServerProcessTests
 
 	private sealed class RecordingReadStream(Stream source) : Stream
 	{
+		private static readonly Encoding StrictUtf8 = new UTF8Encoding(
+			encoderShouldEmitUTF8Identifier: false,
+			throwOnInvalidBytes: true);
 		private readonly MemoryStream _recording = new();
 		private readonly object _sync = new();
 
 		public string GetRecordedText()
 		{
 			lock (_sync)
-				return Encoding.UTF8.GetString(_recording.ToArray());
+				return StrictUtf8.GetString(_recording.ToArray());
+		}
+
+		public async Task DrainToEndAsync(CancellationToken cancellationToken)
+		{
+			var buffer = new byte[8 * 1024];
+			while (await ReadAsync(buffer, cancellationToken).ConfigureAwait(false) > 0)
+			{
+			}
 		}
 
 		public override async ValueTask<int> ReadAsync(
