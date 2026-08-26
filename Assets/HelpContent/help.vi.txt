@@ -395,7 +395,7 @@ Các đoạn đã che được đánh dấu trong Bản xem trước. Bấm vào
 
 Menu ngữ cảnh của Bản xem trước mở rộng các quyết định này. Bấm chuột phải vào một lần xuất hiện đã phát hiện để giữ nguyên hoặc ẩn lại toàn bộ lần xuất hiện theo quy tắc đó hay mọi lần xuất hiện đã phát hiện trong cùng tệp bằng một thao tác. Để đánh dấu thủ công một giá trị đã chọn trong nội dung tệp, bấm chuột phải vào giá trị: "Ẩn… tại đây" chỉ ẩn lần xuất hiện đó trong phiên hiện tại, "Luôn ẩn…" tạo dấu bền vững cho mọi lần xuất hiện của giá trị, còn "Ẩn… dưới dạng dữ liệu cá nhân" tạo dấu bền vững do tùy chọn "Ẩn dữ liệu cá nhân" kiểm soát. Lệnh "Xóa dấu" xóa dấu thủ công; giá trị vẫn được bộ dò phát hiện sẽ tiếp tục bị ẩn. Giá trị thủ công phải là một dòng dài từ 8 đến 512 ký tự được chọn trong nội dung tệp. Việc tạo dấu sẽ tự động bật tùy chọn tương ứng. Dấu bền vững chỉ lưu định danh giá trị đã băm khóa và lớp của giá trị, không bao giờ lưu văn bản gốc.
 
-Một thư mục hoặc bản sao ZIP cũng thay đổi văn bản phù hợp và có thể không còn được xây dựng hoặc chạy nữa. Các tệp nhị phân được sao chép không thay đổi và không được quét. Tệp văn bản đã chọn trên 16 MiB hoặc lỗi phát hiện sẽ dừng hoạt động thay vì xuất văn bản chưa được kiểm tra.
+Một thư mục hoặc bản sao ZIP cũng thay đổi văn bản phù hợp và có thể không còn được xây dựng hoặc chạy nữa. Các tệp nhị phân được sao chép không thay đổi và không được quét. Tệp văn bản đã chọn lớn hơn 16 MiB sẽ bị bỏ qua và được báo cáo, trong khi phần đầu ra còn lại vẫn được hoàn tất. Lỗi phát hiện sẽ dừng toàn bộ hoạt động.
 
 Quy tắc báo cáo số lượng chỉ phù hợp. Zero không có nghĩa là dự án an toàn. CLI sử dụng `--hide-secrets`; chi tiết và giới hạn kỹ thuật có trong `Docs/HideSecrets.md`.
 

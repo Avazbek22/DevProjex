@@ -96,8 +96,10 @@ to stdout and exit with code `0` without opening Desktop or Terminal Workspace.
 
 ## Common Selection Options
 
-`analyze`, `tree`, `export context`, `export project`, and `open` accept the same
-typed path selection. `open` additionally accepts the `auto` profile:
+All five commands accept the same typed path-selection options, through `--exclude`
+in the list below. `analyze`, `export context`, `export project`, and `open` also
+accept the five content-transformation options that follow; `tree` deliberately
+does not. `open` additionally accepts the `auto` profile:
 
 ```text
 --profile <standard|local|FILE>
