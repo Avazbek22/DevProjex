@@ -4587,6 +4587,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 					StringComparison.Ordinal) &&
 				      !viewModel.StatusBusy,
 				"the real compression prewarm to finish before injecting status states");
+			await UiTestDriver.WaitForInitialMetricsBaselineAsync(window);
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
 			viewModel.SetCompressionPreparationStatus(isActive: true);
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);

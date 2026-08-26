@@ -124,6 +124,9 @@ internal sealed class MetricsPipeline(
 
     public bool IsBackgroundActive => _isBackgroundMetricsActive;
 
+	internal bool IsCompressionPrewarmActive =>
+		Volatile.Read(ref _compressionPrewarmCts) is not null;
+
     public bool HasCompleteBaseline
     {
         get => _hasCompleteMetricsBaseline;
