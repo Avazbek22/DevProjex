@@ -5,13 +5,13 @@
 <p align="center">
   <a href="https://github.com/Avazbek22/DevProjex/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/Avazbek22/DevProjex/total"></a>
   <a href="https://github.com/Avazbek22/DevProjex/actions"><img alt="Build" src="https://img.shields.io/github/actions/workflow/status/Avazbek22/DevProjex/dotnet.yml"></a>
-  <a href="https://github.com/Avazbek22/DevProjex/blob/master/LICENSE"><img alt="License" src="https://img.shields.io/github/license/Avazbek22/DevProjex"></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
   <img alt="Last commit" src="https://img.shields.io/github/last-commit/Avazbek22/DevProjex">
   <img alt="Platforms" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-green">
 </p>
 
 <p align="center">
-  <strong>The fastest way to turn a real codebase into clean, AI-ready context.</strong>
+  <strong>Turn a real codebase into clean, AI-ready context — and see exactly what you're sending.</strong>
 </p>
 
 DevProjex turns any folder or codebase into clean, ready-to-use context for AI chats, code reviews, and documentation. Use it as a **GUI**, a **TUI**, a **CLI**, or an **MCP server** for AI agents — whatever fits your workflow.
@@ -75,12 +75,11 @@ Works with any language, repository, or project structure.
 ## Feature overview ✨
 
 **Choose and control**
-* **Smart Ignore** — filters stack-specific build output, dependency folders, and caches without touching your source. [How it works ↓](#how-smart-ignore-works-)
-* **Hide Secrets** — replaces detected credential values in the exported output while keeping the file and surrounding code. [Details](Docs/HideSecrets.md)
-* **Hide private data** — hides selected-content email, global IP, local-user path, MAC, and international-phone findings. [Details](Docs/HidePrivateData.md)
-* **Code compression** — keeps declarations and state while shortening named implementations across 14 languages; on pure source code it cuts packed size by roughly two thirds (measured −69% on DevProjex's own C# sources)
-* **Strip comments** — removes comments and documentation comments across 20 syntax-aware language packs without modifying source files
-* **Strip blank lines** — removes whitespace-only source lines across the same 20 syntax-aware language packs while preserving multiline literals and markup text
+* **Smart Ignore** — hides build output, dependency folders, and caches, and checks for evidence before hiding anything. [How it works ↓](#how-smart-ignore-works-)
+* **Hide Secrets** — masks detected credential values in everything you export. [How it works ↓](#how-hide-secrets-and-hide-private-data-work-)
+* **Hide private data** — optionally masks emails, IPs, MACs, phones, and user paths. [How it works ↓](#how-hide-secrets-and-hide-private-data-work-)
+* **Code compression** — keeps declarations and signatures, empties implementation bodies; pure code gets ~3× smaller. [How it works ↓](#how-code-compression-works-)
+* **Strip comments** and **strip blank lines** — syntax-aware cleanup across 20 language packs, without modifying source files
 * File tree with checkboxes, search, and name filters
 * Two Git-aware modes: follow `.gitignore`, or show only tracked files
 
@@ -231,9 +230,53 @@ Smart Ignore is a local, deterministic filter — not an AI model, and not one b
 
 ---
 
+## How Code Compression Works 🗜️
+
+An AI rarely needs every implementation line — it needs the shape of your code. Compression keeps declarations, signatures, fields, and class structure, and empties named implementation bodies:
+
+```csharp
+// Before — what's in your file (unchanged on disk)
+private Command BuildMcpCommand()
+{
+    var command = new Command("mcp", L("Terminal.Command.Mcp"));
+    // … ~40 more lines of implementation
+}
+
+// After — what goes into the packed context
+private Command BuildMcpCommand()
+{ }
+```
+
+Measured on DevProjex's own C# sources (619 files), the packed context shrinks from 5.4 MB to 1.7 MB — a 69% cut, roughly 3× smaller. On a mixed repository the saving is lower, because compression only touches code, never test fixtures, JSON assets, or documentation.
+
+It covers 14 languages with per-language rules about what must survive (properties in Kotlin, `val`/`var` in Scala, free lambdas everywhere), and it is deliberately conservative: a file it can't process safely stays complete. Comment and blank-line stripping extend the same syntax engine to 20 packs in total — the 14 plus six comments-only packs such as HTML, CSS, YAML, and XML project files. The same transformed content feeds token metrics, context documents, and folder/ZIP exports, in the GUI and via `--compress-code` in the CLI.
+
+📖 Per-language rules and edge cases are in [`Docs/CodeCompression.md`](Docs/CodeCompression.md).
+
+---
+
+## How Hide Secrets and Hide Private Data Work 🔒
+
+Two independent layers. Both replace values inside the output — they never delete a file and never modify your project.
+
+**Hide Secrets** finds credential values — API keys, tokens, connection strings — and masks each one where it stands, keeping the file and all surrounding code:
+
+```text
+var botToken = "110201543:AAHdqTcvE…";                          // in your file
+var botToken = "DEVPROJEX_REDACTED[telegram-bot-api-token#1]";  // in the export
+```
+
+One secret never costs you the whole file. Findings are marked on the Preview scrollbar, and a false positive can be excluded per match right in Preview. You enable it with one switch in the GUI or `--hide-secrets` in the CLI; in MCP mode it is forced on with no off switch. For pipelines, `--findings` prints rule, file, and line — never the value — and `--fail-on-findings` fails the build.
+
+**Hide private data** is the second, optional layer for personal traces: emails, global IPs, local-user paths, MAC addresses, and international phone numbers become `DEVPROJEX_REDACTED[email#1]`, `[ipv4#1]`, `[local-user#1]`, and so on — the same placeholder for the same finding on every surface, so exported code stays consistent. It is off by default: real projects are full of version strings that look like IPs and sample emails that are not personal. Turn it on per profile in the GUI, or with `--hide-private-data` in the CLI and MCP.
+
+📖 Detection rules and edge cases: [`Docs/HideSecrets.md`](Docs/HideSecrets.md) · [`Docs/HidePrivateData.md`](Docs/HidePrivateData.md)
+
+---
+
 ## Documentation 📚
 
-[Installation](Docs/Installation.md) · [Smart Ignore](Docs/SmartIgnore.md) · [Hide Secrets](Docs/HideSecrets.md) · [Hide private data](Docs/HidePrivateData.md) · [Command Line](Docs/CommandLine.md) · [Terminal Workspace](Docs/TerminalWorkspace.md) · [MCP Server](Docs/McpServer.md) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
+[Installation](Docs/Installation.md) · [Smart Ignore](Docs/SmartIgnore.md) · [Hide Secrets](Docs/HideSecrets.md) · [Hide private data](Docs/HidePrivateData.md) · [Code Compression](Docs/CodeCompression.md) · [Command Line](Docs/CommandLine.md) · [Terminal Workspace](Docs/TerminalWorkspace.md) · [MCP Server](Docs/McpServer.md) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
 
 ---
 
