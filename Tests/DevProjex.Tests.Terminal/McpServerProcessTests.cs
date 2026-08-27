@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Threading.Channels;
 using DevProjex.Application.Services;
 using DevProjex.Mcp;
 using ModelContextProtocol;
@@ -107,7 +108,7 @@ public sealed class McpServerProcessTests
 		}
 
 		process.StandardInput.Close();
-		var standardOutputEofTask = recordingOutput.DrainToEndAsync(TestContext.Current.CancellationToken);
+		var standardOutputEofTask = recordingOutput.WaitForSourceEofAsync(TestContext.Current.CancellationToken);
 		await Task.WhenAll(
 			process.WaitForExitAsync(TestContext.Current.CancellationToken)
 				.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken),
@@ -219,13 +220,33 @@ public sealed class McpServerProcessTests
 		}
 	}
 
-	private sealed class RecordingReadStream(Stream source) : Stream
+	private sealed class RecordingReadStream : Stream
 	{
+		private const int ReadBufferSize = 8 * 1024;
 		private static readonly Encoding StrictUtf8 = new UTF8Encoding(
 			encoderShouldEmitUTF8Identifier: false,
 			throwOnInvalidBytes: true);
+		private readonly Stream _source;
+		private readonly Channel<byte[]> _chunks = Channel.CreateUnbounded<byte[]>(
+			new UnboundedChannelOptions
+			{
+				SingleReader = true,
+				SingleWriter = true,
+				AllowSynchronousContinuations = false
+			});
 		private readonly MemoryStream _recording = new();
 		private readonly object _sync = new();
+		private readonly CancellationTokenSource _lifetime = new();
+		private readonly Task _pumpTask;
+		private byte[]? _currentChunk;
+		private int _currentOffset;
+		private int _disposed;
+
+		public RecordingReadStream(Stream source)
+		{
+			_source = source;
+			_pumpTask = PumpAsync();
+		}
 
 		public string GetRecordedText()
 		{
@@ -233,49 +254,117 @@ public sealed class McpServerProcessTests
 				return StrictUtf8.GetString(_recording.ToArray());
 		}
 
-		public async Task DrainToEndAsync(CancellationToken cancellationToken)
-		{
-			var buffer = new byte[8 * 1024];
-			while (await ReadAsync(buffer, cancellationToken).ConfigureAwait(false) > 0)
-			{
-			}
-		}
+		public Task WaitForSourceEofAsync(CancellationToken cancellationToken) =>
+			_pumpTask.WaitAsync(cancellationToken);
 
 		public override async ValueTask<int> ReadAsync(
 			Memory<byte> buffer,
 			CancellationToken cancellationToken = default)
 		{
-			var read = await source.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
-			if (read > 0)
+			ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+			while (true)
 			{
-				lock (_sync)
-					_recording.Write(buffer.Span[..read]);
+				if (_currentChunk is not null)
+				{
+					var count = Math.Min(buffer.Length, _currentChunk.Length - _currentOffset);
+					_currentChunk.AsSpan(_currentOffset, count).CopyTo(buffer.Span);
+					_currentOffset += count;
+					if (_currentOffset == _currentChunk.Length)
+					{
+						_currentChunk = null;
+						_currentOffset = 0;
+					}
+					return count;
+				}
+
+				if (_chunks.Reader.TryRead(out _currentChunk))
+					continue;
+				if (!await _chunks.Reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
+					return 0;
 			}
-			return read;
 		}
 
-		public override int Read(byte[] buffer, int offset, int count)
+		public override int Read(byte[] buffer, int offset, int count) =>
+			ReadAsync(buffer.AsMemory(offset, count)).AsTask().GetAwaiter().GetResult();
+
+		private async Task PumpAsync()
 		{
-			var read = source.Read(buffer, offset, count);
-			if (read > 0)
+			Exception? failure = null;
+			try
 			{
-				lock (_sync)
-					_recording.Write(buffer, offset, read);
+				while (true)
+				{
+					var buffer = new byte[ReadBufferSize];
+					var read = await _source
+						.ReadAsync(buffer, _lifetime.Token)
+						.ConfigureAwait(false);
+					if (read == 0)
+						break;
+					if (read != buffer.Length)
+						Array.Resize(ref buffer, read);
+
+					lock (_sync)
+						_recording.Write(buffer);
+					await _chunks.Writer
+						.WriteAsync(buffer, _lifetime.Token)
+						.ConfigureAwait(false);
+				}
 			}
-			return read;
+			catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+			{
+			}
+			catch (Exception exception)
+			{
+				failure = exception;
+				throw;
+			}
+			finally
+			{
+				_chunks.Writer.TryComplete(failure);
+			}
 		}
 
 		protected override void Dispose(bool disposing)
 		{
 			if (disposing)
-			{
-				source.Dispose();
-				_recording.Dispose();
-			}
+				DisposeAsyncCore().AsTask().GetAwaiter().GetResult();
 			base.Dispose(disposing);
 		}
 
-		public override bool CanRead => source.CanRead;
+		public override async ValueTask DisposeAsync()
+		{
+			await DisposeAsyncCore().ConfigureAwait(false);
+			GC.SuppressFinalize(this);
+		}
+
+		private async ValueTask DisposeAsyncCore()
+		{
+			if (Interlocked.Exchange(ref _disposed, 1) != 0)
+				return;
+
+			_lifetime.Cancel();
+			await _source.DisposeAsync().ConfigureAwait(false);
+			try
+			{
+				await _pumpTask.ConfigureAwait(false);
+			}
+			catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+			{
+			}
+			catch (ObjectDisposedException)
+			{
+			}
+			catch (IOException) when (_lifetime.IsCancellationRequested)
+			{
+			}
+			finally
+			{
+				_lifetime.Dispose();
+				_recording.Dispose();
+			}
+		}
+
+		public override bool CanRead => Volatile.Read(ref _disposed) == 0;
 		public override bool CanSeek => false;
 		public override bool CanWrite => false;
 		public override long Length => throw new NotSupportedException();
