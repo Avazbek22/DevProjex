@@ -112,14 +112,13 @@ Works with any language, repository, or project structure.
 |---|---|---|---|---|---|---|
 | GUI + TUI + CLI + MCP — all in one app | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Built-in MCP server for AI agents | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Live preview before export | ✅ | ❌ | ❌ | ✅ | ✅ | ❌ |
+| Live preview that updates while you select | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Tracked-files-only Git mode | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Scope-aware, evidence-based Smart Ignore (monorepo-safe) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Value-level secret masking that keeps the file in output | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Private-data masking (emails, IPs, MAC, phones, user paths) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Signature-level code compression | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | CI secret pre-flight gate (fail build on findings) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Dedicated ASCII-tree-only export | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Export a clean project copy as folder/ZIP | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | GUI-managed Git workflow (clone, branch switch, cache updates) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Run with no install (npx / uvx / browser) | ❌ | ✅ | ✅ | ❌ | ❌ | ✅ |
