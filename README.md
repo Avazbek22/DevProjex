@@ -54,7 +54,7 @@ DevProjex works differently — visual, precise, and local-first:
 
 ### Use it for
 
-* **AI assistants** — clean input for ChatGPT, Claude, DeepSeek, Qwen
+* **AI assistants** — clean input for ChatGPT, Claude, DeepSeek, Qwen, Kimi
 * **AI agents** — Claude Code, Cursor, or any MCP client inspects your project through a read-only, always-redacted server
 * **CI pipelines** — fail a build when secrets would leak into packed context, without ever printing the values
 * **Restricted environments** where AI agents, remote indexing, or IDE plugins aren't allowed
