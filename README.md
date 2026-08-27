@@ -14,7 +14,7 @@
   <strong>The fastest way to turn a real codebase into clean, AI-ready context.</strong>
 </p>
 
-DevProjex turns any folder or codebase into clean, ready-to-use context for AI chats, code reviews, and documentation. Use it as a **GUI**, a **TUI**, or a **CLI** — whatever fits your workflow.
+DevProjex turns any folder or codebase into clean, ready-to-use context for AI chats, code reviews, and documentation. Use it as a **GUI**, a **TUI**, a **CLI**, or an **MCP server** for AI agents — whatever fits your workflow.
 
 Choose what you need in an interactive file tree, check the result in a live preview, then export it as **ASCII, Markdown, JSON, or XML**. Need more than text? Export a real copy of your project — a clean **folder or ZIP file** — with the same filters applied.
 
@@ -38,6 +38,8 @@ Choose what you need in an interactive file tree, check the result in a live pre
 
 **Install via WinGet (Windows):** `winget install OlimoffDev.DevProjex`
 
+All install options per OS are covered in [Docs/Installation.md](Docs/Installation.md).
+
 ---
 
 ## Why DevProjex? 💡
@@ -53,6 +55,7 @@ DevProjex works differently — visual, precise, and local-first:
 ### Use it for
 
 * **AI assistants** — clean input for ChatGPT, Claude, DeepSeek, Qwen
+* **AI agents** — Claude Code, Cursor, or any MCP client inspects your project through a read-only, always-redacted server
 * **Restricted environments** where AI agents, remote indexing, or IDE plugins aren't allowed
 * **Code reviews** — share structure and only the files that matter
 * **Large codebases** — pull out one module instead of the whole repo
@@ -88,7 +91,7 @@ Works with any language, repository, or project structure.
 * Export a clean copy of your project to a folder or ZIP archive
 
 **Workflow**
-* GUI, TUI, and CLI — the same engine, three ways to work
+* GUI, TUI, CLI, and MCP server — the same engine, four ways to work
 * Git tools built in: clone by URL, switch branches, update cached copies
 * Local profiles remember your settings per project
 * Live counters for lines, characters, and estimated tokens
@@ -108,10 +111,12 @@ Works with any language, repository, or project structure.
 | Feature | DevProjex | Repomix | gitingest | code2prompt | GPTree | files-to-prompt |
 |---|---|---|---|---|---|---|
 | GUI + TUI + CLI — all in one app | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Built-in MCP server for AI agents | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Live preview before export | ✅ | ❌ | ❌ | ✅ | ✅ | ❌ |
 | Tracked-files-only Git mode | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Scope-aware, evidence-based Smart Ignore (monorepo-safe) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | In-place secret redaction with per-match Preview override | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Private-data masking (emails, IPs, MAC, phones, user paths) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Dedicated ASCII-tree-only export | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Export a clean project copy as folder/ZIP | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | GUI-managed Git workflow (clone, branch switch, cache updates) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
@@ -163,6 +168,29 @@ See [Docs/CommandLine.md](Docs/CommandLine.md) for the full command reference, a
 
 ---
 
+## MCP Server 🤖
+
+DevProjex ships a built-in [Model Context Protocol](https://modelcontextprotocol.io) server, so AI agents — Claude Code, Cursor, or any MCP client — explore your projects through the same engine as the GUI, TUI, and CLI:
+
+```bash
+devprojex mcp --root /path/to/project
+```
+
+Seven read-only tools cover the whole workflow: `list_projects`, `get_tree`, `analyze`, `search_project`, `get_file`, `pack_context`, and `read_pack`. Oversized results are stored as session packs and read back in line ranges instead of flooding the agent's context, and long operations report standard MCP progress notifications.
+
+The server enforces hard security boundaries on top of DevProjex's read-only design:
+
+* **Read-only by design** — tools cannot modify files, run project code, or touch the network
+* **Secret redaction is always on in MCP mode and has no off switch** — not in the server flags, not in the tool schemas, so neither a config mistake nor the agent itself can turn it off
+* **Optional private-data masking** via `devprojex mcp --hide-private-data`, mirroring the CLI flag
+* **Root jail** — access is pinned to the roots you pass at startup; symlink and junction escapes are rejected
+* Smart Ignore, `.gitignore`, and tracked-only Git modes stay active; agent paths and globs can only narrow the selection
+* Returned file contents are wrapped in untrusted-data markers to resist prompt injection
+
+See [Docs/McpServer.md](Docs/McpServer.md) for client setup, the full tool reference, and the security model.
+
+---
+
 ## Safety boundaries 🛡️
 
 DevProjex keeps your source projects read-only, with clear limits on what it does:
@@ -200,7 +228,7 @@ Smart Ignore is a local, deterministic filter — not an AI model, and not one b
 
 ## Documentation 📚
 
-[Smart Ignore](Docs/SmartIgnore.md) · [Hide Secrets](Docs/HideSecrets.md) · [Hide private data](Docs/HidePrivateData.md) · [Command Line](Docs/CommandLine.md) · [Terminal Workspace](Docs/TerminalWorkspace.md) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
+[Installation](Docs/Installation.md) · [Smart Ignore](Docs/SmartIgnore.md) · [Hide Secrets](Docs/HideSecrets.md) · [Hide private data](Docs/HidePrivateData.md) · [Command Line](Docs/CommandLine.md) · [Terminal Workspace](Docs/TerminalWorkspace.md) · [MCP Server](Docs/McpServer.md) · [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
 
 ---
 
@@ -210,14 +238,14 @@ Smart Ignore is a local, deterministic filter — not an AI model, and not one b
   <img alt=".NET 10" src="https://img.shields.io/badge/.NET-10-purple">
   <img alt="WinGet" src="https://img.shields.io/badge/winget-available-blue">
   <img alt="Repository size" src="https://img.shields.io/github/repo-size/Avazbek22/DevProjex">
-  <img alt="Tests" src="https://img.shields.io/badge/tests-10000%2B-brightgreen">
+  <img alt="Tests" src="https://img.shields.io/badge/tests-17000%2B-brightgreen">
 </p>
 
 * **.NET 10**
 * **Avalonia UI** (cross-platform)
 * Clean Architecture layers (Kernel / Application / Infrastructure / Terminal / Avalonia)
 * JSON-based resources (localization, icon mappings, presets)
-* 10,000+ automated tests (unit + integration + UI)
+* 17,000+ automated tests (unit + integration + terminal + UI), run on Windows, Linux, and macOS
 
 **Build from source**
 
