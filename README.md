@@ -56,6 +56,7 @@ DevProjex works differently — visual, precise, and local-first:
 
 * **AI assistants** — clean input for ChatGPT, Claude, DeepSeek, Qwen
 * **AI agents** — Claude Code, Cursor, or any MCP client inspects your project through a read-only, always-redacted server
+* **CI pipelines** — fail a build when secrets would leak into packed context, without ever printing the values
 * **Restricted environments** where AI agents, remote indexing, or IDE plugins aren't allowed
 * **Code reviews** — share structure and only the files that matter
 * **Large codebases** — pull out one module instead of the whole repo
@@ -75,10 +76,10 @@ Works with any language, repository, or project structure.
 
 **Choose and control**
 * **Smart Ignore** — filters stack-specific build output, dependency folders, and caches without touching your source. [How it works ↓](#how-smart-ignore-works-)
-* **Hide Secrets** — replaces detected credential values in place while keeping the file and surrounding code. [Details](Docs/HideSecrets.md)
+* **Hide Secrets** — replaces detected credential values in the exported output while keeping the file and surrounding code. [Details](Docs/HideSecrets.md)
 * **Hide private data** — hides selected-content email, global IP, local-user path, MAC, and international-phone findings. [Details](Docs/HidePrivateData.md)
-* **Code compression** — keeps declarations and state while shortening named implementations across 14 languages
-* **Strip comments** — removes comments and documentation comments across 20 language packs without modifying source files
+* **Code compression** — keeps declarations and state while shortening named implementations across 14 languages; on pure source code it cuts packed size by roughly two thirds (measured −69% on DevProjex's own C# sources)
+* **Strip comments** — removes comments and documentation comments across 20 syntax-aware language packs without modifying source files
 * **Strip blank lines** — removes whitespace-only source lines across the same 20 syntax-aware language packs while preserving multiline literals and markup text
 * File tree with checkboxes, search, and name filters
 * Two Git-aware modes: follow `.gitignore`, or show only tracked files
@@ -115,8 +116,10 @@ Works with any language, repository, or project structure.
 | Live preview before export | ✅ | ❌ | ❌ | ✅ | ✅ | ❌ |
 | Tracked-files-only Git mode | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Scope-aware, evidence-based Smart Ignore (monorepo-safe) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| In-place secret redaction with per-match Preview override | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Value-level secret masking that keeps the file in output | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Private-data masking (emails, IPs, MAC, phones, user paths) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Signature-level code compression | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| CI secret pre-flight gate (fail build on findings) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Dedicated ASCII-tree-only export | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Export a clean project copy as folder/ZIP | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | GUI-managed Git workflow (clone, branch switch, cache updates) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
@@ -175,6 +178,8 @@ DevProjex ships a built-in [Model Context Protocol](https://modelcontextprotocol
 ```bash
 devprojex mcp --root /path/to/project
 ```
+
+For Claude Code it's one command: `claude mcp add devprojex -- devprojex mcp --root .`
 
 Seven read-only tools cover the whole workflow: `list_projects`, `get_tree`, `analyze`, `search_project`, `get_file`, `pack_context`, and `read_pack`. Oversized results are stored as session packs and read back in line ranges instead of flooding the agent's context, and long operations report standard MCP progress notifications.
 
