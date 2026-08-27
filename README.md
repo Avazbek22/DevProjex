@@ -100,7 +100,7 @@ Works with any language, repository, or project structure.
 **Interface**
 * Light, dark, and system themes, with transparency and blur where supported
 * Platform-native keyboard shortcuts — ⌘-based on macOS, Ctrl-based on Windows and Linux
-* Tree context menu — reveal in the system file manager, copy full or relative paths, copy a file's transformed contents, select only one item, expand or collapse a branch
+* Tree context menu — reveal in the file manager, copy paths or transformed contents, select one item, expand or collapse a branch
 * Localization in 20 languages
 * Stays smooth even on very large folders
 
@@ -110,7 +110,7 @@ Works with any language, repository, or project structure.
 
 | Feature | DevProjex | Repomix | gitingest | code2prompt | GPTree | files-to-prompt |
 |---|---|---|---|---|---|---|
-| GUI + TUI + CLI — all in one app | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| GUI + TUI + CLI + MCP — all in one app | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Built-in MCP server for AI agents | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Live preview before export | ✅ | ❌ | ❌ | ✅ | ✅ | ❌ |
 | Tracked-files-only Git mode | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
@@ -123,6 +123,8 @@ Works with any language, repository, or project structure.
 | Export a clean project copy as folder/ZIP | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | GUI-managed Git workflow (clone, branch switch, cache updates) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Run with no install (npx / uvx / browser) | ❌ | ✅ | ✅ | ❌ | ❌ | ✅ |
+
+<sub>Based on publicly documented features, last verified August 2026.</sub>
 
 ---
 
@@ -172,7 +174,7 @@ See [Docs/CommandLine.md](Docs/CommandLine.md) for the full command reference, a
 
 ## MCP Server 🤖
 
-DevProjex ships a built-in [Model Context Protocol](https://modelcontextprotocol.io) server, so AI agents — Claude Code, Cursor, or any MCP client — explore your projects through the same engine as the GUI, TUI, and CLI:
+DevProjex ships a built-in [Model Context Protocol](https://modelcontextprotocol.io) server (on the official [C# MCP SDK](https://github.com/modelcontextprotocol/csharp-sdk)), so AI agents — Claude Code, Cursor, or any MCP client — explore your projects through the same engine as the GUI, TUI, and CLI:
 
 ```bash
 devprojex mcp --root /path/to/project
@@ -249,7 +251,7 @@ private Command BuildMcpCommand()
 
 Measured on DevProjex's own C# sources (619 files), the packed context shrinks from 5.4 MB to 1.7 MB — a 69% cut, roughly 3× smaller. On a mixed repository the saving is lower, because compression only touches code, never test fixtures, JSON assets, or documentation.
 
-It covers 14 languages with per-language rules about what must survive (properties in Kotlin, `val`/`var` in Scala, free lambdas everywhere), and it is deliberately conservative: a file it can't process safely stays complete. Comment and blank-line stripping extend the same syntax engine to 20 packs in total — the 14 plus six comments-only packs such as HTML, CSS, YAML, and XML project files. The same transformed content feeds token metrics, context documents, and folder/ZIP exports, in the GUI and via `--compress-code` in the CLI.
+It covers 14 languages, parsing with [Tree-sitter](https://tree-sitter.github.io/tree-sitter/) grammars and applying DevProjex's own per-language rules about what must survive (properties in Kotlin, `val`/`var` in Scala, free lambdas everywhere), and it is deliberately conservative: a file it can't process safely stays complete. Comment and blank-line stripping extend the same syntax engine to 20 packs in total — the 14 plus six comments-only packs such as HTML, CSS, YAML, and XML project files. The same transformed content feeds token metrics, context documents, and folder/ZIP exports, in the GUI and via `--compress-code` in the CLI.
 
 📖 Per-language rules and edge cases are in [`Docs/CodeCompression.md`](Docs/CodeCompression.md).
 
@@ -266,7 +268,7 @@ var botToken = "110201543:AAHdqTcvE…";                          // in your fil
 var botToken = "DEVPROJEX_REDACTED[telegram-bot-api-token#1]";  // in the export
 ```
 
-One secret never costs you the whole file. Findings are marked on the Preview scrollbar, and a false positive can be excluded per match right in Preview. You enable it with one switch in the GUI or `--hide-secrets` in the CLI; in MCP mode it is forced on with no off switch. For pipelines, `--findings` prints rule, file, and line — never the value — and `--fail-on-findings` fails the build.
+Detection runs a pinned, reviewed [Gitleaks](https://github.com/gitleaks/gitleaks) rule set on DevProjex's own engine, and one secret never costs you the whole file. Findings are marked on the Preview scrollbar, and a false positive can be excluded per match right in Preview. You enable it with one switch in the GUI or `--hide-secrets` in the CLI; in MCP mode it is forced on with no off switch. For pipelines, `--findings` prints rule, file, and line — never the value — and `--fail-on-findings` fails the build.
 
 **Hide private data** is the second, optional layer for personal traces: emails, global IPs, local-user paths, MAC addresses, and international phone numbers become `DEVPROJEX_REDACTED[email#1]`, `[ipv4#1]`, `[local-user#1]`, and so on — the same placeholder for the same finding on every surface, so exported code stays consistent. It is off by default: real projects are full of version strings that look like IPs and sample emails that are not personal. Turn it on per profile in the GUI, or with `--hide-private-data` in the CLI and MCP.
 
@@ -291,6 +293,7 @@ One secret never costs you the whole file. Findings are marked on the Preview sc
 
 * **.NET 10**
 * **Avalonia UI** (cross-platform)
+* **Tree-sitter** parsing · **Gitleaks** rule source · official **MCP** C# SDK — attributions in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)
 * Clean Architecture layers (Kernel / Application / Infrastructure / Terminal / Avalonia)
 * JSON-based resources (localization, icon mappings, presets)
 * 17,000+ automated tests (unit + integration + terminal + UI), run on Windows, Linux, and macOS
