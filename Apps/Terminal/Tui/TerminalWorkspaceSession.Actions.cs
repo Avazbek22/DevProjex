@@ -17,25 +17,50 @@ internal sealed partial class TerminalWorkspaceSession
 	private const int AggregateFramePaddingColumns = 3;
 	private const int AggregateTrailingBorderColumns = 3;
 
-	private FrameView? _controlsFrame;
-	private Label? _controlsPanelHeading;
-	private Label? _collapsedControls;
-	private FrameView? _contentControlsFrame;
-	private FrameView? _exclusionControlsFrame;
-	private FrameView? _extensionControlsFrame;
-	private View? _filterControlsHost;
-	private TerminalParameterListView? _contentControls;
-	private TerminalAggregateControl? _contentAllControl;
-	private TerminalAggregateControl? _exclusionAllControl;
-	private TerminalParameterListView? _exclusionControls;
-	private TerminalAggregateControl? _extensionAllControl;
-	private TerminalParameterListView? _extensionControls;
-	private ObservableCollection<TerminalParameterRow>? _contentControlRows;
-	private ObservableCollection<TerminalParameterRow>? _contentAllControlRows;
-	private ObservableCollection<TerminalParameterRow>? _exclusionAllControlRows;
-	private ObservableCollection<TerminalParameterRow>? _exclusionControlRows;
-	private ObservableCollection<TerminalParameterRow>? _extensionAllControlRows;
-	private ObservableCollection<TerminalParameterRow>? _extensionControlRows;
+	private WorkspaceControlViewGraph? ControlViews => _workspaceViews?.Controls;
+	private FrameView? _controlsFrame => ControlViews?.Frame;
+	private Label? _controlsPanelHeading => ControlViews?.PanelHeading;
+	private Label? _collapsedControls => ControlViews?.CollapsedSummary;
+	private FrameView? _contentControlsFrame => ControlViews?.ContentFrame;
+	private FrameView? _exclusionControlsFrame => ControlViews?.ExclusionFrame;
+	private FrameView? _extensionControlsFrame => ControlViews?.ExtensionFrame;
+	private View? _filterControlsHost => ControlViews?.FilterHost;
+	private TerminalParameterListView? _contentControls => ControlViews?.ContentList;
+	private TerminalAggregateControl? _contentAllControl => ControlViews?.ContentAll;
+	private TerminalAggregateControl? _exclusionAllControl => ControlViews?.ExclusionAll;
+	private TerminalParameterListView? _exclusionControls => ControlViews?.ExclusionList;
+	private TerminalAggregateControl? _extensionAllControl => ControlViews?.ExtensionAll;
+	private TerminalParameterListView? _extensionControls => ControlViews?.ExtensionList;
+	private ObservableCollection<TerminalParameterRow>? _contentControlRows
+	{
+		get => ControlViews?.ContentRows;
+		set { if (ControlViews is { } views) views.ContentRows = value ?? []; }
+	}
+	private ObservableCollection<TerminalParameterRow>? _contentAllControlRows
+	{
+		get => ControlViews?.ContentAllRows;
+		set { if (ControlViews is { } views) views.ContentAllRows = value ?? []; }
+	}
+	private ObservableCollection<TerminalParameterRow>? _exclusionAllControlRows
+	{
+		get => ControlViews?.ExclusionAllRows;
+		set { if (ControlViews is { } views) views.ExclusionAllRows = value ?? []; }
+	}
+	private ObservableCollection<TerminalParameterRow>? _exclusionControlRows
+	{
+		get => ControlViews?.ExclusionRows;
+		set { if (ControlViews is { } views) views.ExclusionRows = value ?? []; }
+	}
+	private ObservableCollection<TerminalParameterRow>? _extensionAllControlRows
+	{
+		get => ControlViews?.ExtensionAllRows;
+		set { if (ControlViews is { } views) views.ExtensionAllRows = value ?? []; }
+	}
+	private ObservableCollection<TerminalParameterRow>? _extensionControlRows
+	{
+		get => ControlViews?.ExtensionRows;
+		set { if (ControlViews is { } views) views.ExtensionRows = value ?? []; }
+	}
 	private string? _selectedContentControlKey;
 	private string? _selectedExclusionControlKey;
 	private string? _selectedExtensionControlKey;
@@ -49,14 +74,14 @@ internal sealed partial class TerminalWorkspaceSession
 	private Dictionary<string, bool>? _settingsDraftExtensionStates;
 	private bool _settingsDraftOriginatedFromCommandLine;
 
-	private void CreateContextControls()
+	private WorkspaceControlViewGraph CreateContextControls()
 	{
-		_controlsFrame = new TerminalLiteralFrameView
+		var controlsFrame = new TerminalLiteralFrameView
 		{
 			BorderStyle = _presentation.BorderStyle,
 			SchemeName = TerminalWorkspaceTheme.Panel
 		};
-		_controlsPanelHeading = new TerminalLiteralLabel
+		var controlsPanelHeading = new TerminalLiteralLabel
 		{
 			X = 0,
 			Y = 0,
@@ -65,7 +90,7 @@ internal sealed partial class TerminalWorkspaceSession
 			Visible = _options.Plain,
 			SchemeName = TerminalWorkspaceTheme.Secondary
 		};
-		_collapsedControls = new TerminalLiteralLabel
+		var collapsedControls = new TerminalLiteralLabel
 		{
 			X = 1,
 			Y = 0,
@@ -74,52 +99,65 @@ internal sealed partial class TerminalWorkspaceSession
 			Visible = false,
 			SchemeName = TerminalWorkspaceTheme.Secondary
 		};
-		(_contentControlsFrame, _contentControls) = CreateControlSection(
+		var (contentControlsFrame, contentControls) = CreateControlSection(
 			NormalizeControlTitle(L("Settings.Secrets.Title")),
 			TerminalControlSection.Content,
 			showVerticalScrollBar: false);
-		_contentAllControl = AddAggregateControl(
-			_contentControlsFrame,
-			_contentControls,
+		var contentAllControl = AddAggregateControl(
+			contentControlsFrame,
+			contentControls,
 			TerminalControlSection.Content);
-		_contentControlsFrame.Y = _options.Plain ? 1 : 0;
-		_contentControlsFrame.Height = ContentControlsFrameHeight;
+		contentControlsFrame.Y = _options.Plain ? 1 : 0;
+		contentControlsFrame.Height = ContentControlsFrameHeight;
 
-		_filterControlsHost = new View
+		var filterControlsHost = new View
 		{
 			X = 0,
-			Y = Pos.Bottom(_contentControlsFrame),
+			Y = Pos.Bottom(contentControlsFrame),
 			Width = Dim.Fill(),
 			Height = Dim.Fill()
 		};
-		(_exclusionControlsFrame, _exclusionControls) = CreateControlSection(
+		var (exclusionControlsFrame, exclusionControls) = CreateControlSection(
 			NormalizeControlTitle(L("Terminal.Tui.Exclusions")),
 			TerminalControlSection.Exclusions,
 			showVerticalScrollBar: true);
-		_exclusionAllControl = AddAggregateControl(
-			_exclusionControlsFrame,
-			_exclusionControls,
+		var exclusionAllControl = AddAggregateControl(
+			exclusionControlsFrame,
+			exclusionControls,
 			TerminalControlSection.Exclusions);
-		_exclusionControlsFrame.Height = Dim.Percent(50);
-		(_extensionControlsFrame, _extensionControls) = CreateControlSection(
+		exclusionControlsFrame.Height = Dim.Percent(50);
+		var (extensionControlsFrame, extensionControls) = CreateControlSection(
 			NormalizeControlTitle(L("Terminal.Tui.FileTypes")),
 			TerminalControlSection.Extensions,
 			showVerticalScrollBar: true);
-		_extensionAllControl = AddAggregateControl(
-			_extensionControlsFrame,
-			_extensionControls,
+		var extensionAllControl = AddAggregateControl(
+			extensionControlsFrame,
+			extensionControls,
 			TerminalControlSection.Extensions);
-		_extensionControlsFrame.Y = Pos.Bottom(_exclusionControlsFrame);
-		_extensionControlsFrame.Height = Dim.Fill();
-		_filterControlsHost.Add(_exclusionControlsFrame, _extensionControlsFrame);
-		_controlsFrame.Add(
-			_controlsPanelHeading,
-			_collapsedControls,
-			_contentControlsFrame,
-			_filterControlsHost);
+		extensionControlsFrame.Y = Pos.Bottom(exclusionControlsFrame);
+		extensionControlsFrame.Height = Dim.Fill();
+		filterControlsHost.Add(exclusionControlsFrame, extensionControlsFrame);
+		controlsFrame.Add(
+			controlsPanelHeading,
+			collapsedControls,
+			contentControlsFrame,
+			filterControlsHost);
 		if (_state?.Plan.GitReadiness.Mode is not GitFilteringMode.None and { } mode)
 			_preferredGitMode = mode;
-		RefreshContextControls();
+		return new WorkspaceControlViewGraph(
+			controlsFrame,
+			controlsPanelHeading,
+			collapsedControls,
+			contentControlsFrame,
+			exclusionControlsFrame,
+			extensionControlsFrame,
+			filterControlsHost,
+			contentControls,
+			contentAllControl,
+			exclusionAllControl,
+			exclusionControls,
+			extensionAllControl,
+			extensionControls);
 	}
 
 	private (FrameView Frame, TerminalParameterListView List) CreateControlSection(
@@ -1341,7 +1379,7 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (_state is null)
 			return;
-		_activeOperationTask = TrackBackgroundTask(RunOperationAsync(
+		TrackActiveOperation(RunOperationAsync(
 			L("Terminal.Tui.Analyze"),
 			async token =>
 			{
@@ -1367,7 +1405,7 @@ internal sealed partial class TerminalWorkspaceSession
 			return;
 		var view = command.View ?? _previewView;
 		var format = command.Format ?? _format;
-		_activeOperationTask = TrackBackgroundTask(RunOperationAsync(
+		TrackActiveOperation(RunOperationAsync(
 			L("Terminal.Tui.Command.Copy.Title"),
 			async token =>
 			{
@@ -1405,7 +1443,7 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (_state is null)
 			return;
-		_activeOperationTask = TrackBackgroundTask(RunOperationAsync(
+		TrackActiveOperation(RunOperationAsync(
 			L("Terminal.Tui.Command.Refresh.Title"),
 			async token =>
 			{
@@ -1420,7 +1458,7 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (_state is null)
 			return;
-		_activeOperationTask = TrackBackgroundTask(RunOperationAsync(
+		TrackActiveOperation(RunOperationAsync(
 			L("Terminal.Tui.Welcome.OpenDesktop"),
 			async token =>
 			{
@@ -1456,7 +1494,7 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (_state?.Plan.SourceIdentity?.SourceType != ProjectSourceType.GitClone)
 			return;
-		_activeOperationTask = TrackBackgroundTask(RunOperationAsync(
+		TrackActiveOperation(RunOperationAsync(
 			L("Terminal.Tui.Action.GetUpdates"),
 			async token =>
 			{
@@ -1480,7 +1518,7 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (_state?.Plan.SourceIdentity?.SourceType != ProjectSourceType.GitClone)
 			return;
-		_activeOperationTask = TrackBackgroundTask(RunOperationAsync(
+		TrackActiveOperation(RunOperationAsync(
 			L("Terminal.Tui.Action.SwitchBranch"),
 			async token =>
 			{

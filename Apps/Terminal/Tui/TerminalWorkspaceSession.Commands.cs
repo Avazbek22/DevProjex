@@ -19,7 +19,8 @@ internal sealed partial class TerminalWorkspaceSession
 
 		_workspaceActionRegistry = new TerminalWorkspaceActionRegistry(
 			BuildWorkspacePaletteItems(),
-			BuildWorkspaceCommandActions());
+			BuildWorkspaceCommandActions(),
+			validate: false);
 		_workspaceActionRegistryRevision = revision;
 		_workspaceActionRegistryLanguage = language;
 		return _workspaceActionRegistry;
@@ -576,9 +577,11 @@ internal sealed partial class TerminalWorkspaceSession
 		_application.LayoutAndDraw();
 		if (success)
 		{
-			var resultCts = CancellationTokenSource.CreateLinkedTokenSource(_sessionCts.Token);
-			_commandResultCts = resultCts;
-			_commandResultTask = TrackBackgroundTask(RestoreCommandFooterAfterDelayAsync(resultCts));
+			var resultCts = _operations.Start(WorkspaceOperationKind.CommandResult);
+			TrackOperation(
+				WorkspaceOperationKind.CommandResult,
+				resultCts,
+				RestoreCommandFooterAfterDelayAsync(resultCts));
 		}
 	}
 
@@ -596,12 +599,9 @@ internal sealed partial class TerminalWorkspaceSession
 			await Task.Delay(TimeSpan.FromMilliseconds(2750), resultCts.Token).ConfigureAwait(false);
 			await InvokeAsync(() =>
 			{
-				if (!ReferenceEquals(_commandResultCts, resultCts))
+				if (!_operations.IsCurrent(WorkspaceOperationKind.CommandResult, resultCts))
 					return false;
-				_commandResultCts = null;
-				_commandResultTask = null;
 				_activeCommandResult = null;
-				resultCts.Dispose();
 				_commandLine?.Close();
 				RestoreCommandFooterAndFocus();
 				return true;
@@ -610,12 +610,15 @@ internal sealed partial class TerminalWorkspaceSession
 		catch (OperationCanceledException) when (resultCts.IsCancellationRequested)
 		{
 		}
+		finally
+		{
+			_operations.Complete(WorkspaceOperationKind.CommandResult, resultCts);
+		}
 	}
 
 	private void CancelCommandResult()
 	{
 		_operations.Cancel(WorkspaceOperationKind.CommandResult);
-		_commandResultTask = null;
 		_activeCommandResult = null;
 	}
 

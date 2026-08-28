@@ -78,6 +78,15 @@ public sealed class TerminalPolishTests
 	}
 
 	[Fact]
+	public void WorkspaceViewBuilderRejectsAnIncompleteScreenGraph()
+	{
+		var exception = Assert.Throws<InvalidOperationException>(() =>
+			new WorkspaceViewBuilder().Build());
+
+		Assert.Contains("_tree", exception.Message, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void CommandCatalogHasOneGrammarDescriptorForEveryVerb()
 	{
 		Assert.Equal(Enum.GetValues<TerminalWorkspaceCommandVerb>().Length,

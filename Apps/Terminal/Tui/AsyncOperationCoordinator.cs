@@ -15,15 +15,21 @@ internal sealed class AsyncOperationCoordinator : IDisposable
 {
 	private readonly Dictionary<WorkspaceOperationKind, OperationState> _operations = [];
 	private readonly CancellationToken _sessionToken;
+	private readonly object _sync = new();
 
 	public AsyncOperationCoordinator(CancellationToken sessionToken) =>
 		_sessionToken = sessionToken;
 
 	public CancellationTokenSource Start(WorkspaceOperationKind kind)
 	{
-		Cancel(kind);
 		var source = CancellationTokenSource.CreateLinkedTokenSource(_sessionToken);
-		_operations[kind] = new OperationState(source, null);
+		OperationState? previous;
+		lock (_sync)
+		{
+			_operations.Remove(kind, out previous);
+			_operations[kind] = new OperationState(source, null);
+		}
+		CancelAndDispose(previous);
 		return source;
 	}
 
@@ -31,56 +37,92 @@ internal sealed class AsyncOperationCoordinator : IDisposable
 	{
 		ArgumentNullException.ThrowIfNull(source);
 		ArgumentNullException.ThrowIfNull(task);
-		if (!IsCurrent(kind, source))
+		if (!TryTrack(kind, source, task))
 			throw new InvalidOperationException("The operation token is not current.");
-		_operations[kind] = new OperationState(source, task);
+	}
+
+	public bool TryTrack(WorkspaceOperationKind kind, CancellationTokenSource source, Task task)
+	{
+		ArgumentNullException.ThrowIfNull(source);
+		ArgumentNullException.ThrowIfNull(task);
+		lock (_sync)
+		{
+			if (!_operations.TryGetValue(kind, out var state) ||
+				!ReferenceEquals(state.Source, source))
+			{
+				return false;
+			}
+			_operations[kind] = state with { Task = task };
+			return true;
+		}
+	}
+
+	public bool TryTrackCurrent(WorkspaceOperationKind kind, Task task)
+	{
+		ArgumentNullException.ThrowIfNull(task);
+		lock (_sync)
+		{
+			if (!_operations.TryGetValue(kind, out var state))
+				return false;
+			_operations[kind] = state with { Task = task };
+			return true;
+		}
 	}
 
 	public bool IsCurrent(WorkspaceOperationKind kind, CancellationTokenSource source) =>
-		_operations.TryGetValue(kind, out var state) && ReferenceEquals(state.Source, source);
+		Read(kind, state => ReferenceEquals(state.Source, source), false);
 
 	public bool IsRunning(WorkspaceOperationKind kind) =>
-		_operations.TryGetValue(kind, out var state) && !state.Source.IsCancellationRequested;
+		Read(kind, static state => !state.Source.IsCancellationRequested, false);
 
 	public Task? GetTask(WorkspaceOperationKind kind) =>
-		_operations.TryGetValue(kind, out var state) ? state.Task : null;
+		Read<Task?>(kind, static state => state.Task, null);
 
 	public CancellationTokenSource? GetSource(WorkspaceOperationKind kind) =>
-		_operations.TryGetValue(kind, out var state) ? state.Source : null;
-
-	public void AssignSource(WorkspaceOperationKind kind, CancellationTokenSource? source)
-	{
-		if (source is null)
-		{
-			_operations.Remove(kind);
-			return;
-		}
-		var task = _operations.TryGetValue(kind, out var current) ? current.Task : null;
-		_operations[kind] = new OperationState(source, task);
-	}
-
-	public void AssignTask(WorkspaceOperationKind kind, Task? task)
-	{
-		if (!_operations.TryGetValue(kind, out var current))
-		{
-			if (task is not null)
-				throw new InvalidOperationException("An operation token must be assigned before its task.");
-			return;
-		}
-		_operations[kind] = current with { Task = task };
-	}
+		Read<CancellationTokenSource?>(kind, static state => state.Source, null);
 
 	public void Complete(WorkspaceOperationKind kind, CancellationTokenSource source, bool dispose = true)
 	{
-		if (IsCurrent(kind, source))
-			_operations.Remove(kind);
+		lock (_sync)
+		{
+			if (_operations.TryGetValue(kind, out var state) && ReferenceEquals(state.Source, source))
+				_operations.Remove(kind);
+		}
 		if (dispose)
 			source.Dispose();
 	}
 
 	public void Cancel(WorkspaceOperationKind kind)
 	{
-		if (!_operations.Remove(kind, out var state))
+		OperationState? state;
+		lock (_sync)
+		{
+			_operations.Remove(kind, out state);
+		}
+		CancelAndDispose(state);
+	}
+
+	public void Dispose()
+	{
+		OperationState[] states;
+		lock (_sync)
+		{
+			states = _operations.Values.ToArray();
+			_operations.Clear();
+		}
+		foreach (var state in states)
+			CancelAndDispose(state);
+	}
+
+	private T Read<T>(WorkspaceOperationKind kind, Func<OperationState, T> selector, T fallback)
+	{
+		lock (_sync)
+			return _operations.TryGetValue(kind, out var state) ? selector(state) : fallback;
+	}
+
+	private static void CancelAndDispose(OperationState? state)
+	{
+		if (state is null)
 			return;
 		try
 		{
@@ -90,12 +132,6 @@ internal sealed class AsyncOperationCoordinator : IDisposable
 		{
 		}
 		state.Source.Dispose();
-	}
-
-	public void Dispose()
-	{
-		foreach (var kind in _operations.Keys.ToArray())
-			Cancel(kind);
 	}
 
 	private sealed record OperationState(CancellationTokenSource Source, Task? Task);

@@ -141,66 +141,77 @@ internal static class TerminalWorkspaceCommandCatalog
 	[
 		Define(
 			TerminalWorkspaceCommandVerb.Set,
+			TerminalWorkspaceCommandGrammar.ToggleOption,
 			"set",
 			"set <option> <on|off>",
 			"set hide-secrets on",
 			static (session, command) => session.ExecuteSetCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.All,
+			TerminalWorkspaceCommandGrammar.ToggleGroup,
 			"all",
 			"all <types|exclusions|content> <on|off>",
 			"all content on",
 			static (session, command) => session.ExecuteAllCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Type,
+			TerminalWorkspaceCommandGrammar.ToggleTypes,
 			"type",
 			"type <.ext> [<.ext>...] <on|off>",
 			"type .cs on",
 			static (session, command) => session.ExecuteTypeCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.View,
+			TerminalWorkspaceCommandGrammar.View,
 			"view",
 			"view <tree|content|tree-content>",
 			"view content",
 			static (session, command) => session.ExecuteViewCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Format,
+			TerminalWorkspaceCommandGrammar.Format,
 			"format",
 			"format <text|markdown|json|xml>",
 			"format json",
 			static (session, command) => session.ExecuteFormatCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Search,
+			TerminalWorkspaceCommandGrammar.Text,
 			"search",
 			"search [text]",
 			"search TODO",
 			static (session, command) => session.ExecuteSearchCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Filter,
+			TerminalWorkspaceCommandGrammar.Text,
 			"filter",
 			"filter [text]",
 			"filter generated",
 			static (session, command) => session.ExecuteFilterCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Export,
+			TerminalWorkspaceCommandGrammar.Export,
 			"export",
 			"export <context|zip|folder> ...",
 			"export context markdown context.md",
 			static (session, command) => session.ExecuteExportCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Copy,
+			TerminalWorkspaceCommandGrammar.Copy,
 			"copy",
 			"copy [tree|content|tree-content] [text|markdown|json|xml]",
 			"copy content markdown",
 			static (session, command) => session.ExecuteCopyCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Analyze,
+			TerminalWorkspaceCommandGrammar.None,
 			"analyze",
 			"analyze",
 			"analyze",
 			static (session, command) => session.ExecuteAnalyzeCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Branch,
+			TerminalWorkspaceCommandGrammar.OptionalText,
 			"branch",
 			"branch [name]",
 			"branch feature/review",
@@ -208,6 +219,7 @@ internal static class TerminalWorkspaceCommandCatalog
 			TerminalWorkspaceCommandAvailability.GitClone),
 		Define(
 			TerminalWorkspaceCommandVerb.Update,
+			TerminalWorkspaceCommandGrammar.None,
 			"update",
 			"update",
 			"update",
@@ -215,6 +227,7 @@ internal static class TerminalWorkspaceCommandCatalog
 			TerminalWorkspaceCommandAvailability.GitClone),
 		Define(
 			TerminalWorkspaceCommandVerb.Recent,
+			TerminalWorkspaceCommandGrammar.None,
 			"recent",
 			"recent",
 			"recent",
@@ -222,18 +235,21 @@ internal static class TerminalWorkspaceCommandCatalog
 			TerminalWorkspaceCommandAvailability.Always),
 		Define(
 			TerminalWorkspaceCommandVerb.Profile,
+			TerminalWorkspaceCommandGrammar.Profile,
 			"profile",
 			"profile save [name]",
 			"profile save \"Review Settings\"",
 			static (session, command) => session.ExecuteProfileCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Refresh,
+			TerminalWorkspaceCommandGrammar.None,
 			"refresh",
 			"refresh",
 			"refresh",
 			static (session, command) => session.ExecuteRefreshCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Language,
+			TerminalWorkspaceCommandGrammar.Language,
 			"language",
 			"language [code]",
 			"language ja",
@@ -241,12 +257,14 @@ internal static class TerminalWorkspaceCommandCatalog
 			TerminalWorkspaceCommandAvailability.Always),
 		Define(
 			TerminalWorkspaceCommandVerb.Diagnostics,
+			TerminalWorkspaceCommandGrammar.None,
 			"diagnostics",
 			"diagnostics",
 			"diagnostics",
 			static (session, command) => session.ExecuteDiagnosticsCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Help,
+			TerminalWorkspaceCommandGrammar.Help,
 			"help",
 			"help [verb]",
 			"help set",
@@ -254,6 +272,7 @@ internal static class TerminalWorkspaceCommandCatalog
 			TerminalWorkspaceCommandAvailability.Always),
 		Define(
 			TerminalWorkspaceCommandVerb.Quit,
+			TerminalWorkspaceCommandGrammar.None,
 			"quit",
 			"quit",
 			"quit",
@@ -268,6 +287,18 @@ internal static class TerminalWorkspaceCommandCatalog
 	private static readonly IReadOnlyDictionary<string, TerminalWorkspaceCommandDefinition> ByToken =
 		All.ToDictionary(static definition => definition.Token, StringComparer.OrdinalIgnoreCase);
 
+	static TerminalWorkspaceCommandCatalog()
+	{
+		if (All.Count != Enum.GetValues<TerminalWorkspaceCommandVerb>().Length ||
+			All.Select(static definition => definition.Verb).Distinct().Count() != All.Count ||
+			All.Select(static definition => definition.Id).Distinct(StringComparer.Ordinal).Count() != All.Count ||
+			All.Select(static definition => definition.Token)
+				.Distinct(StringComparer.OrdinalIgnoreCase).Count() != All.Count)
+		{
+			throw new InvalidOperationException("The terminal command catalog is incomplete or contains duplicate descriptors.");
+		}
+	}
+
 	public static TerminalWorkspaceCommandDefinition Get(TerminalWorkspaceCommandVerb verb) =>
 		ByVerb[verb];
 
@@ -278,6 +309,7 @@ internal static class TerminalWorkspaceCommandCatalog
 
 	private static TerminalWorkspaceCommandDefinition Define(
 		TerminalWorkspaceCommandVerb verb,
+		TerminalWorkspaceCommandGrammar grammar,
 		string token,
 		string syntax,
 		string example,
@@ -286,7 +318,7 @@ internal static class TerminalWorkspaceCommandCatalog
 		new(
 			$"workspace.command.{token}",
 			verb,
-			ResolveGrammar(verb),
+			grammar,
 			handler,
 			availability,
 			token,
@@ -295,25 +327,6 @@ internal static class TerminalWorkspaceCommandCatalog
 			$"Terminal.Tui.Command.{verb}.Title",
 			$"Terminal.Tui.Command.{verb}.Description",
 			$"Terminal.Tui.Command.{verb}.Schema");
-
-	private static TerminalWorkspaceCommandGrammar ResolveGrammar(TerminalWorkspaceCommandVerb verb) =>
-		verb switch
-		{
-			TerminalWorkspaceCommandVerb.Set => TerminalWorkspaceCommandGrammar.ToggleOption,
-			TerminalWorkspaceCommandVerb.All => TerminalWorkspaceCommandGrammar.ToggleGroup,
-			TerminalWorkspaceCommandVerb.Type => TerminalWorkspaceCommandGrammar.ToggleTypes,
-			TerminalWorkspaceCommandVerb.View => TerminalWorkspaceCommandGrammar.View,
-			TerminalWorkspaceCommandVerb.Format => TerminalWorkspaceCommandGrammar.Format,
-			TerminalWorkspaceCommandVerb.Search or TerminalWorkspaceCommandVerb.Filter =>
-				TerminalWorkspaceCommandGrammar.Text,
-			TerminalWorkspaceCommandVerb.Export => TerminalWorkspaceCommandGrammar.Export,
-			TerminalWorkspaceCommandVerb.Copy => TerminalWorkspaceCommandGrammar.Copy,
-			TerminalWorkspaceCommandVerb.Branch => TerminalWorkspaceCommandGrammar.OptionalText,
-			TerminalWorkspaceCommandVerb.Profile => TerminalWorkspaceCommandGrammar.Profile,
-			TerminalWorkspaceCommandVerb.Language => TerminalWorkspaceCommandGrammar.Language,
-			TerminalWorkspaceCommandVerb.Help => TerminalWorkspaceCommandGrammar.Help,
-			_ => TerminalWorkspaceCommandGrammar.None
-		};
 }
 
 internal static class TerminalWorkspaceCommandKey
