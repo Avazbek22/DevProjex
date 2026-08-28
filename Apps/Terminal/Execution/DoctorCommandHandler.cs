@@ -441,17 +441,32 @@ public sealed class DoctorCommandHandler(
 	private static async Task<(bool Available, string Version)> TryReadGitVersionAsync(
 		CancellationToken cancellationToken)
 	{
+		return await TryReadGitVersionAsync(
+			CreateGitVersionStartInfo(),
+			TimeSpan.FromSeconds(3),
+			cancellationToken).ConfigureAwait(false);
+	}
+
+	internal static async Task<(bool Available, string Version)> TryReadGitVersionAsync(
+		ProcessStartInfo startInfo,
+		TimeSpan timeout,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(startInfo);
+		if (timeout <= TimeSpan.Zero)
+			throw new ArgumentOutOfRangeException(nameof(timeout));
+
 		try
 		{
 			using var process = new Process
 			{
-				StartInfo = CreateGitVersionStartInfo()
+				StartInfo = startInfo
 			};
 			if (!process.Start())
 				return (false, "unavailable");
 			process.StandardInput.Close();
 			using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-			timeoutSource.CancelAfter(TimeSpan.FromSeconds(3));
+			timeoutSource.CancelAfter(timeout);
 			var outputTask = BoundedTextReader.ReadAsync(
 				process.StandardOutput,
 				MaximumGitVersionOutputCharacters,
@@ -462,7 +477,9 @@ public sealed class DoctorCommandHandler(
 				timeoutSource.Token);
 			try
 			{
-				await process.WaitForExitAsync(timeoutSource.Token).ConfigureAwait(false);
+				await ExternalProcessLifetime
+					.WaitForExitOrTerminateAsync(process, timeoutSource.Token)
+					.ConfigureAwait(false);
 				var output = await outputTask.ConfigureAwait(false);
 				var error = await errorTask.ConfigureAwait(false);
 				if (output.ExceededLimit || error.ExceededLimit)
@@ -472,7 +489,6 @@ public sealed class DoctorCommandHandler(
 			}
 			catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
 			{
-				TryTerminate(process);
 				await BoundedTextReader
 					.ObserveCompletionAsync(outputTask, errorTask)
 					.ConfigureAwait(false);
@@ -480,7 +496,6 @@ public sealed class DoctorCommandHandler(
 			}
 			catch (OperationCanceledException)
 			{
-				TryTerminate(process);
 				await BoundedTextReader
 					.ObserveCompletionAsync(outputTask, errorTask)
 					.ConfigureAwait(false);
@@ -511,22 +526,6 @@ public sealed class DoctorCommandHandler(
 		startInfo.ArgumentList.Add("--version");
 		startInfo.Environment["GIT_TERMINAL_PROMPT"] = "0";
 		return startInfo;
-	}
-
-	private static void TryTerminate(Process process)
-	{
-		try
-		{
-			if (!process.HasExited)
-				process.Kill(entireProcessTree: true);
-		}
-		catch (Exception exception) when (exception is
-			       InvalidOperationException or
-			       NotSupportedException or
-			       System.ComponentModel.Win32Exception)
-		{
-			// The process may already have exited or the platform may not expose tree termination.
-		}
 	}
 
 	private static bool CanReadDirectory(string path)
