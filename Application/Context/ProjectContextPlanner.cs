@@ -80,6 +80,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				cancellationToken);
 		var effectiveFileSizes = BuildEffectiveFileSizes(
 			effectiveRoot,
+			loaded.Tree.OrderedFilePaths,
 			loaded.TreeInventory,
 			cancellationToken);
 		var includedBytes = CalculateIncludedBytes(
@@ -322,36 +323,59 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		};
 	}
 
-	private static IReadOnlyDictionary<string, long> BuildEffectiveFileSizes(
+	internal static IReadOnlyDictionary<string, long> BuildEffectiveFileSizes(
 		TreeNodeDescriptor root,
+		IReadOnlyList<string>? orderedFilePaths,
 		ProjectTreeInventorySnapshot? inventory,
 		CancellationToken cancellationToken)
 	{
-		var sizes = new Dictionary<string, long>(PathComparer.Default);
-		var stack = new Stack<TreeNodeDescriptor>();
-		stack.Push(root);
-		while (stack.Count > 0)
+		var sizes = new Dictionary<string, long>(orderedFilePaths?.Count ?? 0, PathComparer.Default);
+		if (orderedFilePaths is not null)
 		{
-			cancellationToken.ThrowIfCancellationRequested();
-			var node = stack.Pop();
-			if (!node.IsDirectory)
+			foreach (var path in orderedFilePaths)
 			{
-				sizes[node.FullPath] = -1;
-				continue;
+				cancellationToken.ThrowIfCancellationRequested();
+				sizes.TryAdd(path, -1);
 			}
+		}
+		else
+		{
+			var stack = new Stack<TreeNodeDescriptor>();
+			stack.Push(root);
+			while (stack.Count > 0)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				var node = stack.Pop();
+				if (!node.IsDirectory)
+				{
+					sizes[node.FullPath] = -1;
+					continue;
+				}
 
-			for (var index = node.Children.Count - 1; index >= 0; index--)
-				stack.Push(node.Children[index]);
+				for (var index = node.Children.Count - 1; index >= 0; index--)
+					stack.Push(node.Children[index]);
+			}
 		}
 
+		var unresolvedCount = sizes.Count;
 		if (inventory is not null)
 		{
 			foreach (var entry in inventory.Entries)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				if (!entry.IsDirectory && sizes.ContainsKey(entry.FullPath))
+				if (!entry.IsDirectory &&
+				    sizes.TryGetValue(entry.FullPath, out var currentLength) &&
+				    currentLength < 0)
+				{
 					sizes[entry.FullPath] = Math.Max(0, entry.Length);
+					unresolvedCount--;
+				}
 			}
+		}
+		if (unresolvedCount == 0)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			return sizes;
 		}
 
 		foreach (var path in sizes.Keys.ToArray())
