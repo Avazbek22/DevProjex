@@ -135,7 +135,7 @@ public sealed class TerminalBrokenPipeRegressionTests
 	}
 
 	[Fact]
-	public async Task ParserDiagnosticExitsCleanlyWhenStderrConsumerClosesEarly()
+	public async Task ParserDiagnosticPreservesUsageExitWhenStderrConsumerClosesEarly()
 	{
 		var environment = new TestTerminalEnvironment
 		{
@@ -146,8 +146,46 @@ public sealed class TerminalBrokenPipeRegressionTests
 			["unknown-command"],
 			TestContext.Current.CancellationToken);
 
-		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
 		Assert.Empty(environment.StandardOutput);
+	}
+
+	[Fact]
+	public async Task CancellationPreservesCanceledExitWhenStderrConsumerClosesEarly()
+	{
+		var environment = new TestTerminalEnvironment
+		{
+			ErrorOverride = new BrokenPipeTextWriter()
+		};
+		var application = new TerminalApplication(
+			environment,
+			developerCommandRunner: new ThrowingDeveloperCommandRunner(
+				new OperationCanceledException()));
+
+		var exitCode = await application.RunAsync(
+			["dev", "session", "."],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Canceled, exitCode);
+	}
+
+	[Fact]
+	public async Task RuntimeFailurePreservesRuntimeExitWhenStderrConsumerClosesEarly()
+	{
+		var environment = new TestTerminalEnvironment
+		{
+			ErrorOverride = new BrokenPipeTextWriter()
+		};
+		var application = new TerminalApplication(
+			environment,
+			developerCommandRunner: new ThrowingDeveloperCommandRunner(
+				new InvalidOperationException("failure")));
+
+		var exitCode = await application.RunAsync(
+			["dev", "session", "."],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.RuntimeError, exitCode);
 	}
 
 	[Fact]
@@ -352,6 +390,14 @@ public sealed class TerminalBrokenPipeRegressionTests
 		public override Encoding Encoding => Encoding.UTF8;
 
 		public override void Write(string? value) => throw new TerminalBrokenPipeException();
+	}
+
+	private sealed class ThrowingDeveloperCommandRunner(Exception exception) : IDeveloperCommandRunner
+	{
+		public Task<int> RunAsync(
+			DeveloperCommandRequest request,
+			CancellationToken cancellationToken) =>
+			Task.FromException<int>(exception);
 	}
 
 	private sealed class ConsoleOutputScope : IDisposable
