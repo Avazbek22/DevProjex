@@ -143,6 +143,41 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 	}
 
 	[Fact(Timeout = 120_000)]
+	public async Task RefreshSelectsANewExtensionAndPreservesAnExplicitDisabledExtension()
+	{
+		using var project = CreateProject();
+		await using var terminal = await StartAsync(project.Path, columns: 160, rows: 50);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await ExecuteAsync(terminal, "type .md off", ".md: disabled");
+		project.WriteFile("notes.md", "# Added while the workspace is open");
+		project.WriteFile("config.toml", "enabled = true");
+
+		await terminal.SendAsync(":refresh\r", TestContext.Current.CancellationToken);
+		var refreshed = await terminal.WaitForScreenAsync(
+			"Project refreshed.",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.DoesNotContain("Processing request", refreshed, StringComparison.Ordinal);
+		var tree = await terminal.WaitForScreenAsync(
+			"config.toml",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.DoesNotContain("notes.md", tree, StringComparison.Ordinal);
+
+		await OpenAndCancelAsync(terminal);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		var parameters = await terminal.WaitForScreenAsync(
+			"[x] .toml",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("[ ] .md", parameters, StringComparison.Ordinal);
+		Assert.DoesNotContain("Processing request", parameters, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 120_000)]
 	public async Task QuitDoesNotWaitForTheCommandResultTimer()
 	{
 		using var project = CreateProject();
