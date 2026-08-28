@@ -105,7 +105,10 @@ internal sealed class OutputOptions
 			result.AddError(LocalizedParseError.Create(
 				_localization["Terminal.Validation.QuietVerbosityConflict"]));
 		}
-		if (result.GetValue(Plain) && result.GetValue(Color) == TerminalColorMode.Always)
+		if (CliParseValue.TryGet(result, Plain, out var plain) &&
+		    plain &&
+		    CliParseValue.TryGet(result, Color, out var color) &&
+		    color == TerminalColorMode.Always)
 		{
 			result.AddError(LocalizedParseError.Create(
 				_localization["Terminal.Validation.PlainColorConflict"]));
