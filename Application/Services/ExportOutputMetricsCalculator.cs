@@ -46,6 +46,8 @@ public static class ExportOutputMetricsCalculator
 		return metricsStream.Complete(cancellationToken);
 	}
 
+	internal static TextMetricsWriter CreateTextWriter() => new();
+
 	public static ExportOutputMetrics FromContentFiles(IEnumerable<ContentFileMetrics> files)
 	{
 		var uniquePaths = new HashSet<string>(PathComparer.Default);
@@ -307,6 +309,96 @@ public static class ExportOutputMetricsCalculator
 
 	private readonly record struct NormalizedTextStats(int NormalizedChars, int LineBreaks);
 
+	internal sealed class TextMetricsWriter : TextWriter
+	{
+		private NormalizedTextMetricsAccumulator _metrics;
+		private bool _completed;
+
+		public override Encoding Encoding => Encoding.Unicode;
+
+		public ExportOutputMetrics Complete(CancellationToken cancellationToken)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (!_completed)
+			{
+				_completed = true;
+				return _metrics.Complete();
+			}
+
+			return _metrics.ToMetrics();
+		}
+
+		public override void Write(char value)
+		{
+			ThrowIfCompleted();
+			_metrics.Append(value);
+		}
+
+		public override void Write(string? value)
+		{
+			if (value is null)
+				return;
+
+			Write(value.AsSpan());
+		}
+
+		public override void Write(char[] buffer, int index, int count)
+		{
+			ArgumentNullException.ThrowIfNull(buffer);
+			ArgumentOutOfRangeException.ThrowIfNegative(index);
+			ArgumentOutOfRangeException.ThrowIfNegative(count);
+			if (index > buffer.Length - count)
+				throw new ArgumentException("The write range exceeds the source buffer.", nameof(count));
+
+			Write(buffer.AsSpan(index, count));
+		}
+
+		public override void Write(ReadOnlySpan<char> buffer)
+		{
+			ThrowIfCompleted();
+			_metrics.Append(buffer);
+		}
+
+		public override Task WriteAsync(char value)
+		{
+			Write(value);
+			return Task.CompletedTask;
+		}
+
+		public override Task WriteAsync(string? value)
+		{
+			Write(value);
+			return Task.CompletedTask;
+		}
+
+		public override Task WriteAsync(char[] buffer, int index, int count)
+		{
+			Write(buffer, index, count);
+			return Task.CompletedTask;
+		}
+
+		public override Task WriteAsync(
+			ReadOnlyMemory<char> buffer,
+			CancellationToken cancellationToken = default)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			Write(buffer.Span);
+			return Task.CompletedTask;
+		}
+
+		public override Task FlushAsync()
+		{
+			ThrowIfCompleted();
+			return Task.CompletedTask;
+		}
+
+		private void ThrowIfCompleted()
+		{
+			if (_completed)
+				throw new InvalidOperationException("Output metrics were already finalized.");
+		}
+	}
+
 	private sealed class Utf8MetricsStream : Stream
 	{
 		private const int CharacterBufferSize = 4 * 1024;
@@ -315,9 +407,7 @@ public static class ExportOutputMetricsCalculator
 			throwOnInvalidBytes: true);
 		private readonly Decoder _decoder = StrictUtf8.GetDecoder();
 		private readonly char[] _characterBuffer = new char[CharacterBufferSize];
-		private long _normalizedCharacters;
-		private long _lineBreaks;
-		private bool _pendingCarriageReturn;
+		private NormalizedTextMetricsAccumulator _metrics;
 		private bool _completed;
 
 		public override bool CanRead => false;
@@ -335,17 +425,11 @@ public static class ExportOutputMetricsCalculator
 			if (!_completed)
 			{
 				Decode(ReadOnlySpan<byte>.Empty, flush: true, cancellationToken);
-				FlushPendingCarriageReturn();
 				_completed = true;
+				return _metrics.Complete();
 			}
 
-			if (_normalizedCharacters == 0)
-				return ExportOutputMetrics.Empty;
-
-			return new ExportOutputMetrics(
-				_lineBreaks + 1,
-				_normalizedCharacters,
-				EstimateTokens(_normalizedCharacters));
+			return _metrics.ToMetrics();
 		}
 
 		public override void Flush()
@@ -425,7 +509,7 @@ public static class ExportOutputMetricsCalculator
 					out var bytesUsed,
 					out var charactersUsed,
 					out var completed);
-				Count(_characterBuffer.AsSpan(0, charactersUsed));
+				_metrics.Append(_characterBuffer.AsSpan(0, charactersUsed));
 				bytes = bytes[bytesUsed..];
 				if (completed)
 					break;
@@ -433,42 +517,100 @@ public static class ExportOutputMetricsCalculator
 			while (!bytes.IsEmpty || flush);
 		}
 
-		private void Count(ReadOnlySpan<char> characters)
+		private void ThrowIfCompleted()
 		{
-			foreach (var character in characters)
+			if (_completed)
+				throw new InvalidOperationException("Output metrics were already finalized.");
+		}
+	}
+
+	private struct NormalizedTextMetricsAccumulator
+	{
+		private long _normalizedCharacters;
+		private long _lineBreaks;
+		private bool _pendingCarriageReturn;
+
+		public void Append(ReadOnlySpan<char> characters)
+		{
+			var index = 0;
+			if (_pendingCarriageReturn && !characters.IsEmpty)
 			{
-				if (_pendingCarriageReturn)
+				FlushPendingCarriageReturn();
+				if (characters[0] == '\n')
+					index = 1;
+			}
+
+			while (index < characters.Length)
+			{
+				var remaining = characters[index..];
+				var lineBreakOffset = remaining.IndexOfAny(LineBreakCharacters);
+				if (lineBreakOffset < 0)
 				{
-					FlushPendingCarriageReturn();
-					if (character == '\n')
-						continue;
+					_normalizedCharacters += remaining.Length;
+					return;
 				}
 
-				if (character == '\r')
+				_normalizedCharacters += lineBreakOffset;
+				index += lineBreakOffset;
+				var lineBreak = characters[index++];
+				if (lineBreak == '\r' && index == characters.Length)
 				{
 					_pendingCarriageReturn = true;
-					continue;
+					return;
 				}
 
 				_normalizedCharacters++;
-				if (character == '\n')
-					_lineBreaks++;
+				_lineBreaks++;
+				if (lineBreak == '\r' && characters[index] == '\n')
+					index++;
 			}
+		}
+
+		public void Append(char character)
+		{
+			if (_pendingCarriageReturn)
+			{
+				FlushPendingCarriageReturn();
+				if (character == '\n')
+					return;
+			}
+
+			if (character == '\r')
+			{
+				_pendingCarriageReturn = true;
+				return;
+			}
+
+			_normalizedCharacters++;
+			if (character == '\n')
+				_lineBreaks++;
+		}
+
+		public ExportOutputMetrics Complete()
+		{
+			FlushPendingCarriageReturn();
+			return ToMetrics();
+		}
+
+		public ExportOutputMetrics ToMetrics()
+		{
+			if (_normalizedCharacters == 0)
+				return ExportOutputMetrics.Empty;
+
+			return new ExportOutputMetrics(
+				_lineBreaks + 1,
+				_normalizedCharacters,
+				EstimateTokens(_normalizedCharacters));
 		}
 
 		private void FlushPendingCarriageReturn()
 		{
 			if (!_pendingCarriageReturn)
 				return;
+
 			_pendingCarriageReturn = false;
 			_normalizedCharacters++;
 			_lineBreaks++;
-		}
-
-		private void ThrowIfCompleted()
-		{
-			if (_completed)
-				throw new InvalidOperationException("Output metrics were already finalized.");
 		}
 	}
 }

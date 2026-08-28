@@ -54,6 +54,21 @@ public sealed class ExportOutputMetricsCalculatorEdgeCaseTests
 	}
 
 	[Fact]
+	public async Task TextMetricsWriter_PreservesLineEndingsSplitAcrossWrites()
+	{
+		const string text = "A\r\nБ\rC\n終";
+		using var writer = ExportOutputMetricsCalculator.CreateTextWriter();
+
+		await writer.WriteAsync("A\r".AsMemory(), TestContext.Current.CancellationToken);
+		await writer.WriteAsync("\nБ\r".AsMemory(), TestContext.Current.CancellationToken);
+		await writer.WriteAsync("C\n終".AsMemory(), TestContext.Current.CancellationToken);
+
+		Assert.Equal(
+			ExportOutputMetricsCalculator.FromText(text),
+			writer.Complete(TestContext.Current.CancellationToken));
+	}
+
+	[Fact]
 	public void FromContentFiles_IgnoresEmptyPathsAndPreservesWhitespaceOnlyFileNames()
 	{
 		var files = new[]

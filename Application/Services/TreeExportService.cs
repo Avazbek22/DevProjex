@@ -314,16 +314,32 @@ public sealed class TreeExportService
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 		ValidateFormat(format);
+		if (format == TreeTextFormat.Markdown)
+		{
+			var markdownRootPath = string.IsNullOrWhiteSpace(displayRootPath) ? rootPath : displayRootPath;
+			return CalculateMarkdownTreeMetrics(
+				markdownRootPath,
+				root,
+				includedPaths: null,
+				cancellationToken);
+		}
+
 		if (format != TreeTextFormat.Ascii)
-			return ExportOutputMetricsCalculator.FromText(
-				BuildFullTreeWithCancellation(
+		{
+			using var metricsWriter = ExportOutputMetricsCalculator.CreateTextWriter();
+			WriteFullTreeAsync(
+					metricsWriter,
 					rootPath,
 					root,
 					format,
 					displayRootPath,
 					displayRootName,
 					includeRootPath: true,
-					cancellationToken));
+					cancellationToken)
+				.GetAwaiter()
+				.GetResult();
+			return metricsWriter.Complete(cancellationToken);
+		}
 
 		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath) ? rootPath : displayRootPath;
 		var outputRootName = ResolveRootDisplayName(root, displayRootName);
@@ -451,18 +467,45 @@ public sealed class TreeExportService
 		if (!CollectIncludedPaths(root, selectedPaths, includedPaths, cancellationToken))
 			return ExportOutputMetrics.Empty;
 
+		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath) ? rootPath : displayRootPath;
+		if (format == TreeTextFormat.Markdown)
+		{
+			return CalculateMarkdownTreeMetrics(
+				outputRootPath,
+				root,
+				includedPaths,
+				cancellationToken);
+		}
+
 		if (format != TreeTextFormat.Ascii)
-			return ExportOutputMetricsCalculator.FromText(
-				BuildSelectedTreeFromIncludedPaths(
+		{
+			using var metricsWriter = ExportOutputMetricsCalculator.CreateTextWriter();
+			var writeTask = format switch
+			{
+				TreeTextFormat.Json => WriteTreeJsonAsync(
+					metricsWriter,
 					rootPath,
 					root,
-					includedPaths,
-					format,
-					displayRootPath,
+					outputRootPath,
 					displayRootName,
-					cancellationToken));
+					includeRootPath: true,
+					includedPaths,
+					cancellationToken),
+				TreeTextFormat.Xml => WriteTreeXmlAsync(
+					metricsWriter,
+					rootPath,
+					root,
+					outputRootPath,
+					displayRootName,
+					includeRootPath: true,
+					includedPaths,
+					cancellationToken),
+				_ => throw new ArgumentOutOfRangeException(nameof(format), format, null)
+			};
+			writeTask.GetAwaiter().GetResult();
+			return metricsWriter.Complete(cancellationToken);
+		}
 
-		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath) ? rootPath : displayRootPath;
 		var outputRootName = ResolveRootDisplayName(root, displayRootName);
 		return CalculateAsciiSelectedTreeMetrics(
 			outputRootPath,
@@ -731,6 +774,25 @@ public sealed class TreeExportService
 		string? displayRootPath,
 		string? displayRootName,
 		bool includeRootPath,
+		CancellationToken cancellationToken) =>
+		WriteTreeJsonAsync(
+			destination,
+			rootPath,
+			root,
+			displayRootPath,
+			displayRootName,
+			includeRootPath,
+			includedPaths: null,
+			cancellationToken);
+
+	private static Task WriteTreeJsonAsync(
+		TextWriter destination,
+		string rootPath,
+		TreeNodeDescriptor root,
+		string? displayRootPath,
+		string? displayRootName,
+		bool includeRootPath,
+		IReadOnlySet<string>? includedPaths,
 		CancellationToken cancellationToken)
 	{
 		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath)
@@ -755,7 +817,7 @@ public sealed class TreeExportService
 		WriteJsonTreeContents(
 			writer,
 			root,
-			includedPaths: null,
+			includedPaths,
 			cancellationToken,
 			() =>
 			{
@@ -778,6 +840,25 @@ public sealed class TreeExportService
 		string? displayRootPath,
 		string? displayRootName,
 		bool includeRootPath,
+		CancellationToken cancellationToken) =>
+		WriteTreeXmlAsync(
+			destination,
+			rootPath,
+			root,
+			displayRootPath,
+			displayRootName,
+			includeRootPath,
+			includedPaths: null,
+			cancellationToken);
+
+	private static Task WriteTreeXmlAsync(
+		TextWriter destination,
+		string rootPath,
+		TreeNodeDescriptor root,
+		string? displayRootPath,
+		string? displayRootName,
+		bool includeRootPath,
+		IReadOnlySet<string>? includedPaths,
 		CancellationToken cancellationToken)
 	{
 		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath)
@@ -796,7 +877,7 @@ public sealed class TreeExportService
 		WriteXmlTreeContents(
 			writer,
 			root,
-			includedPaths: null,
+			includedPaths,
 			cancellationToken,
 			() =>
 			{
@@ -1870,6 +1951,75 @@ public sealed class TreeExportService
 	{
 		chars += renderedChars + 1; // Normalize any platform newline to a single logical line-break char.
 		lineBreaks++;
+	}
+
+	private static ExportOutputMetrics CalculateMarkdownTreeMetrics(
+		string outputRootPath,
+		TreeNodeDescriptor root,
+		IReadOnlySet<string>? includedPaths,
+		CancellationToken cancellationToken)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
+		long chars = 0;
+		long lineBreaks = 0;
+		var rootHeaderChars = "Root: ".Length +
+		                      EscapeTextValue(ResolveStructuredRootPath(outputRootPath)).Length;
+		AppendAsciiLineMetrics(rootHeaderChars, ref chars, ref lineBreaks);
+		AppendAsciiLineMetrics(renderedChars: 0, ref chars, ref lineBreaks);
+
+		if (!root.IsDirectory)
+		{
+			if (includedPaths is null || includedPaths.Contains(root.FullPath))
+			{
+				AppendMarkdownItemMetrics(
+					root,
+					level: 0,
+					ref chars,
+					ref lineBreaks);
+			}
+
+			return CreateMetricsFromNormalizedCounts(chars, lineBreaks);
+		}
+
+		var pending = new Stack<MarkdownTreeWriteOperation>();
+		PushMarkdownChildren(
+			pending,
+			root.Children,
+			includedPaths,
+			level: 0,
+			cancellationToken);
+		while (pending.TryPop(out var operation))
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var node = operation.Node;
+			AppendMarkdownItemMetrics(
+				node,
+				operation.Level,
+				ref chars,
+				ref lineBreaks);
+			if (node.IsDirectory)
+			{
+				PushMarkdownChildren(
+					pending,
+					node.Children,
+					includedPaths,
+					operation.Level + 1,
+					cancellationToken);
+			}
+		}
+
+		return CreateMetricsFromNormalizedCounts(chars, lineBreaks);
+	}
+
+	private static void AppendMarkdownItemMetrics(
+		TreeNodeDescriptor node,
+		int level,
+		ref long chars,
+		ref long lineBreaks)
+	{
+		var escapedName = EscapeMarkdownListText(node.DisplayName);
+		var renderedChars = checked((long)level * 2 + 2 + escapedName.Length + (node.IsDirectory ? 1 : 0));
+		AppendAsciiLineMetrics(renderedChars, ref chars, ref lineBreaks);
 	}
 
 	private static ExportOutputMetrics CreateMetricsFromNormalizedCounts(long chars, long lineBreaks)
