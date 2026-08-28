@@ -34,6 +34,17 @@ public sealed class ContentSelectionSnapshotTests
 		Assert.Equal(1, paths.ReadCount);
 	}
 
+	[Fact]
+	public void Create_CanonicalInputIsDefensivelyCopied()
+	{
+		string[] paths = ["a.cs", "b.cs"];
+
+		var snapshot = ContentSelectionSnapshot.Create("project", paths);
+		paths[0] = "changed.cs";
+
+		Assert.Equal(["a.cs", "b.cs"], snapshot.OrderedPaths);
+	}
+
 	private sealed class CancelingPathList(CancellationTokenSource cancellation) : IReadOnlyList<string>
 	{
 		public int Count => 2;

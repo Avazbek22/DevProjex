@@ -140,21 +140,9 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 
-		// Use HashSet for O(1) deduplication
-		var uniqueFiles = new HashSet<string>(PathComparer.Default);
-		foreach (var path in filePaths)
-		{
-			cancellationToken.ThrowIfCancellationRequested();
-			if (!string.IsNullOrWhiteSpace(path))
-				uniqueFiles.Add(path);
-		}
-
-		if (uniqueFiles.Count == 0)
+		var files = ContentPathOrdering.BuildOrderedUnique(filePaths, cancellationToken);
+		if (files.Count == 0)
 			return new SelectedContentExportResult(string.Empty, null);
-
-		// Convert to list and sort in-place
-		var files = new List<string>(uniqueFiles);
-		CancellationAwareSort.Sort(files, PathComparer.Default, cancellationToken);
 		var redactionContext = transformationContext?.Redaction;
 		outputPathRedaction ??= OutputRootPathPresentation.CaptureRedactionDecision(transformationContext);
 		if (redactionContext is not null)

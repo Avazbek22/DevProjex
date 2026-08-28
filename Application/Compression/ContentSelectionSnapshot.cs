@@ -36,6 +36,26 @@ public sealed record ContentSelectionSnapshot(
 		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
 		ArgumentNullException.ThrowIfNull(orderedPaths);
 		cancellationToken.ThrowIfCancellationRequested();
+		var normalizedProjectRoot = PathUtility.Normalize(projectRoot);
+		if (ContentPathOrdering.IsStrictlyOrderedUnique(orderedPaths, cancellationToken))
+		{
+			using var canonicalHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+			Append(canonicalHash, normalizedProjectRoot);
+			var canonicalPaths = new string[orderedPaths.Count];
+			for (var index = 0; index < orderedPaths.Count; index++)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				var path = orderedPaths[index];
+				canonicalPaths[index] = path;
+				Append(canonicalHash, path);
+			}
+
+			return new ContentSelectionSnapshot(
+				revision,
+				canonicalPaths,
+				Convert.ToHexString(canonicalHash.GetHashAndReset()));
+		}
+
 		var unique = new HashSet<string>(PathComparer.Default);
 		var paths = new List<string>(orderedPaths.Count);
 		var pathsAreSorted = true;
@@ -54,7 +74,7 @@ public sealed record ContentSelectionSnapshot(
 		}
 
 		using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-		Append(hash, PathUtility.Normalize(projectRoot));
+		Append(hash, normalizedProjectRoot);
 		IReadOnlyList<string> fingerprintPaths = paths;
 		if (!pathsAreSorted)
 		{

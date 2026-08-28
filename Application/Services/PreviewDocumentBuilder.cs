@@ -94,7 +94,7 @@ public sealed class PreviewDocumentBuilder(
 		OutputPathRedactionDecision? outputPathRedaction = null,
 		string? projectRoot = null)
     {
-		var orderedFiles = BuildOrderedUniqueFiles(filePaths, cancellationToken);
+		var orderedFiles = ContentPathOrdering.BuildOrderedUnique(filePaths, cancellationToken);
 		outputPathRedaction ??= OutputRootPathPresentation.CaptureRedactionDecision(transformationContext);
 		await EnsurePersistentIdentityReadyAsync(transformationContext, cancellationToken).ConfigureAwait(false);
         if (orderedFiles.Count == 0)
@@ -154,7 +154,7 @@ public sealed class PreviewDocumentBuilder(
 		OutputPathPresentationResult? treeRootPresentation = null,
 		string? projectRoot = null)
     {
-		var orderedFiles = BuildOrderedUniqueFiles(filePaths, cancellationToken);
+		var orderedFiles = ContentPathOrdering.BuildOrderedUnique(filePaths, cancellationToken);
 		outputPathRedaction ??= OutputRootPathPresentation.CaptureRedactionDecision(transformationContext);
 		await EnsurePersistentIdentityReadyAsync(transformationContext, cancellationToken).ConfigureAwait(false);
         var normalizedTreeText = treeText.TrimEnd('\r', '\n');
@@ -745,25 +745,6 @@ public sealed class PreviewDocumentBuilder(
             FileContentClassification.UnsupportedEncoding => UnsupportedEncodingMarker,
             _ => UnreadableMarker
         };
-    }
-
-	private static List<string> BuildOrderedUniqueFiles(
-		IEnumerable<string> filePaths,
-		CancellationToken cancellationToken)
-    {
-		cancellationToken.ThrowIfCancellationRequested();
-        var uniqueFiles = new HashSet<string>(PathComparer.Default);
-        foreach (var path in filePaths)
-        {
-			cancellationToken.ThrowIfCancellationRequested();
-            if (!string.IsNullOrWhiteSpace(path))
-                uniqueFiles.Add(path);
-        }
-
-		var files = new List<string>(uniqueFiles.Count);
-		files.AddRange(uniqueFiles);
-		CancellationAwareSort.Sort(files, PathComparer.Default, cancellationToken);
-		return files;
     }
 
     private static bool AppendMultilineText(PreviewTextStorageBuilder builder, ReadOnlySpan<char> text)
