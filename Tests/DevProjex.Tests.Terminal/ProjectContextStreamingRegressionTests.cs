@@ -1763,6 +1763,8 @@ public sealed class ProjectContextStreamingRegressionTests
 			TaskCreationOptions.RunContinuationsAsynchronously);
 		private readonly TaskCompletionSource<bool> _firstCopyStarted = new(
 			TaskCreationOptions.RunContinuationsAsynchronously);
+		private readonly TaskCompletionSource<bool> _snapshotsReady = new(
+			TaskCreationOptions.RunContinuationsAsynchronously);
 		private readonly int _requiredConcurrency;
 		private readonly bool _blockCopy;
 		private int _activeReads;
@@ -1819,9 +1821,24 @@ public sealed class ProjectContextStreamingRegressionTests
 					.OpenCompleteSnapshotAsync(path, cancellationToken)
 					.ConfigureAwait(false);
 				_completionOrder.Enqueue(Path.GetFileName(path));
-				Interlocked.Increment(ref _createdSnapshots);
+				var createdSnapshots = Interlocked.Increment(ref _createdSnapshots);
 				Interlocked.Increment(ref _activeSnapshots);
-				return new TrackingSnapshot(snapshot, this, _blockCopy);
+				var trackingSnapshot = new TrackingSnapshot(snapshot, this, _blockCopy);
+				if (_blockCopy)
+				{
+					if (createdSnapshots >= _requiredConcurrency)
+						_snapshotsReady.TrySetResult(true);
+					try
+					{
+						await _snapshotsReady.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+					}
+					catch
+					{
+						await trackingSnapshot.DisposeAsync().ConfigureAwait(false);
+						throw;
+					}
+				}
+				return trackingSnapshot;
 			}
 			finally
 			{

@@ -560,7 +560,7 @@ public sealed class CliExpansionCommandTests
 		using var data = new TemporaryDirectory();
 		const string repositoryUrl = "https://github.com/example/leased.git";
 		var factory = new TerminalServiceFactory(() => data.Path);
-		var services = factory.Create(AppLanguage.En);
+		using var services = factory.Create(AppLanguage.En);
 		var staging = services.RepoCacheService.CreateRepositoryStagingDirectory(repositoryUrl);
 		File.WriteAllText(Path.Combine(staging, "README.md"), "cached\n");
 		var published = services.RepoCacheService.PublishRepositoryDirectory(staging, repositoryUrl);
@@ -592,6 +592,7 @@ public sealed class CliExpansionCommandTests
 		Assert.Contains("Removed: 0. Retained: 1. Failed: 0.", retainedEnvironment.StandardOutput);
 		Assert.True(Directory.Exists(published));
 
+		services.Dispose();
 		session.Dispose();
 		var removedEnvironment = new TestTerminalEnvironment();
 		var removedExitCode = await new TerminalApplication(removedEnvironment, factory).RunAsync(
