@@ -720,6 +720,8 @@ public sealed class MainWindowLifecycleUiTests
 
 		public void CleanupStaleCacheOnStartup() => inner.CleanupStaleCacheOnStartup();
 
+		public void RequestStaleCacheCleanupOnStartup() => inner.RequestStaleCacheCleanupOnStartup();
+
 		public void CollectGarbage() => inner.CollectGarbage();
 
 		public void RequestGarbageCollection() => inner.RequestGarbageCollection();

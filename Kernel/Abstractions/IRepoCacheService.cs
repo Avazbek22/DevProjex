@@ -117,6 +117,11 @@ public interface IRepoCacheService
     void CleanupStaleCacheOnStartup();
 
     /// <summary>
+    /// Requests coalesced startup cleanup on the cache-owned background scheduler.
+    /// </summary>
+    void RequestStaleCacheCleanupOnStartup();
+
+    /// <summary>
     /// Runs best-effort trash cleanup and size/age eviction without touching pinned repositories.
     /// </summary>
     void CollectGarbage();

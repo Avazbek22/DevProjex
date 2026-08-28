@@ -449,6 +449,41 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 	}
 
 	[Fact]
+	public async Task DisposeAsync_CancelsAndDrainsStartupCacheCleanup()
+	{
+		using var cleanupStarted = new ManualResetEventSlim();
+		using var allowCleanup = new ManualResetEventSlim();
+		var startedCount = 0;
+		var completedCount = 0;
+		var hooks = new RepoCacheTestHooks
+		{
+			BeforeStartupCacheCleanup = () =>
+			{
+				Interlocked.Increment(ref startedCount);
+				cleanupStarted.Set();
+				allowCleanup.Wait(BackgroundOperationTimeout);
+			},
+			AfterStartupCacheCleanup = () => Interlocked.Increment(ref completedCount)
+		};
+		var service = CreateService(new FakeWorktreeManager(supported: true), hooks: hooks);
+		service.RequestStaleCacheCleanupOnStartup();
+		Assert.True(cleanupStarted.Wait(
+			BackgroundOperationTimeout,
+			TestContext.Current.CancellationToken));
+
+		var disposal = service.DisposeAsync();
+		allowCleanup.Set();
+		await disposal.AsTask().WaitAsync(
+			TimeSpan.FromSeconds(2),
+			TestContext.Current.CancellationToken);
+		service.RequestStaleCacheCleanupOnStartup();
+		await Task.Delay(100, TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, Volatile.Read(ref startedCount));
+		Assert.Equal(0, Volatile.Read(ref completedCount));
+	}
+
+	[Fact]
 	public async Task DisposeAsync_WithoutGarbageCollectionRequest_DoesNotScanCache()
 	{
 		var policy = new RepositoryCachePolicy(1, TimeSpan.FromDays(60));

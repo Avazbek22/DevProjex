@@ -58,6 +58,7 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 	private readonly ConcurrentDictionary<string, WorktreeCleanupState> _worktreeCleanupInFlight =
 		new(PathComparer.Default);
 	private readonly ConcurrentDictionary<string, byte> _repositorySizeRefreshInFlight = new(PathComparer.Default);
+	private int _scheduledStartupCleanupState;
 	private int _scheduledGarbageCollectionState;
 	private Task? _disposalTask;
 
@@ -927,9 +928,44 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 	}
 
 	public void CleanupStaleCacheOnStartup()
+		=> CleanupStaleCacheOnStartup(CancellationToken.None);
+
+	private void CleanupStaleCacheOnStartup(CancellationToken cancellationToken)
 	{
-		CleanupStaging();
-		CollectGarbage();
+		CleanupStaging(cancellationToken);
+		CollectGarbage(cancellationToken);
+	}
+
+	public void RequestStaleCacheCleanupOnStartup()
+	{
+		if (Interlocked.CompareExchange(ref _scheduledStartupCleanupState, 1, 0) != 0)
+			return;
+		if (!_backgroundTasks.TryRun(RunScheduledStartupCleanupAsync))
+			Interlocked.Exchange(ref _scheduledStartupCleanupState, 0);
+	}
+
+	private Task RunScheduledStartupCleanupAsync(CancellationToken cancellationToken)
+	{
+		try
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			_testHooks?.BeforeStartupCacheCleanup?.Invoke();
+			cancellationToken.ThrowIfCancellationRequested();
+			CleanupStaleCacheOnStartup(cancellationToken);
+			_testHooks?.AfterStartupCacheCleanup?.Invoke();
+		}
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+		{
+		}
+		catch (Exception exception)
+		{
+			Trace.TraceWarning("Repository cache startup cleanup failed: {0}", exception.Message);
+		}
+		finally
+		{
+			Interlocked.Exchange(ref _scheduledStartupCleanupState, 0);
+		}
+		return Task.CompletedTask;
 	}
 
 	public void CollectGarbage()
@@ -2859,6 +2895,8 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 internal sealed class RepoCacheTestHooks
 {
 	public Action<string>? AfterSessionLeaseAcquired { get; init; }
+	public Action? BeforeStartupCacheCleanup { get; init; }
+	public Action? AfterStartupCacheCleanup { get; init; }
 	public Action? BeforeScheduledGarbageCollection { get; init; }
 	public Action? AfterScheduledGarbageCollection { get; init; }
 	public Action<string>? BeforeUnusedWorktreeCleanup { get; init; }
