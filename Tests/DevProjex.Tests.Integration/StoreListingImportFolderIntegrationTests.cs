@@ -74,7 +74,9 @@ public sealed class StoreListingImportFolderIntegrationTests
         var templateLocales = StoreListingPaths.GetLocaleColumns(templateDocument.Headers);
 
         Assert.Equal(templateLocales, importLocales.Take(templateLocales.Length));
-        Assert.Equal(["es-es", "pt-br", "pt-pt"], importLocales.Skip(templateLocales.Length));
+        Assert.Equal(
+            ["es-es", "pt-br", "pt-pt", "pl-pl", "tr-tr", "uk-ua", "ja-jp", "ko-kr", "zh-cn", "zh-tw", "vi-vn", "id-id"],
+            importLocales.Skip(templateLocales.Length));
     }
 
     [Fact]
@@ -122,22 +124,31 @@ public sealed class StoreListingImportFolderIntegrationTests
     public void ImportFolder_FeatureSummaryAdvertisesBothGitAwareFilteringModes()
     {
         var document = StoreListingCsvDocument.Load(StoreListingPaths.GetImportCsvPath(RepoRoot.Value));
-        var feature = document.RowsByField["Feature4"];
+        var feature = document.RowsByField["Feature7"];
         var expectedValues = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["en-us"] = "Smart Ignore, .gitignore, and Git-tracked mode",
             ["en"] = "Smart Ignore, .gitignore, and Git-tracked mode",
-            ["ru"] = "Smart Ignore, .gitignore и режим отслеживаемых Git-файлов",
-            ["ru-ru"] = "Smart Ignore, .gitignore и режим отслеживаемых Git-файлов",
-            ["kk-kz"] = "Smart Ignore, .gitignore және Git бақылайтын файлдар режимі",
+            ["ru"] = "Smart Ignore, .gitignore и режим отслеживаемых файлов",
+            ["ru-ru"] = "Smart Ignore, .gitignore и режим отслеживаемых файлов",
+            ["kk-kz"] = "Smart Ignore, .gitignore және қадағаланатын файлдар режимі",
             ["de-de"] = "Smart Ignore, .gitignore und Git-Tracked-Modus",
-            ["it-it"] = "Smart Ignore, .gitignore e modalità file tracciati da Git",
-            ["tg-cyrl-tj"] = "Smart Ignore, .gitignore ва реҷаи файлҳои пайгиришавандаи Git",
-            ["uz-latn-uz"] = "Smart Ignore, .gitignore va Git kuzatadigan fayllar rejimi",
+            ["it-it"] = "Smart Ignore, .gitignore e modalità file tracciati",
+            ["tg-cyrl-tj"] = "Smart Ignore, .gitignore ва реҷаи файлҳои пайгиришаванда",
+            ["uz-latn-uz"] = "Smart Ignore, .gitignore va kuzatilgan fayllar rejimi",
             ["fr-fr"] = "Smart Ignore, .gitignore et mode fichiers suivis par Git",
-            ["es-es"] = "Smart Ignore, .gitignore y modo de archivos seguidos por Git",
-            ["pt-br"] = "Smart Ignore, .gitignore e arquivos rastreados pelo Git",
-            ["pt-pt"] = "Smart Ignore, .gitignore e ficheiros controlados pelo Git"
+            ["es-es"] = "Smart Ignore, .gitignore y modo de archivos rastreados",
+            ["pt-br"] = "Smart Ignore, .gitignore e modo de arquivos rastreados",
+            ["pt-pt"] = "Smart Ignore, .gitignore e modo de ficheiros seguidos",
+            ["pl-pl"] = "Smart Ignore, .gitignore i tryb plików śledzonych",
+            ["tr-tr"] = "Smart Ignore, .gitignore ve izlenen dosyalar modu",
+            ["uk-ua"] = "Smart Ignore, .gitignore і режим відстежуваних файлів",
+            ["ja-jp"] = "Smart Ignore・.gitignore・Git 追跡ファイルモード",
+            ["ko-kr"] = "Smart Ignore, .gitignore, Git 추적 파일 모드",
+            ["zh-cn"] = "Smart Ignore、.gitignore 与 Git 跟踪文件模式",
+            ["zh-tw"] = "Smart Ignore、.gitignore 與 Git 追蹤檔案模式",
+            ["vi-vn"] = "Smart Ignore, .gitignore và chế độ tệp Git theo dõi",
+            ["id-id"] = "Smart Ignore, .gitignore, dan mode berkas terlacak Git"
         };
 
         Assert.Equal(
