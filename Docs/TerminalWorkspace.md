@@ -290,7 +290,7 @@ the existing confirmation and blocking progress surfaces.
 | `X` | focus Exclusions |
 | `T` | focus File Types |
 | `E` | export context |
-| `Z` / Shift+`Z` | export folder / ZIP |
+| `z` / Shift+`Z` | export folder / ZIP |
 | `D` | show diagnostics |
 | `A` | analyze |
 | `G` | open Desktop |

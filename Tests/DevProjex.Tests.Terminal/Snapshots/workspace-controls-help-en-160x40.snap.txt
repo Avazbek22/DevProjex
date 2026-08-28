@@ -11,8 +11,8 @@
 │                                 │ All and the two mutually exclusive Git checkboxes. File Types has its own All         █ │Exclusions├────── [x] All (10) ──┐│
 │                                 │ control. Up/Down or j/k moves inside a mini-panel and crosses to the next one at a    █ │x] Use .gitignore                ││
 │                                 │ boundary; Enter or Space toggles a row. Each long list scrolls independently. : opens █ │ ] Tracked Git files only        ││
-│                                 │ workspace commands, Ctrl+P opens actions, E exports context, and Z exports            █ │x] Smart ignore                  ││
-│                                 │ folder/ZIP. Tab/F6 returns to Tree; Shift+Tab/Shift+F6 moves to Preview.              █ │x] Empty folders                 ││
+│                                 │ workspace commands, Ctrl+P opens actions, E exports context, z exports a folder, and  █ │x] Smart ignore                  ││
+│                                 │ Shift+Z exports ZIP. Tab/F6 returns to Tree; Shift+Tab/Shift+F6 moves to Preview.     █ │x] Empty folders                 ││
 │                                 │                                                                                       █ │x] Empty files                   ││
 │                                 │ WORKSPACE                                                                             █ │x] Hidden folders                ││
 │                                 │ Tree selects files and folders. Preview inspects the current context. Parameters      █ │x] Hidden files                  ││
