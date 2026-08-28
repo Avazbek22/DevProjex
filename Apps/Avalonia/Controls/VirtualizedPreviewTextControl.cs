@@ -58,6 +58,11 @@ internal sealed class PreviewManualSecretMarkRejectedEventArgs(string message) :
 	public string Message { get; } = message;
 }
 
+internal sealed class PreviewClipboardCopyFailedEventArgs(Exception exception) : EventArgs
+{
+	public Exception Exception { get; } = exception;
+}
+
 /// <summary>
 /// Draws only visible preview text lines for large payloads.
 /// Rendering stays virtualized while the underlying document can be either in-memory
@@ -67,6 +72,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 {
     public event EventHandler<CancelEventArgs>? CopyingToClipboard;
     public event EventHandler? CopiedToClipboard;
+	internal event EventHandler<PreviewClipboardCopyFailedEventArgs>? ClipboardCopyFailed;
     public event EventHandler? PreviewSelectionChanged;
 	public event EventHandler<PreviewRedactionToggleRequestedEventArgs>? RedactionToggleRequested;
 	public event EventHandler<PreviewBulkRedactionToggleRequestedEventArgs>? BulkRedactionToggleRequested;
@@ -2326,37 +2332,55 @@ public sealed class VirtualizedPreviewTextControl : Control
             : left.Column.CompareTo(right.Column);
     }
 
-    private async Task CopySelectionToClipboardAsync()
-    {
-		if (!TryGetNormalizedSelection(out var start, out var end))
-			return;
-
-		_pendingClipboardCharacterCount = MeasureSelectedTextLength(start, end, normalizeForClipboard: true);
-		if (_pendingClipboardCharacterCount <= 0)
-			return;
-
-        var copying = new CancelEventArgs();
+	private Task CopySelectionToClipboardAsync()
+	{
 		try
 		{
-			CopyingToClipboard?.Invoke(this, copying);
-			if (copying.Cancel)
-				return;
+			var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+			return CopySelectionToClipboardUsingAsync(
+				clipboard is null ? null : clipboard.SetTextAsync);
 		}
-		finally
+		catch (Exception exception)
 		{
-			_pendingClipboardCharacterCount = 0;
+			ClipboardCopyFailed?.Invoke(this, new PreviewClipboardCopyFailedEventArgs(exception));
+			return Task.CompletedTask;
 		}
+	}
 
-		var selectedText = BuildSelectedText(normalizeForClipboard: true);
-		if (string.IsNullOrEmpty(selectedText))
-			return;
+	internal async Task CopySelectionToClipboardUsingAsync(Func<string, Task>? writeTextAsync)
+	{
+		try
+		{
+			if (!TryGetNormalizedSelection(out var start, out var end))
+				return;
 
-        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
-        if (clipboard is null)
-            return;
+			_pendingClipboardCharacterCount = MeasureSelectedTextLength(start, end, normalizeForClipboard: true);
+			if (_pendingClipboardCharacterCount <= 0)
+				return;
 
-        await clipboard.SetTextAsync(selectedText);
-        CopiedToClipboard?.Invoke(this, EventArgs.Empty);
+			var copying = new CancelEventArgs();
+			try
+			{
+				CopyingToClipboard?.Invoke(this, copying);
+				if (copying.Cancel)
+					return;
+			}
+			finally
+			{
+				_pendingClipboardCharacterCount = 0;
+			}
+
+			var selectedText = BuildSelectedText(normalizeForClipboard: true);
+			if (string.IsNullOrEmpty(selectedText) || writeTextAsync is null)
+				return;
+
+			await writeTextAsync(selectedText);
+			CopiedToClipboard?.Invoke(this, EventArgs.Empty);
+		}
+		catch (Exception exception)
+		{
+			ClipboardCopyFailed?.Invoke(this, new PreviewClipboardCopyFailedEventArgs(exception));
+		}
     }
 
 	private long MeasureSelectedTextLength(

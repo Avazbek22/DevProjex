@@ -1214,6 +1214,26 @@ public sealed class VirtualizedPreviewTextControlTests
 		Assert.Equal(0, control.PendingClipboardCharacterCount);
 	}
 
+	[AvaloniaFact]
+	public async Task CopySelection_ObservesClipboardProviderFailure()
+	{
+		using var document = new InMemoryPreviewTextDocument("alpha\nbeta");
+		var control = new VirtualizedPreviewTextControl { Document = document };
+		var failure = new IOException("clipboard provider failed");
+		Exception? observedFailure = null;
+		var copiedCount = 0;
+		control.SelectAll();
+		control.ClipboardCopyFailed += (_, eventArgs) => observedFailure = eventArgs.Exception;
+		control.CopiedToClipboard += (_, _) => copiedCount++;
+
+		await control.CopySelectionToClipboardUsingAsync(
+			_ => Task.FromException(failure));
+
+		Assert.Same(failure, observedFailure);
+		Assert.Equal(0, copiedCount);
+		Assert.Equal(0, control.PendingClipboardCharacterCount);
+	}
+
 	[Fact]
 	public void ClipboardSelectionLimit_IsInclusiveAt256MiBOfUtf16Text()
 	{

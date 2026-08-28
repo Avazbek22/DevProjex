@@ -133,6 +133,7 @@ internal sealed class PreviewSurfaceController : IDisposable
             Math.Max(0, controls.TextScrollViewer.Viewport.Width);
         controls.TextControl.CopyingToClipboard += OnCopyingToClipboard;
         controls.TextControl.CopiedToClipboard += OnCopiedToClipboard;
+		controls.TextControl.ClipboardCopyFailed += OnClipboardCopyFailed;
         controls.TextControl.PreviewSelectionChanged +=
             OnSelectionChanged;
 		controls.TextControl.RedactionToggleRequested += OnRedactionToggleRequested;
@@ -1555,6 +1556,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 		_controls.TextControl.BulkRedactionToggleRequested -= OnBulkRedactionToggleRequested;
 		_controls.TextControl.CopiedToClipboard -=
             OnCopiedToClipboard;
+		_controls.TextControl.ClipboardCopyFailed -= OnClipboardCopyFailed;
         _controls.TextControl.PreviewSelectionChanged -=
             OnSelectionChanged;
 		_controls.TextControl.ManualSecretMarkRequested -= OnManualSecretMarkRequested;
@@ -1914,6 +1916,24 @@ internal sealed class PreviewSurfaceController : IDisposable
         if (_viewModel.IsAnyPreviewVisible)
             _toastService.Show(_localization["Toast.Copy.Preview"]);
     }
+
+	private void OnClipboardCopyFailed(object? sender, PreviewClipboardCopyFailedEventArgs e)
+	{
+		if (!_disposed)
+			_ = ShowClipboardCopyFailureAsync(e.Exception);
+	}
+
+	private async Task ShowClipboardCopyFailureAsync(Exception exception)
+	{
+		try
+		{
+			await _showErrorAsync(DesktopExceptionPresentation.Format(_localization, exception));
+		}
+		catch
+		{
+			// A dialog failure must not turn a clipboard provider failure into an application crash.
+		}
+	}
 
     private void OnSelectionChanged(object? sender, EventArgs e)
         => ScheduleSelectionMetricsUpdate();
