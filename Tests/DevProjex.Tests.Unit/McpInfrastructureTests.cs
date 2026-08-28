@@ -712,6 +712,53 @@ public sealed class McpInfrastructureTests
 		Assert.Equal(content, await File.ReadAllTextAsync(pack.Path, TestContext.Current.CancellationToken));
 	}
 
+	[Theory]
+	[InlineData("\n")]
+	[InlineData("\r\n")]
+	[InlineData("\r")]
+	public async Task PackLineCheckpointsSkipCompletedPrefixesWithoutChangingRanges(string lineEnding)
+	{
+		using var workspace = new TemporaryDirectory();
+		using var registry = new McpPackRegistry(workspace.Path);
+		var line = $"α{lineEnding}";
+		var content = string.Concat(Enumerable.Repeat(line, 600));
+		var bytes = Encoding.UTF8.GetBytes(content);
+		var pack = await registry.CreateAsync(
+			async (stream, token) =>
+			{
+				for (var offset = 0; offset < bytes.Length; offset += 7)
+				{
+					var count = Math.Min(7, bytes.Length - offset);
+					await stream.WriteAsync(bytes.AsMemory(offset, count), token);
+				}
+			},
+			TestContext.Current.CancellationToken);
+
+		var checkpoint = pack.ResolveLineCheckpoint(300);
+		Assert.Equal(257, checkpoint.LineNumber);
+		Assert.Equal(256L * Encoding.UTF8.GetByteCount(line), checkpoint.ByteOffset);
+		await using var stream = new FileStream(
+			pack.Path,
+			FileMode.Open,
+			FileAccess.Read,
+			FileShare.Read);
+		stream.Seek(checkpoint.ByteOffset, SeekOrigin.Begin);
+		var page = await McpTextRanges.ReadPageAsync(
+			stream,
+			startLine: 300,
+			endLine: 301,
+			maximumLines: 1000,
+			maximumCharacters: 50_000,
+			TestContext.Current.CancellationToken,
+			knownTotalLines: pack.Lines,
+			firstStreamLineNumber: checkpoint.LineNumber);
+
+		Assert.Equal("α\nα", page.Text);
+		Assert.Equal(300, page.StartLine);
+		Assert.Equal(301, page.EndLine);
+		Assert.Equal(601, page.TotalLines);
+	}
+
 	[Fact]
 	public async Task PackCreationDoesNotPublishWhenCancellationArrivesAfterWriting()
 	{

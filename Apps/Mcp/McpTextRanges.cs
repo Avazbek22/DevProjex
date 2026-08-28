@@ -19,12 +19,15 @@ internal static class McpTextRanges
 		int maximumLines,
 		int maximumCharacters,
 		CancellationToken cancellationToken,
-		int? knownTotalLines = null)
+		int? knownTotalLines = null,
+		int firstStreamLineNumber = 1)
 	{
 		ArgumentNullException.ThrowIfNull(stream);
 		if (knownTotalLines is < 0)
 			throw new ArgumentOutOfRangeException(nameof(knownTotalLines));
 		var start = startLine ?? 1;
+		if (firstStreamLineNumber < 1 || firstStreamLineNumber > start)
+			throw new ArgumentOutOfRangeException(nameof(firstStreamLineNumber));
 		var requestedEnd = endLine ?? int.MaxValue;
 		if (start < 1 || requestedEnd < start)
 			throw InvalidRange(start, endLine, knownTotalLines ?? 0);
@@ -51,7 +54,7 @@ internal static class McpTextRanges
 		var builder = new StringBuilder();
 		var lineBuilder = new StringBuilder(Math.Min(maximumCharacters, 16 * 1024));
 		var readBuffer = ArrayPool<char>.Shared.Rent(16 * 1024);
-		var total = 0;
+		var total = firstStreamLineNumber - 1;
 		var actualEnd = start - 1;
 		var characterLimit = false;
 		var hasAppendedLine = false;

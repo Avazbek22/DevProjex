@@ -289,8 +289,7 @@ internal sealed class DevProjexMcpTools(
 			var end = arguments.OptionalInteger("end_line", 1, int.MaxValue);
 			var pack = packs.ResolveDocument(packId);
 			var page = await ReadFilePageAsync(
-					pack.Path,
-					pack.Lines,
+					pack,
 					start,
 					end,
 					cancellationToken)
@@ -564,19 +563,20 @@ internal sealed class DevProjexMcpTools(
 	}
 
 	private static async Task<McpTextPage> ReadFilePageAsync(
-		string path,
-		int totalLines,
+		McpPackDocument pack,
 		int? startLine,
 		int? endLine,
 		CancellationToken cancellationToken)
 	{
+		var checkpoint = pack.ResolveLineCheckpoint(startLine ?? 1);
 		await using var stream = new FileStream(
-			path,
+			pack.Path,
 			FileMode.Open,
 			FileAccess.Read,
 			FileShare.Read,
 			16 * 1024,
 			FileOptions.Asynchronous | FileOptions.SequentialScan);
+		stream.Seek(checkpoint.ByteOffset, SeekOrigin.Begin);
 		return await McpTextRanges.ReadPageAsync(
 			stream,
 			startLine,
@@ -584,7 +584,8 @@ internal sealed class DevProjexMcpTools(
 			MaximumPageLines,
 			MaximumPageCharacters,
 			cancellationToken,
-			totalLines).ConfigureAwait(false);
+			pack.Lines,
+			checkpoint.LineNumber).ConfigureAwait(false);
 	}
 
 	private static bool AppendSearchResult(
