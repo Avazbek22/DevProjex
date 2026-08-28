@@ -25,6 +25,7 @@ public sealed class DoctorCommandHandler(
 	Func<DoctorStorageRoots>? storageRootsProvider = null)
 {
 	private const int MaximumGitVersionOutputCharacters = 64 * 1024;
+	private static readonly TimeSpan GitVersionOutputDrainTimeout = TimeSpan.FromSeconds(2);
 	private readonly DesktopInstanceRegistry _desktopRegistry =
 		desktopRegistry ?? new DesktopInstanceRegistry();
 	private readonly Func<string> _currentDirectoryProvider =
@@ -466,20 +467,22 @@ public sealed class DoctorCommandHandler(
 				return (false, "unavailable");
 			process.StandardInput.Close();
 			using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+			using var outputDrainSource = new CancellationTokenSource();
 			timeoutSource.CancelAfter(timeout);
 			var outputTask = BoundedTextReader.ReadAsync(
 				process.StandardOutput,
 				MaximumGitVersionOutputCharacters,
-				timeoutSource.Token);
+				outputDrainSource.Token);
 			var errorTask = BoundedTextReader.ReadAsync(
 				process.StandardError,
 				MaximumGitVersionOutputCharacters,
-				timeoutSource.Token);
+				outputDrainSource.Token);
 			try
 			{
 				await ExternalProcessLifetime
 					.WaitForExitOrTerminateAsync(process, timeoutSource.Token)
 					.ConfigureAwait(false);
+				outputDrainSource.CancelAfter(GitVersionOutputDrainTimeout);
 				var output = await outputTask.ConfigureAwait(false);
 				var error = await errorTask.ConfigureAwait(false);
 				if (output.ExceededLimit || error.ExceededLimit)
@@ -489,6 +492,7 @@ public sealed class DoctorCommandHandler(
 			}
 			catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
 			{
+				outputDrainSource.CancelAfter(GitVersionOutputDrainTimeout);
 				await BoundedTextReader
 					.ObserveCompletionAsync(outputTask, errorTask)
 					.ConfigureAwait(false);
@@ -496,6 +500,7 @@ public sealed class DoctorCommandHandler(
 			}
 			catch (OperationCanceledException)
 			{
+				outputDrainSource.CancelAfter(GitVersionOutputDrainTimeout);
 				await BoundedTextReader
 					.ObserveCompletionAsync(outputTask, errorTask)
 					.ConfigureAwait(false);
