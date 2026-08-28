@@ -101,6 +101,9 @@ public sealed partial class TerminalRecentRepositoriesPtyTests
 			welcomeDirectory.Path,
 			normalizeRepositorySize: true);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenWithoutAsync(
+			"Last opened",
+			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
 		Assert.Equal(
