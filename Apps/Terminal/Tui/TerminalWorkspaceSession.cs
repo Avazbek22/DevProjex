@@ -2889,17 +2889,22 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			return;
 		}
 		_lastExportDestination = destination;
+		var pendingSettingsRefresh = _operations.GetTask(WorkspaceOperationKind.SettingsRefresh);
 
 		TrackActiveOperation(RunExportWorkflowAsync(
 			L("Terminal.Tui.ExportContext"),
-			token => _controller.PrepareContextExportAsync(
-				_state,
-				_previewView,
-				selectedFormat,
-				destination,
-				overwrite: false,
-				token,
-				plain: _options.Plain),
+			async token =>
+			{
+				await AwaitPendingSettingsRefreshAsync(pendingSettingsRefresh, token).ConfigureAwait(false);
+				return await _controller.PrepareContextExportAsync(
+					_state,
+					_previewView,
+					selectedFormat,
+					destination,
+					overwrite: false,
+					token,
+					plain: _options.Plain).ConfigureAwait(false);
+			},
 			async (_, overwrite, token) => await _controller.ExportContextAsync(
 				_state,
 				_previewView,
@@ -2942,14 +2947,19 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			return;
 		}
 		_lastExportDestination = destination;
+		var pendingSettingsRefresh = _operations.GetTask(WorkspaceOperationKind.SettingsRefresh);
 
 		TrackActiveOperation(RunExportWorkflowAsync(
 			L("Terminal.Tui.ExportProject"),
-			token => _controller.PrepareProjectExportAsync(
-				_state,
-				selectedKind,
-				destination,
-				token),
+			async token =>
+			{
+				await AwaitPendingSettingsRefreshAsync(pendingSettingsRefresh, token).ConfigureAwait(false);
+				return await _controller.PrepareProjectExportAsync(
+					_state,
+					selectedKind,
+					destination,
+					token).ConfigureAwait(false);
+			},
 			async (progress, overwrite, token) => await _controller.ExportProjectAsync(
 				_state,
 				selectedKind,
@@ -2963,6 +2973,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					exactDestination,
 					dryRun),
 			originatedFromCommandLine));
+	}
+
+	private static async Task AwaitPendingSettingsRefreshAsync(
+		Task? pendingSettingsRefresh,
+		CancellationToken cancellationToken)
+	{
+		if (pendingSettingsRefresh is not null)
+			await pendingSettingsRefresh.WaitAsync(cancellationToken).ConfigureAwait(false);
 	}
 
 	internal static string BuildDefaultExportPath(
@@ -4490,7 +4508,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var text = _workspace.BuildExportSummaryText(summary, Math.Max(12, dialogWidth - 26));
 		if (_options.Plain)
 			text = $"{title}\n\n{text}";
-		using var dialog = CreateDialog(title, dialogWidth, 14);
+		var dialogHeight = text.Count(static character => character == '\n') + 8;
+		using var dialog = CreateDialog(title, dialogWidth, dialogHeight);
 		var body = new TextView
 		{
 			X = 1,

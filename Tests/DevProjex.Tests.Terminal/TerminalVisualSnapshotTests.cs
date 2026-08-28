@@ -146,11 +146,7 @@ public sealed class TerminalVisualSnapshotTests
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		var destination = Path.Combine(output.Path, "project-export");
-		await terminal.SendAsync("Z", TestContext.Current.CancellationToken);
-		await WaitForStableScreenAsync(terminal, "Choose the physical output kind");
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync("z", TestContext.Current.CancellationToken);
 		await ReplacePromptTextAsync(terminal, destination, "Exact destination:");
 		await WaitForStableScreenAsync(terminal, "Export?");
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);

@@ -294,25 +294,19 @@ public sealed class TerminalClonePtyTests
 
 		await terminal.SendAsync("Z", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Choose the physical output kind",
-			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
-			"Project copy with hidden data",
-			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
 			"Exact destination:",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendCtrlAAsync(TestContext.Current.CancellationToken);
 		await terminal.SendAsync(destination, TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
-			"Export?",
+		var summary = await terminal.WaitForScreenAsync(
+			"Redaction",
 			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("Export?", summary, StringComparison.Ordinal);
+		Assert.Contains(
+			"Secrets and private data are redacted",
+			summary,
+			StringComparison.Ordinal);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"Export completed:",

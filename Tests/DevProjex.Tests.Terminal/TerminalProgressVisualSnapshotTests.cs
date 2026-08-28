@@ -359,9 +359,6 @@ public sealed class TerminalProgressVisualSnapshotTests
 		CancellationToken cancellationToken,
 		string language = "en")
 	{
-		var outputKindPrompt = language == "ru"
-			? "Выберите тип физического результата"
-			: "Choose the physical output kind";
 		var destinationPrompt = language == "ru"
 			? "Точный путь назначения:"
 			: "Exact destination:";
@@ -369,11 +366,7 @@ public sealed class TerminalProgressVisualSnapshotTests
 			language == "ru" ? "ДЕРЕВО ПРОЕКТА" : "PROJECT TREE",
 			timeout: TimeSpan.FromSeconds(45),
 			cancellationToken: cancellationToken);
-		await terminal.SendAsync("Z", cancellationToken);
-		await terminal.WaitForScreenAsync(outputKindPrompt, cancellationToken: cancellationToken);
-		await terminal.SendTabAsync(cancellationToken);
-		await terminal.SendTabAsync(cancellationToken);
-		await terminal.SendEnterAsync(cancellationToken);
+		await terminal.SendAsync("z", cancellationToken);
 		await terminal.WaitForScreenAsync(destinationPrompt, cancellationToken: cancellationToken);
 		await terminal.SendCtrlAAsync(cancellationToken);
 		await terminal.SendAsync(destination, cancellationToken);
@@ -390,13 +383,6 @@ public sealed class TerminalProgressVisualSnapshotTests
 			timeout: TimeSpan.FromSeconds(45),
 			cancellationToken: cancellationToken);
 		await terminal.SendAsync("Z", cancellationToken);
-		await terminal.WaitForScreenAsync(
-			"Choose the physical output kind",
-			cancellationToken: cancellationToken);
-		await terminal.SendTabAsync(cancellationToken);
-		await terminal.SendTabAsync(cancellationToken);
-		await terminal.SendTabAsync(cancellationToken);
-		await terminal.SendEnterAsync(cancellationToken);
 		await terminal.WaitForScreenAsync(
 			"Exact destination:",
 			cancellationToken: cancellationToken);

@@ -133,7 +133,7 @@ public sealed class TerminalPtyRecoveryTests
 	}
 
 	[Fact(Timeout = 90_000)]
-	public async Task DestinationConflictReturnsToWorkspaceAndProjectFolderExportCompletes()
+	public async Task DestinationConflictOffersOverwriteAndProjectFolderExportCompletes()
 	{
 		using var project = CreateProject();
 		using var output = new TemporaryDirectory();
@@ -149,25 +149,20 @@ public sealed class TerminalPtyRecoveryTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendAsync("E", TestContext.Current.CancellationToken);
 		await ReplacePromptTextAsync(terminal, conflict);
-		await terminal.WaitForScreenAsync(
-			"DPX-EXPORT-DESTINATION-EXISTS",
+		var conflictSummary = await terminal.WaitForScreenAsync(
+			"Export?",
 			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("Overwrite", conflictSummary, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenWithoutAsync(
-			"DPX-EXPORT-DESTINATION-EXISTS",
+			"Export?",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
 
-		await terminal.SendAsync("Z", TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
-			"Choose the physical output kind",
-			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync("z", TestContext.Current.CancellationToken);
 		await ReplacePromptTextAsync(terminal, folderDestination, "Exact destination:");
 		await terminal.WaitForScreenAsync(
 			"Export?",
