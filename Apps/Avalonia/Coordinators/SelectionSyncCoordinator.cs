@@ -1571,20 +1571,18 @@ public sealed partial class SelectionSyncCoordinator(
                 return;
             }
 
-            if (!_visibleExtensionAggregateIsValid ||
-                !_session.Extensions.TryUpdateKnownOption(
-                    option.Name,
-                    option.IsChecked,
-                    out var previousState))
-            {
-                UpdateExtensionsSelectionCache();
-            }
-            else
-            {
-                if (previousState != option.IsChecked)
-                    _visibleUncheckedExtensionCount += option.IsChecked ? -1 : 1;
-                SyncAllExtensionsCheckboxFromAggregate();
-            }
+			if (!_visibleExtensionAggregateIsValid ||
+			    !_session.Extensions.TryUpdateKnownOption(
+				    option.Name,
+				    option.IsChecked,
+				    out _))
+			{
+				UpdateExtensionsSelectionCache();
+			}
+			else
+			{
+				RebuildVisibleExtensionAggregate();
+			}
             _session.AdvanceRevision();
             RequestPendingApplyEvaluation();
 			selectionContentChanged?.Invoke();

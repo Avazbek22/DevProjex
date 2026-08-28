@@ -6,6 +6,18 @@ namespace DevProjex.Tests.Unit;
 public sealed class SecretRedactionCountOnlyPerformanceTests
 {
 	[Fact]
+	public void CachingOccurrenceIdDoesNotChangeCandidateValueEquality()
+	{
+		var candidate = CreateCandidate();
+		var equivalent = CreateCandidate();
+
+		_ = candidate.CacheOccurrenceId("occurrence-1");
+
+		Assert.Equal(equivalent, candidate);
+		Assert.Equal(equivalent.GetHashCode(), candidate.GetHashCode());
+	}
+
+	[Fact]
 	public void CachedFindingCountBenchmark()
 	{
 		if (!string.Equals(
@@ -82,4 +94,21 @@ public sealed class SecretRedactionCountOnlyPerformanceTests
 			string content,
 			CancellationToken cancellationToken = default) => [];
 	}
+
+	private static SecretFindingCandidateMetadata CreateCandidate() =>
+		new(
+			RawStart: 10,
+			RawLength: 8,
+			RuleId: "rule",
+			ValueFingerprint: "fingerprint",
+			RuleOrder: 1,
+			SecretFindingSource.Detector,
+			PersistentMarkHash: null,
+			SessionMarkId: null,
+			PersistentMarkId: null,
+			RedactionFindingCategory.Secrets,
+			new SecretOccurrenceCoordinateIdentity(
+				IsSourceBacked: true,
+				Start: 10,
+				Length: 8));
 }

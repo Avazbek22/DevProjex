@@ -431,13 +431,17 @@ public sealed class TerminalWorkspaceController(
 		IEqualityComparer<T> comparer) =>
 		(left ?? []).SequenceEqual(right ?? [], comparer);
 
-	public Task<ProjectContextPlan> BuildCurrentPlanAsync(
+	public async Task<ProjectContextPlan> BuildCurrentPlanAsync(
 		TerminalWorkspaceState state,
-		CancellationToken cancellationToken) =>
-		BuildReprojectedPlanAsync(
+		CancellationToken cancellationToken)
+	{
+		var plan = await BuildReprojectedPlanAsync(
 			state.Plan,
 			state.BuildSelectedRelativePaths(),
-			cancellationToken);
+			cancellationToken).ConfigureAwait(false);
+		state.ReplacePlan(plan);
+		return plan;
+	}
 
 	public async Task RefreshPreviewAsync(
 		TerminalWorkspaceState state,

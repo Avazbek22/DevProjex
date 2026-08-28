@@ -993,6 +993,35 @@ public sealed class TerminalWorkspaceContractTests
 	}
 
 	[Fact]
+	public async Task BuildCurrentPlanPublishesTheReprojectedPlanToWorkspaceState()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("kept.cs", "class Kept {}");
+		workspace.WriteFile("cleared.cs", "class Cleared {}");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+		var clearedIndex = state.VisibleRows
+			.Select((row, index) => (row, index))
+			.Single(item => Path.GetFileName(item.row.Node.FullPath) == "cleared.cs")
+			.index;
+		state.ToggleSelection(clearedIndex);
+
+		var rebuilt = await controller.BuildCurrentPlanAsync(
+			state,
+			TestContext.Current.CancellationToken);
+
+		Assert.Same(rebuilt, state.Plan);
+		Assert.DoesNotContain(
+			state.Plan.IncludedFiles,
+			path => Path.GetFileName(path) == "cleared.cs");
+	}
+
+	[Fact]
 	public async Task RefreshSelectsANewFileAndPreservesAnExplicitlyClearedFile()
 	{
 		using var workspace = new TemporaryDirectory();

@@ -320,6 +320,23 @@ public sealed class TerminalParameterRowsBuilderTests
 	}
 
 	[Fact]
+	public void RenderingDoesNotChangeParameterRowValueEquality()
+	{
+		var row = new TerminalParameterRow(
+			"extension:.cs",
+			TerminalParameterRowKind.Extension,
+			".cs",
+			IsSelected: true,
+			Value: ".cs");
+		var equivalent = row with { };
+
+		_ = row.ToString();
+
+		Assert.Equal(equivalent, row);
+		Assert.Equal(equivalent.GetHashCode(), row.GetHashCode());
+	}
+
+	[Fact]
 	public void ChangedParameterShapeLeavesTheExistingSourceUntouchedForFallback()
 	{
 		var original = new TerminalParameterRow(
