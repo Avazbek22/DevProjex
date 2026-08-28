@@ -249,6 +249,8 @@ public partial class MainWindow
             // Releasing the file-handle lease makes this checkout eligible for silent cache GC.
             Interlocked.Exchange(ref _currentRepositorySession, null)?.Dispose();
             _repoCacheService.RequestGarbageCollection();
+            if (_repoCacheService is global::DevProjex.Infrastructure.Git.RepoCacheService repoCacheLifetime)
+                repoCacheLifetime.Dispose();
 
             _taskbarProgress.Dispose();
             _desktopInteractionGate.Dispose();

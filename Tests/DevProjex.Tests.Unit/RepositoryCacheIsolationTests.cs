@@ -143,6 +143,41 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 	}
 
 	[Fact]
+	public async Task DisposeAsync_CancelsAndDrainsBlockedWorktreeCleanup()
+	{
+		var worktrees = new FakeWorktreeManager(supported: true, blockRemoval: true);
+		var service = CreateService(worktrees);
+		_ = Publish(service, RepositoryUrl, RepositoryCacheContentKind.Git, "main");
+		var first = await service.TryAcquireRepositorySessionAsync(
+			RepositoryUrl,
+			"main",
+			TestContext.Current.CancellationToken);
+		var second = await service.TryAcquireRepositorySessionAsync(
+			RepositoryUrl,
+			"main",
+			TestContext.Current.CancellationToken);
+		Assert.NotNull(first);
+		Assert.NotNull(second);
+		first.Dispose();
+		second.Dispose();
+
+		using var reopened = await service.TryAcquireRepositorySessionAsync(
+			RepositoryUrl,
+			"main",
+			TestContext.Current.CancellationToken);
+		await worktrees.RemovalStarted.Task.WaitAsync(
+			BackgroundOperationTimeout,
+			TestContext.Current.CancellationToken);
+
+		await service.DisposeAsync().AsTask().WaitAsync(
+			TimeSpan.FromSeconds(2),
+			TestContext.Current.CancellationToken);
+
+		Assert.True(worktrees.RemovalCanceled.Task.IsCompletedSuccessfully);
+		Assert.Equal(0, worktrees.RemovedCount);
+	}
+
+	[Fact]
 	public async Task GitSessionReturnsBeforeRepositorySizeRefreshAndBackgroundRefreshUpdatesIndex()
 	{
 		var refreshStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -188,6 +223,44 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 			TestContext.Current.CancellationToken);
 		Assert.True(service.FindIndexedRepository(RepositoryUrl)!.ApproximateSizeBytes > initialSize);
 		Assert.True(Directory.Exists(basePath));
+	}
+
+	[Fact]
+	public async Task DisposeAsync_CancelsAndDrainsRepositorySizeRefresh()
+	{
+		using var refreshStarted = new ManualResetEventSlim();
+		using var allowRefresh = new ManualResetEventSlim();
+		var sizeCalculated = 0;
+		var hooks = new RepoCacheTestHooks
+		{
+			BeforeRepositorySizeRefresh = _ =>
+			{
+				refreshStarted.Set();
+				Assert.True(allowRefresh.Wait(BackgroundOperationTimeout));
+			},
+			AfterRepositorySizeCalculated = _ => Interlocked.Increment(ref sizeCalculated)
+		};
+		var service = CreateService(new FakeWorktreeManager(supported: true), hooks: hooks);
+		_ = Publish(service, RepositoryUrl, RepositoryCacheContentKind.Git, "main");
+		using var first = await service.TryAcquireRepositorySessionAsync(
+			RepositoryUrl,
+			"main",
+			TestContext.Current.CancellationToken);
+		using var second = await service.TryAcquireRepositorySessionAsync(
+			RepositoryUrl,
+			"main",
+			TestContext.Current.CancellationToken);
+		Assert.True(refreshStarted.Wait(
+			BackgroundOperationTimeout,
+			TestContext.Current.CancellationToken));
+
+		var disposal = service.DisposeAsync();
+		allowRefresh.Set();
+		await disposal.AsTask().WaitAsync(
+			TimeSpan.FromSeconds(2),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(0, Volatile.Read(ref sizeCalculated));
 	}
 
 	[Fact]
@@ -373,6 +446,66 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 			foreach (var session in sessions)
 				session.Dispose();
 		}
+	}
+
+	[Fact]
+	public async Task DisposeAsync_WithoutGarbageCollectionRequest_DoesNotScanCache()
+	{
+		var policy = new RepositoryCachePolicy(1, TimeSpan.FromDays(60));
+		var service = CreateService(new FakeWorktreeManager(supported: true), policy);
+		var repositoryPath = Publish(
+			service,
+			RepositoryUrl,
+			RepositoryCacheContentKind.Zip,
+			new string('x', 128));
+
+		await service.DisposeAsync();
+
+		Assert.True(Directory.Exists(repositoryPath));
+	}
+
+	[Fact]
+	public async Task DisposeAsync_CancelsScheduledCollection_RunsFinalCollection_AndRejectsFutureRequests()
+	{
+		using var collectionStarted = new ManualResetEventSlim();
+		using var allowCollection = new ManualResetEventSlim();
+		var collectionCount = 0;
+		var hooks = new RepoCacheTestHooks
+		{
+			BeforeScheduledGarbageCollection = () =>
+			{
+				Interlocked.Increment(ref collectionCount);
+				collectionStarted.Set();
+				Assert.True(allowCollection.Wait(BackgroundOperationTimeout));
+			}
+		};
+		var policy = new RepositoryCachePolicy(1, TimeSpan.FromDays(60));
+		var service = CreateService(new FakeWorktreeManager(supported: true), policy, hooks: hooks);
+		var repositoryPath = Publish(
+			service,
+			RepositoryUrl,
+			RepositoryCacheContentKind.Zip,
+			new string('x', 128));
+		var session = await service.TryAcquireRepositorySessionAsync(
+			RepositoryUrl,
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.NotNull(session);
+		Assert.True(collectionStarted.Wait(
+			BackgroundOperationTimeout,
+			TestContext.Current.CancellationToken));
+
+		session.Dispose();
+		service.RequestGarbageCollection();
+		var disposal = service.DisposeAsync();
+		allowCollection.Set();
+		await disposal.AsTask().WaitAsync(
+			TimeSpan.FromSeconds(2),
+			TestContext.Current.CancellationToken);
+		service.RequestGarbageCollection();
+		await Task.Delay(100, TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, Volatile.Read(ref collectionCount));
+		Assert.False(Directory.Exists(repositoryPath));
 	}
 
 	[Fact]
@@ -711,6 +844,7 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 		public int RemovedCount { get; private set; }
 		public int PrunedCount { get; private set; }
 		public TaskCompletionSource RemovalStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+		public TaskCompletionSource RemovalCanceled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 		public void ReleaseRemoval() => _releaseRemoval.TrySetResult();
 		public Task<WorktreeSupportState> GetSupportStateAsync(
 			string basePath,
@@ -745,7 +879,15 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 			RemovalStarted.TrySetResult();
 			if (!_blockRemoval)
 				_releaseRemoval.TrySetResult();
-			await _releaseRemoval.Task.WaitAsync(cancellationToken);
+			try
+			{
+				await _releaseRemoval.Task.WaitAsync(cancellationToken);
+			}
+			catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+			{
+				RemovalCanceled.TrySetResult();
+				throw;
+			}
 			if (Directory.Exists(worktreePath))
 				Directory.Delete(worktreePath, recursive: true);
 			RemovedCount++;
