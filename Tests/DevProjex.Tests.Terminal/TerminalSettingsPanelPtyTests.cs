@@ -160,6 +160,31 @@ public sealed class TerminalSettingsPanelPtyTests
 		await ExitAsync(terminal);
 	}
 
+	[Fact(Timeout = 60_000)]
+	public async Task GitShortcutFocusesTheActiveGitRowBeforeSpaceTogglesIt()
+	{
+		using var project = CreatePanelProject();
+		await using var terminal = await StartAsync(project.Path, columns: 160, rows: 50);
+
+		await WaitForStableScreenAsync(terminal, "PROJECT TREE");
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(terminal, "> PARAMETERS");
+		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
+		var focused = await WaitForStableScreenAsync(terminal, "> PARAMETERS");
+		AssertOnlyRowIsHighlighted(
+			terminal,
+			focused,
+			activeText: "Use .gitignore",
+			inactiveTexts: ["Smart ignore"]);
+
+		await terminal.SendSpaceAsync(TestContext.Current.CancellationToken);
+		var toggled = await WaitForStableScreenAsync(terminal, "[ ] Use .gitignore");
+		Assert.Contains("[x] Smart ignore", toggled, StringComparison.Ordinal);
+
+		await ExitAsync(terminal);
+	}
+
 	[Fact(Timeout = 90_000)]
 	public async Task MouseClickOnFrameAggregateTogglesOnlyItsSection()
 	{

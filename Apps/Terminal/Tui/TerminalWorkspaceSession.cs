@@ -2289,7 +2289,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		if (key.NoShift == Key.M)
 		{
 			key.Handled = true;
-			FocusControlSection(TerminalControlSection.Exclusions);
+			FocusGitFiltering();
 			return;
 		}
 		if (key.NoShift == Key.X)

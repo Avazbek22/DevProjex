@@ -613,6 +613,42 @@ internal sealed partial class TerminalWorkspaceSession
 		UpdateWorkspaceFocus();
 	}
 
+	private void FocusGitFiltering()
+	{
+		const TerminalControlSection section = TerminalControlSection.Exclusions;
+		FocusControlSection(section);
+		_application.Invoke(() => FocusGitFilteringRow(section));
+	}
+
+	private void FocusGitFilteringRow(TerminalControlSection section)
+	{
+		var (_, rows) = GetControlSection(section);
+		if (rows is null)
+			return;
+		var rowIndex = -1;
+		for (var index = 0; index < rows.Count; index++)
+		{
+			var row = rows[index];
+			if (row.Kind != TerminalParameterRowKind.GitMode)
+				continue;
+			if (rowIndex < 0)
+				rowIndex = index;
+			if (row.IsSelected == true)
+			{
+				rowIndex = index;
+				break;
+			}
+		}
+		if (rowIndex < 0)
+		{
+			FocusControlSection(section, movePane: false);
+			return;
+		}
+
+		var aggregateOffset = GetAggregateControlSection(section).List is null ? 0 : 1;
+		FocusControlPosition(section, rowIndex + aggregateOffset);
+	}
+
 	private enum TerminalControlSection
 	{
 		Content,
@@ -692,7 +728,7 @@ internal sealed partial class TerminalWorkspaceSession
 				"M",
 				FormatGitMode(selection.GitMode ?? plan.GitReadiness.Mode),
 				TerminalWorkspaceCommandCatalog.Get(TerminalWorkspaceCommandVerb.Set).Syntax,
-				execute: () => FocusControlSection(TerminalControlSection.Exclusions)),
+				execute: FocusGitFiltering),
 			CreateAction(
 				TerminalWorkspaceActionKind.Exclusions,
 				"Terminal.Tui.Selection",
