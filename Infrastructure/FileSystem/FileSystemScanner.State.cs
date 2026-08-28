@@ -121,12 +121,12 @@ public sealed partial class FileSystemScanner
         bool GitIgnoreVisible,
         bool SmartIgnoreVisible);
 
-    private struct EffectiveIgnoreScanNode(
-        string path,
-        string relativePath,
-        string name,
-		IReadOnlyList<FileSystemFileEntry> files,
-        int parentIndex,
+	private struct EffectiveIgnoreScanNode(
+		string path,
+		string relativePath,
+		string name,
+		IReadOnlyList<FileSystemFileEntry>? files,
+		int parentIndex,
         bool isAccessDenied,
         bool isHidden,
         bool isDot,
@@ -138,10 +138,10 @@ public sealed partial class FileSystemScanner
         IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
         IgnoreRules.GitIgnoreScanContext gitIgnoreCandidateContext)
     {
-        public string Path { get; } = path;
-        public string RelativePath { get; } = relativePath;
-        public string Name { get; } = name;
-		public IReadOnlyList<FileSystemFileEntry> Files { get; } = files;
+		public string Path { get; } = path;
+		public string RelativePath { get; } = relativePath;
+		public string Name { get; } = name;
+		public IReadOnlyList<FileSystemFileEntry>? Files { get; } = files;
         public int ParentIndex { get; } = parentIndex;
         public bool IsAccessDenied { get; set; } = isAccessDenied;
         public bool IsHidden { get; } = isHidden;

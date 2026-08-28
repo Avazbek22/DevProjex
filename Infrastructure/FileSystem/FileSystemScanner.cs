@@ -1770,6 +1770,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			extensionDiscoveryRules,
 			effectiveRules,
 			effectiveExtensionPolicy,
+			captureFiles: treeInventoryCapture is not null,
 			cancellationToken,
 			gitIgnoreLoadSession);
 		var directories = discovery.Value.Nodes;
@@ -1860,7 +1861,10 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 
 				try
 				{
-					foreach (var file in node.Files)
+					BeforeEnumeration(FileSystemScanEnumerationPoint.DirectoryFiles, node.Path);
+					foreach (var file in node.Files ?? FileSystemEntryEnumerator.EnumerateFiles(
+					         node.Path,
+					         node.RelativePath))
 					{
 						token.ThrowIfCancellationRequested();
 						if (treeInventoryDirectoryIncluded is not null &&
@@ -2124,7 +2128,9 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			if (!treeInventoryDirectoryIncluded[index])
 				continue;
 			entryCapacity = checked(
-				entryCapacity + 1 + Math.Min(processedFileCounts[index], directories[index].Files.Count));
+				entryCapacity + 1 + Math.Min(
+					processedFileCounts[index],
+					directories[index].Files?.Count ?? 0));
 		}
 		var entries = new List<ProjectTreeInventoryEntry>(Math.Max(1, entryCapacity));
 
@@ -2168,7 +2174,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			var directoryChildren = childDirectories[sourceIndex];
-			var fileChildren = directories[sourceIndex].Files;
+			var fileChildren = directories[sourceIndex].Files ?? [];
 			var processedFileCount = Math.Min(processedFileCounts[sourceIndex], fileChildren.Count);
 			if ((directoryChildren is null || directoryChildren.Count == 0) &&
 			    processedFileCount == 0)
@@ -2597,6 +2603,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		IgnoreRules extensionDiscoveryRules,
 		IgnoreRules effectiveRules,
 		IExtensionInclusionPolicy? effectiveExtensionPolicy,
+		bool captureFiles,
 		CancellationToken cancellationToken,
 		GitIgnoreMatcherLoadSession gitIgnoreLoadSession)
 	{
@@ -2749,8 +2756,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			var gitIgnoreContext = parentGitIgnoreContext;
 			var gitIgnoreCandidateContext = parentGitIgnoreCandidateContext;
 			DirectoryEnumerationBatch directoryBatch = default;
-			IReadOnlyList<FileSystemFileEntry> directoryFiles = [];
-
+			IReadOnlyList<FileSystemFileEntry>? directoryFiles = null;
 			if (canTraverseChildren)
 			{
 				try
@@ -2760,8 +2766,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						facts.FullPath,
 						facts.RelativePath,
 						cancellationToken,
-						captureFiles: true);
-					directoryFiles = directoryBatch.Files;
+						captureFiles);
+					directoryFiles = captureFiles ? directoryBatch.Files : null;
 					if (!string.IsNullOrWhiteSpace(directoryBatch.GitMetadataPath))
 						gitEvidence = new GitWorkspaceEvidence(HasRepositoryBoundary: true);
 					(gitIgnoreContext, gitIgnoreCandidateContext, var gitIgnoreLoadStatus) = EnterGitIgnoreScope(
@@ -2781,7 +2787,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 								facts.FullPath,
 								facts.RelativePath,
 								facts.Name,
-								[],
+								captureFiles ? [] : null,
 								parentIndex,
 							isAccessDenied: true,
 							facts.IsHidden,
@@ -2807,7 +2813,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						facts.FullPath,
 						facts.RelativePath,
 						facts.Name,
-						[],
+						captureFiles ? [] : null,
 						parentIndex,
 						isAccessDenied: true,
 						facts.IsHidden,
@@ -2830,7 +2836,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						facts.FullPath,
 						facts.RelativePath,
 						facts.Name,
-						[],
+						captureFiles ? [] : null,
 						parentIndex,
 						isAccessDenied: false,
 						facts.IsHidden,

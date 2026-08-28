@@ -47,6 +47,7 @@ public sealed class ProjectContextDocumentService(
 	private const string Kind = "devprojex-context";
 	private const int StructuredTreeFlushNodeInterval = 512;
 	private const int MaximumBoundedReadAhead = 8;
+	internal const long MaximumCompleteSnapshotReadAheadRetainedBytes = 4L * 1024 * 1024;
 	private const long MaximumBoundedReadAheadRetainedBytes = 4L * 1024 * 1024;
 	private static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
 	private static readonly RepositoryWebPathPresentationService WebPathPresentation = new();
@@ -790,6 +791,7 @@ public sealed class ProjectContextDocumentService(
 			orderedPaths.Count,
 			Math.Min(MaximumBoundedReadAhead, ScanParallelismPolicy.MaxDegreeOfParallelism));
 		using var readCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		using var retainedBytes = new WeightedByteBudget(MaximumCompleteSnapshotReadAheadRetainedBytes);
 		var pendingReads = new Queue<PendingCompleteSnapshotRead>(readAheadCount);
 		var nextPathIndex = 0;
 
@@ -803,11 +805,26 @@ public sealed class ProjectContextDocumentService(
 					index,
 					path,
 					Task.Run(
-						async () => await OpenSourceSnapshotAsync(
-								projectRoot,
-								path,
-								readCancellation.Token)
-							.ConfigureAwait(false),
+						async () =>
+						{
+							var lease = await retainedBytes.AcquireAsync(
+								EstimateCompleteSnapshotRetainedBytes(path),
+								readCancellation.Token).ConfigureAwait(false);
+							try
+							{
+								var snapshot = await OpenSourceSnapshotAsync(
+										projectRoot,
+										path,
+										readCancellation.Token)
+									.ConfigureAwait(false);
+								return (IFileContentSnapshot)new BudgetedCompleteSourceSnapshot(snapshot, lease);
+							}
+							catch
+							{
+								lease.Dispose();
+								throw;
+							}
+						},
 						readCancellation.Token)));
 			}
 		}
@@ -841,6 +858,22 @@ public sealed class ProjectContextDocumentService(
 		{
 			await CancelAndDisposePendingSnapshotsAsync(readCancellation, pendingReads)
 				.ConfigureAwait(false);
+		}
+	}
+
+	internal static long EstimateCompleteSnapshotRetainedBytes(string path)
+	{
+		try
+		{
+			var length = new FileInfo(path).Length;
+			return length > long.MaxValue / sizeof(char)
+				? MaximumCompleteSnapshotReadAheadRetainedBytes
+				: Math.Max(1, length * sizeof(char));
+		}
+		catch (Exception exception) when (
+			exception is IOException or UnauthorizedAccessException or ArgumentException)
+		{
+			return MaximumCompleteSnapshotReadAheadRetainedBytes;
 		}
 	}
 
@@ -2061,6 +2094,35 @@ public sealed class ProjectContextDocumentService(
 		int Index,
 		string Path,
 		Task<IFileContentSnapshot> ReadTask);
+
+	private sealed class BudgetedCompleteSourceSnapshot(
+		IFileContentSnapshot inner,
+		WeightedByteBudget.Lease lease) : IFileContentSnapshot
+	{
+		private int _disposed;
+
+		public FileContentMetricsResult Result => inner.Result;
+
+		public ValueTask CopyTextToAsync(
+			int maximumCharacters,
+			Func<ReadOnlyMemory<char>, CancellationToken, ValueTask> writeChunk,
+			CancellationToken cancellationToken = default) =>
+			inner.CopyTextToAsync(maximumCharacters, writeChunk, cancellationToken);
+
+		public async ValueTask DisposeAsync()
+		{
+			if (Interlocked.Exchange(ref _disposed, 1) != 0)
+				return;
+			try
+			{
+				await inner.DisposeAsync().ConfigureAwait(false);
+			}
+			finally
+			{
+				lease.Dispose();
+			}
+		}
+	}
 
 	private sealed record ContextFileDocument(
 		string Path,
