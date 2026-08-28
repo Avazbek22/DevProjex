@@ -1160,7 +1160,7 @@ public partial class MainWindow : Window
                 _currentRepositorySession = candidateSession;
                 previousSession?.Dispose();
                 if (previousSession is not null)
-                    _ = Task.Run(_repoCacheService.CollectGarbage);
+                    _repoCacheService.RequestGarbageCollection();
             }
 
             if (candidateSession is not null)

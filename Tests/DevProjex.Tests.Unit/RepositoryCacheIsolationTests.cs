@@ -319,7 +319,7 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 	}
 
 	[Fact]
-	public async Task GarbageCollection_MultipleOpensWhileFirstPassIsBlocked_CoalescesOnePendingRepeat()
+	public async Task GarbageCollection_MultipleRequestsWhileFirstPassIsBlocked_CoalescesOnePendingRepeat()
 	{
 		using var collectionStarted = new ManualResetEventSlim();
 		using var allowCollection = new ManualResetEventSlim();
@@ -357,12 +357,7 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 				TestContext.Current.CancellationToken));
 
 			for (var index = 0; index < 5; index++)
-			{
-				sessions.Add(Assert.IsAssignableFrom<IRepositoryCacheSession>(
-					await service.TryAcquireRepositorySessionAsync(
-						RepositoryUrl,
-						cancellationToken: TestContext.Current.CancellationToken)));
-			}
+				service.RequestGarbageCollection();
 
 			Assert.Equal(1, Volatile.Read(ref collectionCount));
 			allowCollection.Set();

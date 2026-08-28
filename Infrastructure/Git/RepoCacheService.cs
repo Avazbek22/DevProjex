@@ -425,7 +425,7 @@ public sealed class RepoCacheService : IRepoCacheService
 			branch,
 			cancellationToken).ConfigureAwait(false);
 		if (session is not null)
-			ScheduleGarbageCollection();
+			RequestGarbageCollection();
 		return session;
 	}
 
@@ -467,7 +467,7 @@ public sealed class RepoCacheService : IRepoCacheService
 			entry.Branch,
 			cancellationToken).ConfigureAwait(false);
 		if (session is not null)
-			ScheduleGarbageCollection();
+			RequestGarbageCollection();
 		return session;
 	}
 
@@ -900,7 +900,7 @@ public sealed class RepoCacheService : IRepoCacheService
 			CollectGarbageCore();
 	}
 
-	private void ScheduleGarbageCollection()
+	public void RequestGarbageCollection()
 	{
 		while (true)
 		{
@@ -946,7 +946,7 @@ public sealed class RepoCacheService : IRepoCacheService
 			var state = Interlocked.Exchange(ref _scheduledGarbageCollectionState, 0);
 			Trace.TraceWarning("Repository cache garbage collection failed: {0}", exception.Message);
 			if (state == 2)
-				ScheduleGarbageCollection();
+				RequestGarbageCollection();
 		}
 	}
 

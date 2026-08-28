@@ -122,6 +122,12 @@ public interface IRepoCacheService
     void CollectGarbage();
 
     /// <summary>
+    /// Requests best-effort garbage collection on the shared background scheduler.
+    /// Repeated requests are coalesced without blocking the caller.
+    /// </summary>
+    void RequestGarbageCollection();
+
+    /// <summary>
     /// Recomputes the approximate size after an explicit repository update.
     /// </summary>
     void RefreshIndexedRepositorySize(string localPath);
