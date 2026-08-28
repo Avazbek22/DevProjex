@@ -18,6 +18,9 @@ public sealed class HelpReleaseRegressionTests
 		Assert.Contains("Remove blank lines from supported source files.", help, StringComparison.Ordinal);
 		Assert.Contains("--language", help, StringComparison.Ordinal);
 		Assert.Contains("--language <CODE>", help, StringComparison.Ordinal);
+		Assert.Equal(
+			2,
+			help.Split("Enables secret detection automatically.", StringSplitOptions.None).Length - 1);
 	}
 
 	[Fact]
