@@ -24,7 +24,7 @@ internal sealed record TerminalParameterRow(
 	IgnoreOptionId? ContentTransformation = null,
 	string? Value = null)
 {
-	private readonly string _displayText = $"{(IsSelected == true ? "[x]" : "[ ]")} {Label}";
+	private string? _displayText;
 
 	private TerminalParameterRow(TerminalParameterRow original)
 		: base()
@@ -37,10 +37,10 @@ internal sealed record TerminalParameterRow(
 		Exclusion = original.Exclusion;
 		ContentTransformation = original.ContentTransformation;
 		Value = original.Value;
-		_displayText = $"{(IsSelected == true ? "[x]" : "[ ]")} {Label}";
 	}
 
-	public override string ToString() => _displayText;
+	public override string ToString() =>
+		_displayText ??= $"{(IsSelected == true ? "[x]" : "[ ]")} {Label}";
 
 	internal static string FitLabel(string value, int width, bool useUnicode)
 	{
