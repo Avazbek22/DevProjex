@@ -66,6 +66,7 @@ internal sealed class McpProjectService(
 				$"{McpErrorCodes.ProjectUnavailable}: project preparation failed ({diagnostic.Code}: {diagnostic.Message}). " +
 				"Fix the reported project access or Git state and retry.");
 		}
+		ValidatePlanContainment(roots, projectRoot, plan.IncludedFiles, cancellationToken);
 		if ((paths is null || paths.Count == 0) &&
 		    (includePatterns is null || includePatterns.Count == 0) &&
 		    (excludePatterns is null || excludePatterns.Count == 0))
@@ -102,6 +103,19 @@ internal sealed class McpProjectService(
 				.Where(static diagnostic => diagnostic.Code != "DPX-SELECTION-PATH-MISSING")
 				.ToArray()
 		};
+	}
+
+	internal static void ValidatePlanContainment(
+		McpRootRegistry roots,
+		string projectRoot,
+		IReadOnlyList<string> includedFiles,
+		CancellationToken cancellationToken)
+	{
+		foreach (var file in includedFiles)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			_ = roots.ResolveExistingPath(projectRoot, file);
+		}
 	}
 
 	public McpDetailResolution ResolveDetail(ProjectContextPlan plan, McpDetailLevel detail) =>

@@ -117,6 +117,24 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public void ProjectPlanContainmentRejectsAnIncludedFileOutsideRoot()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var outside = workspace.CreateFile("outside.txt", "outside");
+		var registry = new McpRootRegistry([project]);
+
+		var exception = Assert.Throws<McpToolException>(() =>
+			McpProjectService.ValidatePlanContainment(
+				registry,
+				project,
+				[outside],
+				TestContext.Current.CancellationToken));
+
+		Assert.Equal(McpErrorCodes.RootViolation, exception.Code);
+	}
+
+	[Fact]
 	public void RootRegistryDoesNotExposeMutableAllowedRoots()
 	{
 		using var workspace = new TemporaryDirectory();
