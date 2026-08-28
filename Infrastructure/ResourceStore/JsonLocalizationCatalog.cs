@@ -4,13 +4,14 @@ namespace DevProjex.Infrastructure.ResourceStore;
 
 public sealed class JsonLocalizationCatalog : ILocalizationCatalog
 {
-	private readonly IReadOnlyDictionary<AppLanguage, Lazy<IReadOnlyDictionary<string, string>>> _cache = CreateCache();
+	private static readonly IReadOnlyDictionary<AppLanguage, Lazy<IReadOnlyDictionary<string, string>>> Cache =
+		CreateCache();
 
 	public IReadOnlyDictionary<string, string> Get(AppLanguage language)
 	{
-		var resource = _cache.TryGetValue(language, out var localizedResource)
+		var resource = Cache.TryGetValue(language, out var localizedResource)
 			? localizedResource
-			: _cache[AppLanguage.En];
+			: Cache[AppLanguage.En];
 		return resource.Value;
 	}
 
