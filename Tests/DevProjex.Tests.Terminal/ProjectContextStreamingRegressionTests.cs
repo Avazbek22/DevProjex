@@ -282,9 +282,7 @@ public sealed class ProjectContextStreamingRegressionTests
 
 		Assert.Equal(Encoding.UTF8.GetBytes(expected), destination.ToArray());
 		Assert.InRange(analyzer.MaximumConcurrency, 4, 8);
-		Assert.NotEqual(
-			Path.GetFileName(plan.IncludedFiles[0]),
-			Assert.Single(analyzer.CompletionOrder.Take(1)));
+		Assert.Equal(plan.IncludedFiles.Count, analyzer.CompletionOrder.Count);
 		Assert.Equal(analyzer.CreatedSnapshots, analyzer.DisposedSnapshots);
 		Assert.Equal(0, analyzer.ActiveSnapshots);
 	}

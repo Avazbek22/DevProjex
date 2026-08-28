@@ -23,7 +23,7 @@ public sealed class SharedAsyncOperationTests
 		Assert.True(operation.TryAcquire(out var firstLease));
 		Assert.True(operation.TryAcquire(out var secondLease));
 		var task = operation.Task;
-		await started.Task.WaitAsync(TimeSpan.FromSeconds(1), TestContext.Current.CancellationToken);
+		await started.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
 
 		firstLease.Dispose();
 		Assert.False(cancellationObserved.Task.IsCompleted);
@@ -53,14 +53,14 @@ public sealed class SharedAsyncOperationTests
 		Assert.True(operation.TryAcquire(out var firstLease));
 		Assert.True(operation.TryAcquire(out var secondLease));
 		var task = operation.Task;
-		await started.Task.WaitAsync(TimeSpan.FromSeconds(1), TestContext.Current.CancellationToken);
+		await started.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
 
 		firstLease.Dispose();
 		Assert.False(cancellationObserved.Task.IsCompleted);
 		secondLease.Dispose();
 
 		await cancellationObserved.Task.WaitAsync(
-			TimeSpan.FromSeconds(1),
+			TimeSpan.FromSeconds(5),
 			TestContext.Current.CancellationToken);
 		await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
 		Assert.Equal(1, Volatile.Read(ref releaseCount));

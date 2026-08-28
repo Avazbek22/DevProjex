@@ -70,6 +70,9 @@ public sealed class MetricsPipelineWarmupTests
 		await pipeline.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
 			currentTree,
 			TestContext.Current.CancellationToken);
+		await WaitUntilAsync(
+			() => pipeline.HasStatusMetricsSnapshot,
+			TimeSpan.FromSeconds(5));
 		selectedPaths.ResetEnumerationCount();
 
 		pipeline.Recalculate(MemoryCleanupReason.FilterApplied);
