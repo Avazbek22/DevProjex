@@ -36,3 +36,17 @@ internal enum TerminalExportDecision
 	DryRun = 2,
 	Overwrite = 3
 }
+
+internal sealed class TerminalExportDestinationHistory
+{
+	private readonly Dictionary<TerminalExportKind, string> _destinations = [];
+
+	public string Resolve(TerminalExportKind kind, string fallback) =>
+		_destinations.GetValueOrDefault(kind) ?? fallback;
+
+	public void Remember(TerminalExportKind kind, string destination)
+	{
+		if (!string.IsNullOrWhiteSpace(destination))
+			_destinations[kind] = destination;
+	}
+}

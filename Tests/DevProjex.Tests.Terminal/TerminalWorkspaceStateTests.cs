@@ -58,6 +58,24 @@ public sealed class TerminalWorkspaceStateTests
 	}
 
 	[Fact]
+	public void PersistedSelectionUsesMinimalRootsWithoutLosingAllOrNone()
+	{
+		using var state = new TerminalWorkspaceState(CreatePlan());
+		Assert.Equal(["."], state.BuildPersistedSelectedRelativePaths());
+
+		state.SelectNone();
+		Assert.Empty(state.BuildPersistedSelectedRelativePaths());
+
+		state.RestoreSelectedRelativePaths(["src"]);
+		Assert.Equal(["src"], state.BuildPersistedSelectedRelativePaths());
+		Assert.Equal(2, state.SelectedFileCount);
+
+		state.RestoreSelectedRelativePaths(["."]);
+		Assert.Equal(["."], state.BuildPersistedSelectedRelativePaths());
+		Assert.Equal(2, state.SelectedFileCount);
+	}
+
+	[Fact]
 	public void DeselectingDirectoryBuildsMinimalSiblingSelection()
 	{
 		var state = new TerminalWorkspaceState(CreatePlan());

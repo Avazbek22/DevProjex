@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using DevProjex.Infrastructure.Persistence;
 using DevProjex.Kernel.IO;
@@ -13,19 +14,22 @@ public sealed class TerminalSettingsStore
 	private const UnixFileMode PrivateUnixFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
 	private readonly Func<string> _appDataPathProvider;
 	private readonly Action? _afterReadOpened;
+	private readonly Action<string> _diagnosticSink;
 	private readonly SemaphoreSlim _writeGate = new(1, 1);
 
 	public TerminalSettingsStore(Func<string>? appDataPathProvider = null)
-		: this(appDataPathProvider, afterReadOpened: null)
+		: this(appDataPathProvider, afterReadOpened: null, diagnosticSink: null)
 	{
 	}
 
 	internal TerminalSettingsStore(
 		Func<string>? appDataPathProvider,
-		Action? afterReadOpened)
+		Action? afterReadOpened,
+		Action<string>? diagnosticSink = null)
 	{
 		_appDataPathProvider = appDataPathProvider ?? UserDataPathResolver.GetConfigurationRoot;
 		_afterReadOpened = afterReadOpened;
+		_diagnosticSink = diagnosticSink ?? (message => Trace.TraceWarning("{0}", message));
 	}
 
 	public TerminalScreenMode LoadScreenMode() =>
@@ -147,6 +151,7 @@ public sealed class TerminalSettingsStore
 			// The schema cannot be classified within this version's resource limit. Preserve the
 			// document exactly as a potentially valid settings file written by a newer version.
 			hasFutureSchema = true;
+			_diagnosticSink("Terminal settings exceed the size limit; the document was preserved and ignored.");
 			return null;
 		}
 		catch (Exception exception) when (exception is
@@ -209,7 +214,10 @@ public sealed class TerminalSettingsStore
 				.ConfigureAwait(false);
 			var current = LoadDocument(out var hasFutureSchema);
 			if (hasFutureSchema)
+			{
+				_diagnosticSink("Terminal settings update was skipped because the existing document could not be safely classified.");
 				return;
+			}
 			current ??= new TerminalSettingsDocument(
 				CurrentSchemaVersion,
 				TerminalScreenMode.Auto,
@@ -241,6 +249,12 @@ public sealed class TerminalSettingsStore
 							cancellationToken: cancellationToken)
 						.ConfigureAwait(false);
 					await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+					if (stream.Length > MaximumDocumentBytes)
+					{
+						_diagnosticSink(
+							"Terminal settings update exceeded the size limit and was not committed.");
+						return;
+					}
 				}
 
 				if (File.Exists(path))

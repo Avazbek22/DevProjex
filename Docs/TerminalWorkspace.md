@@ -79,7 +79,9 @@ secondary screens are overlays over that root; closing an overlay restores the
 previous screen, selected row, and keyboard focus.
 
 - Enter opens or confirms the focused action.
-- Esc cancels the current operation or returns exactly one level.
+- Esc cancels active work, closes the command line or overlay, clears the active
+  Tree filter or Preview search, and otherwise asks before returning from a
+  workspace to Welcome.
 - Ctrl+C cancels active work first and otherwise asks before exiting.
 - `q` exits only from a root screen.
 - Errors remain visible until dismissed and then return to a usable prior state.
@@ -291,11 +293,12 @@ the existing confirmation and blocking progress surfaces.
 | `T` | focus File Types |
 | `E` | export context |
 | `z` / Shift+`Z` | export folder / ZIP |
+| `P` | save the current selection as a portable profile |
 | `D` | show diagnostics |
 | `A` | analyze |
 | `G` | open Desktop |
 | F1 or `?` | help |
-| Esc | close the active overlay |
+| Esc | cancel work; close an overlay; clear the active filter/search; otherwise confirm return to Welcome |
 | `q` | quit |
 
 The footer shows actions relevant to the active layout.

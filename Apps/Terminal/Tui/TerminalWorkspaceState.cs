@@ -338,10 +338,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 				path.Replace('/', Path.DirectorySeparatorChar)));
 			if (!_nodesByPath.TryGetValue(fullPath, out var node))
 				continue;
-			if (node.IsDirectory && node.Children.Count == 0)
-				_selectedEmptyDirectories.Add(fullPath);
-			else if (!node.IsDirectory)
-				_selectedFiles.Add(fullPath);
+			SetSubtreeSelection(node, selected: true);
 		}
 		Interlocked.Increment(ref _revision);
 		RecomputeCheckStates();
@@ -484,6 +481,11 @@ public sealed class TerminalWorkspaceState : IDisposable
 			.OrderBy(static path => path, StringComparer.Ordinal)
 			.ToArray();
 	}
+
+	public IReadOnlyList<string> BuildPersistedSelectedRelativePaths() =>
+		GetCheckState(Plan.EffectiveTree) == TerminalTreeCheckState.Checked
+			? ["."]
+			: BuildSelectedRelativePaths();
 
 	public ProjectSelectionSpec BuildSelection() =>
 		Plan.Selection with { SelectedPaths = BuildSelectedRelativePaths() };

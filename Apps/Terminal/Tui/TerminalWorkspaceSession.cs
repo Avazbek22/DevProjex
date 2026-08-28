@@ -45,6 +45,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private readonly TerminalBackgroundTaskTracker _backgroundTasks = new();
 	private readonly WorkspaceFocusModel _focus = new();
 	private readonly AsyncOperationCoordinator _operations;
+	private readonly TerminalExportDestinationHistory _exportDestinations = new();
 
 	private TerminalWorkspaceScreen _screen;
 	private TerminalWorkspaceLayoutMode _layoutMode;
@@ -113,12 +114,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private string? _searchQuery;
 	private string? _previewSearchQuery;
 	private string? _selectedTreePath;
-	private string? _lastExportDestination;
 	private bool _suppressTreeSelectionTracking;
 	private bool _suppressWorkspaceFocusTracking;
 	private TerminalWorkspaceActionRegistry? _workspaceActionRegistry;
-	private long _workspaceActionRegistryRevision = long.MinValue;
-	private AppLanguage? _workspaceActionRegistryLanguage;
+	private TerminalWorkspaceActionRegistryCacheKey? _workspaceActionRegistryKey;
 
 	public TerminalWorkspaceSession(
 		IApplication application,
@@ -1470,7 +1469,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				: PathUtility.NormalizeSeparators(Path.GetRelativePath(state.Plan.SourceRoot, _selectedTreePath));
 			var settings = new TerminalProjectSettings(
 				state.Plan.SourceRoot,
-				state.BuildSelectedItemRelativePaths().OrderBy(static path => path, StringComparer.Ordinal).ToArray(),
+				state.BuildPersistedSelectedRelativePaths(),
 				state.BuildExpandedRelativePaths(),
 				focusedPath,
 				_previewView,
@@ -1489,6 +1488,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		}
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
 		{
+			Trace.TraceWarning("Terminal workspace settings could not be persisted: {0}", exception.Message);
 		}
 	}
 
@@ -2882,13 +2882,13 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var destination = requestedDestination ?? Prompt(
 			L("Terminal.Tui.ExportContext"),
 			L("Terminal.Tui.Destination"),
-			_lastExportDestination ?? defaultPath);
+			_exportDestinations.Resolve(TerminalExportKind.Context, defaultPath));
 		if (string.IsNullOrWhiteSpace(destination))
 		{
 			ShowTransientStatus(L("Terminal.Tui.Export.DestinationRequired"));
 			return;
 		}
-		_lastExportDestination = destination;
+		_exportDestinations.Remember(TerminalExportKind.Context, destination);
 		var pendingSettingsRefresh = _operations.GetTask(WorkspaceOperationKind.SettingsRefresh);
 
 		TrackActiveOperation(RunExportWorkflowAsync(
@@ -2931,6 +2931,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		if (_state is null)
 			return;
 		var selectedKind = requestedFormat ?? ProjectCopyExportFormat.Folder;
+		var exportKind = selectedKind == ProjectCopyExportFormat.Zip
+			? TerminalExportKind.Zip
+			: TerminalExportKind.Folder;
 		var defaultPath = BuildDefaultExportPath(
 			_state.Plan.SourceRoot,
 			Directory.GetCurrentDirectory(),
@@ -2940,13 +2943,13 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var destination = requestedDestination ?? Prompt(
 			L("Terminal.Tui.ExportProject"),
 			L("Terminal.Tui.ExactDestination"),
-			_lastExportDestination ?? defaultPath);
+			_exportDestinations.Resolve(exportKind, defaultPath));
 		if (string.IsNullOrWhiteSpace(destination))
 		{
 			ShowTransientStatus(L("Terminal.Tui.Export.DestinationRequired"));
 			return;
 		}
-		_lastExportDestination = destination;
+		_exportDestinations.Remember(exportKind, destination);
 		var pendingSettingsRefresh = _operations.GetTask(WorkspaceOperationKind.SettingsRefresh);
 
 		TrackActiveOperation(RunExportWorkflowAsync(
@@ -4962,8 +4965,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_welcomeViews = null;
 		_loadingViews = null;
 		_workspaceActionRegistry = null;
-		_workspaceActionRegistryRevision = long.MinValue;
-		_workspaceActionRegistryLanguage = null;
+		_workspaceActionRegistryKey = null;
 		_activeAggregateControlSection = null;
 		previousState?.Dispose();
 		foreach (var view in _root.RemoveAll())

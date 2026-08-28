@@ -128,7 +128,11 @@ public sealed class TerminalSettingsStoreTests
 	public async Task OversizedSettingsSafelyFallBackWithoutOverwritingTheDocument()
 	{
 		using var workspace = new TemporaryDirectory();
-		var store = new TerminalSettingsStore(() => workspace.Path);
+		var diagnostics = new List<string>();
+		var store = new TerminalSettingsStore(
+			() => workspace.Path,
+			afterReadOpened: null,
+			diagnostics.Add);
 		Directory.CreateDirectory(Path.GetDirectoryName(store.GetPath())!);
 		var oversizedDocument =
 			"{\"SchemaVersion\":1,\"ScreenMode\":2,\"CommandHistory\":[]}" +
@@ -143,6 +147,41 @@ public sealed class TerminalSettingsStoreTests
 			TestContext.Current.CancellationToken);
 
 		Assert.Equal(oversizedDocument, File.ReadAllText(store.GetPath()));
+		Assert.Contains(diagnostics, static message =>
+			message.Contains("size limit", StringComparison.Ordinal));
+	}
+
+	[Fact]
+	public async Task OversizedUpdateIsRejectedBeforeItCanReplaceReadableSettings()
+	{
+		using var workspace = new TemporaryDirectory();
+		var diagnostics = new List<string>();
+		var store = new TerminalSettingsStore(
+			() => workspace.Path,
+			afterReadOpened: null,
+			diagnostics.Add);
+		await store.SaveScreenModeAsync(
+			TerminalScreenMode.Inline,
+			TestContext.Current.CancellationToken);
+		var original = File.ReadAllText(store.GetPath());
+		var paths = Enumerable.Range(0, 20_000)
+			.Select(index => $"src/feature-{index:D5}/file-{index:D5}.cs")
+			.ToArray();
+
+		await store.SaveProjectSettingsAsync(
+			new TerminalProjectSettings(
+				workspace.CreateDirectory("project"),
+				paths,
+				[],
+				null,
+				ProjectContextView.Content,
+				ProjectContextDocumentFormat.Markdown,
+				DateTimeOffset.MinValue),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(original, File.ReadAllText(store.GetPath()));
+		Assert.Contains(diagnostics, static message =>
+			message.Contains("was not committed", StringComparison.Ordinal));
 	}
 
 	[Fact]

@@ -8,21 +8,21 @@ internal sealed partial class TerminalWorkspaceSession
 {
 	private TerminalWorkspaceActionRegistry BuildWorkspaceActionRegistry()
 	{
-		var revision = _state?.Revision ?? -1;
-		var language = _services.Localization.CurrentLanguage;
+		var key = new TerminalWorkspaceActionRegistryCacheKey(
+			_state?.Revision ?? -1,
+			_services.Localization.CurrentLanguage,
+			_previewView,
+			_format);
 		if (_workspaceActionRegistry is not null &&
-			_workspaceActionRegistryRevision == revision &&
-			_workspaceActionRegistryLanguage == language)
+			_workspaceActionRegistryKey == key)
 		{
 			return _workspaceActionRegistry;
 		}
 
 		_workspaceActionRegistry = new TerminalWorkspaceActionRegistry(
 			BuildWorkspacePaletteItems(),
-			BuildWorkspaceCommandActions(),
-			validate: false);
-		_workspaceActionRegistryRevision = revision;
-		_workspaceActionRegistryLanguage = language;
+			BuildWorkspaceCommandActions());
+		_workspaceActionRegistryKey = key;
 		return _workspaceActionRegistry;
 	}
 
@@ -678,3 +678,9 @@ internal sealed partial class TerminalWorkspaceSession
 		});
 	}
 }
+
+internal readonly record struct TerminalWorkspaceActionRegistryCacheKey(
+	long Revision,
+	AppLanguage Language,
+	ProjectContextView PreviewView,
+	ProjectContextDocumentFormat Format);
