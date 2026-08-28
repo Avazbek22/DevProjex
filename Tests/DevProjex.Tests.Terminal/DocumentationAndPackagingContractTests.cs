@@ -545,6 +545,9 @@ public sealed class DocumentationAndPackagingContractTests
 			"TerminalPtyLifecycleTests.SupportedTerminalSizeMatrixRemainsKeyboardUsableAndWithinViewport",
 			workflow,
 			StringComparison.Ordinal);
+		Assert.True(
+			Regex.Matches(workflow, "DEVPROJEX_SKIP_TUI_PTY_TESTS: 0").Count >= 2,
+			"Curated published-binary PTY steps must override the global skip switch.");
 		Assert.Contains("DEVPROJEX_TUI_TEST_BINARY", workflow, StringComparison.Ordinal);
 		Assert.DoesNotContain("DevProjex.Cli", workflow, StringComparison.OrdinalIgnoreCase);
 		Assert.DoesNotContain("\"--path\"", workflow, StringComparison.Ordinal);

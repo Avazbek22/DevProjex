@@ -9,7 +9,7 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 	public async Task CopyCommandPublishesAnInlineSuccessResult()
 	{
 		using var project = CreateProject();
-		await using var terminal = await StartAsync(project.Path, columns: 120, rows: 30);
+		await using var terminal = await StartAsync(project.Path, columns: 160, rows: 36);
 		await terminal.WaitForScreenAsync(
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
@@ -21,6 +21,29 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains("characters", result, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 120_000)]
+	public async Task CopyThenCjkLanguageSwitchKeepsThePublishedWorkspaceInteractive()
+	{
+		using var project = CreateProject();
+		await using var terminal = await StartAsync(project.Path, columns: 120, rows: 30);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.SendAsync(":copy\r", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Copied: Tree",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync(":language ja\r", TestContext.Current.CancellationToken);
+		var japanese = await terminal.WaitForScreenAsync(
+			"↑/↓ 移動",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains("プロジェクトツリー", japanese, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 		await QuitAsync(terminal);
 	}

@@ -133,13 +133,9 @@ public sealed class HelpReleaseRegressionTests
 	[Fact]
 	public async Task EveryPublicHelpFitsTerminalCellWidthAcrossLocales()
 	{
-		string[] languages =
-		[
-			"en", "ru", "de", "fr", "it", "es", "pt", "pt-pt", "kk", "tg", "uz"
-		];
 		int[] widths = [60, 80, 120];
 		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
-		foreach (var language in languages)
+		foreach (var language in CliChoiceSets.Language.Tokens)
 		{
 			foreach (var width in widths)
 			{

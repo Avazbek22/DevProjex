@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using DevProjex.Application.Presentation;
+using Terminal.Gui.Text;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -191,12 +192,12 @@ public sealed partial class TerminalLocalizationContractTests
 		foreach (var (locale, catalog) in catalogs)
 		{
 			Assert.True(
-				catalog["Terminal.Tui.Footer.Welcome"].Length <= 76,
+				catalog["Terminal.Tui.Footer.Welcome"].GetColumns() <= 76,
 				$"The compact Welcome footer does not fit 80 columns in {locale}.");
 			foreach (var key in workspaceFooterKeys)
 			{
 				Assert.True(
-					catalog[key].Length <= 80,
+					catalog[key].GetColumns() <= 80,
 					$"{key} does not fit 80 columns in {locale}.");
 			}
 		}
