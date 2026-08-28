@@ -153,6 +153,47 @@ public sealed class MachineSchemaContractTests
 	}
 
 	[Fact]
+	public async Task AnalysisJsonStreamsLargeFindingSetsInBoundedChunks()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("src/App.cs", "internal sealed class App {}");
+		using var services = new TerminalServiceFactory(
+				() => workspace.CreateDirectory("data"))
+			.Create(AppLanguage.En);
+		var selection = await services.SelectionResolver.ResolveAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			new ProjectSelectionSpec(),
+			TestContext.Current.CancellationToken);
+		var plan = await services.ContextPlanner.BuildAsync(
+			new ProjectContextRequest(workspace.Path, selection),
+			TestContext.Current.CancellationToken);
+		plan = plan with
+		{
+			Redaction = new SecretRedactionSummary(5_000, 5_000),
+			Findings = Enumerable.Range(1, 5_000)
+				.Select(static line => new EffectiveRedactionFinding(
+					"github-pat",
+					RedactionFindingCategory.Secrets,
+					"src/App.cs",
+					line))
+				.ToArray()
+		};
+		var writer = new BoundedChunkTextWriter(32 * 1024);
+
+		await new MachineOutputRenderer(new TestTerminalEnvironment()).WriteAnalysisJsonAsync(
+			plan,
+			writer,
+			TestContext.Current.CancellationToken);
+
+		using var document = JsonDocument.Parse(writer.Content);
+		Assert.Equal(
+			5_000,
+			document.RootElement.GetProperty("findings").GetArrayLength());
+		Assert.True(writer.MaximumObservedWrite <= 32 * 1024);
+	}
+
+	[Fact]
 	public async Task UiListJsonUsesVersionedStableEnvelope()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -253,5 +294,45 @@ public sealed class MachineSchemaContractTests
 		Assert.Equal(
 			"C:/workspace/Project",
 			instance.GetProperty("projectPath").GetString());
+	}
+
+	private sealed class BoundedChunkTextWriter(int maximumWriteLength) : TextWriter
+	{
+		private readonly StringBuilder _content = new();
+
+		public override Encoding Encoding => Encoding.UTF8;
+		public string Content => _content.ToString();
+		public int MaximumObservedWrite { get; private set; }
+
+		public override Task WriteAsync(
+			ReadOnlyMemory<char> buffer,
+			CancellationToken cancellationToken = default)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			RegisterWrite(buffer.Length);
+			_content.Append(buffer.Span);
+			return Task.CompletedTask;
+		}
+
+		public override Task WriteLineAsync(
+			ReadOnlyMemory<char> buffer,
+			CancellationToken cancellationToken = default)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			RegisterWrite(buffer.Length);
+			_content.Append(buffer.Span);
+			_content.Append(NewLine);
+			return Task.CompletedTask;
+		}
+
+		private void RegisterWrite(int length)
+		{
+			MaximumObservedWrite = Math.Max(MaximumObservedWrite, length);
+			if (length > maximumWriteLength)
+			{
+				throw new InvalidOperationException(
+					$"A single text-writer chunk contained {length} characters.");
+			}
+		}
 	}
 }

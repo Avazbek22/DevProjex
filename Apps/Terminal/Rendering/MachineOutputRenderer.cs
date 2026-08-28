@@ -21,8 +21,18 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 		CancellationToken cancellationToken)
 	{
 		var document = CreateAnalysisDocument(plan);
-		var json = JsonSerializer.Serialize(document, JsonOptions);
-		await writer.WriteLineAsync(json.AsMemory(), cancellationToken).ConfigureAwait(false);
+		await using (var stream = new Utf8TextWriterStream(writer, cancellationToken))
+		{
+			await JsonSerializer.SerializeAsync(
+					stream,
+					document,
+					JsonOptions,
+					cancellationToken)
+				.ConfigureAwait(false);
+			await stream.CompleteAsync(cancellationToken).ConfigureAwait(false);
+		}
+		await writer.WriteLineAsync(ReadOnlyMemory<char>.Empty, cancellationToken)
+			.ConfigureAwait(false);
 	}
 
 	public TextWriter StandardOutput => environment.Output;
