@@ -150,8 +150,10 @@ public sealed class ProjectTreeSelectionProjectionTests
 		var plan = new ProjectCopyExportPlanBuilder().Build(
 			request,
 			TestContext.Current.CancellationToken);
-
 		Assert.Equal(OperatingSystem.IsWindows() ? 1 : 2, plan.FileCount);
+		Assert.Equal(
+			plan.Entries.Count,
+			plan.Entries.Select(static entry => entry.RelativePath).Distinct(PathComparer.Default).Count());
 	}
 
 	[Fact]

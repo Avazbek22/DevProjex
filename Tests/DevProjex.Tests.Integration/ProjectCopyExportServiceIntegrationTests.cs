@@ -1453,7 +1453,10 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 				.EnumerateFiles(stagingPath, "*", SearchOption.AllDirectories)
 				.OrderBy(static path => path, PathComparer.Default)
 				.ToArray();
-			Assert.NotEmpty(copiedFiles);
+			Assert.InRange(
+				copiedFiles.Length,
+				1,
+				8);
 			var copiedFile = copiedFiles[0];
 			heldFile = new FileStream(copiedFile, FileMode.Open, FileAccess.Read, FileShare.Read);
 			releaseThread = new Thread(() =>
@@ -1507,7 +1510,10 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 				.EnumerateFiles(stagingPath, "*", SearchOption.AllDirectories)
 				.OrderBy(static path => path, PathComparer.Default)
 				.ToArray();
-			Assert.NotEmpty(copiedFiles);
+			Assert.InRange(
+				copiedFiles.Length,
+				1,
+				8);
 			var copiedFile = copiedFiles[0];
 			heldFile = new FileStream(
 				copiedFile,

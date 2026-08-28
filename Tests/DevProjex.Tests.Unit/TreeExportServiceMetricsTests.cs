@@ -3,6 +3,38 @@ namespace DevProjex.Tests.Unit;
 public sealed class TreeExportServiceMetricsTests
 {
 	[Theory]
+	[InlineData(false, false)]
+	[InlineData(false, true)]
+	[InlineData(true, false)]
+	[InlineData(true, true)]
+	public void MarkdownMetricsMatchRendererForRootShapeAndSelection(
+		bool rootIsFile,
+		bool selected)
+	{
+		var service = new TreeExportService();
+		const string rootPath = "/repo";
+		var root = rootIsFile
+			? new TreeNodeDescriptor("root.cs", rootPath, false, false, "csharp", [])
+			: new TreeNodeDescriptor(
+				"repo",
+				rootPath,
+				true,
+				false,
+				"folder",
+				[new TreeNodeDescriptor("root.cs", "/repo/root.cs", false, false, "csharp", [])]);
+		var selection = new HashSet<string>(PathComparer.Default) { rootPath };
+
+		var rendered = selected
+			? service.BuildSelectedTree(rootPath, root, selection, TreeTextFormat.Markdown)
+			: service.BuildFullTree(rootPath, root, TreeTextFormat.Markdown);
+		var metrics = selected
+			? service.CalculateSelectedTreeMetrics(rootPath, root, selection, TreeTextFormat.Markdown)
+			: service.CalculateFullTreeMetrics(rootPath, root, TreeTextFormat.Markdown);
+
+		Assert.Equal(ExportOutputMetricsCalculator.FromText(rendered), metrics);
+	}
+
+	[Theory]
 	[InlineData(TreeTextFormat.Ascii)]
 	[InlineData(TreeTextFormat.Json)]
 	[InlineData(TreeTextFormat.Xml)]
