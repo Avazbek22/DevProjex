@@ -217,6 +217,16 @@ exists, so a pipeline can gate on redaction before exporting.
 new help and completion output. An explicit `--hide-secrets false` disables a
 value inherited through a profile or the legacy token for that invocation.
 
+## MCP
+
+In MCP server mode (`devprojex mcp`) secret redaction is not a switch: it is
+always enabled for returned file content, stored context packs, and search —
+matching runs against the redacted text, not the original. There is no server
+flag to disable it, and tool schemas intentionally expose no redaction controls,
+so neither a configuration mistake nor the connected agent can turn it off.
+Private-data redaction remains a separate, opt-in server flag; see
+[McpServer.md](McpServer.md) for the full security model.
+
 ## Updating the rule source
 
 A provider-rule update is a reviewed source change, not a runtime download:
