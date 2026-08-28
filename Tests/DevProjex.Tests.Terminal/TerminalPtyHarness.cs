@@ -390,8 +390,58 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 
 	public async Task SendQuitAndConfirmAsync(CancellationToken cancellationToken = default)
 	{
+		await WaitForScreenToSettleAsync(cancellationToken).ConfigureAwait(false);
+		var workspaceScreen = CaptureScreen();
 		await SendAsync("q", cancellationToken).ConfigureAwait(false);
+		await WaitForScreenChangeAsync(workspaceScreen, cancellationToken).ConfigureAwait(false);
 		await SendEnterAsync(cancellationToken).ConfigureAwait(false);
+	}
+
+	private async Task WaitForScreenToSettleAsync(CancellationToken cancellationToken)
+	{
+		var previous = CaptureScreen();
+		var stableSamples = 0;
+		var stopwatch = Stopwatch.StartNew();
+		while (stopwatch.Elapsed < TimeSpan.FromSeconds(5))
+		{
+			await Task.Delay(50, cancellationToken).ConfigureAwait(false);
+			var current = CaptureScreen();
+			if (string.Equals(previous, current, StringComparison.Ordinal))
+			{
+				if (++stableSamples >= 2)
+					return;
+			}
+			else
+			{
+				previous = current;
+				stableSamples = 0;
+			}
+		}
+
+		throw new TimeoutException(
+			"Timed out waiting for the terminal screen to settle before quitting.\n" +
+			CaptureScreen());
+	}
+
+	private async Task WaitForScreenChangeAsync(
+		string previous,
+		CancellationToken cancellationToken)
+	{
+		var stopwatch = Stopwatch.StartNew();
+		while (stopwatch.Elapsed < TimeSpan.FromSeconds(5))
+		{
+			var current = CaptureScreen();
+			if (!string.Equals(previous, current, StringComparison.Ordinal))
+				return;
+			if (HasExited)
+				throw new Xunit.Sdk.XunitException(
+					$"Terminal process exited with code {_process.ExitCode} before the quit confirmation appeared.");
+			await Task.Delay(25, cancellationToken).ConfigureAwait(false);
+		}
+
+		throw new TimeoutException(
+			"Timed out waiting for the quit confirmation.\n" +
+			CaptureScreen());
 	}
 
 	public async Task CompleteShellRestorationHandshakeAsync(
