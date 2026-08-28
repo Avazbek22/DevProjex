@@ -448,12 +448,17 @@ public sealed class TerminalWorkspaceContractTests
 			ProjectProfileReference.Standard,
 			TestContext.Current.CancellationToken);
 
-		var preview = await controller.BuildPreviewDocumentAsync(
+		var build = await controller.BuildPreviewDocumentWithMetricsAsync(
 			state,
 			ProjectContextView.Content,
 			ProjectContextDocumentFormat.Markdown,
 			TestContext.Current.CancellationToken);
-		await SetPreviewDocumentAsync(state, preview);
+		Assert.Equal(
+			await ExportOutputMetricsCalculator.FromDocumentAsync(
+				build.Document,
+				TestContext.Current.CancellationToken),
+			build.Metrics);
+		await SetPreviewDocumentAsync(state, build.Document);
 
 		var document = Assert.IsType<FileBackedPreviewTextDocument>(state.PreviewDocument);
 		Assert.Equal(fileCount, document.Sections.Count);

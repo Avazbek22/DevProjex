@@ -48,6 +48,23 @@ public static class ExportOutputMetricsCalculator
 
 	internal static TextMetricsWriter CreateTextWriter() => new();
 
+	internal static ExportOutputMetrics TrimTrailingLineFeeds(
+		ExportOutputMetrics metrics,
+		int count)
+	{
+		ArgumentOutOfRangeException.ThrowIfNegative(count);
+		if (count == 0 || metrics == ExportOutputMetrics.Empty)
+			return metrics;
+
+		var chars = Math.Max(0, metrics.Chars - count);
+		if (chars == 0)
+			return ExportOutputMetrics.Empty;
+		return new ExportOutputMetrics(
+			Math.Max(1, metrics.Lines - count),
+			chars,
+			EstimateTokens(chars));
+	}
+
 	public static ExportOutputMetrics FromContentFiles(IEnumerable<ContentFileMetrics> files)
 	{
 		var uniquePaths = new HashSet<string>(PathComparer.Default);

@@ -422,6 +422,131 @@ public sealed class PreviewDocumentBuilderTests
         Assert.Equal(finalLine, fileBacked.GetLineText(2));
     }
 
+	[Theory]
+	[MemberData(nameof(DocumentMetricsCases))]
+	public async Task CreateDocumentWithMetricsAsync_MatchesDocumentMetricsPass(
+		bool fileBacked,
+		string lineBreak,
+		bool trailingLineBreak)
+	{
+		var prefix = fileBacked ? new string('x', 500_001) : "header";
+		var text = string.Concat(
+			prefix,
+			lineBreak,
+			"Unicode: 日本語 \U0001F642",
+			trailingLineBreak ? lineBreak : string.Empty);
+		var bytes = Encoding.UTF8.GetBytes(text);
+		var builder = new PreviewDocumentBuilder(new StubFileContentAnalyzer());
+
+		var result = await builder.CreateDocumentWithMetricsAsync(
+			(stream, cancellationToken) => stream.WriteAsync(bytes, cancellationToken).AsTask(),
+			TestContext.Current.CancellationToken);
+		using var document = result.Document;
+
+		Assert.Equal(fileBacked, document is FileBackedPreviewTextDocument);
+		Assert.Equal(
+			await ExportOutputMetricsCalculator.FromDocumentAsync(
+				document,
+				TestContext.Current.CancellationToken),
+			result.Metrics);
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task CreateDocumentWithMetricsAsync_Utf8Bom_MatchesExposedDocument(bool fileBacked)
+	{
+		var text = fileBacked ? new string('x', 500_001) : "Unicode: 日本語";
+		var preamble = Encoding.UTF8.GetPreamble();
+		var content = Encoding.UTF8.GetBytes(text);
+		var builder = new PreviewDocumentBuilder(new StubFileContentAnalyzer());
+
+		var result = await builder.CreateDocumentWithMetricsAsync(
+			async (stream, cancellationToken) =>
+			{
+				await stream.WriteAsync(preamble, cancellationToken);
+				await stream.WriteAsync(content, cancellationToken);
+			},
+			TestContext.Current.CancellationToken);
+		using var document = result.Document;
+
+		Assert.Equal(
+			await ExportOutputMetricsCalculator.FromDocumentAsync(
+				document,
+				TestContext.Current.CancellationToken),
+			result.Metrics);
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task BuildContentDocumentWithMetricsAsync_AfterTrailingLineTrim_MatchesDocumentMetricsPass(
+		bool fileBacked)
+	{
+		using var temp = new TemporaryDirectory();
+		var path = temp.CreateFile("estimate.txt", string.Empty);
+		var analyzer = new StubFileContentAnalyzer(new Dictionary<string, TextFileContent?>
+		{
+			[path] = new TextFileContent(
+				Content: string.Empty,
+				SizeBytes: 25_000_000,
+				LineCount: 10,
+				CharCount: 2000,
+				IsEmpty: false,
+				IsWhitespaceOnly: false,
+				IsEstimated: true)
+		});
+		var displayPath = fileBacked ? new string('x', 500_100) : "estimate.txt";
+
+		var result = await new PreviewDocumentBuilder(analyzer).BuildContentDocumentWithMetricsAsync(
+			[path],
+			TestContext.Current.CancellationToken,
+			_ => displayPath);
+		Assert.True(result.HasValue);
+		var build = result.Value;
+		using var document = build.Document;
+
+		Assert.Equal(fileBacked, document is FileBackedPreviewTextDocument);
+		Assert.Equal(
+			await ExportOutputMetricsCalculator.FromDocumentAsync(
+				document,
+				TestContext.Current.CancellationToken),
+			build.Metrics);
+	}
+
+	[Fact]
+	public async Task CreateDocumentWithMetrics_FileBackedMetricsDoNotReadDocument()
+	{
+		var builder = new PreviewDocumentBuilder(new StubFileContentAnalyzer());
+		var result = builder.CreateDocumentWithMetrics(new string('x', 600_000));
+		using var document = new CountingPreviewTextDocument(result.Document);
+
+		_ = result.Metrics;
+		Assert.Equal(0, document.WriteCount);
+
+		var legacyMetrics = await ExportOutputMetricsCalculator.FromDocumentAsync(
+			document,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(1, document.WriteCount);
+		Assert.Equal(legacyMetrics, result.Metrics);
+	}
+
+	public static TheoryData<bool, string, bool> DocumentMetricsCases => new()
+	{
+		{ false, "\n", false },
+		{ false, "\n", true },
+		{ false, "\r\n", false },
+		{ false, "\r\n", true },
+		{ false, "\r", false },
+		{ false, "\r", true },
+		{ true, "\n", false },
+		{ true, "\n", true },
+		{ true, "\r\n", false },
+		{ true, "\r\n", true },
+		{ true, "\r", false },
+		{ true, "\r", true }
+	};
+
     [Fact]
     public async Task CreateDocumentAsync_FailedWriterDeletesTemporaryBackingFile()
     {
@@ -769,6 +894,32 @@ public sealed class PreviewDocumentBuilderTests
             CancellationToken cancellationToken = default)
             => TryReadAsTextAsync(path, cancellationToken);
     }
+
+	private sealed class CountingPreviewTextDocument(IPreviewTextDocument inner) : IPreviewTextDocument
+	{
+		public int WriteCount { get; private set; }
+		public int LineCount => inner.LineCount;
+		public int MaxLineLength => inner.MaxLineLength;
+		public long CharacterCount => inner.CharacterCount;
+		public IReadOnlyList<PreviewDocumentSection> Sections => inner.Sections;
+		public IReadOnlyList<PreviewRedactionSpan> Redactions => inner.Redactions;
+		public string GetFullText() => inner.GetFullText();
+		public string GetLineText(int lineNumber) => inner.GetLineText(lineNumber);
+		public string GetLineRangeText(int firstLine, int lastLine) =>
+			inner.GetLineRangeText(firstLine, lastLine);
+		public void VisitLines(
+			int firstLine,
+			int lastLine,
+			PreviewTextLineVisitor visitor,
+			CancellationToken cancellationToken = default) =>
+			inner.VisitLines(firstLine, lastLine, visitor, cancellationToken);
+		public ValueTask WriteToAsync(Stream destination, CancellationToken cancellationToken = default)
+		{
+			WriteCount++;
+			return inner.WriteToAsync(destination, cancellationToken);
+		}
+		public void Dispose() => inner.Dispose();
+	}
 
 	private sealed class DelayedCodeCompressor(
 		TimeSpan delay,

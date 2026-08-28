@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using DevProjex.Application.Secrets;
 using DevProjex.Application.Presentation;
 using Terminal.Gui.Text;
@@ -296,6 +297,106 @@ public sealed class TerminalParameterRowsBuilderTests
 
 		Assert.Equal(expected, result);
 		Assert.True(result.GetColumns() <= width);
+	}
+
+	[Fact]
+	public void StableParameterShapeUpdatesRowsWithoutReplacingTheSource()
+	{
+		var original = new TerminalParameterRow(
+			"content:hide-secrets",
+			TerminalParameterRowKind.ContentTransformation,
+			"Hide secrets",
+			IsSelected: true,
+			ContentTransformation: IgnoreOptionId.HideSecrets);
+		var source = new ObservableCollection<TerminalParameterRow>([original]);
+		_ = original.ToString();
+		var replacement = original with { Label = "Hide secrets (2/2)" };
+
+		var updated = TerminalWorkspaceSession.TryUpdateRowsInPlace(source, [replacement]);
+
+		Assert.True(updated);
+		Assert.Same(replacement, source[0]);
+		Assert.Equal("[x] Hide secrets (2/2)", source[0].ToString());
+	}
+
+	[Fact]
+	public void ChangedParameterShapeLeavesTheExistingSourceUntouchedForFallback()
+	{
+		var original = new TerminalParameterRow(
+			"extension:.cs",
+			TerminalParameterRowKind.Extension,
+			".cs",
+			IsSelected: true,
+			Value: ".cs");
+		var source = new ObservableCollection<TerminalParameterRow>([original]);
+		var replacement = original with { Key = "extension:.json", Label = ".json", Value = ".json" };
+
+		var updated = TerminalWorkspaceSession.TryUpdateRowsInPlace(source, [replacement]);
+
+		Assert.False(updated);
+		Assert.Same(original, source[0]);
+	}
+
+	[Fact]
+	public void RedactionLabelStampUsesSnapshotValuesInsteadOfObjectIdentity()
+	{
+		var first = new SecretRedactionSnapshot(
+			"selection",
+			DetectedCount: 5,
+			RedactedCount: 4,
+			PrivateDataDetectedCount: 2,
+			PrivateDataRedactedCount: 1);
+		var equivalent = first with { };
+		var changed = first with { RedactedCount = 5 };
+
+		Assert.Equal(
+			TerminalRedactionLabelStamp.From(first),
+			TerminalRedactionLabelStamp.From(equivalent));
+		Assert.NotEqual(
+			TerminalRedactionLabelStamp.From(first),
+			TerminalRedactionLabelStamp.From(changed));
+	}
+
+	[Fact]
+	public void ControlRefreshDecisionSeparatesPreviewCountersFromStructuralChanges()
+	{
+		var source = new TerminalControlSourceStamp(
+			null!,
+			Revision: 7,
+			DraftSelection: null,
+			Language: AppLanguage.En,
+			LayoutMode: TerminalWorkspaceLayoutMode.Wide,
+			LabelWidth: 30);
+		var redaction = new TerminalRedactionLabelStamp(
+			true,
+			"selection",
+			1,
+			1,
+			0,
+			0,
+			true);
+
+		Assert.Equal(
+			TerminalControlRefreshKind.None,
+			TerminalWorkspaceSession.ResolveControlRefreshKind(
+				source,
+				source,
+				redaction,
+				redaction));
+		Assert.Equal(
+			TerminalControlRefreshKind.RedactionOnly,
+			TerminalWorkspaceSession.ResolveControlRefreshKind(
+				source,
+				source,
+				redaction,
+				redaction with { SecretDetectedCount = 2 }));
+		Assert.Equal(
+			TerminalControlRefreshKind.Full,
+			TerminalWorkspaceSession.ResolveControlRefreshKind(
+				source,
+				source with { Revision = 8 },
+				redaction,
+				redaction));
 	}
 
 	[Theory]

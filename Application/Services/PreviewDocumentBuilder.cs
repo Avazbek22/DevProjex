@@ -5,6 +5,10 @@ using DevProjex.Kernel;
 
 namespace DevProjex.Application.Services;
 
+public readonly record struct PreviewDocumentBuildResult(
+	IPreviewTextDocument Document,
+	ExportOutputMetrics Metrics);
+
 /// <summary>
 /// Builds readable preview documents with bounded memory usage.
 /// Large payloads are stored in a temporary UTF-8 backing file instead of one giant managed string.
@@ -37,14 +41,23 @@ public sealed class PreviewDocumentBuilder(
     public IPreviewTextDocument CreateDocument(
         string? text,
         IReadOnlyList<PreviewDocumentSection>? sections = null)
+		=> CreateDocumentWithMetrics(text, sections).Document;
+
+	public PreviewDocumentBuildResult CreateDocumentWithMetrics(
+		string? text,
+		IReadOnlyList<PreviewDocumentSection>? sections = null)
     {
         var value = text ?? string.Empty;
         if (value.Length <= InMemoryDocumentThresholdChars)
-            return CreateInMemory(value, sections);
+		{
+			return new PreviewDocumentBuildResult(
+				CreateInMemory(value, sections),
+				ExportOutputMetricsCalculator.FromText(value));
+		}
 
         using var builder = new PreviewTextStorageBuilder(InMemoryDocumentThresholdChars);
         builder.AppendExactText(value.AsSpan());
-        return builder.BuildDocument(sections);
+		return builder.BuildResult(sections);
     }
 
 	public IPreviewTextDocument CreateInMemoryWithGeneratedPathRedaction(
@@ -59,6 +72,11 @@ public sealed class PreviewDocumentBuilder(
     public async Task<IPreviewTextDocument> CreateDocumentAsync(
         Func<Stream, CancellationToken, Task> writeAsync,
         CancellationToken cancellationToken)
+		=> (await CreateDocumentWithMetricsAsync(writeAsync, cancellationToken).ConfigureAwait(false)).Document;
+
+	public async Task<PreviewDocumentBuildResult> CreateDocumentWithMetricsAsync(
+		Func<Stream, CancellationToken, Task> writeAsync,
+		CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(writeAsync);
 
@@ -84,6 +102,27 @@ public sealed class PreviewDocumentBuilder(
     }
 
     public async Task<IPreviewTextDocument?> BuildContentDocumentAsync(
+        IEnumerable<string> filePaths,
+        CancellationToken cancellationToken,
+		Func<string, string>? displayPathMapper,
+		bool includeOmissionMarkers = false,
+		ContentTransformationContext? transformationContext = null,
+		bool includeSourceCoordinateMaps = false,
+		string? displayRootPath = null,
+		OutputPathRedactionDecision? outputPathRedaction = null,
+		string? projectRoot = null) =>
+		(await BuildContentDocumentWithMetricsAsync(
+			filePaths,
+			cancellationToken,
+			displayPathMapper,
+			includeOmissionMarkers,
+			transformationContext,
+			includeSourceCoordinateMaps,
+			displayRootPath,
+			outputPathRedaction,
+			projectRoot).ConfigureAwait(false))?.Document;
+
+    public async Task<PreviewDocumentBuildResult?> BuildContentDocumentWithMetricsAsync(
         IEnumerable<string> filePaths,
         CancellationToken cancellationToken,
 		Func<string, string>? displayPathMapper,
@@ -139,10 +178,33 @@ public sealed class PreviewDocumentBuilder(
 		if (!anyWritten)
 			return null;
 
-		return builder.BuildDocument(sections, redactions);
+		return builder.BuildResult(sections, redactions);
     }
 
     public async Task<IPreviewTextDocument> BuildTreeAndContentDocumentAsync(
+        string treeText,
+        IEnumerable<string> filePaths,
+        CancellationToken cancellationToken,
+        Func<string, string>? displayPathMapper,
+		bool includeOmissionMarkers = false,
+		ContentTransformationContext? transformationContext = null,
+		bool includeSourceCoordinateMaps = false,
+		OutputPathRedactionDecision? outputPathRedaction = null,
+		OutputPathPresentationResult? treeRootPresentation = null,
+		string? projectRoot = null) =>
+		(await BuildTreeAndContentDocumentWithMetricsAsync(
+			treeText,
+			filePaths,
+			cancellationToken,
+			displayPathMapper,
+			includeOmissionMarkers,
+			transformationContext,
+			includeSourceCoordinateMaps,
+			outputPathRedaction,
+			treeRootPresentation,
+			projectRoot).ConfigureAwait(false)).Document;
+
+    public async Task<PreviewDocumentBuildResult> BuildTreeAndContentDocumentWithMetricsAsync(
         string treeText,
         IEnumerable<string> filePaths,
         CancellationToken cancellationToken,
@@ -163,7 +225,7 @@ public sealed class PreviewDocumentBuilder(
         {
 			using var emptyScope = transformationContext?.BeginOutput(orderedFiles, cancellationToken);
 			CompleteTransformation(emptyScope, transformationContext);
-			return CreateInMemory(normalizedTreeTextLength == treeText.Length
+			return CreateDocumentWithMetrics(normalizedTreeTextLength == treeText.Length
 				? treeText
 				: treeText[..normalizedTreeTextLength]);
 		}
@@ -193,9 +255,9 @@ public sealed class PreviewDocumentBuilder(
 		CompleteTransformation(transformationScope, transformationContext);
 
         if (!wroteTree && !wroteContent)
-            return CreateInMemory(string.Empty);
+			return CreateDocumentWithMetrics(string.Empty);
 
-        return builder.BuildDocument(sections, redactions);
+		return builder.BuildResult(sections, redactions);
     }
 
 	private static void CompleteTransformation(
@@ -780,7 +842,7 @@ public sealed class PreviewDocumentBuilder(
         }
     }
 
-    private static async Task<IPreviewTextDocument> BuildDocumentFromUtf8FileAsync(
+    private static async Task<PreviewDocumentBuildResult> BuildDocumentFromUtf8FileAsync(
         string storagePath,
         CancellationToken cancellationToken)
     {
@@ -794,15 +856,19 @@ public sealed class PreviewDocumentBuilder(
                     cancellationToken)
                 .ConfigureAwait(false);
             DisposeStorageFile(storagePath);
-            return new InMemoryPreviewTextDocument(text);
+            return new PreviewDocumentBuildResult(
+                new InMemoryPreviewTextDocument(text),
+                ExportOutputMetricsCalculator.FromText(text));
         }
 
-        return new FileBackedPreviewTextDocument(
-            storagePath,
-            metrics.LineOffsets,
-            metrics.FileLength,
-            metrics.MaxLineLength,
-            metrics.CharacterCount);
+        return new PreviewDocumentBuildResult(
+            new FileBackedPreviewTextDocument(
+                storagePath,
+                metrics.LineOffsets,
+                metrics.FileLength,
+                metrics.MaxLineLength,
+                metrics.CharacterCount),
+            metrics.OutputMetrics);
     }
 
     private static async Task<PreviewStorageMetrics> ReadStorageMetricsAsync(
@@ -817,13 +883,14 @@ public sealed class PreviewDocumentBuilder(
             bufferSize: 8192,
             options: FileOptions.Asynchronous | FileOptions.SequentialScan);
         if (stream.Length == 0)
-            return new PreviewStorageMetrics([], 0, 0, 0);
+            return new PreviewStorageMetrics([], 0, 0, 0, ExportOutputMetrics.Empty);
 
         var offsets = new List<long> { 0 };
         var byteBuffer = ArrayPool<byte>.Shared.Rent(8192);
         var charBuffer = ArrayPool<char>.Shared.Rent(
             PreviewTextStorageBuilder.Utf8WithoutBom.GetMaxCharCount(byteBuffer.Length));
         var decoder = PreviewTextStorageBuilder.Utf8WithoutBom.GetDecoder();
+        using var metricsWriter = ExportOutputMetricsCalculator.CreateTextWriter();
         try
         {
             long fileOffset = 0;
@@ -858,6 +925,8 @@ public sealed class PreviewDocumentBuilder(
                                    byteBuffer[2] == 0xBF
                     ? 3
                     : 0;
+                if (decodeOffset != 0)
+                    metricsWriter.Write('\uFEFF');
                 Decode(
                     byteBuffer.AsSpan(decodeOffset, bytesRead - decodeOffset),
                     flush: false);
@@ -870,7 +939,8 @@ public sealed class PreviewDocumentBuilder(
                 offsets.ToArray(),
                 stream.Length,
                 characterCount,
-                Math.Max(maxLineLength, currentLineLength));
+                Math.Max(maxLineLength, currentLineLength),
+                metricsWriter.Complete(cancellationToken));
 
             void Decode(ReadOnlySpan<byte> bytes, bool flush)
             {
@@ -885,7 +955,9 @@ public sealed class PreviewDocumentBuilder(
                         out var charactersUsed,
                         out var completed);
                     characterCount += charactersUsed;
-                    foreach (var character in charBuffer.AsSpan(0, charactersUsed))
+                    var characters = charBuffer.AsSpan(0, charactersUsed);
+                    metricsWriter.Write(characters);
+                    foreach (var character in characters)
                     {
                         if (character == '\n')
                         {
@@ -915,7 +987,8 @@ public sealed class PreviewDocumentBuilder(
         long[] LineOffsets,
         long FileLength,
         long CharacterCount,
-        int MaxLineLength);
+        int MaxLineLength,
+        ExportOutputMetrics OutputMetrics);
 
 	private static string CreateStoragePath()
 	{
@@ -1099,9 +1172,15 @@ internal static class PreviewTextStorageScavenger
         private int _inMemoryLength;
         private Encoder? _utf8Encoder;
         private byte[]? _utf8WriteBuffer;
+        private readonly ExportOutputMetricsCalculator.TextMetricsWriter _metricsWriter =
+            ExportOutputMetricsCalculator.CreateTextWriter();
         private bool _built;
         private bool _disposed;
         private bool _lastLineIsEmpty;
+        private char _characterBeforePreviousCharacter;
+        private char _previousCharacter;
+        private char _lastCharacter;
+        private int _trimmedNormalizedLineFeeds;
         private int _maxLineLength;
         private long _characterCount;
 
@@ -1123,6 +1202,10 @@ internal static class PreviewTextStorageScavenger
             _lastLineIsEmpty = line.Length == 0;
             _maxLineLength = Math.Max(_maxLineLength, line.Length);
 			_characterCount = resultingCharacterCount;
+			_metricsWriter.Write(line);
+			_metricsWriter.Write('\n');
+			UpdateTrailingCharacters(line);
+			UpdateTrailingCharacter('\n');
 
 			AppendText(line);
 			AppendNewLine();
@@ -1177,9 +1260,13 @@ internal static class PreviewTextStorageScavenger
             _lineOffsets.RemoveAt(_lineOffsets.Count - 1);
             _lastLineIsEmpty = false;
             _characterCount = Math.Max(0, _characterCount - 1);
+            if (_previousCharacter != '\r')
+                _trimmedNormalizedLineFeeds++;
+            _lastCharacter = _previousCharacter;
+            _previousCharacter = _characterBeforePreviousCharacter;
         }
 
-        public IPreviewTextDocument BuildDocument(
+        public PreviewDocumentBuildResult BuildResult(
 			IReadOnlyList<PreviewDocumentSection>? sections = null,
 			IReadOnlyList<PreviewRedactionSpan>? redactions = null)
         {
@@ -1214,8 +1301,17 @@ internal static class PreviewTextStorageScavenger
                 }
 
                 ReleaseInMemoryBuffer();
+                var removedNormalizedLineFeeds = _trimmedNormalizedLineFeeds;
+                if (_lastCharacter == '\n' && _previousCharacter != '\r')
+                    removedNormalizedLineFeeds++;
+                var inMemoryMetrics = ExportOutputMetricsCalculator.TrimTrailingLineFeeds(
+                    _metricsWriter.Complete(CancellationToken.None),
+                    removedNormalizedLineFeeds);
+                _metricsWriter.Dispose();
                 _disposed = true;
-                return new InMemoryPreviewTextDocument(text, sections, redactions);
+                return new PreviewDocumentBuildResult(
+                    new InMemoryPreviewTextDocument(text, sections, redactions),
+                    inMemoryMetrics);
             }
 
             var backingStream = _stream ??
@@ -1237,7 +1333,11 @@ internal static class PreviewTextStorageScavenger
                 redactions);
             _storagePath = null;
             _disposed = true;
-            return document;
+            var fileBackedMetrics = ExportOutputMetricsCalculator.TrimTrailingLineFeeds(
+                _metricsWriter.Complete(CancellationToken.None),
+                _trimmedNormalizedLineFeeds);
+            _metricsWriter.Dispose();
+            return new PreviewDocumentBuildResult(document, fileBackedMetrics);
         }
 
         public void Dispose()
@@ -1250,6 +1350,7 @@ internal static class PreviewTextStorageScavenger
             _stream = null;
             ReleaseInMemoryBuffer();
             ReleaseUtf8WriteBuffer();
+            _metricsWriter.Dispose();
             DisposeStorageFile();
         }
 
@@ -1393,8 +1494,35 @@ internal static class PreviewTextStorageScavenger
             _lastLineIsEmpty = displayLength == 0;
             _maxLineLength = Math.Max(_maxLineLength, displayLength);
 			_characterCount = resultingCharacterCount;
+			_metricsWriter.Write(rawLine);
+			UpdateTrailingCharacters(rawLine);
 			AppendText(rawLine);
         }
+
+		private void UpdateTrailingCharacters(ReadOnlySpan<char> text)
+		{
+			if (text.Length == 0)
+				return;
+
+			if (text.Length == 1)
+			{
+				_characterBeforePreviousCharacter = _previousCharacter;
+				_previousCharacter = _lastCharacter;
+				_lastCharacter = text[0];
+				return;
+			}
+
+			_characterBeforePreviousCharacter = text.Length > 2 ? text[^3] : _lastCharacter;
+			_previousCharacter = text[^2];
+			_lastCharacter = text[^1];
+		}
+
+		private void UpdateTrailingCharacter(char character)
+		{
+			_characterBeforePreviousCharacter = _previousCharacter;
+			_previousCharacter = _lastCharacter;
+			_lastCharacter = character;
+		}
 
         private void DisposeStorageFile()
         {

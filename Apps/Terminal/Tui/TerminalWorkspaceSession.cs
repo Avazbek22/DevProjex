@@ -3610,16 +3610,15 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			IPreviewTextDocument? pendingDocument = null;
 			try
 			{
-				pendingDocument = await _controller.BuildPreviewDocumentAsync(
+				var build = await _controller.BuildPreviewDocumentWithMetricsAsync(
 						state,
 						view,
 						format,
 						cancellationToken,
 						plain: _options.Plain)
 					.ConfigureAwait(false);
-				var outputMetrics = await ExportOutputMetricsCalculator
-					.FromDocumentAsync(pendingDocument, cancellationToken)
-					.ConfigureAwait(false);
+				pendingDocument = build.Document;
+				var outputMetrics = build.Metrics;
 				var document = pendingDocument;
 				var applied = await InvokeAsync(() =>
 				{
@@ -4681,6 +4680,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_exclusionControlRows = null;
 		_extensionAllControlRows = null;
 		_extensionControlRows = null;
+		_controlSourceStamp = null;
+		_redactionLabelStamp = null;
 		_activeAggregateControlSection = null;
 		_welcomeList = null;
 		_welcomeRows = null;

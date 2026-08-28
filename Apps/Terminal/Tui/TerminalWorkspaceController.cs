@@ -462,6 +462,20 @@ public sealed class TerminalWorkspaceController(
 		ProjectContextDocumentFormat format,
 		CancellationToken cancellationToken,
 		bool plain = false)
+		=> (await BuildPreviewDocumentWithMetricsAsync(
+				state,
+				view,
+				format,
+				cancellationToken,
+				plain)
+			.ConfigureAwait(false)).Document;
+
+	public async Task<PreviewDocumentBuildResult> BuildPreviewDocumentWithMetricsAsync(
+		TerminalWorkspaceState state,
+		ProjectContextView view,
+		ProjectContextDocumentFormat format,
+		CancellationToken cancellationToken,
+		bool plain = false)
 	{
 		ValidateView(view);
 		ValidateDocumentFormat(format);
@@ -486,7 +500,7 @@ public sealed class TerminalWorkspaceController(
 					includeRootPath: false,
 					cancellationToken: cancellationToken);
 		}
-		return await BuildInteractivePreviewAsync(
+		return await BuildInteractivePreviewWithMetricsAsync(
 				plan,
 				tree,
 				view,
@@ -546,7 +560,7 @@ public sealed class TerminalWorkspaceController(
 			: PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(document);
 	}
 
-	private async Task<IPreviewTextDocument> BuildInteractivePreviewAsync(
+	private async Task<PreviewDocumentBuildResult> BuildInteractivePreviewWithMetricsAsync(
 		ProjectContextPlan plan,
 		string tree,
 		ProjectContextView view,
@@ -571,10 +585,10 @@ public sealed class TerminalWorkspaceController(
 		return view switch
 		{
 			ProjectContextView.Tree =>
-				services.PreviewDocumentBuilder.CreateDocument(tree),
+				services.PreviewDocumentBuilder.CreateDocumentWithMetrics(tree),
 			ProjectContextView.Content =>
 				await services.PreviewDocumentBuilder
-					.BuildContentDocumentAsync(
+					.BuildContentDocumentWithMetricsAsync(
 						files,
 						cancellationToken,
 						MapDisplayPath,
@@ -582,9 +596,9 @@ public sealed class TerminalWorkspaceController(
 						transformationContext: transformationContext,
 						projectRoot: plan.SourceRoot)
 					.ConfigureAwait(false) ??
-				services.PreviewDocumentBuilder.CreateInMemory(string.Empty),
+				services.PreviewDocumentBuilder.CreateDocumentWithMetrics(string.Empty),
 			ProjectContextView.TreeContent => await services.PreviewDocumentBuilder
-				.BuildTreeAndContentDocumentAsync(
+				.BuildTreeAndContentDocumentWithMetricsAsync(
 					tree,
 					files,
 					cancellationToken,
