@@ -41,6 +41,40 @@ public sealed class TerminalPolishTests
 	}
 
 	[Fact]
+	public void ColumnLayoutFitsInteractiveOutputWhenThePreferredColumnCannotAbsorbAllOverflow()
+	{
+		string[][] rows =
+		[
+			[
+				"https://github.com/owner/a-very-long-repository-name.git",
+				"ready",
+				"main",
+				"0123456789ab",
+				"68.2 MiB",
+				"2026-08-28 12:00",
+				"C:/a/very/long/cache/path/with/a-tail"
+			]
+		];
+		var environment = new TestTerminalEnvironment
+		{
+			IsOutputInteractive = true,
+			HasAttachedConsole = true,
+			IsTerminalHost = true,
+			Width = 48
+		};
+
+		var lines = TerminalColumnLayout.FormatForOutput(
+			rows,
+			["Repository", "Status", "Branch", "Commit", "Size", "Last used", "Path"],
+			environment,
+			new TerminalOutputOptions(),
+			truncationColumn: 6);
+
+		Assert.All(lines, static line => Assert.True(TerminalCellWidth.Measure(line) <= 48, line));
+		Assert.Contains(lines, static line => line.Contains('…'));
+	}
+
+	[Fact]
 	public void FocusModelCapturesAndRestoresPaneSectionAndAggregateTogether()
 	{
 		var model = new WorkspaceFocusModel

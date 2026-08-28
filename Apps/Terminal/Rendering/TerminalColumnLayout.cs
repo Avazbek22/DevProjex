@@ -62,12 +62,29 @@ internal static class TerminalColumnLayout
 			var totalWidth = widths.Sum() + separatorWidth * Math.Max(0, columnCount - 1);
 			if (totalWidth > limit)
 			{
-				var column = truncationColumn is >= 0 && truncationColumn < columnCount
+				var overflow = totalWidth - limit;
+				var preferredColumn = truncationColumn is >= 0 && truncationColumn < columnCount
 					? truncationColumn.Value
-					: Array.IndexOf(widths, widths.Max());
-				widths[column] = Math.Max(1, widths[column] - (totalWidth - limit));
+					: (int?)null;
+				while (overflow > 0)
+				{
+					var column = preferredColumn is { } preferred && widths[preferred] > 1
+						? preferred
+						: Array.IndexOf(widths, widths.Max());
+					preferredColumn = null;
+					var available = widths[column] - 1;
+					if (available <= 0)
+						break;
+					var reduction = Math.Min(overflow, available);
+					widths[column] -= reduction;
+					overflow -= reduction;
+				}
+
 				foreach (var row in materialized)
-					row[column] = TerminalCellWidth.TruncateMiddle(row[column], widths[column]);
+				{
+					for (var column = 0; column < columnCount; column++)
+						row[column] = TerminalCellWidth.TruncateMiddle(row[column], widths[column]);
+				}
 			}
 		}
 

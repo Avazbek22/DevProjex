@@ -47,13 +47,15 @@ devprojex
 │   ├── export
 │   ├── import
 │   ├── validate
-│   └── reset
+│   ├── reset
+│   └── save
 ├── recent
 ├── cache
 │   ├── path
 │   ├── list
 │   ├── remove
-│   └── clear
+│   ├── clear
+│   └── update
 ├── ui
 │   ├── list
 │   ├── status
@@ -79,9 +81,10 @@ diagnostic workflows.
 read-only MCP stdio server. Secret redaction is mandatory; private-data
 redaction is enabled only by the server startup flag and cannot be controlled by
 tools.
-Explicit roots take precedence over `CLAUDE_PROJECT_DIR` and the current
-directory. See [McpServer.md](McpServer.md) for its security model, tools, and
-client configuration.
+Explicit MCP roots take precedence over `DEVPROJEX_ROOT`, then
+`CLAUDE_PROJECT_DIR`, then the current directory. See
+[McpServer.md](McpServer.md) for its security model, tools, and client
+configuration.
 
 Commands, option names, enum tokens, JSON properties, and XML element names are
 stable English identifiers. `--language CODE` localizes human-readable help,
@@ -99,10 +102,11 @@ to stdout and exit with code `0` without opening Desktop or Terminal Workspace.
 
 ## Common Selection Options
 
-All five commands accept the same typed path-selection options, through `--exclude`
-in the list below. `analyze`, `export context`, `export project`, and `open` also
-accept the five content-transformation options that follow; `tree` deliberately
-does not. `open` additionally accepts the `auto` profile:
+Six commands accept the same typed path-selection options, through `--exclude`
+in the list below: `analyze`, `tree`, `export context`, `export project`, `open`,
+and `profile save`. All except `tree` also accept the five
+content-transformation options that follow. `open` additionally accepts the
+`auto` profile:
 
 ```text
 --profile <standard|local|FILE>
@@ -112,11 +116,11 @@ does not. `open` additionally accepts the `auto` profile:
 --select-from <FILE|->
 --git-mode <none|gitignore|tracked>
 --exclude <NAME>             repeatable
---hide-secrets [<true|false>]
---hide-private-data [<true|false>]
---compress-code [<true|false>]
---strip-comments [<true|false>]
---strip-blank-lines [<true|false>]
+--hide-secrets [<true|false|on|off>]
+--hide-private-data [<true|false|on|off>]
+--compress-code [<true|false|on|off>]
+--strip-comments [<true|false|on|off>]
+--strip-blank-lines [<true|false|on|off>]
 ```
 
 Boolean transformation values also accept `on|off`. Each has an explicit
@@ -127,7 +131,8 @@ negative form: `--no-hide-secrets`, `--no-hide-private-data`,
 conflict with an existing command option.
 
 For `open`, the first line is `--profile <auto|standard|local|FILE>` and its
-default is `auto`. Direct analyze/export commands default to `standard`.
+default is `auto`. Direct selection commands (`analyze`, `tree`, both exports,
+and `profile save`) default to `standard`.
 
 Git filtering is independent from ordinary Exclusions.
 
@@ -310,9 +315,10 @@ percentage milestones, and completion. It never enters stdout. Cancellation clea
 staging through the cache lifecycle. Profile-management commands remain local-path-only.
 
 Common aliases are part of the public contract: `export ctx` equals
-`export context`, `export proj` equals `export project`, `-f` equals `--format`,
-and `-n` equals `--dry-run`. `-q` and `--quiet` select `quiet` verbosity and
-cannot be combined with an explicit `--verbosity`.
+`export context`, `export proj` equals `export project`, and `-f` equals
+`--format`. `-n` equals `--dry-run` where that option is available. `-q` and
+`--quiet` select `quiet` verbosity and cannot be combined with an explicit
+`--verbosity`.
 
 ## Terminal Workspace
 
@@ -552,8 +558,9 @@ unchanged. The result is intentionally not byte-for-byte faithful and may not
 build or run. `--dry-run` states this before any destination or staging path is
 created.
 
-On success stdout contains exactly one absolute result path. Measured progress and
-warnings use stderr.
+On success, file and folder destinations write exactly one absolute result path
+to stdout. A ZIP destination of `-` writes only the raw archive bytes instead.
+Measured progress and warnings use stderr.
 
 ## Recent Workspaces
 
@@ -633,7 +640,7 @@ stderr.
 ## Desktop Control
 
 ```shell
-devprojex ui list [-f text|json]
+devprojex ui list [-f text|json] [--timeout DURATION]
 devprojex ui status
 devprojex ui activate
 devprojex ui preview open [--view tree|content|tree-content]
@@ -700,9 +707,11 @@ diagnostic output accept and ignore values that do not affect their payload.
 
 Environment defaults sit below explicit flags and above capability detection:
 `DEVPROJEX_COLOR`, `DEVPROJEX_PROGRESS`, `DEVPROJEX_VERBOSITY`, and
-`DEVPROJEX_LANGUAGE` accept the same tokens as their options. `DEVPROJEX_ROOT`
-provides the general project root when no explicit source was supplied.
-`NO_COLOR` is considered after `DEVPROJEX_COLOR`.
+`DEVPROJEX_LANGUAGE` accept the same tokens as their options. For the MCP server
+(`devprojex mcp`), `DEVPROJEX_ROOT` supplies the root after explicit `--root`
+values and before `CLAUDE_PROJECT_DIR` or the current directory. It does not
+replace the `PROJECT` argument of direct commands. `NO_COLOR` is considered
+after `DEVPROJEX_COLOR`.
 
 Interactive text tables add localized headers and fit long paths to the terminal
 with a middle ellipsis. Pipes and redirects retain the headerless, untruncated

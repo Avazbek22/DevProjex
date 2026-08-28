@@ -148,7 +148,7 @@ remains a usage error instead of silently selecting a later command.
 
 ## Shared Selection
 
-`analyze`, `export context`, `export project`, and `open` use:
+`analyze`, `export context`, `export project`, `open`, and `profile save` use:
 
 ```text
 --profile <standard|local|FILE>
@@ -158,11 +158,16 @@ remains a usage error instead of silently selecting a later command.
 --select-from <FILE|->
 --git-mode <none|gitignore|tracked>
 --exclude <NAME>                     repeatable
---hide-secrets [<true|false>]
---hide-private-data [<true|false>]
---compress-code [<true|false>]
---strip-comments [<true|false>]
---strip-blank-lines [<true|false>]
+--hide-secrets [<true|false|on|off>]
+--no-hide-secrets
+--hide-private-data [<true|false|on|off>]
+--no-hide-private-data
+--compress-code [<true|false|on|off>]
+--no-compress-code
+--strip-comments [<true|false|on|off>]
+--no-strip-comments
+--strip-blank-lines [<true|false|on|off>]
+--no-strip-blank-lines
 ```
 
 Exclusion tokens are:
@@ -202,9 +207,9 @@ preserves intentional selection against changing filter profiles.
 omits all content-transformation options.
 
 The documented aliases are stable syntax: `export ctx`, `export proj`, `-f` for
-every public `--format`, `-n` for export `--dry-run`, and `-q` for the existing
-quiet verbosity. Aliases appear in help and completion; none are implicit or
-hidden.
+every public `--format`, `-n` for each public `--dry-run`, and `-q`/`--quiet`
+for quiet verbosity. Aliases appear in help and completion; none are implicit
+or hidden.
 
 The normative `standard` profile has Git mode `gitignore` and contains all eight
 exclusion groups: `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`,
@@ -637,6 +642,7 @@ validates without modifying local state unless `--apply` is present.
 ```text
 devprojex ui list
   --format <text|json>               default: text
+  --timeout <DURATION>               default: 10s
 
 devprojex ui status
 devprojex ui activate
@@ -1016,11 +1022,12 @@ schemas unless a schema is named below.
 Environment defaults are evaluated after an explicit option and before
 `NO_COLOR` or capability autodetection: `DEVPROJEX_COLOR`,
 `DEVPROJEX_PROGRESS`, `DEVPROJEX_VERBOSITY`, and `DEVPROJEX_LANGUAGE` use the
-same tokens as their options. `DEVPROJEX_ROOT` is the general project-root
-counterpart of `CLAUDE_PROJECT_DIR`; an explicit command argument or `--root`
-still wins. Empty or invalid environment values are ignored. The effective
-priority is explicit flag, matching `DEVPROJEX_*`, `NO_COLOR` where applicable,
-then terminal/system autodetection.
+same tokens as their options. For the MCP server, `DEVPROJEX_ROOT` is the
+general counterpart of `CLAUDE_PROJECT_DIR`; explicit MCP `--root` values still
+win, and the variable does not replace direct commands' `PROJECT` arguments.
+Empty or invalid environment values are ignored. The effective priority is
+explicit flag, matching `DEVPROJEX_*`, `NO_COLOR` where applicable, then
+terminal/system autodetection.
 
 Interactive text tables for `recent`, `cache list`, and `ui list` use localized
 headers and middle-ellipsis path truncation to fit the TTY. Redirected/piped text
