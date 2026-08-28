@@ -85,7 +85,7 @@ public sealed class TerminalClonePtyTests
 			"The repository could not be cloned.",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.False(terminal.HasExited);
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(
@@ -142,7 +142,7 @@ public sealed class TerminalClonePtyTests
 		Assert.Contains("PublishedCloneMarker.cs", preview, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(
@@ -207,7 +207,7 @@ public sealed class TerminalClonePtyTests
 
 		Assert.Contains("[x] .cs", parameters, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(
@@ -334,7 +334,7 @@ public sealed class TerminalClonePtyTests
 		Assert.DoesNotContain("\n\n", exported.Replace("\r\n", "\n", StringComparison.Ordinal), StringComparison.Ordinal);
 		Assert.DoesNotContain("Console.WriteLine(Token)", exported, StringComparison.Ordinal);
 
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(
@@ -451,7 +451,7 @@ public sealed class TerminalClonePtyTests
 			originRoot.Path,
 			welcomeDirectory.Path);
 
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(
