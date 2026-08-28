@@ -1,4 +1,5 @@
 using System.IO.Pipelines;
+using DevProjex.Application.Diagnostics;
 using DevProjex.Mcp;
 using ModelContextProtocol;
 using ModelContextProtocol.Client;
@@ -20,6 +21,42 @@ public sealed class McpServerIntegrationTests
 		"search_project",
 		"get_file"
 	];
+
+	[Fact]
+	public async Task TreeAndAnalyzeAvoidUnusedPlanningContentPasses()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "First.cs"), "class First { }\n");
+		File.WriteAllText(Path.Combine(project, "Second.cs"), "class Second { }\n");
+		using var measurement = ContentPipelineDiagnostics.BeginMeasurement();
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var tree = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["include_patterns"] = new[] { "**/*.cs" }
+			});
+		var afterTree = measurement.Capture();
+
+		Assert.NotEqual(true, tree.IsError);
+		Assert.Equal(0, afterTree.FullFileReads);
+		Assert.Equal(0, afterTree.FullFileReadBytes);
+
+		var analysis = await server.CallAsync("analyze");
+		var afterAnalysis = measurement.Capture();
+		var metrics = Assert.IsType<JsonElement>(analysis.StructuredContent);
+
+		Assert.NotEqual(true, analysis.IsError);
+		Assert.Equal(2, metrics.GetProperty("files").GetInt32());
+		Assert.True(metrics.GetProperty("characters").GetInt64() > 0);
+		Assert.True(metrics.GetProperty("tokens").GetInt64() > 0);
+		Assert.Equal(
+			metrics.GetProperty("files").GetInt32() * 2L,
+			afterAnalysis.FullFileReads);
+		Assert.True(afterAnalysis.FullFileReadBytes > 0);
+	}
 
 	[Fact]
 	public async Task StreamServerReleasesItsPackSessionWhenInputReachesEndOfStream()

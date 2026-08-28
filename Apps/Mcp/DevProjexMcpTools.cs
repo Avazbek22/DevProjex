@@ -59,7 +59,8 @@ internal sealed class DevProjexMcpTools(
 				arguments.OptionalStringArray("exclude_patterns"),
 				profile: null,
 				arguments.OptionalBoolean("tracked_only", false),
-				cancellationToken).ConfigureAwait(false);
+				cancellationToken,
+				includeOutputMetrics: false).ConfigureAwait(false);
 			var depth = arguments.OptionalInteger("max_depth", 0, 1_000);
 			var renderedTree = depth is null
 				? plan.ProjectedTree
@@ -98,7 +99,10 @@ internal sealed class DevProjexMcpTools(
 			operationProgress.Milestone(1, "selecting files");
 			var arguments = SelectionArguments(request.Params);
 			var detail = McpDetailPolicy.Parse(arguments.OptionalString("detail"));
-			var plan = await BuildSelectionAsync(arguments, cancellationToken).ConfigureAwait(false);
+			var plan = await BuildSelectionAsync(
+				arguments,
+				cancellationToken,
+				includeOutputMetrics: false).ConfigureAwait(false);
 			operationProgress.Milestone(
 				10,
 				$"scanning files {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");
@@ -327,7 +331,8 @@ internal sealed class DevProjexMcpTools(
 				arguments.OptionalStringArray("exclude_patterns"),
 				profile: null,
 				arguments.OptionalBoolean("tracked_only", false),
-				cancellationToken).ConfigureAwait(false);
+				cancellationToken,
+				includeOutputMetrics: false).ConfigureAwait(false);
 			await using var prepared = await projects.PrepareAsync(plan, cancellationToken).ConfigureAwait(false);
 			var analyzer = projects.CreatePreparedAnalyzer(prepared);
 			var output = new StringBuilder();
@@ -394,7 +399,8 @@ internal sealed class DevProjexMcpTools(
 				excludePatterns: null,
 				profile: null,
 				trackedOnly: false,
-				cancellationToken).ConfigureAwait(false);
+				cancellationToken,
+				includeOutputMetrics: false).ConfigureAwait(false);
 			var file = projects.ResolveFile(plan, arguments.RequiredString("path", allowWhitespace: true));
 			await using var prepared = await projects.PrepareAsync(plan with { IncludedFiles = [file] }, cancellationToken)
 				.ConfigureAwait(false);
@@ -435,7 +441,8 @@ internal sealed class DevProjexMcpTools(
 
 	private Task<ProjectContextPlan> BuildSelectionAsync(
 		McpJsonArguments arguments,
-		CancellationToken cancellationToken) =>
+		CancellationToken cancellationToken,
+		bool includeOutputMetrics = true) =>
 		projects.BuildPlanAsync(
 			arguments.OptionalString("project"),
 			arguments.OptionalStringArray("paths", allowWhitespace: true),
@@ -443,7 +450,8 @@ internal sealed class DevProjexMcpTools(
 			arguments.OptionalStringArray("exclude_patterns"),
 			arguments.OptionalString("profile"),
 			arguments.OptionalBoolean("tracked_only", false),
-			cancellationToken);
+			cancellationToken,
+			includeOutputMetrics);
 
 	private Task<CallToolResult> RunProjectAsync(
 		Func<Task<CallToolResult>> operation,

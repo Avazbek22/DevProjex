@@ -16,14 +16,26 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		CancellationToken cancellationToken = default)
 	{
 		ArgumentNullException.ThrowIfNull(request);
-		return BuildAsync(
+		return BuildCoreAsync(
 			request with { CaptureIgnoreImpactCounts = true },
+			includeOutputMetrics: true,
 			cancellationToken);
 	}
 
-	public async Task<ProjectContextPlan> BuildAsync(
+	public Task<ProjectContextPlan> BuildAsync(
 		ProjectContextRequest request,
 		CancellationToken cancellationToken = default)
+		=> BuildCoreAsync(request, includeOutputMetrics: true, cancellationToken);
+
+	public Task<ProjectContextPlan> BuildStructureAsync(
+		ProjectContextRequest request,
+		CancellationToken cancellationToken = default)
+		=> BuildCoreAsync(request, includeOutputMetrics: false, cancellationToken);
+
+	private async Task<ProjectContextPlan> BuildCoreAsync(
+		ProjectContextRequest request,
+		bool includeOutputMetrics,
+		CancellationToken cancellationToken)
 	{
 		ArgumentNullException.ThrowIfNull(request);
 		ArgumentNullException.ThrowIfNull(request.Selection);
@@ -98,7 +110,10 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				includedFiles)
 		};
 		var analysis = await analysisService
-			.BuildReportFromTreeAsync(projectedLoaded, cancellationToken)
+			.BuildReportFromTreeAsync(
+				projectedLoaded,
+				includeOutputMetrics,
+				cancellationToken)
 			.ConfigureAwait(false);
 		AddAnalysisDiagnostics(analysis, diagnostics);
 
@@ -172,7 +187,10 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			SourceIdentity: sourceIdentity,
 			HasIgnoreOptionCounts: loaded.HasIgnoreOptionCounts,
 			IgnoreOptionCounts: loaded.IgnoreOptionCounts,
-			IgnoreControllerImpactCounts: loaded.IgnoreControllerImpactCounts);
+			IgnoreControllerImpactCounts: loaded.IgnoreControllerImpactCounts)
+		{
+			IncludesOutputMetrics = includeOutputMetrics
+		};
 	}
 
 	public async Task<ProjectContextPlan> ReprojectSelectionAsync(
@@ -247,7 +265,10 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			UnavailableGitTrackedIndexCount:
 				baseline.GitReadiness.UnavailableTrackedIndexCount);
 		var analysis = await analysisService
-			.BuildReportFromTreeAsync(reportInput, cancellationToken)
+			.BuildReportFromTreeAsync(
+				reportInput,
+				baseline.IncludesOutputMetrics,
+				cancellationToken)
 			.ConfigureAwait(false);
 
 		return baseline with

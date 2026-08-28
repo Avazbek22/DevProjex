@@ -17,6 +17,7 @@ public sealed class TreeCommandHandler(
 				() => services.ContextFactory.BuildAsync(
 					request.ProjectPath,
 					request.Selection,
+					includeOutputMetrics: false,
 					cancellationToken: cancellationToken))
 			.ConfigureAwait(false);
 		new ContextDiagnosticRenderer(environment, request.Output, services.Localization)
