@@ -44,6 +44,20 @@ public sealed class TerminalApplication
 		IReadOnlyList<string> arguments,
 		CancellationToken cancellationToken = default)
 	{
+		try
+		{
+			return await RunCoreAsync(arguments, cancellationToken).ConfigureAwait(false);
+		}
+		catch (TerminalBrokenPipeException)
+		{
+			return CommandLineExitCodes.Success;
+		}
+	}
+
+	private async Task<int> RunCoreAsync(
+		IReadOnlyList<string> arguments,
+		CancellationToken cancellationToken)
+	{
 		var localization = new LocalizationService(
 			new JsonLocalizationCatalog(),
 			TerminalLanguageResolver.Resolve(arguments));
@@ -152,11 +166,7 @@ public sealed class TerminalApplication
 				$"error[DPX-CLI-CANCELED]: {localization["Terminal.Error.Canceled"]}");
 			return CommandLineExitCodes.Canceled;
 		}
-		catch (TerminalBrokenPipeException)
-		{
-			return CommandLineExitCodes.Success;
-		}
-		catch (Exception exception)
+		catch (Exception exception) when (exception is not TerminalBrokenPipeException)
 		{
 			environment.Error.WriteLine(
 				$"error[DPX-CLI-UNEXPECTED]: {localization["Terminal.Error.Unexpected"]}");
