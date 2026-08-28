@@ -19,6 +19,71 @@ internal sealed class TerminalWorkspaceCommandParser
 		"tracked"
 	];
 
+	private delegate TerminalWorkspaceCommandParseResult GrammarParser(
+		TerminalWorkspaceCommandDefinition definition,
+		IReadOnlyList<ParsedToken> tokens,
+		TerminalWorkspaceCommandParseContext context);
+
+	private delegate IReadOnlyList<string> GrammarCompleter(
+		int argumentIndex,
+		IReadOnlyList<ParsedToken> tokens,
+		string current,
+		TerminalWorkspaceCommandParseContext context);
+
+	private sealed record GrammarHandler(GrammarParser Parse, GrammarCompleter Complete);
+
+	private static readonly IReadOnlyDictionary<TerminalWorkspaceCommandGrammar, GrammarHandler>
+		GrammarHandlers = new Dictionary<TerminalWorkspaceCommandGrammar, GrammarHandler>
+		{
+			[TerminalWorkspaceCommandGrammar.ToggleOption] = new(
+				static (definition, tokens, _) => ParseSet(definition, tokens),
+				CompleteToggleOption),
+			[TerminalWorkspaceCommandGrammar.ToggleGroup] = new(
+				static (definition, tokens, _) => ParseAll(definition, tokens),
+				CompleteToggleGroup),
+			[TerminalWorkspaceCommandGrammar.ToggleTypes] = new(
+				ParseType,
+				CompleteTypes),
+			[TerminalWorkspaceCommandGrammar.View] = new(
+				static (definition, tokens, _) => ParseView(definition, tokens),
+				CompleteView),
+			[TerminalWorkspaceCommandGrammar.Format] = new(
+				static (definition, tokens, _) => ParseFormat(definition, tokens),
+				CompleteFormat),
+			[TerminalWorkspaceCommandGrammar.Text] = new(
+				static (definition, tokens, _) => ParseText(definition, tokens),
+				NoCompletions),
+			[TerminalWorkspaceCommandGrammar.Export] = new(
+				static (definition, tokens, _) => ParseExport(definition, tokens),
+				CompleteExport),
+			[TerminalWorkspaceCommandGrammar.Copy] = new(
+				static (definition, tokens, _) => ParseCopy(definition, tokens),
+				CompleteCopy),
+			[TerminalWorkspaceCommandGrammar.OptionalText] = new(
+				static (definition, tokens, _) => ParseOptionalText(definition, tokens),
+				NoCompletions),
+			[TerminalWorkspaceCommandGrammar.Profile] = new(
+				static (definition, tokens, _) => ParseProfile(definition, tokens),
+				CompleteProfile),
+			[TerminalWorkspaceCommandGrammar.Language] = new(
+				static (definition, tokens, _) => ParseLanguage(definition, tokens),
+				CompleteLanguage),
+			[TerminalWorkspaceCommandGrammar.Help] = new(
+				static (definition, tokens, _) => ParseHelp(definition, tokens),
+				CompleteHelp),
+			[TerminalWorkspaceCommandGrammar.None] = new(
+				static (definition, tokens, _) => ParseWithoutArguments(definition, tokens),
+				NoCompletions)
+		};
+
+	static TerminalWorkspaceCommandParser()
+	{
+		if (GrammarHandlers.Count != Enum.GetValues<TerminalWorkspaceCommandGrammar>().Length)
+			throw new InvalidOperationException("The terminal command grammar registry is incomplete.");
+	}
+
+	internal static int RegisteredGrammarCount => GrammarHandlers.Count;
+
 	public TerminalWorkspaceCommandParseResult Parse(
 		string? text,
 		TerminalWorkspaceCommandParseContext? context = null)
@@ -47,24 +112,7 @@ internal sealed class TerminalWorkspaceCommandParser
 				FindSimilar(verbToken.Value, context.VerbTokens));
 		}
 
-		return definition.Grammar switch
-		{
-			TerminalWorkspaceCommandGrammar.ToggleOption => ParseSet(definition, tokenization.Tokens),
-			TerminalWorkspaceCommandGrammar.ToggleGroup => ParseAll(definition, tokenization.Tokens),
-			TerminalWorkspaceCommandGrammar.ToggleTypes => ParseType(definition, tokenization.Tokens, context),
-			TerminalWorkspaceCommandGrammar.View => ParseView(definition, tokenization.Tokens),
-			TerminalWorkspaceCommandGrammar.Format => ParseFormat(definition, tokenization.Tokens),
-			TerminalWorkspaceCommandGrammar.Text =>
-				ParseText(definition, tokenization.Tokens),
-			TerminalWorkspaceCommandGrammar.Export => ParseExport(definition, tokenization.Tokens),
-			TerminalWorkspaceCommandGrammar.Copy => ParseCopy(definition, tokenization.Tokens),
-			TerminalWorkspaceCommandGrammar.OptionalText => ParseOptionalText(definition, tokenization.Tokens),
-			TerminalWorkspaceCommandGrammar.Profile => ParseProfile(definition, tokenization.Tokens),
-			TerminalWorkspaceCommandGrammar.Language => ParseLanguage(definition, tokenization.Tokens),
-			TerminalWorkspaceCommandGrammar.Help => ParseHelp(definition, tokenization.Tokens),
-			TerminalWorkspaceCommandGrammar.None => ParseWithoutArguments(definition, tokenization.Tokens),
-			_ => throw new ArgumentOutOfRangeException()
-		};
+		return GrammarHandlers[definition.Grammar].Parse(definition, tokenization.Tokens, context);
 	}
 
 	public TerminalWorkspaceCommandCompletion GetCompletion(
@@ -102,8 +150,7 @@ internal sealed class TerminalWorkspaceCommandParser
 		var argumentIndex = atNewToken ? tokens.Count - 1 : tokens.Count - 2;
 		var current = atNewToken ? string.Empty : tokens[^1].Value;
 		var replacementStart = atNewToken ? cursorPosition : tokens[^1].Start;
-		var candidates = ResolveCompletionCandidates(
-			definition.Grammar,
+		var candidates = GrammarHandlers[definition.Grammar].Complete(
 			argumentIndex,
 			tokens,
 			current,
@@ -386,37 +433,106 @@ internal sealed class TerminalWorkspaceCommandParser
 			? TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(definition))
 			: Unexpected(tokens[1]);
 
-	private static IReadOnlyList<string> ResolveCompletionCandidates(
-		TerminalWorkspaceCommandGrammar grammar,
+	private static IReadOnlyList<string> CompleteToggleOption(
 		int argumentIndex,
 		IReadOnlyList<ParsedToken> tokens,
 		string current,
 		TerminalWorkspaceCommandParseContext context) =>
-		grammar switch
+		argumentIndex switch
 		{
-			TerminalWorkspaceCommandGrammar.ToggleOption when argumentIndex == 0 => SetTargets,
-			TerminalWorkspaceCommandGrammar.ToggleOption when argumentIndex == 1 => ToggleValues,
-			TerminalWorkspaceCommandGrammar.ToggleGroup when argumentIndex == 0 => AggregateTargets,
-			TerminalWorkspaceCommandGrammar.ToggleGroup when argumentIndex == 1 => ToggleValues,
-			TerminalWorkspaceCommandGrammar.ToggleTypes when argumentIndex >= 0 => ResolveTypeCompletions(tokens, context),
-			TerminalWorkspaceCommandGrammar.View when argumentIndex == 0 => CliChoiceSets.ContextView.Tokens,
-			TerminalWorkspaceCommandGrammar.Format when argumentIndex == 0 => CliChoiceSets.ContextDocumentFormat.Tokens,
-			TerminalWorkspaceCommandGrammar.Export when argumentIndex == 0 => ExportTargets,
-			TerminalWorkspaceCommandGrammar.Export when argumentIndex == 1 &&
-				tokens.Count > 1 && string.Equals(tokens[1].Value, "context", StringComparison.OrdinalIgnoreCase) =>
-				CliChoiceSets.ContextDocumentFormat.Tokens,
-			TerminalWorkspaceCommandGrammar.Export when argumentIndex == 2 &&
-				tokens.Count > 1 && string.Equals(tokens[1].Value, "context", StringComparison.OrdinalIgnoreCase) =>
-				ResolvePathCompletions(current, context.WorkingDirectory),
-			TerminalWorkspaceCommandGrammar.Export when argumentIndex == 1 && tokens.Count > 1 =>
-				ResolvePathCompletions(current, context.WorkingDirectory),
-			TerminalWorkspaceCommandGrammar.Copy when argumentIndex == 0 => CliChoiceSets.ContextView.Tokens,
-			TerminalWorkspaceCommandGrammar.Copy when argumentIndex == 1 => CliChoiceSets.ContextDocumentFormat.Tokens,
-			TerminalWorkspaceCommandGrammar.Profile when argumentIndex == 0 => ProfileTargets,
-			TerminalWorkspaceCommandGrammar.Language when argumentIndex == 0 => LanguageCodes,
-			TerminalWorkspaceCommandGrammar.Help when argumentIndex == 0 => context.VerbTokens,
+			0 => SetTargets,
+			1 => ToggleValues,
 			_ => []
 		};
+
+	private static IReadOnlyList<string> CompleteToggleGroup(
+		int argumentIndex,
+		IReadOnlyList<ParsedToken> tokens,
+		string current,
+		TerminalWorkspaceCommandParseContext context) =>
+		argumentIndex switch
+		{
+			0 => AggregateTargets,
+			1 => ToggleValues,
+			_ => []
+		};
+
+	private static IReadOnlyList<string> CompleteTypes(
+		int argumentIndex,
+		IReadOnlyList<ParsedToken> tokens,
+		string current,
+		TerminalWorkspaceCommandParseContext context) =>
+		argumentIndex >= 0 ? ResolveTypeCompletions(tokens, context) : [];
+
+	private static IReadOnlyList<string> CompleteView(
+		int argumentIndex,
+		IReadOnlyList<ParsedToken> tokens,
+		string current,
+		TerminalWorkspaceCommandParseContext context) =>
+		argumentIndex == 0 ? CliChoiceSets.ContextView.Tokens : [];
+
+	private static IReadOnlyList<string> CompleteFormat(
+		int argumentIndex,
+		IReadOnlyList<ParsedToken> tokens,
+		string current,
+		TerminalWorkspaceCommandParseContext context) =>
+		argumentIndex == 0 ? CliChoiceSets.ContextDocumentFormat.Tokens : [];
+
+	private static IReadOnlyList<string> CompleteExport(
+		int argumentIndex,
+		IReadOnlyList<ParsedToken> tokens,
+		string current,
+		TerminalWorkspaceCommandParseContext context)
+	{
+		if (argumentIndex == 0)
+			return ExportTargets;
+		var isContext = tokens.Count > 1 &&
+			string.Equals(tokens[1].Value, "context", StringComparison.OrdinalIgnoreCase);
+		if (argumentIndex == 1 && isContext)
+			return CliChoiceSets.ContextDocumentFormat.Tokens;
+		if (argumentIndex == 2 && isContext || argumentIndex == 1 && tokens.Count > 1)
+			return ResolvePathCompletions(current, context.WorkingDirectory);
+		return [];
+	}
+
+	private static IReadOnlyList<string> CompleteCopy(
+		int argumentIndex,
+		IReadOnlyList<ParsedToken> tokens,
+		string current,
+		TerminalWorkspaceCommandParseContext context) =>
+		argumentIndex switch
+		{
+			0 => CliChoiceSets.ContextView.Tokens,
+			1 => CliChoiceSets.ContextDocumentFormat.Tokens,
+			_ => []
+		};
+
+	private static IReadOnlyList<string> CompleteProfile(
+		int argumentIndex,
+		IReadOnlyList<ParsedToken> tokens,
+		string current,
+		TerminalWorkspaceCommandParseContext context) =>
+		argumentIndex == 0 ? ProfileTargets : [];
+
+	private static IReadOnlyList<string> CompleteLanguage(
+		int argumentIndex,
+		IReadOnlyList<ParsedToken> tokens,
+		string current,
+		TerminalWorkspaceCommandParseContext context) =>
+		argumentIndex == 0 ? LanguageCodes : [];
+
+	private static IReadOnlyList<string> CompleteHelp(
+		int argumentIndex,
+		IReadOnlyList<ParsedToken> tokens,
+		string current,
+		TerminalWorkspaceCommandParseContext context) =>
+		argumentIndex == 0 ? context.VerbTokens : [];
+
+	private static IReadOnlyList<string> NoCompletions(
+		int argumentIndex,
+		IReadOnlyList<ParsedToken> tokens,
+		string current,
+		TerminalWorkspaceCommandParseContext context) => [];
 
 	private static IReadOnlyList<string> ResolvePathCompletions(string current, string? workingDirectory)
 	{

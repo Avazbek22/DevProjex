@@ -125,6 +125,8 @@ public sealed class TerminalPolishTests
 	{
 		Assert.Equal(Enum.GetValues<TerminalWorkspaceCommandVerb>().Length,
 			TerminalWorkspaceCommandCatalog.All.Count);
+		Assert.Equal(Enum.GetValues<TerminalWorkspaceCommandGrammar>().Length,
+			TerminalWorkspaceCommandParser.RegisteredGrammarCount);
 		Assert.Equal(TerminalWorkspaceCommandCatalog.All.Count,
 			TerminalWorkspaceCommandCatalog.All.Select(static item => item.Id).Distinct().Count());
 		Assert.All(TerminalWorkspaceCommandCatalog.All,
