@@ -119,6 +119,32 @@ public sealed class TerminalWorkspaceStateTests
 	}
 
 	[Fact]
+	public void RepeatedLeafTogglesKeepAncestorStatesAndFolderCountsExact()
+	{
+		using var state = new TerminalWorkspaceState(CreatePlan());
+		state.Expand(FindRow(state, "src"));
+		var firstFileRow = FindRow(state, "a.cs");
+		var secondFileRow = FindRow(state, "b.cs");
+
+		state.ToggleSelection(firstFileRow);
+		Assert.Equal(TerminalTreeCheckState.Indeterminate, state.VisibleRows[0].CheckState);
+		Assert.Equal(TerminalTreeCheckState.Indeterminate, state.VisibleRows[1].CheckState);
+		Assert.Equal(3, state.SelectedFolderCount);
+
+		state.ToggleSelection(secondFileRow);
+		Assert.Equal(TerminalTreeCheckState.Indeterminate, state.VisibleRows[0].CheckState);
+		Assert.Equal(TerminalTreeCheckState.Unchecked, state.VisibleRows[1].CheckState);
+		Assert.Equal(2, state.SelectedFolderCount);
+
+		state.ToggleSelection(firstFileRow);
+		state.ToggleSelection(secondFileRow);
+		Assert.Equal(TerminalTreeCheckState.Checked, state.VisibleRows[0].CheckState);
+		Assert.Equal(TerminalTreeCheckState.Checked, state.VisibleRows[1].CheckState);
+		Assert.Equal(3, state.SelectedFolderCount);
+		Assert.Empty(state.BuildSelectedRelativePaths());
+	}
+
+	[Fact]
 	public void SearchWrapsWithoutMutatingTree()
 	{
 		var state = new TerminalWorkspaceState(CreatePlan());

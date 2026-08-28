@@ -324,7 +324,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 		Interlocked.Increment(ref _revision);
 		var select = GetCheckState(row.Node) != TerminalTreeCheckState.Checked;
 		SetSubtreeSelection(row.Node, select);
-		RecomputeCheckStates();
+		RecomputeAncestorCheckStates(row.Node);
 		RebuildVisibleRows();
 	}
 
@@ -549,11 +549,15 @@ public sealed class TerminalWorkspaceState : IDisposable
 
 	private void SetSubtreeSelection(TreeNodeDescriptor node, bool selected)
 	{
+		var targetState = selected
+			? TerminalTreeCheckState.Checked
+			: TerminalTreeCheckState.Unchecked;
 		var stack = new Stack<TreeNodeDescriptor>();
 		stack.Push(node);
 		while (stack.Count > 0)
 		{
 			var current = stack.Pop();
+			SetCheckState(current, targetState);
 			if (!current.IsDirectory)
 			{
 				if (selected)
@@ -679,6 +683,42 @@ public sealed class TerminalWorkspaceState : IDisposable
 			for (var index = current.Children.Count - 1; index >= 0; index--)
 				stack.Push((current.Children[index], current.FullPath));
 		}
+	}
+
+	private void RecomputeAncestorCheckStates(TreeNodeDescriptor node)
+	{
+		var parentPath = _parentsByPath.GetValueOrDefault(node.FullPath);
+		while (parentPath is not null)
+		{
+			var parent = _nodesByPath[parentPath];
+			var state = _checkStates[parent.Children[0].FullPath];
+			for (var index = 1; index < parent.Children.Count; index++)
+			{
+				if (_checkStates[parent.Children[index].FullPath] == state)
+					continue;
+
+				state = TerminalTreeCheckState.Indeterminate;
+				break;
+			}
+
+			if (_checkStates[parent.FullPath] == state)
+				break;
+			SetCheckState(parent, state);
+			parentPath = _parentsByPath.GetValueOrDefault(parentPath);
+		}
+	}
+
+	private void SetCheckState(TreeNodeDescriptor node, TerminalTreeCheckState state)
+	{
+		var previous = _checkStates[node.FullPath];
+		_checkStates[node.FullPath] = state;
+		if (!node.IsDirectory || previous == state)
+			return;
+
+		if (previous == TerminalTreeCheckState.Unchecked)
+			_selectedFolderCount++;
+		else if (state == TerminalTreeCheckState.Unchecked)
+			_selectedFolderCount--;
 	}
 
 	private void ExpandAncestors(string path)
