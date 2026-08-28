@@ -21,6 +21,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private const int WelcomeHorizontalMargin = 2;
 	private const int WelcomeWideActionsWidth = 42;
 	private const int SettingsRefreshDebounceMilliseconds = 200;
+	private static readonly TimeSpan SettingsPersistenceShutdownBudget = TimeSpan.FromSeconds(1);
 
 	private readonly IApplication _application;
 	private readonly Window _root;
@@ -41,6 +42,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private readonly EventHandler<SizeChangedEventArgs>? _driverSizeChangedHandler;
 	private readonly global::Terminal.Gui.Drivers.IDriver? _subscribedDriver;
 	private readonly CancellationTokenSource _sessionCts;
+	private readonly CancellationTokenSource _settingsPersistenceCts = new();
 	private readonly SemaphoreSlim _operationGate = new(1, 1);
 	private readonly TerminalBackgroundTaskTracker _backgroundTasks = new();
 
@@ -167,7 +169,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_commandHistory = new TerminalCommandHistory(
 			services.TerminalSettingsStore.LoadCommandHistory());
 		_commandHistoryPersistence = new TerminalCommandHistoryPersistenceQueue(
-			services.TerminalSettingsStore.SaveCommandHistoryAsync);
+			services.TerminalSettingsStore.SaveCommandStateAsync,
+			_settingsPersistenceCts.Token);
 		_sessionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 		var initialScreen = _application.Driver?.Screen ?? _application.Screen;
 		_terminalWidth = Math.Max(_environment.Width, initialScreen.Width);
@@ -343,6 +346,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	public async Task CompleteAsync()
 	{
 		_stopping = true;
+		_settingsPersistenceCts.CancelAfter(SettingsPersistenceShutdownBudget);
 		_sessionCts.Cancel();
 		CancelAndDispose(ref _activeOperationCts);
 		CancelAndDispose(ref _projectionCts);
@@ -4840,6 +4844,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		state?.Dispose();
 		ReleaseOwnedRepositorySession();
 		_sessionCts.Dispose();
+		_settingsPersistenceCts.Cancel();
+		_settingsPersistenceCts.Dispose();
 		_operationGate.Dispose();
 	}
 

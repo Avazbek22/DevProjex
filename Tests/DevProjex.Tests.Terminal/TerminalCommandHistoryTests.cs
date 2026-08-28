@@ -10,7 +10,7 @@ public sealed class TerminalCommandHistoryTests
 		var releaseFirstWrite = new TaskCompletionSource(
 			TaskCreationOptions.RunContinuationsAsynchronously);
 		var writes = new List<IReadOnlyList<string>>();
-		var queue = new TerminalCommandHistoryPersistenceQueue(async (history, cancellationToken) =>
+		var queue = new TerminalCommandHistoryPersistenceQueue(async (history, _, cancellationToken) =>
 		{
 			writes.Add(history);
 			if (writes.Count == 1)
@@ -42,7 +42,7 @@ public sealed class TerminalCommandHistoryTests
 		var releaseFirstWrite = new TaskCompletionSource(
 			TaskCreationOptions.RunContinuationsAsynchronously);
 		var writes = new List<IReadOnlyList<string>>();
-		var queue = new TerminalCommandHistoryPersistenceQueue(async (history, cancellationToken) =>
+		var queue = new TerminalCommandHistoryPersistenceQueue(async (history, _, cancellationToken) =>
 		{
 			writes.Add(history);
 			if (writes.Count != 1)
@@ -66,6 +66,61 @@ public sealed class TerminalCommandHistoryTests
 	}
 
 	[Fact]
+	public async Task PersistenceQueueCoalescesLanguageWithTheLatestHistory()
+	{
+		var firstWriteStarted = new TaskCompletionSource(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		var releaseFirstWrite = new TaskCompletionSource(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		var writes = new List<(IReadOnlyList<string> History, AppLanguage? Language)>();
+		var queue = new TerminalCommandHistoryPersistenceQueue(
+			async (history, language, cancellationToken) =>
+			{
+				writes.Add((history, language));
+				if (writes.Count == 1)
+				{
+					firstWriteStarted.SetResult();
+					await releaseFirstWrite.Task.WaitAsync(cancellationToken);
+				}
+			});
+
+		var drain = queue.Enqueue(["first"]);
+		Assert.NotNull(drain);
+		await firstWriteStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+		Assert.Null(queue.Enqueue(["first", "language ja"], AppLanguage.Ja));
+		Assert.Null(queue.Enqueue(["first", "language ja", "view content"]));
+
+		releaseFirstWrite.SetResult();
+		await drain.WaitAsync(TestContext.Current.CancellationToken);
+
+		Assert.Equal(2, writes.Count);
+		Assert.Equal(["first", "language ja", "view content"], writes[1].History);
+		Assert.Equal(AppLanguage.Ja, writes[1].Language);
+	}
+
+	[Fact]
+	public async Task PersistenceQueueObservesTheSharedShutdownToken()
+	{
+		using var shutdown = new CancellationTokenSource();
+		var writeStarted = new TaskCompletionSource(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		var queue = new TerminalCommandHistoryPersistenceQueue(
+			async (_, _, cancellationToken) =>
+			{
+				writeStarted.SetResult();
+				await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+			},
+			shutdown.Token);
+
+		var drain = queue.Enqueue(["language ja"], AppLanguage.Ja);
+		Assert.NotNull(drain);
+		await writeStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+		await shutdown.CancelAsync();
+
+		await drain.WaitAsync(TestContext.Current.CancellationToken);
+	}
+
+	[Fact]
 	public async Task PersistenceQueueRecoversAfterUnexpectedWriteFailure()
 	{
 		var firstWriteStarted = new TaskCompletionSource(
@@ -73,7 +128,7 @@ public sealed class TerminalCommandHistoryTests
 		var releaseFirstWrite = new TaskCompletionSource(
 			TaskCreationOptions.RunContinuationsAsynchronously);
 		var writes = new List<IReadOnlyList<string>>();
-		var queue = new TerminalCommandHistoryPersistenceQueue(async (history, cancellationToken) =>
+		var queue = new TerminalCommandHistoryPersistenceQueue(async (history, _, cancellationToken) =>
 		{
 			writes.Add(history);
 			if (writes.Count != 1)

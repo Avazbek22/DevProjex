@@ -57,6 +57,22 @@ public sealed class TerminalSettingsStoreTests
 	}
 
 	[Fact]
+	public async Task CommandStatePersistsHistoryAndLanguageInOneAtomicUpdate()
+	{
+		using var workspace = new TemporaryDirectory();
+		var store = new TerminalSettingsStore(() => workspace.Path);
+
+		await store.SaveCommandStateAsync(
+			["language ja"],
+			AppLanguage.Ja,
+			TestContext.Current.CancellationToken);
+
+		var reloaded = new TerminalSettingsStore(() => workspace.Path);
+		Assert.Equal(["language ja"], reloaded.LoadCommandHistory());
+		Assert.Equal(AppLanguage.Ja, reloaded.LoadLanguage());
+	}
+
+	[Fact]
 	public void UnsupportedPersistedLanguageIsIgnored()
 	{
 		using var workspace = new TemporaryDirectory();

@@ -56,12 +56,26 @@ public sealed class TerminalSettingsStore
 		IReadOnlyList<string> history,
 		CancellationToken cancellationToken = default)
 	{
+		await SaveCommandStateAsync(history, language: null, cancellationToken).ConfigureAwait(false);
+	}
+
+	internal async Task SaveCommandStateAsync(
+		IReadOnlyList<string> history,
+		AppLanguage? language,
+		CancellationToken cancellationToken = default)
+	{
 		ArgumentNullException.ThrowIfNull(history);
 		var normalized = new TerminalCommandHistory(history)
 			.Entries
 			.ToArray();
 		await UpdateAsync(
-			current => current with { CommandHistory = normalized },
+			current => current with
+			{
+				CommandHistory = normalized,
+				Language = language is null
+					? current.Language
+					: AppLanguageUtility.ToCode(language.Value)
+			},
 			cancellationToken).ConfigureAwait(false);
 	}
 

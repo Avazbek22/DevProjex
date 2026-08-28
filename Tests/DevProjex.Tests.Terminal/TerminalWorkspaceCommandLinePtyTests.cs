@@ -496,6 +496,52 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		await QuitAsync(restored);
 	}
 
+	[Fact(Timeout = 120_000)]
+	public async Task LanguageCommandDoesNotDelayExitWhenTheSettingsLockIsBusy()
+	{
+		using var project = CreateProject();
+		FileStream? heldLock = null;
+		try
+		{
+			await using var terminal = await StartAsync(
+				project.Path,
+				columns: 120,
+				rows: 30,
+				initializeDataRoot: dataRoot =>
+				{
+					var store = new TerminalSettingsStore(() => dataRoot);
+					Directory.CreateDirectory(Path.GetDirectoryName(store.GetPath())!);
+					heldLock = new FileStream(
+						store.GetPath() + ".lock",
+						FileMode.OpenOrCreate,
+						FileAccess.ReadWrite,
+						FileShare.None);
+				});
+			await terminal.WaitForScreenAsync(
+				"PROJECT TREE",
+				cancellationToken: TestContext.Current.CancellationToken);
+			await terminal.SendAsync(":language ja\r", TestContext.Current.CancellationToken);
+			await terminal.WaitForScreenAsync(
+				"言語をjaに切り替えました。",
+				cancellationToken: TestContext.Current.CancellationToken);
+
+			var stopwatch = Stopwatch.StartNew();
+			await terminal.SendAsync(":quit\r", TestContext.Current.CancellationToken);
+			var exitCode = await terminal.WaitForExitAsync(
+				timeout: TimeSpan.FromSeconds(5),
+				cancellationToken: TestContext.Current.CancellationToken);
+
+			Assert.Equal(CommandLineExitCodes.Success, exitCode);
+			Assert.True(
+				stopwatch.Elapsed < TimeSpan.FromSeconds(3),
+				$"TUI exit waited {stopwatch.Elapsed} for best-effort settings persistence.");
+		}
+		finally
+		{
+			heldLock?.Dispose();
+		}
+	}
+
 	[Fact(Timeout = 180_000)]
 	public async Task EveryVerbExecutesInOneLiveWorkspaceWithoutStateDivergence()
 	{

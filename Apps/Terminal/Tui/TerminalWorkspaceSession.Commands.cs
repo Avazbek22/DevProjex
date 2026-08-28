@@ -333,25 +333,10 @@ internal sealed partial class TerminalWorkspaceSession
 			return InvalidCommandExecution();
 
 		_services.Localization.SetLanguage(language);
-		TrackBackgroundTask(PersistLanguageAsync(language));
 		return TerminalWorkspaceCommandExecutionResult.Success(string.Format(
 			CultureInfo.CurrentCulture,
 			L("Terminal.Tui.Command.Language.Result.Changed"),
 			AppLanguageUtility.ToCode(language)));
-	}
-
-	private async Task PersistLanguageAsync(AppLanguage language)
-	{
-		try
-		{
-			await _services.TerminalSettingsStore
-				.SaveLanguageAsync(language, CancellationToken.None)
-				.ConfigureAwait(false);
-		}
-		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-		{
-			// A read-only configuration directory must not break the live language switch.
-		}
 	}
 
 	private static bool IsValidProfileName(string name) =>
@@ -456,21 +441,28 @@ internal sealed partial class TerminalWorkspaceSession
 			return;
 		_commandLine.Close();
 		var normalized = text.Trim();
+		var historyChanged = false;
 		if (normalized.Length > 0)
-		{
-			_commandHistory.Add(normalized);
-			if (_commandHistoryPersistence.Enqueue(_commandHistory.Entries.ToArray()) is { } saveTask)
-				TrackBackgroundTask(saveTask);
-		}
+			historyChanged = _commandHistory.Add(normalized);
 
 		var parse = _commandParser.Parse(text, BuildCommandParseContext());
 		if (!parse.IsSuccess)
 		{
+			QueueCommandSettingsPersistence(historyChanged, language: null);
 			ShowCommandResult(FormatCommandError(parse.Error!), success: false);
 			return;
 		}
 
 		var result = BuildWorkspaceActionRegistry().Execute(parse.Command!);
+		AppLanguage? persistedLanguage = null;
+		if (parse.Command!.Definition.Verb == TerminalWorkspaceCommandVerb.Language &&
+		    parse.Command.Text is { } languageCode &&
+		    result.Status == TerminalWorkspaceCommandExecutionStatus.Success &&
+		    AppLanguageUtility.TryParseCode(languageCode, out var language))
+		{
+			persistedLanguage = language;
+		}
+		QueueCommandSettingsPersistence(historyChanged, persistedLanguage);
 		switch (result.Status)
 		{
 			case TerminalWorkspaceCommandExecutionStatus.Success:
@@ -492,6 +484,18 @@ internal sealed partial class TerminalWorkspaceSession
 				break;
 			default:
 				throw new ArgumentOutOfRangeException();
+		}
+	}
+
+	private void QueueCommandSettingsPersistence(bool historyChanged, AppLanguage? language)
+	{
+		if (!historyChanged && language is null)
+			return;
+		if (_commandHistoryPersistence.Enqueue(
+			    _commandHistory.Entries.ToArray(),
+			    language) is { } saveTask)
+		{
+			TrackBackgroundTask(saveTask);
 		}
 	}
 
