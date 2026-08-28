@@ -141,6 +141,11 @@ public sealed class IgnoreRulesPolyglotScopeSelectionStressTests
 
 		Assert.True(rules.UseGitIgnore);
 		Assert.True(rules.ScopedGitIgnoreMatchers.Count >= 2);
+		Assert.Equal(
+			rules.ScopedGitIgnoreMatchers
+				.OrderBy(static matcher => matcher.ScopeRootPath.Length)
+				.ThenBy(static matcher => matcher.ScopeRootPath, PathComparer.Default),
+			rules.ScopedGitIgnoreMatchers);
 	}
 
 	private static void SeedWorkspace(TemporaryDirectory temp)

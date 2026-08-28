@@ -86,7 +86,7 @@ public sealed class IgnoreRulesService(
 		var useSmartIgnore = selectedOptions.Contains(IgnoreOptionId.SmartIgnore);
 
 		var candidateScopedGitMatchers = context.HasAnyGitIgnore
-			? BuildScopedGitIgnoreMatchers(context.Scopes, cancellationToken).ToArray()
+			? BuildScopedGitIgnoreMatchers(context.Scopes, cancellationToken)
 			: [];
 		var candidateGitIgnoreMatcher = candidateScopedGitMatchers.Length == 1
 			? candidateScopedGitMatchers[0].Matcher
@@ -376,11 +376,10 @@ public sealed class IgnoreRulesService(
 			? EmptyStringSet
 			: values.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
-	private IEnumerable<ScopedGitIgnoreMatcher> BuildScopedGitIgnoreMatchers(
+	private ScopedGitIgnoreMatcher[] BuildScopedGitIgnoreMatchers(
 		IReadOnlyList<ProjectScope> scopes,
 		CancellationToken cancellationToken)
 	{
-		// Filter and collect in single pass
 		var scopesWithGitIgnore = new List<ProjectScope>();
 		foreach (var scope in scopes)
 		{
@@ -389,7 +388,7 @@ public sealed class IgnoreRulesService(
 		}
 
 		if (scopesWithGitIgnore.Count == 0)
-			yield break;
+			return [];
 
 		// GitIgnore precedence is parent -> child, so scopes must be ordered by depth.
 		CancellationAwareSort.Sort(
@@ -404,21 +403,35 @@ public sealed class IgnoreRulesService(
 			},
 			cancellationToken);
 
-		foreach (var scope in scopesWithGitIgnore)
-		{
-			cancellationToken.ThrowIfCancellationRequested();
-			var matcher = TryBuildGitIgnoreMatcher(
-				scope.RootPath,
-				smartIgnore.RootFactsProvider.GetWithCancellation(
+		var matchers = new ScopedGitIgnoreMatcher?[scopesWithGitIgnore.Count];
+		Parallel.For(
+			0,
+			scopesWithGitIgnore.Count,
+			ScanParallelismPolicy.CreateOptions(cancellationToken),
+			index =>
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				var scope = scopesWithGitIgnore[index];
+				var matcher = TryBuildGitIgnoreMatcher(
 					scope.RootPath,
-					forceRefresh: false,
-					cancellationToken),
-				cancellationToken);
-			if (ReferenceEquals(matcher, GitIgnoreMatcher.Empty))
-				continue;
+					smartIgnore.RootFactsProvider.GetWithCancellation(
+						scope.RootPath,
+						forceRefresh: false,
+						cancellationToken),
+					cancellationToken);
+				if (ReferenceEquals(matcher, GitIgnoreMatcher.Empty))
+					return;
 
-			yield return new ScopedGitIgnoreMatcher(scope.RootPath, matcher);
+				matchers[index] = new ScopedGitIgnoreMatcher(scope.RootPath, matcher);
+			});
+
+		var result = new List<ScopedGitIgnoreMatcher>(matchers.Length);
+		foreach (var matcher in matchers)
+		{
+			if (matcher is not null)
+				result.Add(matcher);
 		}
+		return result.ToArray();
 	}
 
 	private ProjectScanContext DiscoverProjectScanContext(
