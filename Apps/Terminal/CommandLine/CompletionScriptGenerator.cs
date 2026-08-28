@@ -74,7 +74,7 @@ public static class CompletionScriptGenerator
 		"""
 		function __devprojex_complete
 		    set -l command_path (command -s devprojex)
-		    set -l working_directory (printf '%s' "$PWD" | base64 | string collect | string replace -a \n '')
+		    set -l working_directory (printf '%s' "$PWD" | base64 | string join '')
 		    test -n "$command_path"; or return
 		    $command_path dev complete --position (commandline -C) \
 		        --position-unit unicode-scalar --null \

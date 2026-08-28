@@ -33,7 +33,7 @@ public sealed class CompletionCommandContractTests
 			{
 				"bash" => new[] { "read -r -d '' candidate", "compopt -o filenames" },
 				"zsh" => ["${(V)candidate}", "compadd -d displays -a candidates"],
-				"fish" => ["string split0"],
+				"fish" => ["base64 | string join ''", "string split0"],
 				_ => throw new ArgumentOutOfRangeException(nameof(shell), shell, null)
 			};
 			foreach (var marker in transportMarkers)
