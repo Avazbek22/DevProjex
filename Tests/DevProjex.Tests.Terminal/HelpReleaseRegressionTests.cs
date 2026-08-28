@@ -33,6 +33,19 @@ public sealed class HelpReleaseRegressionTests
 		Assert.Contains("-o, --output <PATH>", help, StringComparison.Ordinal);
 	}
 
+	[Theory]
+	[InlineData("remove")]
+	[InlineData("clear")]
+	public async Task CacheCleanupHelpDoesNotMarkForceRequiredWhenDryRunIsAvailable(
+		string action)
+	{
+		var help = await RenderHelpAsync(120, "en", "cache", action);
+
+		Assert.Contains("--force", help, StringComparison.Ordinal);
+		Assert.Contains("--dry-run", help, StringComparison.Ordinal);
+		Assert.DoesNotContain("Required.", help, StringComparison.Ordinal);
+	}
+
 	[Fact]
 	public async Task HelpShowsEffectiveInteractiveDefaultsAndProfileScopes()
 	{

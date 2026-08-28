@@ -1403,7 +1403,6 @@ public sealed class DevProjexCommandTree
 		Option<bool> force,
 		Option<bool> dryRun)
 	{
-		CliHelpMetadataRegistry.MarkRequired(force);
 		command.Validators.Add(result =>
 		{
 			if (!result.GetValue(force) && !result.GetValue(dryRun))

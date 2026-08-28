@@ -601,7 +601,13 @@ partial cleanup for complete success.
 `cache remove` and `cache clear` also accept `-y`/`--yes`, `-n`/`--dry-run`,
 and `--format json`. Dry-run reports the same counters and bytes without deleting.
 The JSON result has `schemaVersion: 1`, kind `devprojex-cache-removal`, `dryRun`,
-`removed`, `retained`, `failed`, and `bytes`.
+`removed`, `retained`, `failed`, and `bytes`. If `cache remove` cannot find the
+requested URL, text mode writes the localized diagnostic to stderr; JSON mode
+instead writes the same versioned envelope to stdout with `notFound: true` and
+zero counters/bytes, then returns runtime exit code `1`.
+
+`cache update` prints a localized completion status only. Its managed clone path
+is an internal cache detail and is not part of stdout.
 
 ## Command Help
 

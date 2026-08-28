@@ -580,8 +580,9 @@ devprojex cache clear [-y|--yes|--force] [-n|--dry-run] [-f|--format text|json]
 devprojex cache update <URL>
 ```
 
-The group manages only the shared Git clone cache. Destructive commands never
-prompt and require `--force`. Their result reports removed, retained, and failed
+The group manages only the shared Git clone cache. Actual destructive commands
+never prompt and require `--force` or `--yes`; `--dry-run` requires neither.
+Their result reports removed, retained, and failed
 entries from the same index-locked operation. Leased repositories are retained;
 an unavailable index lock, an unsupported future index schema, or a failed index
 update is reported as a failure rather than an empty success. Unindexed cache
@@ -784,9 +785,9 @@ that prevents an accepted option from becoming a no-op.
 | `export project` | `--dry-run` | off | validates plan, kind, and exact destination without copying | creates no folder, ZIP, parent, or staging | stdout empty; one readiness plan on stderr | handler, filesystem-effects, process |
 | `recent` | `--kind`, `--limit`, `-f`/`--format` | `all`, `48`, `text` | filters and bounds newest-first workspace history and selects text or JSON | limit range is `1..100000` | requested list on stdout; invalid value exits `2` | parser, schema, process |
 | `cache list` | `-f`, `--format` | `text` | selects text or versioned cache JSON | a busy index lock or future-schema root marks the result incomplete | available entries stay on stdout; warning on stderr and exit `3`; JSON adds `incomplete: true` only for a partial list | parser, schema, process |
-| `cache remove`, `cache clear` | `--force`, `-y`/`--yes` | off | authorizes non-interactive destructive cleanup | one authorization form is required unless `--dry-run` is used | text or versioned JSON counters on stdout; retained/failed entries exit `3`, missing URL exits `1` | parser, leases, schema, process |
+| `cache remove`, `cache clear` | `--force`, `-y`/`--yes` | off | authorizes non-interactive destructive cleanup | one authorization form is required unless `--dry-run` is used | text or versioned JSON counters on stdout; retained/failed entries exit `3`; missing remove URL exits `1`, with a JSON not-found envelope when JSON was requested | parser, leases, schema, process |
 | `cache remove`, `cache clear` | `-n`, `--dry-run` | off | reports entries, counters, and bytes without deleting cache data | does not require force/yes | plan on stdout; no cache/index mutation | handler, filesystem-effects, process |
-| `cache update` | `URL` | required | fetches and refreshes an existing managed clone | URL must already have a cache entry | status on stdout; missing URL exits `1` | parser, Git cache, process |
+| `cache update` | `URL` | required | fetches and refreshes an existing managed clone | URL must already have a cache entry | localized status, never the internal cache path, on stdout; missing URL exits `1` | parser, Git cache, process |
 | `profile show` | `--profile`, `--format` | `standard`, `text` | resolves a profile and selects text or profile JSON | `auto` is not accepted | document on stdout; invalid/unresolved value exits `2` | parser, profile handler |
 | `profile export` | `--profile`, `-o`/`--output`, `--force`, `-n`/`--dry-run` | `local`, required, off, off | resolves an exact portable-profile export; dry-run performs the same preflight without writing | source safety precedes conflict; existing file needs force; directories always conflict | real committed absolute path on stdout, or a localized plan for dry-run; runtime write failure exits `1`, safety exits `3`, conflict exits `4` | parser, profile handler, filesystem effects |
 | `profile import` | `--apply` | off | persists the validated imported profile as local state | absent means validation-only | status/path contract on stdout; invalid profile exits `2`; local-store write failure exits `1` | profile handler, persistence |
@@ -1009,13 +1010,16 @@ schemas unless a schema is named below.
 - `cache remove` and `cache clear` accept `-y`/`--yes` as aliases for
   `--force`, plus `-n`/`--dry-run`. Their `--format json` result has
   `schemaVersion: 1`, kind `devprojex-cache-removal`, `dryRun`, `removed`,
-  `retained`, `failed`, and `bytes`.
+  `retained`, `failed`, and `bytes`. A missing `cache remove` URL adds
+  `notFound: true`, keeps all counters and bytes at zero, writes no text
+  diagnostic, and exits `1`.
 - `profile export -n` validates and reports its plan without writing.
   `profile validate --format json` returns `schemaVersion: 1`, kind
   `devprojex-profile-validation`, `valid`, and `errors`. `profile save
   [PROJECT]` stores the effective selection as the project's local profile.
-  `cache update URL` refreshes an existing managed clone and never creates an
-  unrelated cache entry.
+  `cache update URL` refreshes an existing managed clone, never creates an
+  unrelated cache entry, and prints a localized status rather than its internal
+  cache path.
 - Context/project dry-run output includes file/folder counts, bytes, estimated
   tokens, and the effective profile.
 - `ui list --timeout` uses the same bounded IPC timeout as other UI actions.

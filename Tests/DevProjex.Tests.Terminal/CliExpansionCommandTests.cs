@@ -352,6 +352,39 @@ public sealed class CliExpansionCommandTests
 		Assert.Contains("https://example.com/owner/repository.git", environment.StandardError, StringComparison.Ordinal);
 	}
 
+	[Theory]
+	[InlineData("--force", false)]
+	[InlineData("--dry-run", true)]
+	public async Task CacheRemoveNotFoundJsonWritesVersionedEnvelope(
+		string authorization,
+		bool dryRun)
+	{
+		using var data = new TemporaryDirectory();
+		const string repositoryUrl = "https://user:top-secret@example.com/owner/missing.git";
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(() => data.Path))
+			.RunAsync(
+				["cache", "remove", repositoryUrl, authorization, "--format", "json"],
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.RuntimeError, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		var result = document.RootElement;
+		Assert.Equal(1, result.GetProperty("schemaVersion").GetInt32());
+		Assert.Equal("devprojex-cache-removal", result.GetProperty("kind").GetString());
+		Assert.Equal(dryRun, result.GetProperty("dryRun").GetBoolean());
+		Assert.True(result.GetProperty("notFound").GetBoolean());
+		Assert.Equal(0, result.GetProperty("removed").GetInt32());
+		Assert.Equal(0, result.GetProperty("retained").GetInt32());
+		Assert.Equal(0, result.GetProperty("failed").GetInt32());
+		Assert.Equal(0, result.GetProperty("bytes").GetInt64());
+		Assert.DoesNotContain("top-secret", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Empty(environment.StandardError);
+	}
+
 	[Fact]
 	public void RecentTextEntryEscapesControlCharactersInsideFields()
 	{
@@ -706,8 +739,13 @@ public sealed class CliExpansionCommandTests
 			exitCode == CommandLineExitCodes.Success,
 			$"cache update exited {exitCode}: {environment.StandardError}");
 		Assert.Equal(1, git.PullCalls);
-		Assert.Equal(PathUtility.NormalizeSeparators(published) + Environment.NewLine,
+		Assert.Equal(
+			services.Localization["Toast.Git.UpdatesApplied"] + Environment.NewLine,
 			environment.StandardOutput);
+		Assert.DoesNotContain(
+			PathUtility.NormalizeSeparators(published),
+			environment.StandardOutput,
+			StringComparison.Ordinal);
 		var indexed = Assert.Single(cache.ListIndexedRepositories());
 		Assert.Equal("after", indexed.CommitHash);
 		Assert.True(cache.SizeRefreshed);

@@ -68,7 +68,7 @@ internal sealed class CacheCommandHandler(
 		if (dryRun)
 		{
 			if (before.Count == 0)
-				return WriteNotFound(repositoryUrl);
+				return WriteNotFound(repositoryUrl, format, dryRun: true);
 			return WriteRemovalResult(
 				new CacheClearResult(before.Count, 0, 0),
 				before.Sum(static entry => Math.Max(0, entry.ApproximateSizeBytes)),
@@ -77,7 +77,7 @@ internal sealed class CacheCommandHandler(
 		}
 		var result = services.RepoCacheService.RemoveCachedRepositoryWithResult(repositoryUrl);
 		if (result.Removed + result.Retained + result.Failed == 0)
-			return WriteNotFound(repositoryUrl);
+			return WriteNotFound(repositoryUrl, format, dryRun: false);
 
 		return WriteRemovalResult(result, ResolveRemovedBytes(before), format, dryRun: false);
 	}
@@ -105,7 +105,7 @@ internal sealed class CacheCommandHandler(
 	{
 		var indexed = services.RepoCacheService.FindIndexedRepository(repositoryUrl);
 		if (indexed is null)
-			return WriteNotFound(repositoryUrl);
+			return WriteNotFound(repositoryUrl, CliTextJsonFormat.Text, dryRun: false);
 
 		using var lease = await new TerminalRepositoryCloneCoordinator(
 				services.GitRepositoryService,
@@ -128,7 +128,7 @@ internal sealed class CacheCommandHandler(
 			lease.Result.DefaultBranch,
 			commit);
 		services.RepoCacheService.RefreshIndexedRepositorySize(repositoryPath);
-		TerminalTextEscaping.WriteSingleLine(environment.Output, NormalizePath(repositoryPath));
+		environment.Output.WriteLine(services.Localization["Toast.Git.UpdatesApplied"]);
 		return CommandLineExitCodes.Success;
 	}
 
@@ -224,8 +224,29 @@ internal sealed class CacheCommandHandler(
 			truncationColumn: 6);
 	}
 
-	private int WriteNotFound(string repositoryUrl)
+	private int WriteNotFound(
+		string repositoryUrl,
+		CliTextJsonFormat format,
+		bool dryRun)
 	{
+		if (format == CliTextJsonFormat.Json)
+		{
+			environment.Output.WriteLine(JsonSerializer.Serialize(
+				new
+				{
+					schemaVersion = 1,
+					kind = "devprojex-cache-removal",
+					dryRun,
+					notFound = true,
+					removed = 0,
+					retained = 0,
+					failed = 0,
+					bytes = 0
+				},
+				JsonOptions));
+			return CommandLineExitCodes.RuntimeError;
+		}
+
 		var safeUrl = TerminalTextEscaping.EscapeSingleLine(
 			RepositoryUrlUtility.ToSafeDisplay(repositoryUrl));
 		environment.Error.WriteLine(services.Localization.Format(

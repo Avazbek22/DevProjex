@@ -233,7 +233,12 @@ illustrative):
 
 `dryRun` identifies a non-mutating plan. `removed`, `retained`, and `failed` are
 entry counts; `bytes` is the non-negative byte count represented by removed or
-planned entries.
+planned entries. If `cache remove` does not find the requested URL, the JSON
+document adds `"notFound": true`, all counters and `bytes` are zero, stdout still
+contains the complete JSON envelope, stderr is empty, and the command returns
+runtime exit code `1`. Successful and other non-not-found documents omit the
+additive `notFound` field. Text mode keeps its localized not-found diagnostic on
+stderr.
 
 ## Profile Validation JSON
 
