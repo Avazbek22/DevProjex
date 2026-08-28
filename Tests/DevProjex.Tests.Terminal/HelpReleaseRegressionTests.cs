@@ -119,6 +119,36 @@ public sealed class HelpReleaseRegressionTests
 		Assert.True(show > validate, "Portable profile use must follow profile export and validation.");
 	}
 
+	[Theory]
+	[InlineData("recent", "0,1,2,130")]
+	[InlineData("cache path", "0,1,2,130")]
+	[InlineData("cache list", "0,1,2,3,130")]
+	[InlineData("profile validate", "0,1,2,130")]
+	[InlineData("profile export", "0,1,2,3,4,130")]
+	[InlineData("ui list", "0,1,2,5,130")]
+	[InlineData("ui status", "0,1,2,3,4,5,130")]
+	public void LeafHelpListsOnlyReachableExitCodes(string commandPath, string expectedCodes)
+	{
+		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
+		var command = commandPath
+			.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+			.Aggregate(
+				(Command)root,
+				static (parent, name) => parent.Subcommands.Single(child => child.Name == name));
+
+		Assert.Equal(
+			expectedCodes.Split(',').Select(int.Parse),
+			CommandHelpRenderer.ResolveExitCodes(command));
+	}
+
+	[Fact]
+	public void RootHelpRetainsTheCompleteExitCodeTable()
+	{
+		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
+
+		Assert.Equal([0, 1, 2, 3, 4, 5, 130], CommandHelpRenderer.ResolveExitCodes(root));
+	}
+
 	[Fact]
 	public void CellWidthWrappingPreservesCjkCombiningAndEmojiTextElements()
 	{

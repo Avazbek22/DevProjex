@@ -95,25 +95,40 @@ public sealed class CommandHelpRenderer(
 		}
 	}
 
-	private static IReadOnlyList<int> ResolveExitCodes(Command command)
+	internal static IReadOnlyList<int> ResolveExitCodes(Command command)
 	{
 		if (command is RootCommand)
 			return [0, 1, 2, 3, 4, 5, 130];
 
-		var topLevel = command;
-		while (topLevel.Parents.OfType<Command>().FirstOrDefault() is { } parent &&
-		       parent is not RootCommand)
+		var path = ResolveCommandPath(command);
+		return path switch
 		{
-			topLevel = parent;
-		}
-		return topLevel.Name switch
-		{
-			"open" or "ui" => [0, 1, 2, 3, 4, 5, 130],
-			"analyze" or "tree" or "export" or "profile" => [0, 1, 2, 3, 4, 130],
-			"cache" or "recent" or "doctor" => [0, 1, 2, 3, 130],
+			"open" => [0, 1, 2, 3, 4, 5, 130],
+			"analyze" or "tree" or "export context" or "export project" or
+				"profile export" => [0, 1, 2, 3, 4, 130],
+			"profile import" or "profile save" or
+				"cache list" or "cache remove" or "cache clear" or "cache update" or
+				"doctor" => [0, 1, 2, 3, 130],
+			"ui list" => [0, 1, 2, 5, 130],
 			"tui" => [0, 1, 2, 3, 130],
+			"export" or "profile" or "cache" or "ui" => [0, 2, 130],
+			"recent" or "profile show" or "profile validate" or "profile reset" or
+				"cache path" or "completion" => [0, 1, 2, 130],
+			_ when path.StartsWith("ui ", StringComparison.Ordinal) => [0, 1, 2, 3, 4, 5, 130],
 			_ => [0, 2, 130]
 		};
+	}
+
+	private static string ResolveCommandPath(Command command)
+	{
+		var segments = new Stack<string>();
+		for (var current = command;
+		     current is not RootCommand;
+		     current = current.Parents.OfType<Command>().First())
+		{
+			segments.Push(current.Name);
+		}
+		return string.Join(' ', segments);
 	}
 
 	private static void WriteSection(TextWriter output, string title, int terminalWidth)
