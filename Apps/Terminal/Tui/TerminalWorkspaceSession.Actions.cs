@@ -66,12 +66,12 @@ internal sealed partial class TerminalWorkspaceSession
 	private TerminalParameterListView? _exclusionControls;
 	private TerminalAggregateControl? _extensionAllControl;
 	private TerminalParameterListView? _extensionControls;
-	private ObservableCollection<TerminalParameterRow>? _contentControlRows;
+	private ResettableObservableCollection<TerminalParameterRow>? _contentControlRows;
 	private ObservableCollection<TerminalParameterRow>? _contentAllControlRows;
 	private ObservableCollection<TerminalParameterRow>? _exclusionAllControlRows;
-	private ObservableCollection<TerminalParameterRow>? _exclusionControlRows;
+	private ResettableObservableCollection<TerminalParameterRow>? _exclusionControlRows;
 	private ObservableCollection<TerminalParameterRow>? _extensionAllControlRows;
-	private ObservableCollection<TerminalParameterRow>? _extensionControlRows;
+	private ResettableObservableCollection<TerminalParameterRow>? _extensionControlRows;
 	private string? _selectedContentControlKey;
 	private string? _selectedExclusionControlKey;
 	private string? _selectedExtensionControlKey;
@@ -332,23 +332,20 @@ internal sealed partial class TerminalWorkspaceSession
 		return source;
 	}
 
-	private ObservableCollection<TerminalParameterRow> UpdateControlRows(
+	private ResettableObservableCollection<TerminalParameterRow> UpdateControlRows(
 		TerminalParameterListView list,
-		ObservableCollection<TerminalParameterRow>? source,
+		ResettableObservableCollection<TerminalParameterRow>? source,
 		IReadOnlyList<TerminalParameterRow> rows,
 		string? selectedKey)
 	{
 		if (source is null)
 		{
-			source = new ObservableCollection<TerminalParameterRow>(rows);
+			source = [];
+			source.Reset(rows);
 			list.SetSource(source);
 		}
 		else if (!TryUpdateRowsInPlace(source, rows))
-		{
-			source.Clear();
-			foreach (var row in rows)
-				source.Add(row);
-		}
+			source.Reset(rows);
 		if (source.Count > 0)
 		{
 			var selectedIndex = FindSelectedIndex(source, selectedKey);
