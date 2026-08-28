@@ -185,12 +185,22 @@ public sealed class MachineSchemaContractTests
 			plan,
 			writer,
 			TestContext.Current.CancellationToken);
+		await using var stream = new BoundedChunkStream(32 * 1024);
+		await new MachineOutputRenderer(new TestTerminalEnvironment())
+			.WriteAnalysisJsonContentAsync(
+				plan,
+				stream,
+				TestContext.Current.CancellationToken);
 
 		using var document = JsonDocument.Parse(writer.Content);
 		Assert.Equal(
 			5_000,
 			document.RootElement.GetProperty("findings").GetArrayLength());
 		Assert.True(writer.MaximumObservedWrite <= 32 * 1024);
+		Assert.True(stream.MaximumObservedWrite <= 32 * 1024);
+		Assert.Equal(
+			writer.Content[..^writer.NewLine.Length],
+			Encoding.UTF8.GetString(stream.ToArray()));
 	}
 
 	[Fact]
@@ -332,6 +342,39 @@ public sealed class MachineSchemaContractTests
 			{
 				throw new InvalidOperationException(
 					$"A single text-writer chunk contained {length} characters.");
+			}
+		}
+	}
+
+	private sealed class BoundedChunkStream(int maximumWriteLength) : MemoryStream
+	{
+		public int MaximumObservedWrite { get; private set; }
+
+		public override ValueTask WriteAsync(
+			ReadOnlyMemory<byte> buffer,
+			CancellationToken cancellationToken = default)
+		{
+			RegisterWrite(buffer.Length);
+			return base.WriteAsync(buffer, cancellationToken);
+		}
+
+		public override Task WriteAsync(
+			byte[] buffer,
+			int offset,
+			int count,
+			CancellationToken cancellationToken)
+		{
+			RegisterWrite(count);
+			return base.WriteAsync(buffer, offset, count, cancellationToken);
+		}
+
+		private void RegisterWrite(int length)
+		{
+			MaximumObservedWrite = Math.Max(MaximumObservedWrite, length);
+			if (length > maximumWriteLength)
+			{
+				throw new InvalidOperationException(
+					$"A single stream chunk contained {length} bytes.");
 			}
 		}
 	}

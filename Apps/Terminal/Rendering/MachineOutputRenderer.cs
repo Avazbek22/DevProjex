@@ -20,20 +20,25 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 		TextWriter writer,
 		CancellationToken cancellationToken)
 	{
-		var document = CreateAnalysisDocument(plan);
 		await using (var stream = new Utf8TextWriterStream(writer, cancellationToken))
 		{
-			await JsonSerializer.SerializeAsync(
-					stream,
-					document,
-					JsonOptions,
-					cancellationToken)
+			await WriteAnalysisJsonContentAsync(plan, stream, cancellationToken)
 				.ConfigureAwait(false);
 			await stream.CompleteAsync(cancellationToken).ConfigureAwait(false);
 		}
 		await writer.WriteLineAsync(ReadOnlyMemory<char>.Empty, cancellationToken)
 			.ConfigureAwait(false);
 	}
+
+	internal Task WriteAnalysisJsonContentAsync(
+		ProjectContextPlan plan,
+		Stream destination,
+		CancellationToken cancellationToken) =>
+		JsonSerializer.SerializeAsync(
+			destination,
+			CreateAnalysisDocument(plan),
+			JsonOptions,
+			cancellationToken);
 
 	public TextWriter StandardOutput => environment.Output;
 

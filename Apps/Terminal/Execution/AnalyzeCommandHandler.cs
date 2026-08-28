@@ -136,19 +136,35 @@ public sealed class AnalyzeCommandHandler(
 		}
 		else
 		{
-			var payload = request.Format == AnalysisOutputFormat.Json
-				? await BuildJsonAsync(plan, cancellationToken).ConfigureAwait(false)
-				: AnalysisTextFormatter.Build(plan, services.Localization);
-			var writtenPath = await AtomicOutputWriter
-				.WriteTextAsync(
-					requestedOutputPath!,
-					payload,
-					overwrite: false,
-					cancellationToken,
-					path => ExactOutputDestinationValidator.ValidateAnalysis(
-						plan.SourceRoot,
-						path))
-				.ConfigureAwait(false);
+			string ValidateDestination(string path) =>
+				ExactOutputDestinationValidator.ValidateAnalysis(
+					plan.SourceRoot,
+					path);
+			string writtenPath;
+			if (request.Format == AnalysisOutputFormat.Json)
+			{
+				var renderer = new MachineOutputRenderer(environment);
+				writtenPath = await AtomicOutputWriter.WriteAsync(
+						requestedOutputPath!,
+						overwrite: false,
+						(destination, token) => renderer.WriteAnalysisJsonContentAsync(
+							plan,
+							destination,
+							token),
+						cancellationToken,
+						ValidateDestination)
+					.ConfigureAwait(false);
+			}
+			else
+			{
+				writtenPath = await AtomicOutputWriter.WriteTextAsync(
+						requestedOutputPath!,
+						AnalysisTextFormatter.Build(plan, services.Localization),
+						overwrite: false,
+						cancellationToken,
+						ValidateDestination)
+					.ConfigureAwait(false);
+			}
 			TerminalTextEscaping.WriteSingleLine(environment.Output, writtenPath);
 		}
 
@@ -190,18 +206,6 @@ public sealed class AnalyzeCommandHandler(
 					services.SecretRedactionSession,
 					redactionFeatures)
 				: null);
-	}
-
-	private async Task<string> BuildJsonAsync(
-		ProjectContextPlan plan,
-		CancellationToken cancellationToken)
-	{
-		using var writer = new StringWriter();
-		var nestedEnvironment = new WriterTerminalEnvironment(environment, writer);
-		await new MachineOutputRenderer(nestedEnvironment)
-			.WriteAnalysisJsonAsync(plan, writer, cancellationToken)
-			.ConfigureAwait(false);
-		return writer.ToString().TrimEnd('\r', '\n');
 	}
 }
 
@@ -408,25 +412,3 @@ internal static class AnalysisTextFormatter
 }
 
 internal sealed record AnalysisTextRow(string Label, string Value);
-
-internal sealed class WriterTerminalEnvironment(
-	ITerminalEnvironment source,
-	TextWriter output)
-	: ITerminalEnvironment
-{
-	public TextReader Input => source.Input;
-	public TextWriter Output => output;
-	public TextWriter Error => source.Error;
-	public bool IsInputInteractive => source.IsInputInteractive;
-	public bool IsOutputInteractive => false;
-	public bool IsErrorInteractive => source.IsErrorInteractive;
-	public bool HasAttachedConsole => source.HasAttachedConsole;
-	public bool IsTerminalHost => source.IsTerminalHost;
-	public bool IsCi => source.IsCi;
-	public bool IsTermDumb => source.IsTermDumb;
-	public bool IsNoColor => true;
-	public bool SupportsUnicode => source.SupportsUnicode;
-	public int Width => source.Width;
-	public int Height => source.Height;
-	public IReadOnlyDictionary<string, string?> Variables => source.Variables;
-}
