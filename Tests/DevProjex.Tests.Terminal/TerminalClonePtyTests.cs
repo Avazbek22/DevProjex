@@ -215,6 +215,70 @@ public sealed class TerminalClonePtyTests
 	}
 
 	[Fact(Timeout = 120_000)]
+	public async Task BranchCommandSwitchesTheCachedWorkspaceAndKeepsItInteractive()
+	{
+		using var originRoot = new TemporaryDirectory();
+		var origin = originRoot.CreateDirectory("BranchRepository");
+		File.WriteAllText(
+			Path.Combine(origin, "MainOnly.cs"),
+			"internal sealed class MainOnly {}",
+			new UTF8Encoding(false));
+		InitializeGitRepository(origin);
+		RunGit(origin, "checkout", "-b", "feature");
+		File.Delete(Path.Combine(origin, "MainOnly.cs"));
+		File.WriteAllText(
+			Path.Combine(origin, "FeatureOnly.cs"),
+			"internal sealed class FeatureOnly {}",
+			new UTF8Encoding(false));
+		RunGit(origin, "add", "--all");
+		RunGit(origin, "commit", "-m", "Add feature branch content");
+		RunGit(origin, "checkout", "main");
+		using var welcomeDirectory = new TemporaryDirectory();
+		welcomeDirectory.WriteFile("notes.txt", "markerless directory");
+
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			welcomeDirectory.Path,
+			["--language", "en"],
+			columns: 120,
+			rows: 30,
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Choose a workspace action",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await StartCloneAsync(
+			terminal,
+			new Uri(origin).AbsoluteUri,
+			TestContext.Current.CancellationToken);
+		var main = await terminal.WaitForScreenAsync(
+			"MainOnly.cs",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.DoesNotContain("FeatureOnly.cs", main, StringComparison.Ordinal);
+
+		await terminal.SendAsync(":branch feature\r", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Branch: feature",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+		var feature = await terminal.WaitForScreenAsync(
+			"FeatureOnly.cs",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.DoesNotContain("MainOnly.cs", feature, StringComparison.Ordinal);
+
+		await terminal.SendAsync("3", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"internal sealed class FeatureOnly",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.False(terminal.HasExited);
+		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
+	}
+
+	[Fact(Timeout = 120_000)]
 	public async Task UrlWorkspaceAppliesEveryTransformationAndExportsRedactedZip()
 	{
 		const string secret = "ghp_a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL";
