@@ -618,6 +618,32 @@ public sealed class PreviewDocumentBuilderTests
 			document.Sections.Select(static section => section.DisplayPath));
 	}
 
+	[Fact]
+	public async Task BuildContentDocumentAsync_WithoutCompression_PreparesFilesConcurrentlyAndKeepsOrder()
+	{
+		using var temp = new TemporaryDirectory();
+		var paths = Enumerable.Range(0, 16)
+			.Select(index => temp.CreateFile($"file-{index:D2}.cs", $"content-{index:D2}"))
+			.Reverse()
+			.ToArray();
+		using var analyzer = new CoordinatedFileContentAnalyzer(
+			coordinateFirstPair: Environment.ProcessorCount > 1);
+
+		using var document = await new PreviewDocumentBuilder(analyzer)
+			.BuildContentDocumentAsync(
+				paths,
+				TestContext.Current.CancellationToken,
+				Path.GetFileName);
+
+		Assert.NotNull(document);
+		Assert.True(
+			Environment.ProcessorCount == 1 || analyzer.MaximumConcurrency > 1,
+			$"Expected concurrent preparation; maximum concurrency was {analyzer.MaximumConcurrency}.");
+		Assert.Equal(
+			paths.OrderBy(static path => path, PathComparer.Default).Select(Path.GetFileName),
+			document.Sections.Select(static section => section.DisplayPath));
+	}
+
 	[Theory]
 	[InlineData(false)]
 	[InlineData(true)]
@@ -711,6 +737,8 @@ public sealed class PreviewDocumentBuilderTests
     private sealed class StubFileContentAnalyzer(IReadOnlyDictionary<string, TextFileContent?> contentByPath)
         : IFileContentAnalyzer
     {
+		private readonly object _requestedPathsLock = new();
+
         public StubFileContentAnalyzer() : this(new Dictionary<string, TextFileContent?>())
         {
         }
@@ -729,7 +757,8 @@ public sealed class PreviewDocumentBuilderTests
             string path,
             CancellationToken cancellationToken = default)
         {
-            RequestedPaths.Add(path);
+			lock (_requestedPathsLock)
+				RequestedPaths.Add(path);
             contentByPath.TryGetValue(path, out var content);
             return ValueTask.FromResult(content);
         }
@@ -846,6 +875,81 @@ public sealed class PreviewDocumentBuilderTests
 
 			public void Dispose()
 			{
+			}
+		}
+	}
+
+	private sealed class CoordinatedFileContentAnalyzer(bool coordinateFirstPair)
+		: IFileContentAnalyzer, IDisposable
+	{
+		private readonly ManualResetEventSlim _firstPairReady = new(false);
+		private int _active;
+		private int _firstPairArrivals;
+		private int _maximumConcurrency;
+
+		public int MaximumConcurrency => Volatile.Read(ref _maximumConcurrency);
+
+		public ValueTask<ContentReadFact> ReadFactAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default)
+		{
+			var active = Interlocked.Increment(ref _active);
+			UpdateMaximum(ref _maximumConcurrency, active);
+			try
+			{
+				if (coordinateFirstPair && Volatile.Read(ref _firstPairArrivals) < 2)
+				{
+					if (Interlocked.Increment(ref _firstPairArrivals) >= 2)
+						_firstPairReady.Set();
+					if (!_firstPairReady.Wait(TimeSpan.FromSeconds(5), cancellationToken))
+						throw new TimeoutException("Parallel preview preparation did not start a second worker.");
+				}
+
+				var content = File.ReadAllText(path);
+				return ValueTask.FromResult(ContentReadFact.FromReadResult(
+					new FileContentReadResult(
+						FileContentClassification.Text,
+						CreateTextContent(content))));
+			}
+			finally
+			{
+				Interlocked.Decrement(ref _active);
+			}
+		}
+
+		public ValueTask<bool> IsTextFileAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+
+		public void Dispose() => _firstPairReady.Dispose();
+
+		private static void UpdateMaximum(ref int target, int candidate)
+		{
+			var current = Volatile.Read(ref target);
+			while (candidate > current)
+			{
+				var observed = Interlocked.CompareExchange(ref target, candidate, current);
+				if (observed == current)
+					return;
+				current = observed;
 			}
 		}
 	}

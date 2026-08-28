@@ -407,112 +407,81 @@ public sealed class PreviewDocumentBuilder(
 		string? projectRoot,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        if (transformationScope?.Compression is null)
-        {
-            foreach (var file in orderedFiles)
-            {
-                yield return await PrepareContentEntryAsync(
-                        file,
-                        displayPathMapper,
-                        redactionScope,
-                        transformationScope,
+		if (orderedFiles.Count <= 1)
+		{
+			foreach (var file in orderedFiles)
+			{
+				yield return await PrepareContentEntryAsync(
+						file,
+						displayPathMapper,
+						redactionScope,
+						transformationScope,
 						projectRoot,
-                        cancellationToken)
-                    .ConfigureAwait(false);
-            }
+						cancellationToken)
+					.ConfigureAwait(false);
+			}
 
-            yield break;
-        }
+			yield break;
+		}
 
-        var batch = new List<string>(MaximumParallelPreparations);
-        foreach (var file in orderedFiles)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (!IsSmallFile(file))
-            {
-                await foreach (var entry in PrepareParallelBatchAsync(
-                                   batch,
-                                   displayPathMapper,
-                                   redactionScope,
-                                   transformationScope,
-								   projectRoot,
-                                   cancellationToken).ConfigureAwait(false))
-                {
-                    yield return entry;
-                }
+		var pending = new Queue<Task<PreparedContentEntry>>(MaximumParallelPreparations);
+		try
+		{
+			foreach (var file in orderedFiles)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				if (!IsSmallFile(file))
+				{
+					while (pending.TryDequeue(out var prepared))
+						yield return await prepared.ConfigureAwait(false);
 
-                batch.Clear();
-                yield return await PrepareContentEntryAsync(
-                        file,
-                        displayPathMapper,
-                        redactionScope,
-                        transformationScope,
+					yield return await PrepareContentEntryAsync(
+							file,
+							displayPathMapper,
+							redactionScope,
+							transformationScope,
+							projectRoot,
+							cancellationToken)
+						.ConfigureAwait(false);
+					continue;
+				}
+
+				pending.Enqueue(Task.Run(
+					() => PrepareContentEntryAsync(
+						file,
+						displayPathMapper,
+						redactionScope,
+						transformationScope,
 						projectRoot,
-                        cancellationToken)
-                    .ConfigureAwait(false);
-                continue;
-            }
+						cancellationToken).AsTask(),
+					cancellationToken));
+				if (pending.Count >= MaximumParallelPreparations)
+					yield return await pending.Dequeue().ConfigureAwait(false);
+			}
 
-            batch.Add(file);
-            if (batch.Count < MaximumParallelPreparations)
-                continue;
+			while (pending.TryDequeue(out var prepared))
+				yield return await prepared.ConfigureAwait(false);
+		}
+		finally
+		{
+			await ObservePendingPreparationsAsync(pending).ConfigureAwait(false);
+		}
+	}
 
-            await foreach (var entry in PrepareParallelBatchAsync(
-                               batch,
-                               displayPathMapper,
-                               redactionScope,
-                               transformationScope,
-							   projectRoot,
-                               cancellationToken).ConfigureAwait(false))
-            {
-                yield return entry;
-            }
-
-            batch.Clear();
-        }
-
-        await foreach (var entry in PrepareParallelBatchAsync(
-                           batch,
-                           displayPathMapper,
-                           redactionScope,
-                           transformationScope,
-						   projectRoot,
-                           cancellationToken).ConfigureAwait(false))
-        {
-            yield return entry;
-        }
-    }
-
-    private async IAsyncEnumerable<PreparedContentEntry> PrepareParallelBatchAsync(
-        IReadOnlyList<string> files,
-        Func<string, string>? displayPathMapper,
-        SecretRedactionScope? redactionScope,
-        ContentTransformationScope transformationScope,
-		string? projectRoot,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
-    {
-        if (files.Count == 0)
-            yield break;
-
-        var tasks = new Task<PreparedContentEntry>[files.Count];
-        for (var index = 0; index < files.Count; index++)
-        {
-            var file = files[index];
-            tasks[index] = Task.Run(
-                () => PrepareContentEntryAsync(
-                    file,
-                    displayPathMapper,
-                    redactionScope,
-                    transformationScope,
-					projectRoot,
-                    cancellationToken).AsTask(),
-                cancellationToken);
-        }
-
-        var entries = await Task.WhenAll(tasks).ConfigureAwait(false);
-        foreach (var entry in entries)
-            yield return entry;
-    }
+	private static async Task ObservePendingPreparationsAsync(
+		IReadOnlyCollection<Task<PreparedContentEntry>> pending)
+	{
+		if (pending.Count == 0)
+			return;
+		try
+		{
+			await Task.WhenAll(pending).ConfigureAwait(false);
+		}
+		catch
+		{
+			// The consumer's exception or cancellation remains authoritative.
+		}
+	}
 
     private async ValueTask<PreparedContentEntry> PrepareContentEntryAsync(
         string file,
