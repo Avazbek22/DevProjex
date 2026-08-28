@@ -480,8 +480,10 @@ after the main analysis table. Plain output aligns the same columns with spaces 
 never emits tab characters.
 `--fail-on-findings` writes the report and returns `3` when that effective count
 is nonzero; it is independent from `--strict`. Requesting `--findings` or
-`--fail-on-findings` automatically enables secret detection for counting when no
-secret detector was enabled explicitly. Private-data detection remains opt-in.
+`--fail-on-findings` runs count-only secret detection when needed but never
+changes the effective `HideSecrets` selection or redacts the emitted report.
+JSON adds the optional `findingCount`; the text redacted-value row is present only
+when redaction is actually enabled. Private-data detection remains opt-in.
 `--force` atomically replaces an existing report file and is invalid with stdout.
 
 ### `tree`
@@ -786,10 +788,10 @@ that prevents an accepted option from becoming a no-op.
 | `export project` | `--force` | off | atomically replaces an existing ZIP file | invalid for folder output and ZIP stdout | success path on stdout; invalid combination exits `2` | parser, destination, integration |
 | `export project` | `--dry-run` | off | validates plan, kind, and exact destination without copying | creates no folder, ZIP, parent, or staging | stdout empty; one readiness plan on stderr | handler, filesystem-effects, process |
 | `recent` | `--kind`, `--limit`, `-f`/`--format` | `all`, `48`, `text` | filters and bounds newest-first workspace history and selects text or JSON | limit range is `1..100000` | requested list on stdout; invalid value exits `2` | parser, schema, process |
-| `cache list` | `-f`, `--format` | `text` | selects text or versioned cache JSON | a busy index lock or future-schema root marks the result incomplete | available entries stay on stdout; warning on stderr and exit `3`; JSON adds `incomplete: true` only for a partial list | parser, schema, process |
-| `cache remove`, `cache clear` | `--force`, `-y`/`--yes` | off | authorizes non-interactive destructive cleanup | one authorization form is required unless `--dry-run` is used | text or versioned JSON counters on stdout; retained/failed entries exit `3`; missing remove URL exits `1`, with a JSON not-found envelope when JSON was requested | parser, leases, schema, process |
+| `cache list` | `-f`, `--format` | `text` | selects text or versioned cache JSON | a busy index lock or future-schema root marks the result incomplete | future-schema roots warn and exit `3`; a busy index reports runtime exit `1`; JSON adds `incomplete: true` and adds `busy: true` only for lock contention | parser, schema, process |
+| `cache remove`, `cache clear` | `--force`, `-y`/`--yes` | off | authorizes non-interactive destructive cleanup | one authorization form is required unless `--dry-run` is used | text or versioned JSON counters on stdout; retained/failed entries exit `3`; a busy index exits `1` and JSON adds `busy: true`; missing remove URL exits `2`, with a JSON not-found envelope when JSON was requested | parser, leases, schema, process |
 | `cache remove`, `cache clear` | `-n`, `--dry-run` | off | reports entries, counters, and bytes without deleting cache data | does not require force/yes | plan on stdout; no cache/index mutation | handler, filesystem-effects, process |
-| `cache update` | `URL` | required | fetches and refreshes an existing managed clone | URL must already have a cache entry | localized status, never the internal cache path, on stdout; missing URL exits `1` | parser, Git cache, process |
+| `cache update` | `URL` | required | fetches and refreshes an existing managed clone | URL must already have a cache entry | localized status, never the internal cache path, on stdout; missing URL exits `2`, a busy index exits `1` | parser, Git cache, process |
 | `profile show` | `--profile`, `--format` | `standard`, `text` | resolves a profile and selects text or profile JSON | `auto` is not accepted | document on stdout; invalid/unresolved value exits `2` | parser, profile handler |
 | `profile export` | `--profile`, `-o`/`--output`, `--force`, `-n`/`--dry-run` | `local`, required, off, off | resolves an exact portable-profile export; dry-run performs the same preflight without writing | source safety precedes conflict; existing file needs force; directories always conflict | real committed absolute path on stdout, or a localized plan for dry-run; runtime write failure exits `1`, safety exits `3`, conflict exits `4` | parser, profile handler, filesystem effects |
 | `profile import` | `--apply` | off | persists the validated imported profile as local state | absent means validation-only | status/path contract on stdout; invalid profile exits `2`; local-store write failure exits `1` | profile handler, persistence |
@@ -1017,7 +1019,8 @@ schemas unless a schema is named below.
   `schemaVersion: 1`, kind `devprojex-cache-removal`, `dryRun`, `removed`,
   `retained`, `failed`, and `bytes`. A missing `cache remove` URL adds
   `notFound: true`, keeps all counters and bytes at zero, writes no text
-  diagnostic, and exits `1`.
+  diagnostic, and exits `2`. Lock contention instead adds `busy: true`, reports
+  that the index is temporarily busy, and exits `1`.
 - `profile export -n` validates and reports its plan without writing.
   `profile validate --format json` returns `schemaVersion: 1`, kind
   `devprojex-profile-validation`, `valid`, and `errors`. `profile save
@@ -1102,7 +1105,8 @@ Context XML uses `devprojexContext`, numeric text `schemaVersion="1"`, and
 XML must parse with standard parsers.
 
 Analysis v1 contains inventory, effective selection, metrics, diagnostics, and
-fingerprint. With `--findings`, it adds an ordered `findings` array whose entries
+fingerprint. Either findings option adds `findingCount`. With `--findings`, it
+also adds an ordered `findings` array whose entries
 contain only `ruleId`, `category`, `relativePath`, and `lineNumber`. The one-based
 line number is measured in the original decoded source before content
 transformations. Timings and secret values are not part of the stable v1 analysis

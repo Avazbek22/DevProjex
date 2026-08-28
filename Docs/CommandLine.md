@@ -421,11 +421,14 @@ parent directory must already exist.
 `category` (`secret` or `private-data`), `relativePath`, and one-based
 `lineNumber`. Values, source fragments, assignment context, fingerprints, and raw
 detector errors are never emitted. The number of descriptors equals the combined
-effective matched counts from the same redaction session. `--fail-on-findings`
+effective matched counts from the same inspection session. `--fail-on-findings`
 writes the requested report and returns policy exit code `3` when any effective
 finding exists; unlike `--strict`, it does not gate ordinary diagnostics.
-Either findings option automatically enables secret detection for counting when
-it was otherwise disabled; private-data detection remains explicit.
+Either findings option runs count-only secret detection when it was otherwise
+disabled, but never changes `--hide-secrets` or the emitted content. JSON adds
+`findingCount`; `findings` remains conditional on `--findings`. Text reports
+redacted values only when redaction was explicitly enabled. Private-data
+detection remains explicit.
 
 Examples:
 
@@ -604,7 +607,10 @@ The JSON result has `schemaVersion: 1`, kind `devprojex-cache-removal`, `dryRun`
 `removed`, `retained`, `failed`, and `bytes`. If `cache remove` cannot find the
 requested URL, text mode writes the localized diagnostic to stderr; JSON mode
 instead writes the same versioned envelope to stdout with `notFound: true` and
-zero counters/bytes, then returns runtime exit code `1`.
+zero counters/bytes, then returns usage exit code `2`. A temporarily busy cache
+index is not reported as missing: text reports the busy condition, JSON adds
+`busy: true`, and the operation returns runtime exit code `1`. Future-schema or
+otherwise unreadable roots remain policy failures (`3`).
 
 `cache update` prints a localized completion status only. Its managed clone path
 is an internal cache detail and is not part of stdout.

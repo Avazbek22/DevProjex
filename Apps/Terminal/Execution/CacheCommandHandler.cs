@@ -31,7 +31,7 @@ internal sealed class CacheCommandHandler(
 		var entries = result.Entries;
 		if (format == CliTextJsonFormat.Json)
 		{
-			WriteJsonList(entries, result.IsComplete);
+			WriteJsonList(entries, result.IsComplete, result.BusyRootCount > 0);
 		}
 		else
 		{
@@ -50,10 +50,10 @@ internal sealed class CacheCommandHandler(
 		if (result.IsComplete)
 			return CommandLineExitCodes.Success;
 
-		environment.Error.WriteLine(services.Localization.Format(
-			"Terminal.Cache.ListIncomplete",
-			result.UnavailableRootCount));
-		return CommandLineExitCodes.PolicyFailure;
+		WriteIncompleteWarnings(result);
+		return result.BusyRootCount > 0
+			? CommandLineExitCodes.RuntimeError
+			: CommandLineExitCodes.PolicyFailure;
 	}
 
 	public int Remove(string repositoryUrl)
@@ -64,20 +64,31 @@ internal sealed class CacheCommandHandler(
 		CliTextJsonFormat format,
 		bool dryRun)
 	{
-		var before = FindEntries(repositoryUrl);
+		var lookup = FindEntries(repositoryUrl);
+		var before = lookup.Entries;
 		if (dryRun)
 		{
 			if (before.Count == 0)
-				return WriteNotFound(repositoryUrl, format, dryRun: true);
+				return lookup.Management.BusyRootCount > 0
+					? WriteBusy(format, dryRun: true)
+					: WriteNotFound(repositoryUrl, format, dryRun: true);
 			return WriteRemovalResult(
-				new CacheClearResult(before.Count, 0, 0),
+				new CacheClearResult(
+					before.Count,
+					0,
+					lookup.Management.UnavailableRootCount,
+					lookup.Management.BusyRootCount),
 				before.Sum(static entry => Math.Max(0, entry.ApproximateSizeBytes)),
 				format,
 				dryRun: true);
 		}
+		if (before.Count == 0 && lookup.Management.BusyRootCount > 0)
+			return WriteBusy(format, dryRun: false);
 		var result = services.RepoCacheService.RemoveCachedRepositoryWithResult(repositoryUrl);
 		if (result.Removed + result.Retained + result.Failed == 0)
-			return WriteNotFound(repositoryUrl, format, dryRun: false);
+			return result.BusyRootCount > 0
+				? WriteBusy(format, dryRun: false)
+				: WriteNotFound(repositoryUrl, format, dryRun: false);
 
 		return WriteRemovalResult(result, ResolveRemovedBytes(before), format, dryRun: false);
 	}
@@ -91,11 +102,17 @@ internal sealed class CacheCommandHandler(
 		if (dryRun)
 		{
 			return WriteRemovalResult(
-				new CacheClearResult(before.Entries.Count, 0, before.UnavailableRootCount),
+				new CacheClearResult(
+					before.Entries.Count,
+					0,
+					before.UnavailableRootCount,
+					before.BusyRootCount),
 				bytes,
 				format,
 				dryRun: true);
 		}
+		if (before.Entries.Count == 0 && before.BusyRootCount > 0)
+			return WriteBusy(format, dryRun: false);
 
 		var result = services.RepoCacheService.ClearAllCacheWithResult();
 		return WriteRemovalResult(result, ResolveRemovedBytes(before.Entries), format, dryRun: false);
@@ -103,9 +120,12 @@ internal sealed class CacheCommandHandler(
 
 	public async Task<int> UpdateAsync(string repositoryUrl, CancellationToken cancellationToken)
 	{
-		var indexed = services.RepoCacheService.FindIndexedRepository(repositoryUrl);
+		var lookup = FindEntries(repositoryUrl);
+		var indexed = lookup.Entries.FirstOrDefault();
 		if (indexed is null)
-			return WriteNotFound(repositoryUrl, CliTextJsonFormat.Text, dryRun: false);
+			return lookup.Management.BusyRootCount > 0
+				? WriteBusy(CliTextJsonFormat.Text, dryRun: false)
+				: WriteNotFound(repositoryUrl, CliTextJsonFormat.Text, dryRun: false);
 
 		using var lease = await new TerminalRepositoryCloneCoordinator(
 				services.GitRepositoryService,
@@ -140,18 +160,19 @@ internal sealed class CacheCommandHandler(
 	{
 		if (format == CliTextJsonFormat.Json)
 		{
-			environment.Output.WriteLine(JsonSerializer.Serialize(
-				new
-				{
-					schemaVersion = 1,
-					kind = "devprojex-cache-removal",
-					dryRun,
-					removed = result.Removed,
-					retained = result.Retained,
-					failed = result.Failed,
-					bytes = Math.Max(0, bytes)
-				},
-				JsonOptions));
+			var payload = new Dictionary<string, object?>
+			{
+				["schemaVersion"] = 1,
+				["kind"] = "devprojex-cache-removal",
+				["dryRun"] = dryRun,
+				["removed"] = result.Removed,
+				["retained"] = result.Retained,
+				["failed"] = result.Failed,
+				["bytes"] = Math.Max(0, bytes)
+			};
+			if (result.BusyRootCount > 0)
+				payload["busy"] = true;
+			environment.Output.WriteLine(JsonSerializer.Serialize(payload, JsonOptions));
 		}
 		else
 		{
@@ -161,6 +182,11 @@ internal sealed class CacheCommandHandler(
 				result.Retained,
 				result.Failed,
 				FormatByteSize(bytes)));
+		}
+		if (result.BusyRootCount > 0)
+		{
+			environment.Error.WriteLine(services.Localization["Terminal.Cache.IndexBusy"]);
+			return CommandLineExitCodes.RuntimeError;
 		}
 		return result.IsComplete
 			? CommandLineExitCodes.Success
@@ -244,7 +270,7 @@ internal sealed class CacheCommandHandler(
 					bytes = 0
 				},
 				JsonOptions));
-			return CommandLineExitCodes.RuntimeError;
+			return CommandLineExitCodes.UsageError;
 		}
 
 		var safeUrl = TerminalTextEscaping.EscapeSingleLine(
@@ -252,11 +278,12 @@ internal sealed class CacheCommandHandler(
 		environment.Error.WriteLine(services.Localization.Format(
 			"Terminal.Cache.NotFound",
 			safeUrl));
-		return CommandLineExitCodes.RuntimeError;
+		return CommandLineExitCodes.UsageError;
 	}
 
-	private IReadOnlyList<RepositoryCacheCatalogEntry> FindEntries(string repositoryUrl)
+	private CacheEntryLookup FindEntries(string repositoryUrl)
 	{
+		var management = services.RepoCacheService.ListCacheEntriesForManagement();
 		string identity;
 		try
 		{
@@ -264,14 +291,46 @@ internal sealed class CacheCommandHandler(
 		}
 		catch
 		{
-			return [];
+			return new CacheEntryLookup([], management);
 		}
-		return services.RepoCacheService.ListCacheEntriesForManagement().Entries
+		return new CacheEntryLookup(management.Entries
 			.Where(entry => string.Equals(
 				RepositoryUrlUtility.GetComparisonKey(entry.RepositoryUrl),
 				identity,
 				StringComparison.Ordinal))
-			.ToArray();
+			.ToArray(), management);
+	}
+
+	private int WriteBusy(CliTextJsonFormat format, bool dryRun)
+	{
+		if (format == CliTextJsonFormat.Json)
+		{
+			environment.Output.WriteLine(JsonSerializer.Serialize(
+				new
+				{
+					schemaVersion = 1,
+					kind = "devprojex-cache-removal",
+					dryRun,
+					busy = true,
+					removed = 0,
+					retained = 0,
+					failed = 0,
+					bytes = 0
+				},
+				JsonOptions));
+		}
+		environment.Error.WriteLine(services.Localization["Terminal.Cache.IndexBusy"]);
+		return CommandLineExitCodes.RuntimeError;
+	}
+
+	private void WriteIncompleteWarnings(RepositoryCacheManagementListResult result)
+	{
+		if (result.BusyRootCount > 0)
+			environment.Error.WriteLine(services.Localization["Terminal.Cache.IndexBusy"]);
+		if (result.NonBusyUnavailableRootCount > 0)
+			environment.Error.WriteLine(services.Localization.Format(
+				"Terminal.Cache.ListIncomplete",
+				result.NonBusyUnavailableRootCount));
 	}
 
 	private long ResolveRemovedBytes(IReadOnlyList<RepositoryCacheCatalogEntry> before)
@@ -308,7 +367,8 @@ internal sealed class CacheCommandHandler(
 
 	private void WriteJsonList(
 		IReadOnlyList<RepositoryCacheCatalogEntry> entries,
-		bool isComplete)
+		bool isComplete,
+		bool isBusy = false)
 	{
 		var items = entries.Select(static entry => new
 		{
@@ -327,7 +387,16 @@ internal sealed class CacheCommandHandler(
 				kind = "devprojex-repository-cache",
 				items
 			}
-			: new
+			: isBusy
+				? (object)new
+				{
+					schemaVersion = 1,
+					kind = "devprojex-repository-cache",
+					incomplete = true,
+					busy = true,
+					items
+				}
+				: new
 			{
 				schemaVersion = 1,
 				kind = "devprojex-repository-cache",
@@ -336,4 +405,8 @@ internal sealed class CacheCommandHandler(
 			};
 		environment.Output.WriteLine(JsonSerializer.Serialize(payload, JsonOptions));
 	}
+
+	private sealed record CacheEntryLookup(
+		IReadOnlyList<RepositoryCacheCatalogEntry> Entries,
+		RepositoryCacheManagementListResult Management);
 }

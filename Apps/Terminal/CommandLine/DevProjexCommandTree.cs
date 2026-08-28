@@ -297,11 +297,6 @@ public sealed class DevProjexCommandTree
 						services,
 						selectedPaths,
 						cancellationToken).ConfigureAwait(false);
-					if ((parseResult.GetValue(findings) || parseResult.GetValue(failOnFindings)) &&
-					    selection.GetHideSecretsOverride(parseResult) is null)
-					{
-						spec = spec with { HideSecrets = true };
-					}
 					return await new AnalyzeCommandHandler(services, environment)
 						.ExecuteAsync(
 							new AnalyzeCommandRequest(

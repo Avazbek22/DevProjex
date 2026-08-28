@@ -375,6 +375,7 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 	{
 		var catalog = new List<RepositoryCacheCatalogEntry>();
 		var unavailableRootCount = 0;
+		var busyRootCount = 0;
 		foreach (var searchRoot in CacheSearchRootPaths)
 		{
 			if (IsLinkedCacheRoot(searchRoot))
@@ -388,6 +389,7 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			if (!CrossProcessFileLock.TryAcquire(fileSet, IndexLockTimeout, out var heldLock))
 			{
 				unavailableRootCount++;
+				busyRootCount++;
 				continue;
 			}
 
@@ -436,7 +438,8 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 		});
 		return new RepositoryCacheManagementListResult(
 			catalog.ToArray(),
-			unavailableRootCount);
+			unavailableRootCount,
+			busyRootCount);
 	}
 
 	private static RepositoryCacheCatalogEntry ToCatalogEntry(RepositoryCacheIndexEntry entry) =>
@@ -660,7 +663,7 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 			return new CacheClearResult(0, 0, 0);
 		}
 		if (!CrossProcessFileLock.TryAcquire(fileSet, IndexLockTimeout, out var heldLock))
-			return CacheRootFailure(cacheRoot);
+			return CacheRootFailure(cacheRoot, busy: true);
 
 		var trashPaths = new List<string>();
 		CacheClearResult result;
@@ -848,7 +851,7 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 		}
 	}
 
-	private static CacheClearResult CacheRootFailure(string cacheRoot)
+	private static CacheClearResult CacheRootFailure(string cacheRoot, bool busy = false)
 	{
 		var failed = 0;
 		try
@@ -858,7 +861,11 @@ public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDis
 		catch
 		{
 		}
-		return new CacheClearResult(0, 0, Math.Max(1, failed));
+		return new CacheClearResult(
+			0,
+			0,
+			Math.Max(1, failed),
+			busy ? 1 : 0);
 	}
 
 	private sealed record CacheRemovalEntry(

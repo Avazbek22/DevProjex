@@ -345,7 +345,7 @@ public sealed class CliExpansionCommandTests
 				["cache", "remove", repositoryUrl, "--force", "--language", "en"],
 				TestContext.Current.CancellationToken);
 
-		Assert.Equal(CommandLineExitCodes.RuntimeError, exitCode);
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
 		Assert.Empty(environment.StandardOutput);
 		Assert.DoesNotContain("top-secret", environment.StandardError, StringComparison.Ordinal);
 		Assert.DoesNotContain(repositoryUrl, environment.StandardError, StringComparison.Ordinal);
@@ -370,7 +370,7 @@ public sealed class CliExpansionCommandTests
 				["cache", "remove", repositoryUrl, authorization, "--format", "json"],
 				TestContext.Current.CancellationToken);
 
-		Assert.Equal(CommandLineExitCodes.RuntimeError, exitCode);
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
 		using var document = JsonDocument.Parse(environment.StandardOutput);
 		var result = document.RootElement;
 		Assert.Equal(1, result.GetProperty("schemaVersion").GetInt32());
@@ -505,7 +505,7 @@ public sealed class CliExpansionCommandTests
 	}
 
 	[Fact]
-	public async Task CacheListWithBusyIndexLockReportsIncompletePolicyResult()
+	public async Task CacheListWithBusyIndexLockReportsIncompleteRuntimeFailure()
 	{
 		using var data = new TemporaryDirectory();
 		var factory = new TerminalServiceFactory(() => data.Path);
@@ -525,11 +525,12 @@ public sealed class CliExpansionCommandTests
 			["cache", "list", "--format", "json", "--language", "en"],
 			TestContext.Current.CancellationToken);
 
-		Assert.Equal(CommandLineExitCodes.PolicyFailure, exitCode);
+		Assert.Equal(CommandLineExitCodes.RuntimeError, exitCode);
 		using var document = JsonDocument.Parse(environment.StandardOutput);
 		Assert.True(document.RootElement.GetProperty("incomplete").GetBoolean());
+		Assert.True(document.RootElement.GetProperty("busy").GetBoolean());
 		Assert.Empty(document.RootElement.GetProperty("items").EnumerateArray());
-		Assert.Contains("cache list is incomplete", environment.StandardError, StringComparison.OrdinalIgnoreCase);
+		Assert.Contains("cache index is busy", environment.StandardError, StringComparison.OrdinalIgnoreCase);
 	}
 
 	[Fact]
@@ -587,7 +588,7 @@ public sealed class CliExpansionCommandTests
 	}
 
 	[Fact]
-	public async Task CacheClearWithBusyIndexLockReturnsPolicyFailure()
+	public async Task CacheClearWithBusyIndexLockReturnsRuntimeFailure()
 	{
 		using var data = new TemporaryDirectory();
 		var factory = new TerminalServiceFactory(() => data.Path);
@@ -607,9 +608,57 @@ public sealed class CliExpansionCommandTests
 			["cache", "clear", "--force", "--language", "en"],
 			TestContext.Current.CancellationToken);
 
-		Assert.Equal(CommandLineExitCodes.PolicyFailure, exitCode);
-		Assert.Contains("Removed: 0. Retained: 0. Failed:", environment.StandardOutput);
-		Assert.Empty(environment.StandardError);
+		Assert.Equal(CommandLineExitCodes.RuntimeError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("cache index is busy", environment.StandardError, StringComparison.OrdinalIgnoreCase);
+	}
+
+	[Theory]
+	[InlineData("remove-dry-run")]
+	[InlineData("remove")]
+	[InlineData("update")]
+	public async Task CacheManagementLookupReportsBusyInsteadOfNotFound(string operation)
+	{
+		using var data = new TemporaryDirectory();
+		const string repositoryUrl = "https://github.com/example/locked-management.git";
+		var factory = new TerminalServiceFactory(() => data.Path);
+		var services = factory.Create(AppLanguage.En);
+		PublishSnapshot(services.RepoCacheService, repositoryUrl);
+		var lockPath = Path.Combine(
+			services.RepoCacheService.CacheRootPath,
+			"cache-index.json.lock");
+		using var heldLock = new FileStream(
+			lockPath,
+			FileMode.OpenOrCreate,
+			FileAccess.ReadWrite,
+			FileShare.None);
+		var arguments = operation switch
+		{
+			"remove-dry-run" => new[]
+			{
+				"cache", "remove", repositoryUrl, "--dry-run", "--format", "json", "--language", "en"
+			},
+			"remove" =>
+			[
+				"cache", "remove", repositoryUrl, "--force", "--format", "json", "--language", "en"
+			],
+			_ => ["cache", "update", repositoryUrl, "--language", "en"]
+		};
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment, factory).RunAsync(
+			arguments,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.RuntimeError, exitCode);
+		Assert.Contains("cache index is busy", environment.StandardError, StringComparison.OrdinalIgnoreCase);
+		Assert.DoesNotContain("No cached repository matches", environment.StandardError, StringComparison.Ordinal);
+		if (!string.Equals(operation, "update", StringComparison.Ordinal))
+		{
+			using var document = JsonDocument.Parse(environment.StandardOutput);
+			Assert.True(document.RootElement.GetProperty("busy").GetBoolean());
+			Assert.False(document.RootElement.TryGetProperty("notFound", out _));
+		}
 	}
 
 	[Fact]
@@ -841,7 +890,8 @@ public sealed class CliExpansionCommandTests
 		public string CreateRepositoryDirectory(string repositoryUrl) => throw Unexpected();
 		public string CreateRepositoryStagingDirectory(string repositoryUrl) => throw Unexpected();
 		public string PublishRepositoryDirectory(string stagingPath, string repositoryUrl) => throw Unexpected();
-		public RepositoryCacheManagementListResult ListCacheEntriesForManagement() => throw Unexpected();
+		public RepositoryCacheManagementListResult ListCacheEntriesForManagement() =>
+			new(ListIndexedRepositories(), 0);
 		public Task<IRepositoryCacheSession?> TryAcquireRepositorySessionByPathAsync(
 			string repositoryPath,
 			CancellationToken cancellationToken = default) => throw Unexpected();

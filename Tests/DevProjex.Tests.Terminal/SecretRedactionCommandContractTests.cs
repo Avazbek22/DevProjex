@@ -344,7 +344,7 @@ public sealed class SecretRedactionCommandContractTests
 	}
 
 	[Fact]
-	public async Task FailOnFindingsAutomaticallyEnablesSecretDetectionAndReturnsPolicyFailure()
+	public async Task FailOnFindingsRunsCountOnlyDetectionAndReturnsPolicyFailure()
 	{
 		using var workspace = CreateWorkspace();
 		var environment = new TestTerminalEnvironment();
@@ -359,15 +359,16 @@ public sealed class SecretRedactionCommandContractTests
 			]);
 
 		Assert.Equal(CommandLineExitCodes.PolicyFailure, exitCode);
-		Assert.DoesNotContain(GithubToken, environment.StandardOutput, StringComparison.Ordinal);
 		using var document = JsonDocument.Parse(environment.StandardOutput);
-		Assert.Equal(1, document.RootElement.GetProperty("redaction").GetProperty("matchedCount").GetInt32());
+		Assert.False(document.RootElement.GetProperty("selection").GetProperty("hideSecrets").GetBoolean());
+		Assert.Equal(1, document.RootElement.GetProperty("findingCount").GetInt32());
+		Assert.False(document.RootElement.TryGetProperty("redaction", out _));
 		Assert.False(document.RootElement.TryGetProperty("findings", out _));
 		Assert.Empty(environment.StandardError);
 	}
 
 	[Fact]
-	public async Task ExplicitNoHideSecretsPreventsFailOnFindingsFromEnablingRedaction()
+	public async Task ExplicitNoHideSecretsStillCountsFindingsAndReturnsPolicyFailure()
 	{
 		using var workspace = CreateWorkspace();
 		var environment = new TestTerminalEnvironment();
@@ -381,11 +382,62 @@ public sealed class SecretRedactionCommandContractTests
 				"--format", "json", "--plain", "-o", "-"
 			]);
 
-		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Equal(CommandLineExitCodes.PolicyFailure, exitCode);
 		using var document = JsonDocument.Parse(environment.StandardOutput);
 		Assert.False(document.RootElement.GetProperty("selection").GetProperty("hideSecrets").GetBoolean());
+		Assert.Equal(1, document.RootElement.GetProperty("findingCount").GetInt32());
 		Assert.False(document.RootElement.TryGetProperty("redaction", out _));
 		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
+	public async Task FindingsWithoutRedactionPreservesMetricsAndPublishesTheFindingsTable()
+	{
+		using var workspace = CreateWorkspace();
+		var baseline = new TestTerminalEnvironment();
+		var findings = new TestTerminalEnvironment();
+
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				baseline,
+				["analyze", workspace.ProjectRoot, "--format", "json", "--plain", "-o", "-"]));
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				findings,
+				[
+					"analyze", workspace.ProjectRoot,
+					"--findings", "--format", "json", "--plain", "-o", "-"
+				]));
+
+		using var baselineDocument = JsonDocument.Parse(baseline.StandardOutput);
+		using var findingsDocument = JsonDocument.Parse(findings.StandardOutput);
+		var root = findingsDocument.RootElement;
+		Assert.False(root.GetProperty("selection").GetProperty("hideSecrets").GetBoolean());
+		Assert.Equal(
+			baselineDocument.RootElement.GetProperty("metrics").GetRawText(),
+			root.GetProperty("metrics").GetRawText());
+		Assert.Equal(1, root.GetProperty("findingCount").GetInt32());
+		Assert.Single(root.GetProperty("findings").EnumerateArray());
+		Assert.False(root.TryGetProperty("redaction", out _));
+
+		var text = new TestTerminalEnvironment();
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				text,
+				[
+					"analyze", workspace.ProjectRoot,
+					"--findings", "--format", "text", "--plain", "-o", "-",
+					"--language", "en"
+				]));
+		Assert.Contains("Category", text.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("github-pat", text.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("Redacted values", text.StandardOutput, StringComparison.Ordinal);
 	}
 
 	[Fact]
