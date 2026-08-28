@@ -169,14 +169,18 @@ internal sealed class DevProjexMcpTools(
 				"detail",
 				"tracked_only");
 			var detail = McpDetailPolicy.Parse(arguments.OptionalString("detail"));
-			var plan = await BuildSelectionAsync(arguments, cancellationToken).ConfigureAwait(false);
+			var format = ParseFormat(arguments.OptionalString("format") ?? "markdown");
+			var plan = await BuildSelectionAsync(
+					arguments,
+					cancellationToken,
+					includeOutputMetrics: format is ProjectContextDocumentFormat.Json or ProjectContextDocumentFormat.Xml)
+				.ConfigureAwait(false);
 			operationProgress.Milestone(
 				10,
 				$"scanning files {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");
 			var effectiveDetail = projects.ResolveDetail(plan, detail);
 			plan = projects.ApplyDetail(plan, effectiveDetail);
 			var view = ParseView(arguments.OptionalString("view") ?? "tree-content");
-			var format = ParseFormat(arguments.OptionalString("format") ?? "markdown");
 			var transformedFileCount = view == ProjectContextView.Tree ? 0 : plan.IncludedFiles.Count;
 			operationProgress.Milestone(11, $"transforming content 0/{transformedFileCount}");
 			await using var prepared = view == ProjectContextView.Tree

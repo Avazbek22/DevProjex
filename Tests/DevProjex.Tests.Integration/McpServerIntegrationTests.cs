@@ -58,6 +58,49 @@ public sealed class McpServerIntegrationTests
 		Assert.True(afterAnalysis.FullFileReadBytes > 0);
 	}
 
+	[Theory]
+	[InlineData("text", false)]
+	[InlineData("markdown", false)]
+	[InlineData("json", true)]
+	[InlineData("xml", true)]
+	public async Task PackContextBuildsPlanningMetricsOnlyForStructuredFormats(
+		string format,
+		bool expectsPlanningMetrics)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "First.cs"), "class First { }\n");
+		File.WriteAllText(Path.Combine(project, "Second.cs"), "class Second { }\n");
+		using var measurement = ContentPipelineDiagnostics.BeginMeasurement();
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["view"] = "tree",
+				["format"] = format
+			});
+		var diagnostics = measurement.Capture();
+		var output = Text(result);
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.Contains("First.cs", output, StringComparison.Ordinal);
+		Assert.Contains("Second.cs", output, StringComparison.Ordinal);
+		Assert.Equal(expectsPlanningMetrics ? 2 : 0, diagnostics.FullFileReads);
+		Assert.Equal(expectsPlanningMetrics, diagnostics.FullFileReadBytes > 0);
+		if (format == "json")
+		{
+			Assert.Contains("\"metrics\"", output, StringComparison.Ordinal);
+			Assert.DoesNotContain("\"characters\": 0", output, StringComparison.Ordinal);
+		}
+		else if (format == "xml")
+		{
+			Assert.Contains("<metrics>", output, StringComparison.Ordinal);
+			Assert.DoesNotContain("<characters>0</characters>", output, StringComparison.Ordinal);
+		}
+	}
+
 	[Fact]
 	public async Task StreamServerReleasesItsPackSessionWhenInputReachesEndOfStream()
 	{
