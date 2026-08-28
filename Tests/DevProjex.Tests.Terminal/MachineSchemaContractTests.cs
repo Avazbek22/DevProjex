@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using DevProjex.Application.Secrets;
 using DevProjex.Infrastructure.ResourceStore;
+using DevProjex.Kernel.Abstractions;
 using DevProjex.Terminal.DesktopControl;
 using DevProjex.Terminal.Rendering;
 
@@ -73,6 +75,81 @@ public sealed class MachineSchemaContractTests
 		Assert.Equal(
 			"C:/workspace/src/App.cs",
 			diagnostic.GetProperty("path").GetString());
+	}
+
+	[Fact]
+	public async Task AnalysisJsonExtendedSectionsKeepStableOrderAndDeterministicBytes()
+	{
+		using var workspace = new TemporaryDirectory();
+		var sourcePath = workspace.WriteFile("src/App.cs", "internal sealed class App {}");
+		var services = new TerminalServiceFactory(
+				() => workspace.CreateDirectory("data"))
+			.Create(AppLanguage.En);
+		var selection = await services.SelectionResolver.ResolveAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			new ProjectSelectionSpec(),
+			TestContext.Current.CancellationToken);
+		var plan = await services.ContextPlanner.BuildAsync(
+			new ProjectContextRequest(workspace.Path, selection),
+			TestContext.Current.CancellationToken);
+		plan = plan with
+		{
+			Redaction = new SecretRedactionSummary(2, 2),
+			Privacy = new PrivateDataRedactionSummary(1, 1),
+			Compression = new CodeCompressionSummary(1, 0, 100, 40, 1, 1, 1),
+			Findings =
+			[
+				new EffectiveRedactionFinding(
+					"github-pat",
+					RedactionFindingCategory.Secrets,
+					"src/App.cs",
+					1)
+			],
+			UnscannableFiles =
+			[
+				new UnscannableFile(sourcePath, FileContentClassification.TooLarge)
+			]
+		};
+
+		var first = new TestTerminalEnvironment();
+		var second = new TestTerminalEnvironment();
+		await new MachineOutputRenderer(first).WriteAnalysisJsonAsync(
+			plan,
+			first.Output,
+			TestContext.Current.CancellationToken);
+		await new MachineOutputRenderer(second).WriteAnalysisJsonAsync(
+			plan,
+			second.Output,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(first.StandardOutput, second.StandardOutput);
+		using var document = JsonDocument.Parse(first.StandardOutput);
+		Assert.Equal(
+			[
+				"schemaVersion",
+				"kind",
+				"project",
+				"selection",
+				"inventory",
+				"metrics",
+				"diagnostics",
+				"fingerprint",
+				"redaction",
+				"privacy",
+				"compression",
+				"findings",
+				"contentInspection"
+			],
+			document.RootElement.EnumerateObject().Select(static property => property.Name));
+		var finding = Assert.Single(
+			document.RootElement.GetProperty("findings").EnumerateArray());
+		Assert.Equal("secret", finding.GetProperty("category").GetString());
+		var unscannable = Assert.Single(
+			document.RootElement.GetProperty("contentInspection")
+				.GetProperty("unscannableFiles")
+				.EnumerateArray());
+		Assert.Equal("src/App.cs", unscannable.GetProperty("path").GetString());
 	}
 
 	[Fact]
