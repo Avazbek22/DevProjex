@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Diagnostics;
 using DevProjex.Infrastructure.Persistence;
 using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Infrastructure.Git;
@@ -628,6 +629,63 @@ public sealed class CliExpansionCommandTests
 			Assert.Single(services.RepoCacheService.ListIndexedRepositories()).RepositoryUrl);
 	}
 
+	[Fact]
+	public async Task CacheRemoveDryRunJsonReportsBytesWithoutDeletingRepository()
+	{
+		using var data = new TemporaryDirectory();
+		const string repositoryUrl = "https://github.com/example/dry-run.git";
+		var factory = new TerminalServiceFactory(() => data.Path);
+		var services = factory.Create(AppLanguage.En);
+		var repositoryPath = PublishSnapshot(services.RepoCacheService, repositoryUrl);
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment, factory).RunAsync(
+			["cache", "remove", repositoryUrl, "--dry-run", "--format", "json"],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		Assert.Equal(1, document.RootElement.GetProperty("schemaVersion").GetInt32());
+		Assert.True(document.RootElement.GetProperty("dryRun").GetBoolean());
+		Assert.Equal(1, document.RootElement.GetProperty("removed").GetInt32());
+		Assert.True(document.RootElement.GetProperty("bytes").GetInt64() > 0);
+		Assert.True(Directory.Exists(repositoryPath));
+		Assert.Single(services.RepoCacheService.ListIndexedRepositories());
+	}
+
+	[Fact]
+	public async Task CacheUpdateRefreshesAnExistingManagedGitClone()
+	{
+		using var data = new TemporaryDirectory();
+		const string repositoryUrl = "https://github.com/example/update.git";
+		var sourceFactory = new TerminalServiceFactory(() => data.Path);
+		using var services = sourceFactory.Create(AppLanguage.En);
+		var staging = services.RepoCacheService.CreateRepositoryStagingDirectory(repositoryUrl);
+		File.WriteAllText(Path.Combine(staging, "README.md"), "cached\n");
+		RunGit(staging, "init", "--initial-branch=main");
+		RunGit(staging, "config", "user.email", "terminal-tests@devprojex.local");
+		RunGit(staging, "config", "user.name", "DevProjex Terminal Tests");
+		RunGit(staging, "add", ".");
+		RunGit(staging, "commit", "-m", "initial");
+		var published = services.RepoCacheService.PublishRepositoryDirectory(staging, repositoryUrl);
+		services.RepoCacheService.RecordIndexedRepository(repositoryUrl, published, commitHash: "before");
+		var git = new UpdatingGitRepositoryService();
+		var commandServices = services with { GitRepositoryService = git };
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new CacheCommandHandler(commandServices, environment)
+			.UpdateAsync(repositoryUrl, TestContext.Current.CancellationToken);
+
+		Assert.True(
+			exitCode == CommandLineExitCodes.Success,
+			$"cache update exited {exitCode}: {environment.StandardError}");
+		Assert.Equal(1, git.PullCalls);
+		Assert.Equal(PathUtility.NormalizeSeparators(published) + Environment.NewLine,
+			environment.StandardOutput);
+		var indexed = Assert.Single(services.RepoCacheService.ListIndexedRepositories());
+		Assert.Equal("after", indexed.CommitHash);
+	}
+
 	private static TreeTextFormat ParseTreeFormat(string format) =>
 		format switch
 		{
@@ -645,5 +703,76 @@ public sealed class CliExpansionCommandTests
 		var published = cache.PublishRepositoryDirectory(staging, repositoryUrl);
 		cache.RecordIndexedRepository(repositoryUrl, published);
 		return published;
+	}
+
+	private static void RunGit(string workingDirectory, params string[] arguments)
+	{
+		var startInfo = new ProcessStartInfo("git")
+		{
+			WorkingDirectory = workingDirectory,
+			UseShellExecute = false,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			CreateNoWindow = true
+		};
+		foreach (var argument in arguments)
+			startInfo.ArgumentList.Add(argument);
+		var result = TerminalTestProcess.Run(startInfo);
+		Assert.True(result.ExitCode == 0,
+			$"git {string.Join(' ', arguments)} failed: {result.StandardError}");
+	}
+
+	private sealed class UpdatingGitRepositoryService : IGitRepositoryService
+	{
+		public int PullCalls { get; private set; }
+
+		public Task<bool> IsGitAvailableAsync(CancellationToken cancellationToken = default) =>
+			Task.FromResult(true);
+
+		public Task<bool> PullUpdatesAsync(
+			string repositoryPath,
+			IProgress<string>? progress = null,
+			CancellationToken cancellationToken = default)
+		{
+			PullCalls++;
+			return Task.FromResult(true);
+		}
+
+		public Task<string?> GetCurrentBranchAsync(
+			string repositoryPath,
+			CancellationToken cancellationToken = default) =>
+			Task.FromResult<string?>("main");
+
+		public Task<string?> GetHeadCommitAsync(
+			string repositoryPath,
+			CancellationToken cancellationToken = default) =>
+			Task.FromResult<string?>("after");
+
+		public Task<GitCloneResult> CloneAsync(
+			string url,
+			string targetDirectory,
+			IProgress<string>? progress = null,
+			CancellationToken cancellationToken = default) => throw Unexpected();
+
+		public Task<IReadOnlyList<GitBranch>> GetBranchesAsync(
+			string repositoryPath,
+			CancellationToken cancellationToken = default) => throw Unexpected();
+
+		public Task<string?> GetDefaultBranchAsync(
+			string repositoryPath,
+			CancellationToken cancellationToken = default) => Task.FromResult<string?>(null);
+
+		public Task<bool> SwitchBranchAsync(
+			string repositoryPath,
+			string branchName,
+			IProgress<string>? progress = null,
+			CancellationToken cancellationToken = default) => throw Unexpected();
+
+		public Task<string?> GetRemoteUrlAsync(
+			string repositoryPath,
+			CancellationToken cancellationToken = default) => throw Unexpected();
+
+		private static InvalidOperationException Unexpected() =>
+			new("Unexpected Git operation.");
 	}
 }

@@ -33,6 +33,70 @@ public sealed class CliV1ParserRegressionTests
 			.Parse(["analyze", ".", "--hide-secrets", "--no-hide-secrets"]);
 		Assert.NotEmpty(result.Errors);
 	}
+
+	[Fact]
+	public void DevProjexEnvironmentDefaultsApplyAndExplicitFlagsWin()
+	{
+		var environment = new TestTerminalEnvironment
+		{
+			Variables = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+			{
+				["DEVPROJEX_COLOR"] = "always",
+				["DEVPROJEX_PROGRESS"] = "never",
+				["DEVPROJEX_VERBOSITY"] = "detailed",
+				["DEVPROJEX_LANGUAGE"] = "uz"
+			}
+		};
+		var root = new DevProjexCommandTree(environment).Build();
+		var analyze = ResolveCommand(root, ["analyze"]);
+		var defaults = root.Parse(["analyze", "."]);
+
+		Assert.Equal(TerminalColorMode.Always,
+			defaults.GetValue(Assert.IsType<Option<TerminalColorMode>>(
+				root.Options.Single(static option => option.Name == "--color"))));
+		Assert.Equal(TerminalProgressMode.Never,
+			defaults.GetValue(Assert.IsType<Option<TerminalProgressMode>>(
+				analyze.Options.Single(static option => option.Name == "--progress"))));
+		Assert.Equal(TerminalVerbosity.Detailed,
+			defaults.GetValue(Assert.IsType<Option<TerminalVerbosity>>(
+				root.Options.Single(static option => option.Name == "--verbosity"))));
+		Assert.Equal(AppLanguage.Uz,
+			defaults.GetValue(Assert.IsType<Option<AppLanguage>>(
+				root.Options.Single(static option => option.Name == "--language"))));
+
+		var explicitValues = root.Parse([
+			"analyze", ".",
+			"--color", "never",
+			"--progress", "always",
+			"--verbosity", "minimal",
+			"--language", "en"
+		]);
+		Assert.Empty(explicitValues.Errors);
+		Assert.Equal(TerminalColorMode.Never,
+			explicitValues.GetValue(Assert.IsType<Option<TerminalColorMode>>(
+				root.Options.Single(static option => option.Name == "--color"))));
+		Assert.Equal(TerminalProgressMode.Always,
+			explicitValues.GetValue(Assert.IsType<Option<TerminalProgressMode>>(
+				analyze.Options.Single(static option => option.Name == "--progress"))));
+	}
+
+	[Fact]
+	public void DevProjexRootPrecedesClaudeProjectDirUnlessRootsAreExplicit()
+	{
+		var variables = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+		{
+			["DEVPROJEX_ROOT"] = "devprojex-root",
+			["CLAUDE_PROJECT_DIR"] = "claude-root"
+		};
+
+		Assert.Equal(
+			["explicit-root"],
+			McpRootSourceResolver.Resolve(["explicit-root"], variables, "working-root"));
+		Assert.Equal(
+			["devprojex-root"],
+			McpRootSourceResolver.Resolve([], variables, "working-root"));
+	}
+
 	[Fact]
 	public void SelectionChoiceSetsAreDerivedFromTheSharedCatalogAndRejectInvalidEnums()
 	{
