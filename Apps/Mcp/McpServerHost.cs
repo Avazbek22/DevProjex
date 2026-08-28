@@ -29,22 +29,26 @@ public static class McpServerHost
 		bool hidePrivateData = false,
 		CancellationToken cancellationToken = default,
 		Func<string>? appDataPathProvider = null,
-		string? tempRoot = null)
+		string? tempRoot = null,
+		Func<McpRootRegistry, McpServices>? servicesFactory = null)
 	{
 		ArgumentNullException.ThrowIfNull(roots);
 		ArgumentNullException.ThrowIfNull(input);
 		ArgumentNullException.ThrowIfNull(output);
 
 		var rootRegistry = new McpRootRegistry(roots);
-		using var services = McpServices.Create(rootRegistry, appDataPathProvider);
+		var services = new Lazy<McpServices>(
+			() => servicesFactory?.Invoke(rootRegistry) ?? McpServices.Create(rootRegistry, appDataPathProvider),
+			LazyThreadSafetyMode.ExecutionAndPublication);
 		await using var packs = new McpPackRegistry(tempRoot);
-		var projectService = new McpProjectService(rootRegistry, services, hidePrivateData);
+		var projectService = new Lazy<McpProjectService>(
+			() => new McpProjectService(rootRegistry, services.Value, hidePrivateData),
+			LazyThreadSafetyMode.ExecutionAndPublication);
 		var tools = new DevProjexMcpTools(rootRegistry, projectService, packs);
 		var catalog = new DevProjexMcpToolCatalog(tools);
 
 		var builder = Host.CreateApplicationBuilder([]);
 		builder.Logging.ClearProviders();
-		builder.Services.AddSingleton(services);
 		builder.Services.AddSingleton(packs);
 		builder.Services.AddMcpServer(options =>
 			{
@@ -67,8 +71,16 @@ public static class McpServerHost
 				return result;
 			}));
 
-		using var host = builder.Build();
-		await host.RunAsync(cancellationToken).ConfigureAwait(false);
+		try
+		{
+			using var host = builder.Build();
+			await host.RunAsync(cancellationToken).ConfigureAwait(false);
+		}
+		finally
+		{
+			if (services.IsValueCreated)
+				services.Value.Dispose();
+		}
 	}
 
 	private static string ResolveVersion() =>

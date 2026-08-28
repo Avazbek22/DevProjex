@@ -109,6 +109,7 @@ public sealed class McpServerIntegrationTests
 		var temporaryRoot = workspace.CreateDirectory("temp");
 		await using var input = new MemoryStream();
 		await using var output = new MemoryStream();
+		var serviceCreationCount = 0;
 
 		await McpServerHost.RunWithStreamsAsync(
 			[project],
@@ -117,10 +118,16 @@ public sealed class McpServerIntegrationTests
 			hidePrivateData: false,
 			cancellationToken: TestContext.Current.CancellationToken,
 			appDataPathProvider: () => workspace.CreateDirectory("app-data"),
-			tempRoot: temporaryRoot);
+			tempRoot: temporaryRoot,
+			servicesFactory: _ =>
+			{
+				Interlocked.Increment(ref serviceCreationCount);
+				throw new InvalidOperationException("Project services must remain deferred before EOF.");
+			});
 
 		var packRoot = Path.Combine(temporaryRoot, "DevProjex", "mcp");
 		Assert.Empty(Directory.EnumerateDirectories(packRoot));
+		Assert.Equal(0, Volatile.Read(ref serviceCreationCount));
 	}
 
 	[Fact]
@@ -448,6 +455,32 @@ public sealed class McpServerIntegrationTests
 		Assert.Contains("50000-character response cap", text, StringComparison.Ordinal);
 		Assert.Contains("narrow the source", text, StringComparison.Ordinal);
 		AssertSpotlighted(result);
+	}
+
+	[Fact]
+	public async Task StreamServerDefersProjectServicesUntilFirstToolCall()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "sample.txt"), "content");
+		var creationCount = 0;
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			servicesCreated: () => Interlocked.Increment(ref creationCount));
+
+		_ = await server.Client.ListToolsAsync(
+			options: null,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(0, Volatile.Read(ref creationCount));
+
+		var projects = await server.CallAsync("list_projects");
+		Assert.NotEqual(true, projects.IsError);
+		Assert.Equal(1, Volatile.Read(ref creationCount));
+
+		var tree = await server.CallAsync("get_tree");
+		Assert.NotEqual(true, tree.IsError);
+		Assert.Equal(1, Volatile.Read(ref creationCount));
 	}
 
 	[Fact]
@@ -1399,7 +1432,8 @@ public sealed class McpServerIntegrationTests
 		public static async Task<McpTestServer> StartAsync(
 			string project,
 			string sandbox,
-			bool hidePrivateData = false)
+			bool hidePrivateData = false,
+			Action? servicesCreated = null)
 		{
 			var clientToServer = new Pipe();
 			var serverToClient = new Pipe();
@@ -1410,7 +1444,14 @@ public sealed class McpServerIntegrationTests
 				hidePrivateData,
 				TestContext.Current.CancellationToken,
 				() => Path.Combine(sandbox, "app-data"),
-				Path.Combine(sandbox, "temp"));
+				Path.Combine(sandbox, "temp"),
+				servicesCreated is null
+					? null
+					: roots =>
+					{
+						servicesCreated();
+						return McpServices.Create(roots, () => Path.Combine(sandbox, "app-data"));
+					});
 			var recordingInput = new RecordingWriteStream(clientToServer.Writer.AsStream());
 			var recordingOutput = new RecordingReadStream(serverToClient.Reader.AsStream());
 			var transport = new StreamClientTransport(
