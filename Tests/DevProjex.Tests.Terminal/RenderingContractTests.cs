@@ -144,6 +144,48 @@ public sealed class RenderingContractTests
 	}
 
 	[Fact]
+	public void RedirectedDiagnosticKeepsEscapedLongPathOnOnePhysicalLine()
+	{
+		var environment = new TestTerminalEnvironment
+		{
+			Width = 40
+		};
+		var renderer = new ContextDiagnosticRenderer(
+			environment,
+			new TerminalOutputOptions(),
+			new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En));
+		var diagnosticPath = Path.Combine(
+			"diagnostic-path-start",
+			new string('a', 80),
+			"leaf") + "\nforged\rsegment\t\u001bcontrol\u2028end";
+
+		renderer.Write(
+		[
+			new ContextDiagnostic(
+				"DPX-PROJECT-SELECTION-WARNING",
+				ContextDiagnosticSeverity.Warning,
+				"Selection warning.",
+				diagnosticPath)
+		]);
+
+		var lines = environment.StandardError
+			.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
+		var pathLine = Assert.Single(
+			lines,
+			static line => line.Contains("diagnostic-path-start", StringComparison.Ordinal));
+		Assert.True(pathLine.Length > environment.Width);
+		Assert.Contains(
+			"\\nforged\\rsegment\\t\\u001Bcontrol\\u2028end",
+			pathLine,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain('\n', pathLine);
+		Assert.DoesNotContain('\r', pathLine);
+		Assert.DoesNotContain('\t', pathLine);
+		Assert.DoesNotContain('\u001b', pathLine);
+		Assert.DoesNotContain('\u2028', pathLine);
+	}
+
+	[Fact]
 	public async Task RussianHumanDiagnosticNeverFallsBackToInternalEnglishMessage()
 	{
 		using var workspace = new TemporaryDirectory();

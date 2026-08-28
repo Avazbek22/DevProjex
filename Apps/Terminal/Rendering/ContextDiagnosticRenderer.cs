@@ -40,7 +40,7 @@ public sealed class ContextDiagnosticRenderer(
 				var labelKey = diagnostic.Code == "DPX-PROJECT-SELECTION-WARNING"
 					? "Terminal.Label.Value"
 					: "Terminal.Label.Path";
-				console.WriteLine(
+				environment.Error.WriteLine(
 					$"{localization[labelKey]}: {TerminalTextEscaping.EscapeSingleLine(diagnostic.Path)}");
 			}
 		}
