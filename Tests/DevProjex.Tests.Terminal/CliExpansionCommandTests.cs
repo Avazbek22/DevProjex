@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Diagnostics;
 using DevProjex.Infrastructure.Persistence;
 using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Infrastructure.Git;
@@ -688,17 +687,16 @@ public sealed class CliExpansionCommandTests
 		const string repositoryUrl = "https://github.com/example/update.git";
 		var sourceFactory = new TerminalServiceFactory(() => data.Path);
 		using var services = sourceFactory.Create(AppLanguage.En);
-		var staging = services.RepoCacheService.CreateRepositoryStagingDirectory(repositoryUrl);
-		File.WriteAllText(Path.Combine(staging, "README.md"), "cached\n");
-		RunGit(staging, "init", "--initial-branch=main");
-		RunGit(staging, "config", "user.email", "terminal-tests@devprojex.local");
-		RunGit(staging, "config", "user.name", "DevProjex Terminal Tests");
-		RunGit(staging, "add", ".");
-		RunGit(staging, "commit", "-m", "initial");
-		var published = services.RepoCacheService.PublishRepositoryDirectory(staging, repositoryUrl);
-		services.RepoCacheService.RecordIndexedRepository(repositoryUrl, published, commitHash: "before");
+		var published = Path.Combine(data.Path, "RepoCache", "update", "base");
+		Directory.CreateDirectory(published);
+		File.WriteAllText(Path.Combine(published, "README.md"), "cached\n");
+		var cache = new UpdatingRepoCacheService(repositoryUrl, published);
 		var git = new UpdatingGitRepositoryService();
-		var commandServices = services with { GitRepositoryService = git };
+		var commandServices = services with
+		{
+			GitRepositoryService = git,
+			RepoCacheService = cache
+		};
 		var environment = new TestTerminalEnvironment();
 
 		var exitCode = await new CacheCommandHandler(commandServices, environment)
@@ -710,8 +708,9 @@ public sealed class CliExpansionCommandTests
 		Assert.Equal(1, git.PullCalls);
 		Assert.Equal(PathUtility.NormalizeSeparators(published) + Environment.NewLine,
 			environment.StandardOutput);
-		var indexed = Assert.Single(services.RepoCacheService.ListIndexedRepositories());
+		var indexed = Assert.Single(cache.ListIndexedRepositories());
 		Assert.Equal("after", indexed.CommitHash);
+		Assert.True(cache.SizeRefreshed);
 	}
 
 	private static TreeTextFormat ParseTreeFormat(string format) =>
@@ -733,21 +732,110 @@ public sealed class CliExpansionCommandTests
 		return published;
 	}
 
-	private static void RunGit(string workingDirectory, params string[] arguments)
+	private sealed class UpdatingRepoCacheService : IRepoCacheService
 	{
-		var startInfo = new ProcessStartInfo("git")
+		private RepositoryCacheIndexEntry _entry;
+
+		public UpdatingRepoCacheService(string repositoryUrl, string repositoryPath)
 		{
-			WorkingDirectory = workingDirectory,
-			UseShellExecute = false,
-			RedirectStandardOutput = true,
-			RedirectStandardError = true,
-			CreateNoWindow = true
-		};
-		foreach (var argument in arguments)
-			startInfo.ArgumentList.Add(argument);
-		var result = TerminalTestProcess.Run(startInfo);
-		Assert.True(result.ExitCode == 0,
-			$"git {string.Join(' ', arguments)} failed: {result.StandardError}");
+			CacheRootPath = Path.GetDirectoryName(Path.GetDirectoryName(repositoryPath)!)!;
+			CacheSearchRootPaths = [CacheRootPath];
+			_entry = new RepositoryCacheIndexEntry(
+				"update",
+				repositoryUrl,
+				repositoryPath,
+				"main",
+				"before",
+				DateTimeOffset.UnixEpoch,
+				RepositoryCacheEntryState.Ready,
+				ContentKind: RepositoryCacheContentKind.Git);
+		}
+
+		public string CacheRootPath { get; }
+		public IReadOnlyList<string> CacheSearchRootPaths { get; }
+		public bool SizeRefreshed { get; private set; }
+
+		public RepositoryCacheIndexEntry? FindIndexedRepository(string repositoryUrl) => _entry;
+
+		public IReadOnlyList<RepositoryCacheCatalogEntry> ListIndexedRepositories() =>
+		[
+			new(
+				_entry.RepositoryUrl,
+				"update",
+				_entry.Branch,
+				_entry.LastOpenedUtc,
+				_entry.ApproximateSizeBytes,
+				_entry.ContentKind,
+				_entry.LocalPath,
+				_entry.CommitHash,
+				_entry.State)
+		];
+
+		public Task<IRepositoryCacheSession?> TryAcquireRepositorySessionAsync(
+			string repositoryUrl,
+			string? branch = null,
+			CancellationToken cancellationToken = default) =>
+			Task.FromResult<IRepositoryCacheSession?>(new UpdatingCacheSession(_entry));
+
+		public Task<IAsyncDisposable> AcquireRepositoryOperationAsync(
+			string repositoryUrl,
+			CancellationToken cancellationToken = default) =>
+			Task.FromResult<IAsyncDisposable>(new NoopAsyncDisposable());
+
+		public void RecordIndexedRepository(
+			string repositoryUrl,
+			string localPath,
+			string? branch = null,
+			string? commitHash = null,
+			RepositoryCacheEntryState state = RepositoryCacheEntryState.Ready) =>
+			_entry = _entry with
+			{
+				RepositoryUrl = repositoryUrl,
+				LocalPath = localPath,
+				Branch = branch,
+				CommitHash = commitHash,
+				State = state
+			};
+
+		public void RefreshIndexedRepositorySize(string localPath)
+		{
+			Assert.Equal(_entry.LocalPath, localPath, PathComparer.Default);
+			SizeRefreshed = true;
+		}
+
+		public string CreateRepositoryDirectory(string repositoryUrl) => throw Unexpected();
+		public string CreateRepositoryStagingDirectory(string repositoryUrl) => throw Unexpected();
+		public string PublishRepositoryDirectory(string stagingPath, string repositoryUrl) => throw Unexpected();
+		public RepositoryCacheManagementListResult ListCacheEntriesForManagement() => throw Unexpected();
+		public Task<IRepositoryCacheSession?> TryAcquireRepositorySessionByPathAsync(
+			string repositoryPath,
+			CancellationToken cancellationToken = default) => throw Unexpected();
+		public void RemoveIndexedRepository(string localPath) => throw Unexpected();
+		public void DeleteRepositoryDirectory(string path) => throw Unexpected();
+		public void ClearAllCache() => throw Unexpected();
+		public CacheClearResult ClearAllCacheWithResult() => throw Unexpected();
+		public CacheClearResult RemoveCachedRepositoryWithResult(string repositoryUrl) => throw Unexpected();
+		public void CleanupStaleCacheOnStartup() => throw Unexpected();
+		public void CollectGarbage() => throw Unexpected();
+		public bool IsInCache(string path) => throw Unexpected();
+		public bool PathsBelongToSameRepository(string left, string right) => throw Unexpected();
+
+		private static InvalidOperationException Unexpected() =>
+			new("Unexpected repository-cache operation.");
+
+		private sealed class UpdatingCacheSession(RepositoryCacheIndexEntry entry) : IRepositoryCacheSession
+		{
+			public string RepositoryPath { get; } = entry.LocalPath;
+			public string RepositoryUrl { get; } = entry.RepositoryUrl;
+			public string? Branch { get; } = entry.Branch;
+			public RepositoryCacheContentKind ContentKind => RepositoryCacheContentKind.Git;
+			public void Dispose() { }
+		}
+
+		private sealed class NoopAsyncDisposable : IAsyncDisposable
+		{
+			public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+		}
 	}
 
 	private sealed class UpdatingGitRepositoryService : IGitRepositoryService
