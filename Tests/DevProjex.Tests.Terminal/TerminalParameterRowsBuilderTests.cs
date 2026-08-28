@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using DevProjex.Application.Secrets;
 using DevProjex.Application.Presentation;
+using Terminal.Gui.Input;
 using Terminal.Gui.Text;
 
 namespace DevProjex.Tests.Terminal;
@@ -281,6 +282,15 @@ public sealed class TerminalParameterRowsBuilderTests
 
 		Assert.Equal(expected, resolved);
 		Assert.Equal(expectedIndex, selectionIndex);
+	}
+
+	[Fact]
+	public void TreeAndParameterListsIgnoreButtonReleaseEvents()
+	{
+		Assert.False(TerminalProjectTreeView.IsPrimaryActivation(MouseFlags.LeftButtonReleased));
+		Assert.False(TerminalParameterListView.IsPrimaryActivation(MouseFlags.LeftButtonReleased));
+		Assert.True(TerminalProjectTreeView.IsPrimaryActivation(MouseFlags.LeftButtonPressed));
+		Assert.True(TerminalParameterListView.IsPrimaryActivation(MouseFlags.LeftButtonClicked));
 	}
 
 	[Theory]

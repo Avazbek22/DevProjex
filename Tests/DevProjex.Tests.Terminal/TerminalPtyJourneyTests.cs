@@ -12,6 +12,37 @@ public sealed class TerminalProcessCollection
 public sealed class TerminalPtyJourneyTests
 {
 	[Fact(Timeout = 60_000)]
+	public async Task ImmediateExitFlushesThePendingWorkspaceSelection()
+	{
+		using var workspace = CreateProject();
+		string? dataRoot = null;
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			workspace.Path,
+			["tui", workspace.Path, "--profile", "standard", "--language", "en"],
+			cancellationToken: TestContext.Current.CancellationToken,
+			initializeDataRoot: root => dataRoot = root);
+		await terminal.WaitForScreenAsync(
+			"> PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
+		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
+		await terminal.SendSpaceAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Files 2",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(cancellationToken: TestContext.Current.CancellationToken));
+
+		var settings = new TerminalSettingsStore(() => dataRoot!)
+			.LoadProjectSettings(workspace.Path);
+		Assert.NotNull(settings);
+		Assert.DoesNotContain(".", settings.SelectedPaths);
+		Assert.DoesNotContain("src", settings.SelectedPaths);
+	}
+
+	[Fact(Timeout = 60_000)]
 	public async Task ImplicitTuiPreservesExplicitlySavedInlineScreenMode()
 	{
 		using var workspace = new TemporaryDirectory();

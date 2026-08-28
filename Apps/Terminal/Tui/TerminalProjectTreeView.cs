@@ -62,10 +62,8 @@ internal sealed class TerminalProjectTreeView : ListView
 		}
 
 		var isPressed = mouse.Flags.HasFlag(MouseFlags.LeftButtonPressed);
-		var isReleased = mouse.Flags.HasFlag(MouseFlags.LeftButtonReleased);
-		var isClicked = mouse.Flags.HasFlag(MouseFlags.LeftButtonClicked);
 		var isDoubleClicked = mouse.Flags.HasFlag(MouseFlags.LeftButtonDoubleClicked);
-		if (!isPressed && !isReleased && !isClicked && !isDoubleClicked)
+		if (!IsPrimaryActivation(mouse.Flags))
 			return base.OnMouseEvent(mouse);
 		if (mouse.Position is not { } position)
 			return true;
@@ -123,4 +121,9 @@ internal sealed class TerminalProjectTreeView : ListView
 		SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
 		return true;
 	}
+
+	internal static bool IsPrimaryActivation(MouseFlags flags) =>
+		flags.HasFlag(MouseFlags.LeftButtonPressed) ||
+		flags.HasFlag(MouseFlags.LeftButtonClicked) ||
+		flags.HasFlag(MouseFlags.LeftButtonDoubleClicked);
 }

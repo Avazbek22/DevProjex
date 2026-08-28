@@ -11,25 +11,12 @@ internal readonly record struct PreviewSearchResult(
 
 internal static class PreviewSearchIndex
 {
-	internal const int MinimumQueryLength = 2;
-	internal const int MaximumMatches = 10_000;
+	internal const int MinimumQueryLength = PreviewTextDocumentSearch.MinimumQueryLength;
+	internal const int MaximumMatches = PreviewTextDocumentSearch.MaximumMatches;
 
 	public static bool CanSearch(string? query)
 	{
-		if (string.IsNullOrWhiteSpace(query) ||
-		    query.AsSpan().IndexOfAny('\r', '\n') >= 0)
-		{
-			return false;
-		}
-
-		var runeCount = 0;
-		foreach (var _ in query.EnumerateRunes())
-		{
-			if (++runeCount == MinimumQueryLength)
-				return true;
-		}
-
-		return false;
+		return PreviewTextDocumentSearch.CanSearch(query);
 	}
 
 	public static PreviewSearchResult Find(

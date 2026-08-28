@@ -174,6 +174,7 @@ internal sealed class TerminalWorkspaceCommandParser
 				0,
 				string.Empty,
 				new CompletionCandidateSource(context.VerbTokens),
+				null,
 				null);
 		}
 
@@ -185,7 +186,8 @@ internal sealed class TerminalWorkspaceCommandParser
 				tokens[0].Start,
 				tokens[0].Value,
 				new CompletionCandidateSource(context.VerbTokens),
-				null);
+				null,
+				tokens[0].OpeningQuote);
 		}
 
 		if (!TerminalWorkspaceCommandCatalog.TryGet(tokens[0].Value, out var definition) ||
@@ -210,7 +212,8 @@ internal sealed class TerminalWorkspaceCommandParser
 				replacementStart,
 				current,
 				candidates,
-				schemaKey)
+				schemaKey,
+				atNewToken ? null : tokens[^1].OpeningQuote)
 			: null;
 	}
 
@@ -457,7 +460,7 @@ internal sealed class TerminalWorkspaceCommandParser
 				TerminalWorkspaceCommandErrorCode.UnknownLanguage,
 				tokens[1].Start,
 				tokens[1].Value,
-				LanguageCodes);
+				FindSimilar(tokens[1].Value, LanguageCodes));
 		}
 
 		return TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
@@ -639,22 +642,72 @@ internal sealed class TerminalWorkspaceCommandParser
 		if (matches is null)
 			return TerminalWorkspaceCommandCompletion.Empty;
 
-		var replacementEnd = target.CursorPosition;
-		while (replacementEnd < target.FullText.Length && !char.IsWhiteSpace(target.FullText[replacementEnd]))
-			replacementEnd++;
+		var replacementEnd = FindCompletionReplacementEnd(
+			target.FullText,
+			target.CursorPosition,
+			target.OpeningQuote);
 		var suffix = target.FullText[replacementEnd..];
 		var candidates = matches.Select(candidate =>
 		{
-			var completed = target.FullText[..target.ReplacementStart] + candidate + suffix;
+			var inserted = QuoteCompletionCandidate(candidate, target.OpeningQuote);
+			var completed = target.FullText[..target.ReplacementStart] + inserted + suffix;
 			return new TerminalWorkspaceCommandCompletionCandidate(
 				candidate,
 				completed,
-				target.ReplacementStart + candidate.Length);
+				target.ReplacementStart + inserted.Length);
 		}).ToArray();
 		var ghost = matches[0].Length > target.Current.Length
 			? matches[0][target.Current.Length..]
 			: null;
 		return new TerminalWorkspaceCommandCompletion(candidates, ghost, null);
+	}
+
+	private static int FindCompletionReplacementEnd(
+		string text,
+		int cursorPosition,
+		char? openingQuote)
+	{
+		var index = cursorPosition;
+		if (openingQuote is not { } quote)
+		{
+			while (index < text.Length && !char.IsWhiteSpace(text[index]))
+				index++;
+			return index;
+		}
+
+		while (index < text.Length)
+		{
+			if (text[index] != quote)
+			{
+				index++;
+				continue;
+			}
+			if (index + 1 < text.Length && text[index + 1] == quote)
+			{
+				index += 2;
+				continue;
+			}
+			return index + 1;
+		}
+		return index;
+	}
+
+	private static string QuoteCompletionCandidate(string candidate, char? openingQuote)
+	{
+		var quote = openingQuote;
+		if (quote is null && candidate.Any(static character =>
+		    char.IsWhiteSpace(character) || character is '\'' or '"'))
+		{
+			quote = candidate.Contains('"') && !candidate.Contains('\'') ? '\'' : '"';
+		}
+		if (quote is null)
+			return candidate;
+
+		var escaped = candidate.Replace(
+			quote.Value.ToString(),
+			new string(quote.Value, 2),
+			StringComparison.Ordinal);
+		return $"{quote}{escaped}{quote}";
 	}
 
 	private static string? ResolveGhostSuffix(
@@ -789,6 +842,7 @@ internal sealed class TerminalWorkspaceCommandParser
 			var start = index;
 			var value = new StringBuilder();
 			char? quote = null;
+			char? openingQuote = null;
 			var quoteStart = -1;
 			while (index < text.Length && (quote is not null || !char.IsWhiteSpace(text[index])))
 			{
@@ -796,11 +850,19 @@ internal sealed class TerminalWorkspaceCommandParser
 				if (quote is null && character is '\'' or '"')
 				{
 					quote = character;
+					if (index == start)
+						openingQuote = character;
 					quoteStart = index++;
 					continue;
 				}
 				if (quote == character)
 				{
+					if (index + 1 < text.Length && text[index + 1] == character)
+					{
+						value.Append(character);
+						index += 2;
+						continue;
+					}
 					quote = null;
 					index++;
 					continue;
@@ -820,7 +882,7 @@ internal sealed class TerminalWorkspaceCommandParser
 						[]));
 			}
 
-			tokens.Add(new ParsedToken(value.ToString(), start, index));
+			tokens.Add(new ParsedToken(value.ToString(), start, index, openingQuote));
 		}
 
 		return new TokenizationResult(tokens, null);
@@ -832,7 +894,8 @@ internal sealed class TerminalWorkspaceCommandParser
 		int ReplacementStart,
 		string Current,
 		CompletionCandidateSource Candidates,
-		string? SchemaKey);
+		string? SchemaKey,
+		char? OpeningQuote);
 
 	private readonly struct CompletionCandidateSource(
 		IReadOnlyList<string>? primary,
@@ -854,7 +917,7 @@ internal sealed class TerminalWorkspaceCommandParser
 		}
 	}
 
-	private sealed record ParsedToken(string Value, int Start, int End);
+	private sealed record ParsedToken(string Value, int Start, int End, char? OpeningQuote);
 
 	private sealed record TokenizationResult(
 		IReadOnlyList<ParsedToken> Tokens,

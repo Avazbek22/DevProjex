@@ -89,7 +89,13 @@ internal static class TerminalColumnLayout
 		}
 
 		var separator = new string(' ', separatorWidth);
-		return materialized.Select(row => FormatRow(row, widths, separator)).ToArray();
+		return materialized.Select(row =>
+		{
+			var rendered = FormatRow(row, widths, separator);
+			return maximumWidth is { } limit
+				? TerminalCellWidth.Truncate(rendered, Math.Max(0, limit))
+				: rendered;
+		}).ToArray();
 	}
 
 	private static string FormatRow(

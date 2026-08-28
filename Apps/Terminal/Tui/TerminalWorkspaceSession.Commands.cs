@@ -176,6 +176,11 @@ internal sealed partial class TerminalWorkspaceSession
 		if (_preview is null)
 			return InvalidCommandExecution();
 		var query = command.Text?.Trim() ?? string.Empty;
+		if (query.Length > 0 && !PreviewTextDocumentSearch.CanSearch(query))
+		{
+			return TerminalWorkspaceCommandExecutionResult.Failure(
+				L("Terminal.Tui.Preview.SearchTooShort"));
+		}
 		_previewSearchQuery = query.Length == 0 ? null : query;
 		if (query.Length == 0)
 		{

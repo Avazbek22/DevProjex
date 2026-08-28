@@ -336,4 +336,47 @@ public sealed class TerminalWorkspacePresentationPolicyTests
 		Assert.Equal(5, position.DisplayColumn);
 		Assert.InRange(match.Column, position.DisplayColumn, position.DisplayColumn + view.VisibleTextWidth);
 	}
+
+	[Fact]
+	public void PreviewWordWrapMovesAWideRuneIntactToTheNextVisualRow()
+	{
+		using var document = new InMemoryPreviewTextDocument("ab界");
+		using var view = new TerminalVirtualizedPreviewView(showScrollBars: false)
+		{
+			Frame = new Rectangle(0, 0, 3, 2)
+		};
+		view.SetDocument(document, preserveViewport: false);
+
+		view.ToggleWordWrap();
+
+		Assert.Equal([0, 2], TerminalVirtualizedPreviewView.BuildWrappedSegmentColumns("ab界", 3));
+		Assert.Equal(2, view.ContentRowCount);
+		var first = view.ResolveDocumentPosition(0);
+		var second = view.ResolveDocumentPosition(1);
+		Assert.Equal((0, 0), (first.Line, first.DisplayColumn));
+		Assert.Equal((0, 2), (second.Line, second.DisplayColumn));
+		Assert.Equal("ab", TerminalVirtualizedPreviewView.SliceColumns("ab界", first.DisplayColumn, 3));
+		Assert.Equal("界", TerminalVirtualizedPreviewView.SliceColumns("ab界", second.DisplayColumn, 3).TrimEnd());
+	}
+
+	[Fact]
+	public void PreviewSearchUsesTheSharedMinimumAndCappedWraparoundSet()
+	{
+		using var document = new InMemoryPreviewTextDocument(
+			string.Join('\n', Enumerable.Repeat("marker marker", 5_001)));
+		using var view = new TerminalVirtualizedPreviewView(showScrollBars: false);
+		view.SetDocument(document, preserveViewport: false);
+
+		Assert.Null(view.SetSearchQuery("界", 0, -1));
+		Assert.Equal(0, view.SearchMatchCount);
+		var first = Assert.NotNull(view.SetSearchQuery("marker", 0, -1));
+
+		Assert.Equal(PreviewTextDocumentSearch.MaximumMatches, view.SearchMatchCount);
+		Assert.True(view.IsSearchCapped);
+		var current = first;
+		for (var index = 1; index < PreviewTextDocumentSearch.MaximumMatches; index++)
+			current = Assert.NotNull(view.FindNextSearchMatch(current.Line, current.Column, reverse: false));
+		var wrapped = Assert.NotNull(view.FindNextSearchMatch(current.Line, current.Column, reverse: false));
+		Assert.Equal(first, wrapped);
+	}
 }

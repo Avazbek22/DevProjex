@@ -344,9 +344,8 @@ public sealed class TerminalWorkspaceState : IDisposable
 		_selectedEmptyDirectories.Clear();
 		foreach (var path in paths ?? [])
 		{
-			var fullPath = Path.GetFullPath(Path.Combine(
-				Plan.SourceRoot,
-				path.Replace('/', Path.DirectorySeparatorChar)));
+			if (!TryResolvePersistedPath(path, out var fullPath))
+				continue;
 			if (!_nodesByPath.TryGetValue(fullPath, out var node))
 				continue;
 			SetSubtreeSelection(node, selected: true);
@@ -390,13 +389,30 @@ public sealed class TerminalWorkspaceState : IDisposable
 		_expandedPaths.Add(Plan.EffectiveTree.FullPath);
 		foreach (var path in paths ?? [])
 		{
-			var fullPath = Path.GetFullPath(Path.Combine(
-				Plan.SourceRoot,
-				path.Replace('/', Path.DirectorySeparatorChar)));
+			if (!TryResolvePersistedPath(path, out var fullPath))
+				continue;
 			if (_nodesByPath.TryGetValue(fullPath, out var node) && node.IsDirectory)
 				_expandedPaths.Add(fullPath);
 		}
 		RebuildVisibleRows();
+	}
+
+	private bool TryResolvePersistedPath(string? path, out string fullPath)
+	{
+		fullPath = string.Empty;
+		if (string.IsNullOrWhiteSpace(path))
+			return false;
+		try
+		{
+			fullPath = Path.GetFullPath(Path.Combine(
+				Plan.SourceRoot,
+				path.Replace('/', Path.DirectorySeparatorChar)));
+			return true;
+		}
+		catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
+		{
+			return false;
+		}
 	}
 
 	public void ToggleSelection(int rowIndex)

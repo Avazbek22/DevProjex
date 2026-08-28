@@ -36,9 +36,7 @@ internal sealed class TerminalParameterListView : ListView
 		}
 
 		var pressed = mouse.Flags.HasFlag(MouseFlags.LeftButtonPressed);
-		var released = mouse.Flags.HasFlag(MouseFlags.LeftButtonReleased);
-		var clicked = mouse.Flags.HasFlag(MouseFlags.LeftButtonClicked);
-		if ((!pressed && !released && !clicked) || mouse.Position is not { } position)
+		if (!IsPrimaryActivation(mouse.Flags) || mouse.Position is not { } position)
 			return base.OnMouseEvent(mouse);
 
 		SetFocus();
@@ -60,6 +58,10 @@ internal sealed class TerminalParameterListView : ListView
 		SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
 		return true;
 	}
+
+	internal static bool IsPrimaryActivation(MouseFlags flags) =>
+		flags.HasFlag(MouseFlags.LeftButtonPressed) ||
+		flags.HasFlag(MouseFlags.LeftButtonClicked);
 
 	internal static bool TryResolveSelectionIndex(
 		int viewportTop,

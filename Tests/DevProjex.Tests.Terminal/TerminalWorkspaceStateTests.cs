@@ -495,6 +495,43 @@ public sealed class TerminalWorkspaceStateTests
 		Assert.Contains("src", state.BuildExpandedRelativePaths());
 	}
 
+	[Fact]
+	public async Task CorruptedPersistedPathsAreSkippedPerElement()
+	{
+		using var data = new TemporaryDirectory();
+		using var state = new TerminalWorkspaceState(CreatePlan());
+		var store = new TerminalSettingsStore(() => data.Path);
+		await store.SaveProjectSettingsAsync(
+			new TerminalProjectSettings(
+				state.Plan.SourceRoot,
+				["src"],
+				["src"],
+				null,
+				ProjectContextView.TreeContent,
+				ProjectContextDocumentFormat.Markdown,
+				DateTimeOffset.UtcNow),
+			TestContext.Current.CancellationToken);
+		var settingsPath = store.GetPath();
+		var json = await File.ReadAllTextAsync(settingsPath, TestContext.Current.CancellationToken);
+		json = json
+			.Replace("\"SelectedPaths\":[\"src\"]", "\"SelectedPaths\":[null,\"\",\"\\u0000\",\"src\"]", StringComparison.Ordinal)
+			.Replace("\"ExpandedPaths\":[\"src\"]", "\"ExpandedPaths\":[null,\" \",\"\\u0000\",\"src\"]", StringComparison.Ordinal);
+		await File.WriteAllTextAsync(settingsPath, json, TestContext.Current.CancellationToken);
+		var persisted = new TerminalSettingsStore(() => data.Path)
+			.LoadProjectSettings(state.Plan.SourceRoot);
+		Assert.NotNull(persisted);
+
+		var exception = Record.Exception(() =>
+		{
+			state.RestoreSelectedRelativePaths(persisted.SelectedPaths);
+			state.RestoreExpandedRelativePaths(persisted.ExpandedPaths);
+		});
+
+		Assert.Null(exception);
+		Assert.Equal(["src"], state.BuildSelectedRelativePaths());
+		Assert.Contains("src", state.BuildExpandedRelativePaths());
+	}
+
 	private static int FindRow(TerminalWorkspaceState state, string name) =>
 		state.VisibleRows
 			.Select((row, index) => (row, index))

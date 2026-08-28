@@ -203,7 +203,8 @@ direct CLI presentation catalog. They are intentionally not localized. Argument
 schemas, help, completion hints, results, and errors are localized. Resolution is
 strict: only a complete token executes. Tab accepts or cycles completion, while an
 invalid token reports its position and up to three similar candidates. Arguments
-containing whitespace can use single or double quotes.
+containing whitespace can use single or double quotes; path completion inserts
+and preserves the required quotes automatically.
 Welcome exposes the focused subset `recent`, `language`, `help`, and `quit`.
 
 | Syntax | Session action |
@@ -255,7 +256,13 @@ are persisted in terminal settings across launches; adjacent duplicates are stor
 once. A ghost suffix previews completion without changing the input. Plain mode
 renders that hint in brackets instead of relying on dim color.
 
+Debounced tree selection, expansion, focus, view, and format state is flushed
+before leaving a workspace or exiting, so an immediate exit cannot discard the
+last accepted interaction.
+
 `language` without an argument shows the current language and all supported codes.
+A mistyped code reports only the nearest candidates and points back to the
+argument-free command for the complete list.
 A language selected with `:language` is stored for future Terminal Workspace
 sessions. An explicit `--language` option overrides it for one launch without
 changing the stored choice; otherwise the workspace uses the stored choice and
@@ -321,7 +328,9 @@ two-panel layout instead of squeezing three panes.
 
 Path pickers include an editable path field above the list. `~`, environment
 variables, relative paths, and Tab completion are supported. Command-line export
-destinations use filesystem completion from the active project directory.
+destinations use filesystem completion from the active project directory. A
+nonempty typed path that does not exist remains in the open picker with a
+localized error; it is never replaced by the current folder or highlighted file.
 
 Clicking anywhere on a tree or parameter row toggles its checkbox; double-clicking
 a folder expands or collapses it.
@@ -351,7 +360,10 @@ Large contexts use the shared preview document abstractions. Small documents
 stay in memory; larger documents use temporary file-backed UTF-8 storage with
 line and file-section indexes. The viewport reads only visible lines, Preview
 Search scans the indexed document, and Home/End can reach the first and final
-selected files. The range line reports visible
+selected files. Preview Search starts at two Unicode runes and keeps at most
+10,000 matches; a capped result displays `10000+` and navigation wraps through
+the loaded matches. Word wrapping never splits a wide terminal glyph between
+visual rows. The range line reports visible
 files/sections, lines, columns, and totals, so partial visibility is never
 silent. Rapid changes cancel stale Preview work, and retired temporary documents
 are disposed after the replacement is active.

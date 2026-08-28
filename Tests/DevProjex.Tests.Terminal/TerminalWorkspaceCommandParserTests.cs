@@ -112,6 +112,33 @@ public sealed class TerminalWorkspaceCommandParserTests
 		Assert.Contains(completion.Candidates, candidate => candidate.Token == "review.md");
 	}
 
+	[Fact]
+	public void CompletionQuotesPathsWithSpacesAndPreservesAnOpeningQuote()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("review notes.md", "context");
+		var context = new TerminalWorkspaceCommandParseContext(
+			[".md"],
+			WorkingDirectory: workspace.Path);
+
+		var unquoted = _parser.GetCompletion("export context rev", 18, context);
+		var quoted = _parser.GetCompletion("export context \"rev", 19, context);
+		var quotedWithSuffix = _parser.GetCompletion(
+			"export context \"rev stale.md\" trailing",
+			19,
+			context);
+
+		Assert.Equal(
+			"export context \"review notes.md\"",
+			Assert.Single(unquoted.Candidates, static item => item.Token == "review notes.md").CompletedText);
+		Assert.Equal(
+			"export context \"review notes.md\"",
+			Assert.Single(quoted.Candidates, static item => item.Token == "review notes.md").CompletedText);
+		Assert.Equal(
+			"export context \"review notes.md\" trailing",
+			Assert.Single(quotedWithSuffix.Candidates, static item => item.Token == "review notes.md").CompletedText);
+	}
+
 	[Theory]
 	[InlineData("language", null)]
 	[InlineData("language RU", "ru")]
@@ -126,13 +153,14 @@ public sealed class TerminalWorkspaceCommandParserTests
 	}
 
 	[Fact]
-	public void Parse_UnknownLanguageReturnsEverySupportedCode()
+	public void Parse_UnknownLanguageReturnsOnlyTheNearestCodes()
 	{
 		var result = _parser.Parse("language klingon", Context);
 
 		Assert.False(result.IsSuccess);
 		Assert.Equal(TerminalWorkspaceCommandErrorCode.UnknownLanguage, result.Error!.Code);
-		Assert.Equal(CliChoiceSets.Language.Tokens, result.Error.Candidates);
+		Assert.InRange(result.Error.Candidates.Count, 2, 3);
+		Assert.True(result.Error.Candidates.Count < CliChoiceSets.Language.Tokens.Count);
 	}
 
 	[Fact]

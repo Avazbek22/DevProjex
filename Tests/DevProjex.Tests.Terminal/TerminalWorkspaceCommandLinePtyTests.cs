@@ -420,14 +420,19 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 			var error = await first.WaitForScreenAsync(
 				"Unknown language code 'klingon'",
 				cancellationToken: TestContext.Current.CancellationToken);
-			Assert.Contains("en ru de", error, StringComparison.Ordinal);
+			Assert.Contains("Did you mean:", error, StringComparison.Ordinal);
+			Assert.Contains(":language", error, StringComparison.Ordinal);
+			Assert.DoesNotContain(
+				string.Join(' ', CliChoiceSets.Language.Tokens),
+				error,
+				StringComparison.Ordinal);
 
 			await first.SendAsync(":language ja\r", TestContext.Current.CancellationToken);
 			await first.WaitForScreenAsync(
 				"言語をjaに切り替えました。",
 				cancellationToken: TestContext.Current.CancellationToken);
 			var japaneseWorkspace = await first.WaitForScreenAsync(
-				"↑/↓ 移動",
+				"Space 切り替え",
 				timeout: TimeSpan.FromSeconds(10),
 				cancellationToken: TestContext.Current.CancellationToken);
 			Assert.Contains("プロジェクトツリー", japaneseWorkspace, StringComparison.Ordinal);
