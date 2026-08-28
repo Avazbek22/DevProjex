@@ -164,6 +164,9 @@ public sealed partial class TerminalPreviewNavigationPtyTests
 		await terminal.WaitForScreenAsync(
 			"[x] Use .gitignore",
 			cancellationToken: TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(
+			terminal,
+			TestContext.Current.CancellationToken);
 		await terminal.SendShiftTabAsync(TestContext.Current.CancellationToken);
 		var afterGitRefresh = await terminal.WaitForScreenAsync(
 			"> CONTEXT PREVIEW",
@@ -176,6 +179,9 @@ public sealed partial class TerminalPreviewNavigationPtyTests
 		await terminal.WaitForScreenAsync(
 			"[x] Use .gitignore",
 			cancellationToken: TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(
+			terminal,
+			TestContext.Current.CancellationToken);
 		await terminal.SendShiftTabAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"> CONTEXT PREVIEW",
