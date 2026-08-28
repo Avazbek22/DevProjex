@@ -140,7 +140,7 @@
   "Dialog.ResetData.Message": "Profil proyek lokal yang tersimpan akan dihapus, termasuk:\nekstensi file, aturan pengecualian, pengaturan pemrosesan konten, dan tanda rahasia manual.\nFile dan folder proyek Anda tidak akan diubah atau dihapus — aplikasi bekerja dalam mode baca-saja.\nPengaturan tampilan tidak akan berubah.\n\nHapus profil tersimpan?",
   "Dialog.ResetData.Confirm": "Menghapus",
   "Dialog.RecentFolderUnavailable.Title": "Folder tidak tersedia",
-  "Dialog.RecentFolderUnavailable.Message": "Folder tidak ditemukan atau untuk sementara tidak tersedia:\n{0}Hapus dari Terbaru?",
+  "Dialog.RecentFolderUnavailable.Message": "Folder tidak ditemukan atau untuk sementara tidak tersedia:\n{0}\n\nHapus dari Terbaru?",
   "Dialog.RecentFolderUnavailable.Remove": "Hapus",
   "Dialog.RecentFolderUnavailable.Keep": "Menyimpan",
   "Dialog.TerminalCommand.Title": "Jalankan dari terminal",

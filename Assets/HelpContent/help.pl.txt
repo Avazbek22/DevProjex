@@ -261,7 +261,7 @@ Zachowanie:
 Zakres: 6–28, reset wynosi 15.
 
 ### Tryb kompaktowy
-Sprawia, że ​​interfejs użytkownika jest gęstszy: mniejsze odstępy w drzewie i ustawieniach.
+Sprawia, że interfejs użytkownika jest gęstszy: mniejsze odstępy w drzewie i ustawieniach.
 Gdy obszar roboczy podglądu jest aktywny, tryb kompaktowy jest włączany automatycznie.
 
 ### Animacje
@@ -397,7 +397,7 @@ Menu kontekstowe Podglądu rozszerza te decyzje. Kliknij wykryte wystąpienie pr
 
 Kopia folderu lub ZIP również zmienia pasujący tekst i nie można go już budować ani uruchamiać. Pliki binarne są kopiowane w niezmienionej postaci i nie są skanowane. Wybrany plik tekstowy większy niż 16 MiB jest pomijany i zgłaszany, a pozostałe dane wyjściowe są tworzone. Błąd wykrywania zatrzymuje całą operację.
 
-Reguła raportów zliczania pasuje tylko do siebie. Zero nie oznacza, że ​​projekt jest bezpieczny. CLI używa `--hide-secrets`; szczegóły techniczne i ograniczenia znajdują się w `Docs/HideSecrets.md`.
+Reguła raportów zliczania pasuje tylko do siebie. Zero nie oznacza, że projekt jest bezpieczny. CLI używa `--hide-secrets`; szczegóły techniczne i ograniczenia znajdują się w `Docs/HideSecrets.md`.
 
 ### 12.4 Ukryj dane osobowe
 Opcja „Ukryj dane osobowe” jest domyślnie wyłączona. Wykrywa adresy e-mail, globalne adresy IP, lokalne nazwy użytkowników w ścieżkach, adresy MAC i międzynarodowe numery telefonów w wybranych plikach tekstowych. Wyniki korzystają z tych samych decyzji w Podglądzie i tego samego potoku wyjściowego co „Ukryj sekrety”; ręczne znaczniki utworzone przez „Ukryj… jako dane osobowe” należą do tej klasy i podlegają temu przełącznikowi (sekcja 12.3). Lokalne nazwy użytkowników w wygenerowanych nagłówkach ścieżek i katalogu głównym drzewa są maskowane jako jedno wspólne znalezisko: licznik uwzględnia je jako jedną wartość,? wskaźnik informuje, czy jest ukryte, czy widoczne, a jedno kliknięcie przełącza wszystkie zamaskowane ścieżki.
@@ -474,7 +474,7 @@ Jeśli przygotowanie ustawień zostanie anulowane, DevProjex przywróci panel do
 ## 13) Sposób obliczania drzewa i metryk
 Wynik zależy od:
 * wybrane rozszerzenia
-* Ignoruj ​​zasady
+* Ignoruj zasady
 * aktywny filtr
 * zaznaczone węzły drzewa (dla operacji opartych na wyborze)
 

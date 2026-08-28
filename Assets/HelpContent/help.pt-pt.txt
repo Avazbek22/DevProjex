@@ -386,7 +386,7 @@ O nome da pasta por si só nem sempre é suficiente. Nomes ambíguos como `build
 
 Alguns armazenamentos de dependências e diretórios de serviços podem ser reconhecidos pela sua estrutura interna característica, mesmo fora de um projeto explicitamente detetado.
 
-A descoberta do âmbito do projeto é limitada, pelo que carregar uma pasta de utilizador grande não se torna uma análise completa e repetida de cada diretório. As estruturas regulares utilizam a descoberta superficial, enquanto os monorepos reconhecidos são pesquisados ​​mais profundamente. Depois de encontrado um âmbito, o Smart Ignore aplica-se a toda a sua subárvore sem limite de profundidade.
+A descoberta do âmbito do projeto é limitada, pelo que carregar uma pasta de utilizador grande não se torna uma análise completa e repetida de cada diretório. As estruturas regulares utilizam a descoberta superficial, enquanto os monorepos reconhecidos são pesquisados mais profundamente. Depois de encontrado um âmbito, o Smart Ignore aplica-se a toda a sua subárvore sem limite de profundidade.
 
 ### 12.3 Ocultar segredos
 «Ocultar segredos» está desativado por predefinição. A opção analisa apenas o texto selecionado e substitui cada valor detetado no próprio local, mantendo o ficheiro e o código envolvente. Enquanto estiver desativada, não é feita qualquer análise nem apresentado um contador. Depois de analisar a seleção atual, o rótulo mostra o número de valores detetados; se as decisões de manter deixarem menos valores ocultos, mostra os dois números — detetados/ocultos — e o indicador ? da linha informa-os em texto.

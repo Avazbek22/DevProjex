@@ -58,7 +58,7 @@ Biçim kuralları:
 Dışa aktarma dosyaları BOM olmadan UTF-8'de yazılır.
 
 ### Sürükle ve Bırak
-Sürükle ve bırak, hiçbir proje yüklenmediğinde başlangıç ​​alanında (Bırakma Bölgesi) çalışır.
+Sürükle ve bırak, hiçbir proje yüklenmediğinde başlangıç alanında (Bırakma Bölgesi) çalışır.
 
 Tüzük:
 * bir klasörü bırakabilirsiniz;
@@ -356,7 +356,7 @@ Yoksayma kuralları birikimlidir. En az bir etkin kural bir öğeyi gizlerse ba�
 Proje içeriğine bağlı olarak aşağıdaki seçenekler gösterilebilir:
 
 * Smart Ignore
-*.gitignore'u kullanın
+* .gitignore'u kullanın
 * Yalnızca izlenen Git dosyaları
 * Boş klasörler
 * Boş dosyalar
@@ -404,7 +404,7 @@ Rapor sayımı kuralı yalnızca eşleşir. Sıfır, projenin güvenli olduğu a
 
 Belge aralıkları ve ana bilgisayarlar, ortak CI kullanıcı adları, iyi bilinen genel DNS çözümleyicileri ve belgelenmiş kurgusal telefon aralıkları görünür kalır. Sıfır eşleşme gizlilik garantisi değildir. CLI `--hide-private-data` yı kullanır; kuralların tamamı ve birinci aşama sınırları `Docs/HidePrivateData.md` dosyasındadır.
 
-### 12.5.gitignore'u kullanın
+### 12.5 .gitignore'u kullanın
 Etkinleştirildiğinde, DevProjex yalnızca açılan klasörün kökündeki dosyayı değil, erişilebilen her `.gitignore` dosyasını uygular.
 
 Her `.gitignore` geçerlidir:

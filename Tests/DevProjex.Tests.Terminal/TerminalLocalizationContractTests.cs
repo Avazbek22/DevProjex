@@ -1,5 +1,7 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 using DevProjex.Application.Presentation;
+using DevProjex.Infrastructure.ResourceStore;
 using Terminal.Gui.Text;
 
 namespace DevProjex.Tests.Terminal;
@@ -148,21 +150,78 @@ public sealed partial class TerminalLocalizationContractTests
 	}
 
 	[Fact]
-	public void EveryLocale_PreservesCompositeFormatPlaceholders()
+	public void EveryLocale_PreservesPlaceholdersAndLineStructure()
 	{
 		var catalogs = ReadCatalogs();
 		var english = catalogs["en"];
 
 		foreach (var locale in catalogs.Keys)
 		{
-			foreach (var (key, expectedValue) in english.Where(static entry =>
-				         entry.Key.StartsWith("Terminal.", StringComparison.Ordinal)))
+			foreach (var (key, expectedValue) in english)
 			{
-				var expected = PlaceholderRegex().Matches(expectedValue).Select(static match => match.Value).Distinct().Order();
-				var actual = PlaceholderRegex().Matches(catalogs[locale][key]).Select(static match => match.Value).Distinct().Order();
-				Assert.Equal(expected, actual);
+				var actualValue = catalogs[locale][key];
+				var expectedPlaceholders = GetPlaceholderMultiset(expectedValue);
+				var actualPlaceholders = GetPlaceholderMultiset(actualValue);
+				Assert.True(
+					expectedPlaceholders.SequenceEqual(actualPlaceholders, StringComparer.Ordinal),
+					$"Placeholder mismatch in {locale}.json/{key}: " +
+					$"expected [{string.Join(", ", expectedPlaceholders)}], " +
+					$"actual [{string.Join(", ", actualPlaceholders)}].");
+				var expectedLineShape = GetLineShape(expectedValue);
+				var actualLineShape = GetLineShape(actualValue);
+				Assert.True(
+					string.Equals(expectedLineShape, actualLineShape, StringComparison.Ordinal),
+					$"Line-break structure mismatch in {locale}.json/{key}: " +
+					$"expected {expectedLineShape}, actual {actualLineShape}.");
 			}
 		}
+	}
+
+	[Fact]
+	public void EveryLocalizedHelpPreservesNumberedSectionsAndBulletMarkup()
+	{
+		var helpDirectory = Path.Combine(FindRepositoryRoot(), "Assets", "HelpContent");
+		var paths = Directory.GetFiles(helpDirectory, "help.*.txt", SearchOption.TopDirectoryOnly)
+			.Order(StringComparer.Ordinal)
+			.ToArray();
+		var english = File.ReadAllText(Path.Combine(helpDirectory, "help.en.txt"));
+		var expectedHeadings = GetNumberedHelpHeadings(english);
+
+		foreach (var path in paths)
+		{
+			var source = Path.GetFileName(path);
+			var help = File.ReadAllText(path);
+			var actualHeadings = GetNumberedHelpHeadings(help);
+			Assert.True(
+				expectedHeadings.SequenceEqual(actualHeadings, StringComparer.Ordinal),
+				$"Numbered help headings differ in {source}: " +
+				$"expected [{string.Join(", ", expectedHeadings)}], " +
+				$"actual [{string.Join(", ", actualHeadings)}].");
+			Assert.DoesNotMatch(MalformedHelpBulletRegex(), help);
+
+			var plainText = HelpContentProvider.ToPlainText(help);
+			Assert.DoesNotMatch(LiteralHelpAsteriskRegex(), plainText);
+		}
+	}
+
+	[Fact]
+	public void LocalizationResources_DoNotContainUnicodeFormatControls()
+	{
+		var violations = new List<string>();
+		foreach (var (locale, catalog) in ReadCatalogs())
+		{
+			foreach (var (key, value) in catalog)
+				AddFormatControlViolations(value, $"{locale}.json/{key}", violations);
+		}
+
+		var helpDirectory = Path.Combine(FindRepositoryRoot(), "Assets", "HelpContent");
+		foreach (var path in Directory.GetFiles(helpDirectory, "help.*.txt", SearchOption.TopDirectoryOnly))
+			AddFormatControlViolations(File.ReadAllText(path), Path.GetFileName(path), violations);
+
+		Assert.True(
+			violations.Count == 0,
+			$"Unicode format controls are not allowed in localized resources:{Environment.NewLine}" +
+			string.Join(Environment.NewLine, violations));
 	}
 
 	[Fact]
@@ -394,6 +453,37 @@ public sealed partial class TerminalLocalizationContractTests
 		Assert.True(fullWidthOpen == fullWidthClose, $"Unbalanced full-width parentheses in {source}.");
 	}
 
+	private static string[] GetPlaceholderMultiset(string value) =>
+		PlaceholderRegex().Matches(value)
+			.Select(static match => match.Value)
+			.Order(StringComparer.Ordinal)
+			.ToArray();
+
+	private static string GetLineShape(string value) =>
+		string.Concat(
+			value.ReplaceLineEndings("\n")
+				.Split('\n')
+				.Select(static line => line.Length == 0 ? '0' : '1'));
+
+	private static string[] GetNumberedHelpHeadings(string help) =>
+		NumberedHelpHeadingRegex().Matches(help)
+			.Select(static match => match.Groups[1].Value)
+			.ToArray();
+
+	private static void AddFormatControlViolations(
+		string value,
+		string source,
+		ICollection<string> violations)
+	{
+		var controls = value.EnumerateRunes()
+			.Where(static rune => Rune.GetUnicodeCategory(rune) == UnicodeCategory.Format)
+			.Select(static rune => $"U+{rune.Value:X4}")
+			.Distinct(StringComparer.Ordinal)
+			.ToArray();
+		if (controls.Length > 0)
+			violations.Add($"{source}: {string.Join(", ", controls)}");
+	}
+
 	private static string RemoveTechnicalLiterals(string value) =>
 		CurrentDirectoryCommandRegex().Replace(
 			CommandVariadicSchemaRegex().Replace(
@@ -421,8 +511,17 @@ public sealed partial class TerminalLocalizationContractTests
 	private static string FindRepositoryRoot()
 		=> PublishedApplicationLocator.FindRepositoryRoot();
 
-	[GeneratedRegex(@"\{\d+\}", RegexOptions.CultureInvariant)]
+	[GeneratedRegex(@"\{[^{}\r\n]+\}", RegexOptions.CultureInvariant)]
 	private static partial Regex PlaceholderRegex();
+
+	[GeneratedRegex(@"(?m)^#{2,3}\s+(\d+(?:\.\d+)*)(?=\)|\s)", RegexOptions.CultureInvariant)]
+	private static partial Regex NumberedHelpHeadingRegex();
+
+	[GeneratedRegex(@"(?m)^\s*\*(?!\s)", RegexOptions.CultureInvariant)]
+	private static partial Regex MalformedHelpBulletRegex();
+
+	[GeneratedRegex(@"(?m)^\s*\*", RegexOptions.CultureInvariant)]
+	private static partial Regex LiteralHelpAsteriskRegex();
 
 	[GeneratedRegex(@" (?=[,:;!?\)]|\.\.\.|\.(?:\s|$))", RegexOptions.CultureInvariant)]
 	private static partial Regex ForbiddenSpaceBeforePunctuationRegex();
