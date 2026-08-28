@@ -45,7 +45,30 @@ internal sealed record SecretFindingCandidateMetadata(
 	string? PersistentMarkHash,
 	string? SessionMarkId,
 	PersistentSecretMarkId? PersistentMarkId,
-	RedactionFindingCategory Category);
+	RedactionFindingCategory Category)
+{
+	public SecretFindingIdentity Identity { get; } = new(RuleId, ValueFingerprint);
+}
+
+internal sealed class SecretFindingIdentity(
+	string ruleId,
+	string valueFingerprint) : IEquatable<SecretFindingIdentity>
+{
+	private readonly string _ruleId = ruleId;
+	private readonly string _valueFingerprint = valueFingerprint;
+	private readonly int _hashCode = HashCode.Combine(
+		StringComparer.Ordinal.GetHashCode(ruleId),
+		StringComparer.Ordinal.GetHashCode(valueFingerprint));
+
+	public bool Equals(SecretFindingIdentity? other) =>
+		ReferenceEquals(this, other) ||
+		other is not null &&
+		string.Equals(_ruleId, other._ruleId, StringComparison.Ordinal) &&
+		string.Equals(_valueFingerprint, other._valueFingerprint, StringComparison.Ordinal);
+
+	public override bool Equals(object? value) => Equals(value as SecretFindingIdentity);
+	public override int GetHashCode() => _hashCode;
+}
 
 internal sealed record SecretFindingSegmentMetadata(
 	int Start,

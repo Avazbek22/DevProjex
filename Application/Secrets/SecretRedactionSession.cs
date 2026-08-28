@@ -2043,7 +2043,7 @@ public sealed class SecretRedactionSession : IDisposable
 		              transformIdentity.Length) * sizeof(char);
 		foreach (var candidate in candidates)
 		{
-			bytes += 72 + (candidate.RuleId.Length + candidate.ValueFingerprint.Length) * sizeof(char);
+			bytes += 104 + (candidate.RuleId.Length + candidate.ValueFingerprint.Length) * sizeof(char);
 			if (candidate.PersistentMarkId is { RelativePath: { } relativePath })
 				bytes += relativePath.Length * sizeof(char);
 		}
@@ -2190,7 +2190,7 @@ public sealed class SecretRedactionScope
 	private readonly int _markedSecretsRevision;
 	private readonly string _transformIdentity;
 	private readonly ISecretDetectionScope _detectorScope;
-	private readonly Dictionary<string, int> _identityIndexes = new(StringComparer.Ordinal);
+	private readonly Dictionary<SecretFindingIdentity, int> _identityIndexes = [];
 	private readonly Dictionary<string, int> _ruleIdentityCounts = new(StringComparer.Ordinal);
 	private readonly Dictionary<string, int> _markedSecretCounts = new(StringComparer.OrdinalIgnoreCase);
 	private readonly ConcurrentDictionary<string, SecretContentInspectionMode> _inspectionModes =
@@ -2811,7 +2811,7 @@ public sealed class SecretRedactionScope
 
 	private int GetOrCreateIdentityIndex(SecretFindingCandidateMetadata finding)
 	{
-		var identity = $"{finding.RuleId}:{finding.ValueFingerprint}";
+		var identity = finding.Identity;
 		if (_identityIndexes.TryGetValue(identity, out var identityIndex))
 			return identityIndex;
 

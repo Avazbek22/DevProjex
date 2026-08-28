@@ -62,7 +62,7 @@ public sealed class SecretRedactionCountOnlyPerformanceTests
 		Assert.Equal(fileCount * findingsPerFile, snapshot.DetectedCount);
 		Assert.Equal(fileCount * findingsPerFile, snapshot.RedactedCount);
 		Assert.True(
-			allocatedBytes < 8_000_000,
+			allocatedBytes < 1_000_000,
 			$"Count-only aggregation allocated {allocatedBytes:N0} bytes.");
 		TestContext.Current.TestOutputHelper?.WriteLine(
 			$"Counted {snapshot.RedactedCount:N0} cached findings in " +
