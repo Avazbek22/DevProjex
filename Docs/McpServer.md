@@ -9,8 +9,8 @@ devprojex mcp --root /absolute/path/to/project
 ```
 
 Repeat `--root` to expose more than one project. When no explicit root is given,
-DevProjex uses `CLAUDE_PROJECT_DIR`, then the current directory. A `project`
-argument is optional only when the server has exactly one root.
+DevProjex uses `DEVPROJEX_ROOT`, then `CLAUDE_PROJECT_DIR`, then the current
+directory. A `project` argument is optional only when the server has exactly one root.
 
 Private-data redaction is opt-in at server startup:
 
