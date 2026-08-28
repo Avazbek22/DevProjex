@@ -10,6 +10,7 @@ internal sealed class TerminalProjectTreeView : ListView
 	private readonly Func<int, TerminalTreeRow?> _rowResolver;
 	private readonly TerminalPointerEventDeduplicator _pointerEvents = new();
 	private int _lastNamePressedRow = -1;
+	private int _lastNamePressedColumn = -1;
 	private long _lastNamePressedAt;
 
 	public TerminalProjectTreeView(
@@ -82,15 +83,24 @@ internal sealed class TerminalProjectTreeView : ListView
 		EnsureSelectedItemVisible();
 
 		if (isDoubleClicked ||
-			isPressed && row.Node.IsDirectory && _lastNamePressedRow == rowIndex &&
+			isPressed && row.Node.IsDirectory &&
+			_lastNamePressedRow == rowIndex &&
+			_lastNamePressedColumn == position.X &&
 			now - _lastNamePressedAt <= DoubleClickWindowMilliseconds)
 		{
 			if (row.Node.IsDirectory)
+			{
+				// The first click already toggled the whole row. Balance the second
+				// click so a double-click changes expansion without changing selection.
+				SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
 				ExpansionToggleRequested?.Invoke(this, EventArgs.Empty);
+			}
 			_lastNamePressedRow = -1;
+			_lastNamePressedColumn = -1;
 			return true;
 		}
 		_lastNamePressedRow = row.Node.IsDirectory ? rowIndex : -1;
+		_lastNamePressedColumn = row.Node.IsDirectory ? position.X : -1;
 		_lastNamePressedAt = now;
 		SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
 		return true;

@@ -6,7 +6,7 @@ namespace DevProjex.Tests.Terminal;
 public sealed class TerminalTreeMousePtyTests
 {
 	[Fact(Timeout = 90_000)]
-	public async Task MouseHitZonesKeepSelectionAndCheckboxStateIndependent()
+	public async Task MouseTogglesSelectionAcrossTheWholeRowAndDoubleClickExpandsFolders()
 	{
 		using var project = CreateProject();
 		var projectName = Path.GetFileName(project.Path);
@@ -35,19 +35,9 @@ public sealed class TerminalTreeMousePtyTests
 		var rootRow = FindVisibleTreeRow(terminal.CaptureScreen(), $"[x] {projectName}");
 		Assert.True(rootRow >= 0);
 
-		// Clicking a name only changes focus/selection.
+		// The name area toggles the row just like the checkbox itself.
 		await terminal.SendMouseClickAsync(
 			column: 12,
-			row: rootRow,
-			cancellationToken: TestContext.Current.CancellationToken);
-		var selectedOnly = await terminal.WaitForScreenAsync(
-			$"[x] {projectName}",
-			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.Contains("src", selectedOnly, StringComparison.Ordinal);
-
-		// The checkbox has its own hit zone and does not collapse the node.
-		await terminal.SendMouseClickAsync(
-			column: 4,
 			row: rootRow,
 			cancellationToken: TestContext.Current.CancellationToken);
 		var uncheckedRoot = await terminal.WaitForScreenAsync(
@@ -57,24 +47,27 @@ public sealed class TerminalTreeMousePtyTests
 		await terminal.WaitForScreenAsync(
 			"Files 0",
 			cancellationToken: TestContext.Current.CancellationToken);
+
+		// Trailing space in the same row is an equally valid toggle target.
 		await terminal.SendMouseClickAsync(
-			column: 4,
+			column: 30,
 			row: rootRow,
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			$"[x] {projectName}",
 			cancellationToken: TestContext.Current.CancellationToken);
 
-		// The disclosure glyph changes expansion without touching selection.
+		// Double-clicking any folder row changes expansion.
 		await terminal.SendMouseClickAsync(
-			column: 1,
+			column: 12,
 			row: rootRow,
+			clickCount: 2,
 			cancellationToken: TestContext.Current.CancellationToken);
 		var collapsed = await terminal.WaitForStableScreenAsync(
-			$"[x] {projectName}",
+			projectName,
 			forbidden: "│  > [x] src",
 			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.Contains($"[x] {projectName}", collapsed, StringComparison.Ordinal);
+		Assert.Contains(projectName, collapsed, StringComparison.Ordinal);
 		await terminal.SendMouseClickAsync(
 			column: 12,
 			row: rootRow,
@@ -85,11 +78,12 @@ public sealed class TerminalTreeMousePtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains($"[x] {projectName}", expanded, StringComparison.Ordinal);
 
-		var sourceRow = FindVisibleTreeRow(terminal.CaptureScreen(), "[x] src");
+		var sourceRow = FindVisibleTreeRow(expanded, "[x] src");
 		Assert.True(sourceRow >= 0);
 		await terminal.SendMouseClickAsync(
-			column: 3,
+			column: 12,
 			row: sourceRow,
+			clickCount: 2,
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"File001.cs",
@@ -121,7 +115,7 @@ public sealed class TerminalTreeMousePtyTests
 		Assert.Equal(-1, FindVisibleTreeRow(toggledFile, "File001.cs"));
 		Assert.False(terminal.HasExited);
 
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(
@@ -321,7 +315,7 @@ public sealed class TerminalTreeMousePtyTests
 		Assert.DoesNotContain("ROOT FOLDERS", extensionRestored, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(
@@ -385,7 +379,7 @@ public sealed class TerminalTreeMousePtyTests
 		Assert.Contains("[x] All", ExtractPanel(restored, "Exclusions", "File types"), StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(
