@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using DevProjex.Infrastructure.ProjectProfiles;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -98,6 +99,45 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 			static line => line.Contains("Символы", StringComparison.Ordinal));
 
 		Assert.Contains("Примерное число токенов", resultLine, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 120_000)]
+	public async Task ProfileSaveWithQuotedNamePersistsAValidProfileOutsideTheProject()
+	{
+		using var workspace = new TemporaryDirectory();
+		var projectPath = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/global.json", "{}");
+		workspace.WriteFile("project/src/App.cs", "namespace Sample;");
+		var profilePath = Path.Combine(workspace.Path, "My Name.json");
+		string? internalDataRoot = null;
+		await using var terminal = await StartAsync(
+			projectPath,
+			columns: 160,
+			rows: 36,
+			initializeDataRoot: dataRoot => internalDataRoot = dataRoot);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.SendAsync(
+			":profile save \"My Name\"\r",
+			TestContext.Current.CancellationToken);
+		var result = await terminal.WaitForScreenAsync(
+			profilePath,
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains("My Name.json", result, StringComparison.Ordinal);
+		Assert.NotNull(internalDataRoot);
+		Assert.False(PathUtility.IsPathInside(internalDataRoot, projectPath));
+		Assert.True(File.Exists(profilePath));
+		Assert.False(File.Exists(Path.Combine(projectPath, "My Name.json")));
+		var profile = await new PortableProjectProfileService().LoadAsync(
+			profilePath,
+			TestContext.Current.CancellationToken);
+		Assert.Contains(".cs", profile.Extensions ?? [], StringComparer.OrdinalIgnoreCase);
 		Assert.False(terminal.HasExited);
 		await QuitAsync(terminal);
 	}
@@ -787,7 +827,8 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		int rows,
 		IReadOnlyDictionary<string, string>? environment = null,
 		bool plain = false,
-		string? language = "en")
+		string? language = "en",
+		Action<string>? initializeDataRoot = null)
 	{
 		var arguments = new List<string>
 		{
@@ -812,7 +853,8 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 			columns,
 			rows,
 			environment,
-			cancellationToken: TestContext.Current.CancellationToken);
+			cancellationToken: TestContext.Current.CancellationToken,
+			initializeDataRoot: initializeDataRoot);
 	}
 
 	private static TemporaryDirectory CreateProject()
