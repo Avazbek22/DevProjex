@@ -35,7 +35,7 @@ internal readonly record struct SecretFileMetadata(long Length, long LastWriteUt
 	}
 }
 
-internal sealed record SecretFindingCandidateMetadata(
+internal sealed class SecretFindingCandidateMetadata(
 	int RawStart,
 	int RawLength,
 	string RuleId,
@@ -45,7 +45,82 @@ internal sealed record SecretFindingCandidateMetadata(
 	string? PersistentMarkHash,
 	string? SessionMarkId,
 	PersistentSecretMarkId? PersistentMarkId,
-	RedactionFindingCategory Category);
+	RedactionFindingCategory Category,
+	SecretOccurrenceCoordinateIdentity OccurrenceCoordinateIdentity) :
+	IEquatable<SecretFindingCandidateMetadata>
+{
+	private string? _occurrenceId;
+
+	public int RawStart { get; } = RawStart;
+	public int RawLength { get; } = RawLength;
+	public string RuleId { get; } = RuleId;
+	public string ValueFingerprint { get; } = ValueFingerprint;
+	public int RuleOrder { get; } = RuleOrder;
+	public SecretFindingSource Source { get; } = Source;
+	public string? PersistentMarkHash { get; } = PersistentMarkHash;
+	public string? SessionMarkId { get; } = SessionMarkId;
+	public PersistentSecretMarkId? PersistentMarkId { get; } = PersistentMarkId;
+	public RedactionFindingCategory Category { get; } = Category;
+	public SecretOccurrenceCoordinateIdentity OccurrenceCoordinateIdentity { get; } = OccurrenceCoordinateIdentity;
+	public SecretFindingIdentity Identity { get; } = new(RuleId, ValueFingerprint);
+
+	public string? GetCachedOccurrenceId() => Volatile.Read(ref _occurrenceId);
+
+	public string CacheOccurrenceId(string occurrenceId) =>
+		Interlocked.CompareExchange(ref _occurrenceId, occurrenceId, null) ?? occurrenceId;
+
+	public bool Equals(SecretFindingCandidateMetadata? other) =>
+		ReferenceEquals(this, other) ||
+		other is not null &&
+		RawStart == other.RawStart &&
+		RawLength == other.RawLength &&
+		RuleOrder == other.RuleOrder &&
+		Source == other.Source &&
+		PersistentMarkId == other.PersistentMarkId &&
+		Category == other.Category &&
+		OccurrenceCoordinateIdentity == other.OccurrenceCoordinateIdentity &&
+		string.Equals(RuleId, other.RuleId, StringComparison.Ordinal) &&
+		string.Equals(ValueFingerprint, other.ValueFingerprint, StringComparison.Ordinal) &&
+		string.Equals(PersistentMarkHash, other.PersistentMarkHash, StringComparison.Ordinal) &&
+		string.Equals(SessionMarkId, other.SessionMarkId, StringComparison.Ordinal);
+
+	public override bool Equals(object? value) =>
+		Equals(value as SecretFindingCandidateMetadata);
+
+	public override int GetHashCode() => HashCode.Combine(
+		HashCode.Combine(RawStart, RawLength, RuleOrder, Source),
+		HashCode.Combine(PersistentMarkId, Category, OccurrenceCoordinateIdentity),
+		HashCode.Combine(
+			StringComparer.Ordinal.GetHashCode(RuleId),
+			StringComparer.Ordinal.GetHashCode(ValueFingerprint),
+			PersistentMarkHash is null ? 0 : StringComparer.Ordinal.GetHashCode(PersistentMarkHash),
+			SessionMarkId is null ? 0 : StringComparer.Ordinal.GetHashCode(SessionMarkId)));
+}
+
+internal readonly record struct SecretOccurrenceCoordinateIdentity(
+	bool IsSourceBacked,
+	int Start,
+	int Length);
+
+internal sealed class SecretFindingIdentity(
+	string ruleId,
+	string valueFingerprint) : IEquatable<SecretFindingIdentity>
+{
+	private readonly string _ruleId = ruleId;
+	private readonly string _valueFingerprint = valueFingerprint;
+	private readonly int _hashCode = HashCode.Combine(
+		StringComparer.Ordinal.GetHashCode(ruleId),
+		StringComparer.Ordinal.GetHashCode(valueFingerprint));
+
+	public bool Equals(SecretFindingIdentity? other) =>
+		ReferenceEquals(this, other) ||
+		other is not null &&
+		string.Equals(_ruleId, other._ruleId, StringComparison.Ordinal) &&
+		string.Equals(_valueFingerprint, other._valueFingerprint, StringComparison.Ordinal);
+
+	public override bool Equals(object? value) => Equals(value as SecretFindingIdentity);
+	public override int GetHashCode() => _hashCode;
+}
 
 internal sealed record SecretFindingSegmentMetadata(
 	int Start,
@@ -58,6 +133,8 @@ internal sealed record SecretScanCacheEntry(
 	string ContentFingerprint,
 	string RulesIdentity,
 	string TransformIdentity,
+	string OccurrenceProjectRoot,
+	string OccurrenceRelativePath,
 	int MarkedSecretsRevision,
 	bool IsBinary,
 	IReadOnlyList<SecretFindingCandidateMetadata> Candidates,

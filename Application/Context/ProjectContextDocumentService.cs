@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Runtime.CompilerServices;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Unicode;
@@ -45,6 +46,9 @@ public sealed class ProjectContextDocumentService(
 	private const int SchemaVersion = 1;
 	private const string Kind = "devprojex-context";
 	private const int StructuredTreeFlushNodeInterval = 512;
+	private const int MaximumBoundedReadAhead = 8;
+	internal const long MaximumCompleteSnapshotReadAheadRetainedBytes = 4L * 1024 * 1024;
+	private const long MaximumBoundedReadAheadRetainedBytes = 4L * 1024 * 1024;
 	private static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
 	private static readonly RepositoryWebPathPresentationService WebPathPresentation = new();
 
@@ -385,15 +389,15 @@ public sealed class ProjectContextDocumentService(
 
 		if (includesContent)
 		{
-			for (var index = 0; index < plan.IncludedFiles.Count; index++)
+			await foreach (var source in OpenSourceSnapshotsInOrderAsync(
+				               plan.SourceRoot,
+				               plan.IncludedFiles,
+				               cancellationToken).ConfigureAwait(false))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				var path = plan.IncludedFiles[index];
-				await using var snapshot = await OpenSourceSnapshotAsync(
-						plan.SourceRoot,
-						path,
-						cancellationToken)
-					.ConfigureAwait(false);
+				var index = source.Index;
+				var path = source.Path;
+				await using var snapshot = source.Snapshot;
 				var file = CreateCompleteFileDocument(
 					path,
 					snapshot.Result,
@@ -495,14 +499,14 @@ public sealed class ProjectContextDocumentService(
 		if (IncludesContent(view))
 		{
 			var processedFiles = 0;
-			foreach (var path in plan.IncludedFiles)
+			await foreach (var source in OpenSourceSnapshotsInOrderAsync(
+				               plan.SourceRoot,
+				               plan.IncludedFiles,
+				               cancellationToken).ConfigureAwait(false))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				await using var snapshot = await OpenSourceSnapshotAsync(
-						plan.SourceRoot,
-						path,
-						cancellationToken)
-					.ConfigureAwait(false);
+				var path = source.Path;
+				await using var snapshot = source.Snapshot;
 				var file = CreateCompleteFileDocument(
 					path,
 					snapshot.Result,
@@ -590,14 +594,14 @@ public sealed class ProjectContextDocumentService(
 		if (IncludesContent(view))
 		{
 			var processedFiles = 0;
-			foreach (var path in plan.IncludedFiles)
+			await foreach (var source in OpenSourceSnapshotsInOrderAsync(
+				               plan.SourceRoot,
+				               plan.IncludedFiles,
+				               cancellationToken).ConfigureAwait(false))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				await using var snapshot = await OpenSourceSnapshotAsync(
-						plan.SourceRoot,
-						path,
-						cancellationToken)
-					.ConfigureAwait(false);
+				var path = source.Path;
+				await using var snapshot = source.Snapshot;
 				var file = CreateCompleteFileDocument(
 					path,
 					snapshot.Result,
@@ -687,14 +691,14 @@ public sealed class ProjectContextDocumentService(
 		if (IncludesContent(view))
 		{
 			var processedFiles = 0;
-			foreach (var path in plan.IncludedFiles)
+			await foreach (var source in OpenSourceSnapshotsInOrderAsync(
+				               plan.SourceRoot,
+				               plan.IncludedFiles,
+				               cancellationToken).ConfigureAwait(false))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				await using var snapshot = await OpenSourceSnapshotAsync(
-						plan.SourceRoot,
-						path,
-						cancellationToken)
-					.ConfigureAwait(false);
+				var path = source.Path;
+				await using var snapshot = source.Snapshot;
 				var file = CreateCompleteFileDocument(
 					path,
 					snapshot.Result,
@@ -773,6 +777,134 @@ public sealed class ProjectContextDocumentService(
 			totalFiles,
 			BytesWritten: 0,
 			Percentage: percentage));
+	}
+
+	private async IAsyncEnumerable<CompleteSourceSnapshot> OpenSourceSnapshotsInOrderAsync(
+		string projectRoot,
+		IReadOnlyList<string> orderedPaths,
+		[EnumeratorCancellation] CancellationToken cancellationToken)
+	{
+		if (orderedPaths.Count == 0)
+			yield break;
+
+		var readAheadCount = Math.Min(
+			orderedPaths.Count,
+			Math.Min(MaximumBoundedReadAhead, ScanParallelismPolicy.MaxDegreeOfParallelism));
+		using var readCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		using var retainedBytes = new WeightedByteBudget(MaximumCompleteSnapshotReadAheadRetainedBytes);
+		var pendingReads = new Queue<PendingCompleteSnapshotRead>(readAheadCount);
+		var nextPathIndex = 0;
+
+		void FillReadAhead()
+		{
+			while (pendingReads.Count < readAheadCount && nextPathIndex < orderedPaths.Count)
+			{
+				var index = nextPathIndex++;
+				var path = orderedPaths[index];
+				pendingReads.Enqueue(new PendingCompleteSnapshotRead(
+					index,
+					path,
+					OpenBudgetedSourceSnapshotAsync(
+						projectRoot,
+						path,
+						retainedBytes,
+						readCancellation.Token)));
+			}
+		}
+
+		FillReadAhead();
+		try
+		{
+			while (pendingReads.Count > 0)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				var pending = pendingReads.Dequeue();
+				IFileContentSnapshot? snapshot = null;
+				try
+				{
+					snapshot = await pending.ReadTask.ConfigureAwait(false);
+					cancellationToken.ThrowIfCancellationRequested();
+					var source = new CompleteSourceSnapshot(pending.Index, pending.Path, snapshot);
+					snapshot = null;
+					yield return source;
+				}
+				finally
+				{
+					if (snapshot is not null)
+						await snapshot.DisposeAsync().ConfigureAwait(false);
+				}
+
+				FillReadAhead();
+			}
+		}
+		finally
+		{
+			await CancelAndDisposePendingSnapshotsAsync(readCancellation, pendingReads)
+				.ConfigureAwait(false);
+		}
+	}
+
+	private async Task<IFileContentSnapshot> OpenBudgetedSourceSnapshotAsync(
+		string projectRoot,
+		string path,
+		WeightedByteBudget retainedBytes,
+		CancellationToken cancellationToken)
+	{
+		// Start these methods in source order so a full-budget request cannot be
+		// blocked by later snapshots whose leases the ordered consumer cannot release yet.
+		var lease = await retainedBytes.AcquireAsync(
+				EstimateCompleteSnapshotRetainedBytes(path),
+				cancellationToken)
+			.ConfigureAwait(false);
+		try
+		{
+			var snapshot = await OpenSourceSnapshotAsync(projectRoot, path, cancellationToken)
+				.ConfigureAwait(false);
+			return new BudgetedCompleteSourceSnapshot(snapshot, lease);
+		}
+		catch
+		{
+			lease.Dispose();
+			throw;
+		}
+	}
+
+	internal static long EstimateCompleteSnapshotRetainedBytes(string path)
+	{
+		try
+		{
+			var length = new FileInfo(path).Length;
+			return length > long.MaxValue / sizeof(char)
+				? MaximumCompleteSnapshotReadAheadRetainedBytes
+				: Math.Max(1, length * sizeof(char));
+		}
+		catch (Exception exception) when (
+			exception is IOException or UnauthorizedAccessException or ArgumentException)
+		{
+			return MaximumCompleteSnapshotReadAheadRetainedBytes;
+		}
+	}
+
+	private static async Task CancelAndDisposePendingSnapshotsAsync(
+		CancellationTokenSource cancellation,
+		Queue<PendingCompleteSnapshotRead> pendingReads)
+	{
+		cancellation.Cancel();
+		while (pendingReads.TryDequeue(out var pending))
+		{
+			try
+			{
+				var snapshot = await pending.ReadTask.ConfigureAwait(false);
+				await snapshot.DisposeAsync().ConfigureAwait(false);
+			}
+			catch
+			{
+				// Speculative snapshots are not observable after the writer stops. Draining owns
+				// their failures and releases every handle without masking the primary outcome.
+				if (pending.ReadTask.IsFaulted)
+					_ = pending.ReadTask.Exception;
+			}
+		}
 	}
 
 	private async ValueTask<IFileContentSnapshot> OpenSourceSnapshotAsync(
@@ -924,77 +1056,154 @@ public sealed class ProjectContextDocumentService(
 			Math.Min(plan.IncludedFiles.Count, maximumFiles));
 		var remainingCharacters = maximumCharacters;
 		var isTruncated = plan.IncludedFiles.Count > maximumFiles;
-		foreach (var path in plan.IncludedFiles.Take(maximumFiles))
+		var pathCount = Math.Min(plan.IncludedFiles.Count, maximumFiles);
+		var readAheadCount = ResolveBoundedReadAheadCount(maximumFileBytes, pathCount);
+		using var readCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		var pendingReads = new Queue<PendingBoundedFileRead>(Math.Max(1, readAheadCount));
+		var nextPathIndex = 0;
+
+		void FillReadAhead()
 		{
-			cancellationToken.ThrowIfCancellationRequested();
-			var relativePath = NormalizeRelativePath(plan.SourceRoot, path);
-			var result = await ReadSourceClassifiedAsync(
-					plan.SourceRoot,
+			while (pendingReads.Count < readAheadCount && nextPathIndex < pathCount)
+			{
+				var path = plan.IncludedFiles[nextPathIndex++];
+				pendingReads.Enqueue(new PendingBoundedFileRead(
 					path,
-					maximumFileBytes,
-					cancellationToken)
-				.ConfigureAwait(false);
-			var content = result.Content;
-			if (!result.IsText || content is null)
-			{
-				files.Add(new ContextFileDocument(
-					relativePath,
-					result.Classification,
-					Content: null));
-				continue;
-			}
-
-			if (content.IsEstimated)
-			{
-				files.Add(new ContextFileDocument(
-					relativePath,
-					FileContentClassification.TooLarge,
-					Content: null,
-					IsOmitted: true));
-				isTruncated = true;
-				continue;
-			}
-
-			var fileContent = content.Content;
-			var truncatedAtCharacterBoundary = false;
-			if (fileContent.Length > remainingCharacters)
-			{
-				fileContent = fileContent[..ClampToCompleteUnicodeScalar(fileContent, remainingCharacters)];
-				isTruncated = true;
-				truncatedAtCharacterBoundary = true;
-			}
-			if (prepared is not null)
-			{
-				var preparedFile = prepared.GetFile(path);
-				var completeLength = preparedFile.ClampLengthToCompleteRedactions(fileContent.Length);
-				if (completeLength != fileContent.Length)
-				{
-					fileContent = fileContent[..completeLength];
-					isTruncated = true;
-					truncatedAtCharacterBoundary = true;
-				}
-
-			}
-			files.Add(new ContextFileDocument(
-				relativePath,
-				FileContentClassification.Text,
-				fileContent,
-				IsTruncated: fileContent.Length != content.Content.Length));
-			remainingCharacters -= fileContent.Length;
-			// Once a file is truncated, later files are not part of the bounded prefix.
-			// Continuing merely because a placeholder was removed at the boundary would
-			// make the limit select non-contiguous content and violate deterministic ordering.
-			if (truncatedAtCharacterBoundary)
-				break;
-			if (remainingCharacters == 0 &&
-			    files.Count < Math.Min(plan.IncludedFiles.Count, maximumFiles))
-			{
-				isTruncated = true;
-				break;
+					Task.Run(
+						async () => await ReadSourceClassifiedAsync(
+								plan.SourceRoot,
+								path,
+								maximumFileBytes,
+								readCancellation.Token)
+							.ConfigureAwait(false),
+						readCancellation.Token)));
 			}
 		}
 
+		FillReadAhead();
+		try
+		{
+			while (pendingReads.Count > 0)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				var pending = pendingReads.Dequeue();
+				var result = await pending.ReadTask.ConfigureAwait(false);
+				var relativePath = NormalizeRelativePath(plan.SourceRoot, pending.Path);
+				var content = result.Content;
+				var reachedOutputBoundary = false;
+				if (!result.IsText || content is null)
+				{
+					files.Add(new ContextFileDocument(
+						relativePath,
+						result.Classification,
+						Content: null));
+				}
+				else if (content.IsEstimated)
+				{
+					files.Add(new ContextFileDocument(
+						relativePath,
+						FileContentClassification.TooLarge,
+						Content: null,
+						IsOmitted: true));
+					isTruncated = true;
+				}
+				else
+				{
+					var fileContent = content.Content;
+					var truncatedAtCharacterBoundary = false;
+					if (fileContent.Length > remainingCharacters)
+					{
+						fileContent = fileContent[..ClampToCompleteUnicodeScalar(fileContent, remainingCharacters)];
+						isTruncated = true;
+						truncatedAtCharacterBoundary = true;
+					}
+					if (prepared is not null)
+					{
+						var preparedFile = prepared.GetFile(pending.Path);
+						var completeLength = preparedFile.ClampLengthToCompleteRedactions(fileContent.Length);
+						if (completeLength != fileContent.Length)
+						{
+							fileContent = fileContent[..completeLength];
+							isTruncated = true;
+							truncatedAtCharacterBoundary = true;
+						}
+					}
+					files.Add(new ContextFileDocument(
+						relativePath,
+						FileContentClassification.Text,
+						fileContent,
+						IsTruncated: fileContent.Length != content.Content.Length));
+					remainingCharacters -= fileContent.Length;
+					// Once a file is truncated, later files are not part of the bounded prefix.
+					// Continuing merely because a placeholder was removed at the boundary would
+					// make the limit select non-contiguous content and violate deterministic ordering.
+					reachedOutputBoundary = truncatedAtCharacterBoundary;
+					if (!reachedOutputBoundary && remainingCharacters == 0 && files.Count < pathCount)
+					{
+						isTruncated = true;
+						reachedOutputBoundary = true;
+					}
+				}
+
+				result = null!;
+				content = null;
+				if (reachedOutputBoundary)
+					break;
+				FillReadAhead();
+			}
+		}
+		finally
+		{
+			await CancelAndObservePendingReadsAsync(readCancellation, pendingReads)
+				.ConfigureAwait(false);
+		}
+
 		return new ContextFileReadResult(files, isTruncated);
+	}
+
+	private static int ResolveBoundedReadAheadCount(long maximumFileBytes, int fileCount)
+	{
+		if (fileCount <= 1)
+			return fileCount;
+
+		var concurrencyLimit = Math.Min(
+			fileCount,
+			Math.Min(MaximumBoundedReadAhead, ScanParallelismPolicy.MaxDegreeOfParallelism));
+		if (maximumFileBytes == 0)
+			return concurrencyLimit;
+
+		var maximumRetainedBytesPerFile = maximumFileBytes > long.MaxValue / sizeof(char)
+			? long.MaxValue
+			: maximumFileBytes * sizeof(char);
+		var memoryBoundedLimit = Math.Max(
+			1,
+			MaximumBoundedReadAheadRetainedBytes / maximumRetainedBytesPerFile);
+		return (int)Math.Min(concurrencyLimit, memoryBoundedLimit);
+	}
+
+	private static async Task CancelAndObservePendingReadsAsync(
+		CancellationTokenSource cancellation,
+		Queue<PendingBoundedFileRead> pendingReads)
+	{
+		cancellation.Cancel();
+		if (pendingReads.Count == 0)
+			return;
+
+		var tasks = pendingReads.Select(static pending => pending.ReadTask).ToArray();
+		try
+		{
+			await Task.WhenAll(tasks).ConfigureAwait(false);
+		}
+		catch
+		{
+			// Speculative reads past the deterministic output boundary are never observable.
+			// Draining them still owns every exception and prevents background work escaping.
+			foreach (var task in tasks)
+			{
+				if (task.IsFaulted)
+					_ = task.Exception;
+			}
+		}
 	}
 
 	private static int ClampToCompleteUnicodeScalar(string value, int maximumLength)
@@ -1029,7 +1238,8 @@ public sealed class ProjectContextDocumentService(
 		}
 		AppendTextFiles(output, files);
 		AppendTruncationNotice(output, truncated);
-		return output.ToString().TrimEnd('\r', '\n');
+		TrailingLineEndingTrimming.Trim(output);
+		return output.ToString();
 	}
 
 	private string BuildMarkdown(
@@ -1053,8 +1263,11 @@ public sealed class ProjectContextDocumentService(
 				GetDocumentRoot(plan),
 				GetProjectName(plan),
 				includeRootPath: true,
-				cancellationToken: cancellationToken).TrimEnd('\r', '\n');
-			AppendMarkdownFence(output, tree, "text");
+				cancellationToken: cancellationToken);
+			AppendMarkdownFence(
+				output,
+				tree.AsSpan(0, TrailingLineEndingTrimming.GetTrimmedLength(tree)),
+				"text");
 		}
 
 		foreach (var file in files)
@@ -1083,7 +1296,8 @@ public sealed class ProjectContextDocumentService(
 
 		if (truncated)
 			output.AppendLine().AppendLine("_Preview truncated._");
-		return output.ToString().TrimEnd('\r', '\n');
+		TrailingLineEndingTrimming.Trim(output);
+		return output.ToString();
 	}
 
 	private string BuildJson(
@@ -1298,15 +1512,18 @@ public sealed class ProjectContextDocumentService(
 		return (completedTree!, truncated);
 	}
 
-	private static void AppendMarkdownFence(StringBuilder output, string content, string language)
+	private static void AppendMarkdownFence(
+		StringBuilder output,
+		ReadOnlySpan<char> content,
+		string language)
 	{
 		var fence = new string('`', Math.Max(3, FindLongestBacktickRun(content) + 1));
 		output.Append(fence).AppendLine(language);
-		output.AppendLine(content);
+		output.Append(content).AppendLine();
 		output.AppendLine(fence);
 	}
 
-	private static int FindLongestBacktickRun(string value)
+	private static int FindLongestBacktickRun(ReadOnlySpan<char> value)
 	{
 		var longest = 0;
 		var current = 0;
@@ -1871,6 +2088,49 @@ public sealed class ProjectContextDocumentService(
 	private sealed record ContextFileReadResult(
 		IReadOnlyList<ContextFileDocument> Files,
 		bool IsTruncated);
+
+	private sealed record PendingBoundedFileRead(
+		string Path,
+		Task<FileContentReadResult> ReadTask);
+
+	private readonly record struct CompleteSourceSnapshot(
+		int Index,
+		string Path,
+		IFileContentSnapshot Snapshot);
+
+	private sealed record PendingCompleteSnapshotRead(
+		int Index,
+		string Path,
+		Task<IFileContentSnapshot> ReadTask);
+
+	private sealed class BudgetedCompleteSourceSnapshot(
+		IFileContentSnapshot inner,
+		WeightedByteBudget.Lease lease) : IFileContentSnapshot
+	{
+		private int _disposed;
+
+		public FileContentMetricsResult Result => inner.Result;
+
+		public ValueTask CopyTextToAsync(
+			int maximumCharacters,
+			Func<ReadOnlyMemory<char>, CancellationToken, ValueTask> writeChunk,
+			CancellationToken cancellationToken = default) =>
+			inner.CopyTextToAsync(maximumCharacters, writeChunk, cancellationToken);
+
+		public async ValueTask DisposeAsync()
+		{
+			if (Interlocked.Exchange(ref _disposed, 1) != 0)
+				return;
+			try
+			{
+				await inner.DisposeAsync().ConfigureAwait(false);
+			}
+			finally
+			{
+				lease.Dispose();
+			}
+		}
+	}
 
 	private sealed record ContextFileDocument(
 		string Path,

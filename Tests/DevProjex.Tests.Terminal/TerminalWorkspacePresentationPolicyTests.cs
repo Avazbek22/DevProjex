@@ -113,6 +113,21 @@ public sealed class TerminalWorkspacePresentationPolicyTests
 		Assert.Equal([firstOccurrence, secondOccurrence], toggled);
 	}
 
+	[Theory]
+	[InlineData(false, false)]
+	[InlineData(true, true)]
+	public void LocalizedTextUsesAsciiWhenPlainOrUnicodeIsUnavailable(
+		bool plain,
+		bool supportsUnicode)
+	{
+		var value = TerminalWorkspaceSession.NormalizeLocalizedText(
+			"↑/↓ Action…",
+			plain,
+			supportsUnicode);
+
+		Assert.Equal("k/j Action...", value);
+	}
+
 	[Fact]
 	public void PreviewNavigationProjectsWidePrefixesToTerminalColumns()
 	{
@@ -137,6 +152,44 @@ public sealed class TerminalWorkspacePresentationPolicyTests
 
 		Assert.Equal(2, view.HorizontalOffset);
 		Assert.True(view.MaxLineLength > document.MaxLineLength);
+	}
+
+	[Fact]
+	public void RepeatedPreviewLayout_ReusesDecodedDocumentLine()
+	{
+		using var document = new CountingPreviewTextDocument("界ABC");
+		using var view = new TerminalVirtualizedPreviewView(showScrollBars: false);
+		view.SetDocument(document, preserveViewport: false);
+
+		for (var iteration = 0; iteration < 100; iteration++)
+			Assert.Equal(5, view.GetDisplayColumn(0, 4));
+
+		Assert.Equal(1, document.LineReadCount);
+
+		using var replacement = new CountingPreviewTextDocument("日Z");
+		view.SetDocument(replacement, preserveViewport: true);
+		Assert.Equal(3, view.GetDisplayColumn(0, 2));
+		Assert.Equal(1, replacement.LineReadCount);
+		Assert.Equal(1, document.LineReadCount);
+	}
+
+	[Fact]
+	public void VisiblePreviewLinesUseOneRangeVisitAndRemainCached()
+	{
+		using var document = new CountingRangePreviewTextDocument(40);
+		using var view = new TerminalVirtualizedPreviewView(showScrollBars: false)
+		{
+			Frame = new Rectangle(0, 0, 80, 20)
+		};
+		view.SetDocument(document, preserveViewport: false);
+
+		view.PrimeVisibleLineCache();
+		for (var lineNumber = 1; lineNumber <= 20; lineNumber++)
+			Assert.Equal($"line-{lineNumber}", view.GetDisplayLine(lineNumber));
+		view.PrimeVisibleLineCache();
+
+		Assert.Equal(1, document.RangeVisitCount);
+		Assert.Equal(0, document.LineReadCount);
 	}
 
 	[Theory]
@@ -172,6 +225,65 @@ public sealed class TerminalWorkspacePresentationPolicyTests
 		view.ScrollTo(1, 0);
 
 		Assert.Equal(1, notifications);
+	}
+
+	private sealed class CountingPreviewTextDocument(string line) : IPreviewTextDocument
+	{
+		public int LineReadCount { get; private set; }
+		public int LineCount => 1;
+		public int MaxLineLength => line.Length;
+		public long CharacterCount => line.Length;
+		public IReadOnlyList<PreviewDocumentSection> Sections => [];
+		public IReadOnlyList<PreviewRedactionSpan> Redactions => [];
+		public string GetFullText() => line;
+		public string GetLineText(int lineNumber)
+		{
+			LineReadCount++;
+			return line;
+		}
+
+		public string GetLineRangeText(int firstLine, int lastLine) => line;
+		public ValueTask WriteToAsync(Stream destination, CancellationToken cancellationToken = default) =>
+			ValueTask.CompletedTask;
+		public void Dispose()
+		{
+		}
+	}
+
+	private sealed class CountingRangePreviewTextDocument(int lineCount) : IPreviewTextDocument
+	{
+		public int RangeVisitCount { get; private set; }
+		public int LineReadCount { get; private set; }
+		public int LineCount => lineCount;
+		public int MaxLineLength => 16;
+		public long CharacterCount => lineCount * 8L;
+		public IReadOnlyList<PreviewDocumentSection> Sections => [];
+		public string GetFullText() => string.Empty;
+		public string GetLineText(int lineNumber)
+		{
+			LineReadCount++;
+			return $"line-{lineNumber}";
+		}
+		public string GetLineRangeText(int firstLine, int lastLine) => string.Empty;
+		public void VisitLines(
+			int firstLine,
+			int lastLine,
+			PreviewTextLineVisitor visitor,
+			CancellationToken cancellationToken = default)
+		{
+			RangeVisitCount++;
+			for (var lineNumber = firstLine; lineNumber <= lastLine; lineNumber++)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				if (!visitor(lineNumber, $"line-{lineNumber}"))
+					break;
+			}
+		}
+		public ValueTask WriteToAsync(Stream destination, CancellationToken cancellationToken = default) =>
+			ValueTask.CompletedTask;
+		public void Dispose()
+		{
+		}
 	}
 
 	[Fact]

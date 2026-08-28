@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.IO.Compression;
 using DevProjex.Application.Secrets;
+using DevProjex.Kernel.Models;
 
 namespace DevProjex.Application.Services;
 
@@ -11,6 +12,7 @@ public sealed class ProjectCopyExportService(
 	CodeCompressionSession? codeCompressionSession = null)
 {
 	private const int CopyBufferSize = 128 * 1024;
+	private const int MaximumConcurrentFolderCopies = 8;
 
 	/// <summary>
 	/// Named so it sorts to the top of a listing and cannot collide with a source file. It is never
@@ -366,7 +368,13 @@ public sealed class ProjectCopyExportService(
 
 		// A sibling staging directory keeps the final rename atomic and prevents partial results from becoming visible.
 		var stagingPath = Path.Combine(destinationParent, $".devprojex-{Guid.NewGuid():N}.tmp");
-		var buffer = ArrayPool<byte>.Shared.Rent(CopyBufferSize);
+		var fileEntries = plan.Entries
+			.Where(static entry => !entry.IsDirectory)
+			.ToArray();
+		var copyConcurrency = Math.Min(
+			fileEntries.Length,
+			Math.Min(MaximumConcurrentFolderCopies, ScanParallelismPolicy.MaxDegreeOfParallelism));
+		var copyBuffers = RentCopyBuffers(copyConcurrency);
 		var processedEntries = 0;
 		var processedFiles = 0;
 		long bytesWritten = 0;
@@ -386,35 +394,20 @@ public sealed class ProjectCopyExportService(
 				ReportProgress(progress, processedEntries, totalEntries, bytesWritten);
 			}
 
-			foreach (var file in plan.Entries.Where(static entry => !entry.IsDirectory))
-			{
-				cancellationToken.ThrowIfCancellationRequested();
-				if (IsExcludedFromCopy(prepared, file.SourcePath))
-				{
-					processedEntries++;
-					ReportProgress(progress, processedEntries, totalEntries, bytesWritten);
-					continue;
-				}
-
-				var destination = ResolveDestinationPath(stagingPath, file.RelativePath);
-				Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-				var preparedFile = prepared?.GetFile(file.SourcePath);
-				var contentPath = preparedFile?.ContentPath ?? file.SourcePath;
-				var copiedBytes = await CopyFileAsync(
-						plan.ProjectRootPath,
-						file.SourcePath,
-						contentPath,
-						preparedFile,
-						destination,
-						buffer,
-						cancellationToken)
-					.ConfigureAwait(false);
-				bytesWritten += copiedBytes;
-				processedEntries++;
-				processedFiles++;
-				TryCopyLastWriteTime(file.SourcePath, destination);
-				ReportProgress(progress, processedEntries, totalEntries, bytesWritten);
-			}
+			var copyResult = await CopyFolderFilesAsync(
+				plan.ProjectRootPath,
+				stagingPath,
+				fileEntries,
+				prepared,
+				copyBuffers,
+				processedEntries,
+				totalEntries,
+				bytesWritten,
+				progress,
+				cancellationToken).ConfigureAwait(false);
+			processedEntries = copyResult.ProcessedEntries;
+			processedFiles = copyResult.CopiedFiles;
+			bytesWritten = copyResult.BytesWritten;
 
 			if (totalEntries == 0)
 				ReportProgress(progress, 0, 0, 0);
@@ -463,7 +456,7 @@ public sealed class ProjectCopyExportService(
 		}
 		finally
 		{
-			ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
+			ReturnCopyBuffers(copyBuffers);
 			try
 			{
 				await DeleteStagingDirectoryAsync(stagingPath).ConfigureAwait(false);
@@ -744,7 +737,10 @@ public sealed class ProjectCopyExportService(
 		}
 	}
 
-	private static void ValidateNoReparsePoints(string rootPath, string sourcePath, HashSet<string> validatedPaths)
+	private static void ValidateNoReparsePoints(
+		string rootPath,
+		string sourcePath,
+		HashSet<string>? validatedPaths)
 	{
 		var relativePath = Path.GetRelativePath(rootPath, sourcePath);
 		var currentPath = rootPath;
@@ -760,9 +756,9 @@ public sealed class ProjectCopyExportService(
 		}
 	}
 
-	private static void ValidatePathAttributes(string path, HashSet<string> validatedPaths)
+	private static void ValidatePathAttributes(string path, HashSet<string>? validatedPaths)
 	{
-		if (!validatedPaths.Add(path))
+		if (validatedPaths is not null && !validatedPaths.Add(path))
 			return;
 
 		FileAttributes attributes;
@@ -1359,6 +1355,135 @@ public sealed class ProjectCopyExportService(
 		}
 	}
 
+	private static async Task<FolderCopyPhaseResult> CopyFolderFilesAsync(
+		string projectRootPath,
+		string stagingPath,
+		IReadOnlyList<ProjectCopyExportPlanEntry> files,
+		PreparedSecretRedactionOutput? prepared,
+		byte[][] copyBuffers,
+		int processedEntries,
+		int totalEntries,
+		long bytesWritten,
+		IProgress<ProjectCopyExportProgress>? progress,
+		CancellationToken cancellationToken)
+	{
+		if (files.Count == 0)
+			return new FolderCopyPhaseResult(processedEntries, 0, bytesWritten);
+
+		using var copyCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		var pendingCopies = new Task<FolderCopyEntryResult>[copyBuffers.Length];
+		var copiedFiles = 0;
+		for (var batchStart = 0; batchStart < files.Count; batchStart += copyBuffers.Length)
+		{
+			copyCancellation.Token.ThrowIfCancellationRequested();
+			var batchCount = Math.Min(copyBuffers.Length, files.Count - batchStart);
+			for (var slot = 0; slot < batchCount; slot++)
+			{
+				pendingCopies[slot] = CopyFolderEntryAsync(
+					projectRootPath,
+					stagingPath,
+					files[batchStart + slot],
+					prepared,
+					copyBuffers[slot],
+					copyCancellation.Token);
+			}
+
+			try
+			{
+				for (var slot = 0; slot < batchCount; slot++)
+				{
+					var result = await pendingCopies[slot].ConfigureAwait(false);
+					processedEntries++;
+					if (result.Copied)
+					{
+						copiedFiles++;
+						bytesWritten += result.BytesWritten;
+					}
+					ReportProgress(progress, processedEntries, totalEntries, bytesWritten);
+					copyCancellation.Token.ThrowIfCancellationRequested();
+				}
+			}
+			catch
+			{
+				copyCancellation.Cancel();
+				await ObservePendingFolderCopiesAsync(pendingCopies, batchCount).ConfigureAwait(false);
+				throw;
+			}
+		}
+
+		return new FolderCopyPhaseResult(processedEntries, copiedFiles, bytesWritten);
+	}
+
+	private static async Task<FolderCopyEntryResult> CopyFolderEntryAsync(
+		string projectRootPath,
+		string stagingPath,
+		ProjectCopyExportPlanEntry file,
+		PreparedSecretRedactionOutput? prepared,
+		byte[] buffer,
+		CancellationToken cancellationToken)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
+		if (IsExcludedFromCopy(prepared, file.SourcePath))
+			return default;
+
+		var destination = ResolveDestinationPath(stagingPath, file.RelativePath);
+		Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+		var preparedFile = prepared?.GetFile(file.SourcePath);
+		var contentPath = preparedFile?.ContentPath ?? file.SourcePath;
+		var copiedBytes = await CopyFileAsync(
+			projectRootPath,
+			file.SourcePath,
+			contentPath,
+			preparedFile,
+			destination,
+			buffer,
+			cancellationToken).ConfigureAwait(false);
+		TryCopyLastWriteTime(file.SourcePath, destination);
+		return new FolderCopyEntryResult(true, copiedBytes);
+	}
+
+	private static async Task ObservePendingFolderCopiesAsync(
+		Task<FolderCopyEntryResult>[] pendingCopies,
+		int count)
+	{
+		for (var index = 0; index < count; index++)
+		{
+			try
+			{
+				_ = await pendingCopies[index].ConfigureAwait(false);
+			}
+			catch
+			{
+				// The first observable failure remains authoritative, but every started copy is owned and drained.
+			}
+		}
+	}
+
+	private static byte[][] RentCopyBuffers(int count)
+	{
+		var buffers = new byte[count][];
+		try
+		{
+			for (var index = 0; index < buffers.Length; index++)
+				buffers[index] = ArrayPool<byte>.Shared.Rent(CopyBufferSize);
+			return buffers;
+		}
+		catch
+		{
+			ReturnCopyBuffers(buffers);
+			throw;
+		}
+	}
+
+	private static void ReturnCopyBuffers(byte[][] buffers)
+	{
+		foreach (var buffer in buffers)
+		{
+			if (buffer is not null)
+				ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
+		}
+	}
+
 	private static async Task<long> CopyFileAsync(
 		string projectRootPath,
 		string originalSourcePath,
@@ -1422,7 +1547,7 @@ public sealed class ProjectCopyExportService(
 		ValidateNoReparsePoints(
 			projectRootPath,
 			sourcePath,
-			new HashSet<string>(PathComparer.Default));
+			validatedPaths: null);
 		try
 		{
 			if (!UnixFileTypeInspector.IsRegularFile(sourcePath))
@@ -1508,6 +1633,13 @@ public sealed class ProjectCopyExportService(
 			// Timestamps are optional metadata; copied file contents remain valid without them.
 		}
 	}
+
+	private readonly record struct FolderCopyPhaseResult(
+		int ProcessedEntries,
+		int CopiedFiles,
+		long BytesWritten);
+
+	private readonly record struct FolderCopyEntryResult(bool Copied, long BytesWritten);
 
 	private static void TrySetZipLastWriteTime(ZipArchiveEntry entry, string sourcePath)
 	{

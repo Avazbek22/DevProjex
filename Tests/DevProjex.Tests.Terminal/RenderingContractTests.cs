@@ -144,6 +144,48 @@ public sealed class RenderingContractTests
 	}
 
 	[Fact]
+	public void RedirectedDiagnosticKeepsEscapedLongPathOnOnePhysicalLine()
+	{
+		var environment = new TestTerminalEnvironment
+		{
+			Width = 40
+		};
+		var renderer = new ContextDiagnosticRenderer(
+			environment,
+			new TerminalOutputOptions(),
+			new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En));
+		var diagnosticPath = Path.Combine(
+			"diagnostic-path-start",
+			new string('a', 80),
+			"leaf") + "\nforged\rsegment\t\u001bcontrol\u2028end";
+
+		renderer.Write(
+		[
+			new ContextDiagnostic(
+				"DPX-PROJECT-SELECTION-WARNING",
+				ContextDiagnosticSeverity.Warning,
+				"Selection warning.",
+				diagnosticPath)
+		]);
+
+		var lines = environment.StandardError
+			.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
+		var pathLine = Assert.Single(
+			lines,
+			static line => line.Contains("diagnostic-path-start", StringComparison.Ordinal));
+		Assert.True(pathLine.Length > environment.Width);
+		Assert.Contains(
+			"\\nforged\\rsegment\\t\\u001Bcontrol\\u2028end",
+			pathLine,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain('\n', pathLine);
+		Assert.DoesNotContain('\r', pathLine);
+		Assert.DoesNotContain('\t', pathLine);
+		Assert.DoesNotContain('\u001b', pathLine);
+		Assert.DoesNotContain('\u2028', pathLine);
+	}
+
+	[Fact]
 	public async Task RussianHumanDiagnosticNeverFallsBackToInternalEnglishMessage()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -712,34 +754,44 @@ public sealed class RenderingContractTests
 		Assert.DoesNotContain("100%", environment.StandardError, StringComparison.Ordinal);
 	}
 
-	[Fact]
-	public async Task NoColorProjectExportProgressRemainsReadableWithoutAnsi()
+	[Theory]
+	[InlineData(TerminalColorMode.Auto, true)]
+	[InlineData(TerminalColorMode.Never, false)]
+	public async Task InteractiveMonochromeProjectExportProgressRewritesAndClearsOneLine(
+		TerminalColorMode color,
+		bool noColor)
 	{
 		using var appData = new TemporaryDirectory();
 		var environment = new TestTerminalEnvironment
 		{
 			IsErrorInteractive = true,
-			IsNoColor = true,
+			IsNoColor = noColor,
 			Width = 100
 		};
 		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
 		var renderer = new ProgressRenderer(
 			environment,
-			new TerminalOutputOptions(Progress: TerminalProgressMode.Always),
+			new TerminalOutputOptions(
+				Color: color,
+				Progress: TerminalProgressMode.Always),
 			services.Localization);
 
-		await renderer.RunProjectExportAsync(async progress =>
+		var result = await renderer.RunProjectExportAsync(progress =>
 		{
 			Assert.NotNull(progress);
+			progress.Report(new ProjectCopyExportProgress(1, 4, 1_024, 25));
 			progress.Report(new ProjectCopyExportProgress(2, 4, 2_048, 50));
-			await Task.Delay(300, TestContext.Current.CancellationToken);
-			return true;
+			return Task.FromResult(42);
 		});
 
+		Assert.Equal(42, result);
 		Assert.Empty(environment.StandardOutput);
 		Assert.Contains("Exporting project 2/4 (2 KB)", environment.StandardError, StringComparison.Ordinal);
 		Assert.Contains("50%", environment.StandardError, StringComparison.Ordinal);
-		Assert.DoesNotContain("\u001b", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains('\r', environment.StandardError);
+		Assert.DoesNotContain('\n', environment.StandardError);
+		Assert.DoesNotContain('\u001b', environment.StandardError);
+		Assert.EndsWith("\r", environment.StandardError, StringComparison.Ordinal);
 	}
 
 	[Theory]

@@ -1,4 +1,5 @@
 using System.IO.Pipelines;
+using DevProjex.Application.Diagnostics;
 using DevProjex.Mcp;
 using ModelContextProtocol;
 using ModelContextProtocol.Client;
@@ -22,6 +23,85 @@ public sealed class McpServerIntegrationTests
 	];
 
 	[Fact]
+	public async Task TreeAndAnalyzeAvoidUnusedPlanningContentPasses()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "First.cs"), "class First { }\n");
+		File.WriteAllText(Path.Combine(project, "Second.cs"), "class Second { }\n");
+		using var measurement = ContentPipelineDiagnostics.BeginMeasurement();
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var tree = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["include_patterns"] = new[] { "**/*.cs" }
+			});
+		var afterTree = measurement.Capture();
+
+		Assert.NotEqual(true, tree.IsError);
+		Assert.Equal(0, afterTree.FullFileReads);
+		Assert.Equal(0, afterTree.FullFileReadBytes);
+
+		var analysis = await server.CallAsync("analyze");
+		var afterAnalysis = measurement.Capture();
+		var metrics = Assert.IsType<JsonElement>(analysis.StructuredContent);
+
+		Assert.NotEqual(true, analysis.IsError);
+		Assert.Equal(2, metrics.GetProperty("files").GetInt32());
+		Assert.True(metrics.GetProperty("characters").GetInt64() > 0);
+		Assert.True(metrics.GetProperty("tokens").GetInt64() > 0);
+		Assert.Equal(
+			metrics.GetProperty("files").GetInt32() * 2L,
+			afterAnalysis.FullFileReads);
+		Assert.True(afterAnalysis.FullFileReadBytes > 0);
+	}
+
+	[Theory]
+	[InlineData("text", false)]
+	[InlineData("markdown", false)]
+	[InlineData("json", true)]
+	[InlineData("xml", true)]
+	public async Task PackContextBuildsPlanningMetricsOnlyForStructuredFormats(
+		string format,
+		bool expectsPlanningMetrics)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "First.cs"), "class First { }\n");
+		File.WriteAllText(Path.Combine(project, "Second.cs"), "class Second { }\n");
+		using var measurement = ContentPipelineDiagnostics.BeginMeasurement();
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["view"] = "tree",
+				["format"] = format
+			});
+		var diagnostics = measurement.Capture();
+		var output = Text(result);
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.Contains("First.cs", output, StringComparison.Ordinal);
+		Assert.Contains("Second.cs", output, StringComparison.Ordinal);
+		Assert.Equal(expectsPlanningMetrics ? 2 : 0, diagnostics.FullFileReads);
+		Assert.Equal(expectsPlanningMetrics, diagnostics.FullFileReadBytes > 0);
+		if (format == "json")
+		{
+			Assert.Contains("\"metrics\"", output, StringComparison.Ordinal);
+			Assert.DoesNotContain("\"characters\": 0", output, StringComparison.Ordinal);
+		}
+		else if (format == "xml")
+		{
+			Assert.Contains("<metrics>", output, StringComparison.Ordinal);
+			Assert.DoesNotContain("<characters>0</characters>", output, StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
 	public async Task StreamServerReleasesItsPackSessionWhenInputReachesEndOfStream()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -29,6 +109,7 @@ public sealed class McpServerIntegrationTests
 		var temporaryRoot = workspace.CreateDirectory("temp");
 		await using var input = new MemoryStream();
 		await using var output = new MemoryStream();
+		var serviceCreationCount = 0;
 
 		await McpServerHost.RunWithStreamsAsync(
 			[project],
@@ -37,10 +118,16 @@ public sealed class McpServerIntegrationTests
 			hidePrivateData: false,
 			cancellationToken: TestContext.Current.CancellationToken,
 			appDataPathProvider: () => workspace.CreateDirectory("app-data"),
-			tempRoot: temporaryRoot);
+			tempRoot: temporaryRoot,
+			servicesFactory: _ =>
+			{
+				Interlocked.Increment(ref serviceCreationCount);
+				throw new InvalidOperationException("Project services must remain deferred before EOF.");
+			});
 
 		var packRoot = Path.Combine(temporaryRoot, "DevProjex", "mcp");
 		Assert.Empty(Directory.EnumerateDirectories(packRoot));
+		Assert.Equal(0, Volatile.Read(ref serviceCreationCount));
 	}
 
 	[Fact]
@@ -201,6 +288,8 @@ public sealed class McpServerIntegrationTests
 			$"internal static class Secrets {{ const string Token = \"{Secret}\"; }}\n" +
 			$"// Contact {PrivateEmail}\nsearch-marker\n");
 		File.WriteAllText(Path.Combine(project, "Large.cs"), "large-marker\n" + new string('x', 60_000));
+		File.WriteAllText(Path.Combine(project, "TieB.cs"), "same-size\n");
+		File.WriteAllText(Path.Combine(project, "TieA.cs"), "same-size\n");
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 		var tools = await server.Client.ListToolsAsync(
 			options: null,
@@ -228,6 +317,14 @@ public sealed class McpServerIntegrationTests
 			analysis,
 			Assert.IsType<JsonElement>(tools.Single(static tool => tool.Name == "analyze").ProtocolTool.OutputSchema));
 		Assert.True(analysisStructured.GetProperty("files").GetInt32() >= 2);
+		var topFiles = analysisStructured.GetProperty("topFiles")
+			.EnumerateArray()
+			.Select(static item => item.GetProperty("path").GetString()!)
+			.ToArray();
+		Assert.All(topFiles, static path => Assert.False(Path.IsPathFullyQualified(path), path));
+		Assert.Equal(
+			["TieA.cs", "TieB.cs"],
+			topFiles.Where(static path => path.StartsWith("Tie", StringComparison.Ordinal)).ToArray());
 
 		var file = await server.CallAsync(
 			"get_file",
@@ -358,6 +455,111 @@ public sealed class McpServerIntegrationTests
 		Assert.Contains("50000-character response cap", text, StringComparison.Ordinal);
 		Assert.Contains("narrow the source", text, StringComparison.Ordinal);
 		AssertSpotlighted(result);
+	}
+
+	[Fact]
+	public async Task StreamServerDefersProjectServicesUntilFirstToolCall()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "sample.txt"), "content");
+		var creationCount = 0;
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			servicesCreated: () => Interlocked.Increment(ref creationCount));
+
+		_ = await server.Client.ListToolsAsync(
+			options: null,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(0, Volatile.Read(ref creationCount));
+
+		var projects = await server.CallAsync("list_projects");
+		Assert.NotEqual(true, projects.IsError);
+		Assert.Equal(1, Volatile.Read(ref creationCount));
+
+		var tree = await server.CallAsync("get_tree");
+		Assert.NotEqual(true, tree.IsError);
+		Assert.Equal(1, Volatile.Read(ref creationCount));
+	}
+
+	[Fact]
+	public async Task GetFileContinuationPreservesThePageBoundaryThroughTheSdk()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(
+			Path.Combine(project, "Paged.txt"),
+			string.Join('\n', Enumerable.Range(1, 1_005).Select(static line => $"line-{line:D4}")));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var firstPage = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "Paged.txt" });
+		var continuation = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "Paged.txt", ["start_line"] = 1_001 });
+		var firstText = Text(firstPage);
+		var continuationText = Text(continuation);
+
+		Assert.Contains("line-1000", firstText, StringComparison.Ordinal);
+		Assert.DoesNotContain("line-1001", firstText, StringComparison.Ordinal);
+		Assert.Contains(
+			"Showing lines 1-1000 of 1005; continue with start_line=1001.",
+			firstText,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("line-1000", continuationText, StringComparison.Ordinal);
+		Assert.Contains("line-1001", continuationText, StringComparison.Ordinal);
+		Assert.Contains("line-1005", continuationText, StringComparison.Ordinal);
+		Assert.DoesNotContain("continue with start_line=", continuationText, StringComparison.Ordinal);
+		AssertSpotlighted(firstPage);
+		AssertSpotlighted(continuation);
+	}
+
+	[Fact]
+	public async Task ReadPackContinuationPreservesThePageBoundaryThroughTheSdk()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(
+			Path.Combine(project, "Large.txt"),
+			string.Join('\n', Enumerable.Range(1, 1_500).Select(static line =>
+				$"pack-line-{line:D4}-{new string('x', 24)}")));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var stored = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "Large.txt" },
+				["view"] = "content",
+				["format"] = "text"
+			});
+		var packId = ExtractPackId(Text(stored));
+		var firstPage = await server.CallAsync(
+			"read_pack",
+			new Dictionary<string, object?> { ["pack_id"] = packId });
+		var continuation = await server.CallAsync(
+			"read_pack",
+			new Dictionary<string, object?> { ["pack_id"] = packId, ["start_line"] = 1_001 });
+		var firstText = Text(firstPage);
+		var continuationText = Text(continuation);
+		var firstMarkers = ExtractPackLineMarkers(firstText);
+		var continuationMarkers = ExtractPackLineMarkers(continuationText);
+
+		Assert.NotEmpty(firstMarkers);
+		Assert.NotEmpty(continuationMarkers);
+		Assert.Matches(
+			"Showing lines 1-1000 of [0-9]+; continue with start_line=1001\\.",
+			firstText);
+		Assert.Equal(firstMarkers.Length, firstMarkers.Distinct().Count());
+		Assert.Equal(continuationMarkers.Length, continuationMarkers.Distinct().Count());
+		Assert.DoesNotContain(continuationMarkers[0], firstMarkers);
+		Assert.Equal(firstMarkers[^1] + 1, continuationMarkers[0]);
+		Assert.Equal(1_500, continuationMarkers[^1]);
+		Assert.DoesNotContain("continue with start_line=", continuationText, StringComparison.Ordinal);
+		AssertSpotlighted(firstPage);
+		AssertSpotlighted(continuation);
 	}
 
 	[Theory]
@@ -959,6 +1161,10 @@ public sealed class McpServerIntegrationTests
 		return match.Groups[1].Value;
 	}
 
+	private static int[] ExtractPackLineMarkers(string text) =>
+		[.. Regex.Matches(text, "pack-line-(\\d{4})-")
+			.Select(static match => int.Parse(match.Groups[1].Value))];
+
 	private static void AssertTextOnlyResult(
 		McpTestServer server,
 		CallToolResult result,
@@ -1226,7 +1432,8 @@ public sealed class McpServerIntegrationTests
 		public static async Task<McpTestServer> StartAsync(
 			string project,
 			string sandbox,
-			bool hidePrivateData = false)
+			bool hidePrivateData = false,
+			Action? servicesCreated = null)
 		{
 			var clientToServer = new Pipe();
 			var serverToClient = new Pipe();
@@ -1237,7 +1444,14 @@ public sealed class McpServerIntegrationTests
 				hidePrivateData,
 				TestContext.Current.CancellationToken,
 				() => Path.Combine(sandbox, "app-data"),
-				Path.Combine(sandbox, "temp"));
+				Path.Combine(sandbox, "temp"),
+				servicesCreated is null
+					? null
+					: roots =>
+					{
+						servicesCreated();
+						return McpServices.Create(roots, () => Path.Combine(sandbox, "app-data"));
+					});
 			var recordingInput = new RecordingWriteStream(clientToServer.Writer.AsStream());
 			var recordingOutput = new RecordingReadStream(serverToClient.Reader.AsStream());
 			var transport = new StreamClientTransport(

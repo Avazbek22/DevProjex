@@ -853,6 +853,72 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		Assert.False(viewModel.AllExtensionsChecked);
 	}
 
+	[AvaloniaFact]
+	public void ExtensionSingleToggle_UpdatesKnownStateAndDerivedAllFlag()
+	{
+		const string projectPath = @"C:\Project";
+		var viewModel = CreateViewModel();
+		viewModel.Extensions.Add(new SelectionOptionViewModel(".cs", true));
+		viewModel.Extensions.Add(new SelectionOptionViewModel(".md", true));
+		using var coordinator = CreateCoordinator(viewModel);
+		coordinator.ApplyProjectProfileSelections(
+			projectPath,
+			new ProjectSelectionProfile(
+				SelectedRootFolders: [],
+				SelectedExtensions: [".cs", ".md"],
+				SelectedIgnoreOptions: [],
+				ExtensionStates: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+				{
+					[".cs"] = true,
+					[".md"] = true,
+					[".hidden"] = false
+				}));
+		coordinator.ConsumePreparedSelectionForPath(projectPath);
+		coordinator.HookOptionListeners(viewModel.Extensions);
+		var option = viewModel.Extensions.Single(static candidate => candidate.Name == ".cs");
+
+		option.IsChecked = false;
+
+		Assert.False(viewModel.AllExtensionsChecked);
+		var uncheckedStates = coordinator.SnapshotExtensionOptionStatesForPersistence();
+		Assert.NotNull(uncheckedStates);
+		Assert.False(uncheckedStates![".cs"]);
+		Assert.False(uncheckedStates[".hidden"]);
+
+		option.IsChecked = true;
+
+		Assert.True(viewModel.AllExtensionsChecked);
+		Assert.True(coordinator.SnapshotExtensionOptionStatesForPersistence()![".cs"]);
+		Assert.False(coordinator.SnapshotExtensionOptionStatesForPersistence()![".hidden"]);
+	}
+
+	[AvaloniaFact]
+	public void ExtensionAggregate_BulkAndCheckpointRestore_RebuildVisibleUncheckedCount()
+	{
+		var viewModel = CreateViewModel();
+		viewModel.Extensions.Add(new SelectionOptionViewModel(".cs", true));
+		viewModel.Extensions.Add(new SelectionOptionViewModel(".md", true));
+		using var coordinator = CreateCoordinator(viewModel);
+		coordinator.HookOptionListeners(viewModel.Extensions);
+		coordinator.UpdateExtensionsSelectionCache();
+
+		coordinator.HandleExtensionsAllChanged(isChecked: false);
+		var checkpoint = coordinator.CaptureProjectCheckpoint();
+
+		Assert.False(viewModel.AllExtensionsChecked);
+
+		coordinator.HandleExtensionsAllChanged(isChecked: true);
+		Assert.True(viewModel.AllExtensionsChecked);
+
+		coordinator.RestoreProjectCheckpoint(checkpoint);
+		Assert.False(viewModel.AllExtensionsChecked);
+
+		viewModel.Extensions.Single(static option => option.Name == ".cs").IsChecked = true;
+		Assert.False(viewModel.AllExtensionsChecked);
+		viewModel.Extensions.Single(static option => option.Name == ".md").IsChecked = true;
+		Assert.True(viewModel.AllExtensionsChecked);
+	}
+
 	[Fact]
 	public void ApplyExtensionScan_WhenCacheNotInitialized_RestoresDefaultCheckedState()
 	{

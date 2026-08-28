@@ -14,10 +14,28 @@ internal static class CrossProcessFileLock
         => TryAcquire(fileSet, DefaultTimeout, out heldLock);
 
     public static bool TryAcquire(JsonStoreFileSet fileSet, TimeSpan timeout, out IDisposable? heldLock)
+	{
+		try
+		{
+			heldLock = Acquire(fileSet, timeout);
+			return true;
+		}
+		catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+		{
+			heldLock = null;
+			return false;
+		}
+	}
+
+	public static bool TryAcquireWithCancellation(
+		JsonStoreFileSet fileSet,
+		TimeSpan timeout,
+		CancellationToken cancellationToken,
+		out IDisposable? heldLock)
     {
         try
         {
-            heldLock = Acquire(fileSet, timeout);
+            heldLock = AcquireWithCancellation(fileSet, timeout, cancellationToken);
             return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
@@ -28,15 +46,29 @@ internal static class CrossProcessFileLock
     }
 
     public static IDisposable Acquire(JsonStoreFileSet fileSet, TimeSpan timeout)
+		=> AcquireCore(fileSet, timeout, CancellationToken.None);
+
+	public static IDisposable AcquireWithCancellation(
+		JsonStoreFileSet fileSet,
+		TimeSpan timeout,
+		CancellationToken cancellationToken) =>
+		AcquireCore(fileSet, timeout, cancellationToken);
+
+	private static IDisposable AcquireCore(
+		JsonStoreFileSet fileSet,
+		TimeSpan timeout,
+		CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(fileSet.DirectoryPath))
             throw new IOException("The store directory path cannot be resolved.");
 
+		cancellationToken.ThrowIfCancellationRequested();
         Directory.CreateDirectory(fileSet.DirectoryPath);
 
 		var startedTimestamp = Stopwatch.GetTimestamp();
         while (true)
         {
+			cancellationToken.ThrowIfCancellationRequested();
             try
             {
                 // A short-lived sidecar lock keeps every store on the same
@@ -55,7 +87,9 @@ internal static class CrossProcessFileLock
                     throw;
 
 				var remaining = timeout - elapsed;
-				Thread.Sleep(remaining < RetryDelay ? remaining : RetryDelay);
+				var delay = remaining < RetryDelay ? remaining : RetryDelay;
+				if (cancellationToken.WaitHandle.WaitOne(delay))
+					cancellationToken.ThrowIfCancellationRequested();
             }
         }
     }

@@ -775,6 +775,8 @@ that prevents an accepted option from becoming a no-op.
 | `analyze` | `--fail-on-findings` | off | writes the report, then gates on effective findings | independent from `--strict` | requested report remains intact; a nonzero finding count exits `3` | handler, process |
 | URL-capable commands | `--branch` | remote default branch | selects a validated repository branch under an operation lease | rejected for local paths and with `open --last` | ordinary command payload remains on stdout; clone/branch failure exits `1` or invalid name exits `2` | parser, resolver, Git fixture |
 | analyze/tree/context/project | `--progress` | `auto` | selects automatic, forced, or disabled operational progress on stderr | quiet/minimal suppress optional progress; URL-source Git operations use bounded milestones when rewriting is unavailable | requested payload stays byte-clean on stdout | parser, rendering, process |
+| analyze/tree/context/project | `--verbosity`, `-q` | `normal` | controls optional operational stderr from quiet through safe diagnostic context; `-q` selects `quiet` | `-q` conflicts with an explicit `--verbosity`; neither removes requested stdout nor suppresses errors | requested payload stays on stdout; invalid value or conflict exits `2` | parser, rendering, process |
+| analyze/tree/context/project | `--plain` | off | selects stable ASCII decorations and line structure while preserving Unicode user text, and disables ANSI, markup, and animation | conflicts with `--color always` | machine schema and requested payload stay unchanged; conflict exits `2` | parser, rendering, process |
 | `export context` | `--view`, `--format` | `tree-content`, `markdown` | selects typed document sections and serializer | none | document on stdout/file; invalid value exits `2` | parser, serializer, process |
 | `export context` | `-o`, `--output` | `-` | selects streaming stdout or an exact context file | destination must be outside source | document or real absolute path on stdout | destination, streaming, process |
 | `export context` | `--force` | off | atomically replaces an existing context file | invalid with stdout | success path on stdout; conflict exits `4`, invalid combination `2` | parser, destination, handler |
@@ -855,7 +857,8 @@ such as `head` remain usable.
 - no animations;
 - no emoji or decorative symbols;
 - no Unicode box-drawing;
-- ASCII, line-oriented human output.
+- stable ASCII line structure and tree connectors. Localized text, file names,
+  paths, and project content remain Unicode and are never transliterated.
 
 An interactive TUI necessarily uses terminal cursor, input-mode, and screen-buffer
 control sequences. In TUI `--plain` disables color styling, motion, decorated
@@ -886,6 +889,8 @@ active. URL-source Git operations use a single carriage-return-updated line in t
 mode. Redirected stderr, CI, `TERM=dumb`, and `--plain` use at most six static
 milestone lines for URL-source Git progress in both `auto` and `always` modes.
 `--progress never`, `quiet`, and `minimal` suppress that progress completely.
+Measured project-export progress also remains a single carriage-return-updated line
+in interactive monochrome modes (`NO_COLOR` and `--color never`).
 All progress remains on stderr and never changes the requested stdout payload.
 
 ## Destination and Atomicity

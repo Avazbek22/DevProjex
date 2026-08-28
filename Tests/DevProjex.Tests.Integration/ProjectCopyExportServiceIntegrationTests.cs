@@ -1449,7 +1449,15 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 				return;
 
 			var stagingPath = Assert.Single(FindStagingArtifacts(workspace.DestinationParent));
-			var copiedFile = Assert.Single(Directory.EnumerateFiles(stagingPath, "*", SearchOption.AllDirectories));
+			var copiedFiles = Directory
+				.EnumerateFiles(stagingPath, "*", SearchOption.AllDirectories)
+				.OrderBy(static path => path, PathComparer.Default)
+				.ToArray();
+			Assert.InRange(
+				copiedFiles.Length,
+				1,
+				8);
+			var copiedFile = copiedFiles[0];
 			heldFile = new FileStream(copiedFile, FileMode.Open, FileAccess.Read, FileShare.Read);
 			releaseThread = new Thread(() =>
 			{
@@ -1498,8 +1506,15 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 				return;
 
 			stagingPath = Assert.Single(FindStagingArtifacts(workspace.DestinationParent));
-			var copiedFile = Assert.Single(
-				Directory.EnumerateFiles(stagingPath, "*", SearchOption.AllDirectories));
+			var copiedFiles = Directory
+				.EnumerateFiles(stagingPath, "*", SearchOption.AllDirectories)
+				.OrderBy(static path => path, PathComparer.Default)
+				.ToArray();
+			Assert.InRange(
+				copiedFiles.Length,
+				1,
+				8);
+			var copiedFile = copiedFiles[0];
 			heldFile = new FileStream(
 				copiedFile,
 				FileMode.Open,

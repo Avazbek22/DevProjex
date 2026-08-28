@@ -42,12 +42,12 @@ internal sealed record WorkspaceControlViewGraph(
 	TerminalAggregateControl ExtensionAll,
 	TerminalParameterListView ExtensionList)
 {
-	public ObservableCollection<TerminalParameterRow> ContentRows { get; set; } = [];
-	public ObservableCollection<TerminalParameterRow> ContentAllRows { get; set; } = [];
-	public ObservableCollection<TerminalParameterRow> ExclusionAllRows { get; set; } = [];
-	public ObservableCollection<TerminalParameterRow> ExclusionRows { get; set; } = [];
-	public ObservableCollection<TerminalParameterRow> ExtensionAllRows { get; set; } = [];
-	public ObservableCollection<TerminalParameterRow> ExtensionRows { get; set; } = [];
+	public ResettableObservableCollection<TerminalParameterRow>? ContentRows { get; set; }
+	public ObservableCollection<TerminalParameterRow>? ContentAllRows { get; set; }
+	public ObservableCollection<TerminalParameterRow>? ExclusionAllRows { get; set; }
+	public ResettableObservableCollection<TerminalParameterRow>? ExclusionRows { get; set; }
+	public ObservableCollection<TerminalParameterRow>? ExtensionAllRows { get; set; }
+	public ResettableObservableCollection<TerminalParameterRow>? ExtensionRows { get; set; }
 }
 
 internal sealed record WorkspaceViewGraph(

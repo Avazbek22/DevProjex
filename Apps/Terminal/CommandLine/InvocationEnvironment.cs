@@ -31,12 +31,14 @@ public sealed class InvocationEnvironment : ITerminalEnvironment
 	public const string DesktopRequestVariable = "DEVPROJEX_DESKTOP_REQUEST_FILE";
 	internal const string InternalDataRootVariable = "DEVPROJEX_INTERNAL_DATA_ROOT";
 	private readonly TextWriter _output;
+	private readonly TextWriter _error;
 	private Stream? _rawInput;
 	private Stream? _rawOutput;
 
 	public InvocationEnvironment(bool hasAttachedConsole)
 	{
 		_output = new TerminalOutputWriter(Console.Out);
+		_error = new TerminalOutputWriter(Console.Error);
 		HasAttachedConsole = hasAttachedConsole;
 		IsInputInteractive = hasAttachedConsole && !ReadRedirected(static () => Console.IsInputRedirected);
 		IsOutputInteractive = hasAttachedConsole && !ReadRedirected(static () => Console.IsOutputRedirected);
@@ -60,7 +62,7 @@ public sealed class InvocationEnvironment : ITerminalEnvironment
 	public Stream? RawInput => _rawInput ??= Console.OpenStandardInput();
 	public Stream? RawOutput => _rawOutput ??= Console.OpenStandardOutput();
 	public TextWriter Output => _output;
-	public TextWriter Error => Console.Error;
+	public TextWriter Error => _error;
 	public bool IsInputInteractive { get; }
 	public bool IsOutputInteractive { get; }
 	public bool IsErrorInteractive { get; }

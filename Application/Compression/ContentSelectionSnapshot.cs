@@ -36,6 +36,22 @@ public sealed record ContentSelectionSnapshot(
 		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
 		ArgumentNullException.ThrowIfNull(orderedPaths);
 		cancellationToken.ThrowIfCancellationRequested();
+		var normalizedProjectRoot = PathUtility.Normalize(projectRoot);
+		if (ContentPathOrdering.IsStrictlyOrderedUnique(orderedPaths, cancellationToken))
+		{
+			var canonicalPaths = new string[orderedPaths.Count];
+			for (var index = 0; index < orderedPaths.Count; index++)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				canonicalPaths[index] = orderedPaths[index];
+			}
+			return CreateFromOwnedOrderedUniqueCore(
+				normalizedProjectRoot,
+				canonicalPaths,
+				cancellationToken,
+				revision);
+		}
+
 		var unique = new HashSet<string>(PathComparer.Default);
 		var paths = new List<string>(orderedPaths.Count);
 		var pathsAreSorted = true;
@@ -54,7 +70,7 @@ public sealed record ContentSelectionSnapshot(
 		}
 
 		using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-		Append(hash, PathUtility.Normalize(projectRoot));
+		Append(hash, normalizedProjectRoot);
 		IReadOnlyList<string> fingerprintPaths = paths;
 		if (!pathsAreSorted)
 		{
@@ -72,6 +88,41 @@ public sealed record ContentSelectionSnapshot(
 		return new ContentSelectionSnapshot(
 			revision,
 			paths.ToArray(),
+			Convert.ToHexString(hash.GetHashAndReset()));
+	}
+
+	internal static ContentSelectionSnapshot CreateFromOwnedOrderedUnique(
+		string projectRoot,
+		string[] orderedPaths,
+		CancellationToken cancellationToken,
+		long revision = 0)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
+		ArgumentNullException.ThrowIfNull(orderedPaths);
+		cancellationToken.ThrowIfCancellationRequested();
+		return CreateFromOwnedOrderedUniqueCore(
+			PathUtility.Normalize(projectRoot),
+			orderedPaths,
+			cancellationToken,
+			revision);
+	}
+
+	private static ContentSelectionSnapshot CreateFromOwnedOrderedUniqueCore(
+		string normalizedProjectRoot,
+		string[] orderedPaths,
+		CancellationToken cancellationToken,
+		long revision)
+	{
+		using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+		Append(hash, normalizedProjectRoot);
+		for (var index = 0; index < orderedPaths.Length; index++)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			Append(hash, orderedPaths[index]);
+		}
+		return new ContentSelectionSnapshot(
+			revision,
+			orderedPaths,
 			Convert.ToHexString(hash.GetHashAndReset()));
 	}
 

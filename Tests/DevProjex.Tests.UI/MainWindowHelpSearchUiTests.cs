@@ -5,12 +5,51 @@ using Avalonia.Media;
 using Avalonia.Styling;
 using Avalonia.VisualTree;
 using DevProjex.Avalonia.Controls;
+using DevProjex.Infrastructure.ResourceStore;
 
 namespace DevProjex.Tests.UI;
 
 [Collection(UiWorkspaceCollection.Name)]
 public sealed class MainWindowHelpSearchUiTests
 {
+    [AvaloniaFact]
+    public async Task OpenHelpUpdatesItsVisibleTitleAndBodyWhenLanguageChanges()
+    {
+        using var project = UiTestProject.CreateDefault();
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            var help = await OpenHelpAsync(window);
+            var englishCatalog = new JsonLocalizationCatalog().Get(AppLanguage.En);
+            var chineseCatalog = new JsonLocalizationCatalog().Get(AppLanguage.ZhCn);
+            var helpProvider = new HelpContentProvider();
+            var englishHeading = FirstHelpHeading(helpProvider.GetHelpBody(AppLanguage.En));
+            var chineseHeading = FirstHelpHeading(helpProvider.GetHelpBody(AppLanguage.ZhCn));
+
+            AssertVisibleText(help, englishCatalog["Help.Help.Title"]);
+            AssertVisibleText(help, englishHeading);
+
+            var simplifiedChineseItem = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(
+                window,
+                "LanguageZhCnMenuItem");
+            await UiTestDriver.RaiseMenuItemClickAsync(simplifiedChineseItem);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => HasVisibleText(help, chineseCatalog["Help.Help.Title"]) &&
+                      HasVisibleText(help, chineseHeading),
+                "the already-open help surface to apply simplified Chinese");
+
+            Assert.True(UiTestDriver.GetViewModel(window).HelpDocsPopoverOpen);
+            Assert.False(HasVisibleText(help, englishCatalog["Help.Help.Title"]));
+            Assert.False(HasVisibleText(help, englishHeading));
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
     [AvaloniaFact]
     public async Task SearchButton_ExpandsLeftWithTransitionsAndFadesTheMagnifier()
     {
@@ -259,6 +298,22 @@ public sealed class MainWindowHelpSearchUiTests
     private static T GetRequiredControl<T>(Control root, string name)
         where T : Control
         => Assert.IsType<T>(root.FindControl<T>(name));
+
+    private static string FirstHelpHeading(string helpBody) =>
+        helpBody
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Split('\n')
+            .First(static line => line.StartsWith("## ", StringComparison.Ordinal))[3..];
+
+    private static void AssertVisibleText(Control root, string expected) =>
+        Assert.True(HasVisibleText(root, expected), $"Visible text '{expected}' was not rendered.");
+
+    private static bool HasVisibleText(Control root, string expected) =>
+        root.GetVisualDescendants()
+            .OfType<TextBlock>()
+            .Any(textBlock =>
+                textBlock.IsVisible &&
+                string.Equals(textBlock.Text, expected, StringComparison.Ordinal));
 
     private static void AssertNavigationButtonPresentation(Button button)
     {

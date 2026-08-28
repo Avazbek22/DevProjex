@@ -17,8 +17,16 @@ public sealed class TextFileExportService
 		string content,
 		CancellationToken cancellationToken = default)
 	{
-		ArgumentNullException.ThrowIfNull(stream);
 		ArgumentNullException.ThrowIfNull(content);
+		await AppendAsync(stream, content.AsMemory(), cancellationToken).ConfigureAwait(false);
+	}
+
+	public async Task AppendAsync(
+		Stream stream,
+		ReadOnlyMemory<char> content,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(stream);
 		if (!stream.CanWrite)
 			throw new InvalidOperationException("Target stream must be writable.");
 

@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Collections.Frozen;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Security;
 using System.Security.Cryptography;
@@ -1142,11 +1143,19 @@ public sealed class FileContentAnalyzer :
 	}
 
 	/// <summary>
-	/// The single per-character pass behind every text metric. Carrying its state across calls is
+	/// The single streaming pass behind every text metric. Carrying its state across calls is
 	/// what lets a CRLF pair split by a read-buffer boundary still count as one line break.
 	/// </summary>
 	internal struct TextMetricsCounter()
 	{
+		// Two AVX2 vectors (or four AdvSimd vectors) amortize SearchValues dispatch while short edit
+		// replacements stay on the cheaper scalar path.
+		private const int VectorizedScanThreshold = 32;
+		private const int MinimumVectorizedOrdinaryRun = 16;
+		private const int DenseBoundaryThreshold = 3;
+		private static readonly SearchValues<char> MetricBoundaryCharacters =
+			SearchValues.Create("\0\r\n`");
+
 		private int _lineCount = 1; // A file with no newlines is one line.
 		private int _charCount;
 		private bool _hasNonWhitespace;
@@ -1160,36 +1169,77 @@ public sealed class FileContentAnalyzer :
 		/// <summary>Returns false when a null byte proves the content is binary.</summary>
 		public bool Append(ReadOnlySpan<char> span)
 		{
-			for (int i = 0; i < span.Length; i++)
+			var index = 0;
+			var shortBoundaryStreak = 0;
+			while (index < span.Length && !_hasNonWhitespace)
 			{
-				char c = span[i];
+				if (!AppendCharacter(span[index]))
+					return false;
+				index++;
+			}
 
-				if (c == '\0')
+			while (span.Length - index >= VectorizedScanThreshold)
+			{
+				var boundaryOffset = span[index..].IndexOfAny(MetricBoundaryCharacters);
+				if (boundaryOffset < 0)
+				{
+					AppendOrdinaryRun(span.Length - index);
+					return true;
+				}
+				if (boundaryOffset < MinimumVectorizedOrdinaryRun &&
+				    ++shortBoundaryStreak >= DenseBoundaryThreshold)
+				{
+					// Dense markup and line-oriented payloads retain the original scalar cost.
+					return AppendScalar(span[index..]);
+				}
+				if (boundaryOffset >= MinimumVectorizedOrdinaryRun)
+					shortBoundaryStreak = 0;
+
+				if (boundaryOffset > 0)
+				{
+					AppendOrdinaryRun(boundaryOffset);
+					index += boundaryOffset;
+				}
+
+				if (!AppendCharacter(span[index]))
+					return false;
+				index++;
+			}
+
+			for (; index < span.Length; index++)
+			{
+				if (!AppendCharacter(span[index]))
+					return false;
+			}
+
+			return true;
+		}
+
+		private bool AppendScalar(ReadOnlySpan<char> span)
+		{
+			foreach (var character in span)
+			{
+				if (character == '\0')
 					return false;
 
 				_charCount++;
-
-				if (c == '\r')
+				if (character == '\r')
 				{
 					_lineCount++;
 					_trailingNewlineChars++;
 					_trailingNewlineLineBreaks++;
 					_previousWasCarriageReturn = true;
 				}
-				else if (c == '\n')
+				else if (character == '\n')
 				{
 					_trailingNewlineChars++;
 					if (_previousWasCarriageReturn)
-					{
-						// CRLF is one logical line break even when the pair crosses a read-buffer boundary.
 						_crLfPairCount++;
-					}
 					else
 					{
 						_lineCount++;
 						_trailingNewlineLineBreaks++;
 					}
-
 					_previousWasCarriageReturn = false;
 				}
 				else
@@ -1199,16 +1249,76 @@ public sealed class FileContentAnalyzer :
 					_trailingNewlineLineBreaks = 0;
 				}
 
-				if (!_hasNonWhitespace && !char.IsWhiteSpace(c))
+				if (!_hasNonWhitespace && !char.IsWhiteSpace(character))
 					_hasNonWhitespace = true;
-
-				if (c == '`')
+				if (character == '`')
 					_longestBacktickRun = Math.Max(_longestBacktickRun, ++_currentBacktickRun);
 				else
 					_currentBacktickRun = 0;
 			}
 
 			return true;
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		private bool AppendCharacter(char character)
+		{
+			if (character == '\0')
+				return false;
+
+			_charCount++;
+
+			if (character == '\r')
+			{
+				_lineCount++;
+				_trailingNewlineChars++;
+				_trailingNewlineLineBreaks++;
+				_previousWasCarriageReturn = true;
+			}
+			else if (character == '\n')
+			{
+				_trailingNewlineChars++;
+				if (_previousWasCarriageReturn)
+				{
+					// CRLF is one logical line break even when the pair crosses a read-buffer boundary.
+					_crLfPairCount++;
+				}
+				else
+				{
+					_lineCount++;
+					_trailingNewlineLineBreaks++;
+				}
+
+				_previousWasCarriageReturn = false;
+			}
+			else
+			{
+				_previousWasCarriageReturn = false;
+				_trailingNewlineChars = 0;
+				_trailingNewlineLineBreaks = 0;
+			}
+
+			if (!_hasNonWhitespace && !char.IsWhiteSpace(character))
+				_hasNonWhitespace = true;
+
+			if (character == '`')
+				_longestBacktickRun = Math.Max(_longestBacktickRun, ++_currentBacktickRun);
+			else
+				_currentBacktickRun = 0;
+
+			return true;
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		private void AppendOrdinaryRun(int length)
+		{
+			Debug.Assert(length > 0);
+			Debug.Assert(_hasNonWhitespace);
+			_charCount += length;
+			_previousWasCarriageReturn = false;
+			_trailingNewlineChars = 0;
+			_trailingNewlineLineBreaks = 0;
+			_currentBacktickRun = 0;
 		}
 
 		public TextFileMetrics Build(long sizeBytes) =>

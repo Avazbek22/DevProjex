@@ -82,7 +82,7 @@ internal sealed class ProjectTextOutputPipeline(
 					CandidateFileCount: 0);
 			}
 
-			var trimmedTree = tree.TrimEnd('\r', '\n');
+			var trimmedTreeLength = TrailingLineEndingTrimming.GetTrimmedLength(tree);
 			var separator = string.Concat(
 				Environment.NewLine,
 				"\u00A0",
@@ -94,7 +94,7 @@ internal sealed class ProjectTextOutputPipeline(
 				{
 					await textFileExport.AppendAsync(
 						stream,
-						trimmedTree,
+						tree.AsMemory(0, trimmedTreeLength),
 						writeCancellationToken).ConfigureAwait(false);
 					await textFileExport.AppendAsync(
 						stream,

@@ -140,7 +140,7 @@
   "Dialog.ResetData.Message": "Các hồ sơ dự án cục bộ đã lưu sẽ bị xóa, bao gồm:\nphần mở rộng tệp, quy tắc loại trừ, cài đặt xử lý nội dung và dấu bí mật được đánh thủ công.\nCác tệp và thư mục dự án của bạn sẽ không bị thay đổi hoặc xóa — ứng dụng hoạt động ở chế độ chỉ đọc.\nCài đặt giao diện sẽ không thay đổi.\n\nXóa các hồ sơ đã lưu?",
   "Dialog.ResetData.Confirm": "Xóa bỏ",
   "Dialog.RecentFolderUnavailable.Title": "Thư mục không có sẵn",
-  "Dialog.RecentFolderUnavailable.Message": "Không tìm thấy thư mục hoặc tạm thời không có:\n{0}Xóa nó khỏi Gần đây?",
+  "Dialog.RecentFolderUnavailable.Message": "Không tìm thấy thư mục hoặc tạm thời không có:\n{0}\n\nXóa nó khỏi Gần đây?",
   "Dialog.RecentFolderUnavailable.Remove": "Xóa",
   "Dialog.RecentFolderUnavailable.Keep": "Giữ",
   "Dialog.TerminalCommand.Title": "Chạy từ thiết bị đầu cuối",

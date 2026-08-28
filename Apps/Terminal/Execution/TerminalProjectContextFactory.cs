@@ -7,12 +7,28 @@ public sealed class TerminalProjectContextFactory(
 	ProjectSourceIdentityResolver sourceIdentityResolver,
 	SecretRedactionSession secretRedactionSession)
 {
-	public async Task<ProjectContextPlan> BuildAsync(
+	public Task<ProjectContextPlan> BuildAsync(
 		string projectPath,
 		ProjectSelectionSpec selection,
 		ProjectSourceIdentity? knownIdentity = null,
 		CancellationToken cancellationToken = default,
 		bool captureIgnoreImpactCounts = false)
+		=> BuildAsync(
+			projectPath,
+			selection,
+			includeOutputMetrics: true,
+			knownIdentity,
+			cancellationToken,
+			captureIgnoreImpactCounts);
+
+	internal async Task<ProjectContextPlan> BuildAsync(
+		string projectPath,
+		ProjectSelectionSpec selection,
+		bool includeOutputMetrics,
+		ProjectSourceIdentity? knownIdentity = null,
+		CancellationToken cancellationToken = default,
+		bool captureIgnoreImpactCounts = false,
+		bool includeContentOutputMetrics = true)
 	{
 		var markedSecrets = ProjectSelectionMarkedSecretsResolver.Resolve(selection);
 		if (await secretRedactionSession
@@ -35,6 +51,18 @@ public sealed class TerminalProjectContextFactory(
 			.ResolveAsync(projectPath, knownIdentity, cancellationToken)
 			.ConfigureAwait(false);
 		var request = new ProjectContextRequest(projectPath, selection, sourceIdentity);
+		if (!includeOutputMetrics)
+		{
+			return await planner
+				.BuildStructureAsync(request, cancellationToken)
+				.ConfigureAwait(false);
+		}
+		if (!includeContentOutputMetrics)
+		{
+			return await planner
+				.BuildWithTreeMetricsAsync(request, cancellationToken)
+				.ConfigureAwait(false);
+		}
 		return captureIgnoreImpactCounts
 			? await planner
 				.BuildWithIgnoreImpactCountsAsync(request, cancellationToken)

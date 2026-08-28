@@ -102,6 +102,35 @@ public sealed class DirectCommandIntegrationTests
 		""";
 
 	[Fact]
+	public async Task TreeDoesNotReadSelectedFileContents()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		workspace.WriteFile("src/app.cs", "tree-read-probe\n");
+		workspace.WriteFile("README.md", "# Tree read probe\n");
+		var environment = new TestTerminalEnvironment();
+		using var measurement = DevProjex.Application.Diagnostics.ContentPipelineDiagnostics.BeginMeasurement();
+
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(() => appData.Path))
+			.RunAsync(
+			[
+				"tree", workspace.Path,
+				"--git-mode", "none",
+				"--exclude", "none"
+			],
+				TestContext.Current.CancellationToken);
+
+		var diagnostics = measurement.Capture();
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Contains("app.cs", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("README.md", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Equal(0, diagnostics.FullFileReads);
+		Assert.Equal(0, diagnostics.FullFileReadBytes);
+	}
+
+	[Fact]
 	public async Task AnalyzeJsonWritesStableMachineDocumentOnlyToStdout()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -177,6 +206,33 @@ public sealed class DirectCommandIntegrationTests
 			root.GetProperty("metrics").GetProperty("content").GetProperty("chars").GetInt64() <
 			CompressibleSource.Length);
 		Assert.Empty(environment.StandardError);
+	}
+
+	[Theory]
+	[InlineData(false, false, false, false, false, false)]
+	[InlineData(true, false, false, false, false, true)]
+	[InlineData(false, true, false, false, false, true)]
+	[InlineData(false, false, true, false, false, true)]
+	[InlineData(false, false, false, true, false, true)]
+	[InlineData(false, false, false, false, true, true)]
+	public void AnalyzeTransformationDetectionCoversEveryContentTransformation(
+		bool hideSecrets,
+		bool hidePrivateData,
+		bool compressCode,
+		bool stripComments,
+		bool stripBlankLines,
+		bool expected)
+	{
+		var selection = ProjectSelectionSpec.Standard with
+		{
+			HideSecrets = hideSecrets,
+			HidePrivateData = hidePrivateData,
+			CompressCode = compressCode,
+			StripComments = stripComments,
+			StripBlankLines = stripBlankLines
+		};
+
+		Assert.Equal(expected, AnalyzeCommandHandler.HasContentTransformations(selection));
 	}
 
 	[Fact]

@@ -501,7 +501,9 @@ Ripristina impostazioni (Aiuto → Ripristina impostazioni) ripristina i valori 
 ### 16.3 Ripristina dati
 Ripristina dati (Aiuto → Ripristina dati) rimuove i profili salvati dei parametri dei progetti locali:
 * tipi di file selezionati;
-* opzioni selezionate nella sezione «Esclusioni».
+* opzioni selezionate nella sezione «Esclusioni»;
+* impostazioni selezionate per l'elaborazione dei contenuti;
+* contrassegni manuali dei segreti.
 
 Importante:
 * la cronologia «Recenti» delle cartelle locali non viene cancellata;

@@ -636,6 +636,26 @@ public sealed class InfrastructureJsonPersistenceTests
 	}
 
 	[Fact]
+	public async Task CrossProcessFileLock_BoundedWaitObservesCancellationPromptly()
+	{
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "settings.json");
+		using var heldLock = CrossProcessFileLock.Acquire(fileSet, TimeSpan.Zero);
+		using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(75));
+		var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Task.Run(() =>
+			CrossProcessFileLock.AcquireWithCancellation(
+				fileSet,
+				TimeSpan.FromSeconds(5),
+				cancellation.Token)));
+
+		Assert.True(
+			stopwatch.Elapsed < TimeSpan.FromSeconds(1),
+			$"Cancellation was observed after {stopwatch.Elapsed}.");
+	}
+
+	[Fact]
 	public void CrossProcessFileLock_DisposeReleasesSidecarLockForNextWriter()
 	{
 		using var temp = new TemporaryDirectory();

@@ -24,11 +24,45 @@ internal sealed record TerminalParameterRow(
 	IgnoreOptionId? ContentTransformation = null,
 	string? Value = null)
 {
-	public override string ToString()
+	private string? _displayText;
+
+	private TerminalParameterRow(TerminalParameterRow original)
+		: base()
 	{
-		var marker = IsSelected == true ? "[x]" : "[ ]";
-		return $"{marker} {Label}";
+		Key = original.Key;
+		Kind = original.Kind;
+		Label = original.Label;
+		IsSelected = original.IsSelected;
+		GitMode = original.GitMode;
+		Exclusion = original.Exclusion;
+		ContentTransformation = original.ContentTransformation;
+		Value = original.Value;
 	}
+
+	public override string ToString() =>
+		_displayText ??= $"{(IsSelected == true ? "[x]" : "[ ]")} {Label}";
+
+	public bool Equals(TerminalParameterRow? other) =>
+		ReferenceEquals(this, other) ||
+		other is not null &&
+		Kind == other.Kind &&
+		IsSelected == other.IsSelected &&
+		GitMode == other.GitMode &&
+		Exclusion == other.Exclusion &&
+		ContentTransformation == other.ContentTransformation &&
+		string.Equals(Key, other.Key, StringComparison.Ordinal) &&
+		string.Equals(Label, other.Label, StringComparison.Ordinal) &&
+		string.Equals(Value, other.Value, StringComparison.Ordinal);
+
+	public override int GetHashCode() => HashCode.Combine(
+		StringComparer.Ordinal.GetHashCode(Key),
+		Kind,
+		StringComparer.Ordinal.GetHashCode(Label),
+		IsSelected,
+		GitMode,
+		Exclusion,
+		ContentTransformation,
+		Value is null ? 0 : StringComparer.Ordinal.GetHashCode(Value));
 
 	internal static string FitLabel(string value, int width, bool useUnicode)
 	{

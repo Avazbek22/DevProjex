@@ -19,7 +19,7 @@ internal static class GitTrackedPathIndexCache
 	private static readonly Dictionary<string, LinkedListNode<CacheEntry>> Cache =
 		new(PathComparer.Default);
 	private static readonly LinkedList<CacheEntry> CacheLru = new();
-	private static readonly ConcurrentDictionary<string, Lazy<Task<LoadedGitTrackedPathIndex?>>> InFlightLoads =
+	private static readonly ConcurrentDictionary<string, SharedAsyncOperation<LoadedGitTrackedPathIndex?>> InFlightLoads =
 		new(PathComparer.Default);
 	private static long _cacheSizeBytes;
 	private static int _gitAvailability;
@@ -52,18 +52,28 @@ internal static class GitTrackedPathIndexCache
 			return false;
 
 		var loadKey = signature.CreateLoadKey();
-		var lazyLoad = InFlightLoads.GetOrAdd(
-			loadKey,
-			_ => new Lazy<Task<LoadedGitTrackedPathIndex?>>(
-				() => LoadAndStoreSafelyAsync(signature),
-				LazyThreadSafetyMode.ExecutionAndPublication));
-		var loadTask = lazyLoad.Value;
-		RemoveCompletedLoad(loadKey, lazyLoad, loadTask);
+		SharedAsyncOperation<LoadedGitTrackedPathIndex?> sharedLoad;
+		IDisposable lease;
+		while (true)
+		{
+			sharedLoad = GetOrCreateSharedLoad(loadKey, signature);
+			if (sharedLoad.TryAcquire(out lease))
+				break;
 
-		var loaded = loadTask
-			.WaitAsync(cancellationToken)
-			.GetAwaiter()
-			.GetResult();
+			InFlightLoads.TryRemove(
+				new KeyValuePair<string, SharedAsyncOperation<LoadedGitTrackedPathIndex?>>(loadKey, sharedLoad));
+			if (TryGetCached(signature, out trackedPathIndex))
+				return true;
+		}
+
+		LoadedGitTrackedPathIndex? loaded;
+		using (lease)
+		{
+			loaded = sharedLoad.Task
+				.WaitAsync(cancellationToken)
+				.GetAwaiter()
+				.GetResult();
+		}
 		if (loaded is null)
 			return false;
 
@@ -152,12 +162,33 @@ internal static class GitTrackedPathIndexCache
 		return false;
 	}
 
-	private static async Task<LoadedGitTrackedPathIndex?> LoadAndStoreSafelyAsync(
+	private static SharedAsyncOperation<LoadedGitTrackedPathIndex?> GetOrCreateSharedLoad(
+		string loadKey,
 		GitIndexSignature signature)
+	{
+		while (true)
+		{
+			if (InFlightLoads.TryGetValue(loadKey, out var existing))
+				return existing;
+
+			var candidate = new SharedAsyncOperation<LoadedGitTrackedPathIndex?>(
+				cancellationToken => LoadAndStoreSafelyAsync(signature, cancellationToken),
+				load => InFlightLoads.TryRemove(
+					new KeyValuePair<string, SharedAsyncOperation<LoadedGitTrackedPathIndex?>>(loadKey, load)));
+			if (InFlightLoads.TryAdd(loadKey, candidate))
+				return candidate;
+
+			candidate.DisposeUnused();
+		}
+	}
+
+	private static async Task<LoadedGitTrackedPathIndex?> LoadAndStoreSafelyAsync(
+		GitIndexSignature signature,
+		CancellationToken cancellationToken)
 	{
 		try
 		{
-			var loaded = await LoadAsync(signature).ConfigureAwait(false);
+			var loaded = await LoadAsync(signature, cancellationToken).ConfigureAwait(false);
 			if (loaded is not null)
 				Store(signature, loaded);
 			return loaded;
@@ -168,30 +199,12 @@ internal static class GitTrackedPathIndexCache
 		}
 	}
 
-	private static void RemoveCompletedLoad(
-		string loadKey,
-		Lazy<Task<LoadedGitTrackedPathIndex?>> lazyLoad,
-		Task<LoadedGitTrackedPathIndex?> loadTask)
-	{
-		_ = loadTask.ContinueWith(
-			static (_, state) =>
-			{
-				var completedLoad = ((string Key, Lazy<Task<LoadedGitTrackedPathIndex?>> Load))state!;
-				InFlightLoads.TryRemove(
-					new KeyValuePair<string, Lazy<Task<LoadedGitTrackedPathIndex?>>>(
-						completedLoad.Key,
-						completedLoad.Load));
-			},
-			(loadKey, lazyLoad),
-			CancellationToken.None,
-			TaskContinuationOptions.ExecuteSynchronously,
-			TaskScheduler.Default);
-	}
-
 	private static async Task<LoadedGitTrackedPathIndex?> LoadAsync(
-		GitIndexSignature signature)
+		GitIndexSignature signature,
+		CancellationToken cancellationToken)
 	{
-		using var timeoutSource = new CancellationTokenSource(CommandTimeout);
+		using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		timeoutSource.CancelAfter(CommandTimeout);
 
 		using var process = new Process
 		{

@@ -51,31 +51,33 @@ public sealed class TreeAndContentExportService(
 			pathPresentation,
 			outputPathRedaction);
 		var displayRootName = pathPresentation?.DisplayRootName;
-		bool hasSelection = selectedPaths.Count > 0 &&
-		                    TreeExportService.HasSelectedDescendantOrSelfWithCancellation(
-			                    root,
-			                    selectedPaths,
-			                    cancellationToken);
-
-		string tree = hasSelection
-			? treeExport.BuildSelectedTreeWithCancellation(
+		var hasSelection = selectedPaths.Count > 0;
+		string tree;
+		if (hasSelection)
+		{
+			tree = treeExport.BuildSelectedTreeWithCancellation(
 				rootPath,
 				root,
 				selectedPaths,
 				format,
 				displayRootPath,
 				displayRootName,
-				cancellationToken)
-			: treeExport.BuildFullTreeWithCancellation(
-				rootPath,
-				root,
-				format,
-				displayRootPath,
-				displayRootName,
-				includeRootPath: true,
-				cancellationToken: cancellationToken);
-
-		if (hasSelection && string.IsNullOrWhiteSpace(tree))
+				cancellationToken);
+			if (string.IsNullOrWhiteSpace(tree))
+			{
+				hasSelection = false;
+				tree = treeExport.BuildFullTreeWithCancellation(
+					rootPath,
+					root,
+					format,
+					displayRootPath,
+					displayRootName,
+					includeRootPath: true,
+					cancellationToken: cancellationToken);
+			}
+		}
+		else
+		{
 			tree = treeExport.BuildFullTreeWithCancellation(
 				rootPath,
 				root,
@@ -84,6 +86,7 @@ public sealed class TreeAndContentExportService(
 				displayRootName,
 				includeRootPath: true,
 				cancellationToken: cancellationToken);
+		}
 
 		var files = ProjectTreeSelectionProjection.BuildOrderedSelectedFilePathsWithCancellation(
 			root,
@@ -104,14 +107,32 @@ public sealed class TreeAndContentExportService(
 			return tree;
 
 		// The selected format applies only to the tree block; file content stays plain text.
-		var sb = new StringBuilder();
-		sb.Append(tree.TrimEnd('\r', '\n'));
-		sb.AppendLine();
-		AppendClipboardBlankLine(sb);
-		AppendClipboardBlankLine(sb);
-		sb.Append(content);
+		return CombineTreeAndContent(tree, content);
+	}
 
-		return sb.ToString();
+	internal static string CombineTreeAndContent(string tree, string content)
+	{
+		var treeLength = TrailingLineEndingTrimming.GetTrimmedLength(tree);
+		var lineEnding = Environment.NewLine;
+		var resultLength = checked(treeLength + content.Length + lineEnding.Length * 3 + 2);
+		return string.Create(
+			resultLength,
+			(Tree: tree, TreeLength: treeLength, Content: content, LineEnding: lineEnding),
+			static (destination, state) =>
+			{
+				var offset = 0;
+				state.Tree.AsSpan(0, state.TreeLength).CopyTo(destination);
+				offset += state.TreeLength;
+				state.LineEnding.AsSpan().CopyTo(destination[offset..]);
+				offset += state.LineEnding.Length;
+				destination[offset++] = ClipboardBlankLine[0];
+				state.LineEnding.AsSpan().CopyTo(destination[offset..]);
+				offset += state.LineEnding.Length;
+				destination[offset++] = ClipboardBlankLine[0];
+				state.LineEnding.AsSpan().CopyTo(destination[offset..]);
+				offset += state.LineEnding.Length;
+				state.Content.AsSpan().CopyTo(destination[offset..]);
+			});
 	}
 
 	public static Func<string, string> CreateRelativeContentHeaderPathMapper(string rootPath)
@@ -199,8 +220,6 @@ public sealed class TreeAndContentExportService(
 		var fileName = Path.GetFileName(filePath);
 		return string.IsNullOrEmpty(fileName) ? PathUtility.NormalizeSeparators(filePath) : fileName;
 	}
-
-	private static void AppendClipboardBlankLine(StringBuilder sb) => sb.AppendLine(ClipboardBlankLine);
 
 	private sealed record RelativePathMapperCacheEntry(
 		Func<string, string> Mapper,

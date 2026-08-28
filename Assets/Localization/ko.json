@@ -258,7 +258,7 @@
   "Terminal.Analysis.PrivateDataRuleMatches": "개인 데이터 일치",
   "Terminal.Analysis.PrivateDataRedactedValues": "마스킹된 개인 데이터",
   "Terminal.Analysis.PrivateDataScanNotice": "개인정보 검색 알림",
-  "Terminal.Tui.Secret.Kept": "이 값은 이 세션의 모든 출력에서 ​​그대로 유지됩니다.",
+  "Terminal.Tui.Secret.Kept": "이 값은 이 세션의 모든 출력에서 그대로 유지됩니다.",
   "Terminal.Tui.Secret.Redacted": "이 값은 출력할 때마다 다시 마스킹됩니다.",
   "Settings.Ignore.HiddenFolders": "숨겨진 폴더",
   "Settings.Ignore.HiddenFiles": "숨겨진 파일",

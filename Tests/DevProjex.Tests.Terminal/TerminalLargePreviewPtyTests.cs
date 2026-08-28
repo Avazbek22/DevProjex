@@ -87,7 +87,7 @@ public sealed class TerminalLargePreviewPtyTests
 		Assert.Contains("Files ", final, StringComparison.Ordinal);
 		Assert.Contains("/120", final, StringComparison.Ordinal);
 		var finalRange = await terminal.WaitForScreenAsync(
-			"F 117-120/120",
+			"F 118-120/120",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("C 1-62/5", finalRange, StringComparison.Ordinal);
 		await terminal.WaitForScreenAsync(

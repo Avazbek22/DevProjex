@@ -5,6 +5,35 @@ namespace DevProjex.Tests.Unit;
 public sealed class PreviewTextDocumentSearchTests
 {
 	[Fact]
+	public void FindAll_FileBackedMatchesInMemoryAcrossVisitChunkBoundaries()
+	{
+		using var temporary = new TemporaryDirectory();
+		var lines = Enumerable.Range(1, 2_050)
+			.Select(static lineNumber => lineNumber is 1_024 or 1_025 or 2_048 or 2_049
+				? $"line {lineNumber}: 境界🙂 marker"
+				: $"line {lineNumber}")
+			.ToArray();
+		var text = string.Concat(lines.Select(
+			static (line, index) => index == 2_049
+				? line
+				: line + (index % 2 == 0 ? "\r\n" : "\n")));
+		using var inMemory = new InMemoryPreviewTextDocument(text);
+		using var fileBacked = CreateFileBackedDocument(temporary, text, inMemory);
+
+		var expected = PreviewTextDocumentSearch.FindAll(
+			inMemory,
+			"境界🙂",
+			TestContext.Current.CancellationToken);
+		var actual = PreviewTextDocumentSearch.FindAll(
+			fileBacked,
+			"境界🙂",
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(expected, actual);
+		Assert.Equal([1_023, 1_024, 2_047, 2_048], actual.Select(static match => match.Line));
+	}
+
+	[Fact]
 	public void FindAll_SearchesEveryLineWithoutMaterializingTheWholeDocument()
 	{
 		using var document = new TrackingPreviewDocument(
@@ -46,6 +75,29 @@ public sealed class PreviewTextDocumentSearchTests
 		Assert.Throws<OperationCanceledException>(() =>
 			PreviewTextDocumentSearch.FindAll(document, "line", cancellation.Token));
 		Assert.InRange(document.LineReadCount, 3, 4);
+	}
+
+	private static FileBackedPreviewTextDocument CreateFileBackedDocument(
+		TemporaryDirectory temporary,
+		string text,
+		InMemoryPreviewTextDocument inMemory)
+	{
+		var bytes = Encoding.UTF8.GetBytes(text);
+		var storagePath = Path.Combine(temporary.Path, $"{Guid.NewGuid():N}.preview.txt");
+		File.WriteAllBytes(storagePath, bytes);
+		var lineOffsets = new List<long> { 0 };
+		for (var index = 0; index < bytes.Length; index++)
+		{
+			if (bytes[index] == (byte)'\n')
+				lineOffsets.Add(index + 1L);
+		}
+
+		return new FileBackedPreviewTextDocument(
+			storagePath,
+			lineOffsets.ToArray(),
+			bytes.Length,
+			inMemory.MaxLineLength,
+			inMemory.CharacterCount);
 	}
 
 	private sealed class TrackingPreviewDocument(

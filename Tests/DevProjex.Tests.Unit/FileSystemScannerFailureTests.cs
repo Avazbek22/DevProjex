@@ -38,6 +38,28 @@ public sealed class FileSystemScannerFailureTests
 	}
 
 	[Fact]
+	public void ScanProjectWorkspace_WhenDirectoryFileEnumerationFails_MarksSnapshotIncomplete()
+	{
+		using var project = new TemporaryDirectory();
+		project.CreateFile("src/app.cs", "class App {}\n");
+		var scanner = new FileSystemScanner((point, path) =>
+		{
+			if (point == FileSystemScanEnumerationPoint.DirectoryFiles &&
+			    Path.GetFileName(path).Equals("src", StringComparison.OrdinalIgnoreCase))
+			{
+				throw new IOException("Simulated file enumeration failure.");
+			}
+		});
+
+		var result = scanner.ScanProjectWorkspace(
+			CreateRequest(project.Path, ["src"]),
+			TestContext.Current.CancellationToken);
+
+		Assert.True(result.HadScanFailure);
+		Assert.False(result.RootAccessDenied);
+	}
+
+	[Fact]
 	public void GetRootFolderNames_WhenExpectedIoFails_DoesNotReportEmptySuccess()
 	{
 		using var project = new TemporaryDirectory();

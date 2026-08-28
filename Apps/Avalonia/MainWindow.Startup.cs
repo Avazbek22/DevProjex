@@ -546,9 +546,7 @@ public partial class MainWindow
                 await TryShowAutomaticTerminalCommandPromptAsync(cancellationToken);
             }
 
-            ObserveDetachedTask(
-                Task.Run(_repoCacheService.CleanupStaleCacheOnStartup, cancellationToken),
-                "CleanupStaleRepositoryCache");
+            _repoCacheService.RequestStaleCacheCleanupOnStartup();
             ObserveDetachedTask(
                 _applicationUpdates.RunAutomaticCheckIfDueAsync(cancellationToken),
                 "AutomaticUpdateCheck");

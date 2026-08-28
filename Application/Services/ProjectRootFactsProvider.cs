@@ -310,10 +310,12 @@ public sealed class ProjectRootFactsProvider
 				return null;
 			var expectedLastWriteTicks = linkInfo.LastWriteTimeUtc.Ticks;
 			var expectedLength = linkInfo.Length;
+			IgnorePipelineDiagnostics.RecordGitIgnoreSourceReadRequest();
 			var fingerprint = ComputeContentFingerprintWithCancellation(
 				linkInfo.FullName,
 				expectedLength,
 				cancellationToken);
+			IgnorePipelineDiagnostics.RecordGitIgnoreSourceBytes(expectedLength);
 			linkInfo.Refresh();
 			if (!linkInfo.Exists ||
 			    linkInfo.LastWriteTimeUtc.Ticks != expectedLastWriteTicks ||
@@ -327,6 +329,59 @@ public sealed class ProjectRootFactsProvider
 				expectedLength,
 				LinkTarget: string.Empty,
 				fingerprint);
+		}
+		catch (Exception exception) when (exception is
+		       IOException or
+		       UnauthorizedAccessException or
+		       System.Security.SecurityException or
+		       NotSupportedException or
+		       ArgumentException)
+		{
+			return null;
+		}
+	}
+
+	internal static ProjectRootFileContentSnapshot? TryReadFileContentSnapshotWithCancellation(
+		string filePath,
+		CancellationToken cancellationToken)
+	{
+		try
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			UnixFileTypeInspector.EnsureRegularFile(filePath);
+			var linkInfo = new FileInfo(filePath);
+			if (!linkInfo.Exists)
+				return null;
+
+			if (linkInfo.Attributes.HasFlag(FileAttributes.ReparsePoint) ||
+			    !string.IsNullOrEmpty(linkInfo.LinkTarget))
+			{
+				return null;
+			}
+
+			if (linkInfo.Length > GitIgnoreFileReader.MaximumFileSizeBytes)
+				return null;
+			var expectedLastWriteTicks = linkInfo.LastWriteTimeUtc.Ticks;
+			var expectedLength = linkInfo.Length;
+			var source = GitIgnoreFileReader.ReadWithCancellation(filePath, cancellationToken);
+			linkInfo.Refresh();
+			if (!linkInfo.Exists ||
+			    linkInfo.Attributes.HasFlag(FileAttributes.ReparsePoint) ||
+			    !string.IsNullOrEmpty(linkInfo.LinkTarget) ||
+			    linkInfo.LastWriteTimeUtc.Ticks != expectedLastWriteTicks ||
+			    linkInfo.Length != expectedLength ||
+			    source.LengthBytes != expectedLength)
+			{
+				return null;
+			}
+
+			return new ProjectRootFileContentSnapshot(
+				new ProjectRootFileSignature(
+					expectedLastWriteTicks,
+					expectedLength,
+					LinkTarget: string.Empty,
+					source.ContentFingerprint),
+				source);
 		}
 		catch (Exception exception) when (exception is
 		       IOException or
@@ -448,3 +503,7 @@ public sealed class ProjectRootFactsProvider
 
 	private sealed record CacheEntry(string Path, DateTime CachedAtUtc, ProjectRootFacts Facts);
 }
+
+internal readonly record struct ProjectRootFileContentSnapshot(
+	ProjectRootFileSignature Signature,
+	GitIgnoreFileContent Source);

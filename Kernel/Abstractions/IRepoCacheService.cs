@@ -3,7 +3,7 @@ namespace DevProjex.Kernel.Abstractions;
 /// <summary>
 /// Manages the persistent repository cache and temporary clone staging.
 /// </summary>
-public interface IRepoCacheService
+public interface IRepoCacheService : IDisposable
 {
     /// <summary>
     /// Gets the root path of the repository cache.
@@ -117,9 +117,20 @@ public interface IRepoCacheService
     void CleanupStaleCacheOnStartup();
 
     /// <summary>
+    /// Requests coalesced startup cleanup on the cache-owned background scheduler.
+    /// </summary>
+    void RequestStaleCacheCleanupOnStartup();
+
+    /// <summary>
     /// Runs best-effort trash cleanup and size/age eviction without touching pinned repositories.
     /// </summary>
     void CollectGarbage();
+
+    /// <summary>
+    /// Requests best-effort garbage collection on the shared background scheduler.
+    /// Repeated requests are coalesced without blocking the caller.
+    /// </summary>
+    void RequestGarbageCollection();
 
     /// <summary>
     /// Recomputes the approximate size after an explicit repository update.

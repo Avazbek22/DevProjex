@@ -128,6 +128,8 @@ public sealed record ProjectContextPlan(
 {
 	public bool HasErrors => Diagnostics.Any(static diagnostic =>
 		diagnostic.Severity == ContextDiagnosticSeverity.Error);
+
+	internal bool IncludesOutputMetrics { get; init; } = true;
 }
 
 public sealed record ProjectContextRequest(

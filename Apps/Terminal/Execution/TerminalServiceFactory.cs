@@ -9,6 +9,7 @@ public sealed class TerminalServiceFactory(
 	Func<string>? appDataPathProvider = null)
 {
 	private readonly Func<AppLanguage, TerminalServices>? _servicesProvider;
+	private readonly Action? _fullServiceCreationObserver;
 
 	internal TerminalServiceFactory(Func<AppLanguage, TerminalServices> servicesProvider)
 		: this()
@@ -17,10 +18,20 @@ public sealed class TerminalServiceFactory(
 			throw new ArgumentNullException(nameof(servicesProvider));
 	}
 
+	internal TerminalServiceFactory(
+		Func<string> appDataPathProvider,
+		Action fullServiceCreationObserver)
+		: this(appDataPathProvider)
+	{
+		_fullServiceCreationObserver = fullServiceCreationObserver ??
+			throw new ArgumentNullException(nameof(fullServiceCreationObserver));
+	}
+
 	public TerminalServices Create(AppLanguage language)
 	{
 		if (_servicesProvider is not null)
 			return _servicesProvider(language);
+		_fullServiceCreationObserver?.Invoke();
 
 		var resolvedAppDataPathProvider =
 			appDataPathProvider ?? UserDataPathResolver.GetConfigurationRoot;
@@ -69,12 +80,8 @@ public sealed class TerminalServiceFactory(
 		var selectionResolver = new ProjectSelectionResolver(
 			localProfiles,
 			portableProfiles.LoadAsync);
-		var repoCache = appDataPathProvider is null
-			? new RepoCacheService()
-			: new RepoCacheService(Path.Combine(resolvedAppDataPathProvider(), "RepoCache"));
-		var recentProjects = appDataPathProvider is null
-			? new RecentProjectsStore()
-			: new RecentProjectsStore(resolvedAppDataPathProvider);
+		var repoCache = CreateRepositoryCache(resolvedAppDataPathProvider);
+		var recentProjects = CreateRecentProjectsStore(resolvedAppDataPathProvider);
 		var gitRepository = new GitRepositoryService();
 		var sourceIdentityResolver = new ProjectSourceIdentityResolver(gitRepository, repoCache);
 		var repositoryCacheCatalog = new RepositoryCacheCatalog(gitRepository, repoCache);
@@ -164,6 +171,110 @@ public sealed class TerminalServiceFactory(
 
 	internal TerminalServiceScope CreateScope(AppLanguage language) =>
 		new(Create(language), ownsServices: _servicesProvider is null);
+
+	internal TerminalCacheServiceScope CreateCacheScope(AppLanguage language)
+	{
+		if (_servicesProvider is not null)
+		{
+			var fullScope = CreateScope(language);
+			return new TerminalCacheServiceScope(
+				new TerminalCacheServices(
+					fullScope.Services.Localization,
+					fullScope.Services.RepoCacheService,
+					fullScope.Services.GitRepositoryService),
+				fullScope);
+		}
+
+		var resolvedAppDataPathProvider =
+			appDataPathProvider ?? UserDataPathResolver.GetConfigurationRoot;
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), language);
+		var repositoryCache = CreateRepositoryCache(resolvedAppDataPathProvider);
+		return new TerminalCacheServiceScope(
+			new TerminalCacheServices(
+				localization,
+				repositoryCache,
+				new GitRepositoryService()),
+			repositoryCache);
+	}
+
+	internal TerminalRecentServiceScope CreateRecentScope(AppLanguage language)
+	{
+		if (_servicesProvider is not null)
+		{
+			var fullScope = CreateScope(language);
+			return new TerminalRecentServiceScope(
+				new TerminalRecentServices(
+					fullScope.Services.RecentProjectsStore,
+					fullScope.Services.RecentWorkspacesService,
+					fullScope.Services.Localization),
+				fullScope);
+		}
+
+		var resolvedAppDataPathProvider =
+			appDataPathProvider ?? UserDataPathResolver.GetConfigurationRoot;
+		return new TerminalRecentServiceScope(
+			new TerminalRecentServices(
+				CreateRecentProjectsStore(resolvedAppDataPathProvider),
+				new RecentWorkspacesService(),
+				new LocalizationService(new JsonLocalizationCatalog(), language)));
+	}
+
+	private RepoCacheService CreateRepositoryCache(Func<string> resolvedAppDataPathProvider) =>
+		appDataPathProvider is null
+			? new RepoCacheService()
+			: new RepoCacheService(Path.Combine(resolvedAppDataPathProvider(), "RepoCache"));
+
+	private RecentProjectsStore CreateRecentProjectsStore(Func<string> resolvedAppDataPathProvider) =>
+		appDataPathProvider is null
+			? new RecentProjectsStore()
+			: new RecentProjectsStore(resolvedAppDataPathProvider);
+}
+
+internal sealed record TerminalCacheServices(
+	LocalizationService Localization,
+	IRepoCacheService RepoCacheService,
+	IGitRepositoryService GitRepositoryService);
+
+internal sealed record TerminalRecentServices(
+	RecentProjectsStore RecentProjectsStore,
+	RecentWorkspacesService RecentWorkspacesService,
+	LocalizationService Localization);
+
+internal sealed class TerminalCacheServiceScope(
+	TerminalCacheServices services,
+	IDisposable ownedLifetime) : IDisposable
+{
+	private TerminalCacheServices? _services = services ??
+		throw new ArgumentNullException(nameof(services));
+	private IDisposable? _ownedLifetime = ownedLifetime ??
+		throw new ArgumentNullException(nameof(ownedLifetime));
+
+	public TerminalCacheServices Services =>
+		_services ?? throw new ObjectDisposedException(nameof(TerminalCacheServiceScope));
+
+	public void Dispose()
+	{
+		_services = null;
+		Interlocked.Exchange(ref _ownedLifetime, null)?.Dispose();
+	}
+}
+
+internal sealed class TerminalRecentServiceScope(
+	TerminalRecentServices services,
+	IDisposable? ownedLifetime = null) : IDisposable
+{
+	private TerminalRecentServices? _services = services ??
+		throw new ArgumentNullException(nameof(services));
+	private IDisposable? _ownedLifetime = ownedLifetime;
+
+	public TerminalRecentServices Services =>
+		_services ?? throw new ObjectDisposedException(nameof(TerminalRecentServiceScope));
+
+	public void Dispose()
+	{
+		_services = null;
+		Interlocked.Exchange(ref _ownedLifetime, null)?.Dispose();
+	}
 }
 
 internal sealed class TerminalServiceScope(

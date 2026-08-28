@@ -5,6 +5,10 @@ using DevProjex.Kernel;
 
 namespace DevProjex.Application.Services;
 
+public readonly record struct PreviewDocumentBuildResult(
+	IPreviewTextDocument Document,
+	ExportOutputMetrics Metrics);
+
 /// <summary>
 /// Builds readable preview documents with bounded memory usage.
 /// Large payloads are stored in a temporary UTF-8 backing file instead of one giant managed string.
@@ -37,14 +41,23 @@ public sealed class PreviewDocumentBuilder(
     public IPreviewTextDocument CreateDocument(
         string? text,
         IReadOnlyList<PreviewDocumentSection>? sections = null)
+		=> CreateDocumentWithMetrics(text, sections).Document;
+
+	public PreviewDocumentBuildResult CreateDocumentWithMetrics(
+		string? text,
+		IReadOnlyList<PreviewDocumentSection>? sections = null)
     {
         var value = text ?? string.Empty;
         if (value.Length <= InMemoryDocumentThresholdChars)
-            return CreateInMemory(value, sections);
+		{
+			return new PreviewDocumentBuildResult(
+				CreateInMemory(value, sections),
+				ExportOutputMetricsCalculator.FromText(value));
+		}
 
         using var builder = new PreviewTextStorageBuilder(InMemoryDocumentThresholdChars);
         builder.AppendExactText(value.AsSpan());
-        return builder.BuildDocument(sections);
+		return builder.BuildResult(sections);
     }
 
 	public IPreviewTextDocument CreateInMemoryWithGeneratedPathRedaction(
@@ -59,28 +72,34 @@ public sealed class PreviewDocumentBuilder(
     public async Task<IPreviewTextDocument> CreateDocumentAsync(
         Func<Stream, CancellationToken, Task> writeAsync,
         CancellationToken cancellationToken)
+		=> (await CreateDocumentWithMetricsAsync(writeAsync, cancellationToken).ConfigureAwait(false)).Document;
+
+	public async Task<PreviewDocumentBuildResult> CreateDocumentWithMetricsAsync(
+		Func<Stream, CancellationToken, Task> writeAsync,
+		CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(writeAsync);
 
-		var storagePath = CreateStoragePath();
+		await using var stream = new SpillablePreviewWriteStream();
+		await writeAsync(stream, cancellationToken).ConfigureAwait(false);
+		await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+		if (!stream.HasSpilled)
+		{
+			var text = await stream.ReadBufferedTextAsync(cancellationToken).ConfigureAwait(false);
+			return CreateDocumentWithMetrics(text);
+		}
+
+		var storagePath = await stream.DetachStoragePathAsync(cancellationToken).ConfigureAwait(false);
 		try
 		{
-			await using (var stream = OpenStorageFile(
-			                 storagePath,
-			                 FileOptions.Asynchronous | FileOptions.SequentialScan))
-            {
-                await writeAsync(stream, cancellationToken).ConfigureAwait(false);
-                await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
-            }
-
-            return await BuildDocumentFromUtf8FileAsync(storagePath, cancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch
-        {
-            DisposeStorageFile(storagePath);
-            throw;
-        }
+			return await BuildDocumentFromUtf8FileAsync(storagePath, cancellationToken)
+				.ConfigureAwait(false);
+		}
+		catch
+		{
+			DisposeStorageFile(storagePath);
+			throw;
+		}
     }
 
     public async Task<IPreviewTextDocument?> BuildContentDocumentAsync(
@@ -92,22 +111,47 @@ public sealed class PreviewDocumentBuilder(
 		bool includeSourceCoordinateMaps = false,
 		string? displayRootPath = null,
 		OutputPathRedactionDecision? outputPathRedaction = null,
+		string? projectRoot = null) =>
+		(await BuildContentDocumentWithMetricsAsync(
+			filePaths,
+			cancellationToken,
+			displayPathMapper,
+			includeOmissionMarkers,
+			transformationContext,
+			includeSourceCoordinateMaps,
+			displayRootPath,
+			outputPathRedaction,
+			projectRoot).ConfigureAwait(false))?.Document;
+
+    public async Task<PreviewDocumentBuildResult?> BuildContentDocumentWithMetricsAsync(
+        IEnumerable<string> filePaths,
+        CancellationToken cancellationToken,
+		Func<string, string>? displayPathMapper,
+		bool includeOmissionMarkers = false,
+		ContentTransformationContext? transformationContext = null,
+		bool includeSourceCoordinateMaps = false,
+		string? displayRootPath = null,
+		OutputPathRedactionDecision? outputPathRedaction = null,
 		string? projectRoot = null)
     {
-		var orderedFiles = BuildOrderedUniqueFiles(filePaths, cancellationToken);
+		var orderedFiles = ContentPathOrdering.BuildOrderedUnique(filePaths, cancellationToken);
 		outputPathRedaction ??= OutputRootPathPresentation.CaptureRedactionDecision(transformationContext);
 		await EnsurePersistentIdentityReadyAsync(transformationContext, cancellationToken).ConfigureAwait(false);
-        if (orderedFiles.Count == 0)
+        if (orderedFiles.Length == 0)
         {
-			using var emptyScope = transformationContext?.BeginOutput(orderedFiles, cancellationToken);
+			using var emptyScope = transformationContext?.BeginOutputFromOwnedOrderedUnique(
+				orderedFiles,
+				cancellationToken);
 			CompleteTransformation(emptyScope, transformationContext);
             return null;
 		}
 
         using var builder = new PreviewTextStorageBuilder(InMemoryDocumentThresholdChars);
-        var sections = new List<PreviewDocumentSection>(orderedFiles.Count);
+        var sections = new List<PreviewDocumentSection>(orderedFiles.Length);
 		var redactions = new List<PreviewRedactionSpan>();
-		using var transformationScope = transformationContext?.BeginOutput(orderedFiles, cancellationToken);
+		using var transformationScope = transformationContext?.BeginOutputFromOwnedOrderedUnique(
+			orderedFiles,
+			cancellationToken);
 		var redactionScope = transformationScope?.Redaction;
 		var wroteRoot = false;
 		if (!string.IsNullOrWhiteSpace(displayRootPath))
@@ -139,7 +183,7 @@ public sealed class PreviewDocumentBuilder(
 		if (!anyWritten)
 			return null;
 
-		return builder.BuildDocument(sections, redactions);
+		return builder.BuildResult(sections, redactions);
     }
 
     public async Task<IPreviewTextDocument> BuildTreeAndContentDocumentAsync(
@@ -152,28 +196,57 @@ public sealed class PreviewDocumentBuilder(
 		bool includeSourceCoordinateMaps = false,
 		OutputPathRedactionDecision? outputPathRedaction = null,
 		OutputPathPresentationResult? treeRootPresentation = null,
+		string? projectRoot = null) =>
+		(await BuildTreeAndContentDocumentWithMetricsAsync(
+			treeText,
+			filePaths,
+			cancellationToken,
+			displayPathMapper,
+			includeOmissionMarkers,
+			transformationContext,
+			includeSourceCoordinateMaps,
+			outputPathRedaction,
+			treeRootPresentation,
+			projectRoot).ConfigureAwait(false)).Document;
+
+    public async Task<PreviewDocumentBuildResult> BuildTreeAndContentDocumentWithMetricsAsync(
+        string treeText,
+        IEnumerable<string> filePaths,
+        CancellationToken cancellationToken,
+        Func<string, string>? displayPathMapper,
+		bool includeOmissionMarkers = false,
+		ContentTransformationContext? transformationContext = null,
+		bool includeSourceCoordinateMaps = false,
+		OutputPathRedactionDecision? outputPathRedaction = null,
+		OutputPathPresentationResult? treeRootPresentation = null,
 		string? projectRoot = null)
     {
-		var orderedFiles = BuildOrderedUniqueFiles(filePaths, cancellationToken);
+		var orderedFiles = ContentPathOrdering.BuildOrderedUnique(filePaths, cancellationToken);
 		outputPathRedaction ??= OutputRootPathPresentation.CaptureRedactionDecision(transformationContext);
 		await EnsurePersistentIdentityReadyAsync(transformationContext, cancellationToken).ConfigureAwait(false);
-        var normalizedTreeText = treeText.TrimEnd('\r', '\n');
+		var normalizedTreeTextLength = TrailingLineEndingTrimming.GetTrimmedLength(treeText);
 
-        if (orderedFiles.Count == 0)
+        if (orderedFiles.Length == 0)
         {
-			using var emptyScope = transformationContext?.BeginOutput(orderedFiles, cancellationToken);
+			using var emptyScope = transformationContext?.BeginOutputFromOwnedOrderedUnique(
+				orderedFiles,
+				cancellationToken);
 			CompleteTransformation(emptyScope, transformationContext);
-            return CreateInMemory(normalizedTreeText);
+			return CreateDocumentWithMetrics(normalizedTreeTextLength == treeText.Length
+				? treeText
+				: treeText[..normalizedTreeTextLength]);
 		}
 
         using var builder = new PreviewTextStorageBuilder(InMemoryDocumentThresholdChars);
-        var sections = new List<PreviewDocumentSection>(orderedFiles.Count);
+        var sections = new List<PreviewDocumentSection>(orderedFiles.Length);
 		var redactions = new List<PreviewRedactionSpan>();
-		using var transformationScope = transformationContext?.BeginOutput(orderedFiles, cancellationToken);
+		using var transformationScope = transformationContext?.BeginOutputFromOwnedOrderedUnique(
+			orderedFiles,
+			cancellationToken);
 		var redactionScope = transformationScope?.Redaction;
-        var wroteTree = AppendMultilineText(builder, normalizedTreeText.AsSpan());
+		var wroteTree = AppendMultilineText(builder, treeText.AsSpan(0, normalizedTreeTextLength));
 		if (treeRootPresentation is { } rootPresentation)
-			AppendGeneratedPathRedactionFromText(redactions, normalizedTreeText, rootPresentation);
+			AppendGeneratedPathRedactionFromText(redactions, treeText, rootPresentation);
         var wroteContent = await AppendContentEntriesAsync(
             builder,
             orderedFiles,
@@ -191,9 +264,9 @@ public sealed class PreviewDocumentBuilder(
 		CompleteTransformation(transformationScope, transformationContext);
 
         if (!wroteTree && !wroteContent)
-            return CreateInMemory(string.Empty);
+			return CreateDocumentWithMetrics(string.Empty);
 
-        return builder.BuildDocument(sections, redactions);
+		return builder.BuildResult(sections, redactions);
     }
 
 	private static void CompleteTransformation(
@@ -405,112 +478,96 @@ public sealed class PreviewDocumentBuilder(
 		string? projectRoot,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        if (transformationScope?.Compression is null)
-        {
-            foreach (var file in orderedFiles)
-            {
-                yield return await PrepareContentEntryAsync(
-                        file,
-                        displayPathMapper,
-                        redactionScope,
-                        transformationScope,
+		if (orderedFiles.Count <= 1)
+		{
+			foreach (var file in orderedFiles)
+			{
+				yield return await PrepareContentEntryAsync(
+						file,
+						displayPathMapper,
+						redactionScope,
+						transformationScope,
 						projectRoot,
-                        cancellationToken)
-                    .ConfigureAwait(false);
-            }
+						cancellationToken)
+					.ConfigureAwait(false);
+			}
 
-            yield break;
-        }
+			yield break;
+		}
 
-        var batch = new List<string>(MaximumParallelPreparations);
-        foreach (var file in orderedFiles)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (!IsSmallFile(file))
-            {
-                await foreach (var entry in PrepareParallelBatchAsync(
-                                   batch,
-                                   displayPathMapper,
-                                   redactionScope,
-                                   transformationScope,
-								   projectRoot,
-                                   cancellationToken).ConfigureAwait(false))
-                {
-                    yield return entry;
-                }
+		using var preparationCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		var preparationToken = preparationCancellation.Token;
+		var pending = new Queue<Task<PreparedContentEntry>>(MaximumParallelPreparations);
+		try
+		{
+			foreach (var file in orderedFiles)
+			{
+				preparationToken.ThrowIfCancellationRequested();
+				if (!IsSmallFile(file))
+				{
+					while (pending.TryDequeue(out var prepared))
+						yield return await prepared.ConfigureAwait(false);
 
-                batch.Clear();
-                yield return await PrepareContentEntryAsync(
-                        file,
-                        displayPathMapper,
-                        redactionScope,
-                        transformationScope,
+					yield return await PrepareContentEntryAsync(
+							file,
+							displayPathMapper,
+							redactionScope,
+							transformationScope,
+							projectRoot,
+							preparationToken)
+						.ConfigureAwait(false);
+					continue;
+				}
+
+				pending.Enqueue(Task.Run(
+					() => PrepareContentEntryAsync(
+						file,
+						displayPathMapper,
+						redactionScope,
+						transformationScope,
 						projectRoot,
-                        cancellationToken)
-                    .ConfigureAwait(false);
-                continue;
-            }
+						preparationToken).AsTask(),
+					preparationToken));
+				if (pending.Count >= MaximumParallelPreparations)
+					yield return await pending.Dequeue().ConfigureAwait(false);
+			}
 
-            batch.Add(file);
-            if (batch.Count < MaximumParallelPreparations)
-                continue;
+			while (pending.TryDequeue(out var prepared))
+				yield return await prepared.ConfigureAwait(false);
+		}
+		finally
+		{
+			TryCancel(preparationCancellation);
+			await ObservePendingPreparationsAsync(pending).ConfigureAwait(false);
+		}
+	}
 
-            await foreach (var entry in PrepareParallelBatchAsync(
-                               batch,
-                               displayPathMapper,
-                               redactionScope,
-                               transformationScope,
-							   projectRoot,
-                               cancellationToken).ConfigureAwait(false))
-            {
-                yield return entry;
-            }
+	private static void TryCancel(CancellationTokenSource cancellation)
+	{
+		try
+		{
+			cancellation.Cancel();
+		}
+		catch (AggregateException)
+		{
+			// Pending preparation failures must not replace the consumer's exception.
+		}
+	}
 
-            batch.Clear();
-        }
-
-        await foreach (var entry in PrepareParallelBatchAsync(
-                           batch,
-                           displayPathMapper,
-                           redactionScope,
-                           transformationScope,
-						   projectRoot,
-                           cancellationToken).ConfigureAwait(false))
-        {
-            yield return entry;
-        }
-    }
-
-    private async IAsyncEnumerable<PreparedContentEntry> PrepareParallelBatchAsync(
-        IReadOnlyList<string> files,
-        Func<string, string>? displayPathMapper,
-        SecretRedactionScope? redactionScope,
-        ContentTransformationScope transformationScope,
-		string? projectRoot,
-        [EnumeratorCancellation] CancellationToken cancellationToken)
-    {
-        if (files.Count == 0)
-            yield break;
-
-        var tasks = new Task<PreparedContentEntry>[files.Count];
-        for (var index = 0; index < files.Count; index++)
-        {
-            var file = files[index];
-            tasks[index] = Task.Run(
-                () => PrepareContentEntryAsync(
-                    file,
-                    displayPathMapper,
-                    redactionScope,
-                    transformationScope,
-					projectRoot,
-                    cancellationToken).AsTask(),
-                cancellationToken);
-        }
-
-        var entries = await Task.WhenAll(tasks).ConfigureAwait(false);
-        foreach (var entry in entries)
-            yield return entry;
-    }
+	private static async Task ObservePendingPreparationsAsync(
+		IReadOnlyCollection<Task<PreparedContentEntry>> pending)
+	{
+		if (pending.Count == 0)
+			return;
+		try
+		{
+			await Task.WhenAll(pending).ConfigureAwait(false);
+		}
+		catch
+		{
+			// The consumer's exception or cancellation remains authoritative.
+		}
+	}
 
     private async ValueTask<PreparedContentEntry> PrepareContentEntryAsync(
         string file,
@@ -747,25 +804,6 @@ public sealed class PreviewDocumentBuilder(
         };
     }
 
-	private static List<string> BuildOrderedUniqueFiles(
-		IEnumerable<string> filePaths,
-		CancellationToken cancellationToken)
-    {
-		cancellationToken.ThrowIfCancellationRequested();
-        var uniqueFiles = new HashSet<string>(PathComparer.Default);
-        foreach (var path in filePaths)
-        {
-			cancellationToken.ThrowIfCancellationRequested();
-            if (!string.IsNullOrWhiteSpace(path))
-                uniqueFiles.Add(path);
-        }
-
-		var files = new List<string>(uniqueFiles.Count);
-		files.AddRange(uniqueFiles);
-		CancellationAwareSort.Sort(files, PathComparer.Default, cancellationToken);
-		return files;
-    }
-
     private static bool AppendMultilineText(PreviewTextStorageBuilder builder, ReadOnlySpan<char> text)
     {
         if (text.Length == 0)
@@ -828,7 +866,7 @@ public sealed class PreviewDocumentBuilder(
         }
     }
 
-    private static async Task<IPreviewTextDocument> BuildDocumentFromUtf8FileAsync(
+    private static async Task<PreviewDocumentBuildResult> BuildDocumentFromUtf8FileAsync(
         string storagePath,
         CancellationToken cancellationToken)
     {
@@ -842,15 +880,19 @@ public sealed class PreviewDocumentBuilder(
                     cancellationToken)
                 .ConfigureAwait(false);
             DisposeStorageFile(storagePath);
-            return new InMemoryPreviewTextDocument(text);
+            return new PreviewDocumentBuildResult(
+                new InMemoryPreviewTextDocument(text),
+                ExportOutputMetricsCalculator.FromText(text));
         }
 
-        return new FileBackedPreviewTextDocument(
-            storagePath,
-            metrics.LineOffsets,
-            metrics.FileLength,
-            metrics.MaxLineLength,
-            metrics.CharacterCount);
+        return new PreviewDocumentBuildResult(
+            new FileBackedPreviewTextDocument(
+                storagePath,
+                metrics.LineOffsets,
+                metrics.FileLength,
+                metrics.MaxLineLength,
+                metrics.CharacterCount),
+            metrics.OutputMetrics);
     }
 
     private static async Task<PreviewStorageMetrics> ReadStorageMetricsAsync(
@@ -865,13 +907,14 @@ public sealed class PreviewDocumentBuilder(
             bufferSize: 8192,
             options: FileOptions.Asynchronous | FileOptions.SequentialScan);
         if (stream.Length == 0)
-            return new PreviewStorageMetrics([], 0, 0, 0);
+            return new PreviewStorageMetrics([], 0, 0, 0, ExportOutputMetrics.Empty);
 
         var offsets = new List<long> { 0 };
         var byteBuffer = ArrayPool<byte>.Shared.Rent(8192);
         var charBuffer = ArrayPool<char>.Shared.Rent(
             PreviewTextStorageBuilder.Utf8WithoutBom.GetMaxCharCount(byteBuffer.Length));
         var decoder = PreviewTextStorageBuilder.Utf8WithoutBom.GetDecoder();
+        using var metricsWriter = ExportOutputMetricsCalculator.CreateTextWriter();
         try
         {
             long fileOffset = 0;
@@ -906,6 +949,8 @@ public sealed class PreviewDocumentBuilder(
                                    byteBuffer[2] == 0xBF
                     ? 3
                     : 0;
+                if (decodeOffset != 0)
+                    metricsWriter.Write('\uFEFF');
                 Decode(
                     byteBuffer.AsSpan(decodeOffset, bytesRead - decodeOffset),
                     flush: false);
@@ -918,7 +963,8 @@ public sealed class PreviewDocumentBuilder(
                 offsets.ToArray(),
                 stream.Length,
                 characterCount,
-                Math.Max(maxLineLength, currentLineLength));
+                Math.Max(maxLineLength, currentLineLength),
+                metricsWriter.Complete(cancellationToken));
 
             void Decode(ReadOnlySpan<byte> bytes, bool flush)
             {
@@ -933,7 +979,9 @@ public sealed class PreviewDocumentBuilder(
                         out var charactersUsed,
                         out var completed);
                     characterCount += charactersUsed;
-                    foreach (var character in charBuffer.AsSpan(0, charactersUsed))
+                    var characters = charBuffer.AsSpan(0, charactersUsed);
+                    metricsWriter.Write(characters);
+                    foreach (var character in characters)
                     {
                         if (character == '\n')
                         {
@@ -963,7 +1011,8 @@ public sealed class PreviewDocumentBuilder(
         long[] LineOffsets,
         long FileLength,
         long CharacterCount,
-        int MaxLineLength);
+        int MaxLineLength,
+        ExportOutputMetrics OutputMetrics);
 
 	private static string CreateStoragePath()
 	{
@@ -1019,7 +1068,390 @@ public sealed class PreviewDocumentBuilder(
 		return new FileStream(storagePath, streamOptions);
 	}
 
-    private static void DisposeStorageFile(string storagePath)
+	/// <summary>
+	/// Keeps one export-sized chunk below the LOH threshold in pooled memory, then spills
+	/// to the existing private preview storage without narrowing the writable stream contract.
+	/// </summary>
+	internal sealed class SpillablePreviewWriteStream : Stream
+	{
+		internal const int MemoryLimitBytes = PreviewTextStreamWriter.BufferSizeBytes;
+
+		private byte[]? _memoryBuffer;
+		private MemoryStream? _memoryStream;
+		private FileStream? _fileStream;
+		private string? _storagePath;
+		private bool _disposed;
+
+		internal SpillablePreviewWriteStream()
+		{
+			_memoryBuffer = ArrayPool<byte>.Shared.Rent(MemoryLimitBytes);
+			_memoryStream = new MemoryStream(
+				_memoryBuffer,
+				index: 0,
+				count: _memoryBuffer.Length,
+				writable: true,
+				publiclyVisible: true);
+			_memoryStream.SetLength(0);
+		}
+
+		internal bool HasSpilled => _fileStream is not null;
+
+		internal string? StoragePath => _storagePath;
+
+		public override bool CanRead => !_disposed;
+
+		public override bool CanSeek => !_disposed;
+
+		public override bool CanWrite => !_disposed;
+
+		public override long Length
+		{
+			get
+			{
+				ThrowIfDisposed();
+				return CurrentStream.Length;
+			}
+		}
+
+		public override long Position
+		{
+			get
+			{
+				ThrowIfDisposed();
+				return CurrentStream.Position;
+			}
+			set
+			{
+				ThrowIfDisposed();
+				ArgumentOutOfRangeException.ThrowIfNegative(value);
+				if (_fileStream is null && value > MemoryLimitBytes)
+					SpillToFile();
+				CurrentStream.Position = value;
+			}
+		}
+
+		public override void Flush()
+		{
+			ThrowIfDisposed();
+			CurrentStream.Flush();
+		}
+
+		public override Task FlushAsync(CancellationToken cancellationToken)
+		{
+			ThrowIfDisposed();
+			cancellationToken.ThrowIfCancellationRequested();
+			return CurrentStream.FlushAsync(cancellationToken);
+		}
+
+		public override int Read(byte[] buffer, int offset, int count)
+		{
+			ThrowIfDisposed();
+			return CurrentStream.Read(buffer, offset, count);
+		}
+
+		public override int Read(Span<byte> buffer)
+		{
+			ThrowIfDisposed();
+			return CurrentStream.Read(buffer);
+		}
+
+		public override Task<int> ReadAsync(
+			byte[] buffer,
+			int offset,
+			int count,
+			CancellationToken cancellationToken)
+		{
+			ThrowIfDisposed();
+			return CurrentStream.ReadAsync(buffer, offset, count, cancellationToken);
+		}
+
+		public override ValueTask<int> ReadAsync(
+			Memory<byte> buffer,
+			CancellationToken cancellationToken = default)
+		{
+			ThrowIfDisposed();
+			return CurrentStream.ReadAsync(buffer, cancellationToken);
+		}
+
+		public override int ReadByte()
+		{
+			ThrowIfDisposed();
+			return CurrentStream.ReadByte();
+		}
+
+		public override long Seek(long offset, SeekOrigin origin)
+		{
+			ThrowIfDisposed();
+			if (_fileStream is null && ResolveSeekPosition(offset, origin) > MemoryLimitBytes)
+				SpillToFile();
+			return CurrentStream.Seek(offset, origin);
+		}
+
+		public override void SetLength(long value)
+		{
+			ThrowIfDisposed();
+			ArgumentOutOfRangeException.ThrowIfNegative(value);
+			if (_fileStream is null && value > MemoryLimitBytes)
+				SpillToFile();
+			CurrentStream.SetLength(value);
+		}
+
+		public override void Write(byte[] buffer, int offset, int count)
+		{
+			ThrowIfDisposed();
+			ArgumentNullException.ThrowIfNull(buffer);
+			ArgumentOutOfRangeException.ThrowIfNegative(offset);
+			ArgumentOutOfRangeException.ThrowIfNegative(count);
+			if (offset > buffer.Length - count)
+				throw new ArgumentException("The write range exceeds the source buffer.", nameof(count));
+
+			EnsureStorageForWrite(count);
+			CurrentStream.Write(buffer, offset, count);
+		}
+
+		public override void Write(ReadOnlySpan<byte> buffer)
+		{
+			ThrowIfDisposed();
+			EnsureStorageForWrite(buffer.Length);
+			CurrentStream.Write(buffer);
+		}
+
+		public override Task WriteAsync(
+			byte[] buffer,
+			int offset,
+			int count,
+			CancellationToken cancellationToken)
+		{
+			ArgumentNullException.ThrowIfNull(buffer);
+			ArgumentOutOfRangeException.ThrowIfNegative(offset);
+			ArgumentOutOfRangeException.ThrowIfNegative(count);
+			if (offset > buffer.Length - count)
+				throw new ArgumentException("The write range exceeds the source buffer.", nameof(count));
+
+			return WriteAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+		}
+
+		public override ValueTask WriteAsync(
+			ReadOnlyMemory<byte> buffer,
+			CancellationToken cancellationToken = default)
+		{
+			ThrowIfDisposed();
+			cancellationToken.ThrowIfCancellationRequested();
+			if (RequiresSpill(buffer.Length))
+				return WriteAfterSpillAsync(buffer, cancellationToken);
+			return CurrentStream.WriteAsync(buffer, cancellationToken);
+		}
+
+		public override void WriteByte(byte value)
+		{
+			ThrowIfDisposed();
+			EnsureStorageForWrite(1);
+			CurrentStream.WriteByte(value);
+		}
+
+		internal async Task<string> ReadBufferedTextAsync(CancellationToken cancellationToken)
+		{
+			ThrowIfDisposed();
+			if (_fileStream is not null)
+				throw new InvalidOperationException("Spilled preview storage cannot be read as a memory buffer.");
+
+			var stream = _memoryStream ??
+			             throw new ObjectDisposedException(nameof(SpillablePreviewWriteStream));
+			stream.Position = 0;
+			using var reader = new StreamReader(
+				stream,
+				PreviewTextStorageBuilder.Utf8WithoutBom,
+				detectEncodingFromByteOrderMarks: true,
+				bufferSize: 8192,
+				leaveOpen: true);
+			return await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+		}
+
+		internal async ValueTask<string> DetachStoragePathAsync(CancellationToken cancellationToken)
+		{
+			ThrowIfDisposed();
+			var stream = _fileStream ??
+			             throw new InvalidOperationException("Preview storage has not spilled to a file.");
+			await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+			await stream.DisposeAsync().ConfigureAwait(false);
+			_fileStream = null;
+			var storagePath = _storagePath ??
+			                  throw new InvalidOperationException("Preview backing path is unavailable.");
+			_storagePath = null;
+			_disposed = true;
+			return storagePath;
+		}
+
+		protected override void Dispose(bool disposing)
+		{
+			if (disposing && !_disposed)
+			{
+				_disposed = true;
+				try
+				{
+					_fileStream?.Dispose();
+				}
+				finally
+				{
+					_fileStream = null;
+					ReleaseMemoryBuffer();
+					DeleteOwnedStorageFile();
+				}
+			}
+
+			base.Dispose(disposing);
+		}
+
+		public override async ValueTask DisposeAsync()
+		{
+			if (_disposed)
+				return;
+
+			_disposed = true;
+			try
+			{
+				if (_fileStream is not null)
+					await _fileStream.DisposeAsync().ConfigureAwait(false);
+			}
+			finally
+			{
+				_fileStream = null;
+				ReleaseMemoryBuffer();
+				DeleteOwnedStorageFile();
+				GC.SuppressFinalize(this);
+			}
+		}
+
+		private Stream CurrentStream => (Stream?)_fileStream ?? _memoryStream ??
+			throw new ObjectDisposedException(nameof(SpillablePreviewWriteStream));
+
+		private void EnsureStorageForWrite(int count)
+		{
+			if (RequiresSpill(count))
+				SpillToFile();
+		}
+
+		private bool RequiresSpill(int count)
+		{
+			if (_fileStream is not null)
+				return false;
+			var stream = _memoryStream ??
+			             throw new ObjectDisposedException(nameof(SpillablePreviewWriteStream));
+			var resultingLength = Math.Max(stream.Length, checked(stream.Position + count));
+			return resultingLength > MemoryLimitBytes;
+		}
+
+		private async ValueTask WriteAfterSpillAsync(
+			ReadOnlyMemory<byte> buffer,
+			CancellationToken cancellationToken)
+		{
+			await SpillToFileAsync(cancellationToken).ConfigureAwait(false);
+			await _fileStream!.WriteAsync(buffer, cancellationToken).ConfigureAwait(false);
+		}
+
+		private void SpillToFile()
+		{
+			if (_fileStream is not null)
+				return;
+
+			var memory = _memoryStream ??
+			             throw new ObjectDisposedException(nameof(SpillablePreviewWriteStream));
+			var storagePath = CreateStoragePath();
+			FileStream? file = null;
+			try
+			{
+				file = OpenStorageFile(
+					storagePath,
+					FileOptions.Asynchronous | FileOptions.SequentialScan);
+				var position = memory.Position;
+				if (memory.Length > 0)
+					file.Write(_memoryBuffer!, 0, checked((int)memory.Length));
+				file.Position = position;
+				_fileStream = file;
+				_storagePath = storagePath;
+				ReleaseMemoryBuffer();
+			}
+			catch
+			{
+				file?.Dispose();
+				DisposeStorageFile(storagePath);
+				throw;
+			}
+		}
+
+		private async ValueTask SpillToFileAsync(CancellationToken cancellationToken)
+		{
+			if (_fileStream is not null)
+				return;
+
+			var memory = _memoryStream ??
+			             throw new ObjectDisposedException(nameof(SpillablePreviewWriteStream));
+			var storagePath = CreateStoragePath();
+			FileStream? file = null;
+			try
+			{
+				file = OpenStorageFile(
+					storagePath,
+					FileOptions.Asynchronous | FileOptions.SequentialScan);
+				var position = memory.Position;
+				if (memory.Length > 0)
+				{
+					await file.WriteAsync(
+							_memoryBuffer!.AsMemory(0, checked((int)memory.Length)),
+							cancellationToken)
+						.ConfigureAwait(false);
+				}
+				file.Position = position;
+				_fileStream = file;
+				_storagePath = storagePath;
+				ReleaseMemoryBuffer();
+			}
+			catch
+			{
+				if (file is not null)
+					await file.DisposeAsync().ConfigureAwait(false);
+				DisposeStorageFile(storagePath);
+				throw;
+			}
+		}
+
+		private long ResolveSeekPosition(long offset, SeekOrigin origin)
+		{
+			var stream = _memoryStream ??
+			             throw new ObjectDisposedException(nameof(SpillablePreviewWriteStream));
+			return origin switch
+			{
+				SeekOrigin.Begin => offset,
+				SeekOrigin.Current => checked(stream.Position + offset),
+				SeekOrigin.End => checked(stream.Length + offset),
+				_ => throw new ArgumentOutOfRangeException(nameof(origin), origin, null)
+			};
+		}
+
+		private void ReleaseMemoryBuffer()
+		{
+			_memoryStream?.Dispose();
+			_memoryStream = null;
+			var buffer = Interlocked.Exchange(ref _memoryBuffer, null);
+			if (buffer is not null)
+				ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
+		}
+
+		private void DeleteOwnedStorageFile()
+		{
+			var storagePath = Interlocked.Exchange(ref _storagePath, null);
+			if (storagePath is not null)
+				DisposeStorageFile(storagePath);
+		}
+
+		private void ThrowIfDisposed()
+		{
+			if (_disposed)
+				throw new ObjectDisposedException(nameof(SpillablePreviewWriteStream));
+		}
+	}
+
+	private static void DisposeStorageFile(string storagePath)
     {
         try
         {
@@ -1029,8 +1461,8 @@ public sealed class PreviewDocumentBuilder(
         catch
         {
             // Best-effort cleanup only.
+		}
 	}
-}
 
 internal static class PreviewTextStorageScavenger
 {
@@ -1139,24 +1571,31 @@ internal static class PreviewTextStorageScavenger
 
         internal static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
 
-        private readonly string _storagePath;
-        private readonly FileStream _stream;
+        private string? _storagePath;
+        private FileStream? _stream;
         private readonly List<long> _lineOffsets = [];
         private readonly int _inMemoryThresholdChars;
-        private readonly Encoder _utf8Encoder = Utf8WithoutBom.GetEncoder();
-        private byte[]? _utf8WriteBuffer = ArrayPool<byte>.Shared.Rent(Utf8WriteBufferSize);
+        private char[]? _inMemoryBuffer;
+        private int _inMemoryLength;
+        private Encoder? _utf8Encoder;
+        private byte[]? _utf8WriteBuffer;
+        private readonly ExportOutputMetricsCalculator.TextMetricsWriter _metricsWriter =
+            ExportOutputMetricsCalculator.CreateTextWriter();
         private bool _built;
         private bool _disposed;
         private bool _lastLineIsEmpty;
+        private char _characterBeforePreviousCharacter;
+        private char _previousCharacter;
+        private char _lastCharacter;
+        private int _trimmedNormalizedLineFeeds;
         private int _maxLineLength;
         private long _characterCount;
 
-		public PreviewTextStorageBuilder(int inMemoryThresholdChars)
-		{
-			_inMemoryThresholdChars = inMemoryThresholdChars;
-			_storagePath = CreateStoragePath();
-			_stream = OpenStorageFile(_storagePath, FileOptions.SequentialScan);
-		}
+        public PreviewTextStorageBuilder(int inMemoryThresholdChars)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(inMemoryThresholdChars);
+            _inMemoryThresholdChars = inMemoryThresholdChars;
+        }
 
         public void AppendLine(string line) => AppendLine(line.AsSpan());
 
@@ -1164,13 +1603,19 @@ internal static class PreviewTextStorageScavenger
         {
             ThrowIfDisposed();
 
-            _lineOffsets.Add(_stream.Position);
+			var resultingCharacterCount = checked(_characterCount + line.Length + 1);
+			EnsureStorage(resultingCharacterCount);
+			RecordLineStart();
             _lastLineIsEmpty = line.Length == 0;
             _maxLineLength = Math.Max(_maxLineLength, line.Length);
-            _characterCount += line.Length + 1;
+			_characterCount = resultingCharacterCount;
+			_metricsWriter.Write(line);
+			_metricsWriter.Write('\n');
+			UpdateTrailingCharacters(line);
+			UpdateTrailingCharacter('\n');
 
-            WriteUtf8(line);
-            _stream.WriteByte((byte)'\n');
+			AppendText(line);
+			AppendNewLine();
         }
 
         public int LineCount => _lineOffsets.Count;
@@ -1197,7 +1642,7 @@ internal static class PreviewTextStorageScavenger
             }
             else
             {
-                _lineOffsets.Add(_stream.Position);
+				RecordLineStart();
                 _lastLineIsEmpty = true;
             }
         }
@@ -1210,34 +1655,25 @@ internal static class PreviewTextStorageScavenger
                 return;
 
             var trailingLineStart = _lineOffsets[^1];
-            _stream.SetLength(trailingLineStart);
-            _stream.Position = trailingLineStart;
+            if (_stream is null)
+            {
+                _inMemoryLength = checked((int)trailingLineStart);
+            }
+            else
+            {
+                _stream.SetLength(trailingLineStart);
+                _stream.Position = trailingLineStart;
+            }
             _lineOffsets.RemoveAt(_lineOffsets.Count - 1);
             _lastLineIsEmpty = false;
             _characterCount = Math.Max(0, _characterCount - 1);
+            if (_previousCharacter != '\r')
+                _trimmedNormalizedLineFeeds++;
+            _lastCharacter = _previousCharacter;
+            _previousCharacter = _characterBeforePreviousCharacter;
         }
 
-        public void AppendFrom(PreviewTextStorageBuilder source)
-		{
-			ThrowIfDisposed();
-			ArgumentNullException.ThrowIfNull(source);
-			source.ThrowIfDisposed();
-			if (ReferenceEquals(this, source))
-				throw new ArgumentException("A preview builder cannot append itself.", nameof(source));
-
-			source._stream.Flush();
-			var destinationStart = _stream.Position;
-			source._stream.Position = 0;
-			source._stream.CopyTo(_stream);
-			foreach (var offset in source._lineOffsets)
-				_lineOffsets.Add(destinationStart + offset);
-			if (source._lineOffsets.Count > 0)
-				_lastLineIsEmpty = source._lastLineIsEmpty;
-			_maxLineLength = Math.Max(_maxLineLength, source._maxLineLength);
-			_characterCount += source._characterCount;
-		}
-
-        public IPreviewTextDocument BuildDocument(
+        public PreviewDocumentBuildResult BuildResult(
 			IReadOnlyList<PreviewDocumentSection>? sections = null,
 			IReadOnlyList<PreviewRedactionSpan>? redactions = null)
         {
@@ -1247,35 +1683,68 @@ internal static class PreviewTextStorageScavenger
                 throw new InvalidOperationException("Preview document was already built.");
 
             _built = true;
-            _stream.Flush();
-
-            var fileLength = _stream.Length;
-            _stream.Dispose();
-            ReleaseUtf8WriteBuffer();
-
             if (_characterCount <= _inMemoryThresholdChars)
             {
-                var text = File.Exists(_storagePath)
-                    ? File.ReadAllText(_storagePath, Utf8WithoutBom)
-                    : string.Empty;
+                string text;
+                if (_stream is null)
+                {
+                    var outputLength = _inMemoryLength > 0 && _inMemoryBuffer![_inMemoryLength - 1] == '\n'
+                        ? _inMemoryLength - 1
+                        : _inMemoryLength;
+                    text = outputLength == 0
+                        ? string.Empty
+                        : new string(_inMemoryBuffer!, 0, outputLength);
+                }
+                else
+                {
+                    _stream.Flush();
+                    _stream.Dispose();
+                    _stream = null;
+                    ReleaseUtf8WriteBuffer();
+                    text = File.ReadAllText(_storagePath!, Utf8WithoutBom);
+                    if (text.Length > 0 && text[^1] == '\n')
+                        text = text[..^1];
+                    DisposeStorageFile();
+                }
 
-                if (text.Length > 0 && text[^1] == '\n')
-                    text = text[..^1];
-
-                DisposeStorageFile();
+                ReleaseInMemoryBuffer();
+                var removedNormalizedLineFeeds = _trimmedNormalizedLineFeeds;
+                if (_lastCharacter == '\n' && _previousCharacter != '\r')
+                    removedNormalizedLineFeeds++;
+                var inMemoryMetrics = ExportOutputMetricsCalculator.TrimTrailingLineFeeds(
+                    _metricsWriter.Complete(CancellationToken.None),
+                    removedNormalizedLineFeeds);
+                _metricsWriter.Dispose();
                 _disposed = true;
-				return new InMemoryPreviewTextDocument(text, sections, redactions);
+                return new PreviewDocumentBuildResult(
+                    new InMemoryPreviewTextDocument(text, sections, redactions),
+                    inMemoryMetrics);
             }
 
-            _disposed = true;
-            return new FileBackedPreviewTextDocument(
-                _storagePath,
+            var backingStream = _stream ??
+                throw new InvalidOperationException("Preview backing storage was not initialized.");
+            backingStream.Flush();
+            var fileLength = backingStream.Length;
+            backingStream.Dispose();
+            _stream = null;
+            ReleaseUtf8WriteBuffer();
+            var storagePath = _storagePath ??
+                throw new InvalidOperationException("Preview backing storage was not initialized.");
+            var document = new FileBackedPreviewTextDocument(
+                storagePath,
                 _lineOffsets.ToArray(),
                 fileLength,
                 _maxLineLength,
                 _characterCount,
                 sections,
-				redactions);
+                redactions);
+            _storagePath = null;
+            _disposed = true;
+            var fileBackedMetrics = ExportOutputMetricsCalculator.TrimTrailingLineFeeds(
+                _metricsWriter.Complete(CancellationToken.None),
+                _trimmedNormalizedLineFeeds);
+            _metricsWriter.Dispose();
+            return new PreviewDocumentBuildResult(document, fileBackedMetrics);
         }
 
         public void Dispose()
@@ -1284,30 +1753,128 @@ internal static class PreviewTextStorageScavenger
                 return;
 
             _disposed = true;
-            _stream.Dispose();
+            _stream?.Dispose();
+            _stream = null;
+            ReleaseInMemoryBuffer();
             ReleaseUtf8WriteBuffer();
+            _metricsWriter.Dispose();
             DisposeStorageFile();
         }
 
-        private void WriteUtf8(ReadOnlySpan<char> line)
+		private void EnsureStorage(long resultingCharacterCount)
+		{
+			if (_stream is not null || resultingCharacterCount <= _inMemoryThresholdChars)
+				return;
+
+			_storagePath = CreateStoragePath();
+			_stream = OpenStorageFile(_storagePath, FileOptions.SequentialScan);
+			_utf8Encoder = Utf8WithoutBom.GetEncoder();
+			_utf8WriteBuffer = ArrayPool<byte>.Shared.Rent(Utf8WriteBufferSize);
+			FlushInMemoryTextToStorage();
+		}
+
+        private void FlushInMemoryTextToStorage()
         {
-            if (line.Length == 0)
+            var buffer = _inMemoryBuffer;
+            var previousCharacterOffset = 0;
+            for (var lineIndex = 0; lineIndex < _lineOffsets.Count; lineIndex++)
+            {
+                var lineCharacterOffset = checked((int)_lineOffsets[lineIndex]);
+                WriteUtf8(
+                    buffer.AsSpan(previousCharacterOffset, lineCharacterOffset - previousCharacterOffset),
+                    flush: false);
+                _lineOffsets[lineIndex] = _stream!.Position;
+                previousCharacterOffset = lineCharacterOffset;
+            }
+
+            WriteUtf8(buffer.AsSpan(previousCharacterOffset, _inMemoryLength - previousCharacterOffset), flush: false);
+            WriteUtf8(ReadOnlySpan<char>.Empty, flush: true);
+            ReleaseInMemoryBuffer();
+        }
+
+        private void RecordLineStart()
+        {
+            _lineOffsets.Add(_stream is null ? _inMemoryLength : _stream.Position);
+        }
+
+        private void AppendText(ReadOnlySpan<char> text)
+        {
+            if (_stream is null)
+            {
+                EnsureInMemoryCapacity(text.Length);
+                text.CopyTo(_inMemoryBuffer.AsSpan(_inMemoryLength));
+                _inMemoryLength += text.Length;
+            }
+            else
+                WriteUtf8(text, flush: true);
+        }
+
+        private void AppendNewLine()
+        {
+            if (_stream is null)
+            {
+                EnsureInMemoryCapacity(1);
+                _inMemoryBuffer![_inMemoryLength++] = '\n';
+            }
+            else
+                _stream.WriteByte((byte)'\n');
+        }
+
+        private void EnsureInMemoryCapacity(int additionalCharacterCount)
+        {
+            if (additionalCharacterCount == 0)
                 return;
 
-            var buffer = _utf8WriteBuffer ??
+            var requiredLength = checked(_inMemoryLength + additionalCharacterCount);
+            if (_inMemoryBuffer is { Length: var currentLength } && currentLength >= requiredLength)
+                return;
+
+			var targetLength = Math.Max(Utf8WriteBufferSize, requiredLength);
+			if (_inMemoryBuffer is { } existingBuffer)
+				targetLength = Math.Max(targetLength, checked(existingBuffer.Length * 2));
+			System.Diagnostics.Debug.Assert(requiredLength <= _inMemoryThresholdChars);
+			targetLength = Math.Min(_inMemoryThresholdChars, targetLength);
+
+            var replacement = ArrayPool<char>.Shared.Rent(targetLength);
+            if (_inMemoryLength > 0)
+                _inMemoryBuffer.AsSpan(0, _inMemoryLength).CopyTo(replacement);
+
+            ReleaseInMemoryBuffer();
+            _inMemoryBuffer = replacement;
+        }
+
+        private void ReleaseInMemoryBuffer()
+        {
+            var buffer = Interlocked.Exchange(ref _inMemoryBuffer, null);
+            if (buffer is not null)
+                ArrayPool<char>.Shared.Return(buffer, clearArray: true);
+        }
+
+		private void WriteUtf8(ReadOnlySpan<char> text, bool flush)
+        {
+			if (text.Length == 0 && !flush)
+                return;
+
+			var stream = _stream ??
+				throw new InvalidOperationException("Preview backing storage was not initialized.");
+			var encoder = _utf8Encoder ??
+				throw new InvalidOperationException("Preview UTF-8 encoder was not initialized.");
+			var buffer = _utf8WriteBuffer ??
                          throw new ObjectDisposedException(nameof(PreviewTextStorageBuilder));
-            var remaining = line;
+			var remaining = text;
             bool completed;
             do
             {
-                _utf8Encoder.Convert(
+				encoder.Convert(
                     remaining,
                     buffer.AsSpan(0, Utf8WriteBufferSize),
-                    flush: true,
+					flush,
                     out var charsUsed,
                     out var bytesUsed,
                     out completed);
-                _stream.Write(buffer, 0, bytesUsed);
+				if (charsUsed == 0 && bytesUsed == 0 && !completed)
+					throw new IOException("The preview UTF-8 encoder did not make progress.");
+				stream.Write(buffer, 0, bytesUsed);
                 remaining = remaining[charsUsed..];
             }
             while (!completed);
@@ -1324,7 +1891,9 @@ internal static class PreviewTextStorageScavenger
 
         private void AppendExactLine(ReadOnlySpan<char> rawLine)
         {
-            _lineOffsets.Add(_stream.Position);
+			var resultingCharacterCount = checked(_characterCount + rawLine.Length);
+			EnsureStorage(resultingCharacterCount);
+			RecordLineStart();
             var displayLength = rawLine.Length;
             if (displayLength > 0 && rawLine[displayLength - 1] == '\n')
                 displayLength--;
@@ -1332,13 +1901,44 @@ internal static class PreviewTextStorageScavenger
                 displayLength--;
             _lastLineIsEmpty = displayLength == 0;
             _maxLineLength = Math.Max(_maxLineLength, displayLength);
-            _characterCount += rawLine.Length;
-            WriteUtf8(rawLine);
+			_characterCount = resultingCharacterCount;
+			_metricsWriter.Write(rawLine);
+			UpdateTrailingCharacters(rawLine);
+			AppendText(rawLine);
         }
+
+		private void UpdateTrailingCharacters(ReadOnlySpan<char> text)
+		{
+			if (text.Length == 0)
+				return;
+
+			if (text.Length == 1)
+			{
+				_characterBeforePreviousCharacter = _previousCharacter;
+				_previousCharacter = _lastCharacter;
+				_lastCharacter = text[0];
+				return;
+			}
+
+			_characterBeforePreviousCharacter = text.Length > 2 ? text[^3] : _lastCharacter;
+			_previousCharacter = text[^2];
+			_lastCharacter = text[^1];
+		}
+
+		private void UpdateTrailingCharacter(char character)
+		{
+			_characterBeforePreviousCharacter = _previousCharacter;
+			_previousCharacter = _lastCharacter;
+			_lastCharacter = character;
+		}
 
         private void DisposeStorageFile()
         {
-            PreviewDocumentBuilder.DisposeStorageFile(_storagePath);
+			if (_storagePath is not null)
+			{
+				PreviewDocumentBuilder.DisposeStorageFile(_storagePath);
+				_storagePath = null;
+			}
         }
 
         private void ThrowIfDisposed()

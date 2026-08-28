@@ -429,22 +429,46 @@ public sealed class ProjectAnalysisService(
 		return names;
 	}
 
-	public async Task<ProjectAnalysisReport> BuildReportFromTreeAsync(
+	public Task<ProjectAnalysisReport> BuildReportFromTreeAsync(
 		LoadedProjectAnalysisRequest request,
 		CancellationToken cancellationToken = default)
+		=> BuildReportFromTreeAsync(
+			request,
+			includeOutputMetrics: true,
+			cancellationToken);
+
+	internal Task<ProjectAnalysisReport> BuildReportFromTreeAsync(
+		LoadedProjectAnalysisRequest request,
+		bool includeOutputMetrics,
+		CancellationToken cancellationToken) =>
+		BuildReportFromTreeAsync(
+			request,
+			includeTreeOutputMetrics: includeOutputMetrics,
+			includeContentOutputMetrics: includeOutputMetrics,
+			cancellationToken);
+
+	internal async Task<ProjectAnalysisReport> BuildReportFromTreeAsync(
+		LoadedProjectAnalysisRequest request,
+		bool includeTreeOutputMetrics,
+		bool includeContentOutputMetrics,
+		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 
 		var analysisStopwatch = Stopwatch.StartNew();
-		var treeMetrics = treeExport.CalculateFullTreeMetricsWithCancellation(
-			request.RootPath,
-			request.Tree.Root,
-			TreeTextFormat.Ascii,
-			displayRootPath: null,
-			displayRootName: null,
-			cancellationToken);
-		var contentMetrics = await CalculateContentMetricsAsync(request.Tree.OrderedFilePaths, cancellationToken)
-			.ConfigureAwait(false);
+		var treeMetrics = includeTreeOutputMetrics
+			? treeExport.CalculateFullTreeMetricsWithCancellation(
+				request.RootPath,
+				request.Tree.Root,
+				TreeTextFormat.Ascii,
+				displayRootPath: null,
+				displayRootName: null,
+				cancellationToken)
+			: ExportOutputMetrics.Empty;
+		var contentMetrics = includeContentOutputMetrics
+			? await CalculateContentMetricsAsync(request.Tree.OrderedFilePaths, cancellationToken)
+				.ConfigureAwait(false)
+			: ExportOutputMetrics.Empty;
 		cancellationToken.ThrowIfCancellationRequested();
 		analysisStopwatch.Stop();
 

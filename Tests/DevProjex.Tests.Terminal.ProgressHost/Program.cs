@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using DevProjex.Application.Preview;
@@ -26,6 +27,14 @@ internal static class Program
 			_ = Console.In.ReadToEnd();
 			Console.Out.Write("eof");
 			return CommandLineExitCodes.Success;
+		}
+		if (args is ["--hold-process-tree", var parentLockPath, var parentReadyPath])
+		{
+			return HoldProcessTree(parentLockPath, parentReadyPath);
+		}
+		if (args is ["--hold-lock", var childLockPath, var childReadyPath])
+		{
+			return HoldLock(childLockPath, childReadyPath);
 		}
 		if (args is ["--file-backed-export", var sourcePath, var destinationPath,
 		    var readyPath, var cancelPath, var outcomePath])
@@ -71,6 +80,48 @@ internal static class Program
 			.RunAsync(args, cancellation.Token)
 			.GetAwaiter()
 			.GetResult();
+	}
+
+	private static int HoldProcessTree(string lockPath, string readyPath)
+	{
+		using var child = new Process
+		{
+			StartInfo = CreateSelfStartInfo("--hold-lock", lockPath, readyPath)
+		};
+		if (!child.Start())
+			return CommandLineExitCodes.RuntimeError;
+
+		child.WaitForExit();
+		return child.ExitCode;
+	}
+
+	private static int HoldLock(string lockPath, string readyPath)
+	{
+		using var heldHandle = new FileStream(
+			lockPath,
+			FileMode.OpenOrCreate,
+			FileAccess.ReadWrite,
+			FileShare.None);
+		File.WriteAllText(readyPath, Environment.ProcessId.ToString(CultureInfo.InvariantCulture));
+
+		using var exitSignal = new ManualResetEventSlim(initialState: false);
+		exitSignal.Wait();
+		return CommandLineExitCodes.Success;
+	}
+
+	private static ProcessStartInfo CreateSelfStartInfo(params string[] arguments)
+	{
+		var executable = Environment.ProcessPath ??
+		                 throw new InvalidOperationException("The test host executable path is unavailable.");
+		var startInfo = new ProcessStartInfo
+		{
+			FileName = executable,
+			UseShellExecute = false,
+			CreateNoWindow = true
+		};
+		foreach (var argument in arguments)
+			startInfo.ArgumentList.Add(argument);
+		return startInfo;
 	}
 
 	private static async Task RunFileBackedExportAsync(

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using DevProjex.Infrastructure.ProjectProfiles;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -9,8 +10,8 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 	public async Task CopyCommandPublishesAnInlineSuccessResult()
 	{
 		using var project = CreateProject();
-		await using var terminal = await StartAsync(project.Path, columns: 120, rows: 30);
-		await terminal.WaitForScreenAsync(
+		await using var terminal = await StartAsync(project.Path, columns: 160, rows: 36);
+		await terminal.WaitForStableScreenAsync(
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
 
@@ -21,6 +22,29 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains("characters", result, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 120_000)]
+	public async Task CopyThenCjkLanguageSwitchKeepsThePublishedWorkspaceInteractive()
+	{
+		using var project = CreateProject();
+		await using var terminal = await StartAsync(project.Path, columns: 120, rows: 30);
+		await terminal.WaitForStableScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.SendAsync(":copy\r", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Copied: Tree",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync(":language ja\r", TestContext.Current.CancellationToken);
+		var japanese = await terminal.WaitForScreenAsync(
+			"Space 切り替え",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains("プロジェクトツリー", japanese, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 		await QuitAsync(terminal);
 	}
@@ -75,6 +99,80 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 			static line => line.Contains("Символы", StringComparison.Ordinal));
 
 		Assert.Contains("Примерное число токенов", resultLine, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 120_000)]
+	public async Task ProfileSaveWithQuotedNamePersistsAValidProfileOutsideTheProject()
+	{
+		using var workspace = new TemporaryDirectory();
+		var projectPath = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/global.json", "{}");
+		workspace.WriteFile("project/src/App.cs", "namespace Sample;");
+		var profilePath = Path.Combine(workspace.Path, "My Name.json");
+		string? internalDataRoot = null;
+		await using var terminal = await StartAsync(
+			projectPath,
+			columns: 160,
+			rows: 36,
+			initializeDataRoot: dataRoot => internalDataRoot = dataRoot);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.SendAsync(
+			":profile save \"My Name\"\r",
+			TestContext.Current.CancellationToken);
+		var result = await terminal.WaitForScreenAsync(
+			profilePath,
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains("My Name.json", result, StringComparison.Ordinal);
+		Assert.NotNull(internalDataRoot);
+		Assert.False(PathUtility.IsPathInside(internalDataRoot, projectPath));
+		Assert.True(File.Exists(profilePath));
+		Assert.False(File.Exists(Path.Combine(projectPath, "My Name.json")));
+		var profile = await new PortableProjectProfileService().LoadAsync(
+			profilePath,
+			TestContext.Current.CancellationToken);
+		Assert.Contains(".cs", profile.Extensions ?? [], StringComparer.OrdinalIgnoreCase);
+		Assert.False(terminal.HasExited);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 120_000)]
+	public async Task RefreshSelectsANewExtensionAndPreservesAnExplicitDisabledExtension()
+	{
+		using var project = CreateProject();
+		await using var terminal = await StartAsync(project.Path, columns: 160, rows: 50);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await ExecuteAsync(terminal, "type .md off", ".md: disabled");
+		project.WriteFile("notes.md", "# Added while the workspace is open");
+		project.WriteFile("config.toml", "enabled = true");
+
+		await terminal.SendAsync(":refresh\r", TestContext.Current.CancellationToken);
+		var refreshed = await terminal.WaitForScreenAsync(
+			"Project refreshed.",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.DoesNotContain("Processing request", refreshed, StringComparison.Ordinal);
+		var tree = await terminal.WaitForScreenAsync(
+			"config.toml",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.DoesNotContain("notes.md", tree, StringComparison.Ordinal);
+
+		await OpenAndCancelAsync(terminal);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		var parameters = await terminal.WaitForScreenAsync(
+			"[x] .toml",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("[ ] .md", parameters, StringComparison.Ordinal);
+		Assert.DoesNotContain("Processing request", parameters, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 		await QuitAsync(terminal);
 	}
@@ -398,6 +496,52 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		await QuitAsync(restored);
 	}
 
+	[Fact(Timeout = 120_000)]
+	public async Task LanguageCommandDoesNotDelayExitWhenTheSettingsLockIsBusy()
+	{
+		using var project = CreateProject();
+		FileStream? heldLock = null;
+		try
+		{
+			await using var terminal = await StartAsync(
+				project.Path,
+				columns: 120,
+				rows: 30,
+				initializeDataRoot: dataRoot =>
+				{
+					var store = new TerminalSettingsStore(() => dataRoot);
+					Directory.CreateDirectory(Path.GetDirectoryName(store.GetPath())!);
+					heldLock = new FileStream(
+						store.GetPath() + ".lock",
+						FileMode.OpenOrCreate,
+						FileAccess.ReadWrite,
+						FileShare.None);
+				});
+			await terminal.WaitForScreenAsync(
+				"PROJECT TREE",
+				cancellationToken: TestContext.Current.CancellationToken);
+			await terminal.SendAsync(":language ja\r", TestContext.Current.CancellationToken);
+			await terminal.WaitForScreenAsync(
+				"言語をjaに切り替えました。",
+				cancellationToken: TestContext.Current.CancellationToken);
+
+			var stopwatch = Stopwatch.StartNew();
+			await terminal.SendAsync(":quit\r", TestContext.Current.CancellationToken);
+			var exitCode = await terminal.WaitForExitAsync(
+				timeout: TimeSpan.FromSeconds(5),
+				cancellationToken: TestContext.Current.CancellationToken);
+
+			Assert.Equal(CommandLineExitCodes.Success, exitCode);
+			Assert.True(
+				stopwatch.Elapsed < TimeSpan.FromSeconds(3),
+				$"TUI exit waited {stopwatch.Elapsed} for best-effort settings persistence.");
+		}
+		finally
+		{
+			heldLock?.Dispose();
+		}
+	}
+
 	[Fact(Timeout = 180_000)]
 	public async Task EveryVerbExecutesInOneLiveWorkspaceWithoutStateDivergence()
 	{
@@ -500,6 +644,36 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		await terminal.WaitForScreenAsync(
 			"App.cs",
 			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.False(terminal.HasExited);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 120_000)]
+	public async Task CjkArgumentEditingKeepsExactCommandText()
+	{
+		using var project = CreateProject();
+		await using var terminal = await StartAsync(project.Path, columns: 100, rows: 30);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.SendAsync(":search 本語", TestContext.Current.CancellationToken);
+		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
+		for (var index = 0; index < "search ".Length; index++)
+			await terminal.SendRightAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync("日", TestContext.Current.CancellationToken);
+		await terminal.SendEndAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync("x\u007f", TestContext.Current.CancellationToken);
+
+		var edited = await terminal.WaitForScreenAsync(
+			":search 日本語",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.DoesNotContain(":search 日本語x", edited, StringComparison.Ordinal);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Preview search: 日本語",
+			cancellationToken: TestContext.Current.CancellationToken);
+
 		Assert.False(terminal.HasExited);
 		await QuitAsync(terminal);
 	}
@@ -764,7 +938,8 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		int rows,
 		IReadOnlyDictionary<string, string>? environment = null,
 		bool plain = false,
-		string? language = "en")
+		string? language = "en",
+		Action<string>? initializeDataRoot = null)
 	{
 		var arguments = new List<string>
 		{
@@ -789,7 +964,8 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 			columns,
 			rows,
 			environment,
-			cancellationToken: TestContext.Current.CancellationToken);
+			cancellationToken: TestContext.Current.CancellationToken,
+			initializeDataRoot: initializeDataRoot);
 	}
 
 	private static TemporaryDirectory CreateProject()
@@ -863,6 +1039,7 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 	private static async Task QuitAsync(TerminalPtyHarness terminal)
 	{
 		await terminal.SendAsync(":quit\r", TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(

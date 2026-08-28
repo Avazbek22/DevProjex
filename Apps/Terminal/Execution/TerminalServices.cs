@@ -35,7 +35,10 @@ public sealed record TerminalServices(
 
 	internal TerminalServices AttachOwnedLifetime()
 	{
-		var lifetime = new OwnedLifetime(SecretRedactionSession, CodeCompressionSession);
+		var lifetime = new OwnedLifetime(
+			RepoCacheService as IDisposable,
+			SecretRedactionSession,
+			CodeCompressionSession);
 		if (Interlocked.CompareExchange(ref _ownedLifetime, lifetime, null) is not null)
 			throw new InvalidOperationException("Terminal service ownership is already configured.");
 
@@ -45,23 +48,33 @@ public sealed record TerminalServices(
 	public void Dispose() => Interlocked.Exchange(ref _ownedLifetime, null)?.Dispose();
 
 	private sealed class OwnedLifetime(
+		IDisposable? repoCacheLifetime,
 		SecretRedactionSession secretRedactionSession,
 		CodeCompressionSession codeCompressionSession) : IDisposable
 	{
+		private IDisposable? _repoCacheLifetime = repoCacheLifetime;
 		private SecretRedactionSession? _secretRedactionSession = secretRedactionSession;
 		private CodeCompressionSession? _codeCompressionSession = codeCompressionSession;
 
 		public void Dispose()
 		{
+			var cacheLifetime = Interlocked.Exchange(ref _repoCacheLifetime, null);
 			var redactionSession = Interlocked.Exchange(ref _secretRedactionSession, null);
 			var compressionSession = Interlocked.Exchange(ref _codeCompressionSession, null);
 			try
 			{
-				redactionSession?.Dispose();
+				cacheLifetime?.Dispose();
 			}
 			finally
 			{
-				compressionSession?.Dispose();
+				try
+				{
+					redactionSession?.Dispose();
+				}
+				finally
+				{
+					compressionSession?.Dispose();
+				}
 			}
 		}
 	}

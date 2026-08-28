@@ -4,6 +4,7 @@ using DevProjex.Kernel.Abstractions;
 
 namespace DevProjex.Tests.Terminal;
 
+[Collection(TerminalProcessCollection.Name)]
 public sealed class CliUrlSourceCommandTests
 {
 	[Theory]
@@ -139,9 +140,7 @@ public sealed class CliUrlSourceCommandTests
 		var bare = Path.Combine(workspace.Path, "origin.git");
 		RunGit(workspace.Path, "clone", "--bare", source, bare);
 		var repositoryUrl = new Uri(bare + Path.DirectorySeparatorChar).AbsoluteUri;
-		var services = new TerminalServiceFactory(() => data.Path).Create(AppLanguage.En);
-		using var secretSession = services.SecretRedactionSession;
-		using var compressionSession = services.CodeCompressionSession;
+		using var services = new TerminalServiceFactory(() => data.Path).Create(AppLanguage.En);
 		var factory = new TerminalServiceFactory(_ => services);
 
 		using var main = await AnalyzeAsync(factory, repositoryUrl, "main");

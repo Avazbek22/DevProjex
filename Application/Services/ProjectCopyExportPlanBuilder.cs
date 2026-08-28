@@ -52,8 +52,12 @@ public sealed class ProjectCopyExportPlanBuilder
 					$"The effective tree contains an unsafe relative path: {relativePath}");
 			}
 
-			if (relativePaths.Add(relativePath))
-				entries.Add(new ProjectCopyExportPlanEntry(sourcePath, relativePath, node.IsDirectory));
+			if (!relativePaths.Add(relativePath))
+			{
+				throw InvalidRequest(
+					$"The effective tree contains duplicate destination path '{relativePath}'.");
+			}
+			entries.Add(new ProjectCopyExportPlanEntry(sourcePath, relativePath, node.IsDirectory));
 		}
 
 		CancellationAwareSort.Sort(entries, CompareEntries, cancellationToken);

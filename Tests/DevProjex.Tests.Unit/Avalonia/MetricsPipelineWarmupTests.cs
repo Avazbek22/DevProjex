@@ -36,6 +36,53 @@ public sealed class MetricsPipelineWarmupTests
 		Assert.Null(timer);
 	}
 
+	[AvaloniaFact]
+	public async Task Recalculate_ProjectsSelectedPathsOncePerGeneration()
+	{
+		using var temp = new TemporaryDirectory();
+		var selectedFile = temp.CreateFile("Selected.cs", "internal class Selected { }");
+		var otherFile = temp.CreateFile("Other.cs", "internal class Other { }");
+		var root = CreateTree(temp.Path, [selectedFile, otherFile]);
+		var currentTree = new BuildTreeResult(root, false, false, [selectedFile, otherFile]);
+		var selectedPaths = new CountingReadOnlySet<string>(
+			new HashSet<string>([selectedFile], PathComparer.Default));
+		var viewModel = CreateViewModel();
+		viewModel.IsProjectLoaded = true;
+		viewModel.TreeNodes.Add(new TreeNodeViewModel(root, parent: null, icon: null));
+		var completedRecalculations = 0;
+		using var pipeline = new MetricsPipeline(
+			viewModel,
+			CreateLocalization(),
+			new FileContentAnalyzer(),
+			new TreeExportService(),
+			new StatusOperationCoordinator(
+				viewModel,
+				isBackgroundMetricsActive: () => false,
+				metricsOperationTextProvider: () => viewModel.StatusOperationCalculatingData),
+			currentTreeProvider: () => currentTree,
+			currentPathProvider: () => temp.Path,
+			selectedPathsProvider: () => selectedPaths,
+			treeFormatProvider: () => TreeTextFormat.Ascii,
+			exportPathPresentationProvider: () => null,
+			boundsWidthProvider: () => 1400,
+			scheduleMemoryCleanup: _ => Interlocked.Increment(ref completedRecalculations));
+
+		await pipeline.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
+			currentTree,
+			TestContext.Current.CancellationToken);
+		await WaitUntilAsync(
+			() => pipeline.HasStatusMetricsSnapshot,
+			TimeSpan.FromSeconds(5));
+		selectedPaths.ResetEnumerationCount();
+
+		pipeline.Recalculate(MemoryCleanupReason.FilterApplied);
+		await WaitUntilAsync(
+			() => Volatile.Read(ref completedRecalculations) == 1,
+			TimeSpan.FromSeconds(5));
+
+		Assert.Equal(1, selectedPaths.EnumerationCount);
+	}
+
     [AvaloniaFact]
     public async Task InitializeFileMetricsCacheAsync_PendingVisualGate_DefersAllFileIoUntilReveal()
     {
@@ -1603,6 +1650,32 @@ public sealed class MetricsPipelineWarmupTests
             CancellationToken cancellationToken = default) =>
             inner.TryReadAsTextAsync(path, maxSizeForFullRead, cancellationToken);
     }
+
+	private sealed class CountingReadOnlySet<T>(IReadOnlySet<T> inner) : IReadOnlySet<T>
+	{
+		private int _enumerationCount;
+
+		public int Count => inner.Count;
+		public int EnumerationCount => Volatile.Read(ref _enumerationCount);
+
+		public bool Contains(T item) => inner.Contains(item);
+		public bool IsProperSubsetOf(IEnumerable<T> other) => inner.IsProperSubsetOf(other);
+		public bool IsProperSupersetOf(IEnumerable<T> other) => inner.IsProperSupersetOf(other);
+		public bool IsSubsetOf(IEnumerable<T> other) => inner.IsSubsetOf(other);
+		public bool IsSupersetOf(IEnumerable<T> other) => inner.IsSupersetOf(other);
+		public bool Overlaps(IEnumerable<T> other) => inner.Overlaps(other);
+		public bool SetEquals(IEnumerable<T> other) => inner.SetEquals(other);
+
+		public IEnumerator<T> GetEnumerator()
+		{
+			Interlocked.Increment(ref _enumerationCount);
+			return inner.GetEnumerator();
+		}
+
+		System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+
+		public void ResetEnumerationCount() => Volatile.Write(ref _enumerationCount, 0);
+	}
 
     private sealed class FaultInjectingMetricsAnalyzer(
         IFileContentAnalyzer inner,

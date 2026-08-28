@@ -2,6 +2,7 @@ using System.Diagnostics;
 
 namespace DevProjex.Tests.Terminal;
 
+[Collection(TerminalProcessCollection.Name)]
 public sealed class GeneratedCompletionNativeShellIntegrationTests
 {
 	private const string CompletionLine = "devprojex analyze . --format ";

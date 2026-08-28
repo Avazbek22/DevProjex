@@ -9,14 +9,14 @@
   │  Open current directory                │  │ Open a recent local folder or Git repository from one shared history.                              │
   │> Recent workspaces┌┤Recent workspaces├────────────────────────────────────────────────────────────────────────────────────┐                    │
   │  Browse folder    │ Open a recent local folder or Git repository from one shared history.                                 │                    │
-  │  Clone repository │                                                                                                       │                    │
-  │  Open Desktop     │ > Git        DevProjex                    Today                                                       │                    │
+  │  Open project with│                                                                                                       │                    │
+  │  Clone repository │ > Git        DevProjex                    Today                                                       │                    │
+  │  Open Desktop     │                                                                                                       │                    │
   │  Help             │                                                                                                       │                    │
-  │  Exit             │                                                                                                       │                    │
-  └───────────────────│ Git · DevProjex                                                                                       │────────────────────┘
-                      │ https://github.com/Avazbek22/DevProjex                                                                │
-  Direct automation: d│ Last opened: <TIMESTAMP>│
-                      │                                                                                                       │
+  │  Exit             │ Git · DevProjex                                                                                       │                    │
+  └───────────────────│ https://github.com/Avazbek22/DevProjex                                                                │────────────────────┘
+                      │ Last opened: <TIMESTAMP>│
+  Direct automation: d│                                                                                                       │
                       │                                                                                                       │
                       │                                                                                                       │
                       │                                ⟦ Back ⟧▖ ⟦ Remove entry ⟧▖ ⟦► Open ◄⟧▖                                │
@@ -32,4 +32,4 @@
 
 
 
-  Up/Down or j/k Navigate   Enter Select   Ctrl+P Actions   ? Help   q Exit
+  1-9 Recent   Enter Select   : Commands   Ctrl+P Actions   ? Help   q Exit

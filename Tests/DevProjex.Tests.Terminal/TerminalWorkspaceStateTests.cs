@@ -1,9 +1,28 @@
+using System.Collections.Specialized;
 using DevProjex.Application.Preview;
+using Terminal.Gui.Text;
 
 namespace DevProjex.Tests.Terminal;
 
 public sealed class TerminalWorkspaceStateTests
 {
+	[Fact]
+	public void VisibleTreeRebuildPublishesOneResetAndKeepsCachedRowText()
+	{
+		using var state = new TerminalWorkspaceState(CreatePlan());
+		var collectionEvents = new List<NotifyCollectionChangedAction>();
+		state.VisibleRows.CollectionChanged += (_, eventArgs) =>
+			collectionEvents.Add(eventArgs.Action);
+		var sourceRow = FindRow(state, "src");
+
+		state.Expand(sourceRow);
+
+		Assert.Equal([NotifyCollectionChangedAction.Reset], collectionEvents);
+		var row = state.VisibleRows[sourceRow];
+		Assert.Same(row.ToString(), row.ToString());
+		Assert.Equal(row.ToString().GetColumns(), row.DisplayWidth);
+	}
+
 	[Fact]
 	public void PreviewRefreshPublishesDocumentAndExactOutputMetricsTogether()
 	{
@@ -115,6 +134,32 @@ public sealed class TerminalWorkspaceStateTests
 		Assert.Equal(TerminalTreeCheckState.Indeterminate, root.CheckState);
 		Assert.Equal(TerminalTreeCheckState.Indeterminate, src.CheckState);
 		Assert.Equal(["empty", "src/b.cs"], state.BuildSelectedRelativePaths());
+	}
+
+	[Fact]
+	public void RepeatedLeafTogglesKeepAncestorStatesAndFolderCountsExact()
+	{
+		using var state = new TerminalWorkspaceState(CreatePlan());
+		state.Expand(FindRow(state, "src"));
+		var firstFileRow = FindRow(state, "a.cs");
+		var secondFileRow = FindRow(state, "b.cs");
+
+		state.ToggleSelection(firstFileRow);
+		Assert.Equal(TerminalTreeCheckState.Indeterminate, state.VisibleRows[0].CheckState);
+		Assert.Equal(TerminalTreeCheckState.Indeterminate, state.VisibleRows[1].CheckState);
+		Assert.Equal(3, state.SelectedFolderCount);
+
+		state.ToggleSelection(secondFileRow);
+		Assert.Equal(TerminalTreeCheckState.Indeterminate, state.VisibleRows[0].CheckState);
+		Assert.Equal(TerminalTreeCheckState.Unchecked, state.VisibleRows[1].CheckState);
+		Assert.Equal(2, state.SelectedFolderCount);
+
+		state.ToggleSelection(firstFileRow);
+		state.ToggleSelection(secondFileRow);
+		Assert.Equal(TerminalTreeCheckState.Checked, state.VisibleRows[0].CheckState);
+		Assert.Equal(TerminalTreeCheckState.Checked, state.VisibleRows[1].CheckState);
+		Assert.Equal(3, state.SelectedFolderCount);
+		Assert.Empty(state.BuildSelectedRelativePaths());
 	}
 
 	[Fact]

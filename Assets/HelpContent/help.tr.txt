@@ -58,7 +58,7 @@ Biçim kuralları:
 Dışa aktarma dosyaları BOM olmadan UTF-8'de yazılır.
 
 ### Sürükle ve Bırak
-Sürükle ve bırak, hiçbir proje yüklenmediğinde başlangıç ​​alanında (Bırakma Bölgesi) çalışır.
+Sürükle ve bırak, hiçbir proje yüklenmediğinde başlangıç alanında (Bırakma Bölgesi) çalışır.
 
 Tüzük:
 * bir klasörü bırakabilirsiniz;
@@ -356,7 +356,7 @@ Yoksayma kuralları birikimlidir. En az bir etkin kural bir öğeyi gizlerse ba�
 Proje içeriğine bağlı olarak aşağıdaki seçenekler gösterilebilir:
 
 * Smart Ignore
-*.gitignore'u kullanın
+* .gitignore'u kullanın
 * Yalnızca izlenen Git dosyaları
 * Boş klasörler
 * Boş dosyalar
@@ -400,11 +400,11 @@ Bir klasör veya ZIP kopyası da eşleşen metni değiştirir ve artık oluştur
 Rapor sayımı kuralı yalnızca eşleşir. Sıfır, projenin güvenli olduğu anlamına gelmez. CLI `--hide-secrets` kullanır; teknik ayrıntılar ve sınırlar `Docs/HideSecrets.md` dosyasındadır.
 
 ### 12.4 Kişisel verileri gizle
-"Kişisel verileri gizle" varsayılan olarak kapalıdır. Seçilen metin dosyalarındaki e-posta adreslerini, genel IP adreslerini, yollardaki yerel kullanıcı adlarını, MAC adreslerini ve uluslararası telefon numaralarını algılar. Bulgular, "Gizli bilgileri sakla" ile aynı Önizleme kararlarını ve çıktı hattını kullanır; "Kişisel veri olarak gizle" ile oluşturulan manuel işaretler de bu sınıfa aittir ve bu anahtara uyar (bölüm 12.3). Oluşturulan yol başlıklarındaki ve ağaç kökündeki yerel kullanıcı adları tek bir paylaşılan bulgu olarak maskelenir: sayaç bunu tek değer olarak sayar,? göstergesi gizli veya görünür olduğunu bildirir ve tek tıklama tüm maskelenen yolları değiştirir.
+"Kişisel verileri gizle" varsayılan olarak kapalıdır. Seçilen metin dosyalarındaki e-posta adreslerini, genel IP adreslerini, yollardaki yerel kullanıcı adlarını, MAC adreslerini ve uluslararası telefon numaralarını algılar. Bulgular, "Gizli bilgileri sakla" ile aynı Önizleme kararlarını ve çıktı hattını kullanır; "Kişisel veri olarak gizle" ile oluşturulan manuel işaretler de bu sınıfa aittir ve bu anahtara uyar (bölüm 12.3). Oluşturulan yol başlıklarındaki ve ağaç kökündeki yerel kullanıcı adları tek bir paylaşılan bulgu olarak maskelenir: sayaç bunu tek değer olarak sayar; ? göstergesi gizli veya görünür olduğunu bildirir ve tek tıklama tüm maskelenen yolları değiştirir.
 
 Belge aralıkları ve ana bilgisayarlar, ortak CI kullanıcı adları, iyi bilinen genel DNS çözümleyicileri ve belgelenmiş kurgusal telefon aralıkları görünür kalır. Sıfır eşleşme gizlilik garantisi değildir. CLI `--hide-private-data` yı kullanır; kuralların tamamı ve birinci aşama sınırları `Docs/HidePrivateData.md` dosyasındadır.
 
-### 12.5.gitignore'u kullanın
+### 12.5 .gitignore'u kullanın
 Etkinleştirildiğinde, DevProjex yalnızca açılan klasörün kökündeki dosyayı değil, erişilebilen her `.gitignore` dosyasını uygular.
 
 Her `.gitignore` geçerlidir:
@@ -552,7 +552,9 @@ Ayarları sıfırla (Yardım → Ayarları sıfırla) varsayılan temayı, efekt
 ### 16.3 Verileri sıfırla
 Verileri sıfırla (Yardım → Verileri sıfırla) kayıtlı yerel proje parametre profillerini kaldırır:
 * seçilen dosya türleri;
-* "Hariç Tutulanlar" bölümünde seçilen seçenekler.
+* "Hariç Tutulanlar" bölümünde seçilen seçenekler;
+* seçilen içerik işleme ayarları;
+* elle işaretlenen gizli bilgiler.
 
 Önemli:
 * Yerel klasörlerin yakın geçmişi temizlenmez;

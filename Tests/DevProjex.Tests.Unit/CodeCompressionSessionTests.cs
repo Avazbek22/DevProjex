@@ -457,6 +457,30 @@ public sealed class CodeCompressionSessionTests
 	}
 
 	[Fact]
+	public async Task Prewarm_SupportedDecodeReadsUseAvailableParallelism()
+	{
+		var paths = Enumerable.Range(0, 4)
+			.Select(index => $"C:/project/source-{index}.cs")
+			.ToArray();
+		using var compressor = new RecordingCompressor();
+		using var session = new CodeCompressionSession(compressor);
+		var expectedConcurrency = Math.Min(2, Math.Max(1, Environment.ProcessorCount));
+		var analyzer = new DelayedBudgetedReadAnalyzer();
+
+		var result = await Task.Run(() =>
+				new CodeCompressionPrewarmer(analyzer).WarmAsync(
+					new CodeCompressionContext("C:/project", session),
+					paths,
+					TestContext.Current.CancellationToken),
+			TestContext.Current.CancellationToken).WaitAsync(
+			TimeSpan.FromSeconds(10),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(paths.Length, result.WarmedFiles);
+		Assert.True(analyzer.PeakConcurrentReads >= expectedConcurrency);
+	}
+
+	[Fact]
 	public async Task Prewarm_ProducerFailureWaitsForActiveWorkerAndPreservesPrimaryException()
 	{
 		const string primaryMessage = "producer failed";
@@ -766,6 +790,41 @@ public sealed class CodeCompressionSessionTests
 		Assert.Equal(
 			300,
 			snapshot.UnchangedOutcomeCounts![CodeCompressionOutcome.UnchangedNoBenefit]);
+	}
+
+	[Fact]
+	public void Snapshot_ConcurrentUnsupportedDiagnosticsRetainTheDeterministicPrefix()
+	{
+		const int fileCount = 4_096;
+		var paths = Enumerable.Range(0, fileCount)
+			.Select(index => $"src/sample-{index:D5}.txt")
+			.ToArray();
+		var shuffled = paths.ToArray();
+		var random = new Random(42);
+		for (var index = shuffled.Length - 1; index > 0; index--)
+		{
+			var swapIndex = random.Next(index + 1);
+			(shuffled[index], shuffled[swapIndex]) = (shuffled[swapIndex], shuffled[index]);
+		}
+		using var compressor = new RecordingCompressor();
+		using var session = new CodeCompressionSession(compressor);
+		using var scope = session.BeginOutput("project", paths);
+
+		Parallel.ForEach(
+			shuffled,
+			path => scope.RecordUnsupported(path, path, sourceLength: 1));
+		var snapshot = scope.Complete();
+
+		Assert.Equal(fileCount, snapshot.UnchangedFiles);
+		Assert.Equal(
+			paths.Take(CodeCompressionScope.MaximumUnchangedDiagnosticExamples),
+			snapshot.Unchanged.Select(static outcome => outcome.RelativePath));
+		Assert.Equal(
+			fileCount - CodeCompressionScope.MaximumUnchangedDiagnosticExamples,
+			snapshot.AdditionalUnchangedFiles);
+		Assert.Equal(
+			fileCount,
+			snapshot.UnchangedOutcomeCounts![CodeCompressionOutcome.UnchangedUnsupportedLanguage]);
 	}
 
 	[Fact]
@@ -1827,6 +1886,96 @@ public sealed class CodeCompressionSessionTests
 			string path,
 			CancellationToken cancellationToken = default) =>
 			throw new NotSupportedException();
+	}
+
+	private sealed class DelayedBudgetedReadAnalyzer :
+		IFileContentAnalyzer,
+		IPrewarmFileContentAnalyzer
+	{
+		private int _activeReads;
+		private int _peakConcurrentReads;
+
+		public int PeakConcurrentReads => Volatile.Read(ref _peakConcurrentReads);
+
+		public FileContentClassification? ClassifyWithoutReading(string path) =>
+			FileContentClassification.Text;
+
+		public async ValueTask<ContentReadFact> ReadFactAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default)
+		{
+			var active = Interlocked.Increment(ref _activeReads);
+			UpdatePeak(active);
+			try
+			{
+				await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken);
+				const string content = "class Sample { }";
+				return new ContentReadFact(
+					content,
+					FileContentClassification.Text,
+					new TextFileMetrics(content.Length, 1, content.Length, false, false),
+					ContentFingerprint.Compute(content));
+			}
+			finally
+			{
+				Interlocked.Decrement(ref _activeReads);
+			}
+		}
+
+		public ValueTask<BudgetedContentReadResult> ReadFactWithBudgetAsync(
+			string path,
+			long maximumReadBytes,
+			WeightedByteBudget byteBudget,
+			SemaphoreSlim decodeScratchGate,
+			CancellationToken cancellationToken = default) =>
+			ReadTestFactWithBudgetAsync(
+				() => ReadFactAsync(path, maximumReadBytes, cancellationToken),
+				128 + "class Sample { }".Length * sizeof(char),
+				byteBudget,
+				decodeScratchGate,
+				cancellationToken);
+
+		public ValueTask<IdentifiedFileContentMetricsResult> GetClassifiedMetricsWithIdentityAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+
+		public ValueTask<bool> IsTextFileAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+
+		private void UpdatePeak(int value)
+		{
+			var current = Volatile.Read(ref _peakConcurrentReads);
+			while (value > current)
+			{
+				var observed = Interlocked.CompareExchange(
+					ref _peakConcurrentReads,
+					value,
+					current);
+				if (observed == current)
+					return;
+				current = observed;
+			}
+		}
 	}
 
 	private sealed class PipelineFillFailureCompressor(

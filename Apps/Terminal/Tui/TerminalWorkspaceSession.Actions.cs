@@ -10,6 +10,43 @@ namespace DevProjex.Terminal.Tui;
 
 #pragma warning disable CS0618
 
+internal readonly record struct TerminalControlSourceStamp(
+	TerminalWorkspaceState State,
+	long Revision,
+	ProjectSelectionSpec? DraftSelection,
+	AppLanguage Language,
+	TerminalWorkspaceLayoutMode LayoutMode,
+	int LabelWidth);
+
+internal readonly record struct TerminalRedactionLabelStamp(
+	bool HasSnapshot,
+	string? SelectionKey,
+	int SecretDetectedCount,
+	int SecretRedactedCount,
+	int PrivateDataDetectedCount,
+	int PrivateDataRedactedCount,
+	bool IsComplete)
+{
+	public static TerminalRedactionLabelStamp From(SecretRedactionSnapshot? snapshot) =>
+		snapshot is null
+			? default
+			: new TerminalRedactionLabelStamp(
+				true,
+				snapshot.SelectionKey,
+				snapshot.SecretDetectedCount,
+				snapshot.SecretRedactedCount,
+				snapshot.PrivateDataDetectedCount,
+				snapshot.PrivateDataRedactedCount,
+				snapshot.IsComplete);
+}
+
+internal enum TerminalControlRefreshKind
+{
+	None,
+	RedactionOnly,
+	Full
+}
+
 internal sealed partial class TerminalWorkspaceSession
 {
 	private const int WideControlsWidth = 38;
@@ -31,35 +68,35 @@ internal sealed partial class TerminalWorkspaceSession
 	private TerminalParameterListView? _exclusionControls => ControlViews?.ExclusionList;
 	private TerminalAggregateControl? _extensionAllControl => ControlViews?.ExtensionAll;
 	private TerminalParameterListView? _extensionControls => ControlViews?.ExtensionList;
-	private ObservableCollection<TerminalParameterRow>? _contentControlRows
+	private ResettableObservableCollection<TerminalParameterRow>? _contentControlRows
 	{
 		get => ControlViews?.ContentRows;
-		set { if (ControlViews is { } views) views.ContentRows = value ?? []; }
+		set { if (ControlViews is { } views) views.ContentRows = value; }
 	}
 	private ObservableCollection<TerminalParameterRow>? _contentAllControlRows
 	{
 		get => ControlViews?.ContentAllRows;
-		set { if (ControlViews is { } views) views.ContentAllRows = value ?? []; }
+		set { if (ControlViews is { } views) views.ContentAllRows = value; }
 	}
 	private ObservableCollection<TerminalParameterRow>? _exclusionAllControlRows
 	{
 		get => ControlViews?.ExclusionAllRows;
-		set { if (ControlViews is { } views) views.ExclusionAllRows = value ?? []; }
+		set { if (ControlViews is { } views) views.ExclusionAllRows = value; }
 	}
-	private ObservableCollection<TerminalParameterRow>? _exclusionControlRows
+	private ResettableObservableCollection<TerminalParameterRow>? _exclusionControlRows
 	{
 		get => ControlViews?.ExclusionRows;
-		set { if (ControlViews is { } views) views.ExclusionRows = value ?? []; }
+		set { if (ControlViews is { } views) views.ExclusionRows = value; }
 	}
 	private ObservableCollection<TerminalParameterRow>? _extensionAllControlRows
 	{
 		get => ControlViews?.ExtensionAllRows;
-		set { if (ControlViews is { } views) views.ExtensionAllRows = value ?? []; }
+		set { if (ControlViews is { } views) views.ExtensionAllRows = value; }
 	}
-	private ObservableCollection<TerminalParameterRow>? _extensionControlRows
+	private ResettableObservableCollection<TerminalParameterRow>? _extensionControlRows
 	{
 		get => ControlViews?.ExtensionRows;
-		set { if (ControlViews is { } views) views.ExtensionRows = value ?? []; }
+		set { if (ControlViews is { } views) views.ExtensionRows = value; }
 	}
 	private string? _selectedContentControlKey;
 	private string? _selectedExclusionControlKey;
@@ -73,6 +110,8 @@ internal sealed partial class TerminalWorkspaceSession
 	private ProjectSelectionSpec? _settingsDraftSelection;
 	private Dictionary<string, bool>? _settingsDraftExtensionStates;
 	private bool _settingsDraftOriginatedFromCommandLine;
+	private TerminalControlSourceStamp? _controlSourceStamp;
+	private TerminalRedactionLabelStamp? _redactionLabelStamp;
 
 	private WorkspaceControlViewGraph CreateContextControls()
 	{
@@ -254,30 +293,62 @@ internal sealed partial class TerminalWorkspaceSession
 			_extensionAllControl is null || _extensionControls is null)
 			return;
 
+		var selection = GetDisplayedSettingsSelection();
+		var snapshot = GetContentRedactionSnapshot(_state.Plan);
+		var sourceStamp = new TerminalControlSourceStamp(
+			_state,
+			_state.Revision,
+			_settingsDraftSelection,
+			_services.Localization.CurrentLanguage,
+			_layoutMode,
+			ResolveControlLabelWidth(markerColumns: 4));
+		var redactionStamp = TerminalRedactionLabelStamp.From(snapshot);
+		var refreshKind = ResolveControlRefreshKind(
+			_controlSourceStamp,
+			sourceStamp,
+			_redactionLabelStamp,
+			redactionStamp);
+		if (refreshKind != TerminalControlRefreshKind.Full)
+		{
+			if (refreshKind == TerminalControlRefreshKind.RedactionOnly)
+			{
+				RefreshContentRedactionRows(selection, snapshot);
+				RefreshControlTitles();
+			}
+			_redactionLabelStamp = redactionStamp;
+			UpdateControlSelectionSchemes();
+			return;
+		}
+
 		TrackSelectedControl(TerminalControlSection.Content);
 		TrackSelectedControl(TerminalControlSection.Exclusions);
 		TrackSelectedControl(TerminalControlSection.Extensions);
-		var selection = GetDisplayedSettingsSelection();
 		var selectedExtensions = selection.Extensions ?? _state.Plan.SelectedExtensions;
-		_contentAllControlRows = ReplaceAggregateRow(
+		_contentAllControlRows = UpdateAggregateRow(
 			_contentAllControl,
+			_contentAllControlRows,
 			_parameterRowsBuilder.BuildContentAggregate(selection));
-		_contentControlRows = ReplaceControlRows(
+		_contentControlRows = UpdateControlRows(
 			_contentControls,
-			BuildContentParameterRows(),
+			_contentControlRows,
+			BuildContentParameterRows(selection, snapshot),
 			_selectedContentControlKey);
-		_exclusionAllControlRows = ReplaceAggregateRow(
+		_exclusionAllControlRows = UpdateAggregateRow(
 			_exclusionAllControl,
+			_exclusionAllControlRows,
 			_parameterRowsBuilder.BuildExclusionAggregate(_state.Plan, selection));
-		_exclusionControlRows = ReplaceControlRows(
+		_exclusionControlRows = UpdateControlRows(
 			_exclusionControls,
+			_exclusionControlRows,
 			BuildExclusionParameterRows(),
 			_selectedExclusionControlKey);
-		_extensionAllControlRows = ReplaceAggregateRow(
+		_extensionAllControlRows = UpdateAggregateRow(
 			_extensionAllControl,
+			_extensionAllControlRows,
 			_parameterRowsBuilder.BuildExtensionAggregate(_state.Plan, selectedExtensions));
-		_extensionControlRows = ReplaceControlRows(
+		_extensionControlRows = UpdateControlRows(
 			_extensionControls,
+			_extensionControlRows,
 			BuildExtensionParameterRows(),
 			_selectedExtensionControlKey);
 		if (_collapsedControls is not null)
@@ -290,46 +361,138 @@ internal sealed partial class TerminalWorkspaceSession
 		}
 		RefreshControlTitles();
 		UpdateControlSelectionSchemes();
+		_controlSourceStamp = sourceStamp;
+		_redactionLabelStamp = redactionStamp;
 	}
 
-	private ObservableCollection<TerminalParameterRow> ReplaceAggregateRow(
+	internal static TerminalControlRefreshKind ResolveControlRefreshKind(
+		TerminalControlSourceStamp? previousSource,
+		TerminalControlSourceStamp currentSource,
+		TerminalRedactionLabelStamp? previousRedaction,
+		TerminalRedactionLabelStamp currentRedaction)
+	{
+		if (previousSource != currentSource)
+			return TerminalControlRefreshKind.Full;
+		return previousRedaction == currentRedaction
+			? TerminalControlRefreshKind.None
+			: TerminalControlRefreshKind.RedactionOnly;
+	}
+
+	private ObservableCollection<TerminalParameterRow> UpdateAggregateRow(
 		TerminalAggregateControl control,
+		ObservableCollection<TerminalParameterRow>? source,
 		TerminalParameterRow row)
 	{
 		control.SetRow(row);
 		if (control.IsOnBorder)
 			control.X = Pos.AnchorEnd(
 				control.Text.GetColumns() + AggregateTrailingBorderColumns);
-		return new ObservableCollection<TerminalParameterRow>([row]);
+		source ??= [row];
+		if (source.Count == 0)
+			source.Add(row);
+		else if (source[0] != row)
+			source[0] = row;
+		return source;
 	}
 
-	private ObservableCollection<TerminalParameterRow> ReplaceControlRows(
+	private ResettableObservableCollection<TerminalParameterRow> UpdateControlRows(
 		TerminalParameterListView list,
+		ResettableObservableCollection<TerminalParameterRow>? source,
 		IReadOnlyList<TerminalParameterRow> rows,
 		string? selectedKey)
 	{
-		var source = new ObservableCollection<TerminalParameterRow>(rows);
-		list.SetSource(source);
+		if (source is null)
+		{
+			source = [];
+			source.Reset(rows);
+			list.SetSource(source);
+		}
+		else if (!TryUpdateRowsInPlace(source, rows))
+			source.Reset(rows);
 		if (source.Count > 0)
 		{
-			var selectedIndex = selectedKey is null
-				? 0
-				: source
-					.Select((row, index) => (row, index))
-					.FirstOrDefault(pair => pair.row.Key == selectedKey)
-					.index;
+			var selectedIndex = FindSelectedIndex(source, selectedKey);
 			list.SelectedItem = Math.Clamp(selectedIndex, 0, source.Count - 1);
 		}
 		return source;
 	}
 
+	private static int FindSelectedIndex(
+		IReadOnlyList<TerminalParameterRow> rows,
+		string? selectedKey)
+	{
+		if (selectedKey is null)
+			return 0;
+		for (var index = 0; index < rows.Count; index++)
+		{
+			if (string.Equals(rows[index].Key, selectedKey, StringComparison.Ordinal))
+				return index;
+		}
+		return 0;
+	}
+
+	internal static bool TryUpdateRowsInPlace(
+		ObservableCollection<TerminalParameterRow> source,
+		IReadOnlyList<TerminalParameterRow> rows)
+	{
+		ArgumentNullException.ThrowIfNull(source);
+		ArgumentNullException.ThrowIfNull(rows);
+		if (source.Count != rows.Count)
+			return false;
+		for (var index = 0; index < rows.Count; index++)
+		{
+			if (!string.Equals(source[index].Key, rows[index].Key, StringComparison.Ordinal))
+				return false;
+		}
+		for (var index = 0; index < rows.Count; index++)
+		{
+			if (!HasSamePresentation(source[index], rows[index]))
+				source[index] = rows[index];
+		}
+		return true;
+	}
+
+	private static bool HasSamePresentation(TerminalParameterRow left, TerminalParameterRow right) =>
+		left.Kind == right.Kind &&
+		string.Equals(left.Label, right.Label, StringComparison.Ordinal) &&
+		left.IsSelected == right.IsSelected &&
+		left.GitMode == right.GitMode &&
+		left.Exclusion == right.Exclusion &&
+		left.ContentTransformation == right.ContentTransformation &&
+		string.Equals(left.Value, right.Value, StringComparison.Ordinal);
+
+	private void RefreshContentRedactionRows(
+		ProjectSelectionSpec selection,
+		SecretRedactionSnapshot? snapshot)
+	{
+		if (_state is null || _contentAllControl is null || _contentControls is null)
+			return;
+
+		TrackSelectedControl(TerminalControlSection.Content);
+		_contentAllControlRows = UpdateAggregateRow(
+			_contentAllControl,
+			_contentAllControlRows,
+			_parameterRowsBuilder.BuildContentAggregate(selection));
+		_contentControlRows = UpdateControlRows(
+			_contentControls,
+			_contentControlRows,
+			BuildContentParameterRows(selection, snapshot),
+			_selectedContentControlKey);
+	}
+
 	private IReadOnlyList<TerminalParameterRow> BuildContentParameterRows() =>
 		_state is null
 			? []
-			: _parameterRowsBuilder.BuildContent(
-				_state.Plan,
-				GetContentRedactionSnapshot(_state.Plan),
-				GetDisplayedSettingsSelection());
+			: BuildContentParameterRows(
+				GetDisplayedSettingsSelection(),
+				GetContentRedactionSnapshot(_state.Plan));
+
+	private IReadOnlyList<TerminalParameterRow> BuildContentParameterRows(
+		ProjectSelectionSpec selection,
+		SecretRedactionSnapshot? snapshot) =>
+		_state is null
+			? []
+			: _parameterRowsBuilder.BuildContent(_state.Plan, snapshot, selection);
 
 	private IReadOnlyList<TerminalParameterRow> BuildExclusionParameterRows() =>
 		_state is null
@@ -511,6 +674,42 @@ internal sealed partial class TerminalWorkspaceSession
 		_activePane = TerminalWorkspacePane.Controls;
 		_activeControlSection = section;
 		UpdateWorkspaceFocus();
+	}
+
+	private void FocusGitFiltering()
+	{
+		const TerminalControlSection section = TerminalControlSection.Exclusions;
+		FocusControlSection(section);
+		_application.Invoke(() => FocusGitFilteringRow(section));
+	}
+
+	private void FocusGitFilteringRow(TerminalControlSection section)
+	{
+		var (_, rows) = GetControlSection(section);
+		if (rows is null)
+			return;
+		var rowIndex = -1;
+		for (var index = 0; index < rows.Count; index++)
+		{
+			var row = rows[index];
+			if (row.Kind != TerminalParameterRowKind.GitMode)
+				continue;
+			if (rowIndex < 0)
+				rowIndex = index;
+			if (row.IsSelected == true)
+			{
+				rowIndex = index;
+				break;
+			}
+		}
+		if (rowIndex < 0)
+		{
+			FocusControlSection(section, movePane: false);
+			return;
+		}
+
+		var aggregateOffset = GetAggregateControlSection(section).List is null ? 0 : 1;
+		FocusControlPosition(section, rowIndex + aggregateOffset);
 	}
 
 	private IReadOnlyList<TerminalWorkspaceAction> BuildWorkspaceActions()
@@ -1443,11 +1642,16 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (_state is null)
 			return;
+		var state = _state;
+		var refreshRequest = TerminalWorkspaceController.CaptureStructuralRefresh(
+			state,
+			state.BuildSelection());
 		TrackActiveOperation(RunOperationAsync(
 			L("Terminal.Tui.Command.Refresh.Title"),
 			async token =>
 			{
-				await _controller.RefreshProjectAsync(_state, token).ConfigureAwait(false);
+				await BuildAndApplyStructuralRefreshAsync(state, refreshRequest, token)
+					.ConfigureAwait(false);
 				return L("Terminal.Tui.Command.Refresh.Result");
 			},
 			originatedFromCommandLine: originatedFromCommandLine,
@@ -1494,17 +1698,20 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (_state?.Plan.SourceIdentity?.SourceType != ProjectSourceType.GitClone)
 			return;
+		var state = _state;
+		var refreshRequest = TerminalWorkspaceController.CaptureStructuralRefresh(
+			state,
+			state.BuildSelection());
 		TrackActiveOperation(RunOperationAsync(
 			L("Terminal.Tui.Action.GetUpdates"),
 			async token =>
 			{
 				var updated = await _services.GitRepositoryService
-					.PullUpdatesAsync(_state.Plan.SourceRoot, cancellationToken: token)
+					.PullUpdatesAsync(state.Plan.SourceRoot, cancellationToken: token)
 					.ConfigureAwait(false);
 				if (!updated)
 					throw new TerminalWorkspaceOperationException("DPX-TUI-GIT-UPDATE-FAILED");
-				await _controller
-					.RebuildRepositoryAsync(_state, _state.BuildSelection(), token)
+				await BuildAndApplyStructuralRefreshAsync(state, refreshRequest, token)
 					.ConfigureAwait(false);
 				return L("Terminal.Tui.RepositoryUpdated");
 			},
@@ -1518,12 +1725,16 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (_state?.Plan.SourceIdentity?.SourceType != ProjectSourceType.GitClone)
 			return;
+		var state = _state;
+		var refreshRequest = TerminalWorkspaceController.CaptureStructuralRefresh(
+			state,
+			state.BuildSelection());
 		TrackActiveOperation(RunOperationAsync(
 			L("Terminal.Tui.Action.SwitchBranch"),
 			async token =>
 			{
 				var branches = await _services.GitRepositoryService
-					.GetBranchesAsync(_state.Plan.SourceRoot, token)
+					.GetBranchesAsync(state.Plan.SourceRoot, token)
 					.ConfigureAwait(false);
 				var branchNames = branches
 					.Select(static branch => branch.Name)
@@ -1544,19 +1755,37 @@ internal sealed partial class TerminalWorkspaceSession
 				}
 				var switched = await _services.GitRepositoryService
 					.SwitchBranchAsync(
-						_state.Plan.SourceRoot,
+						state.Plan.SourceRoot,
 						selected,
 						cancellationToken: token)
 					.ConfigureAwait(false);
 				if (!switched)
 					throw new TerminalWorkspaceOperationException("DPX-TUI-GIT-BRANCH-FAILED");
-				await _controller
-					.RebuildRepositoryAsync(_state, _state.BuildSelection(), token)
+				await BuildAndApplyStructuralRefreshAsync(state, refreshRequest, token)
 					.ConfigureAwait(false);
 				return $"{L("Terminal.Tui.RecentRepositories.Branch")}: {selected}";
 			},
 			modalProgress: true,
 			originatedFromCommandLine: originatedFromCommandLine));
+	}
+
+	private async Task BuildAndApplyStructuralRefreshAsync(
+		TerminalWorkspaceState state,
+		TerminalStructuralRefreshRequest request,
+		CancellationToken cancellationToken)
+	{
+		var result = await _controller
+			.BuildStructuralRefreshAsync(request, cancellationToken)
+			.ConfigureAwait(false);
+		cancellationToken.ThrowIfCancellationRequested();
+		await InvokeAsync(() =>
+		{
+			if (_stopping || !ReferenceEquals(_state, state))
+				return false;
+
+			TerminalWorkspaceController.ApplyStructuralRefresh(state, result);
+			return true;
+		}).ConfigureAwait(false);
 	}
 
 	private void FocusPane(TerminalWorkspacePane pane)

@@ -1,4 +1,5 @@
 using DevProjex.Application.Compression;
+using DevProjex.Application.Diagnostics;
 using DevProjex.Application.Secrets;
 
 namespace DevProjex.Tests.Unit;
@@ -6,6 +7,104 @@ namespace DevProjex.Tests.Unit;
 public sealed class SecretOccurrenceIdentityTests
 {
 	private const string Secret = "canonical-secret-value";
+
+	[Fact]
+	public void CachedFinding_LazilyMaterializesAndThenReusesTheOccurrenceId()
+	{
+		using var workspace = new TemporaryDirectory();
+		var path = workspace.CreateFile("config.txt", Secret);
+		using var session = new SecretRedactionSession(new ExactSecretDetector());
+		using var measurement = ContentPipelineDiagnostics.BeginMeasurement();
+		var scan = session.BeginOutput(workspace.Path, [path]);
+		var entry = scan.Detect(
+			path,
+			Secret.AsSpan(),
+			SecretFileMetadata.Capture(path),
+			TestContext.Current.CancellationToken);
+		scan.ProcessEntry(path, entry);
+		_ = scan.Complete();
+
+		Assert.Null(Assert.Single(entry.Candidates).GetCachedOccurrenceId());
+		Assert.Equal(0, measurement.Capture().OccurrenceIdComputations);
+
+		var cold = session.BeginOutput(workspace.Path, [path]).CreatePlan(
+			path,
+			Secret,
+			ContentTransformMap.Identity,
+			TestContext.Current.CancellationToken);
+		var coldOccurrenceId = Assert.Single(cold.Spans).OccurrenceId;
+		var coldComputations = measurement.Capture().OccurrenceIdComputations;
+		var retainedBytes = session.GetCacheDiagnostics().RetainedBytes;
+
+		var warm = session.BeginOutput(workspace.Path, [path]).CreatePlan(
+			path,
+			Secret,
+			ContentTransformMap.Identity,
+			TestContext.Current.CancellationToken);
+		var warmOccurrenceId = Assert.Single(warm.Spans).OccurrenceId;
+
+		Assert.Equal(1, coldComputations);
+		Assert.Equal(coldComputations, measurement.Capture().OccurrenceIdComputations);
+		Assert.Same(coldOccurrenceId, warmOccurrenceId);
+		Assert.True(retainedBytes >= coldOccurrenceId.Length * sizeof(char));
+		Assert.Equal(retainedBytes, session.GetCacheDiagnostics().RetainedBytes);
+	}
+
+	[Fact]
+	public void CachedFinding_RehashesWhenTheSameTransformedTextHasDifferentSourceCoordinates()
+	{
+		const string firstSource = "Axx" + Secret;
+		const string secondSource = "Ayyyy" + Secret;
+		using var workspace = new TemporaryDirectory();
+		var path = workspace.CreateFile("config.txt", firstSource);
+		var firstTransform = CodeCompressionPlan.Create(
+			"config.txt",
+			"test",
+			[new CodeCompressionEdit(1, 2, "")],
+			firstSource.Length,
+			"shared-transform").ApplyForAnalysis(
+			firstSource,
+			TestContext.Current.CancellationToken);
+		var secondTransform = CodeCompressionPlan.Create(
+			"config.txt",
+			"test",
+			[new CodeCompressionEdit(1, 4, "")],
+			secondSource.Length,
+			"shared-transform").ApplyForAnalysis(
+			secondSource,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(firstTransform.Text, secondTransform.Text);
+		using var session = new SecretRedactionSession(new ExactSecretDetector());
+		using var measurement = ContentPipelineDiagnostics.BeginMeasurement();
+		var metadata = SecretFileMetadata.Capture(path);
+
+		var first = session.BeginOutput(workspace.Path, [path], "shared-transform").CreatePlan(
+			path,
+			firstTransform.Text,
+			firstTransform.Map,
+			metadata,
+			knownFingerprint: null,
+			cancellationToken: TestContext.Current.CancellationToken);
+		var second = session.BeginOutput(workspace.Path, [path], "shared-transform").CreatePlan(
+			path,
+			secondTransform.Text,
+			secondTransform.Map,
+			metadata,
+			knownFingerprint: null,
+			cancellationToken: TestContext.Current.CancellationToken);
+		var repeatedFirst = session.BeginOutput(workspace.Path, [path], "shared-transform").CreatePlan(
+			path,
+			firstTransform.Text,
+			firstTransform.Map,
+			metadata,
+			knownFingerprint: null,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var firstOccurrenceId = Assert.Single(first.Spans).OccurrenceId;
+		Assert.NotEqual(firstOccurrenceId, Assert.Single(second.Spans).OccurrenceId);
+		Assert.Same(firstOccurrenceId, Assert.Single(repeatedFirst.Spans).OccurrenceId);
+		Assert.Equal(2, measurement.Capture().OccurrenceIdComputations);
+	}
 
 	[Fact]
 	public void KeepAsIs_SurvivesEquivalentProjectRootAlias()
@@ -69,6 +168,18 @@ public sealed class SecretOccurrenceIdentityTests
 			Assert.Equal(initialSpan.OccurrenceId, span.OccurrenceId);
 			Assert.Equal(SecretPreviewSpanState.KeptAsIs, span.State);
 			Assert.Equal(Secret, plan.BuildResult(result.Text).Text.AsSpan(span.Start, span.Length));
+
+			var countScope = session.BeginOutput(workspace.Path, [path], identity);
+			countScope.AnalyzeTransformed(
+				path,
+				result.Text,
+				result.Map,
+				SecretFileMetadata.Capture(path),
+				knownFingerprint: null,
+				TestContext.Current.CancellationToken);
+			var snapshot = countScope.Complete();
+			Assert.Equal(1, snapshot.DetectedCount);
+			Assert.Equal(0, snapshot.RedactedCount);
 		}
 	}
 

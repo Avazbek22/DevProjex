@@ -43,6 +43,25 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public void TopFileRanking_ProjectsOnlyTheBoundedWinners()
+	{
+		var ranking = new McpTopFileRanking(capacity: 10);
+		for (var index = 0; index < 20_000; index++)
+			ranking.Add($"file-{index:D5}.cs", index);
+		var mappedPaths = 0;
+
+		var projected = ranking.Project(item =>
+		{
+			mappedPaths++;
+			return item.Path;
+		});
+
+		Assert.Equal(10, mappedPaths);
+		Assert.Equal(10, projected.Length);
+		Assert.Equal("file-19999.cs", projected[0]);
+	}
+
+	[Fact]
 	public async Task ProjectOperationGateCancelsARequestWaitingBehindAnotherOperation()
 	{
 		var gate = new McpProjectOperationGate();
@@ -95,6 +114,24 @@ public sealed class McpInfrastructureTests
 		var missingEscape = Assert.Throws<McpToolException>(() =>
 			registry.ResolveExistingPath(project, "../missing.txt"));
 		Assert.Equal(McpErrorCodes.RootViolation, missingEscape.Code);
+	}
+
+	[Fact]
+	public void ProjectPlanContainmentRejectsAnIncludedFileOutsideRoot()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var outside = workspace.CreateFile("outside.txt", "outside");
+		var registry = new McpRootRegistry([project]);
+
+		var exception = Assert.Throws<McpToolException>(() =>
+			McpProjectService.ValidatePlanContainment(
+				registry,
+				project,
+				[outside],
+				TestContext.Current.CancellationToken));
+
+		Assert.Equal(McpErrorCodes.RootViolation, exception.Code);
 	}
 
 	[Fact]
@@ -549,7 +586,7 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
-	public void PackSweepRemovesOnlyStaleOwnedSessionsAndPreservesAnActiveLease()
+	public async Task PackSweepRemovesOnlyStaleOwnedSessionsAndPreservesAnActiveLease()
 	{
 		using var workspace = new TemporaryDirectory();
 		var baseDirectory = Path.Combine(workspace.Path, "DevProjex", "mcp");
@@ -565,8 +602,10 @@ public sealed class McpInfrastructureTests
 		Directory.SetLastWriteTimeUtc(foreign, DateTime.UtcNow.AddDays(-2));
 
 		using var active = new McpPackRegistry(workspace.Path);
+		await active.ScavengingCompletion.WaitAsync(TestContext.Current.CancellationToken);
 		Directory.SetLastWriteTimeUtc(active.SessionDirectory, DateTime.UtcNow.AddDays(-2));
 		using var next = new McpPackRegistry(workspace.Path);
+		await next.ScavengingCompletion.WaitAsync(TestContext.Current.CancellationToken);
 
 		Assert.False(Directory.Exists(stale));
 		Assert.True(File.Exists(protectedFile));
@@ -574,7 +613,7 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
-	public void PackSweepNeverTraversesASymbolicLinkSessionDirectory()
+	public async Task PackSweepNeverTraversesASymbolicLinkSessionDirectory()
 	{
 		using var workspace = new TemporaryDirectory();
 		var target = Path.Combine(workspace.Path, "protected-target");
@@ -598,9 +637,51 @@ public sealed class McpInfrastructureTests
 		}
 
 		using var registry = new McpPackRegistry(workspace.Path);
+		await registry.ScavengingCompletion.WaitAsync(TestContext.Current.CancellationToken);
 
 		Assert.True(File.Exists(protectedFile));
 		Assert.True(Directory.Exists(link));
+	}
+
+	[Fact]
+	public async Task PackRegistryConstructionDoesNotWaitForScavengingAndDisposeCancelsIt()
+	{
+		using var workspace = new TemporaryDirectory();
+		var scavengeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var scavengeCanceled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var construction = Task.Run(() => new McpPackRegistry(
+			workspace.Path,
+			timeProvider: null,
+			maximumPackBytes: McpPackRegistry.MaximumPackBytes,
+			maximumSessionBytes: McpPackRegistry.MaximumSessionBytes,
+			scavengeOperation: async cancellationToken =>
+			{
+				scavengeStarted.TrySetResult();
+				try
+				{
+					await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+				}
+				finally
+				{
+					if (cancellationToken.IsCancellationRequested)
+						scavengeCanceled.TrySetResult();
+				}
+			}),
+			TestContext.Current.CancellationToken);
+		var registry = await construction.WaitAsync(
+			TimeSpan.FromSeconds(2),
+			TestContext.Current.CancellationToken);
+		var sessionDirectory = registry.SessionDirectory;
+		await scavengeStarted.Task.WaitAsync(
+			TimeSpan.FromSeconds(2),
+			TestContext.Current.CancellationToken);
+
+		await registry.DisposeAsync().AsTask().WaitAsync(
+			TimeSpan.FromSeconds(2),
+			TestContext.Current.CancellationToken);
+
+		Assert.True(scavengeCanceled.Task.IsCompletedSuccessfully);
+		Assert.False(Directory.Exists(sessionDirectory));
 	}
 
 	[Fact]
@@ -691,6 +772,53 @@ public sealed class McpInfrastructureTests
 		Assert.Equal(4, pack.Lines);
 		Assert.Equal(bytes.Length, pack.Bytes);
 		Assert.Equal(content, await File.ReadAllTextAsync(pack.Path, TestContext.Current.CancellationToken));
+	}
+
+	[Theory]
+	[InlineData("\n")]
+	[InlineData("\r\n")]
+	[InlineData("\r")]
+	public async Task PackLineCheckpointsSkipCompletedPrefixesWithoutChangingRanges(string lineEnding)
+	{
+		using var workspace = new TemporaryDirectory();
+		using var registry = new McpPackRegistry(workspace.Path);
+		var line = $"α{lineEnding}";
+		var content = string.Concat(Enumerable.Repeat(line, 600));
+		var bytes = Encoding.UTF8.GetBytes(content);
+		var pack = await registry.CreateAsync(
+			async (stream, token) =>
+			{
+				for (var offset = 0; offset < bytes.Length; offset += 7)
+				{
+					var count = Math.Min(7, bytes.Length - offset);
+					await stream.WriteAsync(bytes.AsMemory(offset, count), token);
+				}
+			},
+			TestContext.Current.CancellationToken);
+
+		var checkpoint = pack.ResolveLineCheckpoint(300);
+		Assert.Equal(257, checkpoint.LineNumber);
+		Assert.Equal(256L * Encoding.UTF8.GetByteCount(line), checkpoint.ByteOffset);
+		await using var stream = new FileStream(
+			pack.Path,
+			FileMode.Open,
+			FileAccess.Read,
+			FileShare.Read);
+		stream.Seek(checkpoint.ByteOffset, SeekOrigin.Begin);
+		var page = await McpTextRanges.ReadPageAsync(
+			stream,
+			startLine: 300,
+			endLine: 301,
+			maximumLines: 1000,
+			maximumCharacters: 50_000,
+			TestContext.Current.CancellationToken,
+			knownTotalLines: pack.Lines,
+			firstStreamLineNumber: checkpoint.LineNumber);
+
+		Assert.Equal("α\nα", page.Text);
+		Assert.Equal(300, page.StartLine);
+		Assert.Equal(301, page.EndLine);
+		Assert.Equal(601, page.TotalLines);
 	}
 
 	[Fact]

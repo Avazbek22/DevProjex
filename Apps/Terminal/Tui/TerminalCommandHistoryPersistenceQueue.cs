@@ -1,25 +1,36 @@
 namespace DevProjex.Terminal.Tui;
 
 internal sealed class TerminalCommandHistoryPersistenceQueue(
-	Func<IReadOnlyList<string>, CancellationToken, Task> saveAsync)
+	Func<IReadOnlyList<string>, AppLanguage?, CancellationToken, Task> saveAsync,
+	CancellationToken cancellationToken = default)
 {
 	private readonly object _gate = new();
-	private IReadOnlyList<string>? _pendingHistory;
+	private PendingSettings? _pendingSettings;
 	private bool _workerRunning;
+	private Task? _drainTask;
 
-	public Task? Enqueue(IReadOnlyList<string> history)
+	public Task? Enqueue(IReadOnlyList<string> history, AppLanguage? language = null)
 	{
 		ArgumentNullException.ThrowIfNull(history);
 
 		lock (_gate)
 		{
-			_pendingHistory = history;
+			_pendingSettings = new PendingSettings(
+				history,
+				language ?? _pendingSettings?.Language);
 			if (_workerRunning)
 				return null;
 
 			_workerRunning = true;
-			return DrainAsync();
+			_drainTask = DrainAsync();
+			return _drainTask;
 		}
+	}
+
+	public Task CompleteAsync()
+	{
+		lock (_gate)
+			return _drainTask ?? Task.CompletedTask;
 	}
 
 	private async Task DrainAsync()
@@ -27,16 +38,20 @@ internal sealed class TerminalCommandHistoryPersistenceQueue(
 		Exception? unexpectedFailure = null;
 		while (true)
 		{
-			IReadOnlyList<string> history;
+			PendingSettings settings;
 			lock (_gate)
 			{
-				history = _pendingHistory!;
-				_pendingHistory = null;
+				settings = _pendingSettings!;
+				_pendingSettings = null;
 			}
 
 			try
 			{
-				await saveAsync(history, CancellationToken.None).ConfigureAwait(false);
+				await saveAsync(settings.History, settings.Language, cancellationToken)
+					.ConfigureAwait(false);
+			}
+			catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+			{
 			}
 			catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
 			{
@@ -49,7 +64,7 @@ internal sealed class TerminalCommandHistoryPersistenceQueue(
 
 			lock (_gate)
 			{
-				if (_pendingHistory is not null)
+				if (_pendingSettings is not null)
 					continue;
 
 				_workerRunning = false;
@@ -62,4 +77,8 @@ internal sealed class TerminalCommandHistoryPersistenceQueue(
 				.Capture(unexpectedFailure)
 				.Throw();
 	}
+
+	private sealed record PendingSettings(
+		IReadOnlyList<string> History,
+		AppLanguage? Language);
 }

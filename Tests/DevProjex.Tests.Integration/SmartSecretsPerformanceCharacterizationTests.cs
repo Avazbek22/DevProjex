@@ -41,6 +41,20 @@ public sealed class SmartSecretsPerformanceCharacterizationTests
 				expectedRedactions++;
 		}
 
+		// Exercise both clean and detected-file paths before the process-wide allocation sample so
+		// one-time runtime initialization cannot be mistaken for per-file pipeline overhead.
+		using (var warmUpSession = new SecretRedactionSession(CreateSmartSecretsDetector()))
+		{
+			await warmUpSession.BeginWarmUp();
+			var warmUpPreparer = new SecretRedactionOutputPreparer(new FileContentAnalyzer());
+			var warmUpContext = new SecretRedactionContext(workspace.Path, warmUpSession);
+			var warmUpPaths = paths[..Math.Min(paths.Length, SecretRedactionOutputPreparer.MaximumParallelScans)];
+			_ = await warmUpPreparer.DiscoverAsync(
+				warmUpContext,
+				warmUpPaths,
+				TestContext.Current.CancellationToken);
+		}
+
 		var analyzer = new CountingBufferAnalyzer(new FileContentAnalyzer());
 		using var session = new SecretRedactionSession(CreateSmartSecretsDetector());
 		var preparer = new SecretRedactionOutputPreparer(analyzer);

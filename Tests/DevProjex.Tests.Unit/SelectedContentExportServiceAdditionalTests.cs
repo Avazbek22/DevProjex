@@ -3,6 +3,19 @@ namespace DevProjex.Tests.Unit;
 public sealed class SelectedContentExportServiceAdditionalTests
 {
 	[Fact]
+	public void MaterializationTrimsWithoutMutatingTheReusableBuffer()
+	{
+		var buffer = new StringBuilder("content\r\n");
+
+		var first = SelectedContentExportService.MaterializeWithoutTrailingLineEndings(buffer);
+		var second = SelectedContentExportService.MaterializeWithoutTrailingLineEndings(buffer);
+
+		Assert.Equal("content", first);
+		Assert.Equal(first, second);
+		Assert.Equal("content\r\n", buffer.ToString());
+	}
+
+	[Fact]
 	// Verifies empty input yields an empty export.
 	public void Build_EmptyList_ReturnsEmpty()
 	{

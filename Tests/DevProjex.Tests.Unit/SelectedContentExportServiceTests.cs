@@ -256,6 +256,102 @@ public sealed class SelectedContentExportServiceTests
 	}
 
 	[Fact]
+	public async Task BuildAsync_PreparesSmallFilesConcurrentlyWithinBoundAndPreservesExactOutput()
+	{
+		using var temp = new TemporaryDirectory();
+		var paths = Enumerable.Range(0, 16)
+			.Select(index => temp.CreateFile($"{index:D2}.txt", $"value-{index:D2}"))
+			.Reverse()
+			.ToArray();
+		var expected = await new SelectedContentExportService(new FileContentAnalyzer()).BuildAsync(
+			paths,
+			TestContext.Current.CancellationToken,
+			Path.GetFileName);
+		var analyzer = new ConcurrentProbeContentAnalyzer(minimumConcurrentReads: 2);
+		var service = new SelectedContentExportService(analyzer);
+
+		var actual = await service.BuildAsync(
+			paths,
+			TestContext.Current.CancellationToken,
+			Path.GetFileName);
+
+		Assert.Equal(expected, actual);
+		Assert.InRange(
+			analyzer.MaximumConcurrentReads,
+			2,
+			SelectedContentExportService.MaximumParallelPreparations);
+	}
+
+	[Fact]
+	public async Task BuildAsync_CancellationDrainsEveryScheduledPreparation()
+	{
+		using var temp = new TemporaryDirectory();
+		var paths = Enumerable.Range(0, 16)
+			.Select(index => temp.CreateFile($"{index:D2}.txt", $"value-{index:D2}"))
+			.ToArray();
+		var analyzer = new BlockingContentAnalyzer(returnFirstResult: false);
+		var service = new SelectedContentExportService(analyzer);
+		using var cancellation = new CancellationTokenSource();
+
+		var operation = service.BuildAsync(paths, cancellation.Token, Path.GetFileName);
+		await analyzer.MinimumConcurrencyReached.WaitAsync(
+			TimeSpan.FromSeconds(5),
+			TestContext.Current.CancellationToken);
+		await cancellation.CancelAsync();
+
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(() => operation);
+		await analyzer.AllReadsDrained.WaitAsync(
+			TimeSpan.FromSeconds(5),
+			TestContext.Current.CancellationToken);
+		Assert.Equal(0, analyzer.ActiveReads);
+	}
+
+	[Fact]
+	public async Task WriteAsync_OutputFailureCancelsAndDrainsEveryScheduledPreparation()
+	{
+		using var temp = new TemporaryDirectory();
+		var paths = Enumerable.Range(0, 16)
+			.Select(index => temp.CreateFile($"{index:D2}.txt", $"value-{index:D2}"))
+			.ToArray();
+		var analyzer = new BlockingContentAnalyzer(returnFirstResult: true);
+		var service = new SelectedContentExportService(analyzer);
+		await using var output = new FailingWriteStream();
+
+		await Assert.ThrowsAsync<IOException>(() => service.WriteAsync(
+			output,
+			paths,
+			TestContext.Current.CancellationToken,
+			Path.GetFileName));
+
+		await analyzer.AllReadsDrained.WaitAsync(
+			TimeSpan.FromSeconds(5),
+			TestContext.Current.CancellationToken);
+		Assert.Equal(0, analyzer.ActiveReads);
+	}
+
+	[Fact]
+	public async Task BuildBoundedPreviewAsync_DoesNotReadFilesAfterFileCutoff()
+	{
+		using var temp = new TemporaryDirectory();
+		var first = temp.CreateFile("a.txt", "first");
+		var second = temp.CreateFile("b.txt", "second");
+		var third = temp.CreateFile("c.txt", "third");
+		var analyzer = new RecordingContentAnalyzer();
+		var service = new SelectedContentExportService(analyzer);
+
+		var result = await service.BuildBoundedPreviewAsync(
+			[third, second, first],
+			maxFileCount: 1,
+			maxFileSizeForFullRead: 4096,
+			maxOutputCharacters: 8192,
+			TestContext.Current.CancellationToken,
+			Path.GetFileName);
+
+		Assert.Contains("a.txt:", result, StringComparison.Ordinal);
+		Assert.Equal([first], analyzer.ReadPaths);
+	}
+
+	[Fact]
 	public async Task BuildBoundedPreviewAsync_CompressesWarmupWithoutPublishingPartialSnapshot()
 	{
 		using var temp = new TemporaryDirectory();
@@ -381,4 +477,198 @@ public sealed class SelectedContentExportServiceTests
 			}
 		}
 	}
+
+	private sealed class ConcurrentProbeContentAnalyzer(int minimumConcurrentReads) : IFileContentAnalyzer
+	{
+		private readonly TaskCompletionSource _releaseReads = new(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		private int _activeReads;
+		private int _maximumConcurrentReads;
+
+		public int MaximumConcurrentReads => Volatile.Read(ref _maximumConcurrentReads);
+
+		public ValueTask<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default) =>
+			ValueTask.FromResult(true);
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromResult<TextFileMetrics?>(null);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			new(ReadAsync(path, cancellationToken));
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			new(ReadAsync(path, cancellationToken));
+
+		private async Task<TextFileContent?> ReadAsync(string path, CancellationToken cancellationToken)
+		{
+			var active = Interlocked.Increment(ref _activeReads);
+			UpdateMaximum(active);
+			if (active >= minimumConcurrentReads)
+				_releaseReads.TrySetResult();
+			try
+			{
+				await _releaseReads.Task.WaitAsync(cancellationToken);
+				await Task.Delay(20, cancellationToken);
+				return CreateContent(await File.ReadAllTextAsync(path, cancellationToken));
+			}
+			finally
+			{
+				Interlocked.Decrement(ref _activeReads);
+			}
+		}
+
+		private void UpdateMaximum(int active)
+		{
+			while (true)
+			{
+				var current = Volatile.Read(ref _maximumConcurrentReads);
+				if (active <= current ||
+				    Interlocked.CompareExchange(ref _maximumConcurrentReads, active, current) == current)
+				{
+					return;
+				}
+			}
+		}
+	}
+
+	private sealed class BlockingContentAnalyzer(bool returnFirstResult) : IFileContentAnalyzer
+	{
+		private readonly TaskCompletionSource _minimumConcurrencyReached = new(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		private readonly TaskCompletionSource _allReadsDrained = new(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		private int _activeReads;
+
+		public Task MinimumConcurrencyReached => _minimumConcurrencyReached.Task;
+		public Task AllReadsDrained => _allReadsDrained.Task;
+		public int ActiveReads => Volatile.Read(ref _activeReads);
+
+		public ValueTask<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default) =>
+			ValueTask.FromResult(true);
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromResult<TextFileMetrics?>(null);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			new(ReadAsync(path, cancellationToken));
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			new(ReadAsync(path, cancellationToken));
+
+		private async Task<TextFileContent?> ReadAsync(string path, CancellationToken cancellationToken)
+		{
+			var active = Interlocked.Increment(ref _activeReads);
+			if (active >= 2)
+				_minimumConcurrencyReached.TrySetResult();
+			try
+			{
+				if (returnFirstResult && string.Equals(Path.GetFileName(path), "00.txt", StringComparison.Ordinal))
+				{
+					await _minimumConcurrencyReached.Task.WaitAsync(cancellationToken);
+					return CreateContent(new string('x', 64 * 1024));
+				}
+
+				await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+				return null;
+			}
+			finally
+			{
+				if (Interlocked.Decrement(ref _activeReads) == 0)
+					_allReadsDrained.TrySetResult();
+			}
+		}
+	}
+
+	private sealed class RecordingContentAnalyzer : IFileContentAnalyzer
+	{
+		private readonly List<string> _readPaths = [];
+
+		public IReadOnlyList<string> ReadPaths => _readPaths;
+
+		public ValueTask<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default) =>
+			ValueTask.FromResult(true);
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromResult<TextFileMetrics?>(null);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			ReadAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			ReadAsync(path, cancellationToken);
+
+		private ValueTask<TextFileContent?> ReadAsync(string path, CancellationToken cancellationToken)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			_readPaths.Add(path);
+			return ValueTask.FromResult<TextFileContent?>(
+				CreateContent(File.ReadAllText(path)));
+		}
+	}
+
+	private sealed class FailingWriteStream : Stream
+	{
+		public override bool CanRead => false;
+		public override bool CanSeek => false;
+		public override bool CanWrite => true;
+		public override long Length => throw new NotSupportedException();
+		public override long Position
+		{
+			get => throw new NotSupportedException();
+			set => throw new NotSupportedException();
+		}
+
+		public override void Flush()
+		{
+		}
+
+		public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+		public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+		public override void SetLength(long value) => throw new NotSupportedException();
+
+		public override void Write(byte[] buffer, int offset, int count) =>
+			throw new IOException("Synthetic output failure.");
+
+		public override Task WriteAsync(
+			byte[] buffer,
+			int offset,
+			int count,
+			CancellationToken cancellationToken) =>
+			Task.FromException(new IOException("Synthetic output failure."));
+
+		public override ValueTask WriteAsync(
+			ReadOnlyMemory<byte> buffer,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromException(new IOException("Synthetic output failure."));
+	}
+
+	private static TextFileContent CreateContent(string text) =>
+		new(
+			text,
+			Encoding.UTF8.GetByteCount(text),
+			LineCount: 1,
+			CharCount: text.Length,
+			IsEmpty: text.Length == 0,
+			IsWhitespaceOnly: string.IsNullOrWhiteSpace(text));
 }

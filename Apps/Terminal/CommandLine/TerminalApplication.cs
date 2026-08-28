@@ -44,28 +44,43 @@ public sealed class TerminalApplication
 		IReadOnlyList<string> arguments,
 		CancellationToken cancellationToken = default)
 	{
+		try
+		{
+			return await RunCoreAsync(arguments, cancellationToken).ConfigureAwait(false);
+		}
+		catch (TerminalBrokenPipeException)
+		{
+			return CommandLineExitCodes.Success;
+		}
+	}
+
+	private async Task<int> RunCoreAsync(
+		IReadOnlyList<string> arguments,
+		CancellationToken cancellationToken)
+	{
+		var runtimeEnvironment = new DiagnosticPipeSafeTerminalEnvironment(environment);
 		var localization = new LocalizationService(
 			new JsonLocalizationCatalog(),
 			TerminalLanguageResolver.Resolve(arguments, environment.Variables));
 		if (LegacyCliSyntaxDetector.TryDetect(arguments, out var migration))
 		{
-			environment.Error.WriteLine("error[DPX-CLI-LEGACY-SYNTAX]:");
-			environment.Error.WriteLine(localization["Terminal.Error.LegacySyntax"]);
-			environment.Error.WriteLine(localization["Terminal.Label.NewCommand"]);
+			runtimeEnvironment.Error.WriteLine("error[DPX-CLI-LEGACY-SYNTAX]:");
+			runtimeEnvironment.Error.WriteLine(localization["Terminal.Error.LegacySyntax"]);
+			runtimeEnvironment.Error.WriteLine(localization["Terminal.Label.NewCommand"]);
 			foreach (var line in CliArgumentVectorFormatter
 				         .Format(migration.ReplacementArguments)
 				         .Split(Environment.NewLine))
 			{
-				environment.Error.WriteLine($"  {line}");
+				runtimeEnvironment.Error.WriteLine($"  {line}");
 			}
 			return CommandLineExitCodes.UsageError;
 		}
 		var implicitTuiInvocation = IsImplicitTuiInvocation(arguments) &&
-		                            environment.IsInputInteractive &&
-		                            environment.IsOutputInteractive &&
-		                            !environment.IsTermDumb;
+			runtimeEnvironment.IsInputInteractive &&
+			runtimeEnvironment.IsOutputInteractive &&
+			!runtimeEnvironment.IsTermDumb;
 		var root = new DevProjexCommandTree(
-			environment,
+			runtimeEnvironment,
 			serviceFactory ?? CreateDefaultServiceFactory(),
 			developerCommandRunner,
 			implicitTuiInvocation,
@@ -105,12 +120,12 @@ public sealed class TerminalApplication
 					"Terminal.Error.EmptyArgument"),
 				_ => throw new ArgumentOutOfRangeException()
 			};
-			environment.Error.WriteLine(
+			runtimeEnvironment.Error.WriteLine(
 				$"error[{code}]: " +
 				localization.Format(
 					messageKey,
 					inputIntegrityError.SymbolName));
-			environment.Error.WriteLine(localization["Terminal.Hint.Help"]);
+			runtimeEnvironment.Error.WriteLine(localization["Terminal.Hint.Help"]);
 			return CommandLineExitCodes.UsageError;
 		}
 		if (parseResult.Errors.Count > 0 || parseResult.UnmatchedTokens.Count > 0)
@@ -118,13 +133,13 @@ public sealed class TerminalApplication
 			var errors = PresentParseErrors(parseResult, localization);
 			foreach (var error in errors)
 			{
-				environment.Error.WriteLine(
+				runtimeEnvironment.Error.WriteLine(
 					$"error[{error.Code}]: {TerminalTextEscaping.EscapeSingleLine(error.Message)}");
 			}
 			if (TryBuildSuggestion(root, parseResult, out var suggestion))
-				environment.Error.WriteLine(localization.Format("Terminal.Hint.DidYouMean", suggestion));
+				runtimeEnvironment.Error.WriteLine(localization.Format("Terminal.Hint.DidYouMean", suggestion));
 			else
-				environment.Error.WriteLine(localization["Terminal.Hint.Help"]);
+				runtimeEnvironment.Error.WriteLine(localization["Terminal.Hint.Help"]);
 			return CommandLineExitCodes.UsageError;
 		}
 		if (parseResult.Action is HelpAction)
@@ -138,8 +153,8 @@ public sealed class TerminalApplication
 
 		var configuration = new InvocationConfiguration
 		{
-			Output = environment.Output,
-			Error = environment.Error,
+			Output = runtimeEnvironment.Output,
+			Error = runtimeEnvironment.Error,
 			EnableDefaultExceptionHandler = false
 		};
 		try
@@ -148,23 +163,19 @@ public sealed class TerminalApplication
 		}
 		catch (OperationCanceledException)
 		{
-			environment.Error.WriteLine(
+			runtimeEnvironment.Error.WriteLine(
 				$"error[DPX-CLI-CANCELED]: {localization["Terminal.Error.Canceled"]}");
 			return CommandLineExitCodes.Canceled;
 		}
-		catch (TerminalBrokenPipeException)
+		catch (Exception exception) when (exception is not TerminalBrokenPipeException)
 		{
-			return CommandLineExitCodes.Success;
-		}
-		catch (Exception exception)
-		{
-			environment.Error.WriteLine(
+			runtimeEnvironment.Error.WriteLine(
 				$"error[DPX-CLI-UNEXPECTED]: {localization["Terminal.Error.Unexpected"]}");
 			if (IsDiagnosticVerbosity(parseResult))
 			{
-				environment.Error.WriteLine(
+				runtimeEnvironment.Error.WriteLine(
 					$"{localization["Terminal.Label.Exception"]}: {exception.GetType().FullName}");
-				environment.Error.WriteLine(exception.StackTrace);
+				runtimeEnvironment.Error.WriteLine(exception.StackTrace);
 			}
 			return CommandLineExitCodes.RuntimeError;
 		}

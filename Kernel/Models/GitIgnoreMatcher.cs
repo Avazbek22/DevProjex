@@ -9,6 +9,7 @@ namespace DevProjex.Kernel.Models;
 public sealed class GitIgnoreMatcher
 {
     internal const int MaximumEffectiveRuleCount = 8_192;
+    private const int RelativePathStackLimit = 512;
 
     private readonly string _normalizedRootPath;
     private readonly IReadOnlyList<Rule> _rules;
@@ -235,6 +236,34 @@ public sealed class GitIgnoreMatcher
         return EvaluateRelativeNormalizedCore(relativePath, isDirectory, name);
     }
 
+    internal IgnoreEvaluation EvaluateRelativeNormalized(
+        ReadOnlySpan<char> baseRelativePath,
+        ReadOnlySpan<char> scanRelativePath,
+        bool isDirectory,
+        string name)
+    {
+        if (baseRelativePath.IsEmpty)
+            return EvaluateRelativeNormalized(scanRelativePath, isDirectory, name);
+        if (scanRelativePath.IsEmpty)
+            return EvaluateRelativeNormalized(baseRelativePath, isDirectory, name);
+
+        var length = checked(baseRelativePath.Length + scanRelativePath.Length + 1);
+        char[]? rented = null;
+        Span<char> relativePath = length <= RelativePathStackLimit
+            ? stackalloc char[length]
+            : (rented = ArrayPool<char>.Shared.Rent(length)).AsSpan(0, length);
+        try
+        {
+            WriteCombinedRelativePath(baseRelativePath, scanRelativePath, relativePath);
+            return EvaluateRelativeNormalized(relativePath, isDirectory, name);
+        }
+		finally
+		{
+			if (rented is not null)
+				ArrayPool<char>.Shared.Return(rented, clearArray: true);
+		}
+    }
+
     internal IgnoreEvaluation EvaluateRulesOnly(string fullPath, bool isDirectory, string name)
     {
         if (!TryGetRelativePath(fullPath, out var relativePath))
@@ -263,6 +292,34 @@ public sealed class GitIgnoreMatcher
         }
 
         return EvaluateRules(relativePath, isDirectory, normalizedName);
+    }
+
+    internal IgnoreEvaluation EvaluateRelativeRulesOnlyNormalized(
+        ReadOnlySpan<char> baseRelativePath,
+        ReadOnlySpan<char> scanRelativePath,
+        bool isDirectory,
+        string name)
+    {
+        if (baseRelativePath.IsEmpty)
+            return EvaluateRelativeRulesOnlyNormalized(scanRelativePath, isDirectory, name);
+        if (scanRelativePath.IsEmpty)
+            return EvaluateRelativeRulesOnlyNormalized(baseRelativePath, isDirectory, name);
+
+        var length = checked(baseRelativePath.Length + scanRelativePath.Length + 1);
+        char[]? rented = null;
+        Span<char> relativePath = length <= RelativePathStackLimit
+            ? stackalloc char[length]
+            : (rented = ArrayPool<char>.Shared.Rent(length)).AsSpan(0, length);
+        try
+        {
+            WriteCombinedRelativePath(baseRelativePath, scanRelativePath, relativePath);
+            return EvaluateRelativeRulesOnlyNormalized(relativePath, isDirectory, name);
+        }
+		finally
+		{
+			if (rented is not null)
+				ArrayPool<char>.Shared.Return(rented, clearArray: true);
+		}
     }
 
     private IgnoreEvaluation EvaluateRelativeNormalizedCore(
@@ -331,13 +388,12 @@ public sealed class GitIgnoreMatcher
             normalizedName,
             _normalizeUnicode,
             _ignoreAsciiCase);
-        var ignored = false;
-        var hasMatch = false;
         var regexProjectionInitialized = false;
         string? projectedRelativePath = null;
         string? projectedName = null;
-        foreach (var rule in _rules)
+        for (var ruleIndex = _rules.Count - 1; ruleIndex >= 0; ruleIndex--)
         {
+            var rule = _rules[ruleIndex];
             if (rule.MatchKind == RuleMatchKind.Regex && !regexProjectionInitialized)
             {
                 projectedRelativePath = ProjectUtf8BytesForRegexOrNull(relativePath);
@@ -356,11 +412,10 @@ public sealed class GitIgnoreMatcher
                 continue;
             }
 
-            ignored = !rule.IsNegation;
-            hasMatch = true;
+            return new IgnoreEvaluation(HasMatch: true, IsIgnored: !rule.IsNegation);
         }
 
-        return new IgnoreEvaluation(hasMatch, ignored);
+        return default;
     }
 
     private bool HasIgnoredAncestor(ReadOnlySpan<char> relativePath)
@@ -419,6 +474,43 @@ public sealed class GitIgnoreMatcher
             _normalizeUnicode,
             _ignoreAsciiCase);
         return ShouldTraverseIgnoredDirectoryRelativeCore(normalizedPath, name);
+    }
+
+    internal bool ShouldTraverseIgnoredDirectoryRelativeNormalized(
+        ReadOnlySpan<char> baseRelativePath,
+        ReadOnlySpan<char> scanRelativePath,
+        string name)
+    {
+        if (baseRelativePath.IsEmpty)
+            return ShouldTraverseIgnoredDirectoryRelativeNormalized(scanRelativePath, name);
+        if (scanRelativePath.IsEmpty)
+            return ShouldTraverseIgnoredDirectoryRelativeNormalized(baseRelativePath, name);
+
+        var length = checked(baseRelativePath.Length + scanRelativePath.Length + 1);
+        char[]? rented = null;
+        Span<char> relativePath = length <= RelativePathStackLimit
+            ? stackalloc char[length]
+            : (rented = ArrayPool<char>.Shared.Rent(length)).AsSpan(0, length);
+        try
+        {
+            WriteCombinedRelativePath(baseRelativePath, scanRelativePath, relativePath);
+            return ShouldTraverseIgnoredDirectoryRelativeNormalized(relativePath, name);
+        }
+		finally
+		{
+			if (rented is not null)
+				ArrayPool<char>.Shared.Return(rented, clearArray: true);
+		}
+    }
+
+    private static void WriteCombinedRelativePath(
+        ReadOnlySpan<char> baseRelativePath,
+        ReadOnlySpan<char> scanRelativePath,
+        Span<char> destination)
+    {
+        baseRelativePath.CopyTo(destination);
+        destination[baseRelativePath.Length] = '/';
+        scanRelativePath.CopyTo(destination[(baseRelativePath.Length + 1)..]);
     }
 
     private bool ShouldTraverseIgnoredDirectoryRelativeCore(ReadOnlySpan<char> relativePath, string name)

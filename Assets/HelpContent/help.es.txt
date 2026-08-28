@@ -554,7 +554,9 @@ Restablecer configuración (Ayuda → Restablecer configuración) restaura el te
 ### 16.3 Restablecer datos
 Restablecer datos (Ayuda → Restablecer datos) elimina los perfiles de parámetros del proyecto local guardados:
 * tipos de archivos seleccionados;
-* opciones seleccionadas en la sección "Exclusiones".
+* opciones seleccionadas en la sección "Exclusiones";
+* configuración seleccionada de procesamiento de contenido;
+* marcas manuales de secretos.
 
 Importante:
 * El historial reciente de las carpetas locales no se borra;

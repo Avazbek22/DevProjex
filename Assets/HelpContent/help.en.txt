@@ -552,7 +552,9 @@ Reset settings (Help → Reset settings) restores the default theme, effects, Co
 ### 16.3 Reset data
 Reset data (Help → Reset data) removes saved local-project parameter profiles:
 * selected file types;
-* selected options in the "Exclusions" section.
+* selected options in the "Exclusions" section;
+* selected content-processing settings;
+* manual secret marks.
 
 Important:
 * Recent history for local folders is not cleared;

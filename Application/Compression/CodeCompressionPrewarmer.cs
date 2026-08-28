@@ -118,6 +118,9 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 		var retainedFactsSync = new object();
 		long retainedFactBytes = 0;
 		var parserWorkers = Math.Max(1, Math.Min(context.Session.AnalysisWorkerCapacity, candidates.Count));
+		var producerCount = Math.Min(
+			Math.Min(MaximumIoParallelism, Math.Max(1, Environment.ProcessorCount)),
+			candidates.Count);
 		var channel = Channel.CreateBounded<WarmWorkItem>(new BoundedChannelOptions(parserWorkers * 2)
 		{
 			FullMode = BoundedChannelFullMode.Wait,
@@ -128,9 +131,10 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 		using var pipelineCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 		var pipelineToken = pipelineCancellation.Token;
 		using var byteBudget = new WeightedByteBudget(MaximumInFlightBytes);
-		// Only one decoder may hold its temporary pooled character buffer outside the retained-byte
-		// accounting. Materialized facts themselves are covered by their weighted leases.
-		using var decodeScratchGate = new SemaphoreSlim(1, 1);
+		// Every decoder first reserves the maximum retained size for its open file. The shared
+		// byte budget therefore also bounds the aggregate temporary character buffers while
+		// independent SSD reads and decodes use the available producer parallelism.
+		using var decodeScratchGate = new SemaphoreSlim(producerCount, producerCount);
 		var warmed = 0;
 		var skipped = 0;
 		var failed = 0;
@@ -141,9 +145,6 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 		var workers = Enumerable.Range(0, parserWorkers)
 			.Select(_ => RunAnalysisWorkerAsync())
 			.ToArray();
-		var producerCount = Math.Min(
-			Math.Min(MaximumIoParallelism, Math.Max(1, Environment.ProcessorCount)),
-			candidates.Count);
 		var producers = Enumerable.Range(0, producerCount)
 			.Select(_ => Task.Factory.StartNew(
 				RunProducerAsync,

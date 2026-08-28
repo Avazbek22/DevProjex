@@ -12,34 +12,29 @@ public sealed class AnalyzeCommandHandler(
 		AnalyzeCommandRequest request,
 		CancellationToken cancellationToken)
 	{
+		var includeSourceContentMetrics = !HasContentTransformations(request.Selection);
 		var plan = await new StatusRenderer(environment, request.Output)
 			.RunAsync(
 				services.Localization["Terminal.Status.AnalyzingProject"],
 				() => services.ContextFactory.BuildAsync(
 					request.ProjectPath,
 					request.Selection,
-					cancellationToken: cancellationToken))
+					includeOutputMetrics: true,
+					cancellationToken: cancellationToken,
+					includeContentOutputMetrics: includeSourceContentMetrics))
 			.ConfigureAwait(false);
-		var transformKinds = CodeTransformIdentity.Resolve(
-			plan.Selection.CompressCode == true,
-			plan.Selection.StripComments == true,
-			plan.Selection.StripBlankLines == true);
-		var redactionFeatures = SecretRedactionFeatureSelection.Resolve(
-			plan.Selection.HideSecrets == true,
-			plan.Selection.HidePrivateData == true);
-		var transformationContext = ContentTransformationContext.For(
-			transformKinds != CodeTransformKinds.None
-				? new CodeCompressionContext(
-					plan.SourceRoot,
-					services.CodeCompressionSession,
-					transformKinds)
-				: null,
-			redactionFeatures != SecretRedactionFeatures.None
-				? new SecretRedactionContext(
-					plan.SourceRoot,
-					services.SecretRedactionSession,
-					redactionFeatures)
-				: null);
+		var transformationContext = CreateTransformationContext(plan);
+		if (!includeSourceContentMetrics && transformationContext is null)
+		{
+			// Resolved CLI selections normally make this branch unreachable. Keeping the fallback
+			// prevents a future profile-normalization change from publishing empty content metrics.
+			plan = await services.ContextFactory.BuildAsync(
+					request.ProjectPath,
+					request.Selection,
+					cancellationToken: cancellationToken)
+				.ConfigureAwait(false);
+			transformationContext = CreateTransformationContext(plan);
+		}
 		IReadOnlyList<EffectiveRedactionFinding> effectiveFindings = [];
 		var effectiveFindingCount = 0;
 		if (transformationContext is not null)
@@ -142,20 +137,36 @@ public sealed class AnalyzeCommandHandler(
 		}
 		else
 		{
-			var payload = request.Format == AnalysisOutputFormat.Json
-				? await BuildJsonAsync(plan, cancellationToken).ConfigureAwait(false)
-				: AnalysisTextFormatter.Build(plan, services.Localization);
-			var writtenPath = await AtomicOutputWriter
-				.WriteTextAsync(
-					requestedOutputPath!,
-					payload,
-					overwrite: request.Force,
-					cancellationToken,
-					path => ExactOutputDestinationValidator.ValidateAnalysis(
-						plan.SourceRoot,
-						path,
-						request.Force))
-				.ConfigureAwait(false);
+			string ValidateDestination(string path) =>
+				ExactOutputDestinationValidator.ValidateAnalysis(
+					plan.SourceRoot,
+					path,
+					request.Force);
+			string writtenPath;
+			if (request.Format == AnalysisOutputFormat.Json)
+			{
+				var renderer = new MachineOutputRenderer(environment);
+				writtenPath = await AtomicOutputWriter.WriteAsync(
+						requestedOutputPath!,
+						overwrite: request.Force,
+						(destination, token) => renderer.WriteAnalysisJsonContentAsync(
+							plan,
+							destination,
+							token),
+						cancellationToken,
+						ValidateDestination)
+					.ConfigureAwait(false);
+			}
+			else
+			{
+				writtenPath = await AtomicOutputWriter.WriteTextAsync(
+						requestedOutputPath!,
+						AnalysisTextFormatter.Build(plan, services.Localization),
+						overwrite: request.Force,
+						cancellationToken,
+						ValidateDestination)
+					.ConfigureAwait(false);
+			}
 			TerminalTextEscaping.WriteSingleLine(environment.Output, writtenPath);
 		}
 
@@ -166,16 +177,37 @@ public sealed class AnalyzeCommandHandler(
 			: CommandLineExitCodes.Success;
 	}
 
-	private async Task<string> BuildJsonAsync(
-		ProjectContextPlan plan,
-		CancellationToken cancellationToken)
+	internal static bool HasContentTransformations(ProjectSelectionSpec selection) =>
+		CodeTransformIdentity.Resolve(
+			selection.CompressCode == true,
+			selection.StripComments == true,
+			selection.StripBlankLines == true) != CodeTransformKinds.None ||
+		SecretRedactionFeatureSelection.Resolve(
+			selection.HideSecrets == true,
+			selection.HidePrivateData == true) != SecretRedactionFeatures.None;
+
+	private ContentTransformationContext? CreateTransformationContext(ProjectContextPlan plan)
 	{
-		using var writer = new StringWriter();
-		var nestedEnvironment = new WriterTerminalEnvironment(environment, writer);
-		await new MachineOutputRenderer(nestedEnvironment)
-			.WriteAnalysisJsonAsync(plan, writer, cancellationToken)
-			.ConfigureAwait(false);
-		return writer.ToString().TrimEnd('\r', '\n');
+		var transformKinds = CodeTransformIdentity.Resolve(
+			plan.Selection.CompressCode == true,
+			plan.Selection.StripComments == true,
+			plan.Selection.StripBlankLines == true);
+		var redactionFeatures = SecretRedactionFeatureSelection.Resolve(
+			plan.Selection.HideSecrets == true,
+			plan.Selection.HidePrivateData == true);
+		return ContentTransformationContext.For(
+			transformKinds != CodeTransformKinds.None
+				? new CodeCompressionContext(
+					plan.SourceRoot,
+					services.CodeCompressionSession,
+					transformKinds)
+				: null,
+			redactionFeatures != SecretRedactionFeatures.None
+				? new SecretRedactionContext(
+					plan.SourceRoot,
+					services.SecretRedactionSession,
+					redactionFeatures)
+				: null);
 	}
 }
 
@@ -389,25 +421,3 @@ internal static class AnalysisTextFormatter
 }
 
 internal sealed record AnalysisTextRow(string Label, string Value);
-
-internal sealed class WriterTerminalEnvironment(
-	ITerminalEnvironment source,
-	TextWriter output)
-	: ITerminalEnvironment
-{
-	public TextReader Input => source.Input;
-	public TextWriter Output => output;
-	public TextWriter Error => source.Error;
-	public bool IsInputInteractive => source.IsInputInteractive;
-	public bool IsOutputInteractive => false;
-	public bool IsErrorInteractive => source.IsErrorInteractive;
-	public bool HasAttachedConsole => source.HasAttachedConsole;
-	public bool IsTerminalHost => source.IsTerminalHost;
-	public bool IsCi => source.IsCi;
-	public bool IsTermDumb => source.IsTermDumb;
-	public bool IsNoColor => true;
-	public bool SupportsUnicode => source.SupportsUnicode;
-	public int Width => source.Width;
-	public int Height => source.Height;
-	public IReadOnlyDictionary<string, string?> Variables => source.Variables;
-}

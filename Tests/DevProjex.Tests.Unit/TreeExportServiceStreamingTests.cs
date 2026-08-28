@@ -2,6 +2,20 @@ namespace DevProjex.Tests.Unit;
 
 public sealed class TreeExportServiceStreamingTests
 {
+	[Fact]
+	public async Task TextLineWriterFlushesBufferedTextWithoutABegunLine()
+	{
+		using var destination = new StringWriter();
+		using var writer = new TreeExportService.TreeTextLineWriter(
+			destination,
+			TestContext.Current.CancellationToken);
+
+		await writer.WriteAsync("buffered text");
+		await writer.CompleteAsync(includeFinalLineEnding: false);
+
+		Assert.Equal("buffered text", destination.ToString());
+	}
+
 	[Theory]
 	[InlineData(TreeTextFormat.Ascii, true)]
 	[InlineData(TreeTextFormat.Ascii, false)]
@@ -37,6 +51,57 @@ public sealed class TreeExportServiceStreamingTests
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Equal(expected, destination.ToString());
+	}
+
+	[Theory]
+	[InlineData(TreeTextFormat.Ascii)]
+	[InlineData(TreeTextFormat.Markdown)]
+	public async Task WriteFullTreeAsync_CoalescesEachNormalTextLineIntoOneWrite(
+		TreeTextFormat format)
+	{
+		var (rootPath, root) = CreateTree();
+		var service = new TreeExportService();
+		var expected = service.BuildFullTree(rootPath, root, format);
+		var destination = new RecordingTextWriter();
+
+		await service.WriteFullTreeAsync(
+			destination,
+			rootPath,
+			root,
+			format,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Equal(
+			Encoding.UTF8.GetBytes(expected),
+			Encoding.UTF8.GetBytes(destination.Text));
+		Assert.Equal(CountLineEndings(expected), destination.WriteCount);
+	}
+
+	[Theory]
+	[InlineData(TreeTextFormat.Ascii, 1_030)]
+	[InlineData(TreeTextFormat.Markdown, 2_050)]
+	public async Task WriteFullTreeAsync_PathologicalDepthUsesBoundedWritesWithoutChangingBytes(
+		TreeTextFormat format,
+		int depth)
+	{
+		var rootPath = Path.Combine(Path.GetTempPath(), "deep-streaming-tree");
+		var root = CreateDeepTree(rootPath, depth);
+		var service = new TreeExportService();
+		var expected = service.BuildFullTree(rootPath, root, format);
+		var destination = new RecordingTextWriter();
+
+		await service.WriteFullTreeAsync(
+			destination,
+			rootPath,
+			root,
+			format,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Equal(
+			Encoding.UTF8.GetBytes(expected),
+			Encoding.UTF8.GetBytes(destination.Text));
+		Assert.InRange(destination.MaximumWriteCharacters, 1, 4 * 1024);
+		Assert.True(destination.WriteCount > CountLineEndings(expected));
 	}
 
 	[Theory]
@@ -132,6 +197,33 @@ public sealed class TreeExportServiceStreamingTests
 			IconKey: "file",
 			Children: []);
 
+	private static TreeNodeDescriptor CreateDeepTree(string rootPath, int depth)
+	{
+		TreeNodeDescriptor child = CreateFile(rootPath, "leaf.txt");
+		for (var level = depth - 1; level >= 0; level--)
+		{
+			var name = $"directory-{level:D4}";
+			child = new TreeNodeDescriptor(
+				name,
+				Path.Combine(rootPath, name),
+				IsDirectory: true,
+				IsAccessDenied: false,
+				IconKey: "folder",
+				Children: [child]);
+		}
+
+		return new TreeNodeDescriptor(
+			"deep-streaming-tree",
+			rootPath,
+			IsDirectory: true,
+			IsAccessDenied: false,
+			IconKey: "folder",
+			Children: [child]);
+	}
+
+	private static int CountLineEndings(string value) =>
+		value.Split(Environment.NewLine, StringSplitOptions.None).Length - 1;
+
 	private class CountingTextWriter : TextWriter
 	{
 		public override Encoding Encoding => Encoding.UTF8;
@@ -175,6 +267,31 @@ public sealed class TreeExportServiceStreamingTests
 		private Task ObserveAsync(int count)
 		{
 			Observe(count);
+			return Task.CompletedTask;
+		}
+	}
+
+	private sealed class RecordingTextWriter : TextWriter
+	{
+		private readonly StringBuilder _text = new();
+
+		public override Encoding Encoding => Encoding.UTF8;
+		public string Text => _text.ToString();
+		public int WriteCount { get; private set; }
+		public int MaximumWriteCharacters { get; private set; }
+
+		public override Task WriteAsync(
+			ReadOnlyMemory<char> buffer,
+			CancellationToken cancellationToken = default)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (buffer.Length > 0)
+			{
+				WriteCount++;
+				MaximumWriteCharacters = Math.Max(MaximumWriteCharacters, buffer.Length);
+				_text.Append(buffer.Span);
+			}
+
 			return Task.CompletedTask;
 		}
 	}

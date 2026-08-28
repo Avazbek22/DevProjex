@@ -807,9 +807,12 @@ public partial class MainWindow
 	private readonly Func<IDesktopInteractionHandler, string?, CancellationToken, Task<DesktopControlServer>>
 		_desktopControlServerFactory;
     private readonly SemaphoreSlim _desktopInteractionGate = new(1, 1);
-    private readonly TaskCompletionSource<bool> _shutdownCompletion =
+	private readonly TaskCompletionSource<bool> _shutdownCompletion =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private DesktopControlServer? _desktopControlServer;
+	private int _desktopControlServerShutdownRequested;
+	private bool _desktopControlServerClosePending;
+	private bool _allowCloseAfterDesktopControlServerCleanup;
     private bool _desktopStartupReady;
     private string? _desktopStartupErrorCode;
 
@@ -867,6 +870,10 @@ public partial class MainWindow
 	private int _gitCloneDialogOpenInProgress;
 	private int _gitCloneActionInProgress;
     private CancellationTokenSource? _gitOperationCts;
+	private readonly object _gitOperationTasksLock = new();
+	private readonly HashSet<Task> _activeGitOperationTasks = [];
+	private bool _gitOperationClosePending;
+	private bool _allowCloseAfterGitOperationCleanup;
     private CancellationTokenSource? _projectCopyExportCts;
     private TaskCompletionSource<bool>? _projectCopyExportCompletion;
     private bool _projectCopyExportClosePending;

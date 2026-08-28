@@ -25,6 +25,7 @@ public sealed class DoctorCommandHandler(
 	Func<DoctorStorageRoots>? storageRootsProvider = null)
 {
 	private const int MaximumGitVersionOutputCharacters = 64 * 1024;
+	private static readonly TimeSpan GitVersionOutputDrainTimeout = TimeSpan.FromSeconds(2);
 	private readonly DesktopInstanceRegistry _desktopRegistry =
 		desktopRegistry ?? new DesktopInstanceRegistry();
 	private readonly Func<string> _currentDirectoryProvider =
@@ -441,28 +442,47 @@ public sealed class DoctorCommandHandler(
 	private static async Task<(bool Available, string Version)> TryReadGitVersionAsync(
 		CancellationToken cancellationToken)
 	{
+		return await TryReadGitVersionAsync(
+			CreateGitVersionStartInfo(),
+			TimeSpan.FromSeconds(3),
+			cancellationToken).ConfigureAwait(false);
+	}
+
+	internal static async Task<(bool Available, string Version)> TryReadGitVersionAsync(
+		ProcessStartInfo startInfo,
+		TimeSpan timeout,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(startInfo);
+		if (timeout <= TimeSpan.Zero)
+			throw new ArgumentOutOfRangeException(nameof(timeout));
+
 		try
 		{
 			using var process = new Process
 			{
-				StartInfo = CreateGitVersionStartInfo()
+				StartInfo = startInfo
 			};
 			if (!process.Start())
 				return (false, "unavailable");
 			process.StandardInput.Close();
 			using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-			timeoutSource.CancelAfter(TimeSpan.FromSeconds(3));
+			using var outputDrainSource = new CancellationTokenSource();
+			timeoutSource.CancelAfter(timeout);
 			var outputTask = BoundedTextReader.ReadAsync(
 				process.StandardOutput,
 				MaximumGitVersionOutputCharacters,
-				timeoutSource.Token);
+				outputDrainSource.Token);
 			var errorTask = BoundedTextReader.ReadAsync(
 				process.StandardError,
 				MaximumGitVersionOutputCharacters,
-				timeoutSource.Token);
+				outputDrainSource.Token);
 			try
 			{
-				await process.WaitForExitAsync(timeoutSource.Token).ConfigureAwait(false);
+				await ExternalProcessLifetime
+					.WaitForExitOrTerminateAsync(process, timeoutSource.Token)
+					.ConfigureAwait(false);
+				outputDrainSource.CancelAfter(GitVersionOutputDrainTimeout);
 				var output = await outputTask.ConfigureAwait(false);
 				var error = await errorTask.ConfigureAwait(false);
 				if (output.ExceededLimit || error.ExceededLimit)
@@ -472,7 +492,7 @@ public sealed class DoctorCommandHandler(
 			}
 			catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
 			{
-				TryTerminate(process);
+				outputDrainSource.CancelAfter(GitVersionOutputDrainTimeout);
 				await BoundedTextReader
 					.ObserveCompletionAsync(outputTask, errorTask)
 					.ConfigureAwait(false);
@@ -480,7 +500,7 @@ public sealed class DoctorCommandHandler(
 			}
 			catch (OperationCanceledException)
 			{
-				TryTerminate(process);
+				outputDrainSource.CancelAfter(GitVersionOutputDrainTimeout);
 				await BoundedTextReader
 					.ObserveCompletionAsync(outputTask, errorTask)
 					.ConfigureAwait(false);
@@ -511,22 +531,6 @@ public sealed class DoctorCommandHandler(
 		startInfo.ArgumentList.Add("--version");
 		startInfo.Environment["GIT_TERMINAL_PROMPT"] = "0";
 		return startInfo;
-	}
-
-	private static void TryTerminate(Process process)
-	{
-		try
-		{
-			if (!process.HasExited)
-				process.Kill(entireProcessTree: true);
-		}
-		catch (Exception exception) when (exception is
-			       InvalidOperationException or
-			       NotSupportedException or
-			       System.ComponentModel.Win32Exception)
-		{
-			// The process may already have exited or the platform may not expose tree termination.
-		}
 	}
 
 	private static bool CanReadDirectory(string path)

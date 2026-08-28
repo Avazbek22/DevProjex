@@ -17,23 +17,33 @@ public sealed record TerminalTreeRow(
 	bool IsExpanded,
 	TerminalTreeCheckState CheckState)
 {
-	private string SafeDisplayName => TerminalTextEscaping.EscapeSingleLine(Node.DisplayName);
+	private readonly string _displayText = BuildDisplayText(Node, Depth, IsExpanded, CheckState);
+	private readonly int _displayWidth = ResolveDisplayWidth(Node, Depth);
 
-	public int DisplayWidth => Depth * 2 + 6 + SafeDisplayName.GetColumns();
+	public int DisplayWidth => _displayWidth;
 
-	public override string ToString()
+	public override string ToString() => _displayText;
+
+	private static int ResolveDisplayWidth(TreeNodeDescriptor node, int depth) =>
+		depth * 2 + 6 + TerminalTextEscaping.EscapeSingleLine(node.DisplayName).GetColumns();
+
+	private static string BuildDisplayText(
+		TreeNodeDescriptor node,
+		int depth,
+		bool isExpanded,
+		TerminalTreeCheckState checkState)
 	{
-		var indentation = new string(' ', Depth * 2);
-		var disclosure = Node.IsDirectory
-			? IsExpanded ? "v" : ">"
+		var indentation = new string(' ', depth * 2);
+		var disclosure = node.IsDirectory
+			? isExpanded ? "v" : ">"
 			: " ";
-		var check = CheckState switch
+		var check = checkState switch
 		{
 			TerminalTreeCheckState.Checked => "[x]",
 			TerminalTreeCheckState.Indeterminate => "[-]",
 			_ => "[ ]"
 		};
-		return $"{indentation}{disclosure} {check} {SafeDisplayName}";
+		return $"{indentation}{disclosure} {check} {TerminalTextEscaping.EscapeSingleLine(node.DisplayName)}";
 	}
 }
 
@@ -55,6 +65,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 	private readonly Dictionary<string, bool> _pathOptionStates = new(PathComparer.Default);
 	private readonly List<string> _orderedPaths = [];
 	private readonly List<IPreviewTextDocument> _retiredPreviewDocuments = [];
+	private readonly ResettableObservableCollection<TerminalTreeRow> _visibleRows = [];
 	private readonly object _previewSync = new();
 	private int _selectedFolderCount;
 	private long _revision;
@@ -91,7 +102,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 	}
 
 	public ProjectContextPlan Plan { get; private set; }
-	public ObservableCollection<TerminalTreeRow> VisibleRows { get; } = [];
+	public ObservableCollection<TerminalTreeRow> VisibleRows => _visibleRows;
 	public int VisibleRowWidth { get; private set; } = 1;
 	public int SelectedFileCount => _selectedFiles.Count;
 	public int SelectedFolderCount => _selectedFolderCount;
@@ -396,7 +407,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 		Interlocked.Increment(ref _revision);
 		var select = GetCheckState(row.Node) != TerminalTreeCheckState.Checked;
 		SetSubtreeSelection(row.Node, select);
-		RecomputeCheckStates();
+		RecomputeAncestorCheckStates(row.Node);
 		RebuildVisibleRows();
 	}
 
@@ -531,13 +542,10 @@ public sealed class TerminalWorkspaceState : IDisposable
 			TreeFilterMatchCount = matchCount;
 		}
 
-		VisibleRows.Clear();
 		VisibleRowWidth = 1;
 		foreach (var row in rows)
-		{
-			VisibleRows.Add(row);
 			VisibleRowWidth = Math.Max(VisibleRowWidth, row.DisplayWidth);
-		}
+		_visibleRows.Reset(rows);
 	}
 
 	private bool AppendFiltered(
@@ -625,11 +633,15 @@ public sealed class TerminalWorkspaceState : IDisposable
 
 	private void SetSubtreeSelection(TreeNodeDescriptor node, bool selected)
 	{
+		var targetState = selected
+			? TerminalTreeCheckState.Checked
+			: TerminalTreeCheckState.Unchecked;
 		var stack = new Stack<TreeNodeDescriptor>();
 		stack.Push(node);
 		while (stack.Count > 0)
 		{
 			var current = stack.Pop();
+			SetCheckState(current, targetState);
 			if (!current.IsDirectory)
 			{
 				if (selected)
@@ -756,6 +768,42 @@ public sealed class TerminalWorkspaceState : IDisposable
 			for (var index = current.Children.Count - 1; index >= 0; index--)
 				stack.Push((current.Children[index], current.FullPath));
 		}
+	}
+
+	private void RecomputeAncestorCheckStates(TreeNodeDescriptor node)
+	{
+		var parentPath = _parentsByPath.GetValueOrDefault(node.FullPath);
+		while (parentPath is not null)
+		{
+			var parent = _nodesByPath[parentPath];
+			var state = _checkStates[parent.Children[0].FullPath];
+			for (var index = 1; index < parent.Children.Count; index++)
+			{
+				if (_checkStates[parent.Children[index].FullPath] == state)
+					continue;
+
+				state = TerminalTreeCheckState.Indeterminate;
+				break;
+			}
+
+			if (_checkStates[parent.FullPath] == state)
+				break;
+			SetCheckState(parent, state);
+			parentPath = _parentsByPath.GetValueOrDefault(parentPath);
+		}
+	}
+
+	private void SetCheckState(TreeNodeDescriptor node, TerminalTreeCheckState state)
+	{
+		var previous = _checkStates[node.FullPath];
+		_checkStates[node.FullPath] = state;
+		if (!node.IsDirectory || previous == state)
+			return;
+
+		if (previous == TerminalTreeCheckState.Unchecked)
+			_selectedFolderCount++;
+		else if (state == TerminalTreeCheckState.Unchecked)
+			_selectedFolderCount--;
 	}
 
 	public void ExpandAncestors(string path)

@@ -24,7 +24,7 @@ internal sealed class TerminalWorkspaceCommandParser
 		IReadOnlyList<ParsedToken> tokens,
 		TerminalWorkspaceCommandParseContext context);
 
-	private delegate IReadOnlyList<string> GrammarCompleter(
+	private delegate CompletionCandidateSource GrammarCompleter(
 		int argumentIndex,
 		IReadOnlyList<ParsedToken> tokens,
 		string current,
@@ -120,32 +120,77 @@ internal sealed class TerminalWorkspaceCommandParser
 		int cursorPosition,
 		TerminalWorkspaceCommandParseContext? context = null)
 	{
+		var target = ResolveCompletionTarget(text, cursorPosition, context);
+		if (target is null)
+			return TerminalWorkspaceCommandCompletion.Empty;
+
+		var completion = BuildCompletion(target.Value);
+		return target.Value.SchemaKey is { } schemaKey
+			? completion with
+			{
+				GhostSuffix = null,
+				SchemaKey = schemaKey
+			}
+			: completion;
+	}
+
+	public TerminalWorkspaceCommandGhostCompletion GetGhostCompletion(
+		string? text,
+		int cursorPosition,
+		TerminalWorkspaceCommandParseContext? context = null)
+	{
+		var target = ResolveCompletionTarget(text, cursorPosition, context);
+		if (target is null)
+			return TerminalWorkspaceCommandGhostCompletion.Empty;
+		if (target.Value.SchemaKey is { } schemaKey)
+			return new TerminalWorkspaceCommandGhostCompletion(null, schemaKey);
+
+		var ghostSuffix = ResolveGhostSuffix(target.Value.Current, target.Value.Candidates);
+		return ghostSuffix is null
+			? TerminalWorkspaceCommandGhostCompletion.Empty
+			: new TerminalWorkspaceCommandGhostCompletion(ghostSuffix, null);
+	}
+
+	private static CompletionTarget? ResolveCompletionTarget(
+		string? text,
+		int cursorPosition,
+		TerminalWorkspaceCommandParseContext? context)
+	{
 		text ??= string.Empty;
 		context ??= TerminalWorkspaceCommandParseContext.Empty;
 		cursorPosition = Math.Clamp(cursorPosition, 0, text.Length);
 		var prefix = text[..cursorPosition];
 		var tokenization = Tokenize(prefix, tolerateUnterminatedQuote: true);
 		if (tokenization.Error is not null)
-			return TerminalWorkspaceCommandCompletion.Empty;
+			return null;
 
 		var atNewToken = prefix.Length > 0 && char.IsWhiteSpace(prefix[^1]);
 		var tokens = tokenization.Tokens;
 		if (tokens.Count == 0)
-			return BuildCompletion(text, cursorPosition, 0, string.Empty, context.VerbTokens);
+		{
+			return new CompletionTarget(
+				text,
+				cursorPosition,
+				0,
+				string.Empty,
+				new CompletionCandidateSource(context.VerbTokens),
+				null);
+		}
 
 		if (tokens.Count == 1 && !atNewToken)
 		{
-			return BuildCompletion(
+			return new CompletionTarget(
 				text,
 				cursorPosition,
 				tokens[0].Start,
 				tokens[0].Value,
-				context.VerbTokens);
+				new CompletionCandidateSource(context.VerbTokens),
+				null);
 		}
 
 		if (!TerminalWorkspaceCommandCatalog.TryGet(tokens[0].Value, out var definition) ||
 			context.AllowedVerbs is not null && !context.AllowedVerbs.Contains(definition.Verb))
-			return TerminalWorkspaceCommandCompletion.Empty;
+			return null;
 
 		var argumentIndex = atNewToken ? tokens.Count - 1 : tokens.Count - 2;
 		var current = atNewToken ? string.Empty : tokens[^1].Value;
@@ -155,24 +200,18 @@ internal sealed class TerminalWorkspaceCommandParser
 			tokens,
 			current,
 			context);
-		if (atNewToken && tokens.Count == 1)
-		{
-			var completion = BuildCompletion(
+		var schemaKey = atNewToken && tokens.Count == 1
+			? definition.SchemaKey
+			: null;
+		return candidates.Count > 0 || schemaKey is not null
+			? new CompletionTarget(
 				text,
 				cursorPosition,
 				replacementStart,
 				current,
-				candidates);
-			return completion with
-			{
-				GhostSuffix = null,
-				SchemaKey = definition.SchemaKey
-			};
-		}
-		if (candidates.Count > 0)
-			return BuildCompletion(text, cursorPosition, replacementStart, current, candidates);
-
-		return TerminalWorkspaceCommandCompletion.Empty;
+				candidates,
+				schemaKey)
+			: null;
 	}
 
 	private static TerminalWorkspaceCommandParseResult ParseSet(
@@ -433,112 +472,110 @@ internal sealed class TerminalWorkspaceCommandParser
 			? TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(definition))
 			: Unexpected(tokens[1]);
 
-	private static IReadOnlyList<string> CompleteToggleOption(
+	private static CompletionCandidateSource CompleteToggleOption(
 		int argumentIndex,
 		IReadOnlyList<ParsedToken> tokens,
 		string current,
 		TerminalWorkspaceCommandParseContext context) =>
 		argumentIndex switch
 		{
-			0 => SetTargets,
-			1 => ToggleValues,
-			_ => []
+			0 => new CompletionCandidateSource(SetTargets),
+			1 => new CompletionCandidateSource(ToggleValues),
+			_ => default
 		};
 
-	private static IReadOnlyList<string> CompleteToggleGroup(
+	private static CompletionCandidateSource CompleteToggleGroup(
 		int argumentIndex,
 		IReadOnlyList<ParsedToken> tokens,
 		string current,
 		TerminalWorkspaceCommandParseContext context) =>
 		argumentIndex switch
 		{
-			0 => AggregateTargets,
-			1 => ToggleValues,
-			_ => []
+			0 => new CompletionCandidateSource(AggregateTargets),
+			1 => new CompletionCandidateSource(ToggleValues),
+			_ => default
 		};
 
-	private static IReadOnlyList<string> CompleteTypes(
+	private static CompletionCandidateSource CompleteTypes(
 		int argumentIndex,
 		IReadOnlyList<ParsedToken> tokens,
 		string current,
 		TerminalWorkspaceCommandParseContext context) =>
-		argumentIndex >= 0 ? ResolveTypeCompletions(tokens, context) : [];
+		argumentIndex >= 0 ? ResolveTypeCompletions(tokens, context) : default;
 
-	private static IReadOnlyList<string> CompleteView(
+	private static CompletionCandidateSource CompleteView(
 		int argumentIndex,
 		IReadOnlyList<ParsedToken> tokens,
 		string current,
 		TerminalWorkspaceCommandParseContext context) =>
-		argumentIndex == 0 ? CliChoiceSets.ContextView.Tokens : [];
+		argumentIndex == 0 ? new CompletionCandidateSource(CliChoiceSets.ContextView.Tokens) : default;
 
-	private static IReadOnlyList<string> CompleteFormat(
+	private static CompletionCandidateSource CompleteFormat(
 		int argumentIndex,
 		IReadOnlyList<ParsedToken> tokens,
 		string current,
 		TerminalWorkspaceCommandParseContext context) =>
-		argumentIndex == 0 ? CliChoiceSets.ContextDocumentFormat.Tokens : [];
+		argumentIndex == 0 ? new CompletionCandidateSource(CliChoiceSets.ContextDocumentFormat.Tokens) : default;
 
-	private static IReadOnlyList<string> CompleteExport(
+	private static CompletionCandidateSource CompleteExport(
 		int argumentIndex,
 		IReadOnlyList<ParsedToken> tokens,
 		string current,
 		TerminalWorkspaceCommandParseContext context)
 	{
 		if (argumentIndex == 0)
-			return ExportTargets;
+			return new CompletionCandidateSource(ExportTargets);
 		var isContext = tokens.Count > 1 &&
 			string.Equals(tokens[1].Value, "context", StringComparison.OrdinalIgnoreCase);
 		if (argumentIndex == 1 && isContext)
 		{
-			return
-			[
-				.. CliChoiceSets.ContextDocumentFormat.Tokens,
-				.. ResolvePathCompletions(current, context.WorkingDirectory)
-			];
+			return new CompletionCandidateSource(
+				CliChoiceSets.ContextDocumentFormat.Tokens,
+				ResolvePathCompletions(current, context.WorkingDirectory));
 		}
 		if (argumentIndex == 2 && isContext || argumentIndex == 1 && tokens.Count > 1)
-			return ResolvePathCompletions(current, context.WorkingDirectory);
-		return [];
+			return new CompletionCandidateSource(ResolvePathCompletions(current, context.WorkingDirectory));
+		return default;
 	}
 
-	private static IReadOnlyList<string> CompleteCopy(
+	private static CompletionCandidateSource CompleteCopy(
 		int argumentIndex,
 		IReadOnlyList<ParsedToken> tokens,
 		string current,
 		TerminalWorkspaceCommandParseContext context) =>
 		argumentIndex switch
 		{
-			0 => CliChoiceSets.ContextView.Tokens,
-			1 => CliChoiceSets.ContextDocumentFormat.Tokens,
-			_ => []
+			0 => new CompletionCandidateSource(CliChoiceSets.ContextView.Tokens),
+			1 => new CompletionCandidateSource(CliChoiceSets.ContextDocumentFormat.Tokens),
+			_ => default
 		};
 
-	private static IReadOnlyList<string> CompleteProfile(
+	private static CompletionCandidateSource CompleteProfile(
 		int argumentIndex,
 		IReadOnlyList<ParsedToken> tokens,
 		string current,
 		TerminalWorkspaceCommandParseContext context) =>
-		argumentIndex == 0 ? ProfileTargets : [];
+		argumentIndex == 0 ? new CompletionCandidateSource(ProfileTargets) : default;
 
-	private static IReadOnlyList<string> CompleteLanguage(
+	private static CompletionCandidateSource CompleteLanguage(
 		int argumentIndex,
 		IReadOnlyList<ParsedToken> tokens,
 		string current,
 		TerminalWorkspaceCommandParseContext context) =>
-		argumentIndex == 0 ? LanguageCodes : [];
+		argumentIndex == 0 ? new CompletionCandidateSource(LanguageCodes) : default;
 
-	private static IReadOnlyList<string> CompleteHelp(
+	private static CompletionCandidateSource CompleteHelp(
 		int argumentIndex,
 		IReadOnlyList<ParsedToken> tokens,
 		string current,
 		TerminalWorkspaceCommandParseContext context) =>
-		argumentIndex == 0 ? context.VerbTokens : [];
+		argumentIndex == 0 ? new CompletionCandidateSource(context.VerbTokens) : default;
 
-	private static IReadOnlyList<string> NoCompletions(
+	private static CompletionCandidateSource NoCompletions(
 		int argumentIndex,
 		IReadOnlyList<ParsedToken> tokens,
 		string current,
-		TerminalWorkspaceCommandParseContext context) => [];
+		TerminalWorkspaceCommandParseContext context) => default;
 
 	private static IReadOnlyList<string> ResolvePathCompletions(string current, string? workingDirectory)
 	{
@@ -568,47 +605,74 @@ internal sealed class TerminalWorkspaceCommandParser
 		}
 	}
 
-	private static IReadOnlyList<string> ResolveTypeCompletions(
+	private static CompletionCandidateSource ResolveTypeCompletions(
 		IReadOnlyList<ParsedToken> tokens,
 		TerminalWorkspaceCommandParseContext context)
 	{
-		var hasExtension = tokens.Skip(1).Any(token =>
-			context.AvailableExtensions.Contains(token.Value, StringComparer.OrdinalIgnoreCase));
+		var hasExtension = false;
+		for (var tokenIndex = 1; tokenIndex < tokens.Count && !hasExtension; tokenIndex++)
+		{
+			hasExtension = context.AvailableExtensions.Contains(
+				tokens[tokenIndex].Value,
+				StringComparer.OrdinalIgnoreCase);
+		}
 		return hasExtension
-			? [.. context.AvailableExtensions, .. ToggleValues]
-			: context.AvailableExtensions;
+			? new CompletionCandidateSource(context.AvailableExtensions, ToggleValues)
+			: new CompletionCandidateSource(context.AvailableExtensions);
 	}
 
 	private static TerminalWorkspaceCommandCompletion BuildCompletion(
-		string fullText,
-		int cursorPosition,
-		int replacementStart,
-		string current,
-		IReadOnlyList<string> source)
+		CompletionTarget target)
 	{
-		var matches = source
-			.Where(candidate => candidate.StartsWith(current, StringComparison.OrdinalIgnoreCase))
-			.Distinct(StringComparer.OrdinalIgnoreCase)
-			.ToArray();
-		if (matches.Length == 0)
+		List<string>? matches = null;
+		HashSet<string>? seen = null;
+		for (var candidateIndex = 0; candidateIndex < target.Candidates.Count; candidateIndex++)
+		{
+			var candidate = target.Candidates[candidateIndex];
+			if (!candidate.StartsWith(target.Current, StringComparison.OrdinalIgnoreCase))
+				continue;
+
+			seen ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+			if (seen.Add(candidate))
+				(matches ??= []).Add(candidate);
+		}
+		if (matches is null)
 			return TerminalWorkspaceCommandCompletion.Empty;
 
-		var replacementEnd = cursorPosition;
-		while (replacementEnd < fullText.Length && !char.IsWhiteSpace(fullText[replacementEnd]))
+		var replacementEnd = target.CursorPosition;
+		while (replacementEnd < target.FullText.Length && !char.IsWhiteSpace(target.FullText[replacementEnd]))
 			replacementEnd++;
-		var suffix = fullText[replacementEnd..];
+		var suffix = target.FullText[replacementEnd..];
 		var candidates = matches.Select(candidate =>
 		{
-			var completed = fullText[..replacementStart] + candidate + suffix;
+			var completed = target.FullText[..target.ReplacementStart] + candidate + suffix;
 			return new TerminalWorkspaceCommandCompletionCandidate(
 				candidate,
 				completed,
-				replacementStart + candidate.Length);
+				target.ReplacementStart + candidate.Length);
 		}).ToArray();
-		var ghost = matches[0].Length > current.Length
-			? matches[0][current.Length..]
+		var ghost = matches[0].Length > target.Current.Length
+			? matches[0][target.Current.Length..]
 			: null;
 		return new TerminalWorkspaceCommandCompletion(candidates, ghost, null);
+	}
+
+	private static string? ResolveGhostSuffix(
+		string current,
+		CompletionCandidateSource candidates)
+	{
+		for (var candidateIndex = 0; candidateIndex < candidates.Count; candidateIndex++)
+		{
+			var candidate = candidates[candidateIndex];
+			if (candidate.StartsWith(current, StringComparison.OrdinalIgnoreCase))
+			{
+				return candidate.Length > current.Length
+					? candidate[current.Length..]
+					: null;
+			}
+		}
+
+		return null;
 	}
 
 	private static bool TryParseToggle(
@@ -760,6 +824,34 @@ internal sealed class TerminalWorkspaceCommandParser
 		}
 
 		return new TokenizationResult(tokens, null);
+	}
+
+	private readonly record struct CompletionTarget(
+		string FullText,
+		int CursorPosition,
+		int ReplacementStart,
+		string Current,
+		CompletionCandidateSource Candidates,
+		string? SchemaKey);
+
+	private readonly struct CompletionCandidateSource(
+		IReadOnlyList<string>? primary,
+		IReadOnlyList<string>? secondary = null)
+	{
+		public int Count => (primary?.Count ?? 0) + (secondary?.Count ?? 0);
+
+		public string this[int index]
+		{
+			get
+			{
+				var primaryCount = primary?.Count ?? 0;
+				if ((uint)index >= (uint)Count)
+					throw new ArgumentOutOfRangeException(nameof(index));
+				return index < primaryCount
+					? primary![index]
+					: secondary![index - primaryCount];
+			}
+		}
 	}
 
 	private sealed record ParsedToken(string Value, int Start, int End);

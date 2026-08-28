@@ -1120,7 +1120,7 @@ public sealed class SecretRedactionOutputPreparer
 						prepared.ReadResult.Classification));
 					break;
 				case FileContentClassification.Text:
-					redactionScope.CreatePlan(
+					redactionScope.AnalyzeTransformed(
 						prepared.SourcePath,
 						prepared.Compression.Text,
 						prepared.Compression.Map,
@@ -1245,7 +1245,7 @@ public sealed class SecretRedactionOutputPreparer
 							prepared.ReadResult.Classification));
 						break;
 					case FileContentClassification.Text:
-						redactionScope.CreatePlan(
+						redactionScope.AnalyzeTransformed(
 							prepared.SourcePath,
 							prepared.Compression.Text,
 							prepared.Compression.Map,

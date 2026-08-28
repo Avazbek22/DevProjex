@@ -12,7 +12,8 @@ internal sealed class McpProjectService(
 		IReadOnlyList<string>? excludePatterns,
 		string? profile,
 		bool trackedOnly,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		bool includeOutputMetrics = true)
 	{
 		var projectRoot = roots.ResolveProject(project);
 		if (trackedOnly && !IsGitRepository(projectRoot))
@@ -52,8 +53,10 @@ internal sealed class McpProjectService(
 			services.RedactionSession.ReplaceMarkedSecrets(marks);
 		}
 
-		var plan = await services.Planner
-			.BuildAsync(new ProjectContextRequest(projectRoot, selection), cancellationToken)
+		var request = new ProjectContextRequest(projectRoot, selection);
+		var plan = await (includeOutputMetrics
+				? services.Planner.BuildAsync(request, cancellationToken)
+				: services.Planner.BuildStructureAsync(request, cancellationToken))
 			.ConfigureAwait(false);
 		if (plan.HasErrors)
 		{
@@ -63,11 +66,7 @@ internal sealed class McpProjectService(
 				$"{McpErrorCodes.ProjectUnavailable}: project preparation failed ({diagnostic.Code}: {diagnostic.Message}). " +
 				"Fix the reported project access or Git state and retry.");
 		}
-		foreach (var file in plan.IncludedFiles)
-		{
-			cancellationToken.ThrowIfCancellationRequested();
-			_ = roots.ResolveExistingPath(projectRoot, file);
-		}
+		ValidatePlanContainment(roots, projectRoot, plan.IncludedFiles, cancellationToken);
 		if ((paths is null || paths.Count == 0) &&
 		    (includePatterns is null || includePatterns.Count == 0) &&
 		    (excludePatterns is null || excludePatterns.Count == 0))
@@ -104,6 +103,19 @@ internal sealed class McpProjectService(
 				.Where(static diagnostic => diagnostic.Code != "DPX-SELECTION-PATH-MISSING")
 				.ToArray()
 		};
+	}
+
+	internal static void ValidatePlanContainment(
+		McpRootRegistry roots,
+		string projectRoot,
+		IReadOnlyList<string> includedFiles,
+		CancellationToken cancellationToken)
+	{
+		foreach (var file in includedFiles)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			_ = roots.ResolveExistingPath(projectRoot, file);
+		}
 	}
 
 	public McpDetailResolution ResolveDetail(ProjectContextPlan plan, McpDetailLevel detail) =>

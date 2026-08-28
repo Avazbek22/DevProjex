@@ -10,7 +10,7 @@ namespace DevProjex.Infrastructure.Git;
 /// Cache roots must reside on a local file system because network file systems do not consistently
 /// honor the exclusive file-handle leases used for cross-process ownership.
 /// </summary>
-public sealed class RepoCacheService : IRepoCacheService
+public sealed class RepoCacheService : IRepoCacheService, IDisposable, IAsyncDisposable
 {
 	private const string AppFolderName = "DevProjex";
 	private const string CacheFolderName = "RepoCache";
@@ -31,6 +31,8 @@ public sealed class RepoCacheService : IRepoCacheService
 	private static readonly TimeSpan IndexLockTimeout = TimeSpan.FromSeconds(5);
 	private static readonly TimeSpan WorktreeCleanupTimeout = TimeSpan.FromSeconds(5);
 	private static readonly TimeSpan RepositorySizeRefreshTimeout = TimeSpan.FromSeconds(30);
+	private static readonly TimeSpan BackgroundShutdownTimeout = TimeSpan.FromSeconds(10);
+	private static readonly TimeSpan FinalGarbageCollectionTimeout = TimeSpan.FromSeconds(5);
 	private static readonly TimeSpan MaximumPersistedClockSkew = TimeSpan.FromDays(1);
 	private static readonly JsonSerializerOptions IndexSerializerOptions = new(JsonSerializerDefaults.Web)
 	{
@@ -50,11 +52,15 @@ public sealed class RepoCacheService : IRepoCacheService
 	private readonly TimeProvider _timeProvider;
 	private readonly IGitWorktreeManager _worktreeManager;
 	private readonly RepoCacheTestHooks? _testHooks;
+	private readonly BackgroundTaskOwner _backgroundTasks = new(BackgroundShutdownTimeout);
+	private readonly object _disposalSync = new();
 	private readonly object _garbageCollectionSync = new();
 	private readonly ConcurrentDictionary<string, WorktreeCleanupState> _worktreeCleanupInFlight =
 		new(PathComparer.Default);
 	private readonly ConcurrentDictionary<string, byte> _repositorySizeRefreshInFlight = new(PathComparer.Default);
+	private int _scheduledStartupCleanupState;
 	private int _scheduledGarbageCollectionState;
+	private Task? _disposalTask;
 
 	public string CacheRootPath { get; }
 	public IReadOnlyList<string> CacheSearchRootPaths { get; }
@@ -131,6 +137,41 @@ public sealed class RepoCacheService : IRepoCacheService
 		_timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
 		_worktreeManager = worktreeManager ?? throw new ArgumentNullException(nameof(worktreeManager));
 		_testHooks = testHooks;
+	}
+
+	public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+	public ValueTask DisposeAsync()
+	{
+		lock (_disposalSync)
+		{
+			_disposalTask ??= DisposeCoreAsync();
+			return new ValueTask(_disposalTask);
+		}
+	}
+
+	private async Task DisposeCoreAsync()
+	{
+		var collectGarbageOnShutdown = Volatile.Read(ref _scheduledGarbageCollectionState) != 0;
+		await _backgroundTasks.DisposeAsync().ConfigureAwait(false);
+		if (!collectGarbageOnShutdown)
+			return;
+
+		using var timeout = new CancellationTokenSource(FinalGarbageCollectionTimeout);
+		try
+		{
+			await Task.Run(
+				() => CollectGarbage(timeout.Token),
+				CancellationToken.None).ConfigureAwait(false);
+		}
+		catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+		{
+			Trace.TraceWarning("Repository cache final garbage collection timed out.");
+		}
+		catch (Exception exception)
+		{
+			Trace.TraceWarning("Repository cache final garbage collection failed: {0}", exception.Message);
+		}
 	}
 
 	public string CreateRepositoryDirectory(string repositoryUrl)
@@ -425,7 +466,7 @@ public sealed class RepoCacheService : IRepoCacheService
 			branch,
 			cancellationToken).ConfigureAwait(false);
 		if (session is not null)
-			ScheduleGarbageCollection();
+			RequestGarbageCollection();
 		return session;
 	}
 
@@ -467,7 +508,7 @@ public sealed class RepoCacheService : IRepoCacheService
 			entry.Branch,
 			cancellationToken).ConfigureAwait(false);
 		if (session is not null)
-			ScheduleGarbageCollection();
+			RequestGarbageCollection();
 		return session;
 	}
 
@@ -887,21 +928,73 @@ public sealed class RepoCacheService : IRepoCacheService
 	}
 
 	public void CleanupStaleCacheOnStartup()
+		=> CleanupStaleCacheOnStartup(CancellationToken.None);
+
+	private void CleanupStaleCacheOnStartup(CancellationToken cancellationToken)
 	{
-		CleanupStaging();
-		CollectGarbage();
+		CleanupStaging(cancellationToken);
+		CollectGarbage(cancellationToken);
+	}
+
+	public void RequestStaleCacheCleanupOnStartup()
+	{
+		if (Interlocked.CompareExchange(ref _scheduledStartupCleanupState, 1, 0) != 0)
+			return;
+		if (!_backgroundTasks.TryRun(RunScheduledStartupCleanupAsync))
+			Interlocked.Exchange(ref _scheduledStartupCleanupState, 0);
+	}
+
+	private Task RunScheduledStartupCleanupAsync(CancellationToken cancellationToken)
+	{
+		try
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			_testHooks?.BeforeStartupCacheCleanup?.Invoke();
+			cancellationToken.ThrowIfCancellationRequested();
+			CleanupStaleCacheOnStartup(cancellationToken);
+			_testHooks?.AfterStartupCacheCleanup?.Invoke();
+		}
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+		{
+		}
+		catch (Exception exception)
+		{
+			Trace.TraceWarning("Repository cache startup cleanup failed: {0}", exception.Message);
+		}
+		finally
+		{
+			Interlocked.Exchange(ref _scheduledStartupCleanupState, 0);
+		}
+		return Task.CompletedTask;
 	}
 
 	public void CollectGarbage()
+		=> CollectGarbage(CancellationToken.None);
+
+	private void CollectGarbage(CancellationToken cancellationToken)
 	{
 		// A synchronous caller must observe completed cleanup even when session warm-up
 		// has already queued a background collection for the same service instance.
-		lock (_garbageCollectionSync)
-			CollectGarbageCore();
+		var lockTaken = false;
+		try
+		{
+			while (!Monitor.TryEnter(_garbageCollectionSync, millisecondsTimeout: 100))
+				cancellationToken.ThrowIfCancellationRequested();
+			lockTaken = true;
+			CollectGarbageCore(cancellationToken);
+		}
+		finally
+		{
+			if (lockTaken)
+				Monitor.Exit(_garbageCollectionSync);
+		}
 	}
 
-	private void ScheduleGarbageCollection()
+	public void RequestGarbageCollection()
 	{
+		if (!_backgroundTasks.IsAccepting)
+			return;
+
 		while (true)
 		{
 			var state = Volatile.Read(ref _scheduledGarbageCollectionState);
@@ -915,25 +1008,27 @@ public sealed class RepoCacheService : IRepoCacheService
 			}
 			if (Interlocked.CompareExchange(ref _scheduledGarbageCollectionState, 1, 0) == 0)
 			{
-				_ = Task.Run(RunScheduledGarbageCollection, CancellationToken.None);
+				if (!_backgroundTasks.TryRun(RunScheduledGarbageCollectionAsync))
+					Interlocked.Exchange(ref _scheduledGarbageCollectionState, 0);
 				return;
 			}
 		}
 	}
 
-	private void RunScheduledGarbageCollection()
+	private Task RunScheduledGarbageCollectionAsync(CancellationToken cancellationToken)
 	{
 		try
 		{
 			while (true)
 			{
+				cancellationToken.ThrowIfCancellationRequested();
 				_testHooks?.BeforeScheduledGarbageCollection?.Invoke();
-				CollectGarbage();
+				CollectGarbage(cancellationToken);
 				_testHooks?.AfterScheduledGarbageCollection?.Invoke();
 
 				var state = Interlocked.CompareExchange(ref _scheduledGarbageCollectionState, 0, 1);
 				if (state == 1)
-					return;
+					return Task.CompletedTask;
 				if (state == 2 &&
 				    Interlocked.CompareExchange(ref _scheduledGarbageCollectionState, 1, 2) == 2)
 				{
@@ -941,24 +1036,34 @@ public sealed class RepoCacheService : IRepoCacheService
 				}
 			}
 		}
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+		{
+			Interlocked.Exchange(ref _scheduledGarbageCollectionState, 0);
+		}
 		catch (Exception exception)
 		{
 			var state = Interlocked.Exchange(ref _scheduledGarbageCollectionState, 0);
 			Trace.TraceWarning("Repository cache garbage collection failed: {0}", exception.Message);
 			if (state == 2)
-				ScheduleGarbageCollection();
+				RequestGarbageCollection();
 		}
+		return Task.CompletedTask;
 	}
 
-	private void CollectGarbageCore()
+	private void CollectGarbageCore(CancellationToken cancellationToken)
 	{
-		CleanupTrash();
-		CleanupStaging();
+		CleanupTrash(cancellationToken);
+		CleanupStaging(cancellationToken);
+		cancellationToken.ThrowIfCancellationRequested();
 		if (!Directory.Exists(CacheRootPath) || IsLinkedCacheRoot(CacheRootPath))
 			return;
 
 		var fileSet = GetIndexFileSet();
-		if (!CrossProcessFileLock.TryAcquire(fileSet, IndexLockTimeout, out var heldLock))
+		if (!CrossProcessFileLock.TryAcquireWithCancellation(
+			    fileSet,
+			    IndexLockTimeout,
+			    cancellationToken,
+			    out var heldLock))
 			return;
 
 		var trashPaths = new List<string>();
@@ -974,6 +1079,7 @@ public sealed class RepoCacheService : IRepoCacheService
 
 			foreach (var entry in entries.OrderBy(static entry => entry.LastOpenedUtc).ToArray())
 			{
+				cancellationToken.ThrowIfCancellationRequested();
 				var expired = entry.LastOpenedUtc < expiration;
 				if (!expired && totalSize <= _policy.MaximumSizeBytes)
 					continue;
@@ -995,9 +1101,12 @@ public sealed class RepoCacheService : IRepoCacheService
 		}
 
 		foreach (var trashPath in trashPaths)
-			MoveToTrashAndClean(trashPath);
-		CleanupUnindexedRepositories();
-		CleanupTrash();
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			MoveToTrashAndClean(trashPath, cancellationToken);
+		}
+		CleanupUnindexedRepositories(cancellationToken);
+		CleanupTrash(cancellationToken);
 	}
 
 	public void RefreshIndexedRepositorySize(string localPath)
@@ -1016,11 +1125,16 @@ public sealed class RepoCacheService : IRepoCacheService
 		_testHooks?.AfterRepositorySizeCalculated?.Invoke(localPath);
 
 		var fileSet = GetIndexFileSet();
-		if (!CrossProcessFileLock.TryAcquire(fileSet, IndexLockTimeout, out var heldLock))
+		if (!CrossProcessFileLock.TryAcquireWithCancellation(
+			    fileSet,
+			    IndexLockTimeout,
+			    cancellationToken,
+			    out var heldLock))
 			return;
 
 		using (heldLock)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			if (HasUnsupportedIndexDocument(fileSet))
 				return;
 
@@ -1457,6 +1571,9 @@ public sealed class RepoCacheService : IRepoCacheService
 
 	private void ScheduleUnusedWorktreeCleanup(string basePath, string retainedPath)
 	{
+		if (!_backgroundTasks.IsAccepting)
+			return;
+
 		while (true)
 		{
 			if (_worktreeCleanupInFlight.TryGetValue(basePath, out var active))
@@ -1470,24 +1587,37 @@ public sealed class RepoCacheService : IRepoCacheService
 			var state = new WorktreeCleanupState(retainedPath);
 			if (!_worktreeCleanupInFlight.TryAdd(basePath, state))
 				continue;
-			_ = Task.Run(() => RunScheduledWorktreeCleanupAsync(basePath, state), CancellationToken.None);
+			if (!_backgroundTasks.TryRun(token => RunScheduledWorktreeCleanupAsync(basePath, state, token)))
+			{
+				_worktreeCleanupInFlight.TryRemove(
+					new KeyValuePair<string, WorktreeCleanupState>(basePath, state));
+			}
 			return;
 		}
 	}
 
-	private async Task RunScheduledWorktreeCleanupAsync(string basePath, WorktreeCleanupState state)
+	private async Task RunScheduledWorktreeCleanupAsync(
+		string basePath,
+		WorktreeCleanupState state,
+		CancellationToken cancellationToken)
 	{
 		var retainedPath = state.InitialRetainedPath;
 		try
 		{
 			while (true)
 			{
-				using var timeout = new CancellationTokenSource(WorktreeCleanupTimeout);
+				cancellationToken.ThrowIfCancellationRequested();
+				using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+				timeout.CancelAfter(WorktreeCleanupTimeout);
 				try
 				{
 					_testHooks?.BeforeUnusedWorktreeCleanup?.Invoke(basePath);
 					await CleanupUnusedWorktreesAsync(basePath, retainedPath, timeout.Token).ConfigureAwait(false);
 					_testHooks?.AfterUnusedWorktreeCleanup?.Invoke(basePath);
+				}
+				catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+				{
+					return;
 				}
 				catch (OperationCanceledException) when (timeout.IsCancellationRequested)
 				{
@@ -1511,11 +1641,18 @@ public sealed class RepoCacheService : IRepoCacheService
 
 	private void ScheduleRepositorySizeRefresh(string basePath)
 	{
+		if (!_backgroundTasks.IsAccepting)
+			return;
+
 		while (true)
 		{
 			if (_repositorySizeRefreshInFlight.TryAdd(basePath, RepositorySizeRefreshRunning))
 			{
-				_ = Task.Run(() => RunScheduledRepositorySizeRefresh(basePath), CancellationToken.None);
+				if (!_backgroundTasks.TryRun(token => RunScheduledRepositorySizeRefreshAsync(basePath, token)))
+				{
+					_repositorySizeRefreshInFlight.TryRemove(
+						new KeyValuePair<string, byte>(basePath, RepositorySizeRefreshRunning));
+				}
 				return;
 			}
 
@@ -1531,41 +1668,59 @@ public sealed class RepoCacheService : IRepoCacheService
 		}
 	}
 
-	private void RunScheduledRepositorySizeRefresh(string basePath)
+	private Task RunScheduledRepositorySizeRefreshAsync(
+		string basePath,
+		CancellationToken cancellationToken)
 	{
-		while (true)
+		try
 		{
-			using (var timeout = new CancellationTokenSource(RepositorySizeRefreshTimeout))
-			{
-				try
-				{
-					_testHooks?.BeforeRepositorySizeRefresh?.Invoke(basePath);
-					RefreshIndexedRepositorySize(basePath, timeout.Token);
-				}
-				catch (OperationCanceledException) when (timeout.IsCancellationRequested)
-				{
-					Trace.TraceWarning("Repository size refresh timed out for '{0}'.", basePath);
-				}
-				catch (Exception exception)
-				{
-					Trace.TraceWarning("Repository size refresh failed for '{0}': {1}", basePath, exception.Message);
-				}
-			}
-
 			while (true)
 			{
-				if (_repositorySizeRefreshInFlight.TryUpdate(
-					    basePath,
-					    RepositorySizeRefreshRunning,
-					    RepositorySizeRefreshPending))
-					break;
-				if (_repositorySizeRefreshInFlight.TryRemove(
-					    new KeyValuePair<string, byte>(basePath, RepositorySizeRefreshRunning)))
+				cancellationToken.ThrowIfCancellationRequested();
+				using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
 				{
-					_testHooks?.AfterRepositorySizeRefresh?.Invoke(basePath);
-					return;
+					timeout.CancelAfter(RepositorySizeRefreshTimeout);
+					try
+					{
+						_testHooks?.BeforeRepositorySizeRefresh?.Invoke(basePath);
+						RefreshIndexedRepositorySize(basePath, timeout.Token);
+					}
+					catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+					{
+						return Task.CompletedTask;
+					}
+					catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+					{
+						Trace.TraceWarning("Repository size refresh timed out for '{0}'.", basePath);
+					}
+					catch (Exception exception)
+					{
+						Trace.TraceWarning(
+							"Repository size refresh failed for '{0}': {1}",
+							basePath,
+							exception.Message);
+					}
+				}
+
+				while (true)
+				{
+					if (_repositorySizeRefreshInFlight.TryUpdate(
+						    basePath,
+						    RepositorySizeRefreshRunning,
+						    RepositorySizeRefreshPending))
+						break;
+					if (_repositorySizeRefreshInFlight.TryRemove(
+						    new KeyValuePair<string, byte>(basePath, RepositorySizeRefreshRunning)))
+					{
+						_testHooks?.AfterRepositorySizeRefresh?.Invoke(basePath);
+						return Task.CompletedTask;
+					}
 				}
 			}
+		}
+		finally
+		{
+			_repositorySizeRefreshInFlight.TryRemove(basePath, out _);
 		}
 	}
 
@@ -1638,7 +1793,7 @@ public sealed class RepoCacheService : IRepoCacheService
 		}
 
 		if (removedAny)
-			RefreshIndexedRepositorySize(basePath);
+			RefreshIndexedRepositorySize(basePath, cancellationToken);
 	}
 
 	private RepositoryFileLease? AcquireUniqueSnapshotLease(
@@ -1954,8 +2109,11 @@ public sealed class RepoCacheService : IRepoCacheService
 		}
 	}
 
-	private void MoveToTrashAndClean(string path)
+	private void MoveToTrashAndClean(
+		string path,
+		CancellationToken cancellationToken = default)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		if (!Directory.Exists(path) || !IsInCache(path))
 			return;
 
@@ -1971,8 +2129,12 @@ public sealed class RepoCacheService : IRepoCacheService
 					break;
 			}
 			Directory.Move(path, destination);
-			TryDeleteTree(destination);
+			TryDeleteTree(destination, cancellationToken);
 			TryDeleteEmptyDirectory(trashRoot);
+		}
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+		{
+			throw;
 		}
 		catch
 		{
@@ -1988,14 +2150,20 @@ public sealed class RepoCacheService : IRepoCacheService
 		}
 	}
 
-	private void CleanupTrash()
+	private void CleanupTrash(CancellationToken cancellationToken = default)
 	{
 		foreach (var cacheRoot in CacheSearchRootPaths)
-			CleanupTrash(cacheRoot);
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			CleanupTrash(cacheRoot, cancellationToken);
+		}
 	}
 
-	private static void CleanupTrash(string cacheRoot)
+	private static void CleanupTrash(
+		string cacheRoot,
+		CancellationToken cancellationToken = default)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		if (IsLinkedCacheRoot(cacheRoot))
 			return;
 		var trashRoot = RepositoryCacheLayout.GetTrashRoot(cacheRoot);
@@ -2005,21 +2173,35 @@ public sealed class RepoCacheService : IRepoCacheService
 		try
 		{
 			foreach (var path in Directory.EnumerateDirectories(trashRoot))
-				TryDeleteTree(path);
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				TryDeleteTree(path, cancellationToken);
+			}
 			TryDeleteEmptyDirectory(trashRoot);
+		}
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+		{
+			throw;
 		}
 		catch
 		{
 		}
 	}
 
-	private void CleanupUnindexedRepositories()
-		=> CleanupUnindexedRepositories(CacheRootPath);
+	private void CleanupUnindexedRepositories(CancellationToken cancellationToken = default)
+		=> CleanupUnindexedRepositories(CacheRootPath, cancellationToken);
 
-	private void CleanupUnindexedRepositories(string cacheRoot)
+	private void CleanupUnindexedRepositories(
+		string cacheRoot,
+		CancellationToken cancellationToken = default)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		var fileSet = GetIndexFileSet(cacheRoot);
-		if (!CrossProcessFileLock.TryAcquire(fileSet, IndexLockTimeout, out var heldLock))
+		if (!CrossProcessFileLock.TryAcquireWithCancellation(
+			    fileSet,
+			    IndexLockTimeout,
+			    cancellationToken,
+			    out var heldLock))
 			return;
 
 		var trashPaths = new List<string>();
@@ -2030,6 +2212,7 @@ public sealed class RepoCacheService : IRepoCacheService
 				.ToHashSet(PathComparer.Default);
 			foreach (var directory in EnumerateRepositoryRootDirectories(cacheRoot))
 			{
+				cancellationToken.ThrowIfCancellationRequested();
 				if (indexedContainers.Contains(directory))
 					continue;
 				if (!File.Exists(Path.Combine(directory, RepositoryCacheLayout.MarkerFileName)) &&
@@ -2047,17 +2230,26 @@ public sealed class RepoCacheService : IRepoCacheService
 		}
 
 		foreach (var path in trashPaths)
-			MoveToTrashAndClean(path);
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			MoveToTrashAndClean(path, cancellationToken);
+		}
 	}
 
-	private void CleanupStaging()
+	private void CleanupStaging(CancellationToken cancellationToken = default)
 	{
 		foreach (var cacheRoot in CacheSearchRootPaths)
-			CleanupStaging(cacheRoot);
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			CleanupStaging(cacheRoot, cancellationToken);
+		}
 	}
 
-	private void CleanupStaging(string cacheRoot)
+	private void CleanupStaging(
+		string cacheRoot,
+		CancellationToken cancellationToken = default)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		if (IsLinkedCacheRoot(cacheRoot))
 			return;
 		var stagingRoot = Path.Combine(cacheRoot, RepositoryCacheLayout.StagingDirectoryName);
@@ -2069,6 +2261,7 @@ public sealed class RepoCacheService : IRepoCacheService
 			var staleThreshold = _timeProvider.GetUtcNow().UtcDateTime.AddHours(-24);
 			foreach (var directory in Directory.EnumerateDirectories(stagingRoot))
 			{
+				cancellationToken.ThrowIfCancellationRequested();
 				if (string.Equals(
 					Path.GetFileName(directory),
 					RepositoryCacheLayout.TrashDirectoryName,
@@ -2080,12 +2273,20 @@ public sealed class RepoCacheService : IRepoCacheService
 				try
 				{
 					if (Directory.GetCreationTimeUtc(directory) < staleThreshold)
-						MoveToTrashAndClean(directory);
+						MoveToTrashAndClean(directory, cancellationToken);
+				}
+				catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+				{
+					throw;
 				}
 				catch
 				{
 				}
 			}
+		}
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+		{
+			throw;
 		}
 		catch
 		{
@@ -2136,19 +2337,24 @@ public sealed class RepoCacheService : IRepoCacheService
 		return CacheRootPath;
 	}
 
-	private static void TryDeleteTree(string path)
+	private static void TryDeleteTree(
+		string path,
+		CancellationToken cancellationToken = default)
 	{
 		try
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			if (!Directory.Exists(path))
 				return;
 			if (File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint))
 			{
+				cancellationToken.ThrowIfCancellationRequested();
 				Directory.Delete(path);
 				return;
 			}
 			foreach (var file in Directory.EnumerateFiles(path, "*", RecursiveCacheEnumeration))
 			{
+				cancellationToken.ThrowIfCancellationRequested();
 				try
 				{
 					File.SetAttributes(file, FileAttributes.Normal);
@@ -2161,6 +2367,7 @@ public sealed class RepoCacheService : IRepoCacheService
 				         .EnumerateDirectories(path, "*", RecursiveCacheEnumeration)
 				         .OrderByDescending(static directory => directory.Length))
 			{
+				cancellationToken.ThrowIfCancellationRequested();
 				try
 				{
 					File.SetAttributes(directory, FileAttributes.Directory);
@@ -2176,7 +2383,12 @@ public sealed class RepoCacheService : IRepoCacheService
 			catch
 			{
 			}
+			cancellationToken.ThrowIfCancellationRequested();
 			Directory.Delete(path, recursive: true);
+		}
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+		{
+			throw;
 		}
 		catch
 		{
@@ -2501,6 +2713,127 @@ public sealed class RepoCacheService : IRepoCacheService
 			CacheIndexSchemaVersion,
 			maximumDocumentBytes: MaximumCacheIndexBytes);
 
+	private sealed class BackgroundTaskOwner(TimeSpan shutdownTimeout) : IDisposable, IAsyncDisposable
+	{
+		private readonly object _sync = new();
+		private readonly CancellationTokenSource _shutdown = new();
+		private readonly HashSet<Task> _tasks = [];
+		private Task? _disposeTask;
+		private int _stopping;
+
+		public bool IsAccepting => Volatile.Read(ref _stopping) == 0;
+
+		public bool TryRun(Func<CancellationToken, Task> operation)
+		{
+			ArgumentNullException.ThrowIfNull(operation);
+			Task task;
+			lock (_sync)
+			{
+				if (_stopping != 0)
+					return false;
+				task = Task.Run(() => operation(_shutdown.Token), CancellationToken.None);
+				_tasks.Add(task);
+			}
+			_ = task.ContinueWith(
+				static (completedTask, state) => ((BackgroundTaskOwner)state!).OnTaskCompleted(completedTask),
+				this,
+				CancellationToken.None,
+				TaskContinuationOptions.ExecuteSynchronously,
+				TaskScheduler.Default);
+			return true;
+		}
+
+		public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+		public ValueTask DisposeAsync()
+		{
+			Task completion;
+			Task[]? tasks = null;
+			TaskCompletionSource<object?>? completionSource = null;
+			lock (_sync)
+			{
+				if (_disposeTask is null)
+				{
+					Volatile.Write(ref _stopping, 1);
+					tasks = [.. _tasks];
+					completionSource = new TaskCompletionSource<object?>(
+						TaskCreationOptions.RunContinuationsAsynchronously);
+					_disposeTask = completionSource.Task;
+				}
+				completion = _disposeTask;
+			}
+
+			if (completionSource is not null)
+			{
+				try
+				{
+					_shutdown.Cancel(throwOnFirstException: false);
+				}
+				catch (Exception exception)
+				{
+					Trace.TraceWarning("Repository cache background cancellation failed: {0}", exception.Message);
+				}
+				_ = CompleteDisposalAsync(tasks!, completionSource);
+			}
+			return new ValueTask(completion);
+		}
+
+		private void OnTaskCompleted(Task task)
+		{
+			_ = task.Exception;
+			lock (_sync)
+				_tasks.Remove(task);
+		}
+
+		private async Task CompleteDisposalAsync(
+			Task[] tasks,
+			TaskCompletionSource<object?> completionSource)
+		{
+			var allTasks = Task.WhenAll(tasks);
+			try
+			{
+				await allTasks.WaitAsync(shutdownTimeout).ConfigureAwait(false);
+				_shutdown.Dispose();
+			}
+			catch (TimeoutException)
+			{
+				Trace.TraceWarning(
+					"Repository cache background shutdown exceeded {0} seconds.",
+					shutdownTimeout.TotalSeconds);
+				_ = ObserveLateCompletionAsync(allTasks);
+			}
+			catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
+			{
+				_shutdown.Dispose();
+			}
+			catch (Exception exception)
+			{
+				Trace.TraceWarning("Repository cache background operation failed during shutdown: {0}", exception.Message);
+				_shutdown.Dispose();
+			}
+			finally
+			{
+				completionSource.TrySetResult(null);
+			}
+		}
+
+		private async Task ObserveLateCompletionAsync(Task tasks)
+		{
+			try
+			{
+				await tasks.ConfigureAwait(false);
+			}
+			catch (Exception exception)
+			{
+				Trace.TraceWarning("Repository cache background operation failed after shutdown: {0}", exception.Message);
+			}
+			finally
+			{
+				_shutdown.Dispose();
+			}
+		}
+	}
+
 	private sealed class WorktreeCleanupState(string initialRetainedPath)
 	{
 		private readonly object _sync = new();
@@ -2562,6 +2895,8 @@ public sealed class RepoCacheService : IRepoCacheService
 internal sealed class RepoCacheTestHooks
 {
 	public Action<string>? AfterSessionLeaseAcquired { get; init; }
+	public Action? BeforeStartupCacheCleanup { get; init; }
+	public Action? AfterStartupCacheCleanup { get; init; }
 	public Action? BeforeScheduledGarbageCollection { get; init; }
 	public Action? AfterScheduledGarbageCollection { get; init; }
 	public Action<string>? BeforeUnusedWorktreeCleanup { get; init; }

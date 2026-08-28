@@ -314,16 +314,32 @@ public sealed class TreeExportService
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 		ValidateFormat(format);
+		if (format == TreeTextFormat.Markdown)
+		{
+			var markdownRootPath = string.IsNullOrWhiteSpace(displayRootPath) ? rootPath : displayRootPath;
+			return CalculateMarkdownTreeMetrics(
+				markdownRootPath,
+				root,
+				includedPaths: null,
+				cancellationToken);
+		}
+
 		if (format != TreeTextFormat.Ascii)
-			return ExportOutputMetricsCalculator.FromText(
-				BuildFullTreeWithCancellation(
+		{
+			using var metricsWriter = ExportOutputMetricsCalculator.CreateTextWriter();
+			WriteFullTreeAsync(
+					metricsWriter,
 					rootPath,
 					root,
 					format,
 					displayRootPath,
 					displayRootName,
 					includeRootPath: true,
-					cancellationToken));
+					cancellationToken)
+				.GetAwaiter()
+				.GetResult();
+			return metricsWriter.Complete(cancellationToken);
+		}
 
 		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath) ? rootPath : displayRootPath;
 		var outputRootName = ResolveRootDisplayName(root, displayRootName);
@@ -451,18 +467,45 @@ public sealed class TreeExportService
 		if (!CollectIncludedPaths(root, selectedPaths, includedPaths, cancellationToken))
 			return ExportOutputMetrics.Empty;
 
+		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath) ? rootPath : displayRootPath;
+		if (format == TreeTextFormat.Markdown)
+		{
+			return CalculateMarkdownTreeMetrics(
+				outputRootPath,
+				root,
+				includedPaths,
+				cancellationToken);
+		}
+
 		if (format != TreeTextFormat.Ascii)
-			return ExportOutputMetricsCalculator.FromText(
-				BuildSelectedTreeFromIncludedPaths(
+		{
+			using var metricsWriter = ExportOutputMetricsCalculator.CreateTextWriter();
+			var writeTask = format switch
+			{
+				TreeTextFormat.Json => WriteTreeJsonAsync(
+					metricsWriter,
 					rootPath,
 					root,
-					includedPaths,
-					format,
-					displayRootPath,
+					outputRootPath,
 					displayRootName,
-					cancellationToken));
+					includeRootPath: true,
+					includedPaths,
+					cancellationToken),
+				TreeTextFormat.Xml => WriteTreeXmlAsync(
+					metricsWriter,
+					rootPath,
+					root,
+					outputRootPath,
+					displayRootName,
+					includeRootPath: true,
+					includedPaths,
+					cancellationToken),
+				_ => throw new ArgumentOutOfRangeException(nameof(format), format, null)
+			};
+			writeTask.GetAwaiter().GetResult();
+			return metricsWriter.Complete(cancellationToken);
+		}
 
-		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath) ? rootPath : displayRootPath;
 		var outputRootName = ResolveRootDisplayName(root, displayRootName);
 		return CalculateAsciiSelectedTreeMetrics(
 			outputRootPath,
@@ -546,7 +589,7 @@ public sealed class TreeExportService
 			? rootPath
 			: displayRootPath);
 		var outputRootName = EscapeTextValue(ResolveRootDisplayName(root, displayRootName));
-		var output = new TreeTextLineWriter(destination, cancellationToken);
+		using var output = new TreeTextLineWriter(destination, cancellationToken);
 		var ancestorBranches = new List<bool>();
 
 		if (includeRootPath)
@@ -625,7 +668,7 @@ public sealed class TreeExportService
 		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath)
 			? rootPath
 			: displayRootPath;
-		var output = new TreeTextLineWriter(destination, cancellationToken);
+		using var output = new TreeTextLineWriter(destination, cancellationToken);
 		if (includeRootPath)
 		{
 			await output.BeginLineAsync().ConfigureAwait(false);
@@ -731,6 +774,25 @@ public sealed class TreeExportService
 		string? displayRootPath,
 		string? displayRootName,
 		bool includeRootPath,
+		CancellationToken cancellationToken) =>
+		WriteTreeJsonAsync(
+			destination,
+			rootPath,
+			root,
+			displayRootPath,
+			displayRootName,
+			includeRootPath,
+			includedPaths: null,
+			cancellationToken);
+
+	private static Task WriteTreeJsonAsync(
+		TextWriter destination,
+		string rootPath,
+		TreeNodeDescriptor root,
+		string? displayRootPath,
+		string? displayRootName,
+		bool includeRootPath,
+		IReadOnlySet<string>? includedPaths,
 		CancellationToken cancellationToken)
 	{
 		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath)
@@ -755,7 +817,7 @@ public sealed class TreeExportService
 		WriteJsonTreeContents(
 			writer,
 			root,
-			includedPaths: null,
+			includedPaths,
 			cancellationToken,
 			() =>
 			{
@@ -778,6 +840,25 @@ public sealed class TreeExportService
 		string? displayRootPath,
 		string? displayRootName,
 		bool includeRootPath,
+		CancellationToken cancellationToken) =>
+		WriteTreeXmlAsync(
+			destination,
+			rootPath,
+			root,
+			displayRootPath,
+			displayRootName,
+			includeRootPath,
+			includedPaths: null,
+			cancellationToken);
+
+	private static Task WriteTreeXmlAsync(
+		TextWriter destination,
+		string rootPath,
+		TreeNodeDescriptor root,
+		string? displayRootPath,
+		string? displayRootName,
+		bool includeRootPath,
+		IReadOnlySet<string>? includedPaths,
 		CancellationToken cancellationToken)
 	{
 		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath)
@@ -796,7 +877,7 @@ public sealed class TreeExportService
 		WriteXmlTreeContents(
 			writer,
 			root,
-			includedPaths: null,
+			includedPaths,
 			cancellationToken,
 			() =>
 			{
@@ -847,37 +928,50 @@ public sealed class TreeExportService
 		int IndentLength,
 		bool IsLast);
 
-	private sealed class TreeTextLineWriter(
-		TextWriter destination,
-		CancellationToken cancellationToken)
+	internal sealed class TreeTextLineWriter : IDisposable
 	{
+		private readonly TextWriter _destination;
+		private readonly CancellationToken _cancellationToken;
+		private char[] _buffer;
+		private int _bufferedCharacters;
 		private bool _hasLine;
+		private bool _completed;
+		private bool _disposed;
+
+		public TreeTextLineWriter(
+			TextWriter destination,
+			CancellationToken cancellationToken)
+		{
+			ArgumentNullException.ThrowIfNull(destination);
+			_destination = destination;
+			_cancellationToken = cancellationToken;
+			_buffer = ArrayPool<char>.Shared.Rent(MaximumTreeTextWriteCharacters);
+		}
 
 		public async ValueTask BeginLineAsync()
 		{
-			cancellationToken.ThrowIfCancellationRequested();
+			ThrowIfNotWritable();
+			_cancellationToken.ThrowIfCancellationRequested();
 			if (_hasLine)
-			{
-				await destination.WriteAsync(
-						Environment.NewLine.AsMemory(),
-						cancellationToken)
-					.ConfigureAwait(false);
-			}
+				await FlushCurrentLineAsync(includeLineEnding: true).ConfigureAwait(false);
 			_hasLine = true;
 		}
 
 		public async ValueTask WriteAsync(string value)
 		{
+			ArgumentNullException.ThrowIfNull(value);
+			ThrowIfNotWritable();
 			for (var offset = 0; offset < value.Length;)
 			{
-				cancellationToken.ThrowIfCancellationRequested();
+				_cancellationToken.ThrowIfCancellationRequested();
+				if (_bufferedCharacters == MaximumTreeTextWriteCharacters)
+					await FlushBufferAsync().ConfigureAwait(false);
+
 				var length = Math.Min(
-					MaximumTreeTextWriteCharacters,
+					MaximumTreeTextWriteCharacters - _bufferedCharacters,
 					value.Length - offset);
-				await destination.WriteAsync(
-						value.AsMemory(offset, length),
-						cancellationToken)
-					.ConfigureAwait(false);
+				value.AsSpan(offset, length).CopyTo(_buffer.AsSpan(_bufferedCharacters));
+				_bufferedCharacters += length;
 				offset += length;
 			}
 		}
@@ -887,29 +981,73 @@ public sealed class TreeExportService
 			if (count <= 0)
 				return;
 
-			var chunk = new string(value, Math.Min(MaximumTreeTextWriteCharacters, count));
+			ThrowIfNotWritable();
 			for (var remaining = count; remaining > 0;)
 			{
-				cancellationToken.ThrowIfCancellationRequested();
-				var length = Math.Min(chunk.Length, remaining);
-				await destination.WriteAsync(
-						chunk.AsMemory(0, length),
-						cancellationToken)
-					.ConfigureAwait(false);
+				_cancellationToken.ThrowIfCancellationRequested();
+				if (_bufferedCharacters == MaximumTreeTextWriteCharacters)
+					await FlushBufferAsync().ConfigureAwait(false);
+
+				var length = Math.Min(
+					MaximumTreeTextWriteCharacters - _bufferedCharacters,
+					remaining);
+				_buffer.AsSpan(_bufferedCharacters, length).Fill(value);
+				_bufferedCharacters += length;
 				remaining -= length;
 			}
 		}
 
 		public async ValueTask CompleteAsync(bool includeFinalLineEnding)
 		{
-			cancellationToken.ThrowIfCancellationRequested();
-			if (!includeFinalLineEnding || !_hasLine)
+			ThrowIfNotWritable();
+			_cancellationToken.ThrowIfCancellationRequested();
+			if (!_hasLine)
+			{
+				await FlushBufferAsync().ConfigureAwait(false);
+				_completed = true;
+				return;
+			}
+
+			await FlushCurrentLineAsync(includeFinalLineEnding).ConfigureAwait(false);
+			_completed = true;
+		}
+
+		public void Dispose()
+		{
+			if (_disposed)
 				return;
 
-			await destination.WriteAsync(
-					Environment.NewLine.AsMemory(),
-					cancellationToken)
+			ArrayPool<char>.Shared.Return(_buffer, clearArray: true);
+			_buffer = [];
+			_bufferedCharacters = 0;
+			_disposed = true;
+		}
+
+		private async ValueTask FlushCurrentLineAsync(bool includeLineEnding)
+		{
+			if (includeLineEnding)
+				await WriteAsync(Environment.NewLine).ConfigureAwait(false);
+			await FlushBufferAsync().ConfigureAwait(false);
+		}
+
+		private async ValueTask FlushBufferAsync()
+		{
+			_cancellationToken.ThrowIfCancellationRequested();
+			if (_bufferedCharacters == 0)
+				return;
+
+			await _destination.WriteAsync(
+					_buffer.AsMemory(0, _bufferedCharacters),
+					_cancellationToken)
 				.ConfigureAwait(false);
+			_bufferedCharacters = 0;
+		}
+
+		private void ThrowIfNotWritable()
+		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
+			if (_completed)
+				throw new InvalidOperationException("Tree text output was already finalized.");
 		}
 	}
 
@@ -1870,6 +2008,75 @@ public sealed class TreeExportService
 	{
 		chars += renderedChars + 1; // Normalize any platform newline to a single logical line-break char.
 		lineBreaks++;
+	}
+
+	private static ExportOutputMetrics CalculateMarkdownTreeMetrics(
+		string outputRootPath,
+		TreeNodeDescriptor root,
+		IReadOnlySet<string>? includedPaths,
+		CancellationToken cancellationToken)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
+		long chars = 0;
+		long lineBreaks = 0;
+		var rootHeaderChars = "Root: ".Length +
+		                      EscapeTextValue(ResolveStructuredRootPath(outputRootPath)).Length;
+		AppendAsciiLineMetrics(rootHeaderChars, ref chars, ref lineBreaks);
+		AppendAsciiLineMetrics(renderedChars: 0, ref chars, ref lineBreaks);
+
+		if (!root.IsDirectory)
+		{
+			if (includedPaths is null || includedPaths.Contains(root.FullPath))
+			{
+				AppendMarkdownItemMetrics(
+					root,
+					level: 0,
+					ref chars,
+					ref lineBreaks);
+			}
+
+			return CreateMetricsFromNormalizedCounts(chars, lineBreaks);
+		}
+
+		var pending = new Stack<MarkdownTreeWriteOperation>();
+		PushMarkdownChildren(
+			pending,
+			root.Children,
+			includedPaths,
+			level: 0,
+			cancellationToken);
+		while (pending.TryPop(out var operation))
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var node = operation.Node;
+			AppendMarkdownItemMetrics(
+				node,
+				operation.Level,
+				ref chars,
+				ref lineBreaks);
+			if (node.IsDirectory)
+			{
+				PushMarkdownChildren(
+					pending,
+					node.Children,
+					includedPaths,
+					operation.Level + 1,
+					cancellationToken);
+			}
+		}
+
+		return CreateMetricsFromNormalizedCounts(chars, lineBreaks);
+	}
+
+	private static void AppendMarkdownItemMetrics(
+		TreeNodeDescriptor node,
+		int level,
+		ref long chars,
+		ref long lineBreaks)
+	{
+		var escapedName = EscapeMarkdownListText(node.DisplayName);
+		var renderedChars = checked((long)level * 2 + 2 + escapedName.Length + (node.IsDirectory ? 1 : 0));
+		AppendAsciiLineMetrics(renderedChars, ref chars, ref lineBreaks);
 	}
 
 	private static ExportOutputMetrics CreateMetricsFromNormalizedCounts(long chars, long lineBreaks)

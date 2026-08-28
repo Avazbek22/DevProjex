@@ -33,10 +33,10 @@ public sealed partial class TerminalPreviewNavigationPtyTests
 			"CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);
 		initial = await terminal.WaitForScreenAsync(
-			"Tab/F6 Preview",
+			"Ctrl+A/U Select all/none",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("> PROJECT TREE", initial, StringComparison.Ordinal);
-		Assert.Contains("Tab/F6 Preview", initial, StringComparison.Ordinal);
+		Assert.Contains("Ctrl+A/U Select all/none", initial, StringComparison.Ordinal);
 		await terminal.SendAsync("2", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"ContentMarker001",
@@ -158,14 +158,15 @@ public sealed partial class TerminalPreviewNavigationPtyTests
 
 		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"> PARAMETERS",
+			"DPX-GIT-TRACKED-INDEX-UNAVAILABLE",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
-		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
-		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"[ ] Use .gitignore",
+			"[x] Use .gitignore",
 			cancellationToken: TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(
+			terminal,
+			TestContext.Current.CancellationToken);
 		await terminal.SendShiftTabAsync(TestContext.Current.CancellationToken);
 		var afterGitRefresh = await terminal.WaitForScreenAsync(
 			"> CONTEXT PREVIEW",
@@ -174,10 +175,13 @@ public sealed partial class TerminalPreviewNavigationPtyTests
 		await WaitForStableScreenAsync(
 			terminal,
 			TestContext.Current.CancellationToken);
-		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
+		await terminal.SendAsync("x", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"[ ] Use .gitignore",
+			"[x] Use .gitignore",
 			cancellationToken: TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(
+			terminal,
+			TestContext.Current.CancellationToken);
 		await terminal.SendShiftTabAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"> CONTEXT PREVIEW",
@@ -236,7 +240,7 @@ public sealed partial class TerminalPreviewNavigationPtyTests
 
 		await terminal.ResizeAsync(120, 30, TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"1/2/3 View",
+			"W Wrap",
 			cancellationToken: TestContext.Current.CancellationToken);
 		var restored = await terminal.WaitForScreenAsync(
 			"PROJECT TREE",

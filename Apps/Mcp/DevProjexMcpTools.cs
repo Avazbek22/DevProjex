@@ -4,7 +4,7 @@ namespace DevProjex.Mcp;
 
 internal sealed class DevProjexMcpTools(
 	McpRootRegistry roots,
-	McpProjectService projects,
+	Lazy<McpProjectService> projectService,
 	McpPackRegistry packs)
 {
 	private const int MaximumTreeLines = 2_000;
@@ -13,6 +13,7 @@ internal sealed class DevProjexMcpTools(
 	private const int MaximumPageCharacters = 50_000;
 	private const int MaximumSearchContentCharacters = 49_000;
 	private readonly McpProjectOperationGate _projectOperation = new();
+	private McpProjectService Projects => projectService.Value;
 
 	[Description("List the project roots this server is allowed to read and their saved local profiles.")]
 	public Task<CallToolResult> ListProjects(
@@ -33,7 +34,7 @@ internal sealed class DevProjexMcpTools(
 				})
 				.ToArray();
 			var profiles = validatedRoots
-				.Where(projects.HasLocalProfile)
+				.Where(Projects.HasLocalProfile)
 				.Select(root => new { project = root, name = "local" })
 				.ToArray();
 			return Task.FromResult(McpToolResults.StructuredSuccess(new { projects = projectItems, profiles }));
@@ -52,14 +53,15 @@ internal sealed class DevProjexMcpTools(
 				"exclude_patterns",
 				"max_depth",
 				"tracked_only");
-			var plan = await projects.BuildPlanAsync(
+			var plan = await Projects.BuildPlanAsync(
 				arguments.OptionalString("project"),
 				paths: null,
 				arguments.OptionalStringArray("include_patterns"),
 				arguments.OptionalStringArray("exclude_patterns"),
 				profile: null,
 				arguments.OptionalBoolean("tracked_only", false),
-				cancellationToken).ConfigureAwait(false);
+				cancellationToken,
+				includeOutputMetrics: false).ConfigureAwait(false);
 			var depth = arguments.OptionalInteger("max_depth", 0, 1_000);
 			var renderedTree = depth is null
 				? plan.ProjectedTree
@@ -70,7 +72,7 @@ internal sealed class DevProjexMcpTools(
 			using var treeWriter = new McpBoundedLineTextWriter(MaximumTreeLines);
 			try
 			{
-				await projects.TreeExportService.WriteFullTreeAsync(
+				await Projects.TreeExportService.WriteFullTreeAsync(
 						treeWriter,
 						plan.SourceRoot,
 						renderedTree,
@@ -90,21 +92,23 @@ internal sealed class DevProjexMcpTools(
 	[Description("Measure a redacted project selection and list its ten largest text files by estimated tokens.")]
 	public Task<CallToolResult> Analyze(
 		RequestContext<CallToolRequestParams> request,
-		IProgress<ProgressNotificationValue> progress,
 		CancellationToken cancellationToken) =>
 		RunProjectAsync(async () =>
 		{
-			var operationProgress = new McpProgressReporter(progress);
+			var operationProgress = new McpProgressReporter(request, cancellationToken);
 			operationProgress.Milestone(1, "selecting files");
 			var arguments = SelectionArguments(request.Params);
 			var detail = McpDetailPolicy.Parse(arguments.OptionalString("detail"));
-			var plan = await BuildSelectionAsync(arguments, cancellationToken).ConfigureAwait(false);
+			var plan = await BuildSelectionAsync(
+				arguments,
+				cancellationToken,
+				includeOutputMetrics: false).ConfigureAwait(false);
 			operationProgress.Milestone(
 				10,
 				$"scanning files {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");
-			var effectiveDetail = projects.ResolveDetail(plan, detail);
+			var effectiveDetail = Projects.ResolveDetail(plan, detail);
 			operationProgress.Milestone(11, $"transforming content 0/{plan.IncludedFiles.Count}");
-			await using var prepared = await projects.PrepareAsync(
+			await using var prepared = await Projects.PrepareAsync(
 					plan,
 					detail,
 					operationProgress.Measure("transforming content", 12, 59),
@@ -113,7 +117,7 @@ internal sealed class DevProjexMcpTools(
 			operationProgress.Milestone(
 				60,
 				$"transforming content {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");
-			var analyzer = projects.CreatePreparedAnalyzer(prepared);
+			var analyzer = Projects.CreatePreparedAnalyzer(prepared);
 			operationProgress.Milestone(61, $"analyzing content 0/{plan.IncludedFiles.Count}");
 			var largest = new McpTopFileRanking(capacity: 10);
 			var metrics = await ProjectContentMetricsCalculator
@@ -121,7 +125,7 @@ internal sealed class DevProjexMcpTools(
 					analyzer,
 					plan.IncludedFiles,
 					fileMetrics => largest.Add(
-						McpProjectService.ToRelative(plan.SourceRoot, fileMetrics.Path),
+						fileMetrics.Path,
 						CodeCompressionSnapshot.EstimateTokens(fileMetrics.CharCount)),
 					operationProgress.Measure("analyzing content", 62, 98),
 					cancellationToken)
@@ -129,9 +133,11 @@ internal sealed class DevProjexMcpTools(
 			operationProgress.Milestone(
 				99,
 				$"analyzing content {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");
-			var top = largest.Items
-				.Select(static item => new { path = item.Path, tokens = item.Tokens })
-				.ToArray();
+			var top = largest.Project(item => new
+			{
+				path = McpProjectService.ToRelative(plan.SourceRoot, item.Path),
+				tokens = item.Tokens
+			});
 			var envelope = new
 			{
 				files = plan.IncludedFiles.Count,
@@ -140,18 +146,17 @@ internal sealed class DevProjexMcpTools(
 				detail = effectiveDetail.Token,
 				topFiles = top
 			};
-			operationProgress.Milestone(100, "building analysis");
+			await operationProgress.CompleteAsync(100, "building analysis").ConfigureAwait(false);
 			return McpToolResults.StructuredSuccess(envelope);
 		}, cancellationToken);
 
 	[Description("Build an exact redacted DevProjex context export. Large packs expire when this server process exits.")]
 	public Task<CallToolResult> PackContext(
 		RequestContext<CallToolRequestParams> request,
-		IProgress<ProgressNotificationValue> progress,
 		CancellationToken cancellationToken) =>
 		RunProjectAsync(async () =>
 		{
-			var operationProgress = new McpProgressReporter(progress);
+			var operationProgress = new McpProgressReporter(request, cancellationToken);
 			operationProgress.Milestone(1, "selecting files");
 			var arguments = McpJsonArguments.Create(
 				request.Params,
@@ -165,19 +170,23 @@ internal sealed class DevProjexMcpTools(
 				"detail",
 				"tracked_only");
 			var detail = McpDetailPolicy.Parse(arguments.OptionalString("detail"));
-			var plan = await BuildSelectionAsync(arguments, cancellationToken).ConfigureAwait(false);
+			var format = ParseFormat(arguments.OptionalString("format") ?? "markdown");
+			var plan = await BuildSelectionAsync(
+					arguments,
+					cancellationToken,
+					includeOutputMetrics: format is ProjectContextDocumentFormat.Json or ProjectContextDocumentFormat.Xml)
+				.ConfigureAwait(false);
 			operationProgress.Milestone(
 				10,
 				$"scanning files {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");
-			var effectiveDetail = projects.ResolveDetail(plan, detail);
-			plan = projects.ApplyDetail(plan, effectiveDetail);
+			var effectiveDetail = Projects.ResolveDetail(plan, detail);
+			plan = Projects.ApplyDetail(plan, effectiveDetail);
 			var view = ParseView(arguments.OptionalString("view") ?? "tree-content");
-			var format = ParseFormat(arguments.OptionalString("format") ?? "markdown");
 			var transformedFileCount = view == ProjectContextView.Tree ? 0 : plan.IncludedFiles.Count;
 			operationProgress.Milestone(11, $"transforming content 0/{transformedFileCount}");
 			await using var prepared = view == ProjectContextView.Tree
 				? null
-				: await projects.PrepareAsync(
+				: await Projects.PrepareAsync(
 						plan,
 						McpDetailLevel.Full,
 						operationProgress.Measure("transforming content", 12, 59),
@@ -194,7 +203,7 @@ internal sealed class DevProjexMcpTools(
 					var writeProgress = operationProgress.Measure("writing pack", 62, 99);
 					if (prepared is null)
 					{
-						await projects.DocumentService.WriteCompleteAsync(
+						await Projects.DocumentService.WriteCompleteAsync(
 								plan,
 								view,
 								format,
@@ -207,7 +216,7 @@ internal sealed class DevProjexMcpTools(
 						return;
 					}
 
-					await projects.DocumentService.WritePreparedCompleteAsync(
+					await Projects.DocumentService.WritePreparedCompleteAsync(
 							plan,
 							view,
 							format,
@@ -226,20 +235,21 @@ internal sealed class DevProjexMcpTools(
 				if (pack.Characters <= MaximumInlinePackCharacters)
 				{
 					var content = await File.ReadAllTextAsync(pack.Path, cancellationToken).ConfigureAwait(false);
-					operationProgress.Milestone(
-						100,
-						$"writing pack {writtenFileCount}/{writtenFileCount}");
+					await operationProgress.CompleteAsync(
+							100,
+							$"writing pack {writtenFileCount}/{writtenFileCount}")
+						.ConfigureAwait(false);
 					return McpToolResults.TextSuccess(McpSpotlight.Wrap(content), advertiseLargeResult: true);
 				}
 
 				using var treeWriter = new McpBoundedLineTextWriter(MaximumTreeLines);
 				try
 				{
-					await projects.TreeExportService.WriteFullTreeAsync(
+					await Projects.TreeExportService.WriteFullTreeAsync(
 							treeWriter,
 							plan.SourceRoot,
 							plan.ProjectedTree,
-							projects.ResolveProtectedDocumentRoot(plan),
+							Projects.ResolveProtectedDocumentRoot(plan),
 							includeFinalLineEnding: false,
 							cancellationToken: cancellationToken)
 						.ConfigureAwait(false);
@@ -253,9 +263,10 @@ internal sealed class DevProjexMcpTools(
 				var message = $"Pack stored as '{pack.Id}' ({pack.Characters} characters). " +
 				              "Call read_pack with this pack_id to read ranges, or search_project to locate source content.\n" +
 				              McpSpotlight.Wrap(tree);
-				operationProgress.Milestone(
-					100,
-					$"writing pack {writtenFileCount}/{writtenFileCount}");
+				await operationProgress.CompleteAsync(
+						100,
+						$"writing pack {writtenFileCount}/{writtenFileCount}")
+					.ConfigureAwait(false);
 				var response = McpToolResults.TextSuccess(message, advertiseLargeResult: true);
 				retainPack = true;
 				return response;
@@ -279,8 +290,7 @@ internal sealed class DevProjexMcpTools(
 			var end = arguments.OptionalInteger("end_line", 1, int.MaxValue);
 			var pack = packs.ResolveDocument(packId);
 			var page = await ReadFilePageAsync(
-					pack.Path,
-					pack.Lines,
+					pack,
 					start,
 					end,
 					cancellationToken)
@@ -320,16 +330,17 @@ internal sealed class DevProjexMcpTools(
 			var maximumResults = arguments.OptionalInteger("max_results", 1, 200) ?? 50;
 			var regex = new McpSearchRegex(pattern, ignoreCase);
 
-			var plan = await projects.BuildPlanAsync(
+			var plan = await Projects.BuildPlanAsync(
 				arguments.OptionalString("project"),
 				paths: null,
 				arguments.OptionalStringArray("include_patterns"),
 				arguments.OptionalStringArray("exclude_patterns"),
 				profile: null,
 				arguments.OptionalBoolean("tracked_only", false),
-				cancellationToken).ConfigureAwait(false);
-			await using var prepared = await projects.PrepareAsync(plan, cancellationToken).ConfigureAwait(false);
-			var analyzer = projects.CreatePreparedAnalyzer(prepared);
+				cancellationToken,
+				includeOutputMetrics: false).ConfigureAwait(false);
+			await using var prepared = await Projects.PrepareAsync(plan, cancellationToken).ConfigureAwait(false);
+			var analyzer = Projects.CreatePreparedAnalyzer(prepared);
 			var output = new StringBuilder();
 			var totalMatches = 0;
 			var shownMatches = 0;
@@ -387,18 +398,19 @@ internal sealed class DevProjexMcpTools(
 				"path",
 				"start_line",
 				"end_line");
-			var plan = await projects.BuildPlanAsync(
+			var plan = await Projects.BuildPlanAsync(
 				arguments.OptionalString("project"),
 				paths: null,
 				includePatterns: null,
 				excludePatterns: null,
 				profile: null,
 				trackedOnly: false,
-				cancellationToken).ConfigureAwait(false);
-			var file = projects.ResolveFile(plan, arguments.RequiredString("path", allowWhitespace: true));
-			await using var prepared = await projects.PrepareAsync(plan with { IncludedFiles = [file] }, cancellationToken)
+				cancellationToken,
+				includeOutputMetrics: false).ConfigureAwait(false);
+			var file = Projects.ResolveFile(plan, arguments.RequiredString("path", allowWhitespace: true));
+			await using var prepared = await Projects.PrepareAsync(plan with { IncludedFiles = [file] }, cancellationToken)
 				.ConfigureAwait(false);
-			var content = await projects.CreatePreparedAnalyzer(prepared)
+			var content = await Projects.CreatePreparedAnalyzer(prepared)
 				.TryReadAsTextAsync(file, cancellationToken)
 				.ConfigureAwait(false);
 			if (content is null)
@@ -435,15 +447,17 @@ internal sealed class DevProjexMcpTools(
 
 	private Task<ProjectContextPlan> BuildSelectionAsync(
 		McpJsonArguments arguments,
-		CancellationToken cancellationToken) =>
-		projects.BuildPlanAsync(
+		CancellationToken cancellationToken,
+		bool includeOutputMetrics = true) =>
+		Projects.BuildPlanAsync(
 			arguments.OptionalString("project"),
 			arguments.OptionalStringArray("paths", allowWhitespace: true),
 			arguments.OptionalStringArray("include_patterns"),
 			arguments.OptionalStringArray("exclude_patterns"),
 			arguments.OptionalString("profile"),
 			arguments.OptionalBoolean("tracked_only", false),
-			cancellationToken);
+			cancellationToken,
+			includeOutputMetrics);
 
 	private Task<CallToolResult> RunProjectAsync(
 		Func<Task<CallToolResult>> operation,
@@ -550,19 +564,20 @@ internal sealed class DevProjexMcpTools(
 	}
 
 	private static async Task<McpTextPage> ReadFilePageAsync(
-		string path,
-		int totalLines,
+		McpPackDocument pack,
 		int? startLine,
 		int? endLine,
 		CancellationToken cancellationToken)
 	{
+		var checkpoint = pack.ResolveLineCheckpoint(startLine ?? 1);
 		await using var stream = new FileStream(
-			path,
+			pack.Path,
 			FileMode.Open,
 			FileAccess.Read,
 			FileShare.Read,
 			16 * 1024,
 			FileOptions.Asynchronous | FileOptions.SequentialScan);
+		stream.Seek(checkpoint.ByteOffset, SeekOrigin.Begin);
 		return await McpTextRanges.ReadPageAsync(
 			stream,
 			startLine,
@@ -570,7 +585,8 @@ internal sealed class DevProjexMcpTools(
 			MaximumPageLines,
 			MaximumPageCharacters,
 			cancellationToken,
-			totalLines).ConfigureAwait(false);
+			pack.Lines,
+			checkpoint.LineNumber).ConfigureAwait(false);
 	}
 
 	private static bool AppendSearchResult(

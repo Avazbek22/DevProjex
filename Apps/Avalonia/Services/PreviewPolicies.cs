@@ -764,23 +764,72 @@ internal static class PreviewFileCollectionPolicy
         if (selectedPaths.Count == 0)
             return 0;
 
-        var ordered = new List<string>(selectedPaths.Count);
+		return selectedPaths is HashSet<string> hashSet
+			? BuildHashSetFingerprint(hashSet, cancellationToken)
+			: BuildSetFingerprint(selectedPaths, cancellationToken);
+    }
+
+	private static int BuildHashSetFingerprint(
+		HashSet<string> selectedPaths,
+		CancellationToken cancellationToken)
+	{
+		var accumulator = new PathSetHashAccumulator();
 		foreach (var path in selectedPaths)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			ordered.Add(path);
+			accumulator.Add(path);
 		}
-		CancellationAwareSort.Sort(ordered, PathComparer.Default, cancellationToken);
 
-        var hash = new HashCode();
-        foreach (var path in ordered)
+		return accumulator.Complete();
+	}
+
+	private static int BuildSetFingerprint(
+		IEnumerable<string> selectedPaths,
+		CancellationToken cancellationToken)
+	{
+		var accumulator = new PathSetHashAccumulator();
+		foreach (var path in selectedPaths)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-            hash.Add(path, PathComparer.Default);
+			accumulator.Add(path);
 		}
 
-        return hash.ToHashCode();
-    }
+		return accumulator.Complete();
+	}
+
+	private struct PathSetHashAccumulator
+	{
+		private int _count;
+		private uint _sum;
+		private uint _sumOfSquares;
+		private uint _xor;
+
+		public void Add(string path)
+		{
+			_count++;
+			var hash = Mix(unchecked((uint)PathComparer.Default.GetHashCode(path)));
+			unchecked
+			{
+				_sum += hash;
+				_sumOfSquares += hash * hash;
+				_xor ^= hash;
+			}
+		}
+
+		public readonly int Complete() => HashCode.Combine(_count, _sum, _sumOfSquares, _xor);
+
+		private static uint Mix(uint value)
+		{
+			unchecked
+			{
+				value ^= value >> 16;
+				value *= 0x7FEB352D;
+				value ^= value >> 15;
+				value *= 0x846CA68B;
+				return value ^ (value >> 16);
+			}
+		}
+	}
 
     public static int CountSelectedFilesUpToLimit(
         IReadOnlySet<string> selectedPaths,

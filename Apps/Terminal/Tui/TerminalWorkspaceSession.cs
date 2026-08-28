@@ -21,6 +21,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private const int WelcomeHorizontalMargin = 2;
 	private const int WelcomeWideActionsWidth = 42;
 	private const int SettingsRefreshDebounceMilliseconds = 200;
+	private static readonly TimeSpan SettingsPersistenceShutdownBudget = TimeSpan.FromSeconds(1);
 
 	private readonly IApplication _application;
 	private readonly Window _root;
@@ -41,6 +42,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private readonly EventHandler<SizeChangedEventArgs>? _driverSizeChangedHandler;
 	private readonly global::Terminal.Gui.Drivers.IDriver? _subscribedDriver;
 	private readonly CancellationTokenSource _sessionCts;
+	private readonly CancellationTokenSource _settingsPersistenceCts = new();
 	private readonly SemaphoreSlim _operationGate = new(1, 1);
 	private readonly TerminalBackgroundTaskTracker _backgroundTasks = new();
 	private readonly WorkspaceFocusModel _focus = new();
@@ -163,7 +165,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_commandHistory = new TerminalCommandHistory(
 			services.TerminalSettingsStore.LoadCommandHistory());
 		_commandHistoryPersistence = new TerminalCommandHistoryPersistenceQueue(
-			services.TerminalSettingsStore.SaveCommandHistoryAsync);
+			services.TerminalSettingsStore.SaveCommandStateAsync,
+			_settingsPersistenceCts.Token);
 		_sessionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 		_operations = new AsyncOperationCoordinator(_sessionCts.Token);
 		var initialScreen = _application.Driver?.Screen ?? _application.Screen;
@@ -336,6 +339,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	public async Task CompleteAsync()
 	{
 		_stopping = true;
+		await _commandHistoryPersistence.CompleteAsync().ConfigureAwait(false);
+		_settingsPersistenceCts.CancelAfter(SettingsPersistenceShutdownBudget);
 		_sessionCts.Cancel();
 		_operations.Dispose();
 
@@ -519,6 +524,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var commandLine = new TerminalWorkspaceCommandLineView(
 			_application,
 			(text, cursor) => _commandParser.GetCompletion(text, cursor, BuildCommandParseContext()),
+			(text, cursor) => _commandParser.GetGhostCompletion(text, cursor, BuildCommandParseContext()),
 			L,
 			_commandHistory,
 			_options.Plain,
@@ -1354,6 +1360,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				text,
 				cursor,
 				BuildCommandParseContext()),
+			(text, cursor) => _commandParser.GetGhostCompletion(
+				text,
+				cursor,
+				BuildCommandParseContext()),
 			L,
 			_commandHistory,
 			_options.Plain,
@@ -2142,7 +2152,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			CancelCommandResult();
 			_commandLine.Close();
 			RestoreCommandFooterAndFocus();
-			return;
+			if (!TerminalWorkspaceCommandKey.IsActivation(key))
+				return;
 		}
 		if (_operationProgress is not null && IsOverlayActivationKey(key))
 		{
@@ -3342,13 +3353,15 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 						operationCts.Token)
 					.ConfigureAwait(false);
 			}
-			var progress = new SynchronousProgress<ProjectCopyExportProgress>(value =>
-			{
-				_application.Invoke(() =>
-				UpdateMeasuredProgress(
+			using var renderedProgress = new LatestValueProgressRelay<ProjectCopyExportProgress>(
+				action => _application.Invoke(action),
+				value => UpdateMeasuredProgress(
 					value,
 					summary.Kind,
 					progressPhase));
+			var progress = new SynchronousProgress<ProjectCopyExportProgress>(value =>
+			{
+				renderedProgress.Report(value);
 				_operationObserver.ObserveProgress(value, operationCts.Token);
 			});
 			var result = await export(
@@ -3357,6 +3370,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				operationCts.Token).ConfigureAwait(false);
 			if (_stopping)
 				return;
+			await renderedProgress.CompleteAsync().ConfigureAwait(false);
 			await InvokeAsync(() =>
 			{
 				MarkActiveOperationFinished(operationCts);
@@ -3900,16 +3914,15 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			IPreviewTextDocument? pendingDocument = null;
 			try
 			{
-				pendingDocument = await _controller.BuildPreviewDocumentAsync(
+				var build = await _controller.BuildPreviewDocumentWithMetricsAsync(
 						state,
 						view,
 						format,
 						cancellationToken,
 						plain: _options.Plain)
 					.ConfigureAwait(false);
-				var outputMetrics = await ExportOutputMetricsCalculator
-					.FromDocumentAsync(pendingDocument, cancellationToken)
-					.ConfigureAwait(false);
+				pendingDocument = build.Document;
+				var outputMetrics = build.Metrics;
 				var document = pendingDocument;
 				var applied = await InvokeAsync(() =>
 				{
@@ -4966,6 +4979,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_loadingViews = null;
 		_workspaceActionRegistry = null;
 		_workspaceActionRegistryKey = null;
+		_controlSourceStamp = null;
+		_redactionLabelStamp = null;
 		_activeAggregateControlSection = null;
 		previousState?.Dispose();
 		foreach (var view in _root.RemoveAll())
@@ -5092,8 +5107,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private string L(string key)
 	{
 		var value = _workspace.L(key);
-		return _options.Plain ? TerminalPlainText.Normalize(value) : value;
+		return NormalizeLocalizedText(value, _options.Plain, _environment.SupportsUnicode);
 	}
+
+	internal static string NormalizeLocalizedText(
+		string value,
+		bool plain,
+		bool supportsUnicode) =>
+		plain || !supportsUnicode ? TerminalPlainText.Normalize(value) : value;
 
 	public void Dispose()
 	{
@@ -5117,6 +5138,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		state?.Dispose();
 		ReleaseOwnedRepositorySession();
 		_sessionCts.Dispose();
+		_settingsPersistenceCts.Cancel();
+		_settingsPersistenceCts.Dispose();
 		_operationGate.Dispose();
 	}
 

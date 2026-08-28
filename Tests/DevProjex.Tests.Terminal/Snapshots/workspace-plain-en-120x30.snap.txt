@@ -21,10 +21,10 @@ v [x] <PROJECT>                 <PROJECT>
 
 
 
-
-
-
                                                         Files 2  |  Lines 1-5/5
 
+ Content 0/5 | Exclusions 9/10 | File types 2/2
+
+
  Files 2 | Folders 2 | 54 B | ~<TOKENS> tokens | Warnings 0 | Errors 0
- Up/Down Navigate   Enter Expand   Space Toggle   / Search   Tab/F6 Preview   Ctrl+P Actions   ? Help
+ Space Toggle   Shift+h/l Collapse/expand all   Ctrl+A/U Select all/none   R Reveal   : Commands

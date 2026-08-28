@@ -15,24 +15,29 @@ public static class PreviewTextDocumentSearch
 
 		var normalizedQuery = query.Trim();
 		var matches = new List<PreviewTextSearchMatch>();
-		for (var lineIndex = 0; lineIndex < document.LineCount; lineIndex++)
-		{
-			cancellationToken.ThrowIfCancellationRequested();
-			var line = document.GetLineText(lineIndex + 1);
-			var searchStart = 0;
-			while (searchStart <= line.Length)
+		document.VisitLines(
+			1,
+			document.LineCount,
+			(lineNumber, line) =>
 			{
-				var match = line.IndexOf(
-					normalizedQuery,
-					searchStart,
-					StringComparison.OrdinalIgnoreCase);
-				if (match < 0)
-					break;
+				var columnOffset = 0;
+				while (line.Length >= normalizedQuery.Length)
+				{
+					var match = line.IndexOf(
+						normalizedQuery.AsSpan(),
+						StringComparison.OrdinalIgnoreCase);
+					if (match < 0)
+						break;
 
-				matches.Add(new PreviewTextSearchMatch(lineIndex, match));
-				searchStart = match + Math.Max(1, normalizedQuery.Length);
-			}
-		}
+					matches.Add(new PreviewTextSearchMatch(lineNumber - 1, columnOffset + match));
+					var consumed = match + normalizedQuery.Length;
+					columnOffset += consumed;
+					line = line[consumed..];
+				}
+
+				return true;
+			},
+			cancellationToken);
 
 		return matches;
 	}

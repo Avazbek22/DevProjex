@@ -1,5 +1,6 @@
 using DevProjex.Application.Secrets;
 using DevProjex.Application.Compression;
+using DevProjex.Application.Diagnostics;
 
 namespace DevProjex.Tests.Unit;
 
@@ -338,6 +339,7 @@ public sealed class SecretRedactionCacheTests
 		var fingerprint = ContentFingerprint.Compute(content);
 		var detector = new CountingDetector();
 		using var session = new SecretRedactionSession(detector);
+		using var measurement = ContentPipelineDiagnostics.BeginMeasurement();
 
 		var raw = session.BeginOutput(workspace.Path, [path]);
 		var rawPlan = raw.CreatePlan(
@@ -347,6 +349,8 @@ public sealed class SecretRedactionCacheTests
 			fingerprint,
 			TestContext.Current.CancellationToken);
 		_ = raw.Complete();
+		var rawOccurrenceId = Assert.Single(rawPlan.Spans).OccurrenceId;
+		var rawOccurrenceComputations = measurement.Capture().OccurrenceIdComputations;
 
 		var compressed = session.BeginOutput(workspace.Path, [path], "signatures-v1");
 		var compressedPlan = compressed.CreatePlan(
@@ -358,6 +362,9 @@ public sealed class SecretRedactionCacheTests
 		_ = compressed.Complete();
 
 		Assert.Equal(rawPlan.RedactedCount, compressedPlan.RedactedCount);
+		Assert.Equal(1, rawOccurrenceComputations);
+		Assert.Same(rawOccurrenceId, Assert.Single(compressedPlan.Spans).OccurrenceId);
+		Assert.Equal(rawOccurrenceComputations, measurement.Capture().OccurrenceIdComputations);
 		Assert.Equal(1, detector.CallCount);
 		Assert.Equal(2, session.GetCacheDiagnostics().EntryCount);
 

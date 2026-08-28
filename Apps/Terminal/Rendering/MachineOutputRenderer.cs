@@ -1,6 +1,5 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Text.Json.Nodes;
 using DevProjex.Application.Secrets;
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.Execution;
@@ -21,135 +20,25 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 		TextWriter writer,
 		CancellationToken cancellationToken)
 	{
-		var document = new
+		await using (var stream = new Utf8TextWriterStream(writer, cancellationToken))
 		{
-			schemaVersion = 1,
-			kind = "devprojex-analysis",
-			project = new
-			{
-				root = MachinePathPresentation.Normalize(ResolveDocumentRoot(plan)),
-				name = plan.SourceIdentity?.DisplayName ??
-				       Path.GetFileName(Path.TrimEndingDirectorySeparator(plan.SourceRoot)),
-				source = plan.SourceIdentity is
-				{
-					SourceType: ProjectSourceType.GitClone,
-					RepositoryUrl.Length: > 0
-				} identity
-					? new
-					{
-						type = "git",
-						repositoryUrl = identity.RepositoryUrl,
-						branch = identity.Branch,
-						commit = identity.CommitHash
-					}
-					: null
-			},
-			selection = new
-			{
-				gitMode = ProjectSelectionTokens.ToToken(plan.Selection.GitMode!.Value),
-				exclusions = plan.Selection.Exclusions!.Select(ProjectSelectionTokens.ToToken).ToArray(),
-				hideSecrets = plan.Selection.HideSecrets == true,
-				hidePrivateData = plan.Selection.HidePrivateData == true,
-				compressCode = plan.Selection.CompressCode == true,
-				stripComments = plan.Selection.StripComments == true,
-				stripBlankLines = plan.Selection.StripBlankLines == true,
-				roots = plan.SelectedRoots,
-				extensions = plan.SelectedExtensions,
-				selectedPaths = plan.Selection.SelectedPaths ?? []
-			},
-			inventory = new
-			{
-				files = plan.IncludedFiles.Count,
-				folders = plan.IncludedFolders.Count
-			},
-			metrics = new
-			{
-				bytes = plan.IncludedBytes,
-				tree = plan.Analysis.Metrics.Tree,
-				content = plan.Analysis.Metrics.Content
-			},
-			diagnostics = plan.Diagnostics.Select(static diagnostic => new
-			{
-				code = diagnostic.Code,
-				severity = diagnostic.Severity.ToString().ToLowerInvariant(),
-				message = diagnostic.Message,
-				path = diagnostic.Path is null ? null : MachinePathPresentation.Normalize(diagnostic.Path)
-			}),
-			fingerprint = plan.Fingerprint
-		};
-		var json = JsonSerializer.Serialize(document, JsonOptions);
-		if (plan.Redaction is not null ||
-		    plan.Privacy is not null ||
-		    plan.Compression is not null ||
-		    plan.Findings is not null)
-		{
-			var root = JsonNode.Parse(json)?.AsObject() ??
-			           throw new JsonException("The analysis document could not be materialized.");
-			if (plan.Redaction is { } redaction)
-			{
-				root["redaction"] = new JsonObject
-				{
-					["matchedCount"] = redaction.MatchedCount,
-					["redactedCount"] = redaction.RedactedCount,
-					["notice"] = redaction.MatchedCount == 0
-						? SecretRedactionLegendText.English.NoFindingsNotice
-						: SecretRedactionLegendText.English.Notice
-				};
-			}
-			if (plan.Privacy is { } privacy)
-			{
-				root["privacy"] = new JsonObject
-				{
-					["matchedCount"] = privacy.MatchedCount,
-					["redactedCount"] = privacy.RedactedCount,
-					["notice"] = privacy.MatchedCount == 0
-						? SecretRedactionLegendText.PrivacyEnglish.NoFindingsNotice
-						: SecretRedactionLegendText.PrivacyEnglish.Notice
-				};
-			}
-			if (plan.Compression is { } compression)
-			{
-				root["compression"] = new JsonObject
-				{
-					["compressedFiles"] = compression.CompressedFiles,
-					["unchangedFiles"] = compression.UnchangedFiles,
-					["sourceCharacters"] = compression.SourceCharacters,
-					["transformedCharacters"] = compression.TransformedCharacters,
-					["bodyTransformedFiles"] = compression.BodyTransformedFiles,
-					["commentTransformedFiles"] = compression.CommentTransformedFiles,
-					["blankLineTransformedFiles"] = compression.BlankLineTransformedFiles
-				};
-			}
-			if (plan.Findings is { } findings)
-			{
-				root["findings"] = new JsonArray(findings.Select(finding =>
-					(JsonNode)new JsonObject
-					{
-						["ruleId"] = finding.RuleId,
-						["category"] = finding.Category == RedactionFindingCategory.Secrets
-							? "secret"
-							: "private-data",
-						["relativePath"] = PathUtility.NormalizeSeparators(finding.RelativePath),
-						["lineNumber"] = finding.LineNumber
-					}).ToArray());
-			}
-			if (plan.UnscannableFiles is { Count: > 0 } unscannableFiles)
-			{
-				root["contentInspection"] = new JsonObject
-				{
-					["unscannableCount"] = unscannableFiles.Count,
-					["unscannableFiles"] = new JsonArray(unscannableFiles.Select(file =>
-						(JsonNode)new JsonObject
-						{
-							["path"] = PathUtility.GetPortableRelativePath(plan.SourceRoot, file.Path),
-							["reason"] = UnscannableFileOutput.ToReasonToken(file.Classification)
-						}).ToArray())
-				};
-			}
-			json = root.ToJsonString(JsonOptions);
+			await WriteAnalysisJsonContentAsync(plan, stream, cancellationToken)
+				.ConfigureAwait(false);
+			await stream.CompleteAsync(cancellationToken).ConfigureAwait(false);
 		}
-		await writer.WriteLineAsync(json.AsMemory(), cancellationToken).ConfigureAwait(false);
+		await writer.WriteLineAsync(ReadOnlyMemory<char>.Empty, cancellationToken)
+			.ConfigureAwait(false);
 	}
+
+	internal Task WriteAnalysisJsonContentAsync(
+		ProjectContextPlan plan,
+		Stream destination,
+		CancellationToken cancellationToken) =>
+		JsonSerializer.SerializeAsync(
+			destination,
+			CreateAnalysisDocument(plan),
+			JsonOptions,
+			cancellationToken);
 
 	public TextWriter StandardOutput => environment.Output;
 
@@ -161,4 +50,183 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 		} identity
 			? identity.SourceReference
 			: plan.SourceRoot;
+
+	private static AnalysisDocument CreateAnalysisDocument(ProjectContextPlan plan)
+	{
+		var identity = plan.SourceIdentity;
+		var hasExtendedContent = plan.Redaction is not null ||
+		                         plan.Privacy is not null ||
+		                         plan.Compression is not null ||
+		                         plan.Findings is not null;
+		return new AnalysisDocument(
+			SchemaVersion: 1,
+			Kind: "devprojex-analysis",
+			Project: new AnalysisProjectDocument(
+				MachinePathPresentation.Normalize(ResolveDocumentRoot(plan)),
+				identity?.DisplayName ??
+				Path.GetFileName(Path.TrimEndingDirectorySeparator(plan.SourceRoot)),
+				identity is
+				{
+					SourceType: ProjectSourceType.GitClone,
+					RepositoryUrl.Length: > 0
+				}
+					? new AnalysisGitSourceDocument(
+						"git",
+						identity.RepositoryUrl,
+						identity.Branch,
+						identity.CommitHash)
+					: null),
+			Selection: new AnalysisSelectionDocument(
+				ProjectSelectionTokens.ToToken(plan.Selection.GitMode!.Value),
+				plan.Selection.Exclusions!.Select(ProjectSelectionTokens.ToToken).ToArray(),
+				plan.Selection.HideSecrets == true,
+				plan.Selection.HidePrivateData == true,
+				plan.Selection.CompressCode == true,
+				plan.Selection.StripComments == true,
+				plan.Selection.StripBlankLines == true,
+				plan.SelectedRoots,
+				plan.SelectedExtensions,
+				plan.Selection.SelectedPaths ?? []),
+			Inventory: new AnalysisInventoryDocument(
+				plan.IncludedFiles.Count,
+				plan.IncludedFolders.Count),
+			Metrics: new AnalysisMetricsDocument(
+				plan.IncludedBytes,
+				plan.Analysis.Metrics.Tree,
+				plan.Analysis.Metrics.Content),
+			Diagnostics: plan.Diagnostics.Select(static diagnostic =>
+				new AnalysisDiagnosticDocument(
+					diagnostic.Code,
+					diagnostic.Severity.ToString().ToLowerInvariant(),
+					diagnostic.Message,
+					diagnostic.Path is null
+						? null
+						: MachinePathPresentation.Normalize(diagnostic.Path))),
+			Fingerprint: plan.Fingerprint,
+			Redaction: plan.Redaction is { } redaction
+				? new AnalysisRedactionDocument(
+					redaction.MatchedCount,
+					redaction.RedactedCount,
+					redaction.MatchedCount == 0
+						? SecretRedactionLegendText.English.NoFindingsNotice
+						: SecretRedactionLegendText.English.Notice)
+				: null,
+			Privacy: plan.Privacy is { } privacy
+				? new AnalysisRedactionDocument(
+					privacy.MatchedCount,
+					privacy.RedactedCount,
+					privacy.MatchedCount == 0
+						? SecretRedactionLegendText.PrivacyEnglish.NoFindingsNotice
+						: SecretRedactionLegendText.PrivacyEnglish.Notice)
+				: null,
+			Compression: plan.Compression is { } compression
+				? new AnalysisCompressionDocument(
+					compression.CompressedFiles,
+					compression.UnchangedFiles,
+					compression.SourceCharacters,
+					compression.TransformedCharacters,
+					compression.BodyTransformedFiles,
+					compression.CommentTransformedFiles,
+					compression.BlankLineTransformedFiles)
+				: null,
+			Findings: plan.Findings?.Select(static finding =>
+				new AnalysisFindingDocument(
+					finding.RuleId,
+					finding.Category == RedactionFindingCategory.Secrets
+						? "secret"
+						: "private-data",
+					PathUtility.NormalizeSeparators(finding.RelativePath),
+					finding.LineNumber)),
+			ContentInspection: hasExtendedContent &&
+			                   plan.UnscannableFiles is { Count: > 0 } unscannableFiles
+				? new AnalysisContentInspectionDocument(
+					unscannableFiles.Count,
+					unscannableFiles.Select(file =>
+						new AnalysisUnscannableFileDocument(
+							PathUtility.GetPortableRelativePath(plan.SourceRoot, file.Path),
+							UnscannableFileOutput.ToReasonToken(file.Classification))))
+				: null);
+	}
+
+	private sealed record AnalysisDocument(
+		int SchemaVersion,
+		string Kind,
+		AnalysisProjectDocument Project,
+		AnalysisSelectionDocument Selection,
+		AnalysisInventoryDocument Inventory,
+		AnalysisMetricsDocument Metrics,
+		IEnumerable<AnalysisDiagnosticDocument> Diagnostics,
+		string Fingerprint,
+		[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+		AnalysisRedactionDocument? Redaction,
+		[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+		AnalysisRedactionDocument? Privacy,
+		[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+		AnalysisCompressionDocument? Compression,
+		[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+		IEnumerable<AnalysisFindingDocument>? Findings,
+		[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+		AnalysisContentInspectionDocument? ContentInspection);
+
+	private readonly record struct AnalysisProjectDocument(
+		string Root,
+		string Name,
+		AnalysisGitSourceDocument? Source);
+
+	private readonly record struct AnalysisGitSourceDocument(
+		string Type,
+		string RepositoryUrl,
+		string? Branch,
+		string? Commit);
+
+	private readonly record struct AnalysisSelectionDocument(
+		string GitMode,
+		IReadOnlyList<string> Exclusions,
+		bool HideSecrets,
+		bool HidePrivateData,
+		bool CompressCode,
+		bool StripComments,
+		bool StripBlankLines,
+		IReadOnlyList<string> Roots,
+		IReadOnlyList<string> Extensions,
+		IReadOnlyCollection<string> SelectedPaths);
+
+	private readonly record struct AnalysisInventoryDocument(int Files, int Folders);
+
+	private readonly record struct AnalysisMetricsDocument(
+		long Bytes,
+		ProjectOutputMetricsReport Tree,
+		ProjectOutputMetricsReport Content);
+
+	private readonly record struct AnalysisDiagnosticDocument(
+		string Code,
+		string Severity,
+		string Message,
+		string? Path);
+
+	private readonly record struct AnalysisRedactionDocument(
+		int MatchedCount,
+		int RedactedCount,
+		string Notice);
+
+	private readonly record struct AnalysisCompressionDocument(
+		int CompressedFiles,
+		int UnchangedFiles,
+		long SourceCharacters,
+		long TransformedCharacters,
+		int BodyTransformedFiles,
+		int CommentTransformedFiles,
+		int BlankLineTransformedFiles);
+
+	private readonly record struct AnalysisFindingDocument(
+		string RuleId,
+		string Category,
+		string RelativePath,
+		int LineNumber);
+
+	private sealed record AnalysisContentInspectionDocument(
+		int UnscannableCount,
+		IEnumerable<AnalysisUnscannableFileDocument> UnscannableFiles);
+
+	private readonly record struct AnalysisUnscannableFileDocument(string Path, string Reason);
 }

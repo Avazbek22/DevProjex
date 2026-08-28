@@ -1,16 +1,20 @@
+using System.Buffers;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Security.Cryptography;
 
 namespace DevProjex.Mcp;
 
-public sealed class McpPackRegistry : IDisposable
+public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 {
+	private const int LineCheckpointInterval = 256;
 	internal const long MaximumPackBytes = 200L * 1024 * 1024;
 	internal const long MaximumSessionBytes = 1024L * 1024 * 1024;
 	private const UnixFileMode PrivateDirectoryMode =
 		UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
 	private const UnixFileMode PrivateFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
 	private static readonly TimeSpan StaleAge = TimeSpan.FromHours(24);
+	private static readonly TimeSpan ScavengeShutdownTimeout = TimeSpan.FromSeconds(5);
 	private static readonly ConcurrentDictionary<string, byte> ActiveSessions = new(PathComparer.Default);
 	private readonly Dictionary<string, PackEntry> _packs = new(StringComparer.Ordinal);
 	private readonly string _sessionDirectory;
@@ -18,9 +22,12 @@ public sealed class McpPackRegistry : IDisposable
 	private readonly long _maximumPackBytes;
 	private readonly long _maximumSessionBytes;
 	private readonly object _sync = new();
+	private readonly CancellationTokenSource _scavengeCancellation = new();
+	private readonly Task _scavengeTask;
 	private long _allocatedBytes;
 	private int _activeCreates;
 	private bool _disposed;
+	private Task? _disposeTask;
 
 	public McpPackRegistry(string? tempRoot = null, TimeProvider? timeProvider = null)
 		: this(tempRoot, timeProvider, MaximumPackBytes, MaximumSessionBytes)
@@ -32,7 +39,8 @@ public sealed class McpPackRegistry : IDisposable
 		TimeProvider? timeProvider,
 		long maximumPackBytes,
 		long maximumSessionBytes,
-		Action<string>? onSessionDirectoryCreated = null)
+		Action<string>? onSessionDirectoryCreated = null,
+		Func<CancellationToken, Task>? scavengeOperation = null)
 	{
 		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumPackBytes);
 		ArgumentOutOfRangeException.ThrowIfLessThan(maximumSessionBytes, maximumPackBytes);
@@ -43,7 +51,6 @@ public sealed class McpPackRegistry : IDisposable
 		EnsurePrivateDirectory(productDirectory);
 		var baseDirectory = Path.Combine(productDirectory, "mcp");
 		EnsurePrivateDirectory(baseDirectory);
-		Scavenge(baseDirectory, TimeProvider.GetUtcNow());
 		_sessionDirectory = Path.Combine(baseDirectory, Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant());
 		var sessionDirectoryExisted = Directory.Exists(_sessionDirectory);
 		try
@@ -65,10 +72,19 @@ public sealed class McpPackRegistry : IDisposable
 			throw;
 		}
 		ActiveSessions.TryAdd(_sessionDirectory, 0);
+		var scavengeTimestamp = TimeProvider.GetUtcNow();
+		_scavengeTask = Task.Run(
+			() => RunScavengeAsync(
+				baseDirectory,
+				scavengeTimestamp,
+				scavengeOperation,
+				_scavengeCancellation.Token),
+			CancellationToken.None);
 	}
 
 	internal TimeProvider TimeProvider { get; }
 	internal string SessionDirectory => _sessionDirectory;
+	internal Task ScavengingCompletion => _scavengeTask;
 
 	public async Task<string> StoreAsync(string content, CancellationToken cancellationToken)
 	{
@@ -119,7 +135,10 @@ public sealed class McpPackRegistry : IDisposable
 					path,
 					metrics.Lines,
 					metrics.Characters,
-					reservation.Bytes);
+					reservation.Bytes)
+				{
+					LineCheckpoints = metrics.LineCheckpoints
+				};
 				lock (_sync)
 				{
 					ObjectDisposedException.ThrowIf(_disposed, this);
@@ -171,19 +190,75 @@ public sealed class McpPackRegistry : IDisposable
 		return entry.Document;
 	}
 
-	public void Dispose()
+	public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+	public ValueTask DisposeAsync()
 	{
-		bool cleanupNow;
+		Task disposal;
 		lock (_sync)
 		{
-			if (_disposed)
-				return;
-			_disposed = true;
-			cleanupNow = _activeCreates == 0;
+			if (_disposeTask is null)
+			{
+				_disposed = true;
+				_disposeTask = DisposeCoreAsync(_activeCreates == 0);
+			}
+			disposal = _disposeTask;
+		}
+		return new ValueTask(disposal);
+	}
+
+	private async Task DisposeCoreAsync(bool cleanupSession)
+	{
+		try
+		{
+			_scavengeCancellation.Cancel(throwOnFirstException: false);
+		}
+		catch (Exception exception)
+		{
+			Trace.TraceWarning("MCP pack scavenging cancellation failed: {0}", exception.Message);
+		}
+		var completed = false;
+		try
+		{
+			await _scavengeTask.WaitAsync(ScavengeShutdownTimeout).ConfigureAwait(false);
+			completed = true;
+		}
+		catch (TimeoutException)
+		{
+			Trace.TraceWarning(
+				"MCP pack scavenging shutdown exceeded {0} seconds.",
+				ScavengeShutdownTimeout.TotalSeconds);
+			_ = ObserveLateScavengeCompletionAsync();
+		}
+		catch (Exception exception)
+		{
+			completed = _scavengeTask.IsCompleted;
+			Trace.TraceWarning("MCP pack scavenging failed during shutdown: {0}", exception.Message);
+		}
+		finally
+		{
+			if (completed)
+				_scavengeCancellation.Dispose();
 		}
 
-		if (cleanupNow)
+		if (cleanupSession)
 			CleanupSessionDirectory();
+	}
+
+	private async Task ObserveLateScavengeCompletionAsync()
+	{
+		try
+		{
+			await _scavengeTask.ConfigureAwait(false);
+		}
+		catch (Exception exception)
+		{
+			Trace.TraceWarning("MCP pack scavenging failed after shutdown: {0}", exception.Message);
+		}
+		finally
+		{
+			_scavengeCancellation.Dispose();
+		}
 	}
 
 	private void BeginCreate()
@@ -220,12 +295,39 @@ public sealed class McpPackRegistry : IDisposable
 		}
 	}
 
-	private static void Scavenge(string baseDirectory, DateTimeOffset now)
+	private static async Task RunScavengeAsync(
+		string baseDirectory,
+		DateTimeOffset now,
+		Func<CancellationToken, Task>? scavengeOperation,
+		CancellationToken cancellationToken)
 	{
+		try
+		{
+			if (scavengeOperation is not null)
+				await scavengeOperation(cancellationToken).ConfigureAwait(false);
+			else
+				Scavenge(baseDirectory, now, cancellationToken);
+		}
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+		{
+		}
+		catch (Exception exception)
+		{
+			Trace.TraceWarning("MCP pack scavenging failed: {0}", exception.Message);
+		}
+	}
+
+	private static void Scavenge(
+		string baseDirectory,
+		DateTimeOffset now,
+		CancellationToken cancellationToken)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
 		if (!Directory.Exists(baseDirectory))
 			return;
 		foreach (var directory in Directory.EnumerateDirectories(baseDirectory))
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			try
 			{
 				if (!IsOwnedSessionDirectory(directory))
@@ -240,6 +342,7 @@ public sealed class McpPackRegistry : IDisposable
 					FileMode.Open,
 					FileAccess.ReadWrite,
 					FileShare.Delete);
+				cancellationToken.ThrowIfCancellationRequested();
 				Directory.Delete(directory, recursive: true);
 			}
 			catch (IOException)
@@ -420,12 +523,17 @@ public sealed class McpPackRegistry : IDisposable
 
 	private sealed class QuotaWriteStream(Stream inner, PackReservation reservation) : Stream
 	{
+		private static readonly SearchValues<byte> LineEndingBytes = SearchValues.Create("\r\n"u8);
 		private readonly Decoder _decoder = new UTF8Encoding(false, true).GetDecoder();
 		private readonly char[] _characterBuffer = new char[16 * 1024];
 		private long _characters;
 		private int _lineBreaks;
 		private bool _previousCarriageReturn;
 		private bool _metricsCompleted;
+		private readonly List<McpPackLineCheckpoint> _lineCheckpoints = [new(1, 0)];
+		private long _indexedBytes;
+		private long _pendingCarriageReturnLineOffset = -1;
+		private int _indexedLineNumber = 1;
 
 		public override bool CanRead => false;
 		public override bool CanSeek => false;
@@ -481,10 +589,12 @@ public sealed class McpPackRegistry : IDisposable
 			if (_metricsCompleted)
 				throw new InvalidOperationException("Pack text metrics have already been completed.");
 			_metricsCompleted = true;
+			CompletePendingCarriageReturn();
 			Decode([], flush: true);
 			return new PackTextMetrics(
 				_characters,
-				_characters == 0 ? 0 : checked(_lineBreaks + 1));
+				_characters == 0 ? 0 : checked(_lineBreaks + 1),
+				_lineCheckpoints.ToArray());
 		}
 
 		public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
@@ -508,7 +618,68 @@ public sealed class McpPackRegistry : IDisposable
 		{
 			if (_metricsCompleted)
 				throw new InvalidOperationException("Cannot write after pack text metrics are completed.");
+			AppendLineCheckpoints(bytes);
 			Decode(bytes, flush: false);
+		}
+
+		private void AppendLineCheckpoints(ReadOnlySpan<byte> bytes)
+		{
+			var index = 0;
+			if (_pendingCarriageReturnLineOffset >= 0 && !bytes.IsEmpty)
+			{
+				if (bytes[0] == (byte)'\n')
+				{
+					RecordLineStart(_indexedBytes + 1);
+					_pendingCarriageReturnLineOffset = -1;
+					index = 1;
+				}
+				else
+					CompletePendingCarriageReturn();
+			}
+
+			while (index < bytes.Length)
+			{
+				var relativeOffset = bytes[index..].IndexOfAny(LineEndingBytes);
+				if (relativeOffset < 0)
+					break;
+				index += relativeOffset;
+				var value = bytes[index];
+				var absoluteOffset = _indexedBytes + index;
+				if (value == (byte)'\r')
+				{
+					if (index + 1 < bytes.Length)
+					{
+						if (bytes[index + 1] == (byte)'\n')
+						{
+							RecordLineStart(absoluteOffset + 2);
+							index += 2;
+							continue;
+						}
+						RecordLineStart(absoluteOffset + 1);
+					}
+					else
+						_pendingCarriageReturnLineOffset = absoluteOffset + 1;
+				}
+				else
+					RecordLineStart(absoluteOffset + 1);
+				index++;
+			}
+			_indexedBytes += bytes.Length;
+		}
+
+		private void CompletePendingCarriageReturn()
+		{
+			if (_pendingCarriageReturnLineOffset < 0)
+				return;
+			RecordLineStart(_pendingCarriageReturnLineOffset);
+			_pendingCarriageReturnLineOffset = -1;
+		}
+
+		private void RecordLineStart(long byteOffset)
+		{
+			_indexedLineNumber++;
+			if ((_indexedLineNumber - 1) % LineCheckpointInterval == 0)
+				_lineCheckpoints.Add(new McpPackLineCheckpoint(_indexedLineNumber, byteOffset));
 		}
 
 		private void Decode(ReadOnlySpan<byte> bytes, bool flush)
@@ -550,7 +721,35 @@ public sealed class McpPackRegistry : IDisposable
 		}
 	}
 
-	private readonly record struct PackTextMetrics(long Characters, int Lines);
+	private readonly record struct PackTextMetrics(
+		long Characters,
+		int Lines,
+		McpPackLineCheckpoint[] LineCheckpoints);
 }
 
-public sealed record McpPackDocument(string Id, string Path, int Lines, long Characters, long Bytes);
+internal readonly record struct McpPackLineCheckpoint(int LineNumber, long ByteOffset);
+
+public sealed record McpPackDocument(string Id, string Path, int Lines, long Characters, long Bytes)
+{
+	internal IReadOnlyList<McpPackLineCheckpoint> LineCheckpoints { get; init; } =
+		[new McpPackLineCheckpoint(1, 0)];
+
+	internal McpPackLineCheckpoint ResolveLineCheckpoint(int lineNumber)
+	{
+		var low = 0;
+		var high = LineCheckpoints.Count - 1;
+		while (low <= high)
+		{
+			var middle = low + ((high - low) / 2);
+			var checkpoint = LineCheckpoints[middle];
+			if (checkpoint.LineNumber == lineNumber)
+				return checkpoint;
+			if (checkpoint.LineNumber < lineNumber)
+				low = middle + 1;
+			else
+				high = middle - 1;
+		}
+
+		return LineCheckpoints[Math.Max(0, high)];
+	}
+}

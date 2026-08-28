@@ -618,7 +618,7 @@ public sealed class CliExpansionCommandTests
 		using var data = new TemporaryDirectory();
 		const string repositoryUrl = "https://github.com/example/leased.git";
 		var factory = new TerminalServiceFactory(() => data.Path);
-		var services = factory.Create(AppLanguage.En);
+		using var services = factory.Create(AppLanguage.En);
 		var staging = services.RepoCacheService.CreateRepositoryStagingDirectory(repositoryUrl);
 		File.WriteAllText(Path.Combine(staging, "README.md"), "cached\n");
 		var published = services.RepoCacheService.PublishRepositoryDirectory(staging, repositoryUrl);
@@ -650,6 +650,7 @@ public sealed class CliExpansionCommandTests
 		Assert.Contains("Removed: 0. Retained: 1. Failed: 0.", retainedEnvironment.StandardOutput);
 		Assert.True(Directory.Exists(published));
 
+		services.Dispose();
 		session.Dispose();
 		var removedEnvironment = new TestTerminalEnvironment();
 		var removedExitCode = await new TerminalApplication(removedEnvironment, factory).RunAsync(
@@ -725,11 +726,7 @@ public sealed class CliExpansionCommandTests
 		File.WriteAllText(Path.Combine(published, "README.md"), "cached\n");
 		var cache = new UpdatingRepoCacheService(repositoryUrl, published);
 		var git = new UpdatingGitRepositoryService();
-		var commandServices = services with
-		{
-			GitRepositoryService = git,
-			RepoCacheService = cache
-		};
+		var commandServices = new TerminalCacheServices(services.Localization, cache, git);
 		var environment = new TestTerminalEnvironment();
 
 		var exitCode = await new CacheCommandHandler(commandServices, environment)
@@ -854,9 +851,12 @@ public sealed class CliExpansionCommandTests
 		public CacheClearResult ClearAllCacheWithResult() => throw Unexpected();
 		public CacheClearResult RemoveCachedRepositoryWithResult(string repositoryUrl) => throw Unexpected();
 		public void CleanupStaleCacheOnStartup() => throw Unexpected();
+		public void RequestStaleCacheCleanupOnStartup() { }
 		public void CollectGarbage() => throw Unexpected();
+		public void RequestGarbageCollection() { }
 		public bool IsInCache(string path) => throw Unexpected();
 		public bool PathsBelongToSameRepository(string left, string right) => throw Unexpected();
+		public void Dispose() { }
 
 		private static InvalidOperationException Unexpected() =>
 			new("Unexpected repository-cache operation.");

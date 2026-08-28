@@ -146,10 +146,7 @@ public sealed partial class SelectionSyncCoordinator
 
         _session.Extensions.RestoreProfile(selected, exactStates);
         _session.ExtensionSelectionIsExplicit = true;
-        SyncAllCheckbox(
-            viewModel.Extensions,
-            ref _suppressExtensionAllCheck,
-            value => viewModel.AllExtensionsChecked = value);
+        RebuildVisibleExtensionAggregate();
         return changed;
     }
 
