@@ -5,6 +5,7 @@ namespace DevProjex.Terminal.CommandLine;
 internal sealed class SelectionOptions
 {
 	private readonly ITerminalEnvironment _environment;
+	private readonly LocalizationService _localization;
 	private readonly bool _includeHidePrivateData;
 	private readonly bool _includeContentTransformations;
 	public Option<CliProfileValue> Profile { get; }
@@ -15,12 +16,30 @@ internal sealed class SelectionOptions
 	public Option<string?> SelectedPathsSource { get; }
 	public Option<GitFilteringMode?> GitMode { get; }
 	public Option<CliExclusionValue[]> Exclusions { get; }
-	public Option<bool> HideSecrets { get; }
-	public Option<bool> HidePrivateData { get; }
-	public Option<bool> CompressCode { get; }
-	public Option<bool> StripComments { get; }
-	public Option<bool> StripBlankLines { get; }
+	public Option<string?> HideSecrets { get; }
+	public Option<bool> NoHideSecrets { get; }
+	public Option<string?> HidePrivateData { get; }
+	public Option<bool> NoHidePrivateData { get; }
+	public Option<string?> CompressCode { get; }
+	public Option<bool> NoCompressCode { get; }
+	public Option<string?> StripComments { get; }
+	public Option<bool> NoStripComments { get; }
+	public Option<string?> StripBlankLines { get; }
+	public Option<bool> NoStripBlankLines { get; }
 	public bool IncludesHidePrivateData => _includeHidePrivateData;
+	public IReadOnlyList<Option> AllSymbols =>
+	[
+		Profile,
+		Roots,
+		Extensions,
+		SelectedPaths,
+		SelectedPathsSource,
+		GitMode,
+		Exclusions,
+		.. (_includeContentTransformations
+			? ContentTransformationSymbols()
+			: [])
+	];
 
 	public SelectionOptions(
 		LocalizationService localization,
@@ -30,6 +49,7 @@ internal sealed class SelectionOptions
 		bool includeContentTransformations = true)
 	{
 		_environment = environment;
+		_localization = localization;
 		_includeContentTransformations = includeContentTransformations;
 		_includeHidePrivateData = includeContentTransformations && includeHidePrivateData;
 		Profile = CliChoiceSymbols.ProfileOption(
@@ -39,15 +59,18 @@ internal sealed class SelectionOptions
 			allowAuto: defaultProfile.Equals("auto", StringComparison.Ordinal));
 		Roots = Repeatable(
 			"--root",
+			"-r",
 			localization["Terminal.Option.Root"],
 			"PATH",
 			FileSystemCompletionKind.Directories);
 		Extensions = Repeatable(
 			"--extension",
+			"-e",
 			localization["Terminal.Option.Extension"],
 			"EXT");
 		SelectedPaths = Repeatable(
 			"--select",
+			"-s",
 			localization["Terminal.Option.Select"],
 			"RELATIVE_PATH",
 			FileSystemCompletionKind.FilesAndDirectories);
@@ -67,26 +90,26 @@ internal sealed class SelectionOptions
 			CliChoiceSets.GitMode,
 			localization);
 		Exclusions = RepeatableExclusions(localization);
-		HideSecrets = new Option<bool>("--hide-secrets")
-		{
-			Description = localization["Terminal.Option.HideSecrets"]
-		};
-		HidePrivateData = new Option<bool>("--hide-private-data")
-		{
-			Description = localization["Terminal.Option.HidePrivateData"]
-		};
-		CompressCode = new Option<bool>("--compress-code")
-		{
-			Description = localization["Terminal.Option.CompressCode"]
-		};
-		StripComments = new Option<bool>("--strip-comments")
-		{
-			Description = localization["Terminal.Option.StripComments"]
-		};
-		StripBlankLines = new Option<bool>("--strip-blank-lines")
-		{
-			Description = localization["Terminal.Option.StripBlankLines"]
-		};
+		(HideSecrets, NoHideSecrets) = CreateToggle(
+			"--hide-secrets", "--no-hide-secrets",
+			"Terminal.Option.HideSecrets", "Terminal.Option.NoHideSecrets",
+			localization);
+		(HidePrivateData, NoHidePrivateData) = CreateToggle(
+			"--hide-private-data", "--no-hide-private-data",
+			"Terminal.Option.HidePrivateData", "Terminal.Option.NoHidePrivateData",
+			localization);
+		(CompressCode, NoCompressCode) = CreateToggle(
+			"--compress-code", "--no-compress-code",
+			"Terminal.Option.CompressCode", "Terminal.Option.NoCompressCode",
+			localization);
+		(StripComments, NoStripComments) = CreateToggle(
+			"--strip-comments", "--no-strip-comments",
+			"Terminal.Option.StripComments", "Terminal.Option.NoStripComments",
+			localization);
+		(StripBlankLines, NoStripBlankLines) = CreateToggle(
+			"--strip-blank-lines", "--no-strip-blank-lines",
+			"Terminal.Option.StripBlankLines", "Terminal.Option.NoStripBlankLines",
+			localization);
 	}
 
 	public void AddTo(Command command)
@@ -101,11 +124,32 @@ internal sealed class SelectionOptions
 		if (_includeContentTransformations)
 		{
 			command.Options.Add(HideSecrets);
+			command.Options.Add(NoHideSecrets);
 			if (_includeHidePrivateData)
+			{
 				command.Options.Add(HidePrivateData);
+				command.Options.Add(NoHidePrivateData);
+			}
 			command.Options.Add(CompressCode);
+			command.Options.Add(NoCompressCode);
 			command.Options.Add(StripComments);
+			command.Options.Add(NoStripComments);
 			command.Options.Add(StripBlankLines);
+			command.Options.Add(NoStripBlankLines);
+			command.Validators.Add(result =>
+			{
+				foreach (var (positive, negative) in TogglePairs())
+				{
+					if (result.GetResult(positive) is { Implicit: false } &&
+					    result.GetResult(negative) is { Implicit: false })
+					{
+						result.AddError(LocalizedParseError.Create(_localization.Format(
+							"Terminal.Validation.BooleanOptionConflict",
+							positive.Name,
+							negative.Name)));
+					}
+				}
+			});
 		}
 	}
 
@@ -141,25 +185,20 @@ internal sealed class SelectionOptions
 		var exclusions = parseResult.GetResult(Exclusions) is null
 			? null
 			: ParseExclusions(parseResult.GetValue(Exclusions) ?? []);
-		bool? hideSecrets = _includeContentTransformations &&
-		                    parseResult.GetResult(HideSecrets) is { Implicit: false }
-			? parseResult.GetValue(HideSecrets)
+		bool? hideSecrets = _includeContentTransformations
+			? ResolveToggle(parseResult, HideSecrets, NoHideSecrets)
 			: null;
-		bool? hidePrivateData = _includeHidePrivateData &&
-		                        parseResult.GetResult(HidePrivateData) is { Implicit: false }
-			? parseResult.GetValue(HidePrivateData)
+		bool? hidePrivateData = _includeHidePrivateData
+			? ResolveToggle(parseResult, HidePrivateData, NoHidePrivateData)
 			: null;
-		bool? compressCode = _includeContentTransformations &&
-		                     parseResult.GetResult(CompressCode) is { Implicit: false }
-			? parseResult.GetValue(CompressCode)
+		bool? compressCode = _includeContentTransformations
+			? ResolveToggle(parseResult, CompressCode, NoCompressCode)
 			: null;
-		bool? stripComments = _includeContentTransformations &&
-		                      parseResult.GetResult(StripComments) is { Implicit: false }
-			? parseResult.GetValue(StripComments)
+		bool? stripComments = _includeContentTransformations
+			? ResolveToggle(parseResult, StripComments, NoStripComments)
 			: null;
-		bool? stripBlankLines = _includeContentTransformations &&
-		                        parseResult.GetResult(StripBlankLines) is { Implicit: false }
-			? parseResult.GetValue(StripBlankLines)
+		bool? stripBlankLines = _includeContentTransformations
+			? ResolveToggle(parseResult, StripBlankLines, NoStripBlankLines)
 			: null;
 		SelectedPathExistenceValidator.Validate(projectPath, selectedPaths);
 		var overrides = new ProjectSelectionSpec(
@@ -231,11 +270,12 @@ internal sealed class SelectionOptions
 
 	private static Option<string[]> Repeatable(
 		string name,
+		string alias,
 		string description,
 		string helpName,
 		FileSystemCompletionKind? completionKind = null)
 	{
-		var option = new Option<string[]>(name)
+		var option = new Option<string[]>(name, alias)
 		{
 			Description = description,
 			HelpName = helpName,
@@ -254,10 +294,10 @@ internal sealed class SelectionOptions
 
 	private static Option<CliExclusionValue[]> RepeatableExclusions(LocalizationService localization)
 	{
-		var option = new Option<CliExclusionValue[]>("--exclude")
+		var option = new Option<CliExclusionValue[]>("--exclude", "-x")
 		{
 			Description = localization["Terminal.Option.Exclude"],
-			HelpName = string.Join('|', CliChoiceSets.Exclusion.Tokens),
+			HelpName = "NAME",
 			Arity = ArgumentArity.OneOrMore,
 			AllowMultipleArgumentsPerToken = false,
 			CustomParser = result =>
@@ -287,5 +327,95 @@ internal sealed class SelectionOptions
 		};
 		option.CompletionSources.Add(CliChoiceSets.Exclusion.Tokens.ToArray());
 		return option;
+	}
+
+	private IReadOnlyList<Option> ContentTransformationSymbols()
+	{
+		var symbols = new List<Option>
+		{
+			HideSecrets,
+			NoHideSecrets
+		};
+		if (_includeHidePrivateData)
+		{
+			symbols.Add(HidePrivateData);
+			symbols.Add(NoHidePrivateData);
+		}
+		symbols.AddRange([
+			CompressCode,
+			NoCompressCode,
+			StripComments,
+			NoStripComments,
+			StripBlankLines,
+			NoStripBlankLines
+		]);
+		return symbols;
+	}
+
+	private IEnumerable<(Option<string?> Positive, Option<bool> Negative)> TogglePairs()
+	{
+		yield return (HideSecrets, NoHideSecrets);
+		if (_includeHidePrivateData)
+			yield return (HidePrivateData, NoHidePrivateData);
+		yield return (CompressCode, NoCompressCode);
+		yield return (StripComments, NoStripComments);
+		yield return (StripBlankLines, NoStripBlankLines);
+	}
+
+	private static bool? ResolveToggle(
+		ParseResult parseResult,
+		Option<string?> positive,
+		Option<bool> negative)
+	{
+		if (parseResult.GetResult(negative) is { Implicit: false })
+			return false;
+		if (parseResult.GetResult(positive) is not { Implicit: false })
+			return null;
+		return parseResult.GetValue(positive) switch
+		{
+			null => true,
+			var value when value.Equals("true", StringComparison.OrdinalIgnoreCase) => true,
+			var value when value.Equals("on", StringComparison.OrdinalIgnoreCase) => true,
+			_ => false
+		};
+	}
+
+	private static (Option<string?> Positive, Option<bool> Negative) CreateToggle(
+		string positiveName,
+		string negativeName,
+		string positiveDescriptionKey,
+		string negativeDescriptionKey,
+		LocalizationService localization)
+	{
+		var positive = new Option<string?>(positiveName)
+		{
+			Description = localization[positiveDescriptionKey],
+			HelpName = "on|off",
+			Arity = ArgumentArity.ZeroOrOne,
+			CustomParser = result =>
+			{
+				if (result.Tokens.Count == 0)
+					return null;
+				var value = result.Tokens[0].Value;
+				if (value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+				    value.Equals("on", StringComparison.OrdinalIgnoreCase))
+					return "on";
+				if (value.Equals("false", StringComparison.OrdinalIgnoreCase) ||
+				    value.Equals("off", StringComparison.OrdinalIgnoreCase))
+					return "off";
+				result.AddError(LocalizedParseError.Create(localization.Format(
+					"Terminal.Validation.Choice",
+					positiveName,
+					"true, false, on, off")));
+				return null;
+			}
+		};
+		positive.CompletionSources.Add(["on", "off", "true", "false"]);
+		var negative = new Option<bool>(negativeName)
+		{
+			Description = localization[negativeDescriptionKey]
+		};
+		CompletionConflictRegistry.RegisterMutual(positive, negative);
+		return (positive, negative);
 	}
 }

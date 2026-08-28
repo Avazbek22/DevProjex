@@ -268,6 +268,45 @@ public sealed class ProfileCommandContractTests
 	}
 
 	[Fact]
+	public async Task SavePersistsTheEffectiveSelectionAsTheLocalProfile()
+	{
+		using var workspace = CreateWorkspace();
+		var saveEnvironment = new TestTerminalEnvironment();
+
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				saveEnvironment,
+				"profile", "save", workspace.Path,
+				"--extension", ".cs",
+				"--git-mode", "none",
+				"--exclude", "none",
+				"--hide-secrets", "off",
+				"--hide-private-data", "on"));
+		Assert.Equal(PathUtility.Normalize(workspace.Path) + Environment.NewLine,
+			saveEnvironment.StandardOutput);
+
+		var showEnvironment = new TestTerminalEnvironment();
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				showEnvironment,
+				"profile", "show", workspace.Path,
+				"--profile", "local",
+				"--format", "json"));
+		using var document = JsonDocument.Parse(showEnvironment.StandardOutput);
+		var selection = document.RootElement.GetProperty("selection");
+		Assert.Equal([".cs"], selection.GetProperty("extensions")
+			.EnumerateArray().Select(static value => value.GetString()));
+		Assert.Equal("none", selection.GetProperty("gitMode").GetString());
+		Assert.Empty(selection.GetProperty("exclusions").EnumerateArray());
+		Assert.False(selection.GetProperty("hideSecrets").GetBoolean());
+		Assert.True(selection.GetProperty("hidePrivateData").GetBoolean());
+	}
+
+	[Fact]
 	public async Task ExportImportExportUsesOneCanonicalByteOrder()
 	{
 		using var workspace = CreateWorkspace();

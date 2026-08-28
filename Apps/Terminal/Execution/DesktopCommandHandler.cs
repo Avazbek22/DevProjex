@@ -25,6 +25,13 @@ public sealed class DesktopCommandHandler(
 		new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);
 	private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
+	public Task<int> ListAsync(bool json, CancellationToken cancellationToken) =>
+		ListAsync(
+			json,
+			new TerminalOutputOptions(),
+			TimeSpan.FromSeconds(10),
+			cancellationToken);
+
 	public async Task<int> OpenAsync(
 		DesktopOpenRequest request,
 		CancellationToken cancellationToken,
@@ -90,9 +97,15 @@ public sealed class DesktopCommandHandler(
 		return CommandLineExitCodes.Success;
 	}
 
-	public async Task<int> ListAsync(bool json, CancellationToken cancellationToken)
+	public async Task<int> ListAsync(
+		bool json,
+		TerminalOutputOptions outputOptions,
+		TimeSpan timeout,
+		CancellationToken cancellationToken)
 	{
-		var instances = await _client.ListAsync(cancellationToken).ConfigureAwait(false);
+		var instances = await _client.ListAsync(cancellationToken)
+			.WaitAsync(timeout, cancellationToken)
+			.ConfigureAwait(false);
 		if (json)
 		{
 			environment.Output.WriteLine(JsonSerializer.Serialize(
@@ -118,22 +131,43 @@ public sealed class DesktopCommandHandler(
 		{
 			if (instances.Count == 0)
 			{
-				environment.Output.WriteLine(_localization["Terminal.Ui.NoInstances"]);
+				environment.Error.WriteLine(_localization["Terminal.Ui.NoInstances"]);
 				return CommandLineExitCodes.Success;
 			}
-			foreach (var instance in instances)
-				environment.Output.WriteLine(FormatTextInstance(instance));
+			foreach (var line in FormatTextInstances(instances, outputOptions))
+				environment.Output.WriteLine(line);
 		}
 
 		return CommandLineExitCodes.Success;
 	}
 
 	internal static string FormatTextInstance(DesktopInstanceRegistration instance) =>
-		string.Join(
-			'\t',
-			TerminalTextEscaping.EscapeSingleLine(instance.InstanceId),
-			instance.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-			TerminalTextEscaping.EscapeSingleLine(instance.ProjectPath ?? "-"));
+		TerminalColumnLayout.Format([
+			[
+				TerminalTextEscaping.EscapeSingleLine(instance.InstanceId),
+				instance.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+				TerminalTextEscaping.EscapeSingleLine(instance.ProjectPath ?? "-")
+			]
+		])[0];
+
+	private IReadOnlyList<string> FormatTextInstances(
+		IReadOnlyList<DesktopInstanceRegistration> instances,
+		TerminalOutputOptions outputOptions) =>
+		TerminalColumnLayout.FormatForOutput(
+			instances.Select(static instance => new[]
+			{
+				TerminalTextEscaping.EscapeSingleLine(instance.InstanceId),
+				instance.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+				TerminalTextEscaping.EscapeSingleLine(instance.ProjectPath ?? "-")
+			}).ToArray(),
+			[
+				_localization["Terminal.Table.Instance"],
+				"PID",
+				_localization["Terminal.Tui.Recent.Path"]
+			],
+			environment,
+			outputOptions,
+			truncationColumn: 2);
 
 	public async Task<int> SendAsync(
 		DesktopTarget target,

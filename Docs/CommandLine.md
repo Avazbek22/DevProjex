@@ -119,6 +119,13 @@ does not. `open` additionally accepts the `auto` profile:
 --strip-blank-lines [<true|false>]
 ```
 
+Boolean transformation values also accept `on|off`. Each has an explicit
+negative form: `--no-hide-secrets`, `--no-hide-private-data`,
+`--no-compress-code`, `--no-strip-comments`, and
+`--no-strip-blank-lines`. Short aliases are `-p` profile, `-r` root,
+`-e` extension, `-s` select, `-x` exclude, and `-b` branch where they do not
+conflict with an existing command option.
+
 For `open`, the first line is `--profile <auto|standard|local|FILE>` and its
 default is `auto`. Direct analyze/export commands default to `standard`.
 
@@ -280,7 +287,7 @@ non-empty entries and 16 MiB.
 
 ## Repository URL Sources
 
-`tui`, `open`, `analyze`, `export context`, and `export project` accept either a
+`tui`, `open`, `analyze`, `tree`, `export context`, and `export project` accept either a
 local project directory or a Git repository URL as `PROJECT`. URL sources use the
 same managed clone cache and operation leases as Desktop. `--branch NAME` selects
 a validated branch for a URL source and is rejected for local paths and with
@@ -300,11 +307,11 @@ the complete cached checkout and can work offline. Clone progress follows
 `--progress`, `--verbosity`, and `--plain`: an interactive stderr reuses one line,
 while redirected, CI, dumb-terminal, and plain output is limited to start, three
 percentage milestones, and completion. It never enters stdout. Cancellation cleans
-staging through the cache lifecycle. Profile commands and `tree` remain local-path-only.
+staging through the cache lifecycle. Profile-management commands remain local-path-only.
 
 Common aliases are part of the public contract: `export ctx` equals
 `export context`, `export proj` equals `export project`, `-f` equals `--format`,
-and `-n` equals `--dry-run`. `-q` selects the existing `quiet` verbosity and
+and `-n` equals `--dry-run`. `-q` and `--quiet` select `quiet` verbosity and
 cannot be combined with an explicit `--verbosity`.
 
 ## Terminal Workspace
@@ -387,6 +394,7 @@ Specific options:
 ```text
 -f, --format <text|json>
 -o, --output <PATH|->
+--force
 --strict
 --findings
 --fail-on-findings
@@ -400,7 +408,8 @@ Text is a human-readable project summary. JSON is a stable machine document with
 `schemaVersion`. `--strict` still writes the report, then returns exit code `3`
 when policy diagnostics exist. Analysis is already read-only and therefore has
 no `--dry-run` option. A file destination must be outside the source project and
-must not already exist. Its parent directory must already exist.
+must not already exist unless `--force` is used for atomic replacement. Its
+parent directory must already exist.
 
 `--findings` adds sanitized effective findings to text and JSON: only `ruleId`,
 `category` (`secret` or `private-data`), `relativePath`, and one-based
@@ -409,6 +418,8 @@ detector errors are never emitted. The number of descriptors equals the combined
 effective matched counts from the same redaction session. `--fail-on-findings`
 writes the requested report and returns policy exit code `3` when any effective
 finding exists; unlike `--strict`, it does not gate ordinary diagnostics.
+Either findings option automatically enables secret detection for counting when
+it was otherwise disabled; private-data detection remains explicit.
 
 Examples:
 
@@ -424,7 +435,7 @@ devprojex analyze . --hide-secrets --findings --fail-on-findings
 ## Tree
 
 ```shell
-devprojex tree [PROJECT] [-f text|markdown|json|xml] [-o PATH|-] [options]
+devprojex tree [PROJECT|URL] [-f text|markdown|json|xml] [-o PATH|-] [options]
 ```
 
 Output options:
@@ -435,18 +446,20 @@ Output options:
 --verbosity <quiet|minimal|normal|detailed|diagnostic>
 -q
 --plain
+--force
+--branch NAME
 ```
 
 `tree` writes the same tree payload as the shared Desktop export service and
 defaults to text on stdout. It accepts profile and path-selection options,
 including `--select-from`, but deliberately has no content-transformation flags.
-Its `PROJECT` argument is a local directory. `-q` selects quiet verbosity and
+Its `PROJECT` argument may be a local directory or repository URL. `-q` selects quiet verbosity and
 cannot be combined with an explicit `--verbosity`; `--plain` conflicts with
 `--color always`.
 
 For file output, the destination must be outside the source project, its parent
-directory must already exist, and the destination must not already exist. `tree`
-has no `--force` option. On success, stdout contains the tree document for `-o -`
+directory must already exist, and an existing destination requires `--force`.
+Replacement is atomic. On success, stdout contains the tree document for `-o -`
 or one absolute committed path for file output; operational output stays on stderr.
 
 ## Export Context
@@ -509,7 +522,7 @@ devprojex export context . --compress-code --format markdown -o ../devprojex-com
 ## Export Project
 
 ```shell
-devprojex export project [PROJECT|URL] --as <folder|zip> -o <PATH> [options]
+devprojex export project [PROJECT|URL] --as <folder|zip> -o <PATH|-> [options]
 ```
 
 The destination is exact:
@@ -517,6 +530,7 @@ The destination is exact:
 ```shell
 devprojex export project . --as folder -o ../devprojex-submission
 devprojex export project . --as zip -o ../devprojex-submission.zip
+devprojex export project . --as zip -o - > devprojex-submission.zip
 devprojex export project . --compress-code --as zip -o ../devprojex-compact.zip
 ```
 
@@ -525,6 +539,8 @@ additional project-name child or `(2)` suffix. The folder must not exist. A ZIP 
 in `.zip` and must not exist unless `--force` is supplied. `--force` is not valid
 for folder exports. In both cases the destination parent directory must already
 exist.
+For ZIP only, `-o -` streams raw ZIP bytes to stdout; folder output cannot use
+standard output.
 
 Folder and ZIP exports preserve selected binary bytes, timestamps, directory
 structure, and included empty directories. Staging is cleaned after cancellation
@@ -558,6 +574,7 @@ devprojex cache path
 devprojex cache list [-f text|json]
 devprojex cache remove URL --force
 devprojex cache clear --force
+devprojex cache update URL
 ```
 
 `cache path` prints the same managed Git clone cache root reported by `doctor`.
@@ -573,6 +590,8 @@ Removal commands are non-interactive and require `--force`. Their result reports
 removed, retained, and failed entries. A live repository lease is retained; any
 retained or failed entry returns policy exit code `3`, so scripts cannot mistake a
 partial cleanup for complete success.
+`cache remove` and `cache clear` also accept `-y`/`--yes`, `-n`/`--dry-run`,
+and `--format json`. Dry-run reports the same counters and bytes without deleting.
 
 ## Command Help
 
@@ -589,9 +608,10 @@ command path returns usage exit code `2`.
 
 ```shell
 devprojex profile show [PROJECT] [--profile standard|local|FILE] [-f text|json]
-devprojex profile export [PROJECT] [--profile standard|local|FILE] -o FILE [--force]
+devprojex profile export [PROJECT] [--profile standard|local|FILE] -o FILE [--force] [-n]
+devprojex profile save [PROJECT] [selection options]
 devprojex profile import FILE [PROJECT] [--apply]
-devprojex profile validate FILE
+devprojex profile validate FILE [-f text|json]
 devprojex profile reset [PROJECT]
 ```
 
@@ -667,6 +687,23 @@ Avalonia or require another DevProjex executable. Evaluate or install it using
 the shell's normal completion mechanism.
 
 ## Streams and Exit Codes
+
+`--color`, `--plain`, `--verbosity`, and `-q`/`--quiet` are recursive root
+options and may be placed on every command. Commands without optional ANSI or
+diagnostic output accept and ignore values that do not affect their payload.
+`--progress` remains limited to `analyze`, `tree`, and exports.
+
+Environment defaults sit below explicit flags and above capability detection:
+`DEVPROJEX_COLOR`, `DEVPROJEX_PROGRESS`, `DEVPROJEX_VERBOSITY`, and
+`DEVPROJEX_LANGUAGE` accept the same tokens as their options. `DEVPROJEX_ROOT`
+provides the general project root when no explicit source was supplied.
+`NO_COLOR` is considered after `DEVPROJEX_COLOR`.
+
+Interactive text tables add localized headers and fit long paths to the terminal
+with a middle ellipsis. Pipes and redirects retain the headerless, untruncated
+text shape for script compatibility; JSON remains the stable machine channel.
+Context/project dry-run plans include files, folders, bytes, estimated tokens,
+and effective profile.
 
 stdout is reserved for payloads, one result path, help/version, and completion.
 Progress, warnings, diagnostics, migration guidance, and errors use stderr. JSON

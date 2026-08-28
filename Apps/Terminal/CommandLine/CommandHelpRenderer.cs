@@ -77,13 +77,43 @@ public sealed class CommandHelpRenderer(
 			WriteIndented(output, example, terminalWidth);
 
 		WriteSection(output, _localization["Terminal.Help.ExitCodes"], terminalWidth);
-		WriteItem(output, "0", _localization["Terminal.Exit.Success"], terminalWidth, 4);
-		WriteItem(output, "1", _localization["Terminal.Exit.Runtime"], terminalWidth, 4);
-		WriteItem(output, "2", _localization["Terminal.Exit.Syntax"], terminalWidth, 4);
-		WriteItem(output, "3", _localization["Terminal.Exit.Policy"], terminalWidth, 4);
-		WriteItem(output, "4", _localization["Terminal.Exit.Conflict"], terminalWidth, 4);
-		WriteItem(output, "5", _localization["Terminal.Exit.Desktop"], terminalWidth, 4);
-		WriteItem(output, "130", _localization["Terminal.Exit.Canceled"], terminalWidth, 4);
+		foreach (var code in ResolveExitCodes(command))
+		{
+			var key = code switch
+			{
+				0 => "Terminal.Exit.Success",
+				1 => "Terminal.Exit.Runtime",
+				2 => "Terminal.Exit.Syntax",
+				3 => "Terminal.Exit.Policy",
+				4 => "Terminal.Exit.Conflict",
+				5 => "Terminal.Exit.Desktop",
+				130 => "Terminal.Exit.Canceled",
+				_ => throw new ArgumentOutOfRangeException(nameof(code), code, null)
+			};
+			WriteItem(output, code.ToString(System.Globalization.CultureInfo.InvariantCulture),
+				_localization[key], terminalWidth, 4);
+		}
+	}
+
+	private static IReadOnlyList<int> ResolveExitCodes(Command command)
+	{
+		if (command is RootCommand)
+			return [0, 1, 2, 3, 4, 5, 130];
+
+		var topLevel = command;
+		while (topLevel.Parents.OfType<Command>().FirstOrDefault() is { } parent &&
+		       parent is not RootCommand)
+		{
+			topLevel = parent;
+		}
+		return topLevel.Name switch
+		{
+			"open" or "ui" => [0, 1, 2, 3, 4, 5, 130],
+			"analyze" or "tree" or "export" or "profile" => [0, 1, 2, 3, 4, 130],
+			"cache" or "recent" or "doctor" => [0, 1, 2, 3, 130],
+			"tui" => [0, 1, 2, 3, 130],
+			_ => [0, 2, 130]
+		};
 	}
 
 	private static void WriteSection(TextWriter output, string title, int terminalWidth)
@@ -103,7 +133,7 @@ public sealed class CommandHelpRenderer(
 		};
 
 		var metadata = new List<string>(3);
-		if (option.Required)
+		if (option.Required || CliHelpMetadataRegistry.IsRequired(option))
 			metadata.Add(_localization["Terminal.Help.Required"]);
 		if (IsRepeatable(option))
 			metadata.Add(_localization["Terminal.Help.Repeatable"]);

@@ -3,6 +3,7 @@ using System.Text.Json;
 using DevProjex.Kernel.Models;
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.Rendering;
+using DevProjex.Terminal.Tui;
 
 namespace DevProjex.Terminal.Execution;
 
@@ -24,7 +25,7 @@ internal sealed class CacheCommandHandler(
 		return CommandLineExitCodes.Success;
 	}
 
-	public int WriteList(CliTextJsonFormat format)
+	public int WriteList(CliTextJsonFormat format, TerminalOutputOptions outputOptions)
 	{
 		var result = services.RepoCacheService.ListCacheEntriesForManagement();
 		var entries = result.Entries;
@@ -34,8 +35,16 @@ internal sealed class CacheCommandHandler(
 		}
 		else
 		{
-			foreach (var line in FormatTextEntries(entries))
+			foreach (var line in FormatTextEntries(entries, services.Localization, environment, outputOptions))
 				environment.Output.WriteLine(line);
+			if (environment.IsOutputInteractive && !environment.IsTermDumb)
+			{
+				var totalBytes = entries.Sum(static entry => Math.Max(0, entry.ApproximateSizeBytes));
+				environment.Output.WriteLine(services.Localization.Format(
+					"Terminal.Cache.Summary",
+					entries.Count,
+					FormatByteSize(totalBytes)));
+			}
 		}
 
 		if (result.IsComplete)
@@ -48,31 +57,111 @@ internal sealed class CacheCommandHandler(
 	}
 
 	public int Remove(string repositoryUrl)
+		=> Remove(repositoryUrl, CliTextJsonFormat.Text, dryRun: false);
+
+	public int Remove(
+		string repositoryUrl,
+		CliTextJsonFormat format,
+		bool dryRun)
 	{
+		var before = FindEntries(repositoryUrl);
+		if (dryRun)
+		{
+			if (before.Count == 0)
+				return WriteNotFound(repositoryUrl);
+			return WriteRemovalResult(
+				new CacheClearResult(before.Count, 0, 0),
+				before.Sum(static entry => Math.Max(0, entry.ApproximateSizeBytes)),
+				format,
+				dryRun: true);
+		}
 		var result = services.RepoCacheService.RemoveCachedRepositoryWithResult(repositoryUrl);
 		if (result.Removed + result.Retained + result.Failed == 0)
+			return WriteNotFound(repositoryUrl);
+
+		return WriteRemovalResult(result, ResolveRemovedBytes(before), format, dryRun: false);
+	}
+
+	public int Clear() => Clear(CliTextJsonFormat.Text, dryRun: false);
+
+	public int Clear(CliTextJsonFormat format, bool dryRun)
+	{
+		var before = services.RepoCacheService.ListCacheEntriesForManagement();
+		var bytes = before.Entries.Sum(static entry => Math.Max(0, entry.ApproximateSizeBytes));
+		if (dryRun)
 		{
-			var safeUrl = TerminalTextEscaping.EscapeSingleLine(
-				RepositoryUrlUtility.ToSafeDisplay(repositoryUrl));
-			environment.Error.WriteLine(services.Localization.Format(
-				"Terminal.Cache.NotFound",
-				safeUrl));
+			return WriteRemovalResult(
+				new CacheClearResult(before.Entries.Count, 0, before.UnavailableRootCount),
+				bytes,
+				format,
+				dryRun: true);
+		}
+
+		var result = services.RepoCacheService.ClearAllCacheWithResult();
+		return WriteRemovalResult(result, ResolveRemovedBytes(before.Entries), format, dryRun: false);
+	}
+
+	public async Task<int> UpdateAsync(string repositoryUrl, CancellationToken cancellationToken)
+	{
+		var indexed = services.RepoCacheService.FindIndexedRepository(repositoryUrl);
+		if (indexed is null)
+			return WriteNotFound(repositoryUrl);
+
+		using var lease = await new TerminalRepositoryCloneCoordinator(
+				services.GitRepositoryService,
+				services.RepoCacheService)
+			.AcquireAsync(repositoryUrl, progress: null, phaseChanged: null, cancellationToken)
+			.ConfigureAwait(false);
+		if (lease.UpdateFailed)
+		{
+			environment.Error.WriteLine(services.Localization["Terminal.Cache.UpdateFailed"]);
 			return CommandLineExitCodes.RuntimeError;
 		}
 
-		return WriteRemovalResult(result);
+		var repositoryPath = lease.Result.LocalPath;
+		var commit = await services.GitRepositoryService
+			.GetHeadCommitAsync(repositoryPath, cancellationToken)
+			.ConfigureAwait(false);
+		services.RepoCacheService.RecordIndexedRepository(
+			repositoryUrl,
+			repositoryPath,
+			lease.Result.DefaultBranch,
+			commit);
+		services.RepoCacheService.RefreshIndexedRepositorySize(repositoryPath);
+		TerminalTextEscaping.WriteSingleLine(environment.Output, NormalizePath(repositoryPath));
+		return CommandLineExitCodes.Success;
 	}
 
-	public int Clear() =>
-		WriteRemovalResult(services.RepoCacheService.ClearAllCacheWithResult());
-
-	private int WriteRemovalResult(CacheClearResult result)
+	private int WriteRemovalResult(
+		CacheClearResult result,
+		long bytes,
+		CliTextJsonFormat format,
+		bool dryRun)
 	{
-		environment.Output.WriteLine(services.Localization.Format(
-			"Terminal.Cache.Result",
-			result.Removed,
-			result.Retained,
-			result.Failed));
+		if (format == CliTextJsonFormat.Json)
+		{
+			environment.Output.WriteLine(JsonSerializer.Serialize(
+				new
+				{
+					schemaVersion = 1,
+					kind = "devprojex-cache-removal",
+					dryRun,
+					removed = result.Removed,
+					retained = result.Retained,
+					failed = result.Failed,
+					bytes = Math.Max(0, bytes)
+				},
+				JsonOptions));
+		}
+		else
+		{
+			environment.Output.WriteLine(services.Localization.Format(
+				dryRun ? "Terminal.Cache.DryRunResult" : "Terminal.Cache.ResultWithSize",
+				result.Removed,
+				result.Retained,
+				result.Failed,
+				FormatByteSize(bytes)));
+		}
 		return result.IsComplete
 			? CommandLineExitCodes.Success
 			: CommandLineExitCodes.PolicyFailure;
@@ -100,6 +189,84 @@ internal sealed class CacheCommandHandler(
 			entry.LastOpenedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture),
 			TerminalTextEscaping.EscapeSingleLine(NormalizePath(entry.LocalPath))
 		}).ToArray());
+
+	internal static IReadOnlyList<string> FormatTextEntries(
+		IReadOnlyList<RepositoryCacheCatalogEntry> entries,
+		LocalizationService localization,
+		ITerminalEnvironment environment,
+		TerminalOutputOptions outputOptions)
+	{
+		var rows = entries.Select(entry => new[]
+		{
+			TerminalTextEscaping.EscapeSingleLine(entry.RepositoryUrl),
+			localization[entry.State == RepositoryCacheEntryState.Ready
+				? "Terminal.Tui.DestinationReady"
+				: "Terminal.Tui.RecentRepositories.Damaged"],
+			TerminalTextEscaping.EscapeSingleLine(entry.Branch ?? "-"),
+			TerminalTextEscaping.EscapeSingleLine(ShortCommit(entry.CommitHash)),
+			FormatByteSize(entry.ApproximateSizeBytes),
+			entry.LastOpenedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture),
+			TerminalTextEscaping.EscapeSingleLine(NormalizePath(entry.LocalPath))
+		}).ToArray();
+		return TerminalColumnLayout.FormatForOutput(
+			rows,
+			[
+				localization["Terminal.Tui.RecentRepositories.Repository"],
+				localization["Terminal.Tui.Recent.Status"],
+				localization["Terminal.Tui.RecentRepositories.Branch"],
+				localization["Terminal.Tui.Commit"],
+				localization["Terminal.Analysis.Size"],
+				localization["Terminal.Tui.Recent.LastOpened"],
+				localization["Terminal.Tui.Recent.Path"]
+			],
+			environment,
+			outputOptions,
+			truncationColumn: 6);
+	}
+
+	private int WriteNotFound(string repositoryUrl)
+	{
+		var safeUrl = TerminalTextEscaping.EscapeSingleLine(
+			RepositoryUrlUtility.ToSafeDisplay(repositoryUrl));
+		environment.Error.WriteLine(services.Localization.Format(
+			"Terminal.Cache.NotFound",
+			safeUrl));
+		return CommandLineExitCodes.RuntimeError;
+	}
+
+	private IReadOnlyList<RepositoryCacheCatalogEntry> FindEntries(string repositoryUrl)
+	{
+		string identity;
+		try
+		{
+			identity = RepositoryUrlUtility.GetComparisonKey(repositoryUrl);
+		}
+		catch
+		{
+			return [];
+		}
+		return services.RepoCacheService.ListCacheEntriesForManagement().Entries
+			.Where(entry => string.Equals(
+				RepositoryUrlUtility.GetComparisonKey(entry.RepositoryUrl),
+				identity,
+				StringComparison.Ordinal))
+			.ToArray();
+	}
+
+	private long ResolveRemovedBytes(IReadOnlyList<RepositoryCacheCatalogEntry> before)
+	{
+		var remaining = services.RepoCacheService.ListCacheEntriesForManagement().Entries
+			.Select(static entry => entry.LocalPath)
+			.ToHashSet(PathComparer.Default);
+		return before
+			.Where(entry => !remaining.Contains(entry.LocalPath))
+			.Sum(static entry => Math.Max(0, entry.ApproximateSizeBytes));
+	}
+
+	private static string ShortCommit(string? commitHash) =>
+		string.IsNullOrWhiteSpace(commitHash)
+			? "-"
+			: commitHash.Length <= 12 ? commitHash : commitHash[..12];
 
 	internal static string FormatByteSize(long bytes)
 	{

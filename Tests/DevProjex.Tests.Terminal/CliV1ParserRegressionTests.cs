@@ -8,6 +8,31 @@ namespace DevProjex.Tests.Terminal;
 
 public sealed class CliV1ParserRegressionTests
 {
+	[Theory]
+	[InlineData("analyze|.|--hide-secrets|on|--no-strip-comments")]
+	[InlineData("analyze|.|-p|standard|-r|src|-e|.cs|-s|src/a.cs|-x|smart-ignore")]
+	[InlineData("tree|https://github.com/owner/repo|-b|main|--force|-o|tree.txt")]
+	[InlineData("cache|remove|https://github.com/owner/repo|-y|-n|-f|json")]
+	[InlineData("cache|update|https://github.com/owner/repo")]
+	[InlineData("profile|save|.|--hide-private-data|off")]
+	[InlineData("profile|validate|profile.json|-f|json")]
+	[InlineData("ui|list|--timeout|5s|--quiet")]
+	public void TerminalPolishFormsParse(string invocation)
+	{
+		var result = new DevProjexCommandTree(new TestTerminalEnvironment())
+			.Build()
+			.Parse(invocation.Split('|'));
+		Assert.Empty(result.Errors);
+	}
+
+	[Fact]
+	public void PositiveAndNegativeBooleanFormsConflict()
+	{
+		var result = new DevProjexCommandTree(new TestTerminalEnvironment())
+			.Build()
+			.Parse(["analyze", ".", "--hide-secrets", "--no-hide-secrets"]);
+		Assert.NotEmpty(result.Errors);
+	}
 	[Fact]
 	public void SelectionChoiceSetsAreDerivedFromTheSharedCatalogAndRejectInvalidEnums()
 	{

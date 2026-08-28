@@ -23,9 +23,11 @@ public static class CompletionScriptGenerator
 		_devprojex_complete() {
 		    local command_path
 		    local candidate
+		    local working_directory
 		    local has_filename_candidate=0
 		    local -a current_word_argument=()
 		    command_path="$(command -v devprojex)" || return
+		    working_directory="$(printf '%s' "$PWD" | base64 | tr -d '\r\n')"
 		    if [[ -n "${2-}" ]]; then
 		        current_word_argument=(--bash-current-word="$2")
 		    fi
@@ -37,6 +39,7 @@ public static class CompletionScriptGenerator
 		        fi
 		    done < <("$command_path" dev complete --position "$COMP_POINT" \
 		        --position-unit utf8-byte --null \
+		        --working-directory-base64 "$working_directory" \
 		        "${current_word_argument[@]}" -- "$COMP_LINE")
 		    if (( has_filename_candidate )); then
 		        compopt -o filenames 2>/dev/null || true
@@ -51,14 +54,17 @@ public static class CompletionScriptGenerator
 		_devprojex_complete() {
 		    local command_path
 		    local candidate
+		    local working_directory
 		    local -a candidates
 		    local -a displays
 		    command_path="$(whence -p devprojex)" || return
+		    working_directory="$(printf '%s' "$PWD" | base64 | tr -d '\r\n')"
 		    while IFS= read -r -d '' candidate; do
 		        candidates+=("$candidate")
 		        displays+=("${(V)candidate}")
 		    done < <("$command_path" dev complete --position "$CURSOR" \
-		        --position-unit unicode-scalar --null -- "$BUFFER")
+		        --position-unit unicode-scalar --null \
+		        --working-directory-base64 "$working_directory" -- "$BUFFER")
 		    compadd -d displays -a candidates
 		}
 		compdef _devprojex_complete devprojex
@@ -68,9 +74,11 @@ public static class CompletionScriptGenerator
 		"""
 		function __devprojex_complete
 		    set -l command_path (command -s devprojex)
+		    set -l working_directory (printf '%s' "$PWD" | base64 | string collect | string replace -a \n '')
 		    test -n "$command_path"; or return
 		    $command_path dev complete --position (commandline -C) \
-		        --position-unit unicode-scalar --null -- (commandline)
+		        --position-unit unicode-scalar --null \
+		        --working-directory-base64 $working_directory -- (commandline)
 		end
 		complete -c devprojex -f -a '(__devprojex_complete | string split0)'
 		""";

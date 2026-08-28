@@ -16,14 +16,16 @@ public sealed record AnalyzeCommandRequest(
 	bool Strict,
 	TerminalOutputOptions Output,
 	bool IncludeFindings = false,
-	bool FailOnFindings = false);
+	bool FailOnFindings = false,
+	bool Force = false);
 
 public sealed record TreeCommandRequest(
 	string ProjectPath,
 	ProjectSelectionSpec Selection,
 	TreeTextFormat Format,
 	string? OutputPath,
-	TerminalOutputOptions Output);
+	TerminalOutputOptions Output,
+	bool Force = false);
 
 public sealed record ExportContextCommandRequest(
 	string ProjectPath,

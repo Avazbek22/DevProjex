@@ -107,7 +107,8 @@ public sealed class AnalyzeCommandHandler(
 		var outputPath = request.OutputPath is not null and not "-"
 			? ExactOutputDestinationValidator.ValidateAnalysis(
 				plan.SourceRoot,
-				request.OutputPath)
+				request.OutputPath,
+				request.Force)
 			: null;
 		var requestedOutputPath = outputPath is not null
 			? Path.GetFullPath(request.OutputPath!)
@@ -148,11 +149,12 @@ public sealed class AnalyzeCommandHandler(
 				.WriteTextAsync(
 					requestedOutputPath!,
 					payload,
-					overwrite: false,
+					overwrite: request.Force,
 					cancellationToken,
 					path => ExactOutputDestinationValidator.ValidateAnalysis(
 						plan.SourceRoot,
-						path))
+						path,
+						request.Force))
 				.ConfigureAwait(false);
 			TerminalTextEscaping.WriteSingleLine(environment.Output, writtenPath);
 		}
@@ -219,15 +221,22 @@ internal static class AnalysisTextFormatter
 		rows.Add(new AnalysisTextRow(
 			localization["Terminal.Analysis.GitMode"],
 			ProjectSelectionTokens.ToToken(plan.Selection.GitMode!.Value)));
-		rows.Add(new AnalysisTextRow(
-			localization["Terminal.Analysis.Exclusions"],
-			string.Join(", ", plan.Selection.Exclusions!.Select(ProjectSelectionTokens.ToToken))));
+		if (plan.Selection.Exclusions is { Count: > 0 } exclusions)
+		{
+			rows.Add(new AnalysisTextRow(
+				localization["Terminal.Analysis.Exclusions"],
+				string.Join(", ", exclusions.Select(ProjectSelectionTokens.ToToken))));
+		}
 		rows.Add(new AnalysisTextRow(
 			localization["Terminal.Analysis.Roots"],
-			JoinEscaped(plan.SelectedRoots)));
+			plan.SelectedRoots.Count == 0
+				? localization["Terminal.Profile.All"]
+				: JoinEscaped(plan.SelectedRoots)));
 		rows.Add(new AnalysisTextRow(
 			localization["Terminal.Analysis.Extensions"],
-			JoinEscaped(plan.SelectedExtensions)));
+			plan.SelectedExtensions.Count == 0
+				? localization["Terminal.Profile.All"]
+				: JoinEscaped(plan.SelectedExtensions)));
 		rows.Add(new AnalysisTextRow(
 			localization["Terminal.Analysis.Files"],
 			plan.IncludedFiles.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)));
@@ -236,7 +245,7 @@ internal static class AnalysisTextFormatter
 			plan.IncludedFolders.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)));
 		rows.Add(new AnalysisTextRow(
 			localization["Terminal.Analysis.Size"],
-			$"{plan.IncludedBytes.ToString(System.Globalization.CultureInfo.InvariantCulture)} B"));
+			CacheCommandHandler.FormatByteSize(plan.IncludedBytes)));
 		rows.Add(new AnalysisTextRow(
 			localization["Terminal.Analysis.Characters"],
 			plan.Analysis.Metrics.Content.Chars.ToString(System.Globalization.CultureInfo.InvariantCulture)));
