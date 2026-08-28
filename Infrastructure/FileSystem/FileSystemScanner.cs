@@ -272,7 +272,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			? new List<ProjectTreeInventoryEntry>()
 			: null;
 		var rootFileGitIgnoreMatchers = captureTreeInventory
-			? new List<ScopedGitIgnoreMatcher>()
+			? new ScopedGitIgnoreMatcherAccumulator()
 			: null;
 
 		var rootFileSnapshot = ScanRootFileIgnoreSectionSnapshotCore(
@@ -428,7 +428,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				rootAccessDenied == 1,
 				hadAccessDenied == 1,
 				hadScanFailure == 1,
-				rootFileGitIgnoreMatchers!,
+				rootFileGitIgnoreMatchers!.Items,
 				TryLoadRootTrackedPathIndex(
 					rootPath,
 					effectiveRules,
@@ -1529,7 +1529,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		IExtensionInclusionPolicy? effectiveExtensionPolicy,
 		CancellationToken cancellationToken,
 		List<ProjectTreeInventoryEntry>? treeInventoryFiles = null,
-		List<ScopedGitIgnoreMatcher>? discoveredGitIgnoreMatchers = null,
+		ScopedGitIgnoreMatcherAccumulator? discoveredGitIgnoreMatchers = null,
 		GitIgnoreMatcherLoadSession? gitIgnoreLoadSession = null)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
@@ -2620,7 +2620,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		var rootName = Path.GetFileName(rootPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
 		var effectiveGitIgnoreContext = effectiveRules.CreateGitIgnoreScanContext(rootPath);
 		var effectiveGitIgnoreCandidateContext = effectiveRules.CreateGitIgnoreCandidateScanContext(rootPath);
-		var discoveredGitIgnoreMatchers = new List<ScopedGitIgnoreMatcher>();
+		var discoveredGitIgnoreMatchers = new ScopedGitIgnoreMatcherAccumulator();
 		var discoveredGitTrackedPathIndexes = new List<GitTrackedPathIndex>();
 		GitTrackedPathIndex? inheritedTrackedPathIndex = null;
 		if (effectiveRules.IsGitIgnoreTraversalEnabled)
@@ -2638,7 +2638,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				return new ScanResult<EffectiveIgnoreScanDiscovery>(
 					new EffectiveIgnoreScanDiscovery(
 						[],
-						discoveredGitIgnoreMatchers,
+						discoveredGitIgnoreMatchers.Items,
 						[],
 						GitWorkspaceEvidence.Empty),
 					RootAccessDenied: false,
@@ -2651,7 +2651,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			return new ScanResult<EffectiveIgnoreScanDiscovery>(
 				new EffectiveIgnoreScanDiscovery(
 					[],
-					discoveredGitIgnoreMatchers,
+					discoveredGitIgnoreMatchers.Items,
 					[],
 					GitWorkspaceEvidence.Empty),
 				RootAccessDenied: rootAttributeAccessDenied,
@@ -2927,13 +2927,13 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		}
 
 		CancellationAwareSort.Sort(
-			discoveredGitIgnoreMatchers,
+			discoveredGitIgnoreMatchers.Items,
 			CompareScopedGitIgnoreMatchers,
 			cancellationToken);
 		return new ScanResult<EffectiveIgnoreScanDiscovery>(
 			new EffectiveIgnoreScanDiscovery(
 				directories,
-				discoveredGitIgnoreMatchers,
+				discoveredGitIgnoreMatchers.Items,
 				discoveredGitTrackedPathIndexes,
 				gitEvidence),
 			rootAccessDenied == 1,
@@ -3744,7 +3744,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		IgnoreRules.GitIgnoreScanContext activeContext,
 		IgnoreRules.GitIgnoreScanContext candidateContext,
 		CancellationToken cancellationToken,
-		List<ScopedGitIgnoreMatcher>? discoveredMatchers = null,
+		ScopedGitIgnoreMatcherAccumulator? discoveredMatchers = null,
 		List<GitTrackedPathIndex>? discoveredTrackedPathIndexes = null,
 		GitIgnoreMatcherLoadSession? loadSession = null)
 	{
@@ -3812,7 +3812,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		if (scopedMatcher is null)
 			return (activeContext, candidateContext, loadStatus);
 
-		AddDiscoveredGitIgnoreMatcher(discoveredMatchers, scopedMatcher);
+		discoveredMatchers?.Add(scopedMatcher);
 		return (
 			activeContainsScope
 				? activeContext
@@ -3839,7 +3839,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		IgnoreRules.GitIgnoreScanContext activeContext,
 		IgnoreRules.GitIgnoreScanContext candidateContext,
 		CancellationToken cancellationToken,
-		List<ScopedGitIgnoreMatcher>? discoveredMatchers = null,
+		ScopedGitIgnoreMatcherAccumulator? discoveredMatchers = null,
 		GitIgnoreMatcherLoadSession? loadSession = null)
 	{
 		loadSession ??= new GitIgnoreMatcherLoadSession();
@@ -3869,22 +3869,6 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			candidateContext.WithTrackedPathIndex(trackedPathIndex),
 			trackedPathIndex,
 			ancestorScopes.LoadStatus);
-	}
-
-	private static void AddDiscoveredGitIgnoreMatcher(
-		List<ScopedGitIgnoreMatcher>? discoveredMatchers,
-		ScopedGitIgnoreMatcher matcher)
-	{
-		if (discoveredMatchers is null)
-			return;
-
-		foreach (var discovered in discoveredMatchers)
-		{
-			if (PathComparer.Default.Equals(discovered.ScopeRootPath, matcher.ScopeRootPath))
-				return;
-		}
-
-		discoveredMatchers.Add(matcher);
 	}
 
 	private static int CompareScopedGitIgnoreMatchers(

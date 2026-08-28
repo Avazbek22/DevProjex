@@ -77,7 +77,7 @@ internal static class ProjectTreeInventoryScanner
 				hadScanFailure: true);
 		}
 
-		var discoveredGitIgnoreMatchers = new List<ScopedGitIgnoreMatcher>();
+		var discoveredGitIgnoreMatchers = new ScopedGitIgnoreMatcherAccumulator();
 		var discoveredGitTrackedPathIndexes = new List<GitTrackedPathIndex>();
 		var inheritedGitIgnoreContexts = initialGitIgnoreContexts;
 		if (initialGitIgnoreContexts.Enabled)
@@ -102,7 +102,7 @@ internal static class ProjectTreeInventoryScanner
 					entries,
 					rootAccessDenied: false,
 					hadAccessDenied: true,
-					discoveredGitIgnoreMatchers,
+					discoveredGitIgnoreMatchers.Items,
 					discoveredGitTrackedPathIndexes);
 			}
 		}
@@ -135,7 +135,7 @@ internal static class ProjectTreeInventoryScanner
 				entries,
 				rootAccessDenied: false,
 				hadAccessDenied: true,
-				discoveredGitIgnoreMatchers,
+				discoveredGitIgnoreMatchers.Items,
 				discoveredGitTrackedPathIndexes);
 		}
 		var rootDirectoryChildren = AddProjectRootChildren(
@@ -151,7 +151,7 @@ internal static class ProjectTreeInventoryScanner
 				entries,
 				rootAccessDenied,
 				hadAccessDenied,
-				discoveredGitIgnoreMatchers,
+				discoveredGitIgnoreMatchers.Items,
 				discoveredGitTrackedPathIndexes);
 		}
 
@@ -206,11 +206,15 @@ internal static class ProjectTreeInventoryScanner
 				hadScanFailure = true;
 
 			MergeSubtree(entries, result, cancellationToken);
-			AppendRange(discoveredGitIgnoreMatchers, result.DiscoveredGitIgnoreMatchers, cancellationToken);
+			foreach (var matcher in result.DiscoveredGitIgnoreMatchers)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				discoveredGitIgnoreMatchers.Add(matcher);
+			}
 			AppendRange(discoveredGitTrackedPathIndexes, result.DiscoveredGitTrackedPathIndexes, cancellationToken);
 		}
 
-		var uniqueMatchers = MergeDiscoveredGitIgnoreMatchers(discoveredGitIgnoreMatchers, cancellationToken);
+		var uniqueMatchers = MergeDiscoveredGitIgnoreMatchers(discoveredGitIgnoreMatchers.Items, cancellationToken);
 		var uniqueTrackedPathIndexes = MergeDiscoveredGitTrackedPathIndexes(
 			discoveredGitTrackedPathIndexes,
 			cancellationToken);
@@ -277,7 +281,7 @@ internal static class ProjectTreeInventoryScanner
 		};
 		var hadAccessDenied = false;
 		var hadScanFailure = false;
-		var discoveredGitIgnoreMatchers = new List<ScopedGitIgnoreMatcher>();
+		var discoveredGitIgnoreMatchers = new ScopedGitIgnoreMatcherAccumulator();
 		var discoveredGitTrackedPathIndexes = new List<GitTrackedPathIndex>();
 		var pendingDirectories = new Stack<(int Index, ProjectTreeGitIgnoreContexts GitIgnoreContexts)>();
 		pendingDirectories.Push((0, inheritedGitIgnoreContexts));
@@ -369,7 +373,7 @@ internal static class ProjectTreeInventoryScanner
 			entries,
 			hadAccessDenied,
 			hadScanFailure,
-			discoveredGitIgnoreMatchers,
+			discoveredGitIgnoreMatchers.Items,
 			discoveredGitTrackedPathIndexes);
 	}
 
@@ -603,7 +607,7 @@ internal readonly record struct ProjectTreeGitIgnoreContexts(
 		string directoryRelativePath,
 		string? gitIgnorePath,
 		string? gitMetadataPath,
-		List<ScopedGitIgnoreMatcher> discoveredMatchers,
+		ScopedGitIgnoreMatcherAccumulator discoveredMatchers,
 		List<GitTrackedPathIndex> discoveredTrackedPathIndexes,
 		GitIgnoreMatcherLoadSession gitIgnoreLoadSession,
 		CancellationToken cancellationToken,
