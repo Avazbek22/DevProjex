@@ -3,7 +3,9 @@ using Avalonia.Media;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Application.Compression;
 using DevProjex.Application.Secrets;
+using DevProjex.Infrastructure.Git;
 using DevProjex.Infrastructure.ThemePresets;
+using DevProjex.Kernel.Abstractions;
 using DevProjex.Terminal.DesktopControl;
 
 namespace DevProjex.Tests.UI;
@@ -309,6 +311,136 @@ public sealed class MainWindowLifecycleUiTests
 	}
 
 	[AvaloniaFact]
+	public async Task ClosingWindow_WaitsForGitCloneCancellationCleanupBeforeTeardown()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var git = new BlockingGitRepositoryService(BlockingGitOperation.Clone);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			configureServices: services => services with { GitRepositoryService = git });
+		GitCloneWindow? cloneWindow = null;
+		bool? operationExitedAtClosed = null;
+		window.Closed += (_, _) => operationExitedAtClosed = git.Exited.Task.IsCompleted;
+
+		try
+		{
+			cloneWindow = await UiTestDriver.OpenGitCloneWindowAsync(window);
+			UiTestDriver.GetViewModel(window).GitCloneUrl = "https://example.test/repository.git";
+			await UiTestDriver.RaiseButtonClickAsync(
+				Assert.IsType<Button>(cloneWindow.FindControl<Button>("StartCloneButton")));
+			await git.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+			window.Close();
+			await git.CancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+			Assert.False(window.ShutdownCompletion.IsCompleted);
+			Assert.True(window.IsVisible);
+
+			git.ReleaseCleanup.TrySetResult();
+			await window.ShutdownCompletion.WaitAsync(TimeSpan.FromSeconds(2));
+
+			Assert.True(git.Exited.Task.IsCompletedSuccessfully);
+			Assert.True(operationExitedAtClosed);
+			Assert.False(UiTestDriver.GetViewModel(window).GitCloneInProgress);
+		}
+		finally
+		{
+			git.ReleaseCleanup.TrySetResult();
+			if (cloneWindow is not null)
+				await UiTestDriver.CloseTopLevelWindowAsync(cloneWindow);
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task ClosingWindow_WaitsForGitCloneCacheCatalogBeforeTeardown()
+	{
+		using var project = UiTestProject.CreateDefault();
+		BlockingRepoCacheService? cache = null;
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			configureServices: services => services with
+			{
+				RepoCacheService = cache = new BlockingRepoCacheService(services.RepoCacheService)
+			});
+		GitCloneWindow? cloneWindow = null;
+		bool? catalogExitedAtClosed = null;
+		window.Closed += (_, _) => catalogExitedAtClosed = cache!.Exited.Task.IsCompleted;
+
+		try
+		{
+			cache!.Arm();
+			cloneWindow = await UiTestDriver.OpenGitCloneWindowAsync(window);
+			await cache.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+			var catalogCts = Assert.IsType<CancellationTokenSource>(GetPrivateFieldValue(
+				window,
+				new OwnedField(null, "_gitCloneCatalogCts")));
+
+			window.Close();
+
+			Assert.False(window.ShutdownCompletion.IsCompleted);
+			Assert.True(window.IsVisible);
+			Assert.True(catalogCts.IsCancellationRequested);
+			Assert.Null(Record.Exception(catalogCts.Cancel));
+
+			cache.Release();
+			await window.ShutdownCompletion.WaitAsync(TimeSpan.FromSeconds(2));
+
+			Assert.True(cache.Exited.Task.IsCompletedSuccessfully);
+			Assert.True(catalogExitedAtClosed);
+		}
+		finally
+		{
+			cache?.Release();
+			if (cloneWindow is not null)
+				await UiTestDriver.CloseTopLevelWindowAsync(cloneWindow);
+			await UiTestDriver.CloseWindowAsync(window);
+			cache?.Dispose();
+		}
+	}
+
+	[AvaloniaTheory]
+	[InlineData(BlockingGitOperation.Update)]
+	[InlineData(BlockingGitOperation.Branch)]
+	public async Task ClosingWindow_WaitsForRepositoryGitCancellationCleanupBeforeTeardown(
+		BlockingGitOperation operation)
+	{
+		using var project = UiTestProject.CreateDefault();
+		var git = new BlockingGitRepositoryService(operation);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			configureServices: services => services with { GitRepositoryService = git },
+			projectSourceType: ProjectSourceType.GitClone,
+			managedClonePath: project.RootPath,
+			repositoryUrl: "https://example.test/repository.git");
+		bool? operationExitedAtClosed = null;
+		window.Closed += (_, _) => operationExitedAtClosed = git.Exited.Task.IsCompleted;
+
+		try
+		{
+			StartRepositoryGitOperation(window, operation);
+			await git.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+			window.Close();
+			await git.CancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+			Assert.False(window.ShutdownCompletion.IsCompleted);
+			Assert.True(window.IsVisible);
+
+			git.ReleaseCleanup.TrySetResult();
+			await window.ShutdownCompletion.WaitAsync(TimeSpan.FromSeconds(2));
+
+			Assert.True(git.Exited.Task.IsCompletedSuccessfully);
+			Assert.True(operationExitedAtClosed);
+		}
+		finally
+		{
+			git.ReleaseCleanup.TrySetResult();
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task ClosingWindow_DetachesViewModelHandlersSoLateChangesDoNotReachDisposedCoordinators()
 	{
 		using var project = UiTestProject.CreateDefault();
@@ -437,6 +569,25 @@ public sealed class MainWindowLifecycleUiTests
 		}
 	}
 
+	private static void StartRepositoryGitOperation(MainWindow window, BlockingGitOperation operation)
+	{
+		if (operation == BlockingGitOperation.Update)
+		{
+			var updateMethod = typeof(MainWindow).GetMethod(
+				"GetGitUpdatesAsync",
+				BindingFlags.Instance | BindingFlags.NonPublic);
+			Assert.NotNull(updateMethod);
+			Assert.IsAssignableFrom<Task>(updateMethod!.Invoke(window, null));
+			return;
+		}
+
+		var branchMethod = typeof(MainWindow).GetMethod(
+			"OnGitBranchSwitch",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(branchMethod);
+		branchMethod!.Invoke(window, [window, "feature"]);
+	}
+
 	private static void SetPrivateField(MainWindow window, OwnedField ownedField, object? value)
 	{
 		var owner = GetOwner(window, ownedField);
@@ -482,5 +633,207 @@ public sealed class MainWindowLifecycleUiTests
 	{
 		public string DisplayName =>
 			OwnerFieldName is null ? FieldName : $"{OwnerFieldName}.{FieldName}";
+	}
+
+	private sealed class BlockingRepoCacheService(IRepoCacheService inner) : IRepoCacheService, IDisposable
+	{
+		private readonly ManualResetEventSlim _release = new(initialState: false);
+		private int _armed;
+
+		public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+		public TaskCompletionSource Exited { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+		public string CacheRootPath => inner.CacheRootPath;
+		public IReadOnlyList<string> CacheSearchRootPaths => inner.CacheSearchRootPaths;
+
+		public void Arm() => Volatile.Write(ref _armed, 1);
+
+		public void Release() => _release.Set();
+
+		public string CreateRepositoryDirectory(string repositoryUrl) =>
+			inner.CreateRepositoryDirectory(repositoryUrl);
+
+		public string CreateRepositoryStagingDirectory(string repositoryUrl) =>
+			inner.CreateRepositoryStagingDirectory(repositoryUrl);
+
+		public string PublishRepositoryDirectory(string stagingPath, string repositoryUrl) =>
+			inner.PublishRepositoryDirectory(stagingPath, repositoryUrl);
+
+		public RepositoryCacheIndexEntry? FindIndexedRepository(string repositoryUrl) =>
+			inner.FindIndexedRepository(repositoryUrl);
+
+		public IReadOnlyList<RepositoryCacheCatalogEntry> ListIndexedRepositories()
+		{
+			if (Interlocked.Exchange(ref _armed, 0) != 1)
+				return inner.ListIndexedRepositories();
+
+			Started.TrySetResult();
+			try
+			{
+				_release.Wait();
+				return inner.ListIndexedRepositories();
+			}
+			finally
+			{
+				Exited.TrySetResult();
+			}
+		}
+
+		public RepositoryCacheManagementListResult ListCacheEntriesForManagement() =>
+			inner.ListCacheEntriesForManagement();
+
+		public Task<IRepositoryCacheSession?> TryAcquireRepositorySessionAsync(
+			string repositoryUrl,
+			string? branch = null,
+			CancellationToken cancellationToken = default) =>
+			inner.TryAcquireRepositorySessionAsync(repositoryUrl, branch, cancellationToken);
+
+		public Task<IRepositoryCacheSession?> TryAcquireRepositorySessionByPathAsync(
+			string repositoryPath,
+			CancellationToken cancellationToken = default) =>
+			inner.TryAcquireRepositorySessionByPathAsync(repositoryPath, cancellationToken);
+
+		public Task<IAsyncDisposable> AcquireRepositoryOperationAsync(
+			string repositoryUrl,
+			CancellationToken cancellationToken = default) =>
+			inner.AcquireRepositoryOperationAsync(repositoryUrl, cancellationToken);
+
+		public void RecordIndexedRepository(
+			string repositoryUrl,
+			string localPath,
+			string? branch = null,
+			string? commitHash = null,
+			RepositoryCacheEntryState state = RepositoryCacheEntryState.Ready) =>
+			inner.RecordIndexedRepository(repositoryUrl, localPath, branch, commitHash, state);
+
+		public void RemoveIndexedRepository(string localPath) =>
+			inner.RemoveIndexedRepository(localPath);
+
+		public void DeleteRepositoryDirectory(string path) =>
+			inner.DeleteRepositoryDirectory(path);
+
+		public void ClearAllCache() => inner.ClearAllCache();
+
+		public CacheClearResult ClearAllCacheWithResult() => inner.ClearAllCacheWithResult();
+
+		public CacheClearResult RemoveCachedRepositoryWithResult(string repositoryUrl) =>
+			inner.RemoveCachedRepositoryWithResult(repositoryUrl);
+
+		public void CleanupStaleCacheOnStartup() => inner.CleanupStaleCacheOnStartup();
+
+		public void CollectGarbage() => inner.CollectGarbage();
+
+		public void RequestGarbageCollection() => inner.RequestGarbageCollection();
+
+		public void RefreshIndexedRepositorySize(string localPath) =>
+			inner.RefreshIndexedRepositorySize(localPath);
+
+		public bool IsInCache(string path) => inner.IsInCache(path);
+
+		public bool PathsBelongToSameRepository(string left, string right) =>
+			inner.PathsBelongToSameRepository(left, right);
+
+		public void Dispose()
+		{
+			_release.Set();
+			_release.Dispose();
+		}
+	}
+
+	public enum BlockingGitOperation
+	{
+		Clone,
+		Update,
+		Branch
+	}
+
+	private sealed class BlockingGitRepositoryService(BlockingGitOperation operation) : IGitRepositoryService
+	{
+		public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+		public TaskCompletionSource CancellationObserved { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+		public TaskCompletionSource ReleaseCleanup { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+		public TaskCompletionSource Exited { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+		public Task<bool> IsGitAvailableAsync(CancellationToken cancellationToken = default) =>
+			Task.FromResult(true);
+
+		public async Task<GitCloneResult> CloneAsync(
+			string url,
+			string targetDirectory,
+			IProgress<string>? progress = null,
+			CancellationToken cancellationToken = default)
+		{
+			Assert.Equal(BlockingGitOperation.Clone, operation);
+			await WaitForCancellationAndCleanupAsync(cancellationToken);
+			throw new UnreachableException();
+		}
+
+		public Task<IReadOnlyList<GitBranch>> GetBranchesAsync(
+			string repositoryPath,
+			CancellationToken cancellationToken = default) =>
+			Task.FromResult<IReadOnlyList<GitBranch>>(
+			[
+				new("main", IsActive: true, IsRemote: false),
+				new("feature", IsActive: false, IsRemote: false)
+			]);
+
+		public Task<string?> GetDefaultBranchAsync(
+			string repositoryPath,
+			CancellationToken cancellationToken = default) =>
+			Task.FromResult<string?>("main");
+
+		public async Task<bool> SwitchBranchAsync(
+			string repositoryPath,
+			string branchName,
+			IProgress<string>? progress = null,
+			CancellationToken cancellationToken = default)
+		{
+			Assert.Equal(BlockingGitOperation.Branch, operation);
+			await WaitForCancellationAndCleanupAsync(cancellationToken);
+			throw new UnreachableException();
+		}
+
+		public async Task<bool> PullUpdatesAsync(
+			string repositoryPath,
+			IProgress<string>? progress = null,
+			CancellationToken cancellationToken = default)
+		{
+			Assert.Equal(BlockingGitOperation.Update, operation);
+			await WaitForCancellationAndCleanupAsync(cancellationToken);
+			throw new UnreachableException();
+		}
+
+		public Task<string?> GetHeadCommitAsync(
+			string repositoryPath,
+			CancellationToken cancellationToken = default) =>
+			Task.FromResult<string?>("head");
+
+		public Task<string?> GetCurrentBranchAsync(
+			string repositoryPath,
+			CancellationToken cancellationToken = default) =>
+			Task.FromResult<string?>("main");
+
+		public Task<string?> GetRemoteUrlAsync(
+			string repositoryPath,
+			CancellationToken cancellationToken = default) =>
+			Task.FromResult<string?>("https://example.test/repository.git");
+
+		private async Task WaitForCancellationAndCleanupAsync(CancellationToken cancellationToken)
+		{
+			Started.TrySetResult();
+			try
+			{
+				await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+			}
+			catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+			{
+				CancellationObserved.TrySetResult();
+				await ReleaseCleanup.Task;
+				throw;
+			}
+			finally
+			{
+				Exited.TrySetResult();
+			}
+		}
 	}
 }

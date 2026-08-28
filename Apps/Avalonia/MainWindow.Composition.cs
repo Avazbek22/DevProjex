@@ -870,6 +870,10 @@ public partial class MainWindow
 	private int _gitCloneDialogOpenInProgress;
 	private int _gitCloneActionInProgress;
     private CancellationTokenSource? _gitOperationCts;
+	private readonly object _gitOperationTasksLock = new();
+	private readonly HashSet<Task> _activeGitOperationTasks = [];
+	private bool _gitOperationClosePending;
+	private bool _allowCloseAfterGitOperationCleanup;
     private CancellationTokenSource? _projectCopyExportCts;
     private TaskCompletionSource<bool>? _projectCopyExportCompletion;
     private bool _projectCopyExportClosePending;

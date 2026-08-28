@@ -55,8 +55,10 @@ public partial class MainWindow
             cloneWindow.Closed += OnGitCloneWindowClosed;
 
             _ = cloneWindow.ShowDialog(this);
-            var catalogCts = ReplaceCancellationSource(ref _gitCloneCatalogCts);
-            _ = RefreshGitCloneCacheAsync(cloneWindow, catalogCts.Token);
+			var catalogCts = ReplaceGitCloneCatalogCancellation();
+			_ = TrackGitOperationAsync(() => RefreshGitCloneCacheCatalogAsync(
+				cloneWindow,
+				catalogCts));
         }
         catch (OperationCanceledException)
         {
@@ -71,13 +73,18 @@ public partial class MainWindow
     private void OnGitCloneClose(object? sender, RoutedEventArgs e)
     {
         CancelGitCloneOperation();
-		CancelAndDispose(ref _gitCloneCatalogCts);
+		CancelWithoutDisposal(_gitCloneCatalogCts);
         _gitCloneWindow?.Close();
         _gitCloneWindow = null;
         e.Handled = true;
     }
 
-    private async void OnGitCloneStart(object? sender, RoutedEventArgs e)
+	private async void OnGitCloneStart(object? sender, RoutedEventArgs e)
+	{
+		await TrackGitOperationAsync(() => RunGitCloneAsync(e));
+	}
+
+	private async Task RunGitCloneAsync(RoutedEventArgs e)
     {
         var url = _viewModel.GitCloneUrl?.Trim();
         if (string.IsNullOrWhiteSpace(url))
@@ -385,6 +392,11 @@ public partial class MainWindow
 
 	private async void OnOpenCachedRepositoryRequested(object? sender, RepositoryCacheEntryEventArgs e)
 	{
+		await TrackGitOperationAsync(() => OpenCachedRepositoryAsync(e));
+	}
+
+	private async Task OpenCachedRepositoryAsync(RepositoryCacheEntryEventArgs e)
+	{
 		if (Interlocked.CompareExchange(ref _gitCloneActionInProgress, 1, 0) != 0)
 			return;
 
@@ -470,6 +482,11 @@ public partial class MainWindow
 
 	private async void OnDeleteCachedRepositoryRequested(object? sender, RepositoryCacheEntryEventArgs e)
 	{
+		await TrackGitOperationAsync(() => DeleteCachedRepositoryAsync(e));
+	}
+
+	private async Task DeleteCachedRepositoryAsync(RepositoryCacheEntryEventArgs e)
+	{
 		if (Interlocked.CompareExchange(ref _gitCloneActionInProgress, 1, 0) != 0)
 			return;
 		if (!e.Entry.CanDelete)
@@ -504,6 +521,21 @@ public partial class MainWindow
 		{
 			_viewModel.GitCloneCacheManagementInProgress = false;
 			Volatile.Write(ref _gitCloneActionInProgress, 0);
+		}
+	}
+
+	private async Task RefreshGitCloneCacheCatalogAsync(
+		GitCloneWindow window,
+		CancellationTokenSource catalogCts)
+	{
+		try
+		{
+			await RefreshGitCloneCacheAsync(window, catalogCts.Token);
+		}
+		finally
+		{
+			Interlocked.CompareExchange(ref _gitCloneCatalogCts, null, catalogCts);
+			catalogCts.Dispose();
 		}
 	}
 
@@ -604,7 +636,7 @@ public partial class MainWindow
 		window.OpenCachedRepositoryRequested -= OnOpenCachedRepositoryRequested;
 		window.DeleteCachedRepositoryRequested -= OnDeleteCachedRepositoryRequested;
 		window.Closed -= OnGitCloneWindowClosed;
-		CancelAndDispose(ref _gitCloneCatalogCts);
+		CancelWithoutDisposal(_gitCloneCatalogCts);
 		_viewModel.GitCloneCacheLoading = false;
 		_viewModel.GitCloneCacheManagementInProgress = false;
 		_viewModel.ReplaceCachedRepositories([]);
@@ -642,7 +674,10 @@ public partial class MainWindow
         e.Handled = true;
     }
 
-    private async Task GetGitUpdatesAsync()
+	private Task GetGitUpdatesAsync() =>
+		TrackGitOperationAsync(GetGitUpdatesCoreAsync);
+
+	private async Task GetGitUpdatesCoreAsync()
     {
         if (!_viewModel.IsGitMode || string.IsNullOrEmpty(_currentPath))
             return;
@@ -726,7 +761,12 @@ public partial class MainWindow
         }
     }
 
-    private async void OnGitBranchSwitch(object? sender, string branchName)
+	private async void OnGitBranchSwitch(object? sender, string branchName)
+	{
+		await TrackGitOperationAsync(() => SwitchGitBranchAsync(branchName));
+	}
+
+	private async Task SwitchGitBranchAsync(string branchName)
     {
         if (!_viewModel.CanGetGitUpdates || string.IsNullOrEmpty(_currentPath))
             return;
@@ -805,6 +845,80 @@ public partial class MainWindow
             DisposeIfCurrent(ref _gitOperationCts, gitCts);
         }
     }
+
+	private async Task TrackGitOperationAsync(Func<Task> operationFactory)
+	{
+		var operation = operationFactory();
+		lock (_gitOperationTasksLock)
+			_activeGitOperationTasks.Add(operation);
+
+		try
+		{
+			await operation;
+		}
+		finally
+		{
+			lock (_gitOperationTasksLock)
+				_activeGitOperationTasks.Remove(operation);
+		}
+	}
+
+	private bool HasActiveGitOperations()
+	{
+		lock (_gitOperationTasksLock)
+			return _activeGitOperationTasks.Count > 0;
+	}
+
+	private void CancelActiveGitOperations()
+	{
+		CancelWithoutDisposal(_gitCloneCts);
+		CancelWithoutDisposal(_gitCloneCatalogCts);
+		CancelWithoutDisposal(_gitOperationCts);
+	}
+
+	private CancellationTokenSource ReplaceGitCloneCatalogCancellation()
+	{
+		var replacement = new CancellationTokenSource();
+		var previous = Interlocked.Exchange(ref _gitCloneCatalogCts, replacement);
+		CancelWithoutDisposal(previous);
+		return replacement;
+	}
+
+	private async Task WaitForActiveGitOperationsAsync()
+	{
+		while (true)
+		{
+			Task[] operations;
+			lock (_gitOperationTasksLock)
+			{
+				_activeGitOperationTasks.RemoveWhere(static operation => operation.IsCompleted);
+				if (_activeGitOperationTasks.Count == 0)
+					return;
+				operations = [.. _activeGitOperationTasks];
+			}
+
+			try
+			{
+				await Task.WhenAll(operations);
+			}
+			catch (Exception exception)
+			{
+				Trace.TraceWarning("Git operation cleanup failed during shutdown: {0}", exception.GetType().Name);
+			}
+		}
+	}
+
+	private static void CancelWithoutDisposal(CancellationTokenSource? source)
+	{
+		try
+		{
+			source?.Cancel();
+		}
+		catch (ObjectDisposedException)
+		{
+			// The operation completed while shutdown was requesting cancellation.
+		}
+	}
 
     private async Task RefreshGitBranchesAsync(string repositoryPath, CancellationToken cancellationToken = default)
     {

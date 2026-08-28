@@ -49,6 +49,20 @@ public partial class MainWindow
 			return;
 		}
 
+		if (!_allowCloseAfterGitOperationCleanup && HasActiveGitOperations())
+		{
+			e.Cancel = true;
+			if (_gitOperationClosePending)
+				return;
+
+			_gitOperationClosePending = true;
+			CancelActiveGitOperations();
+			await WaitForActiveGitOperationsAsync();
+			_allowCloseAfterGitOperationCleanup = true;
+			Dispatcher.Post(Close, DispatcherPriority.Send);
+			return;
+		}
+
 		if (_allowCloseAfterDesktopControlServerCleanup)
 			return;
 
