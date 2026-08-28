@@ -24,11 +24,23 @@ internal sealed record TerminalParameterRow(
 	IgnoreOptionId? ContentTransformation = null,
 	string? Value = null)
 {
-	public override string ToString()
+	private readonly string _displayText = $"{(IsSelected == true ? "[x]" : "[ ]")} {Label}";
+
+	private TerminalParameterRow(TerminalParameterRow original)
+		: base()
 	{
-		var marker = IsSelected == true ? "[x]" : "[ ]";
-		return $"{marker} {Label}";
+		Key = original.Key;
+		Kind = original.Kind;
+		Label = original.Label;
+		IsSelected = original.IsSelected;
+		GitMode = original.GitMode;
+		Exclusion = original.Exclusion;
+		ContentTransformation = original.ContentTransformation;
+		Value = original.Value;
+		_displayText = $"{(IsSelected == true ? "[x]" : "[ ]")} {Label}";
 	}
+
+	public override string ToString() => _displayText;
 
 	internal static string FitLabel(string value, int width, bool useUnicode)
 	{

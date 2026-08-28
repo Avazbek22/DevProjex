@@ -22,6 +22,35 @@ public sealed class TerminalParameterRowsBuilderTests
 	}
 
 	[Fact]
+	public void RowDisplayText_IsReusedAcrossRepeatedRenders()
+	{
+		var row = new TerminalParameterRow(
+			"row",
+			TerminalParameterRowKind.Extension,
+			".cs",
+			IsSelected: true);
+		var expected = row.ToString();
+		var checksum = 0;
+		var allSame = true;
+
+		var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+		for (var iteration = 0; iteration < 10_000; iteration++)
+		{
+			var rendered = row.ToString();
+			allSame &= ReferenceEquals(expected, rendered);
+			checksum += rendered.Length;
+		}
+		var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+		Assert.True(allSame);
+		Assert.Equal(expected.Length * 10_000, checksum);
+		Assert.InRange(allocatedBytes, 0, 256);
+
+		var changed = row with { IsSelected = false, Label = ".fs" };
+		Assert.Equal("[ ] .fs", changed.ToString());
+	}
+
+	[Fact]
 	public void ContentRowsExposeAllTransformationsAndSeparateRedactionCounters()
 	{
 		var builder = CreateBuilder();
