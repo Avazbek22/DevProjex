@@ -1653,6 +1653,7 @@ public sealed class ProjectContextStreamingRegressionTests
 		private readonly TaskCompletionSource<bool> _firstReadStarted = new(
 			TaskCreationOptions.RunContinuationsAsynchronously);
 		private readonly TaskCompletionSource<bool>? _release;
+		private readonly TaskCompletionSource<bool>? _nonFirstReadCompleted;
 		private readonly int _requiredConcurrency;
 		private readonly bool _blockUntilCancellation;
 		private int _activeReads;
@@ -1665,6 +1666,8 @@ public sealed class ProjectContextStreamingRegressionTests
 			if (!blockUntilCancellation)
 			{
 				_release = new TaskCompletionSource<bool>(
+					TaskCreationOptions.RunContinuationsAsynchronously);
+				_nonFirstReadCompleted = new TaskCompletionSource<bool>(
 					TaskCreationOptions.RunContinuationsAsynchronously);
 			}
 		}
@@ -1706,10 +1709,18 @@ public sealed class ProjectContextStreamingRegressionTests
 				var index = int.TryParse(stem, out var parsed) ? parsed : 0;
 				await Task.Delay(TimeSpan.FromMilliseconds(Math.Max(1, 9 - index) * 10), cancellationToken)
 					.ConfigureAwait(false);
+				if (index == 0)
+				{
+					await _nonFirstReadCompleted!.Task
+						.WaitAsync(cancellationToken)
+						.ConfigureAwait(false);
+				}
 				var result = await _inner
 					.ReadClassifiedAsync(path, maxSizeForFullRead, cancellationToken)
 					.ConfigureAwait(false);
 				_completionOrder.Enqueue(Path.GetFileName(path));
+				if (index != 0)
+					_nonFirstReadCompleted!.TrySetResult(true);
 				return result;
 			}
 			finally
