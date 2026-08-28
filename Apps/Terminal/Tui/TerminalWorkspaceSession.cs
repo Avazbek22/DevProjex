@@ -4176,9 +4176,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	{
 		if (_preview is null)
 			return;
-		var lastRow = Math.Max(0, _preview.LineCount - 1);
+		var lastRow = Math.Max(0, _preview.ContentRowCount - 1);
 		var pageSize = Math.Max(1, _preview.PageSize - 1);
-		var row = Math.Clamp(_preview.FirstVisibleLine, 0, lastRow);
+		var row = Math.Clamp(_preview.FirstVisibleContentRow, 0, lastRow);
 		var column = Math.Max(0, _preview.HorizontalOffset);
 		switch (scroll)
 		{
@@ -4212,7 +4212,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				throw new ArgumentOutOfRangeException(nameof(scroll), scroll, null);
 		}
 
-		RestorePreviewViewport(row, column);
+		_preview.ScrollToContentRow(row, column);
+		UpdatePreviewRange();
 	}
 
 	private void RestorePreviewViewport(int row, int column)
