@@ -3,7 +3,7 @@ namespace DevProjex.Kernel.Abstractions;
 /// <summary>
 /// Manages the persistent repository cache and temporary clone staging.
 /// </summary>
-public interface IRepoCacheService
+public interface IRepoCacheService : IDisposable
 {
     /// <summary>
     /// Gets the root path of the repository cache.

@@ -388,6 +388,7 @@ public sealed class MainWindowLifecycleUiTests
 
 			Assert.True(cache.Exited.Task.IsCompletedSuccessfully);
 			Assert.True(catalogExitedAtClosed);
+			Assert.True(cache.IsDisposed);
 		}
 		finally
 		{
@@ -639,9 +640,11 @@ public sealed class MainWindowLifecycleUiTests
 	{
 		private readonly ManualResetEventSlim _release = new(initialState: false);
 		private int _armed;
+		private int _disposed;
 
 		public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 		public TaskCompletionSource Exited { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+		public bool IsDisposed => Volatile.Read(ref _disposed) != 0;
 		public string CacheRootPath => inner.CacheRootPath;
 		public IReadOnlyList<string> CacheSearchRootPaths => inner.CacheSearchRootPaths;
 
@@ -736,8 +739,11 @@ public sealed class MainWindowLifecycleUiTests
 
 		public void Dispose()
 		{
+			if (Interlocked.Exchange(ref _disposed, 1) != 0)
+				return;
 			_release.Set();
 			_release.Dispose();
+			inner.Dispose();
 		}
 	}
 
