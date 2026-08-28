@@ -649,6 +649,36 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 	}
 
 	[Fact(Timeout = 120_000)]
+	public async Task CjkArgumentEditingKeepsExactCommandText()
+	{
+		using var project = CreateProject();
+		await using var terminal = await StartAsync(project.Path, columns: 100, rows: 30);
+		await terminal.WaitForScreenAsync(
+			"PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.SendAsync(":search 本語", TestContext.Current.CancellationToken);
+		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
+		for (var index = 0; index < "search ".Length; index++)
+			await terminal.SendRightAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync("日", TestContext.Current.CancellationToken);
+		await terminal.SendEndAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync("x\u007f", TestContext.Current.CancellationToken);
+
+		var edited = await terminal.WaitForScreenAsync(
+			":search 日本語",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.DoesNotContain(":search 日本語x", edited, StringComparison.Ordinal);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Preview search: 日本語",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.False(terminal.HasExited);
+		await QuitAsync(terminal);
+	}
+
+	[Fact(Timeout = 120_000)]
 	public async Task ActivationWorksFromEveryPaneAndSurvivesResizeAndPlainMode()
 	{
 		using var project = CreateProject();
