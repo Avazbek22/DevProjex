@@ -60,9 +60,9 @@ public sealed class DevProjexCommandTree
 	}
 
 
-	public RootCommand Build()
+	public DevProjexRootCommand Build()
 	{
-		var root = new RootCommand(L("Terminal.Command.Root"));
+		var root = new DevProjexRootCommand(L("Terminal.Command.Root"));
 		var defaultVersionOption = root.Options.OfType<VersionOption>().Single();
 		root.Options.Remove(defaultVersionOption);
 		root.Options.Add(new VersionOption("--version", "-v"));
@@ -298,7 +298,7 @@ public sealed class DevProjexCommandTree
 						selectedPaths,
 						cancellationToken).ConfigureAwait(false);
 					if ((parseResult.GetValue(findings) || parseResult.GetValue(failOnFindings)) &&
-					    spec.HideSecrets != true)
+					    selection.GetHideSecretsOverride(parseResult) is null)
 					{
 						spec = spec with { HideSecrets = true };
 					}

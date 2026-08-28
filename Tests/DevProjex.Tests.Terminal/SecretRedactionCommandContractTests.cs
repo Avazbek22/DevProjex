@@ -338,6 +338,28 @@ public sealed class SecretRedactionCommandContractTests
 	}
 
 	[Fact]
+	public async Task ExplicitNoHideSecretsPreventsFailOnFindingsFromEnablingRedaction()
+	{
+		using var workspace = CreateWorkspace();
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"analyze", workspace.ProjectRoot,
+				"--no-hide-secrets", "--fail-on-findings",
+				"--format", "json", "--plain", "-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		Assert.False(document.RootElement.GetProperty("selection").GetProperty("hideSecrets").GetBoolean());
+		Assert.False(document.RootElement.TryGetProperty("redaction", out _));
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
 	public async Task AnalyzeFindingsTextDoesNotExposeDetectedValues()
 	{
 		using var workspace = CreateWorkspace();

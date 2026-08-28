@@ -34,6 +34,24 @@ public sealed class CliV1ParserRegressionTests
 		Assert.NotEmpty(result.Errors);
 	}
 
+	[Theory]
+	[InlineData("--hide-secrets")]
+	[InlineData("--hide-private-data")]
+	[InlineData("--compress-code")]
+	[InlineData("--strip-comments")]
+	[InlineData("--strip-blank-lines")]
+	public void BareTransformationFlagBeforeProjectDoesNotConsumeProject(string option)
+	{
+		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
+		var command = ResolveCommand(root, ["analyze"]);
+		var project = Assert.IsType<Argument<string?>>(Assert.Single(command.Arguments));
+
+		var result = root.Parse(["analyze", option, "project-root"]);
+
+		Assert.Empty(result.Errors);
+		Assert.Equal("project-root", result.GetValue(project));
+	}
+
 	[Fact]
 	public void BareMisspelledProfileTokenIsRejectedAsAChoiceInsteadOfAPath()
 	{

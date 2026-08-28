@@ -16,15 +16,15 @@ internal sealed class SelectionOptions
 	public Option<string?> SelectedPathsSource { get; }
 	public Option<GitFilteringMode?> GitMode { get; }
 	public Option<CliExclusionValue[]> Exclusions { get; }
-	public Option<string?> HideSecrets { get; }
+	public Option<bool?> HideSecrets { get; }
 	public Option<bool> NoHideSecrets { get; }
-	public Option<string?> HidePrivateData { get; }
+	public Option<bool?> HidePrivateData { get; }
 	public Option<bool> NoHidePrivateData { get; }
-	public Option<string?> CompressCode { get; }
+	public Option<bool?> CompressCode { get; }
 	public Option<bool> NoCompressCode { get; }
-	public Option<string?> StripComments { get; }
+	public Option<bool?> StripComments { get; }
 	public Option<bool> NoStripComments { get; }
-	public Option<string?> StripBlankLines { get; }
+	public Option<bool?> StripBlankLines { get; }
 	public Option<bool> NoStripBlankLines { get; }
 	public bool IncludesHidePrivateData => _includeHidePrivateData;
 	public IReadOnlyList<Option> AllSymbols =>
@@ -219,6 +219,11 @@ internal sealed class SelectionOptions
 			.ConfigureAwait(false);
 	}
 
+	public bool? GetHideSecretsOverride(ParseResult parseResult) =>
+		_includeContentTransformations
+			? ResolveToggle(parseResult, HideSecrets, NoHideSecrets)
+			: null;
+
 	public async Task<IReadOnlyCollection<string>?> ReadSelectedPathsAsync(
 		ParseResult parseResult,
 		CancellationToken cancellationToken)
@@ -352,7 +357,7 @@ internal sealed class SelectionOptions
 		return symbols;
 	}
 
-	private IEnumerable<(Option<string?> Positive, Option<bool> Negative)> TogglePairs()
+	private IEnumerable<(Option<bool?> Positive, Option<bool> Negative)> TogglePairs()
 	{
 		yield return (HideSecrets, NoHideSecrets);
 		if (_includeHidePrivateData)
@@ -364,51 +369,28 @@ internal sealed class SelectionOptions
 
 	private static bool? ResolveToggle(
 		ParseResult parseResult,
-		Option<string?> positive,
+		Option<bool?> positive,
 		Option<bool> negative)
 	{
 		if (parseResult.GetResult(negative) is { Implicit: false })
 			return false;
 		if (parseResult.GetResult(positive) is not { Implicit: false })
 			return null;
-		return parseResult.GetValue(positive) switch
-		{
-			null => true,
-			var value when value.Equals("true", StringComparison.OrdinalIgnoreCase) => true,
-			var value when value.Equals("on", StringComparison.OrdinalIgnoreCase) => true,
-			_ => false
-		};
+		return parseResult.GetValue(positive) ?? true;
 	}
 
-	private static (Option<string?> Positive, Option<bool> Negative) CreateToggle(
+	private static (Option<bool?> Positive, Option<bool> Negative) CreateToggle(
 		string positiveName,
 		string negativeName,
 		string positiveDescriptionKey,
 		string negativeDescriptionKey,
 		LocalizationService localization)
 	{
-		var positive = new Option<string?>(positiveName)
+		var positive = new Option<bool?>(positiveName)
 		{
 			Description = localization[positiveDescriptionKey],
 			HelpName = "on|off",
-			Arity = ArgumentArity.ZeroOrOne,
-			CustomParser = result =>
-			{
-				if (result.Tokens.Count == 0)
-					return null;
-				var value = result.Tokens[0].Value;
-				if (value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
-				    value.Equals("on", StringComparison.OrdinalIgnoreCase))
-					return "on";
-				if (value.Equals("false", StringComparison.OrdinalIgnoreCase) ||
-				    value.Equals("off", StringComparison.OrdinalIgnoreCase))
-					return "off";
-				result.AddError(LocalizedParseError.Create(localization.Format(
-					"Terminal.Validation.Choice",
-					positiveName,
-					"true, false, on, off")));
-				return null;
-			}
+			Arity = ArgumentArity.ZeroOrOne
 		};
 		positive.CompletionSources.Add(["on", "off", "true", "false"]);
 		var negative = new Option<bool>(negativeName)
