@@ -462,7 +462,12 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		public override void Truncate(int length) => _builder.Length = length;
 		public override ValueTask CompleteAsync(CancellationToken cancellationToken) =>
 			ValueTask.CompletedTask;
-		public override string GetMaterializedText() => _builder.ToString().TrimEnd('\r', '\n');
+		public override string GetMaterializedText()
+		{
+			while (_builder.Length > 0 && _builder[^1] is '\r' or '\n')
+				_builder.Length--;
+			return _builder.ToString();
+		}
 	}
 
 	private sealed class StreamingSelectedContentOutput(TextWriter writer) : SelectedContentOutput
