@@ -3,7 +3,7 @@ namespace DevProjex.Application.Services;
 /// <summary>Calculates rendered content metrics from any source or prepared-file analyzer.</summary>
 public static class ProjectContentMetricsCalculator
 {
-	private const int MaximumConcurrentReads = 4;
+	private const int MaximumConcurrentReads = 16;
 	private const int BatchSize = 1024;
 
 	public static Task<ExportOutputMetrics> CalculateAsync(
