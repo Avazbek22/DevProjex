@@ -2052,6 +2052,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 
         try
         {
+            Assert.True(UiTestDriver.GetViewModel(window).AllExtensionsChecked);
             await UiTestDriver.WaitForIgnoreOptionStateAsync(
                 window,
                 IgnoreOptionId.EmptyFolders,
@@ -2060,6 +2061,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
             var markdownOption = UiTestDriver.GetViewModel(window).Extensions.Single(option => option.Name == ".md");
             markdownOption.IsChecked = false;
             await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
+            Assert.False(UiTestDriver.GetViewModel(window).AllExtensionsChecked);
 
             await UiTestDriver.WaitForIgnoreOptionStateAsync(
                 window,
@@ -2074,6 +2076,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
             markdownOption = UiTestDriver.GetViewModel(window).Extensions.Single(option => option.Name == ".md");
             markdownOption.IsChecked = true;
             await UiTestDriver.WaitForSettledFramesAsync(frameCount: 8);
+            Assert.True(UiTestDriver.GetViewModel(window).AllExtensionsChecked);
             await UiTestDriver.WaitForIgnoreOptionStateAsync(
                 window,
                 IgnoreOptionId.EmptyFolders,

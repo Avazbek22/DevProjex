@@ -53,8 +53,10 @@ public sealed partial class SelectionSyncCoordinator(
     private bool _suppressExtensionAllCheck;
     private bool _suppressExtensionItemCheck;
     private bool _suppressIgnoreAllCheck;
-	private bool _suppressContentProcessingAllCheck;
+    private bool _suppressContentProcessingAllCheck;
     private bool _suppressIgnoreItemCheck;
+    private int _visibleUncheckedExtensionCount;
+    private bool _visibleExtensionAggregateIsValid;
     private int _extensionScanVersion;
     private int _ignoreOptionsVersion;
     private SemaphoreSlim _refreshLock = new(1, 1);
@@ -271,6 +273,7 @@ public sealed partial class SelectionSyncCoordinator(
         else if (ReferenceEquals(options, _hookedExtensions))
         {
             SynchronizeSelectionItemSubscriptions(options, _subscribedExtensionItems);
+            RebuildVisibleExtensionAggregate(synchronizeAllCheckbox: false);
             return;
         }
         else
@@ -282,6 +285,7 @@ public sealed partial class SelectionSyncCoordinator(
             SubscribeSelectionItem(item, _subscribedExtensionItems);
 
         options.CollectionChanged += _extensionsCollectionChangedHandler;
+        RebuildVisibleExtensionAggregate(synchronizeAllCheckbox: false);
     }
 
     private NotifyCollectionChangedEventHandler CreateSelectionCollectionChangedHandler(
@@ -290,6 +294,7 @@ public sealed partial class SelectionSyncCoordinator(
     {
         return (_, e) =>
         {
+            _visibleExtensionAggregateIsValid = false;
             if (e.OldItems is not null)
             {
                 foreach (SelectionOptionViewModel item in e.OldItems)
@@ -1465,8 +1470,9 @@ public sealed partial class SelectionSyncCoordinator(
 
     public void UpdateExtensionsSelectionCache()
     {
-        _session.Extensions.UpdateFromVisibleOptions(
-            viewModel.Extensions.Select(static option => new SelectionOption(option.Name, option.IsChecked)));
+        _session.Extensions.UpdateFromVisibleOptionStates(
+            viewModel.Extensions.Select(static option => (option.Name, option.IsChecked)));
+        RebuildVisibleExtensionAggregate();
     }
 
     internal void ApplyExtensionScan(IReadOnlyCollection<string> extensions)
@@ -1553,7 +1559,7 @@ public sealed partial class SelectionSyncCoordinator(
         if (sender is not SelectionOptionViewModel option)
             return;
 
-        if (viewModel.Extensions.Contains(option))
+        if (_subscribedExtensionItems.Contains(option))
         {
             if (_suppressExtensionItemCheck) return;
             if (_session.PreparedPath is not null)
@@ -1565,10 +1571,20 @@ public sealed partial class SelectionSyncCoordinator(
                 return;
             }
 
-            SyncAllCheckbox(viewModel.Extensions, ref _suppressExtensionAllCheck,
-                value => viewModel.AllExtensionsChecked = value);
-
-            UpdateExtensionsSelectionCache();
+            if (!_visibleExtensionAggregateIsValid ||
+                !_session.Extensions.TryUpdateKnownOption(
+                    option.Name,
+                    option.IsChecked,
+                    out var previousState))
+            {
+                UpdateExtensionsSelectionCache();
+            }
+            else
+            {
+                if (previousState != option.IsChecked)
+                    _visibleUncheckedExtensionCount += option.IsChecked ? -1 : 1;
+                SyncAllExtensionsCheckboxFromAggregate();
+            }
             _session.AdvanceRevision();
             RequestPendingApplyEvaluation();
 			selectionContentChanged?.Invoke();
@@ -1627,10 +1643,7 @@ public sealed partial class SelectionSyncCoordinator(
 
     private void SynchronizeDerivedAggregateSelectionState()
     {
-        SyncAllCheckbox(
-            viewModel.Extensions,
-            ref _suppressExtensionAllCheck,
-            value => viewModel.AllExtensionsChecked = value);
+        RebuildVisibleExtensionAggregate();
         SyncIgnoreAllCheckbox();
     }
 
@@ -1894,42 +1907,6 @@ public sealed partial class SelectionSyncCoordinator(
         }).ConfigureAwait(false);
     }
 
-    private static void SyncAllCheckbox<T>(
-        IEnumerable<T> options,
-        ref bool suppressFlag,
-        Action<bool> setValue,
-        bool emptyValue = false)
-        where T : class
-    {
-        suppressFlag = true;
-        try
-        {
-            // Avoid ToList() allocation - iterate once with early exit
-            bool hasItems = false;
-            bool allChecked = true;
-            foreach (var option in options)
-            {
-                hasItems = true;
-                bool isChecked = option switch
-                {
-                    SelectionOptionViewModel selection => selection.IsChecked,
-                    IgnoreOptionViewModel ignore => ignore.IsChecked,
-                    _ => false
-                };
-                if (!isChecked)
-                {
-                    allChecked = false;
-                    break;
-                }
-            }
-            setValue(hasItems ? allChecked : emptyValue);
-        }
-        finally
-        {
-            suppressFlag = false;
-        }
-    }
-
     private void ApplyExtensionOptions(
         IReadOnlyList<SelectionOption> options,
         int extensionlessEntriesCount,
@@ -1975,11 +1952,40 @@ public sealed partial class SelectionSyncCoordinator(
         if (!ShouldSuppressAllTogglesOverride() && ResolveAllExtensionsCheckedForRefresh())
             SetAllChecked(viewModel.Extensions, true, ref _suppressExtensionItemCheck);
 
-        SyncAllCheckbox(viewModel.Extensions, ref _suppressExtensionAllCheck,
-            value => viewModel.AllExtensionsChecked = value);
         if (!_session.Extensions.IsInitialized)
             UpdateExtensionsSelectionCache();
+        else
+            RebuildVisibleExtensionAggregate();
         RequestPendingApplyEvaluation();
+    }
+
+    private void RebuildVisibleExtensionAggregate(bool synchronizeAllCheckbox = true)
+    {
+        var uncheckedCount = 0;
+        foreach (var option in viewModel.Extensions)
+        {
+            if (!option.IsChecked)
+                uncheckedCount++;
+        }
+
+        _visibleUncheckedExtensionCount = uncheckedCount;
+        _visibleExtensionAggregateIsValid = true;
+        if (synchronizeAllCheckbox)
+            SyncAllExtensionsCheckboxFromAggregate();
+    }
+
+    private void SyncAllExtensionsCheckboxFromAggregate()
+    {
+        _suppressExtensionAllCheck = true;
+        try
+        {
+            viewModel.AllExtensionsChecked =
+                viewModel.Extensions.Count > 0 && _visibleUncheckedExtensionCount == 0;
+        }
+        finally
+        {
+            _suppressExtensionAllCheck = false;
+        }
     }
 
     private void ApplyScanRootOptions(IReadOnlyList<SelectionOption> options)

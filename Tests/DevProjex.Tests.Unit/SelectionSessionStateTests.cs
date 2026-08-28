@@ -15,10 +15,10 @@ public sealed class SelectionSessionStateTests
                 [".hidden"] = false
             });
 
-        cache.UpdateFromVisibleOptions(
+        cache.UpdateFromVisibleOptionStates(
         [
-            new(".cs", true),
-            new(".json", true)
+            (".cs", true),
+            (".json", true)
         ]);
 
         var states = cache.SnapshotOptionStatesOrNull(suppressLegacySelectedOnlyState: true);
@@ -41,6 +41,42 @@ public sealed class SelectionSessionStateTests
 
         Assert.Same(selectedNames, cache.SelectedNames);
         Assert.Equal([".md"], cache.SelectedNames);
+    }
+
+    [Fact]
+    public void SelectionOptionStateCache_TryUpdateKnownOption_UpdatesInPlaceAndPreservesHiddenState()
+    {
+        var cache = new SelectionOptionStateCache(StringComparer.OrdinalIgnoreCase);
+        cache.RestoreProfile(
+            selectedNames: [".cs", ".hidden-selected"],
+            optionStates: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+            {
+                [".cs"] = true,
+                [".hidden-selected"] = true,
+                [".hidden"] = false
+            });
+        var selectedNames = cache.SelectedNames;
+        var optionStates = cache.OptionStates;
+        cache.MarkIncomplete();
+
+        var updated = cache.TryUpdateKnownOption(".CS", isChecked: false, out var previousState);
+
+        Assert.True(updated);
+        Assert.True(previousState);
+        Assert.True(cache.HasFullState);
+        Assert.Same(selectedNames, cache.SelectedNames);
+        Assert.Same(optionStates, cache.OptionStates);
+        Assert.DoesNotContain(".cs", cache.SelectedNames, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains(".hidden-selected", cache.SelectedNames, StringComparer.OrdinalIgnoreCase);
+        Assert.False(cache.OptionStates[".cs"]);
+        Assert.True(cache.OptionStates[".hidden-selected"]);
+        Assert.False(cache.OptionStates[".hidden"]);
+        Assert.True(cache.TryUpdateKnownOption(".cs", isChecked: true, out previousState));
+        Assert.False(previousState);
+        Assert.Contains(".cs", cache.SelectedNames, StringComparer.OrdinalIgnoreCase);
+        Assert.True(cache.OptionStates[".cs"]);
+        Assert.False(cache.TryUpdateKnownOption(".new", isChecked: true, out _));
+        Assert.DoesNotContain(".new", cache.OptionStates.Keys, StringComparer.OrdinalIgnoreCase);
     }
 
     [Fact]
