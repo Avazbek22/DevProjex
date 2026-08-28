@@ -10,6 +10,16 @@ namespace DevProjex.Tests.Terminal;
 
 public sealed class McpServerProcessTests
 {
+	private static readonly string[] ExpectedTools =
+	[
+		"list_projects",
+		"get_tree",
+		"analyze",
+		"pack_context",
+		"read_pack",
+		"search_project",
+		"get_file"
+	];
 	private const string Secret = "ghp_" + "a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL";
 	private const string PrivateEmail = "alice.smith" + "@company.io";
 	private const string PrivatePath = "/home/alice-smith/DevProjexMcpProcessProbe/project";
@@ -63,7 +73,7 @@ public sealed class McpServerProcessTests
 			TestContext.Current.CancellationToken))
 		{
 			var tools = await client.ListToolsAsync(options: null, TestContext.Current.CancellationToken);
-			Assert.Equal(7, tools.Count);
+			Assert.Equal(ExpectedTools, tools.Select(static tool => tool.Name));
 			var result = await client.CallToolAsync(
 				"list_projects",
 				new Dictionary<string, object?>(),
@@ -125,6 +135,80 @@ public sealed class McpServerProcessTests
 			return document.RootElement.TryGetProperty("method", out var method) &&
 			       method.GetString() == NotificationMethods.ProgressNotification;
 		});
+	}
+
+	[Fact]
+	public async Task PublishedSingleFileCompletesHandshakeListsToolsCallsToolAndExitsOnEof()
+	{
+		var application = GetPublishedSingleFileOrSkip();
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/app.cs", "internal sealed class PublishedMcpMarker {}\n");
+		var startInfo = new ProcessStartInfo(application)
+		{
+			UseShellExecute = false,
+			RedirectStandardInput = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			CreateNoWindow = true,
+			WorkingDirectory = project
+		};
+		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--root");
+		startInfo.ArgumentList.Add(project);
+		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data");
+
+		using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("MCP process did not start.");
+		var standardErrorTask = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+		await using var recordingOutput = new RecordingReadStream(process.StandardOutput.BaseStream);
+		await using (var client = await McpClient.CreateAsync(
+			             new StreamClientTransport(process.StandardInput.BaseStream, recordingOutput),
+			             clientOptions: null,
+			             loggerFactory: null,
+			             TestContext.Current.CancellationToken))
+		{
+			var tools = await client.ListToolsAsync(options: null, TestContext.Current.CancellationToken);
+			Assert.Equal(ExpectedTools, tools.Select(static tool => tool.Name));
+			var result = await client.CallToolAsync(
+				"list_projects",
+				new Dictionary<string, object?>(),
+				progress: null,
+				options: null,
+				TestContext.Current.CancellationToken);
+			Assert.NotEqual(true, result.IsError);
+			var listedProject = result.StructuredContent!.Value
+				.GetProperty("projects")[0]
+				.GetProperty("path")
+				.GetString();
+			Assert.True(string.Equals(
+				McpRootRegistry.ResolvePhysicalExistingPath(project, requireDirectory: true),
+				listedProject,
+				PathComparison));
+		}
+
+		process.StandardInput.Close();
+		await Task.WhenAll(
+			process.WaitForExitAsync(TestContext.Current.CancellationToken)
+				.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken),
+			recordingOutput.WaitForSourceEofAsync(TestContext.Current.CancellationToken)
+				.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken));
+		var standardError = await standardErrorTask;
+		Assert.True(process.ExitCode == 0, $"Unexpected exit code {process.ExitCode}. stderr: {standardError}");
+
+		Assert.NotEmpty(ParseJsonRpcMessages(recordingOutput.GetRecordedText()));
+	}
+
+	private static string GetPublishedSingleFileOrSkip()
+	{
+		var explicitPath = Environment.GetEnvironmentVariable("DEVPROJEX_TUI_TEST_BINARY");
+		if (string.IsNullOrWhiteSpace(explicitPath))
+			Assert.Skip("Published MCP smoke requires DEVPROJEX_TUI_TEST_BINARY.");
+
+		var application = Path.GetFullPath(explicitPath);
+		Assert.True(File.Exists(application), $"Published application does not exist: {application}");
+		Assert.False(File.Exists(Path.ChangeExtension(application, ".runtimeconfig.json")));
+		Assert.False(File.Exists(Path.ChangeExtension(application, ".deps.json")));
+		return application;
 	}
 
 	private static IReadOnlyList<string> ParseJsonRpcMessages(string transcript)

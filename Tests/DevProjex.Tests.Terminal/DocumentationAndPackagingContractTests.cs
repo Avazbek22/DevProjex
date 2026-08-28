@@ -350,6 +350,10 @@ public sealed class DocumentationAndPackagingContractTests
 			"PublishedSingleFileExtractionProcessTests",
 			workflow,
 			StringComparison.Ordinal);
+		Assert.Contains(
+			"McpServerProcessTests.PublishedSingleFileCompletesHandshakeListsToolsCallsToolAndExitsOnEof",
+			workflow,
+			StringComparison.Ordinal);
 		var publishStepIndex = workflow.IndexOf(
 			"\n      - name: Publish\n",
 			StringComparison.Ordinal);

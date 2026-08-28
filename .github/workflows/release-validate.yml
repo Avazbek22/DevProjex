@@ -952,7 +952,7 @@ jobs:
           dotnet test Tests/DevProjex.Tests.Terminal/DevProjex.Tests.Terminal.csproj `
             -c Release `
             --no-restore `
-            --filter "FullyQualifiedName~PublishedSingleFileExtractionProcessTests" `
+            --filter "FullyQualifiedName~PublishedSingleFileExtractionProcessTests|FullyQualifiedName~McpServerProcessTests.PublishedSingleFileCompletesHandshakeListsToolsCallsToolAndExitsOnEof" `
             --logger "console;verbosity=minimal"
 
       - name: Published Completion Native Shell Integration
