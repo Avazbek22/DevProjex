@@ -589,7 +589,7 @@ public sealed class TreeExportService
 			? rootPath
 			: displayRootPath);
 		var outputRootName = EscapeTextValue(ResolveRootDisplayName(root, displayRootName));
-		var output = new TreeTextLineWriter(destination, cancellationToken);
+		using var output = new TreeTextLineWriter(destination, cancellationToken);
 		var ancestorBranches = new List<bool>();
 
 		if (includeRootPath)
@@ -668,7 +668,7 @@ public sealed class TreeExportService
 		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath)
 			? rootPath
 			: displayRootPath;
-		var output = new TreeTextLineWriter(destination, cancellationToken);
+		using var output = new TreeTextLineWriter(destination, cancellationToken);
 		if (includeRootPath)
 		{
 			await output.BeginLineAsync().ConfigureAwait(false);
@@ -928,37 +928,50 @@ public sealed class TreeExportService
 		int IndentLength,
 		bool IsLast);
 
-	private sealed class TreeTextLineWriter(
-		TextWriter destination,
-		CancellationToken cancellationToken)
+	private sealed class TreeTextLineWriter : IDisposable
 	{
+		private readonly TextWriter _destination;
+		private readonly CancellationToken _cancellationToken;
+		private char[] _buffer;
+		private int _bufferedCharacters;
 		private bool _hasLine;
+		private bool _completed;
+		private bool _disposed;
+
+		public TreeTextLineWriter(
+			TextWriter destination,
+			CancellationToken cancellationToken)
+		{
+			ArgumentNullException.ThrowIfNull(destination);
+			_destination = destination;
+			_cancellationToken = cancellationToken;
+			_buffer = ArrayPool<char>.Shared.Rent(MaximumTreeTextWriteCharacters);
+		}
 
 		public async ValueTask BeginLineAsync()
 		{
-			cancellationToken.ThrowIfCancellationRequested();
+			ThrowIfNotWritable();
+			_cancellationToken.ThrowIfCancellationRequested();
 			if (_hasLine)
-			{
-				await destination.WriteAsync(
-						Environment.NewLine.AsMemory(),
-						cancellationToken)
-					.ConfigureAwait(false);
-			}
+				await FlushCurrentLineAsync(includeLineEnding: true).ConfigureAwait(false);
 			_hasLine = true;
 		}
 
 		public async ValueTask WriteAsync(string value)
 		{
+			ArgumentNullException.ThrowIfNull(value);
+			ThrowIfNotWritable();
 			for (var offset = 0; offset < value.Length;)
 			{
-				cancellationToken.ThrowIfCancellationRequested();
+				_cancellationToken.ThrowIfCancellationRequested();
+				if (_bufferedCharacters == MaximumTreeTextWriteCharacters)
+					await FlushBufferAsync().ConfigureAwait(false);
+
 				var length = Math.Min(
-					MaximumTreeTextWriteCharacters,
+					MaximumTreeTextWriteCharacters - _bufferedCharacters,
 					value.Length - offset);
-				await destination.WriteAsync(
-						value.AsMemory(offset, length),
-						cancellationToken)
-					.ConfigureAwait(false);
+				value.AsSpan(offset, length).CopyTo(_buffer.AsSpan(_bufferedCharacters));
+				_bufferedCharacters += length;
 				offset += length;
 			}
 		}
@@ -968,29 +981,72 @@ public sealed class TreeExportService
 			if (count <= 0)
 				return;
 
-			var chunk = new string(value, Math.Min(MaximumTreeTextWriteCharacters, count));
+			ThrowIfNotWritable();
 			for (var remaining = count; remaining > 0;)
 			{
-				cancellationToken.ThrowIfCancellationRequested();
-				var length = Math.Min(chunk.Length, remaining);
-				await destination.WriteAsync(
-						chunk.AsMemory(0, length),
-						cancellationToken)
-					.ConfigureAwait(false);
+				_cancellationToken.ThrowIfCancellationRequested();
+				if (_bufferedCharacters == MaximumTreeTextWriteCharacters)
+					await FlushBufferAsync().ConfigureAwait(false);
+
+				var length = Math.Min(
+					MaximumTreeTextWriteCharacters - _bufferedCharacters,
+					remaining);
+				_buffer.AsSpan(_bufferedCharacters, length).Fill(value);
+				_bufferedCharacters += length;
 				remaining -= length;
 			}
 		}
 
 		public async ValueTask CompleteAsync(bool includeFinalLineEnding)
 		{
-			cancellationToken.ThrowIfCancellationRequested();
-			if (!includeFinalLineEnding || !_hasLine)
+			ThrowIfNotWritable();
+			_cancellationToken.ThrowIfCancellationRequested();
+			if (!_hasLine)
+			{
+				_completed = true;
+				return;
+			}
+
+			await FlushCurrentLineAsync(includeFinalLineEnding).ConfigureAwait(false);
+			_completed = true;
+		}
+
+		public void Dispose()
+		{
+			if (_disposed)
 				return;
 
-			await destination.WriteAsync(
-					Environment.NewLine.AsMemory(),
-					cancellationToken)
+			ArrayPool<char>.Shared.Return(_buffer, clearArray: true);
+			_buffer = [];
+			_bufferedCharacters = 0;
+			_disposed = true;
+		}
+
+		private async ValueTask FlushCurrentLineAsync(bool includeLineEnding)
+		{
+			if (includeLineEnding)
+				await WriteAsync(Environment.NewLine).ConfigureAwait(false);
+			await FlushBufferAsync().ConfigureAwait(false);
+		}
+
+		private async ValueTask FlushBufferAsync()
+		{
+			_cancellationToken.ThrowIfCancellationRequested();
+			if (_bufferedCharacters == 0)
+				return;
+
+			await _destination.WriteAsync(
+					_buffer.AsMemory(0, _bufferedCharacters),
+					_cancellationToken)
 				.ConfigureAwait(false);
+			_bufferedCharacters = 0;
+		}
+
+		private void ThrowIfNotWritable()
+		{
+			ObjectDisposedException.ThrowIf(_disposed, this);
+			if (_completed)
+				throw new InvalidOperationException("Tree text output was already finalized.");
 		}
 	}
 
