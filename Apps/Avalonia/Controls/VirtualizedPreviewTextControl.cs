@@ -1343,14 +1343,17 @@ public sealed class VirtualizedPreviewTextControl : Control
         _formattedLineCacheBrush = brush;
     }
 
-    private void TrimFormattedLineCache()
-    {
-        while (_formattedLineCache.Count > MaxCachedFormattedLines &&
-               _formattedLineCacheOrder.TryDequeue(out var lineNumber))
-        {
-            _formattedLineCache.Remove(lineNumber);
-        }
-    }
+	private void TrimFormattedLineCache()
+	{
+		var evicted = false;
+		while (_formattedLineCache.Count > MaxCachedFormattedLines &&
+		       _formattedLineCacheOrder.TryDequeue(out var lineNumber))
+		{
+			evicted |= _formattedLineCache.Remove(lineNumber);
+		}
+		if (evicted)
+			_columnGeometryCache.Clear();
+	}
 
     private void ClearFormattedLineCache()
     {

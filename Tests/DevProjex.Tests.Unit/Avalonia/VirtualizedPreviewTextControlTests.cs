@@ -1657,6 +1657,42 @@ public sealed class VirtualizedPreviewTextControlTests
 		Assert.Equal(PreviewColumnGeometryCache.MaximumEntries + 31.25, newest);
 	}
 
+	[AvaloniaFact]
+	public void FormattedLineEvictionClearsDependentColumnGeometry()
+	{
+		var control = new VirtualizedPreviewTextControl
+		{
+			TextBrush = Brushes.White,
+			TextFontSize = 16
+		};
+		var cache = GetColumnGeometryCache(control);
+		cache.Store(lineNumber: 1, column: 1, distance: 10);
+		var method = typeof(VirtualizedPreviewTextControl).GetMethod(
+			"TrimFormattedLineCache",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(method);
+		var linesField = typeof(VirtualizedPreviewTextControl).GetField(
+			"_formattedLineCache",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(linesField);
+		var lines = Assert.IsAssignableFrom<System.Collections.IDictionary>(
+			linesField!.GetValue(control));
+		var orderField = typeof(VirtualizedPreviewTextControl).GetField(
+			"_formattedLineCacheOrder",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(orderField);
+		var order = Assert.IsType<Queue<int>>(orderField!.GetValue(control));
+		for (var line = 0; line <= 2048; line++)
+		{
+			lines[line] = null;
+			order.Enqueue(line);
+		}
+
+		method!.Invoke(control, []);
+
+		Assert.Equal(0, cache.Count);
+	}
+
     private static double InvokeResolveLineHeight(VirtualizedPreviewTextControl control)
     {
         var method = typeof(VirtualizedPreviewTextControl).GetMethod(

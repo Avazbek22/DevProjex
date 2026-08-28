@@ -634,11 +634,16 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		public override ValueTask CompleteAsync(CancellationToken cancellationToken) =>
 			ValueTask.CompletedTask;
 		public override string GetMaterializedText()
-		{
-			while (_builder.Length > 0 && _builder[^1] is '\r' or '\n')
-				_builder.Length--;
-			return _builder.ToString();
-		}
+			=> MaterializeWithoutTrailingLineEndings(_builder);
+	}
+
+	internal static string MaterializeWithoutTrailingLineEndings(StringBuilder builder)
+	{
+		ArgumentNullException.ThrowIfNull(builder);
+		var length = builder.Length;
+		while (length > 0 && builder[length - 1] is '\r' or '\n')
+			length--;
+		return builder.ToString(0, length);
 	}
 
 	private sealed class StreamingSelectedContentOutput(TextWriter writer) : SelectedContentOutput

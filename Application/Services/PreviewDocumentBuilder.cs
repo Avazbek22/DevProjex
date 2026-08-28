@@ -1829,10 +1829,11 @@ internal static class PreviewTextStorageScavenger
             if (_inMemoryBuffer is { Length: var currentLength } && currentLength >= requiredLength)
                 return;
 
-            var targetLength = Math.Max(Utf8WriteBufferSize, requiredLength);
-            if (_inMemoryBuffer is { } existingBuffer)
-                targetLength = Math.Max(targetLength, checked(existingBuffer.Length * 2));
-            targetLength = Math.Min(_inMemoryThresholdChars, targetLength);
+			var targetLength = Math.Max(Utf8WriteBufferSize, requiredLength);
+			if (_inMemoryBuffer is { } existingBuffer)
+				targetLength = Math.Max(targetLength, checked(existingBuffer.Length * 2));
+			System.Diagnostics.Debug.Assert(requiredLength <= _inMemoryThresholdChars);
+			targetLength = Math.Min(_inMemoryThresholdChars, targetLength);
 
             var replacement = ArrayPool<char>.Shared.Rent(targetLength);
             if (_inMemoryLength > 0)
