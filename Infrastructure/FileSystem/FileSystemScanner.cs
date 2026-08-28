@@ -1795,14 +1795,16 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		var rawCounts = default(MutableIgnoreOptionCounts);
 		var fileMetrics = ArrayPool<EffectiveIgnoreNodeFileMetrics>.Shared.Rent(directories.Count);
 		var visibilityStates = ArrayPool<EffectiveIgnoreNodeVisibilityState>.Shared.Rent(directories.Count);
-		var treeInventoryFiles = treeInventoryCapture is null
+		var treeInventoryProcessedFileCounts = treeInventoryCapture is null
 			? null
-			: new List<ProjectTreeInventoryEntry>?[directories.Count];
+			: ArrayPool<int>.Shared.Rent(directories.Count);
 		var treeInventoryDirectoryIncluded = treeInventoryCapture is null
 			? null
 			: ArrayPool<bool>.Shared.Rent(directories.Count);
 		Array.Clear(fileMetrics, 0, directories.Count);
 		Array.Clear(visibilityStates, 0, directories.Count);
+		if (treeInventoryProcessedFileCounts is not null)
+			Array.Clear(treeInventoryProcessedFileCounts, 0, directories.Count);
 		if (treeInventoryDirectoryIncluded is not null)
 			Array.Clear(treeInventoryDirectoryIncluded, 0, directories.Count);
 		var hadAccessDenied = discovery.HadAccessDenied ? 1 : 0;
@@ -1863,16 +1865,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						token.ThrowIfCancellationRequested();
 						if (treeInventoryDirectoryIncluded is not null &&
 						    treeInventoryDirectoryIncluded[index])
-						{
-							(treeInventoryFiles![index] ??= []).Add(new ProjectTreeInventoryEntry(
-								file.Name,
-								file.FullPath,
-								file.RelativePath,
-								parentIndex: -1,
-								isDirectory: false,
-								file.IsHidden,
-								file.Length));
-						}
+							treeInventoryProcessedFileCounts![index]++;
 
 						var facts = AnalyzeFile(
 							file.FullPath,
@@ -2069,7 +2062,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			{
 				treeInventoryCapture.Inventory = BuildSubtreeInventory(
 					directories,
-					treeInventoryFiles!,
+					treeInventoryProcessedFileCounts!,
 					treeInventoryDirectoryIncluded!,
 					discovery.RootAccessDenied,
 					hadAccessDenied == 1,
@@ -2098,6 +2091,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		{
 			ArrayPool<EffectiveIgnoreNodeFileMetrics>.Shared.Return(fileMetrics);
 			ArrayPool<EffectiveIgnoreNodeVisibilityState>.Shared.Return(visibilityStates);
+			if (treeInventoryProcessedFileCounts is not null)
+				ArrayPool<int>.Shared.Return(treeInventoryProcessedFileCounts);
 			if (treeInventoryDirectoryIncluded is not null)
 				ArrayPool<bool>.Shared.Return(treeInventoryDirectoryIncluded);
 		}
@@ -2105,7 +2100,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 
 	private static ProjectTreeInventorySnapshot? BuildSubtreeInventory(
 		IReadOnlyList<EffectiveIgnoreScanNode> directories,
-		List<ProjectTreeInventoryEntry>?[] treeInventoryFiles,
+		int[] processedFileCounts,
 		bool[] treeInventoryDirectoryIncluded,
 		bool rootAccessDenied,
 		bool hadAccessDenied,
@@ -2122,7 +2117,16 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			directories,
 			treeInventoryDirectoryIncluded,
 			cancellationToken);
-		var entries = new List<ProjectTreeInventoryEntry>(Math.Max(1, directories.Count));
+		var entryCapacity = 0;
+		for (var index = 0; index < directories.Count; index++)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (!treeInventoryDirectoryIncluded[index])
+				continue;
+			entryCapacity = checked(
+				entryCapacity + 1 + Math.Min(processedFileCounts[index], directories[index].Files.Count));
+		}
+		var entries = new List<ProjectTreeInventoryEntry>(Math.Max(1, entryCapacity));
 
 		AddDirectoryShell(sourceIndex: 0, parentIndex: -1);
 		var pendingDirectories = new Stack<(int SourceIndex, int TargetIndex)>();
@@ -2164,15 +2168,29 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			var directoryChildren = childDirectories[sourceIndex];
-			var fileChildren = treeInventoryFiles[sourceIndex];
+			var fileChildren = directories[sourceIndex].Files;
+			var processedFileCount = Math.Min(processedFileCounts[sourceIndex], fileChildren.Count);
 			if ((directoryChildren is null || directoryChildren.Count == 0) &&
-			    (fileChildren is null || fileChildren.Count == 0))
+			    processedFileCount == 0)
 			{
 				return;
 			}
 
 			SortDirectoryIndexes(directoryChildren, directories, cancellationToken);
-			SortInventoryEntries(fileChildren, cancellationToken);
+			List<FileSystemFileEntry>? orderedFiles = null;
+			if (processedFileCount > 1)
+			{
+				orderedFiles = new List<FileSystemFileEntry>(processedFileCount);
+				for (var index = 0; index < processedFileCount; index++)
+				{
+					cancellationToken.ThrowIfCancellationRequested();
+					orderedFiles.Add(fileChildren[index]);
+				}
+				CancellationAwareSort.Sort(
+					orderedFiles,
+					static (left, right) => ProjectInventoryNameComparer.Compare(left.Name, right.Name),
+					cancellationToken);
+			}
 
 			// ProjectTreeInventorySnapshot requires every node's direct children to occupy
 			// one contiguous range. Add directory shells and files first, then append each
@@ -2189,20 +2207,18 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				}
 			}
 
-			if (fileChildren is not null)
+			for (var index = 0; index < processedFileCount; index++)
 			{
-				foreach (var file in fileChildren)
-				{
-					cancellationToken.ThrowIfCancellationRequested();
-					entries.Add(new ProjectTreeInventoryEntry(
-						file.Name,
-						file.FullPath,
-						file.RelativePath,
-						targetIndex,
-						isDirectory: false,
-						file.IsHidden,
-						file.Length));
-				}
+				cancellationToken.ThrowIfCancellationRequested();
+				var file = orderedFiles is null ? fileChildren[index] : orderedFiles[index];
+				entries.Add(new ProjectTreeInventoryEntry(
+					file.Name,
+					file.FullPath,
+					file.RelativePath,
+					targetIndex,
+					isDirectory: false,
+					file.IsHidden,
+					file.Length));
 			}
 
 			var childCount = entries.Count - firstChildIndex;
