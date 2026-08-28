@@ -3038,18 +3038,21 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 						operationCts.Token)
 					.ConfigureAwait(false);
 			}
-			var progress = new SynchronousProgress<ProjectCopyExportProgress>(value =>
-			{
-				_application.Invoke(() =>
-				UpdateMeasuredProgress(
+			using var renderedProgress = new LatestValueProgressRelay<ProjectCopyExportProgress>(
+				action => _application.Invoke(action),
+				value => UpdateMeasuredProgress(
 					value,
 					summary.Kind,
 					progressPhase));
+			var progress = new SynchronousProgress<ProjectCopyExportProgress>(value =>
+			{
+				renderedProgress.Report(value);
 				_operationObserver.ObserveProgress(value, operationCts.Token);
 			});
 			var result = await export(progress, operationCts.Token).ConfigureAwait(false);
 			if (_stopping)
 				return;
+			await renderedProgress.CompleteAsync().ConfigureAwait(false);
 			await InvokeAsync(() =>
 			{
 				MarkActiveOperationFinished(operationCts);

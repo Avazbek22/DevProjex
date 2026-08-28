@@ -133,8 +133,9 @@ public partial class MainWindow
 				indeterminate: request.RedactSecrets || request.RedactPrivateData,
                 operationType: StatusOperationType.ProjectCopyExport,
                 cancelAction: cancellation.Cancel);
-            var progress = new Progress<ProjectCopyExportProgress>(value =>
-                _statusOperations.UpdateProgress(
+            using var progress = new LatestValueProgressRelay<ProjectCopyExportProgress>(
+                action => Dispatcher.UIThread.Post(action),
+                value => _statusOperations.UpdateProgress(
                     value.Percentage,
                     string.Format(
                         CultureInfo.CurrentCulture,
@@ -147,6 +148,7 @@ public partial class MainWindow
             var result = await Task.Run(
                 () => _projectCopyExport.ExportAsync(request, progress, cancellation.Token),
                 cancellation.Token);
+            await progress.CompleteAsync();
             CompleteStatusOperation(ref operationId);
             var toastKey = format == ProjectCopyExportFormat.Folder
                 ? "Toast.ProjectCopy.Folder"
