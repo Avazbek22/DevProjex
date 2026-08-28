@@ -560,7 +560,8 @@ repository-URL history, newest first. JSON schema version 1 uses kind
 `devprojex-recent` and stable `kind`, `path`/`url`, `name`, `parent`, and
 `lastOpened` properties. Text output uses display-cell-aligned, space-separated
 columns and renders the timestamp in local time as `yyyy-MM-dd HH:mm`; JSON retains
-the full UTC ISO-8601 value.
+the full UTC ISO-8601 value. Folder/repository labels are localized in every text
+mode; JSON alone retains the stable English `folder` and `repository` tokens.
 
 ### `cache`
 
@@ -693,8 +694,8 @@ cursor context. It does not expose hidden commands. It scopes subcommands and
 options, completes choice values and paths, and does not suggest a non-repeatable
 option already present. Hidden completion transport details, including the
 UTF-8 Base64 arguments used to preserve unfinished quoted input and the
-completion working directory in Windows PowerShell 5.1, are internal and are
-not part of the public v1 syntax.
+completion working directory in bash, zsh, fish, and Windows PowerShell 5.1, are
+internal and are not part of the public v1 syntax.
 
 ## Shared Output Options
 
@@ -1023,8 +1024,9 @@ then terminal/system autodetection.
 
 Interactive text tables for `recent`, `cache list`, and `ui list` use localized
 headers and middle-ellipsis path truncation to fit the TTY. Redirected/piped text
-keeps the legacy headerless, untruncated shape. JSON keeps stable English tokens,
-full commit hashes, raw byte counts, and booleans. `cache list` shortens commits
+keeps the legacy headerless, untruncated shape while human labels remain
+localized. JSON keeps stable English tokens, full commit hashes, raw byte counts,
+and booleans. `cache list` shortens commits
 to 12 characters only in text and adds a TTY total; `ui list` emits an empty
 stdout and the no-instances diagnostic on stderr. Analysis text uses IEC sizes,
 and profile text uses localized yes/no values.

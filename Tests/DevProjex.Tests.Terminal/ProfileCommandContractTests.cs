@@ -496,6 +496,47 @@ public sealed class ProfileCommandContractTests
 	}
 
 	[Fact]
+	public async Task ExportProfileDryRunPerformsTheSamePreflightWithoutWriting()
+	{
+		using var workspace = CreateWorkspace();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/app.cs", "class App {}\n");
+		var destination = workspace.WriteFile("profiles/portable.json", "unchanged");
+		var conflictEnvironment = new TestTerminalEnvironment();
+
+		var conflict = await RunAsync(
+			workspace,
+			conflictEnvironment,
+			"profile", "export", project,
+			"--profile", "standard",
+			"-o", destination,
+			"--dry-run");
+
+		Assert.Equal(CommandLineExitCodes.DestinationConflict, conflict);
+		Assert.Equal("unchanged", File.ReadAllText(destination));
+		Assert.Empty(conflictEnvironment.StandardOutput);
+		Assert.Contains(
+			"DPX-PROFILE-DESTINATION-EXISTS",
+			conflictEnvironment.StandardError,
+			StringComparison.Ordinal);
+
+		var forceEnvironment = new TestTerminalEnvironment();
+		var success = await RunAsync(
+			workspace,
+			forceEnvironment,
+			"profile", "export", project,
+			"--profile", "standard",
+			"-o", destination,
+			"--force",
+			"-n");
+
+		Assert.Equal(CommandLineExitCodes.Success, success);
+		Assert.Equal("unchanged", File.ReadAllText(destination));
+		Assert.Empty(forceEnvironment.StandardOutput);
+		Assert.Contains(Path.GetFullPath(destination), forceEnvironment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task ExportProfileRejectsSourceDestinationAndMissingExternalParentWithoutEffects()
 	{
 		using var workspace = CreateWorkspace();

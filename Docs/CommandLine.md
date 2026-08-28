@@ -625,7 +625,10 @@ Portable profile output must resolve outside the source project, including
 filesystem aliases, and its parent directory must already exist. Source safety is
 validated before conflicts. An existing file requires `--force` for atomic
 replacement; an existing directory is always a destination conflict. On success
-stdout contains one absolute committed path. Errors and diagnostics use stderr.
+stdout contains one absolute committed path. `-n`/`--dry-run` performs the same
+source-safety, parent, and conflict preflight without creating or changing the
+profile file; its localized plan is written to stderr. Errors and diagnostics use
+stderr.
 
 ## Desktop Control
 
@@ -682,9 +685,11 @@ devprojex completion powershell
 
 The generated script queries the production command tree using the current
 command line and cursor position. Suggestions are scoped to the active command,
-option values, repeatability, conflicts, and path arguments. It does not execute
-Avalonia or require another DevProjex executable. Evaluate or install it using
-the shell's normal completion mechanism.
+option values, repeatability, conflicts, and path arguments. All four scripts
+pass the shell's current working directory through the hidden completion
+transport so relative path candidates are resolved in the caller's context. It
+does not execute Avalonia or require another DevProjex executable. Evaluate or
+install it using the shell's normal completion mechanism.
 
 ## Streams and Exit Codes
 
@@ -701,7 +706,8 @@ provides the general project root when no explicit source was supplied.
 
 Interactive text tables add localized headers and fit long paths to the terminal
 with a middle ellipsis. Pipes and redirects retain the headerless, untruncated
-text shape for script compatibility; JSON remains the stable machine channel.
+text shape for script compatibility; human labels remain localized, while JSON
+remains the stable machine channel.
 Context/project dry-run plans include files, folders, bytes, estimated tokens,
 and effective profile.
 

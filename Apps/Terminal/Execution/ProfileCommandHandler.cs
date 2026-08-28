@@ -59,10 +59,14 @@ public sealed class ProfileCommandHandler(
 			.ConfigureAwait(false);
 		if (dryRun)
 		{
+			var destination = services.PortableProfileService.ValidateSaveDestination(
+				projectPath,
+				outputPath,
+				force);
 			DryRunRenderer.WritePlan(
 				environment,
 				services.Localization,
-				Path.GetFullPath(outputPath));
+				destination);
 			return CommandLineExitCodes.Success;
 		}
 		var writtenPath = await services.PortableProfileService

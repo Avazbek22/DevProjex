@@ -3,6 +3,7 @@ using System.Diagnostics;
 using DevProjex.Infrastructure.Persistence;
 using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Infrastructure.Git;
+using DevProjex.Infrastructure.ResourceStore;
 using DevProjex.Kernel.Abstractions;
 using DevProjex.Kernel.Models;
 
@@ -376,6 +377,30 @@ public sealed class CliExpansionCommandTests
 		Assert.DoesNotContain('\t', line);
 		Assert.DoesNotContain('\n', line);
 		Assert.DoesNotContain('\r', line);
+	}
+
+	[Fact]
+	public void RedirectedRecentTextLocalizesKindsWithoutAddingTtyColumns()
+	{
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.Ru);
+		var environment = new TestTerminalEnvironment { IsOutputInteractive = false };
+		var line = Assert.Single(RecentCommandHandler.FormatTextEntries(
+			[
+				new RecentCommandHandler.RecentOutputEntry(
+					"folder",
+					"/tmp/project",
+					null,
+					"sample",
+					null,
+					new DateTimeOffset(2026, 1, 2, 3, 4, 0, TimeSpan.Zero))
+			],
+			localization,
+			environment,
+			new TerminalOutputOptions()));
+
+		Assert.StartsWith("Папка  sample", line, StringComparison.Ordinal);
+		Assert.DoesNotContain("folder", line, StringComparison.Ordinal);
+		Assert.DoesNotContain("#", line, StringComparison.Ordinal);
 	}
 
 	[Fact]

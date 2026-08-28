@@ -124,14 +124,20 @@ internal sealed class RecentCommandHandler(
 		TerminalOutputOptions outputOptions)
 	{
 		if (!environment.IsOutputInteractive || environment.IsTermDumb)
-			return FormatTextEntries(entries);
+		{
+			return TerminalColumnLayout.Format(entries.Select(entry => new[]
+			{
+				LocalizeKind(entry.Kind, localization),
+				TerminalTextEscaping.EscapeSingleLine(entry.Name),
+				TerminalTextEscaping.EscapeSingleLine(entry.Path ?? entry.Url ?? string.Empty),
+				entry.LastOpened.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)
+			}).ToArray());
+		}
 
 		var rows = entries.Select((entry, index) => new[]
 		{
 			(index + 1).ToString(CultureInfo.InvariantCulture),
-			localization[entry.Kind == "folder"
-				? "Terminal.Tui.Folder"
-				: "Terminal.Tui.RecentRepositories.Repository"],
+			LocalizeKind(entry.Kind, localization),
 			TerminalTextEscaping.EscapeSingleLine(entry.Name),
 			TerminalTextEscaping.EscapeSingleLine(entry.Path ?? entry.Url ?? string.Empty),
 			entry.LastOpened.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)
@@ -149,6 +155,11 @@ internal sealed class RecentCommandHandler(
 			outputOptions,
 			truncationColumn: 3);
 	}
+
+	private static string LocalizeKind(string kind, LocalizationService localization) =>
+		localization[kind == "folder"
+			? "Terminal.Tui.Folder"
+			: "Terminal.Tui.RecentRepositories.Repository"];
 
 	internal sealed record RecentOutputEntry(
 		string Kind,

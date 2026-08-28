@@ -92,10 +92,7 @@ public sealed class PortableProjectProfileService
 		try
 		{
 			var requestedPath = NormalizeProfilePath(path);
-			_ = ExactFileOutputDestinationPolicy.Resolve(
-				sourceRoot,
-				requestedPath,
-				overwrite);
+			_ = ValidateSaveDestination(sourceRoot, requestedPath, overwrite);
 			return await AtomicFileOutput.WriteAsync(
 					requestedPath,
 					overwrite,
@@ -126,6 +123,38 @@ public sealed class PortableProjectProfileService
 		catch (OperationCanceledException)
 		{
 			throw;
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		{
+			throw new PortableProjectProfileException(
+				"DPX-CLI-PROFILE-WRITE-FAILED",
+				"The portable profile could not be written.",
+				exception);
+		}
+	}
+
+	public string ValidateSaveDestination(
+		string sourceRoot,
+		string path,
+		bool overwrite)
+	{
+		try
+		{
+			return ExactFileOutputDestinationPolicy.Resolve(
+				sourceRoot,
+				NormalizeProfilePath(path),
+				overwrite);
+		}
+		catch (PortableProjectProfileException)
+		{
+			throw;
+		}
+		catch (AtomicFileOutputConflictException exception)
+		{
+			throw new PortableProjectProfileException(
+				"DPX-PROFILE-DESTINATION-EXISTS",
+				"The portable profile destination already exists.",
+				exception);
 		}
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
 		{
