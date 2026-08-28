@@ -189,6 +189,14 @@ internal static class ProjectTreeInventoryScanner
 			});
 		}
 
+		var mergedEntryCapacity = entries.Count;
+		foreach (var result in subtreeResults)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			mergedEntryCapacity = checked(mergedEntryCapacity + Math.Max(0, result.Entries.Count - 1));
+		}
+		entries.EnsureCapacity(mergedEntryCapacity);
+
 		foreach (var result in subtreeResults)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
