@@ -157,4 +157,25 @@ public sealed class TerminalScreenSnapshotTests
 				"Path: <TEMP_ROOT>/deadbeef",
 				[]));
 	}
+
+	[Fact]
+	public void Normalize_ReplacesClippedSystemTemporaryPathAfterFieldLabels()
+	{
+		var temporaryPrefix = Path.GetTempPath();
+
+		var normalized = TerminalScreenSnapshot.Normalize(
+			$"│ Destination {temporaryPrefix}clipped-project│",
+			[]);
+
+		Assert.Equal("│ Destination <SYSTEM_TEMP>/clipped-project│", normalized);
+		Assert.DoesNotContain(temporaryPrefix, normalized, StringComparison.OrdinalIgnoreCase);
+	}
+
+	[Theory]
+	[InlineData("│> [1] /tmp/session/Alpha Project│", "│> [1] <RECENT_PATH>│")]
+	[InlineData("│  [2] C:\\Temp\\Beta Project│", "│  [2] <RECENT_PATH>│")]
+	public void Normalize_ReplacesInlineRecentPaths(string screen, string expected)
+	{
+		Assert.Equal(expected, TerminalScreenSnapshot.Normalize(screen, []));
+	}
 }

@@ -82,9 +82,9 @@ public sealed class TerminalVisualSnapshotTests
 		await WaitForStableScreenAsync(terminal, "PROJECT TREE");
 		Verify("workspace-en-120x30", terminal, project.Path);
 
-		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
+		await terminal.SendAsync("c", TestContext.Current.CancellationToken);
 		await WaitForStableScreenAsync(terminal, "> PARAMETERS");
-		Verify("workspace-git-mode-en-120x30", terminal, project.Path);
+		Verify("workspace-content-en-120x30", terminal, project.Path);
 		await terminal.SendShiftTabAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync("> CONTEXT PREVIEW", cancellationToken: TestContext.Current.CancellationToken);
 
@@ -133,11 +133,6 @@ public sealed class TerminalVisualSnapshotTests
 
 		await WaitForStableScreenAsync(terminal, "PROJECT TREE");
 		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
-		await WaitForStableScreenAsync(terminal, "Tracked Git files only");
-		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
-		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
-		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
-		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await WaitForStableScreenAsync(terminal, "DPX-GIT-TRACKED-INDEX-UNAVAILABLE");
 		Verify("workspace-error-en-120x30", terminal, project.Path);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
@@ -231,7 +226,7 @@ public sealed class TerminalVisualSnapshotTests
 
 		await terminal.SendAsync("\u0010", TestContext.Current.CancellationToken);
 		await WaitForStableScreenAsync(terminal, "Filter actions:");
-		await terminal.SendAsync("Parameters", TestContext.Current.CancellationToken);
+		await terminal.SendAsync("Open the visible project", TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await WaitForStableScreenAsync(terminal, "> PARAMETERS");
 		Verify("workspace-controls-focused-en-160x40", terminal, project.Path);

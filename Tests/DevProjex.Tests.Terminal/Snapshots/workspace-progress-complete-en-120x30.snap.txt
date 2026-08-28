@@ -5,7 +5,7 @@
 │  > [x] src                                          ││├── src                                                       ┃│
 │    [x] global.json                                  │││   ├── File0001.bin                                          ┃│
 │                                                     │││   ├── File0002.bin                                          ┃│
-│                                                     │││   ├── File0003.bin                                          ┃│
+│                                                     │││   ├── File0003.bin                                          ·│
 │                                                     │││   ├── File0004.bin                                          ·│
 │                                                     │││   ├── File0005.bin                                          ·│
 │                                                     │││   ├── File0006.bin                                          ·│
@@ -19,12 +19,12 @@
 │                                                     │││   ├── File0014.bin                                          ·│
 │                                                     │││   ├── File0015.bin                                          ·│
 │                                                     │││   ├── File0016.bin                                          ·│
-│                                                     │││   ├── File0017.bin                                          ·│
-│                                                     │││   ├── File0018.bin                                          ·│
-│                                                     │││   ├── File0019.bin                                          ·│
-│                                                     │││   ├── File0020.bin                                          ▼│
-│                                                     ││ Files 101  |  Lines 1-22/104                                  │
+│                                                     │││   ├── File0017.bin                                          ▼│
+│                                                     ││ Files 101  |  Lines 1-19/104                                  │
 └─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
 
+┌┤  PARAMETERS├────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ Content 0/5 · Exclusions 9/10 · File types 2/2                                                                       │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
  Export completed: <OUTPUT_ROOT>/project-export
- Up/Down Navigate   Enter Expand   Space Toggle   / Search   Tab/F6 Preview   Ctrl+P Actions   ? Help
+ Space Toggle   Shift+←/→ Collapse/expand all   Ctrl+A/U Select all/none   R Reveal   : Commands

@@ -48,11 +48,11 @@ public sealed class TerminalInteractionVisualSnapshotTests
 			"Choose a workspace action",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
-			"> Recent workspaces",
-			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		await WaitForStableScreenAsync(terminal, "AlphaProject");
+		await WaitForStableScreenAsync(
+			terminal,
+			screen => screen.Split('\n').Any(
+				line => line.Contains("> [1]", StringComparison.Ordinal)),
+			"selected inline recent workspace 1");
 		Verify(
 			"recent-populated-en-120x30",
 			terminal,
@@ -63,9 +63,8 @@ public sealed class TerminalInteractionVisualSnapshotTests
 		await WaitForStableScreenAsync(
 			terminal,
 			screen => screen.Split('\n').Any(
-				line => line.Contains("> Folder", StringComparison.Ordinal) &&
-				        line.Contains("Beta Project", StringComparison.Ordinal)),
-			"selected recent workspace 'Beta Project'");
+				line => line.Contains("> [2]", StringComparison.Ordinal)),
+			"selected inline recent workspace 2");
 		Verify(
 			"recent-selected-en-120x30",
 			terminal,
@@ -142,7 +141,7 @@ public sealed class TerminalInteractionVisualSnapshotTests
 		Verify("workspace-preview-scrolled-en-120x30", terminal, project.Path);
 
 		await terminal.ResizeAsync(80, 24, TestContext.Current.CancellationToken);
-		await WaitForStableScreenAsync(terminal, "Tab/F6 Parameters");
+		await WaitForStableScreenAsync(terminal, "Ctrl+G Line");
 		Assert.Contains(
 			"> CONTEXT PREVIEW",
 			terminal.CaptureScreen(),
@@ -153,7 +152,7 @@ public sealed class TerminalInteractionVisualSnapshotTests
 		await terminal.ResizeAsync(120, 30, TestContext.Current.CancellationToken);
 		await WaitForStableScreenAsync(
 			terminal,
-			"1/2/3 View");
+			"n/N Match");
 		await terminal.WaitForScreenAsync(
 			"> CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);

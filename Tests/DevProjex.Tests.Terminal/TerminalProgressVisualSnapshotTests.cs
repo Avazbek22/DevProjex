@@ -73,7 +73,7 @@ public sealed class TerminalProgressVisualSnapshotTests
 			(output.Path, "<OUTPUT_ROOT>"));
 		await terminal.ResizeAsync(80, 24, TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Up/Down Move",
+			"Ctrl+A/U Select",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await WaitForStableMeasuredScreenAsync(terminal, "50%");
 		Verify(

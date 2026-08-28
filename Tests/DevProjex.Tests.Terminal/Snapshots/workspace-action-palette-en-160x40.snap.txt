@@ -18,7 +18,7 @@
 │                                 │ File types: All (3)  [T]       :type <.ext> [<.ext>...] <on|off>                        │x] Hidden files                  ││
 │                                 │ Export context  [E]            :export context [format] [path]                          │x] dot folders                   ││
 │                                 │ To Folder…  [Z]                :export folder <path>                                    │x] dot files                     ││
-│                                 │ To ZIP Archive…  [Z]           :export zip <path>                                       │x] Files without extension       ││
+│                                 │ To ZIP Archive…  [Shift+Z]     :export zip <path>                                       │x] Files without extension       ││
 │                                 │ Export settings...  [P]        :profile save [name]                                     │                                 ││
 │                                 │ Open Desktop  [G]                                                                       │─────────────────────────────────┘│
 │                                 │                                                                                         │File types├─────── [x] All (3) ──┐│
@@ -37,4 +37,4 @@
 └─────────────────────────────────────────┘└─────────────────────────────────────────────────────────────────────────────┘└────────────────────────────────────┘
 
  Files 4 · Folders 3 · 76 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
- Up/Down Navigate   Enter Expand   Space Toggle   / Search   Tab/F6 Preview   Ctrl+P Actions   ? Help
+ Space Toggle   Shift+←/→ Collapse/expand all   Ctrl+A/U Select all/none   R Reveal   : Commands
