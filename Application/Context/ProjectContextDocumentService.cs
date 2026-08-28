@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Runtime.CompilerServices;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Unicode;
@@ -387,15 +388,15 @@ public sealed class ProjectContextDocumentService(
 
 		if (includesContent)
 		{
-			for (var index = 0; index < plan.IncludedFiles.Count; index++)
+			await foreach (var source in OpenSourceSnapshotsInOrderAsync(
+				               plan.SourceRoot,
+				               plan.IncludedFiles,
+				               cancellationToken).ConfigureAwait(false))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				var path = plan.IncludedFiles[index];
-				await using var snapshot = await OpenSourceSnapshotAsync(
-						plan.SourceRoot,
-						path,
-						cancellationToken)
-					.ConfigureAwait(false);
+				var index = source.Index;
+				var path = source.Path;
+				await using var snapshot = source.Snapshot;
 				var file = CreateCompleteFileDocument(
 					path,
 					snapshot.Result,
@@ -497,14 +498,14 @@ public sealed class ProjectContextDocumentService(
 		if (IncludesContent(view))
 		{
 			var processedFiles = 0;
-			foreach (var path in plan.IncludedFiles)
+			await foreach (var source in OpenSourceSnapshotsInOrderAsync(
+				               plan.SourceRoot,
+				               plan.IncludedFiles,
+				               cancellationToken).ConfigureAwait(false))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				await using var snapshot = await OpenSourceSnapshotAsync(
-						plan.SourceRoot,
-						path,
-						cancellationToken)
-					.ConfigureAwait(false);
+				var path = source.Path;
+				await using var snapshot = source.Snapshot;
 				var file = CreateCompleteFileDocument(
 					path,
 					snapshot.Result,
@@ -592,14 +593,14 @@ public sealed class ProjectContextDocumentService(
 		if (IncludesContent(view))
 		{
 			var processedFiles = 0;
-			foreach (var path in plan.IncludedFiles)
+			await foreach (var source in OpenSourceSnapshotsInOrderAsync(
+				               plan.SourceRoot,
+				               plan.IncludedFiles,
+				               cancellationToken).ConfigureAwait(false))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				await using var snapshot = await OpenSourceSnapshotAsync(
-						plan.SourceRoot,
-						path,
-						cancellationToken)
-					.ConfigureAwait(false);
+				var path = source.Path;
+				await using var snapshot = source.Snapshot;
 				var file = CreateCompleteFileDocument(
 					path,
 					snapshot.Result,
@@ -689,14 +690,14 @@ public sealed class ProjectContextDocumentService(
 		if (IncludesContent(view))
 		{
 			var processedFiles = 0;
-			foreach (var path in plan.IncludedFiles)
+			await foreach (var source in OpenSourceSnapshotsInOrderAsync(
+				               plan.SourceRoot,
+				               plan.IncludedFiles,
+				               cancellationToken).ConfigureAwait(false))
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				await using var snapshot = await OpenSourceSnapshotAsync(
-						plan.SourceRoot,
-						path,
-						cancellationToken)
-					.ConfigureAwait(false);
+				var path = source.Path;
+				await using var snapshot = source.Snapshot;
 				var file = CreateCompleteFileDocument(
 					path,
 					snapshot.Result,
@@ -775,6 +776,94 @@ public sealed class ProjectContextDocumentService(
 			totalFiles,
 			BytesWritten: 0,
 			Percentage: percentage));
+	}
+
+	private async IAsyncEnumerable<CompleteSourceSnapshot> OpenSourceSnapshotsInOrderAsync(
+		string projectRoot,
+		IReadOnlyList<string> orderedPaths,
+		[EnumeratorCancellation] CancellationToken cancellationToken)
+	{
+		if (orderedPaths.Count == 0)
+			yield break;
+
+		var readAheadCount = Math.Min(
+			orderedPaths.Count,
+			Math.Min(MaximumBoundedReadAhead, ScanParallelismPolicy.MaxDegreeOfParallelism));
+		using var readCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		var pendingReads = new Queue<PendingCompleteSnapshotRead>(readAheadCount);
+		var nextPathIndex = 0;
+
+		void FillReadAhead()
+		{
+			while (pendingReads.Count < readAheadCount && nextPathIndex < orderedPaths.Count)
+			{
+				var index = nextPathIndex++;
+				var path = orderedPaths[index];
+				pendingReads.Enqueue(new PendingCompleteSnapshotRead(
+					index,
+					path,
+					Task.Run(
+						async () => await OpenSourceSnapshotAsync(
+								projectRoot,
+								path,
+								readCancellation.Token)
+							.ConfigureAwait(false),
+						readCancellation.Token)));
+			}
+		}
+
+		FillReadAhead();
+		try
+		{
+			while (pendingReads.Count > 0)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				var pending = pendingReads.Dequeue();
+				IFileContentSnapshot? snapshot = null;
+				try
+				{
+					snapshot = await pending.ReadTask.ConfigureAwait(false);
+					cancellationToken.ThrowIfCancellationRequested();
+					var source = new CompleteSourceSnapshot(pending.Index, pending.Path, snapshot);
+					snapshot = null;
+					yield return source;
+				}
+				finally
+				{
+					if (snapshot is not null)
+						await snapshot.DisposeAsync().ConfigureAwait(false);
+				}
+
+				FillReadAhead();
+			}
+		}
+		finally
+		{
+			await CancelAndDisposePendingSnapshotsAsync(readCancellation, pendingReads)
+				.ConfigureAwait(false);
+		}
+	}
+
+	private static async Task CancelAndDisposePendingSnapshotsAsync(
+		CancellationTokenSource cancellation,
+		Queue<PendingCompleteSnapshotRead> pendingReads)
+	{
+		cancellation.Cancel();
+		while (pendingReads.TryDequeue(out var pending))
+		{
+			try
+			{
+				var snapshot = await pending.ReadTask.ConfigureAwait(false);
+				await snapshot.DisposeAsync().ConfigureAwait(false);
+			}
+			catch
+			{
+				// Speculative snapshots are not observable after the writer stops. Draining owns
+				// their failures and releases every handle without masking the primary outcome.
+				if (pending.ReadTask.IsFaulted)
+					_ = pending.ReadTask.Exception;
+			}
+		}
 	}
 
 	private async ValueTask<IFileContentSnapshot> OpenSourceSnapshotAsync(
@@ -1962,6 +2051,16 @@ public sealed class ProjectContextDocumentService(
 	private sealed record PendingBoundedFileRead(
 		string Path,
 		Task<FileContentReadResult> ReadTask);
+
+	private readonly record struct CompleteSourceSnapshot(
+		int Index,
+		string Path,
+		IFileContentSnapshot Snapshot);
+
+	private sealed record PendingCompleteSnapshotRead(
+		int Index,
+		string Path,
+		Task<IFileContentSnapshot> ReadTask);
 
 	private sealed record ContextFileDocument(
 		string Path,

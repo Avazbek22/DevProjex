@@ -16,7 +16,7 @@ public sealed class ProjectContextStreamingRegressionTests
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
 		var sourcePath = workspace.WriteFile("project/src/app.cs", "class App {}\n");
-		var services = new TerminalServiceFactory(
+		using var services = new TerminalServiceFactory(
 				() => workspace.CreateDirectory("app-data"))
 			.Create(AppLanguage.En);
 		var plan = await services.ContextFactory.BuildAsync(
@@ -129,7 +129,7 @@ public sealed class ProjectContextStreamingRegressionTests
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
 		workspace.WriteFile("project/content.txt", "x😀tail");
-		var services = new TerminalServiceFactory(
+		using var services = new TerminalServiceFactory(
 				() => workspace.CreateDirectory("app-data"))
 			.Create(AppLanguage.En);
 		var plan = await services.ContextFactory.BuildAsync(
@@ -239,6 +239,95 @@ public sealed class ProjectContextStreamingRegressionTests
 		await Assert.ThrowsAnyAsync<OperationCanceledException>(() => build);
 		Assert.Equal(0, analyzer.ActiveReads);
 		Assert.InRange(analyzer.MaximumConcurrency, 1, 8);
+	}
+
+	[Fact]
+	public async Task CompleteDocumentReadAheadPreservesByteIdentityAndOrderWithinConcurrencyBound()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		for (var index = 0; index < 12; index++)
+			workspace.WriteFile($"project/src/{index:D2}.txt", $"content-{index}\n");
+		var services = new TerminalServiceFactory(
+				() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var plan = await services.ContextFactory.BuildAsync(
+			project,
+			new ProjectSelectionSpec(GitMode: GitFilteringMode.None, Exclusions: []),
+			cancellationToken: TestContext.Current.CancellationToken);
+		var limits = new ProjectContextDocumentLimits(
+			MaximumTreeNodes: 64,
+			MaximumFiles: plan.IncludedFiles.Count,
+			MaximumCharacters: 64 * 1024,
+			MaximumFileBytes: 4 * 1024);
+		var expected = await services.ContextDocumentService.BuildAsync(
+			plan,
+			ProjectContextView.Content,
+			ProjectContextDocumentFormat.Json,
+			limits,
+			TestContext.Current.CancellationToken);
+		var analyzer = CompleteSnapshotReadAheadProbeAnalyzer.CreateCoordinated(
+			requiredConcurrency: 4);
+		await using var destination = new WriteOnlyNonSeekableStream();
+
+		await new ProjectContextDocumentService(
+				services.TreeExportService,
+				analyzer)
+			.WriteCompleteAsync(
+				plan,
+				ProjectContextView.Content,
+				ProjectContextDocumentFormat.Json,
+				destination,
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(Encoding.UTF8.GetBytes(expected), destination.ToArray());
+		Assert.InRange(analyzer.MaximumConcurrency, 4, 8);
+		Assert.NotEqual(
+			Path.GetFileName(plan.IncludedFiles[0]),
+			Assert.Single(analyzer.CompletionOrder.Take(1)));
+		Assert.Equal(analyzer.CreatedSnapshots, analyzer.DisposedSnapshots);
+		Assert.Equal(0, analyzer.ActiveSnapshots);
+	}
+
+	[Fact]
+	public async Task CompleteDocumentReadAheadCancellationDisposesEveryPrefetchedSnapshot()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		for (var index = 0; index < 12; index++)
+			workspace.WriteFile($"project/src/{index:D2}.txt", $"content-{index}\n");
+		var services = new TerminalServiceFactory(
+				() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var plan = await services.ContextFactory.BuildAsync(
+			project,
+			new ProjectSelectionSpec(GitMode: GitFilteringMode.None, Exclusions: []),
+			cancellationToken: TestContext.Current.CancellationToken);
+		var analyzer = CompleteSnapshotReadAheadProbeAnalyzer.CreateWithBlockingCopy(
+			requiredConcurrency: 4);
+		using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(
+			TestContext.Current.CancellationToken);
+		await using var destination = new WriteOnlyNonSeekableStream();
+		var write = new ProjectContextDocumentService(
+				services.TreeExportService,
+				analyzer)
+			.WriteCompleteAsync(
+				plan,
+				ProjectContextView.Content,
+				ProjectContextDocumentFormat.Text,
+				destination,
+				cancellation.Token);
+		await analyzer.FirstCopyStarted.WaitAsync(
+			TimeSpan.FromSeconds(5),
+			TestContext.Current.CancellationToken);
+
+		cancellation.Cancel();
+
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(() => write);
+		Assert.InRange(analyzer.CreatedSnapshots, 4, 8);
+		Assert.Equal(analyzer.CreatedSnapshots, analyzer.DisposedSnapshots);
+		Assert.Equal(0, analyzer.ActiveSnapshots);
+		Assert.Equal(0, analyzer.ActiveReads);
 	}
 
 	[Theory]
@@ -1664,6 +1753,168 @@ public sealed class ProjectContextStreamingRegressionTests
 				if (original == observed)
 					return;
 				observed = original;
+			}
+		}
+	}
+
+	private sealed class CompleteSnapshotReadAheadProbeAnalyzer : IFileContentAnalyzer
+	{
+		private readonly FileContentAnalyzer _inner = new();
+		private readonly ConcurrentQueue<string> _completionOrder = new();
+		private readonly TaskCompletionSource<bool> _release = new(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		private readonly TaskCompletionSource<bool> _firstCopyStarted = new(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		private readonly int _requiredConcurrency;
+		private readonly bool _blockCopy;
+		private int _activeReads;
+		private int _maximumConcurrency;
+		private int _createdSnapshots;
+		private int _disposedSnapshots;
+		private int _activeSnapshots;
+
+		private CompleteSnapshotReadAheadProbeAnalyzer(
+			int requiredConcurrency,
+			bool blockCopy)
+		{
+			_requiredConcurrency = requiredConcurrency;
+			_blockCopy = blockCopy;
+		}
+
+		public int ActiveReads => Volatile.Read(ref _activeReads);
+		public int ActiveSnapshots => Volatile.Read(ref _activeSnapshots);
+		public IReadOnlyList<string> CompletionOrder => _completionOrder.ToArray();
+		public int CreatedSnapshots => Volatile.Read(ref _createdSnapshots);
+		public int DisposedSnapshots => Volatile.Read(ref _disposedSnapshots);
+		public Task FirstCopyStarted => _firstCopyStarted.Task;
+		public int MaximumConcurrency => Volatile.Read(ref _maximumConcurrency);
+
+		public static CompleteSnapshotReadAheadProbeAnalyzer CreateCoordinated(
+			int requiredConcurrency) =>
+			new(requiredConcurrency, blockCopy: false);
+
+		public static CompleteSnapshotReadAheadProbeAnalyzer CreateWithBlockingCopy(
+			int requiredConcurrency) =>
+			new(requiredConcurrency, blockCopy: true);
+
+		public FileContentClassification? ClassifyWithoutReading(string path) =>
+			_inner.ClassifyWithoutReading(path);
+
+		public async ValueTask<IFileContentSnapshot> OpenCompleteSnapshotAsync(
+			string path,
+			CancellationToken cancellationToken = default)
+		{
+			var concurrency = Interlocked.Increment(ref _activeReads);
+			UpdateMaximumConcurrency(concurrency);
+			try
+			{
+				if (concurrency >= _requiredConcurrency)
+					_release.TrySetResult(true);
+				await _release.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+				var stem = Path.GetFileNameWithoutExtension(path);
+				var index = int.TryParse(stem, out var parsed) ? parsed : 0;
+				await Task.Delay(
+						TimeSpan.FromMilliseconds(Math.Max(1, 12 - index) * 5),
+						cancellationToken)
+					.ConfigureAwait(false);
+				var snapshot = await _inner
+					.OpenCompleteSnapshotAsync(path, cancellationToken)
+					.ConfigureAwait(false);
+				_completionOrder.Enqueue(Path.GetFileName(path));
+				Interlocked.Increment(ref _createdSnapshots);
+				Interlocked.Increment(ref _activeSnapshots);
+				return new TrackingSnapshot(snapshot, this, _blockCopy);
+			}
+			finally
+			{
+				Interlocked.Decrement(ref _activeReads);
+			}
+		}
+
+		public ValueTask<bool> IsTextFileAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			_inner.IsTextFileAsync(path, cancellationToken);
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			_inner.GetTextFileMetricsAsync(path, cancellationToken);
+
+		public ValueTask<FileContentMetricsResult> GetClassifiedMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			_inner.GetClassifiedMetricsAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			_inner.TryReadAsTextAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			_inner.TryReadAsTextAsync(path, maxSizeForFullRead, cancellationToken);
+
+		private void UpdateMaximumConcurrency(int concurrency)
+		{
+			var observed = Volatile.Read(ref _maximumConcurrency);
+			while (concurrency > observed)
+			{
+				var original = Interlocked.CompareExchange(
+					ref _maximumConcurrency,
+					concurrency,
+					observed);
+				if (original == observed)
+					return;
+				observed = original;
+			}
+		}
+
+		private void SnapshotDisposed()
+		{
+			Interlocked.Increment(ref _disposedSnapshots);
+			Interlocked.Decrement(ref _activeSnapshots);
+		}
+
+		private sealed class TrackingSnapshot(
+			IFileContentSnapshot inner,
+			CompleteSnapshotReadAheadProbeAnalyzer owner,
+			bool blockCopy) : IFileContentSnapshot
+		{
+			private int _disposed;
+
+			public FileContentMetricsResult Result => inner.Result;
+
+			public async ValueTask CopyTextToAsync(
+				int maximumCharacters,
+				Func<ReadOnlyMemory<char>, CancellationToken, ValueTask> writeChunk,
+				CancellationToken cancellationToken = default)
+			{
+				if (blockCopy)
+				{
+					owner._firstCopyStarted.TrySetResult(true);
+					await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken)
+						.ConfigureAwait(false);
+				}
+
+				await inner.CopyTextToAsync(maximumCharacters, writeChunk, cancellationToken)
+					.ConfigureAwait(false);
+			}
+
+			public async ValueTask DisposeAsync()
+			{
+				if (Interlocked.Exchange(ref _disposed, 1) != 0)
+					return;
+				try
+				{
+					await inner.DisposeAsync().ConfigureAwait(false);
+				}
+				finally
+				{
+					owner.SnapshotDisposed();
+				}
 			}
 		}
 	}
