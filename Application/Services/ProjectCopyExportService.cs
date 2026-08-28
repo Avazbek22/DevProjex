@@ -591,7 +591,10 @@ public sealed class ProjectCopyExportService(
 		}
 	}
 
-	private static void ValidateNoReparsePoints(string rootPath, string sourcePath, HashSet<string> validatedPaths)
+	private static void ValidateNoReparsePoints(
+		string rootPath,
+		string sourcePath,
+		HashSet<string>? validatedPaths)
 	{
 		var relativePath = Path.GetRelativePath(rootPath, sourcePath);
 		var currentPath = rootPath;
@@ -607,9 +610,9 @@ public sealed class ProjectCopyExportService(
 		}
 	}
 
-	private static void ValidatePathAttributes(string path, HashSet<string> validatedPaths)
+	private static void ValidatePathAttributes(string path, HashSet<string>? validatedPaths)
 	{
-		if (!validatedPaths.Add(path))
+		if (validatedPaths is not null && !validatedPaths.Add(path))
 			return;
 
 		FileAttributes attributes;
@@ -1398,7 +1401,7 @@ public sealed class ProjectCopyExportService(
 		ValidateNoReparsePoints(
 			projectRootPath,
 			sourcePath,
-			new HashSet<string>(PathComparer.Default));
+			validatedPaths: null);
 		try
 		{
 			if (!UnixFileTypeInspector.IsRegularFile(sourcePath))
