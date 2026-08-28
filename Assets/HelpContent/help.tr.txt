@@ -552,7 +552,9 @@ Ayarları sıfırla (Yardım → Ayarları sıfırla) varsayılan temayı, efekt
 ### 16.3 Verileri sıfırla
 Verileri sıfırla (Yardım → Verileri sıfırla) kayıtlı yerel proje parametre profillerini kaldırır:
 * seçilen dosya türleri;
-* "Hariç Tutulanlar" bölümünde seçilen seçenekler.
+* "Hariç Tutulanlar" bölümünde seçilen seçenekler;
+* seçilen içerik işleme ayarları;
+* elle işaretlenen gizli bilgiler.
 
 Önemli:
 * Yerel klasörlerin yakın geçmişi temizlenmez;

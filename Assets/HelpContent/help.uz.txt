@@ -501,7 +501,9 @@ Sozlamalarni tiklash (Yordam → Sozlamalarni tiklash) mavzu, effektlar, ixcham 
 ### 16.3 Ma’lumotlarni tiklash
 Ma’lumotlarni tiklash (Yordam → Ma’lumotlarni tiklash) mahalliy loyiha parametrlarining saqlangan profillarini o‘chiradi:
 * tanlangan fayl turlari;
-* «Istisnolar» bo‘limidagi tanlangan qoidalar.
+* «Istisnolar» bo‘limidagi tanlangan qoidalar;
+* kontentga ishlov berishning tanlangan sozlamalari;
+* qo‘lda qo‘yilgan maxfiy maʼlumot belgilari.
 
 Muhim:
 * lokal jildlar uchun “So‘nggilar” tarixi tozalanmaydi;

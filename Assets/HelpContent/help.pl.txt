@@ -552,7 +552,9 @@ Resetuj ustawienia (Pomoc → Resetuj ustawienia) przywraca domyślny motyw, efe
 ### 16.3 Resetuj dane
 Resetuj dane (Pomoc → Resetuj dane) usuwa zapisane profile parametrów projektu lokalnego:
 * wybrane typy plików;
-* wybrane opcje w sekcji „Wyłączenia”.
+* wybrane opcje w sekcji „Wyłączenia”;
+* wybrane ustawienia przetwarzania zawartości;
+* ręczne oznaczenia sekretów.
 
 Ważny:
 * Najnowsza historia folderów lokalnych nie została wyczyszczona;

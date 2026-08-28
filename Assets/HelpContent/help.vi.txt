@@ -552,7 +552,9 @@ Mica sử dụng vật liệu hệ thống của nền tảng và không có cà
 ### 16.3 Đặt lại dữ liệu
 Đặt lại dữ liệu (Trợ giúp → Đặt lại dữ liệu) xóa các cấu hình tham số dự án cục bộ đã lưu:
 * các loại tệp đã chọn;
-* các tùy chọn đã chọn trong phần "Loại trừ".
+* các tùy chọn đã chọn trong phần "Loại trừ";
+* các cài đặt xử lý nội dung đã chọn;
+* các dấu bí mật được đánh thủ công.
 
 Quan trọng:
 * Lịch sử gần đây của các thư mục cục bộ không bị xóa;

@@ -554,7 +554,9 @@ Repor definições (Ajuda → Repor definições) restaura o tema predefinido, o
 ### 16.3 Repor dados
 Repor dados (Ajuda → Repor dados) remove os perfis de parâmetros de projeto local guardados:
 * tipos de ficheiro selecionados;
-* opções selecionadas na secção "Exclusões".
+* opções selecionadas na secção "Exclusões";
+* definições selecionadas de processamento de conteúdo;
+* marcações manuais de segredos.
 
 Importante:
 * O histórico recente das pastas locais não é apagado;

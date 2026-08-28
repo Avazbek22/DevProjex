@@ -501,7 +501,9 @@ Einstellungen zurücksetzen (Hilfe → Einstellungen zurücksetzen) stellt Theme
 ### 16.3 Daten zurücksetzen
 Daten zurücksetzen (Hilfe → Daten zurücksetzen) löscht gespeicherte Profile lokaler Projektparameter:
 * ausgewählte Dateitypen;
-* ausgewählte Optionen im Bereich „Ausschlüsse“.
+* ausgewählte Optionen im Bereich „Ausschlüsse“;
+* ausgewählte Einstellungen zur Inhaltsverarbeitung;
+* manuelle Geheimnismarkierungen.
 
 Wichtig:
 * der Verlauf „Zuletzt verwendet“ für lokale Ordner wird nicht gelöscht;

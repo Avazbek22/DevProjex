@@ -501,7 +501,9 @@ Réinitialiser les paramètres (Aide → Réinitialiser les paramètres) rétabl
 ### 16.3 Réinitialiser les données
 Réinitialiser les données (Aide → Réinitialiser les données) supprime les profils enregistrés de paramètres des projets locaux :
 * types de fichiers sélectionnés ;
-* options sélectionnées dans la section « Exclusions ».
+* options sélectionnées dans la section « Exclusions » ;
+* paramètres de traitement du contenu sélectionnés ;
+* marquages manuels de secrets.
 
 Important :
 * l’historique « Récents » des dossiers locaux n’est pas effacé ;

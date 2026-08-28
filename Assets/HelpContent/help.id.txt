@@ -552,7 +552,9 @@ Atur ulang pengaturan (Bantuan → Atur ulang pengaturan) memulihkan tema defaul
 ### 16.3 Mengatur ulang data
 Reset data (Bantuan → Reset data) menghapus profil parameter proyek lokal yang disimpan:
 * jenis file yang dipilih;
-* opsi yang dipilih di bagian "Pengecualian".
+* opsi yang dipilih di bagian "Pengecualian";
+* pengaturan pemrosesan konten yang dipilih;
+* tanda rahasia manual.
 
 Penting:
 * Riwayat terkini untuk folder lokal tidak dihapus;

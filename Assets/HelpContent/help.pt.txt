@@ -554,7 +554,9 @@ Redefinir configurações (Ajuda → Redefinir configurações) restaura o tema 
 ### 16.3 Redefinir dados
 Redefinir dados (Ajuda → Redefinir dados) remove perfis de parâmetros de projeto local salvos:
 * tipos de arquivo selecionados;
-* opções selecionadas na seção "Exclusões".
+* opções selecionadas na seção "Exclusões";
+* configurações selecionadas de processamento de conteúdo;
+* marcações manuais de segredos.
 
 Importante:
 * O histórico recente das pastas locais não é apagado;

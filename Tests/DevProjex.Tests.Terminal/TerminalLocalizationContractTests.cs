@@ -186,6 +186,7 @@ public sealed partial class TerminalLocalizationContractTests
 			.ToArray();
 		var english = File.ReadAllText(Path.Combine(helpDirectory, "help.en.txt"));
 		var expectedHeadings = GetNumberedHelpHeadings(english);
+		var expectedResetDataBulletCount = GetNumberedHelpBulletCount(english, "16.3");
 
 		foreach (var path in paths)
 		{
@@ -197,6 +198,11 @@ public sealed partial class TerminalLocalizationContractTests
 				$"Numbered help headings differ in {source}: " +
 				$"expected [{string.Join(", ", expectedHeadings)}], " +
 				$"actual [{string.Join(", ", actualHeadings)}].");
+			var actualResetDataBulletCount = GetNumberedHelpBulletCount(help, "16.3");
+			Assert.True(
+				expectedResetDataBulletCount == actualResetDataBulletCount,
+				$"Reset Data help bullet count differs in {source}: " +
+				$"expected {expectedResetDataBulletCount}, actual {actualResetDataBulletCount}.");
 			Assert.DoesNotMatch(MalformedHelpBulletRegex(), help);
 			Assert.DoesNotContain(",?", help, StringComparison.Ordinal);
 
@@ -478,6 +484,24 @@ public sealed partial class TerminalLocalizationContractTests
 			.Select(static match => match.Groups[1].Value)
 			.ToArray();
 
+	private static int GetNumberedHelpBulletCount(string help, string sectionNumber)
+	{
+		var headings = NumberedHelpHeadingRegex().Matches(help);
+		for (var index = 0; index < headings.Count; index++)
+		{
+			var heading = headings[index];
+			if (!string.Equals(heading.Groups[1].Value, sectionNumber, StringComparison.Ordinal))
+				continue;
+			var sectionEnd = index + 1 < headings.Count
+				? headings[index + 1].Index
+				: help.Length;
+			var section = help[heading.Index..sectionEnd];
+			return HelpBulletRegex().Count(section);
+		}
+
+		throw new InvalidOperationException($"Help section {sectionNumber} is missing.");
+	}
+
 	private static void AddFormatControlViolations(
 		string value,
 		string source,
@@ -530,6 +554,9 @@ public sealed partial class TerminalLocalizationContractTests
 
 	[GeneratedRegex(@"(?m)^\s*\*", RegexOptions.CultureInvariant)]
 	private static partial Regex LiteralHelpAsteriskRegex();
+
+	[GeneratedRegex(@"(?m)^\s*\*\s", RegexOptions.CultureInvariant)]
+	private static partial Regex HelpBulletRegex();
 
 	[GeneratedRegex(@"\s{2,}", RegexOptions.CultureInvariant)]
 	private static partial Regex WelcomeFooterSegmentSeparatorRegex();
