@@ -158,6 +158,25 @@ public sealed class TerminalWorkspacePresentationPolicyTests
 		Assert.Equal(1, document.LineReadCount);
 	}
 
+	[Fact]
+	public void VisiblePreviewLinesUseOneRangeVisitAndRemainCached()
+	{
+		using var document = new CountingRangePreviewTextDocument(40);
+		using var view = new TerminalVirtualizedPreviewView(showScrollBars: false)
+		{
+			Frame = new Rectangle(0, 0, 80, 20)
+		};
+		view.SetDocument(document, preserveViewport: false);
+
+		view.PrimeVisibleLineCache();
+		for (var lineNumber = 1; lineNumber <= 20; lineNumber++)
+			Assert.Equal($"line-{lineNumber}", view.GetDisplayLine(lineNumber));
+		view.PrimeVisibleLineCache();
+
+		Assert.Equal(1, document.RangeVisitCount);
+		Assert.Equal(0, document.LineReadCount);
+	}
+
 	[Theory]
 	[InlineData("界AB", 1, 2, " A")]
 	[InlineData("界AB", 2, 2, "AB")]
@@ -209,6 +228,42 @@ public sealed class TerminalWorkspacePresentationPolicyTests
 		}
 
 		public string GetLineRangeText(int firstLine, int lastLine) => line;
+		public ValueTask WriteToAsync(Stream destination, CancellationToken cancellationToken = default) =>
+			ValueTask.CompletedTask;
+		public void Dispose()
+		{
+		}
+	}
+
+	private sealed class CountingRangePreviewTextDocument(int lineCount) : IPreviewTextDocument
+	{
+		public int RangeVisitCount { get; private set; }
+		public int LineReadCount { get; private set; }
+		public int LineCount => lineCount;
+		public int MaxLineLength => 16;
+		public long CharacterCount => lineCount * 8L;
+		public IReadOnlyList<PreviewDocumentSection> Sections => [];
+		public string GetFullText() => string.Empty;
+		public string GetLineText(int lineNumber)
+		{
+			LineReadCount++;
+			return $"line-{lineNumber}";
+		}
+		public string GetLineRangeText(int firstLine, int lastLine) => string.Empty;
+		public void VisitLines(
+			int firstLine,
+			int lastLine,
+			PreviewTextLineVisitor visitor,
+			CancellationToken cancellationToken = default)
+		{
+			RangeVisitCount++;
+			for (var lineNumber = firstLine; lineNumber <= lastLine; lineNumber++)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				if (!visitor(lineNumber, $"line-{lineNumber}"))
+					break;
+			}
+		}
 		public ValueTask WriteToAsync(Stream destination, CancellationToken cancellationToken = default) =>
 			ValueTask.CompletedTask;
 		public void Dispose()

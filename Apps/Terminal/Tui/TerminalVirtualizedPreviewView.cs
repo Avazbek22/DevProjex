@@ -251,6 +251,7 @@ internal sealed class TerminalVirtualizedPreviewView : View
 		if (_document is null)
 			return true;
 
+		PrimeVisibleLineCache();
 		var maximumVisibleWidth = _maximumDisplayColumns;
 		for (var row = 0; row < Viewport.Height; row++)
 		{
@@ -413,8 +414,47 @@ internal sealed class TerminalVirtualizedPreviewView : View
 			return cached;
 
 		var line = _document.GetLineText(lineNumber);
+		CacheLine(lineNumber, line);
+		return line;
+	}
+
+	internal void PrimeVisibleLineCache()
+	{
+		var document = _document;
+		if (document is null || Viewport.Height <= 0)
+			return;
+
+		var firstLine = FirstVisibleLine + 1;
+		var lastLine = Math.Min(
+			document.LineCount,
+			firstLine + Math.Min(Viewport.Height, MaximumCachedLineCount) - 1);
+		var hasMissingLine = false;
+		for (var lineNumber = firstLine; lineNumber <= lastLine; lineNumber++)
+		{
+			if (!_cachedLines.ContainsKey(lineNumber))
+			{
+				hasMissingLine = true;
+				break;
+			}
+		}
+		if (!hasMissingLine)
+			return;
+
+		document.VisitLines(
+			firstLine,
+			lastLine,
+			(lineNumber, line) =>
+			{
+				if (!_cachedLines.ContainsKey(lineNumber))
+					CacheLine(lineNumber, line.ToString());
+				return true;
+			});
+	}
+
+	private void CacheLine(int lineNumber, string line)
+	{
 		if (line.Length > MaximumCachedCharacterCount)
-			return line;
+			return;
 
 		while (_cachedLineOrder.Count > 0 &&
 		       (_cachedLines.Count >= MaximumCachedLineCount ||
@@ -428,7 +468,6 @@ internal sealed class TerminalVirtualizedPreviewView : View
 		_cachedLines[lineNumber] = line;
 		_cachedLineOrder.Enqueue(lineNumber);
 		_cachedCharacterCount += line.Length;
-		return line;
 	}
 
 	private void ClearLineCache()
