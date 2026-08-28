@@ -281,6 +281,8 @@ public sealed class McpServerIntegrationTests
 			$"internal static class Secrets {{ const string Token = \"{Secret}\"; }}\n" +
 			$"// Contact {PrivateEmail}\nsearch-marker\n");
 		File.WriteAllText(Path.Combine(project, "Large.cs"), "large-marker\n" + new string('x', 60_000));
+		File.WriteAllText(Path.Combine(project, "TieB.cs"), "same-size\n");
+		File.WriteAllText(Path.Combine(project, "TieA.cs"), "same-size\n");
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
 		var tools = await server.Client.ListToolsAsync(
 			options: null,
@@ -308,6 +310,14 @@ public sealed class McpServerIntegrationTests
 			analysis,
 			Assert.IsType<JsonElement>(tools.Single(static tool => tool.Name == "analyze").ProtocolTool.OutputSchema));
 		Assert.True(analysisStructured.GetProperty("files").GetInt32() >= 2);
+		var topFiles = analysisStructured.GetProperty("topFiles")
+			.EnumerateArray()
+			.Select(static item => item.GetProperty("path").GetString()!)
+			.ToArray();
+		Assert.All(topFiles, static path => Assert.False(Path.IsPathFullyQualified(path), path));
+		Assert.Equal(
+			["TieA.cs", "TieB.cs"],
+			topFiles.Where(static path => path.StartsWith("Tie", StringComparison.Ordinal)).ToArray());
 
 		var file = await server.CallAsync(
 			"get_file",

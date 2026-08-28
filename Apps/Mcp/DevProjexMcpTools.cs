@@ -125,7 +125,7 @@ internal sealed class DevProjexMcpTools(
 					analyzer,
 					plan.IncludedFiles,
 					fileMetrics => largest.Add(
-						McpProjectService.ToRelative(plan.SourceRoot, fileMetrics.Path),
+						fileMetrics.Path,
 						CodeCompressionSnapshot.EstimateTokens(fileMetrics.CharCount)),
 					operationProgress.Measure("analyzing content", 62, 98),
 					cancellationToken)
@@ -133,9 +133,11 @@ internal sealed class DevProjexMcpTools(
 			operationProgress.Milestone(
 				99,
 				$"analyzing content {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");
-			var top = largest.Items
-				.Select(static item => new { path = item.Path, tokens = item.Tokens })
-				.ToArray();
+			var top = largest.Project(item => new
+			{
+				path = McpProjectService.ToRelative(plan.SourceRoot, item.Path),
+				tokens = item.Tokens
+			});
 			var envelope = new
 			{
 				files = plan.IncludedFiles.Count,

@@ -43,6 +43,25 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public void TopFileRanking_ProjectsOnlyTheBoundedWinners()
+	{
+		var ranking = new McpTopFileRanking(capacity: 10);
+		for (var index = 0; index < 20_000; index++)
+			ranking.Add($"file-{index:D5}.cs", index);
+		var mappedPaths = 0;
+
+		var projected = ranking.Project(item =>
+		{
+			mappedPaths++;
+			return item.Path;
+		});
+
+		Assert.Equal(10, mappedPaths);
+		Assert.Equal(10, projected.Length);
+		Assert.Equal("file-19999.cs", projected[0]);
+	}
+
+	[Fact]
 	public async Task ProjectOperationGateCancelsARequestWaitingBehindAnotherOperation()
 	{
 		var gate = new McpProjectOperationGate();

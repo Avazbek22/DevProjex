@@ -18,6 +18,15 @@ internal sealed class McpTopFileRanking
 
 	public IReadOnlyList<McpFileWeight> Items => _items;
 
+	public TResult[] Project<TResult>(Func<McpFileWeight, TResult> projection)
+	{
+		ArgumentNullException.ThrowIfNull(projection);
+		var result = new TResult[_items.Count];
+		for (var index = 0; index < _items.Count; index++)
+			result[index] = projection(_items[index]);
+		return result;
+	}
+
 	public void Add(string path, long tokens)
 	{
 		var candidate = new McpFileWeight(path, tokens);
