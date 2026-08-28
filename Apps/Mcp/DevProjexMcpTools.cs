@@ -92,11 +92,10 @@ internal sealed class DevProjexMcpTools(
 	[Description("Measure a redacted project selection and list its ten largest text files by estimated tokens.")]
 	public Task<CallToolResult> Analyze(
 		RequestContext<CallToolRequestParams> request,
-		IProgress<ProgressNotificationValue> progress,
 		CancellationToken cancellationToken) =>
 		RunProjectAsync(async () =>
 		{
-			var operationProgress = new McpProgressReporter(progress);
+			var operationProgress = new McpProgressReporter(request, cancellationToken);
 			operationProgress.Milestone(1, "selecting files");
 			var arguments = SelectionArguments(request.Params);
 			var detail = McpDetailPolicy.Parse(arguments.OptionalString("detail"));
@@ -147,18 +146,17 @@ internal sealed class DevProjexMcpTools(
 				detail = effectiveDetail.Token,
 				topFiles = top
 			};
-			operationProgress.Milestone(100, "building analysis");
+			await operationProgress.CompleteAsync(100, "building analysis").ConfigureAwait(false);
 			return McpToolResults.StructuredSuccess(envelope);
 		}, cancellationToken);
 
 	[Description("Build an exact redacted DevProjex context export. Large packs expire when this server process exits.")]
 	public Task<CallToolResult> PackContext(
 		RequestContext<CallToolRequestParams> request,
-		IProgress<ProgressNotificationValue> progress,
 		CancellationToken cancellationToken) =>
 		RunProjectAsync(async () =>
 		{
-			var operationProgress = new McpProgressReporter(progress);
+			var operationProgress = new McpProgressReporter(request, cancellationToken);
 			operationProgress.Milestone(1, "selecting files");
 			var arguments = McpJsonArguments.Create(
 				request.Params,
@@ -237,9 +235,10 @@ internal sealed class DevProjexMcpTools(
 				if (pack.Characters <= MaximumInlinePackCharacters)
 				{
 					var content = await File.ReadAllTextAsync(pack.Path, cancellationToken).ConfigureAwait(false);
-					operationProgress.Milestone(
-						100,
-						$"writing pack {writtenFileCount}/{writtenFileCount}");
+					await operationProgress.CompleteAsync(
+							100,
+							$"writing pack {writtenFileCount}/{writtenFileCount}")
+						.ConfigureAwait(false);
 					return McpToolResults.TextSuccess(McpSpotlight.Wrap(content), advertiseLargeResult: true);
 				}
 
@@ -264,9 +263,10 @@ internal sealed class DevProjexMcpTools(
 				var message = $"Pack stored as '{pack.Id}' ({pack.Characters} characters). " +
 				              "Call read_pack with this pack_id to read ranges, or search_project to locate source content.\n" +
 				              McpSpotlight.Wrap(tree);
-				operationProgress.Milestone(
-					100,
-					$"writing pack {writtenFileCount}/{writtenFileCount}");
+				await operationProgress.CompleteAsync(
+						100,
+						$"writing pack {writtenFileCount}/{writtenFileCount}")
+					.ConfigureAwait(false);
 				var response = McpToolResults.TextSuccess(message, advertiseLargeResult: true);
 				retainPack = true;
 				return response;

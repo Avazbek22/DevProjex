@@ -7,6 +7,7 @@ internal sealed class DiagnosticPipeSafeTerminalEnvironment(
 
 	public TextReader Input => inner.Input;
 	public Stream? RawInput => inner.RawInput;
+	public Stream? RawOutput => inner.RawOutput;
 	public TextWriter Output => inner.Output;
 	public TextWriter Error => _error;
 	public bool IsInputInteractive => inner.IsInputInteractive;
