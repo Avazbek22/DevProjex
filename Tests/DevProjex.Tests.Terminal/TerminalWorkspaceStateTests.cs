@@ -1,9 +1,28 @@
+using System.Collections.Specialized;
 using DevProjex.Application.Preview;
+using Terminal.Gui.Text;
 
 namespace DevProjex.Tests.Terminal;
 
 public sealed class TerminalWorkspaceStateTests
 {
+	[Fact]
+	public void VisibleTreeRebuildPublishesOneResetAndKeepsCachedRowText()
+	{
+		using var state = new TerminalWorkspaceState(CreatePlan());
+		var collectionEvents = new List<NotifyCollectionChangedAction>();
+		state.VisibleRows.CollectionChanged += (_, eventArgs) =>
+			collectionEvents.Add(eventArgs.Action);
+		var sourceRow = FindRow(state, "src");
+
+		state.Expand(sourceRow);
+
+		Assert.Equal([NotifyCollectionChangedAction.Reset], collectionEvents);
+		var row = state.VisibleRows[sourceRow];
+		Assert.Same(row.ToString(), row.ToString());
+		Assert.Equal(row.ToString().GetColumns(), row.DisplayWidth);
+	}
+
 	[Fact]
 	public void PreviewRefreshPublishesDocumentAndExactOutputMetricsTogether()
 	{
