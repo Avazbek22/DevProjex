@@ -280,6 +280,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 	private IBrush? _cachedSearchHighlightBrush;
 	private IBrush? _cachedSearchCurrentBrush;
 	private IBrush? _cachedSearchHighlightTextBrush;
+	private readonly PreviewRedactionRenderStyleCache _redactionRenderStyleCache = new();
     private StickyHeaderTrimCacheKey? _cachedStickyHeaderTrimKey;
     private string? _cachedStickyHeaderTrimText;
 	private MenuFlyout? _contextFlyout;
@@ -992,6 +993,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 
 		var firstLine = visibleWindow.FirstLine;
 		var lastLine = firstLine + visibleWindow.LineCount - 1;
+		var renderStyles = ResolveRedactionRenderStyles();
 		for (var lineNumber = firstLine; lineNumber <= lastLine; lineNumber++)
 		{
 			if (!_redactionsByLine.TryGetValue(lineNumber, out var lineRedactions))
@@ -1015,10 +1017,10 @@ public sealed class VirtualizedPreviewTextControl : Control
 				var y = origin.Y + ((lineNumber - firstLine) * lineHeight);
 				var isInteractive = span.OccurrenceId == _hoveredRedactionOccurrenceId ||
 				                    IsNavigationTarget(span, _activeRedactionTarget);
-				var (background, border) = ResolveRedactionBrushes(span.State, isInteractive);
+				var style = renderStyles.Resolve(span.State, isInteractive);
 				context.DrawRectangle(
-					background,
-					new Pen(border, isInteractive ? 1.6 : 1.15),
+					style.Background,
+					style.Border,
 					new RoundedRect(new Rect(x, y + 1, width, Math.Max(1, lineHeight - 2)), 3));
 			}
 		}
@@ -1182,9 +1184,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 			: new SolidColorBrush(Color.Parse(fallbackColor));
 	}
 
-	private static (IBrush Background, IBrush Border) ResolveRedactionBrushes(
-		SecretPreviewSpanState state,
-		bool isInteractive)
+	private PreviewRedactionRenderStyleCache ResolveRedactionRenderStyles()
 	{
 		var application = global::Avalonia.Application.Current;
 		var theme = application?.ActualThemeVariant ?? ThemeVariant.Light;
@@ -1192,15 +1192,8 @@ public sealed class VirtualizedPreviewTextControl : Control
 		             resource is ISolidColorBrush solid
 			? solid.Color
 			: Color.Parse("#6D5DFB");
-		var backgroundAlpha = state == SecretPreviewSpanState.Redacted
-			? (isInteractive ? (byte)82 : (byte)54)
-			: (isInteractive ? (byte)38 : (byte)14);
-		var borderAlpha = isInteractive
-			? (byte)240
-			: state == SecretPreviewSpanState.Redacted ? (byte)180 : (byte)190;
-		return (
-			new SolidColorBrush(Color.FromArgb(backgroundAlpha, accent.R, accent.G, accent.B)),
-			new SolidColorBrush(Color.FromArgb(borderAlpha, accent.R, accent.G, accent.B)));
+		_redactionRenderStyleCache.Update(theme, accent);
+		return _redactionRenderStyleCache;
 	}
 
     private void DrawVisibleTextLinesWithSelection(
@@ -3464,4 +3457,66 @@ public sealed class VirtualizedPreviewTextControl : Control
             return lineStarts;
         }
     }
+}
+
+internal readonly record struct PreviewRedactionRenderStyle(
+	IBrush Background,
+	Pen Border);
+
+internal sealed class PreviewRedactionRenderStyleCache
+{
+	private const int StyleCount = 4;
+	private ThemeVariant? _theme;
+	private Color _accent;
+	private PreviewRedactionRenderStyle[] _styles = [];
+
+	public void Update(
+		ThemeVariant theme,
+		Color accent)
+	{
+		ArgumentNullException.ThrowIfNull(theme);
+		if (_styles.Length == StyleCount && _theme == theme && _accent == accent)
+			return;
+
+		_theme = theme;
+		_accent = accent;
+		_styles =
+		[
+			Create(accent, SecretPreviewSpanState.Redacted, isInteractive: false),
+			Create(accent, SecretPreviewSpanState.Redacted, isInteractive: true),
+			Create(accent, SecretPreviewSpanState.KeptAsIs, isInteractive: false),
+			Create(accent, SecretPreviewSpanState.KeptAsIs, isInteractive: true)
+		];
+	}
+
+	public PreviewRedactionRenderStyle Resolve(
+		SecretPreviewSpanState state,
+		bool isInteractive)
+	{
+		if (_styles.Length != StyleCount)
+			throw new InvalidOperationException("Redaction render styles were not initialized.");
+
+		var stateOffset = state == SecretPreviewSpanState.Redacted ? 0 : 2;
+		return _styles[stateOffset + (isInteractive ? 1 : 0)];
+	}
+
+	private static PreviewRedactionRenderStyle Create(
+		Color accent,
+		SecretPreviewSpanState state,
+		bool isInteractive)
+	{
+		var backgroundAlpha = state == SecretPreviewSpanState.Redacted
+			? (isInteractive ? (byte)82 : (byte)54)
+			: (isInteractive ? (byte)38 : (byte)14);
+		var borderAlpha = isInteractive
+			? (byte)240
+			: state == SecretPreviewSpanState.Redacted ? (byte)180 : (byte)190;
+		var background = new SolidColorBrush(
+			Color.FromArgb(backgroundAlpha, accent.R, accent.G, accent.B));
+		var border = new SolidColorBrush(
+			Color.FromArgb(borderAlpha, accent.R, accent.G, accent.B));
+		return new PreviewRedactionRenderStyle(
+			background,
+			new Pen(border, isInteractive ? 1.6 : 1.15));
+	}
 }

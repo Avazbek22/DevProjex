@@ -3,6 +3,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
+using Avalonia.Styling;
 using DevProjex.Application.Preview;
 using DevProjex.Application.Secrets;
 using DevProjex.Avalonia.Controls;
@@ -1475,6 +1476,98 @@ public sealed class VirtualizedPreviewTextControlTests
             1,
             (512 + (3 * 2)) * 2);
     }
+
+	[Fact]
+	public void RedactionRenderStyleCache_ReusesAllFourStylesForTheSameThemeAndAccent()
+	{
+		var cache = new PreviewRedactionRenderStyleCache();
+		var accent = Color.Parse("#6D5DFB");
+		var states = new[]
+		{
+			(SecretPreviewSpanState.Redacted, false),
+			(SecretPreviewSpanState.Redacted, true),
+			(SecretPreviewSpanState.KeptAsIs, false),
+			(SecretPreviewSpanState.KeptAsIs, true)
+		};
+		cache.Update(ThemeVariant.Dark, accent);
+		var firstPass = states
+			.Select(state => cache.Resolve(state.Item1, state.Item2))
+			.ToArray();
+		var secondPass = states
+			.Select(state => cache.Resolve(state.Item1, state.Item2))
+			.ToArray();
+
+		for (var index = 0; index < firstPass.Length; index++)
+		{
+			Assert.Same(firstPass[index].Background, secondPass[index].Background);
+			Assert.Same(firstPass[index].Border, secondPass[index].Border);
+		}
+		for (var left = 0; left < firstPass.Length; left++)
+		{
+			for (var right = left + 1; right < firstPass.Length; right++)
+			{
+				Assert.NotSame(firstPass[left].Background, firstPass[right].Background);
+				Assert.NotSame(firstPass[left].Border, firstPass[right].Border);
+			}
+		}
+	}
+
+	[Fact]
+	public void RedactionRenderStyleCache_RebuildsWhenAccentOrThemeChanges()
+	{
+		var cache = new PreviewRedactionRenderStyleCache();
+		var firstAccent = Color.Parse("#6D5DFB");
+		var secondAccent = Color.Parse("#12947A");
+		cache.Update(ThemeVariant.Dark, firstAccent);
+		var initial = cache.Resolve(
+			SecretPreviewSpanState.Redacted,
+			isInteractive: false);
+		cache.Update(ThemeVariant.Dark, secondAccent);
+		var afterAccentChange = cache.Resolve(
+			SecretPreviewSpanState.Redacted,
+			isInteractive: false);
+		cache.Update(ThemeVariant.Light, secondAccent);
+		var afterThemeChange = cache.Resolve(
+			SecretPreviewSpanState.Redacted,
+			isInteractive: false);
+
+		Assert.NotSame(initial.Background, afterAccentChange.Background);
+		Assert.NotSame(initial.Border, afterAccentChange.Border);
+		Assert.NotSame(afterAccentChange.Background, afterThemeChange.Background);
+		Assert.NotSame(afterAccentChange.Border, afterThemeChange.Border);
+		Assert.Equal(
+			Color.FromArgb(54, secondAccent.R, secondAccent.G, secondAccent.B),
+			Assert.IsAssignableFrom<ISolidColorBrush>(afterThemeChange.Background).Color);
+		Assert.Equal(
+			Color.FromArgb(180, secondAccent.R, secondAccent.G, secondAccent.B),
+			Assert.IsAssignableFrom<ISolidColorBrush>(afterThemeChange.Border.Brush).Color);
+		var reused = cache.Resolve(
+			SecretPreviewSpanState.Redacted,
+			isInteractive: false);
+		Assert.Same(afterThemeChange.Background, reused.Background);
+		Assert.Same(afterThemeChange.Border, reused.Border);
+	}
+
+	[Fact]
+	public void RedactionRenderStyleCache_WarmResolutionAllocatesNoPerSpanObjects()
+	{
+		var cache = new PreviewRedactionRenderStyleCache();
+		cache.Update(ThemeVariant.Dark, Color.Parse("#6D5DFB"));
+		_ = cache.Resolve(SecretPreviewSpanState.Redacted, isInteractive: false);
+
+		var before = GC.GetAllocatedBytesForCurrentThread();
+		for (var index = 0; index < 100_000; index++)
+		{
+			_ = cache.Resolve(
+				(index & 2) == 0
+					? SecretPreviewSpanState.Redacted
+					: SecretPreviewSpanState.KeptAsIs,
+				(index & 1) != 0);
+		}
+		var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+		Assert.InRange(allocated, 0, 128);
+	}
 
     private static double InvokeResolveLineHeight(VirtualizedPreviewTextControl control)
     {
