@@ -49,28 +49,39 @@ internal static class PreviewSearchIndex
 		{
 			var firstContentLine = Math.Max(lastScannedLine + 1, Math.Max(1, section.ContentStartLine));
 			var lastContentLine = Math.Min(document.LineCount, section.EndLine);
-			for (var lineNumber = firstContentLine; lineNumber <= lastContentLine; lineNumber++)
-			{
-				cancellationToken.ThrowIfCancellationRequested();
-				var line = document.GetLineText(lineNumber);
-				var searchStart = 0;
-				while (searchStart <= line.Length - query.Length)
+			var capped = false;
+			document.VisitLines(
+				firstContentLine,
+				lastContentLine,
+				(lineNumber, line) =>
 				{
-					var matchColumn = line.IndexOf(
-						query,
-						searchStart,
-						StringComparison.OrdinalIgnoreCase);
-					if (matchColumn < 0)
-						break;
+					var columnOffset = 0;
+					while (line.Length >= query.Length)
+					{
+						var matchColumn = line.IndexOf(
+							query.AsSpan(),
+							StringComparison.OrdinalIgnoreCase);
+						if (matchColumn < 0)
+							break;
 
-					matches ??= new List<PreviewSearchMatch>(64);
-					if (matches.Count == MaximumMatches)
-						return new PreviewSearchResult(matches.ToArray(), IsCapped: true);
+						matches ??= new List<PreviewSearchMatch>(64);
+						if (matches.Count == MaximumMatches)
+						{
+							capped = true;
+							return false;
+						}
 
-					matches.Add(new PreviewSearchMatch(lineNumber, matchColumn, query.Length));
-					searchStart = matchColumn + query.Length;
-				}
-			}
+						matches.Add(new PreviewSearchMatch(lineNumber, columnOffset + matchColumn, query.Length));
+						var consumed = matchColumn + query.Length;
+						columnOffset += consumed;
+						line = line[consumed..];
+					}
+
+					return true;
+				},
+				cancellationToken);
+			if (capped)
+				return new PreviewSearchResult(matches!.ToArray(), IsCapped: true);
 
 			lastScannedLine = Math.Max(lastScannedLine, lastContentLine);
 		}

@@ -71,6 +71,27 @@ public sealed class InMemoryPreviewTextDocument : IPreviewTextDocument
         return builder.ToString();
     }
 
+	public void VisitLines(
+		int firstLine,
+		int lastLine,
+		PreviewTextLineVisitor visitor,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(visitor);
+		if (!PreviewTextLineRange.TryNormalize(LineCount, firstLine, lastLine, out var first, out var last))
+			return;
+
+		for (var lineNumber = first; lineNumber <= last; lineNumber++)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var line = _text.Length == 0
+				? ReadOnlySpan<char>.Empty
+				: GetLineSlice(_text, _lineStarts, lineNumber - 1);
+			if (!visitor(lineNumber, line))
+				return;
+		}
+	}
+
     public void Dispose()
     {
     }

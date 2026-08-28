@@ -12,6 +12,8 @@ public sealed class FileBackedPreviewTextDocument(
 	IReadOnlyList<PreviewRedactionSpan>? redactions = null)
     : IPreviewTextDocument
 {
+	private const int MaximumLinesPerVisitChunk = 1024;
+	private const int MaximumBytesPerVisitChunk = 1024 * 1024;
     private static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
 
 	private readonly SemaphoreSlim _streamGate = new(1, 1);
@@ -120,6 +122,79 @@ public sealed class FileBackedPreviewTextDocument(
         return ReadTextRange(startOffset, endOffset, trimTrailingLineEnding: true);
     }
 
+	public void VisitLines(
+		int firstLine,
+		int lastLine,
+		PreviewTextLineVisitor visitor,
+		CancellationToken cancellationToken = default)
+	{
+		ThrowIfDisposed();
+		ArgumentNullException.ThrowIfNull(visitor);
+		if (!PreviewTextLineRange.TryNormalize(LineCount, firstLine, lastLine, out var first, out var last))
+			return;
+		if (lineOffsets.Length == 0)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			_ = visitor(1, ReadOnlySpan<char>.Empty);
+			return;
+		}
+
+		var lineIndex = first - 1;
+		var lastLineIndexExclusive = last;
+		while (lineIndex < lastLineIndexExclusive)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var chunkEndExclusive = ResolveVisitChunkEnd(lineIndex, lastLineIndexExclusive);
+			var startOffset = lineOffsets[lineIndex];
+			var endOffset = chunkEndExclusive < LineCount
+				? lineOffsets[chunkEndExclusive]
+				: fileLength;
+			var byteCount = checked((int)Math.Max(0, endOffset - startOffset));
+			if (byteCount == 0)
+			{
+				for (; lineIndex < chunkEndExclusive; lineIndex++)
+				{
+					cancellationToken.ThrowIfCancellationRequested();
+					if (!visitor(lineIndex + 1, ReadOnlySpan<char>.Empty))
+						return;
+				}
+				continue;
+			}
+
+			var buffer = ArrayPool<byte>.Shared.Rent(byteCount);
+			try
+			{
+				var bytesRead = ReadBytes(startOffset, buffer, byteCount);
+				var characters = ArrayPool<char>.Shared.Rent(Math.Max(1, bytesRead));
+				try
+				{
+					var characterCount = Utf8WithoutBom.GetChars(
+						buffer.AsSpan(0, bytesRead),
+						characters);
+					if (!VisitDecodedLines(
+						characters.AsSpan(0, characterCount),
+						lineIndex,
+						chunkEndExclusive,
+						visitor,
+						cancellationToken))
+					{
+						return;
+					}
+				}
+				finally
+				{
+					ArrayPool<char>.Shared.Return(characters, clearArray: true);
+				}
+			}
+			finally
+			{
+				ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
+			}
+
+			lineIndex = chunkEndExclusive;
+		}
+	}
+
     public void Dispose()
     {
         if (_disposed)
@@ -176,6 +251,55 @@ public sealed class FileBackedPreviewTextDocument(
 			_streamGate.Release();
 		}
     }
+
+	private int ResolveVisitChunkEnd(int startLineIndex, int lastLineIndexExclusive)
+	{
+		var startOffset = lineOffsets[startLineIndex];
+		var maximumEnd = Math.Min(
+			lastLineIndexExclusive,
+			startLineIndex + MaximumLinesPerVisitChunk);
+		var endExclusive = startLineIndex + 1;
+		while (endExclusive < maximumEnd)
+		{
+			var candidateEndExclusive = endExclusive + 1;
+			var candidateEndOffset = candidateEndExclusive < LineCount
+				? lineOffsets[candidateEndExclusive]
+				: fileLength;
+			if (candidateEndOffset - startOffset > MaximumBytesPerVisitChunk)
+				break;
+			endExclusive = candidateEndExclusive;
+		}
+
+		return endExclusive;
+	}
+
+	private static bool VisitDecodedLines(
+		ReadOnlySpan<char> decoded,
+		int firstLineIndex,
+		int lastLineIndexExclusive,
+		PreviewTextLineVisitor visitor,
+		CancellationToken cancellationToken)
+	{
+		var position = 0;
+		for (var lineIndex = firstLineIndex; lineIndex < lastLineIndexExclusive; lineIndex++)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var remaining = decoded[position..];
+			var separatorOffset = remaining.IndexOf('\n');
+			var rawLength = separatorOffset >= 0 ? separatorOffset : remaining.Length;
+			var visibleLength = rawLength;
+			if (visibleLength > 0 && remaining[visibleLength - 1] == '\r')
+				visibleLength--;
+			if (!visitor(lineIndex + 1, remaining[..visibleLength]))
+				return false;
+
+			position = separatorOffset >= 0
+				? checked(position + separatorOffset + 1)
+				: decoded.Length;
+		}
+
+		return true;
+	}
 
     private string ReadTextRange(
         long startOffset,
