@@ -800,11 +800,16 @@ public sealed record IgnoreRules(
 
 	private static GitIgnoreEvaluation EvaluateWithSingleMatcherRelative(
 		GitIgnoreMatcher matcher,
-		string relativePath,
+		ReadOnlySpan<char> baseRelativePath,
+		ReadOnlySpan<char> scanRelativePath,
 		bool isDirectory,
 		string name)
 	{
-		var evaluation = matcher.EvaluateRelativeNormalized(relativePath.AsSpan(), isDirectory, name);
+		var evaluation = matcher.EvaluateRelativeNormalized(
+			baseRelativePath,
+			scanRelativePath,
+			isDirectory,
+			name);
 		if (!evaluation.HasMatch || !evaluation.IsIgnored)
 			return GitIgnoreEvaluation.NotIgnored;
 
@@ -814,8 +819,23 @@ public sealed record IgnoreRules(
 		return new GitIgnoreEvaluation(
 			IsIgnored: true,
 			ShouldTraverseIgnoredDirectory: matcher.ShouldTraverseIgnoredDirectoryRelativeNormalized(
-				relativePath.AsSpan(),
+				baseRelativePath,
+				scanRelativePath,
 				name));
+	}
+
+	private static GitIgnoreMatcher.IgnoreEvaluation EvaluateRulesOnlyWithSingleMatcherRelative(
+		GitIgnoreMatcher matcher,
+		ReadOnlySpan<char> baseRelativePath,
+		ReadOnlySpan<char> scanRelativePath,
+		bool isDirectory,
+		string name)
+	{
+		return matcher.EvaluateRelativeRulesOnlyNormalized(
+			baseRelativePath,
+			scanRelativePath,
+			isDirectory,
+			name);
 	}
 
 	public readonly struct GitIgnoreScanContext
@@ -1002,12 +1022,12 @@ public sealed record IgnoreRules(
 			}
 			else
 			{
-				var matcherRelativePath = BuildMatcherRelativePath(relativePath);
-				evaluation = matcherRelativePath.Length == 0
+				evaluation = _baseRelativePath.Length == 0 && relativePath.Length == 0
 					? GitIgnoreEvaluation.NotIgnored
 					: EvaluateWithSingleMatcherRelative(
 						_relativeMatcher,
-						matcherRelativePath,
+						_baseRelativePath.AsSpan(),
+						relativePath.AsSpan(),
 						isDirectory,
 						name);
 			}
@@ -1124,11 +1144,12 @@ public sealed record IgnoreRules(
 			}
 			else
 			{
-				var matcherRelativePath = BuildMatcherRelativePath(relativePath);
-				evaluation = matcherRelativePath.Length == 0
+				evaluation = _baseRelativePath.Length == 0 && relativePath.Length == 0
 					? default
-					: _relativeMatcher.EvaluateRelativeRulesOnlyNormalized(
-						matcherRelativePath.AsSpan(),
+					: EvaluateRulesOnlyWithSingleMatcherRelative(
+						_relativeMatcher,
+						_baseRelativePath.AsSpan(),
+						relativePath.AsSpan(),
 						isDirectory,
 						name);
 			}
@@ -1162,17 +1183,6 @@ public sealed record IgnoreRules(
 					return true;
 				}
 			}
-		}
-
-		private string BuildMatcherRelativePath(string scanRelativePath)
-		{
-			if (_baseRelativePath.Length == 0)
-				return scanRelativePath;
-
-			if (string.IsNullOrEmpty(scanRelativePath))
-				return _baseRelativePath;
-
-			return $"{_baseRelativePath}/{scanRelativePath}";
 		}
 
 		private sealed class AdditionalGitIgnoreScope(
@@ -1216,11 +1226,11 @@ public sealed record IgnoreRules(
 				GitIgnoreMatcher.IgnoreEvaluation local;
 				if (matcherBaseRelativePath is not null)
 				{
-					var matcherRelativePath = BuildAncestorMatcherRelativePath(scanRelativePath);
-					if (matcherRelativePath.Length == 0)
+					if (matcherBaseRelativePath.Length == 0 && scanRelativePath.Length == 0)
 						return evaluation;
 					local = _scopedMatcher.Matcher.EvaluateRelativeNormalized(
-						matcherRelativePath.AsSpan(),
+						matcherBaseRelativePath.AsSpan(),
+						scanRelativePath.AsSpan(),
 						isDirectory,
 						name);
 				}
@@ -1259,11 +1269,12 @@ public sealed record IgnoreRules(
 				GitIgnoreMatcher.IgnoreEvaluation local;
 				if (matcherBaseRelativePath is not null)
 				{
-					var matcherRelativePath = BuildAncestorMatcherRelativePath(scanRelativePath);
-					if (matcherRelativePath.Length == 0)
+					if (matcherBaseRelativePath.Length == 0 && scanRelativePath.Length == 0)
 						return evaluation;
-					local = _scopedMatcher.Matcher.EvaluateRelativeRulesOnlyNormalized(
-						matcherRelativePath.AsSpan(),
+					local = EvaluateRulesOnlyWithSingleMatcherRelative(
+						_scopedMatcher.Matcher,
+						matcherBaseRelativePath.AsSpan(),
+						scanRelativePath.AsSpan(),
 						isDirectory,
 						name);
 				}
@@ -1286,10 +1297,10 @@ public sealed record IgnoreRules(
 
 				if (matcherBaseRelativePath is not null)
 				{
-					var matcherRelativePath = BuildAncestorMatcherRelativePath(scanRelativePath);
-					return matcherRelativePath.Length > 0 &&
+					return (matcherBaseRelativePath.Length > 0 || scanRelativePath.Length > 0) &&
 					       _scopedMatcher.Matcher.ShouldTraverseIgnoredDirectoryRelativeNormalized(
-						       matcherRelativePath.AsSpan(),
+						       matcherBaseRelativePath.AsSpan(),
+						       scanRelativePath.AsSpan(),
 						       name);
 				}
 
@@ -1297,16 +1308,6 @@ public sealed record IgnoreRules(
 				       _scopedMatcher.Matcher.ShouldTraverseIgnoredDirectoryRelativeNormalized(
 					       descendantRelativePath,
 					       name);
-			}
-
-			private string BuildAncestorMatcherRelativePath(string scanRelativePath)
-			{
-				if (matcherBaseRelativePath!.Length == 0)
-					return scanRelativePath;
-				if (scanRelativePath.Length == 0)
-					return matcherBaseRelativePath;
-
-				return $"{matcherBaseRelativePath}/{scanRelativePath}";
 			}
 
 			private bool TryGetMatcherRelativePath(
