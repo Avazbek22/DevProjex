@@ -186,6 +186,38 @@ public sealed class TerminalWorkspaceCommandParserTests
 		Assert.Contains(extension.Candidates, candidate => candidate.Token == ".generated");
 	}
 
+	[Theory]
+	[InlineData("", 0)]
+	[InlineData("se", 2)]
+	[InlineData("set ", 4)]
+	[InlineData("set hide-p", 10)]
+	[InlineData("set hide-secrets o", 18)]
+	[InlineData("type .cs ", 9)]
+	[InlineData("type .cs o", 10)]
+	[InlineData("language zh-", 12)]
+	[InlineData("viw content", 2)]
+	[InlineData("profile save \"My", 16)]
+	internal void GhostCompletionMatchesFullCompletionHints(string text, int cursorPosition)
+	{
+		var full = _parser.GetCompletion(text, cursorPosition, Context);
+		var ghost = _parser.GetGhostCompletion(text, cursorPosition, Context);
+
+		Assert.Equal(full.GhostSuffix, ghost.GhostSuffix);
+		Assert.Equal(full.SchemaKey, ghost.SchemaKey);
+	}
+
+	[Fact]
+	public void FullTypeCompletionPreservesDistinctExtensionAndToggleOrder()
+	{
+		var context = new TerminalWorkspaceCommandParseContext([".cs", ".CS", ".md"]);
+
+		var completion = _parser.GetCompletion("type .cs ", 9, context);
+
+		Assert.Equal(
+			[".cs", ".md", "on", "off"],
+			completion.Candidates.Select(static candidate => candidate.Token));
+	}
+
 	[Fact]
 	public void CompletionReturnsTheLocalizedSchemaHookAfterAnExactVerb()
 	{

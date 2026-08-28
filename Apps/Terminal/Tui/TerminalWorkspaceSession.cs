@@ -1292,6 +1292,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				text,
 				cursor,
 				BuildCommandParseContext()),
+			(text, cursor) => _commandParser.GetGhostCompletion(
+				text,
+				cursor,
+				BuildCommandParseContext()),
 			L,
 			_commandHistory,
 			_options.Plain,

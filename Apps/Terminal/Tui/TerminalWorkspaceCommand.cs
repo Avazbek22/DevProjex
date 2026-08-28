@@ -95,6 +95,13 @@ internal sealed record TerminalWorkspaceCommandCompletion(
 	public static TerminalWorkspaceCommandCompletion Empty { get; } = new([], null, null);
 }
 
+internal readonly record struct TerminalWorkspaceCommandGhostCompletion(
+	string? GhostSuffix,
+	string? SchemaKey)
+{
+	public static TerminalWorkspaceCommandGhostCompletion Empty { get; } = new(null, null);
+}
+
 internal static class TerminalWorkspaceCommandCatalog
 {
 	public static IReadOnlyList<TerminalWorkspaceCommandDefinition> All { get; } =

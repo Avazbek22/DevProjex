@@ -8,6 +8,7 @@ namespace DevProjex.Terminal.Tui;
 internal sealed class TerminalWorkspaceCommandLineView : View
 {
 	private readonly Func<string, int, TerminalWorkspaceCommandCompletion> _complete;
+	private readonly Func<string, int, TerminalWorkspaceCommandGhostCompletion> _completeGhost;
 	private readonly Func<string, string> _localize;
 	private readonly TerminalCommandHistory _history;
 	private readonly bool _plain;
@@ -27,12 +28,14 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 	public TerminalWorkspaceCommandLineView(
 		IApplication application,
 		Func<string, int, TerminalWorkspaceCommandCompletion> complete,
+		Func<string, int, TerminalWorkspaceCommandGhostCompletion> completeGhost,
 		Func<string, string> localize,
 		TerminalCommandHistory history,
 		bool plain,
 		bool useUnicode)
 	{
 		_complete = complete;
+		_completeGhost = completeGhost;
 		_localize = localize;
 		_history = history;
 		_plain = plain;
@@ -254,7 +257,7 @@ internal sealed class TerminalWorkspaceCommandLineView : View
 			return;
 		}
 
-		var completion = _complete(
+		var completion = _completeGhost(
 			text,
 			TerminalTextPosition.RuneToUtf16Index(text, _input.InsertionPoint));
 		var ghost = completion.SchemaKey is { } schemaKey
