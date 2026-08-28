@@ -1016,11 +1016,16 @@ public sealed class RepoCacheService : IRepoCacheService
 		_testHooks?.AfterRepositorySizeCalculated?.Invoke(localPath);
 
 		var fileSet = GetIndexFileSet();
-		if (!CrossProcessFileLock.TryAcquire(fileSet, IndexLockTimeout, out var heldLock))
+		if (!CrossProcessFileLock.TryAcquireWithCancellation(
+			    fileSet,
+			    IndexLockTimeout,
+			    cancellationToken,
+			    out var heldLock))
 			return;
 
 		using (heldLock)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			if (HasUnsupportedIndexDocument(fileSet))
 				return;
 
@@ -1638,7 +1643,7 @@ public sealed class RepoCacheService : IRepoCacheService
 		}
 
 		if (removedAny)
-			RefreshIndexedRepositorySize(basePath);
+			RefreshIndexedRepositorySize(basePath, cancellationToken);
 	}
 
 	private RepositoryFileLease? AcquireUniqueSnapshotLease(
