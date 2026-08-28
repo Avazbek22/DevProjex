@@ -928,7 +928,7 @@ public sealed class TreeExportService
 		int IndentLength,
 		bool IsLast);
 
-	private sealed class TreeTextLineWriter : IDisposable
+	internal sealed class TreeTextLineWriter : IDisposable
 	{
 		private readonly TextWriter _destination;
 		private readonly CancellationToken _cancellationToken;
@@ -1003,6 +1003,7 @@ public sealed class TreeExportService
 			_cancellationToken.ThrowIfCancellationRequested();
 			if (!_hasLine)
 			{
+				await FlushBufferAsync().ConfigureAwait(false);
 				_completed = true;
 				return;
 			}

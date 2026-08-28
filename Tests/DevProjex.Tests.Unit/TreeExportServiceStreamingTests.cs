@@ -2,6 +2,20 @@ namespace DevProjex.Tests.Unit;
 
 public sealed class TreeExportServiceStreamingTests
 {
+	[Fact]
+	public async Task TextLineWriterFlushesBufferedTextWithoutABegunLine()
+	{
+		using var destination = new StringWriter();
+		using var writer = new TreeExportService.TreeTextLineWriter(
+			destination,
+			TestContext.Current.CancellationToken);
+
+		await writer.WriteAsync("buffered text");
+		await writer.CompleteAsync(includeFinalLineEnding: false);
+
+		Assert.Equal("buffered text", destination.ToString());
+	}
+
 	[Theory]
 	[InlineData(TreeTextFormat.Ascii, true)]
 	[InlineData(TreeTextFormat.Ascii, false)]
