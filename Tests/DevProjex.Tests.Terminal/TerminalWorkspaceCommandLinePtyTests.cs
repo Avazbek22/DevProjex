@@ -41,7 +41,7 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendAsync(":language ja\r", TestContext.Current.CancellationToken);
 		var japanese = await terminal.WaitForScreenAsync(
-			"↑/↓ 移動",
+			"Space 切り替え",
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.Contains("プロジェクトツリー", japanese, StringComparison.Ordinal);
@@ -1039,6 +1039,7 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 	private static async Task QuitAsync(TerminalPtyHarness terminal)
 	{
 		await terminal.SendAsync(":quit\r", TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(

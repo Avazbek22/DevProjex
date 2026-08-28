@@ -56,7 +56,7 @@ public sealed partial class TerminalPlainPtyTests
 		AssertPlainScreen(terminal.CaptureScreen());
 		await terminal.SendAsync("?", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"ACTION PALETTE",
+			"WORKSPACE",
 			cancellationToken: TestContext.Current.CancellationToken);
 		AssertPlainScreen(terminal.CaptureScreen());
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);

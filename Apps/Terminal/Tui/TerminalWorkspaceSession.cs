@@ -2152,7 +2152,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			CancelCommandResult();
 			_commandLine.Close();
 			RestoreCommandFooterAndFocus();
-			return;
+			if (!TerminalWorkspaceCommandKey.IsActivation(key))
+				return;
 		}
 		if (_operationProgress is not null && IsOverlayActivationKey(key))
 		{

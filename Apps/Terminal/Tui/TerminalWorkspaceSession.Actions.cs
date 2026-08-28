@@ -71,32 +71,32 @@ internal sealed partial class TerminalWorkspaceSession
 	private ResettableObservableCollection<TerminalParameterRow>? _contentControlRows
 	{
 		get => ControlViews?.ContentRows;
-		set { if (ControlViews is { } views) views.ContentRows = value ?? []; }
+		set { if (ControlViews is { } views) views.ContentRows = value; }
 	}
 	private ObservableCollection<TerminalParameterRow>? _contentAllControlRows
 	{
 		get => ControlViews?.ContentAllRows;
-		set { if (ControlViews is { } views) views.ContentAllRows = value ?? []; }
+		set { if (ControlViews is { } views) views.ContentAllRows = value; }
 	}
 	private ObservableCollection<TerminalParameterRow>? _exclusionAllControlRows
 	{
 		get => ControlViews?.ExclusionAllRows;
-		set { if (ControlViews is { } views) views.ExclusionAllRows = value ?? []; }
+		set { if (ControlViews is { } views) views.ExclusionAllRows = value; }
 	}
 	private ResettableObservableCollection<TerminalParameterRow>? _exclusionControlRows
 	{
 		get => ControlViews?.ExclusionRows;
-		set { if (ControlViews is { } views) views.ExclusionRows = value ?? []; }
+		set { if (ControlViews is { } views) views.ExclusionRows = value; }
 	}
 	private ObservableCollection<TerminalParameterRow>? _extensionAllControlRows
 	{
 		get => ControlViews?.ExtensionAllRows;
-		set { if (ControlViews is { } views) views.ExtensionAllRows = value ?? []; }
+		set { if (ControlViews is { } views) views.ExtensionAllRows = value; }
 	}
 	private ResettableObservableCollection<TerminalParameterRow>? _extensionControlRows
 	{
 		get => ControlViews?.ExtensionRows;
-		set { if (ControlViews is { } views) views.ExtensionRows = value ?? []; }
+		set { if (ControlViews is { } views) views.ExtensionRows = value; }
 	}
 	private string? _selectedContentControlKey;
 	private string? _selectedExclusionControlKey;

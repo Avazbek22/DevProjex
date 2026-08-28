@@ -32,4 +32,4 @@
 └──────────────────────────────────────┘└──────────────────────────────────────────────────────────────────────┘└────────────────────────────────────┘
 
  Files 2 · Folders 2 · 52 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
- Up/Down Navigate   Enter Expand   Space Toggle   / Search   Tab/F6 Preview   Ctrl+P Actions   ? Help
+ Space Toggle   Shift+←/→ Collapse/expand all   Ctrl+A/U Select all/none   R Reveal   : Commands
