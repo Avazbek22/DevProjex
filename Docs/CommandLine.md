@@ -579,8 +579,8 @@ Folders come from the 32-entry local-project history and repositories from the
 ```shell
 devprojex cache path
 devprojex cache list [-f text|json]
-devprojex cache remove URL --force
-devprojex cache clear --force
+devprojex cache remove URL [-y|--yes|--force] [-n|--dry-run] [-f|--format text|json]
+devprojex cache clear [-y|--yes|--force] [-n|--dry-run] [-f|--format text|json]
 devprojex cache update URL
 ```
 
@@ -600,6 +600,8 @@ retained or failed entry returns policy exit code `3`, so scripts cannot mistake
 partial cleanup for complete success.
 `cache remove` and `cache clear` also accept `-y`/`--yes`, `-n`/`--dry-run`,
 and `--format json`. Dry-run reports the same counters and bytes without deleting.
+The JSON result has `schemaVersion: 1`, kind `devprojex-cache-removal`, `dryRun`,
+`removed`, `retained`, `failed`, and `bytes`.
 
 ## Command Help
 
@@ -622,6 +624,9 @@ devprojex profile import FILE [PROJECT] [--apply]
 devprojex profile validate FILE [-f text|json]
 devprojex profile reset [PROJECT]
 ```
+
+`profile validate --format json` emits `schemaVersion: 1`, kind
+`devprojex-profile-validation`, Boolean `valid`, and an `errors` array.
 
 `analyze`, `tree`, `export context`, `export project`, `profile show`, and
 `profile save` default to `standard`. `profile export` is the exception and

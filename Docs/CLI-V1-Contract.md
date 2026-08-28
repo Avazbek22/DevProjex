@@ -385,7 +385,8 @@ network and clone failures return runtime exit `1` without opening or exporting
 partial content. The generated cache path is internal and is never reported by
 direct URL-source commands or Terminal Workspace repository details. In particular,
 successful `open URL` writes the safe repository URL rather than the physical cache
-checkout path. Profile commands other than `profile save` accept local directories only.
+checkout path. Every profile command, including `profile save`, accepts local
+directories only.
 
 ## Command Contracts
 
@@ -574,8 +575,8 @@ mode; JSON alone retains the stable English `folder` and `repository` tokens.
 ```text
 devprojex cache path
 devprojex cache list [-f text|json]
-devprojex cache remove <URL> --force
-devprojex cache clear --force
+devprojex cache remove <URL> [-y|--yes|--force] [-n|--dry-run] [-f|--format text|json]
+devprojex cache clear [-y|--yes|--force] [-n|--dry-run] [-f|--format text|json]
 devprojex cache update <URL>
 ```
 
@@ -1007,12 +1008,14 @@ schemas unless a schema is named below.
   replacement. Neither command has a dry-run mode.
 - `cache remove` and `cache clear` accept `-y`/`--yes` as aliases for
   `--force`, plus `-n`/`--dry-run`. Their `--format json` result has
-  `schemaVersion: 1`, `removed`, `retained`, `failed`, and `bytes`.
+  `schemaVersion: 1`, kind `devprojex-cache-removal`, `dryRun`, `removed`,
+  `retained`, `failed`, and `bytes`.
 - `profile export -n` validates and reports its plan without writing.
-  `profile validate --format json` returns `schemaVersion: 1`, `valid`, and
-  `errors`. `profile save [PROJECT]` stores the effective selection as the
-  project's local profile. `cache update URL` refreshes an existing managed
-  clone and never creates an unrelated cache entry.
+  `profile validate --format json` returns `schemaVersion: 1`, kind
+  `devprojex-profile-validation`, `valid`, and `errors`. `profile save
+  [PROJECT]` stores the effective selection as the project's local profile.
+  `cache update URL` refreshes an existing managed clone and never creates an
+  unrelated cache entry.
 - Context/project dry-run output includes file/folder counts, bytes, estimated
   tokens, and the effective profile.
 - `ui list --timeout` uses the same bounded IPC timeout as other UI actions.
@@ -1073,9 +1076,11 @@ The v1 kinds are:
 devprojex-analysis
 devprojex-recent
 devprojex-repository-cache
+devprojex-cache-removal
 devprojex-context
 devprojex-doctor
 devprojex-profile
+devprojex-profile-validation
 devprojex-ui-instances
 ```
 

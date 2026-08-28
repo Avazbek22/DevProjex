@@ -216,6 +216,42 @@ inside the index-locked operation. A busy index lock, unsupported future schema,
 or failed index update cannot be reported as empty success and produces policy
 exit code `3`. `cache clear` also counts unindexed cache containers.
 
+With `--format json`, both commands emit this stable schema (the values shown are
+illustrative):
+
+```json
+{
+  "schemaVersion": 1,
+  "kind": "devprojex-cache-removal",
+  "dryRun": true,
+  "removed": 1,
+  "retained": 0,
+  "failed": 0,
+  "bytes": 4096
+}
+```
+
+`dryRun` identifies a non-mutating plan. `removed`, `retained`, and `failed` are
+entry counts; `bytes` is the non-negative byte count represented by removed or
+planned entries.
+
+## Profile Validation JSON
+
+`profile validate --format json` emits the stable schema:
+
+```json
+{
+  "schemaVersion": 1,
+  "kind": "devprojex-profile-validation",
+  "valid": false,
+  "errors": ["Portable profile schema is missing or unsupported."]
+}
+```
+
+`valid` is a JSON Boolean. `errors` is empty for a valid profile and otherwise
+contains validation messages. The document is written before an invalid profile
+returns usage exit code `2`.
+
 ## Doctor JSON
 
 `doctor --format json` emits the stable schema:

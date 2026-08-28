@@ -137,6 +137,65 @@ public sealed class ProfileCommandContractTests
 	}
 
 	[Fact]
+	public async Task ValidateJsonUsesTheStableSchemaForValidAndInvalidProfiles()
+	{
+		using var workspace = CreateWorkspace();
+		var validProfile = WriteProfile(
+			workspace,
+			"""
+			{
+			  "schemaVersion": 1,
+			  "selection": {
+			    "roots": null,
+			    "extensions": null,
+			    "selectedPaths": [],
+			    "gitMode": "none",
+			    "exclusions": []
+			  }
+			}
+			""");
+		var validEnvironment = new TestTerminalEnvironment();
+
+		var validExitCode = await RunAsync(
+			workspace,
+			validEnvironment,
+			"profile", "validate", validProfile, "--format", "json");
+
+		Assert.Equal(CommandLineExitCodes.Success, validExitCode);
+		using (var document = JsonDocument.Parse(validEnvironment.StandardOutput))
+		{
+			Assert.Equal(
+				["schemaVersion", "kind", "valid", "errors"],
+				document.RootElement.EnumerateObject().Select(static property => property.Name));
+			Assert.Equal(1, document.RootElement.GetProperty("schemaVersion").GetInt32());
+			Assert.Equal(
+				"devprojex-profile-validation",
+				document.RootElement.GetProperty("kind").GetString());
+			Assert.True(document.RootElement.GetProperty("valid").GetBoolean());
+			Assert.Empty(document.RootElement.GetProperty("errors").EnumerateArray());
+		}
+		Assert.Empty(validEnvironment.StandardError);
+
+		var invalidProfile = workspace.WriteFile("profiles/broken.json", "{ invalid");
+		var invalidEnvironment = new TestTerminalEnvironment();
+		var invalidExitCode = await RunAsync(
+			workspace,
+			invalidEnvironment,
+			"profile", "validate", invalidProfile, "--format", "json");
+
+		Assert.Equal(CommandLineExitCodes.UsageError, invalidExitCode);
+		using (var document = JsonDocument.Parse(invalidEnvironment.StandardOutput))
+		{
+			Assert.Equal(
+				"devprojex-profile-validation",
+				document.RootElement.GetProperty("kind").GetString());
+			Assert.False(document.RootElement.GetProperty("valid").GetBoolean());
+			Assert.Single(document.RootElement.GetProperty("errors").EnumerateArray());
+		}
+		Assert.Empty(invalidEnvironment.StandardError);
+	}
+
+	[Fact]
 	public async Task PortableProfileValuesAreAppliedToAnalyze()
 	{
 		using var workspace = CreateWorkspace();

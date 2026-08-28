@@ -671,8 +671,11 @@ public sealed class CliExpansionCommandTests
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
 		using var document = JsonDocument.Parse(environment.StandardOutput);
 		Assert.Equal(1, document.RootElement.GetProperty("schemaVersion").GetInt32());
+		Assert.Equal("devprojex-cache-removal", document.RootElement.GetProperty("kind").GetString());
 		Assert.True(document.RootElement.GetProperty("dryRun").GetBoolean());
 		Assert.Equal(1, document.RootElement.GetProperty("removed").GetInt32());
+		Assert.Equal(0, document.RootElement.GetProperty("retained").GetInt32());
+		Assert.Equal(0, document.RootElement.GetProperty("failed").GetInt32());
 		Assert.True(document.RootElement.GetProperty("bytes").GetInt64() > 0);
 		Assert.True(Directory.Exists(repositoryPath));
 		Assert.Single(services.RepoCacheService.ListIndexedRepositories());
