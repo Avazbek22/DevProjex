@@ -113,6 +113,21 @@ public sealed class TerminalWorkspacePresentationPolicyTests
 		Assert.Equal([firstOccurrence, secondOccurrence], toggled);
 	}
 
+	[Theory]
+	[InlineData(false, false)]
+	[InlineData(true, true)]
+	public void LocalizedTextUsesAsciiWhenPlainOrUnicodeIsUnavailable(
+		bool plain,
+		bool supportsUnicode)
+	{
+		var value = TerminalWorkspaceSession.NormalizeLocalizedText(
+			"↑/↓ Action…",
+			plain,
+			supportsUnicode);
+
+		Assert.Equal("k/j Action...", value);
+	}
+
 	[Fact]
 	public void PreviewNavigationProjectsWidePrefixesToTerminalColumns()
 	{

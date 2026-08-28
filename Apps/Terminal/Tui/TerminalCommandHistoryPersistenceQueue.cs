@@ -7,6 +7,7 @@ internal sealed class TerminalCommandHistoryPersistenceQueue(
 	private readonly object _gate = new();
 	private PendingSettings? _pendingSettings;
 	private bool _workerRunning;
+	private Task? _drainTask;
 
 	public Task? Enqueue(IReadOnlyList<string> history, AppLanguage? language = null)
 	{
@@ -21,8 +22,15 @@ internal sealed class TerminalCommandHistoryPersistenceQueue(
 				return null;
 
 			_workerRunning = true;
-			return DrainAsync();
+			_drainTask = DrainAsync();
+			return _drainTask;
 		}
+	}
+
+	public Task CompleteAsync()
+	{
+		lock (_gate)
+			return _drainTask ?? Task.CompletedTask;
 	}
 
 	private async Task DrainAsync()

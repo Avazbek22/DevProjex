@@ -259,7 +259,10 @@ internal sealed partial class TerminalWorkspaceSession
 		if (refreshKind != TerminalControlRefreshKind.Full)
 		{
 			if (refreshKind == TerminalControlRefreshKind.RedactionOnly)
+			{
 				RefreshContentRedactionRows(selection, snapshot);
+				RefreshControlTitles();
+			}
 			_redactionLabelStamp = redactionStamp;
 			UpdateControlSelectionSchemes();
 			return;

@@ -99,6 +99,32 @@ public sealed class TerminalCommandHistoryTests
 	}
 
 	[Fact]
+	public async Task CompleteWaitsForThePendingLanguageWrite()
+	{
+		var writeStarted = new TaskCompletionSource(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		var releaseWrite = new TaskCompletionSource(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		var savedLanguage = (AppLanguage?)null;
+		var queue = new TerminalCommandHistoryPersistenceQueue(
+			async (_, language, cancellationToken) =>
+			{
+				writeStarted.SetResult();
+				await releaseWrite.Task.WaitAsync(cancellationToken);
+				savedLanguage = language;
+			});
+		_ = queue.Enqueue(["language ja"], AppLanguage.Ja);
+		await writeStarted.Task.WaitAsync(TestContext.Current.CancellationToken);
+
+		var completion = queue.CompleteAsync();
+		Assert.False(completion.IsCompleted);
+		releaseWrite.SetResult();
+		await completion.WaitAsync(TestContext.Current.CancellationToken);
+
+		Assert.Equal(AppLanguage.Ja, savedLanguage);
+	}
+
+	[Fact]
 	public async Task PersistenceQueueObservesTheSharedShutdownToken()
 	{
 		using var shutdown = new CancellationTokenSource();

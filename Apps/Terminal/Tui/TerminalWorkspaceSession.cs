@@ -346,6 +346,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	public async Task CompleteAsync()
 	{
 		_stopping = true;
+		await _commandHistoryPersistence.CompleteAsync().ConfigureAwait(false);
 		_settingsPersistenceCts.CancelAfter(SettingsPersistenceShutdownBudget);
 		_sessionCts.Cancel();
 		CancelAndDispose(ref _activeOperationCts);
@@ -4818,8 +4819,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private string L(string key)
 	{
 		var value = _workspace.L(key);
-		return _options.Plain ? TerminalPlainText.Normalize(value) : value;
+		return NormalizeLocalizedText(value, _options.Plain, _environment.SupportsUnicode);
 	}
+
+	internal static string NormalizeLocalizedText(
+		string value,
+		bool plain,
+		bool supportsUnicode) =>
+		plain || !supportsUnicode ? TerminalPlainText.Normalize(value) : value;
 
 	public void Dispose()
 	{
