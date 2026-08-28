@@ -9,6 +9,8 @@ public partial class MainWindow
 {
     private async Task EnsureDesktopControlServerAsync(CancellationToken cancellationToken)
     {
+        if (Volatile.Read(ref _desktopControlServerShutdownRequested) != 0)
+            return;
         if (Volatile.Read(ref _desktopControlServer) is not null)
             return;
 
@@ -16,10 +18,12 @@ public partial class MainWindow
             new AvaloniaDesktopInteractionHandler(this),
             _currentPath,
             cancellationToken);
-        if (cancellationToken.IsCancellationRequested)
+        if (cancellationToken.IsCancellationRequested ||
+            Volatile.Read(ref _desktopControlServerShutdownRequested) != 0)
         {
             await server.DisposeAsync();
             cancellationToken.ThrowIfCancellationRequested();
+            return;
         }
 
         if (Interlocked.CompareExchange(ref _desktopControlServer, server, null) is not null)
@@ -29,7 +33,8 @@ public partial class MainWindow
             return;
         }
 
-        if (cancellationToken.IsCancellationRequested &&
+        if ((cancellationToken.IsCancellationRequested ||
+             Volatile.Read(ref _desktopControlServerShutdownRequested) != 0) &&
             ReferenceEquals(
                 Interlocked.CompareExchange(ref _desktopControlServer, null, server),
                 server))

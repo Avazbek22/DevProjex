@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using DevProjex.Avalonia.Coordinators;
 
 namespace DevProjex.Avalonia;
@@ -23,29 +24,63 @@ public partial class MainWindow
 			return;
 		}
 
-        if (_allowCloseAfterProjectCopyExportCleanup || _projectCopyExportCts is null)
-            return;
+		if (!_allowCloseAfterProjectCopyExportCleanup && _projectCopyExportCts is not null)
+		{
+			e.Cancel = true;
+			if (_projectCopyExportClosePending)
+				return;
 
-        e.Cancel = true;
-        if (_projectCopyExportClosePending)
-            return;
+			_projectCopyExportClosePending = true;
+			var completion = _projectCopyExportCompletion?.Task;
+			try
+			{
+				_projectCopyExportCts.Cancel();
+			}
+			catch (ObjectDisposedException)
+			{
+				// Export completion won the race with window shutdown.
+			}
 
-        _projectCopyExportClosePending = true;
-        var completion = _projectCopyExportCompletion?.Task;
-        try
-        {
-            _projectCopyExportCts.Cancel();
-        }
-        catch (ObjectDisposedException)
-        {
-            // Export completion won the race with window shutdown.
-        }
+			if (completion is not null)
+				await completion;
 
-        if (completion is not null)
-            await completion;
+			_allowCloseAfterProjectCopyExportCleanup = true;
+			Close();
+			return;
+		}
 
-        _allowCloseAfterProjectCopyExportCleanup = true;
-        Close();
+		if (_allowCloseAfterDesktopControlServerCleanup)
+			return;
+
+		Interlocked.Exchange(ref _desktopControlServerShutdownRequested, 1);
+		if (_desktopControlServerClosePending)
+		{
+			e.Cancel = true;
+			return;
+		}
+
+		var desktopControlServer = Interlocked.Exchange(ref _desktopControlServer, null);
+		if (desktopControlServer is null)
+		{
+			_allowCloseAfterDesktopControlServerCleanup = true;
+			return;
+		}
+
+		e.Cancel = true;
+		_desktopControlServerClosePending = true;
+		try
+		{
+			await desktopControlServer.DisposeAsync();
+		}
+		catch (Exception exception)
+		{
+			Trace.TraceWarning("Desktop control shutdown failed: {0}", exception.GetType().Name);
+		}
+		finally
+		{
+			_allowCloseAfterDesktopControlServerCleanup = true;
+			Dispatcher.Post(Close, DispatcherPriority.Send);
+		}
     }
 
     private void CancelAndDisposeWindowOperations()
@@ -90,18 +125,13 @@ public partial class MainWindow
         current.Dispose();
     }
 
-    private async void OnWindowClosed(object? sender, EventArgs e)
+    private void OnWindowClosed(object? sender, EventArgs e)
     {
         try
         {
             CancelAndDispose(ref _windowLifetimeCts);
-            var desktopControlServer = Interlocked.Exchange(ref _desktopControlServer, null);
-            // Avalonia cannot await a Closed event handler. Persist critical session state
-            // before the first asynchronous boundary so process shutdown cannot overtake it.
             CompleteSessionMetricsRecording();
             FlushPersistedStateOnWindowClose();
-            if (desktopControlServer is not null)
-                await desktopControlServer.DisposeAsync();
 
             // Unsubscribe from window events
             PropertyChanged -= OnWindowPropertyChanged;

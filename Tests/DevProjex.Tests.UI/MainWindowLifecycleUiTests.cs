@@ -24,6 +24,59 @@ public sealed class MainWindowLifecycleUiTests
 	];
 
 	[AvaloniaFact]
+	public async Task ClosingWindow_WithPublishedDesktopServer_CompletesTeardownBeforeClosedReturns()
+	{
+		var appDataPath = Path.Combine(Path.GetTempPath(), "DevProjexTests", Guid.NewGuid().ToString("N"));
+		var paths = new DesktopControlPaths(() => appDataPath);
+		Directory.CreateDirectory(appDataPath);
+		var services = AvaloniaCompositionRoot.CreateDefault(
+			DesktopStartupOptions.Default,
+			() => appDataPath) with
+		{
+			DesktopControlServerFactory = (handler, projectPath, cancellationToken) =>
+				DesktopControlServer.StartAsync(handler, projectPath, paths, cancellationToken)
+		};
+		var window = new MainWindow(DesktopStartupOptions.Default, services);
+		UiTestDriver.TrackTopLevelWindow(window);
+		bool? shutdownCompletedAtClosed = null;
+		window.Closed += (_, _) =>
+			shutdownCompletedAtClosed = window.ShutdownCompletion.IsCompletedSuccessfully;
+
+		try
+		{
+			window.Show();
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => Directory.Exists(paths.RegistryDirectory) &&
+				      Directory.EnumerateFiles(paths.RegistryDirectory, "*.json").Any(),
+				"desktop control server publication",
+				TimeSpan.FromSeconds(2));
+
+			window.Close();
+			await window.ShutdownCompletion.WaitAsync(TimeSpan.FromSeconds(2));
+
+			Assert.True(shutdownCompletedAtClosed);
+			Assert.Null(GetPrivateFieldValue(window, new OwnedField(null, "_desktopControlServer")));
+			Assert.False(Directory.Exists(paths.RegistryDirectory) &&
+			             Directory.EnumerateFiles(paths.RegistryDirectory, "*.json").Any());
+		}
+		finally
+		{
+			if (window.IsVisible)
+				await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+
+			try
+			{
+				Directory.Delete(appDataPath, recursive: true);
+			}
+			catch
+			{
+				// Best effort test cleanup only.
+			}
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task ClosingWindow_BeforeDesktopServerPublication_DisposesLateServer()
 	{
 		var appDataPath = Path.Combine(Path.GetTempPath(), "DevProjexTests", Guid.NewGuid().ToString("N"));

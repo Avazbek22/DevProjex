@@ -807,9 +807,12 @@ public partial class MainWindow
 	private readonly Func<IDesktopInteractionHandler, string?, CancellationToken, Task<DesktopControlServer>>
 		_desktopControlServerFactory;
     private readonly SemaphoreSlim _desktopInteractionGate = new(1, 1);
-    private readonly TaskCompletionSource<bool> _shutdownCompletion =
+	private readonly TaskCompletionSource<bool> _shutdownCompletion =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private DesktopControlServer? _desktopControlServer;
+	private int _desktopControlServerShutdownRequested;
+	private bool _desktopControlServerClosePending;
+	private bool _allowCloseAfterDesktopControlServerCleanup;
     private bool _desktopStartupReady;
     private string? _desktopStartupErrorCode;
 
