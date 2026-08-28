@@ -483,6 +483,52 @@ public sealed class McpServerIntegrationTests
 		AssertSpotlighted(continuation);
 	}
 
+	[Fact]
+	public async Task ReadPackContinuationPreservesThePageBoundaryThroughTheSdk()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(
+			Path.Combine(project, "Large.txt"),
+			string.Join('\n', Enumerable.Range(1, 1_500).Select(static line =>
+				$"pack-line-{line:D4}-{new string('x', 24)}")));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var stored = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "Large.txt" },
+				["view"] = "content",
+				["format"] = "text"
+			});
+		var packId = ExtractPackId(Text(stored));
+		var firstPage = await server.CallAsync(
+			"read_pack",
+			new Dictionary<string, object?> { ["pack_id"] = packId });
+		var continuation = await server.CallAsync(
+			"read_pack",
+			new Dictionary<string, object?> { ["pack_id"] = packId, ["start_line"] = 1_001 });
+		var firstText = Text(firstPage);
+		var continuationText = Text(continuation);
+		var firstMarkers = ExtractPackLineMarkers(firstText);
+		var continuationMarkers = ExtractPackLineMarkers(continuationText);
+
+		Assert.NotEmpty(firstMarkers);
+		Assert.NotEmpty(continuationMarkers);
+		Assert.Matches(
+			"Showing lines 1-1000 of [0-9]+; continue with start_line=1001\\.",
+			firstText);
+		Assert.Equal(firstMarkers.Length, firstMarkers.Distinct().Count());
+		Assert.Equal(continuationMarkers.Length, continuationMarkers.Distinct().Count());
+		Assert.DoesNotContain(continuationMarkers[0], firstMarkers);
+		Assert.Equal(firstMarkers[^1] + 1, continuationMarkers[0]);
+		Assert.Equal(1_500, continuationMarkers[^1]);
+		Assert.DoesNotContain("continue with start_line=", continuationText, StringComparison.Ordinal);
+		AssertSpotlighted(firstPage);
+		AssertSpotlighted(continuation);
+	}
+
 	[Theory]
 	[InlineData(false)]
 	[InlineData(true)]
@@ -1081,6 +1127,10 @@ public sealed class McpServerIntegrationTests
 		Assert.True(match.Success, $"Stored pack response did not contain a pack id: {text}");
 		return match.Groups[1].Value;
 	}
+
+	private static int[] ExtractPackLineMarkers(string text) =>
+		[.. Regex.Matches(text, "pack-line-(\\d{4})-")
+			.Select(static match => int.Parse(match.Groups[1].Value))];
 
 	private static void AssertTextOnlyResult(
 		McpTestServer server,
