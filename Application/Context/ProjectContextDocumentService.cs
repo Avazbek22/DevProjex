@@ -1029,7 +1029,8 @@ public sealed class ProjectContextDocumentService(
 		}
 		AppendTextFiles(output, files);
 		AppendTruncationNotice(output, truncated);
-		return output.ToString().TrimEnd('\r', '\n');
+		TrailingLineEndingTrimming.Trim(output);
+		return output.ToString();
 	}
 
 	private string BuildMarkdown(
@@ -1053,8 +1054,11 @@ public sealed class ProjectContextDocumentService(
 				GetDocumentRoot(plan),
 				GetProjectName(plan),
 				includeRootPath: true,
-				cancellationToken: cancellationToken).TrimEnd('\r', '\n');
-			AppendMarkdownFence(output, tree, "text");
+				cancellationToken: cancellationToken);
+			AppendMarkdownFence(
+				output,
+				tree.AsSpan(0, TrailingLineEndingTrimming.GetTrimmedLength(tree)),
+				"text");
 		}
 
 		foreach (var file in files)
@@ -1083,7 +1087,8 @@ public sealed class ProjectContextDocumentService(
 
 		if (truncated)
 			output.AppendLine().AppendLine("_Preview truncated._");
-		return output.ToString().TrimEnd('\r', '\n');
+		TrailingLineEndingTrimming.Trim(output);
+		return output.ToString();
 	}
 
 	private string BuildJson(
@@ -1298,15 +1303,18 @@ public sealed class ProjectContextDocumentService(
 		return (completedTree!, truncated);
 	}
 
-	private static void AppendMarkdownFence(StringBuilder output, string content, string language)
+	private static void AppendMarkdownFence(
+		StringBuilder output,
+		ReadOnlySpan<char> content,
+		string language)
 	{
 		var fence = new string('`', Math.Max(3, FindLongestBacktickRun(content) + 1));
 		output.Append(fence).AppendLine(language);
-		output.AppendLine(content);
+		output.Append(content).AppendLine();
 		output.AppendLine(fence);
 	}
 
-	private static int FindLongestBacktickRun(string value)
+	private static int FindLongestBacktickRun(ReadOnlySpan<char> value)
 	{
 		var longest = 0;
 		var current = 0;

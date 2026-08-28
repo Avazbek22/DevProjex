@@ -1260,7 +1260,8 @@ internal sealed class PreviewSurfaceController : IDisposable
                     treeText.Length +
                     combinedContent.Length +
                     16);
-            combinedBuilder.Append(treeText.TrimEnd('\r', '\n'));
+			combinedBuilder.Append(
+				treeText.AsSpan(0, TrailingLineEndingTrimming.GetTrimmedLength(treeText)));
             combinedBuilder.AppendLine("\u00A0");
             combinedBuilder.AppendLine("\u00A0");
             combinedBuilder.Append(combinedContent);

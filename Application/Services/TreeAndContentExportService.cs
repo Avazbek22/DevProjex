@@ -105,7 +105,7 @@ public sealed class TreeAndContentExportService(
 
 		// The selected format applies only to the tree block; file content stays plain text.
 		var sb = new StringBuilder();
-		sb.Append(tree.TrimEnd('\r', '\n'));
+		sb.Append(tree.AsSpan(0, TrailingLineEndingTrimming.GetTrimmedLength(tree)));
 		sb.AppendLine();
 		AppendClipboardBlankLine(sb);
 		AppendClipboardBlankLine(sb);

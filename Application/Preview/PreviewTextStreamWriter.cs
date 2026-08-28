@@ -8,9 +8,15 @@ internal static class PreviewTextStreamWriter
 	private const int MaximumCharactersPerChunk = BufferSizeBytes / 4;
 	private static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
 
-	public static async ValueTask WriteAsync(
+	public static ValueTask WriteAsync(
 		Stream destination,
 		string content,
+		CancellationToken cancellationToken) =>
+		WriteAsync(destination, content.AsMemory(), cancellationToken);
+
+	public static async ValueTask WriteAsync(
+		Stream destination,
+		ReadOnlyMemory<char> content,
 		CancellationToken cancellationToken)
 	{
 		if (content.Length == 0)
@@ -27,7 +33,7 @@ internal static class PreviewTextStreamWriter
 				var characterCount = Math.Min(MaximumCharactersPerChunk, content.Length - offset);
 				var flush = offset + characterCount == content.Length;
 				encoder.Convert(
-					content.AsSpan(offset, characterCount),
+					content.Span.Slice(offset, characterCount),
 					buffer,
 					flush,
 					out var charactersUsed,

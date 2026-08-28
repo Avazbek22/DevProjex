@@ -157,13 +157,15 @@ public sealed class PreviewDocumentBuilder(
 		var orderedFiles = ContentPathOrdering.BuildOrderedUnique(filePaths, cancellationToken);
 		outputPathRedaction ??= OutputRootPathPresentation.CaptureRedactionDecision(transformationContext);
 		await EnsurePersistentIdentityReadyAsync(transformationContext, cancellationToken).ConfigureAwait(false);
-        var normalizedTreeText = treeText.TrimEnd('\r', '\n');
+		var normalizedTreeTextLength = TrailingLineEndingTrimming.GetTrimmedLength(treeText);
 
         if (orderedFiles.Count == 0)
         {
 			using var emptyScope = transformationContext?.BeginOutput(orderedFiles, cancellationToken);
 			CompleteTransformation(emptyScope, transformationContext);
-            return CreateInMemory(normalizedTreeText);
+			return CreateInMemory(normalizedTreeTextLength == treeText.Length
+				? treeText
+				: treeText[..normalizedTreeTextLength]);
 		}
 
         using var builder = new PreviewTextStorageBuilder(InMemoryDocumentThresholdChars);
@@ -171,9 +173,9 @@ public sealed class PreviewDocumentBuilder(
 		var redactions = new List<PreviewRedactionSpan>();
 		using var transformationScope = transformationContext?.BeginOutput(orderedFiles, cancellationToken);
 		var redactionScope = transformationScope?.Redaction;
-        var wroteTree = AppendMultilineText(builder, normalizedTreeText.AsSpan());
+		var wroteTree = AppendMultilineText(builder, treeText.AsSpan(0, normalizedTreeTextLength));
 		if (treeRootPresentation is { } rootPresentation)
-			AppendGeneratedPathRedactionFromText(redactions, normalizedTreeText, rootPresentation);
+			AppendGeneratedPathRedactionFromText(redactions, treeText, rootPresentation);
         var wroteContent = await AppendContentEntriesAsync(
             builder,
             orderedFiles,
