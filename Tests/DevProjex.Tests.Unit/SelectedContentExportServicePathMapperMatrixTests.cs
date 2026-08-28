@@ -86,7 +86,7 @@ public sealed class SelectedContentExportServicePathMapperMatrixTests
 			filePaths,
 			path =>
 			{
-				mapperCalls++;
+				Interlocked.Increment(ref mapperCalls);
 				return $"mapped::{Path.GetFileName(path)}";
 			});
 
