@@ -9,6 +9,7 @@ public sealed class TerminalServiceFactory(
 	Func<string>? appDataPathProvider = null)
 {
 	private readonly Func<AppLanguage, TerminalServices>? _servicesProvider;
+	private readonly Action? _fullServiceCreationObserver;
 
 	internal TerminalServiceFactory(Func<AppLanguage, TerminalServices> servicesProvider)
 		: this()
@@ -17,10 +18,20 @@ public sealed class TerminalServiceFactory(
 			throw new ArgumentNullException(nameof(servicesProvider));
 	}
 
+	internal TerminalServiceFactory(
+		Func<string> appDataPathProvider,
+		Action fullServiceCreationObserver)
+		: this(appDataPathProvider)
+	{
+		_fullServiceCreationObserver = fullServiceCreationObserver ??
+			throw new ArgumentNullException(nameof(fullServiceCreationObserver));
+	}
+
 	public TerminalServices Create(AppLanguage language)
 	{
 		if (_servicesProvider is not null)
 			return _servicesProvider(language);
+		_fullServiceCreationObserver?.Invoke();
 
 		var resolvedAppDataPathProvider =
 			appDataPathProvider ?? UserDataPathResolver.GetConfigurationRoot;
@@ -69,9 +80,7 @@ public sealed class TerminalServiceFactory(
 		var selectionResolver = new ProjectSelectionResolver(
 			localProfiles,
 			portableProfiles.LoadAsync);
-		var repoCache = appDataPathProvider is null
-			? new RepoCacheService()
-			: new RepoCacheService(Path.Combine(resolvedAppDataPathProvider(), "RepoCache"));
+		var repoCache = CreateRepositoryCache(resolvedAppDataPathProvider);
 		var recentProjects = appDataPathProvider is null
 			? new RecentProjectsStore()
 			: new RecentProjectsStore(resolvedAppDataPathProvider);
@@ -164,6 +173,57 @@ public sealed class TerminalServiceFactory(
 
 	internal TerminalServiceScope CreateScope(AppLanguage language) =>
 		new(Create(language), ownsServices: _servicesProvider is null);
+
+	internal TerminalCacheServiceScope CreateCacheScope(AppLanguage language)
+	{
+		if (_servicesProvider is not null)
+		{
+			var fullScope = CreateScope(language);
+			return new TerminalCacheServiceScope(
+				new TerminalCacheServices(
+					fullScope.Services.Localization,
+					fullScope.Services.RepoCacheService),
+				fullScope);
+		}
+
+		var resolvedAppDataPathProvider =
+			appDataPathProvider ?? UserDataPathResolver.GetConfigurationRoot;
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), language);
+		var repositoryCache = CreateRepositoryCache(resolvedAppDataPathProvider);
+		return new TerminalCacheServiceScope(
+			new TerminalCacheServices(
+				localization,
+				repositoryCache),
+			repositoryCache);
+	}
+
+	private RepoCacheService CreateRepositoryCache(Func<string> resolvedAppDataPathProvider) =>
+		appDataPathProvider is null
+			? new RepoCacheService()
+			: new RepoCacheService(Path.Combine(resolvedAppDataPathProvider(), "RepoCache"));
+}
+
+internal sealed record TerminalCacheServices(
+	LocalizationService Localization,
+	IRepoCacheService RepoCacheService);
+
+internal sealed class TerminalCacheServiceScope(
+	TerminalCacheServices services,
+	IDisposable ownedLifetime) : IDisposable
+{
+	private TerminalCacheServices? _services = services ??
+		throw new ArgumentNullException(nameof(services));
+	private IDisposable? _ownedLifetime = ownedLifetime ??
+		throw new ArgumentNullException(nameof(ownedLifetime));
+
+	public TerminalCacheServices Services =>
+		_services ?? throw new ObjectDisposedException(nameof(TerminalCacheServiceScope));
+
+	public void Dispose()
+	{
+		_services = null;
+		Interlocked.Exchange(ref _ownedLifetime, null)?.Dispose();
+	}
 }
 
 internal sealed class TerminalServiceScope(

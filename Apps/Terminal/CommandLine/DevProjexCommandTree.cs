@@ -1228,7 +1228,7 @@ public sealed class DevProjexCommandTree
 			CommandExecution.RunAsync(
 				environment,
 				new TerminalOutputOptions(),
-				() => RunWithServicesAsync(
+				() => RunWithCacheServicesAsync(
 					parseResult,
 					services => Task.FromResult(new CacheCommandHandler(
 							services,
@@ -1253,7 +1253,7 @@ public sealed class DevProjexCommandTree
 			CommandExecution.RunAsync(
 				environment,
 				new TerminalOutputOptions(),
-				() => RunWithServicesAsync(
+				() => RunWithCacheServicesAsync(
 					parseResult,
 					services => Task.FromResult(new CacheCommandHandler(
 							services,
@@ -1281,7 +1281,7 @@ public sealed class DevProjexCommandTree
 			CommandExecution.RunAsync(
 				environment,
 				new TerminalOutputOptions(),
-				() => RunWithServicesAsync(
+				() => RunWithCacheServicesAsync(
 					parseResult,
 					services => Task.FromResult(new CacheCommandHandler(
 							services,
@@ -1303,7 +1303,7 @@ public sealed class DevProjexCommandTree
 			CommandExecution.RunAsync(
 				environment,
 				new TerminalOutputOptions(),
-				() => RunWithServicesAsync(
+				() => RunWithCacheServicesAsync(
 					parseResult,
 					services => Task.FromResult(new CacheCommandHandler(
 							services,
@@ -1650,6 +1650,14 @@ public sealed class DevProjexCommandTree
 		Func<TerminalServices, Task<int>> operation)
 	{
 		using var serviceScope = CreateServiceScope(parseResult);
+		return await operation(serviceScope.Services).ConfigureAwait(false);
+	}
+
+	private async Task<int> RunWithCacheServicesAsync(
+		ParseResult parseResult,
+		Func<TerminalCacheServices, Task<int>> operation)
+	{
+		using var serviceScope = _serviceFactory.CreateCacheScope(parseResult.GetValue(_language));
 		return await operation(serviceScope.Services).ConfigureAwait(false);
 	}
 

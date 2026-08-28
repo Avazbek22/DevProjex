@@ -7,7 +7,7 @@ using DevProjex.Terminal.Rendering;
 namespace DevProjex.Terminal.Execution;
 
 internal sealed class CacheCommandHandler(
-	TerminalServices services,
+	TerminalCacheServices services,
 	ITerminalEnvironment environment)
 {
 	private static readonly JsonSerializerOptions JsonOptions = new()
