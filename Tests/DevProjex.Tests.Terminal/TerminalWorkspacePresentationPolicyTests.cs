@@ -139,6 +139,25 @@ public sealed class TerminalWorkspacePresentationPolicyTests
 		Assert.True(view.MaxLineLength > document.MaxLineLength);
 	}
 
+	[Fact]
+	public void RepeatedPreviewLayout_ReusesDecodedDocumentLine()
+	{
+		using var document = new CountingPreviewTextDocument("界ABC");
+		using var view = new TerminalVirtualizedPreviewView(showScrollBars: false);
+		view.SetDocument(document, preserveViewport: false);
+
+		for (var iteration = 0; iteration < 100; iteration++)
+			Assert.Equal(5, view.GetDisplayColumn(0, 4));
+
+		Assert.Equal(1, document.LineReadCount);
+
+		using var replacement = new CountingPreviewTextDocument("日Z");
+		view.SetDocument(replacement, preserveViewport: true);
+		Assert.Equal(3, view.GetDisplayColumn(0, 2));
+		Assert.Equal(1, replacement.LineReadCount);
+		Assert.Equal(1, document.LineReadCount);
+	}
+
 	[Theory]
 	[InlineData("界AB", 1, 2, " A")]
 	[InlineData("界AB", 2, 2, "AB")]
@@ -172,5 +191,28 @@ public sealed class TerminalWorkspacePresentationPolicyTests
 		view.ScrollTo(1, 0);
 
 		Assert.Equal(1, notifications);
+	}
+
+	private sealed class CountingPreviewTextDocument(string line) : IPreviewTextDocument
+	{
+		public int LineReadCount { get; private set; }
+		public int LineCount => 1;
+		public int MaxLineLength => line.Length;
+		public long CharacterCount => line.Length;
+		public IReadOnlyList<PreviewDocumentSection> Sections => [];
+		public IReadOnlyList<PreviewRedactionSpan> Redactions => [];
+		public string GetFullText() => line;
+		public string GetLineText(int lineNumber)
+		{
+			LineReadCount++;
+			return line;
+		}
+
+		public string GetLineRangeText(int firstLine, int lastLine) => line;
+		public ValueTask WriteToAsync(Stream destination, CancellationToken cancellationToken = default) =>
+			ValueTask.CompletedTask;
+		public void Dispose()
+		{
+		}
 	}
 }

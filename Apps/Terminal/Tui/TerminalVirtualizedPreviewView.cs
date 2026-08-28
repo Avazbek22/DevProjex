@@ -8,7 +8,11 @@ namespace DevProjex.Terminal.Tui;
 
 internal sealed class TerminalVirtualizedPreviewView : View
 {
+	private const int MaximumCachedLineCount = 256;
+	private const int MaximumCachedCharacterCount = 1_000_000;
 	private readonly List<PreviewTextSearchMatch> _searchMatches = [];
+	private readonly Dictionary<int, string> _cachedLines = [];
+	private readonly Queue<int> _cachedLineOrder = new(MaximumCachedLineCount);
 	private IPreviewTextDocument? _document;
 	private string _searchQuery = string.Empty;
 	private int _currentSearchMatchIndex = -1;
@@ -16,6 +20,7 @@ internal sealed class TerminalVirtualizedPreviewView : View
 	private List<PreviewRedactionSpan> _redactionOccurrences = [];
 	private string? _activeRedactionOccurrenceId;
 	private int _maximumDisplayColumns;
+	private int _cachedCharacterCount;
 	private long _viewportChangeRevision;
 
 	public TerminalVirtualizedPreviewView(
@@ -89,6 +94,7 @@ internal sealed class TerminalVirtualizedPreviewView : View
 
 		var previousLocation = Viewport.Location;
 		_document = document;
+		ClearLineCache();
 		_maximumDisplayColumns = document.MaxLineLength;
 		RebuildRedactionIndex(document.Redactions);
 		if (_activeRedactionOccurrenceId is not null &&
@@ -132,7 +138,7 @@ internal sealed class TerminalVirtualizedPreviewView : View
 		if (_document is null || zeroBasedLine < 0 || zeroBasedLine >= _document.LineCount)
 			return Math.Max(0, utf16Column);
 
-		var line = _document.GetLineText(zeroBasedLine + 1);
+		var line = GetDisplayLine(zeroBasedLine + 1);
 		EnsureContentWidth(line);
 		var characterIndex = Math.Clamp(utf16Column, 0, line.Length);
 		return GetColumns(line.AsSpan(0, characterIndex));
@@ -252,7 +258,7 @@ internal sealed class TerminalVirtualizedPreviewView : View
 			if (lineIndex >= LineCount)
 				break;
 
-			var line = _document.GetLineText(lineIndex + 1);
+			var line = GetDisplayLine(lineIndex + 1);
 			maximumVisibleWidth = Math.Max(maximumVisibleWidth, GetColumns(line.AsSpan()));
 			DrawPreviewLine(line, lineIndex + 1, row);
 		}
@@ -348,7 +354,7 @@ internal sealed class TerminalVirtualizedPreviewView : View
 		if (_document is null || !_redactionsByLine.TryGetValue(lineNumber, out var redactions))
 			return null;
 
-		var line = _document.GetLineText(lineNumber);
+		var line = GetDisplayLine(lineNumber);
 		var documentColumn = HorizontalOffset + viewportColumn;
 		foreach (var span in redactions)
 		{
@@ -398,6 +404,39 @@ internal sealed class TerminalVirtualizedPreviewView : View
 
 	private void RaiseVisibleRangeChanged() =>
 		VisibleRangeChanged?.Invoke(this, EventArgs.Empty);
+
+	internal string GetDisplayLine(int lineNumber)
+	{
+		if (_document is null)
+			return string.Empty;
+		if (_cachedLines.TryGetValue(lineNumber, out var cached))
+			return cached;
+
+		var line = _document.GetLineText(lineNumber);
+		if (line.Length > MaximumCachedCharacterCount)
+			return line;
+
+		while (_cachedLineOrder.Count > 0 &&
+		       (_cachedLines.Count >= MaximumCachedLineCount ||
+		        _cachedCharacterCount + line.Length > MaximumCachedCharacterCount))
+		{
+			var expiredLineNumber = _cachedLineOrder.Dequeue();
+			if (_cachedLines.Remove(expiredLineNumber, out var expiredLine))
+				_cachedCharacterCount -= expiredLine.Length;
+		}
+
+		_cachedLines[lineNumber] = line;
+		_cachedLineOrder.Enqueue(lineNumber);
+		_cachedCharacterCount += line.Length;
+		return line;
+	}
+
+	private void ClearLineCache()
+	{
+		_cachedLines.Clear();
+		_cachedLineOrder.Clear();
+		_cachedCharacterCount = 0;
+	}
 
 	internal static string SliceColumns(string value, int startColumn, int maximumColumns)
 	{
