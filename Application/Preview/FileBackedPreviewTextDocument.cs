@@ -56,19 +56,26 @@ public sealed class FileBackedPreviewTextDocument(
 			ThrowIfDisposed();
 			var stream = _stream!;
 			stream.Seek(0, SeekOrigin.Begin);
-			var buffer = new byte[PreviewTextStreamWriter.BufferSizeBytes];
-			while (true)
+			var buffer = ArrayPool<byte>.Shared.Rent(PreviewTextStreamWriter.BufferSizeBytes);
+			try
 			{
-				cancellationToken.ThrowIfCancellationRequested();
-				var bytesRead = await stream
-					.ReadAsync(buffer, cancellationToken)
-					.ConfigureAwait(false);
-				if (bytesRead == 0)
-					break;
+				while (true)
+				{
+					cancellationToken.ThrowIfCancellationRequested();
+					var bytesRead = await stream
+						.ReadAsync(buffer, cancellationToken)
+						.ConfigureAwait(false);
+					if (bytesRead == 0)
+						break;
 
-				await destination
-					.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken)
-					.ConfigureAwait(false);
+					await destination
+						.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken)
+						.ConfigureAwait(false);
+				}
+			}
+			finally
+			{
+				ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
 			}
 		}
 		finally
