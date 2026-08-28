@@ -33,7 +33,11 @@ public sealed class SecretRedactionCountOnlyPerformanceTests
 				PersistentMarkHash: null,
 				SessionMarkId: null,
 				PersistentMarkId: null,
-				RedactionFindingCategory.Secrets))
+				RedactionFindingCategory.Secrets,
+				new SecretOccurrenceCoordinateIdentity(
+					IsSourceBacked: true,
+					index * 10,
+					8)))
 			.ToArray();
 		var segments = Enumerable.Range(0, findingsPerFile)
 			.Select(static index => new SecretFindingSegmentMetadata(index * 10, 8, [index]))
@@ -44,6 +48,8 @@ public sealed class SecretRedactionCountOnlyPerformanceTests
 			"content",
 			"rules",
 			string.Empty,
+			workspace.Path,
+			Path.GetFileName(paths[0]),
 			0,
 			IsBinary: false,
 			candidates,

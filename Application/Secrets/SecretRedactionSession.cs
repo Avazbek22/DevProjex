@@ -15,6 +15,8 @@ public sealed class SecretRedactionSession : IDisposable
 	// Selection combinations are transient UI state; 32 entries cover normal toggling while
 	// preventing arbitrary selection churn from retaining snapshots for the whole session.
 	internal const int MaximumSnapshots = 32;
+	private const int CandidateMetadataBaseRetainedBytes = 120;
+	private const int OccurrenceIdRetainedBytes = 24 + 64 * sizeof(char);
 
 	private readonly ISecretDetector _detector;
 	private readonly ISecretDetector? _privateDataDetector;
@@ -1745,6 +1747,10 @@ public sealed class SecretRedactionSession : IDisposable
 			generationToken.ThrowIfCancellationRequested();
 			var finding = resolved.Candidates[index];
 			var valueFingerprint = HashValue(content.Slice(finding.Start, finding.Length));
+			var occurrenceCoordinateIdentity = ResolveOccurrenceCoordinateIdentity(
+				finding.Start,
+				finding.Length,
+				transformMap);
 			candidates[index] = new SecretFindingCandidateMetadata(
 				finding.Start,
 				finding.Length,
@@ -1755,7 +1761,8 @@ public sealed class SecretRedactionSession : IDisposable
 				finding.PersistentMarkHash,
 				finding.SessionMarkId,
 				finding.PersistentMarkId,
-				finding.Category);
+				finding.Category,
+				occurrenceCoordinateIdentity);
 		}
 		var segments = resolved.Segments
 			.Select(static segment => new SecretFindingSegmentMetadata(
@@ -1771,6 +1778,8 @@ public sealed class SecretRedactionSession : IDisposable
 			contentFingerprint,
 			rulesIdentity,
 			transformIdentity,
+			projectRoot,
+			relativePath,
 			markedSecretsRevision,
 			IsBinary: false,
 			candidates,
@@ -1780,6 +1789,8 @@ public sealed class SecretRedactionSession : IDisposable
 				contentFingerprint,
 				rulesIdentity,
 				transformIdentity,
+				projectRoot,
+				relativePath,
 				candidates,
 				segments));
 		lock (_sync)
@@ -1801,11 +1812,13 @@ public sealed class SecretRedactionSession : IDisposable
 			TransformIdentity = transformIdentity,
 			ApproximateRetainedBytes = EstimateRetainedBytes(
 				source.NormalizedPath,
-				source.ContentFingerprint,
-				source.RulesIdentity,
-				transformIdentity,
-				source.Candidates,
-				source.Segments)
+					source.ContentFingerprint,
+					source.RulesIdentity,
+					transformIdentity,
+					source.OccurrenceProjectRoot,
+					source.OccurrenceRelativePath,
+					source.Candidates,
+					source.Segments)
 		};
 		_scanCache.Store(alias, detectionExecuted: false);
 	}
@@ -1834,13 +1847,15 @@ public sealed class SecretRedactionSession : IDisposable
 			ContentFingerprint: string.Empty,
 			rulesIdentity,
 			transformIdentity,
+			projectRoot,
+			relativePath,
 			markedSecretsRevision,
 			IsBinary: true,
 			Candidates: [],
 			Segments: [],
-			ApproximateRetainedBytes: 96 +
-			                          (normalizedPath.Length + rulesIdentity.Length + transformIdentity.Length) *
-			                          sizeof(char));
+			ApproximateRetainedBytes: 112 +
+			                          (normalizedPath.Length + rulesIdentity.Length + transformIdentity.Length +
+			                           projectRoot.Length + relativePath.Length) * sizeof(char));
 		lock (_sync)
 		{
 			ThrowIfGenerationIsNotCurrentLocked(generation, generationToken);
@@ -1887,13 +1902,15 @@ public sealed class SecretRedactionSession : IDisposable
 			ContentFingerprint: string.Empty,
 			rulesIdentity,
 			transformIdentity,
+			projectRoot,
+			relativePath,
 			markedSecretsRevision,
 			IsBinary: false,
 			Candidates: [],
 			Segments: [],
-			ApproximateRetainedBytes: 96 +
-			                          (normalizedPath.Length + rulesIdentity.Length + transformIdentity.Length) *
-			                          sizeof(char),
+			ApproximateRetainedBytes: 112 +
+			                          (normalizedPath.Length + rulesIdentity.Length + transformIdentity.Length +
+			                           projectRoot.Length + relativePath.Length) * sizeof(char),
 			UnscannableClassification: classification);
 		lock (_sync)
 		{
@@ -2021,6 +2038,28 @@ public sealed class SecretRedactionSession : IDisposable
 
 	internal static string HashValue(ReadOnlySpan<char> value) => HashText(value);
 
+	internal static SecretOccurrenceCoordinateIdentity ResolveOccurrenceCoordinateIdentity(
+		int start,
+		int length,
+		ContentTransformMap? transformMap)
+	{
+		if (transformMap is null or { IsIdentity: true })
+			return new SecretOccurrenceCoordinateIdentity(IsSourceBacked: true, start, length);
+		if (transformMap.TryMapSourceBackedRange(
+			    start,
+			    length,
+			    out var sourceStart,
+			    out var sourceLength))
+		{
+			return new SecretOccurrenceCoordinateIdentity(
+				IsSourceBacked: true,
+				sourceStart,
+				sourceLength);
+		}
+
+		return new SecretOccurrenceCoordinateIdentity(IsSourceBacked: false, start, length);
+	}
+
 	private static string HashText(string value) => HashText(value.AsSpan());
 
 	private static string HashText(ReadOnlySpan<char> value)
@@ -2035,15 +2074,21 @@ public sealed class SecretRedactionSession : IDisposable
 		string contentFingerprint,
 		string rulesIdentity,
 		string transformIdentity,
+		string occurrenceProjectRoot,
+		string occurrenceRelativePath,
 		IReadOnlyList<SecretFindingCandidateMetadata> candidates,
 		IReadOnlyList<SecretFindingSegmentMetadata> segments)
 	{
 		long bytes = 160 +
 		             (normalizedPath.Length + contentFingerprint.Length + rulesIdentity.Length +
-		              transformIdentity.Length) * sizeof(char);
+		              transformIdentity.Length + occurrenceProjectRoot.Length + occurrenceRelativePath.Length) *
+		             sizeof(char);
 		foreach (var candidate in candidates)
 		{
-			bytes += 104 + (candidate.RuleId.Length + candidate.ValueFingerprint.Length) * sizeof(char);
+			// The 64-character occurrence hash is materialized lazily. Reserving it up front keeps
+			// the cache byte limit valid after the first preview without a mutable accounting path.
+			bytes += CandidateMetadataBaseRetainedBytes + OccurrenceIdRetainedBytes +
+			         (candidate.RuleId.Length + candidate.ValueFingerprint.Length) * sizeof(char);
 			if (candidate.PersistentMarkId is { RelativePath: { } relativePath })
 				bytes += relativePath.Length * sizeof(char);
 		}
@@ -2441,7 +2486,7 @@ public sealed class SecretRedactionScope
 			// same unchanged file would otherwise forget that it was never read.
 			if (entry.IsUnscannable)
 				RecordUnscannable(filePath);
-			AccumulateFindings(filePath, entry.Candidates, entry.Segments, transformMap: null);
+			AccumulateFindings(filePath, entry, transformMap: null);
 		}
 		finally
 		{
@@ -2526,8 +2571,8 @@ public sealed class SecretRedactionScope
 			knownFingerprint,
 			cancellationToken);
 		if (entry is null)
-			return ProcessFindings(filePath, [], [], transformMap);
-		return ProcessFindings(filePath, entry.Candidates, entry.Segments, transformMap);
+			return ProcessFindings(filePath, entry: null, transformMap: transformMap);
+		return ProcessFindings(filePath, entry, transformMap);
 	}
 
 	internal void AnalyzeTransformed(
@@ -2547,10 +2592,10 @@ public sealed class SecretRedactionScope
 			cancellationToken);
 		if (entry is null)
 		{
-			AccumulateFindings(filePath, [], [], transformMap);
+			AccumulateFindings(filePath, entry: null, transformMap: transformMap);
 			return;
 		}
-		AccumulateFindings(filePath, entry.Candidates, entry.Segments, transformMap);
+		AccumulateFindings(filePath, entry, transformMap);
 	}
 
 	private SecretScanCacheEntry? DetectTransformed(
@@ -2644,13 +2689,14 @@ public sealed class SecretRedactionScope
 
 	private SecretFileRedactionPlan ProcessFindings(
 		string filePath,
-		IReadOnlyList<SecretFindingCandidateMetadata> candidates,
-		IReadOnlyList<SecretFindingSegmentMetadata> segments,
+		SecretScanCacheEntry? entry,
 		ContentTransformMap? transformMap)
 	{
+		var candidates = entry?.Candidates ?? [];
+		var segments = entry?.Segments ?? [];
 		_outputInspectionBudget.RegisterFindings(segments.Count);
 		var relativePath = SecretRedactionSession.NormalizeRelativePath(_projectRoot, filePath);
-		var occurrenceIds = BuildOccurrenceIds(relativePath, candidates, transformMap);
+		var occurrenceIds = BuildOccurrenceIds(relativePath, entry, candidates, transformMap);
 		var identityIndexes = new int[candidates.Count];
 		for (var index = 0; index < candidates.Count; index++)
 			identityIndexes[index] = GetOrCreateIdentityIndex(candidates[index]);
@@ -2721,10 +2767,11 @@ public sealed class SecretRedactionScope
 
 	private void AccumulateFindings(
 		string filePath,
-		IReadOnlyList<SecretFindingCandidateMetadata> candidates,
-		IReadOnlyList<SecretFindingSegmentMetadata> segments,
+		SecretScanCacheEntry? entry,
 		ContentTransformMap? transformMap)
 	{
+		var candidates = entry?.Candidates ?? [];
+		var segments = entry?.Segments ?? [];
 		_outputInspectionBudget.RegisterFindings(segments.Count);
 		for (var index = 0; index < candidates.Count; index++)
 			_ = GetOrCreateIdentityIndex(candidates[index]);
@@ -2733,7 +2780,7 @@ public sealed class SecretRedactionScope
 		if (_keptOccurrenceIds.Count > 0)
 		{
 			var relativePath = SecretRedactionSession.NormalizeRelativePath(_projectRoot, filePath);
-			occurrenceIds = BuildOccurrenceIds(relativePath, candidates, transformMap);
+			occurrenceIds = BuildOccurrenceIds(relativePath, entry, candidates, transformMap);
 		}
 
 		foreach (var segment in segments)
@@ -2793,18 +2840,44 @@ public sealed class SecretRedactionScope
 
 	private string[] BuildOccurrenceIds(
 		string relativePath,
+		SecretScanCacheEntry? entry,
 		IReadOnlyList<SecretFindingCandidateMetadata> candidates,
 		ContentTransformMap? transformMap)
 	{
 		var occurrenceIds = new string[candidates.Count];
+		var namespaceMatches = entry is not null &&
+		                       string.Equals(
+			                       _projectRoot,
+			                       entry.OccurrenceProjectRoot,
+			                       StringComparison.Ordinal) &&
+		                       string.Equals(
+			                       relativePath,
+			                       entry.OccurrenceRelativePath,
+			                       StringComparison.Ordinal);
 		for (var index = 0; index < candidates.Count; index++)
 		{
 			var candidate = candidates[index];
-			var coordinateIdentity = ResolveOccurrenceCoordinateIdentity(
-				candidate.RawStart,
-				candidate.RawLength,
-				transformMap);
-			occurrenceIds[index] = CreateOccurrenceId(relativePath, candidate, coordinateIdentity);
+			var coordinateIdentity = transformMap is null
+				? candidate.OccurrenceCoordinateIdentity
+				: SecretRedactionSession.ResolveOccurrenceCoordinateIdentity(
+					candidate.RawStart,
+					candidate.RawLength,
+					transformMap);
+			var cachedOccurrenceId = namespaceMatches &&
+			                         coordinateIdentity == candidate.OccurrenceCoordinateIdentity
+				? candidate.GetCachedOccurrenceId()
+				: null;
+			if (cachedOccurrenceId is not null)
+			{
+				occurrenceIds[index] = cachedOccurrenceId;
+				continue;
+			}
+
+			var occurrenceId = CreateOccurrenceId(relativePath, candidate, coordinateIdentity);
+			occurrenceIds[index] = namespaceMatches &&
+			                       coordinateIdentity == candidate.OccurrenceCoordinateIdentity
+				? candidate.CacheOccurrenceId(occurrenceId)
+				: occurrenceId;
 		}
 		return occurrenceIds;
 	}
@@ -2824,29 +2897,16 @@ public sealed class SecretRedactionScope
 	private string CreateOccurrenceId(
 		string relativePath,
 		SecretFindingCandidateMetadata finding,
-		string coordinateIdentity) =>
-		SecretRedactionSession.HashValue(
-			$"{_projectRoot}\n{relativePath}\n{finding.RuleId}\n{finding.ValueFingerprint}\n{coordinateIdentity}".AsSpan());
-
-	private string ResolveOccurrenceCoordinateIdentity(
-		int start,
-		int length,
-		ContentTransformMap? transformMap)
+		SecretOccurrenceCoordinateIdentity coordinateIdentity)
 	{
-		if (transformMap is null or { IsIdentity: true })
-			return $"source:{start}:{length}";
-		if (transformMap.TryMapSourceBackedRange(
-			    start,
-			    length,
-			    out var sourceStart,
-			    out var sourceLength))
-		{
-			return $"source:{sourceStart}:{sourceLength}";
-		}
-
-		// Replacement-only text has no source coordinate. Its namespace includes the exact
-		// transform identity so it can never inherit a keep decision from source content.
-		return $"transform:{_transformIdentity}:{start}:{length}";
+		ContentPipelineDiagnostics.RecordOccurrenceIdComputation();
+		var coordinateText = coordinateIdentity.IsSourceBacked
+			? $"source:{coordinateIdentity.Start}:{coordinateIdentity.Length}"
+			// Replacement-only text has no source coordinate. Its namespace includes the exact
+			// transform identity so it can never inherit a keep decision from source content.
+			: $"transform:{_transformIdentity}:{coordinateIdentity.Start}:{coordinateIdentity.Length}";
+		return SecretRedactionSession.HashValue(
+			$"{_projectRoot}\n{relativePath}\n{finding.RuleId}\n{finding.ValueFingerprint}\n{coordinateText}".AsSpan());
 	}
 
 	private void EnsureActive()

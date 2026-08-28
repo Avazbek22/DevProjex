@@ -45,10 +45,23 @@ internal sealed record SecretFindingCandidateMetadata(
 	string? PersistentMarkHash,
 	string? SessionMarkId,
 	PersistentSecretMarkId? PersistentMarkId,
-	RedactionFindingCategory Category)
+	RedactionFindingCategory Category,
+	SecretOccurrenceCoordinateIdentity OccurrenceCoordinateIdentity)
 {
+	private string? _occurrenceId;
+
 	public SecretFindingIdentity Identity { get; } = new(RuleId, ValueFingerprint);
+
+	public string? GetCachedOccurrenceId() => Volatile.Read(ref _occurrenceId);
+
+	public string CacheOccurrenceId(string occurrenceId) =>
+		Interlocked.CompareExchange(ref _occurrenceId, occurrenceId, null) ?? occurrenceId;
 }
+
+internal readonly record struct SecretOccurrenceCoordinateIdentity(
+	bool IsSourceBacked,
+	int Start,
+	int Length);
 
 internal sealed class SecretFindingIdentity(
 	string ruleId,
@@ -81,6 +94,8 @@ internal sealed record SecretScanCacheEntry(
 	string ContentFingerprint,
 	string RulesIdentity,
 	string TransformIdentity,
+	string OccurrenceProjectRoot,
+	string OccurrenceRelativePath,
 	int MarkedSecretsRevision,
 	bool IsBinary,
 	IReadOnlyList<SecretFindingCandidateMetadata> Candidates,

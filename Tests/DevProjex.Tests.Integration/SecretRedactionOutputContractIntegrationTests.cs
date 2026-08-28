@@ -359,6 +359,44 @@ public sealed class SecretRedactionOutputContractIntegrationTests
 	}
 
 	[Fact]
+	public async Task RepeatedPreview_ReusesCachedOccurrenceIdsWithoutRehashing()
+	{
+		using var workspace = CreateWorkspace(repeatedGithubOnly: true);
+		var analyzer = new FileContentAnalyzer();
+		using var session = new SecretRedactionSession(CreateDetector());
+		var context = new SecretRedactionContext(workspace.SourceRoot, session);
+		var plan = await BuildPlanAsync(workspace.SourceRoot, hideSecrets: true);
+		var previewBuilder = new PreviewDocumentBuilder(analyzer);
+		using var measurement = ContentPipelineDiagnostics.BeginMeasurement();
+
+		using var cold = await previewBuilder.BuildContentDocumentAsync(
+			plan.IncludedFiles,
+			TestContext.Current.CancellationToken,
+			TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(plan.SourceRoot),
+			includeOmissionMarkers: true,
+			transformationContext: context);
+		var coldOccurrenceIds = cold!.Redactions
+			.Select(static span => span.OccurrenceId)
+			.ToArray();
+		var coldComputations = measurement.Capture().OccurrenceIdComputations;
+
+		using var warm = await previewBuilder.BuildContentDocumentAsync(
+			plan.IncludedFiles,
+			TestContext.Current.CancellationToken,
+			TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(plan.SourceRoot),
+			includeOmissionMarkers: true,
+			transformationContext: context);
+		var warmOccurrenceIds = warm!.Redactions
+			.Select(static span => span.OccurrenceId)
+			.ToArray();
+
+		Assert.NotEmpty(coldOccurrenceIds);
+		Assert.True(coldComputations >= coldOccurrenceIds.Length);
+		Assert.Equal(coldOccurrenceIds, warmOccurrenceIds);
+		Assert.Equal(coldComputations, measurement.Capture().OccurrenceIdComputations);
+	}
+
+	[Fact]
 	public async Task PrivateDataKeepAsIs_IsSharedByPreviewClipboardContextFolderAndZip()
 	{
 		using var temporary = new TemporaryDirectory();

@@ -37,6 +37,9 @@ public static class ContentPipelineDiagnostics
 	public static void RecordPlanApply() =>
 		Increment(static state => ref state.PlanApplications);
 
+	public static void RecordOccurrenceIdComputation() =>
+		Increment(static state => ref state.OccurrenceIdComputations);
+
 	private delegate ref long CounterSelector(MeasurementState state);
 
 	private static void Increment(CounterSelector selector)
@@ -62,12 +65,14 @@ public static class ContentPipelineDiagnostics
 		public long FullFileReadBytes;
 		public long ContentFingerprintComputations;
 		public long PlanApplications;
+		public long OccurrenceIdComputations;
 
 		public ContentPipelineDiagnosticSnapshot Capture() => new(
 			Volatile.Read(ref FullFileReads),
 			Volatile.Read(ref FullFileReadBytes),
 			Volatile.Read(ref ContentFingerprintComputations),
-			Volatile.Read(ref PlanApplications));
+			Volatile.Read(ref PlanApplications),
+			Volatile.Read(ref OccurrenceIdComputations));
 	}
 }
 
@@ -102,4 +107,5 @@ public sealed record ContentPipelineDiagnosticSnapshot(
 	long FullFileReads,
 	long FullFileReadBytes,
 	long ContentFingerprintComputations,
-	long PlanApplications);
+	long PlanApplications,
+	long OccurrenceIdComputations);
