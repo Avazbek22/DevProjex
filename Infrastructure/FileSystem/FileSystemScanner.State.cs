@@ -125,6 +125,7 @@ public sealed partial class FileSystemScanner
         string path,
         string relativePath,
         string name,
+		IReadOnlyList<FileSystemFileEntry> files,
         int parentIndex,
         bool isAccessDenied,
         bool isHidden,
@@ -140,6 +141,7 @@ public sealed partial class FileSystemScanner
         public string Path { get; } = path;
         public string RelativePath { get; } = relativePath;
         public string Name { get; } = name;
+		public IReadOnlyList<FileSystemFileEntry> Files { get; } = files;
         public int ParentIndex { get; } = parentIndex;
         public bool IsAccessDenied { get; set; } = isAccessDenied;
         public bool IsHidden { get; } = isHidden;

@@ -1868,8 +1868,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 
 				try
 				{
-					BeforeEnumeration(FileSystemScanEnumerationPoint.DirectoryFiles, node.Path);
-					foreach (var file in FileSystemEntryEnumerator.EnumerateFiles(node.Path, node.RelativePath))
+					foreach (var file in node.Files)
 					{
 						token.ThrowIfCancellationRequested();
 						if (treeInventoryDirectoryIncluded is not null &&
@@ -2711,6 +2710,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			var gitIgnoreContext = parentGitIgnoreContext;
 			var gitIgnoreCandidateContext = parentGitIgnoreCandidateContext;
 			DirectoryEnumerationBatch directoryBatch = default;
+			IReadOnlyList<FileSystemFileEntry> directoryFiles = [];
 
 			if (canTraverseChildren)
 			{
@@ -2720,7 +2720,9 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					directoryBatch = FileSystemEntryEnumerator.ReadDirectoriesAndGitIgnore(
 						facts.FullPath,
 						facts.RelativePath,
-						cancellationToken);
+						cancellationToken,
+						captureFiles: true);
+					directoryFiles = directoryBatch.Files;
 					if (!string.IsNullOrWhiteSpace(directoryBatch.GitMetadataPath))
 						gitEvidence = new GitWorkspaceEvidence(HasRepositoryBoundary: true);
 					(gitIgnoreContext, gitIgnoreCandidateContext, var gitIgnoreLoadStatus) = EnterGitIgnoreScope(
@@ -2736,11 +2738,12 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						gitIgnoreLoadSession);
 					if (IsActiveGitIgnoreReadFailure(effectiveRules, gitIgnoreLoadStatus))
 					{
-						directories.Add(new EffectiveIgnoreScanNode(
-							facts.FullPath,
-							facts.RelativePath,
-							facts.Name,
-							parentIndex,
+							directories.Add(new EffectiveIgnoreScanNode(
+								facts.FullPath,
+								facts.RelativePath,
+								facts.Name,
+								[],
+								parentIndex,
 							isAccessDenied: true,
 							facts.IsHidden,
 							facts.IsDot,
@@ -2765,6 +2768,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						facts.FullPath,
 						facts.RelativePath,
 						facts.Name,
+						[],
 						parentIndex,
 						isAccessDenied: true,
 						facts.IsHidden,
@@ -2787,6 +2791,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						facts.FullPath,
 						facts.RelativePath,
 						facts.Name,
+						[],
 						parentIndex,
 						isAccessDenied: false,
 						facts.IsHidden,
@@ -2807,6 +2812,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				facts.FullPath,
 				facts.RelativePath,
 				facts.Name,
+				directoryFiles,
 				parentIndex,
 				isAccessDenied: false,
 				facts.IsHidden,
