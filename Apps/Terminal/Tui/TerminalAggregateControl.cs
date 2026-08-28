@@ -62,9 +62,8 @@ internal sealed class TerminalAggregateControl : Label
 	protected override bool OnMouseEvent(Mouse mouse)
 	{
 		var pressed = mouse.Flags.HasFlag(MouseFlags.LeftButtonPressed);
-		var released = mouse.Flags.HasFlag(MouseFlags.LeftButtonReleased);
 		var clicked = mouse.Flags.HasFlag(MouseFlags.LeftButtonClicked);
-		if (!pressed && !released && !clicked)
+		if (!pressed && !clicked)
 			return base.OnMouseEvent(mouse);
 
 		SetFocus();

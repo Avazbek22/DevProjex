@@ -12,6 +12,9 @@ internal sealed class TerminalProjectTreeView : ListView
 	private int _lastNamePressedRow = -1;
 	private int _lastNamePressedColumn = -1;
 	private long _lastNamePressedAt;
+	private int _lastManualDoubleClickRow = -1;
+	private int _lastManualDoubleClickColumn = -1;
+	private long _lastManualDoubleClickAt;
 
 	public TerminalProjectTreeView(
 		Func<int, TerminalTreeRow?> rowResolver,
@@ -73,7 +76,16 @@ internal sealed class TerminalProjectTreeView : ListView
 			return true;
 
 		var now = Environment.TickCount64;
-		if (!_pointerEvents.ShouldHandle(isPressed, position.X, position.Y))
+		if (isDoubleClicked &&
+		    _lastManualDoubleClickRow == rowIndex &&
+		    _lastManualDoubleClickColumn == position.X &&
+		    now - _lastManualDoubleClickAt <= DoubleClickWindowMilliseconds)
+		{
+			_lastManualDoubleClickRow = -1;
+			_lastManualDoubleClickColumn = -1;
+			return true;
+		}
+		if (!isDoubleClicked && !_pointerEvents.ShouldHandle(isPressed, position.X, position.Y))
 		{
 			return true;
 		}
@@ -94,6 +106,12 @@ internal sealed class TerminalProjectTreeView : ListView
 				// click so a double-click changes expansion without changing selection.
 				SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
 				ExpansionToggleRequested?.Invoke(this, EventArgs.Empty);
+				if (!isDoubleClicked)
+				{
+					_lastManualDoubleClickRow = rowIndex;
+					_lastManualDoubleClickColumn = position.X;
+					_lastManualDoubleClickAt = now;
+				}
 			}
 			_lastNamePressedRow = -1;
 			_lastNamePressedColumn = -1;
