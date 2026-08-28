@@ -71,25 +71,15 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		var selectsNoEffectivePaths =
 			selection.SelectedPaths is { Count: > 0 } &&
 			!explicitSelectionHadMatch;
-		var includedNodes = selectsNoEffectivePaths
-			? []
-			: ProjectTreeSelectionProjection.BuildIncludedNodesWithCancellation(
-				effectiveRoot,
-				selectedFullPaths,
-				cancellationToken);
-		var projectedTree = ResolveProjectedTree(
+		var projection = ResolveSelectionProjection(
 			effectiveRoot,
 			selectedFullPaths,
-			includedNodes,
 			selectsNoEffectivePaths,
+			loaded.Tree.OrderedFilePaths,
 			cancellationToken);
-		var includedFiles = selectsNoEffectivePaths
-			? []
-			: ProjectTreeSelectionProjection.BuildOrderedSelectedFilePathsWithCancellation(
-				effectiveRoot,
-				selectedFullPaths,
-				ensureExists: false,
-				cancellationToken);
+		var projectedTree = projection.ProjectedTree;
+		var includedFiles = projection.IncludedFiles;
+		var includedFolders = projection.IncludedFolders;
 		var effectiveFileSizes = BuildEffectiveFileSizes(
 			effectiveRoot,
 			loaded.Tree.OrderedFilePaths,
@@ -99,7 +89,6 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			includedFiles,
 			effectiveFileSizes,
 			cancellationToken);
-		var includedFolders = BuildOrderedIncludedFolders(includedNodes, cancellationToken);
 
 		var projectedLoaded = loaded with
 		{
@@ -181,7 +170,12 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			Analysis: analysis,
 			Diagnostics: diagnostics,
 			GitReadiness: gitReadiness,
-			Fingerprint: BuildFingerprint(sourceRoot, effectiveSelection, includedNodes, cancellationToken),
+			Fingerprint: BuildFingerprint(
+				sourceRoot,
+				effectiveSelection,
+				includedFiles,
+				includedFolders,
+				cancellationToken),
 			IncludedBytes: includedBytes,
 			EffectiveFileSizes: effectiveFileSizes,
 			SourceIdentity: sourceIdentity,
@@ -213,30 +207,19 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		var selectsNoEffectivePaths =
 			selectedPaths is { Count: > 0 } &&
 			!explicitSelectionHadMatch;
-		var includedNodes = selectsNoEffectivePaths
-			? []
-			: ProjectTreeSelectionProjection.BuildIncludedNodesWithCancellation(
-				baseline.EffectiveTree,
-				selectedFullPaths,
-				cancellationToken);
-		var projectedTree = ResolveProjectedTree(
+		var projection = ResolveSelectionProjection(
 			baseline.EffectiveTree,
 			selectedFullPaths,
-			includedNodes,
 			selectsNoEffectivePaths,
+			knownFullTreeFilePaths: null,
 			cancellationToken);
-		var includedFiles = selectsNoEffectivePaths
-			? []
-			: ProjectTreeSelectionProjection.BuildOrderedSelectedFilePathsWithCancellation(
-				baseline.EffectiveTree,
-				selectedFullPaths,
-				ensureExists: false,
-				cancellationToken);
+		var projectedTree = projection.ProjectedTree;
+		var includedFiles = projection.IncludedFiles;
+		var includedFolders = projection.IncludedFolders;
 		var includedBytes = CalculateIncludedBytes(
 			includedFiles,
 			baseline.EffectiveFileSizes,
 			cancellationToken);
-		var includedFolders = BuildOrderedIncludedFolders(includedNodes, cancellationToken);
 		var selection = baseline.Selection with
 		{
 			SelectedPaths = NormalizeRelativeSelectionForOutput(
@@ -283,7 +266,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			Fingerprint = BuildFingerprint(
 				baseline.SourceRoot,
 				selection,
-				includedNodes,
+				includedFiles,
+				includedFolders,
 				cancellationToken),
 			IncludedBytes = includedBytes
 		};
@@ -327,17 +311,14 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			StripComments = stripComments ?? baseline.Selection.StripComments,
 			StripBlankLines = stripBlankLines ?? baseline.Selection.StripBlankLines
 		};
-		var includedNodes = ProjectTreeSelectionProjection.BuildIncludedNodesWithCancellation(
-			baseline.EffectiveTree,
-			baseline.SelectedFullPaths,
-			cancellationToken);
 		return baseline with
 		{
 			Selection = selection,
 			Fingerprint = BuildFingerprint(
 				baseline.SourceRoot,
 				selection,
-				includedNodes,
+				baseline.IncludedFiles,
+				baseline.IncludedFolders,
 				cancellationToken),
 			Redaction = null,
 			Privacy = null
@@ -934,10 +915,11 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		return normalizedPaths;
 	}
 
-	private static string BuildFingerprint(
+	internal static string BuildFingerprint(
 		string sourceRoot,
 		ProjectSelectionSpec selection,
-		IReadOnlyList<TreeNodeDescriptor> includedNodes,
+		IReadOnlyList<string> orderedIncludedFiles,
+		IReadOnlyList<string> orderedIncludedFolders,
 		CancellationToken cancellationToken = default)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
@@ -963,21 +945,23 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			cancellationToken.ThrowIfCancellationRequested();
 			Append("e:" + extension);
 		}
-		var orderedNodes = new List<TreeNodeDescriptor>(includedNodes.Count);
-		foreach (var node in includedNodes)
+		var fileIndex = 0;
+		var folderIndex = 0;
+		var pathComparer = PathComparer.Default;
+		// The two canonical lists merge into the same global path order as the former node sort.
+		while (fileIndex < orderedIncludedFiles.Count || folderIndex < orderedIncludedFolders.Count)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			orderedNodes.Add(node);
-		}
-		CancellationAwareSort.Sort(
-			orderedNodes,
-			(left, right) => PathComparer.Default.Compare(left.FullPath, right.FullPath),
-			cancellationToken);
-		foreach (var node in orderedNodes)
-		{
-			cancellationToken.ThrowIfCancellationRequested();
-			var relativePath = Path.GetRelativePath(sourceRoot, node.FullPath);
-			Append((node.IsDirectory ? "d:" : "f:") + NormalizePathSeparators(relativePath));
+			var useFolder = fileIndex >= orderedIncludedFiles.Count ||
+			                folderIndex < orderedIncludedFolders.Count &&
+			                pathComparer.Compare(
+				                orderedIncludedFolders[folderIndex],
+				                orderedIncludedFiles[fileIndex]) <= 0;
+			var path = useFolder
+				? orderedIncludedFolders[folderIndex++]
+				: orderedIncludedFiles[fileIndex++];
+			var relativePath = Path.GetRelativePath(sourceRoot, path);
+			Append((useFolder ? "d:" : "f:") + NormalizePathSeparators(relativePath));
 		}
 
 		return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
@@ -1007,6 +991,116 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 
 			hash.AppendData(FingerprintValueSeparator);
 		}
+	}
+
+	internal static (
+		TreeNodeDescriptor ProjectedTree,
+		IReadOnlyList<string> IncludedFiles,
+		IReadOnlyList<string> IncludedFolders) ResolveSelectionProjection(
+		TreeNodeDescriptor root,
+		IReadOnlySet<string> selectedFullPaths,
+		bool selectsNoEffectivePaths,
+		IReadOnlyList<string>? knownFullTreeFilePaths,
+		CancellationToken cancellationToken)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
+		if (selectsNoEffectivePaths)
+			return (root with { Children = [] }, Array.Empty<string>(), Array.Empty<string>());
+
+		if (ProjectTreeSelectionProjection.CoversWholeTree(root, selectedFullPaths))
+		{
+			var (fullTreeFiles, fullTreeFolders) = BuildOrderedFullTreePaths(
+				root,
+				knownFullTreeFilePaths,
+				cancellationToken);
+			return (root, fullTreeFiles, fullTreeFolders);
+		}
+
+		var includedNodes = ProjectTreeSelectionProjection.BuildIncludedNodesWithCancellation(
+			root,
+			selectedFullPaths,
+			cancellationToken);
+		var projectedTree = ResolveProjectedTree(
+			root,
+			selectedFullPaths,
+			includedNodes,
+			selectsNoEffectivePaths: false,
+			cancellationToken);
+		var includedFiles = ProjectTreeSelectionProjection.BuildOrderedSelectedFilePathsWithCancellation(
+			root,
+			selectedFullPaths,
+			ensureExists: false,
+			cancellationToken);
+		var includedFolders = BuildOrderedIncludedFolders(includedNodes, cancellationToken);
+		return (projectedTree, includedFiles, includedFolders);
+	}
+
+	private static (List<string> IncludedFiles, string[] IncludedFolders) BuildOrderedFullTreePaths(
+		TreeNodeDescriptor root,
+		IReadOnlyList<string>? knownFilePaths,
+		CancellationToken cancellationToken)
+	{
+		var includedFiles = knownFilePaths is null
+			? []
+			: new List<string>(knownFilePaths.Count);
+		if (knownFilePaths is not null)
+		{
+			foreach (var path in knownFilePaths)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				includedFiles.Add(path);
+			}
+		}
+
+		var includedFolders = new List<string>();
+		var stack = new Stack<TreeNodeDescriptor>();
+		stack.Push(root);
+		while (stack.Count > 0)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var node = stack.Pop();
+			if (!node.IsDirectory)
+			{
+				if (knownFilePaths is null)
+					includedFiles.Add(node.FullPath);
+				continue;
+			}
+
+			includedFolders.Add(node.FullPath);
+			for (var index = node.Children.Count - 1; index >= 0; index--)
+			{
+				var child = node.Children[index];
+				if (knownFilePaths is null || child.IsDirectory)
+					stack.Push(child);
+			}
+		}
+
+		SortAndDeduplicatePaths(includedFiles, cancellationToken);
+		SortAndDeduplicatePaths(includedFolders, cancellationToken);
+		return (includedFiles, includedFolders.ToArray());
+	}
+
+	private static void SortAndDeduplicatePaths(
+		List<string> paths,
+		CancellationToken cancellationToken)
+	{
+		var pathComparer = PathComparer.Default;
+		CancellationAwareSort.Sort(paths, pathComparer, cancellationToken);
+		if (paths.Count < 2)
+			return;
+
+		var writeIndex = 1;
+		for (var readIndex = 1; readIndex < paths.Count; readIndex++)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (pathComparer.Equals(paths[writeIndex - 1], paths[readIndex]))
+				continue;
+
+			paths[writeIndex++] = paths[readIndex];
+		}
+
+		if (writeIndex < paths.Count)
+			paths.RemoveRange(writeIndex, paths.Count - writeIndex);
 	}
 
 	private static HashSet<string> BuildIncludedPathSet(
