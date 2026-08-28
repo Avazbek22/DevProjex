@@ -769,6 +769,41 @@ public sealed class CodeCompressionSessionTests
 	}
 
 	[Fact]
+	public void Snapshot_ConcurrentUnsupportedDiagnosticsRetainTheDeterministicPrefix()
+	{
+		const int fileCount = 4_096;
+		var paths = Enumerable.Range(0, fileCount)
+			.Select(index => $"src/sample-{index:D5}.txt")
+			.ToArray();
+		var shuffled = paths.ToArray();
+		var random = new Random(42);
+		for (var index = shuffled.Length - 1; index > 0; index--)
+		{
+			var swapIndex = random.Next(index + 1);
+			(shuffled[index], shuffled[swapIndex]) = (shuffled[swapIndex], shuffled[index]);
+		}
+		using var compressor = new RecordingCompressor();
+		using var session = new CodeCompressionSession(compressor);
+		using var scope = session.BeginOutput("project", paths);
+
+		Parallel.ForEach(
+			shuffled,
+			path => scope.RecordUnsupported(path, path, sourceLength: 1));
+		var snapshot = scope.Complete();
+
+		Assert.Equal(fileCount, snapshot.UnchangedFiles);
+		Assert.Equal(
+			paths.Take(CodeCompressionScope.MaximumUnchangedDiagnosticExamples),
+			snapshot.Unchanged.Select(static outcome => outcome.RelativePath));
+		Assert.Equal(
+			fileCount - CodeCompressionScope.MaximumUnchangedDiagnosticExamples,
+			snapshot.AdditionalUnchangedFiles);
+		Assert.Equal(
+			fileCount,
+			snapshot.UnchangedOutcomeCounts![CodeCompressionOutcome.UnchangedUnsupportedLanguage]);
+	}
+
+	[Fact]
 	public void PlanCache_EvictsByRetainedBytesAndDoesNotRetainOversizedEntry()
 	{
 		using var compressor = new RecordingCompressor();

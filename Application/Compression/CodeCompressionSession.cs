@@ -871,7 +871,7 @@ public sealed class CodeCompressionScope : IDisposable
 	private readonly CodeCompressionScopeMode mode;
 	private readonly CodeTransformKinds kinds;
 	private readonly string transformIdentity;
-	private readonly SortedDictionary<DiagnosticOrderKey, CodeCompressionFileOutcome>? _unchangedExamples;
+	private readonly SortedList<DiagnosticOrderKey, CodeCompressionFileOutcome>? _unchangedExamples;
 	private readonly int[]? _unchangedOutcomeCounts;
 	private readonly IReadOnlyDictionary<string, int>? _fileOrder;
 	private readonly object _diagnosticsSync = new();
@@ -905,7 +905,8 @@ public sealed class CodeCompressionScope : IDisposable
 		if (mode == CodeCompressionScopeMode.Measurement)
 			return;
 
-		_unchangedExamples = new SortedDictionary<DiagnosticOrderKey, CodeCompressionFileOutcome>(
+		_unchangedExamples = new SortedList<DiagnosticOrderKey, CodeCompressionFileOutcome>(
+			MaximumUnchangedDiagnosticExamples + 1,
 			DiagnosticOrderKeyComparer.Instance);
 		_unchangedOutcomeCounts = new int[Enum.GetValues<CodeCompressionOutcome>().Length];
 		_fileOrder = orderedFilePaths
@@ -1122,7 +1123,7 @@ public sealed class CodeCompressionScope : IDisposable
 			if (_unchangedExamples!.Count >= MaximumUnchangedDiagnosticExamples &&
 			    DiagnosticOrderKeyComparer.Instance.Compare(
 				    order,
-				    _unchangedExamples.Last().Key) >= 0)
+				    _unchangedExamples.Keys[^1]) >= 0)
 			{
 				return;
 			}
@@ -1133,7 +1134,7 @@ public sealed class CodeCompressionScope : IDisposable
 				plan.SourceLength,
 				plan.SourceLength);
 			if (_unchangedExamples.Count > MaximumUnchangedDiagnosticExamples)
-				_unchangedExamples.Remove(_unchangedExamples.Last().Key);
+				_unchangedExamples.RemoveAt(_unchangedExamples.Count - 1);
 		}
 	}
 
