@@ -753,7 +753,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			SmartIgnore: smartDirectImpact ? 1 : 0);
 	}
 
-	private static bool HasVisibleContentForControllerImpactCandidate(
+	internal static bool HasVisibleContentForControllerImpactCandidate(
 		string rootPath,
 		string rootRelativePath,
 		IgnoreRules rules,
@@ -772,27 +772,17 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 
 			try
 			{
-				foreach (var file in FileSystemEntryEnumerator.EnumerateFiles(currentPath, currentRelativePath))
+				foreach (var entry in FileSystemEntryEnumerator.EnumerateEntries(currentPath, currentRelativePath))
 				{
 					cancellationToken.ThrowIfCancellationRequested();
-					if (IsFileVisibleWithoutControllerRules(file, rules, extensionPolicy))
-						return true;
-				}
+					if (entry.IsDirectory)
+					{
+						pending.Push((entry.FullPath, entry.RelativePath));
+						continue;
+					}
 
-				foreach (var directory in FileSystemEntryEnumerator.EnumerateDirectories(currentPath, currentRelativePath))
-				{
-					cancellationToken.ThrowIfCancellationRequested();
-					var childFacts = new DirectoryScanFacts(
-						Name: directory.Name,
-						FullPath: directory.FullPath,
-						RelativePath: directory.RelativePath,
-						IsHidden: directory.IsHidden,
-						IsDot: IgnoreRuleSemantics.IsDotName(directory.Name),
-						IsSmartIgnored: false,
-						IsSmartIgnoredCandidate: false,
-						GitIgnoreEvaluation: IgnoreRules.GitIgnoreEvaluation.NotIgnored,
-						GitIgnoreCandidateEvaluation: IgnoreRules.GitIgnoreEvaluation.NotIgnored);
-					pending.Push((directory.FullPath, directory.RelativePath));
+					if (IsFileVisibleWithoutControllerRules(entry, rules, extensionPolicy))
+						return true;
 				}
 			}
 			catch (OperationCanceledException)
@@ -815,7 +805,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 	}
 
 	private static bool IsFileVisibleWithoutControllerRules(
-		FileSystemFileEntry file,
+		FileSystemTreeEntry file,
 		IgnoreRules rules,
 		IExtensionInclusionPolicy? extensionPolicy)
 	{
