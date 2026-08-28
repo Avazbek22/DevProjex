@@ -27,6 +27,35 @@ public sealed class ProfileCommandContractTests
 	}
 
 	[Fact]
+	public void TextProfileUsesLocalizedAllForEmptySelections()
+	{
+		using var workspace = new TemporaryDirectory();
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var handler = new ProfileCommandHandler(services, new TestTerminalEnvironment());
+		var selection = new ProjectSelectionSpec(
+			Roots: [],
+			Extensions: [],
+			SelectedPaths: []);
+
+		var text = handler.BuildText(selection);
+		var all = services.Localization["Terminal.Profile.All"];
+
+		Assert.Contains(
+			$"{services.Localization["Terminal.Analysis.Roots"]}: {all}",
+			text,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			$"{services.Localization["Terminal.Analysis.Extensions"]}: {all}",
+			text,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			$"{services.Localization["Terminal.Profile.SelectedPaths"]}: {all}",
+			text,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task StandardProfileIsDeterministicAndDoesNotReadLocalState()
 	{
 		using var workspace = CreateWorkspace();

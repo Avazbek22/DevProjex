@@ -450,7 +450,7 @@ Output options:
 --color <auto|always|never>
 --progress <auto|always|never>
 --verbosity <quiet|minimal|normal|detailed|diagnostic>
--q
+-q, --quiet
 --plain
 --force
 --branch NAME
@@ -593,7 +593,8 @@ the available entries are still emitted, a localized warning goes to stderr, and
 the command returns policy exit code `3`. JSON adds `"incomplete": true` only in
 that case; a complete result omits the field.
 
-Removal commands are non-interactive and require `--force`. Their result reports
+Actual removal is non-interactive and requires `--force` or `--yes`; dry-run
+requires neither confirmation flag. The result reports
 removed, retained, and failed entries. A live repository lease is retained; any
 retained or failed entry returns policy exit code `3`, so scripts cannot mistake a
 partial cleanup for complete success.

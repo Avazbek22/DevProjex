@@ -272,9 +272,9 @@ public sealed class ProfileCommandHandler(
 				? ProjectSelectionTokens.ToToken(gitMode)
 				: ProjectSelectionTokens.ToToken(GitFilteringMode.None));
 		output.Append(services.Localization["Terminal.Analysis.Roots"]).Append(": ")
-			.AppendLine(selection.Roots is null ? all : JoinEscaped(selection.Roots));
+			.AppendLine(selection.Roots is { Count: > 0 } roots ? JoinEscaped(roots) : all);
 		output.Append(services.Localization["Terminal.Analysis.Extensions"]).Append(": ")
-			.AppendLine(selection.Extensions is null ? all : JoinEscaped(selection.Extensions));
+			.AppendLine(selection.Extensions is { Count: > 0 } extensions ? JoinEscaped(extensions) : all);
 		output.Append(services.Localization["Terminal.Profile.SelectedPaths"]).Append(": ")
 			.AppendLine(selection.SelectedPaths is { Count: > 0 } selectedPaths
 				? JoinEscaped(selectedPaths)

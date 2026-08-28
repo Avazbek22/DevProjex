@@ -296,17 +296,17 @@ the existing confirmation and blocking progress surfaces.
 | `G` | open Desktop |
 | F1 or `?` | help |
 | Esc | close the active overlay |
-| `Q` | quit |
+| `q` | quit |
 
 The footer shows actions relevant to the active layout.
 
 When Context Preview has focus, Up/Down and `j`/`k` scroll by line,
 Page Up/Page Down scroll by page, and Home/End move to the start or end.
-Left/Right scroll horizontally when content overflows. In compact layouts,
-`{` and `}` move to the previous or next file section, Ctrl+G jumps to a line,
-and `W` toggles line wrapping. Changing the selected tree file scrolls Preview
-to that file after a short debounce.
-moving focus also makes the corresponding Tree, Preview, or Parameters pane visible. Pane
+Left/Right scroll horizontally when content overflows. `{` and `}` move to the
+previous or next file section, Ctrl+G jumps to a line, and `W` toggles line
+wrapping. Changing the selected tree file scrolls Preview to that file after a
+short debounce. In compact layouts, moving focus also makes the corresponding
+Tree, Preview, or Parameters pane visible. Pane
 focus and preview position survive Help, settings overlays, refreshes, exports,
 cancellation, and terminal resize.
 
