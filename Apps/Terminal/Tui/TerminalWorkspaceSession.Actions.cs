@@ -1326,11 +1326,16 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (_state is null)
 			return;
+		var state = _state;
+		var refreshRequest = TerminalWorkspaceController.CaptureStructuralRefresh(
+			state,
+			state.BuildSelection());
 		_activeOperationTask = TrackBackgroundTask(RunOperationAsync(
 			L("Terminal.Tui.Command.Refresh.Title"),
 			async token =>
 			{
-				await _controller.RefreshProjectAsync(_state, token).ConfigureAwait(false);
+				await BuildAndApplyStructuralRefreshAsync(state, refreshRequest, token)
+					.ConfigureAwait(false);
 				return L("Terminal.Tui.Command.Refresh.Result");
 			},
 			originatedFromCommandLine: originatedFromCommandLine,
@@ -1377,17 +1382,20 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (_state?.Plan.SourceIdentity?.SourceType != ProjectSourceType.GitClone)
 			return;
+		var state = _state;
+		var refreshRequest = TerminalWorkspaceController.CaptureStructuralRefresh(
+			state,
+			state.BuildSelection());
 		_activeOperationTask = TrackBackgroundTask(RunOperationAsync(
 			L("Terminal.Tui.Action.GetUpdates"),
 			async token =>
 			{
 				var updated = await _services.GitRepositoryService
-					.PullUpdatesAsync(_state.Plan.SourceRoot, cancellationToken: token)
+					.PullUpdatesAsync(state.Plan.SourceRoot, cancellationToken: token)
 					.ConfigureAwait(false);
 				if (!updated)
 					throw new TerminalWorkspaceOperationException("DPX-TUI-GIT-UPDATE-FAILED");
-				await _controller
-					.RebuildRepositoryAsync(_state, _state.BuildSelection(), token)
+				await BuildAndApplyStructuralRefreshAsync(state, refreshRequest, token)
 					.ConfigureAwait(false);
 				return L("Terminal.Tui.RepositoryUpdated");
 			},
@@ -1401,12 +1409,16 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (_state?.Plan.SourceIdentity?.SourceType != ProjectSourceType.GitClone)
 			return;
+		var state = _state;
+		var refreshRequest = TerminalWorkspaceController.CaptureStructuralRefresh(
+			state,
+			state.BuildSelection());
 		_activeOperationTask = TrackBackgroundTask(RunOperationAsync(
 			L("Terminal.Tui.Action.SwitchBranch"),
 			async token =>
 			{
 				var branches = await _services.GitRepositoryService
-					.GetBranchesAsync(_state.Plan.SourceRoot, token)
+					.GetBranchesAsync(state.Plan.SourceRoot, token)
 					.ConfigureAwait(false);
 				var branchNames = branches
 					.Select(static branch => branch.Name)
@@ -1427,19 +1439,37 @@ internal sealed partial class TerminalWorkspaceSession
 				}
 				var switched = await _services.GitRepositoryService
 					.SwitchBranchAsync(
-						_state.Plan.SourceRoot,
+						state.Plan.SourceRoot,
 						selected,
 						cancellationToken: token)
 					.ConfigureAwait(false);
 				if (!switched)
 					throw new TerminalWorkspaceOperationException("DPX-TUI-GIT-BRANCH-FAILED");
-				await _controller
-					.RebuildRepositoryAsync(_state, _state.BuildSelection(), token)
+				await BuildAndApplyStructuralRefreshAsync(state, refreshRequest, token)
 					.ConfigureAwait(false);
 				return $"{L("Terminal.Tui.RecentRepositories.Branch")}: {selected}";
 			},
 			modalProgress: true,
 			originatedFromCommandLine: originatedFromCommandLine));
+	}
+
+	private async Task BuildAndApplyStructuralRefreshAsync(
+		TerminalWorkspaceState state,
+		TerminalStructuralRefreshRequest request,
+		CancellationToken cancellationToken)
+	{
+		var result = await _controller
+			.BuildStructuralRefreshAsync(request, cancellationToken)
+			.ConfigureAwait(false);
+		cancellationToken.ThrowIfCancellationRequested();
+		await InvokeAsync(() =>
+		{
+			if (_stopping || !ReferenceEquals(_state, state))
+				return false;
+
+			TerminalWorkspaceController.ApplyStructuralRefresh(state, result);
+			return true;
+		}).ConfigureAwait(false);
 	}
 
 	private void FocusPane(TerminalWorkspacePane pane)

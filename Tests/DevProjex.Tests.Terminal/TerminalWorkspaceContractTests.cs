@@ -1020,6 +1020,87 @@ public sealed class TerminalWorkspaceContractTests
 	}
 
 	[Fact]
+	public async Task StructuralRefreshBuildsOnlyPlansRequiredBySelectionEvolution()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("src/app.cs", "class App {}");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		var unchanged = await controller.BuildStructuralRefreshAsync(
+			TerminalWorkspaceController.CaptureStructuralRefresh(state, state.BuildSelection()),
+			TestContext.Current.CancellationToken);
+		Assert.Equal(1, unchanged.PlanBuildCount);
+		TerminalWorkspaceController.ApplyStructuralRefresh(state, unchanged);
+
+		workspace.WriteFile("src/config.json", "{}");
+		var newExtension = await controller.BuildStructuralRefreshAsync(
+			TerminalWorkspaceController.CaptureStructuralRefresh(state, state.BuildSelection()),
+			TestContext.Current.CancellationToken);
+		Assert.Equal(2, newExtension.PlanBuildCount);
+		TerminalWorkspaceController.ApplyStructuralRefresh(state, newExtension);
+
+		var sourceIndex = state.VisibleRows
+			.Select((row, index) => (row, index))
+			.Single(item => Path.GetFileName(item.row.Node.FullPath) == "src")
+			.index;
+		state.Expand(sourceIndex);
+		var jsonIndex = state.VisibleRows
+			.Select((row, index) => (row, index))
+			.Single(item => Path.GetFileName(item.row.Node.FullPath) == "config.json")
+			.index;
+		state.ToggleSelection(jsonIndex);
+		var partialSelection = await controller.BuildStructuralRefreshAsync(
+			TerminalWorkspaceController.CaptureStructuralRefresh(state, state.BuildSelection()),
+			TestContext.Current.CancellationToken);
+		Assert.Equal(2, partialSelection.PlanBuildCount);
+	}
+
+	[Fact]
+	public async Task ApplyingStructuralRefreshPublishesVisibleRowsOnTheCallingThread()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("app.cs", "class App {}");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+		var originalPlan = state.Plan;
+		var originalRevision = state.Revision;
+		var collectionEventCount = 0;
+		var notificationThreadId = -1;
+		state.VisibleRows.CollectionChanged += (_, _) =>
+		{
+			collectionEventCount++;
+			notificationThreadId = Environment.CurrentManagedThreadId;
+		};
+		workspace.WriteFile("new.cs", "class New {}");
+		var result = await controller.BuildStructuralRefreshAsync(
+			TerminalWorkspaceController.CaptureStructuralRefresh(state, state.BuildSelection()),
+			TestContext.Current.CancellationToken);
+
+		Assert.Same(originalPlan, state.Plan);
+		Assert.Equal(originalRevision, state.Revision);
+		Assert.Equal(0, collectionEventCount);
+		var callerThreadId = Environment.CurrentManagedThreadId;
+
+		TerminalWorkspaceController.ApplyStructuralRefresh(state, result);
+
+		Assert.NotSame(originalPlan, state.Plan);
+		Assert.Contains(state.Plan.IncludedFiles, path => Path.GetFileName(path) == "new.cs");
+		Assert.Equal(1, collectionEventCount);
+		Assert.Equal(callerThreadId, notificationThreadId);
+	}
+
+	[Fact]
 	public void ExportSummaryDistinguishesAnEmptySelectionFromUnavailableValues()
 	{
 		using var workspace = new TemporaryDirectory();
