@@ -603,7 +603,7 @@
   "Terminal.Tui.Welcome.Help.Description": "Gezinme ve iş akışı yardımını açın, ardından tam olarak bu seçime dönün.",
   "Terminal.Tui.Welcome.Exit.Description": "DevProjex Terminalinden çıkın ve terminal durumunu geri yükleyin.",
   "Terminal.Tui.Welcome.QuickStart": "Doğrudan otomasyon: devprojex analyze .  |  devprojex export context . -o context.md",
-  "Terminal.Tui.Footer.Welcome": "Yukarı/Aşağı veya j/k Gezin Enter Seç Ctrl+P Eylemler? Yardım q Çıkış",
+  "Terminal.Tui.Footer.Welcome": "↑/↓ veya j/k Gezin   Enter Seç   Ctrl+P Eylemler   ? Yardım   q Çıkış",
   "Terminal.Tui.Footer.Loading": "Esc İşlemi iptal et  ? Yardım",
   "Terminal.Tui.Footer.Tree": "↑/↓ Taşı  Enter Aç  Space Değiştir  Tab/F6 Önizleme  Ctrl+P Eylemler",
   "Terminal.Tui.Footer.Tree.Wide": "↑/↓ Gez   Enter Genişlet   Space Değiştir   / Ara   Tab/F6 Önizleme   Ctrl+P Eylemler   ? Yardım",

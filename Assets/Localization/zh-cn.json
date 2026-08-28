@@ -603,7 +603,7 @@
   "Terminal.Tui.Welcome.Help.Description": "打开导航和工作流程帮助，然后返回到此精确选择。",
   "Terminal.Tui.Welcome.Exit.Description": "离开DevProjex终端并恢复终端状态。",
   "Terminal.Tui.Welcome.QuickStart": "直接自动化：devprojex analyze .  |  devprojex export context . -o context.md",
-  "Terminal.Tui.Footer.Welcome": "向上/向下或j/k导航Enter选择Ctrl+P操作?帮助q退出",
+  "Terminal.Tui.Footer.Welcome": "↑/↓ 或 j/k 导航   Enter 选择   Ctrl+P 操作   ? 帮助   q 退出",
   "Terminal.Tui.Footer.Loading": "Esc 取消操作  ? 帮助",
   "Terminal.Tui.Footer.Tree": "↑/↓ 移动  Enter 打开  Space 切换  Tab/F6 预览  Ctrl+P 操作",
   "Terminal.Tui.Footer.Tree.Wide": "↑/↓ 导航   Enter 展开   Space 切换   / 搜索   Tab/F6 预览   Ctrl+P 操作   ? 帮助",

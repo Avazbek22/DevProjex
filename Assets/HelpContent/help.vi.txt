@@ -63,7 +63,7 @@ Kéo và thả hoạt động trong vùng khởi động (Vùng thả) khi khôn
 Quy tắc:
 * bạn có thể thả một thư mục;
 * bạn có thể thả một tập tin - trong trường hợp này thư mục chứa nó được mở;
-* nếu nhiều mục bị loại bỏ, đường dẫn cục bộ phù hợp đầu tiên sẽ được sử dụng;
+* nếu thả nhiều mục, đường dẫn cục bộ phù hợp đầu tiên sẽ được sử dụng;
 * nếu đường dẫn không có sẵn hoặc không tồn tại thì các biện pháp kiểm tra quyền truy cập tương tự như trong “Mở thư mục…” sẽ được áp dụng;
 * các mục không được hỗ trợ hoặc không phải cục bộ sẽ bị bỏ qua.
 
@@ -400,7 +400,7 @@ Một thư mục hoặc bản sao ZIP cũng thay đổi văn bản phù hợp v�
 Quy tắc báo cáo số lượng chỉ phù hợp. Zero không có nghĩa là dự án an toàn. CLI sử dụng `--hide-secrets`; chi tiết và giới hạn kỹ thuật có trong `Docs/HideSecrets.md`.
 
 ### 12.4 Ẩn dữ liệu cá nhân
-"Ẩn dữ liệu cá nhân" bị tắt theo mặc định. Tùy chọn phát hiện địa chỉ email, địa chỉ IP toàn cầu, tên người dùng cục bộ trong đường dẫn, địa chỉ MAC và số điện thoại quốc tế trong các tệp văn bản đã chọn. Các kết quả dùng cùng quyết định trong Bản xem trước và cùng quy trình đầu ra như "Ẩn thông tin bí mật"; dấu thủ công được tạo bằng "Ẩn… dưới dạng dữ liệu cá nhân" cũng thuộc nhóm này và chịu sự điều khiển của công tắc (phần 12.3). Tên người dùng cục bộ trong tiêu đề đường dẫn đã tạo và gốc cây được che như một kết quả dùng chung: bộ đếm tính là một giá trị,? chỉ báo cho biết đang ẩn hay hiển thị, và một lần bấm sẽ chuyển đổi mọi đường dẫn đã che.
+"Ẩn dữ liệu cá nhân" bị tắt theo mặc định. Tùy chọn phát hiện địa chỉ email, địa chỉ IP toàn cầu, tên người dùng cục bộ trong đường dẫn, địa chỉ MAC và số điện thoại quốc tế trong các tệp văn bản đã chọn. Các kết quả dùng cùng quyết định trong Bản xem trước và cùng quy trình đầu ra như "Ẩn thông tin bí mật"; dấu thủ công được tạo bằng "Ẩn… dưới dạng dữ liệu cá nhân" cũng thuộc nhóm này và chịu sự điều khiển của công tắc (phần 12.3). Tên người dùng cục bộ trong tiêu đề đường dẫn đã tạo và gốc cây được che như một kết quả dùng chung: bộ đếm tính là một giá trị; chỉ báo ? cho biết đang ẩn hay hiển thị, và một lần bấm sẽ chuyển đổi mọi đường dẫn đã che.
 
 Các dải địa chỉ và máy chủ dùng trong tài liệu, tên người dùng CI phổ biến, trình phân giải DNS công cộng quen thuộc và dải số điện thoại hư cấu đã được ghi nhận vẫn hiển thị. Không tìm thấy kết quả không đồng nghĩa với đảm bảo quyền riêng tư. CLI sử dụng `--hide-private-data`; các quy tắc đầy đủ và giới hạn của giai đoạn một có trong `Docs/HidePrivateData.md`.
 

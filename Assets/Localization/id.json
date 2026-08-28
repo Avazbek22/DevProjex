@@ -603,7 +603,7 @@
   "Terminal.Tui.Welcome.Help.Description": "Buka bantuan navigasi dan alur kerja, lalu kembali ke pilihan persis ini.",
   "Terminal.Tui.Welcome.Exit.Description": "Keluar dari Terminal DevProjex dan pulihkan status terminal.",
   "Terminal.Tui.Welcome.QuickStart": "Otomatisasi langsung: devprojex analyze .  |  devprojex export context . -o context.md",
-  "Terminal.Tui.Footer.Welcome": "Atas/Bawah atau j/k Navigasi Enter Pilih Ctrl+P Actions? Bantuan q Keluar",
+  "Terminal.Tui.Footer.Welcome": "↑/↓ atau j/k Navigasi   Enter Pilih   Ctrl+P Tindakan   ? Bantuan   q Keluar",
   "Terminal.Tui.Footer.Loading": "Esc Batalkan operasi  ? Bantuan",
   "Terminal.Tui.Footer.Tree": "↑/↓ Pindah  Enter Buka  Space Alihkan  Tab/F6 Pratinjau  Ctrl+P Tindakan",
   "Terminal.Tui.Footer.Tree.Wide": "↑/↓ Navigasi   Enter Bentangkan   Space Alihkan   / Cari   Tab/F6 Pratinjau   Ctrl+P Tindakan   ? Bantuan",

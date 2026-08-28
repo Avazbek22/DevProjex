@@ -603,7 +603,7 @@
   "Terminal.Tui.Welcome.Help.Description": "Відкрийте довідку про навігацію та робочий процес, а потім поверніться до цього вибору.",
   "Terminal.Tui.Welcome.Exit.Description": "Залиште термінал DevProjex і відновіть стан терміналу.",
   "Terminal.Tui.Welcome.QuickStart": "Пряма автоматизація: devprojex analyze .  |  devprojex export context . -o context.md",
-  "Terminal.Tui.Footer.Welcome": "Вгору/Вниз або j/k Навігація Enter Вибір Ctrl+P Дії? Довідка q Вийти",
+  "Terminal.Tui.Footer.Welcome": "↑/↓ або j/k Навігація   Enter Вибір   Ctrl+P Дії   ? Довідка   q Вийти",
   "Terminal.Tui.Footer.Loading": "Esc Скасувати операцію  ? Довідка",
   "Terminal.Tui.Footer.Tree": "↑/↓ Рух  Enter Відкрити  Space Перемкнути  Tab/F6 Перегляд  Ctrl+P Дії",
   "Terminal.Tui.Footer.Tree.Wide": "↑/↓ Навігація   Enter Розгорнути   Space Перемкнути   / Пошук   Tab/F6 Перегляд   Ctrl+P Дії   ? Довідка",

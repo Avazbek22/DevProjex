@@ -198,6 +198,7 @@ public sealed partial class TerminalLocalizationContractTests
 				$"expected [{string.Join(", ", expectedHeadings)}], " +
 				$"actual [{string.Join(", ", actualHeadings)}].");
 			Assert.DoesNotMatch(MalformedHelpBulletRegex(), help);
+			Assert.DoesNotContain(",?", help, StringComparison.Ordinal);
 
 			var plainText = HelpContentProvider.ToPlainText(help);
 			Assert.DoesNotMatch(LiteralHelpAsteriskRegex(), plainText);
@@ -250,6 +251,13 @@ public sealed partial class TerminalLocalizationContractTests
 
 		foreach (var (locale, catalog) in catalogs)
 		{
+			var welcomeSegments = WelcomeFooterSegmentSeparatorRegex()
+				.Split(catalog["Terminal.Tui.Footer.Welcome"])
+				.Where(static segment => !string.IsNullOrWhiteSpace(segment))
+				.ToArray();
+			Assert.True(
+				welcomeSegments.Length == 5,
+				$"The compact Welcome footer must contain five separated shortcut/action pairs in {locale}.");
 			Assert.True(
 				catalog["Terminal.Tui.Footer.Welcome"].GetColumns() <= 76,
 				$"The compact Welcome footer does not fit 80 columns in {locale}.");
@@ -522,6 +530,9 @@ public sealed partial class TerminalLocalizationContractTests
 
 	[GeneratedRegex(@"(?m)^\s*\*", RegexOptions.CultureInvariant)]
 	private static partial Regex LiteralHelpAsteriskRegex();
+
+	[GeneratedRegex(@"\s{2,}", RegexOptions.CultureInvariant)]
+	private static partial Regex WelcomeFooterSegmentSeparatorRegex();
 
 	[GeneratedRegex(@" (?=[,:;!?\)]|\.\.\.|\.(?:\s|$))", RegexOptions.CultureInvariant)]
 	private static partial Regex ForbiddenSpaceBeforePunctuationRegex();
