@@ -451,43 +451,58 @@ public sealed class IgnoreRulesService(
 				// source as unavailable and exclude the affected scope fail-closed.
 				return GitIgnoreMatcher.Empty;
 			}
-			// The root-facts cache is intentionally short-lived, but timestamp and length
-			// alone cannot identify a .gitignore rewrite. Always obtain the current content
-			// fingerprint before reusing a compiled matcher.
-			var signature = ProjectRootFactsProvider.TryGetFileSignatureWithCancellation(
-				gitIgnorePath,
-				cancellationToken);
-			// A missing signature means that this is not a readable regular working-tree
-			// file. The filesystem scanner owns the visible partial-access diagnostic;
-			// this prebuild path must neither follow a link nor invent an empty rule set.
-			if (!signature.HasValue)
-				return GitIgnoreMatcher.Empty;
-
+			GitIgnoreCacheEntry? cachedEntry = null;
 			lock (CacheSync)
 			{
-				if (GitIgnoreCache.TryGetValue(cacheKey, out var cachedNode) &&
-				    cachedNode.Value.Signature.Equals(signature.GetValueOrDefault()) &&
-				    cachedNode.Value.ComparisonSemantics.Equals(comparisonSemantics))
+				if (GitIgnoreCache.TryGetValue(cacheKey, out var cachedNode))
 				{
-					GitIgnoreCacheLru.Remove(cachedNode);
-					GitIgnoreCacheLru.AddFirst(cachedNode);
-					return cachedNode.Value.Matcher;
+					if (cachedNode.Value.ComparisonSemantics.Equals(comparisonSemantics))
+						cachedEntry = cachedNode.Value;
+					else
+						RemoveGitIgnoreCacheEntry(cacheKey);
 				}
-
-				RemoveGitIgnoreCacheEntry(cacheKey);
 			}
 
-			var source = GitIgnoreFileReader.ReadWithCancellation(
+			// Reuse still requires a content hash: timestamp and length do not identify an
+			// adversarial same-metadata rewrite. Cold and metadata-changed paths skip this
+			// hash-only probe and obtain content plus fingerprint in one coherent read.
+			if (cachedEntry is not null &&
+			    ProjectRootFactsProvider.HasMatchingFileMetadata(gitIgnorePath, cachedEntry.Signature))
+			{
+				var currentSignature = ProjectRootFactsProvider.TryGetFileSignatureWithCancellation(
+					gitIgnorePath,
+					cancellationToken);
+				// A missing signature means that this is not a readable regular working-tree
+				// file. The filesystem scanner owns the visible partial-access diagnostic.
+				if (!currentSignature.HasValue)
+					return GitIgnoreMatcher.Empty;
+
+				lock (CacheSync)
+				{
+					if (GitIgnoreCache.TryGetValue(cacheKey, out var currentNode) &&
+					    currentNode.Value.Signature.Equals(currentSignature.GetValueOrDefault()) &&
+					    currentNode.Value.ComparisonSemantics.Equals(comparisonSemantics))
+					{
+						GitIgnoreCacheLru.Remove(currentNode);
+						GitIgnoreCacheLru.AddFirst(currentNode);
+						return currentNode.Value.Matcher;
+					}
+
+					if (GitIgnoreCache.TryGetValue(cacheKey, out currentNode) &&
+					    ReferenceEquals(currentNode.Value, cachedEntry))
+					{
+						RemoveGitIgnoreCacheEntry(cacheKey);
+					}
+				}
+			}
+
+			var snapshot = ProjectRootFactsProvider.TryReadFileContentSnapshotWithCancellation(
 				gitIgnorePath,
 				cancellationToken);
-			if (source.LengthBytes != signature.GetValueOrDefault().LengthBytes ||
-			    !string.Equals(
-				    source.ContentFingerprint,
-				    signature.GetValueOrDefault().ContentFingerprint,
-				    StringComparison.Ordinal))
-			{
+			if (!snapshot.HasValue)
 				return GitIgnoreMatcher.Empty;
-			}
+			var signature = snapshot.GetValueOrDefault().Signature;
+			var source = snapshot.GetValueOrDefault().Source;
 
 			var matcher = GitIgnoreMatcher.Build(
 				rootPath,
@@ -499,14 +514,14 @@ public sealed class IgnoreRulesService(
 			lock (CacheSync)
 			{
 				RemoveGitIgnoreCacheEntry(cacheKey);
-				var sourceSizeBytes = signature.GetValueOrDefault().LengthBytes;
+				var sourceSizeBytes = signature.LengthBytes;
 				// A pathological but valid source remains usable for this scan. Retaining
 				// it would let the static cache grow by hundreds of megabytes per scope.
 				if (sourceSizeBytes <= CacheByteLimit)
 				{
 					var entry = new GitIgnoreCacheEntry(
 						cacheKey,
-						signature.GetValueOrDefault(),
+						signature,
 						comparisonSemantics,
 						matcher);
 					GitIgnoreCache[cacheKey] = GitIgnoreCacheLru.AddFirst(entry);
