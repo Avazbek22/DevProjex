@@ -58,7 +58,8 @@ public sealed class ExportContextCommandHandler(
 			DryRunRenderer.WritePlan(
 				environment,
 				services.Localization,
-				requestedOutputPath ?? "-");
+				requestedOutputPath ?? "-",
+				plan);
 			if (redactionSnapshot is not null)
 			{
 				UnscannableFileOutput.Write(

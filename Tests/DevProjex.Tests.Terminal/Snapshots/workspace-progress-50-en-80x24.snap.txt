@@ -21,4 +21,4 @@
 └──────────────────────────────────────────────────────────────────────────────┘
 
  Files 101 · Folders 2 · 100 KB · ~<TOKENS> tokens · Warnings 0 · Errors 0
- Up/Down Move  Enter Open  Space Toggle  Tab/F6 Preview  Ctrl+P Actions
+ Space Toggle  Shift+←/→ All  Ctrl+A/U Select  : Commands

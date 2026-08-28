@@ -6,6 +6,7 @@ public interface ITerminalEnvironment
 {
 	TextReader Input { get; }
 	Stream? RawInput => null;
+	Stream? RawOutput => null;
 	TextWriter Output { get; }
 	TextWriter Error { get; }
 	bool IsInputInteractive { get; }
@@ -32,6 +33,7 @@ public sealed class InvocationEnvironment : ITerminalEnvironment
 	private readonly TextWriter _output;
 	private readonly TextWriter _error;
 	private Stream? _rawInput;
+	private Stream? _rawOutput;
 
 	public InvocationEnvironment(bool hasAttachedConsole)
 	{
@@ -58,6 +60,7 @@ public sealed class InvocationEnvironment : ITerminalEnvironment
 
 	public TextReader Input => Console.In;
 	public Stream? RawInput => _rawInput ??= Console.OpenStandardInput();
+	public Stream? RawOutput => _rawOutput ??= Console.OpenStandardOutput();
 	public TextWriter Output => _output;
 	public TextWriter Error => _error;
 	public bool IsInputInteractive { get; }
@@ -215,6 +218,11 @@ public sealed class InvocationEnvironment : ITerminalEnvironment
 			["ZELLIJ"] = Environment.GetEnvironmentVariable("ZELLIJ"),
 			["WT_SESSION"] = Environment.GetEnvironmentVariable("WT_SESSION"),
 			["CLAUDE_PROJECT_DIR"] = Environment.GetEnvironmentVariable("CLAUDE_PROJECT_DIR"),
+			["DEVPROJEX_ROOT"] = Environment.GetEnvironmentVariable("DEVPROJEX_ROOT"),
+			["DEVPROJEX_COLOR"] = Environment.GetEnvironmentVariable("DEVPROJEX_COLOR"),
+			["DEVPROJEX_PROGRESS"] = Environment.GetEnvironmentVariable("DEVPROJEX_PROGRESS"),
+			["DEVPROJEX_VERBOSITY"] = Environment.GetEnvironmentVariable("DEVPROJEX_VERBOSITY"),
+			["DEVPROJEX_LANGUAGE"] = Environment.GetEnvironmentVariable("DEVPROJEX_LANGUAGE"),
 			[TerminalHostVariable] = Environment.GetEnvironmentVariable(TerminalHostVariable),
 			[InternalDataRootVariable] = Environment.GetEnvironmentVariable(InternalDataRootVariable)
 		};

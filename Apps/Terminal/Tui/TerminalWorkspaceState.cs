@@ -60,6 +60,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 	private readonly Dictionary<string, TreeNodeDescriptor> _nodesByPath = new(PathComparer.Default);
 	private readonly Dictionary<string, string?> _parentsByPath = new(PathComparer.Default);
 	private readonly Dictionary<string, TerminalTreeCheckState> _checkStates = new(PathComparer.Default);
+	private readonly Dictionary<string, int> _orderedPathIndexes = new(PathComparer.Default);
 	private readonly Dictionary<string, bool> _extensionOptionStates = new(StringComparer.OrdinalIgnoreCase);
 	private readonly Dictionary<string, bool> _pathOptionStates = new(PathComparer.Default);
 	private readonly List<string> _orderedPaths = [];
@@ -140,6 +141,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 		_nodesByPath.Clear();
 		_parentsByPath.Clear();
 		_orderedPaths.Clear();
+		_orderedPathIndexes.Clear();
 		_selectedFiles.Clear();
 		_selectedEmptyDirectories.Clear();
 		_checkStates.Clear();
@@ -316,6 +318,87 @@ public sealed class TerminalWorkspaceState : IDisposable
 			RebuildVisibleRows();
 	}
 
+	public void ExpandAll()
+	{
+		foreach (var node in _nodesByPath.Values)
+		{
+			if (node.IsDirectory)
+				_expandedPaths.Add(node.FullPath);
+		}
+		RebuildVisibleRows();
+	}
+
+	public void CollapseAll()
+	{
+		_expandedPaths.Clear();
+		RebuildVisibleRows();
+	}
+
+	public void SelectAll() => SetAllSelection(selected: true);
+
+	public void SelectNone() => SetAllSelection(selected: false);
+
+	public void RestoreSelectedRelativePaths(IEnumerable<string>? paths)
+	{
+		_selectedFiles.Clear();
+		_selectedEmptyDirectories.Clear();
+		foreach (var path in paths ?? [])
+		{
+			var fullPath = Path.GetFullPath(Path.Combine(
+				Plan.SourceRoot,
+				path.Replace('/', Path.DirectorySeparatorChar)));
+			if (!_nodesByPath.TryGetValue(fullPath, out var node))
+				continue;
+			SetSubtreeSelection(node, selected: true);
+		}
+		Interlocked.Increment(ref _revision);
+		RecomputeCheckStates();
+		UpdatePathOptionStates(Plan);
+		RebuildVisibleRows();
+	}
+
+	public int Reveal(string path)
+	{
+		if (string.IsNullOrWhiteSpace(path))
+			return -1;
+		var fullPath = Path.IsPathRooted(path)
+			? Path.GetFullPath(path)
+			: Path.GetFullPath(Path.Combine(
+				Plan.SourceRoot,
+				path.Replace('/', Path.DirectorySeparatorChar)));
+		if (!_nodesByPath.ContainsKey(fullPath))
+			return -1;
+
+		ExpandAncestors(fullPath);
+		for (var index = 0; index < VisibleRows.Count; index++)
+		{
+			if (PathComparer.Default.Equals(VisibleRows[index].Node.FullPath, fullPath))
+				return index;
+		}
+		return -1;
+	}
+
+	public IReadOnlyList<string> BuildExpandedRelativePaths() =>
+		_expandedPaths
+			.Select(ToRelativePath)
+			.OrderBy(static path => path, StringComparer.Ordinal)
+			.ToArray();
+
+	public void RestoreExpandedRelativePaths(IEnumerable<string>? paths)
+	{
+		_expandedPaths.Clear();
+		_expandedPaths.Add(Plan.EffectiveTree.FullPath);
+		foreach (var path in paths ?? [])
+		{
+			var fullPath = Path.GetFullPath(Path.Combine(
+				Plan.SourceRoot,
+				path.Replace('/', Path.DirectorySeparatorChar)));
+			if (_nodesByPath.TryGetValue(fullPath, out var node) && node.IsDirectory)
+				_expandedPaths.Add(fullPath);
+		}
+		RebuildVisibleRows();
+	}
+
 	public void ToggleSelection(int rowIndex)
 	{
 		if (!TryGetRow(rowIndex, out var row))
@@ -366,7 +449,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 			: null;
 		var currentIndex = currentPath is null
 			? reverse ? 0 : -1
-			: _orderedPaths.FindIndex(path => PathComparer.Default.Equals(path, currentPath));
+			: _orderedPathIndexes.GetValueOrDefault(currentPath, reverse ? 0 : -1);
 		for (var offset = 1; offset <= _orderedPaths.Count; offset++)
 		{
 			var index = reverse
@@ -380,11 +463,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 				continue;
 			}
 
-			ExpandAncestors(path);
-			return VisibleRows
-				.Select((row, visibleIndex) => (row, visibleIndex))
-				.First(tuple => PathComparer.Default.Equals(tuple.row.Node.FullPath, path))
-				.visibleIndex;
+			return Reveal(path);
 		}
 
 		return -1;
@@ -413,6 +492,11 @@ public sealed class TerminalWorkspaceState : IDisposable
 			.OrderBy(static path => path, StringComparer.Ordinal)
 			.ToArray();
 	}
+
+	public IReadOnlyList<string> BuildPersistedSelectedRelativePaths() =>
+		GetCheckState(Plan.EffectiveTree) == TerminalTreeCheckState.Checked
+			? ["."]
+			: BuildSelectedRelativePaths();
 
 	public ProjectSelectionSpec BuildSelection() =>
 		Plan.Selection with { SelectedPaths = BuildSelectedRelativePaths() };
@@ -679,6 +763,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 			var (current, currentParentPath) = stack.Pop();
 			_nodesByPath[current.FullPath] = current;
 			_parentsByPath[current.FullPath] = currentParentPath;
+			_orderedPathIndexes[current.FullPath] = _orderedPaths.Count;
 			_orderedPaths.Add(current.FullPath);
 			for (var index = current.Children.Count - 1; index >= 0; index--)
 				stack.Push((current.Children[index], current.FullPath));
@@ -721,7 +806,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 			_selectedFolderCount--;
 	}
 
-	private void ExpandAncestors(string path)
+	public void ExpandAncestors(string path)
 	{
 		var changed = false;
 		var current = _parentsByPath[path];
@@ -734,6 +819,22 @@ public sealed class TerminalWorkspaceState : IDisposable
 
 		if (changed)
 			RebuildVisibleRows();
+	}
+
+	private void SetAllSelection(bool selected)
+	{
+		Interlocked.Increment(ref _revision);
+		_selectedFiles.Clear();
+		_selectedEmptyDirectories.Clear();
+		if (selected)
+			SetSubtreeSelection(Plan.EffectiveTree, selected: true);
+		else
+		{
+			foreach (var path in _pathOptionStates.Keys.ToArray())
+				_pathOptionStates[path] = false;
+		}
+		RecomputeCheckStates();
+		RebuildVisibleRows();
 	}
 
 	private bool TryGetRow(int index, out TerminalTreeRow row)

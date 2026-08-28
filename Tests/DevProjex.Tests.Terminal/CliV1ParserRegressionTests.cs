@@ -8,6 +8,141 @@ namespace DevProjex.Tests.Terminal;
 
 public sealed class CliV1ParserRegressionTests
 {
+	[Theory]
+	[InlineData("analyze|.|--hide-secrets|on|--no-strip-comments")]
+	[InlineData("analyze|.|-p|standard|-r|src|-e|.cs|-s|src/a.cs|-x|smart-ignore")]
+	[InlineData("tree|https://github.com/owner/repo|-b|main|--force|-o|tree.txt")]
+	[InlineData("cache|remove|https://github.com/owner/repo|-y|-n|-f|json")]
+	[InlineData("cache|update|https://github.com/owner/repo")]
+	[InlineData("profile|save|.|--hide-private-data|off")]
+	[InlineData("profile|validate|profile.json|-f|json")]
+	[InlineData("ui|list|--timeout|5s|--quiet")]
+	public void TerminalPolishFormsParse(string invocation)
+	{
+		var result = new DevProjexCommandTree(new TestTerminalEnvironment())
+			.Build()
+			.Parse(invocation.Split('|'));
+		Assert.Empty(result.Errors);
+	}
+
+	[Fact]
+	public void PositiveAndNegativeBooleanFormsConflict()
+	{
+		var result = new DevProjexCommandTree(new TestTerminalEnvironment())
+			.Build()
+			.Parse(["analyze", ".", "--hide-secrets", "--no-hide-secrets"]);
+		Assert.NotEmpty(result.Errors);
+	}
+
+	[Theory]
+	[InlineData("--hide-secrets")]
+	[InlineData("--hide-private-data")]
+	[InlineData("--compress-code")]
+	[InlineData("--strip-comments")]
+	[InlineData("--strip-blank-lines")]
+	public void BareTransformationFlagBeforeProjectDoesNotConsumeProject(string option)
+	{
+		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
+		var command = ResolveCommand(root, ["analyze"]);
+		var project = Assert.IsType<Argument<string?>>(Assert.Single(command.Arguments));
+
+		var result = root.Parse(["analyze", option, "project-root"]);
+
+		Assert.Empty(result.Errors);
+		Assert.Equal("project-root", result.GetValue(project));
+	}
+
+	[Fact]
+	public void BareMisspelledProfileTokenIsRejectedAsAChoiceInsteadOfAPath()
+	{
+		var result = new DevProjexCommandTree(new TestTerminalEnvironment())
+			.Build()
+			.Parse(["analyze", ".", "--profile", "stanadrd"]);
+
+		var error = Assert.Single(result.Errors);
+		Assert.Contains(
+			"standard, local, FILE",
+			error.Message,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void DevProjexEnvironmentDefaultsApplyAndExplicitFlagsWin()
+	{
+		var environment = new TestTerminalEnvironment
+		{
+			Variables = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+			{
+				["DEVPROJEX_COLOR"] = "always",
+				["DEVPROJEX_PROGRESS"] = "never",
+				["DEVPROJEX_VERBOSITY"] = "detailed",
+				["DEVPROJEX_LANGUAGE"] = "uz"
+			}
+		};
+		var root = new DevProjexCommandTree(environment).Build();
+		var analyze = ResolveCommand(root, ["analyze"]);
+		var defaults = root.Parse(["analyze", "."]);
+
+		Assert.Equal(TerminalColorMode.Always,
+			defaults.GetValue(Assert.IsType<Option<TerminalColorMode>>(
+				root.Options.Single(static option => option.Name == "--color"))));
+		Assert.Equal(TerminalProgressMode.Never,
+			defaults.GetValue(Assert.IsType<Option<TerminalProgressMode>>(
+				analyze.Options.Single(static option => option.Name == "--progress"))));
+		Assert.Equal(TerminalVerbosity.Detailed,
+			defaults.GetValue(Assert.IsType<Option<TerminalVerbosity>>(
+				root.Options.Single(static option => option.Name == "--verbosity"))));
+		Assert.Equal(AppLanguage.Uz,
+			defaults.GetValue(Assert.IsType<Option<AppLanguage>>(
+				root.Options.Single(static option => option.Name == "--language"))));
+
+		var explicitValues = root.Parse([
+			"analyze", ".",
+			"--color", "never",
+			"--progress", "always",
+			"--verbosity", "minimal",
+			"--language", "en"
+		]);
+		Assert.Empty(explicitValues.Errors);
+		Assert.Equal(TerminalColorMode.Never,
+			explicitValues.GetValue(Assert.IsType<Option<TerminalColorMode>>(
+				root.Options.Single(static option => option.Name == "--color"))));
+		Assert.Equal(TerminalProgressMode.Always,
+			explicitValues.GetValue(Assert.IsType<Option<TerminalProgressMode>>(
+				analyze.Options.Single(static option => option.Name == "--progress"))));
+	}
+
+	[Fact]
+	public void RecursiveQuietAliasConflictsWithExplicitVerbosity()
+	{
+		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
+
+		var parseResult = root.Parse([
+			"doctor",
+			"--quiet",
+			"--verbosity", "normal"
+		]);
+
+		Assert.NotEmpty(parseResult.Errors);
+	}
+
+	[Fact]
+	public void DevProjexRootPrecedesClaudeProjectDirUnlessRootsAreExplicit()
+	{
+		var variables = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+		{
+			["DEVPROJEX_ROOT"] = "devprojex-root",
+			["CLAUDE_PROJECT_DIR"] = "claude-root"
+		};
+
+		Assert.Equal(
+			["explicit-root"],
+			McpRootSourceResolver.Resolve(["explicit-root"], variables, "working-root"));
+		Assert.Equal(
+			["devprojex-root"],
+			McpRootSourceResolver.Resolve([], variables, "working-root"));
+	}
+
 	[Fact]
 	public void SelectionChoiceSetsAreDerivedFromTheSharedCatalogAndRejectInvalidEnums()
 	{

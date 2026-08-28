@@ -2,6 +2,7 @@ using System.Globalization;
 using DevProjex.Infrastructure.Persistence;
 using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Infrastructure.Git;
+using DevProjex.Infrastructure.ResourceStore;
 using DevProjex.Kernel.Abstractions;
 using DevProjex.Kernel.Models;
 
@@ -351,6 +352,39 @@ public sealed class CliExpansionCommandTests
 		Assert.Contains("https://example.com/owner/repository.git", environment.StandardError, StringComparison.Ordinal);
 	}
 
+	[Theory]
+	[InlineData("--force", false)]
+	[InlineData("--dry-run", true)]
+	public async Task CacheRemoveNotFoundJsonWritesVersionedEnvelope(
+		string authorization,
+		bool dryRun)
+	{
+		using var data = new TemporaryDirectory();
+		const string repositoryUrl = "https://user:top-secret@example.com/owner/missing.git";
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(() => data.Path))
+			.RunAsync(
+				["cache", "remove", repositoryUrl, authorization, "--format", "json"],
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.RuntimeError, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		var result = document.RootElement;
+		Assert.Equal(1, result.GetProperty("schemaVersion").GetInt32());
+		Assert.Equal("devprojex-cache-removal", result.GetProperty("kind").GetString());
+		Assert.Equal(dryRun, result.GetProperty("dryRun").GetBoolean());
+		Assert.True(result.GetProperty("notFound").GetBoolean());
+		Assert.Equal(0, result.GetProperty("removed").GetInt32());
+		Assert.Equal(0, result.GetProperty("retained").GetInt32());
+		Assert.Equal(0, result.GetProperty("failed").GetInt32());
+		Assert.Equal(0, result.GetProperty("bytes").GetInt64());
+		Assert.DoesNotContain("top-secret", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Empty(environment.StandardError);
+	}
+
 	[Fact]
 	public void RecentTextEntryEscapesControlCharactersInsideFields()
 	{
@@ -375,6 +409,30 @@ public sealed class CliExpansionCommandTests
 		Assert.DoesNotContain('\t', line);
 		Assert.DoesNotContain('\n', line);
 		Assert.DoesNotContain('\r', line);
+	}
+
+	[Fact]
+	public void RedirectedRecentTextLocalizesKindsWithoutAddingTtyColumns()
+	{
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.Ru);
+		var environment = new TestTerminalEnvironment { IsOutputInteractive = false };
+		var line = Assert.Single(RecentCommandHandler.FormatTextEntries(
+			[
+				new RecentCommandHandler.RecentOutputEntry(
+					"folder",
+					"/tmp/project",
+					null,
+					"sample",
+					null,
+					new DateTimeOffset(2026, 1, 2, 3, 4, 0, TimeSpan.Zero))
+			],
+			localization,
+			environment,
+			new TerminalOutputOptions()));
+
+		Assert.StartsWith("Папка  sample", line, StringComparison.Ordinal);
+		Assert.DoesNotContain("folder", line, StringComparison.Ordinal);
+		Assert.DoesNotContain("#", line, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -629,6 +687,67 @@ public sealed class CliExpansionCommandTests
 			Assert.Single(services.RepoCacheService.ListIndexedRepositories()).RepositoryUrl);
 	}
 
+	[Fact]
+	public async Task CacheRemoveDryRunJsonReportsBytesWithoutDeletingRepository()
+	{
+		using var data = new TemporaryDirectory();
+		const string repositoryUrl = "https://github.com/example/dry-run.git";
+		var factory = new TerminalServiceFactory(() => data.Path);
+		var services = factory.Create(AppLanguage.En);
+		var repositoryPath = PublishSnapshot(services.RepoCacheService, repositoryUrl);
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment, factory).RunAsync(
+			["cache", "remove", repositoryUrl, "--dry-run", "--format", "json"],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		Assert.Equal(1, document.RootElement.GetProperty("schemaVersion").GetInt32());
+		Assert.Equal("devprojex-cache-removal", document.RootElement.GetProperty("kind").GetString());
+		Assert.True(document.RootElement.GetProperty("dryRun").GetBoolean());
+		Assert.Equal(1, document.RootElement.GetProperty("removed").GetInt32());
+		Assert.Equal(0, document.RootElement.GetProperty("retained").GetInt32());
+		Assert.Equal(0, document.RootElement.GetProperty("failed").GetInt32());
+		Assert.True(document.RootElement.GetProperty("bytes").GetInt64() > 0);
+		Assert.True(Directory.Exists(repositoryPath));
+		Assert.Single(services.RepoCacheService.ListIndexedRepositories());
+	}
+
+	[Fact]
+	public async Task CacheUpdateRefreshesAnExistingManagedGitClone()
+	{
+		using var data = new TemporaryDirectory();
+		const string repositoryUrl = "https://github.com/example/update.git";
+		var sourceFactory = new TerminalServiceFactory(() => data.Path);
+		using var services = sourceFactory.Create(AppLanguage.En);
+		var published = Path.Combine(data.Path, "RepoCache", "update", "base");
+		Directory.CreateDirectory(published);
+		File.WriteAllText(Path.Combine(published, "README.md"), "cached\n");
+		var cache = new UpdatingRepoCacheService(repositoryUrl, published);
+		var git = new UpdatingGitRepositoryService();
+		var commandServices = new TerminalCacheServices(services.Localization, cache, git);
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new CacheCommandHandler(commandServices, environment)
+			.UpdateAsync(repositoryUrl, TestContext.Current.CancellationToken);
+
+		Assert.True(
+			exitCode == CommandLineExitCodes.Success,
+			$"cache update exited {exitCode}: {environment.StandardError}");
+		Assert.Equal(1, git.PullCalls);
+		Assert.Equal(
+			services.Localization["Toast.Git.UpdatesApplied"] + Environment.NewLine,
+			environment.StandardOutput);
+		Assert.DoesNotContain(
+			PathUtility.NormalizeSeparators(published),
+			environment.StandardOutput,
+			StringComparison.Ordinal);
+		var indexed = Assert.Single(cache.ListIndexedRepositories());
+		Assert.Equal("after", indexed.CommitHash);
+		Assert.True(cache.SizeRefreshed);
+	}
+
 	private static TreeTextFormat ParseTreeFormat(string format) =>
 		format switch
 		{
@@ -646,5 +765,168 @@ public sealed class CliExpansionCommandTests
 		var published = cache.PublishRepositoryDirectory(staging, repositoryUrl);
 		cache.RecordIndexedRepository(repositoryUrl, published);
 		return published;
+	}
+
+	private sealed class UpdatingRepoCacheService : IRepoCacheService
+	{
+		private RepositoryCacheIndexEntry _entry;
+
+		public UpdatingRepoCacheService(string repositoryUrl, string repositoryPath)
+		{
+			CacheRootPath = Path.GetDirectoryName(Path.GetDirectoryName(repositoryPath)!)!;
+			CacheSearchRootPaths = [CacheRootPath];
+			_entry = new RepositoryCacheIndexEntry(
+				"update",
+				repositoryUrl,
+				repositoryPath,
+				"main",
+				"before",
+				DateTimeOffset.UnixEpoch,
+				RepositoryCacheEntryState.Ready,
+				ContentKind: RepositoryCacheContentKind.Git);
+		}
+
+		public string CacheRootPath { get; }
+		public IReadOnlyList<string> CacheSearchRootPaths { get; }
+		public bool SizeRefreshed { get; private set; }
+
+		public RepositoryCacheIndexEntry? FindIndexedRepository(string repositoryUrl) => _entry;
+
+		public IReadOnlyList<RepositoryCacheCatalogEntry> ListIndexedRepositories() =>
+		[
+			new(
+				_entry.RepositoryUrl,
+				"update",
+				_entry.Branch,
+				_entry.LastOpenedUtc,
+				_entry.ApproximateSizeBytes,
+				_entry.ContentKind,
+				_entry.LocalPath,
+				_entry.CommitHash,
+				_entry.State)
+		];
+
+		public Task<IRepositoryCacheSession?> TryAcquireRepositorySessionAsync(
+			string repositoryUrl,
+			string? branch = null,
+			CancellationToken cancellationToken = default) =>
+			Task.FromResult<IRepositoryCacheSession?>(new UpdatingCacheSession(_entry));
+
+		public Task<IAsyncDisposable> AcquireRepositoryOperationAsync(
+			string repositoryUrl,
+			CancellationToken cancellationToken = default) =>
+			Task.FromResult<IAsyncDisposable>(new NoopAsyncDisposable());
+
+		public void RecordIndexedRepository(
+			string repositoryUrl,
+			string localPath,
+			string? branch = null,
+			string? commitHash = null,
+			RepositoryCacheEntryState state = RepositoryCacheEntryState.Ready) =>
+			_entry = _entry with
+			{
+				RepositoryUrl = repositoryUrl,
+				LocalPath = localPath,
+				Branch = branch,
+				CommitHash = commitHash,
+				State = state
+			};
+
+		public void RefreshIndexedRepositorySize(string localPath)
+		{
+			Assert.Equal(_entry.LocalPath, localPath, PathComparer.Default);
+			SizeRefreshed = true;
+		}
+
+		public string CreateRepositoryDirectory(string repositoryUrl) => throw Unexpected();
+		public string CreateRepositoryStagingDirectory(string repositoryUrl) => throw Unexpected();
+		public string PublishRepositoryDirectory(string stagingPath, string repositoryUrl) => throw Unexpected();
+		public RepositoryCacheManagementListResult ListCacheEntriesForManagement() => throw Unexpected();
+		public Task<IRepositoryCacheSession?> TryAcquireRepositorySessionByPathAsync(
+			string repositoryPath,
+			CancellationToken cancellationToken = default) => throw Unexpected();
+		public void RemoveIndexedRepository(string localPath) => throw Unexpected();
+		public void DeleteRepositoryDirectory(string path) => throw Unexpected();
+		public void ClearAllCache() => throw Unexpected();
+		public CacheClearResult ClearAllCacheWithResult() => throw Unexpected();
+		public CacheClearResult RemoveCachedRepositoryWithResult(string repositoryUrl) => throw Unexpected();
+		public void CleanupStaleCacheOnStartup() => throw Unexpected();
+		public void RequestStaleCacheCleanupOnStartup() { }
+		public void CollectGarbage() => throw Unexpected();
+		public void RequestGarbageCollection() { }
+		public bool IsInCache(string path) => throw Unexpected();
+		public bool PathsBelongToSameRepository(string left, string right) => throw Unexpected();
+		public void Dispose() { }
+
+		private static InvalidOperationException Unexpected() =>
+			new("Unexpected repository-cache operation.");
+
+		private sealed class UpdatingCacheSession(RepositoryCacheIndexEntry entry) : IRepositoryCacheSession
+		{
+			public string RepositoryPath { get; } = entry.LocalPath;
+			public string RepositoryUrl { get; } = entry.RepositoryUrl;
+			public string? Branch { get; } = entry.Branch;
+			public RepositoryCacheContentKind ContentKind => RepositoryCacheContentKind.Git;
+			public void Dispose() { }
+		}
+
+		private sealed class NoopAsyncDisposable : IAsyncDisposable
+		{
+			public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+		}
+	}
+
+	private sealed class UpdatingGitRepositoryService : IGitRepositoryService
+	{
+		public int PullCalls { get; private set; }
+
+		public Task<bool> IsGitAvailableAsync(CancellationToken cancellationToken = default) =>
+			Task.FromResult(true);
+
+		public Task<bool> PullUpdatesAsync(
+			string repositoryPath,
+			IProgress<string>? progress = null,
+			CancellationToken cancellationToken = default)
+		{
+			PullCalls++;
+			return Task.FromResult(true);
+		}
+
+		public Task<string?> GetCurrentBranchAsync(
+			string repositoryPath,
+			CancellationToken cancellationToken = default) =>
+			Task.FromResult<string?>("main");
+
+		public Task<string?> GetHeadCommitAsync(
+			string repositoryPath,
+			CancellationToken cancellationToken = default) =>
+			Task.FromResult<string?>("after");
+
+		public Task<GitCloneResult> CloneAsync(
+			string url,
+			string targetDirectory,
+			IProgress<string>? progress = null,
+			CancellationToken cancellationToken = default) => throw Unexpected();
+
+		public Task<IReadOnlyList<GitBranch>> GetBranchesAsync(
+			string repositoryPath,
+			CancellationToken cancellationToken = default) => throw Unexpected();
+
+		public Task<string?> GetDefaultBranchAsync(
+			string repositoryPath,
+			CancellationToken cancellationToken = default) => Task.FromResult<string?>(null);
+
+		public Task<bool> SwitchBranchAsync(
+			string repositoryPath,
+			string branchName,
+			IProgress<string>? progress = null,
+			CancellationToken cancellationToken = default) => throw Unexpected();
+
+		public Task<string?> GetRemoteUrlAsync(
+			string repositoryPath,
+			CancellationToken cancellationToken = default) => throw Unexpected();
+
+		private static InvalidOperationException Unexpected() =>
+			new("Unexpected Git operation.");
 	}
 }

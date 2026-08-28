@@ -12,6 +12,11 @@ internal static class McpRootSourceResolver
 		ArgumentException.ThrowIfNullOrWhiteSpace(currentDirectory);
 		if (explicitRoots.Count > 0)
 			return explicitRoots;
+		if (variables.TryGetValue("DEVPROJEX_ROOT", out var devProjexRoot) &&
+		    !string.IsNullOrWhiteSpace(devProjexRoot))
+		{
+			return [devProjexRoot];
+		}
 		if (variables.TryGetValue("CLAUDE_PROJECT_DIR", out var projectDirectory) &&
 		    !string.IsNullOrWhiteSpace(projectDirectory))
 		{

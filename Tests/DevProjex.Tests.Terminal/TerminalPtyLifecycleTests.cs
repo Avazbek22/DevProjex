@@ -33,7 +33,7 @@ public sealed class TerminalPtyLifecycleTests
 		await terminal.WaitForScreenAsync(
 			"notes.txt",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 
 		Assert.Equal(
 			CommandLineExitCodes.Success,
@@ -41,7 +41,7 @@ public sealed class TerminalPtyLifecycleTests
 	}
 
 	[Fact(Timeout = 60_000)]
-	public async Task CtrlCAtWelcomeRequiresConfirmationAndDoesNotTerminateSession()
+	public async Task CtrlCAndQAtWelcomeUseTheSameExitConfirmation()
 	{
 		using var workspace = new TemporaryDirectory();
 		workspace.WriteFile("notes.txt", "markerless directory");
@@ -63,6 +63,11 @@ public sealed class TerminalPtyLifecycleTests
 			"Exit DevProjex Terminal?",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Exit DevProjex Terminal?",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.False(terminal.HasExited);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(
@@ -112,7 +117,7 @@ public sealed class TerminalPtyLifecycleTests
 		AssertViewportWidth(previewScreen, columns);
 		Assert.False(terminal.HasExited);
 
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(
@@ -152,7 +157,7 @@ public sealed class TerminalPtyLifecycleTests
 		Assert.DoesNotContain("[[", screen, StringComparison.Ordinal);
 		Assert.Contains(exitAction, screen, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(
@@ -203,7 +208,7 @@ public sealed class TerminalPtyLifecycleTests
 			"CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);
 
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(cancellationToken: TestContext.Current.CancellationToken));
@@ -249,7 +254,7 @@ public sealed class TerminalPtyLifecycleTests
 			"ACTION PALETTE",
 			cancellationToken: TestContext.Current.CancellationToken);
 
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(cancellationToken: TestContext.Current.CancellationToken));
@@ -284,7 +289,7 @@ public sealed class TerminalPtyLifecycleTests
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.False(terminal.HasExited);
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		await terminal.CompleteShellRestorationHandshakeAsync(
 			TestContext.Current.CancellationToken);
 
@@ -324,7 +329,7 @@ public sealed class TerminalPtyLifecycleTests
 		await terminal.WaitForScreenAsync(
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(cancellationToken: TestContext.Current.CancellationToken));
@@ -371,7 +376,7 @@ public sealed class TerminalPtyLifecycleTests
 		await terminal.WaitForScreenAsync(
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		await terminal.CompleteShellRestorationHandshakeAsync(
 			TestContext.Current.CancellationToken);
 
@@ -423,7 +428,7 @@ public sealed class TerminalPtyLifecycleTests
 		var screen = terminal.CaptureScreen();
 		Assert.Contains($"[x] {projectName}", screen, StringComparison.Ordinal);
 		Assert.DoesNotContain($"[ ] {projectName}", screen, StringComparison.Ordinal);
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(cancellationToken: TestContext.Current.CancellationToken));
@@ -462,7 +467,7 @@ public sealed class TerminalPtyLifecycleTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.False(terminal.HasExited);
 
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(cancellationToken: TestContext.Current.CancellationToken));

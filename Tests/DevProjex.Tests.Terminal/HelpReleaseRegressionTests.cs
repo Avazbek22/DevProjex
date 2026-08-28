@@ -17,7 +17,10 @@ public sealed class HelpReleaseRegressionTests
 		Assert.Contains("--strip-blank-lines", help, StringComparison.Ordinal);
 		Assert.Contains("Remove blank lines from supported source files.", help, StringComparison.Ordinal);
 		Assert.Contains("--language", help, StringComparison.Ordinal);
-		Assert.Contains("<en|ru|de|fr|it|es|pt|pt-pt|kk|tg|uz|zh-cn|zh-tw|ja|ko|tr|uk|pl|vi|id>", help, StringComparison.Ordinal);
+		Assert.Contains("--language <CODE>", help, StringComparison.Ordinal);
+		Assert.Equal(
+			2,
+			help.Split("Enables secret detection automatically.", StringSplitOptions.None).Length - 1);
 	}
 
 	[Fact]
@@ -28,6 +31,19 @@ public sealed class HelpReleaseRegressionTests
 		Assert.Contains("--as <folder|zip>", help, StringComparison.Ordinal);
 		Assert.Contains("Required.", help, StringComparison.Ordinal);
 		Assert.Contains("-o, --output <PATH>", help, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("remove")]
+	[InlineData("clear")]
+	public async Task CacheCleanupHelpDoesNotMarkForceRequiredWhenDryRunIsAvailable(
+		string action)
+	{
+		var help = await RenderHelpAsync(120, "en", "cache", action);
+
+		Assert.Contains("--force", help, StringComparison.Ordinal);
+		Assert.Contains("--dry-run", help, StringComparison.Ordinal);
+		Assert.DoesNotContain("Required.", help, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -69,10 +85,12 @@ public sealed class HelpReleaseRegressionTests
 	[InlineData("profile import", "devprojex profile import ../devprojex-profile.json .")]
 	[InlineData("profile validate", "devprojex profile validate ../devprojex-profile.json")]
 	[InlineData("profile reset", "devprojex profile reset .")]
+	[InlineData("profile save", "devprojex profile save . --root src --extension .cs")]
 	[InlineData("cache path", "devprojex cache path")]
 	[InlineData("cache list", "devprojex cache list --format json")]
 	[InlineData("cache remove", "devprojex cache remove https://github.com/owner/repo --force")]
 	[InlineData("cache clear", "devprojex cache clear --force")]
+	[InlineData("cache update", "devprojex cache update https://github.com/owner/repo")]
 	[InlineData("ui list", "devprojex ui list --format json")]
 	[InlineData("ui status", "devprojex ui status --project .")]
 	[InlineData("ui activate", "devprojex ui activate --project .")]
@@ -117,6 +135,36 @@ public sealed class HelpReleaseRegressionTests
 		Assert.True(export >= 0, "The profile export example is missing.");
 		Assert.True(validate > export, "Profile validation must follow profile export.");
 		Assert.True(show > validate, "Portable profile use must follow profile export and validation.");
+	}
+
+	[Theory]
+	[InlineData("recent", "0,1,2,130")]
+	[InlineData("cache path", "0,1,2,130")]
+	[InlineData("cache list", "0,1,2,3,130")]
+	[InlineData("profile validate", "0,1,2,130")]
+	[InlineData("profile export", "0,1,2,3,4,130")]
+	[InlineData("ui list", "0,1,2,5,130")]
+	[InlineData("ui status", "0,1,2,3,4,5,130")]
+	public void LeafHelpListsOnlyReachableExitCodes(string commandPath, string expectedCodes)
+	{
+		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
+		var command = commandPath
+			.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+			.Aggregate(
+				(Command)root,
+				static (parent, name) => parent.Subcommands.Single(child => child.Name == name));
+
+		Assert.Equal(
+			expectedCodes.Split(',').Select(int.Parse),
+			CommandHelpRenderer.ResolveExitCodes(command));
+	}
+
+	[Fact]
+	public void RootHelpRetainsTheCompleteExitCodeTable()
+	{
+		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
+
+		Assert.Equal([0, 1, 2, 3, 4, 5, 130], CommandHelpRenderer.ResolveExitCodes(root));
 	}
 
 	[Fact]

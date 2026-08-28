@@ -19,12 +19,12 @@
 │                                                     ││src/Feature003.cs:                                            ·│
 │                                                     ││                                                              ·│
 │                                                     ││internal sealed class ContentMarker003 { }                    ·│
-│                                                     ││                                                              ·│
-│                                                     ││                                                              ·│
-│                                                     ││src/Feature004.cs:                                            ·│
 │                                                     ││                                                              ▼│
-│                                                     ││ Files 1-5/61  |  Lines 1-22/303                               │
+│                                                     ││ Files 1-4/61  |  Lines 1-19/303                               │
 └─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
 
+┌┤  PARAMETERS├────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ Content 0/5 · Exclusions 9/10 · File types 2/2                                                                       │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
  Files 61 · Folders 2 · 2.46 KB · ~<TOKENS> tokens · Warnings 0 · Errors 0
- Up/Down Navigate   Enter Expand   Space Toggle   / Search   Tab/F6 Preview   Ctrl+P Actions   ? Help
+ Space Toggle   Shift+←/→ Collapse/expand all   Ctrl+A/U Select all/none   R Reveal   : Commands

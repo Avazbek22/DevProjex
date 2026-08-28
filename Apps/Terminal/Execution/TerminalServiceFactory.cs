@@ -180,7 +180,8 @@ public sealed class TerminalServiceFactory(
 			return new TerminalCacheServiceScope(
 				new TerminalCacheServices(
 					fullScope.Services.Localization,
-					fullScope.Services.RepoCacheService),
+					fullScope.Services.RepoCacheService,
+					fullScope.Services.GitRepositoryService),
 				fullScope);
 		}
 
@@ -191,7 +192,8 @@ public sealed class TerminalServiceFactory(
 		return new TerminalCacheServiceScope(
 			new TerminalCacheServices(
 				localization,
-				repositoryCache),
+				repositoryCache,
+				new GitRepositoryService()),
 			repositoryCache);
 	}
 
@@ -203,7 +205,8 @@ public sealed class TerminalServiceFactory(
 			return new TerminalRecentServiceScope(
 				new TerminalRecentServices(
 					fullScope.Services.RecentProjectsStore,
-					fullScope.Services.RecentWorkspacesService),
+					fullScope.Services.RecentWorkspacesService,
+					fullScope.Services.Localization),
 				fullScope);
 		}
 
@@ -212,7 +215,8 @@ public sealed class TerminalServiceFactory(
 		return new TerminalRecentServiceScope(
 			new TerminalRecentServices(
 				CreateRecentProjectsStore(resolvedAppDataPathProvider),
-				new RecentWorkspacesService()));
+				new RecentWorkspacesService(),
+				new LocalizationService(new JsonLocalizationCatalog(), language)));
 	}
 
 	private RepoCacheService CreateRepositoryCache(Func<string> resolvedAppDataPathProvider) =>
@@ -228,11 +232,13 @@ public sealed class TerminalServiceFactory(
 
 internal sealed record TerminalCacheServices(
 	LocalizationService Localization,
-	IRepoCacheService RepoCacheService);
+	IRepoCacheService RepoCacheService,
+	IGitRepositoryService GitRepositoryService);
 
 internal sealed record TerminalRecentServices(
 	RecentProjectsStore RecentProjectsStore,
-	RecentWorkspacesService RecentWorkspacesService);
+	RecentWorkspacesService RecentWorkspacesService,
+	LocalizationService Localization);
 
 internal sealed class TerminalCacheServiceScope(
 	TerminalCacheServices services,

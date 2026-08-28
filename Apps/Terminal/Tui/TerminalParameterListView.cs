@@ -6,10 +6,7 @@ namespace DevProjex.Terminal.Tui;
 
 internal sealed class TerminalParameterListView : ListView
 {
-	private const long PointerEventDeduplicationWindowMilliseconds = 1_000;
-	private int _lastPressedViewportColumn = -1;
-	private int _lastPressedViewportRow = -1;
-	private long _lastPressedAt;
+	private readonly TerminalPointerEventDeduplicator _pointerEvents = new();
 
 	public TerminalParameterListView(
 		bool showVerticalScrollBar = false,
@@ -25,10 +22,9 @@ internal sealed class TerminalParameterListView : ListView
 
 	protected override bool OnKeyDown(Key key)
 	{
-		if (!TerminalWorkspaceCommandKey.IsActivation(key))
-			return base.OnKeyDown(key);
-		CommandLineRequested?.Invoke(this, EventArgs.Empty);
-		return true;
+		return TerminalInteractiveView.TryActivateCommandLine(
+			key,
+			() => CommandLineRequested?.Invoke(this, EventArgs.Empty)) || base.OnKeyDown(key);
 	}
 
 	protected override bool OnMouseEvent(Mouse mouse)
@@ -57,23 +53,11 @@ internal sealed class TerminalParameterListView : ListView
 		}
 		SelectedItem = row;
 		EnsureSelectedItemVisible();
-		var now = Environment.TickCount64;
-		if (!pressed &&
-			_lastPressedViewportRow == position.Y &&
-			_lastPressedViewportColumn == position.X &&
-			now - _lastPressedAt <= PointerEventDeduplicationWindowMilliseconds)
+		if (!_pointerEvents.ShouldHandle(pressed, position.X, position.Y))
 		{
 			return true;
 		}
-		if (pressed)
-		{
-			// A settings refresh can move the viewport before the matching release event.
-			_lastPressedViewportRow = position.Y;
-			_lastPressedViewportColumn = position.X;
-			_lastPressedAt = now;
-		}
-		if (position.X is >= 0 and <= 2)
-			SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
+		SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
 		return true;
 	}
 

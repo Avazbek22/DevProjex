@@ -16,7 +16,11 @@ internal sealed class RecentCommandHandler(
 		WriteIndented = true
 	};
 
-	public int Execute(CliRecentKind kind, int limit, CliTextJsonFormat format)
+	public int Execute(
+		CliRecentKind kind,
+		int limit,
+		CliTextJsonFormat format,
+		TerminalOutputOptions outputOptions)
 	{
 		var database = services.RecentProjectsStore.Load();
 		var sources = database.RecentFolders
@@ -48,7 +52,7 @@ internal sealed class RecentCommandHandler(
 			return CommandLineExitCodes.Success;
 		}
 
-		foreach (var line in FormatTextEntries(entries))
+		foreach (var line in FormatTextEntries(entries, services.Localization, environment, outputOptions))
 			environment.Output.WriteLine(line);
 
 		return CommandLineExitCodes.Success;
@@ -112,6 +116,50 @@ internal sealed class RecentCommandHandler(
 			TerminalTextEscaping.EscapeSingleLine(entry.Path ?? entry.Url ?? string.Empty),
 			entry.LastOpened.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)
 		}).ToArray());
+
+	internal static IReadOnlyList<string> FormatTextEntries(
+		IReadOnlyList<RecentOutputEntry> entries,
+		LocalizationService localization,
+		ITerminalEnvironment environment,
+		TerminalOutputOptions outputOptions)
+	{
+		if (!environment.IsOutputInteractive || environment.IsTermDumb)
+		{
+			return TerminalColumnLayout.Format(entries.Select(entry => new[]
+			{
+				LocalizeKind(entry.Kind, localization),
+				TerminalTextEscaping.EscapeSingleLine(entry.Name),
+				TerminalTextEscaping.EscapeSingleLine(entry.Path ?? entry.Url ?? string.Empty),
+				entry.LastOpened.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)
+			}).ToArray());
+		}
+
+		var rows = entries.Select((entry, index) => new[]
+		{
+			(index + 1).ToString(CultureInfo.InvariantCulture),
+			LocalizeKind(entry.Kind, localization),
+			TerminalTextEscaping.EscapeSingleLine(entry.Name),
+			TerminalTextEscaping.EscapeSingleLine(entry.Path ?? entry.Url ?? string.Empty),
+			entry.LastOpened.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)
+		}).ToArray();
+		return TerminalColumnLayout.FormatForOutput(
+			rows,
+			[
+				"#",
+				localization["Terminal.Table.Type"],
+				localization["Terminal.Tui.Source"],
+				localization["Terminal.Tui.Recent.Path"],
+				localization["Terminal.Tui.Recent.LastOpened"]
+			],
+			environment,
+			outputOptions,
+			truncationColumn: 3);
+	}
+
+	private static string LocalizeKind(string kind, LocalizationService localization) =>
+		localization[kind == "folder"
+			? "Terminal.Tui.Folder"
+			: "Terminal.Tui.RecentRepositories.Repository"];
 
 	internal sealed record RecentOutputEntry(
 		string Kind,

@@ -152,6 +152,7 @@ public sealed class DocumentationExecutionRegressionTests
 			case "show":
 			case "export":
 			case "reset":
+			case "save":
 				arguments[2] = project;
 				break;
 			case "validate":

@@ -226,7 +226,7 @@ internal sealed partial class TerminalWorkspaceSession
 			L("Terminal.Tui.LoadingProject"),
 			workspace.DisplaySource);
 		var operationCts = ReplaceActiveOperation();
-		_activeOperationTask = TrackBackgroundTask(Task.Run(async () =>
+		TrackActiveOperation(Task.Run(async () =>
 		{
 			IRepositoryCacheSession? preparedRepositorySession = null;
 			try
@@ -336,7 +336,7 @@ internal sealed partial class TerminalWorkspaceSession
 	private void ReturnToRepositoryHistoryAfterCancellation(
 		CancellationTokenSource operationCts)
 	{
-		if (_stopping || !ReferenceEquals(_activeOperationCts, operationCts))
+		if (_stopping || !_operations.IsCurrent(WorkspaceOperationKind.Active, operationCts))
 			return;
 		_application.Invoke(() =>
 		{
@@ -351,7 +351,7 @@ internal sealed partial class TerminalWorkspaceSession
 		string code,
 		string message)
 	{
-		if (_stopping || !ReferenceEquals(_activeOperationCts, operationCts))
+		if (_stopping || !_operations.IsCurrent(WorkspaceOperationKind.Active, operationCts))
 			return;
 		_application.Invoke(() =>
 		{

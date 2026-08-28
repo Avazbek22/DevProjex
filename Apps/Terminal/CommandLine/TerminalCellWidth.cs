@@ -31,6 +31,52 @@ internal static class TerminalCellWidth
 		return result.ToString();
 	}
 
+	public static string TruncateMiddle(string value, int width)
+	{
+		if (string.IsNullOrEmpty(value) || width <= 0)
+			return string.Empty;
+		if (Measure(value) <= width)
+			return value;
+		if (width == 1)
+			return "…";
+
+		var elements = new List<string>();
+		var enumerator = StringInfo.GetTextElementEnumerator(value);
+		while (enumerator.MoveNext())
+			elements.Add(enumerator.GetTextElement());
+
+		var contentWidth = width - 1;
+		var prefixBudget = (contentWidth + 1) / 2;
+		var suffixBudget = contentWidth - prefixBudget;
+		var prefix = TakeByWidth(elements, prefixBudget, fromEnd: false);
+		var suffix = TakeByWidth(elements, suffixBudget, fromEnd: true);
+		return string.Concat(prefix, "…", suffix);
+	}
+
+	private static string TakeByWidth(
+		IReadOnlyList<string> elements,
+		int width,
+		bool fromEnd)
+	{
+		if (width <= 0)
+			return string.Empty;
+		var selected = new List<string>();
+		var used = 0;
+		for (var offset = 0; offset < elements.Count; offset++)
+		{
+			var index = fromEnd ? elements.Count - offset - 1 : offset;
+			var element = elements[index];
+			var elementWidth = Math.Max(0, Measure(element));
+			if (used + elementWidth > width)
+				break;
+			selected.Add(element);
+			used += elementWidth;
+		}
+		if (fromEnd)
+			selected.Reverse();
+		return string.Concat(selected);
+	}
+
 	public static string PadRight(string value, int width)
 	{
 		var padding = Math.Max(0, width - Measure(value));

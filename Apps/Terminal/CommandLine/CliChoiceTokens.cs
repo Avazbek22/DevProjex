@@ -147,9 +147,9 @@ internal static class CliChoiceSets
 		new("never", TerminalProgressMode.Never));
 
 	public static CliChoiceSet<TerminalVerbosity> Verbosity { get; } = new(
-		new("normal", TerminalVerbosity.Normal),
 		new("quiet", TerminalVerbosity.Quiet),
 		new("minimal", TerminalVerbosity.Minimal),
+		new("normal", TerminalVerbosity.Normal),
 		new("detailed", TerminalVerbosity.Detailed),
 		new("diagnostic", TerminalVerbosity.Diagnostic));
 
@@ -262,6 +262,19 @@ internal static class CliChoiceSymbols
 							"standard, local, FILE")));
 						return new CliProfileValue(CliProfileSource.Invalid, string.Empty);
 					}
+					if (!(allowAuto && token.Equals("auto", StringComparison.OrdinalIgnoreCase)) &&
+					    !token.Equals("standard", StringComparison.OrdinalIgnoreCase) &&
+					    !token.Equals("local", StringComparison.OrdinalIgnoreCase) &&
+					    token.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]) < 0 &&
+					    !token.Contains('.') &&
+					    !File.Exists(token))
+					{
+						result.AddError(LocalizedParseError.Create(localization.Format(
+							"Terminal.Validation.Choice",
+							"--profile",
+							allowAuto ? "auto, standard, local, FILE" : "standard, local, FILE")));
+						return new CliProfileValue(CliProfileSource.Invalid, string.Empty);
+					}
 					return CliProfileValue.Parse(token, allowAuto);
 				}
 
@@ -270,6 +283,7 @@ internal static class CliChoiceSymbols
 				return new CliProfileValue(CliProfileSource.Invalid, string.Empty);
 			}
 		};
+		option.Aliases.Add("-p");
 		option.CompletionSources.Add(profileTokens);
 		option.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
 			context,

@@ -38,10 +38,13 @@ public sealed class TreeCommandHandler(
 		}
 
 		var requestedPath = Path.GetFullPath(request.OutputPath);
-		_ = ExactOutputDestinationValidator.ValidateAnalysis(plan.SourceRoot, requestedPath);
+		_ = ExactOutputDestinationValidator.ValidateAnalysis(
+			plan.SourceRoot,
+			requestedPath,
+			request.Force);
 		var writtenPath = await AtomicOutputWriter.WriteAsync(
 				requestedPath,
-				overwrite: false,
+				overwrite: request.Force,
 				async (destination, token) =>
 				{
 					await using var writer = new StreamWriter(
@@ -59,7 +62,10 @@ public sealed class TreeCommandHandler(
 					await writer.FlushAsync(token).ConfigureAwait(false);
 				},
 				cancellationToken,
-				path => ExactOutputDestinationValidator.ValidateAnalysis(plan.SourceRoot, path))
+				path => ExactOutputDestinationValidator.ValidateAnalysis(
+					plan.SourceRoot,
+					path,
+					request.Force))
 			.ConfigureAwait(false);
 		TerminalTextEscaping.WriteSingleLine(environment.Output, writtenPath);
 		return CommandLineExitCodes.Success;

@@ -262,8 +262,8 @@ public sealed partial class TerminalLocalizationContractTests
 				.Where(static segment => !string.IsNullOrWhiteSpace(segment))
 				.ToArray();
 			Assert.True(
-				welcomeSegments.Length == 5,
-				$"The compact Welcome footer must contain five separated shortcut/action pairs in {locale}.");
+				welcomeSegments.Length == 6,
+				$"The compact Welcome footer must contain six separated shortcut/action pairs in {locale}.");
 			Assert.True(
 				catalog["Terminal.Tui.Footer.Welcome"].GetColumns() <= 76,
 				$"The compact Welcome footer does not fit 80 columns in {locale}.");
@@ -543,7 +543,7 @@ public sealed partial class TerminalLocalizationContractTests
 	private static string FindRepositoryRoot()
 		=> PublishedApplicationLocator.FindRepositoryRoot();
 
-	[GeneratedRegex(@"\{[^{}\r\n]+\}", RegexOptions.CultureInvariant)]
+	[GeneratedRegex(@"\{(?:\d+(?::[^{}\r\n]+)?|[A-Za-z][A-Za-z0-9]*)\}", RegexOptions.CultureInvariant)]
 	private static partial Regex PlaceholderRegex();
 
 	[GeneratedRegex(@"(?m)^#{2,3}\s+(\d+(?:\.\d+)*)(?=\)|\s)", RegexOptions.CultureInvariant)]

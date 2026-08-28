@@ -61,7 +61,7 @@ public sealed class TerminalApplication
 		var runtimeEnvironment = new DiagnosticPipeSafeTerminalEnvironment(environment);
 		var localization = new LocalizationService(
 			new JsonLocalizationCatalog(),
-			TerminalLanguageResolver.Resolve(arguments));
+			TerminalLanguageResolver.Resolve(arguments, environment.Variables));
 		if (LegacyCliSyntaxDetector.TryDetect(arguments, out var migration))
 		{
 			runtimeEnvironment.Error.WriteLine("error[DPX-CLI-LEGACY-SYNTAX]:");
@@ -510,7 +510,7 @@ public sealed class TerminalApplication
 
 	private static bool IsDiagnosticVerbosity(ParseResult parseResult)
 	{
-		var option = parseResult.CommandResult.Command.Options
+		var option = parseResult.RootCommandResult.Command.Options
 			.OfType<Option<TerminalVerbosity>>()
 			.SingleOrDefault(static candidate => candidate.Name == "--verbosity");
 		return option is not null &&

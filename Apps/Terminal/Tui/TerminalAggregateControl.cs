@@ -8,9 +8,8 @@ namespace DevProjex.Terminal.Tui;
 
 internal sealed class TerminalAggregateControl : Label
 {
-	private const long PointerEventDeduplicationWindowMilliseconds = 1_000;
+	private readonly TerminalPointerEventDeduplicator _pointerEvents = new();
 	private bool _isActive;
-	private long _lastPressedAt;
 
 	public TerminalAggregateControl(bool isOnBorder)
 	{
@@ -48,10 +47,9 @@ internal sealed class TerminalAggregateControl : Label
 
 	protected override bool OnKeyDown(Key key)
 	{
-		if (!TerminalWorkspaceCommandKey.IsActivation(key))
-			return base.OnKeyDown(key);
-		CommandLineRequested?.Invoke(this, EventArgs.Empty);
-		return true;
+		return TerminalInteractiveView.TryActivateCommandLine(
+			key,
+			() => CommandLineRequested?.Invoke(this, EventArgs.Empty)) || base.OnKeyDown(key);
 	}
 
 	protected override bool OnDrawingContent(DrawContext? context)
@@ -64,23 +62,14 @@ internal sealed class TerminalAggregateControl : Label
 	protected override bool OnMouseEvent(Mouse mouse)
 	{
 		var pressed = mouse.Flags.HasFlag(MouseFlags.LeftButtonPressed);
-		var released = mouse.Flags.HasFlag(MouseFlags.LeftButtonReleased);
 		var clicked = mouse.Flags.HasFlag(MouseFlags.LeftButtonClicked);
-		if (!pressed && !released && !clicked)
+		if (!pressed && !clicked)
 			return base.OnMouseEvent(mouse);
 
 		SetFocus();
 		InteractionStarted?.Invoke(this, EventArgs.Empty);
-		var now = Environment.TickCount64;
-		if (pressed)
-		{
-			_lastPressedAt = now;
+		if (_pointerEvents.ShouldHandle(pressed, 0, 0))
 			SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
-		}
-		else if (clicked && now - _lastPressedAt > PointerEventDeduplicationWindowMilliseconds)
-		{
-			SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
-		}
 		return true;
 	}
 }

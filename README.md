@@ -147,13 +147,17 @@ DevProjex isn't only a desktop context builder. The same app runs from the termi
 devprojex
 devprojex open . --preview
 devprojex tree .
+devprojex tree https://github.com/owner/repo --branch main
 devprojex analyze . --format json
 devprojex analyze . --hide-secrets --hide-private-data --findings --fail-on-findings
 devprojex export context . --format markdown -o ../devprojex-context.md
 devprojex export context https://github.com/owner/repo -o -
 git diff --name-only | devprojex export context . --select-from - -o -
 devprojex export project . --as zip --hide-secrets -o ../devprojex-submission.zip
+$ devprojex export project . --as zip -o - > devprojex-submission.zip
 devprojex analyze . --git-mode tracked --exclude smart-ignore
+devprojex profile save . --hide-secrets on
+devprojex cache update https://github.com/owner/repo
 ```
 
 ### What the CLI adds

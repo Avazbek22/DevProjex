@@ -190,7 +190,7 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		await terminal.WaitForScreenAsync(
 			"Unknown command",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 
 		Assert.Equal(
 			CommandLineExitCodes.Success,

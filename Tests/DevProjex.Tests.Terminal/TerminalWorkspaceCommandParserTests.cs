@@ -98,6 +98,20 @@ public sealed class TerminalWorkspaceCommandParserTests
 		Assert.Contains(profile.Candidates, candidate => candidate.Token == "save");
 	}
 
+	[Fact]
+	public void CompletionOffersAPathForContextExportWithoutAnExplicitFormat()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("review.md", "context");
+		var context = new TerminalWorkspaceCommandParseContext(
+			[".md"],
+			WorkingDirectory: workspace.Path);
+
+		var completion = _parser.GetCompletion("export context re", 17, context);
+
+		Assert.Contains(completion.Candidates, candidate => candidate.Token == "review.md");
+	}
+
 	[Theory]
 	[InlineData("language", null)]
 	[InlineData("language RU", "ru")]

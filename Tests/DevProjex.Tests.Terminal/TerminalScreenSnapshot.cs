@@ -112,6 +112,15 @@ internal static partial class TerminalScreenSnapshot
 					OperatingSystem.IsMacOS());
 			}
 		}
+		normalized = InlineRecentPathPattern().Replace(
+			normalized,
+			static match =>
+				$"{match.Groups["prefix"].Value}<RECENT_PATH>{match.Groups["suffix"].Value}");
+		normalized = ReplacePathForSnapshot(
+			normalized,
+			Path.GetTempPath(),
+			"<SYSTEM_TEMP>/",
+			OperatingSystem.IsMacOS());
 		normalized = NormalizeMacOsSystemPathAliases(
 			normalized,
 			OperatingSystem.IsMacOS());
@@ -318,7 +327,8 @@ internal static partial class TerminalScreenSnapshot
 			"<TEMP_ROOT>",
 			"<ORIGIN_ROOT>",
 			"<WELCOME_ROOT>",
-			"<OUTPUT_ROOT>"
+			"<OUTPUT_ROOT>",
+			"<SYSTEM_TEMP>"
 		};
 		var normalizedLines = string.Join(
 			'\n',
@@ -347,6 +357,9 @@ internal static partial class TerminalScreenSnapshot
 
 	[GeneratedRegex(@"\b[0-9a-f]{32}\b", RegexOptions.IgnoreCase)]
 	private static partial Regex IdentifierPattern();
+
+	[GeneratedRegex(@"(?m)(?<prefix>│(?:> |  )\[[1-9]\] )[^\n│]*(?<suffix>│)")]
+	private static partial Regex InlineRecentPathPattern();
 
 	[GeneratedRegex(@"(?<=<TEMP_ROOT>[\\/])[0-9a-f]{8,32}", RegexOptions.IgnoreCase)]
 	private static partial Regex TruncatedProjectIdentifierPattern();

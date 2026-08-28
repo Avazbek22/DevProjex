@@ -285,4 +285,55 @@ public sealed class TerminalWorkspacePresentationPolicyTests
 		{
 		}
 	}
+
+	[Fact]
+	public void PreviewWordWrapUsesVisualRowsAndRestoresHorizontalGeometry()
+	{
+		using var document = new InMemoryPreviewTextDocument(
+			"0123456789\nabcdefghij\nklmnopqrst");
+		using var view = new TerminalVirtualizedPreviewView(showScrollBars: false)
+		{
+			Frame = new Rectangle(0, 0, 5, 2)
+		};
+		view.SetDocument(document, preserveViewport: false);
+		var maximumWidth = view.MaxLineLength;
+
+		Assert.True(view.ToggleWordWrap());
+		Assert.Equal(6, view.ContentRowCount);
+		Assert.Equal(6, view.GetContentSize().Height);
+		Assert.True(view.HasVerticalOverflow);
+		Assert.False(view.HasHorizontalOverflow);
+
+		view.ScrollToContentRow(view.ContentRowCount - 1, 0);
+
+		Assert.Equal(4, view.FirstVisibleContentRow);
+		Assert.Equal(2, view.FirstVisibleLine);
+		Assert.Equal(3, view.VisibleLastLine);
+
+		Assert.False(view.ToggleWordWrap());
+		Assert.Equal(maximumWidth, view.MaxLineLength);
+		Assert.Equal(document.LineCount, view.ContentRowCount);
+		Assert.Equal(maximumWidth, view.GetContentSize().Width);
+		Assert.True(view.HasHorizontalOverflow);
+	}
+
+	[Fact]
+	public void PreviewWordWrapMapsSearchNavigationToWrappedCoordinates()
+	{
+		using var document = new InMemoryPreviewTextDocument("012345secret-tail");
+		using var view = new TerminalVirtualizedPreviewView(showScrollBars: false)
+		{
+			Frame = new Rectangle(0, 0, 5, 1)
+		};
+		view.SetDocument(document, preserveViewport: false);
+		view.ToggleWordWrap();
+
+		var match = Assert.NotNull(view.SetSearchQuery("secret", 0, -1));
+		view.ScrollTo(match.Line, view.GetDisplayColumn(match.Line, match.Column));
+
+		var position = view.ResolveDocumentPosition(view.FirstVisibleContentRow);
+		Assert.Equal(0, position.Line);
+		Assert.Equal(5, position.DisplayColumn);
+		Assert.InRange(match.Column, position.DisplayColumn, position.DisplayColumn + view.VisibleTextWidth);
+	}
 }

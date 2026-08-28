@@ -21,6 +21,11 @@ names remain part of the CLI profile contract, not permanent TUI jargon.
 
 ## Welcome
 
+Welcome shows up to nine recent projects inline; `1` through `9` open them
+directly. **Open portable profile** is a first-class visible action. The footer
+advertises `:`, and the Welcome command line accepts `recent`, `language`,
+`help`, and `quit`.
+
 The welcome screen offers:
 
 - open the current directory when it is a reasonable project candidate;
@@ -74,7 +79,9 @@ secondary screens are overlays over that root; closing an overlay restores the
 previous screen, selected row, and keyboard focus.
 
 - Enter opens or confirms the focused action.
-- Esc cancels the current operation or returns exactly one level.
+- Esc cancels active work, closes the command line or overlay, clears the active
+  Tree filter or Preview search, and otherwise asks before returning from a
+  workspace to Welcome.
 - Ctrl+C cancels active work first and otherwise asks before exiting.
 - `q` exits only from a root screen.
 - Errors remain visible until dismissed and then return to a usable prior state.
@@ -185,7 +192,7 @@ exports remain blocking operations and retain the modal progress surface.
 
 ## Workspace Command Line
 
-Press `:` while Project Tree, Context Preview, or Parameters has normal focus to
+Press `:` on Welcome or while Project Tree, Context Preview, or Parameters has normal focus to
 replace the contextual footer with the workspace command line. It controls the
 current live session; it is not a nested invocation of the direct DevProjex CLI.
 Dialogs and overlays keep ownership of their input, and the command line is not
@@ -197,6 +204,7 @@ schemas, help, completion hints, results, and errors are localized. Resolution i
 strict: only a complete token executes. Tab accepts or cycles completion, while an
 invalid token reports its position and up to three similar candidates. Arguments
 containing whitespace can use single or double quotes.
+Welcome exposes the focused subset `recent`, `language`, `help`, and `quit`.
 
 | Syntax | Session action |
 |---|---|
@@ -217,6 +225,7 @@ containing whitespace can use single or double quotes.
 | `profile save [name]` | save the current settings as a portable profile |
 | `refresh` | rescan the working copy from disk without network access |
 | `language [code]` | show available language codes or switch the workspace language immediately |
+| `diagnostics` | show every diagnostic in a scrollable overlay |
 | `help [verb]` | open the localized command cheat sheet |
 | `quit` | perform the same safe exit action as `q` |
 
@@ -253,8 +262,9 @@ changing the stored choice; otherwise the workspace uses the stored choice and
 then falls back to system-language detection. Desktop language settings remain
 independent.
 
-Successful and failed results temporarily occupy the same footer row, then the
-contextual hints return. Execution failures never open an error dialog. Settings
+Single-line successful results temporarily occupy the footer. Errors remain until
+the next key press, and multiline results use a scrollable overlay instead of
+being flattened. Settings
 commands use the same optimistic update, cancellation/coalescing, corner progress,
 and rollback path as mouse and keyboard changes in Parameters. Export commands use
 the existing confirmation and blocking progress surfaces.
@@ -265,6 +275,9 @@ the existing confirmation and blocking progress surfaces.
 |---|---|
 | Up / Down | navigate |
 | Left / Right | collapse / expand |
+| Shift+Left / Shift+Right | collapse / expand the complete tree |
+| Ctrl+A / Ctrl+U | select all / select none in the tree |
+| `R` | reveal a project path in the tree |
 | Enter | open or activate |
 | Space | toggle the selected node |
 | `/` | search |
@@ -274,25 +287,44 @@ the existing confirmation and blocking progress surfaces.
 | Shift+Tab / Shift+F6 | focus the previous major pane |
 | `1`, `2`, `3` | tree, content, tree plus content |
 | `F` | format |
-| `M` | focus Git filtering in Exclusions |
+| `C` | focus Content transformations |
+| `M` | cycle Git mode: none → gitignore → tracked |
 | `X` | focus Exclusions |
 | `T` | focus File Types |
 | `E` | export context |
-| `Z` | export project or ZIP |
+| `z` / Shift+`Z` | export folder / ZIP |
+| `P` | save the current selection as a portable profile |
+| `D` | show diagnostics |
 | `A` | analyze |
 | `G` | open Desktop |
 | F1 or `?` | help |
-| Esc | close the active overlay |
-| `Q` | quit |
+| Esc | cancel work; close an overlay; clear the active filter/search; otherwise confirm return to Welcome |
+| `q` | quit |
 
 The footer shows actions relevant to the active layout.
 
 When Context Preview has focus, Up/Down and `j`/`k` scroll by line,
 Page Up/Page Down scroll by page, and Home/End move to the start or end.
-Left/Right scroll horizontally when content overflows. In compact layouts,
-moving focus also makes the corresponding Tree, Preview, or Parameters pane visible. Pane
+Left/Right scroll horizontally when content overflows. `{` and `}` move to the
+previous or next file section, Ctrl+G jumps to a line, and `W` toggles line
+wrapping. Changing the selected tree file scrolls Preview to that file after a
+short debounce. In compact layouts, moving focus also makes the corresponding
+Tree, Preview, or Parameters pane visible. Pane
 focus and preview position survive Help, settings overlays, refreshes, exports,
 cancellation, and terminal resize.
+
+Tree selection, expanded folders, Preview view/format, and the focused path are
+stored per canonical project root. The settings store retains the 32 most
+recently used project entries. In split layouts the Parameters area remains
+visible as a collapsed aggregate strip; a wide but low terminal uses the
+two-panel layout instead of squeezing three panes.
+
+Path pickers include an editable path field above the list. `~`, environment
+variables, relative paths, and Tab completion are supported. Command-line export
+destinations use filesystem completion from the active project directory.
+
+Clicking anywhere on a tree or parameter row toggles its checkbox; double-clicking
+a folder expands or collapses it.
 
 Within Parameters, Up/Down and `j`/`k` move through the active mini-list. At a
 list boundary focus crosses to the adjacent mini-panel. Enter or Space toggles
@@ -357,13 +389,14 @@ sequence at all. The upstream behavior is documented in the
 
 ## Export
 
-The export confirmation asks whether to export and presents a compact aligned
+The export summary asks whether to export and presents a compact aligned
 table containing destination, file and folder counts, size, estimated tokens,
-filters, and diagnostics. Export is the default action. A destination conflict
-uses a short error containing only the conflicting path. Successful exports do
+filters, diagnostics, and an inline redaction warning when applicable. Export is
+the default action. A destination conflict offers **Overwrite** directly in the
+summary. Successful exports do
 not open another dialog; the result path appears transiently in the status bar.
 
-When Hide Secrets is enabled, project-copy confirmation states that matching text
+When redaction is enabled, the project-copy summary states that matching text
 will change, binary files will remain unchanged, and the folder or ZIP may not
 build or run. Keep-as-is decisions made in Preview also apply to the output.
 
