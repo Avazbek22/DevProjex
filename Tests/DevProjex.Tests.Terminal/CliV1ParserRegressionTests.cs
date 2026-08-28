@@ -95,6 +95,20 @@ public sealed class CliV1ParserRegressionTests
 	}
 
 	[Fact]
+	public void RecursiveQuietAliasConflictsWithExplicitVerbosity()
+	{
+		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
+
+		var parseResult = root.Parse([
+			"doctor",
+			"--quiet",
+			"--verbosity", "normal"
+		]);
+
+		Assert.NotEmpty(parseResult.Errors);
+	}
+
+	[Fact]
 	public void DevProjexRootPrecedesClaudeProjectDirUnlessRootsAreExplicit()
 	{
 		var variables = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)

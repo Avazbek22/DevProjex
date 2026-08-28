@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.CommandLine.Parsing;
 
 namespace DevProjex.Terminal.CommandLine;
 
@@ -83,22 +84,32 @@ internal sealed class OutputOptions
 				!value.Equals("always", StringComparison.Ordinal) ||
 				!CliParseValue.TryGet(result, Plain, out var plain) ||
 				!plain);
-		root.Validators.Add(result =>
+	}
+
+	public void AddValidatorsTo(Command command)
+	{
+		if (command.Subcommands.Count == 0)
 		{
-			if (result.GetValue(Quiet) && result.GetResult(Verbosity) is { Implicit: false })
-			{
-				result.AddError(LocalizedParseError.Create(
-					_localization["Terminal.Validation.QuietVerbosityConflict"]));
-			}
-			if (CliParseValue.TryGet(result, Plain, out var plain) &&
-			    plain &&
-			    CliParseValue.TryGet(result, Color, out var color) &&
-			    color == TerminalColorMode.Always)
-			{
-				result.AddError(LocalizedParseError.Create(
-					_localization["Terminal.Validation.PlainColorConflict"]));
-			}
-		});
+			command.Validators.Add(ValidatePresentationOptions);
+			return;
+		}
+
+		foreach (var child in command.Subcommands)
+			AddValidatorsTo(child);
+	}
+
+	private void ValidatePresentationOptions(CommandResult result)
+	{
+		if (result.GetValue(Quiet) && result.GetResult(Verbosity) is { Implicit: false })
+		{
+			result.AddError(LocalizedParseError.Create(
+				_localization["Terminal.Validation.QuietVerbosityConflict"]));
+		}
+		if (result.GetValue(Plain) && result.GetValue(Color) == TerminalColorMode.Always)
+		{
+			result.AddError(LocalizedParseError.Create(
+				_localization["Terminal.Validation.PlainColorConflict"]));
+		}
 	}
 
 	public void AddProgressTo(Command command) => command.Options.Add(Progress);

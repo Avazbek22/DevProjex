@@ -83,6 +83,7 @@ public sealed class DevProjexCommandTree
 		root.Subcommands.Add(BuildHelpCommand(root));
 		root.Subcommands.Add(BuildCompletionCommand(root));
 		root.Subcommands.Add(BuildDevCommand(root));
+		_output.AddValidatorsTo(root);
 		CliExamplesRegistry.Set(
 			root,
 			"devprojex",
