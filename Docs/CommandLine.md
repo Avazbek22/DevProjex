@@ -530,7 +530,7 @@ The destination is exact:
 ```shell
 devprojex export project . --as folder -o ../devprojex-submission
 devprojex export project . --as zip -o ../devprojex-submission.zip
-devprojex export project . --as zip -o - > devprojex-submission.zip
+$ devprojex export project . --as zip -o - > devprojex-submission.zip
 devprojex export project . --compress-code --as zip -o ../devprojex-compact.zip
 ```
 
