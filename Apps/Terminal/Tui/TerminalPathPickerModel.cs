@@ -16,6 +16,10 @@ internal enum TerminalPathPickerError
 	Unavailable
 }
 
+internal readonly record struct TerminalPathPickerSelection(
+	string? Path,
+	bool InvalidTypedPath);
+
 internal sealed record TerminalPathPickerEntry(
 	string Path,
 	string Name,
@@ -129,6 +133,21 @@ internal sealed class TerminalPathPickerModel
 			TerminalPathPickerMode.JsonFile when !entry.IsDirectory => entry.Path,
 			_ => null
 		};
+	}
+
+	public TerminalPathPickerSelection ResolveSelection(string input, int selectedIndex)
+	{
+		if (!string.IsNullOrWhiteSpace(input))
+		{
+			return SelectInputPath(input) is { } typedPath
+				? new TerminalPathPickerSelection(typedPath, InvalidTypedPath: false)
+				: new TerminalPathPickerSelection(null, InvalidTypedPath: true);
+		}
+
+		var fallback = _mode == TerminalPathPickerMode.Directory
+			? SelectCurrentDirectory()
+			: SelectEntry(selectedIndex);
+		return new TerminalPathPickerSelection(fallback, InvalidTypedPath: false);
 	}
 
 	public string ResolveInputPath(string input)

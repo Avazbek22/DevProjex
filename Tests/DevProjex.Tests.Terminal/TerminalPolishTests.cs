@@ -75,6 +75,29 @@ public sealed class TerminalPolishTests
 	}
 
 	[Fact]
+	public void ColumnLayoutClampsWhenMinimumColumnsExceedTheAvailableWidth()
+	{
+		var environment = new TestTerminalEnvironment
+		{
+			IsOutputInteractive = true,
+			HasAttachedConsole = true,
+			IsTerminalHost = true,
+			Width = 40
+		};
+		var columns = Enumerable.Range(1, 30)
+			.Select(static index => $"column-{index}")
+			.ToArray();
+
+		var lines = TerminalColumnLayout.FormatForOutput(
+			[columns],
+			columns,
+			environment,
+			new TerminalOutputOptions());
+
+		Assert.All(lines, static line => Assert.True(TerminalCellWidth.Measure(line) <= 40, line));
+	}
+
+	[Fact]
 	public void FocusModelCapturesAndRestoresPaneSectionAndAggregateTogether()
 	{
 		var model = new WorkspaceFocusModel

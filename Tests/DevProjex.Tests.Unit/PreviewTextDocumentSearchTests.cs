@@ -77,6 +77,29 @@ public sealed class PreviewTextDocumentSearchTests
 		Assert.InRange(document.LineReadCount, 3, 4);
 	}
 
+	[Theory]
+	[InlineData("")]
+	[InlineData("a")]
+	[InlineData("界")]
+	[InlineData(" a ")]
+	public void CanSearchRequiresAtLeastTwoRunes(string query) =>
+		Assert.False(PreviewTextDocumentSearch.CanSearch(query));
+
+	[Fact]
+	public void FindCapsMatchesAtTheSharedPreviewLimit()
+	{
+		using var document = new TrackingPreviewDocument(
+			Enumerable.Repeat("marker marker", PreviewTextDocumentSearch.MaximumMatches).ToArray());
+
+		var result = PreviewTextDocumentSearch.Find(
+			document,
+			"marker",
+			TestContext.Current.CancellationToken);
+
+		Assert.True(result.IsCapped);
+		Assert.Equal(PreviewTextDocumentSearch.MaximumMatches, result.Matches.Count);
+	}
+
 	private static FileBackedPreviewTextDocument CreateFileBackedDocument(
 		TemporaryDirectory temporary,
 		string text,

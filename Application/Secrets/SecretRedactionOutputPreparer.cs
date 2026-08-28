@@ -60,12 +60,40 @@ public sealed class SecretRedactionOutputPreparer
 			cancellationToken,
 			progress);
 
-	public async Task<PreparedSecretRedactionOutput> PrepareAsync(
+	public Task<PreparedSecretRedactionOutput> PrepareAsync(
 		ContentTransformationContext context,
 		IReadOnlyList<string> orderedFilePaths,
 		bool captureEffectiveFindings,
 		CancellationToken cancellationToken = default,
-		IProgress<ProjectCopyExportProgress>? progress = null)
+		IProgress<ProjectCopyExportProgress>? progress = null) =>
+		PrepareCoreAsync(
+			context,
+			orderedFilePaths,
+			captureEffectiveFindings,
+			materializeTransformedContent: true,
+			cancellationToken,
+			progress);
+
+	public Task<PreparedSecretRedactionOutput> InspectAsync(
+		ContentTransformationContext context,
+		IReadOnlyList<string> orderedFilePaths,
+		bool captureEffectiveFindings,
+		CancellationToken cancellationToken = default) =>
+		PrepareCoreAsync(
+			context,
+			orderedFilePaths,
+			captureEffectiveFindings,
+			materializeTransformedContent: false,
+			cancellationToken,
+			progress: null);
+
+	private async Task<PreparedSecretRedactionOutput> PrepareCoreAsync(
+		ContentTransformationContext context,
+		IReadOnlyList<string> orderedFilePaths,
+		bool captureEffectiveFindings,
+		bool materializeTransformedContent,
+		CancellationToken cancellationToken,
+		IProgress<ProjectCopyExportProgress>? progress)
 	{
 		ArgumentNullException.ThrowIfNull(context);
 		ArgumentNullException.ThrowIfNull(orderedFilePaths);
@@ -187,6 +215,21 @@ public sealed class SecretRedactionOutputPreparer
 					IReadOnlyList<EffectiveRedactionFinding> findings = plan is null || !captureEffectiveFindings
 						? []
 						: BuildEffectiveFindings(plan.Spans, content.Content, compressed.Map);
+					if (!materializeTransformedContent)
+					{
+						preparedFiles[sourcePath] = new PreparedSecretFile(
+							sourcePath,
+							sourcePath,
+							FileContentClassification.Text,
+							result.Encoding,
+							[],
+							findings)
+						{
+							SourceMetadata = metadataAfterRead
+						};
+						completed = true;
+						continue;
+					}
 					// A completed redaction scan must remain authoritative if the source changes before output.
 					if (scope is null && ReferenceEquals(transformedText, content.Content) && redactions.Length == 0)
 					{

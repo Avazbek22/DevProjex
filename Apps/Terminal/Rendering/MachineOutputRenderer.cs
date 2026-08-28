@@ -57,6 +57,7 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 		var hasExtendedContent = plan.Redaction is not null ||
 		                         plan.Privacy is not null ||
 		                         plan.Compression is not null ||
+		                         plan.FindingCount is not null ||
 		                         plan.Findings is not null;
 		return new AnalysisDocument(
 			SchemaVersion: 1,
@@ -129,6 +130,7 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 					compression.CommentTransformedFiles,
 					compression.BlankLineTransformedFiles)
 				: null,
+			FindingCount: plan.FindingCount,
 			Findings: plan.Findings?.Select(static finding =>
 				new AnalysisFindingDocument(
 					finding.RuleId,
@@ -163,6 +165,8 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 		AnalysisRedactionDocument? Privacy,
 		[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
 		AnalysisCompressionDocument? Compression,
+		[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+		int? FindingCount,
 		[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
 		IEnumerable<AnalysisFindingDocument>? Findings,
 		[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

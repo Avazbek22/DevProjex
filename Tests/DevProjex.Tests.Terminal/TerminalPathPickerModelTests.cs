@@ -106,4 +106,28 @@ public sealed class TerminalPathPickerModelTests
 		Assert.Equal(expectedCurrentDirectory, model.CurrentDirectory);
 		Assert.Equal(TerminalPathPickerError.None, model.Error);
 	}
+
+	[Theory]
+	[InlineData(TerminalPathPickerMode.Directory)]
+	[InlineData(TerminalPathPickerMode.JsonFile)]
+	internal void MissingTypedPathNeverFallsBackToTheCurrentOrSelectedEntry(
+		TerminalPathPickerMode mode)
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("settings.json", "{}");
+		var model = new TerminalPathPickerModel(mode, workspace.Path);
+		var fallbackIndex = mode == TerminalPathPickerMode.JsonFile
+			? model.Entries
+				.Select((entry, index) => (entry, index))
+				.First(pair => !pair.entry.IsDirectory)
+				.index
+			: 0;
+
+		var selection = model.ResolveSelection(
+			Path.Combine(workspace.Path, "missing"),
+			fallbackIndex);
+
+		Assert.True(selection.InvalidTypedPath);
+		Assert.Null(selection.Path);
+	}
 }

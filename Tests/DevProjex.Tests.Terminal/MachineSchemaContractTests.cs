@@ -98,6 +98,7 @@ public sealed class MachineSchemaContractTests
 			Redaction = new SecretRedactionSummary(2, 2),
 			Privacy = new PrivateDataRedactionSummary(1, 1),
 			Compression = new CodeCompressionSummary(1, 0, 100, 40, 1, 1, 1),
+			FindingCount = 1,
 			Findings =
 			[
 				new EffectiveRedactionFinding(
@@ -138,6 +139,7 @@ public sealed class MachineSchemaContractTests
 				"redaction",
 				"privacy",
 				"compression",
+				"findingCount",
 				"findings",
 				"contentInspection"
 			],
@@ -171,6 +173,7 @@ public sealed class MachineSchemaContractTests
 		plan = plan with
 		{
 			Redaction = new SecretRedactionSummary(5_000, 5_000),
+			FindingCount = 5_000,
 			Findings = Enumerable.Range(1, 5_000)
 				.Select(static line => new EffectiveRedactionFinding(
 					"github-pat",

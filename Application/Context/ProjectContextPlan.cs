@@ -122,6 +122,7 @@ public sealed record ProjectContextPlan(
 	PrivateDataRedactionSummary? Privacy = null,
 	IReadOnlyList<UnscannableFile>? UnscannableFiles = null,
 	IReadOnlyList<EffectiveRedactionFinding>? Findings = null,
+	int? FindingCount = null,
 	bool HasIgnoreOptionCounts = false,
 	IgnoreOptionCounts IgnoreOptionCounts = default,
 	IgnoreControllerImpactCounts IgnoreControllerImpactCounts = default)

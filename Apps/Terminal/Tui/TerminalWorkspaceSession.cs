@@ -64,6 +64,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private long _previewSearchRequestId;
 	private long _treePreviewSyncRequestId;
 	private long _workspacePersistenceRequestId;
+	private int _workspacePersistencePending;
 	private bool _previewSearchInProgress;
 
 	private TerminalWelcomeContext? _welcomeContext;
@@ -338,6 +339,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 
 	public async Task CompleteAsync()
 	{
+		await FlushPendingWorkspacePersistenceAsync().ConfigureAwait(false);
 		_stopping = true;
 		await _commandHistoryPersistence.CompleteAsync().ConfigureAwait(false);
 		_settingsPersistenceCts.CancelAfter(SettingsPersistenceShutdownBudget);
@@ -1468,27 +1470,47 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	{
 		if (_state is null || _screen != TerminalWorkspaceScreen.Workspace || _stopping)
 			return;
+		Interlocked.Exchange(ref _workspacePersistencePending, 1);
 		var requestId = Interlocked.Increment(ref _workspacePersistenceRequestId);
 		_application.AddTimeout(TimeSpan.FromMilliseconds(250), () =>
 		{
 			if (_stopping || requestId != Volatile.Read(ref _workspacePersistenceRequestId) || _state is null)
 				return false;
-			var state = _state;
-			var focusedPath = string.IsNullOrWhiteSpace(_selectedTreePath)
-				? null
-				: PathUtility.NormalizeSeparators(Path.GetRelativePath(state.Plan.SourceRoot, _selectedTreePath));
-			var settings = new TerminalProjectSettings(
-				state.Plan.SourceRoot,
-				state.BuildPersistedSelectedRelativePaths(),
-				state.BuildExpandedRelativePaths(),
-				focusedPath,
-				_previewView,
-				_format,
-				DateTimeOffset.UtcNow);
-			TrackBackgroundTask(PersistWorkspaceSettingsAsync(settings));
+			var settings = CaptureWorkspaceSettings();
+			if (settings is not null && Interlocked.Exchange(ref _workspacePersistencePending, 0) != 0)
+				TrackBackgroundTask(PersistWorkspaceSettingsAsync(settings));
 			return false;
 		});
 	}
+
+	private TerminalProjectSettings? CaptureWorkspaceSettings()
+	{
+		if (_state is not { } state || _screen != TerminalWorkspaceScreen.Workspace)
+			return null;
+		var focusedPath = string.IsNullOrWhiteSpace(_selectedTreePath)
+			? null
+			: PathUtility.NormalizeSeparators(Path.GetRelativePath(state.Plan.SourceRoot, _selectedTreePath));
+		return new TerminalProjectSettings(
+			state.Plan.SourceRoot,
+			state.BuildPersistedSelectedRelativePaths(),
+			state.BuildExpandedRelativePaths(),
+			focusedPath,
+			_previewView,
+			_format,
+			DateTimeOffset.UtcNow);
+	}
+
+	private async Task FlushPendingWorkspacePersistenceAsync()
+	{
+		Interlocked.Increment(ref _workspacePersistenceRequestId);
+		if (Interlocked.Exchange(ref _workspacePersistencePending, 0) == 0)
+			return;
+		if (CaptureWorkspaceSettings() is { } settings)
+			await PersistWorkspaceSettingsAsync(settings).ConfigureAwait(false);
+	}
+
+	private void FlushPendingWorkspacePersistence() =>
+		FlushPendingWorkspacePersistenceAsync().GetAwaiter().GetResult();
 
 	private async Task PersistWorkspaceSettingsAsync(TerminalProjectSettings settings)
 	{
@@ -1684,12 +1706,15 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		}
 		else if (_preview.SearchQuery.Length > 0)
 		{
+			var matchCount = _preview.IsSearchCapped
+				? $"{_preview.SearchMatchCount:N0}+"
+				: $"{_preview.SearchMatchCount:N0}";
 			var matchRange =
 				$"{L("Terminal.Tui.Search")} " +
-				$"{_preview.CurrentSearchMatchOrdinal:N0}/{_preview.SearchMatchCount:N0}  |  ";
+				$"{_preview.CurrentSearchMatchOrdinal:N0}/{matchCount}  |  ";
 			fullRange = matchRange + fullRange;
 			compactRange =
-				$"/ {_preview.CurrentSearchMatchOrdinal:N0}/{_preview.SearchMatchCount:N0}  |  " +
+				$"/ {_preview.CurrentSearchMatchOrdinal:N0}/{matchCount}  |  " +
 				compactRange;
 		}
 		var availableWidth = Math.Max(1, _preview.Viewport.Width - 2);
@@ -1725,9 +1750,12 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		}
 		else if (_preview?.SearchQuery.Length > 0)
 		{
+			var matchCount = _preview.IsSearchCapped
+				? $"{_preview.SearchMatchCount:N0}+"
+				: $"{_preview.SearchMatchCount:N0}";
 			previewTitle +=
 				$"{PanelSeparator}/{_preview.SearchQuery} " +
-				$"({_preview.CurrentSearchMatchOrdinal:N0}/{_preview.SearchMatchCount:N0})";
+				$"({_preview.CurrentSearchMatchOrdinal:N0}/{matchCount})";
 		}
 		var previewTitleWidth = Math.Max(8, _previewFrame.Viewport.Width - 2);
 		var renderedPreviewTitle = previewTitle.GetColumns() <= previewTitleWidth
@@ -2656,6 +2684,18 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			UpdatePanelTitles();
 			return;
 		}
+		if (!PreviewTextDocumentSearch.CanSearch(query.Trim()))
+		{
+			_previewSearchQuery = null;
+			CancelPreviewSearch(clearQuery: true);
+			_preview.ClearSearch();
+			UpdatePanelTitles();
+			ShowNotice(
+				L("Terminal.Tui.Search"),
+				L("Terminal.Tui.Preview.SearchTooShort"),
+				TerminalWorkspaceTheme.Warning);
+			return;
+		}
 
 		SchedulePreviewSearch(query, showNoResults: true);
 	}
@@ -2669,6 +2709,13 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			return;
 		var normalizedQuery = query.Trim();
 		if (normalizedQuery.Length == 0)
+		{
+			CancelPreviewSearch(clearQuery: true);
+			_preview.ClearSearch();
+			UpdatePanelTitles();
+			return;
+		}
+		if (!PreviewTextDocumentSearch.CanSearch(normalizedQuery))
 		{
 			CancelPreviewSearch(clearQuery: true);
 			_preview.ClearSearch();
@@ -2693,7 +2740,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		{
 			try
 			{
-				var matches = PreviewTextDocumentSearch.FindAll(
+				var searchResult = PreviewTextDocumentSearch.Find(
 					document,
 					normalizedQuery,
 					cancellationToken);
@@ -2713,7 +2760,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					_previewSearchInProgress = false;
 					var match = _preview.ApplySearchResults(
 						normalizedQuery,
-						matches,
+						searchResult,
 						startLine);
 					if (match is not null)
 					{
@@ -4432,24 +4479,17 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		void OpenSelection()
 		{
 			var typed = pathInput.Text?.ToString() ?? string.Empty;
-			if (!string.IsNullOrWhiteSpace(typed) && model.SelectInputPath(typed) is { } typedPath)
+			var selection = model.ResolveSelection(typed, list.SelectedItem ?? -1);
+			if (selection.InvalidTypedPath)
 			{
-				selectedPath = typedPath;
-				_application.RequestStop(dialog);
+				status.Text = L("Terminal.Tui.Picker.PathNotFound");
+				status.SchemeName = TerminalWorkspaceTheme.Warning;
+				pathInput.SetFocus();
 				return;
 			}
-			if (mode == TerminalPathPickerMode.Directory)
+			if (selection.Path is { } resolvedPath)
 			{
-				selectedPath = model.SelectCurrentDirectory();
-				if (selectedPath is not null)
-					_application.RequestStop(dialog);
-				return;
-			}
-
-			var selected = model.SelectEntry(list.SelectedItem ?? -1);
-			if (selected is not null && File.Exists(selected))
-			{
-				selectedPath = selected;
+				selectedPath = resolvedPath;
 				_application.RequestStop(dialog);
 				return;
 			}
@@ -5182,6 +5222,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		{
 			return false;
 		}
+		FlushPendingWorkspacePersistence();
 		leave();
 		return true;
 	}
@@ -5196,6 +5237,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		}
 		if (!Confirm(L("Terminal.Tui.Exit"), L("Terminal.Tui.ConfirmExit")))
 			return false;
+		FlushPendingWorkspacePersistence();
 		RequestExit();
 		return true;
 	}

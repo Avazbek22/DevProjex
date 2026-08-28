@@ -35,27 +35,29 @@ public sealed class AnalyzeCommandHandler(
 				.ConfigureAwait(false);
 			transformationContext = CreateTransformationContext(plan);
 		}
+		var findingsRequested = request.IncludeFindings || request.FailOnFindings;
 		IReadOnlyList<EffectiveRedactionFinding> effectiveFindings = [];
 		var effectiveFindingCount = 0;
+		var findingsCapturedByOutput = false;
 		if (transformationContext is not null)
 		{
 			await using var prepared = await services.SecretRedactionOutputPreparer
 				.PrepareAsync(
 					transformationContext,
 					plan.IncludedFiles,
-					request.IncludeFindings,
+					request.IncludeFindings && plan.Selection.HideSecrets == true,
 					cancellationToken)
 				.ConfigureAwait(false);
 			var transformedAnalyzer = services.SecretRedactionOutputPreparer.CreatePreparedAnalyzer(prepared);
-			effectiveFindingCount = prepared.Snapshot?.DetectedCount ?? 0;
-			if (request.IncludeFindings)
+			if (findingsRequested && plan.Selection.HideSecrets == true)
 			{
-				effectiveFindings = prepared.GetEffectiveFindings();
-				if (effectiveFindings.Count != effectiveFindingCount)
+				effectiveFindingCount = prepared.Snapshot?.DetectedCount ?? 0;
+				if (request.IncludeFindings)
 				{
-					throw new SecretDetectionException(
-						"The effective redaction finding count did not match the published snapshot.");
+					effectiveFindings = prepared.GetEffectiveFindings();
+					EnsureFindingCountMatches(effectiveFindings, effectiveFindingCount);
 				}
+				findingsCapturedByOutput = true;
 			}
 			var transformedMetrics = await ProjectContentMetricsCalculator
 				.CalculateAsync(transformedAnalyzer, plan.IncludedFiles, cancellationToken)
@@ -94,8 +96,56 @@ public sealed class AnalyzeCommandHandler(
 				UnscannableFiles = prepared.UnscannableFiles
 			};
 		}
-		if (request.IncludeFindings)
-			plan = plan with { Findings = effectiveFindings };
+
+		if (findingsRequested && !findingsCapturedByOutput)
+		{
+			var detectionContext = CreateTransformationContext(plan, forceSecretDetection: true) ??
+			                       throw new InvalidOperationException(
+				                       "Finding detection did not create a transformation context.");
+			SecretRedactionSnapshot detectionSnapshot;
+			IReadOnlyList<UnscannableFile> detectionUnscannableFiles;
+			if (request.IncludeFindings)
+			{
+				await using var prepared = await services.SecretRedactionOutputPreparer
+					.InspectAsync(
+						detectionContext,
+						plan.IncludedFiles,
+						captureEffectiveFindings: true,
+						cancellationToken)
+					.ConfigureAwait(false);
+				detectionSnapshot = prepared.Snapshot ??
+				                    throw new SecretDetectionException(
+					                    "Finding detection completed without a snapshot.");
+				effectiveFindings = prepared.GetEffectiveFindings();
+				detectionUnscannableFiles = prepared.UnscannableFiles;
+			}
+			else
+			{
+				detectionSnapshot = await services.SecretRedactionOutputPreparer
+					.DiscoverAsync(detectionContext, plan.IncludedFiles, cancellationToken)
+					.ConfigureAwait(false);
+				detectionUnscannableFiles = detectionSnapshot.UnscannableFiles;
+			}
+
+			effectiveFindingCount = detectionSnapshot.DetectedCount;
+			if (request.IncludeFindings)
+				EnsureFindingCountMatches(effectiveFindings, effectiveFindingCount);
+			plan = plan with
+			{
+				UnscannableFiles = MergeUnscannableFiles(
+					plan.UnscannableFiles,
+					detectionUnscannableFiles)
+			};
+		}
+
+		if (findingsRequested)
+		{
+			plan = plan with
+			{
+				FindingCount = effectiveFindingCount,
+				Findings = request.IncludeFindings ? effectiveFindings : null
+			};
+		}
 		new ContextDiagnosticRenderer(environment, request.Output, services.Localization)
 			.Write(plan.Diagnostics);
 
@@ -186,14 +236,16 @@ public sealed class AnalyzeCommandHandler(
 			selection.HideSecrets == true,
 			selection.HidePrivateData == true) != SecretRedactionFeatures.None;
 
-	private ContentTransformationContext? CreateTransformationContext(ProjectContextPlan plan)
+	private ContentTransformationContext? CreateTransformationContext(
+		ProjectContextPlan plan,
+		bool forceSecretDetection = false)
 	{
 		var transformKinds = CodeTransformIdentity.Resolve(
 			plan.Selection.CompressCode == true,
 			plan.Selection.StripComments == true,
 			plan.Selection.StripBlankLines == true);
 		var redactionFeatures = SecretRedactionFeatureSelection.Resolve(
-			plan.Selection.HideSecrets == true,
+			forceSecretDetection || plan.Selection.HideSecrets == true,
 			plan.Selection.HidePrivateData == true);
 		return ContentTransformationContext.For(
 			transformKinds != CodeTransformKinds.None
@@ -208,6 +260,33 @@ public sealed class AnalyzeCommandHandler(
 					services.SecretRedactionSession,
 					redactionFeatures)
 				: null);
+	}
+
+	private static void EnsureFindingCountMatches(
+		IReadOnlyList<EffectiveRedactionFinding> findings,
+		int findingCount)
+	{
+		if (findings.Count != findingCount)
+		{
+			throw new SecretDetectionException(
+				"The effective redaction finding count did not match the published snapshot.");
+		}
+	}
+
+	private static IReadOnlyList<UnscannableFile> MergeUnscannableFiles(
+		IReadOnlyList<UnscannableFile>? outputFiles,
+		IReadOnlyList<UnscannableFile> detectionFiles)
+	{
+		if (outputFiles is not { Count: > 0 })
+			return detectionFiles;
+		if (detectionFiles.Count == 0)
+			return outputFiles;
+
+		return outputFiles
+			.Concat(detectionFiles)
+			.DistinctBy(static file => file.Path, PathComparer.Default)
+			.OrderBy(static file => file.Path, PathComparer.Default)
+			.ToArray();
 	}
 }
 
@@ -314,11 +393,11 @@ internal static class AnalysisTextFormatter
 					localization["PrivateDataRedaction.NoFindingsNotice"]));
 			}
 		}
-		if (plan.Findings is { } findings)
+		if (plan.FindingCount is { } findingCount)
 		{
 			rows.Add(new AnalysisTextRow(
 				localization["Terminal.Analysis.Findings"],
-				findings.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+				findingCount.ToString(System.Globalization.CultureInfo.InvariantCulture)));
 		}
 		if (plan.UnscannableFiles is { Count: > 0 } unscannableFiles)
 		{

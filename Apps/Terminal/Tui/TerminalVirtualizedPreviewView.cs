@@ -23,6 +23,7 @@ internal sealed class TerminalVirtualizedPreviewView : View
 	private int _maximumDisplayColumns;
 	private int _cachedCharacterCount;
 	private int[] _wrappedLineStarts = [0, 1];
+	private int[][] _wrappedSegmentColumns = [[0]];
 	private int _wrappedWidth;
 	private bool _updatingContentGeometry;
 	private long _viewportChangeRevision;
@@ -92,6 +93,7 @@ internal sealed class TerminalVirtualizedPreviewView : View
 	public string SearchQuery => _searchQuery;
 
 	public int SearchMatchCount => _searchMatches.Count;
+	public bool IsSearchCapped { get; private set; }
 
 	public int CurrentSearchMatchOrdinal =>
 		_currentSearchMatchIndex >= 0 ? _currentSearchMatchIndex + 1 : 0;
@@ -217,10 +219,10 @@ internal sealed class TerminalVirtualizedPreviewView : View
 		int startColumn = -1)
 	{
 		_searchQuery = query?.Trim() ?? string.Empty;
-		ReplaceSearchMatches(
-			_document is null
-				? []
-				: PreviewTextDocumentSearch.FindAll(_document, _searchQuery));
+		var result = _document is null
+			? new PreviewTextSearchResult([], IsCapped: false)
+			: PreviewTextDocumentSearch.Find(_document, _searchQuery);
+		ReplaceSearchMatches(result.Matches, result.IsCapped);
 		return FindNextSearchMatch(startLine, startColumn, reverse: false);
 	}
 
@@ -235,14 +237,14 @@ internal sealed class TerminalVirtualizedPreviewView : View
 
 	public PreviewTextSearchMatch? ApplySearchResults(
 		string query,
-		IReadOnlyList<PreviewTextSearchMatch> matches,
+		PreviewTextSearchResult result,
 		int startLine,
 		int startColumn = -1)
 	{
 		if (!string.Equals(_searchQuery, query.Trim(), StringComparison.Ordinal))
 			return null;
 
-		ReplaceSearchMatches(matches);
+		ReplaceSearchMatches(result.Matches, result.IsCapped);
 		_currentSearchMatchIndex = -1;
 		return FindNextSearchMatch(startLine, startColumn, reverse: false);
 	}
@@ -499,7 +501,9 @@ internal sealed class TerminalVirtualizedPreviewView : View
 			.ToList();
 	}
 
-	private void ReplaceSearchMatches(IReadOnlyList<PreviewTextSearchMatch> matches)
+	private void ReplaceSearchMatches(
+		IReadOnlyList<PreviewTextSearchMatch> matches,
+		bool isCapped = false)
 	{
 		_searchMatches.Clear();
 		_searchMatches.AddRange(matches);
@@ -508,6 +512,7 @@ internal sealed class TerminalVirtualizedPreviewView : View
 			.ToDictionary(
 				static group => group.Key,
 				static group => group.OrderBy(static match => match.Column).ToArray());
+		IsSearchCapped = isCapped;
 	}
 
 	private void HandleViewportChanged()
@@ -556,7 +561,8 @@ internal sealed class TerminalVirtualizedPreviewView : View
 		else if (line == LineCount)
 			line--;
 		line = Math.Clamp(line, 0, Math.Max(0, LineCount - 1));
-		return (line, (normalizedRow - _wrappedLineStarts[line]) * _wrappedWidth);
+		var segment = normalizedRow - _wrappedLineStarts[line];
+		return (line, _wrappedSegmentColumns[line][segment]);
 	}
 
 	private int WrappedRowCount
@@ -585,15 +591,19 @@ internal sealed class TerminalVirtualizedPreviewView : View
 		else if (line == LineCount)
 			line--;
 		line = Math.Clamp(line, 0, Math.Max(0, LineCount - 1));
-		return (line, (normalizedRow - _wrappedLineStarts[line]) * _wrappedWidth);
+		var segment = normalizedRow - _wrappedLineStarts[line];
+		return (line, _wrappedSegmentColumns[line][segment]);
 	}
 
 	private int GetWrappedRow(int zeroBasedLine, int displayColumn)
 	{
 		EnsureWrappedLayout();
 		var line = Math.Clamp(zeroBasedLine, 0, Math.Max(0, LineCount - 1));
-		var lineRows = Math.Max(1, _wrappedLineStarts[line + 1] - _wrappedLineStarts[line]);
-		var segment = Math.Clamp(Math.Max(0, displayColumn) / _wrappedWidth, 0, lineRows - 1);
+		var segmentColumns = _wrappedSegmentColumns[line];
+		var segment = Array.BinarySearch(segmentColumns, Math.Max(0, displayColumn));
+		if (segment < 0)
+			segment = ~segment - 1;
+		segment = Math.Clamp(segment, 0, segmentColumns.Length - 1);
 		return _wrappedLineStarts[line] + segment;
 	}
 
@@ -602,6 +612,7 @@ internal sealed class TerminalVirtualizedPreviewView : View
 		if (_document is null)
 		{
 			_wrappedLineStarts = [0, 1];
+			_wrappedSegmentColumns = [[0]];
 			_wrappedWidth = Math.Max(1, VisibleTextWidth);
 			return;
 		}
@@ -611,23 +622,48 @@ internal sealed class TerminalVirtualizedPreviewView : View
 			return;
 
 		var starts = new int[_document.LineCount + 1];
+		var segmentColumns = new int[_document.LineCount][];
 		var row = 0;
 		for (var line = 0; line < _document.LineCount; line++)
 		{
 			starts[line] = row;
-			var columns = GetColumns(_document.GetLineText(line + 1).AsSpan());
-			var rows = Math.Max(1, (columns + width - 1) / width);
-			row = checked(row + rows);
+			segmentColumns[line] = BuildWrappedSegmentColumns(
+				_document.GetLineText(line + 1),
+				width);
+			row = checked(row + segmentColumns[line].Length);
 		}
 		starts[^1] = Math.Max(1, row);
 		_wrappedLineStarts = starts;
+		_wrappedSegmentColumns = segmentColumns;
 		_wrappedWidth = width;
+	}
+
+	internal static int[] BuildWrappedSegmentColumns(string value, int width)
+	{
+		var effectiveWidth = Math.Max(1, width);
+		List<int>? starts = null;
+		var displayColumn = 0;
+		var segmentWidth = 0;
+		foreach (var rune in value.EnumerateRunes())
+		{
+			var runeWidth = Math.Max(0, rune.GetColumns());
+			if (runeWidth > 0 && segmentWidth > 0 && segmentWidth + runeWidth > effectiveWidth)
+			{
+				starts ??= [0];
+				starts.Add(displayColumn);
+				segmentWidth = 0;
+			}
+			displayColumn += runeWidth;
+			segmentWidth += runeWidth;
+		}
+		return starts?.ToArray() ?? [0];
 	}
 
 	private void InvalidateWrappedLayout()
 	{
 		_wrappedWidth = 0;
 		_wrappedLineStarts = [0, 1];
+		_wrappedSegmentColumns = [[0]];
 	}
 
 	private void ApplyContentGeometry()

@@ -76,6 +76,7 @@ public sealed class PreviewSearchIndexTests
 	[InlineData("")]
 	[InlineData("   ")]
 	[InlineData("x")]
+	[InlineData(" x ")]
 	[InlineData("🙂")]
 	[InlineData("two\nlines")]
 	public void Find_RejectsShortOrMultilineQueryWithoutReadingDocument(string query)
