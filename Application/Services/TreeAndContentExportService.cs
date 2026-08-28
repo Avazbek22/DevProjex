@@ -51,31 +51,33 @@ public sealed class TreeAndContentExportService(
 			pathPresentation,
 			outputPathRedaction);
 		var displayRootName = pathPresentation?.DisplayRootName;
-		bool hasSelection = selectedPaths.Count > 0 &&
-		                    TreeExportService.HasSelectedDescendantOrSelfWithCancellation(
-			                    root,
-			                    selectedPaths,
-			                    cancellationToken);
-
-		string tree = hasSelection
-			? treeExport.BuildSelectedTreeWithCancellation(
+		var hasSelection = selectedPaths.Count > 0;
+		string tree;
+		if (hasSelection)
+		{
+			tree = treeExport.BuildSelectedTreeWithCancellation(
 				rootPath,
 				root,
 				selectedPaths,
 				format,
 				displayRootPath,
 				displayRootName,
-				cancellationToken)
-			: treeExport.BuildFullTreeWithCancellation(
-				rootPath,
-				root,
-				format,
-				displayRootPath,
-				displayRootName,
-				includeRootPath: true,
-				cancellationToken: cancellationToken);
-
-		if (hasSelection && string.IsNullOrWhiteSpace(tree))
+				cancellationToken);
+			if (string.IsNullOrWhiteSpace(tree))
+			{
+				hasSelection = false;
+				tree = treeExport.BuildFullTreeWithCancellation(
+					rootPath,
+					root,
+					format,
+					displayRootPath,
+					displayRootName,
+					includeRootPath: true,
+					cancellationToken: cancellationToken);
+			}
+		}
+		else
+		{
 			tree = treeExport.BuildFullTreeWithCancellation(
 				rootPath,
 				root,
@@ -84,6 +86,7 @@ public sealed class TreeAndContentExportService(
 				displayRootName,
 				includeRootPath: true,
 				cancellationToken: cancellationToken);
+		}
 
 		var files = ProjectTreeSelectionProjection.BuildOrderedSelectedFilePathsWithCancellation(
 			root,
