@@ -450,6 +450,39 @@ public sealed class McpServerIntegrationTests
 		AssertSpotlighted(result);
 	}
 
+	[Fact]
+	public async Task GetFileContinuationPreservesThePageBoundaryThroughTheSdk()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(
+			Path.Combine(project, "Paged.txt"),
+			string.Join('\n', Enumerable.Range(1, 1_005).Select(static line => $"line-{line:D4}")));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var firstPage = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "Paged.txt" });
+		var continuation = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "Paged.txt", ["start_line"] = 1_001 });
+		var firstText = Text(firstPage);
+		var continuationText = Text(continuation);
+
+		Assert.Contains("line-1000", firstText, StringComparison.Ordinal);
+		Assert.DoesNotContain("line-1001", firstText, StringComparison.Ordinal);
+		Assert.Contains(
+			"Showing lines 1-1000 of 1005; continue with start_line=1001.",
+			firstText,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("line-1000", continuationText, StringComparison.Ordinal);
+		Assert.Contains("line-1001", continuationText, StringComparison.Ordinal);
+		Assert.Contains("line-1005", continuationText, StringComparison.Ordinal);
+		Assert.DoesNotContain("continue with start_line=", continuationText, StringComparison.Ordinal);
+		AssertSpotlighted(firstPage);
+		AssertSpotlighted(continuation);
+	}
+
 	[Theory]
 	[InlineData(false)]
 	[InlineData(true)]
