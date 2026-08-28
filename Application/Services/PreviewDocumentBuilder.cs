@@ -1139,24 +1139,25 @@ internal static class PreviewTextStorageScavenger
 
         internal static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
 
-        private readonly string _storagePath;
-        private readonly FileStream _stream;
+        private string? _storagePath;
+        private FileStream? _stream;
         private readonly List<long> _lineOffsets = [];
         private readonly int _inMemoryThresholdChars;
-        private readonly Encoder _utf8Encoder = Utf8WithoutBom.GetEncoder();
-        private byte[]? _utf8WriteBuffer = ArrayPool<byte>.Shared.Rent(Utf8WriteBufferSize);
+        private char[]? _inMemoryBuffer;
+        private int _inMemoryLength;
+        private Encoder? _utf8Encoder;
+        private byte[]? _utf8WriteBuffer;
         private bool _built;
         private bool _disposed;
         private bool _lastLineIsEmpty;
         private int _maxLineLength;
         private long _characterCount;
 
-		public PreviewTextStorageBuilder(int inMemoryThresholdChars)
-		{
-			_inMemoryThresholdChars = inMemoryThresholdChars;
-			_storagePath = CreateStoragePath();
-			_stream = OpenStorageFile(_storagePath, FileOptions.SequentialScan);
-		}
+        public PreviewTextStorageBuilder(int inMemoryThresholdChars)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(inMemoryThresholdChars);
+            _inMemoryThresholdChars = inMemoryThresholdChars;
+        }
 
         public void AppendLine(string line) => AppendLine(line.AsSpan());
 
@@ -1164,13 +1165,15 @@ internal static class PreviewTextStorageScavenger
         {
             ThrowIfDisposed();
 
-            _lineOffsets.Add(_stream.Position);
+			var resultingCharacterCount = checked(_characterCount + line.Length + 1);
+			EnsureStorage(resultingCharacterCount);
+			RecordLineStart();
             _lastLineIsEmpty = line.Length == 0;
             _maxLineLength = Math.Max(_maxLineLength, line.Length);
-            _characterCount += line.Length + 1;
+			_characterCount = resultingCharacterCount;
 
-            WriteUtf8(line);
-            _stream.WriteByte((byte)'\n');
+			AppendText(line);
+			AppendNewLine();
         }
 
         public int LineCount => _lineOffsets.Count;
@@ -1197,7 +1200,7 @@ internal static class PreviewTextStorageScavenger
             }
             else
             {
-                _lineOffsets.Add(_stream.Position);
+				RecordLineStart();
                 _lastLineIsEmpty = true;
             }
         }
@@ -1210,32 +1213,19 @@ internal static class PreviewTextStorageScavenger
                 return;
 
             var trailingLineStart = _lineOffsets[^1];
-            _stream.SetLength(trailingLineStart);
-            _stream.Position = trailingLineStart;
+            if (_stream is null)
+            {
+                _inMemoryLength = checked((int)trailingLineStart);
+            }
+            else
+            {
+                _stream.SetLength(trailingLineStart);
+                _stream.Position = trailingLineStart;
+            }
             _lineOffsets.RemoveAt(_lineOffsets.Count - 1);
             _lastLineIsEmpty = false;
             _characterCount = Math.Max(0, _characterCount - 1);
         }
-
-        public void AppendFrom(PreviewTextStorageBuilder source)
-		{
-			ThrowIfDisposed();
-			ArgumentNullException.ThrowIfNull(source);
-			source.ThrowIfDisposed();
-			if (ReferenceEquals(this, source))
-				throw new ArgumentException("A preview builder cannot append itself.", nameof(source));
-
-			source._stream.Flush();
-			var destinationStart = _stream.Position;
-			source._stream.Position = 0;
-			source._stream.CopyTo(_stream);
-			foreach (var offset in source._lineOffsets)
-				_lineOffsets.Add(destinationStart + offset);
-			if (source._lineOffsets.Count > 0)
-				_lastLineIsEmpty = source._lastLineIsEmpty;
-			_maxLineLength = Math.Max(_maxLineLength, source._maxLineLength);
-			_characterCount += source._characterCount;
-		}
 
         public IPreviewTextDocument BuildDocument(
 			IReadOnlyList<PreviewDocumentSection>? sections = null,
@@ -1247,35 +1237,55 @@ internal static class PreviewTextStorageScavenger
                 throw new InvalidOperationException("Preview document was already built.");
 
             _built = true;
-            _stream.Flush();
-
-            var fileLength = _stream.Length;
-            _stream.Dispose();
-            ReleaseUtf8WriteBuffer();
-
             if (_characterCount <= _inMemoryThresholdChars)
             {
-                var text = File.Exists(_storagePath)
-                    ? File.ReadAllText(_storagePath, Utf8WithoutBom)
-                    : string.Empty;
+                string text;
+                if (_stream is null)
+                {
+                    var outputLength = _inMemoryLength > 0 && _inMemoryBuffer![_inMemoryLength - 1] == '\n'
+                        ? _inMemoryLength - 1
+                        : _inMemoryLength;
+                    text = outputLength == 0
+                        ? string.Empty
+                        : new string(_inMemoryBuffer!, 0, outputLength);
+                }
+                else
+                {
+                    _stream.Flush();
+                    _stream.Dispose();
+                    _stream = null;
+                    ReleaseUtf8WriteBuffer();
+                    text = File.ReadAllText(_storagePath!, Utf8WithoutBom);
+                    if (text.Length > 0 && text[^1] == '\n')
+                        text = text[..^1];
+                    DisposeStorageFile();
+                }
 
-                if (text.Length > 0 && text[^1] == '\n')
-                    text = text[..^1];
-
-                DisposeStorageFile();
+                ReleaseInMemoryBuffer();
                 _disposed = true;
-				return new InMemoryPreviewTextDocument(text, sections, redactions);
+                return new InMemoryPreviewTextDocument(text, sections, redactions);
             }
 
-            _disposed = true;
-            return new FileBackedPreviewTextDocument(
-                _storagePath,
+            var backingStream = _stream ??
+                throw new InvalidOperationException("Preview backing storage was not initialized.");
+            backingStream.Flush();
+            var fileLength = backingStream.Length;
+            backingStream.Dispose();
+            _stream = null;
+            ReleaseUtf8WriteBuffer();
+            var storagePath = _storagePath ??
+                throw new InvalidOperationException("Preview backing storage was not initialized.");
+            var document = new FileBackedPreviewTextDocument(
+                storagePath,
                 _lineOffsets.ToArray(),
                 fileLength,
                 _maxLineLength,
                 _characterCount,
                 sections,
-				redactions);
+                redactions);
+            _storagePath = null;
+            _disposed = true;
+            return document;
         }
 
         public void Dispose()
@@ -1284,30 +1294,126 @@ internal static class PreviewTextStorageScavenger
                 return;
 
             _disposed = true;
-            _stream.Dispose();
+            _stream?.Dispose();
+            _stream = null;
+            ReleaseInMemoryBuffer();
             ReleaseUtf8WriteBuffer();
             DisposeStorageFile();
         }
 
-        private void WriteUtf8(ReadOnlySpan<char> line)
+		private void EnsureStorage(long resultingCharacterCount)
+		{
+			if (_stream is not null || resultingCharacterCount <= _inMemoryThresholdChars)
+				return;
+
+			_storagePath = CreateStoragePath();
+			_stream = OpenStorageFile(_storagePath, FileOptions.SequentialScan);
+			_utf8Encoder = Utf8WithoutBom.GetEncoder();
+			_utf8WriteBuffer = ArrayPool<byte>.Shared.Rent(Utf8WriteBufferSize);
+			FlushInMemoryTextToStorage();
+		}
+
+        private void FlushInMemoryTextToStorage()
         {
-            if (line.Length == 0)
+            var buffer = _inMemoryBuffer;
+            var previousCharacterOffset = 0;
+            for (var lineIndex = 0; lineIndex < _lineOffsets.Count; lineIndex++)
+            {
+                var lineCharacterOffset = checked((int)_lineOffsets[lineIndex]);
+                WriteUtf8(
+                    buffer.AsSpan(previousCharacterOffset, lineCharacterOffset - previousCharacterOffset),
+                    flush: false);
+                _lineOffsets[lineIndex] = _stream!.Position;
+                previousCharacterOffset = lineCharacterOffset;
+            }
+
+            WriteUtf8(buffer.AsSpan(previousCharacterOffset, _inMemoryLength - previousCharacterOffset), flush: false);
+            WriteUtf8(ReadOnlySpan<char>.Empty, flush: true);
+            ReleaseInMemoryBuffer();
+        }
+
+        private void RecordLineStart()
+        {
+            _lineOffsets.Add(_stream is null ? _inMemoryLength : _stream.Position);
+        }
+
+        private void AppendText(ReadOnlySpan<char> text)
+        {
+            if (_stream is null)
+            {
+                EnsureInMemoryCapacity(text.Length);
+                text.CopyTo(_inMemoryBuffer.AsSpan(_inMemoryLength));
+                _inMemoryLength += text.Length;
+            }
+            else
+                WriteUtf8(text, flush: true);
+        }
+
+        private void AppendNewLine()
+        {
+            if (_stream is null)
+            {
+                EnsureInMemoryCapacity(1);
+                _inMemoryBuffer![_inMemoryLength++] = '\n';
+            }
+            else
+                _stream.WriteByte((byte)'\n');
+        }
+
+        private void EnsureInMemoryCapacity(int additionalCharacterCount)
+        {
+            if (additionalCharacterCount == 0)
                 return;
 
-            var buffer = _utf8WriteBuffer ??
+            var requiredLength = checked(_inMemoryLength + additionalCharacterCount);
+            if (_inMemoryBuffer is { Length: var currentLength } && currentLength >= requiredLength)
+                return;
+
+            var targetLength = Math.Max(Utf8WriteBufferSize, requiredLength);
+            if (_inMemoryBuffer is { } existingBuffer)
+                targetLength = Math.Max(targetLength, checked(existingBuffer.Length * 2));
+            targetLength = Math.Min(_inMemoryThresholdChars, targetLength);
+
+            var replacement = ArrayPool<char>.Shared.Rent(targetLength);
+            if (_inMemoryLength > 0)
+                _inMemoryBuffer.AsSpan(0, _inMemoryLength).CopyTo(replacement);
+
+            ReleaseInMemoryBuffer();
+            _inMemoryBuffer = replacement;
+        }
+
+        private void ReleaseInMemoryBuffer()
+        {
+            var buffer = Interlocked.Exchange(ref _inMemoryBuffer, null);
+            if (buffer is not null)
+                ArrayPool<char>.Shared.Return(buffer, clearArray: true);
+        }
+
+		private void WriteUtf8(ReadOnlySpan<char> text, bool flush)
+        {
+			if (text.Length == 0 && !flush)
+                return;
+
+			var stream = _stream ??
+				throw new InvalidOperationException("Preview backing storage was not initialized.");
+			var encoder = _utf8Encoder ??
+				throw new InvalidOperationException("Preview UTF-8 encoder was not initialized.");
+			var buffer = _utf8WriteBuffer ??
                          throw new ObjectDisposedException(nameof(PreviewTextStorageBuilder));
-            var remaining = line;
+			var remaining = text;
             bool completed;
             do
             {
-                _utf8Encoder.Convert(
+				encoder.Convert(
                     remaining,
                     buffer.AsSpan(0, Utf8WriteBufferSize),
-                    flush: true,
+					flush,
                     out var charsUsed,
                     out var bytesUsed,
                     out completed);
-                _stream.Write(buffer, 0, bytesUsed);
+				if (charsUsed == 0 && bytesUsed == 0 && !completed)
+					throw new IOException("The preview UTF-8 encoder did not make progress.");
+				stream.Write(buffer, 0, bytesUsed);
                 remaining = remaining[charsUsed..];
             }
             while (!completed);
@@ -1324,7 +1430,9 @@ internal static class PreviewTextStorageScavenger
 
         private void AppendExactLine(ReadOnlySpan<char> rawLine)
         {
-            _lineOffsets.Add(_stream.Position);
+			var resultingCharacterCount = checked(_characterCount + rawLine.Length);
+			EnsureStorage(resultingCharacterCount);
+			RecordLineStart();
             var displayLength = rawLine.Length;
             if (displayLength > 0 && rawLine[displayLength - 1] == '\n')
                 displayLength--;
@@ -1332,13 +1440,17 @@ internal static class PreviewTextStorageScavenger
                 displayLength--;
             _lastLineIsEmpty = displayLength == 0;
             _maxLineLength = Math.Max(_maxLineLength, displayLength);
-            _characterCount += rawLine.Length;
-            WriteUtf8(rawLine);
+			_characterCount = resultingCharacterCount;
+			AppendText(rawLine);
         }
 
         private void DisposeStorageFile()
         {
-            PreviewDocumentBuilder.DisposeStorageFile(_storagePath);
+			if (_storagePath is not null)
+			{
+				PreviewDocumentBuilder.DisposeStorageFile(_storagePath);
+				_storagePath = null;
+			}
         }
 
         private void ThrowIfDisposed()

@@ -309,6 +309,35 @@ public sealed class PreviewDocumentBuilderTests
     }
 
     [Fact]
+    public async Task BuildContentDocumentAsync_FinalEstimatedEntry_WhenTrimReturnsToThreshold_UsesMemory()
+    {
+        using var temp = new TemporaryDirectory();
+        var path = temp.CreateFile("estimate.txt", string.Empty);
+        var displayPath = new string('x', 499_996);
+        var analyzer = new StubFileContentAnalyzer(new Dictionary<string, TextFileContent?>
+        {
+            [path] = new TextFileContent(
+                Content: string.Empty,
+                SizeBytes: 25_000_000,
+                LineCount: 10,
+                CharCount: 2000,
+                IsEmpty: false,
+                IsWhitespaceOnly: false,
+                IsEstimated: true)
+        });
+
+        using var document = await new PreviewDocumentBuilder(analyzer).BuildContentDocumentAsync(
+            [path],
+            TestContext.Current.CancellationToken,
+            _ => displayPath);
+
+        Assert.IsType<InMemoryPreviewTextDocument>(document);
+        Assert.Equal(2, document!.LineCount);
+        Assert.Equal(displayPath + ":", document.GetLineText(1));
+        Assert.Equal(BlankLine, document.GetLineText(2));
+    }
+
+    [Fact]
     public async Task BuildContentDocumentAsync_LargePayload_UsesFileBackedDocument()
     {
         using var temp = new TemporaryDirectory();
@@ -334,6 +363,35 @@ public sealed class PreviewDocumentBuilderTests
         Assert.Equal("large.txt:", fileBacked.GetLineText(1));
         Assert.Equal(BlankLine, fileBacked.GetLineText(2));
         Assert.Equal(largeContent, fileBacked.GetLineText(3));
+    }
+
+    [Fact]
+    public async Task BuildContentDocumentAsync_LargeMultilinePayload_PreservesUtf8OffsetsAcrossMemorySpill()
+    {
+        using var temp = new TemporaryDirectory();
+        var path = temp.CreateFile("multiline.txt", string.Empty);
+        var firstLine = new string('\u65E5', 250_000);
+        var secondLine = new string('x', 250_000);
+        const string finalLine = "final-\U0001F642";
+        var content = string.Concat(firstLine, "\r\n", secondLine, "\n", finalLine);
+        var analyzer = new StubFileContentAnalyzer(new Dictionary<string, TextFileContent?>
+        {
+            [path] = CreateTextContent(content)
+        });
+
+        using var document = await new PreviewDocumentBuilder(analyzer).BuildContentDocumentAsync(
+            [path],
+            TestContext.Current.CancellationToken,
+            Path.GetFileName);
+
+        var fileBacked = Assert.IsType<FileBackedPreviewTextDocument>(document);
+        Assert.Equal(5, fileBacked.LineCount);
+        Assert.Equal(firstLine, fileBacked.GetLineText(3));
+        Assert.Equal(secondLine, fileBacked.GetLineText(4));
+        Assert.Equal(finalLine, fileBacked.GetLineText(5));
+        Assert.Equal(
+            string.Join('\n', "multiline.txt:", BlankLine, firstLine, secondLine, finalLine) + "\n",
+            fileBacked.GetFullText());
     }
 
     [Fact]
