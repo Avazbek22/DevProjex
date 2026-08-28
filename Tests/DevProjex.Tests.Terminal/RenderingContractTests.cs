@@ -754,34 +754,44 @@ public sealed class RenderingContractTests
 		Assert.DoesNotContain("100%", environment.StandardError, StringComparison.Ordinal);
 	}
 
-	[Fact]
-	public async Task NoColorProjectExportProgressRemainsReadableWithoutAnsi()
+	[Theory]
+	[InlineData(TerminalColorMode.Auto, true)]
+	[InlineData(TerminalColorMode.Never, false)]
+	public async Task InteractiveMonochromeProjectExportProgressRewritesAndClearsOneLine(
+		TerminalColorMode color,
+		bool noColor)
 	{
 		using var appData = new TemporaryDirectory();
 		var environment = new TestTerminalEnvironment
 		{
 			IsErrorInteractive = true,
-			IsNoColor = true,
+			IsNoColor = noColor,
 			Width = 100
 		};
 		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
 		var renderer = new ProgressRenderer(
 			environment,
-			new TerminalOutputOptions(Progress: TerminalProgressMode.Always),
+			new TerminalOutputOptions(
+				Color: color,
+				Progress: TerminalProgressMode.Always),
 			services.Localization);
 
-		await renderer.RunProjectExportAsync(async progress =>
+		var result = await renderer.RunProjectExportAsync(progress =>
 		{
 			Assert.NotNull(progress);
+			progress.Report(new ProjectCopyExportProgress(1, 4, 1_024, 25));
 			progress.Report(new ProjectCopyExportProgress(2, 4, 2_048, 50));
-			await Task.Delay(300, TestContext.Current.CancellationToken);
-			return true;
+			return Task.FromResult(42);
 		});
 
+		Assert.Equal(42, result);
 		Assert.Empty(environment.StandardOutput);
 		Assert.Contains("Exporting project 2/4 (2 KB)", environment.StandardError, StringComparison.Ordinal);
 		Assert.Contains("50%", environment.StandardError, StringComparison.Ordinal);
-		Assert.DoesNotContain("\u001b", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains('\r', environment.StandardError);
+		Assert.DoesNotContain('\n', environment.StandardError);
+		Assert.DoesNotContain('\u001b', environment.StandardError);
+		Assert.EndsWith("\r", environment.StandardError, StringComparison.Ordinal);
 	}
 
 	[Theory]

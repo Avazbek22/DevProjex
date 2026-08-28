@@ -47,6 +47,8 @@ stderr, outside CI, and without `--plain`, the latest Git message replaces one l
 using carriage return and spaces only; no ANSI cursor controls are used. Every frame
 is sanitized and truncated to `terminal width - 1` display columns, with the width
 read again for every update, and the line is cleared before ordinary output resumes.
+Interactive measured project-export progress uses the same single-line behavior when
+color is disabled through `NO_COLOR` or `--color never`.
 
 Redirected stderr, CI, `TERM=dumb`, and `--plain` use bounded milestone output instead:
 one localized clone-start line, at most three Git percentage milestones, and one

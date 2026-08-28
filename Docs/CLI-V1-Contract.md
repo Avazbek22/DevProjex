@@ -853,6 +853,8 @@ active. URL-source Git operations use a single carriage-return-updated line in t
 mode. Redirected stderr, CI, `TERM=dumb`, and `--plain` use at most six static
 milestone lines for URL-source Git progress in both `auto` and `always` modes.
 `--progress never`, `quiet`, and `minimal` suppress that progress completely.
+Measured project-export progress also remains a single carriage-return-updated line
+in interactive monochrome modes (`NO_COLOR` and `--color never`).
 All progress remains on stderr and never changes the requested stdout payload.
 
 ## Destination and Atomicity
