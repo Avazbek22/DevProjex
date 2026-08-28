@@ -2,6 +2,31 @@ namespace DevProjex.Tests.Terminal;
 
 public sealed class TerminalSettingsStoreTests
 {
+	[Fact]
+	public async Task ProjectSettingsRoundTripAndUseLruCapacity()
+	{
+		using var workspace = new TemporaryDirectory();
+		var store = new TerminalSettingsStore(() => workspace.Path);
+		for (var index = 0; index < 34; index++)
+		{
+			var root = workspace.CreateDirectory($"project-{index}");
+			await store.SaveProjectSettingsAsync(new TerminalProjectSettings(
+				root,
+				["src/a.cs"],
+				[".", "src"],
+				"src/a.cs",
+				ProjectContextView.Content,
+				ProjectContextDocumentFormat.Markdown,
+				DateTimeOffset.MinValue), TestContext.Current.CancellationToken);
+		}
+
+		var newest = store.LoadProjectSettings(Path.Combine(workspace.Path, "project-33"));
+		var evicted = store.LoadProjectSettings(Path.Combine(workspace.Path, "project-0"));
+		Assert.NotNull(newest);
+		Assert.Equal(["src/a.cs"], newest.SelectedPaths);
+		Assert.Equal(ProjectContextView.Content, newest.PreviewView);
+		Assert.Null(evicted);
+	}
 	[Theory]
 	[InlineData(TerminalScreenMode.Auto)]
 	[InlineData(TerminalScreenMode.Alternate)]

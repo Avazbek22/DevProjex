@@ -26,11 +26,13 @@ public sealed record TerminalExportSummary(
 	long EstimatedTokens,
 	GitFilteringMode GitMode,
 	IReadOnlyList<ProjectExclusion> Exclusions,
-	int DiagnosticCount);
+	int DiagnosticCount,
+	bool RedactionEnabled = false);
 
 internal enum TerminalExportDecision
 {
 	Cancel = 0,
 	Export = 1,
-	DryRun = 2
+	DryRun = 2,
+	Overwrite = 3
 }

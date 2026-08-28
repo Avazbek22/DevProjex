@@ -17,6 +17,7 @@ internal sealed class TerminalVirtualizedPreviewView : View
 	private string? _activeRedactionOccurrenceId;
 	private int _maximumDisplayColumns;
 	private long _viewportChangeRevision;
+	private bool _wordWrap;
 
 	public TerminalVirtualizedPreviewView(
 		bool useUnicode = true,
@@ -41,10 +42,9 @@ internal sealed class TerminalVirtualizedPreviewView : View
 
 	protected override bool OnKeyDown(Key key)
 	{
-		if (!TerminalWorkspaceCommandKey.IsActivation(key))
-			return base.OnKeyDown(key);
-		CommandLineRequested?.Invoke(this, EventArgs.Empty);
-		return true;
+		return TerminalInteractiveView.TryActivateCommandLine(
+			key,
+			() => CommandLineRequested?.Invoke(this, EventArgs.Empty)) || base.OnKeyDown(key);
 	}
 
 	public int FirstVisibleLine => Viewport.Y;
@@ -66,6 +66,7 @@ internal sealed class TerminalVirtualizedPreviewView : View
 		_document?.Sections ?? [];
 
 	public bool HasHorizontalOverflow => MaxLineLength > VisibleTextWidth;
+	public bool WordWrap => _wordWrap;
 
 	public bool HasVerticalOverflow => LineCount > PageSize;
 
@@ -105,6 +106,16 @@ internal sealed class TerminalVirtualizedPreviewView : View
 			preserveViewport ? previousLocation.Y : 0,
 			preserveViewport ? previousLocation.X : 0);
 		return true;
+	}
+
+	public bool ToggleWordWrap()
+	{
+		_wordWrap = !_wordWrap;
+		if (_wordWrap)
+			ScrollTo(FirstVisibleLine, 0);
+		SetContentWidth(_wordWrap ? Math.Max(1, Viewport.Width) : Math.Max(1, _maximumDisplayColumns));
+		SetNeedsDraw();
+		return _wordWrap;
 	}
 
 	public bool MoveActiveRedaction(bool reverse)
@@ -244,6 +255,11 @@ internal sealed class TerminalVirtualizedPreviewView : View
 	{
 		if (_document is null)
 			return true;
+		if (_wordWrap)
+		{
+			DrawWrappedContent();
+			return true;
+		}
 
 		var maximumVisibleWidth = _maximumDisplayColumns;
 		for (var row = 0; row < Viewport.Height; row++)
@@ -260,6 +276,29 @@ internal sealed class TerminalVirtualizedPreviewView : View
 			SetContentWidth(maximumVisibleWidth);
 
 		return true;
+	}
+
+	private void DrawWrappedContent()
+	{
+		var row = 0;
+		var width = Math.Max(1, VisibleTextWidth);
+		for (var lineIndex = FirstVisibleLine; lineIndex < LineCount && row < Viewport.Height; lineIndex++)
+		{
+			var line = _document!.GetLineText(lineIndex + 1);
+			if (line.Length == 0)
+			{
+				SetAttributeForRole(VisualRole.ReadOnly);
+				Move(0, row++);
+				continue;
+			}
+			var offset = 0;
+			while (offset < GetColumns(line.AsSpan()) && row < Viewport.Height)
+			{
+				SetAttributeForRole(VisualRole.ReadOnly);
+				AddStr(0, row++, SliceColumns(line, offset, width));
+				offset += width;
+			}
+		}
 	}
 
 	protected override bool OnMouseEvent(Mouse mouse)

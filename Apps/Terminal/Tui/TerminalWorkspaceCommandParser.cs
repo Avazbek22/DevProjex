@@ -33,39 +33,36 @@ internal sealed class TerminalWorkspaceCommandParser
 				TerminalWorkspaceCommandErrorCode.EmptyInput,
 				0,
 				null,
-				TerminalWorkspaceCommandCatalog.VerbTokens);
+				context.VerbTokens);
 		}
 
 		var verbToken = tokenization.Tokens[0];
-		if (!TerminalWorkspaceCommandCatalog.TryGet(verbToken.Value, out var definition))
+		if (!TerminalWorkspaceCommandCatalog.TryGet(verbToken.Value, out var definition) ||
+			context.AllowedVerbs is not null && !context.AllowedVerbs.Contains(definition.Verb))
 		{
 			return Failure(
 				TerminalWorkspaceCommandErrorCode.UnknownVerb,
 				verbToken.Start,
 				verbToken.Value,
-				FindSimilar(verbToken.Value, TerminalWorkspaceCommandCatalog.VerbTokens));
+				FindSimilar(verbToken.Value, context.VerbTokens));
 		}
 
-		return definition.Verb switch
+		return definition.Grammar switch
 		{
-			TerminalWorkspaceCommandVerb.Set => ParseSet(definition, tokenization.Tokens),
-			TerminalWorkspaceCommandVerb.All => ParseAll(definition, tokenization.Tokens),
-			TerminalWorkspaceCommandVerb.Type => ParseType(definition, tokenization.Tokens, context),
-			TerminalWorkspaceCommandVerb.View => ParseView(definition, tokenization.Tokens),
-			TerminalWorkspaceCommandVerb.Format => ParseFormat(definition, tokenization.Tokens),
-			TerminalWorkspaceCommandVerb.Search or TerminalWorkspaceCommandVerb.Filter =>
+			TerminalWorkspaceCommandGrammar.ToggleOption => ParseSet(definition, tokenization.Tokens),
+			TerminalWorkspaceCommandGrammar.ToggleGroup => ParseAll(definition, tokenization.Tokens),
+			TerminalWorkspaceCommandGrammar.ToggleTypes => ParseType(definition, tokenization.Tokens, context),
+			TerminalWorkspaceCommandGrammar.View => ParseView(definition, tokenization.Tokens),
+			TerminalWorkspaceCommandGrammar.Format => ParseFormat(definition, tokenization.Tokens),
+			TerminalWorkspaceCommandGrammar.Text =>
 				ParseText(definition, tokenization.Tokens),
-			TerminalWorkspaceCommandVerb.Export => ParseExport(definition, tokenization.Tokens),
-			TerminalWorkspaceCommandVerb.Copy => ParseCopy(definition, tokenization.Tokens),
-			TerminalWorkspaceCommandVerb.Branch => ParseOptionalText(definition, tokenization.Tokens),
-			TerminalWorkspaceCommandVerb.Profile => ParseProfile(definition, tokenization.Tokens),
-			TerminalWorkspaceCommandVerb.Language => ParseLanguage(definition, tokenization.Tokens),
-			TerminalWorkspaceCommandVerb.Help => ParseHelp(definition, tokenization.Tokens),
-			TerminalWorkspaceCommandVerb.Analyze or
-			TerminalWorkspaceCommandVerb.Update or
-			TerminalWorkspaceCommandVerb.Recent or
-			TerminalWorkspaceCommandVerb.Refresh or
-			TerminalWorkspaceCommandVerb.Quit => ParseWithoutArguments(definition, tokenization.Tokens),
+			TerminalWorkspaceCommandGrammar.Export => ParseExport(definition, tokenization.Tokens),
+			TerminalWorkspaceCommandGrammar.Copy => ParseCopy(definition, tokenization.Tokens),
+			TerminalWorkspaceCommandGrammar.OptionalText => ParseOptionalText(definition, tokenization.Tokens),
+			TerminalWorkspaceCommandGrammar.Profile => ParseProfile(definition, tokenization.Tokens),
+			TerminalWorkspaceCommandGrammar.Language => ParseLanguage(definition, tokenization.Tokens),
+			TerminalWorkspaceCommandGrammar.Help => ParseHelp(definition, tokenization.Tokens),
+			TerminalWorkspaceCommandGrammar.None => ParseWithoutArguments(definition, tokenization.Tokens),
 			_ => throw new ArgumentOutOfRangeException()
 		};
 	}
@@ -86,7 +83,7 @@ internal sealed class TerminalWorkspaceCommandParser
 		var atNewToken = prefix.Length > 0 && char.IsWhiteSpace(prefix[^1]);
 		var tokens = tokenization.Tokens;
 		if (tokens.Count == 0)
-			return BuildCompletion(text, cursorPosition, 0, string.Empty, TerminalWorkspaceCommandCatalog.VerbTokens);
+			return BuildCompletion(text, cursorPosition, 0, string.Empty, context.VerbTokens);
 
 		if (tokens.Count == 1 && !atNewToken)
 		{
@@ -95,16 +92,22 @@ internal sealed class TerminalWorkspaceCommandParser
 				cursorPosition,
 				tokens[0].Start,
 				tokens[0].Value,
-				TerminalWorkspaceCommandCatalog.VerbTokens);
+				context.VerbTokens);
 		}
 
-		if (!TerminalWorkspaceCommandCatalog.TryGet(tokens[0].Value, out var definition))
+		if (!TerminalWorkspaceCommandCatalog.TryGet(tokens[0].Value, out var definition) ||
+			context.AllowedVerbs is not null && !context.AllowedVerbs.Contains(definition.Verb))
 			return TerminalWorkspaceCommandCompletion.Empty;
 
 		var argumentIndex = atNewToken ? tokens.Count - 1 : tokens.Count - 2;
 		var current = atNewToken ? string.Empty : tokens[^1].Value;
 		var replacementStart = atNewToken ? cursorPosition : tokens[^1].Start;
-		var candidates = ResolveCompletionCandidates(definition.Verb, argumentIndex, tokens, context);
+		var candidates = ResolveCompletionCandidates(
+			definition.Grammar,
+			argumentIndex,
+			tokens,
+			current,
+			context);
 		if (atNewToken && tokens.Count == 1)
 		{
 			var completion = BuildCompletion(
@@ -384,30 +387,64 @@ internal sealed class TerminalWorkspaceCommandParser
 			: Unexpected(tokens[1]);
 
 	private static IReadOnlyList<string> ResolveCompletionCandidates(
-		TerminalWorkspaceCommandVerb verb,
+		TerminalWorkspaceCommandGrammar grammar,
 		int argumentIndex,
 		IReadOnlyList<ParsedToken> tokens,
+		string current,
 		TerminalWorkspaceCommandParseContext context) =>
-		verb switch
+		grammar switch
 		{
-			TerminalWorkspaceCommandVerb.Set when argumentIndex == 0 => SetTargets,
-			TerminalWorkspaceCommandVerb.Set when argumentIndex == 1 => ToggleValues,
-			TerminalWorkspaceCommandVerb.All when argumentIndex == 0 => AggregateTargets,
-			TerminalWorkspaceCommandVerb.All when argumentIndex == 1 => ToggleValues,
-			TerminalWorkspaceCommandVerb.Type when argumentIndex >= 0 => ResolveTypeCompletions(tokens, context),
-			TerminalWorkspaceCommandVerb.View when argumentIndex == 0 => CliChoiceSets.ContextView.Tokens,
-			TerminalWorkspaceCommandVerb.Format when argumentIndex == 0 => CliChoiceSets.ContextDocumentFormat.Tokens,
-			TerminalWorkspaceCommandVerb.Export when argumentIndex == 0 => ExportTargets,
-			TerminalWorkspaceCommandVerb.Export when argumentIndex == 1 &&
+			TerminalWorkspaceCommandGrammar.ToggleOption when argumentIndex == 0 => SetTargets,
+			TerminalWorkspaceCommandGrammar.ToggleOption when argumentIndex == 1 => ToggleValues,
+			TerminalWorkspaceCommandGrammar.ToggleGroup when argumentIndex == 0 => AggregateTargets,
+			TerminalWorkspaceCommandGrammar.ToggleGroup when argumentIndex == 1 => ToggleValues,
+			TerminalWorkspaceCommandGrammar.ToggleTypes when argumentIndex >= 0 => ResolveTypeCompletions(tokens, context),
+			TerminalWorkspaceCommandGrammar.View when argumentIndex == 0 => CliChoiceSets.ContextView.Tokens,
+			TerminalWorkspaceCommandGrammar.Format when argumentIndex == 0 => CliChoiceSets.ContextDocumentFormat.Tokens,
+			TerminalWorkspaceCommandGrammar.Export when argumentIndex == 0 => ExportTargets,
+			TerminalWorkspaceCommandGrammar.Export when argumentIndex == 1 &&
 				tokens.Count > 1 && string.Equals(tokens[1].Value, "context", StringComparison.OrdinalIgnoreCase) =>
 				CliChoiceSets.ContextDocumentFormat.Tokens,
-			TerminalWorkspaceCommandVerb.Copy when argumentIndex == 0 => CliChoiceSets.ContextView.Tokens,
-			TerminalWorkspaceCommandVerb.Copy when argumentIndex == 1 => CliChoiceSets.ContextDocumentFormat.Tokens,
-			TerminalWorkspaceCommandVerb.Profile when argumentIndex == 0 => ProfileTargets,
-			TerminalWorkspaceCommandVerb.Language when argumentIndex == 0 => LanguageCodes,
-			TerminalWorkspaceCommandVerb.Help when argumentIndex == 0 => TerminalWorkspaceCommandCatalog.VerbTokens,
+			TerminalWorkspaceCommandGrammar.Export when argumentIndex == 2 &&
+				tokens.Count > 1 && string.Equals(tokens[1].Value, "context", StringComparison.OrdinalIgnoreCase) =>
+				ResolvePathCompletions(current, context.WorkingDirectory),
+			TerminalWorkspaceCommandGrammar.Export when argumentIndex == 1 && tokens.Count > 1 =>
+				ResolvePathCompletions(current, context.WorkingDirectory),
+			TerminalWorkspaceCommandGrammar.Copy when argumentIndex == 0 => CliChoiceSets.ContextView.Tokens,
+			TerminalWorkspaceCommandGrammar.Copy when argumentIndex == 1 => CliChoiceSets.ContextDocumentFormat.Tokens,
+			TerminalWorkspaceCommandGrammar.Profile when argumentIndex == 0 => ProfileTargets,
+			TerminalWorkspaceCommandGrammar.Language when argumentIndex == 0 => LanguageCodes,
+			TerminalWorkspaceCommandGrammar.Help when argumentIndex == 0 => context.VerbTokens,
 			_ => []
 		};
+
+	private static IReadOnlyList<string> ResolvePathCompletions(string current, string? workingDirectory)
+	{
+		try
+		{
+			var baseDirectory = workingDirectory ?? Directory.GetCurrentDirectory();
+			var expanded = TerminalPathPickerModel.ExpandPath(current);
+			var absolute = Path.GetFullPath(Path.IsPathRooted(expanded)
+				? expanded
+				: Path.Combine(baseDirectory, expanded));
+			var directory = Directory.Exists(absolute) ? absolute : Path.GetDirectoryName(absolute);
+			var prefix = Directory.Exists(absolute) ? string.Empty : Path.GetFileName(absolute);
+			if (directory is null || !Directory.Exists(directory))
+				return [];
+			var rooted = Path.IsPathRooted(current);
+			return Directory.EnumerateFileSystemEntries(directory)
+				.Where(path => Path.GetFileName(path).StartsWith(prefix, StringComparison.CurrentCultureIgnoreCase))
+				.OrderBy(static path => path, PathComparer.Default)
+				.Take(100)
+				.Select(path => rooted ? path : Path.GetRelativePath(baseDirectory, path))
+				.ToArray();
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+			ArgumentException or NotSupportedException)
+		{
+			return [];
+		}
+	}
 
 	private static IReadOnlyList<string> ResolveTypeCompletions(
 		IReadOnlyList<ParsedToken> tokens,

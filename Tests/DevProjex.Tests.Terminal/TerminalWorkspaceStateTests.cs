@@ -411,6 +411,27 @@ public sealed class TerminalWorkspaceStateTests
 		Assert.Equal(expected, TerminalWorkspaceLayout.Resolve(width, height));
 	}
 
+	[Fact]
+	public void BulkTreeOperationsAndRevealPreserveCanonicalState()
+	{
+		using var state = new TerminalWorkspaceState(CreatePlan());
+		state.CollapseAll();
+		Assert.Single(state.VisibleRows);
+
+		var revealed = state.Reveal("src/a.cs");
+		Assert.True(revealed >= 0);
+		Assert.Equal("a.cs", state.VisibleRows[revealed].Node.DisplayName);
+
+		state.SelectNone();
+		Assert.Equal(0, state.SelectedFileCount);
+		state.SelectAll();
+		Assert.Equal(2, state.SelectedFileCount);
+
+		state.ExpandAll();
+		Assert.Equal(5, state.VisibleRows.Count);
+		Assert.Contains("src", state.BuildExpandedRelativePaths());
+	}
+
 	private static int FindRow(TerminalWorkspaceState state, string name) =>
 		state.VisibleRows
 			.Select((row, index) => (row, index))

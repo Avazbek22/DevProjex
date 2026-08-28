@@ -19,6 +19,7 @@ internal sealed partial class TerminalWorkspaceSession
 
 	private FrameView? _controlsFrame;
 	private Label? _controlsPanelHeading;
+	private Label? _collapsedControls;
 	private FrameView? _contentControlsFrame;
 	private FrameView? _exclusionControlsFrame;
 	private FrameView? _extensionControlsFrame;
@@ -38,8 +39,11 @@ internal sealed partial class TerminalWorkspaceSession
 	private string? _selectedContentControlKey;
 	private string? _selectedExclusionControlKey;
 	private string? _selectedExtensionControlKey;
-	private TerminalControlSection _activeControlSection = TerminalControlSection.Content;
-	private TerminalControlSection? _activeAggregateControlSection;
+	private TerminalControlSection? _activeAggregateControlSection
+	{
+		get => _focus.AggregateSection;
+		set => _focus.AggregateSection = value;
+	}
 	private GitFilteringMode _preferredGitMode = GitFilteringMode.RespectGitIgnore;
 	private ProjectSelectionSpec? _settingsDraftSelection;
 	private Dictionary<string, bool>? _settingsDraftExtensionStates;
@@ -59,6 +63,15 @@ internal sealed partial class TerminalWorkspaceSession
 			Width = Dim.Fill(),
 			Height = 1,
 			Visible = _options.Plain,
+			SchemeName = TerminalWorkspaceTheme.Secondary
+		};
+		_collapsedControls = new TerminalLiteralLabel
+		{
+			X = 1,
+			Y = 0,
+			Width = Dim.Fill(1),
+			Height = 1,
+			Visible = false,
 			SchemeName = TerminalWorkspaceTheme.Secondary
 		};
 		(_contentControlsFrame, _contentControls) = CreateControlSection(
@@ -101,6 +114,7 @@ internal sealed partial class TerminalWorkspaceSession
 		_filterControlsHost.Add(_exclusionControlsFrame, _extensionControlsFrame);
 		_controlsFrame.Add(
 			_controlsPanelHeading,
+			_collapsedControls,
 			_contentControlsFrame,
 			_filterControlsHost);
 		if (_state?.Plan.GitReadiness.Mode is not GitFilteringMode.None and { } mode)
@@ -228,6 +242,14 @@ internal sealed partial class TerminalWorkspaceSession
 			_extensionControls,
 			BuildExtensionParameterRows(),
 			_selectedExtensionControlKey);
+		if (_collapsedControls is not null)
+		{
+			_collapsedControls.Text = string.Join(
+				PanelSeparator,
+				$"{L("Preview.Mode.Content")} {_contentControlRows.Count(static row => row.IsSelected == true)}/{_contentControlRows.Count}",
+				$"{L("Terminal.Tui.Exclusions")} {_exclusionControlRows.Count(static row => row.IsSelected == true)}/{_exclusionControlRows.Count}",
+				$"{L("Terminal.Tui.FileTypes")} {_extensionControlRows.Count(static row => row.IsSelected == true)}/{_extensionControlRows.Count}");
+		}
 		RefreshControlTitles();
 		UpdateControlSelectionSchemes();
 	}
@@ -453,13 +475,6 @@ internal sealed partial class TerminalWorkspaceSession
 		UpdateWorkspaceFocus();
 	}
 
-	private enum TerminalControlSection
-	{
-		Content,
-		Exclusions,
-		Extensions
-	}
-
 	private IReadOnlyList<TerminalWorkspaceAction> BuildWorkspaceActions()
 	{
 		if (_state is null)
@@ -532,7 +547,7 @@ internal sealed partial class TerminalWorkspaceSession
 				"M",
 				FormatGitMode(selection.GitMode ?? plan.GitReadiness.Mode),
 				TerminalWorkspaceCommandCatalog.Get(TerminalWorkspaceCommandVerb.Set).Syntax,
-				execute: () => FocusControlSection(TerminalControlSection.Exclusions)),
+				execute: CycleGitMode),
 			CreateAction(
 				TerminalWorkspaceActionKind.Exclusions,
 				"Terminal.Tui.Selection",
@@ -576,7 +591,7 @@ internal sealed partial class TerminalWorkspaceSession
 				"Terminal.Tui.Export",
 				"Menu.File.ExportProjectCopy.Zip",
 				"Menu.File.ExportProjectCopy.Zip.Help",
-				"Z",
+				"Shift+Z",
 				commandSyntax: "export zip <path>",
 				isAvailable: () => !HasActiveOperation,
 				execute: () => ExportProject(ProjectCopyExportFormat.Zip)),
@@ -613,8 +628,11 @@ internal sealed partial class TerminalWorkspaceSession
 					TerminalWorkspaceCommandVerb.Recent).Syntax,
 				execute: () =>
 				{
-					ShowWelcome();
-					_application.Invoke(OpenRecentWorkspaces);
+					TryLeaveWorkspace(() =>
+					{
+						ShowWelcome();
+						_application.Invoke(OpenRecentWorkspaces);
+					});
 				}),
 			CreateAction(
 				TerminalWorkspaceActionKind.Refresh,
@@ -626,6 +644,15 @@ internal sealed partial class TerminalWorkspaceSession
 					TerminalWorkspaceCommandVerb.Refresh).Syntax,
 				execute: () => RefreshCurrentProject())
 		};
+			actions.Add(CreateAction(
+			TerminalWorkspaceActionKind.Diagnostics,
+			"Terminal.Tui.Diagnostics",
+			"Terminal.Tui.Command.Diagnostics.Title",
+			"Terminal.Tui.Command.Diagnostics.Description",
+			"D",
+			commandSyntax: TerminalWorkspaceCommandCatalog.Get(
+				TerminalWorkspaceCommandVerb.Diagnostics).Syntax,
+			execute: ShowDiagnostics));
 		actions.Add(CreateAction(
 			TerminalWorkspaceActionKind.Language,
 			"Terminal.Tui.Source",
@@ -928,12 +955,26 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		_activePane = TerminalWorkspacePane.Controls;
 		_activeControlSection = section;
-		_activePaneBeforeBusy = TerminalWorkspacePane.Controls;
-		_activeControlSectionBeforeBusy = section;
-		_aggregateControlSectionBeforeBusy = IsAggregateControlFocused(section) ||
+		_activeAggregateControlSection = IsAggregateControlFocused(section) ||
 			_activeAggregateControlSection == section
 			? section
 			: null;
+		_focus.SaveBeforeBusy();
+	}
+
+	private void CycleGitMode()
+	{
+		var selection = GetDisplayedSettingsSelection();
+		var next = selection.GitMode switch
+		{
+			GitFilteringMode.None => GitFilteringMode.RespectGitIgnore,
+			GitFilteringMode.RespectGitIgnore => GitFilteringMode.TrackedFilesOnly,
+			_ => GitFilteringMode.None
+		};
+		_preferredGitMode = next == GitFilteringMode.None
+			? GitFilteringMode.RespectGitIgnore
+			: next;
+		ApplyPathFilters(next, selection.Exclusions ?? [], originatedFromCommandLine: false);
 	}
 
 	private void ShowActionPalette()
@@ -1091,22 +1132,60 @@ internal sealed partial class TerminalWorkspaceSession
 		actions.Add(CreateAction(
 			TerminalWorkspaceActionKind.OpenControls,
 			"Terminal.Tui.Source",
-			"Terminal.Tui.ContextControls",
+			"Preview.Mode.Content",
 			"Terminal.Tui.Action.OpenControls.Description",
+			"C",
+			execute: () => FocusControlSection(TerminalControlSection.Content)));
+		actions.Add(CreateAction(
+			TerminalWorkspaceActionKind.FocusTree,
+			"Terminal.Tui.Source",
+			"Terminal.Tui.Tree",
+			"Terminal.Tui.Action.FocusTree.Description",
 			"Tab/F6",
-			commandSyntax: TerminalWorkspaceCommandCatalog.Get(TerminalWorkspaceCommandVerb.All).Syntax,
-			execute: () => FocusPane(TerminalWorkspacePane.Controls)));
+			execute: () => FocusPane(TerminalWorkspacePane.Tree)));
+		actions.Add(CreateAction(
+			TerminalWorkspaceActionKind.FocusPreview,
+			"Terminal.Tui.Source",
+			"Terminal.Tui.Preview",
+			"Terminal.Tui.Action.FocusPreview.Description",
+			"Tab/F6",
+			execute: () => FocusPane(TerminalWorkspacePane.Preview)));
+		actions.Add(CreateAction(
+			TerminalWorkspaceActionKind.ClearFilter,
+			"Terminal.Tui.Selection",
+			"Terminal.Tui.Action.ClearFilter",
+			"Terminal.Tui.Action.ClearFilter.Description",
+			"Esc",
+			isAvailable: () => _state?.HasTreeFilter == true,
+			execute: ClearTreeFilter));
+		actions.Add(CreateAction(
+			TerminalWorkspaceActionKind.ClearSearch,
+			"Terminal.Tui.Preview",
+			"Terminal.Tui.Action.ClearSearch",
+			"Terminal.Tui.Action.ClearSearch.Description",
+			"Esc",
+			isAvailable: () => _preview?.SearchQuery.Length > 0,
+			execute: () =>
+			{
+				CancelPreviewSearch(clearQuery: true);
+				_preview?.ClearSearch();
+				UpdatePanelTitles();
+			}));
+		actions.Add(CreateAction(
+			TerminalWorkspaceActionKind.Quit,
+			"Terminal.Tui.Source",
+			"Terminal.Tui.Exit",
+			"Terminal.Tui.Welcome.Exit.Description",
+			"Q",
+			commandSyntax: TerminalWorkspaceCommandCatalog.Get(TerminalWorkspaceCommandVerb.Quit).Syntax,
+			execute: () => TryExitWorkspace()));
 		actions.Add(CreateAction(
 			TerminalWorkspaceActionKind.ReturnToWelcome,
 			"Terminal.Tui.Source",
 			"Terminal.Tui.BackToWelcome",
 			"Terminal.Tui.ConfirmBackToWelcome",
 			"Esc",
-			execute: () =>
-			{
-				if (Confirm(L("Terminal.Tui.BackToWelcome"), L("Terminal.Tui.ConfirmBackToWelcome")))
-					ShowWelcome();
-			}));
+			execute: () => TryLeaveWorkspace(() => ShowWelcome())));
 		actions.Add(CreateAction(
 			TerminalWorkspaceActionKind.Help,
 			"Terminal.Tui.Source",

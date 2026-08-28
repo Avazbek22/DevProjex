@@ -1,4 +1,5 @@
 using DevProjex.Terminal.Rendering;
+using System.Text.RegularExpressions;
 
 namespace DevProjex.Terminal.Tui;
 
@@ -128,6 +129,100 @@ internal sealed class TerminalPathPickerModel
 			TerminalPathPickerMode.JsonFile when !entry.IsDirectory => entry.Path,
 			_ => null
 		};
+	}
+
+	public string ResolveInputPath(string input)
+	{
+		var expanded = ExpandPath(input);
+		return Path.GetFullPath(Path.IsPathRooted(expanded)
+			? expanded
+			: Path.Combine(CurrentDirectory, expanded));
+	}
+
+	public string? SelectInputPath(string input)
+	{
+		try
+		{
+			var path = ResolveInputPath(input);
+			return _mode switch
+			{
+				TerminalPathPickerMode.Directory when Directory.Exists(path) => path,
+				TerminalPathPickerMode.JsonFile when File.Exists(path) &&
+					path.EndsWith(".json", StringComparison.OrdinalIgnoreCase) => path,
+				_ => null
+			};
+		}
+		catch (Exception exception) when (exception is ArgumentException or NotSupportedException or IOException)
+		{
+			return null;
+		}
+	}
+
+	public string CompleteInputPath(string input)
+	{
+		try
+		{
+			var expanded = ExpandPath(input);
+			var absolute = Path.GetFullPath(Path.IsPathRooted(expanded)
+				? expanded
+				: Path.Combine(CurrentDirectory, expanded));
+			var directory = Directory.Exists(absolute)
+				? absolute
+				: Path.GetDirectoryName(absolute);
+			var prefix = Directory.Exists(absolute) ? string.Empty : Path.GetFileName(absolute);
+			if (directory is null || !Directory.Exists(directory))
+				return input;
+			var matches = Directory.EnumerateFileSystemEntries(directory)
+				.Where(path => Path.GetFileName(path).StartsWith(prefix, StringComparison.CurrentCultureIgnoreCase))
+				.Where(path => Directory.Exists(path) || IsVisibleFile(path))
+				.Take(100)
+				.ToArray();
+			if (matches.Length == 0)
+				return input;
+			var completion = matches.Length == 1
+				? matches[0]
+				: Path.Combine(directory, CommonPrefix(matches.Select(path => Path.GetFileName(path) ?? string.Empty)));
+			if (matches.Length == 1 && Directory.Exists(completion))
+				completion += Path.DirectorySeparatorChar;
+			return completion;
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+			ArgumentException or NotSupportedException)
+		{
+			return input;
+		}
+	}
+
+	internal static string ExpandPath(string input)
+	{
+		var value = input.Trim();
+		if (value == "~" || value.StartsWith($"~{Path.DirectorySeparatorChar}") ||
+			value.StartsWith($"~{Path.AltDirectorySeparatorChar}"))
+		{
+			value = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) + value[1..];
+		}
+		value = Environment.ExpandEnvironmentVariables(value);
+		return Regex.Replace(value, @"\$(?:\{(?<name>[A-Za-z_][A-Za-z0-9_]*)\}|(?<name>[A-Za-z_][A-Za-z0-9_]*))", match =>
+			Environment.GetEnvironmentVariable(match.Groups["name"].Value) ?? match.Value);
+	}
+
+	private static string CommonPrefix(IEnumerable<string> values)
+	{
+		var items = values.ToArray();
+		if (items.Length == 0)
+			return string.Empty;
+		var prefix = items[0];
+		foreach (var item in items.Skip(1))
+		{
+			var length = 0;
+			while (length < prefix.Length && length < item.Length &&
+				char.ToUpperInvariant(prefix[length]) == char.ToUpperInvariant(item[length]))
+			{
+				length++;
+			}
+			prefix = prefix[..length];
+		}
+		return prefix;
 	}
 
 	internal static IReadOnlyList<TerminalPathPickerEntry> TakeOrderedEntries(

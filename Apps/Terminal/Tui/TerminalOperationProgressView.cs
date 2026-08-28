@@ -32,6 +32,7 @@ internal sealed class TerminalOperationProgressView : IDisposable
 	private double? _measuredFraction;
 	private int _frameWidth;
 	private bool _disposed;
+	public string OperationName { get; }
 
 	public TerminalOperationProgressView(
 		IApplication application,
@@ -44,13 +45,14 @@ internal sealed class TerminalOperationProgressView : IDisposable
 		bool plain = false)
 	{
 		_application = application;
+		OperationName = SanitizeLine(operationName);
 		_elapsedFormatter = elapsedFormatter;
 		_sourceText = SanitizeSource(source);
 		_useTextProgress = useTextProgress;
 		_allowMotion = !plain;
 		_frame = new TerminalLiteralFrameView
 		{
-			Title = SanitizeLine(operationName),
+			Title = OperationName,
 			BorderStyle = plain ? LineStyle.None : LineStyle.Single,
 			SchemeName = TerminalWorkspaceTheme.Dialog,
 			CanFocus = false

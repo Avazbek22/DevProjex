@@ -9,6 +9,7 @@ public sealed class TerminalSettingsStore
 {
 	private const int CurrentSchemaVersion = 1;
 	private const int MaximumDocumentBytes = 512 * 1024;
+	private const int MaximumProjectSettings = 32;
 	private const UnixFileMode PrivateUnixFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
 	private readonly Func<string> _appDataPathProvider;
 	private readonly Action? _afterReadOpened;
@@ -41,6 +42,35 @@ public sealed class TerminalSettingsStore
 		return AppLanguageUtility.TryParseCode(code, out var language)
 			? language
 			: null;
+	}
+
+	public TerminalProjectSettings? LoadProjectSettings(string projectRoot)
+	{
+		var normalizedRoot = NormalizeProjectRoot(projectRoot);
+		return LoadDocument()?.Projects?
+			.FirstOrDefault(project => PathComparer.Default.Equals(project.Root, normalizedRoot));
+	}
+
+	public async Task SaveProjectSettingsAsync(
+		TerminalProjectSettings settings,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(settings);
+		var normalized = settings with
+		{
+			Root = NormalizeProjectRoot(settings.Root),
+			LastUsedUtc = DateTimeOffset.UtcNow
+		};
+		await UpdateAsync(current =>
+		{
+			var projects = (current.Projects ?? [])
+				.Where(project => !PathComparer.Default.Equals(project.Root, normalized.Root))
+				.Append(normalized)
+				.OrderByDescending(static project => project.LastUsedUtc)
+				.Take(MaximumProjectSettings)
+				.ToArray();
+			return current with { Projects = projects };
+		}, cancellationToken).ConfigureAwait(false);
 	}
 
 	public async Task SaveScreenModeAsync(
@@ -254,8 +284,21 @@ public sealed class TerminalSettingsStore
 		int SchemaVersion,
 		TerminalScreenMode ScreenMode,
 		IReadOnlyList<string>? CommandHistory = null,
-		string? Language = null);
+		string? Language = null,
+		IReadOnlyList<TerminalProjectSettings>? Projects = null);
+
+	private static string NormalizeProjectRoot(string root) =>
+		Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
 
 	private sealed class TerminalSettingsLimitException()
 		: IOException("Terminal settings exceed the size limit.");
 }
+
+public sealed record TerminalProjectSettings(
+	string Root,
+	IReadOnlyList<string> SelectedPaths,
+	IReadOnlyList<string> ExpandedPaths,
+	string? FocusedPath,
+	ProjectContextView PreviewView,
+	ProjectContextDocumentFormat Format,
+	DateTimeOffset LastUsedUtc);

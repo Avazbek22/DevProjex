@@ -641,6 +641,21 @@ public sealed class TerminalWorkspaceController(
 		ProjectCopyExportFormat format,
 		string destination,
 		CancellationToken cancellationToken,
+		IProgress<ProjectCopyExportProgress>? progress = null) =>
+		await ExportProjectAsync(
+			state,
+			format,
+			destination,
+			overwrite: false,
+			cancellationToken,
+			progress).ConfigureAwait(false);
+
+	public async Task<string> ExportProjectAsync(
+		TerminalWorkspaceState state,
+		ProjectCopyExportFormat format,
+		string destination,
+		bool overwrite,
+		CancellationToken cancellationToken,
 		IProgress<ProjectCopyExportProgress>? progress = null)
 	{
 		ValidateProjectDestinationExtension(format, destination);
@@ -651,7 +666,7 @@ public sealed class TerminalWorkspaceController(
 			plan.SourceRoot,
 			destination,
 			format,
-			overwrite: false);
+			overwrite);
 		var requestedDestination = Path.GetFullPath(destination);
 		var result = await services.ProjectCopyExportService.ExportAsync(
 				new ProjectCopyExportRequest(
@@ -663,7 +678,9 @@ public sealed class TerminalWorkspaceController(
 					DestinationPath: requestedDestination,
 					Format: format,
 					DestinationMode: ProjectCopyDestinationMode.Exact,
-					ConflictPolicy: ProjectCopyConflictPolicy.Fail,
+					ConflictPolicy: overwrite
+						? ProjectCopyConflictPolicy.ReplaceAtomically
+						: ProjectCopyConflictPolicy.Fail,
 					RedactSecrets: plan.Selection.HideSecrets == true,
 					CompressCode: plan.Selection.CompressCode == true,
 					StripComments: plan.Selection.StripComments == true,
@@ -762,7 +779,8 @@ public sealed class TerminalWorkspaceController(
 			tokens,
 			plan.GitReadiness.Mode,
 			(plan.Selection.Exclusions ?? []).OrderBy(static value => value).ToArray(),
-			plan.Diagnostics.Count);
+			plan.Diagnostics.Count,
+			plan.Selection.HideSecrets == true || plan.Selection.HidePrivateData == true);
 
 	private static (string Destination, TerminalExportDestinationState State) ResolveDestination(
 		string destination,

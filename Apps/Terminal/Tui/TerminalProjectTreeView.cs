@@ -6,12 +6,9 @@ namespace DevProjex.Terminal.Tui;
 
 internal sealed class TerminalProjectTreeView : ListView
 {
-	private const long PointerEventDeduplicationWindowMilliseconds = 1_000;
 	private const long DoubleClickWindowMilliseconds = 500;
 	private readonly Func<int, TerminalTreeRow?> _rowResolver;
-	private int _lastPressedViewportColumn = -1;
-	private int _lastPressedViewportRow = -1;
-	private long _lastPressedAt;
+	private readonly TerminalPointerEventDeduplicator _pointerEvents = new();
 	private int _lastNamePressedRow = -1;
 	private long _lastNamePressedAt;
 
@@ -47,10 +44,9 @@ internal sealed class TerminalProjectTreeView : ListView
 
 	protected override bool OnKeyDown(Key key)
 	{
-		if (!TerminalWorkspaceCommandKey.IsActivation(key))
-			return base.OnKeyDown(key);
-		CommandLineRequested?.Invoke(this, EventArgs.Empty);
-		return true;
+		return TerminalInteractiveView.TryActivateCommandLine(
+			key,
+			() => CommandLineRequested?.Invoke(this, EventArgs.Empty)) || base.OnKeyDown(key);
 	}
 
 	protected override bool OnMouseEvent(Mouse mouse)
@@ -76,64 +72,27 @@ internal sealed class TerminalProjectTreeView : ListView
 			return true;
 
 		var now = Environment.TickCount64;
-		if (!isPressed &&
-			_lastPressedViewportRow == position.Y &&
-			_lastPressedViewportColumn == position.X &&
-			now - _lastPressedAt <= PointerEventDeduplicationWindowMilliseconds)
+		if (!_pointerEvents.ShouldHandle(isPressed, position.X, position.Y))
 		{
 			return true;
-		}
-		if (isPressed)
-		{
-			// A selection refresh can move the viewport before the matching release event.
-			_lastPressedViewportRow = position.Y;
-			_lastPressedViewportColumn = position.X;
-			_lastPressedAt = now;
 		}
 
 		SetFocus();
 		SelectedItem = rowIndex;
 		EnsureSelectedItemVisible();
 
-		var disclosureColumn = row.Depth * 2;
-		var checkboxStart = disclosureColumn + 2;
-		var nameStart = disclosureColumn + 6;
-		if (isDoubleClicked)
+		if (isDoubleClicked ||
+			isPressed && row.Node.IsDirectory && _lastNamePressedRow == rowIndex &&
+			now - _lastNamePressedAt <= DoubleClickWindowMilliseconds)
 		{
-			if (position.X >= nameStart && row.Node.IsDirectory)
+			if (row.Node.IsDirectory)
 				ExpansionToggleRequested?.Invoke(this, EventArgs.Empty);
+			_lastNamePressedRow = -1;
 			return true;
 		}
-
-		if (position.X == disclosureColumn && row.Node.IsDirectory)
-		{
-			_lastNamePressedRow = -1;
-			ExpansionToggleRequested?.Invoke(this, EventArgs.Empty);
-		}
-		else if (position.X >= checkboxStart &&
-				 position.X < checkboxStart + 3)
-		{
-			_lastNamePressedRow = -1;
-			SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
-		}
-		else if (position.X >= nameStart && row.Node.IsDirectory)
-		{
-			if (_lastNamePressedRow == rowIndex &&
-				now - _lastNamePressedAt <= DoubleClickWindowMilliseconds)
-			{
-				_lastNamePressedRow = -1;
-				ExpansionToggleRequested?.Invoke(this, EventArgs.Empty);
-			}
-			else
-			{
-				_lastNamePressedRow = rowIndex;
-				_lastNamePressedAt = now;
-			}
-		}
-		else
-		{
-			_lastNamePressedRow = -1;
-		}
+		_lastNamePressedRow = row.Node.IsDirectory ? rowIndex : -1;
+		_lastNamePressedAt = now;
+		SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
 		return true;
 	}
 }

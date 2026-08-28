@@ -19,6 +19,8 @@ public static class TerminalWorkspaceLayout
 			return TerminalWorkspaceLayoutMode.Compact;
 		if (width < 120)
 			return TerminalWorkspaceLayoutMode.Tabbed;
+		if (height < 28)
+			return TerminalWorkspaceLayoutMode.Split;
 		if (width < 150)
 			return TerminalWorkspaceLayoutMode.Split;
 		return TerminalWorkspaceLayoutMode.Wide;

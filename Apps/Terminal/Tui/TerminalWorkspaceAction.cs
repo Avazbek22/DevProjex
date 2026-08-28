@@ -10,6 +10,11 @@ internal enum TerminalWorkspaceActionKind
 	PreviewFormat,
 	Copy,
 	OpenControls,
+	FocusTree,
+	FocusPreview,
+	ClearFilter,
+	ClearSearch,
+	Quit,
 	GitFiltering,
 	Exclusions,
 	FileTypes,
@@ -24,6 +29,7 @@ internal enum TerminalWorkspaceActionKind
 	RecentWorkspaces,
 	Refresh,
 	Language,
+	Diagnostics,
 	ReturnToWelcome,
 	Help
 }
