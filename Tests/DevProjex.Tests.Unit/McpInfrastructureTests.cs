@@ -568,7 +568,7 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
-	public void PackSweepRemovesOnlyStaleOwnedSessionsAndPreservesAnActiveLease()
+	public async Task PackSweepRemovesOnlyStaleOwnedSessionsAndPreservesAnActiveLease()
 	{
 		using var workspace = new TemporaryDirectory();
 		var baseDirectory = Path.Combine(workspace.Path, "DevProjex", "mcp");
@@ -584,8 +584,10 @@ public sealed class McpInfrastructureTests
 		Directory.SetLastWriteTimeUtc(foreign, DateTime.UtcNow.AddDays(-2));
 
 		using var active = new McpPackRegistry(workspace.Path);
+		await active.ScavengingCompletion.WaitAsync(TestContext.Current.CancellationToken);
 		Directory.SetLastWriteTimeUtc(active.SessionDirectory, DateTime.UtcNow.AddDays(-2));
 		using var next = new McpPackRegistry(workspace.Path);
+		await next.ScavengingCompletion.WaitAsync(TestContext.Current.CancellationToken);
 
 		Assert.False(Directory.Exists(stale));
 		Assert.True(File.Exists(protectedFile));
@@ -593,7 +595,7 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
-	public void PackSweepNeverTraversesASymbolicLinkSessionDirectory()
+	public async Task PackSweepNeverTraversesASymbolicLinkSessionDirectory()
 	{
 		using var workspace = new TemporaryDirectory();
 		var target = Path.Combine(workspace.Path, "protected-target");
@@ -617,9 +619,51 @@ public sealed class McpInfrastructureTests
 		}
 
 		using var registry = new McpPackRegistry(workspace.Path);
+		await registry.ScavengingCompletion.WaitAsync(TestContext.Current.CancellationToken);
 
 		Assert.True(File.Exists(protectedFile));
 		Assert.True(Directory.Exists(link));
+	}
+
+	[Fact]
+	public async Task PackRegistryConstructionDoesNotWaitForScavengingAndDisposeCancelsIt()
+	{
+		using var workspace = new TemporaryDirectory();
+		var scavengeStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var scavengeCanceled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var construction = Task.Run(() => new McpPackRegistry(
+			workspace.Path,
+			timeProvider: null,
+			maximumPackBytes: McpPackRegistry.MaximumPackBytes,
+			maximumSessionBytes: McpPackRegistry.MaximumSessionBytes,
+			scavengeOperation: async cancellationToken =>
+			{
+				scavengeStarted.TrySetResult();
+				try
+				{
+					await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+				}
+				finally
+				{
+					if (cancellationToken.IsCancellationRequested)
+						scavengeCanceled.TrySetResult();
+				}
+			}),
+			TestContext.Current.CancellationToken);
+		var registry = await construction.WaitAsync(
+			TimeSpan.FromSeconds(2),
+			TestContext.Current.CancellationToken);
+		var sessionDirectory = registry.SessionDirectory;
+		await scavengeStarted.Task.WaitAsync(
+			TimeSpan.FromSeconds(2),
+			TestContext.Current.CancellationToken);
+
+		await registry.DisposeAsync().AsTask().WaitAsync(
+			TimeSpan.FromSeconds(2),
+			TestContext.Current.CancellationToken);
+
+		Assert.True(scavengeCanceled.Task.IsCompletedSuccessfully);
+		Assert.False(Directory.Exists(sessionDirectory));
 	}
 
 	[Fact]

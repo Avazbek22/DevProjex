@@ -1,10 +1,11 @@
 using System.Buffers;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Security.Cryptography;
 
 namespace DevProjex.Mcp;
 
-public sealed class McpPackRegistry : IDisposable
+public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 {
 	private const int LineCheckpointInterval = 256;
 	internal const long MaximumPackBytes = 200L * 1024 * 1024;
@@ -13,6 +14,7 @@ public sealed class McpPackRegistry : IDisposable
 		UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
 	private const UnixFileMode PrivateFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
 	private static readonly TimeSpan StaleAge = TimeSpan.FromHours(24);
+	private static readonly TimeSpan ScavengeShutdownTimeout = TimeSpan.FromSeconds(5);
 	private static readonly ConcurrentDictionary<string, byte> ActiveSessions = new(PathComparer.Default);
 	private readonly Dictionary<string, PackEntry> _packs = new(StringComparer.Ordinal);
 	private readonly string _sessionDirectory;
@@ -20,9 +22,12 @@ public sealed class McpPackRegistry : IDisposable
 	private readonly long _maximumPackBytes;
 	private readonly long _maximumSessionBytes;
 	private readonly object _sync = new();
+	private readonly CancellationTokenSource _scavengeCancellation = new();
+	private readonly Task _scavengeTask;
 	private long _allocatedBytes;
 	private int _activeCreates;
 	private bool _disposed;
+	private Task? _disposeTask;
 
 	public McpPackRegistry(string? tempRoot = null, TimeProvider? timeProvider = null)
 		: this(tempRoot, timeProvider, MaximumPackBytes, MaximumSessionBytes)
@@ -34,7 +39,8 @@ public sealed class McpPackRegistry : IDisposable
 		TimeProvider? timeProvider,
 		long maximumPackBytes,
 		long maximumSessionBytes,
-		Action<string>? onSessionDirectoryCreated = null)
+		Action<string>? onSessionDirectoryCreated = null,
+		Func<CancellationToken, Task>? scavengeOperation = null)
 	{
 		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumPackBytes);
 		ArgumentOutOfRangeException.ThrowIfLessThan(maximumSessionBytes, maximumPackBytes);
@@ -45,7 +51,6 @@ public sealed class McpPackRegistry : IDisposable
 		EnsurePrivateDirectory(productDirectory);
 		var baseDirectory = Path.Combine(productDirectory, "mcp");
 		EnsurePrivateDirectory(baseDirectory);
-		Scavenge(baseDirectory, TimeProvider.GetUtcNow());
 		_sessionDirectory = Path.Combine(baseDirectory, Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant());
 		var sessionDirectoryExisted = Directory.Exists(_sessionDirectory);
 		try
@@ -67,10 +72,19 @@ public sealed class McpPackRegistry : IDisposable
 			throw;
 		}
 		ActiveSessions.TryAdd(_sessionDirectory, 0);
+		var scavengeTimestamp = TimeProvider.GetUtcNow();
+		_scavengeTask = Task.Run(
+			() => RunScavengeAsync(
+				baseDirectory,
+				scavengeTimestamp,
+				scavengeOperation,
+				_scavengeCancellation.Token),
+			CancellationToken.None);
 	}
 
 	internal TimeProvider TimeProvider { get; }
 	internal string SessionDirectory => _sessionDirectory;
+	internal Task ScavengingCompletion => _scavengeTask;
 
 	public async Task<string> StoreAsync(string content, CancellationToken cancellationToken)
 	{
@@ -176,19 +190,75 @@ public sealed class McpPackRegistry : IDisposable
 		return entry.Document;
 	}
 
-	public void Dispose()
+	public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+	public ValueTask DisposeAsync()
 	{
-		bool cleanupNow;
+		Task disposal;
 		lock (_sync)
 		{
-			if (_disposed)
-				return;
-			_disposed = true;
-			cleanupNow = _activeCreates == 0;
+			if (_disposeTask is null)
+			{
+				_disposed = true;
+				_disposeTask = DisposeCoreAsync(_activeCreates == 0);
+			}
+			disposal = _disposeTask;
+		}
+		return new ValueTask(disposal);
+	}
+
+	private async Task DisposeCoreAsync(bool cleanupSession)
+	{
+		try
+		{
+			_scavengeCancellation.Cancel(throwOnFirstException: false);
+		}
+		catch (Exception exception)
+		{
+			Trace.TraceWarning("MCP pack scavenging cancellation failed: {0}", exception.Message);
+		}
+		var completed = false;
+		try
+		{
+			await _scavengeTask.WaitAsync(ScavengeShutdownTimeout).ConfigureAwait(false);
+			completed = true;
+		}
+		catch (TimeoutException)
+		{
+			Trace.TraceWarning(
+				"MCP pack scavenging shutdown exceeded {0} seconds.",
+				ScavengeShutdownTimeout.TotalSeconds);
+			_ = ObserveLateScavengeCompletionAsync();
+		}
+		catch (Exception exception)
+		{
+			completed = _scavengeTask.IsCompleted;
+			Trace.TraceWarning("MCP pack scavenging failed during shutdown: {0}", exception.Message);
+		}
+		finally
+		{
+			if (completed)
+				_scavengeCancellation.Dispose();
 		}
 
-		if (cleanupNow)
+		if (cleanupSession)
 			CleanupSessionDirectory();
+	}
+
+	private async Task ObserveLateScavengeCompletionAsync()
+	{
+		try
+		{
+			await _scavengeTask.ConfigureAwait(false);
+		}
+		catch (Exception exception)
+		{
+			Trace.TraceWarning("MCP pack scavenging failed after shutdown: {0}", exception.Message);
+		}
+		finally
+		{
+			_scavengeCancellation.Dispose();
+		}
 	}
 
 	private void BeginCreate()
@@ -225,12 +295,39 @@ public sealed class McpPackRegistry : IDisposable
 		}
 	}
 
-	private static void Scavenge(string baseDirectory, DateTimeOffset now)
+	private static async Task RunScavengeAsync(
+		string baseDirectory,
+		DateTimeOffset now,
+		Func<CancellationToken, Task>? scavengeOperation,
+		CancellationToken cancellationToken)
 	{
+		try
+		{
+			if (scavengeOperation is not null)
+				await scavengeOperation(cancellationToken).ConfigureAwait(false);
+			else
+				Scavenge(baseDirectory, now, cancellationToken);
+		}
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+		{
+		}
+		catch (Exception exception)
+		{
+			Trace.TraceWarning("MCP pack scavenging failed: {0}", exception.Message);
+		}
+	}
+
+	private static void Scavenge(
+		string baseDirectory,
+		DateTimeOffset now,
+		CancellationToken cancellationToken)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
 		if (!Directory.Exists(baseDirectory))
 			return;
 		foreach (var directory in Directory.EnumerateDirectories(baseDirectory))
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			try
 			{
 				if (!IsOwnedSessionDirectory(directory))
@@ -245,6 +342,7 @@ public sealed class McpPackRegistry : IDisposable
 					FileMode.Open,
 					FileAccess.ReadWrite,
 					FileShare.Delete);
+				cancellationToken.ThrowIfCancellationRequested();
 				Directory.Delete(directory, recursive: true);
 			}
 			catch (IOException)

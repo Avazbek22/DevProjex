@@ -37,7 +37,7 @@ public static class McpServerHost
 
 		var rootRegistry = new McpRootRegistry(roots);
 		using var services = McpServices.Create(rootRegistry, appDataPathProvider);
-		using var packs = new McpPackRegistry(tempRoot);
+		await using var packs = new McpPackRegistry(tempRoot);
 		var projectService = new McpProjectService(rootRegistry, services, hidePrivateData);
 		var tools = new DevProjexMcpTools(rootRegistry, projectService, packs);
 		var catalog = new DevProjexMcpToolCatalog(tools);
