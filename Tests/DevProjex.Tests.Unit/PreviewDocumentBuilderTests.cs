@@ -423,6 +423,72 @@ public sealed class PreviewDocumentBuilderTests
     }
 
 	[Theory]
+	[InlineData(PreviewDocumentBuilder.SpillablePreviewWriteStream.MemoryLimitBytes, false)]
+	[InlineData(PreviewDocumentBuilder.SpillablePreviewWriteStream.MemoryLimitBytes + 1, true)]
+	public async Task CreateDocumentWithMetricsAsync_SpillsOnlyAboveMemoryBoundary(
+		int byteCount,
+		bool expectedSpill)
+	{
+		var bytes = new byte[byteCount];
+		Array.Fill(bytes, (byte)'x');
+		var builder = new PreviewDocumentBuilder(new StubFileContentAnalyzer());
+		var observedSpill = false;
+		string? storagePath = null;
+
+		var result = await builder.CreateDocumentWithMetricsAsync(
+			async (stream, cancellationToken) =>
+			{
+				await stream.WriteAsync(bytes, cancellationToken);
+				var spillable = Assert.IsType<PreviewDocumentBuilder.SpillablePreviewWriteStream>(stream);
+				observedSpill = spillable.HasSpilled;
+				storagePath = spillable.StoragePath;
+			},
+			TestContext.Current.CancellationToken);
+		using var document = result.Document;
+
+		Assert.Equal(expectedSpill, observedSpill);
+		Assert.IsType<InMemoryPreviewTextDocument>(document);
+		Assert.Equal(byteCount, document.CharacterCount);
+		Assert.Equal(new ExportOutputMetrics(1, byteCount, (byteCount + 3L) / 4L), result.Metrics);
+		if (storagePath is not null)
+			Assert.False(File.Exists(storagePath));
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task CreateDocumentWithMetricsAsync_SeekAndTruncatePreserveStreamSemantics(bool forceSpill)
+	{
+		var initialLength = forceSpill
+			? PreviewDocumentBuilder.SpillablePreviewWriteStream.MemoryLimitBytes + 8
+			: 16;
+		var initial = new byte[initialLength];
+		Array.Fill(initial, (byte)'x');
+		var replacement = "ABCD"u8.ToArray();
+		var observedSpill = false;
+
+		var result = await new PreviewDocumentBuilder(new StubFileContentAnalyzer())
+			.CreateDocumentWithMetricsAsync(
+				(stream, _) =>
+				{
+					stream.Write(initial);
+					stream.Seek(2, SeekOrigin.Begin);
+					stream.Write(replacement);
+					stream.SetLength(8);
+					observedSpill = Assert
+						.IsType<PreviewDocumentBuilder.SpillablePreviewWriteStream>(stream)
+						.HasSpilled;
+					return Task.CompletedTask;
+				},
+				TestContext.Current.CancellationToken);
+		using var document = result.Document;
+
+		Assert.Equal(forceSpill, observedSpill);
+		Assert.Equal("xxABCDxx", document.GetFullText());
+		Assert.Equal(ExportOutputMetricsCalculator.FromText("xxABCDxx"), result.Metrics);
+	}
+
+	[Theory]
 	[MemberData(nameof(DocumentMetricsCases))]
 	public async Task CreateDocumentWithMetricsAsync_MatchesDocumentMetricsPass(
 		bool fileBacked,
@@ -460,21 +526,61 @@ public sealed class PreviewDocumentBuilderTests
 		var preamble = Encoding.UTF8.GetPreamble();
 		var content = Encoding.UTF8.GetBytes(text);
 		var builder = new PreviewDocumentBuilder(new StubFileContentAnalyzer());
+		var observedSpill = false;
 
 		var result = await builder.CreateDocumentWithMetricsAsync(
 			async (stream, cancellationToken) =>
 			{
 				await stream.WriteAsync(preamble, cancellationToken);
 				await stream.WriteAsync(content, cancellationToken);
+				observedSpill = Assert
+					.IsType<PreviewDocumentBuilder.SpillablePreviewWriteStream>(stream)
+					.HasSpilled;
 			},
 			TestContext.Current.CancellationToken);
 		using var document = result.Document;
 
+		Assert.Equal(fileBacked, observedSpill);
+		if (!fileBacked)
+			Assert.Equal(text, document.GetFullText());
 		Assert.Equal(
 			await ExportOutputMetricsCalculator.FromDocumentAsync(
 				document,
 				TestContext.Current.CancellationToken),
 			result.Metrics);
+	}
+
+	[Fact]
+	public async Task CreateDocumentWithMetricsAsync_InvalidUtf8PreservesReplacementFallback()
+	{
+		byte[] bytes = [(byte)'a', 0xC3, (byte)'(', (byte)'\r', (byte)'\n', (byte)'b'];
+		const string expected = "a\uFFFD(\r\nb";
+
+		var result = await new PreviewDocumentBuilder(new StubFileContentAnalyzer())
+			.CreateDocumentWithMetricsAsync(
+				(stream, cancellationToken) => stream.WriteAsync(bytes, cancellationToken).AsTask(),
+				TestContext.Current.CancellationToken);
+		using var document = result.Document;
+
+		Assert.IsType<InMemoryPreviewTextDocument>(document);
+		Assert.Equal(expected, document.GetFullText());
+		Assert.Equal(ExportOutputMetricsCalculator.FromText(expected), result.Metrics);
+	}
+
+	[Fact]
+	public async Task CreateDocumentWithMetricsAsync_CancellationAfterBufferedWriteIsObserved()
+	{
+		using var cancellation = new CancellationTokenSource();
+		var builder = new PreviewDocumentBuilder(new StubFileContentAnalyzer());
+
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+			builder.CreateDocumentWithMetricsAsync(
+				async (stream, cancellationToken) =>
+				{
+					await stream.WriteAsync("content"u8.ToArray(), cancellationToken);
+					cancellation.Cancel();
+				},
+				cancellation.Token));
 	}
 
 	[Theory]
@@ -552,11 +658,15 @@ public sealed class PreviewDocumentBuilderTests
     {
         var builder = new PreviewDocumentBuilder(new StubFileContentAnalyzer());
         string? storagePath = null;
+		var bytes = new byte[PreviewDocumentBuilder.SpillablePreviewWriteStream.MemoryLimitBytes + 1];
 
         await Assert.ThrowsAsync<IOException>(() => builder.CreateDocumentAsync(
-            (stream, _) =>
+			async (stream, cancellationToken) =>
             {
-                storagePath = Assert.IsType<FileStream>(stream).Name;
+				await stream.WriteAsync(bytes, cancellationToken);
+				var spillable = Assert.IsType<PreviewDocumentBuilder.SpillablePreviewWriteStream>(stream);
+				Assert.True(spillable.HasSpilled);
+				storagePath = spillable.StoragePath;
                 throw new IOException("deterministic test failure");
             },
             TestContext.Current.CancellationToken));

@@ -80,25 +80,26 @@ public sealed class PreviewDocumentBuilder(
     {
         ArgumentNullException.ThrowIfNull(writeAsync);
 
-		var storagePath = CreateStoragePath();
+		await using var stream = new SpillablePreviewWriteStream();
+		await writeAsync(stream, cancellationToken).ConfigureAwait(false);
+		await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+		if (!stream.HasSpilled)
+		{
+			var text = await stream.ReadBufferedTextAsync(cancellationToken).ConfigureAwait(false);
+			return CreateDocumentWithMetrics(text);
+		}
+
+		var storagePath = await stream.DetachStoragePathAsync(cancellationToken).ConfigureAwait(false);
 		try
 		{
-			await using (var stream = OpenStorageFile(
-			                 storagePath,
-			                 FileOptions.Asynchronous | FileOptions.SequentialScan))
-            {
-                await writeAsync(stream, cancellationToken).ConfigureAwait(false);
-                await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
-            }
-
-            return await BuildDocumentFromUtf8FileAsync(storagePath, cancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch
-        {
-            DisposeStorageFile(storagePath);
-            throw;
-        }
+			return await BuildDocumentFromUtf8FileAsync(storagePath, cancellationToken)
+				.ConfigureAwait(false);
+		}
+		catch
+		{
+			DisposeStorageFile(storagePath);
+			throw;
+		}
     }
 
     public async Task<IPreviewTextDocument?> BuildContentDocumentAsync(
@@ -1044,7 +1045,390 @@ public sealed class PreviewDocumentBuilder(
 		return new FileStream(storagePath, streamOptions);
 	}
 
-    private static void DisposeStorageFile(string storagePath)
+	/// <summary>
+	/// Keeps one export-sized chunk below the LOH threshold in pooled memory, then spills
+	/// to the existing private preview storage without narrowing the writable stream contract.
+	/// </summary>
+	internal sealed class SpillablePreviewWriteStream : Stream
+	{
+		internal const int MemoryLimitBytes = PreviewTextStreamWriter.BufferSizeBytes;
+
+		private byte[]? _memoryBuffer;
+		private MemoryStream? _memoryStream;
+		private FileStream? _fileStream;
+		private string? _storagePath;
+		private bool _disposed;
+
+		internal SpillablePreviewWriteStream()
+		{
+			_memoryBuffer = ArrayPool<byte>.Shared.Rent(MemoryLimitBytes);
+			_memoryStream = new MemoryStream(
+				_memoryBuffer,
+				index: 0,
+				count: _memoryBuffer.Length,
+				writable: true,
+				publiclyVisible: true);
+			_memoryStream.SetLength(0);
+		}
+
+		internal bool HasSpilled => _fileStream is not null;
+
+		internal string? StoragePath => _storagePath;
+
+		public override bool CanRead => !_disposed;
+
+		public override bool CanSeek => !_disposed;
+
+		public override bool CanWrite => !_disposed;
+
+		public override long Length
+		{
+			get
+			{
+				ThrowIfDisposed();
+				return CurrentStream.Length;
+			}
+		}
+
+		public override long Position
+		{
+			get
+			{
+				ThrowIfDisposed();
+				return CurrentStream.Position;
+			}
+			set
+			{
+				ThrowIfDisposed();
+				ArgumentOutOfRangeException.ThrowIfNegative(value);
+				if (_fileStream is null && value > MemoryLimitBytes)
+					SpillToFile();
+				CurrentStream.Position = value;
+			}
+		}
+
+		public override void Flush()
+		{
+			ThrowIfDisposed();
+			CurrentStream.Flush();
+		}
+
+		public override Task FlushAsync(CancellationToken cancellationToken)
+		{
+			ThrowIfDisposed();
+			cancellationToken.ThrowIfCancellationRequested();
+			return CurrentStream.FlushAsync(cancellationToken);
+		}
+
+		public override int Read(byte[] buffer, int offset, int count)
+		{
+			ThrowIfDisposed();
+			return CurrentStream.Read(buffer, offset, count);
+		}
+
+		public override int Read(Span<byte> buffer)
+		{
+			ThrowIfDisposed();
+			return CurrentStream.Read(buffer);
+		}
+
+		public override Task<int> ReadAsync(
+			byte[] buffer,
+			int offset,
+			int count,
+			CancellationToken cancellationToken)
+		{
+			ThrowIfDisposed();
+			return CurrentStream.ReadAsync(buffer, offset, count, cancellationToken);
+		}
+
+		public override ValueTask<int> ReadAsync(
+			Memory<byte> buffer,
+			CancellationToken cancellationToken = default)
+		{
+			ThrowIfDisposed();
+			return CurrentStream.ReadAsync(buffer, cancellationToken);
+		}
+
+		public override int ReadByte()
+		{
+			ThrowIfDisposed();
+			return CurrentStream.ReadByte();
+		}
+
+		public override long Seek(long offset, SeekOrigin origin)
+		{
+			ThrowIfDisposed();
+			if (_fileStream is null && ResolveSeekPosition(offset, origin) > MemoryLimitBytes)
+				SpillToFile();
+			return CurrentStream.Seek(offset, origin);
+		}
+
+		public override void SetLength(long value)
+		{
+			ThrowIfDisposed();
+			ArgumentOutOfRangeException.ThrowIfNegative(value);
+			if (_fileStream is null && value > MemoryLimitBytes)
+				SpillToFile();
+			CurrentStream.SetLength(value);
+		}
+
+		public override void Write(byte[] buffer, int offset, int count)
+		{
+			ThrowIfDisposed();
+			ArgumentNullException.ThrowIfNull(buffer);
+			ArgumentOutOfRangeException.ThrowIfNegative(offset);
+			ArgumentOutOfRangeException.ThrowIfNegative(count);
+			if (offset > buffer.Length - count)
+				throw new ArgumentException("The write range exceeds the source buffer.", nameof(count));
+
+			EnsureStorageForWrite(count);
+			CurrentStream.Write(buffer, offset, count);
+		}
+
+		public override void Write(ReadOnlySpan<byte> buffer)
+		{
+			ThrowIfDisposed();
+			EnsureStorageForWrite(buffer.Length);
+			CurrentStream.Write(buffer);
+		}
+
+		public override Task WriteAsync(
+			byte[] buffer,
+			int offset,
+			int count,
+			CancellationToken cancellationToken)
+		{
+			ArgumentNullException.ThrowIfNull(buffer);
+			ArgumentOutOfRangeException.ThrowIfNegative(offset);
+			ArgumentOutOfRangeException.ThrowIfNegative(count);
+			if (offset > buffer.Length - count)
+				throw new ArgumentException("The write range exceeds the source buffer.", nameof(count));
+
+			return WriteAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+		}
+
+		public override ValueTask WriteAsync(
+			ReadOnlyMemory<byte> buffer,
+			CancellationToken cancellationToken = default)
+		{
+			ThrowIfDisposed();
+			cancellationToken.ThrowIfCancellationRequested();
+			if (RequiresSpill(buffer.Length))
+				return WriteAfterSpillAsync(buffer, cancellationToken);
+			return CurrentStream.WriteAsync(buffer, cancellationToken);
+		}
+
+		public override void WriteByte(byte value)
+		{
+			ThrowIfDisposed();
+			EnsureStorageForWrite(1);
+			CurrentStream.WriteByte(value);
+		}
+
+		internal async Task<string> ReadBufferedTextAsync(CancellationToken cancellationToken)
+		{
+			ThrowIfDisposed();
+			if (_fileStream is not null)
+				throw new InvalidOperationException("Spilled preview storage cannot be read as a memory buffer.");
+
+			var stream = _memoryStream ??
+			             throw new ObjectDisposedException(nameof(SpillablePreviewWriteStream));
+			stream.Position = 0;
+			using var reader = new StreamReader(
+				stream,
+				PreviewTextStorageBuilder.Utf8WithoutBom,
+				detectEncodingFromByteOrderMarks: true,
+				bufferSize: 8192,
+				leaveOpen: true);
+			return await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+		}
+
+		internal async ValueTask<string> DetachStoragePathAsync(CancellationToken cancellationToken)
+		{
+			ThrowIfDisposed();
+			var stream = _fileStream ??
+			             throw new InvalidOperationException("Preview storage has not spilled to a file.");
+			await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+			await stream.DisposeAsync().ConfigureAwait(false);
+			_fileStream = null;
+			var storagePath = _storagePath ??
+			                  throw new InvalidOperationException("Preview backing path is unavailable.");
+			_storagePath = null;
+			_disposed = true;
+			return storagePath;
+		}
+
+		protected override void Dispose(bool disposing)
+		{
+			if (disposing && !_disposed)
+			{
+				_disposed = true;
+				try
+				{
+					_fileStream?.Dispose();
+				}
+				finally
+				{
+					_fileStream = null;
+					ReleaseMemoryBuffer();
+					DeleteOwnedStorageFile();
+				}
+			}
+
+			base.Dispose(disposing);
+		}
+
+		public override async ValueTask DisposeAsync()
+		{
+			if (_disposed)
+				return;
+
+			_disposed = true;
+			try
+			{
+				if (_fileStream is not null)
+					await _fileStream.DisposeAsync().ConfigureAwait(false);
+			}
+			finally
+			{
+				_fileStream = null;
+				ReleaseMemoryBuffer();
+				DeleteOwnedStorageFile();
+				GC.SuppressFinalize(this);
+			}
+		}
+
+		private Stream CurrentStream => (Stream?)_fileStream ?? _memoryStream ??
+			throw new ObjectDisposedException(nameof(SpillablePreviewWriteStream));
+
+		private void EnsureStorageForWrite(int count)
+		{
+			if (RequiresSpill(count))
+				SpillToFile();
+		}
+
+		private bool RequiresSpill(int count)
+		{
+			if (_fileStream is not null)
+				return false;
+			var stream = _memoryStream ??
+			             throw new ObjectDisposedException(nameof(SpillablePreviewWriteStream));
+			var resultingLength = Math.Max(stream.Length, checked(stream.Position + count));
+			return resultingLength > MemoryLimitBytes;
+		}
+
+		private async ValueTask WriteAfterSpillAsync(
+			ReadOnlyMemory<byte> buffer,
+			CancellationToken cancellationToken)
+		{
+			await SpillToFileAsync(cancellationToken).ConfigureAwait(false);
+			await _fileStream!.WriteAsync(buffer, cancellationToken).ConfigureAwait(false);
+		}
+
+		private void SpillToFile()
+		{
+			if (_fileStream is not null)
+				return;
+
+			var memory = _memoryStream ??
+			             throw new ObjectDisposedException(nameof(SpillablePreviewWriteStream));
+			var storagePath = CreateStoragePath();
+			FileStream? file = null;
+			try
+			{
+				file = OpenStorageFile(
+					storagePath,
+					FileOptions.Asynchronous | FileOptions.SequentialScan);
+				var position = memory.Position;
+				if (memory.Length > 0)
+					file.Write(_memoryBuffer!, 0, checked((int)memory.Length));
+				file.Position = position;
+				_fileStream = file;
+				_storagePath = storagePath;
+				ReleaseMemoryBuffer();
+			}
+			catch
+			{
+				file?.Dispose();
+				DisposeStorageFile(storagePath);
+				throw;
+			}
+		}
+
+		private async ValueTask SpillToFileAsync(CancellationToken cancellationToken)
+		{
+			if (_fileStream is not null)
+				return;
+
+			var memory = _memoryStream ??
+			             throw new ObjectDisposedException(nameof(SpillablePreviewWriteStream));
+			var storagePath = CreateStoragePath();
+			FileStream? file = null;
+			try
+			{
+				file = OpenStorageFile(
+					storagePath,
+					FileOptions.Asynchronous | FileOptions.SequentialScan);
+				var position = memory.Position;
+				if (memory.Length > 0)
+				{
+					await file.WriteAsync(
+							_memoryBuffer!.AsMemory(0, checked((int)memory.Length)),
+							cancellationToken)
+						.ConfigureAwait(false);
+				}
+				file.Position = position;
+				_fileStream = file;
+				_storagePath = storagePath;
+				ReleaseMemoryBuffer();
+			}
+			catch
+			{
+				if (file is not null)
+					await file.DisposeAsync().ConfigureAwait(false);
+				DisposeStorageFile(storagePath);
+				throw;
+			}
+		}
+
+		private long ResolveSeekPosition(long offset, SeekOrigin origin)
+		{
+			var stream = _memoryStream ??
+			             throw new ObjectDisposedException(nameof(SpillablePreviewWriteStream));
+			return origin switch
+			{
+				SeekOrigin.Begin => offset,
+				SeekOrigin.Current => checked(stream.Position + offset),
+				SeekOrigin.End => checked(stream.Length + offset),
+				_ => throw new ArgumentOutOfRangeException(nameof(origin), origin, null)
+			};
+		}
+
+		private void ReleaseMemoryBuffer()
+		{
+			_memoryStream?.Dispose();
+			_memoryStream = null;
+			var buffer = Interlocked.Exchange(ref _memoryBuffer, null);
+			if (buffer is not null)
+				ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
+		}
+
+		private void DeleteOwnedStorageFile()
+		{
+			var storagePath = Interlocked.Exchange(ref _storagePath, null);
+			if (storagePath is not null)
+				DisposeStorageFile(storagePath);
+		}
+
+		private void ThrowIfDisposed()
+		{
+			if (_disposed)
+				throw new ObjectDisposedException(nameof(SpillablePreviewWriteStream));
+		}
+	}
+
+	private static void DisposeStorageFile(string storagePath)
     {
         try
         {
@@ -1054,8 +1438,8 @@ public sealed class PreviewDocumentBuilder(
         catch
         {
             // Best-effort cleanup only.
+		}
 	}
-}
 
 internal static class PreviewTextStorageScavenger
 {
