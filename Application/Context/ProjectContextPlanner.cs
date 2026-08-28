@@ -65,14 +65,12 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				effectiveRoot,
 				selectedFullPaths,
 				cancellationToken);
-		var includedPathSet = BuildIncludedPathSet(includedNodes, cancellationToken);
-		var projectedTree = selectsNoEffectivePaths
-			? loaded.Tree.Root with { Children = [] }
-			: ProjectTreeSelectionProjection.BuildProjectedTreeWithCancellation(
-				effectiveRoot,
-				includedPathSet,
-				cancellationToken) ??
-			  effectiveRoot with { Children = [] };
+		var projectedTree = ResolveProjectedTree(
+			effectiveRoot,
+			selectedFullPaths,
+			includedNodes,
+			selectsNoEffectivePaths,
+			cancellationToken);
 		var includedFiles = selectsNoEffectivePaths
 			? []
 			: ProjectTreeSelectionProjection.BuildOrderedSelectedFilePathsWithCancellation(
@@ -202,14 +200,12 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				baseline.EffectiveTree,
 				selectedFullPaths,
 				cancellationToken);
-		var includedPathSet = BuildIncludedPathSet(includedNodes, cancellationToken);
-		var projectedTree = selectsNoEffectivePaths
-			? baseline.EffectiveTree with { Children = [] }
-			: ProjectTreeSelectionProjection.BuildProjectedTreeWithCancellation(
-				baseline.EffectiveTree,
-				includedPathSet,
-				cancellationToken) ??
-			  baseline.EffectiveTree with { Children = [] };
+		var projectedTree = ResolveProjectedTree(
+			baseline.EffectiveTree,
+			selectedFullPaths,
+			includedNodes,
+			selectsNoEffectivePaths,
+			cancellationToken);
 		var includedFiles = selectsNoEffectivePaths
 			? []
 			: ProjectTreeSelectionProjection.BuildOrderedSelectedFilePathsWithCancellation(
@@ -980,6 +976,27 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		}
 
 		return includedPaths;
+	}
+
+	internal static TreeNodeDescriptor ResolveProjectedTree(
+		TreeNodeDescriptor root,
+		IReadOnlySet<string> selectedFullPaths,
+		IReadOnlyList<TreeNodeDescriptor> includedNodes,
+		bool selectsNoEffectivePaths,
+		CancellationToken cancellationToken)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
+		if (selectsNoEffectivePaths)
+			return root with { Children = [] };
+		if (ProjectTreeSelectionProjection.CoversWholeTree(root, selectedFullPaths))
+			return root;
+
+		var includedPathSet = BuildIncludedPathSet(includedNodes, cancellationToken);
+		return ProjectTreeSelectionProjection.BuildProjectedTreeWithCancellation(
+			       root,
+			       includedPathSet,
+			       cancellationToken) ??
+		       root with { Children = [] };
 	}
 
 	private static string[] BuildOrderedIncludedFolders(
