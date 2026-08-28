@@ -331,13 +331,12 @@ public sealed class GitIgnoreMatcher
             normalizedName,
             _normalizeUnicode,
             _ignoreAsciiCase);
-        var ignored = false;
-        var hasMatch = false;
         var regexProjectionInitialized = false;
         string? projectedRelativePath = null;
         string? projectedName = null;
-        foreach (var rule in _rules)
+        for (var ruleIndex = _rules.Count - 1; ruleIndex >= 0; ruleIndex--)
         {
+            var rule = _rules[ruleIndex];
             if (rule.MatchKind == RuleMatchKind.Regex && !regexProjectionInitialized)
             {
                 projectedRelativePath = ProjectUtf8BytesForRegexOrNull(relativePath);
@@ -356,11 +355,10 @@ public sealed class GitIgnoreMatcher
                 continue;
             }
 
-            ignored = !rule.IsNegation;
-            hasMatch = true;
+            return new IgnoreEvaluation(HasMatch: true, IsIgnored: !rule.IsNegation);
         }
 
-        return new IgnoreEvaluation(hasMatch, ignored);
+        return default;
     }
 
     private bool HasIgnoredAncestor(ReadOnlySpan<char> relativePath)
