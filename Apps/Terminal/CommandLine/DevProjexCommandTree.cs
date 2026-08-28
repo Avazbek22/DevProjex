@@ -1198,7 +1198,7 @@ public sealed class DevProjexCommandTree
 			CommandExecution.RunAsync(
 				environment,
 				new TerminalOutputOptions(),
-				() => RunWithServicesAsync(
+				() => RunWithRecentServicesAsync(
 					parseResult,
 					services => Task.FromResult(new RecentCommandHandler(
 							services,
@@ -1658,6 +1658,14 @@ public sealed class DevProjexCommandTree
 		Func<TerminalCacheServices, Task<int>> operation)
 	{
 		using var serviceScope = _serviceFactory.CreateCacheScope(parseResult.GetValue(_language));
+		return await operation(serviceScope.Services).ConfigureAwait(false);
+	}
+
+	private async Task<int> RunWithRecentServicesAsync(
+		ParseResult parseResult,
+		Func<TerminalRecentServices, Task<int>> operation)
+	{
+		using var serviceScope = _serviceFactory.CreateRecentScope(parseResult.GetValue(_language));
 		return await operation(serviceScope.Services).ConfigureAwait(false);
 	}
 

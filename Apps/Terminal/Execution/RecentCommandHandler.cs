@@ -7,7 +7,7 @@ using DevProjex.Terminal.Rendering;
 namespace DevProjex.Terminal.Execution;
 
 internal sealed class RecentCommandHandler(
-	TerminalServices services,
+	TerminalRecentServices services,
 	ITerminalEnvironment environment)
 {
 	private static readonly JsonSerializerOptions JsonOptions = new()

@@ -81,9 +81,7 @@ public sealed class TerminalServiceFactory(
 			localProfiles,
 			portableProfiles.LoadAsync);
 		var repoCache = CreateRepositoryCache(resolvedAppDataPathProvider);
-		var recentProjects = appDataPathProvider is null
-			? new RecentProjectsStore()
-			: new RecentProjectsStore(resolvedAppDataPathProvider);
+		var recentProjects = CreateRecentProjectsStore(resolvedAppDataPathProvider);
 		var gitRepository = new GitRepositoryService();
 		var sourceIdentityResolver = new ProjectSourceIdentityResolver(gitRepository, repoCache);
 		var repositoryCacheCatalog = new RepositoryCacheCatalog(gitRepository, repoCache);
@@ -197,15 +195,44 @@ public sealed class TerminalServiceFactory(
 			repositoryCache);
 	}
 
+	internal TerminalRecentServiceScope CreateRecentScope(AppLanguage language)
+	{
+		if (_servicesProvider is not null)
+		{
+			var fullScope = CreateScope(language);
+			return new TerminalRecentServiceScope(
+				new TerminalRecentServices(
+					fullScope.Services.RecentProjectsStore,
+					fullScope.Services.RecentWorkspacesService),
+				fullScope);
+		}
+
+		var resolvedAppDataPathProvider =
+			appDataPathProvider ?? UserDataPathResolver.GetConfigurationRoot;
+		return new TerminalRecentServiceScope(
+			new TerminalRecentServices(
+				CreateRecentProjectsStore(resolvedAppDataPathProvider),
+				new RecentWorkspacesService()));
+	}
+
 	private RepoCacheService CreateRepositoryCache(Func<string> resolvedAppDataPathProvider) =>
 		appDataPathProvider is null
 			? new RepoCacheService()
 			: new RepoCacheService(Path.Combine(resolvedAppDataPathProvider(), "RepoCache"));
+
+	private RecentProjectsStore CreateRecentProjectsStore(Func<string> resolvedAppDataPathProvider) =>
+		appDataPathProvider is null
+			? new RecentProjectsStore()
+			: new RecentProjectsStore(resolvedAppDataPathProvider);
 }
 
 internal sealed record TerminalCacheServices(
 	LocalizationService Localization,
 	IRepoCacheService RepoCacheService);
+
+internal sealed record TerminalRecentServices(
+	RecentProjectsStore RecentProjectsStore,
+	RecentWorkspacesService RecentWorkspacesService);
 
 internal sealed class TerminalCacheServiceScope(
 	TerminalCacheServices services,
@@ -218,6 +245,24 @@ internal sealed class TerminalCacheServiceScope(
 
 	public TerminalCacheServices Services =>
 		_services ?? throw new ObjectDisposedException(nameof(TerminalCacheServiceScope));
+
+	public void Dispose()
+	{
+		_services = null;
+		Interlocked.Exchange(ref _ownedLifetime, null)?.Dispose();
+	}
+}
+
+internal sealed class TerminalRecentServiceScope(
+	TerminalRecentServices services,
+	IDisposable? ownedLifetime = null) : IDisposable
+{
+	private TerminalRecentServices? _services = services ??
+		throw new ArgumentNullException(nameof(services));
+	private IDisposable? _ownedLifetime = ownedLifetime;
+
+	public TerminalRecentServices Services =>
+		_services ?? throw new ObjectDisposedException(nameof(TerminalRecentServiceScope));
 
 	public void Dispose()
 	{

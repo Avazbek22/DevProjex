@@ -1,5 +1,6 @@
 using DevProjex.Infrastructure.Git;
 using DevProjex.Infrastructure.Persistence;
+using DevProjex.Infrastructure.RecentProjects;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -88,6 +89,56 @@ public sealed class TerminalServiceFactoryTests
 	}
 
 	[Fact]
+	public async Task RecentRouteUsesNarrowScopeAndCustomDataRoot()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var project = new TemporaryDirectory();
+		var dataRoot = workspace.CreateDirectory("app-data");
+		var recentStore = new RecentProjectsStore(() => dataRoot);
+		var database = recentStore.AddFolder(null, project.Path);
+		var entry = Assert.Single(database.RecentFolders);
+		var fullServiceCreations = 0;
+		var factory = new TerminalServiceFactory(
+			() => dataRoot,
+			() => fullServiceCreations++);
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment, factory)
+			.RunAsync(
+				["recent", "--kind", "folder", "--limit", "1", "--format", "json", "--language", "en"],
+				TestContext.Current.CancellationToken);
+
+		var normalizedPath = PathUtility.NormalizeSeparators(project.Path);
+		var normalizedParent = PathUtility.NormalizeSeparators(
+			Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(project.Path))!);
+		var expectedOutput = JsonSerializer.Serialize(
+			new
+			{
+				schemaVersion = 1,
+				kind = "devprojex-recent",
+				items = new[]
+				{
+					new RecentCommandHandler.RecentOutputEntry(
+						"folder",
+						normalizedPath,
+						null,
+						Path.GetFileName(Path.TrimEndingDirectorySeparator(project.Path)),
+						normalizedParent,
+						entry.OpenedUtc.ToUniversalTime())
+				}
+			},
+			new JsonSerializerOptions
+			{
+				PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+				WriteIndented = true
+			});
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Equal(0, fullServiceCreations);
+		Assert.Equal(expectedOutput + Environment.NewLine, environment.StandardOutput);
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
 	public void InjectedCacheScopeFallsBackToBorrowedFullServices()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -104,6 +155,29 @@ public sealed class TerminalServiceFactoryTests
 		{
 			Assert.Same(services.Localization, scope.Services.Localization);
 			Assert.Same(services.RepoCacheService, scope.Services.RepoCacheService);
+		}
+
+		Assert.Equal(1, providerCalls);
+		services.SecretRedactionSession.Reset();
+	}
+
+	[Fact]
+	public void InjectedRecentScopeFallsBackToBorrowedFullServices()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var providerCalls = 0;
+		var factory = new TerminalServiceFactory(_ =>
+		{
+			providerCalls++;
+			return services;
+		});
+
+		using (var scope = factory.CreateRecentScope(AppLanguage.En))
+		{
+			Assert.Same(services.RecentProjectsStore, scope.Services.RecentProjectsStore);
+			Assert.Same(services.RecentWorkspacesService, scope.Services.RecentWorkspacesService);
 		}
 
 		Assert.Equal(1, providerCalls);
