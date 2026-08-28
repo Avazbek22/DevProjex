@@ -84,6 +84,69 @@ public sealed class ProjectCopyExportService(
 		}
 	}
 
+	public async Task<ProjectCopyExportResult> ExportZipToStreamAsync(
+		ProjectCopyExportRequest request,
+		Stream destination,
+		IProgress<ProjectCopyExportProgress>? progress = null,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(request);
+		ArgumentNullException.ThrowIfNull(destination);
+		if (request.Format != ProjectCopyExportFormat.Zip || !destination.CanWrite)
+		{
+			throw new ProjectCopyExportException(
+				ProjectCopyExportError.InvalidRequest,
+				"A writable stream and ZIP format are required for streamed export.");
+		}
+
+		try
+		{
+			var plan = planBuilder.Build(request, cancellationToken);
+			ValidateSources(plan, cancellationToken);
+			await using var prepared = request.RedactSecrets || request.RedactPrivateData || request.CompressCode ||
+			                           request.StripComments || request.StripBlankLines
+				? await PrepareRedactedOutputAsync(plan, request, cancellationToken).ConfigureAwait(false)
+				: null;
+			var transformationNotice = BuildTransformationNotice(prepared, plan, request.NoticeText);
+			ValidateTransformationNoticeCollision(plan, transformationNotice);
+			var result = await WriteZipArchiveAsync(
+					plan,
+					destination,
+					prepared,
+					transformationNotice,
+					progress,
+					cancellationToken)
+				.ConfigureAwait(false);
+			await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
+			return new ProjectCopyExportResult(
+				"-",
+				result.ProcessedFiles,
+				plan.DirectoryCount,
+				result.BytesWritten,
+				prepared?.Snapshot?.RedactedCount ?? 0,
+				prepared?.UnscannableFiles ?? []);
+		}
+		catch (Exception exception) when (exception is not OperationCanceledException and not ProjectCopyExportException)
+		{
+			throw exception switch
+			{
+				SecretScanLimitExceededException scanLimit => new ProjectCopyExportException(
+					ProjectCopyExportError.SecretScanLimitExceeded,
+					"Hide Secrets could not inspect a selected text file because it exceeds the supported scan limit.",
+					scanLimit,
+					scanLimit.Path),
+				SecretDetectionException detection => new ProjectCopyExportException(
+					ProjectCopyExportError.SecretDetectionFailed,
+					"Hide Secrets could not inspect every selected text file. No project copy was created.",
+					detection),
+				FileNotFoundException or DirectoryNotFoundException => ExportFailure(ProjectCopyExportError.SourceUnavailable, exception),
+				UnauthorizedAccessException => ExportFailure(ProjectCopyExportError.AccessDenied, exception),
+				IOException => ExportFailure(ProjectCopyExportError.IoFailure, exception),
+				_ => ExportFailure(ProjectCopyExportError.UnexpectedFailure, exception)
+			};
+		}
+	}
+
 	/// <summary>
 	/// The notice a transformed copy carries in its own root. A folder or ZIP that is not a
 	/// byte-for-byte copy of the project has to say so where it will be read - the confirmation the
@@ -574,6 +637,89 @@ public sealed class ProjectCopyExportService(
 		string destinationPath,
 		bool overwrite) =>
 		AtomicFileCommit.Commit(stagingPath, destinationPath, overwrite);
+
+	private static async Task<StreamedZipWriteResult> WriteZipArchiveAsync(
+		ProjectCopyExportPlan plan,
+		Stream destination,
+		PreparedSecretRedactionOutput? prepared,
+		string? transformationNotice,
+		IProgress<ProjectCopyExportProgress>? progress,
+		CancellationToken cancellationToken)
+	{
+		var buffer = ArrayPool<byte>.Shared.Rent(CopyBufferSize);
+		var processedEntries = 0;
+		var processedFiles = 0;
+		long bytesWritten = 0;
+		var totalEntries = plan.Entries.Count;
+		try
+		{
+			using var archive = new ZipArchive(
+				destination,
+				ZipArchiveMode.Create,
+				leaveOpen: true,
+				Encoding.UTF8);
+			foreach (var directory in plan.Entries.Where(static entry => entry.IsDirectory))
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				var entryName = BuildZipEntryName(plan.ProjectName, directory.RelativePath, isDirectory: true);
+				var entry = archive.CreateEntry(entryName, CompressionLevel.NoCompression);
+				TrySetZipLastWriteTime(entry, directory.SourcePath);
+				processedEntries++;
+				ReportProgress(progress, processedEntries, totalEntries, bytesWritten);
+			}
+
+			foreach (var file in plan.Entries.Where(static entry => !entry.IsDirectory))
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				if (IsExcludedFromCopy(prepared, file.SourcePath))
+				{
+					processedEntries++;
+					ReportProgress(progress, processedEntries, totalEntries, bytesWritten);
+					continue;
+				}
+
+				var entryName = BuildZipEntryName(plan.ProjectName, file.RelativePath, isDirectory: false);
+				var entry = archive.CreateEntry(entryName, CompressionLevel.Optimal);
+				TrySetZipLastWriteTime(entry, file.SourcePath);
+				var preparedFile = prepared?.GetFile(file.SourcePath);
+				var contentPath = preparedFile?.ContentPath ?? file.SourcePath;
+				await using var source = OpenValidatedSourceFile(
+					plan.ProjectRootPath,
+					file.SourcePath,
+					contentPath,
+					preparedFile);
+				await using var entryDestination = entry.Open();
+				var copiedBytes = await CopyStreamAsync(source, entryDestination, buffer, cancellationToken)
+					.ConfigureAwait(false);
+				ValidatePreparedSourceVersion(preparedFile, source);
+				bytesWritten += copiedBytes;
+				processedEntries++;
+				processedFiles++;
+				ReportProgress(progress, processedEntries, totalEntries, bytesWritten);
+			}
+
+			if (totalEntries == 0)
+				ReportProgress(progress, 0, 0, 0);
+
+			if (transformationNotice is { } notice)
+			{
+				var noticeEntry = archive.CreateEntry(
+					BuildZipEntryName(plan.ProjectName, TransformationNoticeFileName, isDirectory: false),
+					CompressionLevel.Optimal);
+				await using var noticeStream = noticeEntry.Open();
+				await using var noticeWriter = new StreamWriter(noticeStream, new UTF8Encoding(false));
+				await noticeWriter.WriteAsync(notice.AsMemory(), cancellationToken).ConfigureAwait(false);
+			}
+		}
+		finally
+		{
+			ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
+		}
+
+		return new StreamedZipWriteResult(processedFiles, bytesWritten);
+	}
+
+	private readonly record struct StreamedZipWriteResult(int ProcessedFiles, long BytesWritten);
 
 	private static void ValidateSources(ProjectCopyExportPlan plan, CancellationToken cancellationToken)
 	{

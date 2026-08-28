@@ -42,13 +42,7 @@ public sealed class TerminalProgressPtyTests
 		await terminal.WaitForScreenAsync(
 			"> CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendAsync("Z", TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
-			"Choose the physical output kind",
-			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync("z", TestContext.Current.CancellationToken);
 		await ReplacePromptTextAsync(terminal, destination);
 		await terminal.WaitForScreenAsync(
 			"Export?",
@@ -126,7 +120,7 @@ public sealed class TerminalProgressPtyTests
 		await terminal.WaitForScreenAsync(
 			"> CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		await terminal.CompleteShellRestorationHandshakeAsync(
 			TestContext.Current.CancellationToken);
 		TerminalPtyStateAssertions.AssertRestoredAtShellCompletion(
@@ -161,13 +155,7 @@ public sealed class TerminalProgressPtyTests
 		string destination,
 		CancellationToken cancellationToken)
 	{
-		await terminal.SendAsync("Z", cancellationToken);
-		await terminal.WaitForScreenAsync(
-			"Choose the physical output kind",
-			cancellationToken: cancellationToken);
-		await terminal.SendTabAsync(cancellationToken);
-		await terminal.SendTabAsync(cancellationToken);
-		await terminal.SendEnterAsync(cancellationToken);
+		await terminal.SendAsync("z", cancellationToken);
 		await ReplacePromptTextAsync(terminal, destination);
 		await terminal.WaitForScreenAsync(
 			"Export?",

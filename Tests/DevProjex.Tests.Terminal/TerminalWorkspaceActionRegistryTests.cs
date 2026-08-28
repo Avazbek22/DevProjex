@@ -3,6 +3,22 @@ namespace DevProjex.Tests.Terminal;
 public sealed class TerminalWorkspaceActionRegistryTests
 {
 	[Fact]
+	public void RegistryCacheKeyIncludesPreviewViewAndFormat()
+	{
+		var baseline = new TerminalWorkspaceActionRegistryCacheKey(
+			1,
+			AppLanguage.En,
+			ProjectContextView.Tree,
+			ProjectContextDocumentFormat.Text);
+
+		Assert.NotEqual(
+			baseline,
+			baseline with { PreviewView = ProjectContextView.Content });
+		Assert.NotEqual(
+			baseline,
+			baseline with { Format = ProjectContextDocumentFormat.Markdown });
+	}
+	[Fact]
 	public void EveryCatalogCommandHasExactlyOneExecutableHandler()
 	{
 		var executed = new List<string>();

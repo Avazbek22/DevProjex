@@ -63,7 +63,7 @@ public sealed partial class TerminalPlainPtyTests
 		await terminal.WaitForScreenAsync(
 			"> CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		await terminal.CompleteShellRestorationHandshakeAsync(
 			TestContext.Current.CancellationToken);
 
@@ -135,7 +135,7 @@ public sealed partial class TerminalPlainPtyTests
 		Assert.True(File.Exists(destination));
 		var restoredWorkspace = terminal.CaptureScreen();
 		Assert.Contains("> PROJECT TREE", restoredWorkspace, StringComparison.Ordinal);
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(

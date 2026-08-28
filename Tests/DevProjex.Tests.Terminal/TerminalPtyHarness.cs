@@ -388,6 +388,12 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 	public Task SendEnterAsync(CancellationToken cancellationToken = default) =>
 		SendAsync("\r", cancellationToken);
 
+	public async Task SendQuitAndConfirmAsync(CancellationToken cancellationToken = default)
+	{
+		await SendAsync("q", cancellationToken).ConfigureAwait(false);
+		await SendEnterAsync(cancellationToken).ConfigureAwait(false);
+	}
+
 	public async Task CompleteShellRestorationHandshakeAsync(
 		CancellationToken cancellationToken = default)
 	{

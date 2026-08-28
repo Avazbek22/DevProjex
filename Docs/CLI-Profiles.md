@@ -11,9 +11,9 @@ DevProjex profiles store selection intent, not dynamic scan counts.
 - `local`: the existing per-project Desktop profile;
 - `FILE`: a portable versioned JSON profile.
 
-`analyze`, context/project export, and `profile show` default to `standard` so
-scripts behave consistently on another machine. `profile export` defaults to
-`local`. TUI and `open` default to `auto`.
+`analyze`, `tree`, context/project export, `profile show`, and `profile save`
+default to `standard` so scripts behave consistently on another machine.
+`profile export` defaults to `local`. TUI and `open` default to `auto`.
 
 ## Precedence
 

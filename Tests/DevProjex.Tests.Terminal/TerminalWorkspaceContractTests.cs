@@ -7,6 +7,17 @@ namespace DevProjex.Tests.Terminal;
 public sealed class TerminalWorkspaceContractTests
 {
 	[Fact]
+	public void ExportDestinationHistoryIsIndependentForContextFolderAndZip()
+	{
+		var history = new TerminalExportDestinationHistory();
+		history.Remember(TerminalExportKind.Context, "context.md");
+		history.Remember(TerminalExportKind.Folder, "project-folder");
+
+		Assert.Equal("context.md", history.Resolve(TerminalExportKind.Context, "default.md"));
+		Assert.Equal("project-folder", history.Resolve(TerminalExportKind.Folder, "default-folder"));
+		Assert.Equal("default.zip", history.Resolve(TerminalExportKind.Zip, "default.zip"));
+	}
+	[Fact]
 	public void CancellationSourceCleanupIsIdempotentAcrossBackgroundCompletion()
 	{
 		CancellationTokenSource? active = new();

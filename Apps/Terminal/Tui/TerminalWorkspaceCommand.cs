@@ -20,6 +20,7 @@ internal enum TerminalWorkspaceCommandVerb
 	Profile,
 	Refresh,
 	Language,
+	Diagnostics,
 	Help,
 	Quit
 }
@@ -27,12 +28,43 @@ internal enum TerminalWorkspaceCommandVerb
 internal sealed record TerminalWorkspaceCommandDefinition(
 	string Id,
 	TerminalWorkspaceCommandVerb Verb,
+	TerminalWorkspaceCommandGrammar Grammar,
+	TerminalWorkspaceCommandHandler Handler,
+	TerminalWorkspaceCommandAvailability Availability,
 	string Token,
 	string Syntax,
 	string Example,
 	string TitleKey,
 	string DescriptionKey,
 	string SchemaKey);
+
+internal delegate TerminalWorkspaceCommandExecutionResult TerminalWorkspaceCommandHandler(
+	TerminalWorkspaceSession session,
+	TerminalWorkspaceCommand command);
+
+internal enum TerminalWorkspaceCommandAvailability
+{
+	Workspace,
+	GitClone,
+	Always
+}
+
+internal enum TerminalWorkspaceCommandGrammar
+{
+	ToggleOption,
+	ToggleGroup,
+	ToggleTypes,
+	View,
+	Format,
+	Text,
+	Export,
+	Copy,
+	OptionalText,
+	Profile,
+	Language,
+	Help,
+	None
+}
 
 internal sealed record TerminalWorkspaceCommand(
 	TerminalWorkspaceCommandDefinition Definition,
@@ -77,9 +109,17 @@ internal readonly record struct TerminalWorkspaceCommandParseResult(
 }
 
 internal sealed record TerminalWorkspaceCommandParseContext(
-	IReadOnlyList<string> AvailableExtensions)
+	IReadOnlyList<string> AvailableExtensions,
+	IReadOnlySet<TerminalWorkspaceCommandVerb>? AllowedVerbs = null,
+	string? WorkingDirectory = null)
 {
 	public static TerminalWorkspaceCommandParseContext Empty { get; } = new([]);
+	public IReadOnlyList<string> VerbTokens => AllowedVerbs is null
+		? TerminalWorkspaceCommandCatalog.VerbTokens
+		: TerminalWorkspaceCommandCatalog.All
+			.Where(definition => AllowedVerbs.Contains(definition.Verb))
+			.Select(static definition => definition.Token)
+			.ToArray();
 }
 
 internal sealed record TerminalWorkspaceCommandCompletionCandidate(
@@ -101,117 +141,186 @@ internal static class TerminalWorkspaceCommandCatalog
 	[
 		Define(
 			TerminalWorkspaceCommandVerb.Set,
+			TerminalWorkspaceCommandGrammar.ToggleOption,
 			"set",
 			"set <option> <on|off>",
-			"set hide-secrets on"),
+			"set hide-secrets on",
+			static (session, command) => session.ExecuteSetCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.All,
+			TerminalWorkspaceCommandGrammar.ToggleGroup,
 			"all",
 			"all <types|exclusions|content> <on|off>",
-			"all content on"),
+			"all content on",
+			static (session, command) => session.ExecuteAllCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Type,
+			TerminalWorkspaceCommandGrammar.ToggleTypes,
 			"type",
 			"type <.ext> [<.ext>...] <on|off>",
-			"type .cs on"),
+			"type .cs on",
+			static (session, command) => session.ExecuteTypeCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.View,
+			TerminalWorkspaceCommandGrammar.View,
 			"view",
 			"view <tree|content|tree-content>",
-			"view content"),
+			"view content",
+			static (session, command) => session.ExecuteViewCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Format,
+			TerminalWorkspaceCommandGrammar.Format,
 			"format",
 			"format <text|markdown|json|xml>",
-			"format json"),
+			"format json",
+			static (session, command) => session.ExecuteFormatCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Search,
+			TerminalWorkspaceCommandGrammar.Text,
 			"search",
 			"search [text]",
-			"search TODO"),
+			"search TODO",
+			static (session, command) => session.ExecuteSearchCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Filter,
+			TerminalWorkspaceCommandGrammar.Text,
 			"filter",
 			"filter [text]",
-			"filter generated"),
+			"filter generated",
+			static (session, command) => session.ExecuteFilterCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Export,
+			TerminalWorkspaceCommandGrammar.Export,
 			"export",
 			"export <context|zip|folder> ...",
-			"export context markdown context.md"),
+			"export context markdown context.md",
+			static (session, command) => session.ExecuteExportCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Copy,
+			TerminalWorkspaceCommandGrammar.Copy,
 			"copy",
 			"copy [tree|content|tree-content] [text|markdown|json|xml]",
-			"copy content markdown"),
+			"copy content markdown",
+			static (session, command) => session.ExecuteCopyCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Analyze,
+			TerminalWorkspaceCommandGrammar.None,
 			"analyze",
 			"analyze",
-			"analyze"),
+			"analyze",
+			static (session, command) => session.ExecuteAnalyzeCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Branch,
+			TerminalWorkspaceCommandGrammar.OptionalText,
 			"branch",
 			"branch [name]",
-			"branch feature/review"),
+			"branch feature/review",
+			static (session, command) => session.ExecuteBranchCommand(command),
+			TerminalWorkspaceCommandAvailability.GitClone),
 		Define(
 			TerminalWorkspaceCommandVerb.Update,
+			TerminalWorkspaceCommandGrammar.None,
 			"update",
 			"update",
-			"update"),
+			"update",
+			static (session, command) => session.ExecuteUpdateCommand(command),
+			TerminalWorkspaceCommandAvailability.GitClone),
 		Define(
 			TerminalWorkspaceCommandVerb.Recent,
+			TerminalWorkspaceCommandGrammar.None,
 			"recent",
 			"recent",
-			"recent"),
+			"recent",
+			static (session, command) => session.ExecuteRecentCommand(command),
+			TerminalWorkspaceCommandAvailability.Always),
 		Define(
 			TerminalWorkspaceCommandVerb.Profile,
+			TerminalWorkspaceCommandGrammar.Profile,
 			"profile",
 			"profile save [name]",
-			"profile save \"Review Settings\""),
+			"profile save \"Review Settings\"",
+			static (session, command) => session.ExecuteProfileCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Refresh,
+			TerminalWorkspaceCommandGrammar.None,
 			"refresh",
 			"refresh",
-			"refresh"),
+			"refresh",
+			static (session, command) => session.ExecuteRefreshCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Language,
+			TerminalWorkspaceCommandGrammar.Language,
 			"language",
 			"language [code]",
-			"language ja"),
+			"language ja",
+			static (session, command) => session.ExecuteLanguageCommand(command),
+			TerminalWorkspaceCommandAvailability.Always),
+		Define(
+			TerminalWorkspaceCommandVerb.Diagnostics,
+			TerminalWorkspaceCommandGrammar.None,
+			"diagnostics",
+			"diagnostics",
+			"diagnostics",
+			static (session, command) => session.ExecuteDiagnosticsCommand(command)),
 		Define(
 			TerminalWorkspaceCommandVerb.Help,
+			TerminalWorkspaceCommandGrammar.Help,
 			"help",
 			"help [verb]",
-			"help set"),
+			"help set",
+			static (session, command) => session.ExecuteHelpCommand(command),
+			TerminalWorkspaceCommandAvailability.Always),
 		Define(
 			TerminalWorkspaceCommandVerb.Quit,
+			TerminalWorkspaceCommandGrammar.None,
 			"quit",
 			"quit",
-			"quit")
+			"quit",
+			static (session, command) => session.ExecuteQuitCommand(command),
+			TerminalWorkspaceCommandAvailability.Always)
 	];
 
 	public static IReadOnlyList<string> VerbTokens { get; } =
 		All.Select(static definition => definition.Token).ToArray();
+	private static readonly IReadOnlyDictionary<TerminalWorkspaceCommandVerb, TerminalWorkspaceCommandDefinition>
+		ByVerb = All.ToDictionary(static definition => definition.Verb);
+	private static readonly IReadOnlyDictionary<string, TerminalWorkspaceCommandDefinition> ByToken =
+		All.ToDictionary(static definition => definition.Token, StringComparer.OrdinalIgnoreCase);
+
+	static TerminalWorkspaceCommandCatalog()
+	{
+		if (All.Count != Enum.GetValues<TerminalWorkspaceCommandVerb>().Length ||
+			All.Select(static definition => definition.Verb).Distinct().Count() != All.Count ||
+			All.Select(static definition => definition.Id).Distinct(StringComparer.Ordinal).Count() != All.Count ||
+			All.Select(static definition => definition.Token)
+				.Distinct(StringComparer.OrdinalIgnoreCase).Count() != All.Count)
+		{
+			throw new InvalidOperationException("The terminal command catalog is incomplete or contains duplicate descriptors.");
+		}
+	}
 
 	public static TerminalWorkspaceCommandDefinition Get(TerminalWorkspaceCommandVerb verb) =>
-		All.First(definition => definition.Verb == verb);
+		ByVerb[verb];
 
 	public static bool TryGet(string token, out TerminalWorkspaceCommandDefinition definition)
 	{
-		definition = All.FirstOrDefault(candidate =>
-			string.Equals(candidate.Token, token, StringComparison.OrdinalIgnoreCase))!;
-		return definition is not null;
+		return ByToken.TryGetValue(token, out definition!);
 	}
 
 	private static TerminalWorkspaceCommandDefinition Define(
 		TerminalWorkspaceCommandVerb verb,
+		TerminalWorkspaceCommandGrammar grammar,
 		string token,
 		string syntax,
-		string example) =>
+		string example,
+		TerminalWorkspaceCommandHandler handler,
+		TerminalWorkspaceCommandAvailability availability = TerminalWorkspaceCommandAvailability.Workspace) =>
 		new(
 			$"workspace.command.{token}",
 			verb,
+			grammar,
+			handler,
+			availability,
 			token,
 			syntax,
 			example,

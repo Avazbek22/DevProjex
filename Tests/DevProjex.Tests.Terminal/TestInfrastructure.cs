@@ -4,9 +4,12 @@ internal sealed class TestTerminalEnvironment : ITerminalEnvironment
 {
 	private readonly StringWriter _output = new();
 	private readonly StringWriter _error = new();
+	private readonly MemoryStream _rawOutput = new();
 
 	public TextReader Input { get; init; } = new StringReader(string.Empty);
 	public Stream? RawInput { get; init; }
+	public Stream? RawOutput => RawOutputOverride ?? _rawOutput;
+	public Stream? RawOutputOverride { get; init; }
 	public TextWriter Output => OutputOverride ?? _output;
 	public TextWriter Error => ErrorOverride ?? _error;
 	public TextWriter? OutputOverride { get; init; }
@@ -27,6 +30,7 @@ internal sealed class TestTerminalEnvironment : ITerminalEnvironment
 
 	public string StandardOutput => _output.ToString();
 	public string StandardError => _error.ToString();
+	public byte[] StandardOutputBytes => _rawOutput.ToArray();
 }
 
 internal sealed class TemporaryDirectory : IDisposable

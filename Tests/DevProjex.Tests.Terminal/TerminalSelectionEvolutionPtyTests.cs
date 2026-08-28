@@ -273,7 +273,7 @@ public sealed class TerminalSelectionEvolutionPtyTests
 			GetCheckpointRoot(dataRoot),
 			"background-refresh");
 
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 
 		Assert.Equal(
 			CommandLineExitCodes.Success,
@@ -392,7 +392,7 @@ public sealed class TerminalSelectionEvolutionPtyTests
 
 	private static async Task ExitAsync(TerminalPtyHarness terminal)
 	{
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(

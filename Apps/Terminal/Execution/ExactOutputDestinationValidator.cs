@@ -4,8 +4,9 @@ internal static class ExactOutputDestinationValidator
 {
 	public static string ValidateAnalysis(
 		string sourceRoot,
-		string destination) =>
-		ValidateFile(sourceRoot, destination, overwrite: false);
+		string destination,
+		bool overwrite = false) =>
+		ValidateFile(sourceRoot, destination, overwrite);
 
 	public static string ValidateContext(
 		string sourceRoot,

@@ -9,6 +9,7 @@
   │  Open current directory                │  │ Select a folder without scanning anything until you confirm it.      │
   │  Recent workspaces                     │  │                                                                      │
   │> Browse folder                         │  │                                                                      │
+  │  Open project with settings file...    │  │                                                                      │
   │  Clone repository                      │  │                                                                      │
   │  Open Desktop                          │  │                                                                      │
   │  Help                                  │  │                                                                      │
@@ -26,5 +27,4 @@
 
 
 
-
-  Up/Down or j/k Navigate   Enter Select   Ctrl+P Actions   ? Help   q Exit
+  1-9 Recent   Enter Select   : Commands   Ctrl+P Actions   ? Help   q Exit

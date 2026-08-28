@@ -27,6 +27,35 @@ public sealed class ProfileCommandContractTests
 	}
 
 	[Fact]
+	public void TextProfileUsesLocalizedAllForEmptySelections()
+	{
+		using var workspace = new TemporaryDirectory();
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var handler = new ProfileCommandHandler(services, new TestTerminalEnvironment());
+		var selection = new ProjectSelectionSpec(
+			Roots: [],
+			Extensions: [],
+			SelectedPaths: []);
+
+		var text = handler.BuildText(selection);
+		var all = services.Localization["Terminal.Profile.All"];
+
+		Assert.Contains(
+			$"{services.Localization["Terminal.Analysis.Roots"]}: {all}",
+			text,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			$"{services.Localization["Terminal.Analysis.Extensions"]}: {all}",
+			text,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			$"{services.Localization["Terminal.Profile.SelectedPaths"]}: {all}",
+			text,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task StandardProfileIsDeterministicAndDoesNotReadLocalState()
 	{
 		using var workspace = CreateWorkspace();
@@ -105,6 +134,65 @@ public sealed class ProfileCommandContractTests
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
 		Assert.Equal("valid" + Environment.NewLine, environment.StandardOutput);
 		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
+	public async Task ValidateJsonUsesTheStableSchemaForValidAndInvalidProfiles()
+	{
+		using var workspace = CreateWorkspace();
+		var validProfile = WriteProfile(
+			workspace,
+			"""
+			{
+			  "schemaVersion": 1,
+			  "selection": {
+			    "roots": null,
+			    "extensions": null,
+			    "selectedPaths": [],
+			    "gitMode": "none",
+			    "exclusions": []
+			  }
+			}
+			""");
+		var validEnvironment = new TestTerminalEnvironment();
+
+		var validExitCode = await RunAsync(
+			workspace,
+			validEnvironment,
+			"profile", "validate", validProfile, "--format", "json");
+
+		Assert.Equal(CommandLineExitCodes.Success, validExitCode);
+		using (var document = JsonDocument.Parse(validEnvironment.StandardOutput))
+		{
+			Assert.Equal(
+				["schemaVersion", "kind", "valid", "errors"],
+				document.RootElement.EnumerateObject().Select(static property => property.Name));
+			Assert.Equal(1, document.RootElement.GetProperty("schemaVersion").GetInt32());
+			Assert.Equal(
+				"devprojex-profile-validation",
+				document.RootElement.GetProperty("kind").GetString());
+			Assert.True(document.RootElement.GetProperty("valid").GetBoolean());
+			Assert.Empty(document.RootElement.GetProperty("errors").EnumerateArray());
+		}
+		Assert.Empty(validEnvironment.StandardError);
+
+		var invalidProfile = workspace.WriteFile("profiles/broken.json", "{ invalid");
+		var invalidEnvironment = new TestTerminalEnvironment();
+		var invalidExitCode = await RunAsync(
+			workspace,
+			invalidEnvironment,
+			"profile", "validate", invalidProfile, "--format", "json");
+
+		Assert.Equal(CommandLineExitCodes.UsageError, invalidExitCode);
+		using (var document = JsonDocument.Parse(invalidEnvironment.StandardOutput))
+		{
+			Assert.Equal(
+				"devprojex-profile-validation",
+				document.RootElement.GetProperty("kind").GetString());
+			Assert.False(document.RootElement.GetProperty("valid").GetBoolean());
+			Assert.Single(document.RootElement.GetProperty("errors").EnumerateArray());
+		}
+		Assert.Empty(invalidEnvironment.StandardError);
 	}
 
 	[Fact]
@@ -265,6 +353,45 @@ public sealed class ProfileCommandContractTests
 			"The local project profile was not found",
 			missingEnvironment.StandardError,
 			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task SavePersistsTheEffectiveSelectionAsTheLocalProfile()
+	{
+		using var workspace = CreateWorkspace();
+		var saveEnvironment = new TestTerminalEnvironment();
+
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				saveEnvironment,
+				"profile", "save", workspace.Path,
+				"--extension", ".cs",
+				"--git-mode", "none",
+				"--exclude", "none",
+				"--hide-secrets", "off",
+				"--hide-private-data", "on"));
+		Assert.Equal(PathUtility.Normalize(workspace.Path) + Environment.NewLine,
+			saveEnvironment.StandardOutput);
+
+		var showEnvironment = new TestTerminalEnvironment();
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				showEnvironment,
+				"profile", "show", workspace.Path,
+				"--profile", "local",
+				"--format", "json"));
+		using var document = JsonDocument.Parse(showEnvironment.StandardOutput);
+		var selection = document.RootElement.GetProperty("selection");
+		Assert.Equal([".cs"], selection.GetProperty("extensions")
+			.EnumerateArray().Select(static value => value.GetString()));
+		Assert.Equal("none", selection.GetProperty("gitMode").GetString());
+		Assert.Empty(selection.GetProperty("exclusions").EnumerateArray());
+		Assert.False(selection.GetProperty("hideSecrets").GetBoolean());
+		Assert.True(selection.GetProperty("hidePrivateData").GetBoolean());
 	}
 
 	[Fact]
@@ -454,6 +581,47 @@ public sealed class ProfileCommandContractTests
 		Assert.Equal(1, document.RootElement.GetProperty("schemaVersion").GetInt32());
 		Assert.Equal("devprojex-profile", document.RootElement.GetProperty("kind").GetString());
 		Assert.Equal(Path.GetFullPath(destination) + Environment.NewLine, forceEnvironment.StandardOutput);
+	}
+
+	[Fact]
+	public async Task ExportProfileDryRunPerformsTheSamePreflightWithoutWriting()
+	{
+		using var workspace = CreateWorkspace();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/src/app.cs", "class App {}\n");
+		var destination = workspace.WriteFile("profiles/portable.json", "unchanged");
+		var conflictEnvironment = new TestTerminalEnvironment();
+
+		var conflict = await RunAsync(
+			workspace,
+			conflictEnvironment,
+			"profile", "export", project,
+			"--profile", "standard",
+			"-o", destination,
+			"--dry-run");
+
+		Assert.Equal(CommandLineExitCodes.DestinationConflict, conflict);
+		Assert.Equal("unchanged", File.ReadAllText(destination));
+		Assert.Empty(conflictEnvironment.StandardOutput);
+		Assert.Contains(
+			"DPX-PROFILE-DESTINATION-EXISTS",
+			conflictEnvironment.StandardError,
+			StringComparison.Ordinal);
+
+		var forceEnvironment = new TestTerminalEnvironment();
+		var success = await RunAsync(
+			workspace,
+			forceEnvironment,
+			"profile", "export", project,
+			"--profile", "standard",
+			"-o", destination,
+			"--force",
+			"-n");
+
+		Assert.Equal(CommandLineExitCodes.Success, success);
+		Assert.Equal("unchanged", File.ReadAllText(destination));
+		Assert.Empty(forceEnvironment.StandardOutput);
+		Assert.Contains(Path.GetFullPath(destination), forceEnvironment.StandardError, StringComparison.Ordinal);
 	}
 
 	[Fact]

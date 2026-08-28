@@ -20,9 +20,9 @@ public sealed class CompletionCommandContractTests
 		Assert.Contains(shellMarker, script, StringComparison.Ordinal);
 		Assert.Contains("dev complete", script, StringComparison.Ordinal);
 		Assert.Contains("--position", script, StringComparison.Ordinal);
+		Assert.Contains("--working-directory-base64", script, StringComparison.Ordinal);
 		if (shell == "powershell")
 		{
-			Assert.Contains("--working-directory-base64", script, StringComparison.Ordinal);
 			Assert.Contains("FromBase64String", script, StringComparison.Ordinal);
 			Assert.Contains("UTF8Encoding", script, StringComparison.Ordinal);
 		}
@@ -33,7 +33,7 @@ public sealed class CompletionCommandContractTests
 			{
 				"bash" => new[] { "read -r -d '' candidate", "compopt -o filenames" },
 				"zsh" => ["${(V)candidate}", "compadd -d displays -a candidates"],
-				"fish" => ["string split0"],
+				"fish" => ["base64 | string join ''", "string split0"],
 				_ => throw new ArgumentOutOfRangeException(nameof(shell), shell, null)
 			};
 			foreach (var marker in transportMarkers)

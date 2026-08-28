@@ -315,7 +315,7 @@ public sealed class SecretRedactionCommandContractTests
 	}
 
 	[Fact]
-	public async Task FailOnFindingsWritesTheReportAndReturnsPolicyFailure()
+	public async Task FailOnFindingsAutomaticallyEnablesSecretDetectionAndReturnsPolicyFailure()
 	{
 		using var workspace = CreateWorkspace();
 		var environment = new TestTerminalEnvironment();
@@ -325,7 +325,7 @@ public sealed class SecretRedactionCommandContractTests
 			environment,
 			[
 				"analyze", workspace.ProjectRoot,
-				"--hide-secrets", "--fail-on-findings",
+				"--fail-on-findings",
 				"--format", "json", "--plain", "-o", "-"
 			]);
 
@@ -334,6 +334,28 @@ public sealed class SecretRedactionCommandContractTests
 		using var document = JsonDocument.Parse(environment.StandardOutput);
 		Assert.Equal(1, document.RootElement.GetProperty("redaction").GetProperty("matchedCount").GetInt32());
 		Assert.False(document.RootElement.TryGetProperty("findings", out _));
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
+	public async Task ExplicitNoHideSecretsPreventsFailOnFindingsFromEnablingRedaction()
+	{
+		using var workspace = CreateWorkspace();
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			[
+				"analyze", workspace.ProjectRoot,
+				"--no-hide-secrets", "--fail-on-findings",
+				"--format", "json", "--plain", "-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		Assert.False(document.RootElement.GetProperty("selection").GetProperty("hideSecrets").GetBoolean());
+		Assert.False(document.RootElement.TryGetProperty("redaction", out _));
 		Assert.Empty(environment.StandardError);
 	}
 

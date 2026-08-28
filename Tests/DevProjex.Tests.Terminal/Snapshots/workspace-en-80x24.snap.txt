@@ -21,4 +21,4 @@
 └──────────────────────────────────────────────────────────────────────────────┘
 
  Files 4 · Folders 3 · 76 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
- j/k Scroll  PgUp/PgDn Page  Tab/F6 Parameters  Ctrl+P Actions  ? Help
+ j/k Scroll  {/} Section  Ctrl+G Line  W Wrap  : Commands

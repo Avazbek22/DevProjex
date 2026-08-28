@@ -521,7 +521,7 @@ public sealed class ReleaseHardeningOutputRegressionTests
 	[Theory]
 	[InlineData("context")]
 	[InlineData("project")]
-	public async Task QuietDryRunKeepsOnlyTheRequestedPreflightPlan(string command)
+	public async Task QuietDryRunKeepsTheCompleteRequestedPreflightPlan(string command)
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
@@ -541,6 +541,7 @@ public sealed class ReleaseHardeningOutputRegressionTests
 				"--dry-run",
 				"--verbosity", "quiet",
 				"--progress", "always",
+				"--language", "en",
 				"-o", destination
 			}
 			: new[]
@@ -552,6 +553,7 @@ public sealed class ReleaseHardeningOutputRegressionTests
 				"--dry-run",
 				"--verbosity", "quiet",
 				"--progress", "always",
+				"--language", "en",
 				"-o", destination
 			};
 
@@ -566,8 +568,12 @@ public sealed class ReleaseHardeningOutputRegressionTests
 			.Split(
 				["\r\n", "\n"],
 				StringSplitOptions.RemoveEmptyEntries);
-		var line = Assert.Single(lines);
-		Assert.Contains(Path.GetFullPath(destination), line, StringComparison.Ordinal);
+		Assert.Collection(
+			lines,
+			line => Assert.Contains(Path.GetFullPath(destination), line, StringComparison.Ordinal),
+			line => Assert.Equal("Inventory: 1 files, 1 folders", line),
+			line => Assert.Matches("^Size: 13 B; estimated tokens: [1-9][0-9]*$", line),
+			line => Assert.Equal("Effective profile: standard", line));
 		Assert.False(File.Exists(destination));
 		Assert.False(Directory.Exists(destination));
 		Assert.Empty(Directory.EnumerateFileSystemEntries(outputParent));

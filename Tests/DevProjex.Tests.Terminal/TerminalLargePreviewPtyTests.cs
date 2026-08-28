@@ -96,7 +96,7 @@ public sealed class TerminalLargePreviewPtyTests
 		Verify("large-preview-final-en-120x30", terminal, project.Path);
 		Assert.False(terminal.HasExited);
 
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(

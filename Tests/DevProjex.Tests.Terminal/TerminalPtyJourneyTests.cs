@@ -40,7 +40,7 @@ public sealed class TerminalPtyJourneyTests
 			TerminalScreenMode.Inline,
 			new TerminalSettingsStore(() => dataRoot!).LoadScreenMode());
 
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(
@@ -94,7 +94,7 @@ public sealed class TerminalPtyJourneyTests
 			"> PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
 
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		await terminal.CompleteShellRestorationHandshakeAsync(
 			TestContext.Current.CancellationToken);
 		TerminalPtyStateAssertions.AssertRestoredAtShellCompletion(
@@ -144,7 +144,7 @@ public sealed class TerminalPtyJourneyTests
 		TerminalVisualArtifactWriter.WriteIfRequested(
 			"literal-underscores-welcome-en-180x35",
 			welcome);
-		await welcome.SendAsync("q", TestContext.Current.CancellationToken);
+		await welcome.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await welcome.WaitForExitAsync(
@@ -195,7 +195,7 @@ public sealed class TerminalPtyJourneyTests
 			"literal-underscores-workspace-en-180x35",
 			terminal);
 
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(
@@ -253,7 +253,7 @@ public sealed class TerminalPtyJourneyTests
 		await terminal.WaitForScreenAsync(
 			"> PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(
@@ -578,7 +578,7 @@ public sealed class TerminalPtyJourneyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.False(terminal.HasExited);
 
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(

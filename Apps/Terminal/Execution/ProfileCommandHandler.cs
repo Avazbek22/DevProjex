@@ -9,6 +9,19 @@ public sealed class ProfileCommandHandler(
 	TerminalServices services,
 	ITerminalEnvironment environment)
 {
+	public Task<int> ExportAsync(
+		string projectPath,
+		ProjectProfileReference profile,
+		string outputPath,
+		bool force,
+		CancellationToken cancellationToken) =>
+		ExportAsync(projectPath, profile, outputPath, force, dryRun: false, cancellationToken);
+
+	public Task<int> ValidateAsync(
+		string profilePath,
+		CancellationToken cancellationToken) =>
+		ValidateAsync(profilePath, json: false, cancellationToken);
+
 	public async Task<int> ShowAsync(
 		string projectPath,
 		ProjectProfileReference profile,
@@ -34,6 +47,7 @@ public sealed class ProfileCommandHandler(
 		ProjectProfileReference profile,
 		string outputPath,
 		bool force,
+		bool dryRun,
 		CancellationToken cancellationToken)
 	{
 		var selection = await services.SelectionResolver
@@ -43,6 +57,18 @@ public sealed class ProfileCommandHandler(
 				new ProjectSelectionSpec(),
 				cancellationToken)
 			.ConfigureAwait(false);
+		if (dryRun)
+		{
+			var destination = services.PortableProfileService.ValidateSaveDestination(
+				projectPath,
+				outputPath,
+				force);
+			DryRunRenderer.WritePlan(
+				environment,
+				services.Localization,
+				destination);
+			return CommandLineExitCodes.Success;
+		}
 		var writtenPath = await services.PortableProfileService
 			.SaveAsync(
 				projectPath,
@@ -104,11 +130,31 @@ public sealed class ProfileCommandHandler(
 
 	public async Task<int> ValidateAsync(
 		string profilePath,
+		bool json,
 		CancellationToken cancellationToken)
 	{
 		var result = await services.PortableProfileService
 			.ValidateAsync(profilePath, cancellationToken)
 			.ConfigureAwait(false);
+		if (json)
+		{
+			environment.Output.WriteLine(JsonSerializer.Serialize(
+				new
+				{
+					schemaVersion = 1,
+					kind = "devprojex-profile-validation",
+					valid = result.IsValid,
+					errors = result.Errors
+				},
+				new JsonSerializerOptions
+				{
+					PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+					WriteIndented = true
+				}));
+			return result.IsValid
+				? CommandLineExitCodes.Success
+				: CommandLineExitCodes.UsageError;
+		}
 		if (result.IsValid)
 		{
 			environment.Output.WriteLine(services.Localization["Terminal.Profile.Valid"]);
@@ -118,6 +164,26 @@ public sealed class ProfileCommandHandler(
 		environment.Error.WriteLine("error[DPX-CLI-PROFILE-INVALID]:");
 		environment.Error.WriteLine(services.Localization["Terminal.Error.ProfileInvalid"]);
 		return CommandLineExitCodes.UsageError;
+	}
+
+	public async Task<int> SaveAsync(
+		string projectPath,
+		ProjectSelectionSpec selection,
+		CancellationToken cancellationToken)
+	{
+		var plan = await services.ContextFactory
+			.BuildAsync(projectPath, selection, cancellationToken: cancellationToken)
+			.ConfigureAwait(false);
+		if (plan.HasErrors)
+		{
+			new ContextDiagnosticRenderer(environment, new TerminalOutputOptions(), services.Localization)
+				.Write(plan.Diagnostics);
+			return CommandLineExitCodes.PolicyFailure;
+		}
+
+		SaveLocalProfile(projectPath, plan, selection);
+		TerminalTextEscaping.WriteSingleLine(environment.Output, PathUtility.Normalize(projectPath));
+		return CommandLineExitCodes.Success;
 	}
 
 	public int Reset(string projectPath)
@@ -133,6 +199,27 @@ public sealed class ProfileCommandHandler(
 			environment.Output,
 			PathUtility.Normalize(projectPath));
 		return CommandLineExitCodes.Success;
+	}
+
+	private void SaveLocalProfile(
+		string projectPath,
+		ProjectContextPlan plan,
+		ProjectSelectionSpec selection)
+	{
+		var legacy = ToLegacyProfile(plan, selection);
+		var saveResult = services.LocalProfileStore.TrySaveProfileWithResult(projectPath, legacy);
+		if (saveResult.WasTruncated)
+		{
+			throw new PortableProjectProfileException(
+				"DPX-CLI-PROFILE-SELECTION-TOO-LARGE",
+				services.Localization["Terminal.Error.ProfileSelectionTooLarge"]);
+		}
+		if (!saveResult.Succeeded)
+		{
+			throw new PortableProjectProfileException(
+				"DPX-CLI-PROFILE-WRITE-FAILED",
+				"The local project profile could not be saved.");
+		}
 	}
 
 	private static ProjectSelectionProfile ToLegacyProfile(
@@ -185,27 +272,33 @@ public sealed class ProfileCommandHandler(
 				? ProjectSelectionTokens.ToToken(gitMode)
 				: ProjectSelectionTokens.ToToken(GitFilteringMode.None));
 		output.Append(services.Localization["Terminal.Analysis.Roots"]).Append(": ")
-			.AppendLine(selection.Roots is null ? all : JoinEscaped(selection.Roots));
+			.AppendLine(selection.Roots is { Count: > 0 } roots ? JoinEscaped(roots) : all);
 		output.Append(services.Localization["Terminal.Analysis.Extensions"]).Append(": ")
-			.AppendLine(selection.Extensions is null ? all : JoinEscaped(selection.Extensions));
+			.AppendLine(selection.Extensions is { Count: > 0 } extensions ? JoinEscaped(extensions) : all);
 		output.Append(services.Localization["Terminal.Profile.SelectedPaths"]).Append(": ")
-			.AppendLine(JoinEscaped(selection.SelectedPaths ?? []));
-		output.Append(services.Localization["Terminal.Analysis.Exclusions"]).Append(": ")
-			.AppendLine(string.Join(
-				", ",
-				(selection.Exclusions ?? []).Select(ProjectSelectionTokens.ToToken)));
+			.AppendLine(selection.SelectedPaths is { Count: > 0 } selectedPaths
+				? JoinEscaped(selectedPaths)
+				: all);
+		if (selection.Exclusions is { Count: > 0 } exclusions)
+		{
+			output.Append(services.Localization["Terminal.Analysis.Exclusions"]).Append(": ")
+				.AppendLine(string.Join(", ", exclusions.Select(ProjectSelectionTokens.ToToken)));
+		}
 		output.Append(services.Localization["Settings.Ignore.HideSecrets"]).Append(": ")
-			.AppendLine((selection.HideSecrets == true).ToString(CultureInfo.InvariantCulture));
+			.AppendLine(FormatBoolean(selection.HideSecrets == true));
 		output.Append(services.Localization["Settings.Ignore.HidePrivateData"]).Append(": ")
-			.AppendLine((selection.HidePrivateData == true).ToString(CultureInfo.InvariantCulture));
+			.AppendLine(FormatBoolean(selection.HidePrivateData == true));
 		output.Append(services.Localization["Settings.Ignore.CompressCode"]).Append(": ")
-			.AppendLine((selection.CompressCode == true).ToString(CultureInfo.InvariantCulture));
+			.AppendLine(FormatBoolean(selection.CompressCode == true));
 		output.Append(services.Localization["Settings.Ignore.StripComments"]).Append(": ")
-			.AppendLine((selection.StripComments == true).ToString(CultureInfo.InvariantCulture));
+			.AppendLine(FormatBoolean(selection.StripComments == true));
 		output.Append(services.Localization["Settings.Ignore.StripBlankLines"]).Append(": ")
-			.AppendLine((selection.StripBlankLines == true).ToString(CultureInfo.InvariantCulture));
+			.AppendLine(FormatBoolean(selection.StripBlankLines == true));
 		return output.ToString().TrimEnd('\r', '\n');
 	}
+
+	private string FormatBoolean(bool value) =>
+		services.Localization[value ? "Terminal.Value.Yes" : "Terminal.Value.No"];
 
 	private static string JoinEscaped(IEnumerable<string> values) =>
 		string.Join(", ", values.Select(TerminalTextEscaping.EscapeSingleLine));

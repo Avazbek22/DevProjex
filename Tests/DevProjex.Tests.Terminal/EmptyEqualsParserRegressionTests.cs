@@ -120,8 +120,14 @@ public sealed class EmptyEqualsParserRegressionTests
 
 	private static readonly string[] ExpectedPublicValueOptionTokens =
 	[
+		"-b",
+		"-e",
 		"-f",
 		"-o",
+		"-p",
+		"-r",
+		"-s",
+		"-x",
 		"--as",
 		"--branch",
 		"--color",

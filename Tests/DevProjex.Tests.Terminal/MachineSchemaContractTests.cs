@@ -102,7 +102,7 @@ public sealed class MachineSchemaContractTests
 	}
 
 	[Fact]
-	public async Task UiListTextExplainsThatNoDesktopInstancesAreRunning()
+	public async Task UiListTextKeepsStdoutEmptyAndExplainsThatNoDesktopInstancesAreRunningOnStderr()
 	{
 		using var workspace = new TemporaryDirectory();
 		var environment = new TestTerminalEnvironment();
@@ -119,8 +119,8 @@ public sealed class MachineSchemaContractTests
 			TestContext.Current.CancellationToken);
 
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
-		Assert.Equal("Запущенных экземпляров нет." + Environment.NewLine, environment.StandardOutput);
-		Assert.Empty(environment.StandardError);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Equal("Запущенных экземпляров нет." + Environment.NewLine, environment.StandardError);
 	}
 
 	[Fact]
@@ -138,10 +138,10 @@ public sealed class MachineSchemaContractTests
 
 		var line = DesktopCommandHandler.FormatTextInstance(registration);
 
-		Assert.Equal("instance\\nspoof\t42\tproject\\tname\\rnext", line);
+		Assert.Equal("instance\\nspoof  42  project\\tname\\rnext", line);
 		Assert.DoesNotContain('\r', line);
 		Assert.DoesNotContain('\n', line);
-		Assert.Equal(2, line.Count(static character => character == '\t'));
+		Assert.DoesNotContain('\t', line);
 	}
 
 	[Fact]

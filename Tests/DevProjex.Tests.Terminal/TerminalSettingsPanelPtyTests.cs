@@ -340,7 +340,7 @@ public sealed class TerminalSettingsPanelPtyTests
 		AssertFrameAggregate(screen, "Exclusions", ExpectedExclusionCount);
 		AssertFrameAggregate(screen, "File types", expectedCount: 3);
 
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		await terminal.CompleteShellRestorationHandshakeAsync(
 			TestContext.Current.CancellationToken);
 		TerminalPtyStateAssertions.AssertRestoredAtShellCompletion(
@@ -739,26 +739,21 @@ public sealed class TerminalSettingsPanelPtyTests
 				await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 		}
 
-		await terminal.SendAsync("Z", TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
-			"Choose the physical output kind",
-			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
-			"Project copy with hidden data",
-			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync("z", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"Exact destination:",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendCtrlAAsync(TestContext.Current.CancellationToken);
 		await terminal.SendAsync(destination, TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
-			"Export?",
+		var summary = await terminal.WaitForScreenAsync(
+			"Redaction",
 			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("Export?", summary, StringComparison.Ordinal);
+		Assert.Contains(
+			"Secrets and private data are redacted",
+			summary,
+			StringComparison.Ordinal);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"Export completed:",
@@ -1080,7 +1075,7 @@ public sealed class TerminalSettingsPanelPtyTests
 
 	private static async Task ExitAsync(TerminalPtyHarness terminal)
 	{
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(

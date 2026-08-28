@@ -6,66 +6,53 @@ namespace DevProjex.Terminal.Tui;
 
 internal sealed partial class TerminalWorkspaceSession
 {
-	private TerminalWorkspaceActionRegistry BuildWorkspaceActionRegistry() =>
-		new(BuildWorkspacePaletteItems(), BuildWorkspaceCommandActions());
+	private TerminalWorkspaceActionRegistry BuildWorkspaceActionRegistry()
+	{
+		var key = new TerminalWorkspaceActionRegistryCacheKey(
+			_state?.Revision ?? -1,
+			_services.Localization.CurrentLanguage,
+			_previewView,
+			_format);
+		if (_workspaceActionRegistry is not null &&
+			_workspaceActionRegistryKey == key)
+		{
+			return _workspaceActionRegistry;
+		}
+
+		_workspaceActionRegistry = new TerminalWorkspaceActionRegistry(
+			BuildWorkspacePaletteItems(),
+			BuildWorkspaceCommandActions());
+		_workspaceActionRegistryKey = key;
+		return _workspaceActionRegistry;
+	}
 
 	private IReadOnlyList<TerminalWorkspaceCommandAction> BuildWorkspaceCommandActions() =>
-	[
-		CreateCommandAction(TerminalWorkspaceCommandVerb.Set, ExecuteSetCommand),
-		CreateCommandAction(TerminalWorkspaceCommandVerb.All, ExecuteAllCommand),
-		CreateCommandAction(TerminalWorkspaceCommandVerb.Type, ExecuteTypeCommand),
-		CreateCommandAction(TerminalWorkspaceCommandVerb.View, ExecuteViewCommand),
-		CreateCommandAction(TerminalWorkspaceCommandVerb.Format, ExecuteFormatCommand),
-		CreateCommandAction(TerminalWorkspaceCommandVerb.Search, ExecuteSearchCommand),
-		CreateCommandAction(TerminalWorkspaceCommandVerb.Filter, ExecuteFilterCommand),
-		CreateCommandAction(TerminalWorkspaceCommandVerb.Export, ExecuteExportCommand),
-		CreateCommandAction(TerminalWorkspaceCommandVerb.Copy, ExecuteCopyCommand),
-		CreateCommandAction(TerminalWorkspaceCommandVerb.Analyze, ExecuteAnalyzeCommand),
-		CreateCommandAction(
-			TerminalWorkspaceCommandVerb.Branch,
-			ExecuteBranchCommand,
-			IsGitCloneCommandAvailable,
-			() => L("Terminal.Tui.Command.Error.GitCloneRequired")),
-		CreateCommandAction(
-			TerminalWorkspaceCommandVerb.Update,
-			ExecuteUpdateCommand,
-			IsGitCloneCommandAvailable,
-			() => L("Terminal.Tui.Command.Error.GitCloneRequired")),
-		CreateCommandAction(TerminalWorkspaceCommandVerb.Recent, ExecuteRecentCommand),
-		CreateCommandAction(TerminalWorkspaceCommandVerb.Profile, ExecuteProfileCommand),
-		CreateCommandAction(TerminalWorkspaceCommandVerb.Refresh, ExecuteRefreshCommand),
-		CreateCommandAction(
-			TerminalWorkspaceCommandVerb.Language,
-			ExecuteLanguageCommand,
-			static () => true),
-		CreateCommandAction(
-			TerminalWorkspaceCommandVerb.Help,
-			ExecuteHelpCommand,
-			static () => true),
-		CreateCommandAction(
-			TerminalWorkspaceCommandVerb.Quit,
-			ExecuteQuitCommand,
-			static () => true)
-	];
+		TerminalWorkspaceCommandCatalog.All
+			.Select(CreateCommandAction)
+			.ToArray();
 
 	private TerminalWorkspaceCommandAction CreateCommandAction(
-		TerminalWorkspaceCommandVerb verb,
-		Func<TerminalWorkspaceCommand, TerminalWorkspaceCommandExecutionResult> execute,
-		Func<bool>? isAvailable = null,
-		Func<string?>? unavailableMessage = null) =>
+		TerminalWorkspaceCommandDefinition definition) =>
 		new(
-			TerminalWorkspaceCommandCatalog.Get(verb),
-			isAvailable ?? (() => _screen == TerminalWorkspaceScreen.Workspace &&
-				_state is not null && !HasActiveOperation),
-			execute,
-			unavailableMessage);
+			definition,
+			() => definition.Availability switch
+			{
+				TerminalWorkspaceCommandAvailability.Always => true,
+				TerminalWorkspaceCommandAvailability.GitClone => IsGitCloneCommandAvailable(),
+				_ => _screen == TerminalWorkspaceScreen.Workspace &&
+				     _state is not null && !HasActiveOperation
+			},
+			command => definition.Handler(this, command),
+			definition.Availability == TerminalWorkspaceCommandAvailability.GitClone
+				? () => L("Terminal.Tui.Command.Error.GitCloneRequired")
+				: null);
 
 	private bool IsGitCloneCommandAvailable() =>
 		_screen == TerminalWorkspaceScreen.Workspace &&
 		_state?.Plan.SourceIdentity?.SourceType == ProjectSourceType.GitClone &&
 		!HasActiveOperation;
 
-	private TerminalWorkspaceCommandExecutionResult ExecuteSetCommand(
+	internal TerminalWorkspaceCommandExecutionResult ExecuteSetCommand(
 		TerminalWorkspaceCommand command)
 	{
 		if (_state is null || command.Target is null || command.Enabled is not { } enabled)
@@ -113,7 +100,7 @@ internal sealed partial class TerminalWorkspaceSession
 		return ToggleCommandResult(L(ProjectPresentationCatalog.Get(mode.Value).LabelKey), enabled);
 	}
 
-	private TerminalWorkspaceCommandExecutionResult ExecuteAllCommand(
+	internal TerminalWorkspaceCommandExecutionResult ExecuteAllCommand(
 		TerminalWorkspaceCommand command)
 	{
 		if (_state is null || command.Enabled is not { } enabled)
@@ -135,7 +122,7 @@ internal sealed partial class TerminalWorkspaceSession
 		return ToggleCommandResult(L("Settings.All"), enabled);
 	}
 
-	private TerminalWorkspaceCommandExecutionResult ExecuteTypeCommand(
+	internal TerminalWorkspaceCommandExecutionResult ExecuteTypeCommand(
 		TerminalWorkspaceCommand command)
 	{
 		if (_state is null || command.Enabled is not { } enabled || command.Values is null)
@@ -153,7 +140,7 @@ internal sealed partial class TerminalWorkspaceSession
 		return ToggleCommandResult(string.Join(", ", command.Values), enabled);
 	}
 
-	private TerminalWorkspaceCommandExecutionResult ExecuteViewCommand(
+	internal TerminalWorkspaceCommandExecutionResult ExecuteViewCommand(
 		TerminalWorkspaceCommand command)
 	{
 		if (command.View is not { } view)
@@ -168,7 +155,7 @@ internal sealed partial class TerminalWorkspaceSession
 			L(ProjectPresentationCatalog.Get(view).LabelKey)));
 	}
 
-	private TerminalWorkspaceCommandExecutionResult ExecuteFormatCommand(
+	internal TerminalWorkspaceCommandExecutionResult ExecuteFormatCommand(
 		TerminalWorkspaceCommand command)
 	{
 		if (command.Format is not { } format)
@@ -183,7 +170,7 @@ internal sealed partial class TerminalWorkspaceSession
 			TerminalWorkspace.FormatContextFormat(format)));
 	}
 
-	private TerminalWorkspaceCommandExecutionResult ExecuteSearchCommand(
+	internal TerminalWorkspaceCommandExecutionResult ExecuteSearchCommand(
 		TerminalWorkspaceCommand command)
 	{
 		if (_preview is null)
@@ -212,7 +199,7 @@ internal sealed partial class TerminalWorkspaceSession
 					query));
 	}
 
-	private TerminalWorkspaceCommandExecutionResult ExecuteFilterCommand(
+	internal TerminalWorkspaceCommandExecutionResult ExecuteFilterCommand(
 		TerminalWorkspaceCommand command)
 	{
 		if (_state is null || _tree is null)
@@ -236,7 +223,7 @@ internal sealed partial class TerminalWorkspaceSession
 					query));
 	}
 
-	private TerminalWorkspaceCommandExecutionResult ExecuteExportCommand(
+	internal TerminalWorkspaceCommandExecutionResult ExecuteExportCommand(
 		TerminalWorkspaceCommand command)
 	{
 		if (command.Target == "context")
@@ -253,43 +240,47 @@ internal sealed partial class TerminalWorkspaceSession
 		return TerminalWorkspaceCommandExecutionResult.Deferred();
 	}
 
-	private TerminalWorkspaceCommandExecutionResult ExecuteCopyCommand(
+	internal TerminalWorkspaceCommandExecutionResult ExecuteCopyCommand(
 		TerminalWorkspaceCommand command)
 	{
 		CopyCurrentContext(command);
 		return TerminalWorkspaceCommandExecutionResult.Deferred();
 	}
 
-	private TerminalWorkspaceCommandExecutionResult ExecuteAnalyzeCommand(
+	internal TerminalWorkspaceCommandExecutionResult ExecuteAnalyzeCommand(
 		TerminalWorkspaceCommand command)
 	{
 		AnalyzeCurrentContext(originatedFromCommandLine: true);
 		return TerminalWorkspaceCommandExecutionResult.Deferred();
 	}
 
-	private TerminalWorkspaceCommandExecutionResult ExecuteBranchCommand(
+	internal TerminalWorkspaceCommandExecutionResult ExecuteBranchCommand(
 		TerminalWorkspaceCommand command)
 	{
 		SwitchRepositoryBranch(command.Text, originatedFromCommandLine: true);
 		return TerminalWorkspaceCommandExecutionResult.Deferred();
 	}
 
-	private TerminalWorkspaceCommandExecutionResult ExecuteUpdateCommand(
+	internal TerminalWorkspaceCommandExecutionResult ExecuteUpdateCommand(
 		TerminalWorkspaceCommand command)
 	{
 		GetRepositoryUpdates(originatedFromCommandLine: true);
 		return TerminalWorkspaceCommandExecutionResult.Deferred();
 	}
 
-	private TerminalWorkspaceCommandExecutionResult ExecuteRecentCommand(
+	internal TerminalWorkspaceCommandExecutionResult ExecuteRecentCommand(
 		TerminalWorkspaceCommand command)
 	{
-		ShowWelcome();
-		_application.Invoke(OpenRecentWorkspaces);
-		return TerminalWorkspaceCommandExecutionResult.Deferred();
+		return TryLeaveWorkspace(() =>
+			{
+				ShowWelcome();
+				_application.Invoke(OpenRecentWorkspaces);
+			})
+			? TerminalWorkspaceCommandExecutionResult.Deferred()
+			: TerminalWorkspaceCommandExecutionResult.Unavailable();
 	}
 
-	private TerminalWorkspaceCommandExecutionResult ExecuteProfileCommand(
+	internal TerminalWorkspaceCommandExecutionResult ExecuteProfileCommand(
 		TerminalWorkspaceCommand command)
 	{
 		if (command.Target != "save")
@@ -303,14 +294,14 @@ internal sealed partial class TerminalWorkspaceSession
 		return TerminalWorkspaceCommandExecutionResult.Deferred();
 	}
 
-	private TerminalWorkspaceCommandExecutionResult ExecuteRefreshCommand(
+	internal TerminalWorkspaceCommandExecutionResult ExecuteRefreshCommand(
 		TerminalWorkspaceCommand command)
 	{
 		RefreshCurrentProject(originatedFromCommandLine: true);
 		return TerminalWorkspaceCommandExecutionResult.Deferred();
 	}
 
-	private TerminalWorkspaceCommandExecutionResult ExecuteLanguageCommand(
+	internal TerminalWorkspaceCommandExecutionResult ExecuteLanguageCommand(
 		TerminalWorkspaceCommand command)
 	{
 		var availableCodes = string.Join(' ', CliChoiceSets.Language.Tokens);
@@ -361,25 +352,24 @@ internal sealed partial class TerminalWorkspaceSession
 		!name.Contains(Path.DirectorySeparatorChar) &&
 		!name.Contains(Path.AltDirectorySeparatorChar);
 
-	private TerminalWorkspaceCommandExecutionResult ExecuteHelpCommand(
+	internal TerminalWorkspaceCommandExecutionResult ExecuteHelpCommand(
 		TerminalWorkspaceCommand command)
 	{
 		ShowCommandHelp(command.Target);
 		return TerminalWorkspaceCommandExecutionResult.Deferred();
 	}
 
-	private TerminalWorkspaceCommandExecutionResult ExecuteQuitCommand(
+	internal TerminalWorkspaceCommandExecutionResult ExecuteDiagnosticsCommand(
 		TerminalWorkspaceCommand command)
 	{
-		if (HasActiveOperation)
-		{
-			CancelActiveOperation();
-			ShowCancelingOperation();
-		}
-		else
-		{
-			RequestExit();
-		}
+		ShowDiagnostics();
+		return TerminalWorkspaceCommandExecutionResult.Deferred();
+	}
+
+	internal TerminalWorkspaceCommandExecutionResult ExecuteQuitCommand(
+		TerminalWorkspaceCommand command)
+	{
+		TryExitWorkspace();
 		return TerminalWorkspaceCommandExecutionResult.Deferred();
 	}
 
@@ -417,11 +407,21 @@ internal sealed partial class TerminalWorkspaceSession
 	}
 
 	private TerminalWorkspaceCommandParseContext BuildCommandParseContext() =>
-		new(_state?.Plan.AvailableExtensions ?? []);
+		_screen == TerminalWorkspaceScreen.Welcome
+			? new([], new HashSet<TerminalWorkspaceCommandVerb>
+			{
+				TerminalWorkspaceCommandVerb.Recent,
+				TerminalWorkspaceCommandVerb.Language,
+				TerminalWorkspaceCommandVerb.Help,
+				TerminalWorkspaceCommandVerb.Quit
+			})
+			: new(
+				_state?.Plan.AvailableExtensions ?? [],
+				WorkingDirectory: _state?.Plan.SourceRoot ?? Directory.GetCurrentDirectory());
 
 	private void OpenCommandLine(string initialText = "")
 	{
-		if (_screen != TerminalWorkspaceScreen.Workspace ||
+		if ((_screen != TerminalWorkspaceScreen.Workspace && _screen != TerminalWorkspaceScreen.Welcome) ||
 			_layoutMode == TerminalWorkspaceLayoutMode.TooSmall ||
 			_operationProgress is not null ||
 			_commandLine is null)
@@ -432,6 +432,8 @@ internal sealed partial class TerminalWorkspaceSession
 		_commandReturnPane = _activePane;
 		if (_footer is not null)
 			_footer.Visible = false;
+		if (_welcomeFooter is not null)
+			_welcomeFooter.Visible = false;
 		_commandLine.Open(initialText);
 		_application.LayoutAndDraw();
 		_application.AddTimeout(TimeSpan.Zero, () =>
@@ -470,7 +472,9 @@ internal sealed partial class TerminalWorkspaceSession
 			return;
 		}
 
-		var result = BuildWorkspaceActionRegistry().Execute(parse.Command!);
+		var result = _screen == TerminalWorkspaceScreen.Welcome
+			? ExecuteWelcomeCommand(parse.Command!)
+			: BuildWorkspaceActionRegistry().Execute(parse.Command!);
 		switch (result.Status)
 		{
 			case TerminalWorkspaceCommandExecutionStatus.Success:
@@ -494,6 +498,16 @@ internal sealed partial class TerminalWorkspaceSession
 				throw new ArgumentOutOfRangeException();
 		}
 	}
+
+	private TerminalWorkspaceCommandExecutionResult ExecuteWelcomeCommand(TerminalWorkspaceCommand command) =>
+		command.Definition.Verb switch
+		{
+			TerminalWorkspaceCommandVerb.Recent => ExecuteRecentCommand(command),
+			TerminalWorkspaceCommandVerb.Language => ExecuteLanguageCommand(command),
+			TerminalWorkspaceCommandVerb.Help => ExecuteHelpCommand(command),
+			TerminalWorkspaceCommandVerb.Quit => ExecuteQuitCommand(command),
+			_ => TerminalWorkspaceCommandExecutionResult.Unavailable()
+		};
 
 	private string FormatCommandError(TerminalWorkspaceCommandError error)
 	{
@@ -543,14 +557,32 @@ internal sealed partial class TerminalWorkspaceSession
 			return;
 		CancelCommandResult();
 		_activeCommandResult = success ? command : null;
+		if (message.Contains('\n') || message.Contains('\r'))
+		{
+			RestoreCommandFooterAndFocus();
+			ShowScrollableOverlay(
+				success ? L("Terminal.Tui.Command.Result.Completed") : L("Terminal.Tui.Error"),
+				message,
+				success ? TerminalWorkspaceTheme.Dialog : TerminalWorkspaceTheme.Warning,
+				preferredWidth: 92,
+				preferredHeight: 24);
+			return;
+		}
 		if (_footer is not null)
 			_footer.Visible = false;
+		if (_welcomeFooter is not null)
+			_welcomeFooter.Visible = false;
 		var singleLineMessage = NormalizeCommandResult(message);
 		_commandLine.ShowResult(singleLineMessage, success);
 		_application.LayoutAndDraw();
-		var resultCts = CancellationTokenSource.CreateLinkedTokenSource(_sessionCts.Token);
-		_commandResultCts = resultCts;
-		_commandResultTask = TrackBackgroundTask(RestoreCommandFooterAfterDelayAsync(resultCts));
+		if (success)
+		{
+			var resultCts = _operations.Start(WorkspaceOperationKind.CommandResult);
+			TrackOperation(
+				WorkspaceOperationKind.CommandResult,
+				resultCts,
+				RestoreCommandFooterAfterDelayAsync(resultCts));
+		}
 	}
 
 	internal static string NormalizeCommandResult(string message) =>
@@ -567,12 +599,9 @@ internal sealed partial class TerminalWorkspaceSession
 			await Task.Delay(TimeSpan.FromMilliseconds(2750), resultCts.Token).ConfigureAwait(false);
 			await InvokeAsync(() =>
 			{
-				if (!ReferenceEquals(_commandResultCts, resultCts))
+				if (!_operations.IsCurrent(WorkspaceOperationKind.CommandResult, resultCts))
 					return false;
-				_commandResultCts = null;
-				_commandResultTask = null;
 				_activeCommandResult = null;
-				resultCts.Dispose();
 				_commandLine?.Close();
 				RestoreCommandFooterAndFocus();
 				return true;
@@ -581,12 +610,15 @@ internal sealed partial class TerminalWorkspaceSession
 		catch (OperationCanceledException) when (resultCts.IsCancellationRequested)
 		{
 		}
+		finally
+		{
+			_operations.Complete(WorkspaceOperationKind.CommandResult, resultCts);
+		}
 	}
 
 	private void CancelCommandResult()
 	{
-		CancelAndDispose(ref _commandResultCts);
-		_commandResultTask = null;
+		_operations.Cancel(WorkspaceOperationKind.CommandResult);
 		_activeCommandResult = null;
 	}
 
@@ -621,8 +653,14 @@ internal sealed partial class TerminalWorkspaceSession
 			_footer.Visible = true;
 			UpdateFooter();
 		}
+		if (_welcomeFooter is not null && _layoutMode != TerminalWorkspaceLayoutMode.TooSmall)
+			_welcomeFooter.Visible = true;
 		if (_screen != TerminalWorkspaceScreen.Workspace)
+		{
+			_welcomeList?.SetFocus();
+			_application.LayoutAndDraw();
 			return;
+		}
 		FocusPane(_commandReturnPane);
 		_application.LayoutAndDraw();
 	}
@@ -640,3 +678,9 @@ internal sealed partial class TerminalWorkspaceSession
 		});
 	}
 }
+
+internal readonly record struct TerminalWorkspaceActionRegistryCacheKey(
+	long Revision,
+	AppLanguage Language,
+	ProjectContextView PreviewView,
+	ProjectContextDocumentFormat Format);

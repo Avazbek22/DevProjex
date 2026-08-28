@@ -10,6 +10,11 @@ internal enum TerminalWorkspaceActionKind
 	PreviewFormat,
 	Copy,
 	OpenControls,
+	FocusTree,
+	FocusPreview,
+	ClearFilter,
+	ClearSearch,
+	Quit,
 	GitFiltering,
 	Exclusions,
 	FileTypes,
@@ -24,6 +29,7 @@ internal enum TerminalWorkspaceActionKind
 	RecentWorkspaces,
 	Refresh,
 	Language,
+	Diagnostics,
 	ReturnToWelcome,
 	Help
 }
@@ -135,15 +141,33 @@ internal sealed class TerminalWorkspaceActionRegistry
 
 	public TerminalWorkspaceActionRegistry(
 		IEnumerable<TerminalPaletteItem> paletteItems,
-		IEnumerable<TerminalWorkspaceCommandAction> commandActions)
+		IEnumerable<TerminalWorkspaceCommandAction> commandActions,
+		bool validate = true)
 	{
 		ArgumentNullException.ThrowIfNull(paletteItems);
 		ArgumentNullException.ThrowIfNull(commandActions);
 		var commands = commandActions.ToArray();
+		var palette = paletteItems.ToArray();
+		if (validate)
+			Validate(palette, commands);
+
+		_commands = commands.ToDictionary(
+			static action => action.Definition.Id,
+			StringComparer.Ordinal);
+		PaletteItems = palette;
+		_paletteItems = PaletteItems.ToDictionary(
+			static item => item.Id,
+			StringComparer.Ordinal);
+	}
+
+	private static void Validate(
+		IReadOnlyList<TerminalPaletteItem> paletteItems,
+		IReadOnlyList<TerminalWorkspaceCommandAction> commands)
+	{
 		if (commands.GroupBy(static item => item.Definition.Id, StringComparer.Ordinal)
 			.Any(static group => group.Count() > 1))
 		{
-			throw new ArgumentException("Command action ids must be unique.", nameof(commandActions));
+			throw new ArgumentException("Command action ids must be unique.", nameof(commands));
 		}
 		var missing = TerminalWorkspaceCommandCatalog.All
 			.Where(definition => commands.All(action => action.Definition.Id != definition.Id))
@@ -153,32 +177,27 @@ internal sealed class TerminalWorkspaceActionRegistry
 		{
 			throw new ArgumentException(
 				$"Command handlers are missing: {string.Join(", ", missing)}.",
-				nameof(commandActions));
+				nameof(commands));
 		}
 
-		_commands = commands.ToDictionary(
-			static action => action.Definition.Id,
-			StringComparer.Ordinal);
-
-		PaletteItems = paletteItems.ToArray();
-		if (PaletteItems.Any(static item => string.IsNullOrWhiteSpace(item.Id)))
+		if (paletteItems.Any(static item => string.IsNullOrWhiteSpace(item.Id)))
 			throw new ArgumentException("Every palette action must have a stable id.", nameof(paletteItems));
-		if (PaletteItems.GroupBy(static item => item.Id, StringComparer.Ordinal).Any(static group => group.Count() > 1))
+		if (paletteItems.GroupBy(static item => item.Id, StringComparer.Ordinal).Any(static group => group.Count() > 1))
 			throw new ArgumentException("Palette action ids must be unique.", nameof(paletteItems));
-		foreach (var item in PaletteItems)
+		var commandIds = commands
+			.Select(static item => item.Definition.Id)
+			.ToHashSet(StringComparer.Ordinal);
+		foreach (var item in paletteItems)
 		{
 			var hasSyntax = !string.IsNullOrWhiteSpace(item.CommandSyntax);
 			var hasCommandId = !string.IsNullOrWhiteSpace(item.CommandId);
-			if (hasSyntax != hasCommandId || hasCommandId && !_commands.ContainsKey(item.CommandId!))
+			if (hasSyntax != hasCommandId || hasCommandId && !commandIds.Contains(item.CommandId!))
 			{
 				throw new ArgumentException(
 					$"Palette action '{item.Id}' has an invalid command binding.",
 					nameof(paletteItems));
 			}
 		}
-		_paletteItems = PaletteItems.ToDictionary(
-			static item => item.Id,
-			StringComparer.Ordinal);
 	}
 
 	public IReadOnlyList<TerminalPaletteItem> PaletteItems { get; }
