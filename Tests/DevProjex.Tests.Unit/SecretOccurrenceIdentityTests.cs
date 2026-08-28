@@ -69,6 +69,18 @@ public sealed class SecretOccurrenceIdentityTests
 			Assert.Equal(initialSpan.OccurrenceId, span.OccurrenceId);
 			Assert.Equal(SecretPreviewSpanState.KeptAsIs, span.State);
 			Assert.Equal(Secret, plan.BuildResult(result.Text).Text.AsSpan(span.Start, span.Length));
+
+			var countScope = session.BeginOutput(workspace.Path, [path], identity);
+			countScope.AnalyzeTransformed(
+				path,
+				result.Text,
+				result.Map,
+				SecretFileMetadata.Capture(path),
+				knownFingerprint: null,
+				TestContext.Current.CancellationToken);
+			var snapshot = countScope.Complete();
+			Assert.Equal(1, snapshot.DetectedCount);
+			Assert.Equal(0, snapshot.RedactedCount);
 		}
 	}
 

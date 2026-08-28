@@ -2177,6 +2177,8 @@ public sealed class SecretRedactionSnapshotPublishedEventArgs(SecretRedactionSna
 
 public sealed class SecretRedactionScope
 {
+	private const byte CandidateRepresented = 1;
+	private const byte CandidateRedacted = 2;
 	private readonly SecretRedactionSession _session;
 	private readonly string _projectRoot;
 	private readonly IReadOnlySet<string> _keptOccurrenceIds;
@@ -2439,7 +2441,7 @@ public sealed class SecretRedactionScope
 			// same unchanged file would otherwise forget that it was never read.
 			if (entry.IsUnscannable)
 				RecordUnscannable(filePath);
-			ProcessFindings(filePath, entry.Candidates, entry.Segments, transformMap: null);
+			AccumulateFindings(filePath, entry.Candidates, entry.Segments, transformMap: null);
 		}
 		finally
 		{
@@ -2516,10 +2518,53 @@ public sealed class SecretRedactionScope
 		ContentFingerprint? knownFingerprint,
 		CancellationToken cancellationToken = default)
 	{
+		var entry = DetectTransformed(
+			filePath,
+			content,
+			transformMap,
+			metadata,
+			knownFingerprint,
+			cancellationToken);
+		if (entry is null)
+			return ProcessFindings(filePath, [], [], transformMap);
+		return ProcessFindings(filePath, entry.Candidates, entry.Segments, transformMap);
+	}
+
+	internal void AnalyzeTransformed(
+		string filePath,
+		string content,
+		ContentTransformMap? transformMap,
+		SecretFileMetadata metadata,
+		ContentFingerprint? knownFingerprint,
+		CancellationToken cancellationToken = default)
+	{
+		var entry = DetectTransformed(
+			filePath,
+			content,
+			transformMap,
+			metadata,
+			knownFingerprint,
+			cancellationToken);
+		if (entry is null)
+		{
+			AccumulateFindings(filePath, [], [], transformMap);
+			return;
+		}
+		AccumulateFindings(filePath, entry.Candidates, entry.Segments, transformMap);
+	}
+
+	private SecretScanCacheEntry? DetectTransformed(
+		string filePath,
+		string content,
+		ContentTransformMap? transformMap,
+		SecretFileMetadata metadata,
+		ContentFingerprint? knownFingerprint,
+		CancellationToken cancellationToken)
+	{
 		EnsureActive();
 		var inspectionMode = GetContentInspectionMode(filePath);
 		if (inspectionMode == SecretContentInspectionMode.None)
-			return ProcessFindings(filePath, [], [], transformMap);
+			return null;
 		// Measured on the text this scope was handed, not on the file on disk. Compression runs
 		// first and the plan describes its output, so gating on the on-disk size would refuse work
 		// the scanner is about to do on a fraction of that text - the limit would fight the very
@@ -2531,7 +2576,7 @@ public sealed class SecretRedactionScope
 				content.Length,
 				SecretRedactionOutputPreparer.MaximumScannableFileBytes);
 		}
-		var entry = _session.GetOrDetectFindings(
+		return _session.GetOrDetectFindings(
 			_projectRoot,
 			filePath,
 			content,
@@ -2548,7 +2593,6 @@ public sealed class SecretRedactionScope
 			knownFingerprint,
 			allowIdentityTransformFallback:
 				knownFingerprint is not null && transformMap?.IsIdentity == true);
-		return ProcessFindings(filePath, entry.Candidates, entry.Segments, transformMap);
 	}
 
 	internal IDisposable TrackFullContentBuffer() => _session.TrackFullContentBuffer();
@@ -2606,23 +2650,14 @@ public sealed class SecretRedactionScope
 	{
 		_outputInspectionBudget.RegisterFindings(segments.Count);
 		var relativePath = SecretRedactionSession.NormalizeRelativePath(_projectRoot, filePath);
-		var occurrenceIds = new string[candidates.Count];
+		var occurrenceIds = BuildOccurrenceIds(relativePath, candidates, transformMap);
 		var identityIndexes = new int[candidates.Count];
 		for (var index = 0; index < candidates.Count; index++)
-		{
-			var candidate = candidates[index];
-			identityIndexes[index] = GetOrCreateIdentityIndex(candidate);
-			var coordinateIdentity = ResolveOccurrenceCoordinateIdentity(
-				candidate.RawStart,
-				candidate.RawLength,
-				transformMap);
-			occurrenceIds[index] = CreateOccurrenceId(relativePath, candidate, coordinateIdentity);
-		}
+			identityIndexes[index] = GetOrCreateIdentityIndex(candidates[index]);
 
 		var replacements = new SecretReplacement[segments.Count];
 		var spans = new SecretPreviewSpan[segments.Count];
-		var representedCandidates = new bool[candidates.Count];
-		var redactedCandidates = new bool[candidates.Count];
+		var candidateStates = new byte[candidates.Count];
 		var outputDelta = 0;
 		for (var index = 0; index < segments.Count; index++)
 		{
@@ -2640,9 +2675,9 @@ public sealed class SecretRedactionScope
 			var kept = activeCandidateIndex < 0;
 			var displayCandidateIndex = kept ? segment.CandidateIndexes[0] : activeCandidateIndex;
 			var displayCandidate = candidates[displayCandidateIndex];
-			representedCandidates[displayCandidateIndex] = true;
+			candidateStates[displayCandidateIndex] |= CandidateRepresented;
 			if (!kept)
-				redactedCandidates[displayCandidateIndex] = true;
+				candidateStates[displayCandidateIndex] |= CandidateRedacted;
 			var replacement = kept
 				? null
 				: SecretRedactionLegend.CreatePlaceholder(
@@ -2680,18 +2715,69 @@ public sealed class SecretRedactionScope
 			outputDelta = checked(outputDelta + outputLength - segment.Length);
 		}
 
+		var counts = RecordCandidateCounts(candidates, candidateStates);
+		return new SecretFileRedactionPlan(replacements, spans, counts.Detected, counts.Redacted);
+	}
+
+	private void AccumulateFindings(
+		string filePath,
+		IReadOnlyList<SecretFindingCandidateMetadata> candidates,
+		IReadOnlyList<SecretFindingSegmentMetadata> segments,
+		ContentTransformMap? transformMap)
+	{
+		_outputInspectionBudget.RegisterFindings(segments.Count);
+		for (var index = 0; index < candidates.Count; index++)
+			_ = GetOrCreateIdentityIndex(candidates[index]);
+		var candidateStates = new byte[candidates.Count];
+		string[]? occurrenceIds = null;
+		if (_keptOccurrenceIds.Count > 0)
+		{
+			var relativePath = SecretRedactionSession.NormalizeRelativePath(_projectRoot, filePath);
+			occurrenceIds = BuildOccurrenceIds(relativePath, candidates, transformMap);
+		}
+
+		foreach (var segment in segments)
+		{
+			var displayCandidateIndex = segment.CandidateIndexes[0];
+			var redacted = true;
+			if (occurrenceIds is not null)
+			{
+				redacted = false;
+				foreach (var candidateIndex in segment.CandidateIndexes)
+				{
+					if (_keptOccurrenceIds.Contains(occurrenceIds[candidateIndex]))
+						continue;
+					displayCandidateIndex = candidateIndex;
+					redacted = true;
+					break;
+				}
+			}
+
+			candidateStates[displayCandidateIndex] |= CandidateRepresented;
+			if (redacted)
+				candidateStates[displayCandidateIndex] |= CandidateRedacted;
+		}
+
+		_ = RecordCandidateCounts(candidates, candidateStates);
+	}
+
+	private (int Detected, int Redacted) RecordCandidateCounts(
+		IReadOnlyList<SecretFindingCandidateMetadata> candidates,
+		ReadOnlySpan<byte> candidateStates)
+	{
 		var detectedInFile = 0;
 		var redactedInFile = 0;
 		for (var index = 0; index < candidates.Count; index++)
 		{
-			if (!representedCandidates[index])
+			var state = candidateStates[index];
+			if ((state & CandidateRepresented) == 0)
 				continue;
 			detectedInFile++;
 			_detectedCount++;
 			var candidate = candidates[index];
 			if (candidate.Category == RedactionFindingCategory.PrivateData)
 				_privateDataDetectedCount++;
-			if (redactedCandidates[index])
+			if ((state & CandidateRedacted) != 0)
 			{
 				_redactedCount++;
 				if (candidate.Category == RedactionFindingCategory.PrivateData)
@@ -2702,7 +2788,25 @@ public sealed class SecretRedactionScope
 			}
 		}
 
-		return new SecretFileRedactionPlan(replacements, spans, detectedInFile, redactedInFile);
+		return (detectedInFile, redactedInFile);
+	}
+
+	private string[] BuildOccurrenceIds(
+		string relativePath,
+		IReadOnlyList<SecretFindingCandidateMetadata> candidates,
+		ContentTransformMap? transformMap)
+	{
+		var occurrenceIds = new string[candidates.Count];
+		for (var index = 0; index < candidates.Count; index++)
+		{
+			var candidate = candidates[index];
+			var coordinateIdentity = ResolveOccurrenceCoordinateIdentity(
+				candidate.RawStart,
+				candidate.RawLength,
+				transformMap);
+			occurrenceIds[index] = CreateOccurrenceId(relativePath, candidate, coordinateIdentity);
+		}
+		return occurrenceIds;
 	}
 
 	private int GetOrCreateIdentityIndex(SecretFindingCandidateMetadata finding)

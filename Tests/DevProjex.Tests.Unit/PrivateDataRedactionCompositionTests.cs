@@ -103,6 +103,7 @@ public sealed class PrivateDataRedactionCompositionTests
 		Assert.DoesNotContain("DEVPROJEX_REDACTED[private-rule", first.Text, StringComparison.Ordinal);
 		Assert.Equal(1, firstSnapshot.SecretDetectedCount);
 		Assert.Equal(0, firstSnapshot.PrivateDataDetectedCount);
+		AssertCountOnlyMatches(session, workspace.Path, path, content, features, firstSnapshot);
 
 		Assert.True(session.ToggleKeepAsIs(secretSpan.OccurrenceId));
 		var secondScope = session.BeginOutput(workspace.Path, [path], features: features);
@@ -117,6 +118,7 @@ public sealed class PrivateDataRedactionCompositionTests
 		Assert.Equal(0, secondSnapshot.SecretDetectedCount);
 		Assert.Equal(1, secondSnapshot.PrivateDataDetectedCount);
 		Assert.Equal(1, secondSnapshot.RedactedCount);
+		AssertCountOnlyMatches(session, workspace.Path, path, content, features, secondSnapshot);
 
 		Assert.True(session.ToggleKeepAsIs(privateSpan.OccurrenceId));
 		var fullyKept = Redact(session, workspace.Path, path, content, features);
@@ -127,6 +129,7 @@ public sealed class PrivateDataRedactionCompositionTests
 			fullyKept.Snapshot.SecretDetectedCount,
 			fullyKept.Snapshot.PrivateDataDetectedCount));
 		Assert.Equal(0, fullyKept.Snapshot.RedactedCount);
+		AssertCountOnlyMatches(session, workspace.Path, path, content, features, fullyKept.Snapshot);
 		Assert.Equal(2, Assert.IsAssignableFrom<IReadOnlyCollection<string>>(
 			keptSpan.CascadedOccurrenceIds).Count);
 
@@ -311,6 +314,13 @@ public sealed class PrivateDataRedactionCompositionTests
 		Assert.DoesNotContain(markedValue, scan.Result.Text, StringComparison.Ordinal);
 		Assert.DoesNotContain("right-detector-flank", scan.Result.Text, StringComparison.Ordinal);
 		Assert.Equal(2, scan.Snapshot.SecretRedactedCount);
+		AssertCountOnlyMatches(
+			session,
+			workspace.Path,
+			path,
+			content,
+			SecretRedactionFeatures.Secrets,
+			scan.Snapshot);
 	}
 
 	[Fact]
@@ -567,6 +577,7 @@ public sealed class PrivateDataRedactionCompositionTests
 		var features = SecretRedactionFeatures.Secrets | SecretRedactionFeatures.PrivateData;
 
 		var initial = Redact(session, workspace.Path, path, content, features);
+		AssertCountOnlyMatches(session, workspace.Path, path, content, features, initial.Snapshot);
 		var secretSpan = Assert.Single(initial.Result.Spans, static span => span.RuleId == "secret-rule");
 		var privateSpans = initial.Result.Spans.Where(static span => span.RuleId == "private-rule").ToArray();
 		Assert.Equal(2, privateSpans.Length);
@@ -575,6 +586,7 @@ public sealed class PrivateDataRedactionCompositionTests
 
 		Assert.True(session.ToggleKeepAsIs(secretSpan.OccurrenceId));
 		var secretKept = Redact(session, workspace.Path, path, content, features);
+		AssertCountOnlyMatches(session, workspace.Path, path, content, features, secretKept.Snapshot);
 		Assert.Equal(3, secretKept.Result.Spans.Count);
 		Assert.All(secretKept.Result.Spans, static span => Assert.Equal("private-rule", span.RuleId));
 		Assert.DoesNotContain(secretValue, secretKept.Result.Text, StringComparison.Ordinal);
@@ -582,6 +594,7 @@ public sealed class PrivateDataRedactionCompositionTests
 		var privateOccurrenceId = secretKept.Result.Spans[0].OccurrenceId;
 		Assert.True(session.ToggleKeepAsIs(privateOccurrenceId));
 		var fullyKept = Redact(session, workspace.Path, path, content, features);
+		AssertCountOnlyMatches(session, workspace.Path, path, content, features, fullyKept.Snapshot);
 		Assert.Equal(content, fullyKept.Result.Text);
 		var cascade = Assert.Single(
 			fullyKept.Result.Spans,
@@ -1156,6 +1169,35 @@ public sealed class PrivateDataRedactionCompositionTests
 		var scan = Redact(session, projectRoot, path, content, features);
 		Assert.Equal(expectedSecretCount, scan.Snapshot.SecretDetectedCount);
 		Assert.Equal(expectedPrivateCount, scan.Snapshot.PrivateDataDetectedCount);
+	}
+
+	private static void AssertCountOnlyMatches(
+		SecretRedactionSession session,
+		string projectRoot,
+		string path,
+		string content,
+		SecretRedactionFeatures features,
+		SecretRedactionSnapshot expected)
+	{
+		var scope = session.BeginOutput(projectRoot, [path], features: features);
+		scope.AnalyzeTransformed(
+			path,
+			content,
+			ContentTransformMap.Identity,
+			SecretFileMetadata.Capture(path),
+			knownFingerprint: null,
+			TestContext.Current.CancellationToken);
+		var actual = scope.Complete();
+
+		Assert.Equal(expected.DetectedCount, actual.DetectedCount);
+		Assert.Equal(expected.RedactedCount, actual.RedactedCount);
+		Assert.Equal(expected.SecretDetectedCount, actual.SecretDetectedCount);
+		Assert.Equal(expected.SecretRedactedCount, actual.SecretRedactedCount);
+		Assert.Equal(expected.PrivateDataDetectedCount, actual.PrivateDataDetectedCount);
+		Assert.Equal(expected.PrivateDataRedactedCount, actual.PrivateDataRedactedCount);
+		Assert.Equal(
+			expected.MarkedSecretCounts?.OrderBy(static pair => pair.Key, StringComparer.Ordinal),
+			actual.MarkedSecretCounts?.OrderBy(static pair => pair.Key, StringComparer.Ordinal));
 	}
 
 	private static (SecretTextRedactionResult Result, SecretRedactionSnapshot Snapshot) Redact(
