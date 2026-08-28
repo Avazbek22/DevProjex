@@ -804,27 +804,10 @@ public sealed class ProjectContextDocumentService(
 				pendingReads.Enqueue(new PendingCompleteSnapshotRead(
 					index,
 					path,
-					Task.Run(
-						async () =>
-						{
-							var lease = await retainedBytes.AcquireAsync(
-								EstimateCompleteSnapshotRetainedBytes(path),
-								readCancellation.Token).ConfigureAwait(false);
-							try
-							{
-								var snapshot = await OpenSourceSnapshotAsync(
-										projectRoot,
-										path,
-										readCancellation.Token)
-									.ConfigureAwait(false);
-								return (IFileContentSnapshot)new BudgetedCompleteSourceSnapshot(snapshot, lease);
-							}
-							catch
-							{
-								lease.Dispose();
-								throw;
-							}
-						},
+					OpenBudgetedSourceSnapshotAsync(
+						projectRoot,
+						path,
+						retainedBytes,
 						readCancellation.Token)));
 			}
 		}
@@ -858,6 +841,31 @@ public sealed class ProjectContextDocumentService(
 		{
 			await CancelAndDisposePendingSnapshotsAsync(readCancellation, pendingReads)
 				.ConfigureAwait(false);
+		}
+	}
+
+	private async Task<IFileContentSnapshot> OpenBudgetedSourceSnapshotAsync(
+		string projectRoot,
+		string path,
+		WeightedByteBudget retainedBytes,
+		CancellationToken cancellationToken)
+	{
+		// Start these methods in source order so a full-budget request cannot be
+		// blocked by later snapshots whose leases the ordered consumer cannot release yet.
+		var lease = await retainedBytes.AcquireAsync(
+				EstimateCompleteSnapshotRetainedBytes(path),
+				cancellationToken)
+			.ConfigureAwait(false);
+		try
+		{
+			var snapshot = await OpenSourceSnapshotAsync(projectRoot, path, cancellationToken)
+				.ConfigureAwait(false);
+			return new BudgetedCompleteSourceSnapshot(snapshot, lease);
+		}
+		catch
+		{
+			lease.Dispose();
+			throw;
 		}
 	}
 
