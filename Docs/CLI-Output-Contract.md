@@ -39,9 +39,10 @@ is a usage error.
 
 `--color never` disables ANSI color but does not imply ASCII. `--plain` disables
 ANSI, markup, box-drawing characters, emoji, and animations and uses stable ASCII
-lines. `TERM=dumb` selects the same conservative terminal-capability fallback and
-never starts the TUI. stdout and stderr TTY state are evaluated independently;
-machine payloads remain undecorated in every mode.
+decorations and line structure. Localized text, file names, paths, and project
+content remain Unicode. `TERM=dumb` selects the same conservative
+terminal-capability fallback and never starts the TUI. stdout and stderr TTY state
+are evaluated independently; machine payloads remain undecorated in every mode.
 Git progress for URL project sources is always confined to stderr. With interactive
 stderr, outside CI, and without `--plain`, the latest Git message replaces one line
 using carriage return and spaces only; no ANSI cursor controls are used. Every frame

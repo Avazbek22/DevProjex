@@ -746,7 +746,7 @@ that prevents an accepted option from becoming a no-op.
 | analyze/tree/context/project | `--color` | `auto` | selects ANSI color policy independently for the relevant human stream | `always` conflicts with `--plain`; `never` does not force ASCII | requested payload stays on stdout; conflict exits `2` | parser, rendering, process |
 | analyze/tree/context/project | `--progress` | `auto` | selects automatic, forced, or disabled operational progress on stderr | quiet/minimal suppress optional progress; URL-source Git operations use bounded milestones when rewriting is unavailable | requested payload stays byte-clean on stdout | parser, rendering, process |
 | analyze/tree/context/project | `--verbosity`, `-q` | `normal` | controls optional operational stderr from quiet through safe diagnostic context; `-q` selects `quiet` | `-q` conflicts with an explicit `--verbosity`; neither removes requested stdout nor suppresses errors | requested payload stays on stdout; invalid value or conflict exits `2` | parser, rendering, process |
-| analyze/tree/context/project | `--plain` | off | selects line-oriented ASCII human output and disables ANSI, markup, decoration, and animation | conflicts with `--color always` | machine schema and requested payload stay unchanged; conflict exits `2` | parser, rendering, process |
+| analyze/tree/context/project | `--plain` | off | selects stable ASCII decorations and line structure while preserving Unicode user text, and disables ANSI, markup, and animation | conflicts with `--color always` | machine schema and requested payload stay unchanged; conflict exits `2` | parser, rendering, process |
 | `export context` | `--view`, `--format` | `tree-content`, `markdown` | selects typed document sections and serializer | none | document on stdout/file; invalid value exits `2` | parser, serializer, process |
 | `export context` | `-o`, `--output` | `-` | selects streaming stdout or an exact context file | destination must be outside source | document or real absolute path on stdout | destination, streaming, process |
 | `export context` | `--force` | off | atomically replaces an existing context file | invalid with stdout | success path on stdout; conflict exits `4`, invalid combination `2` | parser, destination, handler |
@@ -823,7 +823,8 @@ such as `head` remain usable.
 - no animations;
 - no emoji or decorative symbols;
 - no Unicode box-drawing;
-- ASCII, line-oriented human output.
+- stable ASCII line structure and tree connectors. Localized text, file names,
+  paths, and project content remain Unicode and are never transliterated.
 
 An interactive TUI necessarily uses terminal cursor, input-mode, and screen-buffer
 control sequences. In TUI `--plain` disables color styling, motion, decorated
