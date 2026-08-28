@@ -11,7 +11,7 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 	{
 		using var project = CreateProject();
 		await using var terminal = await StartAsync(project.Path, columns: 160, rows: 36);
-		await terminal.WaitForScreenAsync(
+		await terminal.WaitForStableScreenAsync(
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
 
@@ -31,7 +31,7 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 	{
 		using var project = CreateProject();
 		await using var terminal = await StartAsync(project.Path, columns: 120, rows: 30);
-		await terminal.WaitForScreenAsync(
+		await terminal.WaitForStableScreenAsync(
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
 
