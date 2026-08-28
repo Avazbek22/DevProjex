@@ -45,6 +45,8 @@ public sealed class ProjectContextDocumentService(
 	private const int SchemaVersion = 1;
 	private const string Kind = "devprojex-context";
 	private const int StructuredTreeFlushNodeInterval = 512;
+	private const int MaximumBoundedReadAhead = 8;
+	private const long MaximumBoundedReadAheadRetainedBytes = 4L * 1024 * 1024;
 	private static readonly UTF8Encoding Utf8WithoutBom = new(encoderShouldEmitUTF8Identifier: false);
 	private static readonly RepositoryWebPathPresentationService WebPathPresentation = new();
 
@@ -924,77 +926,154 @@ public sealed class ProjectContextDocumentService(
 			Math.Min(plan.IncludedFiles.Count, maximumFiles));
 		var remainingCharacters = maximumCharacters;
 		var isTruncated = plan.IncludedFiles.Count > maximumFiles;
-		foreach (var path in plan.IncludedFiles.Take(maximumFiles))
+		var pathCount = Math.Min(plan.IncludedFiles.Count, maximumFiles);
+		var readAheadCount = ResolveBoundedReadAheadCount(maximumFileBytes, pathCount);
+		using var readCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		var pendingReads = new Queue<PendingBoundedFileRead>(Math.Max(1, readAheadCount));
+		var nextPathIndex = 0;
+
+		void FillReadAhead()
 		{
-			cancellationToken.ThrowIfCancellationRequested();
-			var relativePath = NormalizeRelativePath(plan.SourceRoot, path);
-			var result = await ReadSourceClassifiedAsync(
-					plan.SourceRoot,
+			while (pendingReads.Count < readAheadCount && nextPathIndex < pathCount)
+			{
+				var path = plan.IncludedFiles[nextPathIndex++];
+				pendingReads.Enqueue(new PendingBoundedFileRead(
 					path,
-					maximumFileBytes,
-					cancellationToken)
-				.ConfigureAwait(false);
-			var content = result.Content;
-			if (!result.IsText || content is null)
-			{
-				files.Add(new ContextFileDocument(
-					relativePath,
-					result.Classification,
-					Content: null));
-				continue;
-			}
-
-			if (content.IsEstimated)
-			{
-				files.Add(new ContextFileDocument(
-					relativePath,
-					FileContentClassification.TooLarge,
-					Content: null,
-					IsOmitted: true));
-				isTruncated = true;
-				continue;
-			}
-
-			var fileContent = content.Content;
-			var truncatedAtCharacterBoundary = false;
-			if (fileContent.Length > remainingCharacters)
-			{
-				fileContent = fileContent[..ClampToCompleteUnicodeScalar(fileContent, remainingCharacters)];
-				isTruncated = true;
-				truncatedAtCharacterBoundary = true;
-			}
-			if (prepared is not null)
-			{
-				var preparedFile = prepared.GetFile(path);
-				var completeLength = preparedFile.ClampLengthToCompleteRedactions(fileContent.Length);
-				if (completeLength != fileContent.Length)
-				{
-					fileContent = fileContent[..completeLength];
-					isTruncated = true;
-					truncatedAtCharacterBoundary = true;
-				}
-
-			}
-			files.Add(new ContextFileDocument(
-				relativePath,
-				FileContentClassification.Text,
-				fileContent,
-				IsTruncated: fileContent.Length != content.Content.Length));
-			remainingCharacters -= fileContent.Length;
-			// Once a file is truncated, later files are not part of the bounded prefix.
-			// Continuing merely because a placeholder was removed at the boundary would
-			// make the limit select non-contiguous content and violate deterministic ordering.
-			if (truncatedAtCharacterBoundary)
-				break;
-			if (remainingCharacters == 0 &&
-			    files.Count < Math.Min(plan.IncludedFiles.Count, maximumFiles))
-			{
-				isTruncated = true;
-				break;
+					Task.Run(
+						async () => await ReadSourceClassifiedAsync(
+								plan.SourceRoot,
+								path,
+								maximumFileBytes,
+								readCancellation.Token)
+							.ConfigureAwait(false),
+						readCancellation.Token)));
 			}
 		}
 
+		FillReadAhead();
+		try
+		{
+			while (pendingReads.Count > 0)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				var pending = pendingReads.Dequeue();
+				var result = await pending.ReadTask.ConfigureAwait(false);
+				var relativePath = NormalizeRelativePath(plan.SourceRoot, pending.Path);
+				var content = result.Content;
+				var reachedOutputBoundary = false;
+				if (!result.IsText || content is null)
+				{
+					files.Add(new ContextFileDocument(
+						relativePath,
+						result.Classification,
+						Content: null));
+				}
+				else if (content.IsEstimated)
+				{
+					files.Add(new ContextFileDocument(
+						relativePath,
+						FileContentClassification.TooLarge,
+						Content: null,
+						IsOmitted: true));
+					isTruncated = true;
+				}
+				else
+				{
+					var fileContent = content.Content;
+					var truncatedAtCharacterBoundary = false;
+					if (fileContent.Length > remainingCharacters)
+					{
+						fileContent = fileContent[..ClampToCompleteUnicodeScalar(fileContent, remainingCharacters)];
+						isTruncated = true;
+						truncatedAtCharacterBoundary = true;
+					}
+					if (prepared is not null)
+					{
+						var preparedFile = prepared.GetFile(pending.Path);
+						var completeLength = preparedFile.ClampLengthToCompleteRedactions(fileContent.Length);
+						if (completeLength != fileContent.Length)
+						{
+							fileContent = fileContent[..completeLength];
+							isTruncated = true;
+							truncatedAtCharacterBoundary = true;
+						}
+					}
+					files.Add(new ContextFileDocument(
+						relativePath,
+						FileContentClassification.Text,
+						fileContent,
+						IsTruncated: fileContent.Length != content.Content.Length));
+					remainingCharacters -= fileContent.Length;
+					// Once a file is truncated, later files are not part of the bounded prefix.
+					// Continuing merely because a placeholder was removed at the boundary would
+					// make the limit select non-contiguous content and violate deterministic ordering.
+					reachedOutputBoundary = truncatedAtCharacterBoundary;
+					if (!reachedOutputBoundary && remainingCharacters == 0 && files.Count < pathCount)
+					{
+						isTruncated = true;
+						reachedOutputBoundary = true;
+					}
+				}
+
+				result = null!;
+				content = null;
+				if (reachedOutputBoundary)
+					break;
+				FillReadAhead();
+			}
+		}
+		finally
+		{
+			await CancelAndObservePendingReadsAsync(readCancellation, pendingReads)
+				.ConfigureAwait(false);
+		}
+
 		return new ContextFileReadResult(files, isTruncated);
+	}
+
+	private static int ResolveBoundedReadAheadCount(long maximumFileBytes, int fileCount)
+	{
+		if (fileCount <= 1)
+			return fileCount;
+
+		var concurrencyLimit = Math.Min(
+			fileCount,
+			Math.Min(MaximumBoundedReadAhead, ScanParallelismPolicy.MaxDegreeOfParallelism));
+		if (maximumFileBytes == 0)
+			return concurrencyLimit;
+
+		var maximumRetainedBytesPerFile = maximumFileBytes > long.MaxValue / sizeof(char)
+			? long.MaxValue
+			: maximumFileBytes * sizeof(char);
+		var memoryBoundedLimit = Math.Max(
+			1,
+			MaximumBoundedReadAheadRetainedBytes / maximumRetainedBytesPerFile);
+		return (int)Math.Min(concurrencyLimit, memoryBoundedLimit);
+	}
+
+	private static async Task CancelAndObservePendingReadsAsync(
+		CancellationTokenSource cancellation,
+		Queue<PendingBoundedFileRead> pendingReads)
+	{
+		cancellation.Cancel();
+		if (pendingReads.Count == 0)
+			return;
+
+		var tasks = pendingReads.Select(static pending => pending.ReadTask).ToArray();
+		try
+		{
+			await Task.WhenAll(tasks).ConfigureAwait(false);
+		}
+		catch
+		{
+			// Speculative reads past the deterministic output boundary are never observable.
+			// Draining them still owns every exception and prevents background work escaping.
+			foreach (var task in tasks)
+			{
+				if (task.IsFaulted)
+					_ = task.Exception;
+			}
+		}
 	}
 
 	private static int ClampToCompleteUnicodeScalar(string value, int maximumLength)
@@ -1879,6 +1958,10 @@ public sealed class ProjectContextDocumentService(
 	private sealed record ContextFileReadResult(
 		IReadOnlyList<ContextFileDocument> Files,
 		bool IsTruncated);
+
+	private sealed record PendingBoundedFileRead(
+		string Path,
+		Task<FileContentReadResult> ReadTask);
 
 	private sealed record ContextFileDocument(
 		string Path,

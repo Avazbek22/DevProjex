@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Xml.Linq;
 using DevProjex.Kernel.Abstractions;
@@ -150,6 +151,94 @@ public sealed class ProjectContextStreamingRegressionTests
 		using var json = JsonDocument.Parse(document);
 		var file = Assert.Single(json.RootElement.GetProperty("files").EnumerateArray());
 		Assert.Equal("x", file.GetProperty("content").GetString());
+	}
+
+	[Fact]
+	public async Task BoundedDocumentReadAheadPreservesByteIdentityAndOrderWithinConcurrencyBound()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		for (var index = 0; index < 8; index++)
+			workspace.WriteFile($"project/src/{index:D2}.txt", $"content-{index}\n");
+		var services = new TerminalServiceFactory(
+				() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var plan = await services.ContextFactory.BuildAsync(
+			project,
+			new ProjectSelectionSpec(GitMode: GitFilteringMode.None, Exclusions: []),
+			cancellationToken: TestContext.Current.CancellationToken);
+		var limits = new ProjectContextDocumentLimits(
+			MaximumTreeNodes: 32,
+			MaximumFiles: 8,
+			MaximumCharacters: 16 * 1024,
+			MaximumFileBytes: 4 * 1024);
+		var baseline = await new ProjectContextDocumentService(
+				services.TreeExportService,
+				new FileContentAnalyzer())
+			.BuildAsync(
+				plan,
+				ProjectContextView.Content,
+				ProjectContextDocumentFormat.Json,
+				limits with { MaximumFileBytes = long.MaxValue },
+				TestContext.Current.CancellationToken);
+		var analyzer = ReadAheadProbeAnalyzer.CreateCoordinated(requiredConcurrency: 4);
+
+		var actual = await new ProjectContextDocumentService(
+				services.TreeExportService,
+				analyzer)
+			.BuildAsync(
+				plan,
+				ProjectContextView.Content,
+				ProjectContextDocumentFormat.Json,
+				limits,
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(baseline, actual);
+		Assert.InRange(analyzer.MaximumConcurrency, 4, 8);
+		Assert.NotEqual(
+			Path.GetFileName(plan.IncludedFiles[0]),
+			Assert.Single(analyzer.CompletionOrder.Take(1)));
+	}
+
+	[Fact]
+	public async Task BoundedDocumentReadAheadCancelsAndDrainsEveryStartedRead()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		for (var index = 0; index < 8; index++)
+			workspace.WriteFile($"project/src/{index:D2}.txt", $"content-{index}\n");
+		var services = new TerminalServiceFactory(
+				() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var plan = await services.ContextFactory.BuildAsync(
+			project,
+			new ProjectSelectionSpec(GitMode: GitFilteringMode.None, Exclusions: []),
+			cancellationToken: TestContext.Current.CancellationToken);
+		var analyzer = ReadAheadProbeAnalyzer.CreateBlocking();
+		using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(
+			TestContext.Current.CancellationToken);
+		var build = new ProjectContextDocumentService(
+				services.TreeExportService,
+				analyzer)
+			.BuildAsync(
+				plan,
+				ProjectContextView.Content,
+				ProjectContextDocumentFormat.Text,
+				new ProjectContextDocumentLimits(
+					MaximumTreeNodes: 32,
+					MaximumFiles: 8,
+					MaximumCharacters: 16 * 1024,
+					MaximumFileBytes: 4 * 1024),
+				cancellation.Token);
+		await analyzer.FirstReadStarted.WaitAsync(
+			TimeSpan.FromSeconds(5),
+			TestContext.Current.CancellationToken);
+
+		cancellation.Cancel();
+
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(() => build);
+		Assert.Equal(0, analyzer.ActiveReads);
+		Assert.InRange(analyzer.MaximumConcurrency, 1, 8);
 	}
 
 	[Theory]
@@ -1467,6 +1556,115 @@ public sealed class ProjectContextStreamingRegressionTests
 			}
 
 			throw new IOException("Simulated destination write failure.");
+		}
+	}
+
+	private sealed class ReadAheadProbeAnalyzer : IFileContentAnalyzer
+	{
+		private readonly FileContentAnalyzer _inner = new();
+		private readonly ConcurrentQueue<string> _completionOrder = new();
+		private readonly TaskCompletionSource<bool> _firstReadStarted = new(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		private readonly TaskCompletionSource<bool>? _release;
+		private readonly int _requiredConcurrency;
+		private readonly bool _blockUntilCancellation;
+		private int _activeReads;
+		private int _maximumConcurrency;
+
+		private ReadAheadProbeAnalyzer(int requiredConcurrency, bool blockUntilCancellation)
+		{
+			_requiredConcurrency = requiredConcurrency;
+			_blockUntilCancellation = blockUntilCancellation;
+			if (!blockUntilCancellation)
+			{
+				_release = new TaskCompletionSource<bool>(
+					TaskCreationOptions.RunContinuationsAsynchronously);
+			}
+		}
+
+		public int ActiveReads => Volatile.Read(ref _activeReads);
+		public IReadOnlyList<string> CompletionOrder => _completionOrder.ToArray();
+		public Task FirstReadStarted => _firstReadStarted.Task;
+		public int MaximumConcurrency => Volatile.Read(ref _maximumConcurrency);
+
+		public static ReadAheadProbeAnalyzer CreateBlocking() => new(1, blockUntilCancellation: true);
+
+		public static ReadAheadProbeAnalyzer CreateCoordinated(int requiredConcurrency) =>
+			new(requiredConcurrency, blockUntilCancellation: false);
+
+		public FileContentClassification? ClassifyWithoutReading(string path) =>
+			_inner.ClassifyWithoutReading(path);
+
+		public async ValueTask<FileContentReadResult> ReadClassifiedAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default)
+		{
+			var concurrency = Interlocked.Increment(ref _activeReads);
+			UpdateMaximumConcurrency(concurrency);
+			_firstReadStarted.TrySetResult(true);
+			try
+			{
+				if (_blockUntilCancellation)
+				{
+					await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken)
+						.ConfigureAwait(false);
+					throw new InvalidOperationException("The blocking read completed without cancellation.");
+				}
+
+				if (concurrency >= _requiredConcurrency)
+					_release!.TrySetResult(true);
+				await _release!.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+				var stem = Path.GetFileNameWithoutExtension(path);
+				var index = int.TryParse(stem, out var parsed) ? parsed : 0;
+				await Task.Delay(TimeSpan.FromMilliseconds(Math.Max(1, 9 - index) * 10), cancellationToken)
+					.ConfigureAwait(false);
+				var result = await _inner
+					.ReadClassifiedAsync(path, maxSizeForFullRead, cancellationToken)
+					.ConfigureAwait(false);
+				_completionOrder.Enqueue(Path.GetFileName(path));
+				return result;
+			}
+			finally
+			{
+				Interlocked.Decrement(ref _activeReads);
+			}
+		}
+
+		public ValueTask<bool> IsTextFileAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			_inner.IsTextFileAsync(path, cancellationToken);
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			_inner.GetTextFileMetricsAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			_inner.TryReadAsTextAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			_inner.TryReadAsTextAsync(path, maxSizeForFullRead, cancellationToken);
+
+		private void UpdateMaximumConcurrency(int concurrency)
+		{
+			var observed = Volatile.Read(ref _maximumConcurrency);
+			while (concurrency > observed)
+			{
+				var original = Interlocked.CompareExchange(
+					ref _maximumConcurrency,
+					concurrency,
+					observed);
+				if (original == observed)
+					return;
+				observed = original;
+			}
 		}
 	}
 
