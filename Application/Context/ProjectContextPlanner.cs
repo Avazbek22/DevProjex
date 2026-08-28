@@ -18,23 +18,42 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		ArgumentNullException.ThrowIfNull(request);
 		return BuildCoreAsync(
 			request with { CaptureIgnoreImpactCounts = true },
-			includeOutputMetrics: true,
+			includeTreeOutputMetrics: true,
+			includeContentOutputMetrics: true,
 			cancellationToken);
 	}
 
 	public Task<ProjectContextPlan> BuildAsync(
 		ProjectContextRequest request,
 		CancellationToken cancellationToken = default)
-		=> BuildCoreAsync(request, includeOutputMetrics: true, cancellationToken);
+		=> BuildCoreAsync(
+			request,
+			includeTreeOutputMetrics: true,
+			includeContentOutputMetrics: true,
+			cancellationToken);
+
+	public Task<ProjectContextPlan> BuildWithTreeMetricsAsync(
+		ProjectContextRequest request,
+		CancellationToken cancellationToken = default)
+		=> BuildCoreAsync(
+			request,
+			includeTreeOutputMetrics: true,
+			includeContentOutputMetrics: false,
+			cancellationToken);
 
 	public Task<ProjectContextPlan> BuildStructureAsync(
 		ProjectContextRequest request,
 		CancellationToken cancellationToken = default)
-		=> BuildCoreAsync(request, includeOutputMetrics: false, cancellationToken);
+		=> BuildCoreAsync(
+			request,
+			includeTreeOutputMetrics: false,
+			includeContentOutputMetrics: false,
+			cancellationToken);
 
 	private async Task<ProjectContextPlan> BuildCoreAsync(
 		ProjectContextRequest request,
-		bool includeOutputMetrics,
+		bool includeTreeOutputMetrics,
+		bool includeContentOutputMetrics,
 		CancellationToken cancellationToken)
 	{
 		ArgumentNullException.ThrowIfNull(request);
@@ -101,7 +120,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		var analysis = await analysisService
 			.BuildReportFromTreeAsync(
 				projectedLoaded,
-				includeOutputMetrics,
+				includeTreeOutputMetrics,
+				includeContentOutputMetrics,
 				cancellationToken)
 			.ConfigureAwait(false);
 		AddAnalysisDiagnostics(analysis, diagnostics);
@@ -183,7 +203,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			IgnoreOptionCounts: loaded.IgnoreOptionCounts,
 			IgnoreControllerImpactCounts: loaded.IgnoreControllerImpactCounts)
 		{
-			IncludesOutputMetrics = includeOutputMetrics
+			IncludesOutputMetrics = includeTreeOutputMetrics && includeContentOutputMetrics
 		};
 	}
 

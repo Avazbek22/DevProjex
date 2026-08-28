@@ -208,6 +208,33 @@ public sealed class DirectCommandIntegrationTests
 		Assert.Empty(environment.StandardError);
 	}
 
+	[Theory]
+	[InlineData(false, false, false, false, false, false)]
+	[InlineData(true, false, false, false, false, true)]
+	[InlineData(false, true, false, false, false, true)]
+	[InlineData(false, false, true, false, false, true)]
+	[InlineData(false, false, false, true, false, true)]
+	[InlineData(false, false, false, false, true, true)]
+	public void AnalyzeTransformationDetectionCoversEveryContentTransformation(
+		bool hideSecrets,
+		bool hidePrivateData,
+		bool compressCode,
+		bool stripComments,
+		bool stripBlankLines,
+		bool expected)
+	{
+		var selection = ProjectSelectionSpec.Standard with
+		{
+			HideSecrets = hideSecrets,
+			HidePrivateData = hidePrivateData,
+			CompressCode = compressCode,
+			StripComments = stripComments,
+			StripBlankLines = stripBlankLines
+		};
+
+		Assert.Equal(expected, AnalyzeCommandHandler.HasContentTransformations(selection));
+	}
+
 	[Fact]
 	public async Task ContextExportWithCompressionWritesSignaturesInsteadOfMethodBodies()
 	{

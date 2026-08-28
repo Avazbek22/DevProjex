@@ -1,3 +1,5 @@
+using DevProjex.Application.Context;
+
 namespace DevProjex.Tests.Integration;
 
 [Collection(CurrentDirectoryTestCollection.Name)]
@@ -351,9 +353,27 @@ public sealed class ProjectAnalysisServiceIntegrationTests
 			.ToArray());
 
 		Assert.True(analyzer.MaximumConcurrency > 1);
+		Assert.Equal(paths.Length, analyzer.CallCount);
 		Assert.Equal(expected.Lines, report.Metrics.Content.Lines);
 		Assert.Equal(expected.Chars, report.Metrics.Content.Chars);
 		Assert.Equal(expected.Tokens, report.Metrics.Content.Tokens);
+	}
+
+	[Fact]
+	public async Task BuildWithTreeMetricsAsync_SkipsContentReads()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("src/Selected.cs", "class Selected {}\n");
+		var analyzer = new ConcurrentMetricsAnalyzer();
+
+		var plan = await new ProjectContextPlanner(CreateService(analyzer))
+			.BuildWithTreeMetricsAsync(
+				new ProjectContextRequest(temp.Path, ProjectSelectionSpec.Standard),
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(0, analyzer.CallCount);
+		Assert.True(plan.Analysis.Metrics.Tree.Chars > 0);
+		Assert.Equal(ProjectOutputMetricsReport.Empty, plan.Analysis.Metrics.Content);
 	}
 
 	[Fact]
@@ -438,8 +458,10 @@ public sealed class ProjectAnalysisServiceIntegrationTests
 	private sealed class ConcurrentMetricsAnalyzer : IFileContentAnalyzer
 	{
 		private int _activeCalls;
+		private int _callCount;
 		private int _maximumConcurrency;
 
+		public int CallCount => Volatile.Read(ref _callCount);
 		public int MaximumConcurrency => Volatile.Read(ref _maximumConcurrency);
 
 		public ValueTask<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default) =>
@@ -449,6 +471,7 @@ public sealed class ProjectAnalysisServiceIntegrationTests
 			string path,
 			CancellationToken cancellationToken = default)
 		{
+			Interlocked.Increment(ref _callCount);
 			var concurrency = Interlocked.Increment(ref _activeCalls);
 			UpdateMaximumConcurrency(concurrency);
 			try

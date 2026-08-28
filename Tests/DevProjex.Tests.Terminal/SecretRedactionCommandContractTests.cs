@@ -188,6 +188,17 @@ public sealed class SecretRedactionCommandContractTests
 		workspace.Temporary.WriteFile(
 			"project/src/contact.txt",
 			$"contact={PrivateEmail}\n");
+		var baselineEnvironment = new TestTerminalEnvironment();
+		var baselineExitCode = await RunAsync(
+			workspace,
+			baselineEnvironment,
+			[
+				"analyze", workspace.ProjectRoot,
+				"--format", "json", "--plain", "-o", "-"
+			]);
+
+		Assert.Equal(CommandLineExitCodes.Success, baselineExitCode);
+		using var baselineDocument = JsonDocument.Parse(baselineEnvironment.StandardOutput);
 		var environment = new TestTerminalEnvironment();
 
 		var exitCode = await RunAsync(
@@ -204,6 +215,23 @@ public sealed class SecretRedactionCommandContractTests
 		Assert.DoesNotContain(PrivateEmail, environment.StandardOutput, StringComparison.Ordinal);
 		using var document = JsonDocument.Parse(environment.StandardOutput);
 		var root = document.RootElement;
+		var baselineTreeMetrics = baselineDocument.RootElement
+			.GetProperty("metrics")
+			.GetProperty("tree");
+		var transformedTreeMetrics = root
+			.GetProperty("metrics")
+			.GetProperty("tree");
+		Assert.Equal(
+			baselineTreeMetrics.GetProperty("lines").GetInt64(),
+			transformedTreeMetrics.GetProperty("lines").GetInt64());
+		Assert.Equal(
+			baselineTreeMetrics.GetProperty("chars").GetInt64(),
+			transformedTreeMetrics.GetProperty("chars").GetInt64());
+		Assert.Equal(
+			baselineTreeMetrics.GetProperty("tokens").GetInt64(),
+			transformedTreeMetrics.GetProperty("tokens").GetInt64());
+		Assert.True(
+			root.GetProperty("metrics").GetProperty("content").GetProperty("chars").GetInt64() > 0);
 		var findings = root.GetProperty("findings").EnumerateArray().ToArray();
 		var matched = root.GetProperty("redaction").GetProperty("matchedCount").GetInt32() +
 		              root.GetProperty("privacy").GetProperty("matchedCount").GetInt32();
@@ -220,6 +248,7 @@ public sealed class SecretRedactionCommandContractTests
 			Assert.True(category is "secret" or "private-data");
 			Assert.True(finding.GetProperty("lineNumber").GetInt32() >= 1);
 		});
+		Assert.Empty(baselineEnvironment.StandardError);
 		Assert.Empty(environment.StandardError);
 	}
 

@@ -437,15 +437,26 @@ public sealed class ProjectAnalysisService(
 			includeOutputMetrics: true,
 			cancellationToken);
 
-	internal async Task<ProjectAnalysisReport> BuildReportFromTreeAsync(
+	internal Task<ProjectAnalysisReport> BuildReportFromTreeAsync(
 		LoadedProjectAnalysisRequest request,
 		bool includeOutputMetrics,
+		CancellationToken cancellationToken) =>
+		BuildReportFromTreeAsync(
+			request,
+			includeTreeOutputMetrics: includeOutputMetrics,
+			includeContentOutputMetrics: includeOutputMetrics,
+			cancellationToken);
+
+	internal async Task<ProjectAnalysisReport> BuildReportFromTreeAsync(
+		LoadedProjectAnalysisRequest request,
+		bool includeTreeOutputMetrics,
+		bool includeContentOutputMetrics,
 		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 
 		var analysisStopwatch = Stopwatch.StartNew();
-		var treeMetrics = includeOutputMetrics
+		var treeMetrics = includeTreeOutputMetrics
 			? treeExport.CalculateFullTreeMetricsWithCancellation(
 				request.RootPath,
 				request.Tree.Root,
@@ -454,7 +465,7 @@ public sealed class ProjectAnalysisService(
 				displayRootName: null,
 				cancellationToken)
 			: ExportOutputMetrics.Empty;
-		var contentMetrics = includeOutputMetrics
+		var contentMetrics = includeContentOutputMetrics
 			? await CalculateContentMetricsAsync(request.Tree.OrderedFilePaths, cancellationToken)
 				.ConfigureAwait(false)
 			: ExportOutputMetrics.Empty;

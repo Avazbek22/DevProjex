@@ -27,7 +27,8 @@ public sealed class TerminalProjectContextFactory(
 		bool includeOutputMetrics,
 		ProjectSourceIdentity? knownIdentity = null,
 		CancellationToken cancellationToken = default,
-		bool captureIgnoreImpactCounts = false)
+		bool captureIgnoreImpactCounts = false,
+		bool includeContentOutputMetrics = true)
 	{
 		var markedSecrets = ProjectSelectionMarkedSecretsResolver.Resolve(selection);
 		if (await secretRedactionSession
@@ -54,6 +55,12 @@ public sealed class TerminalProjectContextFactory(
 		{
 			return await planner
 				.BuildStructureAsync(request, cancellationToken)
+				.ConfigureAwait(false);
+		}
+		if (!includeContentOutputMetrics)
+		{
+			return await planner
+				.BuildWithTreeMetricsAsync(request, cancellationToken)
 				.ConfigureAwait(false);
 		}
 		return captureIgnoreImpactCounts

@@ -12,34 +12,29 @@ public sealed class AnalyzeCommandHandler(
 		AnalyzeCommandRequest request,
 		CancellationToken cancellationToken)
 	{
+		var includeSourceContentMetrics = !HasContentTransformations(request.Selection);
 		var plan = await new StatusRenderer(environment, request.Output)
 			.RunAsync(
 				services.Localization["Terminal.Status.AnalyzingProject"],
 				() => services.ContextFactory.BuildAsync(
 					request.ProjectPath,
 					request.Selection,
-					cancellationToken: cancellationToken))
+					includeOutputMetrics: true,
+					cancellationToken: cancellationToken,
+					includeContentOutputMetrics: includeSourceContentMetrics))
 			.ConfigureAwait(false);
-		var transformKinds = CodeTransformIdentity.Resolve(
-			plan.Selection.CompressCode == true,
-			plan.Selection.StripComments == true,
-			plan.Selection.StripBlankLines == true);
-		var redactionFeatures = SecretRedactionFeatureSelection.Resolve(
-			plan.Selection.HideSecrets == true,
-			plan.Selection.HidePrivateData == true);
-		var transformationContext = ContentTransformationContext.For(
-			transformKinds != CodeTransformKinds.None
-				? new CodeCompressionContext(
-					plan.SourceRoot,
-					services.CodeCompressionSession,
-					transformKinds)
-				: null,
-			redactionFeatures != SecretRedactionFeatures.None
-				? new SecretRedactionContext(
-					plan.SourceRoot,
-					services.SecretRedactionSession,
-					redactionFeatures)
-				: null);
+		var transformationContext = CreateTransformationContext(plan);
+		if (!includeSourceContentMetrics && transformationContext is null)
+		{
+			// Resolved CLI selections normally make this branch unreachable. Keeping the fallback
+			// prevents a future profile-normalization change from publishing empty content metrics.
+			plan = await services.ContextFactory.BuildAsync(
+					request.ProjectPath,
+					request.Selection,
+					cancellationToken: cancellationToken)
+				.ConfigureAwait(false);
+			transformationContext = CreateTransformationContext(plan);
+		}
 		IReadOnlyList<EffectiveRedactionFinding> effectiveFindings = [];
 		var effectiveFindingCount = 0;
 		if (transformationContext is not null)
@@ -162,6 +157,39 @@ public sealed class AnalyzeCommandHandler(
 		       request.FailOnFindings && effectiveFindingCount > 0
 			? CommandLineExitCodes.PolicyFailure
 			: CommandLineExitCodes.Success;
+	}
+
+	internal static bool HasContentTransformations(ProjectSelectionSpec selection) =>
+		CodeTransformIdentity.Resolve(
+			selection.CompressCode == true,
+			selection.StripComments == true,
+			selection.StripBlankLines == true) != CodeTransformKinds.None ||
+		SecretRedactionFeatureSelection.Resolve(
+			selection.HideSecrets == true,
+			selection.HidePrivateData == true) != SecretRedactionFeatures.None;
+
+	private ContentTransformationContext? CreateTransformationContext(ProjectContextPlan plan)
+	{
+		var transformKinds = CodeTransformIdentity.Resolve(
+			plan.Selection.CompressCode == true,
+			plan.Selection.StripComments == true,
+			plan.Selection.StripBlankLines == true);
+		var redactionFeatures = SecretRedactionFeatureSelection.Resolve(
+			plan.Selection.HideSecrets == true,
+			plan.Selection.HidePrivateData == true);
+		return ContentTransformationContext.For(
+			transformKinds != CodeTransformKinds.None
+				? new CodeCompressionContext(
+					plan.SourceRoot,
+					services.CodeCompressionSession,
+					transformKinds)
+				: null,
+			redactionFeatures != SecretRedactionFeatures.None
+				? new SecretRedactionContext(
+					plan.SourceRoot,
+					services.SecretRedactionSession,
+					redactionFeatures)
+				: null);
 	}
 
 	private async Task<string> BuildJsonAsync(
