@@ -3321,6 +3321,62 @@ public sealed class MainWindowIgnoreOptionsUiTests
         }
     }
 
+	[AvaloniaFact]
+	public async Task ClosingWindow_WhileSelectionRefreshOwnsGate_CompletesWithoutLateMutation()
+	{
+		using var project = UiTestProject.CreateWithPythonSmartIgnoreAndIdeaWorkspace();
+		using var blockingScanner = new SwitchableBlockingFileSystemScanner(
+			project.RootPath,
+			ignoreCancellation: true);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			configureServices: services => services with
+			{
+				ScanOptionsUseCase = new ScanOptionsUseCase(
+					LegacyWorkspaceScannerTestAdapter.Adapt(blockingScanner))
+			});
+
+		try
+		{
+			blockingScanner.EnableBlocking();
+			await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.SmartIgnore, isChecked: false);
+			Assert.True(
+				blockingScanner.WaitForBlockedCall(TimeSpan.FromSeconds(10)),
+				"The selection refresh did not acquire its gate before shutdown.");
+
+			var coordinator = Assert.IsType<DevProjex.Avalonia.Coordinators.SelectionSyncCoordinator>(
+				typeof(MainWindow)
+					.GetField("_selectionCoordinator", System.Reflection.BindingFlags.Instance |
+					                                  System.Reflection.BindingFlags.NonPublic)!
+					.GetValue(window));
+			var refreshTask = Assert.IsAssignableFrom<Task>(
+				typeof(DevProjex.Avalonia.Coordinators.SelectionSyncCoordinator)
+					.GetField("_latestFullRefreshTask", System.Reflection.BindingFlags.Instance |
+					                                        System.Reflection.BindingFlags.NonPublic)!
+					.GetValue(coordinator));
+
+			window.Close();
+			await window.ShutdownCompletion.WaitAsync(TimeSpan.FromSeconds(2));
+			Assert.False(refreshTask.IsCompleted);
+
+			var lateMutations = 0;
+			UiTestDriver.GetViewModel(window).Extensions.CollectionChanged += (_, _) =>
+				Interlocked.Increment(ref lateMutations);
+			blockingScanner.Release();
+
+			var completionException = await Record.ExceptionAsync(async () =>
+				await refreshTask.WaitAsync(TimeSpan.FromSeconds(3)));
+			Assert.IsAssignableFrom<OperationCanceledException>(completionException);
+			Assert.Equal(0, Volatile.Read(ref lateMutations));
+			Assert.True(window.ShutdownCompletion.IsCompletedSuccessfully);
+		}
+		finally
+		{
+			blockingScanner.Release();
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
     private static async Task WaitForExtensionStateAsync(
         MainWindow window,
         string extensionName,

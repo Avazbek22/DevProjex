@@ -3221,8 +3221,8 @@ public sealed partial class SelectionSyncCoordinator(
         _session.ClearPreparedSelection();
         _ignoreOptions = [];
 
-        // Dispose the semaphore
-        _refreshLock.Dispose();
+        // Canceled refresh continuations can still own the captured gate and must release it.
+        // SemaphoreSlim has no native resource here because AvailableWaitHandle is never used.
     }
 
     private bool ShouldClearCachesForCurrentPath(string currentPath)
