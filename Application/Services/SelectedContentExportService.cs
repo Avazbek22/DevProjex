@@ -1,5 +1,6 @@
 namespace DevProjex.Application.Services;
 
+using System.Runtime.CompilerServices;
 using DevProjex.Application.Secrets;
 
 public sealed record SelectedContentExportResult(
@@ -17,6 +18,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 	private const string WhitespaceMarkerPrefix = "[Whitespace, ";
 	private const string WhitespaceMarkerSuffix = " bytes]";
 	private const long DefaultMaximumMaterializedFileBytes = 10L * 1024 * 1024;
+	private const long MaximumParallelPreparationFileBytes = 1024 * 1024;
+	internal const int MaximumParallelPreparations = 8;
 
 	public string Build(IEnumerable<string> filePaths) =>
 		Build(filePaths, displayPathMapper: null);
@@ -160,162 +163,109 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		bool anyWritten = false;
 
 		var processedFileCount = 0;
-		foreach (var file in files)
+		var allowParallelPreparation = maxFileCount is null && maxOutputCharacters is null;
+		await foreach (var prepared in PrepareContentEntriesAsync(
+						   files,
+						   displayPathMapper,
+						   maxFileSizeForFullRead,
+						   transformationScope,
+						   redactionScope,
+						   allowParallelPreparation,
+						   cancellationToken).ConfigureAwait(false))
 		{
-			cancellationToken.ThrowIfCancellationRequested();
-			if (maxFileCount is { } fileLimit && processedFileCount >= fileLimit)
-				break;
-
-			TextFileContent? content;
-			ContentFingerprint? contentFingerprint = null;
-			SecretFileMetadata? redactionMetadata = null;
-			if (redactionScope is null)
+			using (prepared)
 			{
-				if (transformationScope?.Compression is not null)
-				{
-					var readFact = await contentAnalyzer.ReadFactAsync(
+				cancellationToken.ThrowIfCancellationRequested();
+				var file = prepared.FilePath;
+				var content = prepared.Content;
+				if (content is null)
+					continue;
+
+				// Compression first, then secrets: the clipboard must carry exactly what the preview
+				// showed, and the secret counter must describe the text that actually leaves.
+				// Estimated content is an empty string standing in for text nobody read - transforming
+				// it would record a clean scan of a file that was never opened.
+				var rawDisplayPath = prepared.DisplayPath;
+				var compression = prepared.Compression;
+				var transformedText = compression?.Text ?? content.Content;
+				var redactionPlan = content.IsEstimated
+					? null
+					: redactionScope?.CreatePlan(
 						file,
-						maxFileSizeForFullRead ?? DefaultMaximumMaterializedFileBytes,
-						cancellationToken).ConfigureAwait(false);
-					content = readFact.ToReadResult().Content;
-					contentFingerprint = readFact.Fingerprint;
-				}
-				else
-				{
-					content = maxFileSizeForFullRead is { } sizeLimit
-						? await contentAnalyzer.TryReadAsTextAsync(file, sizeLimit, cancellationToken).ConfigureAwait(false)
-						: await contentAnalyzer.TryReadAsTextAsync(file, cancellationToken).ConfigureAwait(false);
-				}
-			}
-			else
-			{
-				var scanLimit = maxFileSizeForFullRead ??
-				                SecretRedactionOutputPreparer.MaximumScannableFileBytes;
-				var coherentRead = await ReadRedactionFactAsync(file, scanLimit, cancellationToken)
-					.ConfigureAwait(false);
-				var readFact = coherentRead.Fact;
-				redactionMetadata = coherentRead.Metadata;
-				var readResult = readFact.ToReadResult();
-				content = readResult.Content;
-				contentFingerprint = readFact.Fingerprint;
-				switch (readResult.Classification)
-				{
-					case FileContentClassification.Binary:
-						continue;
-					case FileContentClassification.TooLarge:
-					case FileContentClassification.Unreadable:
-					case FileContentClassification.UnsupportedEncoding:
-						// Unavailable content contributes no text, matching the unredacted path.
-						// One unreadable file must not discard the rest of the selection.
-						break;
-					case FileContentClassification.Text when content is not null:
-						break;
-					default:
-						throw new SecretDetectionException(
-							$"Hide Secrets could not inspect '{file}' ({readResult.Classification}).");
-				}
-			}
-
-			// Skip binary files (null result)
-			if (content is null)
-				continue;
-
-			using var contentLease = redactionScope?.TrackFullContentBuffer();
-			// Compression first, then secrets: the clipboard must carry exactly what the preview
-			// showed, and the secret counter must describe the text that actually leaves.
-			// Estimated content is an empty string standing in for text nobody read - transforming
-			// it would record a clean scan of a file that was never opened.
-			var rawDisplayPath = MapDisplayPath(file, displayPathMapper);
-			var compression = content.IsEstimated
-				? null
-				: contentFingerprint is { } fingerprint
-					? transformationScope?.Compress(
-						file,
-						rawDisplayPath,
-						content.Content,
-						fingerprint,
-						cancellationToken)
-					: transformationScope?.Compress(
-						file,
-						rawDisplayPath,
-						content.Content,
-						cancellationToken);
-			var transformedText = compression?.Text ?? content.Content;
-			var redactionPlan = content.IsEstimated
-				? null
-				: redactionScope?.CreatePlan(
-					file,
-					transformedText,
-					compression?.Map,
-					redactionMetadata ?? SecretFileMetadata.Capture(file),
-					contentFingerprint,
-					cancellationToken);
-
-			processedFileCount++;
-			if (!anyWritten && !string.IsNullOrWhiteSpace(displayRootPath))
-			{
-				await output.AppendLineAsync(
-					$"{SingleLineTextEscaping.Escape(displayRootPath)}:",
-					cancellationToken).ConfigureAwait(false);
-				await AppendClipboardBlankLineAsync(output, cancellationToken).ConfigureAwait(false);
-				await AppendClipboardBlankLineAsync(output, cancellationToken).ConfigureAwait(false);
-			}
-			if (anyWritten)
-			{
-				await AppendClipboardBlankLineAsync(output, cancellationToken).ConfigureAwait(false);
-				await AppendClipboardBlankLineAsync(output, cancellationToken).ConfigureAwait(false);
-			}
-
-			anyWritten = true;
-
-			var displayPath = OutputRootPathPresentation
-				.ResolvePath(rawDisplayPath, outputPathRedaction)
-				.Text;
-			displayPath = SingleLineTextEscaping.Escape(displayPath);
-			await output.AppendLineAsync($"{displayPath}:", cancellationToken).ConfigureAwait(false);
-			await AppendClipboardBlankLineAsync(output, cancellationToken).ConfigureAwait(false);
-
-			if (content.IsEmpty)
-			{
-				await output.AppendLineAsync(NoContentMarker, cancellationToken).ConfigureAwait(false);
-			}
-			else if (content.IsWhitespaceOnly)
-			{
-				await output.AppendLineAsync(
-					$"{WhitespaceMarkerPrefix}{content.SizeBytes}{WhitespaceMarkerSuffix}",
-					cancellationToken).ConfigureAwait(false);
-			}
-			else
-			{
-				// Written from the transformed text, never from the file on disk: the plan's offsets
-				// describe that text, and this surface has to carry the same bytes the preview showed.
-				// Trim trailing newlines for clipboard-friendly output without allocating a
-				// second whole-file string when redaction is enabled.
-				var sourceLength = transformedText.Length;
-				while (sourceLength > 0 && transformedText[sourceLength - 1] is '\r' or '\n')
-					sourceLength--;
-				if (redactionPlan is null)
-				{
-					await output.AppendAsync(
-						transformedText.AsMemory(0, sourceLength),
-						cancellationToken).ConfigureAwait(false);
-					await output.AppendLineAsync(string.Empty, cancellationToken).ConfigureAwait(false);
-				}
-				else
-				{
-					await output.AppendRedactedAsync(
-						redactionPlan,
 						transformedText,
-						sourceLength,
-						cancellationToken).ConfigureAwait(false);
-					await output.AppendLineAsync(string.Empty, cancellationToken).ConfigureAwait(false);
-				}
-			}
+						compression?.Map,
+						prepared.RedactionMetadata ?? SecretFileMetadata.Capture(file),
+						prepared.ContentFingerprint,
+						cancellationToken);
 
-			if (maxOutputCharacters is { } characterLimit && output.Length >= characterLimit)
-			{
-				output.Truncate(characterLimit);
-				break;
+				processedFileCount++;
+				if (!anyWritten && !string.IsNullOrWhiteSpace(displayRootPath))
+				{
+					await output.AppendLineAsync(
+						$"{SingleLineTextEscaping.Escape(displayRootPath)}:",
+						cancellationToken).ConfigureAwait(false);
+					await AppendClipboardBlankLineAsync(output, cancellationToken).ConfigureAwait(false);
+					await AppendClipboardBlankLineAsync(output, cancellationToken).ConfigureAwait(false);
+				}
+				if (anyWritten)
+				{
+					await AppendClipboardBlankLineAsync(output, cancellationToken).ConfigureAwait(false);
+					await AppendClipboardBlankLineAsync(output, cancellationToken).ConfigureAwait(false);
+				}
+
+				anyWritten = true;
+
+				var displayPath = OutputRootPathPresentation
+					.ResolvePath(rawDisplayPath, outputPathRedaction)
+					.Text;
+				displayPath = SingleLineTextEscaping.Escape(displayPath);
+				await output.AppendLineAsync($"{displayPath}:", cancellationToken).ConfigureAwait(false);
+				await AppendClipboardBlankLineAsync(output, cancellationToken).ConfigureAwait(false);
+
+				if (content.IsEmpty)
+				{
+					await output.AppendLineAsync(NoContentMarker, cancellationToken).ConfigureAwait(false);
+				}
+				else if (content.IsWhitespaceOnly)
+				{
+					await output.AppendLineAsync(
+						$"{WhitespaceMarkerPrefix}{content.SizeBytes}{WhitespaceMarkerSuffix}",
+						cancellationToken).ConfigureAwait(false);
+				}
+				else
+				{
+					// Written from the transformed text, never from the file on disk: the plan's offsets
+					// describe that text, and this surface has to carry the same bytes the preview showed.
+					// Trim trailing newlines for clipboard-friendly output without allocating a
+					// second whole-file string when redaction is enabled.
+					var sourceLength = transformedText.Length;
+					while (sourceLength > 0 && transformedText[sourceLength - 1] is '\r' or '\n')
+						sourceLength--;
+					if (redactionPlan is null)
+					{
+						await output.AppendAsync(
+							transformedText.AsMemory(0, sourceLength),
+							cancellationToken).ConfigureAwait(false);
+						await output.AppendLineAsync(string.Empty, cancellationToken).ConfigureAwait(false);
+					}
+					else
+					{
+						await output.AppendRedactedAsync(
+							redactionPlan,
+							transformedText,
+							sourceLength,
+							cancellationToken).ConfigureAwait(false);
+						await output.AppendLineAsync(string.Empty, cancellationToken).ConfigureAwait(false);
+					}
+				}
+
+				if (maxOutputCharacters is { } characterLimit && output.Length >= characterLimit)
+				{
+					output.Truncate(characterLimit);
+					break;
+				}
+				if (maxFileCount is { } fileLimit && processedFileCount >= fileLimit)
+					break;
 			}
 		}
 
@@ -334,6 +284,237 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		var textOutput = anyWritten ? output.GetMaterializedText() : string.Empty;
 
 		return new SelectedContentExportResult(textOutput, snapshot);
+	}
+
+	private async IAsyncEnumerable<PreparedContentEntry> PrepareContentEntriesAsync(
+		IReadOnlyList<string> files,
+		Func<string, string>? displayPathMapper,
+		long? maxFileSizeForFullRead,
+		ContentTransformationScope? transformationScope,
+		SecretRedactionScope? redactionScope,
+		bool allowParallelPreparation,
+		[EnumeratorCancellation] CancellationToken cancellationToken)
+	{
+		if (!allowParallelPreparation || files.Count <= 1)
+		{
+			foreach (var file in files)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				yield return await PrepareContentEntryAsync(
+						file,
+						displayPathMapper,
+						maxFileSizeForFullRead,
+						transformationScope,
+						redactionScope,
+						cancellationToken)
+					.ConfigureAwait(false);
+			}
+			yield break;
+		}
+
+		using var preparationCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		var preparationToken = preparationCancellation.Token;
+		var pending = new Queue<Task<PreparedContentEntry>>(MaximumParallelPreparations);
+		try
+		{
+			foreach (var file in files)
+			{
+				preparationToken.ThrowIfCancellationRequested();
+				if (!IsSmallFile(file))
+				{
+					while (pending.TryDequeue(out var queued))
+						yield return await queued.ConfigureAwait(false);
+
+					yield return await PrepareContentEntryAsync(
+							file,
+							displayPathMapper,
+							maxFileSizeForFullRead,
+							transformationScope,
+							redactionScope,
+							preparationToken)
+						.ConfigureAwait(false);
+					continue;
+				}
+
+				pending.Enqueue(Task.Run(
+					() => PrepareContentEntryAsync(
+						file,
+						displayPathMapper,
+						maxFileSizeForFullRead,
+						transformationScope,
+						redactionScope,
+						preparationToken).AsTask(),
+					preparationToken));
+				if (pending.Count >= MaximumParallelPreparations)
+					yield return await pending.Dequeue().ConfigureAwait(false);
+			}
+
+			while (pending.TryDequeue(out var queued))
+				yield return await queued.ConfigureAwait(false);
+		}
+		finally
+		{
+			TryCancel(preparationCancellation);
+			await DrainAndDisposePendingAsync(pending).ConfigureAwait(false);
+		}
+	}
+
+	private async ValueTask<PreparedContentEntry> PrepareContentEntryAsync(
+		string file,
+		Func<string, string>? displayPathMapper,
+		long? maxFileSizeForFullRead,
+		ContentTransformationScope? transformationScope,
+		SecretRedactionScope? redactionScope,
+		CancellationToken cancellationToken)
+	{
+		TextFileContent? content;
+		ContentFingerprint? contentFingerprint = null;
+		SecretFileMetadata? redactionMetadata = null;
+		if (redactionScope is null)
+		{
+			if (transformationScope?.Compression is not null)
+			{
+				var readFact = await contentAnalyzer.ReadFactAsync(
+					file,
+					maxFileSizeForFullRead ?? DefaultMaximumMaterializedFileBytes,
+					cancellationToken).ConfigureAwait(false);
+				content = readFact.ToReadResult().Content;
+				contentFingerprint = readFact.Fingerprint;
+			}
+			else
+			{
+				content = maxFileSizeForFullRead is { } sizeLimit
+					? await contentAnalyzer.TryReadAsTextAsync(file, sizeLimit, cancellationToken).ConfigureAwait(false)
+					: await contentAnalyzer.TryReadAsTextAsync(file, cancellationToken).ConfigureAwait(false);
+			}
+		}
+		else
+		{
+			var scanLimit = maxFileSizeForFullRead ?? SecretRedactionOutputPreparer.MaximumScannableFileBytes;
+			var coherentRead = await ReadRedactionFactAsync(file, scanLimit, cancellationToken)
+				.ConfigureAwait(false);
+			var readFact = coherentRead.Fact;
+			redactionMetadata = coherentRead.Metadata;
+			var readResult = readFact.ToReadResult();
+			content = readResult.Content;
+			contentFingerprint = readFact.Fingerprint;
+			switch (readResult.Classification)
+			{
+				case FileContentClassification.Binary:
+					content = null;
+					break;
+				case FileContentClassification.TooLarge:
+				case FileContentClassification.Unreadable:
+				case FileContentClassification.UnsupportedEncoding:
+					break;
+				case FileContentClassification.Text when content is not null:
+					break;
+				default:
+					throw new SecretDetectionException(
+						$"Hide Secrets could not inspect '{file}' ({readResult.Classification}).");
+			}
+		}
+
+		if (content is null)
+			return new PreparedContentEntry(file, file, null, null, contentFingerprint, redactionMetadata, null);
+
+		var contentLease = redactionScope?.TrackFullContentBuffer();
+		try
+		{
+			var displayPath = MapDisplayPath(file, displayPathMapper);
+			var compression = content.IsEstimated
+				? null
+				: contentFingerprint is { } fingerprint
+					? transformationScope?.Compress(
+						file,
+						displayPath,
+						content.Content,
+						fingerprint,
+						cancellationToken)
+					: transformationScope?.Compress(
+						file,
+						displayPath,
+						content.Content,
+						cancellationToken);
+			return new PreparedContentEntry(
+				file,
+				displayPath,
+				content,
+				compression,
+				contentFingerprint,
+				redactionMetadata,
+				contentLease);
+		}
+		catch
+		{
+			contentLease?.Dispose();
+			throw;
+		}
+	}
+
+	private static bool IsSmallFile(string path)
+	{
+		try
+		{
+			return new FileInfo(path).Length <= MaximumParallelPreparationFileBytes;
+		}
+		catch (Exception exception) when (exception is
+			   IOException or
+			   UnauthorizedAccessException or
+			   NotSupportedException or
+			   System.Security.SecurityException)
+		{
+			return false;
+		}
+	}
+
+	private static async Task DrainAndDisposePendingAsync(
+		IEnumerable<Task<PreparedContentEntry>> pending)
+	{
+		foreach (var task in pending)
+		{
+			try
+			{
+				(await task.ConfigureAwait(false)).Dispose();
+			}
+			catch
+			{
+				// The consumer's failure or cancellation remains authoritative.
+			}
+		}
+	}
+
+	private static void TryCancel(CancellationTokenSource cancellation)
+	{
+		try
+		{
+			cancellation.Cancel();
+		}
+		catch (AggregateException)
+		{
+			// Preparation callbacks cannot replace the consumer's failure during cleanup.
+		}
+	}
+
+	private sealed class PreparedContentEntry(
+		string filePath,
+		string displayPath,
+		TextFileContent? content,
+		CodeCompressionResult? compression,
+		ContentFingerprint? contentFingerprint,
+		SecretFileMetadata? redactionMetadata,
+		IDisposable? contentLease) : IDisposable
+	{
+		private IDisposable? _contentLease = contentLease;
+
+		public string FilePath { get; } = filePath;
+		public string DisplayPath { get; } = displayPath;
+		public TextFileContent? Content { get; } = content;
+		public CodeCompressionResult? Compression { get; } = compression;
+		public ContentFingerprint? ContentFingerprint { get; } = contentFingerprint;
+		public SecretFileMetadata? RedactionMetadata { get; } = redactionMetadata;
+
+		public void Dispose() => Interlocked.Exchange(ref _contentLease, null)?.Dispose();
 	}
 
 	private async ValueTask<CoherentRedactionRead> ReadRedactionFactAsync(
