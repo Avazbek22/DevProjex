@@ -2177,20 +2177,10 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			}
 
 			SortDirectoryIndexes(directoryChildren, directories, cancellationToken);
-			List<FileSystemFileEntry>? orderedFiles = null;
-			if (processedFileCount > 1)
-			{
-				orderedFiles = new List<FileSystemFileEntry>(processedFileCount);
-				for (var index = 0; index < processedFileCount; index++)
-				{
-					cancellationToken.ThrowIfCancellationRequested();
-					orderedFiles.Add(fileChildren[index]);
-				}
-				CancellationAwareSort.Sort(
-					orderedFiles,
-					static (left, right) => ProjectInventoryNameComparer.Compare(left.Name, right.Name),
-					cancellationToken);
-			}
+			var orderedFiles = OrderSubtreeInventoryFiles(
+				fileChildren,
+				processedFileCount,
+				cancellationToken);
 
 			// ProjectTreeInventorySnapshot requires every node's direct children to occupy
 			// one contiguous range. Add directory shells and files first, then append each
@@ -2210,7 +2200,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			for (var index = 0; index < processedFileCount; index++)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				var file = orderedFiles is null ? fileChildren[index] : orderedFiles[index];
+				var file = orderedFiles[index];
 				entries.Add(new ProjectTreeInventoryEntry(
 					file.Name,
 					file.FullPath,
@@ -2233,6 +2223,49 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			for (var index = childDirectoryPairs.Count - 1; index >= 0; index--)
 				pending.Push(childDirectoryPairs[index]);
 		}
+	}
+
+	internal static IReadOnlyList<FileSystemFileEntry> OrderSubtreeInventoryFiles(
+		IReadOnlyList<FileSystemFileEntry> files,
+		int processedFileCount,
+		CancellationToken cancellationToken)
+	{
+		ArgumentOutOfRangeException.ThrowIfNegative(processedFileCount);
+		if (processedFileCount > files.Count)
+			throw new ArgumentOutOfRangeException(nameof(processedFileCount));
+
+		if (processedFileCount == files.Count && files is List<FileSystemFileEntry> operationFiles)
+		{
+			if (operationFiles.Count > 1)
+			{
+				CancellationAwareSort.Sort(
+					operationFiles,
+					static (left, right) => ProjectInventoryNameComparer.Compare(left.Name, right.Name),
+					cancellationToken);
+			}
+
+			return operationFiles;
+		}
+
+		if (processedFileCount == 0)
+			return [];
+
+		var orderedFiles = new List<FileSystemFileEntry>(processedFileCount);
+		for (var index = 0; index < processedFileCount; index++)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			orderedFiles.Add(files[index]);
+		}
+
+		if (orderedFiles.Count > 1)
+		{
+			CancellationAwareSort.Sort(
+				orderedFiles,
+				static (left, right) => ProjectInventoryNameComparer.Compare(left.Name, right.Name),
+				cancellationToken);
+		}
+
+		return orderedFiles;
 	}
 
 	private static List<int>?[] BuildIncludedChildDirectoryIndex(
