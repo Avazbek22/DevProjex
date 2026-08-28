@@ -4,9 +4,11 @@ using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Styling;
+using System.Text;
 using DevProjex.Application.Preview;
 using DevProjex.Application.Secrets;
 using DevProjex.Avalonia.Controls;
+using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Tests.Unit.Avalonia;
 
@@ -1569,6 +1571,92 @@ public sealed class VirtualizedPreviewTextControlTests
 		Assert.InRange(allocated, 0, 128);
 	}
 
+	[AvaloniaFact]
+	public void RedactionColumnGeometryCache_PreservesAsciiCjkEmojiAndTrailingSpaceWidths()
+	{
+		const string text = "ab中🙂 cd  ";
+		using var document = new InMemoryPreviewTextDocument(
+			text,
+			redactions:
+			[
+				new PreviewRedactionSpan("ascii", "manual", 1, 0, 2, SecretPreviewSpanState.Redacted),
+				new PreviewRedactionSpan("cjk", "manual", 1, 2, 1, SecretPreviewSpanState.Redacted),
+				new PreviewRedactionSpan("emoji", "manual", 1, 3, 2, SecretPreviewSpanState.Redacted),
+				new PreviewRedactionSpan("spaces", "manual", 1, 8, 2, SecretPreviewSpanState.Redacted)
+			]);
+		var control = new VirtualizedPreviewTextControl
+		{
+			Document = document,
+			TextBrush = Brushes.White,
+			TextFontSize = 16,
+			ViewportWidth = 640,
+			ViewportHeight = 120,
+			Width = 640,
+			Height = 120
+		};
+		control.Measure(new Size(640, 120));
+		control.Arrange(new Rect(0, 0, 640, 120));
+		using var bitmap = new RenderTargetBitmap(new PixelSize(640, 120));
+		bitmap.Render(control);
+
+		var cache = GetColumnGeometryCache(control);
+		var typeface = ResolveTestTypeface(control);
+		foreach (var column in new[] { 2, 3, 5, 8, 10 })
+		{
+			Assert.True(cache.TryGet(1, column, out var actual));
+			Assert.Equal(
+				MeasureRenderedPrefixWidth(control, text, column, typeface),
+				actual,
+				precision: 6);
+		}
+	}
+
+	[AvaloniaFact]
+	public void HighlightRendering_FileBackedVisibleWindowDoesNotReadIndividualLines()
+	{
+		using var document = CreateCountingFileBackedDocument();
+		var control = new VirtualizedPreviewTextControl
+		{
+			Document = document,
+			TextBrush = Brushes.White,
+			TextFontSize = 16,
+			ViewportWidth = 640,
+			ViewportHeight = 120,
+			Width = 640,
+			Height = 120
+		};
+		control.SetSearchMatches(
+			[new PreviewSearchMatch(2, 0, "search".Length)],
+			activateNearestToViewport: false,
+			scrollIntoView: false);
+		control.ClearSelection();
+		control.Measure(new Size(640, 120));
+		control.Arrange(new Rect(0, 0, 640, 120));
+		using var bitmap = new RenderTargetBitmap(new PixelSize(640, 120));
+
+		bitmap.Render(control);
+		bitmap.Render(control);
+
+		Assert.Equal(1, document.LineRangeReadCount);
+		Assert.Equal(0, document.LineReadCount);
+	}
+
+	[Fact]
+	public void ColumnGeometryCache_EvictsOldestEntriesAtItsFixedLimit()
+	{
+		var cache = new PreviewColumnGeometryCache();
+		for (var column = 0; column < PreviewColumnGeometryCache.MaximumEntries + 32; column++)
+			cache.Store(lineNumber: 1, column, distance: column + 0.25);
+
+		Assert.Equal(PreviewColumnGeometryCache.MaximumEntries, cache.Count);
+		Assert.False(cache.TryGet(1, 0, out _));
+		Assert.True(cache.TryGet(
+			1,
+			PreviewColumnGeometryCache.MaximumEntries + 31,
+			out var newest));
+		Assert.Equal(PreviewColumnGeometryCache.MaximumEntries + 31.25, newest);
+	}
+
     private static double InvokeResolveLineHeight(VirtualizedPreviewTextControl control)
     {
         var method = typeof(VirtualizedPreviewTextControl).GetMethod(
@@ -1742,6 +1830,16 @@ public sealed class VirtualizedPreviewTextControlTests
         return entries;
     }
 
+	private static PreviewColumnGeometryCache GetColumnGeometryCache(
+		VirtualizedPreviewTextControl control)
+	{
+		var field = typeof(VirtualizedPreviewTextControl).GetField(
+			"_columnGeometryCache",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(field);
+		return Assert.IsType<PreviewColumnGeometryCache>(field!.GetValue(control));
+	}
+
     private static double InvokeResolveDistanceFromColumn(
         VirtualizedPreviewTextControl control,
         string lineText,
@@ -1810,6 +1908,82 @@ public sealed class VirtualizedPreviewTextControlTests
 
         return formattedText.WidthIncludingTrailingWhitespace;
     }
+
+	private static CountingPreviewTextDocument CreateCountingFileBackedDocument()
+	{
+		const string placeholder = "DEVPROJEX_REDACTED[test#1]";
+		var firstLine = $"token={placeholder}";
+		var text = $"{firstLine}\nsearch target";
+		var bytes = Encoding.UTF8.GetBytes(text);
+		var storagePath = Path.Combine(
+			Path.GetTempPath(),
+			$"devprojex-preview-render-{Guid.NewGuid():N}.tmp");
+		File.WriteAllBytes(storagePath, bytes);
+		try
+		{
+			var document = new FileBackedPreviewTextDocument(
+				storagePath,
+				[0, Encoding.UTF8.GetByteCount(firstLine + "\n")],
+				bytes.Length,
+				maxLineLength: Math.Max(firstLine.Length, "search target".Length),
+				characterCount: text.Length,
+				redactions:
+				[
+					new PreviewRedactionSpan(
+						"file-backed",
+						"test",
+						1,
+						"token=".Length,
+						placeholder.Length,
+						SecretPreviewSpanState.Redacted)
+				]);
+			return new CountingPreviewTextDocument(document);
+		}
+		catch
+		{
+			File.Delete(storagePath);
+			throw;
+		}
+	}
+
+	private sealed class CountingPreviewTextDocument(IPreviewTextDocument inner) : IPreviewTextDocument
+	{
+		public int LineReadCount { get; private set; }
+		public int LineRangeReadCount { get; private set; }
+		public int LineCount => inner.LineCount;
+		public int MaxLineLength => inner.MaxLineLength;
+		public long CharacterCount => inner.CharacterCount;
+		public IReadOnlyList<PreviewDocumentSection> Sections => inner.Sections;
+		public IReadOnlyList<PreviewRedactionSpan> Redactions => inner.Redactions;
+
+		public string GetFullText() => inner.GetFullText();
+
+		public string GetLineText(int lineNumber)
+		{
+			LineReadCount++;
+			return inner.GetLineText(lineNumber);
+		}
+
+		public string GetLineRangeText(int firstLine, int lastLine)
+		{
+			LineRangeReadCount++;
+			return inner.GetLineRangeText(firstLine, lastLine);
+		}
+
+		public void VisitLines(
+			int firstLine,
+			int lastLine,
+			PreviewTextLineVisitor visitor,
+			CancellationToken cancellationToken = default) =>
+			inner.VisitLines(firstLine, lastLine, visitor, cancellationToken);
+
+		public ValueTask WriteToAsync(
+			Stream destination,
+			CancellationToken cancellationToken = default) =>
+			inner.WriteToAsync(destination, cancellationToken);
+
+		public void Dispose() => inner.Dispose();
+	}
 
     private sealed class SyntheticLargePreviewDocument(int lineCount) : IPreviewTextDocument
     {

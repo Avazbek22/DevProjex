@@ -254,6 +254,7 @@ public sealed class VirtualizedPreviewTextControl : Control
     private int _cachedVisibleWindowLastLine;
     private readonly Dictionary<int, FormattedLineCacheEntry> _formattedLineCache = [];
     private readonly Queue<int> _formattedLineCacheOrder = [];
+	private readonly PreviewColumnGeometryCache _columnGeometryCache = new();
 	private Dictionary<int, PreviewRedactionSpan[]> _redactionsByLine = [];
 	private PreviewRedactionSpan[] _redactionOccurrences = [];
 	private PreviewSearchMatch[] _searchMatches = [];
@@ -878,6 +879,7 @@ public sealed class VirtualizedPreviewTextControl : Control
         var visibleWindow = BuildVisibleTextWindow(firstVisibleLine, lastVisibleLine);
         if (visibleWindow.Text.Length == 0)
             return;
+		EnsureFormattedLineCacheStyle();
 
         var origin = new Point(
             LeftPadding,
@@ -969,7 +971,6 @@ public sealed class VirtualizedPreviewTextControl : Control
         Typeface typeface,
         double lineHeight)
     {
-        EnsureFormattedLineCacheStyle();
         for (var lineIndex = 0; lineIndex < visibleWindow.LineCount; lineIndex++)
         {
             var lineOrigin = new Point(origin.X, origin.Y + (lineIndex * lineHeight));
@@ -999,7 +1000,11 @@ public sealed class VirtualizedPreviewTextControl : Control
 			if (!_redactionsByLine.TryGetValue(lineNumber, out var lineRedactions))
 				continue;
 
-			var lineText = GetLineText(lineNumber);
+			var lineEntry = GetOrCreateVisibleFormattedLine(
+				visibleWindow,
+				lineNumber,
+				typeface);
+			var lineText = lineEntry.Text;
 			foreach (var span in lineRedactions)
 			{
 				if (span.Length <= 0)
@@ -1009,11 +1014,20 @@ public sealed class VirtualizedPreviewTextControl : Control
 				if (endColumn <= startColumn)
 					continue;
 
-				var x = origin.X + ResolveDistanceFromColumn(lineText, startColumn, typeface);
+				var start = ResolveCachedDistanceFromColumn(
+					lineNumber,
+					lineEntry,
+					startColumn,
+					typeface);
+				var end = ResolveCachedDistanceFromColumn(
+					lineNumber,
+					lineEntry,
+					endColumn,
+					typeface);
+				var x = origin.X + start;
 				var width = Math.Max(
 					1,
-					ResolveDistanceFromColumn(lineText, endColumn, typeface) -
-					ResolveDistanceFromColumn(lineText, startColumn, typeface));
+					end - start);
 				var y = origin.Y + ((lineNumber - firstLine) * lineHeight);
 				var isInteractive = span.OccurrenceId == _hoveredRedactionOccurrenceId ||
 				                    IsNavigationTarget(span, _activeRedactionTarget);
@@ -1040,6 +1054,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 		var firstMatchIndex = FindFirstSearchMatchOnOrAfterLine(visibleWindow.FirstLine);
 		var currentLineNumber = -1;
 		var lineText = string.Empty;
+		FormattedLineCacheEntry? lineEntry = null;
 		FormattedText? formattedLine = null;
 		for (var matchIndex = firstMatchIndex;
 		     matchIndex < _searchMatches.Length;
@@ -1054,18 +1069,30 @@ public sealed class VirtualizedPreviewTextControl : Control
 			if (currentLineNumber != match.LineNumber)
 			{
 				currentLineNumber = match.LineNumber;
-				lineText = GetLineText(match.LineNumber);
+				lineEntry = GetOrCreateVisibleFormattedLine(
+					visibleWindow,
+					match.LineNumber,
+					typeface);
+				lineText = lineEntry.Text;
 				formattedLine = BuildFormattedText(lineText, typeface);
 				formattedLine.SetForegroundBrush(highlightTextBrush);
 			}
 
 			var startColumn = Math.Clamp(match.StartColumn, 0, lineText.Length);
 			var endColumn = Math.Clamp(match.StartColumn + match.Length, startColumn, lineText.Length);
-			if (endColumn <= startColumn || formattedLine is null)
+			if (endColumn <= startColumn || formattedLine is null || lineEntry is null)
 				continue;
 
-			var left = origin.X + ResolveDistanceFromColumn(lineText, startColumn, typeface);
-			var right = origin.X + ResolveDistanceFromColumn(lineText, endColumn, typeface);
+			var left = origin.X + ResolveCachedDistanceFromColumn(
+				match.LineNumber,
+				lineEntry,
+				startColumn,
+				typeface);
+			var right = origin.X + ResolveCachedDistanceFromColumn(
+				match.LineNumber,
+				lineEntry,
+				endColumn,
+				typeface);
 			var top = origin.Y + ((match.LineNumber - visibleWindow.FirstLine) * lineHeight);
 			using (context.PushClip(new Rect(left, top, Math.Max(1, right - left), lineHeight)))
 			{
@@ -1089,6 +1116,7 @@ public sealed class VirtualizedPreviewTextControl : Control
 		var firstMatchIndex = FindFirstSearchMatchOnOrAfterLine(visibleWindow.FirstLine);
 		var currentLineNumber = -1;
 		var currentLineText = string.Empty;
+		FormattedLineCacheEntry? currentLineEntry = null;
 		for (var matchIndex = firstMatchIndex;
 		     matchIndex < _searchMatches.Length;
 		     matchIndex++)
@@ -1102,17 +1130,29 @@ public sealed class VirtualizedPreviewTextControl : Control
 			if (currentLineNumber != match.LineNumber)
 			{
 				currentLineNumber = match.LineNumber;
-				currentLineText = GetLineText(match.LineNumber);
+				currentLineEntry = GetOrCreateVisibleFormattedLine(
+					visibleWindow,
+					match.LineNumber,
+					typeface);
+				currentLineText = currentLineEntry.Text;
 			}
 
 			var lineText = currentLineText;
 			var startColumn = Math.Clamp(match.StartColumn, 0, lineText.Length);
 			var endColumn = Math.Clamp(match.StartColumn + match.Length, startColumn, lineText.Length);
-			if (endColumn <= startColumn)
+			if (endColumn <= startColumn || currentLineEntry is null)
 				continue;
 
-			var left = origin.X + ResolveDistanceFromColumn(lineText, startColumn, typeface);
-			var right = origin.X + ResolveDistanceFromColumn(lineText, endColumn, typeface);
+			var left = origin.X + ResolveCachedDistanceFromColumn(
+				match.LineNumber,
+				currentLineEntry,
+				startColumn,
+				typeface);
+			var right = origin.X + ResolveCachedDistanceFromColumn(
+				match.LineNumber,
+				currentLineEntry,
+				endColumn,
+				typeface);
 			var top = origin.Y + ((match.LineNumber - visibleWindow.FirstLine) * lineHeight);
 			context.FillRectangle(
 				ResolveSearchBrush(matchIndex == _activeSearchMatchIndex),
@@ -1236,22 +1276,45 @@ public sealed class VirtualizedPreviewTextControl : Control
         int lineNumber,
         ReadOnlySpan<char> lineText,
         Typeface typeface)
+		=> GetOrCreateFormattedLineEntry(lineNumber, lineText, typeface).FormattedText;
+
+	private FormattedLineCacheEntry GetOrCreateVisibleFormattedLine(
+		VisibleTextWindow visibleWindow,
+		int lineNumber,
+		Typeface typeface)
+	{
+		var lineIndex = Math.Clamp(
+			lineNumber - visibleWindow.FirstLine,
+			0,
+			visibleWindow.LineCount - 1);
+		return GetOrCreateFormattedLineEntry(
+			lineNumber,
+			visibleWindow.GetLineSpan(lineIndex),
+			typeface);
+	}
+
+	private FormattedLineCacheEntry GetOrCreateFormattedLineEntry(
+		int lineNumber,
+		ReadOnlySpan<char> lineText,
+		Typeface typeface)
     {
         if (_formattedLineCache.TryGetValue(lineNumber, out var cachedLine) &&
             lineText.SequenceEqual(cachedLine.Text.AsSpan()))
         {
-            return cachedLine.FormattedText;
+			return cachedLine;
         }
 
+		if (cachedLine is not null)
+			_columnGeometryCache.Clear();
         var text = lineText.ToString();
         var formattedText = BuildFormattedText(text, typeface);
         if (cachedLine is null)
             _formattedLineCacheOrder.Enqueue(lineNumber);
 
-        _formattedLineCache[lineNumber] =
-            new FormattedLineCacheEntry(text, formattedText);
+        var entry = new FormattedLineCacheEntry(text, formattedText);
+        _formattedLineCache[lineNumber] = entry;
         TrimFormattedLineCache();
-        return formattedText;
+		return entry;
     }
 
     private void EnsureFormattedLineCacheStyle()
@@ -1293,6 +1356,7 @@ public sealed class VirtualizedPreviewTextControl : Control
     {
         _formattedLineCache.Clear();
         _formattedLineCacheOrder.Clear();
+		_columnGeometryCache.Clear();
     }
 
     protected override void OnPointerPressed(PointerPressedEventArgs e)
@@ -2249,6 +2313,24 @@ public sealed class VirtualizedPreviewTextControl : Control
         // Hit-testing must use the same text geometry as DrawText, including trailing code whitespace.
         return BuildFormattedText(lineText[..clampedColumn], typeface).WidthIncludingTrailingWhitespace;
     }
+
+	private double ResolveCachedDistanceFromColumn(
+		int lineNumber,
+		FormattedLineCacheEntry lineEntry,
+		int column,
+		Typeface typeface)
+	{
+		if (string.IsNullOrEmpty(lineEntry.Text) || column <= 0)
+			return 0;
+
+		var clampedColumn = Math.Clamp(column, 0, lineEntry.Text.Length);
+		if (_columnGeometryCache.TryGet(lineNumber, clampedColumn, out var cachedDistance))
+			return cachedDistance;
+
+		var distance = ResolveDistanceFromColumn(lineEntry.Text, clampedColumn, typeface);
+		_columnGeometryCache.Store(lineNumber, clampedColumn, distance);
+		return distance;
+	}
 
     private double ResolveCharacterMidpoint(string lineText, int column, Typeface typeface)
     {
@@ -3462,6 +3544,39 @@ public sealed class VirtualizedPreviewTextControl : Control
 internal readonly record struct PreviewRedactionRenderStyle(
 	IBrush Background,
 	Pen Border);
+
+internal sealed class PreviewColumnGeometryCache
+{
+	internal const int MaximumEntries = 32 * 1024;
+	private readonly Dictionary<ColumnGeometryCacheKey, double> _distances = [];
+	private readonly Queue<ColumnGeometryCacheKey> _insertionOrder = [];
+
+	internal int Count => _distances.Count;
+
+	public bool TryGet(int lineNumber, int column, out double distance) =>
+		_distances.TryGetValue(new ColumnGeometryCacheKey(lineNumber, column), out distance);
+
+	public void Store(int lineNumber, int column, double distance)
+	{
+		var key = new ColumnGeometryCacheKey(lineNumber, column);
+		if (!_distances.TryAdd(key, distance))
+			return;
+
+		_insertionOrder.Enqueue(key);
+		while (_distances.Count > MaximumEntries && _insertionOrder.TryDequeue(out var oldest))
+			_distances.Remove(oldest);
+	}
+
+	public void Clear()
+	{
+		_distances.Clear();
+		_insertionOrder.Clear();
+	}
+
+	private readonly record struct ColumnGeometryCacheKey(
+		int LineNumber,
+		int Column);
+}
 
 internal sealed class PreviewRedactionRenderStyleCache
 {
