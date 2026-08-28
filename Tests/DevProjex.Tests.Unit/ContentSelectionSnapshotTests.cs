@@ -45,6 +45,22 @@ public sealed class ContentSelectionSnapshotTests
 		Assert.Equal(["a.cs", "b.cs"], snapshot.OrderedPaths);
 	}
 
+	[Fact]
+	public void CreateFromOwnedOrderedUnique_ReusesOwnedArrayAndPreservesCanonicalIdentity()
+	{
+		string[] ownedPaths = ["a.cs", "b.cs"];
+		var expected = ContentSelectionSnapshot.Create("project", ownedPaths);
+
+		var snapshot = ContentSelectionSnapshot.CreateFromOwnedOrderedUnique(
+			"project",
+			ownedPaths,
+			CancellationToken.None);
+
+		Assert.Same(ownedPaths, snapshot.OrderedPaths);
+		Assert.Equal(expected.SelectionFingerprint, snapshot.SelectionFingerprint);
+		Assert.Equal(expected.OrderedPaths, snapshot.OrderedPaths);
+	}
+
 	private sealed class CancelingPathList(CancellationTokenSource cancellation) : IReadOnlyList<string>
 	{
 		public int Count => 2;

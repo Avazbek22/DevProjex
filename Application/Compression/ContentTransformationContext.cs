@@ -56,6 +56,18 @@ public sealed record ContentTransformationContext(
 			// The redaction cache is keyed on the text that was scanned, and compression decides what
 			// that text is. Without this, toggling the checkbox would reuse offsets from the other one.
 			Redaction?.BeginOutput(selection, Compression?.TransformIdentity ?? string.Empty));
+
+	internal ContentTransformationScope BeginOutputFromOwnedOrderedUnique(
+		string[] orderedFilePaths,
+		CancellationToken cancellationToken)
+	{
+		var projectRoot = Compression?.ProjectRoot ?? Redaction?.ProjectRoot ??
+			throw new InvalidOperationException("A transformation context has no project root.");
+		return BeginOutput(ContentSelectionSnapshot.CreateFromOwnedOrderedUnique(
+			projectRoot,
+			orderedFilePaths,
+			cancellationToken));
+	}
 }
 
 /// <summary>

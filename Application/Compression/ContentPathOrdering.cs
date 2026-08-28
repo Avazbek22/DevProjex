@@ -2,7 +2,7 @@ namespace DevProjex.Application.Compression;
 
 internal static class ContentPathOrdering
 {
-	public static List<string> BuildOrderedUnique(
+	public static string[] BuildOrderedUnique(
 		IEnumerable<string> paths,
 		CancellationToken cancellationToken)
 	{
@@ -11,7 +11,13 @@ internal static class ContentPathOrdering
 		if (paths is IReadOnlyList<string> orderedPaths &&
 		    IsStrictlyOrderedUnique(orderedPaths, cancellationToken))
 		{
-			return new List<string>(orderedPaths);
+			var orderedResult = new string[orderedPaths.Count];
+			for (var index = 0; index < orderedResult.Length; index++)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				orderedResult[index] = orderedPaths[index];
+			}
+			return orderedResult;
 		}
 
 		var uniquePaths = new HashSet<string>(PathComparer.Default);
@@ -22,8 +28,7 @@ internal static class ContentPathOrdering
 				uniquePaths.Add(path);
 		}
 
-		var result = new List<string>(uniquePaths.Count);
-		result.AddRange(uniquePaths);
+		var result = uniquePaths.ToArray();
 		CancellationAwareSort.Sort(result, PathComparer.Default, cancellationToken);
 		return result;
 	}

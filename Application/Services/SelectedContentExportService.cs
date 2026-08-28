@@ -141,7 +141,7 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		cancellationToken.ThrowIfCancellationRequested();
 
 		var files = ContentPathOrdering.BuildOrderedUnique(filePaths, cancellationToken);
-		if (files.Count == 0)
+		if (files.Length == 0)
 			return new SelectedContentExportResult(string.Empty, null);
 		var redactionContext = transformationContext?.Redaction;
 		outputPathRedaction ??= OutputRootPathPresentation.CaptureRedactionDecision(transformationContext);
@@ -151,7 +151,9 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 				.RefreshPersistentMarksAsync(redactionContext.ProjectRoot, cancellationToken)
 				.ConfigureAwait(false);
 		}
-		using var transformationScope = transformationContext?.BeginOutput(files, cancellationToken);
+		using var transformationScope = transformationContext?.BeginOutputFromOwnedOrderedUnique(
+			files,
+			cancellationToken);
 		var redactionScope = transformationScope?.Redaction;
 
 		var output = destination ?? new MaterializedSelectedContentOutput();

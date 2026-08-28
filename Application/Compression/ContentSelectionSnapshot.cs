@@ -39,21 +39,17 @@ public sealed record ContentSelectionSnapshot(
 		var normalizedProjectRoot = PathUtility.Normalize(projectRoot);
 		if (ContentPathOrdering.IsStrictlyOrderedUnique(orderedPaths, cancellationToken))
 		{
-			using var canonicalHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-			Append(canonicalHash, normalizedProjectRoot);
 			var canonicalPaths = new string[orderedPaths.Count];
 			for (var index = 0; index < orderedPaths.Count; index++)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				var path = orderedPaths[index];
-				canonicalPaths[index] = path;
-				Append(canonicalHash, path);
+				canonicalPaths[index] = orderedPaths[index];
 			}
-
-			return new ContentSelectionSnapshot(
-				revision,
+			return CreateFromOwnedOrderedUniqueCore(
+				normalizedProjectRoot,
 				canonicalPaths,
-				Convert.ToHexString(canonicalHash.GetHashAndReset()));
+				cancellationToken,
+				revision);
 		}
 
 		var unique = new HashSet<string>(PathComparer.Default);
@@ -92,6 +88,41 @@ public sealed record ContentSelectionSnapshot(
 		return new ContentSelectionSnapshot(
 			revision,
 			paths.ToArray(),
+			Convert.ToHexString(hash.GetHashAndReset()));
+	}
+
+	internal static ContentSelectionSnapshot CreateFromOwnedOrderedUnique(
+		string projectRoot,
+		string[] orderedPaths,
+		CancellationToken cancellationToken,
+		long revision = 0)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
+		ArgumentNullException.ThrowIfNull(orderedPaths);
+		cancellationToken.ThrowIfCancellationRequested();
+		return CreateFromOwnedOrderedUniqueCore(
+			PathUtility.Normalize(projectRoot),
+			orderedPaths,
+			cancellationToken,
+			revision);
+	}
+
+	private static ContentSelectionSnapshot CreateFromOwnedOrderedUniqueCore(
+		string normalizedProjectRoot,
+		string[] orderedPaths,
+		CancellationToken cancellationToken,
+		long revision)
+	{
+		using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+		Append(hash, normalizedProjectRoot);
+		for (var index = 0; index < orderedPaths.Length; index++)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			Append(hash, orderedPaths[index]);
+		}
+		return new ContentSelectionSnapshot(
+			revision,
+			orderedPaths,
 			Convert.ToHexString(hash.GetHashAndReset()));
 	}
 
