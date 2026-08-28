@@ -359,9 +359,10 @@ be part of a valid path on Unix. Duplicates are removed before values are sorted
 with effective host path semantics (case-insensitive on Windows, ordinal on Linux
 and macOS), producing one deterministic root set without changing path names.
 
-`analyze`, `tree`, `export context`, `export project`, and `profile show` default
-to `standard`. `profile export` is the exception and defaults to `local`. TUI and
-`open` default to `local` when a valid local profile exists, otherwise `standard`.
+`analyze`, `tree`, `export context`, `export project`, `profile show`, and
+`profile save` default to `standard`. `profile export` is the exception and
+defaults to `local`. TUI and `open` default to `local` when a valid local profile
+exists, otherwise `standard`.
 
 `open --last` resolves the last project itself. It cannot be combined with a
 project argument, `--branch`, or any selection override because silently
@@ -870,8 +871,9 @@ Color precedence is:
 
 1. `--plain`;
 2. an explicit `--color` value;
-3. a non-empty `NO_COLOR` value;
-4. automatic terminal detection.
+3. a valid non-empty `DEVPROJEX_COLOR` value;
+4. a non-empty `NO_COLOR` value;
+5. automatic terminal detection.
 
 `NO_COLOR=` is treated as unset. `--plain --color always` is a usage error.
 

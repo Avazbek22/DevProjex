@@ -623,10 +623,10 @@ devprojex profile validate FILE [-f text|json]
 devprojex profile reset [PROJECT]
 ```
 
-`analyze`, `tree`, `export context`, `export project`, and `profile show` default
-to `standard`. `profile export` is the exception and defaults to `local`.
-Terminal Workspace and `open` use `local` when it is valid, then `standard`.
-Explicit CLI selection options override profile fields. See
+`analyze`, `tree`, `export context`, `export project`, `profile show`, and
+`profile save` default to `standard`. `profile export` is the exception and
+defaults to `local`. Terminal Workspace and `open` use `local` when it is valid,
+then `standard`. Explicit CLI selection options override profile fields. See
 [CLI-Profiles.md](CLI-Profiles.md).
 
 Portable profile output must resolve outside the source project, including
