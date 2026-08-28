@@ -35,6 +35,20 @@ public sealed class CliV1ParserRegressionTests
 	}
 
 	[Fact]
+	public void BareMisspelledProfileTokenIsRejectedAsAChoiceInsteadOfAPath()
+	{
+		var result = new DevProjexCommandTree(new TestTerminalEnvironment())
+			.Build()
+			.Parse(["analyze", ".", "--profile", "stanadrd"]);
+
+		var error = Assert.Single(result.Errors);
+		Assert.Contains(
+			"standard, local, FILE",
+			error.Message,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void DevProjexEnvironmentDefaultsApplyAndExplicitFlagsWin()
 	{
 		var environment = new TestTerminalEnvironment

@@ -195,7 +195,7 @@ public sealed class CliUrlSourceCommandTests
 	}
 
 	[Fact]
-	public async Task UrlSourceFlowsThroughContextAndProjectExportsUsingTheManagedCache()
+	public async Task UrlSourceFlowsThroughTreeAndExportsUsingTheManagedCache()
 	{
 		if (!IsGitAvailable())
 			Assert.Skip("Git is unavailable on this test host.");
@@ -213,6 +213,19 @@ public sealed class CliUrlSourceCommandTests
 		RunGit(workspace.Path, "clone", "--bare", source, bare);
 		var repositoryUrl = new Uri(bare + Path.DirectorySeparatorChar).AbsoluteUri;
 		var factory = new TerminalServiceFactory(() => data.Path);
+		var treeEnvironment = new TestTerminalEnvironment();
+
+		var treeExitCode = await new TerminalApplication(treeEnvironment, factory).RunAsync(
+			[
+				"tree", repositoryUrl,
+				"--git-mode", "none", "--format", "text", "-o", "-", "--plain",
+				"--progress", "never"
+			],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, treeExitCode);
+		Assert.Contains("remote.cs", treeEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.Empty(treeEnvironment.StandardError);
 		var contextEnvironment = new TestTerminalEnvironment();
 
 		var contextExitCode = await new TerminalApplication(contextEnvironment, factory).RunAsync(

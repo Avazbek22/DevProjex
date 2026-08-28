@@ -315,7 +315,7 @@ public sealed class SecretRedactionCommandContractTests
 	}
 
 	[Fact]
-	public async Task FailOnFindingsWritesTheReportAndReturnsPolicyFailure()
+	public async Task FailOnFindingsAutomaticallyEnablesSecretDetectionAndReturnsPolicyFailure()
 	{
 		using var workspace = CreateWorkspace();
 		var environment = new TestTerminalEnvironment();
@@ -325,7 +325,7 @@ public sealed class SecretRedactionCommandContractTests
 			environment,
 			[
 				"analyze", workspace.ProjectRoot,
-				"--hide-secrets", "--fail-on-findings",
+				"--fail-on-findings",
 				"--format", "json", "--plain", "-o", "-"
 			]);
 
