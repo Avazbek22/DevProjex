@@ -879,6 +879,36 @@ public sealed class PreviewDocumentBuilderTests
 			document.Sections.Select(static section => section.DisplayPath));
 	}
 
+	[Fact]
+	public async Task BuildContentDocumentAsync_OrderedConsumerFailureCancelsAndDrainsPendingReads()
+	{
+		using var temp = new TemporaryDirectory();
+		var paths = Enumerable.Range(0, 8)
+			.Select(index => temp.CreateFile($"file-{index:D2}.txt", $"content-{index:D2}"))
+			.ToArray();
+		var analyzer = new ConsumerFailureContentAnalyzer();
+		using var redactionSession = new SecretRedactionSession(new ThrowingSecretDetector());
+		var transformation = ContentTransformationContext.For(
+			compression: null,
+			new SecretRedactionContext(temp.Path, redactionSession));
+
+		var operation = new PreviewDocumentBuilder(analyzer).BuildContentDocumentAsync(
+			paths,
+			TestContext.Current.CancellationToken,
+			Path.GetFileName,
+			transformationContext: transformation);
+
+		var failure = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+			await operation.WaitAsync(
+				TimeSpan.FromSeconds(5),
+				TestContext.Current.CancellationToken));
+		Assert.Equal("Synthetic ordered consumer failure.", failure.Message);
+		await analyzer.AllReadsDrained.WaitAsync(
+			TimeSpan.FromSeconds(1),
+			TestContext.Current.CancellationToken);
+		Assert.Equal(0, analyzer.ActiveReads);
+	}
+
 	[Theory]
 	[InlineData(false)]
 	[InlineData(true)]
@@ -1249,5 +1279,77 @@ public sealed class PreviewDocumentBuilderTests
 			{
 			}
 		}
+	}
+
+	private sealed class ConsumerFailureContentAnalyzer : IFileContentAnalyzer
+	{
+		private readonly TaskCompletionSource _minimumConcurrencyReached = new(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		private readonly TaskCompletionSource _allReadsDrained = new(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		private int _activeReads;
+
+		public Task AllReadsDrained => _allReadsDrained.Task;
+		public int ActiveReads => Volatile.Read(ref _activeReads);
+
+		public ValueTask<bool> IsTextFileAsync(string path, CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			throw new NotSupportedException();
+
+		public ValueTask<ContentReadFact> ReadFactAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			new(ReadAsync(path, cancellationToken));
+
+		private async Task<ContentReadFact> ReadAsync(string path, CancellationToken cancellationToken)
+		{
+			var active = Interlocked.Increment(ref _activeReads);
+			if (active >= 2)
+				_minimumConcurrencyReached.TrySetResult();
+			try
+			{
+				if (string.Equals(Path.GetFileName(path), "file-00.txt", StringComparison.Ordinal))
+				{
+					await _minimumConcurrencyReached.Task.WaitAsync(cancellationToken);
+					return ContentReadFact.FromReadResult(
+						new FileContentReadResult(
+							FileContentClassification.Text,
+							CreateTextContent("first")));
+				}
+
+				await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+				throw new InvalidOperationException("Blocked read unexpectedly completed.");
+			}
+			finally
+			{
+				if (Interlocked.Decrement(ref _activeReads) == 0)
+					_allReadsDrained.TrySetResult();
+			}
+		}
+	}
+
+	private sealed class ThrowingSecretDetector : ISecretDetector
+	{
+		public IReadOnlyList<DetectedSecret> Detect(
+			string repositoryRelativePath,
+			string content,
+			CancellationToken cancellationToken = default) =>
+			throw new InvalidOperationException("Synthetic ordered consumer failure.");
 	}
 }

@@ -495,12 +495,14 @@ public sealed class PreviewDocumentBuilder(
 			yield break;
 		}
 
+		using var preparationCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		var preparationToken = preparationCancellation.Token;
 		var pending = new Queue<Task<PreparedContentEntry>>(MaximumParallelPreparations);
 		try
 		{
 			foreach (var file in orderedFiles)
 			{
-				cancellationToken.ThrowIfCancellationRequested();
+				preparationToken.ThrowIfCancellationRequested();
 				if (!IsSmallFile(file))
 				{
 					while (pending.TryDequeue(out var prepared))
@@ -512,7 +514,7 @@ public sealed class PreviewDocumentBuilder(
 							redactionScope,
 							transformationScope,
 							projectRoot,
-							cancellationToken)
+							preparationToken)
 						.ConfigureAwait(false);
 					continue;
 				}
@@ -524,8 +526,8 @@ public sealed class PreviewDocumentBuilder(
 						redactionScope,
 						transformationScope,
 						projectRoot,
-						cancellationToken).AsTask(),
-					cancellationToken));
+						preparationToken).AsTask(),
+					preparationToken));
 				if (pending.Count >= MaximumParallelPreparations)
 					yield return await pending.Dequeue().ConfigureAwait(false);
 			}
@@ -535,7 +537,20 @@ public sealed class PreviewDocumentBuilder(
 		}
 		finally
 		{
+			TryCancel(preparationCancellation);
 			await ObservePendingPreparationsAsync(pending).ConfigureAwait(false);
+		}
+	}
+
+	private static void TryCancel(CancellationTokenSource cancellation)
+	{
+		try
+		{
+			cancellation.Cancel();
+		}
+		catch (AggregateException)
+		{
+			// Pending preparation failures must not replace the consumer's exception.
 		}
 	}
 
