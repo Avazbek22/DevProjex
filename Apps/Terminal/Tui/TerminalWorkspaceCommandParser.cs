@@ -489,7 +489,13 @@ internal sealed class TerminalWorkspaceCommandParser
 		var isContext = tokens.Count > 1 &&
 			string.Equals(tokens[1].Value, "context", StringComparison.OrdinalIgnoreCase);
 		if (argumentIndex == 1 && isContext)
-			return CliChoiceSets.ContextDocumentFormat.Tokens;
+		{
+			return
+			[
+				.. CliChoiceSets.ContextDocumentFormat.Tokens,
+				.. ResolvePathCompletions(current, context.WorkingDirectory)
+			];
+		}
 		if (argumentIndex == 2 && isContext || argumentIndex == 1 && tokens.Count > 1)
 			return ResolvePathCompletions(current, context.WorkingDirectory);
 		return [];
