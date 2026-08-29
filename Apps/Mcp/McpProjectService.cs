@@ -217,36 +217,6 @@ internal sealed class McpProjectService(
 	public IFileContentAnalyzer CreatePreparedAnalyzer(PreparedSecretRedactionOutput prepared) =>
 		services.OutputPreparer.CreatePreparedAnalyzer(prepared);
 
-	public async Task<ProjectContextPlan> ApplyPreparedContentMetricsAsync(
-		ProjectContextPlan plan,
-		PreparedSecretRedactionOutput prepared,
-		IProgress<ProjectCopyExportProgress>? progress,
-		CancellationToken cancellationToken)
-	{
-		ArgumentNullException.ThrowIfNull(plan);
-		ArgumentNullException.ThrowIfNull(prepared);
-		var metrics = await ProjectContentMetricsCalculator
-			.CalculateAsync(
-				CreatePreparedAnalyzer(prepared),
-				plan.IncludedFiles,
-				progress,
-				cancellationToken)
-			.ConfigureAwait(false);
-		return plan with
-		{
-			Analysis = plan.Analysis with
-			{
-				Metrics = plan.Analysis.Metrics with
-				{
-					Content = new ProjectOutputMetricsReport(
-						metrics.Lines,
-						metrics.Chars,
-						metrics.Tokens)
-				}
-			}
-		};
-	}
-
 	public string ResolveFile(ProjectContextPlan plan, string path)
 	{
 		var physical = roots.ResolveExistingPath(plan.SourceRoot, path);

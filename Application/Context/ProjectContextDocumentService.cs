@@ -259,6 +259,13 @@ public sealed class ProjectContextDocumentService(
 		                    OutputRootPathPresentation.CaptureRedactionDecision(
 			                    CreateTransformationContext(plan));
 		var analyzer = new PreparedSecretFileContentAnalyzer(contentAnalyzer, prepared);
+		plan = await RefreshStructuredContentMetricsAsync(
+				plan,
+				view,
+				format,
+				analyzer,
+				cancellationToken)
+			.ConfigureAwait(false);
 		var service = new ProjectContextDocumentService(
 			treeExportService,
 			analyzer,
@@ -357,6 +364,37 @@ public sealed class ProjectContextDocumentService(
 			? null
 			: new ProjectContextTokenBudgetAccumulator(maximumEstimatedTokens.Value);
 
+	private static async Task<ProjectContextPlan> RefreshStructuredContentMetricsAsync(
+		ProjectContextPlan plan,
+		ProjectContextView view,
+		ProjectContextDocumentFormat format,
+		IFileContentAnalyzer analyzer,
+		CancellationToken cancellationToken)
+	{
+		if (!IncludesContent(view) ||
+		    format is not (ProjectContextDocumentFormat.Json or ProjectContextDocumentFormat.Xml))
+		{
+			return plan;
+		}
+
+		var metrics = await ProjectContentMetricsCalculator
+			.CalculateAsync(analyzer, plan.IncludedFiles, cancellationToken)
+			.ConfigureAwait(false);
+		return plan with
+		{
+			Analysis = plan.Analysis with
+			{
+				Metrics = plan.Analysis.Metrics with
+				{
+					Content = new ProjectOutputMetricsReport(
+						metrics.Lines,
+						metrics.Chars,
+						metrics.Tokens)
+				}
+			}
+		};
+	}
+
 	// One gate for both transformations: whichever is enabled, the document is built from prepared
 	// text rather than from the files on disk, so every format sees the same bytes.
 	private bool ShouldRedact(ProjectContextPlan plan, ProjectContextView view) =>
@@ -434,6 +472,13 @@ public sealed class ProjectContextDocumentService(
 			.PrepareAsync(context, plan.IncludedFiles, cancellationToken)
 			.ConfigureAwait(false);
 		var analyzer = new PreparedSecretFileContentAnalyzer(contentAnalyzer, prepared);
+		plan = await RefreshStructuredContentMetricsAsync(
+				plan,
+				view,
+				format,
+				analyzer,
+				cancellationToken)
+			.ConfigureAwait(false);
 		var service = new ProjectContextDocumentService(
 			treeExportService,
 			analyzer,

@@ -203,16 +203,6 @@ internal sealed class DevProjexMcpTools(
 						operationProgress.Measure("transforming content", 12, 59),
 						cancellationToken)
 					.ConfigureAwait(false);
-			if (prepared is not null &&
-			    format is ProjectContextDocumentFormat.Json or ProjectContextDocumentFormat.Xml)
-			{
-				plan = await Projects.ApplyPreparedContentMetricsAsync(
-						plan,
-						prepared,
-						operationProgress.Measure("transforming content", 59, 60),
-						cancellationToken)
-					.ConfigureAwait(false);
-			}
 			operationProgress.Milestone(
 				60,
 				$"transforming content {transformedFileCount}/{transformedFileCount}");

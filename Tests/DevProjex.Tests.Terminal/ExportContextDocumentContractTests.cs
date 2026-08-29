@@ -142,6 +142,37 @@ public sealed class ExportContextDocumentContractTests
 	}
 
 	[Theory]
+	[InlineData("json")]
+	[InlineData("xml")]
+	public async Task MachineMetricsReflectTransformedContentBeforeTokenBudget(string format)
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile(
+			"App.cs",
+			"internal static class App { public static int Run() { " +
+			string.Join(' ', Enumerable.Repeat("var value = 12345;", 100)) +
+			" return 1; } }");
+		var full = new TestTerminalEnvironment();
+		var compressed = new TestTerminalEnvironment();
+
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(workspace, full, format, maximumEstimatedTokens: 10_000));
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				compressed,
+				format,
+				maximumEstimatedTokens: 10_000,
+				compressCode: true));
+
+		var fullTokens = ReadEstimatedTokens(format, full.StandardOutput);
+		var compressedTokens = ReadEstimatedTokens(format, compressed.StandardOutput);
+		Assert.True(compressedTokens < fullTokens, $"Expected {compressedTokens} < {fullTokens}.");
+	}
+
+	[Theory]
 	[InlineData("text")]
 	[InlineData("markdown")]
 	public async Task TokenBudgetOmitsOnlySkippedSectionsFromHumanDocuments(string format)
@@ -335,7 +366,8 @@ public sealed class ExportContextDocumentContractTests
 		string? outputPath = null,
 		int? maximumEstimatedTokens = null,
 		bool dryRun = false,
-		string view = "tree-content")
+		string view = "tree-content",
+		bool compressCode = false)
 	{
 		var arguments = new List<string>
 		{
@@ -354,6 +386,8 @@ public sealed class ExportContextDocumentContractTests
 		}
 		if (dryRun)
 			arguments.Add("--dry-run");
+		if (compressCode)
+			arguments.Add("--compress-code");
 
 		return new TerminalApplication(
 				environment,
@@ -374,5 +408,18 @@ public sealed class ExportContextDocumentContractTests
 		var start = standardError.IndexOf("Token budget", StringComparison.Ordinal);
 		Assert.True(start >= 0, standardError);
 		return standardError[start..];
+	}
+
+	private static long ReadEstimatedTokens(string format, string output)
+	{
+		if (format == "json")
+		{
+			using var document = JsonDocument.Parse(output);
+			return document.RootElement.GetProperty("metrics").GetProperty("estimatedTokens").GetInt64();
+		}
+
+		return long.Parse(
+			XDocument.Parse(output).Root!.Element("metrics")!.Element("estimatedTokens")!.Value,
+			CultureInfo.InvariantCulture);
 	}
 }
