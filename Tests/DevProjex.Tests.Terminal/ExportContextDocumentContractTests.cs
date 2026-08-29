@@ -173,6 +173,67 @@ public sealed class ExportContextDocumentContractTests
 	}
 
 	[Theory]
+	[InlineData(ProjectContextDocumentFormat.Json)]
+	[InlineData(ProjectContextDocumentFormat.Xml)]
+	public async Task RemoteMachineDiagnosticsUseSourceAddressInsteadOfCheckoutPath(
+		ProjectContextDocumentFormat format)
+	{
+		using var workspace = new TemporaryDirectory();
+		var checkout = workspace.CreateDirectory("internal-cache/checkout");
+		File.WriteAllText(Path.Combine(checkout, "App.cs"), "internal sealed class App { }");
+		var repositoryUrl = new Uri(workspace.CreateDirectory("origin/repository.git")).AbsoluteUri;
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var plan = await services.ContextFactory.BuildAsync(
+			checkout,
+			new ProjectSelectionSpec(GitMode: GitFilteringMode.None, Exclusions: []),
+			new ProjectSourceIdentity(
+				"repository",
+				ProjectSourceType.GitClone,
+				repositoryUrl,
+				repositoryUrl,
+				IsCachedRepository: true),
+			TestContext.Current.CancellationToken);
+		plan = plan with
+		{
+			Diagnostics =
+			[
+				new ContextDiagnostic(
+					"DPX-TEST-CACHE-PATH",
+					ContextDiagnosticSeverity.Warning,
+					"Diagnostic path presentation probe.",
+					checkout)
+			]
+		};
+		using var destination = new MemoryStream();
+
+		await services.ContextDocumentService.WriteCompleteAsync(
+			plan,
+			ProjectContextView.Content,
+			format,
+			destination,
+			TestContext.Current.CancellationToken,
+			useUnifiedContentHeaders: true);
+		var output = Encoding.UTF8.GetString(destination.ToArray());
+		var expected = RepositoryWebPathPresentationService.NormalizeForDisplay(repositoryUrl);
+		string? diagnosticPath;
+		if (format == ProjectContextDocumentFormat.Json)
+		{
+			using var document = JsonDocument.Parse(output);
+			diagnosticPath = document.RootElement.GetProperty("diagnostics")[0]
+				.GetProperty("path").GetString();
+		}
+		else
+		{
+			diagnosticPath = XDocument.Parse(output).Root!.Element("diagnostics")!
+				.Element("diagnostic")!.Attribute("path")?.Value;
+		}
+
+		Assert.Equal(expected, diagnosticPath);
+		Assert.DoesNotContain(checkout, output, StringComparison.OrdinalIgnoreCase);
+	}
+
+	[Theory]
 	[InlineData("json")]
 	[InlineData("xml")]
 	public async Task MachineMetricsReflectTransformedContentBeforeTokenBudget(string format)

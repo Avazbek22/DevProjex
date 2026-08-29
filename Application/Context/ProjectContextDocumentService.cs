@@ -797,7 +797,7 @@ public sealed class ProjectContextDocumentService(
 		writer.WriteEndArray();
 		if (tokenBudget is not null)
 			WriteTokenBudget(writer, tokenBudget.CreateReport());
-		WriteDiagnostics(writer, plan.Diagnostics);
+		WriteDiagnostics(writer, plan.Diagnostics, contentPathMapper, pathRedaction);
 		writer.WriteString("fingerprint", plan.Fingerprint);
 		writer.WriteEndObject();
 		await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
@@ -918,7 +918,12 @@ public sealed class ProjectContextDocumentService(
 			WriteSanitizedXmlAttributeString(writer, "code", diagnostic.Code);
 			writer.WriteAttributeString("severity", ToToken(diagnostic.Severity));
 			if (!string.IsNullOrWhiteSpace(diagnostic.Path))
-				WriteSanitizedXmlAttributeString(writer, "path", NormalizePath(diagnostic.Path));
+			{
+				WriteSanitizedXmlAttributeString(
+					writer,
+					"path",
+					ResolveDiagnosticPath(diagnostic.Path, contentPathMapper, pathRedaction));
+			}
 			WriteSanitizedXmlString(writer, diagnostic.Message);
 			writer.WriteEndElement();
 		}
@@ -1874,7 +1879,9 @@ public sealed class ProjectContextDocumentService(
 
 	private static void WriteDiagnostics(
 		Utf8JsonWriter writer,
-		IReadOnlyList<ContextDiagnostic> diagnostics)
+		IReadOnlyList<ContextDiagnostic> diagnostics,
+		Func<string, string>? pathMapper = null,
+		OutputPathRedactionDecision? pathRedaction = null)
 	{
 		writer.WriteStartArray("diagnostics");
 		foreach (var diagnostic in diagnostics)
@@ -1884,7 +1891,11 @@ public sealed class ProjectContextDocumentService(
 			writer.WriteString("severity", ToToken(diagnostic.Severity));
 			writer.WriteString("message", diagnostic.Message);
 			if (!string.IsNullOrWhiteSpace(diagnostic.Path))
-				writer.WriteString("path", NormalizePath(diagnostic.Path));
+			{
+				writer.WriteString(
+					"path",
+					ResolveDiagnosticPath(diagnostic.Path, pathMapper, pathRedaction));
+			}
 			writer.WriteEndObject();
 		}
 		writer.WriteEndArray();
@@ -1953,6 +1964,15 @@ public sealed class ProjectContextDocumentService(
 		writer.WriteElementString("characters", XmlConvert.ToString(content.Chars));
 		writer.WriteElementString("estimatedTokens", XmlConvert.ToString(content.Tokens));
 		writer.WriteEndElement();
+	}
+
+	private static string ResolveDiagnosticPath(
+		string path,
+		Func<string, string>? pathMapper,
+		OutputPathRedactionDecision? pathRedaction)
+	{
+		var displayPath = pathMapper is null ? path : MapContentPath(pathMapper, path);
+		return NormalizePath(OutputRootPathPresentation.ResolvePath(displayPath, pathRedaction).Text);
 	}
 
 	private static void WriteTokenBudgetXml(
