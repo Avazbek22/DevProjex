@@ -219,6 +219,7 @@ public sealed class ProjectContextDocumentService(
 						cancellationDestination,
 						effectivePathRedaction,
 						contentPathMapper,
+						useUnifiedContentHeaders,
 						writeProgress,
 						tokenBudget,
 						cancellationToken)
@@ -231,6 +232,7 @@ public sealed class ProjectContextDocumentService(
 						cancellationDestination,
 						effectivePathRedaction,
 						contentPathMapper,
+						useUnifiedContentHeaders,
 						writeProgress,
 						tokenBudget,
 						cancellationToken)
@@ -708,6 +710,7 @@ public sealed class ProjectContextDocumentService(
 		Stream destination,
 		OutputPathRedactionDecision? pathRedaction,
 		Func<string, string>? contentPathMapper,
+		bool useUnifiedContentHeaders,
 		IProgress<ProjectCopyExportProgress>? writeProgress,
 		ProjectContextTokenBudgetAccumulator? tokenBudget,
 		CancellationToken cancellationToken)
@@ -797,7 +800,11 @@ public sealed class ProjectContextDocumentService(
 		writer.WriteEndArray();
 		if (tokenBudget is not null)
 			WriteTokenBudget(writer, tokenBudget.CreateReport());
-		WriteDiagnostics(writer, plan.Diagnostics, contentPathMapper, pathRedaction);
+		WriteDiagnostics(
+			writer,
+			plan.Diagnostics,
+			useUnifiedContentHeaders ? contentPathMapper : null,
+			useUnifiedContentHeaders ? pathRedaction : null);
 		writer.WriteString("fingerprint", plan.Fingerprint);
 		writer.WriteEndObject();
 		await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
@@ -809,6 +816,7 @@ public sealed class ProjectContextDocumentService(
 		Stream destination,
 		OutputPathRedactionDecision? pathRedaction,
 		Func<string, string>? contentPathMapper,
+		bool useUnifiedContentHeaders,
 		IProgress<ProjectCopyExportProgress>? writeProgress,
 		ProjectContextTokenBudgetAccumulator? tokenBudget,
 		CancellationToken cancellationToken)
@@ -922,7 +930,10 @@ public sealed class ProjectContextDocumentService(
 				WriteSanitizedXmlAttributeString(
 					writer,
 					"path",
-					ResolveDiagnosticPath(diagnostic.Path, contentPathMapper, pathRedaction));
+					ResolveDiagnosticPath(
+						diagnostic.Path,
+						useUnifiedContentHeaders ? contentPathMapper : null,
+						useUnifiedContentHeaders ? pathRedaction : null));
 			}
 			WriteSanitizedXmlString(writer, diagnostic.Message);
 			writer.WriteEndElement();
