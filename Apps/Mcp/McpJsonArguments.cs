@@ -85,8 +85,9 @@ internal sealed class McpJsonArguments(
 		int parsed;
 		if (value.ValueKind == JsonValueKind.Number)
 		{
-			if (!value.TryGetInt32(out parsed))
+			if (!TryGetIntegralInt64(value, out var integer) || integer is < int.MinValue or > int.MaxValue)
 				throw InvalidInteger(name, minimum, maximum);
+			parsed = (int)integer;
 		}
 		else if (value.ValueKind == JsonValueKind.String &&
 		         int.TryParse(
@@ -114,7 +115,7 @@ internal sealed class McpJsonArguments(
 		long parsed;
 		if (value.ValueKind == JsonValueKind.Number)
 		{
-			if (!value.TryGetInt64(out parsed))
+			if (!TryGetIntegralInt64(value, out parsed))
 				throw InvalidInt64(name, minimum, maximum);
 		}
 		else if (value.ValueKind == JsonValueKind.String &&
@@ -133,6 +134,21 @@ internal sealed class McpJsonArguments(
 		if (parsed < minimum || parsed > maximum)
 			throw InvalidInt64(name, minimum, maximum);
 		return parsed;
+	}
+
+	private static bool TryGetIntegralInt64(JsonElement value, out long parsed)
+	{
+		if (value.TryGetInt64(out parsed))
+			return true;
+		if (!value.TryGetDecimal(out var decimalValue) || decimal.Truncate(decimalValue) != decimalValue ||
+		    decimalValue is < long.MinValue or > long.MaxValue)
+		{
+			parsed = default;
+			return false;
+		}
+
+		parsed = (long)decimalValue;
+		return true;
 	}
 
 	private void ValidateNames()

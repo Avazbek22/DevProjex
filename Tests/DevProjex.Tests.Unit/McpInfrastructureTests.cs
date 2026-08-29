@@ -435,6 +435,47 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Theory]
+	[InlineData("42.0", 42)]
+	[InlineData("4.2e1", 42)]
+	public void JsonArgumentsAcceptIntegralJsonNumberForms(string json, long expected)
+	{
+		using var document = JsonDocument.Parse(json);
+		var request = new CallToolRequestParams
+		{
+			Name = "test",
+			Arguments = new Dictionary<string, JsonElement>
+			{
+				["limit"] = document.RootElement.Clone()
+			}
+		};
+		var arguments = McpJsonArguments.Create(request, "limit");
+
+		Assert.Equal((int)expected, arguments.OptionalInteger("limit", 1, 100));
+		Assert.Equal(expected, arguments.OptionalInt64("limit", 1, 100));
+	}
+
+	[Theory]
+	[InlineData("42.5")]
+	[InlineData("\"4.2e1\"")]
+	public void JsonArgumentsRejectFractionalNumbersAndExponentStrings(string json)
+	{
+		using var document = JsonDocument.Parse(json);
+		var request = new CallToolRequestParams
+		{
+			Name = "test",
+			Arguments = new Dictionary<string, JsonElement>
+			{
+				["limit"] = document.RootElement.Clone()
+			}
+		};
+
+		var exception = Assert.Throws<McpToolException>(() =>
+			McpJsonArguments.Create(request, "limit").OptionalInt64("limit", 1, 100));
+
+		Assert.Equal(McpErrorCodes.InvalidRange, exception.Code);
+	}
+
+	[Theory]
 	[InlineData(true, true)]
 	[InlineData(false, false)]
 	[InlineData("true", true)]
