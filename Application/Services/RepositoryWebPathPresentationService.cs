@@ -30,8 +30,30 @@ public sealed class RepositoryWebPathPresentationService
 
         return new ExportPathPresentation(
             displayRootPath: rootWebPath,
-            mapFilePath: filePath => MapToFileWebPath(filePath, normalizedRootPath, rootWebPath),
+            mapFilePath: filePath => MapToRepositoryPath(filePath, normalizedRootPath, rootWebPath),
             displayRootName: displayRootName);
+    }
+
+    public Func<string, string>? TryCreatePathMapper(string localRootPath, string repositoryUrl)
+    {
+        if (string.IsNullOrWhiteSpace(localRootPath))
+            return null;
+
+        var displayRootPath = NormalizeForDisplay(repositoryUrl);
+        if (displayRootPath.Length == 0)
+            return null;
+
+        string normalizedRootPath;
+        try
+        {
+            normalizedRootPath = Path.GetFullPath(localRootPath);
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return null;
+        }
+
+        return filePath => MapToRepositoryPath(filePath, normalizedRootPath, displayRootPath);
     }
 
     private static string NormalizeRepositoryUrl(string repositoryUrl)
@@ -42,7 +64,7 @@ public sealed class RepositoryWebPathPresentationService
             : normalized;
     }
 
-    private static string MapToFileWebPath(string fullPath, string localRootPath, string rootWebPath)
+    private static string MapToRepositoryPath(string fullPath, string localRootPath, string rootDisplayPath)
     {
         if (string.IsNullOrWhiteSpace(fullPath))
             return fullPath;
@@ -58,7 +80,7 @@ public sealed class RepositoryWebPathPresentationService
         }
 
         if (string.IsNullOrEmpty(relativePath) || relativePath == ".")
-            return rootWebPath;
+            return rootDisplayPath;
 
         if (PathUtility.IsRelativePathOutsideRoot(relativePath))
             return fullPath;
@@ -66,7 +88,7 @@ public sealed class RepositoryWebPathPresentationService
         var relativeUnixPath = PathUtility.NormalizeSeparators(relativePath);
         var encodedRelativePath = EncodePathSegments(relativeUnixPath);
 
-        return $"{rootWebPath}/{encodedRelativePath}";
+        return $"{rootDisplayPath}/{encodedRelativePath}";
     }
 
     private static string? ExtractRepositoryName(Uri repositoryUri)

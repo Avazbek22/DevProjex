@@ -349,6 +349,7 @@ public sealed class McpServerIntegrationTests
 		Assert.Contains("Token budget: 1000 estimated tokens.", Text(pack), StringComparison.Ordinal);
 		Assert.DoesNotContain(Secret, Text(pack), StringComparison.Ordinal);
 		Assert.Contains("DEVPROJEX_REDACTED", Text(pack), StringComparison.Ordinal);
+		Assert.DoesNotContain(cachePath, Text(pack), PathComparison);
 		Assert.NotEqual(true, repeatedTree.IsError);
 		Assert.Equal(1, git.CloneCallCount);
 		Assert.True(jail.IsError);

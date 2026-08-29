@@ -2232,9 +2232,8 @@ public sealed class ProjectContextDocumentService(
 			return null;
 		}
 
-		return WebPathPresentation
-			.TryCreate(plan.SourceRoot, identity.SourceReference)
-			?.MapFilePath;
+		return WebPathPresentation.TryCreatePathMapper(plan.SourceRoot, identity.SourceReference)
+		       ?? TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(plan.SourceRoot);
 	}
 
 	private static string EscapeMarkdownHeading(string value) =>
