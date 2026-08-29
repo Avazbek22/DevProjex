@@ -2246,7 +2246,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         if (string.IsNullOrEmpty(baseText))
             baseText = _localization["Settings.All"];
 
-		var ignoreCount = PathIgnoreOptions.Count + (GitFilteringModes.Count > 0 ? 1 : 0);
+		var ignoreCount = PathIgnoreOptions.Count;
 		SettingsAllIgnore = ignoreCount > 0 ? $"{baseText} ({ignoreCount})" : baseText;
 		SettingsAllContentProcessing = ContentProcessingOptions.Count > 0
 			? $"{baseText} ({ContentProcessingOptions.Count})"
