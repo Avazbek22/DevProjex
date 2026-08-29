@@ -238,7 +238,9 @@ public sealed class TerminalWorkspace
 		TerminalExportSummary summary,
 		int maximumValueColumns = int.MaxValue)
 	{
-		var gitMode = L(ProjectPresentationCatalog.Get(summary.GitMode).LabelKey);
+		var gitMode = summary.GitMode == GitFilteringMode.Diff
+			? GitScopeSelection.ToToken(summary.GitMode, summary.GitDiffRange)
+			: L(ProjectPresentationCatalog.Get(summary.GitMode).LabelKey);
 		var exclusions = summary.Exclusions.Count == 0
 			? L("Terminal.Tui.NoneSelected")
 			: string.Join(", ", summary.Exclusions.Select(LocalizeExclusion));

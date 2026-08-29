@@ -413,6 +413,7 @@ public sealed class TerminalWorkspaceController(
 		ProjectSelectionSpec baseline,
 		ProjectSelectionSpec candidate) =>
 		baseline.GitMode != candidate.GitMode ||
+		!string.Equals(baseline.GitDiffRange, candidate.GitDiffRange, StringComparison.Ordinal) ||
 		!SelectionSetEquals(baseline.Exclusions, candidate.Exclusions) ||
 		!SelectionSetEquals(
 			baseline.Extensions,
@@ -849,13 +850,13 @@ public sealed class TerminalWorkspaceController(
 	private static void ThrowIfTrackedModeIsUnavailable(ProjectContextPlan plan)
 	{
 		var diagnostic = plan.Diagnostics.FirstOrDefault(static item =>
-			item.Code == TrackedIndexUnavailableCode &&
+			item.Code is TrackedIndexUnavailableCode or GitScopeFilter.UnavailableDiagnosticCode &&
 			item.Severity == ContextDiagnosticSeverity.Error);
 		if (diagnostic is not null)
 		{
 			throw new ProjectContextValidationException(
 				diagnostic.Code,
-				"Tracked Git files mode requires a readable repository index.");
+				"The requested Git filtering mode is unavailable.");
 		}
 	}
 
@@ -882,7 +883,8 @@ public sealed class TerminalWorkspaceController(
 			plan.GitReadiness.Mode,
 			(plan.Selection.Exclusions ?? []).OrderBy(static value => value).ToArray(),
 			plan.Diagnostics.Count,
-			plan.Selection.HideSecrets == true || plan.Selection.HidePrivateData == true);
+			plan.Selection.HideSecrets == true || plan.Selection.HidePrivateData == true,
+			plan.Selection.GitDiffRange);
 
 	private static (string Destination, TerminalExportDestinationState State) ResolveDestination(
 		string destination,
@@ -1013,7 +1015,7 @@ public sealed class TerminalWorkspaceController(
 		arguments.Add("--profile");
 		arguments.Add("standard");
 		arguments.Add("--git-mode");
-		arguments.Add(ProjectSelectionTokens.ToToken(plan.GitReadiness.Mode));
+		arguments.Add(ProjectSelectionTokens.ToToken(plan.Selection));
 
 		var exclusions = plan.Selection.Exclusions ?? [];
 		if (exclusions.Count == 0)

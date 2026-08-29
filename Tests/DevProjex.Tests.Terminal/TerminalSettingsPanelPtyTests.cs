@@ -161,9 +161,9 @@ public sealed class TerminalSettingsPanelPtyTests
 	}
 
 	[Fact(Timeout = 60_000)]
-	public async Task GitShortcutFocusesTheActiveGitRowBeforeSpaceTogglesIt()
+	public async Task GitShortcutCyclesRadioModesWithoutChangingExclusions()
 	{
-		using var project = CreatePanelProject();
+		using var project = CreatePanelProject(initializeGit: true);
 		await using var terminal = await StartAsync(project.Path, columns: 160, rows: 50);
 
 		await WaitForStableScreenAsync(terminal, "PROJECT TREE");
@@ -171,16 +171,14 @@ public sealed class TerminalSettingsPanelPtyTests
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		await WaitForStableScreenAsync(terminal, "> PARAMETERS");
 		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
-		var focused = await WaitForStableScreenAsync(terminal, "> PARAMETERS");
-		AssertOnlyRowIsHighlighted(
-			terminal,
-			focused,
-			activeText: "Use .gitignore",
-			inactiveTexts: ["Smart ignore"]);
+		var tracked = await WaitForStableScreenAsync(terminal, "(•) Tracked Git files only");
+		Assert.Contains("( ) Use .gitignore", tracked, StringComparison.Ordinal);
+		Assert.Contains("[x] Smart ignore", tracked, StringComparison.Ordinal);
 
-		await terminal.SendSpaceAsync(TestContext.Current.CancellationToken);
-		var toggled = await WaitForStableScreenAsync(terminal, "[ ] Use .gitignore");
-		Assert.Contains("[x] Smart ignore", toggled, StringComparison.Ordinal);
+		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
+		var staged = await WaitForStableScreenAsync(terminal, "(•) Staged Git files");
+		Assert.Contains("( ) Tracked Git files only", staged, StringComparison.Ordinal);
+		Assert.Contains("[x] Smart ignore", staged, StringComparison.Ordinal);
 
 		await ExitAsync(terminal);
 	}
@@ -210,7 +208,8 @@ public sealed class TerminalSettingsPanelPtyTests
 			terminal,
 			"Exclusions",
 			"[ ] All");
-		Assert.Contains("[ ] Use .gitignore", cleared, StringComparison.Ordinal);
+		Assert.Contains("(•) No Git filtering", cleared, StringComparison.Ordinal);
+		Assert.Contains("( ) Use .gitignore", cleared, StringComparison.Ordinal);
 		Assert.Contains("[x] .cs", cleared, StringComparison.Ordinal);
 
 		await ExitAsync(terminal);
@@ -527,14 +526,14 @@ public sealed class TerminalSettingsPanelPtyTests
 		await WaitForPanelContainsAsync(terminal, "Exclusions", "File types", "[ ] All");
 		await WaitForStableScreenAsync(terminal, "[ ] All");
 		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
-		var exclusionsCleared = await WaitForStableScreenAsync(terminal, "[ ] Use .gitignore");
-		Assert.Contains("[ ] Use .gitignore", exclusionsCleared, StringComparison.Ordinal);
+		var exclusionsCleared = await WaitForStableScreenAsync(terminal, "(•) No Git filtering");
+		Assert.Contains("( ) Use .gitignore", exclusionsCleared, StringComparison.Ordinal);
 		Assert.Contains("[ ] .cs", exclusionsCleared, StringComparison.Ordinal);
 
 		await terminal.SendUpAsync(TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await WaitForPanelContainsAsync(terminal, "Exclusions", "File types", "[x] All");
-		var exclusionsRestored = await WaitForStableScreenAsync(terminal, "[x] Use .gitignore");
+		var exclusionsRestored = await WaitForStableScreenAsync(terminal, "(•) Use .gitignore");
 		Assert.Contains("[x] Smart ignore", exclusionsRestored, StringComparison.Ordinal);
 		Assert.Contains("[ ] .cs", exclusionsRestored, StringComparison.Ordinal);
 
@@ -828,15 +827,16 @@ public sealed class TerminalSettingsPanelPtyTests
 		string title,
 		int? expectedCount = null)
 	{
-		var titleLine = screen.Split('\n').Single(line => line.Contains(title, StringComparison.Ordinal));
 		var marker = title == "Content processing" ? "[ ]" : "[x]";
 		var suffix = expectedCount is { } count ? $" ({count})" : " (";
+		var titleLine = screen.Split('\n').Single(line =>
+			line.Contains(title, StringComparison.Ordinal) &&
+			line.Contains($"{marker} All{suffix}", StringComparison.Ordinal));
 		Assert.Contains($"{marker} All{suffix}", titleLine, StringComparison.Ordinal);
 	}
 
 	private static int ExpectedExclusionCount =>
-		ProjectPresentationCatalog.GitFiltering.Count - 1 +
-		ProjectPresentationCatalog.Exclusions.Count;
+		ProjectPresentationCatalog.Exclusions.Count + 1;
 
 	private static (int Row, int Column) FindFrameAggregate(
 		string screen,
@@ -1071,7 +1071,9 @@ public sealed class TerminalSettingsPanelPtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 	}
 
-	private static TemporaryDirectory CreatePanelProject(bool includeFindings = false)
+	private static TemporaryDirectory CreatePanelProject(
+		bool includeFindings = false,
+		bool initializeGit = false)
 	{
 		var project = new TemporaryDirectory();
 		project.WriteFile("global.json", "{}");
@@ -1082,7 +1084,32 @@ public sealed class TerminalSettingsPanelPtyTests
 				  "const string email = \"ivan.petrov@corp.internal\";\n"
 				: "internal sealed class App { }");
 		project.WriteFile("readme.md", "# Project");
+		if (initializeGit)
+		{
+			RunGit(project.Path, "init", "--quiet");
+			RunGit(project.Path, "config", "user.email", "terminal-tests@devprojex.local");
+			RunGit(project.Path, "config", "user.name", "DevProjex Terminal Tests");
+			RunGit(project.Path, "add", ".");
+			RunGit(project.Path, "commit", "--quiet", "-m", "Initial test project");
+		}
 		return project;
+	}
+
+	private static void RunGit(string workingDirectory, params string[] arguments)
+	{
+		var startInfo = new ProcessStartInfo
+		{
+			FileName = OperatingSystem.IsWindows() ? "git.exe" : "git",
+			WorkingDirectory = workingDirectory,
+			UseShellExecute = false,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			CreateNoWindow = true
+		};
+		foreach (var argument in arguments)
+			startInfo.ArgumentList.Add(argument);
+		var result = TerminalTestProcess.Run(startInfo);
+		Assert.Equal(0, result.ExitCode);
 	}
 
 	private static TemporaryDirectory CreateScrollableTreeProject()

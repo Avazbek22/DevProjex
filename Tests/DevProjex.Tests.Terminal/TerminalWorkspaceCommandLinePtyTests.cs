@@ -292,7 +292,7 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 
 		await terminal.SendAsync(":set ", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"<option> <on|off>",
+			"<option> <value>",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
@@ -585,7 +585,7 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 
 		await terminal.SendAsync(":help set\r", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"set <option> <on|off>",
+			"set <option> <value>",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 
@@ -727,7 +727,7 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		await plain.SendAsync(":set ", TestContext.Current.CancellationToken);
 		var plainGhost = await plain.WaitForScreenAsync(
-			"[<option> <on|off>]",
+			"[<option> <value>]",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.DoesNotContain('✓', plainGhost);
 		await plain.SendEscapeAsync(TestContext.Current.CancellationToken);
@@ -828,7 +828,7 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 	}
 
 	[Fact(Timeout = 150_000)]
-	public async Task ContentCommandsAndGitPairFollowTheSameTransitionsAsThePanel()
+	public async Task ContentCommandsAndGitAxisFollowTheSameTransitionsAsThePanel()
 	{
 		using var project = CreateGitProject();
 		await using var terminal = await StartAsync(project.Path, columns: 160, rows: 40);
@@ -860,17 +860,24 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 			Assert.Contains($"[ ] {label}", terminal.CaptureScreen(), StringComparison.Ordinal);
 
 		await ExecuteAsync(terminal, "set gitignore on", "Use .gitignore: enabled");
-		Assert.Contains("[x] Use .gitignore", terminal.CaptureScreen(), StringComparison.Ordinal);
+		Assert.Contains("(•) Use .gitignore", terminal.CaptureScreen(), StringComparison.Ordinal);
 		await ExecuteAsync(terminal, "set tracked on", "Tracked Git files only: enabled");
 		var tracked = terminal.CaptureScreen();
-		Assert.Contains("[ ] Use .gitignore", tracked, StringComparison.Ordinal);
-		Assert.Contains("[x] Tracked Git files only", tracked, StringComparison.Ordinal);
+		Assert.Contains("( ) Use .gitignore", tracked, StringComparison.Ordinal);
+		Assert.Contains("(•) Tracked Git files only", tracked, StringComparison.Ordinal);
+		await ExecuteAsync(terminal, "set git staged", "✓ Staged Git files");
+		Assert.Contains("(•) Staged Git files", terminal.CaptureScreen(), StringComparison.Ordinal);
+		await ExecuteAsync(terminal, "set git changes", "✓ Current Git changes");
+		Assert.Contains("(•) Current Git changes", terminal.CaptureScreen(), StringComparison.Ordinal);
+		await ExecuteAsync(terminal, "set git diff:HEAD..HEAD", "✓ diff:HEAD..HEAD");
+		Assert.Contains("(•) diff: HEAD..HEAD", terminal.CaptureScreen(), StringComparison.Ordinal);
 		await ExecuteAsync(terminal, "set tracked off", "Tracked Git files only: disabled");
 		var disabled = terminal.CaptureScreen();
-		Assert.Contains("[ ] Use .gitignore", disabled, StringComparison.Ordinal);
-		Assert.Contains("[ ] Tracked Git files only", disabled, StringComparison.Ordinal);
+		Assert.Contains("(•) No Git filtering", disabled, StringComparison.Ordinal);
+		Assert.Contains("( ) Use .gitignore", disabled, StringComparison.Ordinal);
+		Assert.Contains("( ) Tracked Git files only", disabled, StringComparison.Ordinal);
 		await ExecuteAsync(terminal, "set gitignore off", "Use .gitignore: disabled");
-		Assert.Contains("[ ] Use .gitignore", terminal.CaptureScreen(), StringComparison.Ordinal);
+		Assert.Contains("(•) No Git filtering", terminal.CaptureScreen(), StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 		await QuitAsync(terminal);
 	}

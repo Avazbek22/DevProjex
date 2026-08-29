@@ -152,7 +152,7 @@ public sealed class TerminalCornerProgressPtyTests
 	[Fact(Timeout = 90_000)]
 	public async Task FailedBackgroundRefreshClearsTheCornerBeforeShowingTheError()
 	{
-		using var project = CreateProject();
+		using var project = CreateGitProject();
 		string? dataRoot = null;
 		await using var terminal = await StartAsync(
 			project.Path,
@@ -169,14 +169,11 @@ public sealed class TerminalCornerProgressPtyTests
 		await terminal.WaitForScreenAsync(
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
+		File.WriteAllText(Path.Combine(project.Path, ".git", "index"), "not-a-git-index");
+		await terminal.SendAsync(":set git tracked\r", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"Tracked Git files only",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
-		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
-		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
-		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 
 		var checkpointRoot = GetCheckpointRoot(dataRoot);
 		await WaitForCheckpointAsync(checkpointRoot, "background-refresh");
@@ -194,9 +191,14 @@ public sealed class TerminalCornerProgressPtyTests
 		await terminal.WaitForScreenWithoutAsync(
 			"DPX-GIT-TRACKED-INDEX-UNAVAILABLE",
 			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> PARAMETERS",
+			cancellationToken: TestContext.Current.CancellationToken);
 		var rolledBack = terminal.CaptureScreen();
-		Assert.Contains("[x] Use .gitignore", rolledBack, StringComparison.Ordinal);
-		Assert.Contains("[ ] Tracked Git files only", rolledBack, StringComparison.Ordinal);
+		Assert.Contains("(•) Use .gitignore", rolledBack, StringComparison.Ordinal);
+		Assert.Contains("( ) Tracked Git files only", rolledBack, StringComparison.Ordinal);
 		await ExitAsync(terminal);
 	}
 
@@ -257,6 +259,34 @@ public sealed class TerminalCornerProgressPtyTests
 		project.WriteFile("src/App.cs", "internal sealed class App { }");
 		project.WriteFile("readme.md", "# Project");
 		return project;
+	}
+
+	private static TemporaryDirectory CreateGitProject()
+	{
+		var project = CreateProject();
+		RunGit(project.Path, "init", "--quiet");
+		RunGit(project.Path, "config", "user.email", "terminal-tests@devprojex.local");
+		RunGit(project.Path, "config", "user.name", "DevProjex Terminal Tests");
+		RunGit(project.Path, "add", "--all");
+		RunGit(project.Path, "commit", "--quiet", "-m", "Initial test project");
+		return project;
+	}
+
+	private static void RunGit(string workingDirectory, params string[] arguments)
+	{
+		var startInfo = new ProcessStartInfo
+		{
+			FileName = OperatingSystem.IsWindows() ? "git.exe" : "git",
+			WorkingDirectory = workingDirectory,
+			UseShellExecute = false,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			CreateNoWindow = true
+		};
+		foreach (var argument in arguments)
+			startInfo.ArgumentList.Add(argument);
+		var result = TerminalTestProcess.Run(startInfo);
+		Assert.Equal(0, result.ExitCode);
 	}
 
 	private static string GetCheckpointRoot(string? dataRoot)

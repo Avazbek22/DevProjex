@@ -94,13 +94,86 @@ public sealed class TerminalParameterRowsBuilderTests
 		var rows = builder.BuildExclusions(CreatePlan(ProjectSelectionSpec.Standard));
 
 		Assert.DoesNotContain(rows, static row => row.Kind == TerminalParameterRowKind.ToggleAllExclusions);
-		Assert.Equal(GitFilteringMode.RespectGitIgnore, rows[0].GitMode);
-		Assert.True(rows[0].IsSelected);
-		Assert.Equal(GitFilteringMode.TrackedFilesOnly, rows[1].GitMode);
-		Assert.False(rows[1].IsSelected);
-		Assert.DoesNotContain(
-			rows,
-			static row => row.GitMode == GitFilteringMode.None);
+		Assert.Equal(
+			[
+				GitFilteringMode.None,
+				GitFilteringMode.RespectGitIgnore,
+				GitFilteringMode.TrackedFilesOnly,
+				GitFilteringMode.Staged,
+				GitFilteringMode.Changes
+			],
+			rows.Take(5).Select(static row => row.GitMode));
+		Assert.Equal([false, true, false, false, false], rows.Take(5).Select(static row => row.IsSelected));
+		Assert.Equal("( ) Terminal.Tui.GitNone", rows[0].ToString());
+		Assert.Equal("(•) Settings.Ignore.UseGitIgnore", rows[1].ToString());
+	}
+
+	[Fact]
+	public void GitModesRemainEnabledForEmptyRepositoryBoundary()
+	{
+		var plan = CreatePlan(ProjectSelectionSpec.Standard) with
+		{
+			GitReadiness = new ProjectContextGitReadiness(
+				GitFilteringMode.RespectGitIgnore,
+				LoadedTrackedIndexCount: 0,
+				IsReady: true,
+				UnavailableTrackedIndexCount: 1)
+		};
+
+		var rows = CreateBuilder().BuildExclusions(plan);
+
+		Assert.All(
+			rows.Where(static row => row.GitMode is GitFilteringMode.TrackedFilesOnly or
+				GitFilteringMode.Staged or GitFilteringMode.Changes),
+			static row => Assert.True(row.IsEnabled));
+	}
+
+	[Fact]
+	public void GitModesUseThePhysicalWorktreeBoundaryBeforeTrackedIndexIsLoaded()
+	{
+		using var project = new TemporaryDirectory();
+		project.WriteFile(".git", "gitdir: ../metadata/worktrees/project\n");
+		var plan = CreatePlan(ProjectSelectionSpec.Standard) with
+		{
+			SourceRoot = project.Path,
+			GitReadiness = new ProjectContextGitReadiness(
+				GitFilteringMode.RespectGitIgnore,
+				LoadedTrackedIndexCount: 0,
+				IsReady: true)
+		};
+
+		var rows = CreateBuilder().BuildExclusions(plan);
+
+		Assert.All(
+			rows.Where(static row => row.GitMode is GitFilteringMode.TrackedFilesOnly or
+				GitFilteringMode.Staged or GitFilteringMode.Changes),
+			static row => Assert.True(row.IsEnabled));
+	}
+
+	[Fact]
+	public void CollapsedExclusionCountTreatsGitModesAsOneAxis()
+	{
+		var rows = CreateBuilder().BuildExclusions(CreatePlan(ProjectSelectionSpec.Standard));
+
+		var counts = TerminalWorkspaceSession.CountExclusionAxis(rows);
+
+		var expected = ProjectPresentationCatalog.Exclusions.Count + 1;
+		Assert.Equal((expected, expected), counts);
+	}
+
+	[Fact]
+	public void ActiveDiffScopeAddsOneReadOnlyRadioRow()
+	{
+		var rows = CreateBuilder().BuildExclusions(CreatePlan(ProjectSelectionSpec.Standard with
+		{
+			GitMode = GitFilteringMode.Diff,
+			GitDiffRange = "main..feature"
+		}));
+
+		var diff = Assert.Single(rows, static row => row.GitMode == GitFilteringMode.Diff);
+		Assert.Equal("main..feature", diff.Value);
+		Assert.True(diff.IsSelected);
+		Assert.Equal("(•) diff: main..feature", diff.ToString());
 	}
 
 	[Fact]
@@ -170,7 +243,7 @@ public sealed class TerminalParameterRowsBuilderTests
 
 		Assert.Equal(TerminalParameterRowKind.ToggleAllExclusions, selected.Kind);
 		Assert.Equal(
-			$"Settings.All ({ProjectPresentationCatalog.GitFiltering.Count - 1 + ProjectPresentationCatalog.Exclusions.Count})",
+			$"Settings.All ({1 + ProjectPresentationCatalog.Exclusions.Count})",
 			selected.Label);
 		Assert.True(selected.IsSelected);
 		Assert.False(cleared.IsSelected);

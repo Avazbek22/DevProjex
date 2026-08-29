@@ -5,6 +5,21 @@ namespace DevProjex.Tests.Terminal;
 
 public sealed class TerminalSettingsStateContractTests
 {
+	[Fact]
+	public void ChangingOnlyTheDiffRangeRequiresAFullStructuralRefresh()
+	{
+		var baseline = ProjectSelectionSpec.Standard with
+		{
+			GitMode = GitFilteringMode.Diff,
+			GitDiffRange = "main..feature-a"
+		};
+
+		Assert.True(TerminalWorkspaceController.RequiresStructuralRefresh(
+			baseline,
+			baseline with { GitDiffRange = "main..feature-b" }));
+		Assert.False(TerminalWorkspaceController.RequiresStructuralRefresh(baseline, baseline));
+	}
+
 	[Theory]
 	[InlineData(IgnoreOptionId.HideSecrets)]
 	[InlineData(IgnoreOptionId.HidePrivateData)]

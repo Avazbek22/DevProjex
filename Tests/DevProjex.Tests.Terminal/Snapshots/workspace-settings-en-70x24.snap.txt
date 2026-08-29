@@ -8,10 +8,10 @@
 ││[ ] Strip comments                                                ││
 ││[ ] Strip blank lines                                             ││
 │└──────────────────────────────────────────────────────────────────┘│
-│┌┤Exclusions├────────────────────────────────────── [x] All (10) ──┐│
-││[x] Use .gitignore                                               ▲││
-││[ ] Tracked Git files only                                       ┃││
-││[x] Smart ignore                                                 ▼││
+│┌┤Exclusions├─────────────────────────────────────── [x] All (9) ──┐│
+││( ) No Git filtering                                             ▲││
+││(•) Use .gitignore                                               ┃││
+││( ) Tracked Git files only                                       ▼││
 │└──────────────────────────────────────────────────────────────────┘│
 │┌┤File types├─────────────────────────────────────── [x] All (3) ──┐│
 ││[x] .cs                                                           ││
@@ -21,4 +21,4 @@
 └────────────────────────────────────────────────────────────────────┘
 
  3 F  2 D  ~<TOKENS> tok  0 W  0 E
- Up/Down Move  Enter Change  Tab/F6 Tree  Ctrl+P Actions  ? Help
+ C Content  X Exclusions  T Types  M Git mode  : Commands

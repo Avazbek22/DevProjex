@@ -88,7 +88,7 @@ public sealed class TerminalPtyRecoveryTests
 	}
 
 	[Fact(Timeout = 60_000)]
-	public async Task UnavailableTrackedModeShowsErrorAndPreservesLastUsablePlan()
+	public async Task UnavailableTrackedModeIsRejectedAndPreservesLastUsablePlan()
 	{
 		using var project = CreateProject();
 		await using var terminal = await StartProjectAsync(
@@ -100,29 +100,12 @@ public sealed class TerminalPtyRecoveryTests
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
 
-		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
-		var initialMode = await terminal.WaitForScreenAsync(
-			"Tracked Git files only",
+		await terminal.SendAsync(":set git tracked\r", TestContext.Current.CancellationToken);
+		var rejected = await terminal.WaitForScreenAsync(
+			"The command cannot be applied to the current workspace state",
 			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.Contains("[x] Use .gitignore", initialMode, StringComparison.Ordinal);
-		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
-		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
-		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
-		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
-			"DPX-GIT-TRACKED-INDEX-UNAVAILABLE",
-			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("Files 4", rejected, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
-
-		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			"DPX-GIT-TRACKED-INDEX-UNAVAILABLE",
-			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
-		var recoveredMode = await terminal.WaitForScreenAsync(
-			"Tracked Git files only",
-			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.Contains("[x] Use .gitignore", recoveredMode, StringComparison.Ordinal);
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		var recovered = await terminal.WaitForScreenAsync(
 			"PROJECT TREE",

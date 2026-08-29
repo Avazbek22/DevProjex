@@ -8,18 +8,18 @@
 │                                         ││    </d>                                                                     │││[ ] Strip comments                ││
 │                                         ││    <f>App.cs</f>                                                            │││[ ] Strip blank lines             ││
 │                                         ││  </d>                                                                       ││└──────────────────────────────────┘│
-│                                         ││  <f>global.json</f>                                                         ││┌┤Exclusions├────── [x] All (10) ──┐│
-│                                         ││  <f>readme.md</f>                                                           │││[x] Use .gitignore                ││
-│                                         ││</d>                                                                         │││[ ] Tracked Git files only        ││
-│                                         ││                                                                             │││[x] Smart ignore                  ││
-│                                         ││                                                                             │││[x] Empty folders                 ││
-│                                         ││                                                                             │││[x] Empty files                   ││
-│                                         ││                                                                             │││[x] Hidden folders                ││
-│                                         ││                                                                             │││[x] Hidden files                  ││
-│                                         ││                                                                             │││[x] dot folders                   ││
-│                                         ││                                                                             │││[x] dot files                     ││
-│                                         ││                                                                             │││[x] Files without extension       ││
-│                                         ││                                                                             │││                                  ││
+│                                         ││  <f>global.json</f>                                                         ││┌┤Exclusions├─────── [x] All (9) ──┐│
+│                                         ││  <f>readme.md</f>                                                           │││( ) No Git filtering             ▲││
+│                                         ││</d>                                                                         │││(•) Use .gitignore               ┃││
+│                                         ││                                                                             │││( ) Tracked Git files only       ┃││
+│                                         ││                                                                             │││( ) Staged Git files             ┃││
+│                                         ││                                                                             │││( ) Current Git changes          ┃││
+│                                         ││                                                                             │││[x] Smart ignore                 ┃││
+│                                         ││                                                                             │││[x] Empty folders                ┃││
+│                                         ││                                                                             │││[x] Empty files                  ┃││
+│                                         ││                                                                             │││[x] Hidden folders               ·││
+│                                         ││                                                                             │││[x] Hidden files                 ·││
+│                                         ││                                                                             │││[x] dot folders                  ▼││
 │                                         ││                                                                             ││└──────────────────────────────────┘│
 │                                         ││                                                                             ││┌┤File types├─────── [x] All (3) ──┐│
 │                                         ││                                                                             │││[x] .cs                           ││

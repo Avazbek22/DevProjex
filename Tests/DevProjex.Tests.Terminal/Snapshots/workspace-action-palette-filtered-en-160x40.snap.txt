@@ -8,18 +8,18 @@
 │                                 │ Filter actions:                                                                         │ ] Strip comments                ││
 │                                 │ Preview format                                                                          │ ] Strip blank lines             ││
 │                                 │                                                                                         │─────────────────────────────────┘│
-│                                 │ Preview format: ASCII  …  :format <text|markdown|json|xml>                              │Exclusions├────── [x] All (10) ──┐│
-│                                 │                                                                                         │x] Use .gitignore                ││
-│                                 │                                                                                         │ ] Tracked Git files only        ││
-│                                 │                                                                                         │x] Smart ignore                  ││
-│                                 │                                                                                         │x] Empty folders                 ││
-│                                 │                                                                                         │x] Empty files                   ││
-│                                 │                                                                                         │x] Hidden folders                ││
-│                                 │                                                                                         │x] Hidden files                  ││
-│                                 │                                                                                         │x] dot folders                   ││
-│                                 │                                                                                         │x] dot files                     ││
-│                                 │                                                                                         │x] Files without extension       ││
-│                                 │                                                                                         │                                 ││
+│                                 │ Preview format: ASCII  …  :format <text|markdown|json|xml>                              │Exclusions├─────── [x] All (9) ──┐│
+│                                 │                                                                                         │ ) No Git filtering             ▲││
+│                                 │                                                                                         │•) Use .gitignore               ┃││
+│                                 │                                                                                         │ ) Tracked Git files only       ┃││
+│                                 │                                                                                         │ ) Staged Git files             ┃││
+│                                 │                                                                                         │ ) Current Git changes          ┃││
+│                                 │                                                                                         │x] Smart ignore                 ┃││
+│                                 │                                                                                         │x] Empty folders                ┃││
+│                                 │                                                                                         │x] Empty files                  ┃││
+│                                 │                                                                                         │x] Hidden folders               ·││
+│                                 │                                                                                         │x] Hidden files                 ·││
+│                                 │                                                                                         │x] dot folders                  ▼││
 │                                 │                                                                                         │─────────────────────────────────┘│
 │                                 │                                                                                         │File types├─────── [x] All (3) ──┐│
 │                                 │ CONTEXT PREVIEW · Preview format · ASCII                                                │x] .cs                           ││

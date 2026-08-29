@@ -8,18 +8,18 @@
 │                                 │ Filter actions:                                                                         │ ] Strip comments                ││
 │                                 │                                                                                         │ ] Strip blank lines             ││
 │                                 │                                                                                         │─────────────────────────────────┘│
-│                                 │ Analyze  [A]                   :analyze                                                 │Exclusions├────── [x] All (10) ──┐│
-│                                 │ Search  [/]                    :filter [text]                                           │x] Use .gitignore                ││
-│                                 │ Preview mode: Tree  [1/2/3]    :view <tree|content|tree-content>                        │ ] Tracked Git files only        ││
-│                                 │ Preview format: ASCII  [F]     :format <text|markdown|json|xml>                         │x] Smart ignore                  ││
-│                                 │ Copy preview                   :copy [tree|content|tree-content] [text|markdown|json|…  │x] Empty folders                 ││
-│                                 │ Git filtering: Use .gitignor…  :set <option> <on|off>                                   │x] Empty files                   ││
-│                                 │ Exclusions: 8  [X]             :set <option> <on|off>                                   │x] Hidden folders                ││
-│                                 │ File types: All (3)  [T]       :type <.ext> [<.ext>...] <on|off>                        │x] Hidden files                  ││
-│                                 │ Export context  [E]            :export context [format] [path]                          │x] dot folders                   ││
-│                                 │ To Folder…  [Z]                :export folder <path>                                    │x] dot files                     ││
-│                                 │ To ZIP Archive…  [Shift+Z]     :export zip <path>                                       │x] Files without extension       ││
-│                                 │ Export settings...  [P]        :profile save [name]                                     │                                 ││
+│                                 │ Analyze  [A]                   :analyze                                                 │Exclusions├─────── [x] All (9) ──┐│
+│                                 │ Search  [/]                    :filter [text]                                           │ ) No Git filtering             ▲││
+│                                 │ Preview mode: Tree  [1/2/3]    :view <tree|content|tree-content>                        │•) Use .gitignore               ┃││
+│                                 │ Preview format: ASCII  [F]     :format <text|markdown|json|xml>                         │ ) Tracked Git files only       ┃││
+│                                 │ Copy preview                   :copy [tree|content|tree-content] [text|markdown|json|…  │ ) Staged Git files             ┃││
+│                                 │ Git filtering: Use .gitignor…  :set <option> <value>                                    │ ) Current Git changes          ┃││
+│                                 │ Exclusions: 8  [X]             :set <option> <value>                                    │x] Smart ignore                 ┃││
+│                                 │ File types: All (3)  [T]       :type <.ext> [<.ext>...] <on|off>                        │x] Empty folders                ┃││
+│                                 │ Export context  [E]            :export context [format] [path]                          │x] Empty files                  ┃││
+│                                 │ To Folder…  [Z]                :export folder <path>                                    │x] Hidden folders               ·││
+│                                 │ To ZIP Archive…  [Shift+Z]     :export zip <path>                                       │x] Hidden files                 ·││
+│                                 │ Export settings...  [P]        :profile save [name]                                     │x] dot folders                  ▼││
 │                                 │ Open Desktop  [G]                                                                       │─────────────────────────────────┘│
 │                                 │                                                                                         │File types├─────── [x] All (3) ──┐│
 │                                 │ Diagnostics · Analyze                                                                   │x] .cs                           ││

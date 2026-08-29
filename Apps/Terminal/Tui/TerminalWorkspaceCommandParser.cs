@@ -6,6 +6,8 @@ namespace DevProjex.Terminal.Tui;
 internal sealed class TerminalWorkspaceCommandParser
 {
 	private static readonly string[] ToggleValues = ["on", "off"];
+	private static readonly string[] GitModeValues =
+		["off", "gitignore", "tracked", "staged", "changes", "diff:<ref>..<ref>"];
 	private static readonly string[] AggregateTargets = ["types", "exclusions", "content"];
 	private static readonly string[] ExportTargets = ["context", "zip", "folder"];
 	private static readonly string[] ProfileTargets = ["save"];
@@ -16,7 +18,8 @@ internal sealed class TerminalWorkspaceCommandParser
 		.. ProjectPresentationCatalog.ContentTransformations.Select(static item => item.Token),
 		.. ProjectPresentationCatalog.Exclusions.Select(static item => item.Token),
 		"gitignore",
-		"tracked"
+		"tracked",
+		"git"
 	];
 
 	private delegate TerminalWorkspaceCommandParseResult GrammarParser(
@@ -222,11 +225,27 @@ internal sealed class TerminalWorkspaceCommandParser
 		IReadOnlyList<ParsedToken> tokens)
 	{
 		if (tokens.Count < 3)
-			return Missing(tokens, tokens.Count == 1 ? SetTargets : ToggleValues);
+		{
+			var candidates = tokens.Count == 1
+				? SetTargets
+				: string.Equals(tokens[1].Value, "git", StringComparison.OrdinalIgnoreCase)
+					? GitModeValues
+					: ToggleValues;
+			return Missing(tokens, candidates);
+		}
 		if (tokens.Count > 3)
 			return Unexpected(tokens[3]);
 		if (!Contains(SetTargets, tokens[1].Value))
 			return Unknown(tokens[1], SetTargets);
+		if (string.Equals(tokens[1].Value, "git", StringComparison.OrdinalIgnoreCase))
+		{
+			if (!GitScopeSelection.TryParse(tokens[2].Value, out var mode, out var diffRange))
+				return Unknown(tokens[2], GitModeValues);
+			return TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
+				definition,
+				Target: "git",
+				Text: GitScopeSelection.ToToken(mode, diffRange)));
+		}
 		if (!TryParseToggle(tokens[2], out var enabled, out var error))
 			return TerminalWorkspaceCommandParseResult.Failure(error!);
 
@@ -483,6 +502,9 @@ internal sealed class TerminalWorkspaceCommandParser
 		argumentIndex switch
 		{
 			0 => new CompletionCandidateSource(SetTargets),
+			1 when tokens.Count > 1 &&
+			       string.Equals(tokens[1].Value, "git", StringComparison.OrdinalIgnoreCase) =>
+				new CompletionCandidateSource(GitModeValues),
 			1 => new CompletionCandidateSource(ToggleValues),
 			_ => default
 		};

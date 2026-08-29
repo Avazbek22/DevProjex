@@ -135,8 +135,8 @@ The workspace supports:
 - keyboard and mouse navigation;
 - a visible Tree Filter and a separate Preview Search;
 - extension selection;
-- two mutually exclusive Git filtering checkboxes for `.gitignore` and tracked
-  files; selecting an active checkbox again returns to no Git filtering;
+- a five-value Git radio group for none, `.gitignore`, tracked, staged, and all
+  working-tree changes; an active command-line diff scope appears as a sixth row;
 - ordinary Exclusions independent from Git filtering;
 - all five content-processing options: Hide Secrets, Hide Private Data,
   Compress Code, Strip Comments, and Strip Blank Lines;
@@ -150,10 +150,13 @@ The workspace supports:
 - dry-run summaries and cancellation;
 - opening the current state in Desktop.
 
-Tracked-files mode uses the installed Git CLI. On startup, an unavailable tracked
-selection does not open the workspace. If an interactive mode change cannot load an
-applicable index, TUI keeps the last usable Git mode. It never silently substitutes
-`.gitignore` or an unfiltered tree.
+Tracked, staged, changes, and diff modes use the installed Git CLI. On startup,
+an unavailable selection does not open the workspace. If an interactive mode
+change cannot resolve the requested Git state, TUI keeps the last usable Git
+mode. It never silently substitutes `.gitignore` or an unfiltered tree. Staged,
+changes, and diff are session-only; portable profile saves reject them rather
+than persist a stale snapshot. Their content is read from the current working
+tree, while all other selection and exclusion rules continue to narrow files.
 
 `Ctrl+P` opens a searchable Action Palette from Welcome or the workspace.
 Important features do not depend on memorizing letter shortcuts: the palette and
@@ -209,7 +212,8 @@ Welcome exposes the focused subset `recent`, `language`, `help`, and `quit`.
 
 | Syntax | Session action |
 |---|---|
-| `set <option> on\|off` | toggle one content, exclusion, or Git option |
+| `set <option> on\|off` | toggle one content or exclusion option; legacy `set gitignore` and `set tracked` remain supported |
+| `set git off\|gitignore\|tracked\|staged\|changes\|diff:<ref>..<ref>` | select the Git axis without changing profiles |
 | `all types\|exclusions\|content on\|off` | apply the framed **All** action |
 | `type <.ext> [<.ext>...] on\|off` | toggle available file extensions |
 | `view tree\|content\|tree-content` | select Preview mode |
@@ -234,6 +238,8 @@ Examples:
 
 ```text
 :set hide-secrets on
+:set git staged
+:set git diff:main..feature
 :all types off
 :type .cs .md on
 :view content
@@ -295,7 +301,7 @@ the existing confirmation and blocking progress surfaces.
 | `1`, `2`, `3` | tree, content, tree plus content |
 | `F` | format |
 | `C` | focus Content transformations |
-| `M` | cycle Git mode: none → gitignore → tracked |
+| `M` | cycle Git mode: none → gitignore → tracked → staged → changes |
 | `X` | focus Exclusions |
 | `T` | focus File Types |
 | `E` | export context |

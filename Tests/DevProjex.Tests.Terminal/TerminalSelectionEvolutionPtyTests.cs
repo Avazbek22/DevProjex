@@ -27,22 +27,22 @@ public sealed class TerminalSelectionEvolutionPtyTests
 		await terminal.WaitForScreenAsync(
 			"> PARAMETERS",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendAsync("X", TestContext.Current.CancellationToken);
-		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 		var before = await terminal.WaitForScreenAsync(
-			"[x] Use .gitignore",
+			"(•) Use .gitignore",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.DoesNotContain(".generated", before, StringComparison.Ordinal);
 		AssertFrameAggregate(before, "File types", "[x] All (3)");
 
+		await terminal.SendAsync("X", TestContext.Current.CancellationToken);
+		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		var optimistic = await terminal.WaitForScreenAsync(
-			"[ ] Use .gitignore",
+			"(•) No Git filtering",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.DoesNotContain("Processing request", optimistic, StringComparison.Ordinal);
 		var checkpointRoot = GetCheckpointRoot(dataRoot);
 		await WaitForCheckpointAsync(checkpointRoot, "background-refresh");
-		Assert.Contains("[ ] Use .gitignore", terminal.CaptureScreen(), StringComparison.Ordinal);
+		Assert.Contains("( ) Use .gitignore", terminal.CaptureScreen(), StringComparison.Ordinal);
 		ReleaseCheckpoint(checkpointRoot, "background-refresh");
 
 		var revealed = await terminal.WaitForScreenAsync(
@@ -119,7 +119,7 @@ public sealed class TerminalSelectionEvolutionPtyTests
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		var before = await terminal.WaitForScreenAsync(
-			"[x] Use .gitignore",
+			"(•) Use .gitignore",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.DoesNotContain(".generated", before, StringComparison.Ordinal);
 		AssertFrameAggregate(before, "File types", "[x] All (1)");
@@ -216,13 +216,16 @@ public sealed class TerminalSelectionEvolutionPtyTests
 		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 
 		await SendSettingsActionAsync(terminal, "\r");
-		await SendSettingsActionAsync(terminal, "\u001b[B\u001b[B\r");
+		await SendSettingsActionAsync(
+			terminal,
+			"\u001b[B\u001b[B\u001b[B\u001b[B\u001b[B\r");
 		await SendSettingsActionAsync(terminal, "\u001b[B\r");
 		await terminal.SendAsync("\u001b[B\r", TestContext.Current.CancellationToken);
 		var optimistic = await terminal.WaitForScreenAsync(
 			"[ ] Empty files",
 			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.Contains("[ ] Use .gitignore", optimistic, StringComparison.Ordinal);
+		Assert.Contains("(•) No Git filtering", optimistic, StringComparison.Ordinal);
+		Assert.Contains("( ) Use .gitignore", optimistic, StringComparison.Ordinal);
 		Assert.Contains("[ ] Smart ignore", optimistic, StringComparison.Ordinal);
 		Assert.Contains("[ ] Empty folders", optimistic, StringComparison.Ordinal);
 		Assert.DoesNotContain("Processing request", optimistic, StringComparison.Ordinal);
@@ -240,7 +243,8 @@ public sealed class TerminalSelectionEvolutionPtyTests
 			"[x] .generated",
 			timeout: TimeSpan.FromSeconds(30),
 			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.Contains("[ ] Use .gitignore", completed, StringComparison.Ordinal);
+		Assert.Contains("(•) No Git filtering", completed, StringComparison.Ordinal);
+		Assert.Contains("( ) Use .gitignore", completed, StringComparison.Ordinal);
 		Assert.Contains("[ ] Smart ignore", completed, StringComparison.Ordinal);
 		Assert.Contains("[ ] Empty folders", completed, StringComparison.Ordinal);
 		Assert.Contains("[ ] Empty files", completed, StringComparison.Ordinal);
@@ -288,9 +292,11 @@ public sealed class TerminalSelectionEvolutionPtyTests
 	{
 		await terminal.SendAsync("X", TestContext.Current.CancellationToken);
 		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
+		if (expectedSelected)
+			await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			expectedSelected ? "[x] Use .gitignore" : "[ ] Use .gitignore",
+			expectedSelected ? "(•) Use .gitignore" : "(•) No Git filtering",
 			cancellationToken: TestContext.Current.CancellationToken);
 	}
 

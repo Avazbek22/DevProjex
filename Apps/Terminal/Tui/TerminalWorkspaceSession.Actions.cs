@@ -181,7 +181,8 @@ internal sealed partial class TerminalWorkspaceSession
 			collapsedControls,
 			contentControlsFrame,
 			filterControlsHost);
-		if (_state?.Plan.GitReadiness.Mode is not GitFilteringMode.None and { } mode)
+		if (_state?.Plan.GitReadiness.Mode is not GitFilteringMode.None and { } mode &&
+		    GitScopeSelection.IsPersistent(mode))
 			_preferredGitMode = mode;
 		return new WorkspaceControlViewGraph(
 			controlsFrame,
@@ -353,16 +354,30 @@ internal sealed partial class TerminalWorkspaceSession
 			_selectedExtensionControlKey);
 		if (_collapsedControls is not null)
 		{
+			var exclusionCounts = CountExclusionAxis(_exclusionControlRows);
 			_collapsedControls.Text = string.Join(
 				PanelSeparator,
 				$"{L("Preview.Mode.Content")} {_contentControlRows.Count(static row => row.IsSelected == true)}/{_contentControlRows.Count}",
-				$"{L("Terminal.Tui.Exclusions")} {_exclusionControlRows.Count(static row => row.IsSelected == true)}/{_exclusionControlRows.Count}",
+				$"{L("Terminal.Tui.Exclusions")} {exclusionCounts.Selected}/{exclusionCounts.Total}",
 				$"{L("Terminal.Tui.FileTypes")} {_extensionControlRows.Count(static row => row.IsSelected == true)}/{_extensionControlRows.Count}");
 		}
 		RefreshControlTitles();
 		UpdateControlSelectionSchemes();
 		_controlSourceStamp = sourceStamp;
 		_redactionLabelStamp = redactionStamp;
+	}
+
+	internal static (int Selected, int Total) CountExclusionAxis(
+		IReadOnlyCollection<TerminalParameterRow> rows)
+	{
+		ArgumentNullException.ThrowIfNull(rows);
+		var gitSelected = rows.Any(static row =>
+			row.Kind == TerminalParameterRowKind.GitMode && row.IsSelected == true);
+		return (
+			rows.Count(static row =>
+				row.Kind == TerminalParameterRowKind.Exclusion && row.IsSelected == true) +
+			(gitSelected ? 1 : 0),
+			rows.Count(static row => row.Kind == TerminalParameterRowKind.Exclusion) + 1);
 	}
 
 	internal static TerminalControlRefreshKind ResolveControlRefreshKind(
@@ -456,6 +471,8 @@ internal sealed partial class TerminalWorkspaceSession
 		left.Kind == right.Kind &&
 		string.Equals(left.Label, right.Label, StringComparison.Ordinal) &&
 		left.IsSelected == right.IsSelected &&
+		left.IsEnabled == right.IsEnabled &&
+		left.UseUnicodeRadioMarker == right.UseUnicodeRadioMarker &&
 		left.GitMode == right.GitMode &&
 		left.Exclusion == right.Exclusion &&
 		left.ContentTransformation == right.ContentTransformation &&
@@ -947,7 +964,9 @@ internal sealed partial class TerminalWorkspaceSession
 			execute);
 
 	private string FormatGitMode(GitFilteringMode mode) =>
-		L(ProjectPresentationCatalog.Get(mode).LabelKey);
+		mode == GitFilteringMode.Diff
+			? GitScopeSelection.ToToken(mode, GetDisplayedSettingsSelection().GitDiffRange)
+			: L(ProjectPresentationCatalog.Get(mode).LabelKey);
 
 	private string FormatExclusions(IReadOnlyCollection<ProjectExclusion> exclusions)
 	{
@@ -995,10 +1014,12 @@ internal sealed partial class TerminalWorkspaceSession
 
 	private void ActivateControlRow(TerminalControlSection section, TerminalParameterRow row)
 	{
+		if (!row.IsEnabled)
+			return;
 		switch (row.Kind)
 		{
 			case TerminalParameterRowKind.GitMode when row.GitMode is { } mode:
-				ApplyGitMode(mode);
+				ApplyGitMode(mode, row.Value);
 				return;
 			case TerminalParameterRowKind.ToggleAllContent:
 				ApplyAllContentTransformations(row.IsSelected != true);
@@ -1037,17 +1058,14 @@ internal sealed partial class TerminalWorkspaceSession
 		}
 	}
 
-	private void ApplyGitMode(GitFilteringMode mode)
+	private void ApplyGitMode(GitFilteringMode mode, string? diffRange = null)
 	{
 		if (_state is null)
 			return;
 		var selection = GetDisplayedSettingsSelection();
-		var target = (selection.GitMode ?? _state.Plan.GitReadiness.Mode) == mode
-			? GitFilteringMode.None
-			: mode;
-		if (target != GitFilteringMode.None)
-			_preferredGitMode = target;
-		ApplyPathFilters(target, selection.Exclusions ?? []);
+		if (GitScopeSelection.IsPersistent(mode) && mode != GitFilteringMode.None)
+			_preferredGitMode = mode;
+		ApplyPathFilters(mode, selection.Exclusions ?? [], diffRange);
 	}
 
 	private void ApplyAllExclusions(bool enabled, bool originatedFromCommandLine = false)
@@ -1059,7 +1077,7 @@ internal sealed partial class TerminalWorkspaceSession
 			enabled,
 			selection.GitMode ?? _state.Plan.GitReadiness.Mode,
 			_preferredGitMode);
-		ApplyPathFilters(mode, exclusions, originatedFromCommandLine);
+		ApplyPathFilters(mode, exclusions, originatedFromCommandLine: originatedFromCommandLine);
 	}
 
 	private void ApplyExclusions(
@@ -1071,12 +1089,13 @@ internal sealed partial class TerminalWorkspaceSession
 		ApplyPathFilters(
 			GetDisplayedSettingsSelection().GitMode ?? _state.Plan.GitReadiness.Mode,
 			exclusions,
-			originatedFromCommandLine);
+			originatedFromCommandLine: originatedFromCommandLine);
 	}
 
 	private void ApplyPathFilters(
 		GitFilteringMode mode,
 		IReadOnlyCollection<ProjectExclusion> exclusions,
+		string? diffRange = null,
 		bool originatedFromCommandLine = false)
 	{
 		if (_state is null)
@@ -1086,6 +1105,7 @@ internal sealed partial class TerminalWorkspaceSession
 		var selection = EnsureSettingsDraft() with
 		{
 			GitMode = mode,
+			GitDiffRange = mode == GitFilteringMode.Diff ? diffRange : null,
 			Exclusions = exclusions.ToArray()
 		};
 		PublishOptimisticSettings(selection, originatedFromCommandLine);
@@ -1206,13 +1226,25 @@ internal sealed partial class TerminalWorkspaceSession
 		{
 			GitFilteringMode.None => GitFilteringMode.RespectGitIgnore,
 			GitFilteringMode.RespectGitIgnore => GitFilteringMode.TrackedFilesOnly,
+			GitFilteringMode.TrackedFilesOnly => GitFilteringMode.Staged,
+			GitFilteringMode.Staged => GitFilteringMode.Changes,
 			_ => GitFilteringMode.None
 		};
+		if (!HasGitRepository() && next is GitFilteringMode.TrackedFilesOnly or
+		    GitFilteringMode.Staged or GitFilteringMode.Changes)
+		{
+			next = GitFilteringMode.None;
+		}
 		_preferredGitMode = next == GitFilteringMode.None
 			? GitFilteringMode.RespectGitIgnore
-			: next;
+			: GitScopeSelection.IsPersistent(next) ? next : _preferredGitMode;
 		ApplyPathFilters(next, selection.Exclusions ?? [], originatedFromCommandLine: false);
 	}
+
+	private bool HasGitRepository() =>
+		_state?.Plan is { } plan &&
+		(plan.GitReadiness.HasRepositoryBoundary ||
+		 GitRepositoryBoundaryProbe.ExistsAtOrAbove(plan.SourceRoot));
 
 	private void ShowActionPalette()
 	{

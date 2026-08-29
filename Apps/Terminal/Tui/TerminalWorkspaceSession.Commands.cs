@@ -55,7 +55,29 @@ internal sealed partial class TerminalWorkspaceSession
 	internal TerminalWorkspaceCommandExecutionResult ExecuteSetCommand(
 		TerminalWorkspaceCommand command)
 	{
-		if (_state is null || command.Target is null || command.Enabled is not { } enabled)
+		if (_state is null || command.Target is null)
+			return InvalidCommandExecution();
+		if (command.Target == "git")
+		{
+			if (!GitScopeSelection.TryParse(command.Text, out var gitMode, out var diffRange) ||
+			    (gitMode is GitFilteringMode.TrackedFilesOnly or GitFilteringMode.Staged or
+				    GitFilteringMode.Changes or GitFilteringMode.Diff) && !HasGitRepository())
+			{
+				return InvalidCommandExecution();
+			}
+			if (GitScopeSelection.IsPersistent(gitMode) && gitMode != GitFilteringMode.None)
+				_preferredGitMode = gitMode;
+			ApplyPathFilters(
+				gitMode,
+				GetDisplayedSettingsSelection().Exclusions ?? [],
+				diffRange,
+				originatedFromCommandLine: true);
+			var label = gitMode == GitFilteringMode.Diff
+				? GitScopeSelection.ToToken(gitMode, diffRange)
+				: L(ProjectPresentationCatalog.Get(gitMode).LabelKey);
+			return TerminalWorkspaceCommandExecutionResult.Success(label);
+		}
+		if (command.Enabled is not { } enabled)
 			return InvalidCommandExecution();
 
 		var content = ProjectPresentationCatalog.ContentTransformations.FirstOrDefault(

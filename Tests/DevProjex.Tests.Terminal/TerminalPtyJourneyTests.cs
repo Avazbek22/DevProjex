@@ -528,7 +528,7 @@ public sealed class TerminalPtyJourneyTests
 
 		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"[x] Use .gitignore",
+			"(•) Use .gitignore",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendShiftTabAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(

@@ -8,9 +8,12 @@
 │                                      ││└── readme.md                                                         │││[ ] Strip comments                ││
 │                                      ││                                                                      │││[ ] Strip blank lines             ││
 │                                      ││                                                                      ││└──────────────────────────────────┘│
-│                                      ││                                                                      ││┌┤Exclusions├────── [x] All (10) ──┐│
-│                                      ││                                                                      │││[x] Use .gitignore                ││
-│                                      ││                                                                      │││[ ] Tracked Git files only        ││
+│                                      ││                                                                      ││┌┤Exclusions├─────── [x] All (9) ──┐│
+│                                      ││                                                                      │││( ) No Git filtering              ││
+│                                      ││                                                                      │││(•) Use .gitignore                ││
+│                                      ││                                                                      │││( ) Tracked Git files only        ││
+│                                      ││                                                                      │││( ) Staged Git files              ││
+│                                      ││                                                                      │││( ) Current Git changes           ││
 │                                      ││                                                                      │││[x] Smart ignore                  ││
 │                                      ││                                                                      │││[x] Empty folders                 ││
 │                                      ││                                                                      │││[x] Empty files                   ││
@@ -19,9 +22,6 @@
 │                                      ││                                                                      │││[x] dot folders                   ││
 │                                      ││                                                                      │││[x] dot files                     ││
 │                                      ││                                                                      │││[x] Files without extension       ││
-│                                      ││                                                                      │││                                  ││
-│                                      ││                                                                      │││                                  ││
-│                                      ││                                                                      │││                                  ││
 │                                      ││                                                                      ││└──────────────────────────────────┘│
 │                                      ││                                                                      ││┌┤File types├─────── [x] All (3) ──┐│
 │                                      ││                                                                      │││[x] .cs                           ││
@@ -42,4 +42,4 @@
 └──────────────────────────────────────┘└──────────────────────────────────────────────────────────────────────┘└────────────────────────────────────┘
 
  Files 3 · Folders 2 · 40 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
- Up/Down or j/k Navigate   Enter Change   Tab/F6 Tree   Ctrl+P Action palette   ? Help
+ C Content   X Exclusions   T Types   M Cycle Git mode   Enter Change   : Commands

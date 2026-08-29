@@ -158,7 +158,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_parameterRowsBuilder = new TerminalParameterRowsBuilder(
 			L,
 			FitControlLabel,
-			services.IgnoreOptionsService.FormatContentRedactionLabel);
+			services.IgnoreOptionsService.FormatContentRedactionLabel,
+			environment.SupportsUnicode && !options.Plain);
 		_presentation = TerminalWorkspacePresentationPolicy.Resolve(
 			options.ColorMode,
 			options.Plain,
@@ -3501,6 +3502,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		{
 			"DPX-GIT-TRACKED-INDEX-UNAVAILABLE" =>
 				L("Terminal.Diagnostic.TrackedIndexUnavailable"),
+			GitScopeFilter.UnavailableDiagnosticCode =>
+				L("Terminal.Diagnostic.GitStateUnavailable"),
+			GitScopeFilter.DeletedDiagnosticCode =>
+				L("Terminal.Diagnostic.GitStateDeleted"),
 			"DPX-PROJECT-NOT-FOUND" or "DPX-PROJECT-PATH-INVALID" =>
 				L("Terminal.Tui.Error.ProjectUnavailable"),
 			_ => L("Terminal.Tui.Error.InvalidOperation")
@@ -3803,6 +3808,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		{
 			if (IsCurrentSettingsRefresh(state, operationCts, requestId))
 			{
+				await CompleteCornerProgressAsync(cornerProgressId).ConfigureAwait(false);
+				cornerProgressId = 0;
 				await RollbackFailedSettingsRefreshAsync().ConfigureAwait(false);
 				await ShowSettingsFailureAsync(
 					exception.Code,
@@ -3814,6 +3821,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		{
 			if (IsCurrentSettingsRefresh(state, operationCts, requestId))
 			{
+				await CompleteCornerProgressAsync(cornerProgressId).ConfigureAwait(false);
+				cornerProgressId = 0;
 				await RollbackFailedSettingsRefreshAsync().ConfigureAwait(false);
 				await ShowSettingsFailureAsync(
 					"DPX-TUI-OPERATION-FAILED",
@@ -5200,7 +5209,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				};
 				var message = ContextDiagnosticRenderer.ResolveMessage(
 					_services.Localization,
-					diagnostic.Code);
+					diagnostic);
 				var path = string.IsNullOrWhiteSpace(diagnostic.Path)
 					? string.Empty
 					: $"\n{L("Terminal.Label.Path")}: {TerminalTextEscaping.EscapeSingleLine(diagnostic.Path)}";
