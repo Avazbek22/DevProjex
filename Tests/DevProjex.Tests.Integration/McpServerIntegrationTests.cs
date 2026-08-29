@@ -210,6 +210,7 @@ public sealed class McpServerIntegrationTests
 			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("max_tokens");
 		Assert.Equal(2, maximumTokens.GetProperty("oneOf").GetArrayLength());
 		Assert.Equal(1, maximumTokens.GetProperty("oneOf")[0].GetProperty("minimum").GetInt32());
+		Assert.Equal("^[1-9][0-9]*$", maximumTokens.GetProperty("oneOf")[1].GetProperty("pattern").GetString());
 		foreach (var name in new[] { "get_tree", "analyze", "pack_context", "search_project" })
 		{
 			var properties = tools.Single(tool => tool.Name == name)
