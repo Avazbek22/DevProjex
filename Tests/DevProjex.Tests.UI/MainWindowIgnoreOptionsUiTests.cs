@@ -3417,6 +3417,9 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			gitWarning);
 
 		Assert.Equal([scannerWarning, scannerError, gitWarning], combined);
+		Assert.False(MainWindow.IsGitScopeDiagnostic(scannerWarning));
+		Assert.False(MainWindow.IsGitScopeDiagnostic(scannerError));
+		Assert.True(MainWindow.IsGitScopeDiagnostic(gitWarning));
 	}
 
     private static async Task WaitForExtensionStateAsync(

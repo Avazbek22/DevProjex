@@ -67,14 +67,19 @@ public partial class MainWindow
 	{
 		if (diagnostics is null || diagnostics.Count == 0)
 			return false;
-		foreach (var diagnostic in diagnostics)
+		var gitDiagnostics = diagnostics.Where(IsGitScopeDiagnostic).ToArray();
+		foreach (var diagnostic in gitDiagnostics)
 		{
 			var message = diagnostic.Code == GitScopeFilter.DeletedDiagnosticCode
 				? _localization.Format("Terminal.Diagnostic.GitStateDeleted", diagnostic.Count ?? 0)
 				: _localization["Terminal.Diagnostic.GitStateUnavailable"];
 			_toastService.Show(message);
 		}
-		return diagnostics.Any(static diagnostic =>
+		return gitDiagnostics.Any(static diagnostic =>
 			diagnostic.Severity == ContextDiagnosticSeverity.Error);
 	}
+
+	internal static bool IsGitScopeDiagnostic(ContextDiagnostic diagnostic) =>
+		diagnostic.Code is GitScopeFilter.DeletedDiagnosticCode or
+			GitScopeFilter.UnavailableDiagnosticCode;
 }
