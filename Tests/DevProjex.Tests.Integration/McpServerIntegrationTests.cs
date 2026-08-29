@@ -1656,6 +1656,64 @@ public sealed class McpServerIntegrationTests
 		Assert.Equal(0, allExcluded.StructuredContent?.GetProperty("files").GetInt32());
 	}
 
+	[Fact]
+	public async Task EmptySelectionsNeverResolveReservedLookingProjectFiles()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(
+			Path.Combine(project, ".devprojex-mcp-empty-selection"),
+			new string('m', 128));
+		File.WriteAllText(
+			Path.Combine(project, ".devprojex-size-filter-empty-selection"),
+			new string('s', 128));
+		const string profileName = "portable.json";
+		File.WriteAllText(
+			Path.Combine(project, profileName),
+			JsonSerializer.Serialize(new
+			{
+				schemaVersion = PortableProjectProfileService.CurrentSchemaVersion,
+				kind = PortableProjectProfileService.DocumentKind,
+				selection = new
+				{
+					roots = (string[]?)null,
+					extensions = (string[]?)null,
+					selectedPaths = Array.Empty<string>(),
+					gitMode = "none",
+					exclusions = Array.Empty<string>(),
+					hideSecrets = false,
+					hidePrivateData = false
+				}
+			}));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var unmatched = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["profile"] = profileName,
+				["include_patterns"] = new[] { "does-not-match/**" },
+				["view"] = "content",
+				["format"] = "json"
+			});
+		var sizeFiltered = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["profile"] = profileName,
+				["max_file_bytes"] = 1,
+				["view"] = "content",
+				["format"] = "json"
+			});
+
+		Assert.NotEqual(true, unmatched.IsError);
+		using var unmatchedDocument = JsonDocument.Parse(ExtractSpotlightBody(Text(unmatched)));
+		Assert.Empty(unmatchedDocument.RootElement.GetProperty("files").EnumerateArray());
+		Assert.NotEqual(true, sizeFiltered.IsError);
+		using var sizeFilteredDocument = JsonDocument.Parse(ExtractSpotlightBody(Text(sizeFiltered)));
+		Assert.Empty(sizeFilteredDocument.RootElement.GetProperty("files").EnumerateArray());
+	}
+
 	private static string ReadLikeSchemaAwareClient(McpClientTool tool, CallToolResult result)
 	{
 		if (tool.ProtocolTool.OutputSchema is null)

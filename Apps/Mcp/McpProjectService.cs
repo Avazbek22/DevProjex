@@ -102,15 +102,9 @@ internal sealed class McpProjectService(
 			}
 			else
 			{
-				var empty = await services.Planner
-					.ReprojectSelectionAsync(plan, [".devprojex-mcp-empty-selection"], cancellationToken)
+				narrowed = await services.Planner
+					.ReprojectEmptySelectionAsync(plan, cancellationToken)
 					.ConfigureAwait(false);
-				narrowed = empty with
-				{
-					Diagnostics = empty.Diagnostics
-						.Where(static diagnostic => diagnostic.Code != "DPX-SELECTION-PATH-MISSING")
-						.ToArray()
-				};
 			}
 		}
 

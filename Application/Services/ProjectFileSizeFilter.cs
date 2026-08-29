@@ -2,8 +2,6 @@ namespace DevProjex.Application.Services;
 
 public static class ProjectFileSizeFilter
 {
-	private const string EmptySelectionSentinel = ".devprojex-size-filter-empty-selection";
-
 	public static async Task<ProjectContextPlan> ApplyAsync(
 		ProjectContextPlanner planner,
 		ProjectContextPlan plan,
@@ -41,20 +39,12 @@ public static class ProjectFileSizeFilter
 		if (excludedFiles == 0)
 			return plan with { FileSizeFilter = summary };
 
-		var narrowed = await planner.ReprojectSelectionAsync(
-				plan,
-				selected.Count > 0 ? selected : [EmptySelectionSentinel],
-				cancellationToken)
-			.ConfigureAwait(false);
-		var diagnostics = narrowed.Diagnostics
-			.Where(static diagnostic =>
-				diagnostic.Code != "DPX-SELECTION-PATH-MISSING" ||
-				diagnostic.Path != EmptySelectionSentinel)
-			.ToArray();
+		var narrowed = selected.Count > 0
+			? await planner.ReprojectSelectionAsync(plan, selected, cancellationToken).ConfigureAwait(false)
+			: await planner.ReprojectEmptySelectionAsync(plan, cancellationToken).ConfigureAwait(false);
 		return narrowed with
 		{
 			Selection = plan.Selection,
-			Diagnostics = diagnostics,
 			FileSizeFilter = summary
 		};
 	}

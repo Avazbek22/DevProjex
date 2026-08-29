@@ -245,6 +245,9 @@ public sealed class DirectCommandIntegrationTests
 		workspace.WriteFile(
 			"project/Large.txt",
 			"oversized-marker\n" + new string('x', 128));
+		workspace.WriteFile(
+			"project/.devprojex-size-filter-empty-selection",
+			new string('s', 128));
 		var factory = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"));
 
 		var analysisEnvironment = new TestTerminalEnvironment();
@@ -312,7 +315,7 @@ public sealed class DirectCommandIntegrationTests
 		Assert.Empty(analysisEnvironment.StandardError);
 		Assert.Equal(CommandLineExitCodes.Success, textExit);
 		Assert.Contains("Size filter:", textEnvironment.StandardOutput, StringComparison.Ordinal);
-		Assert.Contains("excluded 1 files", textEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("excluded 2 files", textEnvironment.StandardOutput, StringComparison.Ordinal);
 		Assert.Empty(textEnvironment.StandardError);
 		Assert.Equal(CommandLineExitCodes.Success, treeExit);
 		Assert.Contains("Small.txt", treeEnvironment.StandardOutput, StringComparison.Ordinal);
@@ -327,8 +330,35 @@ public sealed class DirectCommandIntegrationTests
 		Assert.Empty(contextEnvironment.StandardError);
 		Assert.Equal(CommandLineExitCodes.Success, dryRunExit);
 		Assert.False(File.Exists(Path.Combine(workspace.Path, "dry-run.md")));
-		Assert.Contains("Size filter: up to 64 B; excluded 1 files", dryRunEnvironment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("Size filter: up to 64 B; excluded 2 files", dryRunEnvironment.StandardError, StringComparison.Ordinal);
 		Assert.Empty(dryRunEnvironment.StandardOutput);
+	}
+
+	[Fact]
+	public async Task MaximumFileBytesDoesNotReincludeReservedLookingFileWhenEverythingIsExcluded()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile(
+			"project/.devprojex-size-filter-empty-selection",
+			new string('s', 128));
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(() => workspace.CreateDirectory("app-data")))
+			.RunAsync(
+				[
+					"analyze", Path.Combine(workspace.Path, "project"),
+					"--format", "json",
+					"--max-file-bytes", "1",
+					"--git-mode", "none",
+					"--exclude", "none"
+				],
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		Assert.Equal(0, document.RootElement.GetProperty("inventory").GetProperty("files").GetInt32());
 	}
 
 	[Fact]
