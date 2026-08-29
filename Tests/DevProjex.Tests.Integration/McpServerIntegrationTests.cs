@@ -1414,6 +1414,33 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task PackContextTokenBudgetUsesRedactedCharacterCount()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "secret.txt"), Secret);
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "secret.txt" },
+				["view"] = "content",
+				["format"] = "text",
+				["max_tokens"] = 8
+			});
+		var text = Text(result);
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.Contains("secret.txt", text, StringComparison.Ordinal);
+		Assert.Contains("DEVPROJEX_REDACTED[github-pat#1]", text, StringComparison.Ordinal);
+		Assert.DoesNotContain(Secret, text, StringComparison.Ordinal);
+		Assert.Contains("Included: 1 file (8 estimated tokens).", text, StringComparison.Ordinal);
+		Assert.Contains("Skipped: 0 files", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task PackContextSignaturesFitsMoreFilesWithinTheSameTokenBudget()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -1519,7 +1546,8 @@ public sealed class McpServerIntegrationTests
 			new Dictionary<string, object?>(maximum)
 			{
 				["view"] = "content",
-				["format"] = "text"
+				["format"] = "text",
+				["max_tokens"] = 1_000
 			});
 		var search = await server.CallAsync(
 			"search_project",
@@ -1543,6 +1571,8 @@ public sealed class McpServerIntegrationTests
 		Assert.Contains("small-marker", Text(pack), StringComparison.Ordinal);
 		Assert.Contains("Exact.txt", Text(pack), StringComparison.Ordinal);
 		Assert.DoesNotContain("Large.txt", Text(pack), StringComparison.Ordinal);
+		Assert.Contains("Included: 2 files", Text(pack), StringComparison.Ordinal);
+		Assert.Contains("Skipped: 0 files", Text(pack), StringComparison.Ordinal);
 		Assert.Contains("Small.txt:1:", Text(search), StringComparison.Ordinal);
 		Assert.DoesNotContain("Large.txt", Text(search), StringComparison.Ordinal);
 		Assert.True(invalid.IsError);

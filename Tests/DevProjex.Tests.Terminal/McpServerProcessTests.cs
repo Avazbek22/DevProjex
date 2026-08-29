@@ -107,7 +107,8 @@ public sealed class McpServerProcessTests
 				new Dictionary<string, object?>
 				{
 					["view"] = "tree-content",
-					["format"] = "text"
+					["format"] = "text",
+					["max_tokens"] = "100000"
 				},
 				progress,
 				options: null,
@@ -115,6 +116,10 @@ public sealed class McpServerProcessTests
 			Assert.NotEqual(true, pack.IsError);
 			AssertRedactionPolicy(pack, hidePrivateData);
 			AssertGeneratedRootPathPolicy(pack, expectedProject, hidePrivateData);
+			Assert.Contains(
+				"Token budget: 100000 estimated tokens.",
+				Assert.IsType<TextContentBlock>(Assert.Single(pack.Content)).Text,
+				StringComparison.Ordinal);
 		}
 
 		process.StandardInput.Close();

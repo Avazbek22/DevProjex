@@ -128,6 +128,40 @@ public sealed class TerminalProcessSmokeIntegrationTests
 	}
 
 	[Fact]
+	public async Task ContextTokenBudgetRunsThroughTheRealEntryPoint()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("token-budget-source");
+		File.WriteAllText(Path.Combine(project, "A-large.txt"), new string('a', 100));
+		File.WriteAllText(Path.Combine(project, "B-small.txt"), "b");
+
+		var context = await RunAsync(
+		[
+			"export", "context", project,
+			"--view", "tree-content",
+			"--format", "json",
+			"--output", "-",
+			"--max-tokens", "1",
+			"--git-mode", "none",
+			"--exclude", "none",
+			"--progress", "never",
+			"--language", "en"
+		]);
+
+		Assert.Equal(CommandLineExitCodes.Success, context.ExitCode);
+		using var document = JsonDocument.Parse(context.StandardOutput);
+		var file = Assert.Single(document.RootElement.GetProperty("files").EnumerateArray());
+		Assert.Equal("B-small.txt", file.GetProperty("path").GetString());
+		var budget = document.RootElement.GetProperty("tokenBudget");
+		Assert.Equal(1, budget.GetProperty("includedFiles").GetInt32());
+		Assert.Equal(1, budget.GetProperty("skippedFiles").GetInt32());
+		Assert.Contains("Token budget 1:", context.StandardError, StringComparison.Ordinal);
+		Assert.Contains("A-large.txt", context.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain("\u001b", context.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("\u001b", context.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task ContextExportReportsFifoAsUnreadableWithoutBlocking()
 	{
 		if (OperatingSystem.IsWindows())

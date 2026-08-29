@@ -1799,6 +1799,43 @@ public sealed class ProjectContextStreamingRegressionTests
 		Assert.Equal(1, result.TokenBudget?.SkippedFileCount);
 	}
 
+	[Fact]
+	public async Task CompleteTextDocumentMatchesBoundedOutputAcrossTrailingLineEndings()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/A-lf.txt", "alpha\n");
+		workspace.WriteFile("project/B-crlf.txt", "beta\r\n");
+		workspace.WriteFile("project/C-empty.txt", string.Empty);
+		workspace.WriteFile("project/D-none.txt", "delta");
+		var services = new TerminalServiceFactory(
+				() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var plan = await services.ContextFactory.BuildAsync(
+			project,
+			new ProjectSelectionSpec(GitMode: GitFilteringMode.None, Exclusions: []),
+			cancellationToken: TestContext.Current.CancellationToken);
+		var expected = await services.ContextDocumentService.BuildAsync(
+			plan,
+			ProjectContextView.Content,
+			ProjectContextDocumentFormat.Text,
+			new ProjectContextDocumentLimits(
+				MaximumFiles: plan.IncludedFiles.Count,
+				MaximumCharacters: 16 * 1024,
+				MaximumFileBytes: 16 * 1024),
+			TestContext.Current.CancellationToken);
+		await using var destination = new WriteOnlyNonSeekableStream();
+
+		await services.ContextDocumentService.WriteCompleteAsync(
+			plan,
+			ProjectContextView.Content,
+			ProjectContextDocumentFormat.Text,
+			destination,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(Encoding.UTF8.GetBytes(expected), destination.ToArray());
+	}
+
 	private sealed class CompleteSnapshotReadAheadProbeAnalyzer : IFileContentAnalyzer
 	{
 		private readonly FileContentAnalyzer _inner = new();
