@@ -30,7 +30,9 @@ public sealed record ProjectContextDocumentLimits(
 	int MaximumCharacters = 256 * 1024,
 	long MaximumFileBytes = 256 * 1024);
 
-public sealed record ProjectContextWriteResult(IReadOnlyList<UnscannableFile> UnscannableFiles)
+public sealed record ProjectContextWriteResult(
+	IReadOnlyList<UnscannableFile> UnscannableFiles,
+	ProjectContextTokenBudgetReport? TokenBudget = null)
 {
 	public static ProjectContextWriteResult Empty { get; } = new([]);
 }
@@ -122,7 +124,8 @@ public sealed class ProjectContextDocumentService(
 		CancellationToken cancellationToken = default,
 		bool plain = false,
 		bool useUnifiedContentHeaders = false,
-		IProgress<ProjectCopyExportProgress>? writeProgress = null)
+		IProgress<ProjectCopyExportProgress>? writeProgress = null,
+		long? maximumEstimatedTokens = null)
 	{
 		_ = await WriteCompleteWithReportAsync(
 				plan,
@@ -132,7 +135,8 @@ public sealed class ProjectContextDocumentService(
 				cancellationToken,
 				plain,
 				useUnifiedContentHeaders,
-				writeProgress)
+				writeProgress,
+				maximumEstimatedTokens)
 			.ConfigureAwait(false);
 	}
 
@@ -144,7 +148,8 @@ public sealed class ProjectContextDocumentService(
 		CancellationToken cancellationToken = default,
 		bool plain = false,
 		bool useUnifiedContentHeaders = false,
-		IProgress<ProjectCopyExportProgress>? writeProgress = null)
+		IProgress<ProjectCopyExportProgress>? writeProgress = null,
+		long? maximumEstimatedTokens = null)
 	{
 		ArgumentNullException.ThrowIfNull(plan);
 		ArgumentNullException.ThrowIfNull(destination);
@@ -152,6 +157,7 @@ public sealed class ProjectContextDocumentService(
 		ValidateDocumentFormat(format);
 		if (!destination.CanWrite)
 			throw new ArgumentException("Destination must be writable.", nameof(destination));
+		var tokenBudget = CreateTokenBudget(maximumEstimatedTokens);
 		var effectivePathRedaction = outputPathRedactionDecision ??
 			OutputRootPathPresentation.CaptureRedactionDecision(CreateTransformationContext(plan));
 		var contentPathMapper = CreateContentPathMapper(
@@ -169,7 +175,8 @@ public sealed class ProjectContextDocumentService(
 					plain,
 					useUnifiedContentHeaders,
 					effectivePathRedaction,
-					writeProgress)
+					writeProgress,
+					maximumEstimatedTokens)
 				.ConfigureAwait(false);
 		}
 		using var cancellationDestination = new CancellationBoundWriteStream(
@@ -187,6 +194,7 @@ public sealed class ProjectContextDocumentService(
 						effectivePathRedaction,
 						contentPathMapper,
 						writeProgress,
+						tokenBudget,
 						cancellationToken)
 					.ConfigureAwait(false);
 				break;
@@ -199,6 +207,7 @@ public sealed class ProjectContextDocumentService(
 						effectivePathRedaction,
 						contentPathMapper,
 						writeProgress,
+						tokenBudget,
 						cancellationToken)
 					.ConfigureAwait(false);
 				break;
@@ -210,6 +219,7 @@ public sealed class ProjectContextDocumentService(
 						effectivePathRedaction,
 						contentPathMapper,
 						writeProgress,
+						tokenBudget,
 						cancellationToken)
 					.ConfigureAwait(false);
 				break;
@@ -221,16 +231,17 @@ public sealed class ProjectContextDocumentService(
 						effectivePathRedaction,
 						contentPathMapper,
 						writeProgress,
+						tokenBudget,
 						cancellationToken)
 					.ConfigureAwait(false);
 				break;
 			default:
 				throw new ArgumentOutOfRangeException(nameof(format), format, null);
 		}
-		return ProjectContextWriteResult.Empty;
+		return new ProjectContextWriteResult([], tokenBudget?.CreateReport());
 	}
 
-	public async Task WritePreparedCompleteAsync(
+	public async Task<ProjectContextWriteResult> WritePreparedCompleteAsync(
 		ProjectContextPlan plan,
 		ProjectContextView view,
 		ProjectContextDocumentFormat format,
@@ -239,7 +250,8 @@ public sealed class ProjectContextDocumentService(
 		CancellationToken cancellationToken = default,
 		bool plain = false,
 		bool useUnifiedContentHeaders = false,
-		IProgress<ProjectCopyExportProgress>? writeProgress = null)
+		IProgress<ProjectCopyExportProgress>? writeProgress = null,
+		long? maximumEstimatedTokens = null)
 	{
 		ArgumentNullException.ThrowIfNull(prepared);
 		var pathRedaction = outputPathRedactionDecision ??
@@ -253,7 +265,7 @@ public sealed class ProjectContextDocumentService(
 			secretRedactionSession: null,
 			codeCompressionSession: null,
 			outputPathRedactionDecision: pathRedaction);
-		await service.WriteCompleteAsync(
+		return await service.WriteCompleteWithReportAsync(
 				plan,
 				view,
 				format,
@@ -261,9 +273,85 @@ public sealed class ProjectContextDocumentService(
 				cancellationToken,
 				plain,
 				useUnifiedContentHeaders,
-				writeProgress)
+				writeProgress,
+				maximumEstimatedTokens)
 			.ConfigureAwait(false);
 	}
+
+	public async Task<ProjectContextWriteResult> EvaluateTokenBudgetAsync(
+		ProjectContextPlan plan,
+		ProjectContextView view,
+		long maximumEstimatedTokens,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(plan);
+		ValidateView(view);
+		var tokenBudget = CreateTokenBudget(maximumEstimatedTokens)!;
+		if (!IncludesContent(view))
+			return new ProjectContextWriteResult([], tokenBudget.CreateReport());
+
+		var transformationContext = CreateTransformationContext(plan);
+		if (transformationContext is null)
+		{
+			await EvaluateTokenBudgetCoreAsync(
+					plan,
+					tokenBudget,
+					cancellationToken)
+				.ConfigureAwait(false);
+			return new ProjectContextWriteResult([], tokenBudget.CreateReport());
+		}
+
+		var preparer = new SecretRedactionOutputPreparer(contentAnalyzer);
+		await using var prepared = await preparer
+			.PrepareAsync(transformationContext, plan.IncludedFiles, cancellationToken)
+			.ConfigureAwait(false);
+		var service = new ProjectContextDocumentService(
+			treeExportService,
+			new PreparedSecretFileContentAnalyzer(contentAnalyzer, prepared),
+			omissionMessageProvider,
+			secretRedactionSession: null,
+			codeCompressionSession: null,
+			outputPathRedactionDecision: OutputRootPathPresentation.CaptureRedactionDecision(
+				transformationContext));
+		await service.EvaluateTokenBudgetCoreAsync(
+				plan,
+				tokenBudget,
+				cancellationToken)
+			.ConfigureAwait(false);
+		return new ProjectContextWriteResult(prepared.UnscannableFiles, tokenBudget.CreateReport());
+	}
+
+	private async Task EvaluateTokenBudgetCoreAsync(
+		ProjectContextPlan plan,
+		ProjectContextTokenBudgetAccumulator tokenBudget,
+		CancellationToken cancellationToken)
+	{
+		var effectivePathRedaction = outputPathRedactionDecision ??
+			OutputRootPathPresentation.CaptureRedactionDecision(CreateTransformationContext(plan));
+		var contentPathMapper = CreateContentPathMapper(
+			plan,
+			useUnifiedContentHeaders: true,
+			ProjectContextView.Content);
+		await foreach (var source in OpenSourceSnapshotsInOrderAsync(
+			               plan.SourceRoot,
+			               plan.IncludedFiles,
+			               cancellationToken).ConfigureAwait(false))
+		{
+			await using var snapshot = source.Snapshot;
+			var file = CreateCompleteFileDocument(
+				source.Path,
+				snapshot.Result,
+				contentPathMapper,
+				effectivePathRedaction);
+			tokenBudget.TryInclude(file.Path, file.Metrics?.CharCount ?? 0);
+		}
+	}
+
+	private static ProjectContextTokenBudgetAccumulator? CreateTokenBudget(
+		long? maximumEstimatedTokens) =>
+		maximumEstimatedTokens is null
+			? null
+			: new ProjectContextTokenBudgetAccumulator(maximumEstimatedTokens.Value);
 
 	// One gate for both transformations: whichever is enabled, the document is built from prepared
 	// text rather than from the files on disk, so every format sees the same bytes.
@@ -333,7 +421,8 @@ public sealed class ProjectContextDocumentService(
 		bool plain,
 		bool useUnifiedContentHeaders,
 		OutputPathRedactionDecision? pathRedaction,
-		IProgress<ProjectCopyExportProgress>? writeProgress)
+		IProgress<ProjectCopyExportProgress>? writeProgress,
+		long? maximumEstimatedTokens)
 	{
 		var context = CreateTransformationContext(plan)!;
 		var preparer = new SecretRedactionOutputPreparer(contentAnalyzer);
@@ -348,7 +437,7 @@ public sealed class ProjectContextDocumentService(
 			secretRedactionSession: null,
 			codeCompressionSession: null,
 			outputPathRedactionDecision: pathRedaction);
-		await service.WriteCompleteAsync(
+		var writeResult = await service.WriteCompleteWithReportAsync(
 				plan,
 				view,
 				format,
@@ -356,9 +445,10 @@ public sealed class ProjectContextDocumentService(
 				cancellationToken,
 				plain,
 				useUnifiedContentHeaders,
-				writeProgress)
+				writeProgress,
+				maximumEstimatedTokens)
 			.ConfigureAwait(false);
-		return new ProjectContextWriteResult(prepared.UnscannableFiles);
+		return new ProjectContextWriteResult(prepared.UnscannableFiles, writeResult.TokenBudget);
 	}
 
 	private async Task WriteCompleteTextAsync(
@@ -369,6 +459,7 @@ public sealed class ProjectContextDocumentService(
 		OutputPathRedactionDecision? pathRedaction,
 		Func<string, string>? contentPathMapper,
 		IProgress<ProjectCopyExportProgress>? writeProgress,
+		ProjectContextTokenBudgetAccumulator? tokenBudget,
 		CancellationToken cancellationToken)
 	{
 		await using var writer = CreateStreamWriter(destination);
@@ -403,6 +494,12 @@ public sealed class ProjectContextDocumentService(
 					snapshot.Result,
 					contentPathMapper,
 					pathRedaction);
+				if (tokenBudget is not null &&
+				    !tokenBudget.TryInclude(file.Path, file.Metrics?.CharCount ?? 0))
+				{
+					ReportProgress(writeProgress, index + 1, plan.IncludedFiles.Count);
+					continue;
+				}
 				if (hasOutput)
 				{
 					await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
@@ -458,6 +555,7 @@ public sealed class ProjectContextDocumentService(
 		OutputPathRedactionDecision? pathRedaction,
 		Func<string, string>? contentPathMapper,
 		IProgress<ProjectCopyExportProgress>? writeProgress,
+		ProjectContextTokenBudgetAccumulator? tokenBudget,
 		CancellationToken cancellationToken)
 	{
 		await using var writer = CreateStreamWriter(destination);
@@ -512,6 +610,12 @@ public sealed class ProjectContextDocumentService(
 					snapshot.Result,
 					contentPathMapper,
 					pathRedaction);
+				if (tokenBudget is not null &&
+				    !tokenBudget.TryInclude(file.Path, file.Metrics?.CharCount ?? 0))
+				{
+					ReportProgress(writeProgress, ++processedFiles, plan.IncludedFiles.Count);
+					continue;
+				}
 				await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
 				await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
 				await writer.WriteAsync("## ".AsMemory(), cancellationToken).ConfigureAwait(false);
@@ -559,6 +663,7 @@ public sealed class ProjectContextDocumentService(
 		OutputPathRedactionDecision? pathRedaction,
 		Func<string, string>? contentPathMapper,
 		IProgress<ProjectCopyExportProgress>? writeProgress,
+		ProjectContextTokenBudgetAccumulator? tokenBudget,
 		CancellationToken cancellationToken)
 	{
 		using var writer = new Utf8JsonWriter(destination, new JsonWriterOptions
@@ -607,6 +712,12 @@ public sealed class ProjectContextDocumentService(
 					snapshot.Result,
 					contentPathMapper,
 					pathRedaction);
+				if (tokenBudget is not null &&
+				    !tokenBudget.TryInclude(file.Path, file.Metrics?.CharCount ?? 0))
+				{
+					ReportProgress(writeProgress, ++processedFiles, plan.IncludedFiles.Count);
+					continue;
+				}
 				writer.WriteStartObject();
 				writer.WriteString("path", file.Path);
 				writer.WriteBoolean("isBinary", file.IsBinary);
@@ -638,6 +749,8 @@ public sealed class ProjectContextDocumentService(
 			}
 		}
 		writer.WriteEndArray();
+		if (tokenBudget is not null)
+			WriteTokenBudget(writer, tokenBudget.CreateReport());
 		WriteDiagnostics(writer, plan.Diagnostics);
 		writer.WriteString("fingerprint", plan.Fingerprint);
 		writer.WriteEndObject();
@@ -651,6 +764,7 @@ public sealed class ProjectContextDocumentService(
 		OutputPathRedactionDecision? pathRedaction,
 		Func<string, string>? contentPathMapper,
 		IProgress<ProjectCopyExportProgress>? writeProgress,
+		ProjectContextTokenBudgetAccumulator? tokenBudget,
 		CancellationToken cancellationToken)
 	{
 		using var writer = XmlWriter.Create(destination, new XmlWriterSettings
@@ -704,6 +818,12 @@ public sealed class ProjectContextDocumentService(
 					snapshot.Result,
 					contentPathMapper,
 					pathRedaction);
+				if (tokenBudget is not null &&
+				    !tokenBudget.TryInclude(file.Path, file.Metrics?.CharCount ?? 0))
+				{
+					ReportProgress(writeProgress, ++processedFiles, plan.IncludedFiles.Count);
+					continue;
+				}
 				writer.WriteStartElement("file");
 				WriteSanitizedXmlAttributeString(writer, "path", file.Path);
 				writer.WriteAttributeString("isBinary", XmlConvert.ToString(file.IsBinary));
@@ -743,6 +863,8 @@ public sealed class ProjectContextDocumentService(
 			}
 		}
 		writer.WriteEndElement();
+		if (tokenBudget is not null)
+			WriteTokenBudgetXml(writer, tokenBudget.CreateReport());
 		writer.WriteStartElement("diagnostics");
 		foreach (var diagnostic in plan.Diagnostics)
 		{
@@ -1593,6 +1715,29 @@ public sealed class ProjectContextDocumentService(
 		writer.WriteEndObject();
 	}
 
+	private static void WriteTokenBudget(
+		Utf8JsonWriter writer,
+		ProjectContextTokenBudgetReport report)
+	{
+		writer.WriteStartObject("tokenBudget");
+		writer.WriteNumber("maximumEstimatedTokens", report.MaximumEstimatedTokens);
+		writer.WriteNumber("includedFiles", report.IncludedFileCount);
+		writer.WriteNumber("skippedFiles", report.SkippedFileCount);
+		writer.WriteNumber("includedEstimatedTokens", report.IncludedEstimatedTokens);
+		writer.WriteNumber("skippedEstimatedTokens", report.SkippedEstimatedTokens);
+		writer.WriteStartArray("largestSkippedFiles");
+		foreach (var file in report.LargestSkippedFiles)
+		{
+			writer.WriteStartObject();
+			writer.WriteString("path", file.Path);
+			writer.WriteNumber("estimatedTokens", file.EstimatedTokens);
+			writer.WriteEndObject();
+		}
+		writer.WriteEndArray();
+		writer.WriteNumber("additionalSkippedFiles", report.AdditionalSkippedFileCount);
+		writer.WriteEndObject();
+	}
+
 	private static void WriteTreeNode(
 		Utf8JsonWriter writer,
 		TreeNodeDescriptor node,
@@ -1761,6 +1906,39 @@ public sealed class ProjectContextDocumentService(
 		writer.WriteElementString("bytes", XmlConvert.ToString(plan.IncludedBytes));
 		writer.WriteElementString("characters", XmlConvert.ToString(content.Chars));
 		writer.WriteElementString("estimatedTokens", XmlConvert.ToString(content.Tokens));
+		writer.WriteEndElement();
+	}
+
+	private static void WriteTokenBudgetXml(
+		XmlWriter writer,
+		ProjectContextTokenBudgetReport report)
+	{
+		writer.WriteStartElement("tokenBudget");
+		writer.WriteElementString(
+			"maximumEstimatedTokens",
+			XmlConvert.ToString(report.MaximumEstimatedTokens));
+		writer.WriteElementString("includedFiles", XmlConvert.ToString(report.IncludedFileCount));
+		writer.WriteElementString("skippedFiles", XmlConvert.ToString(report.SkippedFileCount));
+		writer.WriteElementString(
+			"includedEstimatedTokens",
+			XmlConvert.ToString(report.IncludedEstimatedTokens));
+		writer.WriteElementString(
+			"skippedEstimatedTokens",
+			XmlConvert.ToString(report.SkippedEstimatedTokens));
+		writer.WriteStartElement("largestSkippedFiles");
+		foreach (var file in report.LargestSkippedFiles)
+		{
+			writer.WriteStartElement("file");
+			WriteSanitizedXmlAttributeString(writer, "path", file.Path);
+			writer.WriteAttributeString(
+				"estimatedTokens",
+				XmlConvert.ToString(file.EstimatedTokens));
+			writer.WriteEndElement();
+		}
+		writer.WriteEndElement();
+		writer.WriteElementString(
+			"additionalSkippedFiles",
+			XmlConvert.ToString(report.AdditionalSkippedFileCount));
 		writer.WriteEndElement();
 	}
 
