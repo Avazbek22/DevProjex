@@ -534,6 +534,9 @@ Whenever the option is present, stderr reports included and skipped counts and
 estimated tokens, lists up to 25 largest skipped files, and suggests how to fit
 more. JSON and XML also include an additive `tokenBudget` object; text and
 Markdown payloads remain unchanged apart from omitted file sections.
+In JSON and XML, the existing `metrics` object and tree continue to describe the
+complete effective selection, while `files` and `tokenBudget` describe the
+content admitted by the budget.
 
 With `--hide-secrets` or `--hide-private-data`, detector and budget failures fail closed and
 produce no complete output artifact. A text file above the supported scan limit or in an

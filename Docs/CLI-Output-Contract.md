@@ -373,6 +373,9 @@ These are estimated tokens based on each file's transformed character count,
 rounded up at one token per four characters. Tree text, headings, and serializer
 markup are outside the budget, so this sum is not required to equal the complete
 document's `metrics.estimatedTokens` value.
+The existing `metrics` object and `tree` describe the complete effective
+selection before token-budget omission; `files` and `tokenBudget` describe the
+content admitted by the budget.
 
 ## Context XML
 

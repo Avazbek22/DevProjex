@@ -1153,6 +1153,9 @@ optional `tokenBudget` sibling after `files`. It contains
 `additionalSkippedFiles`. Each largest-skipped entry contains `path` and
 `estimatedTokens`. The budget sums per-file estimates after enabled content
 transformations and excludes tree text, headings, and serialization markup.
+The existing `metrics` object and `tree` remain pre-budget descriptions of the
+complete effective selection; `files` and `tokenBudget` describe the content
+admitted by the budget.
 
 Analysis v1 contains inventory, effective selection, metrics, diagnostics, and
 fingerprint. Either findings option adds `findingCount`. With `--findings`, it

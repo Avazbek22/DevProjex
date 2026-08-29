@@ -1477,6 +1477,51 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task StructuredPackMetricsReflectEffectiveDetailBeforeTokenBudget()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(
+			Path.Combine(project, "Large.cs"),
+			"internal static class Large { public static int Calculate() { " +
+			string.Join(' ', Enumerable.Repeat("var value = 12345;", 100)) +
+			" return 1; } }");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var full = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["view"] = "content",
+				["format"] = "json",
+				["detail"] = "full",
+				["max_tokens"] = 10_000
+			});
+		var signatures = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["view"] = "content",
+				["format"] = "json",
+				["detail"] = "signatures",
+				["max_tokens"] = 10_000
+			});
+		using var fullDocument = JsonDocument.Parse(ExtractSpotlightBody(Text(full)));
+		using var signaturesDocument = JsonDocument.Parse(ExtractSpotlightBody(Text(signatures)));
+
+		var fullMetrics = fullDocument.RootElement.GetProperty("metrics");
+		var signaturesMetrics = signaturesDocument.RootElement.GetProperty("metrics");
+		Assert.True(
+			signaturesMetrics.GetProperty("estimatedTokens").GetInt64() <
+			fullMetrics.GetProperty("estimatedTokens").GetInt64());
+		Assert.True(
+			signaturesDocument.RootElement.GetProperty("tokenBudget")
+				.GetProperty("includedEstimatedTokens").GetInt64() <
+			fullDocument.RootElement.GetProperty("tokenBudget")
+				.GetProperty("includedEstimatedTokens").GetInt64());
+	}
+
+	[Fact]
 	public async Task TrackedOnlyStringFiltersEverySelectionToolAndRejectsNonGitRoots()
 	{
 		using var workspace = new TemporaryDirectory();
