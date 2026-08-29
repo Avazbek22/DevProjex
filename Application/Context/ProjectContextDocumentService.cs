@@ -158,7 +158,6 @@ public sealed class ProjectContextDocumentService(
 		ValidateDocumentFormat(format);
 		if (!destination.CanWrite)
 			throw new ArgumentException("Destination must be writable.", nameof(destination));
-		var tokenBudget = CreateTokenBudget(maximumEstimatedTokens);
 		var effectivePathRedaction = outputPathRedactionDecision ??
 			OutputRootPathPresentation.CaptureRedactionDecision(CreateTransformationContext(plan));
 		var contentPathMapper = CreateContentPathMapper(
@@ -180,6 +179,7 @@ public sealed class ProjectContextDocumentService(
 					maximumEstimatedTokens)
 				.ConfigureAwait(false);
 		}
+		var tokenBudget = CreateTokenBudget(maximumEstimatedTokens);
 		using var cancellationDestination = new CancellationBoundWriteStream(
 			destination,
 			cancellationToken);

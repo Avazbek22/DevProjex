@@ -19,8 +19,7 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 {
 	internal const int MaximumReportedSkippedFiles = 25;
 	private readonly long _maximumEstimatedTokens;
-	private readonly List<ProjectContextTokenBudgetSkippedFile> _largestSkippedFiles =
-		new(MaximumReportedSkippedFiles);
+	private List<ProjectContextTokenBudgetSkippedFile>? _largestSkippedFiles;
 	private long _remainingEstimatedTokens;
 	private int _includedFileCount;
 	private int _skippedFileCount;
@@ -55,7 +54,7 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 
 	public ProjectContextTokenBudgetReport CreateReport()
 	{
-		var largestSkippedFiles = _largestSkippedFiles.ToArray();
+		var largestSkippedFiles = _largestSkippedFiles?.ToArray() ?? [];
 		return new ProjectContextTokenBudgetReport(
 			_maximumEstimatedTokens,
 			_includedFileCount,
@@ -68,15 +67,17 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 
 	private void RetainLargestSkippedFile(ProjectContextTokenBudgetSkippedFile candidate)
 	{
-		var insertionIndex = _largestSkippedFiles.BinarySearch(candidate, SkippedFileComparer.Instance);
+		var largestSkippedFiles = _largestSkippedFiles ??=
+			new List<ProjectContextTokenBudgetSkippedFile>(MaximumReportedSkippedFiles);
+		var insertionIndex = largestSkippedFiles.BinarySearch(candidate, SkippedFileComparer.Instance);
 		if (insertionIndex < 0)
 			insertionIndex = ~insertionIndex;
 		if (insertionIndex >= MaximumReportedSkippedFiles)
 			return;
 
-		_largestSkippedFiles.Insert(insertionIndex, candidate);
-		if (_largestSkippedFiles.Count > MaximumReportedSkippedFiles)
-			_largestSkippedFiles.RemoveAt(MaximumReportedSkippedFiles);
+		largestSkippedFiles.Insert(insertionIndex, candidate);
+		if (largestSkippedFiles.Count > MaximumReportedSkippedFiles)
+			largestSkippedFiles.RemoveAt(MaximumReportedSkippedFiles);
 	}
 
 	private sealed class SkippedFileComparer : IComparer<ProjectContextTokenBudgetSkippedFile>
