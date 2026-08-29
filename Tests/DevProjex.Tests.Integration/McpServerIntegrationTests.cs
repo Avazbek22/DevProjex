@@ -211,6 +211,23 @@ public sealed class McpServerIntegrationTests
 		Assert.Equal(2, maximumTokens.GetProperty("oneOf").GetArrayLength());
 		Assert.Equal(1, maximumTokens.GetProperty("oneOf")[0].GetProperty("minimum").GetInt32());
 		Assert.Equal("^[1-9][0-9]*$", maximumTokens.GetProperty("oneOf")[1].GetProperty("pattern").GetString());
+		var positiveNumericStrings = new (string Tool, string Property)[]
+		{
+			("analyze", "top_files"),
+			("read_pack", "start_line"),
+			("read_pack", "end_line"),
+			("search_project", "max_results"),
+			("get_file", "start_line"),
+			("get_file", "end_line")
+		};
+		foreach (var (toolName, propertyName) in positiveNumericStrings)
+		{
+			var property = tools.Single(tool => tool.Name == toolName)
+				.ProtocolTool.InputSchema.GetProperty("properties").GetProperty(propertyName);
+			Assert.Equal(
+				"^[1-9][0-9]*$",
+				property.GetProperty("oneOf")[1].GetProperty("pattern").GetString());
+		}
 		foreach (var name in new[] { "get_tree", "analyze", "pack_context", "search_project" })
 		{
 			var properties = tools.Single(tool => tool.Name == name)
