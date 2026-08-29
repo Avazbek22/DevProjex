@@ -144,6 +144,7 @@ public sealed record ProjectContextRequest(
 	ProjectSelectionSpec Selection,
 	ProjectSourceIdentity? SourceIdentity = null)
 {
+	public IReadOnlyDictionary<string, bool>? KnownExtensionStates { get; init; }
 	internal bool CaptureIgnoreImpactCounts { get; init; }
 }
 

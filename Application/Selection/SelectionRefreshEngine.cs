@@ -299,7 +299,7 @@ public sealed class SelectionRefreshEngine(
     {
         var ignoreRules = BuildIgnoreRules(context.Path, selectedIgnoreOptions, selectedRoots, cancellationToken);
         var extensionScanRules = IgnoreRulesProjection.ForExtensionAvailability(ignoreRules);
-        var effectiveExtensionPolicy = BuildEffectiveExtensionPolicy(context);
+		var effectiveExtensionPolicy = ExtensionInclusionPolicyFactory.Create(context);
 
         // Extension availability, effective ignore counts, and optional tree inventory must
         // come from the same filesystem observation. This prevents mismatched UI sections and
@@ -905,24 +905,6 @@ public sealed class SelectionRefreshEngine(
         }
 
         return filtered;
-    }
-
-    private static IExtensionInclusionPolicy? BuildEffectiveExtensionPolicy(SelectionRefreshContext context)
-    {
-        if (!ShouldSuppressAllTogglesOverride(context) && context.AllExtensionsChecked)
-            return null;
-
-		if (!context.ExtensionsSelectionInitialized)
-			return null;
-
-		var previousSelections = new HashSet<string>(
-			context.ExtensionsSelectionCache,
-			StringComparer.OrdinalIgnoreCase);
-		var stateCache = context.ExtensionOptionStateCache;
-
-		return new ExtensionSelectionInclusionPolicy(
-            new SelectionStateResolver(previousSelections, stateCache),
-            defaultForNewExtension: stateCache is not null);
     }
 
     private static bool ResolveIgnoreOptionCheckedState(

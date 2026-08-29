@@ -26,7 +26,9 @@ public sealed record SelectionRefreshContext(
     // Explicit CLI collections are closed sets. Persisted settings maps are open-world:
     // known rows retain their state and newly discovered rows receive product defaults.
     bool RootSelectionIsExplicit = false,
-    bool ExtensionSelectionIsExplicit = false)
+    bool ExtensionSelectionIsExplicit = false,
+	GitFilteringMode GitMode = GitFilteringMode.None,
+	string? GitDiffRange = null)
 {
     private static readonly IReadOnlySet<string> EmptyRootSelection =
         new HashSet<string>(PathComparer.Default);
@@ -46,7 +48,9 @@ public sealed record SelectionRefreshContext(
         bool ignoreOptionStateCacheIsComplete,
         bool captureTreeInventory,
         IReadOnlyList<SelectionOption>? currentScanRootOptions,
-        bool extensionSelectionIsExplicit) =>
+        bool extensionSelectionIsExplicit,
+		GitFilteringMode gitMode = GitFilteringMode.None,
+		string? gitDiffRange = null) =>
         new(
             Path: path,
             PreparedSelectionMode: preparedSelectionMode,
@@ -67,5 +71,7 @@ public sealed record SelectionRefreshContext(
             CaptureTreeInventory: captureTreeInventory,
             CurrentRootOptions: currentScanRootOptions,
             RootSelectionIsExplicit: false,
-            ExtensionSelectionIsExplicit: extensionSelectionIsExplicit);
+            ExtensionSelectionIsExplicit: extensionSelectionIsExplicit,
+			GitMode: gitMode,
+			GitDiffRange: gitDiffRange);
 }

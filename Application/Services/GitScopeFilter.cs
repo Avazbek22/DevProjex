@@ -69,20 +69,6 @@ public static class GitScopeFilter
 			};
 		}
 
-		var scopeProjection = ProjectContextPlanner.ResolveSelectionProjection(
-			plan.EffectiveTree,
-			scope.IncludedPaths,
-			scope.IncludedPaths.Count == 0,
-			knownFullTreeFilePaths: null,
-			cancellationToken);
-		var scopedBaseline = plan with
-		{
-			EffectiveTree = scopeProjection.ProjectedTree,
-			ProjectedTree = scopeProjection.ProjectedTree,
-			IncludedFiles = scopeProjection.IncludedFiles,
-			IncludedFolders = scopeProjection.IncludedFolders
-		};
-
 		var selected = new List<string>(Math.Min(plan.IncludedFiles.Count, scope.IncludedPaths.Count));
 		foreach (var path in plan.IncludedFiles)
 		{
@@ -95,17 +81,18 @@ public static class GitScopeFilter
 		if (selected.Count > 0)
 		{
 			narrowed = await planner
-				.ReprojectSelectionAsync(scopedBaseline, selected, cancellationToken)
+				.ReprojectSelectionAsync(plan, selected, cancellationToken)
 				.ConfigureAwait(false);
 		}
 		else
 		{
 			narrowed = await planner
-				.ReprojectEmptySelectionAsync(scopedBaseline, cancellationToken)
+				.ReprojectEmptySelectionAsync(plan, cancellationToken)
 				.ConfigureAwait(false);
 		}
 
 		var diagnostics = narrowed.Diagnostics;
+		var presentation = planner.BuildGitScopePresentation(plan, scope, cancellationToken);
 		if (scope.DeletedPathCount > 0)
 		{
 			diagnostics = AppendDiagnostic(
@@ -116,6 +103,11 @@ public static class GitScopeFilter
 		return narrowed with
 		{
 			Selection = plan.Selection,
+			AvailableExtensions = presentation.AvailableExtensions,
+			SelectedExtensions = plan.SelectedExtensions,
+			HasIgnoreOptionCounts = true,
+			IgnoreOptionCounts = presentation.IgnoreOptionCounts,
+			IgnoreControllerImpactCounts = presentation.ControllerImpactCounts,
 			Diagnostics = diagnostics
 		};
 	}

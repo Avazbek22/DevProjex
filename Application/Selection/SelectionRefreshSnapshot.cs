@@ -23,6 +23,9 @@ public sealed record SelectionRefreshSnapshot(
     IReadOnlySet<IgnoreOptionId>? SelectedIgnoreOptions = null,
     IgnoreRules? EffectiveRules = null)
 {
+	public GitScopePresentationProjection? GitScopePresentation { get; init; }
+	public GitScopePathResult? GitScope { get; init; }
+
     public IReadOnlyList<SelectionOption> EffectiveExtensionOptions =>
         VisibleExtensionOptions ?? ExtensionOptions;
 

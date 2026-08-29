@@ -1,4 +1,5 @@
 using DevProjex.Application.Context;
+using DevProjex.Application.Services;
 using DevProjex.Infrastructure.FileSystem;
 
 namespace DevProjex.Tests.Unit;
@@ -98,5 +99,365 @@ public sealed class GitScopeSelectionTests
 
 		Assert.Equal([kept], narrowed.OrderedFilePaths);
 		Assert.Equal("kept.cs", Assert.Single(narrowed.Root.Children).DisplayName);
+	}
+
+	[Fact]
+	public void EmptyScopeDoesNotAdvertiseUnrelatedExtensionsOrIgnoreImpacts()
+	{
+		using var project = new TemporaryDirectory();
+		project.CreateFile("regular.cs", "class Regular {}\n");
+		project.CreateFile(".generated/hidden.cs", "class Hidden {}\n");
+		project.CreateFile(".metadata", "value\n");
+		project.CreateFile("NOTICE", "value\n");
+		var (inventory, rules, roots) = BuildInventory(project.Path);
+
+		var projection = GitScopePresentationProjector.Build(
+			project.Path,
+			inventory,
+			new HashSet<string>(PathComparer.Default),
+			roots,
+			roots,
+			ExtensionPolicy(".cs", ".metadata"),
+			rules,
+			TestContext.Current.CancellationToken);
+
+		Assert.Empty(projection.AvailableExtensions);
+		Assert.Equal(IgnoreOptionCounts.Empty, projection.IgnoreOptionCounts);
+		Assert.Equal(IgnoreControllerImpactCounts.Empty, projection.ControllerImpactCounts);
+	}
+
+	[Fact]
+	public void ScopeCountsOnlyRulesThatCanChangeItsFiles()
+	{
+		using var project = new TemporaryDirectory();
+		var dotFolderFile = PathUtility.Normalize(
+			project.CreateFile(".generated/staged.cs", "class Staged {}\n"));
+		var dotFile = PathUtility.Normalize(project.CreateFile(".metadata", "value\n"));
+		var extensionlessFile = PathUtility.Normalize(project.CreateFile("NOTICE", "value\n"));
+		project.CreateFile(".unrelated/ignored.cs", "class Unrelated {}\n");
+		project.CreateFile("ordinary.txt", "unrelated\n");
+		var (inventory, rules, roots) = BuildInventory(project.Path);
+		var scope = new HashSet<string>(
+			[dotFolderFile, dotFile, extensionlessFile],
+			PathComparer.Default);
+
+		var projection = GitScopePresentationProjector.Build(
+			project.Path,
+			inventory,
+			scope,
+			roots,
+			roots,
+			ExtensionPolicy(".cs", ".metadata"),
+			rules,
+			TestContext.Current.CancellationToken);
+
+		Assert.Empty(projection.AvailableExtensions);
+		Assert.Equal(1, projection.IgnoreOptionCounts.DotFolders);
+		Assert.Equal(1, projection.IgnoreOptionCounts.DotFiles);
+		Assert.Equal(1, projection.IgnoreOptionCounts.ExtensionlessFiles);
+		Assert.Equal(0, projection.IgnoreOptionCounts.HiddenFolders);
+		Assert.Equal(0, projection.IgnoreOptionCounts.HiddenFiles);
+		Assert.Equal(0, projection.IgnoreOptionCounts.EmptyFolders);
+		Assert.Equal(0, projection.IgnoreOptionCounts.EmptyFiles);
+
+		var dotFoldersVisible = GitScopePresentationProjector.Build(
+			project.Path,
+			inventory,
+			scope,
+			roots,
+			roots,
+			ExtensionPolicy(".cs"),
+			rules with { IgnoreDotFolders = false },
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal([".cs"], dotFoldersVisible.AvailableExtensions);
+		Assert.Equal(1, dotFoldersVisible.IgnoreOptionCounts.DotFolders);
+	}
+
+	[Fact]
+	public void ActiveFileRulesExposeOnlyTheCurrentDecisionOwner()
+	{
+		using var project = new TemporaryDirectory();
+		var scopedFile = PathUtility.Normalize(project.CreateFile(".empty.cs", string.Empty));
+		var (inventory, rules, roots) = BuildInventory(project.Path);
+		var scope = new HashSet<string>([scopedFile], PathComparer.Default);
+		var inventoryFile = Assert.Single(inventory.Entries, static entry => !entry.IsDirectory);
+		Assert.Contains(inventoryFile.FullPath, scope);
+		Assert.Equal(0, inventoryFile.ParentIndex);
+		Assert.Equal(".empty.cs", inventoryFile.Name);
+		Assert.Equal(
+			IgnoreDecisionOwner.DotFiles,
+			IgnoreDecisionEngine.EvaluateFile(
+				inventoryFile.FullPath,
+				inventoryFile.Name,
+				inventoryFile.IsHidden,
+				inventoryFile.Length,
+				rules,
+				shouldApplySmartIgnore: false,
+				IgnoreRules.GitIgnoreEvaluation.NotIgnored).Owner);
+
+		var dotOwner = GitScopePresentationProjector.Build(
+			project.Path,
+			inventory,
+			scope,
+			roots,
+			roots,
+			ExtensionPolicy(".cs"),
+			rules,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, dotOwner.IgnoreOptionCounts.DotFiles);
+		Assert.Equal(0, dotOwner.IgnoreOptionCounts.ExtensionlessFiles);
+		Assert.Equal(0, dotOwner.IgnoreOptionCounts.EmptyFiles);
+
+		var emptyOwner = GitScopePresentationProjector.Build(
+			project.Path,
+			inventory,
+			scope,
+			roots,
+			roots,
+			ExtensionPolicy(".cs"),
+			rules with { IgnoreDotFiles = false },
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(0, emptyOwner.IgnoreOptionCounts.DotFiles);
+		Assert.Equal(0, emptyOwner.IgnoreOptionCounts.ExtensionlessFiles);
+		Assert.Equal(1, emptyOwner.IgnoreOptionCounts.EmptyFiles);
+	}
+
+	[Fact]
+	public void NestedDirectoryImpactCountsOnlyReachableBlockersInTheActiveState()
+	{
+		using var project = new TemporaryDirectory();
+		var scopedFile = PathUtility.Normalize(project.CreateFile(".outer/.inner/file.cs", "class File {}\n"));
+		var (inventory, rules, roots) = BuildInventory(project.Path);
+		var scope = new HashSet<string>([scopedFile], PathComparer.Default);
+		var extensions = new HashSet<string>([".cs"], StringComparer.OrdinalIgnoreCase);
+
+		var active = GitScopePresentationProjector.Build(
+			project.Path,
+			inventory,
+			scope,
+			roots,
+			roots,
+			new ExtensionSetInclusionPolicy(extensions),
+			rules,
+			TestContext.Current.CancellationToken);
+		var inactive = GitScopePresentationProjector.Build(
+			project.Path,
+			inventory,
+			scope,
+			roots,
+			roots,
+			new ExtensionSetInclusionPolicy(extensions),
+			rules with { IgnoreDotFolders = false },
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, active.IgnoreOptionCounts.DotFolders);
+		Assert.Equal(2, inactive.IgnoreOptionCounts.DotFolders);
+	}
+
+	[Fact]
+	public void DotFolderOwnsHiddenDotFolderUntilDotFilteringIsDisabled()
+	{
+		using var project = new TemporaryDirectory();
+		var directoryPath = Path.Combine(project.Path, ".hidden");
+		var filePath = Path.Combine(directoryPath, "file.cs");
+		var entries = new List<ProjectTreeInventoryEntry>
+		{
+			new(Path.GetFileName(project.Path), project.Path, string.Empty, -1, true, false, 0)
+			{
+				FirstChildIndex = 1,
+				ChildCount = 1
+			},
+			new(".hidden", directoryPath, ".hidden", 0, true, true, 0)
+			{
+				FirstChildIndex = 2,
+				ChildCount = 1
+			},
+			new("file.cs", filePath, Path.Combine(".hidden", "file.cs"), 1, false, false, 12)
+		};
+		var inventory = new ProjectTreeInventorySnapshot(entries, false, false);
+		var roots = new HashSet<string>([".hidden"], PathComparer.Default);
+		var extensions = new HashSet<string>([".cs"], StringComparer.OrdinalIgnoreCase);
+		var scope = new HashSet<string>([filePath], PathComparer.Default);
+		var emptyNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var rules = new IgnoreRules(true, false, true, false, emptyNames, emptyNames);
+
+		var dotOwner = GitScopePresentationProjector.Build(
+			project.Path,
+			inventory,
+			scope,
+			roots,
+			roots,
+			new ExtensionSetInclusionPolicy(extensions),
+			rules,
+			TestContext.Current.CancellationToken);
+		var hiddenOwner = GitScopePresentationProjector.Build(
+			project.Path,
+			inventory,
+			scope,
+			roots,
+			roots,
+			new ExtensionSetInclusionPolicy(extensions),
+			rules with { IgnoreDotFolders = false },
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, dotOwner.IgnoreOptionCounts.DotFolders);
+		Assert.Equal(0, dotOwner.IgnoreOptionCounts.HiddenFolders);
+		Assert.Equal(0, hiddenOwner.IgnoreOptionCounts.DotFolders);
+		Assert.Equal(1, hiddenOwner.IgnoreOptionCounts.HiddenFolders);
+	}
+
+	[Fact]
+	public void ExplicitRootSelectionDoesNotAdvertiseScopedFilesFromOtherRoots()
+	{
+		using var project = new TemporaryDirectory();
+		project.CreateFile("src/in.cs", "class Included {}\n");
+		var excluded = PathUtility.Normalize(project.CreateFile(".cache/out.txt", "excluded\n"));
+		var (inventory, rules, roots) = BuildInventory(project.Path);
+		var selectedRoots = new HashSet<string>(["src"], PathComparer.Default);
+
+		var projection = GitScopePresentationProjector.Build(
+			project.Path,
+			inventory,
+			new HashSet<string>([excluded], PathComparer.Default),
+			selectedRoots,
+			roots,
+			ExtensionPolicy(".cs"),
+			rules,
+			TestContext.Current.CancellationToken,
+			rootSelectionIsExplicit: true);
+
+		Assert.Empty(projection.AvailableExtensions);
+		Assert.Equal(IgnoreOptionCounts.Empty, projection.IgnoreOptionCounts);
+		Assert.Equal(IgnoreControllerImpactCounts.Empty, projection.ControllerImpactCounts);
+	}
+
+	[Fact]
+	public void KnownUncheckedExtensionDoesNotAdvertiseFolderRulesThatCannotRestoreItsFile()
+	{
+		using var project = new TemporaryDirectory();
+		var scopedFile = PathUtility.Normalize(
+			project.CreateFile(".generated/staged.cs", "class Staged {}\n"));
+		var (inventory, rules, roots) = BuildInventory(project.Path);
+		var policy = new ExtensionSelectionInclusionPolicy(
+			new SelectionStateResolver(
+				new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+				new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+				{
+					[".cs"] = false
+				}),
+			defaultForNewExtension: true);
+
+		var projection = GitScopePresentationProjector.Build(
+			project.Path,
+			inventory,
+			new HashSet<string>([scopedFile], PathComparer.Default),
+			roots,
+			roots,
+			policy,
+			rules,
+			TestContext.Current.CancellationToken);
+
+		Assert.Empty(projection.AvailableExtensions);
+		Assert.Equal(IgnoreOptionCounts.Empty, projection.IgnoreOptionCounts);
+	}
+
+	[Fact]
+	public void NewlyDiscoveredExtensionUsesTheOpenWorldDefaultForFolderImpact()
+	{
+		using var project = new TemporaryDirectory();
+		var scopedFile = PathUtility.Normalize(
+			project.CreateFile(".generated/staged.xyz", "value\n"));
+		var (inventory, rules, roots) = BuildInventory(project.Path);
+		var policy = new ExtensionSelectionInclusionPolicy(
+			new SelectionStateResolver(
+				new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+				new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)),
+			defaultForNewExtension: true);
+
+		var hidden = GitScopePresentationProjector.Build(
+			project.Path,
+			inventory,
+			new HashSet<string>([scopedFile], PathComparer.Default),
+			roots,
+			roots,
+			policy,
+			rules,
+			TestContext.Current.CancellationToken);
+		var revealed = GitScopePresentationProjector.Build(
+			project.Path,
+			inventory,
+			new HashSet<string>([scopedFile], PathComparer.Default),
+			roots,
+			roots,
+			policy,
+			rules with { IgnoreDotFolders = false },
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, hidden.IgnoreOptionCounts.DotFolders);
+		Assert.Equal([".xyz"], revealed.AvailableExtensions);
+	}
+
+	[Fact]
+	public void ExplicitEmptyExtensionSetKeepsScopedFolderImpactsClosed()
+	{
+		using var project = new TemporaryDirectory();
+		var scopedFile = PathUtility.Normalize(
+			project.CreateFile(".generated/staged.cs", "class Staged {}\n"));
+		var (inventory, rules, roots) = BuildInventory(project.Path);
+
+		var projection = GitScopePresentationProjector.Build(
+			project.Path,
+			inventory,
+			new HashSet<string>([scopedFile], PathComparer.Default),
+			roots,
+			roots,
+			ExtensionPolicy(),
+			rules,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(IgnoreOptionCounts.Empty, projection.IgnoreOptionCounts);
+	}
+
+	private static IExtensionInclusionPolicy ExtensionPolicy(params string[] extensions) =>
+		new ExtensionSetInclusionPolicy(
+			extensions.ToHashSet(StringComparer.OrdinalIgnoreCase));
+
+	private static (ProjectTreeInventorySnapshot Inventory, IgnoreRules Rules, IReadOnlySet<string> Roots)
+		BuildInventory(string rootPath)
+	{
+		var roots = Directory.GetDirectories(rootPath)
+			.Select(Path.GetFileName)
+			.Where(static name => !string.IsNullOrEmpty(name))
+			.Cast<string>()
+			.ToHashSet(PathComparer.Default);
+		var emptyNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var rules = new IgnoreRules(
+			IgnoreHiddenFolders: false,
+			IgnoreHiddenFiles: false,
+			IgnoreDotFolders: true,
+			IgnoreDotFiles: true,
+			emptyNames,
+			emptyNames)
+		{
+			IgnoreEmptyFiles = true,
+			IgnoreExtensionlessFiles = true
+		};
+		var discoveryRules = rules with
+		{
+			IgnoreDotFolders = false,
+			IgnoreDotFiles = false,
+			IgnoreEmptyFiles = false,
+			IgnoreExtensionlessFiles = false
+		};
+		var inventory = new TreeBuilder().ReadCompositeInventory(
+			rootPath,
+			roots,
+			discoveryRules,
+			rules,
+			TestContext.Current.CancellationToken);
+		return (inventory, rules, roots);
 	}
 }

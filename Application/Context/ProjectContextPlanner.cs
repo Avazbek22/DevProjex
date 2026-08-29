@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using DevProjex.Application.Selection;
 
@@ -10,6 +11,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 	private const string InvalidSelectedPathCode = ProjectSelectionPath.InvalidPathCode;
 	private const string MissingSelectedPathCode = "DPX-SELECTION-PATH-MISSING";
 	private static readonly byte[] FingerprintValueSeparator = [0];
+	private readonly ConditionalWeakTable<ProjectContextPlan, GitScopeProjectionContext> _gitScopeProjectionContexts = new();
 
 	public Task<ProjectContextPlan> BuildWithIgnoreImpactCountsAsync(
 		ProjectContextRequest request,
@@ -70,6 +72,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				selectedIgnoreOptions)
 			{
 				LocalProfileState = selection.LocalProfileState,
+				KnownExtensionStates = request.KnownExtensionStates,
 				CaptureIgnoreImpactCounts = request.CaptureIgnoreImpactCounts
 			},
 			cancellationToken);
@@ -176,7 +179,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			LocalProfileState = refreshedLocalState
 		};
 
-		return new ProjectContextPlan(
+		var plan = new ProjectContextPlan(
 			SourceRoot: sourceRoot,
 			Selection: effectiveSelection,
 			AvailableRoots: loaded.AvailableRootFolders.OrderBy(static value => value, PathComparer.Default).ToArray(),
@@ -206,7 +209,46 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		{
 			IncludesOutputMetrics = includeTreeOutputMetrics && includeContentOutputMetrics
 		};
+		if (loaded.TreeInventory is not null && loaded.EffectiveRules is not null)
+		{
+			_gitScopeProjectionContexts.Add(
+				plan,
+				new GitScopeProjectionContext(
+					loaded.TreeInventory,
+					loaded.EffectiveRules,
+					loaded.RootSelectionIsExplicit,
+					loaded.EffectiveExtensionPolicy));
+		}
+		return plan;
 	}
+
+	internal GitScopePresentationProjection BuildGitScopePresentation(
+		ProjectContextPlan plan,
+		GitScopePathResult scope,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(plan);
+		ArgumentNullException.ThrowIfNull(scope);
+		if (!_gitScopeProjectionContexts.TryGetValue(plan, out var context))
+			return GitScopePresentationProjection.Empty;
+
+		return GitScopePresentationProjector.Build(
+			plan.SourceRoot,
+			context.Inventory,
+			scope.IncludedPaths,
+			plan.SelectedRoots.ToHashSet(PathComparer.Default),
+			plan.AvailableRoots.ToHashSet(PathComparer.Default),
+			context.EffectiveExtensionPolicy,
+			context.EffectiveRules,
+			cancellationToken,
+			rootSelectionIsExplicit: context.RootSelectionIsExplicit);
+	}
+
+	private sealed record GitScopeProjectionContext(
+		ProjectTreeInventorySnapshot Inventory,
+		IgnoreRules EffectiveRules,
+		bool RootSelectionIsExplicit,
+		IExtensionInclusionPolicy? EffectiveExtensionPolicy);
 
 	public Task<ProjectContextPlan> ReprojectSelectionAsync(
 		ProjectContextPlan baseline,
