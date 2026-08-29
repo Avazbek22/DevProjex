@@ -135,7 +135,7 @@ public sealed class TerminalWorkspaceController(
 		var buildCount = 0;
 		var discoverySelection = request.Selection with
 		{
-			Roots = ShouldPreserveExplicitRoots(request.Selection)
+			Roots = ShouldPreserveRootsDuringDiscovery(request.Selection)
 				? request.Selection.Roots
 				: null,
 			SelectedPaths = []
@@ -215,7 +215,8 @@ public sealed class TerminalWorkspaceController(
 			buildCount);
 	}
 
-	private static bool ShouldPreserveExplicitRoots(ProjectSelectionSpec selection) =>
+	private static bool ShouldPreserveRootsDuringDiscovery(ProjectSelectionSpec selection) =>
+		selection.ProfileSource?.Kind == ProjectProfileSourceKind.Local ||
 		selection.ApplicationIntent?.Roots == ProjectSelectionApplicationMode.ApplyResolvedValue;
 
 	internal static void ApplyStructuralRefresh(
