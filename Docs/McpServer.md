@@ -167,11 +167,13 @@ charged to this content budget. Consequently, the report's included-token sum
 can differ slightly from the complete document metric, which normalizes line
 endings and includes document output differently.
 
-For JSON and XML packs, the existing `metrics` object describes the complete
-effective selection after `detail` and mandatory secret redaction but before
-the token budget is applied. The `files` collection and `tokenBudget` object
-describe the content that the budget admitted; the tree remains the complete
-effective selection so clients can see what was omitted.
+For JSON and XML packs that include content, the existing `metrics` object
+describes the complete effective selection after `detail` and mandatory secret
+redaction but before the token budget is applied. The `files` collection and
+`tokenBudget` object describe the content that the budget admitted; the tree
+remains the complete effective selection so clients can see what was omitted.
+A tree-only pack does not read or transform file content, so its content metrics
+describe the selected source files before `detail` or redaction.
 
 `max_file_bytes` is an optional positive byte count on `get_tree`, `analyze`,
 `pack_context`, and `search_project`. It removes files strictly larger than the

@@ -1593,11 +1593,22 @@ public sealed class McpServerIntegrationTests
 			new Dictionary<string, object?>
 			{
 				["view"] = "tree",
-				["format"] = "json"
+				["format"] = "json",
+				["detail"] = "full"
+			});
+		var treeSignatures = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["view"] = "tree",
+				["format"] = "json",
+				["detail"] = "signatures"
 			});
 		using var fullDocument = JsonDocument.Parse(ExtractSpotlightBody(Text(full)));
 		using var signaturesDocument = JsonDocument.Parse(ExtractSpotlightBody(Text(signatures)));
 		using var treeDocument = JsonDocument.Parse(ExtractSpotlightBody(Text(tree)));
+		using var treeSignaturesDocument = JsonDocument.Parse(
+			ExtractSpotlightBody(Text(treeSignatures)));
 
 		var fullMetrics = fullDocument.RootElement.GetProperty("metrics");
 		var signaturesMetrics = signaturesDocument.RootElement.GetProperty("metrics");
@@ -1615,7 +1626,11 @@ public sealed class McpServerIntegrationTests
 		Assert.True(
 			treeDocument.RootElement.GetProperty("metrics")
 				.GetProperty("estimatedTokens").GetInt64() > 0);
+		Assert.True(JsonElement.DeepEquals(
+			treeDocument.RootElement.GetProperty("metrics"),
+			treeSignaturesDocument.RootElement.GetProperty("metrics")));
 		Assert.Empty(treeDocument.RootElement.GetProperty("files").EnumerateArray());
+		Assert.Empty(treeSignaturesDocument.RootElement.GetProperty("files").EnumerateArray());
 	}
 
 	[Fact]
