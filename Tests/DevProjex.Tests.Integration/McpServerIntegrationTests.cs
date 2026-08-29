@@ -1570,8 +1570,16 @@ public sealed class McpServerIntegrationTests
 				["detail"] = "signatures",
 				["max_tokens"] = 10_000
 			});
+		var tree = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["view"] = "tree",
+				["format"] = "json"
+			});
 		using var fullDocument = JsonDocument.Parse(ExtractSpotlightBody(Text(full)));
 		using var signaturesDocument = JsonDocument.Parse(ExtractSpotlightBody(Text(signatures)));
+		using var treeDocument = JsonDocument.Parse(ExtractSpotlightBody(Text(tree)));
 
 		var fullMetrics = fullDocument.RootElement.GetProperty("metrics");
 		var signaturesMetrics = signaturesDocument.RootElement.GetProperty("metrics");
@@ -1586,6 +1594,10 @@ public sealed class McpServerIntegrationTests
 		Assert.NotEqual(
 			fullDocument.RootElement.GetProperty("fingerprint").GetString(),
 			signaturesDocument.RootElement.GetProperty("fingerprint").GetString());
+		Assert.True(
+			treeDocument.RootElement.GetProperty("metrics")
+				.GetProperty("estimatedTokens").GetInt64() > 0);
+		Assert.Empty(treeDocument.RootElement.GetProperty("files").EnumerateArray());
 	}
 
 	[Fact]
