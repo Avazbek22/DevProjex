@@ -189,6 +189,7 @@ public sealed class McpServerIntegrationTests
 				: [];
 			Assert.DoesNotContain("detail", required);
 			Assert.DoesNotContain("tracked_only", required);
+			Assert.DoesNotContain("max_tokens", required);
 		}
 		var searchBoolean = tools.Single(static tool => tool.Name == "search_project")
 			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("ignore_case");
@@ -1144,6 +1145,13 @@ public sealed class McpServerIntegrationTests
 			});
 		Assert.Contains("Included: 3 files", Text(all), StringComparison.Ordinal);
 		Assert.Contains("Skipped: 0 files (0 estimated tokens).", Text(all), StringComparison.Ordinal);
+
+		var invalid = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?> { ["max_tokens"] = 0 });
+		Assert.True(invalid.IsError);
+		Assert.Contains(McpErrorCodes.InvalidRange, Text(invalid), StringComparison.Ordinal);
+		Assert.Contains("from 1", Text(invalid), StringComparison.Ordinal);
 	}
 
 	[Fact]
