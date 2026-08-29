@@ -99,6 +99,32 @@ public sealed class TerminalUntrustedTextPresentationTests
 			output.ToString());
 	}
 
+	[Fact]
+	public void TokenBudgetReportEscapesSkippedFilePaths()
+	{
+		const string unsafePath = "folder/a\u001B\tfile\n.cs";
+		using var data = new TemporaryDirectory();
+		var services = new TerminalServiceFactory(() => data.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		using var output = new StringWriter();
+		var report = new ProjectContextTokenBudgetReport(
+			MaximumEstimatedTokens: 1,
+			IncludedFileCount: 0,
+			SkippedFileCount: 1,
+			IncludedEstimatedTokens: 0,
+			SkippedEstimatedTokens: 2,
+			[new ProjectContextTokenBudgetSkippedFile(unsafePath, 2)],
+			AdditionalSkippedFileCount: 0);
+
+		TokenBudgetOutput.Write(output, report, services.Localization);
+
+		var rendered = output.ToString();
+		Assert.Contains("folder/a\\u001B\\tfile\\n.cs", rendered, StringComparison.Ordinal);
+		Assert.DoesNotContain('\u001B', rendered);
+		Assert.DoesNotContain('\t', rendered);
+		Assert.DoesNotContain("file\n.cs", rendered, StringComparison.Ordinal);
+	}
+
 	private static void AssertSafe(string rendered, string expected)
 	{
 		Assert.Contains(expected, rendered, StringComparison.Ordinal);

@@ -72,6 +72,10 @@ public sealed class EmptyEqualsParserRegressionTests
 				"--view"
 			},
 			{
+				["export", "context", ".", "--max-tokens=", "10"],
+				"--max-tokens"
+			},
+			{
 				["tui", ".", "--screen=", "inline"],
 				"--screen"
 			},
@@ -149,6 +153,7 @@ public sealed class EmptyEqualsParserRegressionTests
 		"--language",
 		"--limit",
 		"--max-file-bytes",
+		"--max-tokens",
 		"--output",
 		"--profile",
 		"--progress",

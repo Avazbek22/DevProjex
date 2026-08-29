@@ -192,6 +192,38 @@ public sealed class RepositoryWebPathPresentationServiceTests
 		Assert.Equal(external, mapped);
 	}
 
+	[Fact]
+	public void TryCreatePathMapper_MapsFileRepositoryWithoutExposingCheckoutRoot()
+	{
+		var service = new RepositoryWebPathPresentationService();
+		var checkoutRoot = BuildAbsolutePath("cache", "checkout");
+		var repositoryPath = BuildAbsolutePath("origins", "repo.git");
+		var repositoryUrl = new Uri(repositoryPath).AbsoluteUri;
+		var mapper = service.TryCreatePathMapper(checkoutRoot, repositoryUrl);
+
+		Assert.NotNull(mapper);
+		var mapped = mapper!(Path.Combine(checkoutRoot, "src", "File name.cs"));
+
+		Assert.Equal($"{repositoryUrl.TrimEnd('/')[..^4]}/src/File%20name.cs", mapped);
+		Assert.DoesNotContain(checkoutRoot, mapped, StringComparison.OrdinalIgnoreCase);
+	}
+
+	[Fact]
+	public void TryCreatePathMapper_MapsScpRepositoryWithoutExposingCheckoutRoot()
+	{
+		var service = new RepositoryWebPathPresentationService();
+		var checkoutRoot = BuildAbsolutePath("cache", "checkout");
+		var mapper = service.TryCreatePathMapper(
+			checkoutRoot,
+			"git@example.com:owner/repository.git");
+
+		Assert.NotNull(mapper);
+		var mapped = mapper!(Path.Combine(checkoutRoot, "src", "Main.cs"));
+
+		Assert.Equal("git@example.com:owner/repository/src/Main.cs", mapped);
+		Assert.DoesNotContain(checkoutRoot, mapped, StringComparison.OrdinalIgnoreCase);
+	}
+
 	private static string BuildAbsolutePath(params string[] segments)
 		=> Path.Combine([Path.GetTempPath(), "DevProjexTests", "RepositoryWebPathPresentationService", .. segments]);
 }

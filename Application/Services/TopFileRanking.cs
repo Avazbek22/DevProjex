@@ -33,6 +33,8 @@ public sealed class TopFileRanking
 		var index = _items.BinarySearch(candidate, TopFileMetricComparer.Instance);
 		if (index < 0)
 			index = ~index;
+		if (index >= _capacity)
+			return;
 		_items.Insert(index, candidate);
 		if (_items.Count > _capacity)
 			_items.RemoveAt(_capacity);

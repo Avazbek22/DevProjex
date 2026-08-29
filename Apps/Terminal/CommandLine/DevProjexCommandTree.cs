@@ -131,10 +131,11 @@ public sealed class DevProjexCommandTree
 				Directory.GetCurrentDirectory());
 			try
 			{
-				await McpServerHost.RunAsync(
+				await McpServerHost.RunWithStandardStreamsAsync(
 						resolvedRoots,
 						parseResult.GetValue(hidePrivateData),
 						parseResult.GetValue(allowRemote),
+						_serviceFactory.AppDataPathProvider,
 						cancellationToken)
 					.ConfigureAwait(false);
 				return CommandLineExitCodes.Success;
@@ -386,6 +387,11 @@ public sealed class DevProjexCommandTree
 		var outputPath = OutputPathOption();
 		var force = new Option<bool>("--force") { Description = L("Terminal.Option.ForceContext") };
 		var dryRun = new Option<bool>("--dry-run", "-n") { Description = L("Terminal.Option.DryRun") };
+		var maximumEstimatedTokens = new Option<long?>("--max-tokens")
+		{
+			Description = L("Terminal.Option.MaxTokens"),
+			HelpName = "N"
+		};
 		var branch = BranchOption();
 		var selection = new SelectionOptions(
 			_localization,
@@ -397,6 +403,7 @@ public sealed class DevProjexCommandTree
 		command.Options.Add(outputPath);
 		command.Options.Add(force);
 		command.Options.Add(dryRun);
+		command.Options.Add(maximumEstimatedTokens);
 		command.Options.Add(branch);
 		selection.AddTo(command);
 		_output.AddProgressTo(command);
@@ -417,6 +424,12 @@ public sealed class DevProjexCommandTree
 			{
 				result.AddError(LocalizedParseError.Create(
 					L("Terminal.Validation.ForceRequiresFileOutput")));
+			}
+			if (CliParseValue.TryGet(result, maximumEstimatedTokens, out var maximumTokens) &&
+			    maximumTokens is < 1)
+			{
+				result.AddError(LocalizedParseError.Create(
+					L("Terminal.Validation.MaxTokens")));
 			}
 		});
 		command.SetAction(async (parseResult, cancellationToken) =>
@@ -456,6 +469,7 @@ public sealed class DevProjexCommandTree
 								parseResult.GetValue(outputPath),
 								parseResult.GetValue(force),
 								parseResult.GetValue(dryRun),
+								parseResult.GetValue(maximumEstimatedTokens),
 								outputOptions,
 								MaxFileBytes: selection.GetMaxFileBytes(parseResult)),
 							cancellationToken)

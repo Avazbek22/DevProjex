@@ -14,20 +14,28 @@ public static class McpServerHost
 	public static Task RunAsync(
 		IReadOnlyList<string> roots,
 		bool hidePrivateData = false,
+		bool allowRemote = false,
 		CancellationToken cancellationToken = default) =>
-		RunAsync(roots, hidePrivateData, allowRemote: false, cancellationToken);
+		RunWithStandardStreamsAsync(
+			roots,
+			hidePrivateData,
+			allowRemote,
+			appDataPathProvider: null,
+			cancellationToken);
 
-	public static Task RunAsync(
+	internal static Task RunWithStandardStreamsAsync(
 		IReadOnlyList<string> roots,
 		bool hidePrivateData,
 		bool allowRemote,
-		CancellationToken cancellationToken = default) =>
+		Func<string>? appDataPathProvider,
+		CancellationToken cancellationToken) =>
 		RunWithStreamsAsync(
 			roots,
 			Console.OpenStandardInput(),
 			Console.OpenStandardOutput(),
 			hidePrivateData,
 			cancellationToken,
+			appDataPathProvider,
 			allowRemote: allowRemote);
 
 	internal static async Task RunWithStreamsAsync(

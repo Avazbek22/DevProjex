@@ -239,7 +239,7 @@ entry counts; `bytes` is the non-negative byte count represented by removed or
 planned entries. If `cache remove` does not find the requested URL, the JSON
 document adds `"notFound": true`, all counters and `bytes` are zero, stdout still
 contains the complete JSON envelope, stderr is empty, and the command returns
-runtime exit code `1`. Successful and other non-not-found documents omit the
+usage exit code `2`. Successful and other non-not-found documents omit the
 additive `notFound` field. Text mode keeps its localized not-found diagnostic on
 stderr.
 
@@ -304,6 +304,12 @@ Plain or redirected text and text written to a file use one canonical field
 model, ordering, and final-newline policy. An interactive rich presentation may
 change layout but not the represented fields or values.
 
+Whenever `export context --max-tokens` is supplied, stderr receives a localized
+budget report after generation. It contains included and skipped file counts,
+estimated tokens for both groups, up to 25 largest skipped paths, an `and X more`
+line when needed, and a `--compress-code`/larger-budget hint. stdout remains the
+document-only channel.
+
 ## Context JSON
 
 The top-level shape is:
@@ -346,11 +352,38 @@ source type, safe repository URL, and optional branch/commit metadata. Human
 identity never uses the generated cache-directory suffix. Local projects retain
 the existing root/name representation and omit `source`.
 
+With `export context --max-tokens`, JSON adds an optional `tokenBudget` object
+after `files`:
+
+```json
+{
+  "maximumEstimatedTokens": 12000,
+  "includedFiles": 42,
+  "skippedFiles": 3,
+  "includedEstimatedTokens": 11870,
+  "skippedEstimatedTokens": 6400,
+  "largestSkippedFiles": [
+    { "path": "src/Large.cs", "estimatedTokens": 3200 }
+  ],
+  "additionalSkippedFiles": 0
+}
+```
+
+These are estimated tokens based on each file's transformed character count,
+rounded up at one token per four characters. Tree text, headings, and serializer
+markup are outside the budget, so this sum is not required to equal the complete
+document's `metrics.estimatedTokens` value.
+The existing `metrics` object and `tree` describe the complete effective
+selection before token-budget omission; `files` and `tokenBudget` describe the
+content admitted by the budget.
+
 ## Context XML
 
 XML uses the root element `devprojexContext` with `schemaVersion="1"` and
 `kind="devprojex-context"`. It contains corresponding `project`, `selection`,
-`metrics`, `tree`, `files`, `diagnostics`, and `fingerprint` elements. XML is a
+`metrics`, `tree`, `files`, `diagnostics`, and `fingerprint` elements. With a
+token budget, an additive `tokenBudget` element follows `files` and exposes the
+same fields and largest-skipped entries as context JSON. XML is a
 complete well-formed UTF-8 document with escaped values. Characters forbidden by
 XML 1.0 are replaced with `U+FFFD` so file content and metadata cannot invalidate
 the document.
@@ -383,6 +416,12 @@ is empty and the operational plan is written to stderr. Success means that
 preflight is ready; it is not a result path.
 The readiness line is the requested dry-run result and remains visible at
 `quiet` and `minimal`; incidental status and progress remain suppressed.
+When `export context --max-tokens` is present, dry-run also evaluates transformed
+per-file character counts and writes the same localized budget report as a real
+export. The report always identifies included and skipped file counts and
+estimated tokens, lists at most 25 largest skipped files plus an `and X more`
+line, and recommends `--compress-code` or a larger budget. It belongs to stderr;
+the context document on stdout remains byte-clean.
 
 A project-copy dry run with Hide Secrets enabled also states that detected text
 will be changed, binary files will remain unchanged, and the result may not build

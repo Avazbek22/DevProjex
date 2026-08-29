@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Globalization;
 
 namespace DevProjex.Mcp;
 
@@ -176,20 +177,24 @@ internal sealed class DevProjexMcpTools(
 				"format",
 				"detail",
 				"tracked_only",
+				"max_tokens",
 				"max_file_bytes");
 			var detail = McpDetailPolicy.Parse(arguments.OptionalString("detail"));
+			var maximumEstimatedTokens = arguments.OptionalInt64("max_tokens", 1, long.MaxValue);
 			var format = ParseFormat(arguments.OptionalString("format") ?? "markdown");
+			var view = ParseView(arguments.OptionalString("view") ?? "tree-content");
 			var plan = await BuildSelectionAsync(
 					arguments,
 					cancellationToken,
-					includeOutputMetrics: format is ProjectContextDocumentFormat.Json or ProjectContextDocumentFormat.Xml)
+					includeOutputMetrics:
+						view == ProjectContextView.Tree &&
+						format is ProjectContextDocumentFormat.Json or ProjectContextDocumentFormat.Xml)
 				.ConfigureAwait(false);
 			operationProgress.Milestone(
 				10,
 				$"scanning files {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");
 			var effectiveDetail = Projects.ResolveDetail(plan, detail);
-			plan = Projects.ApplyDetail(plan, effectiveDetail);
-			var view = ParseView(arguments.OptionalString("view") ?? "tree-content");
+			plan = Projects.ApplyDetail(plan, effectiveDetail, cancellationToken);
 			var transformedFileCount = view == ProjectContextView.Tree ? 0 : plan.IncludedFiles.Count;
 			operationProgress.Milestone(11, $"transforming content 0/{transformedFileCount}");
 			await using var prepared = view == ProjectContextView.Tree
@@ -205,13 +210,14 @@ internal sealed class DevProjexMcpTools(
 				$"transforming content {transformedFileCount}/{transformedFileCount}");
 			var writtenFileCount = view == ProjectContextView.Tree ? 0 : plan.IncludedFiles.Count;
 			operationProgress.Milestone(61, $"writing pack 0/{writtenFileCount}");
+			ProjectContextWriteResult? writeResult = null;
 			var pack = await packs.CreateAsync(
 				async (stream, token) =>
 				{
 					var writeProgress = operationProgress.Measure("writing pack", 62, 99);
 					if (prepared is null)
 					{
-						await Projects.DocumentService.WriteCompleteAsync(
+						writeResult = await Projects.DocumentService.WriteCompleteWithReportAsync(
 								plan,
 								view,
 								format,
@@ -219,12 +225,13 @@ internal sealed class DevProjexMcpTools(
 								token,
 								plain: false,
 								useUnifiedContentHeaders: true,
-								writeProgress: writeProgress)
+								writeProgress: writeProgress,
+								maximumEstimatedTokens: maximumEstimatedTokens)
 							.ConfigureAwait(false);
 						return;
 					}
 
-					await Projects.DocumentService.WritePreparedCompleteAsync(
+					writeResult = await Projects.DocumentService.WritePreparedCompleteAsync(
 							plan,
 							view,
 							format,
@@ -233,7 +240,8 @@ internal sealed class DevProjexMcpTools(
 							token,
 							plain: false,
 							useUnifiedContentHeaders: true,
-							writeProgress)
+							writeProgress,
+							maximumEstimatedTokens)
 						.ConfigureAwait(false);
 				},
 				cancellationToken).ConfigureAwait(false);
@@ -243,11 +251,17 @@ internal sealed class DevProjexMcpTools(
 				if (pack.Characters <= MaximumInlinePackCharacters)
 				{
 					var content = await File.ReadAllTextAsync(pack.Path, cancellationToken).ConfigureAwait(false);
-					await operationProgress.CompleteAsync(
-							100,
-							$"writing pack {writtenFileCount}/{writtenFileCount}")
-						.ConfigureAwait(false);
-					return McpToolResults.TextSuccess(McpSpotlight.Wrap(content), advertiseLargeResult: true);
+					var inlineMessage = BuildSpotlightedPackContent(
+						content,
+						writeResult?.TokenBudget);
+					if (inlineMessage.Length <= MaximumInlinePackCharacters)
+					{
+						await operationProgress.CompleteAsync(
+								100,
+								$"writing pack {writtenFileCount}/{writtenFileCount}")
+							.ConfigureAwait(false);
+						return McpToolResults.TextSuccess(inlineMessage, advertiseLargeResult: true);
+					}
 				}
 
 				using var treeWriter = new McpBoundedLineTextWriter(MaximumTreeLines);
@@ -270,7 +284,7 @@ internal sealed class DevProjexMcpTools(
 					tree += "\n[Tree truncated at 2000 lines.]";
 				var message = $"Pack stored as '{pack.Id}' ({pack.Characters} characters). " +
 				              "Call read_pack with this pack_id to read ranges, or search_project to locate source content.\n" +
-				              McpSpotlight.Wrap(tree);
+				              BuildSpotlightedPackContent(tree, writeResult?.TokenBudget);
 				await operationProgress.CompleteAsync(
 						100,
 						$"writing pack {writtenFileCount}/{writtenFileCount}")
@@ -530,6 +544,56 @@ internal sealed class DevProjexMcpTools(
 			McpErrorCodes.InvalidArguments,
 			$"{McpErrorCodes.InvalidArguments}: invalid format '{token}'. Valid values: text, markdown, json, xml.")
 	};
+
+	private static string BuildSpotlightedPackContent(
+		string content,
+		ProjectContextTokenBudgetReport? report)
+	{
+		if (report is null)
+			return McpSpotlight.Wrap(content);
+
+		return McpSpotlight.Wrap(content) + "\n\n" +
+		       McpSpotlight.Wrap(FormatTokenBudgetReport(report));
+	}
+
+	private static string FormatTokenBudgetReport(ProjectContextTokenBudgetReport report)
+	{
+		var output = new StringBuilder(512);
+		output.Append("Token budget: ")
+			.Append(report.MaximumEstimatedTokens.ToString(CultureInfo.InvariantCulture))
+			.Append(" estimated tokens.\nIncluded: ")
+			.Append(report.IncludedFileCount.ToString(CultureInfo.InvariantCulture))
+			.Append(report.IncludedFileCount == 1 ? " file (" : " files (")
+			.Append(report.IncludedEstimatedTokens.ToString(CultureInfo.InvariantCulture))
+			.Append(" estimated tokens).\nSkipped: ")
+			.Append(report.SkippedFileCount.ToString(CultureInfo.InvariantCulture))
+			.Append(report.SkippedFileCount == 1 ? " file (" : " files (")
+			.Append(report.SkippedEstimatedTokens.ToString(CultureInfo.InvariantCulture))
+			.Append(" estimated tokens).\n");
+
+		if (report.LargestSkippedFiles.Count > 0)
+		{
+			output.Append("Skipped files:\n");
+			foreach (var file in report.LargestSkippedFiles)
+			{
+				output.Append("- ")
+					.Append(McpTextEscaping.EscapeSingleLine(file.Path))
+					.Append(" (")
+					.Append(file.EstimatedTokens.ToString(CultureInfo.InvariantCulture))
+					.Append(" estimated tokens)\n");
+			}
+			if (report.AdditionalSkippedFileCount > 0)
+			{
+				output.Append("- and ")
+					.Append(report.AdditionalSkippedFileCount.ToString(CultureInfo.InvariantCulture))
+					.Append(" more\n");
+			}
+		}
+
+		output.Append(
+			"Tip: use detail=compact or detail=signatures, narrow the selection, or increase max_tokens.");
+		return output.ToString();
+	}
 
 	internal static TreeNodeDescriptor PruneToDepth(TreeNodeDescriptor node, int remainingDepth) =>
 		PruneToDepthWithCancellation(node, remainingDepth, CancellationToken.None);

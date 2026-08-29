@@ -9,6 +9,20 @@ namespace DevProjex.Tests.Unit;
 public sealed class McpInfrastructureTests
 {
 	[Fact]
+	public void ServerHostExposesOneUnambiguousRunEntryPoint()
+	{
+		var method = Assert.Single(
+			typeof(McpServerHost).GetMethods(
+				System.Reflection.BindingFlags.Public |
+				System.Reflection.BindingFlags.Static),
+			static candidate => candidate.Name == nameof(McpServerHost.RunAsync));
+
+		Assert.Equal(
+			[typeof(IReadOnlyList<string>), typeof(bool), typeof(bool), typeof(CancellationToken)],
+			method.GetParameters().Select(static parameter => parameter.ParameterType));
+	}
+
+	[Fact]
 	public async Task BoundedTreeWriter_StopsBeforeMaterializingLinesBeyondTheLimit()
 	{
 		using var writer = new McpBoundedLineTextWriter(maximumLines: 2);
@@ -418,6 +432,47 @@ public sealed class McpInfrastructureTests
 		var arguments = McpJsonArguments.Create(request, "limit");
 
 		Assert.Equal(expected, arguments.OptionalInteger("limit", 1, 100));
+	}
+
+	[Theory]
+	[InlineData("42.0", 42)]
+	[InlineData("4.2e1", 42)]
+	public void JsonArgumentsAcceptIntegralJsonNumberForms(string json, long expected)
+	{
+		using var document = JsonDocument.Parse(json);
+		var request = new CallToolRequestParams
+		{
+			Name = "test",
+			Arguments = new Dictionary<string, JsonElement>
+			{
+				["limit"] = document.RootElement.Clone()
+			}
+		};
+		var arguments = McpJsonArguments.Create(request, "limit");
+
+		Assert.Equal((int)expected, arguments.OptionalInteger("limit", 1, 100));
+		Assert.Equal(expected, arguments.OptionalInt64("limit", 1, 100));
+	}
+
+	[Theory]
+	[InlineData("42.5")]
+	[InlineData("\"4.2e1\"")]
+	public void JsonArgumentsRejectFractionalNumbersAndExponentStrings(string json)
+	{
+		using var document = JsonDocument.Parse(json);
+		var request = new CallToolRequestParams
+		{
+			Name = "test",
+			Arguments = new Dictionary<string, JsonElement>
+			{
+				["limit"] = document.RootElement.Clone()
+			}
+		};
+
+		var exception = Assert.Throws<McpToolException>(() =>
+			McpJsonArguments.Create(request, "limit").OptionalInt64("limit", 1, 100));
+
+		Assert.Equal(McpErrorCodes.InvalidRange, exception.Code);
 	}
 
 	[Theory]

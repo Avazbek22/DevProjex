@@ -102,15 +102,9 @@ internal sealed class McpProjectService(
 			}
 			else
 			{
-				var empty = await services.Planner
-					.ReprojectSelectionAsync(plan, [".devprojex-mcp-empty-selection"], cancellationToken)
+				narrowed = await services.Planner
+					.ReprojectEmptySelectionAsync(plan, cancellationToken)
 					.ConfigureAwait(false);
-				narrowed = empty with
-				{
-					Diagnostics = empty.Diagnostics
-						.Where(static diagnostic => diagnostic.Code != "DPX-SELECTION-PATH-MISSING")
-						.ToArray()
-				};
 			}
 		}
 
@@ -146,8 +140,21 @@ internal sealed class McpProjectService(
 	public McpDetailResolution ResolveDetail(ProjectContextPlan plan, McpDetailLevel detail) =>
 		McpDetailPolicy.Resolve(plan.Selection, detail);
 
-	public ProjectContextPlan ApplyDetail(ProjectContextPlan plan, McpDetailResolution resolution) =>
-		plan with { Selection = McpDetailPolicy.Apply(plan.Selection, resolution) };
+	public ProjectContextPlan ApplyDetail(
+		ProjectContextPlan plan,
+		McpDetailResolution resolution,
+		CancellationToken cancellationToken)
+	{
+		var selection = McpDetailPolicy.Apply(plan.Selection, resolution);
+		return services.Planner.ApplyContentTransformationSelectionWithCancellation(
+			plan,
+			selection.HideSecrets == true,
+			selection.CompressCode,
+			selection.StripComments,
+			selection.StripBlankLines,
+			selection.HidePrivateData,
+			cancellationToken);
+	}
 
 	public ContentTransformationContext CreateTransformationContext(
 		ProjectContextPlan plan,

@@ -10,6 +10,7 @@ public sealed class TerminalServiceFactory(
 {
 	private readonly Func<AppLanguage, TerminalServices>? _servicesProvider;
 	private readonly Action? _fullServiceCreationObserver;
+	internal Func<string>? AppDataPathProvider => appDataPathProvider;
 
 	internal TerminalServiceFactory(Func<AppLanguage, TerminalServices> servicesProvider)
 		: this()

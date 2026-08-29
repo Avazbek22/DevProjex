@@ -13,8 +13,10 @@ internal static class GitTrackedPathIndexCache
 	private const long MaximumSingleEntryBytes = 64L * 1024 * 1024;
 	private const long EstimatedEmptyIndexBytes = 64;
 	private const int MaximumTrackedPathLength = 32768;
+	private const int MaximumLoadAttempts = 2;
 	internal const int GitFileMaximumLength = 64 * 1024;
 	private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(30);
+	private static readonly TimeSpan FailedLoadRetryDelay = TimeSpan.FromMilliseconds(100);
 	private static readonly object CacheSync = new();
 	private static readonly Dictionary<string, LinkedListNode<CacheEntry>> Cache =
 		new(PathComparer.Default);
@@ -52,33 +54,44 @@ internal static class GitTrackedPathIndexCache
 			return false;
 
 		var loadKey = signature.CreateLoadKey();
-		SharedAsyncOperation<LoadedGitTrackedPathIndex?> sharedLoad;
-		IDisposable lease;
-		while (true)
+		for (var attempt = 0; attempt < MaximumLoadAttempts; attempt++)
 		{
-			sharedLoad = GetOrCreateSharedLoad(loadKey, signature);
-			if (sharedLoad.TryAcquire(out lease))
+			SharedAsyncOperation<LoadedGitTrackedPathIndex?> sharedLoad;
+			IDisposable lease;
+			while (true)
+			{
+				sharedLoad = GetOrCreateSharedLoad(loadKey, signature);
+				if (sharedLoad.TryAcquire(out lease))
+					break;
+
+				InFlightLoads.TryRemove(
+					new KeyValuePair<string, SharedAsyncOperation<LoadedGitTrackedPathIndex?>>(loadKey, sharedLoad));
+				if (TryGetCached(signature, out trackedPathIndex))
+					return true;
+			}
+
+			LoadedGitTrackedPathIndex? loaded;
+			using (lease)
+			{
+				loaded = sharedLoad.Task
+					.WaitAsync(cancellationToken)
+					.GetAwaiter()
+					.GetResult();
+			}
+			if (loaded is not null)
+			{
+				trackedPathIndex = loaded.Index;
+				return true;
+			}
+			if (attempt + 1 >= MaximumLoadAttempts || Volatile.Read(ref _gitAvailability) < 0)
 				break;
 
-			InFlightLoads.TryRemove(
-				new KeyValuePair<string, SharedAsyncOperation<LoadedGitTrackedPathIndex?>>(loadKey, sharedLoad));
+			Task.Delay(FailedLoadRetryDelay, cancellationToken).GetAwaiter().GetResult();
 			if (TryGetCached(signature, out trackedPathIndex))
 				return true;
 		}
 
-		LoadedGitTrackedPathIndex? loaded;
-		using (lease)
-		{
-			loaded = sharedLoad.Task
-				.WaitAsync(cancellationToken)
-				.GetAwaiter()
-				.GetResult();
-		}
-		if (loaded is null)
-			return false;
-
-		trackedPathIndex = loaded.Index;
-		return true;
+		return false;
 	}
 
 	public static bool TryLoadNearest(

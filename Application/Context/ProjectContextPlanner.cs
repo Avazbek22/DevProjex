@@ -207,26 +207,56 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		};
 	}
 
-	public async Task<ProjectContextPlan> ReprojectSelectionAsync(
+	public Task<ProjectContextPlan> ReprojectSelectionAsync(
 		ProjectContextPlan baseline,
 		IReadOnlyCollection<string>? selectedPaths,
-		CancellationToken cancellationToken = default)
+		CancellationToken cancellationToken = default) =>
+		ReprojectSelectionCoreAsync(
+			baseline,
+			selectedPaths,
+			forceEmptySelection: false,
+			cancellationToken);
+
+	public Task<ProjectContextPlan> ReprojectEmptySelectionAsync(
+		ProjectContextPlan baseline,
+		CancellationToken cancellationToken = default) =>
+		ReprojectSelectionCoreAsync(
+			baseline,
+			selectedPaths: [],
+			forceEmptySelection: true,
+			cancellationToken);
+
+	private async Task<ProjectContextPlan> ReprojectSelectionCoreAsync(
+		ProjectContextPlan baseline,
+		IReadOnlyCollection<string>? selectedPaths,
+		bool forceEmptySelection,
+		CancellationToken cancellationToken)
 	{
 		ArgumentNullException.ThrowIfNull(baseline);
 		var diagnostics = baseline.Diagnostics
 			.Where(static diagnostic =>
 				diagnostic.Code is not MissingSelectedPathCode and not InvalidSelectedPathCode)
 			.ToList();
-		var selectedFullPaths = ResolveSelectedPaths(
-			baseline.EffectiveTree,
-			baseline.SourceRoot,
-			selectedPaths,
-			diagnostics,
-			cancellationToken,
-			out var explicitSelectionHadMatch);
+		IReadOnlySet<string> selectedFullPaths;
+		bool explicitSelectionHadMatch;
+		if (forceEmptySelection)
+		{
+			selectedFullPaths = new HashSet<string>(PathComparer.Default);
+			explicitSelectionHadMatch = false;
+		}
+		else
+		{
+			selectedFullPaths = ResolveSelectedPaths(
+				baseline.EffectiveTree,
+				baseline.SourceRoot,
+				selectedPaths,
+				diagnostics,
+				cancellationToken,
+				out explicitSelectionHadMatch);
+		}
 		var selectsNoEffectivePaths =
-			selectedPaths is { Count: > 0 } &&
-			!explicitSelectionHadMatch;
+			forceEmptySelection ||
+			(selectedPaths is { Count: > 0 } && !explicitSelectionHadMatch);
 		var projection = ResolveSelectionProjection(
 			baseline.EffectiveTree,
 			selectedFullPaths,

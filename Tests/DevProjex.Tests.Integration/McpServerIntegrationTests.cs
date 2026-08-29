@@ -63,7 +63,7 @@ public sealed class McpServerIntegrationTests
 	[InlineData("markdown", false)]
 	[InlineData("json", true)]
 	[InlineData("xml", true)]
-	public async Task PackContextBuildsPlanningMetricsOnlyForStructuredFormats(
+	public async Task TreeOnlyPackBudgetBuildsPlanningMetricsOnlyForStructuredFormats(
 		string format,
 		bool expectsPlanningMetrics)
 	{
@@ -79,7 +79,8 @@ public sealed class McpServerIntegrationTests
 			new Dictionary<string, object?>
 			{
 				["view"] = "tree",
-				["format"] = format
+				["format"] = format,
+				["max_tokens"] = 1
 			});
 		var diagnostics = measurement.Capture();
 		var output = Text(result);
@@ -87,6 +88,8 @@ public sealed class McpServerIntegrationTests
 		Assert.NotEqual(true, result.IsError);
 		Assert.Contains("First.cs", output, StringComparison.Ordinal);
 		Assert.Contains("Second.cs", output, StringComparison.Ordinal);
+		Assert.Contains("Included: 0 files (0 estimated tokens).", output, StringComparison.Ordinal);
+		Assert.Contains("Skipped: 0 files (0 estimated tokens).", output, StringComparison.Ordinal);
 		Assert.Equal(expectsPlanningMetrics ? 2 : 0, diagnostics.FullFileReads);
 		Assert.Equal(expectsPlanningMetrics, diagnostics.FullFileReadBytes > 0);
 		if (format == "json")
@@ -173,7 +176,7 @@ public sealed class McpServerIntegrationTests
 			["list_projects"] = [],
 			["get_tree"] = ["project", "branch", "include_patterns", "exclude_patterns", "tracked_only", "max_file_bytes", "max_depth"],
 			["analyze"] = ["project", "branch", "paths", "include_patterns", "exclude_patterns", "profile", "detail", "tracked_only", "top_files", "max_file_bytes"],
-			["pack_context"] = ["project", "branch", "paths", "include_patterns", "exclude_patterns", "profile", "detail", "tracked_only", "max_file_bytes", "view", "format"],
+			["pack_context"] = ["project", "branch", "paths", "include_patterns", "exclude_patterns", "profile", "detail", "tracked_only", "max_tokens", "max_file_bytes", "view", "format"],
 			["read_pack"] = ["pack_id", "start_line", "end_line"],
 			["search_project"] = ["project", "branch", "pattern", "include_patterns", "exclude_patterns", "tracked_only", "max_file_bytes", "context_lines", "ignore_case", "max_results"],
 			["get_file"] = ["project", "branch", "path", "start_line", "end_line"]
@@ -189,6 +192,7 @@ public sealed class McpServerIntegrationTests
 				: [];
 			Assert.DoesNotContain("detail", required);
 			Assert.DoesNotContain("tracked_only", required);
+			Assert.DoesNotContain("max_tokens", required);
 		}
 		var searchBoolean = tools.Single(static tool => tool.Name == "search_project")
 			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("ignore_case");
@@ -204,6 +208,35 @@ public sealed class McpServerIntegrationTests
 			Assert.Equal(
 				["full", "compact", "signatures"],
 				detail.GetProperty("enum").EnumerateArray().Select(static item => item.GetString()));
+		}
+		var maximumTokens = tools.Single(static tool => tool.Name == "pack_context")
+			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("max_tokens");
+		Assert.Equal(2, maximumTokens.GetProperty("oneOf").GetArrayLength());
+		Assert.Equal(1, maximumTokens.GetProperty("oneOf")[0].GetProperty("minimum").GetInt32());
+		const string positiveNumericStringPattern = "^0*[1-9][0-9]*$";
+		Assert.Equal(positiveNumericStringPattern, maximumTokens.GetProperty("oneOf")[1].GetProperty("pattern").GetString());
+		var positiveNumericStrings = new (string Tool, string Property)[]
+		{
+			("get_tree", "max_file_bytes"),
+			("analyze", "max_file_bytes"),
+			("analyze", "top_files"),
+			("pack_context", "max_file_bytes"),
+			("pack_context", "max_tokens"),
+			("read_pack", "start_line"),
+			("read_pack", "end_line"),
+			("search_project", "max_file_bytes"),
+			("search_project", "max_results"),
+			("get_file", "start_line"),
+			("get_file", "end_line")
+		};
+		foreach (var (toolName, propertyName) in positiveNumericStrings)
+		{
+			var property = tools.Single(tool => tool.Name == toolName)
+				.ProtocolTool.InputSchema.GetProperty("properties").GetProperty(propertyName);
+			var pattern = property.GetProperty("oneOf")[1].GetProperty("pattern").GetString();
+			Assert.Equal(positiveNumericStringPattern, pattern);
+			Assert.Matches(pattern!, "0002");
+			Assert.DoesNotMatch(pattern!, "0000");
 		}
 		foreach (var name in new[] { "get_tree", "analyze", "pack_context", "search_project" })
 		{
@@ -301,7 +334,8 @@ public sealed class McpServerIntegrationTests
 			new Dictionary<string, object?>(remote)
 			{
 				["view"] = "content",
-				["format"] = "text"
+				["format"] = "text",
+				["max_tokens"] = 1_000
 			});
 		var repeatedTree = await server.CallAsync("get_tree", remote);
 		var jail = await server.CallAsync(
@@ -322,8 +356,10 @@ public sealed class McpServerIntegrationTests
 		Assert.DoesNotContain(cachePath, Text(tree), PathComparison);
 		Assert.NotEqual(true, pack.IsError);
 		Assert.Contains("remote-feature-marker", Text(pack), StringComparison.Ordinal);
+		Assert.Contains("Token budget: 1000 estimated tokens.", Text(pack), StringComparison.Ordinal);
 		Assert.DoesNotContain(Secret, Text(pack), StringComparison.Ordinal);
 		Assert.Contains("DEVPROJEX_REDACTED", Text(pack), StringComparison.Ordinal);
+		Assert.DoesNotContain(cachePath, Text(pack), PathComparison);
 		Assert.NotEqual(true, repeatedTree.IsError);
 		Assert.Equal(1, git.CloneCallCount);
 		Assert.True(jail.IsError);
@@ -805,6 +841,14 @@ public sealed class McpServerIntegrationTests
 
 			var resultText = Text(result);
 			Assert.Contains("Pack stored as '", resultText, StringComparison.Ordinal);
+			var budgeted = await server.CallAsync(
+				"pack_context",
+				new Dictionary<string, object?>
+				{
+					["view"] = "content",
+					["format"] = "text",
+					["max_tokens"] = 1
+				});
 			var page = await server.CallAsync(
 				"read_pack",
 				new Dictionary<string, object?>
@@ -814,6 +858,8 @@ public sealed class McpServerIntegrationTests
 				});
 			AssertPackPathPolicy(resultText, project, protectedProject, hidePrivateData);
 			AssertPackPathPolicy(Text(page), project, protectedProject, hidePrivateData);
+			Assert.Contains("Skipped: 1 file", Text(budgeted), StringComparison.Ordinal);
+			AssertPackPathPolicy(Text(budgeted), project, protectedProject, hidePrivateData);
 		}
 		finally
 		{
@@ -1155,7 +1201,8 @@ public sealed class McpServerIntegrationTests
 				new Dictionary<string, object?>
 				{
 					["view"] = "content",
-					["format"] = "text"
+					["format"] = "text",
+					["max_tokens"] = 1
 				},
 				["selecting files", "transforming content", "writing pack"]),
 			new ProgressCase(
@@ -1220,6 +1267,13 @@ public sealed class McpServerIntegrationTests
 					value => value.GetProperty("message").GetString()!
 						.StartsWith(phase, StringComparison.Ordinal));
 			}
+			if (testCase.ToolName == "pack_context")
+			{
+				Assert.Contains(
+					values,
+					static value => value.GetProperty("message").GetString() == "writing pack 8/8");
+			}
+			await progress.WaitForValueAsync(TestContext.Current.CancellationToken);
 			Assert.NotEmpty(progress.Values);
 
 			firstMessage = server.WireMessageCount;
@@ -1294,6 +1348,329 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task PackContextTokenBudgetSkipsLargeFilesAndContinuesDeterministically()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "A-large.txt"), "large-marker-" + new string('x', 400));
+		File.WriteAllText(Path.Combine(project, "B-small.txt"), "bb");
+		File.WriteAllText(Path.Combine(project, "C-small.txt"), "cccc");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var arguments = new Dictionary<string, object?>
+		{
+			["view"] = "content",
+			["format"] = "text",
+			["max_tokens"] = "2"
+		};
+		var first = await server.CallAsync("pack_context", arguments);
+		var second = await server.CallAsync("pack_context", arguments);
+		var firstText = Text(first);
+
+		Assert.DoesNotContain("large-marker", firstText, StringComparison.Ordinal);
+		Assert.Contains("B-small.txt", firstText, StringComparison.Ordinal);
+		Assert.Contains("C-small.txt", firstText, StringComparison.Ordinal);
+		Assert.Contains("Included: 2 files (2 estimated tokens).", firstText, StringComparison.Ordinal);
+		Assert.Contains("Skipped: 1 file", firstText, StringComparison.Ordinal);
+		Assert.Contains("A-large.txt", firstText, StringComparison.Ordinal);
+		Assert.Equal(ExtractSpotlightBody(firstText), ExtractSpotlightBody(Text(second)));
+
+		var empty = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "A-large.txt" },
+				["view"] = "content",
+				["format"] = "text",
+				["max_tokens"] = 1
+			});
+		Assert.Contains("Included: 0 files (0 estimated tokens).", Text(empty), StringComparison.Ordinal);
+		Assert.Contains("Skipped: 1 file", Text(empty), StringComparison.Ordinal);
+
+		var all = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["view"] = "content",
+				["format"] = "text",
+				["max_tokens"] = 1_000
+			});
+		Assert.Contains("Included: 3 files", Text(all), StringComparison.Ordinal);
+		Assert.Contains("Skipped: 0 files (0 estimated tokens).", Text(all), StringComparison.Ordinal);
+
+		var longBudget = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["view"] = "content",
+				["format"] = "text",
+				["max_tokens"] = ((long)int.MaxValue + 1).ToString(
+					System.Globalization.CultureInfo.InvariantCulture)
+			});
+		Assert.NotEqual(true, longBudget.IsError);
+		Assert.Contains(
+			"Token budget: 2147483648 estimated tokens.",
+			Text(longBudget),
+			StringComparison.Ordinal);
+
+		var invalid = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?> { ["max_tokens"] = 0 });
+		Assert.True(invalid.IsError);
+		Assert.Contains(McpErrorCodes.InvalidRange, Text(invalid), StringComparison.Ordinal);
+		Assert.Contains("from 1", Text(invalid), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task PackContextAppliesFileSizeFilterBeforeTokenBudget()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "A-too-large.txt"), new string('a', 40));
+		File.WriteAllText(Path.Combine(project, "B-budget-skip.txt"), new string('b', 20));
+		File.WriteAllText(Path.Combine(project, "C-included.txt"), "c");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["view"] = "content",
+				["format"] = "text",
+				["max_file_bytes"] = "20",
+				["max_tokens"] = "1"
+			});
+		var text = Text(result);
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.Contains("C-included.txt", text, StringComparison.Ordinal);
+		Assert.Contains("Included: 1 file (1 estimated tokens).", text, StringComparison.Ordinal);
+		Assert.Contains("Skipped: 1 file (5 estimated tokens).", text, StringComparison.Ordinal);
+		Assert.Contains("B-budget-skip.txt", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("A-too-large.txt", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task PackContextTokenBudgetReportIsAppendedToStoredResult()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "A-included.txt"), new string('a', 60_000));
+		File.WriteAllText(Path.Combine(project, "B-skipped.txt"), new string('b', 20_000));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["view"] = "content",
+				["format"] = "text",
+				["max_tokens"] = 16_000
+			});
+		var text = Text(result);
+
+		Assert.StartsWith("Pack stored as '", text, StringComparison.Ordinal);
+		Assert.Contains("Token budget: 16000 estimated tokens.", text, StringComparison.Ordinal);
+		Assert.Contains("Included: 1 file", text, StringComparison.Ordinal);
+		Assert.Contains("Skipped: 1 file", text, StringComparison.Ordinal);
+		Assert.Contains("B-skipped.txt", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task PackContextStoresResultWhenBudgetReportPushesResponsePastInlineLimit()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "NearLimit.txt"), new string('x', 49_800));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["view"] = "content",
+				["format"] = "text",
+				["max_tokens"] = 20_000
+			});
+		var text = Text(result);
+
+		Assert.StartsWith("Pack stored as '", text, StringComparison.Ordinal);
+		Assert.Contains("Token budget: 20000 estimated tokens.", text, StringComparison.Ordinal);
+		Assert.True(text.Length < 50_000);
+		var page = await server.CallAsync(
+			"read_pack",
+			new Dictionary<string, object?> { ["pack_id"] = ExtractPackId(text) });
+		Assert.NotEqual(true, page.IsError);
+		Assert.Contains(new string('x', 128), Text(page), StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("json")]
+	[InlineData("xml")]
+	public async Task PackContextTokenBudgetKeepsInlineMachineDocumentParseable(string format)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "source.txt"), "content");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["view"] = "content",
+				["format"] = format,
+				["max_tokens"] = 100
+			});
+		var text = Text(result);
+		var document = ExtractSpotlightBody(text);
+
+		if (format == "json")
+			using (JsonDocument.Parse(document)) { }
+		else
+			_ = System.Xml.Linq.XDocument.Parse(document);
+		Assert.Contains("Token budget: 100 estimated tokens.", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task PackContextTokenBudgetUsesRedactedCharacterCount()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "secret.txt"), Secret);
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "secret.txt" },
+				["view"] = "content",
+				["format"] = "text",
+				["max_tokens"] = 8
+			});
+		var text = Text(result);
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.Contains("secret.txt", text, StringComparison.Ordinal);
+		Assert.Contains("DEVPROJEX_REDACTED[github-pat#1]", text, StringComparison.Ordinal);
+		Assert.DoesNotContain(Secret, text, StringComparison.Ordinal);
+		Assert.Contains("Included: 1 file (8 estimated tokens).", text, StringComparison.Ordinal);
+		Assert.Contains("Skipped: 0 files", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task PackContextSignaturesFitsMoreFilesWithinTheSameTokenBudget()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(
+			Path.Combine(project, "A-large.cs"),
+			"internal static class Large { public static int Calculate() { " +
+			string.Join(' ', Enumerable.Repeat("var value = 12345;", 80)) +
+			" return 1; } }");
+		File.WriteAllText(Path.Combine(project, "B-small.cs"), "internal sealed class Small { }");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var full = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["view"] = "content",
+				["format"] = "text",
+				["detail"] = "full",
+				["max_tokens"] = 30
+			});
+		var signatures = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["view"] = "content",
+				["format"] = "text",
+				["detail"] = "signatures",
+				["max_tokens"] = 30
+			});
+
+		Assert.Contains("Included: 1 file", Text(full), StringComparison.Ordinal);
+		Assert.Contains("Included: 2 files", Text(signatures), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task StructuredPackMetricsReflectEffectiveDetailBeforeTokenBudget()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(
+			Path.Combine(project, "Large.cs"),
+			"internal static class Large { public static int Calculate() { " +
+			string.Join(' ', Enumerable.Repeat("var value = 12345;", 100)) +
+			" return 1; } }");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var full = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["view"] = "content",
+				["format"] = "json",
+				["detail"] = "full",
+				["max_tokens"] = 10_000
+			});
+		var signatures = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["view"] = "content",
+				["format"] = "json",
+				["detail"] = "signatures",
+				["max_tokens"] = 10_000
+			});
+		var tree = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["view"] = "tree",
+				["format"] = "json",
+				["detail"] = "full"
+			});
+		var treeSignatures = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["view"] = "tree",
+				["format"] = "json",
+				["detail"] = "signatures"
+			});
+		using var fullDocument = JsonDocument.Parse(ExtractSpotlightBody(Text(full)));
+		using var signaturesDocument = JsonDocument.Parse(ExtractSpotlightBody(Text(signatures)));
+		using var treeDocument = JsonDocument.Parse(ExtractSpotlightBody(Text(tree)));
+		using var treeSignaturesDocument = JsonDocument.Parse(
+			ExtractSpotlightBody(Text(treeSignatures)));
+
+		var fullMetrics = fullDocument.RootElement.GetProperty("metrics");
+		var signaturesMetrics = signaturesDocument.RootElement.GetProperty("metrics");
+		Assert.True(
+			signaturesMetrics.GetProperty("estimatedTokens").GetInt64() <
+			fullMetrics.GetProperty("estimatedTokens").GetInt64());
+		Assert.True(
+			signaturesDocument.RootElement.GetProperty("tokenBudget")
+				.GetProperty("includedEstimatedTokens").GetInt64() <
+			fullDocument.RootElement.GetProperty("tokenBudget")
+				.GetProperty("includedEstimatedTokens").GetInt64());
+		Assert.NotEqual(
+			fullDocument.RootElement.GetProperty("fingerprint").GetString(),
+			signaturesDocument.RootElement.GetProperty("fingerprint").GetString());
+		Assert.True(
+			treeDocument.RootElement.GetProperty("metrics")
+				.GetProperty("estimatedTokens").GetInt64() > 0);
+		Assert.True(JsonElement.DeepEquals(
+			treeDocument.RootElement.GetProperty("metrics"),
+			treeSignaturesDocument.RootElement.GetProperty("metrics")));
+		Assert.Empty(treeDocument.RootElement.GetProperty("files").EnumerateArray());
+		Assert.Empty(treeSignaturesDocument.RootElement.GetProperty("files").EnumerateArray());
+	}
+
+	[Fact]
 	public async Task TrackedOnlyStringFiltersEverySelectionToolAndRejectsNonGitRoots()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -1363,7 +1740,8 @@ public sealed class McpServerIntegrationTests
 			new Dictionary<string, object?>(maximum)
 			{
 				["view"] = "content",
-				["format"] = "text"
+				["format"] = "text",
+				["max_tokens"] = 1_000
 			});
 		var search = await server.CallAsync(
 			"search_project",
@@ -1387,11 +1765,71 @@ public sealed class McpServerIntegrationTests
 		Assert.Contains("small-marker", Text(pack), StringComparison.Ordinal);
 		Assert.Contains("Exact.txt", Text(pack), StringComparison.Ordinal);
 		Assert.DoesNotContain("Large.txt", Text(pack), StringComparison.Ordinal);
+		Assert.Contains("Included: 2 files", Text(pack), StringComparison.Ordinal);
+		Assert.Contains("Skipped: 0 files", Text(pack), StringComparison.Ordinal);
 		Assert.Contains("Small.txt:1:", Text(search), StringComparison.Ordinal);
 		Assert.DoesNotContain("Large.txt", Text(search), StringComparison.Ordinal);
 		Assert.True(invalid.IsError);
 		Assert.Contains(McpErrorCodes.InvalidRange, Text(invalid), StringComparison.Ordinal);
 		Assert.Equal(0, allExcluded.StructuredContent?.GetProperty("files").GetInt32());
+	}
+
+	[Fact]
+	public async Task EmptySelectionsNeverResolveReservedLookingProjectFiles()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(
+			Path.Combine(project, ".devprojex-mcp-empty-selection"),
+			new string('m', 128));
+		File.WriteAllText(
+			Path.Combine(project, ".devprojex-size-filter-empty-selection"),
+			new string('s', 128));
+		const string profileName = "portable.json";
+		File.WriteAllText(
+			Path.Combine(project, profileName),
+			JsonSerializer.Serialize(new
+			{
+				schemaVersion = PortableProjectProfileService.CurrentSchemaVersion,
+				kind = PortableProjectProfileService.DocumentKind,
+				selection = new
+				{
+					roots = (string[]?)null,
+					extensions = (string[]?)null,
+					selectedPaths = Array.Empty<string>(),
+					gitMode = "none",
+					exclusions = Array.Empty<string>(),
+					hideSecrets = false,
+					hidePrivateData = false
+				}
+			}));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var unmatched = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["profile"] = profileName,
+				["include_patterns"] = new[] { "does-not-match/**" },
+				["view"] = "content",
+				["format"] = "json"
+			});
+		var sizeFiltered = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["profile"] = profileName,
+				["max_file_bytes"] = 1,
+				["view"] = "content",
+				["format"] = "json"
+			});
+
+		Assert.NotEqual(true, unmatched.IsError);
+		using var unmatchedDocument = JsonDocument.Parse(ExtractSpotlightBody(Text(unmatched)));
+		Assert.Empty(unmatchedDocument.RootElement.GetProperty("files").EnumerateArray());
+		Assert.NotEqual(true, sizeFiltered.IsError);
+		using var sizeFilteredDocument = JsonDocument.Parse(ExtractSpotlightBody(Text(sizeFiltered)));
+		Assert.Empty(sizeFilteredDocument.RootElement.GetProperty("files").EnumerateArray());
 	}
 
 	private static string ReadLikeSchemaAwareClient(McpClientTool tool, CallToolResult result)
@@ -1414,6 +1852,16 @@ public sealed class McpServerIntegrationTests
 			RegexOptions.CultureInvariant);
 		Assert.True(match.Success, $"Stored pack response did not contain a pack id: {text}");
 		return match.Groups[1].Value;
+	}
+
+	private static string ExtractSpotlightBody(string text)
+	{
+		var opening = Regex.Match(text, "<untrusted-data-[0-9a-f]{24}>\\n");
+		Assert.True(opening.Success, $"Response did not contain a spotlight opening tag: {text}");
+		var contentStart = opening.Index + opening.Length;
+		var contentEnd = text.IndexOf("\n</untrusted-data-", contentStart, StringComparison.Ordinal);
+		Assert.True(contentEnd >= contentStart, $"Response did not contain a spotlight closing tag: {text}");
+		return text[contentStart..contentEnd];
 	}
 
 	private static int[] ExtractPackLineMarkers(string text) =>
@@ -1520,6 +1968,8 @@ public sealed class McpServerIntegrationTests
 	{
 		private readonly List<T> _values = [];
 		private readonly object _sync = new();
+		private readonly TaskCompletionSource _firstValue =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
 
 		public IReadOnlyList<T> Values
 		{
@@ -1534,7 +1984,11 @@ public sealed class McpServerIntegrationTests
 		{
 			lock (_sync)
 				_values.Add(value);
+			_firstValue.TrySetResult();
 		}
+
+		public Task WaitForValueAsync(CancellationToken cancellationToken) =>
+			_firstValue.Task.WaitAsync(TimeSpan.FromSeconds(2), cancellationToken);
 	}
 
 	private static void AssertSpotlighted(CallToolResult result)
