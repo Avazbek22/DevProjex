@@ -309,7 +309,12 @@ public sealed class MainWindowApplySettingsMemoryCleanupUiTests
 	private static async Task StartApplySettingsWithoutWaitingForBackgroundWorkAsync(MainWindow window)
 	{
 		var previousApplyTask = window.LatestApplySettingsTask;
-		await UiTestDriver.RaiseButtonClickAsync(UiTestDriver.GetRequiredApplySettingsButton(window));
+		var applyButton = UiTestDriver.GetRequiredApplySettingsButton(window);
+		Assert.True(UiTestDriver.GetViewModel(window).HasPendingFilterSettingsChanges);
+		// This lifecycle scenario intentionally supersedes a long-running background scan.
+		// Route the command without coupling it to the delayed visual busy state.
+		applyButton.RaiseEvent(new global::Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+		await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
 		await UiTestDriver.WaitForConditionAsync(
 			window,
 			() => !ReferenceEquals(window.LatestApplySettingsTask, previousApplyTask),
