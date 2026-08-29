@@ -1022,6 +1022,7 @@ public sealed class McpServerIntegrationTests
 					value => value.GetProperty("message").GetString()!
 						.StartsWith(phase, StringComparison.Ordinal));
 			}
+			await progress.WaitForValueAsync(TestContext.Current.CancellationToken);
 			Assert.NotEmpty(progress.Values);
 
 			firstMessage = server.WireMessageCount;
@@ -1402,6 +1403,8 @@ public sealed class McpServerIntegrationTests
 	{
 		private readonly List<T> _values = [];
 		private readonly object _sync = new();
+		private readonly TaskCompletionSource _firstValue =
+			new(TaskCreationOptions.RunContinuationsAsynchronously);
 
 		public IReadOnlyList<T> Values
 		{
@@ -1416,7 +1419,11 @@ public sealed class McpServerIntegrationTests
 		{
 			lock (_sync)
 				_values.Add(value);
+			_firstValue.TrySetResult();
 		}
+
+		public Task WaitForValueAsync(CancellationToken cancellationToken) =>
+			_firstValue.Task.WaitAsync(TimeSpan.FromSeconds(2), cancellationToken);
 	}
 
 	private static void AssertSpotlighted(CallToolResult result)
