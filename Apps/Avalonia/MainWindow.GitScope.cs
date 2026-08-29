@@ -28,18 +28,39 @@ public partial class MainWindow
 		{
 			return result with
 			{
-				Diagnostics = [GitScopeFilter.CreateUnavailableDiagnostic(input.CurrentPath, scope)]
+				Diagnostics = AppendGitScopeDiagnostic(
+					result.Diagnostics,
+					GitScopeFilter.CreateUnavailableDiagnostic(input.CurrentPath, scope))
 			};
 		}
 
-		var diagnostics = scope.DeletedPathCount > 0
-			? new[] { GitScopeFilter.CreateDeletedDiagnostic(input.CurrentPath, scope.DeletedPathCount) }
-			: [];
+		var diagnostics = result.Diagnostics;
+		if (scope.DeletedPathCount > 0)
+		{
+			diagnostics = AppendGitScopeDiagnostic(
+				diagnostics,
+				GitScopeFilter.CreateDeletedDiagnostic(input.CurrentPath, scope.DeletedPathCount));
+		}
 		return result with
 		{
 			Tree = GitScopeFilter.ApplyToTree(result.Tree, scope, cancellationToken),
 			Diagnostics = diagnostics
 		};
+	}
+
+	internal static IReadOnlyList<ContextDiagnostic> AppendGitScopeDiagnostic(
+		IReadOnlyList<ContextDiagnostic>? existing,
+		ContextDiagnostic diagnostic)
+	{
+		ArgumentNullException.ThrowIfNull(diagnostic);
+		if (existing is null || existing.Count == 0)
+			return [diagnostic];
+
+		var combined = new ContextDiagnostic[existing.Count + 1];
+		for (var index = 0; index < existing.Count; index++)
+			combined[index] = existing[index];
+		combined[^1] = diagnostic;
+		return combined;
 	}
 
 	private bool HandleGitScopeDiagnostics(IReadOnlyList<ContextDiagnostic>? diagnostics)

@@ -2186,8 +2186,8 @@ public sealed class MainWindowIgnoreOptionsUiTests
         }
     }
 
-    [AvaloniaFact]
-    public async Task RepositoryGitModes_UseComboBoxAndRescanAllSupportedModes()
+	[AvaloniaFact]
+	public async Task RepositoryGitModes_UseComboBoxAndRescanAllSupportedModes()
     {
         EnsureGitAvailable();
         using var project = UiTestProject.CreateWithCleanGitAndSmartWorkspace();
@@ -3397,6 +3397,26 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			blockingScanner.Release();
 			await UiTestDriver.CloseWindowAsync(window);
 		}
+	}
+
+	[Fact]
+	public void GitScopeDiagnostics_PreserveScannerDiagnosticsInOrder()
+	{
+		var scannerWarning = new ContextDiagnostic(
+			"DPX-SCAN-WARNING",
+			ContextDiagnosticSeverity.Warning,
+			"scanner warning");
+		var scannerError = new ContextDiagnostic(
+			"DPX-SCAN-ERROR",
+			ContextDiagnosticSeverity.Error,
+			"scanner error");
+		var gitWarning = GitScopeFilter.CreateDeletedDiagnostic("project", 2);
+
+		var combined = MainWindow.AppendGitScopeDiagnostic(
+			[scannerWarning, scannerError],
+			gitWarning);
+
+		Assert.Equal([scannerWarning, scannerError, gitWarning], combined);
 	}
 
     private static async Task WaitForExtensionStateAsync(
