@@ -1241,6 +1241,7 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 		bool useSmartIgnore,
 		bool ignoreDotFiles)
 	{
+		var underlayMode = GitScopeSelection.ToUnderlayMode(gitMode);
 		var selectedRoots = selectAllPayloadRoots
 			? RootSet("api", "web", "docs")
 			: RootSet("api");
@@ -1248,9 +1249,9 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 			? ExtensionSet(".cs", ".dll", ".md", ".ignored", ".ts", ".js")
 			: ExtensionSet(".cs");
 		var selectedIgnoreOptions = new HashSet<IgnoreOptionId>();
-		if (gitMode == GitFilteringMode.RespectGitIgnore)
+		if (underlayMode == GitFilteringMode.RespectGitIgnore)
 			selectedIgnoreOptions.Add(IgnoreOptionId.UseGitIgnore);
-		else if (gitMode == GitFilteringMode.TrackedFilesOnly)
+		else if (underlayMode == GitFilteringMode.TrackedFilesOnly)
 			selectedIgnoreOptions.Add(IgnoreOptionId.TrackedGitFilesOnly);
 		if (useSmartIgnore)
 			selectedIgnoreOptions.Add(IgnoreOptionId.SmartIgnore);
@@ -1295,13 +1296,14 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 		bool useSmartIgnore,
 		bool ignoreDotFiles)
 	{
+		var underlayMode = GitScopeSelection.ToUnderlayMode(gitMode);
 		var expected = new HashSet<string>(StringComparer.Ordinal)
 		{
 			"api/main.cs"
 		};
 		if (!ignoreDotFiles)
 			expected.Add("api/.secret.cs");
-		if (gitMode != GitFilteringMode.TrackedFilesOnly)
+		if (underlayMode != GitFilteringMode.TrackedFilesOnly)
 			expected.Add("api/local.cs");
 
 		if (selectAllPayloadExtensions)
@@ -1309,7 +1311,7 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 			expected.Add("api/readme.md");
 			if (!useSmartIgnore)
 				expected.Add("api/bin/Debug/generated.dll");
-			if (gitMode == GitFilteringMode.None)
+			if (underlayMode == GitFilteringMode.None)
 				expected.Add("api/drop.ignored");
 		}
 
@@ -1318,7 +1320,7 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 
 		expected.Add("web/app.ts");
 		expected.Add("docs/guide.md");
-		if (gitMode != GitFilteringMode.TrackedFilesOnly)
+		if (underlayMode != GitFilteringMode.TrackedFilesOnly)
 			expected.Add("web/local.ts");
 		if (!useSmartIgnore)
 			expected.Add("web/node_modules/pkg/index.js");
@@ -1368,6 +1370,7 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 		SelectionRefreshSnapshot snapshot,
 		GitFilteringMode expectedMode)
 	{
+		var expectedUnderlayMode = GitScopeSelection.ToUnderlayMode(expectedMode);
 		var useGitIgnore = Assert.Single(
 			snapshot.IgnoreOptions,
 			static option => option.Id == IgnoreOptionId.UseGitIgnore);
@@ -1375,8 +1378,8 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 			snapshot.IgnoreOptions,
 			static option => option.Id == IgnoreOptionId.TrackedGitFilesOnly);
 
-		Assert.Equal(expectedMode == GitFilteringMode.RespectGitIgnore, useGitIgnore.IsChecked);
-		Assert.Equal(expectedMode == GitFilteringMode.TrackedFilesOnly, trackedOnly.IsChecked);
+		Assert.Equal(expectedUnderlayMode == GitFilteringMode.RespectGitIgnore, useGitIgnore.IsChecked);
+		Assert.Equal(expectedUnderlayMode == GitFilteringMode.TrackedFilesOnly, trackedOnly.IsChecked);
 		Assert.False(useGitIgnore.IsChecked && trackedOnly.IsChecked);
 	}
 
