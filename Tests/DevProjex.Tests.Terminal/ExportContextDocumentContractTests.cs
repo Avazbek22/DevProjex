@@ -141,6 +141,37 @@ public sealed class ExportContextDocumentContractTests
 		Assert.Contains("--compress-code", environment.StandardError, StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public async Task TokenBudgetSelectsTheSameOrderedFilesAcrossAllFormats()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("A-large.txt", "large-content-marker-" + new string('a', 40));
+		workspace.WriteFile("B-small.txt", "b");
+		workspace.WriteFile("C-small.txt", "c");
+		var reports = new List<string>();
+
+		foreach (var format in new[] { "text", "markdown", "json", "xml" })
+		{
+			var environment = new TestTerminalEnvironment();
+			Assert.Equal(
+				CommandLineExitCodes.Success,
+				await RunAsync(
+					workspace,
+					environment,
+					format,
+					maximumEstimatedTokens: 2,
+					view: "content"));
+
+			Assert.DoesNotContain("large-content-marker", environment.StandardOutput, StringComparison.Ordinal);
+			var first = environment.StandardOutput.IndexOf("B-small.txt", StringComparison.Ordinal);
+			var second = environment.StandardOutput.IndexOf("C-small.txt", StringComparison.Ordinal);
+			Assert.True(first >= 0 && second > first, environment.StandardOutput);
+			reports.Add(ExtractBudgetReport(environment.StandardError));
+		}
+
+		Assert.All(reports, report => Assert.Equal(reports[0], report));
+	}
+
 	[Theory]
 	[InlineData("json")]
 	[InlineData("xml")]
