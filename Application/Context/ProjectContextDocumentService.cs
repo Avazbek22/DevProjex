@@ -800,11 +800,12 @@ public sealed class ProjectContextDocumentService(
 		writer.WriteEndArray();
 		if (tokenBudget is not null)
 			WriteTokenBudget(writer, tokenBudget.CreateReport());
+		var mapDiagnosticPaths = ShouldMapDiagnosticPathsToSource(plan, useUnifiedContentHeaders);
 		WriteDiagnostics(
 			writer,
 			plan.Diagnostics,
-			useUnifiedContentHeaders ? contentPathMapper : null,
-			useUnifiedContentHeaders ? pathRedaction : null);
+			mapDiagnosticPaths ? contentPathMapper : null,
+			mapDiagnosticPaths ? pathRedaction : null);
 		writer.WriteString("fingerprint", plan.Fingerprint);
 		writer.WriteEndObject();
 		await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
@@ -920,6 +921,7 @@ public sealed class ProjectContextDocumentService(
 		if (tokenBudget is not null)
 			WriteTokenBudgetXml(writer, tokenBudget.CreateReport());
 		writer.WriteStartElement("diagnostics");
+		var mapDiagnosticPaths = ShouldMapDiagnosticPathsToSource(plan, useUnifiedContentHeaders);
 		foreach (var diagnostic in plan.Diagnostics)
 		{
 			writer.WriteStartElement("diagnostic");
@@ -932,8 +934,8 @@ public sealed class ProjectContextDocumentService(
 					"path",
 					ResolveDiagnosticPath(
 						diagnostic.Path,
-						useUnifiedContentHeaders ? contentPathMapper : null,
-						useUnifiedContentHeaders ? pathRedaction : null));
+						mapDiagnosticPaths ? contentPathMapper : null,
+						mapDiagnosticPaths ? pathRedaction : null));
 			}
 			WriteSanitizedXmlString(writer, diagnostic.Message);
 			writer.WriteEndElement();
@@ -1985,6 +1987,11 @@ public sealed class ProjectContextDocumentService(
 		var displayPath = pathMapper is null ? path : MapContentPath(pathMapper, path);
 		return NormalizePath(OutputRootPathPresentation.ResolvePath(displayPath, pathRedaction).Text);
 	}
+
+	private static bool ShouldMapDiagnosticPathsToSource(
+		ProjectContextPlan plan,
+		bool useUnifiedContentHeaders) =>
+		useUnifiedContentHeaders && plan.SourceIdentity?.IsCachedRepository == true;
 
 	private static void WriteTokenBudgetXml(
 		XmlWriter writer,

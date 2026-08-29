@@ -234,6 +234,58 @@ public sealed class ExportContextDocumentContractTests
 	}
 
 	[Theory]
+	[InlineData(ProjectContextDocumentFormat.Json)]
+	[InlineData(ProjectContextDocumentFormat.Xml)]
+	public async Task LocalMachineDiagnosticsPreserveAbsolutePaths(
+		ProjectContextDocumentFormat format)
+	{
+		using var workspace = new TemporaryDirectory();
+		var source = workspace.WriteFile("project/App.cs", "internal sealed class App { }");
+		var project = Path.GetDirectoryName(source)!;
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var plan = await services.ContextFactory.BuildAsync(
+			project,
+			new ProjectSelectionSpec(GitMode: GitFilteringMode.None, Exclusions: []),
+			cancellationToken: TestContext.Current.CancellationToken);
+		plan = plan with
+		{
+			Diagnostics =
+			[
+				new ContextDiagnostic(
+					"DPX-TEST-LOCAL-PATH",
+					ContextDiagnosticSeverity.Warning,
+					"Local diagnostic path presentation probe.",
+					source)
+			]
+		};
+		using var destination = new MemoryStream();
+
+		await services.ContextDocumentService.WriteCompleteAsync(
+			plan,
+			ProjectContextView.Content,
+			format,
+			destination,
+			TestContext.Current.CancellationToken,
+			useUnifiedContentHeaders: true);
+		var output = Encoding.UTF8.GetString(destination.ToArray());
+		string? diagnosticPath;
+		if (format == ProjectContextDocumentFormat.Json)
+		{
+			using var document = JsonDocument.Parse(output);
+			diagnosticPath = document.RootElement.GetProperty("diagnostics")[0]
+				.GetProperty("path").GetString();
+		}
+		else
+		{
+			diagnosticPath = XDocument.Parse(output).Root!.Element("diagnostics")!
+				.Element("diagnostic")!.Attribute("path")?.Value;
+		}
+
+		Assert.Equal(PathUtility.NormalizeSeparators(Path.GetFullPath(source)), diagnosticPath);
+	}
+
+	[Theory]
 	[InlineData("json")]
 	[InlineData("xml")]
 	public async Task MachineMetricsReflectTransformedContentBeforeTokenBudget(string format)
