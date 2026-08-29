@@ -684,7 +684,8 @@ public sealed class SelectedPathsContractTests
 
 	private static string[] FullContentPaths(string rootPath, params string[] relativePaths) =>
 		relativePaths
-			.Select(path => Path.Combine(rootPath, path.Replace('/', Path.DirectorySeparatorChar)))
+			.Select(path => PathUtility.NormalizeSeparators(
+				Path.Combine(rootPath, path.Replace('/', Path.DirectorySeparatorChar))))
 			.OrderBy(static path => path, StringComparer.Ordinal)
 			.ToArray();
 
