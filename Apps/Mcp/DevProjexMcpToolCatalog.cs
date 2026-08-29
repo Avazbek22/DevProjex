@@ -151,6 +151,13 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
+	private const string MaximumTokensProperty = """
+	"max_tokens": {
+	  "description": "Maximum estimated content tokens to include; accepts an integer or numeric string. Document structure is outside this budget.",
+	  "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^[0-9]+$" } ]
+	}
+	""";
+
 	private static readonly string ListProjectsInput = EmptyInput;
 
 	private static readonly string GetTreeInput = $$"""
@@ -197,6 +204,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{ProfileProperty}},
 	    {{DetailProperty}},
 	    {{TrackedOnlyProperty}},
+	    {{MaximumTokensProperty}},
 	    "view": { "type": "string", "enum": ["tree", "content", "tree-content"], "default": "tree-content" },
 	    "format": { "type": "string", "enum": ["text", "markdown", "json", "xml"], "default": "markdown" }
 	  },

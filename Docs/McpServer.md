@@ -72,7 +72,7 @@ The tool order is stable.
 | `list_projects` | none | Allowed roots with path, name, type, and available local profiles. |
 | `get_tree` | `project?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `max_depth?` | Effective text tree; at most 2,000 lines. |
 | `analyze` | `project?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?` | File, character, and token metrics plus the ten largest files by tokens. Metrics reflect the effective detail level. |
-| `pack_context` | `project?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `view?`, `format?` | Exact DevProjex context pipeline. Inline through 50,000 characters; otherwise returns a session-scoped `pack_id` and tree. |
+| `pack_context` | `project?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `max_tokens?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` limits estimated content tokens. Inline through 50,000 characters; otherwise returns a session-scoped `pack_id` and tree. |
 | `read_pack` | `pack_id`, `start_line?`, `end_line?` | Inclusive, 1-based range; at most 1,000 lines or 50,000 characters per call. Call `pack_context` again after server restart. |
 | `search_project` | `project?`, `pattern`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style redacted matches. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, and oversized text responses are explicitly truncated with a narrowing hint. |
 | `get_file` | `project?`, `path`, `start_line?`, `end_line?` | Redacted text from one effective file; at most 1,000 lines or 50,000 characters. |
@@ -95,6 +95,12 @@ self-contained: it starts with `Pack stored as '<id>' (<N> characters). Call
 read_pack ...`, followed by a preview of the project tree. Clients extract the
 session-scoped `pack_id` from that text and pass it to `read_pack`.
 
+When `max_tokens` is supplied, both inline and stored results end with a budget
+report. It states the budget, included and skipped file counts, estimated tokens
+for both groups, up to the 25 largest skipped files, and `and X more` when the
+list is longer. The trailer recommends `detail=compact` or `detail=signatures`
+when additional files are needed.
+
 Future tools must declare `outputSchema` only when their useful result is
 genuinely structured and can be returned completely in `structuredContent`.
 Metadata about a text payload is not sufficient reason to add a schema.
@@ -114,6 +120,7 @@ Defaults:
 - `pack_context.view`: `tree-content`
 - `pack_context.format`: `markdown`
 - `pack_context.detail`: `full`
+- `pack_context.max_tokens`: unlimited
 - `analyze.detail`: `full`
 - `tracked_only`: `false`
 - `search_project.context_lines`: `2`
@@ -127,6 +134,17 @@ directories.
 Numeric parameters accept JSON numbers and decimal numeric strings.
 Boolean parameters accept JSON booleans and the exact strings `"true"` and
 `"false"`.
+
+`max_tokens` is an integer of at least 1 and accepts either a JSON number or a
+decimal numeric string. It uses the existing estimate of one token per four
+transformed characters, rounded up per file. Files are considered in the
+deterministic selection order: a file is included when its estimate fits the
+remaining budget; otherwise it is reported as skipped and later, smaller files
+are still considered. A budget that fits no files is a valid empty-content
+pack. Tree text, file headings, markup, and other document structure are not
+charged to this content budget. Consequently, the report's included-token sum
+can differ slightly from the complete document metric, which normalizes line
+endings and includes document output differently.
 
 When `tracked_only` is `true`, only paths present in the Git index are selected.
 The option can strengthen a profile but cannot disable tracked-only filtering
@@ -151,6 +169,8 @@ enabled by the selected user profile are unioned with the requested level, so an
 agent can reduce context further but cannot restore bodies, comments, or blank
 lines removed by the profile. The `analyze` structured result reports the
 effective detail tier; `pack_context` returns the transformed pack itself.
+Use `compact` or `signatures` together with `max_tokens` to fit more supported
+source files into the same estimated-token budget.
 
 ## Client Configuration
 
