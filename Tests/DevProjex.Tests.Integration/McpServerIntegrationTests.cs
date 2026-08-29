@@ -1419,6 +1419,35 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task PackContextAppliesFileSizeFilterBeforeTokenBudget()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "A-too-large.txt"), new string('a', 40));
+		File.WriteAllText(Path.Combine(project, "B-budget-skip.txt"), new string('b', 20));
+		File.WriteAllText(Path.Combine(project, "C-included.txt"), "c");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["view"] = "content",
+				["format"] = "text",
+				["max_file_bytes"] = "20",
+				["max_tokens"] = "1"
+			});
+		var text = Text(result);
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.Contains("C-included.txt", text, StringComparison.Ordinal);
+		Assert.Contains("Included: 1 file (1 estimated tokens).", text, StringComparison.Ordinal);
+		Assert.Contains("Skipped: 1 file (5 estimated tokens).", text, StringComparison.Ordinal);
+		Assert.Contains("B-budget-skip.txt", text, StringComparison.Ordinal);
+		Assert.DoesNotContain("A-too-large.txt", text, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task PackContextTokenBudgetReportIsAppendedToStoredResult()
 	{
 		using var workspace = new TemporaryDirectory();
