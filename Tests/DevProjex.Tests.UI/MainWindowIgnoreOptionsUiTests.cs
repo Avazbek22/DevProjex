@@ -2275,15 +2275,28 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			});
 			var selectedItem = Assert.Single(items, static item => item.IsSelected);
 			Assert.Equal(FontWeight.Medium, selectedItem.FontWeight);
-			var selectedBackground = Assert.IsAssignableFrom<ISolidColorBrush>(selectedItem.Background);
-			Assert.InRange(selectedBackground.Color.A, (byte)1, (byte)250);
+			Assert.True(global::Avalonia.Application.Current!.TryFindResource(
+				"TreeSelectionBrush",
+				selectedItem.ActualThemeVariant,
+				out var selectionBackground));
+			var expectedSelectionBackground = Assert.IsAssignableFrom<ISolidColorBrush>(selectionBackground);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => GetRenderedBackgrounds(selectedItem)
+					.Any(brush => brush.Color == expectedSelectionBackground.Color),
+				"Git mode selection transition to complete");
+			var selectedBackground = Assert.Single(
+				GetRenderedBackgrounds(selectedItem)
+					.Where(brush => brush.Color == expectedSelectionBackground.Color)
+					.Select(static brush => brush.Color)
+					.Distinct());
 			Assert.True(global::Avalonia.Application.Current!.TryFindResource(
 				"AppAccentBrush",
 				selectedItem.ActualThemeVariant,
 				out var accentBackground));
 			Assert.NotEqual(
 				Assert.IsAssignableFrom<ISolidColorBrush>(accentBackground).Color,
-				selectedBackground.Color);
+				selectedBackground);
 
 			await window.Dispatcher.InvokeAsync(() =>
 			{
@@ -3785,6 +3798,18 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				string.Equals(control.Name, "ContentProcessingStatusIndicator", StringComparison.Ordinal) &&
 				control.DataContext is IgnoreOptionViewModel { Id: var id } &&
 				id == optionId);
+
+	private static IEnumerable<ISolidColorBrush> GetRenderedBackgrounds(ComboBoxItem item)
+	{
+		if (item.Background is ISolidColorBrush itemBackground)
+			yield return itemBackground;
+
+		foreach (var border in item.GetVisualDescendants().OfType<Border>())
+		{
+			if (border.Background is ISolidColorBrush background)
+				yield return background;
+		}
+	}
 
 	[AvaloniaFact]
 	public async Task PreviewBulkKeep_ByRuleKeepsAndRehidesAllOccurrencesWithOneRefresh()

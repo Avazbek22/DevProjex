@@ -1,5 +1,6 @@
 using DevProjex.Application.Models;
 using DevProjex.Application.Context;
+using DevProjex.Application.Presentation;
 using DevProjex.Application.Secrets;
 using DevProjex.Avalonia.Collections;
 
@@ -277,7 +278,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	}
 
 	[Fact]
-	public void HandleIgnoreAllChanged_OffOnCyclePreservesTrackedGitFilteringMode()
+	public void HandleIgnoreAllChanged_OffOnCycleDoesNotMutateTrackedGitFilteringMode()
 	{
 		const string projectPath = @"C:\Project";
 		var viewModel = CreateViewModel();
@@ -314,7 +315,13 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 
 		coordinator.HandleIgnoreAllChanged(isChecked: false, currentPath: null);
 
-		Assert.All(viewModel.IgnoreOptions, static option => Assert.False(option.IsChecked));
+		Assert.All(
+			viewModel.IgnoreOptions.Where(static option =>
+				!ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option.Id) &&
+				!GitFilteringModeResolver.IsGitFilteringOption(option.Id)),
+			static option => Assert.False(option.IsChecked));
+		Assert.True(viewModel.IgnoreOptions.Single(
+			static option => option.Id == IgnoreOptionId.TrackedGitFilesOnly).IsChecked);
 
 		coordinator.HandleIgnoreAllChanged(isChecked: true, currentPath: null);
 
@@ -1625,7 +1632,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	}
 
 	[AvaloniaFact]
-	public async Task FailedRefreshRollback_AllOffWithTrackedPreference_AllOnRestoresTrackedMode()
+	public async Task FailedRefreshRollback_AllOffPreservesTrackedMode()
 	{
 		const string path = @"C:\Project";
 		var failRefresh = false;
@@ -1647,11 +1654,6 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		HookAllOptionListeners(coordinator, viewModel);
 
 		coordinator.HandleIgnoreAllChanged(isChecked: false, currentPath: null);
-		var allOffSnapshot = WithGitMode(
-			trackedSnapshot,
-			useGitIgnore: false,
-			trackedOnly: false);
-		ApplySelectionRefreshSnapshot(coordinator, allOffSnapshot);
 		var rollbackSnapshot = GetStableSelectionSnapshot(coordinator);
 
 		failRefresh = true;

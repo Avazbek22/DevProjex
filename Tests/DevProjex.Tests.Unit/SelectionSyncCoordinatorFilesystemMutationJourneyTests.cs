@@ -503,19 +503,14 @@ public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
 	private static bool AreAllPathIgnoreOptionsChecked(IEnumerable<IgnoreOptionViewModel> options)
 	{
 		var pathOptions = options
-			.Where(static option => !ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option.Id))
+			.Where(static option =>
+				!ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option.Id) &&
+				!GitFilteringModeResolver.IsGitFilteringOption(option.Id))
 			.ToArray();
 		if (pathOptions.Length == 0)
 			return false;
 
-		var ordinaryOptionsChecked = pathOptions
-			.Where(static option => !GitFilteringModeResolver.IsGitFilteringOption(option.Id))
-			.All(static option => option.IsChecked);
-		var gitOptions = pathOptions
-			.Where(static option => GitFilteringModeResolver.IsGitFilteringOption(option.Id))
-			.ToArray();
-		return ordinaryOptionsChecked &&
-		       (gitOptions.Length == 0 || gitOptions.Any(static option => option.IsChecked));
+		return pathOptions.All(static option => option.IsChecked);
 	}
 
     private static void AssertOptionsEqual(

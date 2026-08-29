@@ -326,7 +326,7 @@ public sealed class GitScopeSelectionTests
 	}
 
 	[Fact]
-	public void DotFolderOwnsHiddenDotFolderUntilDotFilteringIsDisabled()
+	public void DotAndHiddenFolderOwnershipMatchesPlatformSemantics()
 	{
 		using var project = new TemporaryDirectory();
 		var directoryPath = Path.Combine(project.Path, ".hidden");
@@ -373,8 +373,12 @@ public sealed class GitScopeSelectionTests
 
 		Assert.Equal(1, dotOwner.IgnoreOptionCounts.DotFolders);
 		Assert.Equal(0, dotOwner.IgnoreOptionCounts.HiddenFolders);
-		Assert.Equal(0, hiddenOwner.IgnoreOptionCounts.DotFolders);
-		Assert.Equal(1, hiddenOwner.IgnoreOptionCounts.HiddenFolders);
+		Assert.Equal(
+			OperatingSystem.IsWindows() ? 0 : 1,
+			hiddenOwner.IgnoreOptionCounts.DotFolders);
+		Assert.Equal(
+			OperatingSystem.IsWindows() ? 1 : 0,
+			hiddenOwner.IgnoreOptionCounts.HiddenFolders);
 	}
 
 	[Fact]
