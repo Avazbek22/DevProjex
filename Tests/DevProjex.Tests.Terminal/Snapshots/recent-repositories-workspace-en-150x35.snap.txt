@@ -8,15 +8,15 @@
 │                                      ││                                                                      │││[ ] Strip comments                ││
 │                                      ││                                                                      │││[ ] Strip blank lines             ││
 │                                      ││                                                                      ││└──────────────────────────────────┘│
-│                                      ││                                                                      ││┌┤Exclusions├─────── [x] All (9) ──┐│
+│                                      ││                                                                      ││┌┤Exclusions├─────────── [ ] All ──┐│
 │                                      ││                                                                      │││( ) No Git filtering              ││
 │                                      ││                                                                      │││(•) Use .gitignore                ││
 │                                      ││                                                                      │││( ) Tracked Git files only        ││
 │                                      ││                                                                      │││( ) Staged Git files              ││
 │                                      ││                                                                      │││( ) Current Git changes           ││
-│                                      ││                                                                      │││[x] Smart ignore                  ││
-│                                      ││                                                                      │││[x] Empty folders                 ││
-│                                      ││                                                                      │││[x] Empty files                   ││
+│                                      ││                                                                      │││                                  ││
+│                                      ││                                                                      │││                                  ││
+│                                      ││                                                                      │││                                  ││
 │                                      ││                                                                      ││└──────────────────────────────────┘│
 │                                      ││                                                                      ││┌┤File types├─────── [x] All (2) ──┐│
 │                                      ││                                                                      │││[x] .cs                           ││

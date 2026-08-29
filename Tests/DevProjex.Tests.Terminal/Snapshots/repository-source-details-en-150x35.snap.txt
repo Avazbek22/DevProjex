@@ -8,15 +8,15 @@
 │                                      ││                                                                      │││[ ] Strip comments                ││
 │                                      ││                                                                      │││[ ] Strip blank lines             ││
 │                                      ││                                                                      ││└──────────────────────────────────┘│
-│                                      ││                                                                      ││┌┤Exclusions├─────── [x] All (9) ──┐│
-│                                 ┌┤Details├──────────────────────────────────────────────────────────────────────┐ ) No Git filtering             ▲││
-│                                 │ Repository URL: https://github.com/Avazbek22/DevProjex                        │•) Use .gitignore               ┃││
-│                                 │ Branch: main                                                                  │ ) Tracked Git files only       ┃││
-│                                 │ Commit: <ID-PART>                                                          │ ) Staged Git files             ┃││
-│                                 │ Size: <REPOSITORY_SIZE>                                                       │ ) Current Git changes          ·││
-│                                 │ Last opened: <TIMESTAMP>│x] Smart ignore                 ·││
-│                                 │                                                                               │x] Empty folders                ·││
-│                                 │                                                                               │x] Empty files                  ▼││
+│                                      ││                                                                      ││┌┤Exclusions├─────────── [ ] All ──┐│
+│                                 ┌┤Details├──────────────────────────────────────────────────────────────────────┐ ) No Git filtering              ││
+│                                 │ Repository URL: https://github.com/Avazbek22/DevProjex                        │•) Use .gitignore                ││
+│                                 │ Branch: main                                                                  │ ) Tracked Git files only        ││
+│                                 │ Commit: <ID-PART>                                                          │ ) Staged Git files              ││
+│                                 │ Size: <REPOSITORY_SIZE>                                                       │ ) Current Git changes           ││
+│                                 │ Last opened: <TIMESTAMP>│                                 ││
+│                                 │                                                                               │                                 ││
+│                                 │                                                                               │                                 ││
 │                                 │                                 ⟦► Close ◄⟧▖                                  │─────────────────────────────────┘│
 │                                 │                                 ▝▀▀▀▀▀▀▀▀▀▀▘                                  │File types├─────── [x] All (2) ──┐│
 │                                 └───────────────────────────────────────────────────────────────────────────────┘x] .cs                           ││
