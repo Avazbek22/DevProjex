@@ -423,12 +423,16 @@ public sealed class TerminalPtyLifecycleTests
 			column: 4,
 			row: rootRow,
 			cancellationToken: TestContext.Current.CancellationToken);
-		await Task.Delay(250, TestContext.Current.CancellationToken);
+		await Task.Delay(1_000, TestContext.Current.CancellationToken);
 
 		var screen = terminal.CaptureScreen();
 		Assert.Contains($"[x] {projectName}", screen, StringComparison.Ordinal);
 		Assert.DoesNotContain($"[ ] {projectName}", screen, StringComparison.Ordinal);
-		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Exit DevProjex Terminal?",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(cancellationToken: TestContext.Current.CancellationToken));
