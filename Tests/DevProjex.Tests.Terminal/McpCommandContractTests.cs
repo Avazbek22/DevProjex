@@ -36,6 +36,7 @@ public sealed class McpCommandContractTests
 		Assert.Contains("devprojex mcp", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("--root", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("--hide-private-data", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("--allow-remote", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("Run the local read-only MCP stdio server.", environment.StandardOutput, StringComparison.Ordinal);
 	}
 

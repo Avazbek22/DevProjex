@@ -106,12 +106,17 @@ public sealed class DevProjexCommandTree
 		{
 			Description = L("Terminal.Option.HidePrivateData")
 		};
+		var allowRemote = new Option<bool>("--allow-remote")
+		{
+			Description = L("Terminal.Option.McpAllowRemote")
+		};
 		roots.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
 			context,
 			FileSystemCompletionKind.Directories,
 			Directory.GetCurrentDirectory()));
 		command.Options.Add(roots);
 		command.Options.Add(hidePrivateData);
+		command.Options.Add(allowRemote);
 		CliExamplesRegistry.Set(
 			command,
 			"devprojex mcp",
@@ -129,6 +134,7 @@ public sealed class DevProjexCommandTree
 				await McpServerHost.RunAsync(
 						resolvedRoots,
 						parseResult.GetValue(hidePrivateData),
+						parseResult.GetValue(allowRemote),
 						cancellationToken)
 					.ConfigureAwait(false);
 				return CommandLineExitCodes.Success;
@@ -258,7 +264,15 @@ public sealed class DevProjexCommandTree
 		{
 			Description = L("Terminal.Option.FailOnFindings")
 		};
-		var selection = new SelectionOptions(_localization, environment);
+		var topFiles = new Option<int?>("--top-files")
+		{
+			Description = L("Terminal.Option.TopFiles"),
+			HelpName = "N"
+		};
+		var selection = new SelectionOptions(
+			_localization,
+			environment,
+			includeMaxFileBytes: true);
 		command.Arguments.Add(project);
 		command.Options.Add(format);
 		command.Options.Add(outputPath);
@@ -266,10 +280,19 @@ public sealed class DevProjexCommandTree
 		command.Options.Add(strict);
 		command.Options.Add(findings);
 		command.Options.Add(failOnFindings);
+		command.Options.Add(topFiles);
 		command.Options.Add(branch);
 		selection.AddTo(command);
 		_output.AddProgressTo(command);
 		ConfigureFileForce(command, force, outputPath);
+		command.Validators.Add(result =>
+		{
+			if (CliParseValue.TryGet(result, topFiles, out var value) && value is < 1 or > 1_000)
+			{
+				result.AddError(LocalizedParseError.Create(
+					L("Terminal.Validation.TopFiles")));
+			}
+		});
 		command.SetAction(async (parseResult, cancellationToken) =>
 		{
 			var outputOptions = _output.Get(parseResult);
@@ -313,7 +336,9 @@ public sealed class DevProjexCommandTree
 								outputOptions,
 								parseResult.GetValue(findings),
 								parseResult.GetValue(failOnFindings),
-								Force: parseResult.GetValue(force)),
+								Force: parseResult.GetValue(force),
+								TopFiles: parseResult.GetValue(topFiles),
+								MaxFileBytes: selection.GetMaxFileBytes(parseResult)),
 							cancellationToken)
 						.ConfigureAwait(false);
 				},
@@ -367,7 +392,10 @@ public sealed class DevProjexCommandTree
 			HelpName = "N"
 		};
 		var branch = BranchOption();
-		var selection = new SelectionOptions(_localization, environment);
+		var selection = new SelectionOptions(
+			_localization,
+			environment,
+			includeMaxFileBytes: true);
 		command.Arguments.Add(project);
 		command.Options.Add(view);
 		command.Options.Add(format);
@@ -441,7 +469,8 @@ public sealed class DevProjexCommandTree
 								parseResult.GetValue(force),
 								parseResult.GetValue(dryRun),
 								parseResult.GetValue(maximumEstimatedTokens),
-								outputOptions),
+								outputOptions,
+								MaxFileBytes: selection.GetMaxFileBytes(parseResult)),
 							cancellationToken)
 						.ConfigureAwait(false);
 				},
@@ -1442,7 +1471,8 @@ public sealed class DevProjexCommandTree
 		var selection = new SelectionOptions(
 			_localization,
 			environment,
-			includeContentTransformations: false);
+			includeContentTransformations: false,
+			includeMaxFileBytes: true);
 		command.Arguments.Add(project);
 		command.Options.Add(format);
 		command.Options.Add(outputPath);
@@ -1482,7 +1512,8 @@ public sealed class DevProjexCommandTree
 								ParseTreeFormat(parseResult.GetValue(format)),
 								parseResult.GetValue(outputPath),
 								outputOptions,
-								Force: parseResult.GetValue(force)),
+								Force: parseResult.GetValue(force),
+								MaxFileBytes: selection.GetMaxFileBytes(parseResult)),
 							cancellationToken)
 						.ConfigureAwait(false);
 				},

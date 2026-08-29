@@ -16,6 +16,10 @@ public sealed class EmptyEqualsParserRegressionTests
 				"--format"
 			},
 			{
+				["analyze", ".", "--top-files=", "10"],
+				"--top-files"
+			},
+			{
 				["analyze", ".", "--profile=", "standard"],
 				"--profile"
 			},
@@ -38,6 +42,10 @@ public sealed class EmptyEqualsParserRegressionTests
 			{
 				["analyze", ".", "--exclude=", "none"],
 				"--exclude"
+			},
+			{
+				["analyze", ".", "--max-file-bytes=", "1m"],
+				"--max-file-bytes"
 			},
 			{
 				["analyze", ".", "--color=", "never"],
@@ -144,6 +152,7 @@ public sealed class EmptyEqualsParserRegressionTests
 		"--kind",
 		"--language",
 		"--limit",
+		"--max-file-bytes",
 		"--max-tokens",
 		"--output",
 		"--profile",
@@ -155,6 +164,7 @@ public sealed class EmptyEqualsParserRegressionTests
 		"--select",
 		"--select-from",
 		"--timeout",
+		"--top-files",
 		"--tree-format",
 		"--verbosity",
 		"--view"

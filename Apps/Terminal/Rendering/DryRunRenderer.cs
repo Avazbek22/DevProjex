@@ -29,6 +29,14 @@ internal static class DryRunRenderer
 		environment.Error.WriteLine(localization.Format(
 			"Terminal.DryRun.Profile",
 			TerminalTextEscaping.EscapeSingleLine(FormatProfile(plan.Selection.ProfileSource))));
+		if (plan.FileSizeFilter is { } sizeFilter)
+		{
+			environment.Error.WriteLine(localization.Format(
+				"Terminal.DryRun.SizeFilter",
+				CacheCommandHandler.FormatByteSize(sizeFilter.MaximumFileBytes),
+				sizeFilter.ExcludedFiles,
+				CacheCommandHandler.FormatByteSize(sizeFilter.ExcludedBytes)));
+		}
 	}
 
 	private static string FormatProfile(ProjectProfileReference? profile) =>

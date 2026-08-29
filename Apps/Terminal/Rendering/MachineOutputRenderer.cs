@@ -95,6 +95,10 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 				plan.IncludedBytes,
 				plan.Analysis.Metrics.Tree,
 				plan.Analysis.Metrics.Content),
+			TopFiles: plan.TopFiles?.Select(static file =>
+				new AnalysisTopFileDocument(
+					PathUtility.NormalizeSeparators(file.Path),
+					file.Tokens)),
 			Diagnostics: plan.Diagnostics.Select(static diagnostic =>
 				new AnalysisDiagnosticDocument(
 					diagnostic.Code,
@@ -157,6 +161,8 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 		AnalysisSelectionDocument Selection,
 		AnalysisInventoryDocument Inventory,
 		AnalysisMetricsDocument Metrics,
+		[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+		IEnumerable<AnalysisTopFileDocument>? TopFiles,
 		IEnumerable<AnalysisDiagnosticDocument> Diagnostics,
 		string Fingerprint,
 		[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -201,6 +207,8 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 		long Bytes,
 		ProjectOutputMetricsReport Tree,
 		ProjectOutputMetricsReport Content);
+
+	private readonly record struct AnalysisTopFileDocument(string Path, long Tokens);
 
 	private readonly record struct AnalysisDiagnosticDocument(
 		string Code,

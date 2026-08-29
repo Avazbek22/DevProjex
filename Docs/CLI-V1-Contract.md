@@ -158,6 +158,7 @@ remains a usage error instead of silently selecting a later command.
 --select-from <FILE|->
 --git-mode <none|gitignore|tracked>
 --exclude <NAME>                     repeatable
+--max-file-bytes <SIZE>              analyze/tree/export-context only
 --hide-secrets [<true|false|on|off>]
 --no-hide-secrets
 --hide-private-data [<true|false|on|off>]
@@ -202,9 +203,17 @@ created. An entry that exists but is absent from the effective tree because of
 Git or exclusion filtering remains a warning and the command succeeds; this
 preserves intentional selection against changing filter profiles.
 
+`--max-file-bytes` is a transient narrowing filter on `analyze`, `tree`, and
+`export context`. Files strictly larger than the parsed byte limit are excluded
+after all ordinary selection rules; files exactly at the limit remain selected.
+SIZE is either a positive byte count or a case-insensitive binary suffix form
+using `k|kb|kib`, `m|mb|mib`, or `g|gb|gib`, each with a 1024 multiplier. It is
+not part of `ProjectSelectionSpec`, is never stored by `profile save`, and does
+not alter portable-profile JSON.
+
 `tree` accepts the path-selection subset (`--profile`, `--root`, `--extension`,
-`--select`, `--select-from`, `--git-mode`, and `--exclude`) and intentionally
-omits all content-transformation options.
+`--select`, `--select-from`, `--git-mode`, `--exclude`, and
+`--max-file-bytes`) and intentionally omits all content-transformation options.
 
 The documented aliases are stable syntax: `export ctx`, `export proj`, `-f` for
 every public `--format`, `-n` for each public `--dry-run`, and `-q`/`--quiet`
@@ -460,6 +469,7 @@ devprojex analyze [PROJECT|URL]
   --strict
   --findings
   --fail-on-findings
+  --top-files <N>                     range: 1..1000; absent by default
   --force                             file output only
   --branch <NAME>                     URL source only
   <shared selection options>
@@ -485,6 +495,9 @@ changes the effective `HideSecrets` selection or redacts the emitted report.
 JSON adds the optional `findingCount`; the text redacted-value row is present only
 when redaction is actually enabled. Private-data detection remains opt-in.
 `--force` atomically replaces an existing report file and is invalid with stdout.
+`--top-files` adds a largest-text-file ranking by estimated tokens. It is absent
+by default, so existing text and JSON bytes do not change unless requested. The
+ranking uses effective transformed content and portable relative paths.
 
 ### `tree`
 
@@ -764,9 +777,11 @@ that prevents an accepted option from becoming a no-op.
 | analyze/tree/context/project/open/profile-save | `--select`, `--select-from` | profile selected paths | combines direct paths with strict UTF-8 file/redirected-stdin entries into one explicit path override | optional UTF-8 BOM is accepted; UTF-16/UTF-32, interactive stdin, oversized input, physically missing or invalid/out-of-source paths, and `open --last` fail with exit `2`; existing paths removed from the effective tree produce a warning and success; the byte limit is enforced during reading | requested payload/path stays on stdout | parser, reader, resolver, process |
 | analyze/tree/context/project/open/profile-save | `--git-mode` | profile Git mode | replaces the profile mode with `none`, `gitignore`, or `tracked` | conflicts with `open --last`; `tracked` requires Git CLI and at least one readable applicable index | on unavailable index, `analyze` preserves its requested report; tree/context/project/open/profile-save create no artifact and emit no success payload; diagnostic uses stderr and exit `3` | parser, resolver, handler, process |
 | analyze/tree/context/project/open/profile-save | `--exclude` | profile exclusions | replaces the path-exclusion set with repeated typed values | repeatable; `none` conflicts with every other value; conflicts with `open --last` | requested payload/path stays on stdout; invalid value exits `2` | parser, resolver, handler, process |
+| analyze/tree/context | `--max-file-bytes` | absent | removes otherwise selected files strictly larger than SIZE | positive bytes or binary `k|kb|kib`, `m|mb|mib`, `g|gb|gib`; invocation-only and never persisted | inventories, trees, context, metrics, and dry-run counts reflect the narrowed selection; invalid value exits `2` | parser, application filter, handler, process |
 | analyze/context/project/open/profile-save | `--hide-secrets` | profile content-transformation state | independently enables or disables detected-value redaction without changing path filters | bare form means on; values are `true`, `false`, `on`, `off`; conflicts with `--no-hide-secrets` and `open --last` | requested payload/path stays on stdout; inspection failure exits `1` without a complete artifact | parser, resolver, handler, process |
 | analyze/context/project/open/profile-save | `--hide-private-data` | profile content-transformation state | independently enables or disables private-data redaction without changing path filters | bare form means on; values are `true`, `false`, `on`, `off`; conflicts with `--no-hide-private-data` and `open --last` | requested payload/path stays on stdout; inspection failure exits `1` without a complete artifact | parser, resolver, handler, process |
 | `mcp` | `--hide-private-data` | off | enables private-data redaction for the entire server process | startup-only; tool schemas and profiles cannot alter it; secret redaction remains mandatory | stdout remains JSON-RPC-only; startup failure exits `2` | parser, MCP contract, process |
+| `mcp` | `--allow-remote` | off | permits project tools to resolve Git URL sources through RepoCache | startup-only; local roots and `list_projects` remain unchanged; `branch` is URL-only | stdout remains JSON-RPC-only; tool failures use stable `DPX-MCP-*` results | parser, MCP schema, integration |
 | analyze/context/project/open/profile-save | `--compress-code` | profile content-transformation state | independently enables or disables syntax-aware body compression without changing path filters | `true|false|on|off`; conflicts with `--no-compress-code` and `open --last` | requested payload/path stays on stdout; unsupported or rejected files remain complete | parser, resolver, handler, process |
 | analyze/context/project/open/profile-save | `--strip-comments` | profile content-transformation state | independently removes syntax-tree comments and Python docstrings without changing path filters | `true|false|on|off`; conflicts with `--no-strip-comments` and `open --last` | requested payload/path stays on stdout; unsupported or rejected files remain complete | parser, resolver, handler, process |
 | analyze/context/project/open/profile-save | `--strip-blank-lines` | profile content-transformation state | independently removes unprotected whitespace-only source lines without changing path filters | `true|false|on|off`; conflicts with `--no-strip-blank-lines` and `open --last` | requested payload/path stays on stdout; unsupported or rejected files remain complete | parser, resolver, handler, process |
@@ -776,6 +791,7 @@ that prevents an accepted option from becoming a no-op.
 | `analyze` | `--strict` | off | writes the report, then treats policy diagnostics as failure | none | requested report remains intact; policy result exits `3` | handler, process |
 | `analyze` | `--findings` | off | adds sanitized effective redaction descriptors | values, source fragments, fingerprints, and raw detector errors are forbidden | report stays on stdout/file | serializer, sanitation, process |
 | `analyze` | `--fail-on-findings` | off | writes the report, then gates on effective findings | independent from `--strict` | requested report remains intact; a nonzero finding count exits `3` | handler, process |
+| `analyze` | `--top-files` | absent | appends the N largest selected text files by estimated tokens | range `1..1000`; ranking reflects effective transformations | optional text section or `topFiles` JSON property; invalid value exits `2` | parser, observer metrics, schema, process |
 | URL-capable commands | `--branch` | remote default branch | selects a validated repository branch under an operation lease | rejected for local paths and with `open --last` | ordinary command payload remains on stdout; clone/branch failure exits `1` or invalid name exits `2` | parser, resolver, Git fixture |
 | analyze/tree/context/project | `--progress` | `auto` | selects automatic, forced, or disabled operational progress on stderr | quiet/minimal suppress optional progress; URL-source Git operations use bounded milestones when rewriting is unavailable | requested payload stays byte-clean on stdout | parser, rendering, process |
 | analyze/tree/context/project | `--verbosity`, `-q` | `normal` | controls optional operational stderr from quiet through safe diagnostic context; `-q` selects `quiet` | `-q` conflicts with an explicit `--verbosity`; neither removes requested stdout nor suppresses errors | requested payload stays on stdout; invalid value or conflict exits `2` | parser, rendering, process |
@@ -1061,6 +1077,26 @@ to 12 characters only in text and adds a TTY total; `ui list` emits an empty
 stdout and the no-instances diagnostic on stderr. Analysis text uses IEC sizes,
 and profile text uses localized yes/no values.
 
+## MCP remote-source addition to CLI v1
+
+`devprojex mcp --allow-remote` is an additive, opt-in startup capability. Without
+the flag, MCP project tools retain the local-only, zero-network contract. With
+the flag, `get_tree`, `analyze`, `pack_context`, `search_project`, and `get_file`
+accept a Git URL in `project` plus an optional URL-only `branch`. RepoCache owns
+clone publication and the server pins each resolved checkout until shutdown.
+`list_projects` remains the stable list of configured local roots.
+
+`analyze --top-files N` is an additive CLI-v1 option with range `1..1000`.
+The MCP `analyze` tool exposes the matching optional `top_files` parameter with
+default `10`; both surfaces share the same bounded, deterministic ranking.
+
+`--max-file-bytes SIZE` is an additive, invocation-only option on `analyze`,
+`tree`, and `export context`. The four MCP selection tools expose the equivalent
+positive integer `max_file_bytes` parameter. Both surfaces use one Application
+filter and exclude files strictly larger than the limit without changing profile
+schemas. Existing machine documents add no property; their inventory, byte
+metrics, trees, and content reflect the effective narrowed selection.
+
 ## Exit Codes
 
 | Code | Meaning |
@@ -1125,6 +1161,9 @@ contain only `ruleId`, `category`, `relativePath`, and `lineNumber`. The one-bas
 line number is measured in the original decoded source before content
 transformations. Timings and secret values are not part of the stable v1 analysis
 schema.
+When `--top-files N` is present, analysis JSON adds `topFiles` after `metrics`.
+Each ordered item contains a portable relative `path` and integer `tokens`.
+The property is omitted when the option is absent, preserving existing v1 bytes.
 
 Recent JSON contains `schemaVersion`, kind `devprojex-recent`, and `items` with
 stable `kind`, nullable `path`/`url`, `name`, `parent`, and `lastOpened` fields.

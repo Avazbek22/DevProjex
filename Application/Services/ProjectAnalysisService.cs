@@ -21,6 +21,17 @@ public sealed class ProjectAnalysisService(
 		new Dictionary<IgnoreOptionId, bool>();
 	private readonly Func<DateTimeOffset> _utcNowProvider = utcNowProvider ?? (() => DateTimeOffset.UtcNow);
 
+	public Task<ExportOutputMetrics> CalculateContentMetricsAsync(
+		IReadOnlyList<string>? orderedFilePaths,
+		Action<ContentFileMetrics>? fileMetricsObserver,
+		CancellationToken cancellationToken = default) =>
+		ProjectContentMetricsCalculator.CalculateAsync(
+			fileContentAnalyzer,
+			orderedFilePaths,
+			fileMetricsObserver,
+			progress: null,
+			cancellationToken);
+
 	public async Task<ProjectAnalysisReport> AnalyzeAsync(
 		ProjectAnalysisRequest request,
 		CancellationToken cancellationToken = default)
