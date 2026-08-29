@@ -143,6 +143,94 @@ public sealed class McpServerProcessTests
 	}
 
 	[Fact]
+	public async Task RealProcessClonesOptInRemoteAndAppliesTokenBudgetWithoutExposingCachePath()
+	{
+		if (!await IsGitAvailableAsync())
+			Assert.Skip("Git is not available in this test environment.");
+
+		using var workspace = new TemporaryDirectory();
+		var repository = workspace.CreateDirectory("remote-source.git");
+		workspace.WriteFile("remote-source.git/A-large.txt", new string('a', 40));
+		workspace.WriteFile("remote-source.git/B-small.txt", "b");
+		await RunGitAsync(repository, "init");
+		await RunGitAsync(repository, "config", "user.email", "tests@devprojex.local");
+		await RunGitAsync(repository, "config", "user.name", "DevProjex Tests");
+		await RunGitAsync(repository, "add", ".");
+		await RunGitAsync(repository, "commit", "-m", "initial");
+
+		var root = workspace.CreateDirectory("configured-root");
+		var dataRoot = workspace.CreateDirectory("data");
+		var repositoryUrl = new Uri(Path.GetFullPath(repository)).AbsoluteUri;
+		var application = PublishedApplicationLocator.FindApplicationAssembly();
+		var startInfo = new ProcessStartInfo("dotnet")
+		{
+			UseShellExecute = false,
+			RedirectStandardInput = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			CreateNoWindow = true,
+			WorkingDirectory = root
+		};
+		startInfo.ArgumentList.Add(application);
+		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--root");
+		startInfo.ArgumentList.Add(root);
+		startInfo.ArgumentList.Add("--allow-remote");
+		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = dataRoot;
+
+		using var process = Process.Start(startInfo) ??
+		                    throw new InvalidOperationException("MCP process did not start.");
+		var standardErrorTask = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+		await using var recordingOutput = new RecordingReadStream(process.StandardOutput.BaseStream);
+		McpClient? client = null;
+		try
+		{
+			client = await McpClient.CreateAsync(
+				new StreamClientTransport(process.StandardInput.BaseStream, recordingOutput),
+				clientOptions: null,
+				loggerFactory: null,
+				TestContext.Current.CancellationToken);
+			var pack = await client.CallToolAsync(
+				"pack_context",
+				new Dictionary<string, object?>
+				{
+					["project"] = repositoryUrl,
+					["view"] = "content",
+					["format"] = "text",
+					["max_tokens"] = "1"
+				},
+				progress: null,
+				options: null,
+				TestContext.Current.CancellationToken);
+			var text = Assert.IsType<TextContentBlock>(Assert.Single(pack.Content)).Text;
+
+			Assert.NotEqual(true, pack.IsError);
+			Assert.Contains("B-small.txt", text, StringComparison.Ordinal);
+			Assert.DoesNotContain(new string('a', 40), text, StringComparison.Ordinal);
+			Assert.Contains("Included: 1 file (1 estimated tokens).", text, StringComparison.Ordinal);
+			Assert.Contains("Skipped: 1 file", text, StringComparison.Ordinal);
+			Assert.DoesNotContain(dataRoot, text, PathComparison);
+		}
+		finally
+		{
+			process.StandardInput.Close();
+			if (client is not null)
+				await client.DisposeAsync();
+		}
+
+		await Task.WhenAll(
+			process.WaitForExitAsync(TestContext.Current.CancellationToken)
+				.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken),
+			recordingOutput.WaitForSourceEofAsync(TestContext.Current.CancellationToken)
+				.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken));
+		var standardError = await standardErrorTask;
+		Assert.True(process.ExitCode == 0, $"Unexpected exit code {process.ExitCode}. stderr: {standardError}");
+		Assert.True(string.IsNullOrWhiteSpace(standardError), $"Unexpected stderr: {standardError}");
+		Assert.NotEmpty(ParseJsonRpcMessages(recordingOutput.GetRecordedText()));
+		Assert.True(Directory.Exists(Path.Combine(dataRoot, "RepoCache")));
+	}
+
+	[Fact]
 	public async Task PublishedSingleFileCompletesHandshakeListsToolsCallsToolAndExitsOnEof()
 	{
 		var application = GetPublishedSingleFileOrSkip();
@@ -216,6 +304,57 @@ public sealed class McpServerProcessTests
 		return application;
 	}
 
+	private static async Task<bool> IsGitAvailableAsync()
+	{
+		try
+		{
+			var result = await RunProcessAsync(
+				"git",
+				Directory.GetCurrentDirectory(),
+				["--version"]);
+			return result.ExitCode == 0;
+		}
+		catch (System.ComponentModel.Win32Exception)
+		{
+			return false;
+		}
+	}
+
+	private static async Task RunGitAsync(string workingDirectory, params string[] arguments)
+	{
+		var result = await RunProcessAsync("git", workingDirectory, arguments);
+		Assert.True(
+			result.ExitCode == 0,
+			$"Git failed with exit code {result.ExitCode}. stdout: {result.Output} stderr: {result.Error}");
+	}
+
+	private static async Task<ProcessResult> RunProcessAsync(
+		string fileName,
+		string workingDirectory,
+		IReadOnlyList<string> arguments)
+	{
+		var startInfo = new ProcessStartInfo(fileName)
+		{
+			UseShellExecute = false,
+			RedirectStandardInput = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			CreateNoWindow = true,
+			WorkingDirectory = workingDirectory
+		};
+		foreach (var argument in arguments)
+			startInfo.ArgumentList.Add(argument);
+
+		using var process = Process.Start(startInfo) ??
+		                    throw new InvalidOperationException($"Process '{fileName}' did not start.");
+		process.StandardInput.Close();
+		var outputTask = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
+		var errorTask = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+		await process.WaitForExitAsync(TestContext.Current.CancellationToken)
+			.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken);
+		return new ProcessResult(process.ExitCode, await outputTask, await errorTask);
+	}
+
 	private static IReadOnlyList<string> ParseJsonRpcMessages(string transcript)
 	{
 		var lines = transcript.Split('\n');
@@ -287,6 +426,8 @@ public sealed class McpServerProcessTests
 
 	private static StringComparison PathComparison =>
 		OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
+	private sealed record ProcessResult(int ExitCode, string Output, string Error);
 
 	private sealed class InlineProgress<T> : IProgress<T>
 	{

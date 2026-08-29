@@ -372,12 +372,12 @@ internal sealed class GitWorktreeManager : IGitWorktreeManager
 		cancellationToken.ThrowIfCancellationRequested();
 		var startInfo = GitProcessStartInfoFactory.Create(
 			workingDirectory,
-			arguments,
-			redirectStandardInput: false);
+			arguments);
 
 		using var process = new Process { StartInfo = startInfo };
 		if (!process.Start())
 			return new GitProcessResult(-1, string.Empty, string.Empty);
+		process.StandardInput.Close();
 
 		var outputTask = GitProcessOutputReader.ReadAsync(
 			process.StandardOutput,

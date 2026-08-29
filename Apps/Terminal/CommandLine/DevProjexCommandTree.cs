@@ -135,7 +135,8 @@ public sealed class DevProjexCommandTree
 						resolvedRoots,
 						parseResult.GetValue(hidePrivateData),
 						parseResult.GetValue(allowRemote),
-						cancellationToken)
+						cancellationToken,
+						_serviceFactory.AppDataPathProvider)
 					.ConfigureAwait(false);
 				return CommandLineExitCodes.Success;
 			}

@@ -15,13 +15,15 @@ public static class McpServerHost
 		IReadOnlyList<string> roots,
 		bool hidePrivateData = false,
 		bool allowRemote = false,
-		CancellationToken cancellationToken = default) =>
+		CancellationToken cancellationToken = default,
+		Func<string>? appDataPathProvider = null) =>
 		RunWithStreamsAsync(
 			roots,
 			Console.OpenStandardInput(),
 			Console.OpenStandardOutput(),
 			hidePrivateData,
 			cancellationToken,
+			appDataPathProvider,
 			allowRemote: allowRemote);
 
 	internal static async Task RunWithStreamsAsync(
