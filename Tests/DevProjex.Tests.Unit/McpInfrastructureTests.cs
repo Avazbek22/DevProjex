@@ -18,7 +18,13 @@ public sealed class McpInfrastructureTests
 			static candidate => candidate.Name == nameof(McpServerHost.RunAsync));
 
 		Assert.Equal(
-			[typeof(IReadOnlyList<string>), typeof(bool), typeof(bool), typeof(CancellationToken)],
+			[
+				typeof(IReadOnlyList<string>),
+				typeof(bool),
+				typeof(bool),
+				typeof(GitFilteringMode?),
+				typeof(CancellationToken)
+			],
 			method.GetParameters().Select(static parameter => parameter.ParameterType));
 	}
 
