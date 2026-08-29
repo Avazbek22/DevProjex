@@ -48,7 +48,7 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 
 		_skippedEstimatedTokens += estimatedTokens;
 		_skippedFileCount++;
-		RetainLargestSkippedFile(new ProjectContextTokenBudgetSkippedFile(path, estimatedTokens));
+		RetainLargestSkippedFile(path, estimatedTokens);
 		return false;
 	}
 
@@ -65,40 +65,40 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 			_skippedFileCount - largestSkippedFiles.Length);
 	}
 
-	private void RetainLargestSkippedFile(ProjectContextTokenBudgetSkippedFile candidate)
+	private void RetainLargestSkippedFile(string path, long estimatedTokens)
 	{
 		var largestSkippedFiles = _largestSkippedFiles ??=
 			new List<ProjectContextTokenBudgetSkippedFile>(MaximumReportedSkippedFiles);
-		var insertionIndex = largestSkippedFiles.BinarySearch(candidate, SkippedFileComparer.Instance);
-		if (insertionIndex < 0)
-			insertionIndex = ~insertionIndex;
+		var insertionIndex = FindInsertionIndex(largestSkippedFiles, path, estimatedTokens);
 		if (insertionIndex >= MaximumReportedSkippedFiles)
 			return;
 
-		largestSkippedFiles.Insert(insertionIndex, candidate);
+		largestSkippedFiles.Insert(
+			insertionIndex,
+			new ProjectContextTokenBudgetSkippedFile(path, estimatedTokens));
 		if (largestSkippedFiles.Count > MaximumReportedSkippedFiles)
 			largestSkippedFiles.RemoveAt(MaximumReportedSkippedFiles);
 	}
 
-	private sealed class SkippedFileComparer : IComparer<ProjectContextTokenBudgetSkippedFile>
+	private static int FindInsertionIndex(
+		IReadOnlyList<ProjectContextTokenBudgetSkippedFile> items,
+		string path,
+		long estimatedTokens)
 	{
-		public static SkippedFileComparer Instance { get; } = new();
-
-		public int Compare(
-			ProjectContextTokenBudgetSkippedFile? left,
-			ProjectContextTokenBudgetSkippedFile? right)
+		var low = 0;
+		var high = items.Count;
+		while (low < high)
 		{
-			if (ReferenceEquals(left, right))
-				return 0;
-			if (left is null)
-				return 1;
-			if (right is null)
-				return -1;
-
-			var tokenOrder = right.EstimatedTokens.CompareTo(left.EstimatedTokens);
-			return tokenOrder != 0
-				? tokenOrder
-				: PathComparer.Default.Compare(left.Path, right.Path);
+			var middle = low + (high - low) / 2;
+			var item = items[middle];
+			var comparison = item.EstimatedTokens != estimatedTokens
+				? estimatedTokens.CompareTo(item.EstimatedTokens)
+				: PathComparer.Default.Compare(item.Path, path);
+			if (comparison < 0)
+				low = middle + 1;
+			else
+				high = middle;
 		}
+		return low;
 	}
 }
