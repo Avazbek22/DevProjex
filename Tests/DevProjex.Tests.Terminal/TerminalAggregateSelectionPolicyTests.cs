@@ -4,37 +4,23 @@ namespace DevProjex.Tests.Terminal;
 
 public sealed class TerminalAggregateSelectionPolicyTests
 {
-	[Theory]
-	[InlineData(GitFilteringMode.None, GitFilteringMode.TrackedFilesOnly)]
-	[InlineData(GitFilteringMode.RespectGitIgnore, GitFilteringMode.TrackedFilesOnly)]
-	public void EnablingSelectsEveryRuleAndKeepsTheCurrentOrPreferredGitMode(
-		GitFilteringMode current,
-		GitFilteringMode preferred)
+	[Fact]
+	public void EnablingSelectsEveryPathRule()
 	{
-		var result = TerminalAggregateSelectionPolicy.ResolveExclusions(
-			enabled: true,
-			current,
-			preferred);
+		var result = TerminalAggregateSelectionPolicy.ResolveExclusions(enabled: true);
 
-		Assert.Equal(
-			current == GitFilteringMode.None ? preferred : current,
-			result.Mode);
 		Assert.Equal(
 			ProjectPresentationCatalog.Exclusions
 				.Select(static descriptor => descriptor.RequireId())
 				.Order(),
-			result.Exclusions.Order());
+			result.Order());
 	}
 
 	[Fact]
-	public void DisablingClearsGitModeAndEveryRule()
+	public void DisablingClearsEveryPathRule()
 	{
-		var result = TerminalAggregateSelectionPolicy.ResolveExclusions(
-			enabled: false,
-			GitFilteringMode.TrackedFilesOnly,
-			GitFilteringMode.RespectGitIgnore);
+		var result = TerminalAggregateSelectionPolicy.ResolveExclusions(enabled: false);
 
-		Assert.Equal(GitFilteringMode.None, result.Mode);
-		Assert.Empty(result.Exclusions);
+		Assert.Empty(result);
 	}
 }

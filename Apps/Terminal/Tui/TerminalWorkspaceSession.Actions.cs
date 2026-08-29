@@ -516,7 +516,8 @@ internal sealed partial class TerminalWorkspaceSession
 			? []
 			: _parameterRowsBuilder.BuildExclusions(
 				_state.Plan,
-				GetDisplayedSettingsSelection());
+				GetDisplayedSettingsSelection(),
+				_gitCliAvailable);
 
 	private IReadOnlyList<TerminalParameterRow> BuildExtensionParameterRows() =>
 		_state is null
@@ -1073,11 +1074,11 @@ internal sealed partial class TerminalWorkspaceSession
 		if (_state is null)
 			return;
 		var selection = GetDisplayedSettingsSelection();
-		var (mode, exclusions) = TerminalAggregateSelectionPolicy.ResolveExclusions(
-			enabled,
+		var exclusions = TerminalAggregateSelectionPolicy.ResolveExclusions(enabled);
+		ApplyPathFilters(
 			selection.GitMode ?? _state.Plan.GitReadiness.Mode,
-			_preferredGitMode);
-		ApplyPathFilters(mode, exclusions, originatedFromCommandLine: originatedFromCommandLine);
+			exclusions,
+			originatedFromCommandLine: originatedFromCommandLine);
 	}
 
 	private void ApplyExclusions(
@@ -1242,6 +1243,7 @@ internal sealed partial class TerminalWorkspaceSession
 	}
 
 	private bool HasGitRepository() =>
+		_gitCliAvailable &&
 		_state?.Plan is { } plan &&
 		(plan.GitReadiness.HasRepositoryBoundary ||
 		 GitRepositoryBoundaryProbe.ExistsAtOrAbove(plan.SourceRoot));

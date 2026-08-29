@@ -54,6 +54,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private int _terminalWidth;
 	private int _terminalHeight;
 	private bool _deferredInitialStart;
+	private bool _gitCliAvailable;
 	private bool _stopping;
 	private bool _disposed;
 	private Task? _openTask;
@@ -1021,12 +1022,35 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			var state = await _controller
 				.OpenAsync(projectPath, profile, operationCts.Token, sourceIdentity)
 				.ConfigureAwait(false);
+			var hasRepositoryBoundary = state.Plan.GitReadiness.HasRepositoryBoundary ||
+			                            GitRepositoryBoundaryProbe.ExistsAtOrAbove(state.Plan.SourceRoot);
+			var gitCliAvailable = false;
+			if (hasRepositoryBoundary)
+			{
+				try
+				{
+					gitCliAvailable = await _services.GitRepositoryService
+						.IsGitAvailableAsync(operationCts.Token)
+						.ConfigureAwait(false);
+				}
+				catch (OperationCanceledException) when (operationCts.IsCancellationRequested)
+				{
+					throw;
+				}
+				catch
+				{
+				}
+			}
 			if (_stopping || operationCts.IsCancellationRequested)
 				return;
 			sessionAccepted = await InvokeAsync(() =>
 				TerminalRepositorySessionOwnership.TryPublishAndReplace(
 					_operations.IsCurrent(WorkspaceOperationKind.Active, operationCts),
-					() => ShowWorkspace(state),
+					() =>
+					{
+						_gitCliAvailable = gitCliAvailable;
+						ShowWorkspace(state);
+					},
 					ref _ownedRepositorySession,
 					preparedRepositorySession)).ConfigureAwait(false);
 			if (!sessionAccepted)
@@ -3718,6 +3742,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var extensionStates = new Dictionary<string, bool>(
 			_settingsDraftExtensionStates ?? state.ExtensionOptionStates,
 			StringComparer.OrdinalIgnoreCase);
+		var previousPaths = state.BuildSelectedItemRelativePaths();
+		var pathStates = new Dictionary<string, bool>(
+			state.PathOptionStates,
+			PathComparer.Default);
 		var originatedFromCommandLine = _settingsDraftOriginatedFromCommandLine;
 		var requestId = Interlocked.Increment(ref _settingsRefreshRequestId);
 		var operationCts = _operations.Start(WorkspaceOperationKind.SettingsRefresh);
@@ -3729,6 +3757,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				baseline,
 				selection,
 				extensionStates,
+				previousPaths,
+				pathStates,
 				originatedFromCommandLine,
 				requestId,
 				operationCts,
@@ -3742,6 +3772,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		ProjectContextPlan baseline,
 		ProjectSelectionSpec selection,
 		IReadOnlyDictionary<string, bool> extensionStates,
+		IReadOnlySet<string> previousPaths,
+		IReadOnlyDictionary<string, bool> pathStates,
 		bool originatedFromCommandLine,
 		long requestId,
 		CancellationTokenSource operationCts,
@@ -3754,8 +3786,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				SettingsRefreshDebounceMilliseconds,
 				cancellationToken).ConfigureAwait(false);
 			if (TerminalWorkspaceController.RequiresStructuralRefresh(
-				    baseline.Selection,
-				    selection))
+				    baseline,
+				    selection,
+				    extensionStates))
 			{
 				await InvokeAsync(() =>
 				{
@@ -3775,6 +3808,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					baseline,
 					selection,
 					extensionStates,
+					previousPaths,
+					pathStates,
 					cancellationToken)
 				.ConfigureAwait(false);
 			cancellationToken.ThrowIfCancellationRequested();
@@ -3871,6 +3906,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var state = _state;
 		var sourcePlan = state.Plan;
 		var selectedPaths = state.BuildSelectedRelativePaths();
+		var forceEmptySelection = state.IsEffectiveRootUnchecked;
 		var expectedRevision = state.Revision;
 		_operations.Cancel(WorkspaceOperationKind.Preview);
 		var projectionRequestId = Interlocked.Increment(ref _projectionRequestId);
@@ -3888,6 +3924,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				var plan = await _controller.BuildReprojectedPlanAsync(
 						sourcePlan,
 						selectedPaths,
+						forceEmptySelection,
 						cancellationToken)
 					.ConfigureAwait(false);
 				var applied = await InvokeAsync(() =>

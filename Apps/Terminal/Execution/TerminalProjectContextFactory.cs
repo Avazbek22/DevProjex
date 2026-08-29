@@ -13,14 +13,17 @@ public sealed class TerminalProjectContextFactory(
 		ProjectSelectionSpec selection,
 		ProjectSourceIdentity? knownIdentity = null,
 		CancellationToken cancellationToken = default,
-		bool captureIgnoreImpactCounts = false)
+		bool captureIgnoreImpactCounts = false,
+		IReadOnlyDictionary<string, bool>? knownExtensionStates = null)
 		=> BuildAsync(
 			projectPath,
 			selection,
 			includeOutputMetrics: true,
 			knownIdentity,
 			cancellationToken,
-			captureIgnoreImpactCounts);
+			captureIgnoreImpactCounts,
+			includeContentOutputMetrics: true,
+			knownExtensionStates);
 
 	internal async Task<ProjectContextPlan> BuildAsync(
 		string projectPath,
@@ -29,7 +32,8 @@ public sealed class TerminalProjectContextFactory(
 		ProjectSourceIdentity? knownIdentity = null,
 		CancellationToken cancellationToken = default,
 		bool captureIgnoreImpactCounts = false,
-		bool includeContentOutputMetrics = true)
+		bool includeContentOutputMetrics = true,
+		IReadOnlyDictionary<string, bool>? knownExtensionStates = null)
 	{
 		var markedSecrets = ProjectSelectionMarkedSecretsResolver.Resolve(selection);
 		if (await secretRedactionSession
@@ -51,7 +55,10 @@ public sealed class TerminalProjectContextFactory(
 		var sourceIdentity = await sourceIdentityResolver
 			.ResolveAsync(projectPath, knownIdentity, cancellationToken)
 			.ConfigureAwait(false);
-		var request = new ProjectContextRequest(projectPath, selection, sourceIdentity);
+		var request = new ProjectContextRequest(projectPath, selection, sourceIdentity)
+		{
+			KnownExtensionStates = knownExtensionStates
+		};
 		ProjectContextPlan plan;
 		if (!includeOutputMetrics)
 		{

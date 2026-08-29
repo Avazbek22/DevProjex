@@ -53,14 +53,54 @@ public sealed class GitModeCommandContractTests
 	}
 
 	[Fact]
+	public async Task StagedScopeNarrowsProjectCopyAndUsesCurrentWorktreeContent()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var output = new TemporaryDirectory();
+		EnsureRepository(workspace.Path);
+		workspace.WriteFile("Selected.cs", "baseline\n");
+		workspace.WriteFile("Other.cs", "other\n");
+		CommitAll(workspace.Path, "baseline");
+		workspace.WriteFile("Selected.cs", "staged-version\n");
+		Assert.True(TryRunGit(workspace.Path, "add", "Selected.cs"));
+		workspace.WriteFile("Selected.cs", "current-worktree-version\n");
+		var destination = Path.Combine(output.Path, "submission");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			"export", "project", workspace.Path,
+			"--as", "folder",
+			"--git-mode", "staged",
+			"--exclude", "none",
+			"-o", destination);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Equal(
+			"current-worktree-version\n",
+			await File.ReadAllTextAsync(
+				Path.Combine(destination, "Selected.cs"),
+				TestContext.Current.CancellationToken));
+		Assert.False(File.Exists(Path.Combine(destination, "Other.cs")));
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
 	public async Task ChangesScopeIncludesUntrackedButNeverGitIgnoredFiles()
 	{
 		using var workspace = new TemporaryDirectory();
 		EnsureRepository(workspace.Path);
 		workspace.WriteFile(".gitignore", "*.ignored\n");
 		workspace.WriteFile("Tracked.cs", "baseline\n");
+		workspace.WriteFile("Staged.cs", "staged-baseline\n");
+		workspace.WriteFile("Tracked.ignored", "tracked-baseline\n");
+		Assert.True(TryRunGit(workspace.Path, "add", "-f", "Tracked.ignored"));
 		CommitAll(workspace.Path, "baseline");
 		workspace.WriteFile("Tracked.cs", "changed\n");
+		workspace.WriteFile("Staged.cs", "staged-change\n");
+		Assert.True(TryRunGit(workspace.Path, "add", "Staged.cs"));
+		workspace.WriteFile("Tracked.ignored", "tracked-ignored-change\n");
 		workspace.WriteFile("Untracked.cs", "visible\n");
 		workspace.WriteFile("Secret.ignored", "ignored\n");
 		var environment = new TestTerminalEnvironment();
@@ -75,9 +115,129 @@ public sealed class GitModeCommandContractTests
 
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
 		Assert.Contains("Tracked.cs", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("Staged.cs", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("Tracked.ignored", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("Untracked.cs", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.DoesNotContain("Secret.ignored", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
+	public async Task StagedScopeDoesNotLeakCommittedBaselineBeforeOrAfterAFileIsStaged()
+	{
+		using var workspace = new TemporaryDirectory();
+		EnsureRepository(workspace.Path);
+		workspace.WriteFile(".internal/Nested.cs", "dot-folder-baseline\n");
+		workspace.WriteFile(".metadata", "dot-file-baseline\n");
+		workspace.WriteFile("LICENSE", "extensionless-baseline\n");
+		workspace.WriteFile("Baseline.cs", "ordinary-baseline\n");
+		workspace.WriteFile("Selected.cs", "selected-baseline\n");
+		CommitAll(workspace.Path, "baseline");
+
+		var cleanEnvironment = new TestTerminalEnvironment();
+		var cleanExitCode = await RunAsync(
+			workspace,
+			cleanEnvironment,
+			"analyze", workspace.Path,
+			"--format", "json",
+			"--git-mode", "staged",
+			"--exclude", "none");
+
+		Assert.Equal(CommandLineExitCodes.Success, cleanExitCode);
+		using (var document = JsonDocument.Parse(cleanEnvironment.StandardOutput))
+		{
+			Assert.Equal(
+				0,
+				document.RootElement.GetProperty("inventory").GetProperty("files").GetInt32());
+		}
+		Assert.Empty(cleanEnvironment.StandardError);
+
+		workspace.WriteFile("Selected.cs", "selected-staged\n");
+		Assert.True(TryRunGit(workspace.Path, "add", "Selected.cs"));
+		var stagedEnvironment = new TestTerminalEnvironment();
+		var stagedExitCode = await RunAsync(
+			workspace,
+			stagedEnvironment,
+			"tree", workspace.Path,
+			"--git-mode", "staged",
+			"--exclude", "none",
+			"--format", "text");
+
+		Assert.Equal(CommandLineExitCodes.Success, stagedExitCode);
+		Assert.Contains("Selected.cs", stagedEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("Baseline.cs", stagedEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("Nested.cs", stagedEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain(".metadata", stagedEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("LICENSE", stagedEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.Empty(stagedEnvironment.StandardError);
+	}
+
+	[Fact]
+	public async Task ExplicitRootAndPathSelectionCannotExpandStagedScope()
+	{
+		using var workspace = new TemporaryDirectory();
+		EnsureRepository(workspace.Path);
+		workspace.WriteFile("baseline/Baseline.cs", "committed-baseline-marker\n");
+		workspace.WriteFile("staged/Selected.cs", "selected-baseline\n");
+		CommitAll(workspace.Path, "baseline");
+		workspace.WriteFile("staged/Selected.cs", "selected-staged-marker\n");
+		Assert.True(TryRunGit(workspace.Path, "add", "staged/Selected.cs"));
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			"export", "context", workspace.Path,
+			"--view", "content",
+			"--format", "json",
+			"--git-mode", "staged",
+			"--root", "baseline",
+			"--select", "baseline/Baseline.cs",
+			"--extension", ".cs",
+			"--exclude", "none",
+			"-o", "-");
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		Assert.Equal(
+			"staged",
+			document.RootElement.GetProperty("selection").GetProperty("gitMode").GetString());
+		Assert.Empty(document.RootElement.GetProperty("files").EnumerateArray());
+		Assert.Equal(0, document.RootElement.GetProperty("metrics").GetProperty("files").GetInt32());
+		Assert.DoesNotContain("committed-baseline-marker", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Theory]
+	[InlineData("staged", "json")]
+	[InlineData("staged", "xml")]
+	[InlineData("changes", "json")]
+	[InlineData("changes", "xml")]
+	public async Task MachineContextKeepsExplicitExtensionsWhileGitScopeNarrowsFiles(
+		string gitMode,
+		string format)
+	{
+		using var workspace = new TemporaryDirectory();
+		EnsureRepository(workspace.Path);
+		workspace.WriteFile("Selected.cs", "selected-baseline\n");
+		workspace.WriteFile("Documentation.md", "documentation-baseline\n");
+		CommitAll(workspace.Path, "baseline");
+
+		var clean = await ExportMachineContextAsync(workspace, gitMode, format);
+		Assert.Equal(gitMode, clean.GitMode);
+		Assert.Equal([".cs", ".md"], clean.Extensions);
+		Assert.Empty(clean.Files);
+		Assert.Equal(0, clean.MetricFiles);
+
+		workspace.WriteFile("Selected.cs", "selected-current\n");
+		if (gitMode == "staged")
+			Assert.True(TryRunGit(workspace.Path, "add", "Selected.cs"));
+
+		var changed = await ExportMachineContextAsync(workspace, gitMode, format);
+		Assert.Equal(gitMode, changed.GitMode);
+		Assert.Equal([".cs", ".md"], changed.Extensions);
+		Assert.Equal("Selected.cs", Path.GetFileName(Assert.Single(changed.Files)));
+		Assert.Equal(1, changed.MetricFiles);
 	}
 
 	[Fact]
@@ -87,8 +247,10 @@ public sealed class GitModeCommandContractTests
 		EnsureRepository(workspace.Path);
 		workspace.WriteFile("Deleted.cs", "deleted\n");
 		workspace.WriteFile("Kept.cs", "kept\n");
+		workspace.WriteFile("RenameSource.cs", "rename-source-marker\n");
 		CommitAll(workspace.Path, "baseline");
 		File.Delete(Path.Combine(workspace.Path, "Deleted.cs"));
+		Assert.True(TryRunGit(workspace.Path, "mv", "RenameSource.cs", "Renamed.cs"));
 		Assert.True(TryRunGit(workspace.Path, "add", "--update"));
 		var environment = new TestTerminalEnvironment();
 
@@ -102,8 +264,10 @@ public sealed class GitModeCommandContractTests
 
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
 		Assert.DoesNotContain("Deleted.cs", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("RenameSource.cs", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("Renamed.cs", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains(GitScopeFilter.DeletedDiagnosticCode, environment.StandardError, StringComparison.Ordinal);
-		Assert.Contains("1", environment.StandardError, StringComparison.Ordinal);
+		Assert.Matches(@"(?<!\d)2(?!\d)", environment.StandardError);
 	}
 
 	[Fact]
@@ -115,8 +279,26 @@ public sealed class GitModeCommandContractTests
 		workspace.WriteFile("Untouched.cs", "untouched\n");
 		CommitAll(workspace.Path, "baseline");
 		var baseline = ReadGit(workspace.Path, "rev-parse", "HEAD");
+		var cleanEnvironment = new TestTerminalEnvironment();
+		var cleanExitCode = await RunAsync(
+			workspace,
+			cleanEnvironment,
+			"analyze", workspace.Path,
+			"--format", "json",
+			"--git-mode", $"diff:{baseline}..HEAD",
+			"--exclude", "none");
+		Assert.Equal(CommandLineExitCodes.Success, cleanExitCode);
+		using (var cleanDocument = JsonDocument.Parse(cleanEnvironment.StandardOutput))
+		{
+			Assert.Equal(
+				0,
+				cleanDocument.RootElement.GetProperty("inventory").GetProperty("files").GetInt32());
+		}
+		Assert.Empty(cleanEnvironment.StandardError);
+
 		workspace.WriteFile("Changed.cs", "committed-change\n");
-		CommitAll(workspace.Path, "change");
+		Assert.True(TryRunGit(workspace.Path, "add", "Changed.cs"));
+		Assert.True(TryRunGit(workspace.Path, "commit", "--quiet", "-m", "change"));
 		var changed = ReadGit(workspace.Path, "rev-parse", "HEAD");
 		workspace.WriteFile("Changed.cs", "current-worktree-content\n");
 		var environment = new TestTerminalEnvironment();
@@ -139,6 +321,79 @@ public sealed class GitModeCommandContractTests
 		Assert.Contains("current-worktree-content", serialized, StringComparison.Ordinal);
 		Assert.DoesNotContain("Untouched.cs", serialized, StringComparison.Ordinal);
 		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
+	public async Task DiffScopeWithMissingRefFailsClosedWithoutWritingADocument()
+	{
+		using var workspace = new TemporaryDirectory();
+		EnsureRepository(workspace.Path);
+		workspace.WriteFile("Tracked.cs", "baseline\n");
+		CommitAll(workspace.Path, "baseline");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			"export", "context", workspace.Path,
+			"--view", "content",
+			"--format", "json",
+			"--git-mode", "diff:refs/heads/does-not-exist..HEAD",
+			"--exclude", "none",
+			"-o", "-");
+
+		Assert.Equal(CommandLineExitCodes.PolicyFailure, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains(GitScopeFilter.UnavailableDiagnosticCode, environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("staged")]
+	[InlineData("changes")]
+	[InlineData("diff:HEAD..HEAD")]
+	public async Task MomentaryGitModesOutsideRepositoryFailClosed(string gitMode)
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("Local.cs", "local\n");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			"tree", workspace.Path,
+			"--git-mode", gitMode,
+			"--exclude", "none",
+			"--format", "text");
+
+		Assert.Equal(CommandLineExitCodes.PolicyFailure, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains(GitScopeFilter.UnavailableDiagnosticCode, environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task UnavailableMomentaryScopeKeepsTheRequestedAnalyzeMachineReport()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("Local.cs", "local\n");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			"analyze", workspace.Path,
+			"--format", "json",
+			"--git-mode", "staged",
+			"--exclude", "none");
+
+		Assert.Equal(CommandLineExitCodes.PolicyFailure, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		Assert.Equal("staged", document.RootElement.GetProperty("selection").GetProperty("gitMode").GetString());
+		Assert.Equal(0, document.RootElement.GetProperty("inventory").GetProperty("files").GetInt32());
+		Assert.Contains(
+			document.RootElement.GetProperty("diagnostics").EnumerateArray(),
+			static diagnostic =>
+				diagnostic.GetProperty("code").GetString() == GitScopeFilter.UnavailableDiagnosticCode);
+		Assert.Contains(GitScopeFilter.UnavailableDiagnosticCode, environment.StandardError, StringComparison.Ordinal);
 	}
 
 	[Theory]
@@ -367,14 +622,62 @@ public sealed class GitModeCommandContractTests
 		Assert.DoesNotContain("nested/drop.tmp", environment.StandardOutput, StringComparison.Ordinal);
 	}
 
-	private static Task<int> RunAsync(
+	private static async Task<int> RunAsync(
 		TemporaryDirectory workspace,
 		TestTerminalEnvironment environment,
-		params string[] arguments) =>
-		new TerminalApplication(
+		params string[] arguments)
+	{
+		using var dataRoot = new TemporaryDirectory();
+		return await new TerminalApplication(
 				environment,
-				new TerminalServiceFactory(() => workspace.CreateDirectory("app-data")))
+				new TerminalServiceFactory(() => dataRoot.Path))
 			.RunAsync(arguments, TestContext.Current.CancellationToken);
+	}
+
+	private static async Task<(string GitMode, string[] Extensions, string[] Files, int MetricFiles)>
+		ExportMachineContextAsync(
+		TemporaryDirectory workspace,
+		string gitMode,
+		string format)
+	{
+		var environment = new TestTerminalEnvironment();
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			"export", "context", workspace.Path,
+			"--view", "content",
+			"--format", format,
+			"--git-mode", gitMode,
+			"--exclude", "none",
+			"--extension", ".cs",
+			"--extension", ".md",
+			"-o", "-");
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Empty(environment.StandardError);
+
+		if (format == "json")
+		{
+			using var document = JsonDocument.Parse(environment.StandardOutput);
+			return (
+				document.RootElement.GetProperty("selection").GetProperty("gitMode").GetString()!,
+				document.RootElement.GetProperty("selection").GetProperty("extensions")
+					.EnumerateArray().Select(static item => item.GetString()!).ToArray(),
+				document.RootElement.GetProperty("files").EnumerateArray()
+					.Select(static file => file.GetProperty("path").GetString()!).ToArray(),
+				document.RootElement.GetProperty("metrics").GetProperty("files").GetInt32());
+		}
+
+		var xml = System.Xml.Linq.XDocument.Parse(environment.StandardOutput);
+		return (
+			xml.Root!.Element("selection")!.Element("gitMode")!.Value,
+			xml.Root.Element("selection")!.Element("extensions")!.Elements("extension")
+				.Select(static item => item.Value).ToArray(),
+			xml.Root.Element("files")!.Elements("file")
+				.Select(static file => file.Attribute("path")!.Value).ToArray(),
+			int.Parse(
+				xml.Root.Element("metrics")!.Element("files")!.Value,
+				System.Globalization.CultureInfo.InvariantCulture));
+	}
 
 	private static bool TryRunGit(string workingDirectory, params string[] arguments)
 	{
@@ -421,8 +724,14 @@ public sealed class GitModeCommandContractTests
 	{
 		if (!TryRunGit(path, "init", "--quiet"))
 			Assert.Skip("Git is not available in this test environment.");
+		var hooksPath = Directory.CreateDirectory(Path.Combine(path, ".git", "devprojex-test-hooks")).FullName;
+		var excludesPath = Path.Combine(path, ".git", "devprojex-test-excludes");
+		File.WriteAllText(excludesPath, string.Empty);
 		Assert.True(TryRunGit(path, "config", "user.name", "DevProjex Tests"));
 		Assert.True(TryRunGit(path, "config", "user.email", "devprojex-tests@example.invalid"));
+		Assert.True(TryRunGit(path, "config", "commit.gpgSign", "false"));
+		Assert.True(TryRunGit(path, "config", "core.hooksPath", hooksPath));
+		Assert.True(TryRunGit(path, "config", "core.excludesFile", excludesPath));
 	}
 
 	private static void CommitAll(string path, string message)

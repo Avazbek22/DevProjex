@@ -113,7 +113,6 @@ public sealed class TerminalWorkspaceController(
 		CancellationToken cancellationToken)
 	{
 		ArgumentNullException.ThrowIfNull(request);
-		var buildCount = 0;
 
 		// Filesystem and repository changes can expose new roots, extensions, and paths.
 		// Discover without the tree projection, then apply the shared evolution policy.
@@ -121,11 +120,32 @@ public sealed class TerminalWorkspaceController(
 		var sourceIdentity = await services.SourceIdentityResolver
 			.ResolveAsync(request.SourceRoot, cancellationToken: cancellationToken)
 			.ConfigureAwait(false);
-		var discovered = await BuildPlanAsync(
-				request.SourceRoot,
-				request.Selection with { SelectedPaths = [] },
+		return await BuildReconciledStructuralPlanAsync(
+				request,
 				sourceIdentity,
 				cancellationToken)
+			.ConfigureAwait(false);
+	}
+
+	private async Task<TerminalStructuralRefreshResult> BuildReconciledStructuralPlanAsync(
+		TerminalStructuralRefreshRequest request,
+		ProjectSourceIdentity? sourceIdentity,
+		CancellationToken cancellationToken)
+	{
+		var buildCount = 0;
+		var discoverySelection = request.Selection with
+		{
+			Roots = ShouldPreserveExplicitRoots(request.Selection)
+				? request.Selection.Roots
+				: null,
+			SelectedPaths = []
+		};
+		var discovered = await BuildPlanAsync(
+				request.SourceRoot,
+				discoverySelection,
+				sourceIdentity,
+				cancellationToken,
+				request.ExtensionOptionStates)
 			.ConfigureAwait(false);
 		buildCount++;
 		ThrowIfTrackedModeIsUnavailable(discovered);
@@ -143,16 +163,19 @@ public sealed class TerminalWorkspaceController(
 		{
 			Extensions = selectedExtensions
 		};
-		if (!SelectionSequenceEquals(
-				discovered.Selection.Extensions,
-				selectedExtensions,
-				StringComparer.OrdinalIgnoreCase))
+		var availableExtensionSet = discovered.AvailableExtensions
+			.ToHashSet(StringComparer.OrdinalIgnoreCase);
+		var selectedAvailableExtensions = discovered.SelectedExtensions
+			.Where(availableExtensionSet.Contains)
+			.ToHashSet(StringComparer.OrdinalIgnoreCase);
+		if (!selectedAvailableExtensions.SetEquals(extensionEvolution.SelectedItems))
 		{
 			discovered = await BuildPlanAsync(
 					request.SourceRoot,
 					selection,
 					sourceIdentity,
-					cancellationToken)
+					cancellationToken,
+					extensionEvolution.KnownStates)
 				.ConfigureAwait(false);
 			buildCount++;
 			ThrowIfTrackedModeIsUnavailable(discovered);
@@ -167,27 +190,23 @@ public sealed class TerminalWorkspaceController(
 			request.PathOptionStates,
 			static _ => true,
 			PathComparer.Default);
-		var selectedPaths = pathEvolution.SelectedItems.Count == availablePaths.Count
-			? []
-			: pathEvolution.SelectedItems.Order(StringComparer.Ordinal).ToArray();
-		selection = discovered.Selection with
-		{
-			SelectedPaths = selectedPaths
-		};
 		var plan = discovered;
-		if (!SelectionSequenceEquals(
-				discovered.Selection.SelectedPaths,
-				selectedPaths,
-				PathComparer.Default))
+		if (pathEvolution.SelectedItems.Count == 0 && availablePaths.Count > 0)
 		{
-			plan = await BuildPlanAsync(
-					request.SourceRoot,
-					selection,
-					sourceIdentity,
+			plan = await services.ContextPlanner
+				.ReprojectEmptySelectionAsync(discovered, cancellationToken)
+				.ConfigureAwait(false);
+		}
+		else if (pathEvolution.SelectedItems.Count < availablePaths.Count)
+		{
+			plan = await services.ContextPlanner
+				.ReprojectSelectionAsync(
+					discovered,
+					pathEvolution.SelectedItems
+						.Order(StringComparer.Ordinal)
+						.ToArray(),
 					cancellationToken)
 				.ConfigureAwait(false);
-			buildCount++;
-			ThrowIfTrackedModeIsUnavailable(plan);
 		}
 		return new TerminalStructuralRefreshResult(
 			plan,
@@ -195,6 +214,9 @@ public sealed class TerminalWorkspaceController(
 			pathEvolution.KnownStates,
 			buildCount);
 	}
+
+	private static bool ShouldPreserveExplicitRoots(ProjectSelectionSpec selection) =>
+		selection.ApplicationIntent?.Roots == ProjectSelectionApplicationMode.ApplyResolvedValue;
 
 	internal static void ApplyStructuralRefresh(
 		TerminalWorkspaceState state,
@@ -212,6 +234,7 @@ public sealed class TerminalWorkspaceController(
 		var plan = await BuildReprojectedPlanAsync(
 				state.Plan,
 				state.BuildSelectedRelativePaths(),
+				state.IsEffectiveRootUnchecked,
 				cancellationToken)
 			.ConfigureAwait(false);
 		state.ReplacePlan(plan);
@@ -220,11 +243,14 @@ public sealed class TerminalWorkspaceController(
 	public Task<ProjectContextPlan> BuildReprojectedPlanAsync(
 		ProjectContextPlan plan,
 		IReadOnlyList<string> selectedPaths,
+		bool forceEmptySelection,
 		CancellationToken cancellationToken) =>
-		services.ContextPlanner.ReprojectSelectionAsync(
-			plan,
-			selectedPaths,
-			cancellationToken);
+		forceEmptySelection
+			? services.ContextPlanner.ReprojectEmptySelectionAsync(plan, cancellationToken)
+			: services.ContextPlanner.ReprojectSelectionAsync(
+				plan,
+				selectedPaths,
+				cancellationToken);
 
 	public async Task SetGitModeAsync(
 		TerminalWorkspaceState state,
@@ -251,6 +277,8 @@ public sealed class TerminalWorkspaceController(
 					Exclusions = exclusions
 				},
 				state.ExtensionOptionStates,
+				state.BuildSelectedItemRelativePaths(),
+				state.PathOptionStates,
 				cancellationToken)
 			.ConfigureAwait(false);
 		ApplySettingsPlan(state, result);
@@ -326,6 +354,8 @@ public sealed class TerminalWorkspaceController(
 				state.Plan,
 				state.BuildSelection() with { Extensions = extensions },
 				state.BuildExtensionOptionStates(extensions),
+				state.BuildSelectedItemRelativePaths(),
+				state.PathOptionStates,
 				cancellationToken)
 			.ConfigureAwait(false);
 		ApplySettingsPlan(state, result);
@@ -339,7 +369,10 @@ public sealed class TerminalWorkspaceController(
 		ArgumentNullException.ThrowIfNull(result);
 		var redactionWasEnabled = state.Plan.Selection.HideSecrets == true ||
 		                          state.Plan.Selection.HidePrivateData == true;
-		state.ReplacePlan(result.Plan, result.ExtensionOptionStates);
+		state.ReplacePlan(
+			result.Plan,
+			result.ExtensionOptionStates,
+			result.PathOptionStates);
 		if (redactionWasEnabled &&
 		    result.Plan.Selection.HideSecrets != true &&
 		    result.Plan.Selection.HidePrivateData != true)
@@ -352,13 +385,17 @@ public sealed class TerminalWorkspaceController(
 		ProjectContextPlan baseline,
 		ProjectSelectionSpec selection,
 		IReadOnlyDictionary<string, bool> extensionOptionStates,
+		IReadOnlySet<string> previousPaths,
+		IReadOnlyDictionary<string, bool> pathOptionStates,
 		CancellationToken cancellationToken)
 	{
 		ArgumentNullException.ThrowIfNull(baseline);
 		ArgumentNullException.ThrowIfNull(selection);
 		ArgumentNullException.ThrowIfNull(extensionOptionStates);
+		ArgumentNullException.ThrowIfNull(previousPaths);
+		ArgumentNullException.ThrowIfNull(pathOptionStates);
 
-		if (!RequiresStructuralRefresh(baseline.Selection, selection))
+		if (!RequiresStructuralRefresh(baseline, selection, extensionOptionStates))
 		{
 			var contentPlan = services.ContextPlanner.ApplyContentTransformationSelectionWithCancellation(
 				baseline,
@@ -368,45 +405,30 @@ public sealed class TerminalWorkspaceController(
 				selection.StripBlankLines,
 				selection.HidePrivateData,
 				cancellationToken);
-			return new TerminalSettingsPlanResult(contentPlan, extensionOptionStates);
+			return new TerminalSettingsPlanResult(
+				contentPlan,
+				new Dictionary<string, bool>(
+					extensionOptionStates,
+					StringComparer.OrdinalIgnoreCase),
+				new Dictionary<string, bool>(pathOptionStates, PathComparer.Default));
 		}
 
-		var plan = await BuildPlanAsync(
-				baseline.SourceRoot,
-				selection,
+		var request = new TerminalStructuralRefreshRequest(
+			baseline.SourceRoot,
+			selection,
+			baseline.SelectedExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase),
+			previousPaths,
+			extensionOptionStates,
+			pathOptionStates);
+		var result = await BuildReconciledStructuralPlanAsync(
+				request,
 				baseline.SourceIdentity,
 				cancellationToken)
 			.ConfigureAwait(false);
-		// Keep the last usable plan when an explicit tracked-mode request cannot be honored.
-		ThrowIfTrackedModeIsUnavailable(plan);
-
-		var previousSelection = new HashSet<string>(
-			selection.Extensions ?? baseline.SelectedExtensions,
-			StringComparer.OrdinalIgnoreCase);
-		var evolution = SelectionEvolutionPolicy.Reconcile(
-			plan.AvailableExtensions,
-			previousSelection,
-			extensionOptionStates,
-			static _ => true,
-			StringComparer.OrdinalIgnoreCase);
-		if (!plan.SelectedExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase)
-				.SetEquals(evolution.SelectedItems))
-		{
-			plan = await BuildPlanAsync(
-					baseline.SourceRoot,
-					selection with
-					{
-						Extensions = evolution.SelectedItems
-							.Order(StringComparer.OrdinalIgnoreCase)
-							.ToArray()
-					},
-					baseline.SourceIdentity,
-					cancellationToken)
-				.ConfigureAwait(false);
-			ThrowIfTrackedModeIsUnavailable(plan);
-		}
-
-		return new TerminalSettingsPlanResult(plan, evolution.KnownStates);
+		return new TerminalSettingsPlanResult(
+			result.Plan,
+			result.ExtensionOptionStates,
+			result.PathOptionStates);
 	}
 
 	internal static bool RequiresStructuralRefresh(
@@ -420,17 +442,36 @@ public sealed class TerminalWorkspaceController(
 			candidate.Extensions,
 			StringComparer.OrdinalIgnoreCase);
 
+	internal static bool RequiresStructuralRefresh(
+		ProjectContextPlan baseline,
+		ProjectSelectionSpec candidate,
+		IReadOnlyDictionary<string, bool> extensionOptionStates)
+	{
+		ArgumentNullException.ThrowIfNull(baseline);
+		ArgumentNullException.ThrowIfNull(candidate);
+		ArgumentNullException.ThrowIfNull(extensionOptionStates);
+		if (RequiresStructuralRefresh(baseline.Selection, candidate))
+			return true;
+
+		var selected = baseline.SelectedExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase);
+		foreach (var extension in baseline.AvailableExtensions)
+		{
+			var currentlySelected = selected.Contains(extension);
+			var requested = extensionOptionStates.TryGetValue(extension, out var isSelected)
+				? isSelected
+				: currentlySelected;
+			if (requested != currentlySelected)
+				return true;
+		}
+
+		return false;
+	}
+
 	private static bool SelectionSetEquals<T>(
 		IReadOnlyCollection<T>? left,
 		IReadOnlyCollection<T>? right,
 		IEqualityComparer<T>? comparer = null) =>
 		new HashSet<T>(left ?? [], comparer).SetEquals(right ?? []);
-
-	private static bool SelectionSequenceEquals<T>(
-		IReadOnlyCollection<T>? left,
-		IReadOnlyCollection<T>? right,
-		IEqualityComparer<T> comparer) =>
-		(left ?? []).SequenceEqual(right ?? [], comparer);
 
 	public async Task<ProjectContextPlan> BuildCurrentPlanAsync(
 		TerminalWorkspaceState state,
@@ -439,6 +480,7 @@ public sealed class TerminalWorkspaceController(
 		var plan = await BuildReprojectedPlanAsync(
 			state.Plan,
 			state.BuildSelectedRelativePaths(),
+			state.IsEffectiveRootUnchecked,
 			cancellationToken).ConfigureAwait(false);
 		state.ReplacePlan(plan);
 		return plan;
@@ -839,13 +881,15 @@ public sealed class TerminalWorkspaceController(
 		string projectPath,
 		ProjectSelectionSpec selection,
 		ProjectSourceIdentity? sourceIdentity,
-		CancellationToken cancellationToken) =>
+		CancellationToken cancellationToken,
+		IReadOnlyDictionary<string, bool>? knownExtensionStates = null) =>
 		services.ContextFactory.BuildAsync(
 			projectPath,
 			selection,
 			sourceIdentity,
 			cancellationToken,
-			captureIgnoreImpactCounts: true);
+			captureIgnoreImpactCounts: true,
+			knownExtensionStates);
 
 	private static void ThrowIfTrackedModeIsUnavailable(ProjectContextPlan plan)
 	{
@@ -1103,4 +1147,5 @@ public sealed class TerminalWorkspaceController(
 
 internal sealed record TerminalSettingsPlanResult(
 	ProjectContextPlan Plan,
-	IReadOnlyDictionary<string, bool> ExtensionOptionStates);
+	IReadOnlyDictionary<string, bool> ExtensionOptionStates,
+	IReadOnlyDictionary<string, bool> PathOptionStates);

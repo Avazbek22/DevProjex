@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using DevProjex.Application.Presentation;
 using DevProjex.Application.Services;
+using DevProjex.Infrastructure.ProjectProfiles;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -74,11 +76,17 @@ public sealed class TerminalSettingsStateContractTests
 				static pair => pair.Key,
 				static pair => pair.Value,
 				StringComparer.OrdinalIgnoreCase);
+			var knownPathStates = state.PathOptionStates.ToDictionary(
+				static pair => pair.Key,
+				static pair => pair.Value,
+				PathComparer.Default);
 
 			var result = await controller.BuildSettingsPlanAsync(
 				baseline,
 				state.BuildSelection() with { HideSecrets = true },
 				knownStates,
+				state.BuildSelectedItemRelativePaths(),
+				state.PathOptionStates,
 				TestContext.Current.CancellationToken);
 
 			Assert.Same(baseline.EffectiveTree, result.Plan.EffectiveTree);
@@ -86,6 +94,14 @@ public sealed class TerminalSettingsStateContractTests
 			Assert.Equal(knownStates.Count, result.ExtensionOptionStates.Count);
 			Assert.All(knownStates, pair =>
 				Assert.Equal(pair.Value, result.ExtensionOptionStates[pair.Key]));
+			Assert.All(knownPathStates, pair =>
+				Assert.Equal(pair.Value, result.PathOptionStates[pair.Key]));
+
+			controller.ApplySettingsPlan(state, result);
+			Assert.All(knownStates, pair =>
+				Assert.Equal(pair.Value, state.ExtensionOptionStates[pair.Key]));
+			Assert.All(knownPathStates, pair =>
+				Assert.Equal(pair.Value, state.PathOptionStates[pair.Key]));
 		}
 	}
 
@@ -123,6 +139,8 @@ public sealed class TerminalSettingsStateContractTests
 			state.Plan,
 			state.BuildSelection() with { HideSecrets = false },
 			state.ExtensionOptionStates,
+			state.BuildSelectedItemRelativePaths(),
+			state.PathOptionStates,
 			TestContext.Current.CancellationToken);
 		controller.ApplySettingsPlan(state, result);
 
@@ -230,12 +248,15 @@ public sealed class TerminalSettingsStateContractTests
 					.Where(static extension => extension != ".generated")
 					.ToArray(),
 				TestContext.Current.CancellationToken);
+			Assert.DoesNotContain(".generated", state.Plan.SelectedExtensions);
+			Assert.False(state.ExtensionOptionStates[".generated"]);
 			await controller.SetPathFilteringAsync(
 				state,
 				GitFilteringMode.RespectGitIgnore,
 				state.Plan.Selection.Exclusions ?? [],
 				TestContext.Current.CancellationToken);
 			Assert.DoesNotContain(".generated", state.Plan.AvailableExtensions);
+			Assert.False(state.ExtensionOptionStates[".generated"]);
 
 			await controller.SetPathFilteringAsync(
 				state,
@@ -245,6 +266,209 @@ public sealed class TerminalSettingsStateContractTests
 			Assert.Contains(".generated", state.Plan.AvailableExtensions);
 			Assert.DoesNotContain(".generated", state.Plan.SelectedExtensions);
 		}
+	}
+
+	[Fact]
+	public async Task StagedModeRestrictsTheEffectiveTreeToTheCurrentGitScope()
+	{
+		using var workspace = CreateWorkspace();
+		RunGit(workspace.Path, "init", "--quiet");
+		RunGit(workspace.Path, "config", "user.email", "terminal-tests@devprojex.local");
+		RunGit(workspace.Path, "config", "user.name", "DevProjex Terminal Tests");
+		RunGit(workspace.Path, "add", "--all");
+		RunGit(workspace.Path, "commit", "--quiet", "-m", "Initial project");
+		var (controller, state) = await OpenAsync(workspace);
+		using (state)
+		{
+			await controller.SetGitModeAsync(
+				state,
+				GitFilteringMode.Staged,
+				TestContext.Current.CancellationToken);
+
+			Assert.Empty(state.Plan.EffectiveTree.Children);
+
+			workspace.WriteFile(".scope/Staged.cs", "internal sealed class Staged { }");
+			RunGit(workspace.Path, "add", "--", ".scope/Staged.cs");
+			await controller.RefreshProjectAsync(state, TestContext.Current.CancellationToken);
+			Assert.Empty(state.Plan.EffectiveTree.Children);
+			Assert.Equal(1, state.Plan.IgnoreOptionCounts.DotFolders);
+
+			await controller.SetExclusionsAsync(
+				state,
+				[],
+				TestContext.Current.CancellationToken);
+			var paths = TerminalWorkspaceState.BuildSelectableRelativePaths(
+				state.Plan.EffectiveTree,
+				state.Plan.SourceRoot);
+			Assert.Equal([".scope/Staged.cs"], paths);
+			Assert.DoesNotContain("global.json", paths);
+			Assert.DoesNotContain("src/App.cs", paths);
+			Assert.DoesNotContain("src/settings.json", paths);
+
+			await controller.SetExclusionsAsync(
+				state,
+				ProjectSelectionSpec.StandardExclusions,
+				TestContext.Current.CancellationToken);
+			Assert.Empty(state.Plan.IncludedFiles);
+			Assert.True(
+				state.Plan.IgnoreOptionCounts.DotFolders == 1,
+				$"Expected one scoped dot-folder blocker; roots=" +
+				$"[{string.Join(',', state.Plan.SelectedRoots)}], available=" +
+				$"[{string.Join(',', state.Plan.AvailableRoots)}], extensions=" +
+				$"[{string.Join(',', state.Plan.AvailableExtensions)}].");
+		}
+	}
+
+	[Fact]
+	public async Task SelectionProjectionPreservesAnExplicitlyEmptyTree()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("only.cs", "internal sealed class Only { }");
+		using var appData = new TemporaryDirectory();
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(
+			services,
+			new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		Assert.Single(state.Plan.IncludedFiles);
+		state.SelectNone();
+		await controller.ReprojectSelectionAsync(
+			state,
+			TestContext.Current.CancellationToken);
+
+		Assert.Empty(state.Plan.IncludedFiles);
+		Assert.Empty(state.Plan.IncludedFolders);
+		Assert.True(state.IsEffectiveRootUnchecked);
+
+		state.SelectAll();
+		await controller.ReprojectSelectionAsync(
+			state,
+			TestContext.Current.CancellationToken);
+		Assert.Single(state.Plan.IncludedFiles);
+
+		var onlyFileIndex = state.VisibleRows
+			.Select((row, index) => (row, index))
+			.Single(item => item.row.Node.DisplayName == "only.cs")
+			.index;
+		state.ToggleSelection(onlyFileIndex);
+		await controller.ReprojectSelectionAsync(
+			state,
+			TestContext.Current.CancellationToken);
+		Assert.Empty(state.Plan.IncludedFiles);
+		Assert.True(state.IsEffectiveRootUnchecked);
+	}
+
+	[Fact]
+	public async Task GitScopeEvolutionSelectsNewPathsAndPreservesKnownUncheckedPaths()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("kept.cs", "internal sealed class Kept { }");
+		workspace.WriteFile("hidden.cs", "internal sealed class Hidden { }");
+		RunGit(workspace.Path, "init", "--quiet");
+		RunGit(workspace.Path, "config", "user.email", "terminal-tests@devprojex.local");
+		RunGit(workspace.Path, "config", "user.name", "DevProjex Terminal Tests");
+		RunGit(workspace.Path, "add", "--all");
+		RunGit(workspace.Path, "commit", "--quiet", "-m", "Initial project");
+		using var appData = new TemporaryDirectory();
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(
+			services,
+			new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		var hiddenIndex = state.VisibleRows
+			.Select((row, index) => (row, index))
+			.Single(item => item.row.Node.DisplayName == "hidden.cs")
+			.index;
+		state.ToggleSelection(hiddenIndex);
+		await controller.ReprojectSelectionAsync(
+			state,
+			TestContext.Current.CancellationToken);
+		Assert.False(state.PathOptionStates["hidden.cs"]);
+		await controller.SetGitModeAsync(
+			state,
+			GitFilteringMode.Staged,
+			TestContext.Current.CancellationToken);
+		Assert.Empty(state.Plan.IncludedFiles);
+		Assert.False(state.PathOptionStates["hidden.cs"]);
+		Assert.True(state.PathOptionStates["kept.cs"]);
+
+		workspace.WriteFile("hidden.cs", "internal sealed class Hidden { private int Changed; }");
+		workspace.WriteFile("new.cs", "internal sealed class New { }");
+		RunGit(workspace.Path, "add", "--", "hidden.cs", "new.cs");
+		await controller.RefreshProjectAsync(
+			state,
+			TestContext.Current.CancellationToken);
+
+		Assert.DoesNotContain(
+			state.Plan.IncludedFiles,
+			path => Path.GetFileName(path) == "hidden.cs");
+		Assert.Contains(
+			state.Plan.IncludedFiles,
+			path => Path.GetFileName(path) == "new.cs");
+		Assert.False(state.PathOptionStates["hidden.cs"]);
+		Assert.True(state.PathOptionStates["new.cs"]);
+	}
+
+	[Fact]
+	public async Task LocalProfileDisabledRootRemainsDisabledAcrossStructuralSettingsRefresh()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("src/App.cs", "internal sealed class App { }");
+		workspace.WriteFile("docs/readme.md", "# Documentation");
+		using var appData = new TemporaryDirectory();
+		new ProjectProfileStore(() => appData.Path).SaveProfile(
+			workspace.Path,
+			new ProjectSelectionProfile(
+				SelectedRootFolders: ["src"],
+				SelectedExtensions: [".cs", ".md"],
+				SelectedIgnoreOptions: ProjectSelectionAdapter.ToIgnoreOptions(
+					ProjectSelectionSpec.Standard),
+				RootFolderStates: new Dictionary<string, bool>(PathComparer.Default)
+				{
+					["src"] = true,
+					["docs"] = false
+				},
+				ExtensionStates: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+				{
+					[".cs"] = true,
+					[".md"] = true
+				}));
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(
+			services,
+			new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Local,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(
+			ProjectSelectionApplicationMode.Preserve,
+			state.Plan.Selection.ApplicationIntent?.Roots);
+		Assert.Equal(["src"], state.Plan.SelectedRoots);
+		Assert.DoesNotContain(
+			state.Plan.IncludedFiles,
+			path => Path.GetFileName(path) == "readme.md");
+
+		await controller.SetExclusionsAsync(
+			state,
+			(state.Plan.Selection.Exclusions ?? [])
+				.Where(static exclusion => exclusion != ProjectExclusion.EmptyFiles)
+				.ToArray(),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(["src"], state.Plan.SelectedRoots);
+		Assert.DoesNotContain(
+			state.Plan.IncludedFiles,
+			path => Path.GetFileName(path) == "readme.md");
 	}
 
 	[Fact]
@@ -279,11 +503,14 @@ public sealed class TerminalSettingsStateContractTests
 					.Where(static extension => extension != ".generated")
 					.ToArray(),
 				TestContext.Current.CancellationToken);
+			Assert.DoesNotContain(".generated", state.Plan.SelectedExtensions);
+			Assert.False(state.ExtensionOptionStates[".generated"]);
 			await controller.SetExclusionsAsync(
 				state,
 				[.. withoutEmptyFiles, ProjectExclusion.EmptyFiles],
 				TestContext.Current.CancellationToken);
 			Assert.DoesNotContain(".generated", state.Plan.AvailableExtensions);
+			Assert.False(state.ExtensionOptionStates[".generated"]);
 
 			await controller.SetExclusionsAsync(
 				state,
@@ -324,5 +551,23 @@ public sealed class TerminalSettingsStateContractTests
 			ProjectProfileReference.Standard,
 			TestContext.Current.CancellationToken);
 		return (controller, state);
+	}
+
+	private static void RunGit(string workingDirectory, params string[] arguments)
+	{
+		var startInfo = new ProcessStartInfo
+		{
+			FileName = OperatingSystem.IsWindows() ? "git.exe" : "git",
+			WorkingDirectory = workingDirectory,
+			UseShellExecute = false,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			CreateNoWindow = true
+		};
+		foreach (var argument in arguments)
+			startInfo.ArgumentList.Add(argument);
+
+		var result = TerminalTestProcess.Run(startInfo);
+		Assert.Equal(0, result.ExitCode);
 	}
 }

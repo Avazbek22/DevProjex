@@ -129,6 +129,29 @@ public sealed class TerminalParameterRowsBuilderTests
 	}
 
 	[Fact]
+	public void GitStateModesAreDisabledWhenGitCliIsUnavailableDespiteRepositoryBoundary()
+	{
+		var plan = CreatePlan(ProjectSelectionSpec.Standard) with
+		{
+			GitReadiness = new ProjectContextGitReadiness(
+				GitFilteringMode.RespectGitIgnore,
+				LoadedTrackedIndexCount: 1,
+				IsReady: true)
+		};
+
+		var rows = CreateBuilder().BuildExclusions(plan, gitCliAvailable: false);
+
+		Assert.All(
+			rows.Where(static row => row.GitMode is GitFilteringMode.TrackedFilesOnly or
+				GitFilteringMode.Staged or GitFilteringMode.Changes),
+			static row => Assert.False(row.IsEnabled));
+		Assert.All(
+			rows.Where(static row => row.GitMode is GitFilteringMode.None or
+				GitFilteringMode.RespectGitIgnore),
+			static row => Assert.True(row.IsEnabled));
+	}
+
+	[Fact]
 	public void GitModesUseThePhysicalWorktreeBoundaryBeforeTrackedIndexIsLoaded()
 	{
 		using var project = new TemporaryDirectory();
@@ -190,7 +213,8 @@ public sealed class TerminalParameterRowsBuilderTests
 		var rows = CreateBuilder().BuildExclusions(CreatePlan(
 			ProjectSelectionSpec.Standard,
 			hasIgnoreOptionCounts: true,
-			ignoreOptionCounts: counts));
+			ignoreOptionCounts: counts,
+			ignoreControllerImpactCounts: new IgnoreControllerImpactCounts(SmartIgnore: 1)));
 
 		Assert.Equal(
 			"Settings.Ignore.HiddenFolders (2)",
@@ -205,6 +229,44 @@ public sealed class TerminalParameterRowsBuilderTests
 			"(",
 			rows.Single(static row => row.Exclusion == ProjectExclusion.SmartIgnore).Label,
 			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void EmptyMomentaryScopeDoesNotOfferNoOpPathFilters()
+	{
+		var plan = CreatePlan(
+			ProjectSelectionSpec.Standard with { GitMode = GitFilteringMode.Staged },
+			availableExtensions: [],
+			selectedExtensions: [],
+			hasIgnoreOptionCounts: true);
+
+		var rows = CreateBuilder().BuildExclusions(plan);
+		var aggregate = CreateBuilder().BuildExclusionAggregate(plan);
+
+		Assert.Equal(5, rows.Count);
+		Assert.All(rows, static row => Assert.Equal(TerminalParameterRowKind.GitMode, row.Kind));
+		Assert.DoesNotContain(rows, static row => row.Exclusion is not null);
+		Assert.Equal("Settings.All", aggregate.Label);
+		Assert.False(aggregate.IsSelected);
+	}
+
+	[Fact]
+	public void MomentaryScopeOffersOnlyFiltersThatCanChangeItsFiles()
+	{
+		var plan = CreatePlan(
+			ProjectSelectionSpec.Standard with { GitMode = GitFilteringMode.Changes },
+			hasIgnoreOptionCounts: true,
+			ignoreOptionCounts: new IgnoreOptionCounts(DotFolders: 2),
+			ignoreControllerImpactCounts: new IgnoreControllerImpactCounts(SmartIgnore: 0));
+
+		var rows = CreateBuilder().BuildExclusions(plan);
+		var aggregate = CreateBuilder().BuildExclusionAggregate(plan);
+
+		var dotFolders = Assert.Single(rows, static row => row.Exclusion == ProjectExclusion.DotFolders);
+		Assert.Equal("Settings.Ignore.DotFolders (2)", dotFolders.Label);
+		Assert.DoesNotContain(rows, static row => row.Exclusion == ProjectExclusion.DotFiles);
+		Assert.DoesNotContain(rows, static row => row.Exclusion == ProjectExclusion.SmartIgnore);
+		Assert.Equal("Settings.All (1)", aggregate.Label);
 	}
 
 	[Fact]
@@ -230,7 +292,7 @@ public sealed class TerminalParameterRowsBuilderTests
 	}
 
 	[Fact]
-	public void ExclusionAggregateRequiresPreferredGitModeAndEveryRule()
+	public void ExclusionAggregateCountsOnlyPathRules()
 	{
 		var builder = CreateBuilder();
 
@@ -243,7 +305,7 @@ public sealed class TerminalParameterRowsBuilderTests
 
 		Assert.Equal(TerminalParameterRowKind.ToggleAllExclusions, selected.Kind);
 		Assert.Equal(
-			$"Settings.All ({1 + ProjectPresentationCatalog.Exclusions.Count})",
+			$"Settings.All ({ProjectPresentationCatalog.Exclusions.Count})",
 			selected.Label);
 		Assert.True(selected.IsSelected);
 		Assert.False(cleared.IsSelected);
@@ -528,7 +590,8 @@ public sealed class TerminalParameterRowsBuilderTests
 		IReadOnlyList<string>? availableExtensions = null,
 		IReadOnlyList<string>? selectedExtensions = null,
 		bool hasIgnoreOptionCounts = false,
-		IgnoreOptionCounts ignoreOptionCounts = default)
+		IgnoreOptionCounts ignoreOptionCounts = default,
+		IgnoreControllerImpactCounts ignoreControllerImpactCounts = default)
 	{
 		var root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "DevProjexTerminalRows"));
 		var tree = new TreeNodeDescriptor("project", root, true, false, "folder", []);
@@ -566,6 +629,7 @@ public sealed class TerminalParameterRowsBuilderTests
 				true),
 			"rows",
 			HasIgnoreOptionCounts: hasIgnoreOptionCounts,
-			IgnoreOptionCounts: ignoreOptionCounts);
+			IgnoreOptionCounts: ignoreOptionCounts,
+			IgnoreControllerImpactCounts: ignoreControllerImpactCounts);
 	}
 }

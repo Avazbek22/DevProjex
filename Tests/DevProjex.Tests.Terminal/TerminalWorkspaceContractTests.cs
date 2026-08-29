@@ -1103,7 +1103,7 @@ public sealed class TerminalWorkspaceContractTests
 		var partialSelection = await controller.BuildStructuralRefreshAsync(
 			TerminalWorkspaceController.CaptureStructuralRefresh(state, state.BuildSelection()),
 			TestContext.Current.CancellationToken);
-		Assert.Equal(2, partialSelection.PlanBuildCount);
+		Assert.Equal(1, partialSelection.PlanBuildCount);
 	}
 
 	[Fact]
