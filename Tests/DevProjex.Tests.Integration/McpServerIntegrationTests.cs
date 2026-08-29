@@ -210,12 +210,18 @@ public sealed class McpServerIntegrationTests
 			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("max_tokens");
 		Assert.Equal(2, maximumTokens.GetProperty("oneOf").GetArrayLength());
 		Assert.Equal(1, maximumTokens.GetProperty("oneOf")[0].GetProperty("minimum").GetInt32());
-		Assert.Equal("^[1-9][0-9]*$", maximumTokens.GetProperty("oneOf")[1].GetProperty("pattern").GetString());
+		const string positiveNumericStringPattern = "^0*[1-9][0-9]*$";
+		Assert.Equal(positiveNumericStringPattern, maximumTokens.GetProperty("oneOf")[1].GetProperty("pattern").GetString());
 		var positiveNumericStrings = new (string Tool, string Property)[]
 		{
+			("get_tree", "max_file_bytes"),
+			("analyze", "max_file_bytes"),
 			("analyze", "top_files"),
+			("pack_context", "max_file_bytes"),
+			("pack_context", "max_tokens"),
 			("read_pack", "start_line"),
 			("read_pack", "end_line"),
+			("search_project", "max_file_bytes"),
 			("search_project", "max_results"),
 			("get_file", "start_line"),
 			("get_file", "end_line")
@@ -224,9 +230,10 @@ public sealed class McpServerIntegrationTests
 		{
 			var property = tools.Single(tool => tool.Name == toolName)
 				.ProtocolTool.InputSchema.GetProperty("properties").GetProperty(propertyName);
-			Assert.Equal(
-				"^[1-9][0-9]*$",
-				property.GetProperty("oneOf")[1].GetProperty("pattern").GetString());
+			var pattern = property.GetProperty("oneOf")[1].GetProperty("pattern").GetString();
+			Assert.Equal(positiveNumericStringPattern, pattern);
+			Assert.Matches(pattern!, "0002");
+			Assert.DoesNotMatch(pattern!, "0000");
 		}
 		foreach (var name in new[] { "get_tree", "analyze", "pack_context", "search_project" })
 		{
