@@ -38,12 +38,12 @@ public sealed class SharedAsyncOperationTests
 	public async Task ReleasingLastWaiter_CancelsOperationAndReleasesOwner()
 	{
 		var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-		var cancellationObserved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var operationToken = CancellationToken.None;
 		var releaseCount = 0;
 		var operation = new SharedAsyncOperation<int>(
 			async cancellationToken =>
 			{
-				using var registration = cancellationToken.Register(cancellationObserved.SetResult);
+				operationToken = cancellationToken;
 				started.SetResult();
 				await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
 				return 0;
@@ -56,12 +56,10 @@ public sealed class SharedAsyncOperationTests
 		await started.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
 
 		firstLease.Dispose();
-		Assert.False(cancellationObserved.Task.IsCompleted);
+		Assert.False(operationToken.IsCancellationRequested);
 		secondLease.Dispose();
 
-		await cancellationObserved.Task.WaitAsync(
-			TimeSpan.FromSeconds(5),
-			TestContext.Current.CancellationToken);
+		Assert.True(operationToken.IsCancellationRequested);
 		await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
 		Assert.Equal(1, Volatile.Read(ref releaseCount));
 		Assert.False(operation.TryAcquire(out _));
