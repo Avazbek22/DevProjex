@@ -1732,7 +1732,7 @@ public sealed class ProjectContextDocumentService(
 	private static void WriteSelection(Utf8JsonWriter writer, ProjectContextPlan plan)
 	{
 		writer.WriteStartObject("selection");
-		writer.WriteString("gitMode", ProjectSelectionTokens.ToToken(plan.Selection.GitMode!.Value));
+		writer.WriteString("gitMode", ProjectSelectionTokens.ToToken(plan.Selection));
 		WriteStringArray(
 			writer,
 			"exclusions",
@@ -1931,7 +1931,7 @@ public sealed class ProjectContextDocumentService(
 		WriteSanitizedXmlElementString(
 			writer,
 			"gitMode",
-			ProjectSelectionTokens.ToToken(plan.Selection.GitMode!.Value));
+			ProjectSelectionTokens.ToToken(plan.Selection));
 		WriteStringCollectionXml(
 			writer,
 			"exclusions",

@@ -147,7 +147,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			Extensions = preserveRequestedSelectionIntent && selection.Extensions is not null
 				? selection.Extensions
 				: ResolveExtensionSelectionIntent(selection, refreshedLocalState, loaded),
-			GitMode = preserveRequestedSelectionIntent
+			GitMode = preserveRequestedSelectionIntent ||
+			          GitScopeSelection.IsMomentary(selection.GitMode!.Value)
 				? selection.GitMode
 				: ResolveGitModeIntent(selection, refreshedLocalState, loaded),
 			Exclusions = preserveRequestedSelectionIntent
@@ -532,10 +533,20 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				"DPX-CLI-PROFILE-UNRESOLVED",
 				"Selection profile was not fully resolved.");
 		}
+		if (selection.GitMode == GitFilteringMode.Diff &&
+		    !GitScopeSelection.IsValidDiffRange(selection.GitDiffRange))
+		{
+			throw new ProjectContextValidationException(
+				"DPX-GIT-STATE-UNAVAILABLE",
+				"The Git diff range is invalid.");
+		}
 
 		var legacyHideSecrets = selection.Exclusions.Contains(ProjectExclusion.HideSecrets);
 		return selection with
 		{
+			GitDiffRange = selection.GitMode == GitFilteringMode.Diff
+				? selection.GitDiffRange
+				: null,
 			Exclusions = selection.Exclusions
 				.Where(static exclusion => exclusion != ProjectExclusion.HideSecrets)
 				.OrderBy(static exclusion => (int)exclusion)
@@ -975,6 +986,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		cancellationToken.ThrowIfCancellationRequested();
 		using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
 		Append(selection.GitMode!.Value.ToString());
+		if (selection.GitDiffRange is not null)
+			Append("git-diff-range:" + selection.GitDiffRange);
 		foreach (var exclusion in selection.Exclusions!.OrderBy(static value => value))
 		{
 			cancellationToken.ThrowIfCancellationRequested();

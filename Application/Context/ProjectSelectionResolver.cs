@@ -32,6 +32,9 @@ public sealed class ProjectSelectionResolver(
 			Extensions = overrides.Extensions ?? baseline.Extensions,
 			SelectedPaths = overrides.SelectedPaths ?? baseline.SelectedPaths,
 			GitMode = overrides.GitMode ?? baseline.GitMode,
+			GitDiffRange = overrides.GitMode is not null
+				? overrides.GitDiffRange
+				: baseline.GitDiffRange,
 			Exclusions = resolvedExclusions,
 			HideSecrets = hideSecrets,
 			HidePrivateData = overrides.HidePrivateData ?? baseline.HidePrivateData,

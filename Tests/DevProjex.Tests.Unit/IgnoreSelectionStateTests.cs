@@ -221,6 +221,32 @@ public sealed class IgnoreSelectionStateTests
 		Assert.True(state.OptionStateCache[IgnoreOptionId.TrackedGitFilesOnly]);
 	}
 
+	[Theory]
+	[InlineData(GitFilteringMode.Staged, GitFilteringMode.TrackedFilesOnly)]
+	[InlineData(GitFilteringMode.Changes, GitFilteringMode.RespectGitIgnore)]
+	public void RefreshAndRollbackPreserveMomentaryModeOverItsScannerUnderlay(
+		GitFilteringMode momentary,
+		GitFilteringMode underlay)
+	{
+		var state = new IgnoreSelectionState();
+		state.RestoreProfileSelection([IgnoreOptionId.UseGitIgnore, IgnoreOptionId.SmartIgnore]);
+		state.SetActiveGitFilteringMode(momentary);
+		var snapshot = state.CaptureSnapshot();
+		var refreshed = state.SnapshotStateCache();
+
+		state.ReplaceStateCachePreservingRuntimePreferences(refreshed);
+		Assert.Equal(momentary, state.ActiveGitFilteringMode);
+		Assert.Equal(GitFilteringMode.RespectGitIgnore, state.PreferredGitFilteringMode);
+		Assert.Equal(
+			underlay,
+			GitFilteringModeResolver.Resolve(state.OptionStateCache));
+
+		state.SetActiveGitFilteringMode(GitFilteringMode.None);
+		state.RestoreSnapshot(snapshot);
+		Assert.Equal(momentary, state.ActiveGitFilteringMode);
+		Assert.Equal(GitFilteringMode.RespectGitIgnore, state.PreferredGitFilteringMode);
+	}
+
 	[Fact]
 	public void ReplaceStateCache_ClearsPreviousProjectAllPreference()
 	{

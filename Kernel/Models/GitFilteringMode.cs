@@ -4,7 +4,10 @@ public enum GitFilteringMode
 {
 	None,
 	RespectGitIgnore,
-	TrackedFilesOnly
+	TrackedFilesOnly,
+	Staged,
+	Changes,
+	Diff
 }
 
 public static class GitFilteringModeResolver

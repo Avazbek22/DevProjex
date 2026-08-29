@@ -43,7 +43,8 @@ public sealed record ProjectSelectionSpec(
 	bool? StripComments = null,
 	bool? StripBlankLines = null,
 	ProjectProfileReference? ProfileSource = null,
-	bool? HidePrivateData = null)
+	bool? HidePrivateData = null,
+	string? GitDiffRange = null)
 {
 	/// <summary>
 	/// Preserves which resolved components came from explicit/profile intent when a selection

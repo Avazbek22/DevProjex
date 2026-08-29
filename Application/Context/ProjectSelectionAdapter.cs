@@ -27,7 +27,12 @@ public static class ProjectSelectionAdapter
 				options.Add(IgnoreOptionId.UseGitIgnore);
 				break;
 			case GitFilteringMode.TrackedFilesOnly:
+			case GitFilteringMode.Staged:
+			case GitFilteringMode.Diff:
 				options.Add(IgnoreOptionId.TrackedGitFilesOnly);
+				break;
+			case GitFilteringMode.Changes:
+				options.Add(IgnoreOptionId.UseGitIgnore);
 				break;
 		}
 

@@ -13,7 +13,8 @@ public sealed record ContextDiagnostic(
 	string Code,
 	ContextDiagnosticSeverity Severity,
 	string Message,
-	string? Path = null);
+	string? Path = null,
+	int? Count = null);
 
 public sealed record ProjectContextGitReadiness(
 	GitFilteringMode Mode,
@@ -21,6 +22,9 @@ public sealed record ProjectContextGitReadiness(
 	bool IsReady,
 	int UnavailableTrackedIndexCount = 0)
 {
+	public bool HasRepositoryBoundary =>
+		LoadedTrackedIndexCount + UnavailableTrackedIndexCount > 0;
+
 	public const string UnavailableDiagnosticCode = "DPX-GIT-TRACKED-INDEX-UNAVAILABLE";
 	public const string PartialDiagnosticCode = "DPX-GIT-TRACKED-INDEX-PARTIAL";
 

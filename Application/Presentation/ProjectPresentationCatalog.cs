@@ -71,7 +71,19 @@ public static class ProjectPresentationCatalog
 			IgnoreOptionId.TrackedGitFilesOnly,
 			"tracked",
 			"Settings.Ignore.TrackedGitFilesOnly",
-			2)
+			2),
+		new(
+			GitFilteringMode.Staged,
+			null,
+			"staged",
+			"Settings.Ignore.GitStaged",
+			3),
+		new(
+			GitFilteringMode.Changes,
+			null,
+			"changes",
+			"Settings.Ignore.GitChanges",
+			4)
 	];
 
 	public static IReadOnlyList<ProjectExclusionDescriptor> Exclusions { get; } =
