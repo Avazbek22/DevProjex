@@ -38,7 +38,6 @@ public static class GitScopePresentationProjector
 			inventory,
 			scopedPaths,
 			selectedRootFolders,
-			availableRootFolders,
 			cancellationToken,
 			rootSelectionIsExplicit);
 
@@ -137,8 +136,6 @@ public static class GitScopePresentationProjector
 			files,
 			scopedPaths,
 			selectedRootFolders,
-			availableRootFolders,
-			effectiveExtensionPolicy,
 			effectiveRules,
 			new IgnoreOptionCounts(
 				HiddenFolders: hiddenFolders,
@@ -163,7 +160,6 @@ public static class GitScopePresentationProjector
 		ProjectTreeInventorySnapshot inventory,
 		IReadOnlySet<string> scopedPaths,
 		IReadOnlySet<string> selectedRootFolders,
-		IReadOnlySet<string> availableRootFolders,
 		CancellationToken cancellationToken,
 		bool rootSelectionIsExplicit)
 	{
@@ -178,7 +174,6 @@ public static class GitScopePresentationProjector
 				    inventory,
 				    index,
 				    selectedRootFolders,
-				    availableRootFolders,
 				    rootSelectionIsExplicit))
 				continue;
 
@@ -192,7 +187,6 @@ public static class GitScopePresentationProjector
 		ProjectTreeInventorySnapshot inventory,
 		int fileIndex,
 		IReadOnlySet<string> selectedRootFolders,
-		IReadOnlySet<string> availableRootFolders,
 		bool rootSelectionIsExplicit)
 	{
 		var currentIndex = inventory.GetEntryRef(fileIndex).ParentIndex;
@@ -202,8 +196,7 @@ public static class GitScopePresentationProjector
 		while (inventory.GetEntryRef(currentIndex).ParentIndex > 0)
 			currentIndex = inventory.GetEntryRef(currentIndex).ParentIndex;
 		var rootName = inventory.GetEntryRef(currentIndex).Name;
-		return selectedRootFolders.Contains(rootName) ||
-		       !rootSelectionIsExplicit && !availableRootFolders.Contains(rootName);
+		return !rootSelectionIsExplicit || selectedRootFolders.Contains(rootName);
 	}
 
 	private static int[] CollectAncestorIndexes(ProjectTreeInventorySnapshot inventory, int parentIndex)
@@ -499,8 +492,6 @@ public static class GitScopePresentationProjector
 		IReadOnlyList<ScopedFile> files,
 		IReadOnlySet<string> scopedPaths,
 		IReadOnlySet<string> selectedRootFolders,
-		IReadOnlySet<string> availableRootFolders,
-		IExtensionInclusionPolicy? effectiveExtensionPolicy,
 		IgnoreRules rules,
 		IgnoreOptionCounts counts,
 		CancellationToken cancellationToken,
@@ -518,8 +509,6 @@ public static class GitScopePresentationProjector
 			cancellationToken.ThrowIfCancellationRequested();
 			ref readonly var file = ref inventory.GetEntryRef(scopedFile.EntryIndex);
 			inventoriedFiles.Add(file.FullPath);
-			if (!AllowsExtension(file.Name, effectiveExtensionPolicy))
-				continue;
 
 			var blocked = false;
 			foreach (var ancestorIndex in scopedFile.AncestorIndexes)
@@ -573,7 +562,6 @@ public static class GitScopePresentationProjector
 				    projectRoot,
 				    scopedPath,
 				    selectedRootFolders,
-				    availableRootFolders,
 				    rootSelectionIsExplicit))
 				continue;
 
@@ -581,7 +569,6 @@ public static class GitScopePresentationProjector
 				projectRoot,
 				scopedPath,
 				rules,
-				effectiveExtensionPolicy,
 				ownerPaths);
 		}
 
@@ -613,14 +600,11 @@ public static class GitScopePresentationProjector
 		string projectRoot,
 		string fullPath,
 		IgnoreRules rules,
-		IExtensionInclusionPolicy? effectiveExtensionPolicy,
 		Dictionary<IgnoreDecisionOwner, HashSet<string>> ownerPaths)
 	{
 		if (!File.Exists(fullPath))
 			return;
 		var fileName = Path.GetFileName(fullPath);
-		if (!AllowsExtension(fileName, effectiveExtensionPolicy))
-			return;
 
 		var relativePath = Path.GetRelativePath(projectRoot, fullPath);
 		var parentRelativePath = Path.GetDirectoryName(relativePath);
@@ -696,7 +680,6 @@ public static class GitScopePresentationProjector
 		string rootPath,
 		string path,
 		IReadOnlySet<string> selectedRootFolders,
-		IReadOnlySet<string> availableRootFolders,
 		bool rootSelectionIsExplicit)
 	{
 		try
@@ -715,8 +698,7 @@ public static class GitScopePresentationProjector
 			if (separatorIndex < 0)
 				return true;
 			var rootName = relativePath[..separatorIndex];
-			return selectedRootFolders.Contains(rootName) ||
-			       !rootSelectionIsExplicit && !availableRootFolders.Contains(rootName);
+			return !rootSelectionIsExplicit || selectedRootFolders.Contains(rootName);
 		}
 		catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
 		{

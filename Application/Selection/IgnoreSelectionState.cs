@@ -172,6 +172,14 @@ public sealed class IgnoreSelectionState
 				continue;
 			_optionStateCache[id] = isChecked;
 		}
+		var preserveGitFilteringMode = excludedOptions is not null &&
+		                               excludedOptions.Contains(IgnoreOptionId.UseGitIgnore) &&
+		                               excludedOptions.Contains(IgnoreOptionId.TrackedGitFilesOnly);
+		if (preserveGitFilteringMode)
+		{
+			RebuildSelectedOptions();
+			return;
+		}
 
 		if (isChecked &&
 		    _optionStateCache.ContainsKey(IgnoreOptionId.UseGitIgnore) &&

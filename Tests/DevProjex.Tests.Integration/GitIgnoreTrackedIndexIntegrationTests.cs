@@ -359,6 +359,87 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 	}
 
 	[Fact]
+	public async Task StagedGitlinkIsNotReportedAsAProjectFileScope()
+	{
+		EnsureGitAvailable();
+		using var temp = new TemporaryDirectory();
+		var outerRoot = temp.CreateDirectory("outer");
+		var nestedRoot = temp.CreateDirectory("outer/submodule");
+		temp.CreateFile("outer/submodule/nested.cs", "namespace Nested;\n");
+		RunGit(nestedRoot, "init", "--quiet");
+		RunGit(nestedRoot, "config", "user.email", "tests@devprojex.local");
+		RunGit(nestedRoot, "config", "user.name", "DevProjex Tests");
+		RunGit(nestedRoot, "add", "--", "nested.cs");
+		RunGit(nestedRoot, "commit", "--quiet", "-m", "nested seed");
+		var nestedCommit = RunGit(nestedRoot, "rev-parse", "HEAD").Trim();
+		RunGit(outerRoot, "init", "--quiet");
+		RunGit(
+			outerRoot,
+			"update-index",
+			"--add",
+			"--cacheinfo",
+			$"160000,{nestedCommit},submodule");
+
+		var result = await new GitScopePathProvider().ResolveAsync(
+			outerRoot,
+			GitFilteringMode.Staged,
+			diffRange: null,
+			TestContext.Current.CancellationToken);
+
+		Assert.True(result.IsAvailable, result.FailureReason);
+		Assert.Empty(result.IncludedPaths);
+		Assert.Equal(0, result.DeletedPathCount);
+	}
+
+	[Fact]
+	public async Task StagedFileRemovedFromWorkingTreeIsReportedAsDeleted()
+	{
+		EnsureGitAvailable();
+		using var temp = new TemporaryDirectory();
+		var repositoryRoot = temp.CreateDirectory("repo");
+		var filePath = temp.CreateFile("repo/staged.txt", "staged\n");
+		RunGit(repositoryRoot, "init", "--quiet");
+		RunGit(repositoryRoot, "add", "--", "staged.txt");
+		File.Delete(filePath);
+
+		var result = await new GitScopePathProvider().ResolveAsync(
+			repositoryRoot,
+			GitFilteringMode.Staged,
+			diffRange: null,
+			TestContext.Current.CancellationToken);
+
+		Assert.True(result.IsAvailable, result.FailureReason);
+		Assert.Empty(result.IncludedPaths);
+		Assert.Equal(1, result.DeletedPathCount);
+	}
+
+	[Fact]
+	public async Task ChangesScopeDoesNotReportRecreatedDeletedPathAsOmitted()
+	{
+		EnsureGitAvailable();
+		using var temp = new TemporaryDirectory();
+		var repositoryRoot = temp.CreateDirectory("repo");
+		temp.CreateFile("repo/recreated.txt", "committed\n");
+		InitializeIndex(repositoryRoot, "recreated.txt");
+		RunGit(repositoryRoot, "config", "user.email", "tests@devprojex.local");
+		RunGit(repositoryRoot, "config", "user.name", "DevProjex Tests");
+		RunGit(repositoryRoot, "commit", "--quiet", "-m", "seed");
+		RunGit(repositoryRoot, "rm", "--quiet", "--", "recreated.txt");
+		var recreatedPath = PathUtility.Normalize(
+			temp.CreateFile("repo/recreated.txt", "working tree\n"));
+
+		var result = await new GitScopePathProvider().ResolveAsync(
+			repositoryRoot,
+			GitFilteringMode.Changes,
+			diffRange: null,
+			TestContext.Current.CancellationToken);
+
+		Assert.True(result.IsAvailable, result.FailureReason);
+		Assert.Equal(recreatedPath, Assert.Single(result.IncludedPaths), PathComparer.Default);
+		Assert.Equal(0, result.DeletedPathCount);
+	}
+
+	[Fact]
 	public void RootFoldersAndExtensionsMatchTheIndexAwareEffectiveTree()
 	{
 		EnsureGitAvailable();

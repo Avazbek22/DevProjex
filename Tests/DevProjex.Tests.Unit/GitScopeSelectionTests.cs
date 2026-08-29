@@ -73,6 +73,40 @@ public sealed class GitScopeSelectionTests
 	}
 
 	[Fact]
+	public void NameStatusParserPreservesUnicodeSpacesWhitespaceAndCopySources()
+	{
+		using var project = new TemporaryDirectory();
+		var root = project.Path;
+		var included = new HashSet<string>(PathComparer.Default);
+		var deleted = new HashSet<string>(PathComparer.Default);
+
+		var parsed = GitScopePathProvider.TryParseNameStatus(
+			[
+				"M", "src/file name.cs",
+				"A", " ",
+				"R087", "old/日本語.cs", "new/日本語 renamed.cs",
+				"C100", "source/копия.cs", "copy/копия.cs"
+			],
+			root,
+			root,
+			included,
+			deleted);
+
+		Assert.True(parsed);
+		var expected = new List<string>
+		{
+			Path.Combine(root, "copy", "копия.cs"),
+			Path.Combine(root, "new", "日本語 renamed.cs"),
+			Path.Combine(root, "src", "file name.cs")
+		};
+		if (!OperatingSystem.IsWindows())
+			expected.Add(Path.Combine(root, " "));
+
+		Assert.Equal(expected.Order(PathComparer.Default), included.Order(PathComparer.Default));
+		Assert.Equal([Path.Combine(root, "old", "日本語.cs")], deleted);
+	}
+
+	[Fact]
 	public void TreeNarrowingKeepsOnlyExistingScopedFiles()
 	{
 		var rootPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "dpx-git-scope-tree"));
@@ -99,6 +133,40 @@ public sealed class GitScopeSelectionTests
 
 		Assert.Equal([kept], narrowed.OrderedFilePaths);
 		Assert.Equal("kept.cs", Assert.Single(narrowed.Root.Children).DisplayName);
+	}
+
+	[Fact]
+	public void TreeNarrowingDoesNotExpandScopedDirectoryPaths()
+	{
+		var rootPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "dpx-git-scope-gitlink"));
+		var gitlinkPath = Path.Combine(rootPath, "submodule");
+		var nestedFile = Path.Combine(gitlinkPath, "nested.cs");
+		var root = new TreeNodeDescriptor(
+			"project",
+			rootPath,
+			true,
+			false,
+			"folder",
+			[
+				new TreeNodeDescriptor(
+					"submodule",
+					gitlinkPath,
+					true,
+					false,
+					"folder",
+					[new TreeNodeDescriptor("nested.cs", nestedFile, false, false, "csharp", [])])
+			]);
+
+		var narrowed = GitScopeFilter.ApplyToTree(
+			new BuildTreeResult(root, false, false, [nestedFile]),
+			new GitScopePathResult(
+				true,
+				new HashSet<string>([gitlinkPath], PathComparer.Default),
+				0),
+			TestContext.Current.CancellationToken);
+
+		Assert.Empty(narrowed.OrderedFilePaths!);
+		Assert.Empty(narrowed.Root.Children);
 	}
 
 	[Fact]
@@ -310,6 +378,48 @@ public sealed class GitScopeSelectionTests
 	}
 
 	[Fact]
+	public void ImplicitRootSelectionKeepsScopedOwnerEvidenceOutsideTheFilteredInventory()
+	{
+		using var project = new TemporaryDirectory();
+		var scopedFile = PathUtility.Normalize(
+			project.CreateFile(".scope/Staged.cs", "class Staged {}\n"));
+		var inventory = new ProjectTreeInventorySnapshot(
+			[
+				new ProjectTreeInventoryEntry(
+					Path.GetFileName(project.Path),
+					project.Path,
+					string.Empty,
+					-1,
+					true,
+					false,
+					0)
+			],
+			false,
+			false);
+		var emptyRoots = new HashSet<string>(PathComparer.Default);
+		var availableRoots = new HashSet<string>([".scope"], PathComparer.Default);
+		var rules = new IgnoreRules(
+			IgnoreDotFolders: true,
+			IgnoreDotFiles: false,
+			IgnoreHiddenFolders: false,
+			IgnoreHiddenFiles: false,
+			SmartIgnoredFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+			SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+
+		var projection = GitScopePresentationProjector.Build(
+			project.Path,
+			inventory,
+			new HashSet<string>([scopedFile], PathComparer.Default),
+			emptyRoots,
+			availableRoots,
+			ExtensionPolicy(".cs"),
+			rules,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, projection.IgnoreOptionCounts.DotFolders);
+	}
+
+	[Fact]
 	public void ExplicitRootSelectionDoesNotAdvertiseScopedFilesFromOtherRoots()
 	{
 		using var project = new TemporaryDirectory();
@@ -335,7 +445,7 @@ public sealed class GitScopeSelectionTests
 	}
 
 	[Fact]
-	public void KnownUncheckedExtensionDoesNotAdvertiseFolderRulesThatCannotRestoreItsFile()
+	public void ActiveFolderRuleRemainsActionableBeforeKnownUncheckedExtension()
 	{
 		using var project = new TemporaryDirectory();
 		var scopedFile = PathUtility.Normalize(
@@ -361,7 +471,12 @@ public sealed class GitScopeSelectionTests
 			TestContext.Current.CancellationToken);
 
 		Assert.Empty(projection.AvailableExtensions);
-		Assert.Equal(IgnoreOptionCounts.Empty, projection.IgnoreOptionCounts);
+		Assert.Equal(1, projection.IgnoreOptionCounts.DotFolders);
+		Assert.Equal(0, projection.IgnoreOptionCounts.HiddenFolders);
+		Assert.Equal(0, projection.IgnoreOptionCounts.HiddenFiles);
+		Assert.Equal(0, projection.IgnoreOptionCounts.DotFiles);
+		Assert.Equal(0, projection.IgnoreOptionCounts.EmptyFiles);
+		Assert.Equal(0, projection.IgnoreOptionCounts.ExtensionlessFiles);
 	}
 
 	[Fact]
@@ -401,7 +516,7 @@ public sealed class GitScopeSelectionTests
 	}
 
 	[Fact]
-	public void ExplicitEmptyExtensionSetKeepsScopedFolderImpactsClosed()
+	public void ExplicitEmptyExtensionSetKeepsActiveFolderRuleWithoutRevivingItsType()
 	{
 		using var project = new TemporaryDirectory();
 		var scopedFile = PathUtility.Normalize(
@@ -418,7 +533,8 @@ public sealed class GitScopeSelectionTests
 			rules,
 			TestContext.Current.CancellationToken);
 
-		Assert.Equal(IgnoreOptionCounts.Empty, projection.IgnoreOptionCounts);
+		Assert.Equal(1, projection.IgnoreOptionCounts.DotFolders);
+		Assert.Empty(projection.AvailableExtensions);
 	}
 
 	private static IExtensionInclusionPolicy ExtensionPolicy(params string[] extensions) =>

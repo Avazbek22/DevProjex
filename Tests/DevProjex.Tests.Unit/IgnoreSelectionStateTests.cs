@@ -169,6 +169,39 @@ public sealed class IgnoreSelectionStateTests
 		Assert.True(state.OptionStateCache[IgnoreOptionId.SmartIgnore]);
 	}
 
+	[Theory]
+	[InlineData(GitFilteringMode.Staged)]
+	[InlineData(GitFilteringMode.Changes)]
+	public void ApplyAllPreferenceToKnownStates_PreservesExcludedMomentaryGitMode(
+		GitFilteringMode mode)
+	{
+		var state = new IgnoreSelectionState();
+		state.ReplaceStateCache(new Dictionary<IgnoreOptionId, bool>
+		{
+			[IgnoreOptionId.UseGitIgnore] = false,
+			[IgnoreOptionId.TrackedGitFilesOnly] = false,
+			[IgnoreOptionId.SmartIgnore] = true
+		});
+		state.SetActiveGitFilteringMode(mode);
+		var preferredMode = state.PreferredGitFilteringMode;
+		var gitIgnoreState = state.OptionStateCache[IgnoreOptionId.UseGitIgnore];
+		var trackedState = state.OptionStateCache[IgnoreOptionId.TrackedGitFilesOnly];
+
+		state.ApplyAllPreferenceToKnownStates(
+			isChecked: false,
+			new HashSet<IgnoreOptionId>
+			{
+				IgnoreOptionId.UseGitIgnore,
+				IgnoreOptionId.TrackedGitFilesOnly
+			});
+
+		Assert.Equal(mode, state.ActiveGitFilteringMode);
+		Assert.Equal(preferredMode, state.PreferredGitFilteringMode);
+		Assert.Equal(gitIgnoreState, state.OptionStateCache[IgnoreOptionId.UseGitIgnore]);
+		Assert.Equal(trackedState, state.OptionStateCache[IgnoreOptionId.TrackedGitFilesOnly]);
+		Assert.False(state.OptionStateCache[IgnoreOptionId.SmartIgnore]);
+	}
+
 	[Fact]
 	public void Reset_ClearsSelectionStateAndAllPreference()
 	{

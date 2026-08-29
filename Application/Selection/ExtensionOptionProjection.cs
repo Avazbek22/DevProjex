@@ -65,6 +65,18 @@ public static class ExtensionOptionProjection
 		return new ExtensionSetInclusionPolicy(selected);
 	}
 
+	public static IReadOnlyList<SelectionOption> ApplyExactSelection(
+		IReadOnlyList<SelectionOption> extensionOptions,
+		IReadOnlySet<string> selectedExtensions)
+	{
+		ArgumentNullException.ThrowIfNull(extensionOptions);
+		ArgumentNullException.ThrowIfNull(selectedExtensions);
+
+		return extensionOptions
+			.Select(option => option with { IsChecked = selectedExtensions.Contains(option.Name) })
+			.ToArray();
+	}
+
 	public static bool IsExtensionlessEntry(string value)
 	{
 		if (string.IsNullOrWhiteSpace(value))

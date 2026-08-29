@@ -1798,10 +1798,17 @@ public sealed class McpServerIntegrationTests
 		var repository = workspace.CreateDirectory("repository");
 		File.WriteAllText(Path.Combine(repository, ".gitignore"), "*.ignored\n");
 		File.WriteAllText(Path.Combine(repository, "Tracked.cs"), "baseline-marker\n");
+		File.WriteAllText(Path.Combine(repository, "Staged.cs"), "staged-baseline\n");
+		File.WriteAllText(Path.Combine(repository, "Tracked.ignored"), "tracked-ignored-baseline\n");
 		InitializeCommittedRepository(repository);
+		RunGit(repository, "add", "-f", "Tracked.ignored");
+		RunGit(repository, "commit", "--quiet", "-m", "track ignored fixture");
 		File.WriteAllText(Path.Combine(repository, "Tracked.cs"), "changed-marker\n");
+		File.WriteAllText(Path.Combine(repository, "Staged.cs"), "staged-marker\n");
+		RunGit(repository, "add", "Staged.cs");
+		File.WriteAllText(Path.Combine(repository, "Tracked.ignored"), "tracked-ignored-marker\n");
 		File.WriteAllText(Path.Combine(repository, "Untracked.cs"), "untracked-marker\n");
-		File.WriteAllText(Path.Combine(repository, "Hidden.ignored"), "ignored-marker\n");
+		File.WriteAllText(Path.Combine(repository, "Hidden.ignored"), "excluded-marker\n");
 
 		await using (var server = await McpTestServer.StartAsync(repository, workspace.Path))
 		{
@@ -1819,18 +1826,24 @@ public sealed class McpServerIntegrationTests
 				"search_project",
 				new Dictionary<string, object?>(scope)
 				{
-					["pattern"] = "changed-marker|untracked-marker|ignored-marker",
+					["pattern"] = "changed-marker|staged-marker|untracked-marker|tracked-ignored-marker|excluded-marker",
 					["ignore_case"] = false
 				});
 
 			Assert.Contains("Tracked.cs", Text(tree), StringComparison.Ordinal);
+			Assert.Contains("Staged.cs", Text(tree), StringComparison.Ordinal);
+			Assert.Contains("Tracked.ignored", Text(tree), StringComparison.Ordinal);
 			Assert.Contains("Untracked.cs", Text(tree), StringComparison.Ordinal);
 			Assert.DoesNotContain("Hidden.ignored", Text(tree), StringComparison.Ordinal);
-			Assert.Equal(2, analyze.StructuredContent?.GetProperty("files").GetInt32());
+			Assert.Equal(4, analyze.StructuredContent?.GetProperty("files").GetInt32());
 			Assert.Contains("changed-marker", Text(pack), StringComparison.Ordinal);
+			Assert.Contains("staged-marker", Text(pack), StringComparison.Ordinal);
+			Assert.Contains("tracked-ignored-marker", Text(pack), StringComparison.Ordinal);
 			Assert.Contains("untracked-marker", Text(pack), StringComparison.Ordinal);
-			Assert.DoesNotContain("ignored-marker", Text(pack), StringComparison.Ordinal);
+			Assert.DoesNotContain("excluded-marker", Text(pack), StringComparison.Ordinal);
 			Assert.Contains("Tracked.cs:1:", Text(search), StringComparison.Ordinal);
+			Assert.Contains("Staged.cs:1:", Text(search), StringComparison.Ordinal);
+			Assert.Contains("Tracked.ignored:1:", Text(search), StringComparison.Ordinal);
 			Assert.Contains("Untracked.cs:1:", Text(search), StringComparison.Ordinal);
 			Assert.DoesNotContain("Hidden.ignored", Text(search), StringComparison.Ordinal);
 		}
@@ -1852,6 +1865,245 @@ public sealed class McpServerIntegrationTests
 
 		Assert.Contains("Tracked.cs", Text(narrowed), StringComparison.Ordinal);
 		Assert.DoesNotContain("Untracked.cs", Text(narrowed), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task StagedScopeNeverLeaksCommittedBaselineAcrossSelectionTools()
+	{
+		using var workspace = new TemporaryDirectory();
+		var repository = workspace.CreateDirectory("repository");
+		Directory.CreateDirectory(Path.Combine(repository, ".internal"));
+		File.WriteAllText(Path.Combine(repository, ".internal", "Nested.cs"), "dot-folder-baseline\n");
+		File.WriteAllText(Path.Combine(repository, ".metadata"), "dot-file-baseline\n");
+		File.WriteAllText(Path.Combine(repository, "LICENSE"), "extensionless-baseline\n");
+		File.WriteAllText(Path.Combine(repository, "Baseline.cs"), "ordinary-baseline\n");
+		File.WriteAllText(Path.Combine(repository, "Selected.cs"), "selected-baseline\n");
+		InitializeCommittedRepository(repository);
+		await using var server = await McpTestServer.StartAsync(repository, workspace.Path);
+		var scope = new Dictionary<string, object?> { ["git_scope"] = "staged" };
+
+		var cleanTree = await server.CallAsync("get_tree", scope);
+		var cleanAnalyze = await server.CallAsync("analyze", scope);
+		var cleanPack = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>(scope)
+			{
+				["view"] = "content",
+				["format"] = "text"
+			});
+		var cleanSearch = await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?>(scope)
+			{
+				["pattern"] = "baseline",
+				["ignore_case"] = false
+			});
+
+		Assert.All(
+			new[] { cleanTree, cleanAnalyze, cleanPack, cleanSearch },
+			static result => Assert.NotEqual(true, result.IsError));
+		Assert.DoesNotContain("Baseline.cs", Text(cleanTree), StringComparison.Ordinal);
+		Assert.Equal(0, cleanAnalyze.StructuredContent?.GetProperty("files").GetInt32());
+		Assert.DoesNotContain("ordinary-baseline", Text(cleanPack), StringComparison.Ordinal);
+		Assert.DoesNotContain("Baseline.cs:", Text(cleanSearch), StringComparison.Ordinal);
+
+		File.WriteAllText(Path.Combine(repository, "Selected.cs"), "selected-staged-marker\n");
+		RunGit(repository, "add", "Selected.cs");
+
+		var stagedTree = await server.CallAsync("get_tree", scope);
+		var stagedAnalyze = await server.CallAsync("analyze", scope);
+		var stagedPack = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>(scope)
+			{
+				["view"] = "content",
+				["format"] = "text"
+			});
+		var stagedSearch = await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?>(scope)
+			{
+				["pattern"] = "selected-staged-marker|baseline",
+				["ignore_case"] = false
+			});
+
+		Assert.All(
+			new[] { stagedTree, stagedAnalyze, stagedPack, stagedSearch },
+			static result => Assert.NotEqual(true, result.IsError));
+		Assert.Contains("Selected.cs", Text(stagedTree), StringComparison.Ordinal);
+		Assert.DoesNotContain("Baseline.cs", Text(stagedTree), StringComparison.Ordinal);
+		Assert.DoesNotContain("Nested.cs", Text(stagedTree), StringComparison.Ordinal);
+		Assert.DoesNotContain(".metadata", Text(stagedTree), StringComparison.Ordinal);
+		Assert.DoesNotContain("LICENSE", Text(stagedTree), StringComparison.Ordinal);
+		Assert.Equal(1, stagedAnalyze.StructuredContent?.GetProperty("files").GetInt32());
+		Assert.Contains("selected-staged-marker", Text(stagedPack), StringComparison.Ordinal);
+		Assert.DoesNotContain("ordinary-baseline", Text(stagedPack), StringComparison.Ordinal);
+		Assert.Contains("Selected.cs:1:", Text(stagedSearch), StringComparison.Ordinal);
+		Assert.DoesNotContain("Baseline.cs:", Text(stagedSearch), StringComparison.Ordinal);
+		Assert.DoesNotContain("Nested.cs:", Text(stagedSearch), StringComparison.Ordinal);
+		Assert.DoesNotContain(".metadata:", Text(stagedSearch), StringComparison.Ordinal);
+		Assert.DoesNotContain("LICENSE:", Text(stagedSearch), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task PathAndGlobNarrowingCannotExpandStagedScope()
+	{
+		using var workspace = new TemporaryDirectory();
+		var repository = workspace.CreateDirectory("repository");
+		File.WriteAllText(Path.Combine(repository, "Baseline.cs"), "committed-baseline-marker\n");
+		File.WriteAllText(Path.Combine(repository, "Selected.cs"), "selected-baseline\n");
+		InitializeCommittedRepository(repository);
+		File.WriteAllText(Path.Combine(repository, "Selected.cs"), "selected-staged-marker\n");
+		RunGit(repository, "add", "Selected.cs");
+		await using var server = await McpTestServer.StartAsync(repository, workspace.Path);
+
+		var result = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "Baseline.cs" },
+				["include_patterns"] = new[] { "**/*.cs" },
+				["git_scope"] = "staged",
+				["view"] = "content",
+				["format"] = "json"
+			});
+
+		Assert.NotEqual(true, result.IsError);
+		var content = ExtractSpotlightBody(Text(result));
+		using var document = JsonDocument.Parse(content);
+		Assert.Equal(
+			"staged",
+			document.RootElement.GetProperty("selection").GetProperty("gitMode").GetString());
+		Assert.Empty(document.RootElement.GetProperty("files").EnumerateArray());
+		Assert.Equal(0, document.RootElement.GetProperty("metrics").GetProperty("files").GetInt32());
+		Assert.DoesNotContain("committed-baseline-marker", content, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("staged", "json")]
+	[InlineData("staged", "xml")]
+	[InlineData("changes", "json")]
+	[InlineData("changes", "xml")]
+	public async Task GitScopeMachinePacksKeepProfileExtensionsWhileNarrowingFiles(
+		string gitScope,
+		string format)
+	{
+		using var workspace = new TemporaryDirectory();
+		var repository = workspace.CreateDirectory("repository");
+		const string profileName = "portable.json";
+		File.WriteAllText(Path.Combine(repository, "Selected.cs"), "selected-baseline\n");
+		File.WriteAllText(Path.Combine(repository, "Documentation.md"), "documentation-baseline\n");
+		File.WriteAllText(
+			Path.Combine(repository, profileName),
+			JsonSerializer.Serialize(new
+			{
+				schemaVersion = PortableProjectProfileService.CurrentSchemaVersion,
+				kind = PortableProjectProfileService.DocumentKind,
+				selection = new
+				{
+					roots = (string[]?)null,
+					extensions = new[] { ".cs", ".md" },
+					selectedPaths = (string[]?)null,
+					gitMode = "none",
+					exclusions = Array.Empty<string>(),
+					hideSecrets = false,
+					hidePrivateData = false
+				}
+			}));
+		InitializeCommittedRepository(repository);
+		await using var server = await McpTestServer.StartAsync(repository, workspace.Path);
+
+		var clean = await PackMachineContextAsync(server, profileName, gitScope, format);
+		Assert.Equal(gitScope, clean.GitMode);
+		Assert.Equal([".cs", ".md"], clean.Extensions);
+		Assert.Empty(clean.Files);
+		Assert.Equal(0, clean.MetricFiles);
+
+		File.WriteAllText(Path.Combine(repository, "Selected.cs"), "selected-current\n");
+		if (gitScope == "staged")
+			RunGit(repository, "add", "Selected.cs");
+
+		var changed = await PackMachineContextAsync(server, profileName, gitScope, format);
+		Assert.Equal(gitScope, changed.GitMode);
+		Assert.Equal([".cs", ".md"], changed.Extensions);
+		Assert.Equal("Selected.cs", Path.GetFileName(Assert.Single(changed.Files)));
+		Assert.Equal(1, changed.MetricFiles);
+	}
+
+	[Fact]
+	public async Task GitDiffScopeTransitionsFromEmptyToCurrentWorktreeContentAcrossSelectionTools()
+	{
+		using var workspace = new TemporaryDirectory();
+		var repository = workspace.CreateDirectory("repository");
+		File.WriteAllText(Path.Combine(repository, "Selected.cs"), "selected-baseline\n");
+		File.WriteAllText(Path.Combine(repository, "Untouched.cs"), "untouched-marker\n");
+		InitializeCommittedRepository(repository);
+		var baseline = ReadGit(repository, "rev-parse", "HEAD");
+		await using var server = await McpTestServer.StartAsync(repository, workspace.Path);
+
+		var clean = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["git_scope"] = $"diff:{baseline}..HEAD" });
+		Assert.NotEqual(true, clean.IsError);
+		Assert.Equal(0, clean.StructuredContent?.GetProperty("files").GetInt32());
+
+		File.WriteAllText(Path.Combine(repository, "Selected.cs"), "selected-committed\n");
+		RunGit(repository, "add", "Selected.cs");
+		RunGit(repository, "commit", "--quiet", "-m", "selected change");
+		var changed = ReadGit(repository, "rev-parse", "HEAD");
+		File.WriteAllText(Path.Combine(repository, "Selected.cs"), "selected-current-worktree\n");
+		var scope = new Dictionary<string, object?>
+		{
+			["git_scope"] = $"diff:{baseline}..{changed}"
+		};
+
+		var tree = await server.CallAsync("get_tree", scope);
+		var analyze = await server.CallAsync("analyze", scope);
+		var pack = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>(scope)
+			{
+				["view"] = "content",
+				["format"] = "json"
+			});
+		var search = await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?>(scope)
+			{
+				["pattern"] = "selected-current-worktree|untouched-marker",
+				["ignore_case"] = false
+			});
+		var missingRef = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["git_scope"] = "diff:refs/heads/does-not-exist..HEAD"
+			});
+
+		Assert.NotEqual(true, tree.IsError);
+		Assert.Contains("Selected.cs", Text(tree), StringComparison.Ordinal);
+		Assert.DoesNotContain("Untouched.cs", Text(tree), StringComparison.Ordinal);
+		Assert.Equal(1, analyze.StructuredContent?.GetProperty("files").GetInt32());
+		using (var packDocument = JsonDocument.Parse(ExtractSpotlightBody(Text(pack))))
+		{
+			Assert.Equal(
+				$"diff:{baseline}..{changed}",
+				packDocument.RootElement.GetProperty("selection").GetProperty("gitMode").GetString());
+			Assert.Equal(
+				"Selected.cs",
+				Path.GetFileName(Assert.Single(
+					packDocument.RootElement.GetProperty("files").EnumerateArray()
+						.Select(static file => file.GetProperty("path").GetString()!))));
+		}
+		Assert.Contains("selected-current-worktree", Text(pack), StringComparison.Ordinal);
+		Assert.DoesNotContain("selected-committed", Text(pack), StringComparison.Ordinal);
+		Assert.DoesNotContain("untouched-marker", Text(pack), StringComparison.Ordinal);
+		Assert.Contains("Selected.cs:1:", Text(search), StringComparison.Ordinal);
+		Assert.DoesNotContain("Untouched.cs:", Text(search), StringComparison.Ordinal);
+		Assert.True(missingRef.IsError);
+		Assert.Contains(McpErrorCodes.ProjectUnavailable, Text(missingRef), StringComparison.Ordinal);
+		Assert.Contains(GitScopeFilter.UnavailableDiagnosticCode, Text(missingRef), StringComparison.Ordinal);
+		Assert.Null(missingRef.StructuredContent);
 	}
 
 	[Fact]
@@ -1884,9 +2136,11 @@ public sealed class McpServerIntegrationTests
 		var repository = workspace.CreateDirectory("repository");
 		File.WriteAllText(Path.Combine(repository, "Keep.cs"), "changed-marker\n");
 		File.WriteAllText(Path.Combine(repository, "Deleted.cs"), "deleted-marker\n");
+		File.WriteAllText(Path.Combine(repository, "RenameSource.cs"), "rename-source-marker\n");
 		InitializeCommittedRepository(repository);
 		File.AppendAllText(Path.Combine(repository, "Keep.cs"), "staged-change\n");
 		File.Delete(Path.Combine(repository, "Deleted.cs"));
+		RunGit(repository, "mv", "RenameSource.cs", "Renamed.cs");
 		RunGit(repository, "add", "--all");
 		await using var server = await McpTestServer.StartAsync(repository, workspace.Path);
 		var scope = new Dictionary<string, object?> { ["git_scope"] = "staged" };
@@ -1918,7 +2172,11 @@ public sealed class McpServerIntegrationTests
 				GitScopeFilter.DeletedDiagnosticCode,
 				AllText(result),
 				StringComparison.Ordinal);
+			Assert.Contains("2 deleted files", AllText(result), StringComparison.Ordinal);
 		});
+		Assert.Contains("Renamed.cs", Text(results[0]), StringComparison.Ordinal);
+		Assert.DoesNotContain("RenameSource.cs", Text(results[0]), StringComparison.Ordinal);
+		Assert.Contains("rename-source-marker", Text(results[2]), StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -2009,6 +2267,49 @@ public sealed class McpServerIntegrationTests
 		var contentEnd = text.IndexOf("\n</untrusted-data-", contentStart, StringComparison.Ordinal);
 		Assert.True(contentEnd >= contentStart, $"Response did not contain a spotlight closing tag: {text}");
 		return text[contentStart..contentEnd];
+	}
+
+	private static async Task<(string GitMode, string[] Extensions, string[] Files, int MetricFiles)>
+		PackMachineContextAsync(
+		McpTestServer server,
+		string profileName,
+		string gitScope,
+		string format)
+	{
+		var result = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["profile"] = profileName,
+				["git_scope"] = gitScope,
+				["view"] = "content",
+				["format"] = format
+			});
+		Assert.NotEqual(true, result.IsError);
+		var content = ExtractSpotlightBody(Text(result));
+
+		if (format == "json")
+		{
+			using var document = JsonDocument.Parse(content);
+			return (
+				document.RootElement.GetProperty("selection").GetProperty("gitMode").GetString()!,
+				document.RootElement.GetProperty("selection").GetProperty("extensions")
+					.EnumerateArray().Select(static item => item.GetString()!).ToArray(),
+				document.RootElement.GetProperty("files").EnumerateArray()
+					.Select(static file => file.GetProperty("path").GetString()!).ToArray(),
+				document.RootElement.GetProperty("metrics").GetProperty("files").GetInt32());
+		}
+
+		var xml = System.Xml.Linq.XDocument.Parse(content);
+		return (
+			xml.Root!.Element("selection")!.Element("gitMode")!.Value,
+			xml.Root.Element("selection")!.Element("extensions")!.Elements("extension")
+				.Select(static item => item.Value).ToArray(),
+			xml.Root.Element("files")!.Elements("file")
+				.Select(static file => file.Attribute("path")!.Value).ToArray(),
+			int.Parse(
+				xml.Root.Element("metrics")!.Element("files")!.Value,
+				System.Globalization.CultureInfo.InvariantCulture));
 	}
 
 	private static int[] ExtractPackLineMarkers(string text) =>
@@ -2191,8 +2492,15 @@ public sealed class McpServerIntegrationTests
 		try
 		{
 			RunGit(repository, "init", "--quiet");
+			var hooksPath = Directory.CreateDirectory(
+				Path.Combine(repository, ".git", "devprojex-test-hooks")).FullName;
+			var excludesPath = Path.Combine(repository, ".git", "devprojex-test-excludes");
+			File.WriteAllText(excludesPath, string.Empty);
 			RunGit(repository, "config", "user.name", "DevProjex Tests");
 			RunGit(repository, "config", "user.email", "devprojex@example.invalid");
+			RunGit(repository, "config", "commit.gpgSign", "false");
+			RunGit(repository, "config", "core.hooksPath", hooksPath);
+			RunGit(repository, "config", "core.excludesFile", excludesPath);
 			RunGit(repository, "add", "--all");
 			RunGit(repository, "commit", "--quiet", "-m", "baseline");
 		}
@@ -2298,6 +2606,26 @@ public sealed class McpServerIntegrationTests
 			throw new TimeoutException("Git command did not complete within 20 seconds.");
 		}
 		Assert.True(process.ExitCode == 0, $"git failed ({process.ExitCode}): {error}{output}");
+	}
+
+	private static string ReadGit(string repository, params string[] arguments)
+	{
+		var startInfo = new ProcessStartInfo("git")
+		{
+			WorkingDirectory = repository,
+			UseShellExecute = false,
+			CreateNoWindow = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true
+		};
+		foreach (var argument in arguments)
+			startInfo.ArgumentList.Add(argument);
+		using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Could not start git.");
+		var output = process.StandardOutput.ReadToEnd();
+		var error = process.StandardError.ReadToEnd();
+		Assert.True(process.WaitForExit(20_000));
+		Assert.True(process.ExitCode == 0, $"git failed ({process.ExitCode}): {error}{output}");
+		return output.Trim();
 	}
 
 	private sealed class CountingGitRepositoryService(IGitRepositoryService? inner) : IGitRepositoryService

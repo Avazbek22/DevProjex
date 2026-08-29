@@ -52,22 +52,40 @@ public static class GitScopeFilter
 		if (!GitScopeSelection.IsMomentary(scopeMode))
 			return plan;
 
+		var scopedSelection = plan.Selection with
+		{
+			GitMode = scopeMode,
+			GitDiffRange = scopeMode == GitFilteringMode.Diff ? diffRange : null
+		};
+		var scopedBaseline = plan with { Selection = scopedSelection };
+
 		var scope = await provider
 			.ResolveAsync(plan.SourceRoot, scopeMode, diffRange, cancellationToken)
 			.ConfigureAwait(false);
 		if (!scope.IsAvailable)
 		{
 			var empty = await planner
-				.ReprojectEmptySelectionAsync(plan, cancellationToken)
+				.ReprojectEmptySelectionAsync(scopedBaseline, cancellationToken)
 				.ConfigureAwait(false);
 			return empty with
 			{
-				Selection = plan.Selection,
+				EffectiveTree = empty.ProjectedTree,
 				Diagnostics = AppendDiagnostic(
 					empty.Diagnostics,
 					CreateUnavailableDiagnostic(plan.SourceRoot, scope))
 			};
 		}
+
+		var scopedFilePaths = RetainExactFilePaths(
+			plan.EffectiveTree,
+			scope.IncludedPaths,
+			cancellationToken);
+		var scopedTree = ProjectContextPlanner.ResolveSelectionProjection(
+			plan.EffectiveTree,
+			scopedFilePaths,
+			scopedFilePaths.Count == 0,
+			knownFullTreeFilePaths: null,
+			cancellationToken).ProjectedTree;
 
 		var selected = new List<string>(Math.Min(plan.IncludedFiles.Count, scope.IncludedPaths.Count));
 		foreach (var path in plan.IncludedFiles)
@@ -81,13 +99,13 @@ public static class GitScopeFilter
 		if (selected.Count > 0)
 		{
 			narrowed = await planner
-				.ReprojectSelectionAsync(plan, selected, cancellationToken)
+				.ReprojectSelectionAsync(scopedBaseline, selected, cancellationToken)
 				.ConfigureAwait(false);
 		}
 		else
 		{
 			narrowed = await planner
-				.ReprojectEmptySelectionAsync(plan, cancellationToken)
+				.ReprojectEmptySelectionAsync(scopedBaseline, cancellationToken)
 				.ConfigureAwait(false);
 		}
 
@@ -102,7 +120,7 @@ public static class GitScopeFilter
 
 		return narrowed with
 		{
-			Selection = plan.Selection,
+			EffectiveTree = scopedTree,
 			AvailableExtensions = presentation.AvailableExtensions,
 			SelectedExtensions = plan.SelectedExtensions,
 			HasIgnoreOptionCounts = true,
@@ -121,10 +139,14 @@ public static class GitScopeFilter
 		ArgumentNullException.ThrowIfNull(scope);
 		if (!scope.IsAvailable)
 			return tree;
-		var projection = ProjectContextPlanner.ResolveSelectionProjection(
+		var scopedFilePaths = RetainExactFilePaths(
 			tree.Root,
 			scope.IncludedPaths,
-			scope.IncludedPaths.Count == 0,
+			cancellationToken);
+		var projection = ProjectContextPlanner.ResolveSelectionProjection(
+			tree.Root,
+			scopedFilePaths,
+			scopedFilePaths.Count == 0,
 			knownFullTreeFilePaths: null,
 			cancellationToken);
 		return tree with
@@ -132,6 +154,35 @@ public static class GitScopeFilter
 			Root = projection.ProjectedTree,
 			OrderedFilePaths = projection.IncludedFiles
 		};
+	}
+
+	private static IReadOnlySet<string> RetainExactFilePaths(
+		TreeNodeDescriptor root,
+		IReadOnlySet<string> scopedPaths,
+		CancellationToken cancellationToken)
+	{
+		if (scopedPaths.Count == 0)
+			return scopedPaths;
+
+		var files = new HashSet<string>(PathComparer.Default);
+		var pending = new Stack<TreeNodeDescriptor>();
+		pending.Push(root);
+		while (pending.Count > 0)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var node = pending.Pop();
+			if (!node.IsDirectory)
+			{
+				if (scopedPaths.Contains(node.FullPath))
+					files.Add(node.FullPath);
+				continue;
+			}
+
+			for (var index = node.Children.Count - 1; index >= 0; index--)
+				pending.Push(node.Children[index]);
+		}
+
+		return files;
 	}
 
 	public static ContextDiagnostic CreateUnavailableDiagnostic(

@@ -120,7 +120,27 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 			}
 		}
 
+		ReconcileWorkingTreePaths(included, deleted, cancellationToken);
+
 		return new GitScopePathResult(true, included, deleted.Count);
+	}
+
+	private static void ReconcileWorkingTreePaths(
+		HashSet<string> included,
+		HashSet<string> deleted,
+		CancellationToken cancellationToken)
+	{
+		foreach (var path in included.ToArray())
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (File.Exists(path))
+				continue;
+
+			included.Remove(path);
+			deleted.Add(path);
+		}
+
+		deleted.ExceptWith(included);
 	}
 
 	internal static bool TryParseNameStatus(
@@ -151,7 +171,12 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 				var destinationPath = values[index++];
 				if (code == 'R')
 					TryAddProjectPath(repositoryRoot, projectRoot, firstPath, deleted);
-				TryAddProjectPath(repositoryRoot, projectRoot, destinationPath, included);
+				TryAddProjectPath(
+					repositoryRoot,
+					projectRoot,
+					destinationPath,
+					included,
+					rejectDirectories: true);
 				continue;
 			}
 
@@ -163,7 +188,12 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 
 			if (code is not ('A' or 'M' or 'T' or 'U' or 'X' or 'B'))
 				return false;
-			TryAddProjectPath(repositoryRoot, projectRoot, firstPath, included);
+			TryAddProjectPath(
+				repositoryRoot,
+				projectRoot,
+				firstPath,
+				included,
+				rejectDirectories: true);
 		}
 
 		return true;
@@ -180,7 +210,12 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 		{
 			if (string.IsNullOrEmpty(value))
 				return false;
-			TryAddProjectPath(repositoryRoot, projectRoot, value, included);
+			TryAddProjectPath(
+				repositoryRoot,
+				projectRoot,
+				value,
+				included,
+				rejectDirectories: true);
 		}
 		return true;
 	}
@@ -189,17 +224,21 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 		string repositoryRoot,
 		string projectRoot,
 		string gitPath,
-		ISet<string> destination)
+		ISet<string> destination,
+		bool rejectDirectories = false)
 	{
-		if (string.IsNullOrWhiteSpace(gitPath) || Path.IsPathRooted(gitPath))
+		if (string.IsNullOrEmpty(gitPath) || Path.IsPathRooted(gitPath))
 			return;
 
 		try
 		{
 			var platformPath = gitPath.Replace('/', Path.DirectorySeparatorChar);
 			var fullPath = PathUtility.Normalize(Path.Combine(repositoryRoot, platformPath));
-			if (PathUtility.IsPathInside(fullPath, projectRoot))
+			if (PathUtility.IsPathInside(fullPath, projectRoot) &&
+			    (!rejectDirectories || !Directory.Exists(fullPath)))
+			{
 				destination.Add(fullPath);
+			}
 		}
 		catch (Exception exception) when (exception is ArgumentException or IOException or NotSupportedException)
 		{
