@@ -1583,6 +1583,9 @@ public sealed class McpServerIntegrationTests
 				.GetProperty("includedEstimatedTokens").GetInt64() <
 			fullDocument.RootElement.GetProperty("tokenBudget")
 				.GetProperty("includedEstimatedTokens").GetInt64());
+		Assert.NotEqual(
+			fullDocument.RootElement.GetProperty("fingerprint").GetString(),
+			signaturesDocument.RootElement.GetProperty("fingerprint").GetString());
 	}
 
 	[Fact]

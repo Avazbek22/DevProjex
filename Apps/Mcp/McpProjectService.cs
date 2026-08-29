@@ -140,8 +140,17 @@ internal sealed class McpProjectService(
 	public McpDetailResolution ResolveDetail(ProjectContextPlan plan, McpDetailLevel detail) =>
 		McpDetailPolicy.Resolve(plan.Selection, detail);
 
-	public ProjectContextPlan ApplyDetail(ProjectContextPlan plan, McpDetailResolution resolution) =>
-		plan with { Selection = McpDetailPolicy.Apply(plan.Selection, resolution) };
+	public ProjectContextPlan ApplyDetail(ProjectContextPlan plan, McpDetailResolution resolution)
+	{
+		var selection = McpDetailPolicy.Apply(plan.Selection, resolution);
+		return services.Planner.ApplyContentTransformationSelection(
+			plan,
+			selection.HideSecrets == true,
+			selection.CompressCode,
+			selection.StripComments,
+			selection.StripBlankLines,
+			selection.HidePrivateData);
+	}
 
 	public ContentTransformationContext CreateTransformationContext(
 		ProjectContextPlan plan,
