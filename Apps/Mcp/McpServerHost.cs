@@ -15,11 +15,13 @@ public static class McpServerHost
 		IReadOnlyList<string> roots,
 		bool hidePrivateData = false,
 		bool allowRemote = false,
+		GitFilteringMode? gitMode = null,
 		CancellationToken cancellationToken = default) =>
 		RunWithStandardStreamsAsync(
 			roots,
 			hidePrivateData,
 			allowRemote,
+			gitMode,
 			appDataPathProvider: null,
 			cancellationToken);
 
@@ -27,6 +29,7 @@ public static class McpServerHost
 		IReadOnlyList<string> roots,
 		bool hidePrivateData,
 		bool allowRemote,
+		GitFilteringMode? gitMode,
 		Func<string>? appDataPathProvider,
 		CancellationToken cancellationToken) =>
 		RunWithStreamsAsync(
@@ -36,7 +39,8 @@ public static class McpServerHost
 			hidePrivateData,
 			cancellationToken,
 			appDataPathProvider,
-			allowRemote: allowRemote);
+			allowRemote: allowRemote,
+			gitMode: gitMode);
 
 	internal static async Task RunWithStreamsAsync(
 		IReadOnlyList<string> roots,
@@ -48,7 +52,8 @@ public static class McpServerHost
 		string? tempRoot = null,
 		Func<McpProjectRootJail, McpServices>? servicesFactory = null,
 		bool allowRemote = false,
-		Func<McpRemoteProjectServices>? remoteServicesFactory = null)
+		Func<McpRemoteProjectServices>? remoteServicesFactory = null,
+		GitFilteringMode? gitMode = null)
 	{
 		ArgumentNullException.ThrowIfNull(roots);
 		ArgumentNullException.ThrowIfNull(input);
@@ -66,7 +71,12 @@ public static class McpServerHost
 			LazyThreadSafetyMode.ExecutionAndPublication);
 		await using var packs = new McpPackRegistry(tempRoot);
 		var projectService = new Lazy<McpProjectService>(
-			() => new McpProjectService(projectSources, rootJail, services.Value, hidePrivateData),
+			() => new McpProjectService(
+				projectSources,
+				rootJail,
+				services.Value,
+				hidePrivateData,
+				gitMode),
 			LazyThreadSafetyMode.ExecutionAndPublication);
 		var tools = new DevProjexMcpTools(rootRegistry, projectService, packs);
 		var catalog = new DevProjexMcpToolCatalog(tools);

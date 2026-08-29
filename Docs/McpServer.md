@@ -25,6 +25,11 @@ Remote repository URLs are a separate startup opt-in:
 devprojex mcp --root /absolute/path/to/project --allow-remote
 ```
 
+The server baseline Git mode can be selected at startup with
+`--git-mode none|gitignore|tracked`. This applies only when a tool does not name
+an explicit profile. Momentary Git state belongs to request-level `git_scope`
+and is intentionally rejected at server startup.
+
 The recommended tool sequence is:
 
 ```text
@@ -42,9 +47,9 @@ list_projects -> get_tree/analyze -> search_project/get_file -> pack_context -> 
 - Without `--allow-remote`, tools perform no network operations. With the flag,
   network access is limited to the RepoCache clone/acquire step for a Git URL;
   all project inspection handlers operate only on the pinned checkout. With
-  `tracked_only`, the server may also start the local Git executable solely to
-  read the repository index. It never runs project executables or arbitrary
-  project commands.
+  `tracked_only` or `git_scope`, the server may also start the local Git
+  executable solely to read repository state. It never runs project executables
+  or arbitrary project commands.
 - Secret redaction is always enabled for returned file content and cannot be
   disabled. Private-data redaction is disabled by default and can be enabled
   only for the whole server process with `--hide-private-data`, mirroring the
@@ -88,11 +93,11 @@ The tool order is stable.
 | Tool | Parameters | Result and limits |
 |---|---|---|
 | `list_projects` | none | Allowed local roots with path, name, type, and available local profiles. Remote projects are addressed by URL and are not added to this list. |
-| `get_tree` | `project?`, `branch?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `max_file_bytes?`, `max_depth?` | Effective text tree; at most 2,000 lines. |
-| `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `top_files?`, `max_file_bytes?` | File, character, and token metrics plus the requested largest files by tokens. Metrics reflect the effective detail level. |
-| `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `max_tokens?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` limits estimated content tokens. Inline through 50,000 characters; otherwise returns a session-scoped `pack_id` and tree. |
+| `get_tree` | `project?`, `branch?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `max_depth?` | Effective text tree; at most 2,000 lines. |
+| `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `top_files?`, `max_file_bytes?` | File, character, and token metrics plus the requested largest files by tokens. Metrics reflect the effective detail level. |
+| `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` limits estimated content tokens. Inline through 50,000 characters; otherwise returns a session-scoped `pack_id` and tree. |
 | `read_pack` | `pack_id`, `start_line?`, `end_line?` | Inclusive, 1-based range; at most 1,000 lines or 50,000 characters per call. Call `pack_context` again after server restart. |
-| `search_project` | `project?`, `branch?`, `pattern`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style redacted matches. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, and oversized text responses are explicitly truncated with a narrowing hint. |
+| `search_project` | `project?`, `branch?`, `pattern`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style redacted matches. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, and oversized text responses are explicitly truncated with a narrowing hint. |
 | `get_file` | `project?`, `branch?`, `path`, `start_line?`, `end_line?` | Redacted text from one effective file; at most 1,000 lines or 50,000 characters. |
 
 ## Result Contract
@@ -100,6 +105,9 @@ The tool order is stable.
 Only `list_projects` and `analyze` declare an MCP `outputSchema`. Their
 authoritative result is the complete object in `structuredContent`; the first
 text block in `content` is a JSON serialization of that same object.
+When a Git state also contains deleted paths, `analyze` appends a separate
+human-readable `DPX-GIT-STATE-DELETED` warning text block without changing its
+structured schema.
 
 `get_tree`, `pack_context`, `read_pack`, `search_project`, and `get_file` are
 text tools. They do not declare `outputSchema`, omit `structuredContent`, and
@@ -107,6 +115,8 @@ return the useful payload directly in the first text block in `content`. This
 avoids JSON escaping and unnecessary token overhead for trees, source text,
 search context, and packs. Truncation and continuation metadata is embedded in
 plain-text trailers such as `[Tree truncated ...]` and `[Showing lines ...]`.
+Git-state deletion warnings are appended outside project spotlight blocks so
+clients can distinguish trusted diagnostics from untrusted file data.
 
 An inline `pack_context` result contains the complete pack. A stored result is
 self-contained: it starts with `Pack stored as '<id>' (<N> characters). Call
@@ -144,6 +154,7 @@ Defaults:
 - `analyze.detail`: `full`
 - `analyze.top_files`: `10` (`1..1000`)
 - `tracked_only`: `false`
+- `git_scope`: absent
 - `search_project.context_lines`: `2`
 - `search_project.ignore_case`: `true`
 - `search_project.max_results`: `50`
@@ -192,6 +203,15 @@ When `tracked_only` is `true`, only paths present in the Git index are selected.
 The option can strengthen a profile but cannot disable tracked-only filtering
 already enabled by that profile. A non-Git project rejects the option with an
 actionable error instead of returning an empty result.
+
+`git_scope` accepts only the narrowing values `staged`, `changes`, and
+`diff:<ref>..<ref>` on `get_tree`, `analyze`, `pack_context`, and
+`search_project`. It intersects the server/profile baseline and therefore cannot
+re-enable paths excluded by `tracked_only` or a tracked profile. Staged selects
+index changes; changes adds unstaged and non-ignored untracked paths; diff uses
+two Git references. File content always comes from the current working tree.
+Deleted paths are omitted with a `DPX-GIT-STATE-DELETED` warning. A non-Git
+project or unavailable/invalid Git state returns an actionable tool error.
 
 Profiles use the existing project profile mechanism: `standard`, `local`, or a
 portable profile JSON path inside the project root. Profile selection can enable

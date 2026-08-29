@@ -55,6 +55,7 @@ internal sealed class DevProjexMcpTools(
 				"exclude_patterns",
 				"max_depth",
 				"tracked_only",
+				"git_scope",
 				"max_file_bytes");
 			var plan = await Projects.BuildPlanAsync(
 				arguments.OptionalString("project"),
@@ -64,6 +65,7 @@ internal sealed class DevProjexMcpTools(
 				arguments.OptionalStringArray("exclude_patterns"),
 				profile: null,
 				arguments.OptionalBoolean("tracked_only", false),
+				arguments.OptionalString("git_scope"),
 				arguments.OptionalInt64("max_file_bytes", 1, long.MaxValue),
 				cancellationToken,
 				includeOutputMetrics: false).ConfigureAwait(false);
@@ -92,7 +94,7 @@ internal sealed class DevProjexMcpTools(
 			var body = treeWriter.Text;
 			if (treeWriter.IsTruncated)
 				body += "\n[Tree truncated at 2000 lines. Narrow include_patterns, exclude_patterns, or max_depth.]";
-			return McpToolResults.TextSuccess(McpSpotlight.Wrap(body));
+			return McpToolResults.TextSuccess(AppendGitScopeWarning(McpSpotlight.Wrap(body), plan));
 		}, cancellationToken);
 
 	[Description("Measure a redacted project selection and list its largest text files by estimated tokens.")]
@@ -154,7 +156,7 @@ internal sealed class DevProjexMcpTools(
 				topFiles = top
 			};
 			await operationProgress.CompleteAsync(100, "building analysis").ConfigureAwait(false);
-			return McpToolResults.StructuredSuccess(envelope);
+			return McpToolResults.StructuredSuccess(envelope, FormatGitScopeWarning(plan));
 		}, cancellationToken);
 
 	[Description("Build an exact redacted DevProjex context export. Large packs expire when this server process exits.")]
@@ -177,6 +179,7 @@ internal sealed class DevProjexMcpTools(
 				"format",
 				"detail",
 				"tracked_only",
+				"git_scope",
 				"max_tokens",
 				"max_file_bytes");
 			var detail = McpDetailPolicy.Parse(arguments.OptionalString("detail"));
@@ -251,9 +254,9 @@ internal sealed class DevProjexMcpTools(
 				if (pack.Characters <= MaximumInlinePackCharacters)
 				{
 					var content = await File.ReadAllTextAsync(pack.Path, cancellationToken).ConfigureAwait(false);
-					var inlineMessage = BuildSpotlightedPackContent(
+					var inlineMessage = AppendGitScopeWarning(BuildSpotlightedPackContent(
 						content,
-						writeResult?.TokenBudget);
+						writeResult?.TokenBudget), plan);
 					if (inlineMessage.Length <= MaximumInlinePackCharacters)
 					{
 						await operationProgress.CompleteAsync(
@@ -282,9 +285,9 @@ internal sealed class DevProjexMcpTools(
 				var tree = treeWriter.Text;
 				if (treeWriter.IsTruncated)
 					tree += "\n[Tree truncated at 2000 lines.]";
-				var message = $"Pack stored as '{pack.Id}' ({pack.Characters} characters). " +
+				var message = AppendGitScopeWarning($"Pack stored as '{pack.Id}' ({pack.Characters} characters). " +
 				              "Call read_pack with this pack_id to read ranges, or search_project to locate source content.\n" +
-				              BuildSpotlightedPackContent(tree, writeResult?.TokenBudget);
+				              BuildSpotlightedPackContent(tree, writeResult?.TokenBudget), plan);
 				await operationProgress.CompleteAsync(
 						100,
 						$"writing pack {writtenFileCount}/{writtenFileCount}")
@@ -347,6 +350,7 @@ internal sealed class DevProjexMcpTools(
 				"ignore_case",
 				"max_results",
 				"tracked_only",
+				"git_scope",
 				"max_file_bytes");
 			var pattern = arguments.RequiredString("pattern", allowWhitespace: true);
 			var contextLines = arguments.OptionalInteger("context_lines", 0, 20) ?? 2;
@@ -362,6 +366,7 @@ internal sealed class DevProjexMcpTools(
 				arguments.OptionalStringArray("exclude_patterns"),
 				profile: null,
 				arguments.OptionalBoolean("tracked_only", false),
+				arguments.OptionalString("git_scope"),
 				arguments.OptionalInt64("max_file_bytes", 1, long.MaxValue),
 				cancellationToken,
 				includeOutputMetrics: false).ConfigureAwait(false);
@@ -409,7 +414,9 @@ internal sealed class DevProjexMcpTools(
 					output.AppendLine();
 				output.AppendLine($"[{totalMatches - shownMatches} additional matches not shown; narrow the pattern or filters.]");
 			}
-			return McpToolResults.TextSuccess(McpSpotlight.Wrap(output.ToString().TrimEnd()));
+			return McpToolResults.TextSuccess(AppendGitScopeWarning(
+				McpSpotlight.Wrap(output.ToString().TrimEnd()),
+				plan));
 		}, cancellationToken);
 
 	[Description("Read redacted text from one effective project file using an optional 1-based line range.")]
@@ -433,6 +440,7 @@ internal sealed class DevProjexMcpTools(
 				excludePatterns: null,
 				profile: null,
 				trackedOnly: false,
+				gitScope: null,
 				maximumFileBytes: null,
 				cancellationToken,
 				includeOutputMetrics: false).ConfigureAwait(false);
@@ -474,6 +482,7 @@ internal sealed class DevProjexMcpTools(
 			"profile",
 			"detail",
 			"tracked_only",
+			"git_scope",
 			"top_files",
 			"max_file_bytes");
 
@@ -489,6 +498,7 @@ internal sealed class DevProjexMcpTools(
 			arguments.OptionalStringArray("exclude_patterns"),
 			arguments.OptionalString("profile"),
 			arguments.OptionalBoolean("tracked_only", false),
+			arguments.OptionalString("git_scope"),
 			arguments.OptionalInt64("max_file_bytes", 1, long.MaxValue),
 			cancellationToken,
 			includeOutputMetrics);
@@ -554,6 +564,22 @@ internal sealed class DevProjexMcpTools(
 
 		return McpSpotlight.Wrap(content) + "\n\n" +
 		       McpSpotlight.Wrap(FormatTokenBudgetReport(report));
+	}
+
+	private static string AppendGitScopeWarning(string content, ProjectContextPlan plan)
+	{
+		var warning = FormatGitScopeWarning(plan);
+		return warning is null ? content : content + "\n\n" + warning;
+	}
+
+	private static string? FormatGitScopeWarning(ProjectContextPlan plan)
+	{
+		var diagnostic = plan.Diagnostics.FirstOrDefault(static item =>
+			item.Code == GitScopeFilter.DeletedDiagnosticCode);
+		return diagnostic is null
+			? null
+			: $"[Warning {GitScopeFilter.DeletedDiagnosticCode}] " +
+			  McpTextEscaping.EscapeSingleLine(diagnostic.Message);
 	}
 
 	private static string FormatTokenBudgetReport(ProjectContextTokenBudgetReport report)
