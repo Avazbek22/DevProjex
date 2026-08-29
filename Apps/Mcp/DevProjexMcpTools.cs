@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Globalization;
 
 namespace DevProjex.Mcp;
 
@@ -244,9 +245,8 @@ internal sealed class DevProjexMcpTools(
 							100,
 							$"writing pack {writtenFileCount}/{writtenFileCount}")
 						.ConfigureAwait(false);
-					var inlineMessage = AppendTokenBudgetReport(
-						McpSpotlight.Wrap(content),
-						writeResult?.TokenBudget);
+					var inlineMessage = McpSpotlight.Wrap(
+						AppendTokenBudgetReport(content, writeResult?.TokenBudget));
 					return McpToolResults.TextSuccess(inlineMessage, advertiseLargeResult: true);
 				}
 
@@ -270,8 +270,7 @@ internal sealed class DevProjexMcpTools(
 					tree += "\n[Tree truncated at 2000 lines.]";
 				var message = $"Pack stored as '{pack.Id}' ({pack.Characters} characters). " +
 				              "Call read_pack with this pack_id to read ranges, or search_project to locate source content.\n" +
-				              McpSpotlight.Wrap(tree);
-				message = AppendTokenBudgetReport(message, writeResult?.TokenBudget);
+				              McpSpotlight.Wrap(AppendTokenBudgetReport(tree, writeResult?.TokenBudget));
 				await operationProgress.CompleteAsync(
 						100,
 						$"writing pack {writtenFileCount}/{writtenFileCount}")
@@ -530,15 +529,15 @@ internal sealed class DevProjexMcpTools(
 		var output = new StringBuilder(message.Length + 512);
 		output.Append(message)
 			.Append("\n\nToken budget: ")
-			.Append(report.MaximumEstimatedTokens)
+			.Append(report.MaximumEstimatedTokens.ToString(CultureInfo.InvariantCulture))
 			.Append(" estimated tokens.\nIncluded: ")
-			.Append(report.IncludedFileCount)
+			.Append(report.IncludedFileCount.ToString(CultureInfo.InvariantCulture))
 			.Append(report.IncludedFileCount == 1 ? " file (" : " files (")
-			.Append(report.IncludedEstimatedTokens)
+			.Append(report.IncludedEstimatedTokens.ToString(CultureInfo.InvariantCulture))
 			.Append(" estimated tokens).\nSkipped: ")
-			.Append(report.SkippedFileCount)
+			.Append(report.SkippedFileCount.ToString(CultureInfo.InvariantCulture))
 			.Append(report.SkippedFileCount == 1 ? " file (" : " files (")
-			.Append(report.SkippedEstimatedTokens)
+			.Append(report.SkippedEstimatedTokens.ToString(CultureInfo.InvariantCulture))
 			.Append(" estimated tokens).\n");
 
 		if (report.LargestSkippedFiles.Count > 0)
@@ -549,13 +548,13 @@ internal sealed class DevProjexMcpTools(
 				output.Append("- ")
 					.Append(McpTextEscaping.EscapeSingleLine(file.Path))
 					.Append(" (")
-					.Append(file.EstimatedTokens)
+					.Append(file.EstimatedTokens.ToString(CultureInfo.InvariantCulture))
 					.Append(" estimated tokens)\n");
 			}
 			if (report.AdditionalSkippedFileCount > 0)
 			{
 				output.Append("- and ")
-					.Append(report.AdditionalSkippedFileCount)
+					.Append(report.AdditionalSkippedFileCount.ToString(CultureInfo.InvariantCulture))
 					.Append(" more\n");
 			}
 		}

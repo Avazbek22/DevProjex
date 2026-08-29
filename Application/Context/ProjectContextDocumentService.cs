@@ -295,6 +295,7 @@ public sealed class ProjectContextDocumentService(
 		{
 			await EvaluateTokenBudgetCoreAsync(
 					plan,
+					view,
 					tokenBudget,
 					cancellationToken)
 				.ConfigureAwait(false);
@@ -315,6 +316,7 @@ public sealed class ProjectContextDocumentService(
 				transformationContext));
 		await service.EvaluateTokenBudgetCoreAsync(
 				plan,
+				view,
 				tokenBudget,
 				cancellationToken)
 			.ConfigureAwait(false);
@@ -323,6 +325,7 @@ public sealed class ProjectContextDocumentService(
 
 	private async Task EvaluateTokenBudgetCoreAsync(
 		ProjectContextPlan plan,
+		ProjectContextView view,
 		ProjectContextTokenBudgetAccumulator tokenBudget,
 		CancellationToken cancellationToken)
 	{
@@ -331,7 +334,7 @@ public sealed class ProjectContextDocumentService(
 		var contentPathMapper = CreateContentPathMapper(
 			plan,
 			useUnifiedContentHeaders: true,
-			ProjectContextView.Content);
+			view);
 		await foreach (var source in OpenSourceSnapshotsInOrderAsync(
 			               plan.SourceRoot,
 			               plan.IncludedFiles,
