@@ -188,6 +188,18 @@ public sealed class ExportContextDocumentContractTests
 		Assert.Contains("included 1 files (1 estimated tokens)", environment.StandardError, StringComparison.Ordinal);
 		Assert.Contains("skipped 1 files", environment.StandardError, StringComparison.Ordinal);
 		Assert.Contains("A-large.txt", environment.StandardError, StringComparison.Ordinal);
+
+		var actual = new TestTerminalEnvironment();
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				actual,
+				"text",
+				maximumEstimatedTokens: 1));
+		Assert.Equal(
+			ExtractBudgetReport(environment.StandardError),
+			ExtractBudgetReport(actual.StandardError));
 	}
 
 	[Fact]
@@ -355,5 +367,12 @@ public sealed class ExportContextDocumentContractTests
 		return Convert.ToHexString(await SHA256.HashDataAsync(
 			stream,
 			TestContext.Current.CancellationToken));
+	}
+
+	private static string ExtractBudgetReport(string standardError)
+	{
+		var start = standardError.IndexOf("Token budget", StringComparison.Ordinal);
+		Assert.True(start >= 0, standardError);
+		return standardError[start..];
 	}
 }
