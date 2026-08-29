@@ -1068,8 +1068,9 @@ public sealed class TerminalWorkspaceContractTests
 	public async Task StructuralRefreshBuildsOnlyPlansRequiredBySelectionEvolution()
 	{
 		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
 		workspace.WriteFile("src/app.cs", "class App {}");
-		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+		var services = new TerminalServiceFactory(() => appData.Path)
 			.Create(AppLanguage.En);
 		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
 		using var state = await controller.OpenAsync(
@@ -1087,7 +1088,11 @@ public sealed class TerminalWorkspaceContractTests
 		var newExtension = await controller.BuildStructuralRefreshAsync(
 			TerminalWorkspaceController.CaptureStructuralRefresh(state, state.BuildSelection()),
 			TestContext.Current.CancellationToken);
-		Assert.Equal(2, newExtension.PlanBuildCount);
+		Assert.Equal(1, newExtension.PlanBuildCount);
+		Assert.Contains(".json", newExtension.Plan.SelectedExtensions);
+		Assert.Contains(
+			newExtension.Plan.IncludedFiles,
+			path => Path.GetFileName(path) == "config.json");
 		TerminalWorkspaceController.ApplyStructuralRefresh(state, newExtension);
 
 		var sourceIndex = state.VisibleRows
