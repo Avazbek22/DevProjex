@@ -1391,6 +1391,29 @@ public sealed class McpServerIntegrationTests
 		Assert.Contains("B-skipped.txt", text, StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public async Task PackContextStoresResultWhenBudgetReportPushesResponsePastInlineLimit()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "NearLimit.txt"), new string('x', 49_800));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["view"] = "content",
+				["format"] = "text",
+				["max_tokens"] = 20_000
+			});
+		var text = Text(result);
+
+		Assert.StartsWith("Pack stored as '", text, StringComparison.Ordinal);
+		Assert.Contains("Token budget: 20000 estimated tokens.", text, StringComparison.Ordinal);
+		Assert.True(text.Length < 50_000);
+	}
+
 	[Theory]
 	[InlineData("json")]
 	[InlineData("xml")]

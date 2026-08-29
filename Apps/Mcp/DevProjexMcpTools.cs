@@ -259,14 +259,17 @@ internal sealed class DevProjexMcpTools(
 				if (pack.Characters <= MaximumInlinePackCharacters)
 				{
 					var content = await File.ReadAllTextAsync(pack.Path, cancellationToken).ConfigureAwait(false);
-					await operationProgress.CompleteAsync(
-							100,
-							$"writing pack {writtenFileCount}/{writtenFileCount}")
-						.ConfigureAwait(false);
 					var inlineMessage = BuildSpotlightedPackContent(
 						content,
 						writeResult?.TokenBudget);
-					return McpToolResults.TextSuccess(inlineMessage, advertiseLargeResult: true);
+					if (inlineMessage.Length <= MaximumInlinePackCharacters)
+					{
+						await operationProgress.CompleteAsync(
+								100,
+								$"writing pack {writtenFileCount}/{writtenFileCount}")
+							.ConfigureAwait(false);
+						return McpToolResults.TextSuccess(inlineMessage, advertiseLargeResult: true);
+					}
 				}
 
 				using var treeWriter = new McpBoundedLineTextWriter(MaximumTreeLines);
