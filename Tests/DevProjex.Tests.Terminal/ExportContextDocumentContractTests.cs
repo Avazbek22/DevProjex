@@ -141,6 +141,32 @@ public sealed class ExportContextDocumentContractTests
 		Assert.Contains("--compress-code", environment.StandardError, StringComparison.Ordinal);
 	}
 
+	[Theory]
+	[InlineData("text")]
+	[InlineData("markdown")]
+	public async Task TokenBudgetOmitsOnlySkippedSectionsFromHumanDocuments(string format)
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("A-large.txt", "large-marker-" + new string('a', 40));
+		workspace.WriteFile("B-small.txt", "small-marker");
+		var environment = new TestTerminalEnvironment();
+
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				environment,
+				format,
+				maximumEstimatedTokens: 3,
+				view: "content"));
+
+		Assert.DoesNotContain("large-marker", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("small-marker", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("A-large.txt", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("included 1 files", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("skipped 1 files", environment.StandardError, StringComparison.Ordinal);
+	}
+
 	[Fact]
 	public async Task DryRunReportsTheSameTokenBudgetForecastWithoutWritingDocument()
 	{
@@ -296,13 +322,14 @@ public sealed class ExportContextDocumentContractTests
 		string? projectPath = null,
 		string? outputPath = null,
 		int? maximumEstimatedTokens = null,
-		bool dryRun = false)
+		bool dryRun = false,
+		string view = "tree-content")
 	{
 		var arguments = new List<string>
 		{
 			"--language", "en",
 			"export", "context", projectPath ?? workspace.Path,
-			"--view", "tree-content",
+			"--view", view,
 			"--format", format,
 			"--git-mode", "none",
 			"--exclude", "none",

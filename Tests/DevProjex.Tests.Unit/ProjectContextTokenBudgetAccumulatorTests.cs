@@ -45,4 +45,16 @@ public sealed class ProjectContextTokenBudgetAccumulatorTests
 		Assert.Equal("file-9999.cs", report.LargestSkippedFiles[0].Path);
 		Assert.Equal(skippedFileCount - 25, report.AdditionalSkippedFileCount);
 	}
+
+	[Fact]
+	public void CreateReport_OrdersEqualEstimatesByPath()
+	{
+		var budget = new ProjectContextTokenBudgetAccumulator(1);
+		Assert.False(budget.TryInclude("z-last.cs", 8));
+		Assert.False(budget.TryInclude("a-first.cs", 8));
+
+		Assert.Equal(
+			["a-first.cs", "z-last.cs"],
+			budget.CreateReport().LargestSkippedFiles.Select(static file => file.Path));
+	}
 }

@@ -306,7 +306,8 @@ public sealed class McpServerIntegrationTests
 			new Dictionary<string, object?>(remote)
 			{
 				["view"] = "content",
-				["format"] = "text"
+				["format"] = "text",
+				["max_tokens"] = 1_000
 			});
 		var repeatedTree = await server.CallAsync("get_tree", remote);
 		var jail = await server.CallAsync(
@@ -327,6 +328,7 @@ public sealed class McpServerIntegrationTests
 		Assert.DoesNotContain(cachePath, Text(tree), PathComparison);
 		Assert.NotEqual(true, pack.IsError);
 		Assert.Contains("remote-feature-marker", Text(pack), StringComparison.Ordinal);
+		Assert.Contains("Token budget: 1000 estimated tokens.", Text(pack), StringComparison.Ordinal);
 		Assert.DoesNotContain(Secret, Text(pack), StringComparison.Ordinal);
 		Assert.Contains("DEVPROJEX_REDACTED", Text(pack), StringComparison.Ordinal);
 		Assert.NotEqual(true, repeatedTree.IsError);
