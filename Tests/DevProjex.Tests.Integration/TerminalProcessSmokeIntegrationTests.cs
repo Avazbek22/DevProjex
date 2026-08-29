@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Xml.Linq;
 
 namespace DevProjex.Tests.Integration;
 
@@ -159,6 +160,30 @@ public sealed class TerminalProcessSmokeIntegrationTests
 		Assert.Contains("A-large.txt", context.StandardError, StringComparison.Ordinal);
 		Assert.DoesNotContain("\u001b", context.StandardOutput, StringComparison.Ordinal);
 		Assert.DoesNotContain("\u001b", context.StandardError, StringComparison.Ordinal);
+
+		var outputPath = Path.Combine(workspace.Path, "budget.xml");
+		var fileContext = await RunAsync(
+		[
+			"export", "context", project,
+			"--view", "content",
+			"--format", "xml",
+			"--output", outputPath,
+			"--max-tokens", "1",
+			"--git-mode", "none",
+			"--exclude", "none",
+			"--progress", "never",
+			"--language", "en"
+		]);
+
+		Assert.Equal(CommandLineExitCodes.Success, fileContext.ExitCode);
+		Assert.Equal(outputPath, fileContext.StandardOutput.TrimEnd('\r', '\n'));
+		var fileDocument = XDocument.Load(outputPath);
+		var fileEntry = Assert.Single(fileDocument.Root!.Element("files")!.Elements("file"));
+		Assert.Equal(Path.Combine(project, "B-small.txt"), fileEntry.Attribute("path")?.Value);
+		Assert.Equal("1", fileDocument.Root.Element("tokenBudget")?
+			.Element("includedFiles")?.Value);
+		Assert.Contains("Token budget 1:", fileContext.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain("\u001b", fileContext.StandardError, StringComparison.Ordinal);
 	}
 
 	[Fact]
