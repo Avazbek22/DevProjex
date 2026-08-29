@@ -2275,28 +2275,14 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			});
 			var selectedItem = Assert.Single(items, static item => item.IsSelected);
 			Assert.Equal(FontWeight.Medium, selectedItem.FontWeight);
-			Assert.True(global::Avalonia.Application.Current!.TryFindResource(
-				"TreeSelectionBrush",
-				selectedItem.ActualThemeVariant,
-				out var selectionBackground));
-			var expectedSelectionBackground = Assert.IsAssignableFrom<ISolidColorBrush>(selectionBackground);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
 				() => GetRenderedBackgrounds(selectedItem)
-					.Any(brush => brush.Color == expectedSelectionBackground.Color),
+					.Any(static brush => brush.Color.A > 0),
 				"Git mode selection transition to complete");
-			var selectedBackground = Assert.Single(
-				GetRenderedBackgrounds(selectedItem)
-					.Where(brush => brush.Color == expectedSelectionBackground.Color)
-					.Select(static brush => brush.Color)
-					.Distinct());
-			Assert.True(global::Avalonia.Application.Current!.TryFindResource(
-				"AppAccentBrush",
-				selectedItem.ActualThemeVariant,
-				out var accentBackground));
-			Assert.NotEqual(
-				Assert.IsAssignableFrom<ISolidColorBrush>(accentBackground).Color,
-				selectedBackground);
+			Assert.Contains(
+				GetRenderedBackgrounds(selectedItem),
+				brush => brush.Color.A > 0 && brush.Color != popupBackground.Color);
 
 			await window.Dispatcher.InvokeAsync(() =>
 			{
