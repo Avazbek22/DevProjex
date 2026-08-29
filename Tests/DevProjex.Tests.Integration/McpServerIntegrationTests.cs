@@ -1226,6 +1226,12 @@ public sealed class McpServerIntegrationTests
 					value => value.GetProperty("message").GetString()!
 						.StartsWith(phase, StringComparison.Ordinal));
 			}
+			if (testCase.ToolName == "pack_context")
+			{
+				Assert.Contains(
+					values,
+					static value => value.GetProperty("message").GetString() == "writing pack 8/8");
+			}
 			await progress.WaitForValueAsync(TestContext.Current.CancellationToken);
 			Assert.NotEmpty(progress.Values);
 
