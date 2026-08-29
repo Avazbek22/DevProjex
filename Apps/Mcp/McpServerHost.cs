@@ -14,13 +14,7 @@ public static class McpServerHost
 	public static Task RunAsync(
 		IReadOnlyList<string> roots,
 		bool hidePrivateData = false,
-		CancellationToken cancellationToken = default) =>
-		RunAsync(roots, hidePrivateData, allowRemote: false, cancellationToken);
-
-	public static Task RunAsync(
-		IReadOnlyList<string> roots,
-		bool hidePrivateData,
-		bool allowRemote,
+		bool allowRemote = false,
 		CancellationToken cancellationToken = default) =>
 		RunWithStreamsAsync(
 			roots,

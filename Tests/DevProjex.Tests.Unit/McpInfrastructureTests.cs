@@ -9,6 +9,20 @@ namespace DevProjex.Tests.Unit;
 public sealed class McpInfrastructureTests
 {
 	[Fact]
+	public void ServerHostExposesOneUnambiguousRunEntryPoint()
+	{
+		var method = Assert.Single(
+			typeof(McpServerHost).GetMethods(
+				System.Reflection.BindingFlags.Public |
+				System.Reflection.BindingFlags.Static),
+			static candidate => candidate.Name == nameof(McpServerHost.RunAsync));
+
+		Assert.Equal(
+			[typeof(IReadOnlyList<string>), typeof(bool), typeof(bool), typeof(CancellationToken)],
+			method.GetParameters().Select(static parameter => parameter.ParameterType));
+	}
+
+	[Fact]
 	public async Task BoundedTreeWriter_StopsBeforeMaterializingLinesBeyondTheLimit()
 	{
 		using var writer = new McpBoundedLineTextWriter(maximumLines: 2);
