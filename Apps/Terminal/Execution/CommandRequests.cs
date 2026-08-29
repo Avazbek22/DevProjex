@@ -17,7 +17,8 @@ public sealed record AnalyzeCommandRequest(
 	TerminalOutputOptions Output,
 	bool IncludeFindings = false,
 	bool FailOnFindings = false,
-	bool Force = false);
+	bool Force = false,
+	int? TopFiles = null);
 
 public sealed record TreeCommandRequest(
 	string ProjectPath,

@@ -406,6 +406,7 @@ Specific options:
 --strict
 --findings
 --fail-on-findings
+--top-files <N>
 --color <auto|always|never>
 --progress <auto|always|never>
 --verbosity <quiet|minimal|normal|detailed|diagnostic>
@@ -432,6 +433,11 @@ disabled, but never changes `--hide-secrets` or the emitted content. JSON adds
 redacted values only when redaction was explicitly enabled. Private-data
 detection remains explicit.
 
+`--top-files N` accepts `1..1000` and appends a localized ranking of the N
+largest selected text files by estimated tokens. JSON adds `topFiles` only when
+the option is present; omitting it preserves the existing text and JSON output.
+The ranking reflects transformed content when compression or stripping is active.
+
 Examples:
 
 ```shell
@@ -441,6 +447,7 @@ devprojex analyze ./app --format json -o report.json --strict
 devprojex analyze . --git-mode tracked --exclude smart-ignore
 devprojex analyze . --compress-code --format json
 devprojex analyze . --hide-secrets --findings --fail-on-findings
+devprojex analyze . --top-files 10
 ```
 
 ## Tree

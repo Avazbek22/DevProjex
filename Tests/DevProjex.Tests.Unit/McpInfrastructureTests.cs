@@ -24,7 +24,7 @@ public sealed class McpInfrastructureTests
 	[Fact]
 	public void TopFileRanking_RemainsBoundedAndUsesStableContractOrder()
 	{
-		var ranking = new McpTopFileRanking(capacity: 3);
+		var ranking = new TopFileRanking(capacity: 3);
 		foreach (var item in new[]
 		         {
 			         ("z.cs", 10L),
@@ -38,14 +38,14 @@ public sealed class McpInfrastructureTests
 		}
 
 		Assert.Equal(
-			[new McpFileWeight("a.cs", 30), new McpFileWeight("b.cs", 30), new McpFileWeight("c.cs", 20)],
+			[new TopFileMetric("a.cs", 30), new TopFileMetric("b.cs", 30), new TopFileMetric("c.cs", 20)],
 			ranking.Items);
 	}
 
 	[Fact]
 	public void TopFileRanking_ProjectsOnlyTheBoundedWinners()
 	{
-		var ranking = new McpTopFileRanking(capacity: 10);
+		var ranking = new TopFileRanking(capacity: 10);
 		for (var index = 0; index < 20_000; index++)
 			ranking.Add($"file-{index:D5}.cs", index);
 		var mappedPaths = 0;

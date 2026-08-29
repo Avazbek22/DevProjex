@@ -240,6 +240,21 @@ public sealed class CommandTreeContractTests
 			StringComparison.Ordinal);
 	}
 
+	[Theory]
+	[InlineData("0")]
+	[InlineData("1001")]
+	public async Task AnalyzeTopFilesRejectsValuesOutsideThePublishedRange(string value)
+	{
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment).RunAsync(
+			["analyze", ".", "--top-files", value, "--language", "en"],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Contains("--top-files must be between 1 and 1000.", environment.StandardError, StringComparison.Ordinal);
+	}
+
 	[Fact]
 	public async Task KnownValidationErrorDoesNotAddIrrelevantCommandSuggestion()
 	{

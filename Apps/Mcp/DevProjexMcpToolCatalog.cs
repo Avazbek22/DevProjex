@@ -159,6 +159,14 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
+	private const string TopFilesProperty = """
+	"top_files": {
+	  "description": "Number of largest text files to return by estimated tokens; default 10; integer or numeric string.",
+	  "default": 10,
+	  "oneOf": [ { "type": "integer", "minimum": 1, "maximum": 1000 }, { "type": "string", "pattern": "^[0-9]+$" } ]
+	}
+	""";
+
 	private static readonly string ListProjectsInput = EmptyInput;
 
 	private static readonly string GetTreeInput = $$"""
@@ -190,7 +198,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{ExcludeProperty}},
 	    {{ProfileProperty}},
 	    {{DetailProperty}},
-	    {{TrackedOnlyProperty}}
+	    {{TrackedOnlyProperty}},
+	    {{TopFilesProperty}}
 	  },
 	  "additionalProperties": false
 	}

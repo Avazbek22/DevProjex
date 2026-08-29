@@ -89,7 +89,7 @@ The tool order is stable.
 |---|---|---|
 | `list_projects` | none | Allowed local roots with path, name, type, and available local profiles. Remote projects are addressed by URL and are not added to this list. |
 | `get_tree` | `project?`, `branch?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `max_depth?` | Effective text tree; at most 2,000 lines. |
-| `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?` | File, character, and token metrics plus the ten largest files by tokens. Metrics reflect the effective detail level. |
+| `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `top_files?` | File, character, and token metrics plus the requested largest files by tokens. Metrics reflect the effective detail level. |
 | `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `view?`, `format?` | Exact DevProjex context pipeline. Inline through 50,000 characters; otherwise returns a session-scoped `pack_id` and tree. |
 | `read_pack` | `pack_id`, `start_line?`, `end_line?` | Inclusive, 1-based range; at most 1,000 lines or 50,000 characters per call. Call `pack_context` again after server restart. |
 | `search_project` | `project?`, `branch?`, `pattern`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style redacted matches. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, and oversized text responses are explicitly truncated with a narrowing hint. |
@@ -133,6 +133,7 @@ Defaults:
 - `pack_context.format`: `markdown`
 - `pack_context.detail`: `full`
 - `analyze.detail`: `full`
+- `analyze.top_files`: `10` (`1..1000`)
 - `tracked_only`: `false`
 - `search_project.context_lines`: `2`
 - `search_project.ignore_case`: `true`

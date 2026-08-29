@@ -13,6 +13,14 @@ public sealed class AnalyzeCommandHandler(
 		CancellationToken cancellationToken)
 	{
 		var includeSourceContentMetrics = !HasContentTransformations(request.Selection);
+		var topFileRanking = request.TopFiles is { } topFileCount
+			? new TopFileRanking(topFileCount)
+			: null;
+		Action<ContentFileMetrics>? topFileObserver = topFileRanking is null
+			? null
+			: metrics => topFileRanking.Add(
+				metrics.Path,
+				CodeCompressionSnapshot.EstimateTokens(metrics.CharCount));
 		var plan = await new StatusRenderer(environment, request.Output)
 			.RunAsync(
 				services.Localization["Terminal.Status.AnalyzingProject"],
@@ -21,7 +29,7 @@ public sealed class AnalyzeCommandHandler(
 					request.Selection,
 					includeOutputMetrics: true,
 					cancellationToken: cancellationToken,
-					includeContentOutputMetrics: includeSourceContentMetrics))
+					includeContentOutputMetrics: includeSourceContentMetrics && topFileRanking is null))
 			.ConfigureAwait(false);
 		var transformationContext = CreateTransformationContext(plan);
 		if (!includeSourceContentMetrics && transformationContext is null)
@@ -31,7 +39,9 @@ public sealed class AnalyzeCommandHandler(
 			plan = await services.ContextFactory.BuildAsync(
 					request.ProjectPath,
 					request.Selection,
-					cancellationToken: cancellationToken)
+					includeOutputMetrics: true,
+					cancellationToken: cancellationToken,
+					includeContentOutputMetrics: topFileRanking is null)
 				.ConfigureAwait(false);
 			transformationContext = CreateTransformationContext(plan);
 		}
@@ -60,7 +70,12 @@ public sealed class AnalyzeCommandHandler(
 				findingsCapturedByOutput = true;
 			}
 			var transformedMetrics = await ProjectContentMetricsCalculator
-				.CalculateAsync(transformedAnalyzer, plan.IncludedFiles, cancellationToken)
+				.CalculateAsync(
+					transformedAnalyzer,
+					plan.IncludedFiles,
+					topFileObserver,
+					progress: null,
+					cancellationToken)
 				.ConfigureAwait(false);
 			plan = plan with
 			{
@@ -94,6 +109,38 @@ public sealed class AnalyzeCommandHandler(
 						compression.BlankLineTransformedFiles)
 					: null,
 				UnscannableFiles = prepared.UnscannableFiles
+			};
+		}
+		else if (topFileRanking is not null)
+		{
+			var sourceMetrics = await services.AnalysisService
+				.CalculateContentMetricsAsync(
+					plan.IncludedFiles,
+					topFileObserver,
+					cancellationToken)
+				.ConfigureAwait(false);
+			plan = plan with
+			{
+				Analysis = plan.Analysis with
+				{
+					Metrics = plan.Analysis.Metrics with
+					{
+						Content = new ProjectOutputMetricsReport(
+							sourceMetrics.Lines,
+							sourceMetrics.Chars,
+							sourceMetrics.Tokens)
+					}
+				}
+			};
+		}
+
+		if (topFileRanking is not null)
+		{
+			plan = plan with
+			{
+				TopFiles = topFileRanking.Project(item => new TopFileMetric(
+					PathUtility.GetPortableRelativePath(plan.SourceRoot, item.Path),
+					item.Tokens))
 			};
 		}
 
@@ -363,6 +410,19 @@ internal static class AnalysisTextFormatter
 		rows.Add(new AnalysisTextRow(
 			localization["Terminal.Analysis.Tokens"],
 			plan.Analysis.Metrics.Content.Tokens.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+		if (plan.TopFiles is { } topFiles)
+		{
+			var value = topFiles.Count == 0
+				? localization["Terminal.Analysis.TopFilesNone"]
+				: string.Join(
+					Environment.NewLine,
+					topFiles.Select((file, index) => localization.Format(
+						"Terminal.Analysis.TopFileValue",
+						index + 1,
+						TerminalTextEscaping.EscapeSingleLine(file.Path),
+						file.Tokens.ToString(System.Globalization.CultureInfo.InvariantCulture))));
+			rows.Add(new AnalysisTextRow(localization["Terminal.Analysis.TopFiles"], value));
+		}
 		if (plan.Redaction is { } redaction)
 		{
 			rows.Add(new AnalysisTextRow(

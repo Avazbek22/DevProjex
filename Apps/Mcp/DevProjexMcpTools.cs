@@ -92,7 +92,7 @@ internal sealed class DevProjexMcpTools(
 			return McpToolResults.TextSuccess(McpSpotlight.Wrap(body));
 		}, cancellationToken);
 
-	[Description("Measure a redacted project selection and list its ten largest text files by estimated tokens.")]
+	[Description("Measure a redacted project selection and list its largest text files by estimated tokens.")]
 	public Task<CallToolResult> Analyze(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
@@ -101,6 +101,7 @@ internal sealed class DevProjexMcpTools(
 			var operationProgress = new McpProgressReporter(request, cancellationToken);
 			operationProgress.Milestone(1, "selecting files");
 			var arguments = SelectionArguments(request.Params);
+			var topFileCount = arguments.OptionalInteger("top_files", 1, 1_000) ?? 10;
 			var detail = McpDetailPolicy.Parse(arguments.OptionalString("detail"));
 			var plan = await BuildSelectionAsync(
 				arguments,
@@ -122,7 +123,7 @@ internal sealed class DevProjexMcpTools(
 				$"transforming content {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");
 			var analyzer = Projects.CreatePreparedAnalyzer(prepared);
 			operationProgress.Milestone(61, $"analyzing content 0/{plan.IncludedFiles.Count}");
-			var largest = new McpTopFileRanking(capacity: 10);
+			var largest = new TopFileRanking(topFileCount);
 			var metrics = await ProjectContentMetricsCalculator
 				.CalculateAsync(
 					analyzer,
@@ -452,7 +453,8 @@ internal sealed class DevProjexMcpTools(
 			"exclude_patterns",
 			"profile",
 			"detail",
-			"tracked_only");
+			"tracked_only",
+			"top_files");
 
 	private Task<ProjectContextPlan> BuildSelectionAsync(
 		McpJsonArguments arguments,

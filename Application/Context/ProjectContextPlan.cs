@@ -125,7 +125,8 @@ public sealed record ProjectContextPlan(
 	int? FindingCount = null,
 	bool HasIgnoreOptionCounts = false,
 	IgnoreOptionCounts IgnoreOptionCounts = default,
-	IgnoreControllerImpactCounts IgnoreControllerImpactCounts = default)
+	IgnoreControllerImpactCounts IgnoreControllerImpactCounts = default,
+	IReadOnlyList<TopFileMetric>? TopFiles = null)
 {
 	public bool HasErrors => Diagnostics.Any(static diagnostic =>
 		diagnostic.Severity == ContextDiagnosticSeverity.Error);

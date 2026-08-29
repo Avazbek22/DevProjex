@@ -158,6 +158,7 @@ public sealed class DirectCommandIntegrationTests
 		Assert.Equal(1, json.RootElement.GetProperty("schemaVersion").GetInt32());
 		Assert.Equal("devprojex-analysis", json.RootElement.GetProperty("kind").GetString());
 		Assert.Equal("none", json.RootElement.GetProperty("selection").GetProperty("gitMode").GetString());
+		Assert.False(json.RootElement.TryGetProperty("topFiles", out _));
 		var expectedBytes = Directory.EnumerateFiles(
 				workspace.Path,
 				"*",
@@ -171,6 +172,67 @@ public sealed class DirectCommandIntegrationTests
 			json.RootElement.GetProperty("metrics").GetProperty("bytes").GetInt64());
 		Assert.Empty(environment.StandardError);
 		Assert.DoesNotContain("\u001b", environment.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task AnalyzeTopFilesRanksEffectiveContentOnlyWhenRequested(bool compressCode)
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("src/Large.cs", CompressibleSource + CompressibleSource);
+		workspace.WriteFile("src/Small.cs", "internal sealed class Small {}\n");
+		var environment = new TestTerminalEnvironment();
+		var arguments = new List<string>
+		{
+			"analyze", workspace.Path,
+			"--format", "json",
+			"--top-files", "1",
+			"--git-mode", "none",
+			"--exclude", "none"
+		};
+		if (compressCode)
+			arguments.Add("--compress-code");
+
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(() => workspace.CreateDirectory("app-data")))
+			.RunAsync(arguments.ToArray(), TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		var topFile = Assert.Single(
+			document.RootElement.GetProperty("topFiles").EnumerateArray());
+		Assert.Equal("src/Large.cs", topFile.GetProperty("path").GetString());
+		Assert.True(topFile.GetProperty("tokens").GetInt64() > 0);
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
+	public async Task AnalyzeTopFilesAddsLocalizedTextSection()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("src/Large.cs", CompressibleSource);
+		workspace.WriteFile("src/Small.cs", "class Small {}\n");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(() => workspace.CreateDirectory("app-data")))
+			.RunAsync(
+				[
+					"analyze", workspace.Path,
+					"--top-files", "1",
+					"--git-mode", "none",
+					"--exclude", "none",
+					"--language", "en"
+				],
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Contains("Largest files:", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("src/Large.cs", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Empty(environment.StandardError);
 	}
 
 	[Fact]

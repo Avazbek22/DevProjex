@@ -460,6 +460,7 @@ devprojex analyze [PROJECT|URL]
   --strict
   --findings
   --fail-on-findings
+  --top-files <N>                     range: 1..1000; absent by default
   --force                             file output only
   --branch <NAME>                     URL source only
   <shared selection options>
@@ -485,6 +486,9 @@ changes the effective `HideSecrets` selection or redacts the emitted report.
 JSON adds the optional `findingCount`; the text redacted-value row is present only
 when redaction is actually enabled. Private-data detection remains opt-in.
 `--force` atomically replaces an existing report file and is invalid with stdout.
+`--top-files` adds a largest-text-file ranking by estimated tokens. It is absent
+by default, so existing text and JSON bytes do not change unless requested. The
+ranking uses effective transformed content and portable relative paths.
 
 ### `tree`
 
@@ -776,6 +780,7 @@ that prevents an accepted option from becoming a no-op.
 | `analyze` | `--strict` | off | writes the report, then treats policy diagnostics as failure | none | requested report remains intact; policy result exits `3` | handler, process |
 | `analyze` | `--findings` | off | adds sanitized effective redaction descriptors | values, source fragments, fingerprints, and raw detector errors are forbidden | report stays on stdout/file | serializer, sanitation, process |
 | `analyze` | `--fail-on-findings` | off | writes the report, then gates on effective findings | independent from `--strict` | requested report remains intact; a nonzero finding count exits `3` | handler, process |
+| `analyze` | `--top-files` | absent | appends the N largest selected text files by estimated tokens | range `1..1000`; ranking reflects effective transformations | optional text section or `topFiles` JSON property; invalid value exits `2` | parser, observer metrics, schema, process |
 | URL-capable commands | `--branch` | remote default branch | selects a validated repository branch under an operation lease | rejected for local paths and with `open --last` | ordinary command payload remains on stdout; clone/branch failure exits `1` or invalid name exits `2` | parser, resolver, Git fixture |
 | analyze/tree/context/project | `--progress` | `auto` | selects automatic, forced, or disabled operational progress on stderr | quiet/minimal suppress optional progress; URL-source Git operations use bounded milestones when rewriting is unavailable | requested payload stays byte-clean on stdout | parser, rendering, process |
 | analyze/tree/context/project | `--verbosity`, `-q` | `normal` | controls optional operational stderr from quiet through safe diagnostic context; `-q` selects `quiet` | `-q` conflicts with an explicit `--verbosity`; neither removes requested stdout nor suppresses errors | requested payload stays on stdout; invalid value or conflict exits `2` | parser, rendering, process |
@@ -1065,6 +1070,10 @@ accept a Git URL in `project` plus an optional URL-only `branch`. RepoCache owns
 clone publication and the server pins each resolved checkout until shutdown.
 `list_projects` remains the stable list of configured local roots.
 
+`analyze --top-files N` is an additive CLI-v1 option with range `1..1000`.
+The MCP `analyze` tool exposes the matching optional `top_files` parameter with
+default `10`; both surfaces share the same bounded, deterministic ranking.
+
 ## Exit Codes
 
 | Code | Meaning |
@@ -1121,6 +1130,9 @@ contain only `ruleId`, `category`, `relativePath`, and `lineNumber`. The one-bas
 line number is measured in the original decoded source before content
 transformations. Timings and secret values are not part of the stable v1 analysis
 schema.
+When `--top-files N` is present, analysis JSON adds `topFiles` after `metrics`.
+Each ordered item contains a portable relative `path` and integer `tokens`.
+The property is omitted when the option is absent, preserving existing v1 bytes.
 
 Recent JSON contains `schemaVersion`, kind `devprojex-recent`, and `items` with
 stable `kind`, nullable `path`/`url`, `name`, `parent`, and `lastOpened` fields.

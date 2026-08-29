@@ -172,7 +172,7 @@ public sealed class McpServerIntegrationTests
 		{
 			["list_projects"] = [],
 			["get_tree"] = ["project", "branch", "include_patterns", "exclude_patterns", "tracked_only", "max_depth"],
-			["analyze"] = ["project", "branch", "paths", "include_patterns", "exclude_patterns", "profile", "detail", "tracked_only"],
+			["analyze"] = ["project", "branch", "paths", "include_patterns", "exclude_patterns", "profile", "detail", "tracked_only", "top_files"],
 			["pack_context"] = ["project", "branch", "paths", "include_patterns", "exclude_patterns", "profile", "detail", "tracked_only", "view", "format"],
 			["read_pack"] = ["pack_id", "start_line", "end_line"],
 			["search_project"] = ["project", "branch", "pattern", "include_patterns", "exclude_patterns", "tracked_only", "context_lines", "ignore_case", "max_results"],
@@ -492,6 +492,14 @@ public sealed class McpServerIntegrationTests
 		Assert.Equal(
 			["TieA.cs", "TieB.cs"],
 			topFiles.Where(static path => path.StartsWith("Tie", StringComparison.Ordinal)).ToArray());
+		var oneTopFile = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["top_files"] = "1" });
+		Assert.Equal(
+			1,
+			Assert.IsType<JsonElement>(oneTopFile.StructuredContent)
+				.GetProperty("topFiles")
+				.GetArrayLength());
 
 		var file = await server.CallAsync(
 			"get_file",

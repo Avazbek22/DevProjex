@@ -264,6 +264,11 @@ public sealed class DevProjexCommandTree
 		{
 			Description = L("Terminal.Option.FailOnFindings")
 		};
+		var topFiles = new Option<int?>("--top-files")
+		{
+			Description = L("Terminal.Option.TopFiles"),
+			HelpName = "N"
+		};
 		var selection = new SelectionOptions(_localization, environment);
 		command.Arguments.Add(project);
 		command.Options.Add(format);
@@ -272,10 +277,19 @@ public sealed class DevProjexCommandTree
 		command.Options.Add(strict);
 		command.Options.Add(findings);
 		command.Options.Add(failOnFindings);
+		command.Options.Add(topFiles);
 		command.Options.Add(branch);
 		selection.AddTo(command);
 		_output.AddProgressTo(command);
 		ConfigureFileForce(command, force, outputPath);
+		command.Validators.Add(result =>
+		{
+			if (CliParseValue.TryGet(result, topFiles, out var value) && value is < 1 or > 1_000)
+			{
+				result.AddError(LocalizedParseError.Create(
+					L("Terminal.Validation.TopFiles")));
+			}
+		});
 		command.SetAction(async (parseResult, cancellationToken) =>
 		{
 			var outputOptions = _output.Get(parseResult);
@@ -319,7 +333,8 @@ public sealed class DevProjexCommandTree
 								outputOptions,
 								parseResult.GetValue(findings),
 								parseResult.GetValue(failOnFindings),
-								Force: parseResult.GetValue(force)),
+								Force: parseResult.GetValue(force),
+								TopFiles: parseResult.GetValue(topFiles)),
 							cancellationToken)
 						.ConfigureAwait(false);
 				},
