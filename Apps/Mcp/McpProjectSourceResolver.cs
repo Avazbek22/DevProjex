@@ -96,7 +96,7 @@ internal sealed class McpProjectSourceResolver : IDisposable
 			if (_disposed)
 				return;
 			_disposed = true;
-			sources = _remoteRoots.Values.ToArray();
+			sources = _remoteSources.Values.ToArray();
 			_remoteRoots.Clear();
 			_remoteSources.Clear();
 		}
@@ -120,10 +120,11 @@ internal sealed class McpProjectSourceResolver : IDisposable
 		RemoteProjectKey key,
 		CancellationToken cancellationToken)
 	{
-		var services = _remoteServices.Value;
+		McpRemoteProjectServices? services = null;
 		string? stagingPath = null;
 		try
 		{
+			services = _remoteServices.Value;
 			await using (await services.RepoCacheService
 				.AcquireRepositoryOperationAsync(safeUrl, cancellationToken)
 				.ConfigureAwait(false))
@@ -198,7 +199,7 @@ internal sealed class McpProjectSourceResolver : IDisposable
 		}
 		finally
 		{
-			if (stagingPath is not null)
+			if (stagingPath is not null && services is not null)
 				services.RepoCacheService.DeleteRepositoryDirectory(stagingPath);
 		}
 	}

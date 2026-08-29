@@ -395,6 +395,30 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task FailedRemoteCacheInitializationReturnsSafeRemoteFailure()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			allowRemote: true,
+			remoteServicesFactory: static () =>
+				throw new IOException("sensitive cache initialization detail"));
+
+		var result = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["project"] = "https://example.invalid/owner/repository.git"
+			});
+
+		Assert.True(result.IsError);
+		Assert.Contains(McpErrorCodes.RemoteFailed, Text(result), StringComparison.Ordinal);
+		Assert.DoesNotContain("sensitive cache initialization detail", Text(result), StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task ListProjectsRejectsConfiguredRootReplacedByDirectoryAlias()
 	{
 		using var workspace = new TemporaryDirectory();
