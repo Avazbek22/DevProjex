@@ -131,12 +131,12 @@ public sealed class DevProjexCommandTree
 				Directory.GetCurrentDirectory());
 			try
 			{
-				await McpServerHost.RunAsync(
+				await McpServerHost.RunWithStandardStreamsAsync(
 						resolvedRoots,
 						parseResult.GetValue(hidePrivateData),
 						parseResult.GetValue(allowRemote),
-						cancellationToken,
-						_serviceFactory.AppDataPathProvider)
+						_serviceFactory.AppDataPathProvider,
+						cancellationToken)
 					.ConfigureAwait(false);
 				return CommandLineExitCodes.Success;
 			}
