@@ -236,6 +236,102 @@ public sealed class DirectCommandIntegrationTests
 	}
 
 	[Fact]
+	public async Task MaximumFileBytesNarrowsAnalyzeTreeAndContextExport()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/Small.txt", "small-marker\n");
+		workspace.WriteFile("project/Exact.txt", new string('e', 64));
+		workspace.WriteFile(
+			"project/Large.txt",
+			"oversized-marker\n" + new string('x', 128));
+		var factory = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"));
+
+		var analysisEnvironment = new TestTerminalEnvironment();
+		var analysisExit = await new TerminalApplication(analysisEnvironment, factory).RunAsync(
+			[
+				"analyze", project,
+				"--format", "json",
+				"--max-file-bytes", "64",
+				"--git-mode", "none",
+				"--exclude", "none"
+			],
+			TestContext.Current.CancellationToken);
+		using var analysis = JsonDocument.Parse(analysisEnvironment.StandardOutput);
+
+		var textEnvironment = new TestTerminalEnvironment();
+		var textExit = await new TerminalApplication(textEnvironment, factory).RunAsync(
+			[
+				"analyze", project,
+				"--max-file-bytes", "64",
+				"--git-mode", "none",
+				"--exclude", "none",
+				"--language", "en"
+			],
+			TestContext.Current.CancellationToken);
+
+		var treeEnvironment = new TestTerminalEnvironment();
+		var treeExit = await new TerminalApplication(treeEnvironment, factory).RunAsync(
+			[
+				"tree", project,
+				"--max-file-bytes", "64",
+				"--git-mode", "none",
+				"--exclude", "none"
+			],
+			TestContext.Current.CancellationToken);
+
+		var output = Path.Combine(workspace.Path, "context.md");
+		var contextEnvironment = new TestTerminalEnvironment();
+		var contextExit = await new TerminalApplication(contextEnvironment, factory).RunAsync(
+			[
+				"export", "context", project,
+				"--view", "content",
+				"--max-file-bytes", "64",
+				"--git-mode", "none",
+				"--exclude", "none",
+				"-o", output
+			],
+			TestContext.Current.CancellationToken);
+
+		var dryRunEnvironment = new TestTerminalEnvironment();
+		var dryRunExit = await new TerminalApplication(dryRunEnvironment, factory).RunAsync(
+			[
+				"export", "context", project,
+				"--max-file-bytes", "64",
+				"--git-mode", "none",
+				"--exclude", "none",
+				"--dry-run",
+				"--language", "en",
+				"-o", Path.Combine(workspace.Path, "dry-run.md")
+			],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, analysisExit);
+		Assert.Equal(2, analysis.RootElement.GetProperty("inventory").GetProperty("files").GetInt32());
+		Assert.Equal(77, analysis.RootElement.GetProperty("metrics").GetProperty("bytes").GetInt64());
+		Assert.Empty(analysisEnvironment.StandardError);
+		Assert.Equal(CommandLineExitCodes.Success, textExit);
+		Assert.Contains("Size filter:", textEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("excluded 1 files", textEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.Empty(textEnvironment.StandardError);
+		Assert.Equal(CommandLineExitCodes.Success, treeExit);
+		Assert.Contains("Small.txt", treeEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("Exact.txt", treeEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("Large.txt", treeEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.Empty(treeEnvironment.StandardError);
+		Assert.Equal(CommandLineExitCodes.Success, contextExit);
+		var context = File.ReadAllText(output);
+		Assert.Contains("small-marker", context, StringComparison.Ordinal);
+		Assert.Contains("Exact.txt", context, StringComparison.Ordinal);
+		Assert.DoesNotContain("Large.txt", context, StringComparison.Ordinal);
+		Assert.Empty(contextEnvironment.StandardError);
+		Assert.Equal(CommandLineExitCodes.Success, dryRunExit);
+		Assert.False(File.Exists(Path.Combine(workspace.Path, "dry-run.md")));
+		Assert.Contains("Size filter: up to 64 B; excluded 1 files", dryRunEnvironment.StandardError, StringComparison.Ordinal);
+		Assert.Empty(dryRunEnvironment.StandardOutput);
+	}
+
+	[Fact]
 	public async Task AnalyzeWithCompressionReportsMetricsForTheTransformedContent()
 	{
 		using var workspace = new TemporaryDirectory();

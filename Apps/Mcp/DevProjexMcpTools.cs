@@ -53,7 +53,8 @@ internal sealed class DevProjexMcpTools(
 				"include_patterns",
 				"exclude_patterns",
 				"max_depth",
-				"tracked_only");
+				"tracked_only",
+				"max_file_bytes");
 			var plan = await Projects.BuildPlanAsync(
 				arguments.OptionalString("project"),
 				arguments.OptionalString("branch"),
@@ -62,6 +63,7 @@ internal sealed class DevProjexMcpTools(
 				arguments.OptionalStringArray("exclude_patterns"),
 				profile: null,
 				arguments.OptionalBoolean("tracked_only", false),
+				arguments.OptionalInt64("max_file_bytes", 1, long.MaxValue),
 				cancellationToken,
 				includeOutputMetrics: false).ConfigureAwait(false);
 			var depth = arguments.OptionalInteger("max_depth", 0, 1_000);
@@ -173,7 +175,8 @@ internal sealed class DevProjexMcpTools(
 				"view",
 				"format",
 				"detail",
-				"tracked_only");
+				"tracked_only",
+				"max_file_bytes");
 			var detail = McpDetailPolicy.Parse(arguments.OptionalString("detail"));
 			var format = ParseFormat(arguments.OptionalString("format") ?? "markdown");
 			var plan = await BuildSelectionAsync(
@@ -329,7 +332,8 @@ internal sealed class DevProjexMcpTools(
 				"context_lines",
 				"ignore_case",
 				"max_results",
-				"tracked_only");
+				"tracked_only",
+				"max_file_bytes");
 			var pattern = arguments.RequiredString("pattern", allowWhitespace: true);
 			var contextLines = arguments.OptionalInteger("context_lines", 0, 20) ?? 2;
 			var ignoreCase = arguments.OptionalBoolean("ignore_case", true);
@@ -344,6 +348,7 @@ internal sealed class DevProjexMcpTools(
 				arguments.OptionalStringArray("exclude_patterns"),
 				profile: null,
 				arguments.OptionalBoolean("tracked_only", false),
+				arguments.OptionalInt64("max_file_bytes", 1, long.MaxValue),
 				cancellationToken,
 				includeOutputMetrics: false).ConfigureAwait(false);
 			await using var prepared = await Projects.PrepareAsync(plan, cancellationToken).ConfigureAwait(false);
@@ -414,6 +419,7 @@ internal sealed class DevProjexMcpTools(
 				excludePatterns: null,
 				profile: null,
 				trackedOnly: false,
+				maximumFileBytes: null,
 				cancellationToken,
 				includeOutputMetrics: false).ConfigureAwait(false);
 			var file = Projects.ResolveFile(plan, arguments.RequiredString("path", allowWhitespace: true));
@@ -454,7 +460,8 @@ internal sealed class DevProjexMcpTools(
 			"profile",
 			"detail",
 			"tracked_only",
-			"top_files");
+			"top_files",
+			"max_file_bytes");
 
 	private Task<ProjectContextPlan> BuildSelectionAsync(
 		McpJsonArguments arguments,
@@ -468,6 +475,7 @@ internal sealed class DevProjexMcpTools(
 			arguments.OptionalStringArray("exclude_patterns"),
 			arguments.OptionalString("profile"),
 			arguments.OptionalBoolean("tracked_only", false),
+			arguments.OptionalInt64("max_file_bytes", 1, long.MaxValue),
 			cancellationToken,
 			includeOutputMetrics);
 

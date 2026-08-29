@@ -106,6 +106,35 @@ internal sealed class McpJsonArguments(
 		return parsed;
 	}
 
+	public long? OptionalInt64(string name, long minimum, long maximum)
+	{
+		if (!_values.TryGetValue(name, out var value) || value.ValueKind == JsonValueKind.Null)
+			return null;
+
+		long parsed;
+		if (value.ValueKind == JsonValueKind.Number)
+		{
+			if (!value.TryGetInt64(out parsed))
+				throw InvalidInt64(name, minimum, maximum);
+		}
+		else if (value.ValueKind == JsonValueKind.String &&
+		         long.TryParse(
+			         value.GetString(),
+			         System.Globalization.NumberStyles.None,
+			         System.Globalization.CultureInfo.InvariantCulture,
+			         out parsed))
+		{
+		}
+		else
+		{
+			throw InvalidInt64(name, minimum, maximum);
+		}
+
+		if (parsed < minimum || parsed > maximum)
+			throw InvalidInt64(name, minimum, maximum);
+		return parsed;
+	}
+
 	private void ValidateNames()
 	{
 		var unexpected = _values.Keys
@@ -127,6 +156,11 @@ internal sealed class McpJsonArguments(
 			$"{McpErrorCodes.InvalidArguments}: '{name}' must be {expected}.");
 
 	private static McpToolException InvalidInteger(string name, int minimum, int maximum) =>
+		new(
+			McpErrorCodes.InvalidRange,
+			$"{McpErrorCodes.InvalidRange}: '{name}' must be an integer or numeric string from {minimum} to {maximum}.");
+
+	private static McpToolException InvalidInt64(string name, long minimum, long maximum) =>
 		new(
 			McpErrorCodes.InvalidRange,
 			$"{McpErrorCodes.InvalidRange}: '{name}' must be an integer or numeric string from {minimum} to {maximum}.");

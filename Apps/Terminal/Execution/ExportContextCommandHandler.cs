@@ -21,6 +21,12 @@ public sealed class ExportContextCommandHandler(
 					request.Selection,
 					cancellationToken: cancellationToken))
 			.ConfigureAwait(false);
+		plan = await ProjectFileSizeFilter.ApplyAsync(
+				services.ContextPlanner,
+				plan,
+				request.MaxFileBytes,
+				cancellationToken)
+			.ConfigureAwait(false);
 		new ContextDiagnosticRenderer(environment, request.Output, services.Localization)
 			.Write(plan.Diagnostics);
 		if (plan.HasErrors)

@@ -158,6 +158,7 @@ remains a usage error instead of silently selecting a later command.
 --select-from <FILE|->
 --git-mode <none|gitignore|tracked>
 --exclude <NAME>                     repeatable
+--max-file-bytes <SIZE>              analyze/tree/export-context only
 --hide-secrets [<true|false|on|off>]
 --no-hide-secrets
 --hide-private-data [<true|false|on|off>]
@@ -202,9 +203,17 @@ created. An entry that exists but is absent from the effective tree because of
 Git or exclusion filtering remains a warning and the command succeeds; this
 preserves intentional selection against changing filter profiles.
 
+`--max-file-bytes` is a transient narrowing filter on `analyze`, `tree`, and
+`export context`. Files strictly larger than the parsed byte limit are excluded
+after all ordinary selection rules; files exactly at the limit remain selected.
+SIZE is either a positive byte count or a case-insensitive binary suffix form
+using `k|kb|kib`, `m|mb|mib`, or `g|gb|gib`, each with a 1024 multiplier. It is
+not part of `ProjectSelectionSpec`, is never stored by `profile save`, and does
+not alter portable-profile JSON.
+
 `tree` accepts the path-selection subset (`--profile`, `--root`, `--extension`,
-`--select`, `--select-from`, `--git-mode`, and `--exclude`) and intentionally
-omits all content-transformation options.
+`--select`, `--select-from`, `--git-mode`, `--exclude`, and
+`--max-file-bytes`) and intentionally omits all content-transformation options.
 
 The documented aliases are stable syntax: `export ctx`, `export proj`, `-f` for
 every public `--format`, `-n` for each public `--dry-run`, and `-q`/`--quiet`
@@ -767,6 +776,7 @@ that prevents an accepted option from becoming a no-op.
 | analyze/tree/context/project/open/profile-save | `--select`, `--select-from` | profile selected paths | combines direct paths with strict UTF-8 file/redirected-stdin entries into one explicit path override | optional UTF-8 BOM is accepted; UTF-16/UTF-32, interactive stdin, oversized input, physically missing or invalid/out-of-source paths, and `open --last` fail with exit `2`; existing paths removed from the effective tree produce a warning and success; the byte limit is enforced during reading | requested payload/path stays on stdout | parser, reader, resolver, process |
 | analyze/tree/context/project/open/profile-save | `--git-mode` | profile Git mode | replaces the profile mode with `none`, `gitignore`, or `tracked` | conflicts with `open --last`; `tracked` requires Git CLI and at least one readable applicable index | on unavailable index, `analyze` preserves its requested report; tree/context/project/open/profile-save create no artifact and emit no success payload; diagnostic uses stderr and exit `3` | parser, resolver, handler, process |
 | analyze/tree/context/project/open/profile-save | `--exclude` | profile exclusions | replaces the path-exclusion set with repeated typed values | repeatable; `none` conflicts with every other value; conflicts with `open --last` | requested payload/path stays on stdout; invalid value exits `2` | parser, resolver, handler, process |
+| analyze/tree/context | `--max-file-bytes` | absent | removes otherwise selected files strictly larger than SIZE | positive bytes or binary `k|kb|kib`, `m|mb|mib`, `g|gb|gib`; invocation-only and never persisted | inventories, trees, context, metrics, and dry-run counts reflect the narrowed selection; invalid value exits `2` | parser, application filter, handler, process |
 | analyze/context/project/open/profile-save | `--hide-secrets` | profile content-transformation state | independently enables or disables detected-value redaction without changing path filters | bare form means on; values are `true`, `false`, `on`, `off`; conflicts with `--no-hide-secrets` and `open --last` | requested payload/path stays on stdout; inspection failure exits `1` without a complete artifact | parser, resolver, handler, process |
 | analyze/context/project/open/profile-save | `--hide-private-data` | profile content-transformation state | independently enables or disables private-data redaction without changing path filters | bare form means on; values are `true`, `false`, `on`, `off`; conflicts with `--no-hide-private-data` and `open --last` | requested payload/path stays on stdout; inspection failure exits `1` without a complete artifact | parser, resolver, handler, process |
 | `mcp` | `--hide-private-data` | off | enables private-data redaction for the entire server process | startup-only; tool schemas and profiles cannot alter it; secret redaction remains mandatory | stdout remains JSON-RPC-only; startup failure exits `2` | parser, MCP contract, process |
@@ -1073,6 +1083,13 @@ clone publication and the server pins each resolved checkout until shutdown.
 `analyze --top-files N` is an additive CLI-v1 option with range `1..1000`.
 The MCP `analyze` tool exposes the matching optional `top_files` parameter with
 default `10`; both surfaces share the same bounded, deterministic ranking.
+
+`--max-file-bytes SIZE` is an additive, invocation-only option on `analyze`,
+`tree`, and `export context`. The four MCP selection tools expose the equivalent
+positive integer `max_file_bytes` parameter. Both surfaces use one Application
+filter and exclude files strictly larger than the limit without changing profile
+schemas. Existing machine documents add no property; their inventory, byte
+metrics, trees, and content reflect the effective narrowed selection.
 
 ## Exit Codes
 

@@ -167,6 +167,13 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
+	private const string MaxFileBytesProperty = """
+	"max_file_bytes": {
+	  "description": "Exclude otherwise selected files strictly larger than this byte count; integer or numeric string.",
+	  "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^[1-9][0-9]*$" } ]
+	}
+	""";
+
 	private static readonly string ListProjectsInput = EmptyInput;
 
 	private static readonly string GetTreeInput = $$"""
@@ -178,6 +185,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{IncludeProperty}},
 	    {{ExcludeProperty}},
 	    {{TrackedOnlyProperty}},
+	    {{MaxFileBytesProperty}},
 	    "max_depth": {
 	      "description": "Maximum tree depth from 0 to 1000; accepts an integer or numeric string.",
 	      "oneOf": [ { "type": "integer", "minimum": 0, "maximum": 1000 }, { "type": "string", "pattern": "^[0-9]+$" } ]
@@ -199,7 +207,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{ProfileProperty}},
 	    {{DetailProperty}},
 	    {{TrackedOnlyProperty}},
-	    {{TopFilesProperty}}
+	    {{TopFilesProperty}},
+	    {{MaxFileBytesProperty}}
 	  },
 	  "additionalProperties": false
 	}
@@ -217,6 +226,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{ProfileProperty}},
 	    {{DetailProperty}},
 	    {{TrackedOnlyProperty}},
+	    {{MaxFileBytesProperty}},
 	    "view": { "type": "string", "enum": ["tree", "content", "tree-content"], "default": "tree-content" },
 	    "format": { "type": "string", "enum": ["text", "markdown", "json", "xml"], "default": "markdown" }
 	  },
@@ -247,6 +257,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{IncludeProperty}},
 	    {{ExcludeProperty}},
 	    {{TrackedOnlyProperty}},
+	    {{MaxFileBytesProperty}},
 	    "context_lines": { "description": "Context lines from 0 to 20; default 2; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 0, "maximum": 20 }, { "type": "string", "pattern": "^[0-9]+$" } ] },
 	    "ignore_case": { "description": "Case-insensitive matching; accepts a boolean or the string 'true' or 'false'.", "default": true, "oneOf": [ { "type": "boolean" }, { "type": "string", "enum": ["true", "false"] } ] },
 	    "max_results": { "description": "Maximum matches from 1 to 200; default 50; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1, "maximum": 200 }, { "type": "string", "pattern": "^[0-9]+$" } ] }

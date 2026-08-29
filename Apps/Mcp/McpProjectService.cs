@@ -14,6 +14,7 @@ internal sealed class McpProjectService(
 		IReadOnlyList<string>? excludePatterns,
 		string? profile,
 		bool trackedOnly,
+		long? maximumFileBytes,
 		CancellationToken cancellationToken,
 		bool includeOutputMetrics = true)
 	{
@@ -71,42 +72,51 @@ internal sealed class McpProjectService(
 				"Fix the reported project access or Git state and retry.");
 		}
 		ValidatePlanContainment(roots, projectRoot, plan.IncludedFiles, cancellationToken);
+		ProjectContextPlan narrowed;
 		if ((paths is null || paths.Count == 0) &&
 		    (includePatterns is null || includePatterns.Count == 0) &&
 		    (excludePatterns is null || excludePatterns.Count == 0))
 		{
-			return plan;
+			narrowed = plan;
 		}
-
-		var globs = McpGlobSet.Create(includePatterns, excludePatterns);
-		var requested = ResolveRequestedPaths(projectRoot, paths, cancellationToken);
-		var selected = new List<string>();
-		foreach (var path in plan.IncludedFiles)
+		else
 		{
-			cancellationToken.ThrowIfCancellationRequested();
-			if (!MatchesRequested(path, requested.Paths, requested.Directories))
-				continue;
+			var globs = McpGlobSet.Create(includePatterns, excludePatterns);
+			var requested = ResolveRequestedPaths(projectRoot, paths, cancellationToken);
+			var selected = new List<string>();
+			foreach (var path in plan.IncludedFiles)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				if (!MatchesRequested(path, requested.Paths, requested.Directories))
+					continue;
 
-			var relativePath = ToRelative(projectRoot, path);
-			if (globs.Includes(relativePath))
-				selected.Add(relativePath);
-		}
-		if (selected.Count > 0)
-		{
-			return await services.Planner
-				.ReprojectSelectionAsync(plan, selected, cancellationToken)
-				.ConfigureAwait(false);
+				var relativePath = ToRelative(projectRoot, path);
+				if (globs.Includes(relativePath))
+					selected.Add(relativePath);
+			}
+			if (selected.Count > 0)
+			{
+				narrowed = await services.Planner
+					.ReprojectSelectionAsync(plan, selected, cancellationToken)
+					.ConfigureAwait(false);
+			}
+			else
+			{
+				var empty = await services.Planner
+					.ReprojectSelectionAsync(plan, [".devprojex-mcp-empty-selection"], cancellationToken)
+					.ConfigureAwait(false);
+				narrowed = empty with
+				{
+					Diagnostics = empty.Diagnostics
+						.Where(static diagnostic => diagnostic.Code != "DPX-SELECTION-PATH-MISSING")
+						.ToArray()
+				};
+			}
 		}
 
-		var empty = await services.Planner
-			.ReprojectSelectionAsync(plan, [".devprojex-mcp-empty-selection"], cancellationToken)
+		return await ProjectFileSizeFilter
+			.ApplyAsync(services.Planner, narrowed, maximumFileBytes, cancellationToken)
 			.ConfigureAwait(false);
-		return empty with
-		{
-			Diagnostics = empty.Diagnostics
-				.Where(static diagnostic => diagnostic.Code != "DPX-SELECTION-PATH-MISSING")
-				.ToArray()
-		};
 	}
 
 	internal static void ValidatePlanContainment(

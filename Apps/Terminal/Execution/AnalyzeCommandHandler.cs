@@ -31,6 +31,12 @@ public sealed class AnalyzeCommandHandler(
 					cancellationToken: cancellationToken,
 					includeContentOutputMetrics: includeSourceContentMetrics && topFileRanking is null))
 			.ConfigureAwait(false);
+		plan = await ProjectFileSizeFilter.ApplyAsync(
+				services.ContextPlanner,
+				plan,
+				request.MaxFileBytes,
+				cancellationToken)
+			.ConfigureAwait(false);
 		var transformationContext = CreateTransformationContext(plan);
 		if (!includeSourceContentMetrics && transformationContext is null)
 		{
@@ -404,6 +410,16 @@ internal static class AnalysisTextFormatter
 		rows.Add(new AnalysisTextRow(
 			localization["Terminal.Analysis.Size"],
 			CacheCommandHandler.FormatByteSize(plan.IncludedBytes)));
+		if (plan.FileSizeFilter is { } sizeFilter)
+		{
+			rows.Add(new AnalysisTextRow(
+				localization["Terminal.Analysis.SizeFilter"],
+				localization.Format(
+					"Terminal.Analysis.SizeFilterValue",
+					CacheCommandHandler.FormatByteSize(sizeFilter.MaximumFileBytes),
+					sizeFilter.ExcludedFiles,
+					CacheCommandHandler.FormatByteSize(sizeFilter.ExcludedBytes))));
+		}
 		rows.Add(new AnalysisTextRow(
 			localization["Terminal.Analysis.Characters"],
 			plan.Analysis.Metrics.Content.Chars.ToString(System.Globalization.CultureInfo.InvariantCulture)));

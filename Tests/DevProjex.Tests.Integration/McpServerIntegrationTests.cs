@@ -171,11 +171,11 @@ public sealed class McpServerIntegrationTests
 		var expectedParameters = new Dictionary<string, string[]>(StringComparer.Ordinal)
 		{
 			["list_projects"] = [],
-			["get_tree"] = ["project", "branch", "include_patterns", "exclude_patterns", "tracked_only", "max_depth"],
-			["analyze"] = ["project", "branch", "paths", "include_patterns", "exclude_patterns", "profile", "detail", "tracked_only", "top_files"],
-			["pack_context"] = ["project", "branch", "paths", "include_patterns", "exclude_patterns", "profile", "detail", "tracked_only", "view", "format"],
+			["get_tree"] = ["project", "branch", "include_patterns", "exclude_patterns", "tracked_only", "max_file_bytes", "max_depth"],
+			["analyze"] = ["project", "branch", "paths", "include_patterns", "exclude_patterns", "profile", "detail", "tracked_only", "top_files", "max_file_bytes"],
+			["pack_context"] = ["project", "branch", "paths", "include_patterns", "exclude_patterns", "profile", "detail", "tracked_only", "max_file_bytes", "view", "format"],
 			["read_pack"] = ["pack_id", "start_line", "end_line"],
-			["search_project"] = ["project", "branch", "pattern", "include_patterns", "exclude_patterns", "tracked_only", "context_lines", "ignore_case", "max_results"],
+			["search_project"] = ["project", "branch", "pattern", "include_patterns", "exclude_patterns", "tracked_only", "max_file_bytes", "context_lines", "ignore_case", "max_results"],
 			["get_file"] = ["project", "branch", "path", "start_line", "end_line"]
 		};
 		foreach (var tool in tools)
@@ -211,6 +211,11 @@ public sealed class McpServerIntegrationTests
 				.ProtocolTool.InputSchema.GetProperty("properties");
 			var trackedOnly = properties.GetProperty("tracked_only");
 			Assert.Equal(2, trackedOnly.GetProperty("oneOf").GetArrayLength());
+			var maximumFileBytes = properties.GetProperty("max_file_bytes");
+			Assert.Equal(2, maximumFileBytes.GetProperty("oneOf").GetArrayLength());
+			Assert.Equal(
+				1,
+				maximumFileBytes.GetProperty("oneOf")[0].GetProperty("minimum").GetInt64());
 			foreach (var propertyName in new[] { "include_patterns", "exclude_patterns" })
 			{
 				var patterns = properties.GetProperty(propertyName);
@@ -1312,6 +1317,57 @@ public sealed class McpServerIntegrationTests
 		Assert.True(error.IsError);
 		Assert.Contains(McpErrorCodes.InvalidArguments, Text(error), StringComparison.Ordinal);
 		Assert.Contains("omit tracked_only", Text(error), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task MaximumFileBytesNarrowsEverySelectionToolAndRejectsInvalidValues()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Small.txt"), "small-marker\n");
+		File.WriteAllText(Path.Combine(project, "Exact.txt"), new string('e', 64));
+		File.WriteAllText(
+			Path.Combine(project, "Large.txt"),
+			"oversized-marker\n" + new string('x', 128));
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+		var maximum = new Dictionary<string, object?> { ["max_file_bytes"] = "64" };
+
+		var tree = await server.CallAsync("get_tree", maximum);
+		var analysis = await server.CallAsync("analyze", maximum);
+		var pack = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>(maximum)
+			{
+				["view"] = "content",
+				["format"] = "text"
+			});
+		var search = await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?>(maximum)
+			{
+				["pattern"] = "small-marker|oversized-marker",
+				["ignore_case"] = false
+			});
+		var invalid = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["max_file_bytes"] = 0 });
+		var allExcluded = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["max_file_bytes"] = 1 });
+
+		Assert.NotEqual(true, tree.IsError);
+		Assert.Contains("Small.txt", Text(tree), StringComparison.Ordinal);
+		Assert.Contains("Exact.txt", Text(tree), StringComparison.Ordinal);
+		Assert.DoesNotContain("Large.txt", Text(tree), StringComparison.Ordinal);
+		Assert.Equal(2, analysis.StructuredContent?.GetProperty("files").GetInt32());
+		Assert.Contains("small-marker", Text(pack), StringComparison.Ordinal);
+		Assert.Contains("Exact.txt", Text(pack), StringComparison.Ordinal);
+		Assert.DoesNotContain("Large.txt", Text(pack), StringComparison.Ordinal);
+		Assert.Contains("Small.txt:1:", Text(search), StringComparison.Ordinal);
+		Assert.DoesNotContain("Large.txt", Text(search), StringComparison.Ordinal);
+		Assert.True(invalid.IsError);
+		Assert.Contains(McpErrorCodes.InvalidRange, Text(invalid), StringComparison.Ordinal);
+		Assert.Equal(0, allExcluded.StructuredContent?.GetProperty("files").GetInt32());
 	}
 
 	private static string ReadLikeSchemaAwareClient(McpClientTool tool, CallToolResult result)

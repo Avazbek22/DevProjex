@@ -269,7 +269,10 @@ public sealed class DevProjexCommandTree
 			Description = L("Terminal.Option.TopFiles"),
 			HelpName = "N"
 		};
-		var selection = new SelectionOptions(_localization, environment);
+		var selection = new SelectionOptions(
+			_localization,
+			environment,
+			includeMaxFileBytes: true);
 		command.Arguments.Add(project);
 		command.Options.Add(format);
 		command.Options.Add(outputPath);
@@ -334,7 +337,8 @@ public sealed class DevProjexCommandTree
 								parseResult.GetValue(findings),
 								parseResult.GetValue(failOnFindings),
 								Force: parseResult.GetValue(force),
-								TopFiles: parseResult.GetValue(topFiles)),
+								TopFiles: parseResult.GetValue(topFiles),
+								MaxFileBytes: selection.GetMaxFileBytes(parseResult)),
 							cancellationToken)
 						.ConfigureAwait(false);
 				},
@@ -383,7 +387,10 @@ public sealed class DevProjexCommandTree
 		var force = new Option<bool>("--force") { Description = L("Terminal.Option.ForceContext") };
 		var dryRun = new Option<bool>("--dry-run", "-n") { Description = L("Terminal.Option.DryRun") };
 		var branch = BranchOption();
-		var selection = new SelectionOptions(_localization, environment);
+		var selection = new SelectionOptions(
+			_localization,
+			environment,
+			includeMaxFileBytes: true);
 		command.Arguments.Add(project);
 		command.Options.Add(view);
 		command.Options.Add(format);
@@ -449,7 +456,8 @@ public sealed class DevProjexCommandTree
 								parseResult.GetValue(outputPath),
 								parseResult.GetValue(force),
 								parseResult.GetValue(dryRun),
-								outputOptions),
+								outputOptions,
+								MaxFileBytes: selection.GetMaxFileBytes(parseResult)),
 							cancellationToken)
 						.ConfigureAwait(false);
 				},
@@ -1450,7 +1458,8 @@ public sealed class DevProjexCommandTree
 		var selection = new SelectionOptions(
 			_localization,
 			environment,
-			includeContentTransformations: false);
+			includeContentTransformations: false,
+			includeMaxFileBytes: true);
 		command.Arguments.Add(project);
 		command.Options.Add(format);
 		command.Options.Add(outputPath);
@@ -1490,7 +1499,8 @@ public sealed class DevProjexCommandTree
 								ParseTreeFormat(parseResult.GetValue(format)),
 								parseResult.GetValue(outputPath),
 								outputOptions,
-								Force: parseResult.GetValue(force)),
+								Force: parseResult.GetValue(force),
+								MaxFileBytes: selection.GetMaxFileBytes(parseResult)),
 							cancellationToken)
 						.ConfigureAwait(false);
 				},

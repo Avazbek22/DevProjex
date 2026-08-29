@@ -118,6 +118,7 @@ content-transformation options that follow. `open` additionally accepts the
 --select-from <FILE|->
 --git-mode <none|gitignore|tracked>
 --exclude <NAME>             repeatable
+--max-file-bytes <SIZE>      analyze, tree, and export context only
 --hide-secrets [<true|false|on|off>]
 --hide-private-data [<true|false|on|off>]
 --compress-code [<true|false|on|off>]
@@ -131,6 +132,13 @@ negative form: `--no-hide-secrets`, `--no-hide-private-data`,
 `--no-strip-blank-lines`. Short aliases are `-p` profile, `-r` root,
 `-e` extension, `-s` select, `-x` exclude, and `-b` branch where they do not
 conflict with an existing command option.
+
+`--max-file-bytes SIZE` is an invocation-only narrowing filter for `analyze`,
+`tree`, and `export context`. Files strictly larger than SIZE are removed after
+all profile, ignore, Git, and explicit path filters; a file exactly SIZE bytes is
+kept. SIZE may be a byte count or use a case-insensitive binary suffix:
+`k|kb|kib`, `m|mb|mib`, or `g|gb|gib`, all with a 1024 multiplier. The filter is
+not stored by `profile save` and does not change the profile format.
 
 For `open`, the first line is `--profile <auto|standard|local|FILE>` and its
 default is `auto`. Direct selection commands (`analyze`, `tree`, both exports,
@@ -407,6 +415,7 @@ Specific options:
 --findings
 --fail-on-findings
 --top-files <N>
+--max-file-bytes <SIZE>
 --color <auto|always|never>
 --progress <auto|always|never>
 --verbosity <quiet|minimal|normal|detailed|diagnostic>
@@ -437,6 +446,9 @@ detection remains explicit.
 largest selected text files by estimated tokens. JSON adds `topFiles` only when
 the option is present; omitting it preserves the existing text and JSON output.
 The ranking reflects transformed content when compression or stripping is active.
+`--max-file-bytes` narrows both the inventory and this ranking before content is
+read. Text output reports the applied limit and excluded count; JSON inventory
+and byte metrics reflect the narrowed selection without adding a new property.
 
 Examples:
 
@@ -448,6 +460,7 @@ devprojex analyze . --git-mode tracked --exclude smart-ignore
 devprojex analyze . --compress-code --format json
 devprojex analyze . --hide-secrets --findings --fail-on-findings
 devprojex analyze . --top-files 10
+devprojex analyze . --max-file-bytes 1m
 ```
 
 ## Tree
