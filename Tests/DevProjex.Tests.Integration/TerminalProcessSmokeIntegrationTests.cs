@@ -156,7 +156,7 @@ public sealed class TerminalProcessSmokeIntegrationTests
 		var budget = document.RootElement.GetProperty("tokenBudget");
 		Assert.Equal(1, budget.GetProperty("includedFiles").GetInt32());
 		Assert.Equal(1, budget.GetProperty("skippedFiles").GetInt32());
-		Assert.Contains("Token budget 1:", context.StandardError, StringComparison.Ordinal);
+		Assert.Contains("Estimated token budget: 1.", context.StandardError, StringComparison.Ordinal);
 		Assert.Contains("A-large.txt", context.StandardError, StringComparison.Ordinal);
 		Assert.DoesNotContain("\u001b", context.StandardOutput, StringComparison.Ordinal);
 		Assert.DoesNotContain("\u001b", context.StandardError, StringComparison.Ordinal);
@@ -187,7 +187,7 @@ public sealed class TerminalProcessSmokeIntegrationTests
 		Assert.Equal(
 			PathUtility.NormalizeSeparators(Path.Combine(project, "A-large.txt")),
 			tokenBudget.Element("largestSkippedFiles")?.Element("file")?.Attribute("path")?.Value);
-		Assert.Contains("Token budget 1:", fileContext.StandardError, StringComparison.Ordinal);
+		Assert.Contains("Estimated token budget: 1.", fileContext.StandardError, StringComparison.Ordinal);
 		Assert.DoesNotContain("\u001b", fileContext.StandardError, StringComparison.Ordinal);
 	}
 

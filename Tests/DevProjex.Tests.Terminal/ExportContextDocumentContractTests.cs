@@ -136,7 +136,7 @@ public sealed class ExportContextDocumentContractTests
 				report.Element("largestSkippedFiles")?.Element("file")?.Attribute("path")?.Value);
 		}
 
-		Assert.Contains("Token budget 2:", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("Estimated token budget: 2.", environment.StandardError, StringComparison.Ordinal);
 		Assert.Contains("A-large.txt", environment.StandardError, StringComparison.Ordinal);
 		Assert.Contains("--compress-code", environment.StandardError, StringComparison.Ordinal);
 	}
@@ -346,8 +346,8 @@ public sealed class ExportContextDocumentContractTests
 		Assert.DoesNotContain("large-marker", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("small-marker", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("A-large.txt", environment.StandardError, StringComparison.Ordinal);
-		Assert.Contains("included 1 files", environment.StandardError, StringComparison.Ordinal);
-		Assert.Contains("skipped 1 files", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("Included files: 1", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("Skipped files: 1", environment.StandardError, StringComparison.Ordinal);
 	}
 
 	[Theory]
@@ -375,7 +375,7 @@ public sealed class ExportContextDocumentContractTests
 
 		Assert.Equal(unlimited.StandardOutput, budgeted.StandardOutput);
 		Assert.Empty(unlimited.StandardError);
-		Assert.Contains("skipped 0 files", budgeted.StandardError, StringComparison.Ordinal);
+		Assert.Contains("Skipped files: 0", budgeted.StandardError, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -395,9 +395,9 @@ public sealed class ExportContextDocumentContractTests
 
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
 		Assert.Empty(environment.StandardOutput);
-		Assert.Contains("Token budget 1:", environment.StandardError, StringComparison.Ordinal);
-		Assert.Contains("included 1 files (1 estimated tokens)", environment.StandardError, StringComparison.Ordinal);
-		Assert.Contains("skipped 1 files", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("Estimated token budget: 1.", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("Included files: 1; estimated tokens: 1", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("Skipped files: 1", environment.StandardError, StringComparison.Ordinal);
 		Assert.Contains("A-large.txt", environment.StandardError, StringComparison.Ordinal);
 
 		var actual = new TestTerminalEnvironment();
@@ -446,7 +446,7 @@ public sealed class ExportContextDocumentContractTests
 
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
 		Assert.Contains("class App", environment.StandardOutput, StringComparison.Ordinal);
-		Assert.Contains("Token budget 2147483648:", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("Estimated token budget: 2147483648.", environment.StandardError, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -603,7 +603,7 @@ public sealed class ExportContextDocumentContractTests
 
 	private static string ExtractBudgetReport(string standardError)
 	{
-		var start = standardError.IndexOf("Token budget", StringComparison.Ordinal);
+		var start = standardError.IndexOf("Estimated token budget", StringComparison.Ordinal);
 		Assert.True(start >= 0, standardError);
 		return standardError[start..];
 	}

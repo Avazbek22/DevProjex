@@ -995,7 +995,7 @@
   "Terminal.DryRun.Inventory": "Inventory: {0} files, {1} folders",
   "Terminal.DryRun.Metrics": "Size: {0}; estimated tokens: {1}",
   "Terminal.DryRun.Profile": "Effective profile: {0}",
-  "Terminal.TokenBudget.Summary": "Token budget {0}: included {1} files ({2} estimated tokens); skipped {3} files ({4} estimated tokens).",
+  "Terminal.TokenBudget.Summary": "Estimated token budget: {0}. Included files: {1}; estimated tokens: {2}. Skipped files: {3}; estimated tokens: {4}.",
   "Terminal.TokenBudget.SkippedFiles": "Skipped files:",
   "Terminal.TokenBudget.SkippedFile": "{0} ({1} estimated tokens)",
   "Terminal.TokenBudget.More": "and {0} more",
