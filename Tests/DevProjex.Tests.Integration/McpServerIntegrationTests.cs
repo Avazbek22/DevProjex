@@ -1497,6 +1497,11 @@ public sealed class McpServerIntegrationTests
 		Assert.StartsWith("Pack stored as '", text, StringComparison.Ordinal);
 		Assert.Contains("Token budget: 20000 estimated tokens.", text, StringComparison.Ordinal);
 		Assert.True(text.Length < 50_000);
+		var page = await server.CallAsync(
+			"read_pack",
+			new Dictionary<string, object?> { ["pack_id"] = ExtractPackId(text) });
+		Assert.NotEqual(true, page.IsError);
+		Assert.Contains(new string('x', 128), Text(page), StringComparison.Ordinal);
 	}
 
 	[Theory]
