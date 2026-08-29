@@ -1800,6 +1800,43 @@ public sealed class ProjectContextStreamingRegressionTests
 	}
 
 	[Fact]
+	public async Task TokenBudgetReportsEveryProcessedFileAcrossCompleteWriters()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/A-skipped.txt", new string('a', 40));
+		workspace.WriteFile("project/B-included.txt", "b");
+		workspace.WriteFile("project/C-included.txt", "c");
+		var services = new TerminalServiceFactory(
+				() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var plan = await services.ContextFactory.BuildAsync(
+			project,
+			new ProjectSelectionSpec(GitMode: GitFilteringMode.None, Exclusions: []),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		foreach (var format in Enum.GetValues<ProjectContextDocumentFormat>())
+		{
+			var updates = new List<ProjectCopyExportProgress>();
+			var progress = new SynchronousProgress<ProjectCopyExportProgress>(updates.Add);
+			await using var destination = new MemoryStream();
+
+			await services.ContextDocumentService.WriteCompleteWithReportAsync(
+				plan,
+				ProjectContextView.Content,
+				format,
+				destination,
+				TestContext.Current.CancellationToken,
+				writeProgress: progress,
+				maximumEstimatedTokens: 2);
+
+			Assert.Equal([1, 2, 3], updates.Select(static update => update.ProcessedEntryCount));
+			Assert.All(updates, static update => Assert.Equal(3, update.TotalEntryCount));
+			Assert.Equal(100d, updates[^1].Percentage);
+		}
+	}
+
+	[Fact]
 	public async Task CompleteTextDocumentMatchesBoundedOutputAcrossTrailingLineEndings()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -2146,6 +2183,11 @@ public sealed class ProjectContextStreamingRegressionTests
 		string StandardOutput,
 		string StandardError,
 		long PeakWorkingSetBytes);
+
+	private sealed class SynchronousProgress<T>(Action<T> report) : IProgress<T>
+	{
+		public void Report(T value) => report(value);
+	}
 
 	private sealed class CancelThenRejectFurtherReadsList<T>(
 		IReadOnlyList<T> items,
