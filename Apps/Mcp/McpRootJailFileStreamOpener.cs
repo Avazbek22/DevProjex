@@ -25,7 +25,7 @@ internal sealed class McpRootJailFileStreamOpener
 		bool asynchronous)
 	{
 		UnixFileTypeInspector.EnsureRegularFile(path);
-		var lexicalRoot = _roots.FindLexicalRoot(path);
+		var lexicalRoot = _roots.ResolveLexicalRoot(path);
 		var stream = new FileStream(
 			path,
 			FileMode.Open,
@@ -36,11 +36,8 @@ internal sealed class McpRootJailFileStreamOpener
 			(asynchronous ? FileOptions.Asynchronous : FileOptions.None));
 		try
 		{
-			if (lexicalRoot is not null)
-			{
-				var openedPath = ResolveOpenedPath(stream.SafeFileHandle);
-				_roots.EnsureOpenedPathIsWithin(lexicalRoot, path, openedPath);
-			}
+			var openedPath = ResolveOpenedPath(stream.SafeFileHandle);
+			_roots.EnsureOpenedPathIsWithin(lexicalRoot, path, openedPath);
 			return stream;
 		}
 		catch

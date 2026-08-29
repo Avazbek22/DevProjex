@@ -35,6 +35,22 @@ internal sealed class McpProjectRootJail(
 		return candidates.OrderByDescending(static candidate => candidate.Root.Length).FirstOrDefault();
 	}
 
+	public McpRootJailScope ResolveLexicalRoot(string path)
+	{
+		var scope = FindLexicalRoot(path);
+		if (scope is not null)
+			return scope;
+
+		var validRoots = localRoots.Roots
+			.Concat(projectSources?.GetRemoteRootsSnapshot().Select(static source => source.Address) ?? [])
+			.Distinct(StringComparer.Ordinal)
+			.Select(static root => $"'{root}'");
+		throw new McpToolException(
+			McpErrorCodes.RootViolation,
+			$"{McpErrorCodes.RootViolation}: path '{path}' is outside every allowed project root. " +
+			$"Valid roots: {string.Join(", ", validRoots)}.");
+	}
+
 	public void EnsureOpenedPathIsWithin(
 		McpRootJailScope scope,
 		string requestedPath,

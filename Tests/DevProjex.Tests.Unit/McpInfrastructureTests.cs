@@ -243,6 +243,24 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public void RootJailFileOpenerRejectsAPathOutsideEveryConfiguredRoot()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var outside = workspace.CreateFile("outside.txt", "outside content");
+		var opener = new McpRootJailFileStreamOpener(new McpRootRegistry([project]));
+
+		var exception = Assert.Throws<McpToolException>(() =>
+			opener.OpenRead(
+				outside,
+				bufferSize: 4096,
+				FileShare.Read,
+				asynchronous: false));
+
+		Assert.Equal(McpErrorCodes.RootViolation, exception.Code);
+	}
+
+	[Fact]
 	public void RootJailFileOpenerRejectsAnAncestorSymlinkEscapeAfterLexicalAcceptance()
 	{
 		using var workspace = new TemporaryDirectory();
