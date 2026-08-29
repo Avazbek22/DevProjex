@@ -77,10 +77,12 @@ devprojex
 `dev` is a hidden maintainer namespace. See `CONTRIBUTING.md` for its supported
 diagnostic workflows.
 
-`devprojex mcp [--root PATH ...] [--hide-private-data]` starts the local
+`devprojex mcp [--root PATH ...] [--hide-private-data] [--allow-remote]` starts the local
 read-only MCP stdio server. Secret redaction is mandatory; private-data
 redaction is enabled only by the server startup flag and cannot be controlled by
-tools.
+tools. Remote Git URL project arguments are disabled by default; `--allow-remote`
+enables RepoCache-backed clone/acquire for MCP project tools without changing
+the local roots returned by `list_projects`.
 Explicit MCP roots take precedence over `DEVPROJEX_ROOT`, then
 `CLAUDE_PROJECT_DIR`, then the current directory. See
 [McpServer.md](McpServer.md) for its security model, tools, and client
@@ -116,6 +118,7 @@ content-transformation options that follow. `open` additionally accepts the
 --select-from <FILE|->
 --git-mode <none|gitignore|tracked>
 --exclude <NAME>             repeatable
+--max-file-bytes <SIZE>      analyze, tree, and export context only
 --hide-secrets [<true|false|on|off>]
 --hide-private-data [<true|false|on|off>]
 --compress-code [<true|false|on|off>]
@@ -129,6 +132,13 @@ negative form: `--no-hide-secrets`, `--no-hide-private-data`,
 `--no-strip-blank-lines`. Short aliases are `-p` profile, `-r` root,
 `-e` extension, `-s` select, `-x` exclude, and `-b` branch where they do not
 conflict with an existing command option.
+
+`--max-file-bytes SIZE` is an invocation-only narrowing filter for `analyze`,
+`tree`, and `export context`. Files strictly larger than SIZE are removed after
+all profile, ignore, Git, and explicit path filters; a file exactly SIZE bytes is
+kept. SIZE may be a byte count or use a case-insensitive binary suffix:
+`k|kb|kib`, `m|mb|mib`, or `g|gb|gib`, all with a 1024 multiplier. The filter is
+not stored by `profile save` and does not change the profile format.
 
 For `open`, the first line is `--profile <auto|standard|local|FILE>` and its
 default is `auto`. Direct selection commands (`analyze`, `tree`, both exports,
@@ -404,6 +414,8 @@ Specific options:
 --strict
 --findings
 --fail-on-findings
+--top-files <N>
+--max-file-bytes <SIZE>
 --color <auto|always|never>
 --progress <auto|always|never>
 --verbosity <quiet|minimal|normal|detailed|diagnostic>
@@ -430,6 +442,14 @@ disabled, but never changes `--hide-secrets` or the emitted content. JSON adds
 redacted values only when redaction was explicitly enabled. Private-data
 detection remains explicit.
 
+`--top-files N` accepts `1..1000` and appends a localized ranking of the N
+largest selected text files by estimated tokens. JSON adds `topFiles` only when
+the option is present; omitting it preserves the existing text and JSON output.
+The ranking reflects transformed content when compression or stripping is active.
+`--max-file-bytes` narrows both the inventory and this ranking before content is
+read. Text output reports the applied limit and excluded count; JSON inventory
+and byte metrics reflect the narrowed selection without adding a new property.
+
 Examples:
 
 ```shell
@@ -439,6 +459,8 @@ devprojex analyze ./app --format json -o report.json --strict
 devprojex analyze . --git-mode tracked --exclude smart-ignore
 devprojex analyze . --compress-code --format json
 devprojex analyze . --hide-secrets --findings --fail-on-findings
+devprojex analyze . --top-files 10
+devprojex analyze . --max-file-bytes 1m
 ```
 
 ## Tree

@@ -98,6 +98,7 @@ public sealed class MachineSchemaContractTests
 			Redaction = new SecretRedactionSummary(2, 2),
 			Privacy = new PrivateDataRedactionSummary(1, 1),
 			Compression = new CodeCompressionSummary(1, 0, 100, 40, 1, 1, 1),
+			TopFiles = [new TopFileMetric("src/App.cs", 7)],
 			FindingCount = 1,
 			Findings =
 			[
@@ -134,6 +135,7 @@ public sealed class MachineSchemaContractTests
 				"selection",
 				"inventory",
 				"metrics",
+				"topFiles",
 				"diagnostics",
 				"fingerprint",
 				"redaction",
@@ -147,6 +149,10 @@ public sealed class MachineSchemaContractTests
 		var finding = Assert.Single(
 			document.RootElement.GetProperty("findings").EnumerateArray());
 		Assert.Equal("secret", finding.GetProperty("category").GetString());
+		var topFile = Assert.Single(
+			document.RootElement.GetProperty("topFiles").EnumerateArray());
+		Assert.Equal("src/App.cs", topFile.GetProperty("path").GetString());
+		Assert.Equal(7, topFile.GetProperty("tokens").GetInt64());
 		var unscannable = Assert.Single(
 			document.RootElement.GetProperty("contentInspection")
 				.GetProperty("unscannableFiles")

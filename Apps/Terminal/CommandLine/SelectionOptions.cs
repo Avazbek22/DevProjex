@@ -8,6 +8,7 @@ internal sealed class SelectionOptions
 	private readonly LocalizationService _localization;
 	private readonly bool _includeHidePrivateData;
 	private readonly bool _includeContentTransformations;
+	private readonly bool _includeMaxFileBytes;
 	public Option<CliProfileValue> Profile { get; }
 
 	public Option<string[]> Roots { get; }
@@ -26,6 +27,7 @@ internal sealed class SelectionOptions
 	public Option<bool> NoStripComments { get; }
 	public Option<bool?> StripBlankLines { get; }
 	public Option<bool> NoStripBlankLines { get; }
+	public Option<long?> MaxFileBytes { get; }
 	public bool IncludesHidePrivateData => _includeHidePrivateData;
 	public IReadOnlyList<Option> AllSymbols =>
 	[
@@ -36,6 +38,7 @@ internal sealed class SelectionOptions
 		SelectedPathsSource,
 		GitMode,
 		Exclusions,
+		.. MaxFileSizeSymbols(),
 		.. (_includeContentTransformations
 			? ContentTransformationSymbols()
 			: [])
@@ -46,12 +49,14 @@ internal sealed class SelectionOptions
 		ITerminalEnvironment environment,
 		string defaultProfile = "standard",
 		bool includeHidePrivateData = true,
-		bool includeContentTransformations = true)
+		bool includeContentTransformations = true,
+		bool includeMaxFileBytes = false)
 	{
 		_environment = environment;
 		_localization = localization;
 		_includeContentTransformations = includeContentTransformations;
 		_includeHidePrivateData = includeContentTransformations && includeHidePrivateData;
+		_includeMaxFileBytes = includeMaxFileBytes;
 		Profile = CliChoiceSymbols.ProfileOption(
 			localization["Terminal.Option.Profile"],
 			defaultProfile,
@@ -90,6 +95,24 @@ internal sealed class SelectionOptions
 			CliChoiceSets.GitMode,
 			localization);
 		Exclusions = RepeatableExclusions(localization);
+		MaxFileBytes = new Option<long?>("--max-file-bytes")
+		{
+			Description = localization["Terminal.Option.MaxFileBytes"],
+			HelpName = "SIZE",
+			Arity = ArgumentArity.ExactlyOne,
+			CustomParser = result =>
+			{
+				if (result.Tokens.Count == 1 &&
+				    TryParseFileSize(result.Tokens[0].Value, out var value))
+				{
+					return value;
+				}
+
+				result.AddError(LocalizedParseError.Create(
+					localization["Terminal.Validation.MaxFileBytes"]));
+				return null;
+			}
+		};
 		(HideSecrets, NoHideSecrets) = CreateToggle(
 			"--hide-secrets", "--no-hide-secrets",
 			"Terminal.Option.HideSecrets", "Terminal.Option.NoHideSecrets",
@@ -121,6 +144,8 @@ internal sealed class SelectionOptions
 		command.Options.Add(SelectedPathsSource);
 		command.Options.Add(GitMode);
 		command.Options.Add(Exclusions);
+		if (_includeMaxFileBytes)
+			command.Options.Add(MaxFileBytes);
 		if (_includeContentTransformations)
 		{
 			command.Options.Add(HideSecrets);
@@ -222,6 +247,11 @@ internal sealed class SelectionOptions
 	public bool? GetHideSecretsOverride(ParseResult parseResult) =>
 		_includeContentTransformations
 			? ResolveToggle(parseResult, HideSecrets, NoHideSecrets)
+			: null;
+
+	public long? GetMaxFileBytes(ParseResult parseResult) =>
+		_includeMaxFileBytes && parseResult.GetResult(MaxFileBytes) is { Implicit: false }
+			? parseResult.GetValue(MaxFileBytes)
 			: null;
 
 	public async Task<IReadOnlyCollection<string>?> ReadSelectedPathsAsync(
@@ -334,6 +364,55 @@ internal sealed class SelectionOptions
 		return option;
 	}
 
+	internal static bool TryParseFileSize(string? token, out long value)
+	{
+		value = 0;
+		if (string.IsNullOrWhiteSpace(token))
+			return false;
+
+		var normalized = token.Trim();
+		var suffixLength = 0;
+		long multiplier = 1;
+		foreach (var (suffix, factor) in FileSizeSuffixes)
+		{
+			if (!normalized.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+				continue;
+			suffixLength = suffix.Length;
+			multiplier = factor;
+			break;
+		}
+
+		var number = suffixLength == 0
+			? normalized
+			: normalized[..^suffixLength];
+		if (!long.TryParse(
+			    number,
+			    System.Globalization.NumberStyles.None,
+			    System.Globalization.CultureInfo.InvariantCulture,
+			    out var parsed) ||
+		    parsed < 1 ||
+		    parsed > long.MaxValue / multiplier)
+		{
+			return false;
+		}
+
+		value = parsed * multiplier;
+		return true;
+	}
+
+	private static readonly (string Suffix, long Multiplier)[] FileSizeSuffixes =
+	[
+		("kib", 1024L),
+		("mib", 1024L * 1024),
+		("gib", 1024L * 1024 * 1024),
+		("kb", 1024L),
+		("mb", 1024L * 1024),
+		("gb", 1024L * 1024 * 1024),
+		("k", 1024L),
+		("m", 1024L * 1024),
+		("g", 1024L * 1024 * 1024)
+	];
+
 	private IReadOnlyList<Option> ContentTransformationSymbols()
 	{
 		var symbols = new List<Option>
@@ -356,6 +435,9 @@ internal sealed class SelectionOptions
 		]);
 		return symbols;
 	}
+
+	private IReadOnlyList<Option> MaxFileSizeSymbols() =>
+		_includeMaxFileBytes ? [MaxFileBytes] : [];
 
 	private IEnumerable<(Option<bool?> Positive, Option<bool> Negative)> TogglePairs()
 	{

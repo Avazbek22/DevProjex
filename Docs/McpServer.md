@@ -2,7 +2,8 @@
 
 DevProjex includes a local Model Context Protocol server for read-only project
 inspection and context packaging. It uses standard input/output only; no HTTP or
-other network transport is exposed.
+other network transport is exposed. Remote Git sources are disabled unless the
+server starts with `--allow-remote`.
 
 ```shell
 devprojex mcp --root /absolute/path/to/project
@@ -18,6 +19,12 @@ Private-data redaction is opt-in at server startup:
 devprojex mcp --root /absolute/path/to/project --hide-private-data
 ```
 
+Remote repository URLs are a separate startup opt-in:
+
+```shell
+devprojex mcp --root /absolute/path/to/project --allow-remote
+```
+
 The recommended tool sequence is:
 
 ```text
@@ -26,13 +33,18 @@ list_projects -> get_tree/analyze -> search_project/get_file -> pack_context -> 
 
 ## Security Model
 
-- Every exposed project is pinned when the process starts. Canonical path and
-  symbolic-link checks reject access outside those roots. Content files are
-  opened before their final handle path is validated, and the validated handle
-  is the one read, so a path swap cannot escape the root jail.
-- Tools are read-only and perform no network operations. With `tracked_only`, the
-  server may start the local Git executable solely to read the repository index;
-  it never runs project executables or arbitrary project commands.
+- Every local project is pinned when the process starts. With `--allow-remote`, a
+  remote checkout is pinned on first use and its RepoCache session lease remains
+  held until the server stops. Canonical path and symbolic-link checks reject
+  access outside those roots. Content files are opened before their final handle
+  path is validated, and the validated handle is the one read, so a path swap
+  cannot escape the root jail.
+- Without `--allow-remote`, tools perform no network operations. With the flag,
+  network access is limited to the RepoCache clone/acquire step for a Git URL;
+  all project inspection handlers operate only on the pinned checkout. With
+  `tracked_only`, the server may also start the local Git executable solely to
+  read the repository index. It never runs project executables or arbitrary
+  project commands.
 - Secret redaction is always enabled for returned file content and cannot be
   disabled. Private-data redaction is disabled by default and can be enabled
   only for the whole server process with `--hide-private-data`, mirroring the
@@ -41,10 +53,10 @@ list_projects -> get_tree/analyze -> search_project/get_file -> pack_context -> 
   File contents and context packs are always processed by Secrets redaction;
   Private Data processing is added only when the server starts with
   `--hide-private-data`. Root paths in `list_projects`, `get_tree`, and tool
-  errors are returned as-is: they are local addresses already known to the
-  client and form the contract for the `project` argument. Without the flag, a
-  pack retains real paths like a default CLI export. With the flag, the pack is
-  private-data-redacted in full, including the project path in its tree header.
+  errors are returned as-is; remote tools use the safe Git URL as that address.
+  These addresses form the contract for the `project` argument. Without the
+  flag, a pack retains real addresses like a default CLI export. With the flag,
+  the pack is private-data-redacted in full, including its tree header.
 - Searches run against content after mandatory secret redaction and any enabled
   private-data redaction, not the original file text.
 - Returned project content is marked as untrusted data with a random, per-response
@@ -63,19 +75,25 @@ Errors returned by tools have `isError: true` and stable `DPX-MCP-*` codes. They
 describe the valid roots, ranges, or retry action. Malformed JSON-RPC traffic is
 the only case reported as a protocol error.
 
+Remote-specific errors are `DPX-MCP-REMOTE-DISABLED` when a URL is passed to a
+server started without `--allow-remote`, `DPX-MCP-INVALID-ARGUMENTS` for an
+unsupported URL or a branch used with a local path, and `DPX-MCP-REMOTE-FAILED`
+when Git, cloning, cache publication, or branch checkout fails. Error text uses
+the credential-free display form of the URL.
+
 ## Tools
 
 The tool order is stable.
 
 | Tool | Parameters | Result and limits |
 |---|---|---|
-| `list_projects` | none | Allowed roots with path, name, type, and available local profiles. |
-| `get_tree` | `project?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `max_depth?` | Effective text tree; at most 2,000 lines. |
-| `analyze` | `project?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?` | File, character, and token metrics plus the ten largest files by tokens. Metrics reflect the effective detail level. |
-| `pack_context` | `project?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `view?`, `format?` | Exact DevProjex context pipeline. Inline through 50,000 characters; otherwise returns a session-scoped `pack_id` and tree. |
+| `list_projects` | none | Allowed local roots with path, name, type, and available local profiles. Remote projects are addressed by URL and are not added to this list. |
+| `get_tree` | `project?`, `branch?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `max_file_bytes?`, `max_depth?` | Effective text tree; at most 2,000 lines. |
+| `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `top_files?`, `max_file_bytes?` | File, character, and token metrics plus the requested largest files by tokens. Metrics reflect the effective detail level. |
+| `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. Inline through 50,000 characters; otherwise returns a session-scoped `pack_id` and tree. |
 | `read_pack` | `pack_id`, `start_line?`, `end_line?` | Inclusive, 1-based range; at most 1,000 lines or 50,000 characters per call. Call `pack_context` again after server restart. |
-| `search_project` | `project?`, `pattern`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style redacted matches. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, and oversized text responses are explicitly truncated with a narrowing hint. |
-| `get_file` | `project?`, `path`, `start_line?`, `end_line?` | Redacted text from one effective file; at most 1,000 lines or 50,000 characters. |
+| `search_project` | `project?`, `branch?`, `pattern`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style redacted matches. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, and oversized text responses are explicitly truncated with a narrowing hint. |
+| `get_file` | `project?`, `branch?`, `path`, `start_line?`, `end_line?` | Redacted text from one effective file; at most 1,000 lines or 50,000 characters. |
 
 ## Result Contract
 
@@ -115,6 +133,7 @@ Defaults:
 - `pack_context.format`: `markdown`
 - `pack_context.detail`: `full`
 - `analyze.detail`: `full`
+- `analyze.top_files`: `10` (`1..1000`)
 - `tracked_only`: `false`
 - `search_project.context_lines`: `2`
 - `search_project.ignore_case`: `true`
@@ -127,6 +146,19 @@ directories.
 Numeric parameters accept JSON numbers and decimal numeric strings.
 Boolean parameters accept JSON booleans and the exact strings `"true"` and
 `"false"`.
+
+`max_file_bytes` is an optional positive byte count on `get_tree`, `analyze`,
+`pack_context`, and `search_project`. It removes files strictly larger than the
+limit after profile, ignore, Git, `paths`, and glob narrowing; a file exactly at
+the limit remains selected. It is request-only, is not stored in profiles, and
+does not apply to `get_file`, which addresses one already-effective file.
+
+For the five project tools, `project` may be a Git URL only when the server was
+started with `--allow-remote`. The optional `branch` is valid only with a URL.
+Remote checkouts are reused from RepoCache and remain pinned for this server
+session. `list_projects` continues to report only configured local roots.
+Project-tool calls, including clone/acquire, are serialized; a first clone
+therefore delays other project-tool calls until its checkout is ready.
 
 When `tracked_only` is `true`, only paths present in the Git index are selected.
 The option can strengthen a profile but cannot disable tracked-only filtering

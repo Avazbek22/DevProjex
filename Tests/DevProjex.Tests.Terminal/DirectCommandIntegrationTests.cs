@@ -158,6 +158,7 @@ public sealed class DirectCommandIntegrationTests
 		Assert.Equal(1, json.RootElement.GetProperty("schemaVersion").GetInt32());
 		Assert.Equal("devprojex-analysis", json.RootElement.GetProperty("kind").GetString());
 		Assert.Equal("none", json.RootElement.GetProperty("selection").GetProperty("gitMode").GetString());
+		Assert.False(json.RootElement.TryGetProperty("topFiles", out _));
 		var expectedBytes = Directory.EnumerateFiles(
 				workspace.Path,
 				"*",
@@ -171,6 +172,163 @@ public sealed class DirectCommandIntegrationTests
 			json.RootElement.GetProperty("metrics").GetProperty("bytes").GetInt64());
 		Assert.Empty(environment.StandardError);
 		Assert.DoesNotContain("\u001b", environment.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task AnalyzeTopFilesRanksEffectiveContentOnlyWhenRequested(bool compressCode)
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("src/Large.cs", CompressibleSource + CompressibleSource);
+		workspace.WriteFile("src/Small.cs", "internal sealed class Small {}\n");
+		var environment = new TestTerminalEnvironment();
+		var arguments = new List<string>
+		{
+			"analyze", workspace.Path,
+			"--format", "json",
+			"--top-files", "1",
+			"--git-mode", "none",
+			"--exclude", "none"
+		};
+		if (compressCode)
+			arguments.Add("--compress-code");
+
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(() => workspace.CreateDirectory("app-data")))
+			.RunAsync(arguments.ToArray(), TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		var topFile = Assert.Single(
+			document.RootElement.GetProperty("topFiles").EnumerateArray());
+		Assert.Equal("src/Large.cs", topFile.GetProperty("path").GetString());
+		Assert.True(topFile.GetProperty("tokens").GetInt64() > 0);
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
+	public async Task AnalyzeTopFilesAddsLocalizedTextSection()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("src/Large.cs", CompressibleSource);
+		workspace.WriteFile("src/Small.cs", "class Small {}\n");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(
+				environment,
+				new TerminalServiceFactory(() => workspace.CreateDirectory("app-data")))
+			.RunAsync(
+				[
+					"analyze", workspace.Path,
+					"--top-files", "1",
+					"--git-mode", "none",
+					"--exclude", "none",
+					"--language", "en"
+				],
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Contains("Largest files:", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("src/Large.cs", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
+	public async Task MaximumFileBytesNarrowsAnalyzeTreeAndContextExport()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/Small.txt", "small-marker\n");
+		workspace.WriteFile("project/Exact.txt", new string('e', 64));
+		workspace.WriteFile(
+			"project/Large.txt",
+			"oversized-marker\n" + new string('x', 128));
+		var factory = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"));
+
+		var analysisEnvironment = new TestTerminalEnvironment();
+		var analysisExit = await new TerminalApplication(analysisEnvironment, factory).RunAsync(
+			[
+				"analyze", project,
+				"--format", "json",
+				"--max-file-bytes", "64",
+				"--git-mode", "none",
+				"--exclude", "none"
+			],
+			TestContext.Current.CancellationToken);
+		using var analysis = JsonDocument.Parse(analysisEnvironment.StandardOutput);
+
+		var textEnvironment = new TestTerminalEnvironment();
+		var textExit = await new TerminalApplication(textEnvironment, factory).RunAsync(
+			[
+				"analyze", project,
+				"--max-file-bytes", "64",
+				"--git-mode", "none",
+				"--exclude", "none",
+				"--language", "en"
+			],
+			TestContext.Current.CancellationToken);
+
+		var treeEnvironment = new TestTerminalEnvironment();
+		var treeExit = await new TerminalApplication(treeEnvironment, factory).RunAsync(
+			[
+				"tree", project,
+				"--max-file-bytes", "64",
+				"--git-mode", "none",
+				"--exclude", "none"
+			],
+			TestContext.Current.CancellationToken);
+
+		var output = Path.Combine(workspace.Path, "context.md");
+		var contextEnvironment = new TestTerminalEnvironment();
+		var contextExit = await new TerminalApplication(contextEnvironment, factory).RunAsync(
+			[
+				"export", "context", project,
+				"--view", "content",
+				"--max-file-bytes", "64",
+				"--git-mode", "none",
+				"--exclude", "none",
+				"-o", output
+			],
+			TestContext.Current.CancellationToken);
+
+		var dryRunEnvironment = new TestTerminalEnvironment();
+		var dryRunExit = await new TerminalApplication(dryRunEnvironment, factory).RunAsync(
+			[
+				"export", "context", project,
+				"--max-file-bytes", "64",
+				"--git-mode", "none",
+				"--exclude", "none",
+				"--dry-run",
+				"--language", "en",
+				"-o", Path.Combine(workspace.Path, "dry-run.md")
+			],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, analysisExit);
+		Assert.Equal(2, analysis.RootElement.GetProperty("inventory").GetProperty("files").GetInt32());
+		Assert.Equal(77, analysis.RootElement.GetProperty("metrics").GetProperty("bytes").GetInt64());
+		Assert.Empty(analysisEnvironment.StandardError);
+		Assert.Equal(CommandLineExitCodes.Success, textExit);
+		Assert.Contains("Size filter:", textEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("excluded 1 files", textEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.Empty(textEnvironment.StandardError);
+		Assert.Equal(CommandLineExitCodes.Success, treeExit);
+		Assert.Contains("Small.txt", treeEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("Exact.txt", treeEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("Large.txt", treeEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.Empty(treeEnvironment.StandardError);
+		Assert.Equal(CommandLineExitCodes.Success, contextExit);
+		var context = File.ReadAllText(output);
+		Assert.Contains("small-marker", context, StringComparison.Ordinal);
+		Assert.Contains("Exact.txt", context, StringComparison.Ordinal);
+		Assert.DoesNotContain("Large.txt", context, StringComparison.Ordinal);
+		Assert.Empty(contextEnvironment.StandardError);
+		Assert.Equal(CommandLineExitCodes.Success, dryRunExit);
+		Assert.False(File.Exists(Path.Combine(workspace.Path, "dry-run.md")));
+		Assert.Contains("Size filter: up to 64 B; excluded 1 files", dryRunEnvironment.StandardError, StringComparison.Ordinal);
+		Assert.Empty(dryRunEnvironment.StandardOutput);
 	}
 
 	[Fact]

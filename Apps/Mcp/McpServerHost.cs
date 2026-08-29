@@ -15,12 +15,20 @@ public static class McpServerHost
 		IReadOnlyList<string> roots,
 		bool hidePrivateData = false,
 		CancellationToken cancellationToken = default) =>
+		RunAsync(roots, hidePrivateData, allowRemote: false, cancellationToken);
+
+	public static Task RunAsync(
+		IReadOnlyList<string> roots,
+		bool hidePrivateData,
+		bool allowRemote,
+		CancellationToken cancellationToken = default) =>
 		RunWithStreamsAsync(
 			roots,
 			Console.OpenStandardInput(),
 			Console.OpenStandardOutput(),
 			hidePrivateData,
-			cancellationToken);
+			cancellationToken,
+			allowRemote: allowRemote);
 
 	internal static async Task RunWithStreamsAsync(
 		IReadOnlyList<string> roots,
@@ -30,19 +38,27 @@ public static class McpServerHost
 		CancellationToken cancellationToken = default,
 		Func<string>? appDataPathProvider = null,
 		string? tempRoot = null,
-		Func<McpRootRegistry, McpServices>? servicesFactory = null)
+		Func<McpProjectRootJail, McpServices>? servicesFactory = null,
+		bool allowRemote = false,
+		Func<McpRemoteProjectServices>? remoteServicesFactory = null)
 	{
 		ArgumentNullException.ThrowIfNull(roots);
 		ArgumentNullException.ThrowIfNull(input);
 		ArgumentNullException.ThrowIfNull(output);
 
 		var rootRegistry = new McpRootRegistry(roots);
+		using var projectSources = new McpProjectSourceResolver(
+			rootRegistry,
+			allowRemote,
+			() => remoteServicesFactory?.Invoke() ??
+			      McpRemoteProjectServices.Create(appDataPathProvider));
+		var rootJail = new McpProjectRootJail(rootRegistry, projectSources);
 		var services = new Lazy<McpServices>(
-			() => servicesFactory?.Invoke(rootRegistry) ?? McpServices.Create(rootRegistry, appDataPathProvider),
+			() => servicesFactory?.Invoke(rootJail) ?? McpServices.Create(rootJail, appDataPathProvider),
 			LazyThreadSafetyMode.ExecutionAndPublication);
 		await using var packs = new McpPackRegistry(tempRoot);
 		var projectService = new Lazy<McpProjectService>(
-			() => new McpProjectService(rootRegistry, services.Value, hidePrivateData),
+			() => new McpProjectService(projectSources, rootJail, services.Value, hidePrivateData),
 			LazyThreadSafetyMode.ExecutionAndPublication);
 		var tools = new DevProjexMcpTools(rootRegistry, projectService, packs);
 		var catalog = new DevProjexMcpToolCatalog(tools);

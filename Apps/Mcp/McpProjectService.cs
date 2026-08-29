@@ -1,21 +1,26 @@
 namespace DevProjex.Mcp;
 
 internal sealed class McpProjectService(
-	McpRootRegistry roots,
+	McpProjectSourceResolver projectSources,
+	McpProjectRootJail roots,
 	McpServices services,
 	bool hidePrivateData)
 {
 	public async Task<ProjectContextPlan> BuildPlanAsync(
 		string? project,
+		string? branch,
 		IReadOnlyList<string>? paths,
 		IReadOnlyList<string>? includePatterns,
 		IReadOnlyList<string>? excludePatterns,
 		string? profile,
 		bool trackedOnly,
+		long? maximumFileBytes,
 		CancellationToken cancellationToken,
 		bool includeOutputMetrics = true)
 	{
-		var projectRoot = roots.ResolveProject(project);
+		var source = await projectSources.ResolveAsync(project, branch, cancellationToken)
+			.ConfigureAwait(false);
+		var projectRoot = source.Root;
 		if (trackedOnly && !IsGitRepository(projectRoot))
 		{
 			throw new McpToolException(
@@ -53,7 +58,7 @@ internal sealed class McpProjectService(
 			services.RedactionSession.ReplaceMarkedSecrets(marks);
 		}
 
-		var request = new ProjectContextRequest(projectRoot, selection);
+		var request = new ProjectContextRequest(projectRoot, selection, source.Identity);
 		var plan = await (includeOutputMetrics
 				? services.Planner.BuildAsync(request, cancellationToken)
 				: services.Planner.BuildStructureAsync(request, cancellationToken))
@@ -67,46 +72,55 @@ internal sealed class McpProjectService(
 				"Fix the reported project access or Git state and retry.");
 		}
 		ValidatePlanContainment(roots, projectRoot, plan.IncludedFiles, cancellationToken);
+		ProjectContextPlan narrowed;
 		if ((paths is null || paths.Count == 0) &&
 		    (includePatterns is null || includePatterns.Count == 0) &&
 		    (excludePatterns is null || excludePatterns.Count == 0))
 		{
-			return plan;
+			narrowed = plan;
 		}
-
-		var globs = McpGlobSet.Create(includePatterns, excludePatterns);
-		var requested = ResolveRequestedPaths(projectRoot, paths, cancellationToken);
-		var selected = new List<string>();
-		foreach (var path in plan.IncludedFiles)
+		else
 		{
-			cancellationToken.ThrowIfCancellationRequested();
-			if (!MatchesRequested(path, requested.Paths, requested.Directories))
-				continue;
+			var globs = McpGlobSet.Create(includePatterns, excludePatterns);
+			var requested = ResolveRequestedPaths(projectRoot, paths, cancellationToken);
+			var selected = new List<string>();
+			foreach (var path in plan.IncludedFiles)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				if (!MatchesRequested(path, requested.Paths, requested.Directories))
+					continue;
 
-			var relativePath = ToRelative(projectRoot, path);
-			if (globs.Includes(relativePath))
-				selected.Add(relativePath);
-		}
-		if (selected.Count > 0)
-		{
-			return await services.Planner
-				.ReprojectSelectionAsync(plan, selected, cancellationToken)
-				.ConfigureAwait(false);
+				var relativePath = ToRelative(projectRoot, path);
+				if (globs.Includes(relativePath))
+					selected.Add(relativePath);
+			}
+			if (selected.Count > 0)
+			{
+				narrowed = await services.Planner
+					.ReprojectSelectionAsync(plan, selected, cancellationToken)
+					.ConfigureAwait(false);
+			}
+			else
+			{
+				var empty = await services.Planner
+					.ReprojectSelectionAsync(plan, [".devprojex-mcp-empty-selection"], cancellationToken)
+					.ConfigureAwait(false);
+				narrowed = empty with
+				{
+					Diagnostics = empty.Diagnostics
+						.Where(static diagnostic => diagnostic.Code != "DPX-SELECTION-PATH-MISSING")
+						.ToArray()
+				};
+			}
 		}
 
-		var empty = await services.Planner
-			.ReprojectSelectionAsync(plan, [".devprojex-mcp-empty-selection"], cancellationToken)
+		return await ProjectFileSizeFilter
+			.ApplyAsync(services.Planner, narrowed, maximumFileBytes, cancellationToken)
 			.ConfigureAwait(false);
-		return empty with
-		{
-			Diagnostics = empty.Diagnostics
-				.Where(static diagnostic => diagnostic.Code != "DPX-SELECTION-PATH-MISSING")
-				.ToArray()
-		};
 	}
 
 	internal static void ValidatePlanContainment(
-		McpRootRegistry roots,
+		McpProjectRootJail roots,
 		string projectRoot,
 		IReadOnlyList<string> includedFiles,
 		CancellationToken cancellationToken)
@@ -117,6 +131,17 @@ internal sealed class McpProjectService(
 			_ = roots.ResolveExistingPath(projectRoot, file);
 		}
 	}
+
+	internal static void ValidatePlanContainment(
+		McpRootRegistry roots,
+		string projectRoot,
+		IReadOnlyList<string> includedFiles,
+		CancellationToken cancellationToken) =>
+		ValidatePlanContainment(
+			new McpProjectRootJail(roots),
+			projectRoot,
+			includedFiles,
+			cancellationToken);
 
 	public McpDetailResolution ResolveDetail(ProjectContextPlan plan, McpDetailLevel detail) =>
 		McpDetailPolicy.Resolve(plan.Selection, detail);
@@ -154,6 +179,15 @@ internal sealed class McpProjectService(
 			CreateTransformationContext(plan));
 		return OutputRootPathPresentation.ResolvePath(displayRoot, pathRedaction).Text;
 	}
+
+	public static string ResolveAddressDocumentRoot(ProjectContextPlan plan) =>
+		plan.SourceIdentity is
+		{
+			SourceType: ProjectSourceType.GitClone,
+			SourceReference.Length: > 0
+		} identity
+			? identity.SourceReference
+			: plan.SourceRoot;
 
 	public Task<PreparedSecretRedactionOutput> PrepareAsync(
 		ProjectContextPlan plan,

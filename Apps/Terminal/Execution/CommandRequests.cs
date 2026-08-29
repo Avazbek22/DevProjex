@@ -17,7 +17,9 @@ public sealed record AnalyzeCommandRequest(
 	TerminalOutputOptions Output,
 	bool IncludeFindings = false,
 	bool FailOnFindings = false,
-	bool Force = false);
+	bool Force = false,
+	int? TopFiles = null,
+	long? MaxFileBytes = null);
 
 public sealed record TreeCommandRequest(
 	string ProjectPath,
@@ -25,7 +27,8 @@ public sealed record TreeCommandRequest(
 	TreeTextFormat Format,
 	string? OutputPath,
 	TerminalOutputOptions Output,
-	bool Force = false);
+	bool Force = false,
+	long? MaxFileBytes = null);
 
 public sealed record ExportContextCommandRequest(
 	string ProjectPath,
@@ -35,7 +38,8 @@ public sealed record ExportContextCommandRequest(
 	string? OutputPath,
 	bool Force,
 	bool DryRun,
-	TerminalOutputOptions Output);
+	TerminalOutputOptions Output,
+	long? MaxFileBytes = null);
 
 public sealed record ExportProjectCommandRequest(
 	string ProjectPath,
