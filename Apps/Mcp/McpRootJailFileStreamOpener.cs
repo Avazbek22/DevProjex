@@ -4,10 +4,19 @@ using Microsoft.Win32.SafeHandles;
 
 namespace DevProjex.Mcp;
 
-internal sealed class McpRootJailFileStreamOpener(McpProjectRootJail roots)
+internal sealed class McpRootJailFileStreamOpener
 {
 	private const int DarwinGetPath = 50;
 	private const int DarwinPathBufferLength = 1024;
+	private readonly McpProjectRootJail _roots;
+
+	public McpRootJailFileStreamOpener(McpProjectRootJail roots) =>
+		_roots = roots ?? throw new ArgumentNullException(nameof(roots));
+
+	public McpRootJailFileStreamOpener(McpRootRegistry roots)
+		: this(new McpProjectRootJail(roots))
+	{
+	}
 
 	public FileStream OpenRead(
 		string path,
@@ -16,7 +25,7 @@ internal sealed class McpRootJailFileStreamOpener(McpProjectRootJail roots)
 		bool asynchronous)
 	{
 		UnixFileTypeInspector.EnsureRegularFile(path);
-		var lexicalRoot = roots.FindLexicalRoot(path);
+		var lexicalRoot = _roots.FindLexicalRoot(path);
 		var stream = new FileStream(
 			path,
 			FileMode.Open,
@@ -30,7 +39,7 @@ internal sealed class McpRootJailFileStreamOpener(McpProjectRootJail roots)
 			if (lexicalRoot is not null)
 			{
 				var openedPath = ResolveOpenedPath(stream.SafeFileHandle);
-				roots.EnsureOpenedPathIsWithin(lexicalRoot, path, openedPath);
+				_roots.EnsureOpenedPathIsWithin(lexicalRoot, path, openedPath);
 			}
 			return stream;
 		}

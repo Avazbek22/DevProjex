@@ -122,6 +122,17 @@ internal sealed class McpProjectService(
 		}
 	}
 
+	internal static void ValidatePlanContainment(
+		McpRootRegistry roots,
+		string projectRoot,
+		IReadOnlyList<string> includedFiles,
+		CancellationToken cancellationToken) =>
+		ValidatePlanContainment(
+			new McpProjectRootJail(roots),
+			projectRoot,
+			includedFiles,
+			cancellationToken);
+
 	public McpDetailResolution ResolveDetail(ProjectContextPlan plan, McpDetailLevel detail) =>
 		McpDetailPolicy.Resolve(plan.Selection, detail);
 
