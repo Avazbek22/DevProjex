@@ -179,9 +179,14 @@ public sealed class TerminalProcessSmokeIntegrationTests
 		Assert.Equal(outputPath, fileContext.StandardOutput.TrimEnd('\r', '\n'));
 		var fileDocument = XDocument.Load(outputPath);
 		var fileEntry = Assert.Single(fileDocument.Root!.Element("files")!.Elements("file"));
-		Assert.Equal(Path.Combine(project, "B-small.txt"), fileEntry.Attribute("path")?.Value);
-		Assert.Equal("1", fileDocument.Root.Element("tokenBudget")?
-			.Element("includedFiles")?.Value);
+		Assert.Equal(
+			PathUtility.NormalizeSeparators(Path.Combine(project, "B-small.txt")),
+			fileEntry.Attribute("path")?.Value);
+		var tokenBudget = fileDocument.Root.Element("tokenBudget")!;
+		Assert.Equal("1", tokenBudget.Element("includedFiles")?.Value);
+		Assert.Equal(
+			PathUtility.NormalizeSeparators(Path.Combine(project, "A-large.txt")),
+			tokenBudget.Element("largestSkippedFiles")?.Element("file")?.Attribute("path")?.Value);
 		Assert.Contains("Token budget 1:", fileContext.StandardError, StringComparison.Ordinal);
 		Assert.DoesNotContain("\u001b", fileContext.StandardError, StringComparison.Ordinal);
 	}

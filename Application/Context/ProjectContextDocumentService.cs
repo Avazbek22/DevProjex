@@ -768,7 +768,7 @@ public sealed class ProjectContextDocumentService(
 					continue;
 				}
 				writer.WriteStartObject();
-				writer.WriteString("path", file.Path);
+				writer.WriteString("path", NormalizePath(file.Path));
 				writer.WriteBoolean("isBinary", file.IsBinary);
 				writer.WriteString("classification", ToToken(file.Classification));
 				if (file.Classification != FileContentClassification.Text)
@@ -880,7 +880,7 @@ public sealed class ProjectContextDocumentService(
 					continue;
 				}
 				writer.WriteStartElement("file");
-				WriteSanitizedXmlAttributeString(writer, "path", file.Path);
+				WriteSanitizedXmlAttributeString(writer, "path", NormalizePath(file.Path));
 				writer.WriteAttributeString("isBinary", XmlConvert.ToString(file.IsBinary));
 				writer.WriteAttributeString("classification", ToToken(file.Classification));
 				if (file.Classification == FileContentClassification.Text)
@@ -1793,7 +1793,7 @@ public sealed class ProjectContextDocumentService(
 		foreach (var file in report.LargestSkippedFiles)
 		{
 			writer.WriteStartObject();
-			writer.WriteString("path", file.Path);
+			writer.WriteString("path", NormalizePath(file.Path));
 			writer.WriteNumber("estimatedTokens", file.EstimatedTokens);
 			writer.WriteEndObject();
 		}
@@ -2013,7 +2013,7 @@ public sealed class ProjectContextDocumentService(
 		foreach (var file in report.LargestSkippedFiles)
 		{
 			writer.WriteStartElement("file");
-			WriteSanitizedXmlAttributeString(writer, "path", file.Path);
+			WriteSanitizedXmlAttributeString(writer, "path", NormalizePath(file.Path));
 			writer.WriteAttributeString(
 				"estimatedTokens",
 				XmlConvert.ToString(file.EstimatedTokens));

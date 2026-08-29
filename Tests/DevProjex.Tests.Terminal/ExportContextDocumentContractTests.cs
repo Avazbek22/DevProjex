@@ -270,19 +270,27 @@ public sealed class ExportContextDocumentContractTests
 			useUnifiedContentHeaders: true);
 		var output = Encoding.UTF8.GetString(destination.ToArray());
 		string? diagnosticPath;
+		string? serializedFilePath;
 		if (format == ProjectContextDocumentFormat.Json)
 		{
 			using var document = JsonDocument.Parse(output);
 			diagnosticPath = document.RootElement.GetProperty("diagnostics")[0]
 				.GetProperty("path").GetString();
+			serializedFilePath = document.RootElement.GetProperty("files")[0]
+				.GetProperty("path").GetString();
 		}
 		else
 		{
-			diagnosticPath = XDocument.Parse(output).Root!.Element("diagnostics")!
+			var document = XDocument.Parse(output);
+			diagnosticPath = document.Root!.Element("diagnostics")!
 				.Element("diagnostic")!.Attribute("path")?.Value;
+			serializedFilePath = document.Root.Element("files")!
+				.Element("file")!.Attribute("path")?.Value;
 		}
 
-		Assert.Equal(PathUtility.NormalizeSeparators(Path.GetFullPath(source)), diagnosticPath);
+		var expectedPath = PathUtility.NormalizeSeparators(Path.GetFullPath(source));
+		Assert.Equal(expectedPath, diagnosticPath);
+		Assert.Equal(expectedPath, serializedFilePath);
 	}
 
 	[Theory]
