@@ -110,6 +110,11 @@ public sealed class DevProjexCommandTree
 		{
 			Description = L("Terminal.Option.McpAllowRemote")
 		};
+		var gitMode = CliChoiceSymbols.NullableOption(
+			"--git-mode",
+			L("Terminal.Option.McpGitMode"),
+			CliChoiceSets.PersistentGitMode,
+			_localization);
 		roots.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
 			context,
 			FileSystemCompletionKind.Directories,
@@ -117,11 +122,13 @@ public sealed class DevProjexCommandTree
 		command.Options.Add(roots);
 		command.Options.Add(hidePrivateData);
 		command.Options.Add(allowRemote);
+		command.Options.Add(gitMode);
 		CliExamplesRegistry.Set(
 			command,
 			"devprojex mcp",
 			"devprojex mcp --root . --root ../shared",
-			"devprojex mcp --root . --hide-private-data");
+			"devprojex mcp --root . --hide-private-data",
+			"devprojex mcp --root . --git-mode tracked");
 		command.SetAction(async (parseResult, cancellationToken) =>
 		{
 			var explicitRoots = parseResult.GetValue(roots) ?? [];
@@ -135,6 +142,7 @@ public sealed class DevProjexCommandTree
 						resolvedRoots,
 						parseResult.GetValue(hidePrivateData),
 						parseResult.GetValue(allowRemote),
+						parseResult.GetValue(gitMode),
 						_serviceFactory.AppDataPathProvider,
 						cancellationToken)
 					.ConfigureAwait(false);
@@ -673,6 +681,13 @@ public sealed class DevProjexCommandTree
 			    CliParseValue.TryGet(result, search, out var searchValue) &&
 			    searchValue is not null)
 				result.AddError(LocalizedParseError.Create(L("Terminal.Validation.FilterSearchConflict")));
+			if (result.GetResult(selection.GitMode) is { Implicit: false } &&
+			    CliParseValue.TryGet(result, selection.GitMode, out var desktopGitMode) &&
+			    desktopGitMode is { Mode: GitFilteringMode.Diff })
+			{
+				result.AddError(LocalizedParseError.Create(
+					L("Terminal.Validation.DesktopGitMode")));
+			}
 		});
 		command.SetAction(async (parseResult, cancellationToken) =>
 		{
@@ -2032,7 +2047,8 @@ public sealed class DevProjexCommandTree
 		ProjectSelectionSpec selection,
 		CancellationToken cancellationToken)
 	{
-		if (selection.GitMode != GitFilteringMode.TrackedFilesOnly)
+		if (selection.GitMode is not (GitFilteringMode.TrackedFilesOnly or
+			GitFilteringMode.Staged or GitFilteringMode.Changes))
 			return null;
 
 		var loaded = services.AnalysisService.Load(
@@ -2042,11 +2058,26 @@ public sealed class DevProjexCommandTree
 				selection.Extensions,
 				ProjectSelectionAdapter.ToIgnoreOptions(selection)),
 			cancellationToken);
-		var readiness = ProjectContextGitReadiness.Evaluate(
-			GitFilteringMode.TrackedFilesOnly,
-			loaded.DiscoveredGitTrackedIndexCount,
-			loaded.UnavailableGitTrackedIndexCount);
-		if (readiness.CreateDiagnostic(PathUtility.Normalize(projectPath)) is not { } diagnostic)
+		ContextDiagnostic? diagnostic;
+		if (selection.GitMode == GitFilteringMode.TrackedFilesOnly)
+		{
+			var readiness = ProjectContextGitReadiness.Evaluate(
+				GitFilteringMode.TrackedFilesOnly,
+				loaded.DiscoveredGitTrackedIndexCount,
+				loaded.UnavailableGitTrackedIndexCount);
+			diagnostic = readiness.CreateDiagnostic(PathUtility.Normalize(projectPath));
+		}
+		else
+		{
+			diagnostic = loaded.DiscoveredGitTrackedIndexCount > 0
+				? null
+				: new ContextDiagnostic(
+					GitScopeFilter.UnavailableDiagnosticCode,
+					ContextDiagnosticSeverity.Error,
+					"The requested Git state is unavailable.",
+					PathUtility.Normalize(projectPath));
+		}
+		if (diagnostic is null)
 			return null;
 
 		new ContextDiagnosticRenderer(

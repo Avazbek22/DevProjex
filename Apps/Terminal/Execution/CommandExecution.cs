@@ -173,6 +173,8 @@ internal static class CommandExecution
 		"DPX-DESKTOP-PAYLOAD-TOO-LARGE" => localization["Terminal.Error.DesktopPayloadTooLarge"],
 		ProjectContextGitReadiness.UnavailableDiagnosticCode =>
 			localization["Terminal.Diagnostic.TrackedIndexUnavailable"],
+		GitScopeFilter.UnavailableDiagnosticCode =>
+			localization["Terminal.Diagnostic.GitStateUnavailable"],
 		var value when value.StartsWith("DPX-DESKTOP-", StringComparison.Ordinal) =>
 			localization["Terminal.Error.DesktopRequestFailed"],
 		_ => localization["Terminal.Error.CommandInvalid"]

@@ -15,7 +15,7 @@ internal sealed class SelectionOptions
 	public Option<string[]> Extensions { get; }
 	public Option<string[]> SelectedPaths { get; }
 	public Option<string?> SelectedPathsSource { get; }
-	public Option<GitFilteringMode?> GitMode { get; }
+	public Option<CliGitModeValue?> GitMode { get; }
 	public Option<CliExclusionValue[]> Exclusions { get; }
 	public Option<bool?> HideSecrets { get; }
 	public Option<bool> NoHideSecrets { get; }
@@ -89,11 +89,7 @@ internal sealed class SelectionOptions
 				context,
 				FileSystemCompletionKind.FilesAndDirectories,
 				FileSystemCompletionSource.ResolveProjectDirectory(context)));
-		GitMode = CliChoiceSymbols.NullableOption(
-			"--git-mode",
-			localization["Terminal.Option.GitMode"],
-			CliChoiceSets.GitMode,
-			localization);
+		GitMode = CreateGitModeOption(localization);
 		Exclusions = RepeatableExclusions(localization);
 		MaxFileBytes = new Option<long?>("--max-file-bytes")
 		{
@@ -204,9 +200,10 @@ internal sealed class SelectionOptions
 	{
 		var profileValue = parseResult.GetValue(Profile);
 		var profile = profileValue.Resolve(projectPath, services);
-		GitFilteringMode? gitMode = parseResult.GetResult(GitMode) is null
+		var parsedGitMode = parseResult.GetResult(GitMode) is null
 			? null
-			: parseResult.GetValue(GitMode)!.Value;
+			: parseResult.GetValue(GitMode);
+		GitFilteringMode? gitMode = parsedGitMode?.Mode;
 		var exclusions = parseResult.GetResult(Exclusions) is null
 			? null
 			: ParseExclusions(parseResult.GetValue(Exclusions) ?? []);
@@ -231,6 +228,7 @@ internal sealed class SelectionOptions
 			Extensions: GetExplicitValues(parseResult, Extensions),
 			SelectedPaths: selectedPaths,
 			GitMode: gitMode,
+			GitDiffRange: parsedGitMode?.DiffRange,
 			Exclusions: exclusions,
 			HideSecrets: hideSecrets,
 			HidePrivateData: hidePrivateData,
@@ -324,6 +322,35 @@ internal sealed class SelectionOptions
 				kind,
 				FileSystemCompletionSource.ResolveProjectDirectory(context)));
 		}
+		return option;
+	}
+
+	private static Option<CliGitModeValue?> CreateGitModeOption(LocalizationService localization)
+	{
+		var option = new Option<CliGitModeValue?>("--git-mode")
+		{
+			Description = localization["Terminal.Option.GitMode"],
+			HelpName = "MODE",
+			Arity = ArgumentArity.ExactlyOne,
+			CustomParser = result =>
+			{
+				if (result.Tokens.Count == 1)
+				{
+					var token = result.Tokens[0].Value;
+					if (!token.Equals("off", StringComparison.OrdinalIgnoreCase) &&
+					    GitScopeSelection.TryParse(token, out var mode, out var diffRange))
+					{
+						return new CliGitModeValue(mode, diffRange);
+					}
+				}
+
+				result.AddError(LocalizedParseError.Create(
+					localization["Terminal.Validation.GitMode"]));
+				return null;
+			}
+		};
+		option.CompletionSources.Add(CliChoiceSets.GitMode.Tokens.ToArray());
+		option.CompletionSources.Add(["diff:<ref>..<ref>"]);
 		return option;
 	}
 
@@ -483,3 +510,7 @@ internal sealed class SelectionOptions
 		return (positive, negative);
 	}
 }
+
+internal readonly record struct CliGitModeValue(
+	GitFilteringMode Mode,
+	string? DiffRange);

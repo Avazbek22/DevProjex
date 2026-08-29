@@ -384,7 +384,7 @@ internal static class AnalysisTextFormatter
 			TerminalTextEscaping.EscapeSingleLine(FormatProfile(plan.Selection.ProfileSource))));
 		rows.Add(new AnalysisTextRow(
 			localization["Terminal.Analysis.GitMode"],
-			ProjectSelectionTokens.ToToken(plan.Selection.GitMode!.Value)));
+			ProjectSelectionTokens.ToToken(plan.Selection)));
 		if (plan.Selection.Exclusions is { Count: > 0 } exclusions)
 		{
 			rows.Add(new AnalysisTextRow(
@@ -521,7 +521,7 @@ internal static class AnalysisTextFormatter
 			plan.Fingerprint));
 		rows.AddRange(plan.Diagnostics.Select(diagnostic => new AnalysisTextRow(
 			diagnostic.Code,
-			ContextDiagnosticRenderer.ResolveMessage(localization, diagnostic.Code))));
+			ContextDiagnosticRenderer.ResolveMessage(localization, diagnostic))));
 		return rows;
 	}
 

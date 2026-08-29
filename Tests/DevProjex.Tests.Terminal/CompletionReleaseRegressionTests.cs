@@ -35,6 +35,7 @@ public sealed class CompletionReleaseRegressionTests
 		var candidates = await CompleteAsync("devprojex mcp --");
 
 		Assert.Contains("--hide-private-data", candidates);
+		Assert.Contains("--git-mode", candidates);
 	}
 
 	[Fact]

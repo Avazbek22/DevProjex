@@ -172,6 +172,14 @@ internal static class CliChoiceSets
 				new CliChoiceSet<GitFilteringMode>.Choice(descriptor.Token, descriptor.Id))
 			.ToArray());
 
+	public static CliChoiceSet<GitFilteringMode> PersistentGitMode { get; } = new(
+		ProjectPresentationCatalog.GitFiltering
+			.Where(static descriptor => GitScopeSelection.IsPersistent(descriptor.Id))
+			.OrderBy(static descriptor => descriptor.Order)
+			.Select(static descriptor =>
+				new CliChoiceSet<GitFilteringMode>.Choice(descriptor.Token, descriptor.Id))
+			.ToArray());
+
 	public static CliChoiceSet<CliExclusionValue> Exclusion { get; } = new(
 		[
 			new(

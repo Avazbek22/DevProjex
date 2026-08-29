@@ -209,7 +209,8 @@ public sealed class DocumentationAndPackagingContractTests
 		}
 
 		Assert.Contains("Exclusions", commandLine, StringComparison.Ordinal);
-		Assert.Contains("--git-mode <none|gitignore|tracked>", commandLine, StringComparison.Ordinal);
+		Assert.Contains("--git-mode <MODE>", commandLine, StringComparison.Ordinal);
+		Assert.Contains("`diff:<REF>..<REF>`", commandLine, StringComparison.Ordinal);
 		Assert.Contains("stdout", commandLine, StringComparison.Ordinal);
 		Assert.Contains("stderr", commandLine, StringComparison.Ordinal);
 	}

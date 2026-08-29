@@ -78,7 +78,7 @@ public sealed class MachineOutputRenderer(ITerminalEnvironment environment)
 						identity.CommitHash)
 					: null),
 			Selection: new AnalysisSelectionDocument(
-				ProjectSelectionTokens.ToToken(plan.Selection.GitMode!.Value),
+				ProjectSelectionTokens.ToToken(plan.Selection),
 				plan.Selection.Exclusions!.Select(ProjectSelectionTokens.ToToken).ToArray(),
 				plan.Selection.HideSecrets == true,
 				plan.Selection.HidePrivateData == true,

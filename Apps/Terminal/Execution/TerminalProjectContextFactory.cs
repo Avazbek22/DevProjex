@@ -5,7 +5,8 @@ namespace DevProjex.Terminal.Execution;
 public sealed class TerminalProjectContextFactory(
 	ProjectContextPlanner planner,
 	ProjectSourceIdentityResolver sourceIdentityResolver,
-	SecretRedactionSession secretRedactionSession)
+	SecretRedactionSession secretRedactionSession,
+	IGitScopePathProvider gitScopePathProvider)
 {
 	public Task<ProjectContextPlan> BuildAsync(
 		string projectPath,
@@ -51,22 +52,32 @@ public sealed class TerminalProjectContextFactory(
 			.ResolveAsync(projectPath, knownIdentity, cancellationToken)
 			.ConfigureAwait(false);
 		var request = new ProjectContextRequest(projectPath, selection, sourceIdentity);
+		ProjectContextPlan plan;
 		if (!includeOutputMetrics)
 		{
-			return await planner
+			plan = await planner
 				.BuildStructureAsync(request, cancellationToken)
 				.ConfigureAwait(false);
 		}
-		if (!includeContentOutputMetrics)
+		else if (!includeContentOutputMetrics)
 		{
-			return await planner
+			plan = await planner
 				.BuildWithTreeMetricsAsync(request, cancellationToken)
 				.ConfigureAwait(false);
 		}
-		return captureIgnoreImpactCounts
-			? await planner
+		else if (captureIgnoreImpactCounts)
+		{
+			plan = await planner
 				.BuildWithIgnoreImpactCountsAsync(request, cancellationToken)
-				.ConfigureAwait(false)
-			: await planner.BuildAsync(request, cancellationToken).ConfigureAwait(false);
+				.ConfigureAwait(false);
+		}
+		else
+		{
+			plan = await planner.BuildAsync(request, cancellationToken).ConfigureAwait(false);
+		}
+
+		return await GitScopeFilter
+			.ApplyAsync(planner, plan, gitScopePathProvider, cancellationToken)
+			.ConfigureAwait(false);
 	}
 }
