@@ -1078,6 +1078,7 @@ internal sealed partial class TerminalWorkspaceSession
 		ApplyPathFilters(
 			selection.GitMode ?? _state.Plan.GitReadiness.Mode,
 			exclusions,
+			selection.GitDiffRange,
 			originatedFromCommandLine: originatedFromCommandLine);
 	}
 
@@ -1087,9 +1088,11 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (_state is null)
 			return;
+		var selection = GetDisplayedSettingsSelection();
 		ApplyPathFilters(
-			GetDisplayedSettingsSelection().GitMode ?? _state.Plan.GitReadiness.Mode,
+			selection.GitMode ?? _state.Plan.GitReadiness.Mode,
 			exclusions,
+			selection.GitDiffRange,
 			originatedFromCommandLine: originatedFromCommandLine);
 	}
 
