@@ -830,6 +830,14 @@ public sealed class McpServerIntegrationTests
 
 			var resultText = Text(result);
 			Assert.Contains("Pack stored as '", resultText, StringComparison.Ordinal);
+			var budgeted = await server.CallAsync(
+				"pack_context",
+				new Dictionary<string, object?>
+				{
+					["view"] = "content",
+					["format"] = "text",
+					["max_tokens"] = 1
+				});
 			var page = await server.CallAsync(
 				"read_pack",
 				new Dictionary<string, object?>
@@ -839,6 +847,8 @@ public sealed class McpServerIntegrationTests
 				});
 			AssertPackPathPolicy(resultText, project, protectedProject, hidePrivateData);
 			AssertPackPathPolicy(Text(page), project, protectedProject, hidePrivateData);
+			Assert.Contains("Skipped: 1 file", Text(budgeted), StringComparison.Ordinal);
+			AssertPackPathPolicy(Text(budgeted), project, protectedProject, hidePrivateData);
 		}
 		finally
 		{

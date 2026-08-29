@@ -198,6 +198,34 @@ public sealed class ExportContextDocumentContractTests
 		Assert.Contains("skipped 1 files", environment.StandardError, StringComparison.Ordinal);
 	}
 
+	[Theory]
+	[InlineData("text")]
+	[InlineData("markdown")]
+	public async Task AllFitTokenBudgetPreservesHumanDocumentBytes(string format)
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("alpha.txt", "alpha\r\n");
+		workspace.WriteFile("Unicode/данные.txt", "emoji 😀\n");
+		var unlimited = new TestTerminalEnvironment();
+		var budgeted = new TestTerminalEnvironment();
+
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(workspace, unlimited, format, view: "content"));
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(
+				workspace,
+				budgeted,
+				format,
+				maximumEstimatedTokens: 10_000,
+				view: "content"));
+
+		Assert.Equal(unlimited.StandardOutput, budgeted.StandardOutput);
+		Assert.Empty(unlimited.StandardError);
+		Assert.Contains("skipped 0 files", budgeted.StandardError, StringComparison.Ordinal);
+	}
+
 	[Fact]
 	public async Task DryRunReportsTheSameTokenBudgetForecastWithoutWritingDocument()
 	{
