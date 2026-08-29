@@ -43,6 +43,8 @@ internal sealed class ProjectLoadSnapshotPipeline(IProjectLoadSnapshotPipelineHo
         }
 
         cancellationToken.ThrowIfCancellationRequested();
+		if (host.TryHandleGitScopeDiagnostics(treeBuild))
+			return false;
         if (host.TryHandleTreeRootAccessDenied(treeInput, treeBuild.Tree))
             return false;
 

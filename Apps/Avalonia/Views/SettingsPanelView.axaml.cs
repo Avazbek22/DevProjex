@@ -22,6 +22,7 @@ public partial class SettingsPanelView : UserControl
 
     public event EventHandler<RoutedEventArgs>? ApplySettingsRequested;
     public event EventHandler<RoutedEventArgs>? IgnoreAllChanged;
+	public event EventHandler<SelectionChangedEventArgs>? GitFilteringModeChanged;
 	public event EventHandler<RoutedEventArgs>? ContentProcessingAllChanged;
     public event EventHandler<RoutedEventArgs>? ExtensionsAllChanged;
     public event EventHandler<SettingsPanelMinimumWidthChangedEventArgs>? MinimumWidthChanged;
@@ -51,6 +52,9 @@ public partial class SettingsPanelView : UserControl
 
     private void OnIgnoreAllChanged(object? sender, RoutedEventArgs e)
         => IgnoreAllChanged?.Invoke(sender, e);
+
+	private void OnGitFilteringModeChanged(object? sender, SelectionChangedEventArgs e)
+		=> GitFilteringModeChanged?.Invoke(sender, e);
 
 	private void OnContentProcessingAllChanged(object? sender, RoutedEventArgs e)
 		=> ContentProcessingAllChanged?.Invoke(sender, e);

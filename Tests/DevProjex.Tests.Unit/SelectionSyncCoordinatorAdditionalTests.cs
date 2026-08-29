@@ -9,6 +9,47 @@ namespace DevProjex.Tests.Unit;
 public sealed class SelectionSyncCoordinatorAdditionalTests
 {
 	[Fact]
+	public void MomentaryGuiGitModeUsesRadioPresentationAndPersistsTheStickyMode()
+	{
+		using var project = new TemporaryDirectory();
+		project.CreateFolder(".git");
+		project.CreateFile(".gitignore", "*.tmp\n");
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(
+			viewModel,
+			currentPathProvider: () => project.Path,
+			availabilityProvider: static (_, _) => new IgnoreOptionsAvailability(
+				IncludeGitIgnore: true,
+				IncludeSmartIgnore: true,
+				IncludeTrackedGitFilesOnly: true));
+
+		coordinator.PopulateIgnoreOptionsForRootSelection([], project.Path);
+		Assert.Equal(
+			[
+				GitFilteringMode.None,
+				GitFilteringMode.RespectGitIgnore,
+				GitFilteringMode.TrackedFilesOnly,
+				GitFilteringMode.Staged,
+				GitFilteringMode.Changes
+			],
+			viewModel.GitFilteringModes.Select(static option => option.Mode));
+		Assert.DoesNotContain(
+			viewModel.PathIgnoreOptions,
+			static option => GitFilteringModeResolver.IsGitFilteringOption(option.Id));
+
+		coordinator.HandleGitFilteringModeChanged(GitFilteringMode.Staged, project.Path);
+
+		Assert.Equal(GitFilteringMode.Staged, coordinator.ActiveGitFilteringMode);
+		Assert.Equal(GitFilteringMode.Staged, viewModel.SelectedGitFilteringModeOption?.Mode);
+		var persisted = coordinator.GetPersistableSelectedIgnoreOptionIds();
+		Assert.Contains(IgnoreOptionId.UseGitIgnore, persisted);
+		Assert.DoesNotContain(IgnoreOptionId.TrackedGitFilesOnly, persisted);
+		var states = coordinator.SnapshotIgnoreOptionStatesForPersistence();
+		Assert.True(states![IgnoreOptionId.UseGitIgnore]);
+		Assert.False(states[IgnoreOptionId.TrackedGitFilesOnly]);
+	}
+
+	[Fact]
 	public void AppliedTrackedMode_RemainsFailClosedWhenItsOptionIsNoLongerVisible()
 	{
 		const string projectPath = @"C:\Project";

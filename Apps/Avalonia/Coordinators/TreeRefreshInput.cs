@@ -9,5 +9,6 @@ internal sealed record TreeRefreshInput(
     ProjectTreeInventoryReuseScope? TreeInventoryScope = null,
     long? SelectionRevision = null,
     BuildTreeResult? InteractiveFilterBaseTree = null,
+	GitFilteringMode GitMode = GitFilteringMode.None,
     bool PreserveCheckedPaths = false,
     bool PreserveExpandedPaths = false);

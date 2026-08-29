@@ -302,6 +302,19 @@ internal static class UiTestDriver
 
     public static async Task ClickIgnoreOptionCheckBoxAsync(MainWindow window, IgnoreOptionId optionId)
     {
+        if (GitFilteringModeResolver.IsGitFilteringOption(optionId))
+        {
+            var activeMode = GetViewModel(window).SelectedGitFilteringModeOption?.Mode ??
+                             GitFilteringMode.None;
+            var requestedMode = optionId == IgnoreOptionId.UseGitIgnore
+                ? GitFilteringMode.RespectGitIgnore
+                : GitFilteringMode.TrackedFilesOnly;
+            await SelectGitFilteringModeAsync(
+                window,
+                activeMode == requestedMode ? GitFilteringMode.None : requestedMode);
+            return;
+        }
+
         if (optionId != IgnoreOptionId.HideSecrets)
         {
             await ScrollSettingsItemIntoViewAsync(
@@ -313,6 +326,29 @@ internal static class UiTestDriver
             window,
             () => FindIgnoreOptionCheckBox(window, optionId),
             $"ignore checkbox '{optionId}'");
+    }
+
+    public static async Task SelectGitFilteringModeAsync(
+        MainWindow window,
+        GitFilteringMode mode)
+    {
+        await WaitForConditionAsync(
+            window,
+            () => GetViewModel(window).GitFilteringModes.Any(option => option.Mode == mode),
+            $"Git filtering mode '{mode}' to become available");
+
+        var comboBox = GetRequiredControl<ComboBox>(window, "GitFilteringModeComboBox");
+        await window.Dispatcher.InvokeAsync(() =>
+        {
+            comboBox.SelectedItem = GetViewModel(window).GitFilteringModes.Single(option =>
+                option.Mode == mode);
+        }, DispatcherPriority.Normal);
+
+        await WaitForConditionAsync(
+            window,
+            () => GetViewModel(window).SelectedGitFilteringModeOption?.Mode == mode,
+            $"Git filtering mode '{mode}' to become selected");
+        await WaitForSettledFramesAsync(frameCount: 8);
     }
 
     public static async Task ClickApplySettingsAsync(MainWindow window)

@@ -44,6 +44,7 @@ public partial class MainWindow : IRefreshTreePipelineHost
             reusableInventory?.Scope,
             _selectionCoordinator.CurrentSelectionRevision,
             _filterBaseTree,
+			GitMode: _selectionCoordinator.ActiveGitFilteringMode,
             PreserveCheckedPaths: preserveCheckedPaths);
     }
 
@@ -66,9 +67,10 @@ public partial class MainWindow : IRefreshTreePipelineHost
     }
 
     BuildTreeSnapshotResult IRefreshTreePipelineHost.BuildTree(TreeRefreshInput input, CancellationToken cancellationToken) =>
-        input.TreeInventory is null
-            ? _buildTree.ExecuteWithInventory(new BuildTreeRequest(input.CurrentPath, input.Options), cancellationToken)
-            : _buildTree.ExecuteWithInventory(new BuildTreeRequest(input.CurrentPath, input.Options), input.TreeInventory, cancellationToken);
+		BuildTreeWithGitScope(input, cancellationToken);
+
+	bool IRefreshTreePipelineHost.TryHandleGitScopeDiagnostics(BuildTreeSnapshotResult result) =>
+		HandleGitScopeDiagnostics(result.Diagnostics);
 
     bool IRefreshTreePipelineHost.TryHandleRootAccessDenied(TreeRefreshInput input, BuildTreeResult result) =>
         result.RootAccessDenied &&

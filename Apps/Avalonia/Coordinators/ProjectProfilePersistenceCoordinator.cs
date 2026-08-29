@@ -274,19 +274,24 @@ public sealed class ProjectProfilePersistenceCoordinator(
 		var applied = candidate is not null && candidate.IsForProject(currentPath)
 			? candidate
 			: null;
+		var appliedIgnoreStates = applied is null
+			? null
+			: selectionCoordinator.GetPersistableIgnoreOptionStates(applied.IgnoreOptionStates);
+		var persistedIgnoreStates = appliedIgnoreStates ??
+			selectionCoordinator.SnapshotIgnoreOptionStatesForPersistence();
         return ProjectSelectionProfileBuilder.Create(
             visibleExtensions: viewModel.Extensions.Select(option => new SelectionOption(
                 option.Name,
                 applied?.ExtensionOptionStates.GetValueOrDefault(option.Name) ?? option.IsChecked)),
-            visibleIgnoreOptions: viewModel.IgnoreOptions.Select(option => new IgnoreSelectionOption(
-                option.Id,
-                applied?.IgnoreOptionStates.GetValueOrDefault(option.Id) ?? option.IsChecked)),
+			visibleIgnoreOptions: viewModel.IgnoreOptions.Select(option => new IgnoreSelectionOption(
+				option.Id,
+				persistedIgnoreStates?.GetValueOrDefault(option.Id) ?? option.IsChecked)),
             cachedExtensionStates: applied?.ExtensionOptionStates ??
                                    selectionCoordinator.SnapshotExtensionOptionStatesForPersistence(),
-            cachedIgnoreOptionStates: applied?.IgnoreOptionStates ??
-                                      selectionCoordinator.SnapshotIgnoreOptionStatesForPersistence(),
-            selectedIgnoreOptions: applied?.SelectedIgnoreOptions ??
-                                   selectionCoordinator.GetSelectedIgnoreOptionIds(),
+			cachedIgnoreOptionStates: persistedIgnoreStates,
+			selectedIgnoreOptions: applied is null
+				? selectionCoordinator.GetPersistableSelectedIgnoreOptionIds()
+				: selectionCoordinator.GetPersistableSelectedIgnoreOptionIds(applied.SelectedIgnoreOptions),
 			extensionComparer: StringComparer.OrdinalIgnoreCase);
     }
 }

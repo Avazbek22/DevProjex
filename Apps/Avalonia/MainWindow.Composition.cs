@@ -773,6 +773,7 @@ public partial class MainWindow
     private readonly UserSettingsStore _userSettingsStore;
     private readonly ThemeSettingsStore _themeSettingsStore;
     private readonly IGitRepositoryService _gitService;
+	private readonly IGitScopePathProvider _gitScopePathProvider;
     private readonly IRepoCacheService _repoCacheService;
     private readonly IZipDownloadService _zipDownloadService;
     private readonly RecentProjectsStore _recentProjectsStore;
@@ -999,6 +1000,7 @@ public partial class MainWindow
         _userSettingsStore = services.UserSettingsStore;
         _themeSettingsStore = services.ThemeSettingsStore;
         _gitService = services.GitRepositoryService;
+		_gitScopePathProvider = services.GitScopePathProvider;
         _repoCacheService = services.RepoCacheService;
         _zipDownloadService = services.ZipDownloadService;
         _terminalCommandSetupService = services.TerminalCommandSetupService;

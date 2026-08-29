@@ -57,6 +57,7 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
             nameFilter,
             selectionSnapshot.TreeInventory,
             inventoryScope,
+			GitMode: _selectionCoordinator.ActiveGitFilteringMode,
             PreserveCheckedPaths: preserveTreeState,
             PreserveExpandedPaths: preserveTreeState);
     }
@@ -73,9 +74,10 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
     BuildTreeSnapshotResult IProjectLoadSnapshotPipelineHost.BuildTree(
         TreeRefreshInput input,
         CancellationToken cancellationToken) =>
-        input.TreeInventory is null
-            ? _buildTree.ExecuteWithInventory(new BuildTreeRequest(input.CurrentPath, input.Options), cancellationToken)
-            : _buildTree.ExecuteWithInventory(new BuildTreeRequest(input.CurrentPath, input.Options), input.TreeInventory, cancellationToken);
+		BuildTreeWithGitScope(input, cancellationToken);
+
+	bool IProjectLoadSnapshotPipelineHost.TryHandleGitScopeDiagnostics(BuildTreeSnapshotResult result) =>
+		HandleGitScopeDiagnostics(result.Diagnostics);
 
     bool IProjectLoadSnapshotPipelineHost.TryHandleTreeRootAccessDenied(
         TreeRefreshInput input,

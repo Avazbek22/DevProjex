@@ -151,6 +151,7 @@ public static class AvaloniaCompositionRoot
             ToastService: toastService,
             IconStore: iconStore,
             GitRepositoryService: gitRepositoryService,
+			GitScopePathProvider: new GitScopePathProvider(),
             RepoCacheService: repoCacheService,
             ZipDownloadService: zipDownloadService,
             FileContentAnalyzer: fileContentAnalyzer,

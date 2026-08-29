@@ -2187,7 +2187,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
     }
 
     [AvaloniaFact]
-    public async Task RepositoryGitModes_AllowTrackedGitIgnoreSmartOnlyAndNoFiltering()
+    public async Task RepositoryGitModes_UseComboBoxAndRescanAllSupportedModes()
     {
         EnsureGitAvailable();
         using var project = UiTestProject.CreateWithCleanGitAndSmartWorkspace();
@@ -2229,16 +2229,35 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 isChecked: false);
             var initialIgnoreOptions = UiTestDriver.GetViewModel(window).IgnoreOptions;
             Assert.DoesNotContain(initialIgnoreOptions, option => option.Id == IgnoreOptionId.SmartIgnore);
+            Assert.DoesNotContain(
+                UiTestDriver.GetViewModel(window).PathIgnoreOptions,
+                option => GitFilteringModeResolver.IsGitFilteringOption(option.Id));
+            Assert.Equal(
+                [
+                    GitFilteringMode.None,
+                    GitFilteringMode.RespectGitIgnore,
+                    GitFilteringMode.TrackedFilesOnly,
+                    GitFilteringMode.Staged,
+                    GitFilteringMode.Changes
+                ],
+                UiTestDriver.GetViewModel(window).GitFilteringModes.Select(static option => option.Mode));
             Assert.Equal(
                 IgnoreOptionId.TrackedGitFilesOnly,
                 Assert.Single(initialIgnoreOptions, option => option.IsControllerGroupEnd).Id);
             await WaitForProjectTreePathStateAsync(window, exists: true, "LocalOnly.cs");
             await WaitForProjectTreePathStateAsync(window, exists: false, "logs", "ignored.log");
 
-            await SetIgnoreOptionCheckedAsync(
-                window,
-                IgnoreOptionId.TrackedGitFilesOnly,
-                isChecked: true);
+            await UiTestDriver.SelectGitFilteringModeAsync(window, GitFilteringMode.Staged);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            await WaitForProjectTreePathStateAsync(window, exists: false, "LocalOnly.cs");
+            await WaitForProjectTreePathStateAsync(window, exists: true, "Program.cs");
+
+            await UiTestDriver.SelectGitFilteringModeAsync(window, GitFilteringMode.Changes);
+            await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+            await WaitForProjectTreePathStateAsync(window, exists: true, "LocalOnly.cs");
+            await WaitForProjectTreePathStateAsync(window, exists: false, "logs", "ignored.log");
+
+            await UiTestDriver.SelectGitFilteringModeAsync(window, GitFilteringMode.TrackedFilesOnly);
             await UiTestDriver.WaitForIgnoreOptionStateAsync(
                 window,
                 IgnoreOptionId.UseGitIgnore,

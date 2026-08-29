@@ -616,6 +616,15 @@ public partial class MainWindow
         _selectionCoordinator.HandleIgnoreAllChanged(check, _currentPath);
     }
 
+	private void OnGitFilteringModeChanged(object? sender, SelectionChangedEventArgs e)
+	{
+		if (_viewModel.IsRefreshingGitFilteringModes)
+			return;
+		if ((sender as ComboBox)?.SelectedItem is not GitFilteringModeOptionViewModel option)
+			return;
+		_selectionCoordinator.HandleGitFilteringModeChanged(option.Mode, _currentPath);
+	}
+
 	private void OnContentProcessingAllChanged(object? sender, RoutedEventArgs e)
 	{
 		var check = (sender as CheckBox)?.IsChecked == true;

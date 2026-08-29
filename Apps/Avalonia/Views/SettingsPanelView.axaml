@@ -121,8 +121,22 @@
                     IsChecked="{Binding AllIgnoreChecked, Mode=TwoWay}"
                     IsCheckedChanged="OnIgnoreAllChanged" />
         </Grid>
-        <Border Grid.Row="1" Classes="checklist-border">
-          <ListBox Name="IgnoreOptionsList"
+		<Border Grid.Row="1" Classes="checklist-border">
+		  <Grid RowDefinitions="Auto,*">
+			<ComboBox Name="GitFilteringModeComboBox"
+					  Grid.Row="0"
+					  Margin="6,5,6,4"
+					  ItemsSource="{Binding GitFilteringModes}"
+					  SelectedItem="{Binding SelectedGitFilteringModeOption, Mode=TwoWay}"
+					  SelectionChanged="OnGitFilteringModeChanged">
+			  <ComboBox.ItemTemplate>
+				<DataTemplate x:DataType="vm:GitFilteringModeOptionViewModel">
+				  <TextBlock Text="{Binding Label}" />
+				</DataTemplate>
+			  </ComboBox.ItemTemplate>
+			</ComboBox>
+			<ListBox Name="IgnoreOptionsList"
+					 Grid.Row="1"
                    Classes="settings-list"
                    ItemsSource="{Binding PathIgnoreOptions}"
                    SelectionMode="Multiple"
@@ -149,7 +163,8 @@
                 </Border>
               </DataTemplate>
             </ListBox.ItemTemplate>
-          </ListBox>
+			</ListBox>
+		  </Grid>
         </Border>
       </Grid>
 
