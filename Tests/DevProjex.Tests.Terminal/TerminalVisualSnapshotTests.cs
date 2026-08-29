@@ -133,7 +133,7 @@ public sealed class TerminalVisualSnapshotTests
 		await using var terminal = await StartProjectAsync(project.Path);
 
 		await WaitForStableScreenAsync(terminal, "PROJECT TREE");
-		File.Delete(Path.Combine(project.Path, ".git", "index"));
+		File.WriteAllText(Path.Combine(project.Path, ".git", "index"), "not-a-git-index");
 		await terminal.SendAsync(":set git tracked\r", TestContext.Current.CancellationToken);
 		await WaitForStableScreenAsync(terminal, "DPX-GIT-TRACKED-INDEX-UNAVAILABLE");
 		Verify("workspace-error-en-120x30", terminal, project.Path);
@@ -155,7 +155,7 @@ public sealed class TerminalVisualSnapshotTests
 			(output.Path, "<OUTPUT_ROOT>"));
 		Assert.True(File.Exists(Path.Combine(destination, "src", "App.cs")));
 		await terminal.WaitForScreenAsync(
-			"> PARAMETERS",
+			"> PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await ExitAsync(terminal);
 	}
