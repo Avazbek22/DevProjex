@@ -38,6 +38,11 @@ internal sealed class McpServices : IDisposable
 
 	public static McpServices Create(
 		McpRootRegistry roots,
+		Func<string>? appDataPathProvider = null) =>
+		Create(new McpProjectRootJail(roots), appDataPathProvider);
+
+	internal static McpServices Create(
+		McpProjectRootJail roots,
 		Func<string>? appDataPathProvider = null)
 	{
 		ArgumentNullException.ThrowIfNull(roots);

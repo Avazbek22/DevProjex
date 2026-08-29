@@ -480,6 +480,7 @@
   "Terminal.Option.ReportOutput": "Rapor çıktı yolu.",
   "Terminal.Option.Root": "Bir kök klasör ekleyin.",
   "Terminal.Option.McpRoot": "Bir MCP proje köküne izin verin (tekrarlanabilir).",
+  "Terminal.Option.McpAllowRemote": "MCP araçlarının uzak Git deposu URL'lerini klonlamasına ve incelemesine izin verin.",
   "Terminal.Option.Extension": "Bir dosya uzantısı ekleyin.",
   "Terminal.Option.Select": "Göreli bir dosya veya dizin yolu ekleyin.",
   "Terminal.Option.GitMode": "Git filtreleme modu: yok, gitignore veya izlendi.",

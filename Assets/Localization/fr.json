@@ -486,6 +486,7 @@
   "Terminal.Option.ReportOutput": "Chemin du rapport.",
   "Terminal.Option.Root": "Inclure un dossier racine.",
   "Terminal.Option.McpRoot": "Autoriser une racine de projet MCP (répétable).",
+  "Terminal.Option.McpAllowRemote": "Autoriser les outils MCP à cloner et inspecter des dépôts Git distants par URL.",
   "Terminal.Option.Extension": "Inclure une extension de fichier.",
   "Terminal.Option.Select": "Inclure un chemin relatif de fichier ou de dossier.",
   "Terminal.Option.GitMode": "Mode de filtrage Git : none, gitignore ou tracked.",

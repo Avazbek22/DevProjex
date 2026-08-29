@@ -480,6 +480,7 @@
   "Terminal.Option.ReportOutput": "Laporkan jalur keluaran.",
   "Terminal.Option.Root": "Sertakan folder root.",
   "Terminal.Option.McpRoot": "Izinkan root proyek MCP (dapat diulang).",
+  "Terminal.Option.McpAllowRemote": "Izinkan alat MCP mengkloning dan memeriksa repositori Git jarak jauh melalui URL.",
   "Terminal.Option.Extension": "Sertakan ekstensi file.",
   "Terminal.Option.Select": "Sertakan file relatif atau jalur direktori.",
   "Terminal.Option.GitMode": "Mode pemfilteran Git: tidak ada, gitignore, atau dilacak.",

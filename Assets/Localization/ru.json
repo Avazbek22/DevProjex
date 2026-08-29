@@ -486,6 +486,7 @@
   "Terminal.Option.ReportOutput": "Путь файла отчёта.",
   "Terminal.Option.Root": "Включить корневую папку.",
   "Terminal.Option.McpRoot": "Разрешить корень проекта для MCP (можно повторять).",
+  "Terminal.Option.McpAllowRemote": "Разрешить инструментам MCP клонировать и анализировать удалённые Git-репозитории по URL.",
   "Terminal.Option.Extension": "Включить расширение файлов.",
   "Terminal.Option.Select": "Включить относительный путь файла или каталога.",
   "Terminal.Option.GitMode": "Режим Git-фильтрации: none, gitignore или tracked.",

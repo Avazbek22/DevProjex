@@ -480,6 +480,7 @@
   "Terminal.Option.ReportOutput": "報告輸出路徑。",
   "Terminal.Option.Root": "包括根資料夾。",
   "Terminal.Option.McpRoot": "允許MCP專案根目錄（可重複）。",
+  "Terminal.Option.McpAllowRemote": "允許MCP工具透過URL複製並檢查遠端Git儲存庫。",
   "Terminal.Option.Extension": "包括檔案副檔名。",
   "Terminal.Option.Select": "包括相對檔案或目錄路徑。",
   "Terminal.Option.GitMode": "Git過濾模式：none、gitignore或tracked。",

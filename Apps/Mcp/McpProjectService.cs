@@ -1,12 +1,14 @@
 namespace DevProjex.Mcp;
 
 internal sealed class McpProjectService(
-	McpRootRegistry roots,
+	McpProjectSourceResolver projectSources,
+	McpProjectRootJail roots,
 	McpServices services,
 	bool hidePrivateData)
 {
 	public async Task<ProjectContextPlan> BuildPlanAsync(
 		string? project,
+		string? branch,
 		IReadOnlyList<string>? paths,
 		IReadOnlyList<string>? includePatterns,
 		IReadOnlyList<string>? excludePatterns,
@@ -15,7 +17,9 @@ internal sealed class McpProjectService(
 		CancellationToken cancellationToken,
 		bool includeOutputMetrics = true)
 	{
-		var projectRoot = roots.ResolveProject(project);
+		var source = await projectSources.ResolveAsync(project, branch, cancellationToken)
+			.ConfigureAwait(false);
+		var projectRoot = source.Root;
 		if (trackedOnly && !IsGitRepository(projectRoot))
 		{
 			throw new McpToolException(
@@ -53,7 +57,7 @@ internal sealed class McpProjectService(
 			services.RedactionSession.ReplaceMarkedSecrets(marks);
 		}
 
-		var request = new ProjectContextRequest(projectRoot, selection);
+		var request = new ProjectContextRequest(projectRoot, selection, source.Identity);
 		var plan = await (includeOutputMetrics
 				? services.Planner.BuildAsync(request, cancellationToken)
 				: services.Planner.BuildStructureAsync(request, cancellationToken))
@@ -106,7 +110,7 @@ internal sealed class McpProjectService(
 	}
 
 	internal static void ValidatePlanContainment(
-		McpRootRegistry roots,
+		McpProjectRootJail roots,
 		string projectRoot,
 		IReadOnlyList<string> includedFiles,
 		CancellationToken cancellationToken)
@@ -154,6 +158,15 @@ internal sealed class McpProjectService(
 			CreateTransformationContext(plan));
 		return OutputRootPathPresentation.ResolvePath(displayRoot, pathRedaction).Text;
 	}
+
+	public static string ResolveAddressDocumentRoot(ProjectContextPlan plan) =>
+		plan.SourceIdentity is
+		{
+			SourceType: ProjectSourceType.GitClone,
+			SourceReference.Length: > 0
+		} identity
+			? identity.SourceReference
+			: plan.SourceRoot;
 
 	public Task<PreparedSecretRedactionOutput> PrepareAsync(
 		ProjectContextPlan plan,

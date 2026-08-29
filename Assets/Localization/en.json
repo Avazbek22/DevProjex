@@ -486,6 +486,7 @@
   "Terminal.Option.ReportOutput": "Report output path.",
   "Terminal.Option.Root": "Include a root folder.",
   "Terminal.Option.McpRoot": "Allow an MCP project root (repeatable).",
+  "Terminal.Option.McpAllowRemote": "Allow MCP tools to clone and inspect remote Git repository URLs.",
   "Terminal.Option.Extension": "Include a file extension.",
   "Terminal.Option.Select": "Include a relative file or directory path.",
   "Terminal.Option.GitMode": "Git filtering mode: none, gitignore, or tracked.",

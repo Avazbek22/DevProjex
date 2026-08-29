@@ -480,6 +480,7 @@
   "Terminal.Option.ReportOutput": "Ścieżka wyjściowa raportu.",
   "Terminal.Option.Root": "Dołącz folder główny.",
   "Terminal.Option.McpRoot": "Zezwalaj na katalog główny projektu MCP (powtarzalny).",
+  "Terminal.Option.McpAllowRemote": "Zezwalaj narzędziom MCP na klonowanie i sprawdzanie zdalnych repozytoriów Git podanych jako URL.",
   "Terminal.Option.Extension": "Dołącz rozszerzenie pliku.",
   "Terminal.Option.Select": "Dołącz względną ścieżkę pliku lub katalogu.",
   "Terminal.Option.GitMode": "Tryb filtrowania Git: brak, gitignore lub śledzony.",

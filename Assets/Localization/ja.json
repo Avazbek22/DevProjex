@@ -480,6 +480,7 @@
   "Terminal.Option.ReportOutput": "レポートの出力パス。",
   "Terminal.Option.Root": "ルートフォルダーを含めます。",
   "Terminal.Option.McpRoot": "MCPプロジェクト ルートを許可します (繰り返し可能)。",
+  "Terminal.Option.McpAllowRemote": "MCPツールによるリモートGitリポジトリURLのクローンと検査を許可します。",
   "Terminal.Option.Extension": "ファイル拡張子を含めます。",
   "Terminal.Option.Select": "相対ファイルまたはディレクトリ パスを含めます。",
   "Terminal.Option.GitMode": "Gitフィルタリング モード: none、gitignore、またはtracked。",

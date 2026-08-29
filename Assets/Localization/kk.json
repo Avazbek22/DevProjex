@@ -468,6 +468,7 @@
   "Terminal.Option.ReportOutput": "Есептің шығыс жолы.",
   "Terminal.Option.Root": "Түбірлік қалтаны қосады.",
   "Terminal.Option.McpRoot": "MCP жоба түбіріне рұқсат береді (қайталанады).",
+  "Terminal.Option.McpAllowRemote": "MCP құралдарына URL арқылы қашықтағы Git репозиторийлерін клондауға және тексеруге рұқсат береді.",
   "Terminal.Option.Extension": "Файл кеңейтімін қосады.",
   "Terminal.Option.Select": "Файлдың немесе қалтаның салыстырмалы жолын қосады.",
   "Terminal.Option.GitMode": "Git сүзгілеу режимі: none, gitignore немесе tracked.",

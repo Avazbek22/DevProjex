@@ -480,6 +480,7 @@
   "Terminal.Option.ReportOutput": "Вихідний шлях звіту.",
   "Terminal.Option.Root": "Додайте кореневу папку.",
   "Terminal.Option.McpRoot": "Дозволити корінь проекту MCP (повторюваний).",
+  "Terminal.Option.McpAllowRemote": "Дозволити інструментам MCP клонувати й перевіряти віддалені Git-репозиторії за URL.",
   "Terminal.Option.Extension": "Додайте розширення файлу.",
   "Terminal.Option.Select": "Включіть відносний шлях до файлу або каталогу.",
   "Terminal.Option.GitMode": "Режим фільтрації Git: немає, gitignore або tracked.",

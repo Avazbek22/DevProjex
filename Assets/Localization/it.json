@@ -486,6 +486,7 @@
   "Terminal.Option.ReportOutput": "Percorso del report.",
   "Terminal.Option.Root": "Include una cartella radice.",
   "Terminal.Option.McpRoot": "Consente una radice di progetto MCP (ripetibile).",
+  "Terminal.Option.McpAllowRemote": "Consente agli strumenti MCP di clonare e ispezionare repository Git remoti tramite URL.",
   "Terminal.Option.Extension": "Include un’estensione file.",
   "Terminal.Option.Select": "Include un percorso relativo di file o cartella.",
   "Terminal.Option.GitMode": "Modalità filtro Git: none, gitignore o tracked.",

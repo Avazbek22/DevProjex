@@ -480,6 +480,7 @@
   "Terminal.Option.ReportOutput": "报告输出路径。",
   "Terminal.Option.Root": "包括根文件夹。",
   "Terminal.Option.McpRoot": "允许MCP项目根目录（可重复）。",
+  "Terminal.Option.McpAllowRemote": "允许MCP工具通过URL克隆和检查远程Git仓库。",
   "Terminal.Option.Extension": "包括文件扩展名。",
   "Terminal.Option.Select": "包括相对文件或目录路径。",
   "Terminal.Option.GitMode": "Git过滤模式：none、gitignore或tracked。",

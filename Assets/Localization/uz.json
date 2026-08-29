@@ -468,6 +468,7 @@
   "Terminal.Option.ReportOutput": "Hisobotning chiqish yo'li.",
   "Terminal.Option.Root": "Ildiz papkani qo'shadi.",
   "Terminal.Option.McpRoot": "MCP loyiha ildiziga ruxsat beradi (takrorlanadi).",
+  "Terminal.Option.McpAllowRemote": "MCP vositalariga URL orqali masofaviy Git repozitoriylarini klonlash va tekshirishga ruxsat beradi.",
   "Terminal.Option.Extension": "Fayl kengaytmasini qo'shadi.",
   "Terminal.Option.Select": "Fayl yoki papkaning nisbiy yo'lini qo'shadi.",
   "Terminal.Option.GitMode": "Git filtrlash rejimi: none, gitignore yoki tracked.",

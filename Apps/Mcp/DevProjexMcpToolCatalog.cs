@@ -96,7 +96,15 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	private const string ProjectProperty = """
 	"project": {
 	  "type": "string",
-	  "description": "Absolute root path returned by list_projects. Optional only when one root is configured."
+	  "description": "Absolute root path returned by list_projects, or a Git URL when the server allows remote sources. Optional only when one local root is configured."
+	}
+	""";
+
+	private const string BranchProperty = """
+	"branch": {
+	  "type": "string",
+	  "minLength": 1,
+	  "description": "Optional Git branch for a remote project URL; invalid for local project paths."
 	}
 	""";
 
@@ -158,6 +166,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	  "type": "object",
 	  "properties": {
 	    {{ProjectProperty}},
+	    {{BranchProperty}},
 	    {{IncludeProperty}},
 	    {{ExcludeProperty}},
 	    {{TrackedOnlyProperty}},
@@ -175,6 +184,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	  "type": "object",
 	  "properties": {
 	    {{ProjectProperty}},
+	    {{BranchProperty}},
 	    {{PathsProperty}},
 	    {{IncludeProperty}},
 	    {{ExcludeProperty}},
@@ -191,6 +201,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	  "type": "object",
 	  "properties": {
 	    {{ProjectProperty}},
+	    {{BranchProperty}},
 	    {{PathsProperty}},
 	    {{IncludeProperty}},
 	    {{ExcludeProperty}},
@@ -222,6 +233,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	  "type": "object",
 	  "properties": {
 	    {{ProjectProperty}},
+	    {{BranchProperty}},
 	    "pattern": { "type": "string", "minLength": 1, "maxLength": 4096, "description": "A .NET regular expression evaluated against redacted text with a 2-second timeout." },
 	    {{IncludeProperty}},
 	    {{ExcludeProperty}},
@@ -240,6 +252,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	  "type": "object",
 	  "properties": {
 	    {{ProjectProperty}},
+	    {{BranchProperty}},
 	    "path": { "type": "string", "minLength": 1, "description": "Existing file path inside the effective project selection." },
 	    "start_line": { "description": "First 1-based line; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^[0-9]+$" } ] },
 	    "end_line": { "description": "Last 1-based line, inclusive; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^[0-9]+$" } ] }

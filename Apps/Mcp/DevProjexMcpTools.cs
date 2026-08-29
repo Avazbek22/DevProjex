@@ -49,12 +49,14 @@ internal sealed class DevProjexMcpTools(
 			var arguments = McpJsonArguments.Create(
 				request.Params,
 				"project",
+				"branch",
 				"include_patterns",
 				"exclude_patterns",
 				"max_depth",
 				"tracked_only");
 			var plan = await Projects.BuildPlanAsync(
 				arguments.OptionalString("project"),
+				arguments.OptionalString("branch"),
 				paths: null,
 				arguments.OptionalStringArray("include_patterns"),
 				arguments.OptionalStringArray("exclude_patterns"),
@@ -76,6 +78,7 @@ internal sealed class DevProjexMcpTools(
 						treeWriter,
 						plan.SourceRoot,
 						renderedTree,
+						McpProjectService.ResolveAddressDocumentRoot(plan),
 						cancellationToken: cancellationToken)
 					.ConfigureAwait(false);
 			}
@@ -161,6 +164,7 @@ internal sealed class DevProjexMcpTools(
 			var arguments = McpJsonArguments.Create(
 				request.Params,
 				"project",
+				"branch",
 				"paths",
 				"include_patterns",
 				"exclude_patterns",
@@ -317,6 +321,7 @@ internal sealed class DevProjexMcpTools(
 			var arguments = McpJsonArguments.Create(
 				request.Params,
 				"project",
+				"branch",
 				"pattern",
 				"include_patterns",
 				"exclude_patterns",
@@ -332,6 +337,7 @@ internal sealed class DevProjexMcpTools(
 
 			var plan = await Projects.BuildPlanAsync(
 				arguments.OptionalString("project"),
+				arguments.OptionalString("branch"),
 				paths: null,
 				arguments.OptionalStringArray("include_patterns"),
 				arguments.OptionalStringArray("exclude_patterns"),
@@ -395,11 +401,13 @@ internal sealed class DevProjexMcpTools(
 			var arguments = McpJsonArguments.Create(
 				request.Params,
 				"project",
+				"branch",
 				"path",
 				"start_line",
 				"end_line");
 			var plan = await Projects.BuildPlanAsync(
 				arguments.OptionalString("project"),
+				arguments.OptionalString("branch"),
 				paths: null,
 				includePatterns: null,
 				excludePatterns: null,
@@ -438,6 +446,7 @@ internal sealed class DevProjexMcpTools(
 		McpJsonArguments.Create(
 			request,
 			"project",
+			"branch",
 			"paths",
 			"include_patterns",
 			"exclude_patterns",
@@ -451,6 +460,7 @@ internal sealed class DevProjexMcpTools(
 		bool includeOutputMetrics = true) =>
 		Projects.BuildPlanAsync(
 			arguments.OptionalString("project"),
+			arguments.OptionalString("branch"),
 			arguments.OptionalStringArray("paths", allowWhitespace: true),
 			arguments.OptionalStringArray("include_patterns"),
 			arguments.OptionalStringArray("exclude_patterns"),

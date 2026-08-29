@@ -468,6 +468,7 @@
   "Terminal.Option.ReportOutput": "Роҳи натиҷаи гузориш.",
   "Terminal.Option.Root": "Ҷузвдони решагиро дохил мекунад.",
   "Terminal.Option.McpRoot": "Решаи лоиҳаи MCP-ро иҷозат медиҳад (такроршаванда).",
+  "Terminal.Option.McpAllowRemote": "Ба абзорҳои MCP иҷозат медиҳад, ки репозиторийҳои дурдасти Git-ро аз рӯйи URL клон ва санҷанд.",
   "Terminal.Option.Extension": "Пасванди файлро дохил мекунад.",
   "Terminal.Option.Select": "Роҳи нисбии файл ё ҷузвдонро дохил мекунад.",
   "Terminal.Option.GitMode": "Реҷаи филтркунии Git: none, gitignore ё tracked.",

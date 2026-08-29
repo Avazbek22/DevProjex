@@ -106,12 +106,17 @@ public sealed class DevProjexCommandTree
 		{
 			Description = L("Terminal.Option.HidePrivateData")
 		};
+		var allowRemote = new Option<bool>("--allow-remote")
+		{
+			Description = L("Terminal.Option.McpAllowRemote")
+		};
 		roots.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
 			context,
 			FileSystemCompletionKind.Directories,
 			Directory.GetCurrentDirectory()));
 		command.Options.Add(roots);
 		command.Options.Add(hidePrivateData);
+		command.Options.Add(allowRemote);
 		CliExamplesRegistry.Set(
 			command,
 			"devprojex mcp",
@@ -129,6 +134,7 @@ public sealed class DevProjexCommandTree
 				await McpServerHost.RunAsync(
 						resolvedRoots,
 						parseResult.GetValue(hidePrivateData),
+						parseResult.GetValue(allowRemote),
 						cancellationToken)
 					.ConfigureAwait(false);
 				return CommandLineExitCodes.Success;

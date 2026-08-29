@@ -480,6 +480,7 @@
   "Terminal.Option.ReportOutput": "보고서 출력 경로.",
   "Terminal.Option.Root": "루트 폴더를 포함합니다.",
   "Terminal.Option.McpRoot": "MCP 프로젝트 루트를 허용합니다(반복 가능).",
+  "Terminal.Option.McpAllowRemote": "MCP 도구가 원격 Git 저장소 URL을 복제하고 검사하도록 허용합니다.",
   "Terminal.Option.Extension": "파일 확장자를 포함합니다.",
   "Terminal.Option.Select": "상대 파일 또는 디렉터리 경로를 포함합니다.",
   "Terminal.Option.GitMode": "Git 필터링 모드: 없음, gitignore 또는 추적됨.",

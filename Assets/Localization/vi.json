@@ -480,6 +480,7 @@
   "Terminal.Option.ReportOutput": "Đường dẫn đầu ra báo cáo.",
   "Terminal.Option.Root": "Bao gồm một thư mục gốc.",
   "Terminal.Option.McpRoot": "Cho phép gốc dự án MCP (có thể lặp lại).",
+  "Terminal.Option.McpAllowRemote": "Cho phép công cụ MCP sao chép và kiểm tra kho Git từ xa qua URL.",
   "Terminal.Option.Extension": "Bao gồm phần mở rộng tập tin.",
   "Terminal.Option.Select": "Bao gồm đường dẫn tệp hoặc thư mục tương đối.",
   "Terminal.Option.GitMode": "Chế độ lọc Git: không có, gitignore hoặc được theo dõi.",

@@ -4,7 +4,7 @@ using Microsoft.Win32.SafeHandles;
 
 namespace DevProjex.Mcp;
 
-internal sealed class McpRootJailFileStreamOpener(McpRootRegistry roots)
+internal sealed class McpRootJailFileStreamOpener(McpProjectRootJail roots)
 {
 	private const int DarwinGetPath = 50;
 	private const int DarwinPathBufferLength = 1024;

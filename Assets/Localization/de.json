@@ -486,6 +486,7 @@
   "Terminal.Option.ReportOutput": "Pfad der Berichtsausgabe.",
   "Terminal.Option.Root": "Stammordner einschließen.",
   "Terminal.Option.McpRoot": "Einen MCP-Projektstamm zulassen (wiederholbar).",
+  "Terminal.Option.McpAllowRemote": "MCP-Werkzeugen das Klonen und Prüfen entfernter Git-Repository-URLs erlauben.",
   "Terminal.Option.Extension": "Dateierweiterung einschließen.",
   "Terminal.Option.Select": "Relativen Datei- oder Verzeichnispfad einschließen.",
   "Terminal.Option.GitMode": "Git-Filtermodus: none, gitignore oder tracked.",

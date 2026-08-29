@@ -171,12 +171,12 @@ public sealed class McpServerIntegrationTests
 		var expectedParameters = new Dictionary<string, string[]>(StringComparer.Ordinal)
 		{
 			["list_projects"] = [],
-			["get_tree"] = ["project", "include_patterns", "exclude_patterns", "tracked_only", "max_depth"],
-			["analyze"] = ["project", "paths", "include_patterns", "exclude_patterns", "profile", "detail", "tracked_only"],
-			["pack_context"] = ["project", "paths", "include_patterns", "exclude_patterns", "profile", "detail", "tracked_only", "view", "format"],
+			["get_tree"] = ["project", "branch", "include_patterns", "exclude_patterns", "tracked_only", "max_depth"],
+			["analyze"] = ["project", "branch", "paths", "include_patterns", "exclude_patterns", "profile", "detail", "tracked_only"],
+			["pack_context"] = ["project", "branch", "paths", "include_patterns", "exclude_patterns", "profile", "detail", "tracked_only", "view", "format"],
 			["read_pack"] = ["pack_id", "start_line", "end_line"],
-			["search_project"] = ["project", "pattern", "include_patterns", "exclude_patterns", "tracked_only", "context_lines", "ignore_case", "max_results"],
-			["get_file"] = ["project", "path", "start_line", "end_line"]
+			["search_project"] = ["project", "branch", "pattern", "include_patterns", "exclude_patterns", "tracked_only", "context_lines", "ignore_case", "max_results"],
+			["get_file"] = ["project", "branch", "path", "start_line", "end_line"]
 		};
 		foreach (var tool in tools)
 		{
@@ -220,6 +220,173 @@ public sealed class McpServerIntegrationTests
 				Assert.Equal(512, items.GetProperty("maxLength").GetInt32());
 			}
 		}
+	}
+
+	[Fact]
+	public async Task RemoteProjectIsRejectedWithoutOptInBeforeRemoteServicesAreCreated()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var remoteServicesCreated = 0;
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			allowRemote: false,
+			remoteServicesFactory: () =>
+			{
+				Interlocked.Increment(ref remoteServicesCreated);
+				throw new InvalidOperationException("Remote services must remain deferred.");
+			});
+
+		var result = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["project"] = "https://user:credential@example.com/owner/repository.git"
+			});
+
+		Assert.True(result.IsError);
+		Assert.Contains(McpErrorCodes.RemoteDisabled, Text(result), StringComparison.Ordinal);
+		Assert.Contains("--allow-remote", Text(result), StringComparison.Ordinal);
+		Assert.DoesNotContain("credential", Text(result), StringComparison.Ordinal);
+		Assert.Equal(0, Volatile.Read(ref remoteServicesCreated));
+	}
+
+	[Fact]
+	public async Task RemoteProjectClonesSelectsBranchReusesPinnedCacheAndKeepsJailAndRedaction()
+	{
+		if (!IsGitAvailable())
+			Assert.Skip("Git is not available in this test environment.");
+
+		using var workspace = new TemporaryDirectory();
+		var localProject = workspace.CreateDirectory("local-project");
+		var source = workspace.CreateDirectory("source");
+		RunGit(source, "init", "--quiet");
+		RunGit(source, "config", "user.name", "DevProjex Tests");
+		RunGit(source, "config", "user.email", "devprojex@example.invalid");
+		File.WriteAllText(Path.Combine(source, "Main.txt"), $"main\n{Secret}\n");
+		RunGit(source, "add", "Main.txt");
+		RunGit(source, "commit", "--quiet", "-m", "main");
+		RunGit(source, "checkout", "--quiet", "-b", "feature");
+		File.WriteAllText(Path.Combine(source, "Feature.txt"), "remote-feature-marker\n");
+		RunGit(source, "add", "Feature.txt");
+		RunGit(source, "commit", "--quiet", "-m", "feature");
+
+		var origin = Path.Combine(workspace.Path, "origin.git");
+		RunGit(workspace.Path, "clone", "--quiet", "--bare", source, origin);
+		var repositoryUrl = new Uri(Path.GetFullPath(origin)).AbsoluteUri;
+		var cachePath = Path.Combine(workspace.Path, "repo-cache");
+		var git = new CountingGitRepositoryService(new GitRepositoryService());
+		await using var server = await McpTestServer.StartAsync(
+			localProject,
+			workspace.Path,
+			allowRemote: true,
+			remoteServicesFactory: () => new McpRemoteProjectServices(
+				new RepoCacheService(cachePath),
+				git));
+
+		var remote = new Dictionary<string, object?>
+		{
+			["project"] = repositoryUrl,
+			["branch"] = "feature"
+		};
+		var tree = await server.CallAsync("get_tree", remote);
+		var pack = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>(remote)
+			{
+				["view"] = "content",
+				["format"] = "text"
+			});
+		var repeatedTree = await server.CallAsync("get_tree", remote);
+		var jail = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?>(remote) { ["path"] = "../outside.txt" });
+		var missingBranch = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["project"] = repositoryUrl,
+				["branch"] = "missing-branch"
+			});
+		var listed = await server.CallAsync("list_projects");
+
+		Assert.NotEqual(true, tree.IsError);
+		Assert.Contains("Feature.txt", Text(tree), StringComparison.Ordinal);
+		Assert.Contains(repositoryUrl, Text(tree), StringComparison.Ordinal);
+		Assert.DoesNotContain(cachePath, Text(tree), PathComparison);
+		Assert.NotEqual(true, pack.IsError);
+		Assert.Contains("remote-feature-marker", Text(pack), StringComparison.Ordinal);
+		Assert.DoesNotContain(Secret, Text(pack), StringComparison.Ordinal);
+		Assert.Contains("DEVPROJEX_REDACTED", Text(pack), StringComparison.Ordinal);
+		Assert.NotEqual(true, repeatedTree.IsError);
+		Assert.Equal(1, git.CloneCallCount);
+		Assert.True(jail.IsError);
+		Assert.Contains(McpErrorCodes.RootViolation, Text(jail), StringComparison.Ordinal);
+		Assert.Contains(repositoryUrl, Text(jail), StringComparison.Ordinal);
+		Assert.DoesNotContain(cachePath, Text(jail), PathComparison);
+		Assert.True(missingBranch.IsError);
+		Assert.Contains(McpErrorCodes.RemoteFailed, Text(missingBranch), StringComparison.Ordinal);
+		Assert.DoesNotContain(repositoryUrl, Text(listed), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task BranchWithLocalProjectAndInvalidRemoteUrlAreRejectedAsInvalidArguments()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var remoteServicesCreated = 0;
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			allowRemote: true,
+			remoteServicesFactory: () =>
+			{
+				Interlocked.Increment(ref remoteServicesCreated);
+				throw new InvalidOperationException("Invalid arguments must fail before remote services are created.");
+			});
+
+		var localBranch = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["project"] = project, ["branch"] = "main" });
+		var invalidUrl = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?> { ["project"] = "https://" });
+
+		Assert.True(localBranch.IsError);
+		Assert.Contains(McpErrorCodes.InvalidArguments, Text(localBranch), StringComparison.Ordinal);
+		Assert.True(invalidUrl.IsError);
+		Assert.Contains(McpErrorCodes.InvalidArguments, Text(invalidUrl), StringComparison.Ordinal);
+		Assert.Equal(0, Volatile.Read(ref remoteServicesCreated));
+	}
+
+	[Fact]
+	public async Task FailedRemoteCloneReturnsSafeRemoteFailure()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var git = new CountingGitRepositoryService(inner: null);
+		var cachePath = Path.Combine(workspace.Path, "repo-cache");
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			allowRemote: true,
+			remoteServicesFactory: () => new McpRemoteProjectServices(
+				new RepoCacheService(cachePath),
+				git));
+
+		var result = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?>
+			{
+				["project"] = "https://user:credential@example.invalid/owner/repository.git"
+			});
+
+		Assert.True(result.IsError);
+		Assert.Contains(McpErrorCodes.RemoteFailed, Text(result), StringComparison.Ordinal);
+		Assert.Contains("https://example.invalid/owner/repository.git", Text(result), StringComparison.Ordinal);
+		Assert.DoesNotContain("credential", Text(result), StringComparison.Ordinal);
+		Assert.Equal(1, git.CloneCallCount);
 	}
 
 	[Fact]
@@ -1380,6 +1547,28 @@ public sealed class McpServerIntegrationTests
 		}
 	}
 
+	private static bool IsGitAvailable()
+	{
+		try
+		{
+			using var process = Process.Start(new ProcessStartInfo("git")
+			{
+				UseShellExecute = false,
+				CreateNoWindow = true,
+				RedirectStandardOutput = true,
+				RedirectStandardError = true,
+				ArgumentList = { "--version" }
+			});
+			return process is not null &&
+			       process.WaitForExit(TimeSpan.FromSeconds(5)) &&
+			       process.ExitCode == 0;
+		}
+		catch (System.ComponentModel.Win32Exception)
+		{
+			return false;
+		}
+	}
+
 	private static void RunGit(string repository, params string[] arguments)
 	{
 		var startInfo = new ProcessStartInfo("git")
@@ -1401,6 +1590,73 @@ public sealed class McpServerIntegrationTests
 			throw new TimeoutException("Git command did not complete within 20 seconds.");
 		}
 		Assert.True(process.ExitCode == 0, $"git failed ({process.ExitCode}): {error}{output}");
+	}
+
+	private sealed class CountingGitRepositoryService(IGitRepositoryService? inner) : IGitRepositoryService
+	{
+		public int CloneCallCount { get; private set; }
+
+		public Task<bool> IsGitAvailableAsync(CancellationToken cancellationToken = default) =>
+			inner?.IsGitAvailableAsync(cancellationToken) ?? Task.FromResult(true);
+
+		public Task<GitCloneResult> CloneAsync(
+			string url,
+			string targetDirectory,
+			IProgress<string>? progress = null,
+			CancellationToken cancellationToken = default)
+		{
+			CloneCallCount++;
+			return inner?.CloneAsync(url, targetDirectory, progress, cancellationToken) ??
+			       Task.FromResult(new GitCloneResult(
+				       Success: false,
+				       LocalPath: targetDirectory,
+				       ProjectSourceType.GitClone,
+				       DefaultBranch: null,
+				       RepositoryName: null,
+				       RepositoryUrl: url,
+				       ErrorMessage: "simulated clone failure"));
+		}
+
+		public Task<IReadOnlyList<GitBranch>> GetBranchesAsync(
+			string repositoryPath,
+			CancellationToken cancellationToken = default) =>
+			RequireInner().GetBranchesAsync(repositoryPath, cancellationToken);
+
+		public Task<string?> GetDefaultBranchAsync(
+			string repositoryPath,
+			CancellationToken cancellationToken = default) =>
+			RequireInner().GetDefaultBranchAsync(repositoryPath, cancellationToken);
+
+		public Task<bool> SwitchBranchAsync(
+			string repositoryPath,
+			string branchName,
+			IProgress<string>? progress = null,
+			CancellationToken cancellationToken = default) =>
+			RequireInner().SwitchBranchAsync(repositoryPath, branchName, progress, cancellationToken);
+
+		public Task<bool> PullUpdatesAsync(
+			string repositoryPath,
+			IProgress<string>? progress = null,
+			CancellationToken cancellationToken = default) =>
+			RequireInner().PullUpdatesAsync(repositoryPath, progress, cancellationToken);
+
+		public Task<string?> GetHeadCommitAsync(
+			string repositoryPath,
+			CancellationToken cancellationToken = default) =>
+			RequireInner().GetHeadCommitAsync(repositoryPath, cancellationToken);
+
+		public Task<string?> GetCurrentBranchAsync(
+			string repositoryPath,
+			CancellationToken cancellationToken = default) =>
+			RequireInner().GetCurrentBranchAsync(repositoryPath, cancellationToken);
+
+		public Task<string?> GetRemoteUrlAsync(
+			string repositoryPath,
+			CancellationToken cancellationToken = default) =>
+			RequireInner().GetRemoteUrlAsync(repositoryPath, cancellationToken);
+
+		private IGitRepositoryService RequireInner() =>
+			inner ?? throw new InvalidOperationException("This fake supports clone failure only.");
 	}
 
 	private sealed class McpTestServer : IAsyncDisposable
@@ -1433,7 +1689,9 @@ public sealed class McpServerIntegrationTests
 			string project,
 			string sandbox,
 			bool hidePrivateData = false,
-			Action? servicesCreated = null)
+			Action? servicesCreated = null,
+			bool allowRemote = false,
+			Func<McpRemoteProjectServices>? remoteServicesFactory = null)
 		{
 			var clientToServer = new Pipe();
 			var serverToClient = new Pipe();
@@ -1451,7 +1709,9 @@ public sealed class McpServerIntegrationTests
 					{
 						servicesCreated();
 						return McpServices.Create(roots, () => Path.Combine(sandbox, "app-data"));
-					});
+					},
+				allowRemote,
+				remoteServicesFactory);
 			var recordingInput = new RecordingWriteStream(clientToServer.Writer.AsStream());
 			var recordingOutput = new RecordingReadStream(serverToClient.Reader.AsStream());
 			var transport = new StreamClientTransport(

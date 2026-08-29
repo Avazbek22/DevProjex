@@ -766,6 +766,7 @@ that prevents an accepted option from becoming a no-op.
 | analyze/context/project/open/profile-save | `--hide-secrets` | profile content-transformation state | independently enables or disables detected-value redaction without changing path filters | bare form means on; values are `true`, `false`, `on`, `off`; conflicts with `--no-hide-secrets` and `open --last` | requested payload/path stays on stdout; inspection failure exits `1` without a complete artifact | parser, resolver, handler, process |
 | analyze/context/project/open/profile-save | `--hide-private-data` | profile content-transformation state | independently enables or disables private-data redaction without changing path filters | bare form means on; values are `true`, `false`, `on`, `off`; conflicts with `--no-hide-private-data` and `open --last` | requested payload/path stays on stdout; inspection failure exits `1` without a complete artifact | parser, resolver, handler, process |
 | `mcp` | `--hide-private-data` | off | enables private-data redaction for the entire server process | startup-only; tool schemas and profiles cannot alter it; secret redaction remains mandatory | stdout remains JSON-RPC-only; startup failure exits `2` | parser, MCP contract, process |
+| `mcp` | `--allow-remote` | off | permits project tools to resolve Git URL sources through RepoCache | startup-only; local roots and `list_projects` remain unchanged; `branch` is URL-only | stdout remains JSON-RPC-only; tool failures use stable `DPX-MCP-*` results | parser, MCP schema, integration |
 | analyze/context/project/open/profile-save | `--compress-code` | profile content-transformation state | independently enables or disables syntax-aware body compression without changing path filters | `true|false|on|off`; conflicts with `--no-compress-code` and `open --last` | requested payload/path stays on stdout; unsupported or rejected files remain complete | parser, resolver, handler, process |
 | analyze/context/project/open/profile-save | `--strip-comments` | profile content-transformation state | independently removes syntax-tree comments and Python docstrings without changing path filters | `true|false|on|off`; conflicts with `--no-strip-comments` and `open --last` | requested payload/path stays on stdout; unsupported or rejected files remain complete | parser, resolver, handler, process |
 | analyze/context/project/open/profile-save | `--strip-blank-lines` | profile content-transformation state | independently removes unprotected whitespace-only source lines without changing path filters | `true|false|on|off`; conflicts with `--no-strip-blank-lines` and `open --last` | requested payload/path stays on stdout; unsupported or rejected files remain complete | parser, resolver, handler, process |
@@ -1054,6 +1055,15 @@ and booleans. `cache list` shortens commits
 to 12 characters only in text and adds a TTY total; `ui list` emits an empty
 stdout and the no-instances diagnostic on stderr. Analysis text uses IEC sizes,
 and profile text uses localized yes/no values.
+
+## MCP remote-source addition to CLI v1
+
+`devprojex mcp --allow-remote` is an additive, opt-in startup capability. Without
+the flag, MCP project tools retain the local-only, zero-network contract. With
+the flag, `get_tree`, `analyze`, `pack_context`, `search_project`, and `get_file`
+accept a Git URL in `project` plus an optional URL-only `branch`. RepoCache owns
+clone publication and the server pins each resolved checkout until shutdown.
+`list_projects` remains the stable list of configured local roots.
 
 ## Exit Codes
 
