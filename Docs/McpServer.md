@@ -113,11 +113,13 @@ self-contained: it starts with `Pack stored as '<id>' (<N> characters). Call
 read_pack ...`, followed by a preview of the project tree. Clients extract the
 session-scoped `pack_id` from that text and pass it to `read_pack`.
 
-When `max_tokens` is supplied, both inline and stored results end with a budget
-report. It states the budget, included and skipped file counts, estimated tokens
-for both groups, up to the 25 largest skipped files, and `and X more` when the
-list is longer. The trailer recommends `detail=compact` or `detail=signatures`
-when additional files are needed.
+When `max_tokens` is supplied, both inline and stored results include a budget
+report in a separate spotlighted data block after the pack or tree preview. This
+keeps an inline JSON or XML pack independently parseable while applying the same
+untrusted-data boundary to skipped file names. The report states the budget,
+included and skipped file counts, estimated tokens for both groups, up to the 25
+largest skipped files, and `and X more` when the list is longer. It recommends
+`detail=compact` or `detail=signatures` when additional files are needed.
 
 Future tools must declare `outputSchema` only when their useful result is
 genuinely structured and can be returned completely in `structuredContent`.

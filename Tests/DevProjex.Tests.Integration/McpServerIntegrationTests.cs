@@ -1385,6 +1385,34 @@ public sealed class McpServerIntegrationTests
 		Assert.Contains("B-skipped.txt", text, StringComparison.Ordinal);
 	}
 
+	[Theory]
+	[InlineData("json")]
+	[InlineData("xml")]
+	public async Task PackContextTokenBudgetKeepsInlineMachineDocumentParseable(string format)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "source.txt"), "content");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["view"] = "content",
+				["format"] = format,
+				["max_tokens"] = 100
+			});
+		var text = Text(result);
+		var document = ExtractSpotlightBody(text);
+
+		if (format == "json")
+			using (JsonDocument.Parse(document)) { }
+		else
+			_ = System.Xml.Linq.XDocument.Parse(document);
+		Assert.Contains("Token budget: 100 estimated tokens.", text, StringComparison.Ordinal);
+	}
+
 	[Fact]
 	public async Task PackContextSignaturesFitsMoreFilesWithinTheSameTokenBudget()
 	{

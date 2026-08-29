@@ -253,8 +253,9 @@ internal sealed class DevProjexMcpTools(
 							100,
 							$"writing pack {writtenFileCount}/{writtenFileCount}")
 						.ConfigureAwait(false);
-					var inlineMessage = McpSpotlight.Wrap(
-						AppendTokenBudgetReport(content, writeResult?.TokenBudget));
+					var inlineMessage = BuildSpotlightedPackContent(
+						content,
+						writeResult?.TokenBudget);
 					return McpToolResults.TextSuccess(inlineMessage, advertiseLargeResult: true);
 				}
 
@@ -278,7 +279,7 @@ internal sealed class DevProjexMcpTools(
 					tree += "\n[Tree truncated at 2000 lines.]";
 				var message = $"Pack stored as '{pack.Id}' ({pack.Characters} characters). " +
 				              "Call read_pack with this pack_id to read ranges, or search_project to locate source content.\n" +
-				              McpSpotlight.Wrap(AppendTokenBudgetReport(tree, writeResult?.TokenBudget));
+				              BuildSpotlightedPackContent(tree, writeResult?.TokenBudget);
 				await operationProgress.CompleteAsync(
 						100,
 						$"writing pack {writtenFileCount}/{writtenFileCount}")
@@ -539,16 +540,21 @@ internal sealed class DevProjexMcpTools(
 			$"{McpErrorCodes.InvalidArguments}: invalid format '{token}'. Valid values: text, markdown, json, xml.")
 	};
 
-	private static string AppendTokenBudgetReport(
-		string message,
+	private static string BuildSpotlightedPackContent(
+		string content,
 		ProjectContextTokenBudgetReport? report)
 	{
 		if (report is null)
-			return message;
+			return McpSpotlight.Wrap(content);
 
-		var output = new StringBuilder(message.Length + 512);
-		output.Append(message)
-			.Append("\n\nToken budget: ")
+		return McpSpotlight.Wrap(content) + "\n\n" +
+		       McpSpotlight.Wrap(FormatTokenBudgetReport(report));
+	}
+
+	private static string FormatTokenBudgetReport(ProjectContextTokenBudgetReport report)
+	{
+		var output = new StringBuilder(512);
+		output.Append("Token budget: ")
 			.Append(report.MaximumEstimatedTokens.ToString(CultureInfo.InvariantCulture))
 			.Append(" estimated tokens.\nIncluded: ")
 			.Append(report.IncludedFileCount.ToString(CultureInfo.InvariantCulture))
