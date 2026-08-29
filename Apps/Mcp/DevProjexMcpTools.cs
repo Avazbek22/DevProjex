@@ -191,7 +191,7 @@ internal sealed class DevProjexMcpTools(
 				10,
 				$"scanning files {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");
 			var effectiveDetail = Projects.ResolveDetail(plan, detail);
-			plan = Projects.ApplyDetail(plan, effectiveDetail);
+			plan = Projects.ApplyDetail(plan, effectiveDetail, cancellationToken);
 			var view = ParseView(arguments.OptionalString("view") ?? "tree-content");
 			var transformedFileCount = view == ProjectContextView.Tree ? 0 : plan.IncludedFiles.Count;
 			operationProgress.Milestone(11, $"transforming content 0/{transformedFileCount}");
