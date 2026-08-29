@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Xml.Linq;
 
@@ -87,6 +88,98 @@ public sealed class ExportContextDocumentContractTests
 		var content = file.Element("content")?.Value;
 		Assert.NotNull(content);
 		Assert.Equal("before\uFFFDafter\n", content);
+	}
+
+	[Theory]
+	[InlineData("json")]
+	[InlineData("xml")]
+	public async Task TokenBudgetAddsMachineReportAndKeepsIncludedFileOrder(string format)
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("A-large.txt", new string('a', 40));
+		workspace.WriteFile("B-small.txt", "bbbb");
+		workspace.WriteFile("C-small.txt", "cccc");
+		var environment = new TestTerminalEnvironment();
+
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(workspace, environment, format, maximumEstimatedTokens: 2));
+
+		if (format == "json")
+		{
+			using var document = JsonDocument.Parse(environment.StandardOutput);
+			Assert.Equal(
+				["B-small.txt", "C-small.txt"],
+				document.RootElement.GetProperty("files")
+					.EnumerateArray()
+					.Select(static file => file.GetProperty("path").GetString()));
+			var report = document.RootElement.GetProperty("tokenBudget");
+			Assert.Equal(2, report.GetProperty("maximumEstimatedTokens").GetInt64());
+			Assert.Equal(2, report.GetProperty("includedFiles").GetInt32());
+			Assert.Equal(1, report.GetProperty("skippedFiles").GetInt32());
+			Assert.Equal("A-large.txt", report.GetProperty("largestSkippedFiles")[0]
+				.GetProperty("path").GetString());
+		}
+		else
+		{
+			var document = XDocument.Parse(environment.StandardOutput);
+			Assert.Equal(
+				["B-small.txt", "C-small.txt"],
+				document.Root!.Element("files")!.Elements("file")
+					.Select(static file => file.Attribute("path")?.Value));
+			var report = document.Root.Element("tokenBudget")!;
+			Assert.Equal("2", report.Element("maximumEstimatedTokens")?.Value);
+			Assert.Equal("2", report.Element("includedFiles")?.Value);
+			Assert.Equal("1", report.Element("skippedFiles")?.Value);
+			Assert.Equal(
+				"A-large.txt",
+				report.Element("largestSkippedFiles")?.Element("file")?.Attribute("path")?.Value);
+		}
+
+		Assert.Contains("Token budget 2:", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("A-large.txt", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("--compress-code", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task DryRunReportsTheSameTokenBudgetForecastWithoutWritingDocument()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("A-large.txt", new string('a', 40));
+		workspace.WriteFile("B-small.txt", "bbbb");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			"text",
+			maximumEstimatedTokens: 1,
+			dryRun: true);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("Token budget 1:", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("included 1 files (1 estimated tokens)", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("skipped 1 files", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("A-large.txt", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task TokenBudgetRejectsValuesBelowOne()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("app.cs", "class App { }");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			"text",
+			maximumEstimatedTokens: 0);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("--max-tokens must be an integer", environment.StandardError, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -201,20 +294,33 @@ public sealed class ExportContextDocumentContractTests
 		TestTerminalEnvironment environment,
 		string format,
 		string? projectPath = null,
-		string? outputPath = null) =>
-		new TerminalApplication(
+		string? outputPath = null,
+		int? maximumEstimatedTokens = null,
+		bool dryRun = false)
+	{
+		var arguments = new List<string>
+		{
+			"--language", "en",
+			"export", "context", projectPath ?? workspace.Path,
+			"--view", "tree-content",
+			"--format", format,
+			"--git-mode", "none",
+			"--exclude", "none",
+			"-o", outputPath ?? "-"
+		};
+		if (maximumEstimatedTokens is not null)
+		{
+			arguments.Add("--max-tokens");
+			arguments.Add(maximumEstimatedTokens.Value.ToString(CultureInfo.InvariantCulture));
+		}
+		if (dryRun)
+			arguments.Add("--dry-run");
+
+		return new TerminalApplication(
 				environment,
 				new TerminalServiceFactory(() => workspace.CreateDirectory("app-data")))
-			.RunAsync(
-			[
-				"export", "context", projectPath ?? workspace.Path,
-				"--view", "tree-content",
-				"--format", format,
-				"--git-mode", "none",
-				"--exclude", "none",
-				"-o", outputPath ?? "-"
-			],
-				TestContext.Current.CancellationToken);
+			.RunAsync(arguments.ToArray(), TestContext.Current.CancellationToken);
+	}
 
 	private static async Task<string> HashAsync(string path)
 	{

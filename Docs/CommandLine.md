@@ -483,6 +483,7 @@ Defaults:
 - format: `markdown`;
 - output: stdout;
 - profile: `standard`.
+- token budget: unlimited.
 
 Specific options:
 
@@ -492,12 +493,25 @@ Specific options:
 -o, --output <PATH|->
 --force
 -n, --dry-run
+--max-tokens <N>
 ```
 
 The format applies to the entire document. JSON and XML are parseable structured
 documents; Markdown contains headings, a fenced tree, and fenced text-file
 content. Binary bytes are never embedded in context output. Machine documents
 mark binary entries with metadata.
+
+`--max-tokens N` limits included file content to an estimated token budget of at
+least 1. The estimate is one token per four transformed characters, rounded up
+per file. Files are considered in deterministic path order; a file that does not
+fit is reported as skipped, while later files are still considered. An empty
+content result is valid. Tree text, headings, and format markup are outside the
+budget. Compression and stripping are applied before estimates are calculated,
+so `--compress-code` can fit more supported source files into the same budget.
+Whenever the option is present, stderr reports included and skipped counts and
+estimated tokens, lists up to 25 largest skipped files, and suggests how to fit
+more. JSON and XML also include an additive `tokenBudget` object; text and
+Markdown payloads remain unchanged apart from omitted file sections.
 
 With `--hide-secrets` or `--hide-private-data`, detector and budget failures fail closed and
 produce no complete output artifact. A text file above the supported scan limit or in an
@@ -515,6 +529,8 @@ must already exist.
 performs planning and destination preflight but does not generate a document,
 create an artifact, or print a result path. Its operational plan is written to
 stderr.
+With `--max-tokens`, dry-run performs the same transformed-content forecast and
+writes the same budget report without generating the document.
 
 Examples:
 

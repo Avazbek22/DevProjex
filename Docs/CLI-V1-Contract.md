@@ -522,6 +522,7 @@ devprojex export context|ctx [PROJECT|URL]
   -o, --output <PATH|->               default: -
   --force
   -n, --dry-run
+  --max-tokens <N>                    integer >= 1; default: unlimited
   --branch <NAME>                     URL source only
   <shared selection options>
   <shared output options>
@@ -783,6 +784,7 @@ that prevents an accepted option from becoming a no-op.
 | `export context` | `-o`, `--output` | `-` | selects streaming stdout or an exact context file | destination must be outside source | document or real absolute path on stdout | destination, streaming, process |
 | `export context` | `--force` | off | atomically replaces an existing context file | invalid with stdout | success path on stdout; conflict exits `4`, invalid combination `2` | parser, destination, handler |
 | `export context` | `--dry-run` | off | runs plan and destination preflight without document generation | creates no parent, staging, or output | stdout empty; one readiness plan on stderr | handler, filesystem-effects, process |
+| `export context` | `--max-tokens` | unlimited | greedily limits included transformed file content by estimated tokens while preserving deterministic path order | integer `>= 1`; skipped files do not stop consideration of later files; document structure is outside the budget | document stays on stdout/file; localized budget report is written to stderr; JSON/XML add `tokenBudget` | parser, serializer, handler, process |
 | `export project` | `--as` | required | selects exact folder or ZIP export | missing/invalid value exits `2` | real absolute created destination on stdout | parser, handler, process |
 | `export project` | `-o`, `--output` | required | selects the exact destination | folder must be absent; ZIP path ends in `.zip`; destination outside source; `-` is valid only with `--as zip` | folder/file success returns its real absolute path; ZIP stdout is the raw archive byte stream | parser, destination, integration |
 | `export project` | `--force` | off | atomically replaces an existing ZIP file | invalid for folder output and ZIP stdout | success path on stdout; invalid combination exits `2` | parser, destination, integration |
@@ -1030,6 +1032,10 @@ schemas unless a schema is named below.
   cache path.
 - Context/project dry-run output includes file/folder counts, bytes, estimated
   tokens, and the effective profile.
+- `export context --max-tokens N` applies a per-file transformed-content estimate
+  and greedily includes every file that fits the remaining budget. It reports
+  included and skipped estimates on stderr; context JSON and XML add the optional
+  `tokenBudget` sibling without changing `schemaVersion` or existing properties.
 - `ui list --timeout` uses the same bounded IPC timeout as other UI actions.
 - Root help owns the full exit-code table; command help shows only codes that
   the command can produce. Verbosity choices are ordered `quiet`, `minimal`,
@@ -1103,6 +1109,14 @@ added, but reject any explicit conflicting kind.
 Context XML uses `devprojexContext`, numeric text `schemaVersion="1"`, and
 `kind="devprojex-context"`. Its XML declaration reports UTF-8. Generated JSON and
 XML must parse with standard parsers.
+
+When `export context --max-tokens` is present, context JSON and XML add an
+optional `tokenBudget` sibling after `files`. It contains
+`maximumEstimatedTokens`, `includedFiles`, `skippedFiles`,
+`includedEstimatedTokens`, `skippedEstimatedTokens`, `largestSkippedFiles`, and
+`additionalSkippedFiles`. Each largest-skipped entry contains `path` and
+`estimatedTokens`. The budget sums per-file estimates after enabled content
+transformations and excludes tree text, headings, and serialization markup.
 
 Analysis v1 contains inventory, effective selection, metrics, diagnostics, and
 fingerprint. Either findings option adds `findingCount`. With `--findings`, it

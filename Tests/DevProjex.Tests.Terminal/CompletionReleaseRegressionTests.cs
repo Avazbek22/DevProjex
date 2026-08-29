@@ -269,7 +269,9 @@ public sealed class CompletionReleaseRegressionTests
 		Assert.DoesNotContain("--force", afterFolder);
 		Assert.Contains("--force", afterZip);
 		Assert.DoesNotContain("--force", contextStdout);
+		Assert.Contains("--max-tokens", contextStdout);
 		Assert.Contains("--force", contextFile);
+		Assert.Contains("--max-tokens", contextFile);
 	}
 
 	[Fact]

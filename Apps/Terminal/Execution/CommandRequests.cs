@@ -35,6 +35,7 @@ public sealed record ExportContextCommandRequest(
 	string? OutputPath,
 	bool Force,
 	bool DryRun,
+	int? MaximumEstimatedTokens,
 	TerminalOutputOptions Output);
 
 public sealed record ExportProjectCommandRequest(

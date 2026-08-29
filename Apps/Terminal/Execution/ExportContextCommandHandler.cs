@@ -39,35 +39,54 @@ public sealed class ExportContextCommandHandler(
 		if (request.DryRun)
 		{
 			SecretRedactionSnapshot? redactionSnapshot = null;
-			var redactionFeatures = SecretRedactionFeatureSelection.Resolve(
-				plan.Selection.HideSecrets == true,
-				plan.Selection.HidePrivateData == true);
-			if (request.View is ProjectContextView.Content or ProjectContextView.TreeContent &&
-			    redactionFeatures != SecretRedactionFeatures.None)
+			ProjectContextWriteResult? budgetResult = null;
+			if (request.MaximumEstimatedTokens is { } maximumEstimatedTokens)
 			{
-				redactionSnapshot = await services.SecretRedactionOutputPreparer
-					.AnalyzeAsync(
-						new SecretRedactionContext(
-							plan.SourceRoot,
-							services.SecretRedactionSession,
-							redactionFeatures),
-						plan.IncludedFiles,
+				budgetResult = await services.ContextDocumentService.EvaluateTokenBudgetAsync(
+						plan,
+						request.View,
+						maximumEstimatedTokens,
 						cancellationToken)
 					.ConfigureAwait(false);
+			}
+			else
+			{
+				var redactionFeatures = SecretRedactionFeatureSelection.Resolve(
+					plan.Selection.HideSecrets == true,
+					plan.Selection.HidePrivateData == true);
+				if (request.View is ProjectContextView.Content or ProjectContextView.TreeContent &&
+				    redactionFeatures != SecretRedactionFeatures.None)
+				{
+					redactionSnapshot = await services.SecretRedactionOutputPreparer
+						.AnalyzeAsync(
+							new SecretRedactionContext(
+								plan.SourceRoot,
+								services.SecretRedactionSession,
+								redactionFeatures),
+							plan.IncludedFiles,
+							cancellationToken)
+						.ConfigureAwait(false);
+				}
 			}
 			DryRunRenderer.WritePlan(
 				environment,
 				services.Localization,
 				requestedOutputPath ?? "-",
 				plan);
-			if (redactionSnapshot is not null)
+			var unscannableFiles = budgetResult?.UnscannableFiles ??
+			                       redactionSnapshot?.UnscannableFiles;
+			if (unscannableFiles is not null)
 			{
 				UnscannableFileOutput.Write(
 					environment.Error,
 					plan.SourceRoot,
-					redactionSnapshot.UnscannableFiles,
+					unscannableFiles,
 					services.Localization);
 			}
+			TokenBudgetOutput.Write(
+				environment.Error,
+				budgetResult?.TokenBudget,
+				services.Localization);
 			return CommandLineExitCodes.Success;
 		}
 
@@ -87,7 +106,8 @@ public sealed class ExportContextCommandHandler(
 								destination,
 								cancellationToken,
 								plain: request.Output.Plain,
-								useUnifiedContentHeaders: true)
+								useUnifiedContentHeaders: true,
+								maximumEstimatedTokens: request.MaximumEstimatedTokens)
 							.ConfigureAwait(false);
 						await destination.CompleteAsync(cancellationToken).ConfigureAwait(false);
 						return writeResult;
@@ -99,6 +119,7 @@ public sealed class ExportContextCommandHandler(
 				plan.SourceRoot,
 				report.UnscannableFiles,
 				services.Localization);
+			TokenBudgetOutput.Write(environment.Error, report.TokenBudget, services.Localization);
 			return CommandLineExitCodes.Success;
 		}
 
@@ -117,7 +138,8 @@ public sealed class ExportContextCommandHandler(
 							destination,
 							token,
 							plain: request.Output.Plain,
-							useUnifiedContentHeaders: true).ConfigureAwait(false);
+							useUnifiedContentHeaders: true,
+							maximumEstimatedTokens: request.MaximumEstimatedTokens).ConfigureAwait(false);
 					},
 					cancellationToken,
 					path => ExactOutputDestinationValidator.ValidateContext(
@@ -132,6 +154,10 @@ public sealed class ExportContextCommandHandler(
 				environment.Error,
 				plan.SourceRoot,
 				writeReport.UnscannableFiles,
+				services.Localization);
+			TokenBudgetOutput.Write(
+				environment.Error,
+				writeReport.TokenBudget,
 				services.Localization);
 		}
 		return CommandLineExitCodes.Success;
