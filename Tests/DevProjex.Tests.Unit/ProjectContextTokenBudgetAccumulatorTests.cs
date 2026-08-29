@@ -34,14 +34,15 @@ public sealed class ProjectContextTokenBudgetAccumulatorTests
 	public void CreateReport_SortsAndCapsSkippedFiles()
 	{
 		var budget = new ProjectContextTokenBudgetAccumulator(1);
-		for (var index = 0; index < 27; index++)
+		const int skippedFileCount = 10_000;
+		for (var index = 0; index < skippedFileCount; index++)
 			Assert.False(budget.TryInclude($"file-{index:D2}.cs", 8 + index * 4));
 
 		var report = budget.CreateReport();
 
-		Assert.Equal(27, report.SkippedFileCount);
+		Assert.Equal(skippedFileCount, report.SkippedFileCount);
 		Assert.Equal(25, report.LargestSkippedFiles.Count);
-		Assert.Equal("file-26.cs", report.LargestSkippedFiles[0].Path);
-		Assert.Equal(2, report.AdditionalSkippedFileCount);
+		Assert.Equal("file-9999.cs", report.LargestSkippedFiles[0].Path);
+		Assert.Equal(skippedFileCount - 25, report.AdditionalSkippedFileCount);
 	}
 }

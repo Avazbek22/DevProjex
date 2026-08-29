@@ -1766,6 +1766,39 @@ public sealed class ProjectContextStreamingRegressionTests
 		}
 	}
 
+	[Fact]
+	public async Task TextTokenBudgetTrimsTheLastIncludedFileWhenLaterFilesAreSkipped()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/A-included.txt", "a\n");
+		workspace.WriteFile("project/B-skipped.txt", new string('b', 20) + "\n");
+		var services = new TerminalServiceFactory(
+				() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var plan = await services.ContextFactory.BuildAsync(
+			project,
+			new ProjectSelectionSpec(
+				GitMode: GitFilteringMode.None,
+				Exclusions: []),
+			cancellationToken: TestContext.Current.CancellationToken);
+		await using var destination = new WriteOnlyNonSeekableStream();
+
+		var result = await services.ContextDocumentService.WriteCompleteWithReportAsync(
+			plan,
+			ProjectContextView.Content,
+			ProjectContextDocumentFormat.Text,
+			destination,
+			TestContext.Current.CancellationToken,
+			maximumEstimatedTokens: 1);
+
+		Assert.Equal(
+			$"A-included.txt:{Environment.NewLine}{Environment.NewLine}a",
+			Encoding.UTF8.GetString(destination.ToArray()));
+		Assert.Equal(1, result.TokenBudget?.IncludedFileCount);
+		Assert.Equal(1, result.TokenBudget?.SkippedFileCount);
+	}
+
 	private sealed class CompleteSnapshotReadAheadProbeAnalyzer : IFileContentAnalyzer
 	{
 		private readonly FileContentAnalyzer _inner = new();

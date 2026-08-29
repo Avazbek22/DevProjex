@@ -19,9 +19,11 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 {
 	internal const int MaximumReportedSkippedFiles = 25;
 	private readonly long _maximumEstimatedTokens;
-	private readonly List<ProjectContextTokenBudgetSkippedFile> _skippedFiles = [];
+	private readonly List<ProjectContextTokenBudgetSkippedFile> _largestSkippedFiles =
+		new(MaximumReportedSkippedFiles);
 	private long _remainingEstimatedTokens;
 	private int _includedFileCount;
+	private int _skippedFileCount;
 	private long _includedEstimatedTokens;
 	private long _skippedEstimatedTokens;
 
@@ -46,24 +48,56 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 		}
 
 		_skippedEstimatedTokens += estimatedTokens;
-		_skippedFiles.Add(new ProjectContextTokenBudgetSkippedFile(path, estimatedTokens));
+		_skippedFileCount++;
+		RetainLargestSkippedFile(new ProjectContextTokenBudgetSkippedFile(path, estimatedTokens));
 		return false;
 	}
 
 	public ProjectContextTokenBudgetReport CreateReport()
 	{
-		var largestSkippedFiles = _skippedFiles
-			.OrderByDescending(static file => file.EstimatedTokens)
-			.ThenBy(static file => file.Path, PathComparer.Default)
-			.Take(MaximumReportedSkippedFiles)
-			.ToArray();
+		var largestSkippedFiles = _largestSkippedFiles.ToArray();
 		return new ProjectContextTokenBudgetReport(
 			_maximumEstimatedTokens,
 			_includedFileCount,
-			_skippedFiles.Count,
+			_skippedFileCount,
 			_includedEstimatedTokens,
 			_skippedEstimatedTokens,
 			largestSkippedFiles,
-			_skippedFiles.Count - largestSkippedFiles.Length);
+			_skippedFileCount - largestSkippedFiles.Length);
+	}
+
+	private void RetainLargestSkippedFile(ProjectContextTokenBudgetSkippedFile candidate)
+	{
+		var insertionIndex = _largestSkippedFiles.BinarySearch(candidate, SkippedFileComparer.Instance);
+		if (insertionIndex < 0)
+			insertionIndex = ~insertionIndex;
+		if (insertionIndex >= MaximumReportedSkippedFiles)
+			return;
+
+		_largestSkippedFiles.Insert(insertionIndex, candidate);
+		if (_largestSkippedFiles.Count > MaximumReportedSkippedFiles)
+			_largestSkippedFiles.RemoveAt(MaximumReportedSkippedFiles);
+	}
+
+	private sealed class SkippedFileComparer : IComparer<ProjectContextTokenBudgetSkippedFile>
+	{
+		public static SkippedFileComparer Instance { get; } = new();
+
+		public int Compare(
+			ProjectContextTokenBudgetSkippedFile? left,
+			ProjectContextTokenBudgetSkippedFile? right)
+		{
+			if (ReferenceEquals(left, right))
+				return 0;
+			if (left is null)
+				return 1;
+			if (right is null)
+				return -1;
+
+			var tokenOrder = right.EstimatedTokens.CompareTo(left.EstimatedTokens);
+			return tokenOrder != 0
+				? tokenOrder
+				: PathComparer.Default.Compare(left.Path, right.Path);
+		}
 	}
 }

@@ -6,6 +6,7 @@ using System.Text.Unicode;
 using System.Runtime.InteropServices;
 using System.Xml;
 using DevProjex.Application.Secrets;
+using DevProjex.Application.Services;
 
 namespace DevProjex.Application.Context;
 
@@ -465,7 +466,8 @@ public sealed class ProjectContextDocumentService(
 		ProjectContextTokenBudgetAccumulator? tokenBudget,
 		CancellationToken cancellationToken)
 	{
-		await using var writer = CreateStreamWriter(destination);
+		await using var streamWriter = CreateStreamWriter(destination);
+		var writer = new TrailingLineEndingTextWriter(streamWriter);
 		var hasOutput = false;
 		var includesContent = IncludesContent(view) && plan.IncludedFiles.Count > 0;
 		if (IncludesTree(view))
@@ -514,17 +516,13 @@ public sealed class ProjectContextDocumentService(
 						cancellationToken)
 					.ConfigureAwait(false);
 				await writer.WriteAsync(":".AsMemory(), cancellationToken).ConfigureAwait(false);
-				var isLast = index == plan.IncludedFiles.Count - 1;
 				var charactersToWrite = file.Classification == FileContentClassification.Text
-					? Math.Max(
-						0,
-						(file.Metrics?.CharCount ?? 0) -
-						(isLast ? file.Metrics?.TrailingNewlineChars ?? 0 : 0))
+					? file.Metrics?.CharCount ?? 0
 					: GetTextContent(file).Length;
-				if (charactersToWrite > 0 || !isLast)
+				await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
+				await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
+				if (charactersToWrite > 0)
 				{
-					await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
-					await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
 					if (file.Classification == FileContentClassification.Text)
 					{
 						await snapshot.CopyTextToAsync(
@@ -547,7 +545,7 @@ public sealed class ProjectContextDocumentService(
 			}
 		}
 
-		await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+		await writer.CompleteAsync(cancellationToken).ConfigureAwait(false);
 	}
 
 	private async Task WriteCompleteMarkdownAsync(
