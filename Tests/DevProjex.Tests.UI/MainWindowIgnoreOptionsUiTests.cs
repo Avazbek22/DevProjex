@@ -2216,6 +2216,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			Assert.InRange(selector.Bounds.Height, 30, 34);
 			Assert.Equal(new CornerRadius(8), selector.CornerRadius);
 			var translucentMenuBrush = new SolidColorBrush(Color.FromArgb(32, 1, 2, 3));
+			var selectedSurfaceBrush = new SolidColorBrush(Color.FromArgb(96, 4, 100, 180));
 			await window.Dispatcher.InvokeAsync(() =>
 			{
 				UiTestDriver.GetViewModel(window).SetThemeEffects(
@@ -2223,6 +2224,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 					mica: false,
 					acrylic: false);
 				window.Resources["MenuPopupBrush"] = translucentMenuBrush;
+				window.Resources["TreeSelectionBrush"] = selectedSurfaceBrush;
 			});
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
 
@@ -2278,11 +2280,11 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			await UiTestDriver.WaitForConditionAsync(
 				window,
 				() => GetRenderedBackgrounds(selectedItem)
-					.Any(static brush => brush.Color.A > 0),
+					.Any(brush => brush.Color == selectedSurfaceBrush.Color),
 				"Git mode selection transition to complete");
 			Assert.Contains(
 				GetRenderedBackgrounds(selectedItem),
-				brush => brush.Color.A > 0 && brush.Color != popupBackground.Color);
+				brush => brush.Color == selectedSurfaceBrush.Color);
 
 			await window.Dispatcher.InvokeAsync(() =>
 			{
