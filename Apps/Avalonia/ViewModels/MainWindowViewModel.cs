@@ -222,13 +222,14 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		new ResettableObservableCollection<IgnoreOptionViewModel>();
 	public ObservableCollection<IgnoreOptionViewModel> ContentProcessingOptions { get; } =
 		new ResettableObservableCollection<IgnoreOptionViewModel>();
-	public ObservableCollection<GitFilteringModeOptionViewModel> GitFilteringModes { get; } = [];
+	public ObservableCollection<GitFilteringModeOptionViewModel> GitFilteringModes { get; } =
+		new ResettableObservableCollection<GitFilteringModeOptionViewModel>();
 	public GitFilteringModeOptionViewModel? SelectedGitFilteringModeOption
 	{
 		get => _selectedGitFilteringModeOption;
 		set
 		{
-			if (Equals(_selectedGitFilteringModeOption, value)) return;
+			if (ReferenceEquals(_selectedGitFilteringModeOption, value)) return;
 			_selectedGitFilteringModeOption = value;
 			RaisePropertyChanged();
 		}
@@ -2289,9 +2290,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		IsRefreshingGitFilteringModes = true;
 		try
 		{
-			GitFilteringModes.Clear();
-			foreach (var option in supported)
-				GitFilteringModes.Add(option);
+			if (!GitFilteringModes.SequenceEqual(supported))
+				((ResettableObservableCollection<GitFilteringModeOptionViewModel>)GitFilteringModes)
+					.ReplaceAll(supported);
 			SelectedGitFilteringModeOption = GitFilteringModes.FirstOrDefault(option =>
 				option.Mode == selectedMode) ?? GitFilteringModes.FirstOrDefault();
 		}
@@ -2299,7 +2300,6 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		{
 			IsRefreshingGitFilteringModes = false;
 		}
-		RaisePropertyChanged(nameof(GitFilteringModes));
 	}
 
 	private void SynchronizeContentProcessingOptions(IReadOnlySet<IgnoreOptionId>? transformationIds = null)

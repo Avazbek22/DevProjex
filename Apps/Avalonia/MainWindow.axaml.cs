@@ -1396,6 +1396,7 @@ public partial class MainWindow : Window
 		PersistentSecretMarksSnapshot? persistentMarks = null;
 		if (applyStoredProfile)
 		{
+			var runtimeGitMode = _selectionCoordinator.ActiveGitFilteringMode;
 			var profileSnapshot = await LoadProjectProfileWithRetryAsync(
 				_currentPath,
 				cancellationToken);
@@ -1409,6 +1410,7 @@ public partial class MainWindow : Window
 			{
 				_selectionCoordinator.ResetProjectProfileSelections(_currentPath);
 			}
+			_selectionCoordinator.RestoreMomentaryGitFilteringMode(runtimeGitMode);
 
 			if (profileSnapshot is
 			    {

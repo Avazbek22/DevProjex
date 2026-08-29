@@ -1,3 +1,5 @@
+using DevProjex.Avalonia.Services;
+
 namespace DevProjex.Avalonia.Views;
 
 public partial class SettingsPanelView : UserControl
@@ -55,6 +57,47 @@ public partial class SettingsPanelView : UserControl
 
 	private void OnGitFilteringModeChanged(object? sender, SelectionChangedEventArgs e)
 		=> GitFilteringModeChanged?.Invoke(sender, e);
+
+	private void OnGitFilteringModeDropDownOpened(object? sender, EventArgs e)
+	{
+		if (sender is not ComboBox comboBox)
+			return;
+
+		Dispatcher.Post(() =>
+		{
+			var popup = comboBox
+				.GetVisualDescendants()
+				.OfType<Popup>()
+				.FirstOrDefault(static candidate =>
+					string.Equals(candidate.Name, "PART_Popup", StringComparison.Ordinal));
+			if (popup?.Child is not Border popupBorder)
+				return;
+
+			var owner = TopLevel.GetTopLevel(this) as Window;
+			if (DataContext is MainWindowViewModel viewModel)
+			{
+				PopupBackdropConfigurator.TryApply(
+					popupBorder,
+					owner,
+					viewModel.ActiveThemeEffect,
+					PopupBackdropTransparencyFallback.Transparent);
+			}
+		}, DispatcherPriority.Loaded);
+	}
+
+	private void OnGitFilteringModeDropDownClosed(object? sender, EventArgs e)
+	{
+		if (sender is not ComboBox comboBox)
+			return;
+
+		Dispatcher.Post(() =>
+		{
+			if (comboBox.IsDropDownOpen || !IsVisible)
+				return;
+
+			this.FindControl<Border>("IgnoreOptionsBorder")?.Focus(NavigationMethod.Unspecified);
+		}, DispatcherPriority.Input);
+	}
 
 	private void OnContentProcessingAllChanged(object? sender, RoutedEventArgs e)
 		=> ContentProcessingAllChanged?.Invoke(sender, e);

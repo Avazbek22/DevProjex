@@ -10,5 +10,9 @@ internal sealed record TreeRefreshInput(
     long? SelectionRevision = null,
     BuildTreeResult? InteractiveFilterBaseTree = null,
 	GitFilteringMode GitMode = GitFilteringMode.None,
+    GitScopePathResult? GitScope = null,
+	GitScopePresentationProjection? GitScopePresentation = null,
+	IExtensionInclusionPolicy? EffectiveExtensionPolicy = null,
+	IReadOnlySet<string>? AvailableRootFolders = null,
     bool PreserveCheckedPaths = false,
     bool PreserveExpandedPaths = false);

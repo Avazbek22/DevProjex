@@ -31,7 +31,7 @@ public sealed class SelectionSyncCoordinatorDynamicIgnoreNegativeMatrixTests
 
 	[Theory]
 	[MemberData(nameof(DynamicOptionIds))]
-	public void DynamicIgnoreNegativeMatrix_HiddenUncheckedOption_DoesNotFlipToCheckedWhenVisibleOptionsAreAllChecked(
+	public void DynamicIgnoreNegativeMatrix_HiddenUncheckedOption_DoesNotFlipWhenPathAggregateIsEmpty(
 		IgnoreOptionId dynamicOptionId)
 	{
 		var viewModel = CreateViewModel();
@@ -47,7 +47,7 @@ public sealed class SelectionSyncCoordinatorDynamicIgnoreNegativeMatrixTests
 
 		Assert.DoesNotContain(viewModel.IgnoreOptions, option => option.Id == dynamicOptionId);
 		Assert.False(GetIgnoreOption(viewModel, IgnoreOptionId.HideSecrets).IsChecked);
-		Assert.True(viewModel.AllIgnoreChecked);
+		Assert.False(viewModel.AllIgnoreChecked);
 
 		ApplyIgnoreCounts(coordinator, BuildCounts(dynamicOptionId, dynamicVisible: true));
 		coordinator.PopulateIgnoreOptionsForRootSelection([], ProjectPath);

@@ -73,6 +73,7 @@ internal sealed class ProjectLoadSnapshotPipeline(IProjectLoadSnapshotPipelineHo
 				treeInput,
 				treeBuild.Tree,
 				treeBuild.Inventory,
+				treeBuild.GitScopePresentation,
 				treeRoot,
 				persistentMarks),
             cancellationToken);

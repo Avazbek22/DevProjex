@@ -34,6 +34,28 @@ public sealed class MainWindowViewModelTests
 		DeleteToolTip: null);
 
 	[Fact]
+	public void GitFilteringModes_RefreshRebindsSelectionToCurrentCollectionItem()
+	{
+		var viewModel = CreateViewModel();
+		viewModel.RefreshGitFilteringModes(
+			repositoryAvailable: true,
+			GitFilteringMode.Staged);
+		var previousSelection = Assert.IsType<GitFilteringModeOptionViewModel>(
+			viewModel.SelectedGitFilteringModeOption);
+
+		viewModel.RefreshGitFilteringModes(
+			repositoryAvailable: true,
+			GitFilteringMode.Staged);
+
+		var currentSelection = Assert.IsType<GitFilteringModeOptionViewModel>(
+			viewModel.SelectedGitFilteringModeOption);
+		Assert.Same(previousSelection, currentSelection);
+		Assert.Contains(
+			viewModel.GitFilteringModes,
+			option => ReferenceEquals(option, currentSelection));
+	}
+
+	[Fact]
 	public void PreviewSearchAvailability_FollowsLoadedPreviewPane()
 	{
 		var viewModel = CreateViewModel();

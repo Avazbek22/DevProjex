@@ -111,7 +111,7 @@ public sealed class SelectionSyncCoordinatorAdvancedIgnoreOptionContractMatrixTe
 
 	[Theory]
 	[MemberData(nameof(AllIgnoreCases))]
-	public void PopulateIgnoreOptionsForRootSelection_WhenUncheckedAdvancedOptionDisappears_AllIgnoreTracksRemainingVisibleOptions(
+	public void PopulateIgnoreOptionsForRootSelection_WhenUncheckedAdvancedOptionDisappears_EmptyPathAggregateStaysUnchecked(
 		IgnoreOptionCase optionCase)
 	{
 		var viewModel = CreateViewModel();
@@ -141,12 +141,12 @@ public sealed class SelectionSyncCoordinatorAdvancedIgnoreOptionContractMatrixTe
 		Assert.True(Assert.Single(
 			viewModel.IgnoreOptions,
 			item => item.Id == IgnoreOptionId.UseGitIgnore).IsChecked);
-		Assert.True(viewModel.AllIgnoreChecked);
+		Assert.False(viewModel.AllIgnoreChecked);
 	}
 
 	[Theory]
 	[MemberData(nameof(AllIgnoreCases))]
-	public void PopulateIgnoreOptionsForRootSelection_WhenUncheckedAdvancedOptionReappears_AllIgnoreBecomesFalseAgain(
+	public void PopulateIgnoreOptionsForRootSelection_WhenUncheckedAdvancedOptionReappears_PreservesStateAcrossEmptyPathAggregate(
 		IgnoreOptionCase optionCase)
 	{
 		var viewModel = CreateViewModel();
@@ -168,7 +168,7 @@ public sealed class SelectionSyncCoordinatorAdvancedIgnoreOptionContractMatrixTe
 			IgnoreOptionCounts.Empty,
 			hasIgnoreCounts: true);
 		coordinator.PopulateIgnoreOptionsForRootSelection(["src"], ProjectPath);
-		Assert.True(viewModel.AllIgnoreChecked);
+		Assert.False(viewModel.AllIgnoreChecked);
 
 		ApplyScanState(
 			coordinator,

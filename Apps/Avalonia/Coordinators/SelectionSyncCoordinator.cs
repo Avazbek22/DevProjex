@@ -20,8 +20,11 @@ public sealed partial class SelectionSyncCoordinator(
     Action? scanIncomplete = null,
     Func<string, IReadOnlyCollection<IgnoreOptionId>, IReadOnlyCollection<string>?, CancellationToken, IgnoreRules>?
         buildIgnoreRulesWithCancellation = null,
-    Func<string, IReadOnlyCollection<string>, CancellationToken, IgnoreOptionsAvailability>?
-        getIgnoreOptionsAvailabilityWithCancellation = null)
+	Func<string, IReadOnlyCollection<string>, CancellationToken, IgnoreOptionsAvailability>?
+		getIgnoreOptionsAvailabilityWithCancellation = null,
+	IGitScopePathProvider? gitScopePathProvider = null,
+	Action<string, GitScopePathResult>? gitScopeUnavailable = null,
+	Func<CancellationToken, Task<bool>>? gitAvailabilityResolver = null)
     : IDisposable
 {
     // Store collection references for proper cleanup
@@ -47,7 +50,8 @@ public sealed partial class SelectionSyncCoordinator(
     private bool _hasIgnoreOptionCounts;
     private IgnoreOptionCounts _ignoreOptionCounts;
     private IgnoreControllerImpactCounts _ignoreControllerImpactCounts;
-    private GitWorkspaceEvidence _gitWorkspaceEvidence;
+	private GitWorkspaceEvidence _gitWorkspaceEvidence;
+	private int _gitCliAvailability = gitAvailabilityResolver is null ? 1 : 0;
 	private bool _selectionPersistenceBlockedByIncompleteScan;
 
     private bool _suppressExtensionAllCheck;
@@ -82,7 +86,12 @@ public sealed partial class SelectionSyncCoordinator(
     private readonly IgnoreRulesBuildCache _ignoreRulesBuildCache = new(
         buildIgnoreRulesWithCancellation ??
         ((path, options, roots, _) => buildIgnoreRules(path, options, roots)));
-    private static readonly TraceSource RefreshTraceSource = new("DevProjex.SelectionRefresh");
+	private static readonly TraceSource RefreshTraceSource = new("DevProjex.SelectionRefresh");
+	private static readonly IReadOnlySet<IgnoreOptionId> IgnoreAllExcludedOptionIds =
+		ProjectPresentationCatalog.ContentTransformationOptionIds
+			.Append(IgnoreOptionId.UseGitIgnore)
+			.Append(IgnoreOptionId.TrackedGitFilesOnly)
+			.ToHashSet();
     private readonly SelectionRefreshEngine _selectionRefreshEngine = new(
         scanOptions,
         filterSelectionService,
@@ -91,10 +100,66 @@ public sealed partial class SelectionSyncCoordinator(
         getIgnoreOptionsAvailability,
         buildIgnoreRulesWithCancellation,
         getIgnoreOptionsAvailabilityWithCancellation);
+	private GitScopeRefreshSnapshot? _pendingGitScopeRefresh;
 
     public long CurrentSelectionRevision => _session.Revision;
     public ProjectContextGitReadiness AppliedGitReadiness => _appliedGitReadiness;
 	public GitFilteringMode ActiveGitFilteringMode => _session.IgnoreOptions.ActiveGitFilteringMode;
+
+	public GitScopeRefreshSnapshot? GetPendingGitScopeRefresh(
+		string projectPath,
+		GitFilteringMode mode)
+	{
+		var snapshot = _pendingGitScopeRefresh;
+		if (snapshot is not null &&
+		       snapshot.SelectionRevision == CurrentSelectionRevision &&
+		       snapshot.Mode == mode &&
+		       PathComparer.Default.Equals(snapshot.ProjectPath, projectPath))
+		{
+			return snapshot;
+		}
+
+		_pendingGitScopeRefresh = null;
+		return null;
+	}
+
+	public void ConsumePendingGitScopeRefresh(
+		string projectPath,
+		GitFilteringMode mode,
+		long selectionRevision)
+	{
+		var snapshot = _pendingGitScopeRefresh;
+		if (snapshot is not null &&
+		    snapshot.SelectionRevision == selectionRevision &&
+		    snapshot.Mode == mode &&
+		    PathComparer.Default.Equals(snapshot.ProjectPath, projectPath))
+		{
+			_pendingGitScopeRefresh = null;
+		}
+	}
+
+	public IExtensionInclusionPolicy? GetEffectiveExtensionPolicy()
+	{
+		var selected = _session.Extensions.IsInitialized
+			? _session.Extensions.SnapshotSelectedNames()
+			: CollectCheckedSelectionNames(viewModel.Extensions, StringComparer.OrdinalIgnoreCase);
+		return ExtensionInclusionPolicyFactory.Create(
+			_session.ExtensionSelectionIsExplicit,
+			forceAllExtensionsChecked:
+				!ShouldSuppressAllTogglesOverride() && ResolveAllExtensionsCheckedForRefresh(),
+			selectionInitialized: _session.Extensions.IsInitialized || viewModel.Extensions.Count > 0,
+			selected,
+			SnapshotExtensionOptionStateCacheOrNull(_session.Extensions.IsInitialized));
+	}
+
+	public void RestoreMomentaryGitFilteringMode(GitFilteringMode mode)
+	{
+		if (!GitScopeSelection.IsMomentary(mode))
+			return;
+
+		_session.IgnoreOptions.SetActiveGitFilteringMode(mode);
+		RefreshGitFilteringModePresentation();
+	}
 
     public void AcceptCurrentSelectionsAsApplied(
         string projectPath,
@@ -470,7 +535,7 @@ public sealed partial class SelectionSyncCoordinator(
 		// asked for by ticking every ignore row.
 		_session.IgnoreOptions.ApplyAllPreferenceToKnownStates(
 			isChecked,
-			ProjectPresentationCatalog.ContentTransformationOptionIds);
+			IgnoreAllExcludedOptionIds);
 
         _suppressIgnoreAllCheck = true;
         viewModel.AllIgnoreChecked = isChecked;
@@ -656,6 +721,7 @@ public sealed partial class SelectionSyncCoordinator(
         if (!string.IsNullOrWhiteSpace(path) && IsStalePathRequest(path))
             return;
         var version = Interlocked.Increment(ref _ignoreOptionsVersion);
+		await EnsureGitCliAvailabilityAsync(cancellationToken).ConfigureAwait(false);
 
 		var availability = await Task.Run(
 				() => ResolveIgnoreOptionsAvailability(path, rootFolders, cancellationToken),
@@ -731,6 +797,93 @@ public sealed partial class SelectionSyncCoordinator(
         var options = ignoreOptionsService.GetOptions(availability);
         ApplyIgnoreOptions(options, previousSelections, hasPreviousSelections, path);
     }
+
+	public void ApplyGitScopePresentation(GitScopePresentationProjection projection)
+	{
+		ArgumentNullException.ThrowIfNull(projection);
+		var selectedExtensions = _session.Extensions.SnapshotSelectedNames();
+		var optionStates = SnapshotExtensionOptionStateCacheOrNull(_session.Extensions.IsInitialized);
+		var extensionOptions = filterSelectionService.BuildExtensionOptions(
+			projection.AvailableExtensions,
+			selectedExtensions,
+			optionStates);
+		if (_session.ExtensionSelectionIsExplicit)
+		{
+			extensionOptions = ExtensionOptionProjection.ApplyExactSelection(
+				extensionOptions,
+				selectedExtensions);
+		}
+		ApplyExtensionOptions(
+			extensionOptions,
+			projection.IgnoreOptionCounts.ExtensionlessFiles,
+			projection.IgnoreOptionCounts,
+			projection.ControllerImpactCounts,
+			hasIgnoreOptionCounts: true);
+		RefreshIgnoreOptionsForCurrentSelection();
+		SynchronizeStableGitScopePresentation();
+	}
+
+	private void ApplyGitScopeSnapshot(string projectPath, SelectionRefreshSnapshot snapshot)
+	{
+		if (snapshot.GitScopePresentation is { } presentation)
+			ApplyGitScopePresentation(presentation);
+
+		var mode = _session.IgnoreOptions.ActiveGitFilteringMode;
+		_pendingGitScopeRefresh = snapshot.GitScope is { } scope && GitScopeSelection.IsMomentary(mode)
+			? new GitScopeRefreshSnapshot(
+				projectPath,
+				mode,
+				CurrentSelectionRevision,
+				scope,
+				snapshot.GitScopePresentation)
+			: null;
+	}
+
+	private bool TryHandleUnavailableGitScope(
+		string projectPath,
+		SelectionRefreshSnapshot snapshot)
+	{
+		if (snapshot.GitScope is not { IsAvailable: false } unavailableScope)
+			return false;
+
+		_pendingGitScopeRefresh = null;
+		if (_stableSelectionSnapshot is { } stable &&
+		    PathComparer.Default.Equals(stable.Path, projectPath))
+		{
+			_stableSelectionSnapshot = RestoreStableSelectionSnapshot(stable);
+		}
+		else
+		{
+			MarkSelectionRefreshClean();
+		}
+
+		_ignoreOptionsProjectPath = projectPath;
+		gitScopeUnavailable?.Invoke(projectPath, unavailableScope);
+		return true;
+	}
+
+	private void SynchronizeStableGitScopePresentation()
+	{
+		if (_stableSelectionSnapshot is not { } stable)
+			return;
+
+		var extensions = viewModel.Extensions
+			.Select(static option => new SelectionOption(option.Name, option.IsChecked))
+			.ToArray();
+		_stableSelectionSnapshot = stable with
+		{
+			ExtensionOptions = extensions,
+			IgnoreOptions = ResolveStableIgnoreOptions([]),
+			ExtensionlessEntriesCount = _ignoreOptionCounts.ExtensionlessFiles,
+			HasIgnoreOptionCounts = true,
+			IgnoreOptionCounts = _ignoreOptionCounts,
+			ControllerImpactCounts = _ignoreControllerImpactCounts,
+			SelectedExtensions = _session.Extensions.SnapshotSelectedNames(),
+			ExtensionOptionStateCache = new Dictionary<string, bool>(
+				_session.Extensions.OptionStates,
+				StringComparer.OrdinalIgnoreCase)
+		};
+	}
 
     public void RelabelIgnoreOptions(
 	    bool showAdvancedCounts,
@@ -817,6 +970,18 @@ public sealed partial class SelectionSyncCoordinator(
     {
         return _scanRoots.ToArray();
     }
+
+	public IReadOnlySet<string> GetAvailableProjectScanRoots()
+	{
+		if (_stableSelectionSnapshot is { } snapshot)
+		{
+			return snapshot.ScanRootOptions
+				.Select(static option => option.Name)
+				.ToHashSet(PathComparer.Default);
+		}
+
+		return _scanRoots.ToHashSet(PathComparer.Default);
+	}
 
     public void ApplyProjectProfileSelections(string projectPath, ProjectSelectionProfile profile)
     {
@@ -940,6 +1105,10 @@ public sealed partial class SelectionSyncCoordinator(
                     liveInput.Context,
                     cancellationToken),
                 cancellationToken);
+			snapshot = await AttachGitScopePresentationAsync(
+				liveInput.Context,
+				snapshot,
+				cancellationToken).ConfigureAwait(false);
             if (IsSupersededLiveOptionsRequest(expectedRequestVersion))
                 return;
             if (snapshot.RootAccessDenied)
@@ -967,7 +1136,11 @@ public sealed partial class SelectionSyncCoordinator(
 					return;
 				}
 
+				if (TryHandleUnavailableGitScope(currentPath, snapshot))
+					return;
+
 				ApplyLiveSelectionRefreshSnapshot(snapshot);
+				ApplyGitScopeSnapshot(currentPath, snapshot);
 				_ignoreOptionsProjectPath = currentPath;
             });
         }
@@ -1020,6 +1193,7 @@ public sealed partial class SelectionSyncCoordinator(
 		{
 			ApplySelectionRefreshSnapshot(snapshot);
 		}
+		ApplyGitScopeSnapshot(currentPath, snapshot);
 		_ignoreOptionsProjectPath = currentPath;
 		if (snapshot.HadScanFailure)
 			scanIncomplete?.Invoke();
@@ -1088,6 +1262,10 @@ public sealed partial class SelectionSyncCoordinator(
             var snapshot = await Task.Run(
                 () => _selectionRefreshEngine.ComputeFullRefreshSnapshot(context, cancellationToken),
                 cancellationToken);
+			snapshot = await AttachGitScopePresentationAsync(
+				context,
+				snapshot,
+				cancellationToken).ConfigureAwait(false);
             if (IsSupersededFullRefreshRequest(expectedRequestVersion))
                 return;
             if (snapshot.RootAccessDenied)
@@ -1110,6 +1288,9 @@ public sealed partial class SelectionSyncCoordinator(
                 if (ShouldSkipRefreshForPreparedPath(currentPath))
                     return;
 
+				if (TryHandleUnavailableGitScope(currentPath, snapshot))
+					return;
+
 				if (snapshot.HadScanFailure && HasStableSelectionSnapshotForPath(currentPath))
 				{
 					MarkSelectionRefreshClean();
@@ -1130,6 +1311,7 @@ public sealed partial class SelectionSyncCoordinator(
 						snapshot,
 						retainPreviousSnapshot: expectedRequestVersion.HasValue);
 				}
+				ApplyGitScopeSnapshot(currentPath, snapshot);
 				_ignoreOptionsProjectPath = currentPath;
 				if (snapshot.HadScanFailure)
 					scanIncomplete?.Invoke();
@@ -1189,6 +1371,10 @@ public sealed partial class SelectionSyncCoordinator(
                     () => _selectionRefreshEngine.ComputeFullRefreshSnapshot(context, cancellationToken),
                     cancellationToken)
                 .ConfigureAwait(false);
+			snapshot = await AttachGitScopePresentationAsync(
+				context,
+				snapshot,
+				cancellationToken).ConfigureAwait(false);
 
             if (IsSupersededFullRefreshRequest(expectedRequestVersion))
                 return null;
@@ -1610,9 +1796,7 @@ public sealed partial class SelectionSyncCoordinator(
         {
             var hasItems = false;
 			var hasContentProcessingItems = false;
-            var hasGitFilteringOptions = false;
-            var hasSelectedGitFilteringMode = false;
-            var allOrdinaryOptionsChecked = true;
+			var allOrdinaryOptionsChecked = true;
 			var allContentProcessingOptionsChecked = true;
             foreach (var option in viewModel.IgnoreOptions)
             {
@@ -1623,22 +1807,14 @@ public sealed partial class SelectionSyncCoordinator(
 						allContentProcessingOptionsChecked = false;
 					continue;
 				}
-                hasItems = true;
-                if (GitFilteringModeResolver.IsGitFilteringOption(option.Id))
-                {
-                    hasGitFilteringOptions = true;
-                    hasSelectedGitFilteringMode |= option.IsChecked;
-                    continue;
-                }
-
-                if (!option.IsChecked)
+				if (GitFilteringModeResolver.IsGitFilteringOption(option.Id))
+					continue;
+				hasItems = true;
+				if (!option.IsChecked)
                     allOrdinaryOptionsChecked = false;
             }
 
-            viewModel.AllIgnoreChecked =
-                hasItems &&
-                allOrdinaryOptionsChecked &&
-                (!hasGitFilteringOptions || hasSelectedGitFilteringMode);
+			viewModel.AllIgnoreChecked = hasItems && allOrdinaryOptionsChecked;
 			viewModel.AllContentProcessingChecked =
 				hasContentProcessingItems && allContentProcessingOptionsChecked;
         }
@@ -2042,8 +2218,10 @@ public sealed partial class SelectionSyncCoordinator(
             _suppressExtensionItemCheck = false;
         }
 
-        if (!ShouldSuppressAllTogglesOverride() && ResolveAllExtensionsCheckedForRefresh())
-            SetAllChecked(viewModel.Extensions, true, ref _suppressExtensionItemCheck);
+		if (!_session.ExtensionSelectionIsExplicit &&
+		    !ShouldSuppressAllTogglesOverride() &&
+		    ResolveAllExtensionsCheckedForRefresh())
+			SetAllChecked(viewModel.Extensions, true, ref _suppressExtensionItemCheck);
 
         if (!_session.Extensions.IsInitialized)
             UpdateExtensionsSelectionCache();
@@ -3065,11 +3243,62 @@ public sealed partial class SelectionSyncCoordinator(
             currentSnapshotState: CaptureIgnoreSectionSnapshotState(),
             extensionOptionStateCache: SnapshotExtensionOptionStateCacheOrNull(isInitialized: true),
             ignoreOptionStateCacheIsComplete: _session.IgnoreOptionStateCacheIsComplete,
-            captureTreeInventory: captureTreeInventory,
+            captureTreeInventory: captureTreeInventory ||
+			                      GitScopeSelection.IsMomentary(_session.IgnoreOptions.ActiveGitFilteringMode),
             currentScanRootOptions: _scanRoots.Count == 0
                 ? null
                 : SnapshotScanRootOptions(),
-            extensionSelectionIsExplicit: _session.ExtensionSelectionIsExplicit);
+            extensionSelectionIsExplicit: _session.ExtensionSelectionIsExplicit,
+			gitMode: _session.IgnoreOptions.ActiveGitFilteringMode);
+
+	private async Task<SelectionRefreshSnapshot> AttachGitScopePresentationAsync(
+		SelectionRefreshContext context,
+		SelectionRefreshSnapshot snapshot,
+		CancellationToken cancellationToken)
+	{
+		if (gitScopePathProvider is null ||
+		    !GitScopeSelection.IsMomentary(context.GitMode) ||
+		    snapshot.TreeInventory is null ||
+		    snapshot.EffectiveRules is null)
+		{
+			return snapshot;
+		}
+
+		var scope = await gitScopePathProvider
+			.ResolveAsync(context.Path, context.GitMode, context.GitDiffRange, cancellationToken)
+			.ConfigureAwait(false);
+		if (!scope.IsAvailable)
+			return snapshot with { GitScope = scope };
+
+		var rootOptions = snapshot.RootOptions ?? context.CurrentRootOptions ?? [];
+		var selectedRoots = rootOptions
+			.Where(static option => option.IsChecked)
+			.Select(static option => option.Name)
+			.ToHashSet(PathComparer.Default);
+		var availableRoots = rootOptions
+			.Select(static option => option.Name)
+			.ToHashSet(PathComparer.Default);
+		return snapshot with
+		{
+			GitScope = scope,
+			GitScopePresentation = GitScopePresentationProjector.Build(
+				context.Path,
+				snapshot.TreeInventory,
+				scope.IncludedPaths,
+				selectedRoots,
+				availableRoots,
+				ExtensionInclusionPolicyFactory.Create(context),
+				snapshot.EffectiveRules,
+				cancellationToken)
+		};
+	}
+
+	public sealed record GitScopeRefreshSnapshot(
+		string ProjectPath,
+		GitFilteringMode Mode,
+		long SelectionRevision,
+		GitScopePathResult Scope,
+		GitScopePresentationProjection? Presentation);
 
     private IReadOnlyList<SelectionOption> SnapshotScanRootOptions()
     {
@@ -3121,20 +3350,17 @@ public sealed partial class SelectionSyncCoordinator(
     private IExtensionInclusionPolicy? BuildEffectiveExtensionPolicyForLiveCounts(
         bool forceAllExtensionsChecked)
     {
-        if (forceAllExtensionsChecked)
-            return null;
-
-        if (!_session.Extensions.IsInitialized && viewModel.Extensions.Count == 0)
-            return null;
-
 		var previousSelections = _session.Extensions.IsInitialized
 			? _session.Extensions.SnapshotSelectedNames()
 			: CollectCheckedSelectionNames(viewModel.Extensions, StringComparer.OrdinalIgnoreCase);
 		var stateCache = SnapshotExtensionOptionStateCacheOrNull(_session.Extensions.IsInitialized);
 
-		return new ExtensionSelectionInclusionPolicy(
-            new SelectionStateResolver(previousSelections, stateCache),
-            defaultForNewExtension: stateCache is not null);
+		return ExtensionInclusionPolicyFactory.Create(
+			_session.ExtensionSelectionIsExplicit,
+			forceAllExtensionsChecked,
+			_session.Extensions.IsInitialized || viewModel.Extensions.Count > 0,
+			previousSelections,
+			stateCache);
     }
 
     private IReadOnlyDictionary<string, bool>? SnapshotExtensionOptionStateCacheOrNull(bool isInitialized)
@@ -3473,36 +3699,42 @@ public sealed partial class SelectionSyncCoordinator(
 			_session.IgnoreOptions.ActiveGitFilteringMode);
 
 	private bool HasGitFilteringRepositoryAvailability() =>
-		_gitWorkspaceEvidence.HasRepositoryBoundary ||
-		_ignoreOptions.Any(static option => option.Id == IgnoreOptionId.TrackedGitFilesOnly);
+		Volatile.Read(ref _gitCliAvailability) > 0 &&
+		(_gitWorkspaceEvidence.HasRepositoryBoundary ||
+		 _ignoreOptions.Any(static option => option.Id == IgnoreOptionId.TrackedGitFilesOnly));
 
-    private void SetAllIgnoreOptionsChecked(bool isChecked)
-    {
-        var gitMode = GitFilteringModeResolver.Resolve(_session.IgnoreOptions.OptionStateCache);
-        if (isChecked && gitMode == GitFilteringMode.None)
-        {
-            gitMode = viewModel.IgnoreOptions.Any(
-                static option => option.Id == IgnoreOptionId.UseGitIgnore)
-                ? GitFilteringMode.RespectGitIgnore
-                : GitFilteringMode.TrackedFilesOnly;
-        }
+	internal async Task EnsureGitCliAvailabilityAsync(CancellationToken cancellationToken)
+	{
+		if (Volatile.Read(ref _gitCliAvailability) != 0 || gitAvailabilityResolver is null)
+			return;
 
-        _suppressIgnoreItemCheck = true;
-        try
-        {
-            foreach (var option in viewModel.IgnoreOptions)
-            {
-				if (ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option.Id))
+		var isAvailable = false;
+		try
+		{
+			isAvailable = await gitAvailabilityResolver(cancellationToken).ConfigureAwait(false);
+		}
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+		{
+			throw;
+		}
+		catch
+		{
+		}
+
+		Interlocked.CompareExchange(ref _gitCliAvailability, isAvailable ? 1 : -1, 0);
+	}
+
+	private void SetAllIgnoreOptionsChecked(bool isChecked)
+	{
+		_suppressIgnoreItemCheck = true;
+		try
+		{
+			foreach (var option in viewModel.IgnoreOptions)
+			{
+				if (IgnoreAllExcludedOptionIds.Contains(option.Id))
 					continue;
-                option.IsChecked = option.Id switch
-                {
-                    IgnoreOptionId.UseGitIgnore =>
-                        isChecked && gitMode == GitFilteringMode.RespectGitIgnore,
-                    IgnoreOptionId.TrackedGitFilesOnly =>
-                        isChecked && gitMode == GitFilteringMode.TrackedFilesOnly,
-                    _ => isChecked
-                };
-            }
+				option.IsChecked = isChecked;
+			}
         }
         finally
         {

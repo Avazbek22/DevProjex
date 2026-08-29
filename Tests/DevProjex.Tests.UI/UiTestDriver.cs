@@ -36,10 +36,14 @@ internal static class UiTestDriver
         ProjectSourceType projectSourceType = ProjectSourceType.LocalFolder,
         string? managedClonePath = null,
         string? repositoryUrl = null,
-        SessionMetricsOptions? sessionMetrics = null)
+        SessionMetricsOptions? sessionMetrics = null,
+        ProjectSelectionSpec? startupSelection = null)
     {
         var options = new DesktopStartupOptions(
-            new DesktopOpenRequest(project.RootPath, Language: AppLanguage.En),
+            new DesktopOpenRequest(
+                project.RootPath,
+                Selection: startupSelection,
+                Language: AppLanguage.En),
             sessionMetrics);
         var appDataPath = appDataPathOverride ?? Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(appDataPath);

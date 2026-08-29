@@ -542,6 +542,34 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	}
 
 	[AvaloniaFact]
+	public async Task GitScopeModesRemainUnavailableWhenRepositoryExistsButGitCliDoesNot()
+	{
+		var viewModel = CreateViewModel();
+		var availabilityChecks = 0;
+		using var coordinator = CreateCoordinator(
+			viewModel,
+			currentPathProvider: () => @"C:\Project",
+			availabilityProvider: static (_, _) => new IgnoreOptionsAvailability(
+				IncludeGitIgnore: true,
+				IncludeSmartIgnore: true,
+				IncludeTrackedGitFilesOnly: true),
+			gitAvailabilityResolver: _ =>
+			{
+				availabilityChecks++;
+				return Task.FromResult(false);
+			});
+
+		await coordinator.EnsureGitCliAvailabilityAsync(TestContext.Current.CancellationToken);
+		await coordinator.EnsureGitCliAvailabilityAsync(TestContext.Current.CancellationToken);
+		coordinator.PopulateIgnoreOptionsForRootSelection([], @"C:\Project");
+
+		Assert.Equal(1, availabilityChecks);
+		Assert.Equal(
+			[GitFilteringMode.None, GitFilteringMode.RespectGitIgnore],
+			viewModel.GitFilteringModes.Select(static option => option.Mode));
+	}
+
+	[AvaloniaFact]
 	public void ProjectCheckpoint_Restore_CompleteStateAfterIncompleteScan_AllowsPersistenceAgain()
 	{
 		const string path = @"C:\Project";
@@ -2331,7 +2359,8 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		Func<string?>? currentPathProvider = null,
 		Func<string, IReadOnlyCollection<string>, IgnoreOptionsAvailability>? availabilityProvider = null,
 		Action? contentTransformationChanged = null,
-		Action<IgnoreOptionId?>? contentTransformationChangedWithId = null)
+		Action<IgnoreOptionId?>? contentTransformationChangedWithId = null,
+		Func<CancellationToken, Task<bool>>? gitAvailabilityResolver = null)
 	{
 		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
 		scanner ??= new StubFileSystemScanner();
@@ -2347,7 +2376,8 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 
 		if (availabilityProvider is null &&
 		    contentTransformationChanged is null &&
-		    contentTransformationChangedWithId is null)
+		    contentTransformationChangedWithId is null &&
+		    gitAvailabilityResolver is null)
 		{
 			return new SelectionSyncCoordinator(
 				viewModel,
@@ -2375,7 +2405,8 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 			contentTransformationChanged: contentTransformationChangedWithId ??
 				(contentTransformationChanged is null
 					? null
-					: _ => contentTransformationChanged()));
+					: _ => contentTransformationChanged()),
+			gitAvailabilityResolver: gitAvailabilityResolver);
 	}
 
 	[Fact]

@@ -1,5 +1,6 @@
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Avalonia.Services;
+using DevProjex.Application.Context;
 
 namespace DevProjex.Avalonia;
 
@@ -25,9 +26,11 @@ public partial class MainWindow : IRefreshTreePipelineHost
             AllowedRootFolders: allowedRoot,
             IgnoreRules: ignoreRules,
             NameFilter: nameFilter);
-        var displayName = !string.IsNullOrWhiteSpace(_currentProjectDisplayName)
+		var displayName = !string.IsNullOrWhiteSpace(_currentProjectDisplayName)
             ? _currentProjectDisplayName
-            : GetDirectoryNameSafe(_currentPath);
+			: GetDirectoryNameSafe(_currentPath);
+		var gitMode = _selectionCoordinator.ActiveGitFilteringMode;
+		var gitScopeRefresh = _selectionCoordinator.GetPendingGitScopeRefresh(_currentPath, gitMode);
 
         var inventoryState = _currentTreeInventory;
         var reusableInventory = inventoryState is not null &&
@@ -44,7 +47,11 @@ public partial class MainWindow : IRefreshTreePipelineHost
             reusableInventory?.Scope,
             _selectionCoordinator.CurrentSelectionRevision,
             _filterBaseTree,
-			GitMode: _selectionCoordinator.ActiveGitFilteringMode,
+			GitMode: gitMode,
+			GitScope: gitScopeRefresh?.Scope,
+			GitScopePresentation: gitScopeRefresh?.Presentation,
+			EffectiveExtensionPolicy: _selectionCoordinator.GetEffectiveExtensionPolicy(),
+			AvailableRootFolders: _selectionCoordinator.GetAvailableProjectScanRoots(),
             PreserveCheckedPaths: preserveCheckedPaths);
     }
 
@@ -108,6 +115,8 @@ public partial class MainWindow : IRefreshTreePipelineHost
 
         if (!PathComparer.Default.Equals(_currentPath, input.CurrentPath))
             return;
+		if (result.GitScopePresentation is { } gitScopePresentation)
+			_selectionCoordinator.ApplyGitScopePresentation(gitScopePresentation);
 
         if (interactiveFilter)
             _searchFilterController.CaptureFilterExpansionForTreeReplacement(input.CurrentPath);
@@ -183,8 +192,22 @@ public partial class MainWindow : IRefreshTreePipelineHost
         if (completedFilterSelectionTransfer)
             _interactiveFilterSelectionSnapshot = null;
 
-        if (!interactiveFilter)
-            _selectionCoordinator.AcceptCurrentSelectionsAsApplied(input.CurrentPath, result.Inventory);
+		if (!interactiveFilter &&
+		    (!GitScopeSelection.IsMomentary(input.GitMode) ||
+		     _gitScopeSelectionSnapshot is { } scopeSnapshot &&
+		     !scopeSnapshot.IsForProject(input.CurrentPath)))
+		{
+			_gitScopeSelectionSnapshot = null;
+		}
+
+		if (!interactiveFilter && input.SelectionRevision is { } selectionRevision)
+			_selectionCoordinator.ConsumePendingGitScopeRefresh(
+				input.CurrentPath,
+				input.GitMode,
+				selectionRevision);
+
+		if (!interactiveFilter)
+			_selectionCoordinator.AcceptCurrentSelectionsAsApplied(input.CurrentPath, result.Inventory);
 
         if (!interactiveFilter && !string.IsNullOrWhiteSpace(input.NameFilter) && root.Children.Count == 0)
             _toastService.Show(_localization["Toast.NoMatches"]);
@@ -230,15 +253,36 @@ public partial class MainWindow : IRefreshTreePipelineHost
 		if (_interactiveFilterSelectionSnapshot is { } filterSnapshot)
 		{
 			if (filterSnapshot.IsForProject(input.CurrentPath))
+			{
+				if (GitScopeSelection.IsMomentary(input.GitMode) &&
+				    _gitScopeSelectionSnapshot is null)
+				{
+					_gitScopeSelectionSnapshot = filterSnapshot;
+				}
 				return filterSnapshot;
+			}
 
 			_interactiveFilterSelectionSnapshot = null;
+		}
+
+		if (_gitScopeSelectionSnapshot is { } gitScopeSnapshot)
+		{
+			if (gitScopeSnapshot.IsForProject(input.CurrentPath))
+			{
+				if (!string.IsNullOrWhiteSpace(input.NameFilter))
+					_interactiveFilterSelectionSnapshot = gitScopeSnapshot;
+				return gitScopeSnapshot;
+			}
+
+			_gitScopeSelectionSnapshot = null;
 		}
 
 		var snapshot = ProjectTreeSelectionSnapshot.Capture(
 			input.CurrentPath,
 			_viewModel.TreeNodes,
 			_treeSelectionSnapshotCache);
+		if (snapshot is not null && GitScopeSelection.IsMomentary(input.GitMode))
+			_gitScopeSelectionSnapshot = snapshot;
 		if (snapshot is not null &&
 			!string.IsNullOrWhiteSpace(input.NameFilter))
 		{

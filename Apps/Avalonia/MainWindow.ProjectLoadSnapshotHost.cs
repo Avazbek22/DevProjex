@@ -25,9 +25,12 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
         var allowedExt = CollectCheckedSelectionNames(
             selectionSnapshot.EffectiveExtensionOptions,
             StringComparer.OrdinalIgnoreCase);
-        var allowedRoot = CollectCheckedSelectionNames(
+		var allowedRoot = CollectCheckedSelectionNames(
             selectionSnapshot.RootOptions,
-            PathComparer.Default);
+			PathComparer.Default);
+		var availableRoot = selectionSnapshot.RootOptions?
+			.Select(static option => option.Name)
+			.ToHashSet(PathComparer.Default) ?? new HashSet<string>(PathComparer.Default);
         var ignoreRules = ProjectLoadIgnoreRulesResolver.Resolve(
             selectionSnapshot,
             selectedIgnoreOptions => BuildIgnoreRules(currentPath, selectedIgnoreOptions, allowedRoot));
@@ -55,10 +58,13 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
             displayName,
             options,
             nameFilter,
-            selectionSnapshot.TreeInventory,
-            inventoryScope,
+			selectionSnapshot.TreeInventory,
+			inventoryScope,
 			GitMode: _selectionCoordinator.ActiveGitFilteringMode,
-            PreserveCheckedPaths: preserveTreeState,
+			GitScope: selectionSnapshot.GitScope,
+			GitScopePresentation: selectionSnapshot.GitScopePresentation,
+			AvailableRootFolders: availableRoot,
+			PreserveCheckedPaths: preserveTreeState,
             PreserveExpandedPaths: preserveTreeState);
     }
 
@@ -111,7 +117,6 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
         {
 			return false;
         }
-
 		PrepareContentSessionsForPublishedProject(snapshot);
 
         // Project profiles are applied with option notifications suppressed. Publish the resolved
@@ -119,10 +124,13 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
         // selection is visible in the UI while background prewarm still observes the previous project.
         PublishTransformationContext();
 
-        ((IRefreshTreePipelineHost)this).ApplyTreeRefreshResult(
-            snapshot.TreeInput,
-            new BuildTreeSnapshotResult(snapshot.TreeResult, snapshot.TreeInventory),
-            snapshot.TreeRoot,
+		((IRefreshTreePipelineHost)this).ApplyTreeRefreshResult(
+			snapshot.TreeInput,
+			new BuildTreeSnapshotResult(
+				snapshot.TreeResult,
+				snapshot.TreeInventory,
+				GitScopePresentation: snapshot.GitScopePresentation),
+			snapshot.TreeRoot,
             interactiveFilter: false,
             usedInMemoryFilter: false,
             postLoadCleanupReason: null,

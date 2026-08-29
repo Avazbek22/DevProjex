@@ -20,7 +20,7 @@ public partial class MainWindow
 		if (!GitScopeSelection.IsMomentary(input.GitMode))
 			return result;
 
-		var scope = _gitScopePathProvider
+		var scope = input.GitScope ?? _gitScopePathProvider
 			.ResolveAsync(input.CurrentPath, input.GitMode, diffRange: null, cancellationToken)
 			.GetAwaiter()
 			.GetResult();
@@ -44,7 +44,16 @@ public partial class MainWindow
 		return result with
 		{
 			Tree = GitScopeFilter.ApplyToTree(result.Tree, scope, cancellationToken),
-			Diagnostics = diagnostics
+			Diagnostics = diagnostics,
+			GitScopePresentation = input.GitScopePresentation ?? GitScopePresentationProjector.Build(
+				input.CurrentPath,
+				result.Inventory,
+				scope.IncludedPaths,
+				input.Options.AllowedRootFolders,
+				input.AvailableRootFolders ?? input.Options.AllowedRootFolders,
+				input.EffectiveExtensionPolicy,
+				input.Options.IgnoreRules,
+				cancellationToken)
 		};
 	}
 

@@ -11,7 +11,9 @@ using DevProjex.Infrastructure.FileSystem;
 using DevProjex.Infrastructure.ProjectProfiles;
 using DevProjex.Infrastructure.Secrets;
 using DevProjex.Kernel.Abstractions;
+using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
+using Avalonia.Media;
 using Avalonia.VisualTree;
 using System.ComponentModel;
 
@@ -2187,6 +2189,123 @@ public sealed class MainWindowIgnoreOptionsUiTests
     }
 
 	[AvaloniaFact]
+	public async Task GitModeSelector_FillsIgnoreIslandAndUsesRoundedCenteredItems()
+	{
+		EnsureGitAvailable();
+		using var project = UiTestProject.CreateWithCleanGitAndSmartWorkspace();
+		RunGit(project.RootPath, "init", "--quiet");
+		RunGit(project.RootPath, "add", "--", ".gitignore", "App.csproj", "Program.cs");
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+		try
+		{
+			await UiTestDriver.WaitForSettingsVisibilityAsync(window, visible: true);
+			var selector = UiTestDriver.GetRequiredControl<ComboBox>(
+				window,
+				"GitFilteringModeComboBox");
+			var island = UiTestDriver.GetRequiredControl<Border>(window, "IgnoreOptionsBorder");
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => selector.Bounds.Width > 0 && island.Bounds.Width > 0,
+				"Git mode selector to complete layout");
+
+			Assert.Contains("git-mode-selector", selector.Classes);
+			Assert.Equal(HorizontalAlignment.Stretch, selector.HorizontalAlignment);
+			Assert.Equal(HorizontalAlignment.Center, selector.HorizontalContentAlignment);
+			Assert.InRange(selector.Bounds.Width / island.Bounds.Width, 0.9, 1.0);
+			Assert.InRange(selector.Bounds.Height, 30, 34);
+			Assert.Equal(new CornerRadius(8), selector.CornerRadius);
+			var translucentMenuBrush = new SolidColorBrush(Color.FromArgb(32, 1, 2, 3));
+			await window.Dispatcher.InvokeAsync(() =>
+			{
+				UiTestDriver.GetViewModel(window).SetThemeEffects(
+					transparent: true,
+					mica: false,
+					acrylic: false);
+				window.Resources["MenuPopupBrush"] = translucentMenuBrush;
+			});
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+
+			await window.Dispatcher.InvokeAsync(() => selector.IsDropDownOpen = true);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => selector.GetVisualDescendants()
+					.OfType<Popup>()
+					.Any(popup => popup.IsOpen),
+				"Git mode selector popup to open");
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+
+			var popup = Assert.Single(
+				selector.GetVisualDescendants().OfType<Popup>(),
+				static candidate => candidate.IsOpen);
+			var popupContent = popup.Child ??
+				throw new InvalidOperationException("Git mode popup has no visual content.");
+			var popupBorder = Assert.IsType<Border>(popupContent);
+			Assert.Equal(new CornerRadius(8), popupBorder.CornerRadius);
+			var popupBackground = Assert.IsAssignableFrom<ISolidColorBrush>(popupBorder.Background);
+			Assert.Equal((byte)32, popupBackground.Color.A);
+			var popupLevel = Assert.IsAssignableFrom<TopLevel>(TopLevel.GetTopLevel(popupBorder));
+			if (popupLevel is PopupRoot)
+			{
+				Assert.Equal(
+					[
+						WindowTransparencyLevel.AcrylicBlur,
+						WindowTransparencyLevel.Blur,
+						WindowTransparencyLevel.Transparent,
+						WindowTransparencyLevel.None
+					],
+					popupLevel.TransparencyLevelHint);
+				Assert.Equal(
+					Colors.Transparent,
+					Assert.IsType<SolidColorBrush>(popupLevel.Background).Color);
+			}
+			else
+			{
+				Assert.Same(window, popupLevel);
+			}
+			var items = popupContent.GetVisualDescendants().OfType<ComboBoxItem>().ToArray();
+			Assert.Equal(5, items.Length);
+			Assert.All(items, item =>
+			{
+				Assert.InRange(item.Bounds.Height, 27, 31);
+				Assert.Equal(new CornerRadius(6), item.CornerRadius);
+				Assert.Equal(HorizontalAlignment.Stretch, item.HorizontalContentAlignment);
+				var label = Assert.Single(item.GetVisualDescendants().OfType<TextBlock>());
+				Assert.Equal(TextAlignment.Center, label.TextAlignment);
+			});
+			var selectedItem = Assert.Single(items, static item => item.IsSelected);
+			Assert.Equal(FontWeight.Medium, selectedItem.FontWeight);
+			var selectedBackground = Assert.IsAssignableFrom<ISolidColorBrush>(selectedItem.Background);
+			Assert.InRange(selectedBackground.Color.A, (byte)1, (byte)250);
+			Assert.True(global::Avalonia.Application.Current!.TryFindResource(
+				"AppAccentBrush",
+				selectedItem.ActualThemeVariant,
+				out var accentBackground));
+			Assert.NotEqual(
+				Assert.IsAssignableFrom<ISolidColorBrush>(accentBackground).Color,
+				selectedBackground.Color);
+
+			await window.Dispatcher.InvokeAsync(() =>
+			{
+				Assert.True(selector.Focus(NavigationMethod.Pointer));
+				selector.SelectedIndex = selector.SelectedIndex == 0 ? 1 : 0;
+				selector.IsDropDownOpen = false;
+			});
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => ReferenceEquals(
+					TopLevel.GetTopLevel(selector)?.FocusManager?.GetFocusedElement(),
+					island),
+				"Git mode selector to release focus after selection");
+			Assert.False(selector.IsFocused);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task RepositoryGitModes_UseComboBoxAndRescanAllSupportedModes()
     {
         EnsureGitAvailable();
@@ -2317,7 +2436,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 smartOnlyIgnoreOptions
                     .Take(3 + ProjectPresentationCatalog.ContentTransformationOptionIds.Count)
                     .Select(static option => option.Id));
-            Assert.False(UiTestDriver.GetViewModel(window).AllIgnoreChecked);
+			Assert.True(UiTestDriver.GetViewModel(window).AllIgnoreChecked);
             await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
             await UiTestDriver.WaitForIgnoreOptionStateAsync(
                 window,
@@ -2342,11 +2461,11 @@ public sealed class MainWindowIgnoreOptionsUiTests
             await UiTestDriver.ClickAsync(
                 window,
                 UiTestDriver.GetRequiredControl<CheckBox>(window, "IgnoreAllCheckBox"));
-            await UiTestDriver.WaitForIgnoreOptionStateAsync(
-                window,
-                IgnoreOptionId.UseGitIgnore,
-                visible: true,
-                isChecked: true);
+			await UiTestDriver.WaitForIgnoreOptionStateAsync(
+				window,
+				IgnoreOptionId.UseGitIgnore,
+				visible: true,
+				isChecked: false);
             await UiTestDriver.WaitForIgnoreOptionStateAsync(
                 window,
                 IgnoreOptionId.TrackedGitFilesOnly,
@@ -2358,6 +2477,98 @@ public sealed class MainWindowIgnoreOptionsUiTests
             await UiTestDriver.CloseWindowAsync(window);
         }
     }
+
+	[AvaloniaFact]
+	public async Task CleanStagedScopeKeepsTreeAndSettingsMetadataEmptyUntilAStagedFileExists()
+	{
+		EnsureGitAvailable();
+		using var project = UiTestProject.CreateWithCleanGitAndSmartWorkspace();
+		Directory.CreateDirectory(Path.Combine(project.RootPath, ".unrelated"));
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, ".unrelated", "Noise.cs"),
+			"class Noise {}\n",
+			TestContext.Current.CancellationToken);
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, ".metadata"),
+			"metadata\n",
+			TestContext.Current.CancellationToken);
+		await File.WriteAllTextAsync(
+			Path.Combine(project.RootPath, "NOTICE"),
+			"notice\n",
+			TestContext.Current.CancellationToken);
+		RunGit(project.RootPath, "init", "--quiet");
+		RunGit(project.RootPath, "add", "--all");
+		RunGit(
+			project.RootPath,
+			"-c", "user.name=DevProjex Tests",
+			"-c", "user.email=tests@devprojex.invalid",
+			"commit", "--quiet", "-m", "baseline");
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+		try
+		{
+			await UiTestDriver.SelectGitFilteringModeAsync(window, GitFilteringMode.Staged);
+			await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => UiTestDriver.GetViewModel(window).PathIgnoreOptions.Count == 0 &&
+				      UiTestDriver.GetViewModel(window).Extensions.Count == 0,
+				"clean staged scope to remove unrelated settings rows");
+			await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+			await WaitForProjectTreePathStateAsync(window, exists: false, "Program.cs");
+			var emptyScopeViewModel = UiTestDriver.GetViewModel(window);
+			Assert.Empty(emptyScopeViewModel.PathIgnoreOptions);
+			Assert.Empty(emptyScopeViewModel.Extensions);
+			Assert.False(emptyScopeViewModel.AllIgnoreChecked);
+			Assert.Equal("All", emptyScopeViewModel.SettingsAllIgnore);
+
+			Directory.CreateDirectory(Path.Combine(project.RootPath, ".scoped"));
+			await File.WriteAllTextAsync(
+				Path.Combine(project.RootPath, ".scoped", "Staged.cs"),
+				"class Staged {}\n",
+				TestContext.Current.CancellationToken);
+			RunGit(project.RootPath, "add", "--", ".scoped/Staged.cs");
+			await UiTestDriver.RefreshProjectAsync(window);
+			Assert.Equal(
+				GitFilteringMode.Staged,
+				UiTestDriver.GetViewModel(window).SelectedGitFilteringModeOption?.Mode);
+
+			await UiTestDriver.WaitForIgnoreOptionStateAsync(
+				window,
+				IgnoreOptionId.DotFolders,
+				visible: true,
+				isChecked: true);
+			var scopedOptions = UiTestDriver.GetViewModel(window).PathIgnoreOptions;
+			Assert.Equal(IgnoreOptionId.DotFolders, Assert.Single(scopedOptions).Id);
+			Assert.Contains("(1)", Assert.Single(scopedOptions).Label, StringComparison.Ordinal);
+			Assert.Empty(UiTestDriver.GetViewModel(window).Extensions);
+
+			await SetIgnoreOptionCheckedAsync(
+				window,
+				IgnoreOptionId.DotFolders,
+				isChecked: false);
+			await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
+			await WaitForExtensionStateAsync(window, ".cs", visible: true, isChecked: true);
+			Assert.DoesNotContain(
+				UiTestDriver.GetViewModel(window).PathIgnoreOptions,
+				static option => option.Id is IgnoreOptionId.DotFiles or IgnoreOptionId.ExtensionlessFiles);
+			await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+			await WaitForProjectTreePathStateAsync(window, exists: true, ".scoped", "Staged.cs");
+
+			await SetIgnoreOptionCheckedAsync(
+				window,
+				IgnoreOptionId.DotFolders,
+				isChecked: true);
+			await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
+			Assert.Empty(UiTestDriver.GetViewModel(window).Extensions);
+			await ApplySettingsAndWaitForIgnoreRefreshAsync(window);
+			await WaitForProjectTreePathStateAsync(window, exists: false, ".scoped", "Staged.cs");
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
 
     [AvaloniaFact]
     public async Task SwitchingToTrackedOnlyRescansGitIgnoredContainerForNestedRepository()
@@ -2416,7 +2627,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
     }
 
     [AvaloniaFact]
-    public async Task ExplicitUncheckedGitIgnoreController_RemainsVisibleWhenDotFilesTakesOver()
+	public async Task GitIgnoreController_RemainsSelectedWhenPathAllAndDotFilesChange()
     {
         using var project = UiTestProject.CreateWithGitIgnoreDotFileOnlyWorkspace();
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
@@ -2436,13 +2647,13 @@ public sealed class MainWindowIgnoreOptionsUiTests
 
             await SetIgnoreAllCheckedAsync(window, isChecked: true);
             await UiTestDriver.ClickAsync(window, UiTestDriver.GetRequiredControl<CheckBox>(window, "IgnoreAllCheckBox"));
-            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.UseGitIgnore, visible: true, isChecked: false);
+			await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.UseGitIgnore, visible: true, isChecked: true);
             await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.DotFiles, visible: true, isChecked: false);
 
             await SetIgnoreOptionCheckedAsync(window, IgnoreOptionId.DotFiles, isChecked: true);
 
             await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.DotFiles, visible: true, isChecked: true);
-            await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.UseGitIgnore, visible: true, isChecked: false);
+			await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.UseGitIgnore, visible: true, isChecked: true);
         }
         finally
         {
