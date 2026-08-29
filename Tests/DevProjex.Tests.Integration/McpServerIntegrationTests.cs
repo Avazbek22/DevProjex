@@ -63,7 +63,7 @@ public sealed class McpServerIntegrationTests
 	[InlineData("markdown", false)]
 	[InlineData("json", true)]
 	[InlineData("xml", true)]
-	public async Task PackContextBuildsPlanningMetricsOnlyForStructuredFormats(
+	public async Task TreeOnlyPackBudgetBuildsPlanningMetricsOnlyForStructuredFormats(
 		string format,
 		bool expectsPlanningMetrics)
 	{
@@ -79,7 +79,8 @@ public sealed class McpServerIntegrationTests
 			new Dictionary<string, object?>
 			{
 				["view"] = "tree",
-				["format"] = format
+				["format"] = format,
+				["max_tokens"] = 1
 			});
 		var diagnostics = measurement.Capture();
 		var output = Text(result);
@@ -87,6 +88,8 @@ public sealed class McpServerIntegrationTests
 		Assert.NotEqual(true, result.IsError);
 		Assert.Contains("First.cs", output, StringComparison.Ordinal);
 		Assert.Contains("Second.cs", output, StringComparison.Ordinal);
+		Assert.Contains("Included: 0 files (0 estimated tokens).", output, StringComparison.Ordinal);
+		Assert.Contains("Skipped: 0 files (0 estimated tokens).", output, StringComparison.Ordinal);
 		Assert.Equal(expectsPlanningMetrics ? 2 : 0, diagnostics.FullFileReads);
 		Assert.Equal(expectsPlanningMetrics, diagnostics.FullFileReadBytes > 0);
 		if (format == "json")
