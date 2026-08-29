@@ -252,6 +252,24 @@ public sealed class ExportContextDocumentContractTests
 	}
 
 	[Fact]
+	public async Task TokenBudgetAcceptsPositiveValuesAboveInt32Range()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("app.cs", "class App { }");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			"text",
+			maximumEstimatedTokens: (long)int.MaxValue + 1);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Contains("class App", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("Token budget 2147483648:", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task MarkdownUsesSafeDynamicFenceAndCodeSpanForSpecialPath()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -364,7 +382,7 @@ public sealed class ExportContextDocumentContractTests
 		string format,
 		string? projectPath = null,
 		string? outputPath = null,
-		int? maximumEstimatedTokens = null,
+		long? maximumEstimatedTokens = null,
 		bool dryRun = false,
 		string view = "tree-content",
 		bool compressCode = false)

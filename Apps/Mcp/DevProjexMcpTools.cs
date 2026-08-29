@@ -180,7 +180,7 @@ internal sealed class DevProjexMcpTools(
 				"max_tokens",
 				"max_file_bytes");
 			var detail = McpDetailPolicy.Parse(arguments.OptionalString("detail"));
-			var maximumEstimatedTokens = arguments.OptionalInteger("max_tokens", 1, int.MaxValue);
+			var maximumEstimatedTokens = arguments.OptionalInt64("max_tokens", 1, long.MaxValue);
 			var format = ParseFormat(arguments.OptionalString("format") ?? "markdown");
 			var plan = await BuildSelectionAsync(
 					arguments,

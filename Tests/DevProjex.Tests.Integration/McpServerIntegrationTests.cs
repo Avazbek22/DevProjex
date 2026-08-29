@@ -1377,6 +1377,21 @@ public sealed class McpServerIntegrationTests
 		Assert.Contains("Included: 3 files", Text(all), StringComparison.Ordinal);
 		Assert.Contains("Skipped: 0 files (0 estimated tokens).", Text(all), StringComparison.Ordinal);
 
+		var longBudget = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["view"] = "content",
+				["format"] = "text",
+				["max_tokens"] = ((long)int.MaxValue + 1).ToString(
+					System.Globalization.CultureInfo.InvariantCulture)
+			});
+		Assert.NotEqual(true, longBudget.IsError);
+		Assert.Contains(
+			"Token budget: 2147483648 estimated tokens.",
+			Text(longBudget),
+			StringComparison.Ordinal);
+
 		var invalid = await server.CallAsync(
 			"pack_context",
 			new Dictionary<string, object?> { ["max_tokens"] = 0 });

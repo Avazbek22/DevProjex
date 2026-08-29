@@ -386,7 +386,7 @@ public sealed class DevProjexCommandTree
 		var outputPath = OutputPathOption();
 		var force = new Option<bool>("--force") { Description = L("Terminal.Option.ForceContext") };
 		var dryRun = new Option<bool>("--dry-run", "-n") { Description = L("Terminal.Option.DryRun") };
-		var maximumEstimatedTokens = new Option<int?>("--max-tokens")
+		var maximumEstimatedTokens = new Option<long?>("--max-tokens")
 		{
 			Description = L("Terminal.Option.MaxTokens"),
 			HelpName = "N"

@@ -38,7 +38,7 @@ public sealed record ExportContextCommandRequest(
 	string? OutputPath,
 	bool Force,
 	bool DryRun,
-	int? MaximumEstimatedTokens,
+	long? MaximumEstimatedTokens,
 	TerminalOutputOptions Output,
 	long? MaxFileBytes = null);
 
