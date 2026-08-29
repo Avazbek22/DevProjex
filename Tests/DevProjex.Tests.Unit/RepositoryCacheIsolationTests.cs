@@ -102,7 +102,9 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 			TestContext.Current.CancellationToken);
 		Assert.NotNull(afterCleanup);
 		Assert.Equal(basePath, afterCleanup.RepositoryPath, PathComparer.Default);
-		await WaitUntilAsync(() => worktrees.RemovedCount == 1);
+		await worktrees.PruneCompleted.Task.WaitAsync(
+			BackgroundOperationTimeout,
+			TestContext.Current.CancellationToken);
 		Assert.Equal(1, worktrees.RemovedCount);
 		Assert.Equal(1, worktrees.PrunedCount);
 	}
@@ -880,6 +882,7 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 		public int PrunedCount { get; private set; }
 		public TaskCompletionSource RemovalStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 		public TaskCompletionSource RemovalCanceled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+		public TaskCompletionSource PruneCompleted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 		public void ReleaseRemoval() => _releaseRemoval.TrySetResult();
 		public Task<WorktreeSupportState> GetSupportStateAsync(
 			string basePath,
@@ -930,6 +933,7 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 		public Task PruneAsync(string basePath, CancellationToken cancellationToken)
 		{
 			PrunedCount++;
+			PruneCompleted.TrySetResult();
 			return Task.CompletedTask;
 		}
 	}

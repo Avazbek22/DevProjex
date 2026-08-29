@@ -641,14 +641,26 @@ public sealed class InfrastructureJsonPersistenceTests
 		using var temp = new TemporaryDirectory();
 		var fileSet = CreateFileSet(temp, "settings.json");
 		using var heldLock = CrossProcessFileLock.Acquire(fileSet, TimeSpan.Zero);
-		using var cancellation = new CancellationTokenSource(TimeSpan.FromMilliseconds(75));
-		var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+		using var cancellation = new CancellationTokenSource();
+		using var acquisitionStarted = new ManualResetEventSlim();
+		var acquisition = Task.Factory.StartNew(
+			() =>
+			{
+				acquisitionStarted.Set();
+				return CrossProcessFileLock.AcquireWithCancellation(
+					fileSet,
+					TimeSpan.FromSeconds(5),
+					cancellation.Token);
+			},
+			CancellationToken.None,
+			TaskCreationOptions.LongRunning,
+			TaskScheduler.Default);
+		Assert.True(acquisitionStarted.Wait(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken));
+		Assert.False(acquisition.IsCompleted);
 
-		await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Task.Run(() =>
-			CrossProcessFileLock.AcquireWithCancellation(
-				fileSet,
-				TimeSpan.FromSeconds(5),
-				cancellation.Token)));
+		var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+		cancellation.Cancel();
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(() => acquisition);
 
 		Assert.True(
 			stopwatch.Elapsed < TimeSpan.FromSeconds(1),
