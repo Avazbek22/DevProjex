@@ -12,12 +12,63 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 	private const int MaximumPathLength = 32768;
 	private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(30);
 	private static int _gitAvailability;
+	private readonly IGitPathComparisonSemanticsResolver _pathComparisonSemanticsResolver;
 
-	public async Task<GitScopePathResult> ResolveAsync(
+	public GitScopePathProvider(IGitPathComparisonSemanticsResolver? pathComparisonSemanticsResolver = null)
+	{
+		_pathComparisonSemanticsResolver = pathComparisonSemanticsResolver ??
+		                                   GitConfigPathComparisonSemanticsResolver.Instance;
+	}
+
+	public Task<GitScopePathResult> ResolveAsync(
 		string projectRoot,
 		GitFilteringMode mode,
 		string? diffRange,
+		CancellationToken cancellationToken = default) =>
+		ResolveCoreAsync(projectRoot, mode, diffRange, repositoryRoots: null, cancellationToken);
+
+	public Task<GitScopePathResult> ResolveAsync(
+		string projectRoot,
+		GitFilteringMode mode,
+		string? diffRange,
+		IReadOnlyCollection<string> repositoryRoots,
 		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(repositoryRoots);
+		return ResolveCoreAsync(projectRoot, mode, diffRange, repositoryRoots, cancellationToken);
+	}
+
+	private async Task<GitScopePathResult> ResolveCoreAsync(
+		string projectRoot,
+		GitFilteringMode mode,
+		string? diffRange,
+		IReadOnlyCollection<string>? repositoryRoots,
+		CancellationToken cancellationToken)
+	{
+		using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		timeoutSource.CancelAfter(CommandTimeout);
+		try
+		{
+			return await ResolveWithinTimeoutAsync(
+					projectRoot,
+					mode,
+					diffRange,
+					repositoryRoots,
+					timeoutSource.Token)
+				.ConfigureAwait(false);
+		}
+		catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+		{
+			return GitScopePathResult.Unavailable("Git state resolution exceeded 30 seconds.");
+		}
+	}
+
+	private async Task<GitScopePathResult> ResolveWithinTimeoutAsync(
+		string projectRoot,
+		GitFilteringMode mode,
+		string? diffRange,
+		IReadOnlyCollection<string>? repositoryRoots,
+		CancellationToken cancellationToken)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
 		if (!GitScopeSelection.IsMomentary(mode))
@@ -33,15 +84,53 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 			return GitScopePathResult.Unavailable("The project root is invalid.");
 		}
 
-		if (!GitTrackedPathIndexCache.TryFindNearestRepositoryBoundary(
-			normalizedProjectRoot,
-			cancellationToken,
-			out var repositoryRoot))
-		{
-			return GitScopePathResult.Unavailable("The project is not inside a Git repository.");
-		}
 		if (Volatile.Read(ref _gitAvailability) < 0)
 			return GitScopePathResult.Unavailable("Git is not available on PATH.");
+		var resolvedRepositoryRoots = ResolveRepositoryRoots(
+			normalizedProjectRoot,
+			repositoryRoots,
+			cancellationToken);
+		if (resolvedRepositoryRoots.Count == 0)
+			return GitScopePathResult.Unavailable("The project is not inside a Git repository.");
+
+		var included = new HashSet<string>(StringComparer.Ordinal);
+		var deleted = new HashSet<string>(StringComparer.Ordinal);
+		var matchers = new List<GitTrackedPathIndex>(resolvedRepositoryRoots.Count);
+		foreach (var repositoryRoot in resolvedRepositoryRoots)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var repositoryResult = await ResolveRepositoryAsync(
+					normalizedProjectRoot,
+					repositoryRoot,
+					mode,
+					diffRange,
+					cancellationToken)
+				.ConfigureAwait(false);
+			if (!repositoryResult.IsAvailable)
+				return GitScopePathResult.Unavailable(repositoryResult.FailureReason);
+
+			included.UnionWith(repositoryResult.IncludedPaths);
+			deleted.UnionWith(repositoryResult.DeletedPaths);
+			matchers.Add(repositoryResult.PathMatcher!);
+		}
+
+		return new GitScopePathResult(
+			true,
+			included,
+			deleted.Count,
+			PathMatchers: matchers);
+	}
+
+	private async Task<RepositoryScopeResult> ResolveRepositoryAsync(
+		string normalizedProjectRoot,
+		string repositoryRoot,
+		GitFilteringMode mode,
+		string? diffRange,
+		CancellationToken cancellationToken)
+	{
+		var comparisonSemantics = _pathComparisonSemanticsResolver.Resolve(repositoryRoot);
+		if (!comparisonSemantics.IsAuthoritative)
+			return RepositoryScopeResult.Unavailable("Git path comparison settings could not be resolved.");
 
 		IReadOnlyList<GitCommandOutput> outputs;
 		switch (mode)
@@ -51,18 +140,18 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 				[
 					await RunAsync(
 						repositoryRoot,
-						["diff", "--name-status", "-z", "--cached", "--"],
+						CreateDiffArguments(cached: true, diffRange: null),
 						cancellationToken).ConfigureAwait(false)
 				];
 				break;
 			case GitFilteringMode.Changes:
 				var stagedTask = RunAsync(
 					repositoryRoot,
-					["diff", "--name-status", "-z", "--cached", "--"],
+					CreateDiffArguments(cached: true, diffRange: null),
 					cancellationToken);
 				var unstagedTask = RunAsync(
 					repositoryRoot,
-					["diff", "--name-status", "-z", "--"],
+					CreateDiffArguments(cached: false, diffRange: null),
 					cancellationToken);
 				var untrackedTask = RunAsync(
 					repositoryRoot,
@@ -73,12 +162,12 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 				break;
 			case GitFilteringMode.Diff:
 				if (!GitScopeSelection.IsValidDiffRange(diffRange))
-					return GitScopePathResult.Unavailable("The Git diff range is invalid.");
+					return RepositoryScopeResult.Unavailable("The Git diff range is invalid.");
 				outputs =
 				[
 					await RunAsync(
 						repositoryRoot,
-						["diff", "--name-status", "-z", diffRange!, "--"],
+						CreateDiffArguments(cached: false, diffRange),
 						cancellationToken).ConfigureAwait(false)
 				];
 				break;
@@ -88,10 +177,11 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 
 		var failed = outputs.FirstOrDefault(static output => !output.Succeeded);
 		if (failed is not null)
-			return GitScopePathResult.Unavailable(failed.FailureReason);
+			return RepositoryScopeResult.Unavailable(failed.FailureReason);
 
-		var included = new HashSet<string>(PathComparer.Default);
-		var deleted = new HashSet<string>(PathComparer.Default);
+		var included = new HashSet<string>(StringComparer.Ordinal);
+		var deleted = new HashSet<string>(StringComparer.Ordinal);
+		var unsupportedDirectories = new HashSet<string>(StringComparer.Ordinal);
 		for (var index = 0; index < outputs.Count; index++)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -104,7 +194,7 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 					normalizedProjectRoot,
 					included))
 				{
-					return GitScopePathResult.Unavailable("Git returned an invalid untracked-file list.");
+					return RepositoryScopeResult.Unavailable("Git returned an invalid untracked-file list.");
 				}
 				continue;
 			}
@@ -114,15 +204,83 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 				repositoryRoot,
 				normalizedProjectRoot,
 				included,
-				deleted))
+				deleted,
+				unsupportedDirectories))
 			{
-				return GitScopePathResult.Unavailable("Git returned an invalid name-status result.");
+				return RepositoryScopeResult.Unavailable("Git returned an invalid name-status result.");
 			}
 		}
 
 		ReconcileWorkingTreePaths(included, deleted, cancellationToken);
+		deleted.UnionWith(unsupportedDirectories);
+		var matcher = new GitTrackedPathIndex(
+			repositoryRoot,
+			included.Select(path => PathUtility.GetPortableRelativePath(repositoryRoot, path)),
+			comparisonSemantics);
+		deleted.RemoveWhere(matcher.Contains);
 
-		return new GitScopePathResult(true, included, deleted.Count);
+		return new RepositoryScopeResult(true, included, deleted, matcher);
+	}
+
+	internal static IReadOnlyList<string> CreateDiffArguments(bool cached, string? diffRange)
+	{
+		var arguments = new List<string>(8)
+		{
+			"diff",
+			"--no-ext-diff",
+			"--no-textconv",
+			"--name-status",
+			"-z"
+		};
+		if (cached)
+			arguments.Add("--cached");
+		if (!string.IsNullOrEmpty(diffRange))
+			arguments.Add(diffRange);
+		arguments.Add("--");
+		return arguments;
+	}
+
+	private static IReadOnlyList<string> ResolveRepositoryRoots(
+		string projectRoot,
+		IReadOnlyCollection<string>? repositoryRoots,
+		CancellationToken cancellationToken)
+	{
+		var resolved = new HashSet<string>(StringComparer.Ordinal);
+		if (repositoryRoots is not null)
+		{
+			foreach (var candidate in repositoryRoots)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				if (string.IsNullOrWhiteSpace(candidate))
+					continue;
+				try
+				{
+					var normalized = PathUtility.Normalize(candidate);
+					if (PathUtility.IsPathInside(normalized, projectRoot) ||
+					    PathUtility.IsPathInside(projectRoot, normalized))
+					{
+						resolved.Add(normalized);
+					}
+				}
+				catch (Exception exception) when (exception is ArgumentException or IOException or NotSupportedException)
+				{
+				}
+			}
+		}
+
+		if (GitTrackedPathIndexCache.TryFindNearestRepositoryBoundary(
+			projectRoot,
+			cancellationToken,
+			out var nearestRepositoryRoot))
+		{
+			resolved.Add(nearestRepositoryRoot);
+		}
+
+		return resolved
+			.OrderBy(static path => path.Length)
+			.ThenBy(static path => path, PathComparer.Default)
+			.ThenBy(static path => path, StringComparer.Ordinal)
+			.ToArray();
 	}
 
 	private static void ReconcileWorkingTreePaths(
@@ -140,6 +298,13 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 			deleted.Add(path);
 		}
 
+		foreach (var path in deleted.ToArray())
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (Directory.Exists(path))
+				deleted.Remove(path);
+		}
+
 		deleted.ExceptWith(included);
 	}
 
@@ -148,7 +313,8 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 		string repositoryRoot,
 		string projectRoot,
 		ISet<string> included,
-		ISet<string> deleted)
+		ISet<string> deleted,
+		ISet<string>? unsupportedDirectories = null)
 	{
 		ArgumentNullException.ThrowIfNull(values);
 		ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
@@ -188,12 +354,20 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 
 			if (code is not ('A' or 'M' or 'T' or 'U' or 'X' or 'B'))
 				return false;
-			TryAddProjectPath(
+			var added = TryAddProjectPath(
 				repositoryRoot,
 				projectRoot,
 				firstPath,
 				included,
 				rejectDirectories: true);
+			if (code == 'T' && !added && unsupportedDirectories is not null)
+			{
+				TryAddProjectPath(
+					repositoryRoot,
+					projectRoot,
+					firstPath,
+					unsupportedDirectories);
+			}
 		}
 
 		return true;
@@ -220,7 +394,7 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 		return true;
 	}
 
-	private static void TryAddProjectPath(
+	private static bool TryAddProjectPath(
 		string repositoryRoot,
 		string projectRoot,
 		string gitPath,
@@ -228,7 +402,7 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 		bool rejectDirectories = false)
 	{
 		if (string.IsNullOrEmpty(gitPath) || Path.IsPathRooted(gitPath))
-			return;
+			return false;
 
 		try
 		{
@@ -238,11 +412,13 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 			    (!rejectDirectories || !Directory.Exists(fullPath)))
 			{
 				destination.Add(fullPath);
+				return true;
 			}
 		}
 		catch (Exception exception) when (exception is ArgumentException or IOException or NotSupportedException)
 		{
 		}
+		return false;
 	}
 
 	private static async Task<GitCommandOutput> RunAsync(
@@ -364,6 +540,21 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 		catch (Exception exception) when (exception is InvalidOperationException or NotSupportedException)
 		{
 		}
+	}
+
+	private sealed record RepositoryScopeResult(
+		bool IsAvailable,
+		IReadOnlySet<string> IncludedPaths,
+		IReadOnlySet<string> DeletedPaths,
+		GitTrackedPathIndex? PathMatcher = null,
+		string? FailureReason = null)
+	{
+		public static RepositoryScopeResult Unavailable(string? reason) =>
+			new(
+				false,
+				new HashSet<string>(StringComparer.Ordinal),
+				new HashSet<string>(StringComparer.Ordinal),
+				FailureReason: reason);
 	}
 
 	private sealed record GitCommandOutput(

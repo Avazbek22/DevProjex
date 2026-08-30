@@ -5,4 +5,5 @@ public sealed record ScanOptionsResult(
 	IReadOnlyList<string> RootFolders,
 	bool RootAccessDenied,
 	bool HadAccessDenied,
-	bool HadScanFailure = false);
+	bool HadScanFailure = false,
+	GitWorkspaceEvidence GitEvidence = default);

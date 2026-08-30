@@ -24,7 +24,60 @@ public static class GitScopePresentationProjector
 		IExtensionInclusionPolicy? effectiveExtensionPolicy,
 		IgnoreRules effectiveRules,
 		CancellationToken cancellationToken = default,
-		bool rootSelectionIsExplicit = false)
+		bool rootSelectionIsExplicit = false,
+		bool includeIgnoreImpactCounts = true) =>
+		BuildCore(
+			projectRoot,
+			inventory,
+			scopedPaths,
+			scopedPaths.Contains,
+			getComparisonIdentity: null,
+			selectedRootFolders,
+			availableRootFolders,
+			effectiveExtensionPolicy,
+			effectiveRules,
+			cancellationToken,
+			rootSelectionIsExplicit,
+			includeIgnoreImpactCounts);
+
+	public static GitScopePresentationProjection Build(
+		string projectRoot,
+		ProjectTreeInventorySnapshot? inventory,
+		GitScopePathResult scope,
+		IReadOnlySet<string> selectedRootFolders,
+		IReadOnlySet<string> availableRootFolders,
+		IExtensionInclusionPolicy? effectiveExtensionPolicy,
+		IgnoreRules effectiveRules,
+		CancellationToken cancellationToken = default,
+		bool rootSelectionIsExplicit = false,
+		bool includeIgnoreImpactCounts = true) =>
+		BuildCore(
+			projectRoot,
+			inventory,
+			scope.IncludedPaths,
+			scope.ContainsPath,
+			scope.GetComparisonIdentity,
+			selectedRootFolders,
+			availableRootFolders,
+			effectiveExtensionPolicy,
+			effectiveRules,
+			cancellationToken,
+			rootSelectionIsExplicit,
+			includeIgnoreImpactCounts);
+
+	private static GitScopePresentationProjection BuildCore(
+		string projectRoot,
+		ProjectTreeInventorySnapshot? inventory,
+		IReadOnlySet<string> scopedPaths,
+		Func<string, bool> containsScopedPath,
+		Func<string, string?>? getComparisonIdentity,
+		IReadOnlySet<string> selectedRootFolders,
+		IReadOnlySet<string> availableRootFolders,
+		IExtensionInclusionPolicy? effectiveExtensionPolicy,
+		IgnoreRules effectiveRules,
+		CancellationToken cancellationToken,
+		bool rootSelectionIsExplicit,
+		bool includeIgnoreImpactCounts)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
 		ArgumentNullException.ThrowIfNull(scopedPaths);
@@ -36,7 +89,8 @@ public static class GitScopePresentationProjector
 
 		var files = CollectScopedFiles(
 			inventory,
-			scopedPaths,
+			containsScopedPath,
+			scopedPaths.Count,
 			selectedRootFolders,
 			cancellationToken,
 			rootSelectionIsExplicit);
@@ -47,6 +101,13 @@ public static class GitScopePresentationProjector
 			files,
 			effectiveRules,
 			cancellationToken);
+		if (!includeIgnoreImpactCounts)
+		{
+			return new GitScopePresentationProjection(
+				availableExtensions,
+				IgnoreOptionCounts.Empty,
+				IgnoreControllerImpactCounts.Empty);
+		}
 		var baseline = EvaluateVisibility(
 			projectRoot,
 			inventory,
@@ -135,6 +196,7 @@ public static class GitScopePresentationProjector
 			inventory,
 			files,
 			scopedPaths,
+			getComparisonIdentity,
 			selectedRootFolders,
 			effectiveRules,
 			new IgnoreOptionCounts(
@@ -158,17 +220,18 @@ public static class GitScopePresentationProjector
 
 	private static List<ScopedFile> CollectScopedFiles(
 		ProjectTreeInventorySnapshot inventory,
-		IReadOnlySet<string> scopedPaths,
+		Func<string, bool> containsScopedPath,
+		int scopedPathCount,
 		IReadOnlySet<string> selectedRootFolders,
 		CancellationToken cancellationToken,
 		bool rootSelectionIsExplicit)
 	{
-		var files = new List<ScopedFile>(Math.Min(scopedPaths.Count, inventory.Entries.Count));
+		var files = new List<ScopedFile>(Math.Min(scopedPathCount, inventory.Entries.Count));
 		for (var index = 1; index < inventory.Entries.Count; index++)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			ref readonly var entry = ref inventory.GetEntryRef(index);
-			if (entry.IsDirectory || !scopedPaths.Contains(entry.FullPath))
+			if (entry.IsDirectory || !containsScopedPath(entry.FullPath))
 				continue;
 			if (!IsInsideSelectedRoot(
 				    inventory,
@@ -491,6 +554,7 @@ public static class GitScopePresentationProjector
 		ProjectTreeInventorySnapshot inventory,
 		IReadOnlyList<ScopedFile> files,
 		IReadOnlySet<string> scopedPaths,
+		Func<string, string?>? getComparisonIdentity,
 		IReadOnlySet<string> selectedRootFolders,
 		IgnoreRules rules,
 		IgnoreOptionCounts counts,
@@ -500,6 +564,9 @@ public static class GitScopePresentationProjector
 	{
 		var ownerPaths = new Dictionary<IgnoreDecisionOwner, HashSet<string>>();
 		var inventoriedFiles = new HashSet<string>(PathComparer.Default);
+		var inventoriedPathIdentities = getComparisonIdentity is null
+			? null
+			: new HashSet<string>(StringComparer.Ordinal);
 		var gitIgnore = rules.CreateGitIgnoreScanContext(
 			projectRoot,
 			inventory.DiscoveredGitIgnoreMatchers,
@@ -509,6 +576,8 @@ public static class GitScopePresentationProjector
 			cancellationToken.ThrowIfCancellationRequested();
 			ref readonly var file = ref inventory.GetEntryRef(scopedFile.EntryIndex);
 			inventoriedFiles.Add(file.FullPath);
+			if (getComparisonIdentity?.Invoke(file.FullPath) is { } identity)
+				inventoriedPathIdentities!.Add(identity);
 
 			var blocked = false;
 			foreach (var ancestorIndex in scopedFile.AncestorIndexes)
@@ -557,7 +626,11 @@ public static class GitScopePresentationProjector
 		foreach (var scopedPath in scopedPaths)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
+			var matchesInventoriedIdentity =
+				getComparisonIdentity?.Invoke(scopedPath) is { } identity &&
+				inventoriedPathIdentities!.Contains(identity);
 			if (inventoriedFiles.Contains(scopedPath) ||
+			    matchesInventoriedIdentity ||
 			    !IsInsideSelectedRoot(
 				    projectRoot,
 				    scopedPath,

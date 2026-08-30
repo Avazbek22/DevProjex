@@ -132,7 +132,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		var gitReadiness = ProjectContextGitReadiness.Evaluate(
 			selection.GitMode!.Value,
 			loaded.DiscoveredGitTrackedIndexCount,
-			loaded.UnavailableGitTrackedIndexCount);
+			loaded.UnavailableGitTrackedIndexCount,
+			loaded.GitEvidence.HasRepositoryBoundary);
 		if (gitReadiness.CreateDiagnostic(sourceRoot) is { } gitDiagnostic)
 			diagnostics.Add(gitDiagnostic);
 
@@ -235,13 +236,30 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		return GitScopePresentationProjector.Build(
 			plan.SourceRoot,
 			context.Inventory,
-			scope.IncludedPaths,
+			scope,
 			plan.SelectedRoots.ToHashSet(PathComparer.Default),
 			plan.AvailableRoots.ToHashSet(PathComparer.Default),
 			context.EffectiveExtensionPolicy,
 			context.EffectiveRules,
 			cancellationToken,
-			rootSelectionIsExplicit: context.RootSelectionIsExplicit);
+			rootSelectionIsExplicit: context.RootSelectionIsExplicit,
+			includeIgnoreImpactCounts: plan.HasIgnoreOptionCounts);
+	}
+
+	internal IReadOnlyList<string> GetGitScopeRepositoryRoots(ProjectContextPlan plan)
+	{
+		ArgumentNullException.ThrowIfNull(plan);
+		if (!_gitScopeProjectionContexts.TryGetValue(plan, out var context))
+			return [];
+
+		return GitScopeFilter.GetDiscoveredRepositoryRoots(
+			context.Inventory,
+			plan.SourceRoot,
+			plan.SelectedRoots,
+			context.RootSelectionIsExplicit,
+			plan.Selection.SelectedPaths is { Count: > 0 }
+				? plan.SelectedFullPaths
+				: null);
 	}
 
 	private sealed record GitScopeProjectionContext(

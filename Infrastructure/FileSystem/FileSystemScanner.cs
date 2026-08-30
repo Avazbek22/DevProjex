@@ -2073,6 +2073,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 					hadScanFailure == 1,
 					discovery.Value.DiscoveredGitIgnoreMatchers,
 					discovery.Value.DiscoveredGitTrackedPathIndexes,
+					discovery.Value.DiscoveredGitRepositoryRoots,
 					cancellationToken);
 			}
 
@@ -2111,6 +2112,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		bool hadScanFailure,
 		IReadOnlyList<ScopedGitIgnoreMatcher> discoveredGitIgnoreMatchers,
 		IReadOnlyList<GitTrackedPathIndex> discoveredGitTrackedPathIndexes,
+		IReadOnlyList<string> discoveredGitRepositoryRoots,
 		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
@@ -2146,7 +2148,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			hadAccessDenied,
 			discoveredGitIgnoreMatchers,
 			discoveredGitTrackedPathIndexes,
-			hadScanFailure);
+			hadScanFailure,
+			discoveredGitRepositoryRoots);
 
 		int AddDirectoryShell(int sourceIndex, int parentIndex)
 		{
@@ -2335,6 +2338,10 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			subtreeInventories,
 			rootTrackedPathIndex,
 			cancellationToken);
+		var discoveredGitRepositoryRoots = MergeDiscoveredGitRepositoryRoots(
+			rootPath,
+			subtreeInventories,
+			cancellationToken);
 
 		var firstChildIndex = entries.Count;
 		var rootChildIndexes = new List<int>(subtreeInventories.Count);
@@ -2401,7 +2408,38 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			hadAccessDenied,
 			discoveredGitIgnoreMatchers,
 			discoveredGitTrackedPathIndexes,
-			hadScanFailure);
+			hadScanFailure,
+			discoveredGitRepositoryRoots);
+	}
+
+	private static IReadOnlyList<string> MergeDiscoveredGitRepositoryRoots(
+		string rootPath,
+		IReadOnlyList<ProjectTreeInventorySnapshot> inventories,
+		CancellationToken cancellationToken)
+	{
+		var unique = new HashSet<string>(StringComparer.Ordinal);
+		if (GitTrackedPathIndexCache.TryFindNearestRepositoryBoundary(
+			rootPath,
+			cancellationToken,
+			out var nearestRepositoryRoot))
+		{
+			unique.Add(nearestRepositoryRoot);
+		}
+
+		foreach (var inventory in inventories)
+		{
+			foreach (var repositoryRoot in inventory.DiscoveredGitRepositoryRoots)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				unique.Add(repositoryRoot);
+			}
+		}
+
+		return unique
+			.OrderBy(static path => path.Length)
+			.ThenBy(static path => path, PathComparer.Default)
+			.ThenBy(static path => path, StringComparer.Ordinal)
+			.ToArray();
 	}
 
 	private static IReadOnlyList<ScopedGitIgnoreMatcher> MergeDiscoveredGitIgnoreMatchers(
@@ -2451,14 +2489,14 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			foreach (var index in inventory.DiscoveredGitTrackedPathIndexes)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				unique ??= new Dictionary<string, GitTrackedPathIndex>(PathComparer.Default);
+				unique ??= new Dictionary<string, GitTrackedPathIndex>(StringComparer.Ordinal);
 				unique[index.RepositoryRootPath] = index;
 			}
 		}
 
 		if (additionalIndex is not null)
 		{
-			unique ??= new Dictionary<string, GitTrackedPathIndex>(PathComparer.Default);
+			unique ??= new Dictionary<string, GitTrackedPathIndex>(StringComparer.Ordinal);
 			unique[additionalIndex.RepositoryRootPath] = additionalIndex;
 		}
 
@@ -2471,9 +2509,14 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			static (left, right) =>
 			{
 				var depth = left.RepositoryRootPath.Length.CompareTo(right.RepositoryRootPath.Length);
-				return depth != 0
-					? depth
-					: PathComparer.Default.Compare(left.RepositoryRootPath, right.RepositoryRootPath);
+				if (depth != 0)
+					return depth;
+				var platformOrder = PathComparer.Default.Compare(
+					left.RepositoryRootPath,
+					right.RepositoryRootPath);
+				return platformOrder != 0
+					? platformOrder
+					: StringComparer.Ordinal.Compare(left.RepositoryRootPath, right.RepositoryRootPath);
 			},
 			cancellationToken);
 		return merged;
@@ -2612,19 +2655,29 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		if (PathUtility.IsMissingPath(rootPath) || !Directory.Exists(rootPath))
 		{
 			return new ScanResult<EffectiveIgnoreScanDiscovery>(
-				new EffectiveIgnoreScanDiscovery([], [], [], GitWorkspaceEvidence.Empty),
+				new EffectiveIgnoreScanDiscovery([], [], [], [], GitWorkspaceEvidence.Empty),
 				RootAccessDenied: false,
 				HadAccessDenied: false);
 		}
 		if (!FileSystemRootEntryPolicy.IsPhysicalDirectory(rootPath))
 		{
 			return new ScanResult<EffectiveIgnoreScanDiscovery>(
-				new EffectiveIgnoreScanDiscovery([], [], [], GitWorkspaceEvidence.Empty),
+				new EffectiveIgnoreScanDiscovery([], [], [], [], GitWorkspaceEvidence.Empty),
 				RootAccessDenied: true,
 				HadAccessDenied: true);
 		}
 
 		var rootName = Path.GetFileName(rootPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+		var discoveredGitRepositoryRoots = new List<string>();
+		var gitEvidence = GitWorkspaceEvidence.Empty;
+		if (GitTrackedPathIndexCache.TryFindNearestRepositoryBoundary(
+			rootPath,
+			cancellationToken,
+			out var nearestRepositoryRoot))
+		{
+			discoveredGitRepositoryRoots.Add(nearestRepositoryRoot);
+			gitEvidence = new GitWorkspaceEvidence(HasRepositoryBoundary: true);
+		}
 		var effectiveGitIgnoreContext = effectiveRules.CreateGitIgnoreScanContext(rootPath);
 		var effectiveGitIgnoreCandidateContext = effectiveRules.CreateGitIgnoreCandidateScanContext(rootPath);
 		var discoveredGitIgnoreMatchers = new ScopedGitIgnoreMatcherAccumulator();
@@ -2647,7 +2700,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						[],
 						discoveredGitIgnoreMatchers.Items,
 						[],
-						GitWorkspaceEvidence.Empty),
+						discoveredGitRepositoryRoots,
+						gitEvidence),
 					RootAccessDenied: false,
 					HadAccessDenied: true);
 			}
@@ -2656,11 +2710,12 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		if (!TryReadHiddenAttribute(rootPath, out var rootIsHidden, out var rootAttributeAccessDenied))
 		{
 			return new ScanResult<EffectiveIgnoreScanDiscovery>(
-				new EffectiveIgnoreScanDiscovery(
-					[],
-					discoveredGitIgnoreMatchers.Items,
-					[],
-					GitWorkspaceEvidence.Empty),
+					new EffectiveIgnoreScanDiscovery(
+						[],
+						discoveredGitIgnoreMatchers.Items,
+						[],
+						discoveredGitRepositoryRoots,
+						gitEvidence),
 				RootAccessDenied: rootAttributeAccessDenied,
 				HadAccessDenied: rootAttributeAccessDenied,
 				HadScanFailure: !rootAttributeAccessDenied);
@@ -2696,13 +2751,17 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		    rootDirectControllerImpactCounts == IgnoreControllerImpactCounts.Empty)
 		{
 			return new ScanResult<EffectiveIgnoreScanDiscovery>(
-				new EffectiveIgnoreScanDiscovery([], [], [], GitWorkspaceEvidence.Empty),
+				new EffectiveIgnoreScanDiscovery(
+					[],
+					[],
+					[],
+					discoveredGitRepositoryRoots,
+					gitEvidence),
 				RootAccessDenied: false,
 				HadAccessDenied: false);
 		}
 
 		var directories = new List<EffectiveIgnoreScanNode>(capacity: 256);
-		var gitEvidence = GitWorkspaceEvidence.Empty;
 		if (inheritedTrackedPathIndex is not null)
 			discoveredGitTrackedPathIndexes.Add(inheritedTrackedPathIndex);
 		var rootAccessDenied = 0;
@@ -2769,7 +2828,10 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 						captureFiles);
 					directoryFiles = captureFiles ? directoryBatch.Files : null;
 					if (!string.IsNullOrWhiteSpace(directoryBatch.GitMetadataPath))
+					{
+						discoveredGitRepositoryRoots.Add(facts.FullPath);
 						gitEvidence = new GitWorkspaceEvidence(HasRepositoryBoundary: true);
+					}
 					(gitIgnoreContext, gitIgnoreCandidateContext, var gitIgnoreLoadStatus) = EnterGitIgnoreScope(
 						facts.FullPath,
 						facts.RelativePath,
@@ -2941,6 +3003,12 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				directories,
 				discoveredGitIgnoreMatchers.Items,
 				discoveredGitTrackedPathIndexes,
+				discoveredGitRepositoryRoots
+					.Distinct(StringComparer.Ordinal)
+					.OrderBy(static path => path.Length)
+					.ThenBy(static path => path, PathComparer.Default)
+					.ThenBy(static path => path, StringComparer.Ordinal)
+					.ToArray(),
 				gitEvidence),
 			rootAccessDenied == 1,
 			hadAccessDenied == 1,

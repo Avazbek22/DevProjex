@@ -23,6 +23,8 @@ public static class ProjectSelectionAdapter
 		var options = new HashSet<IgnoreOptionId>();
 		switch (selection.GitMode.Value)
 		{
+			case GitFilteringMode.None:
+				break;
 			case GitFilteringMode.RespectGitIgnore:
 				options.Add(IgnoreOptionId.UseGitIgnore);
 				break;
@@ -34,6 +36,11 @@ public static class ProjectSelectionAdapter
 			case GitFilteringMode.Changes:
 				options.Add(IgnoreOptionId.UseGitIgnore);
 				break;
+			default:
+				throw new ArgumentOutOfRangeException(
+					nameof(selection),
+					selection.GitMode,
+					"The Git filtering mode is invalid.");
 		}
 
 		foreach (var exclusion in selection.Exclusions)

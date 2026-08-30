@@ -247,7 +247,8 @@ public sealed class ProjectAnalysisService(
 			DiscoveredGitTrackedIndexCount: treeInventory?.DiscoveredGitTrackedPathIndexes.Count ?? 0,
 			UnavailableGitTrackedIndexCount: treeInventory?.DiscoveredGitTrackedPathIndexes.Count(
 				static index => !index.IsAvailable) ?? 0,
-			TreeInventory: treeInventory)
+			TreeInventory: treeInventory,
+			GitEvidence: treeInventory?.GitEvidence ?? scan.GitEvidence)
 		{
 			EffectiveRules = rules,
 			RootSelectionIsExplicit = request.SelectedRootFolders is not null,
@@ -342,7 +343,8 @@ public sealed class ProjectAnalysisService(
 			DiscoveredGitTrackedIndexCount: inventory.DiscoveredGitTrackedPathIndexes.Count,
 			UnavailableGitTrackedIndexCount: inventory.DiscoveredGitTrackedPathIndexes.Count(
 				static index => !index.IsAvailable),
-			TreeInventory: inventory)
+			TreeInventory: inventory,
+			GitEvidence: snapshot.GitEvidence)
 		{
 			// The refresh snapshot intentionally contains only effective rows. Keep the
 			// requested selection separately so stale profile/CLI values still produce the
@@ -741,7 +743,8 @@ public sealed record LoadedProjectAnalysisRequest(
 	TimeSpan? KnownLoadingElapsed = null,
 	int DiscoveredGitTrackedIndexCount = 0,
 	int UnavailableGitTrackedIndexCount = 0,
-	ProjectTreeInventorySnapshot? TreeInventory = null)
+	ProjectTreeInventorySnapshot? TreeInventory = null,
+	GitWorkspaceEvidence GitEvidence = default)
 {
 	internal IReadOnlyCollection<string>? RequestedRootFoldersForDiagnostics { get; init; }
 	internal IReadOnlyCollection<string>? RequestedExtensionsForDiagnostics { get; init; }

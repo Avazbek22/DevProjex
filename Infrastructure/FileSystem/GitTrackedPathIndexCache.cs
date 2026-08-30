@@ -114,7 +114,7 @@ internal static class GitTrackedPathIndexCache
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			var gitMetadataPath = Path.Combine(currentPath, ".git");
-			if (TryMetadataEntryExists(gitMetadataPath))
+			if (TryMetadataEntryEstablishesBoundary(gitMetadataPath))
 			{
 				if (TryLoad(
 					currentPath,
@@ -160,7 +160,7 @@ internal static class GitTrackedPathIndexCache
 		while (!string.IsNullOrWhiteSpace(currentPath))
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			if (TryMetadataEntryExists(Path.Combine(currentPath, ".git")))
+			if (TryMetadataEntryEstablishesBoundary(Path.Combine(currentPath, ".git")))
 			{
 				repositoryRootPath = currentPath;
 				return true;
@@ -601,12 +601,16 @@ internal static class GitTrackedPathIndexCache
 		return true;
 	}
 
-	private static bool TryMetadataEntryExists(string gitMetadataPath)
+	private static bool TryMetadataEntryEstablishesBoundary(string gitMetadataPath)
 	{
 		try
 		{
-			_ = File.GetAttributes(gitMetadataPath);
-			return true;
+			var attributes = File.GetAttributes(gitMetadataPath);
+			if (attributes.HasFlag(FileAttributes.ReparsePoint))
+				return false;
+
+			return attributes.HasFlag(FileAttributes.Directory) ||
+			       UnixFileTypeInspector.IsRegularFile(gitMetadataPath);
 		}
 		catch (FileNotFoundException)
 		{

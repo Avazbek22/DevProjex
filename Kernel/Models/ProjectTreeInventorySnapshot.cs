@@ -12,7 +12,8 @@ public sealed class ProjectTreeInventorySnapshot(
 	bool hadAccessDenied,
 	IReadOnlyList<ScopedGitIgnoreMatcher>? discoveredGitIgnoreMatchers = null,
 	IReadOnlyList<GitTrackedPathIndex>? discoveredGitTrackedPathIndexes = null,
-	bool hadScanFailure = false)
+	bool hadScanFailure = false,
+	IReadOnlyList<string>? discoveredGitRepositoryRoots = null)
 {
 	public IReadOnlyList<ProjectTreeInventoryEntry> Entries => entries;
 	public bool RootAccessDenied { get; } = rootAccessDenied;
@@ -26,6 +27,13 @@ public sealed class ProjectTreeInventorySnapshot(
 
 	public IReadOnlyList<GitTrackedPathIndex> DiscoveredGitTrackedPathIndexes { get; } =
 		discoveredGitTrackedPathIndexes ?? [];
+
+	public IReadOnlyList<string> DiscoveredGitRepositoryRoots { get; } =
+		discoveredGitRepositoryRoots ?? [];
+
+	public GitWorkspaceEvidence GitEvidence { get; } = new(
+		(discoveredGitRepositoryRoots?.Count ?? 0) > 0 ||
+		(discoveredGitTrackedPathIndexes?.Count ?? 0) > 0);
 
 	public ProjectTreeInventoryEntry GetEntry(int index) => entries[index];
 

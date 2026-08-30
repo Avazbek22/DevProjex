@@ -7,22 +7,136 @@ public interface IGitScopePathProvider
 		GitFilteringMode mode,
 		string? diffRange,
 		CancellationToken cancellationToken = default);
+
+	Task<GitScopePathResult> ResolveAsync(
+		string projectRoot,
+		GitFilteringMode mode,
+		string? diffRange,
+		IReadOnlyCollection<string> repositoryRoots,
+		CancellationToken cancellationToken = default) =>
+		ResolveAsync(projectRoot, mode, diffRange, cancellationToken);
 }
 
 public sealed record GitScopePathResult(
 	bool IsAvailable,
 	IReadOnlySet<string> IncludedPaths,
 	int DeletedPathCount,
-	string? FailureReason = null)
+	string? FailureReason = null,
+	IReadOnlyList<GitTrackedPathIndex>? PathMatchers = null)
 {
 	public static GitScopePathResult Unavailable(string? reason = null) =>
 		new(false, new HashSet<string>(PathComparer.Default), 0, reason);
+
+	public bool ContainsPath(string path)
+	{
+		return TryGetOwningMatcher(path, out var owner, out _)
+			? owner.Contains(path)
+			: IncludedPaths.Contains(path);
+	}
+
+	internal string? GetComparisonIdentity(string path)
+	{
+		if (PathMatchers is null)
+			return null;
+
+		return TryGetOwningMatcher(path, out var owner, out var relativeIdentity)
+			? owner.RepositoryRootPath + '\0' + relativeIdentity
+			: null;
+	}
+
+	private bool TryGetOwningMatcher(
+		string path,
+		out GitTrackedPathIndex owner,
+		out string relativeIdentity)
+	{
+		owner = null!;
+		relativeIdentity = string.Empty;
+		if (PathMatchers is null)
+			return false;
+
+		for (var index = 0; index < PathMatchers.Count; index++)
+		{
+			var candidate = PathMatchers[index];
+			if ((owner is not null && candidate.RepositoryRootPath.Length <= owner.RepositoryRootPath.Length) ||
+			    !candidate.TryGetPathIdentity(path, out var candidateIdentity))
+			{
+				continue;
+			}
+
+			owner = candidate;
+			relativeIdentity = candidateIdentity;
+		}
+
+		return owner is not null;
+	}
 }
 
 public static class GitScopeFilter
 {
 	public const string UnavailableDiagnosticCode = "DPX-GIT-STATE-UNAVAILABLE";
 	public const string DeletedDiagnosticCode = "DPX-GIT-STATE-DELETED";
+
+	public static IReadOnlyList<string> GetDiscoveredRepositoryRoots(
+		ProjectTreeInventorySnapshot? inventory) =>
+		inventory is null
+			? []
+			: inventory.DiscoveredGitRepositoryRoots
+			.Concat(inventory.DiscoveredGitTrackedPathIndexes.Select(static index => index.RepositoryRootPath))
+			.Distinct(StringComparer.Ordinal)
+			.OrderBy(static path => path, PathComparer.Default)
+			.ThenBy(static path => path, StringComparer.Ordinal)
+			.ToArray();
+
+	public static IReadOnlyList<string> GetDiscoveredRepositoryRoots(
+		ProjectTreeInventorySnapshot? inventory,
+		string sourceRoot,
+		IReadOnlyCollection<string> selectedRootFolders,
+		bool rootSelectionIsExplicit,
+		IReadOnlyCollection<string>? selectedFullPaths = null)
+	{
+		var repositoryRoots = GetDiscoveredRepositoryRoots(inventory);
+		var pathSelectionIsExplicit = selectedFullPaths is { Count: > 0 };
+		if ((!rootSelectionIsExplicit && !pathSelectionIsExplicit) || repositoryRoots.Count == 0)
+			return repositoryRoots;
+
+		var selectedRoots = new List<string>(
+			(rootSelectionIsExplicit ? selectedRootFolders.Count : 0) +
+			(selectedFullPaths?.Count ?? 0));
+		if (rootSelectionIsExplicit)
+		{
+			foreach (var selectedRootFolder in selectedRootFolders)
+			{
+				if (string.IsNullOrWhiteSpace(selectedRootFolder))
+					continue;
+				try
+				{
+					var selectedRoot = PathUtility.Normalize(Path.Combine(sourceRoot, selectedRootFolder));
+					if (PathUtility.IsPathInside(selectedRoot, sourceRoot))
+						selectedRoots.Add(selectedRoot);
+				}
+				catch (Exception exception) when (
+					exception is ArgumentException or IOException or NotSupportedException)
+				{
+				}
+			}
+		}
+		if (selectedFullPaths is not null)
+		{
+			foreach (var selectedFullPath in selectedFullPaths)
+			{
+				if (PathUtility.IsPathInside(selectedFullPath, sourceRoot))
+					selectedRoots.Add(selectedFullPath);
+			}
+		}
+
+		return repositoryRoots
+			.Where(repositoryRoot =>
+				PathUtility.IsPathInside(sourceRoot, repositoryRoot) ||
+				selectedRoots.Any(selectedRoot =>
+					PathUtility.IsPathInside(repositoryRoot, selectedRoot) ||
+					PathUtility.IsPathInside(selectedRoot, repositoryRoot)))
+			.ToArray();
+	}
 
 	public static async Task<ProjectContextPlan> ApplyAsync(
 		ProjectContextPlanner planner,
@@ -60,7 +174,12 @@ public static class GitScopeFilter
 		var scopedBaseline = plan with { Selection = scopedSelection };
 
 		var scope = await provider
-			.ResolveAsync(plan.SourceRoot, scopeMode, diffRange, cancellationToken)
+			.ResolveAsync(
+				plan.SourceRoot,
+				scopeMode,
+				diffRange,
+				planner.GetGitScopeRepositoryRoots(plan),
+				cancellationToken)
 			.ConfigureAwait(false);
 		if (!scope.IsAvailable)
 		{
@@ -78,7 +197,7 @@ public static class GitScopeFilter
 
 		var scopedFilePaths = RetainExactFilePaths(
 			plan.EffectiveTree,
-			scope.IncludedPaths,
+			scope,
 			cancellationToken);
 		var scopedTree = ProjectContextPlanner.ResolveSelectionProjection(
 			plan.EffectiveTree,
@@ -91,7 +210,7 @@ public static class GitScopeFilter
 		foreach (var path in plan.IncludedFiles)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			if (scope.IncludedPaths.Contains(path))
+			if (scope.ContainsPath(path))
 				selected.Add(PathUtility.GetPortableRelativePath(plan.SourceRoot, path));
 		}
 
@@ -123,9 +242,13 @@ public static class GitScopeFilter
 			EffectiveTree = scopedTree,
 			AvailableExtensions = presentation.AvailableExtensions,
 			SelectedExtensions = plan.SelectedExtensions,
-			HasIgnoreOptionCounts = true,
-			IgnoreOptionCounts = presentation.IgnoreOptionCounts,
-			IgnoreControllerImpactCounts = presentation.ControllerImpactCounts,
+			HasIgnoreOptionCounts = plan.HasIgnoreOptionCounts,
+			IgnoreOptionCounts = plan.HasIgnoreOptionCounts
+				? presentation.IgnoreOptionCounts
+				: IgnoreOptionCounts.Empty,
+			IgnoreControllerImpactCounts = plan.HasIgnoreOptionCounts
+				? presentation.ControllerImpactCounts
+				: IgnoreControllerImpactCounts.Empty,
 			Diagnostics = diagnostics
 		};
 	}
@@ -141,7 +264,7 @@ public static class GitScopeFilter
 			return tree;
 		var scopedFilePaths = RetainExactFilePaths(
 			tree.Root,
-			scope.IncludedPaths,
+			scope,
 			cancellationToken);
 		var projection = ProjectContextPlanner.ResolveSelectionProjection(
 			tree.Root,
@@ -158,11 +281,11 @@ public static class GitScopeFilter
 
 	private static IReadOnlySet<string> RetainExactFilePaths(
 		TreeNodeDescriptor root,
-		IReadOnlySet<string> scopedPaths,
+		GitScopePathResult scope,
 		CancellationToken cancellationToken)
 	{
-		if (scopedPaths.Count == 0)
-			return scopedPaths;
+		if (scope.IncludedPaths.Count == 0)
+			return scope.IncludedPaths;
 
 		var files = new HashSet<string>(PathComparer.Default);
 		var pending = new Stack<TreeNodeDescriptor>();
@@ -173,7 +296,7 @@ public static class GitScopeFilter
 			var node = pending.Pop();
 			if (!node.IsDirectory)
 			{
-				if (scopedPaths.Contains(node.FullPath))
+				if (scope.ContainsPath(node.FullPath))
 					files.Add(node.FullPath);
 				continue;
 			}

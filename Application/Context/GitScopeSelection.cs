@@ -4,10 +4,35 @@ public static class GitScopeSelection
 {
 	public const string DiffPrefix = "diff:";
 
+	public static ProjectSelectionSpec WithMode(
+		ProjectSelectionSpec selection,
+		GitFilteringMode mode,
+		string? diffRange = null)
+	{
+		ArgumentNullException.ThrowIfNull(selection);
+		if (!Enum.IsDefined(mode))
+			throw new ArgumentOutOfRangeException(nameof(mode), mode, null);
+		if (mode == GitFilteringMode.Diff && !IsValidDiffRange(diffRange))
+		{
+			throw new ArgumentException(
+				"A diff Git scope requires two non-empty references separated by '..'.",
+				nameof(diffRange));
+		}
+
+		return selection with
+		{
+			GitMode = mode,
+			GitDiffRange = mode == GitFilteringMode.Diff ? diffRange : null
+		};
+	}
+
 	public static bool IsMomentary(GitFilteringMode mode) =>
 		mode is GitFilteringMode.Staged or GitFilteringMode.Changes or GitFilteringMode.Diff;
 
-	public static bool IsPersistent(GitFilteringMode mode) => !IsMomentary(mode);
+	public static bool IsPersistent(GitFilteringMode mode) =>
+		mode is GitFilteringMode.None or
+			GitFilteringMode.RespectGitIgnore or
+			GitFilteringMode.TrackedFilesOnly;
 
 	public static GitFilteringMode ToUnderlayMode(GitFilteringMode mode) => mode switch
 	{
@@ -15,6 +40,28 @@ public static class GitScopeSelection
 		GitFilteringMode.Changes => GitFilteringMode.RespectGitIgnore,
 		_ => mode
 	};
+
+	public static GitFilteringMode ComposeNarrowingUnderlay(
+		GitFilteringMode baselineMode,
+		GitFilteringMode scopeMode)
+	{
+		if (!IsPersistent(baselineMode))
+			throw new ArgumentOutOfRangeException(nameof(baselineMode), baselineMode, "A persistent baseline is required.");
+		if (!IsMomentary(scopeMode))
+			throw new ArgumentOutOfRangeException(nameof(scopeMode), scopeMode, "A momentary Git scope is required.");
+
+		var scopeUnderlay = ToUnderlayMode(scopeMode);
+		if (baselineMode == GitFilteringMode.TrackedFilesOnly ||
+		    scopeUnderlay == GitFilteringMode.TrackedFilesOnly)
+		{
+			return GitFilteringMode.TrackedFilesOnly;
+		}
+
+		return baselineMode == GitFilteringMode.RespectGitIgnore ||
+		       scopeUnderlay == GitFilteringMode.RespectGitIgnore
+			? GitFilteringMode.RespectGitIgnore
+			: GitFilteringMode.None;
+	}
 
 	public static string ToToken(GitFilteringMode mode, string? diffRange = null) => mode switch
 	{

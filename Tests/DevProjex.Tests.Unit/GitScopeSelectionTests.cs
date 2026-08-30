@@ -49,6 +49,74 @@ public sealed class GitScopeSelectionTests
 		             options.Contains(IgnoreOptionId.TrackedGitFilesOnly));
 	}
 
+	[Theory]
+	[InlineData(GitFilteringMode.None, GitFilteringMode.Staged, GitFilteringMode.TrackedFilesOnly)]
+	[InlineData(GitFilteringMode.None, GitFilteringMode.Changes, GitFilteringMode.RespectGitIgnore)]
+	[InlineData(GitFilteringMode.None, GitFilteringMode.Diff, GitFilteringMode.TrackedFilesOnly)]
+	[InlineData(GitFilteringMode.RespectGitIgnore, GitFilteringMode.Staged, GitFilteringMode.TrackedFilesOnly)]
+	[InlineData(GitFilteringMode.RespectGitIgnore, GitFilteringMode.Changes, GitFilteringMode.RespectGitIgnore)]
+	[InlineData(GitFilteringMode.RespectGitIgnore, GitFilteringMode.Diff, GitFilteringMode.TrackedFilesOnly)]
+	[InlineData(GitFilteringMode.TrackedFilesOnly, GitFilteringMode.Staged, GitFilteringMode.TrackedFilesOnly)]
+	[InlineData(GitFilteringMode.TrackedFilesOnly, GitFilteringMode.Changes, GitFilteringMode.TrackedFilesOnly)]
+	[InlineData(GitFilteringMode.TrackedFilesOnly, GitFilteringMode.Diff, GitFilteringMode.TrackedFilesOnly)]
+	public void NarrowingUnderlayNeverExpandsThePersistentBaseline(
+		GitFilteringMode baseline,
+		GitFilteringMode scope,
+		GitFilteringMode expected) =>
+		Assert.Equal(expected, GitScopeSelection.ComposeNarrowingUnderlay(baseline, scope));
+
+	[Fact]
+	public void SelectionRejectsAnUndefinedGitMode() =>
+		Assert.Throws<ArgumentOutOfRangeException>(() =>
+			GitScopeSelection.WithMode(ProjectSelectionSpec.Standard, (GitFilteringMode)int.MaxValue));
+
+	[Fact]
+	public void SelectionAdapterRejectsAnUndefinedGitMode() =>
+		Assert.Throws<ArgumentOutOfRangeException>(() =>
+			ProjectSelectionAdapter.ToIgnoreOptions(
+				ProjectSelectionSpec.Standard with { GitMode = (GitFilteringMode)int.MaxValue }));
+
+	[Fact]
+	public void RepositoryBoundaryEvidenceDoesNotPretendThatATrackedIndexWasLoaded()
+	{
+		var baseline = ProjectContextGitReadiness.Evaluate(
+			GitFilteringMode.None,
+			discoveredTrackedIndexCount: 0,
+			unavailableTrackedIndexCount: 0,
+			hasRepositoryBoundaryEvidence: true);
+		var tracked = ProjectContextGitReadiness.Evaluate(
+			GitFilteringMode.TrackedFilesOnly,
+			discoveredTrackedIndexCount: 0,
+			unavailableTrackedIndexCount: 0,
+			hasRepositoryBoundaryEvidence: true);
+
+		Assert.True(baseline.HasRepositoryBoundary);
+		Assert.True(baseline.IsReady);
+		Assert.True(tracked.HasRepositoryBoundary);
+		Assert.False(tracked.IsReady);
+		Assert.Equal(
+			ProjectContextGitReadiness.UnavailableDiagnosticCode,
+			tracked.CreateDiagnostic("project")?.Code);
+	}
+
+	[Fact]
+	public void InventoryRepositoryBoundaryContributesReadinessWithoutATrackedIndex()
+	{
+		var inventory = new ProjectTreeInventorySnapshot(
+			[],
+			rootAccessDenied: false,
+			hadAccessDenied: false,
+			discoveredGitRepositoryRoots: [Path.GetFullPath("repository")]);
+
+		var readiness = ProjectContextGitReadiness.Evaluate(
+			GitFilteringMode.None,
+			inventory);
+
+		Assert.True(readiness.HasRepositoryBoundary);
+		Assert.True(readiness.IsReady);
+		Assert.Equal(0, readiness.LoadedTrackedIndexCount);
+	}
+
 	[Fact]
 	public void NameStatusParserHandlesDeletesAndRenamesWithoutLeakingTheOldPath()
 	{
@@ -70,6 +138,24 @@ public sealed class GitScopeSelectionTests
 		Assert.Equal(
 			[Path.Combine(root, "old.cs"), Path.Combine(root, "src", "deleted.cs")],
 			deleted.Order(PathComparer.Default));
+	}
+
+	[Fact]
+	public void GitScopeDiffCommandsDisableExternalDriversAndTextConversion()
+	{
+		var staged = GitScopePathProvider.CreateDiffArguments(cached: true, diffRange: null);
+		var unstaged = GitScopePathProvider.CreateDiffArguments(cached: false, diffRange: null);
+		var compared = GitScopePathProvider.CreateDiffArguments(cached: false, diffRange: "main..feature");
+
+		foreach (var arguments in new[] { staged, unstaged, compared })
+		{
+			Assert.Contains("--no-ext-diff", arguments);
+			Assert.Contains("--no-textconv", arguments);
+			Assert.Equal("--", arguments[^1]);
+		}
+		Assert.Contains("--cached", staged);
+		Assert.DoesNotContain("--cached", unstaged);
+		Assert.Contains("main..feature", compared);
 	}
 
 	[Fact]
@@ -136,6 +222,123 @@ public sealed class GitScopeSelectionTests
 	}
 
 	[Fact]
+	public void TreeNarrowingUsesRepositoryPathIdentityWithoutChangingSetSemantics()
+	{
+		var rootPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "dpx-git-scope-identity"));
+		var gitPath = Path.Combine(rootPath, "MixedCase.cs");
+		var inventoriedPath = Path.Combine(rootPath, "mixedcase.cs");
+		var root = new TreeNodeDescriptor(
+			"project",
+			rootPath,
+			true,
+			false,
+			"folder",
+			[new TreeNodeDescriptor("mixedcase.cs", inventoriedPath, false, false, "csharp", [])]);
+		var scope = new GitScopePathResult(
+			true,
+			new HashSet<string>([gitPath], StringComparer.Ordinal),
+			0,
+			PathMatchers:
+			[
+				new GitTrackedPathIndex(
+					rootPath,
+					["MixedCase.cs"],
+					new GitPathComparisonSemantics(IgnoreCase: true, NormalizeUnicode: false))
+			]);
+
+		var narrowed = GitScopeFilter.ApplyToTree(
+			new BuildTreeResult(root, false, false, [inventoriedPath]),
+			scope,
+			TestContext.Current.CancellationToken);
+
+		Assert.DoesNotContain(inventoriedPath, scope.IncludedPaths);
+		Assert.True(scope.ContainsPath(inventoriedPath));
+		Assert.Equal([inventoriedPath], narrowed.OrderedFilePaths);
+	}
+
+	[Fact]
+	public void RepositoryMatcherDoesNotAllowPlatformComparerToOverrideCaseSensitiveGit()
+	{
+		var rootPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "dpx-git-scope-case-sensitive"));
+		var exactPath = Path.Combine(rootPath, "MixedCase.cs");
+		var differentlyCasedPath = Path.Combine(rootPath, "mixedcase.cs");
+		var scope = new GitScopePathResult(
+			true,
+			new HashSet<string>([exactPath], PathComparer.Default),
+			0,
+			PathMatchers:
+			[
+				new GitTrackedPathIndex(
+					rootPath,
+					["MixedCase.cs"],
+					new GitPathComparisonSemantics(IgnoreCase: false, NormalizeUnicode: false))
+			]);
+
+		Assert.True(scope.ContainsPath(exactPath));
+		Assert.False(scope.ContainsPath(differentlyCasedPath));
+	}
+
+	[Fact]
+	public void ExplicitRootSelectionDoesNotResolveUnselectedRepositoryBoundaries()
+	{
+		var sourceRoot = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "dpx-git-scope-roots"));
+		var firstRepository = Path.Combine(sourceRoot, "first");
+		var secondRepository = Path.Combine(sourceRoot, "second");
+		var inventory = new ProjectTreeInventorySnapshot(
+			[],
+			rootAccessDenied: false,
+			hadAccessDenied: false,
+			discoveredGitRepositoryRoots: [firstRepository, secondRepository]);
+
+		var roots = GitScopeFilter.GetDiscoveredRepositoryRoots(
+			inventory,
+			sourceRoot,
+			["first"],
+			rootSelectionIsExplicit: true);
+
+		Assert.Equal([firstRepository], roots, PathComparer.Default);
+	}
+
+	[Fact]
+	public void ExplicitPathSelectionDoesNotResolveUnrelatedRepositoryBoundaries()
+	{
+		var sourceRoot = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "dpx-git-scope-paths"));
+		var firstRepository = Path.Combine(sourceRoot, "first");
+		var secondRepository = Path.Combine(sourceRoot, "second");
+		var inventory = new ProjectTreeInventorySnapshot(
+			[],
+			rootAccessDenied: false,
+			hadAccessDenied: false,
+			discoveredGitRepositoryRoots: [firstRepository, secondRepository]);
+
+		var roots = GitScopeFilter.GetDiscoveredRepositoryRoots(
+			inventory,
+			sourceRoot,
+			selectedRootFolders: [],
+			rootSelectionIsExplicit: false,
+			selectedFullPaths: [Path.Combine(firstRepository, "src", "selected.cs")]);
+
+		Assert.Equal([firstRepository], roots, PathComparer.Default);
+	}
+
+	[Fact]
+	public void RepositoryDiscoveryPreservesCaseDistinctPhysicalRootsBeforeGitResolution()
+	{
+		var sourceRoot = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "dpx-git-scope-case-roots"));
+		var upperRepository = Path.Combine(sourceRoot, "Repo");
+		var lowerRepository = Path.Combine(sourceRoot, "repo");
+		var inventory = new ProjectTreeInventorySnapshot(
+			[],
+			rootAccessDenied: false,
+			hadAccessDenied: false,
+			discoveredGitRepositoryRoots: [lowerRepository, upperRepository]);
+
+		var roots = GitScopeFilter.GetDiscoveredRepositoryRoots(inventory);
+
+		Assert.Equal([upperRepository, lowerRepository], roots, StringComparer.Ordinal);
+	}
+
+	[Fact]
 	public void TreeNarrowingDoesNotExpandScopedDirectoryPaths()
 	{
 		var rootPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "dpx-git-scope-gitlink"));
@@ -195,6 +398,30 @@ public sealed class GitScopeSelectionTests
 	}
 
 	[Fact]
+	public void ScopeWithoutRequestedImpactCountsStillProjectsAvailableExtensions()
+	{
+		using var project = new TemporaryDirectory();
+		var regular = PathUtility.Normalize(project.CreateFile("regular.cs", "class Regular {}\n"));
+		var hidden = PathUtility.Normalize(project.CreateFile(".hidden.cs", "class Hidden {}\n"));
+		var (inventory, rules, roots) = BuildInventory(project.Path);
+
+		var projection = GitScopePresentationProjector.Build(
+			project.Path,
+			inventory,
+			new HashSet<string>([regular, hidden], PathComparer.Default),
+			roots,
+			roots,
+			ExtensionPolicy(".cs"),
+			rules,
+			TestContext.Current.CancellationToken,
+			includeIgnoreImpactCounts: false);
+
+		Assert.Equal([".cs"], projection.AvailableExtensions);
+		Assert.Equal(IgnoreOptionCounts.Empty, projection.IgnoreOptionCounts);
+		Assert.Equal(IgnoreControllerImpactCounts.Empty, projection.ControllerImpactCounts);
+	}
+
+	[Fact]
 	public void ScopeCountsOnlyRulesThatCanChangeItsFiles()
 	{
 		using var project = new TemporaryDirectory();
@@ -240,6 +467,40 @@ public sealed class GitScopeSelectionTests
 
 		Assert.Equal([".cs"], dotFoldersVisible.AvailableExtensions);
 		Assert.Equal(1, dotFoldersVisible.IgnoreOptionCounts.DotFolders);
+	}
+
+	[Fact]
+	public void RepositoryPathAliasDoesNotDoubleCountIgnoreOwnerEvidence()
+	{
+		using var project = new TemporaryDirectory();
+		var inventoriedPath = PathUtility.Normalize(
+			project.CreateFile(".Hidden.cs", "class Hidden {}\n"));
+		var gitPath = Path.Combine(project.Path, ".hidden.cs");
+		var (inventory, rules, roots) = BuildInventory(project.Path);
+		var scope = new GitScopePathResult(
+			true,
+			new HashSet<string>([gitPath], StringComparer.Ordinal),
+			0,
+			PathMatchers:
+			[
+				new GitTrackedPathIndex(
+					project.Path,
+					[".hidden.cs"],
+					new GitPathComparisonSemantics(IgnoreCase: true, NormalizeUnicode: false))
+			]);
+
+		var projection = GitScopePresentationProjector.Build(
+			project.Path,
+			inventory,
+			scope,
+			roots,
+			roots,
+			ExtensionPolicy(".cs"),
+			rules,
+			TestContext.Current.CancellationToken);
+
+		Assert.True(scope.ContainsPath(inventoriedPath));
+		Assert.Equal(1, projection.IgnoreOptionCounts.DotFiles);
 	}
 
 	[Fact]

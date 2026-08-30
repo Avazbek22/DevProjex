@@ -20,9 +20,11 @@ public sealed record ProjectContextGitReadiness(
 	GitFilteringMode Mode,
 	int LoadedTrackedIndexCount,
 	bool IsReady,
-	int UnavailableTrackedIndexCount = 0)
+	int UnavailableTrackedIndexCount = 0,
+	bool HasRepositoryBoundaryEvidence = false)
 {
 	public bool HasRepositoryBoundary =>
+		HasRepositoryBoundaryEvidence ||
 		LoadedTrackedIndexCount + UnavailableTrackedIndexCount > 0;
 
 	public const string UnavailableDiagnosticCode = "DPX-GIT-TRACKED-INDEX-UNAVAILABLE";
@@ -31,7 +33,8 @@ public sealed record ProjectContextGitReadiness(
 	public static ProjectContextGitReadiness Evaluate(
 		GitFilteringMode mode,
 		int discoveredTrackedIndexCount,
-		int unavailableTrackedIndexCount)
+		int unavailableTrackedIndexCount,
+		bool hasRepositoryBoundaryEvidence = false)
 	{
 		var unavailableCount = Math.Clamp(
 			unavailableTrackedIndexCount,
@@ -42,18 +45,21 @@ public sealed record ProjectContextGitReadiness(
 			mode,
 			loadedCount,
 			mode != GitFilteringMode.TrackedFilesOnly || loadedCount > 0,
-			unavailableCount);
+			unavailableCount,
+			hasRepositoryBoundaryEvidence);
 	}
 
 	public static ProjectContextGitReadiness Evaluate(
 		GitFilteringMode mode,
-		ProjectTreeInventorySnapshot? inventory)
+		ProjectTreeInventorySnapshot? inventory,
+		GitWorkspaceEvidence gitEvidence = default)
 	{
 		var indexes = inventory?.DiscoveredGitTrackedPathIndexes;
 		return Evaluate(
 			mode,
 			indexes?.Count ?? 0,
-			indexes?.Count(static index => !index.IsAvailable) ?? 0);
+			indexes?.Count(static index => !index.IsAvailable) ?? 0,
+			gitEvidence.HasRepositoryBoundary || inventory?.GitEvidence.HasRepositoryBoundary == true);
 	}
 
 	public ContextDiagnostic? CreateDiagnostic(string sourceRoot)
