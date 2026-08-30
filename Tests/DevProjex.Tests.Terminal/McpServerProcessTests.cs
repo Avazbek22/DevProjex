@@ -56,9 +56,11 @@ public sealed class McpServerProcessTests
 		await process.WaitForExitAsync(TestContext.Current.CancellationToken)
 			.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken);
 
-		Assert.Equal(0, process.ExitCode);
-		Assert.Empty(await output);
-		Assert.Empty(await error);
+		var standardOutput = await output;
+		var standardError = await error;
+		Assert.True(process.ExitCode == 0, standardError);
+		Assert.Empty(standardOutput);
+		Assert.Empty(standardError);
 	}
 
 	[Theory]

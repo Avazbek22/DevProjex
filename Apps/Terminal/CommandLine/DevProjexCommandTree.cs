@@ -110,11 +110,7 @@ public sealed class DevProjexCommandTree
 		{
 			Description = L("Terminal.Option.McpAllowRemote")
 		};
-		var gitMode = CliChoiceSymbols.NullableOption(
-			"--git-mode",
-			L("Terminal.Option.McpGitMode"),
-			CliChoiceSets.PersistentGitMode,
-			_localization);
+		var gitMode = CreateMcpGitModeOption();
 		roots.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
 			context,
 			FileSystemCompletionKind.Directories,
@@ -156,6 +152,39 @@ public sealed class DevProjexCommandTree
 			}
 		});
 		return command;
+	}
+
+	private Option<GitFilteringMode?> CreateMcpGitModeOption()
+	{
+		var choices = CliChoiceSets.PersistentGitMode;
+		var option = new Option<GitFilteringMode?>("--git-mode")
+		{
+			Description = L("Terminal.Option.McpGitMode"),
+			HelpName = string.Join('|', choices.Tokens),
+			CustomParser = result =>
+			{
+				if (result.Tokens.Count == 1)
+				{
+					var token = result.Tokens[0].Value;
+					if (choices.TryParse(token, out var mode))
+						return mode;
+					if (token.Equals("off", StringComparison.OrdinalIgnoreCase))
+						return GitFilteringMode.None;
+				}
+
+				if (result.Tokens.Count > 0)
+				{
+					result.AddError(LocalizedParseError.Create(_localization.Format(
+						"Terminal.Validation.Choice",
+						"--git-mode",
+						string.Join(", ", choices.Tokens))));
+				}
+
+				return null;
+			}
+		};
+		option.CompletionSources.Add(choices.Tokens.ToArray());
+		return option;
 	}
 
 	private Command BuildTuiCommand()

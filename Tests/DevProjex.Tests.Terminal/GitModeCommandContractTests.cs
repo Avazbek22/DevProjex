@@ -795,6 +795,7 @@ public sealed class GitModeCommandContractTests
 		TemporaryDirectory workspace,
 		string gitMode)
 	{
+		using var dataRoot = new TemporaryDirectory();
 		var startInfo = new ProcessStartInfo("dotnet")
 		{
 			UseShellExecute = false,
@@ -819,7 +820,7 @@ public sealed class GitModeCommandContractTests
 			startInfo.ArgumentList.Add(argument);
 		}
 		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] =
-			workspace.CreateDirectory("data-" + gitMode);
+			dataRoot.Path;
 		return TerminalTestProcess.Run(startInfo);
 	}
 
