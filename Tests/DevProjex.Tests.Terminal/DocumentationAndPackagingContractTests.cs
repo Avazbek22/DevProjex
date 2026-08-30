@@ -23,6 +23,26 @@ public sealed class DocumentationAndPackagingContractTests
 	];
 
 	[Fact]
+	public void McpSecretDocumentationSeparatesControlFromDetectionGuarantees()
+	{
+		var rootPath = FindRepositoryRoot();
+		var documents = new[]
+		{
+			File.ReadAllText(Path.Combine(rootPath, "README.md")),
+			File.ReadAllText(Path.Combine(rootPath, "Docs", "McpServer.md")),
+			File.ReadAllText(Path.Combine(rootPath, "Docs", "HideSecrets.md"))
+		};
+
+		Assert.All(documents, static document =>
+		{
+			Assert.Contains("guarantee", document, StringComparison.OrdinalIgnoreCase);
+			Assert.Contains("heuristic", document, StringComparison.OrdinalIgnoreCase);
+			Assert.Contains("review each pack", document, StringComparison.OrdinalIgnoreCase);
+			Assert.Contains("publishing", document, StringComparison.OrdinalIgnoreCase);
+		});
+	}
+
+	[Fact]
 	public void SecretRuleAttributionShipsWithTheEmbeddedConfiguration()
 	{
 		var rootPath = FindRepositoryRoot();

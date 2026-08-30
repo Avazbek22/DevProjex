@@ -196,6 +196,10 @@ The server enforces hard security boundaries on top of DevProjex's read-only des
 * Smart Ignore, `.gitignore`, and tracked-only Git modes stay active; agent paths and globs can only narrow the selection
 * Returned file contents are wrapped in untrusted-data markers to resist prompt injection
 
+The missing off switch is a control guarantee, not a detection guarantee. DevProjex
+detects common secret formats, but detection is heuristic; review each pack before
+publishing it outside your environment.
+
 See [Docs/McpServer.md](Docs/McpServer.md) for client setup, the full tool reference, and the security model.
 
 ---

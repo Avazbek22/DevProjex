@@ -55,6 +55,9 @@ list_projects -> get_tree/analyze -> search_project/get_file -> pack_context -> 
   disabled. Private-data redaction is disabled by default and can be enabled
   only for the whole server process with `--hide-private-data`, mirroring the
   CLI flag. Tool schemas intentionally expose no redaction controls.
+  This guarantees that an agent cannot disable the redaction pass; detection
+  itself covers common secret formats but remains heuristic, not a guarantee.
+  Review each pack before publishing it outside your environment.
 - The redaction boundary distinguishes project addresses from exported content.
   File contents and context packs are always processed by Secrets redaction;
   Private Data processing is added only when the server starts with
