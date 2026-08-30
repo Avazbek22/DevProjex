@@ -171,6 +171,22 @@ public sealed class TerminalScreenSnapshotTests
 		Assert.DoesNotContain(temporaryPrefix, normalized, StringComparison.OrdinalIgnoreCase);
 	}
 
+	[Fact]
+	public void Normalize_DistinguishesClippedProjectRootFromOtherSystemTemporaryPaths()
+	{
+		var temporaryPrefix = Path.GetTempPath();
+		var normalized = TerminalScreenSnapshot.Normalize(
+			$"│Root: {temporaryPrefix}DevProjex.Tests.Termin▲│{Environment.NewLine}" +
+			$"│Destination {temporaryPrefix}clipped-project│",
+			[]);
+
+		Assert.Contains("│Root: <PROJECT_ROOT>▲│", normalized, StringComparison.Ordinal);
+		Assert.Contains(
+			"│Destination <SYSTEM_TEMP>/clipped-project│",
+			normalized,
+			StringComparison.Ordinal);
+	}
+
 	[Theory]
 	[InlineData("│> [1] /tmp/session/Alpha Project│", "│> [1] <RECENT_PATH>│")]
 	[InlineData("│  [2] C:\\Temp\\Beta Project│", "│  [2] <RECENT_PATH>│")]

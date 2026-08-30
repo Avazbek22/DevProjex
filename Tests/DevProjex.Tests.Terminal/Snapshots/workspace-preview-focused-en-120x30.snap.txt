@@ -1,7 +1,7 @@
  DevProjex Terminal · <ID>
  <PROJECTS_ROOT>
 ┌┤  PROJECT TREE├─────────────────────────────────────┐┌┤> CONTEXT PREVIEW · Content · ASCII├──────────────────────────┐
-│v [x] <ID>               ││Root: <SYSTEM_TEMP>/DevProjex.Tests.Termin▲│
+│v [x] <ID>               ││Root: <PROJECT_ROOT>▲│
 │  > [x] src                                          ││                                                              ┃│
 │    [x] global.json                                  ││                                                              ·│
 │                                                     ││global.json:                                                  ·│
