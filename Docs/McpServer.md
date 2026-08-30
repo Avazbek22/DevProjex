@@ -127,6 +127,8 @@ plain-text trailers such as `[Tree truncated ...]` and `[Showing lines ...]`.
 For `get_tree`, only `text` and `markdown` use the truncation trailer. If a JSON
 or XML tree would exceed 2,000 lines, the tool returns
 `DPX-MCP-PAYLOAD-TRUNCATED` with narrowing guidance instead of a partial document.
+The `text` tree writes its project address once, followed directly by the real
+top-level children; it does not repeat the project name as a synthetic tree node.
 Git-state deletion warnings are appended outside project spotlight blocks so
 clients can distinguish trusted diagnostics from untrusted file data.
 
@@ -134,6 +136,13 @@ An inline `pack_context` result contains the complete pack. A stored result is
 self-contained: it starts with `Pack stored as '<id>' (<N> characters). Call
 read_pack ...`, followed by a preview of the project tree. Clients extract the
 session-scoped `pack_id` from that text and pass it to `read_pack`.
+
+For human-readable `pack_context` documents with `view: "content"`, text and
+Markdown write one `Root: ...` line and use project-relative file headings. A
+remote checkout uses its safe repository URL in that Root line and never exposes
+the managed cache path. `tree-content` keeps its existing relative content
+headings. JSON and XML retain their machine-address contract for `root` and
+`files[].path`.
 
 When `max_tokens` is supplied, both inline and stored results include a budget
 report in a separate spotlighted data block after the pack or tree preview. This

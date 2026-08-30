@@ -55,7 +55,7 @@ public sealed class ProjectTextOutputPipelineTests
 	}
 
 	[Fact]
-	public async Task BuildAsync_ContentUsesTheOriginalPerFilePathFormat()
+	public async Task BuildAsync_ContentWritesRemoteRootOnceAndUsesRelativeFileHeaders()
 	{
 		using var project = new TemporaryDirectory();
 		var sourceFile = project.CreateFile(Path.Combine("src", "Program.cs"), "class Program {}");
@@ -74,10 +74,14 @@ public sealed class ProjectTextOutputPipelineTests
 			TestContext.Current.CancellationToken);
 
 		Assert.Equal(
-			$"{displayRoot}/src/Program.cs:{Environment.NewLine}" +
+			$"Root: {displayRoot}{Environment.NewLine}" +
+			$"\u00A0{Environment.NewLine}" +
+			$"\u00A0{Environment.NewLine}" +
+			$"src/Program.cs:{Environment.NewLine}" +
 			$"\u00A0{Environment.NewLine}" +
 			"class Program {}",
 			result.Content);
+		Assert.Equal(1, result.Content.Split(displayRoot, StringSplitOptions.None).Length - 1);
 	}
 
 	[Theory]
@@ -132,7 +136,9 @@ public sealed class ProjectTextOutputPipelineTests
 			snapshot,
 			TestContext.Current.CancellationToken);
 
-		Assert.StartsWith($@"{displayRoot}\Program.cs:{Environment.NewLine}", result.Content, StringComparison.Ordinal);
+		Assert.StartsWith($@"Root: {displayRoot}{Environment.NewLine}", result.Content, StringComparison.Ordinal);
+		Assert.Contains($"Program.cs:{Environment.NewLine}", result.Content, StringComparison.Ordinal);
+		Assert.Equal(1, result.Content.Split(displayRoot, StringSplitOptions.None).Length - 1);
 		Assert.DoesNotContain("[local-user-1]", result.Content, StringComparison.Ordinal);
 	}
     [Theory]

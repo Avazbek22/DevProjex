@@ -201,8 +201,11 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 				processedFileCount++;
 				if (!anyWritten && !string.IsNullOrWhiteSpace(displayRootPath))
 				{
+					var displayRoot = OutputRootPathPresentation
+						.ResolvePath(displayRootPath, outputPathRedaction)
+						.Text;
 					await output.AppendLineAsync(
-						$"{SingleLineTextEscaping.Escape(displayRootPath)}:",
+						ContextRootPresentation.FormatLine(displayRoot),
 						cancellationToken).ConfigureAwait(false);
 					await AppendClipboardBlankLineAsync(output, cancellationToken).ConfigureAwait(false);
 					await AppendClipboardBlankLineAsync(output, cancellationToken).ConfigureAwait(false);

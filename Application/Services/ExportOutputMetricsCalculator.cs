@@ -126,7 +126,7 @@ public static class ExportOutputMetricsCalculator
 				return;
 
 			AppendRenderedLine(
-				renderedChars: displayRootPath.Length + 1,
+				renderedChars: ContextRootPresentation.FormatLine(displayRootPath).Length,
 				internalLineBreaks: 0,
 				newLineChars: NormalizedNewLineChars,
 				chars: ref _chars,

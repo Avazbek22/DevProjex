@@ -357,7 +357,12 @@ public sealed class McpServerIntegrationTests
 		Assert.DoesNotContain('├', markdownBody);
 		Assert.DoesNotContain('└', markdownBody);
 		Assert.DoesNotContain('│', markdownBody);
-		Assert.Contains("└── src", ExtractSpotlightBody(Text(text)), StringComparison.Ordinal);
+		var textBody = ExtractSpotlightBody(Text(text));
+		var textLines = textBody.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+		Assert.Equal(project + ":", textLines[0]);
+		Assert.Equal(string.Empty, textLines[1]);
+		Assert.Equal("└── src", textLines[2]);
+		Assert.DoesNotContain(textLines, line => line.EndsWith(" project", StringComparison.Ordinal));
 		using (JsonDocument.Parse(ExtractSpotlightBody(Text(json)))) { }
 		_ = System.Xml.Linq.XDocument.Parse(ExtractSpotlightBody(Text(xml)));
 		foreach (var result in new[] { markdown, text, json, xml })
@@ -365,6 +370,39 @@ public sealed class McpServerIntegrationTests
 			Assert.NotEqual(true, result.IsError);
 			AssertSpotlighted(result);
 		}
+	}
+
+	[Theory]
+	[InlineData("text")]
+	[InlineData("markdown")]
+	public async Task ContentPackPrintsTheLocalRootOnceAndUsesRelativeFileHeaders(string format)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		Directory.CreateDirectory(Path.Combine(project, "docs"));
+		File.WriteAllText(Path.Combine(project, "docs", "Guide.md"), "guide-content\n");
+		File.WriteAllText(Path.Combine(project, "README.md"), "readme-content\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["view"] = "content",
+				["format"] = format
+			});
+
+		Assert.NotEqual(true, result.IsError);
+		var body = ExtractSpotlightBody(Text(result));
+		var displayRoot = format == "markdown"
+			? PathUtility.NormalizeSeparators(project)
+			: project;
+		Assert.Contains($"Root: {displayRoot}", body, StringComparison.Ordinal);
+		Assert.Equal(1, CountOccurrences(body, displayRoot));
+		Assert.Contains("docs/Guide.md", body, StringComparison.Ordinal);
+		Assert.Contains("README.md", body, StringComparison.Ordinal);
+		Assert.DoesNotContain(Path.Combine(project, "docs", "Guide.md"), body, PathComparison);
+		AssertSpotlighted(result);
 	}
 
 	[Fact]
@@ -506,7 +544,11 @@ public sealed class McpServerIntegrationTests
 		Assert.Contains(repositoryUrl, Text(tree), StringComparison.Ordinal);
 		Assert.DoesNotContain(cachePath, Text(tree), PathComparison);
 		Assert.NotEqual(true, pack.IsError);
-		Assert.Contains("remote-feature-marker", Text(pack), StringComparison.Ordinal);
+		var packBody = ExtractSpotlightBody(Text(pack));
+		Assert.Contains("remote-feature-marker", packBody, StringComparison.Ordinal);
+		Assert.Contains($"Root: {repositoryUrl}", packBody, StringComparison.Ordinal);
+		Assert.Equal(1, CountOccurrences(packBody, repositoryUrl));
+		Assert.Contains("Feature.txt:", packBody, StringComparison.Ordinal);
 		Assert.Contains("Token budget: 1000 estimated tokens.", Text(pack), StringComparison.Ordinal);
 		Assert.DoesNotContain(Secret, Text(pack), StringComparison.Ordinal);
 		Assert.Contains("DEVPROJEX_REDACTED", Text(pack), StringComparison.Ordinal);
@@ -2604,6 +2646,19 @@ public sealed class McpServerIntegrationTests
 	private static int[] ExtractPackLineMarkers(string text) =>
 		[.. Regex.Matches(text, "pack-line-(\\d{4})-")
 			.Select(static match => int.Parse(match.Groups[1].Value))];
+
+	private static int CountOccurrences(string value, string fragment)
+	{
+		var count = 0;
+		for (var offset = 0;;)
+		{
+			var index = value.IndexOf(fragment, offset, StringComparison.Ordinal);
+			if (index < 0)
+				return count;
+			count++;
+			offset = index + fragment.Length;
+		}
+	}
 
 	private static void AssertTextOnlyResult(
 		McpTestServer server,

@@ -512,6 +512,10 @@ Its `PROJECT` argument may be a local directory or repository URL. `-q` selects 
 cannot be combined with an explicit `--verbosity`; `--plain` conflicts with
 `--color always`.
 
+Text trees write the project path once and then start directly with its real
+children. They do not repeat the project name as a synthetic top-level node.
+`--plain` changes only the connectors to their ASCII equivalents.
+
 For file output, the destination must be outside the source project, its parent
 directory must already exist, and an existing destination requires `--force`.
 Replacement is atomic. On success, stdout contains the tree document for `-o -`
@@ -546,6 +550,12 @@ The format applies to the entire document. JSON and XML are parseable structured
 documents; Markdown contains headings, a fenced tree, and fenced text-file
 content. Binary bytes are never embedded in context output. Machine documents
 mark binary entries with metadata.
+
+For `--view content`, human-readable text and Markdown write one `Root: ...`
+line followed by project-relative file headings. A repository URL source uses its
+safe URL for the Root line instead of the managed checkout path. `tree-content`
+keeps relative content headings. JSON and XML keep their existing machine root
+and file-path representation.
 
 `--max-tokens N` limits included file content to an estimated token budget of at
 least 1. The estimate is one token per four transformed characters, rounded up

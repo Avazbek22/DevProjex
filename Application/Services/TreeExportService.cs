@@ -116,8 +116,7 @@ public sealed class TreeExportService
 		{
 			output.Append(outputRootPath).AppendLine(":");
 			output.AppendLine();
-			output.Append(PlainBranchMiddle).AppendLine(outputRootName);
-			AppendPlain(root, PlainIndentPipe, output, cancellationToken);
+			AppendPlain(root, string.Empty, output, cancellationToken);
 		}
 		else
 		{
@@ -238,9 +237,12 @@ public sealed class TreeExportService
 		var longest = includeRootPath
 			? FindLongestCharacterRun(outputRootPath, '`')
 			: 0;
-		longest = Math.Max(
-			longest,
-			FindLongestCharacterRun(ResolveRootDisplayName(root, displayRootName), '`'));
+		if (!includeRootPath)
+		{
+			longest = Math.Max(
+				longest,
+				FindLongestCharacterRun(ResolveRootDisplayName(root, displayRootName), '`'));
+		}
 
 		var frames = new List<TreeTraversalFrame> { new(root) };
 		while (frames.Count > 0)
@@ -278,8 +280,7 @@ public sealed class TreeExportService
 		{
 			sb.Append(outputRootPath).AppendLine(":");
 			sb.AppendLine();
-			sb.Append("├── ").AppendLine(outputRootName);
-			AppendAscii(root, "│   ", sb, cancellationToken);
+			AppendAscii(root, string.Empty, sb, cancellationToken);
 		}
 		else
 		{
@@ -342,11 +343,9 @@ public sealed class TreeExportService
 		}
 
 		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath) ? rootPath : displayRootPath;
-		var outputRootName = ResolveRootDisplayName(root, displayRootName);
 		return CalculateAsciiFullTreeMetrics(
 			outputRootPath,
 			root,
-			outputRootName,
 			cancellationToken);
 	}
 
@@ -404,12 +403,11 @@ public sealed class TreeExportService
 		CancellationToken cancellationToken)
 	{
 		var outputRootPath = string.IsNullOrWhiteSpace(displayRootPath) ? rootPath : displayRootPath;
-		var outputRootName = ResolveRootDisplayName(root, displayRootName);
 
 		return format switch
 		{
 			TreeTextFormat.Ascii =>
-				BuildSelectedTreeAscii(outputRootPath, outputRootName, root, includedPaths, cancellationToken),
+				BuildSelectedTreeAscii(outputRootPath, root, includedPaths, cancellationToken),
 			TreeTextFormat.Json => BuildSelectedTreeJson(outputRootPath, root, includedPaths, cancellationToken),
 			TreeTextFormat.Xml => BuildSelectedTreeXml(outputRootPath, root, includedPaths, cancellationToken),
 			TreeTextFormat.Markdown => BuildSelectedTreeMarkdown(outputRootPath, root, includedPaths, cancellationToken),
@@ -419,19 +417,15 @@ public sealed class TreeExportService
 
 	private static string BuildSelectedTreeAscii(
 		string outputRootPath,
-		string outputRootName,
 		TreeNodeDescriptor root,
 		IReadOnlySet<string> includedPaths,
 		CancellationToken cancellationToken)
 	{
 		outputRootPath = EscapeTextValue(outputRootPath);
-		outputRootName = EscapeTextValue(outputRootName);
 		var sb = new StringBuilder();
 		sb.Append(outputRootPath).AppendLine(":");
 		sb.AppendLine();
-
-		sb.Append("├── ").AppendLine(outputRootName);
-		AppendSelectedAscii(root, includedPaths, "│   ", sb, cancellationToken);
+		AppendSelectedAscii(root, includedPaths, string.Empty, sb, cancellationToken);
 
 		return sb.ToString();
 	}
@@ -506,12 +500,10 @@ public sealed class TreeExportService
 			return metricsWriter.Complete(cancellationToken);
 		}
 
-		var outputRootName = ResolveRootDisplayName(root, displayRootName);
 		return CalculateAsciiSelectedTreeMetrics(
 			outputRootPath,
 			root,
 			includedPaths,
-			outputRootName,
 			cancellationToken);
 	}
 
@@ -598,11 +590,6 @@ public sealed class TreeExportService
 			await output.WriteAsync(outputRootPath).ConfigureAwait(false);
 			await output.WriteAsync(":").ConfigureAwait(false);
 			await output.BeginLineAsync().ConfigureAwait(false);
-			await output.BeginLineAsync().ConfigureAwait(false);
-			await output.WriteAsync(plain ? PlainBranchMiddle : BranchMiddle)
-				.ConfigureAwait(false);
-			await output.WriteAsync(outputRootName).ConfigureAwait(false);
-			ancestorBranches.Add(false);
 		}
 		else
 		{
@@ -672,9 +659,8 @@ public sealed class TreeExportService
 		if (includeRootPath)
 		{
 			await output.BeginLineAsync().ConfigureAwait(false);
-			await output.WriteAsync("Root: ").ConfigureAwait(false);
 			await output.WriteAsync(
-					EscapeTextValue(ResolveStructuredRootPath(outputRootPath)))
+					ContextRootPresentation.FormatLine(ResolveStructuredRootPath(outputRootPath)))
 				.ConfigureAwait(false);
 			await output.BeginLineAsync().ConfigureAwait(false);
 			if (root.IsDirectory)
@@ -1375,7 +1361,7 @@ public sealed class TreeExportService
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 		var sb = new StringBuilder();
-		sb.Append("Root: ").AppendLine(EscapeTextValue(ResolveStructuredRootPath(localRootPath)));
+		sb.AppendLine(ContextRootPresentation.FormatLine(ResolveStructuredRootPath(localRootPath)));
 		sb.AppendLine();
 		WriteMarkdownTreeContents(sb, root, includedPaths, cancellationToken);
 		return sb.ToString();
@@ -1867,7 +1853,6 @@ public sealed class TreeExportService
 	private static ExportOutputMetrics CalculateAsciiFullTreeMetrics(
 		string outputRootPath,
 		TreeNodeDescriptor root,
-		string outputRootName,
 		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
@@ -1879,13 +1864,9 @@ public sealed class TreeExportService
 			ref chars,
 			ref lineBreaks); // "<rootPath>:"
 		AppendAsciiLineMetrics(0, ref chars, ref lineBreaks); // blank separator line
-		AppendAsciiLineMetrics(
-			(long)BranchMiddle.Length + EscapeTextValue(outputRootName).Length,
-			ref chars,
-			ref lineBreaks);
 		AppendFullAsciiChildMetrics(
 			root,
-			IndentPipe.Length,
+			indentLength: 0,
 			ref chars,
 			ref lineBreaks,
 			cancellationToken);
@@ -1897,7 +1878,6 @@ public sealed class TreeExportService
 		string outputRootPath,
 		TreeNodeDescriptor root,
 		IReadOnlySet<string> includedPaths,
-		string outputRootName,
 		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
@@ -1909,14 +1889,10 @@ public sealed class TreeExportService
 			ref chars,
 			ref lineBreaks); // "<rootPath>:"
 		AppendAsciiLineMetrics(0, ref chars, ref lineBreaks); // blank separator line
-		AppendAsciiLineMetrics(
-			(long)BranchMiddle.Length + EscapeTextValue(outputRootName).Length,
-			ref chars,
-			ref lineBreaks);
 		AppendSelectedAsciiChildMetrics(
 			root,
 			includedPaths,
-			IndentPipe.Length,
+			indentLength: 0,
 			ref chars,
 			ref lineBreaks,
 			cancellationToken);
@@ -2019,8 +1995,9 @@ public sealed class TreeExportService
 		cancellationToken.ThrowIfCancellationRequested();
 		long chars = 0;
 		long lineBreaks = 0;
-		var rootHeaderChars = "Root: ".Length +
-		                      EscapeTextValue(ResolveStructuredRootPath(outputRootPath)).Length;
+		var rootHeaderChars = ContextRootPresentation
+			.FormatLine(ResolveStructuredRootPath(outputRootPath))
+			.Length;
 		AppendAsciiLineMetrics(rootHeaderChars, ref chars, ref lineBreaks);
 		AppendAsciiLineMetrics(renderedChars: 0, ref chars, ref lineBreaks);
 

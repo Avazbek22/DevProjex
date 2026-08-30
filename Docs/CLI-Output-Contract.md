@@ -304,6 +304,13 @@ Plain or redirected text and text written to a file use one canonical field
 model, ordering, and final-newline policy. An interactive rich presentation may
 change layout but not the represented fields or values.
 
+Human-readable content-only context writes one `Root: ...` line and uses portable
+project-relative file headings. For a remote source the Root value is the safe
+repository URL, not the managed checkout path. Human-readable text trees write
+the root path once and begin their branches at the real top-level children;
+`--plain` changes the connectors but not that structure. Context JSON/XML
+`project.root` and `files[].path` retain their existing machine representation.
+
 Whenever `export context --max-tokens` is supplied, stderr receives a localized
 budget report after generation. It contains included and skipped file counts,
 estimated tokens for both groups, up to 25 largest skipped paths, an `and X more`

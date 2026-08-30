@@ -112,7 +112,7 @@ public sealed class ExportContextCommandHandler(
 								destination,
 								cancellationToken,
 								plain: request.Output.Plain,
-								useUnifiedContentHeaders: true,
+								useSourceMappedStructuredPaths: true,
 								maximumEstimatedTokens: request.MaximumEstimatedTokens)
 							.ConfigureAwait(false);
 						await destination.CompleteAsync(cancellationToken).ConfigureAwait(false);
@@ -144,7 +144,7 @@ public sealed class ExportContextCommandHandler(
 							destination,
 							token,
 							plain: request.Output.Plain,
-							useUnifiedContentHeaders: true,
+							useSourceMappedStructuredPaths: true,
 							maximumEstimatedTokens: request.MaximumEstimatedTokens).ConfigureAwait(false);
 					},
 					cancellationToken,

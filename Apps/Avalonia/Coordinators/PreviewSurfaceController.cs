@@ -1341,7 +1341,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 
         if (selectedMode == PreviewContentMode.Content)
         {
-            if (files.Count == 0)
+            if (files.Count == 0 || string.IsNullOrWhiteSpace(currentPath))
             {
                 var fallbackText = hasSelection
                     ? noCheckedFilesText
@@ -1355,10 +1355,11 @@ internal sealed class PreviewSurfaceController : IDisposable
                 _previewDocumentBuilder.BuildContentDocumentAsync(
                         files,
                         cancellationToken,
-						pathPresentation?.MapFilePath,
+						TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(
+							currentPath),
 						transformationContext: transformationContext,
 						includeSourceCoordinateMaps: true,
-						displayRootPath: null,
+						displayRootPath: pathPresentation?.DisplayRootPath ?? currentPath,
 						outputPathRedaction: outputPathRedaction,
 						projectRoot: currentPath)
                     .GetAwaiter()

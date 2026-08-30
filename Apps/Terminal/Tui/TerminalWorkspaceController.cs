@@ -709,6 +709,7 @@ public sealed class TerminalWorkspaceController(
 						MapDisplayPath,
 						includeOmissionMarkers: true,
 						transformationContext: transformationContext,
+						displayRootPath: GetDisplaySource(plan),
 						projectRoot: plan.SourceRoot)
 					.ConfigureAwait(false) ??
 				services.PreviewDocumentBuilder.CreateDocumentWithMetrics(string.Empty),

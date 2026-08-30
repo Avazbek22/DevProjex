@@ -23,7 +23,7 @@ namespace DevProjex.Tests.UI;
 public sealed class MainWindowIgnoreOptionsUiTests
 {
 	[AvaloniaFact]
-	public async Task ContentHeaders_UseFullPerFilePathsAndOneInteractivePrivateDataDecision()
+	public async Task ContentView_UsesOneRootAndRelativeHeadersWithOneInteractivePrivateDataDecision()
 	{
 		using var project = UiTestProject.CreateDefaultUnderUserProfile();
 		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
@@ -37,11 +37,9 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				TestContext.Current.CancellationToken);
 			Assert.Equal(unprotected, UiTestDriver.ComputeCurrentPreviewCopyPayload(window));
 			var programPath = Path.Combine(project.RootPath, "src", "AppHost", "Program.cs");
-			Assert.Contains($"{programPath}:", unprotected, StringComparison.Ordinal);
-			Assert.DoesNotContain(
-				$"{project.RootPath}:{Environment.NewLine}",
-				unprotected,
-				StringComparison.Ordinal);
+			Assert.Contains($"Root: {project.RootPath}", unprotected, StringComparison.Ordinal);
+			Assert.Contains("src/AppHost/Program.cs:", unprotected.Replace('\\', '/'), StringComparison.Ordinal);
+			Assert.DoesNotContain(programPath, unprotected, StringComparison.Ordinal);
 			await UiTestDriver.CopyContentToClipboardAsync(window, unprotected);
 
 			await UiTestDriver.ClickIgnoreOptionCheckBoxAsync(window, IgnoreOptionId.HidePrivateData);
@@ -52,11 +50,9 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				window,
 				PreviewContentMode.Content,
 				TestContext.Current.CancellationToken);
-			Assert.Contains(
-				$"{OutputRootPathPresentation.MaskLocalUserSegment(programPath)}:",
-				protectedContent,
-				StringComparison.Ordinal);
-			Assert.DoesNotContain($"{programPath}:", protectedContent, StringComparison.Ordinal);
+			Assert.Contains($"Root: {protectedRoot}", protectedContent, StringComparison.Ordinal);
+			Assert.Contains("src/AppHost/Program.cs:", protectedContent.Replace('\\', '/'), StringComparison.Ordinal);
+			Assert.DoesNotContain(programPath, protectedContent, StringComparison.Ordinal);
 			Assert.Equal(protectedContent, UiTestDriver.ComputeCurrentPreviewCopyPayload(window));
 			await UiTestDriver.CopyContentToClipboardAsync(window, protectedContent);
 
@@ -85,7 +81,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 					span.RuleId == OutputRootPathPresentation.LocalUserRuleId &&
 					span.Source == SecretFindingSource.GeneratedPath)
 				.ToArray();
-			Assert.True(generatedPathSpans.Length > 1);
+			var navigationTarget = Assert.Single(generatedPathSpans);
 			Assert.Equal(
 				[
 					new PreviewMarkerSource(
@@ -97,11 +93,6 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				generatedPathSpans
 					.Select(static span => span.OccurrenceId)
 					.Distinct(StringComparer.Ordinal));
-			var navigationTarget = generatedPathSpans
-				.OrderBy(static span => span.LineNumber)
-				.ThenBy(static span => span.StartColumn)
-				.Skip(1)
-				.First();
 			var counterChangedBeforePreview = false;
 			privateDataOption.PropertyChanged += OnPrivateDataOptionPropertyChanged;
 			control.Focus();
@@ -124,7 +115,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			await UiTestDriver.PressKeyAsync(window, Key.Enter);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
-				() => UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(programPath, StringComparison.Ordinal) &&
+				() => UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(project.RootPath, StringComparison.Ordinal) &&
 				      control.Document!.Redactions
 					      .Where(static span => span.Source == SecretFindingSource.GeneratedPath)
 					      .All(static span => span.State == SecretPreviewSpanState.KeptAsIs) &&
@@ -201,7 +192,7 @@ public sealed class MainWindowIgnoreOptionsUiTests
 			{
 				if (eventArgs.PropertyName == nameof(IgnoreOptionViewModel.Label) &&
 				    privateDataOption.Label.EndsWith("(1/0)", StringComparison.Ordinal) &&
-				    !UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(programPath, StringComparison.Ordinal))
+				    !UiTestDriver.ComputeCurrentPreviewCopyPayload(window).Contains(project.RootPath, StringComparison.Ordinal))
 				{
 					counterChangedBeforePreview = true;
 				}

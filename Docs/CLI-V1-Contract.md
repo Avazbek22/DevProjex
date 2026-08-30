@@ -539,6 +539,10 @@ tree section exported by Desktop for the same projected tree and format. It has
 no content-transformation flags. Local directories and repository URLs use the
 same source/cache contract as `analyze`.
 
+Human-readable text writes the root path once and starts directly with the real
+top-level children. The project name is not repeated as a synthetic child. The
+plain renderer uses ASCII connectors without changing this structure.
+
 For text output, one canonical serializer defines fields, ordering, values, and
 exactly one platform-native final line separator. Redirected stdout, `--plain`,
 and file output use that
@@ -566,6 +570,11 @@ devprojex export context|ctx [PROJECT|URL]
 
 `--force` is valid only for a file destination and performs atomic replacement.
 It is a usage error with stdout.
+
+For human-readable text and Markdown, `--view content` writes one `Root: ...`
+line and project-relative file headings. Remote sources use the safe repository
+URL as Root. `tree-content` retains relative content headings. Context JSON and
+XML keep their existing machine root and file-path representation.
 
 ### `export project`
 
@@ -1133,6 +1142,12 @@ MCP `get_tree.format` is an additive input with `markdown` as its compact defaul
 The existing `text`, `json`, and `xml` tree serializers are available explicitly;
 structured output that cannot fit the 2,000-line response limit fails with an
 actionable tool error rather than returning invalid syntax.
+
+Before the v5.1 output freeze, human-readable content and text-tree presentation
+was aligned across Desktop, Terminal Workspace, CLI, and MCP. Content-only text
+and Markdown now declare the root once and use relative file headings; text trees
+declare the root once and start at real children. This changes only human-readable
+presentation. Context and tree JSON/XML roots and file paths are unchanged.
 
 ## Exit Codes
 

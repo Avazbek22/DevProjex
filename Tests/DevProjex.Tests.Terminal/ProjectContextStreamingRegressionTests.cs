@@ -11,7 +11,7 @@ public sealed class ProjectContextStreamingRegressionTests
 	[Theory]
 	[InlineData(false)]
 	[InlineData(true)]
-	public async Task CompleteContentHeadersHonorTheGeneratedPathOccurrenceDecision(bool keep)
+	public async Task CompleteContentRootHonorsTheGeneratedPathOccurrenceDecision(bool keep)
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
@@ -39,17 +39,18 @@ public sealed class ProjectContextStreamingRegressionTests
 			destination,
 			TestContext.Current.CancellationToken,
 			plain: true,
-			useUnifiedContentHeaders: true);
+			useSourceMappedStructuredPaths: true);
 
 		var payload = Encoding.UTF8.GetString(destination.ToArray());
-		var expectedPath = keep
-			? sourcePath
-			: OutputRootPathPresentation.MaskLocalUserSegment(sourcePath);
+		var expectedRoot = keep
+			? project
+			: OutputRootPathPresentation.MaskLocalUserSegment(project);
 		var firstLine = payload.Split(["\r\n", "\n"], 2, StringSplitOptions.None)[0];
 		Assert.Equal(
-			$"{expectedPath}:".Replace('\\', '/'),
+			$"Root: {expectedRoot}".Replace('\\', '/'),
 			firstLine.Replace('\\', '/'));
-		Assert.DoesNotContain($"{project}:{Environment.NewLine}", payload, StringComparison.Ordinal);
+		Assert.Contains($"src/app.cs:{Environment.NewLine}", payload, StringComparison.Ordinal);
+		Assert.DoesNotContain(sourcePath, payload, StringComparison.OrdinalIgnoreCase);
 	}
 
 	[Fact]

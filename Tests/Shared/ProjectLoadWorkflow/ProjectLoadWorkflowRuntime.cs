@@ -55,7 +55,7 @@ public static class ProjectLoadWorkflowRuntime
 		IReadOnlyCollection<string> allowedExtensions,
 		IReadOnlyCollection<IgnoreOptionId> selectedIgnoreOptions,
 		CancellationToken cancellationToken,
-		bool useUnifiedContentHeaders = false)
+		bool useContentRootAndRelativeHeaders = false)
     {
         // The runtime UI applies selections using set semantics, not list ordering.
         // The test harness must mirror that behavior exactly or the "expected" metrics
@@ -67,7 +67,7 @@ public static class ProjectLoadWorkflowRuntime
 			selectedRootSet,
 			allowedExtensionSet,
 			selectedIgnoreOptions,
-			useUnifiedContentHeaders);
+			useContentRootAndRelativeHeaders);
 
         lock (MetricsCacheLock)
         {
@@ -97,7 +97,7 @@ public static class ProjectLoadWorkflowRuntime
 		var contentMetrics = await ComputeContentMetricsAsync(
 			rootPath,
 			orderedPaths,
-			useUnifiedContentHeaders,
+			useContentRootAndRelativeHeaders,
 			cancellationToken);
 
         var computedMetrics = new ProjectLoadWorkflowMetrics(treeMetrics, contentMetrics);
@@ -135,7 +135,7 @@ public static class ProjectLoadWorkflowRuntime
 	private static async Task<ExportOutputMetrics> ComputeContentMetricsAsync(
 		string rootPath,
 		IReadOnlyList<string> orderedPaths,
-		bool useUnifiedContentHeaders,
+		bool useContentRootAndRelativeHeaders,
 		CancellationToken cancellationToken)
 	{
         if (orderedPaths.Count == 0)
@@ -143,6 +143,8 @@ public static class ProjectLoadWorkflowRuntime
 
 		var analyzer = new FileContentAnalyzer();
 		var accumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
+		if (useContentRootAndRelativeHeaders)
+			accumulator.AppendRootHeader(rootPath);
 		foreach (var path in orderedPaths)
 		{
             cancellationToken.ThrowIfCancellationRequested();
@@ -151,7 +153,9 @@ public static class ProjectLoadWorkflowRuntime
                 continue;
 
 			accumulator.AppendFile(new ContentFileMetrics(
-				Path: path,
+				Path: useContentRootAndRelativeHeaders
+					? PathUtility.GetPortableRelativePath(rootPath, path)
+					: path,
                 SizeBytes: metrics.SizeBytes,
                 LineCount: metrics.LineCount,
                 CharCount: metrics.CharCount,
@@ -171,21 +175,21 @@ public static class ProjectLoadWorkflowRuntime
 		string RootsKey,
 		string ExtensionsKey,
 		string IgnoreKey,
-		bool UseUnifiedContentHeaders)
+		bool UseContentRootAndRelativeHeaders)
     {
         public static MetricsCacheKey Create(
 			string rootPath,
 			IEnumerable<string> selectedRoots,
 			IEnumerable<string> allowedExtensions,
 			IEnumerable<IgnoreOptionId> selectedIgnoreOptions,
-			bool useUnifiedContentHeaders)
+			bool useContentRootAndRelativeHeaders)
         {
             return new MetricsCacheKey(
 				rootPath,
 				Normalize(selectedRoots, StringComparer.OrdinalIgnoreCase),
 				Normalize(allowedExtensions, StringComparer.OrdinalIgnoreCase),
 				string.Join("|", selectedIgnoreOptions.OrderBy(static option => (int)option).Select(static option => option.ToString())),
-				useUnifiedContentHeaders);
+				useContentRootAndRelativeHeaders);
         }
 
         private static string Normalize(IEnumerable<string> values, StringComparer comparer) =>

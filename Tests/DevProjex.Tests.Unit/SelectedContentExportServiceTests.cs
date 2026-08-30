@@ -21,8 +21,9 @@ public sealed class SelectedContentExportServiceTests
 			transformationContext: null,
 			displayRootPath: project.Path);
 
-		Assert.StartsWith($"{project.Path}:{Environment.NewLine}", result, StringComparison.Ordinal);
-		Assert.Equal(1, result.Split($"{project.Path}:", StringSplitOptions.None).Length - 1);
+		var rootLine = ContextRootPresentation.FormatLine(project.Path);
+		Assert.StartsWith($"{rootLine}{Environment.NewLine}", result, StringComparison.Ordinal);
+		Assert.Equal(1, result.Split(rootLine, StringSplitOptions.None).Length - 1);
 		Assert.Contains("src/Program.cs:", result, StringComparison.Ordinal);
 		Assert.DoesNotContain($"{file}:", result, StringComparison.Ordinal);
 	}

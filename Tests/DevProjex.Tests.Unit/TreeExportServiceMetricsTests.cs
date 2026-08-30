@@ -200,7 +200,7 @@ public sealed class TreeExportServiceMetricsTests
 			IsAccessDenied: false,
 			IconKey: "folder",
 			Children: Enumerable.Repeat(child, childCount).ToArray());
-		var expectedCharacters = 17L + childCount * (displayName.Length + 9L);
+		var expectedCharacters = 8L + childCount * (displayName.Length + 5L);
 
 		var actual = new TreeExportService().CalculateFullTreeMetrics(
 			"/root",
@@ -209,7 +209,7 @@ public sealed class TreeExportServiceMetricsTests
 
 		Assert.True(actual.Chars > int.MaxValue);
 		Assert.Equal(expectedCharacters, actual.Chars);
-		Assert.Equal(childCount + 4L, actual.Lines);
+		Assert.Equal(childCount + 3L, actual.Lines);
 		Assert.Equal((expectedCharacters + 3) / 4, actual.Tokens);
 	}
 

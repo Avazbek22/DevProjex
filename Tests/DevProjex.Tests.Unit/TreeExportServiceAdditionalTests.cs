@@ -145,7 +145,7 @@ public sealed class TreeExportServiceAdditionalTests
 	}
 
 	[Fact]
-	// Verifies full tree output includes root path and top-level display name.
+	// Verifies full tree output includes the root path once and starts with its children.
 	public void BuildFullTree_IncludesRootHeader()
 	{
 		var service = new TreeExportService();
@@ -154,7 +154,27 @@ public sealed class TreeExportServiceAdditionalTests
 		var output = service.BuildFullTree("/root", root);
 
 		Assert.Contains("/root:", output);
-		Assert.Contains("├── Root", output);
+		Assert.DoesNotContain("├── Root", output, StringComparison.Ordinal);
+		Assert.Contains("├── Alpha", output, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void HumanTextTreesRenderTheRootPathOnceAndStartAtRealChildren()
+	{
+		var service = new TreeExportService();
+		var root = BuildTree();
+		var selected = new HashSet<string>(PathComparer.Default) { "/root/beta/delta" };
+
+		var unicode = service.BuildFullTree("/root", root);
+		var plain = service.BuildFullTreePlain("/root", root);
+		var selectedTree = service.BuildSelectedTree("/root", root, selected);
+
+		Assert.StartsWith("/root:" + Environment.NewLine + Environment.NewLine + "├── Alpha", unicode);
+		Assert.StartsWith("/root:" + Environment.NewLine + Environment.NewLine + "|-- Alpha", plain);
+		Assert.StartsWith("/root:" + Environment.NewLine + Environment.NewLine + "└── Beta", selectedTree);
+		Assert.DoesNotContain("├── Root", unicode, StringComparison.Ordinal);
+		Assert.DoesNotContain("|-- Root", plain, StringComparison.Ordinal);
+		Assert.DoesNotContain("├── Root", selectedTree, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -195,7 +215,7 @@ public sealed class TreeExportServiceAdditionalTests
 
 		var output = service.BuildSelectedTree("/root", root, selected);
 
-		Assert.Contains("Root", output);
+		Assert.StartsWith("/root:", output, StringComparison.Ordinal);
 		Assert.Contains("Beta", output);
 		Assert.Contains("Delta", output);
 		Assert.DoesNotContain("Alpha", output);

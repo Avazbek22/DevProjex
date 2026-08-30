@@ -124,7 +124,7 @@ public sealed class ProjectContextDocumentService(
 		Stream destination,
 		CancellationToken cancellationToken = default,
 		bool plain = false,
-		bool useUnifiedContentHeaders = false,
+		bool useSourceMappedStructuredPaths = false,
 		IProgress<ProjectCopyExportProgress>? writeProgress = null,
 		long? maximumEstimatedTokens = null)
 	{
@@ -135,7 +135,7 @@ public sealed class ProjectContextDocumentService(
 				destination,
 				cancellationToken,
 				plain,
-				useUnifiedContentHeaders,
+				useSourceMappedStructuredPaths,
 				writeProgress,
 				maximumEstimatedTokens)
 			.ConfigureAwait(false);
@@ -148,7 +148,7 @@ public sealed class ProjectContextDocumentService(
 		Stream destination,
 		CancellationToken cancellationToken = default,
 		bool plain = false,
-		bool useUnifiedContentHeaders = false,
+		bool useSourceMappedStructuredPaths = false,
 		IProgress<ProjectCopyExportProgress>? writeProgress = null,
 		long? maximumEstimatedTokens = null)
 	{
@@ -160,10 +160,10 @@ public sealed class ProjectContextDocumentService(
 			throw new ArgumentException("Destination must be writable.", nameof(destination));
 		var effectivePathRedaction = outputPathRedactionDecision ??
 			OutputRootPathPresentation.CaptureRedactionDecision(CreateTransformationContext(plan));
-		var contentPathMapper = CreateContentPathMapper(
-			plan,
-			useUnifiedContentHeaders,
-			view);
+		var contentPathMapper = format is
+			ProjectContextDocumentFormat.Text or ProjectContextDocumentFormat.Markdown
+			? TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(plan.SourceRoot)
+			: CreateSourceContentPathMapper(plan, useSourceMappedStructuredPaths, view);
 		if (ShouldRedact(plan, view))
 		{
 			return await WriteCompleteRedactedAsync(
@@ -173,7 +173,7 @@ public sealed class ProjectContextDocumentService(
 					destination,
 					cancellationToken,
 					plain,
-					useUnifiedContentHeaders,
+					useSourceMappedStructuredPaths,
 					effectivePathRedaction,
 					writeProgress,
 					maximumEstimatedTokens)
@@ -219,7 +219,7 @@ public sealed class ProjectContextDocumentService(
 						cancellationDestination,
 						effectivePathRedaction,
 						contentPathMapper,
-						useUnifiedContentHeaders,
+						useSourceMappedStructuredPaths,
 						writeProgress,
 						tokenBudget,
 						cancellationToken)
@@ -232,7 +232,7 @@ public sealed class ProjectContextDocumentService(
 						cancellationDestination,
 						effectivePathRedaction,
 						contentPathMapper,
-						useUnifiedContentHeaders,
+						useSourceMappedStructuredPaths,
 						writeProgress,
 						tokenBudget,
 						cancellationToken)
@@ -252,7 +252,7 @@ public sealed class ProjectContextDocumentService(
 		PreparedSecretRedactionOutput prepared,
 		CancellationToken cancellationToken = default,
 		bool plain = false,
-		bool useUnifiedContentHeaders = false,
+		bool useSourceMappedStructuredPaths = false,
 		IProgress<ProjectCopyExportProgress>? writeProgress = null,
 		long? maximumEstimatedTokens = null)
 	{
@@ -282,7 +282,7 @@ public sealed class ProjectContextDocumentService(
 				destination,
 				cancellationToken,
 				plain,
-				useUnifiedContentHeaders,
+				useSourceMappedStructuredPaths,
 				writeProgress,
 				maximumEstimatedTokens)
 			.ConfigureAwait(false);
@@ -341,9 +341,9 @@ public sealed class ProjectContextDocumentService(
 	{
 		var effectivePathRedaction = outputPathRedactionDecision ??
 			OutputRootPathPresentation.CaptureRedactionDecision(CreateTransformationContext(plan));
-		var contentPathMapper = CreateContentPathMapper(
+		var contentPathMapper = CreateSourceContentPathMapper(
 			plan,
-			useUnifiedContentHeaders: true,
+			useSourceMappedStructuredPaths: true,
 			view);
 		await foreach (var source in OpenSourceSnapshotsInOrderAsync(
 			               plan.SourceRoot,
@@ -463,7 +463,7 @@ public sealed class ProjectContextDocumentService(
 		Stream destination,
 		CancellationToken cancellationToken,
 		bool plain,
-		bool useUnifiedContentHeaders,
+		bool useSourceMappedStructuredPaths,
 		OutputPathRedactionDecision? pathRedaction,
 		IProgress<ProjectCopyExportProgress>? writeProgress,
 		long? maximumEstimatedTokens)
@@ -495,7 +495,7 @@ public sealed class ProjectContextDocumentService(
 				destination,
 				cancellationToken,
 				plain,
-				useUnifiedContentHeaders,
+				useSourceMappedStructuredPaths,
 				writeProgress,
 				maximumEstimatedTokens)
 			.ConfigureAwait(false);
@@ -517,6 +517,14 @@ public sealed class ProjectContextDocumentService(
 		var writer = new TrailingLineEndingTextWriter(streamWriter);
 		var hasOutput = false;
 		var includesContent = IncludesContent(view) && plan.IncludedFiles.Count > 0;
+		if (view == ProjectContextView.Content)
+		{
+			await writer.WriteAsync(
+					ContextRootPresentation.FormatLine(GetDocumentRoot(plan, pathRedaction)).AsMemory(),
+					cancellationToken)
+				.ConfigureAwait(false);
+			hasOutput = true;
+		}
 		if (IncludesTree(view))
 		{
 			await WriteCompleteTreeAsync(
@@ -610,6 +618,16 @@ public sealed class ProjectContextDocumentService(
 		await writer.WriteAsync("# ".AsMemory(), cancellationToken).ConfigureAwait(false);
 		await writer.WriteAsync(EscapeMarkdownHeading(GetProjectName(plan)).AsMemory(), cancellationToken)
 			.ConfigureAwait(false);
+		if (view == ProjectContextView.Content)
+		{
+			await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
+			await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
+			await writer.WriteAsync(
+					ContextRootPresentation.FormatLine(
+						NormalizePath(GetDocumentRoot(plan, pathRedaction))).AsMemory(),
+					cancellationToken)
+				.ConfigureAwait(false);
+		}
 
 		if (IncludesTree(view))
 		{
@@ -710,7 +728,7 @@ public sealed class ProjectContextDocumentService(
 		Stream destination,
 		OutputPathRedactionDecision? pathRedaction,
 		Func<string, string>? contentPathMapper,
-		bool useUnifiedContentHeaders,
+		bool useSourceMappedStructuredPaths,
 		IProgress<ProjectCopyExportProgress>? writeProgress,
 		ProjectContextTokenBudgetAccumulator? tokenBudget,
 		CancellationToken cancellationToken)
@@ -800,7 +818,7 @@ public sealed class ProjectContextDocumentService(
 		writer.WriteEndArray();
 		if (tokenBudget is not null)
 			WriteTokenBudget(writer, tokenBudget.CreateReport());
-		var mapDiagnosticPaths = ShouldMapDiagnosticPathsToSource(plan, useUnifiedContentHeaders);
+		var mapDiagnosticPaths = ShouldMapDiagnosticPathsToSource(plan, useSourceMappedStructuredPaths);
 		WriteDiagnostics(
 			writer,
 			plan.Diagnostics,
@@ -817,7 +835,7 @@ public sealed class ProjectContextDocumentService(
 		Stream destination,
 		OutputPathRedactionDecision? pathRedaction,
 		Func<string, string>? contentPathMapper,
-		bool useUnifiedContentHeaders,
+		bool useSourceMappedStructuredPaths,
 		IProgress<ProjectCopyExportProgress>? writeProgress,
 		ProjectContextTokenBudgetAccumulator? tokenBudget,
 		CancellationToken cancellationToken)
@@ -921,7 +939,7 @@ public sealed class ProjectContextDocumentService(
 		if (tokenBudget is not null)
 			WriteTokenBudgetXml(writer, tokenBudget.CreateReport());
 		writer.WriteStartElement("diagnostics");
-		var mapDiagnosticPaths = ShouldMapDiagnosticPathsToSource(plan, useUnifiedContentHeaders);
+		var mapDiagnosticPaths = ShouldMapDiagnosticPathsToSource(plan, useSourceMappedStructuredPaths);
 		foreach (var diagnostic in plan.Diagnostics)
 		{
 			writer.WriteStartElement("diagnostic");
@@ -1411,6 +1429,11 @@ public sealed class ProjectContextDocumentService(
 		CancellationToken cancellationToken)
 	{
 		var output = new StringBuilder();
+		if (view == ProjectContextView.Content)
+		{
+			output.Append(ContextRootPresentation.FormatLine(
+				GetDocumentRoot(plan, protectPrivateData: true)));
+		}
 		if (IncludesTree(view))
 		{
 			output.Append(treeExportService.BuildFullTreeWithCancellation(
@@ -1438,6 +1461,11 @@ public sealed class ProjectContextDocumentService(
 		var output = new StringBuilder();
 		output.Append("# ").AppendLine(EscapeMarkdownHeading(GetProjectName(plan)));
 		output.AppendLine();
+		if (view == ProjectContextView.Content)
+		{
+			output.AppendLine(ContextRootPresentation.FormatLine(
+				NormalizePath(GetDocumentRoot(plan, protectPrivateData: true))));
+		}
 		if (IncludesTree(view))
 		{
 			output.AppendLine("## Project tree");
@@ -1990,8 +2018,8 @@ public sealed class ProjectContextDocumentService(
 
 	private static bool ShouldMapDiagnosticPathsToSource(
 		ProjectContextPlan plan,
-		bool useUnifiedContentHeaders) =>
-		useUnifiedContentHeaders && plan.SourceIdentity?.IsCachedRepository == true;
+		bool useSourceMappedStructuredPaths) =>
+		useSourceMappedStructuredPaths && plan.SourceIdentity?.IsCachedRepository == true;
 
 	private static void WriteTokenBudgetXml(
 		XmlWriter writer,
@@ -2253,12 +2281,12 @@ public sealed class ProjectContextDocumentService(
 		return OutputRootPathPresentation.ResolvePath(displayRootPath, pathRedaction).Text;
 	}
 
-	private static Func<string, string>? CreateContentPathMapper(
+	private static Func<string, string>? CreateSourceContentPathMapper(
 		ProjectContextPlan plan,
-		bool useUnifiedContentHeaders,
+		bool useSourceMappedStructuredPaths,
 		ProjectContextView view)
 	{
-		if (!useUnifiedContentHeaders || view != ProjectContextView.Content)
+		if (!useSourceMappedStructuredPaths || view != ProjectContextView.Content)
 			return TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(plan.SourceRoot);
 
 		if (plan.SourceIdentity is not

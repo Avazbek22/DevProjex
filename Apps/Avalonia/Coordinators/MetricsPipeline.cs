@@ -1640,7 +1640,12 @@ internal sealed class MetricsPipeline(
 		var transformationContext = transformationContextProvider?.Invoke();
 		var outputPathRedaction = OutputRootPathPresentation.CaptureRedactionDecision(
 			transformationContext);
-		var contentOnlyPathMapper = pathPresentation?.MapFilePath;
+		var contentOnlyPathMapper = TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(
+			selection.RootPath);
+		var contentOnlyRootPath = OutputRootPathPresentation.Resolve(
+			selection.RootPath,
+			pathPresentation,
+			outputPathRedaction);
 		var treeAndContentPathMapper = TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(
 			selection.RootPath);
         // The transformation belongs in the key rather than being reconciled here: this method only
@@ -1651,8 +1656,8 @@ internal sealed class MetricsPipeline(
 			SelectedCount: selection.SelectedCount,
 			SelectedHash: selection.SelectedHash,
 			ContentPathPresentationIdentity: HashCode.Combine(
-				pathPresentation?.DisplayRootPath,
-				contentOnlyPathMapper is null ? 0 : RuntimeHelpers.GetHashCode(contentOnlyPathMapper),
+				contentOnlyRootPath,
+				RuntimeHelpers.GetHashCode(contentOnlyPathMapper),
 				outputPathRedaction?.OccurrenceId,
 				outputPathRedaction?.Keep),
 			TreeAndContentRootPathIdentity: BuildRootPathIdentity(selection.RootPath),
@@ -1672,6 +1677,7 @@ internal sealed class MetricsPipeline(
 
 		var contentOnlyAccumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
 		var treeAndContentAccumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
+		contentOnlyAccumulator.AppendRootHeader(contentOnlyRootPath);
 		lock (_metricsLock)
         {
 			for (var index = 0; index < orderedPaths.Count; index++)

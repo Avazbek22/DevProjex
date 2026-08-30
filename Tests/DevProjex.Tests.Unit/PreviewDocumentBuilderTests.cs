@@ -22,7 +22,7 @@ public sealed class PreviewDocumentBuilderTests
 			displayRootPath: project.Path);
 
 		Assert.NotNull(document);
-		Assert.Equal($"{project.Path}:", document.GetLineText(1));
+		Assert.Equal(ContextRootPresentation.FormatLine(project.Path), document.GetLineText(1));
 		var section = Assert.Single(document.Sections);
 		Assert.Equal("src/Program.cs", section.DisplayPath);
 		Assert.Equal("src/Program.cs:", document.GetLineText(section.StartLine));
@@ -43,10 +43,33 @@ public sealed class PreviewDocumentBuilderTests
 			displayRootPath: "root\rname");
 
 		Assert.NotNull(document);
-		Assert.Equal("root\\rname:", document.GetLineText(1));
+		Assert.Equal("Root: root\\rname", document.GetLineText(1));
 		var section = Assert.Single(document.Sections);
 		Assert.Equal("src/line\\nbreak\\t\\u001B.cs", section.DisplayPath);
 		Assert.Equal($"{section.DisplayPath}:", document.GetLineText(section.StartLine));
+	}
+
+	[Fact]
+	public async Task BuildContentDocumentAsync_RootRedactionCoordinatesIncludeTheRootPrefix()
+	{
+		using var project = new TemporaryDirectory();
+		var path = project.CreateFile("Program.cs", "class Program {}");
+		var builder = new PreviewDocumentBuilder(new FileContentAnalyzer());
+		var decision = new OutputPathRedactionDecision("root-path", Keep: false);
+
+		using var document = await builder.BuildContentDocumentAsync(
+			[path],
+			TestContext.Current.CancellationToken,
+			Path.GetFileName,
+			displayRootPath: @"C:\Users\alice\repository",
+			outputPathRedaction: decision);
+
+		Assert.NotNull(document);
+		Assert.Equal(@"Root: C:\Users\[local-user-1]\repository", document.GetLineText(1));
+		var redaction = Assert.Single(document.Redactions);
+		Assert.Equal(1, redaction.LineNumber);
+		Assert.Equal(ContextRootPresentation.Prefix.Length + @"C:\Users\".Length, redaction.StartColumn);
+		Assert.Equal(OutputRootPathPresentation.LocalUserPlaceholder.Length, redaction.Length);
 	}
 
 	[Fact]

@@ -707,7 +707,7 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
 			allowedExtensions,
 			selectedIgnoreOptions,
 			CancellationToken.None,
-			useUnifiedContentHeaders: true);
+			useContentRootAndRelativeHeaders: true);
     }
 
     private static void AssertMetricsChanged(

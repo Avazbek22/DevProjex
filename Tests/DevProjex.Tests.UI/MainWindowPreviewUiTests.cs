@@ -281,9 +281,16 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
             var expectedContentOnlyMetrics = ExportOutputMetricsCalculator.FromText(contentOnlyPayload);
             Assert.True(UiTestDriver.TryGetCurrentStatusMetrics(window, out _, out var actualContentOnlyMetrics));
             Assert.Equal(ToRenderedStatusMetrics(expectedContentOnlyMetrics), actualContentOnlyMetrics);
+            Assert.Contains($"Root: {workspace.Project.RootPath}", contentOnlyPayload, StringComparison.Ordinal);
+            Assert.Equal(1, CountOccurrences(contentOnlyPayload, workspace.Project.RootPath));
+            Assert.Contains("src/AppHost/Program.cs", contentOnlyPayload.Replace('\\', '/'), StringComparison.Ordinal);
+            Assert.DoesNotContain(
+                Path.Combine(workspace.Project.RootPath, "src", "AppHost", "Program.cs"),
+                contentOnlyPayload,
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
             Assert.True(
                 actualTreeAndContentMetrics.Chars < actualContentOnlyMetrics.Chars,
-                "Tree + Content content metrics should benefit from shorter relative headers while Content-only keeps full display paths.");
+                "Content-only metrics include the single root line while Tree + Content reports the content body.");
 
             await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.TreeAndContent);
             await UiTestDriver.WaitForStatusMetricsReadyAsync(window);
@@ -1438,6 +1445,19 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
 
     private static string NormalizeLineEndings(string value) =>
         value.Replace("\r\n", "\n", StringComparison.Ordinal);
+
+    private static int CountOccurrences(string value, string fragment)
+    {
+        var count = 0;
+        for (var offset = 0;;)
+        {
+            var index = value.IndexOf(fragment, offset, StringComparison.Ordinal);
+            if (index < 0)
+                return count;
+            count++;
+            offset = index + fragment.Length;
+        }
+    }
 
     private static void AssertReadableUnicodeJsonTree(string json, string expectedRootPath)
     {
