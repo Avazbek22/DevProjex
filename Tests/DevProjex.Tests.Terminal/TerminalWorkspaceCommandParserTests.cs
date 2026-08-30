@@ -32,6 +32,8 @@ public sealed class TerminalWorkspaceCommandParserTests
 
 	[Theory]
 	[InlineData("set git off", "none")]
+	[InlineData("set git gitignore", "gitignore")]
+	[InlineData("set git tracked", "tracked")]
 	[InlineData("set git staged", "staged")]
 	[InlineData("set git changes", "changes")]
 	[InlineData("set git diff:main..feature/review", "diff:main..feature/review")]
@@ -43,6 +45,18 @@ public sealed class TerminalWorkspaceCommandParserTests
 		Assert.Equal("git", result.Command!.Target);
 		Assert.Equal(expected, result.Command.Text);
 		Assert.Null(result.Command.Enabled);
+	}
+
+	[Fact]
+	public void Parse_SetGitRejectsTheCliOnlyNoneAliasWithPublishedCandidates()
+	{
+		var result = _parser.Parse("set git none", Context);
+
+		Assert.False(result.IsSuccess);
+		Assert.Equal(TerminalWorkspaceCommandErrorCode.UnknownToken, result.Error!.Code);
+		Assert.Equal(8, result.Error.Position);
+		Assert.Equal("none", result.Error.Value);
+		Assert.Equal(["off", "changes", "staged"], result.Error.Candidates);
 	}
 
 	[Fact]

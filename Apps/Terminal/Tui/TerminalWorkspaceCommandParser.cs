@@ -239,7 +239,7 @@ internal sealed class TerminalWorkspaceCommandParser
 			return Unknown(tokens[1], SetTargets);
 		if (string.Equals(tokens[1].Value, "git", StringComparison.OrdinalIgnoreCase))
 		{
-			if (!GitScopeSelection.TryParse(tokens[2].Value, out var mode, out var diffRange))
+			if (!TryParseGitModeValue(tokens[2].Value, out var mode, out var diffRange))
 				return Unknown(tokens[2], GitModeValues);
 			return TerminalWorkspaceCommandParseResult.Success(new TerminalWorkspaceCommand(
 				definition,
@@ -253,6 +253,25 @@ internal sealed class TerminalWorkspaceCommandParser
 			definition,
 			Target: Normalize(tokens[1].Value, SetTargets),
 			Enabled: enabled));
+	}
+
+	private static bool TryParseGitModeValue(
+		string value,
+		out GitFilteringMode mode,
+		out string? diffRange)
+	{
+		var isPublishedValue = value.Equals("off", StringComparison.OrdinalIgnoreCase) ||
+		                       value.Equals("gitignore", StringComparison.OrdinalIgnoreCase) ||
+		                       value.Equals("tracked", StringComparison.OrdinalIgnoreCase) ||
+		                       value.Equals("staged", StringComparison.OrdinalIgnoreCase) ||
+		                       value.Equals("changes", StringComparison.OrdinalIgnoreCase) ||
+		                       value.StartsWith(GitScopeSelection.DiffPrefix, StringComparison.OrdinalIgnoreCase);
+		if (isPublishedValue && GitScopeSelection.TryParse(value, out mode, out diffRange))
+			return true;
+
+		mode = default;
+		diffRange = null;
+		return false;
 	}
 
 	private static TerminalWorkspaceCommandParseResult ParseAll(

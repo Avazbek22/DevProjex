@@ -428,6 +428,35 @@ public sealed class TerminalParameterRowsBuilderTests
 		Assert.True(TerminalParameterListView.IsPrimaryActivation(MouseFlags.LeftButtonClicked));
 	}
 
+	[Fact]
+	public void ParameterListPreservesDisabledRowsAsNonInteractiveItems()
+	{
+		var rows = new ObservableCollection<TerminalParameterRow>
+		{
+			new(
+				"git:tracked",
+				TerminalParameterRowKind.GitMode,
+				"Tracked files only",
+				IsSelected: false,
+				IsEnabled: false,
+				GitMode: GitFilteringMode.TrackedFilesOnly),
+			new(
+				"git:none",
+				TerminalParameterRowKind.GitMode,
+				"Off",
+				IsSelected: true,
+				GitMode: GitFilteringMode.None)
+		};
+		using var list = new TerminalParameterListView();
+
+		list.SetParameterSource(rows);
+
+		Assert.False(list.IsRowEnabled(0));
+		Assert.True(list.IsRowEnabled(1));
+		Assert.False(list.IsRowEnabled(-1));
+		Assert.False(list.IsRowEnabled(rows.Count));
+	}
+
 	[Theory]
 	[InlineData("abcdef", 4, true, "abc…")]
 	[InlineData("界界界", 5, true, "界界…")]

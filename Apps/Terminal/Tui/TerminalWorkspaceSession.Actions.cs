@@ -420,7 +420,7 @@ internal sealed partial class TerminalWorkspaceSession
 		{
 			source = [];
 			source.Reset(rows);
-			list.SetSource(source);
+			list.SetParameterSource(source);
 		}
 		else if (!TryUpdateRowsInPlace(source, rows))
 			source.Reset(rows);
@@ -1106,10 +1106,11 @@ internal sealed partial class TerminalWorkspaceSession
 			return;
 		if (!originatedFromCommandLine)
 			PreserveControlFocusForOperation(TerminalControlSection.Exclusions);
-		var selection = EnsureSettingsDraft() with
+		var selection = GitScopeSelection.WithMode(
+			EnsureSettingsDraft(),
+			mode,
+			diffRange) with
 		{
-			GitMode = mode,
-			GitDiffRange = mode == GitFilteringMode.Diff ? diffRange : null,
 			Exclusions = exclusions.ToArray()
 		};
 		PublishOptimisticSettings(selection, originatedFromCommandLine);
@@ -1682,7 +1683,8 @@ internal sealed partial class TerminalWorkspaceSession
 		var state = _state;
 		var refreshRequest = TerminalWorkspaceController.CaptureStructuralRefresh(
 			state,
-			state.BuildSelection());
+			state.BuildSelection(),
+			_preferredGitMode);
 		TrackActiveOperation(RunOperationAsync(
 			L("Terminal.Tui.Command.Refresh.Title"),
 			async token =>
@@ -1738,7 +1740,8 @@ internal sealed partial class TerminalWorkspaceSession
 		var state = _state;
 		var refreshRequest = TerminalWorkspaceController.CaptureStructuralRefresh(
 			state,
-			state.BuildSelection());
+			state.BuildSelection(),
+			_preferredGitMode);
 		TrackActiveOperation(RunOperationAsync(
 			L("Terminal.Tui.Action.GetUpdates"),
 			async token =>
@@ -1765,7 +1768,8 @@ internal sealed partial class TerminalWorkspaceSession
 		var state = _state;
 		var refreshRequest = TerminalWorkspaceController.CaptureStructuralRefresh(
 			state,
-			state.BuildSelection());
+			state.BuildSelection(),
+			_preferredGitMode);
 		TrackActiveOperation(RunOperationAsync(
 			L("Terminal.Tui.Action.SwitchBranch"),
 			async token =>
@@ -1814,15 +1818,44 @@ internal sealed partial class TerminalWorkspaceSession
 		var result = await _controller
 			.BuildStructuralRefreshAsync(request, cancellationToken)
 			.ConfigureAwait(false);
+		var gitCliAvailable = await ResolveGitCliAvailabilityAsync(result.Plan, cancellationToken)
+			.ConfigureAwait(false);
 		cancellationToken.ThrowIfCancellationRequested();
 		await InvokeAsync(() =>
 		{
 			if (_stopping || !ReferenceEquals(_state, state))
 				return false;
 
+			_gitCliAvailable = gitCliAvailable;
 			TerminalWorkspaceController.ApplyStructuralRefresh(state, result);
 			return true;
 		}).ConfigureAwait(false);
+	}
+
+	private async Task<bool> ResolveGitCliAvailabilityAsync(
+		ProjectContextPlan plan,
+		CancellationToken cancellationToken)
+	{
+		if (!plan.GitReadiness.HasRepositoryBoundary &&
+		    !GitRepositoryBoundaryProbe.ExistsAtOrAbove(plan.SourceRoot))
+		{
+			return false;
+		}
+
+		try
+		{
+			return await _services.GitRepositoryService
+				.IsGitAvailableAsync(cancellationToken)
+				.ConfigureAwait(false);
+		}
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+		{
+			throw;
+		}
+		catch
+		{
+			return false;
+		}
 	}
 
 	private void FocusPane(TerminalWorkspacePane pane)

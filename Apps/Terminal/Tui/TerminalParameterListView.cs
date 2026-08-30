@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
@@ -7,6 +8,7 @@ namespace DevProjex.Terminal.Tui;
 internal sealed class TerminalParameterListView : ListView
 {
 	private readonly TerminalPointerEventDeduplicator _pointerEvents = new();
+	private IReadOnlyList<TerminalParameterRow>? _rows;
 
 	public TerminalParameterListView(
 		bool showVerticalScrollBar = false,
@@ -19,6 +21,20 @@ internal sealed class TerminalParameterListView : ListView
 	public event EventHandler? SelectionToggleRequested;
 	public event EventHandler? InteractionStarted;
 	public event EventHandler? CommandLineRequested;
+
+	public void SetParameterSource(ObservableCollection<TerminalParameterRow> rows)
+	{
+		ArgumentNullException.ThrowIfNull(rows);
+		_rows = rows;
+		SetSource(rows);
+	}
+
+	public override void OnRowRender(ListViewRowEventArgs rowEventArgs)
+	{
+		base.OnRowRender(rowEventArgs);
+		if (!IsRowEnabled(rowEventArgs.Row))
+			rowEventArgs.RowAttribute = GetScheme().Disabled;
+	}
 
 	protected override bool OnKeyDown(Key key)
 	{
@@ -49,6 +65,8 @@ internal sealed class TerminalParameterListView : ListView
 		{
 			return true;
 		}
+		if (!IsRowEnabled(row))
+			return true;
 		SelectedItem = row;
 		EnsureSelectedItemVisible();
 		if (!_pointerEvents.ShouldHandle(pressed, position.X, position.Y))
@@ -58,6 +76,9 @@ internal sealed class TerminalParameterListView : ListView
 		SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
 		return true;
 	}
+
+	internal bool IsRowEnabled(int row) =>
+		_rows is null || row >= 0 && row < _rows.Count && _rows[row].IsEnabled;
 
 	internal static bool IsPrimaryActivation(MouseFlags flags) =>
 		flags.HasFlag(MouseFlags.LeftButtonPressed) ||

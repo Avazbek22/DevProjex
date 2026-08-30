@@ -1022,25 +1022,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			var state = await _controller
 				.OpenAsync(projectPath, profile, operationCts.Token, sourceIdentity)
 				.ConfigureAwait(false);
-			var hasRepositoryBoundary = state.Plan.GitReadiness.HasRepositoryBoundary ||
-			                            GitRepositoryBoundaryProbe.ExistsAtOrAbove(state.Plan.SourceRoot);
-			var gitCliAvailable = false;
-			if (hasRepositoryBoundary)
-			{
-				try
-				{
-					gitCliAvailable = await _services.GitRepositoryService
-						.IsGitAvailableAsync(operationCts.Token)
-						.ConfigureAwait(false);
-				}
-				catch (OperationCanceledException) when (operationCts.IsCancellationRequested)
-				{
-					throw;
-				}
-				catch
-				{
-				}
-			}
+			var gitCliAvailable = await ResolveGitCliAvailabilityAsync(
+					state.Plan,
+					operationCts.Token)
+				.ConfigureAwait(false);
 			if (_stopping || operationCts.IsCancellationRequested)
 				return;
 			sessionAccepted = await InvokeAsync(() =>
@@ -4164,14 +4149,18 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_activeAggregateControlSection == _activeControlSection
 			? 0
 			: Math.Clamp(list.SelectedItem ?? 0, 0, Math.Max(0, rows.Count - 1)) + aggregateOffset;
-		var next = selected + Math.Sign(delta);
-		if (next >= 0 && next < logicalCount)
+		var direction = Math.Sign(delta);
+		var next = FindEnabledControlPosition(
+			_activeControlSection,
+			selected + direction,
+			direction);
+		if (next >= 0)
 		{
 			FocusControlPosition(_activeControlSection, next);
 			return;
 		}
 
-		var targetIndex = currentIndex + Math.Sign(delta);
+		var targetIndex = currentIndex + direction;
 		if (targetIndex < 0 || targetIndex >= sections.Length)
 			return;
 		var targetSection = sections[targetIndex];
@@ -4180,7 +4169,12 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var targetCount = (targetRows?.Count ?? 0) + (targetAggregate is null ? 0 : 1);
 		if (targetRows is null || targetCount == 0)
 			return;
-		FocusControlPosition(targetSection, delta > 0 ? 0 : targetCount - 1);
+		var targetPosition = FindEnabledControlPosition(
+			targetSection,
+			direction > 0 ? 0 : targetCount - 1,
+			direction);
+		if (targetPosition >= 0)
+			FocusControlPosition(targetSection, targetPosition);
 	}
 
 	private void FocusControlBoundary(TerminalControlSection section, bool first)
@@ -4189,7 +4183,31 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var aggregate = GetAggregateControlSection(section).List;
 		var count = (rows?.Count ?? 0) + (aggregate is null ? 0 : 1);
 		if (count > 0)
-			FocusControlPosition(section, first ? 0 : count - 1);
+		{
+			var direction = first ? 1 : -1;
+			var position = FindEnabledControlPosition(
+				section,
+				first ? 0 : count - 1,
+				direction);
+			if (position >= 0)
+				FocusControlPosition(section, position);
+		}
+	}
+
+	private int FindEnabledControlPosition(
+		TerminalControlSection section,
+		int start,
+		int direction)
+	{
+		var (_, rows) = GetControlSection(section);
+		var aggregateOffset = GetAggregateControlSection(section).List is null ? 0 : 1;
+		var count = (rows?.Count ?? 0) + aggregateOffset;
+		for (var position = start; position >= 0 && position < count; position += direction)
+		{
+			if (position < aggregateOffset || rows![position - aggregateOffset].IsEnabled)
+				return position;
+		}
+		return -1;
 	}
 
 	private void FocusControlPosition(TerminalControlSection section, int logicalIndex)
@@ -4209,7 +4227,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		else
 		{
 			var rowIndex = logicalIndex - (aggregate is null ? 0 : 1);
-			if (rowIndex < 0 || rowIndex >= rows.Count)
+			if (rowIndex < 0 || rowIndex >= rows.Count || !rows[rowIndex].IsEnabled)
 				return;
 			_activeAggregateControlSection = null;
 			list.SelectedItem = rowIndex;

@@ -23,6 +23,40 @@ public sealed class TerminalSettingsStateContractTests
 	}
 
 	[Theory]
+	[InlineData(GitFilteringMode.None)]
+	[InlineData(GitFilteringMode.Staged)]
+	[InlineData(GitFilteringMode.Changes)]
+	public void SwitchingAwayFromDiffClearsItsRange(GitFilteringMode mode)
+	{
+		var selection = TerminalWorkspaceController.BuildPathFilteringSelection(
+			ProjectSelectionSpec.Standard with
+			{
+				GitMode = GitFilteringMode.Diff,
+				GitDiffRange = "main..feature"
+			},
+			mode,
+			ProjectSelectionSpec.StandardExclusions);
+
+		Assert.Equal(mode, selection.GitMode);
+		Assert.Null(selection.GitDiffRange);
+	}
+
+	[Theory]
+	[InlineData(null)]
+	[InlineData("")]
+	[InlineData("main")]
+	public void DiffModeRequiresAValidRange(string? range)
+	{
+		var exception = Assert.Throws<ArgumentException>(() =>
+			TerminalWorkspaceController.BuildPathFilteringSelection(
+				ProjectSelectionSpec.Standard with { GitDiffRange = range },
+				GitFilteringMode.Diff,
+				ProjectSelectionSpec.StandardExclusions));
+
+		Assert.Equal("diffRange", exception.ParamName);
+	}
+
+	[Theory]
 	[InlineData(IgnoreOptionId.HideSecrets)]
 	[InlineData(IgnoreOptionId.HidePrivateData)]
 	[InlineData(IgnoreOptionId.CompressCode)]
