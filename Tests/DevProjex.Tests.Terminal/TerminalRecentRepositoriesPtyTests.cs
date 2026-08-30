@@ -86,7 +86,7 @@ public sealed partial class TerminalRecentRepositoriesPtyTests
 			"Inspect project source and repository metadata.",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		var details = await terminal.WaitForScreenAsync(
+		var details = await terminal.WaitForStableScreenAsync(
 			"Last opened",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains(RepositoryUrl, details, StringComparison.Ordinal);
