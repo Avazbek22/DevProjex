@@ -383,18 +383,24 @@ public sealed class McpServerIntegrationTests
 		var invalid = await server.CallAsync(
 			"get_tree",
 			new Dictionary<string, object?> { ["format"] = "yaml" });
-		var truncated = await server.CallAsync(
+		var truncatedJson = await server.CallAsync(
 			"get_tree",
 			new Dictionary<string, object?> { ["format"] = "json" });
+		var truncatedXml = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "xml" });
 
 		Assert.True(invalid.IsError);
 		Assert.Contains(McpErrorCodes.InvalidArguments, Text(invalid), StringComparison.Ordinal);
 		Assert.Contains("markdown, text, json, xml", Text(invalid), StringComparison.Ordinal);
-		Assert.True(truncated.IsError);
-		Assert.Contains(McpErrorCodes.PayloadTruncated, Text(truncated), StringComparison.Ordinal);
-		Assert.Contains("max_depth", Text(truncated), StringComparison.Ordinal);
-		Assert.Contains("include_patterns", Text(truncated), StringComparison.Ordinal);
-		Assert.DoesNotContain("<untrusted-data-", Text(truncated), StringComparison.Ordinal);
+		Assert.All(new[] { truncatedJson, truncatedXml }, truncated =>
+		{
+			Assert.True(truncated.IsError);
+			Assert.Contains(McpErrorCodes.PayloadTruncated, Text(truncated), StringComparison.Ordinal);
+			Assert.Contains("max_depth", Text(truncated), StringComparison.Ordinal);
+			Assert.Contains("include_patterns", Text(truncated), StringComparison.Ordinal);
+			Assert.DoesNotContain("<untrusted-data-", Text(truncated), StringComparison.Ordinal);
+		});
 	}
 
 	[Fact]
