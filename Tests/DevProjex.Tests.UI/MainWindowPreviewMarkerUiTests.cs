@@ -49,7 +49,13 @@ public sealed class MainWindowPreviewMarkerUiTests
 				      scrollViewer.Extent.Width > scrollViewer.Viewport.Width,
 				"large preview to expose three marker ticks");
 
-			scrollViewer.Offset = new Vector(scrollViewer.Offset.X, 64);
+			var firstTick = markerBar.MarkerTicks
+				.Where(static tick => tick.Target.Category == PreviewMarkerCategory.Redaction)
+				.OrderBy(static tick => tick.Y)
+				.First();
+			scrollViewer.Offset = new Vector(
+				scrollViewer.Offset.X,
+				preview.GetVerticalOffsetForLine(firstTick.Target.LineNumber));
 			await UiTestDriver.WaitForConditionAsync(
 				window,
 				() => stickyHeader.IsVisible,
@@ -62,10 +68,6 @@ public sealed class MainWindowPreviewMarkerUiTests
 				      stickyHeader.Margin.Right < 0.1,
 				"preview scrollbars to return to their collapsed state");
 
-			var firstTick = markerBar.MarkerTicks
-				.Where(static tick => tick.Target.Category == PreviewMarkerCategory.Redaction)
-				.OrderBy(static tick => tick.Y)
-				.First();
 			var markerBarBounds = UiTestDriver.GetBoundsInWindow(markerBar, window);
 			var markerPoint = Assert.IsType<Point>(markerBar.TranslatePoint(
 				new Point(markerBar.Bounds.Width - 1, firstTick.Y),

@@ -782,11 +782,13 @@ public sealed class ProjectContextStreamingRegressionTests
 		var payload = Encoding.UTF8.GetString(destination.ToArray());
 		switch (format)
 		{
-			case ProjectContextDocumentFormat.Text:
-				Assert.Equal(
-					$"src/chunk.txt:{Environment.NewLine}{Environment.NewLine}" +
-					content.TrimEnd('\r', '\n'),
-					payload);
+		case ProjectContextDocumentFormat.Text:
+			Assert.Equal(
+				ContextRootPresentation.FormatLine(project) +
+				Environment.NewLine + Environment.NewLine +
+				$"src/chunk.txt:{Environment.NewLine}{Environment.NewLine}" +
+				content.TrimEnd('\r', '\n'),
+				payload);
 				break;
 			case ProjectContextDocumentFormat.Markdown:
 				Assert.Contains(content, payload, StringComparison.Ordinal);
@@ -1794,6 +1796,8 @@ public sealed class ProjectContextStreamingRegressionTests
 			maximumEstimatedTokens: 1);
 
 		Assert.Equal(
+			ContextRootPresentation.FormatLine(project) +
+			Environment.NewLine + Environment.NewLine +
 			$"A-included.txt:{Environment.NewLine}{Environment.NewLine}a",
 			Encoding.UTF8.GetString(destination.ToArray()));
 		Assert.Equal(1, result.TokenBudget?.IncludedFileCount);

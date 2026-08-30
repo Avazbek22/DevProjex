@@ -220,7 +220,7 @@ public sealed class ExportContextDocumentContractTests
 		workspace.WriteFile("A-large.txt", "large-content-marker-" + new string('a', 40));
 		workspace.WriteFile("B-small.txt", "b");
 		workspace.WriteFile("C-small.txt", "c");
-		var reports = new List<string>();
+		var reports = new Dictionary<string, string>(StringComparer.Ordinal);
 
 		foreach (var format in new[] { "text", "markdown", "json", "xml" })
 		{
@@ -238,10 +238,16 @@ public sealed class ExportContextDocumentContractTests
 			var first = environment.StandardOutput.IndexOf("B-small.txt", StringComparison.Ordinal);
 			var second = environment.StandardOutput.IndexOf("C-small.txt", StringComparison.Ordinal);
 			Assert.True(first >= 0 && second > first, environment.StandardOutput);
-			reports.Add(ExtractBudgetReport(environment.StandardError));
+			reports.Add(format, ExtractBudgetReport(environment.StandardError));
 		}
 
-		Assert.All(reports, report => Assert.Equal(reports[0], report));
+		Assert.Equal(reports["text"], reports["markdown"]);
+		Assert.Equal(reports["json"], reports["xml"]);
+		Assert.Contains("  A-large.txt (16 estimated tokens)", reports["text"], StringComparison.Ordinal);
+		Assert.Contains(
+			$"  {Path.Combine(workspace.Path, "A-large.txt")} (16 estimated tokens)",
+			reports["json"],
+			StringComparison.Ordinal);
 	}
 
 	[Theory]

@@ -782,7 +782,8 @@ public sealed class ReleaseHardeningOutputRegressionTests
 				destination,
 				TestContext.Current.CancellationToken)
 			: environment.StandardOutput;
-		Assert.Contains("|--", payload, StringComparison.Ordinal);
+		Assert.Contains("`-- src", payload, StringComparison.Ordinal);
+		Assert.DoesNotContain("|-- project", payload, StringComparison.Ordinal);
 		Assert.DoesNotContain(
 			payload,
 			static character => ForbiddenPlainCharacters.Contains(character));

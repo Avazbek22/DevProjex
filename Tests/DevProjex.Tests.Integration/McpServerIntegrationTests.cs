@@ -339,6 +339,9 @@ public sealed class McpServerIntegrationTests
 		Directory.CreateDirectory(Path.Combine(project, "src"));
 		File.WriteAllText(Path.Combine(project, "src", "App.cs"), "internal sealed class App { }\n");
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+		var physicalProject = McpRootRegistry.ResolvePhysicalExistingPath(
+			project,
+			requireDirectory: true);
 
 		var markdown = await server.CallAsync("get_tree");
 		var text = await server.CallAsync(
@@ -359,7 +362,7 @@ public sealed class McpServerIntegrationTests
 		Assert.DoesNotContain('│', markdownBody);
 		var textBody = ExtractSpotlightBody(Text(text));
 		var textLines = textBody.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
-		Assert.Equal(project + ":", textLines[0]);
+		Assert.Equal(physicalProject + ":", textLines[0]);
 		Assert.Equal(string.Empty, textLines[1]);
 		Assert.Equal("└── src", textLines[2]);
 		Assert.DoesNotContain(textLines, line => line.EndsWith(" project", StringComparison.Ordinal));
@@ -383,6 +386,9 @@ public sealed class McpServerIntegrationTests
 		File.WriteAllText(Path.Combine(project, "docs", "Guide.md"), "guide-content\n");
 		File.WriteAllText(Path.Combine(project, "README.md"), "readme-content\n");
 		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+		var physicalProject = McpRootRegistry.ResolvePhysicalExistingPath(
+			project,
+			requireDirectory: true);
 
 		var result = await server.CallAsync(
 			"pack_context",
@@ -395,13 +401,16 @@ public sealed class McpServerIntegrationTests
 		Assert.NotEqual(true, result.IsError);
 		var body = ExtractSpotlightBody(Text(result));
 		var displayRoot = format == "markdown"
-			? PathUtility.NormalizeSeparators(project)
-			: project;
+			? PathUtility.NormalizeSeparators(physicalProject)
+			: physicalProject;
 		Assert.Contains($"Root: {displayRoot}", body, StringComparison.Ordinal);
 		Assert.Equal(1, CountOccurrences(body, displayRoot));
 		Assert.Contains("docs/Guide.md", body, StringComparison.Ordinal);
 		Assert.Contains("README.md", body, StringComparison.Ordinal);
-		Assert.DoesNotContain(Path.Combine(project, "docs", "Guide.md"), body, PathComparison);
+		var absoluteGuidePath = Path.Combine(physicalProject, "docs", "Guide.md");
+		if (format == "markdown")
+			absoluteGuidePath = PathUtility.NormalizeSeparators(absoluteGuidePath);
+		Assert.DoesNotContain(absoluteGuidePath, body, PathComparison);
 		AssertSpotlighted(result);
 	}
 
