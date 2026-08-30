@@ -20,17 +20,10 @@ internal sealed class McpProjectService(
 		CancellationToken cancellationToken,
 		bool includeOutputMetrics = true)
 	{
+		var parsedScope = ParseGitScope(gitScope);
 		var source = await projectSources.ResolveAsync(project, branch, cancellationToken)
 			.ConfigureAwait(false);
 		var projectRoot = source.Root;
-		var parsedScope = ParseGitScope(gitScope);
-		if ((trackedOnly || parsedScope is not null) && !IsGitRepository(projectRoot))
-		{
-			throw new McpToolException(
-				McpErrorCodes.InvalidArguments,
-				$"{McpErrorCodes.InvalidArguments}: project is not a git repository; omit " +
-				$"{(parsedScope is null ? "tracked_only" : "git_scope")} or choose a Git repository returned by list_projects.");
-		}
 		var profileReference = ResolveProfile(projectRoot, profile);
 		var baselineGitMode = trackedOnly
 			? GitFilteringMode.TrackedFilesOnly
@@ -47,6 +40,14 @@ internal sealed class McpProjectService(
 					HidePrivateData: hidePrivateData),
 				cancellationToken)
 			.ConfigureAwait(false);
+		if (parsedScope is { } narrowingScope)
+		{
+			selection = GitScopeSelection.WithMode(
+				selection,
+				GitScopeSelection.ComposeNarrowingUnderlay(
+					selection.GitMode!.Value,
+					narrowingScope.Mode));
+		}
 		var marks = ProjectSelectionMarkedSecretsResolver.Resolve(selection);
 		if (await services.RedactionSession
 			    .EnsurePersistentIdentityReadyAsync(marks, cancellationToken)
@@ -72,6 +73,19 @@ internal sealed class McpProjectService(
 				? services.Planner.BuildAsync(request, cancellationToken)
 				: services.Planner.BuildStructureAsync(request, cancellationToken))
 			.ConfigureAwait(false);
+		if ((trackedOnly || parsedScope is not null) && !plan.GitReadiness.HasRepositoryBoundary)
+		{
+			var constraint = (trackedOnly, parsedScope is not null) switch
+			{
+				(true, true) => "tracked_only and git_scope",
+				(true, false) => "tracked_only",
+				_ => "git_scope"
+			};
+			throw new McpToolException(
+				McpErrorCodes.InvalidArguments,
+				$"{McpErrorCodes.InvalidArguments}: project is not a git repository; omit " +
+				$"{constraint} or choose a Git repository returned by list_projects.");
+		}
 		if (plan.HasErrors)
 		{
 			var diagnostic = plan.Diagnostics.First(static item => item.Severity == ContextDiagnosticSeverity.Error);
@@ -190,7 +204,10 @@ internal sealed class McpProjectService(
 	{
 		if (value is null)
 			return null;
-		if (!GitScopeSelection.TryParse(value, out var mode, out var diffRange) ||
+		var matchesPublishedSyntax = value is "staged" or "changes" ||
+		                             value.StartsWith(GitScopeSelection.DiffPrefix, StringComparison.Ordinal);
+		if (!matchesPublishedSyntax ||
+		    !GitScopeSelection.TryParse(value, out var mode, out var diffRange) ||
 		    !GitScopeSelection.IsMomentary(mode))
 		{
 			throw new McpToolException(
@@ -377,5 +394,5 @@ internal sealed class McpProjectService(
 		PathUtility.GetPortableRelativePath(root, path);
 
 	internal static bool IsGitRepository(string root) =>
-		Directory.Exists(Path.Combine(root, ".git")) || File.Exists(Path.Combine(root, ".git"));
+		GitRepositoryBoundaryProbe.ExistsAtOrAbove(root);
 }

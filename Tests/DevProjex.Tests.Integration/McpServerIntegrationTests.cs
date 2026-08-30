@@ -23,6 +23,34 @@ public sealed class McpServerIntegrationTests
 	];
 
 	[Fact]
+	public void McpHostAcceptsOnlyPersistentGitModes()
+	{
+		GitFilteringMode?[] accepted =
+		[
+			null,
+			GitFilteringMode.None,
+			GitFilteringMode.RespectGitIgnore,
+			GitFilteringMode.TrackedFilesOnly
+		];
+		foreach (var mode in accepted)
+		{
+			McpServerHost.ValidateGitMode(mode);
+		}
+
+		GitFilteringMode[] rejected =
+		[
+			GitFilteringMode.Staged,
+			GitFilteringMode.Changes,
+			GitFilteringMode.Diff,
+			(GitFilteringMode)int.MaxValue
+		];
+		foreach (var mode in rejected)
+		{
+			Assert.Throws<ArgumentOutOfRangeException>(() => McpServerHost.ValidateGitMode(mode));
+		}
+	}
+
+	[Fact]
 	public async Task TreeAndAnalyzeAvoidUnusedPlanningContentPasses()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -415,6 +443,49 @@ public sealed class McpServerIntegrationTests
 		Assert.Contains(McpErrorCodes.InvalidArguments, Text(localBranch), StringComparison.Ordinal);
 		Assert.True(invalidUrl.IsError);
 		Assert.Contains(McpErrorCodes.InvalidArguments, Text(invalidUrl), StringComparison.Ordinal);
+		Assert.Equal(0, Volatile.Read(ref remoteServicesCreated));
+	}
+
+	[Fact]
+	public async Task InvalidGitScopeIsRejectedBeforeRemoteProjectServicesAreCreated()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var remoteServicesCreated = 0;
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			allowRemote: true,
+			remoteServicesFactory: () =>
+			{
+				Interlocked.Increment(ref remoteServicesCreated);
+				throw new InvalidOperationException("Invalid Git scope must fail before remote acquisition.");
+			});
+
+		var result = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["project"] = "https://example.invalid/owner/repository.git",
+				["git_scope"] = "diff:main...feature"
+			});
+		var mixedCase = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["project"] = "https://example.invalid/owner/repository.git",
+				["git_scope"] = "Staged"
+			});
+
+		Assert.True(result.IsError);
+		Assert.Contains(McpErrorCodes.InvalidArguments, Text(result), StringComparison.Ordinal);
+		Assert.Contains("invalid git_scope", Text(result), StringComparison.Ordinal);
+		Assert.True(mixedCase.IsError);
+		Assert.Contains(McpErrorCodes.InvalidArguments, Text(mixedCase), StringComparison.Ordinal);
+		Assert.Contains(
+			"Valid values: staged, changes, diff:<ref>..<ref>.",
+			Text(mixedCase),
+			StringComparison.Ordinal);
 		Assert.Equal(0, Volatile.Read(ref remoteServicesCreated));
 	}
 
@@ -1731,10 +1802,19 @@ public sealed class McpServerIntegrationTests
 		var error = await localServer.CallAsync(
 			"get_tree",
 			new Dictionary<string, object?> { ["tracked_only"] = "true" });
+		var combinedError = await localServer.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["tracked_only"] = "true",
+				["git_scope"] = "changes"
+			});
 
 		Assert.True(error.IsError);
 		Assert.Contains(McpErrorCodes.InvalidArguments, Text(error), StringComparison.Ordinal);
 		Assert.Contains("omit tracked_only", Text(error), StringComparison.Ordinal);
+		Assert.True(combinedError.IsError);
+		Assert.Contains("omit tracked_only and git_scope", Text(combinedError), StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -1865,6 +1945,92 @@ public sealed class McpServerIntegrationTests
 
 		Assert.Contains("Tracked.cs", Text(narrowed), StringComparison.Ordinal);
 		Assert.DoesNotContain("Untracked.cs", Text(narrowed), StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData(true)]
+	[InlineData(false)]
+	public async Task GitScopeAcceptsRepositoryBoundaryAboveOrBelowProjectRootAcrossSelectionTools(
+		bool repositoryContainsProject)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = repositoryContainsProject
+			? null
+			: workspace.CreateDirectory("project");
+		var repository = repositoryContainsProject
+			? workspace.CreateDirectory("repository")
+			: Directory.CreateDirectory(Path.Combine(project!, "repository")).FullName;
+		project ??= Directory.CreateDirectory(Path.Combine(repository, "project")).FullName;
+		var selectedDirectory = repositoryContainsProject ? project : repository;
+		File.WriteAllText(Path.Combine(selectedDirectory, "Selected.cs"), "selected-baseline\n");
+		File.WriteAllText(Path.Combine(project, "Outside.cs"), "outside-baseline\n");
+		const string profileName = "scope-profile.json";
+		File.WriteAllText(
+			Path.Combine(project, profileName),
+			JsonSerializer.Serialize(new
+			{
+				schemaVersion = PortableProjectProfileService.CurrentSchemaVersion,
+				kind = PortableProjectProfileService.DocumentKind,
+				selection = new
+				{
+					roots = (string[]?)null,
+					extensions = new[] { ".cs" },
+					selectedPaths = (string[]?)null,
+					gitMode = "none",
+					exclusions = Array.Empty<string>(),
+					hideSecrets = false,
+					hidePrivateData = false
+				}
+			}));
+		InitializeCommittedRepository(repository);
+		File.WriteAllText(Path.Combine(selectedDirectory, "Selected.cs"), "pinned-subdirectory-marker\n");
+		RunGit(
+			repository,
+			"add",
+			"--",
+			repositoryContainsProject ? "project/Selected.cs" : "Selected.cs");
+
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			gitMode: GitFilteringMode.None);
+		var listed = await server.CallAsync("list_projects");
+		var scope = new Dictionary<string, object?> { ["git_scope"] = "staged" };
+		var trackedTree = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["tracked_only"] = "true" });
+		var tree = await server.CallAsync("get_tree", scope);
+		var analyze = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?>(scope) { ["profile"] = profileName });
+		var pack = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>(scope)
+			{
+				["profile"] = profileName,
+				["view"] = "content",
+				["format"] = "text"
+			});
+		var search = await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?>(scope)
+			{
+				["pattern"] = "pinned-subdirectory-marker",
+				["ignore_case"] = false
+			});
+
+		Assert.All(
+			new[] { listed, trackedTree, tree, analyze, pack, search },
+			static result => Assert.NotEqual(true, result.IsError));
+		Assert.Equal(
+			repositoryContainsProject ? "git-repository" : "local-folder",
+			listed.StructuredContent?.GetProperty("projects")[0].GetProperty("type").GetString());
+		Assert.Contains("Selected.cs", Text(trackedTree), StringComparison.Ordinal);
+		Assert.Contains("Selected.cs", Text(tree), StringComparison.Ordinal);
+		Assert.DoesNotContain("Outside.cs", Text(tree), StringComparison.Ordinal);
+		Assert.Equal(1, analyze.StructuredContent?.GetProperty("files").GetInt32());
+		Assert.Contains("pinned-subdirectory-marker", Text(pack), StringComparison.Ordinal);
+		Assert.Contains("Selected.cs:1:", Text(search), StringComparison.Ordinal);
 	}
 
 	[Fact]

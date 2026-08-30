@@ -31,8 +31,10 @@ public static class McpServerHost
 		bool allowRemote,
 		GitFilteringMode? gitMode,
 		Func<string>? appDataPathProvider,
-		CancellationToken cancellationToken) =>
-		RunWithStreamsAsync(
+		CancellationToken cancellationToken)
+	{
+		ValidateGitMode(gitMode);
+		return RunWithStreamsAsync(
 			roots,
 			Console.OpenStandardInput(),
 			Console.OpenStandardOutput(),
@@ -41,6 +43,7 @@ public static class McpServerHost
 			appDataPathProvider,
 			allowRemote: allowRemote,
 			gitMode: gitMode);
+	}
 
 	internal static async Task RunWithStreamsAsync(
 		IReadOnlyList<string> roots,
@@ -58,6 +61,7 @@ public static class McpServerHost
 		ArgumentNullException.ThrowIfNull(roots);
 		ArgumentNullException.ThrowIfNull(input);
 		ArgumentNullException.ThrowIfNull(output);
+		ValidateGitMode(gitMode);
 
 		var rootRegistry = new McpRootRegistry(roots);
 		using var projectSources = new McpProjectSourceResolver(
@@ -115,6 +119,20 @@ public static class McpServerHost
 			if (services.IsValueCreated)
 				services.Value.Dispose();
 		}
+	}
+
+	internal static void ValidateGitMode(GitFilteringMode? gitMode)
+	{
+		if (gitMode is null or GitFilteringMode.None or GitFilteringMode.RespectGitIgnore or
+		    GitFilteringMode.TrackedFilesOnly)
+		{
+			return;
+		}
+
+		throw new ArgumentOutOfRangeException(
+			nameof(gitMode),
+			gitMode,
+			"The MCP server Git mode must be none, gitignore, or tracked.");
 	}
 
 	private static string ResolveVersion() =>
