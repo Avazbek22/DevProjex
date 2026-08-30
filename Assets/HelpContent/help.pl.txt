@@ -103,7 +103,7 @@ Przykłady:
 Uwagi:
 * `.` oznacza bieżący folder terminala;
 * ścieżki ze spacjami muszą być ujęte w cudzysłów;
-* `--git-mode` wybiera brak filtrowania Git, `.gitignore` albo wyłącznie śledzone pliki Git;
+* `--git-mode` wybiera `none`, `gitignore`, `tracked`, `staged`, `changes` albo `diff:<ref>..<ref>`;
 * `--exclude` kontroluje zwykłe wykluczenia niezależnie od filtrowania Git;
 * polecenia analizy i eksportu są deterministyczne i nie otwierają interfejsu pulpitu;
 * `tui`, `open`, `analyze` i oba polecenia `export` również akceptują adres URL repozytorium Git; klon trafia do zarządzanej pamięci podręcznej (`devprojex cache`);
@@ -356,8 +356,6 @@ Reguły ignorowania kumulują się. Jeśli co najmniej jedna włączona reguła 
 W zależności od zawartości projektu mogą zostać wyświetlone następujące opcje:
 
 * Smart Ignore
-* Użyj.gitignore
-* Tylko śledzone pliki Git
 * Puste foldery
 * Puste pliki
 * Ukryte foldery
@@ -366,7 +364,7 @@ W zależności od zawartości projektu mogą zostać wyświetlone następujące 
 * Pliki z prefiksem kropki
 * Pliki bez rozszerzenia
 
-W repozytorium Git opcje „Użyj.gitignore” i „Tylko śledzone pliki Git ” pozostają widoczne jako stabilna para pól wyboru. Włączenie jednego powoduje usunięcie drugiego. Ponowne kliknięcie aktywnego pola wyboru powoduje jego wyczyszczenie, pozostawiając oba filtry Git wyłączone bez zmiany Smart Ignore lub podstawowych wykluczeń. Inne opcje są wyświetlane, gdy ich reguły mogą zmienić bieżące drzewo. Lista może zatem ulec zmianie po zmianie innej reguły lub typu pliku.
+W repozytorium Git interfejs GUI oferuje pięć trybów Git: bez filtrowania, `.gitignore`, pliki śledzone, zmiany w indeksie albo wszystkie bieżące zmiany. Poza repozytorium dostępne są tylko brak filtrowania i `.gitignore`. TUI zawsze pokazuje te same pięć wartości jako opcje radiowe, ale bez repozytorium wyłącza wiersze, które go wymagają; aktywny zakres `diff:<ref>..<ref>` pojawia się w szóstym wierszu. Wybór wartości zastępuje bieżący tryb Git bez zmiany Smart Ignore ani podstawowych wykluczeń. Pozostałe opcje pojawiają się, gdy ich reguły mogą wpływać na bieżące drzewo.
 
 Nowa opcja jest domyślnie włączona, gdy pojawia się po raz pierwszy. Znana opcja zachowuje wybór użytkownika, nawet jeśli chwilowo zniknie z listy.
 
@@ -432,12 +430,12 @@ Każde osiągalne zagnieżdżone repozytorium i drzewo robocze jest rozwiązywan
 
 W już otwartym obszarze roboczym Desktop jawny śledzony wybór pozostaje widoczny i zabezpieczony przed awarią: dane wyjściowe i eksport są blokowane w przypadku niepowodzenia gotowości, natomiast częściowa gotowość jest kontynuowana ze zlokalizowanym ostrzeżeniem.
 
-Po włączeniu opcji „Użyj.gitignore” i „Tylko śledzone pliki Git ” wykluczają się wzajemnie. Aktywne pole wyboru można również wyczyścić, aby wyłączyć filtrowanie Git. W przypadku projektów lokalnych obsługujących profile ten stan jest zapisywany z typem pliku i innymi ustawieniami wykluczeń.
+Tryby Git wzajemnie się wykluczają; `none` wyłącza filtrowanie Git. Tymczasowe tryby `staged`, `changes` i `diff:<ref>..<ref>` nie są zapisywane w profilach. Gdy aktywny jest tryb tymczasowy, lokalny profil projektu w GUI zachowuje ostatni włączony tryb trwały: `gitignore` albo `tracked`. `none` jest zapisywany tylko wtedy, gdy jest aktywny w chwili zapisu. TUI i CLI odrzucają zapis profilu przenośnego, gdy aktywny jest tryb tymczasowy.
 
 ### 12.7 Związek pomiędzy filtrowaniem Git a Smart Ignore
-Pola wyboru Git i Smart Ignore są niezależnymi kontrolkami. Wybrany tryb Git ma zastosowanie jako pierwszy w każdym osiągalnym zakresie Git. Następnie Smart Ignore przetwarza pozostałe elementy, a podstawowe reguły działają jako ostatnie.
+Wybrany tryb Git i Smart Ignore są niezależnymi kontrolkami. Tryb Git jest stosowany jako pierwszy w każdym osiągalnym zakresie Git. Następnie Smart Ignore przetwarza pozostałe elementy, a podstawowe reguły działają jako ostatnie.
 
-Smart Ignore może pozostać ukryte, gdy wybrany tryb Git obejmuje już wszystkich swoich kandydatów, a następnie pojawić się po zmianie lub wyczyszczeniu trybu Git. Obydwa pola wyboru Git pozostają dostępne w repozytorium Git.
+Smart Ignore może pozostać ukryte, gdy wybrany tryb Git obejmuje już wszystkich swoich kandydatów, a następnie pojawić się po zmianie lub wyłączeniu trybu Git. W repozytorium Git pozostają dostępne wszystkie tryby wymagające repozytorium.
 
 Reguła negacji Git zaczynająca się od `!` anuluje tylko wynik Git. Nie wyłącza Smart Ignore ani podstawowej reguły.
 

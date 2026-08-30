@@ -775,7 +775,7 @@
   "Terminal.Tui.HelpBody": "工作空间\n项目树用于选择文件和文件夹。预览用于检查当前上下文。参数面板通过三个独立的小面板设置内容处理、排除规则和文件类型。\n\n操作面板\n按Ctrl+P可列出所有重要操作和快捷键。输入文字进行筛选，使用↑/↓选择，然后按Enter执行。“排除规则”和“文件类型”操作会聚焦对应的小面板。Esc返回之前的窗格。\n\n预览和搜索\n1/2/3选择“树”“内容”或“树+内容”。F选择ASCII、JSON、XML或Markdown。焦点位于项目树时，/筛选名称；焦点位于预览时，/搜索完整的预览文档。n/N在匹配项之间移动。Esc清除当前搜索。\n\n导出\nE导出上下文文档。z将项目副本导出到文件夹，Shift+Z将其导出为ZIP。精简的确认界面显示目标位置、数量、大小、过滤规则和诊断；成功结果显示在状态栏中。\n\n操作\nEsc或Ctrl+C会在退出前取消当前操作。可恢复的错误会返回上一界面。",
   "Terminal.Tui.Help.Tree": "项目树\n向上/向下或j/k导航行。Page Up/Page Down移动一页；Home/End移动到第一行/最后一行。左/右折叠或展开，Enter打开文件夹，Space切换选择。/ 搜索树。按:打开工作区命令。Tab/F6移动到预览；Shift+Tab/Shift+F6移动到参数。 Shift+左/Shift+右折叠或展开整棵树；Ctrl+A/Ctrl+U全选或全不选；R显示路径。",
   "Terminal.Tui.Help.Preview": "上下文预览\n向上/向下或j/k滚动一行；Page Up/Page Down滚动一页；Home/End移动到开头/结尾；需要时向左/向右水平滚动。/ 搜索整个文档，n/N选择下一个/上一个匹配项，Esc清除搜索。1/2/3更改预览模式；F选择ASCII、JSON、XML或Markdown。按:打开工作区命令。Tab/F6移至参数；Shift+Tab/Shift+F6返回树。 {和}移动到上一个或下一个节；Ctrl+G跳转到行；W切换自动换行。",
-  "Terminal.Tui.Help.Controls": "参数\n内容处理包含五个立即转换。排除以All和两个互斥的Git复选框开头。文件类型有自己的“全部”控件。向上/向下或j/k在迷你面板内移动并穿过边界处的下一个面板；Enter或Space切换行。每个长列表独立滚动。:打开工作区命令，Ctrl+P打开操作，E导出上下文，z导出文件夹，Shift+Z导出ZIP。Tab/F6返回树；Shift+Tab/Shift+F6移动到预览。",
+  "Terminal.Tui.Help.Controls": "参数\n内容处理包含五个立即转换。排除包含“全部”和5个带单选标记的互斥Git模式行；启用diff:<ref>..<ref>范围时会添加第六行。文件类型有自己的“全部”控件。向上/向下或j/k在迷你面板内移动并穿过边界处的下一个面板；Enter或Space切换行。每个长列表独立滚动。:打开工作区命令，Ctrl+P打开操作，E导出上下文，z导出文件夹，Shift+Z导出ZIP。Tab/F6返回树；Shift+Tab/Shift+F6移动到预览。",
   "Terminal.Tui.TokensShort": "词元",
   "Terminal.Tui.Warnings": "警告",
   "Terminal.Tui.Errors": "错误",

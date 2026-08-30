@@ -103,7 +103,7 @@ Examples:
 Notes:
 * `.` means the current terminal folder;
 * paths with spaces must be wrapped in quotes;
-* `--git-mode` selects no Git filtering, `.gitignore`, or tracked Git files;
+* `--git-mode` selects `none`, `gitignore`, `tracked`, `staged`, `changes`, or `diff:<ref>..<ref>`;
 * `--exclude` controls ordinary exclusions separately from Git filtering;
 * analysis and export commands are deterministic and do not open the desktop interface;
 * `tui`, `open`, `analyze`, and both `export` commands also accept a Git repository URL; the clone goes into a managed cache (`devprojex cache`);
@@ -356,8 +356,6 @@ Ignore rules are cumulative. If at least one enabled rule hides an item, another
 Depending on the project contents, the following options may be shown:
 
 * Smart Ignore
-* Use .gitignore
-* Tracked Git files only
 * Empty folders
 * Empty files
 * Hidden folders
@@ -366,7 +364,7 @@ Depending on the project contents, the following options may be shown:
 * Dot-prefixed files
 * Files without extension
 
-Inside a Git repository, "Use .gitignore" and "Tracked Git files only" remain visible as a stable checkbox pair. Enabling one clears the other. Clicking the active checkbox again clears it, leaving both Git filters off without changing Smart Ignore or the basic exclusions. Other options are shown when their rules can change the current tree. The list may therefore change after switching another rule or a file type.
+Inside a Git repository, the GUI exposes a five-value Git-mode selector: none, `.gitignore`, tracked files, staged files, or all current changes. Outside a repository, only none and `.gitignore` are available. The TUI always shows the same five values as radio rows, but disables the repository-only rows when no repository is available; an active `diff:<ref>..<ref>` scope appears as a sixth row. Selecting a value replaces the current Git mode without changing Smart Ignore or the basic exclusions. Other options are shown when their rules can change the current tree, so the list may change after switching another rule or file type.
 
 A new option is enabled by default when it first appears. A known option keeps the user's choice even if it temporarily disappears from the list.
 
@@ -432,12 +430,12 @@ Every reachable nested repository and worktree is resolved independently at any 
 
 In an already-open Desktop workspace, the explicit tracked selection remains visible and fail-closed: output and export are blocked when readiness fails, while partial readiness continues with a localized warning.
 
-"Use .gitignore" and "Tracked Git files only" are mutually exclusive when enabled. The active checkbox may also be cleared to disable Git filtering. For local projects that support profiles, this state is saved with the file-type and other exclusion settings.
+Git modes are mutually exclusive; `none` disables Git filtering. The momentary `staged`, `changes`, and `diff:<ref>..<ref>` modes are not saved in profiles. While a momentary mode is active, the GUI's local project profile retains the last enabled persistent `gitignore` or `tracked` mode. The `none` mode is saved only when it is active at the time of saving. TUI and CLI reject saving a portable profile while a momentary mode is active.
 
 ### 12.7 Relationship between Git filtering and Smart Ignore
-The Git checkboxes and Smart Ignore are independent controls. The selected Git mode applies first at every reachable Git scope. Smart Ignore then processes the remaining items, and the basic rules run last.
+The selected Git mode and Smart Ignore are independent controls. The Git mode applies first at every reachable Git scope. Smart Ignore then processes the remaining items, and the basic rules run last.
 
-Smart Ignore can stay hidden while the selected Git mode already covers all of its candidates, then appear after the Git mode is changed or cleared. Both Git checkboxes remain available inside a Git repository.
+Smart Ignore can stay hidden while the selected Git mode already covers all of its candidates, then appear after the Git mode is changed or cleared. All repository-backed Git modes remain available inside a Git repository.
 
 A Git negation rule starting with `!` cancels only a Git result. It does not disable Smart Ignore or a basic rule.
 

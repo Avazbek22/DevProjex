@@ -103,7 +103,7 @@ Bu, üst düzey komutları ve seçenekleri listeler. Bu komutun kendi seçenekle
 Notlar:
 * `.` geçerli terminal klasörü anlamına gelir;
 * boşluk içeren yollar tırnak içine alınmalıdır;
-* `--git-mode`, Git filtrelemesi yok, `.gitignore` veya yalnızca izlenen Git dosyaları seçeneklerinden birini belirler;
+* `--git-mode`, `none`, `gitignore`, `tracked`, `staged`, `changes` veya `diff:<ref>..<ref>` seçeneklerinden birini belirler;
 * `--exclude` sıradan hariç tutmaları Git filtrelemesinden ayrı olarak kontrol eder;
 * analiz ve dışa aktarma komutları belirleyicidir ve masaüstü arayüzünü açmaz;
 * `tui`, `open`, `analyze` ve her iki `export` komutu da Git deposu URL'sini kabul eder; klon, yönetilen bir önbelleğe (`devprojex cache`) gider;
@@ -356,8 +356,6 @@ Yoksayma kuralları birikimlidir. En az bir etkin kural bir öğeyi gizlerse ba�
 Proje içeriğine bağlı olarak aşağıdaki seçenekler gösterilebilir:
 
 * Smart Ignore
-* .gitignore'u kullanın
-* Yalnızca izlenen Git dosyaları
 * Boş klasörler
 * Boş dosyalar
 * Gizli klasörler
@@ -366,7 +364,7 @@ Proje içeriğine bağlı olarak aşağıdaki seçenekler gösterilebilir:
 * Nokta önekli dosyalar
 * Uzantısı olmayan dosyalar
 
-Git deposunda ".gitignore kullan" ve "Yalnızca İzlenen Git dosyaları" sabit bir onay kutusu çifti olarak görünür kalır. Birini etkinleştirmek diğerini temizler. Etkin onay kutusuna tekrar tıklamak onu temizler ve Smart Ignore veya temel hariç tutmaları değiştirmeden her iki Git filtresini de kapalı bırakır. Diğer seçenekler, kuralları geçerli ağacı değiştirebildiğinde gösterilir. Bu nedenle liste, başka bir kural veya dosya türü değiştirildikten sonra değişebilir.
+Git deposunda GUI beş Git modu sunar: filtreleme yok, `.gitignore`, izlenen dosyalar, hazırlanan dosyalar veya geçerli değişikliklerin tümü. Depo dışında yalnızca filtreleme yok ve `.gitignore` kullanılabilir. TUI her zaman aynı beş değeri radyo satırları olarak gösterir, ancak depo yoksa depo gerektiren satırları devre dışı bırakır; etkin bir `diff:<ref>..<ref>` kapsamı altıncı satırda görünür. Bir değer seçmek, Smart Ignore veya temel hariç tutmaları değiştirmeden geçerli Git modunu değiştirir. Diğer seçenekler, kuralları geçerli ağacı etkileyebildiğinde gösterilir.
 
 Yeni bir seçenek ilk göründüğünde varsayılan olarak etkindir. Bilinen bir seçenek, geçici olarak listeden kaybolsa bile kullanıcının tercihi kalır.
 
@@ -432,12 +430,12 @@ Erişilebilir her iç içe depo ve çalışma ağacı, ulaşılabilir herhangi b
 
 Zaten açık olan bir Masaüstü çalışma alanında, açıkça izlenen seçim görünür durumda kalır ve arıza durumunda kapatılır: hazırlık başarısız olduğunda çıktı ve dışa aktarma engellenir, kısmi hazırlık ise yerelleştirilmiş bir uyarıyla devam eder.
 
-".gitignore kullan" ve "Yalnızca İzlenen Git dosyaları" etkinleştirildiğinde birbirini dışlar. Git filtrelemeyi devre dışı bırakmak için etkin onay kutusunun işareti de kaldırılabilir. Profilleri destekleyen yerel projeler için bu durum, dosya türü ve diğer hariç tutma ayarlarıyla birlikte kaydedilir.
+Git modları birbirini dışlar; `none` Git filtrelemesini kapatır. Anlık `staged`, `changes` ve `diff:<ref>..<ref>` modları profillere kaydedilmez. Anlık bir mod etkinken GUI'nin yerel proje profili son etkin kalıcı mod olan `gitignore` veya `tracked` seçimini korur. `none` yalnızca kaydetme sırasında kendisi etkinken kaydedilir. TUI ve CLI, anlık bir mod etkinken taşınabilir profil kaydını reddeder.
 
 ### 12.7 Git filtreleme ve Smart Ignore arasındaki ilişki
-Git onay kutuları ve Smart Ignore bağımsız kontrollerdir. Seçilen Git modu, ulaşılabilir her Git kapsamında ilk olarak uygulanır. Smart Ignore daha sonra kalan öğeleri işler ve temel kurallar en son çalıştırılır.
+Seçilen Git modu ve Smart Ignore bağımsız kontrollerdir. Git modu, ulaşılabilir her Git kapsamında ilk olarak uygulanır. Smart Ignore daha sonra kalan öğeleri işler ve temel kurallar en son çalıştırılır.
 
-Smart Ignore seçilen Git modu zaten tüm adayları kapsıyorken gizli kalabilir ve Git modu değiştirildikten veya temizlendikten sonra görünebilir. Her iki Git onay kutusu da Git deposunda kullanılabilir durumda kalır.
+Smart Ignore seçilen Git modu zaten tüm adayları kapsıyorken gizli kalabilir ve Git modu değiştirildikten veya kapatıldıktan sonra görünebilir. Git deposunda, depo gerektiren tüm Git modları kullanılabilir durumda kalır.
 
 `!` ile başlayan Git olumsuzlama kuralı yalnızca Git sonucunu iptal eder. Smart Ignore veya temel bir kuralı devre dışı bırakmaz.
 

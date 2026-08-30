@@ -103,7 +103,7 @@ Exemples :
 Particularités :
 * `.` désigne le dossier courant du terminal ;
 * les chemins contenant des espaces doivent être placés entre guillemets ;
-* `--git-mode` choisit aucune filtration Git, `.gitignore` ou uniquement les fichiers suivis par Git ;
+* `--git-mode` choisit `none`, `gitignore`, `tracked`, `staged`, `changes` ou `diff:<ref>..<ref>` ;
 * `--exclude` gère les exclusions ordinaires séparément de la filtration Git ;
 * les commandes d’analyse et d’exportation sont déterministes et n’ouvrent pas l’interface graphique ;
 * `tui`, `open`, `analyze` et les deux commandes `export` acceptent aussi une URL de dépôt Git ; le clone va dans un cache géré (`devprojex cache`) ;
@@ -349,9 +349,9 @@ La section « Exclusions » détermine les fichiers et dossiers exclus de l’ar
 Un élément n’est affiché que si son type de fichier est sélectionné et si aucune règle active ne l’exclut. Les règles se cumulent : si l’une d’elles masque un élément, une autre ne peut pas le rendre visible.
 
 ### 12.1 Règles disponibles
-Selon le contenu du projet, Smart Ignore, « Utiliser .gitignore », « Uniquement les fichiers suivis par Git », les dossiers et fichiers vides, cachés ou commençant par un point, ainsi que les fichiers sans extension peuvent être proposés.
+Dans un dépôt Git, la GUI propose un sélecteur à cinq modes Git : aucune filtration, `.gitignore`, fichiers suivis, fichiers indexés ou toutes les modifications actuelles. En dehors d’un dépôt, seules l’absence de filtration et l’option `.gitignore` sont disponibles. La TUI affiche toujours les cinq valeurs sous forme de boutons radio, mais désactive les lignes qui nécessitent un dépôt lorsqu’aucun dépôt n’est disponible ; une portée `diff:<ref>..<ref>` active apparaît sur une sixième ligne. Choisir une valeur remplace le mode Git courant sans modifier Smart Ignore ni les exclusions de base. Les autres options apparaissent lorsque leurs règles peuvent modifier l’arborescence actuelle.
 
-Dans un dépôt Git, « Utiliser .gitignore » et « Uniquement les fichiers suivis par Git » restent visibles sous la forme de deux cases. Activer l’une désactive l’autre ; cliquer de nouveau sur la case active désactive entièrement le filtrage Git sans modifier Smart Ignore ni les règles de base. Les autres options apparaissent lorsqu’elles peuvent modifier l’arbre actuel. La liste peut donc changer après la modification d’une autre règle ou d’un type de fichier. Une nouvelle option est activée par défaut lors de sa première apparition ; une option connue conserve le choix de l’utilisateur même si elle disparaît temporairement.
+Une nouvelle option est activée par défaut lors de sa première apparition ; une option connue conserve le choix de l’utilisateur même si elle disparaît temporairement.
 
 ### 12.2 Smart Ignore
 Smart Ignore masque les dépendances, résultats de build, caches et autres artefacts de service. DevProjex identifie le type du projet à partir de sa structure et de fichiers marqueurs comme `.csproj`, `package.json`, `pyproject.toml` ou `Cargo.toml`. Les règles de la technologie reconnue restent dans la zone du projet et ne s’étendent pas aux projets voisins d’une autre technologie.
@@ -396,12 +396,12 @@ Chaque dépôt imbriqué et chaque worktree accessible sont traités indépendam
 
 Dans un espace de travail Desktop déjà ouvert, la sélection explicite reste visible et échoue de façon sûre : la sortie et l’exportation sont bloquées si la disponibilité échoue, tandis qu’une disponibilité partielle permet de continuer avec un avertissement localisé.
 
-« Utiliser .gitignore » et « Uniquement les fichiers suivis par Git » s’excluent lors de l’activation. La case active peut aussi être décochée pour désactiver le filtrage Git. Pour les projets locaux prenant en charge les profils, cet état est enregistré avec les types de fichiers et les autres règles d’exclusion.
+Les modes Git sont mutuellement exclusifs ; `none` désactive la filtration Git. Les modes temporaires `staged`, `changes` et `diff:<ref>..<ref>` ne sont pas enregistrés dans les profils. Tant qu’un mode temporaire est actif, le profil de projet local de la GUI conserve le dernier mode persistant activé, `gitignore` ou `tracked`. `none` n’est enregistré que s’il est actif au moment de l’enregistrement. La TUI et la CLI refusent d’enregistrer un profil portable tant qu’un mode temporaire est actif.
 
 ### 12.7 Relation entre le filtrage Git et Smart Ignore
 Le mode Git sélectionné et Smart Ignore sont contrôlés indépendamment. Le mode Git est appliqué en premier dans chaque zone Git accessible, puis Smart Ignore traite les éléments restants et les règles de base s’appliquent en dernier.
 
-Smart Ignore peut rester masqué tant que le mode Git sélectionné couvre déjà tous ses candidats, puis apparaître après un changement ou une désactivation du mode. Les deux cases Git restent disponibles dans le dépôt.
+Smart Ignore peut rester masqué tant que le mode Git sélectionné couvre déjà tous ses candidats, puis apparaître après un changement ou une désactivation du mode. Dans un dépôt Git, tous les modes dépendant du dépôt restent disponibles.
 
 Une négation Git avec `!` annule uniquement le résultat Git. Elle ne désactive ni Smart Ignore ni une règle de base.
 
