@@ -25,6 +25,14 @@ public static class ProjectSelectionTokens
 	public static string ToToken(GitFilteringMode mode) =>
 		ProjectPresentationCatalog.Get(mode).Token;
 
+	public static string ToToken(ProjectSelectionSpec selection)
+	{
+		ArgumentNullException.ThrowIfNull(selection);
+		return GitScopeSelection.ToToken(
+			selection.GitMode ?? GitFilteringMode.None,
+			selection.GitDiffRange);
+	}
+
 	public static bool TryParseExclusion(string? value, out ProjectExclusion exclusion)
 	{
 		var descriptor = ProjectPresentationCatalog.LegacyExclusionChoices.FirstOrDefault(

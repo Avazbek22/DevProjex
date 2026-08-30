@@ -4,7 +4,8 @@ internal sealed class McpProjectService(
 	McpProjectSourceResolver projectSources,
 	McpProjectRootJail roots,
 	McpServices services,
-	bool hidePrivateData)
+	bool hidePrivateData,
+	GitFilteringMode? serverGitMode)
 {
 	public async Task<ProjectContextPlan> BuildPlanAsync(
 		string? project,
@@ -14,30 +15,39 @@ internal sealed class McpProjectService(
 		IReadOnlyList<string>? excludePatterns,
 		string? profile,
 		bool trackedOnly,
+		string? gitScope,
 		long? maximumFileBytes,
 		CancellationToken cancellationToken,
 		bool includeOutputMetrics = true)
 	{
+		var parsedScope = ParseGitScope(gitScope);
 		var source = await projectSources.ResolveAsync(project, branch, cancellationToken)
 			.ConfigureAwait(false);
 		var projectRoot = source.Root;
-		if (trackedOnly && !IsGitRepository(projectRoot))
-		{
-			throw new McpToolException(
-				McpErrorCodes.InvalidArguments,
-				$"{McpErrorCodes.InvalidArguments}: project is not a git repository; omit tracked_only or choose a Git repository returned by list_projects.");
-		}
 		var profileReference = ResolveProfile(projectRoot, profile);
+		var baselineGitMode = trackedOnly
+			? GitFilteringMode.TrackedFilesOnly
+			: string.IsNullOrEmpty(profile)
+				? serverGitMode
+				: null;
 		var selection = await services.SelectionResolver
 			.ResolveAsync(
 				projectRoot,
 				profileReference,
 				new ProjectSelectionSpec(
-					GitMode: trackedOnly ? GitFilteringMode.TrackedFilesOnly : null,
+					GitMode: baselineGitMode,
 					HideSecrets: true,
 					HidePrivateData: hidePrivateData),
 				cancellationToken)
 			.ConfigureAwait(false);
+		if (parsedScope is { } narrowingScope)
+		{
+			selection = GitScopeSelection.WithMode(
+				selection,
+				GitScopeSelection.ComposeNarrowingUnderlay(
+					selection.GitMode!.Value,
+					narrowingScope.Mode));
+		}
 		var marks = ProjectSelectionMarkedSecretsResolver.Resolve(selection);
 		if (await services.RedactionSession
 			    .EnsurePersistentIdentityReadyAsync(marks, cancellationToken)
@@ -63,6 +73,19 @@ internal sealed class McpProjectService(
 				? services.Planner.BuildAsync(request, cancellationToken)
 				: services.Planner.BuildStructureAsync(request, cancellationToken))
 			.ConfigureAwait(false);
+		if ((trackedOnly || parsedScope is not null) && !plan.GitReadiness.HasRepositoryBoundary)
+		{
+			var constraint = (trackedOnly, parsedScope is not null) switch
+			{
+				(true, true) => "tracked_only and git_scope",
+				(true, false) => "tracked_only",
+				_ => "git_scope"
+			};
+			throw new McpToolException(
+				McpErrorCodes.InvalidArguments,
+				$"{McpErrorCodes.InvalidArguments}: project is not a git repository; omit " +
+				$"{constraint} or choose a Git repository returned by list_projects.");
+		}
 		if (plan.HasErrors)
 		{
 			var diagnostic = plan.Diagnostics.First(static item => item.Severity == ContextDiagnosticSeverity.Error);
@@ -72,6 +95,27 @@ internal sealed class McpProjectService(
 				"Fix the reported project access or Git state and retry.");
 		}
 		ValidatePlanContainment(roots, projectRoot, plan.IncludedFiles, cancellationToken);
+		if (parsedScope is { } scope)
+		{
+			plan = await GitScopeFilter
+				.ApplyAsync(
+					services.Planner,
+					plan,
+					services.GitScopePathProvider,
+					scope.Mode,
+					scope.DiffRange,
+					cancellationToken)
+				.ConfigureAwait(false);
+			if (plan.HasErrors)
+			{
+				var diagnostic = plan.Diagnostics.First(static item =>
+					item.Severity == ContextDiagnosticSeverity.Error);
+				throw new McpToolException(
+					McpErrorCodes.ProjectUnavailable,
+					$"{McpErrorCodes.ProjectUnavailable}: Git state preparation failed " +
+					$"({diagnostic.Code}: {diagnostic.Message}). Verify the repository and refs, then retry.");
+			}
+		}
 		ProjectContextPlan narrowed;
 		if ((paths is null || paths.Count == 0) &&
 		    (includePatterns is null || includePatterns.Count == 0) &&
@@ -96,9 +140,18 @@ internal sealed class McpProjectService(
 			}
 			if (selected.Count > 0)
 			{
-				narrowed = await services.Planner
-					.ReprojectSelectionAsync(plan, selected, cancellationToken)
-					.ConfigureAwait(false);
+				var gitMode = plan.Selection.GitMode ?? GitFilteringMode.None;
+				narrowed = GitScopeSelection.IsMomentary(gitMode)
+					? await services.Planner
+						.ReprojectSelectionAsync(
+							plan,
+							selected,
+							StringComparer.Ordinal,
+							cancellationToken)
+						.ConfigureAwait(false)
+					: await services.Planner
+						.ReprojectSelectionAsync(plan, selected, cancellationToken)
+						.ConfigureAwait(false);
 			}
 			else
 			{
@@ -154,6 +207,31 @@ internal sealed class McpProjectService(
 			selection.StripBlankLines,
 			selection.HidePrivateData,
 			cancellationToken);
+	}
+
+	private static McpGitScope? ParseGitScope(string? value)
+	{
+		if (value is null)
+			return null;
+		if (value.Length > GitScopeSelection.MaximumTokenLength)
+		{
+			throw new McpToolException(
+				McpErrorCodes.InvalidArguments,
+				$"{McpErrorCodes.InvalidArguments}: git_scope must be at most " +
+				$"{GitScopeSelection.MaximumTokenLength} characters; use staged, changes, or a shorter diff:<ref>..<ref> range.");
+		}
+		var matchesPublishedSyntax = value is "staged" or "changes" ||
+		                             value.StartsWith(GitScopeSelection.DiffPrefix, StringComparison.Ordinal);
+		if (!matchesPublishedSyntax ||
+		    !GitScopeSelection.TryParse(value, out var mode, out var diffRange) ||
+		    !GitScopeSelection.IsMomentary(mode))
+		{
+			throw new McpToolException(
+				McpErrorCodes.InvalidArguments,
+				$"{McpErrorCodes.InvalidArguments}: invalid git_scope '{value}'. " +
+				"Valid values: staged, changes, diff:<ref>..<ref>.");
+		}
+		return new McpGitScope(mode, diffRange);
 	}
 
 	public ContentTransformationContext CreateTransformationContext(
@@ -233,7 +311,11 @@ internal sealed class McpProjectService(
 				McpErrorCodes.PathNotFound,
 				$"{McpErrorCodes.PathNotFound}: '{path}' is a directory; provide a file path returned by get_tree or search_project.");
 		}
-		if (!plan.IncludedFiles.Contains(physical, PathComparer.Default))
+		var pathComparer = GitScopeSelection.IsMomentary(
+			plan.Selection.GitMode ?? GitFilteringMode.None)
+			? StringComparer.Ordinal
+			: PathComparer.Default;
+		if (!plan.IncludedFiles.Contains(physical, pathComparer))
 		{
 			throw new McpToolException(
 				McpErrorCodes.PathNotFound,
@@ -291,6 +373,8 @@ internal sealed class McpProjectService(
 		return new RequestedPathSelection(resolved, directories);
 	}
 
+	private sealed record McpGitScope(GitFilteringMode Mode, string? DiffRange);
+
 	internal static bool MatchesRequested(
 		string file,
 		IReadOnlySet<string> requestedPaths,
@@ -330,5 +414,5 @@ internal sealed class McpProjectService(
 		PathUtility.GetPortableRelativePath(root, path);
 
 	internal static bool IsGitRepository(string root) =>
-		Directory.Exists(Path.Combine(root, ".git")) || File.Exists(Path.Combine(root, ".git"));
+		GitRepositoryBoundaryProbe.ExistsAtOrAbove(root);
 }

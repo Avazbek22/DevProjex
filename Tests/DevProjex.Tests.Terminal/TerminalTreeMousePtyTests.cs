@@ -180,27 +180,28 @@ public sealed class TerminalTreeMousePtyTests
 			exclusionChanged.Contains("> PARAMETERS", StringComparison.Ordinal),
 			exclusionChanged);
 
-		var (gitColumn, gitRow) = FindVisibleCell(
+		var (noneColumn, noneRow) = FindVisibleCell(
 			exclusionChanged,
-			"[x] Use .gitignore",
+			"( ) No Git filtering",
 			1);
-		Assert.True(gitColumn >= 0 && gitRow >= 0);
+		Assert.True(noneColumn >= 0 && noneRow >= 0);
 		await terminal.SendMouseClickAsync(
-			gitColumn,
-			gitRow,
+			noneColumn,
+			noneRow,
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"[ ] Use .gitignore",
+			"(•) No Git filtering",
 			cancellationToken: TestContext.Current.CancellationToken);
 		var gitDisabled = await WaitForStableScreenAsync(
 			terminal,
 			TestContext.Current.CancellationToken);
-		Assert.Contains("[ ] Tracked Git files only", gitDisabled, StringComparison.Ordinal);
+		Assert.Contains("( ) Use .gitignore", gitDisabled, StringComparison.Ordinal);
+		Assert.Contains("( ) Tracked Git files only", gitDisabled, StringComparison.Ordinal);
 		Assert.Contains("[ ] Smart ignore", gitDisabled, StringComparison.Ordinal);
 
 		var (trackedColumn, trackedRow) = FindVisibleCell(
 			gitDisabled,
-			"[ ] Tracked Git files only",
+			"( ) Tracked Git files only",
 			1);
 		Assert.True(trackedColumn >= 0 && trackedRow >= 0);
 		await terminal.SendMouseClickAsync(
@@ -208,32 +209,37 @@ public sealed class TerminalTreeMousePtyTests
 			trackedRow,
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"[x] Tracked Git files only",
+			"(•) Tracked Git files only",
 			cancellationToken: TestContext.Current.CancellationToken);
 		var trackedEnabled = await WaitForStableScreenAsync(
 			terminal,
 			TestContext.Current.CancellationToken);
-		Assert.Contains("[ ] Use .gitignore", trackedEnabled, StringComparison.Ordinal);
+		Assert.Contains("( ) Use .gitignore", trackedEnabled, StringComparison.Ordinal);
 		await terminal.SendMouseClickAsync(
-			trackedColumn,
-			trackedRow,
+			noneColumn,
+			noneRow,
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"[ ] Tracked Git files only",
+			"(•) No Git filtering",
 			cancellationToken: TestContext.Current.CancellationToken);
+		var (gitColumn, gitRow) = FindVisibleCell(
+			terminal.CaptureScreen(),
+			"( ) Use .gitignore",
+			1);
+		Assert.True(gitColumn >= 0 && gitRow >= 0);
 		await terminal.SendMouseClickAsync(
 			gitColumn,
 			gitRow,
 			cancellationToken: TestContext.Current.CancellationToken);
 		var gitChanged = await terminal.WaitForScreenAsync(
-			"[x] Use .gitignore",
+			"(•) Use .gitignore",
 			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.Contains("[ ] Tracked Git files only", gitChanged, StringComparison.Ordinal);
+		Assert.Contains("( ) Tracked Git files only", gitChanged, StringComparison.Ordinal);
 		Assert.Contains("> PARAMETERS", gitChanged, StringComparison.Ordinal);
 
 		var (exclusionAllColumn, exclusionAllRow) = FindVisibleCell(
 			gitChanged,
-			"[ ] All (10)",
+			"[ ] All (9)",
 			1);
 		Assert.True(exclusionAllColumn >= 0 && exclusionAllRow >= 0);
 		await terminal.SendMouseClickAsync(
@@ -249,7 +255,7 @@ public sealed class TerminalTreeMousePtyTests
 			exclusionAllRow,
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"[ ] Use .gitignore",
+			"(•) No Git filtering",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendMouseClickAsync(
 			exclusionAllColumn,
@@ -347,9 +353,9 @@ public sealed class TerminalTreeMousePtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendAsync("X", TestContext.Current.CancellationToken);
 		var initial = await terminal.WaitForScreenAsync(
-			"[x] Use .gitignore",
+			"(•) Use .gitignore",
 			cancellationToken: TestContext.Current.CancellationToken);
-		var (column, row) = FindVisibleCell(initial, "[x] Use .gitignore", 8);
+		var (column, row) = FindVisibleCell(initial, "(•) Use .gitignore", 8);
 		Assert.True(column >= 0 && row >= 0);
 
 		for (var step = 0; step < 12; step++)
@@ -373,7 +379,7 @@ public sealed class TerminalTreeMousePtyTests
 				TestContext.Current.CancellationToken);
 		}
 		var restored = await terminal.WaitForScreenAsync(
-			"[x] Use .gitignore",
+			"(•) Use .gitignore",
 			timeout: TimeSpan.FromSeconds(10),
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("[x] All", ExtractPanel(restored, "Exclusions", "File types"), StringComparison.Ordinal);

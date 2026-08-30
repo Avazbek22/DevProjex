@@ -8,11 +8,11 @@
 [ ] Strip comments
 [ ] Strip blank lines
 
-  [x] All (10)
-[x] Use .gitignore                                                             ▲
-[ ] Tracked Git files only                                                     |
-[x] Smart ignore                                                               .
-[x] Empty folders                                                              ▼
+  [x] All (9)
+( ) No Git filtering                                                           ▲
+(*) Use .gitignore                                                             |
+( ) Tracked Git files only                                                     .
+( ) Staged Git files                                                           ▼
   [x] All (3)
 [x] .cs
 [x] .json
@@ -21,4 +21,4 @@
 
 
  Files 3 | Folders 2 | 40 B | ~<TOKENS> tokens | Warnings 0 | Errors 0
- Up/Down Move  Enter Change  Tab/F6 Tree  Ctrl+P Actions  ? Help
+ C Content  X Exclusions  T Types  M Git mode  : Commands

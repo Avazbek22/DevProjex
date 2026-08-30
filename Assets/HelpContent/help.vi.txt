@@ -103,7 +103,7 @@ Ví dụ:
 Ghi chú:
 * `.` có nghĩa là thư mục terminal hiện tại;
 * đường dẫn có dấu cách phải được đặt trong dấu ngoặc kép;
-* `--git-mode` chọn không lọc Git, `.gitignore` hoặc các tệp Git được theo dõi;
+* `--git-mode` chọn `none`, `gitignore`, `tracked`, `staged`, `changes` hoặc `diff:<ref>..<ref>`;
 * `--exclude` kiểm soát các loại trừ thông thường tách biệt với tính năng lọc Git;
 * các lệnh phân tích và xuất có tính xác định và không mở giao diện máy tính để bàn;
 * `tui`, `open`, `analyze` và cả hai lệnh `export` cũng chấp nhận URL kho lưu trữ Git; bản sao đi vào bộ đệm được quản lý (`devprojex cache`);
@@ -356,8 +356,6 @@ Bỏ qua các quy tắc được tích lũy. Nếu ít nhất một quy tắc đ
 Tùy thuộc vào nội dung dự án, các tùy chọn sau có thể được hiển thị:
 
 * Smart Ignore
-* Sử dụng.gitignore
-* Chỉ các tệp Git được theo dõi
 * Thư mục trống
 * Tệp trống
 * Thư mục ẩn
@@ -366,7 +364,7 @@ Tùy thuộc vào nội dung dự án, các tùy chọn sau có thể được h
 * Tệp có tiền tố dấu chấm
 * Tệp không có phần mở rộng
 
-Bên trong kho lưu trữ Git, "Chỉ sử dụng.gitignore" và "Chỉ các tệp Git được theo dõi" vẫn hiển thị dưới dạng cặp hộp kiểm ổn định. Kích hoạt cái này sẽ xóa cái kia. Nhấp vào hộp kiểm đang hoạt động một lần nữa sẽ xóa nó, tắt cả hai bộ lọc Git mà không thay đổi Smart Ignore hoặc các loại trừ cơ bản. Các tùy chọn khác được hiển thị khi quy tắc của chúng có thể thay đổi cây hiện tại. Do đó, danh sách có thể thay đổi sau khi chuyển đổi quy tắc khác hoặc loại tệp.
+Trong kho Git, GUI cung cấp năm chế độ Git: không lọc, `.gitignore`, tệp được theo dõi, tệp đã đưa vào vùng đệm Git hoặc tất cả thay đổi hiện tại. Bên ngoài kho Git, chỉ có chế độ không lọc và `.gitignore`. TUI luôn hiển thị cùng năm giá trị dưới dạng nút chọn, nhưng sẽ vô hiệu hóa các dòng cần kho Git khi không có kho nào; phạm vi `diff:<ref>..<ref>` đang hoạt động xuất hiện ở dòng thứ sáu. Chọn một giá trị sẽ thay thế chế độ Git hiện tại mà không thay đổi Smart Ignore hay các loại trừ cơ bản. Các tùy chọn khác xuất hiện khi quy tắc của chúng có thể ảnh hưởng đến cây hiện tại.
 
 Một tùy chọn mới được bật theo mặc định khi nó xuất hiện lần đầu tiên. Một tùy chọn đã biết sẽ giữ nguyên lựa chọn của người dùng ngay cả khi nó tạm thời biến mất khỏi danh sách.
 
@@ -432,12 +430,12 @@ Mọi kho lưu trữ lồng nhau và cây làm việc lồng nhau có thể truy
 
 Trong không gian làm việc Máy tính để bàn đã mở, lựa chọn được theo dõi rõ ràng vẫn hiển thị và không đóng lỗi: đầu ra và xuất bị chặn khi mức độ sẵn sàng không thành công, trong khi trạng thái sẵn sàng một phần vẫn tiếp tục với cảnh báo cục bộ.
 
-"Sử dụng.gitignore" và "Chỉ các tệp Git được theo dõi" sẽ loại trừ lẫn nhau khi được bật. Hộp kiểm đang hoạt động cũng có thể bị xóa để tắt tính năng lọc Git. Đối với các dự án cục bộ hỗ trợ hồ sơ, trạng thái này được lưu cùng với loại tệp và các cài đặt loại trừ khác.
+Các chế độ Git loại trừ lẫn nhau; `none` tắt tính năng lọc Git. Các chế độ tức thời `staged`, `changes` và `diff:<ref>..<ref>` không được lưu vào hồ sơ. Khi một chế độ tức thời đang hoạt động, hồ sơ dự án cục bộ của GUI sẽ giữ chế độ cố định được bật gần nhất là `gitignore` hoặc `tracked`. `none` chỉ được lưu khi chính nó đang hoạt động tại thời điểm lưu. TUI và CLI từ chối lưu hồ sơ di động khi một chế độ tức thời đang hoạt động.
 
 ### 12.7 Mối quan hệ giữa lọc Git và Smart Ignore
-Các hộp kiểm Git và Smart Ignore là các điều khiển độc lập. Chế độ Git đã chọn sẽ áp dụng đầu tiên ở mọi phạm vi Git có thể truy cập. Smart Ignore sau đó xử lý các mục còn lại và các quy tắc cơ bản sẽ chạy cuối cùng.
+Chế độ Git đã chọn và Smart Ignore là các điều khiển độc lập. Chế độ Git được áp dụng trước ở mọi phạm vi Git có thể truy cập. Smart Ignore sau đó xử lý các mục còn lại và các quy tắc cơ bản sẽ chạy cuối cùng.
 
-Smart Ignore có thể ẩn trong khi chế độ Git đã chọn đã bao gồm tất cả các ứng cử viên của nó, sau đó xuất hiện sau khi chế độ Git được thay đổi hoặc xóa. Cả hai hộp kiểm Git vẫn có sẵn trong kho Git.
+Smart Ignore có thể ẩn trong khi chế độ Git đã chọn đã bao gồm tất cả các ứng cử viên của nó, sau đó xuất hiện sau khi chế độ Git được thay đổi hoặc tắt. Trong kho Git, mọi chế độ cần kho Git đều vẫn khả dụng.
 
 Quy tắc phủ định Git bắt đầu bằng `!` chỉ hủy kết quả Git. Nó không vô hiệu Smart Ignore hoặc quy tắc cơ bản.
 

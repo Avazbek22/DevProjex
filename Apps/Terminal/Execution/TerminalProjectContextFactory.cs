@@ -5,21 +5,25 @@ namespace DevProjex.Terminal.Execution;
 public sealed class TerminalProjectContextFactory(
 	ProjectContextPlanner planner,
 	ProjectSourceIdentityResolver sourceIdentityResolver,
-	SecretRedactionSession secretRedactionSession)
+	SecretRedactionSession secretRedactionSession,
+	IGitScopePathProvider gitScopePathProvider)
 {
 	public Task<ProjectContextPlan> BuildAsync(
 		string projectPath,
 		ProjectSelectionSpec selection,
 		ProjectSourceIdentity? knownIdentity = null,
 		CancellationToken cancellationToken = default,
-		bool captureIgnoreImpactCounts = false)
+		bool captureIgnoreImpactCounts = false,
+		IReadOnlyDictionary<string, bool>? knownExtensionStates = null)
 		=> BuildAsync(
 			projectPath,
 			selection,
 			includeOutputMetrics: true,
 			knownIdentity,
 			cancellationToken,
-			captureIgnoreImpactCounts);
+			captureIgnoreImpactCounts,
+			includeContentOutputMetrics: true,
+			knownExtensionStates);
 
 	internal async Task<ProjectContextPlan> BuildAsync(
 		string projectPath,
@@ -28,7 +32,8 @@ public sealed class TerminalProjectContextFactory(
 		ProjectSourceIdentity? knownIdentity = null,
 		CancellationToken cancellationToken = default,
 		bool captureIgnoreImpactCounts = false,
-		bool includeContentOutputMetrics = true)
+		bool includeContentOutputMetrics = true,
+		IReadOnlyDictionary<string, bool>? knownExtensionStates = null)
 	{
 		var markedSecrets = ProjectSelectionMarkedSecretsResolver.Resolve(selection);
 		if (await secretRedactionSession
@@ -50,23 +55,36 @@ public sealed class TerminalProjectContextFactory(
 		var sourceIdentity = await sourceIdentityResolver
 			.ResolveAsync(projectPath, knownIdentity, cancellationToken)
 			.ConfigureAwait(false);
-		var request = new ProjectContextRequest(projectPath, selection, sourceIdentity);
+		var request = new ProjectContextRequest(projectPath, selection, sourceIdentity)
+		{
+			KnownExtensionStates = knownExtensionStates
+		};
+		ProjectContextPlan plan;
 		if (!includeOutputMetrics)
 		{
-			return await planner
+			plan = await planner
 				.BuildStructureAsync(request, cancellationToken)
 				.ConfigureAwait(false);
 		}
-		if (!includeContentOutputMetrics)
+		else if (!includeContentOutputMetrics)
 		{
-			return await planner
+			plan = await planner
 				.BuildWithTreeMetricsAsync(request, cancellationToken)
 				.ConfigureAwait(false);
 		}
-		return captureIgnoreImpactCounts
-			? await planner
+		else if (captureIgnoreImpactCounts)
+		{
+			plan = await planner
 				.BuildWithIgnoreImpactCountsAsync(request, cancellationToken)
-				.ConfigureAwait(false)
-			: await planner.BuildAsync(request, cancellationToken).ConfigureAwait(false);
+				.ConfigureAwait(false);
+		}
+		else
+		{
+			plan = await planner.BuildAsync(request, cancellationToken).ConfigureAwait(false);
+		}
+
+		return await GitScopeFilter
+			.ApplyAsync(planner, plan, gitScopePathProvider, cancellationToken)
+			.ConfigureAwait(false);
 	}
 }

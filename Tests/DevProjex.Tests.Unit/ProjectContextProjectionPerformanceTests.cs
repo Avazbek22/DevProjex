@@ -140,6 +140,34 @@ public sealed class ProjectContextProjectionPerformanceTests(ITestOutputHelper o
 	}
 
 	[Fact]
+	public void OrderedPathFingerprint_DistinguishesDiffRanges()
+	{
+		var root = CreateTree(directoryCount: 1, filesPerDirectory: 1);
+		var projection = ProjectContextPlanner.ResolveSelectionProjection(
+			root,
+			new HashSet<string>(PathComparer.Default),
+			selectsNoEffectivePaths: false,
+			knownFullTreeFilePaths: null,
+			TestContext.Current.CancellationToken);
+		var selection = ProjectSelectionSpec.Standard with { GitMode = GitFilteringMode.Diff };
+
+		var first = ProjectContextPlanner.BuildFingerprint(
+			root.FullPath,
+			selection with { GitDiffRange = "main..feature-a" },
+			projection.IncludedFiles,
+			projection.IncludedFolders,
+			TestContext.Current.CancellationToken);
+		var second = ProjectContextPlanner.BuildFingerprint(
+			root.FullPath,
+			selection with { GitDiffRange = "main..feature-b" },
+			projection.IncludedFiles,
+			projection.IncludedFolders,
+			TestContext.Current.CancellationToken);
+
+		Assert.NotEqual(first, second);
+	}
+
+	[Fact]
 	public void ResolveProjectedTree_DistinguishesCompleteAndMissingExplicitSelections()
 	{
 		var root = CreateTree(directoryCount: 1, filesPerDirectory: 1);

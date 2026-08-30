@@ -5,5 +5,6 @@ internal sealed record ProjectLoadSnapshot(
     TreeRefreshInput TreeInput,
     BuildTreeResult TreeResult,
     ProjectTreeInventorySnapshot? TreeInventory,
+	GitScopePresentationProjection? GitScopePresentation,
     TreeNodeViewModel TreeRoot,
 	PersistentSecretMarksSnapshot? PersistentMarks);

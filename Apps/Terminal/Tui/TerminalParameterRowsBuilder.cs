@@ -5,7 +5,8 @@ namespace DevProjex.Terminal.Tui;
 internal sealed class TerminalParameterRowsBuilder(
 	Func<string, string> localize,
 	Func<string, string> fitLabel,
-	Func<IgnoreOptionId, SecretScanState, int?, int?, string> formatRedactionLabel)
+	Func<IgnoreOptionId, SecretScanState, int?, int?, string> formatRedactionLabel,
+	bool useUnicodeRadioMarker = true)
 {
 	public IReadOnlyList<TerminalParameterRow> BuildContent(
 		ProjectContextPlan plan,
@@ -37,21 +38,43 @@ internal sealed class TerminalParameterRowsBuilder(
 
 	public IReadOnlyList<TerminalParameterRow> BuildExclusions(
 		ProjectContextPlan plan,
-		ProjectSelectionSpec? selectionOverride = null)
+		ProjectSelectionSpec? selectionOverride = null,
+		bool gitCliAvailable = true)
 	{
 		ArgumentNullException.ThrowIfNull(plan);
 		var selection = selectionOverride ?? plan.Selection;
 		var exclusions = (selection.Exclusions ?? []).ToHashSet();
 		var rows = new List<TerminalParameterRow>();
+		var activeMode = selection.GitMode ?? plan.GitReadiness.Mode;
+		var hasRepository = gitCliAvailable &&
+		                    (plan.GitReadiness.HasRepositoryBoundary ||
+		                     GitRepositoryBoundaryProbe.ExistsAtOrAbove(plan.SourceRoot));
 		rows.AddRange(ProjectPresentationCatalog.GitFiltering
-			.Where(static descriptor => descriptor.Id != GitFilteringMode.None)
 			.Select(descriptor => new TerminalParameterRow(
 				$"git:{descriptor.Token}",
 				TerminalParameterRowKind.GitMode,
 				fitLabel(localize(descriptor.LabelKey)),
-				(selection.GitMode ?? plan.GitReadiness.Mode) == descriptor.Id,
+				activeMode == descriptor.Id,
+				IsEnabled: descriptor.Id is not (GitFilteringMode.TrackedFilesOnly or
+					GitFilteringMode.Staged or GitFilteringMode.Changes) || hasRepository,
+				UseUnicodeRadioMarker: useUnicodeRadioMarker,
 				GitMode: descriptor.Id)));
-		rows.AddRange(ProjectPresentationCatalog.Exclusions.Select(descriptor =>
+		if (activeMode == GitFilteringMode.Diff &&
+		    !string.IsNullOrWhiteSpace(selection.GitDiffRange))
+		{
+			rows.Add(new TerminalParameterRow(
+				"git:diff",
+				TerminalParameterRowKind.GitMode,
+				fitLabel($"diff: {selection.GitDiffRange}"),
+				true,
+				IsEnabled: hasRepository,
+				UseUnicodeRadioMarker: useUnicodeRadioMarker,
+				GitMode: GitFilteringMode.Diff,
+				Value: selection.GitDiffRange));
+		}
+		rows.AddRange(ProjectPresentationCatalog.Exclusions
+			.Where(descriptor => IsPathExclusionAvailable(descriptor, plan))
+			.Select(descriptor =>
 			new TerminalParameterRow(
 				$"exclusion:{descriptor.Token}",
 				TerminalParameterRowKind.Exclusion,
@@ -68,14 +91,16 @@ internal sealed class TerminalParameterRowsBuilder(
 		ArgumentNullException.ThrowIfNull(plan);
 		var selection = selectionOverride ?? plan.Selection;
 		var exclusions = (selection.Exclusions ?? []).ToHashSet();
-		var count = ProjectPresentationCatalog.GitFiltering.Count - 1 +
-		            ProjectPresentationCatalog.Exclusions.Count;
+		var availableExclusions = ProjectPresentationCatalog.Exclusions
+			.Where(descriptor => IsPathExclusionAvailable(descriptor, plan))
+			.ToArray();
+		var count = availableExclusions.Length;
 		return new TerminalParameterRow(
 			"exclusions:all",
 			TerminalParameterRowKind.ToggleAllExclusions,
 			FormatAggregateLabel(count),
-			(selection.GitMode ?? plan.GitReadiness.Mode) != GitFilteringMode.None &&
-			ProjectPresentationCatalog.Exclusions.All(descriptor =>
+			count > 0 &&
+			availableExclusions.All(descriptor =>
 				exclusions.Contains(descriptor.RequireId())));
 	}
 
@@ -180,4 +205,16 @@ internal sealed class TerminalParameterRowsBuilder(
 			ProjectExclusion.SmartIgnore => null,
 			_ => throw new ArgumentOutOfRangeException(nameof(exclusion), exclusion, null)
 		};
+
+	private static bool IsPathExclusionAvailable(
+		ProjectExclusionDescriptor descriptor,
+		ProjectContextPlan plan)
+	{
+		if (!plan.HasIgnoreOptionCounts)
+			return true;
+
+		return descriptor.Id == ProjectExclusion.SmartIgnore
+			? plan.IgnoreControllerImpactCounts.SmartIgnore > 0
+			: GetPathExclusionImpactCount(descriptor.RequireId(), plan.IgnoreOptionCounts) > 0;
+	}
 }

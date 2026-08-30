@@ -128,11 +128,13 @@ public sealed class TerminalVisualSnapshotTests
 	public async Task WorkspaceSnapshotsCoverRecoverableErrorAndProjectExportCompletion()
 	{
 		using var project = CreateProjectForEquivalentCommandSnapshot();
+		InitializeGitRepository(project.Path);
 		using var output = new FixedTemporaryDirectory("DevProjex-Tui-Snapshot-Export");
 		await using var terminal = await StartProjectAsync(project.Path);
 
 		await WaitForStableScreenAsync(terminal, "PROJECT TREE");
-		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
+		File.WriteAllText(Path.Combine(project.Path, ".git", "index"), "not-a-git-index");
+		await terminal.SendAsync(":set git tracked\r", TestContext.Current.CancellationToken);
 		await WaitForStableScreenAsync(terminal, "DPX-GIT-TRACKED-INDEX-UNAVAILABLE");
 		Verify("workspace-error-en-120x30", terminal, project.Path);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
@@ -153,7 +155,7 @@ public sealed class TerminalVisualSnapshotTests
 			(output.Path, "<OUTPUT_ROOT>"));
 		Assert.True(File.Exists(Path.Combine(destination, "src", "App.cs")));
 		await terminal.WaitForScreenAsync(
-			"> PARAMETERS",
+			"> PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await ExitAsync(terminal);
 	}
@@ -464,6 +466,32 @@ public sealed class TerminalVisualSnapshotTests
 			"internal sealed class Handler {}");
 		WriteProjectFile(projectPath, "readme.md", "# Test project");
 		return new OwnedProject(owner, projectPath);
+	}
+
+	private static void InitializeGitRepository(string projectPath)
+	{
+		RunGit(projectPath, "init", "--quiet");
+		RunGit(projectPath, "config", "user.email", "terminal-tests@devprojex.local");
+		RunGit(projectPath, "config", "user.name", "DevProjex Terminal Tests");
+		RunGit(projectPath, "add", "--all");
+		RunGit(projectPath, "commit", "--quiet", "-m", "Initial test project");
+	}
+
+	private static void RunGit(string workingDirectory, params string[] arguments)
+	{
+		var startInfo = new ProcessStartInfo
+		{
+			FileName = OperatingSystem.IsWindows() ? "git.exe" : "git",
+			WorkingDirectory = workingDirectory,
+			UseShellExecute = false,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			CreateNoWindow = true
+		};
+		foreach (var argument in arguments)
+			startInfo.ArgumentList.Add(argument);
+		var result = TerminalTestProcess.Run(startInfo);
+		Assert.Equal(0, result.ExitCode);
 	}
 
 	private sealed class FixedTemporaryDirectory : IDisposable

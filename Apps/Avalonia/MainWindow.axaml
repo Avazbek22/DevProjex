@@ -1008,6 +1008,7 @@
               <views:SettingsPanelView Name="SettingsPanel"
                                        ApplySettingsRequested="OnApplySettings"
                                        IgnoreAllChanged="OnIgnoreAllChanged"
+									   GitFilteringModeChanged="OnGitFilteringModeChanged"
 									   ContentProcessingAllChanged="OnContentProcessingAllChanged"
                                        ExtensionsAllChanged="OnExtensionsAllChanged"
                                        SecretScanRetryRequested="OnSecretScanRetryRequested" />

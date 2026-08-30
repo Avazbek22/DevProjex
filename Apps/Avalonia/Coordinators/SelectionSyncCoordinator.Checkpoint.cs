@@ -20,6 +20,7 @@ public sealed partial class SelectionSyncCoordinator
             IgnoreOptionCounts ignoreOptionCounts,
             IgnoreControllerImpactCounts controllerImpactCounts,
             GitWorkspaceEvidence gitEvidence,
+			bool gitRepositoryBoundaryKnownAbsent,
             SelectionRefreshRollbackSnapshot? stableSelectionSnapshot,
             SelectionRefreshRollbackSnapshot? reversibleSelectionSnapshot,
             AppliedSelectionState? appliedSelectionState,
@@ -39,6 +40,7 @@ public sealed partial class SelectionSyncCoordinator
             IgnoreOptionCounts = ignoreOptionCounts;
             ControllerImpactCounts = controllerImpactCounts;
             GitEvidence = gitEvidence;
+			GitRepositoryBoundaryKnownAbsent = gitRepositoryBoundaryKnownAbsent;
             StableSelectionSnapshot = stableSelectionSnapshot;
             ReversibleSelectionSnapshot = reversibleSelectionSnapshot;
             AppliedSelectionState = appliedSelectionState;
@@ -59,6 +61,7 @@ public sealed partial class SelectionSyncCoordinator
         internal IgnoreOptionCounts IgnoreOptionCounts { get; }
         internal IgnoreControllerImpactCounts ControllerImpactCounts { get; }
         internal GitWorkspaceEvidence GitEvidence { get; }
+		internal bool GitRepositoryBoundaryKnownAbsent { get; }
         internal SelectionRefreshRollbackSnapshot? StableSelectionSnapshot { get; }
         internal SelectionRefreshRollbackSnapshot? ReversibleSelectionSnapshot { get; }
         internal AppliedSelectionState? AppliedSelectionState { get; }
@@ -96,6 +99,7 @@ public sealed partial class SelectionSyncCoordinator
             _ignoreOptionCounts,
             _ignoreControllerImpactCounts,
             _gitWorkspaceEvidence,
+			_gitRepositoryBoundaryKnownAbsent,
             _stableSelectionSnapshot,
             _reversibleSelectionSnapshot,
             _appliedSelectionState,
@@ -151,6 +155,7 @@ public sealed partial class SelectionSyncCoordinator
             _ignoreOptionCounts = checkpoint.IgnoreOptionCounts;
             _ignoreControllerImpactCounts = checkpoint.ControllerImpactCounts;
             _gitWorkspaceEvidence = checkpoint.GitEvidence;
+			_gitRepositoryBoundaryKnownAbsent = checkpoint.GitRepositoryBoundaryKnownAbsent;
             _stableSelectionSnapshot = checkpoint.StableSelectionSnapshot;
             _reversibleSelectionSnapshot = checkpoint.ReversibleSelectionSnapshot;
             _appliedSelectionState = checkpoint.AppliedSelectionState;

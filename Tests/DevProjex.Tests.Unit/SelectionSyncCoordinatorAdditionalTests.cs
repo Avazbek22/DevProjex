@@ -1,5 +1,6 @@
 using DevProjex.Application.Models;
 using DevProjex.Application.Context;
+using DevProjex.Application.Presentation;
 using DevProjex.Application.Secrets;
 using DevProjex.Avalonia.Collections;
 
@@ -8,6 +9,47 @@ namespace DevProjex.Tests.Unit;
 [Collection("AvaloniaUI")]
 public sealed class SelectionSyncCoordinatorAdditionalTests
 {
+	[Fact]
+	public void MomentaryGuiGitModeUsesRadioPresentationAndPersistsTheStickyMode()
+	{
+		using var project = new TemporaryDirectory();
+		project.CreateFolder(".git");
+		project.CreateFile(".gitignore", "*.tmp\n");
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(
+			viewModel,
+			currentPathProvider: () => project.Path,
+			availabilityProvider: static (_, _) => new IgnoreOptionsAvailability(
+				IncludeGitIgnore: true,
+				IncludeSmartIgnore: true,
+				IncludeTrackedGitFilesOnly: true));
+
+		coordinator.PopulateIgnoreOptionsForRootSelection([], project.Path);
+		Assert.Equal(
+			[
+				GitFilteringMode.None,
+				GitFilteringMode.RespectGitIgnore,
+				GitFilteringMode.TrackedFilesOnly,
+				GitFilteringMode.Staged,
+				GitFilteringMode.Changes
+			],
+			viewModel.GitFilteringModes.Select(static option => option.Mode));
+		Assert.DoesNotContain(
+			viewModel.PathIgnoreOptions,
+			static option => GitFilteringModeResolver.IsGitFilteringOption(option.Id));
+
+		coordinator.HandleGitFilteringModeChanged(GitFilteringMode.Staged, project.Path);
+
+		Assert.Equal(GitFilteringMode.Staged, coordinator.ActiveGitFilteringMode);
+		Assert.Equal(GitFilteringMode.Staged, viewModel.SelectedGitFilteringModeOption?.Mode);
+		var persisted = coordinator.GetPersistableSelectedIgnoreOptionIds();
+		Assert.Contains(IgnoreOptionId.UseGitIgnore, persisted);
+		Assert.DoesNotContain(IgnoreOptionId.TrackedGitFilesOnly, persisted);
+		var states = coordinator.SnapshotIgnoreOptionStatesForPersistence();
+		Assert.True(states![IgnoreOptionId.UseGitIgnore]);
+		Assert.False(states[IgnoreOptionId.TrackedGitFilesOnly]);
+	}
+
 	[Fact]
 	public void AppliedTrackedMode_RemainsFailClosedWhenItsOptionIsNoLongerVisible()
 	{
@@ -236,7 +278,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	}
 
 	[Fact]
-	public void HandleIgnoreAllChanged_OffOnCyclePreservesTrackedGitFilteringMode()
+	public void HandleIgnoreAllChanged_OffOnCycleDoesNotMutateTrackedGitFilteringMode()
 	{
 		const string projectPath = @"C:\Project";
 		var viewModel = CreateViewModel();
@@ -273,7 +315,13 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 
 		coordinator.HandleIgnoreAllChanged(isChecked: false, currentPath: null);
 
-		Assert.All(viewModel.IgnoreOptions, static option => Assert.False(option.IsChecked));
+		Assert.All(
+			viewModel.IgnoreOptions.Where(static option =>
+				!ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option.Id) &&
+				!GitFilteringModeResolver.IsGitFilteringOption(option.Id)),
+			static option => Assert.False(option.IsChecked));
+		Assert.True(viewModel.IgnoreOptions.Single(
+			static option => option.Id == IgnoreOptionId.TrackedGitFilesOnly).IsChecked);
 
 		coordinator.HandleIgnoreAllChanged(isChecked: true, currentPath: null);
 
@@ -498,6 +546,34 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		{
 			releaseScan.Set();
 		}
+	}
+
+	[AvaloniaFact]
+	public async Task GitScopeModesRemainUnavailableWhenRepositoryExistsButGitCliDoesNot()
+	{
+		var viewModel = CreateViewModel();
+		var availabilityChecks = 0;
+		using var coordinator = CreateCoordinator(
+			viewModel,
+			currentPathProvider: () => @"C:\Project",
+			availabilityProvider: static (_, _) => new IgnoreOptionsAvailability(
+				IncludeGitIgnore: true,
+				IncludeSmartIgnore: true,
+				IncludeTrackedGitFilesOnly: true),
+			gitAvailabilityResolver: _ =>
+			{
+				availabilityChecks++;
+				return Task.FromResult(false);
+			});
+
+		await coordinator.EnsureGitCliAvailabilityAsync(TestContext.Current.CancellationToken);
+		await coordinator.EnsureGitCliAvailabilityAsync(TestContext.Current.CancellationToken);
+		coordinator.PopulateIgnoreOptionsForRootSelection([], @"C:\Project");
+
+		Assert.Equal(1, availabilityChecks);
+		Assert.Equal(
+			[GitFilteringMode.None, GitFilteringMode.RespectGitIgnore],
+			viewModel.GitFilteringModes.Select(static option => option.Mode));
 	}
 
 	[AvaloniaFact]
@@ -1556,7 +1632,7 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	}
 
 	[AvaloniaFact]
-	public async Task FailedRefreshRollback_AllOffWithTrackedPreference_AllOnRestoresTrackedMode()
+	public async Task FailedRefreshRollback_AllOffPreservesTrackedMode()
 	{
 		const string path = @"C:\Project";
 		var failRefresh = false;
@@ -1578,11 +1654,6 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		HookAllOptionListeners(coordinator, viewModel);
 
 		coordinator.HandleIgnoreAllChanged(isChecked: false, currentPath: null);
-		var allOffSnapshot = WithGitMode(
-			trackedSnapshot,
-			useGitIgnore: false,
-			trackedOnly: false);
-		ApplySelectionRefreshSnapshot(coordinator, allOffSnapshot);
 		var rollbackSnapshot = GetStableSelectionSnapshot(coordinator);
 
 		failRefresh = true;
@@ -2290,7 +2361,8 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		Func<string?>? currentPathProvider = null,
 		Func<string, IReadOnlyCollection<string>, IgnoreOptionsAvailability>? availabilityProvider = null,
 		Action? contentTransformationChanged = null,
-		Action<IgnoreOptionId?>? contentTransformationChangedWithId = null)
+		Action<IgnoreOptionId?>? contentTransformationChangedWithId = null,
+		Func<CancellationToken, Task<bool>>? gitAvailabilityResolver = null)
 	{
 		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
 		scanner ??= new StubFileSystemScanner();
@@ -2306,7 +2378,8 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 
 		if (availabilityProvider is null &&
 		    contentTransformationChanged is null &&
-		    contentTransformationChangedWithId is null)
+		    contentTransformationChangedWithId is null &&
+		    gitAvailabilityResolver is null)
 		{
 			return new SelectionSyncCoordinator(
 				viewModel,
@@ -2334,7 +2407,8 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 			contentTransformationChanged: contentTransformationChangedWithId ??
 				(contentTransformationChanged is null
 					? null
-					: _ => contentTransformationChanged()));
+					: _ => contentTransformationChanged()),
+			gitAvailabilityResolver: gitAvailabilityResolver);
 	}
 
 	[Fact]

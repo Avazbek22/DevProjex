@@ -950,6 +950,33 @@ public sealed class DesktopControlIntegrationTests
 			request.TreeFormat);
 	}
 
+	[Theory]
+	[InlineData(GitFilteringMode.Staged, "staged")]
+	[InlineData(GitFilteringMode.Changes, "changes")]
+	public void OpenWaitReadinessRequiresMomentaryGitModeToBeApplied(
+		GitFilteringMode mode,
+		string token)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var request = new DesktopOpenRequest(
+			ProjectPath: project,
+			Selection: ProjectSelectionSpec.Standard with { GitMode = mode });
+		var state = DeserializeState(new Dictionary<string, object?>
+		{
+			["startupReady"] = true,
+			["projectLoaded"] = true,
+			["projectPath"] = project,
+			["gitMode"] = token,
+			["trackedGitReady"] = true
+		});
+
+		Assert.True(DesktopOpenReadiness.IsApplied(request, state));
+		var unavailable = state.ToDictionary(static pair => pair.Key, static pair => pair.Value);
+		unavailable["trackedGitReady"] = JsonSerializer.SerializeToElement(false);
+		Assert.False(DesktopOpenReadiness.IsApplied(request, unavailable));
+	}
+
 	[Fact]
 	public void OpenRequestPreservesExplicitPrivateDataSelectionThroughJsonTransport()
 	{

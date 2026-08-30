@@ -44,6 +44,26 @@ public sealed class ProjectContextFileSizeTests
 		Assert.Equal(new FileInfo(second).Length, sizes[second]);
 	}
 
+	[Fact]
+	public void SnapshotSizesPreserveCaseDistinctFilesOnCaseSensitiveVolumes()
+	{
+		var rootPath = Path.Combine(Path.GetTempPath(), $"case-sensitive-{Guid.NewGuid():N}");
+		var upper = Path.Combine(rootPath, "Foo.cs");
+		var lower = Path.Combine(rootPath, "foo.cs");
+		var root = CreateRoot(rootPath, upper, lower);
+		var inventory = CreateInventory(rootPath, (upper, 11), (lower, 22));
+
+		var sizes = ProjectContextPlanner.BuildEffectiveFileSizes(
+			root,
+			[upper, lower],
+			inventory,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(2, sizes.Count);
+		Assert.Equal(11, sizes[upper]);
+		Assert.Equal(22, sizes[lower]);
+	}
+
 	private static TreeNodeDescriptor CreateRoot(string rootPath, params string[] files) =>
 		new(
 			Path.GetFileName(rootPath),

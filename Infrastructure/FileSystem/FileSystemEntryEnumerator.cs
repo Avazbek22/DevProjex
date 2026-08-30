@@ -74,8 +74,11 @@ internal static class FileSystemEntryEnumerator
 		foreach (var entry in enumerable)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			if (entry.Name.Equals(".git", FileNameComparison))
-				gitMetadataPath ??= entry.FullPath;
+			if (entry.Name.Equals(".git", FileNameComparison) &&
+			    GitRepositoryBoundaryProbe.ExistsAt(path))
+			{
+				gitMetadataPath ??= Path.Combine(path, ".git");
+			}
 
 			if (!entry.IsDirectory)
 			{

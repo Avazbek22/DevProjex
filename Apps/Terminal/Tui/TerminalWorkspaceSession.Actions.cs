@@ -109,6 +109,7 @@ internal sealed partial class TerminalWorkspaceSession
 	private GitFilteringMode _preferredGitMode = GitFilteringMode.RespectGitIgnore;
 	private ProjectSelectionSpec? _settingsDraftSelection;
 	private Dictionary<string, bool>? _settingsDraftExtensionStates;
+	private GitFilteringMode? _settingsDraftPreferredGitMode;
 	private bool _settingsDraftOriginatedFromCommandLine;
 	private TerminalControlSourceStamp? _controlSourceStamp;
 	private TerminalRedactionLabelStamp? _redactionLabelStamp;
@@ -181,7 +182,8 @@ internal sealed partial class TerminalWorkspaceSession
 			collapsedControls,
 			contentControlsFrame,
 			filterControlsHost);
-		if (_state?.Plan.GitReadiness.Mode is not GitFilteringMode.None and { } mode)
+		if (_state?.Plan.GitReadiness.Mode is not GitFilteringMode.None and { } mode &&
+		    GitScopeSelection.IsPersistent(mode))
 			_preferredGitMode = mode;
 		return new WorkspaceControlViewGraph(
 			controlsFrame,
@@ -329,6 +331,7 @@ internal sealed partial class TerminalWorkspaceSession
 			_contentAllControlRows,
 			_parameterRowsBuilder.BuildContentAggregate(selection));
 		_contentControlRows = UpdateControlRows(
+			TerminalControlSection.Content,
 			_contentControls,
 			_contentControlRows,
 			BuildContentParameterRows(selection, snapshot),
@@ -338,6 +341,7 @@ internal sealed partial class TerminalWorkspaceSession
 			_exclusionAllControlRows,
 			_parameterRowsBuilder.BuildExclusionAggregate(_state.Plan, selection));
 		_exclusionControlRows = UpdateControlRows(
+			TerminalControlSection.Exclusions,
 			_exclusionControls,
 			_exclusionControlRows,
 			BuildExclusionParameterRows(),
@@ -347,22 +351,37 @@ internal sealed partial class TerminalWorkspaceSession
 			_extensionAllControlRows,
 			_parameterRowsBuilder.BuildExtensionAggregate(_state.Plan, selectedExtensions));
 		_extensionControlRows = UpdateControlRows(
+			TerminalControlSection.Extensions,
 			_extensionControls,
 			_extensionControlRows,
 			BuildExtensionParameterRows(),
 			_selectedExtensionControlKey);
 		if (_collapsedControls is not null)
 		{
+			var exclusionCounts = CountExclusionAxis(_exclusionControlRows);
 			_collapsedControls.Text = string.Join(
 				PanelSeparator,
 				$"{L("Preview.Mode.Content")} {_contentControlRows.Count(static row => row.IsSelected == true)}/{_contentControlRows.Count}",
-				$"{L("Terminal.Tui.Exclusions")} {_exclusionControlRows.Count(static row => row.IsSelected == true)}/{_exclusionControlRows.Count}",
+				$"{L("Terminal.Tui.Exclusions")} {exclusionCounts.Selected}/{exclusionCounts.Total}",
 				$"{L("Terminal.Tui.FileTypes")} {_extensionControlRows.Count(static row => row.IsSelected == true)}/{_extensionControlRows.Count}");
 		}
 		RefreshControlTitles();
 		UpdateControlSelectionSchemes();
 		_controlSourceStamp = sourceStamp;
 		_redactionLabelStamp = redactionStamp;
+	}
+
+	internal static (int Selected, int Total) CountExclusionAxis(
+		IReadOnlyCollection<TerminalParameterRow> rows)
+	{
+		ArgumentNullException.ThrowIfNull(rows);
+		var gitSelected = rows.Any(static row =>
+			row.Kind == TerminalParameterRowKind.GitMode && row.IsSelected == true);
+		return (
+			rows.Count(static row =>
+				row.Kind == TerminalParameterRowKind.Exclusion && row.IsSelected == true) +
+			(gitSelected ? 1 : 0),
+			rows.Count(static row => row.Kind == TerminalParameterRowKind.Exclusion) + 1);
 	}
 
 	internal static TerminalControlRefreshKind ResolveControlRefreshKind(
@@ -396,6 +415,7 @@ internal sealed partial class TerminalWorkspaceSession
 	}
 
 	private ResettableObservableCollection<TerminalParameterRow> UpdateControlRows(
+		TerminalControlSection section,
 		TerminalParameterListView list,
 		ResettableObservableCollection<TerminalParameterRow>? source,
 		IReadOnlyList<TerminalParameterRow> rows,
@@ -405,27 +425,43 @@ internal sealed partial class TerminalWorkspaceSession
 		{
 			source = [];
 			source.Reset(rows);
-			list.SetSource(source);
+			list.SetParameterSource(source);
 		}
 		else if (!TryUpdateRowsInPlace(source, rows))
 			source.Reset(rows);
 		if (source.Count > 0)
 		{
-			var selectedIndex = FindSelectedIndex(source, selectedKey);
-			list.SelectedItem = Math.Clamp(selectedIndex, 0, source.Count - 1);
+			var selectedIndex = FindPreferredControlRowIndex(source, selectedKey);
+			var clampedIndex = Math.Clamp(selectedIndex, 0, source.Count - 1);
+			list.SelectedItem = clampedIndex;
+			SetSelectedControlKey(section, source[clampedIndex].Key);
 		}
 		return source;
 	}
 
-	private static int FindSelectedIndex(
+	internal static int FindPreferredControlRowIndex(
 		IReadOnlyList<TerminalParameterRow> rows,
 		string? selectedKey)
 	{
-		if (selectedKey is null)
-			return 0;
+		if (selectedKey is not null)
+		{
+			for (var index = 0; index < rows.Count; index++)
+			{
+				if (rows[index].IsEnabled &&
+				    string.Equals(rows[index].Key, selectedKey, StringComparison.Ordinal))
+				{
+					return index;
+				}
+			}
+		}
 		for (var index = 0; index < rows.Count; index++)
 		{
-			if (string.Equals(rows[index].Key, selectedKey, StringComparison.Ordinal))
+			if (rows[index].IsEnabled && rows[index].IsSelected == true)
+				return index;
+		}
+		for (var index = 0; index < rows.Count; index++)
+		{
+			if (rows[index].IsEnabled)
 				return index;
 		}
 		return 0;
@@ -456,6 +492,8 @@ internal sealed partial class TerminalWorkspaceSession
 		left.Kind == right.Kind &&
 		string.Equals(left.Label, right.Label, StringComparison.Ordinal) &&
 		left.IsSelected == right.IsSelected &&
+		left.IsEnabled == right.IsEnabled &&
+		left.UseUnicodeRadioMarker == right.UseUnicodeRadioMarker &&
 		left.GitMode == right.GitMode &&
 		left.Exclusion == right.Exclusion &&
 		left.ContentTransformation == right.ContentTransformation &&
@@ -474,6 +512,7 @@ internal sealed partial class TerminalWorkspaceSession
 			_contentAllControlRows,
 			_parameterRowsBuilder.BuildContentAggregate(selection));
 		_contentControlRows = UpdateControlRows(
+			TerminalControlSection.Content,
 			_contentControls,
 			_contentControlRows,
 			BuildContentParameterRows(selection, snapshot),
@@ -499,7 +538,8 @@ internal sealed partial class TerminalWorkspaceSession
 			? []
 			: _parameterRowsBuilder.BuildExclusions(
 				_state.Plan,
-				GetDisplayedSettingsSelection());
+				GetDisplayedSettingsSelection(),
+				_gitCliAvailable);
 
 	private IReadOnlyList<TerminalParameterRow> BuildExtensionParameterRows() =>
 		_state is null
@@ -947,7 +987,9 @@ internal sealed partial class TerminalWorkspaceSession
 			execute);
 
 	private string FormatGitMode(GitFilteringMode mode) =>
-		L(ProjectPresentationCatalog.Get(mode).LabelKey);
+		mode == GitFilteringMode.Diff
+			? GitScopeSelection.ToToken(mode, GetDisplayedSettingsSelection().GitDiffRange)
+			: L(ProjectPresentationCatalog.Get(mode).LabelKey);
 
 	private string FormatExclusions(IReadOnlyCollection<ProjectExclusion> exclusions)
 	{
@@ -995,10 +1037,12 @@ internal sealed partial class TerminalWorkspaceSession
 
 	private void ActivateControlRow(TerminalControlSection section, TerminalParameterRow row)
 	{
+		if (!row.IsEnabled)
+			return;
 		switch (row.Kind)
 		{
 			case TerminalParameterRowKind.GitMode when row.GitMode is { } mode:
-				ApplyGitMode(mode);
+				ApplyGitMode(mode, row.Value);
 				return;
 			case TerminalParameterRowKind.ToggleAllContent:
 				ApplyAllContentTransformations(row.IsSelected != true);
@@ -1037,17 +1081,13 @@ internal sealed partial class TerminalWorkspaceSession
 		}
 	}
 
-	private void ApplyGitMode(GitFilteringMode mode)
+	private void ApplyGitMode(GitFilteringMode mode, string? diffRange = null)
 	{
 		if (_state is null)
 			return;
-		var selection = GetDisplayedSettingsSelection();
-		var target = (selection.GitMode ?? _state.Plan.GitReadiness.Mode) == mode
-			? GitFilteringMode.None
-			: mode;
-		if (target != GitFilteringMode.None)
-			_preferredGitMode = target;
-		ApplyPathFilters(target, selection.Exclusions ?? []);
+		var selection = EnsureSettingsDraft();
+		UpdateDraftPreferredGitMode(mode);
+		ApplyPathFilters(mode, selection.Exclusions ?? [], diffRange);
 	}
 
 	private void ApplyAllExclusions(bool enabled, bool originatedFromCommandLine = false)
@@ -1055,11 +1095,12 @@ internal sealed partial class TerminalWorkspaceSession
 		if (_state is null)
 			return;
 		var selection = GetDisplayedSettingsSelection();
-		var (mode, exclusions) = TerminalAggregateSelectionPolicy.ResolveExclusions(
-			enabled,
+		var exclusions = TerminalAggregateSelectionPolicy.ResolveExclusions(enabled);
+		ApplyPathFilters(
 			selection.GitMode ?? _state.Plan.GitReadiness.Mode,
-			_preferredGitMode);
-		ApplyPathFilters(mode, exclusions, originatedFromCommandLine);
+			exclusions,
+			selection.GitDiffRange,
+			originatedFromCommandLine: originatedFromCommandLine);
 	}
 
 	private void ApplyExclusions(
@@ -1068,24 +1109,29 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (_state is null)
 			return;
+		var selection = GetDisplayedSettingsSelection();
 		ApplyPathFilters(
-			GetDisplayedSettingsSelection().GitMode ?? _state.Plan.GitReadiness.Mode,
+			selection.GitMode ?? _state.Plan.GitReadiness.Mode,
 			exclusions,
-			originatedFromCommandLine);
+			selection.GitDiffRange,
+			originatedFromCommandLine: originatedFromCommandLine);
 	}
 
 	private void ApplyPathFilters(
 		GitFilteringMode mode,
 		IReadOnlyCollection<ProjectExclusion> exclusions,
+		string? diffRange = null,
 		bool originatedFromCommandLine = false)
 	{
 		if (_state is null)
 			return;
 		if (!originatedFromCommandLine)
 			PreserveControlFocusForOperation(TerminalControlSection.Exclusions);
-		var selection = EnsureSettingsDraft() with
+		var selection = GitScopeSelection.WithMode(
+			EnsureSettingsDraft(),
+			mode,
+			diffRange) with
 		{
-			GitMode = mode,
 			Exclusions = exclusions.ToArray()
 		};
 		PublishOptimisticSettings(selection, originatedFromCommandLine);
@@ -1144,7 +1190,15 @@ internal sealed partial class TerminalWorkspaceSession
 		_settingsDraftExtensionStates ??= new Dictionary<string, bool>(
 			_state.ExtensionOptionStates,
 			StringComparer.OrdinalIgnoreCase);
+		_settingsDraftPreferredGitMode ??= _preferredGitMode;
 		return _settingsDraftSelection;
+	}
+
+	private void UpdateDraftPreferredGitMode(GitFilteringMode mode)
+	{
+		EnsureSettingsDraft();
+		if (GitScopeSelection.IsPersistent(mode) && mode != GitFilteringMode.None)
+			_settingsDraftPreferredGitMode = mode;
 	}
 
 	private void UpdateDraftExtensionStates(IReadOnlyCollection<string> selectedExtensions)
@@ -1172,6 +1226,7 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		_settingsDraftSelection = null;
 		_settingsDraftExtensionStates = null;
+		_settingsDraftPreferredGitMode = null;
 		_settingsDraftOriginatedFromCommandLine = false;
 	}
 
@@ -1206,13 +1261,32 @@ internal sealed partial class TerminalWorkspaceSession
 		{
 			GitFilteringMode.None => GitFilteringMode.RespectGitIgnore,
 			GitFilteringMode.RespectGitIgnore => GitFilteringMode.TrackedFilesOnly,
+			GitFilteringMode.TrackedFilesOnly => GitFilteringMode.Staged,
+			GitFilteringMode.Staged => GitFilteringMode.Changes,
 			_ => GitFilteringMode.None
 		};
-		_preferredGitMode = next == GitFilteringMode.None
-			? GitFilteringMode.RespectGitIgnore
-			: next;
+		if (!HasGitRepository() && next is GitFilteringMode.TrackedFilesOnly or
+		    GitFilteringMode.Staged or GitFilteringMode.Changes)
+		{
+			next = GitFilteringMode.None;
+		}
+		EnsureSettingsDraft();
+		if (next == GitFilteringMode.None)
+			_settingsDraftPreferredGitMode = GitFilteringMode.RespectGitIgnore;
+		else
+			UpdateDraftPreferredGitMode(next);
 		ApplyPathFilters(next, selection.Exclusions ?? [], originatedFromCommandLine: false);
 	}
+
+	private bool HasGitRepository() =>
+		_gitCliAvailable &&
+		_state?.Plan is { } plan &&
+		(plan.GitReadiness.HasRepositoryBoundary ||
+		 GitRepositoryBoundaryProbe.ExistsAtOrAbove(plan.SourceRoot));
+
+	private bool IsGitModeAvailable(GitFilteringMode mode) =>
+		mode is GitFilteringMode.None or GitFilteringMode.RespectGitIgnore ||
+		HasGitRepository();
 
 	private void ShowActionPalette()
 	{
@@ -1645,7 +1719,8 @@ internal sealed partial class TerminalWorkspaceSession
 		var state = _state;
 		var refreshRequest = TerminalWorkspaceController.CaptureStructuralRefresh(
 			state,
-			state.BuildSelection());
+			state.BuildSelection(),
+			_preferredGitMode);
 		TrackActiveOperation(RunOperationAsync(
 			L("Terminal.Tui.Command.Refresh.Title"),
 			async token =>
@@ -1701,7 +1776,8 @@ internal sealed partial class TerminalWorkspaceSession
 		var state = _state;
 		var refreshRequest = TerminalWorkspaceController.CaptureStructuralRefresh(
 			state,
-			state.BuildSelection());
+			state.BuildSelection(),
+			_preferredGitMode);
 		TrackActiveOperation(RunOperationAsync(
 			L("Terminal.Tui.Action.GetUpdates"),
 			async token =>
@@ -1728,7 +1804,8 @@ internal sealed partial class TerminalWorkspaceSession
 		var state = _state;
 		var refreshRequest = TerminalWorkspaceController.CaptureStructuralRefresh(
 			state,
-			state.BuildSelection());
+			state.BuildSelection(),
+			_preferredGitMode);
 		TrackActiveOperation(RunOperationAsync(
 			L("Terminal.Tui.Action.SwitchBranch"),
 			async token =>
@@ -1777,15 +1854,44 @@ internal sealed partial class TerminalWorkspaceSession
 		var result = await _controller
 			.BuildStructuralRefreshAsync(request, cancellationToken)
 			.ConfigureAwait(false);
+		var gitCliAvailable = await ResolveGitCliAvailabilityAsync(result.Plan, cancellationToken)
+			.ConfigureAwait(false);
 		cancellationToken.ThrowIfCancellationRequested();
 		await InvokeAsync(() =>
 		{
 			if (_stopping || !ReferenceEquals(_state, state))
 				return false;
 
+			_gitCliAvailable = gitCliAvailable;
 			TerminalWorkspaceController.ApplyStructuralRefresh(state, result);
 			return true;
 		}).ConfigureAwait(false);
+	}
+
+	private async Task<bool> ResolveGitCliAvailabilityAsync(
+		ProjectContextPlan plan,
+		CancellationToken cancellationToken)
+	{
+		if (!plan.GitReadiness.HasRepositoryBoundary &&
+		    !GitRepositoryBoundaryProbe.ExistsAtOrAbove(plan.SourceRoot))
+		{
+			return false;
+		}
+
+		try
+		{
+			return await _services.GitRepositoryService
+				.IsGitAvailableAsync(cancellationToken)
+				.ConfigureAwait(false);
+		}
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+		{
+			throw;
+		}
+		catch
+		{
+			return false;
+		}
 	}
 
 	private void FocusPane(TerminalWorkspacePane pane)

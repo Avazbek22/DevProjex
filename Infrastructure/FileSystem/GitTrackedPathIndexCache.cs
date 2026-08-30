@@ -114,7 +114,7 @@ internal static class GitTrackedPathIndexCache
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			var gitMetadataPath = Path.Combine(currentPath, ".git");
-			if (TryMetadataEntryExists(gitMetadataPath))
+			if (TryMetadataEntryEstablishesBoundary(gitMetadataPath))
 			{
 				if (TryLoad(
 					currentPath,
@@ -160,7 +160,7 @@ internal static class GitTrackedPathIndexCache
 		while (!string.IsNullOrWhiteSpace(currentPath))
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			if (TryMetadataEntryExists(Path.Combine(currentPath, ".git")))
+			if (TryMetadataEntryEstablishesBoundary(Path.Combine(currentPath, ".git")))
 			{
 				repositoryRootPath = currentPath;
 				return true;
@@ -318,7 +318,8 @@ internal static class GitTrackedPathIndexCache
 		CancellationToken cancellationToken,
 		Action abortProcess,
 		long maximumRetainedBytes = MaximumSingleEntryBytes,
-		int maximumPathLength = MaximumTrackedPathLength)
+		int maximumPathLength = MaximumTrackedPathLength,
+		Func<long, bool>? reserveRetainedBytes = null)
 	{
 		ArgumentNullException.ThrowIfNull(reader);
 		ArgumentNullException.ThrowIfNull(abortProcess);
@@ -326,6 +327,11 @@ internal static class GitTrackedPathIndexCache
 			throw new ArgumentOutOfRangeException(nameof(maximumRetainedBytes));
 		if (maximumPathLength <= 0)
 			throw new ArgumentOutOfRangeException(nameof(maximumPathLength));
+		if (reserveRetainedBytes is not null && !reserveRetainedBytes(EstimatedEmptyIndexBytes))
+		{
+			abortProcess();
+			return null;
+		}
 
 		var paths = new List<string>(capacity: 1024);
 		var buffer = ArrayPool<char>.Shared.Rent(4096);
@@ -389,6 +395,8 @@ internal static class GitTrackedPathIndexCache
 					return false;
 				var pathBytes = IntPtr.Size + 32L + ((long)pathLength * sizeof(char));
 				if (maximumRetainedBytes - estimatedRetainedBytes < pathBytes)
+					return false;
+				if (reserveRetainedBytes is not null && !reserveRetainedBytes(pathBytes))
 					return false;
 				estimatedRetainedBytes += pathBytes;
 				return true;
@@ -601,12 +609,16 @@ internal static class GitTrackedPathIndexCache
 		return true;
 	}
 
-	private static bool TryMetadataEntryExists(string gitMetadataPath)
+	internal static bool TryMetadataEntryEstablishesBoundary(string gitMetadataPath)
 	{
 		try
 		{
-			_ = File.GetAttributes(gitMetadataPath);
-			return true;
+			var attributes = File.GetAttributes(gitMetadataPath);
+			if (attributes.HasFlag(FileAttributes.ReparsePoint))
+				return false;
+
+			return attributes.HasFlag(FileAttributes.Directory) ||
+			       UnixFileTypeInspector.IsRegularFile(gitMetadataPath);
 		}
 		catch (FileNotFoundException)
 		{

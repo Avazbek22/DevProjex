@@ -109,6 +109,8 @@ public sealed class TerminalWorkspaceState : IDisposable
 	public bool HasVisibleTreeItems => Plan.EffectiveTree.Children.Count > 0;
 	public IReadOnlyDictionary<string, bool> ExtensionOptionStates => _extensionOptionStates;
 	public IReadOnlyDictionary<string, bool> PathOptionStates => _pathOptionStates;
+	internal bool IsEffectiveRootUnchecked =>
+		GetCheckState(Plan.EffectiveTree) == TerminalTreeCheckState.Unchecked;
 	public string TreeFilterQuery => _treeFilterQuery;
 	public int TreeFilterMatchCount { get; private set; }
 	public bool HasTreeFilter => _treeFilterQuery.Length > 0;

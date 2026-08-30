@@ -11,6 +11,7 @@ internal sealed class McpServices : IDisposable
 		IFileContentAnalyzer contentAnalyzer,
 		ProjectSelectionResolver selectionResolver,
 		IProjectProfileStore profileStore,
+		IGitScopePathProvider gitScopePathProvider,
 		SecretRedactionSession redactionSession,
 		CodeCompressionSession compressionSession,
 		SecretRedactionOutputPreparer outputPreparer)
@@ -21,6 +22,7 @@ internal sealed class McpServices : IDisposable
 		ContentAnalyzer = contentAnalyzer;
 		SelectionResolver = selectionResolver;
 		ProfileStore = profileStore;
+		GitScopePathProvider = gitScopePathProvider;
 		RedactionSession = redactionSession;
 		CompressionSession = compressionSession;
 		OutputPreparer = outputPreparer;
@@ -32,6 +34,7 @@ internal sealed class McpServices : IDisposable
 	public IFileContentAnalyzer ContentAnalyzer { get; }
 	public ProjectSelectionResolver SelectionResolver { get; }
 	public IProjectProfileStore ProfileStore { get; }
+	public IGitScopePathProvider GitScopePathProvider { get; }
 	public SecretRedactionSession RedactionSession { get; }
 	public CodeCompressionSession CompressionSession { get; }
 	public SecretRedactionOutputPreparer OutputPreparer { get; }
@@ -121,6 +124,7 @@ internal sealed class McpServices : IDisposable
 				contentAnalyzer,
 				new ProjectSelectionResolver(profileStore, new PortableProjectProfileService().LoadAsync),
 				profileStore,
+				new GitScopePathProvider(),
 				redactionSession,
 				compressionSession,
 				new SecretRedactionOutputPreparer(contentAnalyzer));

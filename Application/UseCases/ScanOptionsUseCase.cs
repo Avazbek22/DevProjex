@@ -29,7 +29,8 @@ public sealed class ScanOptionsUseCase(IFileSystemScannerProjectWorkspaceScanner
 			RootFolders: roots.Value,
 			RootAccessDenied: roots.RootAccessDenied || workspace.RootAccessDenied,
 			HadAccessDenied: roots.HadAccessDenied || workspace.HadAccessDenied,
-			HadScanFailure: roots.HadScanFailure || workspace.HadScanFailure);
+			HadScanFailure: roots.HadScanFailure || workspace.HadScanFailure,
+			GitEvidence: workspace.Value.IgnoreSection.GitEvidence);
 	}
 
 	public ScanResult<List<string>> GetRootFolders(

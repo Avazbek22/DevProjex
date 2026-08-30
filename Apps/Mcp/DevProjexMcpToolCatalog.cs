@@ -166,6 +166,17 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
+	private const string GitScopeProperty = """
+	"git_scope": {
+	  "description": "Further restrict results to staged files, all current changes, or files changed between two Git refs.",
+	  "maxLength": 4096,
+	  "oneOf": [
+	    { "type": "string", "enum": ["staged", "changes"] },
+	    { "type": "string", "pattern": "^diff:(?!.*\\.\\.\\.)(?!.*\\.\\..*\\.\\.)[^\\s-]\\S*\\.\\.[^\\s-]\\S*$" }
+	  ]
+	}
+	""";
+
 	private const string TopFilesProperty = """
 	"top_files": {
 	  "description": "Number of largest text files to return by estimated tokens; default 10; integer or numeric string.",
@@ -192,6 +203,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{IncludeProperty}},
 	    {{ExcludeProperty}},
 	    {{TrackedOnlyProperty}},
+	    {{GitScopeProperty}},
 	    {{MaxFileBytesProperty}},
 	    "max_depth": {
 	      "description": "Maximum tree depth from 0 to 1000; accepts an integer or numeric string.",
@@ -214,6 +226,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{ProfileProperty}},
 	    {{DetailProperty}},
 	    {{TrackedOnlyProperty}},
+	    {{GitScopeProperty}},
 	    {{TopFilesProperty}},
 	    {{MaxFileBytesProperty}}
 	  },
@@ -233,6 +246,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{ProfileProperty}},
 	    {{DetailProperty}},
 	    {{TrackedOnlyProperty}},
+	    {{GitScopeProperty}},
 	    {{MaximumTokensProperty}},
 	    {{MaxFileBytesProperty}},
 	    "view": { "type": "string", "enum": ["tree", "content", "tree-content"], "default": "tree-content" },
@@ -265,6 +279,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    {{IncludeProperty}},
 	    {{ExcludeProperty}},
 	    {{TrackedOnlyProperty}},
+	    {{GitScopeProperty}},
 	    {{MaxFileBytesProperty}},
 	    "context_lines": { "description": "Context lines from 0 to 20; default 2; integer or numeric string.", "oneOf": [ { "type": "integer", "minimum": 0, "maximum": 20 }, { "type": "string", "pattern": "^[0-9]+$" } ] },
 	    "ignore_case": { "description": "Case-insensitive matching; accepts a boolean or the string 'true' or 'false'.", "default": true, "oneOf": [ { "type": "boolean" }, { "type": "string", "enum": ["true", "false"] } ] },

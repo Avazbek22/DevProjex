@@ -110,6 +110,11 @@ public sealed class DevProjexCommandTree
 		{
 			Description = L("Terminal.Option.McpAllowRemote")
 		};
+		var gitMode = CliChoiceSymbols.NullableOption(
+			"--git-mode",
+			L("Terminal.Option.McpGitMode"),
+			CliChoiceSets.PersistentGitMode,
+			_localization);
 		roots.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
 			context,
 			FileSystemCompletionKind.Directories,
@@ -117,11 +122,13 @@ public sealed class DevProjexCommandTree
 		command.Options.Add(roots);
 		command.Options.Add(hidePrivateData);
 		command.Options.Add(allowRemote);
+		command.Options.Add(gitMode);
 		CliExamplesRegistry.Set(
 			command,
 			"devprojex mcp",
 			"devprojex mcp --root . --root ../shared",
-			"devprojex mcp --root . --hide-private-data");
+			"devprojex mcp --root . --hide-private-data",
+			"devprojex mcp --root . --git-mode tracked");
 		command.SetAction(async (parseResult, cancellationToken) =>
 		{
 			var explicitRoots = parseResult.GetValue(roots) ?? [];
@@ -135,6 +142,7 @@ public sealed class DevProjexCommandTree
 						resolvedRoots,
 						parseResult.GetValue(hidePrivateData),
 						parseResult.GetValue(allowRemote),
+						parseResult.GetValue(gitMode),
 						_serviceFactory.AppDataPathProvider,
 						cancellationToken)
 					.ConfigureAwait(false);
@@ -635,7 +643,11 @@ public sealed class DevProjexCommandTree
 			Hidden = true
 		};
 		var branch = BranchOption();
-		var selection = new SelectionOptions(_localization, environment, "auto");
+		var selection = new SelectionOptions(
+			_localization,
+			environment,
+			"auto",
+			gitModeCapability: GitModeOptionCapability.Desktop);
 		command.Arguments.Add(project);
 		command.Options.Add(last);
 		command.Options.Add(newWindow);
@@ -673,6 +685,13 @@ public sealed class DevProjexCommandTree
 			    CliParseValue.TryGet(result, search, out var searchValue) &&
 			    searchValue is not null)
 				result.AddError(LocalizedParseError.Create(L("Terminal.Validation.FilterSearchConflict")));
+			if (result.GetResult(selection.GitMode) is { Implicit: false } &&
+			    CliParseValue.TryGet(result, selection.GitMode, out var desktopGitMode) &&
+			    desktopGitMode is { Mode: GitFilteringMode.Diff })
+			{
+				result.AddError(LocalizedParseError.Create(
+					L("Terminal.Validation.DesktopGitMode")));
+			}
 		});
 		command.SetAction(async (parseResult, cancellationToken) =>
 		{
@@ -714,11 +733,11 @@ public sealed class DevProjexCommandTree
 							services!,
 							selectedPaths,
 							cancellationToken).ConfigureAwait(false);
-						var readinessExitCode = ValidateDesktopOpenGitReadiness(
+						var readinessExitCode = await ValidateDesktopOpenGitReadinessAsync(
 							services!,
 							projectPath,
 							spec,
-							cancellationToken);
+							cancellationToken).ConfigureAwait(false);
 						if (readinessExitCode is not null)
 							return readinessExitCode.Value;
 					}
@@ -905,7 +924,10 @@ public sealed class DevProjexCommandTree
 			command,
 			"devprojex profile save . --root src --extension .cs");
 		var project = ProjectArgument();
-		var selection = new SelectionOptions(_localization, environment);
+		var selection = new SelectionOptions(
+			_localization,
+			environment,
+			gitModeCapability: GitModeOptionCapability.Persistent);
 		command.Arguments.Add(project);
 		selection.AddTo(command);
 		command.SetAction((parseResult, cancellationToken) =>
@@ -2026,34 +2048,24 @@ public sealed class DevProjexCommandTree
 		selection.AllSymbols.Any(symbol =>
 			result.GetResult(symbol) is { Implicit: false });
 
-	private int? ValidateDesktopOpenGitReadiness(
+	private async Task<int?> ValidateDesktopOpenGitReadinessAsync(
 		TerminalServices services,
 		string projectPath,
 		ProjectSelectionSpec selection,
 		CancellationToken cancellationToken)
 	{
-		if (selection.GitMode != GitFilteringMode.TrackedFilesOnly)
-			return null;
-
-		var loaded = services.AnalysisService.Load(
-			new ProjectAnalysisRequest(
-				projectPath,
-				selection.Roots,
-				selection.Extensions,
-				ProjectSelectionAdapter.ToIgnoreOptions(selection)),
-			cancellationToken);
-		var readiness = ProjectContextGitReadiness.Evaluate(
-			GitFilteringMode.TrackedFilesOnly,
-			loaded.DiscoveredGitTrackedIndexCount,
-			loaded.UnavailableGitTrackedIndexCount);
-		if (readiness.CreateDiagnostic(PathUtility.Normalize(projectPath)) is not { } diagnostic)
+		var diagnostics = await DesktopOpenGitReadinessValidator
+			.ValidateAsync(services, projectPath, selection, cancellationToken)
+			.ConfigureAwait(false);
+		if (diagnostics.Count == 0)
 			return null;
 
 		new ContextDiagnosticRenderer(
 			environment,
 			new TerminalOutputOptions(),
-			services.Localization).Write([diagnostic]);
-		return diagnostic.Severity == ContextDiagnosticSeverity.Error
+			services.Localization).Write(diagnostics);
+		return diagnostics.Any(static diagnostic =>
+			diagnostic.Severity == ContextDiagnosticSeverity.Error)
 			? CommandLineExitCodes.PolicyFailure
 			: null;
 	}

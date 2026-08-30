@@ -55,6 +55,32 @@ public sealed class GitTrackedPathIndexTests
 	}
 
 	[Fact]
+	public async Task NullDelimitedReader_WhenSharedBudgetIsExhausted_AbortsTheCurrentProducer()
+	{
+		var payload = Encoding.UTF8.GetBytes("first.cs\0second.cs\0");
+		await using var stream = new MemoryStream(payload);
+		using var reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: false);
+		var remaining = 64L + IntPtr.Size + 32 + ("first.cs".Length * sizeof(char));
+		var abortCount = 0;
+
+		var paths = await GitTrackedPathIndexCache.ReadNullDelimitedPathsAsync(
+			reader,
+			TestContext.Current.CancellationToken,
+			() => abortCount++,
+			reserveRetainedBytes: bytes =>
+			{
+				if (remaining < bytes)
+					return false;
+				remaining -= bytes;
+				return true;
+			});
+
+		Assert.Null(paths);
+		Assert.Equal(1, abortCount);
+		Assert.Equal(0, remaining);
+	}
+
+	[Fact]
 	public async Task NullDelimitedReader_WhenSinglePathExceedsLimit_AbortsWithoutReturningPartialIndex()
 	{
 		var payload = Encoding.UTF8.GetBytes("path-that-is-too-long\0");

@@ -2,4 +2,6 @@ namespace DevProjex.Application.UseCases;
 
 public sealed record BuildTreeSnapshotResult(
 	BuildTreeResult Tree,
-	ProjectTreeInventorySnapshot? Inventory);
+	ProjectTreeInventorySnapshot? Inventory,
+	IReadOnlyList<ContextDiagnostic>? Diagnostics = null,
+	GitScopePresentationProjection? GitScopePresentation = null);

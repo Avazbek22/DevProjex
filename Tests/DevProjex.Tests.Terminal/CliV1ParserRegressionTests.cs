@@ -179,7 +179,14 @@ public sealed class CliV1ParserRegressionTests
 		AssertCompleteChoiceSet(CliChoiceSets.ProgressMode);
 		AssertCompleteChoiceSet(CliChoiceSets.Verbosity);
 		AssertCompleteChoiceSet(CliChoiceSets.DesktopView);
-		AssertCompleteChoiceSet(CliChoiceSets.GitMode);
+		Assert.Equal(
+			Enum.GetValues<GitFilteringMode>().Where(static mode => mode != GitFilteringMode.Diff),
+			CliChoiceSets.GitMode.Tokens.Select(token =>
+			{
+				Assert.True(CliChoiceSets.GitMode.TryParse(token, out var mode));
+				return mode;
+			}));
+		Assert.False(CliChoiceSets.GitMode.TryParse("diff:main..feature", out _));
 		AssertCompleteChoiceSet(CliChoiceSets.CompletionShell);
 		AssertCompleteChoiceSet(CliChoiceSets.DeveloperScenario);
 		AssertCompleteChoiceSet(CliChoiceSets.Language);

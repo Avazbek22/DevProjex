@@ -56,14 +56,9 @@ public partial class MainWindow
 		if (!changed)
 			return;
 
-		if (_interactiveFilterSelectionSnapshot is { } filterSnapshot &&
-		    !string.IsNullOrWhiteSpace(_currentPath) &&
-		    filterSnapshot.IsForProject(_currentPath))
-		{
-			foreach (var root in _viewModel.TreeNodes)
-				filterSnapshot.RecordOverride(root.FullPath, isChecked: false);
-			filterSnapshot.RecordOverride(target.FullPath, isChecked: true);
-		}
+		foreach (var root in _viewModel.TreeNodes)
+			RecordTreeSelectionOverride(root.FullPath, isChecked: false);
+		RecordTreeSelectionOverride(target.FullPath, isChecked: true);
 
 		PublishTreeSelectionChange();
 	}

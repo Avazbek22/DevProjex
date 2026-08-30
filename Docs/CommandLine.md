@@ -116,7 +116,7 @@ content-transformation options that follow. `open` additionally accepts the
 --extension <EXT>            repeatable
 --select <RELATIVE_PATH>     repeatable
 --select-from <FILE|->
---git-mode <none|gitignore|tracked>
+--git-mode <MODE>
 --exclude <NAME>             repeatable
 --max-file-bytes <SIZE>      analyze, tree, and export context only
 --hide-secrets [<true|false|on|off>]
@@ -153,6 +153,23 @@ Git modes:
 | `none` | No Git-based filtering |
 | `gitignore` | Respect applicable hierarchical `.gitignore` rules |
 | `tracked` | Include only paths returned from applicable indexes by the installed Git CLI; no readable index fails closed with exit `3` |
+| `staged` | Include files with staged changes |
+| `changes` | Include staged, unstaged, and untracked files; ignored untracked files remain excluded |
+| `diff:<REF>..<REF>` | Include files changed between two Git references |
+
+The three state scopes are invocation-only and cannot be saved in local or
+portable profiles. `open` supports `staged` and `changes`; diff scopes are
+available in direct CLI commands, Terminal Workspace, and MCP, but not Desktop.
+The Git scope narrows the effective profile selection before file-size limits.
+Smart Ignore, Exclusions, explicit selected paths, extensions, and globs still
+apply. Selected content always comes from the current working tree, including
+when a staged file has newer unstaged edits.
+
+Deleted paths and rename sources do not enter the package because they no longer
+exist in the working tree. DevProjex reports their count with
+`DPX-GIT-STATE-DELETED`. A non-repository project, unavailable Git executable,
+or invalid diff reference fails closed with `DPX-GIT-STATE-UNAVAILABLE` and exit
+`3`.
 
 A readable empty index is a valid tracked view with zero files. If at least one index
 loads but a nested index does not, that nested scope is excluded and reported with
@@ -378,6 +395,9 @@ Useful options:
 `PROJECT` defaults to the current directory. `--last` cannot be combined with a
 project argument, `--branch`, or selection/profile overrides. `--filter` and `--search` are
 mutually exclusive. `--view` and `--search` imply `--preview`.
+Desktop accepts `none`, `gitignore`, `tracked`, `staged`, and `changes`; an
+`open --git-mode diff:...` request is a usage error because diff is not a GUI
+mode.
 
 Without `--new-window`, DevProjex reuses a suitable desktop instance through
 local per-user IPC. The default returns after the desktop accepts the request;
@@ -457,6 +477,7 @@ devprojex analyze .
 devprojex analyze . --format json -o -
 devprojex analyze ./app --format json -o report.json --strict
 devprojex analyze . --git-mode tracked --exclude smart-ignore
+devprojex analyze . --git-mode staged
 devprojex analyze . --compress-code --format json
 devprojex analyze . --hide-secrets --findings --fail-on-findings
 devprojex analyze . --top-files 10

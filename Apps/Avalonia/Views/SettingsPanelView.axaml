@@ -26,6 +26,98 @@
     <Style Selector="Border.content-processing-status-indicator:pointerover">
       <Setter Property="Opacity" Value="1" />
     </Style>
+    <Style Selector="ComboBox.git-mode-selector">
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="MinHeight" Value="32" />
+      <Setter Property="Padding" Value="10,3" />
+      <Setter Property="FontSize" Value="12.5" />
+      <Setter Property="Background" Value="{DynamicResource MenuPopupBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="MaxDropDownHeight" Value="220" />
+    </Style>
+    <Style Selector="ComboBox.git-mode-selector:pointerover">
+      <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+    </Style>
+    <Style Selector="ComboBox.git-mode-selector:focus">
+      <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+    </Style>
+    <Style Selector="ComboBox.git-mode-selector /template/ Border#PART_BorderElement,
+                     ComboBox.git-mode-selector /template/ Border">
+      <Setter Property="CornerRadius" Value="8" />
+    </Style>
+    <Style Selector="ComboBox.git-mode-selector /template/ Popup#PART_Popup">
+      <Setter Property="ShouldUseOverlayLayer" Value="False" />
+      <Setter Property="WindowManagerAddShadowHint" Value="False" />
+    </Style>
+    <Style Selector="ComboBox.git-mode-selector /template/ Border#PopupBorder">
+      <Setter Property="Background" Value="{DynamicResource MenuPopupBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="ClipToBounds" Value="True" />
+      <Setter Property="Padding" Value="3" />
+      <Setter Property="BoxShadow" Value="0 6 18 0 #40000000" />
+    </Style>
+    <Style Selector="ComboBox.git-mode-selector ComboBoxItem">
+      <Setter Property="Margin" Value="1" />
+      <Setter Property="Padding" Value="10,4" />
+      <Setter Property="MinHeight" Value="28" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="FontSize" Value="12.5" />
+      <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Transitions">
+        <Transitions>
+          <BrushTransition Property="Background" Duration="0:0:0.12" Easing="CubicEaseOut" />
+          <BrushTransition Property="Foreground" Duration="0:0:0.12" Easing="CubicEaseOut" />
+        </Transitions>
+      </Setter>
+    </Style>
+    <Style Selector="ComboBox.git-mode-selector ComboBoxItem:pointerover /template/ Border#PART_BorderElement,
+                     ComboBox.git-mode-selector ComboBoxItem:pointerover /template/ Border">
+      <Setter Property="Background" Value="{DynamicResource MenuHoverBrush}" />
+      <Setter Property="CornerRadius" Value="6" />
+    </Style>
+    <Style Selector="ComboBox.git-mode-selector ComboBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource MenuHoverBrush}" />
+      <Setter Property="CornerRadius" Value="6" />
+    </Style>
+    <Style Selector="ComboBox.git-mode-selector ComboBoxItem:selected /template/ Border#PART_BorderElement,
+                     ComboBox.git-mode-selector ComboBoxItem:selected /template/ Border">
+      <Setter Property="Background" Value="{DynamicResource TreeSelectionBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="6" />
+    </Style>
+    <Style Selector="ComboBox.git-mode-selector ComboBoxItem:selected">
+      <Setter Property="Background" Value="{DynamicResource TreeSelectionBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+      <Setter Property="FontWeight" Value="Medium" />
+    </Style>
+    <Style Selector="ComboBox.git-mode-selector ComboBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource TreeSelectionBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+    </Style>
+    <Style Selector="ComboBox.git-mode-selector ComboBoxItem:selected TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+    </Style>
+    <Style Selector="ComboBox.git-mode-selector ComboBoxItem:selected:pointerover /template/ Border#PART_BorderElement,
+                     ComboBox.git-mode-selector ComboBoxItem:selected:pointerover /template/ Border">
+      <Setter Property="Background" Value="{DynamicResource TreeSelectionBrush}" />
+      <Setter Property="CornerRadius" Value="6" />
+    </Style>
+    <Style Selector="ComboBox.git-mode-selector ComboBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource TreeSelectionBrush}" />
+      <Setter Property="CornerRadius" Value="6" />
+    </Style>
     <Style Selector="ListBox.settings-list /template/ ScrollViewer">
       <Setter Property="Padding" Value="5" />
       <Setter Property="Background" Value="Transparent" />
@@ -121,8 +213,42 @@
                     IsChecked="{Binding AllIgnoreChecked, Mode=TwoWay}"
                     IsCheckedChanged="OnIgnoreAllChanged" />
         </Grid>
-        <Border Grid.Row="1" Classes="checklist-border">
-          <ListBox Name="IgnoreOptionsList"
+		<Border Name="IgnoreOptionsBorder"
+				Grid.Row="1"
+				Classes="checklist-border"
+				Focusable="True"
+				IsTabStop="False">
+		  <Grid RowDefinitions="Auto,*">
+			<ComboBox Name="GitFilteringModeComboBox"
+					  Classes="git-mode-selector"
+					  Grid.Row="0"
+					  Margin="8,6,8,4"
+					  ItemsSource="{Binding GitFilteringModes}"
+					  SelectedItem="{Binding SelectedGitFilteringModeOption, Mode=TwoWay}"
+					  DropDownOpened="OnGitFilteringModeDropDownOpened"
+					  DropDownClosed="OnGitFilteringModeDropDownClosed"
+					  SelectionChanged="OnGitFilteringModeChanged">
+			  <ComboBox.SelectionBoxItemTemplate>
+				<DataTemplate x:DataType="vm:GitFilteringModeOptionViewModel">
+				  <TextBlock Text="{Binding Label}"
+							 HorizontalAlignment="Stretch"
+							 TextAlignment="Center"
+							 TextWrapping="NoWrap"
+							 TextTrimming="CharacterEllipsis" />
+				</DataTemplate>
+			  </ComboBox.SelectionBoxItemTemplate>
+			  <ComboBox.ItemTemplate>
+				<DataTemplate x:DataType="vm:GitFilteringModeOptionViewModel">
+				  <TextBlock Text="{Binding Label}"
+							 HorizontalAlignment="Stretch"
+							 TextAlignment="Center"
+							 TextWrapping="NoWrap"
+							 TextTrimming="CharacterEllipsis" />
+				</DataTemplate>
+			  </ComboBox.ItemTemplate>
+			</ComboBox>
+			<ListBox Name="IgnoreOptionsList"
+					 Grid.Row="1"
                    Classes="settings-list"
                    ItemsSource="{Binding PathIgnoreOptions}"
                    SelectionMode="Multiple"
@@ -149,7 +275,8 @@
                 </Border>
               </DataTemplate>
             </ListBox.ItemTemplate>
-          </ListBox>
+			</ListBox>
+		  </Grid>
         </Border>
       </Grid>
 

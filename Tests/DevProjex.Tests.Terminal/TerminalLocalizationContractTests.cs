@@ -146,6 +146,16 @@ public sealed partial class TerminalLocalizationContractTests
 			});
 			Assert.All(contextualHelpKeys, key =>
 				Assert.Contains(":", catalog[key], StringComparison.Ordinal));
+
+			var controlsHelp = catalog["Terminal.Tui.Help.Controls"];
+			Assert.Contains("5", controlsHelp, StringComparison.Ordinal);
+			Assert.Contains("diff:<ref>..<ref>", controlsHelp, StringComparison.Ordinal);
+			Assert.DoesNotContain(
+				NormalizeHelpLabel(catalog["Settings.Ignore.UseGitIgnore"]),
+				NormalizeHelpLabel(controlsHelp));
+			Assert.DoesNotContain(
+				NormalizeHelpLabel(catalog["Settings.Ignore.TrackedGitFilesOnly"]),
+				NormalizeHelpLabel(controlsHelp));
 		}
 	}
 
@@ -208,6 +218,71 @@ public sealed partial class TerminalLocalizationContractTests
 
 			var plainText = HelpContentProvider.ToPlainText(help);
 			Assert.DoesNotMatch(LiteralHelpAsteriskRegex(), plainText);
+		}
+	}
+
+	[Fact]
+	public void EveryLocalizedHelpDescribesTheCompleteGitAxisOnCliGuiAndTui()
+	{
+		var helpDirectory = Path.Combine(FindRepositoryRoot(), "Assets", "HelpContent");
+		var catalogs = ReadCatalogs();
+		var persistentAndMomentaryTokens = ProjectPresentationCatalog.GitFiltering
+			.OrderBy(static descriptor => descriptor.Order)
+			.Select(static descriptor => $"`{descriptor.Token}`")
+			.Append("`diff:<ref>..<ref>`")
+			.ToArray();
+
+		foreach (var path in Directory.GetFiles(helpDirectory, "help.*.txt", SearchOption.TopDirectoryOnly))
+		{
+			var source = Path.GetFileName(path);
+			var locale = Path.GetFileNameWithoutExtension(path)["help.".Length..];
+			Assert.True(catalogs.TryGetValue(locale, out var catalog), $"Catalog for {source} is missing.");
+			var help = File.ReadAllText(path);
+			var cliSection = GetNumberedHelpSection(help, "4");
+			var selectionSection = GetNumberedHelpSection(help, "12.1");
+			var trackedModeSection = GetNumberedHelpSection(help, "12.6");
+			var selectionBullets = GetHelpBulletLabels(selectionSection)
+				.Select(NormalizeHelpLabel)
+				.ToArray();
+			var legacyLabels = new[]
+				{
+					"Settings.Ignore.UseGitIgnore",
+					"Settings.Ignore.TrackedGitFilesOnly"
+				}
+				.Select(key => NormalizeHelpLabel(catalog![key]))
+				.ToArray();
+			foreach (var legacyLabel in legacyLabels)
+			{
+				Assert.DoesNotContain(legacyLabel, selectionBullets);
+			}
+			Assert.DoesNotContain(
+				selectionBullets,
+				static bullet => bullet.Contains("GITIGNORE", StringComparison.Ordinal));
+			Assert.DoesNotContain(
+				selectionSection.ReplaceLineEndings("\n").Split('\n'),
+				line =>
+				{
+					var normalizedLine = NormalizeHelpLabel(line);
+					return legacyLabels.All(normalizedLine.Contains) &&
+					       (!normalizedLine.Contains("STAGED", StringComparison.Ordinal) ||
+					        !normalizedLine.Contains("CHANGES", StringComparison.Ordinal));
+				});
+			foreach (var token in persistentAndMomentaryTokens)
+			{
+				Assert.True(
+					cliSection.Contains(token, StringComparison.Ordinal),
+					$"{source} does not document {token} in the CLI section.");
+				Assert.True(
+					trackedModeSection.Contains(token, StringComparison.Ordinal),
+					$"{source} does not document {token} in the Git-mode section.");
+			}
+
+			Assert.Contains("GUI", selectionSection, StringComparison.Ordinal);
+			Assert.Contains("TUI", selectionSection, StringComparison.Ordinal);
+			Assert.Contains("`diff:<ref>..<ref>`", selectionSection, StringComparison.Ordinal);
+			Assert.Contains("GUI", trackedModeSection, StringComparison.Ordinal);
+			Assert.Contains("TUI", trackedModeSection, StringComparison.Ordinal);
+			Assert.Contains("CLI", trackedModeSection, StringComparison.Ordinal);
 		}
 	}
 
@@ -501,6 +576,34 @@ public sealed partial class TerminalLocalizationContractTests
 
 		throw new InvalidOperationException($"Help section {sectionNumber} is missing.");
 	}
+
+	private static string GetNumberedHelpSection(string help, string sectionNumber)
+	{
+		var headings = NumberedHelpHeadingRegex().Matches(help);
+		for (var index = 0; index < headings.Count; index++)
+		{
+			var heading = headings[index];
+			if (!string.Equals(heading.Groups[1].Value, sectionNumber, StringComparison.Ordinal))
+				continue;
+
+			var sectionEnd = index + 1 < headings.Count
+				? headings[index + 1].Index
+				: help.Length;
+			return help[heading.Index..sectionEnd];
+		}
+
+		throw new InvalidOperationException($"Help section {sectionNumber} is missing.");
+	}
+
+	private static string[] GetHelpBulletLabels(string section) =>
+		section.ReplaceLineEndings("\n")
+			.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+			.Where(static line => line.StartsWith("* ", StringComparison.Ordinal))
+			.Select(static line => line[2..].Trim())
+			.ToArray();
+
+	private static string NormalizeHelpLabel(string value) =>
+		string.Concat(value.Where(char.IsLetterOrDigit)).ToUpperInvariant();
 
 	private static void AddFormatControlViolations(
 		string value,

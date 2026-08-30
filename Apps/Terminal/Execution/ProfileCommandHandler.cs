@@ -171,6 +171,13 @@ public sealed class ProfileCommandHandler(
 		ProjectSelectionSpec selection,
 		CancellationToken cancellationToken)
 	{
+		if (selection.GitMode is { } gitMode && GitScopeSelection.IsMomentary(gitMode))
+		{
+			throw new PortableProjectProfileException(
+				"DPX-CLI-PROFILE-INVALID",
+				services.Localization["Terminal.Error.ProfileTransientGitMode"]);
+		}
+
 		var plan = await services.ContextFactory
 			.BuildAsync(projectPath, selection, cancellationToken: cancellationToken)
 			.ConfigureAwait(false);
@@ -268,9 +275,7 @@ public sealed class ProfileCommandHandler(
 		output.Append(services.Localization["Terminal.Analysis.Profile"]).Append(": ")
 			.AppendLine(TerminalTextEscaping.EscapeSingleLine(FormatProfile(selection.ProfileSource)));
 		output.Append(services.Localization["Terminal.Analysis.GitMode"]).Append(": ")
-			.AppendLine(selection.GitMode is { } gitMode
-				? ProjectSelectionTokens.ToToken(gitMode)
-				: ProjectSelectionTokens.ToToken(GitFilteringMode.None));
+			.AppendLine(ProjectSelectionTokens.ToToken(selection));
 		output.Append(services.Localization["Terminal.Analysis.Roots"]).Append(": ")
 			.AppendLine(selection.Roots is { Count: > 0 } roots ? JoinEscaped(roots) : all);
 		output.Append(services.Localization["Terminal.Analysis.Extensions"]).Append(": ")

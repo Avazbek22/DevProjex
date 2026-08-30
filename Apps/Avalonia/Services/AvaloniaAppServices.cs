@@ -34,6 +34,7 @@ public sealed record AvaloniaAppServices(
     IToastService ToastService,
     IIconStore IconStore,
     IGitRepositoryService GitRepositoryService,
+	IGitScopePathProvider GitScopePathProvider,
     IRepoCacheService RepoCacheService,
     IZipDownloadService ZipDownloadService,
     IFileContentAnalyzer FileContentAnalyzer,

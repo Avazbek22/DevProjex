@@ -103,7 +103,7 @@ Exemplos:
 Notas:
 * `.` significa a pasta atual do terminal;
 * os caminhos com espaços devem ser colocados entre aspas;
-* `--git-mode` seleciona sem filtragem Git, `.gitignore` ou apenas ficheiros seguidos pelo Git;
+* `--git-mode` seleciona `none`, `gitignore`, `tracked`, `staged`, `changes` ou `diff:<ref>..<ref>`;
 * `--exclude` controla as exclusões comuns separadamente da filtragem Git;
 * os comandos de análise e exportação são determinísticos e não abrem a interface gráfica;
 * `tui`, `open`, `analyze` e os dois comandos `export` também aceitam o URL de um repositório Git; o clone vai para uma cache gerida (`devprojex cache`);
@@ -356,8 +356,6 @@ As regras de ignorar são cumulativas. Se pelo menos uma regra ativada ocultar u
 Dependendo do conteúdo do projeto, poderão ser apresentadas as seguintes opções:
 
 * Ignorar inteligente
-* Utilizar .gitignore
-* Apenas ficheiros controlados pelo Git
 * Pastas vazias
 * Arquivos vazios
 * Pastas ocultas
@@ -366,7 +364,7 @@ Dependendo do conteúdo do projeto, poderão ser apresentadas as seguintes opç�
 * Ficheiros com prefixo de ponto
 * Ficheiros sem extensão
 
-Dentro de um repositório Git, "Utilizar .gitignore" e "Apenas ficheiros controlados pelo Git" permanecem visíveis como duas caixas. Ativar uma desmarca a outra; clicar novamente na caixa ativa desativa por completo a filtragem Git sem alterar o Smart Ignore nem as regras básicas. As restantes opções são mostradas quando as suas regras podem alterar a árvore atual. A lista pode, portanto, mudar após a alteração de outra regra ou um tipo de ficheiro.
+Num repositório Git, a GUI oferece um seletor com cinco modos Git: sem filtragem, `.gitignore`, ficheiros controlados, ficheiros em staging ou todas as alterações atuais. Fora de um repositório, apenas sem filtragem e `.gitignore` estão disponíveis. A TUI apresenta sempre os mesmos cinco valores como opções de rádio, mas desativa as linhas que exigem um repositório quando não existe nenhum disponível; um âmbito `diff:<ref>..<ref>` ativo surge numa sexta linha. Escolher um valor substitui o modo Git atual sem alterar o Smart Ignore nem as exclusões básicas. As restantes opções aparecem quando as suas regras podem afetar a árvore atual.
 
 Uma nova opção é ativada por defeito quando aparece pela primeira vez. Uma opção conhecida mantém a escolha do utilizador mesmo que desapareça temporariamente da lista.
 
@@ -434,12 +432,12 @@ Cada repositório aninhado e cada worktree acessível são processados de forma 
 
 Num espaço de trabalho Desktop já aberto, a seleção explícita permanece visível e falha em segurança: a saída e a exportação são bloqueadas quando a prontidão falha, enquanto a prontidão parcial permite continuar com um aviso localizado.
 
-"Utilizar .gitignore" e "Apenas ficheiros controlados pelo Git" excluem-se ao serem ativados. A caixa ativa também pode ser desmarcada para desativar a filtragem Git. Nos projetos locais que suportam perfis, este estado é guardado com os tipos de ficheiro e as restantes regras de exclusão.
+Os modos Git são mutuamente exclusivos; `none` desativa a filtragem Git. Os modos momentâneos `staged`, `changes` e `diff:<ref>..<ref>` não são guardados nos perfis. Enquanto um modo momentâneo está ativo, o perfil local do projeto da GUI mantém o último modo persistente ativado, `gitignore` ou `tracked`. `none` só é guardado quando está ativo no momento da gravação. A TUI e a CLI recusam guardar um perfil portátil enquanto um modo momentâneo está ativo.
 
 ### 12.7 Relação entre a filtragem Git e o Smart Ignore
 O modo Git selecionado e o Smart Ignore são controlos independentes. O modo Git é aplicado primeiro em cada âmbito Git acessível; depois, o Smart Ignore processa os elementos restantes; por fim, atuam as regras básicas.
 
-O Smart Ignore pode ficar oculto enquanto o modo Git selecionado já abranger todos os seus candidatos e aparecer depois de esse modo ser alterado ou desativado. As duas caixas Git permanecem disponíveis no repositório.
+O Smart Ignore pode ficar oculto enquanto o modo Git selecionado já abranger todos os seus candidatos e aparecer depois de esse modo ser alterado ou desativado. Num repositório Git, todos os modos que dependem do repositório permanecem disponíveis.
 
 Uma regra de negação Git iniciada por `!` cancela apenas o resultado Git. Não desativa o Smart Ignore nem uma regra básica.
 

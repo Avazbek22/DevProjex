@@ -201,6 +201,12 @@ public sealed class PortableProjectProfileService
 				"DPX-CLI-PROFILE-INVALID",
 				"Portable profile contains an unknown Git filtering mode.");
 		}
+		if (GitScopeSelection.IsMomentary(gitMode))
+		{
+			throw new PortableProjectProfileException(
+				"DPX-CLI-PROFILE-INVALID",
+				"Momentary Git scopes cannot be loaded from a portable profile.");
+		}
 
 		var exclusions = new HashSet<ProjectExclusion>();
 		var legacyHideSecrets = false;
@@ -242,6 +248,12 @@ public sealed class PortableProjectProfileService
 			throw new PortableProjectProfileException(
 				"DPX-CLI-PROFILE-INVALID",
 				"Only a fully resolved selection can be saved as a portable profile.");
+		}
+		if (GitScopeSelection.IsMomentary(selection.GitMode.Value))
+		{
+			throw new PortableProjectProfileException(
+				"DPX-CLI-PROFILE-INVALID",
+				"Momentary Git scopes cannot be saved in a portable profile.");
 		}
 
 		var selectedPaths = NormalizeSelectedPathsOrThrow(selection.SelectedPaths);

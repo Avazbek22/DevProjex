@@ -103,7 +103,7 @@ Contoh:
 Catatan:
 * `.` berarti folder terminal saat ini;
 * jalur dengan spasi harus diapit tanda kutip;
-* `--git-mode` memilih tanpa pemfilteran Git, `.gitignore`, atau hanya file Git yang dilacak;
+* `--git-mode` memilih `none`, `gitignore`, `tracked`, `staged`, `changes`, atau `diff:<ref>..<ref>`;
 * `--exclude` mengontrol pengecualian biasa secara terpisah dari pemfilteran Git;
 * perintah analisis dan ekspor bersifat deterministik dan tidak membuka antarmuka desktop;
 * `tui`, `open`, `analyze`, dan kedua perintah `export` juga menerima URL repositori Git; klon masuk ke cache yang dikelola (`devprojex cache`);
@@ -356,8 +356,6 @@ Mengabaikan aturan bersifat kumulatif. Jika setidaknya satu aturan yang diaktifk
 Tergantung pada konten proyek, opsi berikut mungkin ditampilkan:
 
 * Smart Ignore
-* Gunakan.gitignore
-* Hanya file Git yang dilacak
 * Folder kosong
 * File kosong
 * Folder tersembunyi
@@ -366,7 +364,7 @@ Tergantung pada konten proyek, opsi berikut mungkin ditampilkan:
 * File dengan awalan titik
 * File tanpa ekstensi
 
-Di dalam repositori Git, "Gunakan.gitignore" dan "Hanya file Git yang dilacak" tetap terlihat sebagai pasangan kotak centang yang stabil. Mengaktifkan yang satu akan menghapus yang lain. Mengklik kembali kotak centang aktif akan menghapusnya, membiarkan kedua filter Git mati tanpa mengubah Smart Ignore atau pengecualian dasar. Opsi lain ditampilkan ketika aturannya dapat mengubah pohon saat ini. Oleh karena itu, daftar ini dapat berubah setelah mengganti aturan atau jenis file lain.
+Di dalam repositori Git, GUI menyediakan pemilih dengan lima mode Git: tanpa pemfilteran, `.gitignore`, file terlacak, file yang disiapkan di Git, atau semua perubahan saat ini. Di luar repositori, hanya tanpa pemfilteran dan `.gitignore` yang tersedia. TUI selalu menampilkan kelima nilai sebagai opsi radio, tetapi menonaktifkan baris yang memerlukan repositori jika tidak ada repositori yang tersedia; cakupan `diff:<ref>..<ref>` yang aktif muncul sebagai baris keenam. Memilih satu nilai menggantikan mode Git saat ini tanpa mengubah Smart Ignore atau pengecualian dasar. Opsi lain muncul ketika aturannya dapat mengubah pohon saat ini.
 
 Opsi baru diaktifkan secara default saat pertama kali muncul. Opsi yang diketahui tetap mempertahankan pilihan pengguna meskipun opsi tersebut hilang untuk sementara dari daftar.
 
@@ -432,12 +430,12 @@ Setiap repositori dan pohon kerja bersarang yang dapat dijangkau diselesaikan se
 
 Di ruang kerja Desktop yang sudah terbuka, pilihan terlacak secara eksplisit tetap terlihat dan gagal ditutup: output dan ekspor diblokir ketika kesiapan gagal, sementara kesiapan parsial berlanjut dengan peringatan yang dilokalkan.
 
-"Gunakan.gitignore" dan "Hanya file Git yang dilacak" bersifat eksklusif jika diaktifkan. Kotak centang aktif juga dapat dikosongkan untuk menonaktifkan pemfilteran Git. Untuk proyek lokal yang mendukung profil, status ini disimpan dengan jenis file dan pengaturan pengecualian lainnya.
+Mode Git saling eksklusif; `none` menonaktifkan pemfilteran Git. Mode sesaat `staged`, `changes`, dan `diff:<ref>..<ref>` tidak disimpan dalam profil. Saat mode sesaat aktif, profil proyek lokal GUI mempertahankan mode persisten terakhir yang diaktifkan, yaitu `gitignore` atau `tracked`. `none` hanya disimpan jika sedang aktif ketika profil disimpan. TUI dan CLI menolak penyimpanan profil portabel selama mode sesaat aktif.
 
 ### 12.7 Hubungan antara pemfilteran Git dan Smart Ignore
-Kotak centang Git dan Smart Ignore adalah kontrol independen. Mode Git yang dipilih berlaku pertama kali di setiap cakupan Git yang dapat dijangkau. Smart Ignore kemudian memproses item yang tersisa, dan aturan dasar dijalankan terakhir.
+Mode Git yang dipilih dan Smart Ignore adalah kontrol yang independen. Mode Git diterapkan terlebih dahulu di setiap cakupan Git yang dapat dijangkau. Smart Ignore kemudian memproses item yang tersisa, dan aturan dasar dijalankan terakhir.
 
-Smart Ignore bisa tetap tersembunyi saat mode Git yang dipilih sudah mencakup semua kandidatnya, lalu muncul setelah mode Git diubah atau dihapus. Kedua kotak centang Git tetap tersedia di dalam repositori Git.
+Smart Ignore bisa tetap tersembunyi saat mode Git yang dipilih sudah mencakup semua kandidatnya, lalu muncul setelah mode Git diubah atau dinonaktifkan. Di dalam repositori Git, semua mode yang bergantung pada repositori tetap tersedia.
 
 Aturan negasi Git yang dimulai dengan `!` hanya membatalkan hasil Git. Itu tidak menonaktifkan Smart Ignore atau aturan dasar.
 

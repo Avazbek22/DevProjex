@@ -98,8 +98,14 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 				workspace.RootPath,
 				SettingsAction.ToggleIgnore(transformationId));
 		}
-		var ignoreOptionIds = viewModel.IgnoreOptions.Select(static option => option.Id).ToArray();
-		Assert.Equal(workspace.ExpectedIgnoreOptionIds.Order(), ignoreOptionIds.Order());
+		var ignoreOptionIds = GetVisibleSettingsCheckboxes(viewModel)
+			.Select(static option => option.Id)
+			.ToArray();
+		Assert.Equal(
+			workspace.ExpectedIgnoreOptionIds
+				.Where(static optionId => !GitFilteringModeResolver.IsGitFilteringOption(optionId))
+				.Order(),
+			ignoreOptionIds.Order());
 
 		var baselineFingerprint = CaptureIslandFingerprint(viewModel);
 		var visitedMasks = new HashSet<int>();
@@ -212,7 +218,9 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 		var actions = new List<SettingsAction>();
 		var column = 1;
 		var expectedVisibleIgnoreStates = BuildPairwiseIgnoreStates(
-			actualIgnoreOptionIds,
+			actualIgnoreOptionIds
+				.Where(static optionId => !GitFilteringModeResolver.IsGitFilteringOption(optionId))
+				.ToArray(),
 			row: 11,
 			ref column,
 			actions);
@@ -265,10 +273,16 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 			SettingsAction.SetAllIgnore(false));
 
 		var extensionNames = viewModel.Extensions.Select(static option => option.Name).ToArray();
-		var ignoreOptionIds = viewModel.IgnoreOptions.Select(static option => option.Id).ToArray();
+		var ignoreOptionIds = GetVisibleSettingsCheckboxes(viewModel)
+			.Select(static option => option.Id)
+			.ToArray();
 		var totalControlCount = extensionNames.Length + ignoreOptionIds.Length;
 		Assert.InRange(totalControlCount, 3, PairwiseColumnCapacity);
-		Assert.Equal(workspace.ExpectedIgnoreOptionIds.Order(), ignoreOptionIds.Order());
+		Assert.Equal(
+			workspace.ExpectedIgnoreOptionIds
+				.Where(static optionId => !GitFilteringModeResolver.IsGitFilteringOption(optionId))
+				.Order(),
+			ignoreOptionIds.Order());
 
 		var actions = new List<SettingsAction>(totalControlCount + 2)
 		{
@@ -385,7 +399,11 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 				await AssertIslandRemainsStableAsync(viewModel, coordinator, stepName);
 		}
 
-		Assert.Equal(workspace.ExpectedIgnoreOptionIds.Order(), toggledIgnoreIds.Order());
+		Assert.Equal(
+			workspace.ExpectedIgnoreOptionIds
+				.Where(static optionId => !GitFilteringModeResolver.IsGitFilteringOption(optionId))
+				.Order(),
+			toggledIgnoreIds.Order());
 		Assert.Contains(SettingsActionKind.ToggleExtension, actionKinds);
 		Assert.Contains(SettingsActionKind.ToggleIgnore, actionKinds);
 		Assert.Contains(SettingsActionKind.SetAllExtensions, actionKinds);
@@ -622,12 +640,18 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 		IReadOnlySet<IgnoreOptionId> toggledIgnoreIds,
 		int ordinal)
 	{
-		Assert.NotEmpty(viewModel.IgnoreOptions);
-		var unvisited = viewModel.IgnoreOptions.FirstOrDefault(option => !toggledIgnoreIds.Contains(option.Id));
+		var options = GetVisibleSettingsCheckboxes(viewModel);
+		Assert.NotEmpty(options);
+		var unvisited = options.FirstOrDefault(option => !toggledIgnoreIds.Contains(option.Id));
 		if (unvisited is not null)
 			return unvisited.Id;
-		return viewModel.IgnoreOptions[PositiveModulo(ordinal, viewModel.IgnoreOptions.Count)].Id;
+		return options[PositiveModulo(ordinal, options.Length)].Id;
 	}
+
+	private static IgnoreOptionViewModel[] GetVisibleSettingsCheckboxes(MainWindowViewModel viewModel) =>
+		viewModel.IgnoreOptions
+			.Where(static option => !GitFilteringModeResolver.IsGitFilteringOption(option.Id))
+			.ToArray();
 
 	private static string SelectCombatName(
 		IReadOnlyList<SelectionOptionViewModel> options,
@@ -662,7 +686,7 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 		IReadOnlyList<IgnoreOptionId> optionIds,
 		string stepName)
 	{
-		Assert.Equal(optionIds.Count, viewModel.IgnoreOptions.Count);
+		Assert.Equal(optionIds.Count, GetVisibleSettingsCheckboxes(viewModel).Length);
 		var mask = 0;
 		for (var bitIndex = 0; bitIndex < optionIds.Count; bitIndex++)
 		{
@@ -670,7 +694,9 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 			if (option.IsChecked)
 				mask |= 1 << bitIndex;
 		}
-		Assert.Equal(optionIds.Count, viewModel.IgnoreOptions.Select(static option => option.Id).Distinct().Count());
+		Assert.Equal(
+			optionIds.Count,
+			GetVisibleSettingsCheckboxes(viewModel).Select(static option => option.Id).Distinct().Count());
 		Assert.True(mask >= 0, $"{stepName}: invalid ignore mask.");
 		return mask;
 	}
@@ -1151,19 +1177,14 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 		IEnumerable<(IgnoreOptionId Id, string Label, bool IsChecked)> options)
 	{
 		var pathOptions = options
-			.Where(static option => !ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option.Id))
+			.Where(static option =>
+				!ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option.Id) &&
+				!GitFilteringModeResolver.IsGitFilteringOption(option.Id))
 			.ToArray();
 		if (pathOptions.Length == 0)
 			return false;
 
-		var ordinaryOptionsChecked = pathOptions
-			.Where(static option => !GitFilteringModeResolver.IsGitFilteringOption(option.Id))
-			.All(static option => option.IsChecked);
-		var gitOptions = pathOptions
-			.Where(static option => GitFilteringModeResolver.IsGitFilteringOption(option.Id))
-			.ToArray();
-		return ordinaryOptionsChecked &&
-		       (gitOptions.Length == 0 || gitOptions.Any(static option => option.IsChecked));
+		return pathOptions.All(static option => option.IsChecked);
 	}
 
 	private static string CaptureIslandFingerprint(MainWindowViewModel viewModel)
@@ -1456,7 +1477,8 @@ public sealed class SelectionSyncCoordinatorCrossSectionJourneyMatrixTests
 		{
 			foreach (var optionId in _ignoreStates.Keys.ToArray())
 			{
-				if (!ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(optionId))
+				if (!ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(optionId) &&
+				    !GitFilteringModeResolver.IsGitFilteringOption(optionId))
 					_ignoreStates[optionId] = isChecked;
 			}
 			_ignoreAllPreference = isChecked;

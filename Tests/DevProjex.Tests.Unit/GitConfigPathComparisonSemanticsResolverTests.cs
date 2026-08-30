@@ -65,6 +65,43 @@ public sealed class GitConfigPathComparisonSemanticsResolverTests
 	}
 
 	[Fact]
+	public void Resolve_DoesNotShareCacheEntriesBetweenCaseDistinctRepositoryRoots()
+	{
+		using var workspace = new TemporaryDirectory();
+		var upperRoot = workspace.CreateFolder("Repo");
+		workspace.CreateFolder("Repo/.git");
+		var lowerRoot = workspace.CreateFolder("repo");
+		workspace.CreateFolder("repo/.git");
+		var physicalRoots = Directory.GetDirectories(workspace.Path);
+		if (physicalRoots.Length != 2)
+		{
+			Assert.Skip("The temporary file system does not support case-distinct sibling directories.");
+			return;
+		}
+
+		var resolutionCount = 0;
+		var resolver = new GitConfigPathComparisonSemanticsResolver(
+			(repositoryRoot, _) =>
+			{
+				Interlocked.Increment(ref resolutionCount);
+				return new GitPathComparisonSemantics(
+					IgnoreCase: repositoryRoot.EndsWith("Repo", StringComparison.Ordinal),
+					NormalizeUnicode: false);
+			},
+			static () => new DateTime(2026, 8, 30, 1, 0, 0, DateTimeKind.Utc),
+			TimeSpan.FromMinutes(1));
+
+		var upper = resolver.Resolve(upperRoot);
+		var lower = resolver.Resolve(lowerRoot);
+
+		Assert.True(upper.IgnoreCase);
+		Assert.False(lower.IgnoreCase);
+		Assert.Equal(upper, resolver.Resolve(upperRoot));
+		Assert.Equal(lower, resolver.Resolve(lowerRoot));
+		Assert.Equal(2, resolutionCount);
+	}
+
+	[Fact]
 	public async Task Invalidate_DuringResolution_PreventsLateResultFromRepopulatingCache()
 	{
 		using var workspace = new TemporaryDirectory();

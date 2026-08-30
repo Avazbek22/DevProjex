@@ -51,7 +51,9 @@ public sealed class MainWindowPreviewLayoutUiTests(UiWorkspaceFixture workspace)
                      })
             {
                 var listBox = UiTestDriver.GetRequiredControl<ListBox>(window, listName);
-                var checklistBorder = Assert.IsType<Border>(listBox.Parent);
+                var checklistBorder = Assert.Single(
+                    listBox.GetVisualAncestors().OfType<Border>(),
+                    border => border.Classes.Contains("checklist-border"));
                 var scrollViewer = Assert.Single(
                     listBox.GetVisualDescendants().OfType<ScrollViewer>());
                 var verticalScrollBar = Assert.Single(
@@ -63,7 +65,7 @@ public sealed class MainWindowPreviewLayoutUiTests(UiWorkspaceFixture workspace)
                         .OfType<Panel>(),
                     panel => panel.Name == "PART_ScrollBarsSeparator");
                 var checklistBounds =
-                    UiTestDriver.GetBoundsInWindow(checklistBorder, window);
+                    UiTestDriver.GetBoundsInWindow(listBox, window);
                 var scrollViewerBounds =
                     UiTestDriver.GetBoundsInWindow(scrollViewer, window);
 

@@ -37,7 +37,26 @@ public sealed class McpCommandContractTests
 		Assert.Contains("--root", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("--hide-private-data", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("--allow-remote", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("--git-mode", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("Run the local read-only MCP stdio server.", environment.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("staged")]
+	[InlineData("changes")]
+	[InlineData("diff:main..feature")]
+	public async Task McpServerBaselineRejectsMomentaryGitModes(string mode)
+	{
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment).RunAsync(
+			["mcp", "--git-mode", mode, "--language", "en"],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("none", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("tracked", environment.StandardError, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -95,6 +114,7 @@ public sealed class McpCommandContractTests
 			using var document = JsonDocument.Parse(File.ReadAllText(path));
 			Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("Terminal.Command.Mcp").GetString()));
 			Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("Terminal.Option.McpRoot").GetString()));
+			Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("Terminal.Option.McpGitMode").GetString()));
 		});
 
 		var solution = File.ReadAllText(Path.Combine(repository, "DevProjex.sln"));

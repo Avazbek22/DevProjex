@@ -19,19 +19,22 @@ internal static class McpToolResults
 				: null
 		};
 
-	public static CallToolResult StructuredSuccess(object value)
+	public static CallToolResult StructuredSuccess(object value, string? notice = null)
 	{
 		ArgumentNullException.ThrowIfNull(value);
 		var structured = JsonSerializer.SerializeToElement(value);
+		List<ContentBlock> content =
+		[
+			new TextContentBlock
+			{
+				Text = JsonSerializer.Serialize(structured, StructuredTextOptions)
+			}
+		];
+		if (!string.IsNullOrWhiteSpace(notice))
+			content.Add(new TextContentBlock { Text = notice });
 		return new CallToolResult
 		{
-			Content =
-			[
-				new TextContentBlock
-				{
-					Text = JsonSerializer.Serialize(structured, StructuredTextOptions)
-				}
-			],
+			Content = content,
 			StructuredContent = structured
 		};
 	}

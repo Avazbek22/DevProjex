@@ -15,11 +15,13 @@ public static class McpServerHost
 		IReadOnlyList<string> roots,
 		bool hidePrivateData = false,
 		bool allowRemote = false,
+		GitFilteringMode? gitMode = null,
 		CancellationToken cancellationToken = default) =>
 		RunWithStandardStreamsAsync(
 			roots,
 			hidePrivateData,
 			allowRemote,
+			gitMode,
 			appDataPathProvider: null,
 			cancellationToken);
 
@@ -27,16 +29,21 @@ public static class McpServerHost
 		IReadOnlyList<string> roots,
 		bool hidePrivateData,
 		bool allowRemote,
+		GitFilteringMode? gitMode,
 		Func<string>? appDataPathProvider,
-		CancellationToken cancellationToken) =>
-		RunWithStreamsAsync(
+		CancellationToken cancellationToken)
+	{
+		ValidateGitMode(gitMode);
+		return RunWithStreamsAsync(
 			roots,
 			Console.OpenStandardInput(),
 			Console.OpenStandardOutput(),
 			hidePrivateData,
 			cancellationToken,
 			appDataPathProvider,
-			allowRemote: allowRemote);
+			allowRemote: allowRemote,
+			gitMode: gitMode);
+	}
 
 	internal static async Task RunWithStreamsAsync(
 		IReadOnlyList<string> roots,
@@ -48,11 +55,13 @@ public static class McpServerHost
 		string? tempRoot = null,
 		Func<McpProjectRootJail, McpServices>? servicesFactory = null,
 		bool allowRemote = false,
-		Func<McpRemoteProjectServices>? remoteServicesFactory = null)
+		Func<McpRemoteProjectServices>? remoteServicesFactory = null,
+		GitFilteringMode? gitMode = null)
 	{
 		ArgumentNullException.ThrowIfNull(roots);
 		ArgumentNullException.ThrowIfNull(input);
 		ArgumentNullException.ThrowIfNull(output);
+		ValidateGitMode(gitMode);
 
 		var rootRegistry = new McpRootRegistry(roots);
 		using var projectSources = new McpProjectSourceResolver(
@@ -66,7 +75,12 @@ public static class McpServerHost
 			LazyThreadSafetyMode.ExecutionAndPublication);
 		await using var packs = new McpPackRegistry(tempRoot);
 		var projectService = new Lazy<McpProjectService>(
-			() => new McpProjectService(projectSources, rootJail, services.Value, hidePrivateData),
+			() => new McpProjectService(
+				projectSources,
+				rootJail,
+				services.Value,
+				hidePrivateData,
+				gitMode),
 			LazyThreadSafetyMode.ExecutionAndPublication);
 		var tools = new DevProjexMcpTools(rootRegistry, projectService, packs);
 		var catalog = new DevProjexMcpToolCatalog(tools);
@@ -105,6 +119,20 @@ public static class McpServerHost
 			if (services.IsValueCreated)
 				services.Value.Dispose();
 		}
+	}
+
+	internal static void ValidateGitMode(GitFilteringMode? gitMode)
+	{
+		if (gitMode is null or GitFilteringMode.None or GitFilteringMode.RespectGitIgnore or
+		    GitFilteringMode.TrackedFilesOnly)
+		{
+			return;
+		}
+
+		throw new ArgumentOutOfRangeException(
+			nameof(gitMode),
+			gitMode,
+			"The MCP server Git mode must be none, gitignore, or tracked.");
 	}
 
 	private static string ResolveVersion() =>

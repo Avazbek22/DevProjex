@@ -12,12 +12,7 @@ public partial class MainWindow
 		if (_suppressTreeSelectionChanges > 0)
 			return;
 
-		if (_interactiveFilterSelectionSnapshot is { } filterSnapshot &&
-			!string.IsNullOrWhiteSpace(_currentPath) &&
-			filterSnapshot.IsForProject(_currentPath))
-		{
-			filterSnapshot.RecordOverride(node.FullPath, node.IsChecked == true);
-		}
+		RecordTreeSelectionOverride(node.FullPath, node.IsChecked == true);
 
 		if (_treeSelectionChangeBatchDepth > 0)
 		{
@@ -26,6 +21,24 @@ public partial class MainWindow
 		}
 
 		PublishTreeSelectionChange();
+	}
+
+	private void RecordTreeSelectionOverride(string path, bool isChecked)
+	{
+		if (string.IsNullOrWhiteSpace(_currentPath))
+			return;
+
+		var filterSnapshot = _interactiveFilterSelectionSnapshot;
+		if (filterSnapshot is not null && filterSnapshot.IsForProject(_currentPath))
+			filterSnapshot.RecordOverride(path, isChecked);
+
+		var gitScopeSnapshot = _gitScopeSelectionSnapshot;
+		if (gitScopeSnapshot is not null &&
+		    !ReferenceEquals(gitScopeSnapshot, filterSnapshot) &&
+		    gitScopeSnapshot.IsForProject(_currentPath))
+		{
+			gitScopeSnapshot.RecordOverride(path, isChecked);
+		}
 	}
 
 	private void ApplyTreeSelectionWithoutPublishing(Action applyChanges)

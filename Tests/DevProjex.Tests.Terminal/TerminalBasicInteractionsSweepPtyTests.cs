@@ -74,37 +74,27 @@ public sealed partial class TerminalBasicInteractionsSweepPtyTests
 		int baselineTreeRows,
 		int columns)
 	{
-		await terminal.SendAsync("X", TestContext.Current.CancellationToken);
-		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
-
-		await ToggleAndWaitAsync(
-			terminal,
-			screen => screen.Contains("[ ] Use .gitignore", StringComparison.Ordinal) &&
-			          screen.Contains("[x] .generated", StringComparison.Ordinal));
-		var unfiltered = terminal.CaptureScreen();
-		Assert.Contains("[x] .generated", unfiltered, StringComparison.Ordinal);
-		Assert.Contains("[x] All (4)", ExtractPanel(unfiltered, "File types", null), StringComparison.Ordinal);
-		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
-		await ToggleAndWaitAsync(
-			terminal,
-			screen => screen.Contains("[x] Tracked Git files only", StringComparison.Ordinal) &&
-			          !screen.Contains(".generated", StringComparison.Ordinal));
-		var tracked = terminal.CaptureScreen();
-		Assert.Contains("[ ] Use .gitignore", tracked, StringComparison.Ordinal);
-
-		await ToggleAndWaitAsync(
-			terminal,
-			screen => screen.Contains("[ ] Tracked Git files only", StringComparison.Ordinal) &&
-			          screen.Contains("[x] .generated", StringComparison.Ordinal));
-		var bothOff = terminal.CaptureScreen();
-		Assert.Contains("[ ] Use .gitignore", bothOff, StringComparison.Ordinal);
-		Assert.Contains("[x] .generated", bothOff, StringComparison.Ordinal);
-
-		await terminal.SendUpAsync(TestContext.Current.CancellationToken);
-		await ToggleAndWaitAsync(
-			terminal,
-			screen => screen.Contains("[x] Use .gitignore", StringComparison.Ordinal) &&
-			          !screen.Contains(".generated", StringComparison.Ordinal));
+		var expectedModes = new[]
+		{
+			"Tracked Git files only",
+			"Staged Git files",
+			"Current Git changes",
+			"No Git filtering",
+			"Use .gitignore"
+		};
+		foreach (var label in expectedModes)
+		{
+			await terminal.SendAsync("M", TestContext.Current.CancellationToken);
+			var screen = await WaitForSettledScreenAsync(
+				terminal,
+				candidate => candidate.Contains($"(•) {label}", StringComparison.Ordinal));
+			var unfiltered = label == "No Git filtering";
+			Assert.Equal(
+				unfiltered,
+				screen.Contains("[x] .generated", StringComparison.Ordinal));
+			AssertStatusIsCoherent(screen);
+			AssertPanelHasNoDrawingArtifacts(screen, columns);
+		}
 		await AssertTreeRestoredAsync(terminal, baselineTreeRows, columns);
 	}
 
@@ -115,9 +105,8 @@ public sealed partial class TerminalBasicInteractionsSweepPtyTests
 	{
 		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);
 		await terminal.SendAsync("X", TestContext.Current.CancellationToken);
-		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
-		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
-		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
+		for (var index = 0; index < ProjectPresentationCatalog.GitFiltering.Count + 1; index++)
+			await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 
 		var descriptors = ProjectPresentationCatalog.Exclusions;
 		for (var index = 0; index < descriptors.Count; index++)
@@ -219,6 +208,13 @@ public sealed partial class TerminalBasicInteractionsSweepPtyTests
 	{
 		Assert.Contains("> PARAMETERS", terminal.CaptureScreen(), StringComparison.Ordinal);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await WaitForSettledScreenAsync(terminal, completed);
+	}
+
+	private static async Task<string> WaitForSettledScreenAsync(
+		TerminalPtyHarness terminal,
+		Func<string, bool> completed)
+	{
 		var stopwatch = Stopwatch.StartNew();
 		var stable = Stopwatch.StartNew();
 		var previous = string.Empty;
@@ -238,7 +234,7 @@ public sealed partial class TerminalBasicInteractionsSweepPtyTests
 				if (stable.Elapsed >= TimeSpan.FromMilliseconds(250))
 				{
 					AssertStatusIsCoherent(screen);
-					return;
+					return screen;
 				}
 			}
 			else

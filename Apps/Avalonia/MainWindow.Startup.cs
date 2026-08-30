@@ -483,12 +483,15 @@ public partial class MainWindow
         {
             _taskbarProgress.Attach(this);
             UpdateAdaptiveWorkspaceChrome(forcePreviewLabels: true);
+            var gitAvailabilityTask = _selectionCoordinator
+                .EnsureGitCliAvailabilityAsync(cancellationToken);
 
             // The IPC registration and compositor warmup are independent. Running them
             // together removes registry/socket IO from the first-visible-frame critical path.
             await Task.WhenAll(
                 EnsureDesktopControlServerAsync(cancellationToken),
                 RevealStartupWindowAfterCompositionWarmupAsync(cancellationToken));
+            await gitAvailabilityTask;
             cancellationToken.ThrowIfCancellationRequested();
             _themeBrushCoordinator.ScheduleStartupEffectSynchronization();
             StartDeferredAppStateBootstrap(cancellationToken);

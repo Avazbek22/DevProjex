@@ -150,7 +150,7 @@ internal static class TerminalWorkspaceCommandCatalog
 			TerminalWorkspaceCommandVerb.Set,
 			TerminalWorkspaceCommandGrammar.ToggleOption,
 			"set",
-			"set <option> <on|off>",
+			"set <option> <value>",
 			"set hide-secrets on",
 			static (session, command) => session.ExecuteSetCommand(command)),
 		Define(

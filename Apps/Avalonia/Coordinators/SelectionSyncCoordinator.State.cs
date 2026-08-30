@@ -10,13 +10,15 @@ public sealed partial class SelectionSyncCoordinator
         HashSet<string> selectedExtensions,
         HashSet<IgnoreOptionId> selectedIgnoreOptions,
         IReadOnlyDictionary<string, bool> extensionOptionStates,
-        IReadOnlyDictionary<IgnoreOptionId, bool> ignoreOptionStates)
+		IReadOnlyDictionary<IgnoreOptionId, bool> ignoreOptionStates,
+		GitFilteringMode gitMode)
     {
         public static AppliedSelectionState Capture(
             string projectPath,
             MainWindowViewModel viewModel,
             IReadOnlyDictionary<string, bool>? cachedExtensionStates,
-            IReadOnlyDictionary<IgnoreOptionId, bool>? cachedIgnoreOptionStates)
+			IReadOnlyDictionary<IgnoreOptionId, bool>? cachedIgnoreOptionStates,
+			GitFilteringMode gitMode)
         {
             var extensionStates = cachedExtensionStates is null
                 ? new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
@@ -44,7 +46,8 @@ public sealed partial class SelectionSyncCoordinator
                 extensions,
                 ignoreOptions,
                 extensionStates,
-                ignoreStates);
+				ignoreStates,
+				gitMode);
         }
 
         public AppliedSelectionPersistenceSnapshot CreatePersistenceSnapshot() => new(
@@ -64,7 +67,10 @@ public sealed partial class SelectionSyncCoordinator
             !string.IsNullOrWhiteSpace(currentProjectPath) &&
             PathComparer.Default.Equals(projectPath, currentProjectPath);
 
-        public bool Matches(string? currentProjectPath, MainWindowViewModel viewModel)
+		public bool Matches(
+			string? currentProjectPath,
+			MainWindowViewModel viewModel,
+			GitFilteringMode currentGitMode)
         {
             if (string.IsNullOrWhiteSpace(currentProjectPath) ||
                 !PathComparer.Default.Equals(projectPath, currentProjectPath))
@@ -73,28 +79,32 @@ public sealed partial class SelectionSyncCoordinator
             }
 
             return MatchesSelectedExtensions(viewModel.Extensions) &&
-                   MatchesSelectedIgnoreOptions(viewModel.IgnoreOptions);
+			       MatchesSelectedIgnoreOptions(viewModel.IgnoreOptions) &&
+			       currentGitMode == gitMode;
         }
 
         public bool MatchesExceptIgnoreOption(
             string? currentProjectPath,
             MainWindowViewModel viewModel,
-            IReadOnlyDictionary<string, bool>? currentExtensionStates,
-            IReadOnlyDictionary<IgnoreOptionId, bool>? currentIgnoreStates,
-            IgnoreOptionId ignoredOption)
+			IReadOnlyDictionary<string, bool>? currentExtensionStates,
+			IReadOnlyDictionary<IgnoreOptionId, bool>? currentIgnoreStates,
+			GitFilteringMode currentGitMode,
+			IgnoreOptionId ignoredOption)
             => MatchesExceptIgnoreOptions(
                 currentProjectPath,
                 viewModel,
-                currentExtensionStates,
-                currentIgnoreStates,
-                [ignoredOption]);
+				currentExtensionStates,
+				currentIgnoreStates,
+				currentGitMode,
+				[ignoredOption]);
 
         public bool MatchesExceptIgnoreOptions(
             string? currentProjectPath,
             MainWindowViewModel viewModel,
-            IReadOnlyDictionary<string, bool>? currentExtensionStates,
-            IReadOnlyDictionary<IgnoreOptionId, bool>? currentIgnoreStates,
-            IReadOnlyCollection<IgnoreOptionId> ignoredOptions)
+			IReadOnlyDictionary<string, bool>? currentExtensionStates,
+			IReadOnlyDictionary<IgnoreOptionId, bool>? currentIgnoreStates,
+			GitFilteringMode currentGitMode,
+			IReadOnlyCollection<IgnoreOptionId> ignoredOptions)
         {
             if (string.IsNullOrWhiteSpace(currentProjectPath) ||
                 !PathComparer.Default.Equals(projectPath, currentProjectPath))
@@ -105,14 +115,16 @@ public sealed partial class SelectionSyncCoordinator
             return MatchesSelectedExtensions(viewModel.Extensions) &&
                    MatchesSelectedIgnoreOptionsExcept(viewModel.IgnoreOptions, ignoredOptions) &&
                    DictionaryStatesMatch(extensionOptionStates, currentExtensionStates) &&
-                   DictionaryStatesMatchExcept(ignoreOptionStates, currentIgnoreStates, ignoredOptions);
+			       DictionaryStatesMatchExcept(ignoreOptionStates, currentIgnoreStates, ignoredOptions) &&
+			       currentGitMode == gitMode;
         }
 
         public bool MatchesExceptContentTransformations(
             string? currentProjectPath,
-            MainWindowViewModel viewModel,
-            IReadOnlyDictionary<string, bool>? currentExtensionStates,
-            IReadOnlyDictionary<IgnoreOptionId, bool>? currentIgnoreStates)
+			MainWindowViewModel viewModel,
+			IReadOnlyDictionary<string, bool>? currentExtensionStates,
+			IReadOnlyDictionary<IgnoreOptionId, bool>? currentIgnoreStates,
+			GitFilteringMode currentGitMode)
         {
             if (string.IsNullOrWhiteSpace(currentProjectPath) ||
                 !PathComparer.Default.Equals(projectPath, currentProjectPath))
@@ -125,10 +137,11 @@ public sealed partial class SelectionSyncCoordinator
                        viewModel.IgnoreOptions,
                        ProjectPresentationCatalog.ContentTransformationOptionIds) &&
                    DictionaryStatesMatch(extensionOptionStates, currentExtensionStates) &&
-                   DictionaryStatesMatchExcept(
-                       ignoreOptionStates,
-                       currentIgnoreStates,
-                       ProjectPresentationCatalog.ContentTransformationOptionIds);
+			       DictionaryStatesMatchExcept(
+				       ignoreOptionStates,
+				       currentIgnoreStates,
+				       ProjectPresentationCatalog.ContentTransformationOptionIds) &&
+			       currentGitMode == gitMode;
         }
 
         public bool HasDifferentIgnoreOption(
@@ -156,7 +169,8 @@ public sealed partial class SelectionSyncCoordinator
                 new HashSet<string>(selectedExtensions, StringComparer.OrdinalIgnoreCase),
                 selected,
                 extensionOptionStates,
-                states);
+				states,
+				gitMode);
         }
 
         private bool MatchesSelectedExtensions(IReadOnlyCollection<SelectionOptionViewModel> options)

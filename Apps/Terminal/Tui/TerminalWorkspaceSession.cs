@@ -54,6 +54,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	private int _terminalWidth;
 	private int _terminalHeight;
 	private bool _deferredInitialStart;
+	private bool _gitCliAvailable;
 	private bool _stopping;
 	private bool _disposed;
 	private Task? _openTask;
@@ -158,7 +159,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_parameterRowsBuilder = new TerminalParameterRowsBuilder(
 			L,
 			FitControlLabel,
-			services.IgnoreOptionsService.FormatContentRedactionLabel);
+			services.IgnoreOptionsService.FormatContentRedactionLabel,
+			environment.SupportsUnicode && !options.Plain);
 		_presentation = TerminalWorkspacePresentationPolicy.Resolve(
 			options.ColorMode,
 			options.Plain,
@@ -1020,12 +1022,20 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			var state = await _controller
 				.OpenAsync(projectPath, profile, operationCts.Token, sourceIdentity)
 				.ConfigureAwait(false);
+			var gitCliAvailable = await ResolveGitCliAvailabilityAsync(
+					state.Plan,
+					operationCts.Token)
+				.ConfigureAwait(false);
 			if (_stopping || operationCts.IsCancellationRequested)
 				return;
 			sessionAccepted = await InvokeAsync(() =>
 				TerminalRepositorySessionOwnership.TryPublishAndReplace(
 					_operations.IsCurrent(WorkspaceOperationKind.Active, operationCts),
-					() => ShowWorkspace(state),
+					() =>
+					{
+						_gitCliAvailable = gitCliAvailable;
+						ShowWorkspace(state);
+					},
 					ref _ownedRepositorySession,
 					preparedRepositorySession)).ConfigureAwait(false);
 			if (!sessionAccepted)
@@ -3501,6 +3511,10 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		{
 			"DPX-GIT-TRACKED-INDEX-UNAVAILABLE" =>
 				L("Terminal.Diagnostic.TrackedIndexUnavailable"),
+			GitScopeFilter.UnavailableDiagnosticCode =>
+				L("Terminal.Diagnostic.GitStateUnavailable"),
+			GitScopeFilter.DeletedDiagnosticCode =>
+				L("Terminal.Diagnostic.GitStateDeleted"),
 			"DPX-PROJECT-NOT-FOUND" or "DPX-PROJECT-PATH-INVALID" =>
 				L("Terminal.Tui.Error.ProjectUnavailable"),
 			_ => L("Terminal.Tui.Error.InvalidOperation")
@@ -3713,6 +3727,11 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var extensionStates = new Dictionary<string, bool>(
 			_settingsDraftExtensionStates ?? state.ExtensionOptionStates,
 			StringComparer.OrdinalIgnoreCase);
+		var previousPaths = state.BuildSelectedItemRelativePaths();
+		var pathStates = new Dictionary<string, bool>(
+			state.PathOptionStates,
+			PathComparer.Default);
+		var preferredGitMode = _settingsDraftPreferredGitMode ?? _preferredGitMode;
 		var originatedFromCommandLine = _settingsDraftOriginatedFromCommandLine;
 		var requestId = Interlocked.Increment(ref _settingsRefreshRequestId);
 		var operationCts = _operations.Start(WorkspaceOperationKind.SettingsRefresh);
@@ -3724,6 +3743,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				baseline,
 				selection,
 				extensionStates,
+				previousPaths,
+				pathStates,
+				preferredGitMode,
 				originatedFromCommandLine,
 				requestId,
 				operationCts,
@@ -3737,6 +3759,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		ProjectContextPlan baseline,
 		ProjectSelectionSpec selection,
 		IReadOnlyDictionary<string, bool> extensionStates,
+		IReadOnlySet<string> previousPaths,
+		IReadOnlyDictionary<string, bool> pathStates,
+		GitFilteringMode preferredGitMode,
 		bool originatedFromCommandLine,
 		long requestId,
 		CancellationTokenSource operationCts,
@@ -3745,12 +3770,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	{
 		try
 		{
+			var requiresStructuralRefresh = TerminalWorkspaceController.RequiresStructuralRefresh(
+				baseline,
+				selection,
+				extensionStates);
 			await Task.Delay(
 				SettingsRefreshDebounceMilliseconds,
 				cancellationToken).ConfigureAwait(false);
-			if (TerminalWorkspaceController.RequiresStructuralRefresh(
-				    baseline.Selection,
-				    selection))
+			if (requiresStructuralRefresh)
 			{
 				await InvokeAsync(() =>
 				{
@@ -3770,8 +3797,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					baseline,
 					selection,
 					extensionStates,
+					previousPaths,
+					pathStates,
+					preferredGitMode,
 					cancellationToken)
 				.ConfigureAwait(false);
+			var gitCliAvailable = requiresStructuralRefresh
+				? await ResolveGitCliAvailabilityAsync(result.Plan, cancellationToken).ConfigureAwait(false)
+				: _gitCliAvailable;
 			cancellationToken.ThrowIfCancellationRequested();
 			await InvokeAsync(() =>
 			{
@@ -3779,6 +3812,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					return false;
 
 				_controller.ApplySettingsPlan(state, result);
+				_gitCliAvailable = gitCliAvailable;
+				_preferredGitMode = preferredGitMode;
 				ClearSettingsDraft();
 				RefreshWorkspace();
 				if (originatedFromCommandLine)
@@ -3803,6 +3838,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		{
 			if (IsCurrentSettingsRefresh(state, operationCts, requestId))
 			{
+				await CompleteCornerProgressAsync(cornerProgressId).ConfigureAwait(false);
+				cornerProgressId = 0;
 				await RollbackFailedSettingsRefreshAsync().ConfigureAwait(false);
 				await ShowSettingsFailureAsync(
 					exception.Code,
@@ -3814,6 +3851,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		{
 			if (IsCurrentSettingsRefresh(state, operationCts, requestId))
 			{
+				await CompleteCornerProgressAsync(cornerProgressId).ConfigureAwait(false);
+				cornerProgressId = 0;
 				await RollbackFailedSettingsRefreshAsync().ConfigureAwait(false);
 				await ShowSettingsFailureAsync(
 					"DPX-TUI-OPERATION-FAILED",
@@ -3862,6 +3901,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var state = _state;
 		var sourcePlan = state.Plan;
 		var selectedPaths = state.BuildSelectedRelativePaths();
+		var forceEmptySelection = state.IsEffectiveRootUnchecked;
 		var expectedRevision = state.Revision;
 		_operations.Cancel(WorkspaceOperationKind.Preview);
 		var projectionRequestId = Interlocked.Increment(ref _projectionRequestId);
@@ -3879,6 +3919,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				var plan = await _controller.BuildReprojectedPlanAsync(
 						sourcePlan,
 						selectedPaths,
+						forceEmptySelection,
 						cancellationToken)
 					.ConfigureAwait(false);
 				var applied = await InvokeAsync(() =>
@@ -4118,14 +4159,18 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_activeAggregateControlSection == _activeControlSection
 			? 0
 			: Math.Clamp(list.SelectedItem ?? 0, 0, Math.Max(0, rows.Count - 1)) + aggregateOffset;
-		var next = selected + Math.Sign(delta);
-		if (next >= 0 && next < logicalCount)
+		var direction = Math.Sign(delta);
+		var next = FindEnabledControlPosition(
+			_activeControlSection,
+			selected + direction,
+			direction);
+		if (next >= 0)
 		{
 			FocusControlPosition(_activeControlSection, next);
 			return;
 		}
 
-		var targetIndex = currentIndex + Math.Sign(delta);
+		var targetIndex = currentIndex + direction;
 		if (targetIndex < 0 || targetIndex >= sections.Length)
 			return;
 		var targetSection = sections[targetIndex];
@@ -4134,7 +4179,12 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var targetCount = (targetRows?.Count ?? 0) + (targetAggregate is null ? 0 : 1);
 		if (targetRows is null || targetCount == 0)
 			return;
-		FocusControlPosition(targetSection, delta > 0 ? 0 : targetCount - 1);
+		var targetPosition = FindEnabledControlPosition(
+			targetSection,
+			direction > 0 ? 0 : targetCount - 1,
+			direction);
+		if (targetPosition >= 0)
+			FocusControlPosition(targetSection, targetPosition);
 	}
 
 	private void FocusControlBoundary(TerminalControlSection section, bool first)
@@ -4143,7 +4193,31 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var aggregate = GetAggregateControlSection(section).List;
 		var count = (rows?.Count ?? 0) + (aggregate is null ? 0 : 1);
 		if (count > 0)
-			FocusControlPosition(section, first ? 0 : count - 1);
+		{
+			var direction = first ? 1 : -1;
+			var position = FindEnabledControlPosition(
+				section,
+				first ? 0 : count - 1,
+				direction);
+			if (position >= 0)
+				FocusControlPosition(section, position);
+		}
+	}
+
+	private int FindEnabledControlPosition(
+		TerminalControlSection section,
+		int start,
+		int direction)
+	{
+		var (_, rows) = GetControlSection(section);
+		var aggregateOffset = GetAggregateControlSection(section).List is null ? 0 : 1;
+		var count = (rows?.Count ?? 0) + aggregateOffset;
+		for (var position = start; position >= 0 && position < count; position += direction)
+		{
+			if (position < aggregateOffset || rows![position - aggregateOffset].IsEnabled)
+				return position;
+		}
+		return -1;
 	}
 
 	private void FocusControlPosition(TerminalControlSection section, int logicalIndex)
@@ -4163,7 +4237,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		else
 		{
 			var rowIndex = logicalIndex - (aggregate is null ? 0 : 1);
-			if (rowIndex < 0 || rowIndex >= rows.Count)
+			if (rowIndex < 0 || rowIndex >= rows.Count || !rows[rowIndex].IsEnabled)
 				return;
 			_activeAggregateControlSection = null;
 			list.SelectedItem = rowIndex;
@@ -5200,7 +5274,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				};
 				var message = ContextDiagnosticRenderer.ResolveMessage(
 					_services.Localization,
-					diagnostic.Code);
+					diagnostic);
 				var path = string.IsNullOrWhiteSpace(diagnostic.Path)
 					? string.Empty
 					: $"\n{L("Terminal.Label.Path")}: {TerminalTextEscaping.EscapeSingleLine(diagnostic.Path)}";

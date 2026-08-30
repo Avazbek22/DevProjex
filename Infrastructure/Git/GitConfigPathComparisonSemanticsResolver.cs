@@ -22,9 +22,9 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 	private readonly TimeSpan _unavailableRetryDelay;
 	private readonly object _cacheSync = new();
 	private readonly Dictionary<string, RepositorySemanticsCacheEntry> _repositoryCache =
-		new(PathComparer.Default);
+		new(StringComparer.Ordinal);
 	private readonly Dictionary<string, long> _latestResolutionSequences =
-		new(PathComparer.Default);
+		new(StringComparer.Ordinal);
 	private long _cacheGeneration;
 	private long _nextResolutionSequence;
 

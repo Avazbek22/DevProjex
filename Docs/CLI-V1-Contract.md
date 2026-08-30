@@ -156,7 +156,7 @@ remains a usage error instead of silently selecting a later command.
 --extension <EXT>                    repeatable
 --select <RELATIVE_PATH>             repeatable
 --select-from <FILE|->
---git-mode <none|gitignore|tracked>
+--git-mode <MODE>
 --exclude <NAME>                     repeatable
 --max-file-bytes <SIZE>              analyze/tree/export-context only
 --hide-secrets [<true|false|on|off>]
@@ -341,6 +341,25 @@ matrix is normative:
 - at least one readable index plus unreadable nested indexes:
   `DPX-GIT-TRACKED-INDEX-PARTIAL`, warning severity, affected nested scopes excluded,
   exit `0` unless `analyze --strict` promotes policy diagnostics to exit `3`.
+
+Git mode also accepts three momentary, invocation-only scopes: `staged`,
+`changes`, and `diff:<REF>..<REF>`. `staged` selects paths with staged changes;
+`changes` selects the union of staged, unstaged, and non-ignored untracked paths;
+`diff` selects paths changed between the two non-empty Git references. These
+scopes use an unfiltered scanner underlay for staged/diff and a `gitignore`
+underlay for changes, then intersect the resulting plan with the Git state. An
+explicit persistent baseline remains a ceiling and can only narrow that result.
+Every other profile, Exclusion, Smart Ignore, extension, explicit path, glob, and
+file-size restriction remains active. Content is always read from the current
+working tree, not the index or a commit object.
+
+Deleted paths and rename sources are omitted because they have no working-tree
+file and produce warning `DPX-GIT-STATE-DELETED` with their count. A non-Git
+project, unavailable Git executable, failed Git state command, or invalid diff
+reference produces error `DPX-GIT-STATE-UNAVAILABLE` and direct-command exit `3`.
+Momentary modes are never persisted: `profile save` and portable profile writes
+reject them with usage error `DPX-CLI-PROFILE-INVALID`. Desktop exposes `staged`
+and `changes`, but not the payload-bearing diff scope.
 
 Selection precedence is:
 
@@ -775,13 +794,15 @@ that prevents an accepted option from becoming a no-op.
 | analyze/tree/context/project/open/profile-save | `--root` | profile roots | replaces the profile root set with each repeated top-level relative path | repeatable; conflicts with `open --last`; invalid/out-of-source path exits `2` | requested payload/path stays on stdout | parser, resolver, handler, process |
 | analyze/tree/context/project/open/profile-save | `--extension` | profile extensions | replaces the profile extension set with each repeated normalized extension | repeatable; conflicts with `open --last` | requested payload/path stays on stdout | parser, resolver, handler, process |
 | analyze/tree/context/project/open/profile-save | `--select`, `--select-from` | profile selected paths | combines direct paths with strict UTF-8 file/redirected-stdin entries into one explicit path override | optional UTF-8 BOM is accepted; UTF-16/UTF-32, interactive stdin, oversized input, physically missing or invalid/out-of-source paths, and `open --last` fail with exit `2`; existing paths removed from the effective tree produce a warning and success; the byte limit is enforced during reading | requested payload/path stays on stdout | parser, reader, resolver, process |
-| analyze/tree/context/project/open/profile-save | `--git-mode` | profile Git mode | replaces the profile mode with `none`, `gitignore`, or `tracked` | conflicts with `open --last`; `tracked` requires Git CLI and at least one readable applicable index | on unavailable index, `analyze` preserves its requested report; tree/context/project/open/profile-save create no artifact and emit no success payload; diagnostic uses stderr and exit `3` | parser, resolver, handler, process |
+| analyze/tree/context/project/open/profile-save | `--git-mode` | profile Git mode | replaces the profile mode with `none`, `gitignore`, `tracked`, `staged`, `changes`, or `diff:<REF>..<REF>` | conflicts with `open --last`; momentary modes require a Git repository and are not persistable; Desktop rejects `diff` | on unavailable Git state, `analyze` preserves its requested report; tree/context/project/open/profile-save create no artifact and emit no success payload; diagnostic uses stderr and exit `3` | parser, resolver, Git process, handler |
 | analyze/tree/context/project/open/profile-save | `--exclude` | profile exclusions | replaces the path-exclusion set with repeated typed values | repeatable; `none` conflicts with every other value; conflicts with `open --last` | requested payload/path stays on stdout; invalid value exits `2` | parser, resolver, handler, process |
 | analyze/tree/context | `--max-file-bytes` | absent | removes otherwise selected files strictly larger than SIZE | positive bytes or binary `k|kb|kib`, `m|mb|mib`, `g|gb|gib`; invocation-only and never persisted | inventories, trees, context, metrics, and dry-run counts reflect the narrowed selection; invalid value exits `2` | parser, application filter, handler, process |
 | analyze/context/project/open/profile-save | `--hide-secrets` | profile content-transformation state | independently enables or disables detected-value redaction without changing path filters | bare form means on; values are `true`, `false`, `on`, `off`; conflicts with `--no-hide-secrets` and `open --last` | requested payload/path stays on stdout; inspection failure exits `1` without a complete artifact | parser, resolver, handler, process |
 | analyze/context/project/open/profile-save | `--hide-private-data` | profile content-transformation state | independently enables or disables private-data redaction without changing path filters | bare form means on; values are `true`, `false`, `on`, `off`; conflicts with `--no-hide-private-data` and `open --last` | requested payload/path stays on stdout; inspection failure exits `1` without a complete artifact | parser, resolver, handler, process |
 | `mcp` | `--hide-private-data` | off | enables private-data redaction for the entire server process | startup-only; tool schemas and profiles cannot alter it; secret redaction remains mandatory | stdout remains JSON-RPC-only; startup failure exits `2` | parser, MCP contract, process |
 | `mcp` | `--allow-remote` | off | permits project tools to resolve Git URL sources through RepoCache | startup-only; local roots and `list_projects` remain unchanged; `branch` is URL-only | stdout remains JSON-RPC-only; tool failures use stable `DPX-MCP-*` results | parser, MCP schema, integration |
+| `mcp` | `--git-mode` | standard-profile mode | selects the server baseline from `none`, `gitignore`, or `tracked` when no explicit profile is requested | startup-only; momentary modes are rejected | stdout remains JSON-RPC-only; startup failure exits `2` | parser, MCP contract, process |
+| MCP get_tree/analyze/pack_context/search_project | `git_scope` | absent | narrows the effective selection with `staged`, `changes`, or `diff:<REF>..<REF>` | cannot weaken the profile/server baseline; input is limited to 4,096 characters; non-Git projects and invalid refs fail | tool error is `DPX-MCP-PROJECT-UNAVAILABLE` for unavailable Git state or `DPX-MCP-INVALID-ARGUMENTS` for invalid input | MCP schema, integration |
 | analyze/context/project/open/profile-save | `--compress-code` | profile content-transformation state | independently enables or disables syntax-aware body compression without changing path filters | `true|false|on|off`; conflicts with `--no-compress-code` and `open --last` | requested payload/path stays on stdout; unsupported or rejected files remain complete | parser, resolver, handler, process |
 | analyze/context/project/open/profile-save | `--strip-comments` | profile content-transformation state | independently removes syntax-tree comments and Python docstrings without changing path filters | `true|false|on|off`; conflicts with `--no-strip-comments` and `open --last` | requested payload/path stays on stdout; unsupported or rejected files remain complete | parser, resolver, handler, process |
 | analyze/context/project/open/profile-save | `--strip-blank-lines` | profile content-transformation state | independently removes unprotected whitespace-only source lines without changing path filters | `true|false|on|off`; conflicts with `--no-strip-blank-lines` and `open --last` | requested payload/path stays on stdout; unsupported or rejected files remain complete | parser, resolver, handler, process |
@@ -1097,6 +1118,12 @@ filter and exclude files strictly larger than the limit without changing profile
 schemas. Existing machine documents add no property; their inventory, byte
 metrics, trees, and content reflect the effective narrowed selection.
 
+Git-axis v2 is an additive CLI-v1 extension. Direct selection commands accept
+the momentary `staged`, `changes`, and `diff:<REF>..<REF>` tokens. MCP adds the
+persistent server baseline `--git-mode` and the narrowing `git_scope` parameter
+on its four selection tools. Profile schemas remain unchanged and reject
+momentary values.
+
 ## Exit Codes
 
 | Code | Meaning |
@@ -1123,6 +1150,11 @@ New public JSON documents use:
 - `/` separators in machine paths;
 - UTF-8 without BOM;
 - no ANSI or localized identifiers.
+
+The machine `selection.gitMode` value is one of `none`, `gitignore`, `tracked`,
+`staged`, `changes`, or the complete `diff:<REF>..<REF>` token. JSON and XML keep
+the payload-bearing diff token intact so separate ranges have distinct,
+reproducible selection identities.
 
 The v1 kinds are:
 

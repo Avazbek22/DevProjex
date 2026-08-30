@@ -74,6 +74,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
     private bool _allExtensionsChecked;
     private bool _allIgnoreChecked;
 	private bool _allContentProcessingChecked;
+	private GitFilteringModeOptionViewModel? _selectedGitFilteringModeOption;
+	private bool _gitFilteringRepositoryAvailable;
+	internal bool IsRefreshingGitFilteringModes { get; private set; }
 	private IgnoreOptionViewModel? _hideSecretsOption;
 	private IgnoreOptionViewModel? _hidePrivateDataOption;
 	private ContentRedactionStatus _secretsRedactionStatus;
@@ -219,6 +222,18 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		new ResettableObservableCollection<IgnoreOptionViewModel>();
 	public ObservableCollection<IgnoreOptionViewModel> ContentProcessingOptions { get; } =
 		new ResettableObservableCollection<IgnoreOptionViewModel>();
+	public ObservableCollection<GitFilteringModeOptionViewModel> GitFilteringModes { get; } =
+		new ResettableObservableCollection<GitFilteringModeOptionViewModel>();
+	public GitFilteringModeOptionViewModel? SelectedGitFilteringModeOption
+	{
+		get => _selectedGitFilteringModeOption;
+		set
+		{
+			if (ReferenceEquals(_selectedGitFilteringModeOption, value)) return;
+			_selectedGitFilteringModeOption = value;
+			RaisePropertyChanged();
+		}
+	}
 	public IgnoreOptionViewModel? HideSecretsOption
 	{
 		get => _hideSecretsOption;
@@ -1912,7 +1927,10 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         HelpAboutSupport = _localization["Help.About.Support"];
         HelpAboutOpenLink = _localization["Help.About.OpenLink"];
         UpdateApplicationUpdateLocalization();
-        SettingsIgnoreTitle = _localization["Settings.IgnoreTitle"];
+		SettingsIgnoreTitle = _localization["Settings.IgnoreTitle"];
+		RefreshGitFilteringModes(
+			_gitFilteringRepositoryAvailable,
+			SelectedGitFilteringModeOption?.Mode ?? GitFilteringMode.None);
 		SettingsSecretsTitle = _localization["Settings.Secrets.Title"];
 		UpdateSettingsSecretsNotice();
 		UpdateSettingsPrivateDataNotice();
@@ -2229,7 +2247,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
         if (string.IsNullOrEmpty(baseText))
             baseText = _localization["Settings.All"];
 
-		SettingsAllIgnore = PathIgnoreOptions.Count > 0 ? $"{baseText} ({PathIgnoreOptions.Count})" : baseText;
+		var ignoreCount = PathIgnoreOptions.Count;
+		SettingsAllIgnore = ignoreCount > 0 ? $"{baseText} ({ignoreCount})" : baseText;
 		SettingsAllContentProcessing = ContentProcessingOptions.Count > 0
 			? $"{baseText} ({ContentProcessingOptions.Count})"
 			: baseText;
@@ -2245,13 +2264,42 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 			.Select(static descriptor => descriptor.LegacyOptionId)
 			.ToHashSet();
 		((ResettableObservableCollection<IgnoreOptionViewModel>)PathIgnoreOptions).ReplaceAll(
-			IgnoreOptions.Where(option => !contentTransformationIds.Contains(option.Id)));
+			IgnoreOptions.Where(option =>
+				!contentTransformationIds.Contains(option.Id) &&
+				!GitFilteringModeResolver.IsGitFilteringOption(option.Id)));
 		HideSecretsOption = IgnoreOptions.FirstOrDefault(
 			static option => option.Id == IgnoreOptionId.HideSecrets);
 		HidePrivateDataOption = IgnoreOptions.FirstOrDefault(
 			static option => option.Id == IgnoreOptionId.HidePrivateData);
 		SynchronizeContentProcessingOptions(contentTransformationIds);
 		RaisePropertyChanged(nameof(HasContentProcessingOptions));
+	}
+
+	public void RefreshGitFilteringModes(
+		bool repositoryAvailable,
+		GitFilteringMode selectedMode)
+	{
+		_gitFilteringRepositoryAvailable = repositoryAvailable;
+		var supported = ProjectPresentationCatalog.GitFiltering
+			.Where(descriptor => repositoryAvailable ||
+				descriptor.Id is GitFilteringMode.None or GitFilteringMode.RespectGitIgnore)
+			.Select(descriptor => new GitFilteringModeOptionViewModel(
+				descriptor.Id,
+				_localization[descriptor.LabelKey]))
+			.ToArray();
+		IsRefreshingGitFilteringModes = true;
+		try
+		{
+			if (!GitFilteringModes.SequenceEqual(supported))
+				((ResettableObservableCollection<GitFilteringModeOptionViewModel>)GitFilteringModes)
+					.ReplaceAll(supported);
+			SelectedGitFilteringModeOption = GitFilteringModes.FirstOrDefault(option =>
+				option.Mode == selectedMode) ?? GitFilteringModes.FirstOrDefault();
+		}
+		finally
+		{
+			IsRefreshingGitFilteringModes = false;
+		}
 	}
 
 	private void SynchronizeContentProcessingOptions(IReadOnlySet<IgnoreOptionId>? transformationIds = null)

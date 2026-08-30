@@ -53,7 +53,8 @@ public static class ProjectTreeSelectionProjection
 	internal static IReadOnlyList<TreeNodeDescriptor> BuildIncludedNodesWithCancellation(
 		TreeNodeDescriptor root,
 		IReadOnlySet<string> selectedPaths,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		StringComparer? pathComparer = null)
 	{
 		ArgumentNullException.ThrowIfNull(root);
 		ArgumentNullException.ThrowIfNull(selectedPaths);
@@ -61,7 +62,7 @@ public static class ProjectTreeSelectionProjection
 
 		var effectiveSelectedPaths = NormalizeSelectedPaths(root, selectedPaths);
 		var included = new List<TreeNodeDescriptor>();
-		var uniquePaths = new HashSet<string>(PathComparer.Default);
+		var uniquePaths = new HashSet<string>(pathComparer ?? PathComparer.Default);
 		VisitIncludedTree(
 			root,
 			effectiveSelectedPaths,
@@ -90,14 +91,16 @@ public static class ProjectTreeSelectionProjection
 		TreeNodeDescriptor root,
 		IReadOnlySet<string> selectedPaths,
 		bool ensureExists,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		StringComparer? pathComparer = null)
 	{
 		ArgumentNullException.ThrowIfNull(root);
 		ArgumentNullException.ThrowIfNull(selectedPaths);
 		cancellationToken.ThrowIfCancellationRequested();
 
 		var effectiveSelectedPaths = NormalizeSelectedPaths(root, selectedPaths);
-		var uniquePaths = new HashSet<string>(PathComparer.Default);
+		var effectivePathComparer = pathComparer ?? PathComparer.Default;
+		var uniquePaths = new HashSet<string>(effectivePathComparer);
 		VisitIncludedTree(
 			root,
 			effectiveSelectedPaths,
@@ -111,7 +114,7 @@ public static class ProjectTreeSelectionProjection
 
 		cancellationToken.ThrowIfCancellationRequested();
 		var orderedPaths = new List<string>(uniquePaths);
-		CancellationAwareSort.Sort(orderedPaths, PathComparer.Default, cancellationToken);
+		CancellationAwareSort.Sort(orderedPaths, effectivePathComparer, cancellationToken);
 		return orderedPaths;
 	}
 

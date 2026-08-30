@@ -21,14 +21,21 @@ public static class ProjectSelectionAdapter
 			throw new ArgumentException("The project selection must be fully resolved.", nameof(selection));
 
 		var options = new HashSet<IgnoreOptionId>();
-		switch (selection.GitMode.Value)
+		switch (GitScopeSelection.ToUnderlayMode(selection.GitMode.Value))
 		{
+			case GitFilteringMode.None:
+				break;
 			case GitFilteringMode.RespectGitIgnore:
 				options.Add(IgnoreOptionId.UseGitIgnore);
 				break;
 			case GitFilteringMode.TrackedFilesOnly:
 				options.Add(IgnoreOptionId.TrackedGitFilesOnly);
 				break;
+			default:
+				throw new ArgumentOutOfRangeException(
+					nameof(selection),
+					selection.GitMode,
+					"The Git filtering mode is invalid.");
 		}
 
 		foreach (var exclusion in selection.Exclusions)

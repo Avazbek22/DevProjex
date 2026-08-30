@@ -37,7 +37,7 @@ internal static class CommandExecution
 			var isRuntimeFailure = exception.Code == "DPX-CLI-PROFILE-WRITE-FAILED";
 			return WriteError(environment, outputOptions, text, new TerminalError(
 				exception.Code,
-				SafeMessageFor(exception.Code, text),
+				SafePortableProfileMessageFor(exception, text),
 				isDestinationConflict
 					? text["Terminal.Hint.DestinationForce"]
 					: null,
@@ -173,10 +173,23 @@ internal static class CommandExecution
 		"DPX-DESKTOP-PAYLOAD-TOO-LARGE" => localization["Terminal.Error.DesktopPayloadTooLarge"],
 		ProjectContextGitReadiness.UnavailableDiagnosticCode =>
 			localization["Terminal.Diagnostic.TrackedIndexUnavailable"],
+		GitScopeFilter.UnavailableDiagnosticCode =>
+			localization["Terminal.Diagnostic.GitStateUnavailable"],
 		var value when value.StartsWith("DPX-DESKTOP-", StringComparison.Ordinal) =>
 			localization["Terminal.Error.DesktopRequestFailed"],
 		_ => localization["Terminal.Error.CommandInvalid"]
 	};
+
+	private static string SafePortableProfileMessageFor(
+		PortableProjectProfileException exception,
+		LocalizationService localization)
+	{
+		var transientGitModeMessage = localization["Terminal.Error.ProfileTransientGitMode"];
+		return exception.Code == "DPX-CLI-PROFILE-INVALID" &&
+		       string.Equals(exception.Message, transientGitModeMessage, StringComparison.Ordinal)
+			? transientGitModeMessage
+			: SafeMessageFor(exception.Code, localization);
+	}
 
 	private static string? HintFor(string code, LocalizationService localization) => code switch
 	{

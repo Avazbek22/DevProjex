@@ -97,6 +97,7 @@ internal sealed class StartupInteractionController(
             currentPath,
             selectedExtensions,
             selectedIgnoreOptions,
+			gitModeOverride: applyGitMode ? selectionSpec.GitMode : null,
             ignoreOptionStateIsComplete: applyExclusions,
 			resetExtensionSelectionToDefaults:
 				extensionMode == ProjectSelectionApplicationMode.ResetToDefaults);

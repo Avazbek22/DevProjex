@@ -1428,7 +1428,8 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 			throw new InvalidOperationException("Git service must not be used for a local-cache open.");
 		}
 
-		public Task<bool> IsGitAvailableAsync(CancellationToken cancellationToken = default) => Fail<Task<bool>>();
+		public Task<bool> IsGitAvailableAsync(CancellationToken cancellationToken = default) =>
+			Task.FromResult(true);
 		public Task<GitCloneResult> CloneAsync(string url, string targetDirectory, IProgress<string>? progress = null, CancellationToken cancellationToken = default) => Fail<Task<GitCloneResult>>();
 		public Task<IReadOnlyList<GitBranch>> GetBranchesAsync(string repositoryPath, CancellationToken cancellationToken = default) =>
 			Task.FromResult<IReadOnlyList<GitBranch>>([]);

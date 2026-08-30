@@ -1,4 +1,4 @@
- DevProjex Terminal · <ID>
+ DevProjex Terminal · <ID>                                                                                      <SPINNER> Building preview…
  <PROJECT_ROOT>
 ┌┤  PROJECT TREE├─────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├───────────────────────────────────────────┐┌┤> PARAMETERS├──────────────────────┐
 │v [x] <ID>   ││+ <ID>                                           ││┌┤Content processing [ ] All (5) ──┐│
@@ -8,9 +8,12 @@
 │                                         ││    <SPINNER> App.cs                                                                 │││[ ] Strip comments                ││
 │                                         ││    <SPINNER> ignored.generated                                                      │││[ ] Strip blank lines             ││
 │                                         ││    <SPINNER> settings.json                                                          ││└──────────────────────────────────┘│
-│                                         ││  <SPINNER> global.json                                                              ││┌┤Exclusions├────── [ ] All (10) ──┐│
-│                                         ││                                                                             │││[ ] Use .gitignore                ││
-│                                         ││                                                                             │││[ ] Tracked Git files only        ││
+│                                         ││  <SPINNER> global.json                                                              ││┌┤Exclusions├─────── [ ] All (9) ──┐│
+│                                         ││                                                                             │││(•) No Git filtering              ││
+│                                         ││                                                                             │││( ) Use .gitignore                ││
+│                                         ││                                                                             │││( ) Tracked Git files only        ││
+│                                         ││                                                                             │││( ) Staged Git files              ││
+│                                         ││                                                                             │││( ) Current Git changes           ││
 │                                         ││                                                                             │││[x] Smart ignore                  ││
 │                                         ││                                                                             │││[x] Empty folders                 ││
 │                                         ││                                                                             │││[x] Empty files                   ││
@@ -19,9 +22,6 @@
 │                                         ││                                                                             │││[x] dot folders                   ││
 │                                         ││                                                                             │││[x] dot files                     ││
 │                                         ││                                                                             │││[x] Files without extension       ││
-│                                         ││                                                                             │││                                  ││
-│                                         ││                                                                             │││                                  ││
-│                                         ││                                                                             │││                                  ││
 │                                         ││                                                                             │││                                  ││
 │                                         ││                                                                             │││                                  ││
 │                                         ││                                                                             │││                                  ││
@@ -47,4 +47,4 @@
 └─────────────────────────────────────────┘└─────────────────────────────────────────────────────────────────────────────┘└────────────────────────────────────┘
 
  Files 5 · Folders 3 · 51 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
- Up/Down or j/k Navigate   Enter Change   Tab/F6 Tree   Ctrl+P Action palette   ? Help
+ C Content   X Exclusions   T Types   M Cycle Git mode   Enter Change   : Commands

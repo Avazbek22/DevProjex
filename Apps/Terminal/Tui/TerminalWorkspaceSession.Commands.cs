@@ -55,7 +55,27 @@ internal sealed partial class TerminalWorkspaceSession
 	internal TerminalWorkspaceCommandExecutionResult ExecuteSetCommand(
 		TerminalWorkspaceCommand command)
 	{
-		if (_state is null || command.Target is null || command.Enabled is not { } enabled)
+		if (_state is null || command.Target is null)
+			return InvalidCommandExecution();
+		if (command.Target == "git")
+		{
+			if (!GitScopeSelection.TryParse(command.Text, out var gitMode, out var diffRange) ||
+			    !IsGitModeAvailable(gitMode))
+			{
+				return InvalidCommandExecution();
+			}
+			UpdateDraftPreferredGitMode(gitMode);
+			ApplyPathFilters(
+				gitMode,
+				GetDisplayedSettingsSelection().Exclusions ?? [],
+				diffRange,
+				originatedFromCommandLine: true);
+			var label = gitMode == GitFilteringMode.Diff
+				? GitScopeSelection.ToToken(gitMode, diffRange)
+				: L(ProjectPresentationCatalog.Get(gitMode).LabelKey);
+			return TerminalWorkspaceCommandExecutionResult.Success(label);
+		}
+		if (command.Enabled is not { } enabled)
 			return InvalidCommandExecution();
 
 		var content = ProjectPresentationCatalog.ContentTransformations.FirstOrDefault(
@@ -91,8 +111,10 @@ internal sealed partial class TerminalWorkspaceSession
 		var nextMode = enabled
 			? mode.Value
 			: GitFilteringMode.None;
+		if (!IsGitModeAvailable(nextMode))
+			return InvalidCommandExecution();
 		if (enabled)
-			_preferredGitMode = mode.Value;
+			UpdateDraftPreferredGitMode(mode.Value);
 		ApplyPathFilters(
 			nextMode,
 			selection.Exclusions ?? [],

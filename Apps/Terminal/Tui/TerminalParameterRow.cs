@@ -19,6 +19,8 @@ internal sealed record TerminalParameterRow(
 	TerminalParameterRowKind Kind,
 	string Label,
 	bool? IsSelected = null,
+	bool IsEnabled = true,
+	bool UseUnicodeRadioMarker = true,
 	GitFilteringMode? GitMode = null,
 	ProjectExclusion? Exclusion = null,
 	IgnoreOptionId? ContentTransformation = null,
@@ -33,20 +35,33 @@ internal sealed record TerminalParameterRow(
 		Kind = original.Kind;
 		Label = original.Label;
 		IsSelected = original.IsSelected;
+		IsEnabled = original.IsEnabled;
+		UseUnicodeRadioMarker = original.UseUnicodeRadioMarker;
 		GitMode = original.GitMode;
 		Exclusion = original.Exclusion;
 		ContentTransformation = original.ContentTransformation;
 		Value = original.Value;
 	}
 
-	public override string ToString() =>
-		_displayText ??= $"{(IsSelected == true ? "[x]" : "[ ]")} {Label}";
+	public override string ToString()
+	{
+		if (_displayText is not null)
+			return _displayText;
+		var marker = Kind == TerminalParameterRowKind.GitMode
+			? IsSelected == true
+				? UseUnicodeRadioMarker ? "(•)" : "(*)"
+				: "( )"
+			: IsSelected == true ? "[x]" : "[ ]";
+		return _displayText = $"{marker} {Label}";
+	}
 
 	public bool Equals(TerminalParameterRow? other) =>
 		ReferenceEquals(this, other) ||
 		other is not null &&
 		Kind == other.Kind &&
 		IsSelected == other.IsSelected &&
+		IsEnabled == other.IsEnabled &&
+		UseUnicodeRadioMarker == other.UseUnicodeRadioMarker &&
 		GitMode == other.GitMode &&
 		Exclusion == other.Exclusion &&
 		ContentTransformation == other.ContentTransformation &&
@@ -54,15 +69,21 @@ internal sealed record TerminalParameterRow(
 		string.Equals(Label, other.Label, StringComparison.Ordinal) &&
 		string.Equals(Value, other.Value, StringComparison.Ordinal);
 
-	public override int GetHashCode() => HashCode.Combine(
-		StringComparer.Ordinal.GetHashCode(Key),
-		Kind,
-		StringComparer.Ordinal.GetHashCode(Label),
-		IsSelected,
-		GitMode,
-		Exclusion,
-		ContentTransformation,
-		Value is null ? 0 : StringComparer.Ordinal.GetHashCode(Value));
+	public override int GetHashCode()
+	{
+		var hash = new HashCode();
+		hash.Add(Key, StringComparer.Ordinal);
+		hash.Add(Kind);
+		hash.Add(Label, StringComparer.Ordinal);
+		hash.Add(IsSelected);
+		hash.Add(IsEnabled);
+		hash.Add(UseUnicodeRadioMarker);
+		hash.Add(GitMode);
+		hash.Add(Exclusion);
+		hash.Add(ContentTransformation);
+		hash.Add(Value, StringComparer.Ordinal);
+		return hash.ToHashCode();
+	}
 
 	internal static string FitLabel(string value, int width, bool useUnicode)
 	{

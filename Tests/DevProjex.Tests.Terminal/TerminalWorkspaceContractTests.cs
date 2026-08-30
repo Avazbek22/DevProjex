@@ -1068,8 +1068,9 @@ public sealed class TerminalWorkspaceContractTests
 	public async Task StructuralRefreshBuildsOnlyPlansRequiredBySelectionEvolution()
 	{
 		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
 		workspace.WriteFile("src/app.cs", "class App {}");
-		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+		var services = new TerminalServiceFactory(() => appData.Path)
 			.Create(AppLanguage.En);
 		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
 		using var state = await controller.OpenAsync(
@@ -1087,7 +1088,11 @@ public sealed class TerminalWorkspaceContractTests
 		var newExtension = await controller.BuildStructuralRefreshAsync(
 			TerminalWorkspaceController.CaptureStructuralRefresh(state, state.BuildSelection()),
 			TestContext.Current.CancellationToken);
-		Assert.Equal(2, newExtension.PlanBuildCount);
+		Assert.Equal(1, newExtension.PlanBuildCount);
+		Assert.Contains(".json", newExtension.Plan.SelectedExtensions);
+		Assert.Contains(
+			newExtension.Plan.IncludedFiles,
+			path => Path.GetFileName(path) == "config.json");
 		TerminalWorkspaceController.ApplyStructuralRefresh(state, newExtension);
 
 		var sourceIndex = state.VisibleRows
@@ -1103,7 +1108,113 @@ public sealed class TerminalWorkspaceContractTests
 		var partialSelection = await controller.BuildStructuralRefreshAsync(
 			TerminalWorkspaceController.CaptureStructuralRefresh(state, state.BuildSelection()),
 			TestContext.Current.CancellationToken);
-		Assert.Equal(2, partialSelection.PlanBuildCount);
+		Assert.Equal(1, partialSelection.PlanBuildCount);
+	}
+
+	[Fact]
+	public async Task StructuralRefreshFallsBackWhenTheActiveRepositoryBoundaryDisappears()
+	{
+		if (!TryRunGit(Directory.GetCurrentDirectory(), "--version"))
+			Assert.Skip("Git is required for this regression test.");
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		workspace.WriteFile("App.cs", "class App {}\n");
+		Assert.True(TryRunGit(workspace.Path, "init", "--quiet"));
+		Assert.True(TryRunGit(workspace.Path, "add", "--", "App.cs"));
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+		await controller.SetGitModeAsync(
+			state,
+			GitFilteringMode.Staged,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(GitFilteringMode.Staged, state.Plan.Selection.GitMode);
+
+		var gitPath = Path.Combine(workspace.Path, ".git");
+		var detachedGitPath = Path.Combine(
+			Path.GetTempPath(),
+			$"devprojex-terminal-git-{Guid.NewGuid():N}");
+		try
+		{
+			Directory.Move(gitPath, detachedGitPath);
+			var result = await controller.BuildStructuralRefreshAsync(
+				TerminalWorkspaceController.CaptureStructuralRefresh(
+					state,
+					state.BuildSelection(),
+					GitFilteringMode.RespectGitIgnore),
+				TestContext.Current.CancellationToken);
+
+			Assert.Equal(GitFilteringMode.RespectGitIgnore, result.Plan.Selection.GitMode);
+			Assert.False(result.Plan.GitReadiness.HasRepositoryBoundary);
+			Assert.DoesNotContain(
+				result.Plan.Diagnostics,
+				static diagnostic => diagnostic.Severity == ContextDiagnosticSeverity.Error);
+			Assert.Contains(result.Plan.IncludedFiles, path => Path.GetFileName(path) == "App.cs");
+			Assert.True(result.PlanBuildCount >= 2);
+		}
+		finally
+		{
+			if (Directory.Exists(detachedGitPath) && !Directory.Exists(gitPath))
+				Directory.Move(detachedGitPath, gitPath);
+		}
+	}
+
+	[Theory]
+	[InlineData(GitFilteringMode.RespectGitIgnore, GitFilteringMode.RespectGitIgnore)]
+	[InlineData(GitFilteringMode.TrackedFilesOnly, GitFilteringMode.None)]
+	public async Task SettingsRefreshUsesTheStickyFallbackWhenTheRepositoryDisappears(
+		GitFilteringMode preferredMode,
+		GitFilteringMode expectedMode)
+	{
+		if (!TryRunGit(Directory.GetCurrentDirectory(), "--version"))
+			Assert.Skip("Git is required for this regression test.");
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		workspace.WriteFile("App.cs", "class App {}\n");
+		Assert.True(TryRunGit(workspace.Path, "init", "--quiet"));
+		Assert.True(TryRunGit(workspace.Path, "add", "--", "App.cs"));
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+		await controller.SetGitModeAsync(
+			state,
+			GitFilteringMode.Staged,
+			TestContext.Current.CancellationToken);
+
+		var gitPath = Path.Combine(workspace.Path, ".git");
+		var detachedGitPath = Path.Combine(
+			Path.GetTempPath(),
+			$"devprojex-terminal-git-{Guid.NewGuid():N}");
+		try
+		{
+			Directory.Move(gitPath, detachedGitPath);
+			var candidate = state.BuildSelection() with { Exclusions = [] };
+			var result = await controller.BuildSettingsPlanAsync(
+				state.Plan,
+				candidate,
+				state.ExtensionOptionStates,
+				state.BuildSelectedItemRelativePaths(),
+				state.PathOptionStates,
+				preferredMode,
+				TestContext.Current.CancellationToken);
+
+			Assert.Equal(expectedMode, result.Plan.Selection.GitMode);
+			Assert.False(result.Plan.GitReadiness.HasRepositoryBoundary);
+			Assert.DoesNotContain(
+				result.Plan.Diagnostics,
+				static diagnostic => diagnostic.Severity == ContextDiagnosticSeverity.Error);
+		}
+		finally
+		{
+			if (Directory.Exists(detachedGitPath) && !Directory.Exists(gitPath))
+				Directory.Move(detachedGitPath, gitPath);
+		}
 	}
 
 	[Fact]
@@ -1306,6 +1417,37 @@ public sealed class TerminalWorkspaceContractTests
 	private sealed class SynchronousProgress<T>(Action<T> report) : IProgress<T>
 	{
 		public void Report(T value) => report(value);
+	}
+
+	private static bool TryRunGit(string workingDirectory, params string[] arguments)
+	{
+		try
+		{
+			var startInfo = new ProcessStartInfo("git")
+			{
+				WorkingDirectory = workingDirectory,
+				UseShellExecute = false,
+				CreateNoWindow = true,
+				RedirectStandardOutput = true,
+				RedirectStandardError = true
+			};
+			foreach (var argument in arguments)
+				startInfo.ArgumentList.Add(argument);
+			using var process = Process.Start(startInfo);
+			if (process is null)
+				return false;
+			if (!process.WaitForExit(10_000))
+			{
+				process.Kill(entireProcessTree: true);
+				return false;
+			}
+			return process.ExitCode == 0;
+		}
+		catch (Exception exception) when (
+			exception is InvalidOperationException or IOException or UnauthorizedAccessException)
+		{
+			return false;
+		}
 	}
 
 	private static async Task SetPreviewDocumentAsync(

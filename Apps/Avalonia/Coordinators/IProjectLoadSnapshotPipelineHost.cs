@@ -19,6 +19,8 @@ internal interface IProjectLoadSnapshotPipelineHost
 
     BuildTreeSnapshotResult BuildTree(TreeRefreshInput input, CancellationToken cancellationToken);
 
+	bool TryHandleGitScopeDiagnostics(BuildTreeSnapshotResult result) => false;
+
     bool TryHandleTreeRootAccessDenied(TreeRefreshInput input, BuildTreeResult result);
 
 	void ReportIncompleteTreeScan();

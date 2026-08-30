@@ -2,6 +2,13 @@ using System.CommandLine;
 
 namespace DevProjex.Terminal.CommandLine;
 
+internal enum GitModeOptionCapability
+{
+	All,
+	Desktop,
+	Persistent
+}
+
 internal sealed class SelectionOptions
 {
 	private readonly ITerminalEnvironment _environment;
@@ -15,7 +22,7 @@ internal sealed class SelectionOptions
 	public Option<string[]> Extensions { get; }
 	public Option<string[]> SelectedPaths { get; }
 	public Option<string?> SelectedPathsSource { get; }
-	public Option<GitFilteringMode?> GitMode { get; }
+	public Option<CliGitModeValue?> GitMode { get; }
 	public Option<CliExclusionValue[]> Exclusions { get; }
 	public Option<bool?> HideSecrets { get; }
 	public Option<bool> NoHideSecrets { get; }
@@ -50,7 +57,8 @@ internal sealed class SelectionOptions
 		string defaultProfile = "standard",
 		bool includeHidePrivateData = true,
 		bool includeContentTransformations = true,
-		bool includeMaxFileBytes = false)
+		bool includeMaxFileBytes = false,
+		GitModeOptionCapability gitModeCapability = GitModeOptionCapability.All)
 	{
 		_environment = environment;
 		_localization = localization;
@@ -89,11 +97,7 @@ internal sealed class SelectionOptions
 				context,
 				FileSystemCompletionKind.FilesAndDirectories,
 				FileSystemCompletionSource.ResolveProjectDirectory(context)));
-		GitMode = CliChoiceSymbols.NullableOption(
-			"--git-mode",
-			localization["Terminal.Option.GitMode"],
-			CliChoiceSets.GitMode,
-			localization);
+		GitMode = CreateGitModeOption(localization, gitModeCapability);
 		Exclusions = RepeatableExclusions(localization);
 		MaxFileBytes = new Option<long?>("--max-file-bytes")
 		{
@@ -204,9 +208,10 @@ internal sealed class SelectionOptions
 	{
 		var profileValue = parseResult.GetValue(Profile);
 		var profile = profileValue.Resolve(projectPath, services);
-		GitFilteringMode? gitMode = parseResult.GetResult(GitMode) is null
+		var parsedGitMode = parseResult.GetResult(GitMode) is null
 			? null
-			: parseResult.GetValue(GitMode)!.Value;
+			: parseResult.GetValue(GitMode);
+		GitFilteringMode? gitMode = parsedGitMode?.Mode;
 		var exclusions = parseResult.GetResult(Exclusions) is null
 			? null
 			: ParseExclusions(parseResult.GetValue(Exclusions) ?? []);
@@ -231,6 +236,7 @@ internal sealed class SelectionOptions
 			Extensions: GetExplicitValues(parseResult, Extensions),
 			SelectedPaths: selectedPaths,
 			GitMode: gitMode,
+			GitDiffRange: parsedGitMode?.DiffRange,
 			Exclusions: exclusions,
 			HideSecrets: hideSecrets,
 			HidePrivateData: hidePrivateData,
@@ -324,6 +330,52 @@ internal sealed class SelectionOptions
 				kind,
 				FileSystemCompletionSource.ResolveProjectDirectory(context)));
 		}
+		return option;
+	}
+
+	private static Option<CliGitModeValue?> CreateGitModeOption(
+		LocalizationService localization,
+		GitModeOptionCapability capability)
+	{
+		var fixedTokens = capability == GitModeOptionCapability.Persistent
+			? CliChoiceSets.PersistentGitMode.Tokens
+			: CliChoiceSets.GitMode.Tokens;
+		var advertisesDiff = capability == GitModeOptionCapability.All;
+		var advertisedTokens = advertisesDiff
+			? fixedTokens.Concat(["diff:<ref>..<ref>"]).ToArray()
+			: fixedTokens.ToArray();
+		var capabilityMessage = capability == GitModeOptionCapability.All
+			? localization["Terminal.Validation.GitMode"]
+			: localization.Format(
+				"Terminal.Validation.Choice",
+				"--git-mode",
+				string.Join(", ", advertisedTokens));
+		var option = new Option<CliGitModeValue?>("--git-mode")
+		{
+			Description = capability == GitModeOptionCapability.All
+				? localization["Terminal.Option.GitMode"]
+				: capabilityMessage,
+			HelpName = "MODE",
+			Arity = ArgumentArity.ExactlyOne,
+			CustomParser = result =>
+			{
+				if (result.Tokens.Count == 1)
+				{
+					var token = result.Tokens[0].Value;
+					if (!token.Equals("off", StringComparison.OrdinalIgnoreCase) &&
+					    GitScopeSelection.TryParse(token, out var mode, out var diffRange))
+					{
+						return new CliGitModeValue(mode, diffRange);
+					}
+				}
+
+				result.AddError(LocalizedParseError.Create(capabilityMessage));
+				return null;
+			}
+		};
+		option.CompletionSources.Add(fixedTokens.ToArray());
+		if (advertisesDiff)
+			option.CompletionSources.Add(["diff:<ref>..<ref>"]);
 		return option;
 	}
 
@@ -483,3 +535,7 @@ internal sealed class SelectionOptions
 		return (positive, negative);
 	}
 }
+
+internal readonly record struct CliGitModeValue(
+	GitFilteringMode Mode,
+	string? DiffRange);

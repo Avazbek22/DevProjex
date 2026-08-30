@@ -129,7 +129,8 @@ public sealed class TerminalServiceFactory(
 			var contextFactory = new TerminalProjectContextFactory(
 				contextPlanner,
 				sourceIdentityResolver,
-				secretRedactionSession);
+				secretRedactionSession,
+				new GitScopePathProvider());
 
 			return new TerminalServices(
 				Localization: localization,

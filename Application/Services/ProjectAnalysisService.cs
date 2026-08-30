@@ -247,7 +247,16 @@ public sealed class ProjectAnalysisService(
 			DiscoveredGitTrackedIndexCount: treeInventory?.DiscoveredGitTrackedPathIndexes.Count ?? 0,
 			UnavailableGitTrackedIndexCount: treeInventory?.DiscoveredGitTrackedPathIndexes.Count(
 				static index => !index.IsAvailable) ?? 0,
-			TreeInventory: treeInventory);
+			TreeInventory: treeInventory,
+			GitEvidence: treeInventory?.GitEvidence ?? scan.GitEvidence)
+		{
+			EffectiveRules = rules,
+			RootSelectionIsExplicit = request.SelectedRootFolders is not null,
+			EffectiveExtensionPolicy = request.SelectedExtensions is null
+				? null
+				: new ExtensionSetInclusionPolicy(
+					allowedExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase))
+		};
 	}
 
 	private static bool CanUseUnifiedSelectionPipeline(ProjectAnalysisRequest request) =>
@@ -334,7 +343,8 @@ public sealed class ProjectAnalysisService(
 			DiscoveredGitTrackedIndexCount: inventory.DiscoveredGitTrackedPathIndexes.Count,
 			UnavailableGitTrackedIndexCount: inventory.DiscoveredGitTrackedPathIndexes.Count(
 				static index => !index.IsAvailable),
-			TreeInventory: inventory)
+			TreeInventory: inventory,
+			GitEvidence: snapshot.GitEvidence)
 		{
 			// The refresh snapshot intentionally contains only effective rows. Keep the
 			// requested selection separately so stale profile/CLI values still produce the
@@ -346,6 +356,9 @@ public sealed class ProjectAnalysisService(
 				? selectionContext.ExtensionsSelectionCache
 				: selectedExtensions,
 			ResolvedIgnoreOptionStates = snapshot.IgnoreOptionStateCache,
+			EffectiveRules = rules,
+			RootSelectionIsExplicit = selectionContext.RootSelectionIsExplicit,
+			EffectiveExtensionPolicy = ExtensionInclusionPolicyFactory.Create(selectionContext),
 			HasIgnoreOptionCounts = snapshot.HasIgnoreOptionCounts,
 			IgnoreOptionCounts = snapshot.IgnoreOptionCounts,
 			IgnoreControllerImpactCounts = snapshot.ControllerImpactCounts
@@ -359,18 +372,23 @@ public sealed class ProjectAnalysisService(
 		if (request.LocalProfileState is not { } localState)
 		{
 			var rootsAreExplicit = request.SelectedRootFolders is not null;
-			var extensionsAreExplicit = request.SelectedExtensions is not null;
+			var hasKnownExtensionStates = request.KnownExtensionStates is not null;
+			var extensionsAreExplicit = request.SelectedExtensions is not null &&
+			                            !hasKnownExtensionStates;
 			var ignoreOptionsAreExplicit = request.SelectedIgnoreOptions is not null;
 			var requestedIgnoreOptions = request.SelectedIgnoreOptions ?? EmptyIgnoreSelection;
 			return new SelectionRefreshContext(
 				Path: rootPath,
 				PreparedSelectionMode: PreparedSelectionMode.Defaults,
 				AllRootFoldersChecked: !rootsAreExplicit,
-				AllExtensionsChecked: !extensionsAreExplicit,
+				AllExtensionsChecked: !extensionsAreExplicit &&
+				                      (request.KnownExtensionStates is null ||
+				                       !request.KnownExtensionStates.Values.Contains(false)),
 				RootSelectionInitialized: rootsAreExplicit,
 				RootSelectionCache: request.SelectedRootFolders?.ToHashSet(PathComparer.Default) ??
 				                    EmptyRootSelection,
-				ExtensionsSelectionInitialized: extensionsAreExplicit,
+				ExtensionsSelectionInitialized:
+					request.SelectedExtensions is not null || hasKnownExtensionStates,
 				ExtensionsSelectionCache: request.SelectedExtensions?
 					.ToHashSet(StringComparer.OrdinalIgnoreCase) ?? EmptyExtensionSelection,
 				IgnoreSelectionInitialized: ignoreOptionsAreExplicit,
@@ -380,6 +398,7 @@ public sealed class ProjectAnalysisService(
 					: EmptyIgnoreState,
 				IgnoreAllPreference: null,
 				CurrentSnapshotState: default,
+				ExtensionOptionStateCache: request.KnownExtensionStates,
 				IgnoreOptionStateCacheIsComplete: ignoreOptionsAreExplicit,
 				CaptureTreeInventory: true,
 				RootSelectionIsExplicit: rootsAreExplicit,
@@ -412,7 +431,8 @@ public sealed class ProjectAnalysisService(
 			IgnoreAllPreference: null,
 			CurrentSnapshotState: default,
 			RootOptionStateCache: localState.RootsOverridden ? null : profile.RootFolderStates,
-			ExtensionOptionStateCache: localState.ExtensionsOverridden ? null : profile.ExtensionStates,
+			ExtensionOptionStateCache: request.KnownExtensionStates ??
+			                           (localState.ExtensionsOverridden ? null : profile.ExtensionStates),
 			IgnoreOptionStateCacheIsComplete:
 				localState.IgnoreOptionsOverridden || profile.IgnoreOptionStates is not null,
 			CaptureTreeInventory: true,
@@ -706,6 +726,7 @@ public sealed record ProjectAnalysisRequest(
 	IReadOnlyCollection<IgnoreOptionId>? SelectedIgnoreOptions = null)
 {
 	internal LocalProjectSelectionState? LocalProfileState { get; init; }
+	internal IReadOnlyDictionary<string, bool>? KnownExtensionStates { get; init; }
 	internal bool CaptureIgnoreImpactCounts { get; init; }
 }
 
@@ -722,11 +743,15 @@ public sealed record LoadedProjectAnalysisRequest(
 	TimeSpan? KnownLoadingElapsed = null,
 	int DiscoveredGitTrackedIndexCount = 0,
 	int UnavailableGitTrackedIndexCount = 0,
-	ProjectTreeInventorySnapshot? TreeInventory = null)
+	ProjectTreeInventorySnapshot? TreeInventory = null,
+	GitWorkspaceEvidence GitEvidence = default)
 {
 	internal IReadOnlyCollection<string>? RequestedRootFoldersForDiagnostics { get; init; }
 	internal IReadOnlyCollection<string>? RequestedExtensionsForDiagnostics { get; init; }
 	internal IReadOnlyDictionary<IgnoreOptionId, bool>? ResolvedIgnoreOptionStates { get; init; }
+	internal IgnoreRules? EffectiveRules { get; init; }
+	internal bool RootSelectionIsExplicit { get; init; }
+	internal IExtensionInclusionPolicy? EffectiveExtensionPolicy { get; init; }
 	internal bool HasIgnoreOptionCounts { get; init; }
 	internal IgnoreOptionCounts IgnoreOptionCounts { get; init; }
 	internal IgnoreControllerImpactCounts IgnoreControllerImpactCounts { get; init; }

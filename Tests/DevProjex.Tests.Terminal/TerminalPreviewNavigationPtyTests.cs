@@ -162,7 +162,7 @@ public sealed partial class TerminalPreviewNavigationPtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"[x] Use .gitignore",
+			"(•) Use .gitignore",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await WaitForStableScreenAsync(
 			terminal,
@@ -177,7 +177,7 @@ public sealed partial class TerminalPreviewNavigationPtyTests
 			TestContext.Current.CancellationToken);
 		await terminal.SendAsync("x", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"[x] Use .gitignore",
+			"(•) Use .gitignore",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await WaitForStableScreenAsync(
 			terminal,
@@ -284,8 +284,37 @@ public sealed partial class TerminalPreviewNavigationPtyTests
 				$"internal sealed class ContentMarker{index:D3} {{ }}");
 		}
 		project.WriteFile("node_modules/noise.js", "generated dependency noise");
+		InitializeGitRepository(project.Path);
+		File.WriteAllText(Path.Combine(project.Path, ".git", "index"), "not-a-git-index");
 
 		return project;
+	}
+
+	private static void InitializeGitRepository(string projectPath)
+	{
+		RunGit(projectPath, "init", "--quiet");
+		RunGit(projectPath, "config", "user.email", "terminal-tests@devprojex.local");
+		RunGit(projectPath, "config", "user.name", "DevProjex Terminal Tests");
+		RunGit(projectPath, "add", "--all");
+		RunGit(projectPath, "commit", "--quiet", "-m", "Initial test project");
+	}
+
+	private static void RunGit(string workingDirectory, params string[] arguments)
+	{
+		var startInfo = new ProcessStartInfo
+		{
+			FileName = OperatingSystem.IsWindows() ? "git.exe" : "git",
+			WorkingDirectory = workingDirectory,
+			UseShellExecute = false,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			CreateNoWindow = true
+		};
+		foreach (var argument in arguments)
+			startInfo.ArgumentList.Add(argument);
+
+		var result = TerminalTestProcess.Run(startInfo);
+		Assert.Equal(0, result.ExitCode);
 	}
 
 	private static async Task<string> WaitForScreenChangeAsync(

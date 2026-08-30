@@ -1,6 +1,8 @@
 using System.CommandLine;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using DevProjex.Application.Presentation;
+using DevProjex.Terminal.Execution;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -209,9 +211,54 @@ public sealed class DocumentationAndPackagingContractTests
 		}
 
 		Assert.Contains("Exclusions", commandLine, StringComparison.Ordinal);
-		Assert.Contains("--git-mode <none|gitignore|tracked>", commandLine, StringComparison.Ordinal);
+		Assert.Contains("--git-mode <MODE>", commandLine, StringComparison.Ordinal);
+		Assert.Contains("`diff:<REF>..<REF>`", commandLine, StringComparison.Ordinal);
 		Assert.Contains("stdout", commandLine, StringComparison.Ordinal);
 		Assert.Contains("stderr", commandLine, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void DesktopControlDocumentationListsEveryPublishedDesktopGitMode()
+	{
+		var rootPath = FindRepositoryRoot();
+		var documentation = File.ReadAllText(Path.Combine(rootPath, "Docs", "Desktop-Control.md"));
+		var gitModeRow = Regex.Match(
+			documentation,
+			@"(?m)^\| `gitMode` \|[^\r\n]+\r?$",
+			RegexOptions.CultureInvariant);
+
+		Assert.True(gitModeRow.Success, "Desktop Control gitMode state contract is missing.");
+		foreach (var descriptor in ProjectPresentationCatalog.GitFiltering.OrderBy(static item => item.Order))
+			Assert.Contains($"`{descriptor.Token}`", gitModeRow.Value, StringComparison.Ordinal);
+		Assert.DoesNotContain("`diff:", gitModeRow.Value, StringComparison.Ordinal);
+
+		var readinessRow = Regex.Match(
+			documentation,
+			@"(?m)^\| `trackedGitReady` \|[^\r\n]+\r?$",
+			RegexOptions.CultureInvariant);
+		Assert.True(readinessRow.Success, "Desktop Control Git-readiness state contract is missing.");
+		foreach (var descriptor in ProjectPresentationCatalog.GitFiltering.Where(static item =>
+			         DesktopOpenReadiness.RequiresGitReadiness(item.Id)))
+		{
+			Assert.Contains($"`{descriptor.Token}`", readinessRow.Value, StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
+	public void SmartIgnoreDocumentationUsesTheCurrentGitAxis()
+	{
+		var rootPath = FindRepositoryRoot();
+		var documentation = File.ReadAllText(Path.Combine(rootPath, "Docs", "SmartIgnore.md"));
+
+		foreach (var descriptor in ProjectPresentationCatalog.GitFiltering)
+		{
+			Assert.Matches(
+				$@"(?m)^\| `{Regex.Escape(descriptor.Token)}` \|[^\r\n]+\r?$",
+				documentation);
+		}
+		Assert.Matches(@"(?m)^\| `diff:<REF>\.\.<REF>` \|[^\r\n]+\r?$", documentation);
+		Assert.DoesNotContain("Git checkbox", documentation, StringComparison.OrdinalIgnoreCase);
+		Assert.DoesNotContain("two Git modes as checkboxes", documentation, StringComparison.OrdinalIgnoreCase);
 	}
 
 	[Fact]

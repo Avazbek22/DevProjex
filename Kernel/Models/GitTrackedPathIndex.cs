@@ -110,6 +110,9 @@ public sealed class GitTrackedPathIndex
 		return ContainsOrHasDescendantNormalizedRelativePath(relativePath);
 	}
 
+	public bool TryGetPathIdentity(string fullPath, out string relativePath) =>
+		TryGetNormalizedRelativePath(fullPath, out relativePath);
+
 	// Scan contexts use this once to establish repository ownership. The returned key
 	// is the only form accepted by the internal probes below; callers must not pass raw paths.
 	internal bool TryGetNormalizedRelativePath(string fullPath, out string relativePath)

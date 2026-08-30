@@ -30,6 +30,47 @@ public sealed class TerminalWorkspaceCommandParserTests
 		Assert.True(result.Command.Enabled);
 	}
 
+	[Theory]
+	[InlineData("set git off", "none")]
+	[InlineData("set git gitignore", "gitignore")]
+	[InlineData("set git tracked", "tracked")]
+	[InlineData("set git staged", "staged")]
+	[InlineData("set git changes", "changes")]
+	[InlineData("set git diff:main..feature/review", "diff:main..feature/review")]
+	internal void Parse_SetGitUsesTheDedicatedAxisValues(string text, string expected)
+	{
+		var result = _parser.Parse(text, Context);
+
+		Assert.True(result.IsSuccess, result.Error?.ToString());
+		Assert.Equal("git", result.Command!.Target);
+		Assert.Equal(expected, result.Command.Text);
+		Assert.Null(result.Command.Enabled);
+	}
+
+	[Fact]
+	public void Parse_SetGitRejectsTheCliOnlyNoneAliasWithPublishedCandidates()
+	{
+		var result = _parser.Parse("set git none", Context);
+
+		Assert.False(result.IsSuccess);
+		Assert.Equal(TerminalWorkspaceCommandErrorCode.UnknownToken, result.Error!.Code);
+		Assert.Equal(8, result.Error.Position);
+		Assert.Equal("none", result.Error.Value);
+		Assert.Equal(["off", "changes", "staged"], result.Error.Candidates);
+	}
+
+	[Fact]
+	public void CompletionOffersGitAxisValuesWithoutReplacingLegacyToggles()
+	{
+		var git = _parser.GetCompletion("set git ", 8, Context);
+		var legacy = _parser.GetCompletion("set tracked ", 12, Context);
+
+		Assert.Equal(
+			["off", "gitignore", "tracked", "staged", "changes", "diff:<ref>..<ref>"],
+			git.Candidates.Select(static candidate => candidate.Token));
+		Assert.Equal(["on", "off"], legacy.Candidates.Select(static candidate => candidate.Token));
+	}
+
 	[Fact]
 	public void Parse_TypeRejectsAnExtensionOutsideTheCurrentWorkspace()
 	{
@@ -295,6 +336,8 @@ public sealed class TerminalWorkspaceCommandParserTests
 		["set hide-secrets on", TerminalWorkspaceCommandVerb.Set],
 		["set smart-ignore off", TerminalWorkspaceCommandVerb.Set],
 		["set gitignore on", TerminalWorkspaceCommandVerb.Set],
+		["set git staged", TerminalWorkspaceCommandVerb.Set],
+		["set git diff:main..feature", TerminalWorkspaceCommandVerb.Set],
 		["all types off", TerminalWorkspaceCommandVerb.All],
 		["all exclusions on", TerminalWorkspaceCommandVerb.All],
 		["all content on", TerminalWorkspaceCommandVerb.All],
@@ -337,6 +380,7 @@ public sealed class TerminalWorkspaceCommandParserTests
 		["set hide-secret on", TerminalWorkspaceCommandErrorCode.UnknownToken, 4, "hide-secrets"],
 		["set hide-secrets maybe", TerminalWorkspaceCommandErrorCode.InvalidValue, 17, "on"],
 		["set hide-secrets on extra", TerminalWorkspaceCommandErrorCode.UnexpectedArgument, 20, (string?)null],
+		["set git diff:main...feature", TerminalWorkspaceCommandErrorCode.UnknownToken, 8, "diff:<ref>..<ref>"],
 		["all unknown on", TerminalWorkspaceCommandErrorCode.UnknownToken, 4, "content"],
 		["type .cs", TerminalWorkspaceCommandErrorCode.MissingArgument, 8, "on"],
 		["view contents", TerminalWorkspaceCommandErrorCode.UnknownToken, 5, "content"],

@@ -60,6 +60,7 @@ public sealed partial class SelectionSyncCoordinator
         string currentPath,
         IReadOnlyCollection<string>? selectedExtensions,
         IReadOnlySet<IgnoreOptionId>? selectedIgnoreOptions,
+		GitFilteringMode? gitModeOverride = null,
         bool ignoreOptionStateIsComplete = false,
 		bool resetExtensionSelectionToDefaults = false)
     {
@@ -73,7 +74,15 @@ public sealed partial class SelectionSyncCoordinator
         var ignoreSelectionChanged = ApplyIgnoreSelectionOverrideCore(
             selectedIgnoreOptions,
             ignoreOptionStateIsComplete);
-        if (!extensionSelectionChanged && !ignoreSelectionChanged)
+		var gitModeChanged = false;
+		if (gitModeOverride is { } gitMode &&
+		    gitMode != _session.IgnoreOptions.ActiveGitFilteringMode)
+		{
+			_session.IgnoreOptions.SetActiveGitFilteringMode(gitMode);
+			gitModeChanged = true;
+			RefreshGitFilteringModePresentation();
+		}
+		if (!extensionSelectionChanged && !ignoreSelectionChanged && !gitModeChanged)
             return false;
 
         _session.AdvanceRevision();

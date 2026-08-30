@@ -299,7 +299,7 @@ public sealed class SelectionRefreshEngine(
     {
         var ignoreRules = BuildIgnoreRules(context.Path, selectedIgnoreOptions, selectedRoots, cancellationToken);
         var extensionScanRules = IgnoreRulesProjection.ForExtensionAvailability(ignoreRules);
-        var effectiveExtensionPolicy = BuildEffectiveExtensionPolicy(context);
+		var effectiveExtensionPolicy = ExtensionInclusionPolicyFactory.Create(context);
 
         // Extension availability, effective ignore counts, and optional tree inventory must
         // come from the same filesystem observation. This prevents mismatched UI sections and
@@ -336,7 +336,12 @@ public sealed class SelectionRefreshEngine(
                 ? new HashSet<string>(context.ExtensionsSelectionCache, StringComparer.OrdinalIgnoreCase)
                 : EmptyExtensionSelection,
             context.ExtensionOptionStateCache);
-		extensionOptions = ApplyExplicitExtensionSelection(context, extensionOptions);
+		if (context.ExtensionSelectionIsExplicit)
+		{
+			extensionOptions = ExtensionOptionProjection.ApplyExactSelection(
+				extensionOptions,
+				context.ExtensionsSelectionCache);
+		}
 		var usedProfileFallback = !context.ExtensionSelectionIsExplicit &&
 			SelectionRefreshPolicy.ShouldApplyMissingProfileSelectionsFallback(
             context.PreparedSelectionMode,
@@ -350,7 +355,9 @@ public sealed class SelectionRefreshEngine(
 				extensionOptions);
 		}
 
-        if (!ShouldSuppressAllTogglesOverride(context) && context.AllExtensionsChecked)
+		if (!context.ExtensionSelectionIsExplicit &&
+		    !ShouldSuppressAllTogglesOverride(context) &&
+		    context.AllExtensionsChecked)
             extensionOptions = ForceAllChecked(extensionOptions);
 
         var visibleExtensionOptions = FilterVisibleExtensionOptions(
@@ -392,7 +399,12 @@ public sealed class SelectionRefreshEngine(
                     ? new HashSet<string>(context.ExtensionsSelectionCache, StringComparer.OrdinalIgnoreCase)
                     : EmptyExtensionSelection,
                 context.ExtensionOptionStateCache);
-			extensionOptions = ApplyExplicitExtensionSelection(context, extensionOptions);
+			if (context.ExtensionSelectionIsExplicit)
+			{
+				extensionOptions = ExtensionOptionProjection.ApplyExactSelection(
+					extensionOptions,
+					context.ExtensionsSelectionCache);
+			}
 			if (!context.ExtensionSelectionIsExplicit)
 			{
 				extensionOptions = SelectionRefreshPolicy.ApplyMissingProfileSelectionsFallbackToExtensions(
@@ -401,7 +413,9 @@ public sealed class SelectionRefreshEngine(
 					extensionOptions);
 			}
 
-            if (!ShouldSuppressAllTogglesOverride(context) && context.AllExtensionsChecked)
+			if (!context.ExtensionSelectionIsExplicit &&
+			    !ShouldSuppressAllTogglesOverride(context) &&
+			    context.AllExtensionsChecked)
                 extensionOptions = ForceAllChecked(extensionOptions);
 
             visibleExtensionOptions = FilterVisibleExtensionOptions(
@@ -436,21 +450,6 @@ public sealed class SelectionRefreshEngine(
             TreeInventory: scan.Value.TreeInventory,
             EffectiveRules: ignoreRules);
     }
-
-	private static IReadOnlyList<SelectionOption> ApplyExplicitExtensionSelection(
-		SelectionRefreshContext context,
-		IReadOnlyList<SelectionOption> options)
-	{
-		if (!context.ExtensionSelectionIsExplicit)
-			return options;
-
-		// CLI extension overrides are exact sets. Unlike a persisted settings island,
-		// newly discovered rows must not opt themselves into an explicit invocation.
-		var selected = context.ExtensionsSelectionCache;
-		return options
-			.Select(option => option with { IsChecked = selected.Contains(option.Name) })
-			.ToArray();
-	}
 
     private ScanResult<ProjectWorkspaceScanSnapshot> GetDynamicSectionScan(
         SelectionRefreshContext context,
@@ -905,24 +904,6 @@ public sealed class SelectionRefreshEngine(
         }
 
         return filtered;
-    }
-
-    private static IExtensionInclusionPolicy? BuildEffectiveExtensionPolicy(SelectionRefreshContext context)
-    {
-        if (!ShouldSuppressAllTogglesOverride(context) && context.AllExtensionsChecked)
-            return null;
-
-		if (!context.ExtensionsSelectionInitialized)
-			return null;
-
-		var previousSelections = new HashSet<string>(
-			context.ExtensionsSelectionCache,
-			StringComparer.OrdinalIgnoreCase);
-		var stateCache = context.ExtensionOptionStateCache;
-
-		return new ExtensionSelectionInclusionPolicy(
-            new SelectionStateResolver(previousSelections, stateCache),
-            defaultForNewExtension: stateCache is not null);
     }
 
     private static bool ResolveIgnoreOptionCheckedState(
