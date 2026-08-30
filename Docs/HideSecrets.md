@@ -230,6 +230,10 @@ Private-data redaction remains a separate, opt-in server flag; see
 The missing schema control guarantees that an agent cannot disable the redaction
 pass. Detection itself covers common secret formats but remains heuristic, not a
 guarantee. Review each pack before publishing it outside your environment.
+Known documentation and placeholder values, including AWS-shaped keys containing
+`EXAMPLE` and bodies made from alphabetic sequences, are intentionally allowlisted
+in line with upstream Gitleaks rules to reduce fixture and example noise. Real
+secret formats remain subject to detection and redaction.
 
 ## Updating the rule source
 

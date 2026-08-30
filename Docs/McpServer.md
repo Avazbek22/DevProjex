@@ -58,6 +58,10 @@ list_projects -> get_tree/analyze -> search_project/get_file -> pack_context -> 
   This guarantees that an agent cannot disable the redaction pass; detection
   itself covers common secret formats but remains heuristic, not a guarantee.
   Review each pack before publishing it outside your environment.
+  Known documentation and placeholder values, such as AWS-shaped keys containing
+  `EXAMPLE` and bodies made from alphabetic sequences, are intentionally allowlisted
+  in line with upstream Gitleaks rules to avoid fixture and example noise. Real
+  secret formats remain subject to detection and redaction.
 - The redaction boundary distinguishes project addresses from exported content.
   File contents and context packs are always processed by Secrets redaction;
   Private Data processing is added only when the server starts with
