@@ -261,6 +261,7 @@ internal sealed class TerminalWorkspaceCommandParser
 		out string? diffRange)
 	{
 		var isPublishedValue = value.Equals("off", StringComparison.OrdinalIgnoreCase) ||
+		                       value.Equals("none", StringComparison.OrdinalIgnoreCase) ||
 		                       value.Equals("gitignore", StringComparison.OrdinalIgnoreCase) ||
 		                       value.Equals("tracked", StringComparison.OrdinalIgnoreCase) ||
 		                       value.Equals("staged", StringComparison.OrdinalIgnoreCase) ||

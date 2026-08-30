@@ -227,6 +227,10 @@ so neither a configuration mistake nor the connected agent can turn it off.
 Private-data redaction remains a separate, opt-in server flag; see
 [McpServer.md](McpServer.md) for the full security model.
 
+The missing schema control guarantees that an agent cannot disable the redaction
+pass. Detection itself covers common secret formats but remains heuristic, not a
+guarantee. Review each pack before publishing it outside your environment.
+
 ## Updating the rule source
 
 A provider-rule update is a reviewed source change, not a runtime download:

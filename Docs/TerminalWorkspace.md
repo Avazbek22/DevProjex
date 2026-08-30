@@ -234,6 +234,9 @@ Welcome exposes the focused subset `recent`, `language`, `help`, and `quit`.
 | `help [verb]` | open the localized command cheat sheet |
 | `quit` | perform the same safe exit action as `q` |
 
+`set git none` is accepted as a synonym for `set git off`; command help and
+completion continue to advertise the shorter `off` form.
+
 Examples:
 
 ```text

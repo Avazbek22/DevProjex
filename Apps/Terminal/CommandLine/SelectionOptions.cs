@@ -362,8 +362,7 @@ internal sealed class SelectionOptions
 				if (result.Tokens.Count == 1)
 				{
 					var token = result.Tokens[0].Value;
-					if (!token.Equals("off", StringComparison.OrdinalIgnoreCase) &&
-					    GitScopeSelection.TryParse(token, out var mode, out var diffRange))
+					if (GitScopeSelection.TryParse(token, out var mode, out var diffRange))
 					{
 						return new CliGitModeValue(mode, diffRange);
 					}

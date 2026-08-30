@@ -157,6 +157,9 @@ Git modes:
 | `changes` | Include staged, unstaged, and untracked files; ignored untracked files remain excluded |
 | `diff:<REF>..<REF>` | Include files changed between two Git references |
 
+`off` is accepted as an input alias for `none`. Help, completions, and machine
+documents continue to use the canonical `none` token.
+
 The three state scopes are invocation-only and cannot be saved in local or
 portable profiles. `open` supports `staged` and `changes`; diff scopes are
 available in direct CLI commands, Terminal Workspace, and MCP, but not Desktop.

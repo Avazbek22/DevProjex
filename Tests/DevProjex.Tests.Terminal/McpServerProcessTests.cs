@@ -25,6 +25,45 @@ public sealed class McpServerProcessTests
 	private const string PrivatePath = "/home/alice-smith/DevProjexMcpProcessProbe/project";
 
 	[Theory]
+	[InlineData("none")]
+	[InlineData("off")]
+	public async Task RealProcessMcpAcceptsThePersistentNoFilteringAliases(string gitMode)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var startInfo = new ProcessStartInfo("dotnet")
+		{
+			UseShellExecute = false,
+			RedirectStandardInput = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			CreateNoWindow = true,
+			WorkingDirectory = project
+		};
+		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
+		startInfo.ArgumentList.Add("mcp");
+		startInfo.ArgumentList.Add("--root");
+		startInfo.ArgumentList.Add(project);
+		startInfo.ArgumentList.Add("--git-mode");
+		startInfo.ArgumentList.Add(gitMode);
+		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] = workspace.CreateDirectory("data");
+
+		using var process = Process.Start(startInfo) ??
+		                    throw new InvalidOperationException("MCP process did not start.");
+		process.StandardInput.Close();
+		var output = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
+		var error = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+		await process.WaitForExitAsync(TestContext.Current.CancellationToken)
+			.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken);
+
+		var standardOutput = await output;
+		var standardError = await error;
+		Assert.True(process.ExitCode == 0, standardError);
+		Assert.Empty(standardOutput);
+		Assert.Empty(standardError);
+	}
+
+	[Theory]
 	[InlineData(false)]
 	[InlineData(true)]
 	public async Task RealProcessAppliesServerRedactionPolicyAndStopsOnStandardInputEof(

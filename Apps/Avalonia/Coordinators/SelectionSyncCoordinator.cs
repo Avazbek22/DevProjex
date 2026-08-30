@@ -3765,7 +3765,11 @@ public sealed partial class SelectionSyncCoordinator(
 		{
 		}
 
-		Interlocked.CompareExchange(ref _gitCliAvailability, isAvailable ? 1 : -1, 0);
+		if (Interlocked.CompareExchange(ref _gitCliAvailability, isAvailable ? 1 : -1, 0) != 0)
+			return;
+
+		cancellationToken.ThrowIfCancellationRequested();
+		await Dispatcher.UIThread.InvokeAsync(RefreshGitFilteringModePresentation);
 	}
 
 	private void SetAllIgnoreOptionsChecked(bool isChecked)

@@ -433,7 +433,7 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 				Assert.Same(entry, viewModel.SelectedGitCloneCacheEntry);
 				var deleteButton = await OpenAndFindDeleteButtonAsync(window, comboBox, entry);
 
-				await UiTestDriver.ClickAsync(window, deleteButton);
+				await UiTestDriver.RaiseButtonClickAsync(deleteButton);
 				await UiTestDriver.WaitForConditionAsync(
 					window,
 					() => viewModel.CachedRepositories.Count == 0 && !container.IsVisible,

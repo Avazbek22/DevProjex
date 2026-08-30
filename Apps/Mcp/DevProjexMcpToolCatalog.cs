@@ -8,18 +8,18 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	private const string MaximumResultSizeKey = "anthropic/maxResultSizeChars";
 	private readonly IReadOnlyList<McpServerTool> _tools;
 
-	public DevProjexMcpToolCatalog(DevProjexMcpTools target)
+	public DevProjexMcpToolCatalog(DevProjexMcpTools target, bool allowRemote)
 	{
 		ArgumentNullException.ThrowIfNull(target);
 		_tools =
 		[
 			Create(target, nameof(DevProjexMcpTools.ListProjects), "list_projects", "List projects", ListProjectsInput, ListProjectsOutput),
-			Create(target, nameof(DevProjexMcpTools.GetTree), "get_tree", "Get project tree", GetTreeInput),
-			Create(target, nameof(DevProjexMcpTools.Analyze), "analyze", "Analyze project", AnalyzeInput, AnalyzeOutput),
-			Create(target, nameof(DevProjexMcpTools.PackContext), "pack_context", "Pack project context", PackContextInput, largeResult: true),
+			Create(target, nameof(DevProjexMcpTools.GetTree), "get_tree", "Get project tree", GetTreeInput, openWorld: allowRemote),
+			Create(target, nameof(DevProjexMcpTools.Analyze), "analyze", "Analyze project", AnalyzeInput, AnalyzeOutput, openWorld: allowRemote),
+			Create(target, nameof(DevProjexMcpTools.PackContext), "pack_context", "Pack project context", PackContextInput, largeResult: true, idempotent: false, openWorld: allowRemote),
 			Create(target, nameof(DevProjexMcpTools.ReadPack), "read_pack", "Read context pack", ReadPackInput, largeResult: true),
-			Create(target, nameof(DevProjexMcpTools.SearchProject), "search_project", "Search project", SearchInput),
-			Create(target, nameof(DevProjexMcpTools.GetFile), "get_file", "Get project file", GetFileInput)
+			Create(target, nameof(DevProjexMcpTools.SearchProject), "search_project", "Search project", SearchInput, openWorld: allowRemote),
+			Create(target, nameof(DevProjexMcpTools.GetFile), "get_file", "Get project file", GetFileInput, openWorld: allowRemote)
 		];
 	}
 
@@ -45,7 +45,9 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 		string title,
 		string inputSchema,
 		string? outputSchema = null,
-		bool largeResult = false)
+		bool largeResult = false,
+		bool idempotent = true,
+		bool openWorld = false)
 	{
 		var method = typeof(DevProjexMcpTools).GetMethod(
 			methodName,
@@ -59,8 +61,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 			Description = description,
 			ReadOnly = true,
 			Destructive = false,
-			Idempotent = true,
-			OpenWorld = false
+			Idempotent = idempotent,
+			OpenWorld = openWorld
 		};
 		if (outputSchema is not null)
 		{
@@ -192,6 +194,15 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
+	private const string TreeFormatProperty = """
+	"format": {
+	  "type": "string",
+	  "enum": ["markdown", "text", "json", "xml"],
+	  "default": "markdown",
+	  "description": "Tree representation. Markdown is the compact default; text uses drawing characters, while JSON and XML are structured."
+	}
+	""";
+
 	private static readonly string ListProjectsInput = EmptyInput;
 
 	private static readonly string GetTreeInput = $$"""
@@ -208,7 +219,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    "max_depth": {
 	      "description": "Maximum tree depth from 0 to 1000; accepts an integer or numeric string.",
 	      "oneOf": [ { "type": "integer", "minimum": 0, "maximum": 1000 }, { "type": "string", "pattern": "^[0-9]+$" } ]
-	    }
+	    },
+	    {{TreeFormatProperty}}
 	  },
 	  "additionalProperties": false
 	}

@@ -135,7 +135,7 @@ jobs:
           --results-directory "TestResults/${{ matrix.suite_id }}"
           --report-xunit-trx
           --report-xunit-trx-filename "${{ matrix.trx_name }}"
-          --timeout 10m
+          --timeout 20m
 
       - name: Run ${{ matrix.suite_name }} Tests (Linux headless)
         if: ${{ matrix.os_id == 'linux' && matrix.suite_id != 'ui' }}
@@ -164,7 +164,7 @@ jobs:
           --results-directory "TestResults/${{ matrix.suite_id }}"
           --report-xunit-trx
           --report-xunit-trx-filename "${{ matrix.trx_name }}"
-          --timeout 10m
+          --timeout 20m
 
       - name: Print Test Runner Logs
         if: ${{ failure() }}

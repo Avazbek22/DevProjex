@@ -83,7 +83,7 @@ public static class McpServerHost
 				gitMode),
 			LazyThreadSafetyMode.ExecutionAndPublication);
 		var tools = new DevProjexMcpTools(rootRegistry, projectService, packs);
-		var catalog = new DevProjexMcpToolCatalog(tools);
+		var catalog = new DevProjexMcpToolCatalog(tools, allowRemote);
 
 		var builder = Host.CreateApplicationBuilder([]);
 		builder.Logging.ClearProviders();

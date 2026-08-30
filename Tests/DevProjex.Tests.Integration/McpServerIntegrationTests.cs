@@ -162,25 +162,40 @@ public sealed class McpServerIntegrationTests
 		Assert.Equal(0, Volatile.Read(ref serviceCreationCount));
 	}
 
-	[Fact]
-	public async Task StreamServerHandshakeListsExactlyTheStrictReadOnlyToolsInContractOrder()
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task StreamServerHandshakePublishesPreciseToolAnnotationsInContractOrder(bool allowRemote)
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
-		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			allowRemote: allowRemote);
 
 		var tools = await server.Client.ListToolsAsync(
 			options: null,
 			TestContext.Current.CancellationToken);
 
 		Assert.Equal(ExpectedTools, tools.Select(static tool => tool.Name));
-		Assert.All(tools, static tool =>
+		var remoteProjectTools = new HashSet<string>(StringComparer.Ordinal)
+		{
+			"get_tree",
+			"analyze",
+			"pack_context",
+			"search_project",
+			"get_file"
+		};
+		Assert.All(tools, tool =>
 		{
 			var protocol = tool.ProtocolTool;
 			Assert.False(string.IsNullOrWhiteSpace(protocol.Title));
 			Assert.True(protocol.Annotations?.ReadOnlyHint);
-			Assert.True(protocol.Annotations?.IdempotentHint);
-			Assert.False(protocol.Annotations?.OpenWorldHint);
+			Assert.Equal(tool.Name != "pack_context", protocol.Annotations?.IdempotentHint);
+			Assert.Equal(
+				allowRemote && remoteProjectTools.Contains(tool.Name),
+				protocol.Annotations?.OpenWorldHint);
 			Assert.False(protocol.Annotations?.DestructiveHint);
 			Assert.Equal(JsonValueKind.False, protocol.InputSchema.GetProperty("additionalProperties").ValueKind);
 			Assert.DoesNotContain("hide_secrets", protocol.InputSchema.GetRawText(), StringComparison.OrdinalIgnoreCase);
@@ -195,6 +210,10 @@ public sealed class McpServerIntegrationTests
 			200_000,
 			tools.Single(static tool => tool.Name == "pack_context")
 				.ProtocolTool.Meta!["anthropic/maxResultSizeChars"]!.GetValue<int>());
+		Assert.Contains(
+			"stored pack id remains valid until this server process exits; after restart, call pack_context again",
+			tools.Single(static tool => tool.Name == "pack_context").ProtocolTool.Description,
+			StringComparison.Ordinal);
 		Assert.Equal(
 			200_000,
 			tools.Single(static tool => tool.Name == "read_pack")
@@ -203,7 +222,7 @@ public sealed class McpServerIntegrationTests
 		var expectedParameters = new Dictionary<string, string[]>(StringComparer.Ordinal)
 		{
 			["list_projects"] = [],
-			["get_tree"] = ["project", "branch", "include_patterns", "exclude_patterns", "tracked_only", "git_scope", "max_file_bytes", "max_depth"],
+			["get_tree"] = ["project", "branch", "include_patterns", "exclude_patterns", "tracked_only", "git_scope", "max_file_bytes", "max_depth", "format"],
 			["analyze"] = ["project", "branch", "paths", "include_patterns", "exclude_patterns", "profile", "detail", "tracked_only", "git_scope", "top_files", "max_file_bytes"],
 			["pack_context"] = ["project", "branch", "paths", "include_patterns", "exclude_patterns", "profile", "detail", "tracked_only", "git_scope", "max_tokens", "max_file_bytes", "view", "format"],
 			["read_pack"] = ["pack_id", "start_line", "end_line"],
@@ -223,6 +242,7 @@ public sealed class McpServerIntegrationTests
 			Assert.DoesNotContain("tracked_only", required);
 			Assert.DoesNotContain("git_scope", required);
 			Assert.DoesNotContain("max_tokens", required);
+			Assert.DoesNotContain("format", required);
 		}
 		var searchBoolean = tools.Single(static tool => tool.Name == "search_project")
 			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("ignore_case");
@@ -230,6 +250,12 @@ public sealed class McpServerIntegrationTests
 		var searchPattern = tools.Single(static tool => tool.Name == "search_project")
 			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("pattern");
 		Assert.Equal(4096, searchPattern.GetProperty("maxLength").GetInt32());
+		var treeFormat = tools.Single(static tool => tool.Name == "get_tree")
+			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("format");
+		Assert.Equal("markdown", treeFormat.GetProperty("default").GetString());
+		Assert.Equal(
+			["markdown", "text", "json", "xml"],
+			treeFormat.GetProperty("enum").EnumerateArray().Select(static item => item.GetString()));
 		foreach (var name in new[] { "analyze", "pack_context" })
 		{
 			var detail = tools.Single(tool => tool.Name == name)
@@ -306,6 +332,78 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task GetTreeDefaultsToMarkdownAndSupportsEveryPublishedFormat()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		Directory.CreateDirectory(Path.Combine(project, "src"));
+		File.WriteAllText(Path.Combine(project, "src", "App.cs"), "internal sealed class App { }\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var markdown = await server.CallAsync("get_tree");
+		var text = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "text" });
+		var json = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "json" });
+		var xml = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "xml" });
+
+		var markdownBody = ExtractSpotlightBody(Text(markdown));
+		Assert.Contains("- src/", markdownBody, StringComparison.Ordinal);
+		Assert.Contains("  - App.cs", markdownBody, StringComparison.Ordinal);
+		Assert.DoesNotContain('├', markdownBody);
+		Assert.DoesNotContain('└', markdownBody);
+		Assert.DoesNotContain('│', markdownBody);
+		Assert.Contains("└── src", ExtractSpotlightBody(Text(text)), StringComparison.Ordinal);
+		using (JsonDocument.Parse(ExtractSpotlightBody(Text(json)))) { }
+		_ = System.Xml.Linq.XDocument.Parse(ExtractSpotlightBody(Text(xml)));
+		foreach (var result in new[] { markdown, text, json, xml })
+		{
+			Assert.NotEqual(true, result.IsError);
+			AssertSpotlighted(result);
+		}
+	}
+
+	[Fact]
+	public async Task GetTreeRejectsInvalidFormatsAndNeverReturnsTruncatedStructuredDocuments()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		for (var index = 0; index < 2_100; index++)
+		{
+			File.WriteAllText(
+				Path.Combine(project, $"File{index:D4}.txt"),
+				index.ToString(System.Globalization.CultureInfo.InvariantCulture));
+		}
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var invalid = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "yaml" });
+		var truncatedJson = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "json" });
+		var truncatedXml = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "xml" });
+
+		Assert.True(invalid.IsError);
+		Assert.Contains(McpErrorCodes.InvalidArguments, Text(invalid), StringComparison.Ordinal);
+		Assert.Contains("markdown, text, json, xml", Text(invalid), StringComparison.Ordinal);
+		Assert.All(new[] { truncatedJson, truncatedXml }, truncated =>
+		{
+			Assert.True(truncated.IsError);
+			Assert.Contains(McpErrorCodes.PayloadTruncated, Text(truncated), StringComparison.Ordinal);
+			Assert.Contains("max_depth", Text(truncated), StringComparison.Ordinal);
+			Assert.Contains("include_patterns", Text(truncated), StringComparison.Ordinal);
+			Assert.DoesNotContain("<untrusted-data-", Text(truncated), StringComparison.Ordinal);
+		});
+	}
+
+	[Fact]
 	public async Task RemoteProjectIsRejectedWithoutOptInBeforeRemoteServicesAreCreated()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -373,7 +471,9 @@ public sealed class McpServerIntegrationTests
 			["project"] = repositoryUrl,
 			["branch"] = "feature"
 		};
-		var tree = await server.CallAsync("get_tree", remote);
+		var tree = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>(remote) { ["format"] = "text" });
 		var pack = await server.CallAsync(
 			"pack_context",
 			new Dictionary<string, object?>(remote)
@@ -1326,10 +1426,12 @@ public sealed class McpServerIntegrationTests
 			var progress = new InlineProgress<ProgressNotificationValue>();
 			var firstMessage = server.WireMessageCount;
 			var firstInputMessage = server.InputWireMessageCount;
-			var result = await server.CallAsync(
+			var callTask = server.CallAsync(
 				testCase.ToolName,
 				testCase.Arguments,
 				progress);
+			await progress.WaitForValueAsync(TestContext.Current.CancellationToken);
+			var result = await callTask;
 
 			Assert.NotEqual(true, result.IsError);
 			var request = Assert.Single(
@@ -1383,7 +1485,6 @@ public sealed class McpServerIntegrationTests
 					values,
 					static value => value.GetProperty("message").GetString() == "writing pack 8/8");
 			}
-			await progress.WaitForValueAsync(TestContext.Current.CancellationToken);
 			Assert.NotEmpty(progress.Values);
 
 			firstMessage = server.WireMessageCount;
