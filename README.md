@@ -189,10 +189,10 @@ Seven read-only tools cover the whole workflow: `list_projects`, `get_tree`, `an
 
 The server enforces hard security boundaries on top of DevProjex's read-only design:
 
-* **Read-only by design** — tools cannot modify files or run project code; network access is disabled unless `--allow-remote` is explicitly enabled for Git URL projects
+* **Read-only by design** — tools cannot modify project files or run project code; network access is disabled unless `--allow-remote` is explicitly enabled for Git URL projects
 * **Secret redaction is always on in MCP mode and has no off switch** — not in the server flags, not in the tool schemas, so neither a config mistake nor the agent itself can turn it off
 * **Optional private-data masking** via `devprojex mcp --hide-private-data`, mirroring the CLI flag
-* **Root jail** — access is pinned to the roots you pass at startup; symlink and junction escapes are rejected
+* **Root jail** — local access is pinned to startup roots; opt-in remote Git URL checkouts are pinned on first use; symlink and junction escapes are rejected
 * Smart Ignore, `.gitignore`, and tracked-only Git modes stay active; agent paths and globs can only narrow the selection
 * Returned file contents are wrapped in untrusted-data markers to resist prompt injection
 

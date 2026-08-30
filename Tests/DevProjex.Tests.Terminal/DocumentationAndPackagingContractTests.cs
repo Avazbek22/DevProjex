@@ -52,6 +52,11 @@ public sealed class DocumentationAndPackagingContractTests
 			"network access is disabled unless `--allow-remote`",
 			readme,
 			StringComparison.Ordinal);
+		Assert.Contains("cannot modify project files", readme, StringComparison.Ordinal);
+		Assert.Contains(
+			"remote Git URL checkouts are pinned on first use",
+			readme,
+			StringComparison.Ordinal);
 		Assert.DoesNotContain(
 			"tools cannot modify files, run project code, or touch the network",
 			readme,
