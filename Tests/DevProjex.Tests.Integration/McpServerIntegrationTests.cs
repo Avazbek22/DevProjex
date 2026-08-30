@@ -1426,10 +1426,12 @@ public sealed class McpServerIntegrationTests
 			var progress = new InlineProgress<ProgressNotificationValue>();
 			var firstMessage = server.WireMessageCount;
 			var firstInputMessage = server.InputWireMessageCount;
-			var result = await server.CallAsync(
+			var callTask = server.CallAsync(
 				testCase.ToolName,
 				testCase.Arguments,
 				progress);
+			await progress.WaitForValueAsync(TestContext.Current.CancellationToken);
+			var result = await callTask;
 
 			Assert.NotEqual(true, result.IsError);
 			var request = Assert.Single(
@@ -1483,7 +1485,6 @@ public sealed class McpServerIntegrationTests
 					values,
 					static value => value.GetProperty("message").GetString() == "writing pack 8/8");
 			}
-			await progress.WaitForValueAsync(TestContext.Current.CancellationToken);
 			Assert.NotEmpty(progress.Values);
 
 			firstMessage = server.WireMessageCount;
