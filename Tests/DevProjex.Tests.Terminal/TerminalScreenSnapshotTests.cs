@@ -187,6 +187,25 @@ public sealed class TerminalScreenSnapshotTests
 			StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public void Normalize_MapsBareClippedSystemTemporaryRootOnlyWhenProjectRootIsKnown()
+	{
+		var temporaryPrefix = Path.GetTempPath();
+		var projectPath = Path.Combine(
+			temporaryPrefix,
+			"DevProjex.Tests.Terminal",
+			Guid.NewGuid().ToString("N"));
+		var screen = $"│Root: {temporaryPrefix}▲│";
+
+		var withProjectRoot = TerminalScreenSnapshot.Normalize(
+			screen,
+			[(projectPath, "<PROJECT_ROOT>")]);
+		var withoutProjectRoot = TerminalScreenSnapshot.Normalize(screen, []);
+
+		Assert.Equal("│Root: <PROJECT_ROOT>▲│", withProjectRoot);
+		Assert.Equal("│Root: <SYSTEM_TEMP>/▲│", withoutProjectRoot);
+	}
+
 	[Theory]
 	[InlineData("│> [1] /tmp/session/Alpha Project│", "│> [1] <RECENT_PATH>│")]
 	[InlineData("│  [2] C:\\Temp\\Beta Project│", "│  [2] <RECENT_PATH>│")]
