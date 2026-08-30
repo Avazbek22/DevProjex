@@ -465,7 +465,9 @@ public sealed class McpServerIntegrationTests
 			["project"] = repositoryUrl,
 			["branch"] = "feature"
 		};
-		var tree = await server.CallAsync("get_tree", remote);
+		var tree = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>(remote) { ["format"] = "text" });
 		var pack = await server.CallAsync(
 			"pack_context",
 			new Dictionary<string, object?>(remote)
