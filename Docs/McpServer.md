@@ -28,7 +28,8 @@ devprojex mcp --root /absolute/path/to/project --allow-remote
 The server baseline Git mode can be selected at startup with
 `--git-mode none|gitignore|tracked`. This applies only when a tool does not name
 an explicit profile. Momentary Git state belongs to request-level `git_scope`
-and is intentionally rejected at server startup.
+and is intentionally rejected at server startup. `off` is accepted as an input
+alias for the canonical `none` token.
 
 The recommended tool sequence is:
 

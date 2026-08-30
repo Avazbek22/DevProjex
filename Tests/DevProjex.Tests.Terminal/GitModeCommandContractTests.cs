@@ -5,6 +5,26 @@ namespace DevProjex.Tests.Terminal;
 public sealed class GitModeCommandContractTests
 {
 	[Fact]
+	public void RealProcessNormalizesOffAndNoneToTheSameMachineToken()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("App.cs", "internal sealed class App { }\n");
+
+		var none = RunAnalyzeProcess(workspace, "none");
+		var off = RunAnalyzeProcess(workspace, "off");
+
+		Assert.Equal(CommandLineExitCodes.Success, none.ExitCode);
+		Assert.Equal(CommandLineExitCodes.Success, off.ExitCode);
+		Assert.Empty(none.StandardError);
+		Assert.Empty(off.StandardError);
+		Assert.Equal(none.StandardOutput, off.StandardOutput);
+		using var document = JsonDocument.Parse(off.StandardOutput);
+		Assert.Equal(
+			"none",
+			document.RootElement.GetProperty("selection").GetProperty("gitMode").GetString());
+	}
+
+	[Fact]
 	public async Task DesktopOpenRejectsDiffScopeBeforeLaunchingTheGui()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -769,6 +789,38 @@ public sealed class GitModeCommandContractTests
 				environment,
 				new TerminalServiceFactory(() => dataRoot.Path))
 			.RunAsync(arguments, TestContext.Current.CancellationToken);
+	}
+
+	private static TerminalTestProcessResult RunAnalyzeProcess(
+		TemporaryDirectory workspace,
+		string gitMode)
+	{
+		var startInfo = new ProcessStartInfo("dotnet")
+		{
+			UseShellExecute = false,
+			CreateNoWindow = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			WorkingDirectory = workspace.Path
+		};
+		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
+		string[] arguments =
+		[
+			"analyze", workspace.Path,
+			"--format", "json",
+			"--git-mode", gitMode,
+			"--exclude", "none",
+			"--plain",
+			"--language", "en",
+			"-o", "-"
+		];
+		foreach (var argument in arguments)
+		{
+			startInfo.ArgumentList.Add(argument);
+		}
+		startInfo.Environment["DEVPROJEX_INTERNAL_DATA_ROOT"] =
+			workspace.CreateDirectory("data-" + gitMode);
+		return TerminalTestProcess.Run(startInfo);
 	}
 
 	private static ProjectSelectionSpec CreateGitSelection(GitFilteringMode mode) =>
