@@ -276,7 +276,23 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			baseline,
 			selectedPaths,
 			forceEmptySelection: false,
+			pathComparer: null,
 			cancellationToken);
+
+	public Task<ProjectContextPlan> ReprojectSelectionAsync(
+		ProjectContextPlan baseline,
+		IReadOnlyCollection<string>? selectedPaths,
+		StringComparer pathComparer,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(pathComparer);
+		return ReprojectSelectionCoreAsync(
+			baseline,
+			selectedPaths,
+			forceEmptySelection: false,
+			pathComparer,
+			cancellationToken);
+	}
 
 	public Task<ProjectContextPlan> ReprojectEmptySelectionAsync(
 		ProjectContextPlan baseline,
@@ -285,12 +301,14 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			baseline,
 			selectedPaths: [],
 			forceEmptySelection: true,
+			pathComparer: null,
 			cancellationToken);
 
 	private async Task<ProjectContextPlan> ReprojectSelectionCoreAsync(
 		ProjectContextPlan baseline,
 		IReadOnlyCollection<string>? selectedPaths,
 		bool forceEmptySelection,
+		StringComparer? pathComparer,
 		CancellationToken cancellationToken)
 	{
 		ArgumentNullException.ThrowIfNull(baseline);
@@ -302,7 +320,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		bool explicitSelectionHadMatch;
 		if (forceEmptySelection)
 		{
-			selectedFullPaths = new HashSet<string>(PathComparer.Default);
+			selectedFullPaths = new HashSet<string>(pathComparer ?? PathComparer.Default);
 			explicitSelectionHadMatch = false;
 		}
 		else
@@ -313,7 +331,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				selectedPaths,
 				diagnostics,
 				cancellationToken,
-				out explicitSelectionHadMatch);
+				out explicitSelectionHadMatch,
+				pathComparer);
 		}
 		var selectsNoEffectivePaths =
 			forceEmptySelection ||
@@ -323,7 +342,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			selectedFullPaths,
 			selectsNoEffectivePaths,
 			knownFullTreeFilePaths: null,
-			cancellationToken);
+			cancellationToken,
+			pathComparer);
 		var projectedTree = projection.ProjectedTree;
 		var includedFiles = projection.IncludedFiles;
 		var includedFolders = projection.IncludedFolders;
@@ -442,7 +462,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		ProjectTreeInventorySnapshot? inventory,
 		CancellationToken cancellationToken)
 	{
-		var sizes = new Dictionary<string, long>(orderedFilePaths?.Count ?? 0, PathComparer.Default);
+		var sizes = new Dictionary<string, long>(orderedFilePaths?.Count ?? 0, StringComparer.Ordinal);
 		if (orderedFilePaths is not null)
 		{
 			foreach (var path in orderedFilePaths)
@@ -882,14 +902,20 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		IReadOnlyCollection<string>? selectedPaths,
 		List<ContextDiagnostic> diagnostics,
 		CancellationToken cancellationToken,
-		out bool explicitSelectionHadMatch)
+		out bool explicitSelectionHadMatch,
+		StringComparer? pathComparer = null)
 	{
 		explicitSelectionHadMatch = false;
+		var effectivePathComparer = pathComparer ?? PathComparer.Default;
 		if (selectedPaths is null || selectedPaths.Count == 0)
-			return new HashSet<string>(PathComparer.Default);
+			return new HashSet<string>(effectivePathComparer);
 
-		var effectivePathMap = BuildEffectivePathMap(root, sourceRoot, cancellationToken);
-		var resolved = new HashSet<string>(PathComparer.Default);
+		var effectivePathMap = BuildEffectivePathMap(
+			root,
+			sourceRoot,
+			cancellationToken,
+			effectivePathComparer);
+		var resolved = new HashSet<string>(effectivePathComparer);
 		foreach (var input in selectedPaths)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -915,22 +941,24 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				relativePath));
 		}
 
-		return NormalizeSelectionFrontier(root, resolved, cancellationToken);
+		return NormalizeSelectionFrontier(root, resolved, cancellationToken, effectivePathComparer);
 	}
 
 	private static IReadOnlySet<string> NormalizeSelectionFrontier(
 		TreeNodeDescriptor root,
 		IReadOnlySet<string> selectedPaths,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		StringComparer? pathComparer = null)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
+		var effectivePathComparer = pathComparer ?? PathComparer.Default;
 		if (selectedPaths.Contains(root.FullPath))
-			return new HashSet<string>(PathComparer.Default);
+			return new HashSet<string>(effectivePathComparer);
 
 		if (selectedPaths.Count < 2)
 			return selectedPaths;
 
-		var frontier = new HashSet<string>(selectedPaths, PathComparer.Default);
+		var frontier = new HashSet<string>(selectedPaths, effectivePathComparer);
 		foreach (var selectedPath in selectedPaths)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -954,9 +982,10 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 	private static Dictionary<string, string> BuildEffectivePathMap(
 		TreeNodeDescriptor root,
 		string sourceRoot,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		StringComparer? pathComparer = null)
 	{
-		var paths = new Dictionary<string, string>(PathComparer.Default);
+		var paths = new Dictionary<string, string>(pathComparer ?? PathComparer.Default);
 		var stack = new Stack<TreeNodeDescriptor>();
 		stack.Push(root);
 		while (stack.Count > 0)
@@ -1124,9 +1153,11 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		IReadOnlySet<string> selectedFullPaths,
 		bool selectsNoEffectivePaths,
 		IReadOnlyList<string>? knownFullTreeFilePaths,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		StringComparer? pathComparer = null)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
+		var effectivePathComparer = pathComparer ?? PathComparer.Default;
 		if (selectsNoEffectivePaths)
 			return (root with { Children = [] }, Array.Empty<string>(), Array.Empty<string>());
 
@@ -1135,33 +1166,41 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			var (fullTreeFiles, fullTreeFolders) = BuildOrderedFullTreePaths(
 				root,
 				knownFullTreeFilePaths,
-				cancellationToken);
+				cancellationToken,
+				effectivePathComparer);
 			return (root, fullTreeFiles, fullTreeFolders);
 		}
 
 		var includedNodes = ProjectTreeSelectionProjection.BuildIncludedNodesWithCancellation(
 			root,
 			selectedFullPaths,
-			cancellationToken);
+			cancellationToken,
+			effectivePathComparer);
 		var projectedTree = ResolveProjectedTree(
 			root,
 			selectedFullPaths,
 			includedNodes,
 			selectsNoEffectivePaths: false,
-			cancellationToken);
+			cancellationToken,
+			effectivePathComparer);
 		var includedFiles = ProjectTreeSelectionProjection.BuildOrderedSelectedFilePathsWithCancellation(
 			root,
 			selectedFullPaths,
 			ensureExists: false,
-			cancellationToken);
-		var includedFolders = BuildOrderedIncludedFolders(includedNodes, cancellationToken);
+			cancellationToken,
+			effectivePathComparer);
+		var includedFolders = BuildOrderedIncludedFolders(
+			includedNodes,
+			cancellationToken,
+			effectivePathComparer);
 		return (projectedTree, includedFiles, includedFolders);
 	}
 
 	private static (List<string> IncludedFiles, string[] IncludedFolders) BuildOrderedFullTreePaths(
 		TreeNodeDescriptor root,
 		IReadOnlyList<string>? knownFilePaths,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		StringComparer? pathComparer = null)
 	{
 		var includedFiles = knownFilePaths is null
 			? []
@@ -1198,16 +1237,17 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			}
 		}
 
-		SortAndDeduplicatePaths(includedFiles, cancellationToken);
-		SortAndDeduplicatePaths(includedFolders, cancellationToken);
+		SortAndDeduplicatePaths(includedFiles, cancellationToken, pathComparer);
+		SortAndDeduplicatePaths(includedFolders, cancellationToken, pathComparer);
 		return (includedFiles, includedFolders.ToArray());
 	}
 
 	private static void SortAndDeduplicatePaths(
 		List<string> paths,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		StringComparer? comparer = null)
 	{
-		var pathComparer = PathComparer.Default;
+		var pathComparer = comparer ?? PathComparer.Default;
 		CancellationAwareSort.Sort(paths, pathComparer, cancellationToken);
 		if (paths.Count < 2)
 			return;
@@ -1228,9 +1268,10 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 
 	private static HashSet<string> BuildIncludedPathSet(
 		IReadOnlyList<TreeNodeDescriptor> includedNodes,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		StringComparer? pathComparer = null)
 	{
-		var includedPaths = new HashSet<string>(PathComparer.Default);
+		var includedPaths = new HashSet<string>(pathComparer ?? PathComparer.Default);
 		foreach (var node in includedNodes)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -1245,7 +1286,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		IReadOnlySet<string> selectedFullPaths,
 		IReadOnlyList<TreeNodeDescriptor> includedNodes,
 		bool selectsNoEffectivePaths,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		StringComparer? pathComparer = null)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 		if (selectsNoEffectivePaths)
@@ -1253,7 +1295,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		if (ProjectTreeSelectionProjection.CoversWholeTree(root, selectedFullPaths))
 			return root;
 
-		var includedPathSet = BuildIncludedPathSet(includedNodes, cancellationToken);
+		var includedPathSet = BuildIncludedPathSet(includedNodes, cancellationToken, pathComparer);
 		return ProjectTreeSelectionProjection.BuildProjectedTreeWithCancellation(
 			       root,
 			       includedPathSet,
@@ -1263,7 +1305,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 
 	private static string[] BuildOrderedIncludedFolders(
 		IReadOnlyList<TreeNodeDescriptor> includedNodes,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		StringComparer? pathComparer = null)
 	{
 		var includedFolders = new List<string>();
 		foreach (var node in includedNodes)
@@ -1273,7 +1316,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				includedFolders.Add(node.FullPath);
 		}
 
-		CancellationAwareSort.Sort(includedFolders, PathComparer.Default, cancellationToken);
+		CancellationAwareSort.Sort(includedFolders, pathComparer ?? PathComparer.Default, cancellationToken);
 		return includedFolders.ToArray();
 	}
 }

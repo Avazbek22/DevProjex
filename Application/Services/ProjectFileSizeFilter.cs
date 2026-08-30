@@ -39,9 +39,29 @@ public static class ProjectFileSizeFilter
 		if (excludedFiles == 0)
 			return plan with { FileSizeFilter = summary };
 
-		var narrowed = selected.Count > 0
-			? await planner.ReprojectSelectionAsync(plan, selected, cancellationToken).ConfigureAwait(false)
-			: await planner.ReprojectEmptySelectionAsync(plan, cancellationToken).ConfigureAwait(false);
+		ProjectContextPlan narrowed;
+		if (selected.Count == 0)
+		{
+			narrowed = await planner
+				.ReprojectEmptySelectionAsync(plan, cancellationToken)
+				.ConfigureAwait(false);
+		}
+		else if (GitScopeSelection.IsMomentary(plan.Selection.GitMode ?? GitFilteringMode.None))
+		{
+			narrowed = await planner
+				.ReprojectSelectionAsync(
+					plan,
+					selected,
+					StringComparer.Ordinal,
+					cancellationToken)
+				.ConfigureAwait(false);
+		}
+		else
+		{
+			narrowed = await planner
+				.ReprojectSelectionAsync(plan, selected, cancellationToken)
+				.ConfigureAwait(false);
+		}
 		return narrowed with
 		{
 			Selection = plan.Selection,

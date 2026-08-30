@@ -439,7 +439,7 @@ public static class GitScopePresentationProjector
 			toggledRules,
 			cancellationToken,
 			variant: variant);
-		var affected = new HashSet<string>(PathComparer.Default);
+		var affected = new HashSet<string>(StringComparer.Ordinal);
 		for (var index = 1; index < inventory.Entries.Count; index++)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -563,7 +563,7 @@ public static class GitScopePresentationProjector
 		out int smartIgnoreEvidence)
 	{
 		var ownerPaths = new Dictionary<IgnoreDecisionOwner, HashSet<string>>();
-		var inventoriedFiles = new HashSet<string>(PathComparer.Default);
+		var inventoriedFiles = new HashSet<string>(StringComparer.Ordinal);
 		var inventoriedPathIdentities = getComparisonIdentity is null
 			? null
 			: new HashSet<string>(StringComparer.Ordinal);
@@ -726,7 +726,7 @@ public static class GitScopePresentationProjector
 			return;
 		if (!ownerPaths.TryGetValue(owner, out var paths))
 		{
-			paths = new HashSet<string>(PathComparer.Default);
+			paths = new HashSet<string>(StringComparer.Ordinal);
 			ownerPaths.Add(owner, paths);
 		}
 		paths.Add(path);

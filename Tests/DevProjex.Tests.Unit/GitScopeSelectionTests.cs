@@ -33,9 +33,17 @@ public sealed class GitScopeSelectionTests
 	public void TryParseRejectsInvalidDiffRanges(string token) =>
 		Assert.False(GitScopeSelection.TryParse(token, out _, out _));
 
+	[Fact]
+	public void TryParseRejectsTokensThatCannotFitPortableProcessArguments()
+	{
+		var token = GitScopeSelection.DiffPrefix +
+		            new string('a', GitScopeSelection.MaximumTokenLength) +
+		            "..HEAD";
+
+		Assert.False(GitScopeSelection.TryParse(token, out _, out _));
+	}
+
 	[Theory]
-	[InlineData(GitFilteringMode.Staged, IgnoreOptionId.TrackedGitFilesOnly)]
-	[InlineData(GitFilteringMode.Diff, IgnoreOptionId.TrackedGitFilesOnly)]
 	[InlineData(GitFilteringMode.Changes, IgnoreOptionId.UseGitIgnore)]
 	public void MomentaryModesUseTheRequiredScannerUnderlay(
 		GitFilteringMode mode,
@@ -50,12 +58,30 @@ public sealed class GitScopeSelectionTests
 	}
 
 	[Theory]
-	[InlineData(GitFilteringMode.None, GitFilteringMode.Staged, GitFilteringMode.TrackedFilesOnly)]
+	[InlineData(GitFilteringMode.Staged, null)]
+	[InlineData(GitFilteringMode.Diff, "main..feature")]
+	public void ReferenceBackedScopeDoesNotFilterAgainstTheCurrentIndexBeforeNarrowing(
+		GitFilteringMode mode,
+		string? diffRange)
+	{
+		var options = ProjectSelectionAdapter.ToIgnoreOptions(
+			ProjectSelectionSpec.Standard with
+			{
+				GitMode = mode,
+				GitDiffRange = diffRange
+			});
+
+		Assert.DoesNotContain(IgnoreOptionId.UseGitIgnore, options);
+		Assert.DoesNotContain(IgnoreOptionId.TrackedGitFilesOnly, options);
+	}
+
+	[Theory]
+	[InlineData(GitFilteringMode.None, GitFilteringMode.Staged, GitFilteringMode.None)]
 	[InlineData(GitFilteringMode.None, GitFilteringMode.Changes, GitFilteringMode.RespectGitIgnore)]
-	[InlineData(GitFilteringMode.None, GitFilteringMode.Diff, GitFilteringMode.TrackedFilesOnly)]
-	[InlineData(GitFilteringMode.RespectGitIgnore, GitFilteringMode.Staged, GitFilteringMode.TrackedFilesOnly)]
+	[InlineData(GitFilteringMode.None, GitFilteringMode.Diff, GitFilteringMode.None)]
+	[InlineData(GitFilteringMode.RespectGitIgnore, GitFilteringMode.Staged, GitFilteringMode.RespectGitIgnore)]
 	[InlineData(GitFilteringMode.RespectGitIgnore, GitFilteringMode.Changes, GitFilteringMode.RespectGitIgnore)]
-	[InlineData(GitFilteringMode.RespectGitIgnore, GitFilteringMode.Diff, GitFilteringMode.TrackedFilesOnly)]
+	[InlineData(GitFilteringMode.RespectGitIgnore, GitFilteringMode.Diff, GitFilteringMode.RespectGitIgnore)]
 	[InlineData(GitFilteringMode.TrackedFilesOnly, GitFilteringMode.Staged, GitFilteringMode.TrackedFilesOnly)]
 	[InlineData(GitFilteringMode.TrackedFilesOnly, GitFilteringMode.Changes, GitFilteringMode.TrackedFilesOnly)]
 	[InlineData(GitFilteringMode.TrackedFilesOnly, GitFilteringMode.Diff, GitFilteringMode.TrackedFilesOnly)]
@@ -156,6 +182,45 @@ public sealed class GitScopeSelectionTests
 		Assert.Contains("--cached", staged);
 		Assert.DoesNotContain("--cached", unstaged);
 		Assert.Contains("main..feature", compared);
+	}
+
+	[Fact]
+	public void GitScopeProcessDisablesFsMonitorAndLazyFetch()
+	{
+		var repositoryRoot = Path.GetFullPath("repository");
+		var startInfo = GitScopePathProvider.CreateStartInfo(
+			repositoryRoot,
+			GitScopePathProvider.CreateDiffArguments(cached: false, diffRange: null));
+		var arguments = startInfo.ArgumentList.ToArray();
+		var quotePathIndex = Array.IndexOf(arguments, "core.quotepath=false");
+		var fsMonitorIndex = Array.IndexOf(arguments, "core.fsmonitor=false");
+		var diffIndex = Array.IndexOf(arguments, "diff");
+
+		Assert.True(quotePathIndex > 0);
+		Assert.Equal("-c", arguments[quotePathIndex - 1]);
+		Assert.True(fsMonitorIndex > quotePathIndex);
+		Assert.Equal("-c", arguments[fsMonitorIndex - 1]);
+		Assert.True(diffIndex > fsMonitorIndex);
+		Assert.Contains(repositoryRoot, arguments);
+		Assert.Equal("0", startInfo.Environment["GIT_OPTIONAL_LOCKS"]);
+		Assert.Equal("1", startInfo.Environment["GIT_NO_LAZY_FETCH"]);
+	}
+
+	[Fact]
+	public void ChangesOutputBudgetIsAtomicAcrossConcurrentReaders()
+	{
+		var budget = new GitScopePathProvider.GitScopeOutputBudget(64);
+		var reservations = 0;
+
+		Parallel.For(0, 128, _ =>
+		{
+			if (budget.TryReserve(1))
+				Interlocked.Increment(ref reservations);
+		});
+
+		Assert.Equal(64, reservations);
+		Assert.Equal(0, budget.RemainingBytes);
+		Assert.False(budget.TryReserve(1));
 	}
 
 	[Fact]
@@ -276,6 +341,43 @@ public sealed class GitScopeSelectionTests
 
 		Assert.True(scope.ContainsPath(exactPath));
 		Assert.False(scope.ContainsPath(differentlyCasedPath));
+	}
+
+	[Fact]
+	public void TreeNarrowingPreservesCaseDistinctPathsForCaseSensitiveGit()
+	{
+		var rootPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "dpx-git-scope-case-tree"));
+		var upperPath = Path.Combine(rootPath, "Foo.cs");
+		var lowerPath = Path.Combine(rootPath, "foo.cs");
+		var root = new TreeNodeDescriptor(
+			"project",
+			rootPath,
+			true,
+			false,
+			"folder",
+			[
+				new TreeNodeDescriptor("Foo.cs", upperPath, false, false, "csharp", []),
+				new TreeNodeDescriptor("foo.cs", lowerPath, false, false, "csharp", [])
+			]);
+		var scope = new GitScopePathResult(
+			true,
+			new HashSet<string>([upperPath, lowerPath], StringComparer.Ordinal),
+			0,
+			PathMatchers:
+			[
+				new GitTrackedPathIndex(
+					rootPath,
+					["Foo.cs", "foo.cs"],
+					new GitPathComparisonSemantics(IgnoreCase: false, NormalizeUnicode: false))
+			]);
+
+		var narrowed = GitScopeFilter.ApplyToTree(
+			new BuildTreeResult(root, false, false, [upperPath, lowerPath]),
+			scope,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal([upperPath, lowerPath], narrowed.OrderedFilePaths, StringComparer.Ordinal);
+		Assert.Equal(["Foo.cs", "foo.cs"], narrowed.Root.Children.Select(static child => child.DisplayName));
 	}
 
 	[Fact]

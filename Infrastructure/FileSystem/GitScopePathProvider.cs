@@ -129,6 +129,7 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 		CancellationToken cancellationToken)
 	{
 		var comparisonSemantics = _pathComparisonSemanticsResolver.Resolve(repositoryRoot);
+		cancellationToken.ThrowIfCancellationRequested();
 		if (!comparisonSemantics.IsAuthoritative)
 			return RepositoryScopeResult.Unavailable("Git path comparison settings could not be resolved.");
 
@@ -145,18 +146,22 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 				];
 				break;
 			case GitFilteringMode.Changes:
+				var outputBudget = new GitScopeOutputBudget(MaximumOutputBytes);
 				var stagedTask = RunAsync(
 					repositoryRoot,
 					CreateDiffArguments(cached: true, diffRange: null),
-					cancellationToken);
+					cancellationToken,
+					outputBudget);
 				var unstagedTask = RunAsync(
 					repositoryRoot,
 					CreateDiffArguments(cached: false, diffRange: null),
-					cancellationToken);
+					cancellationToken,
+					outputBudget);
 				var untrackedTask = RunAsync(
 					repositoryRoot,
 					["ls-files", "--others", "--exclude-standard", "-z", "--"],
-					cancellationToken);
+					cancellationToken,
+					outputBudget);
 				outputs = await Task.WhenAll(stagedTask, unstagedTask, untrackedTask)
 					.ConfigureAwait(false);
 				break;
@@ -430,7 +435,8 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 	private static async Task<GitCommandOutput> RunAsync(
 		string repositoryRoot,
 		IReadOnlyList<string> commandArguments,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		GitScopeOutputBudget? outputBudget = null)
 	{
 		using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 		timeoutSource.CancelAfter(CommandTimeout);
@@ -462,7 +468,8 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 				TryTerminate(process);
 			},
 			MaximumOutputBytes,
-			MaximumPathLength);
+			MaximumPathLength,
+			outputBudget is null ? null : outputBudget.TryReserve);
 		var errorTask = DrainAsync(process.StandardError, timeoutSource.Token);
 		try
 		{
@@ -499,16 +506,18 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 		}
 	}
 
-	private static ProcessStartInfo CreateStartInfo(
+	internal static ProcessStartInfo CreateStartInfo(
 		string repositoryRoot,
 		IReadOnlyList<string> commandArguments)
 	{
-		var arguments = new List<string>(commandArguments.Count + 4)
+		var arguments = new List<string>(commandArguments.Count + 6)
 		{
 			"-C",
 			repositoryRoot,
 			"-c",
-			"core.quotepath=false"
+			"core.quotepath=false",
+			"-c",
+			"core.fsmonitor=false"
 		};
 		arguments.AddRange(commandArguments);
 		var startInfo = GitProcessStartInfoFactory.Create(repositoryRoot, arguments);
@@ -516,7 +525,38 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 			encoderShouldEmitUTF8Identifier: false,
 			throwOnInvalidBytes: false);
 		startInfo.Environment["GIT_OPTIONAL_LOCKS"] = "0";
+		startInfo.Environment["GIT_NO_LAZY_FETCH"] = "1";
 		return startInfo;
+	}
+
+	internal sealed class GitScopeOutputBudget
+	{
+		private long _remainingBytes;
+
+		public GitScopeOutputBudget(long maximumBytes)
+		{
+			if (maximumBytes <= 0)
+				throw new ArgumentOutOfRangeException(nameof(maximumBytes));
+
+			_remainingBytes = maximumBytes;
+		}
+
+		internal long RemainingBytes => Volatile.Read(ref _remainingBytes);
+
+		public bool TryReserve(long bytes)
+		{
+			if (bytes <= 0)
+				throw new ArgumentOutOfRangeException(nameof(bytes));
+
+			while (true)
+			{
+				var remaining = Volatile.Read(ref _remainingBytes);
+				if (remaining < bytes)
+					return false;
+				if (Interlocked.CompareExchange(ref _remainingBytes, remaining - bytes, remaining) == remaining)
+					return true;
+			}
+		}
 	}
 
 	private static async Task DrainAsync(StreamReader reader, CancellationToken cancellationToken)

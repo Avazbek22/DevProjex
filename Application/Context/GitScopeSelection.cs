@@ -3,6 +3,7 @@ namespace DevProjex.Application.Context;
 public static class GitScopeSelection
 {
 	public const string DiffPrefix = "diff:";
+	public const int MaximumTokenLength = 4096;
 
 	public static ProjectSelectionSpec WithMode(
 		ProjectSelectionSpec selection,
@@ -36,8 +37,9 @@ public static class GitScopeSelection
 
 	public static GitFilteringMode ToUnderlayMode(GitFilteringMode mode) => mode switch
 	{
-		GitFilteringMode.Staged or GitFilteringMode.Diff => GitFilteringMode.TrackedFilesOnly,
+		GitFilteringMode.Staged => GitFilteringMode.None,
 		GitFilteringMode.Changes => GitFilteringMode.RespectGitIgnore,
+		GitFilteringMode.Diff => GitFilteringMode.None,
 		_ => mode
 	};
 
@@ -88,6 +90,8 @@ public static class GitScopeSelection
 			return false;
 
 		var normalized = token.Trim();
+		if (normalized.Length > MaximumTokenLength)
+			return false;
 		if (normalized.Equals("none", StringComparison.OrdinalIgnoreCase) ||
 		    normalized.Equals("off", StringComparison.OrdinalIgnoreCase))
 		{

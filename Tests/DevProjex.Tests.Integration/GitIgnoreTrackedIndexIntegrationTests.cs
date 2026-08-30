@@ -668,6 +668,68 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 	}
 
 	[Fact]
+	public async Task DiffProjectPlanKeepsAComparedPathThatIsAbsentFromTheCurrentIndex()
+	{
+		EnsureGitAvailable();
+		using var temp = new TemporaryDirectory();
+		var repositoryRoot = temp.CreateDirectory("repo");
+		temp.CreateFile("repo/recreated.txt", "base\n");
+		InitializeCommittedRepository(repositoryRoot, "recreated.txt");
+		var baseCommit = RunGit(repositoryRoot, "rev-parse", "HEAD").Trim();
+		File.WriteAllText(Path.Combine(repositoryRoot, "recreated.txt"), "compared\n");
+		RunGit(repositoryRoot, "add", "--", "recreated.txt");
+		RunGit(repositoryRoot, "commit", "--quiet", "-m", "compared");
+		var comparedCommit = RunGit(repositoryRoot, "rev-parse", "HEAD").Trim();
+		RunGit(repositoryRoot, "rm", "--quiet", "--", "recreated.txt");
+		RunGit(repositoryRoot, "commit", "--quiet", "-m", "current deletion");
+		var recreatedPath = PathUtility.Normalize(
+			temp.CreateFile("repo/recreated.txt", "current working tree\n"));
+		var planner = new ProjectContextPlanner(CreateProjectAnalysisService());
+
+		var plan = await planner.BuildStructureAsync(
+			new ProjectContextRequest(
+				repositoryRoot,
+				ProjectSelectionSpec.Standard with
+				{
+					GitMode = GitFilteringMode.Diff,
+					GitDiffRange = $"{baseCommit}..{comparedCommit}"
+				}),
+			TestContext.Current.CancellationToken);
+		var scopedPlan = await GitScopeFilter.ApplyAsync(
+			planner,
+			plan,
+			new GitScopePathProvider(),
+			TestContext.Current.CancellationToken);
+
+		Assert.False(scopedPlan.HasErrors);
+		Assert.Equal(recreatedPath, Assert.Single(scopedPlan.IncludedFiles), PathComparer.Default);
+		Assert.DoesNotContain(
+			scopedPlan.Diagnostics,
+			static diagnostic => diagnostic.Code == GitScopeFilter.DeletedDiagnosticCode);
+	}
+
+	[Fact]
+	public async Task CaseDistinctDotGitNameDoesNotCreateARepositoryBoundary()
+	{
+		using var temp = new TemporaryDirectory();
+		var projectRoot = temp.CreateDirectory("project");
+		temp.CreateDirectory("project/.GIT");
+		temp.CreateFile("project/App.cs", "class App {}\n");
+		if (Directory.Exists(Path.Combine(projectRoot, ".git")))
+		{
+			Assert.Skip("The temporary file system is case-insensitive.");
+			return;
+		}
+		var planner = new ProjectContextPlanner(CreateProjectAnalysisService());
+
+		var plan = await planner.BuildStructureAsync(
+			new ProjectContextRequest(projectRoot, ProjectSelectionSpec.Standard),
+			TestContext.Current.CancellationToken);
+
+		Assert.False(plan.GitReadiness.HasRepositoryBoundary);
+	}
+
+	[Fact]
 	public async Task StagedScopeUnionsFilesFromAllDiscoveredNestedRepositories()
 	{
 		EnsureGitAvailable();

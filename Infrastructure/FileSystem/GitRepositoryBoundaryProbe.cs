@@ -7,4 +7,8 @@ public static class GitRepositoryBoundaryProbe
 			projectPath,
 			CancellationToken.None,
 			out _);
+
+	internal static bool ExistsAt(string directoryPath) =>
+		GitTrackedPathIndexCache.TryMetadataEntryEstablishesBoundary(
+			Path.Combine(directoryPath, ".git"));
 }

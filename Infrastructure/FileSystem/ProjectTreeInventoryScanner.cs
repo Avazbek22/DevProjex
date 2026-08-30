@@ -486,8 +486,11 @@ internal static class ProjectTreeInventoryScanner
 		{
 			if (!entry.IsDirectory && PathComparer.Default.Equals(entry.Name, ".gitignore"))
 				gitIgnorePath = entry.FullPath;
-			else if (PathComparer.Default.Equals(entry.Name, ".git"))
-				gitMetadataPath = entry.FullPath;
+			else if (PathComparer.Default.Equals(entry.Name, ".git") &&
+			         GitRepositoryBoundaryProbe.ExistsAt(Path.GetDirectoryName(entry.FullPath)!))
+			{
+				gitMetadataPath = Path.Combine(Path.GetDirectoryName(entry.FullPath)!, ".git");
+			}
 
 			if (gitIgnorePath is not null && gitMetadataPath is not null)
 				break;

@@ -255,8 +255,9 @@ public sealed class IgnoreSelectionStateTests
 	}
 
 	[Theory]
-	[InlineData(GitFilteringMode.Staged, GitFilteringMode.TrackedFilesOnly)]
+	[InlineData(GitFilteringMode.Staged, GitFilteringMode.None)]
 	[InlineData(GitFilteringMode.Changes, GitFilteringMode.RespectGitIgnore)]
+	[InlineData(GitFilteringMode.Diff, GitFilteringMode.None)]
 	public void RefreshAndRollbackPreserveMomentaryModeOverItsScannerUnderlay(
 		GitFilteringMode momentary,
 		GitFilteringMode underlay)

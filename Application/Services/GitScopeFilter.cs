@@ -204,21 +204,29 @@ public static class GitScopeFilter
 			scopedFilePaths,
 			scopedFilePaths.Count == 0,
 			knownFullTreeFilePaths: null,
-			cancellationToken).ProjectedTree;
+			cancellationToken,
+			StringComparer.Ordinal).ProjectedTree;
 
-		var selected = new List<string>(Math.Min(plan.IncludedFiles.Count, scope.IncludedPaths.Count));
-		foreach (var path in plan.IncludedFiles)
+		var selectedFiles = RetainExactFilePaths(
+			plan.ProjectedTree,
+			scope,
+			cancellationToken);
+		var selected = new List<string>(selectedFiles.Count);
+		foreach (var path in selectedFiles)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			if (scope.ContainsPath(path))
-				selected.Add(PathUtility.GetPortableRelativePath(plan.SourceRoot, path));
+			selected.Add(PathUtility.GetPortableRelativePath(plan.SourceRoot, path));
 		}
 
 		ProjectContextPlan narrowed;
 		if (selected.Count > 0)
 		{
 			narrowed = await planner
-				.ReprojectSelectionAsync(scopedBaseline, selected, cancellationToken)
+				.ReprojectSelectionAsync(
+					scopedBaseline,
+					selected,
+					StringComparer.Ordinal,
+					cancellationToken)
 				.ConfigureAwait(false);
 		}
 		else
@@ -271,7 +279,8 @@ public static class GitScopeFilter
 			scopedFilePaths,
 			scopedFilePaths.Count == 0,
 			knownFullTreeFilePaths: null,
-			cancellationToken);
+			cancellationToken,
+			StringComparer.Ordinal);
 		return tree with
 		{
 			Root = projection.ProjectedTree,
@@ -287,7 +296,7 @@ public static class GitScopeFilter
 		if (scope.IncludedPaths.Count == 0)
 			return scope.IncludedPaths;
 
-		var files = new HashSet<string>(PathComparer.Default);
+		var files = new HashSet<string>(StringComparer.Ordinal);
 		var pending = new Stack<TreeNodeDescriptor>();
 		pending.Push(root);
 		while (pending.Count > 0)
