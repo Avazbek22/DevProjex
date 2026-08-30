@@ -21,7 +21,12 @@ public partial class MainWindow
 			return result;
 
 		var scope = input.GitScope ?? _gitScopePathProvider
-			.ResolveAsync(input.CurrentPath, input.GitMode, diffRange: null, cancellationToken)
+			.ResolveAsync(
+				input.CurrentPath,
+				input.GitMode,
+				diffRange: null,
+				GitScopeFilter.GetDiscoveredRepositoryRoots(result.Inventory),
+				cancellationToken)
 			.GetAwaiter()
 			.GetResult();
 		if (!scope.IsAvailable)
@@ -48,7 +53,7 @@ public partial class MainWindow
 			GitScopePresentation = input.GitScopePresentation ?? GitScopePresentationProjector.Build(
 				input.CurrentPath,
 				result.Inventory,
-				scope.IncludedPaths,
+				scope,
 				input.Options.AllowedRootFolders,
 				input.AvailableRootFolders ?? input.Options.AllowedRootFolders,
 				input.EffectiveExtensionPolicy,

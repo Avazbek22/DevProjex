@@ -51,6 +51,7 @@ public sealed partial class SelectionSyncCoordinator(
     private IgnoreOptionCounts _ignoreOptionCounts;
     private IgnoreControllerImpactCounts _ignoreControllerImpactCounts;
 	private GitWorkspaceEvidence _gitWorkspaceEvidence;
+	private bool _gitRepositoryBoundaryKnownAbsent;
 	private int _gitCliAvailability = gitAvailabilityResolver is null ? 1 : 0;
 	private bool _selectionPersistenceBlockedByIncompleteScan;
 
@@ -847,6 +848,26 @@ public sealed partial class SelectionSyncCoordinator(
 			return false;
 
 		_pendingGitScopeRefresh = null;
+		if (!snapshot.HadScanFailure &&
+		    !snapshot.GitEvidence.HasRepositoryBoundary &&
+		    GitScopeSelection.IsMomentary(_session.IgnoreOptions.ActiveGitFilteringMode))
+		{
+			_gitWorkspaceEvidence = snapshot.GitEvidence;
+			_gitRepositoryBoundaryKnownAbsent = true;
+			_stableSelectionSnapshot = null;
+			_reversibleSelectionSnapshot = null;
+			Interlocked.Increment(ref _ignoreOptionsVersion);
+
+			var fallbackMode = ResolveGitFilteringModeAfterRepositoryLoss();
+			HandleGitFilteringModeChanged(fallbackMode, projectPath);
+			viewModel.RefreshGitFilteringModes(
+				repositoryAvailable: false,
+				fallbackMode);
+			_ignoreOptionsProjectPath = projectPath;
+			gitScopeUnavailable?.Invoke(projectPath, unavailableScope);
+			return true;
+		}
+
 		if (_stableSelectionSnapshot is { } stable &&
 		    PathComparer.Default.Equals(stable.Path, projectPath))
 		{
@@ -861,6 +882,11 @@ public sealed partial class SelectionSyncCoordinator(
 		gitScopeUnavailable?.Invoke(projectPath, unavailableScope);
 		return true;
 	}
+
+	private GitFilteringMode ResolveGitFilteringModeAfterRepositoryLoss() =>
+		_session.IgnoreOptions.PreferredGitFilteringMode == GitFilteringMode.RespectGitIgnore
+			? GitFilteringMode.RespectGitIgnore
+			: GitFilteringMode.None;
 
 	private void SynchronizeStableGitScopePresentation()
 	{
@@ -1478,6 +1504,7 @@ public sealed partial class SelectionSyncCoordinator(
         _ignoreOptionCounts = IgnoreOptionCounts.Empty;
         _ignoreControllerImpactCounts = IgnoreControllerImpactCounts.Empty;
         _gitWorkspaceEvidence = GitWorkspaceEvidence.Empty;
+		_gitRepositoryBoundaryKnownAbsent = false;
 		_selectionPersistenceBlockedByIncompleteScan = false;
         _stableSelectionSnapshot = null;
         _reversibleSelectionSnapshot = null;
@@ -2373,6 +2400,8 @@ public sealed partial class SelectionSyncCoordinator(
         try
         {
             _gitWorkspaceEvidence = snapshot.GitEvidence;
+			if (snapshot.GitEvidence.HasRepositoryBoundary)
+				_gitRepositoryBoundaryKnownAbsent = false;
             if (snapshot.RootOptions is not null)
                 ApplyScanRootOptions(snapshot.RootOptions);
 
@@ -2662,6 +2691,8 @@ public sealed partial class SelectionSyncCoordinator(
         try
         {
             _gitWorkspaceEvidence = snapshot.GitEvidence;
+			if (snapshot.GitEvidence.HasRepositoryBoundary)
+				_gitRepositoryBoundaryKnownAbsent = false;
             ApplyScanRootOptions(snapshot.ScanRootOptions);
             ApplyExtensionOptions(
                 snapshot.ExtensionOptions,
@@ -3264,17 +3295,26 @@ public sealed partial class SelectionSyncCoordinator(
 			return snapshot;
 		}
 
-		var scope = await gitScopePathProvider
-			.ResolveAsync(context.Path, context.GitMode, context.GitDiffRange, cancellationToken)
-			.ConfigureAwait(false);
-		if (!scope.IsAvailable)
-			return snapshot with { GitScope = scope };
-
 		var rootOptions = snapshot.RootOptions ?? context.CurrentRootOptions ?? [];
 		var selectedRoots = rootOptions
 			.Where(static option => option.IsChecked)
 			.Select(static option => option.Name)
 			.ToHashSet(PathComparer.Default);
+		var scope = await gitScopePathProvider
+			.ResolveAsync(
+				context.Path,
+				context.GitMode,
+				context.GitDiffRange,
+				GitScopeFilter.GetDiscoveredRepositoryRoots(
+					snapshot.TreeInventory,
+					context.Path,
+					selectedRoots,
+					context.RootSelectionIsExplicit),
+				cancellationToken)
+			.ConfigureAwait(false);
+		if (!scope.IsAvailable)
+			return snapshot with { GitScope = scope };
+
 		var availableRoots = rootOptions
 			.Select(static option => option.Name)
 			.ToHashSet(PathComparer.Default);
@@ -3284,7 +3324,7 @@ public sealed partial class SelectionSyncCoordinator(
 			GitScopePresentation = GitScopePresentationProjector.Build(
 				context.Path,
 				snapshot.TreeInventory,
-				scope.IncludedPaths,
+				scope,
 				selectedRoots,
 				availableRoots,
 				ExtensionInclusionPolicyFactory.Create(context),
@@ -3700,6 +3740,7 @@ public sealed partial class SelectionSyncCoordinator(
 
 	private bool HasGitFilteringRepositoryAvailability() =>
 		Volatile.Read(ref _gitCliAvailability) > 0 &&
+		!_gitRepositoryBoundaryKnownAbsent &&
 		(_gitWorkspaceEvidence.HasRepositoryBoundary ||
 		 _ignoreOptions.Any(static option => option.Id == IgnoreOptionId.TrackedGitFilesOnly));
 

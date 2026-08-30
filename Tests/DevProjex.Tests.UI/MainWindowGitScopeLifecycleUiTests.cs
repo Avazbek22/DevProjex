@@ -155,6 +155,74 @@ public sealed class MainWindowGitScopeLifecycleUiTests
 	}
 
 	[AvaloniaFact]
+	public async Task NestedRepositoryScopesRemainAvailableAndProjectTheirGitState()
+	{
+		EnsureGitAvailable();
+		using var project = UiTestProject.CreateDefault();
+		var nestedRoot = Path.Combine(project.RootPath, "nested-repository");
+		Directory.CreateDirectory(nestedRoot);
+		await File.WriteAllTextAsync(
+			Path.Combine(nestedRoot, "Baseline.cs"),
+			"class Baseline {}\n",
+			TestContext.Current.CancellationToken);
+		InitializeRepository(nestedRoot);
+		await File.WriteAllTextAsync(
+			Path.Combine(nestedRoot, "Staged.cs"),
+			"class Staged {}\n",
+			TestContext.Current.CancellationToken);
+		RunGit(nestedRoot, "add", "--", "Staged.cs");
+		await File.WriteAllTextAsync(
+			Path.Combine(nestedRoot, "Untracked.txt"),
+			"untracked\n",
+			TestContext.Current.CancellationToken);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+		try
+		{
+			Assert.Contains(
+				UiTestDriver.GetViewModel(window).GitFilteringModes,
+				static option => option.Mode == GitFilteringMode.Staged);
+			Assert.Contains(
+				UiTestDriver.GetViewModel(window).GitFilteringModes,
+				static option => option.Mode == GitFilteringMode.Changes);
+
+			await SelectAndApplyGitModeAsync(window, GitFilteringMode.Staged);
+			Assert.Equal(
+				GitFilteringMode.Staged,
+				UiTestDriver.GetViewModel(window).SelectedGitFilteringModeOption?.Mode);
+			await WaitForProjectTreePathStateAsync(
+				window,
+				exists: true,
+				"nested-repository",
+				"Staged.cs");
+			await WaitForProjectTreePathStateAsync(
+				window,
+				exists: false,
+				"nested-repository",
+				"Untracked.txt");
+
+			await SelectAndApplyGitModeAsync(window, GitFilteringMode.Changes);
+			Assert.Equal(
+				GitFilteringMode.Changes,
+				UiTestDriver.GetViewModel(window).SelectedGitFilteringModeOption?.Mode);
+			await WaitForProjectTreePathStateAsync(
+				window,
+				exists: true,
+				"nested-repository",
+				"Staged.cs");
+			await WaitForProjectTreePathStateAsync(
+				window,
+				exists: true,
+				"nested-repository",
+				"Untracked.txt");
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task GitModeRefreshMatrix_ReconcilesExternalStateAndRemembersUncheckedExtension()
 	{
 		EnsureGitAvailable();
@@ -498,6 +566,67 @@ public sealed class MainWindowGitScopeLifecycleUiTests
 		finally
 		{
 			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaTheory]
+	[InlineData(GitFilteringMode.RespectGitIgnore, GitFilteringMode.RespectGitIgnore)]
+	[InlineData(GitFilteringMode.TrackedFilesOnly, GitFilteringMode.None)]
+	public async Task RemovedRepositoryDuringMomentaryScope_FallsBackToAvailablePersistentMode(
+		GitFilteringMode preferredMode,
+		GitFilteringMode expectedFallback)
+	{
+		EnsureGitAvailable();
+		using var project = UiTestProject.CreateWithCleanGitAndSmartWorkspace();
+		InitializeRepository(project.RootPath);
+		var stagedPath = Path.Combine(project.RootPath, "Staged.cs");
+		var fallbackPath = Path.Combine(project.RootPath, "Fallback.cs");
+		await File.WriteAllTextAsync(
+			stagedPath,
+			"class Staged {}\n",
+			TestContext.Current.CancellationToken);
+		await File.WriteAllTextAsync(
+			fallbackPath,
+			"class Fallback {}\n",
+			TestContext.Current.CancellationToken);
+		RunGit(project.RootPath, "add", "--", "Staged.cs");
+		var provider = RecordingGitScopePathProvider.Available([stagedPath]);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			configureServices: services => services with { GitScopePathProvider = provider });
+		var detachedGitPath = Path.Combine(
+			Path.GetTempPath(),
+			$"devprojex-git-metadata-{Guid.NewGuid():N}");
+
+		try
+		{
+			if (UiTestDriver.GetViewModel(window).SelectedGitFilteringModeOption?.Mode != preferredMode)
+				await SelectAndApplyGitModeAsync(window, preferredMode);
+			await SelectAndApplyGitModeAsync(window, GitFilteringMode.Staged);
+			await WaitForProjectTreePathStateAsync(window, exists: true, "Staged.cs");
+			await WaitForProjectTreePathStateAsync(window, exists: false, "Fallback.cs");
+			var providerCallCount = provider.CallCount;
+
+			Directory.Move(Path.Combine(project.RootPath, ".git"), detachedGitPath);
+			provider.SetAvailable(false);
+			await RefreshProjectSelectionAsync(window, project.RootPath);
+			await UiTestDriver.ClickApplySettingsAsync(window);
+			await WaitForProjectTreePathStateAsync(window, exists: true, "Fallback.cs");
+
+			var viewModel = UiTestDriver.GetViewModel(window);
+			Assert.Equal(providerCallCount + 1, provider.CallCount);
+			Assert.Equal(expectedFallback, viewModel.SelectedGitFilteringModeOption?.Mode);
+			Assert.Collection(
+				viewModel.GitFilteringModes,
+				static option => Assert.Equal(GitFilteringMode.None, option.Mode),
+				static option => Assert.Equal(GitFilteringMode.RespectGitIgnore, option.Mode));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+			var projectGitPath = Path.Combine(project.RootPath, ".git");
+			if (Directory.Exists(detachedGitPath) && !Directory.Exists(projectGitPath))
+				Directory.Move(detachedGitPath, projectGitPath);
 		}
 	}
 
