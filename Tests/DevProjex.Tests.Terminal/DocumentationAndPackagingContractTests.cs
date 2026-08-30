@@ -253,10 +253,10 @@ public sealed class DocumentationAndPackagingContractTests
 		foreach (var descriptor in ProjectPresentationCatalog.GitFiltering)
 		{
 			Assert.Matches(
-				$@"(?m)^\| `{Regex.Escape(descriptor.Token)}` \|[^\r\n]+$",
+				$@"(?m)^\| `{Regex.Escape(descriptor.Token)}` \|[^\r\n]+\r?$",
 				documentation);
 		}
-		Assert.Matches(@"(?m)^\| `diff:<REF>\.\.<REF>` \|[^\r\n]+$", documentation);
+		Assert.Matches(@"(?m)^\| `diff:<REF>\.\.<REF>` \|[^\r\n]+\r?$", documentation);
 		Assert.DoesNotContain("Git checkbox", documentation, StringComparison.OrdinalIgnoreCase);
 		Assert.DoesNotContain("two Git modes as checkboxes", documentation, StringComparison.OrdinalIgnoreCase);
 	}
