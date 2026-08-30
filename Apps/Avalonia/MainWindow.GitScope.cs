@@ -20,12 +20,19 @@ public partial class MainWindow
 		if (!GitScopeSelection.IsMomentary(input.GitMode))
 			return result;
 
+		var availableRootFolders = input.AvailableRootFolders ?? input.Options.AllowedRootFolders;
+		var rootSelectionIsExplicit = input.AvailableRootFolders is not null &&
+		                              !input.Options.AllowedRootFolders.SetEquals(availableRootFolders);
 		var scope = input.GitScope ?? _gitScopePathProvider
 			.ResolveAsync(
 				input.CurrentPath,
 				input.GitMode,
 				diffRange: null,
-				GitScopeFilter.GetDiscoveredRepositoryRoots(result.Inventory),
+				GitScopeFilter.GetDiscoveredRepositoryRoots(
+					result.Inventory,
+					input.CurrentPath,
+					input.Options.AllowedRootFolders,
+					rootSelectionIsExplicit),
 				cancellationToken)
 			.GetAwaiter()
 			.GetResult();
@@ -55,10 +62,11 @@ public partial class MainWindow
 				result.Inventory,
 				scope,
 				input.Options.AllowedRootFolders,
-				input.AvailableRootFolders ?? input.Options.AllowedRootFolders,
+				availableRootFolders,
 				input.EffectiveExtensionPolicy,
 				input.Options.IgnoreRules,
-				cancellationToken)
+				cancellationToken,
+				rootSelectionIsExplicit)
 		};
 	}
 

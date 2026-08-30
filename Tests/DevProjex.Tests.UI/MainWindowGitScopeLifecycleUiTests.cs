@@ -223,6 +223,124 @@ public sealed class MainWindowGitScopeLifecycleUiTests
 	}
 
 	[AvaloniaFact]
+	public async Task ScopedPresentationExcludesFilesAndImpactCountsFromUncheckedTopLevelRoot()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var selectedRoot = Path.Combine(project.RootPath, "selected-root");
+		var excludedRoot = Path.Combine(project.RootPath, "excluded-root");
+		Directory.CreateDirectory(selectedRoot);
+		Directory.CreateDirectory(excludedRoot);
+		var includedPath = Path.Combine(selectedRoot, "Included.cs");
+		var excludedExtensionPath = Path.Combine(excludedRoot, "Only.xyz");
+		var excludedDotFilePath = Path.Combine(excludedRoot, ".scoped-noise");
+		await File.WriteAllTextAsync(
+			includedPath,
+			"class Included {}\n",
+			TestContext.Current.CancellationToken);
+		await File.WriteAllTextAsync(
+			excludedExtensionPath,
+			"excluded\n",
+			TestContext.Current.CancellationToken);
+		await File.WriteAllTextAsync(
+			excludedDotFilePath,
+			"excluded dot file\n",
+			TestContext.Current.CancellationToken);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+		try
+		{
+			var host = (IRefreshTreePipelineHost)window;
+			var broadInput = Assert.IsType<TreeRefreshInput>(host.CaptureTreeRefreshInput(true));
+			var initialResult = host.BuildTree(broadInput, TestContext.Current.CancellationToken);
+			var inventory = Assert.IsType<ProjectTreeInventorySnapshot>(initialResult.Inventory);
+			Assert.Contains(
+				inventory.Entries,
+				entry => PathComparer.Default.Equals(entry.FullPath, excludedExtensionPath));
+
+			var selectedRoots = new HashSet<string>(["selected-root"], PathComparer.Default);
+			var availableRoots = new HashSet<string>(
+				["selected-root", "excluded-root"],
+				PathComparer.Default);
+			var scopedPaths = new HashSet<string>(
+				[includedPath, excludedExtensionPath, excludedDotFilePath],
+				PathComparer.Default);
+			var scopedInput = broadInput with
+			{
+				Options = broadInput.Options with { AllowedRootFolders = availableRoots },
+				GitMode = GitFilteringMode.Staged,
+				GitScope = new GitScopePathResult(
+					true,
+					scopedPaths,
+					DeletedPathCount: 0),
+				GitScopePresentation = null,
+				AvailableRootFolders = availableRoots,
+				TreeInventory = inventory
+			};
+
+			var broadResult = host.BuildTree(scopedInput, TestContext.Current.CancellationToken);
+			var broadProjection = Assert.IsType<GitScopePresentationProjection>(broadResult.GitScopePresentation);
+			Assert.Contains(
+				broadProjection.AvailableExtensions,
+				static extension => string.Equals(extension, ".xyz", StringComparison.OrdinalIgnoreCase));
+			Assert.True(broadProjection.IgnoreOptionCounts.DotFiles > 0);
+
+			var restrictedResult = host.BuildTree(
+				scopedInput with
+				{
+					Options = scopedInput.Options with { AllowedRootFolders = selectedRoots }
+				},
+				TestContext.Current.CancellationToken);
+			var restrictedProjection = Assert.IsType<GitScopePresentationProjection>(
+				restrictedResult.GitScopePresentation);
+			Assert.Contains(
+				restrictedProjection.AvailableExtensions,
+				static extension => string.Equals(extension, ".cs", StringComparison.OrdinalIgnoreCase));
+			Assert.DoesNotContain(
+				restrictedProjection.AvailableExtensions,
+				static extension => string.Equals(extension, ".xyz", StringComparison.OrdinalIgnoreCase));
+			Assert.Equal(0, restrictedProjection.IgnoreOptionCounts.DotFiles);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task RepositoryCreatedAfterOpenEnablesMomentaryModesAfterRefresh()
+	{
+		EnsureGitAvailable();
+		using var project = UiTestProject.CreateWithCleanGitAndSmartWorkspace();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+		try
+		{
+			Assert.DoesNotContain(
+				UiTestDriver.GetViewModel(window).GitFilteringModes,
+				static option => option.Mode is GitFilteringMode.Staged or GitFilteringMode.Changes);
+
+			InitializeRepository(project.RootPath);
+			var stagedPath = Path.Combine(project.RootPath, "CreatedAfterOpen.cs");
+			await File.WriteAllTextAsync(
+				stagedPath,
+				"class CreatedAfterOpen {}\n",
+				TestContext.Current.CancellationToken);
+			RunGit(project.RootPath, "add", "--", "CreatedAfterOpen.cs");
+			await UiTestDriver.RefreshProjectAsync(window);
+
+			var modes = UiTestDriver.GetViewModel(window).GitFilteringModes;
+			Assert.Contains(modes, static option => option.Mode == GitFilteringMode.Staged);
+			Assert.Contains(modes, static option => option.Mode == GitFilteringMode.Changes);
+			await SelectAndApplyGitModeAsync(window, GitFilteringMode.Staged);
+			await WaitForProjectTreePathStateAsync(window, exists: true, "CreatedAfterOpen.cs");
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task GitModeRefreshMatrix_ReconcilesExternalStateAndRemembersUncheckedExtension()
 	{
 		EnsureGitAvailable();

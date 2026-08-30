@@ -3300,6 +3300,8 @@ public sealed partial class SelectionSyncCoordinator(
 			.Where(static option => option.IsChecked)
 			.Select(static option => option.Name)
 			.ToHashSet(PathComparer.Default);
+		var rootSelectionIsExplicit = context.RootSelectionIsExplicit ||
+		                              rootOptions.Any(static option => !option.IsChecked);
 		var scope = await gitScopePathProvider
 			.ResolveAsync(
 				context.Path,
@@ -3309,7 +3311,7 @@ public sealed partial class SelectionSyncCoordinator(
 					snapshot.TreeInventory,
 					context.Path,
 					selectedRoots,
-					context.RootSelectionIsExplicit),
+					rootSelectionIsExplicit),
 				cancellationToken)
 			.ConfigureAwait(false);
 		if (!scope.IsAvailable)
@@ -3329,7 +3331,8 @@ public sealed partial class SelectionSyncCoordinator(
 				availableRoots,
 				ExtensionInclusionPolicyFactory.Create(context),
 				snapshot.EffectiveRules,
-				cancellationToken)
+				cancellationToken,
+				rootSelectionIsExplicit)
 		};
 	}
 
