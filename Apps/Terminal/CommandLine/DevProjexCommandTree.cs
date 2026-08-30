@@ -729,11 +729,11 @@ public sealed class DevProjexCommandTree
 							services!,
 							selectedPaths,
 							cancellationToken).ConfigureAwait(false);
-						var readinessExitCode = ValidateDesktopOpenGitReadiness(
+						var readinessExitCode = await ValidateDesktopOpenGitReadinessAsync(
 							services!,
 							projectPath,
 							spec,
-							cancellationToken);
+							cancellationToken).ConfigureAwait(false);
 						if (readinessExitCode is not null)
 							return readinessExitCode.Value;
 					}
@@ -2041,50 +2041,24 @@ public sealed class DevProjexCommandTree
 		selection.AllSymbols.Any(symbol =>
 			result.GetResult(symbol) is { Implicit: false });
 
-	private int? ValidateDesktopOpenGitReadiness(
+	private async Task<int?> ValidateDesktopOpenGitReadinessAsync(
 		TerminalServices services,
 		string projectPath,
 		ProjectSelectionSpec selection,
 		CancellationToken cancellationToken)
 	{
-		if (selection.GitMode is not (GitFilteringMode.TrackedFilesOnly or
-			GitFilteringMode.Staged or GitFilteringMode.Changes))
-			return null;
-
-		var loaded = services.AnalysisService.Load(
-			new ProjectAnalysisRequest(
-				projectPath,
-				selection.Roots,
-				selection.Extensions,
-				ProjectSelectionAdapter.ToIgnoreOptions(selection)),
-			cancellationToken);
-		ContextDiagnostic? diagnostic;
-		if (selection.GitMode == GitFilteringMode.TrackedFilesOnly)
-		{
-			var readiness = ProjectContextGitReadiness.Evaluate(
-				GitFilteringMode.TrackedFilesOnly,
-				loaded.DiscoveredGitTrackedIndexCount,
-				loaded.UnavailableGitTrackedIndexCount);
-			diagnostic = readiness.CreateDiagnostic(PathUtility.Normalize(projectPath));
-		}
-		else
-		{
-			diagnostic = loaded.DiscoveredGitTrackedIndexCount > 0
-				? null
-				: new ContextDiagnostic(
-					GitScopeFilter.UnavailableDiagnosticCode,
-					ContextDiagnosticSeverity.Error,
-					"The requested Git state is unavailable.",
-					PathUtility.Normalize(projectPath));
-		}
-		if (diagnostic is null)
+		var diagnostics = await DesktopOpenGitReadinessValidator
+			.ValidateAsync(services, projectPath, selection, cancellationToken)
+			.ConfigureAwait(false);
+		if (diagnostics.Count == 0)
 			return null;
 
 		new ContextDiagnosticRenderer(
 			environment,
 			new TerminalOutputOptions(),
-			services.Localization).Write([diagnostic]);
-		return diagnostic.Severity == ContextDiagnosticSeverity.Error
+			services.Localization).Write(diagnostics);
+		return diagnostics.Any(static diagnostic =>
+			diagnostic.Severity == ContextDiagnosticSeverity.Error)
 			? CommandLineExitCodes.PolicyFailure
 			: null;
 	}

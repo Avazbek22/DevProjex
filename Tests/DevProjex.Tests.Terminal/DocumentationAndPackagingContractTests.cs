@@ -1,6 +1,8 @@
 using System.CommandLine;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using DevProjex.Application.Presentation;
+using DevProjex.Terminal.Execution;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -213,6 +215,33 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("`diff:<REF>..<REF>`", commandLine, StringComparison.Ordinal);
 		Assert.Contains("stdout", commandLine, StringComparison.Ordinal);
 		Assert.Contains("stderr", commandLine, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void DesktopControlDocumentationListsEveryPublishedDesktopGitMode()
+	{
+		var rootPath = FindRepositoryRoot();
+		var documentation = File.ReadAllText(Path.Combine(rootPath, "Docs", "Desktop-Control.md"));
+		var gitModeRow = Regex.Match(
+			documentation,
+			@"(?m)^\| `gitMode` \|[^\r\n]+$",
+			RegexOptions.CultureInvariant);
+
+		Assert.True(gitModeRow.Success, "Desktop Control gitMode state contract is missing.");
+		foreach (var descriptor in ProjectPresentationCatalog.GitFiltering.OrderBy(static item => item.Order))
+			Assert.Contains($"`{descriptor.Token}`", gitModeRow.Value, StringComparison.Ordinal);
+		Assert.DoesNotContain("`diff:", gitModeRow.Value, StringComparison.Ordinal);
+
+		var readinessRow = Regex.Match(
+			documentation,
+			@"(?m)^\| `trackedGitReady` \|[^\r\n]+$",
+			RegexOptions.CultureInvariant);
+		Assert.True(readinessRow.Success, "Desktop Control Git-readiness state contract is missing.");
+		foreach (var descriptor in ProjectPresentationCatalog.GitFiltering.Where(static item =>
+			         DesktopOpenReadiness.RequiresGitReadiness(item.Id)))
+		{
+			Assert.Contains($"`{descriptor.Token}`", readinessRow.Value, StringComparison.Ordinal);
+		}
 	}
 
 	[Fact]

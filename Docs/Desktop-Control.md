@@ -99,8 +99,8 @@ Successful state dictionaries use these stable keys:
 | `treeFormat` | string | `text`, `markdown`, `json`, or `xml` |
 | `filter` | string or null | Current tree-name filter |
 | `search` | string or null | Current preview search |
-| `gitMode` | string | `none`, `gitignore`, or `tracked` |
-| `trackedGitReady` | boolean | At least one applicable tracked index was loaded, or tracked mode is not selected |
+| `gitMode` | string | `none`, `gitignore`, `tracked`, `staged`, or `changes` |
+| `trackedGitReady` | boolean | The selected Git mode is ready; `tracked` requires a readable index, while `staged` and `changes` require the repository state to be available |
 
 ## Desktop Semantics
 

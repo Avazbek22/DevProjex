@@ -445,6 +445,110 @@ public sealed class GitModeCommandContractTests
 	}
 
 	[Theory]
+	[InlineData("staged")]
+	[InlineData("changes")]
+	public async Task OpenMomentaryModeFailsBeforeDesktopLaunchWhenGitIndexIsUnavailable(string mode)
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("src/App.cs", "class App {}\n");
+		workspace.CreateDirectory(".git");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			"open", workspace.Path,
+			"--git-mode", mode,
+			"--exclude", "none");
+
+		Assert.Equal(CommandLineExitCodes.PolicyFailure, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains(
+			GitScopeFilter.UnavailableDiagnosticCode,
+			environment.StandardError,
+			StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData(GitFilteringMode.Staged)]
+	[InlineData(GitFilteringMode.Changes)]
+	public async Task DesktopOpenReadinessAcceptsValidMomentaryScopeWithoutGitIgnore(
+		GitFilteringMode mode)
+	{
+		using var workspace = new TemporaryDirectory();
+		using var data = new TemporaryDirectory();
+		EnsureRepository(workspace.Path);
+		workspace.WriteFile("Tracked.cs", "baseline\n");
+		CommitAll(workspace.Path, "baseline");
+		workspace.WriteFile("Tracked.cs", "changed\n");
+		if (mode == GitFilteringMode.Staged)
+			Assert.True(TryRunGit(workspace.Path, "add", "Tracked.cs"));
+		using var services = new TerminalServiceFactory(() => data.Path).Create(AppLanguage.En);
+
+		var diagnostics = await DesktopOpenGitReadinessValidator.ValidateAsync(
+			services,
+			workspace.Path,
+			CreateGitSelection(mode),
+			TestContext.Current.CancellationToken);
+
+		Assert.DoesNotContain(
+			diagnostics,
+			static diagnostic => diagnostic.Severity == ContextDiagnosticSeverity.Error);
+	}
+
+	[Theory]
+	[InlineData(GitFilteringMode.Staged)]
+	[InlineData(GitFilteringMode.Changes)]
+	public async Task DesktopOpenReadinessRejectsMomentaryScopeOutsideARepository(
+		GitFilteringMode mode)
+	{
+		using var workspace = new TemporaryDirectory();
+		using var data = new TemporaryDirectory();
+		workspace.WriteFile("App.cs", "class App {}\n");
+		using var services = new TerminalServiceFactory(() => data.Path).Create(AppLanguage.En);
+
+		var diagnostics = await DesktopOpenGitReadinessValidator.ValidateAsync(
+			services,
+			workspace.Path,
+			CreateGitSelection(mode),
+			TestContext.Current.CancellationToken);
+
+		var diagnostic = Assert.Single(diagnostics);
+		Assert.Equal(GitScopeFilter.UnavailableDiagnosticCode, diagnostic.Code);
+		Assert.Equal(ContextDiagnosticSeverity.Error, diagnostic.Severity);
+	}
+
+	[Fact]
+	public async Task DesktopOpenReadinessRejectsPartiallyUnavailableGitState()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var data = new TemporaryDirectory();
+		EnsureRepository(workspace.Path);
+		workspace.WriteFile("src/App.cs", "class App {}\n");
+		CommitAll(workspace.Path, "baseline");
+		var nestedRepository = workspace.CreateDirectory("vendor");
+		EnsureRepository(nestedRepository);
+		File.WriteAllText(Path.Combine(nestedRepository, "Dependency.cs"), "class Dependency {}\n");
+		CommitAll(nestedRepository, "nested baseline");
+		Assert.True(TryRunGit(workspace.Path, "add", "vendor"));
+		CommitAll(workspace.Path, "track nested repository");
+		var nestedIndex = Path.Combine(nestedRepository, ".git", "index");
+		File.Delete(nestedIndex);
+		Directory.CreateDirectory(nestedIndex);
+		using var services = new TerminalServiceFactory(() => data.Path).Create(AppLanguage.En);
+
+		var diagnostics = await DesktopOpenGitReadinessValidator.ValidateAsync(
+			services,
+			workspace.Path,
+			CreateGitSelection(GitFilteringMode.Changes),
+			TestContext.Current.CancellationToken);
+
+		var diagnostic = Assert.Single(diagnostics);
+		Assert.Equal(GitScopeFilter.UnavailableDiagnosticCode, diagnostic.Code);
+		Assert.Equal(ContextDiagnosticSeverity.Error, diagnostic.Severity);
+	}
+
+	[Theory]
 	[InlineData(false, false)]
 	[InlineData(false, true)]
 	[InlineData(true, false)]
@@ -633,6 +737,14 @@ public sealed class GitModeCommandContractTests
 				new TerminalServiceFactory(() => dataRoot.Path))
 			.RunAsync(arguments, TestContext.Current.CancellationToken);
 	}
+
+	private static ProjectSelectionSpec CreateGitSelection(GitFilteringMode mode) =>
+		ProjectSelectionSpec.Standard with
+		{
+			GitMode = mode,
+			GitDiffRange = null,
+			Exclusions = []
+		};
 
 	private static async Task<(string GitMode, string[] Extensions, string[] Files, int MetricFiles)>
 		ExportMachineContextAsync(
