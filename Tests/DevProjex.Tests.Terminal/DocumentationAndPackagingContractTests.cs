@@ -43,6 +43,22 @@ public sealed class DocumentationAndPackagingContractTests
 	}
 
 	[Fact]
+	public void McpReadmeNetworkBoundaryMatchesRemoteOptIn()
+	{
+		var rootPath = FindRepositoryRoot();
+		var readme = File.ReadAllText(Path.Combine(rootPath, "README.md"));
+
+		Assert.Contains(
+			"network access is disabled unless `--allow-remote`",
+			readme,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			"tools cannot modify files, run project code, or touch the network",
+			readme,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void SecretRuleAttributionShipsWithTheEmbeddedConfiguration()
 	{
 		var rootPath = FindRepositoryRoot();
