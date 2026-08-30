@@ -432,6 +432,23 @@ public sealed class TerminalWorkspaceController(
 		IReadOnlyDictionary<string, bool> extensionOptionStates,
 		IReadOnlySet<string> previousPaths,
 		IReadOnlyDictionary<string, bool> pathOptionStates,
+		CancellationToken cancellationToken) =>
+		await BuildSettingsPlanAsync(
+			baseline,
+			selection,
+			extensionOptionStates,
+			previousPaths,
+			pathOptionStates,
+			ResolveDefaultFallbackGitMode(selection),
+			cancellationToken).ConfigureAwait(false);
+
+	internal async Task<TerminalSettingsPlanResult> BuildSettingsPlanAsync(
+		ProjectContextPlan baseline,
+		ProjectSelectionSpec selection,
+		IReadOnlyDictionary<string, bool> extensionOptionStates,
+		IReadOnlySet<string> previousPaths,
+		IReadOnlyDictionary<string, bool> pathOptionStates,
+		GitFilteringMode fallbackGitMode,
 		CancellationToken cancellationToken)
 	{
 		ArgumentNullException.ThrowIfNull(baseline);
@@ -439,6 +456,8 @@ public sealed class TerminalWorkspaceController(
 		ArgumentNullException.ThrowIfNull(extensionOptionStates);
 		ArgumentNullException.ThrowIfNull(previousPaths);
 		ArgumentNullException.ThrowIfNull(pathOptionStates);
+		if (!GitScopeSelection.IsPersistent(fallbackGitMode))
+			throw new ArgumentOutOfRangeException(nameof(fallbackGitMode), fallbackGitMode, null);
 
 		if (!RequiresStructuralRefresh(baseline, selection, extensionOptionStates))
 		{
@@ -467,7 +486,7 @@ public sealed class TerminalWorkspaceController(
 			pathOptionStates,
 			baseline.Selection.GitMode == selection.GitMode &&
 			GitScopeSelection.IsMomentary(selection.GitMode ?? GitFilteringMode.None)
-				? ResolveDefaultFallbackGitMode(selection)
+				? fallbackGitMode
 				: null);
 		var result = await BuildReconciledStructuralPlanAsync(
 				request,

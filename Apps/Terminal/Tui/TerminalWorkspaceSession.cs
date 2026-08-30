@@ -3731,6 +3731,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var pathStates = new Dictionary<string, bool>(
 			state.PathOptionStates,
 			PathComparer.Default);
+		var preferredGitMode = _settingsDraftPreferredGitMode ?? _preferredGitMode;
 		var originatedFromCommandLine = _settingsDraftOriginatedFromCommandLine;
 		var requestId = Interlocked.Increment(ref _settingsRefreshRequestId);
 		var operationCts = _operations.Start(WorkspaceOperationKind.SettingsRefresh);
@@ -3744,6 +3745,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				extensionStates,
 				previousPaths,
 				pathStates,
+				preferredGitMode,
 				originatedFromCommandLine,
 				requestId,
 				operationCts,
@@ -3759,6 +3761,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		IReadOnlyDictionary<string, bool> extensionStates,
 		IReadOnlySet<string> previousPaths,
 		IReadOnlyDictionary<string, bool> pathStates,
+		GitFilteringMode preferredGitMode,
 		bool originatedFromCommandLine,
 		long requestId,
 		CancellationTokenSource operationCts,
@@ -3767,13 +3770,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 	{
 		try
 		{
+			var requiresStructuralRefresh = TerminalWorkspaceController.RequiresStructuralRefresh(
+				baseline,
+				selection,
+				extensionStates);
 			await Task.Delay(
 				SettingsRefreshDebounceMilliseconds,
 				cancellationToken).ConfigureAwait(false);
-			if (TerminalWorkspaceController.RequiresStructuralRefresh(
-				    baseline,
-				    selection,
-				    extensionStates))
+			if (requiresStructuralRefresh)
 			{
 				await InvokeAsync(() =>
 				{
@@ -3795,8 +3799,12 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					extensionStates,
 					previousPaths,
 					pathStates,
+					preferredGitMode,
 					cancellationToken)
 				.ConfigureAwait(false);
+			var gitCliAvailable = requiresStructuralRefresh
+				? await ResolveGitCliAvailabilityAsync(result.Plan, cancellationToken).ConfigureAwait(false)
+				: _gitCliAvailable;
 			cancellationToken.ThrowIfCancellationRequested();
 			await InvokeAsync(() =>
 			{
@@ -3804,6 +3812,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					return false;
 
 				_controller.ApplySettingsPlan(state, result);
+				_gitCliAvailable = gitCliAvailable;
+				_preferredGitMode = preferredGitMode;
 				ClearSettingsDraft();
 				RefreshWorkspace();
 				if (originatedFromCommandLine)

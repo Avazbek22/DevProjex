@@ -1162,6 +1162,61 @@ public sealed class TerminalWorkspaceContractTests
 		}
 	}
 
+	[Theory]
+	[InlineData(GitFilteringMode.RespectGitIgnore, GitFilteringMode.RespectGitIgnore)]
+	[InlineData(GitFilteringMode.TrackedFilesOnly, GitFilteringMode.None)]
+	public async Task SettingsRefreshUsesTheStickyFallbackWhenTheRepositoryDisappears(
+		GitFilteringMode preferredMode,
+		GitFilteringMode expectedMode)
+	{
+		if (!TryRunGit(Directory.GetCurrentDirectory(), "--version"))
+			Assert.Skip("Git is required for this regression test.");
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		workspace.WriteFile("App.cs", "class App {}\n");
+		Assert.True(TryRunGit(workspace.Path, "init", "--quiet"));
+		Assert.True(TryRunGit(workspace.Path, "add", "--", "App.cs"));
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+		await controller.SetGitModeAsync(
+			state,
+			GitFilteringMode.Staged,
+			TestContext.Current.CancellationToken);
+
+		var gitPath = Path.Combine(workspace.Path, ".git");
+		var detachedGitPath = Path.Combine(
+			Path.GetTempPath(),
+			$"devprojex-terminal-git-{Guid.NewGuid():N}");
+		try
+		{
+			Directory.Move(gitPath, detachedGitPath);
+			var candidate = state.BuildSelection() with { Exclusions = [] };
+			var result = await controller.BuildSettingsPlanAsync(
+				state.Plan,
+				candidate,
+				state.ExtensionOptionStates,
+				state.BuildSelectedItemRelativePaths(),
+				state.PathOptionStates,
+				preferredMode,
+				TestContext.Current.CancellationToken);
+
+			Assert.Equal(expectedMode, result.Plan.Selection.GitMode);
+			Assert.False(result.Plan.GitReadiness.HasRepositoryBoundary);
+			Assert.DoesNotContain(
+				result.Plan.Diagnostics,
+				static diagnostic => diagnostic.Severity == ContextDiagnosticSeverity.Error);
+		}
+		finally
+		{
+			if (Directory.Exists(detachedGitPath) && !Directory.Exists(gitPath))
+				Directory.Move(detachedGitPath, gitPath);
+		}
+	}
+
 	[Fact]
 	public async Task ApplyingStructuralRefreshPublishesVisibleRowsOnTheCallingThread()
 	{

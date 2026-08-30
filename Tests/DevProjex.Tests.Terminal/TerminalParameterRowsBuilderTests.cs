@@ -457,6 +457,33 @@ public sealed class TerminalParameterRowsBuilderTests
 		Assert.False(list.IsRowEnabled(rows.Count));
 	}
 
+	[Fact]
+	public void DisabledSelectedControlFallsBackToTheActiveEnabledRow()
+	{
+		TerminalParameterRow[] rows =
+		[
+			new(
+				"git:staged",
+				TerminalParameterRowKind.GitMode,
+				"Staged",
+				IsSelected: false,
+				IsEnabled: false,
+				GitMode: GitFilteringMode.Staged),
+			new(
+				"git:gitignore",
+				TerminalParameterRowKind.GitMode,
+				"Use .gitignore",
+				IsSelected: true,
+				GitMode: GitFilteringMode.RespectGitIgnore)
+		];
+
+		var selectedIndex = TerminalWorkspaceSession.FindPreferredControlRowIndex(
+			rows,
+			"git:staged");
+
+		Assert.Equal(1, selectedIndex);
+	}
+
 	[Theory]
 	[InlineData("abcdef", 4, true, "abc…")]
 	[InlineData("界界界", 5, true, "界界…")]

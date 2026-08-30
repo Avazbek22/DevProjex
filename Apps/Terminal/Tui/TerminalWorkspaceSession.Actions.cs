@@ -109,6 +109,7 @@ internal sealed partial class TerminalWorkspaceSession
 	private GitFilteringMode _preferredGitMode = GitFilteringMode.RespectGitIgnore;
 	private ProjectSelectionSpec? _settingsDraftSelection;
 	private Dictionary<string, bool>? _settingsDraftExtensionStates;
+	private GitFilteringMode? _settingsDraftPreferredGitMode;
 	private bool _settingsDraftOriginatedFromCommandLine;
 	private TerminalControlSourceStamp? _controlSourceStamp;
 	private TerminalRedactionLabelStamp? _redactionLabelStamp;
@@ -330,6 +331,7 @@ internal sealed partial class TerminalWorkspaceSession
 			_contentAllControlRows,
 			_parameterRowsBuilder.BuildContentAggregate(selection));
 		_contentControlRows = UpdateControlRows(
+			TerminalControlSection.Content,
 			_contentControls,
 			_contentControlRows,
 			BuildContentParameterRows(selection, snapshot),
@@ -339,6 +341,7 @@ internal sealed partial class TerminalWorkspaceSession
 			_exclusionAllControlRows,
 			_parameterRowsBuilder.BuildExclusionAggregate(_state.Plan, selection));
 		_exclusionControlRows = UpdateControlRows(
+			TerminalControlSection.Exclusions,
 			_exclusionControls,
 			_exclusionControlRows,
 			BuildExclusionParameterRows(),
@@ -348,6 +351,7 @@ internal sealed partial class TerminalWorkspaceSession
 			_extensionAllControlRows,
 			_parameterRowsBuilder.BuildExtensionAggregate(_state.Plan, selectedExtensions));
 		_extensionControlRows = UpdateControlRows(
+			TerminalControlSection.Extensions,
 			_extensionControls,
 			_extensionControlRows,
 			BuildExtensionParameterRows(),
@@ -411,6 +415,7 @@ internal sealed partial class TerminalWorkspaceSession
 	}
 
 	private ResettableObservableCollection<TerminalParameterRow> UpdateControlRows(
+		TerminalControlSection section,
 		TerminalParameterListView list,
 		ResettableObservableCollection<TerminalParameterRow>? source,
 		IReadOnlyList<TerminalParameterRow> rows,
@@ -426,21 +431,37 @@ internal sealed partial class TerminalWorkspaceSession
 			source.Reset(rows);
 		if (source.Count > 0)
 		{
-			var selectedIndex = FindSelectedIndex(source, selectedKey);
-			list.SelectedItem = Math.Clamp(selectedIndex, 0, source.Count - 1);
+			var selectedIndex = FindPreferredControlRowIndex(source, selectedKey);
+			var clampedIndex = Math.Clamp(selectedIndex, 0, source.Count - 1);
+			list.SelectedItem = clampedIndex;
+			SetSelectedControlKey(section, source[clampedIndex].Key);
 		}
 		return source;
 	}
 
-	private static int FindSelectedIndex(
+	internal static int FindPreferredControlRowIndex(
 		IReadOnlyList<TerminalParameterRow> rows,
 		string? selectedKey)
 	{
-		if (selectedKey is null)
-			return 0;
+		if (selectedKey is not null)
+		{
+			for (var index = 0; index < rows.Count; index++)
+			{
+				if (rows[index].IsEnabled &&
+				    string.Equals(rows[index].Key, selectedKey, StringComparison.Ordinal))
+				{
+					return index;
+				}
+			}
+		}
 		for (var index = 0; index < rows.Count; index++)
 		{
-			if (string.Equals(rows[index].Key, selectedKey, StringComparison.Ordinal))
+			if (rows[index].IsEnabled && rows[index].IsSelected == true)
+				return index;
+		}
+		for (var index = 0; index < rows.Count; index++)
+		{
+			if (rows[index].IsEnabled)
 				return index;
 		}
 		return 0;
@@ -491,6 +512,7 @@ internal sealed partial class TerminalWorkspaceSession
 			_contentAllControlRows,
 			_parameterRowsBuilder.BuildContentAggregate(selection));
 		_contentControlRows = UpdateControlRows(
+			TerminalControlSection.Content,
 			_contentControls,
 			_contentControlRows,
 			BuildContentParameterRows(selection, snapshot),
@@ -1063,9 +1085,8 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		if (_state is null)
 			return;
-		var selection = GetDisplayedSettingsSelection();
-		if (GitScopeSelection.IsPersistent(mode) && mode != GitFilteringMode.None)
-			_preferredGitMode = mode;
+		var selection = EnsureSettingsDraft();
+		UpdateDraftPreferredGitMode(mode);
 		ApplyPathFilters(mode, selection.Exclusions ?? [], diffRange);
 	}
 
@@ -1169,7 +1190,15 @@ internal sealed partial class TerminalWorkspaceSession
 		_settingsDraftExtensionStates ??= new Dictionary<string, bool>(
 			_state.ExtensionOptionStates,
 			StringComparer.OrdinalIgnoreCase);
+		_settingsDraftPreferredGitMode ??= _preferredGitMode;
 		return _settingsDraftSelection;
+	}
+
+	private void UpdateDraftPreferredGitMode(GitFilteringMode mode)
+	{
+		EnsureSettingsDraft();
+		if (GitScopeSelection.IsPersistent(mode) && mode != GitFilteringMode.None)
+			_settingsDraftPreferredGitMode = mode;
 	}
 
 	private void UpdateDraftExtensionStates(IReadOnlyCollection<string> selectedExtensions)
@@ -1197,6 +1226,7 @@ internal sealed partial class TerminalWorkspaceSession
 	{
 		_settingsDraftSelection = null;
 		_settingsDraftExtensionStates = null;
+		_settingsDraftPreferredGitMode = null;
 		_settingsDraftOriginatedFromCommandLine = false;
 	}
 
@@ -1240,9 +1270,11 @@ internal sealed partial class TerminalWorkspaceSession
 		{
 			next = GitFilteringMode.None;
 		}
-		_preferredGitMode = next == GitFilteringMode.None
-			? GitFilteringMode.RespectGitIgnore
-			: GitScopeSelection.IsPersistent(next) ? next : _preferredGitMode;
+		EnsureSettingsDraft();
+		if (next == GitFilteringMode.None)
+			_settingsDraftPreferredGitMode = GitFilteringMode.RespectGitIgnore;
+		else
+			UpdateDraftPreferredGitMode(next);
 		ApplyPathFilters(next, selection.Exclusions ?? [], originatedFromCommandLine: false);
 	}
 
@@ -1251,6 +1283,10 @@ internal sealed partial class TerminalWorkspaceSession
 		_state?.Plan is { } plan &&
 		(plan.GitReadiness.HasRepositoryBoundary ||
 		 GitRepositoryBoundaryProbe.ExistsAtOrAbove(plan.SourceRoot));
+
+	private bool IsGitModeAvailable(GitFilteringMode mode) =>
+		mode is GitFilteringMode.None or GitFilteringMode.RespectGitIgnore ||
+		HasGitRepository();
 
 	private void ShowActionPalette()
 	{

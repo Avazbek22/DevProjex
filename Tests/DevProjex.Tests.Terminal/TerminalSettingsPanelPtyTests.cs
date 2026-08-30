@@ -365,11 +365,16 @@ public sealed class TerminalSettingsPanelPtyTests
 	}
 
 	[Fact(Timeout = 120_000)]
-	public async Task RefreshEnablesGitScopesWhenARepositoryAppearsAfterOpen()
+	public async Task SettingsRefreshEnablesGitScopesWhenARepositoryAppearsAfterOpen()
 	{
 		using var project = CreatePanelProject();
 		await using var terminal = await StartAsync(project.Path, columns: 160, rows: 50);
 		await WaitForStableScreenAsync(terminal, "PROJECT TREE");
+		await terminal.SendAsync(":set tracked on\r", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"The command cannot be applied to the current workspace state",
+			timeout: TimeSpan.FromSeconds(10),
+			cancellationToken: TestContext.Current.CancellationToken);
 
 		RunGit(project.Path, "init", "--quiet");
 		RunGit(project.Path, "config", "user.email", "terminal-tests@devprojex.local");
@@ -377,11 +382,8 @@ public sealed class TerminalSettingsPanelPtyTests
 		project.WriteFile("AddedAfterOpen.cs", "class AddedAfterOpen {}\n");
 		RunGit(project.Path, "add", "--", "AddedAfterOpen.cs");
 
-		await terminal.SendAsync(":refresh\r", TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
-			"Project refreshed.",
-			timeout: TimeSpan.FromSeconds(30),
-			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync(":set dot-folders off\r", TestContext.Current.CancellationToken);
+		await WaitForAppliedCommandAsync(terminal, "dot folders: disabled", "AddedAfterOpen.cs");
 		await terminal.SendAsync(":set git staged\r", TestContext.Current.CancellationToken);
 		var staged = await WaitForAppliedCommandAsync(
 			terminal,
@@ -394,7 +396,7 @@ public sealed class TerminalSettingsPanelPtyTests
 	}
 
 	[Fact(Timeout = 120_000)]
-	public async Task RefreshFallsBackWhenTheRepositoryDisappearsDuringTheSession()
+	public async Task SettingsRefreshFallsBackWhenTheRepositoryDisappearsDuringTheSession()
 	{
 		using var project = CreatePanelProject();
 		RunGit(project.Path, "init", "--quiet");
@@ -420,16 +422,21 @@ public sealed class TerminalSettingsPanelPtyTests
 		{
 			Directory.Move(gitPath, detachedGitPath);
 			project.WriteFile("VisibleAfterRepositoryRemoval.cs", "class VisibleAfterRepositoryRemoval {}\n");
-			await terminal.SendAsync(":refresh\r", TestContext.Current.CancellationToken);
-			await terminal.WaitForScreenAsync(
-				"Project refreshed.",
-				timeout: TimeSpan.FromSeconds(30),
-				cancellationToken: TestContext.Current.CancellationToken);
+			await terminal.SendAsync(":set dot-folders off\r", TestContext.Current.CancellationToken);
+			await WaitForAppliedCommandAsync(
+				terminal,
+				"dot folders: disabled",
+				"VisibleAfterRepositoryRemoval.cs");
 			var refreshed = await WaitForStableScreenAsync(terminal, "(\u2022) Use .gitignore");
 
 			Assert.Contains("VisibleAfterRepositoryRemoval.cs", refreshed, StringComparison.Ordinal);
 			Assert.Contains("( ) Staged Git files", refreshed, StringComparison.Ordinal);
 			Assert.DoesNotContain("(\u2022) Staged Git files", refreshed, StringComparison.Ordinal);
+			await terminal.SendAsync(":set tracked on\r", TestContext.Current.CancellationToken);
+			await terminal.WaitForScreenAsync(
+				"The command cannot be applied to the current workspace state",
+				timeout: TimeSpan.FromSeconds(10),
+				cancellationToken: TestContext.Current.CancellationToken);
 			await terminal.SendAsync(":quit\r", TestContext.Current.CancellationToken);
 			await terminal.WaitForScreenAsync(
 				"Exit DevProjex Terminal?",

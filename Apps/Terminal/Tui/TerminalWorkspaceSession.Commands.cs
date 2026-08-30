@@ -60,13 +60,11 @@ internal sealed partial class TerminalWorkspaceSession
 		if (command.Target == "git")
 		{
 			if (!GitScopeSelection.TryParse(command.Text, out var gitMode, out var diffRange) ||
-			    (gitMode is GitFilteringMode.TrackedFilesOnly or GitFilteringMode.Staged or
-				    GitFilteringMode.Changes or GitFilteringMode.Diff) && !HasGitRepository())
+			    !IsGitModeAvailable(gitMode))
 			{
 				return InvalidCommandExecution();
 			}
-			if (GitScopeSelection.IsPersistent(gitMode) && gitMode != GitFilteringMode.None)
-				_preferredGitMode = gitMode;
+			UpdateDraftPreferredGitMode(gitMode);
 			ApplyPathFilters(
 				gitMode,
 				GetDisplayedSettingsSelection().Exclusions ?? [],
@@ -113,8 +111,10 @@ internal sealed partial class TerminalWorkspaceSession
 		var nextMode = enabled
 			? mode.Value
 			: GitFilteringMode.None;
+		if (!IsGitModeAvailable(nextMode))
+			return InvalidCommandExecution();
 		if (enabled)
-			_preferredGitMode = mode.Value;
+			UpdateDraftPreferredGitMode(mode.Value);
 		ApplyPathFilters(
 			nextMode,
 			selection.Exclusions ?? [],
