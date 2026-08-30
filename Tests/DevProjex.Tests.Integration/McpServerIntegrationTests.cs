@@ -162,25 +162,40 @@ public sealed class McpServerIntegrationTests
 		Assert.Equal(0, Volatile.Read(ref serviceCreationCount));
 	}
 
-	[Fact]
-	public async Task StreamServerHandshakeListsExactlyTheStrictReadOnlyToolsInContractOrder()
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task StreamServerHandshakePublishesPreciseToolAnnotationsInContractOrder(bool allowRemote)
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
-		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			allowRemote: allowRemote);
 
 		var tools = await server.Client.ListToolsAsync(
 			options: null,
 			TestContext.Current.CancellationToken);
 
 		Assert.Equal(ExpectedTools, tools.Select(static tool => tool.Name));
-		Assert.All(tools, static tool =>
+		var remoteProjectTools = new HashSet<string>(StringComparer.Ordinal)
+		{
+			"get_tree",
+			"analyze",
+			"pack_context",
+			"search_project",
+			"get_file"
+		};
+		Assert.All(tools, tool =>
 		{
 			var protocol = tool.ProtocolTool;
 			Assert.False(string.IsNullOrWhiteSpace(protocol.Title));
 			Assert.True(protocol.Annotations?.ReadOnlyHint);
-			Assert.True(protocol.Annotations?.IdempotentHint);
-			Assert.False(protocol.Annotations?.OpenWorldHint);
+			Assert.Equal(tool.Name != "pack_context", protocol.Annotations?.IdempotentHint);
+			Assert.Equal(
+				allowRemote && remoteProjectTools.Contains(tool.Name),
+				protocol.Annotations?.OpenWorldHint);
 			Assert.False(protocol.Annotations?.DestructiveHint);
 			Assert.Equal(JsonValueKind.False, protocol.InputSchema.GetProperty("additionalProperties").ValueKind);
 			Assert.DoesNotContain("hide_secrets", protocol.InputSchema.GetRawText(), StringComparison.OrdinalIgnoreCase);
@@ -195,6 +210,10 @@ public sealed class McpServerIntegrationTests
 			200_000,
 			tools.Single(static tool => tool.Name == "pack_context")
 				.ProtocolTool.Meta!["anthropic/maxResultSizeChars"]!.GetValue<int>());
+		Assert.Contains(
+			"stored pack id remains valid until this server process exits; after restart, call pack_context again",
+			tools.Single(static tool => tool.Name == "pack_context").ProtocolTool.Description,
+			StringComparison.Ordinal);
 		Assert.Equal(
 			200_000,
 			tools.Single(static tool => tool.Name == "read_pack")

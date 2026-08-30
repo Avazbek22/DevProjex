@@ -71,6 +71,7 @@ list_projects -> get_tree/analyze -> search_project/get_file -> pack_context -> 
   Agent paths and globs can only narrow the effective selection.
 - Large packs are kept in an application-owned temporary session directory. Pack
   ids are random, valid only in the current server process, and removed at exit.
+  After a server restart, call `pack_context` again to create a new id.
   Stale session directories older than 24 hours are scavenged at startup. A
   stored pack is limited to 200 MiB and all packs in one server session are
   limited to 1 GiB. The server does not evict valid packs; a request that would
@@ -88,14 +89,18 @@ the credential-free display form of the URL.
 
 ## Tools
 
-The tool order is stable.
+The tool order is stable. Every tool is annotated read-only and non-destructive
+because none modifies the source project. `pack_context` is non-idempotent because
+each stored result gets a new session id. Without `--allow-remote`, every tool is
+closed-world; with it, the five tools that accept `project` Git URLs are annotated
+open-world.
 
 | Tool | Parameters | Result and limits |
 |---|---|---|
 | `list_projects` | none | Allowed local roots with path, name, type, and available local profiles. Remote projects are addressed by URL and are not added to this list. |
 | `get_tree` | `project?`, `branch?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `max_depth?` | Effective text tree; at most 2,000 lines. |
 | `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `top_files?`, `max_file_bytes?` | File, character, and token metrics plus the requested largest files by tokens. Metrics reflect the effective detail level. |
-| `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` limits estimated content tokens. Inline through 50,000 characters; otherwise returns a session-scoped `pack_id` and tree. |
+| `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` limits estimated content tokens. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
 | `read_pack` | `pack_id`, `start_line?`, `end_line?` | Inclusive, 1-based range; at most 1,000 lines or 50,000 characters per call. Call `pack_context` again after server restart. |
 | `search_project` | `project?`, `branch?`, `pattern`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style redacted matches. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, and oversized text responses are explicitly truncated with a narrowing hint. |
 | `get_file` | `project?`, `branch?`, `path`, `start_line?`, `end_line?` | Redacted text from one effective file; at most 1,000 lines or 50,000 characters. |

@@ -159,7 +159,7 @@ internal sealed class DevProjexMcpTools(
 			return McpToolResults.StructuredSuccess(envelope, FormatGitScopeWarning(plan));
 		}, cancellationToken);
 
-	[Description("Build an exact redacted DevProjex context export. Large packs expire when this server process exits.")]
+	[Description("Build an exact redacted DevProjex context export. A stored pack id remains valid until this server process exits; after restart, call pack_context again.")]
 	public Task<CallToolResult> PackContext(
 		RequestContext<CallToolRequestParams> request,
 		CancellationToken cancellationToken) =>
