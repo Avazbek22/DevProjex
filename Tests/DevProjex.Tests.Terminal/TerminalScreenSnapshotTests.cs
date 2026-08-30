@@ -187,15 +187,18 @@ public sealed class TerminalScreenSnapshotTests
 			StringComparison.Ordinal);
 	}
 
-	[Fact]
-	public void Normalize_MapsBareClippedSystemTemporaryRootOnlyWhenProjectRootIsKnown()
+	[Theory]
+	[InlineData("")]
+	[InlineData("De")]
+	public void Normalize_MapsClippedSystemTemporaryRootOnlyWhenProjectRootIsKnown(
+		string visibleProjectFragment)
 	{
 		var temporaryPrefix = Path.GetTempPath();
 		var projectPath = Path.Combine(
 			temporaryPrefix,
 			"DevProjex.Tests.Terminal",
 			Guid.NewGuid().ToString("N"));
-		var screen = $"│Root: {temporaryPrefix}▲│";
+		var screen = $"│Root: {temporaryPrefix}{visibleProjectFragment}▲│";
 
 		var withProjectRoot = TerminalScreenSnapshot.Normalize(
 			screen,
@@ -203,7 +206,9 @@ public sealed class TerminalScreenSnapshotTests
 		var withoutProjectRoot = TerminalScreenSnapshot.Normalize(screen, []);
 
 		Assert.Equal("│Root: <PROJECT_ROOT>▲│", withProjectRoot);
-		Assert.Equal("│Root: <SYSTEM_TEMP>/▲│", withoutProjectRoot);
+		Assert.Equal(
+			$"│Root: <SYSTEM_TEMP>/{visibleProjectFragment}▲│",
+			withoutProjectRoot);
 	}
 
 	[Theory]

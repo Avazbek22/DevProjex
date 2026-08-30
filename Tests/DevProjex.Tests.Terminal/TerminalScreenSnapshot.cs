@@ -129,7 +129,7 @@ internal static partial class TerminalScreenSnapshot
 		normalized = ClippedContextRootPattern().Replace(normalized, "<PROJECT_ROOT>");
 		if (hasProjectRootReplacement)
 		{
-			normalized = BareClippedContextRootPattern()
+			normalized = ClippedSystemTemporaryContextRootPattern()
 				.Replace(normalized, "<PROJECT_ROOT>");
 		}
 		normalized = NormalizeMacOsSystemPathAliases(
@@ -392,8 +392,9 @@ internal static partial class TerminalScreenSnapshot
 		RegexOptions.IgnoreCase)]
 	private static partial Regex ClippedContextRootPattern();
 
-	[GeneratedRegex(@"(?<=Root: )<SYSTEM_TEMP>/(?=[\u2500-\u257F▲▼◀▶])")]
-	private static partial Regex BareClippedContextRootPattern();
+	[GeneratedRegex(
+		@"(?<=Root: )<SYSTEM_TEMP>/[^\r\n\u2500-\u257F▲▼◀▶]*(?=[\u2500-\u257F▲▼◀▶])")]
+	private static partial Regex ClippedSystemTemporaryContextRootPattern();
 
 	[GeneratedRegex(
 		@"(?<label>Elapsed|Прошло|Vergangen|Transcurrido|Écoulé|Trascorso|Өткен уақыт|Decorrido|Вақти гузашта|O‘tgan vaqt):\s*\d{1,2}:\d{2}(?::\d{2})?")]
