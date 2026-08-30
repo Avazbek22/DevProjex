@@ -140,9 +140,18 @@ internal sealed class McpProjectService(
 			}
 			if (selected.Count > 0)
 			{
-				narrowed = await services.Planner
-					.ReprojectSelectionAsync(plan, selected, cancellationToken)
-					.ConfigureAwait(false);
+				var gitMode = plan.Selection.GitMode ?? GitFilteringMode.None;
+				narrowed = GitScopeSelection.IsMomentary(gitMode)
+					? await services.Planner
+						.ReprojectSelectionAsync(
+							plan,
+							selected,
+							StringComparer.Ordinal,
+							cancellationToken)
+						.ConfigureAwait(false)
+					: await services.Planner
+						.ReprojectSelectionAsync(plan, selected, cancellationToken)
+						.ConfigureAwait(false);
 			}
 			else
 			{
@@ -204,6 +213,13 @@ internal sealed class McpProjectService(
 	{
 		if (value is null)
 			return null;
+		if (value.Length > GitScopeSelection.MaximumTokenLength)
+		{
+			throw new McpToolException(
+				McpErrorCodes.InvalidArguments,
+				$"{McpErrorCodes.InvalidArguments}: git_scope must be at most " +
+				$"{GitScopeSelection.MaximumTokenLength} characters; use staged, changes, or a shorter diff:<ref>..<ref> range.");
+		}
 		var matchesPublishedSyntax = value is "staged" or "changes" ||
 		                             value.StartsWith(GitScopeSelection.DiffPrefix, StringComparison.Ordinal);
 		if (!matchesPublishedSyntax ||
@@ -295,7 +311,11 @@ internal sealed class McpProjectService(
 				McpErrorCodes.PathNotFound,
 				$"{McpErrorCodes.PathNotFound}: '{path}' is a directory; provide a file path returned by get_tree or search_project.");
 		}
-		if (!plan.IncludedFiles.Contains(physical, PathComparer.Default))
+		var pathComparer = GitScopeSelection.IsMomentary(
+			plan.Selection.GitMode ?? GitFilteringMode.None)
+			? StringComparer.Ordinal
+			: PathComparer.Default;
+		if (!plan.IncludedFiles.Contains(physical, pathComparer))
 		{
 			throw new McpToolException(
 				McpErrorCodes.PathNotFound,

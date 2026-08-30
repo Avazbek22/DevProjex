@@ -347,6 +347,34 @@ public sealed class GitModeCommandContractTests
 		Assert.Contains(GitScopeFilter.UnavailableDiagnosticCode, environment.StandardError, StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public async Task HelpAdvertisesOnlyGitModesSupportedByEachCommand()
+	{
+		using var workspace = new TemporaryDirectory();
+		var direct = new TestTerminalEnvironment();
+		var desktop = new TestTerminalEnvironment();
+		var profileSave = new TestTerminalEnvironment();
+
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(workspace, direct, "analyze", "--language", "en", "--help"));
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(workspace, desktop, "open", "--language", "en", "--help"));
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(workspace, profileSave, "profile", "save", "--language", "en", "--help"));
+
+		Assert.Contains("diff:<ref>..<ref>", direct.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("staged", desktop.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("changes", desktop.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("diff:<ref>..<ref>", desktop.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("tracked", profileSave.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("staged", profileSave.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("changes", profileSave.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("diff:<ref>..<ref>", profileSave.StandardOutput, StringComparison.Ordinal);
+	}
+
 	[Theory]
 	[InlineData("staged")]
 	[InlineData("changes")]
@@ -410,11 +438,16 @@ public sealed class GitModeCommandContractTests
 			environment,
 			"profile", "save", workspace.Path,
 			"--git-mode", mode,
-			"--exclude", "none");
+			"--exclude", "none",
+			"--language", "en");
 
 		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
 		Assert.Empty(environment.StandardOutput);
 		Assert.Contains("DPX-CLI-PROFILE-INVALID", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains(
+			"Momentary Git modes cannot be saved in profiles",
+			environment.StandardError,
+			StringComparison.Ordinal);
 	}
 
 	[Theory]

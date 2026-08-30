@@ -90,14 +90,17 @@ Smart Ignore and Git filtering solve different problems. Smart Ignore recognizes
 | `none` | Does not apply Git-based filtering. |
 | `gitignore` | Applies reachable hierarchical `.gitignore` rules. |
 | `tracked` | Includes only paths returned by applicable Git indexes. |
+| `staged` | Includes files with staged changes. |
+| `changes` | Includes staged, unstaged, and non-ignored untracked files. |
+| `diff:<REF>..<REF>` | Includes files changed between two Git references. |
 
 Only one Git mode can be active at a time. Ordinary exclusions, including Smart Ignore, remain independent and can be combined with any Git mode. Smart Secrets is a separate downstream content transformation: it never changes Smart Ignore or the effective tree. See [Hide Secrets](HideSecrets.md).
 
-Desktop keeps the two Git modes as checkboxes because they are settings alongside
-the other exclusions. Enabling one Git checkbox clears the other; clearing the
-active checkbox leaves both off, which is the valid no-Git-filtering state. These
-actions never change Smart Ignore or an ordinary exclusion. The section-wide
-**All** checkbox still controls the whole section and never enables both Git modes.
+Inside a repository, Desktop exposes `none`, `gitignore`, `tracked`, `staged`, and
+`changes` in one selector. TUI presents the same mutually exclusive values as
+radio rows and shows the active `diff:<REF>..<REF>` value as an additional row.
+Diff scopes are available through CLI, TUI, and MCP, but not Desktop. Changing the
+Git mode never changes Smart Ignore or an ordinary exclusion.
 
 ### `.gitignore` mode
 

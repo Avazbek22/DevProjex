@@ -2,6 +2,13 @@ using System.CommandLine;
 
 namespace DevProjex.Terminal.CommandLine;
 
+internal enum GitModeOptionCapability
+{
+	All,
+	Desktop,
+	Persistent
+}
+
 internal sealed class SelectionOptions
 {
 	private readonly ITerminalEnvironment _environment;
@@ -50,7 +57,8 @@ internal sealed class SelectionOptions
 		string defaultProfile = "standard",
 		bool includeHidePrivateData = true,
 		bool includeContentTransformations = true,
-		bool includeMaxFileBytes = false)
+		bool includeMaxFileBytes = false,
+		GitModeOptionCapability gitModeCapability = GitModeOptionCapability.All)
 	{
 		_environment = environment;
 		_localization = localization;
@@ -89,7 +97,7 @@ internal sealed class SelectionOptions
 				context,
 				FileSystemCompletionKind.FilesAndDirectories,
 				FileSystemCompletionSource.ResolveProjectDirectory(context)));
-		GitMode = CreateGitModeOption(localization);
+		GitMode = CreateGitModeOption(localization, gitModeCapability);
 		Exclusions = RepeatableExclusions(localization);
 		MaxFileBytes = new Option<long?>("--max-file-bytes")
 		{
@@ -325,11 +333,28 @@ internal sealed class SelectionOptions
 		return option;
 	}
 
-	private static Option<CliGitModeValue?> CreateGitModeOption(LocalizationService localization)
+	private static Option<CliGitModeValue?> CreateGitModeOption(
+		LocalizationService localization,
+		GitModeOptionCapability capability)
 	{
+		var fixedTokens = capability == GitModeOptionCapability.Persistent
+			? CliChoiceSets.PersistentGitMode.Tokens
+			: CliChoiceSets.GitMode.Tokens;
+		var advertisesDiff = capability == GitModeOptionCapability.All;
+		var advertisedTokens = advertisesDiff
+			? fixedTokens.Concat(["diff:<ref>..<ref>"]).ToArray()
+			: fixedTokens.ToArray();
+		var capabilityMessage = capability == GitModeOptionCapability.All
+			? localization["Terminal.Validation.GitMode"]
+			: localization.Format(
+				"Terminal.Validation.Choice",
+				"--git-mode",
+				string.Join(", ", advertisedTokens));
 		var option = new Option<CliGitModeValue?>("--git-mode")
 		{
-			Description = localization["Terminal.Option.GitMode"],
+			Description = capability == GitModeOptionCapability.All
+				? localization["Terminal.Option.GitMode"]
+				: capabilityMessage,
 			HelpName = "MODE",
 			Arity = ArgumentArity.ExactlyOne,
 			CustomParser = result =>
@@ -344,13 +369,13 @@ internal sealed class SelectionOptions
 					}
 				}
 
-				result.AddError(LocalizedParseError.Create(
-					localization["Terminal.Validation.GitMode"]));
+				result.AddError(LocalizedParseError.Create(capabilityMessage));
 				return null;
 			}
 		};
-		option.CompletionSources.Add(CliChoiceSets.GitMode.Tokens.ToArray());
-		option.CompletionSources.Add(["diff:<ref>..<ref>"]);
+		option.CompletionSources.Add(fixedTokens.ToArray());
+		if (advertisesDiff)
+			option.CompletionSources.Add(["diff:<ref>..<ref>"]);
 		return option;
 	}
 

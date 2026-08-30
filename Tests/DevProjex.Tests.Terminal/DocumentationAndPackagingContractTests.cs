@@ -224,7 +224,7 @@ public sealed class DocumentationAndPackagingContractTests
 		var documentation = File.ReadAllText(Path.Combine(rootPath, "Docs", "Desktop-Control.md"));
 		var gitModeRow = Regex.Match(
 			documentation,
-			@"(?m)^\| `gitMode` \|[^\r\n]+$",
+			@"(?m)^\| `gitMode` \|[^\r\n]+\r?$",
 			RegexOptions.CultureInvariant);
 
 		Assert.True(gitModeRow.Success, "Desktop Control gitMode state contract is missing.");
@@ -234,7 +234,7 @@ public sealed class DocumentationAndPackagingContractTests
 
 		var readinessRow = Regex.Match(
 			documentation,
-			@"(?m)^\| `trackedGitReady` \|[^\r\n]+$",
+			@"(?m)^\| `trackedGitReady` \|[^\r\n]+\r?$",
 			RegexOptions.CultureInvariant);
 		Assert.True(readinessRow.Success, "Desktop Control Git-readiness state contract is missing.");
 		foreach (var descriptor in ProjectPresentationCatalog.GitFiltering.Where(static item =>
@@ -242,6 +242,23 @@ public sealed class DocumentationAndPackagingContractTests
 		{
 			Assert.Contains($"`{descriptor.Token}`", readinessRow.Value, StringComparison.Ordinal);
 		}
+	}
+
+	[Fact]
+	public void SmartIgnoreDocumentationUsesTheCurrentGitAxis()
+	{
+		var rootPath = FindRepositoryRoot();
+		var documentation = File.ReadAllText(Path.Combine(rootPath, "Docs", "SmartIgnore.md"));
+
+		foreach (var descriptor in ProjectPresentationCatalog.GitFiltering)
+		{
+			Assert.Matches(
+				$@"(?m)^\| `{Regex.Escape(descriptor.Token)}` \|[^\r\n]+$",
+				documentation);
+		}
+		Assert.Matches(@"(?m)^\| `diff:<REF>\.\.<REF>` \|[^\r\n]+$", documentation);
+		Assert.DoesNotContain("Git checkbox", documentation, StringComparison.OrdinalIgnoreCase);
+		Assert.DoesNotContain("two Git modes as checkboxes", documentation, StringComparison.OrdinalIgnoreCase);
 	}
 
 	[Fact]

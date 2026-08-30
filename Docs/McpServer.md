@@ -209,7 +209,8 @@ actionable error instead of returning an empty result.
 `search_project`. It intersects the server/profile baseline and therefore cannot
 re-enable paths excluded by `tracked_only` or a tracked profile. Staged selects
 index changes; changes adds unstaged and non-ignored untracked paths; diff uses
-two Git references. File content always comes from the current working tree.
+two Git references. The complete value is limited to 4,096 characters. File
+content always comes from the current working tree.
 Deleted paths are omitted with a `DPX-GIT-STATE-DELETED` warning. A non-Git
 project or unavailable/invalid Git state returns an actionable tool error.
 

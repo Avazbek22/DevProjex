@@ -643,7 +643,11 @@ public sealed class DevProjexCommandTree
 			Hidden = true
 		};
 		var branch = BranchOption();
-		var selection = new SelectionOptions(_localization, environment, "auto");
+		var selection = new SelectionOptions(
+			_localization,
+			environment,
+			"auto",
+			gitModeCapability: GitModeOptionCapability.Desktop);
 		command.Arguments.Add(project);
 		command.Options.Add(last);
 		command.Options.Add(newWindow);
@@ -920,7 +924,10 @@ public sealed class DevProjexCommandTree
 			command,
 			"devprojex profile save . --root src --extension .cs");
 		var project = ProjectArgument();
-		var selection = new SelectionOptions(_localization, environment);
+		var selection = new SelectionOptions(
+			_localization,
+			environment,
+			gitModeCapability: GitModeOptionCapability.Persistent);
 		command.Arguments.Add(project);
 		selection.AddTo(command);
 		command.SetAction((parseResult, cancellationToken) =>

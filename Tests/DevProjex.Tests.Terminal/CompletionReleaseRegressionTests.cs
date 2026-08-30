@@ -89,6 +89,29 @@ public sealed class CompletionReleaseRegressionTests
 	}
 
 	[Fact]
+	public async Task GitModeCompletionRespectsCommandCapabilities()
+	{
+		var direct = await CompleteAsync("devprojex analyze . --git-mode ");
+		var desktop = await CompleteAsync("devprojex open . --git-mode ");
+		var profileSave = await CompleteAsync("devprojex profile save . --git-mode ");
+
+		Assert.Contains("staged", direct);
+		Assert.Contains("changes", direct);
+		Assert.Contains("diff:<ref>..<ref>", direct);
+
+		Assert.Contains("staged", desktop);
+		Assert.Contains("changes", desktop);
+		Assert.DoesNotContain("diff:<ref>..<ref>", desktop);
+
+		Assert.Contains("none", profileSave);
+		Assert.Contains("gitignore", profileSave);
+		Assert.Contains("tracked", profileSave);
+		Assert.DoesNotContain("staged", profileSave);
+		Assert.DoesNotContain("changes", profileSave);
+		Assert.DoesNotContain("diff:<ref>..<ref>", profileSave);
+	}
+
+	[Fact]
 	public async Task CompletionPreservesOptionNameForEqualsForm()
 	{
 		var candidates = await CompleteAsync("devprojex analyze . --format=j");

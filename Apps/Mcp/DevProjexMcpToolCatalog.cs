@@ -169,6 +169,7 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	private const string GitScopeProperty = """
 	"git_scope": {
 	  "description": "Further restrict results to staged files, all current changes, or files changed between two Git refs.",
+	  "maxLength": 4096,
 	  "oneOf": [
 	    { "type": "string", "enum": ["staged", "changes"] },
 	    { "type": "string", "pattern": "^diff:(?!.*\\.\\.\\.)(?!.*\\.\\..*\\.\\.)[^\\s-]\\S*\\.\\.[^\\s-]\\S*$" }

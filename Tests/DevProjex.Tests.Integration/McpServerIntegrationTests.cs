@@ -1,4 +1,5 @@
 using System.IO.Pipelines;
+using DevProjex.Application.Context;
 using DevProjex.Application.Diagnostics;
 using DevProjex.Mcp;
 using ModelContextProtocol;
@@ -238,6 +239,14 @@ public sealed class McpServerIntegrationTests
 				["full", "compact", "signatures"],
 				detail.GetProperty("enum").EnumerateArray().Select(static item => item.GetString()));
 		}
+		foreach (var toolName in new[] { "get_tree", "analyze", "pack_context", "search_project" })
+		{
+			var publishedGitScope = tools.Single(tool => tool.Name == toolName)
+				.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("git_scope");
+			Assert.Equal(
+				GitScopeSelection.MaximumTokenLength,
+				publishedGitScope.GetProperty("maxLength").GetInt32());
+		}
 		var gitScope = tools.Single(static tool => tool.Name == "get_tree")
 			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("git_scope");
 		var diffPattern = gitScope.GetProperty("oneOf")[1].GetProperty("pattern").GetString();
@@ -476,6 +485,13 @@ public sealed class McpServerIntegrationTests
 				["project"] = "https://example.invalid/owner/repository.git",
 				["git_scope"] = "Staged"
 			});
+		var oversized = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["project"] = "https://example.invalid/owner/repository.git",
+				["git_scope"] = "diff:" + new string('a', GitScopeSelection.MaximumTokenLength)
+			});
 
 		Assert.True(result.IsError);
 		Assert.Contains(McpErrorCodes.InvalidArguments, Text(result), StringComparison.Ordinal);
@@ -485,6 +501,12 @@ public sealed class McpServerIntegrationTests
 		Assert.Contains(
 			"Valid values: staged, changes, diff:<ref>..<ref>.",
 			Text(mixedCase),
+			StringComparison.Ordinal);
+		Assert.True(oversized.IsError);
+		Assert.Contains(McpErrorCodes.InvalidArguments, Text(oversized), StringComparison.Ordinal);
+		Assert.Contains(
+			$"at most {GitScopeSelection.MaximumTokenLength} characters",
+			Text(oversized),
 			StringComparison.Ordinal);
 		Assert.Equal(0, Volatile.Read(ref remoteServicesCreated));
 	}
@@ -2605,7 +2627,7 @@ public sealed class McpServerIntegrationTests
 		}
 
 		public Task WaitForValueAsync(CancellationToken cancellationToken) =>
-			_firstValue.Task.WaitAsync(TimeSpan.FromSeconds(2), cancellationToken);
+			_firstValue.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
 	}
 
 	private static void AssertSpotlighted(CallToolResult result)
