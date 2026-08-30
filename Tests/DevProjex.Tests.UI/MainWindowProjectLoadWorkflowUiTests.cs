@@ -160,7 +160,7 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
     }
 
     [AvaloniaFact]
-    public async Task CancelledBaselineBinaryOnlyFolderSelection_PublishesTreeMetricsWithZeroContentMetrics()
+    public async Task CancelledBaselineBinaryOnlyFolderSelection_PublishesRootOnlyContentMetrics()
     {
         using var project = UiTestProject.CreateWithMixedTextAndBinaryMetricsWorkspace();
         var analyzer = new BlockingFileContentAnalyzer(new FileContentAnalyzer());
@@ -179,7 +179,8 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
 
             var expected = await ComputeExpectedAppliedMetricsAsync(window);
             Assert.NotEqual(ExportOutputMetrics.Empty, expected.TreeMetrics);
-            Assert.Equal(ExportOutputMetrics.Empty, expected.ContentMetrics);
+            Assert.Equal(1, expected.ContentMetrics.Lines);
+            Assert.True(expected.ContentMetrics.Chars > 0);
 
             await UiTestDriver.WaitForStatusMetricsAsync(window, expected.TreeMetrics, expected.ContentMetrics, waitForSelectionRefreshIdle: false);
         }
@@ -191,7 +192,7 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
     }
 
     [AvaloniaFact]
-    public async Task CancelledBaselineBinaryOnlyFileSelection_PublishesZeroContentMetrics()
+    public async Task CancelledBaselineBinaryOnlyFileSelection_PublishesRootOnlyContentMetrics()
     {
         using var project = UiTestProject.CreateWithMixedTextAndBinaryMetricsWorkspace();
         var analyzer = new BlockingFileContentAnalyzer(new FileContentAnalyzer());
@@ -210,7 +211,8 @@ public sealed class MainWindowProjectLoadWorkflowUiTests
 
             var expected = await ComputeExpectedAppliedMetricsAsync(window);
             Assert.NotEqual(ExportOutputMetrics.Empty, expected.TreeMetrics);
-            Assert.Equal(ExportOutputMetrics.Empty, expected.ContentMetrics);
+            Assert.Equal(1, expected.ContentMetrics.Lines);
+            Assert.True(expected.ContentMetrics.Chars > 0);
 
             await UiTestDriver.WaitForStatusMetricsAsync(window, expected.TreeMetrics, expected.ContentMetrics, waitForSelectionRefreshIdle: false);
         }

@@ -144,10 +144,30 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		cancellationToken.ThrowIfCancellationRequested();
 
 		var files = ContentPathOrdering.BuildOrderedUnique(filePaths, cancellationToken);
-		if (files.Length == 0)
-			return new SelectedContentExportResult(string.Empty, null);
-		var redactionContext = transformationContext?.Redaction;
 		outputPathRedaction ??= OutputRootPathPresentation.CaptureRedactionDecision(transformationContext);
+		var output = destination ?? new MaterializedSelectedContentOutput();
+		var hasRootHeader = !string.IsNullOrWhiteSpace(displayRootPath);
+		if (hasRootHeader)
+		{
+			var displayRoot = OutputRootPathPresentation
+				.ResolvePath(displayRootPath!, outputPathRedaction)
+				.Text;
+			await output.AppendLineAsync(
+				ContextRootPresentation.FormatLine(displayRoot),
+				cancellationToken).ConfigureAwait(false);
+		}
+
+		if (files.Length == 0)
+		{
+			if (maxOutputCharacters is { } characterLimit && output.Length > characterLimit)
+				output.Truncate(characterLimit);
+			await output.CompleteAsync(cancellationToken).ConfigureAwait(false);
+			return new SelectedContentExportResult(
+				hasRootHeader ? output.GetMaterializedText() : string.Empty,
+				null);
+		}
+
+		var redactionContext = transformationContext?.Redaction;
 		if (redactionContext is not null)
 		{
 			await redactionContext.Session
@@ -159,7 +179,6 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			cancellationToken);
 		var redactionScope = transformationScope?.Redaction;
 
-		var output = destination ?? new MaterializedSelectedContentOutput();
 		bool anyWritten = false;
 
 		var processedFileCount = 0;
@@ -199,14 +218,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 						cancellationToken);
 
 				processedFileCount++;
-				if (!anyWritten && !string.IsNullOrWhiteSpace(displayRootPath))
+				if (!anyWritten && hasRootHeader)
 				{
-					var displayRoot = OutputRootPathPresentation
-						.ResolvePath(displayRootPath, outputPathRedaction)
-						.Text;
-					await output.AppendLineAsync(
-						ContextRootPresentation.FormatLine(displayRoot),
-						cancellationToken).ConfigureAwait(false);
 					await AppendClipboardBlankLineAsync(output, cancellationToken).ConfigureAwait(false);
 					await AppendClipboardBlankLineAsync(output, cancellationToken).ConfigureAwait(false);
 				}
@@ -284,7 +297,9 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		if (publishCompressionSnapshot)
 			transformationScope?.Compression?.Complete();
 		await output.CompleteAsync(cancellationToken).ConfigureAwait(false);
-		var textOutput = anyWritten ? output.GetMaterializedText() : string.Empty;
+		var textOutput = hasRootHeader || anyWritten
+			? output.GetMaterializedText()
+			: string.Empty;
 
 		return new SelectedContentExportResult(textOutput, snapshot);
 	}

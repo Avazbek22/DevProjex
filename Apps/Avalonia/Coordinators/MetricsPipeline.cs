@@ -1669,15 +1669,11 @@ internal sealed class MetricsPipeline(
                 return _contentMetricsCacheValue;
         }
 
-		var orderedPaths = selection.OrderedFilePaths ??
-			BuildOrderedMetricsFilePaths(selection, cancellationToken);
-
-        if (orderedPaths.Count == 0)
-            return new ContentMetricsPair(ExportOutputMetrics.Empty, ExportOutputMetrics.Empty);
-
 		var contentOnlyAccumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
 		var treeAndContentAccumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
 		contentOnlyAccumulator.AppendRootHeader(contentOnlyRootPath);
+		var orderedPaths = selection.OrderedFilePaths ??
+			BuildOrderedMetricsFilePaths(selection, cancellationToken);
 		lock (_metricsLock)
         {
 			for (var index = 0; index < orderedPaths.Count; index++)
