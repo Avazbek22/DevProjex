@@ -301,6 +301,12 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 		foreach (var path in deleted.ToArray())
 		{
 			cancellationToken.ThrowIfCancellationRequested();
+			if (File.Exists(path))
+			{
+				deleted.Remove(path);
+				included.Add(path);
+				continue;
+			}
 			if (Directory.Exists(path))
 				deleted.Remove(path);
 		}

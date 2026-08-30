@@ -588,7 +588,7 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 	}
 
 	[Fact]
-	public async Task StagedScopeDoesNotTreatARecreatedUntrackedPathAsStagedContent()
+	public async Task StagedScopeReadsCurrentContentForARecreatedDeletedPath()
 	{
 		EnsureGitAvailable();
 		using var temp = new TemporaryDirectory();
@@ -596,7 +596,8 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 		temp.CreateFile("repo/recreated.txt", "committed\n");
 		InitializeCommittedRepository(repositoryRoot, "recreated.txt");
 		RunGit(repositoryRoot, "rm", "--quiet", "--", "recreated.txt");
-		temp.CreateFile("repo/recreated.txt", "working tree\n");
+		var recreatedPath = PathUtility.Normalize(
+			temp.CreateFile("repo/recreated.txt", "working tree\n"));
 
 		var result = await new GitScopePathProvider().ResolveAsync(
 			repositoryRoot,
@@ -605,12 +606,12 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 			TestContext.Current.CancellationToken);
 
 		Assert.True(result.IsAvailable, result.FailureReason);
-		Assert.Empty(result.IncludedPaths);
-		Assert.Equal(1, result.DeletedPathCount);
+		Assert.Equal(recreatedPath, Assert.Single(result.IncludedPaths), PathComparer.Default);
+		Assert.Equal(0, result.DeletedPathCount);
 	}
 
 	[Fact]
-	public async Task StagedProjectPlanDoesNotTreatARecreatedUntrackedPathAsStagedContent()
+	public async Task StagedProjectPlanReadsCurrentContentForARecreatedDeletedPath()
 	{
 		EnsureGitAvailable();
 		using var temp = new TemporaryDirectory();
@@ -618,7 +619,8 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 		temp.CreateFile("repo/recreated.txt", "committed\n");
 		InitializeCommittedRepository(repositoryRoot, "recreated.txt");
 		RunGit(repositoryRoot, "rm", "--quiet", "--", "recreated.txt");
-		temp.CreateFile("repo/recreated.txt", "working tree\n");
+		var recreatedPath = PathUtility.Normalize(
+			temp.CreateFile("repo/recreated.txt", "working tree\n"));
 		var planner = new ProjectContextPlanner(CreateProjectAnalysisService());
 
 		var plan = await planner.BuildStructureAsync(
@@ -633,14 +635,14 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 			TestContext.Current.CancellationToken);
 
 		Assert.False(scopedPlan.HasErrors);
-		Assert.Empty(scopedPlan.IncludedFiles);
-		Assert.Contains(
+		Assert.Equal(recreatedPath, Assert.Single(scopedPlan.IncludedFiles), PathComparer.Default);
+		Assert.DoesNotContain(
 			scopedPlan.Diagnostics,
 			static diagnostic => diagnostic.Code == GitScopeFilter.DeletedDiagnosticCode);
 	}
 
 	[Fact]
-	public async Task DiffScopeDoesNotTreatARecreatedUntrackedPathAsComparedContent()
+	public async Task DiffScopeReadsCurrentContentForARecreatedDeletedPath()
 	{
 		EnsureGitAvailable();
 		using var temp = new TemporaryDirectory();
@@ -651,7 +653,8 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 		RunGit(repositoryRoot, "rm", "--quiet", "--", "recreated.txt");
 		RunGit(repositoryRoot, "commit", "--quiet", "-m", "delete");
 		var deletedCommit = RunGit(repositoryRoot, "rev-parse", "HEAD").Trim();
-		temp.CreateFile("repo/recreated.txt", "working tree\n");
+		var recreatedPath = PathUtility.Normalize(
+			temp.CreateFile("repo/recreated.txt", "working tree\n"));
 
 		var result = await new GitScopePathProvider().ResolveAsync(
 			repositoryRoot,
@@ -660,8 +663,8 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 			TestContext.Current.CancellationToken);
 
 		Assert.True(result.IsAvailable, result.FailureReason);
-		Assert.Empty(result.IncludedPaths);
-		Assert.Equal(1, result.DeletedPathCount);
+		Assert.Equal(recreatedPath, Assert.Single(result.IncludedPaths), PathComparer.Default);
+		Assert.Equal(0, result.DeletedPathCount);
 	}
 
 	[Fact]
