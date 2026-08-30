@@ -577,6 +577,42 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	}
 
 	[AvaloniaFact]
+	public async Task GitScopeModesRefreshWhenGitAvailabilityCompletesAfterRepositoryEvidence()
+	{
+		var viewModel = CreateViewModel();
+		var availability = new TaskCompletionSource<bool>(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		using var coordinator = CreateCoordinator(
+			viewModel,
+			currentPathProvider: () => @"C:\Project",
+			availabilityProvider: static (_, _) => new IgnoreOptionsAvailability(
+				IncludeGitIgnore: true,
+				IncludeSmartIgnore: true,
+				IncludeTrackedGitFilesOnly: true),
+			gitAvailabilityResolver: _ => availability.Task);
+
+		coordinator.PopulateIgnoreOptionsForRootSelection([], @"C:\Project");
+		Assert.Equal(
+			[GitFilteringMode.None, GitFilteringMode.RespectGitIgnore],
+			viewModel.GitFilteringModes.Select(static option => option.Mode));
+
+		var ensureAvailability = coordinator.EnsureGitCliAvailabilityAsync(
+			TestContext.Current.CancellationToken);
+		availability.SetResult(true);
+		await ensureAvailability;
+
+		Assert.Equal(
+			[
+				GitFilteringMode.None,
+				GitFilteringMode.RespectGitIgnore,
+				GitFilteringMode.TrackedFilesOnly,
+				GitFilteringMode.Staged,
+				GitFilteringMode.Changes
+			],
+			viewModel.GitFilteringModes.Select(static option => option.Mode));
+	}
+
+	[AvaloniaFact]
 	public void ProjectCheckpoint_Restore_CompleteStateAfterIncompleteScan_AllowsPersistenceAgain()
 	{
 		const string path = @"C:\Project";
