@@ -194,6 +194,15 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	}
 	""";
 
+	private const string TreeFormatProperty = """
+	"format": {
+	  "type": "string",
+	  "enum": ["markdown", "text", "json", "xml"],
+	  "default": "markdown",
+	  "description": "Tree representation. Markdown is the compact default; text uses drawing characters, while JSON and XML are structured."
+	}
+	""";
+
 	private static readonly string ListProjectsInput = EmptyInput;
 
 	private static readonly string GetTreeInput = $$"""
@@ -210,7 +219,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	    "max_depth": {
 	      "description": "Maximum tree depth from 0 to 1000; accepts an integer or numeric string.",
 	      "oneOf": [ { "type": "integer", "minimum": 0, "maximum": 1000 }, { "type": "string", "pattern": "^[0-9]+$" } ]
-	    }
+	    },
+	    {{TreeFormatProperty}}
 	  },
 	  "additionalProperties": false
 	}

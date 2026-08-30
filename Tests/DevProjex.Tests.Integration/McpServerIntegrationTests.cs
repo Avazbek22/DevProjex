@@ -222,7 +222,7 @@ public sealed class McpServerIntegrationTests
 		var expectedParameters = new Dictionary<string, string[]>(StringComparer.Ordinal)
 		{
 			["list_projects"] = [],
-			["get_tree"] = ["project", "branch", "include_patterns", "exclude_patterns", "tracked_only", "git_scope", "max_file_bytes", "max_depth"],
+			["get_tree"] = ["project", "branch", "include_patterns", "exclude_patterns", "tracked_only", "git_scope", "max_file_bytes", "max_depth", "format"],
 			["analyze"] = ["project", "branch", "paths", "include_patterns", "exclude_patterns", "profile", "detail", "tracked_only", "git_scope", "top_files", "max_file_bytes"],
 			["pack_context"] = ["project", "branch", "paths", "include_patterns", "exclude_patterns", "profile", "detail", "tracked_only", "git_scope", "max_tokens", "max_file_bytes", "view", "format"],
 			["read_pack"] = ["pack_id", "start_line", "end_line"],
@@ -242,6 +242,7 @@ public sealed class McpServerIntegrationTests
 			Assert.DoesNotContain("tracked_only", required);
 			Assert.DoesNotContain("git_scope", required);
 			Assert.DoesNotContain("max_tokens", required);
+			Assert.DoesNotContain("format", required);
 		}
 		var searchBoolean = tools.Single(static tool => tool.Name == "search_project")
 			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("ignore_case");
@@ -249,6 +250,12 @@ public sealed class McpServerIntegrationTests
 		var searchPattern = tools.Single(static tool => tool.Name == "search_project")
 			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("pattern");
 		Assert.Equal(4096, searchPattern.GetProperty("maxLength").GetInt32());
+		var treeFormat = tools.Single(static tool => tool.Name == "get_tree")
+			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("format");
+		Assert.Equal("markdown", treeFormat.GetProperty("default").GetString());
+		Assert.Equal(
+			["markdown", "text", "json", "xml"],
+			treeFormat.GetProperty("enum").EnumerateArray().Select(static item => item.GetString()));
 		foreach (var name in new[] { "analyze", "pack_context" })
 		{
 			var detail = tools.Single(tool => tool.Name == name)
@@ -322,6 +329,72 @@ public sealed class McpServerIntegrationTests
 				Assert.Equal(512, items.GetProperty("maxLength").GetInt32());
 			}
 		}
+	}
+
+	[Fact]
+	public async Task GetTreeDefaultsToMarkdownAndSupportsEveryPublishedFormat()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		Directory.CreateDirectory(Path.Combine(project, "src"));
+		File.WriteAllText(Path.Combine(project, "src", "App.cs"), "internal sealed class App { }\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var markdown = await server.CallAsync("get_tree");
+		var text = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "text" });
+		var json = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "json" });
+		var xml = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "xml" });
+
+		var markdownBody = ExtractSpotlightBody(Text(markdown));
+		Assert.Contains("- src/", markdownBody, StringComparison.Ordinal);
+		Assert.Contains("  - App.cs", markdownBody, StringComparison.Ordinal);
+		Assert.DoesNotContain('├', markdownBody);
+		Assert.DoesNotContain('└', markdownBody);
+		Assert.DoesNotContain('│', markdownBody);
+		Assert.Contains("└── src", ExtractSpotlightBody(Text(text)), StringComparison.Ordinal);
+		using (JsonDocument.Parse(ExtractSpotlightBody(Text(json)))) { }
+		_ = System.Xml.Linq.XDocument.Parse(ExtractSpotlightBody(Text(xml)));
+		foreach (var result in new[] { markdown, text, json, xml })
+		{
+			Assert.NotEqual(true, result.IsError);
+			AssertSpotlighted(result);
+		}
+	}
+
+	[Fact]
+	public async Task GetTreeRejectsInvalidFormatsAndNeverReturnsTruncatedStructuredDocuments()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		for (var index = 0; index < 2_100; index++)
+		{
+			File.WriteAllText(
+				Path.Combine(project, $"File{index:D4}.txt"),
+				index.ToString(System.Globalization.CultureInfo.InvariantCulture));
+		}
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var invalid = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "yaml" });
+		var truncated = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "json" });
+
+		Assert.True(invalid.IsError);
+		Assert.Contains(McpErrorCodes.InvalidArguments, Text(invalid), StringComparison.Ordinal);
+		Assert.Contains("markdown, text, json, xml", Text(invalid), StringComparison.Ordinal);
+		Assert.True(truncated.IsError);
+		Assert.Contains(McpErrorCodes.PayloadTruncated, Text(truncated), StringComparison.Ordinal);
+		Assert.Contains("max_depth", Text(truncated), StringComparison.Ordinal);
+		Assert.Contains("include_patterns", Text(truncated), StringComparison.Ordinal);
+		Assert.DoesNotContain("<untrusted-data-", Text(truncated), StringComparison.Ordinal);
 	}
 
 	[Fact]

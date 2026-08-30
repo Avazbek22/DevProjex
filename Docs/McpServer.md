@@ -99,7 +99,7 @@ open-world.
 | Tool | Parameters | Result and limits |
 |---|---|---|
 | `list_projects` | none | Allowed local roots with path, name, type, and available local profiles. Remote projects are addressed by URL and are not added to this list. |
-| `get_tree` | `project?`, `branch?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `max_depth?` | Effective text tree; at most 2,000 lines. |
+| `get_tree` | `project?`, `branch?`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `max_depth?`, `format?` | Effective tree in `markdown` (default), `text`, `json`, or `xml`; at most 2,000 lines. Markdown is the compact, token-efficient default. |
 | `analyze` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `top_files?`, `max_file_bytes?` | File, character, and token metrics plus the requested largest files by tokens. Metrics reflect the effective detail level. |
 | `pack_context` | `project?`, `branch?`, `paths?`, `include_patterns?`, `exclude_patterns?`, `profile?`, `detail?`, `tracked_only?`, `git_scope?`, `max_tokens?`, `max_file_bytes?`, `view?`, `format?` | Exact DevProjex context pipeline. `max_tokens` limits estimated content tokens. Inline through 50,000 characters; otherwise returns a `pack_id` valid until this server process exits. After restart, call `pack_context` again. |
 | `read_pack` | `pack_id`, `start_line?`, `end_line?` | Inclusive, 1-based range; at most 1,000 lines or 50,000 characters per call. Call `pack_context` again after server restart. |
@@ -121,6 +121,9 @@ return the useful payload directly in the first text block in `content`. This
 avoids JSON escaping and unnecessary token overhead for trees, source text,
 search context, and packs. Truncation and continuation metadata is embedded in
 plain-text trailers such as `[Tree truncated ...]` and `[Showing lines ...]`.
+For `get_tree`, only `text` and `markdown` use the truncation trailer. If a JSON
+or XML tree would exceed 2,000 lines, the tool returns
+`DPX-MCP-PAYLOAD-TRUNCATED` with narrowing guidance instead of a partial document.
 Git-state deletion warnings are appended outside project spotlight blocks so
 clients can distinguish trusted diagnostics from untrusted file data.
 
@@ -153,6 +156,7 @@ report progress.
 
 Defaults:
 
+- `get_tree.format`: `markdown`
 - `pack_context.view`: `tree-content`
 - `pack_context.format`: `markdown`
 - `pack_context.detail`: `full`

@@ -56,7 +56,9 @@ internal sealed class DevProjexMcpTools(
 				"max_depth",
 				"tracked_only",
 				"git_scope",
-				"max_file_bytes");
+				"max_file_bytes",
+				"format");
+			var format = ParseTreeFormat(arguments.OptionalString("format") ?? "markdown");
 			var plan = await Projects.BuildPlanAsync(
 				arguments.OptionalString("project"),
 				arguments.OptionalString("branch"),
@@ -83,12 +85,21 @@ internal sealed class DevProjexMcpTools(
 						treeWriter,
 						plan.SourceRoot,
 						renderedTree,
-						McpProjectService.ResolveAddressDocumentRoot(plan),
+						format,
+						displayRootPath: McpProjectService.ResolveAddressDocumentRoot(plan),
 						cancellationToken: cancellationToken)
 					.ConfigureAwait(false);
 			}
 			catch (McpLineLimitReachedException)
 			{
+				if (format is TreeTextFormat.Json or TreeTextFormat.Xml)
+				{
+					throw new McpToolException(
+						McpErrorCodes.PayloadTruncated,
+						$"{McpErrorCodes.PayloadTruncated}: the {format.ToString().ToLowerInvariant()} tree exceeds " +
+						$"the {MaximumTreeLines}-line result limit. Reduce max_depth or narrow include_patterns " +
+						"and exclude_patterns, then retry.");
+				}
 			}
 
 			var body = treeWriter.Text;
@@ -553,6 +564,17 @@ internal sealed class DevProjexMcpTools(
 		_ => throw new McpToolException(
 			McpErrorCodes.InvalidArguments,
 			$"{McpErrorCodes.InvalidArguments}: invalid format '{token}'. Valid values: text, markdown, json, xml.")
+	};
+
+	private static TreeTextFormat ParseTreeFormat(string token) => token switch
+	{
+		"markdown" => TreeTextFormat.Markdown,
+		"text" => TreeTextFormat.Ascii,
+		"json" => TreeTextFormat.Json,
+		"xml" => TreeTextFormat.Xml,
+		_ => throw new McpToolException(
+			McpErrorCodes.InvalidArguments,
+			$"{McpErrorCodes.InvalidArguments}: invalid format '{token}'. Valid values: markdown, text, json, xml.")
 	};
 
 	private static string BuildSpotlightedPackContent(

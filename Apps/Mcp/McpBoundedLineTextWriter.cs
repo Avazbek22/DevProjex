@@ -24,11 +24,40 @@ internal sealed class McpBoundedLineTextWriter : TextWriter
 		? string.Join('\n', _lines)
 		: string.Join('\n', _lines.Append(_currentLine.ToString()));
 
+	public override void Write(char value)
+	{
+		Span<char> character = stackalloc char[1];
+		character[0] = value;
+		WriteCharacters(character, CancellationToken.None);
+	}
+
+	public override void Write(char[] buffer, int index, int count)
+	{
+		ArgumentNullException.ThrowIfNull(buffer);
+		WriteCharacters(buffer.AsSpan(index, count), CancellationToken.None);
+	}
+
+	public override void Write(string? value)
+	{
+		if (value is not null)
+			WriteCharacters(value.AsSpan(), CancellationToken.None);
+	}
+
+	public override void Write(ReadOnlySpan<char> buffer) =>
+		WriteCharacters(buffer, CancellationToken.None);
+
 	public override Task WriteAsync(
 		ReadOnlyMemory<char> buffer,
 		CancellationToken cancellationToken = default)
 	{
-		var characters = buffer.Span;
+		WriteCharacters(buffer.Span, cancellationToken);
+		return Task.CompletedTask;
+	}
+
+	private void WriteCharacters(
+		ReadOnlySpan<char> characters,
+		CancellationToken cancellationToken)
+	{
 		for (var index = 0; index < characters.Length; index++)
 		{
 			if ((index & 0xFFF) == 0)
@@ -58,8 +87,6 @@ internal sealed class McpBoundedLineTextWriter : TextWriter
 				ThrowLimitReached();
 			_currentLine.Append(character);
 		}
-
-		return Task.CompletedTask;
 	}
 
 	private void CompleteLine()
