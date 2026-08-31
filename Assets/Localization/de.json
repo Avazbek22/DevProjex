@@ -1028,6 +1028,8 @@
   "Terminal.Tui.Diagnostics.None": "Keine Diagnosen für den aktuellen Kontext.",
   "Terminal.Tui.Export.DestinationRequired": "Geben Sie ein Exportziel ein.",
   "Terminal.Tui.Export.RedactionInline": "Geheimnisse und private Daten werden im exportierten Artefakt geschwärzt.",
+  "Terminal.Tui.Export.SecretsOnlyRedactionInline": "Geheimnisse werden im exportierten Artefakt geschwärzt. Private Daten werden nicht geschwärzt.",
+  "Terminal.Tui.Export.PrivateDataOnlyRedactionInline": "Private Daten werden im exportierten Artefakt geschwärzt. Geheimnisse werden nicht geschwärzt.",
   "Terminal.Tui.Redaction": "Maskierung",
   "Terminal.Tui.Operation.BusyHint": "Wird ausgeführt: {0} — Esc zum Abbrechen",
   "Terminal.Tui.Overwrite": "Überschreiben",

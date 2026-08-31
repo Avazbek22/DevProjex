@@ -261,8 +261,15 @@ public sealed class TerminalWorkspace
 			new[] { L("Terminal.Tui.Filters"), Fit($"{gitMode}; {exclusions}") },
 			new[] { L("Terminal.Tui.Diagnostics"), summary.DiagnosticCount.ToString("N0", CultureInfo.CurrentCulture) }
 		};
-		if (summary.RedactionEnabled)
-			rows.Add([L("Terminal.Tui.Redaction"), L("Terminal.Tui.Export.RedactionInline")]);
+		var redactionKey = (summary.SecretsRedacted, summary.PrivateDataRedacted) switch
+		{
+			(true, true) => "Terminal.Tui.Export.RedactionInline",
+			(true, false) => "Terminal.Tui.Export.SecretsOnlyRedactionInline",
+			(false, true) => "Terminal.Tui.Export.PrivateDataOnlyRedactionInline",
+			_ => null
+		};
+		if (redactionKey is not null)
+			rows.Add([L("Terminal.Tui.Redaction"), L(redactionKey)]);
 		return string.Join(Environment.NewLine, TerminalColumnLayout.Format(rows));
 	}
 

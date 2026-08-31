@@ -1022,6 +1022,8 @@
   "Terminal.Tui.Diagnostics.None": "Không có chẩn đoán cho bối cảnh hiện tại.",
   "Terminal.Tui.Export.DestinationRequired": "Nhập điểm đến xuất khẩu.",
   "Terminal.Tui.Export.RedactionInline": "Bí mật và dữ liệu cá nhân được loại bỏ trong tệp xuất khẩu.",
+  "Terminal.Tui.Export.SecretsOnlyRedactionInline": "Bí mật được che trong tệp xuất. Dữ liệu riêng tư không được che.",
+  "Terminal.Tui.Export.PrivateDataOnlyRedactionInline": "Dữ liệu riêng tư được che trong tệp xuất. Bí mật không được che.",
   "Terminal.Tui.Redaction": "Che dữ liệu",
   "Terminal.Tui.Operation.BusyHint": "Đang chạy: {0} — Nhấn Esc để hủy",
   "Terminal.Tui.Overwrite": "Ghi đè",

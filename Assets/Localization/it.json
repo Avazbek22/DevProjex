@@ -1028,6 +1028,8 @@
   "Terminal.Tui.Diagnostics.None": "Nessuna diagnostica per il contesto attuale.",
   "Terminal.Tui.Export.DestinationRequired": "Inserisci una destinazione di esportazione.",
   "Terminal.Tui.Export.RedactionInline": "I segreti e i dati privati vengono oscurati nell'artefatto esportato.",
+  "Terminal.Tui.Export.SecretsOnlyRedactionInline": "I segreti vengono oscurati nell'artefatto esportato. I dati privati non vengono oscurati.",
+  "Terminal.Tui.Export.PrivateDataOnlyRedactionInline": "I dati privati vengono oscurati nell'artefatto esportato. I segreti non vengono oscurati.",
   "Terminal.Tui.Redaction": "Oscuramento",
   "Terminal.Tui.Operation.BusyHint": "In esecuzione: {0} — Esc per annullare",
   "Terminal.Tui.Overwrite": "Sovrascrivi",

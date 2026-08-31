@@ -1028,6 +1028,8 @@
   "Terminal.Tui.Diagnostics.None": "Joriy kontekst uchun diagnostika mavjud emas.",
   "Terminal.Tui.Export.DestinationRequired": "Eksport manzilini kiriting.",
   "Terminal.Tui.Export.RedactionInline": "Sirli va shaxsiy ma'lumotlar eksport qilinadigan artefaktda yashirilgan.",
+  "Terminal.Tui.Export.SecretsOnlyRedactionInline": "Eksport qilingan artefaktda sirlar yashiriladi. Shaxsiy ma’lumotlar yashirilmaydi.",
+  "Terminal.Tui.Export.PrivateDataOnlyRedactionInline": "Eksport qilingan artefaktda shaxsiy ma’lumotlar yashiriladi. Sirlar yashirilmaydi.",
   "Terminal.Tui.Redaction": "Maskalash",
   "Terminal.Tui.Operation.BusyHint": "Ishga tushirilmoqda: {0} — Bekor qilish uchun Esc",
   "Terminal.Tui.Overwrite": "Ustidan yozish",

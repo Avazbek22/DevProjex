@@ -1022,6 +1022,8 @@
   "Terminal.Tui.Diagnostics.None": "現在のコンテキストには診断なし。",
   "Terminal.Tui.Export.DestinationRequired": "エクスポート先を入力してください。",
   "Terminal.Tui.Export.RedactionInline": "エクスポートされたアーティファクトには、機密情報や個人データがマスクされています。",
+  "Terminal.Tui.Export.SecretsOnlyRedactionInline": "エクスポートされたアーティファクトでは機密情報がマスクされます。個人データはマスクされません。",
+  "Terminal.Tui.Export.PrivateDataOnlyRedactionInline": "エクスポートされたアーティファクトでは個人データがマスクされます。機密情報はマスクされません。",
   "Terminal.Tui.Redaction": "マスキング",
   "Terminal.Tui.Operation.BusyHint": "実行中: {0} — キャンセルするには Esc を押してください",
   "Terminal.Tui.Overwrite": "上書き",

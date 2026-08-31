@@ -1022,6 +1022,8 @@
   "Terminal.Tui.Diagnostics.None": "当前上下文没有诊断。",
   "Terminal.Tui.Export.DestinationRequired": "输入导出目的地。",
   "Terminal.Tui.Export.RedactionInline": "导出的文件中已删除机密和私人数据。",
+  "Terminal.Tui.Export.SecretsOnlyRedactionInline": "导出的产物中会隐藏机密信息。私人数据不会被隐藏。",
+  "Terminal.Tui.Export.PrivateDataOnlyRedactionInline": "导出的产物中会隐藏私人数据。机密信息不会被隐藏。",
   "Terminal.Tui.Redaction": "脱敏",
   "Terminal.Tui.Operation.BusyHint": "正在运行: {0} — 按 Esc 取消",
   "Terminal.Tui.Overwrite": "覆盖",

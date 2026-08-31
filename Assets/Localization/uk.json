@@ -1022,6 +1022,8 @@
   "Terminal.Tui.Diagnostics.None": "Немає діагностик для поточного контексту.",
   "Terminal.Tui.Export.DestinationRequired": "Введіть пункт призначення для експорту.",
   "Terminal.Tui.Export.RedactionInline": "Секрети та приватні дані видалено з експортованого артефакту.",
+  "Terminal.Tui.Export.SecretsOnlyRedactionInline": "Секрети маскуються в експортованому артефакті. Приватні дані не маскуються.",
+  "Terminal.Tui.Export.PrivateDataOnlyRedactionInline": "Приватні дані маскуються в експортованому артефакті. Секрети не маскуються.",
   "Terminal.Tui.Redaction": "Маскування",
   "Terminal.Tui.Operation.BusyHint": "Виконується: {0} — Esc для скасування",
   "Terminal.Tui.Overwrite": "Перезаписати",

@@ -1022,6 +1022,8 @@
   "Terminal.Tui.Diagnostics.None": "현재 컨텍스트에 대한 진단 없음",
   "Terminal.Tui.Export.DestinationRequired": "내보낼 대상 경로를 입력하세요.",
   "Terminal.Tui.Export.RedactionInline": "내보낸 아티팩트에서는 비밀 및 개인 데이터가 삭제됩니다.",
+  "Terminal.Tui.Export.SecretsOnlyRedactionInline": "내보낸 아티팩트에서 비밀 정보는 마스킹됩니다. 개인 데이터는 마스킹되지 않습니다.",
+  "Terminal.Tui.Export.PrivateDataOnlyRedactionInline": "내보낸 아티팩트에서 개인 데이터는 마스킹됩니다. 비밀 정보는 마스킹되지 않습니다.",
   "Terminal.Tui.Redaction": "마스킹",
   "Terminal.Tui.Operation.BusyHint": "실행 중: {0} — 취소하려면 Esc",
   "Terminal.Tui.Overwrite": "덮어쓰기",

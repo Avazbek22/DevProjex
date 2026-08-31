@@ -1028,6 +1028,8 @@
   "Terminal.Tui.Diagnostics.None": "Ағымдағы контекстке диагностика жоқ.",
   "Terminal.Tui.Export.DestinationRequired": "Экспорттау орнын енгізіңіз.",
   "Terminal.Tui.Export.RedactionInline": "Экспортталған артефактта құпия және жеке деректер жойылады.",
+  "Terminal.Tui.Export.SecretsOnlyRedactionInline": "Экспортталған артефактта құпиялар жасырылады. Жеке деректер жасырылмайды.",
+  "Terminal.Tui.Export.PrivateDataOnlyRedactionInline": "Экспортталған артефактта жеке деректер жасырылады. Құпиялар жасырылмайды.",
   "Terminal.Tui.Redaction": "Маскалау",
   "Terminal.Tui.Operation.BusyHint": "Жүгіру: {0} — Болдырмау үшін Esc басыңыз",
   "Terminal.Tui.Overwrite": "Жазып шығу",

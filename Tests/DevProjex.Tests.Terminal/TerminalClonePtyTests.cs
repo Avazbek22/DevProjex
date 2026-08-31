@@ -368,7 +368,7 @@ public sealed class TerminalClonePtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("Export?", summary, StringComparison.Ordinal);
 		Assert.Contains(
-			"Secrets and private data are redacted",
+			"Secrets and private data are redacted in the exported artifact.",
 			summary,
 			StringComparison.Ordinal);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);

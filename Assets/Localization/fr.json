@@ -1028,6 +1028,8 @@
   "Terminal.Tui.Diagnostics.None": "Aucun diagnostic pour le contexte actuel.",
   "Terminal.Tui.Export.DestinationRequired": "Entrez une destination d'exportation.",
   "Terminal.Tui.Export.RedactionInline": "Les secrets et les données privées sont expurgés dans l'artefact exporté.",
+  "Terminal.Tui.Export.SecretsOnlyRedactionInline": "Les secrets sont expurgés de l’artefact exporté. Les données privées ne le sont pas.",
+  "Terminal.Tui.Export.PrivateDataOnlyRedactionInline": "Les données privées sont expurgées de l’artefact exporté. Les secrets ne le sont pas.",
   "Terminal.Tui.Redaction": "Masquage",
   "Terminal.Tui.Operation.BusyHint": "En cours : {0} — Esc pour annuler",
   "Terminal.Tui.Overwrite": "Écraser",

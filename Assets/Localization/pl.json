@@ -1022,6 +1022,8 @@
   "Terminal.Tui.Diagnostics.None": "Brak diagnostyki dla bieżącego kontekstu.",
   "Terminal.Tui.Export.DestinationRequired": "Wprowadź miejsce docelowe eksportu.",
   "Terminal.Tui.Export.RedactionInline": "Sekrety i dane prywatne są usuwane w wyeksportowanym artefakcie.",
+  "Terminal.Tui.Export.SecretsOnlyRedactionInline": "Sekrety są maskowane w wyeksportowanym artefakcie. Dane prywatne nie są maskowane.",
+  "Terminal.Tui.Export.PrivateDataOnlyRedactionInline": "Dane prywatne są maskowane w wyeksportowanym artefakcie. Sekrety nie są maskowane.",
   "Terminal.Tui.Redaction": "Maskowanie",
   "Terminal.Tui.Operation.BusyHint": "Uruchamianie: {0} — Naciśnij Esc, aby anulować",
   "Terminal.Tui.Overwrite": "Nadpisz",

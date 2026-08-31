@@ -1028,6 +1028,8 @@
   "Terminal.Tui.Diagnostics.None": "No diagnostics for the current context.",
   "Terminal.Tui.Export.DestinationRequired": "Enter an export destination.",
   "Terminal.Tui.Export.RedactionInline": "Secrets and private data are redacted in the exported artifact.",
+  "Terminal.Tui.Export.SecretsOnlyRedactionInline": "Secrets are redacted in the exported artifact. Private data is not redacted.",
+  "Terminal.Tui.Export.PrivateDataOnlyRedactionInline": "Private data is redacted in the exported artifact. Secrets are not redacted.",
   "Terminal.Tui.Redaction": "Redaction",
   "Terminal.Tui.Operation.BusyHint": "Running: {0} — Esc to cancel",
   "Terminal.Tui.Overwrite": "Overwrite",

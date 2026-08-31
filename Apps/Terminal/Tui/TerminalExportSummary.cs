@@ -27,7 +27,8 @@ public sealed record TerminalExportSummary(
 	GitFilteringMode GitMode,
 	IReadOnlyList<ProjectExclusion> Exclusions,
 	int DiagnosticCount,
-	bool RedactionEnabled = false,
+	bool SecretsRedacted = false,
+	bool PrivateDataRedacted = false,
 	string? GitDiffRange = null);
 
 internal enum TerminalExportDecision

@@ -1022,6 +1022,8 @@
   "Terminal.Tui.Diagnostics.None": "當前上下文沒有診斷。",
   "Terminal.Tui.Export.DestinationRequired": "輸入一個匯出目的地。",
   "Terminal.Tui.Export.RedactionInline": "秘密與私人資料在匯出的文物中會被塗黑。",
+  "Terminal.Tui.Export.SecretsOnlyRedactionInline": "匯出的成品中會遮蔽機密資訊。私人資料不會被遮蔽。",
+  "Terminal.Tui.Export.PrivateDataOnlyRedactionInline": "匯出的成品中會遮蔽私人資料。機密資訊不會被遮蔽。",
   "Terminal.Tui.Redaction": "遮蔽",
   "Terminal.Tui.Operation.BusyHint": "執行中：{0} — 按 Esc 取消",
   "Terminal.Tui.Overwrite": "覆寫",

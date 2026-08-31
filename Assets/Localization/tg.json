@@ -1028,6 +1028,8 @@
   "Terminal.Tui.Diagnostics.None": "Ҳеҷ гуна ташхис барои контексти ҷорӣ вуҷуд надорад.",
   "Terminal.Tui.Export.DestinationRequired": "Мақсади содиротро ворид кунед.",
   "Terminal.Tui.Export.RedactionInline": "Сирҳо ва маълумоти хусусӣ дар асари содиршуда нопадид карда мешаванд.",
+  "Terminal.Tui.Export.SecretsOnlyRedactionInline": "Дар артефакти содиршуда сирҳо пинҳон карда мешаванд. Маълумоти хусусӣ пинҳон карда намешавад.",
+  "Terminal.Tui.Export.PrivateDataOnlyRedactionInline": "Дар артефакти содиршуда маълумоти хусусӣ пинҳон карда мешавад. Сирҳо пинҳон карда намешаванд.",
   "Terminal.Tui.Redaction": "Пинҳонсозӣ",
   "Terminal.Tui.Operation.BusyHint": "Дар ҳоли иҷро: {0} — Esc барои бекор кардани амр",
   "Terminal.Tui.Overwrite": "Барнавис кунед",

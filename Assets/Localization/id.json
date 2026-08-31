@@ -1022,6 +1022,8 @@
   "Terminal.Tui.Diagnostics.None": "Tidak ada diagnostik untuk konteks saat ini.",
   "Terminal.Tui.Export.DestinationRequired": "Masukkan tujuan ekspor.",
   "Terminal.Tui.Export.RedactionInline": "Rahasia dan data pribadi disunting dalam artefak yang diekspor.",
+  "Terminal.Tui.Export.SecretsOnlyRedactionInline": "Rahasia disunting dalam artefak yang diekspor. Data pribadi tidak disunting.",
+  "Terminal.Tui.Export.PrivateDataOnlyRedactionInline": "Data pribadi disunting dalam artefak yang diekspor. Rahasia tidak disunting.",
   "Terminal.Tui.Redaction": "Redaksi",
   "Terminal.Tui.Operation.BusyHint": "Berjalan: {0} — Esc untuk membatalkan",
   "Terminal.Tui.Overwrite": "Timpa",

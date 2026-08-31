@@ -4639,7 +4639,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var text = _workspace.BuildExportSummaryText(summary, Math.Max(12, dialogWidth - 26));
 		if (_options.Plain)
 			text = $"{title}\n\n{text}";
-		var dialogHeight = text.Count(static character => character == '\n') + 8;
+		var bodyWidth = Math.Max(20, dialogWidth - 6);
+		var dialogHeight = EstimateWrappedLineCount(text, bodyWidth) + 8;
 		using var dialog = CreateDialog(title, dialogWidth, dialogHeight);
 		var body = new TextView
 		{
@@ -4648,7 +4649,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			Width = Dim.Fill(1),
 			Height = Dim.Fill(1),
 			ReadOnly = true,
-			WordWrap = false,
+			WordWrap = true,
 			ScrollBars = false,
 			Text = text,
 			SchemeName = TerminalWorkspaceTheme.Base

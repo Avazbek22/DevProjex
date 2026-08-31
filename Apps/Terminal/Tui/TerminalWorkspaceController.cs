@@ -1011,7 +1011,8 @@ public sealed class TerminalWorkspaceController(
 			plan.GitReadiness.Mode,
 			(plan.Selection.Exclusions ?? []).OrderBy(static value => value).ToArray(),
 			plan.Diagnostics.Count,
-			plan.Selection.HideSecrets == true || plan.Selection.HidePrivateData == true,
+			plan.Selection.HideSecrets == true,
+			plan.Selection.HidePrivateData == true,
 			plan.Selection.GitDiffRange);
 
 	private static (string Destination, TerminalExportDestinationState State) ResolveDestination(

@@ -588,13 +588,30 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 			"set <option> <value>",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await ExecuteAsync(terminal, "set hide-secrets on", "Hide secrets: enabled");
 
 		await terminal.SendAsync(
 			$":export context markdown \"{destination}\"\r",
 			TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
+		var summary = await terminal.WaitForScreenAsync(
 			"Export?",
 			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains(
+			"Secrets are redacted in the exported",
+			summary,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"Private data is",
+			summary,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"not redacted.",
+			summary,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			"Secrets and private data are redacted",
+			summary,
+			StringComparison.Ordinal);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"Export completed",

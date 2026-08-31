@@ -1285,6 +1285,62 @@ public sealed class TerminalWorkspaceContractTests
 		Assert.DoesNotContain("none available", text, StringComparison.OrdinalIgnoreCase);
 	}
 
+	[Theory]
+	[InlineData(false, false, null)]
+	[InlineData(
+		true,
+		false,
+		"Secrets are redacted in the exported artifact. Private data is not redacted.")]
+	[InlineData(
+		false,
+		true,
+		"Private data is redacted in the exported artifact. Secrets are not redacted.")]
+	[InlineData(
+		true,
+		true,
+		"Secrets and private data are redacted in the exported artifact.")]
+	public void ExportSummaryNamesExactlyTheEnabledRedactionPolicies(
+		bool secretsRedacted,
+		bool privateDataRedacted,
+		string? expected)
+	{
+		using var workspace = new TemporaryDirectory();
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var summary = new TerminalExportSummary(
+			TerminalExportKind.Context,
+			ProjectContextView.Content,
+			ProjectContextDocumentFormat.Markdown,
+			"stdout",
+			TerminalExportDestinationState.Ready,
+			FileCount: 1,
+			FolderCount: 0,
+			Bytes: 1,
+			Characters: 1,
+			EstimatedTokens: 1,
+			GitFilteringMode.None,
+			Exclusions: [],
+			DiagnosticCount: 0,
+			SecretsRedacted: secretsRedacted,
+			PrivateDataRedacted: privateDataRedacted);
+
+		var text = new TerminalWorkspace(
+			services,
+			new TestTerminalEnvironment()).BuildExportSummaryText(summary);
+
+		if (expected is null)
+		{
+			Assert.DoesNotContain("Redaction", text, StringComparison.Ordinal);
+			return;
+		}
+
+		Assert.Contains(expected, text, StringComparison.Ordinal);
+		Assert.Equal(
+			1,
+			text.Split(Environment.NewLine)
+				.Count(static line => line.StartsWith("Redaction", StringComparison.Ordinal)));
+	}
+
 	[Fact]
 	public async Task PreparedExportReportsConflictAndLocalizedSummaryWithoutOverwriting()
 	{

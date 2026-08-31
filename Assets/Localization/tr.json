@@ -1022,6 +1022,8 @@
   "Terminal.Tui.Diagnostics.None": "Mevcut bağlam için tanı yok.",
   "Terminal.Tui.Export.DestinationRequired": "Bir ihracat hedefi girin.",
   "Terminal.Tui.Export.RedactionInline": "İhrac edilen eserde gizli ve özel veriler gizlenmiştir.",
+  "Terminal.Tui.Export.SecretsOnlyRedactionInline": "Gizli bilgiler dışa aktarılan artefaktta maskelenir. Özel veriler maskelenmez.",
+  "Terminal.Tui.Export.PrivateDataOnlyRedactionInline": "Özel veriler dışa aktarılan artefaktta maskelenir. Gizli bilgiler maskelenmez.",
   "Terminal.Tui.Redaction": "Maskeleme",
   "Terminal.Tui.Operation.BusyHint": "Çalıştırılıyor: {0} — İptal için Esc tuşuna basın",
   "Terminal.Tui.Overwrite": "Üzerine yaz",
