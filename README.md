@@ -81,7 +81,7 @@ Works with any language, repository, or project structure.
 * **Code compression** — keeps declarations and signatures, empties implementation bodies; pure code gets ~3× smaller. [How it works ↓](#how-code-compression-works-)
 * **Strip comments** and **strip blank lines** — syntax-aware cleanup across 20 language packs, without modifying source files
 * File tree with checkboxes, search, and name filters
-* Two Git-aware modes: follow `.gitignore`, or show only tracked files
+* Git-aware scopes for `.gitignore`, tracked files, staged files, all current changes, or a ref-to-ref diff
 
 **Preview and export**
 * Live preview (tree / content / both) before you copy or export
@@ -193,7 +193,7 @@ The server enforces hard security boundaries on top of DevProjex's read-only des
 * **Secret redaction is always on in MCP mode and has no off switch** — not in the server flags, not in the tool schemas, so neither a config mistake nor the agent itself can turn it off
 * **Optional private-data masking** via `devprojex mcp --hide-private-data`, mirroring the CLI flag
 * **Root jail** — local access is pinned to startup roots; opt-in remote Git URL checkouts are pinned on first use; symlink and junction escapes are rejected
-* Smart Ignore, `.gitignore`, and tracked-only Git modes stay active; agent paths and globs can only narrow the selection
+* Smart Ignore and the selected Git baseline or scope stay active; agent paths and globs can only narrow the selection
 * Returned file contents are wrapped in untrusted-data markers to resist prompt injection
 
 The missing off switch is a control guarantee, not a detection guarantee. DevProjex
@@ -232,6 +232,9 @@ Smart Ignore is a local, deterministic filter — not an AI model, and not one b
 |---|---|
 | `.gitignore` mode | Tracked files, plus untracked files not excluded by `.gitignore` (with nested rules and negations) |
 | Tracked-files-only | Only files currently recorded in the Git index |
+| Staged | Files with staged changes |
+| Changes | Staged, unstaged, and non-ignored untracked files |
+| Diff | Files changed between two Git references |
 
 **You stay in control.** Smart Ignore, the Git mode, and basic filters (hidden files, dot-files, empty folders) all work together and can be turned on or off one by one. "Ignored" means excluded from the current view, copy, or export — it never deletes anything from your project.
 
