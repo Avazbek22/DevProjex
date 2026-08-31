@@ -29,7 +29,7 @@ public sealed record GitScopePathResult(
 
 	public bool ContainsPath(string path)
 	{
-		return TryGetOwningMatcher(path, out var owner, out _)
+		return TryGetOwningMatcher(path, out var owner)
 			? owner.Contains(path)
 			: IncludedPaths.Contains(path);
 	}
@@ -39,18 +39,20 @@ public sealed record GitScopePathResult(
 		if (PathMatchers is null)
 			return null;
 
-		return TryGetOwningMatcher(path, out var owner, out var relativeIdentity)
-			? owner.RepositoryRootPath + '\0' + relativeIdentity
-			: null;
+		if (!TryGetOwningMatcher(path, out var owner) ||
+		    !owner.TryGetPathIdentity(path, out var relativeIdentity))
+		{
+			return null;
+		}
+
+		return owner.RepositoryRootPath + '\0' + relativeIdentity;
 	}
 
 	private bool TryGetOwningMatcher(
 		string path,
-		out GitTrackedPathIndex owner,
-		out string relativeIdentity)
+		out GitTrackedPathIndex owner)
 	{
 		owner = null!;
-		relativeIdentity = string.Empty;
 		if (PathMatchers is null)
 			return false;
 
@@ -58,13 +60,12 @@ public sealed record GitScopePathResult(
 		{
 			var candidate = PathMatchers[index];
 			if ((owner is not null && candidate.RepositoryRootPath.Length <= owner.RepositoryRootPath.Length) ||
-			    !candidate.TryGetPathIdentity(path, out var candidateIdentity))
+			    !candidate.OwnsPath(path))
 			{
 				continue;
 			}
 
 			owner = candidate;
-			relativeIdentity = candidateIdentity;
 		}
 
 		return owner is not null;

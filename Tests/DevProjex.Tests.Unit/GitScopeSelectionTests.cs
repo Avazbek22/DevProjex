@@ -305,9 +305,10 @@ public sealed class GitScopeSelectionTests
 	[Fact]
 	public void TreeNarrowingUsesRepositoryPathIdentityWithoutChangingSetSemantics()
 	{
-		var rootPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "dpx-git-scope-identity"));
+		using var temp = new TemporaryDirectory();
+		var rootPath = temp.CreateFolder("repo");
 		var gitPath = Path.Combine(rootPath, "MixedCase.cs");
-		var inventoriedPath = Path.Combine(rootPath, "mixedcase.cs");
+		var inventoriedPath = temp.CreateFile("repo/mixedcase.cs", "content");
 		var root = new TreeNodeDescriptor(
 			"project",
 			rootPath,
@@ -335,6 +336,52 @@ public sealed class GitScopeSelectionTests
 		Assert.DoesNotContain(inventoriedPath, scope.IncludedPaths);
 		Assert.True(scope.ContainsPath(inventoriedPath));
 		Assert.Equal([inventoriedPath], narrowed.OrderedFilePaths);
+	}
+
+	[Fact]
+	public void TreeNarrowingRejectsAnAmbiguousRepositoryPathAlias()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("The test requires a case-sensitive file system.");
+
+		using var temp = new TemporaryDirectory();
+		var rootPath = temp.CreateFolder("repo");
+		var upperPath = temp.CreateFile("repo/Foo.cs", "upper");
+		var lowerPath = temp.CreateFile("repo/foo.cs", "lower");
+		if (Directory.EnumerateFiles(rootPath, "*.cs").Count() < 2)
+			Assert.Skip("The temporary file system is case-insensitive.");
+
+		var root = new TreeNodeDescriptor(
+			"project",
+			rootPath,
+			true,
+			false,
+			"folder",
+			[
+				new TreeNodeDescriptor("Foo.cs", upperPath, false, false, "csharp", []),
+				new TreeNodeDescriptor("foo.cs", lowerPath, false, false, "csharp", [])
+			]);
+		var scope = new GitScopePathResult(
+			true,
+			new HashSet<string>([upperPath], StringComparer.Ordinal),
+			0,
+			PathMatchers:
+			[
+				new GitTrackedPathIndex(
+					rootPath,
+					["Foo.cs"],
+					new GitPathComparisonSemantics(IgnoreCase: true, NormalizeUnicode: false))
+			]);
+
+		var narrowed = GitScopeFilter.ApplyToTree(
+			new BuildTreeResult(root, false, false, [upperPath, lowerPath]),
+			scope,
+			TestContext.Current.CancellationToken);
+
+		Assert.True(scope.ContainsPath(upperPath));
+		Assert.False(scope.ContainsPath(lowerPath));
+		Assert.Equal([upperPath], narrowed.OrderedFilePaths, StringComparer.Ordinal);
+		Assert.Equal("Foo.cs", Assert.Single(narrowed.Root.Children).DisplayName);
 	}
 
 	[Fact]
