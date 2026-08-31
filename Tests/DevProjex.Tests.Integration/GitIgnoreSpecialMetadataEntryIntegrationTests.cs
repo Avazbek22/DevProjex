@@ -16,7 +16,7 @@ public sealed class GitIgnoreSpecialMetadataEntryIntegrationTests
 			return;
 		}
 
-		using var workspace = new TemporaryDirectory();
+		using var workspace = new TemporaryDirectory("/tmp");
 		workspace.CreateFile("src/App.cs", "class App {}\n");
 		var gitMetadataPath = Path.Combine(workspace.Path, ".git");
 		Socket? socket = null;
@@ -70,7 +70,7 @@ public sealed class GitIgnoreSpecialMetadataEntryIntegrationTests
 			return;
 		}
 
-		using var workspace = new TemporaryDirectory();
+		using var workspace = new TemporaryDirectory("/tmp");
 		var repositoryRoot = workspace.CreateDirectory("repository");
 		workspace.CreateDirectory("repository/.git");
 		var scopeRoot = workspace.CreateDirectory("repository/src");
