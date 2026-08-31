@@ -68,6 +68,7 @@ internal sealed class McpServices : IDisposable
 			new DartArtifactsIgnoreRule()
 		]);
 		var treeExport = new TreeExportService();
+		var gitPathComparisonSemanticsResolver = GitConfigPathComparisonSemanticsResolver.Instance;
 		var guardedFileOpener = new McpRootJailFileStreamOpener(roots);
 		var contentAnalyzer = new FileContentAnalyzer(guardedFileOpener.OpenRead);
 		var preparedContentAnalyzer = new FileContentAnalyzer();
@@ -105,7 +106,9 @@ internal sealed class McpServices : IDisposable
 			new BuildTreeUseCase(treeBuilder, treePresenter),
 			new FilterOptionSelectionService(),
 			new IgnoreOptionsService(localization),
-			new IgnoreRulesService(smartIgnore),
+			new IgnoreRulesService(
+				smartIgnore,
+				pathComparisonSemanticsResolver: gitPathComparisonSemanticsResolver),
 			treeExport,
 			contentAnalyzer);
 		string Omission(FileContentClassification classification) =>
@@ -126,7 +129,7 @@ internal sealed class McpServices : IDisposable
 				contentAnalyzer,
 				new ProjectSelectionResolver(profileStore, new PortableProjectProfileService().LoadAsync),
 				profileStore,
-				new GitScopePathProvider(),
+				new GitScopePathProvider(gitPathComparisonSemanticsResolver),
 				redactionSession,
 				compressionSession,
 				new SecretRedactionOutputPreparer(contentAnalyzer, preparedContentAnalyzer));

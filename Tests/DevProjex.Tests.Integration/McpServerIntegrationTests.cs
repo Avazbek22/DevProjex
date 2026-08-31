@@ -2142,6 +2142,32 @@ public sealed class McpServerIntegrationTests
 		Assert.Empty(treeSignaturesDocument.RootElement.GetProperty("files").EnumerateArray());
 	}
 
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task McpRespectGitIgnoreUsesRepositoryIgnoreCaseSemantics(bool ignoreCase)
+	{
+		using var workspace = new TemporaryDirectory();
+		var repository = workspace.CreateDirectory("repository");
+		File.WriteAllText(Path.Combine(repository, "Baseline.txt"), "baseline\n");
+		InitializeCommittedRepository(repository);
+
+		RunGit(repository, "config", "core.ignorecase", ignoreCase ? "true" : "false");
+		File.WriteAllText(Path.Combine(repository, ".gitignore"), "caseignored.cs\n");
+		File.WriteAllText(Path.Combine(repository, "CaseIgnored.cs"), "case-marker\n");
+
+		await using var server = await McpTestServer.StartAsync(
+			repository,
+			workspace.Path,
+			gitMode: GitFilteringMode.RespectGitIgnore);
+		var tree = await server.CallAsync("get_tree");
+
+		if (ignoreCase)
+			Assert.DoesNotContain("CaseIgnored.cs", Text(tree), StringComparison.Ordinal);
+		else
+			Assert.Contains("CaseIgnored.cs", Text(tree), StringComparison.Ordinal);
+	}
+
 	[Fact]
 	public async Task TrackedOnlyStringFiltersEverySelectionToolAndRejectsNonGitRoots()
 	{
