@@ -491,7 +491,7 @@
   "Terminal.Validation.DesktopGitMode": "Desktop支援none、gitignore、tracked、staged和changes；diff範圍請使用tree、analyze、export context、TUI或MCP。",
   "Terminal.Error.ProfileTransientGitMode": "瞬時Git模式無法儲存至設定檔；請使用none、gitignore或tracked。",
   "Terminal.Diagnostic.GitStateUnavailable": "要求的Git狀態無法使用。請檢查Git、儲存庫及參照。",
-  "Terminal.Diagnostic.GitStateDeleted": "Git狀態中已刪除的{0}個檔案未包含在內。",
+  "Terminal.Diagnostic.GitStateDeleted": "從Git狀態中排除的已刪除檔案：{0}個。",
   "Terminal.Option.Exclude": "設定普通排除。",
   "Terminal.Option.HideSecrets": "遮蔽所選文字檔案中偵測到的值。不檢查二進位檔案；未找到符合項目並不保證安全。",
   "Terminal.Option.HidePrivateData": "遮蔽所選文字檔案中偵測到的個人資料。不檢查二進位檔案；未找到符合項目並不保證隱私安全。",

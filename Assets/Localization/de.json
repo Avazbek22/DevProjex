@@ -497,7 +497,7 @@
   "Terminal.Validation.DesktopGitMode": "Desktop unterstützt none, gitignore, tracked, staged und changes; verwenden Sie tree, analyze, export context, TUI oder MCP für diff-Bereiche.",
   "Terminal.Error.ProfileTransientGitMode": "Momentane Git-Modi können nicht in Profilen gespeichert werden; verwenden Sie none, gitignore oder tracked.",
   "Terminal.Diagnostic.GitStateUnavailable": "Der angeforderte Git-Status ist nicht verfügbar. Prüfen Sie Git, das Repository und die Referenzen.",
-  "Terminal.Diagnostic.GitStateDeleted": "{0} gelöschte Dateien aus dem Git-Status werden nicht einbezogen.",
+  "Terminal.Diagnostic.GitStateDeleted": "Aus dem Git-Status ausgeschlossene gelöschte Dateien: {0}.",
   "Terminal.Option.Exclude": "Gewöhnlichen Ausschluss festlegen.",
   "Terminal.Option.HideSecrets": "Erkannte Werte in ausgewählten Textdateien schwärzen. Binärdateien werden nicht untersucht; keine Treffer sind keine Sicherheitsgarantie.",
   "Terminal.Option.HidePrivateData": "Erkannte private Daten in ausgewählten Textdateien schwärzen. Binärdateien werden nicht untersucht; keine Treffer sind keine Datenschutzgarantie.",

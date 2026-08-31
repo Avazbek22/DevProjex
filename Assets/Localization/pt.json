@@ -491,7 +491,7 @@
     "Terminal.Validation.DesktopGitMode": "O Desktop aceita none, gitignore, tracked, staged e changes; use tree, analyze, export context, TUI ou MCP para intervalos diff.",
     "Terminal.Error.ProfileTransientGitMode": "Modos Git momentâneos não podem ser salvos em perfis; use none, gitignore ou tracked.",
     "Terminal.Diagnostic.GitStateUnavailable": "O estado Git solicitado não está disponível. Verifique o Git, o repositório e as referências.",
-    "Terminal.Diagnostic.GitStateDeleted": "{0} arquivos excluídos do estado Git não foram incluídos.",
+    "Terminal.Diagnostic.GitStateDeleted": "Arquivos eliminados excluídos do estado Git: {0}.",
     "Terminal.Option.Exclude": "Define uma exclusão comum.",
     "Terminal.Option.HideSecrets": "Oculta valores detectados nos arquivos de texto selecionados. Arquivos binários não são inspecionados; a ausência de resultados não garante segurança.",
     "Terminal.Option.HidePrivateData": "Oculta dados privados detectados nos arquivos de texto selecionados. Arquivos binários não são inspecionados; a ausência de resultados não garante privacidade.",

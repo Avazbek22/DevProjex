@@ -280,14 +280,18 @@ public sealed class GitModeCommandContractTests
 			"tree", workspace.Path,
 			"--git-mode", "staged",
 			"--exclude", "none",
-			"--format", "text");
+			"--format", "text",
+			"--language", "en");
 
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
 		Assert.DoesNotContain("Deleted.cs", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.DoesNotContain("RenameSource.cs", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("Renamed.cs", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains(GitScopeFilter.DeletedDiagnosticCode, environment.StandardError, StringComparison.Ordinal);
-		Assert.Matches(@"(?<!\d)2(?!\d)", environment.StandardError);
+		Assert.Contains(
+			"Deleted files excluded from the Git state: 2.",
+			environment.StandardError,
+			StringComparison.Ordinal);
 	}
 
 	[Fact]

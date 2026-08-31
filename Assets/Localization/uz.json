@@ -479,7 +479,7 @@
   "Terminal.Validation.DesktopGitMode": "Desktop none, gitignore, tracked, staged va changes rejimlarini qo‘llaydi; diff oraliqlari uchun tree, analyze, export context, TUI yoki MCP dan foydalaning.",
   "Terminal.Error.ProfileTransientGitMode": "Vaqtinchalik Git rejimlarini profilda saqlab bo‘lmaydi; none, gitignore yoki tracked dan foydalaning.",
   "Terminal.Diagnostic.GitStateUnavailable": "So‘ralgan Git holati mavjud emas. Git, repozitoriy va havolalarni tekshiring.",
-  "Terminal.Diagnostic.GitStateDeleted": "Git holatidagi o‘chirilgan {0} fayl kiritilmadi.",
+  "Terminal.Diagnostic.GitStateDeleted": "Git holatidagi tanlovga kiritilmagan o‘chirilgan fayllar: {0}.",
   "Terminal.Option.Exclude": "Oddiy istisnoni o'rnatadi.",
   "Terminal.Option.HideSecrets": "Tanlangan matn fayllaridagi aniqlangan qiymatlarni yashiradi. Binar fayllar tekshirilmaydi; moslik topilmagani xavfsizlik kafolati emas.",
   "Terminal.Option.HidePrivateData": "Tanlangan matn fayllaridagi aniqlangan shaxsiy ma’lumotlarni yashiradi. Binar fayllar tekshirilmaydi; moslik topilmagani maxfiylik kafolati emas.",

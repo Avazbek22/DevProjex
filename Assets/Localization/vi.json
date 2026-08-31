@@ -491,7 +491,7 @@
   "Terminal.Validation.DesktopGitMode": "Desktop hỗ trợ none, gitignore, tracked, staged và changes; hãy dùng tree, analyze, export context, TUI hoặc MCP cho phạm vi diff.",
   "Terminal.Error.ProfileTransientGitMode": "Không thể lưu chế độ Git tức thời vào hồ sơ; hãy dùng none, gitignore hoặc tracked.",
   "Terminal.Diagnostic.GitStateUnavailable": "Trạng thái Git được yêu cầu không khả dụng. Hãy kiểm tra Git, kho lưu trữ và các tham chiếu.",
-  "Terminal.Diagnostic.GitStateDeleted": "Không bao gồm {0} tệp đã xóa khỏi trạng thái Git.",
+  "Terminal.Diagnostic.GitStateDeleted": "Số tệp đã xóa bị loại khỏi trạng thái Git: {0}.",
   "Terminal.Option.Exclude": "Đặt một loại trừ thông thường.",
   "Terminal.Option.HideSecrets": "Che các giá trị được phát hiện trong tệp văn bản đã chọn. Tệp nhị phân không được kiểm tra; không tìm thấy kết quả không đồng nghĩa với an toàn.",
   "Terminal.Option.HidePrivateData": "Che dữ liệu cá nhân được phát hiện trong tệp văn bản đã chọn. Tệp nhị phân không được kiểm tra; không tìm thấy kết quả không đồng nghĩa với đảm bảo quyền riêng tư.",

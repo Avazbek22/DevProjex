@@ -330,7 +330,7 @@ public static class GitScopeFilter
 		new(
 			DeletedDiagnosticCode,
 			ContextDiagnosticSeverity.Warning,
-			$"{count} deleted files from the Git state are not included.",
+			$"Deleted files excluded from the Git state: {count}.",
 			projectRoot,
 			count);
 

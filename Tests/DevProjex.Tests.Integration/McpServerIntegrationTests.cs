@@ -2513,7 +2513,10 @@ public sealed class McpServerIntegrationTests
 				GitScopeFilter.DeletedDiagnosticCode,
 				AllText(result),
 				StringComparison.Ordinal);
-			Assert.Contains("2 deleted files", AllText(result), StringComparison.Ordinal);
+			Assert.Contains(
+				"Deleted files excluded from the Git state: 2.",
+				AllText(result),
+				StringComparison.Ordinal);
 		});
 		Assert.Contains("Renamed.cs", Text(results[0]), StringComparison.Ordinal);
 		Assert.DoesNotContain("RenameSource.cs", Text(results[0]), StringComparison.Ordinal);

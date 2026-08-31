@@ -479,7 +479,7 @@
   "Terminal.Validation.DesktopGitMode": "Desktop режимҳои none, gitignore, tracked, staged ва changes-ро дастгирӣ мекунад; барои ҳудудҳои diff аз tree, analyze, export context, TUI ё MCP истифода баред.",
   "Terminal.Error.ProfileTransientGitMode": "Реҷаҳои лаҳзавии Git дар профил нигоҳ дошта намешаванд; none, gitignore ё tracked-ро истифода баред.",
   "Terminal.Diagnostic.GitStateUnavailable": "Ҳолати дархостшудаи Git дастрас нест. Git, анбор ва истинодҳоро санҷед.",
-  "Terminal.Diagnostic.GitStateDeleted": "{0} файли ҳазфшуда аз ҳолати Git дохил нашуд.",
+  "Terminal.Diagnostic.GitStateDeleted": "Шумораи файлҳои ҳазфшудаи дохилнашуда аз ҳолати Git: {0}.",
   "Terminal.Option.Exclude": "Истиснои одиро таъин мекунад.",
   "Terminal.Option.HideSecrets": "Қиматҳои ёфтшударо дар файлҳои матнии интихобшуда пинҳон мекунад. Файлҳои бинарӣ санҷида намешаванд; набудани мутобиқат кафолати амният нест.",
   "Terminal.Option.HidePrivateData": "Маълумоти хусусии ёфтшударо дар файлҳои матнии интихобшуда пинҳон мекунад. Файлҳои бинарӣ санҷида намешаванд; набудани мутобиқат кафолати махфият нест.",

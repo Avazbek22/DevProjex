@@ -491,7 +491,7 @@
   "Terminal.Validation.DesktopGitMode": "Desktop mendukung none, gitignore, tracked, staged, dan changes; gunakan tree, analyze, export context, TUI, atau MCP untuk cakupan diff.",
   "Terminal.Error.ProfileTransientGitMode": "Mode Git sesaat tidak dapat disimpan dalam profil; gunakan none, gitignore, atau tracked.",
   "Terminal.Diagnostic.GitStateUnavailable": "Status Git yang diminta tidak tersedia. Periksa Git, repositori, dan referensinya.",
-  "Terminal.Diagnostic.GitStateDeleted": "{0} file terhapus dari status Git tidak disertakan.",
+  "Terminal.Diagnostic.GitStateDeleted": "File terhapus yang dikecualikan dari status Git: {0}.",
   "Terminal.Option.Exclude": "Tetapkan pengecualian biasa.",
   "Terminal.Option.HideSecrets": "Samarkan nilai yang terdeteksi dalam file teks yang dipilih. File biner tidak diperiksa; tidak adanya hasil bukan jaminan keamanan.",
   "Terminal.Option.HidePrivateData": "Samarkan data pribadi yang terdeteksi dalam file teks yang dipilih. File biner tidak diperiksa; tidak adanya hasil bukan jaminan privasi.",

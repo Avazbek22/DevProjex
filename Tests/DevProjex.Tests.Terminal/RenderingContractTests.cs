@@ -417,6 +417,19 @@ public sealed class RenderingContractTests
 		Assert.DoesNotContain('\t', summary);
 	}
 
+	[Theory]
+	[InlineData(1)]
+	[InlineData(2)]
+	public void DeletedGitStateDiagnosticUsesCountNeutralGrammar(int count)
+	{
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);
+		var diagnostic = GitScopeFilter.CreateDeletedDiagnostic("project", count);
+
+		Assert.Equal(
+			$"Deleted files excluded from the Git state: {count}.",
+			ContextDiagnosticRenderer.ResolveMessage(localization, diagnostic));
+	}
+
 	[Fact]
 	public void TerminalColumnsAlignWideRunesWithoutTabs()
 	{

@@ -491,7 +491,7 @@
   "Terminal.Validation.DesktopGitMode": "Desktop none, gitignore, tracked, staged ve changes modlarını destekler; diff aralıkları için tree, analyze, export context, TUI veya MCP kullanın.",
   "Terminal.Error.ProfileTransientGitMode": "Anlık Git modları profillere kaydedilemez; none, gitignore veya tracked kullanın.",
   "Terminal.Diagnostic.GitStateUnavailable": "İstenen Git durumu kullanılamıyor. Git'i, depoyu ve referansları denetleyin.",
-  "Terminal.Diagnostic.GitStateDeleted": "Git durumundaki silinmiş {0} dosya dahil edilmedi.",
+  "Terminal.Diagnostic.GitStateDeleted": "Git durumundan hariç tutulan silinmiş dosya sayısı: {0}.",
   "Terminal.Option.Exclude": "Sıradan bir hariç tutma ayarlayın.",
   "Terminal.Option.HideSecrets": "Seçili metin dosyalarında algılanan değerleri maskele. İkili dosyalar incelenmez; eşleşme bulunmaması güvenlik garantisi değildir.",
   "Terminal.Option.HidePrivateData": "Seçili metin dosyalarında algılanan kişisel verileri maskele. İkili dosyalar incelenmez; eşleşme bulunmaması gizlilik garantisi değildir.",

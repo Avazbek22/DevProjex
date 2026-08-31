@@ -497,7 +497,7 @@
   "Terminal.Validation.DesktopGitMode": "Desktop поддерживает none, gitignore, tracked, staged и changes; для diff-диапазонов используйте tree, analyze, export context, TUI или MCP.",
   "Terminal.Error.ProfileTransientGitMode": "Моментальный Git-режим нельзя сохранить в профиле; используйте none, gitignore или tracked.",
   "Terminal.Diagnostic.GitStateUnavailable": "Запрошенное состояние Git недоступно. Проверьте Git, репозиторий и ссылки.",
-  "Terminal.Diagnostic.GitStateDeleted": "Удалённые файлы из состояния Git не включены: {0}.",
+  "Terminal.Diagnostic.GitStateDeleted": "Не включено удалённых файлов из состояния Git: {0}.",
   "Terminal.Option.Exclude": "Задать обычное исключение.",
   "Terminal.Option.HideSecrets": "Скрывать обнаруженные значения в выбранных текстовых файлах. Бинарные файлы не анализируются; отсутствие совпадений не гарантирует безопасность.",
   "Terminal.Option.HidePrivateData": "Скрывать обнаруженные личные данные в выбранных текстовых файлах. Бинарные файлы не анализируются; отсутствие совпадений не гарантирует конфиденциальность.",
