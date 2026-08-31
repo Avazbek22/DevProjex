@@ -39,6 +39,20 @@ public sealed class StartupInteractionControllerSelectionTests
 	}
 
 	[Fact]
+	public void ResolveSelectedFullPaths_PreservesCaseDistinctEntries()
+	{
+		using var temp = new TemporaryDirectory();
+		var paths = StartupInteractionController.ResolveSelectedFullPaths(
+			temp.Path,
+			["Foo", "foo"],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(2, paths.Count);
+		Assert.Contains(Path.Combine(temp.Path, "Foo"), paths);
+		Assert.Contains(Path.Combine(temp.Path, "foo"), paths);
+	}
+
+	[Fact]
 	public void ResolveSelectedNodeStates_AlreadyCanceled_StopsBeforeProjection()
 	{
 		using var cancellation = new CancellationTokenSource();

@@ -123,6 +123,21 @@ public sealed class TerminalWorkspaceStateTests
 	}
 
 	[Fact]
+	public void DesktopSelectionPreservesWholeTreeAndExplicitEmptyIntent()
+	{
+		using var state = new TerminalWorkspaceState(CreatePlan());
+
+		Assert.Equal(
+			["."],
+			TerminalWorkspaceController.BuildDesktopSelection(state).SelectedPaths);
+
+		state.SelectNone();
+
+		Assert.Empty(
+			TerminalWorkspaceController.BuildDesktopSelection(state).SelectedPaths!);
+	}
+
+	[Fact]
 	public void DeselectingDirectoryBuildsMinimalSiblingSelection()
 	{
 		var state = new TerminalWorkspaceState(CreatePlan());

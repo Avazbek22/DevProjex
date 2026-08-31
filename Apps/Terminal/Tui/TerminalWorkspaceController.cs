@@ -1158,8 +1158,17 @@ public sealed class TerminalWorkspaceController(
 				NewWindow: false,
 				WaitForCompletion: false,
 				OpenPreview: true,
-				Selection: state.BuildSelection()),
+				Selection: BuildDesktopSelection(state)),
 			cancellationToken);
+
+	internal static ProjectSelectionSpec BuildDesktopSelection(TerminalWorkspaceState state)
+	{
+		ArgumentNullException.ThrowIfNull(state);
+		return state.BuildSelection() with
+		{
+			SelectedPaths = state.BuildPersistedSelectedRelativePaths()
+		};
+	}
 
 	public static string BuildEquivalentContextCommand(
 		TerminalWorkspaceState state,

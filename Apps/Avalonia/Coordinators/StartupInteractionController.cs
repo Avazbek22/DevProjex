@@ -125,8 +125,8 @@ internal sealed class StartupInteractionController(
 			cancellationToken.ThrowIfCancellationRequested();
 		}
 
-        if (selectionSpec.SelectedPaths is { Count: > 0 })
-            await ApplySelectedPathsAsync(selectionSpec.SelectedPaths, cancellationToken);
+        if (selectionSpec.SelectedPaths is { } selectedPaths)
+            await ApplySelectedPathsAsync(selectedPaths, cancellationToken);
     }
 
     internal static HashSet<IgnoreOptionId> ResolveIgnoreSelectionOverride(
@@ -262,13 +262,10 @@ internal sealed class StartupInteractionController(
         if (string.IsNullOrWhiteSpace(rootPath))
             return;
 
-        var selectedFullPaths = selectedPaths
-            .Select(path =>
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                return PathUtility.Normalize(ResolveSelectedPath(rootPath, path));
-            })
-            .ToHashSet(PathComparer.Default);
+        var selectedFullPaths = ResolveSelectedFullPaths(
+            rootPath,
+            selectedPaths,
+            cancellationToken);
         var nodes = new List<TreeNodeViewModel>();
         TreeNodeViewModel.ForEachDescendant(
             viewModel.TreeNodes,
@@ -290,7 +287,7 @@ internal sealed class StartupInteractionController(
                         cancellationToken.ThrowIfCancellationRequested();
                         return Directory.Exists(path);
                     })
-                    .ToHashSet(PathComparer.Default);
+                    .ToHashSet(ProjectTreePathIdentity.CanonicalComparer);
 
                 return ResolveSelectedNodeStates(
                     nodePaths,
@@ -303,6 +300,24 @@ internal sealed class StartupInteractionController(
 		cancellationToken.ThrowIfCancellationRequested();
 		ApplyCheckedStates(nodes, checkedStates, applyTreeSelectionBatch);
     }
+
+	internal static HashSet<string> ResolveSelectedFullPaths(
+		string rootPath,
+		IEnumerable<string> selectedPaths,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(rootPath);
+		ArgumentNullException.ThrowIfNull(selectedPaths);
+
+		var result = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
+		foreach (var path in selectedPaths)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			result.Add(PathUtility.Normalize(ResolveSelectedPath(rootPath, path)));
+		}
+
+		return result;
+	}
 
 	internal static bool[] ResolveSelectedNodeStates(
 		IReadOnlyList<string> nodePaths,

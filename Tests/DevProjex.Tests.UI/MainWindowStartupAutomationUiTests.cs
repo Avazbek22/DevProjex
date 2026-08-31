@@ -10,6 +10,42 @@ namespace DevProjex.Tests.UI;
 public sealed class MainWindowStartupAutomationUiTests
 {
 	[AvaloniaFact]
+	public async Task StartupUi_ExplicitEmptySelectionUnchecksEveryTreeNode()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var options = new DesktopStartupOptions(
+			new DesktopOpenRequest(
+				ProjectPath: project.RootPath,
+				Selection: new ProjectSelectionSpec(SelectedPaths: []),
+				Language: AppLanguage.En));
+		var window = CreateStartupWindow(options, appDataPath);
+
+		try
+		{
+			window.Show();
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() =>
+				{
+					var viewModel = UiTestDriver.GetViewModel(window);
+					return viewModel.IsProjectLoaded &&
+					       viewModel.TreeNodes.Count > 0 &&
+					       viewModel.TreeNodes.All(static node => node.IsChecked == false);
+				},
+				"explicit empty Desktop selection to uncheck the project tree");
+
+			Assert.All(
+				UiTestDriver.GetViewModel(window).TreeNodes,
+				static node => Assert.False(node.IsChecked));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task DesktopOpenLanguage_IsSessionScopedWhileGuiLanguageActionPersistsPreference()
 	{
 		using var project = UiTestProject.CreateDefault();
