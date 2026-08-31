@@ -2516,6 +2516,106 @@ public sealed class McpServerIntegrationTests
 		Assert.DoesNotContain("committed-baseline-marker", content, StringComparison.Ordinal);
 	}
 
+	[Theory]
+	[InlineData("include_patterns", "good/**")]
+	[InlineData("exclude_patterns", "broken/**")]
+	public async Task GitScopeGlobsDoNotQueryUnselectedBrokenNestedRepositoriesAcrossSelectionTools(
+		string parameter,
+		string pattern)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var selectedRepository = workspace.CreateDirectory("project/good");
+		var selectedFile = Path.Combine(selectedRepository, "App.cs");
+		File.WriteAllText(selectedFile, "selected-baseline\n");
+		InitializeCommittedRepository(selectedRepository);
+		File.WriteAllText(selectedFile, "selected-current-marker\n");
+		workspace.CreateDirectory("project/broken/.git");
+		File.WriteAllText(Path.Combine(project, "broken", "Other.cs"), "broken-marker\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+		var scope = new Dictionary<string, object?>
+		{
+			["git_scope"] = "changes",
+			[parameter] = new[] { pattern }
+		};
+
+		var tree = await server.CallAsync("get_tree", scope);
+		var analysis = await server.CallAsync("analyze", scope);
+		var pack = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>(scope)
+			{
+				["view"] = "content",
+				["format"] = "text"
+			});
+		var search = await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?>(scope)
+			{
+				["pattern"] = "selected-current-marker|broken-marker",
+				["ignore_case"] = false
+			});
+		Assert.All(
+			new[] { tree, analysis, pack, search },
+			static result => Assert.NotEqual(true, result.IsError));
+		Assert.Contains("App.cs", Text(tree), StringComparison.Ordinal);
+		Assert.DoesNotContain("Other.cs", Text(tree), StringComparison.Ordinal);
+		Assert.Equal(1, analysis.StructuredContent?.GetProperty("files").GetInt32());
+		Assert.Contains("selected-current-marker", Text(pack), StringComparison.Ordinal);
+		Assert.DoesNotContain("broken-marker", Text(pack), StringComparison.Ordinal);
+		Assert.Contains("good/App.cs:1:selected-current-marker", Text(search), StringComparison.Ordinal);
+		Assert.DoesNotContain("broken-marker", Text(search), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task EmptyGitScopeGlobFrontierDoesNotQueryBrokenNestedRepositories()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var selectedRepository = workspace.CreateDirectory("project/good");
+		File.WriteAllText(Path.Combine(selectedRepository, "App.cs"), "selected-baseline\n");
+		InitializeCommittedRepository(selectedRepository);
+		workspace.CreateDirectory("project/broken/.git");
+		File.WriteAllText(Path.Combine(project, "broken", "Other.cs"), "broken-marker\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?>
+			{
+				["git_scope"] = "changes",
+				["include_patterns"] = new[] { "does-not-match/**" }
+			});
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.Equal(0, result.StructuredContent?.GetProperty("files").GetInt32());
+	}
+
+	[Fact]
+	public async Task InvalidGitScopeGlobIsRejectedBeforeNestedRepositoryResolution()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var selectedRepository = workspace.CreateDirectory("project/good");
+		File.WriteAllText(Path.Combine(selectedRepository, "App.cs"), "selected-baseline\n");
+		InitializeCommittedRepository(selectedRepository);
+		workspace.CreateDirectory("project/broken/.git");
+		File.WriteAllText(Path.Combine(project, "broken", "Other.cs"), "broken-marker\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["git_scope"] = "changes",
+				["include_patterns"] = new[] { "../good/**" }
+			});
+
+		Assert.True(result.IsError);
+		Assert.Contains(McpErrorCodes.InvalidPattern, Text(result), StringComparison.Ordinal);
+		Assert.DoesNotContain(GitScopeFilter.UnavailableDiagnosticCode, Text(result), StringComparison.Ordinal);
+	}
+
 	[Fact]
 	public async Task UnicodeScalarGlobsSelectTheSameFilesAcrossContentTools()
 	{

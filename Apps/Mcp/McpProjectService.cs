@@ -21,6 +21,11 @@ internal sealed class McpProjectService(
 		bool includeOutputMetrics = true)
 	{
 		var parsedScope = ParseGitScope(gitScope);
+		var hasSelectionFilters =
+			paths is { Count: > 0 } ||
+			includePatterns is { Count: > 0 } ||
+			excludePatterns is { Count: > 0 };
+		var globs = McpGlobSet.Create(includePatterns, excludePatterns);
 		var source = await projectSources.ResolveAsync(project, branch, cancellationToken)
 			.ConfigureAwait(false);
 		var projectRoot = source.Root;
@@ -96,6 +101,13 @@ internal sealed class McpProjectService(
 				"Fix the reported project access or Git state and retry.");
 		}
 		ValidatePlanContainment(roots, projectRoot, plan.IncludedFiles, cancellationToken);
+		var selectionFrontier = BuildSelectionFrontier(
+			projectRoot,
+			plan.IncludedFiles,
+			requested,
+			globs,
+			hasSelectionFilters,
+			cancellationToken);
 		if (parsedScope is { } scope)
 		{
 			string? resolvedDiffRange = null;
@@ -114,7 +126,7 @@ internal sealed class McpProjectService(
 					services.GitScopePathProvider,
 					scope.Mode,
 					scope.DiffRange,
-					paths is { Count: > 0 } ? requested.Paths : null,
+					selectionFrontier,
 					cancellationToken,
 					resolvedDiffRange)
 				.ConfigureAwait(false);
@@ -129,25 +141,18 @@ internal sealed class McpProjectService(
 			}
 		}
 		ProjectContextPlan narrowed;
-		if ((paths is null || paths.Count == 0) &&
-		    (includePatterns is null || includePatterns.Count == 0) &&
-		    (excludePatterns is null || excludePatterns.Count == 0))
+		if (selectionFrontier is null)
 		{
 			narrowed = plan;
 		}
 		else
 		{
-			var globs = McpGlobSet.Create(includePatterns, excludePatterns);
 			var selected = new List<string>();
 			foreach (var path in plan.IncludedFiles)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				if (!MatchesRequested(path, requested.Paths, requested.Directories))
-					continue;
-
-				var relativePath = ToRelative(projectRoot, path);
-				if (globs.Includes(relativePath))
-					selected.Add(relativePath);
+				if (selectionFrontier.Contains(path))
+					selected.Add(ToRelative(projectRoot, path));
 			}
 			if (selected.Count > 0)
 			{
@@ -175,6 +180,30 @@ internal sealed class McpProjectService(
 		return await ProjectFileSizeFilter
 			.ApplyAsync(services.Planner, narrowed, maximumFileBytes, cancellationToken)
 			.ConfigureAwait(false);
+	}
+
+	private static IReadOnlySet<string>? BuildSelectionFrontier(
+		string projectRoot,
+		IReadOnlyList<string> includedFiles,
+		RequestedPathSelection requested,
+		McpGlobSet globs,
+		bool hasSelectionFilters,
+		CancellationToken cancellationToken)
+	{
+		if (!hasSelectionFilters)
+			return null;
+
+		var selected = new HashSet<string>(StringComparer.Ordinal);
+		foreach (var path in includedFiles)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (MatchesRequested(path, requested.Paths, requested.Directories) &&
+			    globs.Includes(ToRelative(projectRoot, path)))
+			{
+				selected.Add(path);
+			}
+		}
+		return selected;
 	}
 
 	internal static void ValidatePlanContainment(
