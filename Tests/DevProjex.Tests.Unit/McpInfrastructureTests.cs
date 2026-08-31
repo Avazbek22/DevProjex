@@ -10,6 +10,21 @@ namespace DevProjex.Tests.Unit;
 
 public sealed class McpInfrastructureTests
 {
+	public static TheoryData<string, int, bool> PackCheckpointBoundaryCases()
+	{
+		var cases = new TheoryData<string, int, bool>();
+		foreach (var lineEnding in new[] { "\n", "\r\n", "\r" })
+		{
+			foreach (var lineCount in new[] { 255, 256, 257, 512 })
+			{
+				cases.Add(lineEnding, lineCount, false);
+				cases.Add(lineEnding, lineCount, true);
+			}
+		}
+
+		return cases;
+	}
+
 	[Fact]
 	public void ServerHostExposesOneUnambiguousRunEntryPoint()
 	{
@@ -1004,6 +1019,97 @@ public sealed class McpInfrastructureTests
 		Assert.Equal(300, page.StartLine);
 		Assert.Equal(301, page.EndLine);
 		Assert.Equal(601, page.TotalLines);
+	}
+
+	[Theory]
+	[MemberData(nameof(PackCheckpointBoundaryCases))]
+	public async Task PackLineCheckpointsPreserveBoundaryRanges(
+		string lineEnding,
+		int contentLineCount,
+		bool hasTrailingLineEnding)
+	{
+		using var workspace = new TemporaryDirectory();
+		using var registry = new McpPackRegistry(workspace.Path);
+		var content = string.Join(lineEnding, Enumerable.Repeat("x", contentLineCount));
+		if (hasTrailingLineEnding)
+			content += lineEnding;
+		var bytes = Encoding.UTF8.GetBytes(content);
+		var pack = await registry.CreateAsync(
+			async (stream, token) =>
+			{
+				for (var offset = 0; offset < bytes.Length; offset++)
+					await stream.WriteAsync(bytes.AsMemory(offset, 1), token);
+			},
+			TestContext.Current.CancellationToken);
+
+		var expectedLineCount = contentLineCount + (hasTrailingLineEnding ? 1 : 0);
+		Assert.Equal(expectedLineCount, pack.Lines);
+		Assert.DoesNotContain(
+			pack.LineCheckpoints.Skip(1),
+			checkpoint => checkpoint.ByteOffset == pack.Bytes);
+
+		var checkpoint = pack.ResolveLineCheckpoint(expectedLineCount);
+		Assert.InRange(expectedLineCount - checkpoint.LineNumber, 0, 256);
+		await using var stream = new FileStream(
+			pack.Path,
+			FileMode.Open,
+			FileAccess.Read,
+			FileShare.Read);
+		stream.Seek(checkpoint.ByteOffset, SeekOrigin.Begin);
+		var page = await McpTextRanges.ReadPageAsync(
+			stream,
+			startLine: expectedLineCount,
+			endLine: expectedLineCount,
+			maximumLines: 1000,
+			maximumCharacters: 50_000,
+			TestContext.Current.CancellationToken,
+			knownTotalLines: pack.Lines,
+			firstStreamLineNumber: checkpoint.LineNumber);
+
+		Assert.Equal(hasTrailingLineEnding ? string.Empty : "x", page.Text);
+		Assert.Equal(expectedLineCount, page.StartLine);
+		Assert.Equal(expectedLineCount, page.EndLine);
+		Assert.Equal(expectedLineCount, page.TotalLines);
+		Assert.False(page.IsTruncated);
+	}
+
+	[Fact]
+	public async Task PackLineCheckpointAtEofFallsBackForTrailingEmptyLine()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var registry = new McpPackRegistry(workspace.Path);
+		var bytes = Encoding.UTF8.GetBytes(string.Concat(Enumerable.Repeat("x\r\n", 256)));
+		var pack = await registry.CreateAsync(
+			async (stream, token) =>
+			{
+				for (var offset = 0; offset < bytes.Length; offset++)
+					await stream.WriteAsync(bytes.AsMemory(offset, 1), token);
+			},
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(257, pack.Lines);
+		var checkpoint = pack.ResolveLineCheckpoint(257);
+		Assert.Equal(new McpPackLineCheckpoint(1, 0), checkpoint);
+		await using var stream = new FileStream(
+			pack.Path,
+			FileMode.Open,
+			FileAccess.Read,
+			FileShare.Read);
+		var page = await McpTextRanges.ReadPageAsync(
+			stream,
+			startLine: 257,
+			endLine: 257,
+			maximumLines: 1000,
+			maximumCharacters: 50_000,
+			TestContext.Current.CancellationToken,
+			knownTotalLines: pack.Lines,
+			firstStreamLineNumber: checkpoint.LineNumber);
+
+		Assert.Equal(string.Empty, page.Text);
+		Assert.Equal(257, page.StartLine);
+		Assert.Equal(257, page.EndLine);
+		Assert.Equal(257, page.TotalLines);
+		Assert.False(page.IsTruncated);
 	}
 
 	[Fact]
