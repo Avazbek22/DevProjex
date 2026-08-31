@@ -271,6 +271,25 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			: null;
 	}
 
+	public IReadOnlyList<string>? GetSelectedRelativePathFrontier(ProjectContextPlan plan)
+	{
+		ArgumentNullException.ThrowIfNull(plan);
+		if (!_gitScopeProjectionContexts.TryGetValue(plan, out var context) ||
+		    context.SelectedPathFrontier is null)
+		{
+			return null;
+		}
+
+		var relativePaths = new List<string>(context.SelectedPathFrontier.Count);
+		foreach (var path in context.SelectedPathFrontier)
+			relativePaths.Add(PathUtility.GetPortableRelativePath(plan.SourceRoot, path));
+		CancellationAwareSort.Sort(
+			relativePaths,
+			ProjectTreePathIdentity.CanonicalComparer,
+			CancellationToken.None);
+		return relativePaths;
+	}
+
 	internal ProjectContextPlan ApplyGitScopeProjection(
 		ProjectContextPlan contextSource,
 		ProjectContextPlan target,

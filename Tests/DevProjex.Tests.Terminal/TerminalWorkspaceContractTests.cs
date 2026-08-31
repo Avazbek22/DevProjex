@@ -1066,6 +1066,84 @@ public sealed class TerminalWorkspaceContractTests
 	}
 
 	[Fact]
+	public async Task EmptyMomentaryGitScopeRetainsBroadSelectionAcrossRefresh()
+	{
+		if (!TryRunGit(Directory.GetCurrentDirectory(), "--version"))
+			Assert.Skip("Git is required for this regression test.");
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		workspace.WriteFile("Baseline.cs", "class Baseline {}\n");
+		Assert.True(TryRunGit(workspace.Path, "init", "--quiet"));
+		Assert.True(TryRunGit(workspace.Path, "config", "user.name", "DevProjex Tests"));
+		Assert.True(TryRunGit(workspace.Path, "config", "user.email", "devprojex@example.invalid"));
+		Assert.True(TryRunGit(workspace.Path, "add", "--", "Baseline.cs"));
+		Assert.True(TryRunGit(workspace.Path, "commit", "--quiet", "-m", "baseline"));
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		await controller.SetGitModeAsync(
+			state,
+			GitFilteringMode.Staged,
+			TestContext.Current.CancellationToken);
+		Assert.Empty(state.Plan.IncludedFiles);
+		Assert.Null(services.ContextPlanner.GetSelectedRelativePathFrontier(state.Plan));
+
+		workspace.WriteFile("New.cs", "class New {}\n");
+		Assert.True(TryRunGit(workspace.Path, "add", "--", "New.cs"));
+		await controller.RefreshProjectAsync(state, TestContext.Current.CancellationToken);
+
+		Assert.Equal("New.cs", Path.GetFileName(Assert.Single(state.Plan.IncludedFiles)));
+		await controller.SetGitModeAsync(
+			state,
+			GitFilteringMode.None,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(
+			["Baseline.cs", "New.cs"],
+			state.Plan.IncludedFiles
+				.Select(static path => Path.GetFileName(path)!)
+				.Order(StringComparer.Ordinal)
+				.ToArray());
+	}
+
+	[Fact]
+	public async Task ExplicitEmptySelectionRemainsEmptyWhenMomentaryGitScopeChanges()
+	{
+		if (!TryRunGit(Directory.GetCurrentDirectory(), "--version"))
+			Assert.Skip("Git is required for this regression test.");
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		workspace.WriteFile("First.cs", "class First {}\n");
+		Assert.True(TryRunGit(workspace.Path, "init", "--quiet"));
+		Assert.True(TryRunGit(workspace.Path, "add", "--", "First.cs"));
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+		await controller.SetGitModeAsync(
+			state,
+			GitFilteringMode.Staged,
+			TestContext.Current.CancellationToken);
+		Assert.Single(state.Plan.IncludedFiles);
+
+		state.SelectNone();
+		await controller.ReprojectSelectionAsync(state, TestContext.Current.CancellationToken);
+		Assert.Empty(services.ContextPlanner.GetSelectedRelativePathFrontier(state.Plan)!);
+		workspace.WriteFile("Second.cs", "class Second {}\n");
+		Assert.True(TryRunGit(workspace.Path, "add", "--", "Second.cs"));
+
+		await controller.RefreshProjectAsync(state, TestContext.Current.CancellationToken);
+
+		Assert.Empty(state.Plan.IncludedFiles);
+		Assert.Empty(services.ContextPlanner.GetSelectedRelativePathFrontier(state.Plan)!);
+	}
+
+	[Fact]
 	public async Task StructuralRefreshBuildsOnlyPlansRequiredBySelectionEvolution()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -1080,14 +1158,14 @@ public sealed class TerminalWorkspaceContractTests
 			TestContext.Current.CancellationToken);
 
 		var unchanged = await controller.BuildStructuralRefreshAsync(
-			TerminalWorkspaceController.CaptureStructuralRefresh(state, state.BuildSelection()),
+			controller.CaptureStructuralRefresh(state, state.BuildSelection()),
 			TestContext.Current.CancellationToken);
 		Assert.Equal(1, unchanged.PlanBuildCount);
 		TerminalWorkspaceController.ApplyStructuralRefresh(state, unchanged);
 
 		workspace.WriteFile("src/config.json", "{}");
 		var newExtension = await controller.BuildStructuralRefreshAsync(
-			TerminalWorkspaceController.CaptureStructuralRefresh(state, state.BuildSelection()),
+			controller.CaptureStructuralRefresh(state, state.BuildSelection()),
 			TestContext.Current.CancellationToken);
 		Assert.Equal(1, newExtension.PlanBuildCount);
 		Assert.Contains(".json", newExtension.Plan.SelectedExtensions);
@@ -1107,7 +1185,7 @@ public sealed class TerminalWorkspaceContractTests
 			.index;
 		state.ToggleSelection(jsonIndex);
 		var partialSelection = await controller.BuildStructuralRefreshAsync(
-			TerminalWorkspaceController.CaptureStructuralRefresh(state, state.BuildSelection()),
+			controller.CaptureStructuralRefresh(state, state.BuildSelection()),
 			TestContext.Current.CancellationToken);
 		Assert.Equal(1, partialSelection.PlanBuildCount);
 	}
@@ -1142,7 +1220,7 @@ public sealed class TerminalWorkspaceContractTests
 		{
 			Directory.Move(gitPath, detachedGitPath);
 			var result = await controller.BuildStructuralRefreshAsync(
-				TerminalWorkspaceController.CaptureStructuralRefresh(
+				controller.CaptureStructuralRefresh(
 					state,
 					state.BuildSelection(),
 					GitFilteringMode.RespectGitIgnore),
@@ -1241,7 +1319,7 @@ public sealed class TerminalWorkspaceContractTests
 		};
 		workspace.WriteFile("new.cs", "class New {}");
 		var result = await controller.BuildStructuralRefreshAsync(
-			TerminalWorkspaceController.CaptureStructuralRefresh(state, state.BuildSelection()),
+			controller.CaptureStructuralRefresh(state, state.BuildSelection()),
 			TestContext.Current.CancellationToken);
 
 		Assert.Same(originalPlan, state.Plan);

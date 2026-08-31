@@ -1711,7 +1711,7 @@ internal sealed partial class TerminalWorkspaceSession
 		if (_state is null)
 			return;
 		var state = _state;
-		var refreshRequest = TerminalWorkspaceController.CaptureStructuralRefresh(
+		var refreshRequest = _controller.CaptureStructuralRefresh(
 			state,
 			state.BuildSelection(),
 			_preferredGitMode);
@@ -1768,7 +1768,7 @@ internal sealed partial class TerminalWorkspaceSession
 		if (_state?.Plan.SourceIdentity?.SourceType != ProjectSourceType.GitClone)
 			return;
 		var state = _state;
-		var refreshRequest = TerminalWorkspaceController.CaptureStructuralRefresh(
+		var refreshRequest = _controller.CaptureStructuralRefresh(
 			state,
 			state.BuildSelection(),
 			_preferredGitMode);
@@ -1796,7 +1796,7 @@ internal sealed partial class TerminalWorkspaceSession
 		if (_state?.Plan.SourceIdentity?.SourceType != ProjectSourceType.GitClone)
 			return;
 		var state = _state;
-		var refreshRequest = TerminalWorkspaceController.CaptureStructuralRefresh(
+		var refreshRequest = _controller.CaptureStructuralRefresh(
 			state,
 			state.BuildSelection(),
 			_preferredGitMode);

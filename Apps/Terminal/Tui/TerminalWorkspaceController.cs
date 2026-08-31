@@ -94,7 +94,7 @@ public sealed class TerminalWorkspaceController(
 		ApplyStructuralRefresh(state, result);
 	}
 
-	internal static TerminalStructuralRefreshRequest CaptureStructuralRefresh(
+	internal TerminalStructuralRefreshRequest CaptureStructuralRefresh(
 		TerminalWorkspaceState state,
 		ProjectSelectionSpec selection,
 		GitFilteringMode fallbackGitMode = GitFilteringMode.None)
@@ -111,10 +111,7 @@ public sealed class TerminalWorkspaceController(
 				selection.Extensions ?? state.Plan.SelectedExtensions,
 				StringComparer.OrdinalIgnoreCase),
 			selectedItems,
-			ResolveSelectedPathFrontier(
-				selection.SelectedPaths,
-				selectedItems,
-				state.PathOptionStates),
+			services.ContextPlanner.GetSelectedRelativePathFrontier(state.Plan),
 			new Dictionary<string, bool>(
 				state.ExtensionOptionStates,
 				StringComparer.OrdinalIgnoreCase),
@@ -222,7 +219,7 @@ public sealed class TerminalWorkspaceController(
 			var fallbackMode = requestedFallbackMode == GitFilteringMode.TrackedFilesOnly
 				? GitFilteringMode.None
 				: requestedFallbackMode;
-			discoverySelection = GitScopeSelection.WithMode(discovered.Selection, fallbackMode);
+			discoverySelection = GitScopeSelection.WithMode(discoverySelection, fallbackMode);
 			discovered = await BuildPlanAsync(
 					request.SourceRoot,
 					discoverySelection,
@@ -543,10 +540,7 @@ public sealed class TerminalWorkspaceController(
 			selection,
 			baseline.SelectedExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase),
 			previousPaths,
-			ResolveSelectedPathFrontier(
-				selection.SelectedPaths,
-				previousPaths,
-				pathOptionStates),
+			services.ContextPlanner.GetSelectedRelativePathFrontier(baseline),
 			extensionOptionStates,
 			pathOptionStates,
 			baseline.Selection.GitMode == selection.GitMode &&
@@ -1060,20 +1054,6 @@ public sealed class TerminalWorkspaceController(
 				paths.Add(fullPath);
 		}
 		return paths;
-	}
-
-	private static IReadOnlyCollection<string>? ResolveSelectedPathFrontier(
-		IReadOnlyCollection<string>? selectedPaths,
-		IReadOnlyCollection<string> selectedItems,
-		IReadOnlyDictionary<string, bool> pathOptionStates)
-	{
-		if (selectedPaths is { Count: > 0 })
-			return selectedPaths.ToArray();
-
-		return selectedItems.Count == 0 &&
-		       !pathOptionStates.Values.Any(static isSelected => isSelected)
-			? []
-			: null;
 	}
 
 	private static void ThrowIfTrackedModeIsUnavailable(ProjectContextPlan plan)
