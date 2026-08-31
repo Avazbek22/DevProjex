@@ -108,6 +108,98 @@ public sealed class TerminalParameterRowsBuilderTests
 		Assert.Equal("(•) Settings.Ignore.UseGitIgnore", rows[1].ToString());
 	}
 
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public void MeasuredPlainFolderOmitsGitAxisRegardlessOfOtherExclusions(
+		bool hasPathExclusion)
+	{
+		var plan = CreatePlan(
+			ProjectSelectionSpec.Standard,
+			hasIgnoreOptionCounts: true,
+			ignoreOptionCounts: hasPathExclusion
+				? new IgnoreOptionCounts(HiddenFiles: 1)
+				: IgnoreOptionCounts.Empty) with
+		{
+			GitReadiness = new ProjectContextGitReadiness(
+				GitFilteringMode.RespectGitIgnore,
+				LoadedTrackedIndexCount: 0,
+				IsReady: true)
+		};
+
+		var rows = CreateBuilder().BuildExclusions(plan);
+		var counts = TerminalWorkspaceSession.CountExclusionAxis(rows);
+
+		Assert.DoesNotContain(rows, static row => row.Kind == TerminalParameterRowKind.GitMode);
+		Assert.Equal(hasPathExclusion ? (1, 1) : (0, 0), counts);
+	}
+
+	[Fact]
+	public void MeasuredStandaloneGitIgnoreImpactKeepsGitAxisVisible()
+	{
+		var plan = CreatePlan(
+			ProjectSelectionSpec.Standard,
+			hasIgnoreOptionCounts: true,
+			ignoreControllerImpactCounts: new IgnoreControllerImpactCounts(GitIgnore: 1)) with
+		{
+			GitReadiness = new ProjectContextGitReadiness(
+				GitFilteringMode.RespectGitIgnore,
+				LoadedTrackedIndexCount: 0,
+				IsReady: true)
+		};
+
+		var rows = CreateBuilder().BuildExclusions(plan);
+
+		Assert.Equal(5, rows.Count(static row => row.Kind == TerminalParameterRowKind.GitMode));
+		Assert.All(
+			rows.Where(static row => row.GitMode is GitFilteringMode.TrackedFilesOnly or
+				GitFilteringMode.Staged or GitFilteringMode.Changes),
+			static row => Assert.False(row.IsEnabled));
+	}
+
+	[Fact]
+	public void RetainedTrackedModeStaysHiddenWithoutLosingItsIntent()
+	{
+		var plan = CreatePlan(
+			ProjectSelectionSpec.Standard with
+			{
+				GitMode = GitFilteringMode.TrackedFilesOnly,
+				Exclusions = [ProjectExclusion.HiddenFiles]
+			},
+			hasIgnoreOptionCounts: true,
+			ignoreOptionCounts: new IgnoreOptionCounts(HiddenFiles: 1)) with
+		{
+			GitReadiness = new ProjectContextGitReadiness(
+				GitFilteringMode.TrackedFilesOnly,
+				LoadedTrackedIndexCount: 0,
+				IsReady: false)
+		};
+
+		var rows = CreateBuilder().BuildExclusions(plan);
+		var counts = TerminalWorkspaceSession.CountExclusionAxis(rows);
+
+		Assert.DoesNotContain(rows, static row => row.Kind == TerminalParameterRowKind.GitMode);
+		var hiddenFiles = Assert.Single(rows);
+		Assert.Equal(ProjectExclusion.HiddenFiles, hiddenFiles.Exclusion);
+		Assert.True(hiddenFiles.IsSelected);
+		Assert.Equal((1, 1), counts);
+		Assert.Equal(GitFilteringMode.TrackedFilesOnly, plan.Selection.GitMode);
+	}
+
+	[Theory]
+	[InlineData(
+		"C Content  X Exclusions  T Types  M Git mode  : Commands",
+		"C Content  X Exclusions  T Types  : Commands")]
+	[InlineData(
+		"C Контент   X Исключения   T Типы   M Git-режим   Enter Изменить   : Команды",
+		"C Контент   X Исключения   T Типы   Enter Изменить   : Команды")]
+	public void InapplicableGitAxisIsRemovedFromLocalizedControlsFooter(
+		string footer,
+		string expected)
+	{
+		Assert.Equal(expected, TerminalWorkspaceSession.RemoveGitFilteringShortcut(footer));
+	}
+
 	[Fact]
 	public void GitModesRemainEnabledForEmptyRepositoryBoundary()
 	{

@@ -834,14 +834,7 @@ public sealed class TerminalWorkspaceCommandLinePtyTests
 		Assert.False(terminal.HasExited);
 		Verify("workspace-command-error-en-160x40", error, project.Path);
 
-		await terminal.SendAsync(":", TestContext.Current.CancellationToken);
-		await terminal.SendAsync("quit", TestContext.Current.CancellationToken);
-		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		Assert.Equal(
-			CommandLineExitCodes.Success,
-			await terminal.WaitForExitAsync(
-				timeout: TimeSpan.FromSeconds(30),
-				cancellationToken: TestContext.Current.CancellationToken));
+		await QuitAsync(terminal);
 	}
 
 	[Fact(Timeout = 150_000)]

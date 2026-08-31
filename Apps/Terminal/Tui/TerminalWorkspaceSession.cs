@@ -1798,8 +1798,30 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				L(wide ? "Terminal.Tui.Footer.Tree.Wide" : "Terminal.Tui.Footer.Tree"),
 			TerminalWorkspacePane.Preview =>
 				L(wide ? "Terminal.Tui.Footer.Preview.Wide" : "Terminal.Tui.Footer.Preview"),
-			_ => L(wide ? "Terminal.Tui.Footer.Controls.Wide" : "Terminal.Tui.Footer.Controls")
+			_ => BuildControlsFooterText(wide)
 		};
+	}
+
+	private string BuildControlsFooterText(bool wide)
+	{
+		var footer = L(wide ? "Terminal.Tui.Footer.Controls.Wide" : "Terminal.Tui.Footer.Controls");
+		return IsGitFilteringApplicable() ? footer : RemoveGitFilteringShortcut(footer);
+	}
+
+	internal static string RemoveGitFilteringShortcut(string footer)
+	{
+		ArgumentNullException.ThrowIfNull(footer);
+		var commandSeparator = footer.LastIndexOf("  :", StringComparison.Ordinal);
+		if (commandSeparator < 0)
+			return footer;
+		var gitShortcut = footer.LastIndexOf("  M ", commandSeparator, StringComparison.Ordinal);
+		if (gitShortcut < 0)
+			return footer;
+		var enterShortcut = footer.IndexOf("  Enter ", gitShortcut, StringComparison.Ordinal);
+		var suffix = enterShortcut >= 0 && enterShortcut < commandSeparator
+			? enterShortcut
+			: commandSeparator;
+		return footer[..gitShortcut] + footer[suffix..];
 	}
 
 	private string GetFormatToken() =>

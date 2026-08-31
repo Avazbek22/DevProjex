@@ -8,18 +8,18 @@
 │                                         │││   └── App.cs                                                               │││[ ] Strip comments                ││
 │                                         ││├── global.json                                                              │││[ ] Strip blank lines             ││
 │                                         ││└── readme.md                                                                ││└──────────────────────────────────┘│
-│                                         ││                                                                             ││┌┤Exclusions├─────── [x] All (9) ──┐│
-│                                         ││                                                                             │││( ) No Git filtering             ▲││
-│                                         ││                                                                             │││(•) Use .gitignore               ┃││
-│                                         ││        ┌┤Preview format├─────────────────────────────────────┐              │││( ) Tracked Git files only       ┃││
-│                                         ││        │ Choose ASCII, JSON, XML, or Markdown for the tree.  │              │││( ) Staged Git files             ┃││
-│                                         ││        │                                                     │              │││( ) Current Git changes          ┃││
-│                                         ││        │ ASCII                                               │              │││[x] Smart ignore                 ┃││
-│                                         ││        │ JSON                                                │              │││[x] Empty folders                ┃││
-│                                         ││        │ XML                                                 │              │││[x] Empty files                  ┃││
-│                                         ││        │ Markdown                                            │              │││[x] Hidden folders               ·││
-│                                         ││        │                                                     │              │││[x] Hidden files                 ·││
-│                                         ││        │                                                     │              │││[x] dot folders                  ▼││
+│                                         ││                                                                             ││┌┤Exclusions├─────────── [ ] All ──┐│
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││        ┌┤Preview format├─────────────────────────────────────┐              │││                                  ││
+│                                         ││        │ Choose ASCII, JSON, XML, or Markdown for the tree.  │              │││                                  ││
+│                                         ││        │                                                     │              │││                                  ││
+│                                         ││        │ ASCII                                               │              │││                                  ││
+│                                         ││        │ JSON                                                │              │││                                  ││
+│                                         ││        │ XML                                                 │              │││                                  ││
+│                                         ││        │ Markdown                                            │              │││                                  ││
+│                                         ││        │                                                     │              │││                                  ││
+│                                         ││        │                                                     │              │││                                  ││
 │                                         ││        │                     ⟦► Back ◄⟧▖                     │              ││└──────────────────────────────────┘│
 │                                         ││        │                     ▝▀▀▀▀▀▀▀▀▀▘                     │              ││┌┤File types├─────── [x] All (3) ──┐│
 │                                         ││        └─────────────────────────────────────────────────────┘              │││[x] .cs                           ││

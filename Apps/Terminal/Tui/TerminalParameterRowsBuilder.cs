@@ -46,31 +46,33 @@ internal sealed class TerminalParameterRowsBuilder(
 		var exclusions = (selection.Exclusions ?? []).ToHashSet();
 		var rows = new List<TerminalParameterRow>();
 		var activeMode = selection.GitMode ?? plan.GitReadiness.Mode;
-		var hasRepository = gitCliAvailable &&
-		                    (plan.GitReadiness.HasRepositoryBoundary ||
-		                     GitRepositoryBoundaryProbe.ExistsAtOrAbove(plan.SourceRoot));
-		rows.AddRange(ProjectPresentationCatalog.GitFiltering
-			.Select(descriptor => new TerminalParameterRow(
-				$"git:{descriptor.Token}",
-				TerminalParameterRowKind.GitMode,
-				fitLabel(localize(descriptor.LabelKey)),
-				activeMode == descriptor.Id,
-				IsEnabled: descriptor.Id is not (GitFilteringMode.TrackedFilesOnly or
-					GitFilteringMode.Staged or GitFilteringMode.Changes) || hasRepository,
-				UseUnicodeRadioMarker: useUnicodeRadioMarker,
-				GitMode: descriptor.Id)));
-		if (activeMode == GitFilteringMode.Diff &&
-		    !string.IsNullOrWhiteSpace(selection.GitDiffRange))
+		var hasRepositoryBoundary = HasRepositoryBoundary(plan);
+		var hasRepository = gitCliAvailable && hasRepositoryBoundary;
+		if (IsGitFilteringApplicable(plan, hasRepositoryBoundary))
 		{
-			rows.Add(new TerminalParameterRow(
-				"git:diff",
-				TerminalParameterRowKind.GitMode,
-				fitLabel($"diff: {selection.GitDiffRange}"),
-				true,
-				IsEnabled: hasRepository,
-				UseUnicodeRadioMarker: useUnicodeRadioMarker,
-				GitMode: GitFilteringMode.Diff,
-				Value: selection.GitDiffRange));
+			rows.AddRange(ProjectPresentationCatalog.GitFiltering
+				.Select(descriptor => new TerminalParameterRow(
+					$"git:{descriptor.Token}",
+					TerminalParameterRowKind.GitMode,
+					fitLabel(localize(descriptor.LabelKey)),
+					activeMode == descriptor.Id,
+					IsEnabled: descriptor.Id is not (GitFilteringMode.TrackedFilesOnly or
+						GitFilteringMode.Staged or GitFilteringMode.Changes) || hasRepository,
+					UseUnicodeRadioMarker: useUnicodeRadioMarker,
+					GitMode: descriptor.Id)));
+			if (activeMode == GitFilteringMode.Diff &&
+			    !string.IsNullOrWhiteSpace(selection.GitDiffRange))
+			{
+				rows.Add(new TerminalParameterRow(
+					"git:diff",
+					TerminalParameterRowKind.GitMode,
+					fitLabel($"diff: {selection.GitDiffRange}"),
+					true,
+					IsEnabled: hasRepository,
+					UseUnicodeRadioMarker: useUnicodeRadioMarker,
+					GitMode: GitFilteringMode.Diff,
+					Value: selection.GitDiffRange));
+			}
 		}
 		rows.AddRange(ProjectPresentationCatalog.Exclusions
 			.Where(descriptor => IsPathExclusionAvailable(descriptor, plan))
@@ -82,6 +84,12 @@ internal sealed class TerminalParameterRowsBuilder(
 				exclusions.Contains(descriptor.RequireId()),
 				Exclusion: descriptor.RequireId())));
 		return rows;
+	}
+
+	internal static bool IsGitFilteringApplicable(ProjectContextPlan plan)
+	{
+		ArgumentNullException.ThrowIfNull(plan);
+		return IsGitFilteringApplicable(plan, HasRepositoryBoundary(plan));
 	}
 
 	public TerminalParameterRow BuildExclusionAggregate(
@@ -217,4 +225,14 @@ internal sealed class TerminalParameterRowsBuilder(
 			? plan.IgnoreControllerImpactCounts.SmartIgnore > 0
 			: GetPathExclusionImpactCount(descriptor.RequireId(), plan.IgnoreOptionCounts) > 0;
 	}
+
+	private static bool IsGitFilteringApplicable(
+		ProjectContextPlan plan,
+		bool hasRepositoryBoundary) =>
+		hasRepositoryBoundary ||
+		plan.HasIgnoreOptionCounts && plan.IgnoreControllerImpactCounts.GitIgnore > 0;
+
+	private static bool HasRepositoryBoundary(ProjectContextPlan plan) =>
+		plan.GitReadiness.HasRepositoryBoundary ||
+		GitRepositoryBoundaryProbe.ExistsAtOrAbove(plan.SourceRoot);
 }

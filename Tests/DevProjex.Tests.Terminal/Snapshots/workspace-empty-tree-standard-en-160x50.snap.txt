@@ -8,20 +8,20 @@
 │                                         ││                                                                             │││[ ] Strip comments                ││
 │                                         ││                                                                             │││[ ] Strip blank lines             ││
 │                                         ││                                                                             ││└──────────────────────────────────┘│
-│                                         ││                                                                             ││┌┤Exclusions├─────── [x] All (9) ──┐│
-│                                         ││                                                                             │││( ) No Git filtering              ││
-│                                         ││                                                                             │││(•) Use .gitignore                ││
-│                                         ││                                                                             │││( ) Tracked Git files only        ││
-│                                         ││                                                                             │││( ) Staged Git files              ││
-│                                         ││                                                                             │││( ) Current Git changes           ││
-│                                         ││                                                                             │││[x] Smart ignore                  ││
+│                                         ││                                                                             ││┌┤Exclusions├─────── [x] All (1) ──┐│
 │                                         ││                                                                             │││[x] Empty folders (1)             ││
-│                                         ││                                                                             │││[x] Empty files                   ││
-│                                         ││                                                                             │││[x] Hidden folders                ││
-│                                         ││                                                                             │││[x] Hidden files                  ││
-│                                         ││                                                                             │││[x] dot folders                   ││
-│                                         ││                                                                             │││[x] dot files                     ││
-│                                         ││                                                                             │││[x] Files without extension       ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
 │                                         ││                                                                             │││                                  ││
 │                                         ││                                                                             │││                                  ││
 │                                         ││                                                                             │││                                  ││
@@ -47,4 +47,4 @@
 └─────────────────────────────────────────┘└─────────────────────────────────────────────────────────────────────────────┘└────────────────────────────────────┘
 
  Files 0 · Folders 0 · 0 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
- C Content   X Exclusions   T Types   M Cycle Git mode   Enter Change   : Commands
+ C Content   X Exclusions   T Types   Enter Change   : Commands

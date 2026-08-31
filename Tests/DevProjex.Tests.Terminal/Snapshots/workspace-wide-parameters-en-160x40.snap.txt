@@ -8,18 +8,18 @@
 │                                         │││   └── App.cs                                                               │││[ ] Strip comments                ││
 │                                         ││├── global.json                                                              │││[ ] Strip blank lines             ││
 │                                         ││└── readme.md                                                                ││└──────────────────────────────────┘│
-│                                         ││                                                                             ││┌┤Exclusions├─────── [x] All (9) ──┐│
-│                                         ││                                                                             │││( ) No Git filtering              ││
-│                                         ││                                                                             │││(•) Use .gitignore                ││
-│                                         ││                                                                             │││( ) Tracked Git files only        ││
-│                                         ││                                                                             │││( ) Staged Git files              ││
-│                                         ││                                                                             │││( ) Current Git changes           ││
-│                                         ││                                                                             │││[x] Smart ignore                  ││
-│                                         ││                                                                             │││[x] Empty folders                 ││
-│                                         ││                                                                             │││[x] Empty files                   ││
-│                                         ││                                                                             │││[x] Hidden folders                ││
-│                                         ││                                                                             │││[x] Hidden files                  ││
-│                                         ││                                                                             │││[x] dot folders                   ││
+│                                         ││                                                                             ││┌┤Exclusions├─────────── [ ] All ──┐│
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
 │                                         ││                                                                             ││└──────────────────────────────────┘│
 │                                         ││                                                                             ││┌┤File types├─────── [x] All (3) ──┐│
 │                                         ││                                                                             │││[x] .cs                           ││

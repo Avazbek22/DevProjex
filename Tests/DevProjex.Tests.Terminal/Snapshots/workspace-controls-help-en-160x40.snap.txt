@@ -7,23 +7,23 @@
 │    [x] readme.md                        ││      <f>Handler.cs</f>                                                      │││[ ] Compress code                 ││
 │                                 ┌┤Help├───────────────────────────────────────────────────────────────────────────────────┐ ] Strip comments                ││
 │                                 │ PARAMETERS                                                                            ▲ │ ] Strip blank lines             ││
-│                                 │ Content Processing contains five immediate transformations. Exclusions starts with    █ │─────────────────────────────────┘│
-│                                 │ All and the two mutually exclusive Git checkboxes. File Types has its own All         █ │Exclusions├─────── [x] All (9) ──┐│
-│                                 │ control. Up/Down or j/k moves inside a mini-panel and crosses to the next one at a    █ │ ) No Git filtering             ▲││
-│                                 │ boundary; Enter or Space toggles a row. Each long list scrolls independently. : opens █ │•) Use .gitignore               ┃││
-│                                 │ workspace commands, Ctrl+P opens actions, E exports context, z exports a folder, and  █ │ ) Tracked Git files only       ┃││
-│                                 │ Shift+Z exports ZIP. Tab/F6 returns to Tree; Shift+Tab/Shift+F6 moves to Preview.     █ │ ) Staged Git files             ┃││
-│                                 │                                                                                       █ │ ) Current Git changes          ┃││
-│                                 │ WORKSPACE                                                                             █ │x] Smart ignore                 ┃││
-│                                 │ Tree selects files and folders. Preview inspects the current context. Parameters      █ │x] Empty folders                ┃││
-│                                 │ changes Content Processing, Exclusions, and File Types in three independent           ░ │x] Empty files                  ┃││
-│                                 │ mini-panels.                                                                          ░ │x] Hidden folders               ·││
-│                                 │                                                                                       ░ │x] Hidden files                 ·││
-│                                 │ ACTION PALETTE                                                                        ░ │x] dot folders                  ▼││
-│                                 │ Ctrl+P lists every important action and shortcut. Type to filter, use Up/Down, then   ░ │─────────────────────────────────┘│
-│                                 │ Enter. Exclusions and File Types actions focus their mini-panels. Esc restores the    ░ │File types├─────── [x] All (3) ──┐│
-│                                 │ previous pane.                                                                        ░ │x] .cs                           ││
-│                                 │                                                                                       ▼ │x] .json                         ││
+│                                 │ Content Processing contains five immediate transformations. Exclusions has an All     █ │─────────────────────────────────┘│
+│                                 │ control and 5 mutually exclusive Git-mode radio rows; an active diff:<ref>..<ref>     █ │Exclusions├─────────── [ ] All ──┐│
+│                                 │ scope adds a sixth row. File Types has its own All control. Up/Down or j/k moves      █ │                                 ││
+│                                 │ inside a mini-panel and crosses to the next one at a boundary; Enter or Space toggles █ │                                 ││
+│                                 │ a row. Each long list scrolls independently. : opens workspace commands, Ctrl+P opens █ │                                 ││
+│                                 │ actions, E exports context, z exports a folder, and Shift+Z exports ZIP. Tab/F6       █ │                                 ││
+│                                 │ returns to Tree; Shift+Tab/Shift+F6 moves to Preview.                                 █ │                                 ││
+│                                 │                                                                                       █ │                                 ││
+│                                 │ WORKSPACE                                                                             ░ │                                 ││
+│                                 │ Tree selects files and folders. Preview inspects the current context. Parameters      ░ │                                 ││
+│                                 │ changes Content Processing, Exclusions, and File Types in three independent           ░ │                                 ││
+│                                 │ mini-panels.                                                                          ░ │                                 ││
+│                                 │                                                                                       ░ │                                 ││
+│                                 │ ACTION PALETTE                                                                        ░ │─────────────────────────────────┘│
+│                                 │ Ctrl+P lists every important action and shortcut. Type to filter, use Up/Down, then   ░ │File types├─────── [x] All (3) ──┐│
+│                                 │ Enter. Exclusions and File Types actions focus their mini-panels. Esc restores the    ░ │x] .cs                           ││
+│                                 │ previous pane.                                                                        ▼ │x] .json                         ││
 │                                 │                                                                                         │x] .md                           ││
 │                                 │                                                                                         │                                 ││
 │                                 │                                      ⟦► Close ◄⟧▖                                       │                                 ││
@@ -37,4 +37,4 @@
 └─────────────────────────────────────────┘└─────────────────────────────────────────────────────────────────────────────┘└────────────────────────────────────┘
 
  Files 4 · Folders 3 · 76 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
- C Content   X Exclusions   T Types   M Cycle Git mode   Enter Change   : Commands
+ C Content   X Exclusions   T Types   Enter Change   : Commands

@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using DevProjex.Application.Presentation;
 using DevProjex.Infrastructure.ProjectProfiles;
 
 namespace DevProjex.Tests.Terminal;
@@ -7,6 +6,95 @@ namespace DevProjex.Tests.Terminal;
 [Collection(TerminalProcessCollection.Name)]
 public sealed class TerminalSettingsPanelPtyTests
 {
+	[Fact(Timeout = 90_000)]
+	public async Task PlainNonGitWorkspaceOmitsTheInapplicableGitAxis()
+	{
+		using var project = CreatePanelProject(initializeGit: false);
+		await using var terminal = await StartAsync(project.Path, columns: 160, rows: 50);
+
+		await WaitForStableScreenAsync(terminal, "PROJECT TREE");
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		var parameters = await WaitForStableScreenAsync(terminal, "> PARAMETERS");
+		Assert.DoesNotContain("No Git filtering", parameters, StringComparison.Ordinal);
+		Assert.DoesNotContain("Use .gitignore", parameters, StringComparison.Ordinal);
+		Assert.DoesNotContain("M Cycle Git mode", parameters, StringComparison.Ordinal);
+
+		await terminal.SendAsync("\x10", TestContext.Current.CancellationToken);
+		var palette = await WaitForStableScreenAsync(terminal, "Action palette");
+		Assert.DoesNotContain("Git filtering", palette, StringComparison.Ordinal);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenWithoutAsync(
+			"Action palette",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
+		parameters = await WaitForStableScreenAsync(terminal, "> PARAMETERS");
+		Assert.DoesNotContain("Use .gitignore", parameters, StringComparison.Ordinal);
+
+		project.WriteFile(".gitignore", "ignored.tmp\n");
+		project.WriteFile("ignored.tmp", "ignored");
+		await terminal.SendAsync(":refresh\r", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Project refreshed.",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+		parameters = await WaitForStableScreenAsync(terminal, "(•) Use .gitignore");
+		await terminal.SendAsync("X", TestContext.Current.CancellationToken);
+		parameters = await WaitForStableScreenAsync(terminal, "M Cycle Git mode");
+		Assert.Contains("M Cycle Git mode", parameters, StringComparison.Ordinal);
+
+		File.Delete(Path.Combine(project.Path, ".gitignore"));
+		File.Delete(Path.Combine(project.Path, "ignored.tmp"));
+		await terminal.SendAsync(":refresh\r", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Project refreshed.",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+		parameters = await WaitForStableScreenAsync(
+			terminal,
+			"> PARAMETERS",
+			static screen => !screen.Contains("Use .gitignore", StringComparison.Ordinal));
+		Assert.DoesNotContain("M Cycle Git mode", parameters, StringComparison.Ordinal);
+
+		await terminal.SendAsync("X", TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(terminal, "> PARAMETERS");
+		await terminal.SendAsync("\x10", TestContext.Current.CancellationToken);
+		palette = await WaitForStableScreenAsync(terminal, "Action palette");
+		Assert.DoesNotContain("Git filtering", palette, StringComparison.Ordinal);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenWithoutAsync(
+			"Action palette",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.SendAsync(":set git none\r", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"✓ No Git filtering",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		project.WriteFile(".gitignore", "ignored.tmp\n");
+		project.WriteFile("ignored.tmp", "ignored");
+		await terminal.SendAsync(":refresh\r", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Project refreshed.",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+		parameters = await WaitForStableScreenAsync(terminal, "(•) No Git filtering");
+		Assert.Contains("( ) Use .gitignore", parameters, StringComparison.Ordinal);
+
+		await terminal.SendAsync(":quit\r", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Exit DevProjex Terminal?",
+			timeout: TimeSpan.FromSeconds(10),
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
+	}
+
 	[Fact(Timeout = 90_000)]
 	public async Task SplitFocusCycleDoesNotLeaveFramesFromThePreviousPaneGeometry()
 	{
@@ -76,7 +164,7 @@ public sealed class TerminalSettingsPanelPtyTests
 			terminal,
 			project.Path,
 			"workspace-settings-en-70x24");
-		Assert.Contains('▲', ExtractPanel(compact, "Exclusions", "File types"));
+		Assert.DoesNotContain('▲', ExtractPanel(compact, "Exclusions", "File types"));
 
 		await terminal.ResizeAsync(59, 19, TestContext.Current.CancellationToken);
 		var tooSmall = await WaitForStableScreenAsync(terminal, "Terminal too small");
@@ -125,7 +213,7 @@ public sealed class TerminalSettingsPanelPtyTests
 			"workspace-settings-local-en-100x30",
 			parameters,
 			(project.Path, "<PROJECT_ROOT>"));
-		Assert.Contains('▲', ExtractPanel(parameters, "Exclusions", "File types"));
+		Assert.DoesNotContain('▲', ExtractPanel(parameters, "Exclusions", "File types"));
 		var fileTypes = ExtractPanel(parameters, "File types", null);
 		Assert.DoesNotContain('▲', fileTypes);
 		Assert.DoesNotContain('▼', fileTypes);
@@ -140,7 +228,7 @@ public sealed class TerminalSettingsPanelPtyTests
 	[Fact(Timeout = 90_000)]
 	public async Task AggregateControlsRenderOnFramesAndOnlyFocusedSectionHighlightsSelection()
 	{
-		using var project = CreatePanelProject();
+		using var project = CreatePanelProject(initializeGit: true);
 		await using var terminal = await StartAsync(project.Path, columns: 160, rows: 50);
 
 		await terminal.WaitForScreenAsync(
@@ -150,7 +238,7 @@ public sealed class TerminalSettingsPanelPtyTests
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		var contentFocused = await WaitForStableScreenAsync(terminal, "> PARAMETERS");
 		AssertFrameAggregate(contentFocused, "Content processing", expectedCount: 5);
-		AssertFrameAggregate(contentFocused, "Exclusions", ExpectedExclusionCount);
+		AssertFrameAggregate(contentFocused, "Exclusions", expectedCount: 0);
 		AssertFrameAggregate(contentFocused, "File types", expectedCount: 3);
 		Assert.DoesNotContain("Content processing:", contentFocused, StringComparison.Ordinal);
 		AssertOnlyRowIsHighlighted(
@@ -168,8 +256,9 @@ public sealed class TerminalSettingsPanelPtyTests
 		AssertOnlyRowIsHighlighted(
 			terminal,
 			exclusionsFocused,
-			activeText: "[x] All",
-			inactiveTexts: ["Hide secrets", ".cs"]);
+			activeText: "[ ] All",
+			inactiveTexts: ["Hide secrets", ".cs"],
+			lastOccurrence: true);
 		TerminalScreenSnapshot.Verify(
 			"workspace-settings-exclusions-focused-en-160x50",
 			exclusionsFocused,
@@ -354,7 +443,7 @@ public sealed class TerminalSettingsPanelPtyTests
 	[Fact(Timeout = 120_000)]
 	public async Task NestedRepositoryScopesStaySelectableAndPublishTheirGitState()
 	{
-		using var project = CreatePanelProject();
+		using var project = CreatePanelProject(initializeGit: false);
 		var nestedRoot = project.CreateDirectory("nested-repository");
 		project.WriteFile("nested-repository/Baseline.cs", "class Baseline {}\n");
 		RunGit(nestedRoot, "init", "--quiet");
@@ -398,7 +487,7 @@ public sealed class TerminalSettingsPanelPtyTests
 	[Fact(Timeout = 120_000)]
 	public async Task SettingsRefreshEnablesGitScopesWhenARepositoryAppearsAfterOpen()
 	{
-		using var project = CreatePanelProject();
+		using var project = CreatePanelProject(initializeGit: false);
 		await using var terminal = await StartAsync(project.Path, columns: 160, rows: 50);
 		await WaitForStableScreenAsync(terminal, "PROJECT TREE");
 		await terminal.SendAsync(":set tracked on\r", TestContext.Current.CancellationToken);
@@ -429,7 +518,7 @@ public sealed class TerminalSettingsPanelPtyTests
 	[Fact(Timeout = 120_000)]
 	public async Task SettingsRefreshFallsBackWhenTheRepositoryDisappearsDuringTheSession()
 	{
-		using var project = CreatePanelProject();
+		using var project = CreatePanelProject(initializeGit: false);
 		RunGit(project.Path, "init", "--quiet");
 		RunGit(project.Path, "config", "user.email", "terminal-tests@devprojex.local");
 		RunGit(project.Path, "config", "user.name", "DevProjex Terminal Tests");
@@ -458,11 +547,13 @@ public sealed class TerminalSettingsPanelPtyTests
 				terminal,
 				"dot folders: disabled",
 				"VisibleAfterRepositoryRemoval.cs");
-			var refreshed = await WaitForStableScreenAsync(terminal, "(\u2022) Use .gitignore");
+			var refreshed = await WaitForStableScreenAsync(
+				terminal,
+				"PARAMETERS",
+				static screen => !screen.Contains("Use .gitignore", StringComparison.Ordinal));
 
 			Assert.Contains("VisibleAfterRepositoryRemoval.cs", refreshed, StringComparison.Ordinal);
-			Assert.Contains("( ) Staged Git files", refreshed, StringComparison.Ordinal);
-			Assert.DoesNotContain("(\u2022) Staged Git files", refreshed, StringComparison.Ordinal);
+			Assert.DoesNotContain("Staged Git files", refreshed, StringComparison.Ordinal);
 			await terminal.SendAsync(":set tracked on\r", TestContext.Current.CancellationToken);
 			await terminal.WaitForScreenAsync(
 				"The command cannot be applied to the current workspace state",
@@ -604,7 +695,7 @@ public sealed class TerminalSettingsPanelPtyTests
 	[Fact(Timeout = 90_000)]
 	public async Task MouseClickOnFrameAggregateTogglesOnlyItsSection()
 	{
-		using var project = CreatePanelProject();
+		using var project = CreatePanelProject(initializeGit: false);
 		project.WriteFile(".hidden.cs", "internal sealed class Hidden { }");
 		await using var terminal = await StartAsync(
 			project.Path,
@@ -618,7 +709,7 @@ public sealed class TerminalSettingsPanelPtyTests
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		var screen = await WaitForStableScreenAsync(terminal, "Exclusions");
-		Assert.Contains("(•) Use .gitignore", screen, StringComparison.Ordinal);
+		Assert.DoesNotContain("Use .gitignore", screen, StringComparison.Ordinal);
 		Assert.DoesNotContain(".hidden.cs", screen, StringComparison.Ordinal);
 		var (row, column) = FindFrameAggregate(screen, "Exclusions", "[x] All");
 		await terminal.SendMouseClickAsync(
@@ -630,7 +721,7 @@ public sealed class TerminalSettingsPanelPtyTests
 			"Exclusions",
 			"[ ] All");
 		cleared = await WaitForStableScreenAsync(terminal, ".hidden.cs");
-		Assert.Contains("(•) Use .gitignore", cleared, StringComparison.Ordinal);
+		Assert.DoesNotContain("Use .gitignore", cleared, StringComparison.Ordinal);
 		Assert.Contains(".hidden.cs", cleared, StringComparison.Ordinal);
 		Assert.Contains("[x] .cs", cleared, StringComparison.Ordinal);
 
@@ -729,7 +820,7 @@ public sealed class TerminalSettingsPanelPtyTests
 	[Fact(Timeout = 90_000)]
 	public async Task PlainModeKeepsAggregateControlsAsPinnedFirstRows()
 	{
-		using var project = CreatePanelProject();
+		using var project = CreatePanelProject(initializeGit: true);
 		await using var terminal = await StartAsync(
 			project.Path,
 			columns: 80,
@@ -745,7 +836,7 @@ public sealed class TerminalSettingsPanelPtyTests
 		var lines = screen.Split('\n');
 		var aggregateRows = lines
 			.Select((line, index) => (line, index))
-			.Where(static pair => pair.line.Contains("] All (", StringComparison.Ordinal))
+			.Where(static pair => pair.line.Contains("] All", StringComparison.Ordinal))
 			.Select(static pair => pair.index)
 			.ToArray();
 		Assert.Equal(3, aggregateRows.Length);
@@ -783,7 +874,7 @@ public sealed class TerminalSettingsPanelPtyTests
 		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		var screen = await WaitForStableScreenAsync(terminal, "> PARAMETERS");
 		AssertFrameAggregate(screen, "Content processing", expectedCount: 5);
-		AssertFrameAggregate(screen, "Exclusions", ExpectedExclusionCount);
+		AssertFrameAggregate(screen, "Exclusions", expectedCount: 0);
 		AssertFrameAggregate(screen, "File types", expectedCount: 3);
 
 		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
@@ -802,7 +893,7 @@ public sealed class TerminalSettingsPanelPtyTests
 	[Fact(Timeout = 90_000)]
 	public async Task AggregateRowsRemainVisibleWhileTheirListsScroll()
 	{
-		using var project = CreatePanelProject();
+		using var project = CreatePanelProject(initializeGit: true);
 		await using var terminal = await StartAsync(project.Path, columns: 70, rows: 24);
 
 		await terminal.WaitForScreenAsync(
@@ -811,7 +902,7 @@ public sealed class TerminalSettingsPanelPtyTests
 		await terminal.SendAsync("X", TestContext.Current.CancellationToken);
 		await terminal.SendEndAsync(TestContext.Current.CancellationToken);
 		var exclusions = await WaitForStableScreenAsync(terminal, "Exclusions");
-		Assert.Contains("[x] All", ExtractPanel(exclusions, "Exclusions", "File types"));
+		Assert.Contains("[ ] All", ExtractPanel(exclusions, "Exclusions", "File types"));
 
 		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 		await terminal.SendEndAsync(TestContext.Current.CancellationToken);
@@ -885,7 +976,8 @@ public sealed class TerminalSettingsPanelPtyTests
 	[Fact(Timeout = 90_000)]
 	public async Task ArrowKeysCrossMiniPanelBoundariesAndAllAffectsOnlyItsPanel()
 	{
-		using var project = CreatePanelProject();
+		using var project = CreatePanelProject(initializeGit: true);
+		project.WriteFile("obj/project.assets.json", "{}");
 		await using var terminal = await StartAsync(project.Path, columns: 100, rows: 30);
 
 		await terminal.WaitForScreenAsync(
@@ -948,8 +1040,9 @@ public sealed class TerminalSettingsPanelPtyTests
 		await WaitForPanelContainsAsync(terminal, "Exclusions", "File types", "[ ] All");
 		await WaitForStableScreenAsync(terminal, "[ ] All");
 		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
-		var exclusionsCleared = await WaitForStableScreenAsync(terminal, "(•) No Git filtering");
-		Assert.Contains("( ) Use .gitignore", exclusionsCleared, StringComparison.Ordinal);
+		var exclusionsCleared = await WaitForStableScreenAsync(terminal, "(•) Use .gitignore");
+		Assert.Contains("( ) No Git filtering", exclusionsCleared, StringComparison.Ordinal);
+		Assert.Contains("[ ] Smart ignore", exclusionsCleared, StringComparison.Ordinal);
 		Assert.Contains("[ ] .cs", exclusionsCleared, StringComparison.Ordinal);
 
 		await terminal.SendUpAsync(TestContext.Current.CancellationToken);
@@ -1001,6 +1094,7 @@ public sealed class TerminalSettingsPanelPtyTests
 	public async Task SelectedRowSurvivesRefreshInEveryMiniPanel()
 	{
 		using var project = CreatePanelProject(includeFindings: true);
+		project.WriteFile("obj/project.assets.json", "{}");
 		await using var terminal = await StartAsync(project.Path, columns: 100, rows: 30);
 
 		await terminal.WaitForScreenAsync(
@@ -1030,8 +1124,7 @@ public sealed class TerminalSettingsPanelPtyTests
 			"[ ] Hide private data");
 
 		await terminal.SendAsync("X", TestContext.Current.CancellationToken);
-		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
-		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
+		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
 		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await WaitForPanelContainsAsync(
@@ -1234,7 +1327,7 @@ public sealed class TerminalSettingsPanelPtyTests
 		Assert.DoesNotContain("Content processing:", screen, StringComparison.Ordinal);
 		Assert.DoesNotContain("Saved settings", screen, StringComparison.Ordinal);
 		AssertFrameAggregate(screen, "Content processing", expectedCount: 5);
-		AssertFrameAggregate(screen, "Exclusions", ExpectedExclusionCount);
+		AssertFrameAggregate(screen, "Exclusions", expectedCount: 0);
 		AssertFrameAggregate(screen, "File types", expectedCount: 3);
 		Assert.DoesNotContain("ROOT FOLDERS", screen, StringComparison.Ordinal);
 		TerminalScreenSnapshot.Verify(
@@ -1249,16 +1342,21 @@ public sealed class TerminalSettingsPanelPtyTests
 		string title,
 		int? expectedCount = null)
 	{
-		var marker = title == "Content processing" ? "[ ]" : "[x]";
-		var suffix = expectedCount is { } count ? $" ({count})" : " (";
-		var titleLine = screen.Split('\n').Single(line =>
+		var marker = title == "Content processing" || expectedCount == 0 ? "[ ]" : "[x]";
+		var suffix = expectedCount switch
+		{
+			0 => string.Empty,
+			{ } count => $" ({count})",
+			_ => " ("
+		};
+		var titleLine = screen.Split('\n').SingleOrDefault(line =>
 			line.Contains(title, StringComparison.Ordinal) &&
 			line.Contains($"{marker} All{suffix}", StringComparison.Ordinal));
+		Assert.True(
+			titleLine is not null,
+			$"Expected frame aggregate '{marker} All{suffix}' for '{title}'.{Environment.NewLine}{screen}");
 		Assert.Contains($"{marker} All{suffix}", titleLine, StringComparison.Ordinal);
 	}
-
-	private static int ExpectedExclusionCount =>
-		ProjectPresentationCatalog.Exclusions.Count + 1;
 
 	private static (int Row, int Column) FindFrameAggregate(
 		string screen,
