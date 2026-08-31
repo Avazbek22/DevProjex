@@ -1153,6 +1153,11 @@ and Markdown now declare the root once and use relative file headings; text tree
 declare the root once and start at real children. This changes only human-readable
 presentation. Context and tree JSON/XML roots and file paths are unchanged.
 
+Before the same freeze, Markdown tree Root values and node names were hardened
+as literal CommonMark text: active Markdown, HTML, and entity syntax is escaped
+consistently in buffered output, streaming output, and metric calculation. Text,
+JSON, and XML tree bytes are unchanged.
+
 ## Exit Codes
 
 | Code | Meaning |

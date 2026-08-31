@@ -139,6 +139,8 @@ or XML tree would exceed 2,000 lines, the tool returns
 `DPX-MCP-PAYLOAD-TRUNCATED` with narrowing guidance instead of a partial document.
 The `text` tree writes its project address once, followed directly by the real
 top-level children; it does not repeat the project name as a synthetic tree node.
+Markdown tree Root values and node names escape active CommonMark, HTML, and
+entity syntax so project-controlled labels remain literal data.
 Git-state deletion warnings are appended outside project spotlight blocks so
 clients can distinguish trusted diagnostics from untrusted file data.
 

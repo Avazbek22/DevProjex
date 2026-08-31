@@ -515,6 +515,8 @@ cannot be combined with an explicit `--verbosity`; `--plain` conflicts with
 Text trees write the project path once and then start directly with its real
 children. They do not repeat the project name as a synthetic top-level node.
 `--plain` changes only the connectors to their ASCII equivalents.
+Markdown trees keep Root values and node names literal by escaping active
+CommonMark, HTML, and entity syntax in those human-readable labels.
 
 For file output, the destination must be outside the source project, its parent
 directory must already exist, and an existing destination requires `--force`.

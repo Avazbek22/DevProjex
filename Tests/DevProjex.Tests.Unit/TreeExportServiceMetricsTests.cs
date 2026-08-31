@@ -2,6 +2,101 @@ namespace DevProjex.Tests.Unit;
 
 public sealed class TreeExportServiceMetricsTests
 {
+	public static IEnumerable<object[]> FullTreeMetricCases()
+	{
+		for (var rootIsFile = 0; rootIsFile <= 1; rootIsFile++)
+		{
+			for (var includeRootPath = 0; includeRootPath <= 1; includeRootPath++)
+			{
+				yield return [rootIsFile != 0, includeRootPath != 0, TreeTextFormat.Ascii, false];
+				yield return [rootIsFile != 0, includeRootPath != 0, TreeTextFormat.Ascii, true];
+				yield return [rootIsFile != 0, includeRootPath != 0, TreeTextFormat.Markdown, false];
+				yield return [rootIsFile != 0, includeRootPath != 0, TreeTextFormat.Json, false];
+				yield return [rootIsFile != 0, includeRootPath != 0, TreeTextFormat.Xml, false];
+			}
+		}
+	}
+
+	[Theory]
+	[MemberData(nameof(FullTreeMetricCases))]
+	public async Task FullTreeMetricsMatchBufferedAndStreamingRenderers(
+		bool rootIsFile,
+		bool includeRootPath,
+		TreeTextFormat format,
+		bool plain)
+	{
+		var service = new TreeExportService();
+		var rootPath = Path.Combine(Path.GetTempPath(), "tree-metrics-literal-root");
+		var file = new TreeNodeDescriptor(
+			"![file](https://attacker.test/file.png)",
+			Path.Combine(rootPath, "file.md"),
+			false,
+			false,
+			"markdown",
+			[]);
+		var root = rootIsFile
+			? file
+			: new TreeNodeDescriptor(
+				"![root](https://attacker.test/root.png)",
+				rootPath,
+				true,
+				false,
+				"folder",
+				[file]);
+		var actualRootPath = rootIsFile ? file.FullPath : rootPath;
+		const string displayRootPath = "https://example.test/[repo]/<tag>/&copy;";
+		const string displayRootName = "![named](https://attacker.test/root.png)";
+		var buffered = plain
+			? service.BuildFullTreePlain(
+				actualRootPath,
+				root,
+				displayRootPath,
+				displayRootName,
+				includeRootPath)
+			: service.BuildFullTree(
+				actualRootPath,
+				root,
+				format,
+				displayRootPath,
+				displayRootName,
+				includeRootPath);
+		using var destination = new StringWriter(CultureInfo.InvariantCulture);
+		if (plain)
+		{
+			await service.WriteFullTreePlainAsync(
+				destination,
+				actualRootPath,
+				root,
+				displayRootPath,
+				displayRootName,
+				includeRootPath,
+				cancellationToken: TestContext.Current.CancellationToken);
+		}
+		else
+		{
+			await service.WriteFullTreeAsync(
+				destination,
+				actualRootPath,
+				root,
+				format,
+				displayRootPath,
+				displayRootName,
+				includeRootPath,
+				TestContext.Current.CancellationToken);
+		}
+
+		var metrics = service.CalculateFullTreeMetrics(
+			actualRootPath,
+			root,
+			format,
+			displayRootPath,
+			displayRootName,
+			includeRootPath);
+
+		Assert.Equal(buffered, destination.ToString());
+		Assert.Equal(ExportOutputMetricsCalculator.FromText(buffered), metrics);
+	}
+
 	[Theory]
 	[InlineData(false, false)]
 	[InlineData(false, true)]

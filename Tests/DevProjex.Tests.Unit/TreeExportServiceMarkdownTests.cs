@@ -3,6 +3,107 @@ namespace DevProjex.Tests.Unit;
 public sealed class TreeExportServiceMarkdownTests
 {
 	[Fact]
+	public async Task MarkdownTreeTreatsRootAndNodeNamesAsLiteralTextAcrossAllPaths()
+	{
+		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjexMarkdownLiteralNames");
+		var image = FileNode(
+			"![image](https://attacker.test/image.png)",
+			Path.Combine(rootPath, "image.md"));
+		var link = FileNode(
+			"prefix [link](https://attacker.test)",
+			Path.Combine(rootPath, "link.md"));
+		var html = FileNode("<img src=x>", Path.Combine(rootPath, "html.md"));
+		var extensions = FileNode(
+			"`code` **bold** &copy; user@example.com www.example.com",
+			Path.Combine(rootPath, "extensions.md"));
+		var ordered = FileNode("1. nested", Path.Combine(rootPath, "ordered.md"));
+		var indentedHeading = FileNode("  # heading", Path.Combine(rootPath, "heading.md"));
+		var indentedOrdered = FileNode("  2) nested", Path.Combine(rootPath, "ordered-parenthesis.md"));
+		var control = FileNode("line\nbreak", Path.Combine(rootPath, "control.md"));
+		var normal = FileNode("Program.cs", Path.Combine(rootPath, "Program.cs"));
+		var root = DirectoryNode(
+			"![named](https://attacker.test/root.png)",
+			rootPath,
+			[image, link, html, extensions, ordered, indentedHeading, indentedOrdered, control, normal]);
+		const string displayRootPath = "https://example.test/[repo]/<tag>/&copy;";
+		var selected = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer)
+		{
+			image.FullPath,
+			link.FullPath
+		};
+		var service = new TreeExportService();
+
+		var full = service.BuildFullTree(
+			rootPath,
+			root,
+			TreeTextFormat.Markdown,
+			displayRootPath);
+		var named = service.BuildFullTree(
+			rootPath,
+			root,
+			TreeTextFormat.Markdown,
+			displayRootPath,
+			root.DisplayName,
+			includeRootPath: false);
+		var selectedTree = service.BuildSelectedTree(
+			rootPath,
+			root,
+			selected,
+			TreeTextFormat.Markdown,
+			displayRootPath);
+		using var streamed = new StringWriter(CultureInfo.InvariantCulture);
+		await service.WriteFullTreeAsync(
+			streamed,
+			rootPath,
+			root,
+			TreeTextFormat.Markdown,
+			displayRootPath,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Equal(full, streamed.ToString());
+		Assert.Contains(@"https://example.test/\[repo\]/\<tag\>/\&copy;", full, StringComparison.Ordinal);
+		Assert.Contains(@"- \!\[image\](https://attacker.test/image.png)", full, StringComparison.Ordinal);
+		Assert.Contains(@"- prefix \[link\](https://attacker.test)", full, StringComparison.Ordinal);
+		Assert.Contains(@"- \<img src=x\>", full, StringComparison.Ordinal);
+		Assert.Contains(@"- \`code\` \*\*bold\*\* \&copy; user@example.com www.example.com", full, StringComparison.Ordinal);
+		Assert.Contains(@"- 1\. nested", full, StringComparison.Ordinal);
+		Assert.Contains(@"-   \# heading", full, StringComparison.Ordinal);
+		Assert.Contains(@"-   2\) nested", full, StringComparison.Ordinal);
+		Assert.Contains(@"- line\\nbreak", full, StringComparison.Ordinal);
+		Assert.Contains("- Program.cs", full, StringComparison.Ordinal);
+		Assert.Contains(@"- \!\[named\](https://attacker.test/root.png)/", named, StringComparison.Ordinal);
+		Assert.Contains(@"- \!\[image\](https://attacker.test/image.png)", selectedTree, StringComparison.Ordinal);
+		Assert.Contains(@"- prefix \[link\](https://attacker.test)", selectedTree, StringComparison.Ordinal);
+		Assert.DoesNotContain("<img src=x>", full, StringComparison.Ordinal);
+		Assert.DoesNotContain("- <img src=x>", full, StringComparison.Ordinal);
+		Assert.DoesNotContain(" **bold** ", full, StringComparison.Ordinal);
+		Assert.Equal(
+			ExportOutputMetricsCalculator.FromText(full),
+			service.CalculateFullTreeMetrics(
+				rootPath,
+				root,
+				TreeTextFormat.Markdown,
+				displayRootPath));
+		Assert.Equal(
+			ExportOutputMetricsCalculator.FromText(named),
+			service.CalculateFullTreeMetrics(
+				rootPath,
+				root,
+				TreeTextFormat.Markdown,
+				displayRootPath,
+				root.DisplayName,
+				includeRootPath: false));
+		Assert.Equal(
+			ExportOutputMetricsCalculator.FromText(selectedTree),
+			service.CalculateSelectedTreeMetrics(
+				rootPath,
+				root,
+				selected,
+				TreeTextFormat.Markdown,
+				displayRootPath));
+	}
+
+	[Fact]
 	public void BuildFullTree_MarkdownFormat_EmptyRootWritesOnlyHeader()
 	{
 		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjexMarkdownEmptyRoot");
@@ -175,10 +276,10 @@ public sealed class TreeExportServiceMarkdownTests
 		Assert.Contains("- \\-scripts/", result, StringComparison.Ordinal);
 		Assert.Contains("  - \\*glob.md", result, StringComparison.Ordinal);
 		Assert.Contains("  - \\+plus.md", result, StringComparison.Ordinal);
-		Assert.Contains("  - \\[draft].md", result, StringComparison.Ordinal);
+		Assert.Contains("  - \\[draft\\].md", result, StringComparison.Ordinal);
 		Assert.Contains("  - \\-build.ps1", result, StringComparison.Ordinal);
-		Assert.Contains("  - tab\\tfile.txt", result, StringComparison.Ordinal);
-		Assert.Contains("  - line\\nbreak.txt", result, StringComparison.Ordinal);
+		Assert.Contains(@"  - tab\\tfile.txt", result, StringComparison.Ordinal);
+		Assert.Contains(@"  - line\\nbreak.txt", result, StringComparison.Ordinal);
 		Assert.Contains("-scripts/-build.ps1", MarkdownTreeExportTestHelper.ExtractFilePaths(result));
 		Assert.Contains("-scripts/*glob.md", MarkdownTreeExportTestHelper.ExtractFilePaths(result));
 		Assert.Contains("-scripts/+plus.md", MarkdownTreeExportTestHelper.ExtractFilePaths(result));
