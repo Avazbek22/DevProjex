@@ -8,6 +8,8 @@ internal sealed class McpRootJailFileStreamOpener
 {
 	private const int DarwinGetPath = 50;
 	private const int DarwinPathBufferLength = 1024;
+	private const int LinuxOpenDirectory = 0x00010000;
+	private const int DarwinOpenDirectory = 0x00100000;
 	private const uint WindowsShareRead = 0x00000001;
 	private const uint WindowsShareWrite = 0x00000002;
 	private const uint WindowsShareDelete = 0x00000004;
@@ -71,11 +73,7 @@ internal sealed class McpRootJailFileStreamOpener
 		ArgumentException.ThrowIfNullOrWhiteSpace(path);
 		using var handle = OperatingSystem.IsWindows()
 			? OpenWindowsDirectory(path)
-			: File.OpenHandle(
-				path,
-				FileMode.Open,
-				FileAccess.Read,
-				FileShare.ReadWrite | FileShare.Delete);
+			: OpenUnixDirectory(path);
 		if (handle.IsInvalid)
 			throw NativeFailure("The final path of an MCP project root could not be opened.");
 		return Path.TrimEndingDirectorySeparator(ResolveOpenedPath(handle));
@@ -90,6 +88,20 @@ internal sealed class McpRootJailFileStreamOpener
 			WindowsOpenExisting,
 			WindowsBackupSemantics,
 			templateFile: IntPtr.Zero);
+
+	private static SafeFileHandle OpenUnixDirectory(string path)
+	{
+		var directoryFlag = OperatingSystem.IsLinux()
+			? LinuxOpenDirectory
+			: OperatingSystem.IsMacOS()
+				? DarwinOpenDirectory
+				: throw new PlatformNotSupportedException(
+					"MCP root-jail directory handles require Windows, Linux, or macOS.");
+		var descriptor = Open(path, directoryFlag);
+		return descriptor < 0
+			? throw NativeFailure("The final path of an MCP project root could not be opened.")
+			: new SafeFileHandle(descriptor, ownsHandle: true);
+	}
 
 	private static string ResolveWindowsPath(SafeFileHandle handle)
 	{
@@ -200,6 +212,11 @@ internal sealed class McpRootJailFileStreamOpener
 		[MarshalAs(UnmanagedType.LPUTF8Str)] string path,
 		byte[] buffer,
 		nuint bufferSize);
+
+	[DllImport("libc", EntryPoint = "open", SetLastError = true)]
+	private static extern int Open(
+		[MarshalAs(UnmanagedType.LPUTF8Str)] string path,
+		int flags);
 
 	[DllImport("libSystem.B.dylib", EntryPoint = "fcntl", SetLastError = true)]
 	private static extern int DarwinFcntl(int descriptor, int command, IntPtr pathBuffer);

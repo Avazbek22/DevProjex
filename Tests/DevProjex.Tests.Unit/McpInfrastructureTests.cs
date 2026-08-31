@@ -258,6 +258,19 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public void RootJailDirectoryHandleResolvesTheCanonicalRootPath()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+
+		var resolved = McpRootJailFileStreamOpener.ResolveDirectoryPath(project);
+
+		Assert.True(PathComparer.Default.Equals(
+			McpRootRegistry.ResolvePhysicalExistingPath(project, requireDirectory: true),
+			resolved));
+	}
+
+	[Fact]
 	public void RootJailFileOpenerReadsAnOrdinaryFileFromTheVerifiedHandle()
 	{
 		using var workspace = new TemporaryDirectory();
