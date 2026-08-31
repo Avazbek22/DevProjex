@@ -616,6 +616,25 @@ public sealed class McpInfrastructureTests
 			Assert.Throws<McpToolException>(() => McpGlobSet.Create(["../*.cs"], null)).Code);
 	}
 
+	[Fact]
+	public void GlobQuestionMarkMatchesOneUnicodeScalar()
+	{
+		var one = McpGlobSet.Create(["?.txt"], ["a.txt"]);
+		var two = McpGlobSet.Create(["??.txt"], null);
+		var nested = McpGlobSet.Create(["**/?.txt"], null);
+
+		Assert.False(one.Includes("a.txt"));
+		Assert.True(one.Includes("界.txt"));
+		Assert.True(one.Includes("😀.txt"));
+		Assert.False(one.Includes("ab.txt"));
+		Assert.False(one.Includes("😀😀.txt"));
+		Assert.True(two.Includes("a界.txt"));
+		Assert.True(two.Includes("😀界.txt"));
+		Assert.False(two.Includes("😀.txt"));
+		Assert.True(nested.Includes("src/😀.txt"));
+		Assert.False(nested.Includes("src/😀😀.txt"));
+	}
+
 	[Fact(Timeout = 2_000)]
 	public void GlobSetAlternatingWildcardsCannotCauseCatastrophicBacktracking()
 	{

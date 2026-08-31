@@ -89,7 +89,7 @@ internal sealed class McpGlobSet
 			}
 			else if (character == '?')
 			{
-				builder.Append("[^/]");
+				builder.Append("(?:[^/\\uD800-\\uDFFF]|[\\uD800-\\uDBFF][\\uDC00-\\uDFFF])");
 			}
 			else
 			{

@@ -2342,6 +2342,45 @@ public sealed class McpServerIntegrationTests
 		Assert.DoesNotContain("committed-baseline-marker", content, StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public async Task UnicodeScalarGlobsSelectTheSameFilesAcrossContentTools()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		foreach (var fileName in new[] { "a.txt", "界.txt", "😀.txt", "ab.txt", "😀😀.txt" })
+			File.WriteAllText(Path.Combine(project, fileName), $"scalar-glob-marker {fileName}\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+		var selection = new Dictionary<string, object?> { ["include_patterns"] = new[] { "?.txt" } };
+
+		var tree = await server.CallAsync("get_tree", selection);
+		var analyze = await server.CallAsync("analyze", selection);
+		var pack = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>(selection)
+			{
+				["view"] = "content",
+				["format"] = "text"
+			});
+		var search = await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?>(selection)
+			{
+				["pattern"] = "scalar-glob-marker",
+				["ignore_case"] = false
+			});
+
+		Assert.All(new[] { tree, analyze, pack, search }, static result => Assert.NotEqual(true, result.IsError));
+		Assert.Equal(3, analyze.StructuredContent?.GetProperty("files").GetInt32());
+		foreach (var result in new[] { tree, pack, search })
+		{
+			Assert.Contains("a.txt", Text(result), StringComparison.Ordinal);
+			Assert.Contains("界.txt", Text(result), StringComparison.Ordinal);
+			Assert.Contains("😀.txt", Text(result), StringComparison.Ordinal);
+			Assert.DoesNotContain("ab.txt", Text(result), StringComparison.Ordinal);
+			Assert.DoesNotContain("😀😀.txt", Text(result), StringComparison.Ordinal);
+		}
+	}
+
 	[Theory]
 	[InlineData("staged", "json")]
 	[InlineData("staged", "xml")]
