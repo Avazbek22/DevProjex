@@ -208,14 +208,16 @@ public static class GitScopeFilter
 			GitDiffRange = scopeMode == GitFilteringMode.Diff ? diffRange : null
 		};
 		var scopedBaseline = plan with { Selection = scopedSelection };
+		var selectedPathFrontier = repositoryScopeFullPaths ??
+		                           planner.GetGitScopeSelectedPathFrontier(plan);
 
 		var scope = await ResolvePathsAsync(
 				provider,
 				plan.SourceRoot,
 				scopeMode,
 				resolvedDiffRange ?? diffRange,
-				planner.GetGitScopeRepositoryRoots(plan, repositoryScopeFullPaths),
-				repositoryScopeFullPaths,
+				planner.GetGitScopeRepositoryRoots(plan, selectedPathFrontier),
+				selectedPathFrontier,
 				cancellationToken)
 			.ConfigureAwait(false);
 		if (!scope.IsAvailable)
@@ -274,7 +276,6 @@ public static class GitScopeFilter
 		}
 
 		var diagnostics = narrowed.Diagnostics;
-		var presentation = planner.BuildGitScopePresentation(plan, scope, cancellationToken);
 		if (scope.DeletedPathCount > 0)
 		{
 			diagnostics = AppendDiagnostic(
@@ -282,20 +283,19 @@ public static class GitScopeFilter
 				CreateDeletedDiagnostic(plan.SourceRoot, scope.DeletedPathCount));
 		}
 
-		return narrowed with
+		var scoped = narrowed with
 		{
 			EffectiveTree = scopedTree,
-			AvailableExtensions = presentation.AvailableExtensions,
 			SelectedExtensions = plan.SelectedExtensions,
 			HasIgnoreOptionCounts = plan.HasIgnoreOptionCounts,
-			IgnoreOptionCounts = plan.HasIgnoreOptionCounts
-				? presentation.IgnoreOptionCounts
-				: IgnoreOptionCounts.Empty,
-			IgnoreControllerImpactCounts = plan.HasIgnoreOptionCounts
-				? presentation.ControllerImpactCounts
-				: IgnoreControllerImpactCounts.Empty,
 			Diagnostics = diagnostics
 		};
+		return planner.ApplyGitScopeProjection(
+			plan,
+			scoped,
+			scope,
+			selectedPathFrontier,
+			cancellationToken);
 	}
 
 	public static BuildTreeResult ApplyToTree(

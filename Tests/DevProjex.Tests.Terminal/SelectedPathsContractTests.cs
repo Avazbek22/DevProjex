@@ -17,6 +17,34 @@ public sealed class SelectedPathsContractTests
 			ReadFilePaths(document));
 	}
 
+	[Theory]
+	[InlineData("none")]
+	[InlineData("diff:missing-left..missing-right")]
+	public async Task EmptySelectFromExportsAnEmptyDocumentWithoutQueryingGit(string gitMode)
+	{
+		using var workspace = CreateWorkspace();
+		var selectionFile = workspace.WriteFile("empty-selection.txt", string.Empty);
+		var environment = new TestTerminalEnvironment();
+		var exitCode = await new TerminalApplication(environment, new TerminalServiceFactory())
+			.RunAsync(
+				[
+					"export", "context", workspace.Path,
+					"--view", "content",
+					"--format", "json",
+					"--git-mode", gitMode,
+					"--exclude", "none",
+					"--select-from", selectionFile,
+					"-o", "-"
+				],
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Empty(environment.StandardError);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		Assert.Empty(ReadFilePaths(document));
+		Assert.Empty(ReadSelectedPaths(document));
+	}
+
 	[Fact]
 	public async Task SingleDirectoryIncludesItsEffectiveSubtree()
 	{

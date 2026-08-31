@@ -91,8 +91,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			cancellationToken,
 			out var explicitSelectionHadMatch);
 		var selectsNoEffectivePaths =
-			selection.SelectedPaths is { Count: > 0 } &&
-			!explicitSelectionHadMatch;
+			selection.SelectedPaths is { Count: 0 } ||
+			selection.SelectedPaths is { Count: > 0 } && !explicitSelectionHadMatch;
 		var projection = ResolveSelectionProjection(
 			effectiveRoot,
 			selectedFullPaths,
@@ -212,31 +212,104 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		};
 		if (loaded.TreeInventory is not null && loaded.EffectiveRules is not null)
 		{
-			_gitScopeProjectionContexts.Add(
+			SetGitScopeProjectionContext(
 				plan,
 				new GitScopeProjectionContext(
 					loaded.TreeInventory,
 					loaded.EffectiveRules,
 					loaded.RootSelectionIsExplicit,
 					loaded.EffectiveExtensionPolicy,
-					selection.SelectedPaths is { Count: > 0 }
-						? selectedFullPaths
-						: null));
+					ResolveInitialSelectedPathFrontier(
+						selection.SelectedPaths,
+						selectedFullPaths,
+						explicitSelectionHadMatch),
+					Scope: null));
 		}
 		return plan;
 	}
 
-	internal GitScopePresentationProjection BuildGitScopePresentation(
+	private static IReadOnlySet<string>? ResolveInitialSelectedPathFrontier(
+		IReadOnlyCollection<string>? selectedPaths,
+		IReadOnlySet<string> resolvedSelectedPaths,
+		bool explicitSelectionHadMatch) =>
+		selectedPaths switch
+		{
+			null => null,
+			{ Count: 0 } => new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer),
+			_ when resolvedSelectedPaths.Count == 0 && explicitSelectionHadMatch => null,
+			_ => new HashSet<string>(
+				resolvedSelectedPaths,
+				ProjectTreePathIdentity.CanonicalComparer)
+		};
+
+	internal IReadOnlyList<string> GetGitScopeRepositoryRoots(
 		ProjectContextPlan plan,
-		GitScopePathResult scope,
-		CancellationToken cancellationToken)
+		IReadOnlyCollection<string>? repositoryScopeFullPaths = null)
 	{
 		ArgumentNullException.ThrowIfNull(plan);
-		ArgumentNullException.ThrowIfNull(scope);
 		if (!_gitScopeProjectionContexts.TryGetValue(plan, out var context))
-			return GitScopePresentationProjection.Empty;
+			return [];
 
-		return GitScopePresentationProjector.Build(
+		var scopePaths = repositoryScopeFullPaths ?? context.SelectedPathFrontier;
+		return GitScopeFilter.GetDiscoveredRepositoryRoots(
+			context.Inventory,
+			plan.SourceRoot,
+			plan.SelectedRoots,
+			context.RootSelectionIsExplicit,
+			scopePaths);
+	}
+
+	internal IReadOnlySet<string>? GetGitScopeSelectedPathFrontier(ProjectContextPlan plan)
+	{
+		ArgumentNullException.ThrowIfNull(plan);
+		return _gitScopeProjectionContexts.TryGetValue(plan, out var context)
+			? context.SelectedPathFrontier
+			: null;
+	}
+
+	internal ProjectContextPlan ApplyGitScopeProjection(
+		ProjectContextPlan contextSource,
+		ProjectContextPlan target,
+		GitScopePathResult scope,
+		IReadOnlyCollection<string>? selectedPathFrontier,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(contextSource);
+		ArgumentNullException.ThrowIfNull(target);
+		ArgumentNullException.ThrowIfNull(scope);
+		if (!_gitScopeProjectionContexts.TryGetValue(contextSource, out var context))
+			return target;
+
+		var scopedContext = context with
+		{
+			SelectedPathFrontier = CloneSelectedPathFrontier(selectedPathFrontier),
+			Scope = scope
+		};
+		var presentation = BuildGitScopePresentation(
+			target,
+			scope,
+			scopedContext,
+			cancellationToken);
+		var projected = target with
+		{
+			AvailableExtensions = presentation.AvailableExtensions,
+			IgnoreOptionCounts = target.HasIgnoreOptionCounts
+				? presentation.IgnoreOptionCounts
+				: IgnoreOptionCounts.Empty,
+			IgnoreControllerImpactCounts = target.HasIgnoreOptionCounts
+				? presentation.ControllerImpactCounts
+				: IgnoreControllerImpactCounts.Empty
+		};
+		SetGitScopeProjectionContext(projected, scopedContext);
+		return projected;
+	}
+
+	private GitScopePresentationProjection BuildGitScopePresentation(
+		ProjectContextPlan plan,
+		GitScopePathResult scope,
+		GitScopeProjectionContext context,
+		CancellationToken cancellationToken) =>
+		GitScopePresentationProjector.Build(
 			plan.SourceRoot,
 			context.Inventory,
 			scope,
@@ -248,35 +321,30 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			rootSelectionIsExplicit: context.RootSelectionIsExplicit,
 			includeIgnoreImpactCounts: plan.HasIgnoreOptionCounts,
 			selectedPathFrontier: context.SelectedPathFrontier);
-	}
 
-	internal IReadOnlyList<string> GetGitScopeRepositoryRoots(
+	private void SetGitScopeProjectionContext(
 		ProjectContextPlan plan,
-		IReadOnlyCollection<string>? repositoryScopeFullPaths = null)
+		GitScopeProjectionContext context)
 	{
-		ArgumentNullException.ThrowIfNull(plan);
-		if (!_gitScopeProjectionContexts.TryGetValue(plan, out var context))
-			return [];
-
-		var scopePaths = repositoryScopeFullPaths is not null
-			? repositoryScopeFullPaths
-			: plan.Selection.SelectedPaths is { Count: > 0 }
-				? plan.SelectedFullPaths
-				: null;
-		return GitScopeFilter.GetDiscoveredRepositoryRoots(
-			context.Inventory,
-			plan.SourceRoot,
-			plan.SelectedRoots,
-			context.RootSelectionIsExplicit,
-			scopePaths);
+		_gitScopeProjectionContexts.Remove(plan);
+		_gitScopeProjectionContexts.Add(plan, context);
 	}
+
+	private static IReadOnlySet<string>? CloneSelectedPathFrontier(
+		IReadOnlyCollection<string>? selectedPathFrontier) =>
+		selectedPathFrontier is null
+			? null
+			: new HashSet<string>(
+				selectedPathFrontier,
+				ProjectTreePathIdentity.CanonicalComparer);
 
 	private sealed record GitScopeProjectionContext(
 		ProjectTreeInventorySnapshot Inventory,
 		IgnoreRules EffectiveRules,
 		bool RootSelectionIsExplicit,
 		IExtensionInclusionPolicy? EffectiveExtensionPolicy,
-		IReadOnlySet<string>? SelectedPathFrontier);
+		IReadOnlySet<string>? SelectedPathFrontier,
+		GitScopePathResult? Scope);
 
 	public Task<ProjectContextPlan> ReprojectSelectionAsync(
 		ProjectContextPlan baseline,
@@ -395,7 +463,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				cancellationToken)
 			.ConfigureAwait(false);
 
-		return baseline with
+		var reprojected = baseline with
 		{
 			Selection = selection,
 			ProjectedTree = projectedTree,
@@ -412,6 +480,33 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				cancellationToken),
 			IncludedBytes = includedBytes
 		};
+		if (!_gitScopeProjectionContexts.TryGetValue(baseline, out var context))
+			return reprojected;
+
+		var selectedPathFrontier = forceEmptySelection
+			? new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer)
+			: selectedPaths is null || selectedPaths.Count == 0
+				? null
+				: selectedFullPaths.Count == 0 && explicitSelectionHadMatch
+					? null
+					: selectedFullPaths;
+		var reprojectedContext = context with
+		{
+			SelectedPathFrontier = CloneSelectedPathFrontier(selectedPathFrontier)
+		};
+		if (GitScopeSelection.IsMomentary(selection.GitMode ?? GitFilteringMode.None) &&
+		    reprojectedContext.Scope is { IsAvailable: true } scope)
+		{
+			return ApplyGitScopeProjection(
+				baseline,
+				reprojected,
+				scope,
+				selectedPathFrontier,
+				cancellationToken);
+		}
+
+		SetGitScopeProjectionContext(reprojected, reprojectedContext);
+		return reprojected;
 	}
 
 	/// <summary>
@@ -452,7 +547,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			StripComments = stripComments ?? baseline.Selection.StripComments,
 			StripBlankLines = stripBlankLines ?? baseline.Selection.StripBlankLines
 		};
-		return baseline with
+		var transformed = baseline with
 		{
 			Selection = selection,
 			Fingerprint = BuildFingerprint(
@@ -464,6 +559,9 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			Redaction = null,
 			Privacy = null
 		};
+		if (_gitScopeProjectionContexts.TryGetValue(baseline, out var context))
+			SetGitScopeProjectionContext(transformed, context);
+		return transformed;
 	}
 
 	internal static IReadOnlyDictionary<string, long> BuildEffectiveFileSizes(
