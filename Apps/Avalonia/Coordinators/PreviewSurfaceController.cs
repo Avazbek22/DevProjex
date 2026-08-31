@@ -1183,7 +1183,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 
             if (mode == PreviewContentMode.Content)
             {
-                if (files.Count == 0)
+                if (files.Count == 0 || string.IsNullOrWhiteSpace(currentPath))
                 {
                     var fallbackText = hasSelection
                         ? noCheckedFilesText
@@ -1197,8 +1197,10 @@ internal sealed class PreviewSurfaceController : IDisposable
                         PreviewWarmupMaxFileBytes,
                         PreviewWarmupMaxCharacters,
                         cancellationToken,
-						pathPresentation?.MapFilePath,
-						compressionContext)
+						TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(
+							currentPath),
+						compressionContext,
+						pathPresentation?.DisplayRootPath ?? currentPath)
                     .GetAwaiter()
                     .GetResult();
                 if (string.IsNullOrWhiteSpace(contentText))
@@ -1341,7 +1343,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 
         if (selectedMode == PreviewContentMode.Content)
         {
-            if (files.Count == 0)
+            if (files.Count == 0 || string.IsNullOrWhiteSpace(currentPath))
             {
                 var fallbackText = hasSelection
                     ? noCheckedFilesText
@@ -1355,10 +1357,11 @@ internal sealed class PreviewSurfaceController : IDisposable
                 _previewDocumentBuilder.BuildContentDocumentAsync(
                         files,
                         cancellationToken,
-						pathPresentation?.MapFilePath,
+						TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(
+							currentPath),
 						transformationContext: transformationContext,
 						includeSourceCoordinateMaps: true,
-						displayRootPath: null,
+						displayRootPath: pathPresentation?.DisplayRootPath ?? currentPath,
 						outputPathRedaction: outputPathRedaction,
 						projectRoot: currentPath)
                     .GetAwaiter()

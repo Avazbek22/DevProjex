@@ -64,6 +64,49 @@ public sealed class ContentMetricsContractTests
 	}
 
 	[Fact]
+	public async Task ContentMetricsPipeline_EscapedControlCharactersInHeaderMatchRenderedOutput()
+	{
+		using var project = new TemporaryDirectory();
+		var file = project.CreateFile("notes.txt", "alpha\nbeta");
+		var analyzer = new FileContentAnalyzer();
+		Func<string, string> mapper = _ => "src/control\n\u001Bname.txt";
+		var inputs = await BuildMetricsInputsAsync([file], analyzer, mapper);
+		var rendered = await new SelectedContentExportService(analyzer).BuildAsync(
+			[file],
+			TestContext.Current.CancellationToken,
+			mapper,
+			transformationContext: null,
+			displayRootPath: "root\rname");
+		var accumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
+		accumulator.AppendRootHeader("root\rname");
+		foreach (var input in inputs)
+			accumulator.AppendFile(input);
+
+		Assert.Contains(@"Root: root\rname", rendered, StringComparison.Ordinal);
+		Assert.Contains(@"src/control\n\u001Bname.txt:", rendered, StringComparison.Ordinal);
+		Assert.Equal(ExportOutputMetricsCalculator.FromText(rendered), accumulator.ToMetrics());
+	}
+
+	[Fact]
+	public async Task ContentMetricsPipeline_RootHeaderIsTheCompleteOutputWithoutTextFiles()
+	{
+		using var project = new TemporaryDirectory();
+		var binary = project.CreateBinaryFile("image.bin", [0x00, 0x01, 0x02, 0x03, 0xFF]);
+		var analyzer = new FileContentAnalyzer();
+		var rendered = await new SelectedContentExportService(analyzer).BuildAsync(
+			[binary],
+			TestContext.Current.CancellationToken,
+			TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(project.Path),
+			transformationContext: null,
+			displayRootPath: project.Path);
+		var accumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
+		accumulator.AppendRootHeader(project.Path);
+
+		Assert.Equal(ContextRootPresentation.FormatLine(project.Path), rendered);
+		Assert.Equal(ExportOutputMetricsCalculator.FromText(rendered), accumulator.ToMetrics());
+	}
+
+	[Fact]
 	public async Task ContentMetricsPipeline_EqualsRenderedExportMetrics_ForEstimatedLargeFile()
 	{
 		using var temp = new TemporaryDirectory();

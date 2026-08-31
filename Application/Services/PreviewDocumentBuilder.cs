@@ -160,8 +160,12 @@ public sealed class PreviewDocumentBuilder(
 				displayRootPath,
 				outputPathRedaction);
 			var rootLine = builder.LineCount + 1;
-			builder.AppendLine($"{rootPresentation.Text}:");
-			AppendGeneratedPathRedaction(redactions, rootPresentation, rootLine);
+			builder.AppendLine(ContextRootPresentation.Prefix + rootPresentation.Text);
+			AppendGeneratedPathRedaction(
+				redactions,
+				rootPresentation,
+				rootLine,
+				ContextRootPresentation.Prefix.Length);
 			wroteRoot = true;
 		}
 		var anyWritten = await AppendContentEntriesAsync(
@@ -180,7 +184,7 @@ public sealed class PreviewDocumentBuilder(
             cancellationToken).ConfigureAwait(false);
 
 		CompleteTransformation(transformationScope, transformationContext);
-		if (!anyWritten)
+		if (!anyWritten && !wroteRoot)
 			return null;
 
 		return builder.BuildResult(sections, redactions);
@@ -708,7 +712,8 @@ public sealed class PreviewDocumentBuilder(
 	private static void AppendGeneratedPathRedaction(
 		ICollection<PreviewRedactionSpan> destination,
 		OutputPathPresentationResult presentation,
-		int lineNumber)
+		int lineNumber,
+		int columnOffset = 0)
 	{
 		if (!presentation.HasRedaction)
 			return;
@@ -717,7 +722,7 @@ public sealed class PreviewDocumentBuilder(
 			presentation.OccurrenceId!,
 			OutputRootPathPresentation.LocalUserRuleId,
 			lineNumber,
-			presentation.SegmentStart,
+			presentation.SegmentStart + columnOffset,
 			presentation.SegmentLength,
 			presentation.State,
 			presentation.SourceLength,

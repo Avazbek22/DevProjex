@@ -365,6 +365,11 @@ mode and format are always visible. Exact context-export output remains availabl
 as an advanced Action Palette action and is never presented as if it were the
 regular Preview.
 
+Content mode presents the project root once and uses project-relative file
+headings. In a text tree, the root path is likewise shown once and the real
+top-level children begin immediately below it; Unicode and `--plain` connectors
+carry the same structure.
+
 Large contexts use the shared preview document abstractions. Small documents
 stay in memory; larger documents use temporary file-backed UTF-8 storage with
 line and file-section indexes. The viewport reads only visible lines, Preview

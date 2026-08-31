@@ -829,8 +829,8 @@ public sealed class TerminalWorkspaceContractTests
 		var payload = await File.ReadAllTextAsync(
 			destination,
 			TestContext.Current.CancellationToken);
-		Assert.Contains("|--", payload, StringComparison.Ordinal);
-		Assert.Contains("src", payload, StringComparison.Ordinal);
+		Assert.Contains("`-- src", payload, StringComparison.Ordinal);
+		Assert.DoesNotContain("|-- project", payload, StringComparison.Ordinal);
 		Assert.DoesNotContain("├", payload, StringComparison.Ordinal);
 		Assert.DoesNotContain("└", payload, StringComparison.Ordinal);
 		Assert.DoesNotContain("│", payload, StringComparison.Ordinal);

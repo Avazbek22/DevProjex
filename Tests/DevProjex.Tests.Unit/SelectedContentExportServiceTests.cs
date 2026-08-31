@@ -21,8 +21,9 @@ public sealed class SelectedContentExportServiceTests
 			transformationContext: null,
 			displayRootPath: project.Path);
 
-		Assert.StartsWith($"{project.Path}:{Environment.NewLine}", result, StringComparison.Ordinal);
-		Assert.Equal(1, result.Split($"{project.Path}:", StringSplitOptions.None).Length - 1);
+		var rootLine = ContextRootPresentation.FormatLine(project.Path);
+		Assert.StartsWith($"{rootLine}{Environment.NewLine}", result, StringComparison.Ordinal);
+		Assert.Equal(1, result.Split(rootLine, StringSplitOptions.None).Length - 1);
 		Assert.Contains("src/Program.cs:", result, StringComparison.Ordinal);
 		Assert.DoesNotContain($"{file}:", result, StringComparison.Ordinal);
 	}
@@ -232,6 +233,49 @@ public sealed class SelectedContentExportServiceTests
 		Assert.Contains("a.txt:", result, StringComparison.Ordinal);
 		Assert.Contains("b.txt:", result, StringComparison.Ordinal);
 		Assert.DoesNotContain("c.txt:", result, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task BuildBoundedPreviewAsync_ExhaustedRootBudgetSkipsFileIo()
+	{
+		using var temp = new TemporaryDirectory();
+		var binary = Path.Combine(temp.Path, "binary.dat");
+		await File.WriteAllBytesAsync(binary, [0, 1, 2, 0, 3], TestContext.Current.CancellationToken);
+		var analyzer = new RecordingContentAnalyzer();
+		var service = new SelectedContentExportService(analyzer);
+
+		var result = await service.BuildBoundedPreviewAsync(
+			[binary],
+			maxFileCount: 1,
+			maxFileSizeForFullRead: 1024,
+			maxOutputCharacters: 32,
+			TestContext.Current.CancellationToken,
+			displayPathMapper: Path.GetFileName,
+			displayRootPath: new string('r', 128));
+
+		Assert.Equal(32, result.Length);
+		Assert.StartsWith(ContextRootPresentation.Prefix, result, StringComparison.Ordinal);
+		Assert.Empty(analyzer.ReadPaths);
+	}
+
+	[Fact]
+	public async Task BuildBoundedPreviewAsync_DoesNotSplitUnicodeScalarAtRootBudgetBoundary()
+	{
+		using var temp = new TemporaryDirectory();
+		var binary = Path.Combine(temp.Path, "binary.dat");
+		await File.WriteAllBytesAsync(binary, [0, 1, 2, 0, 3], TestContext.Current.CancellationToken);
+		var service = new SelectedContentExportService(new FileContentAnalyzer());
+
+		var result = await service.BuildBoundedPreviewAsync(
+			[binary],
+			maxFileCount: 1,
+			maxFileSizeForFullRead: 1024,
+			maxOutputCharacters: 8,
+			TestContext.Current.CancellationToken,
+			displayPathMapper: Path.GetFileName,
+			displayRootPath: "a🙂");
+
+		Assert.Equal("Root: a", result);
 	}
 
 	[Fact]

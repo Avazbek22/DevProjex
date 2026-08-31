@@ -56,16 +56,15 @@ internal sealed class ProjectTextOutputPipeline(
 			throw new ArgumentOutOfRangeException(nameof(mode), mode, "Unsupported project text output mode.");
 
 		var files = ResolveContentFiles(snapshot);
+		var contentOnly = mode == ProjectTextOutputMode.Content;
 		var contentDocument = await BuildContentDocumentAsync(
 			files,
 			snapshot,
-			mode == ProjectTextOutputMode.Content
-				? snapshot.PathPresentation?.MapFilePath
-				: TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(
-					snapshot.RootPath),
+			TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(snapshot.RootPath),
+			contentOnly ? ResolveContentRoot(snapshot) : null,
 			outputPathRedaction,
 			cancellationToken).ConfigureAwait(false);
-		if (mode == ProjectTextOutputMode.Content)
+		if (contentOnly)
 		{
 			return new ProjectTextDocumentOutputResult(
 				contentDocument,
@@ -113,6 +112,7 @@ internal sealed class ProjectTextOutputPipeline(
 		IReadOnlyList<string> files,
 		ProjectTextOutputSnapshot snapshot,
 		Func<string, string>? displayPathMapper,
+		string? displayRootPath,
 		OutputPathRedactionDecision? outputPathRedaction,
 		CancellationToken cancellationToken)
 	{
@@ -126,7 +126,7 @@ internal sealed class ProjectTextOutputPipeline(
 				writeCancellationToken,
 				displayPathMapper,
 				snapshot.RedactionContext,
-				displayRootPath: null,
+				displayRootPath,
 				outputPathRedaction),
 			cancellationToken).ConfigureAwait(false);
 	}
@@ -178,14 +178,17 @@ internal sealed class ProjectTextOutputPipeline(
 		var content = await contentExport.BuildAsync(
 				files,
 				cancellationToken,
-				snapshot.PathPresentation?.MapFilePath,
+				TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(snapshot.RootPath),
 				snapshot.RedactionContext,
-				displayRootPath: null,
+				displayRootPath: ResolveContentRoot(snapshot),
 				outputPathRedaction: outputPathRedaction)
             .ConfigureAwait(false);
 
-        return new ProjectTextOutputResult(content, files.Count);
-    }
+		return new ProjectTextOutputResult(content, files.Count);
+	}
+
+	private static string ResolveContentRoot(ProjectTextOutputSnapshot snapshot) =>
+		snapshot.PathPresentation?.DisplayRootPath ?? snapshot.RootPath;
 
     public string BuildTree(
         ProjectTextOutputSnapshot snapshot,

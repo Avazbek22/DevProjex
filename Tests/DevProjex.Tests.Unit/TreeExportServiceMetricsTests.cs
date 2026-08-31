@@ -12,7 +12,7 @@ public sealed class TreeExportServiceMetricsTests
 		bool selected)
 	{
 		var service = new TreeExportService();
-		const string rootPath = "/repo";
+		const string rootPath = "/repo_<tag>`tick`";
 		var root = rootIsFile
 			? new TreeNodeDescriptor("root.cs", rootPath, false, false, "csharp", [])
 			: new TreeNodeDescriptor(
@@ -21,7 +21,7 @@ public sealed class TreeExportServiceMetricsTests
 				true,
 				false,
 				"folder",
-				[new TreeNodeDescriptor("root.cs", "/repo/root.cs", false, false, "csharp", [])]);
+				[new TreeNodeDescriptor("root.cs", rootPath + "/root.cs", false, false, "csharp", [])]);
 		var selection = new HashSet<string>(PathComparer.Default) { rootPath };
 
 		var rendered = selected
@@ -200,7 +200,7 @@ public sealed class TreeExportServiceMetricsTests
 			IsAccessDenied: false,
 			IconKey: "folder",
 			Children: Enumerable.Repeat(child, childCount).ToArray());
-		var expectedCharacters = 17L + childCount * (displayName.Length + 9L);
+		var expectedCharacters = 7L + childCount * (displayName.Length + 5L);
 
 		var actual = new TreeExportService().CalculateFullTreeMetrics(
 			"/root",
@@ -209,7 +209,7 @@ public sealed class TreeExportServiceMetricsTests
 
 		Assert.True(actual.Chars > int.MaxValue);
 		Assert.Equal(expectedCharacters, actual.Chars);
-		Assert.Equal(childCount + 4L, actual.Lines);
+		Assert.Equal(childCount + 2L, actual.Lines);
 		Assert.Equal((expectedCharacters + 3) / 4, actual.Tokens);
 	}
 

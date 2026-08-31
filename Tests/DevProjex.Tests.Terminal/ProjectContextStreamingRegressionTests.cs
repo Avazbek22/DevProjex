@@ -11,7 +11,7 @@ public sealed class ProjectContextStreamingRegressionTests
 	[Theory]
 	[InlineData(false)]
 	[InlineData(true)]
-	public async Task CompleteContentHeadersHonorTheGeneratedPathOccurrenceDecision(bool keep)
+	public async Task CompleteContentRootHonorsTheGeneratedPathOccurrenceDecision(bool keep)
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
@@ -39,17 +39,18 @@ public sealed class ProjectContextStreamingRegressionTests
 			destination,
 			TestContext.Current.CancellationToken,
 			plain: true,
-			useUnifiedContentHeaders: true);
+			useSourceMappedStructuredPaths: true);
 
 		var payload = Encoding.UTF8.GetString(destination.ToArray());
-		var expectedPath = keep
-			? sourcePath
-			: OutputRootPathPresentation.MaskLocalUserSegment(sourcePath);
+		var expectedRoot = keep
+			? project
+			: OutputRootPathPresentation.MaskLocalUserSegment(project);
 		var firstLine = payload.Split(["\r\n", "\n"], 2, StringSplitOptions.None)[0];
 		Assert.Equal(
-			$"{expectedPath}:".Replace('\\', '/'),
+			$"Root: {expectedRoot}".Replace('\\', '/'),
 			firstLine.Replace('\\', '/'));
-		Assert.DoesNotContain($"{project}:{Environment.NewLine}", payload, StringComparison.Ordinal);
+		Assert.Contains($"src/app.cs:{Environment.NewLine}", payload, StringComparison.Ordinal);
+		Assert.DoesNotContain(sourcePath, payload, StringComparison.OrdinalIgnoreCase);
 	}
 
 	[Fact]
@@ -781,11 +782,13 @@ public sealed class ProjectContextStreamingRegressionTests
 		var payload = Encoding.UTF8.GetString(destination.ToArray());
 		switch (format)
 		{
-			case ProjectContextDocumentFormat.Text:
-				Assert.Equal(
-					$"src/chunk.txt:{Environment.NewLine}{Environment.NewLine}" +
-					content.TrimEnd('\r', '\n'),
-					payload);
+		case ProjectContextDocumentFormat.Text:
+			Assert.Equal(
+				ContextRootPresentation.FormatLine(project) +
+				Environment.NewLine + Environment.NewLine +
+				$"src/chunk.txt:{Environment.NewLine}{Environment.NewLine}" +
+				content.TrimEnd('\r', '\n'),
+				payload);
 				break;
 			case ProjectContextDocumentFormat.Markdown:
 				Assert.Contains(content, payload, StringComparison.Ordinal);
@@ -1793,6 +1796,8 @@ public sealed class ProjectContextStreamingRegressionTests
 			maximumEstimatedTokens: 1);
 
 		Assert.Equal(
+			ContextRootPresentation.FormatLine(project) +
+			Environment.NewLine + Environment.NewLine +
 			$"A-included.txt:{Environment.NewLine}{Environment.NewLine}a",
 			Encoding.UTF8.GetString(destination.ToArray()));
 		Assert.Equal(1, result.TokenBudget?.IncludedFileCount);

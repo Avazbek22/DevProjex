@@ -18,7 +18,7 @@ public sealed class TreeExportServicePathPresentationTests
 	}
 
 	[Fact]
-	public void BuildFullTree_Ascii_UsesDisplayRootNameWhenProvided()
+	public void BuildFullTree_Ascii_OmitsDisplayRootNameWhenRootPathIsIncluded()
 	{
 		var service = new TreeExportService();
 		var root = CreateSimpleRoot();
@@ -30,9 +30,8 @@ public sealed class TreeExportServicePathPresentationTests
 			displayRootPath: "https://github.com/user/repo",
 			displayRootName: "repo-clean");
 
-		Assert.Contains("├── repo-clean", result, StringComparison.Ordinal);
-		Assert.DoesNotContain("├── repo\r\n", result, StringComparison.Ordinal);
-		Assert.DoesNotContain("├── repo\n", result, StringComparison.Ordinal);
+		Assert.DoesNotContain("repo-clean", result, StringComparison.Ordinal);
+		Assert.Contains("└── src", result, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -202,7 +201,7 @@ public sealed class TreeExportServicePathPresentationTests
 	}
 
 	[Fact]
-	public void BuildSelectedTree_Ascii_UsesDisplayRootNameWhenProvided()
+	public void BuildSelectedTree_Ascii_OmitsDisplayRootNameWhenRootPathIsIncluded()
 	{
 		var service = new TreeExportService();
 		var root = CreateSimpleRoot();
@@ -219,7 +218,8 @@ public sealed class TreeExportServicePathPresentationTests
 			displayRootPath: "https://github.com/user/repo",
 			displayRootName: "repo-clean");
 
-		Assert.Contains("├── repo-clean", result, StringComparison.Ordinal);
+		Assert.DoesNotContain("repo-clean", result, StringComparison.Ordinal);
+		Assert.Contains("└── src", result, StringComparison.Ordinal);
 	}
 
 	[Fact]

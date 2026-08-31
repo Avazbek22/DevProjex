@@ -238,7 +238,7 @@ internal sealed class DevProjexMcpTools(
 								stream,
 								token,
 								plain: false,
-								useUnifiedContentHeaders: true,
+								useSourceMappedStructuredPaths: true,
 								writeProgress: writeProgress,
 								maximumEstimatedTokens: maximumEstimatedTokens)
 							.ConfigureAwait(false);
@@ -253,7 +253,7 @@ internal sealed class DevProjexMcpTools(
 							prepared,
 							token,
 							plain: false,
-							useUnifiedContentHeaders: true,
+							useSourceMappedStructuredPaths: true,
 							writeProgress,
 							maximumEstimatedTokens)
 						.ConfigureAwait(false);

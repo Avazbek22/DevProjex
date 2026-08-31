@@ -40,6 +40,15 @@ public sealed class DocumentationAndPackagingContractTests
 			Assert.Contains("review each pack", document, StringComparison.OrdinalIgnoreCase);
 			Assert.Contains("publishing", document, StringComparison.OrdinalIgnoreCase);
 		});
+
+		foreach (var document in documents.Skip(1))
+		{
+			Assert.Contains("placeholder", document, StringComparison.OrdinalIgnoreCase);
+			Assert.Contains("EXAMPLE", document, StringComparison.Ordinal);
+			Assert.Contains("allowlist", document, StringComparison.OrdinalIgnoreCase);
+			Assert.Contains("Gitleaks", document, StringComparison.OrdinalIgnoreCase);
+			Assert.Contains("scope-aware", document, StringComparison.OrdinalIgnoreCase);
+		}
 	}
 
 	[Fact]

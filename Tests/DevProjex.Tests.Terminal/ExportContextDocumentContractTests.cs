@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Xml.Linq;
@@ -6,6 +7,76 @@ namespace DevProjex.Tests.Terminal;
 
 public sealed class ExportContextDocumentContractTests
 {
+	[Theory]
+	[InlineData("text")]
+	[InlineData("markdown")]
+	public void ContentExportProcessPrintsTheRootOnceAndUsesRelativeHeaders(string format)
+	{
+		using var workspace = new TemporaryDirectory();
+		using var data = new TemporaryDirectory();
+		workspace.WriteFile("docs/Guide.md", "guide-content\n");
+		workspace.WriteFile("README.md", "readme-content\n");
+
+		var result = RunProcess(
+			data.Path,
+			"export", "context", workspace.Path,
+			"--view", "content",
+			"--format", format,
+			"--git-mode", "none",
+			"--exclude", "none",
+			"--plain",
+			"--progress", "never",
+			"-o", "-");
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Empty(result.StandardError);
+		var displayRoot = format == "markdown"
+			? PathUtility.NormalizeSeparators(workspace.Path)
+			: workspace.Path;
+		Assert.Contains($"Root: {displayRoot}", result.StandardOutput, StringComparison.Ordinal);
+		Assert.Equal(1, CountOccurrences(result.StandardOutput, displayRoot));
+		Assert.Contains("docs/Guide.md", result.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("README.md", result.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			Path.Combine(workspace.Path, "docs", "Guide.md"),
+			result.StandardOutput,
+			OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData(false, "└── docs")]
+	[InlineData(true, "`-- docs")]
+	public void TextTreeProcessStartsAtTheFirstRealChild(bool plain, string childLine)
+	{
+		using var workspace = new TemporaryDirectory();
+		using var data = new TemporaryDirectory();
+		workspace.WriteFile("docs/Guide.md", "guide-content\n");
+		var arguments = new List<string>
+		{
+			"tree", workspace.Path,
+			"--format", "text",
+			"--git-mode", "none",
+			"--exclude", "none",
+			"--progress", "never",
+			"-o", "-"
+		};
+		if (plain)
+			arguments.Add("--plain");
+
+		var result = RunProcess(data.Path, arguments.ToArray());
+		var lines = result.StandardOutput
+			.Replace("\r\n", "\n", StringComparison.Ordinal)
+			.Split('\n');
+
+		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
+		Assert.Empty(result.StandardError);
+		Assert.Equal(workspace.Path + ":", lines[0]);
+		Assert.Equal(childLine, lines[1]);
+		Assert.DoesNotContain(lines, line => line.EndsWith(
+			Path.GetFileName(workspace.Path),
+			StringComparison.Ordinal));
+	}
+
 	[Fact]
 	public async Task JsonDocumentPreservesOrderingAndOmitsBinaryBytes()
 	{
@@ -148,7 +219,7 @@ public sealed class ExportContextDocumentContractTests
 		workspace.WriteFile("A-large.txt", "large-content-marker-" + new string('a', 40));
 		workspace.WriteFile("B-small.txt", "b");
 		workspace.WriteFile("C-small.txt", "c");
-		var reports = new List<string>();
+		var reports = new Dictionary<string, string>(StringComparer.Ordinal);
 
 		foreach (var format in new[] { "text", "markdown", "json", "xml" })
 		{
@@ -166,10 +237,43 @@ public sealed class ExportContextDocumentContractTests
 			var first = environment.StandardOutput.IndexOf("B-small.txt", StringComparison.Ordinal);
 			var second = environment.StandardOutput.IndexOf("C-small.txt", StringComparison.Ordinal);
 			Assert.True(first >= 0 && second > first, environment.StandardOutput);
-			reports.Add(ExtractBudgetReport(environment.StandardError));
+			reports.Add(format, ExtractBudgetReport(environment.StandardError));
 		}
 
-		Assert.All(reports, report => Assert.Equal(reports[0], report));
+		Assert.Equal(reports["text"], reports["markdown"]);
+		Assert.Equal(reports["json"], reports["xml"]);
+		Assert.Contains("  A-large.txt (16 estimated tokens)", reports["text"], StringComparison.Ordinal);
+		Assert.Contains(
+			$"  {Path.Combine(workspace.Path, "A-large.txt")} (16 estimated tokens)",
+			reports["json"],
+			StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("text")]
+	[InlineData("markdown")]
+	public async Task TreeContentDocumentKeepsOneRootAndRelativeContentHeaders(string format)
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("docs/Guide.md", "guide-content\n");
+		var environment = new TestTerminalEnvironment();
+
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await RunAsync(workspace, environment, format, view: "tree-content"));
+
+		Assert.Equal(1, CountOccurrences(environment.StandardOutput, workspace.Path));
+		Assert.DoesNotContain(
+			"└── " + Path.GetFileName(workspace.Path),
+			environment.StandardOutput,
+			StringComparison.Ordinal);
+		Assert.Contains("└── docs", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("docs/Guide.md", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			Path.Combine(workspace.Path, "docs", "Guide.md"),
+			environment.StandardOutput,
+			OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+		Assert.Empty(environment.StandardError);
 	}
 
 	[Theory]
@@ -213,7 +317,7 @@ public sealed class ExportContextDocumentContractTests
 			format,
 			destination,
 			TestContext.Current.CancellationToken,
-			useUnifiedContentHeaders: true);
+			useSourceMappedStructuredPaths: true);
 		var output = Encoding.UTF8.GetString(destination.ToArray());
 		var expected = RepositoryWebPathPresentationService.NormalizeForDisplay(repositoryUrl);
 		string? diagnosticPath;
@@ -267,7 +371,7 @@ public sealed class ExportContextDocumentContractTests
 			format,
 			destination,
 			TestContext.Current.CancellationToken,
-			useUnifiedContentHeaders: true);
+			useSourceMappedStructuredPaths: true);
 		var output = Encoding.UTF8.GetString(destination.ToArray());
 		string? diagnosticPath;
 		string? serializedFilePath;
@@ -378,8 +482,10 @@ public sealed class ExportContextDocumentContractTests
 		Assert.Contains("Skipped files: 0", budgeted.StandardError, StringComparison.Ordinal);
 	}
 
-	[Fact]
-	public async Task DryRunReportsTheSameTokenBudgetForecastWithoutWritingDocument()
+	[Theory]
+	[InlineData("tree-content")]
+	[InlineData("content")]
+	public async Task DryRunReportsTheSameTokenBudgetForecastWithoutWritingDocument(string view)
 	{
 		using var workspace = new TemporaryDirectory();
 		workspace.WriteFile("A-large.txt", new string('a', 40));
@@ -391,7 +497,8 @@ public sealed class ExportContextDocumentContractTests
 			environment,
 			"text",
 			maximumEstimatedTokens: 1,
-			dryRun: true);
+			dryRun: true,
+			view: view);
 
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
 		Assert.Empty(environment.StandardOutput);
@@ -407,7 +514,8 @@ public sealed class ExportContextDocumentContractTests
 				workspace,
 				actual,
 				"text",
-				maximumEstimatedTokens: 1));
+				maximumEstimatedTokens: 1,
+				view: view));
 		Assert.Equal(
 			ExtractBudgetReport(environment.StandardError),
 			ExtractBudgetReport(actual.StandardError));
@@ -606,6 +714,37 @@ public sealed class ExportContextDocumentContractTests
 		var start = standardError.IndexOf("Estimated token budget", StringComparison.Ordinal);
 		Assert.True(start >= 0, standardError);
 		return standardError[start..];
+	}
+
+	private static TerminalTestProcessResult RunProcess(string dataRoot, params string[] arguments)
+	{
+		var startInfo = new ProcessStartInfo("dotnet")
+		{
+			UseShellExecute = false,
+			CreateNoWindow = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true
+		};
+		startInfo.ArgumentList.Add(PublishedApplicationLocator.FindApplicationAssembly());
+		foreach (var argument in arguments)
+			startInfo.ArgumentList.Add(argument);
+		startInfo.Environment[InvocationEnvironment.TerminalHostVariable] = "1";
+		startInfo.Environment[InvocationEnvironment.InternalDataRootVariable] = dataRoot;
+		startInfo.Environment["DOTNET_NOLOGO"] = "1";
+		return TerminalTestProcess.Run(startInfo);
+	}
+
+	private static int CountOccurrences(string value, string fragment)
+	{
+		var count = 0;
+		for (var offset = 0;;)
+		{
+			var index = value.IndexOf(fragment, offset, StringComparison.Ordinal);
+			if (index < 0)
+				return count;
+			count++;
+			offset = index + fragment.Length;
+		}
 	}
 
 	private static long ReadEstimatedTokens(string format, string output)

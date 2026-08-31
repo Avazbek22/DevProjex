@@ -709,6 +709,7 @@ public sealed class TerminalWorkspaceController(
 						MapDisplayPath,
 						includeOmissionMarkers: true,
 						transformationContext: transformationContext,
+						displayRootPath: GetContentDisplaySource(plan),
 						projectRoot: plan.SourceRoot)
 					.ConfigureAwait(false) ??
 				services.PreviewDocumentBuilder.CreateDocumentWithMetrics(string.Empty),
@@ -770,6 +771,21 @@ public sealed class TerminalWorkspaceController(
 		} identity
 			? identity.SourceReference
 			: plan.SourceRoot;
+
+	private static string GetContentDisplaySource(ProjectContextPlan plan)
+	{
+		if (plan.SourceIdentity is not
+		    {
+			    SourceType: ProjectSourceType.GitClone,
+			    SourceReference.Length: > 0
+		    } identity)
+		{
+			return plan.SourceRoot;
+		}
+
+		var displayRootPath = RepositoryWebPathPresentationService.NormalizeForDisplay(identity.SourceReference);
+		return displayRootPath.Length > 0 ? displayRootPath : identity.SourceReference;
+	}
 
 	public async Task<string> ExportContextAsync(
 		TerminalWorkspaceState state,

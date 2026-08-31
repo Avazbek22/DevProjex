@@ -168,16 +168,12 @@ public sealed class SecretRedactionCommandContractTests
 		Assert.Equal(!enabled, environment.StandardOutput.Contains(PrivateEmail, StringComparison.Ordinal));
 		Assert.Equal(enabled, environment.StandardOutput.Contains("DEVPROJEX_REDACTED[email#1]", StringComparison.Ordinal));
 		var contactPath = Path.Combine(workspace.ProjectRoot, "src", "contact.txt");
-		var expectedPath = enabled
-			? OutputRootPathPresentation.MaskLocalUserSegment(contactPath)
-			: contactPath;
-		Assert.Contains($"{expectedPath}:", environment.StandardOutput, StringComparison.Ordinal);
-		Assert.DoesNotContain(
-			$"{workspace.ProjectRoot}:{Environment.NewLine}",
-			environment.StandardOutput,
-			StringComparison.Ordinal);
-		if (enabled && !string.Equals(expectedPath, contactPath, StringComparison.Ordinal))
-			Assert.DoesNotContain($"{contactPath}:", environment.StandardOutput, StringComparison.Ordinal);
+		var expectedRoot = enabled
+			? OutputRootPathPresentation.MaskLocalUserSegment(workspace.ProjectRoot)
+			: workspace.ProjectRoot;
+		Assert.Contains($"Root: {expectedRoot}", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains($"src/contact.txt:{Environment.NewLine}", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain(contactPath, environment.StandardOutput, StringComparison.OrdinalIgnoreCase);
 		Assert.Empty(environment.StandardError);
 	}
 

@@ -95,6 +95,11 @@ internal static partial class TerminalScreenSnapshot
 		string value,
 		IReadOnlyList<(string Value, string Replacement)> replacements)
 	{
+		var hasProjectRootReplacement = replacements.Any(
+			static replacement => string.Equals(
+				replacement.Replacement,
+				"<PROJECT_ROOT>",
+				StringComparison.Ordinal));
 		var normalized = value
 			.Replace("\r\n", "\n", StringComparison.Ordinal)
 			.Replace('\u00A0', ' ');
@@ -121,6 +126,12 @@ internal static partial class TerminalScreenSnapshot
 			Path.GetTempPath(),
 			"<SYSTEM_TEMP>/",
 			OperatingSystem.IsMacOS());
+		normalized = ClippedContextRootPattern().Replace(normalized, "<PROJECT_ROOT>");
+		if (hasProjectRootReplacement)
+		{
+			normalized = ClippedSystemTemporaryContextRootPattern()
+				.Replace(normalized, "<PROJECT_ROOT>");
+		}
 		normalized = NormalizeMacOsSystemPathAliases(
 			normalized,
 			OperatingSystem.IsMacOS());
@@ -375,6 +386,15 @@ internal static partial class TerminalScreenSnapshot
 
 	[GeneratedRegex(@"(?:\.{3})?[^\s\n│]*?\.Terminal[\\/]<ID>[\\/]<PROJECT>")]
 	private static partial Regex ClippedTemporaryProjectPathPattern();
+
+	[GeneratedRegex(
+		@"(?<=Root: )<SYSTEM_TEMP>/DevProjex\.Tests\.Termin(?:al(?:[\\/][0-9a-f]{1,32})?)?",
+		RegexOptions.IgnoreCase)]
+	private static partial Regex ClippedContextRootPattern();
+
+	[GeneratedRegex(
+		@"(?<=Root: )<SYSTEM_TEMP>/[^\r\n\u2500-\u257F▲▼◀▶]*(?=[\u2500-\u257F▲▼◀▶])")]
+	private static partial Regex ClippedSystemTemporaryContextRootPattern();
 
 	[GeneratedRegex(
 		@"(?<label>Elapsed|Прошло|Vergangen|Transcurrido|Écoulé|Trascorso|Өткен уақыт|Decorrido|Вақти гузашта|O‘tgan vaqt):\s*\d{1,2}:\d{2}(?::\d{2})?")]

@@ -21,7 +21,12 @@ public sealed class ProjectExportService(
 				includeRootPath: true,
 				cancellationToken: cancellationToken),
 			ProjectTextExportMode.Content => await contentExport
-				.BuildAsync(project.Tree.OrderedFilePaths ?? [], cancellationToken)
+				.BuildAsync(
+					project.Tree.OrderedFilePaths ?? [],
+					cancellationToken,
+					TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(project.RootPath),
+					transformationContext: null,
+					displayRootPath: project.RootPath)
 				.ConfigureAwait(false),
 			ProjectTextExportMode.TreeContent => await treeAndContentExport
 				.BuildAsync(project.RootPath, project.Tree.Root, new HashSet<string>(PathComparer.Default), request.Format, cancellationToken)

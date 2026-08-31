@@ -17,6 +17,23 @@ public static class SingleLineTextEscaping
 		return escaped.ToString();
 	}
 
+	public static int GetEscapedLength(ReadOnlySpan<char> value)
+	{
+		var length = 0;
+		for (var index = 0; index < value.Length; index++)
+		{
+			var character = value[index];
+			var isSurrogatePair = char.IsHighSurrogate(character) &&
+			                      index + 1 < value.Length &&
+			                      char.IsLowSurrogate(value[index + 1]);
+			length = checked(length + GetEscapedLength(character, isSurrogatePair));
+			if (isSurrogatePair)
+				index++;
+		}
+
+		return length;
+	}
+
 	public static bool AppendBounded(
 		StringBuilder destination,
 		ReadOnlySpan<char> value,

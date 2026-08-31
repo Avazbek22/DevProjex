@@ -171,6 +171,46 @@ public sealed class TerminalScreenSnapshotTests
 		Assert.DoesNotContain(temporaryPrefix, normalized, StringComparison.OrdinalIgnoreCase);
 	}
 
+	[Fact]
+	public void Normalize_DistinguishesClippedProjectRootFromOtherSystemTemporaryPaths()
+	{
+		var temporaryPrefix = Path.GetTempPath();
+		var normalized = TerminalScreenSnapshot.Normalize(
+			$"│Root: {temporaryPrefix}DevProjex.Tests.Termin▲│{Environment.NewLine}" +
+			$"│Destination {temporaryPrefix}clipped-project│",
+			[]);
+
+		Assert.Contains("│Root: <PROJECT_ROOT>▲│", normalized, StringComparison.Ordinal);
+		Assert.Contains(
+			"│Destination <SYSTEM_TEMP>/clipped-project│",
+			normalized,
+			StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("")]
+	[InlineData("De")]
+	public void Normalize_MapsClippedSystemTemporaryRootOnlyWhenProjectRootIsKnown(
+		string visibleProjectFragment)
+	{
+		var temporaryPrefix = Path.GetTempPath();
+		var projectPath = Path.Combine(
+			temporaryPrefix,
+			"DevProjex.Tests.Terminal",
+			Guid.NewGuid().ToString("N"));
+		var screen = $"│Root: {temporaryPrefix}{visibleProjectFragment}▲│";
+
+		var withProjectRoot = TerminalScreenSnapshot.Normalize(
+			screen,
+			[(projectPath, "<PROJECT_ROOT>")]);
+		var withoutProjectRoot = TerminalScreenSnapshot.Normalize(screen, []);
+
+		Assert.Equal("│Root: <PROJECT_ROOT>▲│", withProjectRoot);
+		Assert.Equal(
+			$"│Root: <SYSTEM_TEMP>/{visibleProjectFragment}▲│",
+			withoutProjectRoot);
+	}
+
 	[Theory]
 	[InlineData("│> [1] /tmp/session/Alpha Project│", "│> [1] <RECENT_PATH>│")]
 	[InlineData("│  [2] C:\\Temp\\Beta Project│", "│  [2] <RECENT_PATH>│")]

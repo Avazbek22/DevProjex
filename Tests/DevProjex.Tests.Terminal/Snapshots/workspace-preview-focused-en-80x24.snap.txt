@@ -2,8 +2,12 @@
  <PROJECTS_ROOT>
 ┌┤> CONTEXT PREVIEW · Content · ASCII├─────────────────────────────────────────┐
 │                                                                             ▲│
+│src/Feature003.cs:                                                           ·│
+│                                                                             ┃│
+│internal sealed class ContentMarker003 { }                                   ·│
 │                                                                             ·│
-│src/Feature004.cs:                                                           ┃│
+│                                                                             ·│
+│src/Feature004.cs:                                                           ·│
 │                                                                             ·│
 │internal sealed class ContentMarker004 { }                                   ·│
 │                                                                             ·│
@@ -11,13 +15,9 @@
 │src/Feature005.cs:                                                           ·│
 │                                                                             ·│
 │internal sealed class ContentMarker005 { }                                   ·│
-│                                                                             ·│
-│                                                                             ·│
-│src/Feature006.cs:                                                           ·│
-│                                                                             ·│
-│internal sealed class ContentMarker006 { }                                   ·│
 │                                                                             ▼│
-│ Files 5-7/61  |  Lines 19-34/303                                             │
+│◄━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━················► │
+│ Files 4-6/61  |  Lines 18-32/306  |  Columns 1-77/<COLUMNS>                         │
 └──────────────────────────────────────────────────────────────────────────────┘
 
  Files 61 · Folders 2 · 2.46 KB · ~<TOKENS> tokens · Warnings 0 · Errors 0

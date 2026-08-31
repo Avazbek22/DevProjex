@@ -22,6 +22,7 @@ public sealed class TreeExportServiceTests
 
 		Assert.Contains("/root:", result);
 		Assert.Contains("└── file.txt", result);
+		Assert.DoesNotContain("├── root", result, StringComparison.Ordinal);
 	}
 
 	// Verifies selected tree export only includes selected paths.
@@ -135,7 +136,7 @@ public sealed class TreeExportServiceTests
 		var result = service.BuildFullTree("/root", root);
 
 		Assert.Contains("└── src", result);
-		Assert.Contains("│       └── main.cs", result);
+		Assert.Contains("    └── main.cs", result);
 	}
 
 	// Verifies selected tree includes ancestor directories for selected descendants.
@@ -269,12 +270,12 @@ public sealed class TreeExportServiceTests
 		var result = service.BuildSelectedTree("/root", root, selected);
 
 		Assert.Contains("└── src", result);
-		Assert.Contains("│       └── main.cs", result);
+		Assert.Contains("    └── main.cs", result);
 	}
 
 	// Verifies full tree output handles root with no children.
 	[Fact]
-	public void BuildFullTree_ReturnsRootOnlyWhenNoChildren()
+	public void BuildFullTree_ReturnsOnlyRootPathWhenNoChildren()
 	{
 		var root = new TreeNodeDescriptor(
 			DisplayName: "root",
@@ -287,7 +288,7 @@ public sealed class TreeExportServiceTests
 		var service = new TreeExportService();
 		var result = service.BuildFullTree("/root", root);
 
-		Assert.Contains("├── root", result);
+		Assert.Equal($"/root:{Environment.NewLine}", result);
 	}
 
 	// Verifies selection matching returns true when the node itself is selected.
