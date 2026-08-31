@@ -1190,11 +1190,7 @@ public sealed class TerminalWorkspaceController(
 			"-o",
 			destination
 		};
-		foreach (var path in state.BuildSelectedRelativePaths())
-		{
-			arguments.Add("--select");
-			arguments.Add(path);
-		}
+		AppendSelectedPaths(arguments, state);
 		AppendSelection(arguments, state.Plan);
 		if (dryRun)
 			arguments.Add("--dry-run");
@@ -1219,14 +1215,31 @@ public sealed class TerminalWorkspaceController(
 			destination
 		};
 		AppendSelection(arguments, state.Plan);
-		foreach (var path in state.BuildSelectedRelativePaths())
+		AppendSelectedPaths(arguments, state);
+		if (dryRun)
+			arguments.Add("--dry-run");
+		return CliArgumentVectorFormatter.Format(arguments);
+	}
+
+	private static void AppendSelectedPaths(
+		ICollection<string> arguments,
+		TerminalWorkspaceState state)
+	{
+		var selectedPaths = state.BuildPersistedSelectedRelativePaths();
+		if (selectedPaths.Count == 1 && selectedPaths[0] == ".")
+			return;
+		if (selectedPaths.Count == 0)
+		{
+			arguments.Add("--select-from");
+			arguments.Add(OperatingSystem.IsWindows() ? "NUL" : "/dev/null");
+			return;
+		}
+
+		foreach (var path in selectedPaths)
 		{
 			arguments.Add("--select");
 			arguments.Add(path);
 		}
-		if (dryRun)
-			arguments.Add("--dry-run");
-		return CliArgumentVectorFormatter.Format(arguments);
 	}
 
 	private static void AppendSelection(ICollection<string> arguments, ProjectContextPlan plan)
