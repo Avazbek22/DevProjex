@@ -1287,6 +1287,31 @@ public sealed class TerminalWorkspaceContractTests
 	}
 
 	[Fact]
+	public async Task InteractiveContentPreviewPreservesRootWhenSelectionHasNoFiles()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("empty-project");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			project,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		var build = await controller.BuildPreviewDocumentWithMetricsAsync(
+			state,
+			ProjectContextView.Content,
+			ProjectContextDocumentFormat.Markdown,
+			TestContext.Current.CancellationToken);
+		using var document = build.Document;
+		var expected = ContextRootPresentation.FormatLine(project);
+
+		Assert.Equal(expected, document.GetFullText());
+		Assert.Equal(ExportOutputMetricsCalculator.FromText(expected), build.Metrics);
+	}
+
+	[Fact]
 	public async Task StructuralGitRefreshQueriesOnlyTheRepositoryOwningTheManualSelection()
 	{
 		if (!TryRunGit(Directory.GetCurrentDirectory(), "--version"))

@@ -116,9 +116,6 @@ internal sealed class ProjectTextOutputPipeline(
 		OutputPathRedactionDecision? outputPathRedaction,
 		CancellationToken cancellationToken)
 	{
-		if (files.Count == 0)
-			return previewDocumentBuilder.CreateInMemory(string.Empty);
-
 		return await previewDocumentBuilder.CreateDocumentAsync(
 			(stream, writeCancellationToken) => contentExport.WriteAsync(
 				stream,
@@ -172,9 +169,6 @@ internal sealed class ProjectTextOutputPipeline(
         CancellationToken cancellationToken)
     {
         var files = ResolveContentFiles(snapshot);
-        if (files.Count == 0)
-            return new ProjectTextOutputResult(string.Empty, CandidateFileCount: 0);
-
 		var content = await contentExport.BuildAsync(
 				files,
 				cancellationToken,

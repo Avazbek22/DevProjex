@@ -14,6 +14,66 @@ namespace DevProjex.Tests.UI;
 [Collection(UiWorkspaceCollection.Name)]
 public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
 {
+	[AvaloniaTheory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task EmptyContentPreviewAndWarmupPreserveTheProjectRoot(bool hasSelection)
+	{
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+		try
+		{
+			var snapshotMethod = typeof(MainWindow).GetMethod(
+				"CaptureProjectTextOutputSnapshot",
+				BindingFlags.Instance | BindingFlags.NonPublic);
+			var controllerField = typeof(MainWindow).GetField(
+				"_previewSurfaceController",
+				BindingFlags.Instance | BindingFlags.NonPublic);
+			Assert.NotNull(snapshotMethod);
+			Assert.NotNull(controllerField);
+			var snapshot = Assert.IsType<ProjectTextOutputSnapshot>(snapshotMethod!.Invoke(window, null));
+			var controller = Assert.IsType<PreviewSurfaceController>(controllerField!.GetValue(window));
+			var emptyRoot = snapshot.Root with { Children = [] };
+			var selectedPaths = new HashSet<string>(PathComparer.Default);
+			var displayRoot = snapshot.PathPresentation?.DisplayRootPath ?? snapshot.RootPath;
+			var expected = ContextRootPresentation.FormatLine(displayRoot);
+
+			var warmup = await controller.TryBuildWarmupSnapshotAsync(
+				PreviewContentMode.Content,
+				snapshot.TreeFormat,
+				hasSelection,
+				selectedPaths,
+				snapshot.RootPath,
+				emptyRoot,
+				[],
+				snapshot.PathPresentation,
+				"No text content",
+				"No checked files",
+				TestContext.Current.CancellationToken);
+			var preview = controller.BuildDocument(
+				PreviewContentMode.Content,
+				selectedPaths,
+				hasSelection,
+				snapshot.TreeFormat,
+				"No checked files",
+				"No text content",
+				"No data",
+				snapshot.RootPath,
+				emptyRoot,
+				[],
+				snapshot.PathPresentation,
+				TestContext.Current.CancellationToken);
+			using var document = preview.Document;
+
+			Assert.Equal(expected, Assert.IsType<PreviewWarmupSnapshot>(warmup).Text);
+			Assert.Equal(expected, document.GetFullText());
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
 	[AvaloniaFact]
 	public async Task ContentWarmup_UsesSingleRootAndRelativeFileHeaders()
 	{

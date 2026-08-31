@@ -30,6 +30,26 @@ public sealed class PreviewDocumentBuilderTests
 	}
 
 	[Fact]
+	public async Task BuildContentDocumentWithMetricsAsync_EmptySelectionPreservesRootDocument()
+	{
+		using var project = new TemporaryDirectory();
+		var expected = ContextRootPresentation.FormatLine(project.Path);
+
+		var result = await new PreviewDocumentBuilder(new FileContentAnalyzer())
+			.BuildContentDocumentWithMetricsAsync(
+				[],
+				TestContext.Current.CancellationToken,
+				displayPathMapper: null,
+				displayRootPath: project.Path);
+
+		Assert.True(result.HasValue);
+		using var document = result.Value.Document;
+		Assert.Equal(expected, document.GetFullText());
+		Assert.Empty(document.Sections);
+		Assert.Equal(ExportOutputMetricsCalculator.FromText(expected), result.Value.Metrics);
+	}
+
+	[Fact]
 	public async Task BuildContentDocumentAsync_EscapesControlCharactersInGeneratedPaths()
 	{
 		using var project = new TemporaryDirectory();

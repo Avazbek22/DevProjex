@@ -10,6 +10,37 @@ namespace DevProjex.Tests.Unit.Avalonia;
 public sealed class MetricsPipelineWarmupTests
 {
 	[AvaloniaFact]
+	public async Task EmptyContentSelectionMetricsMatchRootOnlyDocument()
+	{
+		using var temp = new TemporaryDirectory();
+		var root = new TreeNodeDescriptor("root", temp.Path, true, false, "folder", []);
+		var currentTree = new BuildTreeResult(root, false, false, []);
+		var viewModel = CreateViewModel();
+		viewModel.IsProjectLoaded = true;
+		viewModel.SelectedPreviewContentMode = PreviewContentMode.Content;
+		viewModel.TreeNodes.Add(new TreeNodeViewModel(root, parent: null, icon: null));
+		using var pipeline = CreateMetricsPipeline(
+			viewModel,
+			currentTree,
+			temp.Path,
+			new FileContentAnalyzer());
+
+		await pipeline.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
+			currentTree,
+			TestContext.Current.CancellationToken);
+		await WaitUntilAsync(() => pipeline.HasStatusMetricsSnapshot, TimeSpan.FromSeconds(5));
+		var rendered = ContextRootPresentation.FormatLine(temp.Path);
+		using var document = new InMemoryPreviewTextDocument(rendered);
+
+		Assert.True(pipeline.TryGetCachedPreviewSelectionMetrics(
+			PreviewContentMode.Content,
+			document,
+			new PreviewSelectionRange(1, 0, 1, rendered.Length),
+			out var metrics));
+		Assert.Equal(ExportOutputMetricsCalculator.FromText(rendered), metrics);
+	}
+
+	[AvaloniaFact]
 	public void ScheduleRecalculate_AfterDispose_DoesNotRecreateDebounceTimer()
 	{
 		using var temp = new TemporaryDirectory();

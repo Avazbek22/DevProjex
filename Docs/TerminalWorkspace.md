@@ -358,17 +358,17 @@ used by every output in the current session and is not saved in the project prof
 
 ## Preview
 
-The regular Preview follows the Desktop model: Tree, Content, or Tree + Content
-in ASCII, JSON, XML, or Markdown. It is optimized for inspection and does not
-show export-document scaffolding such as Markdown headings and fences. The active
-mode and format are always visible. Exact context-export output remains available
-as an advanced Action Palette action and is never presented as if it were the
-regular Preview.
+The regular Preview follows the Desktop model: Tree, Content, or Tree + Content.
+The selected ASCII, JSON, XML, or Markdown format applies to the tree section;
+Content remains inspection-oriented text. Exact structured context output remains
+available through copy/export as an advanced Action Palette action and is never
+presented as if it were the regular Preview.
 
-Content mode presents the project root once and uses project-relative file
-headings. In a text tree, the root path is likewise shown once and the real
-top-level children begin immediately below it; Unicode and `--plain` connectors
-carry the same structure.
+Content mode presents the project root once, including when no files remain, and
+uses project-relative file headings. Desktop and exact-export text trees show the
+root path once, followed immediately by the real top-level children. The regular
+TUI tree uses its named project-root node instead of a separate address line.
+Unicode and `--plain` connectors carry the same tree structure.
 
 Large contexts use the shared preview document abstractions. Small documents
 stay in memory; larger documents use temporary file-backed UTF-8 storage with

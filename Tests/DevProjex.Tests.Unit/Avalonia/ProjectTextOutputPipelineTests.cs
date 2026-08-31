@@ -321,7 +321,7 @@ public sealed class ProjectTextOutputPipelineTests
     }
 
     [Fact]
-    public async Task BuildAsync_ContentSelectionOutsideEffectiveTreeDoesNotReadUnrelatedFile()
+	public async Task BuildAsync_ContentSelectionOutsideEffectiveTreeReturnsRootOnly()
     {
         using var temp = new TemporaryDirectory();
         var effectiveFile = temp.CreateFile("effective.txt", "effective");
@@ -333,13 +333,20 @@ public sealed class ProjectTextOutputPipelineTests
             new HashSet<string>(PathComparer.Default) { outsideFile });
         var pipeline = CreatePipeline();
 
-        var result = await pipeline.BuildAsync(
-            ProjectTextOutputMode.Content,
-            snapshot,
-            TestContext.Current.CancellationToken);
+		var result = await pipeline.BuildAsync(
+			ProjectTextOutputMode.Content,
+			snapshot,
+			TestContext.Current.CancellationToken);
+		using var document = await pipeline.BuildDocumentAsync(
+			ProjectTextOutputMode.Content,
+			snapshot,
+			TestContext.Current.CancellationToken);
+		var expected = ContextRootPresentation.FormatLine(temp.Path);
 
-        Assert.Equal(0, result.CandidateFileCount);
-        Assert.Empty(result.Content);
+		Assert.Equal(0, result.CandidateFileCount);
+		Assert.Equal(expected, result.Content);
+		Assert.Equal(expected, document.Document.GetFullText());
+		Assert.DoesNotContain("outside", result.Content, StringComparison.Ordinal);
     }
 
     [Fact]

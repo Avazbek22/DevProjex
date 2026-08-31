@@ -1672,8 +1672,7 @@ internal sealed class MetricsPipeline(
 			BuildOrderedMetricsFilePaths(selection, cancellationToken);
 		var contentOnlyAccumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
 		var treeAndContentAccumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
-		if (orderedPaths.Count > 0)
-			contentOnlyAccumulator.AppendRootHeader(contentOnlyRootPath);
+		contentOnlyAccumulator.AppendRootHeader(contentOnlyRootPath);
 		lock (_metricsLock)
         {
 			for (var index = 0; index < orderedPaths.Count; index++)

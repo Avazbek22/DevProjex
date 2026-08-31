@@ -1183,7 +1183,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 
             if (mode == PreviewContentMode.Content)
             {
-                if (files.Count == 0 || string.IsNullOrWhiteSpace(currentPath))
+                if (string.IsNullOrWhiteSpace(currentPath))
                 {
                     var fallbackText = hasSelection
                         ? noCheckedFilesText
@@ -1343,7 +1343,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 
         if (selectedMode == PreviewContentMode.Content)
         {
-            if (files.Count == 0 || string.IsNullOrWhiteSpace(currentPath))
+            if (string.IsNullOrWhiteSpace(currentPath))
             {
                 var fallbackText = hasSelection
                     ? noCheckedFilesText
