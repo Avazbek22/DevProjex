@@ -23,7 +23,7 @@ v [x] <PROJECT>                 <PROJECT>
 
                                                         Files 2  |  Lines 1-5/5
 
- Content 0/5 | Exclusions 1/1 | File types 2/2
+ Content 0/5 | Exclusions 0/0 | File types 2/2
 
 
  Files 2 | Folders 2 | 54 B | ~<TOKENS> tokens | Warnings 0 | Errors 0
