@@ -1896,6 +1896,9 @@ internal sealed partial class TerminalWorkspaceSession
 
 	private void FocusPane(TerminalWorkspacePane pane)
 	{
+		var redrawMovedFrames = _layoutMode == TerminalWorkspaceLayoutMode.Split &&
+		                        (_activePane == TerminalWorkspacePane.Controls) !=
+		                        (pane == TerminalWorkspacePane.Controls);
 		_activePane = pane;
 		ApplyWorkspaceLayout();
 		var view = pane switch
@@ -1906,6 +1909,8 @@ internal sealed partial class TerminalWorkspaceSession
 		};
 		view?.SetFocus();
 		UpdateWorkspaceFocus();
+		if (redrawMovedFrames)
+			CompleteRootTransition();
 	}
 }
 

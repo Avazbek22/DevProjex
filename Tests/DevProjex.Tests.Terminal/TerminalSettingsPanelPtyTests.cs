@@ -8,6 +8,37 @@ namespace DevProjex.Tests.Terminal;
 public sealed class TerminalSettingsPanelPtyTests
 {
 	[Fact(Timeout = 90_000)]
+	public async Task SplitFocusCycleDoesNotLeaveFramesFromThePreviousPaneGeometry()
+	{
+		using var project = CreatePanelProject();
+		await using var terminal = await StartAsync(project.Path, columns: 130, rows: 40);
+
+		await WaitForStableScreenAsync(terminal, "> PROJECT TREE");
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(terminal, "> CONTEXT PREVIEW");
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		var parameters = await WaitForStableScreenAsync(terminal, "> PARAMETERS");
+		Assert.Equal(
+			1,
+			parameters.Split('\n').Count(static line =>
+				line.StartsWith('└') && line.TrimEnd().EndsWith('┘')));
+
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		var tree = await WaitForStableScreenAsync(terminal, "> PROJECT TREE");
+		Assert.DoesNotContain(
+			tree.Split('\n'),
+			static line =>
+			{
+				var trimmed = line.TrimEnd();
+				return trimmed.StartsWith("││", StringComparison.Ordinal) &&
+				       trimmed.EndsWith("││", StringComparison.Ordinal) &&
+				       string.IsNullOrWhiteSpace(trimmed[2..^2]);
+			});
+
+		await ExitAsync(terminal);
+	}
+
+	[Fact(Timeout = 90_000)]
 	public async Task MiniPanelsRenderAcrossEveryWorkspaceLayout()
 	{
 		using var project = CreatePanelProject();
