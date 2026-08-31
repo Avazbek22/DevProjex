@@ -62,6 +62,7 @@ internal static class FileSystemEntryEnumerator
 			SingleLevelOptions);
 		enumerable.ShouldIncludePredicate = (ref FileSystemEntry entry) =>
 			!IsReparsePoint(ref entry) &&
+			IsSupportedGitMetadataEntry(ref entry, path) &&
 			(entry.IsDirectory ||
 			 captureFiles ||
 			 entry.FileName.Equals(".gitignore", FileNameComparison) ||
@@ -155,8 +156,10 @@ internal static class FileSystemEntryEnumerator
 					entry.Length);
 			},
 			SingleLevelOptions);
-		enumerable.ShouldIncludePredicate = static (ref FileSystemEntry entry) =>
-			!entry.IsDirectory && !IsReparsePoint(ref entry);
+		enumerable.ShouldIncludePredicate = (ref FileSystemEntry entry) =>
+			!entry.IsDirectory &&
+			!IsReparsePoint(ref entry) &&
+			IsSupportedGitMetadataEntry(ref entry, path);
 		return enumerable;
 	}
 
@@ -182,9 +185,15 @@ internal static class FileSystemEntryEnumerator
 					entry.IsDirectory ? 0 : entry.Length);
 			},
 			SingleLevelOptions);
-		enumerable.ShouldIncludePredicate = static (ref FileSystemEntry entry) => !IsReparsePoint(ref entry);
+		enumerable.ShouldIncludePredicate = (ref FileSystemEntry entry) =>
+			!IsReparsePoint(ref entry) &&
+			IsSupportedGitMetadataEntry(ref entry, path);
 		return enumerable;
 	}
+
+	private static bool IsSupportedGitMetadataEntry(ref FileSystemEntry entry, string parentPath) =>
+		!entry.FileName.Equals(".git", FileNameComparison) ||
+		GitRepositoryBoundaryProbe.ExistsAt(parentPath);
 
 	private static string CombineRelativePath(string relativeDirectory, string name)
 	{

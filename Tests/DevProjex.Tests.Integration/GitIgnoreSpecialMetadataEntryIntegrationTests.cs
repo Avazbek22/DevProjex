@@ -23,6 +23,13 @@ public sealed class GitIgnoreSpecialMetadataEntryIntegrationTests
 		try
 		{
 			socket = CreateSpecialEntryOrSkip(gitMetadataPath, useSocket);
+			var entries = FileSystemEntryEnumerator.EnumerateEntries(workspace.Path).ToArray();
+			var files = FileSystemEntryEnumerator.EnumerateFiles(workspace.Path).ToArray();
+			var batch = FileSystemEntryEnumerator.ReadDirectoriesAndGitIgnore(
+				workspace.Path,
+				relativeDirectory: string.Empty,
+				TestContext.Current.CancellationToken,
+				captureFiles: true);
 			var services = ProjectLoadWorkflowRefreshHarness.CreateServices();
 			var facts = new ProjectRootFactsProvider().Get(workspace.Path);
 			var availability = services.IgnoreRulesService.GetIgnoreOptionsAvailability(
@@ -34,9 +41,14 @@ public sealed class GitIgnoreSpecialMetadataEntryIntegrationTests
 
 			Assert.False(facts.HasGitMetadataEntry);
 			Assert.False(GitRepositoryBoundaryProbe.ExistsAt(workspace.Path));
+			Assert.DoesNotContain(entries, static entry => entry.Name == ".git");
+			Assert.DoesNotContain(files, static entry => entry.Name == ".git");
+			Assert.DoesNotContain(batch.Files, static entry => entry.Name == ".git");
+			Assert.Null(batch.GitMetadataPath);
 			Assert.False(availability.IncludeTrackedGitFilesOnly);
 			Assert.False(snapshot.GitEvidence.HasRepositoryBoundary);
 			Assert.False(snapshot.HadScanFailure);
+			Assert.Equal(0, snapshot.ControllerImpactCounts.GitIgnore);
 			Assert.DoesNotContain(snapshot.IgnoreOptions, static option =>
 				option.Id is IgnoreOptionId.UseGitIgnore or IgnoreOptionId.TrackedGitFilesOnly);
 		}
