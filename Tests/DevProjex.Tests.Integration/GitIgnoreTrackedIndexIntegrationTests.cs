@@ -840,6 +840,45 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 		Assert.True(Directory.Exists(brokenRepository));
 	}
 
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task ExplicitNestedSelectionDoesNotQueryTheContainingRepositoryForDiff(
+		bool selectFile)
+	{
+		EnsureGitAvailable();
+		using var temp = new TemporaryDirectory();
+		var outerRepository = temp.CreateDirectory("outer");
+		temp.CreateFile("outer/README.md", "outer\n");
+		InitializeCommittedRepository(outerRepository, "README.md");
+		var nestedRepository = temp.CreateDirectory("outer/nested");
+		var nestedFile = temp.CreateFile("outer/nested/App.cs", "v1\n");
+		InitializeCommittedRepository(nestedRepository, "App.cs");
+		File.WriteAllText(nestedFile, "v2\n");
+		RunGit(nestedRepository, "add", "--", "App.cs");
+		RunGit(nestedRepository, "commit", "--quiet", "-m", "change");
+		var planner = new ProjectContextPlanner(CreateProjectAnalysisService());
+		var selection = ProjectSelectionSpec.Standard with
+		{
+			Roots = selectFile ? null : ["nested"],
+			SelectedPaths = selectFile ? ["nested/App.cs"] : [],
+			GitMode = GitFilteringMode.Diff,
+			GitDiffRange = "HEAD~1..HEAD"
+		};
+
+		var plan = await planner.BuildStructureAsync(
+			new ProjectContextRequest(outerRepository, selection),
+			TestContext.Current.CancellationToken);
+		var scopedPlan = await GitScopeFilter.ApplyAsync(
+			planner,
+			plan,
+			new GitScopePathProvider(),
+			TestContext.Current.CancellationToken);
+
+		Assert.False(scopedPlan.HasErrors);
+		Assert.Equal(PathUtility.Normalize(nestedFile), Assert.Single(scopedPlan.IncludedFiles));
+	}
+
 	[Fact]
 	public async Task GitScopePathIdentityUsesRepositoryIgnoreCaseSemanticsOnEveryPlatform()
 	{

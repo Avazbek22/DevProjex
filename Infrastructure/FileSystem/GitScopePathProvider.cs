@@ -273,7 +273,7 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 			}
 		}
 
-		if (GitTrackedPathIndexCache.TryFindNearestRepositoryBoundary(
+		if (resolved.Count == 0 && GitTrackedPathIndexCache.TryFindNearestRepositoryBoundary(
 			projectRoot,
 			cancellationToken,
 			out var nearestRepositoryRoot))

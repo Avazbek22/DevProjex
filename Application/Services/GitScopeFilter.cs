@@ -129,12 +129,30 @@ public static class GitScopeFilter
 			}
 		}
 
-		return repositoryRoots
-			.Where(repositoryRoot =>
-				PathUtility.IsPathInside(sourceRoot, repositoryRoot) ||
-				selectedRoots.Any(selectedRoot =>
-					PathUtility.IsPathInside(repositoryRoot, selectedRoot) ||
-					PathUtility.IsPathInside(selectedRoot, repositoryRoot)))
+		var selectedRepositoryRoots = new HashSet<string>(StringComparer.Ordinal);
+		foreach (var selectedRoot in selectedRoots)
+		{
+			string? owningRepository = null;
+			foreach (var repositoryRoot in repositoryRoots)
+			{
+				if (PathUtility.IsPathInside(repositoryRoot, selectedRoot))
+					selectedRepositoryRoots.Add(repositoryRoot);
+				if (!PathUtility.IsPathInside(selectedRoot, repositoryRoot) ||
+				    (owningRepository is not null && repositoryRoot.Length <= owningRepository.Length))
+				{
+					continue;
+				}
+
+				owningRepository = repositoryRoot;
+			}
+
+			if (owningRepository is not null)
+				selectedRepositoryRoots.Add(owningRepository);
+		}
+
+		return selectedRepositoryRoots
+			.OrderBy(static path => path, PathComparer.Default)
+			.ThenBy(static path => path, StringComparer.Ordinal)
 			.ToArray();
 	}
 

@@ -424,6 +424,52 @@ public sealed class GitScopeSelectionTests
 	}
 
 	[Fact]
+	public void ExplicitPathSelectionUsesTheDeepestContainingRepositoryBoundary()
+	{
+		var sourceRoot = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "dpx-git-scope-owner"));
+		var nestedRepository = Path.Combine(sourceRoot, "nested");
+		var inventory = new ProjectTreeInventorySnapshot(
+			[],
+			rootAccessDenied: false,
+			hadAccessDenied: false,
+			discoveredGitRepositoryRoots: [sourceRoot, nestedRepository]);
+
+		var roots = GitScopeFilter.GetDiscoveredRepositoryRoots(
+			inventory,
+			sourceRoot,
+			selectedRootFolders: [],
+			rootSelectionIsExplicit: false,
+			selectedFullPaths: [Path.Combine(nestedRepository, "src", "App.cs")]);
+
+		Assert.Equal([nestedRepository], roots, PathComparer.Default);
+	}
+
+	[Fact]
+	public void ExplicitDirectorySelectionKeepsItsOwnerAndRepositoriesNestedInsideIt()
+	{
+		var sourceRoot = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "dpx-git-scope-subtree"));
+		var selectedDirectory = Path.Combine(sourceRoot, "src");
+		var nestedRepository = Path.Combine(selectedDirectory, "nested");
+		var unrelatedRepository = Path.Combine(sourceRoot, "docs", "samples");
+		var inventory = new ProjectTreeInventorySnapshot(
+			[],
+			rootAccessDenied: false,
+			hadAccessDenied: false,
+			discoveredGitRepositoryRoots: [sourceRoot, nestedRepository, unrelatedRepository]);
+
+		var roots = GitScopeFilter.GetDiscoveredRepositoryRoots(
+			inventory,
+			sourceRoot,
+			["src"],
+			rootSelectionIsExplicit: true);
+
+		Assert.Equal(
+			[sourceRoot, nestedRepository],
+			roots,
+			PathComparer.Default);
+	}
+
+	[Fact]
 	public void RepositoryDiscoveryPreservesCaseDistinctPhysicalRootsBeforeGitResolution()
 	{
 		var sourceRoot = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "dpx-git-scope-case-roots"));
