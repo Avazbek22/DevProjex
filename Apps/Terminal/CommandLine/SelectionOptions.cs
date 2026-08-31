@@ -269,7 +269,7 @@ internal sealed class SelectionOptions
 		if (direct is null && sourceResult is null)
 			return null;
 
-		var selected = new HashSet<string>(PathComparer.Default);
+		var selected = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
 		if (direct is not null)
 			selected.UnionWith(direct);
 		if (sourceResult is not null)
