@@ -8,8 +8,6 @@ internal sealed class McpRootJailFileStreamOpener
 {
 	private const int DarwinGetPath = 50;
 	private const int DarwinPathBufferLength = 1024;
-	private const int LinuxOpenDirectory = 0x00010000;
-	private const int DarwinOpenDirectory = 0x00100000;
 	private const uint WindowsShareRead = 0x00000001;
 	private const uint WindowsShareWrite = 0x00000002;
 	private const uint WindowsShareDelete = 0x00000004;
@@ -71,9 +69,10 @@ internal sealed class McpRootJailFileStreamOpener
 	internal static string ResolveDirectoryPath(string path)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(path);
-		using var handle = OperatingSystem.IsWindows()
-			? OpenWindowsDirectory(path)
-			: OpenUnixDirectory(path);
+		if (!OperatingSystem.IsWindows())
+			return ResolveUnixDirectoryPath(path);
+
+		using var handle = OpenWindowsDirectory(path);
 		if (handle.IsInvalid)
 			throw NativeFailure("The final path of an MCP project root could not be opened.");
 		return Path.TrimEndingDirectorySeparator(ResolveOpenedPath(handle));
@@ -89,18 +88,27 @@ internal sealed class McpRootJailFileStreamOpener
 			WindowsBackupSemantics,
 			templateFile: IntPtr.Zero);
 
-	private static SafeFileHandle OpenUnixDirectory(string path)
+	private static string ResolveUnixDirectoryPath(string path)
 	{
-		var directoryFlag = OperatingSystem.IsLinux()
-			? LinuxOpenDirectory
-			: OperatingSystem.IsMacOS()
-				? DarwinOpenDirectory
-				: throw new PlatformNotSupportedException(
-					"MCP root-jail directory handles require Windows, Linux, or macOS.");
-		var descriptor = Open(path, directoryFlag);
-		return descriptor < 0
-			? throw NativeFailure("The final path of an MCP project root could not be opened.")
-			: new SafeFileHandle(descriptor, ownsHandle: true);
+		if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+			throw new PlatformNotSupportedException(
+				"MCP root-jail directory handles require Windows, Linux, or macOS.");
+
+		var directory = OpenDirectory(path);
+		if (directory == IntPtr.Zero)
+			throw NativeFailure("The final path of an MCP project root could not be opened.");
+		try
+		{
+			var descriptor = GetDirectoryFileDescriptor(directory);
+			if (descriptor < 0)
+				throw NativeFailure("The final path of an MCP project root could not be opened.");
+			using var handle = new SafeFileHandle(descriptor, ownsHandle: false);
+			return Path.TrimEndingDirectorySeparator(ResolveOpenedPath(handle));
+		}
+		finally
+		{
+			_ = CloseDirectory(directory);
+		}
 	}
 
 	private static string ResolveWindowsPath(SafeFileHandle handle)
@@ -213,10 +221,15 @@ internal sealed class McpRootJailFileStreamOpener
 		byte[] buffer,
 		nuint bufferSize);
 
-	[DllImport("libc", EntryPoint = "open", SetLastError = true)]
-	private static extern int Open(
-		[MarshalAs(UnmanagedType.LPUTF8Str)] string path,
-		int flags);
+	[DllImport("libc", EntryPoint = "opendir", SetLastError = true)]
+	private static extern IntPtr OpenDirectory(
+		[MarshalAs(UnmanagedType.LPUTF8Str)] string path);
+
+	[DllImport("libc", EntryPoint = "dirfd", SetLastError = true)]
+	private static extern int GetDirectoryFileDescriptor(IntPtr directory);
+
+	[DllImport("libc", EntryPoint = "closedir", SetLastError = true)]
+	private static extern int CloseDirectory(IntPtr directory);
 
 	[DllImport("libSystem.B.dylib", EntryPoint = "fcntl", SetLastError = true)]
 	private static extern int DarwinFcntl(int descriptor, int command, IntPtr pathBuffer);
