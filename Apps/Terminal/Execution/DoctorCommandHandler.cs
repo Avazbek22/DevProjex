@@ -126,9 +126,7 @@ public sealed class DoctorCommandHandler(
 				terminal.ResolvedCommandPath),
 			new DoctorCheck(
 				"path-resolution",
-				Status(
-					terminal.State != TerminalCommandSetupState.CommandShadowed,
-					DoctorCheckStatus.Warning),
+				ResolvePathResolutionStatus(terminal),
 				terminal.ResolvedCommandPath ?? L("Terminal.Doctor.Value.NotResolved"),
 				terminal.State == TerminalCommandSetupState.CommandShadowed
 					? L("Terminal.Doctor.Hint.PathShadowed")
@@ -626,6 +624,14 @@ public sealed class DoctorCommandHandler(
 		bool passed,
 		DoctorCheckStatus failureStatus) =>
 		passed ? DoctorCheckStatus.Pass : failureStatus;
+
+	private static DoctorCheckStatus ResolvePathResolutionStatus(
+		TerminalCommandSetupSnapshot terminal) =>
+		terminal.State == TerminalCommandSetupState.CommandShadowed
+			? DoctorCheckStatus.Warning
+			: string.IsNullOrWhiteSpace(terminal.ResolvedCommandPath)
+				? DoctorCheckStatus.Skip
+				: DoctorCheckStatus.Pass;
 
 	private static string StatusMarker(DoctorCheckStatus status) =>
 		status switch

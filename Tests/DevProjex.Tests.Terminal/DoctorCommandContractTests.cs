@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using DevProjex.Kernel.Abstractions;
 using DevProjex.Terminal.DesktopControl;
 
 namespace DevProjex.Tests.Terminal;
@@ -113,6 +114,43 @@ public sealed class DoctorCommandContractTests
 	}
 
 	[Fact]
+	public async Task UnresolvedPathUsesANeutralMarkerInsteadOfAPassMarker()
+	{
+		using var workspace = new TemporaryDirectory();
+		var environment = new TestTerminalEnvironment { SupportsUnicode = false };
+		var snapshot = new TerminalCommandSetupSnapshot(
+			"devprojex",
+			TerminalCommandSetupState.NotInstalled,
+			CommandPath: null,
+			TargetExecutablePath: null,
+			InstalledTargetExecutablePath: null,
+			UserBinDirectory: null,
+			UserBinDirectoryIsInPath: false,
+			CanInstall: true,
+			CanRepair: false,
+			ShellProfileHint: null,
+			ResolvedCommandPath: null);
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En) with
+		{
+			TerminalCommandSetupService = new StubTerminalCommandSetupService(snapshot)
+		};
+		var registry = new DesktopInstanceRegistry(
+			new DesktopControlPaths(() => workspace.CreateDirectory("ipc")));
+
+		var exitCode = await new DoctorCommandHandler(
+				services,
+				environment,
+				registry,
+				() => workspace.Path)
+			.ExecuteAsync(json: false, TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Contains("[-] PATH resolution: not resolved", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("[+] PATH resolution: not resolved", environment.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task DoctorReportsButDoesNotDeleteStaleDesktopRegistration()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -153,5 +191,20 @@ public sealed class DoctorCommandContractTests
 		Assert.Contains("Desktop", hint, StringComparison.Ordinal);
 		Assert.DoesNotContain("Run devprojex ui list", hint, StringComparison.Ordinal);
 		Assert.True(File.Exists(paths.GetRegistrationPath(stale.InstanceId)));
+	}
+
+	private sealed class StubTerminalCommandSetupService(TerminalCommandSetupSnapshot snapshot)
+		: ITerminalCommandSetupService
+	{
+		public TerminalCommandSetupSnapshot Probe() => snapshot;
+
+		public TerminalCommandInstallResult InstallOrRepair() =>
+			throw new NotSupportedException();
+
+		public TerminalCommandPathSetupResult ConfigurePath() =>
+			throw new NotSupportedException();
+
+		public TerminalCommandInstallResult Reinstall() =>
+			throw new NotSupportedException();
 	}
 }
