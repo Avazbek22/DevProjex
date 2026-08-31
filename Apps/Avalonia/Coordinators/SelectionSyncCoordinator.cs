@@ -761,8 +761,20 @@ public sealed partial class SelectionSyncCoordinator(
         ApplyIgnoreOptions(options, previousSelections, hasPreviousSelections, path);
     }
 
-	public void HandleGitFilteringModeChanged(GitFilteringMode mode, string? currentPath)
-		=> HandleGitFilteringModeChangedCore(mode, currentPath, preservePreferredForPersistence: false);
+	public void HandleGitFilteringModeChanged(
+		GitFilteringMode mode,
+		string? currentPath,
+		GitFilteringMode? previousMode = null)
+	{
+		if (_session.PreparedPath is not null)
+		{
+			if (previousMode is { } visualMode)
+				RefreshGitFilteringModePresentation(visualMode);
+			return;
+		}
+
+		HandleGitFilteringModeChangedCore(mode, currentPath, preservePreferredForPersistence: false);
+	}
 
 	private void HandleGitFilteringModeChangedCore(
 		GitFilteringMode mode,
@@ -3764,12 +3776,12 @@ public sealed partial class SelectionSyncCoordinator(
         }
     }
 
-	private void RefreshGitFilteringModePresentation() =>
+	private void RefreshGitFilteringModePresentation(GitFilteringMode? selectedMode = null) =>
 		viewModel.RefreshGitFilteringModes(
 			repositoryAvailable: HasGitFilteringRepositoryAvailability(),
 			selectorVisible: _ignoreOptions.Any(
 				static option => option.Id == IgnoreOptionId.UseGitIgnore),
-			selectedMode: _session.IgnoreOptions.ActiveGitFilteringMode);
+			selectedMode: selectedMode ?? _session.IgnoreOptions.ActiveGitFilteringMode);
 
 	private bool HasGitFilteringRepositoryAvailability() =>
 		Volatile.Read(ref _gitCliAvailability) > 0 &&
@@ -3799,7 +3811,7 @@ public sealed partial class SelectionSyncCoordinator(
 			return;
 
 		cancellationToken.ThrowIfCancellationRequested();
-		await Dispatcher.UIThread.InvokeAsync(RefreshGitFilteringModePresentation);
+		await Dispatcher.UIThread.InvokeAsync(() => RefreshGitFilteringModePresentation());
 	}
 
 	private void SetAllIgnoreOptionsChecked(bool isChecked)

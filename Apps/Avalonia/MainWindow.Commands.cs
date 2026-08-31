@@ -622,7 +622,11 @@ public partial class MainWindow
 			return;
 		if ((sender as ComboBox)?.SelectedItem is not GitFilteringModeOptionViewModel option)
 			return;
-		_selectionCoordinator.HandleGitFilteringModeChanged(option.Mode, _currentPath);
+		var previousMode = e.RemovedItems.Count > 0 &&
+		                   e.RemovedItems[0] is GitFilteringModeOptionViewModel previousOption
+			? previousOption.Mode
+			: (GitFilteringMode?)null;
+		_selectionCoordinator.HandleGitFilteringModeChanged(option.Mode, _currentPath, previousMode);
 	}
 
 	private void OnContentProcessingAllChanged(object? sender, RoutedEventArgs e)

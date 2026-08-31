@@ -357,6 +357,38 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		Assert.True(viewModel.AllIgnoreChecked);
 	}
 
+	[AvaloniaFact]
+	public void ProjectCheckpoint_Restore_RestoresGitPresentationAndPreferredPersistenceIntent()
+	{
+		const string path = @"C:\Project";
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel, currentPathProvider: () => path);
+		var trackedSnapshot = WithGitMode(
+			CreateReversibleSelectionRefreshSnapshot(),
+			useGitIgnore: false,
+			trackedOnly: true) with
+		{
+			GitEvidence = new GitWorkspaceEvidence(HasRepositoryBoundary: true)
+		};
+		ApplySelectionRefreshSnapshot(coordinator, trackedSnapshot);
+		HandleGitFilteringModeChangedPreservingPreferredMode(coordinator, GitFilteringMode.None);
+		var checkpoint = coordinator.CaptureProjectCheckpoint();
+
+		coordinator.HandleGitFilteringModeChanged(GitFilteringMode.RespectGitIgnore, currentPath: null);
+		ApplySelectionRefreshSnapshot(coordinator, CreateSelectionRefreshSnapshot());
+		Assert.False(viewModel.IsGitFilteringModeSelectorVisible);
+
+		coordinator.RestoreProjectCheckpoint(checkpoint);
+
+		Assert.True(viewModel.IsGitFilteringModeSelectorVisible);
+		Assert.Equal(5, viewModel.GitFilteringModes.Count);
+		Assert.Equal(GitFilteringMode.None, viewModel.SelectedGitFilteringModeOption?.Mode);
+		var persistedStates = Assert.IsAssignableFrom<IReadOnlyDictionary<IgnoreOptionId, bool>>(
+			coordinator.SnapshotIgnoreOptionStatesForPersistence());
+		Assert.False(persistedStates[IgnoreOptionId.UseGitIgnore]);
+		Assert.True(persistedStates[IgnoreOptionId.TrackedGitFilesOnly]);
+	}
+
 	[Fact]
 	public void GitFilteringCheckboxes_AllowActiveModeToBeClearedAndKeepSmartIgnoreIndependent()
 	{
@@ -2796,6 +2828,17 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 			BindingFlags.Instance | BindingFlags.NonPublic);
 		Assert.NotNull(method);
 		method!.Invoke(coordinator, [snapshot, retainPreviousSnapshot]);
+	}
+
+	private static void HandleGitFilteringModeChangedPreservingPreferredMode(
+		SelectionSyncCoordinator coordinator,
+		GitFilteringMode mode)
+	{
+		var method = typeof(SelectionSyncCoordinator).GetMethod(
+			"HandleGitFilteringModeChangedCore",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(method);
+		method!.Invoke(coordinator, [mode, null, true]);
 	}
 
 	private static void ApplySelectionRefreshSnapshotWithCompleteness(

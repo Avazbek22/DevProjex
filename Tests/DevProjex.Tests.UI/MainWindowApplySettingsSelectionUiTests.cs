@@ -601,6 +601,14 @@ public sealed class MainWindowApplySettingsSelectionUiTests
 		using var firstProject = UiTestProject.CreateWithSecretRedactionWorkspace();
 		using var secondProject = UiTestProject.CreateDefault();
 		var sourcePath = Path.Combine(firstProject.RootPath, "src", "Secrets.cs");
+		await File.WriteAllTextAsync(
+			Path.Combine(firstProject.RootPath, ".gitignore"),
+			"ignored.tmp\n",
+			TestContext.Current.CancellationToken);
+		await File.WriteAllTextAsync(
+			Path.Combine(firstProject.RootPath, "ignored.tmp"),
+			"ignored\n",
+			TestContext.Current.CancellationToken);
 		await File.AppendAllTextAsync(
 			sourcePath,
 			$"const string first = \"{firstMarkedValue}\";\nconst string second = \"{secondMarkedValue}\";\n",
@@ -653,6 +661,24 @@ public sealed class MainWindowApplySettingsSelectionUiTests
 			Assert.True(viewModel.AreFilterSettingsEnabled);
 			Assert.False(viewModel.CanApplySettings);
 			var pendingApplyBefore = viewModel.HasPendingFilterSettingsChanges;
+			Assert.True(viewModel.IsGitFilteringModeSelectorVisible);
+			var gitModeBefore = Assert.IsType<GitFilteringModeOptionViewModel>(
+				viewModel.SelectedGitFilteringModeOption).Mode;
+			var gitModesBefore = viewModel.GitFilteringModes
+				.Select(static option => option.Mode)
+				.ToArray();
+			var attemptedGitMode = viewModel.GitFilteringModes.First(
+				option => option.Mode != gitModeBefore);
+			var gitModeComboBox = UiTestDriver.GetRequiredControl<ComboBox>(
+				window,
+				"GitFilteringModeComboBox");
+			Assert.True(gitModeComboBox.IsEffectivelyEnabled);
+			await window.Dispatcher.InvokeAsync(() => gitModeComboBox.SelectedItem = attemptedGitMode);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => viewModel.SelectedGitFilteringModeOption?.Mode == gitModeBefore,
+				"the prepared Git mode change to roll back");
+
 			var hideSecretsOption = viewModel.IgnoreOptions.Single(
 				static option => option.Id == IgnoreOptionId.HideSecrets);
 			var hideSecretsBefore = hideSecretsOption.IsChecked;
@@ -703,6 +729,11 @@ public sealed class MainWindowApplySettingsSelectionUiTests
 			await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
 
 			viewModel = UiTestDriver.GetViewModel(window);
+			Assert.True(viewModel.IsGitFilteringModeSelectorVisible);
+			Assert.Equal(
+				gitModesBefore,
+				viewModel.GitFilteringModes.Select(static option => option.Mode));
+			Assert.Equal(gitModeBefore, viewModel.SelectedGitFilteringModeOption?.Mode);
 			var restoredRoot = Assert.Single(viewModel.TreeNodes);
 			Assert.True(PathComparer.Default.Equals(firstProject.RootPath, restoredRoot.FullPath));
 			var restoredSource = FindRequiredDirectChild(restoredRoot, "src");
