@@ -47,6 +47,7 @@ public sealed class DocumentationAndPackagingContractTests
 			Assert.Contains("EXAMPLE", document, StringComparison.Ordinal);
 			Assert.Contains("allowlist", document, StringComparison.OrdinalIgnoreCase);
 			Assert.Contains("Gitleaks", document, StringComparison.OrdinalIgnoreCase);
+			Assert.Contains("scope-aware", document, StringComparison.OrdinalIgnoreCase);
 		}
 	}
 
