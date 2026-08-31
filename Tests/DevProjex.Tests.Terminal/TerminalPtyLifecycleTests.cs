@@ -104,8 +104,9 @@ public sealed class TerminalPtyLifecycleTests
 			rows,
 			cancellationToken: TestContext.Current.CancellationToken);
 
-		var treeScreen = await terminal.WaitForScreenAsync(
+		var treeScreen = await terminal.WaitForStableScreenAsync(
 			"PROJECT TREE",
+			forbidden: "Processing request",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.DoesNotContain("Terminal too small", treeScreen, StringComparison.Ordinal);
 		AssertViewportWidth(treeScreen, columns);
