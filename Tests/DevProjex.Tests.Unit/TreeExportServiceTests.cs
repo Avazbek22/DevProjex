@@ -49,6 +49,31 @@ public sealed class TreeExportServiceTests
 		Assert.DoesNotContain("skip.txt", result);
 	}
 
+	[Fact]
+	public void BuildSelectedTree_PreservesEntriesThatDifferOnlyByCase()
+	{
+		var root = new TreeNodeDescriptor(
+			"root",
+			"/root",
+			IsDirectory: true,
+			IsAccessDenied: false,
+			"folder",
+			[
+				new TreeNodeDescriptor("Foo.cs", "/root/Foo.cs", false, false, "csharp", []),
+				new TreeNodeDescriptor("foo.cs", "/root/foo.cs", false, false, "csharp", [])
+			]);
+		var selected = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer)
+		{
+			"/root/Foo.cs",
+			"/root/foo.cs"
+		};
+
+		var result = new TreeExportService().BuildSelectedTree("/root", root, selected);
+
+		Assert.Contains("├── Foo.cs", result, StringComparison.Ordinal);
+		Assert.Contains("└── foo.cs", result, StringComparison.Ordinal);
+	}
+
 	// Verifies selected tree export returns empty when nothing is selected.
 	[Fact]
 	public void BuildSelectedTree_ReturnsEmptyWhenNoSelections()

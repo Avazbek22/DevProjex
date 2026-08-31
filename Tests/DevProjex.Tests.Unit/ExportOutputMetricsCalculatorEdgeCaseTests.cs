@@ -150,6 +150,24 @@ public sealed class ExportOutputMetricsCalculatorEdgeCaseTests
 	}
 
 	[Fact]
+	public void FromContentFiles_PreservesCaseDistinctProjectEntries()
+	{
+		var upper = new ContentFileMetrics(
+			"Foo.cs", 5, 1, 5, IsEmpty: false, IsWhitespaceOnly: false);
+		var lower = new ContentFileMetrics(
+			"foo.cs", 7, 1, 7, IsEmpty: false, IsWhitespaceOnly: false);
+
+		var combined = ExportOutputMetricsCalculator.FromContentFiles([lower, upper]);
+		var upperOnly = ExportOutputMetricsCalculator.FromContentFiles([upper]);
+		var lowerOnly = ExportOutputMetricsCalculator.FromContentFiles([lower]);
+
+		Assert.True(combined.Lines > upperOnly.Lines);
+		Assert.True(combined.Lines > lowerOnly.Lines);
+		Assert.True(combined.Chars > upperOnly.Chars);
+		Assert.True(combined.Chars > lowerOnly.Chars);
+	}
+
+	[Fact]
 	public void OrderedAccumulator_IgnoresEmptyPathButPreservesWhitespaceOnlyFileName()
 	{
 		var accumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();

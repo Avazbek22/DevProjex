@@ -20,7 +20,7 @@ internal static class ContentPathOrdering
 			return orderedResult;
 		}
 
-		var uniquePaths = new HashSet<string>(PathComparer.Default);
+		var uniquePaths = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
 		foreach (var path in paths)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -29,7 +29,7 @@ internal static class ContentPathOrdering
 		}
 
 		var result = uniquePaths.ToArray();
-		CancellationAwareSort.Sort(result, PathComparer.Default, cancellationToken);
+		CancellationAwareSort.Sort(result, ProjectTreePathIdentity.CanonicalComparer, cancellationToken);
 		return result;
 	}
 
@@ -43,7 +43,7 @@ internal static class ContentPathOrdering
 			cancellationToken.ThrowIfCancellationRequested();
 			var path = paths[index];
 			if (string.IsNullOrWhiteSpace(path) ||
-			    previousPath is not null && PathComparer.Default.Compare(previousPath, path) >= 0)
+			    previousPath is not null && ProjectTreePathIdentity.CanonicalComparer.Compare(previousPath, path) >= 0)
 			{
 				return false;
 			}

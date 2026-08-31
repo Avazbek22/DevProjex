@@ -132,6 +132,20 @@ public sealed class MarkedSecretsMatcherOptimizationTests(ITestOutputHelper outp
 	}
 
 	[Fact]
+	public void SessionMark_AppliesOnlyToTheExactCaseDistinctSourcePath()
+	{
+		const string marked = "case-scoped-secret-0001";
+		var content = $"KEY={marked}";
+		var value = CreateValue(marked);
+		var matcher = new MarkedSecretsMatcher(
+			[],
+			[new SessionMarkedSecret("Foo.cs", 4, value.Length, value.Hash)]);
+
+		Assert.Single(matcher.Match("Foo.cs", content, CancellationToken));
+		Assert.Empty(matcher.Match("foo.cs", content, CancellationToken));
+	}
+
+	[Fact]
 	public void SessionOnlyMatching_ObservesCancellationWithoutBuildingAnIndex()
 	{
 		const string marked = "secret-value-0001";

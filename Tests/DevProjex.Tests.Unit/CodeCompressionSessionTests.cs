@@ -150,6 +150,33 @@ public sealed class CodeCompressionSessionTests
 	}
 
 	[Fact]
+	public void OutputScope_PreservesCaseDistinctFilesAndTheirIndependentContent()
+	{
+		var upperPath = Path.Combine("project", "Foo.cs");
+		var lowerPath = Path.Combine("project", "foo.cs");
+		using var compressor = new RecordingCompressor();
+		using var session = new CodeCompressionSession(compressor);
+		using var scope = session.BeginOutput("project", [upperPath, lowerPath]);
+
+		var upper = scope.Transform(
+			upperPath,
+			"Foo.cs",
+			"upper-content",
+			TestContext.Current.CancellationToken);
+		var lower = scope.Transform(
+			lowerPath,
+			"foo.cs",
+			"lower-content",
+			TestContext.Current.CancellationToken);
+		var snapshot = scope.Complete();
+
+		Assert.Equal("upper-content", upper.Text);
+		Assert.Equal("lower-content", lower.Text);
+		Assert.Equal(2, compressor.AnalysisCount);
+		Assert.Equal(2, snapshot.TotalFiles);
+	}
+
+	[Fact]
 	public async Task Prewarm_PreCanceledSnapshotSkipsRetentionClassification()
 	{
 		using var temp = new TemporaryDirectory();

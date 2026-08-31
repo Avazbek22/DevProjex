@@ -330,7 +330,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		bool explicitSelectionHadMatch;
 		if (forceEmptySelection)
 		{
-			selectedFullPaths = new HashSet<string>(pathComparer ?? PathComparer.Default);
+			selectedFullPaths = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
 			explicitSelectionHadMatch = false;
 		}
 		else
@@ -906,7 +906,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		IEqualityComparer<T> comparer) =>
 		new HashSet<T>(left ?? [], comparer).SetEquals(right);
 
-	private static IReadOnlySet<string> ResolveSelectedPaths(
+	internal static IReadOnlySet<string> ResolveSelectedPaths(
 		TreeNodeDescriptor root,
 		string sourceRoot,
 		IReadOnlyCollection<string>? selectedPaths,
@@ -916,16 +916,15 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		StringComparer? pathComparer = null)
 	{
 		explicitSelectionHadMatch = false;
-		var effectivePathComparer = pathComparer ?? PathComparer.Default;
 		if (selectedPaths is null || selectedPaths.Count == 0)
-			return new HashSet<string>(effectivePathComparer);
+			return new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
 
-		var effectivePathMap = BuildEffectivePathMap(
+		var effectivePathLookup = BuildEffectivePathLookup(
 			root,
 			sourceRoot,
 			cancellationToken,
-			effectivePathComparer);
-		var resolved = new HashSet<string>(effectivePathComparer);
+			allowPlatformAliases: !ReferenceEquals(pathComparer, StringComparer.Ordinal));
+		var resolved = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
 		foreach (var input in selectedPaths)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -937,7 +936,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				continue;
 			}
 
-			if (effectivePathMap.TryGetValue(relativePath, out var fullPath))
+			if (effectivePathLookup.TryResolve(relativePath, out var fullPath))
 			{
 				explicitSelectionHadMatch = true;
 				resolved.Add(fullPath);
@@ -951,7 +950,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				relativePath));
 		}
 
-		return NormalizeSelectionFrontier(root, resolved, cancellationToken, effectivePathComparer);
+		return NormalizeSelectionFrontier(root, resolved, cancellationToken);
 	}
 
 	private static IReadOnlySet<string> NormalizeSelectionFrontier(
@@ -961,14 +960,13 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		StringComparer? pathComparer = null)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
-		var effectivePathComparer = pathComparer ?? PathComparer.Default;
 		if (selectedPaths.Contains(root.FullPath))
-			return new HashSet<string>(effectivePathComparer);
+			return new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
 
 		if (selectedPaths.Count < 2)
 			return selectedPaths;
 
-		var frontier = new HashSet<string>(selectedPaths, effectivePathComparer);
+		var frontier = new HashSet<string>(selectedPaths, ProjectTreePathIdentity.CanonicalComparer);
 		foreach (var selectedPath in selectedPaths)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -989,13 +987,17 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		return frontier;
 	}
 
-	private static Dictionary<string, string> BuildEffectivePathMap(
+	private static EffectivePathLookup BuildEffectivePathLookup(
 		TreeNodeDescriptor root,
 		string sourceRoot,
 		CancellationToken cancellationToken,
-		StringComparer? pathComparer = null)
+		bool allowPlatformAliases)
 	{
-		var paths = new Dictionary<string, string>(pathComparer ?? PathComparer.Default);
+		var exactPaths = new Dictionary<string, string>(ProjectTreePathIdentity.CanonicalComparer);
+		Dictionary<string, string?>? platformAliases =
+			allowPlatformAliases && OperatingSystem.IsWindows()
+				? new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+				: null;
 		var stack = new Stack<TreeNodeDescriptor>();
 		stack.Push(root);
 		while (stack.Count > 0)
@@ -1004,13 +1006,49 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			var node = stack.Pop();
 			var relativePath = Path.GetRelativePath(sourceRoot, node.FullPath);
 			var key = relativePath == "." ? string.Empty : NormalizePathSeparators(relativePath);
-			paths[key] = node.FullPath;
+			exactPaths[key] = node.FullPath;
+			if (platformAliases is not null)
+			{
+				if (platformAliases.TryGetValue(key, out var existingPath))
+				{
+					if (existingPath is not null &&
+					    !ProjectTreePathIdentity.CanonicalComparer.Equals(existingPath, node.FullPath))
+					{
+						platformAliases[key] = null;
+					}
+				}
+				else
+				{
+					platformAliases.Add(key, node.FullPath);
+				}
+			}
 
 			for (var index = node.Children.Count - 1; index >= 0; index--)
 				stack.Push(node.Children[index]);
 		}
 
-		return paths;
+		return new EffectivePathLookup(exactPaths, platformAliases);
+	}
+
+	private sealed record EffectivePathLookup(
+		IReadOnlyDictionary<string, string> ExactPaths,
+		IReadOnlyDictionary<string, string?>? PlatformAliases)
+	{
+		public bool TryResolve(string relativePath, out string fullPath)
+		{
+			if (ExactPaths.TryGetValue(relativePath, out fullPath!))
+				return true;
+			if (PlatformAliases is not null &&
+			    PlatformAliases.TryGetValue(relativePath, out var alias) &&
+			    alias is not null)
+			{
+				fullPath = alias;
+				return true;
+			}
+
+			fullPath = string.Empty;
+			return false;
+		}
 	}
 
 	private static string NormalizePathSeparators(string path) =>
@@ -1109,7 +1147,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		}
 		var fileIndex = 0;
 		var folderIndex = 0;
-		var pathComparer = PathComparer.Default;
+		var pathComparer = ProjectTreePathIdentity.CanonicalComparer;
 		// The two canonical lists merge into the same global path order as the former node sort.
 		while (fileIndex < orderedIncludedFiles.Count || folderIndex < orderedIncludedFolders.Count)
 		{
@@ -1167,7 +1205,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		StringComparer? pathComparer = null)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
-		var effectivePathComparer = pathComparer ?? PathComparer.Default;
+		var effectivePathComparer = ProjectTreePathIdentity.CanonicalComparer;
 		if (selectsNoEffectivePaths)
 			return (root with { Children = [] }, Array.Empty<string>(), Array.Empty<string>());
 
@@ -1257,7 +1295,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		CancellationToken cancellationToken,
 		StringComparer? comparer = null)
 	{
-		var pathComparer = comparer ?? PathComparer.Default;
+		var pathComparer = ProjectTreePathIdentity.CanonicalComparer;
 		CancellationAwareSort.Sort(paths, pathComparer, cancellationToken);
 		if (paths.Count < 2)
 			return;
@@ -1281,7 +1319,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		CancellationToken cancellationToken,
 		StringComparer? pathComparer = null)
 	{
-		var includedPaths = new HashSet<string>(pathComparer ?? PathComparer.Default);
+		var includedPaths = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
 		foreach (var node in includedNodes)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -1326,7 +1364,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				includedFolders.Add(node.FullPath);
 		}
 
-		CancellationAwareSort.Sort(includedFolders, pathComparer ?? PathComparer.Default, cancellationToken);
+		CancellationAwareSort.Sort(includedFolders, ProjectTreePathIdentity.CanonicalComparer, cancellationToken);
 		return includedFolders.ToArray();
 	}
 }

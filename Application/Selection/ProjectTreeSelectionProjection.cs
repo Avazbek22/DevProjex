@@ -10,7 +10,7 @@ namespace DevProjex.Application.Selection;
 public static class ProjectTreeSelectionProjection
 {
 	private static readonly IReadOnlySet<string> FullTreeSelection =
-		Array.Empty<string>().ToFrozenSet(PathComparer.Default);
+		Array.Empty<string>().ToFrozenSet(ProjectTreePathIdentity.CanonicalComparer);
 
 	/// <summary>
 	/// Converts the two UI representations of the complete tree into the canonical
@@ -62,7 +62,7 @@ public static class ProjectTreeSelectionProjection
 
 		var effectiveSelectedPaths = NormalizeSelectedPaths(root, selectedPaths);
 		var included = new List<TreeNodeDescriptor>();
-		var uniquePaths = new HashSet<string>(pathComparer ?? PathComparer.Default);
+		var uniquePaths = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
 		VisitIncludedTree(
 			root,
 			effectiveSelectedPaths,
@@ -99,7 +99,7 @@ public static class ProjectTreeSelectionProjection
 		cancellationToken.ThrowIfCancellationRequested();
 
 		var effectiveSelectedPaths = NormalizeSelectedPaths(root, selectedPaths);
-		var effectivePathComparer = pathComparer ?? PathComparer.Default;
+		var effectivePathComparer = ProjectTreePathIdentity.CanonicalComparer;
 		var uniquePaths = new HashSet<string>(effectivePathComparer);
 		VisitIncludedTree(
 			root,

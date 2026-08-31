@@ -20,14 +20,14 @@ public readonly record struct PersistentSecretMarkId(
 	public bool Equals(PersistentSecretMarkId other) =>
 		StringComparer.OrdinalIgnoreCase.Equals(Hash, other.Hash) &&
 		Length == other.Length &&
-		PathComparer.Default.Equals(RelativePath, other.RelativePath) &&
+		ProjectTreePathIdentity.CanonicalComparer.Equals(RelativePath, other.RelativePath) &&
 		SourceOffset == other.SourceOffset &&
 		Class == other.Class;
 
 	public override int GetHashCode() => HashCode.Combine(
 		StringComparer.OrdinalIgnoreCase.GetHashCode(Hash ?? string.Empty),
 		Length,
-		RelativePath is null ? 0 : PathComparer.Default.GetHashCode(RelativePath),
+		RelativePath is null ? 0 : ProjectTreePathIdentity.CanonicalComparer.GetHashCode(RelativePath),
 		SourceOffset,
 		Class);
 }

@@ -52,7 +52,7 @@ public sealed record ContentSelectionSnapshot(
 				revision);
 		}
 
-		var unique = new HashSet<string>(PathComparer.Default);
+		var unique = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
 		var paths = new List<string>(orderedPaths.Count);
 		var pathsAreSorted = true;
 		string? previousPath = null;
@@ -62,7 +62,7 @@ public sealed record ContentSelectionSnapshot(
 			var path = orderedPaths[index];
 			if (!string.IsNullOrWhiteSpace(path) && unique.Add(path))
 			{
-				if (previousPath is not null && PathComparer.Default.Compare(previousPath, path) > 0)
+				if (previousPath is not null && ProjectTreePathIdentity.CanonicalComparer.Compare(previousPath, path) > 0)
 					pathsAreSorted = false;
 				paths.Add(path);
 				previousPath = path;
@@ -75,7 +75,7 @@ public sealed record ContentSelectionSnapshot(
 		if (!pathsAreSorted)
 		{
 			var sortedPaths = paths.ToArray();
-			CancellationAwareSort.Sort(sortedPaths, PathComparer.Default, cancellationToken);
+			CancellationAwareSort.Sort(sortedPaths, ProjectTreePathIdentity.CanonicalComparer, cancellationToken);
 			fingerprintPaths = sortedPaths;
 		}
 

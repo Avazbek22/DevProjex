@@ -377,7 +377,7 @@ public sealed class TreeExportService
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 		ValidateFormat(format);
-		var includedPaths = new HashSet<string>(PathComparer.Default);
+		var includedPaths = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
 		if (!CollectIncludedPaths(root, selectedPaths, includedPaths, cancellationToken))
 			return string.Empty;
 
@@ -454,7 +454,7 @@ public sealed class TreeExportService
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 		ValidateFormat(format);
-		var includedPaths = new HashSet<string>(PathComparer.Default);
+		var includedPaths = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
 		if (!CollectIncludedPaths(root, selectedPaths, includedPaths, cancellationToken))
 			return ExportOutputMetrics.Empty;
 

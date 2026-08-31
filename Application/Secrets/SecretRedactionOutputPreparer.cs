@@ -125,7 +125,7 @@ public sealed class SecretRedactionOutputPreparer
 		}
 
 		SecretRedactionTempDirectory? workingDirectory = null;
-		var preparedFiles = new Dictionary<string, PreparedSecretFile>(PathComparer.Default);
+		var preparedFiles = new Dictionary<string, PreparedSecretFile>(ProjectTreePathIdentity.CanonicalComparer);
 		var unscannableFiles = new List<UnscannableFile>();
 		using var transformationScope = context.BeginOutput(orderedFilePaths, cancellationToken);
 		var scope = transformationScope.Redaction;
@@ -659,7 +659,7 @@ public sealed class SecretRedactionOutputPreparer
 
 			var preparedFiles = new Dictionary<string, PreparedSecretFile>(
 				orderedFilePaths.Count,
-				PathComparer.Default);
+				ProjectTreePathIdentity.CanonicalComparer);
 			for (var index = 0; index < orderedFilePaths.Count; index++)
 			{
 				preparedFiles.Add(
@@ -1930,7 +1930,7 @@ public sealed class PreparedSecretRedactionOutput : IAsyncDisposable
 	public IReadOnlyList<EffectiveRedactionFinding> GetEffectiveFindings() =>
 		_files.Values
 			.SelectMany(static file => file.Findings)
-			.OrderBy(static finding => finding.RelativePath, PathComparer.Default)
+			.OrderBy(static finding => finding.RelativePath, ProjectTreePathIdentity.CanonicalComparer)
 			.ThenBy(static finding => finding.LineNumber)
 			.ThenBy(static finding => finding.RuleId, StringComparer.Ordinal)
 			.ToArray();
@@ -1975,7 +1975,7 @@ public sealed class PreparedSecretFileContentAnalyzer : IFileContentAnalyzer
 	}
 
 	private IFileContentAnalyzer ResolveAnalyzer(PreparedSecretFile file) =>
-		PathComparer.Default.Equals(file.SourcePath, file.ContentPath)
+		ProjectTreePathIdentity.CanonicalComparer.Equals(file.SourcePath, file.ContentPath)
 			? sourceAnalyzer
 			: preparedContentAnalyzer;
 

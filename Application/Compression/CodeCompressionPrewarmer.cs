@@ -114,7 +114,7 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 		var retainedPaths = BuildRetainedPathSet(context, candidates, cancellationToken);
 		var retainedFacts = new ConcurrentDictionary<
 			string,
-			ContentReadFactSnapshot.RetainedContentReadFact>(PathComparer.Default);
+			ContentReadFactSnapshot.RetainedContentReadFact>(ProjectTreePathIdentity.CanonicalComparer);
 		var retainedFactsSync = new object();
 		long retainedFactBytes = 0;
 		var parserWorkers = Math.Max(1, Math.Min(context.Session.AnalysisWorkerCapacity, candidates.Count));
@@ -189,7 +189,7 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 				selection,
 				new Dictionary<string, ContentReadFactSnapshot.RetainedContentReadFact>(
 					retainedFacts,
-					PathComparer.Default),
+					ProjectTreePathIdentity.CanonicalComparer),
 				retainedBytes));
 
 		async Task RunProducerAsync()
@@ -443,7 +443,7 @@ public sealed class CodeCompressionPrewarmer(IFileContentAnalyzer contentAnalyze
 		IReadOnlyList<string> paths,
 		CancellationToken cancellationToken)
 	{
-		var retained = new HashSet<string>(PathComparer.Default);
+		var retained = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
 		long bytes = 0;
 		foreach (var path in paths)
 		{

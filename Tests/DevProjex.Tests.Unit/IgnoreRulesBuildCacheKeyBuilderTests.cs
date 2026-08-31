@@ -121,7 +121,7 @@ public sealed class IgnoreRulesBuildCacheKeyBuilderTests
 	}
 
 	[Fact]
-	public void Build_RootSelectionCaseSensitivity_FollowsPlatformComparer()
+	public void Build_RootSelectionCaseSensitivity_PreservesCanonicalTreeIdentity()
 	{
 		var lower = IgnoreRulesBuildCacheKeyBuilder.Build(
 			@"C:\Workspace\Project",
@@ -132,7 +132,7 @@ public sealed class IgnoreRulesBuildCacheKeyBuilderTests
 			[IgnoreOptionId.DotFolders],
 			["SRC"]);
 
-		Assert.Equal(OperatingSystem.IsWindows(), string.Equals(lower, upper, StringComparison.Ordinal));
+		Assert.NotEqual(lower, upper);
 	}
 
 	[Fact]

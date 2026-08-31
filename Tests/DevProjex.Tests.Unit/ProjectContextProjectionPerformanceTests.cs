@@ -97,6 +97,95 @@ public sealed class ProjectContextProjectionPerformanceTests(ITestOutputHelper o
 			projection.IncludedFolders);
 	}
 
+	[Fact]
+	public void ResolveSelectionProjection_PreservesEntriesThatDifferOnlyByCase()
+	{
+		var rootPath = Path.Combine(Path.GetTempPath(), "dpx-case-plan");
+		var upperPath = Path.Combine(rootPath, "Foo.cs");
+		var lowerPath = Path.Combine(rootPath, "foo.cs");
+		var root = new TreeNodeDescriptor(
+			"dpx-case-plan",
+			rootPath,
+			IsDirectory: true,
+			IsAccessDenied: false,
+			"folder",
+			[
+				new TreeNodeDescriptor("Foo.cs", upperPath, false, false, "csharp", []),
+				new TreeNodeDescriptor("foo.cs", lowerPath, false, false, "csharp", [])
+			]);
+
+		var projection = ProjectContextPlanner.ResolveSelectionProjection(
+			root,
+			new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer),
+			selectsNoEffectivePaths: false,
+			knownFullTreeFilePaths: [lowerPath, upperPath],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal([upperPath, lowerPath], projection.IncludedFiles);
+		Assert.Equal(2, projection.ProjectedTree.Children.Count);
+	}
+
+	[Fact]
+	public void ResolveSelectedPaths_PrefersExactCaseAndRejectsAmbiguousPlatformAlias()
+	{
+		var rootPath = Path.Combine(Path.GetTempPath(), "dpx-case-selection");
+		var upperPath = Path.Combine(rootPath, "Foo.cs");
+		var lowerPath = Path.Combine(rootPath, "foo.cs");
+		var root = new TreeNodeDescriptor(
+			"dpx-case-selection",
+			rootPath,
+			IsDirectory: true,
+			IsAccessDenied: false,
+			"folder",
+			[
+				new TreeNodeDescriptor("Foo.cs", upperPath, false, false, "csharp", []),
+				new TreeNodeDescriptor("foo.cs", lowerPath, false, false, "csharp", [])
+			]);
+		var diagnostics = new List<ContextDiagnostic>();
+
+		var exact = ProjectContextPlanner.ResolveSelectedPaths(
+			root,
+			rootPath,
+			["Foo.cs", "foo.cs"],
+			diagnostics,
+			TestContext.Current.CancellationToken,
+			out var exactHadMatch);
+
+		Assert.True(exactHadMatch);
+		Assert.Equal(2, exact.Count);
+		Assert.Contains(upperPath, exact, ProjectTreePathIdentity.CanonicalComparer);
+		Assert.Contains(lowerPath, exact, ProjectTreePathIdentity.CanonicalComparer);
+		Assert.Empty(diagnostics);
+
+		if (!OperatingSystem.IsWindows())
+			return;
+
+		var ambiguousDiagnostics = new List<ContextDiagnostic>();
+		var ambiguous = ProjectContextPlanner.ResolveSelectedPaths(
+			root,
+			rootPath,
+			["fOo.cs"],
+			ambiguousDiagnostics,
+			TestContext.Current.CancellationToken,
+			out var ambiguousHadMatch);
+
+		Assert.False(ambiguousHadMatch);
+		Assert.Empty(ambiguous);
+		Assert.Equal("DPX-SELECTION-PATH-MISSING", Assert.Single(ambiguousDiagnostics).Code);
+
+		var uniqueRoot = root with { Children = [root.Children[0]] };
+		var alias = ProjectContextPlanner.ResolveSelectedPaths(
+			uniqueRoot,
+			rootPath,
+			["fOo.cs"],
+			[],
+			TestContext.Current.CancellationToken,
+			out var aliasHadMatch);
+
+		Assert.True(aliasHadMatch);
+		Assert.Equal(upperPath, Assert.Single(alias), ProjectTreePathIdentity.CanonicalComparer);
+	}
+
 	[Theory]
 	[InlineData(false)]
 	[InlineData(true)]
