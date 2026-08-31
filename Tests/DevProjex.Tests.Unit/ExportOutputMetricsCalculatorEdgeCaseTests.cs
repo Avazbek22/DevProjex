@@ -83,7 +83,7 @@ public sealed class ExportOutputMetricsCalculatorEdgeCaseTests
 		var expectedText = string.Join(
 			'\n',
 			[
-				"\t:",
+				"\\t:",
 				ClipboardBlankLine,
 				"[No Content, 0 bytes]",
 				ClipboardBlankLine,
