@@ -2068,6 +2068,8 @@ public sealed class TreeExportService
 	{
 		if (IsAbsoluteDisplayUri(localRootPath))
 			return NormalizeStructuredPath(localRootPath.TrimEnd('/'));
+		if (RepositoryUrlUtility.IsScpStyleSource(localRootPath))
+			return NormalizeStructuredPath(RepositoryUrlUtility.ToSafeDisplay(localRootPath));
 
 		try
 		{
@@ -2080,7 +2082,8 @@ public sealed class TreeExportService
 	}
 
 	private static bool IsAbsoluteDisplayUri(string value)
-		=> Uri.TryCreate(value, UriKind.Absolute, out var uri) && !uri.IsFile;
+		=> Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
+		   (!uri.IsFile || value.StartsWith("file:", StringComparison.OrdinalIgnoreCase));
 
 	private static string NormalizeStructuredPath(string path) => PathUtility.NormalizeSeparators(path);
 }

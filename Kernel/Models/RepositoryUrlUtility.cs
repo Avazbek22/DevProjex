@@ -174,6 +174,14 @@ public static class RepositoryUrlUtility
 		}
 	}
 
+	public static bool IsScpStyleSource(string? repositoryUrl)
+	{
+		if (!TryNormalize(repositoryUrl, out var normalized))
+			return false;
+
+		return TryParseScpSyntax(normalized, out _);
+	}
+
 	private static string BuildVersionedHostPathKey(string host, int port, string path)
 	{
 		var normalizedHost = host.Trim().ToLowerInvariant();

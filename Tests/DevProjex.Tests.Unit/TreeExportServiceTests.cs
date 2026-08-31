@@ -25,6 +25,94 @@ public sealed class TreeExportServiceTests
 		Assert.DoesNotContain("├── root", result, StringComparison.Ordinal);
 	}
 
+	[Theory]
+	[InlineData(TreeTextFormat.Ascii)]
+	[InlineData(TreeTextFormat.Markdown)]
+	[InlineData(TreeTextFormat.Json)]
+	[InlineData(TreeTextFormat.Xml)]
+	public void BuildFullTree_PreservesScpStyleRemoteDisplayRoot(TreeTextFormat format)
+	{
+		const string displayRoot = "git@example.com:owner/repository.git";
+		var localRoot = Path.Combine(Path.GetTempPath(), "dpx-scp-tree-cache");
+		var root = new TreeNodeDescriptor(
+			"repository",
+			localRoot,
+			IsDirectory: true,
+			IsAccessDenied: false,
+			"folder",
+			[new TreeNodeDescriptor("App.cs", Path.Combine(localRoot, "App.cs"), false, false, "csharp", [])]);
+
+		var result = new TreeExportService().BuildFullTree(
+			localRoot,
+			root,
+			format,
+			displayRoot);
+
+		switch (format)
+		{
+			case TreeTextFormat.Ascii:
+				Assert.StartsWith(displayRoot + ":", result, StringComparison.Ordinal);
+				break;
+			case TreeTextFormat.Markdown:
+				Assert.StartsWith("Root: " + displayRoot, result, StringComparison.Ordinal);
+				break;
+			case TreeTextFormat.Json:
+				using (var jsonDocument = JsonDocument.Parse(result))
+					Assert.Equal(displayRoot, jsonDocument.RootElement.GetProperty("rootPath").GetString());
+				break;
+			case TreeTextFormat.Xml:
+				var xmlDocument = System.Xml.Linq.XDocument.Parse(result);
+				Assert.Equal(displayRoot, xmlDocument.Root?.Attribute("r")?.Value);
+				break;
+			default:
+				throw new ArgumentOutOfRangeException(nameof(format), format, null);
+		}
+	}
+
+	[Theory]
+	[InlineData(TreeTextFormat.Ascii)]
+	[InlineData(TreeTextFormat.Markdown)]
+	[InlineData(TreeTextFormat.Json)]
+	[InlineData(TreeTextFormat.Xml)]
+	public void BuildFullTree_PreservesFileUriDisplayRoot(TreeTextFormat format)
+	{
+		const string displayRoot = "file:///srv/git/repository.git";
+		var localRoot = Path.Combine(Path.GetTempPath(), "dpx-file-uri-tree-cache");
+		var root = new TreeNodeDescriptor(
+			"repository",
+			localRoot,
+			IsDirectory: true,
+			IsAccessDenied: false,
+			"folder",
+			[new TreeNodeDescriptor("App.cs", Path.Combine(localRoot, "App.cs"), false, false, "csharp", [])]);
+
+		var result = new TreeExportService().BuildFullTree(
+			localRoot,
+			root,
+			format,
+			displayRoot);
+
+		switch (format)
+		{
+			case TreeTextFormat.Ascii:
+				Assert.StartsWith(displayRoot + ":", result, StringComparison.Ordinal);
+				break;
+			case TreeTextFormat.Markdown:
+				Assert.StartsWith("Root: " + displayRoot, result, StringComparison.Ordinal);
+				break;
+			case TreeTextFormat.Json:
+				using (var jsonDocument = JsonDocument.Parse(result))
+					Assert.Equal(displayRoot, jsonDocument.RootElement.GetProperty("rootPath").GetString());
+				break;
+			case TreeTextFormat.Xml:
+				var xmlDocument = System.Xml.Linq.XDocument.Parse(result);
+				Assert.Equal(displayRoot, xmlDocument.Root?.Attribute("r")?.Value);
+				break;
+			default:
+				throw new ArgumentOutOfRangeException(nameof(format), format, null);
+		}
+	}
+
 	// Verifies selected tree export only includes selected paths.
 	[Fact]
 	public void BuildSelectedTree_ReturnsOnlySelectedPaths()
