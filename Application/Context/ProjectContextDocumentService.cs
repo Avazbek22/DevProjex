@@ -916,7 +916,7 @@ public sealed class ProjectContextDocumentService(
 							file.Metrics?.CharCount ?? 0,
 							async (chunk, _) =>
 							{
-								if (TrySanitizeXmlText(chunk.Span, out var sanitized))
+								if (XmlTextSanitizer.TrySanitize(chunk.Span, out var sanitized))
 								{
 									await writer.WriteStringAsync(sanitized)
 										.ConfigureAwait(false);
@@ -2161,60 +2161,16 @@ public sealed class ProjectContextDocumentService(
 		XmlWriter writer,
 		string localName,
 		string value) =>
-		writer.WriteAttributeString(localName, SanitizeXmlText(value));
+		writer.WriteAttributeString(localName, XmlTextSanitizer.Sanitize(value));
 
 	private static void WriteSanitizedXmlElementString(
 		XmlWriter writer,
 		string localName,
 		string value) =>
-		writer.WriteElementString(localName, SanitizeXmlText(value));
+		writer.WriteElementString(localName, XmlTextSanitizer.Sanitize(value));
 
 	private static void WriteSanitizedXmlString(XmlWriter writer, string value) =>
-		writer.WriteString(SanitizeXmlText(value));
-
-	private static string SanitizeXmlText(string value) =>
-		TrySanitizeXmlText(value.AsSpan(), out var sanitized)
-			? sanitized
-			: value;
-
-	private static bool TrySanitizeXmlText(
-		ReadOnlySpan<char> value,
-		out string sanitized)
-	{
-		StringBuilder? builder = null;
-		for (var index = 0; index < value.Length; index++)
-		{
-			var character = value[index];
-			if (char.IsHighSurrogate(character) &&
-			    index + 1 < value.Length &&
-			    char.IsLowSurrogate(value[index + 1]))
-			{
-				if (builder is not null)
-				{
-					builder.Append(character);
-					builder.Append(value[++index]);
-				}
-				else
-				{
-					index++;
-				}
-				continue;
-			}
-
-			if (XmlConvert.IsXmlChar(character))
-			{
-				builder?.Append(character);
-				continue;
-			}
-
-			builder ??= new StringBuilder(value.Length)
-				.Append(value[..index]);
-			builder.Append('\uFFFD');
-		}
-
-		sanitized = builder?.ToString() ?? string.Empty;
-		return builder is not null;
-	}
+		writer.WriteString(XmlTextSanitizer.Sanitize(value));
 
 	private static bool IncludesTree(ProjectContextView view) =>
 		view is ProjectContextView.Tree or ProjectContextView.TreeContent;

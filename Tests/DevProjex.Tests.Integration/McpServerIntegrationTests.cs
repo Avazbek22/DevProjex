@@ -374,6 +374,28 @@ public sealed class McpServerIntegrationTests
 		}
 	}
 
+	[Fact]
+	public async Task GetTreeXmlSanitizesUnixFileNamesThatAreInvalidInXml()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("Windows file names cannot contain the XML control character used by this test.");
+
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "bad\u0001name.txt"), "content\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?> { ["format"] = "xml" });
+
+		Assert.NotEqual(true, result.IsError);
+		var body = ExtractSpotlightBody(Text(result));
+		var document = System.Xml.Linq.XDocument.Parse(body);
+		Assert.Contains("bad\uFFFDname.txt", document.Root!.Value, StringComparison.Ordinal);
+		AssertSpotlighted(result);
+	}
+
 	[Theory]
 	[InlineData("text")]
 	[InlineData("markdown")]

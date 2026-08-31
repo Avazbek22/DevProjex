@@ -850,9 +850,9 @@ public sealed class TreeExportService
 		writer.WriteStartElement(includeRootPath ? "t" : "d");
 		writer.WriteAttributeString(
 			includeRootPath ? "r" : "n",
-			includeRootPath
+			XmlTextSanitizer.Sanitize(includeRootPath
 				? ResolveStructuredRootPath(outputRootPath)
-				: ResolveRootDisplayName(root, displayRootName));
+				: ResolveRootDisplayName(root, displayRootName)));
 		writer.Flush();
 		cancellationToken.ThrowIfCancellationRequested();
 		var processedNodes = 0;
@@ -1269,7 +1269,7 @@ public sealed class TreeExportService
 		using (var writer = XmlWriter.Create(output, XmlWriterSettings))
 		{
 			writer.WriteStartElement("d");
-			writer.WriteAttributeString("n", rootName);
+			writer.WriteAttributeString("n", XmlTextSanitizer.Sanitize(rootName));
 			WriteXmlTreeContents(writer, root, includedPaths: null, cancellationToken);
 			writer.WriteEndElement();
 		}
@@ -1341,7 +1341,9 @@ public sealed class TreeExportService
 		using (var writer = XmlWriter.Create(sb, XmlWriterSettings))
 		{
 			writer.WriteStartElement("t");
-			writer.WriteAttributeString("r", ResolveStructuredRootPath(localRootPath));
+			writer.WriteAttributeString(
+				"r",
+				XmlTextSanitizer.Sanitize(ResolveStructuredRootPath(localRootPath)));
 			WriteXmlTreeContents(writer, root, includedPaths, cancellationToken);
 			writer.WriteEndElement();
 		}
@@ -1551,7 +1553,7 @@ public sealed class TreeExportService
 			}
 
 			writer.WriteStartElement("d");
-			writer.WriteAttributeString("n", node.DisplayName);
+			writer.WriteAttributeString("n", XmlTextSanitizer.Sanitize(node.DisplayName));
 			nodeWritten?.Invoke();
 			operations.Push(XmlTreeWriteOperation.EndElement);
 			PushXmlChildren(
@@ -1576,7 +1578,7 @@ public sealed class TreeExportService
 	private static void WriteXmlFile(XmlWriter writer, TreeNodeDescriptor file)
 	{
 		writer.WriteStartElement("f");
-		writer.WriteString(file.DisplayName);
+		writer.WriteString(XmlTextSanitizer.Sanitize(file.DisplayName));
 		writer.WriteEndElement();
 	}
 
