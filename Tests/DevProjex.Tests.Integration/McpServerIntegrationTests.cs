@@ -587,6 +587,12 @@ public sealed class McpServerIntegrationTests
 			{
 				["git_scope"] = "diff:missing-ref..HEAD"
 			});
+		var optionLikeDiff = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>(remote)
+			{
+				["git_scope"] = "diff:origin/--upload-pack=definitely-not-a-ref..HEAD"
+			});
 		var jail = await server.CallAsync(
 			"get_file",
 			new Dictionary<string, object?>(remote) { ["path"] = "../outside.txt" });
@@ -631,6 +637,8 @@ public sealed class McpServerIntegrationTests
 		Assert.True(invalidDiff.IsError);
 		Assert.Contains(McpErrorCodes.ProjectUnavailable, Text(invalidDiff), StringComparison.Ordinal);
 		Assert.Contains("Verify the repository and refs", Text(invalidDiff), StringComparison.Ordinal);
+		Assert.True(optionLikeDiff.IsError);
+		Assert.Contains(McpErrorCodes.ProjectUnavailable, Text(optionLikeDiff), StringComparison.Ordinal);
 		Assert.Equal(1, git.CloneCallCount);
 		Assert.True(jail.IsError);
 		Assert.Contains(McpErrorCodes.RootViolation, Text(jail), StringComparison.Ordinal);

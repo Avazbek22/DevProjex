@@ -101,7 +101,8 @@ public sealed class GitRemoteDiffRangeResolver
 			baseReference = branch;
 		}
 
-		var remoteReference = NormalizeRemoteReference(baseReference);
+		if (!TryNormalizeRemoteReference(baseReference, out var remoteReference))
+			return null;
 		var fetch = await RunAsync(
 			repositoryPath,
 			[
@@ -164,14 +165,16 @@ public sealed class GitRemoteDiffRangeResolver
 		return (reference[..operatorIndex], suffix, (int)Math.Min(MaximumFetchDepth, depth));
 	}
 
-	private static string NormalizeRemoteReference(string reference)
+	internal static bool TryNormalizeRemoteReference(string reference, out string normalized)
 	{
 		const string remotePrefix = "refs/remotes/origin/";
 		if (reference.StartsWith(remotePrefix, StringComparison.Ordinal))
-			return "refs/heads/" + reference[remotePrefix.Length..];
-		return reference.StartsWith("origin/", StringComparison.Ordinal)
+			normalized = "refs/heads/" + reference[remotePrefix.Length..];
+		else
+			normalized = reference.StartsWith("origin/", StringComparison.Ordinal)
 			? reference["origin/".Length..]
 			: reference;
+		return normalized.Length > 0 && normalized[0] != '-';
 	}
 
 	private static async Task<GitCommandResult?> RunAsync(
