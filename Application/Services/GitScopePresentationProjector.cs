@@ -91,6 +91,9 @@ public static class GitScopePresentationProjector
 		ArgumentNullException.ThrowIfNull(effectiveRules);
 		if (inventory is null || inventory.Entries.Count == 0 || scopedPaths.Count == 0)
 			return GitScopePresentationProjection.Empty;
+		var exactSelectedRootFolders = new HashSet<string>(
+			selectedRootFolders,
+			ProjectTreePathIdentity.CanonicalComparer);
 		var exactPathFrontier = selectedPathFrontier is null
 			? null
 			: new HashSet<string>(selectedPathFrontier, StringComparer.Ordinal);
@@ -99,7 +102,7 @@ public static class GitScopePresentationProjector
 			inventory,
 			containsScopedPath,
 			scopedPaths.Count,
-			selectedRootFolders,
+			exactSelectedRootFolders,
 			exactPathFrontier,
 			cancellationToken,
 			rootSelectionIsExplicit);
@@ -206,7 +209,7 @@ public static class GitScopePresentationProjector
 			files,
 			scopedPaths,
 			getComparisonIdentity,
-			selectedRootFolders,
+			exactSelectedRootFolders,
 			exactPathFrontier,
 			effectiveRules,
 			new IgnoreOptionCounts(

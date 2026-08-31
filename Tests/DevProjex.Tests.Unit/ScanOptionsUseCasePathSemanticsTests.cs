@@ -11,9 +11,9 @@ public sealed class ScanOptionsUseCasePathSemanticsTests
 		SmartIgnoredFiles: new HashSet<string>());
 
 	[Fact]
-	public void GetRootFolders_SortsUsingPlatformPathSemantics()
+	public void GetRootFolders_SortsUsingExactProjectEntryIdentity()
 	{
-		var returnedFolders = new[] { "a-src", "B-src", "C-src" };
+		var returnedFolders = new[] { "foo", "Foo", "FOO" };
 		var scanner = new RecordingScanner
 		{
 			RootFolders = new ScanResult<List<string>>([.. returnedFolders], false, false)
@@ -24,7 +24,7 @@ public sealed class ScanOptionsUseCasePathSemanticsTests
 			Rules,
 			TestContext.Current.CancellationToken);
 		var expected = returnedFolders.ToList();
-		expected.Sort(PathComparer.Default);
+		expected.Sort(ProjectTreePathIdentity.CanonicalComparer);
 
 		Assert.Equal(expected, result.Value);
 	}

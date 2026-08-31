@@ -42,7 +42,10 @@ public sealed class ScanOptionsUseCase(IFileSystemScannerProjectWorkspaceScanner
 
 		var scan = scanner.GetRootFolderNames(rootPath, ignoreRules, cancellationToken);
 		var rootFolders = new List<string>(scan.Value);
-		CancellationAwareSort.Sort(rootFolders, PathComparer.Default, cancellationToken);
+		CancellationAwareSort.Sort(
+			rootFolders,
+			ProjectTreePathIdentity.CanonicalComparer,
+			cancellationToken);
 		return new ScanResult<List<string>>(
 			rootFolders,
 			scan.RootAccessDenied,

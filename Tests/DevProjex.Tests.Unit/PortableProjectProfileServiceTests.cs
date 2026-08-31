@@ -58,14 +58,65 @@ public sealed class PortableProjectProfileServiceTests
 			TestContext.Current.CancellationToken);
 
 		Assert.Equal(
-			selectedPaths.OrderBy(static path => path, PathComparer.Default),
+			selectedPaths.OrderBy(static path => path, ProjectTreePathIdentity.CanonicalComparer),
 			loaded.SelectedPaths);
 		Assert.Equal(
-			roots.OrderBy(static path => path, PathComparer.Default),
+			roots.OrderBy(static path => path, ProjectTreePathIdentity.CanonicalComparer),
 			loaded.Roots);
 		Assert.Equal(
 			extensions.OrderBy(static extension => extension, StringComparer.OrdinalIgnoreCase),
 			loaded.Extensions);
+	}
+
+	[Fact]
+	public async Task CaseDistinctRootsAndSelectedPathsRoundTripIndependently()
+	{
+		using var workspace = new TemporaryDirectory();
+		var sourceRoot = workspace.CreateFolder("project");
+		var destination = Path.Combine(workspace.Path, "portable.json");
+		var service = new PortableProjectProfileService();
+
+		await service.SaveAsync(
+			sourceRoot,
+			destination,
+			new ProjectSelectionSpec(
+				Roots: ["Foo", "foo", "Foo"],
+				SelectedPaths: ["Foo/App.cs", "foo/App.cs", "Foo/App.cs"],
+				GitMode: GitFilteringMode.None,
+				Exclusions: []),
+			overwrite: false,
+			TestContext.Current.CancellationToken);
+
+		var loaded = await service.LoadAsync(destination, TestContext.Current.CancellationToken);
+
+		Assert.Equal(["Foo", "foo"], loaded.Roots);
+		Assert.Equal(["Foo/App.cs", "foo/App.cs"], loaded.SelectedPaths);
+	}
+
+	[Fact]
+	public async Task EmptyPortableSelectedPathsRetainUnrestrictedHistoricalMeaning()
+	{
+		using var workspace = new TemporaryDirectory();
+		var profile = workspace.CreateFile(
+			"portable.json",
+			"""
+			{
+			  "schemaVersion": 1,
+			  "selection": {
+			    "roots": null,
+			    "extensions": null,
+			    "selectedPaths": [],
+			    "gitMode": "none",
+			    "exclusions": []
+			  }
+			}
+			""");
+
+		var loaded = await new PortableProjectProfileService().LoadAsync(
+			profile,
+			TestContext.Current.CancellationToken);
+
+		Assert.Null(loaded.SelectedPaths);
 	}
 
 	[Fact]

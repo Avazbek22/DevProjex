@@ -240,6 +240,43 @@ public sealed class ProfileCommandContractTests
 	}
 
 	[Fact]
+	public async Task PortableProfileJsonPreservesCaseDistinctProjectEntries()
+	{
+		using var workspace = CreateWorkspace();
+		var profile = WriteProfile(
+			workspace,
+			"""
+			{
+			  "schemaVersion": 1,
+			  "selection": {
+			    "roots": ["Foo", "foo"],
+			    "extensions": null,
+			    "selectedPaths": ["Foo/App.cs", "foo/App.cs"],
+			    "gitMode": "none",
+			    "exclusions": []
+			  }
+			}
+			""");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			workspace,
+			environment,
+			"profile", "show", workspace.Path, "--profile", profile, "--format", "json");
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		var selection = document.RootElement.GetProperty("selection");
+		Assert.Equal(
+			["Foo", "foo"],
+			selection.GetProperty("roots").EnumerateArray().Select(static value => value.GetString()));
+		Assert.Equal(
+			["Foo/App.cs", "foo/App.cs"],
+			selection.GetProperty("selectedPaths").EnumerateArray().Select(static value => value.GetString()));
+		Assert.Empty(environment.StandardError);
+	}
+
+	[Fact]
 	public async Task ExplicitOptionsOverridePortableProfileAsExactSets()
 	{
 		using var workspace = CreateWorkspace();

@@ -53,7 +53,9 @@ public static class ProjectSelectionProfileBuilder
             SelectedIgnoreOptions: selectedIgnoreOptions.ToArray(),
             RootFolderStates: profile.RootFolderStates is null
                 ? null
-                : new Dictionary<string, bool>(profile.RootFolderStates, PathComparer.Default),
+                : new Dictionary<string, bool>(
+	                profile.RootFolderStates,
+	                ProjectTreePathIdentity.CanonicalComparer),
             ExtensionStates: profile.ExtensionStates is null
                 ? null
                 : new Dictionary<string, bool>(profile.ExtensionStates, StringComparer.OrdinalIgnoreCase),

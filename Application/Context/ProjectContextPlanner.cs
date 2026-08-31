@@ -183,8 +183,12 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		var plan = new ProjectContextPlan(
 			SourceRoot: sourceRoot,
 			Selection: effectiveSelection,
-			AvailableRoots: loaded.AvailableRootFolders.OrderBy(static value => value, PathComparer.Default).ToArray(),
-			SelectedRoots: loaded.SelectedRootFolders.OrderBy(static value => value, PathComparer.Default).ToArray(),
+			AvailableRoots: loaded.AvailableRootFolders
+				.OrderBy(static value => value, ProjectTreePathIdentity.CanonicalComparer)
+				.ToArray(),
+			SelectedRoots: loaded.SelectedRootFolders
+				.OrderBy(static value => value, ProjectTreePathIdentity.CanonicalComparer)
+				.ToArray(),
 			AvailableExtensions: loaded.AvailableExtensions.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase).ToArray(),
 			SelectedExtensions: loaded.SelectedExtensions.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase).ToArray(),
 			EffectiveTree: effectiveRoot,
@@ -313,8 +317,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			plan.SourceRoot,
 			context.Inventory,
 			scope,
-			plan.SelectedRoots.ToHashSet(PathComparer.Default),
-			plan.AvailableRoots.ToHashSet(PathComparer.Default),
+			plan.SelectedRoots.ToHashSet(ProjectTreePathIdentity.CanonicalComparer),
+			plan.AvailableRoots.ToHashSet(ProjectTreePathIdentity.CanonicalComparer),
 			context.EffectiveExtensionPolicy,
 			context.EffectiveRules,
 			cancellationToken,
@@ -760,7 +764,10 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		var inferredState = state with
 		{
 			RootsOverridden = state.RootsOverridden ||
-			                  !SetEquals(selection.Roots, profileRoots, PathComparer.Default),
+				                  !SetEquals(
+					                  selection.Roots,
+					                  profileRoots,
+					                  ProjectTreePathIdentity.CanonicalComparer),
 			ExtensionsOverridden = state.ExtensionsOverridden ||
 			                       !SetEquals(
 				                       selection.Extensions,
@@ -792,11 +799,10 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		var profile = state.Profile;
 		var rootStates = state.RootsOverridden
 			? profile.RootFolderStates
-			: RefreshStringStates(
+			: RefreshRootStates(
 				profile.RootFolderStates,
 				loaded.AvailableRootFolders,
-				loaded.SelectedRootFolders,
-				PathComparer.Default);
+				loaded.SelectedRootFolders);
 		var extensionStates = state.ExtensionsOverridden
 			? profile.ExtensionStates
 			: RefreshStringStates(
@@ -812,7 +818,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 				loaded.SelectedIgnoreOptions);
 		var selectedRoots = rootStates is null
 			? profile.SelectedRootFolders.ToArray()
-			: SelectCheckedNames(rootStates, PathComparer.Default);
+			: SelectCheckedNames(rootStates, ProjectTreePathIdentity.CanonicalComparer);
 		var selectedExtensions = extensionStates is null
 			? profile.SelectedExtensions.ToArray()
 			: SelectCheckedNames(extensionStates, StringComparer.OrdinalIgnoreCase);
@@ -849,6 +855,28 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		var selectedSet = selected.ToHashSet(comparer);
 		var refreshed = new Dictionary<string, bool>(previousStates, comparer);
 		foreach (var name in available)
+			refreshed[name] = selectedSet.Contains(name);
+		return refreshed;
+	}
+
+	private static IReadOnlyDictionary<string, bool>? RefreshRootStates(
+		IReadOnlyDictionary<string, bool>? previousStates,
+		IReadOnlyCollection<string> available,
+		IReadOnlyCollection<string> selected)
+	{
+		if (previousStates is null)
+			return null;
+
+		var availableNames = available.ToArray();
+		var resolvedPrevious = ProjectTreePathIdentity.ResolveAvailableNameStates(
+			availableNames,
+			previousStates,
+			retainUnmatched: true);
+		var selectedSet = selected.ToHashSet(ProjectTreePathIdentity.CanonicalComparer);
+		var refreshed = new Dictionary<string, bool>(
+			resolvedPrevious,
+			ProjectTreePathIdentity.CanonicalComparer);
+		foreach (var name in availableNames)
 			refreshed[name] = selectedSet.Contains(name);
 		return refreshed;
 	}

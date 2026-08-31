@@ -18,7 +18,7 @@ public sealed class SelectionRefreshEngine(
     // Some dynamic chains need more than one follow-up pass:
     // controller -> directory toggle -> empty/extensionless toggle -> final scan scope.
     private const int MaximumDynamicSnapshotPasses = 6;
-    private static readonly HashSet<string> EmptyScanRoots = new(PathComparer.Default);
+    private static readonly HashSet<string> EmptyScanRoots = new(ProjectTreePathIdentity.CanonicalComparer);
     private static readonly HashSet<string> EmptyExtensionSelection = new(StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<IgnoreOptionId> EmptyIgnoreSelection = [];
     private static readonly IgnoreSectionSnapshotState EmptySnapshotState = new(
@@ -137,7 +137,7 @@ public sealed class SelectionRefreshEngine(
             cancellationToken);
 
         var previousSelections = context.RootSelectionInitialized
-            ? new HashSet<string>(context.RootSelectionCache, PathComparer.Default)
+            ? new HashSet<string>(context.RootSelectionCache, ProjectTreePathIdentity.CanonicalComparer)
             : EmptyScanRoots;
         var options = filterSelectionService.BuildRootFolderOptions(
             visibleRootFolders,
@@ -162,7 +162,7 @@ public sealed class SelectionRefreshEngine(
 
         return new ScanRootSectionSnapshot(
             options,
-            CollectCheckedSelectionNames(options, PathComparer.Default),
+            CollectCheckedSelectionNames(options, ProjectTreePathIdentity.CanonicalComparer),
             scan.RootAccessDenied,
             scan.HadAccessDenied,
             scan.HadScanFailure);
@@ -175,7 +175,7 @@ public sealed class SelectionRefreshEngine(
 
         return new ScanRootSectionSnapshot(
             context.CurrentRootOptions,
-            CollectCheckedSelectionNames(context.CurrentRootOptions, PathComparer.Default),
+            CollectCheckedSelectionNames(context.CurrentRootOptions, ProjectTreePathIdentity.CanonicalComparer),
             RootAccessDenied: false,
             HadAccessDenied: false,
             HadScanFailure: false);
@@ -1102,7 +1102,7 @@ public sealed class SelectionRefreshEngine(
             IReadOnlySet<IgnoreOptionId> selectedIgnoreOptions,
             IgnoreSectionSnapshotState snapshotState) =>
             new(
-                selectedRoots.OrderBy(static value => value, PathComparer.Default).ToArray(),
+                selectedRoots.OrderBy(static value => value, ProjectTreePathIdentity.CanonicalComparer).ToArray(),
                 selectedIgnoreOptions.OrderBy(static value => (int)value).ToArray(),
                 snapshotState);
 
@@ -1117,7 +1117,7 @@ public sealed class SelectionRefreshEngine(
 
             for (var index = 0; index < SelectedRoots.Length; index++)
             {
-                if (!PathComparer.Default.Equals(SelectedRoots[index], other.SelectedRoots[index]))
+                if (!ProjectTreePathIdentity.CanonicalComparer.Equals(SelectedRoots[index], other.SelectedRoots[index]))
                     return false;
             }
 

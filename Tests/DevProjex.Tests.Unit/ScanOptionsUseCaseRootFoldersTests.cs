@@ -11,7 +11,7 @@ public sealed class ScanOptionsUseCaseRootFoldersTests
 		SmartIgnoredFiles: new HashSet<string>());
 
 	[Fact]
-	public void GetRootFolders_SortsCaseInsensitive_AndPreservesFlags()
+	public void GetRootFolders_SortsAndPreservesFlags()
 	{
 		var scanner = new StubFileSystemScanner
 		{

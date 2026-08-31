@@ -32,7 +32,7 @@ public sealed record SelectionRefreshContext(
 	IReadOnlySet<string>? GitRepositoryScopePaths = null)
 {
     private static readonly IReadOnlySet<string> EmptyRootSelection =
-        new HashSet<string>(PathComparer.Default);
+        new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
 
     public static SelectionRefreshContext ForDesktop(
         string path,

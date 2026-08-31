@@ -53,14 +53,16 @@ public sealed class FilterOptionSelectionService
 		IReadOnlyDictionary<string, bool>? previousStateCache = null)
 	{
 		var available = rootFolders.ToArray();
+		var resolvedPreviousSelections = ResolveAvailableRootNames(available, previousSelections);
+		var resolvedStateCache = ResolveAvailableRootStates(available, previousStateCache);
 		if (previousStateCache is not null)
 		{
 			var evolution = SelectionEvolutionPolicy.Reconcile(
 				available,
-				previousSelections,
-				previousStateCache,
+				resolvedPreviousSelections,
+				resolvedStateCache!,
 				name => !IsIgnoredByRules(name, ignoreRules),
-				PathComparer.Default);
+				ProjectTreePathIdentity.CanonicalComparer);
 			return available
 				.Select(name => new SelectionOption(
 					name,
@@ -69,19 +71,52 @@ public sealed class FilterOptionSelectionService
 		}
 
 		var list = new List<SelectionOption>(available.Length);
-		var resolver = new SelectionStateResolver(previousSelections, previousStateCache);
+		var resolver = new SelectionStateResolver(resolvedPreviousSelections, resolvedStateCache);
 		var hasPrevious = hasPreviousSelections || previousSelections.Count > 0;
 
 		foreach (var name in available)
 		{
 			var isChecked = previousStateCache is not null
 				? resolver.Resolve(name, defaultForNewEntry: !IsIgnoredByRules(name, ignoreRules))
-				: previousSelections.Contains(name) || (!hasPrevious && !IsIgnoredByRules(name, ignoreRules));
+				: resolvedPreviousSelections.Contains(name) ||
+				  (!hasPrevious && !IsIgnoredByRules(name, ignoreRules));
 
 			list.Add(new SelectionOption(name, isChecked));
 		}
 
 		return list;
+	}
+
+	private static IReadOnlySet<string> ResolveAvailableRootNames(
+		IReadOnlyList<string> available,
+		IEnumerable<string> requested)
+	{
+		var resolved = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
+		foreach (var requestedName in requested)
+		{
+			if (ProjectTreePathIdentity.TryResolveAvailableName(
+				    available,
+				    requestedName,
+				    out var availableName))
+			{
+				resolved.Add(availableName);
+			}
+		}
+
+		return resolved;
+	}
+
+	private static IReadOnlyDictionary<string, bool>? ResolveAvailableRootStates(
+		IReadOnlyList<string> available,
+		IReadOnlyDictionary<string, bool>? requestedStates)
+	{
+		if (requestedStates is null)
+			return null;
+
+		return ProjectTreePathIdentity.ResolveAvailableNameStates(
+			available,
+			requestedStates,
+			retainUnmatched: false);
 	}
 
 	private static bool IsIgnoredByRules(string name, IgnoreRules rules)

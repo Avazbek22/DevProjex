@@ -3435,14 +3435,14 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				HadScanFailure: false);
 		}
 
-		var selectedNames = new HashSet<string>(PathComparer.Default);
+		var requestedNames = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
 		foreach (var selectedRootFolder in selectedRootFolders)
 		{
 			if (!IsSafeRelativeRootFolderName(selectedRootFolder) ||
 			    PathComparer.Default.Equals(selectedRootFolder, effectiveRules.ExcludedRootFolderName))
 				continue;
 
-			selectedNames.Add(selectedRootFolder);
+			requestedNames.Add(selectedRootFolder);
 		}
 
 		var effectiveGitIgnoreContext = effectiveRules.CreateGitIgnoreScanContext(rootPath);
@@ -3471,7 +3471,9 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		try
 		{
 			BeforeEnumeration(FileSystemScanEnumerationPoint.RootDirectories, rootPath);
-			foreach (var directory in FileSystemEntryEnumerator.EnumerateDirectories(rootPath))
+			var directories = FileSystemEntryEnumerator.EnumerateDirectories(rootPath).ToArray();
+			var selectedNames = ResolveSelectedRootNames(directories, requestedNames);
+			foreach (var directory in directories)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 				if (PathComparer.Default.Equals(directory.Name, effectiveRules.ExcludedRootFolderName))
@@ -3515,7 +3517,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		}
 		catch (UnauthorizedAccessException)
 		{
-			var fallback = AddSelectedRootsByName(rootPath, selectedNames, selectedRoots);
+			var fallback = AddSelectedRootsByName(rootPath, requestedNames, selectedRoots);
 			return new RootSelectionScanPlan(
 				selectedRoots,
 				directoryToggleCandidates,
@@ -3526,7 +3528,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		}
 		catch (Exception exception) when (IsExpectedFileSystemScanFailure(exception))
 		{
-			var fallback = AddSelectedRootsByName(rootPath, selectedNames, selectedRoots);
+			var fallback = AddSelectedRootsByName(rootPath, requestedNames, selectedRoots);
 			return new RootSelectionScanPlan(
 				selectedRoots,
 				directoryToggleCandidates,
@@ -3543,6 +3545,26 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			RootAccessDenied: false,
 			HadAccessDenied: false,
 			HadScanFailure: false);
+	}
+
+	private static IReadOnlySet<string> ResolveSelectedRootNames(
+		IReadOnlyList<FileSystemDirectoryEntry> availableDirectories,
+		IReadOnlyCollection<string> requestedNames)
+	{
+		var resolved = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
+		foreach (var requestedName in requestedNames)
+		{
+			if (ProjectTreePathIdentity.TryResolveAvailableEntry(
+				    availableDirectories,
+				    requestedName,
+				    static directory => directory.Name,
+				    out var directory))
+			{
+				resolved.Add(directory.Name);
+			}
+		}
+
+		return resolved;
 	}
 
 	private (bool HadAccessDenied, bool HadScanFailure) AddSelectedRootsByName(

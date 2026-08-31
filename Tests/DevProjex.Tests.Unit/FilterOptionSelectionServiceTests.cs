@@ -230,6 +230,77 @@ public sealed class FilterOptionSelectionServiceTests
 
 		Assert.All(options, option => Assert.False(option.IsChecked));
 	}
+
+	[Fact]
+	public void BuildRootFolderOptions_CaseDistinctExactSelectionDoesNotSelectSibling()
+	{
+		var service = new FilterOptionSelectionService();
+		var rules = new IgnoreRules(
+			IgnoreHiddenFolders: false,
+			IgnoreHiddenFiles: false,
+			IgnoreDotFolders: false,
+			IgnoreDotFiles: false,
+			SmartIgnoredFolders: new HashSet<string>(),
+			SmartIgnoredFiles: new HashSet<string>());
+
+		var options = service.BuildRootFolderOptions(
+			["Foo", "foo"],
+			new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer) { "Foo" },
+			rules,
+			hasPreviousSelections: true);
+
+		Assert.True(options.Single(option => option.Name == "Foo").IsChecked);
+		Assert.False(options.Single(option => option.Name == "foo").IsChecked);
+	}
+
+	[Fact]
+	public void BuildRootFolderOptions_AmbiguousCompatibilityAliasSelectsNeitherSibling()
+	{
+		if (!OperatingSystem.IsWindows())
+			Assert.Skip("Compatibility aliases are Windows-only.");
+
+		var service = new FilterOptionSelectionService();
+		var rules = new IgnoreRules(
+			IgnoreHiddenFolders: false,
+			IgnoreHiddenFiles: false,
+			IgnoreDotFolders: false,
+			IgnoreDotFiles: false,
+			SmartIgnoredFolders: new HashSet<string>(),
+			SmartIgnoredFiles: new HashSet<string>());
+
+		var options = service.BuildRootFolderOptions(
+			["Foo", "foo"],
+			new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer) { "FOO" },
+			rules,
+			hasPreviousSelections: true,
+			previousStateCache: new Dictionary<string, bool>(ProjectTreePathIdentity.CanonicalComparer)
+			{
+				["FOO"] = true
+			});
+
+		Assert.All(options, option => Assert.False(option.IsChecked));
+	}
+
+	[Fact]
+	public void BuildRootFolderOptions_UniqueCompatibilityAliasIsWindowsOnly()
+	{
+		var service = new FilterOptionSelectionService();
+		var rules = new IgnoreRules(
+			IgnoreHiddenFolders: false,
+			IgnoreHiddenFiles: false,
+			IgnoreDotFolders: false,
+			IgnoreDotFiles: false,
+			SmartIgnoredFolders: new HashSet<string>(),
+			SmartIgnoredFiles: new HashSet<string>());
+
+		var option = Assert.Single(service.BuildRootFolderOptions(
+			["Foo"],
+			new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer) { "foo" },
+			rules,
+			hasPreviousSelections: true));
+
+		Assert.Equal(OperatingSystem.IsWindows(), option.IsChecked);
+	}
 }
 
 
