@@ -986,6 +986,48 @@ public sealed class GitScopeSelectionTests
 		Assert.Empty(projection.AvailableExtensions);
 	}
 
+	[Fact]
+	public void ExplicitPathFrontierRestrictsPresentationAndKeepsNestedIgnoreEvidence()
+	{
+		using var project = new TemporaryDirectory();
+		var selectedDirectory = PathUtility.Normalize(
+			Directory.CreateDirectory(Path.Combine(project.Path, "selected")).FullName);
+		var visible = PathUtility.Normalize(
+			project.CreateFile("selected/Visible.cs", "class Visible {}\n"));
+		var nestedIgnored = PathUtility.Normalize(
+			project.CreateFile("selected/.generated/Hidden.cs", "class Hidden {}\n"));
+		var outside = PathUtility.Normalize(
+			project.CreateFile("outside/Only.xyz", "outside\n"));
+		var (inventory, rules, roots) = BuildInventory(project.Path);
+		var scope = new HashSet<string>([visible, nestedIgnored, outside], StringComparer.Ordinal);
+
+		var directoryProjection = GitScopePresentationProjector.Build(
+			project.Path,
+			inventory,
+			scope,
+			roots,
+			roots,
+			ExtensionPolicy(".cs", ".xyz"),
+			rules,
+			TestContext.Current.CancellationToken,
+			selectedPathFrontier: new HashSet<string>([selectedDirectory], StringComparer.Ordinal));
+		var fileProjection = GitScopePresentationProjector.Build(
+			project.Path,
+			inventory,
+			scope,
+			roots,
+			roots,
+			ExtensionPolicy(".cs", ".xyz"),
+			rules,
+			TestContext.Current.CancellationToken,
+			selectedPathFrontier: new HashSet<string>([visible], StringComparer.Ordinal));
+
+		Assert.Equal([".cs"], directoryProjection.AvailableExtensions);
+		Assert.Equal(1, directoryProjection.IgnoreOptionCounts.DotFolders);
+		Assert.Equal([".cs"], fileProjection.AvailableExtensions);
+		Assert.Equal(0, fileProjection.IgnoreOptionCounts.DotFolders);
+	}
+
 	private static IExtensionInclusionPolicy ExtensionPolicy(params string[] extensions) =>
 		new ExtensionSetInclusionPolicy(
 			extensions.ToHashSet(StringComparer.OrdinalIgnoreCase));

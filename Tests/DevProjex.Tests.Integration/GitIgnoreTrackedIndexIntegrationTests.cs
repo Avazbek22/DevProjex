@@ -840,6 +840,40 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 		Assert.True(Directory.Exists(brokenRepository));
 	}
 
+	[Fact]
+	public async Task StagedPresentationDoesNotAdvertiseFilesOutsideTheExplicitPathSelection()
+	{
+		EnsureGitAvailable();
+		using var temp = new TemporaryDirectory();
+		var repositoryRoot = temp.CreateDirectory("repo");
+		var selectedFile = temp.CreateFile("repo/selected/App.cs", "v1\n");
+		var outsideFile = temp.CreateFile("repo/outside/Only.xyz", "v1\n");
+		InitializeCommittedRepository(repositoryRoot, "selected/App.cs", "outside/Only.xyz");
+		File.WriteAllText(selectedFile, "v2\n");
+		File.WriteAllText(outsideFile, "v2\n");
+		RunGit(repositoryRoot, "add", "--", "selected/App.cs", "outside/Only.xyz");
+		var planner = new ProjectContextPlanner(CreateProjectAnalysisService());
+		var selection = ProjectSelectionSpec.Standard with
+		{
+			GitMode = GitFilteringMode.Staged,
+			SelectedPaths = ["selected/App.cs"]
+		};
+
+		var plan = await planner.BuildWithIgnoreImpactCountsAsync(
+			new ProjectContextRequest(repositoryRoot, selection),
+			TestContext.Current.CancellationToken);
+		var scopedPlan = await GitScopeFilter.ApplyAsync(
+			planner,
+			plan,
+			new GitScopePathProvider(),
+			TestContext.Current.CancellationToken);
+
+		Assert.False(scopedPlan.HasErrors);
+		Assert.Equal(PathUtility.Normalize(selectedFile), Assert.Single(scopedPlan.IncludedFiles));
+		Assert.Contains(".cs", scopedPlan.AvailableExtensions, StringComparer.OrdinalIgnoreCase);
+		Assert.DoesNotContain(".xyz", scopedPlan.AvailableExtensions, StringComparer.OrdinalIgnoreCase);
+	}
+
 	[Theory]
 	[InlineData(false)]
 	[InlineData(true)]

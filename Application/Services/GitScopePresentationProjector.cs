@@ -25,7 +25,8 @@ public static class GitScopePresentationProjector
 		IgnoreRules effectiveRules,
 		CancellationToken cancellationToken = default,
 		bool rootSelectionIsExplicit = false,
-		bool includeIgnoreImpactCounts = true) =>
+		bool includeIgnoreImpactCounts = true,
+		IReadOnlySet<string>? selectedPathFrontier = null) =>
 		BuildCore(
 			projectRoot,
 			inventory,
@@ -38,7 +39,8 @@ public static class GitScopePresentationProjector
 			effectiveRules,
 			cancellationToken,
 			rootSelectionIsExplicit,
-			includeIgnoreImpactCounts);
+			includeIgnoreImpactCounts,
+			selectedPathFrontier);
 
 	public static GitScopePresentationProjection Build(
 		string projectRoot,
@@ -50,7 +52,8 @@ public static class GitScopePresentationProjector
 		IgnoreRules effectiveRules,
 		CancellationToken cancellationToken = default,
 		bool rootSelectionIsExplicit = false,
-		bool includeIgnoreImpactCounts = true) =>
+		bool includeIgnoreImpactCounts = true,
+		IReadOnlySet<string>? selectedPathFrontier = null) =>
 		BuildCore(
 			projectRoot,
 			inventory,
@@ -63,7 +66,8 @@ public static class GitScopePresentationProjector
 			effectiveRules,
 			cancellationToken,
 			rootSelectionIsExplicit,
-			includeIgnoreImpactCounts);
+			includeIgnoreImpactCounts,
+			selectedPathFrontier);
 
 	private static GitScopePresentationProjection BuildCore(
 		string projectRoot,
@@ -77,7 +81,8 @@ public static class GitScopePresentationProjector
 		IgnoreRules effectiveRules,
 		CancellationToken cancellationToken,
 		bool rootSelectionIsExplicit,
-		bool includeIgnoreImpactCounts)
+		bool includeIgnoreImpactCounts,
+		IReadOnlySet<string>? selectedPathFrontier)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
 		ArgumentNullException.ThrowIfNull(scopedPaths);
@@ -86,12 +91,16 @@ public static class GitScopePresentationProjector
 		ArgumentNullException.ThrowIfNull(effectiveRules);
 		if (inventory is null || inventory.Entries.Count == 0 || scopedPaths.Count == 0)
 			return GitScopePresentationProjection.Empty;
+		var exactPathFrontier = selectedPathFrontier is null
+			? null
+			: new HashSet<string>(selectedPathFrontier, StringComparer.Ordinal);
 
 		var files = CollectScopedFiles(
 			inventory,
 			containsScopedPath,
 			scopedPaths.Count,
 			selectedRootFolders,
+			exactPathFrontier,
 			cancellationToken,
 			rootSelectionIsExplicit);
 
@@ -198,6 +207,7 @@ public static class GitScopePresentationProjector
 			scopedPaths,
 			getComparisonIdentity,
 			selectedRootFolders,
+			exactPathFrontier,
 			effectiveRules,
 			new IgnoreOptionCounts(
 				HiddenFolders: hiddenFolders,
@@ -223,6 +233,7 @@ public static class GitScopePresentationProjector
 		Func<string, bool> containsScopedPath,
 		int scopedPathCount,
 		IReadOnlySet<string> selectedRootFolders,
+		IReadOnlySet<string>? selectedPathFrontier,
 		CancellationToken cancellationToken,
 		bool rootSelectionIsExplicit)
 	{
@@ -238,6 +249,8 @@ public static class GitScopePresentationProjector
 				    index,
 				    selectedRootFolders,
 				    rootSelectionIsExplicit))
+				continue;
+			if (!IsInsideSelectedPathFrontier(inventory, index, selectedPathFrontier))
 				continue;
 
 			files.Add(new ScopedFile(index, CollectAncestorIndexes(inventory, entry.ParentIndex)));
@@ -260,6 +273,39 @@ public static class GitScopePresentationProjector
 			currentIndex = inventory.GetEntryRef(currentIndex).ParentIndex;
 		var rootName = inventory.GetEntryRef(currentIndex).Name;
 		return !rootSelectionIsExplicit || selectedRootFolders.Contains(rootName);
+	}
+
+	private static bool IsInsideSelectedPathFrontier(
+		ProjectTreeInventorySnapshot inventory,
+		int fileIndex,
+		IReadOnlySet<string>? selectedPathFrontier)
+	{
+		if (selectedPathFrontier is null)
+			return true;
+
+		for (var current = fileIndex; current >= 0; current = inventory.GetEntryRef(current).ParentIndex)
+		{
+			if (selectedPathFrontier.Contains(inventory.GetEntryRef(current).FullPath))
+				return true;
+		}
+
+		return false;
+	}
+
+	private static bool IsInsideSelectedPathFrontier(
+		string fullPath,
+		IReadOnlySet<string>? selectedPathFrontier)
+	{
+		if (selectedPathFrontier is null)
+			return true;
+
+		foreach (var selectedPath in selectedPathFrontier)
+		{
+			if (PathUtility.IsPathInside(fullPath, selectedPath))
+				return true;
+		}
+
+		return false;
 	}
 
 	private static int[] CollectAncestorIndexes(ProjectTreeInventorySnapshot inventory, int parentIndex)
@@ -556,6 +602,7 @@ public static class GitScopePresentationProjector
 		IReadOnlySet<string> scopedPaths,
 		Func<string, string?>? getComparisonIdentity,
 		IReadOnlySet<string> selectedRootFolders,
+		IReadOnlySet<string>? selectedPathFrontier,
 		IgnoreRules rules,
 		IgnoreOptionCounts counts,
 		CancellationToken cancellationToken,
@@ -626,6 +673,8 @@ public static class GitScopePresentationProjector
 		foreach (var scopedPath in scopedPaths)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
+			if (!IsInsideSelectedPathFrontier(scopedPath, selectedPathFrontier))
+				continue;
 			var matchesInventoriedIdentity =
 				getComparisonIdentity?.Invoke(scopedPath) is { } identity &&
 				inventoriedPathIdentities!.Contains(identity);

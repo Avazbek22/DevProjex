@@ -218,7 +218,10 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 					loaded.TreeInventory,
 					loaded.EffectiveRules,
 					loaded.RootSelectionIsExplicit,
-					loaded.EffectiveExtensionPolicy));
+					loaded.EffectiveExtensionPolicy,
+					selection.SelectedPaths is { Count: > 0 }
+						? selectedFullPaths
+						: null));
 		}
 		return plan;
 	}
@@ -243,7 +246,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			context.EffectiveRules,
 			cancellationToken,
 			rootSelectionIsExplicit: context.RootSelectionIsExplicit,
-			includeIgnoreImpactCounts: plan.HasIgnoreOptionCounts);
+			includeIgnoreImpactCounts: plan.HasIgnoreOptionCounts,
+			selectedPathFrontier: context.SelectedPathFrontier);
 	}
 
 	internal IReadOnlyList<string> GetGitScopeRepositoryRoots(
@@ -271,7 +275,8 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		ProjectTreeInventorySnapshot Inventory,
 		IgnoreRules EffectiveRules,
 		bool RootSelectionIsExplicit,
-		IExtensionInclusionPolicy? EffectiveExtensionPolicy);
+		IExtensionInclusionPolicy? EffectiveExtensionPolicy,
+		IReadOnlySet<string>? SelectedPathFrontier);
 
 	public Task<ProjectContextPlan> ReprojectSelectionAsync(
 		ProjectContextPlan baseline,
