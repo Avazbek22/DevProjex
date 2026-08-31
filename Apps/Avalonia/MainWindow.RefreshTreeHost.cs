@@ -15,7 +15,7 @@ public partial class MainWindow : IRefreshTreePipelineHost
 
         var allowedExt = CollectCheckedOptionNames(_viewModel.Extensions, StringComparer.OrdinalIgnoreCase);
         var allowedRoot = _selectionCoordinator.GetProjectScanRoots()
-            .ToHashSet(PathComparer.Default);
+			.ToHashSet(ProjectTreePathIdentity.CanonicalComparer);
         var selectedIgnoreOptions = _selectionCoordinator.GetSelectedIgnoreOptionIds();
         var ignoreRules = BuildIgnoreRules(_currentPath, selectedIgnoreOptions, allowedRoot);
         var nameFilter = string.IsNullOrWhiteSpace(_viewModel.NameFilter)

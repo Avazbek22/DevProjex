@@ -27,10 +27,11 @@ public partial class MainWindow : IProjectLoadSnapshotPipelineHost
             StringComparer.OrdinalIgnoreCase);
 		var allowedRoot = CollectCheckedSelectionNames(
             selectionSnapshot.RootOptions,
-			PathComparer.Default);
+			ProjectTreePathIdentity.CanonicalComparer);
 		var availableRoot = selectionSnapshot.RootOptions?
 			.Select(static option => option.Name)
-			.ToHashSet(PathComparer.Default) ?? new HashSet<string>(PathComparer.Default);
+			.ToHashSet(ProjectTreePathIdentity.CanonicalComparer) ??
+			new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
         var ignoreRules = ProjectLoadIgnoreRulesResolver.Resolve(
             selectionSnapshot,
             selectedIgnoreOptions => BuildIgnoreRules(currentPath, selectedIgnoreOptions, allowedRoot));

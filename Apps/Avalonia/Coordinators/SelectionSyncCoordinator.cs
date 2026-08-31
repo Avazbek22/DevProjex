@@ -1018,10 +1018,10 @@ public sealed partial class SelectionSyncCoordinator(
 		{
 			return snapshot.ScanRootOptions
 				.Select(static option => option.Name)
-				.ToHashSet(PathComparer.Default);
+				.ToHashSet(ProjectTreePathIdentity.CanonicalComparer);
 		}
 
-		return _scanRoots.ToHashSet(PathComparer.Default);
+		return _scanRoots.ToHashSet(ProjectTreePathIdentity.CanonicalComparer);
 	}
 
     public void ApplyProjectProfileSelections(string projectPath, ProjectSelectionProfile profile)
@@ -3321,7 +3321,7 @@ public sealed partial class SelectionSyncCoordinator(
 		var selectedRoots = rootOptions
 			.Where(static option => option.IsChecked)
 			.Select(static option => option.Name)
-			.ToHashSet(PathComparer.Default);
+			.ToHashSet(ProjectTreePathIdentity.CanonicalComparer);
 		var rootSelectionIsExplicit = context.RootSelectionIsExplicit ||
 		                              rootOptions.Any(static option => !option.IsChecked);
 		var scope = await GitScopeFilter
@@ -3344,7 +3344,7 @@ public sealed partial class SelectionSyncCoordinator(
 
 		var availableRoots = rootOptions
 			.Select(static option => option.Name)
-			.ToHashSet(PathComparer.Default);
+			.ToHashSet(ProjectTreePathIdentity.CanonicalComparer);
 		return snapshot with
 		{
 			GitScope = scope,
