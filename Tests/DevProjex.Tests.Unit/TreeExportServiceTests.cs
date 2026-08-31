@@ -288,7 +288,7 @@ public sealed class TreeExportServiceTests
 		var service = new TreeExportService();
 		var result = service.BuildFullTree("/root", root);
 
-		Assert.Equal($"/root:{Environment.NewLine}{Environment.NewLine}", result);
+		Assert.Equal($"/root:{Environment.NewLine}", result);
 	}
 
 	// Verifies selection matching returns true when the node itself is selected.

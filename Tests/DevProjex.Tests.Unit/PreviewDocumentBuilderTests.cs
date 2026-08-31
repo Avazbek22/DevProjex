@@ -644,6 +644,28 @@ public sealed class PreviewDocumentBuilderTests
 	}
 
 	[Fact]
+	public async Task BuildContentDocumentWithMetricsAsync_BinaryOnlySelectionPreservesRootDocument()
+	{
+		using var project = new TemporaryDirectory();
+		var path = Path.Combine(project.Path, "binary.dat");
+		await File.WriteAllBytesAsync(path, [0, 1, 2, 0, 3], TestContext.Current.CancellationToken);
+		var expected = ContextRootPresentation.FormatLine(project.Path);
+
+		var result = await new PreviewDocumentBuilder(new FileContentAnalyzer())
+			.BuildContentDocumentWithMetricsAsync(
+				[path],
+				TestContext.Current.CancellationToken,
+				Path.GetFileName,
+				displayRootPath: project.Path);
+
+		Assert.True(result.HasValue);
+		using var document = result.Value.Document;
+		Assert.Equal(expected, document.GetFullText());
+		Assert.Empty(document.Sections);
+		Assert.Equal(ExportOutputMetricsCalculator.FromText(expected), result.Value.Metrics);
+	}
+
+	[Fact]
 	public async Task CreateDocumentWithMetrics_FileBackedMetricsDoNotReadDocument()
 	{
 		var builder = new PreviewDocumentBuilder(new StubFileContentAnalyzer());

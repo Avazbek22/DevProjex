@@ -14,6 +14,52 @@ namespace DevProjex.Tests.UI;
 [Collection(UiWorkspaceCollection.Name)]
 public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
 {
+	[AvaloniaFact]
+	public async Task ContentWarmup_UsesSingleRootAndRelativeFileHeaders()
+	{
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+		try
+		{
+			var snapshotMethod = typeof(MainWindow).GetMethod(
+				"CaptureProjectTextOutputSnapshot",
+				BindingFlags.Instance | BindingFlags.NonPublic);
+			var controllerField = typeof(MainWindow).GetField(
+				"_previewSurfaceController",
+				BindingFlags.Instance | BindingFlags.NonPublic);
+			Assert.NotNull(snapshotMethod);
+			Assert.NotNull(controllerField);
+			var snapshot = Assert.IsType<ProjectTextOutputSnapshot>(snapshotMethod!.Invoke(window, null));
+			var controller = Assert.IsType<PreviewSurfaceController>(controllerField!.GetValue(window));
+
+			var warmup = await controller.TryBuildWarmupSnapshotAsync(
+				PreviewContentMode.Content,
+				snapshot.TreeFormat,
+				hasSelection: false,
+				new HashSet<string>(PathComparer.Default),
+				snapshot.RootPath,
+				snapshot.Root,
+				snapshot.OrderedFilePaths,
+				snapshot.PathPresentation,
+				"No text content",
+				"No checked files",
+				TestContext.Current.CancellationToken);
+
+			var text = Assert.IsType<PreviewWarmupSnapshot>(warmup).Text;
+			var displayRoot = snapshot.PathPresentation?.DisplayRootPath ?? snapshot.RootPath;
+			Assert.StartsWith(ContextRootPresentation.FormatLine(displayRoot), text, StringComparison.Ordinal);
+			Assert.Equal(1, CountOccurrences(text, displayRoot));
+			Assert.DoesNotContain(
+				$"{snapshot.RootPath}{Path.DirectorySeparatorChar}src{Path.DirectorySeparatorChar}",
+				text,
+				OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
     [AvaloniaFact]
     public async Task ClipboardReadinessWait_StopsWhenPreviewControllerIsDisposed()
     {

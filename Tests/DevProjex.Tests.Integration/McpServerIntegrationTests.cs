@@ -363,8 +363,7 @@ public sealed class McpServerIntegrationTests
 		var textBody = ExtractSpotlightBody(Text(text));
 		var textLines = textBody.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
 		Assert.Equal(physicalProject + ":", textLines[0]);
-		Assert.Equal(string.Empty, textLines[1]);
-		Assert.Equal("└── src", textLines[2]);
+		Assert.Equal("└── src", textLines[1]);
 		Assert.DoesNotContain(textLines, line => line.EndsWith(" project", StringComparison.Ordinal));
 		using (JsonDocument.Parse(ExtractSpotlightBody(Text(json)))) { }
 		_ = System.Xml.Linq.XDocument.Parse(ExtractSpotlightBody(Text(xml)));
@@ -555,8 +554,10 @@ public sealed class McpServerIntegrationTests
 		Assert.NotEqual(true, pack.IsError);
 		var packBody = ExtractSpotlightBody(Text(pack));
 		Assert.Contains("remote-feature-marker", packBody, StringComparison.Ordinal);
-		Assert.Contains($"Root: {repositoryUrl}", packBody, StringComparison.Ordinal);
-		Assert.Equal(1, CountOccurrences(packBody, repositoryUrl));
+		var displayRepositoryUrl = RepositoryWebPathPresentationService.NormalizeForDisplay(repositoryUrl);
+		Assert.Contains($"Root: {displayRepositoryUrl}", packBody, StringComparison.Ordinal);
+		Assert.Equal(1, CountOccurrences(packBody, displayRepositoryUrl));
+		Assert.DoesNotContain($"Root: {repositoryUrl}", packBody, StringComparison.Ordinal);
 		Assert.Contains("Feature.txt:", packBody, StringComparison.Ordinal);
 		Assert.Contains("Token budget: 1000 estimated tokens.", Text(pack), StringComparison.Ordinal);
 		Assert.DoesNotContain(Secret, Text(pack), StringComparison.Ordinal);

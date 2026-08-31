@@ -160,10 +160,11 @@ public sealed class ProjectContextDocumentService(
 			throw new ArgumentException("Destination must be writable.", nameof(destination));
 		var effectivePathRedaction = outputPathRedactionDecision ??
 			OutputRootPathPresentation.CaptureRedactionDecision(CreateTransformationContext(plan));
-		var contentPathMapper = format is
-			ProjectContextDocumentFormat.Text or ProjectContextDocumentFormat.Markdown
-			? TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(plan.SourceRoot)
-			: CreateSourceContentPathMapper(plan, useSourceMappedStructuredPaths, view);
+		var contentPathMapper = CreateContentPathMapper(
+			plan,
+			view,
+			format,
+			useSourceMappedStructuredPaths);
 		if (ShouldRedact(plan, view))
 		{
 			return await WriteCompleteRedactedAsync(
@@ -291,11 +292,13 @@ public sealed class ProjectContextDocumentService(
 	public async Task<ProjectContextWriteResult> EvaluateTokenBudgetAsync(
 		ProjectContextPlan plan,
 		ProjectContextView view,
+		ProjectContextDocumentFormat format,
 		long maximumEstimatedTokens,
 		CancellationToken cancellationToken = default)
 	{
 		ArgumentNullException.ThrowIfNull(plan);
 		ValidateView(view);
+		ValidateDocumentFormat(format);
 		var tokenBudget = CreateTokenBudget(maximumEstimatedTokens)!;
 		if (!IncludesContent(view))
 			return new ProjectContextWriteResult([], tokenBudget.CreateReport());
@@ -306,6 +309,7 @@ public sealed class ProjectContextDocumentService(
 			await EvaluateTokenBudgetCoreAsync(
 					plan,
 					view,
+					format,
 					tokenBudget,
 					cancellationToken)
 				.ConfigureAwait(false);
@@ -327,6 +331,7 @@ public sealed class ProjectContextDocumentService(
 		await service.EvaluateTokenBudgetCoreAsync(
 				plan,
 				view,
+				format,
 				tokenBudget,
 				cancellationToken)
 			.ConfigureAwait(false);
@@ -336,15 +341,17 @@ public sealed class ProjectContextDocumentService(
 	private async Task EvaluateTokenBudgetCoreAsync(
 		ProjectContextPlan plan,
 		ProjectContextView view,
+		ProjectContextDocumentFormat format,
 		ProjectContextTokenBudgetAccumulator tokenBudget,
 		CancellationToken cancellationToken)
 	{
 		var effectivePathRedaction = outputPathRedactionDecision ??
 			OutputRootPathPresentation.CaptureRedactionDecision(CreateTransformationContext(plan));
-		var contentPathMapper = CreateSourceContentPathMapper(
+		var contentPathMapper = CreateContentPathMapper(
 			plan,
-			useSourceMappedStructuredPaths: true,
-			view);
+			view,
+			format,
+			useSourceMappedStructuredPaths: true);
 		await foreach (var source in OpenSourceSnapshotsInOrderAsync(
 			               plan.SourceRoot,
 			               plan.IncludedFiles,
@@ -520,7 +527,8 @@ public sealed class ProjectContextDocumentService(
 		if (view == ProjectContextView.Content)
 		{
 			await writer.WriteAsync(
-					ContextRootPresentation.FormatLine(GetDocumentRoot(plan, pathRedaction)).AsMemory(),
+					ContextRootPresentation.FormatLine(
+						GetHumanReadableContentRoot(plan, pathRedaction)).AsMemory(),
 					cancellationToken)
 				.ConfigureAwait(false);
 			hasOutput = true;
@@ -624,7 +632,7 @@ public sealed class ProjectContextDocumentService(
 			await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
 			await writer.WriteAsync(
 					ContextRootPresentation.FormatLine(
-						NormalizePath(GetDocumentRoot(plan, pathRedaction))).AsMemory(),
+						NormalizePath(GetHumanReadableContentRoot(plan, pathRedaction))).AsMemory(),
 					cancellationToken)
 				.ConfigureAwait(false);
 		}
@@ -1432,7 +1440,7 @@ public sealed class ProjectContextDocumentService(
 		if (view == ProjectContextView.Content)
 		{
 			output.Append(ContextRootPresentation.FormatLine(
-				GetDocumentRoot(plan, protectPrivateData: true)));
+				GetHumanReadableContentRoot(plan, protectPrivateData: true)));
 		}
 		if (IncludesTree(view))
 		{
@@ -1464,7 +1472,7 @@ public sealed class ProjectContextDocumentService(
 		if (view == ProjectContextView.Content)
 		{
 			output.AppendLine(ContextRootPresentation.FormatLine(
-				NormalizePath(GetDocumentRoot(plan, protectPrivateData: true))));
+				NormalizePath(GetHumanReadableContentRoot(plan, protectPrivateData: true))));
 		}
 		if (IncludesTree(view))
 		{
@@ -2280,6 +2288,48 @@ public sealed class ProjectContextDocumentService(
 			: plan.SourceRoot;
 		return OutputRootPathPresentation.ResolvePath(displayRootPath, pathRedaction).Text;
 	}
+
+	private static string GetHumanReadableContentRoot(
+		ProjectContextPlan plan,
+		bool protectPrivateData = false)
+	{
+		var displayRootPath = GetHumanReadableContentDisplayRoot(plan);
+		return OutputRootPathPresentation.Resolve(
+			plan.SourceRoot,
+			displayRootPath,
+			protectPrivateData && plan.Selection.HidePrivateData == true);
+	}
+
+	private static string GetHumanReadableContentRoot(
+		ProjectContextPlan plan,
+		OutputPathRedactionDecision? pathRedaction) =>
+		OutputRootPathPresentation.ResolvePath(
+			GetHumanReadableContentDisplayRoot(plan),
+			pathRedaction).Text;
+
+	private static string GetHumanReadableContentDisplayRoot(ProjectContextPlan plan)
+	{
+		if (plan.SourceIdentity is not
+		    {
+			    SourceType: ProjectSourceType.GitClone,
+			    SourceReference.Length: > 0
+		    } identity)
+		{
+			return plan.SourceRoot;
+		}
+
+		var displayRootPath = RepositoryWebPathPresentationService.NormalizeForDisplay(identity.SourceReference);
+		return displayRootPath.Length > 0 ? displayRootPath : identity.SourceReference;
+	}
+
+	private static Func<string, string>? CreateContentPathMapper(
+		ProjectContextPlan plan,
+		ProjectContextView view,
+		ProjectContextDocumentFormat format,
+		bool useSourceMappedStructuredPaths) =>
+		format is ProjectContextDocumentFormat.Text or ProjectContextDocumentFormat.Markdown
+			? TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(plan.SourceRoot)
+			: CreateSourceContentPathMapper(plan, useSourceMappedStructuredPaths, view);
 
 	private static Func<string, string>? CreateSourceContentPathMapper(
 		ProjectContextPlan plan,

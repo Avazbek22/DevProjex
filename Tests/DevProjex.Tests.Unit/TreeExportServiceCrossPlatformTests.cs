@@ -70,7 +70,7 @@ public sealed class TreeExportServiceCrossPlatformTests
 		Assert.Contains(Environment.NewLine, ascii);
 		Assert.DoesNotContain("├── Root", ascii, StringComparison.Ordinal);
 		Assert.Equal(
-			$"{SingleLineTextEscaping.Escape(rootPath)}:{Environment.NewLine}{Environment.NewLine}",
+			$"{SingleLineTextEscaping.Escape(rootPath)}:{Environment.NewLine}",
 			ascii);
 	}
 

@@ -165,7 +165,7 @@ public static class ExportOutputMetricsCalculator
 			// string. Avoiding that allocation matters when thousands of files are
 			// recalculated after a selection or format change.
 			AppendRenderedLine(
-				renderedChars: file.Path.Length + 1,
+				renderedChars: SingleLineTextEscaping.GetEscapedLength(file.Path.AsSpan()) + 1L,
 				internalLineBreaks: 0,
 				newLineChars: NormalizedNewLineChars,
 				chars: ref _chars,

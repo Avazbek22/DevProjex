@@ -1640,14 +1640,12 @@ internal sealed class MetricsPipeline(
 		var transformationContext = transformationContextProvider?.Invoke();
 		var outputPathRedaction = OutputRootPathPresentation.CaptureRedactionDecision(
 			transformationContext);
-		var contentOnlyPathMapper = TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(
+		var contentPathMapper = TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(
 			selection.RootPath);
 		var contentOnlyRootPath = OutputRootPathPresentation.Resolve(
 			selection.RootPath,
 			pathPresentation,
 			outputPathRedaction);
-		var treeAndContentPathMapper = TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(
-			selection.RootPath);
         // The transformation belongs in the key rather than being reconciled here: this method only
         // reads the per-file cache, and clearing it mid-read would publish an empty project.
         // Reconciliation happens where a pass can still refill what it drops.
@@ -1657,7 +1655,7 @@ internal sealed class MetricsPipeline(
 			SelectedHash: selection.SelectedHash,
 			ContentPathPresentationIdentity: HashCode.Combine(
 				contentOnlyRootPath,
-				RuntimeHelpers.GetHashCode(contentOnlyPathMapper),
+				BuildRootPathIdentity(selection.RootPath),
 				outputPathRedaction?.OccurrenceId,
 				outputPathRedaction?.Keep),
 			TreeAndContentRootPathIdentity: BuildRootPathIdentity(selection.RootPath),
@@ -1669,11 +1667,12 @@ internal sealed class MetricsPipeline(
                 return _contentMetricsCacheValue;
         }
 
-		var contentOnlyAccumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
-		var treeAndContentAccumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
-		contentOnlyAccumulator.AppendRootHeader(contentOnlyRootPath);
 		var orderedPaths = selection.OrderedFilePaths ??
 			BuildOrderedMetricsFilePaths(selection, cancellationToken);
+		var contentOnlyAccumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
+		var treeAndContentAccumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
+		if (orderedPaths.Count > 0)
+			contentOnlyAccumulator.AppendRootHeader(contentOnlyRootPath);
 		lock (_metricsLock)
         {
 			for (var index = 0; index < orderedPaths.Count; index++)
@@ -1688,12 +1687,11 @@ internal sealed class MetricsPipeline(
                 }
 
                 var metrics = variant.Metrics;
-                var contentOnlyPath = OutputRootPathPresentation.ResolvePath(
-					MapExportDisplayPath(path, contentOnlyPathMapper),
+				var contentPath = OutputRootPathPresentation.ResolvePath(
+					MapExportDisplayPath(path, contentPathMapper),
 					outputPathRedaction).Text;
-                var treeAndContentPath = MapExportDisplayPath(path, treeAndContentPathMapper);
 				var fileMetrics = new ContentFileMetrics(
-                    Path: contentOnlyPath,
+					Path: contentPath,
                     SizeBytes: metrics.Size,
                     LineCount: metrics.LineCount,
                     CharCount: metrics.CharCount,
@@ -1705,7 +1703,7 @@ internal sealed class MetricsPipeline(
 					TrailingNewlineLineBreaks: metrics.TrailingNewlineLineBreaks);
 
 				contentOnlyAccumulator.AppendFile(fileMetrics);
-                treeAndContentAccumulator.AppendFile(fileMetrics with { Path = treeAndContentPath });
+				treeAndContentAccumulator.AppendFile(fileMetrics);
             }
         }
 

@@ -1183,7 +1183,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 
             if (mode == PreviewContentMode.Content)
             {
-                if (files.Count == 0)
+                if (files.Count == 0 || string.IsNullOrWhiteSpace(currentPath))
                 {
                     var fallbackText = hasSelection
                         ? noCheckedFilesText
@@ -1197,8 +1197,10 @@ internal sealed class PreviewSurfaceController : IDisposable
                         PreviewWarmupMaxFileBytes,
                         PreviewWarmupMaxCharacters,
                         cancellationToken,
-						pathPresentation?.MapFilePath,
-						compressionContext)
+						TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(
+							currentPath),
+						compressionContext,
+						pathPresentation?.DisplayRootPath ?? currentPath)
                     .GetAwaiter()
                     .GetResult();
                 if (string.IsNullOrWhiteSpace(contentText))

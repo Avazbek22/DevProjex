@@ -51,6 +51,7 @@ public sealed class ExportContextCommandHandler(
 				budgetResult = await services.ContextDocumentService.EvaluateTokenBudgetAsync(
 						plan,
 						request.View,
+						request.Format,
 						maximumEstimatedTokens,
 						cancellationToken)
 					.ConfigureAwait(false);

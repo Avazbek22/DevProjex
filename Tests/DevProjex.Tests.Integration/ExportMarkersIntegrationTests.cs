@@ -58,7 +58,7 @@ public sealed class ExportMarkersIntegrationTests
 		var output = service.Build(temp.Path, root, selected);
 
 		Assert.StartsWith(
-			$"{temp.Path}:{Environment.NewLine}{Environment.NewLine}└── image.bin",
+			$"{temp.Path}:{Environment.NewLine}└── image.bin",
 			output,
 			StringComparison.Ordinal);
 		Assert.DoesNotContain($"{binary}:", output);
@@ -101,7 +101,7 @@ public sealed class ExportMarkersIntegrationTests
 		var markdown = service.BuildFullTree(temp.Path, root, TreeTextFormat.Markdown);
 
 		Assert.StartsWith(
-			$"{temp.Path}:{Environment.NewLine}{Environment.NewLine}└── secrets [access denied]",
+			$"{temp.Path}:{Environment.NewLine}└── secrets [access denied]",
 			ascii,
 			StringComparison.Ordinal);
 		Assert.DoesNotContain("├── project [access denied]", ascii, StringComparison.Ordinal);

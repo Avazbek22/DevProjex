@@ -236,6 +236,49 @@ public sealed class SelectedContentExportServiceTests
 	}
 
 	[Fact]
+	public async Task BuildBoundedPreviewAsync_ExhaustedRootBudgetSkipsFileIo()
+	{
+		using var temp = new TemporaryDirectory();
+		var binary = Path.Combine(temp.Path, "binary.dat");
+		await File.WriteAllBytesAsync(binary, [0, 1, 2, 0, 3], TestContext.Current.CancellationToken);
+		var analyzer = new RecordingContentAnalyzer();
+		var service = new SelectedContentExportService(analyzer);
+
+		var result = await service.BuildBoundedPreviewAsync(
+			[binary],
+			maxFileCount: 1,
+			maxFileSizeForFullRead: 1024,
+			maxOutputCharacters: 32,
+			TestContext.Current.CancellationToken,
+			displayPathMapper: Path.GetFileName,
+			displayRootPath: new string('r', 128));
+
+		Assert.Equal(32, result.Length);
+		Assert.StartsWith(ContextRootPresentation.Prefix, result, StringComparison.Ordinal);
+		Assert.Empty(analyzer.ReadPaths);
+	}
+
+	[Fact]
+	public async Task BuildBoundedPreviewAsync_DoesNotSplitUnicodeScalarAtRootBudgetBoundary()
+	{
+		using var temp = new TemporaryDirectory();
+		var binary = Path.Combine(temp.Path, "binary.dat");
+		await File.WriteAllBytesAsync(binary, [0, 1, 2, 0, 3], TestContext.Current.CancellationToken);
+		var service = new SelectedContentExportService(new FileContentAnalyzer());
+
+		var result = await service.BuildBoundedPreviewAsync(
+			[binary],
+			maxFileCount: 1,
+			maxFileSizeForFullRead: 1024,
+			maxOutputCharacters: 8,
+			TestContext.Current.CancellationToken,
+			displayPathMapper: Path.GetFileName,
+			displayRootPath: "a🙂");
+
+		Assert.Equal("Root: a", result);
+	}
+
+	[Fact]
 	public async Task BuildBoundedPreviewAsync_DoesNotLoadFileBeyondReadBudget()
 	{
 		using var temp = new TemporaryDirectory();

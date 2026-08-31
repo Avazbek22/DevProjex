@@ -53,6 +53,32 @@ public sealed class TreeExportServiceStreamingTests
 		Assert.Equal(expected, destination.ToString());
 	}
 
+	[Fact]
+	public async Task WriteFullTreeAsync_EmptyRootMatchesTheCompactMaterializedContract()
+	{
+		const string rootPath = "/root";
+		var root = new TreeNodeDescriptor(
+			"root",
+			rootPath,
+			IsDirectory: true,
+			IsAccessDenied: false,
+			IconKey: "folder",
+			Children: []);
+		var service = new TreeExportService();
+		var expected = service.BuildFullTree(rootPath, root, TreeTextFormat.Ascii);
+		using var destination = new StringWriter();
+
+		await service.WriteFullTreeAsync(
+			destination,
+			rootPath,
+			root,
+			TreeTextFormat.Ascii,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Equal($"{rootPath}:{Environment.NewLine}", expected);
+		Assert.Equal(expected, destination.ToString());
+	}
+
 	[Theory]
 	[InlineData(TreeTextFormat.Ascii)]
 	[InlineData(TreeTextFormat.Markdown)]

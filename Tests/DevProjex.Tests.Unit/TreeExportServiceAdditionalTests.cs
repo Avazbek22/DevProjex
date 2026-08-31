@@ -159,6 +159,21 @@ public sealed class TreeExportServiceAdditionalTests
 	}
 
 	[Fact]
+	public void BuildFullTree_MarkdownRootPreservesTheEstablishedLiteralFormat()
+	{
+		const string rootPath = "/tmp/my_project";
+		var output = new TreeExportService().BuildFullTree(
+			rootPath,
+			BuildTree(),
+			TreeTextFormat.Markdown);
+		var rootLine = output.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n')[0];
+		var normalizedRootPath = PathUtility.NormalizeSeparators(Path.GetFullPath(rootPath));
+
+		Assert.Equal(ContextRootPresentation.FormatLine(normalizedRootPath), rootLine);
+		Assert.Equal($"Root: {normalizedRootPath}", rootLine);
+	}
+
+	[Fact]
 	public void HumanTextTreesRenderTheRootPathOnceAndStartAtRealChildren()
 	{
 		var service = new TreeExportService();
@@ -169,9 +184,9 @@ public sealed class TreeExportServiceAdditionalTests
 		var plain = service.BuildFullTreePlain("/root", root);
 		var selectedTree = service.BuildSelectedTree("/root", root, selected);
 
-		Assert.StartsWith("/root:" + Environment.NewLine + Environment.NewLine + "├── Alpha", unicode);
-		Assert.StartsWith("/root:" + Environment.NewLine + Environment.NewLine + "|-- Alpha", plain);
-		Assert.StartsWith("/root:" + Environment.NewLine + Environment.NewLine + "└── Beta", selectedTree);
+		Assert.StartsWith("/root:" + Environment.NewLine + "├── Alpha", unicode);
+		Assert.StartsWith("/root:" + Environment.NewLine + "|-- Alpha", plain);
+		Assert.StartsWith("/root:" + Environment.NewLine + "└── Beta", selectedTree);
 		Assert.DoesNotContain("├── Root", unicode, StringComparison.Ordinal);
 		Assert.DoesNotContain("|-- Root", plain, StringComparison.Ordinal);
 		Assert.DoesNotContain("├── Root", selectedTree, StringComparison.Ordinal);

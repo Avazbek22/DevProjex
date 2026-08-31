@@ -156,6 +156,12 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 				ContextRootPresentation.FormatLine(displayRoot),
 				cancellationToken).ConfigureAwait(false);
 		}
+		if (maxOutputCharacters is { } rootCharacterLimit && output.Length >= rootCharacterLimit)
+		{
+			output.Truncate(rootCharacterLimit);
+			await output.CompleteAsync(cancellationToken).ConfigureAwait(false);
+			return new SelectedContentExportResult(output.GetMaterializedText(), null);
+		}
 
 		if (files.Length == 0)
 		{
@@ -296,6 +302,8 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 		}
 		if (publishCompressionSnapshot)
 			transformationScope?.Compression?.Complete();
+		if (maxOutputCharacters is { } finalCharacterLimit && output.Length > finalCharacterLimit)
+			output.Truncate(finalCharacterLimit);
 		await output.CompleteAsync(cancellationToken).ConfigureAwait(false);
 		var textOutput = hasRootHeader || anyWritten
 			? output.GetMaterializedText()
@@ -648,7 +656,20 @@ public sealed class SelectedContentExportService(IFileContentAnalyzer contentAna
 			return ValueTask.CompletedTask;
 		}
 
-		public override void Truncate(int length) => _builder.Length = length;
+		public override void Truncate(int length)
+		{
+			ArgumentOutOfRangeException.ThrowIfNegative(length);
+			if (length > _builder.Length)
+				throw new ArgumentOutOfRangeException(nameof(length));
+			if (length > 0 && length < _builder.Length &&
+			    char.IsHighSurrogate(_builder[length - 1]) &&
+			    char.IsLowSurrogate(_builder[length]))
+			{
+				length--;
+			}
+
+			_builder.Length = length;
+		}
 		public override ValueTask CompleteAsync(CancellationToken cancellationToken) =>
 			ValueTask.CompletedTask;
 		public override string GetMaterializedText()

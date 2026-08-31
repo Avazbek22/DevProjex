@@ -71,8 +71,7 @@ public sealed class ExportContextDocumentContractTests
 		Assert.Equal(CommandLineExitCodes.Success, result.ExitCode);
 		Assert.Empty(result.StandardError);
 		Assert.Equal(workspace.Path + ":", lines[0]);
-		Assert.Equal(string.Empty, lines[1]);
-		Assert.Equal(childLine, lines[2]);
+		Assert.Equal(childLine, lines[1]);
 		Assert.DoesNotContain(lines, line => line.EndsWith(
 			Path.GetFileName(workspace.Path),
 			StringComparison.Ordinal));
@@ -483,8 +482,10 @@ public sealed class ExportContextDocumentContractTests
 		Assert.Contains("Skipped files: 0", budgeted.StandardError, StringComparison.Ordinal);
 	}
 
-	[Fact]
-	public async Task DryRunReportsTheSameTokenBudgetForecastWithoutWritingDocument()
+	[Theory]
+	[InlineData("tree-content")]
+	[InlineData("content")]
+	public async Task DryRunReportsTheSameTokenBudgetForecastWithoutWritingDocument(string view)
 	{
 		using var workspace = new TemporaryDirectory();
 		workspace.WriteFile("A-large.txt", new string('a', 40));
@@ -496,7 +497,8 @@ public sealed class ExportContextDocumentContractTests
 			environment,
 			"text",
 			maximumEstimatedTokens: 1,
-			dryRun: true);
+			dryRun: true,
+			view: view);
 
 		Assert.Equal(CommandLineExitCodes.Success, exitCode);
 		Assert.Empty(environment.StandardOutput);
@@ -512,7 +514,8 @@ public sealed class ExportContextDocumentContractTests
 				workspace,
 				actual,
 				"text",
-				maximumEstimatedTokens: 1));
+				maximumEstimatedTokens: 1,
+				view: view));
 		Assert.Equal(
 			ExtractBudgetReport(environment.StandardError),
 			ExtractBudgetReport(actual.StandardError));

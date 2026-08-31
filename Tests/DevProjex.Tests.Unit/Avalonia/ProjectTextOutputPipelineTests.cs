@@ -55,6 +55,67 @@ public sealed class ProjectTextOutputPipelineTests
 	}
 
 	[Fact]
+	public async Task BuildDocumentAsync_TreeAndContentEdgeCasesMatchLegacyBytes()
+	{
+		using var project = new TemporaryDirectory();
+		var empty = project.CreateFile("empty.txt", string.Empty);
+		var whitespace = project.CreateFile("whitespace.txt", " \t\r\n");
+		var unicode = project.CreateFile("unicode.txt", "alpha\r\nПривет🙂\n終\r");
+		var binary = Path.Combine(project.Path, "binary.dat");
+		await File.WriteAllBytesAsync(binary, [0, 1, 2, 0, 3], TestContext.Current.CancellationToken);
+		var root = DirectoryNode(
+			project.Path,
+			FileNode(empty),
+			FileNode(whitespace),
+			FileNode(unicode),
+			FileNode(binary));
+		var snapshot = CreateSnapshot(
+			project.Path,
+			root,
+			new HashSet<string>(PathComparer.Default));
+		var pipeline = CreatePipeline();
+
+		var legacy = await pipeline.BuildAsync(
+			ProjectTextOutputMode.TreeAndContent,
+			snapshot,
+			TestContext.Current.CancellationToken);
+		using var streamed = await pipeline.BuildDocumentAsync(
+			ProjectTextOutputMode.TreeAndContent,
+			snapshot,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(legacy.Content, streamed.Document.GetFullText());
+	}
+
+	[Fact]
+	public async Task BuildDocumentAsync_TreeAndContentPreservesLegacyOmissionBeyondInteractiveReadLimit()
+	{
+		using var project = new TemporaryDirectory();
+		var sourceFile = project.CreateFile(
+			"large.txt",
+			new string('x', 10 * 1024 * 1024) + "TAIL");
+		var snapshot = CreateSnapshot(
+			project.Path,
+			DirectoryNode(project.Path, FileNode(sourceFile)),
+			new HashSet<string>(PathComparer.Default));
+		var pipeline = CreatePipeline();
+
+		var legacy = await pipeline.BuildAsync(
+			ProjectTextOutputMode.TreeAndContent,
+			snapshot,
+			TestContext.Current.CancellationToken);
+		using var streamed = await pipeline.BuildDocumentAsync(
+			ProjectTextOutputMode.TreeAndContent,
+			snapshot,
+			TestContext.Current.CancellationToken);
+		var streamedText = streamed.Document.GetFullText();
+
+		Assert.Equal(legacy.Content.Length, streamedText.Length);
+		Assert.Equal(legacy.Content, streamedText);
+		Assert.DoesNotContain("TAIL", streamedText, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task BuildAsync_ContentWritesRemoteRootOnceAndUsesRelativeFileHeaders()
 	{
 		using var project = new TemporaryDirectory();
@@ -110,13 +171,19 @@ public sealed class ProjectTextOutputPipelineTests
 					SecretRedactionFeatures.PrivateData))
 		};
 
-		var result = await CreatePipeline().BuildAsync(
+		var pipeline = CreatePipeline();
+		var result = await pipeline.BuildAsync(
+			(ProjectTextOutputMode)modeValue,
+			snapshot,
+			TestContext.Current.CancellationToken);
+		using var documentResult = await pipeline.BuildDocumentAsync(
 			(ProjectTextOutputMode)modeValue,
 			snapshot,
 			TestContext.Current.CancellationToken);
 
 		Assert.Contains(@"C:\Users\[local-user-1]\repository", result.Content, StringComparison.Ordinal);
 		Assert.DoesNotContain(displayRoot, result.Content, StringComparison.Ordinal);
+		Assert.Equal(result.Content, documentResult.Document.GetFullText());
 	}
 
 	[Fact]

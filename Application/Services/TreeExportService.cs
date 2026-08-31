@@ -115,7 +115,6 @@ public sealed class TreeExportService
 		if (includeRootPath)
 		{
 			output.Append(outputRootPath).AppendLine(":");
-			output.AppendLine();
 			AppendPlain(root, string.Empty, output, cancellationToken);
 		}
 		else
@@ -279,7 +278,6 @@ public sealed class TreeExportService
 		if (includeRootPath)
 		{
 			sb.Append(outputRootPath).AppendLine(":");
-			sb.AppendLine();
 			AppendAscii(root, string.Empty, sb, cancellationToken);
 		}
 		else
@@ -424,7 +422,6 @@ public sealed class TreeExportService
 		outputRootPath = EscapeTextValue(outputRootPath);
 		var sb = new StringBuilder();
 		sb.Append(outputRootPath).AppendLine(":");
-		sb.AppendLine();
 		AppendSelectedAscii(root, includedPaths, string.Empty, sb, cancellationToken);
 
 		return sb.ToString();
@@ -589,7 +586,6 @@ public sealed class TreeExportService
 			await output.BeginLineAsync().ConfigureAwait(false);
 			await output.WriteAsync(outputRootPath).ConfigureAwait(false);
 			await output.WriteAsync(":").ConfigureAwait(false);
-			await output.BeginLineAsync().ConfigureAwait(false);
 		}
 		else
 		{
@@ -1863,7 +1859,6 @@ public sealed class TreeExportService
 			(long)EscapeTextValue(outputRootPath).Length + 1,
 			ref chars,
 			ref lineBreaks); // "<rootPath>:"
-		AppendAsciiLineMetrics(0, ref chars, ref lineBreaks); // blank separator line
 		AppendFullAsciiChildMetrics(
 			root,
 			indentLength: 0,
@@ -1888,7 +1883,6 @@ public sealed class TreeExportService
 			(long)EscapeTextValue(outputRootPath).Length + 1,
 			ref chars,
 			ref lineBreaks); // "<rootPath>:"
-		AppendAsciiLineMetrics(0, ref chars, ref lineBreaks); // blank separator line
 		AppendSelectedAsciiChildMetrics(
 			root,
 			includedPaths,

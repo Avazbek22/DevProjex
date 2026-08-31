@@ -184,7 +184,7 @@ public sealed class PreviewDocumentBuilder(
             cancellationToken).ConfigureAwait(false);
 
 		CompleteTransformation(transformationScope, transformationContext);
-		if (!anyWritten)
+		if (!anyWritten && !wroteRoot)
 			return null;
 
 		return builder.BuildResult(sections, redactions);

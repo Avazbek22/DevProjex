@@ -159,7 +159,7 @@ public sealed class TreeAndContentExportPathPresentationTests
 			presentation);
 
 		Assert.StartsWith(
-			$"https://github.com/user/repo:{Environment.NewLine}{Environment.NewLine}└── a.txt",
+			$"https://github.com/user/repo:{Environment.NewLine}└── a.txt",
 			result,
 			StringComparison.Ordinal);
 		Assert.DoesNotContain("DevProjex", result, StringComparison.Ordinal);
