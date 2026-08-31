@@ -593,6 +593,12 @@ public sealed class McpServerIntegrationTests
 			{
 				["git_scope"] = "diff:origin/--upload-pack=definitely-not-a-ref..HEAD"
 			});
+		var writeCapableRefspec = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>(remote)
+			{
+				["git_scope"] = "diff:main:refs/heads/dpx-injected..HEAD"
+			});
 		var jail = await server.CallAsync(
 			"get_file",
 			new Dictionary<string, object?>(remote) { ["path"] = "../outside.txt" });
@@ -639,6 +645,11 @@ public sealed class McpServerIntegrationTests
 		Assert.Contains("Verify the repository and refs", Text(invalidDiff), StringComparison.Ordinal);
 		Assert.True(optionLikeDiff.IsError);
 		Assert.Contains(McpErrorCodes.ProjectUnavailable, Text(optionLikeDiff), StringComparison.Ordinal);
+		Assert.True(writeCapableRefspec.IsError);
+		Assert.Contains(McpErrorCodes.ProjectUnavailable, Text(writeCapableRefspec), StringComparison.Ordinal);
+		var cachedRepository = Assert.Single(
+			Directory.EnumerateDirectories(cachePath, RepositoryCacheLayout.BaseDirectoryName, SearchOption.AllDirectories));
+		Assert.False(GitRefExists(cachedRepository, "refs/heads/dpx-injected"));
 		Assert.Equal(1, git.CloneCallCount);
 		Assert.True(jail.IsError);
 		Assert.Contains(McpErrorCodes.RootViolation, Text(jail), StringComparison.Ordinal);
@@ -3175,6 +3186,25 @@ public sealed class McpServerIntegrationTests
 		Assert.True(process.WaitForExit(20_000));
 		Assert.True(process.ExitCode == 0, $"git failed ({process.ExitCode}): {error}{output}");
 		return output.Trim();
+	}
+
+	private static bool GitRefExists(string repository, string reference)
+	{
+		var startInfo = new ProcessStartInfo("git")
+		{
+			WorkingDirectory = repository,
+			UseShellExecute = false,
+			CreateNoWindow = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true
+		};
+		startInfo.ArgumentList.Add("show-ref");
+		startInfo.ArgumentList.Add("--verify");
+		startInfo.ArgumentList.Add("--quiet");
+		startInfo.ArgumentList.Add(reference);
+		using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Could not start git.");
+		Assert.True(process.WaitForExit(20_000));
+		return process.ExitCode == 0;
 	}
 
 	private sealed class CountingGitRepositoryService(IGitRepositoryService? inner) : IGitRepositoryService

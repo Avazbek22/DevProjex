@@ -174,7 +174,7 @@ public sealed class GitRemoteDiffRangeResolver
 			normalized = reference.StartsWith("origin/", StringComparison.Ordinal)
 			? reference["origin/".Length..]
 			: reference;
-		return normalized.Length > 0 && normalized[0] != '-';
+		return GitBranchNameValidator.IsValid(normalized);
 	}
 
 	private static async Task<GitCommandResult?> RunAsync(
