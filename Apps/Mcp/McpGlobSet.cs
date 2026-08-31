@@ -62,7 +62,7 @@ internal sealed class McpGlobSet
 	{
 		if (string.IsNullOrWhiteSpace(pattern))
 			throw Invalid(parameter, "patterns must not be empty");
-		if (pattern.Length > MaximumPatternLength)
+		if (McpUnicodeLength.ExceedsScalarValueCount(pattern, MaximumPatternLength))
 			throw Invalid(parameter, $"patterns must be at most {MaximumPatternLength} characters");
 		if (pattern.Contains('\\'))
 			throw Invalid(parameter, "use '/' as the path separator");

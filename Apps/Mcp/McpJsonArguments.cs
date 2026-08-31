@@ -39,14 +39,24 @@ internal sealed class McpJsonArguments(
 		return value;
 	}
 
-	public IReadOnlyList<string>? OptionalStringArray(string name, bool allowWhitespace = false)
+	public IReadOnlyList<string>? OptionalStringArray(
+		string name,
+		bool allowWhitespace = false,
+		int? maximumItems = null,
+		int? maximumItemScalarValues = null)
 	{
 		if (!_values.TryGetValue(name, out var value) || value.ValueKind == JsonValueKind.Null)
 			return null;
 		if (value.ValueKind != JsonValueKind.Array)
 			throw Invalid(name, "an array of strings");
+		if (maximumItems is not null && value.GetArrayLength() > maximumItems.Value)
+		{
+			throw Invalid(
+				name,
+				$"an array with at most {maximumItems.Value} items; narrow the selection and retry");
+		}
 
-		var result = new List<string>();
+		var result = new List<string>(value.GetArrayLength());
 		foreach (var item in value.EnumerateArray())
 		{
 			var itemValue = item.ValueKind == JsonValueKind.String ? item.GetString() : null;
@@ -54,6 +64,13 @@ internal sealed class McpJsonArguments(
 			    string.IsNullOrEmpty(itemValue) ||
 			    (!allowWhitespace && string.IsNullOrWhiteSpace(itemValue)))
 				throw Invalid(name, "an array of non-empty strings");
+			if (maximumItemScalarValues is not null &&
+			    McpUnicodeLength.ExceedsScalarValueCount(itemValue, maximumItemScalarValues.Value))
+			{
+				throw Invalid(
+					name,
+					$"an array whose items contain at most {maximumItemScalarValues.Value} characters; shorten the paths and retry");
+			}
 			result.Add(itemValue);
 		}
 		return result;

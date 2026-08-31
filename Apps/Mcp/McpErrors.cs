@@ -14,6 +14,7 @@ internal static class McpErrorCodes
 	public const string ProjectUnavailable = "DPX-MCP-PROJECT-UNAVAILABLE";
 	public const string RemoteDisabled = "DPX-MCP-REMOTE-DISABLED";
 	public const string RemoteFailed = "DPX-MCP-REMOTE-FAILED";
+	public const string RemoteLimit = "DPX-MCP-REMOTE-LIMIT";
 }
 
 internal sealed class McpToolException(string code, string message) : Exception(message)

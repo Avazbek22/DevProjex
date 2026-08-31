@@ -246,6 +246,15 @@ public sealed class McpServerIntegrationTests
 			Assert.DoesNotContain("max_tokens", required);
 			Assert.DoesNotContain("format", required);
 		}
+		foreach (var toolName in new[] { "analyze", "pack_context" })
+		{
+			var paths = tools.Single(tool => tool.Name == toolName)
+				.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("paths");
+			Assert.Equal(McpProjectService.MaximumRequestedPaths, paths.GetProperty("maxItems").GetInt32());
+			Assert.Equal(
+				McpProjectService.MaximumRequestedPathLength,
+				paths.GetProperty("items").GetProperty("maxLength").GetInt32());
+		}
 		var searchBoolean = tools.Single(static tool => tool.Name == "search_project")
 			.ProtocolTool.InputSchema.GetProperty("properties").GetProperty("ignore_case");
 		Assert.Equal(2, searchBoolean.GetProperty("oneOf").GetArrayLength());
@@ -3177,6 +3186,129 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task SelectionWarningsAreSafeTrustedNoticesForProfileSelectionTools()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Visible.txt"), "visible-marker\n");
+		const string missingPath = "user/private/secret-name.txt";
+		var profile = WritePortableProfile(project, "stale-profile.json", ["Visible.txt", missingPath]);
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+		var selection = new Dictionary<string, object?> { ["profile"] = profile };
+
+		var analysis = await server.CallAsync("analyze", selection);
+		var pack = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>(selection)
+			{
+				["view"] = "content",
+				["format"] = "xml"
+			});
+
+		Assert.All(new[] { analysis, pack }, result =>
+		{
+			Assert.NotEqual(true, result.IsError);
+			var text = AllText(result);
+			Assert.Contains("DPX-SELECTION-PATH-MISSING", text, StringComparison.Ordinal);
+			Assert.Contains("Call get_tree to refresh available paths", text, StringComparison.Ordinal);
+			var warning = text[text.IndexOf("[Warning DPX-SELECTION-PATH-MISSING]", StringComparison.Ordinal)..];
+			Assert.DoesNotContain(missingPath, warning, StringComparison.Ordinal);
+		});
+		AssertTrustedWarningOutsideSpotlight(pack, "DPX-SELECTION-PATH-MISSING");
+		Assert.DoesNotContain(missingPath, Text(pack), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task PartialTrackedIndexWarningSurvivesAllToolsAndStoredPackResponse()
+	{
+		if (!IsGitAvailable())
+			Assert.Skip("Git is not available in this test environment.");
+
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var readable = workspace.CreateDirectory("project/readable");
+		File.WriteAllText(Path.Combine(readable, "Large.txt"), "tracked-marker\n" + new string('x', 70_000));
+		InitializeCommittedRepository(readable);
+		workspace.CreateDirectory("project/broken/.git");
+		File.WriteAllText(Path.Combine(project, "broken", "Other.txt"), "excluded-marker\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+		var selection = new Dictionary<string, object?> { ["tracked_only"] = true };
+
+		var tree = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>(selection) { ["format"] = "json" });
+		var analysis = await server.CallAsync("analyze", selection);
+		var storedPack = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>(selection)
+			{
+				["view"] = "content",
+				["format"] = "text"
+			});
+		var search = await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?>(selection)
+			{
+				["pattern"] = "tracked-marker",
+				["ignore_case"] = false
+			});
+
+		Assert.All(new[] { tree, analysis, storedPack, search }, result =>
+		{
+			Assert.NotEqual(true, result.IsError);
+			Assert.Contains(
+				ProjectContextGitReadiness.PartialDiagnosticCode,
+				AllText(result),
+				StringComparison.Ordinal);
+		});
+		Assert.Contains("Pack stored as '", Text(storedPack), StringComparison.Ordinal);
+		AssertTrustedWarningOutsideSpotlight(tree, ProjectContextGitReadiness.PartialDiagnosticCode);
+		AssertTrustedWarningOutsideSpotlight(storedPack, ProjectContextGitReadiness.PartialDiagnosticCode);
+		AssertTrustedWarningOutsideSpotlight(search, ProjectContextGitReadiness.PartialDiagnosticCode);
+	}
+
+	[Fact]
+	public async Task SelectionPathCapsAndLexicalDeduplicationAreEnforcedAtRuntime()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.CreateDirectory("project/src");
+		File.WriteAllText(Path.Combine(project, "src", "App.cs"), "content\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var deduplicated = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "src", "./src", "src/.", Path.Combine(project, "src") }
+			});
+		var tooMany = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["paths"] = Enumerable.Repeat("src", McpProjectService.MaximumRequestedPaths + 1).ToArray()
+			});
+		var tooLong = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[]
+				{
+					string.Concat(Enumerable.Repeat("😀", McpProjectService.MaximumRequestedPathLength + 1))
+				}
+			});
+
+		Assert.NotEqual(true, deduplicated.IsError);
+		Assert.Equal(1, deduplicated.StructuredContent?.GetProperty("files").GetInt32());
+		Assert.All(new[] { tooMany, tooLong }, result =>
+		{
+			Assert.True(result.IsError);
+			Assert.Contains(McpErrorCodes.InvalidArguments, Text(result), StringComparison.Ordinal);
+			Assert.Contains("paths", Text(result), StringComparison.Ordinal);
+		});
+	}
+
+	[Fact]
 	public async Task EmptySelectionsNeverResolveReservedLookingProjectFiles()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -3254,6 +3386,31 @@ public sealed class McpServerIntegrationTests
 			  }
 			}
 			""");
+		return profileName;
+	}
+
+	private static string WritePortableProfile(
+		string project,
+		string profileName,
+		IReadOnlyList<string> selectedPaths)
+	{
+		File.WriteAllText(
+			Path.Combine(project, profileName),
+			JsonSerializer.Serialize(new
+			{
+				schemaVersion = PortableProjectProfileService.CurrentSchemaVersion,
+				kind = PortableProjectProfileService.DocumentKind,
+				selection = new
+				{
+					roots = (string[]?)null,
+					extensions = (string[]?)null,
+					selectedPaths,
+					gitMode = "none",
+					exclusions = Array.Empty<string>(),
+					hideSecrets = false,
+					hidePrivateData = false
+				}
+			}));
 		return profileName;
 	}
 
@@ -3550,6 +3707,18 @@ public sealed class McpServerIntegrationTests
 		Assert.Matches("<untrusted-data-[0-9a-f]{24}>", text);
 		Assert.Matches("</untrusted-data-[0-9a-f]{24}>", text);
 		Assert.DoesNotContain(result.Content, static block => block is EmbeddedResourceBlock);
+	}
+
+	private static void AssertTrustedWarningOutsideSpotlight(CallToolResult result, string warningCode)
+	{
+		var text = AllText(result);
+		var warningIndex = text.IndexOf($"[Warning {warningCode}]", StringComparison.Ordinal);
+		var closingIndex = text.LastIndexOf("</untrusted-data-", StringComparison.Ordinal);
+		Assert.True(warningIndex >= 0, $"Expected trusted warning {warningCode} in MCP result.");
+		Assert.True(closingIndex >= 0, "Expected spotlight delimiters before the trusted warning.");
+		Assert.True(
+			warningIndex > closingIndex,
+			$"Trusted warning {warningCode} must be outside the spotlight block.");
 	}
 
 	private static void AssertBalancedSpotlights(string text)

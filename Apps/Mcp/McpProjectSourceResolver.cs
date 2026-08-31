@@ -2,11 +2,14 @@ namespace DevProjex.Mcp;
 
 internal sealed class McpProjectSourceResolver : IDisposable
 {
+	internal const int DefaultMaximumRemoteSources = 16;
 	private readonly McpRootRegistry _localRoots;
 	private readonly bool _allowRemote;
+	private readonly int _maximumRemoteSources;
 	private readonly Lazy<McpRemoteProjectServices> _remoteServices;
 	private readonly object _sync = new();
 	private readonly Dictionary<RemoteProjectKey, McpResolvedProjectSource> _remoteSources = [];
+	private readonly Dictionary<RemoteProjectKey, int> _remoteReservations = [];
 	private readonly Dictionary<string, McpResolvedProjectSource> _remoteRoots =
 		new(StringComparer.Ordinal);
 	private bool _disposed;
@@ -14,10 +17,13 @@ internal sealed class McpProjectSourceResolver : IDisposable
 	public McpProjectSourceResolver(
 		McpRootRegistry localRoots,
 		bool allowRemote,
-		Func<McpRemoteProjectServices> remoteServicesFactory)
+		Func<McpRemoteProjectServices> remoteServicesFactory,
+		int maximumRemoteSources = DefaultMaximumRemoteSources)
 	{
 		_localRoots = localRoots ?? throw new ArgumentNullException(nameof(localRoots));
 		_allowRemote = allowRemote;
+		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumRemoteSources);
+		_maximumRemoteSources = maximumRemoteSources;
 		ArgumentNullException.ThrowIfNull(remoteServicesFactory);
 		_remoteServices = new Lazy<McpRemoteProjectServices>(
 			remoteServicesFactory,
@@ -67,14 +73,35 @@ internal sealed class McpProjectSourceResolver : IDisposable
 		var key = new RemoteProjectKey(
 			RepositoryUrlUtility.GetComparisonKey(safeUrl),
 			branch ?? string.Empty);
+		var reservationHeld = false;
 		lock (_sync)
 		{
+			ThrowIfDisposed();
 			if (_remoteSources.TryGetValue(key, out var existing))
 				return existing;
+			if (_remoteReservations.TryGetValue(key, out var reservationCount))
+			{
+				_remoteReservations[key] = reservationCount + 1;
+			}
+			else
+			{
+				if (GetActiveRemoteSourceCountNoLock() >= _maximumRemoteSources)
+					throw RemoteLimitExceeded();
+				_remoteReservations.Add(key, 1);
+			}
+			reservationHeld = true;
 		}
 
-		return await AcquireRemoteAsync(project!, safeUrl, branch, key, cancellationToken)
-			.ConfigureAwait(false);
+		try
+		{
+			return await AcquireRemoteAsync(project!, safeUrl, branch, key, cancellationToken)
+				.ConfigureAwait(false);
+		}
+		finally
+		{
+			if (reservationHeld)
+				ReleaseRemoteReservation(key);
+		}
 	}
 
 	public bool TryGetRemoteRoot(string projectRoot, out McpResolvedProjectSource source)
@@ -118,6 +145,7 @@ internal sealed class McpProjectSourceResolver : IDisposable
 			sources = _remoteSources.Values.ToArray();
 			_remoteRoots.Clear();
 			_remoteSources.Clear();
+			_remoteReservations.Clear();
 		}
 
 		try
@@ -251,6 +279,11 @@ internal sealed class McpProjectSourceResolver : IDisposable
 
 		lock (_sync)
 		{
+			if (_disposed)
+			{
+				source.Dispose();
+				throw new ObjectDisposedException(nameof(McpProjectSourceResolver));
+			}
 			if (_remoteSources.TryGetValue(key, out var existing))
 			{
 				source.Dispose();
@@ -295,6 +328,30 @@ internal sealed class McpProjectSourceResolver : IDisposable
 		       (source[..colon].Contains('@') || source[..colon].Contains('.'));
 	}
 
+	private int GetActiveRemoteSourceCountNoLock()
+	{
+		var count = _remoteSources.Count;
+		foreach (var key in _remoteReservations.Keys)
+		{
+			if (!_remoteSources.ContainsKey(key))
+				count++;
+		}
+		return count;
+	}
+
+	private void ReleaseRemoteReservation(RemoteProjectKey key)
+	{
+		lock (_sync)
+		{
+			if (!_remoteReservations.TryGetValue(key, out var count))
+				return;
+			if (count == 1)
+				_remoteReservations.Remove(key);
+			else
+				_remoteReservations[key] = count - 1;
+		}
+	}
+
 	private void ValidateRemoteSource(string source, string safeUrl)
 	{
 		var normalizedSource = source.Trim().Replace('\\', '/');
@@ -337,6 +394,13 @@ internal sealed class McpProjectSourceResolver : IDisposable
 		new(
 			McpErrorCodes.RemoteFailed,
 			$"{McpErrorCodes.RemoteFailed}: remote repository '{DisplayRemote(safeUrl)}' could not be prepared ({reason}).");
+
+	private McpToolException RemoteLimitExceeded() =>
+		new(
+			McpErrorCodes.RemoteLimit,
+			$"{McpErrorCodes.RemoteLimit}: this MCP server session already has the maximum " +
+			$"{_maximumRemoteSources} active remote project sources. Reuse an existing project URL and branch, " +
+			"or restart the server with fewer remote projects.");
 
 	private static string DisplayRemote(string safeUrl) =>
 		safeUrl.Length == 0 ? "<invalid remote source>" : safeUrl;

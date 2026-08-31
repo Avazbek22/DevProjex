@@ -115,7 +115,7 @@ internal sealed class DevProjexMcpTools(
 			var body = treeWriter.Text;
 			if (treeWriter.IsTruncated)
 				body += "\n[Tree truncated at 2000 lines. Narrow include_patterns, exclude_patterns, or max_depth.]";
-			return McpToolResults.TextSuccess(AppendGitScopeWarning(McpSpotlight.Wrap(body), plan));
+			return McpToolResults.TextSuccess(AppendPlanWarnings(McpSpotlight.Wrap(body), plan));
 		}, cancellationToken);
 
 	[Description("Measure a redacted project selection and list its largest text files by estimated tokens.")]
@@ -181,7 +181,7 @@ internal sealed class DevProjexMcpTools(
 				envelope,
 				CombineTrustedNotices(
 					FormatUnscannableNotice(prepared.UnscannableFiles, UnscannableResultKind.Analysis),
-					FormatGitScopeWarning(plan)));
+					McpTrustedDiagnosticFormatter.FormatWarnings(plan)));
 		}, cancellationToken);
 
 	[Description("Build an exact redacted DevProjex context export. A stored pack id remains valid until this server process exits; after restart, call pack_context again.")]
@@ -218,11 +218,13 @@ internal sealed class DevProjexMcpTools(
 						view == ProjectContextView.Tree &&
 						format is ProjectContextDocumentFormat.Json or ProjectContextDocumentFormat.Xml)
 				.ConfigureAwait(false);
+			var trustedPlanWarnings = McpTrustedDiagnosticFormatter.FormatWarnings(plan);
 			operationProgress.Milestone(
 				10,
 				$"scanning files {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");
 			var effectiveDetail = Projects.ResolveDetail(plan, detail);
 			plan = Projects.ApplyDetail(plan, effectiveDetail, cancellationToken);
+			var outputPlan = WithoutWarningDiagnostics(plan);
 			var transformedFileCount = view == ProjectContextView.Tree ? 0 : plan.IncludedFiles.Count;
 			operationProgress.Milestone(11, $"transforming content 0/{transformedFileCount}");
 			await using var prepared = view == ProjectContextView.Tree
@@ -246,7 +248,7 @@ internal sealed class DevProjexMcpTools(
 					if (prepared is null)
 					{
 						writeResult = await Projects.DocumentService.WriteCompleteWithReportAsync(
-								plan,
+								outputPlan,
 								view,
 								format,
 								stream,
@@ -260,7 +262,7 @@ internal sealed class DevProjexMcpTools(
 					}
 
 					writeResult = await Projects.DocumentService.WritePreparedCompleteAsync(
-							plan,
+							outputPlan,
 							view,
 							format,
 							stream,
@@ -285,7 +287,7 @@ internal sealed class DevProjexMcpTools(
 						FormatUnscannableNotice(
 							writeResult?.UnscannableFiles,
 							UnscannableResultKind.Pack),
-						FormatGitScopeWarning(plan));
+						trustedPlanWarnings);
 					if (inlineMessage.Length <= MaximumInlinePackCharacters)
 					{
 						await operationProgress.CompleteAsync(
@@ -303,9 +305,9 @@ internal sealed class DevProjexMcpTools(
 				{
 					await Projects.TreeExportService.WriteFullTreeAsync(
 							treeWriter,
-							plan.SourceRoot,
-							plan.ProjectedTree,
-							Projects.ResolveProtectedDocumentRoot(plan),
+							outputPlan.SourceRoot,
+							outputPlan.ProjectedTree,
+							Projects.ResolveProtectedDocumentRoot(outputPlan),
 							includeFinalLineEnding: false,
 							cancellationToken: cancellationToken)
 						.ConfigureAwait(false);
@@ -321,7 +323,7 @@ internal sealed class DevProjexMcpTools(
 					FormatUnscannableNotice(
 						writeResult?.UnscannableFiles,
 						UnscannableResultKind.Pack),
-					FormatGitScopeWarning(plan));
+					trustedPlanWarnings);
 				await operationProgress.CompleteAsync(
 						100,
 						$"writing pack {writtenFileCount}/{writtenFileCount}")
@@ -453,7 +455,7 @@ internal sealed class DevProjexMcpTools(
 			return McpToolResults.TextSuccess(AppendTrustedNotices(
 				McpSpotlight.Wrap(output.ToString().TrimEnd()),
 				FormatUnscannableNotice(prepared.UnscannableFiles, UnscannableResultKind.Search),
-				FormatGitScopeWarning(plan)));
+				McpTrustedDiagnosticFormatter.FormatWarnings(plan)));
 		}, cancellationToken);
 
 	[Description("Read redacted text from one effective project file using an optional 1-based line range.")]
@@ -530,7 +532,11 @@ internal sealed class DevProjexMcpTools(
 		Projects.BuildPlanAsync(
 			arguments.OptionalString("project"),
 			arguments.OptionalString("branch"),
-			arguments.OptionalStringArray("paths", allowWhitespace: true),
+			arguments.OptionalStringArray(
+				"paths",
+				allowWhitespace: true,
+				maximumItems: McpProjectService.MaximumRequestedPaths,
+				maximumItemScalarValues: McpProjectService.MaximumRequestedPathLength),
 			arguments.OptionalStringArray("include_patterns"),
 			arguments.OptionalStringArray("exclude_patterns"),
 			arguments.OptionalString("profile"),
@@ -620,7 +626,7 @@ internal sealed class DevProjexMcpTools(
 		bool treeWasTruncated,
 		ProjectContextTokenBudgetReport? report,
 		string? unscannableNotice,
-		string? gitScopeWarning)
+		string? planWarnings)
 	{
 		var header = $"Pack stored as '{pack.Id}' ({pack.Characters} characters). " +
 		             "Call read_pack with this pack_id to read ranges, or search_project to locate source content.\n";
@@ -636,7 +642,7 @@ internal sealed class DevProjexMcpTools(
 				MaximumStoredBudgetReportCharacters,
 				StoredBudgetReportTruncationNotice,
 				forceMarker: false);
-		var trustedNotices = CombineTrustedNotices(unscannableNotice, gitScopeWarning);
+		var trustedNotices = CombineTrustedNotices(unscannableNotice, planWarnings);
 		if (trustedNotices is not null)
 		{
 			trustedNotices = LimitResponseSegment(
@@ -754,17 +760,20 @@ internal sealed class DevProjexMcpTools(
 		       "or lower, exclude oversized or unsupported files, and retry.";
 	}
 
-	private static string AppendGitScopeWarning(string content, ProjectContextPlan plan)
-		=> AppendTrustedNotices(content, FormatGitScopeWarning(plan));
+	private static string AppendPlanWarnings(string content, ProjectContextPlan plan) =>
+		AppendTrustedNotices(content, McpTrustedDiagnosticFormatter.FormatWarnings(plan));
 
-	private static string? FormatGitScopeWarning(ProjectContextPlan plan)
+	private static ProjectContextPlan WithoutWarningDiagnostics(ProjectContextPlan plan)
 	{
-		var diagnostic = plan.Diagnostics.FirstOrDefault(static item =>
-			item.Code == GitScopeFilter.DeletedDiagnosticCode);
-		return diagnostic is null
-			? null
-			: $"[Warning {GitScopeFilter.DeletedDiagnosticCode}] " +
-			  McpTextEscaping.EscapeSingleLine(diagnostic.Message);
+		if (!plan.Diagnostics.Any(static diagnostic =>
+			    diagnostic.Severity == ContextDiagnosticSeverity.Warning))
+			return plan;
+		return plan with
+		{
+			Diagnostics = plan.Diagnostics
+				.Where(static diagnostic => diagnostic.Severity != ContextDiagnosticSeverity.Warning)
+				.ToArray()
+		};
 	}
 
 	private static string FormatTokenBudgetReport(ProjectContextTokenBudgetReport report)

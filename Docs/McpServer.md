@@ -55,6 +55,9 @@ list_projects -> get_tree/analyze -> search_project/get_file -> pack_context -> 
   strings and fragments are rejected so credentials cannot enter Git process
   arguments. A `file://` source is accepted only when it resolves inside an
   already configured local root and never expands the local root jail.
+- A server session pins at most 16 distinct remote URL-and-branch sources. Existing
+  keys are reused and valid sources are never evicted; exceeding the cap returns
+  `DPX-MCP-REMOTE-LIMIT` with guidance to reuse a source or restart the server.
 - Secret redaction is always enabled for returned file content and cannot be
   disabled. Private-data redaction is disabled by default and can be enabled
   only for the whole server process with `--hide-private-data`, mirroring the
@@ -98,8 +101,9 @@ the only case reported as a protocol error.
 Remote-specific errors are `DPX-MCP-REMOTE-DISABLED` when a URL is passed to a
 server started without `--allow-remote`, `DPX-MCP-INVALID-ARGUMENTS` for an
 unsupported URL or a branch used with a local path, and `DPX-MCP-REMOTE-FAILED`
-when Git, cloning, cache publication, or branch checkout fails. Error text uses
-the credential-free display form of the URL.
+when Git, cloning, cache publication, or branch checkout fails.
+`DPX-MCP-REMOTE-LIMIT` reports that the 16-source session cap was reached. Error
+text uses the credential-free display form of the URL.
 
 ## Tools
 
@@ -119,14 +123,21 @@ open-world.
 | `search_project` | `project?`, `branch?`, `pattern`, `include_patterns?`, `exclude_patterns?`, `tracked_only?`, `git_scope?`, `max_file_bytes?`, `context_lines?`, `ignore_case?`, `max_results?` | Grep-style redacted matches. Regex patterns are limited to 4,096 characters and a 2-second timeout; `max_results` cannot exceed 200, and oversized text responses are explicitly truncated with a narrowing hint. |
 | `get_file` | `project?`, `branch?`, `path`, `start_line?`, `end_line?` | Redacted text from one effective file; at most 1,000 lines or 50,000 characters. |
 
+For `analyze` and `pack_context`, `paths` accepts at most 256 entries and each
+entry is limited to 4,096 Unicode scalar values. Lexically equivalent entries are
+deduplicated before root-jail resolution; every unique path still passes the full
+physical containment check. Regex, glob, and `git_scope` schema lengths use the
+same Unicode scalar-value semantics at runtime.
+
 ## Result Contract
 
 Only `list_projects` and `analyze` declare an MCP `outputSchema`. Their
 authoritative result is the complete object in `structuredContent`; the first
 text block in `content` is a JSON serialization of that same object.
-When a Git state also contains deleted paths, `analyze` appends a separate
-human-readable `DPX-GIT-STATE-DELETED` warning text block without changing its
-structured schema.
+When selection produces warnings, `analyze` appends separate human-readable
+trusted warning text blocks without changing its structured schema. Warning
+messages contain stable codes and safe counts or retry guidance, never diagnostic
+paths or project-controlled message text.
 
 If mandatory secret redaction cannot inspect a selected file, including text
 larger than the 16 MiB inspection boundary, selection-wide content tools return
@@ -151,8 +162,10 @@ Markdown tree Root values and node names escape active CommonMark, HTML, and
 entity syntax so project-controlled labels remain literal data.
 Markdown context project headings and content-only Root lines use the same
 literal escaping.
-Git-state deletion warnings are appended outside project spotlight blocks so
-clients can distinguish trusted diagnostics from untrusted file data.
+Selection warnings are appended outside project spotlight blocks so clients can
+distinguish trusted diagnostics from untrusted file data. MCP pack documents omit
+their embedded warning diagnostics to avoid duplicating untrusted path-bearing
+messages; the safe trusted warning trailer remains authoritative.
 
 An inline `pack_context` result contains the complete pack. A stored result is
 self-contained: it starts with `Pack stored as '<id>' (<N> characters). Call

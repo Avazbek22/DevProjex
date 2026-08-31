@@ -7,6 +7,9 @@ internal sealed class McpProjectService(
 	bool hidePrivateData,
 	GitFilteringMode? serverGitMode)
 {
+	internal const int MaximumRequestedPaths = 256;
+	internal const int MaximumRequestedPathLength = 4096;
+
 	public async Task<ProjectContextPlan> BuildPlanAsync(
 		string? project,
 		string? branch,
@@ -313,7 +316,7 @@ internal sealed class McpProjectService(
 	{
 		if (value is null)
 			return null;
-		if (value.Length > GitScopeSelection.MaximumTokenLength)
+		if (McpUnicodeLength.ExceedsScalarValueCount(value, GitScopeSelection.MaximumTokenLength))
 		{
 			throw new McpToolException(
 				McpErrorCodes.InvalidArguments,
@@ -454,9 +457,10 @@ internal sealed class McpProjectService(
 		if (paths is null || paths.Count == 0)
 			return RequestedPathSelection.Empty;
 
+		var distinctTokens = NormalizeRequestedPathTokens(projectRoot, paths);
 		var resolved = new HashSet<string>(StringComparer.Ordinal);
 		var directories = new HashSet<string>(StringComparer.Ordinal);
-		foreach (var path in paths)
+		foreach (var path in distinctTokens)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			var fullPath = roots.ResolveExistingPath(projectRoot, path);
@@ -467,6 +471,38 @@ internal sealed class McpProjectService(
 		}
 
 		return new RequestedPathSelection(resolved, directories);
+	}
+
+	internal static IReadOnlyList<string> NormalizeRequestedPathTokens(
+		string projectRoot,
+		IReadOnlyList<string> paths)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
+		ArgumentNullException.ThrowIfNull(paths);
+		var seen = new HashSet<string>(StringComparer.Ordinal);
+		var normalized = new List<string>(paths.Count);
+		foreach (var path in paths)
+		{
+			try
+			{
+				var fullPath = Path.IsPathFullyQualified(path)
+					? Path.GetFullPath(path)
+					: Path.GetFullPath(path, projectRoot);
+				var normalizedPath = Path.TrimEndingDirectorySeparator(PathUtility.Normalize(fullPath));
+				if (seen.Add(normalizedPath))
+					normalized.Add(normalizedPath);
+			}
+			catch (Exception exception) when (
+				exception is ArgumentException or NotSupportedException or PathTooLongException)
+			{
+				throw new McpToolException(
+					McpErrorCodes.InvalidArguments,
+					$"{McpErrorCodes.InvalidArguments}: 'paths' contains an invalid path. " +
+					"Use existing project-relative files or directories returned by get_tree.");
+			}
+		}
+
+		return normalized;
 	}
 
 	private sealed record McpGitScope(GitFilteringMode Mode, string? DiffRange);
