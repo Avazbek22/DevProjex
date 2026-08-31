@@ -747,43 +747,64 @@ public sealed class SelectedPathsContractTests
 
 	private static void EnableCaseSensitiveDirectoryOrSkip(string directoryPath)
 	{
-		if (!OperatingSystem.IsWindows())
-			return;
+		if (OperatingSystem.IsWindows())
+		{
+			try
+			{
+				using var process = System.Diagnostics.Process.Start(
+					new System.Diagnostics.ProcessStartInfo("fsutil.exe")
+					{
+						UseShellExecute = false,
+						CreateNoWindow = true,
+						RedirectStandardOutput = true,
+						RedirectStandardError = true,
+						ArgumentList = { "file", "setCaseSensitiveInfo", directoryPath, "enable" }
+					});
+				if (process is null || !process.WaitForExit(TimeSpan.FromSeconds(10)))
+				{
+					try
+					{
+						process?.Kill(entireProcessTree: true);
+					}
+					catch (InvalidOperationException)
+					{
+					}
 
+					Assert.Skip("Windows per-directory case sensitivity could not be enabled.");
+				}
+
+				if (process.ExitCode != 0)
+					Assert.Skip("Windows per-directory case sensitivity is unavailable.");
+			}
+			catch (Exception exception) when (exception is
+				       InvalidOperationException or
+				       IOException or
+				       System.ComponentModel.Win32Exception)
+			{
+				Assert.Skip(
+					$"Windows per-directory case sensitivity is unavailable: {exception.GetType().Name}.");
+			}
+		}
+
+		var upperProbe = Path.Combine(directoryPath, ".dpx-case-probe");
+		var lowerProbe = Path.Combine(directoryPath, ".DPX-CASE-PROBE");
 		try
 		{
-			using var process = System.Diagnostics.Process.Start(
-				new System.Diagnostics.ProcessStartInfo("fsutil.exe")
-				{
-					UseShellExecute = false,
-					CreateNoWindow = true,
-					RedirectStandardOutput = true,
-					RedirectStandardError = true,
-					ArgumentList = { "file", "setCaseSensitiveInfo", directoryPath, "enable" }
-				});
-			if (process is null || !process.WaitForExit(TimeSpan.FromSeconds(10)))
+			File.WriteAllText(upperProbe, "lower");
+			File.WriteAllText(lowerProbe, "upper");
+			var probeNames = Directory.EnumerateFiles(directoryPath)
+				.Select(Path.GetFileName)
+				.ToHashSet(StringComparer.Ordinal);
+			if (!probeNames.Contains(Path.GetFileName(upperProbe)) ||
+			    !probeNames.Contains(Path.GetFileName(lowerProbe)))
 			{
-				try
-				{
-					process?.Kill(entireProcessTree: true);
-				}
-				catch (InvalidOperationException)
-				{
-				}
-
-				Assert.Skip("Windows per-directory case sensitivity could not be enabled.");
+				Assert.Skip("The workspace filesystem is not case-sensitive.");
 			}
-
-			if (process.ExitCode != 0)
-				Assert.Skip("Windows per-directory case sensitivity is unavailable.");
 		}
-		catch (Exception exception) when (exception is
-			       InvalidOperationException or
-			       IOException or
-			       System.ComponentModel.Win32Exception)
+		finally
 		{
-			Assert.Skip(
-				$"Windows per-directory case sensitivity is unavailable: {exception.GetType().Name}.");
+			File.Delete(upperProbe);
+			File.Delete(lowerProbe);
 		}
 	}
 

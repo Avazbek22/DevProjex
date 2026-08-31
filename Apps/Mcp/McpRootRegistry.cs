@@ -3,24 +3,30 @@ namespace DevProjex.Mcp;
 public sealed class McpRootRegistry
 {
 	private readonly IReadOnlyList<string> _roots;
+	private readonly Dictionary<string, List<string>> _lexicalRootsByPhysical;
 
 	public McpRootRegistry(IEnumerable<string> roots)
 	{
 		ArgumentNullException.ThrowIfNull(roots);
 		var normalized = new List<string>();
+		var lexicalRootsByPhysical = new Dictionary<string, List<string>>(StringComparer.Ordinal);
 		foreach (var root in roots)
 		{
 			if (PathUtility.IsMissingPath(root))
 				throw new ArgumentException("MCP roots cannot be empty.", nameof(roots));
+			var lexicalRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
 			var physical = McpRootJailFileStreamOpener.ResolveDirectoryPath(
 				ResolvePhysicalExistingPath(root, requireDirectory: true));
 			if (!normalized.Contains(physical, StringComparer.Ordinal))
 				normalized.Add(physical);
+			AddLexicalRoot(lexicalRootsByPhysical, physical, lexicalRoot);
+			AddLexicalRoot(lexicalRootsByPhysical, physical, physical);
 		}
 
 		if (normalized.Count == 0)
 			throw new ArgumentException("At least one existing MCP root is required.", nameof(roots));
 		_roots = normalized.AsReadOnly();
+		_lexicalRootsByPhysical = lexicalRootsByPhysical;
 	}
 
 	public IReadOnlyList<string> Roots => _roots;
@@ -72,7 +78,7 @@ public sealed class McpRootRegistry
 		{
 			throw InvalidPath();
 		}
-		if (!IsWithin(projectRoot, lexicalPath))
+		if (!IsWithinConfiguredLexicalRoot(projectRoot, lexicalPath))
 			throw RootViolation(path);
 		string physical;
 		try
@@ -110,10 +116,19 @@ public sealed class McpRootRegistry
 			return null;
 		}
 
-		return _roots
-			.Where(root => IsWithin(root, fullPath))
-			.OrderByDescending(static root => root.Length)
-			.FirstOrDefault();
+		string? match = null;
+		var matchLength = -1;
+		foreach (var pair in _lexicalRootsByPhysical)
+		{
+			foreach (var lexicalRoot in pair.Value)
+			{
+				if (lexicalRoot.Length <= matchLength || !IsWithin(lexicalRoot, fullPath))
+					continue;
+				match = pair.Key;
+				matchLength = lexicalRoot.Length;
+			}
+		}
+		return match;
 	}
 
 	internal void EnsureOpenedPathIsWithin(string projectRoot, string requestedPath, string openedPath)
@@ -148,6 +163,27 @@ public sealed class McpRootRegistry
 			current = Path.GetFullPath(target?.FullName ?? candidate);
 		}
 		return Path.TrimEndingDirectorySeparator(current);
+	}
+
+	private bool IsWithinConfiguredLexicalRoot(string projectRoot, string path)
+	{
+		if (!_lexicalRootsByPhysical.TryGetValue(projectRoot, out var lexicalRoots))
+			return IsWithin(projectRoot, path);
+		return lexicalRoots.Any(root => IsWithin(root, path));
+	}
+
+	private static void AddLexicalRoot(
+		Dictionary<string, List<string>> aliases,
+		string physicalRoot,
+		string lexicalRoot)
+	{
+		if (!aliases.TryGetValue(physicalRoot, out var roots))
+		{
+			roots = [];
+			aliases.Add(physicalRoot, roots);
+		}
+		if (!roots.Contains(lexicalRoot, StringComparer.Ordinal))
+			roots.Add(lexicalRoot);
 	}
 
 	private static bool IsWithin(string root, string path)

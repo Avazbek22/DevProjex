@@ -188,16 +188,16 @@ public sealed class McpServerProcessTests
 			Assert.Skip("Git is not available in this test environment.");
 
 		using var workspace = new TemporaryDirectory();
-		var repository = workspace.CreateDirectory("remote-source.git");
-		workspace.WriteFile("remote-source.git/A-large.txt", new string('a', 40));
-		workspace.WriteFile("remote-source.git/B-small.txt", "b");
+		var root = workspace.CreateDirectory("configured-root");
+		var repository = workspace.CreateDirectory("configured-root/remote-source.git");
+		workspace.WriteFile("configured-root/remote-source.git/A-large.txt", new string('a', 40));
+		workspace.WriteFile("configured-root/remote-source.git/B-small.txt", "b");
 		await RunGitAsync(repository, "init");
 		await RunGitAsync(repository, "config", "user.email", "tests@devprojex.local");
 		await RunGitAsync(repository, "config", "user.name", "DevProjex Tests");
 		await RunGitAsync(repository, "add", ".");
 		await RunGitAsync(repository, "commit", "-m", "initial");
 
-		var root = workspace.CreateDirectory("configured-root");
 		var dataRoot = workspace.CreateDirectory("data");
 		var repositoryUrl = new Uri(Path.GetFullPath(repository)).AbsoluteUri;
 		var application = PublishedApplicationLocator.FindApplicationAssembly();
@@ -243,7 +243,7 @@ public sealed class McpServerProcessTests
 				TestContext.Current.CancellationToken);
 			var text = Assert.IsType<TextContentBlock>(Assert.Single(pack.Content)).Text;
 
-			Assert.NotEqual(true, pack.IsError);
+			Assert.True(pack.IsError != true, text);
 			Assert.Contains("B-small.txt", text, StringComparison.Ordinal);
 			Assert.DoesNotContain(new string('a', 40), text, StringComparison.Ordinal);
 			Assert.Contains("Included: 1 file (1 estimated tokens).", text, StringComparison.Ordinal);
@@ -293,12 +293,15 @@ public sealed class McpServerProcessTests
 		using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("MCP process did not start.");
 		var standardErrorTask = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
 		await using var recordingOutput = new RecordingReadStream(process.StandardOutput.BaseStream);
-		await using (var client = await McpClient.CreateAsync(
-			             new StreamClientTransport(process.StandardInput.BaseStream, recordingOutput),
-			             clientOptions: null,
-			             loggerFactory: null,
-			             TestContext.Current.CancellationToken))
+		Exception? clientFailure = null;
+		McpClient? client = null;
+		try
 		{
+			client = await McpClient.CreateAsync(
+				new StreamClientTransport(process.StandardInput.BaseStream, recordingOutput),
+				clientOptions: null,
+				loggerFactory: null,
+				TestContext.Current.CancellationToken);
 			var tools = await client.ListToolsAsync(options: null, TestContext.Current.CancellationToken);
 			Assert.Equal(ExpectedTools, tools.Select(static tool => tool.Name));
 			var result = await client.CallToolAsync(
@@ -317,14 +320,27 @@ public sealed class McpServerProcessTests
 				listedProject,
 				PathComparison));
 		}
+		catch (Exception exception)
+		{
+			clientFailure = exception;
+		}
+		finally
+		{
+			process.StandardInput.Close();
+			if (client is not null)
+				await client.DisposeAsync();
+		}
 
-		process.StandardInput.Close();
 		await Task.WhenAll(
 			process.WaitForExitAsync(TestContext.Current.CancellationToken)
 				.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken),
 			recordingOutput.WaitForSourceEofAsync(TestContext.Current.CancellationToken)
 				.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken));
 		var standardError = await standardErrorTask;
+		Assert.True(
+			clientFailure is null,
+			$"Published MCP interaction failed. ExitCode={process.ExitCode}. " +
+			$"stderr: {standardError}{Environment.NewLine}{clientFailure}");
 		Assert.True(process.ExitCode == 0, $"Unexpected exit code {process.ExitCode}. stderr: {standardError}");
 
 		Assert.NotEmpty(ParseJsonRpcMessages(recordingOutput.GetRecordedText()));

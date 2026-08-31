@@ -290,13 +290,11 @@ public class GitRepositoryServiceTests : IAsyncLifetime
             targetDirectory,
             cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.True(result.Success, result.ErrorMessage);
+        Assert.False(result.Success);
         Assert.Equal("https://example.test/owner/repository.git", result.RepositoryUrl);
         Assert.Equal("repository", result.RepositoryName);
-        Assert.Contains(
-            "?transport=opaque#fragment",
-            await File.ReadAllTextAsync(argumentLog, TestContext.Current.CancellationToken),
-            StringComparison.Ordinal);
+        Assert.Equal("Clone failed", result.ErrorMessage);
+        Assert.False(File.Exists(argumentLog));
     }
 
     [Fact]

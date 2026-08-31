@@ -435,8 +435,11 @@ public sealed class McpServerIntegrationTests
 		var displayRoot = format == "markdown"
 			? PathUtility.NormalizeSeparators(physicalProject)
 			: physicalProject;
-		Assert.Contains($"Root: {displayRoot}", body, StringComparison.Ordinal);
-		Assert.Equal(1, CountOccurrences(body, displayRoot));
+		var rootLine = format == "markdown"
+			? ContextRootPresentation.FormatMarkdownLine(displayRoot)
+			: ContextRootPresentation.FormatLine(displayRoot);
+		Assert.Contains(rootLine, body, StringComparison.Ordinal);
+		Assert.Equal(1, CountOccurrences(body, rootLine));
 		Assert.Contains("docs/Guide.md", body, StringComparison.Ordinal);
 		Assert.Contains("README.md", body, StringComparison.Ordinal);
 		var absoluteGuidePath = Path.Combine(physicalProject, "docs", "Guide.md");

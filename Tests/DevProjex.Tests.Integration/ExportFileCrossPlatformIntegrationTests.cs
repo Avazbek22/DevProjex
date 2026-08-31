@@ -116,7 +116,9 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 		}
 		else
 		{
-			Assert.StartsWith($"Root: {Path.GetFullPath(temp.Path).Replace('\\', '/')}", written, StringComparison.Ordinal);
+			var rootLine = ContextRootPresentation.FormatMarkdownLine(
+				Path.GetFullPath(temp.Path).Replace('\\', '/'));
+			Assert.StartsWith(rootLine, written, StringComparison.Ordinal);
 			Assert.Contains("- src/", written, StringComparison.Ordinal);
 			Assert.Contains("  - main.cs", written, StringComparison.Ordinal);
 			Assert.Contains("- README.md", written, StringComparison.Ordinal);
