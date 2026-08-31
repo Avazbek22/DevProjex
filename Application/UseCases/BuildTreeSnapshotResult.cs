@@ -4,4 +4,5 @@ public sealed record BuildTreeSnapshotResult(
 	BuildTreeResult Tree,
 	ProjectTreeInventorySnapshot? Inventory,
 	IReadOnlyList<ContextDiagnostic>? Diagnostics = null,
-	GitScopePresentationProjection? GitScopePresentation = null);
+	GitScopePresentationProjection? GitScopePresentation = null,
+	GitScopePathResult? GitScope = null);

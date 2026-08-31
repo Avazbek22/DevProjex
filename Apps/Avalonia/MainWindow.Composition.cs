@@ -494,10 +494,12 @@ public partial class MainWindow
 		previousProjectionCts?.Dispose();
 		var tree = _currentTree!;
 		var checkedPaths = _treeSelectionSnapshotCache.GetOrCreate(_viewModel.TreeNodes);
+		var gitScopeContext = CaptureGitScopePresentationRefreshContext();
 		ObserveDetachedTask(
 			BuildOrderedSelectionProjectionAsync(
 				tree,
 				checkedPaths,
+				gitScopeContext,
 				selectionVersion,
 				projectionCts,
 				projectionToken),
@@ -507,18 +509,30 @@ public partial class MainWindow
 	private async Task BuildOrderedSelectionProjectionAsync(
 		BuildTreeResult tree,
 		IReadOnlySet<string> checkedPaths,
+		GitScopePresentationRefreshContext? gitScopeContext,
 		long selectionVersion,
 		CancellationTokenSource projectionCts,
 		CancellationToken cancellationToken)
 	{
 		try
 		{
-			var projection = await Task.Run(
-				() => TreeSelectionSnapshotCache.BuildProjectionWithCancellation(
-					tree.Root,
-					checkedPaths,
-					tree.OrderedFilePaths,
-					cancellationToken),
+			var result = await Task.Run(
+				() =>
+				{
+					var selectionProjection =
+						TreeSelectionSnapshotCache.BuildProjectionWithCancellation(
+							tree.Root,
+							checkedPaths,
+							tree.OrderedFilePaths,
+							cancellationToken);
+					var gitScopePresentation = gitScopeContext is null
+						? null
+						: BuildGitScopePresentation(
+							gitScopeContext,
+							checkedPaths,
+							cancellationToken);
+					return (selectionProjection, gitScopePresentation);
+				},
 				cancellationToken);
 			cancellationToken.ThrowIfCancellationRequested();
 			if (_windowLifetimeCts is not { IsCancellationRequested: false } ||
@@ -533,8 +547,14 @@ public partial class MainWindow
 			_treeSelectionSnapshotCache.StoreProjection(
 				selectionVersion,
 				tree.Root,
-				projection.NormalizedPaths,
-				projection.OrderedFiles);
+				result.selectionProjection.NormalizedPaths,
+				result.selectionProjection.OrderedFiles);
+			if (gitScopeContext is not null &&
+			    result.gitScopePresentation is not null &&
+			    IsCurrentGitScopePresentationRefreshContext(gitScopeContext))
+			{
+				_selectionCoordinator.ApplyGitScopePresentation(result.gitScopePresentation);
+			}
 			ScheduleSecretRedactionCountRefresh(_orderedSelectionProjectionPresentation);
 		}
 		finally

@@ -239,6 +239,7 @@ public partial class MainWindow
             _currentTree = null;
             _filterBaseTree = null;
             _currentTreeInventory = null;
+			_gitScopePresentationRefreshContext = null;
             ResetPreviewTreePaneVisualState();
             ResetInteractiveFilterCache();
             _metrics.InvalidateComputedCaches();

@@ -300,18 +300,37 @@ public sealed class MainWindowGitScopeLifecycleUiTests
 			"staged\n",
 			TestContext.Current.CancellationToken);
 		RunGit(project.RootPath, "add", "--all");
-		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+		var provider = RecordingGitScopePathProvider.Available(
+			[selectedPath, siblingExtensionPath, siblingDotFilePath]);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			configureServices: services => services with { GitScopePathProvider = provider });
 
 		try
 		{
-			await SetSingleTreePathSelectionAsync(window, "container", "selected");
 			await SelectAndApplyGitModeAsync(window, GitFilteringMode.Staged);
+			await WaitForExtensionStateAsync(window, ".xyz", visible: true);
+			Assert.Contains(
+				UiTestDriver.GetViewModel(window).PathIgnoreOptions,
+				static option => option.Id == IgnoreOptionId.DotFiles);
+			var providerCallCount = provider.CallCount;
+
+			await SetSingleTreePathSelectionAsync(window, "container", "selected");
 
 			await WaitForExtensionStateAsync(window, ".cs", visible: true);
 			await WaitForExtensionStateAsync(window, ".xyz", visible: false);
 			Assert.DoesNotContain(
 				UiTestDriver.GetViewModel(window).PathIgnoreOptions,
 				static option => option.Id == IgnoreOptionId.DotFiles);
+			Assert.Equal(providerCallCount, provider.CallCount);
+
+			await window.Dispatcher.InvokeAsync(() =>
+				Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes).IsChecked = true);
+			await WaitForExtensionStateAsync(window, ".xyz", visible: true);
+			Assert.Contains(
+				UiTestDriver.GetViewModel(window).PathIgnoreOptions,
+				static option => option.Id == IgnoreOptionId.DotFiles);
+			Assert.Equal(providerCallCount, provider.CallCount);
 		}
 		finally
 		{
@@ -1043,12 +1062,17 @@ public sealed class MainWindowGitScopeLifecycleUiTests
 	}
 
 	[AvaloniaFact]
-	public async Task ExplicitEmptyTreeSelectionDoesNotQueryGitScope()
+	public async Task ZeroCheckedPathsUseTheWholeTreeGitScope()
 	{
 		EnsureGitAvailable();
 		using var project = UiTestProject.CreateWithCleanGitAndSmartWorkspace();
+		var includedPath = Path.Combine(project.RootPath, "Whole.scope");
+		await File.WriteAllTextAsync(
+			includedPath,
+			"whole tree scope\n",
+			TestContext.Current.CancellationToken);
 		InitializeRepository(project.RootPath);
-		var provider = RecordingGitScopePathProvider.Unavailable();
+		var provider = RecordingGitScopePathProvider.Available([includedPath]);
 		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
 			project,
 			configureServices: services => services with { GitScopePathProvider = provider });
@@ -1067,11 +1091,13 @@ public sealed class MainWindowGitScopeLifecycleUiTests
 
 			var viewModel = UiTestDriver.GetViewModel(window);
 			Assert.Equal(GitFilteringMode.Staged, viewModel.SelectedGitFilteringModeOption?.Mode);
-			Assert.Empty(Assert.Single(viewModel.TreeNodes).Children);
-			Assert.Equal(0, provider.CallCount);
-			Assert.DoesNotContain(
-				viewModel.ToastItems,
-				static toast => toast.Message.Contains("Git", StringComparison.OrdinalIgnoreCase));
+			Assert.Contains(
+				Assert.Single(viewModel.TreeNodes).Children,
+				static node => string.Equals(node.DisplayName, "Whole.scope", StringComparison.Ordinal));
+			Assert.Contains(
+				viewModel.Extensions,
+				static option => string.Equals(option.Name, ".scope", StringComparison.OrdinalIgnoreCase));
+			Assert.Equal(1, provider.CallCount);
 		}
 		finally
 		{

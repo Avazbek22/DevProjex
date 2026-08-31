@@ -143,6 +143,7 @@ public partial class MainWindow : IRefreshTreePipelineHost
         _viewModel.TreeNodes.Clear();
 
         _currentTree = result.Tree;
+		UpdateGitScopePresentationRefreshContext(input, result);
 		if (!interactiveFilter)
 		{
 			// "Apply settings" is the commit point for syntax transformations and section-wide

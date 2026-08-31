@@ -14,6 +14,69 @@ namespace DevProjex.Tests.UI;
 [Collection(UiWorkspaceCollection.Name)]
 public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
 {
+	[AvaloniaFact]
+	public async Task ContentPreview_ZeroCheckedPathsRemainTheImplicitWholeTreeForPreviewAndCopy()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+		try
+		{
+			Assert.True(Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes).IsChecked is false);
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+			var initialPayload = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+			Assert.Contains("DevProjex UI test workspace", initialPayload, StringComparison.Ordinal);
+			Assert.Equal(
+				initialPayload,
+				await UiTestDriver.ComputeAppliedPreviewCopyPayloadAsync(
+					window,
+					PreviewContentMode.Content,
+					TestContext.Current.CancellationToken));
+			await UiTestDriver.WaitForStatusMetricsReadyAsync(window);
+			var viewModel = UiTestDriver.GetViewModel(window);
+			var initialTreeMetrics = viewModel.StatusTreeStatsText;
+			var initialContentMetrics = viewModel.StatusContentStatsText;
+			Assert.NotEmpty(initialTreeMetrics);
+			Assert.NotEmpty(initialContentMetrics);
+
+			await window.Dispatcher.InvokeAsync(() =>
+				Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes).IsChecked = true);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => string.Equals(
+					UiTestDriver.ComputeCurrentPreviewCopyPayload(window),
+					initialPayload,
+					StringComparison.Ordinal),
+				"explicit whole-tree selection to preserve the preview document");
+
+			await window.Dispatcher.InvokeAsync(() =>
+				Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes).IsChecked = false);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => string.Equals(
+					UiTestDriver.ComputeCurrentPreviewCopyPayload(window),
+					initialPayload,
+					StringComparison.Ordinal),
+				"zero checked paths to remain the implicit whole-tree preview");
+			Assert.Equal(
+				initialPayload,
+				await UiTestDriver.ComputeAppliedPreviewCopyPayloadAsync(
+					window,
+					PreviewContentMode.Content,
+					TestContext.Current.CancellationToken));
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => string.Equals(viewModel.StatusTreeStatsText, initialTreeMetrics, StringComparison.Ordinal) &&
+				      string.Equals(viewModel.StatusContentStatsText, initialContentMetrics, StringComparison.Ordinal),
+				"zero checked paths to retain the whole-tree status metrics");
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
 	[AvaloniaTheory]
 	[InlineData(false)]
 	[InlineData(true)]

@@ -437,6 +437,45 @@ public sealed class MainWindowPreviewInternalsTests
     }
 
     [Fact]
+    public void ZeroCheckedPathsUseTheWholeTreeForCacheWarmupAndOrderedProjection()
+    {
+        var root = CreateTree("root");
+        var zeroCheckedPaths = new HashSet<string>(PathComparer.Default);
+        var checkedRoot = new HashSet<string>(PathComparer.Default) { root.FullPath };
+        var allOrderedFiles = PreviewFileCollectionPolicy.BuildOrderedAllFilePaths(root);
+
+        Assert.Equal(
+            PreviewFileCollectionPolicy.BuildPreviewCacheKey(
+                "/root",
+                root,
+                PreviewContentMode.Content,
+                TreeTextFormat.Ascii,
+                checkedRoot),
+            PreviewFileCollectionPolicy.BuildPreviewCacheKey(
+                "/root",
+                root,
+                PreviewContentMode.Content,
+                TreeTextFormat.Ascii,
+                zeroCheckedPaths));
+        Assert.Equal(
+            allOrderedFiles,
+            PreviewFileCollectionPolicy.CollectOrderedPreviewFiles(
+                zeroCheckedPaths,
+                hasSelection: false,
+                root));
+        Assert.Equal(
+            allOrderedFiles,
+            TreeSelectionSnapshotCache.BuildProjection(
+                root,
+                zeroCheckedPaths,
+                allOrderedFiles).OrderedFiles);
+        var warmupPlan = PreviewWarmupPolicy.CreateSelectionPlan(root, zeroCheckedPaths);
+        Assert.NotNull(warmupPlan);
+        Assert.False(warmupPlan.HasExplicitSelection);
+        Assert.True(warmupPlan.SelectedRoot?.IncludesWholeSubtree);
+    }
+
+    [Fact]
     public void CollectOrderedPreviewFiles_CheckedRootMatchesImplicitFullTree()
     {
         var root = CreateTree("root");

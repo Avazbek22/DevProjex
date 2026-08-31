@@ -2286,6 +2286,7 @@ public partial class MainWindow : Window
         _currentTree = null;
         _filterBaseTree = null;
         _currentTreeInventory = null;
+		_gitScopePresentationRefreshContext = null;
         _currentProjectDisplayName = null;
         _currentRepositoryUrl = null;
         _searchFilterController.ClearProjectState();
@@ -2344,6 +2345,7 @@ public partial class MainWindow : Window
 
     private IReadOnlySet<string> GetCheckedPaths()
     {
+		// Empty checked paths intentionally mean the whole tree in the GUI and must not be reinterpreted as Select None.
 		return _currentTree is null
 			? _treeSelectionSnapshotCache.GetOrCreate(_viewModel.TreeNodes)
 			: _treeSelectionSnapshotCache.GetOrCreateNormalized(
@@ -2358,8 +2360,9 @@ public partial class MainWindow : Window
 		    !PathComparer.Default.Equals(_explicitTreeSelectionProjectPath, _currentPath))
 			return null;
 
-		return GetCheckedPaths();
-	}
+		var checkedPaths = GetCheckedPaths();
+		return checkedPaths.Count == 0 ? null : checkedPaths;
+    }
 
 	private IReadOnlyList<string> GetOrderedSelectedFilePaths() =>
 		_currentTree is null

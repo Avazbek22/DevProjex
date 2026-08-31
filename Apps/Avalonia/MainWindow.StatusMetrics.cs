@@ -79,7 +79,9 @@ public partial class MainWindow
 
 	private void PublishTreeSelectionChange()
 	{
-        _treeSelectionSnapshotCache.Invalidate();
+		_treeSelectionSnapshotCache.Invalidate();
+		if (CaptureGitScopePresentationRefreshContext() is not null)
+			BeginOrderedSelectionProjectionBuild(StatusOperationPresentation.ExtendedDelay);
 		InvalidateSecretRedactionCount();
 		ScheduleCompressionRefreshForSelectionChange();
         _metrics.ScheduleRecalculate();
