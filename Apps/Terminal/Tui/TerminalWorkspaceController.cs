@@ -46,7 +46,9 @@ public sealed class TerminalWorkspaceController(
 				cancellationToken)
 			.ConfigureAwait(false);
 		ThrowIfTrackedModeIsUnavailable(plan);
-		return new TerminalWorkspaceState(plan);
+		return new TerminalWorkspaceState(
+			plan,
+			services.ContextPlanner.GetSelectedRelativePathFrontier(plan));
 	}
 
 	public async Task RebuildAsync(
@@ -111,7 +113,7 @@ public sealed class TerminalWorkspaceController(
 				selection.Extensions ?? state.Plan.SelectedExtensions,
 				StringComparer.OrdinalIgnoreCase),
 			selectedItems,
-			services.ContextPlanner.GetSelectedRelativePathFrontier(state.Plan),
+			state.BuildSelectedPathFrontier(),
 			new Dictionary<string, bool>(
 				state.ExtensionOptionStates,
 				StringComparer.OrdinalIgnoreCase),
@@ -199,6 +201,7 @@ public sealed class TerminalWorkspaceController(
 			Roots = ShouldPreserveRootsDuringDiscovery(request.Selection)
 				? request.Selection.Roots
 				: null,
+			Extensions = null,
 			SelectedPaths = request.SelectedPathFrontier is { Count: 0 }
 				? []
 				: null
@@ -243,7 +246,8 @@ public sealed class TerminalWorkspaceController(
 			.ToArray();
 		var selection = discovered.Selection with
 		{
-			Extensions = selectedExtensions
+			Extensions = selectedExtensions,
+			SelectedPaths = discoverySelection.SelectedPaths
 		};
 		var availableExtensionSet = discovered.AvailableExtensions
 			.ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -373,6 +377,8 @@ public sealed class TerminalWorkspaceController(
 				state.ExtensionOptionStates,
 				state.BuildSelectedItemRelativePaths(),
 				state.PathOptionStates,
+				state.BuildSelectedPathFrontier(),
+				ResolveDefaultFallbackGitMode(selection),
 				cancellationToken)
 			.ConfigureAwait(false);
 		ApplySettingsPlan(state, result);
@@ -459,6 +465,8 @@ public sealed class TerminalWorkspaceController(
 				state.BuildExtensionOptionStates(extensions),
 				state.BuildSelectedItemRelativePaths(),
 				state.PathOptionStates,
+				state.BuildSelectedPathFrontier(),
+				ResolveDefaultFallbackGitMode(state.Plan.Selection),
 				cancellationToken)
 			.ConfigureAwait(false);
 		ApplySettingsPlan(state, result);
@@ -497,6 +505,7 @@ public sealed class TerminalWorkspaceController(
 			extensionOptionStates,
 			previousPaths,
 			pathOptionStates,
+			ResolveSelectedPathFrontier(baseline, selection),
 			ResolveDefaultFallbackGitMode(selection),
 			cancellationToken).ConfigureAwait(false);
 
@@ -506,6 +515,25 @@ public sealed class TerminalWorkspaceController(
 		IReadOnlyDictionary<string, bool> extensionOptionStates,
 		IReadOnlySet<string> previousPaths,
 		IReadOnlyDictionary<string, bool> pathOptionStates,
+		GitFilteringMode fallbackGitMode,
+		CancellationToken cancellationToken)
+		=> await BuildSettingsPlanAsync(
+			baseline,
+			selection,
+			extensionOptionStates,
+			previousPaths,
+			pathOptionStates,
+			ResolveSelectedPathFrontier(baseline, selection),
+			fallbackGitMode,
+			cancellationToken).ConfigureAwait(false);
+
+	internal async Task<TerminalSettingsPlanResult> BuildSettingsPlanAsync(
+		ProjectContextPlan baseline,
+		ProjectSelectionSpec selection,
+		IReadOnlyDictionary<string, bool> extensionOptionStates,
+		IReadOnlySet<string> previousPaths,
+		IReadOnlyDictionary<string, bool> pathOptionStates,
+		IReadOnlyCollection<string>? selectedPathFrontier,
 		GitFilteringMode fallbackGitMode,
 		CancellationToken cancellationToken)
 	{
@@ -540,7 +568,7 @@ public sealed class TerminalWorkspaceController(
 			selection,
 			baseline.SelectedExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase),
 			previousPaths,
-			services.ContextPlanner.GetSelectedRelativePathFrontier(baseline),
+			selectedPathFrontier,
 			extensionOptionStates,
 			pathOptionStates,
 			baseline.Selection.GitMode == selection.GitMode &&
@@ -557,6 +585,16 @@ public sealed class TerminalWorkspaceController(
 			result.ExtensionOptionStates,
 			result.PathOptionStates);
 	}
+
+	private IReadOnlyCollection<string>? ResolveSelectedPathFrontier(
+		ProjectContextPlan baseline,
+		ProjectSelectionSpec selection) =>
+		selection.SelectedPaths switch
+		{
+			null => services.ContextPlanner.GetSelectedRelativePathFrontier(baseline),
+			{ Count: 0 } => [],
+			_ => selection.SelectedPaths.ToArray()
+		};
 
 	internal static bool RequiresStructuralRefresh(
 		ProjectSelectionSpec baseline,

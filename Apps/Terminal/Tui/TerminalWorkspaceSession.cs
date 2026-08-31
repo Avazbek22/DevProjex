@@ -3734,6 +3734,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		var previousPaths = state.BuildSelectedItemRelativePaths();
 		var pathStates = TerminalWorkspaceController.ClonePathOptionStates(
 			state.PathOptionStates);
+		var selectedPathFrontier = state.BuildSelectedPathFrontier();
 		var preferredGitMode = _settingsDraftPreferredGitMode ?? _preferredGitMode;
 		var originatedFromCommandLine = _settingsDraftOriginatedFromCommandLine;
 		var requestId = Interlocked.Increment(ref _settingsRefreshRequestId);
@@ -3748,6 +3749,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				extensionStates,
 				previousPaths,
 				pathStates,
+				selectedPathFrontier,
 				preferredGitMode,
 				originatedFromCommandLine,
 				requestId,
@@ -3764,6 +3766,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		IReadOnlyDictionary<string, bool> extensionStates,
 		IReadOnlySet<string> previousPaths,
 		IReadOnlyDictionary<string, bool> pathStates,
+		IReadOnlyCollection<string>? selectedPathFrontier,
 		GitFilteringMode preferredGitMode,
 		bool originatedFromCommandLine,
 		long requestId,
@@ -3802,6 +3805,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					extensionStates,
 					previousPaths,
 					pathStates,
+					selectedPathFrontier,
 					preferredGitMode,
 					cancellationToken)
 				.ConfigureAwait(false);

@@ -69,11 +69,16 @@ public sealed class TerminalWorkspaceStateTests
 	[Fact]
 	public void CompleteSelectionUsesCanonicalEmptySelectedPaths()
 	{
-		var state = new TerminalWorkspaceState(CreatePlan());
+		using var state = new TerminalWorkspaceState(CreatePlan());
 
 		Assert.Empty(state.BuildSelectedRelativePaths());
+		Assert.Null(state.BuildSelection().SelectedPaths);
 		Assert.Equal(2, state.SelectedFileCount);
 		Assert.Equal(3, state.SelectedFolderCount);
+
+		state.SelectNone();
+
+		Assert.Empty(state.BuildSelection().SelectedPaths!);
 	}
 
 	[Fact]
