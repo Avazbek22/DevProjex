@@ -614,11 +614,9 @@ internal static class GitTrackedPathIndexCache
 		try
 		{
 			var attributes = File.GetAttributes(gitMetadataPath);
-			if (attributes.HasFlag(FileAttributes.ReparsePoint))
-				return false;
-
-			return attributes.HasFlag(FileAttributes.Directory) ||
-			       UnixFileTypeInspector.IsRegularFile(gitMetadataPath);
+			return UnixFileTypeInspector.IsPhysicalDirectoryOrRegularFile(
+				gitMetadataPath,
+				attributes);
 		}
 		catch (FileNotFoundException)
 		{

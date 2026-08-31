@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Security;
 using DevProjex.Application.Diagnostics;
 using DevProjex.Application.Selection;
+using DevProjex.Application.Services;
 
 namespace DevProjex.Infrastructure.FileSystem;
 
@@ -1736,10 +1737,13 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 	{
 		try
 		{
-			var attributes = File.GetAttributes(Path.Combine(rootPath, ".git"));
-			return attributes.HasFlag(FileAttributes.ReparsePoint)
-				? (GitWorkspaceEvidence.Empty, false)
-				: (new GitWorkspaceEvidence(HasRepositoryBoundary: true), false);
+			var gitMetadataPath = Path.Combine(rootPath, ".git");
+			var attributes = File.GetAttributes(gitMetadataPath);
+			return UnixFileTypeInspector.IsPhysicalDirectoryOrRegularFile(
+				gitMetadataPath,
+				attributes)
+				? (new GitWorkspaceEvidence(HasRepositoryBoundary: true), false)
+				: (GitWorkspaceEvidence.Empty, false);
 		}
 		catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
 		{

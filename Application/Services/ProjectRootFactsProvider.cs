@@ -219,6 +219,13 @@ public sealed class ProjectRootFactsProvider
 					continue;
 				}
 
+				if (!entry.IsReparsePoint &&
+				    PathComparer.Default.Equals(entry.Name, ".git") &&
+				    !UnixFileTypeInspector.IsRegularFile(entry.FullPath))
+				{
+					continue;
+				}
+
 				files.Add(new ProjectRootFileFact(
 					entry.Name,
 					Path.GetExtension(entry.Name),

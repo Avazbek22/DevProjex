@@ -8,6 +8,10 @@ public static class UnixFileTypeInspector
 	private const uint FileTypeMask = 0xF000;
 	private const uint RegularFileType = 0x8000;
 
+	public static bool IsPhysicalDirectoryOrRegularFile(string path, FileAttributes attributes) =>
+		!attributes.HasFlag(FileAttributes.ReparsePoint) &&
+		(attributes.HasFlag(FileAttributes.Directory) || IsRegularFile(path));
+
 	public static bool IsRegularFile(string path)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(path);
