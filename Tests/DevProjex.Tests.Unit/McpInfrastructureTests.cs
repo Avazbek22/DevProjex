@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using DevProjex.Application.Compression;
 using DevProjex.Application.Context;
+using DevProjex.Application.Secrets;
+using DevProjex.Application.Services;
 using DevProjex.Mcp;
 using ModelContextProtocol.Protocol;
 
@@ -614,6 +616,66 @@ public sealed class McpInfrastructureTests
 		Assert.Equal(
 			McpErrorCodes.InvalidPattern,
 			Assert.Throws<McpToolException>(() => McpGlobSet.Create(["../*.cs"], null)).Code);
+	}
+
+	[Fact]
+	public void RootJailFileOpenerRejectsADirectPathOutsideEveryRoot()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var outside = workspace.CreateFile("outside/secret.txt", "outside");
+		var registry = new McpRootRegistry([project]);
+		var opener = new McpRootJailFileStreamOpener(registry);
+
+		var exception = Assert.Throws<McpToolException>(() =>
+			opener.OpenRead(
+				outside,
+				bufferSize: 4096,
+				FileShare.Read,
+				asynchronous: false));
+
+		Assert.Equal(McpErrorCodes.RootViolation, exception.Code);
+		Assert.Contains(project, exception.Message, StringComparison.Ordinal);
+		Assert.Contains("Valid roots", exception.Message, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task PreparedAnalyzerReadsTrustedOutputWithoutWeakeningSourceJail()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var source = workspace.CreateFile("project/source.txt", "source");
+		var preparedPath = workspace.CreateFile("prepared/source.txt", "redacted");
+		var registry = new McpRootRegistry([project]);
+		var sourceAnalyzer = new FileContentAnalyzer(
+			new McpRootJailFileStreamOpener(registry).OpenRead);
+		await using var prepared = new PreparedSecretRedactionOutput(
+			workingDirectory: null,
+			new Dictionary<string, PreparedSecretFile>(PathComparer.Default)
+			{
+				[source] = new PreparedSecretFile(
+					source,
+					preparedPath,
+					FileContentClassification.Text,
+					Encoding: null,
+					Redactions: [])
+			},
+			snapshot: null);
+		var analyzer = new PreparedSecretFileContentAnalyzer(
+			sourceAnalyzer,
+			new FileContentAnalyzer(),
+			prepared);
+
+		var content = await analyzer.TryReadAsTextAsync(
+			source,
+			TestContext.Current.CancellationToken);
+
+		Assert.NotNull(content);
+		Assert.Equal("redacted", content.Content);
+		await Assert.ThrowsAsync<McpToolException>(async () =>
+			await sourceAnalyzer.TryReadAsTextAsync(
+				preparedPath,
+				TestContext.Current.CancellationToken));
 	}
 
 	[Fact]

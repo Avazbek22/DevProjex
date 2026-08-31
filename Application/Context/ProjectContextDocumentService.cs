@@ -44,7 +44,8 @@ public sealed class ProjectContextDocumentService(
 	Func<FileContentClassification, string>? omissionMessageProvider = null,
 	SecretRedactionSession? secretRedactionSession = null,
 	CodeCompressionSession? codeCompressionSession = null,
-	OutputPathRedactionDecision? outputPathRedactionDecision = null)
+	OutputPathRedactionDecision? outputPathRedactionDecision = null,
+	IFileContentAnalyzer? preparedContentAnalyzer = null)
 {
 	private const int SchemaVersion = 1;
 	private const string Kind = "devprojex-context";
@@ -261,7 +262,7 @@ public sealed class ProjectContextDocumentService(
 		var pathRedaction = outputPathRedactionDecision ??
 		                    OutputRootPathPresentation.CaptureRedactionDecision(
 			                    CreateTransformationContext(plan));
-		var analyzer = new PreparedSecretFileContentAnalyzer(contentAnalyzer, prepared);
+		var analyzer = CreatePreparedAnalyzer(prepared);
 		plan = await RefreshStructuredContentMetricsAsync(
 				plan,
 				view,
@@ -322,7 +323,7 @@ public sealed class ProjectContextDocumentService(
 			.ConfigureAwait(false);
 		var service = new ProjectContextDocumentService(
 			treeExportService,
-			new PreparedSecretFileContentAnalyzer(contentAnalyzer, prepared),
+			CreatePreparedAnalyzer(prepared),
 			omissionMessageProvider,
 			secretRedactionSession: null,
 			codeCompressionSession: null,
@@ -372,6 +373,12 @@ public sealed class ProjectContextDocumentService(
 		maximumEstimatedTokens is null
 			? null
 			: new ProjectContextTokenBudgetAccumulator(maximumEstimatedTokens.Value);
+
+	private IFileContentAnalyzer CreatePreparedAnalyzer(PreparedSecretRedactionOutput prepared) =>
+		new PreparedSecretFileContentAnalyzer(
+			contentAnalyzer,
+			preparedContentAnalyzer ?? contentAnalyzer,
+			prepared);
 
 	private static async Task<ProjectContextPlan> RefreshStructuredContentMetricsAsync(
 		ProjectContextPlan plan,
@@ -446,7 +453,7 @@ public sealed class ProjectContextDocumentService(
 		await using var prepared = await preparer
 			.PrepareAsync(context, plan.IncludedFiles, cancellationToken)
 			.ConfigureAwait(false);
-		var analyzer = new PreparedSecretFileContentAnalyzer(contentAnalyzer, prepared);
+		var analyzer = CreatePreparedAnalyzer(prepared);
 		var service = new ProjectContextDocumentService(
 			treeExportService,
 			analyzer,
@@ -480,7 +487,7 @@ public sealed class ProjectContextDocumentService(
 		await using var prepared = await preparer
 			.PrepareAsync(context, plan.IncludedFiles, cancellationToken)
 			.ConfigureAwait(false);
-		var analyzer = new PreparedSecretFileContentAnalyzer(contentAnalyzer, prepared);
+		var analyzer = CreatePreparedAnalyzer(prepared);
 		plan = await RefreshStructuredContentMetricsAsync(
 				plan,
 				view,

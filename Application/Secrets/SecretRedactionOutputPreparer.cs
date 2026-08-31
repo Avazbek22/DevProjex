@@ -10,10 +10,14 @@ namespace DevProjex.Application.Secrets;
 public sealed class SecretRedactionOutputPreparer
 {
 	private readonly IFileContentAnalyzer contentAnalyzer;
+	private readonly IFileContentAnalyzer preparedContentAnalyzer;
 
-	public SecretRedactionOutputPreparer(IFileContentAnalyzer contentAnalyzer)
+	public SecretRedactionOutputPreparer(
+		IFileContentAnalyzer contentAnalyzer,
+		IFileContentAnalyzer? preparedContentAnalyzer = null)
 	{
 		this.contentAnalyzer = contentAnalyzer ?? throw new ArgumentNullException(nameof(contentAnalyzer));
+		this.preparedContentAnalyzer = preparedContentAnalyzer ?? contentAnalyzer;
 		SecretRedactionTempDirectoryScavenger.StartOnce();
 	}
 
@@ -27,7 +31,10 @@ public sealed class SecretRedactionOutputPreparer
 	public IFileContentAnalyzer CreatePreparedAnalyzer(PreparedSecretRedactionOutput prepared)
 	{
 		ArgumentNullException.ThrowIfNull(prepared);
-		return new PreparedSecretFileContentAnalyzer(contentAnalyzer, prepared);
+		return new PreparedSecretFileContentAnalyzer(
+			contentAnalyzer,
+			preparedContentAnalyzer,
+			prepared);
 	}
 
 	/// <summary>
@@ -1943,10 +1950,35 @@ public sealed class PreparedSecretRedactionOutput : IAsyncDisposable
 /// Presents prepared text under its original path identity. Document serializers continue to use
 /// source-relative headers while all content reads are redirected to the redacted snapshot.
 /// </summary>
-public sealed class PreparedSecretFileContentAnalyzer(
-	IFileContentAnalyzer inner,
-	PreparedSecretRedactionOutput prepared) : IFileContentAnalyzer
+public sealed class PreparedSecretFileContentAnalyzer : IFileContentAnalyzer
 {
+	private readonly IFileContentAnalyzer sourceAnalyzer;
+	private readonly IFileContentAnalyzer preparedContentAnalyzer;
+	private readonly PreparedSecretRedactionOutput prepared;
+
+	public PreparedSecretFileContentAnalyzer(
+		IFileContentAnalyzer sourceAnalyzer,
+		PreparedSecretRedactionOutput prepared)
+		: this(sourceAnalyzer, sourceAnalyzer, prepared)
+	{
+	}
+
+	public PreparedSecretFileContentAnalyzer(
+		IFileContentAnalyzer sourceAnalyzer,
+		IFileContentAnalyzer preparedContentAnalyzer,
+		PreparedSecretRedactionOutput prepared)
+	{
+		this.sourceAnalyzer = sourceAnalyzer ?? throw new ArgumentNullException(nameof(sourceAnalyzer));
+		this.preparedContentAnalyzer = preparedContentAnalyzer ??
+		                                  throw new ArgumentNullException(nameof(preparedContentAnalyzer));
+		this.prepared = prepared ?? throw new ArgumentNullException(nameof(prepared));
+	}
+
+	private IFileContentAnalyzer ResolveAnalyzer(PreparedSecretFile file) =>
+		PathComparer.Default.Equals(file.SourcePath, file.ContentPath)
+			? sourceAnalyzer
+			: preparedContentAnalyzer;
+
 	/// <summary>
 	/// An unscannable file retains its original classification but is never given a larger read
 	/// budget than the scanner. Too-large text stays estimated and unsupported text stays undecoded,
@@ -1975,7 +2007,7 @@ public sealed class PreparedSecretFileContentAnalyzer(
 			return new FileContentReadResult(FileContentClassification.Binary);
 
 		file.EnsureSourceVersion();
-		var result = await inner.ReadClassifiedAsync(
+		var result = await ResolveAnalyzer(file).ReadClassifiedAsync(
 				file.ContentPath,
 				ClampReadLimit(file, maxSizeForFullRead),
 				cancellationToken)
@@ -1993,7 +2025,7 @@ public sealed class PreparedSecretFileContentAnalyzer(
 			return false;
 
 		file.EnsureSourceVersion();
-		var result = await inner.IsTextFileAsync(file.ContentPath, cancellationToken)
+		var result = await ResolveAnalyzer(file).IsTextFileAsync(file.ContentPath, cancellationToken)
 			.ConfigureAwait(false);
 		file.EnsureSourceVersion();
 		return result;
@@ -2008,7 +2040,7 @@ public sealed class PreparedSecretFileContentAnalyzer(
 			return null;
 
 		file.EnsureSourceVersion();
-		var result = await inner.GetTextFileMetricsAsync(file.ContentPath, cancellationToken)
+		var result = await ResolveAnalyzer(file).GetTextFileMetricsAsync(file.ContentPath, cancellationToken)
 			.ConfigureAwait(false);
 		file.EnsureSourceVersion();
 		return result;
@@ -2023,7 +2055,7 @@ public sealed class PreparedSecretFileContentAnalyzer(
 			return new FileContentMetricsResult(FileContentClassification.Binary);
 
 		file.EnsureSourceVersion();
-		var result = await inner.GetClassifiedMetricsAsync(file.ContentPath, cancellationToken)
+		var result = await ResolveAnalyzer(file).GetClassifiedMetricsAsync(file.ContentPath, cancellationToken)
 			.ConfigureAwait(false);
 		file.EnsureSourceVersion();
 		return result;
@@ -2041,7 +2073,7 @@ public sealed class PreparedSecretFileContentAnalyzer(
 		if (file.IsUnscannable)
 		{
 			file.EnsureSourceVersion();
-			var metrics = await inner.GetClassifiedMetricsAsync(file.ContentPath, cancellationToken)
+			var metrics = await ResolveAnalyzer(file).GetClassifiedMetricsAsync(file.ContentPath, cancellationToken)
 				.ConfigureAwait(false);
 			file.EnsureSourceVersion();
 			return new UnscannableSnapshot(
@@ -2050,7 +2082,7 @@ public sealed class PreparedSecretFileContentAnalyzer(
 		}
 
 		file.EnsureSourceVersion();
-		var snapshot = await inner.OpenCompleteSnapshotAsync(file.ContentPath, cancellationToken)
+		var snapshot = await ResolveAnalyzer(file).OpenCompleteSnapshotAsync(file.ContentPath, cancellationToken)
 			.ConfigureAwait(false);
 		try
 		{
@@ -2072,7 +2104,7 @@ public sealed class PreparedSecretFileContentAnalyzer(
 		if (file.IsUnscannable)
 		{
 			file.EnsureSourceVersion();
-			var unscannable = await inner.TryReadAsTextAsync(
+			var unscannable = await ResolveAnalyzer(file).TryReadAsTextAsync(
 				file.ContentPath,
 				SecretRedactionOutputPreparer.MaximumScannableFileBytes,
 				cancellationToken).ConfigureAwait(false);
@@ -2084,7 +2116,7 @@ public sealed class PreparedSecretFileContentAnalyzer(
 			return null;
 
 		file.EnsureSourceVersion();
-		var result = await inner.TryReadAsTextAsync(file.ContentPath, cancellationToken)
+		var result = await ResolveAnalyzer(file).TryReadAsTextAsync(file.ContentPath, cancellationToken)
 			.ConfigureAwait(false);
 		file.EnsureSourceVersion();
 		return result;
@@ -2100,7 +2132,7 @@ public sealed class PreparedSecretFileContentAnalyzer(
 			return null;
 
 		file.EnsureSourceVersion();
-		var result = await inner.TryReadAsTextAsync(
+		var result = await ResolveAnalyzer(file).TryReadAsTextAsync(
 				file.ContentPath,
 				ClampReadLimit(file, maxSizeForFullRead),
 				cancellationToken)

@@ -70,6 +70,7 @@ internal sealed class McpServices : IDisposable
 		var treeExport = new TreeExportService();
 		var guardedFileOpener = new McpRootJailFileStreamOpener(roots);
 		var contentAnalyzer = new FileContentAnalyzer(guardedFileOpener.OpenRead);
+		var preparedContentAnalyzer = new FileContentAnalyzer();
 		var resolvedDataPath = appDataPathProvider ??
 		                       DevProjex.Infrastructure.Persistence.UserDataPathResolver.GetConfigurationRoot;
 		var profileStore = new ProjectProfileStore(resolvedDataPath);
@@ -119,7 +120,8 @@ internal sealed class McpServices : IDisposable
 					contentAnalyzer,
 					Omission,
 					redactionSession,
-					compressionSession),
+					compressionSession,
+					preparedContentAnalyzer: preparedContentAnalyzer),
 				treeExport,
 				contentAnalyzer,
 				new ProjectSelectionResolver(profileStore, new PortableProjectProfileService().LoadAsync),
@@ -127,7 +129,7 @@ internal sealed class McpServices : IDisposable
 				new GitScopePathProvider(),
 				redactionSession,
 				compressionSession,
-				new SecretRedactionOutputPreparer(contentAnalyzer));
+				new SecretRedactionOutputPreparer(contentAnalyzer, preparedContentAnalyzer));
 		}
 		catch
 		{
