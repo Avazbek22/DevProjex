@@ -318,6 +318,23 @@ public sealed class TerminalWorkspacePresentationPolicyTests
 	}
 
 	[Fact]
+	public void PreviewWordWrapBuildsFileBackedGeometryThroughOneRangeVisit()
+	{
+		using var document = new CountingRangePreviewTextDocument(40);
+		using var view = new TerminalVirtualizedPreviewView(showScrollBars: false)
+		{
+			Frame = new Rectangle(0, 0, 5, 2)
+		};
+		view.SetDocument(document, preserveViewport: false);
+
+		view.ToggleWordWrap();
+
+		Assert.Equal(1, document.RangeVisitCount);
+		Assert.Equal(0, document.LineReadCount);
+		Assert.True(view.ContentRowCount > document.LineCount);
+	}
+
+	[Fact]
 	public void PreviewWordWrapMapsSearchNavigationToWrappedCoordinates()
 	{
 		using var document = new InMemoryPreviewTextDocument("012345secret-tail");

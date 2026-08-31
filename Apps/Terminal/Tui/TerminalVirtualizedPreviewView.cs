@@ -10,6 +10,7 @@ internal sealed class TerminalVirtualizedPreviewView : View
 {
 	private const int MaximumCachedLineCount = 256;
 	private const int MaximumCachedCharacterCount = 1_000_000;
+	private static readonly int[] SingleWrappedSegmentColumns = [0];
 	private readonly List<PreviewTextSearchMatch> _searchMatches = [];
 	private readonly Dictionary<int, string> _cachedLines = [];
 	private readonly Queue<int> _cachedLineOrder = new(MaximumCachedLineCount);
@@ -23,7 +24,7 @@ internal sealed class TerminalVirtualizedPreviewView : View
 	private int _maximumDisplayColumns;
 	private int _cachedCharacterCount;
 	private int[] _wrappedLineStarts = [0, 1];
-	private int[][] _wrappedSegmentColumns = [[0]];
+	private int[][] _wrappedSegmentColumns = [SingleWrappedSegmentColumns];
 	private int _wrappedWidth;
 	private bool _updatingContentGeometry;
 	private long _viewportChangeRevision;
@@ -612,7 +613,7 @@ internal sealed class TerminalVirtualizedPreviewView : View
 		if (_document is null)
 		{
 			_wrappedLineStarts = [0, 1];
-			_wrappedSegmentColumns = [[0]];
+			_wrappedSegmentColumns = [SingleWrappedSegmentColumns];
 			_wrappedWidth = Math.Max(1, VisibleTextWidth);
 			return;
 		}
@@ -621,17 +622,21 @@ internal sealed class TerminalVirtualizedPreviewView : View
 		if (_wrappedWidth == width && _wrappedLineStarts.Length == _document.LineCount + 1)
 			return;
 
-		var starts = new int[_document.LineCount + 1];
-		var segmentColumns = new int[_document.LineCount][];
+		var lineCount = _document.LineCount;
+		var starts = new int[lineCount + 1];
+		var segmentColumns = new int[lineCount][];
 		var row = 0;
-		for (var line = 0; line < _document.LineCount; line++)
+		_document.VisitLines(1, lineCount, VisitLine);
+
+		bool VisitLine(int lineNumber, ReadOnlySpan<char> line)
 		{
-			starts[line] = row;
-			segmentColumns[line] = BuildWrappedSegmentColumns(
-				_document.GetLineText(line + 1),
-				width);
-			row = checked(row + segmentColumns[line].Length);
+			var lineIndex = lineNumber - 1;
+			starts[lineIndex] = row;
+			segmentColumns[lineIndex] = BuildWrappedSegmentColumns(line, width);
+			row = checked(row + segmentColumns[lineIndex].Length);
+			return true;
 		}
+
 		starts[^1] = Math.Max(1, row);
 		_wrappedLineStarts = starts;
 		_wrappedSegmentColumns = segmentColumns;
@@ -639,6 +644,9 @@ internal sealed class TerminalVirtualizedPreviewView : View
 	}
 
 	internal static int[] BuildWrappedSegmentColumns(string value, int width)
+		=> BuildWrappedSegmentColumns(value.AsSpan(), width);
+
+	private static int[] BuildWrappedSegmentColumns(ReadOnlySpan<char> value, int width)
 	{
 		var effectiveWidth = Math.Max(1, width);
 		List<int>? starts = null;
@@ -656,14 +664,14 @@ internal sealed class TerminalVirtualizedPreviewView : View
 			displayColumn += runeWidth;
 			segmentWidth += runeWidth;
 		}
-		return starts?.ToArray() ?? [0];
+		return starts?.ToArray() ?? SingleWrappedSegmentColumns;
 	}
 
 	private void InvalidateWrappedLayout()
 	{
 		_wrappedWidth = 0;
 		_wrappedLineStarts = [0, 1];
-		_wrappedSegmentColumns = [[0]];
+		_wrappedSegmentColumns = [SingleWrappedSegmentColumns];
 	}
 
 	private void ApplyContentGeometry()
