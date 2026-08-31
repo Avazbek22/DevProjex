@@ -227,7 +227,7 @@ public sealed class PreviewFileCollectionSelectionMatrixTests
 
         public HashSet<string> Resolve(IEnumerable<string> selectionKeys)
         {
-            var selected = new HashSet<string>(PathComparer.Default);
+            var selected = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
             foreach (var key in selectionKeys)
                 selected.Add(_paths[key]);
 
@@ -236,11 +236,11 @@ public sealed class PreviewFileCollectionSelectionMatrixTests
 
         public List<string> ExpandSelectionIndependent(IReadOnlySet<string> selectedPaths)
         {
-            var unique = new HashSet<string>(PathComparer.Default);
+            var unique = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
             ExpandNode(Root, selectedPaths, ancestorSelected: false, unique);
 
             var ordered = new List<string>(unique);
-            ordered.Sort(PathComparer.Default);
+            ordered.Sort(ProjectTreePathIdentity.CanonicalComparer);
             return ordered;
         }
 

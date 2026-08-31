@@ -107,10 +107,10 @@ public sealed class ScanOptionsUseCaseRobustnessTests
         };
 
         var useCase = new ScanOptionsUseCase(scanner);
-        var result = useCase.Execute(new ScanOptionsRequest("/root", CreateRules()), cancellationToken: TestContext.Current.CancellationToken);
+		var result = useCase.Execute(new ScanOptionsRequest("/root", CreateRules()), cancellationToken: TestContext.Current.CancellationToken);
 
-        var expectedRootFolders = returnedRootFolders.ToList();
-        expectedRootFolders.Sort(PathComparer.Default);
+		var expectedRootFolders = returnedRootFolders.ToList();
+		expectedRootFolders.Sort(ProjectTreePathIdentity.CanonicalComparer);
 
         Assert.Equal([".A", ".B", ".m", ".z"], result.Extensions);
         Assert.Equal(expectedRootFolders, result.RootFolders);

@@ -169,8 +169,8 @@ public sealed class TreeExportServiceAdditionalTests
 		var rootLine = output.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n')[0];
 		var normalizedRootPath = PathUtility.NormalizeSeparators(Path.GetFullPath(rootPath));
 
-		Assert.Equal(ContextRootPresentation.FormatLine(normalizedRootPath), rootLine);
-		Assert.Equal($"Root: {normalizedRootPath}", rootLine);
+		Assert.Equal(ContextRootPresentation.FormatMarkdownLine(normalizedRootPath), rootLine);
+		Assert.Equal($"Root: {normalizedRootPath.Replace("_", "\\_", StringComparison.Ordinal)}", rootLine);
 	}
 
 	[Fact]

@@ -46,11 +46,13 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 				TestContext.Current.CancellationToken,
 				_ => unsafeName);
 
-		foreach (var output in new[] { ascii, plain, markdown, content })
+		foreach (var output in new[] { ascii, plain, content })
 		{
 			Assert.Contains(escapedName, output, StringComparison.Ordinal);
 			Assert.DoesNotContain(unsafeName, output, StringComparison.Ordinal);
 		}
+		Assert.Contains(@"safe\\nforged\\t\\u001B.txt", markdown, StringComparison.Ordinal);
+		Assert.DoesNotContain(unsafeName, markdown, StringComparison.Ordinal);
 		Assert.Equal(
 			ExportOutputMetricsCalculator.FromText(ascii),
 			treeExport.CalculateFullTreeMetrics(temp.Path, root, TreeTextFormat.Ascii));
