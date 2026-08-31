@@ -738,6 +738,15 @@ public sealed class MainWindowGitScopeLifecycleUiTests
 				viewModel.GitFilteringModes,
 				static option => Assert.Equal(GitFilteringMode.None, option.Mode),
 				static option => Assert.Equal(GitFilteringMode.RespectGitIgnore, option.Mode));
+			var persistedStates = GetSelectionCoordinator(window)
+				.SnapshotIgnoreOptionStatesForPersistence();
+			Assert.NotNull(persistedStates);
+			Assert.Equal(
+				preferredMode == GitFilteringMode.RespectGitIgnore,
+				persistedStates![IgnoreOptionId.UseGitIgnore]);
+			Assert.Equal(
+				preferredMode == GitFilteringMode.TrackedFilesOnly,
+				persistedStates[IgnoreOptionId.TrackedGitFilesOnly]);
 		}
 		finally
 		{

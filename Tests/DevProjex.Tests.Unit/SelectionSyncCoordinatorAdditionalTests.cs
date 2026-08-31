@@ -51,6 +51,31 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	}
 
 	[Fact]
+	public void ExplicitNoneAfterMomentaryGitModePersistsNone()
+	{
+		using var project = new TemporaryDirectory();
+		project.CreateFolder(".git");
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(
+			viewModel,
+			currentPathProvider: () => project.Path,
+			availabilityProvider: static (_, _) => new IgnoreOptionsAvailability(
+				IncludeGitIgnore: true,
+				IncludeSmartIgnore: true,
+				IncludeTrackedGitFilesOnly: true));
+
+		coordinator.PopulateIgnoreOptionsForRootSelection([], project.Path);
+		coordinator.HandleGitFilteringModeChanged(GitFilteringMode.TrackedFilesOnly, project.Path);
+		coordinator.HandleGitFilteringModeChanged(GitFilteringMode.Staged, project.Path);
+		coordinator.HandleGitFilteringModeChanged(GitFilteringMode.None, project.Path);
+
+		var states = coordinator.SnapshotIgnoreOptionStatesForPersistence();
+		Assert.NotNull(states);
+		Assert.False(states![IgnoreOptionId.UseGitIgnore]);
+		Assert.False(states[IgnoreOptionId.TrackedGitFilesOnly]);
+	}
+
+	[Fact]
 	public void AppliedTrackedMode_RemainsFailClosedWhenItsOptionIsNoLongerVisible()
 	{
 		const string projectPath = @"C:\Project";

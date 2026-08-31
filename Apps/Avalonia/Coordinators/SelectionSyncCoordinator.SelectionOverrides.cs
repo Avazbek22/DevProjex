@@ -71,16 +71,19 @@ public sealed partial class SelectionSyncCoordinator
         var extensionSelectionChanged = resetExtensionSelectionToDefaults
 			? ResetExtensionSelectionToDefaults()
 			: ApplyExtensionSelectionOverride(selectedExtensions);
-        var ignoreSelectionChanged = ApplyIgnoreSelectionOverrideCore(
+		var ignoreSelectionChanged = ApplyIgnoreSelectionOverrideCore(
             selectedIgnoreOptions,
             ignoreOptionStateIsComplete);
 		var gitModeChanged = false;
-		if (gitModeOverride is { } gitMode &&
-		    gitMode != _session.IgnoreOptions.ActiveGitFilteringMode)
+		if (gitModeOverride is { } gitMode)
 		{
-			_session.IgnoreOptions.SetActiveGitFilteringMode(gitMode);
-			gitModeChanged = true;
-			RefreshGitFilteringModePresentation();
+			_preservePreferredGitModeForPersistence = false;
+			if (gitMode != _session.IgnoreOptions.ActiveGitFilteringMode)
+			{
+				_session.IgnoreOptions.SetActiveGitFilteringMode(gitMode);
+				gitModeChanged = true;
+				RefreshGitFilteringModePresentation();
+			}
 		}
 		if (!extensionSelectionChanged && !ignoreSelectionChanged && !gitModeChanged)
             return false;
