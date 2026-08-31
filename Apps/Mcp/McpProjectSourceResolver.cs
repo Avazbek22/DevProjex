@@ -56,6 +56,7 @@ internal sealed class McpProjectSourceResolver : IDisposable
 				McpErrorCodes.InvalidArguments,
 				$"{McpErrorCodes.InvalidArguments}: 'project' is not a supported Git URL.");
 		}
+		ValidateRemoteSource(project!, safeUrl);
 		if (branch is not null && !GitBranchNameValidator.IsValid(branch))
 		{
 			throw new McpToolException(
@@ -292,6 +293,44 @@ internal sealed class McpProjectSourceResolver : IDisposable
 		var colon = source.IndexOf(':');
 		return colon > 0 &&
 		       (source[..colon].Contains('@') || source[..colon].Contains('.'));
+	}
+
+	private void ValidateRemoteSource(string source, string safeUrl)
+	{
+		var normalizedSource = source.Trim().Replace('\\', '/');
+		if (normalizedSource.AsSpan().IndexOfAny('?', '#') >= 0)
+		{
+			throw new McpToolException(
+				McpErrorCodes.InvalidArguments,
+				$"{McpErrorCodes.InvalidArguments}: remote project '{DisplayRemote(safeUrl)}' must not contain a query string or fragment. " +
+				"Use HTTPS userinfo credentials or a credential helper instead.");
+		}
+		if (!Uri.TryCreate(normalizedSource, UriKind.Absolute, out var uri))
+			return;
+
+		if (!uri.IsFile)
+			return;
+
+		try
+		{
+			var localPath = Path.GetFullPath(uri.LocalPath);
+			var root = _localRoots.FindLexicalRoot(localPath);
+			if (root is not null)
+			{
+				_localRoots.ResolveExistingPath(root, localPath, requireDirectory: true);
+				return;
+			}
+		}
+		catch (Exception exception) when (
+			exception is ArgumentException or NotSupportedException or PathTooLongException or
+			IOException or UnauthorizedAccessException or McpToolException)
+		{
+		}
+
+		throw new McpToolException(
+			McpErrorCodes.InvalidArguments,
+			$"{McpErrorCodes.InvalidArguments}: local file project '{DisplayRemote(safeUrl)}' is outside the configured roots. " +
+			"Use a configured root or a network Git URL.");
 	}
 
 	private static McpToolException RemoteFailed(string safeUrl, string reason) =>

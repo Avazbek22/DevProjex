@@ -1120,6 +1120,10 @@ the flag, `get_tree`, `analyze`, `pack_context`, `search_project`, and `get_file
 accept a Git URL in `project` plus an optional URL-only `branch`. RepoCache owns
 clone publication and the server pins each resolved checkout until shutdown.
 `list_projects` remains the stable list of configured local roots.
+Remote network URLs use HTTP(S), SSH, Git protocol, or SCP syntax and cannot
+contain query strings or fragments. A `file://` source must resolve inside an
+already configured local root, so this opt-in never broadens local filesystem
+access.
 
 `analyze --top-files N` is an additive CLI-v1 option with range `1..1000`.
 The MCP `analyze` tool exposes the matching optional `top_files` parameter with

@@ -10,6 +10,13 @@ internal sealed record GitCloneAuthentication(
 		out string cloneUrl,
 		out GitCloneAuthentication? authentication)
 	{
+		if (ContainsQueryOrFragment(repositoryUrl))
+		{
+			authentication = null;
+			cloneUrl = RepositoryUrlUtility.ToSafeDisplay(RemoveQueryAndFragment(repositoryUrl));
+			return false;
+		}
+
 		authentication = TryCreate(repositoryUrl);
 		if (authentication is not null)
 		{
@@ -83,5 +90,25 @@ internal sealed record GitCloneAuthentication(
 			? value.AsSpan(authorityStart)
 			: value.AsSpan(authorityStart, authorityEnd);
 		return authority.Contains('@');
+	}
+
+	private static bool ContainsQueryOrFragment(string repositoryUrl)
+	{
+		var value = repositoryUrl.Trim();
+		if (value.AsSpan().IndexOfAny('?', '#') < 0)
+			return false;
+		if (value.Contains("://", StringComparison.Ordinal))
+			return true;
+
+		var colon = value.IndexOf(':');
+		return colon > 0 &&
+		       (value.AsSpan(0, colon).Contains('@') || value.AsSpan(0, colon).Contains('.'));
+	}
+
+	private static string RemoveQueryAndFragment(string repositoryUrl)
+	{
+		var value = repositoryUrl.Trim();
+		var separator = value.AsSpan().IndexOfAny('?', '#');
+		return separator < 0 ? value : value[..separator];
 	}
 }

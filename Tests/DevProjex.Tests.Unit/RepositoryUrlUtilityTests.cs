@@ -79,6 +79,16 @@ public sealed class RepositoryUrlUtilityTests
 		Assert.DoesNotContain("access_token", display, StringComparison.Ordinal);
 	}
 
+	[Fact]
+	public void SafeDisplayRemovesScpStyleQueryAndFragment()
+	{
+		var display = RepositoryUrlUtility.ToSafeDisplay(
+			"git@example.com:owner/repo.git?access_token=hidden#fragment");
+
+		Assert.Equal("git@example.com:owner/repo.git", display);
+		Assert.DoesNotContain("access_token", display, StringComparison.Ordinal);
+	}
+
 	[Theory]
 	[InlineData("https://user:super-secret@[invalid/repo")]
 	[InlineData("ssh://user:super-secret@")]

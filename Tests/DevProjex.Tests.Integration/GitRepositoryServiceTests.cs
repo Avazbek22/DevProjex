@@ -173,6 +173,31 @@ public class GitRepositoryServiceTests : IAsyncLifetime
         Assert.DoesNotContain("oauth2", cloneUrl, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(
+        "https://example.test/owner/repository.git?access_token=process-secret",
+        "https://example.test/owner/repository.git")]
+    [InlineData(
+        "https://example.test/owner/repository.git#process-secret",
+        "https://example.test/owner/repository.git")]
+    [InlineData(
+        "git@example.test:owner/repository.git?access_token=process-secret",
+        "git@example.test:owner/repository.git")]
+    public void CloneSourceWithQueryOrFragmentIsRejectedBeforeBuildingGitArguments(
+        string source,
+        string expectedSafeSource)
+    {
+        var accepted = GitCloneAuthentication.TryResolveCloneUrl(
+            source,
+            out var cloneUrl,
+            out var authentication);
+
+        Assert.False(accepted);
+        Assert.Null(authentication);
+        Assert.Equal(expectedSafeSource, cloneUrl);
+        Assert.DoesNotContain("process-secret", cloneUrl, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task AuthenticatedCloneUsesSanitizedArgvAndAskPassInChildProcess()
     {
@@ -206,8 +231,7 @@ public class GitRepositoryServiceTests : IAsyncLifetime
         var service = new GitRepositoryService(executablePath);
         var targetDirectory = Path.Combine(probeDirectory, "clone");
         var authenticatedUrl =
-            $"https://oauth2:{Uri.EscapeDataString(password)}@example.test/owner/repository.git" +
-            "?transport=opaque#fragment";
+            $"https://oauth2:{Uri.EscapeDataString(password)}@example.test/owner/repository.git";
 
         var result = await service.CloneAsync(
             authenticatedUrl,
@@ -217,7 +241,7 @@ public class GitRepositoryServiceTests : IAsyncLifetime
         Assert.True(result.Success, result.ErrorMessage);
         var arguments = await File.ReadAllTextAsync(argumentLog, TestContext.Current.CancellationToken);
         Assert.Contains(
-            "https://example.test/owner/repository.git?transport=opaque#fragment",
+            "https://example.test/owner/repository.git",
             arguments,
             StringComparison.Ordinal);
         Assert.DoesNotContain(password, arguments, StringComparison.Ordinal);

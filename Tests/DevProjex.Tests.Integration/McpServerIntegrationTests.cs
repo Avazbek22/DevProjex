@@ -502,6 +502,46 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task LocalFileRemoteOutsideRootsAndQueryCredentialsAreRejectedBeforeRemoteServicesAreCreated()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var outsideRepository = workspace.CreateDirectory("outside/repository.git");
+		var remoteServicesCreated = 0;
+		await using var server = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			allowRemote: true,
+			remoteServicesFactory: () =>
+			{
+				Interlocked.Increment(ref remoteServicesCreated);
+				throw new InvalidOperationException("Rejected sources must not create remote services.");
+			});
+
+		var localFile = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["project"] = new Uri(Path.GetFullPath(outsideRepository)).AbsoluteUri
+			});
+		var queryCredential = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>
+			{
+				["project"] = "https://example.invalid/owner/repository.git?access_token=process-secret"
+			});
+
+		Assert.True(localFile.IsError);
+		Assert.Contains(McpErrorCodes.InvalidArguments, Text(localFile), StringComparison.Ordinal);
+		Assert.Contains("outside the configured roots", Text(localFile), StringComparison.Ordinal);
+		Assert.True(queryCredential.IsError);
+		Assert.Contains(McpErrorCodes.InvalidArguments, Text(queryCredential), StringComparison.Ordinal);
+		Assert.Contains("must not contain a query string or fragment", Text(queryCredential), StringComparison.Ordinal);
+		Assert.DoesNotContain("process-secret", Text(queryCredential), StringComparison.Ordinal);
+		Assert.Equal(0, Volatile.Read(ref remoteServicesCreated));
+	}
+
+	[Fact]
 	public async Task RemoteProjectClonesSelectsBranchReusesPinnedCacheAndKeepsJailAndRedaction()
 	{
 		if (!IsGitAvailable())
@@ -525,7 +565,7 @@ public sealed class McpServerIntegrationTests
 		RunGit(source, "add", "FeatureTail.txt");
 		RunGit(source, "commit", "--quiet", "-m", "feature tail");
 
-		var origin = Path.Combine(workspace.Path, "origin.git");
+		var origin = Path.Combine(localProject, "origin.git");
 		RunGit(workspace.Path, "clone", "--quiet", "--bare", source, origin);
 		var repositoryUrl = new Uri(Path.GetFullPath(origin)).AbsoluteUri;
 		var cachePath = Path.Combine(workspace.Path, "repo-cache");

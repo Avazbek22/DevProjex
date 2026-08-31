@@ -51,6 +51,10 @@ list_projects -> get_tree/analyze -> search_project/get_file -> pack_context -> 
   `tracked_only` or `git_scope`, the server may also start the local Git
   executable solely to read repository state. It never runs project executables
   or arbitrary project commands.
+- Remote network sources use HTTP(S), SSH, Git protocol, or SCP syntax. Query
+  strings and fragments are rejected so credentials cannot enter Git process
+  arguments. A `file://` source is accepted only when it resolves inside an
+  already configured local root and never expands the local root jail.
 - Secret redaction is always enabled for returned file content and cannot be
   disabled. Private-data redaction is disabled by default and can be enabled
   only for the whole server process with `--hide-private-data`, mirroring the

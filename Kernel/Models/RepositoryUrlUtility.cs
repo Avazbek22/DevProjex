@@ -30,7 +30,12 @@ public static class RepositoryUrlUtility
 			return string.Empty;
 
 		if (TryParseScpSyntax(trimmed, out var scp))
-			return $"{scp.UserPrefix}{scp.Host.ToLowerInvariant()}:{NormalizePath(scp.Path)}";
+		{
+			var safePath = RemoveQueryAndFragment(scp.Path);
+			return safePath.Length == 0
+				? string.Empty
+				: $"{scp.UserPrefix}{scp.Host.ToLowerInvariant()}:{NormalizePath(safePath)}";
+		}
 
 		if (!Uri.TryCreate(trimmed.Replace('\\', '/'), UriKind.Absolute, out var uri))
 			return trimmed.Contains("://", StringComparison.Ordinal)
@@ -203,6 +208,12 @@ public static class RepositoryUrlUtility
 
 	private static string NormalizePath(string value) =>
 		value.Replace('\\', '/').Trim().TrimEnd('/');
+
+	private static string RemoveQueryAndFragment(string value)
+	{
+		var separator = value.AsSpan().IndexOfAny('?', '#');
+		return separator < 0 ? value : value[..separator];
+	}
 
 	private static string TrimGitSuffix(
 		string value,
