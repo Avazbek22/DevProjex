@@ -91,6 +91,22 @@ public sealed class GitScopeSelectionTests
 		GitFilteringMode expected) =>
 		Assert.Equal(expected, GitScopeSelection.ComposeNarrowingUnderlay(baseline, scope));
 
+	[Theory]
+	[InlineData(GitFilteringMode.None, GitFilteringMode.None)]
+	[InlineData(GitFilteringMode.RespectGitIgnore, GitFilteringMode.RespectGitIgnore)]
+	[InlineData(GitFilteringMode.TrackedFilesOnly, GitFilteringMode.TrackedFilesOnly)]
+	[InlineData(GitFilteringMode.Staged, GitFilteringMode.TrackedFilesOnly)]
+	[InlineData(GitFilteringMode.Changes, GitFilteringMode.TrackedFilesOnly)]
+	[InlineData(GitFilteringMode.Diff, GitFilteringMode.TrackedFilesOnly)]
+	public void PreferredModeTracksEveryExplicitPersistentModeOnly(
+		GitFilteringMode requested,
+		GitFilteringMode expected) =>
+		Assert.Equal(
+			expected,
+			GitScopeSelection.ResolvePreferredPersistentMode(
+				GitFilteringMode.TrackedFilesOnly,
+				requested));
+
 	[Fact]
 	public void SelectionRejectsAnUndefinedGitMode() =>
 		Assert.Throws<ArgumentOutOfRangeException>(() =>

@@ -2351,6 +2351,16 @@ public partial class MainWindow : Window
 				_currentTree.Root);
     }
 
+	private IReadOnlySet<string>? GetGitRepositoryScopePaths()
+	{
+		if (_viewModel.TreeNodes.Count == 0 ||
+		    string.IsNullOrWhiteSpace(_currentPath) ||
+		    !PathComparer.Default.Equals(_explicitTreeSelectionProjectPath, _currentPath))
+			return null;
+
+		return GetCheckedPaths();
+	}
+
 	private IReadOnlyList<string> GetOrderedSelectedFilePaths() =>
 		_currentTree is null
 			? Array.Empty<string>()

@@ -999,7 +999,11 @@ public sealed class MainWindowGitScopeLifecycleUiTests
 		try
 		{
 			await window.Dispatcher.InvokeAsync(() =>
-				Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes).IsChecked = false);
+			{
+				var root = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
+				root.IsChecked = true;
+				root.IsChecked = false;
+			});
 			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
 
 			await SelectAndApplyGitModeAsync(window, GitFilteringMode.Staged);
@@ -1011,6 +1015,32 @@ public sealed class MainWindowGitScopeLifecycleUiTests
 			Assert.DoesNotContain(
 				viewModel.ToastItems,
 				static toast => toast.Message.Contains("Git", StringComparison.OrdinalIgnoreCase));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task ExplicitNonePersistsBehindASubsequentMomentaryMode()
+	{
+		EnsureGitAvailable();
+		using var project = UiTestProject.CreateWithCleanGitAndSmartWorkspace();
+		InitializeRepository(project.RootPath);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+		try
+		{
+			await SelectAndApplyGitModeAsync(window, GitFilteringMode.TrackedFilesOnly);
+			await SelectAndApplyGitModeAsync(window, GitFilteringMode.None);
+			await SelectAndApplyGitModeAsync(window, GitFilteringMode.Staged);
+
+			var persisted = GetSelectionCoordinator(window)
+				.SnapshotIgnoreOptionStatesForPersistence();
+			Assert.NotNull(persisted);
+			Assert.False(persisted![IgnoreOptionId.UseGitIgnore]);
+			Assert.False(persisted[IgnoreOptionId.TrackedGitFilesOnly]);
 		}
 		finally
 		{

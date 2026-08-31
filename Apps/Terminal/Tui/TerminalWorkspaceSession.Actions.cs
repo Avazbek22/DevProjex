@@ -182,8 +182,7 @@ internal sealed partial class TerminalWorkspaceSession
 			collapsedControls,
 			contentControlsFrame,
 			filterControlsHost);
-		if (_state?.Plan.GitReadiness.Mode is not GitFilteringMode.None and { } mode &&
-		    GitScopeSelection.IsPersistent(mode))
+		if (_state?.Plan.GitReadiness.Mode is { } mode && GitScopeSelection.IsPersistent(mode))
 			_preferredGitMode = mode;
 		return new WorkspaceControlViewGraph(
 			controlsFrame,
@@ -1197,8 +1196,9 @@ internal sealed partial class TerminalWorkspaceSession
 	private void UpdateDraftPreferredGitMode(GitFilteringMode mode)
 	{
 		EnsureSettingsDraft();
-		if (GitScopeSelection.IsPersistent(mode) && mode != GitFilteringMode.None)
-			_settingsDraftPreferredGitMode = mode;
+		_settingsDraftPreferredGitMode = GitScopeSelection.ResolvePreferredPersistentMode(
+			_settingsDraftPreferredGitMode ?? _preferredGitMode,
+			mode);
 	}
 
 	private void UpdateDraftExtensionStates(IReadOnlyCollection<string> selectedExtensions)
@@ -1270,11 +1270,7 @@ internal sealed partial class TerminalWorkspaceSession
 		{
 			next = GitFilteringMode.None;
 		}
-		EnsureSettingsDraft();
-		if (next == GitFilteringMode.None)
-			_settingsDraftPreferredGitMode = GitFilteringMode.RespectGitIgnore;
-		else
-			UpdateDraftPreferredGitMode(next);
+		UpdateDraftPreferredGitMode(next);
 		ApplyPathFilters(next, selection.Exclusions ?? [], originatedFromCommandLine: false);
 	}
 

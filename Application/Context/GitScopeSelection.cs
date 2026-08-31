@@ -35,6 +35,18 @@ public static class GitScopeSelection
 			GitFilteringMode.RespectGitIgnore or
 			GitFilteringMode.TrackedFilesOnly;
 
+	public static GitFilteringMode ResolvePreferredPersistentMode(
+		GitFilteringMode currentPreferredMode,
+		GitFilteringMode requestedMode)
+	{
+		if (!IsPersistent(currentPreferredMode))
+			throw new ArgumentOutOfRangeException(nameof(currentPreferredMode), currentPreferredMode, null);
+		if (!Enum.IsDefined(requestedMode))
+			throw new ArgumentOutOfRangeException(nameof(requestedMode), requestedMode, null);
+
+		return IsPersistent(requestedMode) ? requestedMode : currentPreferredMode;
+	}
+
 	public static GitFilteringMode ToUnderlayMode(GitFilteringMode mode) => mode switch
 	{
 		GitFilteringMode.Staged => GitFilteringMode.None,

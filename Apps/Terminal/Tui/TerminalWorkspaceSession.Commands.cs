@@ -113,8 +113,7 @@ internal sealed partial class TerminalWorkspaceSession
 			: GitFilteringMode.None;
 		if (!IsGitModeAvailable(nextMode))
 			return InvalidCommandExecution();
-		if (enabled)
-			UpdateDraftPreferredGitMode(mode.Value);
+		UpdateDraftPreferredGitMode(nextMode);
 		ApplyPathFilters(
 			nextMode,
 			selection.Exclusions ?? [],

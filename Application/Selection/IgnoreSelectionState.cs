@@ -200,7 +200,9 @@ public sealed class IgnoreSelectionState
 		RebuildSelectedOptions();
 	}
 
-	public void SetActiveGitFilteringMode(GitFilteringMode mode)
+	public void SetActiveGitFilteringMode(
+		GitFilteringMode mode,
+		bool rememberPersistentPreference = true)
 	{
 		var underlay = GitScopeSelection.ToUnderlayMode(mode);
 		_optionStateCache[IgnoreOptionId.UseGitIgnore] =
@@ -208,8 +210,12 @@ public sealed class IgnoreSelectionState
 		_optionStateCache[IgnoreOptionId.TrackedGitFilesOnly] =
 			underlay == GitFilteringMode.TrackedFilesOnly;
 		_activeGitFilteringMode = mode;
-		if (GitScopeSelection.IsPersistent(mode) && mode != GitFilteringMode.None)
-			_preferredGitFilteringMode = mode;
+		if (rememberPersistentPreference)
+		{
+			_preferredGitFilteringMode = GitScopeSelection.ResolvePreferredPersistentMode(
+				_preferredGitFilteringMode,
+				mode);
+		}
 		AllPreference = null;
 		IsInitialized = true;
 		RebuildSelectedOptions();

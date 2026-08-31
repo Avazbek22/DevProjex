@@ -486,6 +486,76 @@ public sealed class TerminalSettingsPanelPtyTests
 		}
 	}
 
+	[Theory(Timeout = 120_000)]
+	[InlineData(
+		"tracked",
+		"Tracked Git files only",
+		"(•) Tracked Git files only",
+		"set git none",
+		"No Git filtering")]
+	[InlineData(
+		"tracked",
+		"Tracked Git files only",
+		"(•) Tracked Git files only",
+		"set tracked off",
+		"Tracked Git files only: disabled")]
+	[InlineData(
+		"gitignore",
+		"Use .gitignore",
+		"(•) Use .gitignore",
+		"set gitignore off",
+		"Use .gitignore: disabled")]
+	public async Task ExplicitNoneRemainsTheFallbackBehindAMomentaryGitMode(
+		string initialMode,
+		string initialResult,
+		string initialState,
+		string disableCommand,
+		string disableResult)
+	{
+		using var project = CreatePanelProject(initializeGit: true);
+		project.WriteFile("Staged.cs", "class Staged {}\n");
+		RunGit(project.Path, "add", "--", "Staged.cs");
+		await using var terminal = await StartAsync(project.Path, columns: 160, rows: 50);
+		await WaitForStableScreenAsync(terminal, "PROJECT TREE");
+
+		await terminal.SendAsync($":set git {initialMode}\r", TestContext.Current.CancellationToken);
+		await WaitForAppliedCommandAsync(
+			terminal,
+			initialResult,
+			initialState);
+		await terminal.SendAsync($":{disableCommand}\r", TestContext.Current.CancellationToken);
+		await WaitForAppliedCommandAsync(
+			terminal,
+			disableResult,
+			"(•) No Git filtering");
+		await terminal.SendAsync(":set git staged\r", TestContext.Current.CancellationToken);
+		await WaitForAppliedCommandAsync(
+			terminal,
+			"Staged Git files",
+			"(•) Staged Git files");
+
+		var gitPath = Path.Combine(project.Path, ".git");
+		var detachedGitPath = Path.Combine(
+			Path.GetTempPath(),
+			$"devprojex-terminal-none-fallback-{Guid.NewGuid():N}");
+		try
+		{
+			Directory.Move(gitPath, detachedGitPath);
+			await terminal.SendAsync(":set dot-folders off\r", TestContext.Current.CancellationToken);
+			await WaitForAppliedCommandAsync(
+				terminal,
+				"dot folders: disabled",
+				"(•) No Git filtering");
+		}
+		finally
+		{
+			if (Directory.Exists(detachedGitPath) && !Directory.Exists(gitPath))
+				Directory.Move(detachedGitPath, gitPath);
+		}
+
+		await ExitAsync(terminal);
+	}
+
 	[Fact(Timeout = 120_000)]
 	public async Task DiffScopeSurvivesIndividualAndAggregateExclusionChanges()
 	{

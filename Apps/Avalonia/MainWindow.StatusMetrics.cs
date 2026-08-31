@@ -11,6 +11,7 @@ public partial class MainWindow
     {
 		if (_suppressTreeSelectionChanges > 0)
 			return;
+		_explicitTreeSelectionProjectPath = _currentPath;
 
 		RecordTreeSelectionOverride(node.FullPath, node.IsChecked == true);
 

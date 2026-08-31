@@ -25,7 +25,7 @@ public sealed partial class SelectionSyncCoordinator(
 	IGitScopePathProvider? gitScopePathProvider = null,
 	Action<string, GitScopePathResult>? gitScopeUnavailable = null,
 	Func<CancellationToken, Task<bool>>? gitAvailabilityResolver = null,
-	Func<IReadOnlySet<string>>? selectedTreePathsProvider = null)
+	Func<IReadOnlySet<string>?>? selectedTreePathsProvider = null)
     : IDisposable
 {
     // Store collection references for proper cleanup
@@ -775,7 +775,9 @@ public sealed partial class SelectionSyncCoordinator(
 		if (GitScopeSelection.IsMomentary(mode) && !HasGitFilteringRepositoryAvailability())
 			return;
 
-		_session.IgnoreOptions.SetActiveGitFilteringMode(mode);
+		_session.IgnoreOptions.SetActiveGitFilteringMode(
+			mode,
+			rememberPersistentPreference: !preservePreferredForPersistence);
 		_suppressIgnoreItemCheck = true;
 		try
 		{

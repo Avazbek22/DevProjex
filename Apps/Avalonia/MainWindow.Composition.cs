@@ -934,6 +934,7 @@ public partial class MainWindow
     private const int TreeViewModelParallelChildrenThreshold = 24;
 
     private readonly TreeSelectionSnapshotCache _treeSelectionSnapshotCache = new();
+	private string? _explicitTreeSelectionProjectPath;
 
     // Event handler delegates for proper unsubscription
     private EventHandler? _languageChangedHandler;
@@ -1073,7 +1074,7 @@ public partial class MainWindow
 			gitScopeUnavailable: (path, scope) => HandleGitScopeDiagnostics(
 				[GitScopeFilter.CreateUnavailableDiagnostic(path, scope)]),
 			gitAvailabilityResolver: _gitService.IsGitAvailableAsync,
-			selectedTreePathsProvider: GetCheckedPaths);
+			selectedTreePathsProvider: GetGitRepositoryScopePaths);
         // User changes in this section remain drafts until Apply. The callback is reserved for
         // programmatic activation, such as enabling Hide Secrets for a manual mark.
         _projectLoadPipeline = new ProjectLoadPipeline(this, _statusOperations);
