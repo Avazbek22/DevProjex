@@ -1,4 +1,5 @@
 using System.IO.Pipelines;
+using System.Xml.Linq;
 using DevProjex.Application.Context;
 using DevProjex.Application.Diagnostics;
 using DevProjex.Application.Secrets;
@@ -2243,6 +2244,41 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task MaximumFileBytesPreservesExplicitEmptyDirectoryWhenSelectedFileIsExcluded()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.CreateDirectory("project/selected-empty");
+		File.WriteAllText(Path.Combine(project, "Large.txt"), new string('x', 128));
+		File.WriteAllText(Path.Combine(project, "Other.txt"), "other");
+		var profile = WriteUnfilteredPortableProfile(project);
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "selected-empty", "Large.txt" },
+				["profile"] = profile,
+				["view"] = "tree-content",
+				["format"] = "json",
+				["max_file_bytes"] = 64
+			});
+
+		Assert.NotEqual(true, result.IsError);
+		var document = ExtractSpotlightBody(Text(result));
+		using var parsed = JsonDocument.Parse(document);
+		var root = parsed.RootElement;
+		Assert.Empty(root.GetProperty("files").EnumerateArray());
+		Assert.Contains(
+			root.GetProperty("tree").GetProperty("children").EnumerateArray(),
+			static child => child.GetProperty("name").GetString() == "selected-empty");
+		Assert.DoesNotContain(
+			root.GetProperty("tree").GetProperty("children").EnumerateArray(),
+			static child => child.GetProperty("name").GetString() is "Large.txt" or "Other.txt");
+	}
+
+	[Fact]
 	public async Task GitScopeNarrowsEverySelectionToolAndCannotExpandATrackedBaseline()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -2614,6 +2650,123 @@ public sealed class McpServerIntegrationTests
 		Assert.True(result.IsError);
 		Assert.Contains(McpErrorCodes.InvalidPattern, Text(result), StringComparison.Ordinal);
 		Assert.DoesNotContain(GitScopeFilter.UnavailableDiagnosticCode, Text(result), StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("tree", "text")]
+	[InlineData("tree", "markdown")]
+	[InlineData("tree", "json")]
+	[InlineData("tree", "xml")]
+	[InlineData("tree-content", "text")]
+	[InlineData("tree-content", "markdown")]
+	[InlineData("tree-content", "json")]
+	[InlineData("tree-content", "xml")]
+	public async Task PackContextPreservesAnExplicitlySelectedEmptyDirectory(
+		string view,
+		string format)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.CreateDirectory("project/selected-empty-directory");
+		workspace.CreateDirectory("project/unselected-directory");
+		File.WriteAllText(
+			Path.Combine(project, "unselected-directory", "Other.txt"),
+			"unselected\n");
+		var profile = WriteUnfilteredPortableProfile(project);
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "selected-empty-directory" },
+				["profile"] = profile,
+				["view"] = view,
+				["format"] = format
+			});
+
+		Assert.NotEqual(true, result.IsError);
+		AssertPackTreeHasOnlyExpectedRootChild(
+			Text(result),
+			format,
+			"selected-empty-directory");
+	}
+
+	[Theory]
+	[InlineData("text")]
+	[InlineData("json")]
+	public async Task PackContextAppliesGlobsToExplicitEmptyDirectoryWithoutDroppingUnmatchedPaths(
+		string format)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.CreateDirectory("project/selected-empty");
+		File.WriteAllText(Path.Combine(project, "Other.txt"), "other");
+		var profile = WriteUnfilteredPortableProfile(project);
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var included = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "selected-empty" },
+				["profile"] = profile,
+				["exclude_patterns"] = new[] { "**/*.tmp" },
+				["view"] = "tree",
+				["format"] = format
+			});
+		var excluded = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "selected-empty" },
+				["profile"] = profile,
+				["exclude_patterns"] = new[] { "selected-empty/**" },
+				["view"] = "tree",
+				["format"] = format
+			});
+
+		Assert.NotEqual(true, included.IsError);
+		AssertPackTreeHasOnlyExpectedRootChild(Text(included), format, "selected-empty");
+		Assert.NotEqual(true, excluded.IsError);
+		AssertPackTreeHasOnlyExpectedRootChild(Text(excluded), format, expectedChild: null);
+	}
+
+	[Theory]
+	[InlineData("src")]
+	[InlineData(".")]
+	public async Task DirectoryPathCannotReincludeAFileRejectedByGlobNarrowing(string selectedPath)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.CreateDirectory("project/src");
+		File.WriteAllText(Path.Combine(project, "src", "Keep.cs"), "kept-marker");
+		File.WriteAllText(Path.Combine(project, "src", "Secret.tmp"), "excluded-marker");
+		var profile = WriteUnfilteredPortableProfile(project);
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+		var selection = new Dictionary<string, object?>
+		{
+			["paths"] = new[] { selectedPath },
+			["profile"] = profile,
+			["exclude_patterns"] = new[] { "**/*.tmp", profile }
+		};
+
+		var analyze = await server.CallAsync("analyze", selection);
+		var pack = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>(selection)
+			{
+				["view"] = "content",
+				["format"] = "text"
+			});
+
+		Assert.NotEqual(true, analyze.IsError);
+		Assert.Equal(1, analyze.StructuredContent?.GetProperty("files").GetInt32());
+		Assert.NotEqual(true, pack.IsError);
+		Assert.Contains("Keep.cs", Text(pack), StringComparison.Ordinal);
+		Assert.Contains("kept-marker", Text(pack), StringComparison.Ordinal);
+		Assert.DoesNotContain("Secret.tmp", Text(pack), StringComparison.Ordinal);
+		Assert.DoesNotContain("excluded-marker", Text(pack), StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -3079,6 +3232,72 @@ public sealed class McpServerIntegrationTests
 		Assert.NotEqual(true, sizeFiltered.IsError);
 		using var sizeFilteredDocument = JsonDocument.Parse(ExtractSpotlightBody(Text(sizeFiltered)));
 		Assert.Empty(sizeFilteredDocument.RootElement.GetProperty("files").EnumerateArray());
+	}
+
+	private static string WriteUnfilteredPortableProfile(string project)
+	{
+		const string profileName = ".devprojex-unfiltered-profile.json";
+		File.WriteAllText(
+			Path.Combine(project, profileName),
+			"""
+			{
+			  "schemaVersion": 1,
+			  "kind": "devprojex-profile",
+			  "selection": {
+			    "roots": null,
+			    "extensions": null,
+			    "selectedPaths": [],
+			    "gitMode": "none",
+			    "exclusions": [],
+			    "hideSecrets": false,
+			    "hidePrivateData": false
+			  }
+			}
+			""");
+		return profileName;
+	}
+
+	private static void AssertPackTreeHasOnlyExpectedRootChild(
+		string response,
+		string format,
+		string? expectedChild)
+	{
+		var document = ExtractSpotlightBody(response);
+		if (format == "json")
+		{
+			using var parsed = JsonDocument.Parse(document);
+			var children = parsed.RootElement.GetProperty("tree").GetProperty("children")
+				.EnumerateArray()
+				.Select(static child => child.GetProperty("name").GetString())
+				.ToArray();
+			if (expectedChild is null)
+				Assert.Empty(children);
+			else
+				Assert.Equal(expectedChild, Assert.Single(children));
+			Assert.Empty(parsed.RootElement.GetProperty("files").EnumerateArray());
+			return;
+		}
+
+		if (format == "xml")
+		{
+			var parsed = XDocument.Parse(document);
+			var children = parsed.Root!.Element("tree")!.Element("directory")!
+				.Elements()
+				.Select(static child => child.Attribute("name")?.Value)
+				.ToArray();
+			if (expectedChild is null)
+				Assert.Empty(children);
+			else
+				Assert.Equal(expectedChild, Assert.Single(children));
+			Assert.Empty(parsed.Root.Element("files")!.Elements("file"));
+			return;
+		}
+
+		if (expectedChild is null)
+			Assert.DoesNotContain("selected-empty", document, StringComparison.Ordinal);
+		else
+			Assert.Contains(expectedChild, document, StringComparison.Ordinal);
+		Assert.DoesNotContain("Other.txt", document, StringComparison.Ordinal);
 	}
 
 	private static string ReadLikeSchemaAwareClient(McpClientTool tool, CallToolResult result)

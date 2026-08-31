@@ -104,6 +104,7 @@ internal sealed class McpProjectService(
 		var selectionFrontier = BuildSelectionFrontier(
 			projectRoot,
 			plan.IncludedFiles,
+			plan.IncludedFolders,
 			requested,
 			globs,
 			hasSelectionFilters,
@@ -126,7 +127,7 @@ internal sealed class McpProjectService(
 					services.GitScopePathProvider,
 					scope.Mode,
 					scope.DiffRange,
-					selectionFrontier,
+					selectionFrontier?.ProjectionPaths,
 					cancellationToken,
 					resolvedDiffRange)
 				.ConfigureAwait(false);
@@ -148,11 +149,22 @@ internal sealed class McpProjectService(
 		else
 		{
 			var selected = new List<string>();
-			foreach (var path in plan.IncludedFiles)
+			if (parsedScope is null)
 			{
-				cancellationToken.ThrowIfCancellationRequested();
-				if (selectionFrontier.Contains(path))
+				foreach (var path in selectionFrontier.ProjectionPaths)
+				{
+					cancellationToken.ThrowIfCancellationRequested();
 					selected.Add(ToRelative(projectRoot, path));
+				}
+			}
+			else
+			{
+				foreach (var path in plan.IncludedFiles)
+				{
+					cancellationToken.ThrowIfCancellationRequested();
+					if (selectionFrontier.FilePaths.Contains(path))
+						selected.Add(ToRelative(projectRoot, path));
+				}
 			}
 			if (selected.Count > 0)
 			{
@@ -182,9 +194,10 @@ internal sealed class McpProjectService(
 			.ConfigureAwait(false);
 	}
 
-	private static IReadOnlySet<string>? BuildSelectionFrontier(
+	private static McpSelectionFrontier? BuildSelectionFrontier(
 		string projectRoot,
 		IReadOnlyList<string> includedFiles,
+		IReadOnlyList<string> includedFolders,
 		RequestedPathSelection requested,
 		McpGlobSet globs,
 		bool hasSelectionFilters,
@@ -193,18 +206,65 @@ internal sealed class McpProjectService(
 		if (!hasSelectionFilters)
 			return null;
 
-		var selected = new HashSet<string>(StringComparer.Ordinal);
+		var selectedFiles = new HashSet<string>(StringComparer.Ordinal);
 		foreach (var path in includedFiles)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			if (MatchesRequested(path, requested.Paths, requested.Directories) &&
 			    globs.Includes(ToRelative(projectRoot, path)))
 			{
-				selected.Add(path);
+				selectedFiles.Add(path);
 			}
 		}
-		return selected;
+
+		var projectionPaths = new HashSet<string>(selectedFiles, StringComparer.Ordinal);
+		if (requested.Directories.Count > 0)
+		{
+			var directoriesWithIncludedFiles = BuildDirectoryContentIndex(
+				projectRoot,
+				includedFiles,
+				cancellationToken);
+			foreach (var path in includedFolders)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				if (requested.Directories.Contains(path) &&
+				    !directoriesWithIncludedFiles.Contains(path) &&
+				    globs.IncludesDirectory(ToRelative(projectRoot, path)))
+					projectionPaths.Add(path);
+			}
+		}
+
+		return new McpSelectionFrontier(selectedFiles, projectionPaths);
 	}
+
+	private static IReadOnlySet<string> BuildDirectoryContentIndex(
+		string projectRoot,
+		IReadOnlyList<string> includedFiles,
+		CancellationToken cancellationToken)
+	{
+		var directories = new HashSet<string>(StringComparer.Ordinal);
+		foreach (var file in includedFiles)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			directories.Add(projectRoot);
+			var directory = Path.GetDirectoryName(file);
+			while (!string.IsNullOrEmpty(directory) &&
+			       !StringComparer.Ordinal.Equals(directory, projectRoot))
+			{
+				directories.Add(directory);
+				var parent = Path.GetDirectoryName(directory);
+				if (StringComparer.Ordinal.Equals(parent, directory))
+					break;
+				directory = parent;
+			}
+		}
+
+		return directories;
+	}
+
+	private sealed record McpSelectionFrontier(
+		IReadOnlySet<string> FilePaths,
+		IReadOnlySet<string> ProjectionPaths);
 
 	internal static void ValidatePlanContainment(
 		McpProjectRootJail roots,

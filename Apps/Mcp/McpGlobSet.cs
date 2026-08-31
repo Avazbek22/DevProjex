@@ -25,6 +25,20 @@ internal sealed class McpGlobSet
 		       !_excludes.Any(regex => regex.IsMatch(normalized));
 	}
 
+	public bool IncludesDirectory(string relativePath)
+	{
+		var normalized = PathUtility.NormalizeSeparators(relativePath).TrimEnd('/');
+		var subtreeBoundary = normalized + "/";
+		return (_includes.Count == 0 || MatchesPathOrSubtreeBoundary(_includes, normalized, subtreeBoundary)) &&
+		       !MatchesPathOrSubtreeBoundary(_excludes, normalized, subtreeBoundary);
+	}
+
+	private static bool MatchesPathOrSubtreeBoundary(
+		IReadOnlyList<Regex> patterns,
+		string path,
+		string subtreeBoundary) =>
+		patterns.Any(regex => regex.IsMatch(path) || regex.IsMatch(subtreeBoundary));
+
 	private static IReadOnlyList<Regex> Compile(IReadOnlyList<string>? patterns, string parameter)
 	{
 		if (patterns is null || patterns.Count == 0)
