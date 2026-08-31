@@ -376,7 +376,8 @@ public sealed class DevProjexCommandTree
 								parseResult.GetValue(failOnFindings),
 								Force: parseResult.GetValue(force),
 								TopFiles: parseResult.GetValue(topFiles),
-								MaxFileBytes: selection.GetMaxFileBytes(parseResult)),
+								MaxFileBytes: selection.GetMaxFileBytes(parseResult),
+								RepositorySourceUrl: resolvedSource.RepositorySourceUrl),
 							cancellationToken)
 						.ConfigureAwait(false);
 				},
@@ -508,7 +509,8 @@ public sealed class DevProjexCommandTree
 								parseResult.GetValue(dryRun),
 								parseResult.GetValue(maximumEstimatedTokens),
 								outputOptions,
-								MaxFileBytes: selection.GetMaxFileBytes(parseResult)),
+								MaxFileBytes: selection.GetMaxFileBytes(parseResult),
+								RepositorySourceUrl: resolvedSource.RepositorySourceUrl),
 							cancellationToken)
 						.ConfigureAwait(false);
 				},
@@ -631,7 +633,8 @@ public sealed class DevProjexCommandTree
 								parseResult.GetValue(outputPath)!,
 								parseResult.GetValue(force),
 								parseResult.GetValue(dryRun),
-								outputOptions),
+								outputOptions,
+								RepositorySourceUrl: resolvedSource.RepositorySourceUrl),
 							cancellationToken)
 						.ConfigureAwait(false);
 				},
@@ -1565,7 +1568,8 @@ public sealed class DevProjexCommandTree
 								parseResult.GetValue(outputPath),
 								outputOptions,
 								Force: parseResult.GetValue(force),
-								MaxFileBytes: selection.GetMaxFileBytes(parseResult)),
+								MaxFileBytes: selection.GetMaxFileBytes(parseResult),
+								RepositorySourceUrl: resolvedSource.RepositorySourceUrl),
 							cancellationToken)
 						.ConfigureAwait(false);
 				},

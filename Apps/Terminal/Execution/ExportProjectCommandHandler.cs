@@ -35,7 +35,8 @@ public sealed class ExportProjectCommandHandler(
 				() => services.ContextFactory.BuildAsync(
 					request.ProjectPath,
 					request.Selection,
-					cancellationToken: cancellationToken))
+					cancellationToken: cancellationToken,
+					repositorySourceUrl: request.RepositorySourceUrl))
 			.ConfigureAwait(false);
 		new ContextDiagnosticRenderer(environment, request.Output, services.Localization)
 			.Write(plan.Diagnostics);

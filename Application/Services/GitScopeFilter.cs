@@ -192,7 +192,8 @@ public static class GitScopeFilter
 		GitFilteringMode scopeMode,
 		string? diffRange,
 		IReadOnlyCollection<string>? repositoryScopeFullPaths,
-		CancellationToken cancellationToken = default)
+		CancellationToken cancellationToken = default,
+		string? resolvedDiffRange = null)
 	{
 		ArgumentNullException.ThrowIfNull(planner);
 		ArgumentNullException.ThrowIfNull(plan);
@@ -212,7 +213,7 @@ public static class GitScopeFilter
 			.ResolveAsync(
 				plan.SourceRoot,
 				scopeMode,
-				diffRange,
+				resolvedDiffRange ?? diffRange,
 				planner.GetGitScopeRepositoryRoots(plan, repositoryScopeFullPaths),
 				cancellationToken)
 			.ConfigureAwait(false);

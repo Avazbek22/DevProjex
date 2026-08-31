@@ -98,6 +98,15 @@ internal sealed class McpProjectService(
 		ValidatePlanContainment(roots, projectRoot, plan.IncludedFiles, cancellationToken);
 		if (parsedScope is { } scope)
 		{
+			string? resolvedDiffRange = null;
+			if (scope.Mode == GitFilteringMode.Diff && source.Identity?.SourceType == ProjectSourceType.GitClone)
+			{
+				resolvedDiffRange = await projectSources.ResolveRemoteDiffRangeAsync(
+					source,
+					project!,
+					scope.DiffRange!,
+					cancellationToken).ConfigureAwait(false);
+			}
 			plan = await GitScopeFilter
 				.ApplyAsync(
 					services.Planner,
@@ -106,7 +115,8 @@ internal sealed class McpProjectService(
 					scope.Mode,
 					scope.DiffRange,
 					requested.Paths,
-					cancellationToken)
+					cancellationToken,
+					resolvedDiffRange)
 				.ConfigureAwait(false);
 			if (plan.HasErrors)
 			{

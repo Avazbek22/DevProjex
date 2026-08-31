@@ -1,4 +1,5 @@
 using DevProjex.Application.Secrets;
+using DevProjex.Infrastructure.Git;
 
 namespace DevProjex.Terminal.Execution;
 
@@ -6,7 +7,8 @@ public sealed class TerminalProjectContextFactory(
 	ProjectContextPlanner planner,
 	ProjectSourceIdentityResolver sourceIdentityResolver,
 	SecretRedactionSession secretRedactionSession,
-	IGitScopePathProvider gitScopePathProvider)
+	IGitScopePathProvider gitScopePathProvider,
+	GitRemoteDiffRangeResolver remoteDiffRangeResolver)
 {
 	public Task<ProjectContextPlan> BuildAsync(
 		string projectPath,
@@ -15,7 +17,8 @@ public sealed class TerminalProjectContextFactory(
 		CancellationToken cancellationToken = default,
 		bool captureIgnoreImpactCounts = false,
 		IReadOnlyDictionary<string, bool>? knownExtensionStates = null,
-		IReadOnlyCollection<string>? repositoryScopeFullPaths = null)
+		IReadOnlyCollection<string>? repositoryScopeFullPaths = null,
+		string? repositorySourceUrl = null)
 		=> BuildAsync(
 			projectPath,
 			selection,
@@ -25,7 +28,8 @@ public sealed class TerminalProjectContextFactory(
 			captureIgnoreImpactCounts,
 			includeContentOutputMetrics: true,
 			knownExtensionStates,
-			repositoryScopeFullPaths);
+			repositoryScopeFullPaths,
+			repositorySourceUrl);
 
 	internal async Task<ProjectContextPlan> BuildAsync(
 		string projectPath,
@@ -36,7 +40,8 @@ public sealed class TerminalProjectContextFactory(
 		bool captureIgnoreImpactCounts = false,
 		bool includeContentOutputMetrics = true,
 		IReadOnlyDictionary<string, bool>? knownExtensionStates = null,
-		IReadOnlyCollection<string>? repositoryScopeFullPaths = null)
+		IReadOnlyCollection<string>? repositoryScopeFullPaths = null,
+		string? repositorySourceUrl = null)
 	{
 		var markedSecrets = ProjectSelectionMarkedSecretsResolver.Resolve(selection);
 		if (await secretRedactionSession
@@ -58,6 +63,22 @@ public sealed class TerminalProjectContextFactory(
 		var sourceIdentity = await sourceIdentityResolver
 			.ResolveAsync(projectPath, knownIdentity, cancellationToken)
 			.ConfigureAwait(false);
+		string? resolvedDiffRange = null;
+		if (sourceIdentity.SourceType == ProjectSourceType.GitClone &&
+		    selection.GitMode == GitFilteringMode.Diff &&
+		    selection.GitDiffRange is { } diffRange)
+		{
+			var sourceUrl = repositorySourceUrl ?? sourceIdentity.RepositoryUrl;
+			if (!string.IsNullOrWhiteSpace(sourceUrl))
+			{
+				resolvedDiffRange = await remoteDiffRangeResolver.ResolveAsync(
+					projectPath,
+					sourceUrl,
+					diffRange,
+					sourceIdentity.Branch,
+					cancellationToken).ConfigureAwait(false);
+			}
+		}
 		var request = new ProjectContextRequest(projectPath, selection, sourceIdentity)
 		{
 			KnownExtensionStates = knownExtensionStates
@@ -94,7 +115,8 @@ public sealed class TerminalProjectContextFactory(
 				plan.Selection.GitMode ?? GitFilteringMode.None,
 				plan.Selection.GitDiffRange,
 				repositoryScopeFullPaths,
-				cancellationToken)
+				cancellationToken,
+				resolvedDiffRange)
 			.ConfigureAwait(false);
 	}
 }

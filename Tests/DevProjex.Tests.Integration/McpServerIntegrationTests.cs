@@ -516,10 +516,14 @@ public sealed class McpServerIntegrationTests
 		File.WriteAllText(Path.Combine(source, "Main.txt"), $"main\n{Secret}\n");
 		RunGit(source, "add", "Main.txt");
 		RunGit(source, "commit", "--quiet", "-m", "main");
+		var mainBranch = ReadGit(source, "branch", "--show-current");
 		RunGit(source, "checkout", "--quiet", "-b", "feature");
 		File.WriteAllText(Path.Combine(source, "Feature.txt"), "remote-feature-marker\n");
 		RunGit(source, "add", "Feature.txt");
 		RunGit(source, "commit", "--quiet", "-m", "feature");
+		File.WriteAllText(Path.Combine(source, "FeatureTail.txt"), "remote-tail-marker\n");
+		RunGit(source, "add", "FeatureTail.txt");
+		RunGit(source, "commit", "--quiet", "-m", "feature tail");
 
 		var origin = Path.Combine(workspace.Path, "origin.git");
 		RunGit(workspace.Path, "clone", "--quiet", "--bare", source, origin);
@@ -551,11 +555,37 @@ public sealed class McpServerIntegrationTests
 				["max_tokens"] = 1_000
 			});
 		var repeatedTree = await server.CallAsync("get_tree", remote);
-		var diffTree = await server.CallAsync(
+		var diffScope = new Dictionary<string, object?>(remote)
+		{
+			["git_scope"] = "diff:HEAD~1..HEAD"
+		};
+		var diffTree = await server.CallAsync("get_tree", diffScope);
+		var diffAnalyze = await server.CallAsync("analyze", diffScope);
+		var diffPack = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>(diffScope)
+			{
+				["view"] = "content",
+				["format"] = "text"
+			});
+		var diffSearch = await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?>(diffScope)
+			{
+				["pattern"] = "remote-tail-marker",
+				["ignore_case"] = false
+			});
+		var branchDiff = await server.CallAsync(
 			"get_tree",
 			new Dictionary<string, object?>(remote)
 			{
-				["git_scope"] = "diff:HEAD..HEAD"
+				["git_scope"] = $"diff:{mainBranch}..feature"
+			});
+		var invalidDiff = await server.CallAsync(
+			"get_tree",
+			new Dictionary<string, object?>(remote)
+			{
+				["git_scope"] = "diff:missing-ref..HEAD"
 			});
 		var jail = await server.CallAsync(
 			"get_file",
@@ -586,9 +616,21 @@ public sealed class McpServerIntegrationTests
 		Assert.Contains("DEVPROJEX_REDACTED", Text(pack), StringComparison.Ordinal);
 		Assert.DoesNotContain(cachePath, Text(pack), PathComparison);
 		Assert.NotEqual(true, repeatedTree.IsError);
-		Assert.False(diffTree.IsError == true, Text(diffTree));
+		Assert.All(
+			new[] { diffTree, diffAnalyze, diffPack, diffSearch, branchDiff },
+			static result => Assert.NotEqual(true, result.IsError));
+		Assert.Contains("FeatureTail.txt", Text(diffTree), StringComparison.Ordinal);
 		Assert.DoesNotContain("Feature.txt", Text(diffTree), StringComparison.Ordinal);
 		Assert.DoesNotContain("Main.txt", Text(diffTree), StringComparison.Ordinal);
+		Assert.Equal(1, diffAnalyze.StructuredContent?.GetProperty("files").GetInt32());
+		Assert.Contains("remote-tail-marker", Text(diffPack), StringComparison.Ordinal);
+		Assert.Contains("FeatureTail.txt:1:", Text(diffSearch), StringComparison.Ordinal);
+		Assert.Contains("Feature.txt", Text(branchDiff), StringComparison.Ordinal);
+		Assert.Contains("FeatureTail.txt", Text(branchDiff), StringComparison.Ordinal);
+		Assert.DoesNotContain("Main.txt", Text(branchDiff), StringComparison.Ordinal);
+		Assert.True(invalidDiff.IsError);
+		Assert.Contains(McpErrorCodes.ProjectUnavailable, Text(invalidDiff), StringComparison.Ordinal);
+		Assert.Contains("Verify the repository and refs", Text(invalidDiff), StringComparison.Ordinal);
 		Assert.Equal(1, git.CloneCallCount);
 		Assert.True(jail.IsError);
 		Assert.Contains(McpErrorCodes.RootViolation, Text(jail), StringComparison.Ordinal);

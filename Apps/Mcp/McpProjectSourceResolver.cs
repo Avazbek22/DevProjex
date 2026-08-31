@@ -88,6 +88,24 @@ internal sealed class McpProjectSourceResolver : IDisposable
 			return _remoteRoots.Values.ToArray();
 	}
 
+	public Task<string?> ResolveRemoteDiffRangeAsync(
+		McpResolvedProjectSource source,
+		string repositoryUrl,
+		string diffRange,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(source);
+		if (source.Identity?.SourceType != ProjectSourceType.GitClone)
+			return Task.FromResult<string?>(diffRange);
+
+		return _remoteServices.Value.DiffRangeResolver.ResolveAsync(
+			source.Root,
+			repositoryUrl,
+			diffRange,
+			source.Identity.Branch,
+			cancellationToken);
+	}
+
 	public void Dispose()
 	{
 		McpResolvedProjectSource[] sources;

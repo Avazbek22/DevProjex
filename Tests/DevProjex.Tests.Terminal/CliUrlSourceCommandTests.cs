@@ -258,6 +258,80 @@ public sealed class CliUrlSourceCommandTests
 	}
 
 	[Fact]
+	public async Task RemoteShallowDiffIsConsistentAcrossCliContentCommands()
+	{
+		if (!IsGitAvailable())
+			Assert.Skip("Git is unavailable on this test host.");
+
+		using var workspace = new TemporaryDirectory();
+		using var data = new TemporaryDirectory();
+		var source = workspace.CreateDirectory("diff-source");
+		RunGit(source, "init", "--initial-branch=main");
+		RunGit(source, "config", "user.email", "terminal-tests@devprojex.local");
+		RunGit(source, "config", "user.name", "DevProjex Terminal Tests");
+		workspace.WriteFile("diff-source/Baseline.txt", "baseline\n");
+		RunGit(source, "add", ".");
+		RunGit(source, "commit", "-m", "baseline");
+		workspace.WriteFile("diff-source/Middle.txt", "middle\n");
+		RunGit(source, "add", ".");
+		RunGit(source, "commit", "-m", "middle");
+		workspace.WriteFile("diff-source/Last.txt", "last-marker\n");
+		RunGit(source, "add", ".");
+		RunGit(source, "commit", "-m", "last");
+		var bare = Path.Combine(workspace.Path, "diff-origin.git");
+		RunGit(workspace.Path, "clone", "--bare", source, bare);
+		var repositoryUrl = new Uri(bare + Path.DirectorySeparatorChar).AbsoluteUri;
+		var factory = new TerminalServiceFactory(() => data.Path);
+		string[] scope = ["--branch", "main", "--git-mode", "diff:HEAD~1..HEAD", "--progress", "never"];
+
+		var analyzeEnvironment = new TestTerminalEnvironment();
+		var analyzeExit = await new TerminalApplication(analyzeEnvironment, factory).RunAsync(
+			["analyze", repositoryUrl, "--format", "json", "-o", "-", .. scope],
+			TestContext.Current.CancellationToken);
+		using var analysis = JsonDocument.Parse(analyzeEnvironment.StandardOutput);
+		var treeEnvironment = new TestTerminalEnvironment();
+		var treeExit = await new TerminalApplication(treeEnvironment, factory).RunAsync(
+			["tree", repositoryUrl, "--format", "text", "-o", "-", "--plain", .. scope],
+			TestContext.Current.CancellationToken);
+		var contextEnvironment = new TestTerminalEnvironment();
+		var contextExit = await new TerminalApplication(contextEnvironment, factory).RunAsync(
+			[
+				"export", "context", repositoryUrl,
+				"--view", "content", "--format", "text", "-o", "-", "--plain", .. scope
+			],
+			TestContext.Current.CancellationToken);
+		var destination = Path.Combine(workspace.Path, "diff-export");
+		var projectEnvironment = new TestTerminalEnvironment();
+		var projectExit = await new TerminalApplication(projectEnvironment, factory).RunAsync(
+			[
+				"export", "project", repositoryUrl,
+				"--as", "folder", "-o", destination, .. scope
+			],
+			TestContext.Current.CancellationToken);
+
+		Assert.All(
+			new[] { analyzeExit, treeExit, contextExit, projectExit },
+			static exitCode => Assert.Equal(CommandLineExitCodes.Success, exitCode));
+		Assert.Equal(1, analysis.RootElement.GetProperty("inventory").GetProperty("files").GetInt32());
+		Assert.Contains("Last.txt", treeEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("Middle.txt", treeEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("last-marker", contextEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("middle", contextEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.Equal("last-marker\n", File.ReadAllText(Path.Combine(destination, "Last.txt")).ReplaceLineEndings("\n"));
+		Assert.False(File.Exists(Path.Combine(destination, "Middle.txt")));
+		Assert.All(
+			new[]
+			{
+				analyzeEnvironment.StandardError,
+				treeEnvironment.StandardError,
+				contextEnvironment.StandardError,
+				projectEnvironment.StandardError
+			},
+			static error => Assert.Empty(error));
+		Assert.Single(new RepoCacheService(Path.Combine(data.Path, "RepoCache")).ListIndexedRepositories());
+	}
+
+	[Fact]
 	public async Task RedirectedUrlCloneProgressNeverContaminatesContextPayloadAndStaysBounded()
 	{
 		if (!IsGitAvailable())

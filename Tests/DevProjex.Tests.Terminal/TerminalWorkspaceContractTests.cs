@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Xml.Linq;
 using DevProjex.Application.Preview;
+using DevProjex.Infrastructure.Git;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -1337,6 +1338,81 @@ public sealed class TerminalWorkspaceContractTests
 		Assert.Equal(GitFilteringMode.Diff, result.Plan.Selection.GitMode);
 	}
 
+	[Fact]
+	public async Task CachedRemoteWorkspaceHydratesShallowDiffWithoutChangingItsCheckout()
+	{
+		if (!TryRunGit(Directory.GetCurrentDirectory(), "--version"))
+			Assert.Skip("Git is required for this regression test.");
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		var source = workspace.CreateDirectory("source");
+		Assert.True(TryRunGit(source, "init", "--quiet", "--initial-branch=main"));
+		Assert.True(TryRunGit(source, "config", "user.name", "DevProjex Tests"));
+		Assert.True(TryRunGit(source, "config", "user.email", "devprojex@example.invalid"));
+		workspace.WriteFile("source/Baseline.txt", "baseline\n");
+		Assert.True(TryRunGit(source, "add", "."));
+		Assert.True(TryRunGit(source, "commit", "--quiet", "-m", "baseline"));
+		workspace.WriteFile("source/Middle.txt", "middle\n");
+		Assert.True(TryRunGit(source, "add", "."));
+		Assert.True(TryRunGit(source, "commit", "--quiet", "-m", "middle"));
+		workspace.WriteFile("source/Last.txt", "last\n");
+		Assert.True(TryRunGit(source, "add", "."));
+		Assert.True(TryRunGit(source, "commit", "--quiet", "-m", "last"));
+		var bare = Path.Combine(workspace.Path, "origin.git");
+		Assert.True(TryRunGit(workspace.Path, "clone", "--quiet", "--bare", source, bare));
+		var repositoryUrl = new Uri(bare + Path.DirectorySeparatorChar).AbsoluteUri;
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		await using var resolvedSource = await new TerminalProjectSourceResolver(
+				services,
+				new TestTerminalEnvironment(),
+				new TerminalOutputOptions { Progress = TerminalProgressMode.Never })
+			.ResolveAsync(repositoryUrl, "main", TestContext.Current.CancellationToken);
+		var checkout = resolvedSource.ProjectPath;
+		var headBefore = ReadGit(checkout, "rev-parse", "HEAD");
+		var statusBefore = ReadGit(checkout, "status", "--porcelain=v1");
+		var contentBefore = File.ReadAllBytes(Path.Combine(checkout, "Last.txt"));
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			checkout,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken,
+			ProjectSourceIdentityResolver.CreateCloneIdentity(repositoryUrl, "origin", "main"));
+		var candidate = GitScopeSelection.WithMode(
+			state.BuildSelection(),
+			GitFilteringMode.Diff,
+			"HEAD~1..HEAD");
+
+		var result = await controller.BuildSettingsPlanAsync(
+			state.Plan,
+			candidate,
+			state.ExtensionOptionStates,
+			state.BuildSelectedItemRelativePaths(),
+			state.PathOptionStates,
+			TestContext.Current.CancellationToken);
+
+		Assert.False(result.Plan.HasErrors);
+		Assert.Equal("Last.txt", Path.GetFileName(Assert.Single(result.Plan.IncludedFiles)));
+		Assert.Equal(headBefore, ReadGit(checkout, "rev-parse", "HEAD"));
+		Assert.Equal(statusBefore, ReadGit(checkout, "status", "--porcelain=v1"));
+		Assert.Equal(contentBefore, File.ReadAllBytes(Path.Combine(checkout, "Last.txt")));
+		var diffResolver = new GitRemoteDiffRangeResolver();
+		var repeated = await Task.WhenAll(
+			diffResolver.ResolveAsync(
+				checkout,
+				repositoryUrl,
+				"HEAD~1..HEAD",
+				"main",
+				TestContext.Current.CancellationToken),
+			diffResolver.ResolveAsync(
+				checkout,
+				repositoryUrl,
+				"HEAD~1..HEAD",
+				"main",
+				TestContext.Current.CancellationToken));
+		Assert.All(repeated, static range => Assert.NotNull(range));
+		Assert.Equal(repeated[0], repeated[1]);
+	}
+
 	[Theory]
 	[InlineData(false, false, null)]
 	[InlineData(
@@ -1556,6 +1632,26 @@ public sealed class TerminalWorkspaceContractTests
 		{
 			return false;
 		}
+	}
+
+	private static string ReadGit(string workingDirectory, params string[] arguments)
+	{
+		var startInfo = new ProcessStartInfo("git")
+		{
+			WorkingDirectory = workingDirectory,
+			UseShellExecute = false,
+			CreateNoWindow = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true
+		};
+		foreach (var argument in arguments)
+			startInfo.ArgumentList.Add(argument);
+		using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Could not start git.");
+		var output = process.StandardOutput.ReadToEnd();
+		var error = process.StandardError.ReadToEnd();
+		Assert.True(process.WaitForExit(10_000));
+		Assert.True(process.ExitCode == 0, error);
+		return output.Trim();
 	}
 
 	private static async Task SetPreviewDocumentAsync(
