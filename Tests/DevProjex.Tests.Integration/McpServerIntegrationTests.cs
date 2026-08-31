@@ -868,6 +868,36 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task GetFileRejectsCaseOnlySiblingOutsideConfiguredRoot()
+	{
+		using var workspace = new TemporaryDirectory();
+		var caseRoot = workspace.CreateDirectory("case-root");
+		EnableCaseSensitiveDirectoryOrSkip(caseRoot);
+		var project = Path.Combine(caseRoot, "Allowed");
+		var sibling = Path.Combine(caseRoot, "allowed");
+		Directory.CreateDirectory(project);
+		Directory.CreateDirectory(sibling);
+		var directoryNames = Directory
+			.EnumerateDirectories(caseRoot)
+			.Select(Path.GetFileName)
+			.ToHashSet(StringComparer.Ordinal);
+		if (!directoryNames.SetEquals(["Allowed", "allowed"]))
+			Assert.Skip("The temporary filesystem does not preserve case-distinct sibling directories.");
+
+		File.WriteAllText(Path.Combine(project, "same.txt"), "allowed content");
+		File.WriteAllText(Path.Combine(sibling, "same.txt"), "sibling escape content");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var result = await server.CallAsync(
+			"get_file",
+			new Dictionary<string, object?> { ["path"] = "../allowed/same.txt" });
+
+		Assert.True(result.IsError);
+		Assert.Contains(McpErrorCodes.RootViolation, Text(result), StringComparison.Ordinal);
+		Assert.DoesNotContain("sibling escape content", Text(result), StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task GetFileRejectsAProjectFileReplacedByAnOutsideSymlink()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -3160,6 +3190,46 @@ public sealed class McpServerIntegrationTests
 			exception is UnauthorizedAccessException or IOException or PlatformNotSupportedException)
 		{
 			Assert.Skip($"File symbolic links are unavailable: {exception.GetType().Name}.");
+		}
+	}
+
+	private static void EnableCaseSensitiveDirectoryOrSkip(string directoryPath)
+	{
+		if (!OperatingSystem.IsWindows())
+			return;
+
+		try
+		{
+			using var process = Process.Start(new ProcessStartInfo("fsutil.exe")
+			{
+				UseShellExecute = false,
+				CreateNoWindow = true,
+				RedirectStandardOutput = true,
+				RedirectStandardError = true,
+				ArgumentList = { "file", "setCaseSensitiveInfo", directoryPath, "enable" }
+			});
+			if (process is null || !process.WaitForExit(TimeSpan.FromSeconds(10)))
+			{
+				try
+				{
+					process?.Kill(entireProcessTree: true);
+				}
+				catch (InvalidOperationException)
+				{
+				}
+
+				Assert.Skip("Windows per-directory case sensitivity could not be enabled.");
+			}
+
+			if (process.ExitCode != 0)
+				Assert.Skip("Windows per-directory case sensitivity is unavailable.");
+		}
+		catch (Exception exception) when (exception is
+			       InvalidOperationException or
+			       IOException or
+			       System.ComponentModel.Win32Exception)
+		{
+			Assert.Skip($"Windows per-directory case sensitivity is unavailable: {exception.GetType().Name}.");
 		}
 	}
 

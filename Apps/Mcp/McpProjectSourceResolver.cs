@@ -8,7 +8,7 @@ internal sealed class McpProjectSourceResolver : IDisposable
 	private readonly object _sync = new();
 	private readonly Dictionary<RemoteProjectKey, McpResolvedProjectSource> _remoteSources = [];
 	private readonly Dictionary<string, McpResolvedProjectSource> _remoteRoots =
-		new(PathComparer.Default);
+		new(StringComparer.Ordinal);
 	private bool _disposed;
 
 	public McpProjectSourceResolver(

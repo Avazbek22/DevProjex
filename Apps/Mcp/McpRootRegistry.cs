@@ -12,8 +12,9 @@ public sealed class McpRootRegistry
 		{
 			if (PathUtility.IsMissingPath(root))
 				throw new ArgumentException("MCP roots cannot be empty.", nameof(roots));
-			var physical = ResolvePhysicalExistingPath(root, requireDirectory: true);
-			if (!normalized.Contains(physical, PathComparer.Default))
+			var physical = McpRootJailFileStreamOpener.ResolveDirectoryPath(
+				ResolvePhysicalExistingPath(root, requireDirectory: true));
+			if (!normalized.Contains(physical, StringComparer.Ordinal))
 				normalized.Add(physical);
 		}
 
@@ -40,14 +41,15 @@ public sealed class McpRootRegistry
 		string physical;
 		try
 		{
-			physical = ResolvePhysicalExistingPath(requestedProject, requireDirectory: true);
+			physical = McpRootJailFileStreamOpener.ResolveDirectoryPath(
+				ResolvePhysicalExistingPath(requestedProject, requireDirectory: true));
 		}
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
 		{
 			throw UnknownProject(requestedProject);
 		}
 
-		var match = _roots.FirstOrDefault(root => PathComparer.Default.Equals(root, physical));
+		var match = _roots.FirstOrDefault(root => StringComparer.Ordinal.Equals(root, physical));
 		return match ?? throw UnknownProject(requestedProject);
 	}
 
@@ -150,16 +152,12 @@ public sealed class McpRootRegistry
 
 	private static bool IsWithin(string root, string path)
 	{
-		if (PathComparer.Default.Equals(root, path))
+		if (StringComparer.Ordinal.Equals(root, path))
 			return true;
 		var prefix = Path.EndsInDirectorySeparator(root)
 			? root
 			: root + Path.DirectorySeparatorChar;
-		return path.StartsWith(
-			prefix,
-			OperatingSystem.IsWindows()
-				? StringComparison.OrdinalIgnoreCase
-				: StringComparison.Ordinal);
+		return path.StartsWith(prefix, StringComparison.Ordinal);
 	}
 
 	private McpToolException UnknownProject(string project) =>

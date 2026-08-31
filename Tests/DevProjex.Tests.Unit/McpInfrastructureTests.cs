@@ -640,6 +640,49 @@ public sealed class McpInfrastructureTests
 	}
 
 	[Fact]
+	public void RootRegistryRejectsCaseOnlySiblingFromOpenedHandleValidation()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("Allowed");
+		var registry = new McpRootRegistry([project]);
+		var canonicalRoot = Assert.Single(registry.Roots);
+		var leafName = Path.GetFileName(canonicalRoot);
+		var alternateName = char.IsUpper(leafName[0])
+			? char.ToLowerInvariant(leafName[0]) + leafName[1..]
+			: char.ToUpperInvariant(leafName[0]) + leafName[1..];
+		var caseOnlySiblingPath = Path.Combine(
+			Path.GetDirectoryName(canonicalRoot)!,
+			alternateName,
+			"same.txt");
+
+		var exception = Assert.Throws<McpToolException>(() =>
+			registry.EnsureOpenedPathIsWithin(
+				canonicalRoot,
+				"../" + alternateName + "/same.txt",
+				caseOnlySiblingPath));
+
+		Assert.Equal(McpErrorCodes.RootViolation, exception.Code);
+	}
+
+	[Fact]
+	public void RequestedPathMatchingKeepsCaseDistinctProjectEntriesIndependent()
+	{
+		var requested = new HashSet<string>(StringComparer.Ordinal)
+		{
+			Path.GetFullPath(Path.Combine("project", "Foo.cs"))
+		};
+
+		Assert.True(McpProjectService.MatchesRequested(
+			Path.GetFullPath(Path.Combine("project", "Foo.cs")),
+			requested,
+			new HashSet<string>(StringComparer.Ordinal)));
+		Assert.False(McpProjectService.MatchesRequested(
+			Path.GetFullPath(Path.Combine("project", "foo.cs")),
+			requested,
+			new HashSet<string>(StringComparer.Ordinal)));
+	}
+
+	[Fact]
 	public async Task PreparedAnalyzerReadsTrustedOutputWithoutWeakeningSourceJail()
 	{
 		using var workspace = new TemporaryDirectory();

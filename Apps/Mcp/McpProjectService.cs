@@ -322,11 +322,7 @@ internal sealed class McpProjectService(
 				McpErrorCodes.PathNotFound,
 				$"{McpErrorCodes.PathNotFound}: '{path}' is a directory; provide a file path returned by get_tree or search_project.");
 		}
-		var pathComparer = GitScopeSelection.IsMomentary(
-			plan.Selection.GitMode ?? GitFilteringMode.None)
-			? StringComparer.Ordinal
-			: PathComparer.Default;
-		if (!plan.IncludedFiles.Contains(physical, pathComparer))
+		if (!plan.IncludedFiles.Contains(physical, StringComparer.Ordinal))
 		{
 			throw new McpToolException(
 				McpErrorCodes.PathNotFound,
@@ -369,8 +365,8 @@ internal sealed class McpProjectService(
 		if (paths is null || paths.Count == 0)
 			return RequestedPathSelection.Empty;
 
-		var resolved = new HashSet<string>(PathComparer.Default);
-		var directories = new HashSet<string>(PathComparer.Default);
+		var resolved = new HashSet<string>(StringComparer.Ordinal);
+		var directories = new HashSet<string>(StringComparer.Ordinal);
 		foreach (var path in paths)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -405,7 +401,7 @@ internal sealed class McpProjectService(
 				return true;
 
 			var parentPath = Path.GetDirectoryName(ancestorPath);
-			if (PathComparer.Default.Equals(parentPath, ancestorPath))
+			if (StringComparer.Ordinal.Equals(parentPath, ancestorPath))
 				break;
 			ancestorPath = parentPath;
 		}
@@ -417,8 +413,8 @@ internal sealed class McpProjectService(
 		IReadOnlySet<string> Directories)
 	{
 		public static RequestedPathSelection Empty { get; } = new(
-			new HashSet<string>(PathComparer.Default),
-			new HashSet<string>(PathComparer.Default));
+			new HashSet<string>(StringComparer.Ordinal),
+			new HashSet<string>(StringComparer.Ordinal));
 	}
 
 	internal static string ToRelative(string root, string path) =>

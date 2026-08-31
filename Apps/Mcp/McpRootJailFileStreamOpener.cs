@@ -8,6 +8,11 @@ internal sealed class McpRootJailFileStreamOpener
 {
 	private const int DarwinGetPath = 50;
 	private const int DarwinPathBufferLength = 1024;
+	private const uint WindowsShareRead = 0x00000001;
+	private const uint WindowsShareWrite = 0x00000002;
+	private const uint WindowsShareDelete = 0x00000004;
+	private const uint WindowsOpenExisting = 3;
+	private const uint WindowsBackupSemantics = 0x02000000;
 	private readonly McpProjectRootJail _roots;
 
 	public McpRootJailFileStreamOpener(McpProjectRootJail roots) =>
@@ -60,6 +65,31 @@ internal sealed class McpRootJailFileStreamOpener
 			return ResolveDarwinPath(handle);
 		throw new PlatformNotSupportedException("MCP root-jail file reads require Windows, Linux, or macOS.");
 	}
+
+	internal static string ResolveDirectoryPath(string path)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(path);
+		using var handle = OperatingSystem.IsWindows()
+			? OpenWindowsDirectory(path)
+			: File.OpenHandle(
+				path,
+				FileMode.Open,
+				FileAccess.Read,
+				FileShare.ReadWrite | FileShare.Delete);
+		if (handle.IsInvalid)
+			throw NativeFailure("The final path of an MCP project root could not be opened.");
+		return Path.TrimEndingDirectorySeparator(ResolveOpenedPath(handle));
+	}
+
+	private static SafeFileHandle OpenWindowsDirectory(string path) =>
+		CreateFile(
+			path,
+			desiredAccess: 0,
+			WindowsShareRead | WindowsShareWrite | WindowsShareDelete,
+			securityAttributes: IntPtr.Zero,
+			WindowsOpenExisting,
+			WindowsBackupSemantics,
+			templateFile: IntPtr.Zero);
 
 	private static string ResolveWindowsPath(SafeFileHandle handle)
 	{
@@ -154,6 +184,16 @@ internal sealed class McpRootJailFileStreamOpener
 		StringBuilder path,
 		uint pathLength,
 		uint flags);
+
+	[DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+	private static extern SafeFileHandle CreateFile(
+		string fileName,
+		uint desiredAccess,
+		uint shareMode,
+		IntPtr securityAttributes,
+		uint creationDisposition,
+		uint flagsAndAttributes,
+		IntPtr templateFile);
 
 	[DllImport("libc", EntryPoint = "readlink", SetLastError = true)]
 	private static extern nint ReadLink(

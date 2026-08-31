@@ -80,7 +80,7 @@ internal sealed class McpProjectRootJail(
 		McpToolException exception,
 		McpRootJailScope scope)
 	{
-		if (PathComparer.Default.Equals(scope.Root, scope.Address))
+		if (StringComparer.Ordinal.Equals(scope.Root, scope.Address))
 			return exception;
 		return new McpToolException(
 			exception.Code,
