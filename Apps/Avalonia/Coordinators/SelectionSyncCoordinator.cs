@@ -3357,7 +3357,8 @@ public sealed partial class SelectionSyncCoordinator(
 				ExtensionInclusionPolicyFactory.Create(context),
 				snapshot.EffectiveRules,
 				cancellationToken,
-				rootSelectionIsExplicit)
+				rootSelectionIsExplicit,
+				selectedPathFrontier: context.GitRepositoryScopePaths)
 		};
 	}
 

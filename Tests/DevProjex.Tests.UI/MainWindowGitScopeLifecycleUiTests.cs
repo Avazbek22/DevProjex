@@ -263,6 +263,63 @@ public sealed class MainWindowGitScopeLifecycleUiTests
 	}
 
 	[AvaloniaFact]
+	public async Task ManualNestedSelectionRestrictsStagedExtensionsAndIgnoreCounts()
+	{
+		EnsureGitAvailable();
+		using var project = UiTestProject.CreateWithCleanGitAndSmartWorkspace();
+		var selectedDirectory = Path.Combine(project.RootPath, "container", "selected");
+		var siblingDirectory = Path.Combine(project.RootPath, "container", "sibling");
+		Directory.CreateDirectory(selectedDirectory);
+		Directory.CreateDirectory(siblingDirectory);
+		var selectedPath = Path.Combine(selectedDirectory, "Selected.cs");
+		var siblingExtensionPath = Path.Combine(siblingDirectory, "Sibling.xyz");
+		var siblingDotFilePath = Path.Combine(siblingDirectory, ".scope-noise");
+		await File.WriteAllTextAsync(
+			selectedPath,
+			"class Selected {}\n",
+			TestContext.Current.CancellationToken);
+		await File.WriteAllTextAsync(
+			siblingExtensionPath,
+			"sibling\n",
+			TestContext.Current.CancellationToken);
+		await File.WriteAllTextAsync(
+			siblingDotFilePath,
+			"dot file\n",
+			TestContext.Current.CancellationToken);
+		InitializeRepository(project.RootPath);
+		await File.AppendAllTextAsync(
+			selectedPath,
+			"// staged\n",
+			TestContext.Current.CancellationToken);
+		await File.AppendAllTextAsync(
+			siblingExtensionPath,
+			"staged\n",
+			TestContext.Current.CancellationToken);
+		await File.AppendAllTextAsync(
+			siblingDotFilePath,
+			"staged\n",
+			TestContext.Current.CancellationToken);
+		RunGit(project.RootPath, "add", "--all");
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+		try
+		{
+			await SetSingleTreePathSelectionAsync(window, "container", "selected");
+			await SelectAndApplyGitModeAsync(window, GitFilteringMode.Staged);
+
+			await WaitForExtensionStateAsync(window, ".cs", visible: true);
+			await WaitForExtensionStateAsync(window, ".xyz", visible: false);
+			Assert.DoesNotContain(
+				UiTestDriver.GetViewModel(window).PathIgnoreOptions,
+				static option => option.Id == IgnoreOptionId.DotFiles);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task ScopedPresentationExcludesFilesAndImpactCountsFromUncheckedTopLevelRoot()
 	{
 		using var project = UiTestProject.CreateDefault();
@@ -1023,6 +1080,68 @@ public sealed class MainWindowGitScopeLifecycleUiTests
 	}
 
 	[AvaloniaFact]
+	public async Task BuildTreeScopedPresentationHonorsSelectedPathFrontier()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var selectedDirectory = Path.Combine(project.RootPath, "container", "selected");
+		var siblingDirectory = Path.Combine(project.RootPath, "container", "sibling");
+		Directory.CreateDirectory(selectedDirectory);
+		Directory.CreateDirectory(siblingDirectory);
+		var selectedPath = Path.Combine(selectedDirectory, "Selected.cs");
+		var siblingExtensionPath = Path.Combine(siblingDirectory, "Sibling.xyz");
+		var siblingDotFilePath = Path.Combine(siblingDirectory, ".scope-noise");
+		await File.WriteAllTextAsync(
+			selectedPath,
+			"class Selected {}\n",
+			TestContext.Current.CancellationToken);
+		await File.WriteAllTextAsync(
+			siblingExtensionPath,
+			"sibling\n",
+			TestContext.Current.CancellationToken);
+		await File.WriteAllTextAsync(
+			siblingDotFilePath,
+			"dot file\n",
+			TestContext.Current.CancellationToken);
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+		try
+		{
+			var host = (IRefreshTreePipelineHost)window;
+			var input = Assert.IsType<TreeRefreshInput>(host.CaptureTreeRefreshInput(true));
+			var initialResult = host.BuildTree(input, TestContext.Current.CancellationToken);
+			var inventory = Assert.IsType<ProjectTreeInventorySnapshot>(initialResult.Inventory);
+			var scopePaths = new HashSet<string>(
+				[selectedPath, siblingExtensionPath, siblingDotFilePath],
+				PathComparer.Default);
+			var frontier = new HashSet<string>([selectedDirectory], StringComparer.Ordinal);
+
+			var result = host.BuildTree(
+				input with
+				{
+					GitMode = GitFilteringMode.Staged,
+					GitScope = new GitScopePathResult(true, scopePaths, DeletedPathCount: 0),
+					GitScopePresentation = null,
+					TreeInventory = inventory,
+					GitRepositoryScopePaths = frontier
+				},
+				TestContext.Current.CancellationToken);
+			var projection = Assert.IsType<GitScopePresentationProjection>(result.GitScopePresentation);
+
+			Assert.Contains(
+				projection.AvailableExtensions,
+				static extension => string.Equals(extension, ".cs", StringComparison.OrdinalIgnoreCase));
+			Assert.DoesNotContain(
+				projection.AvailableExtensions,
+				static extension => string.Equals(extension, ".xyz", StringComparison.OrdinalIgnoreCase));
+			Assert.Equal(0, projection.IgnoreOptionCounts.DotFiles);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task ExplicitNonePersistsBehindASubsequentMomentaryMode()
 	{
 		EnsureGitAvailable();
@@ -1059,6 +1178,26 @@ public sealed class MainWindowGitScopeLifecycleUiTests
 			var selected = Assert.Single(root.Children, node =>
 				string.Equals(node.DisplayName, selectedDisplayName, StringComparison.Ordinal));
 			selected.IsChecked = true;
+		});
+		await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+	}
+
+	private static async Task SetSingleTreePathSelectionAsync(
+		MainWindow window,
+		params string[] relativeDisplayPath)
+	{
+		Assert.NotEmpty(relativeDisplayPath);
+		await window.Dispatcher.InvokeAsync(() =>
+		{
+			var root = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
+			root.IsChecked = false;
+			var current = root;
+			foreach (var segment in relativeDisplayPath)
+			{
+				current = Assert.Single(current.Children, node =>
+					string.Equals(node.DisplayName, segment, StringComparison.Ordinal));
+			}
+			current.IsChecked = true;
 		});
 		await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
 	}

@@ -69,7 +69,8 @@ public partial class MainWindow
 				input.EffectiveExtensionPolicy,
 				input.Options.IgnoreRules,
 				cancellationToken,
-				rootSelectionIsExplicit)
+				rootSelectionIsExplicit,
+				selectedPathFrontier: input.GitRepositoryScopePaths)
 		};
 	}
 
