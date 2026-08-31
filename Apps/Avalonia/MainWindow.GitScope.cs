@@ -23,8 +23,9 @@ public partial class MainWindow
 		var availableRootFolders = input.AvailableRootFolders ?? input.Options.AllowedRootFolders;
 		var rootSelectionIsExplicit = input.AvailableRootFolders is not null &&
 		                              !input.Options.AllowedRootFolders.SetEquals(availableRootFolders);
-		var scope = input.GitScope ?? _gitScopePathProvider
-			.ResolveAsync(
+		var scope = input.GitScope ?? GitScopeFilter
+			.ResolvePathsAsync(
+				_gitScopePathProvider,
 				input.CurrentPath,
 				input.GitMode,
 				diffRange: null,
@@ -34,6 +35,7 @@ public partial class MainWindow
 					input.Options.AllowedRootFolders,
 					rootSelectionIsExplicit,
 					input.GitRepositoryScopePaths),
+				input.GitRepositoryScopePaths,
 				cancellationToken)
 			.GetAwaiter()
 			.GetResult();

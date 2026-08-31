@@ -985,6 +985,39 @@ public sealed class MainWindowGitScopeLifecycleUiTests
 		await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
 	}
 
+	[AvaloniaFact]
+	public async Task ExplicitEmptyTreeSelectionDoesNotQueryGitScope()
+	{
+		EnsureGitAvailable();
+		using var project = UiTestProject.CreateWithCleanGitAndSmartWorkspace();
+		InitializeRepository(project.RootPath);
+		var provider = RecordingGitScopePathProvider.Unavailable();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(
+			project,
+			configureServices: services => services with { GitScopePathProvider = provider });
+
+		try
+		{
+			await window.Dispatcher.InvokeAsync(() =>
+				Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes).IsChecked = false);
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+
+			await SelectAndApplyGitModeAsync(window, GitFilteringMode.Staged);
+
+			var viewModel = UiTestDriver.GetViewModel(window);
+			Assert.Equal(GitFilteringMode.Staged, viewModel.SelectedGitFilteringModeOption?.Mode);
+			Assert.Empty(Assert.Single(viewModel.TreeNodes).Children);
+			Assert.Equal(0, provider.CallCount);
+			Assert.DoesNotContain(
+				viewModel.ToastItems,
+				static toast => toast.Message.Contains("Git", StringComparison.OrdinalIgnoreCase));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
 	private static async Task SetSingleTopLevelSelectionAsync(
 		MainWindow window,
 		string selectedDisplayName)

@@ -209,20 +209,15 @@ public static class GitScopeFilter
 		};
 		var scopedBaseline = plan with { Selection = scopedSelection };
 
-		var scope = repositoryScopeFullPaths is { Count: 0 }
-			? new GitScopePathResult(
-				true,
-				new HashSet<string>(StringComparer.Ordinal),
-				0,
-				PathMatchers: [])
-			: await provider
-				.ResolveAsync(
-					plan.SourceRoot,
-					scopeMode,
-					resolvedDiffRange ?? diffRange,
-					planner.GetGitScopeRepositoryRoots(plan, repositoryScopeFullPaths),
-					cancellationToken)
-				.ConfigureAwait(false);
+		var scope = await ResolvePathsAsync(
+				provider,
+				plan.SourceRoot,
+				scopeMode,
+				resolvedDiffRange ?? diffRange,
+				planner.GetGitScopeRepositoryRoots(plan, repositoryScopeFullPaths),
+				repositoryScopeFullPaths,
+				cancellationToken)
+			.ConfigureAwait(false);
 		if (!scope.IsAvailable)
 		{
 			var empty = await planner
@@ -385,5 +380,35 @@ public static class GitScopeFilter
 			result[index] = diagnostics[index];
 		result[^1] = diagnostic;
 		return result;
+	}
+
+	public static Task<GitScopePathResult> ResolvePathsAsync(
+		IGitScopePathProvider provider,
+		string projectRoot,
+		GitFilteringMode mode,
+		string? diffRange,
+		IReadOnlyCollection<string> repositoryRoots,
+		IReadOnlyCollection<string>? requestedScopePaths,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(provider);
+		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
+		ArgumentNullException.ThrowIfNull(repositoryRoots);
+		cancellationToken.ThrowIfCancellationRequested();
+		if (requestedScopePaths is { Count: 0 })
+		{
+			return Task.FromResult(new GitScopePathResult(
+				true,
+				new HashSet<string>(StringComparer.Ordinal),
+				0,
+				PathMatchers: []));
+		}
+
+		return provider.ResolveAsync(
+			projectRoot,
+			mode,
+			diffRange,
+			repositoryRoots,
+			cancellationToken);
 	}
 }

@@ -3322,8 +3322,9 @@ public sealed partial class SelectionSyncCoordinator(
 			.ToHashSet(PathComparer.Default);
 		var rootSelectionIsExplicit = context.RootSelectionIsExplicit ||
 		                              rootOptions.Any(static option => !option.IsChecked);
-		var scope = await gitScopePathProvider
-			.ResolveAsync(
+		var scope = await GitScopeFilter
+			.ResolvePathsAsync(
+				gitScopePathProvider,
 				context.Path,
 				context.GitMode,
 				context.GitDiffRange,
@@ -3333,6 +3334,7 @@ public sealed partial class SelectionSyncCoordinator(
 					selectedRoots,
 					rootSelectionIsExplicit,
 					context.GitRepositoryScopePaths),
+				context.GitRepositoryScopePaths,
 				cancellationToken)
 			.ConfigureAwait(false);
 		if (!scope.IsAvailable)
