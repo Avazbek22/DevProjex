@@ -277,7 +277,7 @@ public sealed class ProjectContextDocumentService(
 			secretRedactionSession: null,
 			codeCompressionSession: null,
 			outputPathRedactionDecision: pathRedaction);
-		return await service.WriteCompleteWithReportAsync(
+		var result = await service.WriteCompleteWithReportAsync(
 				plan,
 				view,
 				format,
@@ -288,6 +288,7 @@ public sealed class ProjectContextDocumentService(
 				writeProgress,
 				maximumEstimatedTokens)
 			.ConfigureAwait(false);
+		return result with { UnscannableFiles = prepared.UnscannableFiles };
 	}
 
 	public async Task<ProjectContextWriteResult> EvaluateTokenBudgetAsync(

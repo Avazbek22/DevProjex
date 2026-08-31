@@ -1,6 +1,7 @@
 using System.IO.Pipelines;
 using DevProjex.Application.Context;
 using DevProjex.Application.Diagnostics;
+using DevProjex.Application.Secrets;
 using DevProjex.Mcp;
 using ModelContextProtocol;
 using ModelContextProtocol.Client;
@@ -1215,6 +1216,48 @@ public sealed class McpServerIntegrationTests
 		Assert.DoesNotContain("continue with start_line=", continuationText, StringComparison.Ordinal);
 		AssertSpotlighted(firstPage);
 		AssertSpotlighted(continuation);
+	}
+
+	[Fact]
+	public async Task StoredPackResponseBoundsLongTreePreviewWithoutChangingThePack()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var names = Enumerable.Range(0, 1_700)
+			.Select(static index => $"{index:D4}-{new string((char)('a' + index % 26), 110)}.txt")
+			.ToArray();
+		foreach (var name in names)
+			File.WriteAllText(Path.Combine(project, name), "x");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var stored = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["view"] = "tree",
+				["format"] = "text"
+			});
+
+		var response = Text(stored);
+		Assert.NotEqual(true, stored.IsError);
+		Assert.True(
+			response.Length <= DevProjexMcpTools.MaximumStoredPackResponseCharacters,
+			$"Stored response was {response.Length} characters.");
+		Assert.Contains("Pack stored as '", response, StringComparison.Ordinal);
+		Assert.Contains("[Tree preview truncated to fit the stored-pack response limit.", response, StringComparison.Ordinal);
+		AssertSpotlighted(stored);
+		AssertBalancedSpotlights(response);
+
+		var page = await server.CallAsync(
+			"read_pack",
+			new Dictionary<string, object?>
+			{
+				["pack_id"] = ExtractPackId(response),
+				["start_line"] = 1_600
+			});
+		Assert.NotEqual(true, page.IsError);
+		Assert.Contains(names[^1], Text(page), StringComparison.Ordinal);
+		AssertSpotlighted(page);
 	}
 
 	[Theory]
@@ -2512,6 +2555,90 @@ public sealed class McpServerIntegrationTests
 		}
 	}
 
+	[Fact]
+	public async Task ContentToolsReportTrustedPartialResultsAtTheMandatoryRedactionBoundary()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		File.WriteAllText(Path.Combine(project, "Small.txt"), "small-marker\n");
+		File.WriteAllText(Path.Combine(project, "Stored.txt"), new string('s', 60_000));
+		WriteAsciiFileWithLength(
+			Path.Combine(project, "Exact.txt"),
+			SecretRedactionOutputPreparer.MaximumScannableFileBytes,
+			"exact-marker\n");
+		WriteAsciiFileWithLength(
+			Path.Combine(project, "Oversized.txt"),
+			SecretRedactionOutputPreparer.MaximumScannableFileBytes + 1,
+			$"oversized-marker\n{Secret}\n");
+		await using var server = await McpTestServer.StartAsync(project, workspace.Path);
+
+		var search = await server.CallAsync(
+			"search_project",
+			new Dictionary<string, object?>
+			{
+				["pattern"] = "small-marker|exact-marker|oversized-marker",
+				["context_lines"] = 0,
+				["ignore_case"] = false
+			});
+		var searchText = Text(search);
+		Assert.NotEqual(true, search.IsError);
+		Assert.Contains("Small.txt:1:small-marker", searchText, StringComparison.Ordinal);
+		Assert.Contains("Exact.txt:1:exact-marker", searchText, StringComparison.Ordinal);
+		Assert.DoesNotContain("oversized-marker", searchText, StringComparison.Ordinal);
+		Assert.DoesNotContain(Secret, searchText, StringComparison.Ordinal);
+		Assert.Contains($"[Warning {McpErrorCodes.PayloadTruncated}]", searchText, StringComparison.Ordinal);
+		Assert.Contains("could not fully inspect 1 selected file.", searchText, StringComparison.Ordinal);
+		Assert.Contains("Uninspected content was not searched.", searchText, StringComparison.Ordinal);
+		Assert.True(
+			searchText.IndexOf($"[Warning {McpErrorCodes.PayloadTruncated}]", StringComparison.Ordinal) >
+			searchText.LastIndexOf("</untrusted-data-", StringComparison.Ordinal));
+
+		var analysis = await server.CallAsync("analyze");
+		Assert.NotEqual(true, analysis.IsError);
+		Assert.Equal(4, analysis.StructuredContent?.GetProperty("files").GetInt32());
+		var analysisBlocks = analysis.Content.OfType<TextContentBlock>().ToArray();
+		Assert.Equal(2, analysisBlocks.Length);
+		var analysisNotice = analysisBlocks[1].Text;
+		Assert.Contains($"[Warning {McpErrorCodes.PayloadTruncated}]", analysisNotice, StringComparison.Ordinal);
+		Assert.Contains("do not reflect requested detail transformations", analysisNotice, StringComparison.Ordinal);
+		Assert.DoesNotContain("Oversized.txt", analysisNotice, StringComparison.Ordinal);
+		Assert.DoesNotContain(Secret, analysisNotice, StringComparison.Ordinal);
+
+		var pack = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "Oversized.txt" },
+				["view"] = "content",
+				["format"] = "text"
+			});
+		var packText = Text(pack);
+		Assert.NotEqual(true, pack.IsError);
+		Assert.Contains($"[Warning {McpErrorCodes.PayloadTruncated}]", packText, StringComparison.Ordinal);
+		Assert.Contains("Uninspected content was withheld from the pack.", packText, StringComparison.Ordinal);
+		Assert.DoesNotContain(Secret, packText, StringComparison.Ordinal);
+		Assert.True(
+			packText.IndexOf($"[Warning {McpErrorCodes.PayloadTruncated}]", StringComparison.Ordinal) >
+			packText.LastIndexOf("</untrusted-data-", StringComparison.Ordinal));
+
+		var storedPack = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>
+			{
+				["paths"] = new[] { "Stored.txt", "Oversized.txt" },
+				["view"] = "content",
+				["format"] = "text"
+			});
+		var storedPackText = Text(storedPack);
+		Assert.NotEqual(true, storedPack.IsError);
+		Assert.StartsWith("Pack stored as '", storedPackText, StringComparison.Ordinal);
+		Assert.Contains($"[Warning {McpErrorCodes.PayloadTruncated}]", storedPackText, StringComparison.Ordinal);
+		Assert.DoesNotContain(Secret, storedPackText, StringComparison.Ordinal);
+		Assert.True(
+			storedPackText.IndexOf($"[Warning {McpErrorCodes.PayloadTruncated}]", StringComparison.Ordinal) >
+			storedPackText.LastIndexOf("</untrusted-data-", StringComparison.Ordinal));
+	}
+
 	[Theory]
 	[InlineData("staged", "json")]
 	[InlineData("staged", "xml")]
@@ -3031,6 +3158,31 @@ public sealed class McpServerIntegrationTests
 		}
 	}
 
+	private static void WriteAsciiFileWithLength(string path, long length, string prefix)
+	{
+		var prefixBytes = Encoding.ASCII.GetBytes(prefix);
+		if (prefixBytes.LongLength > length)
+			throw new ArgumentOutOfRangeException(nameof(length));
+
+		using var stream = new FileStream(
+			path,
+			FileMode.CreateNew,
+			FileAccess.Write,
+			FileShare.None,
+			64 * 1024,
+			FileOptions.SequentialScan);
+		stream.Write(prefixBytes);
+		var buffer = new byte[64 * 1024];
+		Array.Fill(buffer, (byte)'x');
+		var remaining = length - prefixBytes.LongLength;
+		while (remaining > 0)
+		{
+			var count = (int)Math.Min(buffer.Length, remaining);
+			stream.Write(buffer, 0, count);
+			remaining -= count;
+		}
+	}
+
 	private static StringComparison PathComparison =>
 		OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
@@ -3079,6 +3231,22 @@ public sealed class McpServerIntegrationTests
 		Assert.Matches("<untrusted-data-[0-9a-f]{24}>", text);
 		Assert.Matches("</untrusted-data-[0-9a-f]{24}>", text);
 		Assert.DoesNotContain(result.Content, static block => block is EmbeddedResourceBlock);
+	}
+
+	private static void AssertBalancedSpotlights(string text)
+	{
+		var openings = Regex.Matches(text, "<untrusted-data-([0-9a-f]{24})>");
+		var closings = Regex.Matches(text, "</untrusted-data-([0-9a-f]{24})>");
+		Assert.NotEmpty(openings);
+		Assert.Equal(openings.Count, closings.Count);
+		foreach (Match opening in openings)
+		{
+			Assert.Single(
+				Regex.Matches(
+					text,
+					$"</untrusted-data-{Regex.Escape(opening.Groups[1].Value)}>")
+					.Cast<Match>());
+		}
 	}
 
 	private static void AssertSecretRedactedAndSpotlighted(CallToolResult result)

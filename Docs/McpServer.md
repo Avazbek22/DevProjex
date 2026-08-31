@@ -128,6 +128,14 @@ When a Git state also contains deleted paths, `analyze` appends a separate
 human-readable `DPX-GIT-STATE-DELETED` warning text block without changing its
 structured schema.
 
+If mandatory secret redaction cannot inspect a selected file, including text
+larger than the 16 MiB inspection boundary, selection-wide content tools return
+a partial success plus a trusted `DPX-MCP-PAYLOAD-TRUNCATED` notice. `search_project`
+searches the inspected files, `analyze` preserves its structured metrics
+envelope while identifying metrics that may be estimated, and `pack_context`
+withholds uninspected content. The notice is outside spotlight delimiters and
+reports only a count, never file paths or uninspected content.
+
 `get_tree`, `pack_context`, `read_pack`, `search_project`, and `get_file` are
 text tools. They do not declare `outputSchema`, omit `structuredContent`, and
 return the useful payload directly in the first text block in `content`. This
@@ -147,7 +155,10 @@ clients can distinguish trusted diagnostics from untrusted file data.
 An inline `pack_context` result contains the complete pack. A stored result is
 self-contained: it starts with `Pack stored as '<id>' (<N> characters). Call
 read_pack ...`, followed by a preview of the project tree. Clients extract the
-session-scoped `pack_id` from that text and pass it to `read_pack`.
+session-scoped `pack_id` from that text and pass it to `read_pack`. The stored
+response, including its tree preview and trusted diagnostics, is bounded to
+50,000 characters; preview truncation never changes the stored pack, which
+remains available in full through `read_pack`.
 
 For human-readable `pack_context` documents with `view: "content"`, text and
 Markdown write one `Root: ...` line and use project-relative file headings. A
