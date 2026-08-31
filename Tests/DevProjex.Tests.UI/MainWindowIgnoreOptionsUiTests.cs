@@ -2159,6 +2159,11 @@ public sealed class MainWindowIgnoreOptionsUiTests
         {
             await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.UseGitIgnore, visible: false);
             await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.SmartIgnore, visible: false);
+			var selector = UiTestDriver.GetRequiredControl<ComboBox>(
+				window,
+				"GitFilteringModeComboBox");
+			Assert.False(UiTestDriver.GetViewModel(window).IsGitFilteringModeSelectorVisible);
+			Assert.False(selector.IsVisible);
 
             var artifactPath = Path.Combine(project.RootPath, "bin", "Debug", "net10.0", "App.dll");
             Directory.CreateDirectory(Path.GetDirectoryName(artifactPath)!);
@@ -2172,12 +2177,49 @@ public sealed class MainWindowIgnoreOptionsUiTests
                 visible: true,
                 isChecked: true);
             await UiTestDriver.WaitForIgnoreOptionStateAsync(window, IgnoreOptionId.SmartIgnore, visible: false);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => selector.IsVisible,
+				"Git mode selector to appear when .gitignore becomes applicable");
+			Assert.True(UiTestDriver.GetViewModel(window).IsGitFilteringModeSelectorVisible);
         }
         finally
         {
             await UiTestDriver.CloseWindowAsync(window);
         }
     }
+
+	[AvaloniaTheory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task NonGitWorkspace_HidesGitModeSelectorRegardlessOfOtherPathExclusions(
+		bool hasOtherPathExclusions)
+	{
+		using var project = hasOtherPathExclusions
+			? UiTestProject.CreateWithDynamicIgnoreEntries()
+			: UiTestProject.CreateWithPlainWebAssetsWorkspace();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+		try
+		{
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => UiTestDriver.GetViewModel(window).PathIgnoreOptions.Any() == hasOtherPathExclusions,
+				$"path exclusions presence to become {hasOtherPathExclusions}");
+			var viewModel = UiTestDriver.GetViewModel(window);
+			var selector = UiTestDriver.GetRequiredControl<ComboBox>(
+				window,
+				"GitFilteringModeComboBox");
+
+			Assert.Equal(hasOtherPathExclusions, viewModel.PathIgnoreOptions.Count > 0);
+			Assert.False(viewModel.IsGitFilteringModeSelectorVisible);
+			Assert.False(selector.IsVisible);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
 
 	[AvaloniaFact]
 	public async Task GitModeSelector_FillsIgnoreIslandAndUsesRoundedCenteredItems()
@@ -2195,6 +2237,8 @@ public sealed class MainWindowIgnoreOptionsUiTests
 				window,
 				"GitFilteringModeComboBox");
 			var island = UiTestDriver.GetRequiredControl<Border>(window, "IgnoreOptionsBorder");
+			Assert.True(UiTestDriver.GetViewModel(window).IsGitFilteringModeSelectorVisible);
+			Assert.True(selector.IsVisible);
 			await UiTestDriver.WaitForConditionAsync(
 				window,
 				() => selector.Bounds.Width > 0 && island.Bounds.Width > 0,

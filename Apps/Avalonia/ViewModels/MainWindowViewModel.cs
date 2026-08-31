@@ -76,6 +76,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 	private bool _allContentProcessingChecked;
 	private GitFilteringModeOptionViewModel? _selectedGitFilteringModeOption;
 	private bool _gitFilteringRepositoryAvailable;
+	private bool _isGitFilteringModeSelectorVisible;
 	internal bool IsRefreshingGitFilteringModes { get; private set; }
 	private IgnoreOptionViewModel? _hideSecretsOption;
 	private IgnoreOptionViewModel? _hidePrivateDataOption;
@@ -231,6 +232,16 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		{
 			if (ReferenceEquals(_selectedGitFilteringModeOption, value)) return;
 			_selectedGitFilteringModeOption = value;
+			RaisePropertyChanged();
+		}
+	}
+	public bool IsGitFilteringModeSelectorVisible
+	{
+		get => _isGitFilteringModeSelectorVisible;
+		private set
+		{
+			if (_isGitFilteringModeSelectorVisible == value) return;
+			_isGitFilteringModeSelectorVisible = value;
 			RaisePropertyChanged();
 		}
 	}
@@ -1930,6 +1941,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 		SettingsIgnoreTitle = _localization["Settings.IgnoreTitle"];
 		RefreshGitFilteringModes(
 			_gitFilteringRepositoryAvailable,
+			IsGitFilteringModeSelectorVisible,
 			SelectedGitFilteringModeOption?.Mode ?? GitFilteringMode.None);
 		SettingsSecretsTitle = _localization["Settings.Secrets.Title"];
 		UpdateSettingsSecretsNotice();
@@ -2277,9 +2289,11 @@ public sealed partial class MainWindowViewModel : ViewModelBase, IDisposable
 
 	public void RefreshGitFilteringModes(
 		bool repositoryAvailable,
+		bool selectorVisible,
 		GitFilteringMode selectedMode)
 	{
 		_gitFilteringRepositoryAvailable = repositoryAvailable;
+		IsGitFilteringModeSelectorVisible = selectorVisible;
 		var supported = ProjectPresentationCatalog.GitFiltering
 			.Where(descriptor => repositoryAvailable ||
 				descriptor.Id is GitFilteringMode.None or GitFilteringMode.RespectGitIgnore)

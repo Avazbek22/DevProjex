@@ -119,6 +119,18 @@ internal sealed class UiTestProject : IDisposable
         });
     }
 
+	public static UiTestProject CreateWithPlainWebAssetsWorkspace()
+	{
+		return Create(static rootPath =>
+		{
+			WriteFile(rootPath, "app.css", "body { color: black; }\n");
+			WriteFile(rootPath, "bootstrap.min.css", ".container { width: 100%; }\n");
+			WriteFile(rootPath, "MudBlazor.min.css", ".mud-primary { color: blue; }\n");
+			WriteFile(rootPath, "homePage.js.Без названия", "window.initializeHomePage = () => {};\n");
+			WriteFile(rootPath, "pushInterop.js.Без названия", "window.pushInterop = {};\n");
+		});
+	}
+
     public static UiTestProject CreateWithDeepHorizontalSearchWorkspace()
     {
         return Create(static rootPath =>

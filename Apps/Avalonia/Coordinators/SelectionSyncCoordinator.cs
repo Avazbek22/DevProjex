@@ -877,7 +877,9 @@ public sealed partial class SelectionSyncCoordinator(
 				preservePreferredForPersistence: true);
 			viewModel.RefreshGitFilteringModes(
 				repositoryAvailable: false,
-				fallbackMode);
+				selectorVisible: snapshot.IgnoreOptions.Any(
+					static option => option.Id == IgnoreOptionId.UseGitIgnore),
+				selectedMode: fallbackMode);
 			_ignoreOptionsProjectPath = projectPath;
 			gitScopeUnavailable?.Invoke(projectPath, unavailableScope);
 			return true;
@@ -3764,8 +3766,10 @@ public sealed partial class SelectionSyncCoordinator(
 
 	private void RefreshGitFilteringModePresentation() =>
 		viewModel.RefreshGitFilteringModes(
-			HasGitFilteringRepositoryAvailability(),
-			_session.IgnoreOptions.ActiveGitFilteringMode);
+			repositoryAvailable: HasGitFilteringRepositoryAvailability(),
+			selectorVisible: _ignoreOptions.Any(
+				static option => option.Id == IgnoreOptionId.UseGitIgnore),
+			selectedMode: _session.IgnoreOptions.ActiveGitFilteringMode);
 
 	private bool HasGitFilteringRepositoryAvailability() =>
 		Volatile.Read(ref _gitCliAvailability) > 0 &&
