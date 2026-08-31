@@ -8,6 +8,30 @@ namespace DevProjex.Tests.Terminal;
 public sealed class TerminalSettingsStateContractTests
 {
 	[Fact]
+	public void PathStateSnapshotsAndEvolutionPreserveCaseDistinctEntries()
+	{
+		var knownStates = new Dictionary<string, bool>(ProjectTreePathIdentity.CanonicalComparer)
+		{
+			["Foo.cs"] = false,
+			["foo.cs"] = true
+		};
+		var snapshot = TerminalWorkspaceController.ClonePathOptionStates(knownStates);
+
+		var evolution = TerminalWorkspaceController.ReconcilePathSelection(
+			["Foo.cs", "foo.cs", "New.cs"],
+			new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer) { "foo.cs" },
+			snapshot);
+
+		Assert.Equal(3, evolution.KnownStates.Count);
+		Assert.False(evolution.KnownStates["Foo.cs"]);
+		Assert.True(evolution.KnownStates["foo.cs"]);
+		Assert.True(evolution.KnownStates["New.cs"]);
+		Assert.Equal(
+			["New.cs", "foo.cs"],
+			evolution.SelectedItems.Order(ProjectTreePathIdentity.CanonicalComparer));
+	}
+
+	[Fact]
 	public void ChangingOnlyTheDiffRangeRequiresAFullStructuralRefresh()
 	{
 		var baseline = ProjectSelectionSpec.Standard with

@@ -1558,12 +1558,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_application.AddTimeout(TimeSpan.FromMilliseconds(150), () =>
 		{
 			if (_stopping || requestId != Volatile.Read(ref _treePreviewSyncRequestId) ||
-				_preview is null || !PathComparer.Default.Equals(_selectedTreePath, path))
+				_preview is null ||
+				!ProjectTreePathIdentity.CanonicalComparer.Equals(_selectedTreePath, path))
 			{
 				return false;
 			}
 			var section = _preview.Sections.FirstOrDefault(candidate =>
-				candidate.SourcePath is not null && PathComparer.Default.Equals(candidate.SourcePath, path));
+				candidate.SourcePath is not null &&
+				ProjectTreePathIdentity.CanonicalComparer.Equals(candidate.SourcePath, path));
 			if (section is not null)
 			{
 				_preview.ScrollTo(Math.Max(0, section.StartLine - 1), 0);
@@ -1581,7 +1583,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		{
 			for (var index = 0; index < _state.VisibleRows.Count; index++)
 			{
-				if (PathComparer.Default.Equals(
+				if (ProjectTreePathIdentity.CanonicalComparer.Equals(
 						_state.VisibleRows[index].Node.FullPath,
 						_selectedTreePath))
 				{
@@ -3730,9 +3732,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_settingsDraftExtensionStates ?? state.ExtensionOptionStates,
 			StringComparer.OrdinalIgnoreCase);
 		var previousPaths = state.BuildSelectedItemRelativePaths();
-		var pathStates = new Dictionary<string, bool>(
-			state.PathOptionStates,
-			PathComparer.Default);
+		var pathStates = TerminalWorkspaceController.ClonePathOptionStates(
+			state.PathOptionStates);
 		var preferredGitMode = _settingsDraftPreferredGitMode ?? _preferredGitMode;
 		var originatedFromCommandLine = _settingsDraftOriginatedFromCommandLine;
 		var requestId = Interlocked.Increment(ref _settingsRefreshRequestId);

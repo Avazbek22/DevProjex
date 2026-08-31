@@ -112,9 +112,29 @@ public sealed class TerminalWorkspaceController(
 			new Dictionary<string, bool>(
 				state.ExtensionOptionStates,
 				StringComparer.OrdinalIgnoreCase),
-			new Dictionary<string, bool>(state.PathOptionStates, PathComparer.Default),
+			ClonePathOptionStates(state.PathOptionStates),
 			fallbackGitMode);
 	}
+
+	internal static Dictionary<string, bool> ClonePathOptionStates(
+		IReadOnlyDictionary<string, bool> pathOptionStates)
+	{
+		ArgumentNullException.ThrowIfNull(pathOptionStates);
+		return new Dictionary<string, bool>(
+			pathOptionStates,
+			ProjectTreePathIdentity.CanonicalComparer);
+	}
+
+	internal static SelectionEvolutionResult<string> ReconcilePathSelection(
+		IEnumerable<string> availablePaths,
+		IReadOnlySet<string> previousPaths,
+		IReadOnlyDictionary<string, bool> pathOptionStates) =>
+		SelectionEvolutionPolicy.Reconcile(
+			availablePaths,
+			previousPaths,
+			pathOptionStates,
+			static _ => true,
+			ProjectTreePathIdentity.CanonicalComparer);
 
 	internal async Task<TerminalStructuralRefreshResult> BuildStructuralRefreshAsync(
 		TerminalStructuralRefreshRequest request,
@@ -143,7 +163,8 @@ public sealed class TerminalWorkspaceController(
 		var buildCount = 0;
 		var repositoryScopeFullPaths = ResolveRepositoryScopeFullPaths(
 			request.SourceRoot,
-			request.PreviousPaths);
+			request.PreviousPaths,
+			request.PathOptionStates);
 		var discoverySelection = request.Selection with
 		{
 			Roots = ShouldPreserveRootsDuringDiscovery(request.Selection)
@@ -215,12 +236,10 @@ public sealed class TerminalWorkspaceController(
 		var availablePaths = TerminalWorkspaceState.BuildSelectableRelativePaths(
 			discovered.EffectiveTree,
 			discovered.SourceRoot);
-		var pathEvolution = SelectionEvolutionPolicy.Reconcile(
+		var pathEvolution = ReconcilePathSelection(
 			availablePaths,
 			request.PreviousPaths,
-			request.PathOptionStates,
-			static _ => true,
-			PathComparer.Default);
+			request.PathOptionStates);
 		var plan = discovered;
 		if (pathEvolution.SelectedItems.Count == 0 && availablePaths.Count > 0)
 		{
@@ -480,7 +499,7 @@ public sealed class TerminalWorkspaceController(
 				new Dictionary<string, bool>(
 					extensionOptionStates,
 					StringComparer.OrdinalIgnoreCase),
-				new Dictionary<string, bool>(pathOptionStates, PathComparer.Default));
+				ClonePathOptionStates(pathOptionStates));
 		}
 
 		var request = new TerminalStructuralRefreshRequest(
@@ -909,7 +928,7 @@ public sealed class TerminalWorkspaceController(
 					ProjectName: plan.SourceIdentity?.DisplayName ??
 								 Path.GetFileName(Path.TrimEndingDirectorySeparator(plan.SourceRoot)),
 					TreeRoot: plan.ProjectedTree,
-					SelectedPaths: new HashSet<string>(PathComparer.Default),
+					SelectedPaths: new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer),
 					DestinationPath: requestedDestination,
 					Format: format,
 					DestinationMode: ProjectCopyDestinationMode.Exact,
@@ -983,12 +1002,17 @@ public sealed class TerminalWorkspaceController(
 			knownExtensionStates,
 			repositoryScopeFullPaths);
 
-	private static IReadOnlyList<string> ResolveRepositoryScopeFullPaths(
+	private static IReadOnlyList<string>? ResolveRepositoryScopeFullPaths(
 		string sourceRoot,
-		IReadOnlyCollection<string> selectedRelativePaths)
+		IReadOnlyCollection<string> selectedRelativePaths,
+		IReadOnlyDictionary<string, bool> pathOptionStates)
 	{
 		if (selectedRelativePaths.Count == 0)
-			return [];
+		{
+			return pathOptionStates.Values.Any(static isSelected => isSelected)
+				? null
+				: [];
+		}
 
 		var paths = new List<string>(selectedRelativePaths.Count);
 		foreach (var path in selectedRelativePaths)
@@ -1197,7 +1221,10 @@ public sealed class TerminalWorkspaceController(
 		if (plan.Selection.StripBlankLines == true)
 			arguments.Add("--strip-blank-lines");
 
-		if (!SetEquals(plan.AvailableRoots, plan.SelectedRoots, PathComparer.Default))
+		if (!SetEquals(
+				plan.AvailableRoots,
+				plan.SelectedRoots,
+				ProjectTreePathIdentity.CanonicalComparer))
 		{
 			foreach (var root in plan.SelectedRoots)
 			{

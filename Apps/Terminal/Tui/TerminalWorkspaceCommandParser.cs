@@ -638,7 +638,7 @@ internal sealed class TerminalWorkspaceCommandParser
 			var rooted = Path.IsPathRooted(current);
 			return Directory.EnumerateFileSystemEntries(directory)
 				.Where(path => Path.GetFileName(path).StartsWith(prefix, StringComparison.CurrentCultureIgnoreCase))
-				.OrderBy(static path => path, PathComparer.Default)
+				.OrderBy(static path => path, ProjectTreePathIdentity.CanonicalComparer)
 				.Take(100)
 				.Select(path => rooted ? path : Path.GetRelativePath(baseDirectory, path))
 				.ToArray();
