@@ -95,7 +95,7 @@ public static class GitScopeFilter
 		IReadOnlyCollection<string>? selectedFullPaths = null)
 	{
 		var repositoryRoots = GetDiscoveredRepositoryRoots(inventory);
-		var pathSelectionIsExplicit = selectedFullPaths is { Count: > 0 };
+		var pathSelectionIsExplicit = selectedFullPaths is not null;
 		if ((!rootSelectionIsExplicit && !pathSelectionIsExplicit) || repositoryRoots.Count == 0)
 			return repositoryRoots;
 
@@ -209,14 +209,20 @@ public static class GitScopeFilter
 		};
 		var scopedBaseline = plan with { Selection = scopedSelection };
 
-		var scope = await provider
-			.ResolveAsync(
-				plan.SourceRoot,
-				scopeMode,
-				resolvedDiffRange ?? diffRange,
-				planner.GetGitScopeRepositoryRoots(plan, repositoryScopeFullPaths),
-				cancellationToken)
-			.ConfigureAwait(false);
+		var scope = repositoryScopeFullPaths is { Count: 0 }
+			? new GitScopePathResult(
+				true,
+				new HashSet<string>(StringComparer.Ordinal),
+				0,
+				PathMatchers: [])
+			: await provider
+				.ResolveAsync(
+					plan.SourceRoot,
+					scopeMode,
+					resolvedDiffRange ?? diffRange,
+					planner.GetGitScopeRepositoryRoots(plan, repositoryScopeFullPaths),
+					cancellationToken)
+				.ConfigureAwait(false);
 		if (!scope.IsAvailable)
 		{
 			var empty = await planner

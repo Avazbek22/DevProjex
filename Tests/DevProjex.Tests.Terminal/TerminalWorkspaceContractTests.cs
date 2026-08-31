@@ -1339,6 +1339,47 @@ public sealed class TerminalWorkspaceContractTests
 	}
 
 	[Fact]
+	public async Task ExplicitEmptySelectionDoesNotQueryGitScopeDuringSettingsRefresh()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		workspace.WriteFile("App.cs", "class App {}\n");
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var provider = new FailingGitScopePathProvider();
+		services = services with
+		{
+			ContextFactory = new TerminalProjectContextFactory(
+				services.ContextPlanner,
+				services.SourceIdentityResolver,
+				services.SecretRedactionSession,
+				provider,
+				new GitRemoteDiffRangeResolver())
+		};
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+		state.SelectNone();
+		var candidate = GitScopeSelection.WithMode(
+			state.BuildSelection(),
+			GitFilteringMode.Staged);
+
+		var result = await controller.BuildSettingsPlanAsync(
+			state.Plan,
+			candidate,
+			state.ExtensionOptionStates,
+			state.BuildSelectedItemRelativePaths(),
+			state.PathOptionStates,
+			TestContext.Current.CancellationToken);
+
+		Assert.Empty(result.Plan.IncludedFiles);
+		Assert.False(result.Plan.HasErrors);
+		Assert.Equal(GitFilteringMode.Staged, result.Plan.Selection.GitMode);
+		Assert.Equal(0, provider.CallCount);
+	}
+
+	[Fact]
 	public async Task CachedRemoteWorkspaceHydratesShallowDiffWithoutChangingItsCheckout()
 	{
 		if (!TryRunGit(Directory.GetCurrentDirectory(), "--version"))
@@ -1678,6 +1719,23 @@ public sealed class TerminalWorkspaceContractTests
 			throw new InvalidOperationException("Text must not be materialized.");
 		public void Dispose()
 		{
+		}
+	}
+
+	private sealed class FailingGitScopePathProvider : IGitScopePathProvider
+	{
+		private int _callCount;
+
+		public int CallCount => Volatile.Read(ref _callCount);
+
+		public Task<GitScopePathResult> ResolveAsync(
+			string projectRoot,
+			GitFilteringMode mode,
+			string? diffRange,
+			CancellationToken cancellationToken = default)
+		{
+			Interlocked.Increment(ref _callCount);
+			throw new InvalidOperationException("The Git scope provider must not run for an explicit empty selection.");
 		}
 	}
 }

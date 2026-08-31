@@ -114,7 +114,7 @@ internal sealed class McpProjectService(
 					services.GitScopePathProvider,
 					scope.Mode,
 					scope.DiffRange,
-					requested.Paths,
+					paths is { Count: > 0 } ? requested.Paths : null,
 					cancellationToken,
 					resolvedDiffRange)
 				.ConfigureAwait(false);

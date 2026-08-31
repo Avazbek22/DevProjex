@@ -254,7 +254,7 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 		if (!_gitScopeProjectionContexts.TryGetValue(plan, out var context))
 			return [];
 
-		var scopePaths = repositoryScopeFullPaths is { Count: > 0 }
+		var scopePaths = repositoryScopeFullPaths is not null
 			? repositoryScopeFullPaths
 			: plan.Selection.SelectedPaths is { Count: > 0 }
 				? plan.SelectedFullPaths

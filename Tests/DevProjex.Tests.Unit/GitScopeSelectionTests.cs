@@ -445,6 +445,26 @@ public sealed class GitScopeSelectionTests
 	}
 
 	[Fact]
+	public void ExplicitEmptyPathSelectionDoesNotResolveAnyRepositoryBoundary()
+	{
+		var sourceRoot = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "dpx-git-scope-empty-paths"));
+		var inventory = new ProjectTreeInventorySnapshot(
+			[],
+			rootAccessDenied: false,
+			hadAccessDenied: false,
+			discoveredGitRepositoryRoots: [sourceRoot]);
+
+		var roots = GitScopeFilter.GetDiscoveredRepositoryRoots(
+			inventory,
+			sourceRoot,
+			selectedRootFolders: [],
+			rootSelectionIsExplicit: false,
+			selectedFullPaths: []);
+
+		Assert.Empty(roots);
+	}
+
+	[Fact]
 	public void ExplicitDirectorySelectionKeepsItsOwnerAndRepositoriesNestedInsideIt()
 	{
 		var sourceRoot = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "dpx-git-scope-subtree"));
