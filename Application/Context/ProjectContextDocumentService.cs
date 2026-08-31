@@ -639,7 +639,7 @@ public sealed class ProjectContextDocumentService(
 			await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
 			await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
 			await writer.WriteAsync(
-					ContextRootPresentation.FormatLine(
+					ContextRootPresentation.FormatMarkdownLine(
 						NormalizePath(GetHumanReadableContentRoot(plan, pathRedaction))).AsMemory(),
 					cancellationToken)
 				.ConfigureAwait(false);
@@ -1479,7 +1479,7 @@ public sealed class ProjectContextDocumentService(
 		output.AppendLine();
 		if (view == ProjectContextView.Content)
 		{
-			output.AppendLine(ContextRootPresentation.FormatLine(
+			output.AppendLine(ContextRootPresentation.FormatMarkdownLine(
 				NormalizePath(GetHumanReadableContentRoot(plan, protectPrivateData: true))));
 		}
 		if (IncludesTree(view))
@@ -2317,7 +2317,7 @@ public sealed class ProjectContextDocumentService(
 	}
 
 	private static string EscapeMarkdownHeading(string value) =>
-		SingleLineTextEscaping.Escape(value.Replace("\\", "\\\\").Replace("#", "\\#"));
+		MarkdownInlineLiteralEncoder.Encode(value);
 
 	private static string BuildMarkdownCodeSpan(string value)
 	{

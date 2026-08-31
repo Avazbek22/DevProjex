@@ -9,6 +9,65 @@ namespace DevProjex.Tests.Terminal;
 public sealed class ProjectContextStreamingRegressionTests
 {
 	[Theory]
+	[InlineData(ProjectContextView.Content)]
+	[InlineData(ProjectContextView.TreeContent)]
+	public async Task MarkdownTreatsProjectHeadingAndContentRootAsLiteralData(
+		ProjectContextView view)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project-[root](target)");
+		workspace.WriteFile("project-[root](target)/src/app.cs", "class App {}\n");
+		using var services = new TerminalServiceFactory(
+				() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var plan = await services.ContextFactory.BuildAsync(
+			project,
+			new ProjectSelectionSpec(GitMode: GitFilteringMode.None, Exclusions: []),
+			cancellationToken: TestContext.Current.CancellationToken);
+		plan = plan with
+		{
+			SourceIdentity = new ProjectSourceIdentity(
+				"[title](target) *em* <tag> &copy; # hash",
+				ProjectSourceType.LocalFolder,
+				project)
+		};
+
+		var bounded = await services.ContextDocumentService.BuildAsync(
+			plan,
+			view,
+			ProjectContextDocumentFormat.Markdown,
+			new ProjectContextDocumentLimits(
+				MaximumTreeNodes: 100,
+				MaximumFiles: 10,
+				MaximumCharacters: 10_000,
+				MaximumFileBytes: 4_096),
+			TestContext.Current.CancellationToken);
+		var complete = await CompleteContextDocumentTestHelper.BuildAsync(
+			services.ContextDocumentService,
+			plan,
+			view,
+			ProjectContextDocumentFormat.Markdown,
+			TestContext.Current.CancellationToken);
+
+		foreach (var document in new[] { bounded, complete })
+		{
+			Assert.StartsWith(
+				"# \\[title\\](target) \\*em\\* \\<tag\\> \\&copy; # hash",
+				document,
+				StringComparison.Ordinal);
+			Assert.DoesNotContain("# [title](target)", document, StringComparison.Ordinal);
+			if (view == ProjectContextView.Content)
+			{
+				var rootLine = document
+					.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+					.Single(static line => line.StartsWith(ContextRootPresentation.Prefix, StringComparison.Ordinal));
+				Assert.Contains("project-\\[root\\](target)", rootLine, StringComparison.Ordinal);
+				Assert.DoesNotContain("project-[root](target)", rootLine, StringComparison.Ordinal);
+			}
+		}
+	}
+
+	[Theory]
 	[InlineData(false)]
 	[InlineData(true)]
 	public async Task CompleteContentRootHonorsTheGeneratedPathOccurrenceDecision(bool keep)

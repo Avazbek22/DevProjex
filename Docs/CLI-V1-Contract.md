@@ -198,6 +198,9 @@ latter reads UTF-8 source-relative entries, one per line, from a file or
 redirected stdin (`-`), ignores empty lines, and rejects interactive stdin.
 Inputs are capped at 100,000 entries and 16 MiB. Entries from both options are
 combined and deduplicated with project path semantics.
+Names discovered in the project tree retain exact ordinal identity, including
+case-distinct siblings. On Windows, a differently cased input remains compatible
+only when it resolves to one unambiguous discovered entry.
 An entry that does not exist on disk is a usage error (`2`) and no output is
 created. An entry that exists but is absent from the effective tree because of
 Git or exclusion filtering remains a warning and the command succeeds; this
@@ -1153,10 +1156,10 @@ and Markdown now declare the root once and use relative file headings; text tree
 declare the root once and start at real children. This changes only human-readable
 presentation. Context and tree JSON/XML roots and file paths are unchanged.
 
-Before the same freeze, Markdown tree Root values and node names were hardened
-as literal CommonMark text: active Markdown, HTML, and entity syntax is escaped
-consistently in buffered output, streaming output, and metric calculation. Text,
-JSON, and XML tree bytes are unchanged.
+Before the same freeze, Markdown tree Root values, node names, context project
+headings, and content-only Root lines were hardened as literal CommonMark text:
+active Markdown, HTML, and entity syntax is escaped consistently in buffered and
+streaming output. Text, JSON, and XML bytes are unchanged.
 
 ## Exit Codes
 

@@ -140,6 +140,10 @@ kept. SIZE may be a byte count or use a case-insensitive binary suffix:
 `k|kb|kib`, `m|mb|mib`, or `g|gb|gib`, all with a 1024 multiplier. The filter is
 not stored by `profile save` and does not change the profile format.
 
+Project root and selected-path entries preserve exact case-distinct identities.
+On Windows, differently cased input is accepted only when it identifies one
+unambiguous discovered entry.
+
 For `open`, the first line is `--profile <auto|standard|local|FILE>` and its
 default is `auto`. Direct selection commands (`analyze`, `tree`, both exports,
 and `profile save`) default to `standard`.
@@ -517,6 +521,8 @@ children. They do not repeat the project name as a synthetic top-level node.
 `--plain` changes only the connectors to their ASCII equivalents.
 Markdown trees keep Root values and node names literal by escaping active
 CommonMark, HTML, and entity syntax in those human-readable labels.
+Markdown context documents apply the same literal escaping to the project heading
+and content-only Root line.
 
 For file output, the destination must be outside the source project, its parent
 directory must already exist, and an existing destination requires `--force`.

@@ -401,6 +401,7 @@ Markdown contains one project heading, an optional fenced tree block, and file
 headings with safe variable-length fences. File names and content cannot break
 the document structure. Markdown tree Root values and node names escape active
 CommonMark, HTML, and entity syntax so user-controlled names remain literal.
+The project heading and content-only Root line use the same literal escaping.
 
 Text preserves the existing readable tree and file-section semantics. With
 `--plain`, tree connectors use strict ASCII.
