@@ -54,15 +54,15 @@ public sealed record TerminalTreeRow(
 /// </summary>
 public sealed class TerminalWorkspaceState : IDisposable
 {
-	private readonly HashSet<string> _expandedPaths = new(PathComparer.Default);
-	private readonly HashSet<string> _selectedFiles = new(PathComparer.Default);
-	private readonly HashSet<string> _selectedEmptyDirectories = new(PathComparer.Default);
-	private readonly Dictionary<string, TreeNodeDescriptor> _nodesByPath = new(PathComparer.Default);
-	private readonly Dictionary<string, string?> _parentsByPath = new(PathComparer.Default);
-	private readonly Dictionary<string, TerminalTreeCheckState> _checkStates = new(PathComparer.Default);
-	private readonly Dictionary<string, int> _orderedPathIndexes = new(PathComparer.Default);
+	private readonly HashSet<string> _expandedPaths = new(ProjectTreePathIdentity.CanonicalComparer);
+	private readonly HashSet<string> _selectedFiles = new(ProjectTreePathIdentity.CanonicalComparer);
+	private readonly HashSet<string> _selectedEmptyDirectories = new(ProjectTreePathIdentity.CanonicalComparer);
+	private readonly Dictionary<string, TreeNodeDescriptor> _nodesByPath = new(ProjectTreePathIdentity.CanonicalComparer);
+	private readonly Dictionary<string, string?> _parentsByPath = new(ProjectTreePathIdentity.CanonicalComparer);
+	private readonly Dictionary<string, TerminalTreeCheckState> _checkStates = new(ProjectTreePathIdentity.CanonicalComparer);
+	private readonly Dictionary<string, int> _orderedPathIndexes = new(ProjectTreePathIdentity.CanonicalComparer);
 	private readonly Dictionary<string, bool> _extensionOptionStates = new(StringComparer.OrdinalIgnoreCase);
-	private readonly Dictionary<string, bool> _pathOptionStates = new(PathComparer.Default);
+	private readonly Dictionary<string, bool> _pathOptionStates = new(ProjectTreePathIdentity.CanonicalComparer);
 	private readonly List<string> _orderedPaths = [];
 	private readonly List<IPreviewTextDocument> _retiredPreviewDocuments = [];
 	private readonly ResettableObservableCollection<TerminalTreeRow> _visibleRows = [];
@@ -183,7 +183,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 		_selectedFiles
 			.Concat(_selectedEmptyDirectories)
 			.Select(ToRelativePath)
-			.ToHashSet(PathComparer.Default);
+			.ToHashSet(ProjectTreePathIdentity.CanonicalComparer);
 
 	internal static IReadOnlyList<string> BuildSelectableRelativePaths(
 		TreeNodeDescriptor root,
@@ -373,7 +373,9 @@ public sealed class TerminalWorkspaceState : IDisposable
 		ExpandAncestors(fullPath);
 		for (var index = 0; index < VisibleRows.Count; index++)
 		{
-			if (PathComparer.Default.Equals(VisibleRows[index].Node.FullPath, fullPath))
+			if (ProjectTreePathIdentity.CanonicalComparer.Equals(
+				    VisibleRows[index].Node.FullPath,
+				    fullPath))
 				return index;
 		}
 		return -1;
@@ -572,7 +574,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 		List<TerminalTreeRow> rows,
 		ref int matchCount)
 	{
-		var includedPaths = new HashSet<string>(PathComparer.Default);
+		var includedPaths = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
 		var traversal = new Stack<(TreeNodeDescriptor Node, bool Visited)>();
 		traversal.Push((node, false));
 		while (traversal.Count > 0)

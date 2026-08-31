@@ -97,7 +97,8 @@ internal sealed class MetricsPipeline(
 
     private readonly object _metricsLock = new();
     private readonly object _computationCacheLock = new();
-    private readonly Dictionary<string, FileMetricsCacheEntry> _fileMetricsCache = new(PathComparer.Default);
+    private readonly Dictionary<string, FileMetricsCacheEntry> _fileMetricsCache =
+        new(ProjectTreePathIdentity.CanonicalComparer);
     private readonly CodeCompressionPrewarmer _compressionPrewarmer = new(fileContentAnalyzer);
 
     private CancellationTokenSource? _metricsCalculationCts;

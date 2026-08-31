@@ -97,7 +97,7 @@ public sealed class MainWindowPreviewInternalsTests
     }
 
     [Fact]
-    public void BuildOrderedSelectedFilePaths_CaseVariantPaths_FollowPlatformSemantics()
+    public void BuildOrderedSelectedFilePaths_CaseVariantPathsRemainDistinctOnEveryPlatform()
     {
         var upper = CreatePath("root", "A.cs");
         var lower = CreatePath("root", "a.cs");
@@ -118,14 +118,9 @@ public sealed class MainWindowPreviewInternalsTests
 
         var result = PreviewFileCollectionPolicy.BuildOrderedSelectedFilePaths(selected, root, ensureExists: false);
 
-        var expected = new HashSet<string>(PathComparer.Default)
-        {
-            other,
-            lower,
-            upper
-        }
-        .OrderBy(path => path, PathComparer.Default)
-        .ToList();
+        var expected = new[] { other, lower, upper }
+            .OrderBy(path => path, ProjectTreePathIdentity.CanonicalComparer)
+            .ToList();
 
         Assert.Equal(expected, result);
     }
@@ -292,7 +287,7 @@ public sealed class MainWindowPreviewInternalsTests
     }
 
     [Fact]
-    public void BuildOrderedAllFilePaths_CaseVariantPaths_FollowPlatformSemantics()
+    public void BuildOrderedAllFilePaths_CaseVariantPathsRemainDistinctOnEveryPlatform()
     {
         var upper = CreatePath("root", "A.cs");
         var lower = CreatePath("root", "a.cs");
@@ -309,11 +304,7 @@ public sealed class MainWindowPreviewInternalsTests
             ]);
 
         var result = PreviewFileCollectionPolicy.BuildOrderedAllFilePaths(root);
-        var expected = new HashSet<string>(PathComparer.Default) { upper, lower }
-            .OrderBy(path => path, PathComparer.Default)
-            .ToList();
-
-        Assert.Equal(expected, result);
+        Assert.Equal([upper, lower], result);
     }
 
     [Fact]

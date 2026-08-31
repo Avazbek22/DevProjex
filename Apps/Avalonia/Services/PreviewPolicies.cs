@@ -40,7 +40,6 @@ internal sealed class PreviewWarmupSelectedNode(
 internal static class PreviewWarmupPolicy
 {
     private const int SmallChildListLinearLookupThreshold = 32;
-    private const int MaxCaseEquivalentNameProbes = 32;
 
     public static bool SupportsTransformationContext(ContentTransformationContext? context) =>
         context?.Redaction is null;
@@ -180,7 +179,7 @@ internal static class PreviewWarmupPolicy
             return [];
         }
 
-        var uniqueFiles = new HashSet<string>(PathComparer.Default);
+        var uniqueFiles = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
         if (!selectionPlan.HasExplicitSelection &&
             orderedFilePaths is not null)
         {
@@ -204,7 +203,7 @@ internal static class PreviewWarmupPolicy
             return [];
 
         var files = new List<string>(uniqueFiles);
-        files.Sort(PathComparer.Default);
+        files.Sort(ProjectTreePathIdentity.CanonicalComparer);
         if (files.Count > maxFileCount)
             files.RemoveRange(maxFileCount, files.Count - maxFileCount);
 
@@ -288,7 +287,7 @@ internal static class PreviewWarmupPolicy
     }
 
     private static readonly IReadOnlySet<string> EmptySelectedPaths =
-        new HashSet<string>(PathComparer.Default);
+        new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
 
     private static void CollectInitialPreviewFilesFromWholeSubtree(
         TreeNodeDescriptor node,
@@ -616,11 +615,9 @@ internal static class PreviewWarmupPolicy
                 high = middle;
         }
 
-        var equivalentNameProbes = 0;
         for (var index = low;
-             index < endIndex &&
-             equivalentNameProbes < MaxCaseEquivalentNameProbes;
-             index++, equivalentNameProbes++)
+             index < endIndex;
+             index++)
         {
             var candidate = children[index];
             if (ComparePathName(candidate.FullPath, childName) != 0)
@@ -652,10 +649,10 @@ internal static class PreviewWarmupPolicy
         string candidate,
         string expected)
     {
-        if (PathComparer.Default.Equals(candidate, expected))
+        if (ProjectTreePathIdentity.CanonicalComparer.Equals(candidate, expected))
             return true;
 
-        return PathComparer.Default.Equals(
+        return ProjectTreePathIdentity.CanonicalComparer.Equals(
             NormalizePathOrOriginal(candidate),
             expected);
     }
@@ -692,7 +689,7 @@ internal static class PreviewWarmupPolicy
     private sealed class SelectionPathTrieNode
     {
         public Dictionary<string, SelectionPathTrieNode> Children { get; } =
-            new(PathComparer.Default);
+            new(ProjectTreePathIdentity.CanonicalComparer);
 
         public bool IsSelected { get; set; }
     }
@@ -807,7 +804,8 @@ internal static class PreviewFileCollectionPolicy
 		public void Add(string path)
 		{
 			_count++;
-			var hash = Mix(unchecked((uint)PathComparer.Default.GetHashCode(path)));
+			var hash = Mix(unchecked((uint)
+				ProjectTreePathIdentity.CanonicalComparer.GetHashCode(path)));
 			unchecked
 			{
 				_sum += hash;
@@ -840,7 +838,7 @@ internal static class PreviewFileCollectionPolicy
         if (maxCount <= 0)
             return 0;
 
-        var uniquePaths = new HashSet<string>(PathComparer.Default);
+        var uniquePaths = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
         ProjectTreeSelectionProjection.CollectSelectedFilePaths(
             treeRoot,
             selectedPaths,
@@ -877,7 +875,7 @@ internal static class PreviewFileCollectionPolicy
 		cancellationToken.ThrowIfCancellationRequested();
         // Keep a path-based uniqueness pass even though runtime trees should already be unique.
         // Tests intentionally synthesize case-variant nodes to verify cross-platform comparer semantics.
-        var uniquePaths = new HashSet<string>(PathComparer.Default);
+        var uniquePaths = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
         var stack = new Stack<TreeNodeDescriptor>();
         stack.Push(treeRoot);
 
@@ -900,7 +898,10 @@ internal static class PreviewFileCollectionPolicy
 
         var orderedPaths = new List<string>(uniquePaths.Count);
         orderedPaths.AddRange(uniquePaths);
-		CancellationAwareSort.Sort(orderedPaths, PathComparer.Default, cancellationToken);
+		CancellationAwareSort.Sort(
+			orderedPaths,
+			ProjectTreePathIdentity.CanonicalComparer,
+			cancellationToken);
 		return orderedPaths;
     }
 

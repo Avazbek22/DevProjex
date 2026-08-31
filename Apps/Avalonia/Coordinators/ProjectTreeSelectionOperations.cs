@@ -9,11 +9,12 @@ internal static class ProjectTreeSelectionOperations
 		ArgumentNullException.ThrowIfNull(roots);
 		ArgumentNullException.ThrowIfNull(target);
 
-		var selected = new HashSet<string>(PathComparer.Default);
+		var selected = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
 		foreach (var root in roots)
 			root.CollectCheckedPaths(selected);
 
-		return selected.Any(path => !PathComparer.Default.Equals(path, target.FullPath));
+		return selected.Any(path =>
+			!ProjectTreePathIdentity.CanonicalComparer.Equals(path, target.FullPath));
 	}
 
 	public static bool SelectOnly(
@@ -37,7 +38,7 @@ internal static class ProjectTreeSelectionOperations
 		IList<TreeNodeViewModel> roots,
 		string targetPath)
 	{
-		var selected = new HashSet<string>(PathComparer.Default);
+		var selected = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
 		foreach (var root in roots)
 			root.CollectCheckedPaths(selected);
 

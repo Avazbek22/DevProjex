@@ -638,7 +638,7 @@ public sealed class TreeNodeViewModel(
         {
             var candidate = preservedChildren[index];
             if (ReferenceEquals(candidate.Descriptor, descriptor) ||
-                PathComparer.Default.Equals(
+                ProjectTreePathIdentity.CanonicalComparer.Equals(
                     candidate.FullPath,
                     descriptor.FullPath))
             {
