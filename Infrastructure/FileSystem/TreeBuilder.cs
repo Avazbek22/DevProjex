@@ -118,7 +118,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 
 		var merged = new List<ScopedGitIgnoreMatcher>(
 			discoveryRules.ScopedGitIgnoreMatchers.Count + projectionRules.ScopedGitIgnoreMatchers.Count);
-		var seenScopes = new HashSet<string>(PathComparer.Default);
+		var seenScopes = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
 		foreach (var matcher in discoveryRules.ScopedGitIgnoreMatchers)
 		{
 			if (seenScopes.Add(matcher.ScopeRootPath))

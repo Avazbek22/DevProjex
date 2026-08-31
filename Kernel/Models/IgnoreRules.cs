@@ -12,14 +12,13 @@ public sealed record IgnoreRules(
 	IReadOnlySet<string> SmartIgnoredFolders,
 	IReadOnlySet<string> SmartIgnoredFiles)
 {
-	private static readonly StringComparison PathComparison = PathComparer.Comparison;
 	private static readonly StringComparer PathStringComparer = PathComparer.Default;
 	private const int ScopedMatcherChainCacheLimit = 2048;
 	private const int SmartScopeApplicabilityCacheLimit = 2048;
 	private readonly ConcurrentDictionary<string, ScopedGitIgnoreMatcher[]> _scopedMatcherChainCache =
-		new(PathStringComparer);
+		new(ProjectTreePathIdentity.CanonicalComparer);
 	private readonly ConcurrentDictionary<string, ScopedGitIgnoreMatcher[]> _candidateScopedMatcherChainCache =
-		new(PathStringComparer);
+		new(ProjectTreePathIdentity.CanonicalComparer);
 	private readonly ConcurrentDictionary<string, bool> _smartScopeApplicabilityCache =
 		new(PathStringComparer);
 	private readonly ConcurrentDictionary<string, bool> _candidateSmartScopeApplicabilityCache =
@@ -189,7 +188,7 @@ public sealed record IgnoreRules(
 		var requiresRulesFallback = false;
 		foreach (var scoped in scopedMatchers)
 		{
-			if (!PathStringComparer.Equals(scoped.ScopeRootPath, scanRootPath) &&
+			if (!ProjectTreePathIdentity.CanonicalComparer.Equals(scoped.ScopeRootPath, scanRootPath) &&
 			    IsPathInsideScope(scanRootPath, scoped.ScopeRootPath))
 			{
 				requiresRulesFallback = true;
@@ -203,7 +202,7 @@ public sealed record IgnoreRules(
 		var context = GitIgnoreScanContext.Scoped(this, useCandidates, requiresRulesFallback);
 		foreach (var scoped in scopedMatchers)
 		{
-			if (PathStringComparer.Equals(scoped.ScopeRootPath, scanRootPath))
+			if (ProjectTreePathIdentity.CanonicalComparer.Equals(scoped.ScopeRootPath, scanRootPath))
 				context = context.WithScope(scoped, scopeRelativePath: string.Empty);
 		}
 
@@ -768,7 +767,9 @@ public sealed record IgnoreRules(
 				continue;
 			}
 
-			if (!fullPath.Slice(index, 1).Equals(scopeRootPath.Slice(index, 1), PathComparison))
+			if (!fullPath.Slice(index, 1).Equals(
+				    scopeRootPath.Slice(index, 1),
+				    ProjectTreePathIdentity.CanonicalComparison))
 				return false;
 		}
 
@@ -1198,7 +1199,9 @@ public sealed record IgnoreRules(
 			{
 				for (var current = this; current is not null; current = current._parent)
 				{
-					if (PathStringComparer.Equals(current._scopedMatcher.ScopeRootPath, scopeRootPath))
+					if (ProjectTreePathIdentity.CanonicalComparer.Equals(
+						    current._scopedMatcher.ScopeRootPath,
+						    scopeRootPath))
 						return true;
 				}
 
@@ -1325,7 +1328,7 @@ public sealed record IgnoreRules(
 				    relativePath[scopeRelativePath.Length] != '/' ||
 				    !relativePath[..scopeRelativePath.Length].Equals(
 					    scopeRelativePath.AsSpan(),
-					    PathComparison))
+					    ProjectTreePathIdentity.CanonicalComparison))
 				{
 					matcherRelativePath = default;
 					return false;

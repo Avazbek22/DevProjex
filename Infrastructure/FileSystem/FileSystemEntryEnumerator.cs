@@ -70,20 +70,44 @@ internal static class FileSystemEntryEnumerator
 		List<FileSystemDirectoryEntry>? directories = null;
 		List<FileSystemFileEntry>? files = null;
 		string? gitIgnorePath = null;
+		string? gitIgnoreAliasPath = null;
 		string? gitMetadataPath = null;
+		string? gitMetadataAliasPath = null;
 		foreach (var entry in enumerable)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			if (entry.Name.Equals(".git", FileNameComparison) &&
+			if (entry.Name.Equals(".git", StringComparison.Ordinal) &&
 			    GitRepositoryBoundaryProbe.ExistsAt(path))
 			{
 				gitMetadataPath ??= Path.Combine(path, ".git");
 			}
+			else if (gitMetadataPath is null &&
+			         gitMetadataAliasPath is null &&
+			         OperatingSystem.IsWindows() &&
+			         entry.Name.Equals(".git", StringComparison.OrdinalIgnoreCase) &&
+			         IsWindowsCompatibleControlAlias(
+				         entry.Name,
+				         ".git",
+				         GitRepositoryBoundaryProbe.ExistsAt(path)))
+			{
+				gitMetadataAliasPath = Path.Combine(path, ".git");
+			}
 
 			if (!entry.IsDirectory)
 			{
-				if (entry.Name.Equals(".gitignore", FileNameComparison))
+				if (entry.Name.Equals(".gitignore", StringComparison.Ordinal))
 					gitIgnorePath ??= entry.FullPath;
+				else if (gitIgnorePath is null &&
+				         gitIgnoreAliasPath is null &&
+				         OperatingSystem.IsWindows() &&
+				         entry.Name.Equals(".gitignore", StringComparison.OrdinalIgnoreCase) &&
+				         IsWindowsCompatibleControlAlias(
+					         entry.Name,
+					         ".gitignore",
+					         File.Exists(Path.Combine(path, ".gitignore"))))
+				{
+					gitIgnoreAliasPath = entry.FullPath;
+				}
 				if (captureFiles)
 				{
 					(files ??= []).Add(new FileSystemFileEntry(
@@ -103,7 +127,11 @@ internal static class FileSystemEntryEnumerator
 				entry.IsHidden));
 		}
 
-		return new DirectoryEnumerationBatch(directories ?? [], files ?? [], gitIgnorePath, gitMetadataPath);
+		return new DirectoryEnumerationBatch(
+			directories ?? [],
+			files ?? [],
+			gitIgnorePath ?? gitIgnoreAliasPath,
+			gitMetadataPath ?? gitMetadataAliasPath);
 	}
 
 	public static IEnumerable<FileSystemFileEntry> EnumerateFiles(string path)
@@ -169,6 +197,15 @@ internal static class FileSystemEntryEnumerator
 	{
 		return (entry.Attributes & FileAttributes.ReparsePoint) != 0;
 	}
+
+	internal static bool IsWindowsCompatibleControlAlias(
+		string observedName,
+		string expectedName,
+		bool expectedPathResolves) =>
+		OperatingSystem.IsWindows() &&
+		expectedPathResolves &&
+		!ProjectTreePathIdentity.CanonicalComparer.Equals(observedName, expectedName) &&
+		StringComparer.OrdinalIgnoreCase.Equals(observedName, expectedName);
 
 	private readonly record struct DirectoryDiscoveryEntry(
 		string Name,

@@ -2453,7 +2453,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			foreach (var matcher in additionalMatchers)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				unique ??= new Dictionary<string, ScopedGitIgnoreMatcher>(PathComparer.Default);
+				unique ??= new Dictionary<string, ScopedGitIgnoreMatcher>(
+					ProjectTreePathIdentity.CanonicalComparer);
 				unique[matcher.ScopeRootPath] = matcher;
 			}
 		}
@@ -2464,7 +2465,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			foreach (var matcher in inventory.DiscoveredGitIgnoreMatchers)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				unique ??= new Dictionary<string, ScopedGitIgnoreMatcher>(PathComparer.Default);
+				unique ??= new Dictionary<string, ScopedGitIgnoreMatcher>(
+					ProjectTreePathIdentity.CanonicalComparer);
 				unique[matcher.ScopeRootPath] = matcher;
 			}
 		}
@@ -3972,9 +3974,16 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		ScopedGitIgnoreMatcher right)
 	{
 		var depth = left.ScopeRootPath.Length.CompareTo(right.ScopeRootPath.Length);
-		return depth != 0
-			? depth
-			: PathComparer.Default.Compare(left.ScopeRootPath, right.ScopeRootPath);
+		if (depth != 0)
+			return depth;
+		var platformOrder = PathComparer.Default.Compare(
+			left.ScopeRootPath,
+			right.ScopeRootPath);
+		return platformOrder != 0
+			? platformOrder
+			: ProjectTreePathIdentity.CanonicalComparer.Compare(
+				left.ScopeRootPath,
+				right.ScopeRootPath);
 	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
