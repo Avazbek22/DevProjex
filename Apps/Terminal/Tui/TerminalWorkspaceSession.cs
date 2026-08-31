@@ -1232,6 +1232,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			}
 		}
 		_state = state;
+		if (state.Plan.GitReadiness.Mode is { } mode && GitScopeSelection.IsPersistent(mode))
+			_preferredGitMode = mode;
 		_layoutMode = ResolveLayout();
 		_activePane = TerminalWorkspacePane.Tree;
 

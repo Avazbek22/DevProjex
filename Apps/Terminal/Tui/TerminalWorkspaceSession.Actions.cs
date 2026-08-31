@@ -182,8 +182,6 @@ internal sealed partial class TerminalWorkspaceSession
 			collapsedControls,
 			contentControlsFrame,
 			filterControlsHost);
-		if (_state?.Plan.GitReadiness.Mode is { } mode && GitScopeSelection.IsPersistent(mode))
-			_preferredGitMode = mode;
 		return new WorkspaceControlViewGraph(
 			controlsFrame,
 			controlsPanelHeading,
