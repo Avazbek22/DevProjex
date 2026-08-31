@@ -1005,7 +1005,7 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 		var selection = ProjectSelectionSpec.Standard with
 		{
 			Roots = selectFile ? null : ["nested"],
-			SelectedPaths = selectFile ? ["nested/App.cs"] : [],
+			SelectedPaths = selectFile ? ["nested/App.cs"] : null,
 			GitMode = GitFilteringMode.Diff,
 			GitDiffRange = "HEAD~1..HEAD"
 		};

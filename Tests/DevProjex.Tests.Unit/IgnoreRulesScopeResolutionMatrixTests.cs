@@ -190,6 +190,72 @@ public sealed class IgnoreRulesScopeResolutionMatrixTests
 		Assert.Equal(expected, rules.ShouldApplySmartIgnore(candidatePath));
 	}
 
+	[Fact]
+	public void ResolveGitIgnoreMatcher_WindowsCaseDistinctScopesPreferExactIdentityAndRejectAmbiguousAlias()
+	{
+		if (!OperatingSystem.IsWindows())
+			Assert.Skip("Windows compatibility aliases are platform-specific.");
+
+		var rootPath = BuildAbsolute("case-distinct");
+		var titleCaseScope = Path.Combine(rootPath, "Repo");
+		var lowerCaseScope = Path.Combine(rootPath, "repo");
+		var titleCaseMatcher = GitIgnoreMatcher.Build(titleCaseScope, ["title-ignore/"]);
+		var lowerCaseMatcher = GitIgnoreMatcher.Build(lowerCaseScope, ["lower-ignore/"]);
+		var rules = new IgnoreRules(
+			IgnoreHiddenFolders: false,
+			IgnoreHiddenFiles: false,
+			IgnoreDotFolders: false,
+			IgnoreDotFiles: false,
+			SmartIgnoredFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+			SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase))
+		{
+			UseGitIgnore = true,
+			ScopedGitIgnoreMatchers =
+			[
+				new ScopedGitIgnoreMatcher(titleCaseScope, titleCaseMatcher),
+				new ScopedGitIgnoreMatcher(lowerCaseScope, lowerCaseMatcher)
+			]
+		};
+
+		Assert.Same(
+			titleCaseMatcher,
+			rules.ResolveGitIgnoreMatcher(Path.Combine(titleCaseScope, "value.cs")));
+		Assert.Same(
+			lowerCaseMatcher,
+			rules.ResolveGitIgnoreMatcher(Path.Combine(lowerCaseScope, "value.cs")));
+		Assert.Same(
+			GitIgnoreMatcher.Empty,
+			rules.ResolveGitIgnoreMatcher(Path.Combine(rootPath, "REPO", "value.cs")));
+	}
+
+	[Fact]
+	public void ShouldApplySmartIgnore_WindowsCaseDistinctScopesRejectAmbiguousAlias()
+	{
+		if (!OperatingSystem.IsWindows())
+			Assert.Skip("Windows compatibility aliases are platform-specific.");
+
+		var rootPath = BuildAbsolute("case-distinct-smart");
+		var titleCaseScope = Path.Combine(rootPath, "Repo");
+		var lowerCaseScope = Path.Combine(rootPath, "repo");
+		var rules = new IgnoreRules(
+			IgnoreHiddenFolders: false,
+			IgnoreHiddenFiles: false,
+			IgnoreDotFolders: false,
+			IgnoreDotFiles: false,
+			SmartIgnoredFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+			SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase))
+		{
+			UseSmartIgnore = true,
+			SmartIgnoreScopeRoots = [titleCaseScope, lowerCaseScope]
+		};
+
+		Assert.True(rules.ShouldApplySmartIgnore(Path.Combine(titleCaseScope, "value.cs"), isDirectory: false));
+		Assert.True(rules.ShouldApplySmartIgnore(Path.Combine(lowerCaseScope, "value.cs"), isDirectory: false));
+		Assert.False(rules.ShouldApplySmartIgnore(
+			Path.Combine(rootPath, "REPO", "value.cs"),
+			isDirectory: false));
+	}
+
 	private static string BuildAbsolute(string folderName)
 	{
 		return Path.GetFullPath(Path.Combine(Path.GetTempPath(), "DevProjex", "MatrixPaths", folderName));

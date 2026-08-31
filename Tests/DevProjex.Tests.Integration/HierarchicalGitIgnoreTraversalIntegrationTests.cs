@@ -334,7 +334,8 @@ public sealed class HierarchicalGitIgnoreTraversalIntegrationTests
 		var repositoryRoot = temp.CreateDirectory("repo");
 		temp.CreateFile("repo/.GITIGNORE", "*.drop\n");
 		temp.CreateFile("repo/value.drop", "content");
-		var canonicalControlPathResolves = File.Exists(Path.Combine(repositoryRoot, ".gitignore"));
+		var acceptsWindowsAlias = OperatingSystem.IsWindows() &&
+		                          File.Exists(Path.Combine(repositoryRoot, ".gitignore"));
 		var rules = CreateRules(enableGitIgnore: true);
 		var selectedRoots = new HashSet<string>(["repo"], ProjectTreePathIdentity.CanonicalComparer);
 		var extensions = new HashSet<string>([".drop"], StringComparer.OrdinalIgnoreCase);
@@ -363,9 +364,9 @@ public sealed class HierarchicalGitIgnoreTraversalIntegrationTests
 		var inventoryPaths = FlattenRelativePaths(temp.Path, inventoryTree.Root);
 		var directPaths = FlattenRelativePaths(temp.Path, directTree.Root);
 
-		Assert.Equal(canonicalControlPathResolves ? 1 : 0, inventory.DiscoveredGitIgnoreMatchers.Count);
+		Assert.Equal(acceptsWindowsAlias ? 1 : 0, inventory.DiscoveredGitIgnoreMatchers.Count);
 		Assert.Equal(directPaths, inventoryPaths);
-		Assert.Equal(!canonicalControlPathResolves, inventoryPaths.Contains("repo/value.drop"));
+		Assert.Equal(!acceptsWindowsAlias, inventoryPaths.Contains("repo/value.drop"));
 	}
 
 	private static string SeedDeepWorkspace(TemporaryDirectory temp)
