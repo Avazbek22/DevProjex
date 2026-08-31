@@ -1072,7 +1072,8 @@ public partial class MainWindow
 			gitScopePathProvider: _gitScopePathProvider,
 			gitScopeUnavailable: (path, scope) => HandleGitScopeDiagnostics(
 				[GitScopeFilter.CreateUnavailableDiagnostic(path, scope)]),
-			gitAvailabilityResolver: _gitService.IsGitAvailableAsync);
+			gitAvailabilityResolver: _gitService.IsGitAvailableAsync,
+			selectedTreePathsProvider: GetCheckedPaths);
         // User changes in this section remain drafts until Apply. The callback is reserved for
         // programmatic activation, such as enabling Hide Secrets for a manual mark.
         _projectLoadPipeline = new ProjectLoadPipeline(this, _statusOperations);

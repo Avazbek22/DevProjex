@@ -52,6 +52,7 @@ public partial class MainWindow : IRefreshTreePipelineHost
 			GitScopePresentation: gitScopeRefresh?.Presentation,
 			EffectiveExtensionPolicy: _selectionCoordinator.GetEffectiveExtensionPolicy(),
 			AvailableRootFolders: _selectionCoordinator.GetAvailableProjectScanRoots(),
+			GitRepositoryScopePaths: GetCheckedPaths(),
             PreserveCheckedPaths: preserveCheckedPaths);
     }
 

@@ -24,7 +24,8 @@ public sealed partial class SelectionSyncCoordinator(
 		getIgnoreOptionsAvailabilityWithCancellation = null,
 	IGitScopePathProvider? gitScopePathProvider = null,
 	Action<string, GitScopePathResult>? gitScopeUnavailable = null,
-	Func<CancellationToken, Task<bool>>? gitAvailabilityResolver = null)
+	Func<CancellationToken, Task<bool>>? gitAvailabilityResolver = null,
+	Func<IReadOnlySet<string>>? selectedTreePathsProvider = null)
     : IDisposable
 {
     // Store collection references for proper cleanup
@@ -3294,8 +3295,12 @@ public sealed partial class SelectionSyncCoordinator(
             currentScanRootOptions: _scanRoots.Count == 0
                 ? null
                 : SnapshotScanRootOptions(),
-            extensionSelectionIsExplicit: _session.ExtensionSelectionIsExplicit,
-			gitMode: _session.IgnoreOptions.ActiveGitFilteringMode);
+			extensionSelectionIsExplicit: _session.ExtensionSelectionIsExplicit,
+			gitMode: _session.IgnoreOptions.ActiveGitFilteringMode,
+			gitRepositoryScopePaths:
+				GitScopeSelection.IsMomentary(_session.IgnoreOptions.ActiveGitFilteringMode)
+					? selectedTreePathsProvider?.Invoke()
+					: null);
 
 	private async Task<SelectionRefreshSnapshot> AttachGitScopePresentationAsync(
 		SelectionRefreshContext context,
@@ -3326,7 +3331,8 @@ public sealed partial class SelectionSyncCoordinator(
 					snapshot.TreeInventory,
 					context.Path,
 					selectedRoots,
-					rootSelectionIsExplicit),
+					rootSelectionIsExplicit,
+					context.GitRepositoryScopePaths),
 				cancellationToken)
 			.ConfigureAwait(false);
 		if (!scope.IsAvailable)

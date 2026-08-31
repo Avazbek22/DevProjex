@@ -223,6 +223,46 @@ public sealed class MainWindowGitScopeLifecycleUiTests
 	}
 
 	[AvaloniaFact]
+	public async Task ManualNestedSelectionDoesNotQueryAnUnselectedBrokenOuterRepository()
+	{
+		EnsureGitAvailable();
+		using var project = UiTestProject.CreateDefault();
+		Directory.CreateDirectory(Path.Combine(project.RootPath, ".git"));
+		var nestedRoot = Path.Combine(project.RootPath, "nested-repository");
+		Directory.CreateDirectory(nestedRoot);
+		await File.WriteAllTextAsync(
+			Path.Combine(nestedRoot, "Baseline.cs"),
+			"class Baseline {}\n",
+			TestContext.Current.CancellationToken);
+		InitializeRepository(nestedRoot);
+		await File.WriteAllTextAsync(
+			Path.Combine(nestedRoot, "Staged.cs"),
+			"class Staged {}\n",
+			TestContext.Current.CancellationToken);
+		RunGit(nestedRoot, "add", "--", "Staged.cs");
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+		try
+		{
+			await SetSingleTopLevelSelectionAsync(window, "nested-repository");
+			await SelectAndApplyGitModeAsync(window, GitFilteringMode.Staged);
+
+			Assert.Equal(
+				GitFilteringMode.Staged,
+				UiTestDriver.GetViewModel(window).SelectedGitFilteringModeOption?.Mode);
+			await WaitForProjectTreePathStateAsync(
+				window,
+				exists: true,
+				"nested-repository",
+				"Staged.cs");
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task ScopedPresentationExcludesFilesAndImpactCountsFromUncheckedTopLevelRoot()
 	{
 		using var project = UiTestProject.CreateDefault();
@@ -941,6 +981,21 @@ public sealed class MainWindowGitScopeLifecycleUiTests
 			var node = FindProjectTreeNode(window, displayName);
 			Assert.NotNull(node);
 			node!.IsChecked = isChecked;
+		});
+		await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+	}
+
+	private static async Task SetSingleTopLevelSelectionAsync(
+		MainWindow window,
+		string selectedDisplayName)
+	{
+		await window.Dispatcher.InvokeAsync(() =>
+		{
+			var root = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes);
+			root.IsChecked = false;
+			var selected = Assert.Single(root.Children, node =>
+				string.Equals(node.DisplayName, selectedDisplayName, StringComparison.Ordinal));
+			selected.IsChecked = true;
 		});
 		await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
 	}

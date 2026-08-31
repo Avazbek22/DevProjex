@@ -1285,6 +1285,58 @@ public sealed class TerminalWorkspaceContractTests
 		Assert.DoesNotContain("none available", text, StringComparison.OrdinalIgnoreCase);
 	}
 
+	[Fact]
+	public async Task StructuralGitRefreshQueriesOnlyTheRepositoryOwningTheManualSelection()
+	{
+		if (!TryRunGit(Directory.GetCurrentDirectory(), "--version"))
+			Assert.Skip("Git is required for this regression test.");
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		workspace.WriteFile("Outer.txt", "outer\n");
+		Assert.True(TryRunGit(workspace.Path, "init", "--quiet"));
+		Assert.True(TryRunGit(workspace.Path, "config", "user.name", "DevProjex Tests"));
+		Assert.True(TryRunGit(workspace.Path, "config", "user.email", "devprojex@example.invalid"));
+		Assert.True(TryRunGit(workspace.Path, "add", "--", "Outer.txt"));
+		Assert.True(TryRunGit(workspace.Path, "commit", "--quiet", "-m", "outer baseline"));
+		var nestedRoot = workspace.CreateDirectory("nested");
+		workspace.WriteFile("nested/App.cs", "v1\n");
+		Assert.True(TryRunGit(nestedRoot, "init", "--quiet"));
+		Assert.True(TryRunGit(nestedRoot, "config", "user.name", "DevProjex Tests"));
+		Assert.True(TryRunGit(nestedRoot, "config", "user.email", "devprojex@example.invalid"));
+		Assert.True(TryRunGit(nestedRoot, "add", "--", "App.cs"));
+		Assert.True(TryRunGit(nestedRoot, "commit", "--quiet", "-m", "nested baseline"));
+		workspace.WriteFile("nested/App.cs", "v2\n");
+		Assert.True(TryRunGit(nestedRoot, "add", "--", "App.cs"));
+		Assert.True(TryRunGit(nestedRoot, "commit", "--quiet", "-m", "nested change"));
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+		var outerIndex = state.VisibleRows
+			.Select((row, index) => (row, index))
+			.Single(item => item.row.Node.DisplayName == "Outer.txt")
+			.index;
+		state.ToggleSelection(outerIndex);
+		var candidate = GitScopeSelection.WithMode(
+			state.BuildSelection(),
+			GitFilteringMode.Diff,
+			"HEAD~1..HEAD");
+
+		var result = await controller.BuildSettingsPlanAsync(
+			state.Plan,
+			candidate,
+			state.ExtensionOptionStates,
+			state.BuildSelectedItemRelativePaths(),
+			state.PathOptionStates,
+			TestContext.Current.CancellationToken);
+
+		Assert.False(result.Plan.HasErrors);
+		Assert.Equal("App.cs", Path.GetFileName(Assert.Single(result.Plan.IncludedFiles)));
+		Assert.Equal(GitFilteringMode.Diff, result.Plan.Selection.GitMode);
+	}
+
 	[Theory]
 	[InlineData(false, false, null)]
 	[InlineData(

@@ -28,7 +28,8 @@ public sealed record SelectionRefreshContext(
     bool RootSelectionIsExplicit = false,
     bool ExtensionSelectionIsExplicit = false,
 	GitFilteringMode GitMode = GitFilteringMode.None,
-	string? GitDiffRange = null)
+	string? GitDiffRange = null,
+	IReadOnlySet<string>? GitRepositoryScopePaths = null)
 {
     private static readonly IReadOnlySet<string> EmptyRootSelection =
         new HashSet<string>(PathComparer.Default);
@@ -50,7 +51,8 @@ public sealed record SelectionRefreshContext(
         IReadOnlyList<SelectionOption>? currentScanRootOptions,
         bool extensionSelectionIsExplicit,
 		GitFilteringMode gitMode = GitFilteringMode.None,
-		string? gitDiffRange = null) =>
+		string? gitDiffRange = null,
+		IReadOnlySet<string>? gitRepositoryScopePaths = null) =>
         new(
             Path: path,
             PreparedSelectionMode: preparedSelectionMode,
@@ -73,5 +75,6 @@ public sealed record SelectionRefreshContext(
             RootSelectionIsExplicit: false,
             ExtensionSelectionIsExplicit: extensionSelectionIsExplicit,
 			GitMode: gitMode,
-			GitDiffRange: gitDiffRange);
+			GitDiffRange: gitDiffRange,
+			GitRepositoryScopePaths: gitRepositoryScopePaths);
 }

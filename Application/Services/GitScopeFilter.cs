@@ -175,6 +175,23 @@ public static class GitScopeFilter
 		IGitScopePathProvider provider,
 		GitFilteringMode scopeMode,
 		string? diffRange,
+		CancellationToken cancellationToken = default) =>
+		await ApplyAsync(
+			planner,
+			plan,
+			provider,
+			scopeMode,
+			diffRange,
+			repositoryScopeFullPaths: null,
+			cancellationToken).ConfigureAwait(false);
+
+	public static async Task<ProjectContextPlan> ApplyAsync(
+		ProjectContextPlanner planner,
+		ProjectContextPlan plan,
+		IGitScopePathProvider provider,
+		GitFilteringMode scopeMode,
+		string? diffRange,
+		IReadOnlyCollection<string>? repositoryScopeFullPaths,
 		CancellationToken cancellationToken = default)
 	{
 		ArgumentNullException.ThrowIfNull(planner);
@@ -196,7 +213,7 @@ public static class GitScopeFilter
 				plan.SourceRoot,
 				scopeMode,
 				diffRange,
-				planner.GetGitScopeRepositoryRoots(plan),
+				planner.GetGitScopeRepositoryRoots(plan, repositoryScopeFullPaths),
 				cancellationToken)
 			.ConfigureAwait(false);
 		if (!scope.IsAvailable)

@@ -246,20 +246,25 @@ public sealed class ProjectContextPlanner(ProjectAnalysisService analysisService
 			includeIgnoreImpactCounts: plan.HasIgnoreOptionCounts);
 	}
 
-	internal IReadOnlyList<string> GetGitScopeRepositoryRoots(ProjectContextPlan plan)
+	internal IReadOnlyList<string> GetGitScopeRepositoryRoots(
+		ProjectContextPlan plan,
+		IReadOnlyCollection<string>? repositoryScopeFullPaths = null)
 	{
 		ArgumentNullException.ThrowIfNull(plan);
 		if (!_gitScopeProjectionContexts.TryGetValue(plan, out var context))
 			return [];
 
+		var scopePaths = repositoryScopeFullPaths is { Count: > 0 }
+			? repositoryScopeFullPaths
+			: plan.Selection.SelectedPaths is { Count: > 0 }
+				? plan.SelectedFullPaths
+				: null;
 		return GitScopeFilter.GetDiscoveredRepositoryRoots(
 			context.Inventory,
 			plan.SourceRoot,
 			plan.SelectedRoots,
 			context.RootSelectionIsExplicit,
-			plan.Selection.SelectedPaths is { Count: > 0 }
-				? plan.SelectedFullPaths
-				: null);
+			scopePaths);
 	}
 
 	private sealed record GitScopeProjectionContext(

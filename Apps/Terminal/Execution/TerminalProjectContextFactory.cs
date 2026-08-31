@@ -14,7 +14,8 @@ public sealed class TerminalProjectContextFactory(
 		ProjectSourceIdentity? knownIdentity = null,
 		CancellationToken cancellationToken = default,
 		bool captureIgnoreImpactCounts = false,
-		IReadOnlyDictionary<string, bool>? knownExtensionStates = null)
+		IReadOnlyDictionary<string, bool>? knownExtensionStates = null,
+		IReadOnlyCollection<string>? repositoryScopeFullPaths = null)
 		=> BuildAsync(
 			projectPath,
 			selection,
@@ -23,7 +24,8 @@ public sealed class TerminalProjectContextFactory(
 			cancellationToken,
 			captureIgnoreImpactCounts,
 			includeContentOutputMetrics: true,
-			knownExtensionStates);
+			knownExtensionStates,
+			repositoryScopeFullPaths);
 
 	internal async Task<ProjectContextPlan> BuildAsync(
 		string projectPath,
@@ -33,7 +35,8 @@ public sealed class TerminalProjectContextFactory(
 		CancellationToken cancellationToken = default,
 		bool captureIgnoreImpactCounts = false,
 		bool includeContentOutputMetrics = true,
-		IReadOnlyDictionary<string, bool>? knownExtensionStates = null)
+		IReadOnlyDictionary<string, bool>? knownExtensionStates = null,
+		IReadOnlyCollection<string>? repositoryScopeFullPaths = null)
 	{
 		var markedSecrets = ProjectSelectionMarkedSecretsResolver.Resolve(selection);
 		if (await secretRedactionSession
@@ -84,7 +87,14 @@ public sealed class TerminalProjectContextFactory(
 		}
 
 		return await GitScopeFilter
-			.ApplyAsync(planner, plan, gitScopePathProvider, cancellationToken)
+			.ApplyAsync(
+				planner,
+				plan,
+				gitScopePathProvider,
+				plan.Selection.GitMode ?? GitFilteringMode.None,
+				plan.Selection.GitDiffRange,
+				repositoryScopeFullPaths,
+				cancellationToken)
 			.ConfigureAwait(false);
 	}
 }

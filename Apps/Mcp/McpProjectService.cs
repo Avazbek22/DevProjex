@@ -24,6 +24,7 @@ internal sealed class McpProjectService(
 		var source = await projectSources.ResolveAsync(project, branch, cancellationToken)
 			.ConfigureAwait(false);
 		var projectRoot = source.Root;
+		var requested = ResolveRequestedPaths(projectRoot, paths, cancellationToken);
 		var profileReference = ResolveProfile(projectRoot, profile);
 		var baselineGitMode = trackedOnly
 			? GitFilteringMode.TrackedFilesOnly
@@ -104,6 +105,7 @@ internal sealed class McpProjectService(
 					services.GitScopePathProvider,
 					scope.Mode,
 					scope.DiffRange,
+					requested.Paths,
 					cancellationToken)
 				.ConfigureAwait(false);
 			if (plan.HasErrors)
@@ -126,7 +128,6 @@ internal sealed class McpProjectService(
 		else
 		{
 			var globs = McpGlobSet.Create(includePatterns, excludePatterns);
-			var requested = ResolveRequestedPaths(projectRoot, paths, cancellationToken);
 			var selected = new List<string>();
 			foreach (var path in plan.IncludedFiles)
 			{

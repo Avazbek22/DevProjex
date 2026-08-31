@@ -14,5 +14,6 @@ internal sealed record TreeRefreshInput(
 	GitScopePresentationProjection? GitScopePresentation = null,
 	IExtensionInclusionPolicy? EffectiveExtensionPolicy = null,
 	IReadOnlySet<string>? AvailableRootFolders = null,
+	IReadOnlySet<string>? GitRepositoryScopePaths = null,
     bool PreserveCheckedPaths = false,
     bool PreserveExpandedPaths = false);

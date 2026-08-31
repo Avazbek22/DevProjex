@@ -2470,6 +2470,87 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public async Task ExplicitPathsLimitGitDiffResolutionToTheirOwningNestedRepository()
+	{
+		using var workspace = new TemporaryDirectory();
+		var outer = workspace.CreateDirectory("outer");
+		File.WriteAllText(Path.Combine(outer, "Outer.txt"), "outer\n");
+		InitializeCommittedRepository(outer);
+		var nested = workspace.CreateDirectory("outer/nested");
+		File.WriteAllText(Path.Combine(nested, "App.cs"), "v1\n");
+		InitializeCommittedRepository(nested);
+		File.WriteAllText(Path.Combine(nested, "App.cs"), "v2\n");
+		RunGit(nested, "add", "--", "App.cs");
+		RunGit(nested, "commit", "--quiet", "-m", "nested change");
+		await using var server = await McpTestServer.StartAsync(outer, workspace.Path);
+		var arguments = new Dictionary<string, object?>
+		{
+			["paths"] = new[] { "nested/App.cs" },
+			["git_scope"] = "diff:HEAD~1..HEAD"
+		};
+
+		var analyze = await server.CallAsync("analyze", arguments);
+		var pack = await server.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?>(arguments)
+			{
+				["view"] = "content",
+				["format"] = "text"
+			});
+
+		Assert.NotEqual(true, analyze.IsError);
+		Assert.Equal(1, analyze.StructuredContent?.GetProperty("files").GetInt32());
+		Assert.NotEqual(true, pack.IsError);
+		Assert.Contains("App.cs", Text(pack), StringComparison.Ordinal);
+		Assert.DoesNotContain("Outer.txt", Text(pack), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task ProfilePathsLimitGitDiffResolutionWhenToolPathsAreOmitted()
+	{
+		using var workspace = new TemporaryDirectory();
+		var outer = workspace.CreateDirectory("outer");
+		File.WriteAllText(Path.Combine(outer, "Outer.cs"), "outer\n");
+		InitializeCommittedRepository(outer);
+		var nested = workspace.CreateDirectory("outer/nested");
+		File.WriteAllText(Path.Combine(nested, "App.cs"), "v1\n");
+		InitializeCommittedRepository(nested);
+		File.WriteAllText(Path.Combine(nested, "App.cs"), "v2\n");
+		RunGit(nested, "add", "--", "App.cs");
+		RunGit(nested, "commit", "--quiet", "-m", "nested change");
+		const string profileName = "nested-profile.json";
+		File.WriteAllText(
+			Path.Combine(outer, profileName),
+			JsonSerializer.Serialize(new
+			{
+				schemaVersion = PortableProjectProfileService.CurrentSchemaVersion,
+				kind = PortableProjectProfileService.DocumentKind,
+				selection = new
+				{
+					roots = (string[]?)null,
+					extensions = new[] { ".cs" },
+					selectedPaths = new[] { "nested/App.cs" },
+					gitMode = "none",
+					exclusions = Array.Empty<string>(),
+					hideSecrets = false,
+					hidePrivateData = false
+				}
+			}));
+		await using var server = await McpTestServer.StartAsync(outer, workspace.Path);
+
+		var result = await server.CallAsync(
+			"analyze",
+			new Dictionary<string, object?>
+			{
+				["profile"] = profileName,
+				["git_scope"] = "diff:HEAD~1..HEAD"
+			});
+
+		Assert.NotEqual(true, result.IsError);
+		Assert.Equal(1, result.StructuredContent?.GetProperty("files").GetInt32());
+	}
+
+	[Fact]
 	public async Task GitScopeRejectsLocalFoldersAndInvalidDiffRanges()
 	{
 		using var workspace = new TemporaryDirectory();

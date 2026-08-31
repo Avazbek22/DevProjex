@@ -141,6 +141,9 @@ public sealed class TerminalWorkspaceController(
 		CancellationToken cancellationToken)
 	{
 		var buildCount = 0;
+		var repositoryScopeFullPaths = ResolveRepositoryScopeFullPaths(
+			request.SourceRoot,
+			request.PreviousPaths);
 		var discoverySelection = request.Selection with
 		{
 			Roots = ShouldPreserveRootsDuringDiscovery(request.Selection)
@@ -153,7 +156,8 @@ public sealed class TerminalWorkspaceController(
 				discoverySelection,
 				sourceIdentity,
 				cancellationToken,
-				request.ExtensionOptionStates)
+				request.ExtensionOptionStates,
+				repositoryScopeFullPaths)
 			.ConfigureAwait(false);
 		buildCount++;
 		if (request.FallbackGitMode is { } requestedFallbackMode &&
@@ -169,7 +173,8 @@ public sealed class TerminalWorkspaceController(
 					discoverySelection,
 					sourceIdentity,
 					cancellationToken,
-					request.ExtensionOptionStates)
+					request.ExtensionOptionStates,
+					repositoryScopeFullPaths)
 				.ConfigureAwait(false);
 			buildCount++;
 		}
@@ -200,7 +205,8 @@ public sealed class TerminalWorkspaceController(
 					selection,
 					sourceIdentity,
 					cancellationToken,
-					extensionEvolution.KnownStates)
+					extensionEvolution.KnownStates,
+					repositoryScopeFullPaths)
 				.ConfigureAwait(false);
 			buildCount++;
 			ThrowIfTrackedModeIsUnavailable(discovered);
@@ -966,14 +972,34 @@ public sealed class TerminalWorkspaceController(
 		ProjectSelectionSpec selection,
 		ProjectSourceIdentity? sourceIdentity,
 		CancellationToken cancellationToken,
-		IReadOnlyDictionary<string, bool>? knownExtensionStates = null) =>
+		IReadOnlyDictionary<string, bool>? knownExtensionStates = null,
+		IReadOnlyCollection<string>? repositoryScopeFullPaths = null) =>
 		services.ContextFactory.BuildAsync(
 			projectPath,
 			selection,
 			sourceIdentity,
 			cancellationToken,
 			captureIgnoreImpactCounts: true,
-			knownExtensionStates);
+			knownExtensionStates,
+			repositoryScopeFullPaths);
+
+	private static IReadOnlyList<string> ResolveRepositoryScopeFullPaths(
+		string sourceRoot,
+		IReadOnlyCollection<string> selectedRelativePaths)
+	{
+		if (selectedRelativePaths.Count == 0)
+			return [];
+
+		var paths = new List<string>(selectedRelativePaths.Count);
+		foreach (var path in selectedRelativePaths)
+		{
+			var relativePath = ProjectSelectionPath.NormalizeRelative(path);
+			var fullPath = PathUtility.Normalize(Path.Combine(sourceRoot, relativePath));
+			if (PathUtility.IsPathInside(fullPath, sourceRoot))
+				paths.Add(fullPath);
+		}
+		return paths;
+	}
 
 	private static void ThrowIfTrackedModeIsUnavailable(ProjectContextPlan plan)
 	{

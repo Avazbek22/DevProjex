@@ -32,7 +32,8 @@ public partial class MainWindow
 					result.Inventory,
 					input.CurrentPath,
 					input.Options.AllowedRootFolders,
-					rootSelectionIsExplicit),
+					rootSelectionIsExplicit,
+					input.GitRepositoryScopePaths),
 				cancellationToken)
 			.GetAwaiter()
 			.GetResult();
