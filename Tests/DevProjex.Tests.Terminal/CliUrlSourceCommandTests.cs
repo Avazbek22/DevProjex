@@ -118,7 +118,7 @@ public sealed class CliUrlSourceCommandTests
 	}
 
 	[Fact]
-	public async Task UrlSourceClonesReusesCacheSelectsBranchAndRecordsRecentHistory()
+	public async Task LocalUrlSourceClonesReusesCacheSelectsBranchWithoutRecordingRecentHistory()
 	{
 		if (!IsGitAvailable())
 			Assert.Skip("Git is unavailable on this test host.");
@@ -172,9 +172,7 @@ public sealed class CliUrlSourceCommandTests
 			TestContext.Current.CancellationToken);
 		Assert.Equal(CommandLineExitCodes.Success, recentExitCode);
 		using var recent = JsonDocument.Parse(recentEnvironment.StandardOutput);
-		var item = Assert.Single(recent.RootElement.GetProperty("items").EnumerateArray());
-		Assert.Equal("repository", item.GetProperty("kind").GetString());
-		Assert.Equal(repositoryUrl.TrimEnd('/'), item.GetProperty("url").GetString()?.TrimEnd('/'));
+		Assert.Empty(recent.RootElement.GetProperty("items").EnumerateArray());
 	}
 
 	[Fact]
