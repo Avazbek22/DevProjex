@@ -136,6 +136,12 @@ public sealed class StatusMetricWaveText : Control
     internal bool IsInitialRevealActive =>
         _revealStarted && !_revealCompleted;
 
+    internal bool HasActiveHorizontalReflow =>
+        _metricRollTransition is { } transition &&
+        transition.CurrentStartOffsets
+            .Where(static offset => !double.IsNaN(offset))
+            .Any(offset => Math.Abs(offset - transition.CurrentLayoutOffset) > 0.01);
+
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
@@ -373,6 +379,12 @@ public sealed class StatusMetricWaveText : Control
         var currentLayoutOffset = RevealDirection == StatusMetricWaveDirection.RightToLeft
             ? transitionWidth - currentLayout.Width
             : 0;
+        var currentStartOffsets = BuildCurrentStartOffsets(
+            previousLayout,
+            previousRuns,
+            currentLayout,
+            currentRuns,
+            previousLayoutOffset);
 
         for (var runIndex = 0; runIndex < Math.Min(previousRuns.Count, currentRuns.Count); runIndex++)
         {
@@ -437,6 +449,7 @@ public sealed class StatusMetricWaveText : Control
             currentLayout,
             cells,
             changedGlyphs,
+            currentStartOffsets,
             previousLayoutOffset,
             currentLayoutOffset,
             MetricRollDuration + TimeSpan.FromTicks(MetricRollStagger.Ticks * maximumDelayRank));
@@ -452,6 +465,11 @@ public sealed class StatusMetricWaveText : Control
         MetricRollTransition transition,
         double currentTop)
     {
+        var elapsed = _animationElapsed;
+        var horizontalProgress = SmootherStep(Math.Clamp(
+            elapsed.TotalMilliseconds / transition.Duration.TotalMilliseconds,
+            0,
+            1));
         for (var index = 0; index < transition.Current.Glyphs.Count; index++)
         {
             if (transition.ChangedCurrentGlyphs[index])
@@ -463,10 +481,9 @@ public sealed class StatusMetricWaveText : Control
                 currentTop,
                 0,
                 1,
-                transition.CurrentLayoutOffset);
+                ResolveCurrentGlyphOffset(transition, index, horizontalProgress));
         }
 
-        var elapsed = _animationElapsed;
         var previousTop = Math.Max(0, (Bounds.Height - transition.Previous.Height) / 2);
         var travelDistance = Math.Max(transition.Previous.Height, transition.Current.Height) + 1;
         using (context.PushClip(new Rect(0, 0, Bounds.Width, Bounds.Height)))
@@ -488,8 +505,9 @@ public sealed class StatusMetricWaveText : Control
                         transition.Previous.Glyphs[previousIndex],
                         previousTop,
                         outgoingDirection * travelDistance * movement,
-                        1,
-                        transition.PreviousLayoutOffset + cell.PreviousXAdjustment);
+                        1 - movement,
+                        transition.PreviousLayoutOffset +
+                        (cell.PreviousXAdjustment * horizontalProgress));
                 }
 
                 if (cell.CurrentGlyphIndex is { } currentIndex)
@@ -499,11 +517,25 @@ public sealed class StatusMetricWaveText : Control
                         transition.Current.Glyphs[currentIndex],
                         currentTop,
                         -outgoingDirection * travelDistance * (1 - movement),
-                        1,
-                        transition.CurrentLayoutOffset);
+                        movement,
+                        ResolveCurrentGlyphOffset(
+                            transition,
+                            currentIndex,
+                            horizontalProgress));
                 }
             }
         }
+    }
+
+    private static double ResolveCurrentGlyphOffset(
+        MetricRollTransition transition,
+        int glyphIndex,
+        double progress)
+    {
+        var startOffset = transition.CurrentStartOffsets[glyphIndex];
+        return double.IsNaN(startOffset)
+            ? transition.CurrentLayoutOffset
+            : Lerp(startOffset, transition.CurrentLayoutOffset, progress);
     }
 
     private static void DrawGlyph(
@@ -799,6 +831,79 @@ public sealed class StatusMetricWaveText : Control
         return shape.ToString();
     }
 
+    private static double[] BuildCurrentStartOffsets(
+        GlyphLayout previous,
+        IReadOnlyList<NumericGlyphRun> previousRuns,
+        GlyphLayout current,
+        IReadOnlyList<NumericGlyphRun> currentRuns,
+        double previousLayoutOffset)
+    {
+        var offsets = Enumerable.Repeat(double.NaN, current.Glyphs.Count).ToArray();
+        var previousCursor = 0;
+        var currentCursor = 0;
+        for (var runIndex = 0; runIndex < previousRuns.Count; runIndex++)
+        {
+            var previousRun = previousRuns[runIndex];
+            var currentRun = currentRuns[runIndex];
+            MapCurrentGlyphStarts(
+                previous,
+                previousCursor,
+                previousRun.Start,
+                current,
+                currentCursor,
+                currentRun.Start,
+                previousLayoutOffset,
+                offsets);
+
+            var pairedDigits = Math.Min(
+                previousRun.EndExclusive - previousRun.Start,
+                currentRun.EndExclusive - currentRun.Start);
+            for (var rank = 0; rank < pairedDigits; rank++)
+            {
+                var previousIndex = previousRun.EndExclusive - rank - 1;
+                var currentIndex = currentRun.EndExclusive - rank - 1;
+                offsets[currentIndex] = previous.Glyphs[previousIndex].X +
+                                        previousLayoutOffset -
+                                        current.Glyphs[currentIndex].X;
+            }
+
+            previousCursor = previousRun.EndExclusive;
+            currentCursor = currentRun.EndExclusive;
+        }
+
+        MapCurrentGlyphStarts(
+            previous,
+            previousCursor,
+            previous.Glyphs.Count,
+            current,
+            currentCursor,
+            current.Glyphs.Count,
+            previousLayoutOffset,
+            offsets);
+        return offsets;
+    }
+
+    private static void MapCurrentGlyphStarts(
+        GlyphLayout previous,
+        int previousStart,
+        int previousEnd,
+        GlyphLayout current,
+        int currentStart,
+        int currentEnd,
+        double previousLayoutOffset,
+        double[] offsets)
+    {
+        var count = Math.Min(previousEnd - previousStart, currentEnd - currentStart);
+        for (var offset = 0; offset < count; offset++)
+        {
+            var previousGlyph = previous.Glyphs[previousStart + offset];
+            var currentIndex = currentStart + offset;
+            offsets[currentIndex] = previousGlyph.X +
+                                    previousLayoutOffset -
+                                    current.Glyphs[currentIndex].X;
+        }
+    }
+
     private static bool IsDigitGlyph(WaveGlyph glyph)
     {
         if (!glyph.IsMetricText)
@@ -971,6 +1076,7 @@ public sealed class StatusMetricWaveText : Control
         GlyphLayout Current,
         IReadOnlyList<MetricRollCell> Cells,
         bool[] ChangedCurrentGlyphs,
+        double[] CurrentStartOffsets,
         double PreviousLayoutOffset,
         double CurrentLayoutOffset,
         TimeSpan Duration);

@@ -114,6 +114,43 @@ public sealed class StatusMetricWaveTextTests
     }
 
     [AvaloniaFact]
+    public async Task DigitCountChange_AnimatesHorizontalReflowForBothAnchors()
+    {
+        foreach (var direction in Enum.GetValues<StatusMetricWaveDirection>())
+        {
+            var control = new StatusMetricWaveText
+            {
+                IsAnimationEnabled = false,
+                Label = "Content",
+                Text = "Lines: 99 · Characters: 999",
+                RevealDirection = direction
+            };
+            var window = new Window { Content = control };
+
+            try
+            {
+                window.Show();
+                await FlushUiAsync();
+                control.Measure(Size.Infinity);
+                var previousWidth = control.DesiredSize.Width;
+                control.IsAnimationEnabled = true;
+
+                control.Text = FormattableString.CurrentCulture(
+                    $"Lines: {100:N0} · Characters: {1_000:N0}");
+                control.Measure(Size.Infinity);
+
+                Assert.True(control.IsAnimationActive);
+                Assert.True(control.HasActiveHorizontalReflow);
+                Assert.True(control.DesiredSize.Width >= previousWidth);
+            }
+            finally
+            {
+                window.Close();
+            }
+        }
+    }
+
+    [AvaloniaFact]
     public async Task DetachDuringInitialReveal_CompletesAnimation()
     {
         var control = new StatusMetricWaveText
