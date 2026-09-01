@@ -127,8 +127,8 @@ In the Git Clone window, a “Recent repositories” list can appear below the U
 
 Rules:
 * the list appears only if the history already contains recently cloned repositories;
-* only repository URLs are added to the list;
-* local folders are not added to this list;
+* only network repository sources (`https://`, `http://`, `ssh://`, `git://`, and SCP syntax) are added to the list;
+* local paths and `file://` sources are not added to this list;
 * duplicates are not created — cloning the same repository again moves it to the top;
 * up to 16 recent repositories are stored;
 * history is preserved between app launches.

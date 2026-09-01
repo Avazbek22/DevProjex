@@ -127,8 +127,8 @@ Na janela Git Clone, uma lista de “repositórios recentes” pode aparecer aba
 
 Regras:
 * a lista aparece apenas se o histórico já contiver repositórios clonados recentemente;
-* apenas URLs de repositório são adicionadas à lista;
-* pastas locais não são adicionadas a esta lista;
+* apenas origens de repositório de rede (`https://`, `http://`, `ssh://`, `git://` e sintaxe SCP) são adicionadas à lista;
+* caminhos locais e origens `file://` não são adicionados a esta lista;
 * duplicatas não são criadas — clonar o mesmo repositório novamente o move para o topo;
 * até 16 repositórios recentes são armazenados;
 * o histórico é preservado entre as inicializações do aplicativo.

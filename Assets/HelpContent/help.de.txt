@@ -127,8 +127,8 @@ Im Git-Clone-Fenster kann unter dem URL-Feld eine Liste „Zuletzt verwendete Re
 
 Regeln:
 * die Liste erscheint nur, wenn im Verlauf bereits zuletzt geklonte Repositories vorhanden sind;
-* in die Liste werden nur Repository-URLs aufgenommen;
-* lokale Ordner werden dieser Liste nicht hinzugefügt;
+* nur Netzwerkquellen für Repositorys (`https://`, `http://`, `ssh://`, `git://` und SCP-Syntax) werden der Liste hinzugefügt;
+* lokale Pfade und `file://`-Quellen werden dieser Liste nicht hinzugefügt;
 * es werden keine Duplikate erzeugt — das erneute Klonen desselben Repositories verschiebt es nach oben;
 * es werden bis zu 16 letzte Repositories gespeichert;
 * der Verlauf bleibt zwischen App-Starts erhalten.

@@ -127,8 +127,8 @@ Dans la fenêtre Git Clone, une liste « Dépôts récents » peut apparaître s
 
 Règles :
 * la liste apparaît seulement si l’historique contient déjà des dépôts clonés récemment ;
-* seules les URL des dépôts sont ajoutées à la liste ;
-* les dossiers locaux ne sont pas ajoutés à cette liste ;
+* seules les sources réseau de dépôt (`https://`, `http://`, `ssh://`, `git://` et la syntaxe SCP) sont ajoutées à la liste ;
+* les chemins locaux et les sources `file://` ne sont pas ajoutés à cette liste ;
 * aucun doublon n’est créé — re-cloner le même dépôt le remonte en haut de la liste ;
 * jusqu’à 16 derniers dépôts sont conservés ;
 * l’historique est conservé entre les démarrages de l’application.

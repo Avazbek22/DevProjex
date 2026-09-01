@@ -127,8 +127,8 @@ Trong cửa sổ Git Clone, danh sách “Kho lưu trữ gần đây” có th�
 
 Quy tắc:
 * danh sách chỉ xuất hiện nếu lịch sử đã chứa các kho được nhân bản gần đây;
-* chỉ các URL kho lưu trữ mới được thêm vào danh sách;
-* các thư mục cục bộ không được thêm vào danh sách này;
+* chỉ các nguồn kho lưu trữ qua mạng (`https://`, `http://`, `ssh://`, `git://` và cú pháp SCP) được thêm vào danh sách;
+* đường dẫn cục bộ và nguồn `file://` không được thêm vào danh sách này;
 * các bản sao không được tạo - việc sao chép cùng một kho lưu trữ sẽ di chuyển nó lên trên cùng;
 * tối đa 16 kho lưu trữ gần đây được lưu trữ;
 * lịch sử được lưu giữ giữa các lần khởi chạy ứng dụng.

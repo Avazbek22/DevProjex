@@ -127,8 +127,8 @@ Git Clone penceresinde, URL alanının altında “Son depolar” listesi görü
 
 Tüzük:
 * liste yalnızca geçmişin yakın zamanda klonlanmış depoları içermesi durumunda görünür;
-* listeye yalnızca veri havuzu URL'leri eklenir;
-* yerel klasörler bu listeye eklenmez;
+* listeye yalnızca ağ deposu kaynakları (`https://`, `http://`, `ssh://`, `git://` ve SCP söz dizimi) eklenir;
+* yerel yollar ve `file://` kaynakları bu listeye eklenmez;
 * kopyalar oluşturulmaz; aynı deponun tekrar klonlanması onu en üste taşır;
 * 16 adede kadar yeni depo saklanır;
 * geçmiş, uygulamanın başlatılması arasında korunur.

@@ -127,8 +127,8 @@ Di jendela Git Clone, daftar “Repositori terbaru” dapat muncul di bawah bida
 
 Aturan:
 * daftar hanya muncul jika riwayat sudah berisi repositori yang baru saja dikloning;
-* hanya URL repositori yang ditambahkan ke daftar;
-* folder lokal tidak ditambahkan ke daftar ini;
+* hanya sumber repositori jaringan (`https://`, `http://`, `ssh://`, `git://`, dan sintaks SCP) yang ditambahkan ke daftar;
+* jalur lokal dan sumber `file://` tidak ditambahkan ke daftar ini;
 * duplikat tidak dibuat — mengkloning repositori yang sama lagi akan memindahkannya ke atas;
 * hingga 16 repositori terbaru disimpan;
 * riwayat disimpan di antara peluncuran aplikasi.

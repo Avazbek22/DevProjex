@@ -127,8 +127,8 @@ Git Clone oynasida URL maydoni ostida “So‘nggi repozitoriylar” ro‘yxati 
 
 Qoidalar:
 * ro‘yxat faqat tarixda yaqinda klonlangan repozitoriylar bo‘lsa paydo bo‘ladi;
-* ro‘yxatga faqat repozitoriy URL manzillari qo‘shiladi;
-* lokal jildlar bu ro‘yxatga qo‘shilmaydi;
+* ro‘yxatga faqat tarmoq repozitoriy manbalari (`https://`, `http://`, `ssh://`, `git://` va SCP sintaksisi) qo‘shiladi;
+* lokal yo‘llar va `file://` manbalari bu ro‘yxatga qo‘shilmaydi;
 * dublikatlar yaratilmaydi — bir xil repozitoriyani qayta klonlash uni ro‘yxatning yuqorisiga olib chiqadi;
 * 16 tagacha so‘nggi repozitoriy saqlanadi;
 * tarix ilova qayta ishga tushirilganda ham saqlanadi.

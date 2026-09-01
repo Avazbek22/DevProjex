@@ -127,8 +127,8 @@ En la ventana Git Clone, puede aparecer una lista de "Repositorios recientes" de
 
 Reglas:
 * la lista aparece sólo si el historial ya contiene repositorios clonados recientemente;
-* sólo se agregan a la lista las URL del repositorio;
-* las carpetas locales no se agregan a esta lista;
+* solo se agregan a la lista orígenes de repositorio de red (`https://`, `http://`, `ssh://`, `git://` y la sintaxis SCP);
+* las rutas locales y los orígenes `file://` no se agregan a esta lista;
 * no se crean duplicados: clonar nuevamente el mismo repositorio lo mueve a la parte superior;
 * se almacenan hasta 16 repositorios recientes;
 * El historial se conserva entre los lanzamientos de la aplicación.
