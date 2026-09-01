@@ -160,6 +160,36 @@ public sealed class RepositoryUrlUtilityTests
 		Assert.True(RepositoryUrlUtility.IsSupportedCloneSource(source));
 	}
 
+	[Theory]
+	[InlineData("https://example.com/owner/repo.git")]
+	[InlineData("http://example.com/owner/repo.git")]
+	[InlineData("ssh://git@example.com/owner/repo.git")]
+	[InlineData("git://example.com/owner/repo.git")]
+	[InlineData("git@github.com:owner/repo.git")]
+	public void NetworkCloneSourcesAreAccepted(string source)
+	{
+		Assert.True(RepositoryUrlUtility.IsNetworkCloneSource(source));
+	}
+
+	[Theory]
+	[InlineData("")]
+	[InlineData("file:///tmp/repository")]
+	[InlineData("relative/repository")]
+	public void NonNetworkCloneSourcesAreRejected(string source)
+	{
+		Assert.False(RepositoryUrlUtility.IsNetworkCloneSource(source));
+	}
+
+	[Fact]
+	public void ExistingAbsoluteFolderIsNotANetworkCloneSource()
+	{
+		using var temporary = new TemporaryDirectory();
+
+		Assert.False(RepositoryUrlUtility.IsNetworkCloneSource(temporary.Path));
+		Assert.False(RepositoryUrlUtility.IsNetworkCloneSource(
+			Path.Combine(temporary.Path, "MissingRepository")));
+	}
+
 	[Fact]
 	public void ExistingAbsoluteFolderIsAcceptedAsLocalCloneSource()
 	{

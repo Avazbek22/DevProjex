@@ -148,6 +148,18 @@ public static class RepositoryUrlUtility
 
 	public static string ToSafeDisplay(string? repositoryUrl) => Normalize(repositoryUrl);
 
+	public static bool IsNetworkCloneSource(string? repositoryUrl)
+	{
+		if (!TryNormalize(repositoryUrl, out var normalized))
+			return false;
+
+		if (TryParseScpSyntax(normalized, out _))
+			return true;
+
+		return Uri.TryCreate(normalized, UriKind.Absolute, out var uri) &&
+		       uri.Scheme is "http" or "https" or "ssh" or "git";
+	}
+
 	public static bool IsSupportedCloneSource(string? repositoryUrl)
 	{
 		if (!TryNormalize(repositoryUrl, out var normalized) ||
