@@ -168,6 +168,8 @@ keyboard shortcuts and the workspace command line, then restore the previous pan
 when canceled. Workspace palette rows show the corresponding `:` syntax when the
 action has a command-line form.
 
+![DevProjex Terminal Action Palette](Media/terminal-workspace/action-palette.png)
+
 Changing checked nodes updates the selection projection without rescanning the
 filesystem. Structural changes use the canonical refresh pipeline. Preview
 refresh is cancelable, debounced, and bounded for large projects.
@@ -212,6 +214,13 @@ invalid token reports its position and up to three similar candidates. Arguments
 containing whitespace can use single or double quotes; path completion inserts
 and preserves the required quotes automatically.
 Welcome exposes the focused subset `recent`, `language`, `help`, and `quit`.
+
+The input line exposes the active argument schema before execution and renders an
+inline ghost suffix as soon as a token can be completed:
+
+| Live argument schema | Ghost completion |
+|---|---|
+| ![Workspace command argument schema](Media/terminal-workspace/command-line-schema.png) | ![Workspace command ghost completion](Media/terminal-workspace/command-line-completion.png) |
 
 | Syntax | Session action |
 |---|---|
@@ -372,6 +381,15 @@ uses project-relative file headings. Desktop and exact-export text trees show th
 root path once, followed immediately by the real top-level children. The regular
 TUI tree uses its named project-root node instead of a separate address line.
 Unicode and `--plain` connectors carry the same tree structure.
+
+The following views keep the same live project selection and change only the tree
+format:
+
+![Markdown tree preview](Media/terminal-workspace/format-markdown.png)
+
+![JSON tree preview](Media/terminal-workspace/format-json.png)
+
+![XML tree preview](Media/terminal-workspace/format-xml.png)
 
 Large contexts use the shared preview document abstractions. Small documents
 stay in memory; larger documents use temporary file-backed UTF-8 storage with
