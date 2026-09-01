@@ -127,8 +127,8 @@ Git Clone penceresinde, URL alanının altında “Son depolar” listesi görü
 
 Tüzük:
 * liste yalnızca geçmişin yakın zamanda klonlanmış depoları içermesi durumunda görünür;
-* listeye yalnızca veri havuzu URL'leri eklenir;
-* yerel klasörler bu listeye eklenmez;
+* listeye yalnızca ağ deposu kaynakları (`https://`, `http://`, `ssh://`, `git://` ve SCP söz dizimi) eklenir;
+* yerel yollar ve `file://` kaynakları bu listeye eklenmez;
 * kopyalar oluşturulmaz; aynı deponun tekrar klonlanması onu en üste taşır;
 * 16 adede kadar yeni depo saklanır;
 * geçmiş, uygulamanın başlatılması arasında korunur.
@@ -364,7 +364,7 @@ Proje içeriğine bağlı olarak aşağıdaki seçenekler gösterilebilir:
 * Nokta önekli dosyalar
 * Uzantısı olmayan dosyalar
 
-Git deposunda GUI beş Git modu sunar: filtreleme yok, `.gitignore`, izlenen dosyalar, hazırlanan dosyalar veya geçerli değişikliklerin tümü. Depo dışında yalnızca filtreleme yok ve `.gitignore` kullanılabilir. TUI her zaman aynı beş değeri radyo satırları olarak gösterir, ancak depo yoksa depo gerektiren satırları devre dışı bırakır; etkin bir `diff:<ref>..<ref>` kapsamı altıncı satırda görünür. Bir değer seçmek, Smart Ignore veya temel hariç tutmaları değiştirmeden geçerli Git modunu değiştirir. Diğer seçenekler, kuralları geçerli ağacı etkileyebildiğinde gösterilir.
+GUI seçicisi ve TUI'deki Git ekseninin radyo satırları, Git filtrelemesi uygulanamadığında tamamen gizlenir: depo sınırı yoktur ve `.gitignore` filtresi geçerli ağacı değiştiremez. Eksen depo dışında görünür olduğunda GUI yalnızca filtreleme yok ve `.gitignore` seçeneklerini sunar; TUI ise depo gerektiren satırları devre dışı bırakır. Bir Git deposunda beş normal değer kullanılabilir: filtreleme yok, `.gitignore`, izlenen dosyalar, hazırlanan dosyalar ve geçerli değişikliklerin tümü; TUI'de etkin bir `diff:<ref>..<ref>` kapsamı altıncı satırda görünür. Bir değer seçmek, Smart Ignore veya temel hariç tutmaları değiştirmeden geçerli Git modunu değiştirir. Diğer seçenekler, kuralları geçerli ağacı etkileyebildiğinde gösterilir.
 
 Yeni bir seçenek ilk göründüğünde varsayılan olarak etkindir. Bilinen bir seçenek, geçici olarak listeden kaybolsa bile kullanıcının tercihi kalır.
 

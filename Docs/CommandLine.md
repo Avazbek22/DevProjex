@@ -341,8 +341,11 @@ and cache metadata without exposing the physical checkout path.
 devprojex export context https://github.com/owner/repo -o -
 ```
 
-A successful first clone is added to repository history. Later invocations reuse
-the complete cached checkout and can work offline. Clone progress follows
+A successful first clone is added to repository history only for network clone
+sources: `https://`, `http://`, `ssh://`, `git://`, and SCP syntax. Local paths
+and `file://` sources remain valid clone sources and use the managed cache, but
+are never added to repository history. Later invocations reuse the complete
+cached checkout and can work offline. Clone progress follows
 `--progress`, `--verbosity`, and `--plain`: an interactive stderr reuses one line,
 while redirected, CI, dumb-terminal, and plain output is limited to start, three
 percentage milestones, and completion. It never enters stdout. Cancellation cleans

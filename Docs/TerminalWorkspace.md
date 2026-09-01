@@ -135,8 +135,11 @@ The workspace supports:
 - keyboard and mouse navigation;
 - a visible Tree Filter and a separate Preview Search;
 - extension selection;
-- a five-value Git radio group for none, `.gitignore`, tracked, staged, and all
-  working-tree changes; an active command-line diff scope appears as a sixth row;
+- a Git radio group that is hidden when there is no repository boundary and the
+  `.gitignore` filter cannot change the current tree; when visible, its five
+  regular rows are none, `.gitignore`, tracked, staged, and all working-tree
+  changes, with repository-only rows disabled outside a repository; an active
+  command-line diff scope appears as a sixth row;
 - ordinary Exclusions independent from Git filtering;
 - all five content-processing options: Hide Secrets, Hide Private Data,
   Compress Code, Strip Comments, and Strip Blank Lines;

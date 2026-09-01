@@ -415,7 +415,10 @@ legal Unix and macOS directory names containing `:` remain local. An explicit
 `scheme://` source is always interpreted as a URL.
 
 Cached repositories are reusable offline. A successful first clone records the
-safe URL in recent-repository history. Cancellation removes clone staging;
+safe source in recent-repository history only for network clone sources:
+`https://`, `http://`, `ssh://`, `git://`, and SCP syntax. Local paths and
+`file://` sources remain valid clone sources and use the managed cache, but are
+never written to recent-repository history. Cancellation removes clone staging;
 network and clone failures return runtime exit `1` without opening or exporting
 partial content. The generated cache path is internal and is never reported by
 direct URL-source commands or Terminal Workspace repository details. In particular,

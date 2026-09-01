@@ -127,8 +127,8 @@ W oknie Git Clone pod polem adresu URL może pojawić się lista „Ostatnie rep
 
 Zasady:
 * lista pojawia się tylko wtedy, gdy historia zawiera już ostatnio sklonowane repozytoria;
-* do listy dodawane są tylko adresy URL repozytoriów;
-* foldery lokalne nie są dodawane do tej listy;
+* do listy dodawane są tylko sieciowe źródła repozytoriów (`https://`, `http://`, `ssh://`, `git://` i składnia SCP);
+* ścieżki lokalne i źródła `file://` nie są dodawane do tej listy;
 * duplikaty nie są tworzone — ponowne sklonowanie tego samego repozytorium przenosi je na górę;
 * przechowywanych jest do 16 ostatnich repozytoriów;
 * historia jest zachowywana pomiędzy uruchomieniami aplikacji.
@@ -364,7 +364,7 @@ W zależności od zawartości projektu mogą zostać wyświetlone następujące 
 * Pliki z prefiksem kropki
 * Pliki bez rozszerzenia
 
-W repozytorium Git interfejs GUI oferuje pięć trybów Git: bez filtrowania, `.gitignore`, pliki śledzone, zmiany w indeksie albo wszystkie bieżące zmiany. Poza repozytorium dostępne są tylko brak filtrowania i `.gitignore`. TUI zawsze pokazuje te same pięć wartości jako opcje radiowe, ale bez repozytorium wyłącza wiersze, które go wymagają; aktywny zakres `diff:<ref>..<ref>` pojawia się w szóstym wierszu. Wybór wartości zastępuje bieżący tryb Git bez zmiany Smart Ignore ani podstawowych wykluczeń. Pozostałe opcje pojawiają się, gdy ich reguły mogą wpływać na bieżące drzewo.
+Selektor GUI i wiersze radiowe osi Git w TUI są całkowicie ukrywane, gdy filtrowanie Git nie ma zastosowania: nie ma granicy repozytorium, a filtr `.gitignore` nie może zmienić bieżącego drzewa. Gdy oś jest widoczna poza repozytorium, GUI oferuje tylko brak filtrowania i `.gitignore`, a TUI wyłącza wiersze wymagające repozytorium. W repozytorium Git dostępnych jest pięć zwykłych wartości: brak filtrowania, `.gitignore`, pliki śledzone, zmiany w indeksie i wszystkie bieżące zmiany; w TUI aktywny zakres `diff:<ref>..<ref>` pojawia się w szóstym wierszu. Wybór wartości zastępuje bieżący tryb Git bez zmiany Smart Ignore ani podstawowych wykluczeń. Pozostałe opcje pojawiają się, gdy ich reguły mogą wpływać na bieżące drzewo.
 
 Nowa opcja jest domyślnie włączona, gdy pojawia się po raz pierwszy. Znana opcja zachowuje wybór użytkownika, nawet jeśli chwilowo zniknie z listy.
 

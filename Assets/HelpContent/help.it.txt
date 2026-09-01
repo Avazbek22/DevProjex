@@ -127,8 +127,8 @@ Nella finestra Git Clone può comparire sotto il campo URL un elenco «Repositor
 
 Regole:
 * l’elenco appare solo se nella cronologia esistono già repository clonati di recente;
-* nell’elenco vengono aggiunti solo gli URL dei repository;
-* le cartelle locali non vengono aggiunte a questo elenco;
+* vengono aggiunte all’elenco solo le origini di repository di rete (`https://`, `http://`, `ssh://`, `git://` e la sintassi SCP);
+* i percorsi locali e le origini `file://` non vengono aggiunti a questo elenco;
 * non vengono creati duplicati — clonare di nuovo lo stesso repository lo sposta in cima;
 * vengono conservati fino a 16 repository recenti;
 * la cronologia viene mantenuta tra gli avvii dell’applicazione.
@@ -349,7 +349,7 @@ La sezione «Esclusioni» controlla quali file e cartelle vengono esclusi dall�
 Un elemento viene mostrato solo se il tipo di file è selezionato e nessuna regola attiva lo esclude. Le regole si sommano: se almeno una nasconde un elemento, un’altra non può renderlo visibile.
 
 ### 12.1 Regole disponibili
-In un repository Git, la GUI offre un selettore con cinque modalità Git: nessun filtro, `.gitignore`, file tracciati, file in staging o tutte le modifiche correnti. Fuori da un repository sono disponibili solo nessun filtro e `.gitignore`. La TUI mostra sempre gli stessi cinque valori come opzioni radio, ma disabilita le righe che richiedono un repository quando non ne è disponibile uno; un ambito `diff:<ref>..<ref>` attivo compare come sesta riga. La scelta di un valore sostituisce la modalità Git corrente senza modificare Smart Ignore o le esclusioni di base. Le altre opzioni compaiono quando le relative regole possono cambiare l’albero corrente.
+Il selettore della GUI e le righe radio dell’asse Git nella TUI vengono nascosti completamente quando il filtro Git non è applicabile: non esiste un confine di repository e il filtro `.gitignore` non può modificare l’albero corrente. Quando l’asse è visibile fuori da un repository, la GUI offre solo nessun filtro e `.gitignore`, mentre la TUI disabilita le righe che richiedono un repository. In un repository Git sono disponibili i cinque valori normali: nessun filtro, `.gitignore`, file tracciati, file in staging e tutte le modifiche correnti; nella TUI, un ambito `diff:<ref>..<ref>` attivo compare come sesta riga. La scelta di un valore sostituisce la modalità Git corrente senza modificare Smart Ignore o le esclusioni di base. Le altre opzioni compaiono quando le relative regole possono cambiare l’albero corrente.
 
 Una nuova opzione è attiva per impostazione predefinita alla prima comparsa; un’opzione già nota conserva la scelta dell’utente anche se scompare temporaneamente.
 

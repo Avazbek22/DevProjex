@@ -127,8 +127,8 @@ Na janela Git Clone, uma lista de “repositórios recentes” pode aparecer aba
 
 Regras:
 * a lista aparece apenas se o histórico já contiver repositórios clonados recentemente;
-* apenas URLs de repositório são adicionadas à lista;
-* pastas locais não são adicionadas a esta lista;
+* apenas origens de repositório de rede (`https://`, `http://`, `ssh://`, `git://` e sintaxe SCP) são adicionadas à lista;
+* caminhos locais e origens `file://` não são adicionados a esta lista;
 * duplicatas não são criadas — clonar o mesmo repositório novamente o move para o topo;
 * até 16 repositórios recentes são armazenados;
 * o histórico é preservado entre as inicializações do aplicativo.
@@ -364,7 +364,7 @@ Dependendo do conteúdo do projeto, poderão ser apresentadas as seguintes opç�
 * Arquivos com prefixo de ponto
 * Arquivos sem extensão
 
-Dentro de um repositório Git, a GUI oferece um seletor com cinco modos Git: sem filtro, `.gitignore`, arquivos rastreados, arquivos preparados ou todas as alterações atuais. Fora de um repositório, apenas sem filtro e `.gitignore` estão disponíveis. A TUI sempre mostra os mesmos cinco valores como opções de rádio, mas desativa as linhas que exigem um repositório quando não há nenhum disponível; um escopo `diff:<ref>..<ref>` ativo aparece como uma sexta linha. Escolher um valor substitui o modo Git atual sem alterar o Smart Ignore nem as exclusões básicas. As demais opções aparecem quando suas regras podem afetar a árvore atual.
+O seletor da GUI e as linhas de opção do eixo Git na TUI ficam totalmente ocultos quando o filtro Git não é aplicável: não há um limite de repositório e o filtro `.gitignore` não pode alterar a árvore atual. Quando o eixo está visível fora de um repositório, a GUI oferece apenas sem filtro e `.gitignore`, enquanto a TUI desativa as linhas que exigem um repositório. Dentro de um repositório Git estão disponíveis os cinco valores normais: sem filtro, `.gitignore`, arquivos rastreados, arquivos preparados e todas as alterações atuais; na TUI, um escopo `diff:<ref>..<ref>` ativo aparece como uma sexta linha. Escolher um valor substitui o modo Git atual sem alterar o Smart Ignore nem as exclusões básicas. As demais opções aparecem quando suas regras podem afetar a árvore atual.
 
 Uma nova opção é habilitada por padrão quando aparece pela primeira vez. Uma opção conhecida mantém a escolha do usuário mesmo que desapareça temporariamente da lista.
 

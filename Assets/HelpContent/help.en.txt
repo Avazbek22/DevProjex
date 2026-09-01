@@ -127,8 +127,8 @@ In the Git Clone window, a “Recent repositories” list can appear below the U
 
 Rules:
 * the list appears only if the history already contains recently cloned repositories;
-* only repository URLs are added to the list;
-* local folders are not added to this list;
+* only network repository sources (`https://`, `http://`, `ssh://`, `git://`, and SCP syntax) are added to the list;
+* local paths and `file://` sources are not added to this list;
 * duplicates are not created — cloning the same repository again moves it to the top;
 * up to 16 recent repositories are stored;
 * history is preserved between app launches.
@@ -364,7 +364,7 @@ Depending on the project contents, the following options may be shown:
 * Dot-prefixed files
 * Files without extension
 
-Inside a Git repository, the GUI exposes a five-value Git-mode selector: none, `.gitignore`, tracked files, staged files, or all current changes. Outside a repository, only none and `.gitignore` are available. The TUI always shows the same five values as radio rows, but disables the repository-only rows when no repository is available; an active `diff:<ref>..<ref>` scope appears as a sixth row. Selecting a value replaces the current Git mode without changing Smart Ignore or the basic exclusions. Other options are shown when their rules can change the current tree, so the list may change after switching another rule or file type.
+The GUI selector and the TUI Git-axis radio rows are hidden completely when Git filtering is not applicable: there is no repository boundary and the `.gitignore` filter cannot change the current tree. When the axis is visible outside a repository, the GUI offers only none and `.gitignore`, while the TUI disables the repository-only rows. Inside a Git repository, the five regular values are none, `.gitignore`, tracked files, staged files, and all current changes; in the TUI, an active `diff:<ref>..<ref>` scope appears as a sixth row. Selecting a value replaces the current Git mode without changing Smart Ignore or the basic exclusions. Other options are shown when their rules can change the current tree, so the list may change after switching another rule or file type.
 
 A new option is enabled by default when it first appears. A known option keeps the user's choice even if it temporarily disappears from the list.
 

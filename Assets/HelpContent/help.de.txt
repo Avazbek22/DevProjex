@@ -127,8 +127,8 @@ Im Git-Clone-Fenster kann unter dem URL-Feld eine Liste „Zuletzt verwendete Re
 
 Regeln:
 * die Liste erscheint nur, wenn im Verlauf bereits zuletzt geklonte Repositories vorhanden sind;
-* in die Liste werden nur Repository-URLs aufgenommen;
-* lokale Ordner werden dieser Liste nicht hinzugefügt;
+* nur Netzwerkquellen für Repositorys (`https://`, `http://`, `ssh://`, `git://` und SCP-Syntax) werden der Liste hinzugefügt;
+* lokale Pfade und `file://`-Quellen werden dieser Liste nicht hinzugefügt;
 * es werden keine Duplikate erzeugt — das erneute Klonen desselben Repositories verschiebt es nach oben;
 * es werden bis zu 16 letzte Repositories gespeichert;
 * der Verlauf bleibt zwischen App-Starts erhalten.
@@ -349,7 +349,7 @@ Der Bereich „Ausschlüsse“ steuert, welche Dateien und Ordner aus Baum, Inha
 Ein Element wird nur angezeigt, wenn sein Dateityp ausgewählt ist und keine aktivierte Ignore-Regel es ausschließt. Die Regeln wirken gemeinsam: Blendet mindestens eine Regel ein Element aus, kann eine andere Regel es nicht wieder sichtbar machen.
 
 ### 12.1 Verfügbare Regeln
-In einem Git-Repository bietet die GUI ein Auswahlfeld mit fünf Git-Modi: keine Filterung, `.gitignore`, verfolgte Dateien, zum Commit vorgemerkte Dateien oder alle aktuellen Änderungen. Außerhalb eines Repositorys sind nur keine Filterung und `.gitignore` verfügbar. Die TUI zeigt stets dieselben fünf Werte als Optionsfeldzeilen, deaktiviert ohne Repository jedoch die repositorygebundenen Zeilen; ein aktiver Bereich `diff:<ref>..<ref>` erscheint als sechste Zeile. Eine Auswahl ersetzt den aktuellen Git-Modus, ohne Smart Ignore oder die grundlegenden Ausschlüsse zu ändern. Weitere Optionen werden angezeigt, wenn ihre Regeln den aktuellen Baum beeinflussen können.
+Das GUI-Auswahlfeld und die Optionsfeldzeilen der Git-Achse in der TUI werden vollständig ausgeblendet, wenn die Git-Filterung nicht anwendbar ist: Es gibt keine Repository-Grenze und der `.gitignore`-Filter kann den aktuellen Baum nicht verändern. Ist die Achse außerhalb eines Repositorys sichtbar, bietet die GUI nur keine Filterung und `.gitignore` an, während die TUI die repositorygebundenen Zeilen deaktiviert. In einem Git-Repository stehen fünf reguläre Werte zur Verfügung: keine Filterung, `.gitignore`, verfolgte Dateien, zum Commit vorgemerkte Dateien und alle aktuellen Änderungen; in der TUI erscheint ein aktiver Bereich `diff:<ref>..<ref>` als sechste Zeile. Eine Auswahl ersetzt den aktuellen Git-Modus, ohne Smart Ignore oder die grundlegenden Ausschlüsse zu ändern. Weitere Optionen werden angezeigt, wenn ihre Regeln den aktuellen Baum beeinflussen können.
 
 Eine neue Option ist beim ersten Erscheinen standardmäßig aktiviert; eine bekannte Option behält die Auswahl des Benutzers, auch wenn sie vorübergehend verschwindet.
 

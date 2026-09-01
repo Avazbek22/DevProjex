@@ -167,6 +167,16 @@ distinguish trusted diagnostics from untrusted file data. MCP pack documents omi
 their embedded warning diagnostics to avoid duplicating untrusted path-bearing
 messages; the safe trusted warning trailer remains authoritative.
 
+For tools that expose a format choice, `markdown` and `text` representations are
+intended for people and agents to read. JSON and XML are machine-readable forms
+with escaping guarantees; use `json` or `xml` when reliable parsing is required.
+
+The documented per-tool character limits apply to useful payload text.
+Untrusted-data markers and trusted warning trailers can add a small fixed overhead
+beyond those limits. The exception is the stored `pack_context` response: its
+50,000-character limit covers the complete response, including the wrapper, tree
+preview, and trusted diagnostics.
+
 An inline `pack_context` result contains the complete pack. A stored result is
 self-contained: it starts with `Pack stored as '<id>' (<N> characters). Call
 read_pack ...`, followed by a preview of the project tree. Clients extract the
@@ -229,14 +239,18 @@ Boolean parameters accept JSON booleans and the exact strings `"true"` and
 
 `max_tokens` is an integer of at least 1 and accepts either a JSON number or a
 decimal numeric string. It uses the existing estimate of one token per four
-transformed characters, rounded up per file. Files are considered in the
-deterministic selection order: a file is included when its estimate fits the
-remaining budget; otherwise it is reported as skipped and later, smaller files
-are still considered. A budget that fits no files is a valid empty-content
-pack. Tree text, file headings, markup, and other document structure are not
-charged to this content budget. Consequently, the report's included-token sum
-can differ slightly from the complete document metric, which normalizes line
-endings and includes document output differently.
+transformed characters, rounded up per file. This estimate is calibrated against
+modern tokenizers; on code, it is typically within roughly +/-5% of
+cl100k/o200k-class tokenizers. Actual tokenization depends on the selected model,
+so clients with a hard context window should set `max_tokens` below the window
+limit to leave headroom. Files are considered in the deterministic selection
+order: a file is included when its estimate fits the remaining budget; otherwise
+it is reported as skipped and later, smaller files are still considered. A budget
+that fits no files is a valid empty-content pack. Tree text, file headings,
+markup, and other document structure are not charged to this content budget.
+Consequently, the report's included-token sum can differ slightly from the
+complete document metric, which normalizes line endings and includes document
+output differently.
 
 For JSON and XML packs that include content, the existing `metrics` object
 describes the complete effective selection after `detail` and mandatory secret

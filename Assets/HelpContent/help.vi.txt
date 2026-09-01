@@ -127,8 +127,8 @@ Trong cửa sổ Git Clone, danh sách “Kho lưu trữ gần đây” có th�
 
 Quy tắc:
 * danh sách chỉ xuất hiện nếu lịch sử đã chứa các kho được nhân bản gần đây;
-* chỉ các URL kho lưu trữ mới được thêm vào danh sách;
-* các thư mục cục bộ không được thêm vào danh sách này;
+* chỉ các nguồn kho lưu trữ qua mạng (`https://`, `http://`, `ssh://`, `git://` và cú pháp SCP) được thêm vào danh sách;
+* đường dẫn cục bộ và nguồn `file://` không được thêm vào danh sách này;
 * các bản sao không được tạo - việc sao chép cùng một kho lưu trữ sẽ di chuyển nó lên trên cùng;
 * tối đa 16 kho lưu trữ gần đây được lưu trữ;
 * lịch sử được lưu giữ giữa các lần khởi chạy ứng dụng.
@@ -364,7 +364,7 @@ Tùy thuộc vào nội dung dự án, các tùy chọn sau có thể được h
 * Tệp có tiền tố dấu chấm
 * Tệp không có phần mở rộng
 
-Trong kho Git, GUI cung cấp năm chế độ Git: không lọc, `.gitignore`, tệp được theo dõi, tệp đã đưa vào vùng đệm Git hoặc tất cả thay đổi hiện tại. Bên ngoài kho Git, chỉ có chế độ không lọc và `.gitignore`. TUI luôn hiển thị cùng năm giá trị dưới dạng nút chọn, nhưng sẽ vô hiệu hóa các dòng cần kho Git khi không có kho nào; phạm vi `diff:<ref>..<ref>` đang hoạt động xuất hiện ở dòng thứ sáu. Chọn một giá trị sẽ thay thế chế độ Git hiện tại mà không thay đổi Smart Ignore hay các loại trừ cơ bản. Các tùy chọn khác xuất hiện khi quy tắc của chúng có thể ảnh hưởng đến cây hiện tại.
+Khi không thể áp dụng tính năng lọc Git, bộ chọn của GUI và các dòng nút chọn trên trục Git của TUI sẽ bị ẩn hoàn toàn: không có ranh giới kho Git và bộ lọc `.gitignore` không thể thay đổi cây hiện tại. Khi trục hiển thị bên ngoài kho Git, GUI chỉ cung cấp chế độ không lọc và `.gitignore`, còn TUI vô hiệu hóa các dòng cần kho Git. Trong kho Git có năm giá trị thông thường: không lọc, `.gitignore`, tệp được theo dõi, tệp đã đưa vào vùng đệm Git và tất cả thay đổi hiện tại; trong TUI, phạm vi `diff:<ref>..<ref>` đang hoạt động xuất hiện ở dòng thứ sáu. Chọn một giá trị sẽ thay thế chế độ Git hiện tại mà không thay đổi Smart Ignore hay các loại trừ cơ bản. Các tùy chọn khác xuất hiện khi quy tắc của chúng có thể ảnh hưởng đến cây hiện tại.
 
 Một tùy chọn mới được bật theo mặc định khi nó xuất hiện lần đầu tiên. Một tùy chọn đã biết sẽ giữ nguyên lựa chọn của người dùng ngay cả khi nó tạm thời biến mất khỏi danh sách.
 
