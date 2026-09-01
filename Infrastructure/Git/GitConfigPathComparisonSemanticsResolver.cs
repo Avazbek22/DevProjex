@@ -347,6 +347,11 @@ public sealed class GitConfigPathComparisonSemanticsResolver
 				// A reparse metadata boundary is not safe repository ownership evidence.
 				if (attributes.HasFlag(FileAttributes.ReparsePoint))
 					return false;
+				if (!UnixFileTypeInspector.IsPhysicalDirectoryOrRegularFile(candidate, attributes))
+				{
+					currentPath = Path.GetDirectoryName(currentPath);
+					continue;
+				}
 
 				repositoryRoot = currentPath;
 				gitMetadataPath = candidate;

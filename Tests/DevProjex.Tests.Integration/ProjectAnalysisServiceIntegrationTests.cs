@@ -229,6 +229,44 @@ public sealed class ProjectAnalysisServiceIntegrationTests
 	}
 
 	[Fact]
+	public async Task AnalyzeAsync_CaseDistinctRootSelectionUsesExactIdentityAndRejectsAmbiguousAlias()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(Path.Combine("Foo", "Upper.cs"), "class Upper {}\n");
+		temp.CreateFile(Path.Combine("foo", "Lower.cs"), "class Lower {}\n");
+		if (Directory.EnumerateDirectories(temp.Path)
+			.Select(Path.GetFileName)
+			.Distinct(ProjectTreePathIdentity.CanonicalComparer)
+			.Count() < 2)
+		{
+			Assert.Skip("The test volume does not preserve case-distinct sibling directories.");
+		}
+
+		var service = CreateService();
+		var exact = await service.AnalyzeAsync(
+			new ProjectAnalysisRequest(
+				RootPath: temp.Path,
+				SelectedRootFolders: ["Foo"],
+				SelectedIgnoreOptions: []),
+			TestContext.Current.CancellationToken);
+		var ambiguous = await service.AnalyzeAsync(
+			new ProjectAnalysisRequest(
+				RootPath: temp.Path,
+				SelectedRootFolders: ["FOO"],
+				SelectedIgnoreOptions: []),
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(["Foo"], exact.Selection.SelectedRootFolders);
+		Assert.Equal(1, exact.Inventory.Tree.FileCount);
+		Assert.DoesNotContain(exact.Diagnostics.Warnings, static warning =>
+			warning.Contains("not found", StringComparison.OrdinalIgnoreCase));
+		Assert.Empty(ambiguous.Selection.SelectedRootFolders);
+		Assert.Equal(0, ambiguous.Inventory.Tree.FileCount);
+		Assert.Contains(ambiguous.Diagnostics.Warnings, static warning =>
+			warning.Contains("FOO", StringComparison.Ordinal));
+	}
+
+	[Fact]
 	public async Task BuildReportFromTreeAsync_UsesLoadedTreeWithoutRescanningRootFolders()
 	{
 		using var temp = new TemporaryDirectory();

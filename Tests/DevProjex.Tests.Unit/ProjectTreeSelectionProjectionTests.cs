@@ -128,8 +128,11 @@ public sealed class ProjectTreeSelectionProjectionTests
 		Assert.Equal(implicitPlan.DirectoryCount, checkedRootPlan.DirectoryCount);
 	}
 
-	[Fact]
-	public void ExportPlan_CaseVariantPathsFollowCurrentPlatformFilesystemSemantics()
+	[Theory]
+	[InlineData(ProjectCopyExportFormat.Folder)]
+	[InlineData(ProjectCopyExportFormat.Zip)]
+	public void ExportPlan_CaseVariantPathsFollowDestinationSemantics(
+		ProjectCopyExportFormat format)
 	{
 		var rootPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "project-copy-case-root"));
 		var upperPath = Path.Combine(rootPath, "File.txt");
@@ -145,15 +148,26 @@ public sealed class ProjectTreeSelectionProjectionTests
 			tree,
 			new HashSet<string>(PathComparer.Default),
 			Path.GetTempPath(),
-			ProjectCopyExportFormat.Folder);
+			format);
 
-		var plan = new ProjectCopyExportPlanBuilder().Build(
+		var builder = new ProjectCopyExportPlanBuilder();
+		if (OperatingSystem.IsWindows() && format == ProjectCopyExportFormat.Folder)
+		{
+			var exception = Assert.Throws<ProjectCopyExportException>(() =>
+				builder.Build(request, TestContext.Current.CancellationToken));
+			Assert.Equal(ProjectCopyExportError.InvalidRequest, exception.Error);
+			return;
+		}
+
+		var plan = builder.Build(
 			request,
 			TestContext.Current.CancellationToken);
-		Assert.Equal(OperatingSystem.IsWindows() ? 1 : 2, plan.FileCount);
+		Assert.Equal(2, plan.FileCount);
 		Assert.Equal(
-			plan.Entries.Count,
-			plan.Entries.Select(static entry => entry.RelativePath).Distinct(PathComparer.Default).Count());
+			["File.txt", "file.txt"],
+			plan.Entries
+				.Where(static entry => !entry.IsDirectory)
+				.Select(static entry => entry.RelativePath));
 	}
 
 	[Fact]

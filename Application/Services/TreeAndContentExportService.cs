@@ -8,10 +8,10 @@ public sealed class TreeAndContentExportService(
 {
 	private const string ClipboardBlankLine = "\u00A0"; // NBSP: looks empty but won't collapse on paste
 	private const int MaximumCachedRelativePathMappers = 32;
-	private static readonly IReadOnlySet<string> EmptySelection = new HashSet<string>(PathComparer.Default);
+	private static readonly IReadOnlySet<string> EmptySelection = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
 	private static readonly object RelativePathMapperSync = new();
 	private static readonly Dictionary<string, RelativePathMapperCacheEntry> RelativePathMappers =
-		new(PathComparer.Default);
+		new(ProjectTreePathIdentity.CanonicalComparer);
 	private static readonly LinkedList<string> RelativePathMapperLru = new();
 
 	public string Build(string rootPath, TreeNodeDescriptor root, IReadOnlySet<string> selectedPaths)

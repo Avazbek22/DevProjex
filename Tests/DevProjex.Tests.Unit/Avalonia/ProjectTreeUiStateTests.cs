@@ -77,6 +77,51 @@ public sealed class ProjectTreeUiStateTests
         Assert.All(deferredFolder.Children, static child => Assert.True(child.IsChecked));
     }
 
+	[Fact]
+	public void CaseVariantFilesRemainIndependentThroughRestoreAndPreviewProjection()
+	{
+		var rootPath = Path.Combine(
+			Path.GetTempPath(),
+			"DevProjex-TreeState",
+			"CaseVariant");
+		var upper = CreateFile(rootPath, "Foo.cs");
+		var lower = CreateFile(rootPath, "foo.cs");
+		var descriptor = CreateFolder(rootPath, "CaseVariant", upper, lower);
+		var source = BuildTree(descriptor);
+		source.Children[1].IsChecked = true;
+		var cache = new TreeSelectionSnapshotCache();
+		var snapshot = ProjectTreeSelectionSnapshot.Capture(
+			descriptor.FullPath,
+			[source],
+			cache);
+		snapshot!.RecordOverride(upper.FullPath, isChecked: true);
+		snapshot.RecordOverride(lower.FullPath, isChecked: false);
+		var restored = BuildTree(descriptor);
+
+		var result = snapshot.Restore(restored);
+
+		Assert.True(result.Applied);
+		Assert.True(restored.Children[0].IsChecked);
+		Assert.False(restored.Children[1].IsChecked);
+
+		cache.ResetForTreeReplacement();
+		var selectedPaths = cache.GetOrCreateNormalized([restored], descriptor);
+		var selectedFiles = PreviewFileCollectionPolicy.BuildOrderedSelectedFilePaths(
+			selectedPaths,
+			descriptor,
+			ensureExists: false);
+		Assert.Equal([upper.FullPath], selectedFiles);
+
+		restored.Children[1].IsChecked = true;
+		cache.Invalidate();
+		var bothPaths = cache.GetOrCreateNormalized([restored], descriptor);
+		var bothFiles = PreviewFileCollectionPolicy.BuildOrderedSelectedFilePaths(
+			bothPaths,
+			descriptor,
+			ensureExists: false);
+		Assert.Equal([upper.FullPath, lower.FullPath], bothFiles);
+	}
+
     [Fact]
     public void ExpansionCaptureAndRestore_OnlyRealizeExpandedBranches()
     {

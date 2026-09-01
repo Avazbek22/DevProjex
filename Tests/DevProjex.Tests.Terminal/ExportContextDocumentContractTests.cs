@@ -33,8 +33,11 @@ public sealed class ExportContextDocumentContractTests
 		var displayRoot = format == "markdown"
 			? PathUtility.NormalizeSeparators(workspace.Path)
 			: workspace.Path;
-		Assert.Contains($"Root: {displayRoot}", result.StandardOutput, StringComparison.Ordinal);
-		Assert.Equal(1, CountOccurrences(result.StandardOutput, displayRoot));
+		var rootLine = format == "markdown"
+			? ContextRootPresentation.FormatMarkdownLine(displayRoot)
+			: ContextRootPresentation.FormatLine(displayRoot);
+		Assert.Contains(rootLine, result.StandardOutput, StringComparison.Ordinal);
+		Assert.Equal(1, CountOccurrences(result.StandardOutput, rootLine));
 		Assert.Contains("docs/Guide.md", result.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("README.md", result.StandardOutput, StringComparison.Ordinal);
 		Assert.DoesNotContain(

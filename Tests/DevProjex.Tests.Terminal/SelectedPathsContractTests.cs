@@ -1,3 +1,6 @@
+using System.CommandLine;
+using DevProjex.Infrastructure.ResourceStore;
+
 namespace DevProjex.Tests.Terminal;
 
 public sealed class SelectedPathsContractTests
@@ -12,6 +15,34 @@ public sealed class SelectedPathsContractTests
 		Assert.Equal(
 			FullContentPaths(workspace.Path, "docs/readme.md", "src/a.cs", "src/nested/b.cs"),
 			ReadFilePaths(document));
+	}
+
+	[Theory]
+	[InlineData("none")]
+	[InlineData("diff:missing-left..missing-right")]
+	public async Task EmptySelectFromExportsAnEmptyDocumentWithoutQueryingGit(string gitMode)
+	{
+		using var workspace = CreateWorkspace();
+		var selectionFile = workspace.WriteFile("empty-selection.txt", string.Empty);
+		var environment = new TestTerminalEnvironment();
+		var exitCode = await new TerminalApplication(environment, new TerminalServiceFactory())
+			.RunAsync(
+				[
+					"export", "context", workspace.Path,
+					"--view", "content",
+					"--format", "json",
+					"--git-mode", gitMode,
+					"--exclude", "none",
+					"--select-from", selectionFile,
+					"-o", "-"
+				],
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Empty(environment.StandardError);
+		using var document = JsonDocument.Parse(environment.StandardOutput);
+		Assert.Empty(ReadFilePaths(document));
+		Assert.Empty(ReadSelectedPaths(document));
 	}
 
 	[Fact]
@@ -315,6 +346,54 @@ public sealed class SelectedPathsContractTests
 		Assert.Equal(
 			["docs/readme.md", "src/a.cs", "src/nested/b.cs"],
 			ReadSelectedPaths(document).Order(StringComparer.Ordinal));
+	}
+
+	[Fact]
+	public async Task SelectionArgumentsPreserveCaseDistinctProjectEntriesBeforeResolution()
+	{
+		using var workspace = new TemporaryDirectory();
+		var selectionFile = workspace.WriteFile("selection.txt", "foo.cs\n");
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);
+		var environment = new TestTerminalEnvironment();
+		var selection = new SelectionOptions(localization, environment);
+		var command = new RootCommand();
+		selection.AddTo(command);
+		var parseResult = command.Parse([
+			"--select", "Foo.cs",
+			"--select-from", selectionFile
+		]);
+
+		Assert.Empty(parseResult.Errors);
+		var selectedPaths = await selection.ReadSelectedPathsAsync(
+			parseResult,
+			TestContext.Current.CancellationToken);
+
+		Assert.NotNull(selectedPaths);
+		Assert.Equal(
+			["Foo.cs", "foo.cs"],
+			selectedPaths!.Order(ProjectTreePathIdentity.CanonicalComparer));
+	}
+
+	[Fact]
+	public async Task CaseSensitiveWorkspaceExportsBothDirectAndFileSelections()
+	{
+		using var workspace = new TemporaryDirectory();
+		EnableCaseSensitiveDirectoryOrSkip(workspace.Path);
+		workspace.WriteFile("Foo.cs", "upper-case-entry\n");
+		workspace.WriteFile("foo.cs", "lower-case-entry\n");
+		var selectionFile = workspace.WriteFile("selection.txt", "foo.cs\n");
+
+		using var document = await ExportJsonAsync(
+			workspace.Path,
+			"--select", "Foo.cs",
+			"--select-from", selectionFile);
+
+		Assert.Equal(
+			FullContentPaths(workspace.Path, "Foo.cs", "foo.cs"),
+			ReadFilePaths(document));
+		Assert.Equal(
+			["Foo.cs", "foo.cs"],
+			ReadSelectedPaths(document).Order(ProjectTreePathIdentity.CanonicalComparer));
 	}
 
 	[Fact]
@@ -664,6 +743,69 @@ public sealed class SelectedPathsContractTests
 		workspace.WriteFile("src/nested/b.cs", "class B {}\n");
 		workspace.WriteFile("docs/readme.md", "# Docs\n");
 		return workspace;
+	}
+
+	private static void EnableCaseSensitiveDirectoryOrSkip(string directoryPath)
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			try
+			{
+				using var process = System.Diagnostics.Process.Start(
+					new System.Diagnostics.ProcessStartInfo("fsutil.exe")
+					{
+						UseShellExecute = false,
+						CreateNoWindow = true,
+						RedirectStandardOutput = true,
+						RedirectStandardError = true,
+						ArgumentList = { "file", "setCaseSensitiveInfo", directoryPath, "enable" }
+					});
+				if (process is null || !process.WaitForExit(TimeSpan.FromSeconds(10)))
+				{
+					try
+					{
+						process?.Kill(entireProcessTree: true);
+					}
+					catch (InvalidOperationException)
+					{
+					}
+
+					Assert.Skip("Windows per-directory case sensitivity could not be enabled.");
+				}
+
+				if (process.ExitCode != 0)
+					Assert.Skip("Windows per-directory case sensitivity is unavailable.");
+			}
+			catch (Exception exception) when (exception is
+				       InvalidOperationException or
+				       IOException or
+				       System.ComponentModel.Win32Exception)
+			{
+				Assert.Skip(
+					$"Windows per-directory case sensitivity is unavailable: {exception.GetType().Name}.");
+			}
+		}
+
+		var upperProbe = Path.Combine(directoryPath, ".dpx-case-probe");
+		var lowerProbe = Path.Combine(directoryPath, ".DPX-CASE-PROBE");
+		try
+		{
+			File.WriteAllText(upperProbe, "lower");
+			File.WriteAllText(lowerProbe, "upper");
+			var probeNames = Directory.EnumerateFiles(directoryPath)
+				.Select(Path.GetFileName)
+				.ToHashSet(StringComparer.Ordinal);
+			if (!probeNames.Contains(Path.GetFileName(upperProbe)) ||
+			    !probeNames.Contains(Path.GetFileName(lowerProbe)))
+			{
+				Assert.Skip("The workspace filesystem is not case-sensitive.");
+			}
+		}
+		finally
+		{
+			File.Delete(upperProbe);
+			File.Delete(lowerProbe);
+		}
 	}
 
 	private static string[] ReadFilePaths(JsonDocument document) =>

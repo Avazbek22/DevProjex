@@ -11,6 +11,7 @@ internal sealed record TerminalStructuralRefreshRequest(
 	ProjectSelectionSpec Selection,
 	IReadOnlySet<string> PreviousExtensions,
 	IReadOnlySet<string> PreviousPaths,
+	IReadOnlyCollection<string>? SelectedPathFrontier,
 	IReadOnlyDictionary<string, bool> ExtensionOptionStates,
 	IReadOnlyDictionary<string, bool> PathOptionStates,
 	GitFilteringMode? FallbackGitMode);
@@ -45,7 +46,9 @@ public sealed class TerminalWorkspaceController(
 				cancellationToken)
 			.ConfigureAwait(false);
 		ThrowIfTrackedModeIsUnavailable(plan);
-		return new TerminalWorkspaceState(plan);
+		return new TerminalWorkspaceState(
+			plan,
+			services.ContextPlanner.GetSelectedRelativePathFrontier(plan));
 	}
 
 	public async Task RebuildAsync(
@@ -93,7 +96,7 @@ public sealed class TerminalWorkspaceController(
 		ApplyStructuralRefresh(state, result);
 	}
 
-	internal static TerminalStructuralRefreshRequest CaptureStructuralRefresh(
+	internal TerminalStructuralRefreshRequest CaptureStructuralRefresh(
 		TerminalWorkspaceState state,
 		ProjectSelectionSpec selection,
 		GitFilteringMode fallbackGitMode = GitFilteringMode.None)
@@ -102,18 +105,67 @@ public sealed class TerminalWorkspaceController(
 		ArgumentNullException.ThrowIfNull(selection);
 		if (!GitScopeSelection.IsPersistent(fallbackGitMode))
 			throw new ArgumentOutOfRangeException(nameof(fallbackGitMode), fallbackGitMode, null);
+		var selectedItems = state.BuildSelectedItemRelativePaths();
 		return new TerminalStructuralRefreshRequest(
 			state.Plan.SourceRoot,
 			selection,
 			new HashSet<string>(
 				selection.Extensions ?? state.Plan.SelectedExtensions,
 				StringComparer.OrdinalIgnoreCase),
-			state.BuildSelectedItemRelativePaths(),
+			selectedItems,
+			state.BuildSelectedPathFrontier(),
 			new Dictionary<string, bool>(
 				state.ExtensionOptionStates,
 				StringComparer.OrdinalIgnoreCase),
-			new Dictionary<string, bool>(state.PathOptionStates, PathComparer.Default),
+			ClonePathOptionStates(state.PathOptionStates),
 			fallbackGitMode);
+	}
+
+	internal static Dictionary<string, bool> ClonePathOptionStates(
+		IReadOnlyDictionary<string, bool> pathOptionStates)
+	{
+		ArgumentNullException.ThrowIfNull(pathOptionStates);
+		return new Dictionary<string, bool>(
+			pathOptionStates,
+			ProjectTreePathIdentity.CanonicalComparer);
+	}
+
+	internal static SelectionEvolutionResult<string> ReconcilePathSelection(
+		IEnumerable<string> availablePaths,
+		IReadOnlySet<string> previousPaths,
+		IReadOnlyDictionary<string, bool> pathOptionStates,
+		IReadOnlyCollection<string>? selectedPathFrontier = null)
+	{
+		var normalizedFrontier = selectedPathFrontier?
+			.Select(ProjectSelectionPath.NormalizeRelative)
+			.ToArray();
+		return SelectionEvolutionPolicy.Reconcile(
+			availablePaths,
+			previousPaths,
+			pathOptionStates,
+			path => IsInsideSelectedPathFrontier(path, normalizedFrontier),
+			ProjectTreePathIdentity.CanonicalComparer);
+	}
+
+	private static bool IsInsideSelectedPathFrontier(
+		string path,
+		IReadOnlyCollection<string>? selectedPathFrontier)
+	{
+		if (selectedPathFrontier is null)
+			return true;
+
+		var normalizedPath = ProjectSelectionPath.NormalizeRelative(path);
+		foreach (var selectedPath in selectedPathFrontier)
+		{
+			if (selectedPath.Length == 0 ||
+			    string.Equals(normalizedPath, selectedPath, StringComparison.Ordinal) ||
+			    normalizedPath.StartsWith(selectedPath + '/', StringComparison.Ordinal))
+			{
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	internal async Task<TerminalStructuralRefreshResult> BuildStructuralRefreshAsync(
@@ -141,19 +193,26 @@ public sealed class TerminalWorkspaceController(
 		CancellationToken cancellationToken)
 	{
 		var buildCount = 0;
+		var repositoryScopeFullPaths = ResolveRepositoryScopeFullPaths(
+			request.SourceRoot,
+			request.SelectedPathFrontier);
 		var discoverySelection = request.Selection with
 		{
 			Roots = ShouldPreserveRootsDuringDiscovery(request.Selection)
 				? request.Selection.Roots
 				: null,
-			SelectedPaths = []
+			Extensions = null,
+			SelectedPaths = request.SelectedPathFrontier is { Count: 0 }
+				? []
+				: null
 		};
 		var discovered = await BuildPlanAsync(
 				request.SourceRoot,
 				discoverySelection,
 				sourceIdentity,
 				cancellationToken,
-				request.ExtensionOptionStates)
+				request.ExtensionOptionStates,
+				repositoryScopeFullPaths)
 			.ConfigureAwait(false);
 		buildCount++;
 		if (request.FallbackGitMode is { } requestedFallbackMode &&
@@ -163,13 +222,14 @@ public sealed class TerminalWorkspaceController(
 			var fallbackMode = requestedFallbackMode == GitFilteringMode.TrackedFilesOnly
 				? GitFilteringMode.None
 				: requestedFallbackMode;
-			discoverySelection = GitScopeSelection.WithMode(discovered.Selection, fallbackMode);
+			discoverySelection = GitScopeSelection.WithMode(discoverySelection, fallbackMode);
 			discovered = await BuildPlanAsync(
 					request.SourceRoot,
 					discoverySelection,
 					sourceIdentity,
 					cancellationToken,
-					request.ExtensionOptionStates)
+					request.ExtensionOptionStates,
+					repositoryScopeFullPaths)
 				.ConfigureAwait(false);
 			buildCount++;
 		}
@@ -186,7 +246,8 @@ public sealed class TerminalWorkspaceController(
 			.ToArray();
 		var selection = discovered.Selection with
 		{
-			Extensions = selectedExtensions
+			Extensions = selectedExtensions,
+			SelectedPaths = discoverySelection.SelectedPaths
 		};
 		var availableExtensionSet = discovered.AvailableExtensions
 			.ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -200,7 +261,8 @@ public sealed class TerminalWorkspaceController(
 					selection,
 					sourceIdentity,
 					cancellationToken,
-					extensionEvolution.KnownStates)
+					extensionEvolution.KnownStates,
+					repositoryScopeFullPaths)
 				.ConfigureAwait(false);
 			buildCount++;
 			ThrowIfTrackedModeIsUnavailable(discovered);
@@ -209,14 +271,14 @@ public sealed class TerminalWorkspaceController(
 		var availablePaths = TerminalWorkspaceState.BuildSelectableRelativePaths(
 			discovered.EffectiveTree,
 			discovered.SourceRoot);
-		var pathEvolution = SelectionEvolutionPolicy.Reconcile(
+		var pathEvolution = ReconcilePathSelection(
 			availablePaths,
 			request.PreviousPaths,
 			request.PathOptionStates,
-			static _ => true,
-			PathComparer.Default);
+			request.SelectedPathFrontier);
 		var plan = discovered;
-		if (pathEvolution.SelectedItems.Count == 0 && availablePaths.Count > 0)
+		if (pathEvolution.SelectedItems.Count == 0 &&
+		    request.SelectedPathFrontier is not null)
 		{
 			plan = await services.ContextPlanner
 				.ReprojectEmptySelectionAsync(discovered, cancellationToken)
@@ -315,6 +377,8 @@ public sealed class TerminalWorkspaceController(
 				state.ExtensionOptionStates,
 				state.BuildSelectedItemRelativePaths(),
 				state.PathOptionStates,
+				state.BuildSelectedPathFrontier(),
+				ResolveDefaultFallbackGitMode(selection),
 				cancellationToken)
 			.ConfigureAwait(false);
 		ApplySettingsPlan(state, result);
@@ -401,6 +465,8 @@ public sealed class TerminalWorkspaceController(
 				state.BuildExtensionOptionStates(extensions),
 				state.BuildSelectedItemRelativePaths(),
 				state.PathOptionStates,
+				state.BuildSelectedPathFrontier(),
+				ResolveDefaultFallbackGitMode(state.Plan.Selection),
 				cancellationToken)
 			.ConfigureAwait(false);
 		ApplySettingsPlan(state, result);
@@ -439,6 +505,7 @@ public sealed class TerminalWorkspaceController(
 			extensionOptionStates,
 			previousPaths,
 			pathOptionStates,
+			ResolveSelectedPathFrontier(baseline, selection),
 			ResolveDefaultFallbackGitMode(selection),
 			cancellationToken).ConfigureAwait(false);
 
@@ -448,6 +515,25 @@ public sealed class TerminalWorkspaceController(
 		IReadOnlyDictionary<string, bool> extensionOptionStates,
 		IReadOnlySet<string> previousPaths,
 		IReadOnlyDictionary<string, bool> pathOptionStates,
+		GitFilteringMode fallbackGitMode,
+		CancellationToken cancellationToken)
+		=> await BuildSettingsPlanAsync(
+			baseline,
+			selection,
+			extensionOptionStates,
+			previousPaths,
+			pathOptionStates,
+			ResolveSelectedPathFrontier(baseline, selection),
+			fallbackGitMode,
+			cancellationToken).ConfigureAwait(false);
+
+	internal async Task<TerminalSettingsPlanResult> BuildSettingsPlanAsync(
+		ProjectContextPlan baseline,
+		ProjectSelectionSpec selection,
+		IReadOnlyDictionary<string, bool> extensionOptionStates,
+		IReadOnlySet<string> previousPaths,
+		IReadOnlyDictionary<string, bool> pathOptionStates,
+		IReadOnlyCollection<string>? selectedPathFrontier,
 		GitFilteringMode fallbackGitMode,
 		CancellationToken cancellationToken)
 	{
@@ -474,7 +560,7 @@ public sealed class TerminalWorkspaceController(
 				new Dictionary<string, bool>(
 					extensionOptionStates,
 					StringComparer.OrdinalIgnoreCase),
-				new Dictionary<string, bool>(pathOptionStates, PathComparer.Default));
+				ClonePathOptionStates(pathOptionStates));
 		}
 
 		var request = new TerminalStructuralRefreshRequest(
@@ -482,6 +568,7 @@ public sealed class TerminalWorkspaceController(
 			selection,
 			baseline.SelectedExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase),
 			previousPaths,
+			selectedPathFrontier,
 			extensionOptionStates,
 			pathOptionStates,
 			baseline.Selection.GitMode == selection.GitMode &&
@@ -498,6 +585,16 @@ public sealed class TerminalWorkspaceController(
 			result.ExtensionOptionStates,
 			result.PathOptionStates);
 	}
+
+	private IReadOnlyCollection<string>? ResolveSelectedPathFrontier(
+		ProjectContextPlan baseline,
+		ProjectSelectionSpec selection) =>
+		selection.SelectedPaths switch
+		{
+			null => services.ContextPlanner.GetSelectedRelativePathFrontier(baseline),
+			{ Count: 0 } => [],
+			_ => selection.SelectedPaths.ToArray()
+		};
 
 	internal static bool RequiresStructuralRefresh(
 		ProjectSelectionSpec baseline,
@@ -903,7 +1000,7 @@ public sealed class TerminalWorkspaceController(
 					ProjectName: plan.SourceIdentity?.DisplayName ??
 								 Path.GetFileName(Path.TrimEndingDirectorySeparator(plan.SourceRoot)),
 					TreeRoot: plan.ProjectedTree,
-					SelectedPaths: new HashSet<string>(PathComparer.Default),
+					SelectedPaths: new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer),
 					DestinationPath: requestedDestination,
 					Format: format,
 					DestinationMode: ProjectCopyDestinationMode.Exact,
@@ -966,14 +1063,36 @@ public sealed class TerminalWorkspaceController(
 		ProjectSelectionSpec selection,
 		ProjectSourceIdentity? sourceIdentity,
 		CancellationToken cancellationToken,
-		IReadOnlyDictionary<string, bool>? knownExtensionStates = null) =>
+		IReadOnlyDictionary<string, bool>? knownExtensionStates = null,
+		IReadOnlyCollection<string>? repositoryScopeFullPaths = null) =>
 		services.ContextFactory.BuildAsync(
 			projectPath,
 			selection,
 			sourceIdentity,
 			cancellationToken,
 			captureIgnoreImpactCounts: true,
-			knownExtensionStates);
+			knownExtensionStates,
+			repositoryScopeFullPaths);
+
+	private static IReadOnlyList<string>? ResolveRepositoryScopeFullPaths(
+		string sourceRoot,
+		IReadOnlyCollection<string>? selectedRelativePaths)
+	{
+		if (selectedRelativePaths is null)
+			return null;
+		if (selectedRelativePaths.Count == 0)
+			return [];
+
+		var paths = new List<string>(selectedRelativePaths.Count);
+		foreach (var path in selectedRelativePaths)
+		{
+			var relativePath = ProjectSelectionPath.NormalizeRelative(path);
+			var fullPath = PathUtility.Normalize(Path.Combine(sourceRoot, relativePath));
+			if (PathUtility.IsPathInside(fullPath, sourceRoot))
+				paths.Add(fullPath);
+		}
+		return paths;
+	}
 
 	private static void ThrowIfTrackedModeIsUnavailable(ProjectContextPlan plan)
 	{
@@ -1077,8 +1196,17 @@ public sealed class TerminalWorkspaceController(
 				NewWindow: false,
 				WaitForCompletion: false,
 				OpenPreview: true,
-				Selection: state.BuildSelection()),
+				Selection: BuildDesktopSelection(state)),
 			cancellationToken);
+
+	internal static ProjectSelectionSpec BuildDesktopSelection(TerminalWorkspaceState state)
+	{
+		ArgumentNullException.ThrowIfNull(state);
+		return state.BuildSelection() with
+		{
+			SelectedPaths = state.BuildPersistedSelectedRelativePaths()
+		};
+	}
 
 	public static string BuildEquivalentContextCommand(
 		TerminalWorkspaceState state,
@@ -1100,11 +1228,7 @@ public sealed class TerminalWorkspaceController(
 			"-o",
 			destination
 		};
-		foreach (var path in state.BuildSelectedRelativePaths())
-		{
-			arguments.Add("--select");
-			arguments.Add(path);
-		}
+		AppendSelectedPaths(arguments, state);
 		AppendSelection(arguments, state.Plan);
 		if (dryRun)
 			arguments.Add("--dry-run");
@@ -1129,14 +1253,31 @@ public sealed class TerminalWorkspaceController(
 			destination
 		};
 		AppendSelection(arguments, state.Plan);
-		foreach (var path in state.BuildSelectedRelativePaths())
+		AppendSelectedPaths(arguments, state);
+		if (dryRun)
+			arguments.Add("--dry-run");
+		return CliArgumentVectorFormatter.Format(arguments);
+	}
+
+	private static void AppendSelectedPaths(
+		ICollection<string> arguments,
+		TerminalWorkspaceState state)
+	{
+		var selectedPaths = state.BuildPersistedSelectedRelativePaths();
+		if (selectedPaths.Count == 1 && selectedPaths[0] == ".")
+			return;
+		if (selectedPaths.Count == 0)
+		{
+			arguments.Add("--select-from");
+			arguments.Add(OperatingSystem.IsWindows() ? "NUL" : "/dev/null");
+			return;
+		}
+
+		foreach (var path in selectedPaths)
 		{
 			arguments.Add("--select");
 			arguments.Add(path);
 		}
-		if (dryRun)
-			arguments.Add("--dry-run");
-		return CliArgumentVectorFormatter.Format(arguments);
 	}
 
 	private static void AppendSelection(ICollection<string> arguments, ProjectContextPlan plan)
@@ -1171,7 +1312,10 @@ public sealed class TerminalWorkspaceController(
 		if (plan.Selection.StripBlankLines == true)
 			arguments.Add("--strip-blank-lines");
 
-		if (!SetEquals(plan.AvailableRoots, plan.SelectedRoots, PathComparer.Default))
+		if (!SetEquals(
+				plan.AvailableRoots,
+				plan.SelectedRoots,
+				ProjectTreePathIdentity.CanonicalComparer))
 		{
 			foreach (var root in plan.SelectedRoots)
 			{

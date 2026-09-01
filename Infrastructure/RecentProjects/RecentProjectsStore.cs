@@ -191,6 +191,8 @@ public sealed class RecentProjectsStore
 				var inMemoryState = SanitizeState(fileSet, MergeStates(CreateDefaultDb(), db));
 				if (!RepositoryUrlUtility.TryNormalize(repositoryUrl, out var inMemoryNormalizedUrl))
 					return inMemoryState;
+				if (!RepositoryUrlUtility.IsNetworkCloneSource(inMemoryNormalizedUrl))
+					return inMemoryState;
 
 				MoveToFront(
 					inMemoryState.RecentRepositories,
@@ -211,6 +213,8 @@ public sealed class RecentProjectsStore
 			using var _ = heldLock;
 			var state = SanitizeState(fileSet, MergeStates(LoadInternal(fileSet), db));
 			if (!RepositoryUrlUtility.TryNormalize(repositoryUrl, out var normalizedUrl))
+				return state;
+			if (!RepositoryUrlUtility.IsNetworkCloneSource(normalizedUrl))
 				return state;
 
 			MoveToFront(
@@ -506,7 +510,7 @@ public sealed class RecentProjectsStore
 		IReadOnlyDictionary<string, DateTimeOffset> removalTimes)
 	{
 		var ordered = entries
-			.Where(static entry => entry is not null && RepositoryUrlUtility.TryNormalize(entry.Url, out _))
+			.Where(static entry => entry is not null && RepositoryUrlUtility.IsNetworkCloneSource(entry.Url))
 			.Select(static entry => new RecentRepositoryEntry
 			{
 				Url = RepositoryUrlUtility.Normalize(entry.Url),
@@ -538,7 +542,7 @@ public sealed class RecentProjectsStore
 		IEnumerable<RecentRepositoryRemovalEntry> entries)
 	{
 		var ordered = entries
-			.Where(static entry => entry is not null && RepositoryUrlUtility.TryNormalize(entry.Url, out _))
+			.Where(static entry => entry is not null && RepositoryUrlUtility.IsNetworkCloneSource(entry.Url))
 			.Select(static entry => new RecentRepositoryRemovalEntry
 			{
 				Url = RepositoryUrlUtility.Normalize(entry.Url),

@@ -58,10 +58,10 @@ public sealed class ProjectProfileStoreTests
 
 		Assert.True(store.TryLoadProfile(projectPath, out var loaded));
 		Assert.Equal(
-			selectedPaths.OrderBy(static path => path, PathComparer.Default),
+			selectedPaths.OrderBy(static path => path, ProjectTreePathIdentity.CanonicalComparer),
 			loaded.SelectedPaths);
 		Assert.Equal(
-			roots.OrderBy(static path => path, PathComparer.Default),
+			roots.OrderBy(static path => path, ProjectTreePathIdentity.CanonicalComparer),
 			loaded.SelectedRootFolders);
 		Assert.All(roots, root => Assert.True(loaded.RootFolderStates![root]));
 	}
@@ -485,7 +485,7 @@ public sealed class ProjectProfileStoreTests
 	}
 
 	[Fact]
-	public void SaveProfile_CaseDistinctRootFolders_BehaviorMatchesPlatform()
+	public void SaveProfile_CaseDistinctProjectEntriesRemainIndependent()
 	{
 		var tempRoot = CreateTempDirectory();
 		try
@@ -495,16 +495,26 @@ public sealed class ProjectProfileStoreTests
 			var profile = new ProjectSelectionProfile(
 				SelectedRootFolders: ["src", "Src", "src"],
 				SelectedExtensions: [".cs"],
-				SelectedIgnoreOptions: []);
+				SelectedIgnoreOptions: [],
+				RootFolderStates: new Dictionary<string, bool>(ProjectTreePathIdentity.CanonicalComparer)
+				{
+					["src"] = true,
+					["Src"] = false
+				},
+				SelectedPaths: ["src/App.cs", "Src/App.cs", "src/App.cs"]);
 
 			store.SaveProfile(projectPath, profile);
 
 			Assert.True(store.TryLoadProfile(projectPath, out var loaded));
-			var expectedCount = OperatingSystem.IsWindows() ? 1 : 2;
-			Assert.Equal(expectedCount, loaded.SelectedRootFolders.Count);
+			Assert.Single(loaded.SelectedRootFolders);
 			Assert.Contains("src", loaded.SelectedRootFolders);
-			if (!OperatingSystem.IsWindows())
-				Assert.Contains("Src", loaded.SelectedRootFolders);
+			Assert.DoesNotContain("Src", loaded.SelectedRootFolders);
+			Assert.NotNull(loaded.RootFolderStates);
+			Assert.True(loaded.RootFolderStates!["src"]);
+			Assert.False(loaded.RootFolderStates["Src"]);
+			Assert.Equal(
+				["Src/App.cs", "src/App.cs"],
+				loaded.SelectedPaths);
 		}
 		finally
 		{

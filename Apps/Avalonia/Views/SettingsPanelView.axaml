@@ -223,6 +223,7 @@
 					  Classes="git-mode-selector"
 					  Grid.Row="0"
 					  Margin="8,6,8,4"
+					  IsVisible="{Binding IsGitFilteringModeSelectorVisible}"
 					  ItemsSource="{Binding GitFilteringModes}"
 					  SelectedItem="{Binding SelectedGitFilteringModeOption, Mode=TwoWay}"
 					  DropDownOpened="OnGitFilteringModeDropDownOpened"

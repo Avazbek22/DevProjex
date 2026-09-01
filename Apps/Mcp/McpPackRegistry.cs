@@ -590,6 +590,8 @@ public sealed class McpPackRegistry : IDisposable, IAsyncDisposable
 				throw new InvalidOperationException("Pack text metrics have already been completed.");
 			_metricsCompleted = true;
 			CompletePendingCarriageReturn();
+			if (_lineCheckpoints.Count > 1 && _lineCheckpoints[^1].ByteOffset == _indexedBytes)
+				_lineCheckpoints.RemoveAt(_lineCheckpoints.Count - 1);
 			Decode([], flush: true);
 			return new PackTextMetrics(
 				_characters,

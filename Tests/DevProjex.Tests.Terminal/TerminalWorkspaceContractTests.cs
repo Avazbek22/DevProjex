@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Xml.Linq;
 using DevProjex.Application.Preview;
+using DevProjex.Infrastructure.Git;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -1065,6 +1066,84 @@ public sealed class TerminalWorkspaceContractTests
 	}
 
 	[Fact]
+	public async Task EmptyMomentaryGitScopeRetainsBroadSelectionAcrossRefresh()
+	{
+		if (!TryRunGit(Directory.GetCurrentDirectory(), "--version"))
+			Assert.Skip("Git is required for this regression test.");
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		workspace.WriteFile("Baseline.cs", "class Baseline {}\n");
+		Assert.True(TryRunGit(workspace.Path, "init", "--quiet"));
+		Assert.True(TryRunGit(workspace.Path, "config", "user.name", "DevProjex Tests"));
+		Assert.True(TryRunGit(workspace.Path, "config", "user.email", "devprojex@example.invalid"));
+		Assert.True(TryRunGit(workspace.Path, "add", "--", "Baseline.cs"));
+		Assert.True(TryRunGit(workspace.Path, "commit", "--quiet", "-m", "baseline"));
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		await controller.SetGitModeAsync(
+			state,
+			GitFilteringMode.Staged,
+			TestContext.Current.CancellationToken);
+		Assert.Empty(state.Plan.IncludedFiles);
+		Assert.Null(services.ContextPlanner.GetSelectedRelativePathFrontier(state.Plan));
+
+		workspace.WriteFile("New.cs", "class New {}\n");
+		Assert.True(TryRunGit(workspace.Path, "add", "--", "New.cs"));
+		await controller.RefreshProjectAsync(state, TestContext.Current.CancellationToken);
+
+		Assert.Equal("New.cs", Path.GetFileName(Assert.Single(state.Plan.IncludedFiles)));
+		await controller.SetGitModeAsync(
+			state,
+			GitFilteringMode.None,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(
+			["Baseline.cs", "New.cs"],
+			state.Plan.IncludedFiles
+				.Select(static path => Path.GetFileName(path)!)
+				.Order(StringComparer.Ordinal)
+				.ToArray());
+	}
+
+	[Fact]
+	public async Task ExplicitEmptySelectionRemainsEmptyWhenMomentaryGitScopeChanges()
+	{
+		if (!TryRunGit(Directory.GetCurrentDirectory(), "--version"))
+			Assert.Skip("Git is required for this regression test.");
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		workspace.WriteFile("First.cs", "class First {}\n");
+		Assert.True(TryRunGit(workspace.Path, "init", "--quiet"));
+		Assert.True(TryRunGit(workspace.Path, "add", "--", "First.cs"));
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+		await controller.SetGitModeAsync(
+			state,
+			GitFilteringMode.Staged,
+			TestContext.Current.CancellationToken);
+		Assert.Single(state.Plan.IncludedFiles);
+
+		state.SelectNone();
+		await controller.ReprojectSelectionAsync(state, TestContext.Current.CancellationToken);
+		Assert.Empty(services.ContextPlanner.GetSelectedRelativePathFrontier(state.Plan)!);
+		workspace.WriteFile("Second.cs", "class Second {}\n");
+		Assert.True(TryRunGit(workspace.Path, "add", "--", "Second.cs"));
+
+		await controller.RefreshProjectAsync(state, TestContext.Current.CancellationToken);
+
+		Assert.Empty(state.Plan.IncludedFiles);
+		Assert.Empty(services.ContextPlanner.GetSelectedRelativePathFrontier(state.Plan)!);
+	}
+
+	[Fact]
 	public async Task StructuralRefreshBuildsOnlyPlansRequiredBySelectionEvolution()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -1079,14 +1158,14 @@ public sealed class TerminalWorkspaceContractTests
 			TestContext.Current.CancellationToken);
 
 		var unchanged = await controller.BuildStructuralRefreshAsync(
-			TerminalWorkspaceController.CaptureStructuralRefresh(state, state.BuildSelection()),
+			controller.CaptureStructuralRefresh(state, state.BuildSelection()),
 			TestContext.Current.CancellationToken);
 		Assert.Equal(1, unchanged.PlanBuildCount);
 		TerminalWorkspaceController.ApplyStructuralRefresh(state, unchanged);
 
 		workspace.WriteFile("src/config.json", "{}");
 		var newExtension = await controller.BuildStructuralRefreshAsync(
-			TerminalWorkspaceController.CaptureStructuralRefresh(state, state.BuildSelection()),
+			controller.CaptureStructuralRefresh(state, state.BuildSelection()),
 			TestContext.Current.CancellationToken);
 		Assert.Equal(1, newExtension.PlanBuildCount);
 		Assert.Contains(".json", newExtension.Plan.SelectedExtensions);
@@ -1106,7 +1185,7 @@ public sealed class TerminalWorkspaceContractTests
 			.index;
 		state.ToggleSelection(jsonIndex);
 		var partialSelection = await controller.BuildStructuralRefreshAsync(
-			TerminalWorkspaceController.CaptureStructuralRefresh(state, state.BuildSelection()),
+			controller.CaptureStructuralRefresh(state, state.BuildSelection()),
 			TestContext.Current.CancellationToken);
 		Assert.Equal(1, partialSelection.PlanBuildCount);
 	}
@@ -1141,7 +1220,7 @@ public sealed class TerminalWorkspaceContractTests
 		{
 			Directory.Move(gitPath, detachedGitPath);
 			var result = await controller.BuildStructuralRefreshAsync(
-				TerminalWorkspaceController.CaptureStructuralRefresh(
+				controller.CaptureStructuralRefresh(
 					state,
 					state.BuildSelection(),
 					GitFilteringMode.RespectGitIgnore),
@@ -1240,7 +1319,7 @@ public sealed class TerminalWorkspaceContractTests
 		};
 		workspace.WriteFile("new.cs", "class New {}");
 		var result = await controller.BuildStructuralRefreshAsync(
-			TerminalWorkspaceController.CaptureStructuralRefresh(state, state.BuildSelection()),
+			controller.CaptureStructuralRefresh(state, state.BuildSelection()),
 			TestContext.Current.CancellationToken);
 
 		Assert.Same(originalPlan, state.Plan);
@@ -1283,6 +1362,199 @@ public sealed class TerminalWorkspaceContractTests
 
 		Assert.Contains("No Git filtering; None", text, StringComparison.Ordinal);
 		Assert.DoesNotContain("none available", text, StringComparison.OrdinalIgnoreCase);
+	}
+
+	[Fact]
+	public async Task InteractiveContentPreviewPreservesRootWhenSelectionHasNoFiles()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("empty-project");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			project,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		var build = await controller.BuildPreviewDocumentWithMetricsAsync(
+			state,
+			ProjectContextView.Content,
+			ProjectContextDocumentFormat.Markdown,
+			TestContext.Current.CancellationToken);
+		using var document = build.Document;
+		var expected = ContextRootPresentation.FormatLine(project);
+
+		Assert.Equal(expected, document.GetFullText());
+		Assert.Equal(ExportOutputMetricsCalculator.FromText(expected), build.Metrics);
+	}
+
+	[Fact]
+	public async Task StructuralGitRefreshQueriesOnlyTheRepositoryOwningTheManualSelection()
+	{
+		if (!TryRunGit(Directory.GetCurrentDirectory(), "--version"))
+			Assert.Skip("Git is required for this regression test.");
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		workspace.WriteFile("Outer.txt", "outer\n");
+		Assert.True(TryRunGit(workspace.Path, "init", "--quiet"));
+		Assert.True(TryRunGit(workspace.Path, "config", "user.name", "DevProjex Tests"));
+		Assert.True(TryRunGit(workspace.Path, "config", "user.email", "devprojex@example.invalid"));
+		Assert.True(TryRunGit(workspace.Path, "add", "--", "Outer.txt"));
+		Assert.True(TryRunGit(workspace.Path, "commit", "--quiet", "-m", "outer baseline"));
+		var nestedRoot = workspace.CreateDirectory("nested");
+		workspace.WriteFile("nested/App.cs", "v1\n");
+		Assert.True(TryRunGit(nestedRoot, "init", "--quiet"));
+		Assert.True(TryRunGit(nestedRoot, "config", "user.name", "DevProjex Tests"));
+		Assert.True(TryRunGit(nestedRoot, "config", "user.email", "devprojex@example.invalid"));
+		Assert.True(TryRunGit(nestedRoot, "add", "--", "App.cs"));
+		Assert.True(TryRunGit(nestedRoot, "commit", "--quiet", "-m", "nested baseline"));
+		workspace.WriteFile("nested/App.cs", "v2\n");
+		Assert.True(TryRunGit(nestedRoot, "add", "--", "App.cs"));
+		Assert.True(TryRunGit(nestedRoot, "commit", "--quiet", "-m", "nested change"));
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+		var outerIndex = state.VisibleRows
+			.Select((row, index) => (row, index))
+			.Single(item => item.row.Node.DisplayName == "Outer.txt")
+			.index;
+		state.ToggleSelection(outerIndex);
+		var candidate = GitScopeSelection.WithMode(
+			state.BuildSelection(),
+			GitFilteringMode.Diff,
+			"HEAD~1..HEAD");
+
+		var result = await controller.BuildSettingsPlanAsync(
+			state.Plan,
+			candidate,
+			state.ExtensionOptionStates,
+			state.BuildSelectedItemRelativePaths(),
+			state.PathOptionStates,
+			TestContext.Current.CancellationToken);
+
+		Assert.False(result.Plan.HasErrors);
+		Assert.Equal("App.cs", Path.GetFileName(Assert.Single(result.Plan.IncludedFiles)));
+		Assert.Equal(GitFilteringMode.Diff, result.Plan.Selection.GitMode);
+	}
+
+	[Fact]
+	public async Task ExplicitEmptySelectionDoesNotQueryGitScopeDuringSettingsRefresh()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		workspace.WriteFile("App.cs", "class App {}\n");
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var provider = new FailingGitScopePathProvider();
+		services = services with
+		{
+			ContextFactory = new TerminalProjectContextFactory(
+				services.ContextPlanner,
+				services.SourceIdentityResolver,
+				services.SecretRedactionSession,
+				provider,
+				new GitRemoteDiffRangeResolver())
+		};
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+		state.SelectNone();
+		var candidate = GitScopeSelection.WithMode(
+			state.BuildSelection(),
+			GitFilteringMode.Staged);
+
+		var result = await controller.BuildSettingsPlanAsync(
+			state.Plan,
+			candidate,
+			state.ExtensionOptionStates,
+			state.BuildSelectedItemRelativePaths(),
+			state.PathOptionStates,
+			TestContext.Current.CancellationToken);
+
+		Assert.Empty(result.Plan.IncludedFiles);
+		Assert.False(result.Plan.HasErrors);
+		Assert.Equal(GitFilteringMode.Staged, result.Plan.Selection.GitMode);
+		Assert.Equal(0, provider.CallCount);
+	}
+
+	[Fact]
+	public async Task CachedRemoteWorkspaceHydratesShallowDiffWithoutChangingItsCheckout()
+	{
+		if (!TryRunGit(Directory.GetCurrentDirectory(), "--version"))
+			Assert.Skip("Git is required for this regression test.");
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		var source = workspace.CreateDirectory("source");
+		Assert.True(TryRunGit(source, "init", "--quiet", "--initial-branch=main"));
+		Assert.True(TryRunGit(source, "config", "user.name", "DevProjex Tests"));
+		Assert.True(TryRunGit(source, "config", "user.email", "devprojex@example.invalid"));
+		workspace.WriteFile("source/Baseline.txt", "baseline\n");
+		Assert.True(TryRunGit(source, "add", "."));
+		Assert.True(TryRunGit(source, "commit", "--quiet", "-m", "baseline"));
+		workspace.WriteFile("source/Middle.txt", "middle\n");
+		Assert.True(TryRunGit(source, "add", "."));
+		Assert.True(TryRunGit(source, "commit", "--quiet", "-m", "middle"));
+		workspace.WriteFile("source/Last.txt", "last\n");
+		Assert.True(TryRunGit(source, "add", "."));
+		Assert.True(TryRunGit(source, "commit", "--quiet", "-m", "last"));
+		var bare = Path.Combine(workspace.Path, "origin.git");
+		Assert.True(TryRunGit(workspace.Path, "clone", "--quiet", "--bare", source, bare));
+		var repositoryUrl = new Uri(bare + Path.DirectorySeparatorChar).AbsoluteUri;
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		await using var resolvedSource = await new TerminalProjectSourceResolver(
+				services,
+				new TestTerminalEnvironment(),
+				new TerminalOutputOptions { Progress = TerminalProgressMode.Never })
+			.ResolveAsync(repositoryUrl, "main", TestContext.Current.CancellationToken);
+		var checkout = resolvedSource.ProjectPath;
+		var headBefore = ReadGit(checkout, "rev-parse", "HEAD");
+		var statusBefore = ReadGit(checkout, "status", "--porcelain=v1");
+		var contentBefore = File.ReadAllBytes(Path.Combine(checkout, "Last.txt"));
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			checkout,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken,
+			ProjectSourceIdentityResolver.CreateCloneIdentity(repositoryUrl, "origin", "main"));
+		var candidate = GitScopeSelection.WithMode(
+			state.BuildSelection(),
+			GitFilteringMode.Diff,
+			"HEAD~1..HEAD");
+
+		var result = await controller.BuildSettingsPlanAsync(
+			state.Plan,
+			candidate,
+			state.ExtensionOptionStates,
+			state.BuildSelectedItemRelativePaths(),
+			state.PathOptionStates,
+			TestContext.Current.CancellationToken);
+
+		Assert.False(result.Plan.HasErrors);
+		Assert.Equal("Last.txt", Path.GetFileName(Assert.Single(result.Plan.IncludedFiles)));
+		Assert.Equal(headBefore, ReadGit(checkout, "rev-parse", "HEAD"));
+		Assert.Equal(statusBefore, ReadGit(checkout, "status", "--porcelain=v1"));
+		Assert.Equal(contentBefore, File.ReadAllBytes(Path.Combine(checkout, "Last.txt")));
+		var diffResolver = new GitRemoteDiffRangeResolver();
+		var repeated = await Task.WhenAll(
+			diffResolver.ResolveAsync(
+				checkout,
+				repositoryUrl,
+				"HEAD~1..HEAD",
+				"main",
+				TestContext.Current.CancellationToken),
+			diffResolver.ResolveAsync(
+				checkout,
+				repositoryUrl,
+				"HEAD~1..HEAD",
+				"main",
+				TestContext.Current.CancellationToken));
+		Assert.All(repeated, static range => Assert.NotNull(range));
+		Assert.Equal(repeated[0], repeated[1]);
 	}
 
 	[Theory]
@@ -1506,6 +1778,26 @@ public sealed class TerminalWorkspaceContractTests
 		}
 	}
 
+	private static string ReadGit(string workingDirectory, params string[] arguments)
+	{
+		var startInfo = new ProcessStartInfo("git")
+		{
+			WorkingDirectory = workingDirectory,
+			UseShellExecute = false,
+			CreateNoWindow = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true
+		};
+		foreach (var argument in arguments)
+			startInfo.ArgumentList.Add(argument);
+		using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Could not start git.");
+		var output = process.StandardOutput.ReadToEnd();
+		var error = process.StandardError.ReadToEnd();
+		Assert.True(process.WaitForExit(10_000));
+		Assert.True(process.ExitCode == 0, error);
+		return output.Trim();
+	}
+
 	private static async Task SetPreviewDocumentAsync(
 		TerminalWorkspaceState state,
 		IPreviewTextDocument document)
@@ -1530,6 +1822,23 @@ public sealed class TerminalWorkspaceContractTests
 			throw new InvalidOperationException("Text must not be materialized.");
 		public void Dispose()
 		{
+		}
+	}
+
+	private sealed class FailingGitScopePathProvider : IGitScopePathProvider
+	{
+		private int _callCount;
+
+		public int CallCount => Volatile.Read(ref _callCount);
+
+		public Task<GitScopePathResult> ResolveAsync(
+			string projectRoot,
+			GitFilteringMode mode,
+			string? diffRange,
+			CancellationToken cancellationToken = default)
+		{
+			Interlocked.Increment(ref _callCount);
+			throw new InvalidOperationException("The Git scope provider must not run for an explicit empty selection.");
 		}
 	}
 }

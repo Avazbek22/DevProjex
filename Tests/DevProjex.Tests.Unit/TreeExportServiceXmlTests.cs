@@ -164,6 +164,57 @@ public sealed class TreeExportServiceXmlTests
 	}
 
 	[Fact]
+	public async Task XmlFormat_ReplacesInvalidXmlCharactersAcrossBufferedAndStreamingWriters()
+	{
+		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjexXmlInvalidCharacters");
+		var root = DirectoryNode("Project\u0001", rootPath,
+		[
+			DirectoryNode("bad\u0002folder", Path.Combine(rootPath, "folder"),
+			[
+				FileNode("bad\u000Bfile.txt", Path.Combine(rootPath, "folder", "file.txt"))
+			])
+		]);
+		var service = new TreeExportService();
+
+		var buffered = service.BuildFullTree(
+			rootPath,
+			root,
+			TreeTextFormat.Xml,
+			displayRootPath: "https://example.test/repo\u0003");
+		using var destination = new StringWriter(CultureInfo.InvariantCulture);
+		await service.WriteFullTreeAsync(
+			destination,
+			rootPath,
+			root,
+			TreeTextFormat.Xml,
+			displayRootPath: "https://example.test/repo\u0003",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Equal(buffered, destination.ToString());
+		var document = XmlTreeExportTestHelper.Parse(buffered);
+		Assert.Equal("https://example.test/repo\uFFFD", document.Root!.Attribute("r")?.Value);
+		Assert.Equal(
+			["bad\uFFFDfolder/bad\uFFFDfile.txt"],
+			XmlTreeExportTestHelper.ExtractFilePaths(document));
+	}
+
+	[Fact]
+	public void BuildNamedTree_XmlFormat_ReplacesInvalidXmlCharactersInRootName()
+	{
+		var rootPath = Path.Combine(Path.GetTempPath(), "DevProjexXmlInvalidRootName");
+		var root = DirectoryNode("Project\u0001", rootPath, []);
+
+		var result = new TreeExportService().BuildFullTree(
+			rootPath,
+			root,
+			TreeTextFormat.Xml,
+			includeRootPath: false);
+
+		var document = XDocument.Parse(result);
+		Assert.Equal("Project\uFFFD", document.Root!.Attribute("n")?.Value);
+	}
+
+	[Fact]
 	public void BuildSelectedTree_XmlFormat_FiltersSelectionAndKeepsSelectedEmptyFolder()
 	{
 		var fixture = CreateFixture();

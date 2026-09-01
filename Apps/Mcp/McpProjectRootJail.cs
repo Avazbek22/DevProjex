@@ -35,6 +35,22 @@ internal sealed class McpProjectRootJail(
 		return candidates.OrderByDescending(static candidate => candidate.Root.Length).FirstOrDefault();
 	}
 
+	public McpRootJailScope ResolveLexicalRoot(string path)
+	{
+		var scope = FindLexicalRoot(path);
+		if (scope is not null)
+			return scope;
+
+		var addresses = localRoots.Roots
+			.Concat((projectSources?.GetRemoteRootsSnapshot() ?? []).Select(static source => source.Address))
+			.Distinct(StringComparer.Ordinal)
+			.Select(static address => $"'{address}'");
+		throw new McpToolException(
+			McpErrorCodes.RootViolation,
+			$"{McpErrorCodes.RootViolation}: path '{path}' is outside every allowed project root. " +
+			$"Valid roots: {string.Join(", ", addresses)}.");
+	}
+
 	public void EnsureOpenedPathIsWithin(
 		McpRootJailScope scope,
 		string requestedPath,
@@ -64,7 +80,7 @@ internal sealed class McpProjectRootJail(
 		McpToolException exception,
 		McpRootJailScope scope)
 	{
-		if (PathComparer.Default.Equals(scope.Root, scope.Address))
+		if (StringComparer.Ordinal.Equals(scope.Root, scope.Address))
 			return exception;
 		return new McpToolException(
 			exception.Code,

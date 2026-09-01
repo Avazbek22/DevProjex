@@ -15,6 +15,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 		TreeFilterOptions options,
 		CancellationToken cancellationToken = default)
 	{
+		options = WithExactRootFolderIdentity(options);
 		var gitIgnoreContext = options.IgnoreRules.CreateGitIgnoreScanContext(rootPath);
 		return ProjectTreeInventoryScanner.Read(
 			rootPath,
@@ -38,6 +39,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 		IgnoreRules projectionRules,
 		CancellationToken cancellationToken = default)
 	{
+		allowedRootFolders = ToExactRootFolderSet(allowedRootFolders);
 		var discoveryGitIgnoreContext = discoveryRules.CreateGitIgnoreScanContext(rootPath);
 		var projectionGitIgnoreContext = projectionRules.CreateGitIgnoreScanContext(rootPath);
 		return ProjectTreeInventoryScanner.Read(
@@ -78,6 +80,27 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 	private static bool RequiresWorkingTreeGitIgnore(IgnoreRules rules) =>
 		rules.EnableGitIgnoreTraversal && !rules.UseTrackedGitFilesOnly;
 
+	private static TreeFilterOptions WithExactRootFolderIdentity(TreeFilterOptions options)
+	{
+		ArgumentNullException.ThrowIfNull(options);
+		var exactRoots = ToExactRootFolderSet(options.AllowedRootFolders);
+		return ReferenceEquals(exactRoots, options.AllowedRootFolders)
+			? options
+			: options with { AllowedRootFolders = exactRoots };
+	}
+
+	private static IReadOnlySet<string> ToExactRootFolderSet(IReadOnlySet<string> rootFolders)
+	{
+		ArgumentNullException.ThrowIfNull(rootFolders);
+		if (rootFolders is HashSet<string> set &&
+		    ReferenceEquals(set.Comparer, ProjectTreePathIdentity.CanonicalComparer))
+		{
+			return rootFolders;
+		}
+
+		return rootFolders.ToHashSet(ProjectTreePathIdentity.CanonicalComparer);
+	}
+
 	private static IReadOnlyList<ScopedGitIgnoreMatcher> MergeGitIgnoreMatcherSeeds(
 		IgnoreRules discoveryRules,
 		IgnoreRules projectionRules)
@@ -95,7 +118,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 
 		var merged = new List<ScopedGitIgnoreMatcher>(
 			discoveryRules.ScopedGitIgnoreMatchers.Count + projectionRules.ScopedGitIgnoreMatchers.Count);
-		var seenScopes = new HashSet<string>(PathComparer.Default);
+		var seenScopes = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
 		foreach (var matcher in discoveryRules.ScopedGitIgnoreMatchers)
 		{
 			if (seenScopes.Add(matcher.ScopeRootPath))
@@ -115,6 +138,7 @@ public sealed class TreeBuilder : ITreeBuilder, IProjectTreeInventoryBuilder, IP
 		TreeFilterOptions options,
 		CancellationToken cancellationToken = default)
 	{
+		options = WithExactRootFolderIdentity(options);
 		var allowedExtensions = new AllowedExtensionLookup(options.AllowedExtensions);
 		ref readonly var rootEntry = ref inventory.GetEntryRef(0);
 		var gitIgnoreContext = options.IgnoreRules.CreateGitIgnoreScanContext(

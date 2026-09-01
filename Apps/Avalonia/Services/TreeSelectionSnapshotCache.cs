@@ -117,7 +117,7 @@ internal sealed class TreeSelectionSnapshotCache
             return _snapshot;
         }
 
-        var selected = new HashSet<string>(PathComparer.Default);
+        var selected = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
         for (var index = 0; index < roots.Count; index++)
             roots[index].CollectCheckedPaths(selected);
 

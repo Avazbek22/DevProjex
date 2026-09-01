@@ -34,7 +34,7 @@ internal sealed class TerminalProjectSourceResolver(
 			var cached = await TryAcquireSessionAsync(safeUrl, branch, cancellationToken)
 				.ConfigureAwait(false);
 			if (cached is not null)
-				return ResolvedTerminalProjectSource.Repository(cached.RepositoryPath, safeUrl, cached);
+				return ResolvedTerminalProjectSource.Repository(cached.RepositoryPath, safeUrl, source, cached);
 
 			try
 			{
@@ -78,6 +78,7 @@ internal sealed class TerminalProjectSourceResolver(
 				return ResolvedTerminalProjectSource.Repository(
 					session.RepositoryPath,
 					repositoryUrl,
+					source,
 					session);
 			}
 			catch
@@ -133,19 +134,22 @@ internal sealed class TerminalProjectSourceResolver(
 internal sealed class ResolvedTerminalProjectSource(
 	string projectPath,
 	string? safeRepositoryUrl,
+	string? repositorySourceUrl,
 	IRepositoryCacheSession? session) : IAsyncDisposable
 {
 	public string ProjectPath { get; } = projectPath;
 	public string? SafeRepositoryUrl { get; } = safeRepositoryUrl;
+	public string? RepositorySourceUrl { get; } = repositorySourceUrl;
 	public bool IsRepositoryUrl => SafeRepositoryUrl is not null;
 
-	public static ResolvedTerminalProjectSource Local(string projectPath) => new(projectPath, null, null);
+	public static ResolvedTerminalProjectSource Local(string projectPath) => new(projectPath, null, null, null);
 
 	public static ResolvedTerminalProjectSource Repository(
 		string projectPath,
 		string safeRepositoryUrl,
+		string repositorySourceUrl,
 		IRepositoryCacheSession session) =>
-		new(projectPath, safeRepositoryUrl, session);
+		new(projectPath, safeRepositoryUrl, repositorySourceUrl, session);
 
 	public ValueTask DisposeAsync()
 	{

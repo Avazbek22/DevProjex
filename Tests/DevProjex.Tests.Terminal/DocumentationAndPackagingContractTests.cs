@@ -309,6 +309,15 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Matches(@"(?m)^\| `diff:<REF>\.\.<REF>` \|[^\r\n]+\r?$", documentation);
 		Assert.DoesNotContain("Git checkbox", documentation, StringComparison.OrdinalIgnoreCase);
 		Assert.DoesNotContain("two Git modes as checkboxes", documentation, StringComparison.OrdinalIgnoreCase);
+		Assert.DoesNotContain(
+			"chooses one mode: no Git filtering, `.gitignore`, or tracked files only",
+			documentation,
+			StringComparison.OrdinalIgnoreCase);
+
+		var readme = File.ReadAllText(Path.Combine(rootPath, "README.md"));
+		Assert.Contains("staged files", readme, StringComparison.OrdinalIgnoreCase);
+		Assert.Contains("all current changes", readme, StringComparison.OrdinalIgnoreCase);
+		Assert.Contains("ref-to-ref diff", readme, StringComparison.OrdinalIgnoreCase);
 	}
 
 	[Fact]

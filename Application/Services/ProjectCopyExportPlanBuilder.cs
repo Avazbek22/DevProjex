@@ -29,7 +29,10 @@ public sealed class ProjectCopyExportPlanBuilder
 			throw InvalidRequest("The selected paths do not belong to the effective project tree.");
 
 		var entries = new List<ProjectCopyExportPlanEntry>(nodes.Count);
-		var relativePaths = new HashSet<string>(PathComparer.Default);
+		var destinationPathComparer = request.Format == ProjectCopyExportFormat.Zip
+			? StringComparer.Ordinal
+			: PathComparer.Default;
+		var relativePaths = new HashSet<string>(destinationPathComparer);
 		foreach (var node in nodes)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -72,9 +75,13 @@ public sealed class ProjectCopyExportPlanBuilder
 			return 1;
 
 		var directoryOrder = right.IsDirectory.CompareTo(left.IsDirectory);
-		return directoryOrder != 0
-			? directoryOrder
-			: PathComparer.Default.Compare(left.RelativePath, right.RelativePath);
+		if (directoryOrder != 0)
+			return directoryOrder;
+
+		var pathOrder = PathComparer.Default.Compare(left.RelativePath, right.RelativePath);
+		return pathOrder != 0
+			? pathOrder
+			: StringComparer.Ordinal.Compare(left.RelativePath, right.RelativePath);
 	}
 
 	private static bool ContainsParentTraversal(string relativePath)

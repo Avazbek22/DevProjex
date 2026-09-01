@@ -138,4 +138,24 @@ public sealed class GitIgnoreMatcherLoadSessionTests
 		Assert.Equal(GitIgnoreMatcherLoadStatus.NotFound, retried.Status);
 		Assert.Equal(2, loaderCalls);
 	}
+
+	[Fact]
+	public void Load_CaseDistinctPhysicalSourcesRemainIndependent()
+	{
+		var root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+		var upperSource = Path.Combine(root, "Repo", ".gitignore");
+		var lowerSource = Path.Combine(root, "repo", ".gitignore");
+		var loaderCalls = 0;
+		var session = new GitIgnoreMatcherLoadSession((_, _) =>
+		{
+			Interlocked.Increment(ref loaderCalls);
+			return GitIgnoreMatcherLoadResult.NotFound;
+		});
+
+		session.Load(Path.GetDirectoryName(upperSource)!, upperSource);
+		session.Load(Path.GetDirectoryName(lowerSource)!, lowerSource);
+		session.Load(Path.GetDirectoryName(upperSource)!, upperSource);
+
+		Assert.Equal(2, loaderCalls);
+	}
 }

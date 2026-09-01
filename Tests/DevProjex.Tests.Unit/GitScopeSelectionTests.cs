@@ -91,6 +91,22 @@ public sealed class GitScopeSelectionTests
 		GitFilteringMode expected) =>
 		Assert.Equal(expected, GitScopeSelection.ComposeNarrowingUnderlay(baseline, scope));
 
+	[Theory]
+	[InlineData(GitFilteringMode.None, GitFilteringMode.None)]
+	[InlineData(GitFilteringMode.RespectGitIgnore, GitFilteringMode.RespectGitIgnore)]
+	[InlineData(GitFilteringMode.TrackedFilesOnly, GitFilteringMode.TrackedFilesOnly)]
+	[InlineData(GitFilteringMode.Staged, GitFilteringMode.TrackedFilesOnly)]
+	[InlineData(GitFilteringMode.Changes, GitFilteringMode.TrackedFilesOnly)]
+	[InlineData(GitFilteringMode.Diff, GitFilteringMode.TrackedFilesOnly)]
+	public void PreferredModeTracksEveryExplicitPersistentModeOnly(
+		GitFilteringMode requested,
+		GitFilteringMode expected) =>
+		Assert.Equal(
+			expected,
+			GitScopeSelection.ResolvePreferredPersistentMode(
+				GitFilteringMode.TrackedFilesOnly,
+				requested));
+
 	[Fact]
 	public void SelectionRejectsAnUndefinedGitMode() =>
 		Assert.Throws<ArgumentOutOfRangeException>(() =>
@@ -289,9 +305,10 @@ public sealed class GitScopeSelectionTests
 	[Fact]
 	public void TreeNarrowingUsesRepositoryPathIdentityWithoutChangingSetSemantics()
 	{
-		var rootPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "dpx-git-scope-identity"));
+		using var temp = new TemporaryDirectory();
+		var rootPath = temp.CreateFolder("repo");
 		var gitPath = Path.Combine(rootPath, "MixedCase.cs");
-		var inventoriedPath = Path.Combine(rootPath, "mixedcase.cs");
+		var inventoriedPath = temp.CreateFile("repo/mixedcase.cs", "content");
 		var root = new TreeNodeDescriptor(
 			"project",
 			rootPath,
@@ -319,6 +336,52 @@ public sealed class GitScopeSelectionTests
 		Assert.DoesNotContain(inventoriedPath, scope.IncludedPaths);
 		Assert.True(scope.ContainsPath(inventoriedPath));
 		Assert.Equal([inventoriedPath], narrowed.OrderedFilePaths);
+	}
+
+	[Fact]
+	public void TreeNarrowingRejectsAnAmbiguousRepositoryPathAlias()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("The test requires a case-sensitive file system.");
+
+		using var temp = new TemporaryDirectory();
+		var rootPath = temp.CreateFolder("repo");
+		var upperPath = temp.CreateFile("repo/Foo.cs", "upper");
+		var lowerPath = temp.CreateFile("repo/foo.cs", "lower");
+		if (Directory.EnumerateFiles(rootPath, "*.cs").Count() < 2)
+			Assert.Skip("The temporary file system is case-insensitive.");
+
+		var root = new TreeNodeDescriptor(
+			"project",
+			rootPath,
+			true,
+			false,
+			"folder",
+			[
+				new TreeNodeDescriptor("Foo.cs", upperPath, false, false, "csharp", []),
+				new TreeNodeDescriptor("foo.cs", lowerPath, false, false, "csharp", [])
+			]);
+		var scope = new GitScopePathResult(
+			true,
+			new HashSet<string>([upperPath], StringComparer.Ordinal),
+			0,
+			PathMatchers:
+			[
+				new GitTrackedPathIndex(
+					rootPath,
+					["Foo.cs"],
+					new GitPathComparisonSemantics(IgnoreCase: true, NormalizeUnicode: false))
+			]);
+
+		var narrowed = GitScopeFilter.ApplyToTree(
+			new BuildTreeResult(root, false, false, [upperPath, lowerPath]),
+			scope,
+			TestContext.Current.CancellationToken);
+
+		Assert.True(scope.ContainsPath(upperPath));
+		Assert.False(scope.ContainsPath(lowerPath));
+		Assert.Equal([upperPath], narrowed.OrderedFilePaths, StringComparer.Ordinal);
+		Assert.Equal("Foo.cs", Assert.Single(narrowed.Root.Children).DisplayName);
 	}
 
 	[Fact]
@@ -421,6 +484,72 @@ public sealed class GitScopeSelectionTests
 			selectedFullPaths: [Path.Combine(firstRepository, "src", "selected.cs")]);
 
 		Assert.Equal([firstRepository], roots, PathComparer.Default);
+	}
+
+	[Fact]
+	public void ExplicitPathSelectionUsesTheDeepestContainingRepositoryBoundary()
+	{
+		var sourceRoot = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "dpx-git-scope-owner"));
+		var nestedRepository = Path.Combine(sourceRoot, "nested");
+		var inventory = new ProjectTreeInventorySnapshot(
+			[],
+			rootAccessDenied: false,
+			hadAccessDenied: false,
+			discoveredGitRepositoryRoots: [sourceRoot, nestedRepository]);
+
+		var roots = GitScopeFilter.GetDiscoveredRepositoryRoots(
+			inventory,
+			sourceRoot,
+			selectedRootFolders: [],
+			rootSelectionIsExplicit: false,
+			selectedFullPaths: [Path.Combine(nestedRepository, "src", "App.cs")]);
+
+		Assert.Equal([nestedRepository], roots, PathComparer.Default);
+	}
+
+	[Fact]
+	public void ExplicitEmptyPathSelectionDoesNotResolveAnyRepositoryBoundary()
+	{
+		var sourceRoot = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "dpx-git-scope-empty-paths"));
+		var inventory = new ProjectTreeInventorySnapshot(
+			[],
+			rootAccessDenied: false,
+			hadAccessDenied: false,
+			discoveredGitRepositoryRoots: [sourceRoot]);
+
+		var roots = GitScopeFilter.GetDiscoveredRepositoryRoots(
+			inventory,
+			sourceRoot,
+			selectedRootFolders: [],
+			rootSelectionIsExplicit: false,
+			selectedFullPaths: []);
+
+		Assert.Empty(roots);
+	}
+
+	[Fact]
+	public void ExplicitDirectorySelectionKeepsItsOwnerAndRepositoriesNestedInsideIt()
+	{
+		var sourceRoot = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "dpx-git-scope-subtree"));
+		var selectedDirectory = Path.Combine(sourceRoot, "src");
+		var nestedRepository = Path.Combine(selectedDirectory, "nested");
+		var unrelatedRepository = Path.Combine(sourceRoot, "docs", "samples");
+		var inventory = new ProjectTreeInventorySnapshot(
+			[],
+			rootAccessDenied: false,
+			hadAccessDenied: false,
+			discoveredGitRepositoryRoots: [sourceRoot, nestedRepository, unrelatedRepository]);
+
+		var roots = GitScopeFilter.GetDiscoveredRepositoryRoots(
+			inventory,
+			sourceRoot,
+			["src"],
+			rootSelectionIsExplicit: true);
+
+		Assert.Equal(
+			[sourceRoot, nestedRepository],
+			roots,
+			PathComparer.Default);
 	}
 
 	[Fact]
@@ -902,6 +1031,48 @@ public sealed class GitScopeSelectionTests
 
 		Assert.Equal(1, projection.IgnoreOptionCounts.DotFolders);
 		Assert.Empty(projection.AvailableExtensions);
+	}
+
+	[Fact]
+	public void ExplicitPathFrontierRestrictsPresentationAndKeepsNestedIgnoreEvidence()
+	{
+		using var project = new TemporaryDirectory();
+		var selectedDirectory = PathUtility.Normalize(
+			Directory.CreateDirectory(Path.Combine(project.Path, "selected")).FullName);
+		var visible = PathUtility.Normalize(
+			project.CreateFile("selected/Visible.cs", "class Visible {}\n"));
+		var nestedIgnored = PathUtility.Normalize(
+			project.CreateFile("selected/.generated/Hidden.cs", "class Hidden {}\n"));
+		var outside = PathUtility.Normalize(
+			project.CreateFile("outside/Only.xyz", "outside\n"));
+		var (inventory, rules, roots) = BuildInventory(project.Path);
+		var scope = new HashSet<string>([visible, nestedIgnored, outside], StringComparer.Ordinal);
+
+		var directoryProjection = GitScopePresentationProjector.Build(
+			project.Path,
+			inventory,
+			scope,
+			roots,
+			roots,
+			ExtensionPolicy(".cs", ".xyz"),
+			rules,
+			TestContext.Current.CancellationToken,
+			selectedPathFrontier: new HashSet<string>([selectedDirectory], StringComparer.Ordinal));
+		var fileProjection = GitScopePresentationProjector.Build(
+			project.Path,
+			inventory,
+			scope,
+			roots,
+			roots,
+			ExtensionPolicy(".cs", ".xyz"),
+			rules,
+			TestContext.Current.CancellationToken,
+			selectedPathFrontier: new HashSet<string>([visible], StringComparer.Ordinal));
+
+		Assert.Equal([".cs"], directoryProjection.AvailableExtensions);
+		Assert.Equal(1, directoryProjection.IgnoreOptionCounts.DotFolders);
+		Assert.Equal([".cs"], fileProjection.AvailableExtensions);
+		Assert.Equal(0, fileProjection.IgnoreOptionCounts.DotFolders);
 	}
 
 	private static IExtensionInclusionPolicy ExtensionPolicy(params string[] extensions) =>

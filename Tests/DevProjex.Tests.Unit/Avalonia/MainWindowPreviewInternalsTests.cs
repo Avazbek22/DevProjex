@@ -97,7 +97,7 @@ public sealed class MainWindowPreviewInternalsTests
     }
 
     [Fact]
-    public void BuildOrderedSelectedFilePaths_CaseVariantPaths_FollowPlatformSemantics()
+    public void BuildOrderedSelectedFilePaths_CaseVariantPathsRemainDistinctOnEveryPlatform()
     {
         var upper = CreatePath("root", "A.cs");
         var lower = CreatePath("root", "a.cs");
@@ -118,14 +118,9 @@ public sealed class MainWindowPreviewInternalsTests
 
         var result = PreviewFileCollectionPolicy.BuildOrderedSelectedFilePaths(selected, root, ensureExists: false);
 
-        var expected = new HashSet<string>(PathComparer.Default)
-        {
-            other,
-            lower,
-            upper
-        }
-        .OrderBy(path => path, PathComparer.Default)
-        .ToList();
+        var expected = new[] { other, lower, upper }
+            .OrderBy(path => path, ProjectTreePathIdentity.CanonicalComparer)
+            .ToList();
 
         Assert.Equal(expected, result);
     }
@@ -292,7 +287,7 @@ public sealed class MainWindowPreviewInternalsTests
     }
 
     [Fact]
-    public void BuildOrderedAllFilePaths_CaseVariantPaths_FollowPlatformSemantics()
+    public void BuildOrderedAllFilePaths_CaseVariantPathsRemainDistinctOnEveryPlatform()
     {
         var upper = CreatePath("root", "A.cs");
         var lower = CreatePath("root", "a.cs");
@@ -309,11 +304,7 @@ public sealed class MainWindowPreviewInternalsTests
             ]);
 
         var result = PreviewFileCollectionPolicy.BuildOrderedAllFilePaths(root);
-        var expected = new HashSet<string>(PathComparer.Default) { upper, lower }
-            .OrderBy(path => path, PathComparer.Default)
-            .ToList();
-
-        Assert.Equal(expected, result);
+        Assert.Equal([upper, lower], result);
     }
 
     [Fact]
@@ -443,6 +434,45 @@ public sealed class MainWindowPreviewInternalsTests
         Assert.Equal(implicitKey, checkedRootKey);
         Assert.Equal(0, checkedRootKey.SelectedCount);
         Assert.Equal(0, checkedRootKey.SelectedHash);
+    }
+
+    [Fact]
+    public void ZeroCheckedPathsUseTheWholeTreeForCacheWarmupAndOrderedProjection()
+    {
+        var root = CreateTree("root");
+        var zeroCheckedPaths = new HashSet<string>(PathComparer.Default);
+        var checkedRoot = new HashSet<string>(PathComparer.Default) { root.FullPath };
+        var allOrderedFiles = PreviewFileCollectionPolicy.BuildOrderedAllFilePaths(root);
+
+        Assert.Equal(
+            PreviewFileCollectionPolicy.BuildPreviewCacheKey(
+                "/root",
+                root,
+                PreviewContentMode.Content,
+                TreeTextFormat.Ascii,
+                checkedRoot),
+            PreviewFileCollectionPolicy.BuildPreviewCacheKey(
+                "/root",
+                root,
+                PreviewContentMode.Content,
+                TreeTextFormat.Ascii,
+                zeroCheckedPaths));
+        Assert.Equal(
+            allOrderedFiles,
+            PreviewFileCollectionPolicy.CollectOrderedPreviewFiles(
+                zeroCheckedPaths,
+                hasSelection: false,
+                root));
+        Assert.Equal(
+            allOrderedFiles,
+            TreeSelectionSnapshotCache.BuildProjection(
+                root,
+                zeroCheckedPaths,
+                allOrderedFiles).OrderedFiles);
+        var warmupPlan = PreviewWarmupPolicy.CreateSelectionPlan(root, zeroCheckedPaths);
+        Assert.NotNull(warmupPlan);
+        Assert.False(warmupPlan.HasExplicitSelection);
+        Assert.True(warmupPlan.SelectedRoot?.IncludesWholeSubtree);
     }
 
     [Fact]

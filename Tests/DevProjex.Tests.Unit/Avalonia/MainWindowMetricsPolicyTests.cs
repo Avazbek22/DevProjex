@@ -40,6 +40,14 @@ public sealed class MainWindowMetricsPolicyTests
         Assert.Equal(expected, result);
     }
 
+    [Fact]
+    public void ZeroCheckedPathsKeepPublishingTheCompleteWholeTreeBaseline()
+    {
+        Assert.True(MetricsCalculationPolicy.ShouldProceedWithMetricsCalculation(
+            hasAnyCheckedNodes: false,
+            hasCompleteMetricsBaseline: true));
+    }
+
     [Theory]
     [InlineData(1, 1)]
     [InlineData(2, 4)]

@@ -10,7 +10,8 @@ public sealed class SelectionSyncCoordinatorProjectSwitchIsolationTests
 		IgnoreItem,
 		ExtensionsAll,
 		IgnoreAll,
-		ContentProcessingAll
+		ContentProcessingAll,
+		GitMode
 	}
 
 	private static readonly IgnoreOptionId[] CompletePublishedSectionIds =
@@ -186,6 +187,7 @@ public sealed class SelectionSyncCoordinatorProjectSwitchIsolationTests
 	[InlineData(PreparedEventKind.ExtensionsAll)]
 	[InlineData(PreparedEventKind.IgnoreAll)]
 	[InlineData(PreparedEventKind.ContentProcessingAll)]
+	[InlineData(PreparedEventKind.GitMode)]
 	public void ProjectSwitch_PreparedProfileIgnoresStaleViewModelEvents(PreparedEventKind eventKind)
 	{
 		const string projectA = @"C:\Workspace\ProjectA";
@@ -221,6 +223,8 @@ public sealed class SelectionSyncCoordinatorProjectSwitchIsolationTests
 		var allExtensionsBefore = viewModel.AllExtensionsChecked;
 		var allIgnoreBefore = viewModel.AllIgnoreChecked;
 		var allContentProcessingBefore = viewModel.AllContentProcessingChecked;
+		var gitModeBefore = Assert.IsType<GitFilteringModeOptionViewModel>(
+			viewModel.SelectedGitFilteringModeOption).Mode;
 
 		switch (eventKind)
 		{
@@ -244,6 +248,15 @@ public sealed class SelectionSyncCoordinatorProjectSwitchIsolationTests
 				viewModel.AllContentProcessingChecked = !allContentProcessingBefore;
 				coordinator.HandleContentProcessingAllChanged(!allContentProcessingBefore);
 				break;
+			case PreparedEventKind.GitMode:
+				var attemptedMode = viewModel.GitFilteringModes.First(
+					option => option.Mode != gitModeBefore);
+				viewModel.SelectedGitFilteringModeOption = attemptedMode;
+				coordinator.HandleGitFilteringModeChanged(
+					attemptedMode.Mode,
+					projectB,
+					gitModeBefore);
+				break;
 			default:
 				throw new ArgumentOutOfRangeException(nameof(eventKind), eventKind, null);
 		}
@@ -262,6 +275,7 @@ public sealed class SelectionSyncCoordinatorProjectSwitchIsolationTests
 		Assert.Equal(allExtensionsBefore, viewModel.AllExtensionsChecked);
 		Assert.Equal(allIgnoreBefore, viewModel.AllIgnoreChecked);
 		Assert.Equal(allContentProcessingBefore, viewModel.AllContentProcessingChecked);
+		Assert.Equal(gitModeBefore, viewModel.SelectedGitFilteringModeOption?.Mode);
 		Assert.All(
 			viewModel.Extensions,
 			option => Assert.Equal(extensionVisualStateBefore[option.Name], option.IsChecked));

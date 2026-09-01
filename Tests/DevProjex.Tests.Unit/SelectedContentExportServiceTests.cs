@@ -178,7 +178,7 @@ public sealed class SelectedContentExportServiceTests
 		Assert.Equal(string.Empty, result);
 	}
 
-	// Verifies sorting follows the current platform path semantics.
+	// Verifies sorting follows canonical project-entry identity.
 	[Fact]
 	public void Build_SortsPathsCaseInsensitive()
 	{
@@ -190,7 +190,7 @@ public sealed class SelectedContentExportServiceTests
 		var result = service.Build([fileB, fileA]);
 
 		var orderedPaths = new[] { fileB, fileA }
-			.OrderBy(path => path, PathComparer.Default)
+			.OrderBy(path => path, ProjectTreePathIdentity.CanonicalComparer)
 			.Select(Path.GetFileName)
 			.ToArray();
 		var firstIndex = result.IndexOf($"{orderedPaths[0]}:", StringComparison.Ordinal);

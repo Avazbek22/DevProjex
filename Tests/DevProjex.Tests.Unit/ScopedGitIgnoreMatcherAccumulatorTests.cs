@@ -33,7 +33,7 @@ public sealed class ScopedGitIgnoreMatcherAccumulatorTests
 	}
 
 	[Fact]
-	public void Add_UsesPlatformPathComparisonSemantics()
+	public void Add_PreservesCaseDistinctPhysicalScopes()
 	{
 		var accumulator = new ScopedGitIgnoreMatcherAccumulator();
 		var lowerCasePath = Path.Combine("repo", "scope");
@@ -42,7 +42,7 @@ public sealed class ScopedGitIgnoreMatcherAccumulatorTests
 
 		var added = accumulator.Add(new ScopedGitIgnoreMatcher(upperCasePath, GitIgnoreMatcher.Empty));
 
-		Assert.Equal(!PathComparer.Default.Equals(lowerCasePath, upperCasePath), added);
-		Assert.Equal(added ? 2 : 1, accumulator.Items.Count);
+		Assert.True(added);
+		Assert.Equal(2, accumulator.Items.Count);
 	}
 }

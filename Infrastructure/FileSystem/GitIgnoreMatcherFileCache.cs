@@ -10,7 +10,8 @@ internal static class GitIgnoreMatcherFileCache
 	private const int CacheLimit = 512;
 	internal const long MaximumRetainedSourceBytes = 16L * 1024 * 1024;
 	private static readonly object CacheSync = new();
-	private static readonly Dictionary<string, LinkedListNode<CacheEntry>> Cache = new(PathComparer.Default);
+	private static readonly Dictionary<string, LinkedListNode<CacheEntry>> Cache =
+		new(ProjectTreePathIdentity.CanonicalComparer);
 	private static readonly LinkedList<CacheEntry> CacheLru = new();
 	private static long _retainedSourceBytes;
 

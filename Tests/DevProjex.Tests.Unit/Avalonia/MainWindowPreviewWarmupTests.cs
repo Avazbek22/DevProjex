@@ -6,6 +6,55 @@ namespace DevProjex.Tests.Unit.Avalonia;
 
 public sealed class MainWindowPreviewWarmupTests
 {
+	[Fact]
+	public void BoundedProjectionFindsExactPathBeyondLargeCaseEquivalentSiblingGroup()
+	{
+		var rootPath = Path.Combine(Path.GetTempPath(), "preview-case-equivalent");
+		var children = Enumerable.Range(0, 64)
+			.Select(index =>
+			{
+				var stem = string.Create(6, index, static (buffer, value) =>
+				{
+					for (var position = 0; position < buffer.Length; position++)
+					{
+						var letter = (char)('a' + position);
+						buffer[position] = (value & (1 << position)) == 0
+							? letter
+							: char.ToUpperInvariant(letter);
+					}
+				});
+				var name = $"{stem}.cs";
+				return new TreeNodeDescriptor(
+					name,
+					Path.Combine(rootPath, name),
+					false,
+					false,
+					"csharp",
+					[]);
+			})
+			.OrderBy(static child => child.DisplayName, StringComparer.OrdinalIgnoreCase)
+			.ToArray();
+		var root = new TreeNodeDescriptor(
+			"preview-case-equivalent",
+			rootPath,
+			true,
+			false,
+			"folder",
+			children);
+		var expected = children[^1];
+
+		var projection = PreviewWarmupPolicy.CreateBoundedTreeProjection(
+			root,
+			new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer)
+			{
+				expected.FullPath
+			},
+			maxNodeCount: 2);
+
+		var selected = Assert.Single(projection!.Children);
+		Assert.Equal(expected.FullPath, selected.FullPath);
+	}
+
     [Fact]
     public void SupportsTransformationContext_CompressionOnlyAllowsWarmup()
     {

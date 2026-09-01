@@ -97,6 +97,47 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 	}
 
 	[Fact]
+	public async Task ZipExportPreservesCaseDistinctEntriesOnCaseSensitiveVolumes()
+	{
+		using var workspace = new TemporaryDirectory();
+		var sourceRoot = workspace.CreateDirectory("Sample");
+		var destinationRoot = workspace.CreateDirectory("exports");
+		var upperPath = Path.Combine(sourceRoot, "File.txt");
+		var lowerPath = Path.Combine(sourceRoot, "file.txt");
+		await File.WriteAllTextAsync(upperPath, "upper", TestContext.Current.CancellationToken);
+		await File.WriteAllTextAsync(lowerPath, "lower", TestContext.Current.CancellationToken);
+		if (Directory.EnumerateFiles(sourceRoot).Count() != 2)
+			Assert.Skip("The temporary filesystem does not preserve case-distinct files.");
+
+		var root = new TreeNodeDescriptor(
+			"Sample",
+			sourceRoot,
+			true,
+			false,
+			"folder",
+			[
+				new TreeNodeDescriptor("File.txt", upperPath, false, false, "file", []),
+				new TreeNodeDescriptor("file.txt", lowerPath, false, false, "file", [])
+			]);
+		var destination = Path.Combine(destinationRoot, "copy.zip");
+
+		var result = await new ProjectCopyExportService(new ProjectCopyExportPlanBuilder()).ExportAsync(
+			new ProjectCopyExportRequest(
+				sourceRoot,
+				"Sample",
+				root,
+				new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer),
+				destination,
+				ProjectCopyExportFormat.Zip,
+				ProjectCopyDestinationMode.Exact),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		using var archive = ZipFile.OpenRead(result.DestinationPath);
+		Assert.Equal("upper", await ReadZipEntryTextAsync(archive, "Sample/File.txt"));
+		Assert.Equal("lower", await ReadZipEntryTextAsync(archive, "Sample/file.txt"));
+	}
+
+	[Fact]
 	public async Task FolderExport_NoSelectionCopiesCompleteEffectiveTreeByteForByte()
 	{
 		using var workspace = ProjectCopyWorkspace.Create();
@@ -1850,6 +1891,16 @@ public sealed class ProjectCopyExportServiceIntegrationTests
 		{
 			Assert.Skip($"Hard-link creation is unavailable: {exception.GetType().Name}.");
 		}
+	}
+
+	private static async Task<string> ReadZipEntryTextAsync(
+		ZipArchive archive,
+		string entryName)
+	{
+		var entry = Assert.Single(archive.Entries, candidate => candidate.FullName == entryName);
+		await using var stream = entry.Open();
+		using var reader = new StreamReader(stream, Encoding.UTF8);
+		return await reader.ReadToEndAsync(TestContext.Current.CancellationToken);
 	}
 
 	private sealed class CallbackProgress<T>(Action<T> callback) : IProgress<T>

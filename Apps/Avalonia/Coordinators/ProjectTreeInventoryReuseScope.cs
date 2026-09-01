@@ -17,7 +17,9 @@ internal sealed record ProjectTreeInventoryReuseScope(
     {
         return new ProjectTreeInventoryReuseScope(
             rootPath,
-            new HashSet<string>(options.AllowedRootFolders, PathComparer.Default),
+			new HashSet<string>(
+				options.AllowedRootFolders,
+				ProjectTreePathIdentity.CanonicalComparer),
             options.IgnoreRules.IsGitIgnoreTraversalEnabled,
             options.IgnoreRules.GitFilteringMode,
             options.IgnoreRules.UseSmartIgnore,

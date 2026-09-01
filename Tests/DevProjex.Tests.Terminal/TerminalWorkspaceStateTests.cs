@@ -69,11 +69,44 @@ public sealed class TerminalWorkspaceStateTests
 	[Fact]
 	public void CompleteSelectionUsesCanonicalEmptySelectedPaths()
 	{
-		var state = new TerminalWorkspaceState(CreatePlan());
+		using var state = new TerminalWorkspaceState(CreatePlan());
 
 		Assert.Empty(state.BuildSelectedRelativePaths());
+		Assert.Null(state.BuildSelection().SelectedPaths);
 		Assert.Equal(2, state.SelectedFileCount);
 		Assert.Equal(3, state.SelectedFolderCount);
+
+		state.SelectNone();
+
+		Assert.Empty(state.BuildSelection().SelectedPaths!);
+	}
+
+	[Fact]
+	public void CaseVariantFilesKeepIndependentSelectionState()
+	{
+		var root = CreateSyntheticRoot("case-variant-selection");
+		var upperPath = Path.Combine(root, "Foo.cs");
+		var lowerPath = Path.Combine(root, "foo.cs");
+		var upper = new TreeNodeDescriptor("Foo.cs", upperPath, false, false, "file", []);
+		var lower = new TreeNodeDescriptor("foo.cs", lowerPath, false, false, "file", []);
+		var tree = new TreeNodeDescriptor("project", root, true, false, "folder", [upper, lower]);
+		using var state = new TerminalWorkspaceState(CreatePlan(
+			tree,
+			[upperPath, lowerPath],
+			[root]));
+
+		Assert.Equal(2, state.SelectedFileCount);
+
+		state.ToggleSelection(FindRow(state, "Foo.cs"));
+
+		Assert.Equal(1, state.SelectedFileCount);
+		Assert.Equal(["foo.cs"], state.BuildSelectedRelativePaths());
+		Assert.Equal(
+			TerminalTreeCheckState.Unchecked,
+			state.VisibleRows.Single(static row => row.Node.DisplayName == "Foo.cs").CheckState);
+		Assert.Equal(
+			TerminalTreeCheckState.Checked,
+			state.VisibleRows.Single(static row => row.Node.DisplayName == "foo.cs").CheckState);
 	}
 
 	[Fact]
@@ -92,6 +125,21 @@ public sealed class TerminalWorkspaceStateTests
 		state.RestoreSelectedRelativePaths(["."]);
 		Assert.Equal(["."], state.BuildPersistedSelectedRelativePaths());
 		Assert.Equal(2, state.SelectedFileCount);
+	}
+
+	[Fact]
+	public void DesktopSelectionPreservesWholeTreeAndExplicitEmptyIntent()
+	{
+		using var state = new TerminalWorkspaceState(CreatePlan());
+
+		Assert.Equal(
+			["."],
+			TerminalWorkspaceController.BuildDesktopSelection(state).SelectedPaths);
+
+		state.SelectNone();
+
+		Assert.Empty(
+			TerminalWorkspaceController.BuildDesktopSelection(state).SelectedPaths!);
 	}
 
 	[Fact]

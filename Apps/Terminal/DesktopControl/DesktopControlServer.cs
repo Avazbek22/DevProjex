@@ -17,6 +17,7 @@ public sealed class DesktopControlServer : IAsyncDisposable
 	private readonly DesktopInstanceRegistry _registry;
 	private readonly DesktopControlPaths _paths;
 	private readonly CancellationTokenSource _shutdown = new();
+	private readonly SemaphoreSlim _registrationGate = new(1, 1);
 	private readonly object _stateLock = new();
 	private DesktopInstanceRegistration _registration;
 	private Socket? _unixListener;
@@ -83,18 +84,13 @@ public sealed class DesktopControlServer : IAsyncDisposable
 		string? projectPath,
 		CancellationToken cancellationToken = default)
 	{
-		DesktopInstanceRegistration registration;
-		lock (_stateLock)
-		{
-			_registration = _registration with
+		await PersistRegistrationUpdateAsync(
+			registration => registration with
 			{
 				ProjectPath = NormalizeOptionalPath(projectPath),
 				LastActiveUtc = DateTimeOffset.UtcNow
-			};
-			registration = _registration;
-		}
-
-		await _registry.RegisterAsync(registration, cancellationToken).ConfigureAwait(false);
+			},
+			cancellationToken).ConfigureAwait(false);
 	}
 
 	public async ValueTask DisposeAsync()
@@ -120,9 +116,17 @@ public sealed class DesktopControlServer : IAsyncDisposable
 			}
 		}
 
-		await _registry.UnregisterAsync(_registration.InstanceId).ConfigureAwait(false);
-		if (_registration.Transport == "unix")
-			DesktopInstanceRegistry.TryDelete(_registration.Endpoint);
+		await _registrationGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+		try
+		{
+			await _registry.UnregisterAsync(_registration.InstanceId).ConfigureAwait(false);
+			if (_registration.Transport == "unix")
+				DesktopInstanceRegistry.TryDelete(_registration.Endpoint);
+		}
+		finally
+		{
+			_registrationGate.Release();
+		}
 		_shutdown.Dispose();
 	}
 
@@ -237,12 +241,19 @@ public sealed class DesktopControlServer : IAsyncDisposable
 		{
 			response = Failure(requestId, exception.Code, exception.Message);
 		}
-		catch
+		catch (Exception exception) when (exception is JsonException or DecoderFallbackException)
 		{
 			response = Failure(
 				requestId,
 				"DPX-DESKTOP-INVALID-PAYLOAD",
 				"The desktop request is invalid.");
+		}
+		catch
+		{
+			response = Failure(
+				requestId,
+				"DPX-DESKTOP-REQUEST-FAILED",
+				"The desktop request could not be completed.");
 		}
 
 		var responseJson = JsonSerializer.Serialize(response, JsonOptions);
@@ -270,23 +281,42 @@ public sealed class DesktopControlServer : IAsyncDisposable
 		IReadOnlyDictionary<string, object?>? state,
 		CancellationToken cancellationToken)
 	{
-		DesktopInstanceRegistration registration;
-		lock (_stateLock)
-		{
-			var projectPath = state is not null &&
-			                  state.TryGetValue("projectPath", out var value) &&
-			                  value is string path
-				? NormalizeOptionalPath(path)
-				: _registration.ProjectPath;
-			_registration = _registration with
+		await PersistRegistrationUpdateAsync(
+			registration => registration with
 			{
-				ProjectPath = projectPath,
+				ProjectPath = state is not null &&
+				              state.TryGetValue("projectPath", out var value) &&
+				              value is string path
+					? NormalizeOptionalPath(path)
+					: registration.ProjectPath,
 				LastActiveUtc = DateTimeOffset.UtcNow
-			};
-			registration = _registration;
-		}
+			},
+			cancellationToken).ConfigureAwait(false);
+	}
 
-		await _registry.RegisterAsync(registration, cancellationToken).ConfigureAwait(false);
+	private async Task PersistRegistrationUpdateAsync(
+		Func<DesktopInstanceRegistration, DesktopInstanceRegistration> update,
+		CancellationToken cancellationToken)
+	{
+		await _registrationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+		try
+		{
+			if (Volatile.Read(ref _disposed) != 0)
+				return;
+
+			DesktopInstanceRegistration registration;
+			lock (_stateLock)
+			{
+				_registration = update(_registration);
+				registration = _registration;
+			}
+
+			await _registry.RegisterAsync(registration, cancellationToken).ConfigureAwait(false);
+		}
+		finally
+		{
+			_registrationGate.Release();
+		}
 	}
 
 	internal static async Task<string> ReadMessageAsync(

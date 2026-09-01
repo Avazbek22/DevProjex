@@ -51,6 +51,31 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 	}
 
 	[Fact]
+	public void ExplicitNoneAfterMomentaryGitModePersistsNone()
+	{
+		using var project = new TemporaryDirectory();
+		project.CreateFolder(".git");
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(
+			viewModel,
+			currentPathProvider: () => project.Path,
+			availabilityProvider: static (_, _) => new IgnoreOptionsAvailability(
+				IncludeGitIgnore: true,
+				IncludeSmartIgnore: true,
+				IncludeTrackedGitFilesOnly: true));
+
+		coordinator.PopulateIgnoreOptionsForRootSelection([], project.Path);
+		coordinator.HandleGitFilteringModeChanged(GitFilteringMode.TrackedFilesOnly, project.Path);
+		coordinator.HandleGitFilteringModeChanged(GitFilteringMode.Staged, project.Path);
+		coordinator.HandleGitFilteringModeChanged(GitFilteringMode.None, project.Path);
+
+		var states = coordinator.SnapshotIgnoreOptionStatesForPersistence();
+		Assert.NotNull(states);
+		Assert.False(states![IgnoreOptionId.UseGitIgnore]);
+		Assert.False(states[IgnoreOptionId.TrackedGitFilesOnly]);
+	}
+
+	[Fact]
 	public void AppliedTrackedMode_RemainsFailClosedWhenItsOptionIsNoLongerVisible()
 	{
 		const string projectPath = @"C:\Project";
@@ -330,6 +355,38 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 		Assert.True(viewModel.IgnoreOptions.Single(
 			static option => option.Id == IgnoreOptionId.TrackedGitFilesOnly).IsChecked);
 		Assert.True(viewModel.AllIgnoreChecked);
+	}
+
+	[AvaloniaFact]
+	public void ProjectCheckpoint_Restore_RestoresGitPresentationAndPreferredPersistenceIntent()
+	{
+		const string path = @"C:\Project";
+		var viewModel = CreateViewModel();
+		using var coordinator = CreateCoordinator(viewModel, currentPathProvider: () => path);
+		var trackedSnapshot = WithGitMode(
+			CreateReversibleSelectionRefreshSnapshot(),
+			useGitIgnore: false,
+			trackedOnly: true) with
+		{
+			GitEvidence = new GitWorkspaceEvidence(HasRepositoryBoundary: true)
+		};
+		ApplySelectionRefreshSnapshot(coordinator, trackedSnapshot);
+		HandleGitFilteringModeChangedPreservingPreferredMode(coordinator, GitFilteringMode.None);
+		var checkpoint = coordinator.CaptureProjectCheckpoint();
+
+		coordinator.HandleGitFilteringModeChanged(GitFilteringMode.RespectGitIgnore, currentPath: null);
+		ApplySelectionRefreshSnapshot(coordinator, CreateSelectionRefreshSnapshot());
+		Assert.False(viewModel.IsGitFilteringModeSelectorVisible);
+
+		coordinator.RestoreProjectCheckpoint(checkpoint);
+
+		Assert.True(viewModel.IsGitFilteringModeSelectorVisible);
+		Assert.Equal(5, viewModel.GitFilteringModes.Count);
+		Assert.Equal(GitFilteringMode.None, viewModel.SelectedGitFilteringModeOption?.Mode);
+		var persistedStates = Assert.IsAssignableFrom<IReadOnlyDictionary<IgnoreOptionId, bool>>(
+			coordinator.SnapshotIgnoreOptionStatesForPersistence());
+		Assert.False(persistedStates[IgnoreOptionId.UseGitIgnore]);
+		Assert.True(persistedStates[IgnoreOptionId.TrackedGitFilesOnly]);
 	}
 
 	[Fact]
@@ -2771,6 +2828,17 @@ public sealed class SelectionSyncCoordinatorAdditionalTests
 			BindingFlags.Instance | BindingFlags.NonPublic);
 		Assert.NotNull(method);
 		method!.Invoke(coordinator, [snapshot, retainPreviousSnapshot]);
+	}
+
+	private static void HandleGitFilteringModeChangedPreservingPreferredMode(
+		SelectionSyncCoordinator coordinator,
+		GitFilteringMode mode)
+	{
+		var method = typeof(SelectionSyncCoordinator).GetMethod(
+			"HandleGitFilteringModeChangedCore",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(method);
+		method!.Invoke(coordinator, [mode, null, true]);
 	}
 
 	private static void ApplySelectionRefreshSnapshotWithCompleteness(

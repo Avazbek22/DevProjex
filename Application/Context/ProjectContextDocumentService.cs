@@ -44,7 +44,8 @@ public sealed class ProjectContextDocumentService(
 	Func<FileContentClassification, string>? omissionMessageProvider = null,
 	SecretRedactionSession? secretRedactionSession = null,
 	CodeCompressionSession? codeCompressionSession = null,
-	OutputPathRedactionDecision? outputPathRedactionDecision = null)
+	OutputPathRedactionDecision? outputPathRedactionDecision = null,
+	IFileContentAnalyzer? preparedContentAnalyzer = null)
 {
 	private const int SchemaVersion = 1;
 	private const string Kind = "devprojex-context";
@@ -261,7 +262,7 @@ public sealed class ProjectContextDocumentService(
 		var pathRedaction = outputPathRedactionDecision ??
 		                    OutputRootPathPresentation.CaptureRedactionDecision(
 			                    CreateTransformationContext(plan));
-		var analyzer = new PreparedSecretFileContentAnalyzer(contentAnalyzer, prepared);
+		var analyzer = CreatePreparedAnalyzer(prepared);
 		plan = await RefreshStructuredContentMetricsAsync(
 				plan,
 				view,
@@ -276,7 +277,7 @@ public sealed class ProjectContextDocumentService(
 			secretRedactionSession: null,
 			codeCompressionSession: null,
 			outputPathRedactionDecision: pathRedaction);
-		return await service.WriteCompleteWithReportAsync(
+		var result = await service.WriteCompleteWithReportAsync(
 				plan,
 				view,
 				format,
@@ -287,6 +288,7 @@ public sealed class ProjectContextDocumentService(
 				writeProgress,
 				maximumEstimatedTokens)
 			.ConfigureAwait(false);
+		return result with { UnscannableFiles = prepared.UnscannableFiles };
 	}
 
 	public async Task<ProjectContextWriteResult> EvaluateTokenBudgetAsync(
@@ -322,7 +324,7 @@ public sealed class ProjectContextDocumentService(
 			.ConfigureAwait(false);
 		var service = new ProjectContextDocumentService(
 			treeExportService,
-			new PreparedSecretFileContentAnalyzer(contentAnalyzer, prepared),
+			CreatePreparedAnalyzer(prepared),
 			omissionMessageProvider,
 			secretRedactionSession: null,
 			codeCompressionSession: null,
@@ -372,6 +374,12 @@ public sealed class ProjectContextDocumentService(
 		maximumEstimatedTokens is null
 			? null
 			: new ProjectContextTokenBudgetAccumulator(maximumEstimatedTokens.Value);
+
+	private IFileContentAnalyzer CreatePreparedAnalyzer(PreparedSecretRedactionOutput prepared) =>
+		new PreparedSecretFileContentAnalyzer(
+			contentAnalyzer,
+			preparedContentAnalyzer ?? contentAnalyzer,
+			prepared);
 
 	private static async Task<ProjectContextPlan> RefreshStructuredContentMetricsAsync(
 		ProjectContextPlan plan,
@@ -446,7 +454,7 @@ public sealed class ProjectContextDocumentService(
 		await using var prepared = await preparer
 			.PrepareAsync(context, plan.IncludedFiles, cancellationToken)
 			.ConfigureAwait(false);
-		var analyzer = new PreparedSecretFileContentAnalyzer(contentAnalyzer, prepared);
+		var analyzer = CreatePreparedAnalyzer(prepared);
 		var service = new ProjectContextDocumentService(
 			treeExportService,
 			analyzer,
@@ -480,7 +488,7 @@ public sealed class ProjectContextDocumentService(
 		await using var prepared = await preparer
 			.PrepareAsync(context, plan.IncludedFiles, cancellationToken)
 			.ConfigureAwait(false);
-		var analyzer = new PreparedSecretFileContentAnalyzer(contentAnalyzer, prepared);
+		var analyzer = CreatePreparedAnalyzer(prepared);
 		plan = await RefreshStructuredContentMetricsAsync(
 				plan,
 				view,
@@ -631,7 +639,7 @@ public sealed class ProjectContextDocumentService(
 			await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
 			await WriteLineAsync(writer, null, cancellationToken).ConfigureAwait(false);
 			await writer.WriteAsync(
-					ContextRootPresentation.FormatLine(
+					ContextRootPresentation.FormatMarkdownLine(
 						NormalizePath(GetHumanReadableContentRoot(plan, pathRedaction))).AsMemory(),
 					cancellationToken)
 				.ConfigureAwait(false);
@@ -916,7 +924,7 @@ public sealed class ProjectContextDocumentService(
 							file.Metrics?.CharCount ?? 0,
 							async (chunk, _) =>
 							{
-								if (TrySanitizeXmlText(chunk.Span, out var sanitized))
+								if (XmlTextSanitizer.TrySanitize(chunk.Span, out var sanitized))
 								{
 									await writer.WriteStringAsync(sanitized)
 										.ConfigureAwait(false);
@@ -1471,7 +1479,7 @@ public sealed class ProjectContextDocumentService(
 		output.AppendLine();
 		if (view == ProjectContextView.Content)
 		{
-			output.AppendLine(ContextRootPresentation.FormatLine(
+			output.AppendLine(ContextRootPresentation.FormatMarkdownLine(
 				NormalizePath(GetHumanReadableContentRoot(plan, protectPrivateData: true))));
 		}
 		if (IncludesTree(view))
@@ -2161,60 +2169,16 @@ public sealed class ProjectContextDocumentService(
 		XmlWriter writer,
 		string localName,
 		string value) =>
-		writer.WriteAttributeString(localName, SanitizeXmlText(value));
+		writer.WriteAttributeString(localName, XmlTextSanitizer.Sanitize(value));
 
 	private static void WriteSanitizedXmlElementString(
 		XmlWriter writer,
 		string localName,
 		string value) =>
-		writer.WriteElementString(localName, SanitizeXmlText(value));
+		writer.WriteElementString(localName, XmlTextSanitizer.Sanitize(value));
 
 	private static void WriteSanitizedXmlString(XmlWriter writer, string value) =>
-		writer.WriteString(SanitizeXmlText(value));
-
-	private static string SanitizeXmlText(string value) =>
-		TrySanitizeXmlText(value.AsSpan(), out var sanitized)
-			? sanitized
-			: value;
-
-	private static bool TrySanitizeXmlText(
-		ReadOnlySpan<char> value,
-		out string sanitized)
-	{
-		StringBuilder? builder = null;
-		for (var index = 0; index < value.Length; index++)
-		{
-			var character = value[index];
-			if (char.IsHighSurrogate(character) &&
-			    index + 1 < value.Length &&
-			    char.IsLowSurrogate(value[index + 1]))
-			{
-				if (builder is not null)
-				{
-					builder.Append(character);
-					builder.Append(value[++index]);
-				}
-				else
-				{
-					index++;
-				}
-				continue;
-			}
-
-			if (XmlConvert.IsXmlChar(character))
-			{
-				builder?.Append(character);
-				continue;
-			}
-
-			builder ??= new StringBuilder(value.Length)
-				.Append(value[..index]);
-			builder.Append('\uFFFD');
-		}
-
-		sanitized = builder?.ToString() ?? string.Empty;
-		return builder is not null;
-	}
+		writer.WriteString(XmlTextSanitizer.Sanitize(value));
 
 	private static bool IncludesTree(ProjectContextView view) =>
 		view is ProjectContextView.Tree or ProjectContextView.TreeContent;
@@ -2353,7 +2317,7 @@ public sealed class ProjectContextDocumentService(
 	}
 
 	private static string EscapeMarkdownHeading(string value) =>
-		SingleLineTextEscaping.Escape(value.Replace("\\", "\\\\").Replace("#", "\\#"));
+		MarkdownInlineLiteralEncoder.Encode(value);
 
 	private static string BuildMarkdownCodeSpan(string value)
 	{

@@ -112,9 +112,10 @@ canonical Exclusions collection, and an explicit `hideSecrets` property wins.
 
 Portable-profile root arrays are normalized when they are loaded. Empty values are
 discarded, while non-empty names retain significant whitespace because it can be part
-of a valid path on Unix. Duplicates are removed before values are sorted with the
-effective host path semantics (case-insensitive on Windows, ordinal on Linux and
-macOS), giving every consumer one deterministic root set without changing path names.
+of a valid path on Unix. Duplicates are removed and values are sorted by exact ordinal
+identity, so case-distinct entries survive even on a case-sensitive Windows volume.
+When a profile is applied on Windows, a differently cased legacy name is accepted
+only if it resolves to one unambiguous discovered entry.
 
 Unknown additive JSON properties are allowed for forward compatibility. A missing
 or unsupported schema, unknown required Git mode, unknown exclusion token, or

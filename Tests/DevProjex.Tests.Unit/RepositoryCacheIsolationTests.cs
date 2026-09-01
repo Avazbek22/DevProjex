@@ -536,7 +536,7 @@ public sealed class RepositoryCacheIsolationTests : IDisposable
 		var disposal = service.DisposeAsync();
 		allowCollection.Set();
 		await disposal.AsTask().WaitAsync(
-			TimeSpan.FromSeconds(2),
+			BackgroundOperationTimeout,
 			TestContext.Current.CancellationToken);
 		service.RequestGarbageCollection();
 		await Task.Delay(100, TestContext.Current.CancellationToken);

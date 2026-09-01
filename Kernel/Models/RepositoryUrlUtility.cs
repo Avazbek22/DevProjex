@@ -30,7 +30,12 @@ public static class RepositoryUrlUtility
 			return string.Empty;
 
 		if (TryParseScpSyntax(trimmed, out var scp))
-			return $"{scp.UserPrefix}{scp.Host.ToLowerInvariant()}:{NormalizePath(scp.Path)}";
+		{
+			var safePath = RemoveQueryAndFragment(scp.Path);
+			return safePath.Length == 0
+				? string.Empty
+				: $"{scp.UserPrefix}{scp.Host.ToLowerInvariant()}:{NormalizePath(safePath)}";
+		}
 
 		if (!Uri.TryCreate(trimmed.Replace('\\', '/'), UriKind.Absolute, out var uri))
 			return trimmed.Contains("://", StringComparison.Ordinal)
@@ -143,6 +148,18 @@ public static class RepositoryUrlUtility
 
 	public static string ToSafeDisplay(string? repositoryUrl) => Normalize(repositoryUrl);
 
+	public static bool IsNetworkCloneSource(string? repositoryUrl)
+	{
+		if (!TryNormalize(repositoryUrl, out var normalized))
+			return false;
+
+		if (TryParseScpSyntax(normalized, out _))
+			return true;
+
+		return Uri.TryCreate(normalized, UriKind.Absolute, out var uri) &&
+		       uri.Scheme is "http" or "https" or "ssh" or "git";
+	}
+
 	public static bool IsSupportedCloneSource(string? repositoryUrl)
 	{
 		if (!TryNormalize(repositoryUrl, out var normalized) ||
@@ -167,6 +184,14 @@ public static class RepositoryUrlUtility
 		{
 			return false;
 		}
+	}
+
+	public static bool IsScpStyleSource(string? repositoryUrl)
+	{
+		if (!TryNormalize(repositoryUrl, out var normalized))
+			return false;
+
+		return TryParseScpSyntax(normalized, out _);
 	}
 
 	private static string BuildVersionedHostPathKey(string host, int port, string path)
@@ -203,6 +228,12 @@ public static class RepositoryUrlUtility
 
 	private static string NormalizePath(string value) =>
 		value.Replace('\\', '/').Trim().TrimEnd('/');
+
+	private static string RemoveQueryAndFragment(string value)
+	{
+		var separator = value.AsSpan().IndexOfAny('?', '#');
+		return separator < 0 ? value : value[..separator];
+	}
 
 	private static string TrimGitSuffix(
 		string value,

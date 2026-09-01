@@ -254,6 +254,32 @@ public sealed class IgnoreSelectionStateTests
 		Assert.True(state.OptionStateCache[IgnoreOptionId.TrackedGitFilesOnly]);
 	}
 
+	[Fact]
+	public void ExplicitNoneBecomesTheStickyModeForSubsequentMomentarySelection()
+	{
+		var state = new IgnoreSelectionState();
+		state.SetActiveGitFilteringMode(GitFilteringMode.TrackedFilesOnly);
+		state.SetActiveGitFilteringMode(GitFilteringMode.None);
+		state.SetActiveGitFilteringMode(GitFilteringMode.Staged);
+
+		Assert.Equal(GitFilteringMode.Staged, state.ActiveGitFilteringMode);
+		Assert.Equal(GitFilteringMode.None, state.PreferredGitFilteringMode);
+	}
+
+	[Fact]
+	public void RuntimeFallbackDoesNotReplaceTheStickyMode()
+	{
+		var state = new IgnoreSelectionState();
+		state.SetActiveGitFilteringMode(GitFilteringMode.TrackedFilesOnly);
+		state.SetActiveGitFilteringMode(GitFilteringMode.Staged);
+		state.SetActiveGitFilteringMode(
+			GitFilteringMode.None,
+			rememberPersistentPreference: false);
+
+		Assert.Equal(GitFilteringMode.None, state.ActiveGitFilteringMode);
+		Assert.Equal(GitFilteringMode.TrackedFilesOnly, state.PreferredGitFilteringMode);
+	}
+
 	[Theory]
 	[InlineData(GitFilteringMode.Staged, GitFilteringMode.None)]
 	[InlineData(GitFilteringMode.Changes, GitFilteringMode.RespectGitIgnore)]

@@ -57,4 +57,16 @@ public sealed class ProjectContextTokenBudgetAccumulatorTests
 			["a-first.cs", "z-last.cs"],
 			budget.CreateReport().LargestSkippedFiles.Select(static file => file.Path));
 	}
+
+	[Fact]
+	public void CreateReport_OrdersCaseDistinctEqualEstimatesByCanonicalIdentity()
+	{
+		var budget = new ProjectContextTokenBudgetAccumulator(1);
+		Assert.False(budget.TryInclude("foo.cs", 8));
+		Assert.False(budget.TryInclude("Foo.cs", 8));
+
+		Assert.Equal(
+			["Foo.cs", "foo.cs"],
+			budget.CreateReport().LargestSkippedFiles.Select(static file => file.Path));
+	}
 }

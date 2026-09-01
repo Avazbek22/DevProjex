@@ -102,7 +102,9 @@ public partial class MainWindow
 
         _metrics.CancelBackgroundCalculation();
         CancelPreviewRefresh();
-        var selectedPaths = new HashSet<string>(GetCheckedPaths(), PathComparer.Default);
+        var selectedPaths = new HashSet<string>(
+            GetCheckedPaths(),
+            ProjectTreePathIdentity.CanonicalComparer);
         var request = new ProjectCopyExportRequest(
             _currentPath,
             GetProjectCopyName(),

@@ -84,7 +84,7 @@ internal sealed class MarkedSecretsMatcher
 		}
 		_persistentSourceMarksByPath = normalizedPersistentMarks
 			.Where(static mark => mark.RelativePath is not null)
-			.GroupBy(static mark => NormalizePath(mark.RelativePath!), PathComparer.Default)
+			.GroupBy(static mark => NormalizePath(mark.RelativePath!), ProjectTreePathIdentity.CanonicalComparer)
 			.ToDictionary(
 				static group => group.Key,
 				static group => group
@@ -92,10 +92,10 @@ internal sealed class MarkedSecretsMatcher
 						mark,
 						PersistentHash.Create(mark)))
 					.ToArray(),
-				PathComparer.Default);
+				ProjectTreePathIdentity.CanonicalComparer);
 		_sessionMarksByPath = sessionMarks
 			.Where(static mark => IsValidHash(mark.Hash))
-			.GroupBy(static mark => NormalizePath(mark.RelativePath), PathComparer.Default)
+			.GroupBy(static mark => NormalizePath(mark.RelativePath), ProjectTreePathIdentity.CanonicalComparer)
 			.ToDictionary(
 				static group => group.Key,
 				static group => group
@@ -103,7 +103,7 @@ internal sealed class MarkedSecretsMatcher
 						mark,
 						Convert.FromHexString(mark.Hash)))
 					.ToArray(),
-				PathComparer.Default);
+				ProjectTreePathIdentity.CanonicalComparer);
 	}
 
 	public IReadOnlyList<DetectedSecret> Match(

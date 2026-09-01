@@ -19,10 +19,10 @@ internal static class GitTrackedPathIndexCache
 	private static readonly TimeSpan FailedLoadRetryDelay = TimeSpan.FromMilliseconds(100);
 	private static readonly object CacheSync = new();
 	private static readonly Dictionary<string, LinkedListNode<CacheEntry>> Cache =
-		new(PathComparer.Default);
+		new(ProjectTreePathIdentity.CanonicalComparer);
 	private static readonly LinkedList<CacheEntry> CacheLru = new();
 	private static readonly ConcurrentDictionary<string, SharedAsyncOperation<LoadedGitTrackedPathIndex?>> InFlightLoads =
-		new(PathComparer.Default);
+		new(ProjectTreePathIdentity.CanonicalComparer);
 	private static long _cacheSizeBytes;
 	private static int _gitAvailability;
 
@@ -614,11 +614,9 @@ internal static class GitTrackedPathIndexCache
 		try
 		{
 			var attributes = File.GetAttributes(gitMetadataPath);
-			if (attributes.HasFlag(FileAttributes.ReparsePoint))
-				return false;
-
-			return attributes.HasFlag(FileAttributes.Directory) ||
-			       UnixFileTypeInspector.IsRegularFile(gitMetadataPath);
+			return UnixFileTypeInspector.IsPhysicalDirectoryOrRegularFile(
+				gitMetadataPath,
+				attributes);
 		}
 		catch (FileNotFoundException)
 		{

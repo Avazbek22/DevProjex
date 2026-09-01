@@ -10,7 +10,7 @@ namespace DevProjex.Infrastructure.FileSystem;
 internal sealed class GitIgnoreMatcherLoadSession
 {
 	private readonly ConcurrentDictionary<string, Lazy<GitIgnoreMatcherLoadResult>> _loads =
-		new(PathComparer.Default);
+		new(ProjectTreePathIdentity.CanonicalComparer);
 	private readonly Func<string, string, CancellationToken, GitIgnoreMatcherLoadResult> _loader;
 
 	public GitIgnoreMatcherLoadSession()

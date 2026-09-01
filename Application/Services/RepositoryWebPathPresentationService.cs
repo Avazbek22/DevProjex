@@ -15,18 +15,26 @@ public sealed class RepositoryWebPathPresentationService
         if (string.IsNullOrWhiteSpace(localRootPath) || string.IsNullOrWhiteSpace(repositoryUrl))
             return null;
 
-        var normalizedRootPath = Path.GetFullPath(localRootPath);
-        if (!Uri.TryCreate(NormalizeForDisplay(repositoryUrl), UriKind.Absolute, out var repoUri))
+        if (!RepositoryUrlUtility.IsSupportedCloneSource(repositoryUrl))
             return null;
 
-        if (!repoUri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) &&
-            !repoUri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase))
+        string normalizedRootPath;
+        try
+        {
+            normalizedRootPath = Path.GetFullPath(localRootPath);
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or NotSupportedException or PathTooLongException)
         {
             return null;
         }
 
-        var rootWebPath = repoUri.ToString().TrimEnd('/');
-        var displayRootName = ExtractRepositoryName(repoUri);
+        var rootWebPath = NormalizeForDisplay(repositoryUrl);
+        if (rootWebPath.Length == 0)
+            return null;
+        var displayRootName = Uri.TryCreate(rootWebPath, UriKind.Absolute, out var repositoryUri)
+            ? ExtractRepositoryName(repositoryUri)
+            : RepositoryUrlUtility.GetRepositoryName(rootWebPath);
 
         return new ExportPathPresentation(
             displayRootPath: rootWebPath,

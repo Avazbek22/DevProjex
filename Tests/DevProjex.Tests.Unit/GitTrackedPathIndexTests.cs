@@ -279,6 +279,7 @@ public sealed class GitTrackedPathIndexTests
 	{
 		using var temp = new TemporaryDirectory();
 		var repositoryRoot = temp.CreateFolder("repo");
+		temp.CreateFile("repo/Src/App.cs", "content");
 		var index = new GitTrackedPathIndex(repositoryRoot, ["Src/App.cs"]);
 		var differentlyCasedDirectory = Path.Combine(repositoryRoot, "src");
 		var differentlyCasedFile = Path.Combine(differentlyCasedDirectory, "app.cs");
@@ -289,13 +290,14 @@ public sealed class GitTrackedPathIndexTests
 	}
 
 	[Fact]
-	public void ExplicitCaseInsensitiveSemantics_DeduplicateAndMatchRepositoryPaths()
+	public void ExplicitCaseInsensitiveSemantics_MatchAUniqueWorkingTreeAlias()
 	{
 		using var temp = new TemporaryDirectory();
 		var repositoryRoot = temp.CreateFolder("repo");
+		temp.CreateFile("repo/Src/App.cs", "content");
 		var index = new GitTrackedPathIndex(
 			repositoryRoot,
-			["Src/App.cs", "src/app.cs"],
+			["Src/App.cs"],
 			new GitPathComparisonSemantics(
 				IgnoreCase: true,
 				NormalizeUnicode: false));
@@ -306,10 +308,66 @@ public sealed class GitTrackedPathIndexTests
 	}
 
 	[Fact]
+	public void ExplicitCaseInsensitiveSemantics_RejectAnAmbiguousWorkingTreeAlias()
+	{
+		using var temp = new TemporaryDirectory();
+		var repositoryRoot = temp.CreateFolder("repo");
+		var upperPath = temp.CreateFile("repo/Foo.cs", "upper");
+		var lowerPath = temp.CreateFile("repo/foo.cs", "lower");
+		if (Directory.EnumerateFiles(repositoryRoot, "*.cs").Count() < 2)
+			Assert.Skip("The temporary file system is case-insensitive.");
+
+		var scopedIndex = new GitTrackedPathIndex(
+			repositoryRoot,
+			["Foo.cs"],
+			new GitPathComparisonSemantics(
+				IgnoreCase: true,
+				NormalizeUnicode: false));
+		var completeIndex = new GitTrackedPathIndex(
+			repositoryRoot,
+			["Foo.cs", "foo.cs"],
+			new GitPathComparisonSemantics(
+				IgnoreCase: true,
+				NormalizeUnicode: false));
+
+		Assert.True(scopedIndex.Contains(upperPath));
+		Assert.False(scopedIndex.Contains(lowerPath));
+		Assert.Equal(2, completeIndex.Count);
+		Assert.True(completeIndex.Contains(upperPath));
+		Assert.True(completeIndex.Contains(lowerPath));
+		Assert.False(completeIndex.Contains(Path.Combine(repositoryRoot, "FOO.cs")));
+	}
+
+	[Fact]
+	public void WindowsCompatibilityAliasSelectionRequiresOneDiscoveredSibling()
+	{
+		var parent = Path.Combine(Path.GetTempPath(), "case-alias-parent");
+		var upper = Path.Combine(parent, "Repo");
+		var lower = Path.Combine(parent, "repo");
+
+		Assert.False(GitTrackedPathIndex.TryFindUniqueWindowsCompatibleEntry(
+			[upper, lower],
+			"REPO",
+			out _));
+		Assert.True(GitTrackedPathIndex.TryFindUniqueWindowsCompatibleEntry(
+			[upper, lower],
+			"Repo",
+			out var exact));
+		Assert.Equal(upper, exact);
+		Assert.True(GitTrackedPathIndex.TryFindUniqueWindowsCompatibleEntry(
+			[upper],
+			"repo",
+			out var unique));
+		Assert.Equal(upper, unique);
+	}
+
+	[Fact]
 	public void ExplicitCaseInsensitiveSemantics_UseGitAsciiFoldWithoutMergingUnicodeNames()
 	{
 		using var temp = new TemporaryDirectory();
 		var repositoryRoot = temp.CreateFolder("repo");
+		temp.CreateFile("repo/ASCII/FILE.cs", "content");
+		temp.CreateFile("repo/Ä.cs", "content");
 		var index = new GitTrackedPathIndex(
 			repositoryRoot,
 			["ASCII/FILE.cs", "Ä.cs"],
@@ -338,15 +396,33 @@ public sealed class GitTrackedPathIndexTests
 	}
 
 	[Fact]
+	public void RepositoryOwnershipUsesPlatformSemanticsInsteadOfGitPathSemantics()
+	{
+		using var temp = new TemporaryDirectory();
+		var repositoryRoot = temp.CreateFolder("Repo");
+		var alternateRoot = Path.Combine(temp.Path, "repo");
+		var index = new GitTrackedPathIndex(
+			repositoryRoot,
+			["App.cs"],
+			new GitPathComparisonSemantics(IgnoreCase: true, NormalizeUnicode: true));
+
+		Assert.Equal(OperatingSystem.IsWindows(), index.MatchesRepositoryRoot(alternateRoot));
+		Assert.Equal(
+			OperatingSystem.IsWindows(),
+			index.OwnsPath(Path.Combine(alternateRoot, "App.cs")));
+	}
+
+	[Fact]
 	public void UnicodeNormalizationSemantics_MatchCanonicallyEquivalentGitPaths()
 	{
 		using var temp = new TemporaryDirectory();
 		var repositoryRoot = temp.CreateFolder("repo");
 		const string precomposedName = "caf\u00e9.cs";
 		const string decomposedName = "cafe\u0301.cs";
+		temp.CreateFile($"repo/{precomposedName}", "content");
 		var index = new GitTrackedPathIndex(
 			repositoryRoot,
-			[precomposedName, decomposedName],
+			[precomposedName],
 			new GitPathComparisonSemantics(
 				IgnoreCase: false,
 				NormalizeUnicode: true));
@@ -373,10 +449,11 @@ public sealed class GitTrackedPathIndexTests
 	}
 
 	[Fact]
-	public void ScanContext_UsesRepositorySpecificCaseAndUnicodeSemanticsToResolveIndex()
+	public void ScanContext_UsesRepositorySpecificSemanticsOnlyInsideThePhysicalRepository()
 	{
 		using var temp = new TemporaryDirectory();
 		var repositoryRoot = temp.CreateFolder("r\u00e9po");
+		temp.CreateFile("r\u00e9po/Src/caf\u00e9.cs", "content");
 		var index = new GitTrackedPathIndex(
 			repositoryRoot,
 			["Src/caf\u00e9.cs"],
@@ -394,11 +471,8 @@ public sealed class GitTrackedPathIndexTests
 			UseTrackedGitFilesOnly = true,
 			EnableGitIgnoreTraversal = true
 		};
-		var alternateRootPath = Path.Combine(
-			Path.GetDirectoryName(repositoryRoot)!,
-			"Re\u0301PO");
 		var alternateFilePath = Path.Combine(
-			alternateRootPath,
+			repositoryRoot,
 			"src",
 			"cafe\u0301.cs");
 		var context = rules
@@ -411,8 +485,47 @@ public sealed class GitTrackedPathIndexTests
 			isDirectory: false,
 			"cafe\u0301.cs");
 
-		Assert.True(context.ContainsTrackedPathIndex(alternateRootPath));
+		Assert.True(context.ContainsTrackedPathIndex(repositoryRoot));
 		Assert.False(evaluation.IsIgnored);
+	}
+
+	[Fact]
+	public void ScanContext_DoesNotMergeCaseDistinctRepositoryRoots()
+	{
+		using var temp = new TemporaryDirectory();
+		var upperRoot = temp.CreateFolder("Repo");
+		var lowerRoot = temp.CreateFolder("repo");
+		var upperFile = temp.CreateFile("Repo/Upper.cs", "upper");
+		var lowerFile = temp.CreateFile("repo/Lower.cs", "lower");
+		if (Directory.EnumerateDirectories(temp.Path).Count() < 2)
+			Assert.Skip("The temporary file system is case-insensitive.");
+
+		var rules = new IgnoreRules(
+			IgnoreHiddenFolders: false,
+			IgnoreHiddenFiles: false,
+			IgnoreDotFolders: false,
+			IgnoreDotFiles: false,
+			SmartIgnoredFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+			SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase))
+		{
+			UseTrackedGitFilesOnly = true,
+			EnableGitIgnoreTraversal = true
+		};
+		var context = rules
+			.CreateGitIgnoreScanContext(temp.Path)
+			.WithTrackedPathIndex(new GitTrackedPathIndex(
+				upperRoot,
+				["Upper.cs"],
+				new GitPathComparisonSemantics(IgnoreCase: true, NormalizeUnicode: false)))
+			.WithTrackedPathIndex(new GitTrackedPathIndex(
+				lowerRoot,
+				["Lower.cs"],
+				new GitPathComparisonSemantics(IgnoreCase: false, NormalizeUnicode: false)));
+
+		Assert.True(context.ContainsTrackedPathIndex(upperRoot));
+		Assert.True(context.ContainsTrackedPathIndex(lowerRoot));
+		Assert.False(context.Evaluate(upperFile, "Repo/Upper.cs", false, "Upper.cs").IsIgnored);
+		Assert.False(context.Evaluate(lowerFile, "repo/Lower.cs", false, "Lower.cs").IsIgnored);
 	}
 
 	[Fact]

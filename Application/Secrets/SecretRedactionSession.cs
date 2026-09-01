@@ -1316,7 +1316,7 @@ public sealed class SecretRedactionSession : IDisposable
 						StringComparison.OrdinalIgnoreCase) &&
 						(persistentMarkLength is null || identity.Length == persistentMarkLength) &&
 						(!matchPersistentScope ||
-						 PathComparer.Default.Equals(identity.RelativePath, persistentRelativePath) &&
+						 ProjectTreePathIdentity.CanonicalComparer.Equals(identity.RelativePath, persistentRelativePath) &&
 						 identity.SourceOffset == persistentSourceOffset))
 					.ToArray();
 				foreach (var identity in identities)
@@ -2239,7 +2239,7 @@ public sealed class SecretRedactionScope
 	private readonly Dictionary<string, int> _ruleIdentityCounts = new(StringComparer.Ordinal);
 	private readonly Dictionary<string, int> _markedSecretCounts = new(StringComparer.OrdinalIgnoreCase);
 	private readonly ConcurrentDictionary<string, SecretContentInspectionMode> _inspectionModes =
-		new(PathComparer.Default);
+		new(ProjectTreePathIdentity.CanonicalComparer);
 	private readonly SecretOutputInspectionBudget _outputInspectionBudget = new();
 	private int _detectedCount;
 	private int _redactedCount;

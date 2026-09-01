@@ -31,13 +31,13 @@ public static class ProjectFileSizeFilter
 			excludedFiles++;
 			excludedBytes = SaturatingAdd(excludedBytes, size);
 		}
-
 		var summary = new FileSizeFilterSummary(
 			maximumFileBytes.Value,
 			excludedFiles,
 			excludedBytes);
 		if (excludedFiles == 0)
 			return plan with { FileSizeFilter = summary };
+		AppendPreexistingEmptyDirectories(plan, selected, cancellationToken);
 
 		ProjectContextPlan narrowed;
 		if (selected.Count == 0)
@@ -87,6 +87,43 @@ public static class ProjectFileSizeFilter
 		{
 			// An unreadable size cannot safely prove that the file exceeds the cap.
 			return 0;
+		}
+	}
+
+	private static void AppendPreexistingEmptyDirectories(
+		ProjectContextPlan plan,
+		List<string> selected,
+		CancellationToken cancellationToken)
+	{
+		var emptyDirectories = new List<string>();
+		var stack = new Stack<TreeNodeDescriptor>();
+		for (var index = plan.ProjectedTree.Children.Count - 1; index >= 0; index--)
+			stack.Push(plan.ProjectedTree.Children[index]);
+
+		while (stack.Count > 0)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var node = stack.Pop();
+			if (!node.IsDirectory)
+				continue;
+			if (node.Children.Count == 0)
+			{
+				emptyDirectories.Add(node.FullPath);
+				continue;
+			}
+
+			for (var index = node.Children.Count - 1; index >= 0; index--)
+				stack.Push(node.Children[index]);
+		}
+
+		CancellationAwareSort.Sort(
+			emptyDirectories,
+			ProjectTreePathIdentity.CanonicalComparer,
+			cancellationToken);
+		foreach (var path in emptyDirectories)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			selected.Add(PathUtility.GetPortableRelativePath(plan.SourceRoot, path));
 		}
 	}
 

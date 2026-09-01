@@ -130,7 +130,8 @@ public sealed class TerminalServiceFactory(
 				contextPlanner,
 				sourceIdentityResolver,
 				secretRedactionSession,
-				new GitScopePathProvider());
+				new GitScopePathProvider(),
+				new GitRemoteDiffRangeResolver());
 
 			return new TerminalServices(
 				Localization: localization,

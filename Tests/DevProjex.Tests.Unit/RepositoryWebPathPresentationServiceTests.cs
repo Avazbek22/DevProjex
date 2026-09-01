@@ -74,6 +74,37 @@ public sealed class RepositoryWebPathPresentationServiceTests
 		Assert.Equal("https://github.com/Avazbek22/DevProjex/src/MainWindow.axaml.cs", mapped);
 	}
 
+	[Theory]
+	[InlineData(
+		"ssh://git@example.com/owner/repository.git",
+		"ssh://git@example.com/owner/repository")]
+	[InlineData(
+		"git://example.com/owner/repository.git",
+		"git://example.com/owner/repository")]
+	[InlineData(
+		"git@example.com:owner/repository.git",
+		"git@example.com:owner/repository")]
+	[InlineData(
+		"file:///srv/git/repository.git",
+		"file:///srv/git/repository")]
+	public void TryCreate_MapsSupportedNonHttpRepositoryWithoutExposingCheckoutRoot(
+		string repositoryUrl,
+		string expectedRoot)
+	{
+		var checkoutRoot = BuildAbsolutePath("cache", "checkout");
+		var presentation = new RepositoryWebPathPresentationService().TryCreate(
+			checkoutRoot,
+			repositoryUrl);
+
+		Assert.NotNull(presentation);
+		Assert.Equal(expectedRoot, presentation!.DisplayRootPath);
+		Assert.Equal("repository", presentation.DisplayRootName);
+		Assert.Equal(
+			$"{expectedRoot}/src/Main.cs",
+			presentation.MapFilePath(Path.Combine(checkoutRoot, "src", "Main.cs")));
+		Assert.DoesNotContain(checkoutRoot, presentation.DisplayRootPath, StringComparison.OrdinalIgnoreCase);
+	}
+
 	[Fact]
 	public void TryCreate_DotDotPrefixedDirectoryRemainsInsideRepository()
 	{

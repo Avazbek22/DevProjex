@@ -122,6 +122,43 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 	}
 
 	[AvaloniaFact]
+	public async Task GitCloneWindow_RepositoryDropDownsMatchComboBoxWidthWithLongContent()
+	{
+		var appDataPath = CreateAppDataPath();
+		var cache = new RepoCacheService(Path.Combine(appDataPath, "RepoCache"));
+		var cachedRepositoryUrl = $"https://github.com/example/{new string('c', 240)}.git";
+		var recentRepositoryUrl = $"https://github.com/example/{new string('r', 240)}.git";
+		CreateCachedRepository(cache, cachedRepositoryUrl, "main", 64, git: false);
+		var recentStore = new RecentProjectsStore(() => appDataPath);
+		recentStore.AddRepository(recentStore.Load(), recentRepositoryUrl);
+		var window = await CreateWindowAsync(appDataPath, cache);
+
+		try
+		{
+			var cloneWindow = await UiTestDriver.OpenGitCloneWindowAsync(window);
+			try
+			{
+				await WaitForCatalogAsync(window, expectedCount: 1);
+				var recentComboBox = Assert.IsType<ComboBox>(
+					cloneWindow.FindControl<ComboBox>("RecentRepositoriesComboBox"));
+				var cacheComboBox = Assert.IsType<ComboBox>(
+					cloneWindow.FindControl<ComboBox>("LocalCacheComboBox"));
+
+				await AssertDropDownMatchesComboBoxWidthAsync(window, recentComboBox);
+				await AssertDropDownMatchesComboBoxWidthAsync(window, cacheComboBox);
+			}
+			finally
+			{
+				await UiTestDriver.CloseTopLevelWindowAsync(cloneWindow);
+			}
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task GitCloneWindow_LocalCache_ShowsNewestFirstDetailsAndLocalizedHeadings()
 	{
 		var appDataPath = CreateAppDataPath();
@@ -1375,6 +1412,39 @@ public sealed class MainWindowRepositoryCacheUiTests(UiWorkspaceFixture workspac
 				       (!expectedCount.HasValue || viewModel.CachedRepositories.Count == expectedCount.Value);
 			},
 			"local cache catalog to load");
+	}
+
+	private static async Task AssertDropDownMatchesComboBoxWidthAsync(MainWindow window, ComboBox comboBox)
+	{
+		comboBox.IsDropDownOpen = true;
+		Border? popupBorder = null;
+		try
+		{
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() =>
+				{
+					var popup = comboBox
+						.GetVisualDescendants()
+						.OfType<Popup>()
+						.FirstOrDefault(static candidate => candidate.IsOpen);
+					popupBorder = popup?.Child as Border;
+					return comboBox.Bounds.Width > 0 && popupBorder is { Bounds.Width: > 0 };
+				},
+				"repository dropdown popup to be measured");
+
+			var expectedWidth = comboBox.Bounds.Width;
+			var measuredPopupBorder = Assert.IsType<Border>(popupBorder);
+			Assert.Equal(expectedWidth, measuredPopupBorder.Bounds.Width, precision: 3);
+			Assert.Equal(expectedWidth, measuredPopupBorder.Width);
+			Assert.Equal(expectedWidth, measuredPopupBorder.MinWidth);
+			Assert.Equal(expectedWidth, measuredPopupBorder.MaxWidth);
+		}
+		finally
+		{
+			comboBox.IsDropDownOpen = false;
+			await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+		}
 	}
 
 	private static async Task<Button> OpenAndFindDeleteButtonAsync(

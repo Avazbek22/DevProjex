@@ -39,13 +39,15 @@ public sealed class MainWindowViewModelTests
 		var viewModel = CreateViewModel();
 		viewModel.RefreshGitFilteringModes(
 			repositoryAvailable: true,
-			GitFilteringMode.Staged);
+			selectorVisible: true,
+			selectedMode: GitFilteringMode.Staged);
 		var previousSelection = Assert.IsType<GitFilteringModeOptionViewModel>(
 			viewModel.SelectedGitFilteringModeOption);
 
 		viewModel.RefreshGitFilteringModes(
 			repositoryAvailable: true,
-			GitFilteringMode.Staged);
+			selectorVisible: true,
+			selectedMode: GitFilteringMode.Staged);
 
 		var currentSelection = Assert.IsType<GitFilteringModeOptionViewModel>(
 			viewModel.SelectedGitFilteringModeOption);
@@ -53,6 +55,24 @@ public sealed class MainWindowViewModelTests
 		Assert.Contains(
 			viewModel.GitFilteringModes,
 			option => ReferenceEquals(option, currentSelection));
+	}
+
+	[Fact]
+	public void GitFilteringModes_SelectorVisibilityFollowsCurrentGitApplicability()
+	{
+		var viewModel = CreateViewModel();
+
+		viewModel.RefreshGitFilteringModes(
+			repositoryAvailable: false,
+			selectorVisible: false,
+			selectedMode: GitFilteringMode.None);
+		Assert.False(viewModel.IsGitFilteringModeSelectorVisible);
+
+		viewModel.RefreshGitFilteringModes(
+			repositoryAvailable: true,
+			selectorVisible: true,
+			selectedMode: GitFilteringMode.None);
+		Assert.True(viewModel.IsGitFilteringModeSelectorVisible);
 	}
 
 	[Fact]

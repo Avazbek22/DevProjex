@@ -8,6 +8,11 @@ internal sealed class McpRootJailFileStreamOpener
 {
 	private const int DarwinGetPath = 50;
 	private const int DarwinPathBufferLength = 1024;
+	private const uint WindowsShareRead = 0x00000001;
+	private const uint WindowsShareWrite = 0x00000002;
+	private const uint WindowsShareDelete = 0x00000004;
+	private const uint WindowsOpenExisting = 3;
+	private const uint WindowsBackupSemantics = 0x02000000;
 	private readonly McpProjectRootJail _roots;
 
 	public McpRootJailFileStreamOpener(McpProjectRootJail roots) =>
@@ -24,8 +29,8 @@ internal sealed class McpRootJailFileStreamOpener
 		FileShare fileShare,
 		bool asynchronous)
 	{
+		var lexicalRoot = _roots.ResolveLexicalRoot(path);
 		UnixFileTypeInspector.EnsureRegularFile(path);
-		var lexicalRoot = _roots.FindLexicalRoot(path);
 		var stream = new FileStream(
 			path,
 			FileMode.Open,
@@ -36,11 +41,8 @@ internal sealed class McpRootJailFileStreamOpener
 			(asynchronous ? FileOptions.Asynchronous : FileOptions.None));
 		try
 		{
-			if (lexicalRoot is not null)
-			{
-				var openedPath = ResolveOpenedPath(stream.SafeFileHandle);
-				_roots.EnsureOpenedPathIsWithin(lexicalRoot, path, openedPath);
-			}
+			var openedPath = ResolveOpenedPath(stream.SafeFileHandle);
+			_roots.EnsureOpenedPathIsWithin(lexicalRoot, path, openedPath);
 			return stream;
 		}
 		catch
@@ -62,6 +64,51 @@ internal sealed class McpRootJailFileStreamOpener
 		if (OperatingSystem.IsMacOS())
 			return ResolveDarwinPath(handle);
 		throw new PlatformNotSupportedException("MCP root-jail file reads require Windows, Linux, or macOS.");
+	}
+
+	internal static string ResolveDirectoryPath(string path)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(path);
+		if (!OperatingSystem.IsWindows())
+			return ResolveUnixDirectoryPath(path);
+
+		using var handle = OpenWindowsDirectory(path);
+		if (handle.IsInvalid)
+			throw NativeFailure("The final path of an MCP project root could not be opened.");
+		return Path.TrimEndingDirectorySeparator(ResolveOpenedPath(handle));
+	}
+
+	private static SafeFileHandle OpenWindowsDirectory(string path) =>
+		CreateFile(
+			path,
+			desiredAccess: 0,
+			WindowsShareRead | WindowsShareWrite | WindowsShareDelete,
+			securityAttributes: IntPtr.Zero,
+			WindowsOpenExisting,
+			WindowsBackupSemantics,
+			templateFile: IntPtr.Zero);
+
+	private static string ResolveUnixDirectoryPath(string path)
+	{
+		if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+			throw new PlatformNotSupportedException(
+				"MCP root-jail directory handles require Windows, Linux, or macOS.");
+
+		var directory = OpenDirectory(path);
+		if (directory == IntPtr.Zero)
+			throw NativeFailure("The final path of an MCP project root could not be opened.");
+		try
+		{
+			var descriptor = GetDirectoryFileDescriptor(directory);
+			if (descriptor < 0)
+				throw NativeFailure("The final path of an MCP project root could not be opened.");
+			using var handle = new SafeFileHandle(descriptor, ownsHandle: false);
+			return Path.TrimEndingDirectorySeparator(ResolveOpenedPath(handle));
+		}
+		finally
+		{
+			_ = CloseDirectory(directory);
+		}
 	}
 
 	private static string ResolveWindowsPath(SafeFileHandle handle)
@@ -158,11 +205,31 @@ internal sealed class McpRootJailFileStreamOpener
 		uint pathLength,
 		uint flags);
 
+	[DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+	private static extern SafeFileHandle CreateFile(
+		string fileName,
+		uint desiredAccess,
+		uint shareMode,
+		IntPtr securityAttributes,
+		uint creationDisposition,
+		uint flagsAndAttributes,
+		IntPtr templateFile);
+
 	[DllImport("libc", EntryPoint = "readlink", SetLastError = true)]
 	private static extern nint ReadLink(
 		[MarshalAs(UnmanagedType.LPUTF8Str)] string path,
 		byte[] buffer,
 		nuint bufferSize);
+
+	[DllImport("libc", EntryPoint = "opendir", SetLastError = true)]
+	private static extern IntPtr OpenDirectory(
+		[MarshalAs(UnmanagedType.LPUTF8Str)] string path);
+
+	[DllImport("libc", EntryPoint = "dirfd", SetLastError = true)]
+	private static extern int GetDirectoryFileDescriptor(IntPtr directory);
+
+	[DllImport("libc", EntryPoint = "closedir", SetLastError = true)]
+	private static extern int CloseDirectory(IntPtr directory);
 
 	[DllImport("libSystem.B.dylib", EntryPoint = "fcntl", SetLastError = true)]
 	private static extern int DarwinFcntl(int descriptor, int command, IntPtr pathBuffer);

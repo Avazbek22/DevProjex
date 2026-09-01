@@ -46,6 +46,21 @@ public sealed class ContentSelectionSnapshotTests
 	}
 
 	[Fact]
+	public void Create_PreservesPathsThatDifferOnlyByCase()
+	{
+		var upperPath = Path.Combine("project", "Foo.cs");
+		var lowerPath = Path.Combine("project", "foo.cs");
+
+		var snapshot = ContentSelectionSnapshot.Create(
+			"project",
+			[lowerPath, upperPath, lowerPath]);
+		var upperOnly = ContentSelectionSnapshot.Create("project", [upperPath]);
+
+		Assert.Equal([lowerPath, upperPath], snapshot.OrderedPaths);
+		Assert.NotEqual(upperOnly.SelectionFingerprint, snapshot.SelectionFingerprint);
+	}
+
+	[Fact]
 	public void CreateFromOwnedOrderedUnique_ReusesOwnedArrayAndPreservesCanonicalIdentity()
 	{
 		string[] ownedPaths = ["a.cs", "b.cs"];

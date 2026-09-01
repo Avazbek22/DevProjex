@@ -68,8 +68,10 @@ internal sealed class McpServices : IDisposable
 			new DartArtifactsIgnoreRule()
 		]);
 		var treeExport = new TreeExportService();
+		var gitPathComparisonSemanticsResolver = GitConfigPathComparisonSemanticsResolver.Instance;
 		var guardedFileOpener = new McpRootJailFileStreamOpener(roots);
 		var contentAnalyzer = new FileContentAnalyzer(guardedFileOpener.OpenRead);
+		var preparedContentAnalyzer = new FileContentAnalyzer();
 		var resolvedDataPath = appDataPathProvider ??
 		                       DevProjex.Infrastructure.Persistence.UserDataPathResolver.GetConfigurationRoot;
 		var profileStore = new ProjectProfileStore(resolvedDataPath);
@@ -104,7 +106,9 @@ internal sealed class McpServices : IDisposable
 			new BuildTreeUseCase(treeBuilder, treePresenter),
 			new FilterOptionSelectionService(),
 			new IgnoreOptionsService(localization),
-			new IgnoreRulesService(smartIgnore),
+			new IgnoreRulesService(
+				smartIgnore,
+				pathComparisonSemanticsResolver: gitPathComparisonSemanticsResolver),
 			treeExport,
 			contentAnalyzer);
 		string Omission(FileContentClassification classification) =>
@@ -119,15 +123,16 @@ internal sealed class McpServices : IDisposable
 					contentAnalyzer,
 					Omission,
 					redactionSession,
-					compressionSession),
+					compressionSession,
+					preparedContentAnalyzer: preparedContentAnalyzer),
 				treeExport,
 				contentAnalyzer,
 				new ProjectSelectionResolver(profileStore, new PortableProjectProfileService().LoadAsync),
 				profileStore,
-				new GitScopePathProvider(),
+				new GitScopePathProvider(gitPathComparisonSemanticsResolver),
 				redactionSession,
 				compressionSession,
-				new SecretRedactionOutputPreparer(contentAnalyzer));
+				new SecretRedactionOutputPreparer(contentAnalyzer, preparedContentAnalyzer));
 		}
 		catch
 		{

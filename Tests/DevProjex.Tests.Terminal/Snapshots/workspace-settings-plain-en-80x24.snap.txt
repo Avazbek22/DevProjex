@@ -8,7 +8,7 @@
 [ ] Strip comments
 [ ] Strip blank lines
 
-  [x] All (9)
+  [ ] All
 ( ) No Git filtering                                                           ▲
 (*) Use .gitignore                                                             |
 ( ) Tracked Git files only                                                     .

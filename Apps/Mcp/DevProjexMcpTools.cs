@@ -10,9 +10,19 @@ internal sealed class DevProjexMcpTools(
 {
 	private const int MaximumTreeLines = 2_000;
 	private const int MaximumInlinePackCharacters = 50_000;
+	internal const int MaximumStoredPackResponseCharacters = 50_000;
+	private const int MaximumStoredTreePreviewCharacters = 38_000;
+	private const int MaximumStoredBudgetReportCharacters = 8_000;
+	private const int MaximumStoredTrustedNoticeCharacters = 2_000;
 	private const int MaximumPageLines = 1_000;
 	private const int MaximumPageCharacters = 50_000;
 	private const int MaximumSearchContentCharacters = 49_000;
+	private const string StoredTreePreviewTruncationNotice =
+		"[Tree preview truncated to fit the stored-pack response limit. Use read_pack for the complete pack.]";
+	private const string StoredBudgetReportTruncationNotice =
+		"[Token budget file list truncated to fit the stored-pack response limit.]";
+	private const string StoredTrustedNoticeTruncationNotice =
+		"[Additional trusted diagnostics truncated to fit the stored-pack response limit.]";
 	private readonly McpProjectOperationGate _projectOperation = new();
 	private McpProjectService Projects => projectService.Value;
 
@@ -105,7 +115,7 @@ internal sealed class DevProjexMcpTools(
 			var body = treeWriter.Text;
 			if (treeWriter.IsTruncated)
 				body += "\n[Tree truncated at 2000 lines. Narrow include_patterns, exclude_patterns, or max_depth.]";
-			return McpToolResults.TextSuccess(AppendGitScopeWarning(McpSpotlight.Wrap(body), plan));
+			return McpToolResults.TextSuccess(AppendPlanWarnings(McpSpotlight.Wrap(body), plan));
 		}, cancellationToken);
 
 	[Description("Measure a redacted project selection and list its largest text files by estimated tokens.")]
@@ -167,7 +177,11 @@ internal sealed class DevProjexMcpTools(
 				topFiles = top
 			};
 			await operationProgress.CompleteAsync(100, "building analysis").ConfigureAwait(false);
-			return McpToolResults.StructuredSuccess(envelope, FormatGitScopeWarning(plan));
+			return McpToolResults.StructuredSuccess(
+				envelope,
+				CombineTrustedNotices(
+					FormatUnscannableNotice(prepared.UnscannableFiles, UnscannableResultKind.Analysis),
+					McpTrustedDiagnosticFormatter.FormatWarnings(plan)));
 		}, cancellationToken);
 
 	[Description("Build an exact redacted DevProjex context export. A stored pack id remains valid until this server process exits; after restart, call pack_context again.")]
@@ -204,11 +218,13 @@ internal sealed class DevProjexMcpTools(
 						view == ProjectContextView.Tree &&
 						format is ProjectContextDocumentFormat.Json or ProjectContextDocumentFormat.Xml)
 				.ConfigureAwait(false);
+			var trustedPlanWarnings = McpTrustedDiagnosticFormatter.FormatWarnings(plan);
 			operationProgress.Milestone(
 				10,
 				$"scanning files {plan.IncludedFiles.Count}/{plan.IncludedFiles.Count}");
 			var effectiveDetail = Projects.ResolveDetail(plan, detail);
 			plan = Projects.ApplyDetail(plan, effectiveDetail, cancellationToken);
+			var outputPlan = WithoutWarningDiagnostics(plan);
 			var transformedFileCount = view == ProjectContextView.Tree ? 0 : plan.IncludedFiles.Count;
 			operationProgress.Milestone(11, $"transforming content 0/{transformedFileCount}");
 			await using var prepared = view == ProjectContextView.Tree
@@ -232,7 +248,7 @@ internal sealed class DevProjexMcpTools(
 					if (prepared is null)
 					{
 						writeResult = await Projects.DocumentService.WriteCompleteWithReportAsync(
-								plan,
+								outputPlan,
 								view,
 								format,
 								stream,
@@ -246,7 +262,7 @@ internal sealed class DevProjexMcpTools(
 					}
 
 					writeResult = await Projects.DocumentService.WritePreparedCompleteAsync(
-							plan,
+							outputPlan,
 							view,
 							format,
 							stream,
@@ -265,9 +281,13 @@ internal sealed class DevProjexMcpTools(
 				if (pack.Characters <= MaximumInlinePackCharacters)
 				{
 					var content = await File.ReadAllTextAsync(pack.Path, cancellationToken).ConfigureAwait(false);
-					var inlineMessage = AppendGitScopeWarning(BuildSpotlightedPackContent(
+					var inlineMessage = AppendTrustedNotices(BuildSpotlightedPackContent(
 						content,
-						writeResult?.TokenBudget), plan);
+						writeResult?.TokenBudget),
+						FormatUnscannableNotice(
+							writeResult?.UnscannableFiles,
+							UnscannableResultKind.Pack),
+						trustedPlanWarnings);
 					if (inlineMessage.Length <= MaximumInlinePackCharacters)
 					{
 						await operationProgress.CompleteAsync(
@@ -278,14 +298,16 @@ internal sealed class DevProjexMcpTools(
 					}
 				}
 
-				using var treeWriter = new McpBoundedLineTextWriter(MaximumTreeLines);
+				using var treeWriter = new McpBoundedLineTextWriter(
+					MaximumTreeLines,
+					MaximumStoredTreePreviewCharacters);
 				try
 				{
 					await Projects.TreeExportService.WriteFullTreeAsync(
 							treeWriter,
-							plan.SourceRoot,
-							plan.ProjectedTree,
-							Projects.ResolveProtectedDocumentRoot(plan),
+							outputPlan.SourceRoot,
+							outputPlan.ProjectedTree,
+							Projects.ResolveProtectedDocumentRoot(outputPlan),
 							includeFinalLineEnding: false,
 							cancellationToken: cancellationToken)
 						.ConfigureAwait(false);
@@ -293,12 +315,15 @@ internal sealed class DevProjexMcpTools(
 				catch (McpLineLimitReachedException)
 				{
 				}
-				var tree = treeWriter.Text;
-				if (treeWriter.IsTruncated)
-					tree += "\n[Tree truncated at 2000 lines.]";
-				var message = AppendGitScopeWarning($"Pack stored as '{pack.Id}' ({pack.Characters} characters). " +
-				              "Call read_pack with this pack_id to read ranges, or search_project to locate source content.\n" +
-				              BuildSpotlightedPackContent(tree, writeResult?.TokenBudget), plan);
+				var message = BuildStoredPackResponse(
+					pack,
+					treeWriter.Text,
+					treeWriter.IsTruncated,
+					writeResult?.TokenBudget,
+					FormatUnscannableNotice(
+						writeResult?.UnscannableFiles,
+						UnscannableResultKind.Pack),
+					trustedPlanWarnings);
 				await operationProgress.CompleteAsync(
 						100,
 						$"writing pack {writtenFileCount}/{writtenFileCount}")
@@ -389,7 +414,9 @@ internal sealed class DevProjexMcpTools(
 			var responseLimitReached = false;
 			foreach (var file in plan.IncludedFiles)
 			{
-				var content = await analyzer.TryReadAsTextAsync(file, cancellationToken).ConfigureAwait(false);
+				var content = await analyzer
+					.TryReadAsTextAsync(file, long.MaxValue, cancellationToken)
+					.ConfigureAwait(false);
 				if (content is null)
 					continue;
 				var scan = McpSearchTextScanner.Scan(
@@ -425,9 +452,10 @@ internal sealed class DevProjexMcpTools(
 					output.AppendLine();
 				output.AppendLine($"[{totalMatches - shownMatches} additional matches not shown; narrow the pattern or filters.]");
 			}
-			return McpToolResults.TextSuccess(AppendGitScopeWarning(
+			return McpToolResults.TextSuccess(AppendTrustedNotices(
 				McpSpotlight.Wrap(output.ToString().TrimEnd()),
-				plan));
+				FormatUnscannableNotice(prepared.UnscannableFiles, UnscannableResultKind.Search),
+				McpTrustedDiagnosticFormatter.FormatWarnings(plan)));
 		}, cancellationToken);
 
 	[Description("Read redacted text from one effective project file using an optional 1-based line range.")]
@@ -504,7 +532,11 @@ internal sealed class DevProjexMcpTools(
 		Projects.BuildPlanAsync(
 			arguments.OptionalString("project"),
 			arguments.OptionalString("branch"),
-			arguments.OptionalStringArray("paths", allowWhitespace: true),
+			arguments.OptionalStringArray(
+				"paths",
+				allowWhitespace: true,
+				maximumItems: McpProjectService.MaximumRequestedPaths,
+				maximumItemScalarValues: McpProjectService.MaximumRequestedPathLength),
 			arguments.OptionalStringArray("include_patterns"),
 			arguments.OptionalStringArray("exclude_patterns"),
 			arguments.OptionalString("profile"),
@@ -588,20 +620,160 @@ internal sealed class DevProjexMcpTools(
 		       McpSpotlight.Wrap(FormatTokenBudgetReport(report));
 	}
 
-	private static string AppendGitScopeWarning(string content, ProjectContextPlan plan)
+	private static string BuildStoredPackResponse(
+		McpPackDocument pack,
+		string tree,
+		bool treeWasTruncated,
+		ProjectContextTokenBudgetReport? report,
+		string? unscannableNotice,
+		string? planWarnings)
 	{
-		var warning = FormatGitScopeWarning(plan);
-		return warning is null ? content : content + "\n\n" + warning;
+		var header = $"Pack stored as '{pack.Id}' ({pack.Characters} characters). " +
+		             "Call read_pack with this pack_id to read ranges, or search_project to locate source content.\n";
+		var treePreview = LimitResponseSegment(
+			tree,
+			MaximumStoredTreePreviewCharacters,
+			StoredTreePreviewTruncationNotice,
+			treeWasTruncated);
+		var budgetReport = report is null
+			? null
+			: LimitResponseSegment(
+				FormatTokenBudgetReport(report),
+				MaximumStoredBudgetReportCharacters,
+				StoredBudgetReportTruncationNotice,
+				forceMarker: false);
+		var trustedNotices = CombineTrustedNotices(unscannableNotice, planWarnings);
+		if (trustedNotices is not null)
+		{
+			trustedNotices = LimitResponseSegment(
+				trustedNotices,
+				MaximumStoredTrustedNoticeCharacters,
+				StoredTrustedNoticeTruncationNotice,
+				forceMarker: false);
+		}
+
+		string Compose() => AppendTrustedNotices(
+			header + McpSpotlight.Wrap(treePreview) +
+			(budgetReport is null ? string.Empty : "\n\n" + McpSpotlight.Wrap(budgetReport)),
+			trustedNotices);
+
+		var message = Compose();
+		if (message.Length <= MaximumStoredPackResponseCharacters)
+			return message;
+
+		var overflow = message.Length - MaximumStoredPackResponseCharacters;
+		var reducedTreeLimit = Math.Max(
+			StoredTreePreviewTruncationNotice.Length,
+			treePreview.Length - overflow);
+		treePreview = LimitResponseSegment(
+			treePreview,
+			reducedTreeLimit,
+			StoredTreePreviewTruncationNotice,
+			forceMarker: true);
+		message = Compose();
+		if (message.Length <= MaximumStoredPackResponseCharacters)
+			return message;
+
+		throw new InvalidOperationException("Stored pack response exceeded its character budget.");
 	}
 
-	private static string? FormatGitScopeWarning(ProjectContextPlan plan)
+	internal static string LimitResponseSegment(
+		string content,
+		int maximumCharacters,
+		string marker,
+		bool forceMarker)
 	{
-		var diagnostic = plan.Diagnostics.FirstOrDefault(static item =>
-			item.Code == GitScopeFilter.DeletedDiagnosticCode);
-		return diagnostic is null
-			? null
-			: $"[Warning {GitScopeFilter.DeletedDiagnosticCode}] " +
-			  McpTextEscaping.EscapeSingleLine(diagnostic.Message);
+		ArgumentNullException.ThrowIfNull(content);
+		ArgumentException.ThrowIfNullOrEmpty(marker);
+		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumCharacters);
+		if (!forceMarker && content.Length <= maximumCharacters)
+			return content;
+		if (marker.Length >= maximumCharacters)
+			return TakeCompleteScalarPrefix(marker, maximumCharacters);
+
+		var prefixLimit = maximumCharacters - marker.Length - 1;
+		var prefixLength = Math.Min(prefixLimit, content.Length);
+		if (prefixLength > 0 &&
+		    prefixLength < content.Length &&
+		    char.IsHighSurrogate(content[prefixLength - 1]) &&
+		    char.IsLowSurrogate(content[prefixLength]))
+		{
+			prefixLength--;
+		}
+		if (prefixLength > 0 && content[prefixLength - 1] == '\r')
+			prefixLength--;
+		return prefixLength == 0
+			? marker
+			: string.Concat(content.AsSpan(0, prefixLength), "\n", marker);
+	}
+
+	private static string TakeCompleteScalarPrefix(string content, int maximumCharacters)
+	{
+		var length = Math.Min(content.Length, maximumCharacters);
+		if (length > 0 &&
+		    length < content.Length &&
+		    char.IsHighSurrogate(content[length - 1]) &&
+		    char.IsLowSurrogate(content[length]))
+		{
+			length--;
+		}
+		return content[..length];
+	}
+
+	private static string AppendTrustedNotices(string content, params string?[] notices)
+	{
+		var combined = CombineTrustedNotices(notices);
+		return combined is null ? content : content + "\n\n" + combined;
+	}
+
+	private static string? CombineTrustedNotices(params string?[] notices)
+	{
+		string? combined = null;
+		foreach (var notice in notices)
+		{
+			if (string.IsNullOrWhiteSpace(notice))
+				continue;
+			combined = combined is null ? notice : combined + "\n" + notice;
+		}
+		return combined;
+	}
+
+	private static string? FormatUnscannableNotice(
+		IReadOnlyList<UnscannableFile>? files,
+		UnscannableResultKind resultKind)
+	{
+		if (files is not { Count: > 0 })
+			return null;
+
+		var count = files.Count.ToString(CultureInfo.InvariantCulture);
+		var subject = files.Count == 1 ? $"{count} selected file" : $"{count} selected files";
+		var consequence = resultKind switch
+		{
+			UnscannableResultKind.Analysis =>
+				"Metrics for uninspected content may be estimated and do not reflect requested detail transformations.",
+			UnscannableResultKind.Pack => "Uninspected content was withheld from the pack.",
+			UnscannableResultKind.Search => "Uninspected content was not searched.",
+			_ => throw new ArgumentOutOfRangeException(nameof(resultKind), resultKind, null)
+		};
+		return $"[Warning {McpErrorCodes.PayloadTruncated}] Mandatory redaction could not fully inspect {subject}. " +
+		       $"{consequence} Results are partial. Set max_file_bytes={SecretRedactionOutputPreparer.MaximumScannableFileBytes} " +
+		       "or lower, exclude oversized or unsupported files, and retry.";
+	}
+
+	private static string AppendPlanWarnings(string content, ProjectContextPlan plan) =>
+		AppendTrustedNotices(content, McpTrustedDiagnosticFormatter.FormatWarnings(plan));
+
+	private static ProjectContextPlan WithoutWarningDiagnostics(ProjectContextPlan plan)
+	{
+		if (!plan.Diagnostics.Any(static diagnostic =>
+			    diagnostic.Severity == ContextDiagnosticSeverity.Warning))
+			return plan;
+		return plan with
+		{
+			Diagnostics = plan.Diagnostics
+				.Where(static diagnostic => diagnostic.Severity != ContextDiagnosticSeverity.Warning)
+				.ToArray()
+		};
 	}
 
 	private static string FormatTokenBudgetReport(ProjectContextTokenBudgetReport report)
@@ -641,6 +813,13 @@ internal sealed class DevProjexMcpTools(
 		output.Append(
 			"Tip: use detail=compact or detail=signatures, narrow the selection, or increase max_tokens.");
 		return output.ToString();
+	}
+
+	private enum UnscannableResultKind
+	{
+		Analysis,
+		Pack,
+		Search
 	}
 
 	internal static TreeNodeDescriptor PruneToDepth(TreeNodeDescriptor node, int remainingDepth) =>

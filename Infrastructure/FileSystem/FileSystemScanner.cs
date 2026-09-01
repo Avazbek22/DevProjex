@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Security;
 using DevProjex.Application.Diagnostics;
 using DevProjex.Application.Selection;
+using DevProjex.Application.Services;
 
 namespace DevProjex.Infrastructure.FileSystem;
 
@@ -1736,10 +1737,13 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 	{
 		try
 		{
-			var attributes = File.GetAttributes(Path.Combine(rootPath, ".git"));
-			return attributes.HasFlag(FileAttributes.ReparsePoint)
-				? (GitWorkspaceEvidence.Empty, false)
-				: (new GitWorkspaceEvidence(HasRepositoryBoundary: true), false);
+			var gitMetadataPath = Path.Combine(rootPath, ".git");
+			var attributes = File.GetAttributes(gitMetadataPath);
+			return UnixFileTypeInspector.IsPhysicalDirectoryOrRegularFile(
+				gitMetadataPath,
+				attributes)
+				? (new GitWorkspaceEvidence(HasRepositoryBoundary: true), false)
+				: (GitWorkspaceEvidence.Empty, false);
 		}
 		catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
 		{
@@ -2453,7 +2457,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			foreach (var matcher in additionalMatchers)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				unique ??= new Dictionary<string, ScopedGitIgnoreMatcher>(PathComparer.Default);
+				unique ??= new Dictionary<string, ScopedGitIgnoreMatcher>(
+					ProjectTreePathIdentity.CanonicalComparer);
 				unique[matcher.ScopeRootPath] = matcher;
 			}
 		}
@@ -2464,7 +2469,8 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			foreach (var matcher in inventory.DiscoveredGitIgnoreMatchers)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
-				unique ??= new Dictionary<string, ScopedGitIgnoreMatcher>(PathComparer.Default);
+				unique ??= new Dictionary<string, ScopedGitIgnoreMatcher>(
+					ProjectTreePathIdentity.CanonicalComparer);
 				unique[matcher.ScopeRootPath] = matcher;
 			}
 		}
@@ -3435,14 +3441,14 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 				HadScanFailure: false);
 		}
 
-		var selectedNames = new HashSet<string>(PathComparer.Default);
+		var requestedNames = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
 		foreach (var selectedRootFolder in selectedRootFolders)
 		{
 			if (!IsSafeRelativeRootFolderName(selectedRootFolder) ||
 			    PathComparer.Default.Equals(selectedRootFolder, effectiveRules.ExcludedRootFolderName))
 				continue;
 
-			selectedNames.Add(selectedRootFolder);
+			requestedNames.Add(selectedRootFolder);
 		}
 
 		var effectiveGitIgnoreContext = effectiveRules.CreateGitIgnoreScanContext(rootPath);
@@ -3471,7 +3477,9 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		try
 		{
 			BeforeEnumeration(FileSystemScanEnumerationPoint.RootDirectories, rootPath);
-			foreach (var directory in FileSystemEntryEnumerator.EnumerateDirectories(rootPath))
+			var directories = FileSystemEntryEnumerator.EnumerateDirectories(rootPath).ToArray();
+			var selectedNames = ResolveSelectedRootNames(directories, requestedNames);
+			foreach (var directory in directories)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 				if (PathComparer.Default.Equals(directory.Name, effectiveRules.ExcludedRootFolderName))
@@ -3515,7 +3523,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		}
 		catch (UnauthorizedAccessException)
 		{
-			var fallback = AddSelectedRootsByName(rootPath, selectedNames, selectedRoots);
+			var fallback = AddSelectedRootsByName(rootPath, requestedNames, selectedRoots);
 			return new RootSelectionScanPlan(
 				selectedRoots,
 				directoryToggleCandidates,
@@ -3526,7 +3534,7 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		}
 		catch (Exception exception) when (IsExpectedFileSystemScanFailure(exception))
 		{
-			var fallback = AddSelectedRootsByName(rootPath, selectedNames, selectedRoots);
+			var fallback = AddSelectedRootsByName(rootPath, requestedNames, selectedRoots);
 			return new RootSelectionScanPlan(
 				selectedRoots,
 				directoryToggleCandidates,
@@ -3543,6 +3551,26 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 			RootAccessDenied: false,
 			HadAccessDenied: false,
 			HadScanFailure: false);
+	}
+
+	private static IReadOnlySet<string> ResolveSelectedRootNames(
+		IReadOnlyList<FileSystemDirectoryEntry> availableDirectories,
+		IReadOnlyCollection<string> requestedNames)
+	{
+		var resolved = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
+		foreach (var requestedName in requestedNames)
+		{
+			if (ProjectTreePathIdentity.TryResolveAvailableEntry(
+				    availableDirectories,
+				    requestedName,
+				    static directory => directory.Name,
+				    out var directory))
+			{
+				resolved.Add(directory.Name);
+			}
+		}
+
+		return resolved;
 	}
 
 	private (bool HadAccessDenied, bool HadScanFailure) AddSelectedRootsByName(
@@ -3950,9 +3978,16 @@ public sealed partial class FileSystemScanner : IFileSystemScanner, IFileSystemS
 		ScopedGitIgnoreMatcher right)
 	{
 		var depth = left.ScopeRootPath.Length.CompareTo(right.ScopeRootPath.Length);
-		return depth != 0
-			? depth
-			: PathComparer.Default.Compare(left.ScopeRootPath, right.ScopeRootPath);
+		if (depth != 0)
+			return depth;
+		var platformOrder = PathComparer.Default.Compare(
+			left.ScopeRootPath,
+			right.ScopeRootPath);
+		return platformOrder != 0
+			? platformOrder
+			: ProjectTreePathIdentity.CanonicalComparer.Compare(
+				left.ScopeRootPath,
+				right.ScopeRootPath);
 	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]

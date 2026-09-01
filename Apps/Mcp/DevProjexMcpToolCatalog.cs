@@ -131,7 +131,8 @@ internal sealed class DevProjexMcpToolCatalog : IReadOnlyList<McpServerTool>
 	private const string PathsProperty = """
 	"paths": {
 	  "type": "array",
-	  "items": { "type": "string", "minLength": 1 },
+	  "maxItems": 256,
+	  "items": { "type": "string", "minLength": 1, "maxLength": 4096 },
 	  "description": "Existing project-relative files or directories that narrow the selection."
 	}
 	""";

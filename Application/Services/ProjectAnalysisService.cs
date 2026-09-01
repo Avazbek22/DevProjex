@@ -13,7 +13,8 @@ public sealed class ProjectAnalysisService(
 	IFileContentAnalyzer fileContentAnalyzer,
 	Func<DateTimeOffset>? utcNowProvider = null)
 {
-	private static readonly IReadOnlySet<string> EmptyRootSelection = new HashSet<string>(PathComparer.Default);
+	private static readonly IReadOnlySet<string> EmptyRootSelection =
+		new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
 	private static readonly IReadOnlySet<string> EmptyExtensionSelection =
 		new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 	private static readonly IReadOnlySet<IgnoreOptionId> EmptyIgnoreSelection = new HashSet<IgnoreOptionId>();
@@ -98,7 +99,7 @@ public sealed class ProjectAnalysisService(
 				selectedIgnoreOptions,
 				allowedRootFolders,
 				cancellationToken);
-			var allowedRootFolderSet = allowedRootFolders.ToHashSet(PathComparer.Default);
+			var allowedRootFolderSet = allowedRootFolders.ToHashSet(ProjectTreePathIdentity.CanonicalComparer);
 			treeInventory = buildTree.ReadCompositeInventory(
 				rootPath,
 				allowedRootFolderSet,
@@ -148,12 +149,16 @@ public sealed class ProjectAnalysisService(
 			}
 			else
 			{
-				allowedRootFolders = selectedRootFolders.ToArray();
 				var rootFolders = scanOptions.GetRootFolders(
 					rootPath,
 					discoveryRules,
 					cancellationToken);
-				rules = discoveryRules;
+				allowedRootFolders = ResolveRequestedRootFolders(rootFolders.Value, selectedRootFolders);
+				rules = ignoreRules.BuildWithCancellation(
+					rootPath,
+					selectedIgnoreOptions,
+					allowedRootFolders,
+					cancellationToken);
 				if (buildTree.SupportsCompositeInventory)
 				{
 					// Explicit CLI/TUI selections do not need the interactive convergence loop.
@@ -161,7 +166,7 @@ public sealed class ProjectAnalysisService(
 					// so the optimized path remains exact without scanning every file twice.
 					treeInventory = buildTree.ReadCompositeInventory(
 						rootPath,
-						allowedRootFolders.ToHashSet(PathComparer.Default),
+						allowedRootFolders.ToHashSet(ProjectTreePathIdentity.CanonicalComparer),
 						discoveryRules,
 						rules,
 						cancellationToken);
@@ -205,7 +210,7 @@ public sealed class ProjectAnalysisService(
 			rootPath,
 			new TreeFilterOptions(
 				AllowedExtensions: allowedExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase),
-				AllowedRootFolders: allowedRootFolders.ToHashSet(PathComparer.Default),
+				AllowedRootFolders: allowedRootFolders.ToHashSet(ProjectTreePathIdentity.CanonicalComparer),
 				IgnoreRules: rules));
 		BuildTreeSnapshotResult treeResult;
 		if (treeInventory is not null)
@@ -250,6 +255,9 @@ public sealed class ProjectAnalysisService(
 			TreeInventory: treeInventory,
 			GitEvidence: treeInventory?.GitEvidence ?? scan.GitEvidence)
 		{
+			RequestedRootFoldersForDiagnostics = request.SelectedRootFolders is null
+				? null
+				: selectedRootFolders,
 			EffectiveRules = rules,
 			RootSelectionIsExplicit = request.SelectedRootFolders is not null,
 			EffectiveExtensionPolicy = request.SelectedExtensions is null
@@ -321,7 +329,7 @@ public sealed class ProjectAnalysisService(
 			rootPath,
 			new TreeFilterOptions(
 				AllowedExtensions: selectedExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase),
-				AllowedRootFolders: selectedRootFolders.ToHashSet(PathComparer.Default),
+				AllowedRootFolders: selectedRootFolders.ToHashSet(ProjectTreePathIdentity.CanonicalComparer),
 				IgnoreRules: rules));
 		var treeResult = buildTree.ExecuteWithInventory(
 			treeRequest,
@@ -385,7 +393,8 @@ public sealed class ProjectAnalysisService(
 				                      (request.KnownExtensionStates is null ||
 				                       !request.KnownExtensionStates.Values.Contains(false)),
 				RootSelectionInitialized: rootsAreExplicit,
-				RootSelectionCache: request.SelectedRootFolders?.ToHashSet(PathComparer.Default) ??
+				RootSelectionCache: request.SelectedRootFolders?
+					.ToHashSet(ProjectTreePathIdentity.CanonicalComparer) ??
 				                    EmptyRootSelection,
 				ExtensionsSelectionInitialized:
 					request.SelectedExtensions is not null || hasKnownExtensionStates,
@@ -422,7 +431,7 @@ public sealed class ProjectAnalysisService(
 			AllRootFoldersChecked: false,
 			AllExtensionsChecked: false,
 			RootSelectionInitialized: true,
-			RootSelectionCache: selectedRoots.ToHashSet(PathComparer.Default),
+			RootSelectionCache: selectedRoots.ToHashSet(ProjectTreePathIdentity.CanonicalComparer),
 			ExtensionsSelectionInitialized: true,
 			ExtensionsSelectionCache: selectedExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase),
 			IgnoreSelectionInitialized: true,
@@ -517,7 +526,9 @@ public sealed class ProjectAnalysisService(
 				SelectedExtensions: NormalizeResolvedExtensionNames(request.SelectedExtensions).ToArray(),
 				SelectedIgnoreOptions: request.SelectedIgnoreOptions.OrderBy(static option => (int)option).ToArray()),
 			Inventory: new ProjectAnalysisInventoryReport(
-				AvailableRootFolders: request.AvailableRootFolders.OrderBy(static value => value, PathComparer.Default).ToArray(),
+				AvailableRootFolders: request.AvailableRootFolders
+					.OrderBy(static value => value, ProjectTreePathIdentity.CanonicalComparer)
+					.ToArray(),
 				AvailableExtensions: request.AvailableExtensions.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase).ToArray(),
 				Tree: treeSummary),
 			Metrics: new ProjectAnalysisOutputMetricsReport(
@@ -643,12 +654,12 @@ public sealed class ProjectAnalysisService(
 		CancellationToken cancellationToken)
 	{
 		var warnings = new List<string>();
-		var availableRoots = request.AvailableRootFolders.ToHashSet(PathComparer.Default);
+		var availableRoots = request.AvailableRootFolders.ToArray();
 		var requestedRoots = request.RequestedRootFoldersForDiagnostics ?? request.SelectedRootFolders;
 		foreach (var root in requestedRoots)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			if (!availableRoots.Contains(root))
+			if (!ProjectTreePathIdentity.TryResolveAvailableName(availableRoots, root, out _))
 				warnings.Add($"Selected root folder was not found in the current project: {root}");
 		}
 
@@ -672,8 +683,29 @@ public sealed class ProjectAnalysisService(
 		return rootFolders
 			// Root folder names come from the filesystem. Do not trim legal POSIX names.
 			.Where(static value => !string.IsNullOrEmpty(value))
-			.Distinct(PathComparer.Default)
-			.OrderBy(static value => value, PathComparer.Default)
+			.Distinct(ProjectTreePathIdentity.CanonicalComparer)
+			.OrderBy(static value => value, ProjectTreePathIdentity.CanonicalComparer)
+			.ToArray();
+	}
+
+	private static IReadOnlyList<string> ResolveRequestedRootFolders(
+		IReadOnlyList<string> availableRootFolders,
+		IReadOnlyCollection<string> requestedRootFolders)
+	{
+		var resolved = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
+		foreach (var requestedRoot in requestedRootFolders)
+		{
+			if (ProjectTreePathIdentity.TryResolveAvailableName(
+				    availableRootFolders,
+				    requestedRoot,
+				    out var availableRoot))
+			{
+				resolved.Add(availableRoot);
+			}
+		}
+
+		return resolved
+			.OrderBy(static value => value, ProjectTreePathIdentity.CanonicalComparer)
 			.ToArray();
 	}
 

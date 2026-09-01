@@ -1232,6 +1232,8 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			}
 		}
 		_state = state;
+		if (state.Plan.GitReadiness.Mode is { } mode && GitScopeSelection.IsPersistent(mode))
+			_preferredGitMode = mode;
 		_layoutMode = ResolveLayout();
 		_activePane = TerminalWorkspacePane.Tree;
 
@@ -1556,12 +1558,14 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		_application.AddTimeout(TimeSpan.FromMilliseconds(150), () =>
 		{
 			if (_stopping || requestId != Volatile.Read(ref _treePreviewSyncRequestId) ||
-				_preview is null || !PathComparer.Default.Equals(_selectedTreePath, path))
+				_preview is null ||
+				!ProjectTreePathIdentity.CanonicalComparer.Equals(_selectedTreePath, path))
 			{
 				return false;
 			}
 			var section = _preview.Sections.FirstOrDefault(candidate =>
-				candidate.SourcePath is not null && PathComparer.Default.Equals(candidate.SourcePath, path));
+				candidate.SourcePath is not null &&
+				ProjectTreePathIdentity.CanonicalComparer.Equals(candidate.SourcePath, path));
 			if (section is not null)
 			{
 				_preview.ScrollTo(Math.Max(0, section.StartLine - 1), 0);
@@ -1579,7 +1583,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		{
 			for (var index = 0; index < _state.VisibleRows.Count; index++)
 			{
-				if (PathComparer.Default.Equals(
+				if (ProjectTreePathIdentity.CanonicalComparer.Equals(
 						_state.VisibleRows[index].Node.FullPath,
 						_selectedTreePath))
 				{
@@ -1794,8 +1798,30 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				L(wide ? "Terminal.Tui.Footer.Tree.Wide" : "Terminal.Tui.Footer.Tree"),
 			TerminalWorkspacePane.Preview =>
 				L(wide ? "Terminal.Tui.Footer.Preview.Wide" : "Terminal.Tui.Footer.Preview"),
-			_ => L(wide ? "Terminal.Tui.Footer.Controls.Wide" : "Terminal.Tui.Footer.Controls")
+			_ => BuildControlsFooterText(wide)
 		};
+	}
+
+	private string BuildControlsFooterText(bool wide)
+	{
+		var footer = L(wide ? "Terminal.Tui.Footer.Controls.Wide" : "Terminal.Tui.Footer.Controls");
+		return IsGitFilteringApplicable() ? footer : RemoveGitFilteringShortcut(footer);
+	}
+
+	internal static string RemoveGitFilteringShortcut(string footer)
+	{
+		ArgumentNullException.ThrowIfNull(footer);
+		var commandSeparator = footer.LastIndexOf("  :", StringComparison.Ordinal);
+		if (commandSeparator < 0)
+			return footer;
+		var gitShortcut = footer.LastIndexOf("  M ", commandSeparator, StringComparison.Ordinal);
+		if (gitShortcut < 0)
+			return footer;
+		var enterShortcut = footer.IndexOf("  Enter ", gitShortcut, StringComparison.Ordinal);
+		var suffix = enterShortcut >= 0 && enterShortcut < commandSeparator
+			? enterShortcut
+			: commandSeparator;
+		return footer[..gitShortcut] + footer[suffix..];
 	}
 
 	private string GetFormatToken() =>
@@ -3728,9 +3754,9 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 			_settingsDraftExtensionStates ?? state.ExtensionOptionStates,
 			StringComparer.OrdinalIgnoreCase);
 		var previousPaths = state.BuildSelectedItemRelativePaths();
-		var pathStates = new Dictionary<string, bool>(
-			state.PathOptionStates,
-			PathComparer.Default);
+		var pathStates = TerminalWorkspaceController.ClonePathOptionStates(
+			state.PathOptionStates);
+		var selectedPathFrontier = state.BuildSelectedPathFrontier();
 		var preferredGitMode = _settingsDraftPreferredGitMode ?? _preferredGitMode;
 		var originatedFromCommandLine = _settingsDraftOriginatedFromCommandLine;
 		var requestId = Interlocked.Increment(ref _settingsRefreshRequestId);
@@ -3745,6 +3771,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 				extensionStates,
 				previousPaths,
 				pathStates,
+				selectedPathFrontier,
 				preferredGitMode,
 				originatedFromCommandLine,
 				requestId,
@@ -3761,6 +3788,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 		IReadOnlyDictionary<string, bool> extensionStates,
 		IReadOnlySet<string> previousPaths,
 		IReadOnlyDictionary<string, bool> pathStates,
+		IReadOnlyCollection<string>? selectedPathFrontier,
 		GitFilteringMode preferredGitMode,
 		bool originatedFromCommandLine,
 		long requestId,
@@ -3799,6 +3827,7 @@ internal sealed partial class TerminalWorkspaceSession : IDisposable
 					extensionStates,
 					previousPaths,
 					pathStates,
+					selectedPathFrontier,
 					preferredGitMode,
 					cancellationToken)
 				.ConfigureAwait(false);

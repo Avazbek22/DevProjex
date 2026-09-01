@@ -430,7 +430,7 @@ public sealed class TerminalPtyJourneyTests
 	[Fact(Timeout = 60_000)]
 	public async Task ProjectWorkspaceSupportsNavigationOverlaysAndLiveResize()
 	{
-		using var workspace = CreateProject();
+		using var workspace = CreateGitProject();
 		await using var terminal = await TerminalPtyHarness.StartAsync(
 			workspace.Path,
 			[
@@ -526,9 +526,13 @@ public sealed class TerminalPtyJourneyTests
 			"Name contains:",
 			cancellationToken: TestContext.Current.CancellationToken);
 
+		await terminal.SendAsync("X", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> PARAMETERS",
+			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"(•) Use .gitignore",
+			"(•) Tracked Git files only",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendShiftTabAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
@@ -594,6 +598,14 @@ public sealed class TerminalPtyJourneyTests
 			"--dry-run",
 			cancellationToken: TestContext.Current.CancellationToken);
 
+		await terminal.SendAsync("T", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> PARAMETERS",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendShiftTabAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> CONTEXT PREVIEW",
+			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.ResizeAsync(80, 24, TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenWithoutAsync(
 			"PROJECT TREE",

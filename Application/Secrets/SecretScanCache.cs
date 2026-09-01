@@ -185,7 +185,7 @@ internal sealed class SecretScanCache
 		var canonicalRoot = PathUtility.Normalize(projectRoot);
 		lock (_sync)
 		{
-			if (_projectRoot is null || !PathComparer.Default.Equals(_projectRoot, canonicalRoot))
+			if (_projectRoot is null || !ProjectTreePathIdentity.CanonicalComparer.Equals(_projectRoot, canonicalRoot))
 			{
 				ClearEntriesLocked();
 				_projectRoot = canonicalRoot;
@@ -348,12 +348,12 @@ internal sealed class SecretScanCache
 
 		public bool Equals(SecretScanCacheKey x, SecretScanCacheKey y) =>
 			x.MarkedSecretsRevision == y.MarkedSecretsRevision &&
-			PathComparer.Default.Equals(x.NormalizedPath, y.NormalizedPath) &&
+			ProjectTreePathIdentity.CanonicalComparer.Equals(x.NormalizedPath, y.NormalizedPath) &&
 			x.RulesIdentity.Equals(y.RulesIdentity, StringComparison.Ordinal) &&
 			x.TransformIdentity.Equals(y.TransformIdentity, StringComparison.Ordinal);
 
 		public int GetHashCode(SecretScanCacheKey key) => HashCode.Combine(
-			PathComparer.Default.GetHashCode(key.NormalizedPath),
+			ProjectTreePathIdentity.CanonicalComparer.GetHashCode(key.NormalizedPath),
 			StringComparer.Ordinal.GetHashCode(key.RulesIdentity),
 			StringComparer.Ordinal.GetHashCode(key.TransformIdentity),
 			key.MarkedSecretsRevision);

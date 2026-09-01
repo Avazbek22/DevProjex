@@ -120,8 +120,8 @@ public sealed class ExportMarkersIntegrationTests
 		Assert.Equal("secrets [access denied]", xmlFolder.Attribute("n")?.Value);
 		Assert.Equal("keys.json [access denied]", Assert.Single(xmlDocument.Descendants("f")).Value);
 
-		Assert.Contains("- secrets [access denied]/", markdown, StringComparison.Ordinal);
-		Assert.Contains("  - keys.json [access denied]", markdown, StringComparison.Ordinal);
+		Assert.Contains(@"- secrets \[access denied\]/", markdown, StringComparison.Ordinal);
+		Assert.Contains(@"  - keys.json \[access denied\]", markdown, StringComparison.Ordinal);
 		Assert.DoesNotContain("⛔", ascii + json + xml + markdown, StringComparison.Ordinal);
 	}
 

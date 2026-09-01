@@ -5,6 +5,8 @@ namespace DevProjex.Avalonia;
 
 public partial class MainWindow
 {
+	private GitScopePresentationRefreshContext? _gitScopePresentationRefreshContext;
+
 	private BuildTreeSnapshotResult BuildTreeWithGitScope(
 		TreeRefreshInput input,
 		CancellationToken cancellationToken)
@@ -23,8 +25,9 @@ public partial class MainWindow
 		var availableRootFolders = input.AvailableRootFolders ?? input.Options.AllowedRootFolders;
 		var rootSelectionIsExplicit = input.AvailableRootFolders is not null &&
 		                              !input.Options.AllowedRootFolders.SetEquals(availableRootFolders);
-		var scope = input.GitScope ?? _gitScopePathProvider
-			.ResolveAsync(
+		var scope = input.GitScope ?? GitScopeFilter
+			.ResolvePathsAsync(
+				_gitScopePathProvider,
 				input.CurrentPath,
 				input.GitMode,
 				diffRange: null,
@@ -32,7 +35,9 @@ public partial class MainWindow
 					result.Inventory,
 					input.CurrentPath,
 					input.Options.AllowedRootFolders,
-					rootSelectionIsExplicit),
+					rootSelectionIsExplicit,
+					input.GitRepositoryScopePaths),
+				input.GitRepositoryScopePaths,
 				cancellationToken)
 			.GetAwaiter()
 			.GetResult();
@@ -57,6 +62,7 @@ public partial class MainWindow
 		{
 			Tree = GitScopeFilter.ApplyToTree(result.Tree, scope, cancellationToken),
 			Diagnostics = diagnostics,
+			GitScope = scope,
 			GitScopePresentation = input.GitScopePresentation ?? GitScopePresentationProjector.Build(
 				input.CurrentPath,
 				result.Inventory,
@@ -66,7 +72,8 @@ public partial class MainWindow
 				input.EffectiveExtensionPolicy,
 				input.Options.IgnoreRules,
 				cancellationToken,
-				rootSelectionIsExplicit)
+				rootSelectionIsExplicit,
+				selectedPathFrontier: input.GitRepositoryScopePaths)
 		};
 	}
 
@@ -104,4 +111,81 @@ public partial class MainWindow
 	internal static bool IsGitScopeDiagnostic(ContextDiagnostic diagnostic) =>
 		diagnostic.Code is GitScopeFilter.DeletedDiagnosticCode or
 			GitScopeFilter.UnavailableDiagnosticCode;
+
+	private void UpdateGitScopePresentationRefreshContext(
+		TreeRefreshInput input,
+		BuildTreeSnapshotResult result)
+	{
+		if (!GitScopeSelection.IsMomentary(input.GitMode) ||
+		    result.GitScope is not { IsAvailable: true } scope ||
+		    result.Inventory is null)
+		{
+			_gitScopePresentationRefreshContext = null;
+			return;
+		}
+
+		var availableRoots = input.AvailableRootFolders ?? input.Options.AllowedRootFolders;
+		_gitScopePresentationRefreshContext = new GitScopePresentationRefreshContext(
+			input.CurrentPath,
+			result.Tree,
+			result.Inventory,
+			scope,
+			new HashSet<string>(
+				input.Options.AllowedRootFolders,
+				ProjectTreePathIdentity.CanonicalComparer),
+			new HashSet<string>(
+				availableRoots,
+				ProjectTreePathIdentity.CanonicalComparer),
+			input.EffectiveExtensionPolicy,
+			input.Options.IgnoreRules,
+			input.AvailableRootFolders is not null &&
+			!input.Options.AllowedRootFolders.SetEquals(availableRoots));
+	}
+
+	private GitScopePresentationRefreshContext? CaptureGitScopePresentationRefreshContext()
+	{
+		var context = _gitScopePresentationRefreshContext;
+		return context is not null &&
+		       ReferenceEquals(context.Tree, _currentTree) &&
+		       PathComparer.Default.Equals(context.ProjectPath, _currentPath) &&
+		       GitScopeSelection.IsMomentary(_selectionCoordinator.ActiveGitFilteringMode)
+			? context
+			: null;
+	}
+
+	private bool IsCurrentGitScopePresentationRefreshContext(
+		GitScopePresentationRefreshContext context) =>
+		ReferenceEquals(context, _gitScopePresentationRefreshContext) &&
+		ReferenceEquals(context.Tree, _currentTree) &&
+		PathComparer.Default.Equals(context.ProjectPath, _currentPath) &&
+		GitScopeSelection.IsMomentary(_selectionCoordinator.ActiveGitFilteringMode);
+
+	private static GitScopePresentationProjection BuildGitScopePresentation(
+		GitScopePresentationRefreshContext context,
+		IReadOnlySet<string> selectedPathFrontier,
+		CancellationToken cancellationToken) =>
+		GitScopePresentationProjector.Build(
+			context.ProjectPath,
+			context.Inventory,
+			context.Scope,
+			context.SelectedRoots,
+			context.AvailableRoots,
+			context.ExtensionPolicy,
+			context.EffectiveRules,
+			cancellationToken,
+			context.RootSelectionIsExplicit,
+			selectedPathFrontier: selectedPathFrontier.Count == 0
+				? null
+				: selectedPathFrontier);
+
+	private sealed record GitScopePresentationRefreshContext(
+		string ProjectPath,
+		BuildTreeResult Tree,
+		ProjectTreeInventorySnapshot Inventory,
+		GitScopePathResult Scope,
+		IReadOnlySet<string> SelectedRoots,
+		IReadOnlySet<string> AvailableRoots,
+		IExtensionInclusionPolicy? ExtensionPolicy,
+		IgnoreRules EffectiveRules,
+		bool RootSelectionIsExplicit);
 }

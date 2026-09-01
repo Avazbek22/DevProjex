@@ -198,6 +198,9 @@ latter reads UTF-8 source-relative entries, one per line, from a file or
 redirected stdin (`-`), ignores empty lines, and rejects interactive stdin.
 Inputs are capped at 100,000 entries and 16 MiB. Entries from both options are
 combined and deduplicated with project path semantics.
+Names discovered in the project tree retain exact ordinal identity, including
+case-distinct siblings. On Windows, a differently cased input remains compatible
+only when it resolves to one unambiguous discovered entry.
 An entry that does not exist on disk is a usage error (`2`) and no output is
 created. An entry that exists but is absent from the effective tree because of
 Git or exclusion filtering remains a warning and the command succeeds; this
@@ -1120,6 +1123,10 @@ the flag, `get_tree`, `analyze`, `pack_context`, `search_project`, and `get_file
 accept a Git URL in `project` plus an optional URL-only `branch`. RepoCache owns
 clone publication and the server pins each resolved checkout until shutdown.
 `list_projects` remains the stable list of configured local roots.
+Remote network URLs use HTTP(S), SSH, Git protocol, or SCP syntax and cannot
+contain query strings or fragments. A `file://` source must resolve inside an
+already configured local root, so this opt-in never broadens local filesystem
+access.
 
 `analyze --top-files N` is an additive CLI-v1 option with range `1..1000`.
 The MCP `analyze` tool exposes the matching optional `top_files` parameter with
@@ -1148,6 +1155,11 @@ was aligned across Desktop, Terminal Workspace, CLI, and MCP. Content-only text
 and Markdown now declare the root once and use relative file headings; text trees
 declare the root once and start at real children. This changes only human-readable
 presentation. Context and tree JSON/XML roots and file paths are unchanged.
+
+Before the same freeze, Markdown tree Root values, node names, context project
+headings, and content-only Root lines were hardened as literal CommonMark text:
+active Markdown, HTML, and entity syntax is escaped consistently in buffered and
+streaming output. Text, JSON, and XML bytes are unchanged.
 
 ## Exit Codes
 

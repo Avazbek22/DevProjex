@@ -763,6 +763,116 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 	[Theory]
 	[InlineData(GitFilteringMode.Staged)]
 	[InlineData(GitFilteringMode.Changes)]
+	[InlineData(GitFilteringMode.Diff)]
+	public async Task MomentaryScopeKeepsCaseDistinctSiblingRepositoryOwnership(
+		GitFilteringMode mode)
+	{
+		EnsureGitAvailable();
+		using var temp = new TemporaryDirectory();
+		var workspaceRoot = temp.CreateDirectory("workspace");
+		var upperRepository = temp.CreateDirectory("workspace/Repo");
+		var lowerRepository = temp.CreateDirectory("workspace/repo");
+		var upperFile = temp.CreateFile("workspace/Repo/Upper.cs", "upper-v1\n");
+		var lowerFile = temp.CreateFile("workspace/repo/Lower.cs", "lower-v1\n");
+		if (Directory.EnumerateDirectories(workspaceRoot).Count() < 2)
+			Assert.Skip("The temporary file system is case-insensitive.");
+
+		InitializeCommittedRepository(upperRepository, "Upper.cs");
+		InitializeCommittedRepository(lowerRepository, "Lower.cs");
+		File.WriteAllText(upperFile, "upper-v2\n");
+		File.WriteAllText(lowerFile, "lower-v2\n");
+		RunGit(upperRepository, "add", "--", "Upper.cs");
+		RunGit(lowerRepository, "add", "--", "Lower.cs");
+		if (mode == GitFilteringMode.Diff)
+		{
+			RunGit(upperRepository, "commit", "--quiet", "-m", "upper change");
+			RunGit(lowerRepository, "commit", "--quiet", "-m", "lower change");
+		}
+		RunGit(upperRepository, "config", "core.ignorecase", "true");
+
+		var result = await new GitScopePathProvider().ResolveAsync(
+			workspaceRoot,
+			mode,
+			mode == GitFilteringMode.Diff ? "HEAD~1..HEAD" : null,
+			[upperRepository, lowerRepository],
+			TestContext.Current.CancellationToken);
+
+		Assert.True(result.IsAvailable, result.FailureReason);
+		Assert.Equal(2, result.IncludedPaths.Count);
+		Assert.True(result.ContainsPath(PathUtility.Normalize(upperFile)));
+		Assert.True(result.ContainsPath(PathUtility.Normalize(lowerFile)));
+	}
+
+	[Theory]
+	[InlineData(GitFilteringMode.RespectGitIgnore)]
+	[InlineData(GitFilteringMode.TrackedFilesOnly)]
+	public async Task PersistentGitModesKeepCaseDistinctSiblingRepositoryIndexes(
+		GitFilteringMode mode)
+	{
+		EnsureGitAvailable();
+		using var temp = new TemporaryDirectory();
+		var workspaceRoot = temp.CreateDirectory("workspace");
+		var upperRepository = temp.CreateDirectory("workspace/Repo");
+		var lowerRepository = temp.CreateDirectory("workspace/repo");
+		var upperFile = temp.CreateFile("workspace/Repo/Upper.cs", "upper\n");
+		var lowerFile = temp.CreateFile("workspace/repo/Lower.cs", "lower\n");
+		temp.CreateFile("workspace/Repo/.gitignore", "*.cs\n");
+		temp.CreateFile("workspace/repo/.gitignore", "*.cs\n");
+		if (Directory.EnumerateDirectories(workspaceRoot).Count() < 2)
+			Assert.Skip("The temporary file system is case-insensitive.");
+
+		InitializeCommittedRepository(upperRepository, ".gitignore", "Upper.cs");
+		InitializeCommittedRepository(lowerRepository, ".gitignore", "Lower.cs");
+		RunGit(upperRepository, "config", "core.ignorecase", "true");
+		var planner = new ProjectContextPlanner(CreateProjectAnalysisService());
+
+		var plan = await planner.BuildStructureAsync(
+			new ProjectContextRequest(
+				workspaceRoot,
+				ProjectSelectionSpec.Standard with { GitMode = mode }),
+			TestContext.Current.CancellationToken);
+
+		Assert.False(plan.HasErrors);
+		Assert.Contains(PathUtility.Normalize(upperFile), plan.IncludedFiles, StringComparer.Ordinal);
+		Assert.Contains(PathUtility.Normalize(lowerFile), plan.IncludedFiles, StringComparer.Ordinal);
+	}
+
+	[Fact]
+	public async Task StagedScopeRejectsAmbiguousCaseAliasInTheWorkingTree()
+	{
+		EnsureGitAvailable();
+		using var temp = new TemporaryDirectory();
+		var repositoryRoot = temp.CreateDirectory("repo");
+		var upperFile = temp.CreateFile("repo/Foo.cs", "upper-v1\n");
+		var lowerFile = temp.CreateFile("repo/foo.cs", "lower-v1\n");
+		if (Directory.EnumerateFiles(repositoryRoot, "*.cs").Count() < 2)
+			Assert.Skip("The temporary file system is case-insensitive.");
+
+		InitializeCommittedRepository(repositoryRoot, "Foo.cs", "foo.cs");
+		File.WriteAllText(upperFile, "upper-v2\n");
+		RunGit(repositoryRoot, "add", "--", "Foo.cs");
+		RunGit(repositoryRoot, "config", "core.ignorecase", "true");
+		var planner = new ProjectContextPlanner(CreateProjectAnalysisService());
+		var plan = await planner.BuildStructureAsync(
+			new ProjectContextRequest(
+				repositoryRoot,
+				ProjectSelectionSpec.Standard with { GitMode = GitFilteringMode.Staged }),
+			TestContext.Current.CancellationToken);
+
+		var scoped = await GitScopeFilter.ApplyAsync(
+			planner,
+			plan,
+			new GitScopePathProvider(),
+			TestContext.Current.CancellationToken);
+
+		Assert.False(scoped.HasErrors);
+		Assert.Equal(PathUtility.Normalize(upperFile), Assert.Single(scoped.IncludedFiles));
+		Assert.DoesNotContain(PathUtility.Normalize(lowerFile), scoped.IncludedFiles, StringComparer.Ordinal);
+	}
+
+	[Theory]
+	[InlineData(GitFilteringMode.Staged)]
+	[InlineData(GitFilteringMode.Changes)]
 	public async Task ProjectPlanCarriesNestedRepositoryEvidenceAndScopesAllRepositories(
 		GitFilteringMode scopeMode)
 	{
@@ -838,6 +948,79 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 		Assert.False(scopedPlan.HasErrors);
 		Assert.Equal(PathUtility.Normalize(selectedFile), Assert.Single(scopedPlan.IncludedFiles));
 		Assert.True(Directory.Exists(brokenRepository));
+	}
+
+	[Fact]
+	public async Task StagedPresentationDoesNotAdvertiseFilesOutsideTheExplicitPathSelection()
+	{
+		EnsureGitAvailable();
+		using var temp = new TemporaryDirectory();
+		var repositoryRoot = temp.CreateDirectory("repo");
+		var selectedFile = temp.CreateFile("repo/selected/App.cs", "v1\n");
+		var outsideFile = temp.CreateFile("repo/outside/Only.xyz", "v1\n");
+		InitializeCommittedRepository(repositoryRoot, "selected/App.cs", "outside/Only.xyz");
+		File.WriteAllText(selectedFile, "v2\n");
+		File.WriteAllText(outsideFile, "v2\n");
+		RunGit(repositoryRoot, "add", "--", "selected/App.cs", "outside/Only.xyz");
+		var planner = new ProjectContextPlanner(CreateProjectAnalysisService());
+		var selection = ProjectSelectionSpec.Standard with
+		{
+			GitMode = GitFilteringMode.Staged,
+			SelectedPaths = ["selected/App.cs"]
+		};
+
+		var plan = await planner.BuildWithIgnoreImpactCountsAsync(
+			new ProjectContextRequest(repositoryRoot, selection),
+			TestContext.Current.CancellationToken);
+		var scopedPlan = await GitScopeFilter.ApplyAsync(
+			planner,
+			plan,
+			new GitScopePathProvider(),
+			TestContext.Current.CancellationToken);
+
+		Assert.False(scopedPlan.HasErrors);
+		Assert.Equal(PathUtility.Normalize(selectedFile), Assert.Single(scopedPlan.IncludedFiles));
+		Assert.Contains(".cs", scopedPlan.AvailableExtensions, StringComparer.OrdinalIgnoreCase);
+		Assert.DoesNotContain(".xyz", scopedPlan.AvailableExtensions, StringComparer.OrdinalIgnoreCase);
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task ExplicitNestedSelectionDoesNotQueryTheContainingRepositoryForDiff(
+		bool selectFile)
+	{
+		EnsureGitAvailable();
+		using var temp = new TemporaryDirectory();
+		var outerRepository = temp.CreateDirectory("outer");
+		temp.CreateFile("outer/README.md", "outer\n");
+		InitializeCommittedRepository(outerRepository, "README.md");
+		var nestedRepository = temp.CreateDirectory("outer/nested");
+		var nestedFile = temp.CreateFile("outer/nested/App.cs", "v1\n");
+		InitializeCommittedRepository(nestedRepository, "App.cs");
+		File.WriteAllText(nestedFile, "v2\n");
+		RunGit(nestedRepository, "add", "--", "App.cs");
+		RunGit(nestedRepository, "commit", "--quiet", "-m", "change");
+		var planner = new ProjectContextPlanner(CreateProjectAnalysisService());
+		var selection = ProjectSelectionSpec.Standard with
+		{
+			Roots = selectFile ? null : ["nested"],
+			SelectedPaths = selectFile ? ["nested/App.cs"] : null,
+			GitMode = GitFilteringMode.Diff,
+			GitDiffRange = "HEAD~1..HEAD"
+		};
+
+		var plan = await planner.BuildStructureAsync(
+			new ProjectContextRequest(outerRepository, selection),
+			TestContext.Current.CancellationToken);
+		var scopedPlan = await GitScopeFilter.ApplyAsync(
+			planner,
+			plan,
+			new GitScopePathProvider(),
+			TestContext.Current.CancellationToken);
+
+		Assert.False(scopedPlan.HasErrors);
+		Assert.Equal(PathUtility.Normalize(nestedFile), Assert.Single(scopedPlan.IncludedFiles));
 	}
 
 	[Fact]

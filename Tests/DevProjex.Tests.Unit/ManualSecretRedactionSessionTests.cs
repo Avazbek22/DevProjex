@@ -121,6 +121,33 @@ public sealed class ManualSecretRedactionSessionTests
 	}
 
 	[Fact]
+	public void ScopedPersistentRemoval_PreservesTheCaseDistinctSiblingMark()
+	{
+		const string identity = "v2:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+		var upper = new MarkedSecretProfileEntry(
+			identity,
+			"TOKEN",
+			Secret.Length,
+			RelativePath: "Foo.cs",
+			SourceOffset: 6);
+		var lower = upper with { RelativePath = "foo.cs" };
+		using var session = new SecretRedactionSession(new EmptyDetector());
+		Assert.True(session.AddMarkedSecret(upper));
+		Assert.True(session.AddMarkedSecret(lower));
+
+		var removal = session.RemoveManualSecret(
+			new PersistentSecretMarkId(
+				identity,
+				Secret.Length,
+				"Foo.cs",
+				6),
+			sessionMarkId: null);
+
+		Assert.True(removal.PersistentMarkRemoved);
+		Assert.Equal(lower, Assert.Single(session.GetMarkedSecrets()));
+	}
+
+	[Fact]
 	public void RemovingCombinedManualMark_RemovesBothSourcesWithOneInvalidationAndLeavesDetectorActive()
 	{
 		using var workspace = new TemporaryDirectory();

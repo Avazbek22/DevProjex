@@ -18,7 +18,8 @@ public sealed class TreeCommandHandler(
 					request.ProjectPath,
 					request.Selection,
 					includeOutputMetrics: false,
-					cancellationToken: cancellationToken))
+					cancellationToken: cancellationToken,
+					repositorySourceUrl: request.RepositorySourceUrl))
 			.ConfigureAwait(false);
 		plan = await ProjectFileSizeFilter.ApplyAsync(
 				services.ContextPlanner,

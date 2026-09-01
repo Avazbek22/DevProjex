@@ -29,7 +29,7 @@ public sealed record GitScopePathResult(
 
 	public bool ContainsPath(string path)
 	{
-		return TryGetOwningMatcher(path, out var owner, out _)
+		return TryGetOwningMatcher(path, out var owner)
 			? owner.Contains(path)
 			: IncludedPaths.Contains(path);
 	}
@@ -39,18 +39,20 @@ public sealed record GitScopePathResult(
 		if (PathMatchers is null)
 			return null;
 
-		return TryGetOwningMatcher(path, out var owner, out var relativeIdentity)
-			? owner.RepositoryRootPath + '\0' + relativeIdentity
-			: null;
+		if (!TryGetOwningMatcher(path, out var owner) ||
+		    !owner.TryGetPathIdentity(path, out var relativeIdentity))
+		{
+			return null;
+		}
+
+		return owner.RepositoryRootPath + '\0' + relativeIdentity;
 	}
 
 	private bool TryGetOwningMatcher(
 		string path,
-		out GitTrackedPathIndex owner,
-		out string relativeIdentity)
+		out GitTrackedPathIndex owner)
 	{
 		owner = null!;
-		relativeIdentity = string.Empty;
 		if (PathMatchers is null)
 			return false;
 
@@ -58,13 +60,12 @@ public sealed record GitScopePathResult(
 		{
 			var candidate = PathMatchers[index];
 			if ((owner is not null && candidate.RepositoryRootPath.Length <= owner.RepositoryRootPath.Length) ||
-			    !candidate.TryGetPathIdentity(path, out var candidateIdentity))
+			    !candidate.OwnsPath(path))
 			{
 				continue;
 			}
 
 			owner = candidate;
-			relativeIdentity = candidateIdentity;
 		}
 
 		return owner is not null;
@@ -95,7 +96,7 @@ public static class GitScopeFilter
 		IReadOnlyCollection<string>? selectedFullPaths = null)
 	{
 		var repositoryRoots = GetDiscoveredRepositoryRoots(inventory);
-		var pathSelectionIsExplicit = selectedFullPaths is { Count: > 0 };
+		var pathSelectionIsExplicit = selectedFullPaths is not null;
 		if ((!rootSelectionIsExplicit && !pathSelectionIsExplicit) || repositoryRoots.Count == 0)
 			return repositoryRoots;
 
@@ -129,12 +130,30 @@ public static class GitScopeFilter
 			}
 		}
 
-		return repositoryRoots
-			.Where(repositoryRoot =>
-				PathUtility.IsPathInside(sourceRoot, repositoryRoot) ||
-				selectedRoots.Any(selectedRoot =>
-					PathUtility.IsPathInside(repositoryRoot, selectedRoot) ||
-					PathUtility.IsPathInside(selectedRoot, repositoryRoot)))
+		var selectedRepositoryRoots = new HashSet<string>(StringComparer.Ordinal);
+		foreach (var selectedRoot in selectedRoots)
+		{
+			string? owningRepository = null;
+			foreach (var repositoryRoot in repositoryRoots)
+			{
+				if (PathUtility.IsPathInside(repositoryRoot, selectedRoot))
+					selectedRepositoryRoots.Add(repositoryRoot);
+				if (!PathUtility.IsPathInside(selectedRoot, repositoryRoot) ||
+				    (owningRepository is not null && repositoryRoot.Length <= owningRepository.Length))
+				{
+					continue;
+				}
+
+				owningRepository = repositoryRoot;
+			}
+
+			if (owningRepository is not null)
+				selectedRepositoryRoots.Add(owningRepository);
+		}
+
+		return selectedRepositoryRoots
+			.OrderBy(static path => path, PathComparer.Default)
+			.ThenBy(static path => path, StringComparer.Ordinal)
 			.ToArray();
 	}
 
@@ -157,7 +176,25 @@ public static class GitScopeFilter
 		IGitScopePathProvider provider,
 		GitFilteringMode scopeMode,
 		string? diffRange,
-		CancellationToken cancellationToken = default)
+		CancellationToken cancellationToken = default) =>
+		await ApplyAsync(
+			planner,
+			plan,
+			provider,
+			scopeMode,
+			diffRange,
+			repositoryScopeFullPaths: null,
+			cancellationToken).ConfigureAwait(false);
+
+	public static async Task<ProjectContextPlan> ApplyAsync(
+		ProjectContextPlanner planner,
+		ProjectContextPlan plan,
+		IGitScopePathProvider provider,
+		GitFilteringMode scopeMode,
+		string? diffRange,
+		IReadOnlyCollection<string>? repositoryScopeFullPaths,
+		CancellationToken cancellationToken = default,
+		string? resolvedDiffRange = null)
 	{
 		ArgumentNullException.ThrowIfNull(planner);
 		ArgumentNullException.ThrowIfNull(plan);
@@ -172,13 +209,16 @@ public static class GitScopeFilter
 			GitDiffRange = scopeMode == GitFilteringMode.Diff ? diffRange : null
 		};
 		var scopedBaseline = plan with { Selection = scopedSelection };
+		var selectedPathFrontier = repositoryScopeFullPaths ??
+		                           planner.GetGitScopeSelectedPathFrontier(plan);
 
-		var scope = await provider
-			.ResolveAsync(
+		var scope = await ResolvePathsAsync(
+				provider,
 				plan.SourceRoot,
 				scopeMode,
-				diffRange,
-				planner.GetGitScopeRepositoryRoots(plan),
+				resolvedDiffRange ?? diffRange,
+				planner.GetGitScopeRepositoryRoots(plan, selectedPathFrontier),
+				selectedPathFrontier,
 				cancellationToken)
 			.ConfigureAwait(false);
 		if (!scope.IsAvailable)
@@ -237,7 +277,6 @@ public static class GitScopeFilter
 		}
 
 		var diagnostics = narrowed.Diagnostics;
-		var presentation = planner.BuildGitScopePresentation(plan, scope, cancellationToken);
 		if (scope.DeletedPathCount > 0)
 		{
 			diagnostics = AppendDiagnostic(
@@ -245,20 +284,19 @@ public static class GitScopeFilter
 				CreateDeletedDiagnostic(plan.SourceRoot, scope.DeletedPathCount));
 		}
 
-		return narrowed with
+		var scoped = narrowed with
 		{
 			EffectiveTree = scopedTree,
-			AvailableExtensions = presentation.AvailableExtensions,
 			SelectedExtensions = plan.SelectedExtensions,
 			HasIgnoreOptionCounts = plan.HasIgnoreOptionCounts,
-			IgnoreOptionCounts = plan.HasIgnoreOptionCounts
-				? presentation.IgnoreOptionCounts
-				: IgnoreOptionCounts.Empty,
-			IgnoreControllerImpactCounts = plan.HasIgnoreOptionCounts
-				? presentation.ControllerImpactCounts
-				: IgnoreControllerImpactCounts.Empty,
 			Diagnostics = diagnostics
 		};
+		return planner.ApplyGitScopeProjection(
+			plan,
+			scoped,
+			scope,
+			selectedPathFrontier,
+			cancellationToken);
 	}
 
 	public static BuildTreeResult ApplyToTree(
@@ -343,5 +381,35 @@ public static class GitScopeFilter
 			result[index] = diagnostics[index];
 		result[^1] = diagnostic;
 		return result;
+	}
+
+	public static Task<GitScopePathResult> ResolvePathsAsync(
+		IGitScopePathProvider provider,
+		string projectRoot,
+		GitFilteringMode mode,
+		string? diffRange,
+		IReadOnlyCollection<string> repositoryRoots,
+		IReadOnlyCollection<string>? requestedScopePaths,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(provider);
+		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
+		ArgumentNullException.ThrowIfNull(repositoryRoots);
+		cancellationToken.ThrowIfCancellationRequested();
+		if (requestedScopePaths is { Count: 0 })
+		{
+			return Task.FromResult(new GitScopePathResult(
+				true,
+				new HashSet<string>(StringComparer.Ordinal),
+				0,
+				PathMatchers: []));
+		}
+
+		return provider.ResolveAsync(
+			projectRoot,
+			mode,
+			diffRange,
+			repositoryRoots,
+			cancellationToken);
 	}
 }

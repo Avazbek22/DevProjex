@@ -230,7 +230,7 @@ public sealed class PortableProjectProfileService
 		return new ProjectSelectionSpec(
 			Roots: NormalizeRootNames(document.Selection.Roots),
 			Extensions: NormalizeExtensionNames(document.Selection.Extensions),
-			SelectedPaths: selectedPaths,
+			SelectedPaths: selectedPaths.Count == 0 ? null : selectedPaths,
 			GitMode: gitMode,
 			Exclusions: ProjectSelectionTokens.OrderExclusions(exclusions),
 			HideSecrets: document.Selection.HideSecrets ?? legacyHideSecrets,
@@ -263,7 +263,9 @@ public sealed class PortableProjectProfileService
 			Kind = DocumentKind,
 			Selection = new PortableSelectionDocument
 			{
-				Roots = selection.Roots?.OrderBy(static value => value, PathComparer.Default).ToArray(),
+				Roots = selection.Roots?
+					.OrderBy(static value => value, ProjectTreePathIdentity.CanonicalComparer)
+					.ToArray(),
 				Extensions = selection.Extensions?.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase).ToArray(),
 				SelectedPaths = selectedPaths.ToArray(),
 				GitMode = ProjectSelectionTokens.ToToken(selection.GitMode.Value),
@@ -317,8 +319,8 @@ public sealed class PortableProjectProfileService
 			? null
 			: values
 				.Where(static value => !string.IsNullOrEmpty(value))
-				.Distinct(PathComparer.Default)
-				.OrderBy(static value => value, PathComparer.Default)
+				.Distinct(ProjectTreePathIdentity.CanonicalComparer)
+				.OrderBy(static value => value, ProjectTreePathIdentity.CanonicalComparer)
 				.ToArray();
 
 	private static IReadOnlyCollection<string> NormalizeSelectedPaths(
@@ -327,8 +329,8 @@ public sealed class PortableProjectProfileService
 		.Where(static value => !string.IsNullOrEmpty(value))
 		.Select(ProjectSelectionPath.NormalizePortableRelative)
 		.Where(static value => value.Length > 0)
-		.Distinct(PathComparer.Default)
-		.OrderBy(static value => value, PathComparer.Default)
+		.Distinct(ProjectTreePathIdentity.CanonicalComparer)
+		.OrderBy(static value => value, ProjectTreePathIdentity.CanonicalComparer)
 		.ToArray();
 
 	private static IReadOnlyCollection<string> NormalizeSelectedPathsOrThrow(

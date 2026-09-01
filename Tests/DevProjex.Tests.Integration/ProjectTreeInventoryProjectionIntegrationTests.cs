@@ -146,6 +146,44 @@ public sealed class ProjectTreeInventoryProjectionIntegrationTests
 	}
 
 	[Fact]
+	public void TreeBuilder_ProjectionUsesExactRootIdentityEvenWhenCallerSetIsCaseInsensitive()
+	{
+		var root = new ProjectTreeInventoryEntry(
+			"project",
+			"/project",
+			string.Empty,
+			parentIndex: -1,
+			isDirectory: true,
+			isHidden: false,
+			length: 0)
+		{
+			FirstChildIndex = 1,
+			ChildCount = 2
+		};
+		var inventory = new ProjectTreeInventorySnapshot(
+			[
+				root,
+				new ProjectTreeInventoryEntry(
+					"Foo", "/project/Foo", "Foo", 0, true, false, 0),
+				new ProjectTreeInventoryEntry(
+					"foo", "/project/foo", "foo", 0, true, false, 0)
+			],
+			rootAccessDenied: false,
+			hadAccessDenied: false);
+		var options = new TreeFilterOptions(
+			AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+			AllowedRootFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Foo" },
+			IgnoreRules: CreateRules());
+
+		var tree = new TreeBuilder().Build(
+			inventory,
+			options,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(["Foo"], tree.Root.Children.Select(static child => child.Name));
+	}
+
+	[Fact]
 	public void TreeBuilder_MixedDirectoryAndFileProjection_KeepsStableInventoryOrder()
 	{
 		using var temp = new TemporaryDirectory();

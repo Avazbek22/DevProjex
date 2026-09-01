@@ -54,27 +54,44 @@ public sealed record TerminalTreeRow(
 /// </summary>
 public sealed class TerminalWorkspaceState : IDisposable
 {
-	private readonly HashSet<string> _expandedPaths = new(PathComparer.Default);
-	private readonly HashSet<string> _selectedFiles = new(PathComparer.Default);
-	private readonly HashSet<string> _selectedEmptyDirectories = new(PathComparer.Default);
-	private readonly Dictionary<string, TreeNodeDescriptor> _nodesByPath = new(PathComparer.Default);
-	private readonly Dictionary<string, string?> _parentsByPath = new(PathComparer.Default);
-	private readonly Dictionary<string, TerminalTreeCheckState> _checkStates = new(PathComparer.Default);
-	private readonly Dictionary<string, int> _orderedPathIndexes = new(PathComparer.Default);
+	private readonly HashSet<string> _expandedPaths = new(ProjectTreePathIdentity.CanonicalComparer);
+	private readonly HashSet<string> _selectedFiles = new(ProjectTreePathIdentity.CanonicalComparer);
+	private readonly HashSet<string> _selectedEmptyDirectories = new(ProjectTreePathIdentity.CanonicalComparer);
+	private readonly Dictionary<string, TreeNodeDescriptor> _nodesByPath = new(ProjectTreePathIdentity.CanonicalComparer);
+	private readonly Dictionary<string, string?> _parentsByPath = new(ProjectTreePathIdentity.CanonicalComparer);
+	private readonly Dictionary<string, TerminalTreeCheckState> _checkStates = new(ProjectTreePathIdentity.CanonicalComparer);
+	private readonly Dictionary<string, int> _orderedPathIndexes = new(ProjectTreePathIdentity.CanonicalComparer);
 	private readonly Dictionary<string, bool> _extensionOptionStates = new(StringComparer.OrdinalIgnoreCase);
-	private readonly Dictionary<string, bool> _pathOptionStates = new(PathComparer.Default);
+	private readonly Dictionary<string, bool> _pathOptionStates = new(ProjectTreePathIdentity.CanonicalComparer);
 	private readonly List<string> _orderedPaths = [];
 	private readonly List<IPreviewTextDocument> _retiredPreviewDocuments = [];
 	private readonly ResettableObservableCollection<TerminalTreeRow> _visibleRows = [];
 	private readonly object _previewSync = new();
+	private IReadOnlyList<string>? _selectedPathFrontier;
 	private int _selectedFolderCount;
 	private long _revision;
 	private string _treeFilterQuery = string.Empty;
 	private bool _disposed;
 
 	public TerminalWorkspaceState(ProjectContextPlan plan)
+		: this(plan, plan.Selection.SelectedPaths, inferLegacyBroadSelection: true)
+	{
+	}
+
+	internal TerminalWorkspaceState(
+		ProjectContextPlan plan,
+		IReadOnlyCollection<string>? selectedPathFrontier)
+		: this(plan, selectedPathFrontier, inferLegacyBroadSelection: false)
+	{
+	}
+
+	private TerminalWorkspaceState(
+		ProjectContextPlan plan,
+		IReadOnlyCollection<string>? selectedPathFrontier,
+		bool inferLegacyBroadSelection)
 	{
 		Plan = plan;
+		_selectedPathFrontier = CloneSelectedPathFrontier(selectedPathFrontier);
 		var profileExtensionStates = ProjectSelectionAdapter.GetLocalProfileExtensionStates(
 			plan.Selection);
 		if (profileExtensionStates is not null)
@@ -94,6 +111,12 @@ public sealed class TerminalWorkspaceState : IDisposable
 
 		_expandedPaths.Add(plan.EffectiveTree.FullPath);
 		RecomputeCheckStates();
+		if (inferLegacyBroadSelection &&
+		    _selectedPathFrontier is { Count: 0 } &&
+		    GetCheckState(plan.EffectiveTree) == TerminalTreeCheckState.Checked)
+		{
+			_selectedPathFrontier = null;
+		}
 		UpdatePathOptionStates(plan);
 		RebuildVisibleRows();
 		var initialPreview = BuildTreePreview();
@@ -183,7 +206,10 @@ public sealed class TerminalWorkspaceState : IDisposable
 		_selectedFiles
 			.Concat(_selectedEmptyDirectories)
 			.Select(ToRelativePath)
-			.ToHashSet(PathComparer.Default);
+			.ToHashSet(ProjectTreePathIdentity.CanonicalComparer);
+
+	internal IReadOnlyList<string>? BuildSelectedPathFrontier() =>
+		_selectedPathFrontier?.ToArray();
 
 	internal static IReadOnlyList<string> BuildSelectableRelativePaths(
 		TreeNodeDescriptor root,
@@ -354,6 +380,12 @@ public sealed class TerminalWorkspaceState : IDisposable
 		}
 		Interlocked.Increment(ref _revision);
 		RecomputeCheckStates();
+		_selectedPathFrontier = GetCheckState(Plan.EffectiveTree) switch
+		{
+			TerminalTreeCheckState.Checked => null,
+			TerminalTreeCheckState.Unchecked => [],
+			_ => BuildSelectedRelativePaths()
+		};
 		UpdatePathOptionStates(Plan);
 		RebuildVisibleRows();
 	}
@@ -373,7 +405,9 @@ public sealed class TerminalWorkspaceState : IDisposable
 		ExpandAncestors(fullPath);
 		for (var index = 0; index < VisibleRows.Count; index++)
 		{
-			if (PathComparer.Default.Equals(VisibleRows[index].Node.FullPath, fullPath))
+			if (ProjectTreePathIdentity.CanonicalComparer.Equals(
+				    VisibleRows[index].Node.FullPath,
+				    fullPath))
 				return index;
 		}
 		return -1;
@@ -422,10 +456,12 @@ public sealed class TerminalWorkspaceState : IDisposable
 		if (!TryGetRow(rowIndex, out var row))
 			return;
 
+		var previousFrontier = _selectedPathFrontier;
 		Interlocked.Increment(ref _revision);
 		var select = GetCheckState(row.Node) != TerminalTreeCheckState.Checked;
 		SetSubtreeSelection(row.Node, select);
 		RecomputeAncestorCheckStates(row.Node);
+		_selectedPathFrontier = ResolveUpdatedSelectedPathFrontier(previousFrontier);
 		RebuildVisibleRows();
 	}
 
@@ -517,7 +553,37 @@ public sealed class TerminalWorkspaceState : IDisposable
 			: BuildSelectedRelativePaths();
 
 	public ProjectSelectionSpec BuildSelection() =>
-		Plan.Selection with { SelectedPaths = BuildSelectedRelativePaths() };
+		Plan.Selection with
+		{
+			SelectedPaths = GetCheckState(Plan.EffectiveTree) switch
+			{
+				TerminalTreeCheckState.Checked => null,
+				TerminalTreeCheckState.Unchecked => BuildUncheckedSelection(),
+				_ => BuildSelectedRelativePaths()
+			}
+		};
+
+	private IReadOnlyList<string>? BuildUncheckedSelection() =>
+		_selectedPathFrontier?.ToArray();
+
+	private IReadOnlyList<string>? ResolveUpdatedSelectedPathFrontier(
+		IReadOnlyList<string>? previousFrontier)
+	{
+		var rootState = GetCheckState(Plan.EffectiveTree);
+		if (rootState == TerminalTreeCheckState.Unchecked)
+			return [];
+		if (previousFrontier is null)
+			return null;
+		if (rootState == TerminalTreeCheckState.Checked)
+			return previousFrontier.Count == 0 ? null : previousFrontier;
+		return BuildSelectedRelativePaths();
+	}
+
+	private static IReadOnlyList<string>? CloneSelectedPathFrontier(
+		IReadOnlyCollection<string>? selectedPaths) =>
+		selectedPaths?
+			.Select(ProjectSelectionPath.NormalizeRelative)
+			.ToArray();
 
 	public string BuildTreePreview(int maximumRows = 2_000)
 	{
@@ -572,7 +638,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 		List<TerminalTreeRow> rows,
 		ref int matchCount)
 	{
-		var includedPaths = new HashSet<string>(PathComparer.Default);
+		var includedPaths = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
 		var traversal = new Stack<(TreeNodeDescriptor Node, bool Visited)>();
 		traversal.Push((node, false));
 		while (traversal.Count > 0)
@@ -852,6 +918,7 @@ public sealed class TerminalWorkspaceState : IDisposable
 				_pathOptionStates[path] = false;
 		}
 		RecomputeCheckStates();
+		_selectedPathFrontier = selected ? null : [];
 		RebuildVisibleRows();
 	}
 

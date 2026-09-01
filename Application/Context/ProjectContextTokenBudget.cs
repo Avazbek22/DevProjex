@@ -93,7 +93,7 @@ internal sealed class ProjectContextTokenBudgetAccumulator
 			var item = items[middle];
 			var comparison = item.EstimatedTokens != estimatedTokens
 				? estimatedTokens.CompareTo(item.EstimatedTokens)
-				: PathComparer.Default.Compare(item.Path, path);
+				: ProjectTreePathIdentity.CanonicalComparer.Compare(item.Path, path);
 			if (comparison < 0)
 				low = middle + 1;
 			else

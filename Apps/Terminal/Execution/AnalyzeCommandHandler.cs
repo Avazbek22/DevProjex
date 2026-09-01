@@ -29,7 +29,8 @@ public sealed class AnalyzeCommandHandler(
 					request.Selection,
 					includeOutputMetrics: true,
 					cancellationToken: cancellationToken,
-					includeContentOutputMetrics: includeSourceContentMetrics && topFileRanking is null))
+					includeContentOutputMetrics: includeSourceContentMetrics && topFileRanking is null,
+					repositorySourceUrl: request.RepositorySourceUrl))
 			.ConfigureAwait(false);
 		plan = await ProjectFileSizeFilter.ApplyAsync(
 				services.ContextPlanner,
@@ -47,7 +48,8 @@ public sealed class AnalyzeCommandHandler(
 					request.Selection,
 					includeOutputMetrics: true,
 					cancellationToken: cancellationToken,
-					includeContentOutputMetrics: topFileRanking is null)
+					includeContentOutputMetrics: topFileRanking is null,
+					repositorySourceUrl: request.RepositorySourceUrl)
 				.ConfigureAwait(false);
 			transformationContext = CreateTransformationContext(plan);
 		}

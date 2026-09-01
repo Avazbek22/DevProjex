@@ -911,7 +911,7 @@ public sealed class CodeCompressionScope : IDisposable
 		_unchangedOutcomeCounts = new int[Enum.GetValues<CodeCompressionOutcome>().Length];
 		_fileOrder = orderedFilePaths
 			.Select(static (path, index) => (path, index))
-			.ToDictionary(static item => item.path, static item => item.index, PathComparer.Default);
+			.ToDictionary(static item => item.path, static item => item.index, ProjectTreePathIdentity.CanonicalComparer);
 	}
 
 	public CodeCompressionResult Transform(
@@ -1197,7 +1197,7 @@ public sealed class CodeCompressionScope : IDisposable
 			var order = left.Order.CompareTo(right.Order);
 			return order != 0
 				? order
-				: PathComparer.Default.Compare(left.RelativePath, right.RelativePath);
+				: ProjectTreePathIdentity.CanonicalComparer.Compare(left.RelativePath, right.RelativePath);
 		}
 	}
 

@@ -3,7 +3,7 @@ namespace DevProjex.Infrastructure.FileSystem;
 internal sealed class ScopedGitIgnoreMatcherAccumulator
 {
 	private readonly List<ScopedGitIgnoreMatcher> _items = [];
-	private readonly HashSet<string> _scopeRootPaths = new(PathComparer.Default);
+	private readonly HashSet<string> _scopeRootPaths = new(ProjectTreePathIdentity.CanonicalComparer);
 
 	public List<ScopedGitIgnoreMatcher> Items => _items;
 

@@ -59,6 +59,30 @@ public sealed class DesktopControlIntegrationTests
 	}
 
 	[Fact]
+	public async Task ConcurrentProjectUpdatesLeaveOneValidRegistration()
+	{
+		using var workspace = new TemporaryDirectory();
+		var paths = new DesktopControlPaths(() => workspace.CreateDirectory("ipc"));
+		await using var server = await DesktopControlServer.StartAsync(
+			new RecordingDesktopHandler(),
+			paths: paths,
+			cancellationToken: TestContext.Current.CancellationToken);
+		var projects = Enumerable.Range(0, 64)
+			.Select(index => workspace.CreateDirectory($"project-{index}"))
+			.ToArray();
+
+		await Task.WhenAll(projects.Select(project =>
+			server.UpdateProjectAsync(project, TestContext.Current.CancellationToken)));
+		var finalProject = workspace.CreateDirectory("final-project");
+		await server.UpdateProjectAsync(finalProject, TestContext.Current.CancellationToken);
+
+		var registration = Assert.Single(
+			await new DesktopInstanceRegistry(paths).ListAsync(TestContext.Current.CancellationToken));
+		Assert.Equal(finalProject, registration.ProjectPath);
+		Assert.Empty(Directory.EnumerateFiles(paths.RegistryDirectory, "*.tmp"));
+	}
+
+	[Fact]
 	public async Task OpenWritesTheAcceptedProjectPathForExistingAndLastProjectRequests()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -253,6 +277,31 @@ public sealed class DesktopControlIntegrationTests
 		Assert.False(response.Ok);
 		Assert.Equal(expectedCode, response.Error?.Code);
 		Assert.Empty(handler.Requests);
+	}
+
+	[Fact]
+	public async Task InternalHandlerFailureIsNotReportedAsInvalidPayload()
+	{
+		using var workspace = new TemporaryDirectory();
+		var paths = new DesktopControlPaths(() => workspace.Path);
+		await using var server = await DesktopControlServer.StartAsync(
+			new ThrowingDesktopHandler(),
+			paths: paths,
+			cancellationToken: TestContext.Current.CancellationToken);
+		var registry = new DesktopInstanceRegistry(paths);
+		var registration = Assert.Single(
+			await registry.ListAsync(TestContext.Current.CancellationToken));
+
+		var response = await new DesktopControlClient(registry).SendAsync(
+			registration,
+			"status",
+			new { },
+			TimeSpan.FromSeconds(5),
+			TestContext.Current.CancellationToken);
+
+		Assert.False(response.Ok);
+		Assert.Equal("DPX-DESKTOP-REQUEST-FAILED", response.Error?.Code);
+		Assert.Equal("The desktop request could not be completed.", response.Error?.Message);
 	}
 
 	[Fact]
@@ -1253,6 +1302,14 @@ public sealed class DesktopControlIntegrationTests
 					["projectPath"] = @"C:\workspace\Project"
 				}));
 		}
+	}
+
+	private sealed class ThrowingDesktopHandler : IDesktopInteractionHandler
+	{
+		public Task<DesktopInteractionResult> HandleAsync(
+			DesktopInteractionRequest request,
+			CancellationToken cancellationToken) =>
+			throw new IOException("Synthetic internal failure.");
 	}
 
 	private sealed class CancellationBoundReadStream : Stream

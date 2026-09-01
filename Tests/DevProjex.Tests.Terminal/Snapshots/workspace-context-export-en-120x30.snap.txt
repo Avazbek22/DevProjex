@@ -5,15 +5,15 @@
 │  > [x] src                                          ││├── src                                                        │
 │    [x] global.json                                  │││   ├── Feature                                                │
 │    [x] readme.md                                    │││   │   └── Handler.cs                                         │
-│                                                     │││   └── App.cs                                                 │
 │                ┌┤Export?├──────────────────────────────────────────────────────────────────────────┐                 │
 │                │ Destination       <SYSTEM_TEMP>/<ID-PART>…    │                 │
 │                │ Files             4                                                               │                 │
 │                │ Folders           3                                                               │                 │
 │                │ Size              76 B                                                            │                 │
-│                │ Estimated tokens  62                                                              │                 │
+│                │ Estimated tokens  46                                                              │                 │
 │                │ Filters           Use .gitignore; Smart ignore, Hidden folders, Hidden files,…    │                 │
 │                │ Diagnostics       0                                                               │                 │
+│                │                                                                                   │                 │
 │                │                                                                                   │                 │
 │                │                                                                                   │                 │
 │                │                      ⟦ Cancel ⟧▖ ⟦ Dry run ⟧▖ ⟦► Export ◄⟧▖                       │                 │
@@ -22,9 +22,9 @@
 │                                                     ││                                                               │
 │                                                     ││ Files 4  |  Lines 1-8/8                                       │
 └─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
-││                                                                                                                    ││
+
 ┌┤  PARAMETERS├────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│ Content 0/5 · Exclusions 9/9 · File types 3/3                                                                        │
+│ Content 0/5 · Exclusions 0/0 · File types 3/3                                                                        │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
  Files 4 · Folders 3 · 76 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
  j/k Scroll   {/} Section   Ctrl+G Line   W Wrap   / Search   n/N Match   : Commands

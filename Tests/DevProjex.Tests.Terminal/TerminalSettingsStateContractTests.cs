@@ -1,12 +1,37 @@
 using System.Diagnostics;
 using DevProjex.Application.Presentation;
 using DevProjex.Application.Services;
+using DevProjex.Infrastructure.Git;
 using DevProjex.Infrastructure.ProjectProfiles;
 
 namespace DevProjex.Tests.Terminal;
 
 public sealed class TerminalSettingsStateContractTests
 {
+	[Fact]
+	public void PathStateSnapshotsAndEvolutionPreserveCaseDistinctEntries()
+	{
+		var knownStates = new Dictionary<string, bool>(ProjectTreePathIdentity.CanonicalComparer)
+		{
+			["Foo.cs"] = false,
+			["foo.cs"] = true
+		};
+		var snapshot = TerminalWorkspaceController.ClonePathOptionStates(knownStates);
+
+		var evolution = TerminalWorkspaceController.ReconcilePathSelection(
+			["Foo.cs", "foo.cs", "New.cs"],
+			new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer) { "foo.cs" },
+			snapshot);
+
+		Assert.Equal(3, evolution.KnownStates.Count);
+		Assert.False(evolution.KnownStates["Foo.cs"]);
+		Assert.True(evolution.KnownStates["foo.cs"]);
+		Assert.True(evolution.KnownStates["New.cs"]);
+		Assert.Equal(
+			["New.cs", "foo.cs"],
+			evolution.SelectedItems.Order(ProjectTreePathIdentity.CanonicalComparer));
+	}
+
 	[Fact]
 	public void ChangingOnlyTheDiffRangeRequiresAFullStructuralRefresh()
 	{
@@ -353,6 +378,185 @@ public sealed class TerminalSettingsStateContractTests
 		}
 	}
 
+	[Theory]
+	[InlineData(GitFilteringMode.Staged)]
+	[InlineData(GitFilteringMode.Changes)]
+	public async Task InitialMomentaryGitModeScopesPresentationToTheManualSubtree(
+		GitFilteringMode mode)
+	{
+		using var workspace = CreateStagedPresentationWorkspace();
+		var (controller, state) = await OpenAsync(workspace);
+		using (state)
+		{
+			SelectOnlyTopLevelDirectory(state, "selected");
+
+			await controller.SetGitModeAsync(
+				state,
+				mode,
+				TestContext.Current.CancellationToken);
+
+			AssertSelectedSubtreePresentation(state.Plan, ".cs");
+		}
+	}
+
+	[Theory]
+	[InlineData(GitFilteringMode.Staged)]
+	[InlineData(GitFilteringMode.Changes)]
+	public async Task ManualMomentaryGitReprojectionRecalculatesPresentationFromTheFinalSelection(
+		GitFilteringMode mode)
+	{
+		using var workspace = CreateStagedPresentationWorkspace();
+		var (controller, state) = await OpenAsync(workspace);
+		using (state)
+		{
+			await controller.SetGitModeAsync(
+				state,
+				mode,
+				TestContext.Current.CancellationToken);
+			Assert.Contains(".xyz", state.Plan.AvailableExtensions);
+			Assert.Equal(1, state.Plan.IgnoreOptionCounts.DotFiles);
+			Assert.Equal(1, state.Plan.IgnoreOptionCounts.EmptyFiles);
+
+			SelectOnlyTopLevelDirectory(state, "selected");
+			await controller.ReprojectSelectionAsync(
+				state,
+				TestContext.Current.CancellationToken);
+
+			AssertSelectedSubtreePresentation(state.Plan, ".cs");
+		}
+	}
+
+	[Fact]
+	public async Task StructuralStagedRefreshProjectsNewFilesInsideTheManualSubtreeOnly()
+	{
+		using var workspace = CreateStagedPresentationWorkspace();
+		var (controller, state) = await OpenAsync(workspace);
+		using (state)
+		{
+			SelectOnlyTopLevelDirectory(state, "selected");
+			await controller.SetGitModeAsync(
+				state,
+				GitFilteringMode.Staged,
+				TestContext.Current.CancellationToken);
+
+			workspace.WriteFile("selected/New.md", "# New staged file\n");
+			workspace.WriteFile("sibling/Outside.log", "outside\n");
+			RunGit(workspace.Path, "add", "--all");
+			await controller.RefreshProjectAsync(
+				state,
+				TestContext.Current.CancellationToken);
+
+			AssertSelectedSubtreePresentation(state.Plan, ".cs", ".md");
+			Assert.DoesNotContain(".log", state.Plan.AvailableExtensions);
+			Assert.Contains(
+				state.Plan.IncludedFiles,
+				static path => Path.GetFileName(path) == "New.md");
+		}
+	}
+
+	[Fact]
+	public async Task StructuralStagedRefreshKeepsSelectionEmptyAfterTheSelectedSubtreeIsDeleted()
+	{
+		using var workspace = CreateStagedPresentationWorkspace();
+		var (controller, state) = await OpenAsync(workspace);
+		using (state)
+		{
+			SelectOnlyTopLevelDirectory(state, "selected");
+			await controller.SetGitModeAsync(
+				state,
+				GitFilteringMode.Staged,
+				TestContext.Current.CancellationToken);
+
+			Directory.Delete(Path.Combine(workspace.Path, "selected"), recursive: true);
+			RunGit(workspace.Path, "add", "--all");
+			await controller.RefreshProjectAsync(
+				state,
+				TestContext.Current.CancellationToken);
+
+			Assert.Empty(state.Plan.IncludedFiles);
+			Assert.Empty(state.Plan.AvailableExtensions);
+			Assert.DoesNotContain(
+				state.Plan.IncludedFiles,
+				static path => Path.GetFileName(path) is "Sibling.xyz" or ".scope-noise" or "Empty.txt");
+		}
+	}
+
+	[Fact]
+	public async Task ExplicitEmptySelectionSkipsUnavailableDiffGitQuery()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		workspace.WriteFile("App.cs", "class App {}\n");
+		var provider = new CountingUnavailableGitScopePathProvider();
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		services = services with
+		{
+			ContextFactory = new TerminalProjectContextFactory(
+				services.ContextPlanner,
+				services.SourceIdentityResolver,
+				services.SecretRedactionSession,
+				provider,
+				new GitRemoteDiffRangeResolver())
+		};
+		var emptySelection = ProjectSelectionSpec.Standard with
+		{
+			GitMode = GitFilteringMode.None,
+			SelectedPaths = []
+		};
+		var unfilteredPlan = await services.ContextFactory.BuildAsync(
+			workspace.Path,
+			emptySelection,
+			cancellationToken: TestContext.Current.CancellationToken,
+			captureIgnoreImpactCounts: true);
+		var diffSelection = emptySelection with
+		{
+			GitMode = GitFilteringMode.Diff,
+			GitDiffRange = "missing-left..missing-right"
+		};
+
+		var diffPlan = await services.ContextFactory.BuildAsync(
+			workspace.Path,
+			diffSelection,
+			cancellationToken: TestContext.Current.CancellationToken,
+			captureIgnoreImpactCounts: true);
+
+		Assert.Equal(0, provider.CallCount);
+		Assert.Empty(unfilteredPlan.IncludedFiles);
+		Assert.Empty(diffPlan.IncludedFiles);
+		Assert.Empty(diffPlan.AvailableExtensions);
+		Assert.False(diffPlan.HasErrors);
+	}
+
+	[Fact]
+	public async Task ExplicitRootSelectionKeepsTheWholeMomentaryGitScope()
+	{
+		using var workspace = CreateStagedPresentationWorkspace();
+		using var appData = new TemporaryDirectory();
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var selection = ProjectSelectionSpec.Standard with
+		{
+			GitMode = GitFilteringMode.Staged,
+			SelectedPaths = ["."]
+		};
+
+		var plan = await services.ContextFactory.BuildAsync(
+			workspace.Path,
+			selection,
+			cancellationToken: TestContext.Current.CancellationToken,
+			captureIgnoreImpactCounts: true);
+
+		Assert.Contains(".cs", plan.AvailableExtensions);
+		Assert.Contains(".xyz", plan.AvailableExtensions);
+		Assert.Equal(1, plan.IgnoreOptionCounts.DotFiles);
+		Assert.Equal(1, plan.IgnoreOptionCounts.EmptyFiles);
+		Assert.Contains(
+			plan.IncludedFiles,
+			static path => Path.GetFileName(path) == "Selected.cs");
+		Assert.Contains(
+			plan.IncludedFiles,
+			static path => Path.GetFileName(path) == "Sibling.xyz");
+	}
+
 	[Fact]
 	public async Task SelectionProjectionPreservesAnExplicitlyEmptyTree()
 	{
@@ -572,6 +776,50 @@ public sealed class TerminalSettingsStateContractTests
 		return workspace;
 	}
 
+	private static TemporaryDirectory CreateStagedPresentationWorkspace()
+	{
+		var workspace = new TemporaryDirectory();
+		workspace.WriteFile("Baseline.cs", "class Baseline {}\n");
+		RunGit(workspace.Path, "init", "--quiet");
+		RunGit(workspace.Path, "config", "user.email", "terminal-tests@devprojex.local");
+		RunGit(workspace.Path, "config", "user.name", "DevProjex Terminal Tests");
+		RunGit(workspace.Path, "add", "--all");
+		RunGit(workspace.Path, "commit", "--quiet", "-m", "Initial project");
+		workspace.WriteFile("selected/Selected.cs", "class Selected {}\n");
+		workspace.WriteFile("sibling/Sibling.xyz", "sibling\n");
+		workspace.WriteFile("sibling/.scope-noise", "dot file\n");
+		workspace.WriteFile("sibling/Empty.txt", string.Empty);
+		RunGit(workspace.Path, "add", "--all");
+		return workspace;
+	}
+
+	private static void SelectOnlyTopLevelDirectory(
+		TerminalWorkspaceState state,
+		string displayName)
+	{
+		state.SelectNone();
+		var rowIndex = state.VisibleRows
+			.Select((row, index) => (row, index))
+			.Single(item => item.row.Node.DisplayName == displayName)
+			.index;
+		state.ToggleSelection(rowIndex);
+	}
+
+	private static void AssertSelectedSubtreePresentation(
+		ProjectContextPlan plan,
+		params string[] expectedExtensions)
+	{
+		Assert.Equal(
+			expectedExtensions.Order(StringComparer.OrdinalIgnoreCase),
+			plan.AvailableExtensions.Order(StringComparer.OrdinalIgnoreCase));
+		Assert.Equal(0, plan.IgnoreOptionCounts.DotFiles);
+		Assert.Equal(0, plan.IgnoreOptionCounts.EmptyFiles);
+		Assert.DoesNotContain(".xyz", plan.AvailableExtensions);
+		Assert.DoesNotContain(
+			plan.IncludedFiles,
+			static path => Path.GetFileName(path) is "Sibling.xyz" or ".scope-noise" or "Empty.txt");
+	}
+
 	private static async Task<(TerminalWorkspaceController Controller, TerminalWorkspaceState State)>
 		OpenAsync(TemporaryDirectory workspace)
 	{
@@ -603,5 +851,20 @@ public sealed class TerminalSettingsStateContractTests
 
 		var result = TerminalTestProcess.Run(startInfo);
 		Assert.Equal(0, result.ExitCode);
+	}
+
+	private sealed class CountingUnavailableGitScopePathProvider : IGitScopePathProvider
+	{
+		public int CallCount { get; private set; }
+
+		public Task<GitScopePathResult> ResolveAsync(
+			string projectRoot,
+			GitFilteringMode mode,
+			string? diffRange,
+			CancellationToken cancellationToken = default)
+		{
+			CallCount++;
+			return Task.FromResult(GitScopePathResult.Unavailable("unexpected Git query"));
+		}
 	}
 }

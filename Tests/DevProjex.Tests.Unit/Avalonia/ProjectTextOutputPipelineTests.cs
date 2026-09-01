@@ -146,6 +146,50 @@ public sealed class ProjectTextOutputPipelineTests
 	}
 
 	[Theory]
+	[InlineData((int)ProjectTextOutputMode.Tree, "git@example.com:owner/repository.git", "git@example.com:owner/repository")]
+	[InlineData((int)ProjectTextOutputMode.Content, "git@example.com:owner/repository.git", "git@example.com:owner/repository")]
+	[InlineData((int)ProjectTextOutputMode.TreeAndContent, "git@example.com:owner/repository.git", "git@example.com:owner/repository")]
+	[InlineData((int)ProjectTextOutputMode.Tree, "file:///srv/git/repository.git", "file:///srv/git/repository")]
+	[InlineData((int)ProjectTextOutputMode.Content, "file:///srv/git/repository.git", "file:///srv/git/repository")]
+	[InlineData((int)ProjectTextOutputMode.TreeAndContent, "file:///srv/git/repository.git", "file:///srv/git/repository")]
+	public async Task BuildAsync_SupportedRepositoryPresentationNeverExposesCheckoutRoot(
+		int modeValue,
+		string repositorySource,
+		string expectedDisplayRoot)
+	{
+		using var project = new TemporaryDirectory();
+		var sourceFile = project.CreateFile(Path.Combine("src", "Program.cs"), "class Program {}");
+		var root = DirectoryNode(
+			project.Path,
+			DirectoryNode(Path.GetDirectoryName(sourceFile)!, FileNode(sourceFile)));
+		var presentation = new RepositoryWebPathPresentationService().TryCreate(
+			project.Path,
+			repositorySource);
+		Assert.NotNull(presentation);
+		var snapshot = CreateSnapshot(
+			project.Path,
+			root,
+			new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer)) with
+		{
+			PathPresentation = presentation
+		};
+
+		var result = await CreatePipeline().BuildAsync(
+			(ProjectTextOutputMode)modeValue,
+			snapshot,
+			TestContext.Current.CancellationToken);
+
+		Assert.Contains(expectedDisplayRoot, result.Content, StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			project.Path,
+			result.Content,
+			OperatingSystem.IsWindows()
+				? StringComparison.OrdinalIgnoreCase
+				: StringComparison.Ordinal);
+		Assert.Contains("Program.cs", result.Content, StringComparison.Ordinal);
+	}
+
+	[Theory]
 	[InlineData((int)ProjectTextOutputMode.Tree)]
 	[InlineData((int)ProjectTextOutputMode.Content)]
 	[InlineData((int)ProjectTextOutputMode.TreeAndContent)]
@@ -277,7 +321,7 @@ public sealed class ProjectTextOutputPipelineTests
     }
 
     [Fact]
-    public async Task BuildAsync_ContentSelectionOutsideEffectiveTreeDoesNotReadUnrelatedFile()
+	public async Task BuildAsync_ContentSelectionOutsideEffectiveTreeReturnsRootOnly()
     {
         using var temp = new TemporaryDirectory();
         var effectiveFile = temp.CreateFile("effective.txt", "effective");
@@ -289,13 +333,20 @@ public sealed class ProjectTextOutputPipelineTests
             new HashSet<string>(PathComparer.Default) { outsideFile });
         var pipeline = CreatePipeline();
 
-        var result = await pipeline.BuildAsync(
-            ProjectTextOutputMode.Content,
-            snapshot,
-            TestContext.Current.CancellationToken);
+		var result = await pipeline.BuildAsync(
+			ProjectTextOutputMode.Content,
+			snapshot,
+			TestContext.Current.CancellationToken);
+		using var document = await pipeline.BuildDocumentAsync(
+			ProjectTextOutputMode.Content,
+			snapshot,
+			TestContext.Current.CancellationToken);
+		var expected = ContextRootPresentation.FormatLine(temp.Path);
 
-        Assert.Equal(0, result.CandidateFileCount);
-        Assert.Empty(result.Content);
+		Assert.Equal(0, result.CandidateFileCount);
+		Assert.Equal(expected, result.Content);
+		Assert.Equal(expected, document.Document.GetFullText());
+		Assert.DoesNotContain("outside", result.Content, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -8,7 +8,7 @@ This document describes the filtering behavior shared by the Desktop UI, Termina
 
 DevProjex combines four independent controls:
 
-1. **Git filtering** chooses one mode: no Git filtering, `.gitignore`, or tracked files only.
+1. **Git filtering** chooses one mode: none, `.gitignore`, tracked files, staged files, all current changes, or a ref-to-ref diff.
 2. **Exclusions** enable Smart Ignore and the hidden, dot-name, empty, and extensionless filters.
 3. **Parameters** select file extensions. The current Terminal/CLI compatibility contract can additionally constrain root folders.
 4. **Tree selection** includes or excludes individual files and subtrees.

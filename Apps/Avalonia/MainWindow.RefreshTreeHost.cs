@@ -15,7 +15,7 @@ public partial class MainWindow : IRefreshTreePipelineHost
 
         var allowedExt = CollectCheckedOptionNames(_viewModel.Extensions, StringComparer.OrdinalIgnoreCase);
         var allowedRoot = _selectionCoordinator.GetProjectScanRoots()
-            .ToHashSet(PathComparer.Default);
+			.ToHashSet(ProjectTreePathIdentity.CanonicalComparer);
         var selectedIgnoreOptions = _selectionCoordinator.GetSelectedIgnoreOptionIds();
         var ignoreRules = BuildIgnoreRules(_currentPath, selectedIgnoreOptions, allowedRoot);
         var nameFilter = string.IsNullOrWhiteSpace(_viewModel.NameFilter)
@@ -52,6 +52,7 @@ public partial class MainWindow : IRefreshTreePipelineHost
 			GitScopePresentation: gitScopeRefresh?.Presentation,
 			EffectiveExtensionPolicy: _selectionCoordinator.GetEffectiveExtensionPolicy(),
 			AvailableRootFolders: _selectionCoordinator.GetAvailableProjectScanRoots(),
+			GitRepositoryScopePaths: GetGitRepositoryScopePaths(),
             PreserveCheckedPaths: preserveCheckedPaths);
     }
 
@@ -142,6 +143,7 @@ public partial class MainWindow : IRefreshTreePipelineHost
         _viewModel.TreeNodes.Clear();
 
         _currentTree = result.Tree;
+		UpdateGitScopePresentationRefreshContext(input, result);
 		if (!interactiveFilter)
 		{
 			// "Apply settings" is the commit point for syntax transformations and section-wide

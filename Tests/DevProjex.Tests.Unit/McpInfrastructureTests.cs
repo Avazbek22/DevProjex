@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using DevProjex.Application.Compression;
 using DevProjex.Application.Context;
+using DevProjex.Application.Secrets;
+using DevProjex.Application.Services;
 using DevProjex.Mcp;
 using ModelContextProtocol.Protocol;
 
@@ -8,6 +10,21 @@ namespace DevProjex.Tests.Unit;
 
 public sealed class McpInfrastructureTests
 {
+	public static TheoryData<string, int, bool> PackCheckpointBoundaryCases()
+	{
+		var cases = new TheoryData<string, int, bool>();
+		foreach (var lineEnding in new[] { "\n", "\r\n", "\r" })
+		{
+			foreach (var lineCount in new[] { 255, 256, 257, 512 })
+			{
+				cases.Add(lineEnding, lineCount, false);
+				cases.Add(lineEnding, lineCount, true);
+			}
+		}
+
+		return cases;
+	}
+
 	[Fact]
 	public void ServerHostExposesOneUnambiguousRunEntryPoint()
 	{
@@ -238,6 +255,19 @@ public sealed class McpInfrastructureTests
 		var exception = Assert.Throws<McpToolException>(() =>
 			registry.ResolveExistingPath(project, "escape"));
 		Assert.Equal(McpErrorCodes.RootViolation, exception.Code);
+	}
+
+	[Fact]
+	public void RootJailDirectoryHandleResolvesTheCanonicalRootPath()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+
+		var resolved = McpRootJailFileStreamOpener.ResolveDirectoryPath(project);
+
+		Assert.True(PathComparer.Default.Equals(
+			McpRootRegistry.ResolvePhysicalExistingPath(project, requireDirectory: true),
+			resolved));
 	}
 
 	[Fact]
@@ -616,6 +646,128 @@ public sealed class McpInfrastructureTests
 			Assert.Throws<McpToolException>(() => McpGlobSet.Create(["../*.cs"], null)).Code);
 	}
 
+	[Fact]
+	public void RootJailFileOpenerRejectsADirectPathOutsideEveryRoot()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var outside = workspace.CreateFile("outside/secret.txt", "outside");
+		var registry = new McpRootRegistry([project]);
+		var opener = new McpRootJailFileStreamOpener(registry);
+
+		var exception = Assert.Throws<McpToolException>(() =>
+			opener.OpenRead(
+				outside,
+				bufferSize: 4096,
+				FileShare.Read,
+				asynchronous: false));
+
+		Assert.Equal(McpErrorCodes.RootViolation, exception.Code);
+		Assert.Contains(project, exception.Message, StringComparison.Ordinal);
+		Assert.Contains("Valid roots", exception.Message, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void RootRegistryRejectsCaseOnlySiblingFromOpenedHandleValidation()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("Allowed");
+		var registry = new McpRootRegistry([project]);
+		var canonicalRoot = Assert.Single(registry.Roots);
+		var leafName = Path.GetFileName(canonicalRoot);
+		var alternateName = char.IsUpper(leafName[0])
+			? char.ToLowerInvariant(leafName[0]) + leafName[1..]
+			: char.ToUpperInvariant(leafName[0]) + leafName[1..];
+		var caseOnlySiblingPath = Path.Combine(
+			Path.GetDirectoryName(canonicalRoot)!,
+			alternateName,
+			"same.txt");
+
+		var exception = Assert.Throws<McpToolException>(() =>
+			registry.EnsureOpenedPathIsWithin(
+				canonicalRoot,
+				"../" + alternateName + "/same.txt",
+				caseOnlySiblingPath));
+
+		Assert.Equal(McpErrorCodes.RootViolation, exception.Code);
+	}
+
+	[Fact]
+	public void RequestedPathMatchingKeepsCaseDistinctProjectEntriesIndependent()
+	{
+		var requested = new HashSet<string>(StringComparer.Ordinal)
+		{
+			Path.GetFullPath(Path.Combine("project", "Foo.cs"))
+		};
+
+		Assert.True(McpProjectService.MatchesRequested(
+			Path.GetFullPath(Path.Combine("project", "Foo.cs")),
+			requested,
+			new HashSet<string>(StringComparer.Ordinal)));
+		Assert.False(McpProjectService.MatchesRequested(
+			Path.GetFullPath(Path.Combine("project", "foo.cs")),
+			requested,
+			new HashSet<string>(StringComparer.Ordinal)));
+	}
+
+	[Fact]
+	public async Task PreparedAnalyzerReadsTrustedOutputWithoutWeakeningSourceJail()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var source = workspace.CreateFile("project/source.txt", "source");
+		var preparedPath = workspace.CreateFile("prepared/source.txt", "redacted");
+		var registry = new McpRootRegistry([project]);
+		var sourceAnalyzer = new FileContentAnalyzer(
+			new McpRootJailFileStreamOpener(registry).OpenRead);
+		await using var prepared = new PreparedSecretRedactionOutput(
+			workingDirectory: null,
+			new Dictionary<string, PreparedSecretFile>(PathComparer.Default)
+			{
+				[source] = new PreparedSecretFile(
+					source,
+					preparedPath,
+					FileContentClassification.Text,
+					Encoding: null,
+					Redactions: [])
+			},
+			snapshot: null);
+		var analyzer = new PreparedSecretFileContentAnalyzer(
+			sourceAnalyzer,
+			new FileContentAnalyzer(),
+			prepared);
+
+		var content = await analyzer.TryReadAsTextAsync(
+			source,
+			TestContext.Current.CancellationToken);
+
+		Assert.NotNull(content);
+		Assert.Equal("redacted", content.Content);
+		await Assert.ThrowsAsync<McpToolException>(async () =>
+			await sourceAnalyzer.TryReadAsTextAsync(
+				preparedPath,
+				TestContext.Current.CancellationToken));
+	}
+
+	[Fact]
+	public void GlobQuestionMarkMatchesOneUnicodeScalar()
+	{
+		var one = McpGlobSet.Create(["?.txt"], ["a.txt"]);
+		var two = McpGlobSet.Create(["??.txt"], null);
+		var nested = McpGlobSet.Create(["**/?.txt"], null);
+
+		Assert.False(one.Includes("a.txt"));
+		Assert.True(one.Includes("界.txt"));
+		Assert.True(one.Includes("😀.txt"));
+		Assert.False(one.Includes("ab.txt"));
+		Assert.False(one.Includes("😀😀.txt"));
+		Assert.True(two.Includes("a界.txt"));
+		Assert.True(two.Includes("😀界.txt"));
+		Assert.False(two.Includes("😀.txt"));
+		Assert.True(nested.Includes("src/😀.txt"));
+		Assert.False(nested.Includes("src/😀😀.txt"));
+	}
+
 	[Fact(Timeout = 2_000)]
 	public void GlobSetAlternatingWildcardsCannotCauseCatastrophicBacktracking()
 	{
@@ -645,6 +797,209 @@ public sealed class McpInfrastructureTests
 		Assert.Equal(McpErrorCodes.InvalidPattern, oversized.Code);
 		Assert.Contains("4096", oversized.Message, StringComparison.Ordinal);
 	}
+
+	[Fact]
+	public void McpStringLimitsCountUnicodeScalarValuesAtPublishedBoundaries()
+	{
+		var regexBoundary = string.Concat(Enumerable.Repeat("😀", McpSearchRegex.MaximumPatternLength));
+		var regexOversized = regexBoundary + "😀";
+		var globBoundary = string.Concat(Enumerable.Repeat("😀", 508)) + ".txt";
+		var globOversized = "😀" + globBoundary;
+
+		Assert.False(McpUnicodeLength.ExceedsScalarValueCount(regexBoundary, 4096));
+		Assert.True(McpUnicodeLength.ExceedsScalarValueCount(regexOversized, 4096));
+		Assert.True(new McpSearchRegex(regexBoundary, ignoreCase: false).IsMatch(regexBoundary));
+		Assert.Equal(
+			McpErrorCodes.InvalidPattern,
+			Assert.Throws<McpToolException>(() =>
+				new McpSearchRegex(regexOversized, ignoreCase: false)).Code);
+		Assert.True(McpGlobSet.Create([globBoundary], null).Includes(globBoundary));
+		Assert.Equal(
+			McpErrorCodes.InvalidPattern,
+			Assert.Throws<McpToolException>(() => McpGlobSet.Create([globOversized], null)).Code);
+	}
+
+	[Fact]
+	public void JsonPathArgumentsEnforceItemAndUnicodeScalarCaps()
+	{
+		var boundaryPath = string.Concat(Enumerable.Repeat("😀", McpProjectService.MaximumRequestedPathLength));
+		var allowed = RequestWithPaths(Enumerable.Repeat("path", McpProjectService.MaximumRequestedPaths).ToArray());
+		var scalarBoundary = RequestWithPaths([boundaryPath]);
+		var tooMany = RequestWithPaths(
+			Enumerable.Repeat("path", McpProjectService.MaximumRequestedPaths + 1).ToArray());
+		var tooLong = RequestWithPaths([boundaryPath + "😀"]);
+
+		Assert.Equal(
+			McpProjectService.MaximumRequestedPaths,
+			McpJsonArguments.Create(allowed, "paths").OptionalStringArray(
+				"paths",
+				maximumItems: McpProjectService.MaximumRequestedPaths,
+				maximumItemScalarValues: McpProjectService.MaximumRequestedPathLength)!.Count);
+		Assert.Equal(
+			boundaryPath,
+			Assert.Single(McpJsonArguments.Create(scalarBoundary, "paths").OptionalStringArray(
+				"paths",
+				maximumItems: McpProjectService.MaximumRequestedPaths,
+				maximumItemScalarValues: McpProjectService.MaximumRequestedPathLength)!));
+		Assert.Equal(
+			McpErrorCodes.InvalidArguments,
+			Assert.Throws<McpToolException>(() =>
+				McpJsonArguments.Create(tooMany, "paths").OptionalStringArray(
+					"paths",
+					maximumItems: McpProjectService.MaximumRequestedPaths,
+					maximumItemScalarValues: McpProjectService.MaximumRequestedPathLength)).Code);
+		Assert.Equal(
+			McpErrorCodes.InvalidArguments,
+			Assert.Throws<McpToolException>(() =>
+				McpJsonArguments.Create(tooLong, "paths").OptionalStringArray(
+					"paths",
+					maximumItems: McpProjectService.MaximumRequestedPaths,
+					maximumItemScalarValues: McpProjectService.MaximumRequestedPathLength)).Code);
+	}
+
+	[Fact]
+	public void RequestedPathNormalizationDeduplicatesAliasesWithoutCollapsingCase()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateFolder("project");
+		var source = workspace.CreateFolder("project/src");
+
+		var normalized = McpProjectService.NormalizeRequestedPathTokens(
+			project,
+			["src", "./src", "src/.", source + Path.DirectorySeparatorChar, "Foo", "foo"]);
+
+		Assert.Equal(3, normalized.Count);
+		Assert.Equal(PathUtility.Normalize(source), normalized[0]);
+		Assert.Contains(Path.Combine(project, "Foo"), normalized, StringComparer.Ordinal);
+		Assert.Contains(Path.Combine(project, "foo"), normalized, StringComparer.Ordinal);
+	}
+
+	[Fact]
+	public void TrustedDiagnosticFormattingNeverEchoesDiagnosticPathsOrMessages()
+	{
+		const string sensitivePath = "user/private/secret-name.txt";
+		const string sensitiveMessage = "scanner warning contains user content";
+		var warnings = McpTrustedDiagnosticFormatter.FormatWarnings(
+		new ContextDiagnostic[]
+		{
+			new ContextDiagnostic(
+				"DPX-SELECTION-PATH-MISSING",
+				ContextDiagnosticSeverity.Warning,
+				"Selected path is not present.",
+				sensitivePath),
+			new ContextDiagnostic(
+				"DPX-PROJECT-SELECTION-WARNING",
+				ContextDiagnosticSeverity.Warning,
+				sensitiveMessage,
+				sensitivePath),
+			new ContextDiagnostic(
+				GitScopeFilter.DeletedDiagnosticCode,
+				ContextDiagnosticSeverity.Warning,
+				"unsafe",
+				sensitivePath,
+				2)
+		});
+
+		Assert.NotNull(warnings);
+		Assert.Contains("1 requested path is not present", warnings, StringComparison.Ordinal);
+		Assert.Contains("1 selection warning", warnings, StringComparison.Ordinal);
+		Assert.Contains("Deleted files excluded from the Git state: 2.", warnings, StringComparison.Ordinal);
+		Assert.DoesNotContain(sensitivePath, warnings, StringComparison.Ordinal);
+		Assert.DoesNotContain(sensitiveMessage, warnings, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task RemoteSourceResolverCapsDistinctKeysReusesExistingSourcesAndDisposesOnce()
+	{
+		using var workspace = new TemporaryDirectory();
+		var local = workspace.CreateFolder("local");
+		var firstRoot = workspace.CreateFolder("cache/first");
+		var secondRoot = workspace.CreateFolder("cache/second");
+		var thirdRoot = workspace.CreateFolder("cache/third");
+		const string firstUrl = "https://example.test/owner/first.git";
+		const string secondUrl = "https://example.test/owner/second.git";
+		const string thirdUrl = "https://example.test/owner/third.git";
+		var cache = new TrackingRemoteCache(new Dictionary<string, string>(StringComparer.Ordinal)
+		{
+			[firstUrl] = firstRoot,
+			[secondUrl] = secondRoot,
+			[thirdUrl] = thirdRoot
+		});
+		var resolver = new McpProjectSourceResolver(
+			new McpRootRegistry([local]),
+			allowRemote: true,
+			() => new McpRemoteProjectServices(cache, new GitRepositoryService()),
+			maximumRemoteSources: 2);
+
+		var first = await resolver.ResolveAsync(firstUrl, branch: null, TestContext.Current.CancellationToken);
+		var repeated = await resolver.ResolveAsync(firstUrl, branch: null, TestContext.Current.CancellationToken);
+		var second = await resolver.ResolveAsync(secondUrl, branch: null, TestContext.Current.CancellationToken);
+		var limit = await Assert.ThrowsAsync<McpToolException>(() =>
+			resolver.ResolveAsync(thirdUrl, branch: null, TestContext.Current.CancellationToken));
+		var retained = await resolver.ResolveAsync(firstUrl, branch: null, TestContext.Current.CancellationToken);
+		resolver.Dispose();
+		resolver.Dispose();
+
+		Assert.Same(first, repeated);
+		Assert.Same(first, retained);
+		Assert.NotSame(first, second);
+		Assert.Equal(McpErrorCodes.RemoteLimit, limit.Code);
+		Assert.Contains("Reuse an existing project URL and branch", limit.Message, StringComparison.Ordinal);
+		Assert.Equal(2, cache.AcquireSessionCallCount);
+		Assert.Equal(1, cache.DisposeCount);
+		Assert.All(cache.Sessions, static session => Assert.Equal(1, session.DisposeCount));
+	}
+
+	[Fact]
+	public async Task ConcurrentRemoteSourceReservationsShareAKeyAndKeepTheHardCap()
+	{
+		using var workspace = new TemporaryDirectory();
+		var local = workspace.CreateFolder("local");
+		var firstRoot = workspace.CreateFolder("cache/first");
+		var secondRoot = workspace.CreateFolder("cache/second");
+		const string firstUrl = "https://example.test/owner/first.git";
+		const string secondUrl = "https://example.test/owner/second.git";
+		var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var cache = new TrackingRemoteCache(new Dictionary<string, string>(StringComparer.Ordinal)
+		{
+			[firstUrl] = firstRoot,
+			[secondUrl] = secondRoot
+		})
+		{
+			SessionGate = gate.Task
+		};
+		var resolver = new McpProjectSourceResolver(
+			new McpRootRegistry([local]),
+			allowRemote: true,
+			() => new McpRemoteProjectServices(cache, new GitRepositoryService()),
+			maximumRemoteSources: 1);
+
+		var first = resolver.ResolveAsync(firstUrl, branch: null, TestContext.Current.CancellationToken);
+		Assert.True(SpinWait.SpinUntil(() => cache.AcquireSessionCallCount >= 1, TimeSpan.FromSeconds(2)));
+		var sameKey = resolver.ResolveAsync(firstUrl, branch: null, TestContext.Current.CancellationToken);
+		Assert.True(SpinWait.SpinUntil(() => cache.AcquireSessionCallCount >= 2, TimeSpan.FromSeconds(2)));
+		var limit = await Assert.ThrowsAsync<McpToolException>(() =>
+			resolver.ResolveAsync(secondUrl, branch: null, TestContext.Current.CancellationToken));
+		gate.SetResult();
+		var resolved = await Task.WhenAll(first, sameKey);
+		resolver.Dispose();
+
+		Assert.Same(resolved[0], resolved[1]);
+		Assert.Equal(McpErrorCodes.RemoteLimit, limit.Code);
+		Assert.Equal(2, cache.AcquireSessionCallCount);
+		Assert.Equal(1, cache.DisposeCount);
+		Assert.All(cache.Sessions, static session => Assert.Equal(1, session.DisposeCount));
+	}
+
+	private static CallToolRequestParams RequestWithPaths(string[] paths) =>
+		new()
+		{
+			Name = "test",
+			Arguments = new Dictionary<string, JsonElement>
+			{
+				["paths"] = JsonSerializer.SerializeToElement(paths)
+			}
+		};
 
 	[Fact]
 	public async Task PackSweepRemovesOnlyStaleOwnedSessionsAndPreservesAnActiveLease()
@@ -880,6 +1235,97 @@ public sealed class McpInfrastructureTests
 		Assert.Equal(300, page.StartLine);
 		Assert.Equal(301, page.EndLine);
 		Assert.Equal(601, page.TotalLines);
+	}
+
+	[Theory]
+	[MemberData(nameof(PackCheckpointBoundaryCases))]
+	public async Task PackLineCheckpointsPreserveBoundaryRanges(
+		string lineEnding,
+		int contentLineCount,
+		bool hasTrailingLineEnding)
+	{
+		using var workspace = new TemporaryDirectory();
+		using var registry = new McpPackRegistry(workspace.Path);
+		var content = string.Join(lineEnding, Enumerable.Repeat("x", contentLineCount));
+		if (hasTrailingLineEnding)
+			content += lineEnding;
+		var bytes = Encoding.UTF8.GetBytes(content);
+		var pack = await registry.CreateAsync(
+			async (stream, token) =>
+			{
+				for (var offset = 0; offset < bytes.Length; offset++)
+					await stream.WriteAsync(bytes.AsMemory(offset, 1), token);
+			},
+			TestContext.Current.CancellationToken);
+
+		var expectedLineCount = contentLineCount + (hasTrailingLineEnding ? 1 : 0);
+		Assert.Equal(expectedLineCount, pack.Lines);
+		Assert.DoesNotContain(
+			pack.LineCheckpoints.Skip(1),
+			checkpoint => checkpoint.ByteOffset == pack.Bytes);
+
+		var checkpoint = pack.ResolveLineCheckpoint(expectedLineCount);
+		Assert.InRange(expectedLineCount - checkpoint.LineNumber, 0, 256);
+		await using var stream = new FileStream(
+			pack.Path,
+			FileMode.Open,
+			FileAccess.Read,
+			FileShare.Read);
+		stream.Seek(checkpoint.ByteOffset, SeekOrigin.Begin);
+		var page = await McpTextRanges.ReadPageAsync(
+			stream,
+			startLine: expectedLineCount,
+			endLine: expectedLineCount,
+			maximumLines: 1000,
+			maximumCharacters: 50_000,
+			TestContext.Current.CancellationToken,
+			knownTotalLines: pack.Lines,
+			firstStreamLineNumber: checkpoint.LineNumber);
+
+		Assert.Equal(hasTrailingLineEnding ? string.Empty : "x", page.Text);
+		Assert.Equal(expectedLineCount, page.StartLine);
+		Assert.Equal(expectedLineCount, page.EndLine);
+		Assert.Equal(expectedLineCount, page.TotalLines);
+		Assert.False(page.IsTruncated);
+	}
+
+	[Fact]
+	public async Task PackLineCheckpointAtEofFallsBackForTrailingEmptyLine()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var registry = new McpPackRegistry(workspace.Path);
+		var bytes = Encoding.UTF8.GetBytes(string.Concat(Enumerable.Repeat("x\r\n", 256)));
+		var pack = await registry.CreateAsync(
+			async (stream, token) =>
+			{
+				for (var offset = 0; offset < bytes.Length; offset++)
+					await stream.WriteAsync(bytes.AsMemory(offset, 1), token);
+			},
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(257, pack.Lines);
+		var checkpoint = pack.ResolveLineCheckpoint(257);
+		Assert.Equal(new McpPackLineCheckpoint(1, 0), checkpoint);
+		await using var stream = new FileStream(
+			pack.Path,
+			FileMode.Open,
+			FileAccess.Read,
+			FileShare.Read);
+		var page = await McpTextRanges.ReadPageAsync(
+			stream,
+			startLine: 257,
+			endLine: 257,
+			maximumLines: 1000,
+			maximumCharacters: 50_000,
+			TestContext.Current.CancellationToken,
+			knownTotalLines: pack.Lines,
+			firstStreamLineNumber: checkpoint.LineNumber);
+
+		Assert.Equal(string.Empty, page.Text);
+		Assert.Equal(257, page.StartLine);
+		Assert.Equal(257, page.EndLine);
+		Assert.Equal(257, page.TotalLines);
+		Assert.False(page.IsTruncated);
 	}
 
 	[Fact]
@@ -1329,6 +1775,98 @@ public sealed class McpInfrastructureTests
 
 		Assert.Equal("x", streamed.Text);
 		Assert.Equal("x", sliced.Text);
+	}
+
+	private sealed class TrackingRemoteCache(IReadOnlyDictionary<string, string> repositories) : IRepoCacheService
+	{
+		private readonly object _sync = new();
+		private readonly List<TrackingRemoteSession> _sessions = [];
+		private int _acquireSessionCallCount;
+		private int _disposeCount;
+
+		public string CacheRootPath => Path.GetDirectoryName(repositories.Values.First())!;
+		public IReadOnlyList<string> CacheSearchRootPaths => [CacheRootPath];
+		public IReadOnlyList<TrackingRemoteSession> Sessions
+		{
+			get
+			{
+				lock (_sync)
+					return _sessions.ToArray();
+			}
+		}
+		public int AcquireSessionCallCount => Volatile.Read(ref _acquireSessionCallCount);
+		public int DisposeCount => Volatile.Read(ref _disposeCount);
+		public Task? SessionGate { get; init; }
+
+		public async Task<IRepositoryCacheSession?> TryAcquireRepositorySessionAsync(
+			string repositoryUrl,
+			string? branch = null,
+			CancellationToken cancellationToken = default)
+		{
+			Interlocked.Increment(ref _acquireSessionCallCount);
+			if (SessionGate is not null)
+				await SessionGate.WaitAsync(cancellationToken);
+			var session = new TrackingRemoteSession(repositories[repositoryUrl], repositoryUrl, branch);
+			lock (_sync)
+				_sessions.Add(session);
+			return session;
+		}
+
+		public Task<IAsyncDisposable> AcquireRepositoryOperationAsync(
+			string repositoryUrl,
+			CancellationToken cancellationToken = default)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			return Task.FromResult<IAsyncDisposable>(NoopAsyncDisposable.Instance);
+		}
+
+		public void Dispose() => Interlocked.Increment(ref _disposeCount);
+		public string CreateRepositoryDirectory(string repositoryUrl) => throw new NotSupportedException();
+		public string CreateRepositoryStagingDirectory(string repositoryUrl) => throw new NotSupportedException();
+		public string PublishRepositoryDirectory(string stagingPath, string repositoryUrl) => throw new NotSupportedException();
+		public RepositoryCacheIndexEntry? FindIndexedRepository(string repositoryUrl) => null;
+		public IReadOnlyList<RepositoryCacheCatalogEntry> ListIndexedRepositories() => [];
+		public RepositoryCacheManagementListResult ListCacheEntriesForManagement() => new([], 0);
+		public Task<IRepositoryCacheSession?> TryAcquireRepositorySessionByPathAsync(
+			string repositoryPath,
+			CancellationToken cancellationToken = default) => Task.FromResult<IRepositoryCacheSession?>(null);
+		public void RecordIndexedRepository(
+			string repositoryUrl,
+			string localPath,
+			string? branch = null,
+			string? commitHash = null,
+			RepositoryCacheEntryState state = RepositoryCacheEntryState.Ready) => throw new NotSupportedException();
+		public void RemoveIndexedRepository(string localPath) => throw new NotSupportedException();
+		public void DeleteRepositoryDirectory(string path) => throw new NotSupportedException();
+		public void ClearAllCache() => throw new NotSupportedException();
+		public CacheClearResult ClearAllCacheWithResult() => throw new NotSupportedException();
+		public CacheClearResult RemoveCachedRepositoryWithResult(string repositoryUrl) => throw new NotSupportedException();
+		public void CleanupStaleCacheOnStartup() => throw new NotSupportedException();
+		public void RequestStaleCacheCleanupOnStartup() => throw new NotSupportedException();
+		public void CollectGarbage() => throw new NotSupportedException();
+		public void RequestGarbageCollection() => throw new NotSupportedException();
+		public void RefreshIndexedRepositorySize(string localPath) => throw new NotSupportedException();
+		public bool IsInCache(string path) => false;
+		public bool PathsBelongToSameRepository(string left, string right) => false;
+	}
+
+	private sealed class TrackingRemoteSession(
+		string repositoryPath,
+		string repositoryUrl,
+		string? branch) : IRepositoryCacheSession
+	{
+		public string RepositoryPath { get; } = repositoryPath;
+		public string RepositoryUrl { get; } = repositoryUrl;
+		public string? Branch { get; } = branch;
+		public RepositoryCacheContentKind ContentKind => RepositoryCacheContentKind.Git;
+		public int DisposeCount { get; private set; }
+		public void Dispose() => DisposeCount++;
+	}
+
+	private sealed class NoopAsyncDisposable : IAsyncDisposable
+	{
+		public static NoopAsyncDisposable Instance { get; } = new();
+		public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 	}
 
 	private sealed class RepeatingByteStream(byte value, long length) : Stream

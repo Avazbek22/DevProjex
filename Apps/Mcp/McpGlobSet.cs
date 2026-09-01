@@ -25,6 +25,20 @@ internal sealed class McpGlobSet
 		       !_excludes.Any(regex => regex.IsMatch(normalized));
 	}
 
+	public bool IncludesDirectory(string relativePath)
+	{
+		var normalized = PathUtility.NormalizeSeparators(relativePath).TrimEnd('/');
+		var subtreeBoundary = normalized + "/";
+		return (_includes.Count == 0 || MatchesPathOrSubtreeBoundary(_includes, normalized, subtreeBoundary)) &&
+		       !MatchesPathOrSubtreeBoundary(_excludes, normalized, subtreeBoundary);
+	}
+
+	private static bool MatchesPathOrSubtreeBoundary(
+		IReadOnlyList<Regex> patterns,
+		string path,
+		string subtreeBoundary) =>
+		patterns.Any(regex => regex.IsMatch(path) || regex.IsMatch(subtreeBoundary));
+
 	private static IReadOnlyList<Regex> Compile(IReadOnlyList<string>? patterns, string parameter)
 	{
 		if (patterns is null || patterns.Count == 0)
@@ -48,7 +62,7 @@ internal sealed class McpGlobSet
 	{
 		if (string.IsNullOrWhiteSpace(pattern))
 			throw Invalid(parameter, "patterns must not be empty");
-		if (pattern.Length > MaximumPatternLength)
+		if (McpUnicodeLength.ExceedsScalarValueCount(pattern, MaximumPatternLength))
 			throw Invalid(parameter, $"patterns must be at most {MaximumPatternLength} characters");
 		if (pattern.Contains('\\'))
 			throw Invalid(parameter, "use '/' as the path separator");
@@ -89,7 +103,7 @@ internal sealed class McpGlobSet
 			}
 			else if (character == '?')
 			{
-				builder.Append("[^/]");
+				builder.Append("(?:[^/\\uD800-\\uDFFF]|[\\uD800-\\uDBFF][\\uDC00-\\uDFFF])");
 			}
 			else
 			{

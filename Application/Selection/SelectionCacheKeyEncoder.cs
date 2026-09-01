@@ -10,17 +10,17 @@ internal static class SelectionCacheKeyEncoder
 		if (values is null)
 			return NullCollectionTag.ToString();
 
-		var unique = new HashSet<string>(PathComparer.Default);
+		var unique = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
 		foreach (var value in values)
 		{
 			// Empty tokens are not selections. Every non-empty name remains exact because
 			// whitespace-only names, pipes, and sentinel-looking text are legal on POSIX.
 			if (!string.IsNullOrEmpty(value))
-				unique.Add(NormalizeForPlatform(value));
+				unique.Add(value);
 		}
 
 		var ordered = unique.ToList();
-		ordered.Sort(PathComparer.Default);
+		ordered.Sort(ProjectTreePathIdentity.CanonicalComparer);
 
 		var builder = new StringBuilder();
 		builder.Append(ValueCollectionTag).Append(ordered.Count).Append(':');
@@ -41,6 +41,4 @@ internal static class SelectionCacheKeyEncoder
 	private static void AppendLengthPrefixed(StringBuilder builder, string value) =>
 		builder.Append(value.Length).Append(':').Append(value);
 
-	private static string NormalizeForPlatform(string value) =>
-		OperatingSystem.IsWindows() ? value.ToUpperInvariant() : value;
 }

@@ -15,6 +15,129 @@ namespace DevProjex.Tests.UI;
 public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
 {
 	[AvaloniaFact]
+	public async Task ContentPreview_ZeroCheckedPathsRemainTheImplicitWholeTreeForPreviewAndCopy()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+		try
+		{
+			Assert.True(Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes).IsChecked is false);
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+			var initialPayload = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+			Assert.Contains("DevProjex UI test workspace", initialPayload, StringComparison.Ordinal);
+			Assert.Equal(
+				initialPayload,
+				await UiTestDriver.ComputeAppliedPreviewCopyPayloadAsync(
+					window,
+					PreviewContentMode.Content,
+					TestContext.Current.CancellationToken));
+			await UiTestDriver.WaitForStatusMetricsReadyAsync(window);
+			var viewModel = UiTestDriver.GetViewModel(window);
+			var initialTreeMetrics = viewModel.StatusTreeStatsText;
+			var initialContentMetrics = viewModel.StatusContentStatsText;
+			Assert.NotEmpty(initialTreeMetrics);
+			Assert.NotEmpty(initialContentMetrics);
+
+			await window.Dispatcher.InvokeAsync(() =>
+				Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes).IsChecked = true);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => string.Equals(
+					UiTestDriver.ComputeCurrentPreviewCopyPayload(window),
+					initialPayload,
+					StringComparison.Ordinal),
+				"explicit whole-tree selection to preserve the preview document");
+
+			await window.Dispatcher.InvokeAsync(() =>
+				Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes).IsChecked = false);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => string.Equals(
+					UiTestDriver.ComputeCurrentPreviewCopyPayload(window),
+					initialPayload,
+					StringComparison.Ordinal),
+				"zero checked paths to remain the implicit whole-tree preview");
+			Assert.Equal(
+				initialPayload,
+				await UiTestDriver.ComputeAppliedPreviewCopyPayloadAsync(
+					window,
+					PreviewContentMode.Content,
+					TestContext.Current.CancellationToken));
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => string.Equals(viewModel.StatusTreeStatsText, initialTreeMetrics, StringComparison.Ordinal) &&
+				      string.Equals(viewModel.StatusContentStatsText, initialContentMetrics, StringComparison.Ordinal),
+				"zero checked paths to retain the whole-tree status metrics");
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaTheory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task EmptyContentPreviewAndWarmupPreserveTheProjectRoot(bool hasSelection)
+	{
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+		try
+		{
+			var snapshotMethod = typeof(MainWindow).GetMethod(
+				"CaptureProjectTextOutputSnapshot",
+				BindingFlags.Instance | BindingFlags.NonPublic);
+			var controllerField = typeof(MainWindow).GetField(
+				"_previewSurfaceController",
+				BindingFlags.Instance | BindingFlags.NonPublic);
+			Assert.NotNull(snapshotMethod);
+			Assert.NotNull(controllerField);
+			var snapshot = Assert.IsType<ProjectTextOutputSnapshot>(snapshotMethod!.Invoke(window, null));
+			var controller = Assert.IsType<PreviewSurfaceController>(controllerField!.GetValue(window));
+			var emptyRoot = snapshot.Root with { Children = [] };
+			var selectedPaths = new HashSet<string>(PathComparer.Default);
+			var displayRoot = snapshot.PathPresentation?.DisplayRootPath ?? snapshot.RootPath;
+			var expected = ContextRootPresentation.FormatLine(displayRoot);
+
+			var warmup = await controller.TryBuildWarmupSnapshotAsync(
+				PreviewContentMode.Content,
+				snapshot.TreeFormat,
+				hasSelection,
+				selectedPaths,
+				snapshot.RootPath,
+				emptyRoot,
+				[],
+				snapshot.PathPresentation,
+				"No text content",
+				"No checked files",
+				TestContext.Current.CancellationToken);
+			var preview = controller.BuildDocument(
+				PreviewContentMode.Content,
+				selectedPaths,
+				hasSelection,
+				snapshot.TreeFormat,
+				"No checked files",
+				"No text content",
+				"No data",
+				snapshot.RootPath,
+				emptyRoot,
+				[],
+				snapshot.PathPresentation,
+				TestContext.Current.CancellationToken);
+			using var document = preview.Document;
+
+			Assert.Equal(expected, Assert.IsType<PreviewWarmupSnapshot>(warmup).Text);
+			Assert.Equal(expected, document.GetFullText());
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
 	public async Task ContentWarmup_UsesSingleRootAndRelativeFileHeaders()
 	{
 		var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);

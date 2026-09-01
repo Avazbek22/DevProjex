@@ -294,14 +294,16 @@ public sealed class TreeExportService
 		TreeNodeDescriptor root,
 		TreeTextFormat format,
 		string? displayRootPath = null,
-		string? displayRootName = null)
+		string? displayRootName = null,
+		bool includeRootPath = true)
 		=> CalculateFullTreeMetricsWithCancellation(
 			rootPath,
 			root,
 			format,
 			displayRootPath,
 			displayRootName,
-			CancellationToken.None);
+			CancellationToken.None,
+			includeRootPath);
 
 	public ExportOutputMetrics CalculateFullTreeMetricsWithCancellation(
 		string rootPath,
@@ -309,11 +311,12 @@ public sealed class TreeExportService
 		TreeTextFormat format,
 		string? displayRootPath,
 		string? displayRootName,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		bool includeRootPath = true)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 		ValidateFormat(format);
-		if (format == TreeTextFormat.Markdown)
+		if (includeRootPath && format == TreeTextFormat.Markdown)
 		{
 			var markdownRootPath = string.IsNullOrWhiteSpace(displayRootPath) ? rootPath : displayRootPath;
 			return CalculateMarkdownTreeMetrics(
@@ -323,7 +326,7 @@ public sealed class TreeExportService
 				cancellationToken);
 		}
 
-		if (format != TreeTextFormat.Ascii)
+		if (!includeRootPath || format != TreeTextFormat.Ascii)
 		{
 			using var metricsWriter = ExportOutputMetricsCalculator.CreateTextWriter();
 			WriteFullTreeAsync(
@@ -333,7 +336,7 @@ public sealed class TreeExportService
 					format,
 					displayRootPath,
 					displayRootName,
-					includeRootPath: true,
+					includeRootPath,
 					cancellationToken)
 				.GetAwaiter()
 				.GetResult();
@@ -377,7 +380,7 @@ public sealed class TreeExportService
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 		ValidateFormat(format);
-		var includedPaths = new HashSet<string>(PathComparer.Default);
+		var includedPaths = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
 		if (!CollectIncludedPaths(root, selectedPaths, includedPaths, cancellationToken))
 			return string.Empty;
 
@@ -454,7 +457,7 @@ public sealed class TreeExportService
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 		ValidateFormat(format);
-		var includedPaths = new HashSet<string>(PathComparer.Default);
+		var includedPaths = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
 		if (!CollectIncludedPaths(root, selectedPaths, includedPaths, cancellationToken))
 			return ExportOutputMetrics.Empty;
 
@@ -656,7 +659,7 @@ public sealed class TreeExportService
 		{
 			await output.BeginLineAsync().ConfigureAwait(false);
 			await output.WriteAsync(
-					ContextRootPresentation.FormatLine(ResolveStructuredRootPath(outputRootPath)))
+					FormatMarkdownRootLine(outputRootPath))
 				.ConfigureAwait(false);
 			await output.BeginLineAsync().ConfigureAwait(false);
 			if (root.IsDirectory)
@@ -850,9 +853,9 @@ public sealed class TreeExportService
 		writer.WriteStartElement(includeRootPath ? "t" : "d");
 		writer.WriteAttributeString(
 			includeRootPath ? "r" : "n",
-			includeRootPath
+			XmlTextSanitizer.Sanitize(includeRootPath
 				? ResolveStructuredRootPath(outputRootPath)
-				: ResolveRootDisplayName(root, displayRootName));
+				: ResolveRootDisplayName(root, displayRootName)));
 		writer.Flush();
 		cancellationToken.ThrowIfCancellationRequested();
 		var processedNodes = 0;
@@ -1269,7 +1272,7 @@ public sealed class TreeExportService
 		using (var writer = XmlWriter.Create(output, XmlWriterSettings))
 		{
 			writer.WriteStartElement("d");
-			writer.WriteAttributeString("n", rootName);
+			writer.WriteAttributeString("n", XmlTextSanitizer.Sanitize(rootName));
 			WriteXmlTreeContents(writer, root, includedPaths: null, cancellationToken);
 			writer.WriteEndElement();
 		}
@@ -1341,7 +1344,9 @@ public sealed class TreeExportService
 		using (var writer = XmlWriter.Create(sb, XmlWriterSettings))
 		{
 			writer.WriteStartElement("t");
-			writer.WriteAttributeString("r", ResolveStructuredRootPath(localRootPath));
+			writer.WriteAttributeString(
+				"r",
+				XmlTextSanitizer.Sanitize(ResolveStructuredRootPath(localRootPath)));
 			WriteXmlTreeContents(writer, root, includedPaths, cancellationToken);
 			writer.WriteEndElement();
 		}
@@ -1357,7 +1362,7 @@ public sealed class TreeExportService
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 		var sb = new StringBuilder();
-		sb.AppendLine(ContextRootPresentation.FormatLine(ResolveStructuredRootPath(localRootPath)));
+		sb.AppendLine(FormatMarkdownRootLine(localRootPath));
 		sb.AppendLine();
 		WriteMarkdownTreeContents(sb, root, includedPaths, cancellationToken);
 		return sb.ToString();
@@ -1551,7 +1556,7 @@ public sealed class TreeExportService
 			}
 
 			writer.WriteStartElement("d");
-			writer.WriteAttributeString("n", node.DisplayName);
+			writer.WriteAttributeString("n", XmlTextSanitizer.Sanitize(node.DisplayName));
 			nodeWritten?.Invoke();
 			operations.Push(XmlTreeWriteOperation.EndElement);
 			PushXmlChildren(
@@ -1576,7 +1581,7 @@ public sealed class TreeExportService
 	private static void WriteXmlFile(XmlWriter writer, TreeNodeDescriptor file)
 	{
 		writer.WriteStartElement("f");
-		writer.WriteString(file.DisplayName);
+		writer.WriteString(XmlTextSanitizer.Sanitize(file.DisplayName));
 		writer.WriteEndElement();
 	}
 
@@ -1669,15 +1674,7 @@ public sealed class TreeExportService
 	}
 
 	private static string EscapeMarkdownListText(string name)
-	{
-		if (string.IsNullOrEmpty(name))
-			return name;
-
-		var sanitized = EscapeTextValue(name);
-		return sanitized[0] is '-' or '*' or '+' or '['
-			? "\\" + sanitized
-			: sanitized;
-	}
+		=> MarkdownInlineLiteralEncoder.Encode(name);
 
 	private static IReadOnlyList<TreeNodeDescriptor> GetOrderedStructuredChildren(
 		IReadOnlyList<TreeNodeDescriptor> children,
@@ -1989,9 +1986,7 @@ public sealed class TreeExportService
 		cancellationToken.ThrowIfCancellationRequested();
 		long chars = 0;
 		long lineBreaks = 0;
-		var rootHeaderChars = ContextRootPresentation
-			.FormatLine(ResolveStructuredRootPath(outputRootPath))
-			.Length;
+		var rootHeaderChars = FormatMarkdownRootLine(outputRootPath).Length;
 		AppendAsciiLineMetrics(rootHeaderChars, ref chars, ref lineBreaks);
 		AppendAsciiLineMetrics(renderedChars: 0, ref chars, ref lineBreaks);
 
@@ -2065,10 +2060,16 @@ public sealed class TreeExportService
 
 	private static string EscapeTextValue(string value) => SingleLineTextEscaping.Escape(value);
 
+	private static string FormatMarkdownRootLine(string rootPath) =>
+		ContextRootPresentation.Prefix +
+		MarkdownInlineLiteralEncoder.Encode(ResolveStructuredRootPath(rootPath));
+
 	private static string ResolveStructuredRootPath(string localRootPath)
 	{
 		if (IsAbsoluteDisplayUri(localRootPath))
 			return NormalizeStructuredPath(localRootPath.TrimEnd('/'));
+		if (RepositoryUrlUtility.IsScpStyleSource(localRootPath))
+			return NormalizeStructuredPath(RepositoryUrlUtility.ToSafeDisplay(localRootPath));
 
 		try
 		{
@@ -2081,7 +2082,8 @@ public sealed class TreeExportService
 	}
 
 	private static bool IsAbsoluteDisplayUri(string value)
-		=> Uri.TryCreate(value, UriKind.Absolute, out var uri) && !uri.IsFile;
+		=> Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
+		   (!uri.IsFile || value.StartsWith("file:", StringComparison.OrdinalIgnoreCase));
 
 	private static string NormalizeStructuredPath(string path) => PathUtility.NormalizeSeparators(path);
 }

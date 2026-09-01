@@ -268,6 +268,9 @@ public partial class GitCloneWindow : Window
                 .OfType<Popup>()
                 .FirstOrDefault(static candidate => string.Equals(candidate.Name, "PART_Popup", StringComparison.Ordinal));
 
+			if (popup?.Child is Border popupBorder)
+				ConstrainRepositoryDropDownWidth(comboBox, popupBorder);
+
             PopupBackdropConfigurator.TryApply(
                 popup?.Child,
                 this,
@@ -275,6 +278,17 @@ public partial class GitCloneWindow : Window
                 PopupBackdropTransparencyFallback.Transparent);
         }, DispatcherPriority.Loaded);
     }
+
+	private static void ConstrainRepositoryDropDownWidth(ComboBox comboBox, Border popupBorder)
+	{
+		var width = comboBox.Bounds.Width;
+		if (!double.IsFinite(width) || width <= 0)
+			return;
+
+		popupBorder.Width = width;
+		popupBorder.MinWidth = width;
+		popupBorder.MaxWidth = width;
+	}
 
 	private double ResolveRepositoryDropDownHeight(ComboBox comboBox)
 	{

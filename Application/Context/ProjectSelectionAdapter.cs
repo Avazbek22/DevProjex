@@ -82,7 +82,9 @@ public static class ProjectSelectionAdapter
 		return new ProjectSelectionSpec(
 			Roots: ResolveNullableSelection(profile.SelectedRootFolders, profile.RootFolderStates),
 			Extensions: ResolveNullableSelection(profile.SelectedExtensions, profile.ExtensionStates),
-			SelectedPaths: profile.SelectedPaths?.ToArray() ?? [],
+			SelectedPaths: profile.SelectedPaths is { Count: > 0 }
+				? profile.SelectedPaths.ToArray()
+				: null,
 			GitMode: GitFilteringModeResolver.Resolve(profile.SelectedIgnoreOptions),
 			Exclusions: ToExclusions(profile.SelectedIgnoreOptions),
 			HideSecrets: profile.SelectedIgnoreOptions.Contains(IgnoreOptionId.HideSecrets),

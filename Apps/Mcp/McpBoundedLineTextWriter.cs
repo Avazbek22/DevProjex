@@ -5,24 +5,38 @@ internal sealed class McpLineLimitReachedException : Exception;
 internal sealed class McpBoundedLineTextWriter : TextWriter
 {
 	private readonly int _maximumLines;
+	private readonly int _maximumCharacters;
 	private readonly List<string> _lines;
 	private readonly StringBuilder _currentLine = new();
+	private int _charactersWritten;
 	private bool _previousWasCarriageReturn;
 
-	public McpBoundedLineTextWriter(int maximumLines)
+	public McpBoundedLineTextWriter(int maximumLines, int maximumCharacters = int.MaxValue)
 	{
 		if (maximumLines <= 0)
 			throw new ArgumentOutOfRangeException(nameof(maximumLines));
+		if (maximumCharacters <= 0)
+			throw new ArgumentOutOfRangeException(nameof(maximumCharacters));
 
 		_maximumLines = maximumLines;
+		_maximumCharacters = maximumCharacters;
 		_lines = new List<string>(maximumLines);
 	}
 
 	public override Encoding Encoding => Encoding.UTF8;
 	public bool IsTruncated { get; private set; }
-	public string Text => _currentLine.Length == 0
-		? string.Join('\n', _lines)
-		: string.Join('\n', _lines.Append(_currentLine.ToString()));
+	public string Text
+	{
+		get
+		{
+			var text = _currentLine.Length == 0
+				? string.Join('\n', _lines)
+				: string.Join('\n', _lines.Append(_currentLine.ToString()));
+			return IsTruncated && text.Length > 0 && char.IsHighSurrogate(text[^1])
+				? text[..^1]
+				: text;
+		}
+	}
 
 	public override void Write(char value)
 	{
@@ -85,7 +99,20 @@ internal sealed class McpBoundedLineTextWriter : TextWriter
 			_previousWasCarriageReturn = false;
 			if (_lines.Count >= _maximumLines)
 				ThrowLimitReached();
+			var scalarLength = char.IsHighSurrogate(character) &&
+			                   index + 1 < characters.Length &&
+			                   char.IsLowSurrogate(characters[index + 1])
+				? 2
+				: 1;
+			if (_charactersWritten > _maximumCharacters - scalarLength)
+				ThrowLimitReached();
 			_currentLine.Append(character);
+			_charactersWritten++;
+			if (scalarLength == 2)
+			{
+				_currentLine.Append(characters[++index]);
+				_charactersWritten++;
+			}
 		}
 	}
 
@@ -93,9 +120,12 @@ internal sealed class McpBoundedLineTextWriter : TextWriter
 	{
 		if (_lines.Count >= _maximumLines)
 			ThrowLimitReached();
+		if (_charactersWritten >= _maximumCharacters)
+			ThrowLimitReached();
 
 		_lines.Add(_currentLine.ToString());
 		_currentLine.Clear();
+		_charactersWritten++;
 	}
 
 	private void ThrowLimitReached()

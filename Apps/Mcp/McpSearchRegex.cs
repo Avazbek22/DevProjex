@@ -9,7 +9,7 @@ internal sealed class McpSearchRegex
 	public McpSearchRegex(string pattern, bool ignoreCase, TimeSpan? timeout = null)
 	{
 		ArgumentNullException.ThrowIfNull(pattern);
-		if (pattern.Length > MaximumPatternLength)
+		if (McpUnicodeLength.ExceedsScalarValueCount(pattern, MaximumPatternLength))
 		{
 			throw new McpToolException(
 				McpErrorCodes.InvalidPattern,

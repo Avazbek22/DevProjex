@@ -137,7 +137,7 @@ public sealed class PreviewDocumentBuilder(
 		var orderedFiles = ContentPathOrdering.BuildOrderedUnique(filePaths, cancellationToken);
 		outputPathRedaction ??= OutputRootPathPresentation.CaptureRedactionDecision(transformationContext);
 		await EnsurePersistentIdentityReadyAsync(transformationContext, cancellationToken).ConfigureAwait(false);
-        if (orderedFiles.Length == 0)
+        if (orderedFiles.Length == 0 && string.IsNullOrWhiteSpace(displayRootPath))
         {
 			using var emptyScope = transformationContext?.BeginOutputFromOwnedOrderedUnique(
 				orderedFiles,

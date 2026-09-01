@@ -18,7 +18,10 @@ internal static class MarkdownTreeExportTestHelper
 	{
 		var lines = SplitLines(markdown);
 		Assert.True(lines.Length >= 2, "Markdown tree export must contain a root line and a blank separator line.");
-		Assert.Equal($"Root: {expectedRootPath.Replace('\\', '/')}", lines[0]);
+		Assert.StartsWith("Root: ", lines[0], StringComparison.Ordinal);
+		Assert.Equal(
+			expectedRootPath.Replace('\\', '/'),
+			UnescapeLiteralText(lines[0]["Root: ".Length..]));
 		Assert.Equal(string.Empty, lines[1]);
 
 		foreach (var line in lines.Skip(2))
@@ -63,7 +66,7 @@ internal static class MarkdownTreeExportTestHelper
 
 			var text = line[(indent + 2)..];
 			var isDirectory = text.EndsWith("/", StringComparison.Ordinal);
-			var name = UnescapeListText(isDirectory ? text[..^1] : text);
+			var name = UnescapeLiteralText(isDirectory ? text[..^1] : text);
 			var parentPath = level == 0 ? string.Empty : folderStack[level - 1];
 			if (!string.IsNullOrEmpty(parentPath))
 				foldersWithChildren.Add(parentPath);
@@ -97,13 +100,35 @@ internal static class MarkdownTreeExportTestHelper
 		return count;
 	}
 
-	private static string UnescapeListText(string text)
+	private static string UnescapeLiteralText(string text)
 	{
-		if (text.StartsWith('\\') && text.Length > 1 && text[1] is '-' or '*' or '+' or '[')
-			return text[1..];
+		var unescaped = new StringBuilder(text.Length);
+		for (var index = 0; index < text.Length; index++)
+		{
+			var character = text[index];
+			if (character == '\\' &&
+			    index + 1 < text.Length &&
+			    IsAsciiPunctuation(text[index + 1]))
+			{
+				unescaped.Append(text[++index]);
+				continue;
+			}
 
-		return text.Replace("\\t", "\t").Replace("\\n", "\n").Replace("\\r", "\r");
+			unescaped.Append(character);
+		}
+
+		return unescaped
+			.Replace("\\t", "\t")
+			.Replace("\\n", "\n")
+			.Replace("\\r", "\r")
+			.ToString();
 	}
+
+	private static bool IsAsciiPunctuation(char character) =>
+		character is >= '!' and <= '/' or
+		>= ':' and <= '@' or
+		>= '[' and <= '`' or
+		>= '{' and <= '~';
 
 	private static string Combine(string prefix, string name)
 		=> string.IsNullOrEmpty(prefix) ? name : $"{prefix}/{name}";

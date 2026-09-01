@@ -240,6 +240,7 @@ public sealed class DirectCommandIntegrationTests
 	{
 		using var workspace = new TemporaryDirectory();
 		var project = workspace.CreateDirectory("project");
+		workspace.CreateDirectory("project/Empty");
 		workspace.WriteFile("project/Small.txt", "small-marker\n");
 		workspace.WriteFile("project/Exact.txt", new string('e', 64));
 		workspace.WriteFile(
@@ -320,6 +321,7 @@ public sealed class DirectCommandIntegrationTests
 		Assert.Equal(CommandLineExitCodes.Success, treeExit);
 		Assert.Contains("Small.txt", treeEnvironment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("Exact.txt", treeEnvironment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("Empty", treeEnvironment.StandardOutput, StringComparison.Ordinal);
 		Assert.DoesNotContain("Large.txt", treeEnvironment.StandardOutput, StringComparison.Ordinal);
 		Assert.Empty(treeEnvironment.StandardError);
 		Assert.Equal(CommandLineExitCodes.Success, contextExit);

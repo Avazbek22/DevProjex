@@ -182,9 +182,6 @@ internal sealed partial class TerminalWorkspaceSession
 			collapsedControls,
 			contentControlsFrame,
 			filterControlsHost);
-		if (_state?.Plan.GitReadiness.Mode is not GitFilteringMode.None and { } mode &&
-		    GitScopeSelection.IsPersistent(mode))
-			_preferredGitMode = mode;
 		return new WorkspaceControlViewGraph(
 			controlsFrame,
 			controlsPanelHeading,
@@ -375,13 +372,15 @@ internal sealed partial class TerminalWorkspaceSession
 		IReadOnlyCollection<TerminalParameterRow> rows)
 	{
 		ArgumentNullException.ThrowIfNull(rows);
+		var hasGitAxis = rows.Any(static row => row.Kind == TerminalParameterRowKind.GitMode);
 		var gitSelected = rows.Any(static row =>
 			row.Kind == TerminalParameterRowKind.GitMode && row.IsSelected == true);
 		return (
 			rows.Count(static row =>
 				row.Kind == TerminalParameterRowKind.Exclusion && row.IsSelected == true) +
 			(gitSelected ? 1 : 0),
-			rows.Count(static row => row.Kind == TerminalParameterRowKind.Exclusion) + 1);
+			rows.Count(static row => row.Kind == TerminalParameterRowKind.Exclusion) +
+			(hasGitAxis ? 1 : 0));
 	}
 
 	internal static TerminalControlRefreshKind ResolveControlRefreshKind(
@@ -817,15 +816,6 @@ internal sealed partial class TerminalWorkspaceSession
 				execute: () => CopyCurrentContext(new TerminalWorkspaceCommand(
 					TerminalWorkspaceCommandCatalog.Get(TerminalWorkspaceCommandVerb.Copy)))),
 			CreateAction(
-				TerminalWorkspaceActionKind.GitFiltering,
-				"Terminal.Tui.Selection",
-				"Terminal.Tui.GitFiltering",
-				"Terminal.Tui.Action.FocusExclusions.Description",
-				"M",
-				FormatGitMode(selection.GitMode ?? plan.GitReadiness.Mode),
-				TerminalWorkspaceCommandCatalog.Get(TerminalWorkspaceCommandVerb.Set).Syntax,
-				execute: CycleGitMode),
-			CreateAction(
 				TerminalWorkspaceActionKind.Exclusions,
 				"Terminal.Tui.Selection",
 				"Terminal.Tui.Exclusions",
@@ -921,7 +911,21 @@ internal sealed partial class TerminalWorkspaceSession
 					TerminalWorkspaceCommandVerb.Refresh).Syntax,
 				execute: () => RefreshCurrentProject())
 		};
-			actions.Add(CreateAction(
+		if (IsGitFilteringApplicable())
+		{
+			var exclusionsActionIndex = actions.FindIndex(static action =>
+				action.Kind == TerminalWorkspaceActionKind.Exclusions);
+			actions.Insert(exclusionsActionIndex, CreateAction(
+				TerminalWorkspaceActionKind.GitFiltering,
+				"Terminal.Tui.Selection",
+				"Terminal.Tui.GitFiltering",
+				"Terminal.Tui.Action.FocusExclusions.Description",
+				"M",
+				FormatGitMode(selection.GitMode ?? plan.GitReadiness.Mode),
+				TerminalWorkspaceCommandCatalog.Get(TerminalWorkspaceCommandVerb.Set).Syntax,
+				execute: CycleGitMode));
+		}
+		actions.Add(CreateAction(
 			TerminalWorkspaceActionKind.Diagnostics,
 			"Terminal.Tui.Diagnostics",
 			"Terminal.Tui.Command.Diagnostics.Title",
@@ -1197,8 +1201,9 @@ internal sealed partial class TerminalWorkspaceSession
 	private void UpdateDraftPreferredGitMode(GitFilteringMode mode)
 	{
 		EnsureSettingsDraft();
-		if (GitScopeSelection.IsPersistent(mode) && mode != GitFilteringMode.None)
-			_settingsDraftPreferredGitMode = mode;
+		_settingsDraftPreferredGitMode = GitScopeSelection.ResolvePreferredPersistentMode(
+			_settingsDraftPreferredGitMode ?? _preferredGitMode,
+			mode);
 	}
 
 	private void UpdateDraftExtensionStates(IReadOnlyCollection<string> selectedExtensions)
@@ -1256,6 +1261,9 @@ internal sealed partial class TerminalWorkspaceSession
 
 	private void CycleGitMode()
 	{
+		if (!IsGitFilteringApplicable())
+			return;
+
 		var selection = GetDisplayedSettingsSelection();
 		var next = selection.GitMode switch
 		{
@@ -1270,11 +1278,7 @@ internal sealed partial class TerminalWorkspaceSession
 		{
 			next = GitFilteringMode.None;
 		}
-		EnsureSettingsDraft();
-		if (next == GitFilteringMode.None)
-			_settingsDraftPreferredGitMode = GitFilteringMode.RespectGitIgnore;
-		else
-			UpdateDraftPreferredGitMode(next);
+		UpdateDraftPreferredGitMode(next);
 		ApplyPathFilters(next, selection.Exclusions ?? [], originatedFromCommandLine: false);
 	}
 
@@ -1283,6 +1287,9 @@ internal sealed partial class TerminalWorkspaceSession
 		_state?.Plan is { } plan &&
 		(plan.GitReadiness.HasRepositoryBoundary ||
 		 GitRepositoryBoundaryProbe.ExistsAtOrAbove(plan.SourceRoot));
+
+	private bool IsGitFilteringApplicable() =>
+		_state?.Plan is { } plan && TerminalParameterRowsBuilder.IsGitFilteringApplicable(plan);
 
 	private bool IsGitModeAvailable(GitFilteringMode mode) =>
 		mode is GitFilteringMode.None or GitFilteringMode.RespectGitIgnore ||
@@ -1717,7 +1724,7 @@ internal sealed partial class TerminalWorkspaceSession
 		if (_state is null)
 			return;
 		var state = _state;
-		var refreshRequest = TerminalWorkspaceController.CaptureStructuralRefresh(
+		var refreshRequest = _controller.CaptureStructuralRefresh(
 			state,
 			state.BuildSelection(),
 			_preferredGitMode);
@@ -1774,7 +1781,7 @@ internal sealed partial class TerminalWorkspaceSession
 		if (_state?.Plan.SourceIdentity?.SourceType != ProjectSourceType.GitClone)
 			return;
 		var state = _state;
-		var refreshRequest = TerminalWorkspaceController.CaptureStructuralRefresh(
+		var refreshRequest = _controller.CaptureStructuralRefresh(
 			state,
 			state.BuildSelection(),
 			_preferredGitMode);
@@ -1802,7 +1809,7 @@ internal sealed partial class TerminalWorkspaceSession
 		if (_state?.Plan.SourceIdentity?.SourceType != ProjectSourceType.GitClone)
 			return;
 		var state = _state;
-		var refreshRequest = TerminalWorkspaceController.CaptureStructuralRefresh(
+		var refreshRequest = _controller.CaptureStructuralRefresh(
 			state,
 			state.BuildSelection(),
 			_preferredGitMode);

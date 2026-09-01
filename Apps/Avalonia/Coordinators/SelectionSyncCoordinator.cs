@@ -24,7 +24,8 @@ public sealed partial class SelectionSyncCoordinator(
 		getIgnoreOptionsAvailabilityWithCancellation = null,
 	IGitScopePathProvider? gitScopePathProvider = null,
 	Action<string, GitScopePathResult>? gitScopeUnavailable = null,
-	Func<CancellationToken, Task<bool>>? gitAvailabilityResolver = null)
+	Func<CancellationToken, Task<bool>>? gitAvailabilityResolver = null,
+	Func<IReadOnlySet<string>?>? selectedTreePathsProvider = null)
     : IDisposable
 {
     // Store collection references for proper cleanup
@@ -52,6 +53,7 @@ public sealed partial class SelectionSyncCoordinator(
     private IgnoreControllerImpactCounts _ignoreControllerImpactCounts;
 	private GitWorkspaceEvidence _gitWorkspaceEvidence;
 	private bool _gitRepositoryBoundaryKnownAbsent;
+	private bool _preservePreferredGitModeForPersistence;
 	private int _gitCliAvailability = gitAvailabilityResolver is null ? 1 : 0;
 	private bool _selectionPersistenceBlockedByIncompleteScan;
 
@@ -158,6 +160,7 @@ public sealed partial class SelectionSyncCoordinator(
 		if (!GitScopeSelection.IsMomentary(mode))
 			return;
 
+		_preservePreferredGitModeForPersistence = false;
 		_session.IgnoreOptions.SetActiveGitFilteringMode(mode);
 		RefreshGitFilteringModePresentation();
 	}
@@ -758,14 +761,35 @@ public sealed partial class SelectionSyncCoordinator(
         ApplyIgnoreOptions(options, previousSelections, hasPreviousSelections, path);
     }
 
-	public void HandleGitFilteringModeChanged(GitFilteringMode mode, string? currentPath)
+	public void HandleGitFilteringModeChanged(
+		GitFilteringMode mode,
+		string? currentPath,
+		GitFilteringMode? previousMode = null)
 	{
+		if (_session.PreparedPath is not null)
+		{
+			if (previousMode is { } visualMode)
+				RefreshGitFilteringModePresentation(visualMode);
+			return;
+		}
+
+		HandleGitFilteringModeChangedCore(mode, currentPath, preservePreferredForPersistence: false);
+	}
+
+	private void HandleGitFilteringModeChangedCore(
+		GitFilteringMode mode,
+		string? currentPath,
+		bool preservePreferredForPersistence)
+	{
+		_preservePreferredGitModeForPersistence = preservePreferredForPersistence;
 		if (mode == _session.IgnoreOptions.ActiveGitFilteringMode)
 			return;
 		if (GitScopeSelection.IsMomentary(mode) && !HasGitFilteringRepositoryAvailability())
 			return;
 
-		_session.IgnoreOptions.SetActiveGitFilteringMode(mode);
+		_session.IgnoreOptions.SetActiveGitFilteringMode(
+			mode,
+			rememberPersistentPreference: !preservePreferredForPersistence);
 		_suppressIgnoreItemCheck = true;
 		try
 		{
@@ -859,10 +883,15 @@ public sealed partial class SelectionSyncCoordinator(
 			Interlocked.Increment(ref _ignoreOptionsVersion);
 
 			var fallbackMode = ResolveGitFilteringModeAfterRepositoryLoss();
-			HandleGitFilteringModeChanged(fallbackMode, projectPath);
+			HandleGitFilteringModeChangedCore(
+				fallbackMode,
+				projectPath,
+				preservePreferredForPersistence: true);
 			viewModel.RefreshGitFilteringModes(
 				repositoryAvailable: false,
-				fallbackMode);
+				selectorVisible: snapshot.IgnoreOptions.Any(
+					static option => option.Id == IgnoreOptionId.UseGitIgnore),
+				selectedMode: fallbackMode);
 			_ignoreOptionsProjectPath = projectPath;
 			gitScopeUnavailable?.Invoke(projectPath, unavailableScope);
 			return true;
@@ -1003,10 +1032,10 @@ public sealed partial class SelectionSyncCoordinator(
 		{
 			return snapshot.ScanRootOptions
 				.Select(static option => option.Name)
-				.ToHashSet(PathComparer.Default);
+				.ToHashSet(ProjectTreePathIdentity.CanonicalComparer);
 		}
 
-		return _scanRoots.ToHashSet(PathComparer.Default);
+		return _scanRoots.ToHashSet(ProjectTreePathIdentity.CanonicalComparer);
 	}
 
     public void ApplyProjectProfileSelections(string projectPath, ProjectSelectionProfile profile)
@@ -1503,8 +1532,9 @@ public sealed partial class SelectionSyncCoordinator(
         _hasIgnoreOptionCounts = false;
         _ignoreOptionCounts = IgnoreOptionCounts.Empty;
         _ignoreControllerImpactCounts = IgnoreControllerImpactCounts.Empty;
-        _gitWorkspaceEvidence = GitWorkspaceEvidence.Empty;
+		_gitWorkspaceEvidence = GitWorkspaceEvidence.Empty;
 		_gitRepositoryBoundaryKnownAbsent = false;
+		_preservePreferredGitModeForPersistence = false;
 		_selectionPersistenceBlockedByIncompleteScan = false;
         _stableSelectionSnapshot = null;
         _reversibleSelectionSnapshot = null;
@@ -1611,7 +1641,8 @@ public sealed partial class SelectionSyncCoordinator(
 	{
 		ArgumentNullException.ThrowIfNull(source);
 		var states = new Dictionary<IgnoreOptionId, bool>(source);
-		if (!GitScopeSelection.IsMomentary(_session.IgnoreOptions.ActiveGitFilteringMode))
+		if (!GitScopeSelection.IsMomentary(_session.IgnoreOptions.ActiveGitFilteringMode) &&
+		    !_preservePreferredGitModeForPersistence)
 			return states;
 
 		var selected = states.Where(static pair => pair.Value)
@@ -1628,7 +1659,8 @@ public sealed partial class SelectionSyncCoordinator(
 	{
 		selected.Remove(IgnoreOptionId.UseGitIgnore);
 		selected.Remove(IgnoreOptionId.TrackedGitFilesOnly);
-		var mode = GitScopeSelection.IsMomentary(_session.IgnoreOptions.ActiveGitFilteringMode)
+		var mode = GitScopeSelection.IsMomentary(_session.IgnoreOptions.ActiveGitFilteringMode) ||
+		           _preservePreferredGitModeForPersistence
 			? _session.IgnoreOptions.PreferredGitFilteringMode
 			: _session.IgnoreOptions.ActiveGitFilteringMode;
 		if (mode == GitFilteringMode.RespectGitIgnore)
@@ -3279,8 +3311,12 @@ public sealed partial class SelectionSyncCoordinator(
             currentScanRootOptions: _scanRoots.Count == 0
                 ? null
                 : SnapshotScanRootOptions(),
-            extensionSelectionIsExplicit: _session.ExtensionSelectionIsExplicit,
-			gitMode: _session.IgnoreOptions.ActiveGitFilteringMode);
+			extensionSelectionIsExplicit: _session.ExtensionSelectionIsExplicit,
+			gitMode: _session.IgnoreOptions.ActiveGitFilteringMode,
+			gitRepositoryScopePaths:
+				GitScopeSelection.IsMomentary(_session.IgnoreOptions.ActiveGitFilteringMode)
+					? selectedTreePathsProvider?.Invoke()
+					: null);
 
 	private async Task<SelectionRefreshSnapshot> AttachGitScopePresentationAsync(
 		SelectionRefreshContext context,
@@ -3299,11 +3335,12 @@ public sealed partial class SelectionSyncCoordinator(
 		var selectedRoots = rootOptions
 			.Where(static option => option.IsChecked)
 			.Select(static option => option.Name)
-			.ToHashSet(PathComparer.Default);
+			.ToHashSet(ProjectTreePathIdentity.CanonicalComparer);
 		var rootSelectionIsExplicit = context.RootSelectionIsExplicit ||
 		                              rootOptions.Any(static option => !option.IsChecked);
-		var scope = await gitScopePathProvider
-			.ResolveAsync(
+		var scope = await GitScopeFilter
+			.ResolvePathsAsync(
+				gitScopePathProvider,
 				context.Path,
 				context.GitMode,
 				context.GitDiffRange,
@@ -3311,7 +3348,9 @@ public sealed partial class SelectionSyncCoordinator(
 					snapshot.TreeInventory,
 					context.Path,
 					selectedRoots,
-					rootSelectionIsExplicit),
+					rootSelectionIsExplicit,
+					context.GitRepositoryScopePaths),
+				context.GitRepositoryScopePaths,
 				cancellationToken)
 			.ConfigureAwait(false);
 		if (!scope.IsAvailable)
@@ -3319,7 +3358,7 @@ public sealed partial class SelectionSyncCoordinator(
 
 		var availableRoots = rootOptions
 			.Select(static option => option.Name)
-			.ToHashSet(PathComparer.Default);
+			.ToHashSet(ProjectTreePathIdentity.CanonicalComparer);
 		return snapshot with
 		{
 			GitScope = scope,
@@ -3332,7 +3371,8 @@ public sealed partial class SelectionSyncCoordinator(
 				ExtensionInclusionPolicyFactory.Create(context),
 				snapshot.EffectiveRules,
 				cancellationToken,
-				rootSelectionIsExplicit)
+				rootSelectionIsExplicit,
+				selectedPathFrontier: context.GitRepositoryScopePaths)
 		};
 	}
 
@@ -3736,10 +3776,12 @@ public sealed partial class SelectionSyncCoordinator(
         }
     }
 
-	private void RefreshGitFilteringModePresentation() =>
+	private void RefreshGitFilteringModePresentation(GitFilteringMode? selectedMode = null) =>
 		viewModel.RefreshGitFilteringModes(
-			HasGitFilteringRepositoryAvailability(),
-			_session.IgnoreOptions.ActiveGitFilteringMode);
+			repositoryAvailable: HasGitFilteringRepositoryAvailability(),
+			selectorVisible: _ignoreOptions.Any(
+				static option => option.Id == IgnoreOptionId.UseGitIgnore),
+			selectedMode: selectedMode ?? _session.IgnoreOptions.ActiveGitFilteringMode);
 
 	private bool HasGitFilteringRepositoryAvailability() =>
 		Volatile.Read(ref _gitCliAvailability) > 0 &&
@@ -3769,7 +3811,7 @@ public sealed partial class SelectionSyncCoordinator(
 			return;
 
 		cancellationToken.ThrowIfCancellationRequested();
-		await Dispatcher.UIThread.InvokeAsync(RefreshGitFilteringModePresentation);
+		await Dispatcher.UIThread.InvokeAsync(() => RefreshGitFilteringModePresentation());
 	}
 
 	private void SetAllIgnoreOptionsChecked(bool isChecked)

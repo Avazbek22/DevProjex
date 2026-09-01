@@ -6,7 +6,8 @@ internal sealed class ProjectTreeSelectionSnapshot
 
     private readonly IReadOnlySet<string> _checkedPaths;
     private readonly List<TreeCheckedStateOverride> _overrides = [];
-    private readonly Dictionary<string, int> _latestOverrideIndices = new(PathComparer.Default);
+    private readonly Dictionary<string, int> _latestOverrideIndices =
+        new(ProjectTreePathIdentity.CanonicalComparer);
     private long _nextOverrideSequence;
 
     private ProjectTreeSelectionSnapshot(
@@ -97,7 +98,9 @@ internal sealed class ProjectTreeSelectionSnapshot
         if (_latestOverrideIndices.Count == 0)
             return _checkedPaths;
 
-        var paths = new HashSet<string>(_checkedPaths, PathComparer.Default);
+        var paths = new HashSet<string>(
+            _checkedPaths,
+            ProjectTreePathIdentity.CanonicalComparer);
         for (var index = 0; index < _overrides.Count; index++)
         {
             if (IsLatestOverride(index))
@@ -113,7 +116,8 @@ internal sealed class ProjectTreeSelectionSnapshot
         foreach (var path in _checkedPaths)
         {
             if (!resolution.TryGetNode(path, out _))
-                (candidates ??= new HashSet<string>(PathComparer.Default)).Add(path);
+                (candidates ??= new HashSet<string>(
+                    ProjectTreePathIdentity.CanonicalComparer)).Add(path);
         }
 
         for (var index = 0; index < _overrides.Count; index++)
@@ -125,7 +129,8 @@ internal sealed class ProjectTreeSelectionSnapshot
             if (stateOverride.IsChecked &&
                 !resolution.TryGetNode(stateOverride.Path, out _))
             {
-                (candidates ??= new HashSet<string>(PathComparer.Default)).Add(stateOverride.Path);
+                (candidates ??= new HashSet<string>(
+                    ProjectTreePathIdentity.CanonicalComparer)).Add(stateOverride.Path);
             }
         }
 
@@ -139,7 +144,9 @@ internal sealed class ProjectTreeSelectionSnapshot
             if (latestOverride is { IsChecked: false })
                 continue;
             if (latestOverride is { IsChecked: true } &&
-                !PathComparer.Default.Equals(latestOverride.Value.Path, path))
+                !ProjectTreePathIdentity.CanonicalComparer.Equals(
+                    latestOverride.Value.Path,
+                    path))
             {
                 continue;
             }
@@ -148,7 +155,8 @@ internal sealed class ProjectTreeSelectionSnapshot
         }
 
         selectedCandidates.Sort(static (left, right) => left.Length.CompareTo(right.Length));
-        var minimalMissingPaths = new HashSet<string>(PathComparer.Default);
+        var minimalMissingPaths = new HashSet<string>(
+            ProjectTreePathIdentity.CanonicalComparer);
         for (var index = 0; index < selectedCandidates.Count; index++)
         {
             var path = selectedCandidates[index];
@@ -378,10 +386,14 @@ internal static class ProjectTreeUiState
         ArgumentNullException.ThrowIfNull(paths);
 
         var targets = paths is HashSet<string> reusableTargets &&
-                      ReferenceEquals(reusableTargets.Comparer, PathComparer.Default)
+                      ReferenceEquals(
+                          reusableTargets.Comparer,
+                          ProjectTreePathIdentity.CanonicalComparer)
             ? reusableTargets
-            : new HashSet<string>(paths.Count, PathComparer.Default);
-        var ancestors = new HashSet<string>(PathComparer.Default);
+            : new HashSet<string>(
+                paths.Count,
+                ProjectTreePathIdentity.CanonicalComparer);
+        var ancestors = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
         foreach (var path in paths)
         {
             if (string.IsNullOrWhiteSpace(path) ||
@@ -403,7 +415,9 @@ internal static class ProjectTreeUiState
             }
         }
 
-        var resolved = new Dictionary<string, TreeNodeViewModel>(targets.Count, PathComparer.Default);
+        var resolved = new Dictionary<string, TreeNodeViewModel>(
+            targets.Count,
+            ProjectTreePathIdentity.CanonicalComparer);
         if (targets.Contains(root.FullPath))
             resolved[root.FullPath] = root;
 

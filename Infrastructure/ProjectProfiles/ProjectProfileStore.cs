@@ -505,7 +505,9 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		profile.SelectedRootFolders ??= [];
 		profile.SelectedExtensions ??= [];
 		profile.SelectedIgnoreOptions ??= [];
-		profile.RootFolderStates = NormalizeRootStateDictionary(profile.RootFolderStates, PathComparer.Default);
+		profile.RootFolderStates = NormalizeRootStateDictionary(
+			profile.RootFolderStates,
+			ProjectTreePathIdentity.CanonicalComparer);
 		profile.ExtensionStates = NormalizeStringStateDictionary(profile.ExtensionStates, StringComparer.OrdinalIgnoreCase);
 		profile.IgnoreOptionStates ??= [];
 		profile.SelectedPaths ??= [];
@@ -513,7 +515,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 
 		profile.SelectedRootFolders = profile.SelectedRootFolders
 			.Where(IsValidStoredPath)
-			.Distinct(PathComparer.Default)
+			.Distinct(ProjectTreePathIdentity.CanonicalComparer)
 			.Take(ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection)
 			.ToList();
 		profile.SelectedExtensions = profile.SelectedExtensions
@@ -528,8 +530,8 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		profile.SelectedPaths = profile.SelectedPaths
 			.Where(IsValidStoredPath)
 			.Select(PathUtility.NormalizeSeparators)
-			.Distinct(PathComparer.Default)
-			.OrderBy(static item => item, PathComparer.Default)
+			.Distinct(ProjectTreePathIdentity.CanonicalComparer)
+			.OrderBy(static item => item, ProjectTreePathIdentity.CanonicalComparer)
 			.Take(ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection)
 			.ToList();
 		profile.MarkedSecrets = NormalizeMarkedSecrets(profile.MarkedSecrets);
@@ -560,7 +562,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		ReconcileSelectedStringValues(
 			profile.SelectedRootFolders,
 			profile.RootFolderStates,
-			PathComparer.Default);
+			ProjectTreePathIdentity.CanonicalComparer);
 		ReconcileSelectedStringValues(
 			profile.SelectedExtensions,
 			profile.ExtensionStates,
@@ -582,7 +584,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 	{
 		var selectedRootFolders = profile.SelectedRootFolders
 			.Where(IsValidStoredPath)
-			.Distinct(PathComparer.Default)
+			.Distinct(ProjectTreePathIdentity.CanonicalComparer)
 			.Take(ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection + 1)
 			.ToList();
 		var selectedExtensions = profile.SelectedExtensions
@@ -595,7 +597,7 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 			.ToList();
 		var rootFolderStates = NormalizeRootStateDictionary(
 			profile.RootFolderStates,
-			PathComparer.Default,
+			ProjectTreePathIdentity.CanonicalComparer,
 			out var rootFolderStatesTruncated);
 		var extensionStates = NormalizeStringStateDictionary(
 			profile.ExtensionStates,
@@ -604,15 +606,18 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		var ignoreOptionStates = profile.IgnoreOptionStates is null
 			? []
 			: new Dictionary<IgnoreOptionId, bool>(profile.IgnoreOptionStates);
-		ReconcileSelectedStringValues(selectedRootFolders, rootFolderStates, PathComparer.Default);
+		ReconcileSelectedStringValues(
+			selectedRootFolders,
+			rootFolderStates,
+			ProjectTreePathIdentity.CanonicalComparer);
 		ReconcileSelectedStringValues(selectedExtensions, extensionStates, StringComparer.OrdinalIgnoreCase);
 		ReconcileSelectedIgnoreOptions(selectedIgnoreOptions, ignoreOptionStates);
 		NormalizeGitFilteringState(selectedIgnoreOptions, ignoreOptionStates);
 		var selectedPaths = (profile.SelectedPaths ?? [])
 			.Where(IsValidStoredPath)
 			.Select(PathUtility.NormalizeSeparators)
-			.Distinct(PathComparer.Default)
-			.OrderBy(static item => item, PathComparer.Default)
+			.Distinct(ProjectTreePathIdentity.CanonicalComparer)
+			.OrderBy(static item => item, ProjectTreePathIdentity.CanonicalComparer)
 			.Take(ProjectProfileStorageLimits.MaximumSelectionItemsPerCollection + 1)
 			.ToList();
 
@@ -652,13 +657,17 @@ public sealed class ProjectProfileStore(Func<string>? appDataPathProvider = null
 		PersistedProjectProfile profile,
 		IReadOnlyCollection<MarkedSecretProfileEntry> marks)
 	{
-		var rootFolders = new HashSet<string>(profile.SelectedRootFolders, PathComparer.Default);
+		var rootFolders = new HashSet<string>(
+			profile.SelectedRootFolders,
+			ProjectTreePathIdentity.CanonicalComparer);
 		var extensions = new HashSet<string>(profile.SelectedExtensions, StringComparer.OrdinalIgnoreCase);
 		var selectedIgnoreOptions = profile.SelectedIgnoreOptions.ToList();
 		// Local persistence always exposes a complete-map contract. Selected-only input is
 		// promoted at the storage boundary, so all surfaces give newly discovered rows the
 		// same current default without losing historical positive selections.
-		var rootStates = new Dictionary<string, bool>(profile.RootFolderStates, PathComparer.Default);
+		var rootStates = new Dictionary<string, bool>(
+			profile.RootFolderStates,
+			ProjectTreePathIdentity.CanonicalComparer);
 		var extensionStates = new Dictionary<string, bool>(profile.ExtensionStates, StringComparer.OrdinalIgnoreCase);
 		var ignoreStates = new Dictionary<IgnoreOptionId, bool>(profile.IgnoreOptionStates);
 		NormalizeGitFilteringState(selectedIgnoreOptions, ignoreStates);

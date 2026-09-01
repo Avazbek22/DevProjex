@@ -272,8 +272,8 @@ public sealed class TerminalVisualSnapshotTests
 		Assert.Contains("Исключения", workspace, StringComparison.Ordinal);
 		Assert.Contains("Типы файлов", workspace, StringComparison.Ordinal);
 		Assert.DoesNotContain("КОРНЕВЫЕ ПАПКИ", workspace, StringComparison.Ordinal);
-		Assert.Contains("Использовать .gitignore", workspace, StringComparison.Ordinal);
-		Assert.Contains("Скрытые папки", workspace, StringComparison.Ordinal);
+		Assert.DoesNotContain("Использовать .gitignore", workspace, StringComparison.Ordinal);
+		Assert.DoesNotContain("Скрытые папки", workspace, StringComparison.Ordinal);
 		Assert.DoesNotContain("[[", workspace, StringComparison.Ordinal);
 		Assert.DoesNotContain("smart-ignore", workspace, StringComparison.Ordinal);
 		Assert.DoesNotContain("hidden-folders", workspace, StringComparison.Ordinal);

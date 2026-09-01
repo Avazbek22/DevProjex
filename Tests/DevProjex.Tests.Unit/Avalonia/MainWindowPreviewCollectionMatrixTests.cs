@@ -82,7 +82,7 @@ public sealed class MainWindowPreviewCollectionMatrixTests
     {
         using var temp = new TemporaryDirectory();
 
-        foreach (var relative in relativeFiles.Distinct(StringComparer.OrdinalIgnoreCase))
+        foreach (var relative in relativeFiles.Distinct(ProjectTreePathIdentity.CanonicalComparer))
         {
             var fullPath = Path.Combine(temp.Path, relative.Replace('/', Path.DirectorySeparatorChar));
             var parent = Path.GetDirectoryName(fullPath);
@@ -101,15 +101,15 @@ public sealed class MainWindowPreviewCollectionMatrixTests
 
         var expected = relativeFiles
             .Select(relative => Path.Combine(temp.Path, relative.Replace('/', Path.DirectorySeparatorChar)))
-            .Distinct(PathComparer.Default)
-            .OrderBy(path => path, PathComparer.Default)
+            .Distinct(ProjectTreePathIdentity.CanonicalComparer)
+            .OrderBy(path => path, ProjectTreePathIdentity.CanonicalComparer)
             .ToList();
 
         Assert.Equal(expected, actual);
     }
 
     [Fact]
-    public void CollectOrderedPreviewFiles_WithoutSelection_CaseVariantTreeFiles_FollowPlatformSemantics()
+    public void CollectOrderedPreviewFiles_WithoutSelection_PreservesCaseVariantTreeFiles()
     {
         using var temp = new TemporaryDirectory();
         var relativeFiles = new[] { "src/A.cs", "src/a.cs", "src/B.cs" };
@@ -131,8 +131,8 @@ public sealed class MainWindowPreviewCollectionMatrixTests
 
         var expected = relativeFiles
             .Select(relative => Path.Combine(temp.Path, relative.Replace('/', Path.DirectorySeparatorChar)))
-            .Distinct(PathComparer.Default)
-            .OrderBy(path => path, PathComparer.Default)
+            .Distinct(ProjectTreePathIdentity.CanonicalComparer)
+            .OrderBy(path => path, ProjectTreePathIdentity.CanonicalComparer)
             .ToList();
 
         Assert.Equal(expected, actual);
@@ -140,7 +140,7 @@ public sealed class MainWindowPreviewCollectionMatrixTests
 
     [Theory]
     [InlineData("/root/a.cs;/root/b.cs", "/root/b.cs;/root/a.cs", true)]
-    [InlineData("/root/A.cs;/root/b.cs", "/root/a.cs;/root/B.cs", true)]
+    [InlineData("/root/A.cs;/root/b.cs", "/root/a.cs;/root/B.cs", false)]
     [InlineData("/root/a.cs;/root/b.cs", "/root/a.cs;/root/c.cs", false)]
     [InlineData("/root/a.cs", "/root/a.cs;/root/b.cs", false)]
     [InlineData("", "", true)]
@@ -156,8 +156,10 @@ public sealed class MainWindowPreviewCollectionMatrixTests
         if (expectedEqual)
         {
             expectedEqual = leftSet.Count == rightSet.Count &&
-                leftSet.OrderBy(path => path, PathComparer.Default)
-                    .SequenceEqual(rightSet.OrderBy(path => path, PathComparer.Default), PathComparer.Default);
+                leftSet.OrderBy(path => path, ProjectTreePathIdentity.CanonicalComparer)
+                    .SequenceEqual(
+                        rightSet.OrderBy(path => path, ProjectTreePathIdentity.CanonicalComparer),
+                        ProjectTreePathIdentity.CanonicalComparer);
         }
 
         Assert.Equal(expectedEqual, leftHash == rightHash);
@@ -177,7 +179,7 @@ public sealed class MainWindowPreviewCollectionMatrixTests
 
     private static IReadOnlySet<string> ParseSet(string source)
     {
-        var set = new HashSet<string>(PathComparer.Default);
+        var set = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
         if (string.IsNullOrWhiteSpace(source))
             return set;
 
@@ -241,9 +243,7 @@ public sealed class MainWindowPreviewCollectionMatrixTests
         public string Name { get; } = name;
         public string FullPath { get; } = fullPath;
         public bool IsDirectory { get; set; } = isDirectory;
-        public Dictionary<string, MutableTreeNode> Children { get; } = new(
-            OperatingSystem.IsWindows()
-                ? StringComparer.OrdinalIgnoreCase
-                : StringComparer.Ordinal);
+        public Dictionary<string, MutableTreeNode> Children { get; } =
+            new(ProjectTreePathIdentity.CanonicalComparer);
     }
 }

@@ -67,7 +67,7 @@ public static class ExportOutputMetricsCalculator
 
 	public static ExportOutputMetrics FromContentFiles(IEnumerable<ContentFileMetrics> files)
 	{
-		var uniquePaths = new HashSet<string>(PathComparer.Default);
+		var uniquePaths = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
 		var ordered = new List<ContentFileMetrics>();
 		foreach (var file in files)
 		{
@@ -83,7 +83,7 @@ public static class ExportOutputMetricsCalculator
 		if (ordered.Count == 0)
 			return ExportOutputMetrics.Empty;
 
-		ordered.Sort(static (left, right) => PathComparer.Default.Compare(left.Path, right.Path));
+		ordered.Sort(static (left, right) => ProjectTreePathIdentity.CanonicalComparer.Compare(left.Path, right.Path));
 		return FromOrderedContentFiles(ordered);
 	}
 

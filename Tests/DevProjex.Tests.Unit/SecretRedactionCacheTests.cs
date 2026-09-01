@@ -64,6 +64,55 @@ public sealed class SecretRedactionCacheTests
 	}
 
 	[Fact]
+	public async Task OutputPreparer_PreservesCaseDistinctSourcesAndTheirContent()
+	{
+		using var workspace = new TemporaryDirectory();
+		var upperContent = $"upper={Secret}-upper";
+		var lowerContent = $"lower={Secret}-lower";
+		Assert.Equal(upperContent.Length, lowerContent.Length);
+		var physicalContent = new string('x', upperContent.Length);
+		var upperPath = workspace.CreateFile("Foo.cs", physicalContent);
+		var lowerPath = Path.Combine(workspace.Path, "foo.cs");
+		if (!File.Exists(lowerPath))
+			File.WriteAllText(lowerPath, physicalContent);
+		var sourceContent = new Dictionary<string, string>(ProjectTreePathIdentity.CanonicalComparer)
+		{
+			[upperPath] = upperContent,
+			[lowerPath] = lowerContent
+		};
+		var detector = new CountingDetector();
+		using var session = new SecretRedactionSession(detector);
+		using var compression = new CodeCompressionSession(new CaseIdentityCompressor());
+		var analyzer = new CaseMappedContentAnalyzer(sourceContent);
+		var preparer = new SecretRedactionOutputPreparer(analyzer, new FileContentAnalyzer());
+
+		await using var prepared = await preparer.PrepareAsync(
+			new ContentTransformationContext(
+				new CodeCompressionContext(workspace.Path, compression),
+				new SecretRedactionContext(workspace.Path, session)),
+			[upperPath, lowerPath],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(upperPath, prepared.GetFile(upperPath).SourcePath, StringComparer.Ordinal);
+		Assert.Equal(lowerPath, prepared.GetFile(lowerPath).SourcePath, StringComparer.Ordinal);
+		Assert.Equal(2, detector.CallCount);
+		Assert.Equal(2, Assert.IsType<CodeCompressionSnapshot>(prepared.CompressionSnapshot).TotalFiles);
+
+		var preparedAnalyzer = preparer.CreatePreparedAnalyzer(prepared);
+		var upper = await preparedAnalyzer.TryReadAsTextAsync(
+			upperPath,
+			TestContext.Current.CancellationToken);
+		var lower = await preparedAnalyzer.TryReadAsTextAsync(
+			lowerPath,
+			TestContext.Current.CancellationToken);
+		Assert.NotNull(upper);
+		Assert.NotNull(lower);
+		Assert.NotEqual(upper.Content, lower.Content);
+		Assert.Contains("upper", upper.Content, StringComparison.Ordinal);
+		Assert.Contains("lower", lower.Content, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void Snapshot_CapturesUnscannableDetailsInsteadOfRetainingMutableOperationList()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -710,6 +759,81 @@ public sealed class SecretRedactionCacheTests
 			long maxSizeForFullRead,
 			CancellationToken cancellationToken = default) =>
 			inner.TryReadAsTextAsync(path, maxSizeForFullRead, cancellationToken);
+	}
+
+	private sealed class CaseMappedContentAnalyzer(IReadOnlyDictionary<string, string> contentByPath)
+		: IFileContentAnalyzer
+	{
+		public ValueTask<bool> IsTextFileAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromResult(contentByPath.ContainsKey(path));
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default)
+		{
+			var content = CreateContent(path);
+			return ValueTask.FromResult<TextFileMetrics?>(new TextFileMetrics(
+				content.SizeBytes,
+				content.LineCount,
+				content.CharCount,
+				content.IsEmpty,
+				content.IsWhitespaceOnly));
+		}
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromResult<TextFileContent?>(CreateContent(path));
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			ValueTask.FromResult<TextFileContent?>(CreateContent(path));
+
+		private TextFileContent CreateContent(string path)
+		{
+			var content = contentByPath[path];
+			return new TextFileContent(
+				content,
+				Encoding.UTF8.GetByteCount(content),
+				LineCount: 1,
+				CharCount: content.Length,
+				IsEmpty: false,
+				IsWhitespaceOnly: false);
+		}
+	}
+
+	private sealed class CaseIdentityCompressor : ICodeCompressor
+	{
+		public string TransformIdentity => "case-identity:v1";
+
+		public bool IsSupported(string relativePath) => true;
+
+		public ICodeCompressionScope CreateScope(string projectRoot) => new Scope(this);
+
+		private sealed class Scope(CaseIdentityCompressor owner) : ICodeCompressionScope
+		{
+			public CodeCompressionAnalysis Analyze(
+				string fullPath,
+				string relativePath,
+				string content,
+				CancellationToken cancellationToken) =>
+				new(
+					CodeCompressionPlan.Unchanged(
+						relativePath,
+						content,
+						CodeCompressionOutcome.UnchangedNoBenefit,
+						content.Length,
+						owner.TransformIdentity),
+					null);
+
+			public void Dispose()
+			{
+			}
+		}
 	}
 
 	private sealed class CancelingDetector : ISecretDetector

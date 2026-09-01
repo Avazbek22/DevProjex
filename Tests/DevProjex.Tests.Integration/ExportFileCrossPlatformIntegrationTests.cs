@@ -46,11 +46,13 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 				TestContext.Current.CancellationToken,
 				_ => unsafeName);
 
-		foreach (var output in new[] { ascii, plain, markdown, content })
+		foreach (var output in new[] { ascii, plain, content })
 		{
 			Assert.Contains(escapedName, output, StringComparison.Ordinal);
 			Assert.DoesNotContain(unsafeName, output, StringComparison.Ordinal);
 		}
+		Assert.Contains(@"safe\\nforged\\t\\u001B.txt", markdown, StringComparison.Ordinal);
+		Assert.DoesNotContain(unsafeName, markdown, StringComparison.Ordinal);
 		Assert.Equal(
 			ExportOutputMetricsCalculator.FromText(ascii),
 			treeExport.CalculateFullTreeMetrics(temp.Path, root, TreeTextFormat.Ascii));
@@ -114,7 +116,9 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 		}
 		else
 		{
-			Assert.StartsWith($"Root: {Path.GetFullPath(temp.Path).Replace('\\', '/')}", written, StringComparison.Ordinal);
+			var rootLine = ContextRootPresentation.FormatMarkdownLine(
+				Path.GetFullPath(temp.Path).Replace('\\', '/'));
+			Assert.StartsWith(rootLine, written, StringComparison.Ordinal);
 			Assert.Contains("- src/", written, StringComparison.Ordinal);
 			Assert.Contains("  - main.cs", written, StringComparison.Ordinal);
 			Assert.Contains("- README.md", written, StringComparison.Ordinal);

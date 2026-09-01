@@ -241,7 +241,14 @@ public sealed class IgnoreRulesService(
 				if (attributes.HasFlag(FileAttributes.ReparsePoint))
 					return false;
 
-				return true;
+				if (UnixFileTypeInspector.IsPhysicalDirectoryOrRegularFile(
+					    gitMetadataPath,
+					    attributes))
+				{
+					return true;
+				}
+
+				currentPath = GetParentPath(currentPath);
 			}
 			catch
 			{

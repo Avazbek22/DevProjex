@@ -7,6 +7,9 @@ internal sealed class McpProjectService(
 	bool hidePrivateData,
 	GitFilteringMode? serverGitMode)
 {
+	internal const int MaximumRequestedPaths = 256;
+	internal const int MaximumRequestedPathLength = 4096;
+
 	public async Task<ProjectContextPlan> BuildPlanAsync(
 		string? project,
 		string? branch,
@@ -21,9 +24,15 @@ internal sealed class McpProjectService(
 		bool includeOutputMetrics = true)
 	{
 		var parsedScope = ParseGitScope(gitScope);
+		var hasSelectionFilters =
+			paths is { Count: > 0 } ||
+			includePatterns is { Count: > 0 } ||
+			excludePatterns is { Count: > 0 };
+		var globs = McpGlobSet.Create(includePatterns, excludePatterns);
 		var source = await projectSources.ResolveAsync(project, branch, cancellationToken)
 			.ConfigureAwait(false);
 		var projectRoot = source.Root;
+		var requested = ResolveRequestedPaths(projectRoot, paths, cancellationToken);
 		var profileReference = ResolveProfile(projectRoot, profile);
 		var baselineGitMode = trackedOnly
 			? GitFilteringMode.TrackedFilesOnly
@@ -95,8 +104,25 @@ internal sealed class McpProjectService(
 				"Fix the reported project access or Git state and retry.");
 		}
 		ValidatePlanContainment(roots, projectRoot, plan.IncludedFiles, cancellationToken);
+		var selectionFrontier = BuildSelectionFrontier(
+			projectRoot,
+			plan.IncludedFiles,
+			plan.IncludedFolders,
+			requested,
+			globs,
+			hasSelectionFilters,
+			cancellationToken);
 		if (parsedScope is { } scope)
 		{
+			string? resolvedDiffRange = null;
+			if (scope.Mode == GitFilteringMode.Diff && source.Identity?.SourceType == ProjectSourceType.GitClone)
+			{
+				resolvedDiffRange = await projectSources.ResolveRemoteDiffRangeAsync(
+					source,
+					project!,
+					scope.DiffRange!,
+					cancellationToken).ConfigureAwait(false);
+			}
 			plan = await GitScopeFilter
 				.ApplyAsync(
 					services.Planner,
@@ -104,7 +130,9 @@ internal sealed class McpProjectService(
 					services.GitScopePathProvider,
 					scope.Mode,
 					scope.DiffRange,
-					cancellationToken)
+					selectionFrontier?.ProjectionPaths,
+					cancellationToken,
+					resolvedDiffRange)
 				.ConfigureAwait(false);
 			if (plan.HasErrors)
 			{
@@ -117,26 +145,29 @@ internal sealed class McpProjectService(
 			}
 		}
 		ProjectContextPlan narrowed;
-		if ((paths is null || paths.Count == 0) &&
-		    (includePatterns is null || includePatterns.Count == 0) &&
-		    (excludePatterns is null || excludePatterns.Count == 0))
+		if (selectionFrontier is null)
 		{
 			narrowed = plan;
 		}
 		else
 		{
-			var globs = McpGlobSet.Create(includePatterns, excludePatterns);
-			var requested = ResolveRequestedPaths(projectRoot, paths, cancellationToken);
 			var selected = new List<string>();
-			foreach (var path in plan.IncludedFiles)
+			if (parsedScope is null)
 			{
-				cancellationToken.ThrowIfCancellationRequested();
-				if (!MatchesRequested(path, requested.Paths, requested.Directories))
-					continue;
-
-				var relativePath = ToRelative(projectRoot, path);
-				if (globs.Includes(relativePath))
-					selected.Add(relativePath);
+				foreach (var path in selectionFrontier.ProjectionPaths)
+				{
+					cancellationToken.ThrowIfCancellationRequested();
+					selected.Add(ToRelative(projectRoot, path));
+				}
+			}
+			else
+			{
+				foreach (var path in plan.IncludedFiles)
+				{
+					cancellationToken.ThrowIfCancellationRequested();
+					if (selectionFrontier.FilePaths.Contains(path))
+						selected.Add(ToRelative(projectRoot, path));
+				}
 			}
 			if (selected.Count > 0)
 			{
@@ -165,6 +196,78 @@ internal sealed class McpProjectService(
 			.ApplyAsync(services.Planner, narrowed, maximumFileBytes, cancellationToken)
 			.ConfigureAwait(false);
 	}
+
+	private static McpSelectionFrontier? BuildSelectionFrontier(
+		string projectRoot,
+		IReadOnlyList<string> includedFiles,
+		IReadOnlyList<string> includedFolders,
+		RequestedPathSelection requested,
+		McpGlobSet globs,
+		bool hasSelectionFilters,
+		CancellationToken cancellationToken)
+	{
+		if (!hasSelectionFilters)
+			return null;
+
+		var selectedFiles = new HashSet<string>(StringComparer.Ordinal);
+		foreach (var path in includedFiles)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (MatchesRequested(path, requested.Paths, requested.Directories) &&
+			    globs.Includes(ToRelative(projectRoot, path)))
+			{
+				selectedFiles.Add(path);
+			}
+		}
+
+		var projectionPaths = new HashSet<string>(selectedFiles, StringComparer.Ordinal);
+		if (requested.Directories.Count > 0)
+		{
+			var directoriesWithIncludedFiles = BuildDirectoryContentIndex(
+				projectRoot,
+				includedFiles,
+				cancellationToken);
+			foreach (var path in includedFolders)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				if (requested.Directories.Contains(path) &&
+				    !directoriesWithIncludedFiles.Contains(path) &&
+				    globs.IncludesDirectory(ToRelative(projectRoot, path)))
+					projectionPaths.Add(path);
+			}
+		}
+
+		return new McpSelectionFrontier(selectedFiles, projectionPaths);
+	}
+
+	private static IReadOnlySet<string> BuildDirectoryContentIndex(
+		string projectRoot,
+		IReadOnlyList<string> includedFiles,
+		CancellationToken cancellationToken)
+	{
+		var directories = new HashSet<string>(StringComparer.Ordinal);
+		foreach (var file in includedFiles)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			directories.Add(projectRoot);
+			var directory = Path.GetDirectoryName(file);
+			while (!string.IsNullOrEmpty(directory) &&
+			       !StringComparer.Ordinal.Equals(directory, projectRoot))
+			{
+				directories.Add(directory);
+				var parent = Path.GetDirectoryName(directory);
+				if (StringComparer.Ordinal.Equals(parent, directory))
+					break;
+				directory = parent;
+			}
+		}
+
+		return directories;
+	}
+
+	private sealed record McpSelectionFrontier(
+		IReadOnlySet<string> FilePaths,
+		IReadOnlySet<string> ProjectionPaths);
 
 	internal static void ValidatePlanContainment(
 		McpProjectRootJail roots,
@@ -213,7 +316,7 @@ internal sealed class McpProjectService(
 	{
 		if (value is null)
 			return null;
-		if (value.Length > GitScopeSelection.MaximumTokenLength)
+		if (McpUnicodeLength.ExceedsScalarValueCount(value, GitScopeSelection.MaximumTokenLength))
 		{
 			throw new McpToolException(
 				McpErrorCodes.InvalidArguments,
@@ -311,11 +414,7 @@ internal sealed class McpProjectService(
 				McpErrorCodes.PathNotFound,
 				$"{McpErrorCodes.PathNotFound}: '{path}' is a directory; provide a file path returned by get_tree or search_project.");
 		}
-		var pathComparer = GitScopeSelection.IsMomentary(
-			plan.Selection.GitMode ?? GitFilteringMode.None)
-			? StringComparer.Ordinal
-			: PathComparer.Default;
-		if (!plan.IncludedFiles.Contains(physical, pathComparer))
+		if (!plan.IncludedFiles.Contains(physical, StringComparer.Ordinal))
 		{
 			throw new McpToolException(
 				McpErrorCodes.PathNotFound,
@@ -358,9 +457,10 @@ internal sealed class McpProjectService(
 		if (paths is null || paths.Count == 0)
 			return RequestedPathSelection.Empty;
 
-		var resolved = new HashSet<string>(PathComparer.Default);
-		var directories = new HashSet<string>(PathComparer.Default);
-		foreach (var path in paths)
+		var distinctTokens = NormalizeRequestedPathTokens(projectRoot, paths);
+		var resolved = new HashSet<string>(StringComparer.Ordinal);
+		var directories = new HashSet<string>(StringComparer.Ordinal);
+		foreach (var path in distinctTokens)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			var fullPath = roots.ResolveExistingPath(projectRoot, path);
@@ -371,6 +471,38 @@ internal sealed class McpProjectService(
 		}
 
 		return new RequestedPathSelection(resolved, directories);
+	}
+
+	internal static IReadOnlyList<string> NormalizeRequestedPathTokens(
+		string projectRoot,
+		IReadOnlyList<string> paths)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
+		ArgumentNullException.ThrowIfNull(paths);
+		var seen = new HashSet<string>(StringComparer.Ordinal);
+		var normalized = new List<string>(paths.Count);
+		foreach (var path in paths)
+		{
+			try
+			{
+				var fullPath = Path.IsPathFullyQualified(path)
+					? Path.GetFullPath(path)
+					: Path.GetFullPath(path, projectRoot);
+				var normalizedPath = Path.TrimEndingDirectorySeparator(PathUtility.Normalize(fullPath));
+				if (seen.Add(normalizedPath))
+					normalized.Add(normalizedPath);
+			}
+			catch (Exception exception) when (
+				exception is ArgumentException or NotSupportedException or PathTooLongException)
+			{
+				throw new McpToolException(
+					McpErrorCodes.InvalidArguments,
+					$"{McpErrorCodes.InvalidArguments}: 'paths' contains an invalid path. " +
+					"Use existing project-relative files or directories returned by get_tree.");
+			}
+		}
+
+		return normalized;
 	}
 
 	private sealed record McpGitScope(GitFilteringMode Mode, string? DiffRange);
@@ -394,7 +526,7 @@ internal sealed class McpProjectService(
 				return true;
 
 			var parentPath = Path.GetDirectoryName(ancestorPath);
-			if (PathComparer.Default.Equals(parentPath, ancestorPath))
+			if (StringComparer.Ordinal.Equals(parentPath, ancestorPath))
 				break;
 			ancestorPath = parentPath;
 		}
@@ -406,8 +538,8 @@ internal sealed class McpProjectService(
 		IReadOnlySet<string> Directories)
 	{
 		public static RequestedPathSelection Empty { get; } = new(
-			new HashSet<string>(PathComparer.Default),
-			new HashSet<string>(PathComparer.Default));
+			new HashSet<string>(StringComparer.Ordinal),
+			new HashSet<string>(StringComparer.Ordinal));
 	}
 
 	internal static string ToRelative(string root, string path) =>

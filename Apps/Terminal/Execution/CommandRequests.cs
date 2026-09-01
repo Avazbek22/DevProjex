@@ -19,7 +19,8 @@ public sealed record AnalyzeCommandRequest(
 	bool FailOnFindings = false,
 	bool Force = false,
 	int? TopFiles = null,
-	long? MaxFileBytes = null);
+	long? MaxFileBytes = null,
+	string? RepositorySourceUrl = null);
 
 public sealed record TreeCommandRequest(
 	string ProjectPath,
@@ -28,7 +29,8 @@ public sealed record TreeCommandRequest(
 	string? OutputPath,
 	TerminalOutputOptions Output,
 	bool Force = false,
-	long? MaxFileBytes = null);
+	long? MaxFileBytes = null,
+	string? RepositorySourceUrl = null);
 
 public sealed record ExportContextCommandRequest(
 	string ProjectPath,
@@ -40,7 +42,8 @@ public sealed record ExportContextCommandRequest(
 	bool DryRun,
 	long? MaximumEstimatedTokens,
 	TerminalOutputOptions Output,
-	long? MaxFileBytes = null);
+	long? MaxFileBytes = null,
+	string? RepositorySourceUrl = null);
 
 public sealed record ExportProjectCommandRequest(
 	string ProjectPath,
@@ -49,4 +52,5 @@ public sealed record ExportProjectCommandRequest(
 	string OutputPath,
 	bool Force,
 	bool DryRun,
-	TerminalOutputOptions Output);
+	TerminalOutputOptions Output,
+	string? RepositorySourceUrl = null);

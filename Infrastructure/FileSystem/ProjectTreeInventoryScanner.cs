@@ -481,22 +481,54 @@ internal static class ProjectTreeInventoryScanner
 	private static GitControlPaths FindGitControlPaths(IReadOnlyList<FileSystemTreeEntry> entries)
 	{
 		string? gitIgnorePath = null;
+		string? gitIgnoreAliasPath = null;
 		string? gitMetadataPath = null;
+		string? gitMetadataAliasPath = null;
 		foreach (var entry in entries)
 		{
-			if (!entry.IsDirectory && PathComparer.Default.Equals(entry.Name, ".gitignore"))
-				gitIgnorePath = entry.FullPath;
-			else if (PathComparer.Default.Equals(entry.Name, ".git") &&
-			         GitRepositoryBoundaryProbe.ExistsAt(Path.GetDirectoryName(entry.FullPath)!))
+			var parentPath = Path.GetDirectoryName(entry.FullPath)!;
+			if (!entry.IsDirectory &&
+			    ProjectTreePathIdentity.CanonicalComparer.Equals(entry.Name, ".gitignore"))
 			{
-				gitMetadataPath = Path.Combine(Path.GetDirectoryName(entry.FullPath)!, ".git");
+				gitIgnorePath = entry.FullPath;
+			}
+			else if (!entry.IsDirectory &&
+			         gitIgnorePath is null &&
+			         gitIgnoreAliasPath is null &&
+			         OperatingSystem.IsWindows() &&
+			         entry.Name.Equals(".gitignore", StringComparison.OrdinalIgnoreCase) &&
+			         FileSystemEntryEnumerator.IsWindowsCompatibleControlAlias(
+				         entry.Name,
+				         ".gitignore",
+				         File.Exists(Path.Combine(parentPath, ".gitignore"))))
+			{
+				gitIgnoreAliasPath = entry.FullPath;
+			}
+
+			if (ProjectTreePathIdentity.CanonicalComparer.Equals(entry.Name, ".git") &&
+			    GitRepositoryBoundaryProbe.ExistsAt(parentPath))
+			{
+				gitMetadataPath = Path.Combine(parentPath, ".git");
+			}
+			else if (gitMetadataPath is null &&
+			         gitMetadataAliasPath is null &&
+			         OperatingSystem.IsWindows() &&
+			         entry.Name.Equals(".git", StringComparison.OrdinalIgnoreCase) &&
+			         FileSystemEntryEnumerator.IsWindowsCompatibleControlAlias(
+				         entry.Name,
+				         ".git",
+				         GitRepositoryBoundaryProbe.ExistsAt(parentPath)))
+			{
+				gitMetadataAliasPath = Path.Combine(parentPath, ".git");
 			}
 
 			if (gitIgnorePath is not null && gitMetadataPath is not null)
 				break;
 		}
 
-		return new GitControlPaths(gitIgnorePath, gitMetadataPath);
+		return new GitControlPaths(
+			gitIgnorePath ?? gitIgnoreAliasPath,
+			gitMetadataPath ?? gitMetadataAliasPath);
 	}
 
 	private static IReadOnlyList<ScopedGitIgnoreMatcher> MergeDiscoveredGitIgnoreMatchers(
@@ -507,7 +539,8 @@ internal static class ProjectTreeInventoryScanner
 		if (matchers.Count <= 1)
 			return matchers;
 
-		var unique = new Dictionary<string, ScopedGitIgnoreMatcher>(PathComparer.Default);
+		var unique = new Dictionary<string, ScopedGitIgnoreMatcher>(
+			ProjectTreePathIdentity.CanonicalComparer);
 		foreach (var matcher in matchers)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -520,9 +553,16 @@ internal static class ProjectTreeInventoryScanner
 			static (left, right) =>
 			{
 				var depth = left.ScopeRootPath.Length.CompareTo(right.ScopeRootPath.Length);
-				return depth != 0
-					? depth
-					: PathComparer.Default.Compare(left.ScopeRootPath, right.ScopeRootPath);
+				if (depth != 0)
+					return depth;
+				var platformOrder = PathComparer.Default.Compare(
+					left.ScopeRootPath,
+					right.ScopeRootPath);
+				return platformOrder != 0
+					? platformOrder
+					: ProjectTreePathIdentity.CanonicalComparer.Compare(
+						left.ScopeRootPath,
+						right.ScopeRootPath);
 			},
 			cancellationToken);
 		return merged;
