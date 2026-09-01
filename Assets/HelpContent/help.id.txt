@@ -364,7 +364,7 @@ Tergantung pada konten proyek, opsi berikut mungkin ditampilkan:
 * File dengan awalan titik
 * File tanpa ekstensi
 
-Di dalam repositori Git, GUI menyediakan pemilih dengan lima mode Git: tanpa pemfilteran, `.gitignore`, file terlacak, file yang disiapkan di Git, atau semua perubahan saat ini. Di luar repositori, hanya tanpa pemfilteran dan `.gitignore` yang tersedia. TUI selalu menampilkan kelima nilai sebagai opsi radio, tetapi menonaktifkan baris yang memerlukan repositori jika tidak ada repositori yang tersedia; cakupan `diff:<ref>..<ref>` yang aktif muncul sebagai baris keenam. Memilih satu nilai menggantikan mode Git saat ini tanpa mengubah Smart Ignore atau pengecualian dasar. Opsi lain muncul ketika aturannya dapat mengubah pohon saat ini.
+Pemilih GUI dan baris radio sumbu Git di TUI disembunyikan sepenuhnya saat pemfilteran Git tidak berlaku: tidak ada batas repositori dan filter `.gitignore` tidak dapat mengubah pohon saat ini. Saat sumbu terlihat di luar repositori, GUI hanya menyediakan tanpa pemfilteran dan `.gitignore`, sedangkan TUI menonaktifkan baris yang memerlukan repositori. Di dalam repositori Git tersedia lima nilai biasa: tanpa pemfilteran, `.gitignore`, file terlacak, file yang disiapkan di Git, dan semua perubahan saat ini; di TUI, cakupan `diff:<ref>..<ref>` yang aktif muncul sebagai baris keenam. Memilih satu nilai menggantikan mode Git saat ini tanpa mengubah Smart Ignore atau pengecualian dasar. Opsi lain muncul ketika aturannya dapat mengubah pohon saat ini.
 
 Opsi baru diaktifkan secara default saat pertama kali muncul. Opsi yang diketahui tetap mempertahankan pilihan pengguna meskipun opsi tersebut hilang untuk sementara dari daftar.
 
