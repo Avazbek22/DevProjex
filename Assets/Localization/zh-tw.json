@@ -129,7 +129,7 @@
   "Help.Help.CopyAll": "全部複製",
   "Help.Help.CloseSearch": "關閉搜尋",
   "Help.About.Title": "關於",
-  "Help.About.Body": "DevProjex是一款跨平台開源工具，可快速準備專案上下文：分析結構、靈活選取檔案、設定排除規則，以及預覽、複製和匯出專案樹或內容。GUI、TUI和CLI皆可處理本機資料夾和Git儲存庫，為AI助理、程式碼審查、學習和文件編寫產生乾淨的上下文。\n\n所有處理均在本機完成，開啟的專案始終保持唯讀：DevProjex不會修改原始檔案、不會將內容上傳至外部服務，也不會收集遙測資料。\n\n原始碼開放供研究和修改；歡迎在專案開發過程中提出架構建議和改進（PR）。\n\n技術堆疊：.NET 10 · Avalonia UI\n開發者：Avazbek Olimov (Avazbek22)\n著作權所有 © 2025–{0} Avazbek Olimov",
+  "Help.About.Body": "DevProjex會將選取的專案檔案彙整成一份文件——可直接作為AI助理、程式碼審查或文件編寫的上下文。開啟資料夾或Git儲存庫，勾選所需內容，然後複製或匯出專案樹和檔案內容：權杖估算會提前顯示大小，智慧篩選器會剔除相依項目和建置產物，機密資訊可進行遮罩處理。除主視窗外，還提供終端機介面（TUI）、指令碼命令（CLI）以及供AI代理程式使用的MCP伺服器——僅支援唯讀存取，且機密遮罩永遠開啟。\n\n所有處理均在本機完成，開啟的專案始終保持唯讀：DevProjex不會修改原始檔案、不會將內容上傳至外部服務，也不會收集遙測資料。\n\n原始碼完全開放——歡迎提出建議和改進。\n\n技術堆疊：.NET 10 · Avalonia UI\n開發者：Avazbek Olimov (Avazbek22)\n著作權所有 © 2025–{0} Avazbek Olimov",
   "Help.About.OpenLink": "開啟GitHub儲存庫",
   "Help.About.Support": "支持（助推）",
   "Dialog.SelectRoot": "選擇項目根資料夾",

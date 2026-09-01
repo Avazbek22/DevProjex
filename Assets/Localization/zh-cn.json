@@ -129,7 +129,7 @@
   "Help.Help.CopyAll": "全部复制",
   "Help.Help.CloseSearch": "关闭搜索",
   "Help.About.Title": "关于",
-  "Help.About.Body": "DevProjex是一款跨平台开源工具，用于快速准备项目上下文：分析结构、灵活选择文件、配置排除规则，以及预览、复制和导出项目树或内容。GUI、TUI和CLI均可处理本地文件夹和Git存储库，为AI助手、代码审查、学习和文档编写生成干净的上下文。\n\n所有处理均在本地完成，打开的项目始终保持只读：DevProjex不会修改源文件，不会将内容上传到外部服务，也不会收集遥测数据。\n\n源代码开放供研究和修改；欢迎在项目开发过程中提出架构建议和改进（PR）。\n\n技术栈：.NET 10 · Avalonia UI\n开发者：Avazbek Olimov (Avazbek22)\n版权所有 © 2025–{0} Avazbek Olimov",
+  "Help.About.Body": "DevProjex将选中的项目文件汇集成一份文档——可直接用于AI助手、代码审查或文档编写的上下文。打开文件夹或Git存储库，勾选所需内容，然后复制或导出项目树和文件内容：令牌估算会提前显示大小，智能过滤器会剔除依赖项和构建产物，机密信息可以进行掩码处理。除主窗口外，还提供终端界面（TUI）、脚本命令（CLI）以及面向AI代理的MCP服务器——仅支持只读访问，且机密掩码始终开启。\n\n所有处理均在本地完成，打开的项目始终保持只读：DevProjex不会修改源文件，不会将内容上传到外部服务，也不会收集遥测数据。\n\n源代码完全开放——欢迎提出建议和改进。\n\n技术栈：.NET 10 · Avalonia UI\n开发者：Avazbek Olimov (Avazbek22)\n版权所有 © 2025–{0} Avazbek Olimov",
   "Help.About.OpenLink": "打开GitHub存储库",
   "Help.About.Support": "支持（助推）",
   "Dialog.SelectRoot": "选择项目根文件夹",
