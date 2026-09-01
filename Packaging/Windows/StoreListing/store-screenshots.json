@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "captureWidth": 2048,
   "captureHeight": 1280,
   "windowWidth": 1740,
@@ -11,5 +11,27 @@
     { "index": 3, "name": "Tree_Preview", "directory": "3_Tree_Preview" },
     { "index": 4, "name": "Filter_Preview", "directory": "4_Filter_Preview" },
     { "index": 5, "name": "Tree_Preview_Settings", "directory": "5_Tree_Preview_Settings" }
-  ]
+  ],
+  "tui": {
+    "outputWidth": 2048,
+    "outputHeight": 1280,
+    "windowWidth": 2048,
+    "windowHeight": 1103,
+    "initialColumns": 188,
+    "initialRows": 50,
+    "chromeLeft": 12,
+    "chromeTop": 51,
+    "chromeRight": 12,
+    "chromeBottom": 12,
+    "startupSettleMilliseconds": 5000,
+    "inputSettleMilliseconds": 800,
+    "commandSettleMilliseconds": 3800,
+    "scenes": [
+      { "index": 6, "name": "Terminal_Workspace", "directory": "6_Terminal_Workspace", "state": "workspace" },
+      { "index": 7, "name": "Terminal_Command_Hints", "directory": "7_Terminal_Command_Hints", "state": "command-schema" },
+      { "index": 8, "name": "Terminal_Action_Palette", "directory": "8_Terminal_Action_Palette", "state": "action-palette" },
+      { "index": 9, "name": "Terminal_Markdown", "directory": "9_Terminal_Markdown", "state": "markdown" },
+      { "index": 10, "name": "Terminal_JSON", "directory": "10_Terminal_JSON", "state": "json" }
+    ]
+  }
 }

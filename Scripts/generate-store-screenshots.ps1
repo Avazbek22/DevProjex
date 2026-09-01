@@ -84,7 +84,7 @@ function Publish-StoreCaptureBinary([string]$RepositoryRoot, [string]$Destinatio
         /p:EnableProjectLoadTiming=false `
         /p:DebugType=None `
         /p:DebugSymbols=false `
-        -o $Destination
+        -o $Destination | Out-Host
     if ($LASTEXITCODE -ne 0) {
         throw "DevProjex win-x64 publish failed with exit code $LASTEXITCODE."
     }

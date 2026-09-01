@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+using System.Security.Cryptography;
 using DevProjex.Tests.Shared.StoreListing;
 
 namespace DevProjex.Tests.Integration;
@@ -29,6 +31,125 @@ public sealed class StoreListingImportFolderIntegrationTests
         Assert.Single(csvFiles);
         Assert.True(screenshotFiles.Length >= localeColumns.Length, "The import folder should contain at least one screenshot asset per locale.");
         Assert.Single(logoFiles);
+    }
+
+    [Fact]
+    public void ImportFolder_ContainsLocalizedGuiAndTuiMedia()
+    {
+        var repositoryRoot = RepoRoot.Value;
+        var screenshotRoot = Path.Combine(StoreListingPaths.GetImportFolder(repositoryRoot), "Screenshots");
+        var languageCodes = Directory
+            .EnumerateFiles(Path.Combine(repositoryRoot, "Assets", "Localization"), "*.json")
+            .Select(Path.GetFileNameWithoutExtension)
+            .Select(static code => code!.ToUpperInvariant())
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        string[] guiDirectories =
+        [
+            "1_Main",
+            "2_Loaded_Project",
+            "3_Tree_Preview",
+            "4_Filter_Preview",
+            "5_Tree_Preview_Settings"
+        ];
+        foreach (var directory in guiDirectories)
+        {
+            AssertLocalizedScreenshotSet(screenshotRoot, directory, languageCodes, requireUniqueImages: false);
+        }
+
+        string[] tuiDirectories =
+        [
+            "6_Terminal_Workspace",
+            "7_Terminal_Command_Hints",
+            "8_Terminal_Action_Palette",
+            "9_Terminal_Markdown",
+            "10_Terminal_JSON"
+        ];
+        foreach (var directory in tuiDirectories)
+        {
+            AssertLocalizedScreenshotSet(screenshotRoot, directory, languageCodes, requireUniqueImages: true);
+        }
+
+        var document = StoreListingCsvDocument.Load(StoreListingPaths.GetImportCsvPath(repositoryRoot));
+        var localeColumns = StoreListingPaths.GetLocaleColumns(document.Headers);
+        for (var index = 0; index < tuiDirectories.Length; index++)
+        {
+            var row = document.RowsByField[$"DesktopScreenshot{index + 6}"];
+            foreach (var locale in localeColumns)
+            {
+                var languageCode = ResolveAppLanguageCode(locale, languageCodes);
+                var expectedPath = $"ImportFolder/Screenshots/{tuiDirectories[index]}/{languageCode}.png";
+                Assert.Equal(expectedPath, row.GetValue(locale));
+            }
+        }
+    }
+
+    private static void AssertLocalizedScreenshotSet(
+        string screenshotRoot,
+        string directory,
+        IReadOnlyCollection<string> expectedLanguageCodes,
+        bool requireUniqueImages)
+    {
+        var imagePaths = Directory
+            .EnumerateFiles(Path.Combine(screenshotRoot, directory), "*.png")
+            .ToArray();
+        var actualCodes = imagePaths
+            .Select(static imagePath => Path.GetFileNameWithoutExtension(imagePath)!)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(expectedLanguageCodes, actualCodes);
+        Assert.All(imagePaths, imagePath => AssertPngContract(
+            imagePath,
+            expectedWidth: 2048,
+            expectedHeight: 1280,
+            requireOpaqueRgb: requireUniqueImages));
+        if (!requireUniqueImages)
+        {
+            return;
+        }
+
+        Assert.Equal(
+            imagePaths.Length,
+            imagePaths
+                .Select(static imagePath => File.ReadAllBytes(imagePath))
+                .Select(static bytes => SHA256.HashData(bytes))
+                .Select(static hash => Convert.ToHexString(hash))
+                .Distinct(StringComparer.Ordinal)
+                .Count());
+    }
+
+    private static string ResolveAppLanguageCode(string storeLocale, IReadOnlyCollection<string> supportedCodes)
+    {
+        var normalized = storeLocale.Replace('_', '-').ToUpperInvariant();
+        if (supportedCodes.Contains(normalized))
+        {
+            return normalized;
+        }
+
+        var primary = normalized.Split('-')[0];
+        Assert.Contains(primary, supportedCodes);
+        return primary;
+    }
+
+    private static void AssertPngContract(
+        string path,
+        int expectedWidth,
+        int expectedHeight,
+        bool requireOpaqueRgb)
+    {
+        Span<byte> header = stackalloc byte[26];
+        using var stream = File.OpenRead(path);
+        stream.ReadExactly(header);
+
+        Assert.Equal(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }, header[..8].ToArray());
+        Assert.Equal(expectedWidth, BinaryPrimitives.ReadInt32BigEndian(header[16..20]));
+        Assert.Equal(expectedHeight, BinaryPrimitives.ReadInt32BigEndian(header[20..24]));
+        if (requireOpaqueRgb)
+        {
+            Assert.Equal(2, header[25]);
+        }
     }
 
     [Fact]
