@@ -6,7 +6,7 @@ internal static class StoreListingPaths
     [
         "Field",
         "ID",
-        "Type (Тип)",
+        "Type",
         "default"
     ];
 

@@ -60,7 +60,14 @@ function Get-RequiredLocales() {
 }
 
 function Get-MetadataColumns() {
-    return @("Field", "ID", "Type (Тип)", "default")
+    return @("Field", "ID", "Type", "default")
+}
+
+function ConvertTo-CanonicalHeader([string[]]$headers) {
+    # Partner Center localizes the Type header in exports as "Type (<portal language>)".
+    return @($headers | ForEach-Object {
+        if ($_ -match '^Type \(.+\)$') { "Type" } else { $_ }
+    })
 }
 
 function Get-LocaleColumns([string[]]$headers) {
@@ -183,6 +190,8 @@ function Validate-HeaderAndSchema(
 ) {
     $importHeaders = @(Get-CsvHeaderColumns -path $importCsvPath)
     $templateHeaders = @(Get-CsvHeaderColumns -path $templateCsvPath)
+    $canonicalImportHeaders = @(ConvertTo-CanonicalHeader $importHeaders)
+    $canonicalTemplateHeaders = @(ConvertTo-CanonicalHeader $templateHeaders)
     $separator = [string][char]31
 
     foreach ($header in $importHeaders) {
@@ -192,7 +201,7 @@ function Validate-HeaderAndSchema(
     }
 
     $duplicateHeaders = @(
-        $importHeaders |
+        $canonicalImportHeaders |
             Group-Object |
             Where-Object { $_.Count -gt 1 } |
             Select-Object -ExpandProperty Name
@@ -205,9 +214,9 @@ function Validate-HeaderAndSchema(
     # Microsoft explicitly allows new Store listings to be created by appending locale
     # columns to an exported CSV. The exported header must therefore remain an exact
     # prefix, while additional locales are allowed only after every template column.
-    $preservesTemplatePrefix = $importHeaders.Count -ge $templateHeaders.Count -and
-        (@($importHeaders[0..($templateHeaders.Count - 1)] | ForEach-Object { $_ }) -join $separator) -ceq
-        (@($templateHeaders | ForEach-Object { $_ }) -join $separator)
+    $preservesTemplatePrefix = $canonicalImportHeaders.Count -ge $canonicalTemplateHeaders.Count -and
+        (@($canonicalImportHeaders[0..($canonicalTemplateHeaders.Count - 1)] | ForEach-Object { $_ }) -join $separator) -ceq
+        (@($canonicalTemplateHeaders | ForEach-Object { $_ }) -join $separator)
     if (-not $preservesTemplatePrefix) {
         Add-ValidationError $errors "SLP004" "Import CSV does not preserve the latest Partner Center export header prefix."
     }

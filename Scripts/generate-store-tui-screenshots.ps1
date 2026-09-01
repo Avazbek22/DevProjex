@@ -22,8 +22,9 @@ function Get-StoreLocaleColumns([object[]]$Rows) {
         throw "Store listing CSV is empty."
     }
 
-    $metadataColumns = @("Field", "ID", "Type (Тип)", "default")
-    return @($Rows[0].PSObject.Properties.Name | Where-Object { $metadataColumns -notcontains $_ })
+    $metadataColumns = @("Field", "ID", "Type", "default")
+    $localizedTypeHeader = '^Type \(.+\)$'
+    return @($Rows[0].PSObject.Properties.Name | Where-Object { $metadataColumns -notcontains $_ -and $_ -notmatch $localizedTypeHeader })
 }
 
 function Get-LocalizationCodes([string]$RepositoryRoot) {
@@ -729,12 +730,15 @@ function Update-TuiListingCsv(
         }
     }
 
-    $columns = @($rows[0].PSObject.Properties.Name)
+    $sourceColumns = @($rows[0].PSObject.Properties.Name)
+    $columns = @($sourceColumns | ForEach-Object {
+        if ($_ -match '^Type \(.+\)$') { "Type" } else { $_ }
+    })
     $builder = New-Object System.Text.StringBuilder
     [void]$builder.Append((ConvertTo-StoreCsvRow $columns))
     [void]$builder.Append("`r`n")
     foreach ($row in $rows) {
-        $values = @($columns | ForEach-Object { [string]$row.$_ })
+        $values = @($sourceColumns | ForEach-Object { [string]$row.$_ })
         [void]$builder.Append((ConvertTo-StoreCsvRow $values))
         [void]$builder.Append("`r`n")
     }
