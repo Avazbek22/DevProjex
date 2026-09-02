@@ -183,6 +183,14 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 		var failed = outputs.FirstOrDefault(static output => !output.Succeeded);
 		if (failed is not null)
 			return RepositoryScopeResult.Unavailable(failed.FailureReason);
+		var topLevelOutput = await RunAsync(
+			repositoryRoot,
+			["rev-parse", "--show-toplevel"],
+			cancellationToken).ConfigureAwait(false);
+		if (!topLevelOutput.Succeeded)
+			return RepositoryScopeResult.Unavailable(topLevelOutput.FailureReason);
+		if (!MatchesExpectedRepositoryRoot(topLevelOutput.Values, repositoryRoot))
+			return RepositoryScopeResult.Unavailable("The Git repository boundary changed during scope resolution.");
 
 		var included = new HashSet<string>(StringComparer.Ordinal);
 		var deleted = new HashSet<string>(StringComparer.Ordinal);
@@ -286,6 +294,29 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 			.ThenBy(static path => path, PathComparer.Default)
 			.ThenBy(static path => path, StringComparer.Ordinal)
 			.ToArray();
+	}
+
+	private static bool MatchesExpectedRepositoryRoot(
+		IReadOnlyList<string> topLevelValues,
+		string expectedRepositoryRoot)
+	{
+		if (topLevelValues.Count != 1)
+			return false;
+
+		var topLevel = topLevelValues[0].TrimEnd('\r', '\n');
+		if (PathUtility.IsMissingPath(topLevel))
+			return false;
+
+		try
+		{
+			return PathComparer.Default.Equals(
+				PathUtility.Normalize(topLevel),
+				expectedRepositoryRoot);
+		}
+		catch (Exception exception) when (exception is ArgumentException or IOException or NotSupportedException)
+		{
+			return false;
+		}
 	}
 
 	private static void ReconcileWorkingTreePaths(

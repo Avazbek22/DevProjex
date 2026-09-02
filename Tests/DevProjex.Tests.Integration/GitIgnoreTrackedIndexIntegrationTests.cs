@@ -760,6 +760,45 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 		Assert.Equal(0, result.DeletedPathCount);
 	}
 
+	[Fact]
+	public async Task StagedScopeFailsClosedWhenDiscoveredNestedRepositoryBoundaryDisappears()
+	{
+		EnsureGitAvailable();
+		using var temp = new TemporaryDirectory();
+		var outerRepository = temp.CreateDirectory("outer");
+		temp.CreateFile("outer/README.md", "outer\n");
+		InitializeCommittedRepository(outerRepository, "README.md");
+		var nestedRepository = temp.CreateDirectory("outer/nested");
+		var outerStagedPath = temp.CreateFile("outer/nested/App.cs", "nested\n");
+		var fabricatedNestedPath = temp.CreateFile("outer/nested/nested/App.cs", "decoy\n");
+		InitializeCommittedRepository(nestedRepository, "App.cs", "nested/App.cs");
+		Assert.True(GitTrackedPathIndexCache.TryFindNearestRepositoryBoundary(
+			nestedRepository,
+			TestContext.Current.CancellationToken,
+			out var discoveredNestedRepository));
+		Assert.Equal(
+			PathUtility.Normalize(nestedRepository),
+			discoveredNestedRepository,
+			PathComparer.Default);
+
+		DeleteRepositoryMetadata(nestedRepository);
+		RunGit(outerRepository, "add", "--", "nested/App.cs");
+
+		var result = await new GitScopePathProvider().ResolveAsync(
+			outerRepository,
+			GitFilteringMode.Staged,
+			diffRange: null,
+			[discoveredNestedRepository],
+			TestContext.Current.CancellationToken);
+
+		Assert.False(result.IsAvailable);
+		Assert.Equal("The Git repository boundary changed during scope resolution.", result.FailureReason);
+		Assert.Empty(result.IncludedPaths);
+		Assert.DoesNotContain(PathUtility.Normalize(outerStagedPath), result.IncludedPaths);
+		Assert.DoesNotContain(PathUtility.Normalize(fabricatedNestedPath), result.IncludedPaths);
+		Assert.Equal(0, result.DeletedPathCount);
+	}
+
 	[Theory]
 	[InlineData(GitFilteringMode.Staged)]
 	[InlineData(GitFilteringMode.Changes)]
@@ -2154,6 +2193,22 @@ public sealed class GitIgnoreTrackedIndexIntegrationTests
 
 	private static HashSet<string> ExtensionSet(params string[] values) =>
 		new(values, StringComparer.OrdinalIgnoreCase);
+
+	private static void DeleteRepositoryMetadata(string repositoryRoot)
+	{
+		var gitMetadataPath = Path.Combine(repositoryRoot, ".git");
+		if (OperatingSystem.IsWindows())
+		{
+			foreach (var filePath in Directory.EnumerateFiles(gitMetadataPath, "*", SearchOption.AllDirectories))
+			{
+				var attributes = File.GetAttributes(filePath);
+				if ((attributes & FileAttributes.ReadOnly) != 0)
+					File.SetAttributes(filePath, attributes & ~FileAttributes.ReadOnly);
+			}
+		}
+
+		Directory.Delete(gitMetadataPath, recursive: true);
+	}
 
 	private static List<string> FlattenRelativePaths(string rootPath, FileSystemNode root)
 	{
