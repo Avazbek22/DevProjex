@@ -1,3 +1,4 @@
+using System.Text.Json;
 using DevProjex.Tests.Shared.StoreListing;
 
 namespace DevProjex.Tests.Integration;
@@ -18,6 +19,115 @@ public sealed class StoreListingValidationScriptIntegrationTests
         Assert.True(
             result.ExitCode == 0,
             $"validate-store-listing.ps1 failed.{Environment.NewLine}STDOUT:{Environment.NewLine}{result.StandardOutput}{Environment.NewLine}STDERR:{Environment.NewLine}{result.StandardError}");
+    }
+
+    [Fact]
+    public void GenerateStoreTuiScreenshots_PlanOnly_ResolvesTargetedLanguages()
+    {
+        var result = RunPowerShellScript(
+            Path.Combine(RepoRoot.Value, "Scripts", "generate-store-tui-screenshots.ps1"),
+            ["-PlanOnly", "-Languages", "ru,en"]);
+
+        Assert.True(
+            result.ExitCode == 0,
+            $"TUI capture planning failed.{Environment.NewLine}STDOUT:{Environment.NewLine}{result.StandardOutput}{Environment.NewLine}STDERR:{Environment.NewLine}{result.StandardError}");
+        Assert.Contains("TUI captures: en, ru", result.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains(
+            "TUI scenes: Terminal_Workspace, Terminal_Command_Hints, Terminal_Action_Palette, Terminal_Markdown, Terminal_JSON",
+            result.StandardOutput,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GenerateStoreTuiScreenshots_PlanOnly_RejectsUnknownLanguage()
+    {
+        var result = RunPowerShellScript(
+            Path.Combine(RepoRoot.Value, "Scripts", "generate-store-tui-screenshots.ps1"),
+            ["-PlanOnly", "-Languages", "xx"]);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Contains(
+            "TUI capture language 'xx' has no application localization catalog.",
+            result.StandardError + result.StandardOutput,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StoreTuiScreenshotManifest_DefinesFullBleedFiveSceneCapture()
+    {
+        var captureScript = File.ReadAllText(Path.Combine(
+            RepoRoot.Value,
+            "Scripts",
+            "generate-store-tui-screenshots.ps1"));
+        var saveFrameStart = captureScript.IndexOf("function Save-TerminalFrame", StringComparison.Ordinal);
+        var edgeCheckStart = captureScript.IndexOf("function Assert-TerminalFrameEdges", StringComparison.Ordinal);
+        Assert.True(saveFrameStart >= 0 && edgeCheckStart > saveFrameStart);
+        var saveFrameBlock = captureScript[saveFrameStart..edgeCheckStart];
+
+        Assert.Contains("Assert-TerminalFrameEdges $frame", saveFrameBlock, StringComparison.Ordinal);
+        Assert.Contains("[System.Drawing.Imaging.PixelFormat]::Format24bppRgb", saveFrameBlock, StringComparison.Ordinal);
+        Assert.Contains("[System.Drawing.GraphicsUnit]::Pixel", saveFrameBlock, StringComparison.Ordinal);
+        Assert.Contains("[int]$TuiManifest.outputWidth", saveFrameBlock, StringComparison.Ordinal);
+        Assert.Contains("[int]$TuiManifest.outputHeight", saveFrameBlock, StringComparison.Ordinal);
+        Assert.Contains("Name = \"top\"", captureScript, StringComparison.Ordinal);
+        Assert.Contains("Name = \"bottom\"", captureScript, StringComparison.Ordinal);
+        Assert.Contains("Name = \"left\"", captureScript, StringComparison.Ordinal);
+        Assert.Contains("Name = \"right\"", captureScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("DrawImageUnscaled", saveFrameBlock, StringComparison.Ordinal);
+        Assert.DoesNotContain(".Clear(", saveFrameBlock, StringComparison.Ordinal);
+
+        using var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(
+            RepoRoot.Value,
+            "Packaging",
+            "Windows",
+            "StoreListing",
+            "store-screenshots.json")));
+        var tui = document.RootElement.GetProperty("tui");
+
+        Assert.Equal(2048, tui.GetProperty("outputWidth").GetInt32());
+        Assert.Equal(1280, tui.GetProperty("outputHeight").GetInt32());
+        Assert.Equal(2048, tui.GetProperty("windowWidth").GetInt32());
+        Assert.True(tui.GetProperty("chromeLeft").GetInt32() > 0);
+        Assert.True(tui.GetProperty("chromeTop").GetInt32() > 0);
+        Assert.True(tui.GetProperty("chromeRight").GetInt32() > 0);
+        Assert.True(tui.GetProperty("chromeBottom").GetInt32() > 0);
+        Assert.False(tui.TryGetProperty("languageCode", out _));
+
+        var scenes = tui.GetProperty("scenes").EnumerateArray().ToArray();
+        Assert.Equal([6, 7, 8, 9, 10], scenes.Select(scene => scene.GetProperty("index").GetInt32()));
+        Assert.Equal(
+            ["workspace", "command-schema", "action-palette", "markdown", "json"],
+            scenes.Select(scene => scene.GetProperty("state").GetString()));
+    }
+
+    [Fact]
+    public void StoreTuiCapture_UsesIsolatedOpaqueWindowAndDeterministicShortcuts()
+    {
+        var captureScript = File.ReadAllText(Path.Combine(
+            RepoRoot.Value,
+            "Scripts",
+            "generate-store-tui-screenshots.ps1"));
+
+        Assert.Contains("\"-w\", \"new\"", captureScript, StringComparison.Ordinal);
+        Assert.Contains("\"--colorScheme\", \"Campbell\"", captureScript, StringComparison.Ordinal);
+        Assert.Contains("\"CASCADIA_HOSTING_WINDOW_CLASS\"", captureScript, StringComparison.Ordinal);
+        Assert.Contains("Send-CaptureKeys $Window \"^0\"", captureScript, StringComparison.Ordinal);
+        Assert.Contains("Reset-TerminalAppearance $window", captureScript, StringComparison.Ordinal);
+        Assert.Contains("mouse_event(", captureScript, StringComparison.Ordinal);
+        Assert.Contains("Send-ControlKey $Window 0x50", captureScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("Send-CaptureKeys $Window \"^p\"", captureScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("conhost.exe", captureScript, StringComparison.OrdinalIgnoreCase);
+
+        var geometryIndex = captureScript.IndexOf(
+            "Set-TerminalGeometry $window $TuiManifest",
+            StringComparison.Ordinal);
+        var appearanceIndex = captureScript.IndexOf(
+            "Reset-TerminalAppearance $window",
+            StringComparison.Ordinal);
+        var launchIndex = captureScript.IndexOf(
+            "New-Item -ItemType File -Path (Join-Path $SessionRoot \"launch\")",
+            StringComparison.Ordinal);
+        Assert.True(geometryIndex >= 0 && geometryIndex < appearanceIndex && appearanceIndex < launchIndex);
     }
 
     [Fact]

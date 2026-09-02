@@ -123,7 +123,7 @@ Works with any language, repository, or project structure.
 | GUI-managed Git workflow (clone, branch switch, cache updates) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Run with no install (npx / uvx / browser) | ❌ | ✅ | ✅ | ❌ | ❌ | ✅ |
 
-<sub>Based on publicly documented features, last verified August 2026.</sub>
+<sub>Based on publicly documented features, last verified September 2026.</sub>
 
 ---
 
@@ -177,7 +177,7 @@ See [Docs/CommandLine.md](Docs/CommandLine.md) for the full command reference, a
 
 ## MCP Server 🤖
 
-DevProjex ships a built-in [Model Context Protocol](https://modelcontextprotocol.io) server (on the official [C# MCP SDK](https://github.com/modelcontextprotocol/csharp-sdk)), so AI agents — Claude Code, Cursor, or any MCP client — explore your projects through the same engine as the GUI, TUI, and CLI:
+DevProjex ships a built-in **secure [Model Context Protocol](https://modelcontextprotocol.io) server** (on the official [C# MCP SDK](https://github.com/modelcontextprotocol/csharp-sdk)) that turns any local folder or Git repository into safe, token-efficient codebase context for AI agents — **Claude Code, Claude Desktop, Cursor, Windsurf, VS Code, or any MCP client** — through the same engine as the GUI, TUI, and CLI:
 
 ```bash
 devprojex mcp --root /path/to/project
@@ -199,6 +199,27 @@ The server enforces hard security boundaries on top of DevProjex's read-only des
 The missing off switch is a control guarantee, not a detection guarantee. DevProjex
 detects common secret formats, but detection is heuristic; review each pack before
 publishing it outside your environment.
+
+**Built for agent efficiency.** Trees default to compact markdown, content declares the root once and uses relative paths — no tokens wasted on scaffolding. A `max_tokens` budget packs the largest files that fit and reports what was included, `top_files` shows where the tokens go, `git_scope` narrows any call to staged files, current changes, or a ref-to-ref diff, and `profile` switches between built-in defaults, your saved Desktop selections, or a portable profile file.
+
+Want to audit what the agent gets? Open the same project in the GUI — same engine, same filters, same redaction.
+
+### How DevProjex compares as an MCP server
+
+| Capability | DevProjex | Repomix | Repo Prompt | code2prompt | gitingest |
+|---|---|---|---|---|---|
+| Cross-platform: Windows + Linux + macOS | ✅ | ✅ | ❌ macOS only | ✅ | ✅ |
+| MCP server ships built into the app | ✅ | ✅ | ✅ | ⚠️ separate server | ❌ community only |
+| Secret masking that cannot be disabled | ✅ | ⚠️ optional, drops whole files | ❌ | ❌ | ❌ |
+| Agent can only narrow the human's selection | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Root jail with symlink-escape rejection | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Prompt-injection hardening (untrusted-data wrapping) | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Git-scoped packing: tracked, staged, changes, ref diff | ✅ | ❌ | ⚠️ diffs in context | ❌ | ❌ |
+| Token budget for packing | ✅ | ❌ | ✅ | ❌ | ❌ |
+| Oversized results stored, read back in ranges | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Remote Git repositories by URL | ✅ opt-in | ✅ | ❌ | ❌ | ✅ |
+
+<sub>Based on publicly documented features, last verified September 2026.</sub>
 
 See [Docs/McpServer.md](Docs/McpServer.md) for client setup, the full tool reference, and the security model.
 

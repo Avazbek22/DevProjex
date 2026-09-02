@@ -123,15 +123,28 @@ internal static class StoreListingImportValidator
         // Partner Center allows a new listing to be created by appending its locale code
         // to an exported CSV. Preserve the entire template as an exact prefix so Microsoft
         // schema changes still fail loudly without rejecting legitimate new languages.
-        var expectedHeaders = templateDocument?.Headers
-                              ?? ["Field", "ID", "Type (Тип)", "default", .. StoreListingPaths.LocaleColumns];
+        var expectedHeaders = (templateDocument?.Headers
+                               ?? ["Field", "ID", "Type", "default", .. StoreListingPaths.LocaleColumns])
+            .Select(NormalizeMetadataHeader)
+            .ToArray();
+        var actualHeaders = importDocument.Headers
+            .Take(expectedHeaders.Length)
+            .Select(NormalizeMetadataHeader)
+            .ToArray();
 
-        if (importDocument.Headers.Count < expectedHeaders.Count ||
-            !importDocument.Headers.Take(expectedHeaders.Count).SequenceEqual(expectedHeaders, StringComparer.Ordinal))
+        if (importDocument.Headers.Count < expectedHeaders.Length ||
+            !actualHeaders.SequenceEqual(expectedHeaders, StringComparer.Ordinal))
         {
             report.AddError("SLI006", "Import CSV does not preserve the Partner Center export header prefix.");
         }
     }
+
+    // Partner Center localizes the Type header in exports as "Type (<portal language>)".
+    private static string NormalizeMetadataHeader(string header) =>
+        header.StartsWith("Type (", StringComparison.Ordinal) &&
+        header.EndsWith(")", StringComparison.Ordinal)
+            ? "Type"
+            : header;
 
     private static void ValidateHeaderShape(StoreListingCsvDocument importDocument, StoreListingValidationReport report)
     {

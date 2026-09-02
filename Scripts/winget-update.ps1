@@ -484,7 +484,7 @@ Invoke-ExternalCommand -filePath "winget" -arguments @(
 
 $runInstallTest = Read-Optional -prompt "Run local install test (winget install --manifest)? y/N" -defaultValue "N"
 $installTestExecuted = $false
-if ($runInstallTest -match '^(y|yes|д|да)$') {
+if ($runInstallTest -match '^(y|yes)$') {
     Write-Step "Local install test"
     Invoke-ExternalCommand -filePath "winget" -arguments @(
         "install",
@@ -494,7 +494,7 @@ if ($runInstallTest -match '^(y|yes|д|да)$') {
 }
 
 $submit = Read-Optional -prompt "Submit PR to winget-pkgs now? Y/n" -defaultValue "Y"
-if ($submit -match '^(n|no|н|нет)$') {
+if ($submit -match '^(n|no)$') {
     Write-Step "Done (local only)"
     Write-Host "Manifest path: $manifestRoot"
     exit 0

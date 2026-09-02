@@ -1,0 +1,558 @@
+﻿Field,ID,Type (Type),default,en-us,en,ru,ru-ru,kk-kz,de-de,it-it,tg-cyrl-tj,uz-latn-uz,fr-fr,es-es,pt-br,pt-pt
+Description,2,Text,,"DevProjex turns any folder or Git repository into clean, AI-ready context — project structure, file contents, or both. Before copying or exporting, you can check the result in a live preview.
+
+Smart Ignore removes dependencies, caches, and build files automatically. It follows your project's .gitignore rules, or you can choose to include only Git-tracked files. You can turn folders, file types, and single files on or off — each one works independently.
+
+Choose how you want to work: GUI for a visual view, TUI for the terminal, or CLI for scripts and CI. Export your result as ASCII, Markdown, JSON, or XML — or save the selected files to a folder or ZIP archive.
+
+Search and filters help you handle big codebases. Metrics show file count, lines, characters, and an estimated token count. Local profiles save your project settings. Built-in Git tools let you clone repos, switch branches, and update the cache.
+
+DevProjex runs locally and never changes your files — read-only mode keeps everything safe. No telemetry. No account needed. Available on Windows, Linux, and macOS. Source code is open on GitHub.","DevProjex turns any folder or Git repository into clean, AI-ready context — project structure, file contents, or both. Before copying or exporting, you can check the result in a live preview.
+
+Smart Ignore removes dependencies, caches, and build files automatically. It follows your project's .gitignore rules, or you can choose to include only Git-tracked files. You can turn folders, file types, and single files on or off — each one works independently.
+
+Choose how you want to work: GUI for a visual view, TUI for the terminal, or CLI for scripts and CI. Export your result as ASCII, Markdown, JSON, or XML — or save the selected files to a folder or ZIP archive.
+
+Search and filters help you handle big codebases. Metrics show file count, lines, characters, and an estimated token count. Local profiles save your project settings. Built-in Git tools let you clone repos, switch branches, and update the cache.
+
+DevProjex runs locally and never changes your files — read-only mode keeps everything safe. No telemetry. No account needed. Available on Windows, Linux, and macOS. Source code is open on GitHub.","DevProjex собирает чистый контекст проекта для работы с ИИ — из папки или Git-репозитория: структуру, содержимое файлов или всё сразу. Перед копированием или экспортом результат можно проверить в живом превью.
+
+Smart Ignore автоматически убирает зависимости, кэши и артефакты сборки. Поддерживаются правила .gitignore, а режим отслеживаемых Git-файлов исключает всё, что не входит в индекс. Корневые папки, расширения, исключения и отдельные файлы дерева выбираются независимо друг от друга.
+
+GUI подходит для наглядной работы с проектом, TUI — для терминала и клавиатуры, CLI — для скриптов и CI. Результат копируется или экспортируется в ASCII, Markdown, JSON и XML. Выбранные файлы также можно скопировать в отдельную папку или упаковать в ZIP-архив.
+
+Поиск и фильтрация помогают работать с большими кодовыми базами. Метрики показывают количество строк, символов и примерное число токенов. Локальные профили запоминают параметры проектов, а встроенные Git-инструменты поддерживают клонирование, переключение веток и обновление кэша.
+
+DevProjex работает локально и в режиме read-only: исходные файлы не изменяются, телеметрия не собирается, аккаунт не требуется. Приложение доступно на Windows, Linux и macOS. Исходный код открыт на GitHub.","DevProjex собирает чистый контекст проекта для работы с ИИ — из папки или Git-репозитория: структуру, содержимое файлов или всё сразу. Перед копированием или экспортом результат можно проверить в живом превью.
+
+Smart Ignore автоматически убирает зависимости, кэши и артефакты сборки. Поддерживаются правила .gitignore, а режим отслеживаемых Git-файлов исключает всё, что не входит в индекс. Корневые папки, расширения, исключения и отдельные файлы дерева выбираются независимо друг от друга.
+
+GUI подходит для наглядной работы с проектом, TUI — для терминала и клавиатуры, CLI — для скриптов и CI. Результат копируется или экспортируется в ASCII, Markdown, JSON и XML. Выбранные файлы также можно скопировать в отдельную папку или упаковать в ZIP-архив.
+
+Поиск и фильтрация помогают работать с большими кодовыми базами. Метрики показывают количество строк, символов и примерное число токенов. Локальные профили запоминают параметры проектов, а встроенные Git-инструменты поддерживают клонирование, переключение веток и обновление кэша.
+
+DevProjex работает локально и в режиме read-only: исходные файлы не изменяются, телеметрия не собирается, аккаунт не требуется. Приложение доступно на Windows, Linux и macOS. Исходный код открыт на GitHub.","DevProjex кез келген бума немесе Git репозиторийін ЖИ-мен жұмыс істеуге дайын таза жоба контекстіне айналдырады — жоба құрылымы, файл мазмұны немесе екеуі бірге. Көшіру не экспорттау алдында нәтижені тікелей алдын ала қарау режимінде тексеруге болады.
+
+Smart Ignore тәуелділіктерді, кэштерді және құрастыру артефактілерін автоматты түрде алып тастайды. Жобаның .gitignore ережелері қолданылады немесе тек Git бақылайтын файлдарды қосуға болады. Түбірлік бумалар, файл түрлері, ерекшеліктер және ағаштағы жеке файлдар бір-бірінен тәуелсіз таңдалады.
+
+Әр жұмыс тәсіліне өз интерфейсі бар: GUI көрнекі жұмысқа, TUI терминал мен пернетақтаға, CLI скрипттер мен CI-ге арналған. Нәтижені көшіруге немесе ASCII, Markdown, JSON және XML пішімдеріне экспорттауға болады. Таңдалған файлдарды бөлек бумаға көшіруге не ZIP мұрағатына жинауға да болады.
+
+Іздеу мен сүзгілер үлкен код базаларымен жұмысты жеңілдетеді. Метрикалар файлдар санын, жолдарды, таңбаларды және токендердің шамамен санын көрсетеді. Жергілікті профильдер жоба параметрлерін сақтайды. Кірістірілген Git құралдары репозиторийлерді клондауды, тармақтарды ауыстыруды және кэшті жаңартуды қолдайды.
+
+DevProjex жергілікті әрі тек оқу режимінде жұмыс істейді: бастапқы файлдар өзгертілмейді, телеметрия жиналмайды, тіркелгі қажет емес. Windows, Linux және macOS жүйелерінде қолжетімді. Бастапқы код GitHub-та ашық.","DevProjex verwandelt jeden Ordner oder jedes Git-Repository in sauberen, KI-fertigen Projektkontext — Projektstruktur, Dateiinhalte oder beides. Vor dem Kopieren oder Exportieren lässt sich das Ergebnis in einer Live-Vorschau prüfen.
+
+Smart Ignore entfernt Abhängigkeiten, Caches und Build-Artefakte automatisch. Die .gitignore-Regeln des Projekts werden berücksichtigt; alternativ können ausschließlich von Git verfolgte Dateien einbezogen werden. Stammordner, Dateitypen, Ausschlüsse und einzelne Dateien lassen sich unabhängig voneinander auswählen.
+
+Für jede Arbeitsweise gibt es die passende Oberfläche: GUI für den visuellen Überblick, TUI für Terminal und Tastatur, CLI für Skripte und CI. Das Ergebnis kann kopiert oder als ASCII, Markdown, JSON oder XML exportiert werden. Ausgewählte Dateien lassen sich außerdem in einen separaten Ordner kopieren oder als ZIP-Archiv speichern.
+
+Suche und Filter erleichtern die Arbeit mit großen Codebasen. Metriken zeigen Dateianzahl, Zeilen, Zeichen und eine geschätzte Tokenzahl. Lokale Profile speichern projektspezifische Einstellungen. Integrierte Git-Werkzeuge unterstützen das Klonen von Repositories, den Wechsel von Branches und die Aktualisierung des Caches.
+
+DevProjex arbeitet lokal und schreibgeschützt: Die Quelldateien werden nicht verändert, es wird keine Telemetrie erfasst und kein Konto benötigt. Verfügbar für Windows, Linux und macOS. Der Quellcode ist auf GitHub offen.","DevProjex trasforma qualsiasi cartella o repository Git in un contesto di progetto pulito e pronto per l’IA — struttura, contenuto dei file o entrambi. Prima della copia o dell’esportazione, il risultato può essere controllato in un’anteprima live.
+
+Smart Ignore rimuove automaticamente dipendenze, cache e artefatti di build. Rispetta le regole .gitignore del progetto oppure consente di includere solo i file tracciati da Git. Cartelle radice, tipi di file, esclusioni e singoli file si selezionano in modo indipendente.
+
+Ogni modalità di lavoro ha la sua interfaccia: GUI per la vista grafica, TUI per terminale e tastiera, CLI per script e CI. Il risultato può essere copiato o esportato in ASCII, Markdown, JSON o XML. I file selezionati possono anche essere copiati in una cartella separata o raccolti in un archivio ZIP.
+
+Ricerca e filtri facilitano il lavoro con codebase di grandi dimensioni. Le metriche mostrano numero di file, righe, caratteri e una stima dei token. I profili locali memorizzano le impostazioni dei progetti. Gli strumenti Git integrati consentono di clonare repository, cambiare branch e aggiornare la cache.
+
+DevProjex funziona localmente e in sola lettura: i file sorgente non vengono modificati, non viene raccolta telemetria e non serve alcun account. Disponibile per Windows, Linux e macOS. Il codice sorgente è aperto su GitHub.","DevProjex ҳар ҷузвдон ё репозитории Git-ро ба контексти тоза ва омода барои кор бо зеҳни сунъӣ табдил медиҳад — сохтори лоиҳа, мундариҷаи файлҳо ё ҳар ду. Пеш аз нусхабардорӣ ё содирот натиҷаро дар пешнамоиши зинда санҷидан мумкин аст.
+
+Smart Ignore вобастагиҳо, кешҳо ва артефактҳои сохтро худкор хориҷ мекунад. Қоидаҳои .gitignore-и лоиҳа риоя мешаванд ё метавон танҳо файлҳои аз ҷониби Git пайгиришавандаро ворид кард. Ҷузвдонҳои решавӣ, навъҳои файл, истисноҳо ва файлҳои алоҳидаи дарахт мустақилона интихоб мешаванд.
+
+Барои ҳар тарзи кор интерфейси мувофиқ мавҷуд аст: GUI барои кори аён бо лоиҳа, TUI барои терминал ва клавиатура, CLI барои скриптҳо ва CI. Натиҷаро метавон нусхабардорӣ кард ё ба ASCII, Markdown, JSON ва XML содир намуд. Файлҳои интихобшударо инчунин ба ҷузвдони алоҳида нусха бардоштан ё ба бойгонии ZIP ҷамъ кардан мумкин аст.
+
+Ҷустуҷӯ ва филтрҳо кор бо пойгоҳҳои калони кодро осон мекунанд. Метрикаҳо шумораи файлҳо, сатрҳо, аломатҳо ва шумораи тахминии токенҳоро нишон медиҳанд. Профилҳои маҳаллӣ танзимоти лоиҳаҳоро нигоҳ медоранд. Абзорҳои дарунсохти Git клон кардани репозиторийҳо, иваз кардани шохаҳо ва нав кардани кешро дастгирӣ мекунанд.
+
+DevProjex ба таври маҳаллӣ ва дар реҷаи танҳо хондан кор мекунад: файлҳои манбаъ тағйир дода намешаванд, телеметрия ҷамъ намешавад ва аккаунт лозим нест. Барои Windows, Linux ва macOS дастрас аст. Коди манбаъ дар GitHub кушода аст.","DevProjex har qanday papka yoki Git repozitoriyasini sun’iy intellekt bilan ishlash uchun toza, tayyor loyiha kontekstiga aylantiradi — loyiha tuzilmasi, fayl mazmuni yoki ikkalasi birga. Nusxalash yoki eksport qilishdan oldin natijani jonli ko‘rib chiqishda tekshirish mumkin.
+
+Smart Ignore bog‘liqliklar, keshlar va build artefaktlarini avtomatik olib tashlaydi. Loyiha .gitignore qoidalariga amal qiladi yoki faqat Git kuzatayotgan fayllarni kiritish mumkin. Ildiz papkalar, fayl turlari, istisnolar va daraxtdagi alohida fayllar bir-biridan mustaqil tanlanadi.
+
+Har bir ish usuli uchun mos interfeys bor: GUI loyihani ko‘rgazmali boshqarish, TUI terminal va klaviatura, CLI esa skriptlar va CI uchun. Natijani nusxalash yoki ASCII, Markdown, JSON va XML formatlariga eksport qilish mumkin. Tanlangan fayllarni alohida papkaga ko‘chirish yoki ZIP arxiviga joylash ham mumkin.
+
+Qidiruv va filtrlar katta kod bazalari bilan ishlashni osonlashtiradi. Metrikalar fayllar soni, satrlar, belgilar va tokenlarning taxminiy sonini ko‘rsatadi. Lokal profillar loyiha sozlamalarini saqlaydi. Ichki Git vositalari repozitoriyalarni klonlash, branch almashtirish va keshni yangilashni qo‘llab-quvvatlaydi.
+
+DevProjex lokal va faqat o‘qish rejimida ishlaydi: manba fayllar o‘zgartirilmaydi, telemetriya yig‘ilmaydi va akkaunt talab qilinmaydi. Windows, Linux va macOS uchun mavjud. Manba kod GitHub’da ochiq.","DevProjex transforme n’importe quel dossier ou dépôt Git en contexte de projet propre et prêt pour l’IA — arborescence, contenu des fichiers ou les deux. Avant la copie ou l’export, le résultat peut être vérifié dans un aperçu en direct.
+
+Smart Ignore supprime automatiquement les dépendances, les caches et les artefacts de compilation. Les règles .gitignore du projet sont respectées, avec la possibilité de ne conserver que les fichiers suivis par Git. Dossiers racines, types de fichiers, exclusions et fichiers individuels se sélectionnent indépendamment.
+
+Chaque usage dispose de son interface : GUI pour une vue visuelle, TUI pour le terminal et le clavier, CLI pour les scripts et la CI. Le résultat peut être copié ou exporté en ASCII, Markdown, JSON ou XML. Les fichiers sélectionnés peuvent aussi être copiés dans un dossier séparé ou regroupés dans une archive ZIP.
+
+La recherche et les filtres facilitent le travail sur les grandes bases de code. Les métriques indiquent le nombre de fichiers, de lignes, de caractères et une estimation des tokens. Les profils locaux mémorisent les paramètres de chaque projet. Les outils Git intégrés permettent de cloner des dépôts, changer de branche et actualiser le cache.
+
+DevProjex fonctionne localement et en lecture seule : les fichiers source ne sont pas modifiés, aucune télémétrie n’est collectée et aucun compte n’est nécessaire. Disponible sur Windows, Linux et macOS. Le code source est ouvert sur GitHub.","DevProjex convierte cualquier carpeta o repositorio Git en un contexto de proyecto limpio y listo para la IA: estructura, contenido de los archivos o ambos. Antes de copiar o exportar, el resultado se puede comprobar en una vista previa en directo.
+
+Smart Ignore elimina automáticamente dependencias, cachés y artefactos de compilación. Respeta las reglas .gitignore del proyecto o permite incluir únicamente los archivos seguidos por Git. Las carpetas raíz, los tipos de archivo, las exclusiones y los archivos individuales se seleccionan de forma independiente.
+
+Cada forma de trabajo tiene su interfaz: GUI para una vista visual, TUI para el terminal y el teclado, y CLI para scripts y CI. El resultado se puede copiar o exportar como ASCII, Markdown, JSON o XML. Los archivos seleccionados también se pueden copiar a otra carpeta o guardar en un archivo ZIP.
+
+La búsqueda y los filtros facilitan el trabajo con bases de código grandes. Las métricas muestran el número de archivos, líneas, caracteres y una estimación de tokens. Los perfiles locales guardan la configuración de cada proyecto. Las herramientas Git integradas permiten clonar repositorios, cambiar de rama y actualizar la caché.
+
+DevProjex funciona localmente y en modo de solo lectura: no modifica los archivos originales, no recopila telemetría y no requiere una cuenta. Disponible para Windows, Linux y macOS. El código fuente está abierto en GitHub.","O DevProjex transforma qualquer pasta ou repositório Git em um contexto de projeto limpo e pronto para IA — estrutura, conteúdo dos arquivos ou ambos. Antes de copiar ou exportar, você pode conferir o resultado em uma visualização ao vivo.
+
+O Smart Ignore remove automaticamente dependências, caches e artefatos de build. Ele respeita as regras .gitignore do projeto ou permite incluir somente os arquivos rastreados pelo Git. Pastas raiz, tipos de arquivo, exclusões e arquivos individuais podem ser selecionados de forma independente.
+
+Cada forma de trabalho tem sua interface: GUI para uma visão visual, TUI para terminal e teclado, e CLI para scripts e CI. O resultado pode ser copiado ou exportado em ASCII, Markdown, JSON ou XML. Os arquivos selecionados também podem ser copiados para outra pasta ou reunidos em um arquivo ZIP.
+
+Busca e filtros facilitam o trabalho com codebases grandes. As métricas mostram quantidade de arquivos, linhas, caracteres e uma estimativa de tokens. Perfis locais salvam as configurações de cada projeto. As ferramentas Git integradas permitem clonar repositórios, trocar de branch e atualizar o cache.
+
+O DevProjex funciona localmente e em modo somente leitura: os arquivos de origem não são alterados, nenhuma telemetria é coletada e não é preciso criar uma conta. Disponível para Windows, Linux e macOS. O código-fonte é aberto no GitHub.","O DevProjex transforma qualquer pasta ou repositório Git num contexto de projeto limpo e pronto para IA — estrutura, conteúdo dos ficheiros ou ambos. Antes de copiar ou exportar, pode verificar o resultado numa pré-visualização em tempo real.
+
+O Smart Ignore remove automaticamente dependências, caches e artefactos de compilação. Respeita as regras .gitignore do projeto ou permite incluir apenas os ficheiros controlados pelo Git. Pastas raiz, tipos de ficheiro, exclusões e ficheiros individuais podem ser selecionados de forma independente.
+
+Cada forma de trabalho tem a sua interface: GUI para uma vista visual, TUI para o terminal e teclado, e CLI para scripts e CI. O resultado pode ser copiado ou exportado em ASCII, Markdown, JSON ou XML. Os ficheiros selecionados também podem ser copiados para outra pasta ou reunidos num arquivo ZIP.
+
+A pesquisa e os filtros facilitam o trabalho com bases de código grandes. As métricas mostram o número de ficheiros, linhas, caracteres e uma estimativa de tokens. Os perfis locais guardam as definições de cada projeto. As ferramentas Git integradas permitem clonar repositórios, mudar de branch e atualizar a cache.
+
+O DevProjex funciona localmente e em modo só de leitura: os ficheiros de origem não são alterados, não é recolhida telemetria e não é necessária uma conta. Disponível para Windows, Linux e macOS. O código-fonte está aberto no GitHub."
+ReleaseNotes,3,Text,,"DevProjex 5.0 adds full CLI and TUI experiences alongside the GUI, Git-tracked file mode, system theme support, and update checks. Preview and parameter workflows were refined, with smoother tree and panel animations, faster startup, and better behavior on large projects. Ignore rules, export, help, and cross-platform reliability were strengthened.","DevProjex 5.0 adds full CLI and TUI experiences alongside the GUI, Git-tracked file mode, system theme support, and update checks. Preview and parameter workflows were refined, with smoother tree and panel animations, faster startup, and better behavior on large projects. Ignore rules, export, help, and cross-platform reliability were strengthened.","В DevProjex 5.0 появились полноценные CLI и TUI в дополнение к GUI, режим только отслеживаемых Git-файлов, системная тема и проверка обновлений. Переработаны превью и работа с параметрами, улучшены анимации дерева и панелей, запуск и поведение на больших проектах. Усилены логика исключений, экспорт, справка и кроссплатформенная стабильность.","В DevProjex 5.0 появились полноценные CLI и TUI в дополнение к GUI, режим только отслеживаемых Git-файлов, системная тема и проверка обновлений. Переработаны превью и работа с параметрами, улучшены анимации дерева и панелей, запуск и поведение на больших проектах. Усилены логика исключений, экспорт, справка и кроссплатформенная стабильность.","DevProjex 5.0 нұсқасында GUI-ге толық CLI және TUI интерфейстері, Git бақылайтын файлдар режимі, жүйелік тақырып және жаңартуларды тексеру қосылды. Алдын ала қарау мен параметрлер жетілдіріліп, ағаш пен панель анимациялары, іске қосылу жылдамдығы және үлкен жобалардағы жұмыс жақсарды. Ерекшеліктер логикасы, экспорт, анықтама және кроссплатформалық тұрақтылық күшейтілді.","DevProjex 5.0 ergänzt die GUI um vollständige CLI- und TUI-Oberflächen sowie den Git-Tracked-Modus, Systemdesign-Unterstützung und Update-Prüfungen. Vorschau und Parameterabläufe wurden überarbeitet; Baum- und Panelanimationen, Startzeit und das Verhalten bei großen Projekten wurden verbessert. Ausschlusslogik, Export, Hilfe und plattformübergreifende Stabilität wurden gestärkt.","DevProjex 5.0 affianca alla GUI interfacce CLI e TUI complete, la modalità file tracciati da Git, il tema di sistema e il controllo degli aggiornamenti. Anteprima e parametri sono stati perfezionati, con animazioni più fluide, avvio più rapido e migliore gestione dei progetti grandi. Rafforzate logica delle esclusioni, esportazione, guida e affidabilità multipiattaforma.","Дар DevProjex 5.0 ба GUI интерфейсҳои пурраи CLI ва TUI, реҷаи файлҳои пайгиришавандаи Git, мавзӯи система ва санҷиши навсозиҳо илова шуданд. Пешнамоиш ва танзимот такмил ёфта, аниматсияҳо, оғози барнома ва кор бо лоиҳаҳои калон беҳтар шуданд. Мантиқи истисноҳо, содирот, ёрӣ ва устувории кроссплатформавӣ низ мустаҳкам гардиданд.","DevProjex 5.0 versiyasida GUI bilan birga to‘liq CLI va TUI interfeyslari, Git kuzatadigan fayllar rejimi, tizim mavzusi va yangilanishlarni tekshirish qo‘shildi. Ko‘rib chiqish va parametrlar jarayoni yaxshilanib, animatsiyalar, ishga tushish tezligi va katta loyihalardagi ishlash takomillashtirildi. Istisnolar mantiqi, eksport, yordam va kross-platforma barqarorligi kuchaytirildi.","DevProjex 5.0 ajoute des interfaces CLI et TUI complètes aux côtés de la GUI, le mode fichiers suivis par Git, le thème système et la recherche de mises à jour. Les parcours d’aperçu et de paramètres ont été affinés, avec des animations plus fluides, un démarrage plus rapide et un meilleur comportement sur les grands projets. Les exclusions, l’export, l’aide et la fiabilité multiplateforme ont été renforcés.","DevProjex 5.0 incorpora experiencias CLI y TUI completas junto a la GUI, el modo de archivos seguidos por Git, el tema del sistema y la búsqueda de actualizaciones. Se han perfeccionado la vista previa y los parámetros, con animaciones más fluidas, un inicio más rápido y mejor comportamiento en proyectos grandes. También se han reforzado las exclusiones, la exportación, la ayuda y la fiabilidad multiplataforma.","O DevProjex 5.0 adiciona experiências completas de CLI e TUI ao lado da GUI, modo de arquivos rastreados pelo Git, tema do sistema e verificação de atualizações. A visualização e os parâmetros foram refinados, com animações mais suaves, inicialização mais rápida e melhor comportamento em projetos grandes. Exclusões, exportação, ajuda e confiabilidade multiplataforma também foram reforçadas.","O DevProjex 5.0 acrescenta experiências completas de CLI e TUI à GUI, modo de ficheiros controlados pelo Git, tema do sistema e pesquisa de atualizações. A pré-visualização e as definições foram aperfeiçoadas, com animações mais fluidas, arranque mais rápido e melhor comportamento em projetos grandes. As exclusões, exportação, ajuda e fiabilidade multiplataforma também foram reforçadas."
+Title,4,Text,,DevProjex,DevProjex,DevProjex,DevProjex,DevProjex,DevProjex,DevProjex,DevProjex,DevProjex,DevProjex,DevProjex,DevProjex,DevProjex
+ShortTitle,5,Text,,,,,,,,,,,,,,
+SortTitle,6,Text,,,,,,,,,,,,,,
+VoiceTitle,7,Text,,,,,,,,,,,,,,
+ShortDescription,8,Text,,"DevProjex turns your project into clean codebase context for ChatGPT, Claude, and other AI tools — from any folder or Git repository. Smart Ignore automatically strips out dependencies, caches, and build artifacts, with support for .gitignore and Git-tracked mode. GUI, TUI, and CLI in one app. Export to ASCII, Markdown, JSON, XML, or ZIP. Local, no signup, read-only.","DevProjex turns your project into clean codebase context for ChatGPT, Claude, and other AI tools — from any folder or Git repository. Smart Ignore automatically strips out dependencies, caches, and build artifacts, with support for .gitignore and Git-tracked mode. GUI, TUI, and CLI in one app. Export to ASCII, Markdown, JSON, XML, or ZIP. Local, no signup, read-only.","DevProjex превращает проект в чистый контекст для ChatGPT, Claude и других ИИ — из папки или Git-репозитория. Smart Ignore автоматически убирает зависимости, кэши и артефакты сборки, поддерживаются .gitignore и режим Git-tracked файлов. GUI, TUI и CLI в одном приложении. Экспорт в ASCII, Markdown, JSON, XML или ZIP. Локально, без регистрации, read-only.","DevProjex превращает проект в чистый контекст для ChatGPT, Claude и других ИИ — из папки или Git-репозитория. Smart Ignore автоматически убирает зависимости, кэши и артефакты сборки, поддерживаются .gitignore и режим Git-tracked файлов. GUI, TUI и CLI в одном приложении. Экспорт в ASCII, Markdown, JSON, XML или ZIP. Локально, без регистрации, read-only.","DevProjex кез келген бума не Git репозиторийінен ChatGPT, Claude және басқа ЖИ құралдарына арналған таза код контекстін жасайды. Smart Ignore тәуелділіктерді, кэштерді және құрастыру артефактілерін автоматты түрде алып тастайды; .gitignore және Git бақылайтын файлдар режимі қолданылады. GUI, TUI және CLI бір қолданбада. ASCII, Markdown, JSON, XML немесе ZIP экспорты. Жергілікті, тіркелусіз, тек оқу режимінде.","DevProjex verwandelt Projekte aus Ordnern oder Git-Repositories in sauberen Codebase-Kontext für ChatGPT, Claude und andere KI-Tools. Smart Ignore entfernt Abhängigkeiten, Caches und Build-Artefakte; .gitignore und Git-Tracked-Modus werden unterstützt. GUI, TUI und CLI in einer App. Export als ASCII, Markdown, JSON, XML oder ZIP. Lokal, ohne Anmeldung, schreibgeschützt.","DevProjex trasforma qualsiasi cartella o repository Git in un contesto pulito per ChatGPT, Claude e altri strumenti IA. Smart Ignore elimina automaticamente dipendenze, cache e artefatti di build, con supporto per .gitignore e modalità file tracciati da Git. GUI, TUI e CLI in un’unica app. Export in ASCII, Markdown, JSON, XML o ZIP. Locale, senza registrazione, in sola lettura.","DevProjex ҳар ҷузвдон ё репозитории Git-ро ба контексти тозаи код барои ChatGPT, Claude ва дигар абзорҳои зеҳни сунъӣ табдил медиҳад. Smart Ignore вобастагиҳо, кешҳо ва артефактҳои сохтро худкор хориҷ мекунад; .gitignore ва реҷаи файлҳои пайгиришавандаи Git дастгирӣ мешаванд. GUI, TUI ва CLI дар як барнома. Содирот ба ASCII, Markdown, JSON, XML ё ZIP. Маҳаллӣ, бе сабти ном, танҳо хондан.","DevProjex har qanday papka yoki Git repozitoriyasini ChatGPT, Claude va boshqa AI vositalari uchun toza kod kontekstiga aylantiradi. Smart Ignore bog‘liqliklar, keshlar va build artefaktlarini avtomatik olib tashlaydi; .gitignore va Git kuzatadigan fayllar rejimi qo‘llanadi. GUI, TUI va CLI bitta ilovada. ASCII, Markdown, JSON, XML yoki ZIP eksporti. Lokal, ro‘yxatdan o‘tmasdan, faqat o‘qish rejimida.","DevProjex transforme tout dossier ou dépôt Git en contexte de code propre pour ChatGPT, Claude et d’autres outils d’IA. Smart Ignore retire automatiquement dépendances, caches et artefacts de compilation, avec prise en charge de .gitignore et du mode fichiers suivis par Git. GUI, TUI et CLI dans une seule application. Export en ASCII, Markdown, JSON, XML ou ZIP. Local, sans inscription, en lecture seule.","DevProjex convierte cualquier carpeta o repositorio Git en contexto de código limpio para ChatGPT, Claude y otras herramientas de IA. Smart Ignore elimina dependencias, cachés y artefactos de compilación, con soporte para .gitignore y archivos seguidos por Git. GUI, TUI y CLI en una sola aplicación. Exportación a ASCII, Markdown, JSON, XML o ZIP. Local, sin registro y de solo lectura.","O DevProjex transforma qualquer pasta ou repositório Git em contexto de código limpo para ChatGPT, Claude e outras ferramentas de IA. O Smart Ignore remove dependências, caches e artefatos de build, com suporte a .gitignore e arquivos rastreados pelo Git. GUI, TUI e CLI em um só app. Exporte para ASCII, Markdown, JSON, XML ou ZIP. Local, sem cadastro e somente leitura.","O DevProjex transforma qualquer pasta ou repositório Git em contexto de código limpo para ChatGPT, Claude e outras ferramentas de IA. O Smart Ignore remove dependências, caches e artefactos de compilação, com suporte para .gitignore e ficheiros controlados pelo Git. GUI, TUI e CLI numa só aplicação. Exporte para ASCII, Markdown, JSON, XML ou ZIP. Local, sem registo e só de leitura."
+DevStudio,9,Text,,Avazbek Olimov,Avazbek Olimov,Avazbek Olimov,Avazbek Olimov,Avazbek Olimov,Avazbek Olimov,Avazbek Olimov,Avazbek Olimov,Avazbek Olimov,Avazbek Olimov,Avazbek Olimov,Avazbek Olimov,Avazbek Olimov
+CopyrightTrademarkInformation,12,Text,,© 2026 Avazbek Olimov,© 2026 Avazbek Olimov,© 2026 Avazbek Olimov,© 2026 Avazbek Olimov,© 2026 Avazbek Olimov,© 2026 Avazbek Olimov,© 2026 Avazbek Olimov,© 2026 Avazbek Olimov,© 2026 Avazbek Olimov,© 2026 Avazbek Olimov,© 2026 Avazbek Olimov,© 2026 Avazbek Olimov,© 2026 Avazbek Olimov
+AdditionalLicenseTerms,13,Text,,,,,,,,,,,,,,
+DesktopScreenshot1,100,Relative path (or URL to file in Partner Center),,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700023868723/listingassets/3068382908312635485,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700023869582/listingassets/3068382908312635485,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700023869590/listingassets/3008073026430525780,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024123359/listingassets/3008073026430525780,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380166/listingassets/3014950270104765545,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380168/listingassets/3014666515385241919,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380106/listingassets/3010345556432560405,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380108/listingassets/3050233216702929387,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380618/listingassets/3000875296329623936,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380616/listingassets/3030415032434762952,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700026548166/listingassets/3023273049004117206,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700026547898/listingassets/3001504018058264057,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700026547906/listingassets/3028851681290415789
+DesktopScreenshot2,101,Relative path (or URL to file in Partner Center),,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700023868723/listingassets/3005072585543672683,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700023869582/listingassets/3005072585543672683,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700023869590/listingassets/3058295317532803816,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024123359/listingassets/3054575312746649852,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380166/listingassets/3023385518156092254,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380168/listingassets/3057069878045589456,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380106/listingassets/3047039538537435735,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380108/listingassets/3022787786080409691,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380618/listingassets/3008922608449727319,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380616/listingassets/3023095245672252128,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700026548166/listingassets/3020451484238649558,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700026547898/listingassets/3023246580061271472,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700026547906/listingassets/3055834759243664122
+DesktopScreenshot3,102,Relative path (or URL to file in Partner Center),,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700023868723/listingassets/3035271449724032142,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700023869582/listingassets/3023474979634672708,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700023869590/listingassets/3054575312746649852,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024123359/listingassets/3058295317532803816,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380166/listingassets/3045594757026952251,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380168/listingassets/3008062102714306667,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380106/listingassets/3059235129891874578,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380108/listingassets/3058838818802618157,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380618/listingassets/3068959347699117734,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380616/listingassets/3067587157004040098,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700026548166/listingassets/3000210100366004136,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700026547898/listingassets/3064252680038539002,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700026547906/listingassets/3024774555090544525
+DesktopScreenshot4,103,Relative path (or URL to file in Partner Center),,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700023868723/listingassets/3023474979634672708,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700023869582/listingassets/3035271449724032142,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700023869590/listingassets/3041499872950615424,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024123359/listingassets/3041499872950615424,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380166/listingassets/3001446189279257803,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380168/listingassets/3031203102423051689,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380106/listingassets/3066818102598516643,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380108/listingassets/3032061060198378695,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380618/listingassets/3046025967547359078,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380616/listingassets/3051801016283319690,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700026548166/listingassets/3068909908323242851,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700026547898/listingassets/3050064064551070998,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700026547906/listingassets/3067771901000509771
+DesktopScreenshot5,104,Relative path (or URL to file in Partner Center),,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700023868723/listingassets/3039772590664367412,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700023869582/listingassets/3039772590664367412,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700023869590/listingassets/3061249597818129219,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024123359/listingassets/3061249597818129219,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380166/listingassets/3043760567580435995,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380168/listingassets/3010559966984799696,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380106/listingassets/3025601450603199330,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380108/listingassets/3016828764151669578,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380618/listingassets/3064355479968457689,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380616/listingassets/3056640202661476039,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700026548166/listingassets/3007241477866703704,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700026547898/listingassets/3034605051208312299,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700026547906/listingassets/3062914319347120961
+DesktopScreenshot6,105,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+DesktopScreenshot7,106,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+DesktopScreenshot8,107,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+DesktopScreenshot9,108,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+DesktopScreenshot10,109,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+DesktopScreenshot11,110,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+DesktopScreenshot12,111,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+DesktopScreenshot13,112,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+DesktopScreenshot14,113,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+DesktopScreenshot15,114,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+DesktopScreenshot16,115,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+DesktopScreenshot17,116,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+DesktopScreenshot18,117,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+DesktopScreenshot19,118,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+DesktopScreenshot20,119,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+DesktopScreenshot21,120,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+DesktopScreenshot22,121,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+DesktopScreenshot23,122,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+DesktopScreenshot24,123,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+DesktopScreenshot25,124,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+DesktopScreenshot26,125,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+DesktopScreenshot27,126,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+DesktopScreenshot28,127,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+DesktopScreenshot29,128,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+DesktopScreenshot30,129,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+DesktopScreenshotCaption1,150,Text,,Open a local folder or Git repository,Open a local folder or Git repository,Открытие локальной папки или Git-репозитория,Открытие локальной папки или Git-репозитория,Жергілікті буманы немесе Git репозиторийін ашу,Lokalen Ordner oder Git-Repository öffnen,Apri una cartella locale o un repository Git,Кушодани ҷузвдони маҳаллӣ ё репозитории Git,"Istisnolar, fayl turlari, ildiz papkalar va Git rejimini boshqarish",Ouvrir un dossier local ou un dépôt Git,Abre una carpeta local o un repositorio Git,Abra uma pasta local ou um repositório Git,Abra uma pasta local ou um repositório Git
+DesktopScreenshotCaption2,151,Text,,Explore the project tree and choose exactly what to include,Explore the project tree and choose exactly what to include,Просмотр дерева проекта и точный выбор файлов,Предпросмотр структуры и содержимого перед экспортом,"Жоба ағашын қарап, қажетті файлдарды дәл таңдау",Projektstruktur und Dateiinhalte vor dem Export prüfen,Esplora l’albero e scegli con precisione i file,Дидани дарахти лоиҳа ва интихоби дақиқи файлҳо,Lokal papka yoki Git repozitoriyasini ochish,Explorer l’arborescence et choisir précisément les fichiers,Explora el árbol y elige con precisión los archivos,Explore a árvore e escolha exatamente o que incluir,Explore a árvore e escolha exatamente o que incluir
+DesktopScreenshotCaption3,152,Text,,Filter large projects and inspect the resulting context,Preview project structure and file contents before export,Предпросмотр структуры и содержимого перед экспортом,Просмотр дерева проекта и точный выбор файлов,Экспорт алдында құрылым мен файл мазмұнын тексеру,Große Projekte filtern und den Kontext kontrollieren,Controlla struttura e contenuto prima dell’esportazione,Санҷиши сохтор ва мундариҷа пеш аз содирот,Loyiha daraxtini ko‘rish va fayllarni aniq tanlash,Vérifier la structure et le contenu avant l’export,Comprueba la estructura y el contenido antes de exportar,Confira a estrutura e os arquivos antes de exportar,Verifique a estrutura e os ficheiros antes de exportar
+DesktopScreenshotCaption4,153,Text,,Preview project structure and file contents before export,Filter large projects and inspect the resulting context,Фильтрация больших проектов и проверка контекста,Фильтрация больших проектов и проверка контекста,"Ерекшеліктерді, файл түрлерін, түбірлік бумаларды және Git режимін басқару",Projektbaum erkunden und Dateien präzise auswählen,Filtra i progetti grandi e verifica il contesto ottenuto,"Идораи истисноҳо, навъҳои файл, ҷузвдонҳои решавӣ ва реҷаи Git",Katta loyihalarni filtrlash va tayyor kontekstni ko‘rish,Filtrer les grands projets et contrôler le contexte obtenu,Filtra proyectos grandes y revisa el contexto resultante,Filtre projetos grandes e revise o contexto gerado,Filtre projetos grandes e reveja o contexto gerado
+DesktopScreenshotCaption5,154,Text,,"Control exclusions, file types, top-level folders, and Git mode","Control exclusions, file types, top-level folders, and Git mode","Настройка исключений, расширений, корневых папок и Git-режима","Настройка исключений, расширений, корневых папок и Git-режима",Үлкен жобаларды сүзу және дайын контексті қарау,"Ausschlüsse, Dateitypen, Stammordner und Git-Modus steuern","Gestisci esclusioni, tipi di file, cartelle radice e modalità Git",Филтр кардани лоиҳаҳои калон ва санҷиши контекст,Eksportdan oldin tuzilma va fayl mazmunini tekshirish,"Gérer exclusions, types de fichiers, dossiers racines et mode Git","Controla exclusiones, tipos de archivo, carpetas raíz y modo Git","Controle exclusões, tipos de arquivo, pastas raiz e modo Git","Controle exclusões, tipos de ficheiro, pastas raiz e modo Git"
+DesktopScreenshotCaption6,155,Text,,,,,,,,,,,,,,
+DesktopScreenshotCaption7,156,Text,,,,,,,,,,,,,,
+DesktopScreenshotCaption8,157,Text,,,,,,,,,,,,,,
+DesktopScreenshotCaption9,158,Text,,,,,,,,,,,,,,
+DesktopScreenshotCaption10,159,Text,,,,,,,,,,,,,,
+DesktopScreenshotCaption11,160,Text,,,,,,,,,,,,,,
+DesktopScreenshotCaption12,161,Text,,,,,,,,,,,,,,
+DesktopScreenshotCaption13,162,Text,,,,,,,,,,,,,,
+DesktopScreenshotCaption14,163,Text,,,,,,,,,,,,,,
+DesktopScreenshotCaption15,164,Text,,,,,,,,,,,,,,
+DesktopScreenshotCaption16,165,Text,,,,,,,,,,,,,,
+DesktopScreenshotCaption17,166,Text,,,,,,,,,,,,,,
+DesktopScreenshotCaption18,167,Text,,,,,,,,,,,,,,
+DesktopScreenshotCaption19,168,Text,,,,,,,,,,,,,,
+DesktopScreenshotCaption20,169,Text,,,,,,,,,,,,,,
+DesktopScreenshotCaption21,170,Text,,,,,,,,,,,,,,
+DesktopScreenshotCaption22,171,Text,,,,,,,,,,,,,,
+DesktopScreenshotCaption23,172,Text,,,,,,,,,,,,,,
+DesktopScreenshotCaption24,173,Text,,,,,,,,,,,,,,
+DesktopScreenshotCaption25,174,Text,,,,,,,,,,,,,,
+DesktopScreenshotCaption26,175,Text,,,,,,,,,,,,,,
+DesktopScreenshotCaption27,176,Text,,,,,,,,,,,,,,
+DesktopScreenshotCaption28,177,Text,,,,,,,,,,,,,,
+DesktopScreenshotCaption29,178,Text,,,,,,,,,,,,,,
+DesktopScreenshotCaption30,179,Text,,,,,,,,,,,,,,
+MobileScreenshot1,200,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+MobileScreenshot2,201,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+MobileScreenshot3,202,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+MobileScreenshot4,203,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+MobileScreenshot5,204,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+MobileScreenshot6,205,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+MobileScreenshot7,206,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+MobileScreenshot8,207,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+MobileScreenshot9,208,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+MobileScreenshot10,209,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+MobileScreenshot11,210,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+MobileScreenshot12,211,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+MobileScreenshot13,212,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+MobileScreenshot14,213,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+MobileScreenshot15,214,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+MobileScreenshot16,215,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+MobileScreenshot17,216,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+MobileScreenshot18,217,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+MobileScreenshot19,218,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+MobileScreenshot20,219,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+MobileScreenshot21,220,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+MobileScreenshot22,221,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+MobileScreenshot23,222,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+MobileScreenshot24,223,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+MobileScreenshot25,224,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+MobileScreenshot26,225,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+MobileScreenshot27,226,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+MobileScreenshot28,227,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+MobileScreenshot29,228,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+MobileScreenshot30,229,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+MobileScreenshotCaption1,250,Text,,,,,,,,,,,,,,
+MobileScreenshotCaption2,251,Text,,,,,,,,,,,,,,
+MobileScreenshotCaption3,252,Text,,,,,,,,,,,,,,
+MobileScreenshotCaption4,253,Text,,,,,,,,,,,,,,
+MobileScreenshotCaption5,254,Text,,,,,,,,,,,,,,
+MobileScreenshotCaption6,255,Text,,,,,,,,,,,,,,
+MobileScreenshotCaption7,256,Text,,,,,,,,,,,,,,
+MobileScreenshotCaption8,257,Text,,,,,,,,,,,,,,
+MobileScreenshotCaption9,258,Text,,,,,,,,,,,,,,
+MobileScreenshotCaption10,259,Text,,,,,,,,,,,,,,
+MobileScreenshotCaption11,260,Text,,,,,,,,,,,,,,
+MobileScreenshotCaption12,261,Text,,,,,,,,,,,,,,
+MobileScreenshotCaption13,262,Text,,,,,,,,,,,,,,
+MobileScreenshotCaption14,263,Text,,,,,,,,,,,,,,
+MobileScreenshotCaption15,264,Text,,,,,,,,,,,,,,
+MobileScreenshotCaption16,265,Text,,,,,,,,,,,,,,
+MobileScreenshotCaption17,266,Text,,,,,,,,,,,,,,
+MobileScreenshotCaption18,267,Text,,,,,,,,,,,,,,
+MobileScreenshotCaption19,268,Text,,,,,,,,,,,,,,
+MobileScreenshotCaption20,269,Text,,,,,,,,,,,,,,
+MobileScreenshotCaption21,270,Text,,,,,,,,,,,,,,
+MobileScreenshotCaption22,271,Text,,,,,,,,,,,,,,
+MobileScreenshotCaption23,272,Text,,,,,,,,,,,,,,
+MobileScreenshotCaption24,273,Text,,,,,,,,,,,,,,
+MobileScreenshotCaption25,274,Text,,,,,,,,,,,,,,
+MobileScreenshotCaption26,275,Text,,,,,,,,,,,,,,
+MobileScreenshotCaption27,276,Text,,,,,,,,,,,,,,
+MobileScreenshotCaption28,277,Text,,,,,,,,,,,,,,
+MobileScreenshotCaption29,278,Text,,,,,,,,,,,,,,
+MobileScreenshotCaption30,279,Text,,,,,,,,,,,,,,
+XboxScreenshot1,300,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+XboxScreenshot2,301,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+XboxScreenshot3,302,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+XboxScreenshot4,303,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+XboxScreenshot5,304,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+XboxScreenshot6,305,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+XboxScreenshot7,306,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+XboxScreenshot8,307,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+XboxScreenshot9,308,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+XboxScreenshot10,309,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+XboxScreenshot11,310,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+XboxScreenshot12,311,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+XboxScreenshot13,312,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+XboxScreenshot14,313,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+XboxScreenshot15,314,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+XboxScreenshot16,315,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+XboxScreenshot17,316,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+XboxScreenshot18,317,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+XboxScreenshot19,318,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+XboxScreenshot20,319,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+XboxScreenshot21,320,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+XboxScreenshot22,321,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+XboxScreenshot23,322,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+XboxScreenshot24,323,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+XboxScreenshot25,324,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+XboxScreenshot26,325,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+XboxScreenshot27,326,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+XboxScreenshot28,327,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+XboxScreenshot29,328,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+XboxScreenshot30,329,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+XboxScreenshotCaption1,350,Text,,,,,,,,,,,,,,
+XboxScreenshotCaption2,351,Text,,,,,,,,,,,,,,
+XboxScreenshotCaption3,352,Text,,,,,,,,,,,,,,
+XboxScreenshotCaption4,353,Text,,,,,,,,,,,,,,
+XboxScreenshotCaption5,354,Text,,,,,,,,,,,,,,
+XboxScreenshotCaption6,355,Text,,,,,,,,,,,,,,
+XboxScreenshotCaption7,356,Text,,,,,,,,,,,,,,
+XboxScreenshotCaption8,357,Text,,,,,,,,,,,,,,
+XboxScreenshotCaption9,358,Text,,,,,,,,,,,,,,
+XboxScreenshotCaption10,359,Text,,,,,,,,,,,,,,
+XboxScreenshotCaption11,360,Text,,,,,,,,,,,,,,
+XboxScreenshotCaption12,361,Text,,,,,,,,,,,,,,
+XboxScreenshotCaption13,362,Text,,,,,,,,,,,,,,
+XboxScreenshotCaption14,363,Text,,,,,,,,,,,,,,
+XboxScreenshotCaption15,364,Text,,,,,,,,,,,,,,
+XboxScreenshotCaption16,365,Text,,,,,,,,,,,,,,
+XboxScreenshotCaption17,366,Text,,,,,,,,,,,,,,
+XboxScreenshotCaption18,367,Text,,,,,,,,,,,,,,
+XboxScreenshotCaption19,368,Text,,,,,,,,,,,,,,
+XboxScreenshotCaption20,369,Text,,,,,,,,,,,,,,
+XboxScreenshotCaption21,370,Text,,,,,,,,,,,,,,
+XboxScreenshotCaption22,371,Text,,,,,,,,,,,,,,
+XboxScreenshotCaption23,372,Text,,,,,,,,,,,,,,
+XboxScreenshotCaption24,373,Text,,,,,,,,,,,,,,
+XboxScreenshotCaption25,374,Text,,,,,,,,,,,,,,
+XboxScreenshotCaption26,375,Text,,,,,,,,,,,,,,
+XboxScreenshotCaption27,376,Text,,,,,,,,,,,,,,
+XboxScreenshotCaption28,377,Text,,,,,,,,,,,,,,
+XboxScreenshotCaption29,378,Text,,,,,,,,,,,,,,
+XboxScreenshotCaption30,379,Text,,,,,,,,,,,,,,
+HolographicScreenshot1,400,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+HolographicScreenshot2,401,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+HolographicScreenshot3,402,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+HolographicScreenshot4,403,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+HolographicScreenshot5,404,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+HolographicScreenshot6,405,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+HolographicScreenshot7,406,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+HolographicScreenshot8,407,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+HolographicScreenshot9,408,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+HolographicScreenshot10,409,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+HolographicScreenshot11,410,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+HolographicScreenshot12,411,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+HolographicScreenshot13,412,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+HolographicScreenshot14,413,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+HolographicScreenshot15,414,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+HolographicScreenshot16,415,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+HolographicScreenshot17,416,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+HolographicScreenshot18,417,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+HolographicScreenshot19,418,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+HolographicScreenshot20,419,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+HolographicScreenshot21,420,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+HolographicScreenshot22,421,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+HolographicScreenshot23,422,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+HolographicScreenshot24,423,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+HolographicScreenshot25,424,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+HolographicScreenshot26,425,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+HolographicScreenshot27,426,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+HolographicScreenshot28,427,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+HolographicScreenshot29,428,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+HolographicScreenshot30,429,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+HolographicScreenshotCaption1,450,Text,,,,,,,,,,,,,,
+HolographicScreenshotCaption2,451,Text,,,,,,,,,,,,,,
+HolographicScreenshotCaption3,452,Text,,,,,,,,,,,,,,
+HolographicScreenshotCaption4,453,Text,,,,,,,,,,,,,,
+HolographicScreenshotCaption5,454,Text,,,,,,,,,,,,,,
+HolographicScreenshotCaption6,455,Text,,,,,,,,,,,,,,
+HolographicScreenshotCaption7,456,Text,,,,,,,,,,,,,,
+HolographicScreenshotCaption8,457,Text,,,,,,,,,,,,,,
+HolographicScreenshotCaption9,458,Text,,,,,,,,,,,,,,
+HolographicScreenshotCaption10,459,Text,,,,,,,,,,,,,,
+HolographicScreenshotCaption11,460,Text,,,,,,,,,,,,,,
+HolographicScreenshotCaption12,461,Text,,,,,,,,,,,,,,
+HolographicScreenshotCaption13,462,Text,,,,,,,,,,,,,,
+HolographicScreenshotCaption14,463,Text,,,,,,,,,,,,,,
+HolographicScreenshotCaption15,464,Text,,,,,,,,,,,,,,
+HolographicScreenshotCaption16,465,Text,,,,,,,,,,,,,,
+HolographicScreenshotCaption17,466,Text,,,,,,,,,,,,,,
+HolographicScreenshotCaption18,467,Text,,,,,,,,,,,,,,
+HolographicScreenshotCaption19,468,Text,,,,,,,,,,,,,,
+HolographicScreenshotCaption20,469,Text,,,,,,,,,,,,,,
+HolographicScreenshotCaption21,470,Text,,,,,,,,,,,,,,
+HolographicScreenshotCaption22,471,Text,,,,,,,,,,,,,,
+HolographicScreenshotCaption23,472,Text,,,,,,,,,,,,,,
+HolographicScreenshotCaption24,473,Text,,,,,,,,,,,,,,
+HolographicScreenshotCaption25,474,Text,,,,,,,,,,,,,,
+HolographicScreenshotCaption26,475,Text,,,,,,,,,,,,,,
+HolographicScreenshotCaption27,476,Text,,,,,,,,,,,,,,
+HolographicScreenshotCaption28,477,Text,,,,,,,,,,,,,,
+HolographicScreenshotCaption29,478,Text,,,,,,,,,,,,,,
+HolographicScreenshotCaption30,479,Text,,,,,,,,,,,,,,
+SurfaceHubScreenshot11,510,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+SurfaceHubScreenshot12,511,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+SurfaceHubScreenshot13,512,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+SurfaceHubScreenshot14,513,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+SurfaceHubScreenshot15,514,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+SurfaceHubScreenshot16,515,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+SurfaceHubScreenshot17,516,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+SurfaceHubScreenshot18,517,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+SurfaceHubScreenshot19,518,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+SurfaceHubScreenshot20,519,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+SurfaceHubScreenshot21,520,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+SurfaceHubScreenshot22,521,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+SurfaceHubScreenshot23,522,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+SurfaceHubScreenshot24,523,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+SurfaceHubScreenshot25,524,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+SurfaceHubScreenshot26,525,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+SurfaceHubScreenshot27,526,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+SurfaceHubScreenshot28,527,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+SurfaceHubScreenshot29,528,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+SurfaceHubScreenshot30,529,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption11,560,Text,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption12,561,Text,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption13,562,Text,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption14,563,Text,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption15,564,Text,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption16,565,Text,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption17,566,Text,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption18,567,Text,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption19,568,Text,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption20,569,Text,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption21,570,Text,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption22,571,Text,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption23,572,Text,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption24,573,Text,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption25,574,Text,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption26,575,Text,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption27,576,Text,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption28,577,Text,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption29,578,Text,,,,,,,,,,,,,,
+SurfaceHubScreenshotCaption30,579,Text,,,,,,,,,,,,,,
+StoreLogo720x1080,600,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+StoreLogo1080x1080,601,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+StoreLogo300x300,602,Relative path (or URL to file in Partner Center),,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700023868723/listingassets/3002302617812442280,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700023869582/listingassets/3002302617812442280,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700023869590/listingassets/3002302617812442280,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024123359/listingassets/3002302617812442280,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380166/listingassets/3002302617812442280,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380168/listingassets/3002302617812442280,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380106/listingassets/3002302617812442280,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380108/listingassets/3002302617812442280,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380618/listingassets/3002302617812442280,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700024380616/listingassets/3002302617812442280,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700026548166/listingassets/3002302617812442280,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700026547898/listingassets/3002302617812442280,https://developer.microsoft.com/en-us/dashboard/apps/9NDQ3NQ5M354/submissions/1152921505701788170/listings/1152922700026547906/listingassets/3002302617812442280
+OverrideLogosForWin10,603,True/False,,False,False,False,False,False,False,False,False,False,False,False,False,False
+StoreLogoOverride150x150,604,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+StoreLogoOverride71x71,605,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+PromoImage1920x1080,606,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+PromoImage2400x1200,607,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+XboxBrandedKeyArt584x800,608,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+XboxTitledHero1920x1080,609,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+XboxFeaturedPromo1080x1080,610,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+OptionalPromo358x358,611,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+OptionalPromo1000x800,612,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+OptionalPromo414x180,613,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+Feature1,700,Text,,"Clean project context for ChatGPT, Claude, and other AI tools","Clean project context for ChatGPT, Claude, and other AI tools","Чистый контекст проекта для ChatGPT, Claude и других ИИ","Чистый контекст проекта для ChatGPT, Claude и других ИИ","ChatGPT, Claude және басқа ЖИ құралдарына арналған таза контекст","Sauberer Projektkontext für ChatGPT, Claude und andere KI-Tools","Contesto pulito per ChatGPT, Claude e altri strumenti IA","Контексти тоза барои ChatGPT, Claude ва дигар абзорҳои AI","ChatGPT, Claude va boshqa AI vositalari uchun toza kontekst","Contexte de projet propre pour ChatGPT, Claude et autres IA","Contexto limpio para ChatGPT, Claude y otras herramientas de IA","Contexto limpo para ChatGPT, Claude e outras ferramentas de IA","Contexto limpo para ChatGPT, Claude e outras ferramentas de IA"
+Feature2,701,Text,,"GUI, TUI, and CLI in one application","GUI, TUI, and CLI in one application","GUI, TUI и CLI в одном приложении","GUI, TUI и CLI в одном приложении","GUI, TUI және CLI бір қолданбада","GUI, TUI und CLI in einer Anwendung","GUI, TUI e CLI in un’unica applicazione","GUI, TUI ва CLI дар як барнома","GUI, TUI va CLI bitta ilovada","GUI, TUI et CLI dans une seule application","GUI, TUI y CLI en una sola aplicación","GUI, TUI e CLI em um só aplicativo","GUI, TUI e CLI numa só aplicação"
+Feature3,702,Text,,Live preview of the project tree and file contents,Live preview of the project tree and file contents,Живое превью дерева проекта и содержимого файлов,Живое превью дерева проекта и содержимого файлов,Жоба ағашы мен файл мазмұнының тікелей көрінісі,Live-Vorschau von Projektbaum und Dateiinhalten,Anteprima live dell’albero del progetto e dei file,Пешнамоиши зиндаи дарахт ва мундариҷаи файлҳо,Loyiha daraxti va fayl mazmunining jonli ko‘rinishi,Aperçu en direct de l’arborescence et des fichiers,Vista previa en directo del árbol y los archivos,Visualização ao vivo da árvore e do conteúdo dos arquivos,Pré-visualização da árvore e do conteúdo dos ficheiros
+Feature4,703,Text,,"Smart Ignore, .gitignore, and Git-tracked mode","Smart Ignore, .gitignore, and Git-tracked mode","Smart Ignore, .gitignore и режим отслеживаемых Git-файлов","Smart Ignore, .gitignore и режим отслеживаемых Git-файлов","Smart Ignore, .gitignore және Git бақылайтын файлдар режимі","Smart Ignore, .gitignore und Git-Tracked-Modus","Smart Ignore, .gitignore e modalità file tracciati da Git","Smart Ignore, .gitignore ва реҷаи файлҳои пайгиришавандаи Git","Smart Ignore, .gitignore va Git kuzatadigan fayllar rejimi","Smart Ignore, .gitignore et mode fichiers suivis par Git","Smart Ignore, .gitignore y modo de archivos seguidos por Git","Smart Ignore, .gitignore e arquivos rastreados pelo Git","Smart Ignore, .gitignore e ficheiros controlados pelo Git"
+Feature5,704,Text,,"Independent selection of folders, file types, and files","Independent selection of folders, file types, and files","Независимый выбор папок, расширений и отдельных файлов","Независимый выбор папок, расширений и отдельных файлов","Бумаларды, файл түрлерін және файлдарды тәуелсіз таңдау","Unabhängige Auswahl von Ordnern, Dateitypen und Dateien","Selezione indipendente di cartelle, tipi di file e file","Интихоби мустақили ҷузвдонҳо, навъҳо ва файлҳо","Papkalar, fayl turlari va fayllarni mustaqil tanlash","Sélection indépendante des dossiers, types et fichiers","Selección independiente de carpetas, tipos y archivos","Seleção independente de pastas, tipos e arquivos","Seleção independente de pastas, tipos e ficheiros"
+Feature6,705,Text,,"Copy or export as ASCII, Markdown, JSON, and XML","Copy or export as ASCII, Markdown, JSON, and XML","Копирование и экспорт в ASCII, Markdown, JSON и XML","Копирование и экспорт в ASCII, Markdown, JSON и XML","ASCII, Markdown, JSON және XML түрінде көшіру және экспорт","Kopieren und Export als ASCII, Markdown, JSON und XML","Copia ed esportazione in ASCII, Markdown, JSON e XML","Нусхабардорӣ ва содирот ба ASCII, Markdown, JSON ва XML","ASCII, Markdown, JSON va XML formatida nusxalash va eksport","Copie et export en ASCII, Markdown, JSON et XML","Copia y exportación en ASCII, Markdown, JSON y XML","Cópia e exportação em ASCII, Markdown, JSON e XML","Cópia e exportação em ASCII, Markdown, JSON e XML"
+Feature7,706,Text,,Export selected files to a folder or ZIP archive,Export selected files to a folder or ZIP archive,Экспорт выбранных файлов в папку или ZIP-архив,Экспорт выбранных файлов в папку или ZIP-архив,Таңдалған файлдарды бумаға немесе ZIP мұрағатына экспорттау,Ausgewählte Dateien als Ordner oder ZIP-Archiv exportieren,Esportazione dei file selezionati in cartella o archivio ZIP,Содироти файлҳои интихобшуда ба ҷузвдон ё ZIP,Tanlangan fayllarni papka yoki ZIP arxiviga eksport qilish,Export des fichiers sélectionnés vers un dossier ou une archive ZIP,Exportación de archivos seleccionados a carpeta o ZIP,Exportação dos arquivos selecionados para pasta ou ZIP,Exportação dos ficheiros selecionados para pasta ou ZIP
+Feature8,707,Text,,"Search, filters, and line, character, and token metrics","Search, filters, and line, character, and token metrics","Поиск, фильтры и метрики строк, символов и токенов","Поиск, фильтры и метрики строк, символов и токенов","Іздеу, сүзгілер және жол, таңба, токен метрикалары","Suche, Filter sowie Zeilen-, Zeichen- und Tokenmetriken","Ricerca, filtri e metriche di righe, caratteri e token","Ҷустуҷӯ, филтрҳо ва метрикаҳои сатр, аломат ва токен","Qidiruv, filtrlar va satr, belgi, token metrikalari","Recherche, filtres et métriques de lignes, caractères et tokens","Búsqueda, filtros y métricas de líneas, caracteres y tokens","Busca, filtros e métricas de linhas, caracteres e tokens","Pesquisa, filtros e métricas de linhas, caracteres e tokens"
+Feature9,708,Text,,Local profiles and built-in Git workflows,Local profiles and built-in Git workflows,Локальные профили и встроенные Git-инструменты,Локальные профили и встроенные Git-инструменты,Жергілікті профильдер және кірістірілген Git құралдары,Lokale Profile und integrierte Git-Abläufe,Profili locali e strumenti Git integrati,Профилҳои маҳаллӣ ва абзорҳои дарунсохти Git,Lokal profillar va ichki Git vositalari,Profils locaux et outils Git intégrés,Perfiles locales y herramientas Git integradas,Perfis locais e ferramentas Git integradas,Perfis locais e ferramentas Git integradas
+Feature10,709,Text,,"Local, read-only, with no telemetry or account required","Local, read-only, with no telemetry or account required","Локальная работа, read-only, без телеметрии и аккаунта","Локальная работа, read-only, без телеметрии и аккаунта","Жергілікті, тек оқу режимінде, телеметриясыз және тіркелгісіз","Lokal, schreibgeschützt, ohne Telemetrie oder Konto","Locale, sola lettura, senza telemetria né account","Маҳаллӣ, танҳо хондан, бе телеметрия ва аккаунт","Lokal, faqat o‘qish, telemetriyasiz va akkauntsiz","Local, en lecture seule, sans télémétrie ni compte","Local, solo lectura, sin telemetría ni cuenta","Local, somente leitura, sem telemetria nem conta","Local, só de leitura, sem telemetria nem conta"
+Feature11,710,Text,,,,,,,,,,,,,,
+Feature12,711,Text,,,,,,,,,,,,,,
+Feature13,712,Text,,,,,,,,,,,,,,
+Feature14,713,Text,,,,,,,,,,,,,,
+Feature15,714,Text,,,,,,,,,,,,,,
+Feature16,715,Text,,,,,,,,,,,,,,
+Feature17,716,Text,,,,,,,,,,,,,,
+Feature18,717,Text,,,,,,,,,,,,,,
+Feature19,718,Text,,,,,,,,,,,,,,
+Feature20,719,Text,,,,,,,,,,,,,,
+MinimumHardwareReq1,800,Text,,,,,,,,,,,,,,
+MinimumHardwareReq2,801,Text,,,,,,,,,,,,,,
+MinimumHardwareReq3,802,Text,,,,,,,,,,,,,,
+MinimumHardwareReq4,803,Text,,,,,,,,,,,,,,
+MinimumHardwareReq5,804,Text,,,,,,,,,,,,,,
+MinimumHardwareReq6,805,Text,,,,,,,,,,,,,,
+MinimumHardwareReq7,806,Text,,,,,,,,,,,,,,
+MinimumHardwareReq8,807,Text,,,,,,,,,,,,,,
+MinimumHardwareReq9,808,Text,,,,,,,,,,,,,,
+MinimumHardwareReq10,809,Text,,,,,,,,,,,,,,
+MinimumHardwareReq11,810,Text,,,,,,,,,,,,,,
+RecommendedHardwareReq1,850,Text,,,,,,,,,,,,,,
+RecommendedHardwareReq2,851,Text,,,,,,,,,,,,,,
+RecommendedHardwareReq3,852,Text,,,,,,,,,,,,,,
+RecommendedHardwareReq4,853,Text,,,,,,,,,,,,,,
+RecommendedHardwareReq5,854,Text,,,,,,,,,,,,,,
+RecommendedHardwareReq6,855,Text,,,,,,,,,,,,,,
+RecommendedHardwareReq7,856,Text,,,,,,,,,,,,,,
+RecommendedHardwareReq8,857,Text,,,,,,,,,,,,,,
+RecommendedHardwareReq9,858,Text,,,,,,,,,,,,,,
+RecommendedHardwareReq10,859,Text,,,,,,,,,,,,,,
+RecommendedHardwareReq11,860,Text,,,,,,,,,,,,,,
+SearchTerm1,900,Text,,project context,project context,контекст проекта,контекст проекта,жоба контексті,Projektkontext,contesto progetto,контексти лоиҳа,loyiha konteksti,contexte projet,contexto proyecto,contexto projeto,contexto projeto
+SearchTerm2,901,Text,,AI codebase,AI codebase,код для ИИ,код для ИИ,ЖИ код базасы,KI Codebasis,codice per IA,код барои AI,AI kod bazasi,code pour IA,código para IA,código para IA,código para IA
+SearchTerm3,902,Text,,ChatGPT code,ChatGPT code,ChatGPT код,ChatGPT код,ChatGPT коды,ChatGPT Code,codice ChatGPT,коди ChatGPT,ChatGPT kodi,code ChatGPT,código ChatGPT,código ChatGPT,código ChatGPT
+SearchTerm4,903,Text,,Claude context,Claude context,Claude контекст,Claude контекст,Claude контексті,Claude Kontext,contesto Claude,контексти Claude,Claude konteksti,contexte Claude,contexto Claude,contexto Claude,contexto Claude
+SearchTerm5,904,Text,,project tree,project tree,дерево проекта,дерево проекта,жоба ағашы,Projektbaum,albero progetto,дарахти лоиҳа,loyiha daraxti,arborescence projet,árbol proyecto,árvore projeto,árvore projeto
+SearchTerm6,905,Text,,token counter,token counter,подсчёт токенов,подсчёт токенов,токен санау,Token zählen,conteggio token,ҳисоби токенҳо,token hisoblash,compteur tokens,contador tokens,contador tokens,contagem tokens
+SearchTerm7,906,Text,,gitignore viewer,gitignore viewer,просмотр gitignore,просмотр gitignore,gitignore қарау,gitignore Viewer,visualizzatore gitignore,намоиши gitignore,gitignore ko‘rish,visionneuse gitignore,visor gitignore,visualizador gitignore,visualizador gitignore
+TrailerToPlayAtTopOfListing,999,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+Trailer1,1000,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+Trailer2,1001,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+Trailer3,1002,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+Trailer4,1003,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+Trailer5,1004,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+Trailer6,1005,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+Trailer7,1006,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+Trailer8,1007,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+Trailer9,1008,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+Trailer10,1009,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+Trailer11,1010,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+Trailer12,1011,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+Trailer13,1012,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+Trailer14,1013,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+Trailer15,1014,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerTitle1,1020,Text,,,,,,,,,,,,,,
+TrailerTitle2,1021,Text,,,,,,,,,,,,,,
+TrailerTitle3,1022,Text,,,,,,,,,,,,,,
+TrailerTitle4,1023,Text,,,,,,,,,,,,,,
+TrailerTitle5,1024,Text,,,,,,,,,,,,,,
+TrailerTitle6,1025,Text,,,,,,,,,,,,,,
+TrailerTitle7,1026,Text,,,,,,,,,,,,,,
+TrailerTitle8,1027,Text,,,,,,,,,,,,,,
+TrailerTitle9,1028,Text,,,,,,,,,,,,,,
+TrailerTitle10,1029,Text,,,,,,,,,,,,,,
+TrailerTitle11,1030,Text,,,,,,,,,,,,,,
+TrailerTitle12,1031,Text,,,,,,,,,,,,,,
+TrailerTitle13,1032,Text,,,,,,,,,,,,,,
+TrailerTitle14,1033,Text,,,,,,,,,,,,,,
+TrailerTitle15,1034,Text,,,,,,,,,,,,,,
+TrailerThumbnail1,1040,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerThumbnail2,1041,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerThumbnail3,1042,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerThumbnail4,1043,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerThumbnail5,1044,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerThumbnail6,1045,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerThumbnail7,1046,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerThumbnail8,1047,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerThumbnail9,1048,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerThumbnail10,1049,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerThumbnail11,1050,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerThumbnail12,1051,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerThumbnail13,1052,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerThumbnail14,1053,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerThumbnail15,1054,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerClosedCaption1,1055,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerClosedCaption2,1056,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerClosedCaption3,1057,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerClosedCaption4,1058,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerClosedCaption5,1059,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerClosedCaption6,1060,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerClosedCaption7,1061,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerClosedCaption8,1062,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerClosedCaption9,1063,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerClosedCaption10,1064,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerClosedCaption11,1065,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerClosedCaption12,1066,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerClosedCaption13,1067,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerClosedCaption14,1068,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerClosedCaption15,1069,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerAudioDescription1,1070,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerAudioDescription2,1071,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerAudioDescription3,1072,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerAudioDescription4,1073,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerAudioDescription5,1074,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerAudioDescription6,1075,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerAudioDescription7,1076,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerAudioDescription8,1077,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerAudioDescription9,1078,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerAudioDescription10,1079,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerAudioDescription11,1080,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerAudioDescription12,1081,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerAudioDescription13,1082,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerAudioDescription14,1083,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+TrailerAudioDescription15,1084,Relative path (or URL to file in Partner Center),,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,,,
