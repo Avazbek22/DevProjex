@@ -390,11 +390,34 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 
 	public async Task SendQuitAndConfirmAsync(CancellationToken cancellationToken = default)
 	{
-		await WaitForScreenToSettleAsync(cancellationToken).ConfigureAwait(false);
-		var workspaceScreen = CaptureScreen();
-		await SendAsync("q", cancellationToken).ConfigureAwait(false);
-		await WaitForScreenChangeAsync(workspaceScreen, cancellationToken).ConfigureAwait(false);
-		await SendEnterAsync(cancellationToken).ConfigureAwait(false);
+		for (var attempt = 0; attempt < 3; attempt++)
+		{
+			await WaitForScreenToSettleAsync(cancellationToken).ConfigureAwait(false);
+			var workspaceScreen = CaptureScreen();
+			await SendAsync("q", cancellationToken).ConfigureAwait(false);
+			await WaitForScreenChangeAsync(workspaceScreen, cancellationToken).ConfigureAwait(false);
+			await WaitForScreenToSettleAsync(cancellationToken).ConfigureAwait(false);
+			await SendEnterAsync(cancellationToken).ConfigureAwait(false);
+			if (await WaitForQuitCompletionAsync(cancellationToken).ConfigureAwait(false))
+				return;
+		}
+
+		throw new TimeoutException(
+			"Timed out waiting for the terminal to accept the quit confirmation.\n" +
+			$"Screen:\n{CaptureScreen()}\nRaw output tail:\n{CaptureRawOutputTail()}");
+	}
+
+	private async Task<bool> WaitForQuitCompletionAsync(CancellationToken cancellationToken)
+	{
+		var stopwatch = Stopwatch.StartNew();
+		while (stopwatch.Elapsed < TimeSpan.FromSeconds(3))
+		{
+			if (HasExited || CaptureRawOutput().Contains(ShellHandshakeMarker, StringComparison.Ordinal))
+				return true;
+			await Task.Delay(50, cancellationToken).ConfigureAwait(false);
+		}
+
+		return false;
 	}
 
 	private async Task WaitForScreenToSettleAsync(CancellationToken cancellationToken)

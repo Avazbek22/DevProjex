@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using DevProjex.Infrastructure.RecentProjects;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -38,6 +39,62 @@ public sealed class TerminalPtyLifecycleTests
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(cancellationToken: TestContext.Current.CancellationToken));
+	}
+
+	[Fact(Timeout = 60_000)]
+	public async Task QuitRetriesAfterProjectAppearsBeforeRecentHistoryWriteCompletes()
+	{
+		using var project = CreateProject();
+		FileStream? heldRecentProjectsLock = null;
+		try
+		{
+			await using var terminal = await TerminalPtyHarness.StartAsync(
+				project.Path,
+				[
+					"tui",
+					project.Path,
+					"--profile",
+					"standard",
+					"--screen",
+					"inline",
+					"--no-mouse",
+					"--language",
+					"en"
+				],
+				columns: 80,
+				rows: 24,
+				initializeDataRoot: dataRoot =>
+				{
+					var store = new RecentProjectsStore(() => dataRoot);
+					var lockPath = store.GetPath() + ".lock";
+					Directory.CreateDirectory(Path.GetDirectoryName(lockPath)!);
+					heldRecentProjectsLock = new FileStream(
+						lockPath,
+						FileMode.OpenOrCreate,
+						FileAccess.ReadWrite,
+						FileShare.None);
+				},
+				cancellationToken: TestContext.Current.CancellationToken);
+
+			await terminal.WaitForScreenAsync(
+				"PROJECT TREE",
+				cancellationToken: TestContext.Current.CancellationToken);
+			await terminal.WaitForScreenAsync(
+				"Files 2",
+				cancellationToken: TestContext.Current.CancellationToken);
+
+			await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+
+			Assert.Contains("Canceling operation...", terminal.RawOutput, StringComparison.Ordinal);
+			Assert.Equal(
+				CommandLineExitCodes.Success,
+				await terminal.WaitForExitAsync(
+					cancellationToken: TestContext.Current.CancellationToken));
+		}
+		finally
+		{
+			heldRecentProjectsLock?.Dispose();
+		}
 	}
 
 	[Fact(Timeout = 60_000)]

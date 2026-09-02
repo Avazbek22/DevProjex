@@ -45,6 +45,16 @@ public sealed class MainWindowGitScopeLifecycleUiTests
 
 		try
 		{
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() =>
+				{
+					var current = UiTestDriver.GetViewModel(window);
+					return current.TreeNodes.Count == 1 &&
+					       current.TreeNodes[0].Children.Count == 0;
+				},
+				"the startup staged scope to publish its empty tree");
+
 			var viewModel = UiTestDriver.GetViewModel(window);
 			Assert.Equal(
 				GitFilteringMode.Staged,
@@ -443,6 +453,15 @@ public sealed class MainWindowGitScopeLifecycleUiTests
 				TestContext.Current.CancellationToken);
 			RunGit(project.RootPath, "add", "--", "CreatedAfterOpen.cs");
 			await UiTestDriver.RefreshProjectAsync(window);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() =>
+				{
+					var currentModes = UiTestDriver.GetViewModel(window).GitFilteringModes;
+					return currentModes.Any(static option => option.Mode == GitFilteringMode.Staged) &&
+					       currentModes.Any(static option => option.Mode == GitFilteringMode.Changes);
+				},
+				"the refreshed repository Git modes to become available");
 
 			var modes = UiTestDriver.GetViewModel(window).GitFilteringModes;
 			Assert.Contains(modes, static option => option.Mode == GitFilteringMode.Staged);

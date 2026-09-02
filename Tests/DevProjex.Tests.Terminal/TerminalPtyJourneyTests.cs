@@ -98,16 +98,15 @@ public sealed class TerminalPtyJourneyTests
 		await terminal.WaitForScreenAsync(
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
-		var workspaceScreen = await terminal.WaitForScreenAsync(
+		var workspaceScreen = await terminal.WaitForStableScreenAsync(
 			"App.cs",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("PROJECT TREE", workspaceScreen, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 
-		await terminal.SendF6Async(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
-			"> CONTEXT PREVIEW",
-			cancellationToken: TestContext.Current.CancellationToken);
+		await OpenContextPreviewWhenWorkspaceReadyAsync(
+			terminal,
+			TestContext.Current.CancellationToken);
 		await terminal.ResizeAsync(80, 24, TestContext.Current.CancellationToken);
 		var compactPreview = await terminal.WaitForStableScreenAsync(
 			required: "> CONTEXT PREVIEW",
@@ -636,6 +635,31 @@ public sealed class TerminalPtyJourneyTests
 		workspace.WriteFile("src/Feature/Handler.cs", "internal sealed class Handler {}");
 		workspace.WriteFile("README.md", "# Test project");
 		return workspace;
+	}
+
+	private static async Task<string> OpenContextPreviewWhenWorkspaceReadyAsync(
+		TerminalPtyHarness terminal,
+		CancellationToken cancellationToken)
+	{
+		const string previewHeading = "> CONTEXT PREVIEW";
+		for (var attempt = 0; attempt < 3; attempt++)
+		{
+			await terminal.SendF6Async(cancellationToken);
+			try
+			{
+				return await terminal.WaitForScreenAsync(
+					previewHeading,
+					TimeSpan.FromSeconds(3),
+					cancellationToken);
+			}
+			catch (TimeoutException) when (
+				attempt < 2 &&
+				terminal.CaptureScreen().Contains("> PROJECT TREE", StringComparison.Ordinal))
+			{
+			}
+		}
+
+		throw new TimeoutException($"Timed out waiting for '{previewHeading}'.");
 	}
 
 	private static TemporaryDirectory CreateGitProject()
