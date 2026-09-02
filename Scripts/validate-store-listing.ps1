@@ -74,7 +74,9 @@ function Get-LocaleColumns([string[]]$headers) {
     $metadataColumns = @(Get-MetadataColumns)
     # Locale discovery must stay data-driven. If a new language is added in Partner Center
     # and exported into the CSV, validation should immediately start checking it.
-    return @($headers | Where-Object { $metadataColumns -notcontains $_ })
+    return @($headers | Where-Object {
+        $metadataColumns -notcontains $_ -and $_ -notmatch '^Type \(.+\)$'
+    })
 }
 
 function Get-CsvHeaderColumns([string]$path) {

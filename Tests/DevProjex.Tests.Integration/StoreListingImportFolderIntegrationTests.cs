@@ -196,7 +196,7 @@ public sealed class StoreListingImportFolderIntegrationTests
 
         Assert.Equal(templateLocales, importLocales.Take(templateLocales.Length));
         Assert.Equal(
-            ["es-es", "pt-br", "pt-pt", "pl-pl", "tr-tr", "uk-ua", "ja-jp", "ko-kr", "zh-cn", "zh-tw", "vi-vn", "id-id"],
+            ["pl-pl", "tr-tr", "uk-ua", "ja-jp", "ko-kr", "zh-cn", "zh-tw", "vi-vn", "id-id"],
             importLocales.Skip(templateLocales.Length));
     }
 

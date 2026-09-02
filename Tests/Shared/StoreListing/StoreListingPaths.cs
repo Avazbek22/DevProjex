@@ -79,6 +79,8 @@ internal static class StoreListingPaths
         // This lets the validator adapt to future languages without shipping a code edit first.
         return headers
             .Where(header => !MetadataColumns.Contains(header, StringComparer.Ordinal))
+            .Where(header => !(header.StartsWith("Type (", StringComparison.Ordinal) &&
+                               header.EndsWith(")", StringComparison.Ordinal)))
             .ToArray();
     }
 
