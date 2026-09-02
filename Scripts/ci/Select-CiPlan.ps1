@@ -37,6 +37,61 @@ param(
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'CiChangePlanner.psm1') -Force
 
+$utf8Encoding = [Text.UTF8Encoding]::new($false)
+$outputSummaryMaximumBytes = 16KB
+$stepSummaryMaximumBytes = 512KB
+
+function ConvertTo-CappedReasonText {
+	param(
+		[Parameter(Mandatory)][AllowEmptyCollection()][string[]] $Reason,
+		[Parameter(Mandatory)][ValidateRange(1, [int]::MaxValue)][int] $MaximumUtf8Bytes,
+		[string] $Prefix = '',
+		[string] $ReasonPrefix = '',
+		[string] $Separator = '; ',
+		[string] $Suffix = ''
+	)
+
+	$safeReasons = @($Reason | ForEach-Object { $_ -replace '[\r\n]+', ' ' })
+	$formattedReasons = @($safeReasons | ForEach-Object { "$ReasonPrefix$_" })
+	$fullText = "$Prefix$($formattedReasons -join $Separator)$Suffix"
+	if ($utf8Encoding.GetByteCount($fullText) -le $MaximumUtf8Bytes) {
+		return $fullText
+	}
+
+	$fixedByteCount = $utf8Encoding.GetByteCount($Prefix) + $utf8Encoding.GetByteCount($Suffix)
+	$separatorByteCount = $utf8Encoding.GetByteCount($Separator)
+	$includedReasonsByteCount = 0
+	$includedReasonCount = 0
+
+	for ($candidateCount = 0; $candidateCount -lt $safeReasons.Count; $candidateCount++) {
+		$omittedReasonCount = $safeReasons.Count - $candidateCount
+		$marker = "$ReasonPrefix... (+$omittedReasonCount more reasons)"
+		$candidateByteCount = $fixedByteCount +
+			$includedReasonsByteCount +
+			($separatorByteCount * $candidateCount) +
+			$utf8Encoding.GetByteCount($marker)
+		if ($candidateByteCount -le $MaximumUtf8Bytes) {
+			$includedReasonCount = $candidateCount
+		}
+
+		$includedReasonsByteCount += $utf8Encoding.GetByteCount($formattedReasons[$candidateCount])
+	}
+
+	$omittedReasonCount = $safeReasons.Count - $includedReasonCount
+	$items = [System.Collections.Generic.List[string]]::new($includedReasonCount + 1)
+	for ($index = 0; $index -lt $includedReasonCount; $index++) {
+		$items.Add($formattedReasons[$index])
+	}
+	$items.Add("$ReasonPrefix... (+$omittedReasonCount more reasons)")
+
+	$cappedText = "$Prefix$($items -join $Separator)$Suffix"
+	if ($utf8Encoding.GetByteCount($cappedText) -gt $MaximumUtf8Bytes) {
+		throw "Unable to fit the CI reason omission marker within $MaximumUtf8Bytes UTF-8 bytes."
+	}
+
+	return $cappedText
+}
+
 $effectiveBaseSha = $BaseSha
 $effectiveHeadSha = $HeadSha
 $useMergeBase = [bool]$MergeBase
@@ -117,7 +172,21 @@ else {
 	Get-CiChangePlan -ChangedPath $ChangedPath
 }
 
-$safeSummary = ($plan.Reasons -join '; ') -replace '[\r\n]+', ' '
+$safeSummary = ConvertTo-CappedReasonText `
+	-Reason $plan.Reasons `
+	-MaximumUtf8Bytes $outputSummaryMaximumBytes
+
+if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_STEP_SUMMARY)) {
+	$markdownSummary = ConvertTo-CappedReasonText `
+		-Reason $plan.Reasons `
+		-MaximumUtf8Bytes $stepSummaryMaximumBytes `
+		-Prefix "## Selected CI plan reasons`n" `
+		-ReasonPrefix '- ' `
+		-Separator "`n" `
+		-Suffix "`n"
+	Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $markdownSummary -Encoding utf8 -NoNewline
+}
+
 $output = [ordered]@{
 	test_matrix = $plan.TestMatrix | ConvertTo-Json -Compress -Depth 5
 	has_test_matrix = $plan.HasTestMatrix.ToString().ToLowerInvariant()

@@ -55,12 +55,6 @@ jobs:
           -PreviousGateName $env:PREVIOUS_GATE_NAME
           -GitHubOutputPath $env:GITHUB_OUTPUT
 
-      - name: Report selected plan
-        shell: pwsh
-        env:
-          CI_PLAN_SUMMARY: ${{ steps.plan.outputs.summary }}
-        run: Write-Host $env:CI_PLAN_SUMMARY
-
   test-suite:
     name: CI (${{ matrix.os_name }} / ${{ matrix.suite_name }})
     needs: prepare-matrix

@@ -167,4 +167,82 @@ if ($metadataPlan.HasTestMatrix) {
 	throw '[Metadata only] Expected an empty heavy-test matrix.'
 }
 
+$multiBytePathSegment = ((1..48 | ForEach-Object { [char]::ConvertFromUtf32(0x1F680) }) -join '')
+$largeChangedPathSet = @(1..4000 | ForEach-Object { "Generated/$multiBytePathSegment-$_.cs" })
+$largePlan = Get-CiChangePlan -ChangedPath $largeChangedPathSet
+$uncappedSummary = $largePlan.Reasons -join '; '
+$uncappedMarkdownSummary = "## Selected CI plan reasons`n$(($largePlan.Reasons | ForEach-Object { "- $_" }) -join "`n")`n"
+$utf8Encoding = [Text.UTF8Encoding]::new($false)
+if ($utf8Encoding.GetByteCount($uncappedSummary) -le 128KB) {
+	throw '[Large summary] Test data must exceed the Linux per-environment-entry limit.'
+}
+if ($utf8Encoding.GetByteCount($uncappedMarkdownSummary) -le 512KB) {
+	throw '[Large summary] Test data must exceed the step-summary limit.'
+}
+
+$temporaryOutputPath = Join-Path ([IO.Path]::GetTempPath()) "devprojex-ci-plan-$([Guid]::NewGuid().ToString('N')).txt"
+$temporaryStepSummaryPath = Join-Path ([IO.Path]::GetTempPath()) "devprojex-ci-step-summary-$([Guid]::NewGuid().ToString('N')).md"
+$originalStepSummaryPath = $env:GITHUB_STEP_SUMMARY
+try {
+	$env:GITHUB_STEP_SUMMARY = $temporaryStepSummaryPath
+	& (Join-Path $PSScriptRoot 'Select-CiPlan.ps1') `
+		-ChangedPath $largeChangedPathSet `
+		-GitHubOutputPath $temporaryOutputPath
+
+	$summaryPrefix = 'summary='
+	$summaryLine = @(Get-Content -LiteralPath $temporaryOutputPath | Where-Object { $_.StartsWith($summaryPrefix) })
+	if ($summaryLine.Count -ne 1) {
+		throw "[Large summary] Expected one summary output, found $($summaryLine.Count)."
+	}
+
+	$cappedSummary = $summaryLine[0].Substring($summaryPrefix.Length)
+	if ($utf8Encoding.GetByteCount($cappedSummary) -gt 16KB) {
+		throw '[Large summary] Output exceeded the 16 KiB UTF-8 limit.'
+	}
+
+	$omissionMatch = [regex]::Match(
+		$cappedSummary,
+		'^(?<included>.*?)(?:; )?\.\.\. \(\+(?<omitted>\d+) more reasons\)$')
+	if (-not $omissionMatch.Success) {
+		throw '[Large summary] Expected the output to end with an omission marker.'
+	}
+
+	$includedText = $omissionMatch.Groups['included'].Value
+	$includedReasonCount = if ([string]::IsNullOrEmpty($includedText)) {
+		0
+	}
+	else {
+		@($includedText -split '; ').Count
+	}
+	$reportedOmittedReasonCount = [int]$omissionMatch.Groups['omitted'].Value
+	$expectedOmittedReasonCount = $largePlan.Reasons.Count - $includedReasonCount
+	if ($reportedOmittedReasonCount -ne $expectedOmittedReasonCount) {
+		throw "[Large summary] Expected $expectedOmittedReasonCount omitted reasons, reported $reportedOmittedReasonCount."
+	}
+
+	$markdownSummaryBytes = [IO.File]::ReadAllBytes($temporaryStepSummaryPath)
+	if ($markdownSummaryBytes.Length -gt 512KB) {
+		throw '[Large summary] Step summary exceeded the 512 KiB UTF-8 limit.'
+	}
+
+	$markdownSummary = $utf8Encoding.GetString($markdownSummaryBytes)
+	$markdownReasonLines = @(($markdownSummary -split "`n") | Where-Object { $_.StartsWith('- ') })
+	$markdownOmissionMatch = [regex]::Match(
+		$markdownReasonLines[-1],
+		'^\- \.\.\. \(\+(?<omitted>\d+) more reasons\)$')
+	if (-not $markdownOmissionMatch.Success) {
+		throw '[Large summary] Expected the step summary to end with an omission marker.'
+	}
+
+	$reportedMarkdownOmissionCount = [int]$markdownOmissionMatch.Groups['omitted'].Value
+	$expectedMarkdownOmissionCount = $largePlan.Reasons.Count - ($markdownReasonLines.Count - 1)
+	if ($reportedMarkdownOmissionCount -ne $expectedMarkdownOmissionCount) {
+		throw "[Large summary] Expected $expectedMarkdownOmissionCount omitted Markdown reasons, reported $reportedMarkdownOmissionCount."
+	}
+}
+finally {
+	$env:GITHUB_STEP_SUMMARY = $originalStepSummaryPath
+	Remove-Item -LiteralPath $temporaryOutputPath, $temporaryStepSummaryPath -Force -ErrorAction SilentlyContinue
+}
+
 Write-Host 'CI change planner contract tests passed.'
