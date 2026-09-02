@@ -222,6 +222,20 @@ public sealed class GitScopeSelectionTests
 		Assert.Equal("1", startInfo.Environment["GIT_NO_LAZY_FETCH"]);
 	}
 
+	[Theory]
+	[InlineData("/private/var/folders/session/repo", "/var/folders/session/repo")]
+	[InlineData("/private/tmp/repo", "/tmp/repo")]
+	[InlineData("/private/var", "/var")]
+	[InlineData("/private/tmp", "/tmp")]
+	[InlineData("/Users/private/var/repo", "/Users/private/var/repo")]
+	public void GitScopeRootComparisonNormalizesOnlyMacOsSystemPathAliases(
+		string path,
+		string expected)
+	{
+		Assert.Equal(expected, GitScopePathProvider.NormalizeMacOsSystemPathAlias(path, isMacOs: true));
+		Assert.Equal(path, GitScopePathProvider.NormalizeMacOsSystemPathAlias(path, isMacOs: false));
+	}
+
 	[Fact]
 	public void ChangesOutputBudgetIsAtomicAcrossConcurrentReaders()
 	{

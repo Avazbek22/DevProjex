@@ -310,13 +310,34 @@ public sealed class GitScopePathProvider : IGitScopePathProvider
 		try
 		{
 			return PathComparer.Default.Equals(
-				PathUtility.Normalize(topLevel),
-				expectedRepositoryRoot);
+				NormalizeMacOsSystemPathAlias(
+					PathUtility.Normalize(topLevel),
+					OperatingSystem.IsMacOS()),
+				NormalizeMacOsSystemPathAlias(
+					expectedRepositoryRoot,
+					OperatingSystem.IsMacOS()));
 		}
 		catch (Exception exception) when (exception is ArgumentException or IOException or NotSupportedException)
 		{
 			return false;
 		}
+	}
+
+	internal static string NormalizeMacOsSystemPathAlias(string path, bool isMacOs)
+	{
+		ArgumentNullException.ThrowIfNull(path);
+		if (!isMacOs)
+			return path;
+
+		if (path.Equals("/private/var", StringComparison.Ordinal) ||
+		    path.StartsWith("/private/var/", StringComparison.Ordinal) ||
+		    path.Equals("/private/tmp", StringComparison.Ordinal) ||
+		    path.StartsWith("/private/tmp/", StringComparison.Ordinal))
+		{
+			return path["/private".Length..];
+		}
+
+		return path;
 	}
 
 	private static void ReconcileWorkingTreePaths(
