@@ -636,7 +636,17 @@ public sealed class TerminalSettingsPanelPtyTests
 			await WaitForAppliedCommandAsync(
 				terminal,
 				"dot folders: disabled",
-				"(•) No Git filtering");
+				"PARAMETERS");
+			var parameters = await WaitForStableScreenAsync(
+				terminal,
+				"PARAMETERS",
+				static screen =>
+					!screen.Contains("No Git filtering", StringComparison.Ordinal) &&
+					!screen.Contains("Use .gitignore", StringComparison.Ordinal) &&
+					!screen.Contains("M Cycle Git mode", StringComparison.Ordinal));
+			Assert.DoesNotContain("No Git filtering", parameters, StringComparison.Ordinal);
+			Assert.DoesNotContain("Use .gitignore", parameters, StringComparison.Ordinal);
+			Assert.DoesNotContain("M Cycle Git mode", parameters, StringComparison.Ordinal);
 		}
 		finally
 		{
