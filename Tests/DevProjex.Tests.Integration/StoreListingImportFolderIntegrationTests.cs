@@ -104,7 +104,7 @@ public sealed class StoreListingImportFolderIntegrationTests
             imagePath,
             expectedWidth: 2048,
             expectedHeight: 1280,
-            requireOpaqueRgb: requireUniqueImages));
+            requireOpaquePixels: requireUniqueImages));
         if (!requireUniqueImages)
         {
             return;
@@ -137,7 +137,7 @@ public sealed class StoreListingImportFolderIntegrationTests
         string path,
         int expectedWidth,
         int expectedHeight,
-        bool requireOpaqueRgb)
+        bool requireOpaquePixels)
     {
         Span<byte> header = stackalloc byte[26];
         using var stream = File.OpenRead(path);
@@ -146,10 +146,51 @@ public sealed class StoreListingImportFolderIntegrationTests
         Assert.Equal(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }, header[..8].ToArray());
         Assert.Equal(expectedWidth, BinaryPrimitives.ReadInt32BigEndian(header[16..20]));
         Assert.Equal(expectedHeight, BinaryPrimitives.ReadInt32BigEndian(header[20..24]));
-        if (requireOpaqueRgb)
+        if (requireOpaquePixels)
         {
-            Assert.Equal(2, header[25]);
+            var colorType = header[25];
+            Assert.True(
+                colorType is 2 or 3,
+                $"{path} must use truecolor or indexed color, but its PNG color type is {colorType}.");
+            if (colorType == 3)
+                AssertIndexedPngIsOpaque(stream, path);
         }
+    }
+
+    private static void AssertIndexedPngIsOpaque(Stream stream, string path)
+    {
+        stream.Position = 8;
+        Span<byte> chunkHeader = stackalloc byte[8];
+        Span<byte> transparency = stackalloc byte[256];
+        while (stream.Position + 12 <= stream.Length)
+        {
+            stream.ReadExactly(chunkHeader);
+            var dataLength = BinaryPrimitives.ReadUInt32BigEndian(chunkHeader[..4]);
+            var isTransparencyChunk = chunkHeader[4..].SequenceEqual("tRNS"u8);
+            Assert.True(
+                stream.Length - stream.Position >= dataLength + 4,
+                $"{path} contains a truncated PNG chunk.");
+
+            if (isTransparencyChunk)
+            {
+                Assert.InRange(dataLength, 1u, (uint)transparency.Length);
+                var alphaValues = transparency[..checked((int)dataLength)];
+                stream.ReadExactly(alphaValues);
+                Assert.True(
+                    alphaValues.IndexOfAnyExcept(byte.MaxValue) < 0,
+                    $"{path} contains a non-opaque indexed palette entry.");
+            }
+            else
+            {
+                stream.Position += dataLength;
+            }
+
+            stream.Position += 4;
+            if (chunkHeader[4..].SequenceEqual("IEND"u8))
+                return;
+        }
+
+        Assert.Fail($"{path} does not contain a complete PNG end chunk.");
     }
 
     [Fact]
