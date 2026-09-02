@@ -1,7 +1,45 @@
+using DevProjex.Application.Diagnostics;
+
 namespace DevProjex.Tests.Integration;
 
 public sealed class ProjectWorkspaceScanSnapshotIntegrationTests
 {
+	[Fact]
+	public void WorkspaceSnapshot_ReusesDiscoveryEnumerationForNestedFiles()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("src/App.cs", "class App {}");
+		temp.CreateFile("src/Nested/Feature.cs", "class Feature {}");
+		var rules = new IgnoreRules(
+			IgnoreHiddenFolders: false,
+			IgnoreHiddenFiles: false,
+			IgnoreDotFolders: false,
+			IgnoreDotFiles: false,
+			SmartIgnoredFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+			SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+
+		using var measurement = IgnorePipelineDiagnostics.BeginMeasurement();
+		var snapshot = new ScanOptionsUseCase(new FileSystemScanner())
+			.GetProjectWorkspaceSnapshotForRootFolders(
+				temp.Path,
+				["src"],
+				rules,
+				rules,
+				effectiveExtensionPolicy: null,
+				includeDirectoryToggleProbeRoots: false,
+				cancellationToken: TestContext.Current.CancellationToken,
+				includeControllerImpactProbeRoots: false);
+		var diagnostics = measurement.Capture();
+		var inventory = Assert.IsType<ProjectTreeInventorySnapshot>(snapshot.Value.TreeInventory);
+
+		Assert.Contains(inventory.Entries, static entry => entry.Name == "App.cs");
+		Assert.Contains(inventory.Entries, static entry => entry.Name == "Feature.cs");
+		Assert.True(diagnostics.CombinedEntryEnumerations >= 2);
+		Assert.True(
+			diagnostics.FileEnumerations < diagnostics.CombinedEntryEnumerations,
+			$"Nested files were enumerated twice: {diagnostics}.");
+	}
+
 	[Fact]
 	public void WorkspaceSnapshot_ProjectsSameTreeInventoryAsSeparateTreeScanner()
 	{

@@ -1,8 +1,7 @@
 namespace DevProjex.Tests.Unit;
 
 /// <summary>
-/// Unit tests for GitRepositoryService helper methods.
-/// Tests URL extraction, error parsing, and validation logic without requiring Git.
+/// Unit tests for GitRepositoryService process and parsing contracts without requiring Git.
 /// </summary>
 public class GitRepositoryServiceUnitTests
 {
@@ -13,7 +12,7 @@ public class GitRepositoryServiceUnitTests
     {
         var startInfo = GitRepositoryService.CreateGitCommandStartInfo(
             workingDirectory: null,
-            arguments: "--version");
+            arguments: ["--version"]);
 
         Assert.False(startInfo.UseShellExecute);
         Assert.True(startInfo.RedirectStandardInput);
@@ -29,247 +28,432 @@ public class GitRepositoryServiceUnitTests
         Assert.Equal("never", startInfo.Environment["SSH_ASKPASS_REQUIRE"]);
         Assert.Equal("Never", startInfo.Environment["GCM_INTERACTIVE"]);
         Assert.Equal("false", startInfo.Environment["GCM_GUI_PROMPT"]);
+		var expectedArguments = OperatingSystem.IsWindows()
+			? new[] { "-c", "core.longpaths=true", "--version" }
+			: ["--version"];
+		Assert.Equal(expectedArguments, startInfo.ArgumentList);
     }
 
-    #region Repository Name Extraction Tests
+	[Fact]
+	public async Task WorktreeSupportProbe_TransientFailureIsReportedAndSuccessIsCached()
+	{
+		var calls = 0;
+		var manager = new GitWorktreeManager(_ => Task.FromResult(
+			Interlocked.Increment(ref calls) == 1
+				? WorktreeSupportState.TransientFailure
+				: WorktreeSupportState.Supported));
 
-    [Theory]
-    [InlineData("https://github.com/user/repo", "repo")]
-    [InlineData("https://github.com/user/my-repo", "my-repo")]
-    [InlineData("https://github.com/user/repo.git", "repo")]
-    [InlineData("https://github.com/org/project-name", "project-name")]
-    public void RepositoryUrl_ExtractsName_FromUrl(string url, string expectedName)
-    {
-        // Test URL parsing logic (structural test)
-        var uri = new Uri(url);
-        var pathParts = uri.AbsolutePath.Trim('/').Split('/');
-        var repoNameWithGit = pathParts[^1];
-        var repoName = repoNameWithGit.EndsWith(".git") ? repoNameWithGit[..^4] : repoNameWithGit;
+		Assert.Equal(
+			WorktreeSupportState.TransientFailure,
+			await manager.GetSupportStateAsync("repo", TestContext.Current.CancellationToken));
+		Assert.Equal(
+			WorktreeSupportState.Supported,
+			await manager.GetSupportStateAsync("repo", TestContext.Current.CancellationToken));
+		Assert.Equal(
+			WorktreeSupportState.Supported,
+			await manager.GetSupportStateAsync("repo", TestContext.Current.CancellationToken));
+		Assert.Equal(2, calls);
+	}
 
-        Assert.Equal(expectedName, repoName);
-    }
+	[Fact]
+	public async Task WorktreeProcessOutput_AtLimitIsPreserved()
+	{
+		const int limit = 257;
+		var expected = new string('x', limit);
+		using var reader = new StringReader(expected);
 
-    #endregion
+		var result = await GitProcessOutputReader.ReadAsync(
+			reader,
+			limit,
+			TestContext.Current.CancellationToken);
 
-    #region Error Message Detection Tests
+		Assert.False(result.ExceededLimit);
+		Assert.Equal(expected, result.Text);
+	}
 
-    [Theory]
-    [InlineData("Repository not found")]
-    [InlineData("fatal: repository 'https://github.com/user/repo' not found")]
-    [InlineData("ERROR: Repository not found")]
-    public void GitErrors_NotFound_ContainKeywords(string gitError)
-    {
-        // Structural test - verify error messages contain expected keywords
-        Assert.Contains("not found", gitError, StringComparison.OrdinalIgnoreCase);
-    }
+	[Fact]
+	public async Task WorktreeProcessOutput_OverLimitIsDrainedAndRejected()
+	{
+		const int limit = 257;
+		using var reader = new StringReader(new string('x', limit + 4096));
 
-    [Theory]
-    [InlineData("Authentication failed")]
-    [InlineData("fatal: Authentication failed for 'https://github.com/private/repo'")]
-    [InlineData("Permission denied")]
-    public void GitErrors_Authentication_ContainKeywords(string gitError)
-    {
-        // Structural test
-        Assert.True(
-            gitError.Contains("authentication", StringComparison.OrdinalIgnoreCase) ||
-            gitError.Contains("permission", StringComparison.OrdinalIgnoreCase)
-        );
-    }
+		var result = await GitProcessOutputReader.ReadAsync(
+			reader,
+			limit,
+			TestContext.Current.CancellationToken);
 
-    [Theory]
-    [InlineData("Could not resolve host")]
-    [InlineData("Network is unreachable")]
-    public void GitErrors_Network_ContainKeywords(string gitError)
-    {
-        // Structural test
-        Assert.True(
-            gitError.Contains("network", StringComparison.OrdinalIgnoreCase) ||
-            gitError.Contains("resolve", StringComparison.OrdinalIgnoreCase)
-        );
-    }
+		Assert.True(result.ExceededLimit);
+		Assert.Empty(result.Text);
+		Assert.Equal(-1, reader.Peek());
+	}
 
-    #endregion
+	[Fact]
+	public async Task WorktreeProcessOutput_CancellationObservationWaitsForPipeCleanup()
+	{
+		var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var reader = Task.Run(
+			async () =>
+			{
+				await release.Task;
+				throw new IOException("Pipe closed during process cancellation.");
+			},
+			TestContext.Current.CancellationToken);
+
+		var observation = GitProcessOutputReader.ObserveCompletionAsync(reader);
+		Assert.False(observation.IsCompleted);
+
+		release.SetResult();
+		await observation;
+		Assert.True(reader.IsFaulted);
+	}
+
+	[Fact]
+	public async Task ExitedProcessOutputDrainClosesStuckReadersWithinTheBoundedCleanup()
+	{
+		var reader = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var closeCount = 0;
+
+		var drainedNormally = await GitProcessOutputReader.WaitForCompletionAfterExitAsync(
+			() =>
+			{
+				Interlocked.Increment(ref closeCount);
+				reader.TrySetException(new IOException("Pipe closed."));
+			},
+			TimeSpan.FromMilliseconds(50),
+			reader.Task);
+
+		Assert.False(drainedNormally);
+		Assert.Equal(1, closeCount);
+		Assert.True(reader.Task.IsFaulted);
+	}
+
+	[Fact]
+	public async Task WorktreeSupportProbe_FaultedProbeIsRetriedOnNextRequest()
+	{
+		var calls = 0;
+		var manager = new GitWorktreeManager(_ =>
+		{
+			calls++;
+			return calls == 1
+				? Task.FromException<WorktreeSupportState>(new IOException("transient probe failure"))
+				: Task.FromResult(WorktreeSupportState.Supported);
+		});
+
+		await Assert.ThrowsAsync<IOException>(() => manager.GetSupportStateAsync("repo", CancellationToken.None));
+		Assert.Equal(
+			WorktreeSupportState.Supported,
+			await manager.GetSupportStateAsync("repo", CancellationToken.None));
+		Assert.Equal(
+			WorktreeSupportState.Supported,
+			await manager.GetSupportStateAsync("repo", CancellationToken.None));
+		Assert.Equal(2, calls);
+	}
+
+	[Fact]
+	public async Task WorktreeSupportProbe_TransientResultAfterWaiterCancellationIsRetried()
+	{
+		var calls = 0;
+		var firstProbe = new TaskCompletionSource<WorktreeSupportState>(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		var manager = new GitWorktreeManager(_ => Interlocked.Increment(ref calls) == 1
+			? firstProbe.Task
+			: Task.FromResult(WorktreeSupportState.Supported));
+		using var cancellation = new CancellationTokenSource();
+
+		var canceledWaiter = manager.GetSupportStateAsync("repository", cancellation.Token);
+		cancellation.Cancel();
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(() => canceledWaiter);
+		firstProbe.SetResult(WorktreeSupportState.TransientFailure);
+		await firstProbe.Task;
+
+		Assert.Equal(
+			WorktreeSupportState.Supported,
+			await manager.GetSupportStateAsync("repository", TestContext.Current.CancellationToken));
+		Assert.Equal(2, calls);
+	}
+
+	[Fact]
+	public async Task WorktreeSupportProbe_TimeoutIsTransientAndNextRequestStartsNewProbe()
+	{
+		var probeCount = 0;
+		var cancellationObserved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var manager = new GitWorktreeManager(
+			async (_, _, cancellationToken) =>
+			{
+				var attempt = Interlocked.Increment(ref probeCount);
+				if (attempt > 1)
+					return new GitWorktreeManager.GitProcessResult(0, string.Empty, string.Empty);
+				try
+				{
+					await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+				}
+				catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+				{
+					cancellationObserved.TrySetResult();
+					throw;
+				}
+				return new GitWorktreeManager.GitProcessResult(-1, string.Empty, string.Empty);
+			},
+			TimeSpan.FromMilliseconds(50));
+
+		Assert.Equal(
+			WorktreeSupportState.TransientFailure,
+			await manager.GetSupportStateAsync("repository", TestContext.Current.CancellationToken));
+		await cancellationObserved.Task.WaitAsync(
+			TimeSpan.FromSeconds(2),
+			TestContext.Current.CancellationToken);
+		Assert.Equal(
+			WorktreeSupportState.Supported,
+			await manager.GetSupportStateAsync("repository", TestContext.Current.CancellationToken));
+		Assert.Equal(2, probeCount);
+	}
+
+	[Fact]
+	public async Task WorktreeSupportProbe_TransientProcessStartFailureIsRetried()
+	{
+		var probeCount = 0;
+		var manager = new GitWorktreeManager(
+			(_, _, _) => Interlocked.Increment(ref probeCount) == 1
+				? Task.FromException<GitWorktreeManager.GitProcessResult>(
+					new System.ComponentModel.Win32Exception(5))
+				: Task.FromResult(new GitWorktreeManager.GitProcessResult(0, string.Empty, string.Empty)),
+			TimeSpan.FromSeconds(1));
+
+		Assert.Equal(
+			WorktreeSupportState.TransientFailure,
+			await manager.GetSupportStateAsync("repository", TestContext.Current.CancellationToken));
+		Assert.Equal(
+			WorktreeSupportState.Supported,
+			await manager.GetSupportStateAsync("repository", TestContext.Current.CancellationToken));
+		Assert.Equal(2, probeCount);
+	}
+
+	[Fact]
+	public async Task WorktreeSupportProbe_MissingGitExecutableIsCachedAsPermanent()
+	{
+		var probeCount = 0;
+		var manager = new GitWorktreeManager(
+			(_, _, _) =>
+			{
+				Interlocked.Increment(ref probeCount);
+				return Task.FromException<GitWorktreeManager.GitProcessResult>(
+					new System.ComponentModel.Win32Exception(2));
+			},
+			TimeSpan.FromSeconds(1));
+
+		Assert.Equal(
+			WorktreeSupportState.PermanentUnsupported,
+			await manager.GetSupportStateAsync("repository", TestContext.Current.CancellationToken));
+		Assert.Equal(
+			WorktreeSupportState.PermanentUnsupported,
+			await manager.GetSupportStateAsync("repository", TestContext.Current.CancellationToken));
+		Assert.Equal(1, probeCount);
+	}
+
+	[Fact]
+	public async Task DetachedWorktree_VerificationFailureIsNotMaskedByStalledCleanup()
+	{
+		var cleanupStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var manager = new GitWorktreeManager(
+			async (_, arguments, cancellationToken) =>
+			{
+				if (arguments is ["rev-parse", "--verify", "--quiet", _])
+					return new GitWorktreeManager.GitProcessResult(0, "0123456789abcdef\n", string.Empty);
+				if (arguments is ["worktree", "add", ..])
+					return new GitWorktreeManager.GitProcessResult(0, string.Empty, string.Empty);
+				if (arguments is ["rev-parse", "HEAD"])
+					throw new IOException("verification failed");
+				if (arguments is ["worktree", "remove", ..])
+				{
+					cleanupStarted.TrySetResult();
+					await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+				}
+				throw new InvalidOperationException("Unexpected git command.");
+			},
+			TimeSpan.FromSeconds(1),
+			TimeSpan.FromMilliseconds(25));
+
+		var exception = await Assert.ThrowsAsync<IOException>(() => manager.CreateDetachedAsync(
+			"repository",
+			"worktree",
+			branch: null,
+			TestContext.Current.CancellationToken));
+
+		Assert.Equal("verification failed", exception.Message);
+		Assert.True(cleanupStarted.Task.IsCompletedSuccessfully);
+	}
+
+	[Theory]
+	[InlineData("feature/space+plus")]
+	[InlineData("release/v1.2@beta")]
+	[InlineData("feature.LOCK")]
+	[InlineData("feature/next\u0085checkpoint")]
+	[InlineData("@")]
+	[InlineData("тема/исправление")]
+	public void BranchNameValidator_AcceptsValidUnusualNames(string branchName)
+	{
+		Assert.True(GitBranchNameValidator.IsValid(branchName));
+		Assert.Equal(branchName, GitBranchNameValidator.ValidateAndNormalize(branchName));
+	}
+
+	[Theory]
+	[InlineData("-feature")]
+	[InlineData("feature..next")]
+	[InlineData("feature lock")]
+	[InlineData("feature/@{next")]
+	[InlineData("feature/.hidden")]
+	[InlineData("feature.lock")]
+	[InlineData("feature\\name")]
+	[InlineData("feature/next\u001Fcheckpoint")]
+	[InlineData("feature/next\u007Fcheckpoint")]
+	public void BranchNameValidator_RejectsInvalidNamesBeforeCommandConstruction(string branchName)
+	{
+		Assert.False(GitBranchNameValidator.IsValid(branchName));
+		Assert.Throws<ArgumentException>(() => GitBranchNameValidator.ValidateAndNormalize(branchName));
+	}
+
+	[Theory]
+	[InlineData("https://github.com/user/repo", "repo")]
+	[InlineData("https://github.com/user/my-repo.git", "my-repo")]
+	[InlineData("git@github.com:user/repo.git", "repo")]
+	[InlineData("https://github.com/org/project-name?tab=readme", "project-name")]
+	public void ExtractRepositoryName_UsesTheCloneMetadataParser(string url, string expectedName)
+	{
+		Assert.Equal(expectedName, GitRepositoryService.ExtractRepositoryName(url));
+	}
+
+	[Theory]
+	[InlineData("fatal: repository 'https://github.com/user/repo' not found", "Invalid repository URL or repository does not exist")]
+	[InlineData("fatal: unable to access: Could not resolve host", "Network error - check your internet connection")]
+	[InlineData("fatal: Authentication failed for private repository", "Authentication failed - repository may be private")]
+	[InlineData("Permission denied (publickey)", "Authentication failed - repository may be private")]
+	[InlineData("operation timed out", "Connection timeout - repository may be too large or network is slow")]
+	[InlineData("", "Clone failed")]
+	public void ParseGitCloneError_MapsKnownFailureClasses(string gitError, string expected)
+	{
+		Assert.Equal(expected, GitRepositoryService.ParseGitCloneError(gitError));
+	}
+
+	[Fact]
+	public void ParseGitCloneError_DoesNotEchoUnknownAuthenticatedStderr()
+	{
+		const string stderr = "fatal: transport rejected https://user:token@example.test/repo";
+
+		var result = GitRepositoryService.ParseGitCloneError(stderr);
+
+		Assert.Equal("Clone failed", result);
+		Assert.DoesNotContain("token", result, StringComparison.Ordinal);
+	}
 
     #region Default Branch Detection Tests
 
     [Fact]
     public void GetDefaultBranchAsync_UsesCommonDefaults()
     {
-        // Test that common default branch names are recognized
-        // This is a structural test - actual implementation uses git commands
-        var commonDefaults = new[] { "main", "master", "develop" };
-
-        Assert.All(commonDefaults, name => Assert.NotEmpty(name));
+        Assert.Equal(
+            "release/v1",
+            GitRepositoryService.ResolveRemoteHeadBranch("refs/remotes/origin/release/v1\n"));
+        Assert.Equal(
+            "main",
+            GitRepositoryService.ResolveCommonDefaultBranch("  origin/master\n  origin/main\n"));
+        Assert.Equal(
+            "master",
+            GitRepositoryService.ResolveCommonDefaultBranch("  origin/master\n"));
+        Assert.Equal(
+            "main",
+            GitRepositoryService.ResolveCommonDefaultBranch("  origin/HEAD -> origin/main\n"));
     }
-
-    #endregion
-
-    #region Shallow Clone Optimization Tests
-
-    [Fact]
-    public void CloneCommand_IncludesDepthOne()
-    {
-        // Verify shallow clone optimization is used
-        // The actual command should include --depth 1 for performance
-        var testUrl = "https://github.com/user/repo";
-        var testPath = "/tmp/test";
-
-        // This is a structural test verifying the pattern is correct
-        Assert.StartsWith("https://", testUrl);
-        Assert.NotEmpty(testPath);
-    }
-
-    #endregion
-
-    #region Branch Name Validation Tests
 
     [Theory]
-    [InlineData("main")]
-    [InlineData("master")]
-    [InlineData("develop")]
-    [InlineData("feature/new-feature")]
-    [InlineData("bugfix/fix-123")]
-    [InlineData("release/v1.0")]
-    public void BranchNames_ValidFormats_AreValid(string branchName)
+    [InlineData("origin/mainline")]
+    [InlineData("origin/masterpiece")]
+    [InlineData("origin/user/main")]
+    public void GetDefaultBranchAsync_DoesNotMatchBranchNameSubstrings(string remoteBranch)
     {
-        // Valid branch names should not contain forbidden characters
-        Assert.DoesNotContain(" ", branchName);
-        Assert.DoesNotContain("\t", branchName);
-        Assert.DoesNotContain("\n", branchName);
-        Assert.NotEmpty(branchName);
+        Assert.Null(GitRepositoryService.ResolveCommonDefaultBranch(remoteBranch));
     }
 
     [Theory]
     [InlineData("")]
-    [InlineData(" ")]
-    [InlineData("\t")]
-    [InlineData("\n")]
-    public void BranchNames_InvalidFormats_AreInvalid(string branchName)
+    [InlineData("refs/remotes/upstream/main")]
+    [InlineData("refs/remotes/origin/")]
+    public void GetDefaultBranchAsync_RejectsMalformedRemoteHead(string symbolicReference)
     {
-        // Invalid branch names
-        Assert.True(string.IsNullOrWhiteSpace(branchName));
+        Assert.Null(GitRepositoryService.ResolveRemoteHeadBranch(symbolicReference));
     }
 
     #endregion
 
-    #region URL Format Tests
+	[Theory]
+	[InlineData("Receiving objects: 50% (500/1000)", 50)]
+	[InlineData("remote: Counting objects: 100% (12/12)", 100)]
+	[InlineData("prefix 150% then 7%", 7)]
+	public void TryExtractProgressPercent_ReturnsTheFirstValidPercentage(string message, int expected)
+	{
+		Assert.True(GitRepositoryService.TryExtractProgressPercent(message, out var percent));
+		Assert.Equal(expected, percent);
+	}
 
-    [Theory]
-    [InlineData("https://github.com/user/repo")]
-    [InlineData("https://github.com/user/repo.git")]
-    [InlineData("https://gitlab.com/org/project")]
-    [InlineData("https://bitbucket.org/team/app")]
-    public void GitUrls_CommonFormats_AreValid(string url)
-    {
-        Assert.True(Uri.TryCreate(url, UriKind.Absolute, out var uri));
-        Assert.True(uri.Scheme == "https" || uri.Scheme == "http");
-    }
+	[Theory]
+	[InlineData("")]
+	[InlineData("Receiving objects without percentage")]
+	[InlineData("Receiving objects: 101%")]
+	[InlineData("Receiving objects: -1%")]
+	[InlineData("Receiving objects: 1.5%")]
+	[InlineData("Receiving objects: phase1%")]
+	public void TryExtractProgressPercent_RejectsMissingOrOutOfRangeValues(string message)
+	{
+		Assert.False(GitRepositoryService.TryExtractProgressPercent(message, out _));
+	}
 
-    [Theory]
-    [InlineData("")]
-    [InlineData("not a url")]
-    [InlineData("ftp://github.com/user/repo")]
-    [InlineData("file:///C:/repos/local")]
-    public void GitUrls_InvalidFormats_AreInvalid(string url)
-    {
-        if (string.IsNullOrWhiteSpace(url))
-        {
-            Assert.True(string.IsNullOrWhiteSpace(url));
-        }
-        else
-        {
-            var isValid = Uri.TryCreate(url, UriKind.Absolute, out var uri) &&
-                          (uri.Scheme == "https" || uri.Scheme == "http");
-            Assert.False(isValid);
-        }
-    }
+	[Theory]
+	[InlineData("Receiving objects: 50% (5/10)", true)]
+	[InlineData(" remote: Enumerating objects: 12", true)]
+	[InlineData("remote: warning https://user:token@example.test 50%", false)]
+	[InlineData("fatal: Authentication failed 50%", false)]
+	public void IsSafeGitProgressLine_UsesAClosedPhaseAllowlist(string message, bool expected)
+	{
+		Assert.Equal(expected, GitRepositoryService.IsSafeGitProgressLine(message));
+	}
 
-    #endregion
+	[Theory]
+	[InlineData("Receiving objects: 50% (5/10)", 50, true, false)]
+	[InlineData("fatal: Authentication failed 50%", 50, false, true)]
+	[InlineData("remote: warning https://user:token@example.test 50%", 50, false, true)]
+	[InlineData("fatal: repository not found", null, false, true)]
+	public void ClassifyGitStderrLine_RetainsErrorsThatContainPercentages(
+		string message,
+		int? expectedPercent,
+		bool expectedSafeProgressLine,
+		bool expectedRetainForError)
+	{
+		var classification = GitRepositoryService.ClassifyGitStderrLine(message);
 
-    #region Path Handling Tests
+		Assert.Equal(expectedPercent, classification.Percent);
+		Assert.Equal(expectedSafeProgressLine, classification.IsSafeProgressLine);
+		Assert.Equal(expectedRetainForError, classification.RetainForError);
+	}
 
-    [Theory]
-    [InlineData(@"C:\temp\repo")]
-    [InlineData(@"C:\Users\Name\Documents\Projects\repo")]
-    [InlineData(@"D:\repos\my-project")]
-    public void RepositoryPaths_WindowsFormat_AreValid(string path)
-    {
-        if (OperatingSystem.IsWindows())
-        {
-            Assert.True(Path.IsPathRooted(path));
-            Assert.DoesNotContain("//", path.Replace("\\", "/"));
-        }
-    }
+	[Fact]
+	public async Task GitProcessLinePump_SplitsEveryLineEndingAndBoundsFrames()
+	{
+		var frames = new List<GitProcessLineFrame>();
+		var input = new string('x', 4_095) + "\r\none\rtwo\n\nend";
 
-    [Theory]
-    [InlineData("/tmp/repo")]
-    [InlineData("/home/user/repos/project")]
-    [InlineData("/var/git/my-repo")]
-    public void RepositoryPaths_UnixFormat_AreValid(string path)
-    {
-        if (!OperatingSystem.IsWindows())
-        {
-            Assert.True(Path.IsPathRooted(path));
-            Assert.DoesNotContain("\\", path);
-        }
-    }
+		await GitProcessLinePump.ReadAsync(
+			new StringReader(input),
+			maximumFrameCharacters: 10,
+			frames.Add,
+			TestContext.Current.CancellationToken);
 
-    #endregion
-
-    #region Command Building Tests
-
-    [Fact]
-    public void GitCommands_QuotesPaths()
-    {
-        // Paths with spaces should be quoted
-        var pathWithSpaces = @"C:\My Documents\repo";
-        var quoted = $"\"{pathWithSpaces}\"";
-
-        Assert.StartsWith("\"", quoted);
-        Assert.EndsWith("\"", quoted);
-    }
-
-    [Fact]
-    public void GitCommands_HandlesSpecialCharacters()
-    {
-        // Special characters in paths should be handled
-        var specialPath = @"C:\repo's\my-project";
-
-        Assert.Contains("'", specialPath);
-        // Should be able to handle such paths
-        Assert.NotEmpty(specialPath);
-    }
-
-    #endregion
-
-    #region Progress Reporting Tests
-
-    [Fact]
-    public void ProgressMessages_ContainPercentages()
-    {
-        // Progress messages typically contain percentages
-        var exampleMessages = new[]
-        {
-            "Cloning: 25%",
-            "Downloading: 50%",
-            "Receiving objects: 75%",
-            "Resolving deltas: 100%"
-        };
-
-        Assert.All(exampleMessages, msg =>
-        {
-            Assert.Contains("%", msg);
-        });
-    }
-
-    [Theory]
-    [InlineData("Receiving objects: 50% (500/1000)")]
-    [InlineData("Resolving deltas: 100% (100/100)")]
-    public void ProgressMessages_ParseCorrectly(string message)
-    {
-        Assert.Contains("%", message);
-        Assert.Matches(@"\d+%", message);
-    }
-
-    #endregion
+		Assert.Equal(
+			[
+				new GitProcessLineFrame(new string('x', 10), ExceededLimit: true),
+				new GitProcessLineFrame("one", ExceededLimit: false),
+				new GitProcessLineFrame("two", ExceededLimit: false),
+				new GitProcessLineFrame(string.Empty, ExceededLimit: false),
+				new GitProcessLineFrame("end", ExceededLimit: false)
+			],
+			frames);
+	}
 }

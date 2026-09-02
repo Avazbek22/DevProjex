@@ -7,6 +7,7 @@ namespace DevProjex.Terminal.DesktopControl;
 
 public sealed class DesktopControlServer : IAsyncDisposable
 {
+	internal static readonly TimeSpan RequestReceiveTimeout = TimeSpan.FromSeconds(5);
 	private static readonly JsonSerializerOptions JsonOptions = new()
 	{
 		PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -16,6 +17,7 @@ public sealed class DesktopControlServer : IAsyncDisposable
 	private readonly DesktopInstanceRegistry _registry;
 	private readonly DesktopControlPaths _paths;
 	private readonly CancellationTokenSource _shutdown = new();
+	private readonly SemaphoreSlim _registrationGate = new(1, 1);
 	private readonly object _stateLock = new();
 	private DesktopInstanceRegistration _registration;
 	private Socket? _unixListener;
@@ -82,18 +84,13 @@ public sealed class DesktopControlServer : IAsyncDisposable
 		string? projectPath,
 		CancellationToken cancellationToken = default)
 	{
-		DesktopInstanceRegistration registration;
-		lock (_stateLock)
-		{
-			_registration = _registration with
+		await PersistRegistrationUpdateAsync(
+			registration => registration with
 			{
 				ProjectPath = NormalizeOptionalPath(projectPath),
 				LastActiveUtc = DateTimeOffset.UtcNow
-			};
-			registration = _registration;
-		}
-
-		await _registry.RegisterAsync(registration, cancellationToken).ConfigureAwait(false);
+			},
+			cancellationToken).ConfigureAwait(false);
 	}
 
 	public async ValueTask DisposeAsync()
@@ -119,9 +116,17 @@ public sealed class DesktopControlServer : IAsyncDisposable
 			}
 		}
 
-		await _registry.UnregisterAsync(_registration.InstanceId).ConfigureAwait(false);
-		if (_registration.Transport == "unix")
-			DesktopInstanceRegistry.TryDelete(_registration.Endpoint);
+		await _registrationGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+		try
+		{
+			await _registry.UnregisterAsync(_registration.InstanceId).ConfigureAwait(false);
+			if (_registration.Transport == "unix")
+				DesktopInstanceRegistry.TryDelete(_registration.Endpoint);
+		}
+		finally
+		{
+			_registrationGate.Release();
+		}
 		_shutdown.Dispose();
 	}
 
@@ -187,16 +192,20 @@ public sealed class DesktopControlServer : IAsyncDisposable
 		string requestId = string.Empty;
 		try
 		{
-			var json = await ReadMessageAsync(stream, cancellationToken).ConfigureAwait(false);
+			var json = await ReadMessageAsync(
+				stream,
+				RequestReceiveTimeout,
+				cancellationToken).ConfigureAwait(false);
 			var request = JsonSerializer.Deserialize<DesktopProtocolRequest>(json, JsonOptions) ??
 			              throw new JsonException();
-			requestId = request.RequestId;
 			if (request.ProtocolVersion != DesktopProtocol.CurrentVersion)
 			{
 				throw new DesktopControlException(
 					"DPX-DESKTOP-PROTOCOL-MISMATCH",
 					"The desktop control protocol version is not supported.");
 			}
+			ValidateRequestEnvelope(request);
+			requestId = request.RequestId;
 			if (!string.IsNullOrWhiteSpace(request.InstanceId) &&
 			    !request.InstanceId.Equals(_registration.InstanceId, StringComparison.Ordinal))
 			{
@@ -232,12 +241,19 @@ public sealed class DesktopControlServer : IAsyncDisposable
 		{
 			response = Failure(requestId, exception.Code, exception.Message);
 		}
-		catch
+		catch (Exception exception) when (exception is JsonException or DecoderFallbackException)
 		{
 			response = Failure(
 				requestId,
 				"DPX-DESKTOP-INVALID-PAYLOAD",
 				"The desktop request is invalid.");
+		}
+		catch
+		{
+			response = Failure(
+				requestId,
+				"DPX-DESKTOP-REQUEST-FAILED",
+				"The desktop request could not be completed.");
 		}
 
 		var responseJson = JsonSerializer.Serialize(response, JsonOptions);
@@ -246,54 +262,90 @@ public sealed class DesktopControlServer : IAsyncDisposable
 		await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
 	}
 
+	private static void ValidateRequestEnvelope(DesktopProtocolRequest request)
+	{
+		if (!string.IsNullOrWhiteSpace(request.RequestId) &&
+		    !string.IsNullOrWhiteSpace(request.Action) &&
+		    request.Payload.ValueKind == JsonValueKind.Object)
+		{
+			return;
+		}
+
+		throw new DesktopControlException(
+			"DPX-DESKTOP-INVALID-PAYLOAD",
+			"The desktop request is invalid.",
+			CommandLineExitCodes.UsageError);
+	}
+
 	private async Task TouchRegistrationAsync(
 		IReadOnlyDictionary<string, object?>? state,
 		CancellationToken cancellationToken)
 	{
-		DesktopInstanceRegistration registration;
-		lock (_stateLock)
-		{
-			var projectPath = state is not null &&
-			                  state.TryGetValue("projectPath", out var value) &&
-			                  value is string path
-				? NormalizeOptionalPath(path)
-				: _registration.ProjectPath;
-			_registration = _registration with
+		await PersistRegistrationUpdateAsync(
+			registration => registration with
 			{
-				ProjectPath = projectPath,
+				ProjectPath = state is not null &&
+				              state.TryGetValue("projectPath", out var value) &&
+				              value is string path
+					? NormalizeOptionalPath(path)
+					: registration.ProjectPath,
 				LastActiveUtc = DateTimeOffset.UtcNow
-			};
-			registration = _registration;
-		}
-
-		await _registry.RegisterAsync(registration, cancellationToken).ConfigureAwait(false);
+			},
+			cancellationToken).ConfigureAwait(false);
 	}
 
-	private static async Task<string> ReadMessageAsync(
-		Stream stream,
+	private async Task PersistRegistrationUpdateAsync(
+		Func<DesktopInstanceRegistration, DesktopInstanceRegistration> update,
 		CancellationToken cancellationToken)
 	{
-		var buffer = new byte[4096];
-		using var message = new MemoryStream();
-		while (true)
+		await _registrationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+		try
 		{
-			var read = await stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
-			if (read == 0)
-				throw new EndOfStreamException();
+			if (Volatile.Read(ref _disposed) != 0)
+				return;
 
-			var newline = Array.IndexOf(buffer, (byte)'\n', 0, read);
-			var count = newline >= 0 ? newline : read;
-			if (message.Length + count > DesktopProtocol.MaximumMessageBytes)
+			DesktopInstanceRegistration registration;
+			lock (_stateLock)
 			{
-				throw new DesktopControlException(
-					"DPX-DESKTOP-PAYLOAD-TOO-LARGE",
-					"The desktop request exceeds the size limit.",
-					CommandLineExitCodes.UsageError);
+				_registration = update(_registration);
+				registration = _registration;
 			}
 
-			message.Write(buffer, 0, count);
-			if (newline >= 0)
-				return Encoding.UTF8.GetString(message.GetBuffer(), 0, checked((int)message.Length));
+			await _registry.RegisterAsync(registration, cancellationToken).ConfigureAwait(false);
+		}
+		finally
+		{
+			_registrationGate.Release();
+		}
+	}
+
+	internal static async Task<string> ReadMessageAsync(
+		Stream stream,
+		TimeSpan receiveTimeout,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(stream);
+		if (receiveTimeout <= TimeSpan.Zero)
+			throw new ArgumentOutOfRangeException(nameof(receiveTimeout));
+		using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		timeout.CancelAfter(receiveTimeout);
+		try
+		{
+			return await DesktopProtocolMessageReader.ReadAsync(
+					stream,
+					static () => new DesktopControlException(
+						"DPX-DESKTOP-PAYLOAD-TOO-LARGE",
+						"The desktop request exceeds the size limit.",
+						CommandLineExitCodes.UsageError),
+					timeout.Token)
+				.ConfigureAwait(false);
+		}
+		catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+		{
+			throw new DesktopControlException(
+				"DPX-DESKTOP-TIMEOUT",
+				"The desktop request was not received before the timeout.",
+				innerException: exception);
 		}
 	}
 

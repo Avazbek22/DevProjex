@@ -35,7 +35,7 @@ public sealed class ProjectRootFacts
 
 		if (files.Count >= IndexedLookupThreshold)
 		{
-			_fileNames = files.Select(static file => file.Name).ToFrozenSet(PathComparer.Default);
+			_fileNames = files.Select(static file => file.Name).ToFrozenSet(ProjectTreePathIdentity.CanonicalComparer);
 			_markerFileNames = files.Select(static file => file.Name).ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 			_fileExtensions = files
 				.Select(static file => file.Extension)
@@ -47,7 +47,7 @@ public sealed class ProjectRootFacts
 		{
 			_directoryNames = directories
 				.Select(static directory => directory.Name)
-				.ToFrozenSet(PathComparer.Default);
+				.ToFrozenSet(ProjectTreePathIdentity.CanonicalComparer);
 			_markerDirectoryNames = directories
 				.Select(static directory => directory.Name)
 				.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
@@ -60,10 +60,10 @@ public sealed class ProjectRootFacts
 			// facts and transient observations can. Preserve the former first-entry contract.
 			var directoriesByName = new Dictionary<string, ProjectRootDirectoryFact>(
 				directories.Count,
-				PathComparer.Default);
+				ProjectTreePathIdentity.CanonicalComparer);
 			foreach (var directory in directories)
 				directoriesByName.TryAdd(directory.Name, directory);
-			_directoriesByName = directoriesByName.ToFrozenDictionary(PathComparer.Default);
+			_directoriesByName = directoriesByName.ToFrozenDictionary(ProjectTreePathIdentity.CanonicalComparer);
 		}
 
 		var hasGitMetadataEntry = false;
@@ -160,34 +160,30 @@ public sealed class ProjectRootFacts
 	}
 
 	public bool HasDirectory(string directoryName) =>
-		!string.IsNullOrWhiteSpace(directoryName) && ContainsDirectoryName(
+		!string.IsNullOrEmpty(directoryName) && ContainsDirectoryName(
 			directoryName,
 			markerComparison: false,
 			includeReparsePoints: true);
 
 	public bool TryGetDirectory(string directoryName, out ProjectRootDirectoryFact directory)
 	{
-		if (string.IsNullOrWhiteSpace(directoryName))
+		if (string.IsNullOrEmpty(directoryName))
 		{
 			directory = default;
 			return false;
 		}
 
-		if (_directoriesByName is not null)
-			return _directoriesByName.TryGetValue(directoryName, out directory);
-
-		for (var index = 0; index < Directories.Count; index++)
+		if (_directoriesByName is not null &&
+		    _directoriesByName.TryGetValue(directoryName, out directory))
 		{
-			var candidate = Directories[index];
-			if (!PathComparer.Default.Equals(candidate.Name, directoryName))
-				continue;
-
-			directory = candidate;
 			return true;
 		}
 
-		directory = default;
-		return false;
+		return ProjectTreePathIdentity.TryResolveAvailableEntry(
+			Directories,
+			directoryName,
+			static candidate => candidate.Name,
+			out directory);
 	}
 
 	public bool HasAnyDirectoryName(IEnumerable<string> directoryNames, bool includeReparsePoints = false)
@@ -206,12 +202,20 @@ public sealed class ProjectRootFacts
 	private bool ContainsFileName(string fileName, bool markerComparison)
 	{
 		var index = markerComparison ? _markerFileNames : _fileNames;
-		if (index is not null)
-			return index.Contains(fileName);
+		if (index is not null && index.Contains(fileName))
+			return true;
 
-		var comparer = markerComparison ? StringComparer.OrdinalIgnoreCase : PathComparer.Default;
+		if (!markerComparison)
+		{
+			return ProjectTreePathIdentity.TryResolveAvailableEntry(
+				Files,
+				fileName,
+				static candidate => candidate.Name,
+				out _);
+		}
+
 		for (var position = 0; position < Files.Count; position++)
-			if (comparer.Equals(Files[position].Name, fileName))
+			if (StringComparer.OrdinalIgnoreCase.Equals(Files[position].Name, fileName))
 				return true;
 		return false;
 	}
@@ -237,15 +241,26 @@ public sealed class ProjectRootFacts
 				? _markerDirectoryNames
 				: _nonReparseMarkerDirectoryNames
 			: _directoryNames;
-		if (index is not null)
-			return index.Contains(directoryName);
+		if (index is not null && index.Contains(directoryName))
+			return true;
 
-		var comparer = markerComparison ? StringComparer.OrdinalIgnoreCase : PathComparer.Default;
+		if (!markerComparison)
+		{
+			return ProjectTreePathIdentity.TryResolveAvailableEntry(
+				Directories,
+				directoryName,
+				static candidate => candidate.Name,
+				includeReparsePoints
+					? null
+					: static candidate => !candidate.IsReparsePoint,
+				out _);
+		}
+
 		for (var position = 0; position < Directories.Count; position++)
 		{
 			var directory = Directories[position];
 			if ((!includeReparsePoints && directory.IsReparsePoint) ||
-			    !comparer.Equals(directory.Name, directoryName))
+			    !StringComparer.OrdinalIgnoreCase.Equals(directory.Name, directoryName))
 			{
 				continue;
 			}

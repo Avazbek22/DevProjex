@@ -34,7 +34,9 @@ public static class ProjectLoadWorkflowRuntime
             new RustArtifactsIgnoreRule(),
             new GoArtifactsIgnoreRule(),
             new PhpArtifactsIgnoreRule(),
-            new RubyArtifactsIgnoreRule()
+            new RubyArtifactsIgnoreRule(),
+            new SwiftArtifactsIgnoreRule(),
+            new DartArtifactsIgnoreRule()
         };
 
         return new IgnoreRulesService(
@@ -49,17 +51,23 @@ public static class ProjectLoadWorkflowRuntime
 
     public static async Task<ProjectLoadWorkflowMetrics> ComputeMetricsAsync(
         string rootPath,
-        IReadOnlyCollection<string> selectedRoots,
-        IReadOnlyCollection<string> allowedExtensions,
-        IReadOnlyCollection<IgnoreOptionId> selectedIgnoreOptions,
-        CancellationToken cancellationToken)
+		IReadOnlyCollection<string> selectedRoots,
+		IReadOnlyCollection<string> allowedExtensions,
+		IReadOnlyCollection<IgnoreOptionId> selectedIgnoreOptions,
+		CancellationToken cancellationToken,
+		bool useContentRootAndRelativeHeaders = false)
     {
         // The runtime UI applies selections using set semantics, not list ordering.
         // The test harness must mirror that behavior exactly or the "expected" metrics
         // drift away from the real BuildTree/Export pipeline on large workspaces.
         var selectedRootSet = new HashSet<string>(selectedRoots, PathComparer.Default);
         var allowedExtensionSet = new HashSet<string>(allowedExtensions, StringComparer.OrdinalIgnoreCase);
-        var cacheKey = MetricsCacheKey.Create(rootPath, selectedRootSet, allowedExtensionSet, selectedIgnoreOptions);
+		var cacheKey = MetricsCacheKey.Create(
+			rootPath,
+			selectedRootSet,
+			allowedExtensionSet,
+			selectedIgnoreOptions,
+			useContentRootAndRelativeHeaders);
 
         lock (MetricsCacheLock)
         {
@@ -86,7 +94,11 @@ public static class ProjectLoadWorkflowRuntime
             .Distinct(PathComparer.Default)
             .OrderBy(static path => path, PathComparer.Default)
             .ToArray();
-        var contentMetrics = await ComputeContentMetricsAsync(orderedPaths, cancellationToken);
+		var contentMetrics = await ComputeContentMetricsAsync(
+			rootPath,
+			orderedPaths,
+			useContentRootAndRelativeHeaders,
+			cancellationToken);
 
         var computedMetrics = new ProjectLoadWorkflowMetrics(treeMetrics, contentMetrics);
         lock (MetricsCacheLock)
@@ -120,24 +132,30 @@ public static class ProjectLoadWorkflowRuntime
         ExportOutputMetrics TreeMetrics,
         ExportOutputMetrics ContentMetrics);
 
-    private static async Task<ExportOutputMetrics> ComputeContentMetricsAsync(
-        IReadOnlyList<string> orderedPaths,
-        CancellationToken cancellationToken)
-    {
+	private static async Task<ExportOutputMetrics> ComputeContentMetricsAsync(
+		string rootPath,
+		IReadOnlyList<string> orderedPaths,
+		bool useContentRootAndRelativeHeaders,
+		CancellationToken cancellationToken)
+	{
         if (orderedPaths.Count == 0)
             return ExportOutputMetrics.Empty;
 
-        var analyzer = new FileContentAnalyzer();
-        var metricsInputs = new List<ContentFileMetrics>(orderedPaths.Count);
-        foreach (var path in orderedPaths)
-        {
+		var analyzer = new FileContentAnalyzer();
+		var accumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
+		if (useContentRootAndRelativeHeaders)
+			accumulator.AppendRootHeader(rootPath);
+		foreach (var path in orderedPaths)
+		{
             cancellationToken.ThrowIfCancellationRequested();
             var metrics = await analyzer.GetTextFileMetricsAsync(path, cancellationToken);
             if (metrics is null)
                 continue;
 
-            metricsInputs.Add(new ContentFileMetrics(
-                Path: path,
+			accumulator.AppendFile(new ContentFileMetrics(
+				Path: useContentRootAndRelativeHeaders
+					? PathUtility.GetPortableRelativePath(rootPath, path)
+					: path,
                 SizeBytes: metrics.SizeBytes,
                 LineCount: metrics.LineCount,
                 CharCount: metrics.CharCount,
@@ -149,26 +167,29 @@ public static class ProjectLoadWorkflowRuntime
                 TrailingNewlineLineBreaks: metrics.TrailingNewlineLineBreaks));
         }
 
-        return ExportOutputMetricsCalculator.FromOrderedContentFiles(metricsInputs);
+		return accumulator.ToMetrics();
     }
 
-    private readonly record struct MetricsCacheKey(
-        string RootPath,
-        string RootsKey,
-        string ExtensionsKey,
-        string IgnoreKey)
+	private readonly record struct MetricsCacheKey(
+		string RootPath,
+		string RootsKey,
+		string ExtensionsKey,
+		string IgnoreKey,
+		bool UseContentRootAndRelativeHeaders)
     {
         public static MetricsCacheKey Create(
-            string rootPath,
-            IEnumerable<string> selectedRoots,
-            IEnumerable<string> allowedExtensions,
-            IEnumerable<IgnoreOptionId> selectedIgnoreOptions)
+			string rootPath,
+			IEnumerable<string> selectedRoots,
+			IEnumerable<string> allowedExtensions,
+			IEnumerable<IgnoreOptionId> selectedIgnoreOptions,
+			bool useContentRootAndRelativeHeaders)
         {
             return new MetricsCacheKey(
-                rootPath,
-                Normalize(selectedRoots, StringComparer.OrdinalIgnoreCase),
-                Normalize(allowedExtensions, StringComparer.OrdinalIgnoreCase),
-                string.Join("|", selectedIgnoreOptions.OrderBy(static option => (int)option).Select(static option => option.ToString())));
+				rootPath,
+				Normalize(selectedRoots, StringComparer.OrdinalIgnoreCase),
+				Normalize(allowedExtensions, StringComparer.OrdinalIgnoreCase),
+				string.Join("|", selectedIgnoreOptions.OrderBy(static option => (int)option).Select(static option => option.ToString())),
+				useContentRootAndRelativeHeaders);
         }
 
         private static string Normalize(IEnumerable<string> values, StringComparer comparer) =>
@@ -181,9 +202,9 @@ public static class ProjectLoadWorkflowRuntime
         {
             return new Dictionary<string, string>
             {
-                ["Tree.AccessDeniedRoot"] = "Access denied",
                 ["Tree.AccessDenied"] = "Access denied",
                 ["Settings.Ignore.SmartIgnore"] = "Smart ignore",
+                ["Settings.Ignore.HideSecrets"] = "Hide secrets",
                 ["Settings.Ignore.UseGitIgnore"] = "Use .gitignore",
                 ["Settings.Ignore.TrackedGitFilesOnly"] = "Tracked Git files only",
                 ["Settings.Ignore.HiddenFolders"] = "Hidden folders",

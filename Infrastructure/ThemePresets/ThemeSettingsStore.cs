@@ -258,7 +258,13 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
 
         try
         {
-            var json = File.ReadAllText(path);
+            if (!JsonStorePersistence.TryReadAllTextWithinSizeLimit(
+                    path,
+                    (int)JsonStorePersistence.SmallDocumentMaximumBytes,
+                    out var json))
+            {
+                return ThemeDocumentReadStatus.MissingOrInvalid;
+            }
             var deserialized = JsonSerializer.Deserialize<ThemeSettingsDocument>(json, SerializerOptions);
             if (deserialized is null)
                 return ThemeDocumentReadStatus.MissingOrInvalid;
@@ -303,6 +309,12 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
                 return TrySaveInternal(fileSet, primary);
             return true;
         }
+
+        var backupStatus = TryReadCurrent(fileSet.BackupPath, out var backup, out _);
+        if (backupStatus == ThemeDocumentReadStatus.Future)
+            return true;
+        if (backupStatus == ThemeDocumentReadStatus.Current)
+            return TrySaveInternal(fileSet, backup);
 
         return TrySaveInternal(fileSet, CreateFactoryDefaults());
     }
@@ -432,7 +444,8 @@ public sealed class ThemeSettingsStore(Func<string>? appDataPathProvider = null)
         JsonStorePersistence.ContainsFutureDocument(
             fileSet,
             CurrentSchemaVersion,
-            CurrentDefaultsRevision);
+            CurrentDefaultsRevision,
+            JsonStorePersistence.SmallDocumentMaximumBytes);
 
     private static bool TryParseKeyStatic(string? key, out ThemeVariant theme, out ThemeEffectMode effect)
     {

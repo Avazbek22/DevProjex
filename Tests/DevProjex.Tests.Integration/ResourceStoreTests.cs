@@ -57,6 +57,27 @@ public sealed class ResourceStoreTests
 		Assert.Equal("grayFolder", key);
 	}
 
+	[Theory]
+	[InlineData("source", true, "folder")]
+	[InlineData("Program.cs", false, "csharp")]
+	public void IconMapper_AccessDeniedNodesUseOrdinaryTypeMapping(
+		string name,
+		bool isDirectory,
+		string expectedIconKey)
+	{
+		var mapper = new IconMapper();
+		var node = new FileSystemNode(
+			name,
+			Path.Combine("root", name),
+			isDirectory,
+			isAccessDenied: true,
+			FileSystemNode.EmptyChildren);
+
+		var key = mapper.GetIconKey(node);
+
+		Assert.Equal(expectedIconKey, key);
+	}
+
 	// Verifies unknown files map to the default unknown icon key.
 	[Fact]
 	public void IconMapper_ReturnsUnknownForUnmappedFile()

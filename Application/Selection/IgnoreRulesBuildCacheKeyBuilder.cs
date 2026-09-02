@@ -35,7 +35,14 @@ public static class IgnoreRulesBuildCacheKeyBuilder
 
 		var unique = new HashSet<int>(selectedIgnoreOptions.Count);
 		foreach (var option in selectedIgnoreOptions)
-			unique.Add((int)option);
+		{
+			// Content transformations rewrite selected text after traversal. They must not split or
+			// invalidate the path-ignore cache because they cannot change the scanned tree.
+			if (!ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option))
+				unique.Add((int)option);
+		}
+		if (unique.Count == 0)
+			return "<none>";
 
 		var ordered = new List<int>(unique);
 		ordered.Sort();

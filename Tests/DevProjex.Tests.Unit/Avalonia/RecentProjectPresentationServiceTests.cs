@@ -41,6 +41,17 @@ public sealed class RecentProjectPresentationServiceTests
 	}
 
 	[Fact]
+	public void CreateRepositoryToolTip_RemovesCredentials()
+	{
+		var tooltip = RecentProjectPresentationService.CreateRepositoryToolTip(
+			"https://user:super-secret@example.com/owner/repo.git?token=hidden");
+
+		Assert.Equal("https://example.com/owner/repo.git", tooltip);
+		Assert.DoesNotContain("super-secret", tooltip, StringComparison.Ordinal);
+		Assert.DoesNotContain("token", tooltip, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void CreateFolderDisplayText_ReturnsRootPath_WhenFolderHasNoParentSegment()
 	{
 		var rootPath = Path.GetPathRoot(Environment.CurrentDirectory)!;

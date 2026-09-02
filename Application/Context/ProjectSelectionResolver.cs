@@ -25,13 +25,23 @@ public sealed class ProjectSelectionResolver(
 			_ => throw new ArgumentOutOfRangeException(nameof(profile), profile.Kind, null)
 		};
 
+		var (resolvedExclusions, hideSecrets) = ResolveExclusions(baseline, overrides);
 		var resolved = baseline with
 		{
 			Roots = overrides.Roots ?? baseline.Roots,
 			Extensions = overrides.Extensions ?? baseline.Extensions,
 			SelectedPaths = overrides.SelectedPaths ?? baseline.SelectedPaths,
 			GitMode = overrides.GitMode ?? baseline.GitMode,
-			Exclusions = overrides.Exclusions ?? baseline.Exclusions,
+			GitDiffRange = overrides.GitMode is not null
+				? overrides.GitDiffRange
+				: baseline.GitDiffRange,
+			Exclusions = resolvedExclusions,
+			HideSecrets = hideSecrets,
+			HidePrivateData = overrides.HidePrivateData ?? baseline.HidePrivateData,
+			// Compression has no legacy exclusion form, so it resolves as a plain override.
+			CompressCode = overrides.CompressCode ?? baseline.CompressCode,
+			StripComments = overrides.StripComments ?? baseline.StripComments,
+			StripBlankLines = overrides.StripBlankLines ?? baseline.StripBlankLines,
 			ProfileSource = profile
 		};
 		var applyProfileValues = profile.Kind != ProjectProfileSourceKind.Local;
@@ -53,7 +63,27 @@ public sealed class ProjectSelectionResolver(
 				Exclusions: ResolveApplicationMode(
 					overrides.Exclusions is not null,
 					applyProfileValues,
-					resolved.Exclusions))
+					resolved.Exclusions),
+				HideSecrets: ResolveApplicationMode(
+					overrides.HideSecrets is not null,
+					applyProfileValues,
+					resolved.HideSecrets),
+				HidePrivateData: ResolveApplicationMode(
+					overrides.HidePrivateData is not null,
+					applyProfileValues,
+					resolved.HidePrivateData),
+				CompressCode: ResolveApplicationMode(
+					overrides.CompressCode is not null,
+					applyProfileValues,
+					resolved.CompressCode),
+				StripComments: ResolveApplicationMode(
+					overrides.StripComments is not null,
+					applyProfileValues,
+					resolved.StripComments),
+				StripBlankLines: ResolveApplicationMode(
+					overrides.StripBlankLines is not null,
+					applyProfileValues,
+					resolved.StripBlankLines))
 		};
 
 		if (baseline.LocalProfileState is { } localState)
@@ -64,12 +94,35 @@ public sealed class ProjectSelectionResolver(
 				{
 					RootsOverridden = overrides.Roots is not null,
 					ExtensionsOverridden = overrides.Extensions is not null,
-					IgnoreOptionsOverridden = overrides.GitMode is not null || overrides.Exclusions is not null
+					IgnoreOptionsOverridden = overrides.GitMode is not null ||
+					                          overrides.Exclusions is not null ||
+					                          overrides.HideSecrets is not null ||
+					                          overrides.HidePrivateData is not null ||
+					                          overrides.CompressCode is not null ||
+						                          overrides.StripComments is not null ||
+						                          overrides.StripBlankLines is not null
 				}
 			};
 		}
 
 		return resolved;
+	}
+
+	private static (IReadOnlyCollection<ProjectExclusion>? Exclusions, bool? HideSecrets) ResolveExclusions(
+		ProjectSelectionSpec baseline,
+		ProjectSelectionSpec overrides)
+	{
+		var selected = overrides.Exclusions ?? baseline.Exclusions;
+		var legacyHideSecrets = selected?.Contains(ProjectExclusion.HideSecrets) == true;
+		var hideSecrets = overrides.HideSecrets ??
+		                  (overrides.Exclusions is not null
+			                  ? legacyHideSecrets
+			                  : baseline.HideSecrets ?? legacyHideSecrets);
+		var pathExclusions = selected?
+			.Where(static exclusion => exclusion != ProjectExclusion.HideSecrets)
+			.OrderBy(static exclusion => (int)exclusion)
+			.ToArray();
+		return (pathExclusions, hideSecrets);
 	}
 
 	private static ProjectSelectionApplicationMode ResolveApplicationMode<T>(

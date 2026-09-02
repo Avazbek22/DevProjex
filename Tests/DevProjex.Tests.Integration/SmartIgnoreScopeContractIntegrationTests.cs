@@ -133,6 +133,40 @@ public sealed class SmartIgnoreScopeContractIntegrationTests
 	}
 
 	[Fact]
+	public void TreeBuilder_SwiftAndDartArtifactScopesDoNotBleedIntoUnmarkedSiblings()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("apps/apple/Package.swift", "// swift-tools-version: 6.0\n");
+		temp.CreateFile("apps/apple/Pods/Manifest.lock", "generated\n");
+		temp.CreateFile("apps/apple/Pods/Sources/Generated.swift", "generated\n");
+		temp.CreateFile("apps/flutter/pubspec.yaml", "name: fixture\n");
+		temp.CreateFile("apps/flutter/build/flutter_assets/AssetManifest.bin", "generated\n");
+		temp.CreateFile("apps/flutter/build/generated.dart", "generated\n");
+		temp.CreateFile("apps/plain/Pods/Manifest.lock", "hand-written fixture\n");
+		temp.CreateFile("apps/plain/Pods/Sources/Visible.swift", "visible\n");
+		temp.CreateFile("apps/plain/build/flutter_assets/AssetManifest.bin", "hand-written fixture\n");
+		temp.CreateFile("apps/plain/build/visible.dart", "visible\n");
+
+		var rulesService = new IgnoreRulesService(new SmartIgnoreService([
+			new SwiftArtifactsIgnoreRule(),
+			new DartArtifactsIgnoreRule()
+		]));
+		var rules = rulesService.Build(temp.Path, [IgnoreOptionId.SmartIgnore], selectedRootFolders: []);
+		var tree = new TreeBuilder().Build(temp.Path, new TreeFilterOptions(
+			AllowedExtensions: new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+			{
+				".bin", ".dart", ".lock", ".swift", ".yaml"
+			},
+			AllowedRootFolders: new HashSet<string>(PathComparer.Default) { "apps" },
+			IgnoreRules: rules), TestContext.Current.CancellationToken);
+
+		Assert.False(ContainsPath(tree.Root, "apps/apple/Pods"));
+		Assert.False(ContainsPath(tree.Root, "apps/flutter/build"));
+		Assert.True(ContainsPath(tree.Root, "apps/plain/Pods/Sources/Visible.swift"));
+		Assert.True(ContainsPath(tree.Root, "apps/plain/build/visible.dart"));
+	}
+
+	[Fact]
 	public void TreeBuilder_DeepMonorepoGitAndSmartOptions_ComposeWithoutChangingSiblingVisibility()
 	{
 		using var temp = new TemporaryDirectory();
@@ -230,7 +264,9 @@ public sealed class SmartIgnoreScopeContractIntegrationTests
 			new StackCase("rust", "Cargo.toml", "target", "debug/app", new RustArtifactsIgnoreRule()),
 			new StackCase("go", "go.work", "vendor", "modules.txt", new GoArtifactsIgnoreRule()),
 			new StackCase("php", "composer.json", "vendor", "autoload.php", new PhpArtifactsIgnoreRule()),
-			new StackCase("ruby", "Gemfile.lock", "tmp", "CACHEDIR.TAG", new RubyArtifactsIgnoreRule())
+			new StackCase("ruby", "Gemfile.lock", "tmp", "CACHEDIR.TAG", new RubyArtifactsIgnoreRule()),
+			new StackCase("swift", "Package.swift", ".build", "workspace-state.json", new SwiftArtifactsIgnoreRule()),
+			new StackCase("dart", "pubspec.yaml", ".dart_tool", "package_config.json", new DartArtifactsIgnoreRule())
 		};
 
 		foreach (var testCase in cases)
@@ -262,7 +298,9 @@ public sealed class SmartIgnoreScopeContractIntegrationTests
 			new StackCase("rust", "Cargo.toml", "target", "debug/app", new RustArtifactsIgnoreRule()),
 			new StackCase("go", "go.work", "vendor", "modules.txt", new GoArtifactsIgnoreRule()),
 			new StackCase("php", "composer.json", "vendor", "autoload.php", new PhpArtifactsIgnoreRule()),
-			new StackCase("ruby", "Gemfile.lock", "tmp", "CACHEDIR.TAG", new RubyArtifactsIgnoreRule())
+			new StackCase("ruby", "Gemfile.lock", "tmp", "CACHEDIR.TAG", new RubyArtifactsIgnoreRule()),
+			new StackCase("swift", "Package.swift", ".build", "workspace-state.json", new SwiftArtifactsIgnoreRule()),
+			new StackCase("dart", "pubspec.yaml", ".dart_tool", "package_config.json", new DartArtifactsIgnoreRule())
 		};
 
 		foreach (var testCase in cases)

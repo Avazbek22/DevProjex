@@ -6,44 +6,54 @@ public sealed class TreeNodePresentationService(LocalizationService localization
 
 	public TreeNodeDescriptor Build(FileSystemNode root)
 	{
-		return BuildNode(root, isRoot: true, orderedFilePaths: null);
+		return BuildWithCancellation(root, CancellationToken.None);
+	}
+
+	public TreeNodeDescriptor BuildWithCancellation(
+		FileSystemNode root,
+		CancellationToken cancellationToken)
+	{
+		return BuildNode(root, isRoot: true, orderedFilePaths: null, cancellationToken);
 	}
 
 	public TreeNodePresentationResult BuildWithFilePaths(FileSystemNode root)
 	{
+		return BuildWithFilePathsWithCancellation(root, CancellationToken.None);
+	}
+
+	public TreeNodePresentationResult BuildWithFilePathsWithCancellation(
+		FileSystemNode root,
+		CancellationToken cancellationToken)
+	{
 		var orderedFilePaths = new List<string>();
-		var descriptor = BuildNode(root, isRoot: true, orderedFilePaths: orderedFilePaths);
+		var descriptor = BuildNode(root, isRoot: true, orderedFilePaths, cancellationToken);
 		return new TreeNodePresentationResult(descriptor, orderedFilePaths);
 	}
 
 	private TreeNodeDescriptor BuildNode(
 		FileSystemNode node,
 		bool isRoot,
-		List<string>? orderedFilePaths)
+		List<string>? orderedFilePaths,
+		CancellationToken cancellationToken)
 	{
-		var displayName = node.IsAccessDenied
-			? (isRoot ? localization["Tree.AccessDeniedRoot"] : localization["Tree.AccessDenied"])
-			: node.Name;
+		cancellationToken.ThrowIfCancellationRequested();
+		if (!isRoot)
+			return BuildSubtree(node, orderedFilePaths, cancellationToken);
 
-		var iconKey = iconMapper.GetIconKey(node);
-		if (!node.IsDirectory)
-			orderedFilePaths?.Add(node.FullPath);
-
-		var children = BuildChildren(node.Children, allowParallelAtThisLevel: isRoot, orderedFilePaths: orderedFilePaths);
-
-		return new TreeNodeDescriptor(
-			DisplayName: displayName,
-			FullPath: node.FullPath,
-			IsDirectory: node.IsDirectory,
-			IsAccessDenied: node.IsAccessDenied,
-			IconKey: iconKey,
-			Children: children);
+		var header = CreateHeader(node, orderedFilePaths);
+		var children = BuildChildren(
+			node.Children,
+			allowParallelAtThisLevel: true,
+			orderedFilePaths,
+			cancellationToken);
+		return CreateDescriptor(header, children);
 	}
 
 	private IReadOnlyList<TreeNodeDescriptor> BuildChildren(
 		IReadOnlyList<FileSystemNode> children,
 		bool allowParallelAtThisLevel,
-		List<string>? orderedFilePaths)
+		List<string>? orderedFilePaths,
+		CancellationToken cancellationToken)
 	{
 		if (children.Count == 0)
 			return [];
@@ -65,12 +75,13 @@ public sealed class TreeNodePresentationService(LocalizationService localization
 				children.Count,
 				new ParallelOptions
 				{
+					CancellationToken = cancellationToken,
 					MaxDegreeOfParallelism = Math.Min(ScanParallelismPolicy.MaxDegreeOfParallelism, children.Count)
 				},
 				index =>
 				{
 					var localFilePaths = orderedFilePaths is null ? null : new List<string>();
-					projectedChildren[index] = BuildNode(children[index], isRoot: false, orderedFilePaths: localFilePaths);
+					projectedChildren[index] = BuildSubtree(children[index], localFilePaths, cancellationToken);
 					if (localFilePaths is { Count: > 0 })
 						orderedFilePathSegments![index] = localFilePaths;
 				});
@@ -79,6 +90,7 @@ public sealed class TreeNodePresentationService(LocalizationService localization
 			{
 				foreach (var segment in orderedFilePathSegments)
 				{
+					cancellationToken.ThrowIfCancellationRequested();
 					if (segment is not null)
 						orderedFilePaths!.AddRange(segment);
 				}
@@ -89,8 +101,94 @@ public sealed class TreeNodePresentationService(LocalizationService localization
 
 		var projected = new List<TreeNodeDescriptor>(children.Count);
 		foreach (var child in children)
-			projected.Add(BuildNode(child, isRoot: false, orderedFilePaths: orderedFilePaths));
+			projected.Add(BuildSubtree(child, orderedFilePaths, cancellationToken));
 
 		return projected;
 	}
+
+	private TreeNodeDescriptor BuildSubtree(
+		FileSystemNode root,
+		List<string>? orderedFilePaths,
+		CancellationToken cancellationToken)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
+		var pending = new List<PresentationFrame>
+		{
+			new(CreateHeader(root, orderedFilePaths))
+		};
+		while (pending.Count > 0)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var frameIndex = pending.Count - 1;
+			var frame = pending[frameIndex];
+			if (frame.NextChildIndex < frame.Header.Node.Children.Count)
+			{
+				var child = frame.Header.Node.Children[frame.NextChildIndex++];
+				pending[frameIndex] = frame;
+				pending.Add(new PresentationFrame(CreateHeader(child, orderedFilePaths)));
+				continue;
+			}
+
+			pending.RemoveAt(frameIndex);
+			var descriptor = CreateDescriptor(frame.Header, frame.Children);
+			if (pending.Count == 0)
+				return descriptor;
+			var parentIndex = pending.Count - 1;
+			var parent = pending[parentIndex];
+			parent.AddChild(descriptor);
+			pending[parentIndex] = parent;
+		}
+
+		throw new InvalidOperationException("Tree projection did not produce a root node.");
+	}
+
+	private PresentationHeader CreateHeader(
+		FileSystemNode node,
+		List<string>? orderedFilePaths)
+	{
+		if (!node.IsDirectory)
+			orderedFilePaths?.Add(node.FullPath);
+
+		return new PresentationHeader(
+			node,
+			node.IsAccessDenied
+				? $"{node.Name} [{localization["Tree.AccessDenied"]}]"
+				: node.Name,
+			iconMapper.GetIconKey(node));
+	}
+
+	private static TreeNodeDescriptor CreateDescriptor(
+		PresentationHeader header,
+		IReadOnlyList<TreeNodeDescriptor> children) =>
+		new(
+			header.DisplayName,
+			header.Node.FullPath,
+			header.Node.IsDirectory,
+			header.Node.IsAccessDenied,
+			header.IconKey,
+			children);
+
+	private struct PresentationFrame
+	{
+		private List<TreeNodeDescriptor>? _children;
+		private readonly int _childCapacity;
+
+		public PresentationFrame(PresentationHeader header)
+		{
+			Header = header;
+			_childCapacity = header.Node.Children.Count;
+		}
+
+		public PresentationHeader Header { get; }
+		public IReadOnlyList<TreeNodeDescriptor> Children => _children ?? [];
+		public int NextChildIndex { get; set; }
+
+		public void AddChild(TreeNodeDescriptor child) =>
+			(_children ??= new List<TreeNodeDescriptor>(_childCapacity)).Add(child);
+	}
+
+	private readonly record struct PresentationHeader(
+		FileSystemNode Node,
+		string DisplayName,
+		string IconKey);
 }

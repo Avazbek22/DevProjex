@@ -1,3 +1,5 @@
+global using DevProjex.Infrastructure.Compression;
+global using DevProjex.Application.Compression;
 global using System.Text;
 global using DevProjex.Application.Context;
 global using DevProjex.Application.DesktopControl;

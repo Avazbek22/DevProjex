@@ -169,6 +169,39 @@ public sealed class IgnoreSelectionStateTests
 		Assert.True(state.OptionStateCache[IgnoreOptionId.SmartIgnore]);
 	}
 
+	[Theory]
+	[InlineData(GitFilteringMode.Staged)]
+	[InlineData(GitFilteringMode.Changes)]
+	public void ApplyAllPreferenceToKnownStates_PreservesExcludedMomentaryGitMode(
+		GitFilteringMode mode)
+	{
+		var state = new IgnoreSelectionState();
+		state.ReplaceStateCache(new Dictionary<IgnoreOptionId, bool>
+		{
+			[IgnoreOptionId.UseGitIgnore] = false,
+			[IgnoreOptionId.TrackedGitFilesOnly] = false,
+			[IgnoreOptionId.SmartIgnore] = true
+		});
+		state.SetActiveGitFilteringMode(mode);
+		var preferredMode = state.PreferredGitFilteringMode;
+		var gitIgnoreState = state.OptionStateCache[IgnoreOptionId.UseGitIgnore];
+		var trackedState = state.OptionStateCache[IgnoreOptionId.TrackedGitFilesOnly];
+
+		state.ApplyAllPreferenceToKnownStates(
+			isChecked: false,
+			new HashSet<IgnoreOptionId>
+			{
+				IgnoreOptionId.UseGitIgnore,
+				IgnoreOptionId.TrackedGitFilesOnly
+			});
+
+		Assert.Equal(mode, state.ActiveGitFilteringMode);
+		Assert.Equal(preferredMode, state.PreferredGitFilteringMode);
+		Assert.Equal(gitIgnoreState, state.OptionStateCache[IgnoreOptionId.UseGitIgnore]);
+		Assert.Equal(trackedState, state.OptionStateCache[IgnoreOptionId.TrackedGitFilesOnly]);
+		Assert.False(state.OptionStateCache[IgnoreOptionId.SmartIgnore]);
+	}
+
 	[Fact]
 	public void Reset_ClearsSelectionStateAndAllPreference()
 	{
@@ -192,5 +225,134 @@ public sealed class IgnoreSelectionStateTests
 
 		Assert.True(state.OptionStateCache[IgnoreOptionId.UseGitIgnore]);
 		Assert.False(state.OptionStateCache[IgnoreOptionId.TrackedGitFilesOnly]);
+	}
+
+	[Fact]
+	public void RefreshStateReplacement_PreservesTrackedPreferenceWhileGitSlotIsOff()
+	{
+		var state = new IgnoreSelectionState();
+		state.ReplaceStateCache(new Dictionary<IgnoreOptionId, bool>
+		{
+			[IgnoreOptionId.UseGitIgnore] = false,
+			[IgnoreOptionId.TrackedGitFilesOnly] = true,
+			[IgnoreOptionId.SmartIgnore] = true
+		});
+		state.ApplyAllPreferenceToKnownStates(false);
+		state.AllPreference = false;
+
+		state.ReplaceStateCachePreservingRuntimePreferences(
+			new Dictionary<IgnoreOptionId, bool>
+			{
+				[IgnoreOptionId.UseGitIgnore] = false,
+				[IgnoreOptionId.TrackedGitFilesOnly] = false,
+				[IgnoreOptionId.SmartIgnore] = false
+			});
+		Assert.False(state.AllPreference);
+		state.ApplyAllPreferenceToKnownStates(true);
+
+		Assert.False(state.OptionStateCache[IgnoreOptionId.UseGitIgnore]);
+		Assert.True(state.OptionStateCache[IgnoreOptionId.TrackedGitFilesOnly]);
+	}
+
+	[Fact]
+	public void ExplicitNoneBecomesTheStickyModeForSubsequentMomentarySelection()
+	{
+		var state = new IgnoreSelectionState();
+		state.SetActiveGitFilteringMode(GitFilteringMode.TrackedFilesOnly);
+		state.SetActiveGitFilteringMode(GitFilteringMode.None);
+		state.SetActiveGitFilteringMode(GitFilteringMode.Staged);
+
+		Assert.Equal(GitFilteringMode.Staged, state.ActiveGitFilteringMode);
+		Assert.Equal(GitFilteringMode.None, state.PreferredGitFilteringMode);
+	}
+
+	[Fact]
+	public void RuntimeFallbackDoesNotReplaceTheStickyMode()
+	{
+		var state = new IgnoreSelectionState();
+		state.SetActiveGitFilteringMode(GitFilteringMode.TrackedFilesOnly);
+		state.SetActiveGitFilteringMode(GitFilteringMode.Staged);
+		state.SetActiveGitFilteringMode(
+			GitFilteringMode.None,
+			rememberPersistentPreference: false);
+
+		Assert.Equal(GitFilteringMode.None, state.ActiveGitFilteringMode);
+		Assert.Equal(GitFilteringMode.TrackedFilesOnly, state.PreferredGitFilteringMode);
+	}
+
+	[Theory]
+	[InlineData(GitFilteringMode.Staged, GitFilteringMode.None)]
+	[InlineData(GitFilteringMode.Changes, GitFilteringMode.RespectGitIgnore)]
+	[InlineData(GitFilteringMode.Diff, GitFilteringMode.None)]
+	public void RefreshAndRollbackPreserveMomentaryModeOverItsScannerUnderlay(
+		GitFilteringMode momentary,
+		GitFilteringMode underlay)
+	{
+		var state = new IgnoreSelectionState();
+		state.RestoreProfileSelection([IgnoreOptionId.UseGitIgnore, IgnoreOptionId.SmartIgnore]);
+		state.SetActiveGitFilteringMode(momentary);
+		var snapshot = state.CaptureSnapshot();
+		var refreshed = state.SnapshotStateCache();
+
+		state.ReplaceStateCachePreservingRuntimePreferences(refreshed);
+		Assert.Equal(momentary, state.ActiveGitFilteringMode);
+		Assert.Equal(GitFilteringMode.RespectGitIgnore, state.PreferredGitFilteringMode);
+		Assert.Equal(
+			underlay,
+			GitFilteringModeResolver.Resolve(state.OptionStateCache));
+
+		state.SetActiveGitFilteringMode(GitFilteringMode.None);
+		state.RestoreSnapshot(snapshot);
+		Assert.Equal(momentary, state.ActiveGitFilteringMode);
+		Assert.Equal(GitFilteringMode.RespectGitIgnore, state.PreferredGitFilteringMode);
+	}
+
+	[Fact]
+	public void ReplaceStateCache_ClearsPreviousProjectAllPreference()
+	{
+		var state = new IgnoreSelectionState
+		{
+			AllPreference = false
+		};
+
+		state.ReplaceStateCache(new Dictionary<IgnoreOptionId, bool>
+		{
+			[IgnoreOptionId.HiddenFiles] = true
+		});
+
+		Assert.Null(state.AllPreference);
+		Assert.True(state.OptionStateCache[IgnoreOptionId.HiddenFiles]);
+	}
+
+	[Fact]
+	public void RestoreProfileSelection_ClearsPreviousProjectAllPreference()
+	{
+		var state = new IgnoreSelectionState
+		{
+			AllPreference = false
+		};
+
+		state.RestoreProfileSelection([IgnoreOptionId.DotFolders]);
+
+		Assert.Null(state.AllPreference);
+		Assert.Equal([IgnoreOptionId.DotFolders], state.SelectedOptions);
+	}
+
+	[Fact]
+	public void ApplyProfileThenApplyProfile_NewDescriptorUsesSecondProjectsDefault()
+	{
+		var session = new ProjectSelectionSessionState();
+		session.IgnoreOptions.AllPreference = false;
+		var first = new ProjectSelectionProfile([], [], [], IgnoreOptionStates:
+			new Dictionary<IgnoreOptionId, bool> { [IgnoreOptionId.HiddenFiles] = false });
+		var second = new ProjectSelectionProfile([], [], [], IgnoreOptionStates:
+			new Dictionary<IgnoreOptionId, bool> { [IgnoreOptionId.HiddenFiles] = true });
+
+		session.ApplyProfile(@"C:\Workspace\A", first);
+		session.IgnoreOptions.AllPreference = false;
+		session.ApplyProfile(@"C:\Workspace\B", second);
+		Assert.Null(session.IgnoreOptions.AllPreference);
+		Assert.True(session.IgnoreOptions.OptionStateCache[IgnoreOptionId.HiddenFiles]);
+		Assert.False(session.IgnoreOptions.OptionStateCache.ContainsKey(IgnoreOptionId.DotFolders));
 	}
 }

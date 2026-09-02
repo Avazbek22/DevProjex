@@ -26,12 +26,23 @@ public partial class MainWindow : IProjectLoadPipelineHost
     Task IProjectLoadPipelineHost.YieldProjectLoadStartupFrameAsync(CancellationToken cancellationToken) =>
         YieldProjectLoadStartupFrameAsync(cancellationToken);
 
-    void IProjectLoadPipelineHost.ClearPreviousProjectState(bool forceCompactingGc) =>
-        ClearPreviousProjectState(forceCompactingGc);
+    void IProjectLoadPipelineHost.ClearPreviousProjectState(
+		bool forceCompactingGc,
+		bool preserveProjectSessions) =>
+        ClearPreviousProjectState(forceCompactingGc, preserveProjectSessions);
 
     void IProjectLoadPipelineHost.SetProjectLoadIdentity(string path, bool fromDialog)
     {
         _currentPath = path;
+		_viewModel.IsProjectLoadInProgress = true;
+        var shouldAnimateProjectTools =
+            _viewModel.IsToolAnimationEnabled &&
+            (_workspacePresentation.IsSettingsAnimating ||
+             SettingsPanelRevealPolicy.ShouldRunInitialReveal(
+                 settingsVisible: true,
+                 settingsAnimating: false,
+                 _workspacePresentation.HasVisibleSettingsPanelWidth()));
+        _topMenuBar?.PrepareProjectToolsReveal(shouldAnimateProjectTools);
         _viewModel.IsProjectLoaded = true;
         _viewModel.SettingsVisible = true;
         _viewModel.SearchVisible = false;
@@ -49,23 +60,20 @@ public partial class MainWindow : IProjectLoadPipelineHost
     void IProjectLoadPipelineHost.UpdateTitle() =>
         UpdateTitle();
 
-    Task IProjectLoadPipelineHost.ReloadProjectAsync(CancellationToken cancellationToken, bool applyStoredProfile) =>
-        ReloadProjectAsync(cancellationToken, applyStoredProfile);
+    Task<bool> IProjectLoadPipelineHost.ReloadProjectAsync(CancellationToken cancellationToken, bool applyStoredProfile) =>
+        ReloadProjectAsync(
+            cancellationToken,
+            applyStoredProfile,
+            preserveTreeState: false);
 
     Task IProjectLoadPipelineHost.RecordRecentFolderAsync(
         string path,
         CancellationToken cancellationToken) =>
         RecordRecentFolderAsync(path, cancellationToken);
 
-    Task IProjectLoadPipelineHost.DeleteRepositoryDirectoryAsync(
-        string path,
-        CancellationToken cancellationToken) =>
-        Task.Run(
-            () => _repoCacheService.DeleteRepositoryDirectory(path),
-            cancellationToken);
-
-    void IProjectLoadPipelineHost.ClearCurrentCachedRepoPath()
+    void IProjectLoadPipelineHost.ReleaseCurrentRepositorySession()
     {
+        Interlocked.Exchange(ref _currentRepositorySession, null)?.Dispose();
         _currentCachedRepoPath = null;
     }
 

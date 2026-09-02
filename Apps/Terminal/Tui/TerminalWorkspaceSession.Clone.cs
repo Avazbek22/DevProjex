@@ -1,5 +1,4 @@
-using Terminal.Gui.Drawing;
-using Terminal.Gui.Views;
+using DevProjex.Terminal.Rendering;
 
 namespace DevProjex.Terminal.Tui;
 
@@ -12,6 +11,8 @@ internal sealed partial class TerminalWorkspaceSession
 
 	private void ShowCloneProgress(string repositoryName, string safeRepositoryUrl)
 	{
+		repositoryName = TerminalTextEscaping.EscapeSingleLine(repositoryName);
+		safeRepositoryUrl = TerminalTextEscaping.EscapeSingleLine(safeRepositoryUrl);
 		CancelWorkspaceRefreshes();
 		ClearRoot();
 		_screen = TerminalWorkspaceScreen.Loading;
@@ -39,8 +40,9 @@ internal sealed partial class TerminalWorkspaceSession
 			repositoryName,
 			L("Terminal.Tui.Clone.ValidatingUrl"));
 		_operationProgress.ApplyLayout(_terminalWidth, _terminalHeight);
-		_tooSmall = CreateTooSmallLabel();
-		_root.Add(heading, _operationProgress.View, _tooSmall);
+		var tooSmall = CreateTooSmallLabel();
+		_loadingViews = new LoadingViewGraph(tooSmall);
+		_root.Add(heading, _operationProgress.View, tooSmall);
 		ApplyLoadingLayout();
 		CompleteRootTransition();
 	}

@@ -8,14 +8,11 @@
 │                                                     │││   └── App.cs                                                 │
 │                                                     ││├── global.json                                                │
 │                                                     ││└── readme.md                                                  │
-│                  ┌┤Error [DPX-GIT-TRACKED-INDEX-UNAVAILABLE]├────────────────────────────────────┐                   │
-│                  │ Tracked Git mode requires at least one readable repository index.             │                   │
-│                  │                                                                               │                   │
-│                  │                                                                               │                   │
-│                  │                                                                               │                   │
-│                  │                                 ⟦► Close ◄⟧▖                                  │                   │
-│                  │                                 ▝▀▀▀▀▀▀▀▀▀▀▘                                  │                   │
-│                  └───────────────────────────────────────────────────────────────────────────────┘                   │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
 │                                                     ││                                                               │
 │                                                     ││                                                               │
 │                                                     ││                                                               │
@@ -26,5 +23,8 @@
 │                                                     ││ Files 4  |  Lines 1-8/8                                       │
 └─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
 
+┌┤  PARAMETERS├────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ Content 0/5 · Exclusions 9/9 · File types 3/3                                                                        │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
  Files 4 · Folders 3 · 76 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
- Up/Down Navigate   Enter Expand   Space Toggle   / Search   Tab/F6 Preview   Ctrl+P Actions   ? Help
+ ✗ Tracked Git mode requires at least one readable repository index. (DPX-GIT-TRACKED-INDEX-UNAVAILABLE)

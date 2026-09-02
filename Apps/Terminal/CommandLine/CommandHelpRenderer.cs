@@ -69,7 +69,7 @@ public sealed class CommandHelpRenderer(
 		{
 			WriteSection(output, _localization["Terminal.Help.Commands"], terminalWidth);
 			foreach (var child in children)
-				WriteItem(output, child.Name, child.Description ?? string.Empty, terminalWidth);
+				WriteItem(output, FormatCommandNames(child), child.Description ?? string.Empty, terminalWidth);
 		}
 
 		WriteSection(output, _localization["Terminal.Help.Examples"], terminalWidth);
@@ -77,13 +77,58 @@ public sealed class CommandHelpRenderer(
 			WriteIndented(output, example, terminalWidth);
 
 		WriteSection(output, _localization["Terminal.Help.ExitCodes"], terminalWidth);
-		WriteItem(output, "0", _localization["Terminal.Exit.Success"], terminalWidth, 4);
-		WriteItem(output, "1", _localization["Terminal.Exit.Runtime"], terminalWidth, 4);
-		WriteItem(output, "2", _localization["Terminal.Exit.Syntax"], terminalWidth, 4);
-		WriteItem(output, "3", _localization["Terminal.Exit.Policy"], terminalWidth, 4);
-		WriteItem(output, "4", _localization["Terminal.Exit.Conflict"], terminalWidth, 4);
-		WriteItem(output, "5", _localization["Terminal.Exit.Desktop"], terminalWidth, 4);
-		WriteItem(output, "130", _localization["Terminal.Exit.Canceled"], terminalWidth, 4);
+		foreach (var code in ResolveExitCodes(command))
+		{
+			var key = code switch
+			{
+				0 => "Terminal.Exit.Success",
+				1 => "Terminal.Exit.Runtime",
+				2 => "Terminal.Exit.Syntax",
+				3 => "Terminal.Exit.Policy",
+				4 => "Terminal.Exit.Conflict",
+				5 => "Terminal.Exit.Desktop",
+				130 => "Terminal.Exit.Canceled",
+				_ => throw new ArgumentOutOfRangeException(nameof(code), code, null)
+			};
+			WriteItem(output, code.ToString(System.Globalization.CultureInfo.InvariantCulture),
+				_localization[key], terminalWidth, 4);
+		}
+	}
+
+	internal static IReadOnlyList<int> ResolveExitCodes(Command command)
+	{
+		if (command is RootCommand)
+			return [0, 1, 2, 3, 4, 5, 130];
+
+		var path = ResolveCommandPath(command);
+		return path switch
+		{
+			"open" => [0, 1, 2, 3, 4, 5, 130],
+			"analyze" or "tree" or "export context" or "export project" or
+				"profile export" => [0, 1, 2, 3, 4, 130],
+			"profile import" or "profile save" or
+				"cache list" or "cache remove" or "cache clear" or "cache update" or
+				"doctor" => [0, 1, 2, 3, 130],
+			"ui list" => [0, 1, 2, 5, 130],
+			"tui" => [0, 1, 2, 3, 130],
+			"export" or "profile" or "cache" or "ui" => [0, 2, 130],
+			"recent" or "profile show" or "profile validate" or "profile reset" or
+				"cache path" or "completion" => [0, 1, 2, 130],
+			_ when path.StartsWith("ui ", StringComparison.Ordinal) => [0, 1, 2, 3, 4, 5, 130],
+			_ => [0, 2, 130]
+		};
+	}
+
+	private static string ResolveCommandPath(Command command)
+	{
+		var segments = new Stack<string>();
+		for (var current = command;
+		     current is not RootCommand;
+		     current = current.Parents.OfType<Command>().First())
+		{
+			segments.Push(current.Name);
+		}
+		return string.Join(' ', segments);
 	}
 
 	private static void WriteSection(TextWriter output, string title, int terminalWidth)
@@ -103,7 +148,7 @@ public sealed class CommandHelpRenderer(
 		};
 
 		var metadata = new List<string>(3);
-		if (option.Required)
+		if (option.Required || CliHelpMetadataRegistry.IsRequired(option))
 			metadata.Add(_localization["Terminal.Help.Required"]);
 		if (IsRepeatable(option))
 			metadata.Add(_localization["Terminal.Help.Repeatable"]);
@@ -146,6 +191,14 @@ public sealed class CommandHelpRenderer(
 			? string.Join(", ", names)
 			: $"{string.Join(", ", names)} <{valueName}>";
 	}
+
+	private static string FormatCommandNames(Command command) =>
+		string.Join(
+			", ",
+			new[] { command.Name }
+				.Concat(command.Aliases)
+				.Where(static value => !string.IsNullOrWhiteSpace(value))
+				.Distinct(StringComparer.Ordinal));
 
 	private static void WriteItem(
 		TextWriter output,

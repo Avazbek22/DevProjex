@@ -18,7 +18,8 @@ internal static class ProjectTreeInventoryScanner
 		string rootPath,
 		ProjectTreeGitIgnoreContexts initialGitIgnoreContexts,
 		Func<FileSystemTreeEntry, bool, ProjectTreeGitIgnoreContexts, bool> shouldTraverseDirectory,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		Action<FileSystemScanEnumerationPoint, string>? beforeEnumeration = null)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 		var gitIgnoreLoadSession = new GitIgnoreMatcherLoadSession();
@@ -41,7 +42,7 @@ internal static class ProjectTreeInventoryScanner
 				length: 0)
 		};
 
-		if (string.IsNullOrWhiteSpace(rootPath) || !Directory.Exists(rootPath))
+		if (PathUtility.IsMissingPath(rootPath) || !Directory.Exists(rootPath))
 			return new ProjectTreeInventorySnapshot(entries, rootAccessDenied: false, hadAccessDenied: false);
 		if (!FileSystemRootEntryPolicy.IsPhysicalDirectory(rootPath))
 		{
@@ -51,9 +52,19 @@ internal static class ProjectTreeInventoryScanner
 
 		var rootAccessDenied = false;
 		var hadAccessDenied = false;
+		var hadScanFailure = false;
+		var discoveredGitRepositoryRoots = new List<string>();
+		if (GitTrackedPathIndexCache.TryFindNearestRepositoryBoundary(
+			rootPath,
+			cancellationToken,
+			out var nearestRepositoryRoot))
+		{
+			discoveredGitRepositoryRoots.Add(nearestRepositoryRoot);
+		}
 		List<FileSystemTreeEntry> rootChildren;
 		try
 		{
+			beforeEnumeration?.Invoke(FileSystemScanEnumerationPoint.RootDirectories, rootPath);
 			rootChildren = ReadDirectoryEntries(rootPath, relativePath: string.Empty, cancellationToken);
 		}
 		catch (OperationCanceledException)
@@ -63,14 +74,23 @@ internal static class ProjectTreeInventoryScanner
 		catch (UnauthorizedAccessException)
 		{
 			MarkAccessDenied(entries, 0);
-			return new ProjectTreeInventorySnapshot(entries, rootAccessDenied: true, hadAccessDenied: true);
+			return new ProjectTreeInventorySnapshot(
+				entries,
+				rootAccessDenied: true,
+				hadAccessDenied: true,
+				discoveredGitRepositoryRoots: discoveredGitRepositoryRoots);
 		}
-		catch
+		catch (Exception exception) when (FileSystemScanner.IsExpectedFileSystemScanFailure(exception))
 		{
-			return new ProjectTreeInventorySnapshot(entries, rootAccessDenied: false, hadAccessDenied: false);
+			return new ProjectTreeInventorySnapshot(
+				entries,
+				rootAccessDenied: false,
+				hadAccessDenied: false,
+				hadScanFailure: true,
+				discoveredGitRepositoryRoots: discoveredGitRepositoryRoots);
 		}
 
-		var discoveredGitIgnoreMatchers = new List<ScopedGitIgnoreMatcher>();
+		var discoveredGitIgnoreMatchers = new ScopedGitIgnoreMatcherAccumulator();
 		var discoveredGitTrackedPathIndexes = new List<GitTrackedPathIndex>();
 		var inheritedGitIgnoreContexts = initialGitIgnoreContexts;
 		if (initialGitIgnoreContexts.Enabled)
@@ -95,8 +115,9 @@ internal static class ProjectTreeInventoryScanner
 					entries,
 					rootAccessDenied: false,
 					hadAccessDenied: true,
-					discoveredGitIgnoreMatchers,
-					discoveredGitTrackedPathIndexes);
+					discoveredGitIgnoreMatchers.Items,
+					discoveredGitTrackedPathIndexes,
+					discoveredGitRepositoryRoots: discoveredGitRepositoryRoots);
 			}
 		}
 		if (inheritedGitIgnoreContexts.RequiresTrackedPathIndex &&
@@ -128,8 +149,9 @@ internal static class ProjectTreeInventoryScanner
 				entries,
 				rootAccessDenied: false,
 				hadAccessDenied: true,
-				discoveredGitIgnoreMatchers,
-				discoveredGitTrackedPathIndexes);
+				discoveredGitIgnoreMatchers.Items,
+				discoveredGitTrackedPathIndexes,
+				discoveredGitRepositoryRoots: discoveredGitRepositoryRoots);
 		}
 		var rootDirectoryChildren = AddProjectRootChildren(
 			entries,
@@ -144,8 +166,9 @@ internal static class ProjectTreeInventoryScanner
 				entries,
 				rootAccessDenied,
 				hadAccessDenied,
-				discoveredGitIgnoreMatchers,
-				discoveredGitTrackedPathIndexes);
+				discoveredGitIgnoreMatchers.Items,
+				discoveredGitTrackedPathIndexes,
+				discoveredGitRepositoryRoots: discoveredGitRepositoryRoots);
 		}
 
 		var subtreeResults = new SubtreeScanResult[rootDirectoryChildren.Count];
@@ -161,7 +184,8 @@ internal static class ProjectTreeInventoryScanner
 					rootGitIgnoreContexts,
 					shouldTraverseDirectory,
 					gitIgnoreLoadSession,
-					cancellationToken);
+					cancellationToken,
+					beforeEnumeration);
 			}
 		}
 		else
@@ -176,28 +200,52 @@ internal static class ProjectTreeInventoryScanner
 					rootGitIgnoreContexts,
 					shouldTraverseDirectory,
 					gitIgnoreLoadSession,
-					parallelOptions.CancellationToken);
+					parallelOptions.CancellationToken,
+					beforeEnumeration);
 			});
 		}
 
+		var mergedEntryCapacity = entries.Count;
 		foreach (var result in subtreeResults)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
+			mergedEntryCapacity = checked(mergedEntryCapacity + Math.Max(0, result.Entries.Count - 1));
+		}
+		entries.EnsureCapacity(mergedEntryCapacity);
+
+		foreach (var result in subtreeResults)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
 			if (result.HadAccessDenied)
 				hadAccessDenied = true;
+			if (result.HadScanFailure)
+				hadScanFailure = true;
 
-			MergeSubtree(entries, result);
-			discoveredGitIgnoreMatchers.AddRange(result.DiscoveredGitIgnoreMatchers);
-			discoveredGitTrackedPathIndexes.AddRange(result.DiscoveredGitTrackedPathIndexes);
+			MergeSubtree(entries, result, cancellationToken);
+			foreach (var matcher in result.DiscoveredGitIgnoreMatchers)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				discoveredGitIgnoreMatchers.Add(matcher);
+			}
+			AppendRange(discoveredGitTrackedPathIndexes, result.DiscoveredGitTrackedPathIndexes, cancellationToken);
+			AppendRange(discoveredGitRepositoryRoots, result.DiscoveredGitRepositoryRoots, cancellationToken);
 		}
 
-		var uniqueMatchers = MergeDiscoveredGitIgnoreMatchers(discoveredGitIgnoreMatchers);
-		var uniqueTrackedPathIndexes = MergeDiscoveredGitTrackedPathIndexes(discoveredGitTrackedPathIndexes);
+		var uniqueMatchers = MergeDiscoveredGitIgnoreMatchers(discoveredGitIgnoreMatchers.Items, cancellationToken);
+		var uniqueTrackedPathIndexes = MergeDiscoveredGitTrackedPathIndexes(
+			discoveredGitTrackedPathIndexes,
+			cancellationToken);
+		var uniqueRepositoryRoots = MergeDiscoveredGitRepositoryRoots(
+			discoveredGitRepositoryRoots,
+			cancellationToken);
 		return new ProjectTreeInventorySnapshot(
 			entries,
 			rootAccessDenied,
 			hadAccessDenied,
 			uniqueMatchers,
-			uniqueTrackedPathIndexes);
+			uniqueTrackedPathIndexes,
+			hadScanFailure,
+			uniqueRepositoryRoots);
 	}
 
 	private static List<int> AddProjectRootChildren(
@@ -245,15 +293,18 @@ internal static class ProjectTreeInventoryScanner
 		ProjectTreeGitIgnoreContexts inheritedGitIgnoreContexts,
 		Func<FileSystemTreeEntry, bool, ProjectTreeGitIgnoreContexts, bool> shouldTraverseDirectory,
 		GitIgnoreMatcherLoadSession gitIgnoreLoadSession,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		Action<FileSystemScanEnumerationPoint, string>? beforeEnumeration)
 	{
 		var entries = new List<ProjectTreeInventoryEntry>(capacity: 128)
 		{
 			rootEntry
 		};
 		var hadAccessDenied = false;
-		var discoveredGitIgnoreMatchers = new List<ScopedGitIgnoreMatcher>();
+		var hadScanFailure = false;
+		var discoveredGitIgnoreMatchers = new ScopedGitIgnoreMatcherAccumulator();
 		var discoveredGitTrackedPathIndexes = new List<GitTrackedPathIndex>();
+		var discoveredGitRepositoryRoots = new List<string>();
 		var pendingDirectories = new Stack<(int Index, ProjectTreeGitIgnoreContexts GitIgnoreContexts)>();
 		pendingDirectories.Push((0, inheritedGitIgnoreContexts));
 
@@ -266,6 +317,7 @@ internal static class ProjectTreeInventoryScanner
 			List<FileSystemTreeEntry> childEntries;
 			try
 			{
+				beforeEnumeration?.Invoke(FileSystemScanEnumerationPoint.DirectoryDiscovery, parent.FullPath);
 				childEntries = ReadDirectoryEntries(parent.FullPath, parent.RelativePath, cancellationToken);
 			}
 			catch (OperationCanceledException)
@@ -278,8 +330,9 @@ internal static class ProjectTreeInventoryScanner
 				hadAccessDenied = true;
 				continue;
 			}
-			catch
+			catch (Exception exception) when (FileSystemScanner.IsExpectedFileSystemScanFailure(exception))
 			{
+				hadScanFailure = true;
 				continue;
 			}
 
@@ -287,6 +340,8 @@ internal static class ProjectTreeInventoryScanner
 				continue;
 
 			var gitControlPaths = FindGitControlPaths(childEntries);
+			if (!string.IsNullOrWhiteSpace(gitControlPaths.GitMetadataPath))
+				discoveredGitRepositoryRoots.Add(parent.FullPath);
 			var gitIgnoreContexts = parentGitIgnoreContexts.EnterDirectory(
 				parent.FullPath,
 				parent.RelativePath,
@@ -341,14 +396,18 @@ internal static class ProjectTreeInventoryScanner
 			rootGlobalIndex,
 			entries,
 			hadAccessDenied,
-			discoveredGitIgnoreMatchers,
-			discoveredGitTrackedPathIndexes);
+			hadScanFailure,
+			discoveredGitIgnoreMatchers.Items,
+			discoveredGitTrackedPathIndexes,
+			discoveredGitRepositoryRoots);
 	}
 
 	private static void MergeSubtree(
 		List<ProjectTreeInventoryEntry> targetEntries,
-		SubtreeScanResult subtree)
+		SubtreeScanResult subtree,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		if (subtree.Entries.Count == 0)
 			return;
 
@@ -368,6 +427,7 @@ internal static class ProjectTreeInventoryScanner
 
 		for (var localIndex = 1; localIndex < subtree.Entries.Count; localIndex++)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			var entry = subtree.Entries[localIndex];
 			entry = RemapSubtreeEntry(entry, rootGlobalIndex, globalBaseIndex);
 			targetEntries.Add(entry);
@@ -414,68 +474,170 @@ internal static class ProjectTreeInventoryScanner
 			entries.Add(entry);
 		}
 
-		entries.Sort(ProjectInventoryEntryComparer.Instance);
+		CancellationAwareSort.Sort(entries, ProjectInventoryEntryComparer.Instance, cancellationToken);
 		return entries;
 	}
 
 	private static GitControlPaths FindGitControlPaths(IReadOnlyList<FileSystemTreeEntry> entries)
 	{
 		string? gitIgnorePath = null;
+		string? gitIgnoreAliasPath = null;
 		string? gitMetadataPath = null;
+		string? gitMetadataAliasPath = null;
 		foreach (var entry in entries)
 		{
-			if (!entry.IsDirectory && PathComparer.Default.Equals(entry.Name, ".gitignore"))
+			var parentPath = Path.GetDirectoryName(entry.FullPath)!;
+			if (!entry.IsDirectory &&
+			    ProjectTreePathIdentity.CanonicalComparer.Equals(entry.Name, ".gitignore"))
+			{
 				gitIgnorePath = entry.FullPath;
-			else if (PathComparer.Default.Equals(entry.Name, ".git"))
-				gitMetadataPath = entry.FullPath;
+			}
+			else if (!entry.IsDirectory &&
+			         gitIgnorePath is null &&
+			         gitIgnoreAliasPath is null &&
+			         OperatingSystem.IsWindows() &&
+			         entry.Name.Equals(".gitignore", StringComparison.OrdinalIgnoreCase) &&
+			         FileSystemEntryEnumerator.IsWindowsCompatibleControlAlias(
+				         entry.Name,
+				         ".gitignore",
+				         File.Exists(Path.Combine(parentPath, ".gitignore"))))
+			{
+				gitIgnoreAliasPath = entry.FullPath;
+			}
+
+			if (ProjectTreePathIdentity.CanonicalComparer.Equals(entry.Name, ".git") &&
+			    GitRepositoryBoundaryProbe.ExistsAt(parentPath))
+			{
+				gitMetadataPath = Path.Combine(parentPath, ".git");
+			}
+			else if (gitMetadataPath is null &&
+			         gitMetadataAliasPath is null &&
+			         OperatingSystem.IsWindows() &&
+			         entry.Name.Equals(".git", StringComparison.OrdinalIgnoreCase) &&
+			         FileSystemEntryEnumerator.IsWindowsCompatibleControlAlias(
+				         entry.Name,
+				         ".git",
+				         GitRepositoryBoundaryProbe.ExistsAt(parentPath)))
+			{
+				gitMetadataAliasPath = Path.Combine(parentPath, ".git");
+			}
 
 			if (gitIgnorePath is not null && gitMetadataPath is not null)
 				break;
 		}
 
-		return new GitControlPaths(gitIgnorePath, gitMetadataPath);
+		return new GitControlPaths(
+			gitIgnorePath ?? gitIgnoreAliasPath,
+			gitMetadataPath ?? gitMetadataAliasPath);
 	}
 
 	private static IReadOnlyList<ScopedGitIgnoreMatcher> MergeDiscoveredGitIgnoreMatchers(
-		IReadOnlyList<ScopedGitIgnoreMatcher> matchers)
+		IReadOnlyList<ScopedGitIgnoreMatcher> matchers,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		if (matchers.Count <= 1)
 			return matchers;
 
-		var unique = new Dictionary<string, ScopedGitIgnoreMatcher>(PathComparer.Default);
+		var unique = new Dictionary<string, ScopedGitIgnoreMatcher>(
+			ProjectTreePathIdentity.CanonicalComparer);
 		foreach (var matcher in matchers)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
 			unique[matcher.ScopeRootPath] = matcher;
+		}
 
 		var merged = unique.Values.ToList();
-		merged.Sort(static (left, right) =>
-		{
-			var depth = left.ScopeRootPath.Length.CompareTo(right.ScopeRootPath.Length);
-			return depth != 0
-				? depth
-				: PathComparer.Default.Compare(left.ScopeRootPath, right.ScopeRootPath);
-		});
+		CancellationAwareSort.Sort(
+			merged,
+			static (left, right) =>
+			{
+				var depth = left.ScopeRootPath.Length.CompareTo(right.ScopeRootPath.Length);
+				if (depth != 0)
+					return depth;
+				var platformOrder = PathComparer.Default.Compare(
+					left.ScopeRootPath,
+					right.ScopeRootPath);
+				return platformOrder != 0
+					? platformOrder
+					: ProjectTreePathIdentity.CanonicalComparer.Compare(
+						left.ScopeRootPath,
+						right.ScopeRootPath);
+			},
+			cancellationToken);
 		return merged;
 	}
 
 	private static IReadOnlyList<GitTrackedPathIndex> MergeDiscoveredGitTrackedPathIndexes(
-		IReadOnlyList<GitTrackedPathIndex> indexes)
+		IReadOnlyList<GitTrackedPathIndex> indexes,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		if (indexes.Count <= 1)
 			return indexes;
 
-		var unique = new Dictionary<string, GitTrackedPathIndex>(PathComparer.Default);
+		var unique = new Dictionary<string, GitTrackedPathIndex>(StringComparer.Ordinal);
 		foreach (var index in indexes)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
 			unique[index.RepositoryRootPath] = index;
+		}
 
 		var merged = unique.Values.ToList();
-		merged.Sort(static (left, right) =>
-		{
-			var depth = left.RepositoryRootPath.Length.CompareTo(right.RepositoryRootPath.Length);
-			return depth != 0
-				? depth
-				: PathComparer.Default.Compare(left.RepositoryRootPath, right.RepositoryRootPath);
-		});
+		CancellationAwareSort.Sort(
+			merged,
+			static (left, right) =>
+			{
+				var depth = left.RepositoryRootPath.Length.CompareTo(right.RepositoryRootPath.Length);
+				if (depth != 0)
+					return depth;
+				var platformOrder = PathComparer.Default.Compare(
+					left.RepositoryRootPath,
+					right.RepositoryRootPath);
+				return platformOrder != 0
+					? platformOrder
+					: StringComparer.Ordinal.Compare(left.RepositoryRootPath, right.RepositoryRootPath);
+			},
+			cancellationToken);
 		return merged;
+	}
+
+	private static IReadOnlyList<string> MergeDiscoveredGitRepositoryRoots(
+		IReadOnlyList<string> repositoryRoots,
+		CancellationToken cancellationToken)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
+		if (repositoryRoots.Count <= 1)
+			return repositoryRoots;
+
+		var unique = repositoryRoots.ToHashSet(StringComparer.Ordinal);
+		var merged = unique.ToList();
+		CancellationAwareSort.Sort(
+			merged,
+			static (left, right) =>
+			{
+				var depth = left.Length.CompareTo(right.Length);
+				if (depth != 0)
+					return depth;
+				var platformOrder = PathComparer.Default.Compare(left, right);
+				return platformOrder != 0
+					? platformOrder
+					: StringComparer.Ordinal.Compare(left, right);
+			},
+			cancellationToken);
+		return merged;
+	}
+
+	private static void AppendRange<T>(
+		List<T> target,
+		IReadOnlyList<T> source,
+		CancellationToken cancellationToken)
+	{
+		foreach (var item in source)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			target.Add(item);
+		}
 	}
 
 	private static void MarkAccessDenied(List<ProjectTreeInventoryEntry> entries, int index)
@@ -501,8 +663,10 @@ internal static class ProjectTreeInventoryScanner
 		int RootGlobalIndex,
 		List<ProjectTreeInventoryEntry> Entries,
 		bool HadAccessDenied,
+		bool HadScanFailure,
 		IReadOnlyList<ScopedGitIgnoreMatcher> DiscoveredGitIgnoreMatchers,
-		IReadOnlyList<GitTrackedPathIndex> DiscoveredGitTrackedPathIndexes);
+		IReadOnlyList<GitTrackedPathIndex> DiscoveredGitTrackedPathIndexes,
+		IReadOnlyList<string> DiscoveredGitRepositoryRoots);
 
 	private readonly record struct GitControlPaths(
 		string? GitIgnorePath,
@@ -543,7 +707,7 @@ internal readonly record struct ProjectTreeGitIgnoreContexts(
 		string directoryRelativePath,
 		string? gitIgnorePath,
 		string? gitMetadataPath,
-		List<ScopedGitIgnoreMatcher> discoveredMatchers,
+		ScopedGitIgnoreMatcherAccumulator discoveredMatchers,
 		List<GitTrackedPathIndex> discoveredTrackedPathIndexes,
 		GitIgnoreMatcherLoadSession gitIgnoreLoadSession,
 		CancellationToken cancellationToken,
@@ -558,7 +722,10 @@ internal readonly record struct ProjectTreeGitIgnoreContexts(
 		ScopedGitIgnoreMatcher? matcher = null;
 		if (!string.IsNullOrWhiteSpace(gitIgnorePath))
 		{
-			var loadResult = gitIgnoreLoadSession.Load(directoryPath, gitIgnorePath);
+			var loadResult = gitIgnoreLoadSession.LoadWithCancellation(
+				directoryPath,
+				gitIgnorePath,
+				cancellationToken);
 			matcher = loadResult.Matcher;
 			gitIgnoreReadFailed = ReportGitIgnoreReadFailures &&
 			                      loadResult.Status == GitIgnoreMatcherLoadStatus.ReadFailure;

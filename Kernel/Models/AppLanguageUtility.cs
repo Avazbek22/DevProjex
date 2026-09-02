@@ -4,9 +4,25 @@ namespace DevProjex.Kernel.Models;
 
 public static class AppLanguageUtility
 {
-	public static AppLanguage DetectSystemLanguage()
+	public static AppLanguage DetectSystemLanguage() => DetectSystemLanguage(CultureInfo.CurrentUICulture);
+
+	internal static AppLanguage DetectSystemLanguage(CultureInfo culture)
 	{
-		var cultureName = CultureInfo.CurrentUICulture.Name.ToLowerInvariant();
+		ArgumentNullException.ThrowIfNull(culture);
+
+		var cultureName = culture.Name.ToLowerInvariant();
+		if (cultureName is "zh-tw" or "zh-hk" or "zh-mo" ||
+		    cultureName.StartsWith("zh-hant", StringComparison.Ordinal))
+		{
+			return AppLanguage.ZhTw;
+		}
+
+		if (cultureName is "zh" or "zh-cn" or "zh-sg" ||
+		    cultureName.StartsWith("zh-hans", StringComparison.Ordinal))
+		{
+			return AppLanguage.ZhCn;
+		}
+
 		if (cultureName is
 		    "pt-pt" or "pt-ao" or "pt-mz" or "pt-cv" or "pt-gw" or
 		    "pt-st" or "pt-gq" or "pt-tl" or "pt-mo")
@@ -14,7 +30,7 @@ public static class AppLanguageUtility
 			return AppLanguage.PtPt;
 		}
 
-		return CultureInfo.CurrentUICulture.TwoLetterISOLanguageName.ToLowerInvariant() switch
+		return culture.TwoLetterISOLanguageName.ToLowerInvariant() switch
 		{
 			"ru" => AppLanguage.Ru,
 			"uz" => AppLanguage.Uz,
@@ -25,6 +41,13 @@ public static class AppLanguageUtility
 			"it" => AppLanguage.It,
 			"es" => AppLanguage.Es,
 			"pt" => AppLanguage.Pt,
+			"ja" => AppLanguage.Ja,
+			"ko" => AppLanguage.Ko,
+			"tr" => AppLanguage.Tr,
+			"uk" => AppLanguage.Uk,
+			"pl" => AppLanguage.Pl,
+			"vi" => AppLanguage.Vi,
+			"id" => AppLanguage.Id,
 			_ => AppLanguage.En
 		};
 	}
@@ -41,6 +64,15 @@ public static class AppLanguageUtility
 		AppLanguage.Es => "es",
 		AppLanguage.Pt => "pt",
 		AppLanguage.PtPt => "pt-pt",
+		AppLanguage.ZhCn => "zh-cn",
+		AppLanguage.ZhTw => "zh-tw",
+		AppLanguage.Ja => "ja",
+		AppLanguage.Ko => "ko",
+		AppLanguage.Tr => "tr",
+		AppLanguage.Uk => "uk",
+		AppLanguage.Pl => "pl",
+		AppLanguage.Vi => "vi",
+		AppLanguage.Id => "id",
 		_ => "en"
 	};
 

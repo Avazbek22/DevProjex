@@ -1,0 +1,586 @@
+## 1) Nó là gì và tại sao
+DevProjex nhanh chóng chuẩn bị bối cảnh dự án: hiển thị cấu trúc thư mục/tệp, cho phép bạn chọn các mục bằng hộp kiểm và sao chép nội dung cây và/hoặc tệp vào khay nhớ tạm. Hữu ích cho việc xem xét mã, hỗ trợ, tìm hiểu và chia sẻ cấu trúc dự án với trợ lý AI.
+
+Quan trọng: DevProjex không sửa đổi các tệp trong dự án bạn mở.
+
+## 2) Cây dự án
+* Biểu tượng loại tập tin/thư mục.
+* Hộp kiểm trên các nút.
+* Mở rộng/thu gọn.
+
+Các hộp kiểm: việc chọn một nút áp dụng cho các nút con của nó; trạng thái gốc được tính toán lại tự động.
+
+Phím nóng:
+* {mod}E - mở rộng tất cả
+* {collapseAll} — thu gọn tất cả (gốc vẫn được mở rộng)
+
+### Trình đơn ngữ cảnh
+Nhấp chuột phải vào một nút hoặc nhấn {shift}F10 hoặc phím Menu trên nút được đặt tiêu điểm:
+* Hiển thị trong File Explorer / Hiển thị trong Finder / Mở trong trình quản lý tệp - hiển thị mục trong trình quản lý tệp hệ thống; nhãn phù hợp với nền tảng hiện tại.
+* Sao chép đường dẫn đầy đủ - đường dẫn tuyệt đối của mục.
+* Sao chép đường dẫn tương đối - đường dẫn từ thư mục gốc của dự án, bắt đầu bằng tên thư mục gốc, ví dụ `project/src/File.cs`.
+* Sao chép nội dung - đối với tệp: sao chép nội dung có chuyển đổi nội dung được áp dụng, chính xác như sao chép và xuất tạo ra nội dung đó.
+* Chỉ chọn cái này - chỉ kiểm tra nút này và xóa phần còn lại; chỉ được hiển thị trong khi mục khác cũng được chọn.
+* Mở rộng nhánh / Thu gọn nhánh - cho các thư mục.
+
+Nếu đường dẫn không còn tồn tại trên đĩa, việc mở mục trong trình quản lý tệp hoặc sao chép nội dung của nó sẽ hiển thị thông báo lỗi; sao chép đường dẫn vẫn hoạt động.
+
+## 3) Tập tin
+* Mở thư mục… — mở thư mục gốc ( {mod}O)
+* Cửa sổ mới - mở một phiên bản DevProjex độc lập mới
+* Gần đây - danh sách các thư mục cục bộ được mở gần đây
+* Làm mới - quét lại thư mục cục bộ và xây dựng lại cây (F5)
+* Xuất sang tập tin:
+  * Xuất cây
+  * Xuất nội dung
+  * Xuất cây và nội dung
+* Xuất dự án:
+  * Vào thư mục…
+  * Để lưu trữ ZIP …
+
+Dự án xuất sẽ tạo một thư mục hoặc kho lưu trữ ZIP riêng biệt từ cây hiện tại trong khi vẫn giữ nguyên cấu trúc thư mục.
+
+Các loại tệp đã chọn, quy tắc loại trừ và các mục đã chọn đều được tôn trọng. Nếu không có gì được kiểm tra, toàn bộ cây hiện tại sẽ được xuất.
+
+Các tệp văn bản và nhị phân được sao chép và các thư mục trống đi kèm sẽ được giữ nguyên. Các tập tin nguồn không được sửa đổi. Kết quả không thể được lưu bên trong dự án nguồn.
+
+Trong quá trình xuất, bạn không thể thay đổi cây hoặc cài đặt, sử dụng bộ lọc, thay đổi định dạng hoặc chế độ xem trước, chạy lệnh Git, làm mới hoặc mở một dự án khác.
+
+Quy tắc định dạng:
+* Xuất cây:
+  * ASCII -> chỉ `.txt`.
+  * JSON -> mặc định `.json`, với cả `.json` và `.txt` có sẵn trong hộp thoại Lưu.
+  * XML -> `.xml` mặc định, với cả `.xml` và `.txt` có sẵn trong hộp thoại Lưu.
+  * MD -> mặc định `.md`, với cả `.md` và `.txt` có sẵn trong hộp thoại Lưu.
+* Xuất nội dung - luôn là định dạng nội dung văn bản, tệp `.txt` (không áp dụng chuyển đổi định dạng cây).
+* Xuất cây và nội dung - luôn là tệp `.txt`; định dạng cây đã chọn chỉ ảnh hưởng đến định dạng khối cây bên trong kết quả.
+
+Các tệp xuất được viết bằng UTF-8 không có BOM.
+
+### Kéo và thả
+Kéo và thả hoạt động trong vùng khởi động (Vùng thả) khi không có dự án nào được tải.
+
+Quy tắc:
+* bạn có thể thả một thư mục;
+* bạn có thể thả một tập tin - trong trường hợp này thư mục chứa nó được mở;
+* nếu thả nhiều mục, đường dẫn cục bộ phù hợp đầu tiên sẽ được sử dụng;
+* nếu đường dẫn không có sẵn hoặc không tồn tại thì các biện pháp kiểm tra quyền truy cập tương tự như trong “Mở thư mục…” sẽ được áp dụng;
+* các mục không được hỗ trợ hoặc không phải cục bộ sẽ bị bỏ qua.
+
+### Gần đây
+Mục “Tệp → Gần đây” hiển thị lịch sử của các thư mục cục bộ được mở gần đây.
+
+Quy tắc:
+* chỉ các thư mục cục bộ mới được thêm vào danh sách;
+* Kho Git được sao chép qua DevProjex không được thêm vào danh sách này;
+* các bản sao không được tạo - việc mở lại cùng một thư mục sẽ di chuyển nó lên trên cùng;
+* tối đa 32 thư mục gần đây được lưu trữ;
+* lịch sử được lưu giữ giữa các lần khởi chạy ứng dụng.
+
+Mỗi mục hiển thị thư mục mẹ và tên dự án, ví dụ `Projects / App`.
+
+## 4) Khởi chạy từ thiết bị đầu cuối
+DevProjex cung cấp Không gian làm việc đầu cuối tương tác và các lệnh trực tiếp cho tập lệnh và CI.
+
+Nếu lệnh đã được thiết lập, hãy mở terminal và chạy:
+`devprojex --help`
+
+Điều này liệt kê các lệnh và tùy chọn cấp cao nhất. Chạy `devprojex help <command>` để xem các tùy chọn và ví dụ riêng của lệnh đó.
+
+Ví dụ:
+* `devprojex` — mở Terminal Workspace tương tác. Bên trong không gian làm việc, điều khiển các hành động thông qua dòng lệnh `:` (ví dụ `:copy`, `:analyze`, `:branch`, `:language`); xem tài liệu dự án và trợ giúp về không gian làm việc tích hợp để biết danh sách lệnh đầy đủ.
+* `devprojex tui .` — mở thư mục được chỉ định trực tiếp trong Terminal Workspace.
+* `devprojex open . --preview` — mở thư mục hiện tại trong Desktop Preview.
+* `devprojex analyze . --format json` — phân tích dự án hiện tại dưới dạng JSON.
+* `devprojex tree .` — in cây dự án ra terminal.
+* `devprojex export context . --format markdown -o ../devprojex-context.md` — lưu bối cảnh sẵn sàng cho AI bên ngoài dự án nguồn.
+* `devprojex export project . --as folder -o ../devprojex-submission` — xuất cây dự án hiệu quả sang một thư mục chính xác.
+* `devprojex export project . --as zip -o ../devprojex-submission.zip` — xuất cây dự án hiệu quả sang kho lưu trữ ZIP.
+* `devprojex export context https://github.com/owner/repo -o -` — đóng gói một kho lưu trữ từ xa mà không cần tự nhân bản nó.
+* `devprojex analyze . --git-mode tracked --exclude smart-ignore` — phân tích các tệp Git được theo dõi bằng Smart Ignore.
+* `devprojex mcp --root .` — khởi động máy chủ MCP chỉ đọc cục bộ để các tác nhân AI có thể đọc dự án một cách an toàn.
+
+Ghi chú:
+* `.` có nghĩa là thư mục terminal hiện tại;
+* đường dẫn có dấu cách phải được đặt trong dấu ngoặc kép;
+* `--git-mode` chọn `none`, `gitignore`, `tracked`, `staged`, `changes` hoặc `diff:<ref>..<ref>`;
+* `--exclude` kiểm soát các loại trừ thông thường tách biệt với tính năng lọc Git;
+* các lệnh phân tích và xuất có tính xác định và không mở giao diện máy tính để bàn;
+* `tui`, `open`, `analyze` và cả hai lệnh `export` cũng chấp nhận URL kho lưu trữ Git; bản sao đi vào bộ đệm được quản lý (`devprojex cache`);
+* các lệnh có các bí danh và cờ ngắn được ghi lại — ví dụ `export ctx`, `-f`, `-n`; `devprojex help` hiển thị chúng;
+* `analyze --findings` liệt kê các kết quả che dữ liệu mà không hiển thị giá trị gốc; `--fail-on-findings` trả về mã thoát khác 0 cho CI;
+* lệnh không sửa đổi tệp dự án - DevProjex hoạt động ở chế độ chỉ đọc.
+
+Nếu lệnh `devprojex` không hoạt động, hãy mở trong DevProjex:
+“Trợ giúp → Khởi chạy từ thiết bị đầu cuối”.
+
+## 5) Git
+Menu Git chỉ khả dụng cho các dự án được sao chép qua DevProjex (Git Clone). Ứng dụng không chạm vào tệp của bạn - nó chỉ hoạt động với bộ nhớ đệm.
+
+Bộ đệm được lưu trữ trong thư mục bộ đệm hệ thống của người dùng. Chạy `devprojex doctor` để xem đường dẫn đã được giải quyết.
+
+* Nhánh - hiển thị danh sách các nhánh có sẵn với nhánh đang hoạt động được đánh dấu; chuyển đổi cập nhật cây thành nhánh đã chọn. Nếu nhánh đã tồn tại cục bộ thì việc chuyển đổi sẽ ngoại tuyến (không cập nhật). Nếu nó không tồn tại cục bộ, nó sẽ được tìm nạp và tạo.
+* Nhận bản cập nhật - chỉ cập nhật nhánh hiện tại: tìm nạp và đặt lại về Origin/<branch>. Đối với dự án Git Clone, F5 thực hiện hành động tương tự; lệnh “Tệp → Làm mới” thông thường bị vô hiệu hóa.
+
+### Sao chép cửa sổ
+Trong cửa sổ Git Clone, danh sách “Kho lưu trữ gần đây” có thể xuất hiện bên dưới trường URL.
+
+Quy tắc:
+* danh sách chỉ xuất hiện nếu lịch sử đã chứa các kho được nhân bản gần đây;
+* chỉ các nguồn kho lưu trữ qua mạng (`https://`, `http://`, `ssh://`, `git://` và cú pháp SCP) được thêm vào danh sách;
+* đường dẫn cục bộ và nguồn `file://` không được thêm vào danh sách này;
+* các bản sao không được tạo - việc sao chép cùng một kho lưu trữ sẽ di chuyển nó lên trên cùng;
+* tối đa 16 kho lưu trữ gần đây được lưu trữ;
+* lịch sử được lưu giữ giữa các lần khởi chạy ứng dụng.
+
+Việc chọn một mục sẽ tự động điền vào trường URL.
+Trong khi đang nhân bản, danh sách tạm thời bị ẩn.
+
+## 6) Sao chép
+### Chuyển đổi định dạng cây (ASCII / JSON / XML / MD)
+Chuyển đổi xác định định dạng biểu diễn cây cho các hoạt động trong đó cây là một phần của đầu ra.
+
+* ASCII - cây văn bản có nhánh.
+* JSON - cây có cấu trúc trong JSON.
+* XML — cây XML nhỏ gọn dành cho các công cụ và trình phân tích cú pháp.
+* MD — Danh sách lồng nhau Markdown dành cho tài liệu và lời nhắc AI.
+
+Việc chuyển đổi ảnh hưởng đến:
+* Sao chép cây
+* Sao chép cây + nội dung
+* Xuất cây
+* Xuất cây và nội dung
+
+Việc chuyển đổi không ảnh hưởng đến:
+* Sao chép nội dung
+* Xuất nội dung
+
+### Sao chép cây
+Sao chép cây dự án.
+Nếu có các nút được chọn, cây sẽ được xây dựng từ lựa chọn; nếu lựa chọn trống hoặc không hợp lệ, toàn bộ cây sẽ được sao chép.
+Định dạng kết quả được xác định bằng cách chuyển đổi định dạng cây.
+Phím nóng: {mod}{shift}C và {mod}{alt}C.
+
+### Sao chép nội dung
+Sao chép nội dung tập tin:
+* nếu các tập tin được kiểm tra - chỉ những tập tin đó; mặt khác - tất cả các tệp dự án;
+* trước mỗi tệp là một tiêu đề có đường dẫn cục bộ đầy đủ (đối với các dự án Git Clone - đường dẫn web của kho lưu trữ);
+* các tệp không phải văn bản bị bỏ qua (bao gồm cả nhị phân);
+* đối với các tệp văn bản trống, đường dẫn và dòng `[No Content, 0 bytes]` là đầu ra;
+* đối với các tệp chỉ chứa khoảng trắng/ngắt dòng, đường dẫn và dòng `[Whitespace, N bytes]` là đầu ra.
+Phím nóng: {mod}{alt}V.
+
+### Sao chép cây + nội dung
+Kết hợp cây và nội dung:
+* cây được xây dựng từ sự chọn lọc; nếu lựa chọn trống/không hợp lệ, toàn bộ cây sẽ được sử dụng;
+* nội dung tuân theo các quy tắc tương tự như “Sao chép nội dung”;
+* định dạng khối cây được xác định bằng cách chuyển đổi định dạng cây.
+Phím nóng: {mod}{shift}V.
+
+### Biểu diễn cây
+Các định dạng cây sử dụng các cách biểu diễn khác nhau cho cùng một cây dự án đã chọn.
+
+JSON:
+* `rootPath` — đường dẫn gốc tuyệt đối được chuẩn hóa bằng `/`.
+* `tree` — nội dung của thư mục gốc.
+* Xuất JSON sử dụng định dạng cây này: mảng chứa tệp, đối tượng chứa thư mục con, `/` chứa tệp trong thư mục hiện tại và `[]` đại diện cho một thư mục trống.
+
+XML:
+* nút gốc là `<t r="...">`;
+* các thư mục là `<d n="...">`;
+* các tập tin là `<f>File.cs</f>`.
+
+MD:
+* bắt đầu bằng `Root: ...`;
+* sử dụng danh sách lồng nhau Markdown;
+* các thư mục kết thúc bằng `/`.
+
+Cây + nội dung:
+* định dạng cây đã chọn áp dụng cho khối cây;
+* khối nội dung vẫn là văn bản;
+* tiêu đề tệp trong khối nội dung sử dụng đường dẫn tương đối với `/`;
+* được xuất dưới dạng `.txt`.
+
+## 7) Chế độ xem trước
+Được mở bằng nút biểu tượng con mắt ở thanh trên cùng hoặc bằng {mod}B.
+
+Các nút bên chuột tuân theo điều hướng kiểu trình duyệt: Chuyển tiếp mở chế độ Xem trước và Quay lại đóng chế độ này. Việc lặp lại hướng hiện tại không có tác dụng.
+
+{mod}{shift}F mở hoặc đóng tìm kiếm trong nội dung tệp ở Bản xem trước. Enter hoặc F3 chuyển đến kết quả tiếp theo; {shift}Enter hoặc {shift}F3 chuyển về kết quả trước đó.
+
+Hiển thị kết quả cuối cùng trong một không gian làm việc riêng bên cạnh cây. Chế độ này không sao chép vào bảng nhớ tạm và không tự xuất thành tệp - đây là chế độ xem.
+
+Theo mặc định, không gian làm việc mở ra dưới dạng:
+* trái - cây dự án;
+* trung tâm - khung xem trước;
+* bên phải — bảng cài đặt, nếu nó đang mở.
+
+Các chế độ có sẵn:
+* Cây
+* Nội dung
+* Cây và nội dung
+
+Các quy tắc tương tự như sao chép và xuất được áp dụng:
+* các nút đã kiểm tra được tôn trọng;
+* nếu lựa chọn trống, toàn bộ dữ liệu sẽ được sử dụng;
+* các quy tắc bỏ qua hiện tại và các tùy chọn lựa chọn được áp dụng.
+
+Ngoài ra:
+* các tập tin trong bản xem trước được phân tách bằng các đường ngang;
+* trong khi cuộn, đường dẫn của tệp hiện tại được ghim ở trên cùng; nhấp vào đường dẫn được ghim sẽ cuộn trở lại phần đầu của tệp đó;
+* thanh cuộn xem trước đánh dấu các kết quả tìm kiếm phù hợp và các dòng có kết quả chỉnh sửa; nhấp vào điểm đánh dấu sẽ nhảy tới dòng của nó; một phát hiện được giữ nguyên vẫn được đánh dấu và các tiêu đề đường dẫn được che dấu thêm một điểm đánh dấu ở dòng đầu tiên của chúng;
+* cây và thu phóng xem trước có thể hoạt động độc lập.
+* ở chế độ Xem trước, bạn có thể sao chép toàn bộ kết quả hiện tại hoặc khối tệp hiển thị hiện tại mà không cần mở menu Sao chép.
+
+Nút:
+* nút sao chép ở phía bên trái của đảo xem trước trên cùng - sao chép chế độ xem trước hiện tại:
+  * Cây
+  * Nội dung
+  * Cây và nội dung
+* X trong khung cây — ẩn cây và chỉ để lại khung xem trước;
+* X ở khung xem trước trên cùng - đóng hoàn toàn chế độ Xem trước;
+* nút sao chép nhỏ trong tiêu đề tệp được ghim - sao chép chính xác khối tệp hiển thị hiện tại như được hiển thị trong Bản xem trước;
+* nhấn lại vào biểu tượng con mắt hoặc {mod}B cũng đóng chế độ Xem trước.
+
+Tìm kiếm và Bộ lọc khả dụng trong khi ngăn cây hiển thị trong Bản xem trước.
+Nếu cây bị ẩn, Tìm kiếm và Bộ lọc tạm thời không khả dụng cho đến khi bạn thoát khỏi chế độ chỉ xem trước.
+
+## 8) Xem
+### Phóng
+* {mod}+ / {mod} = — phóng to
+* {mod} - — thu nhỏ
+* {mod}0 - đặt lại
+* {mod} bánh xe chuột - phóng to mượt mà khung bên dưới con trỏ
+
+Hành vi:
+* ở chế độ bình thường, cây được phóng to;
+* trong Xem trước với cây hiển thị, Phóng to, Thu nhỏ và Đặt lại từ menu áp dụng cho cả cây và bản xem trước;
+* với con lăn chuột {mod}, cây và bản xem trước thu phóng độc lập tùy thuộc vào vị trí của con trỏ;
+* ở chế độ chỉ xem trước, chỉ khung xem trước được phóng to.
+
+Phạm vi: 6–28, đặt lại là 15.
+
+### Chế độ nhỏ gọn
+Làm cho giao diện người dùng dày đặc hơn: khoảng cách trong cây và cài đặt nhỏ hơn.
+Trong khi không gian làm việc xem trước đang hoạt động, Chế độ thu gọn sẽ tự động được bật.
+
+### Hoạt ảnh
+Trong “Xem → Hoạt ảnh”, bạn có thể điều khiển riêng việc mở rộng cây, bộ đếm trạng thái và lần xuất hiện đầu tiên của các công cụ. Cả ba hoạt ảnh đều được bật theo mặc định; hoạt ảnh bị tắt sẽ hiển thị trạng thái cuối ngay lập tức.
+
+### Phông chữ cây
+Phông chữ cây được chọn thông qua “Chế độ xem → Phông chữ cây”.
+“Mặc định” khôi phục phông chữ cây tiêu chuẩn.
+Phông chữ đã chọn sẽ được áp dụng sau khi nhấp vào “Áp dụng cài đặt” trong bảng cài đặt.
+
+## 9) Tìm kiếm (cây)
+Mở thanh tìm kiếm, đánh dấu các kết quả phù hợp và cho phép điều hướng.
+* {mod}F - hiển thị/ẩn
+* Nhập - kết quả tiếp theo
+* {shift}Nhập — trước đó
+* Esc - đóng
+
+Tìm kiếm chỉ tự động mở rộng các nhánh cần thiết; xóa truy vấn sẽ làm sập cây (trừ gốc).
+Các dòng khớp cũng được đánh dấu trên thanh cuộn của cây; nhấp vào điểm đánh dấu sẽ chuyển đến kết quả đó.
+Đối với các nhóm đối sánh rất lớn, ứng dụng có thể hạn chế tự động mở rộng và đánh dấu toàn cục để giữ cho giao diện người dùng luôn phản hồi.
+Khi thanh tìm kiếm bị đóng, truy vấn sẽ bị xóa sau khi hoạt ảnh đóng hoàn tất.
+
+Hạn chế:
+* mở Tìm kiếm đóng Lọc tự động;
+* Tìm kiếm có sẵn trong Bản xem trước trong khi ngăn cây hiển thị;
+* nếu cây bị ẩn, Tìm kiếm tạm thời không khả dụng.
+
+## 10) Lọc (theo tên)
+Chỉ hiển thị các nút khớp với chuỗi bộ lọc và cha mẹ của chúng. Các bản cập nhật được gỡ bỏ.
+* {mod}{shift}N — hiển thị/ẩn bộ lọc
+* Esc - đóng bộ lọc
+
+Hạn chế:
+* mở Bộ lọc đóng Tìm kiếm tự động;
+* Bộ lọc có sẵn trong Bản xem trước trong khi ngăn cây hiển thị;
+* nếu cây bị ẩn, Bộ lọc tạm thời không khả dụng.
+
+## 11) Tùy chọn (bảng cài đặt)
+Có sẵn ở bên phải:
+* Áp dụng cài đặt
+* Xử lý nội dung
+* Loại trừ
+* Tiện ích mở rộng
+
+Các thay đổi trong “Loại trừ” và “Tiện ích mở rộng” được sắp xếp trong bảng điều khiển và được áp dụng sau khi nhấp vào “Áp dụng cài đặt”.
+
+Sau khi hộp kiểm thay đổi, ứng dụng có thể cập nhật các tùy chọn có sẵn và số lượng của chúng trong nền. Cây kết quả chỉ được xây dựng lại sau khi nhấp vào “Áp dụng cài đặt”.
+
+Nếu bản cập nhật tùy chọn có sẵn bị hủy bằng nút X trên thanh trạng thái, những thay đổi chưa hoàn thành sẽ không được áp dụng và bảng sẽ trở về trạng thái hoàn thành cuối cùng.
+
+Mỗi danh sách đều có nút chuyển đổi Tất cả.
+
+Lưu ý về "Tiện ích mở rộng":
+* danh sách này chỉ hiển thị các tệp có phần mở rộng;
+* các tệp không có phần mở rộng sẽ không được thêm vào danh sách này và được kiểm soát bởi một tùy chọn riêng trong "Loại trừ".
+
+Xử lý nội dung:
+* chuyển đổi nội dung của các tệp văn bản đã chọn mà không thay đổi cây;
+* Ẩn thông tin bí mật và Ẩn dữ liệu cá nhân thay thế các giá trị được phát hiện (phần 12.3 và 12.4);
+* Nén mã giữ lại các phần khai báo đồng thời rút ngắn quá trình triển khai được đặt tên trên 14 ngôn ngữ;
+* Loại bỏ nhận xét loại bỏ nhận xét và nhận xét tài liệu trên 20 gói ngôn ngữ;
+* Tách các dòng trống sẽ loại bỏ các dòng chỉ có khoảng trắng trong cùng một gói trong khi vẫn giữ nguyên các chữ nhiều dòng;
+* các thay đổi có hiệu lực sau khi "Áp dụng cài đặt".
+
+{mod}P - hiển thị/ẩn bảng điều khiển.
+
+### 11.1 Hồ sơ tham số dự án cục bộ
+Đối với các thư mục cục bộ, DevProjex ghi nhớ các tham số dự án được áp dụng lần cuối:
+* các loại tệp đã chọn;
+* các tùy chọn đã chọn trong phần "Loại trừ".
+
+Việc lưu được thực hiện khi bạn nhấp vào "Áp dụng cài đặt".
+Khi cùng một thư mục cục bộ được mở lại, các tham số sẽ được khôi phục tự động.
+
+Quan trọng:
+* hồ sơ chỉ được lưu cho các dự án địa phương;
+* đối với các dự án được mở qua Git Clone, hồ sơ sẽ không được lưu;
+* nếu một số tùy chọn đã lưu không còn khả dụng trong dự án hiện tại, chúng sẽ bị bỏ qua và các tham số còn lại sẽ được áp dụng.
+* nếu việc làm mới hoặc mở lại hiển thị loại tệp hoặc tùy chọn mới trong "Loại trừ", thì tùy chọn này được bật theo mặc định;
+* các tùy chọn đã thấy giữ nguyên lựa chọn rõ ràng của người dùng: các tệp mới thuộc loại bị vô hiệu hóa sẽ không bật lại loại đó.
+
+## 12) Loại trừ
+Phần "Loại trừ" kiểm soát những tệp và thư mục nào bị loại trừ khỏi cây, nội dung, sao chép và xuất kết quả.
+
+Một mục chỉ được hiển thị khi đáp ứng tất cả các điều kiện sau:
+* loại tệp của nó được chọn, nếu tệp có một loại;
+* không có quy tắc bỏ qua được kích hoạt sẽ loại trừ nó.
+
+Bỏ qua các quy tắc được tích lũy. Nếu ít nhất một quy tắc được bật sẽ ẩn một mục thì một quy tắc khác không thể hiển thị mục đó.
+
+### 12.1 Quy tắc có sẵn
+Tùy thuộc vào nội dung dự án, các tùy chọn sau có thể được hiển thị:
+
+* Smart Ignore
+* Thư mục trống
+* Tệp trống
+* Thư mục ẩn
+* Tập tin ẩn
+* Thư mục có tiền tố dấu chấm
+* Tệp có tiền tố dấu chấm
+* Tệp không có phần mở rộng
+
+Khi không thể áp dụng tính năng lọc Git, bộ chọn của GUI và các dòng nút chọn trên trục Git của TUI sẽ bị ẩn hoàn toàn: không có ranh giới kho Git và bộ lọc `.gitignore` không thể thay đổi cây hiện tại. Khi trục hiển thị bên ngoài kho Git, GUI chỉ cung cấp chế độ không lọc và `.gitignore`, còn TUI vô hiệu hóa các dòng cần kho Git. Trong kho Git có năm giá trị thông thường: không lọc, `.gitignore`, tệp được theo dõi, tệp đã đưa vào vùng đệm Git và tất cả thay đổi hiện tại; trong TUI, phạm vi `diff:<ref>..<ref>` đang hoạt động xuất hiện ở dòng thứ sáu. Chọn một giá trị sẽ thay thế chế độ Git hiện tại mà không thay đổi Smart Ignore hay các loại trừ cơ bản. Các tùy chọn khác xuất hiện khi quy tắc của chúng có thể ảnh hưởng đến cây hiện tại.
+
+Một tùy chọn mới được bật theo mặc định khi nó xuất hiện lần đầu tiên. Một tùy chọn đã biết sẽ giữ nguyên lựa chọn của người dùng ngay cả khi nó tạm thời biến mất khỏi danh sách.
+
+### 12.2 Smart Ignore
+Smart Ignore ẩn các phần phụ thuộc, đầu ra bản dựng, bộ nhớ đệm và các thành phần dịch vụ dự án khác.
+
+DevProjex trước tiên xác định loại dự án từ cấu trúc và tệp đánh dấu của nó, ví dụ:
+
+* `.csproj`
+* `package.json`
+* `pyproject.toml`
+* `Cargo.toml`
+
+Sau đó, các quy tắc cho ngăn xếp tương ứng sẽ được áp dụng bên trong phạm vi dự án được phát hiện. Ví dụ: các quy tắc.NET không mở rộng sang dự án Python hoặc JavaScript lân cận.
+
+Chỉ tên thư mục thôi thì không phải lúc nào cũng đủ. Những cái tên mơ hồ như `build`, `vendor`, `packages`, `cache`, `pkg`, hoặc `Library` cũng được xác minh bởi nội dung của chúng. Điều này ngăn không cho thư mục người dùng thông thường bị ẩn chỉ vì nó có tên tương tự.
+
+Một số cửa hàng phụ thuộc và thư mục dịch vụ có thể được nhận dạng bằng cấu trúc bên trong đặc trưng của chúng ngay cả bên ngoài một dự án được phát hiện rõ ràng.
+
+Việc khám phá phạm vi dự án bị giới hạn nên việc tải một thư mục người dùng lớn không trở thành một phân tích lặp lại đầy đủ cho mọi thư mục. Các cấu trúc thông thường sử dụng khả năng khám phá nông, trong khi các monorepos được công nhận sẽ được tìm kiếm sâu hơn. Sau khi tìm thấy một phạm vi, Smart Ignore áp dụng cho toàn bộ cây con của nó mà không giới hạn độ sâu.
+
+### 12.3 Ẩn bí mật
+"Ẩn bí mật" bị tắt theo mặc định. Nó chỉ quét nội dung văn bản đã chọn và thay thế từng giá trị được phát hiện tại chỗ, giữ nguyên tệp và mã xung quanh nó. Khi tùy chọn này tắt, không có lần quét nào được thực hiện và số lượng không được hiển thị. Sau khi quét lựa chọn hiện tại, nhãn hiển thị số lượng giá trị được phát hiện; nếu các quyết định giữ nguyên để lại ít giá trị bị ẩn hơn, nó sẽ hiển thị được phát hiện/ẩn và hàng? chỉ báo báo cáo cả hai số lượng.
+
+Các đoạn đã che được đánh dấu trong Bản xem trước. Bấm vào một đoạn để chỉ giữ nguyên lần xuất hiện đó; dùng {alt}↓ / {alt}↑ để di chuyển giữa các kết quả và Enter để chuyển đổi kết quả đang chọn. Trong Terminal Workspace, dùng `[` và `]` để di chuyển giữa các lần xuất hiện, dùng `Enter` hoặc `Space` để chuyển đổi lần xuất hiện đang chọn. Quyết định này áp dụng cho Bản xem trước, bảng tạm, xuất ngữ cảnh, sao chép thư mục và ZIP trong phiên hiện tại; quyết định không được lưu vào hồ sơ dự án.
+
+Menu ngữ cảnh của Bản xem trước mở rộng các quyết định này. Bấm chuột phải vào một lần xuất hiện đã phát hiện để giữ nguyên hoặc ẩn lại toàn bộ lần xuất hiện theo quy tắc đó hay mọi lần xuất hiện đã phát hiện trong cùng tệp bằng một thao tác. Để đánh dấu thủ công một giá trị đã chọn trong nội dung tệp, bấm chuột phải vào giá trị: "Ẩn… tại đây" chỉ ẩn lần xuất hiện đó trong phiên hiện tại, "Luôn ẩn…" tạo dấu bền vững cho mọi lần xuất hiện của giá trị, còn "Ẩn… dưới dạng dữ liệu cá nhân" tạo dấu bền vững do tùy chọn "Ẩn dữ liệu cá nhân" kiểm soát. Lệnh "Xóa dấu" xóa dấu thủ công; giá trị vẫn được bộ dò phát hiện sẽ tiếp tục bị ẩn. Giá trị thủ công phải là một dòng dài từ 8 đến 512 ký tự được chọn trong nội dung tệp. Việc tạo dấu sẽ tự động bật tùy chọn tương ứng. Dấu bền vững chỉ lưu định danh giá trị đã băm khóa và lớp của giá trị, không bao giờ lưu văn bản gốc.
+
+Một thư mục hoặc bản sao ZIP cũng thay đổi văn bản phù hợp và có thể không còn được xây dựng hoặc chạy nữa. Các tệp nhị phân được sao chép không thay đổi và không được quét. Tệp văn bản đã chọn lớn hơn 16 MiB sẽ bị bỏ qua và được báo cáo, trong khi phần đầu ra còn lại vẫn được hoàn tất. Lỗi phát hiện sẽ dừng toàn bộ hoạt động.
+
+Quy tắc báo cáo số lượng chỉ phù hợp. Zero không có nghĩa là dự án an toàn. CLI sử dụng `--hide-secrets`; chi tiết và giới hạn kỹ thuật có trong `Docs/HideSecrets.md`.
+
+### 12.4 Ẩn dữ liệu cá nhân
+"Ẩn dữ liệu cá nhân" bị tắt theo mặc định. Tùy chọn phát hiện địa chỉ email, địa chỉ IP toàn cầu, tên người dùng cục bộ trong đường dẫn, địa chỉ MAC và số điện thoại quốc tế trong các tệp văn bản đã chọn. Các kết quả dùng cùng quyết định trong Bản xem trước và cùng quy trình đầu ra như "Ẩn thông tin bí mật"; dấu thủ công được tạo bằng "Ẩn… dưới dạng dữ liệu cá nhân" cũng thuộc nhóm này và chịu sự điều khiển của công tắc (phần 12.3). Tên người dùng cục bộ trong tiêu đề đường dẫn đã tạo và gốc cây được che như một kết quả dùng chung: bộ đếm tính là một giá trị; chỉ báo ? cho biết đang ẩn hay hiển thị, và một lần bấm sẽ chuyển đổi mọi đường dẫn đã che.
+
+Các dải địa chỉ và máy chủ dùng trong tài liệu, tên người dùng CI phổ biến, trình phân giải DNS công cộng quen thuộc và dải số điện thoại hư cấu đã được ghi nhận vẫn hiển thị. Không tìm thấy kết quả không đồng nghĩa với đảm bảo quyền riêng tư. CLI sử dụng `--hide-private-data`; các quy tắc đầy đủ và giới hạn của giai đoạn một có trong `Docs/HidePrivateData.md`.
+
+### 12.5 Sử dụng.gitignore
+Khi được bật, DevProjex sẽ áp dụng mọi `.gitignore` có thể truy cập, không chỉ tệp ở thư mục gốc của thư mục đã mở.
+
+Mỗi `.gitignore` áp dụng:
+
+* vào thư mục chứa nó;
+* tới tất cả các thư mục có thể truy cập bên dưới nó;
+* chỉ trong phạm vi đó.
+
+Các quy tắc từ một `.gitignore` lồng nhau không ảnh hưởng đến các thư mục mẹ hoặc anh chị em.
+
+Đối với một đường dẫn cụ thể, các quy tắc được xử lý từ `.gitignore` gốc tới các tệp sâu hơn. Trong một tệp, các quy tắc được xử lý từ trên xuống dưới. Quy tắc khớp cuối cùng xác định kết quả Git.
+
+Quy tắc bắt đầu bằng `!` chỉ hủy bỏ loại trừ Git trước đó trong phạm vi của nó. Nó không thể khôi phục một tập tin trong khi thư mục mẹ của nó vẫn bị loại trừ. Một `.gitignore` bên trong một thư mục bị loại trừ hoàn toàn và không thể truy cập được sẽ không tham gia đánh giá.
+
+Một dòng không đúng định dạng hoặc không được hỗ trợ sẽ bị bỏ qua một cách độc lập. Các quy tắc hợp lệ khác trong tệp đó và các quy tắc trong phạm vi lân cận vẫn tiếp tục hoạt động.
+
+Tùy chọn này chỉ bao gồm các tệp `.gitignore` của cây làm việc thông thường. Các quy tắc từ `.git/info/exclude` và quy tắc loại trừ Git toàn cầu không được áp dụng; các cài đặt so sánh đường dẫn kho lưu trữ hiệu quả như `core.ignoreCase` và, trên macOS, `core.precomposeUnicode` đều được tôn trọng. Một liên kết tượng trưng có tên `.gitignore` không được theo dõi, phù hợp với hành vi của tệp điều khiển của Git. Nếu không thể đọc được `.gitignore` thông thường, phạm vi thư mục của nó sẽ bị loại trừ do đóng không thành công và quá trình quét sẽ báo cáo quyền truy cập một phần thay vì âm thầm bao gồm các tệp mà không đánh giá quy tắc hoàn chỉnh. Khi có sẵn chỉ mục có thể đọc được cho phạm vi kho lưu trữ sở hữu của đường dẫn, các tệp được theo dõi vẫn hiển thị ngay cả khi chúng khớp với `.gitignore`; không có chỉ mục đó hoặc Git CLI, phạm vi đó sẽ quay trở lại đánh giá chỉ theo mẫu một cách an toàn.
+
+Cấu hình `standard` tích hợp chọn `gitignore` cùng với `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` và `extensionless-files`.
+
+### 12.6 Chỉ các tệp Git được theo dõi
+"Chỉ các tệp Git được theo dõi" xây dựng giai đoạn Git của cây từ các tệp cây làm việc hiện có được ghi trong mỗi chỉ mục Git có thể đọc được. Các tệp được theo dõi đã sửa đổi và các phần bổ sung theo giai đoạn vẫn được bao gồm; các tập tin không bị theo dõi sẽ bị loại trừ. Đây là cây làm việc hiện tại, không phải ảnh chụp nhanh lịch sử của `HEAD` hoặc kho lưu trữ từ xa.
+
+Mọi kho lưu trữ lồng nhau và cây làm việc lồng nhau có thể truy cập được giải quyết độc lập ở bất kỳ cấp độ lồng nhau nào có thể truy cập được. Kho lưu trữ con không kế thừa các đường dẫn được theo dõi từ kho lưu trữ mẹ hoặc anh chị em của nó. Chế độ này yêu cầu Git CLI; một chỉ mục trống có thể đọc được là hợp lệ. Nếu Không gian làm việc đầu cuối ( TUI) khởi động ở chế độ này và không thể tải chỉ mục áp dụng nào thì không gian làm việc sẽ không mở. Nếu chế độ được chọn tương tác trong không gian làm việc TUI mở và không thể tải chỉ mục áp dụng nào thì thay đổi sẽ bị từ chối và chế độ Git có thể sử dụng cuối cùng vẫn hoạt động. Trong tình huống tương tự, lệnh trực tiếp trả về chính sách hoặc kiểm tra lỗi. DevProjex không bao giờ âm thầm quay trở lại `.gitignore`. Nếu một chỉ mục áp dụng khác có thể đọc được thì các phạm vi lồng nhau không khả dụng sẽ bị loại trừ kèm theo cảnh báo.
+
+Trong không gian làm việc Máy tính để bàn đã mở, lựa chọn được theo dõi rõ ràng vẫn hiển thị và không đóng lỗi: đầu ra và xuất bị chặn khi mức độ sẵn sàng không thành công, trong khi trạng thái sẵn sàng một phần vẫn tiếp tục với cảnh báo cục bộ.
+
+Các chế độ Git loại trừ lẫn nhau; `none` tắt tính năng lọc Git. Các chế độ tức thời `staged`, `changes` và `diff:<ref>..<ref>` không được lưu vào hồ sơ. Khi một chế độ tức thời đang hoạt động, hồ sơ dự án cục bộ của GUI sẽ giữ chế độ cố định được bật gần nhất là `gitignore` hoặc `tracked`. `none` chỉ được lưu khi chính nó đang hoạt động tại thời điểm lưu. TUI và CLI từ chối lưu hồ sơ di động khi một chế độ tức thời đang hoạt động.
+
+### 12.7 Mối quan hệ giữa lọc Git và Smart Ignore
+Chế độ Git đã chọn và Smart Ignore là các điều khiển độc lập. Chế độ Git được áp dụng trước ở mọi phạm vi Git có thể truy cập. Smart Ignore sau đó xử lý các mục còn lại và các quy tắc cơ bản sẽ chạy cuối cùng.
+
+Smart Ignore có thể ẩn trong khi chế độ Git đã chọn đã bao gồm tất cả các ứng cử viên của nó, sau đó xuất hiện sau khi chế độ Git được thay đổi hoặc tắt. Trong kho Git, mọi chế độ cần kho Git đều vẫn khả dụng.
+
+Quy tắc phủ định Git bắt đầu bằng `!` chỉ hủy kết quả Git. Nó không vô hiệu Smart Ignore hoặc quy tắc cơ bản.
+
+### 12.8 Quy tắc cơ bản
+"Thư mục có tiền tố dấu chấm" và "Tệp có tiền tố dấu chấm" kiểm tra tên mục.
+
+"Thư mục ẩn" và "Tệp ẩn" kiểm tra thuộc tính ẩn của hệ thống. Trên một số nền tảng, tên có tiền tố dấu chấm và thuộc tính hệ thống có thể mô tả cùng một mục hoặc các mục khác nhau.
+
+"Tệp trống" ẩn các tệp có kích thước 0 byte.
+
+"Tệp không có phần mở rộng" ẩn các tệp như `Dockerfile`, `Makefile`, và `README`.
+
+"Thư mục trống" ẩn các thư mục trống một cách hợp lý. Một thư mục trống về mặt logic khi không còn tệp hoặc thư mục con hiển thị nào sau khi áp dụng các loại tệp đã chọn và tất cả các quy tắc khác.
+
+Do đó, số lượng thư mục trống có thể thay đổi sau khi một quy tắc khác được chuyển đổi: việc ẩn các tệp có thể làm cho các thư mục chứa chúng trống một cách hợp lý.
+
+### 12.9 Bộ đếm
+Số lượng bên cạnh quy tắc hiển thị đóng góp trực tiếp của quy tắc đó trong cài đặt hiện tại chứ không phải số mục vật lý tương tự trên ổ đĩa.
+
+Một mục không được quy cho nhiều bộ đếm chồng chéo cùng một lúc. Ví dụ: thư mục `.git` có thể có cả tên có tiền tố dấu chấm và thuộc tính Ẩn của hệ thống, nhưng việc loại trừ nó chỉ được quy cho một quy tắc.
+
+Thứ tự ổn định được sử dụng để chọn chủ sở hữu của một loại trừ:
+
+* các thư mục: `.gitignore`, Smart Ignore, tên có tiền tố dấu chấm, Thuộc tính ẩn của hệ thống;
+* các tệp: `.gitignore`, Smart Ignore, tên có tiền tố dấu chấm, không có phần mở rộng, tệp trống, thuộc tính ẩn của hệ thống.
+
+Lệnh này chỉ ảnh hưởng đến bộ đếm. Khả năng hiển thị cuối cùng tuân theo một quy tắc đơn giản hơn: một mục sẽ bị ẩn nếu bất kỳ cơ chế kích hoạt nào loại trừ nó.
+
+### 12.10 Áp dụng thay đổi
+Việc chuyển đổi hộp kiểm trước tiên sẽ cập nhật các cài đặt và bộ đếm có sẵn trong bảng điều khiển. Cây cuối cùng được xây dựng lại sau khi chọn "Áp dụng cài đặt".
+
+Nếu quá trình chuẩn bị cài đặt bị hủy, DevProjex sẽ đưa bảng về trạng thái hoàn thành cuối cùng. Các quy tắc được tính toán một phần không được áp dụng.
+
+## 13) Cách tính cây và số liệu
+Kết quả phụ thuộc vào:
+* Tiện ích mở rộng đã chọn
+* Bỏ qua quy tắc
+* Bộ lọc hoạt động
+* các nút cây đã kiểm tra (đối với các hoạt động dựa trên lựa chọn)
+
+Nếu quyền truy cập bị từ chối, nút vẫn giữ tên và biểu tượng thông thường và nhận hậu tố "[truy cập bị từ chối]".
+
+### 13.1 Bộ đếm thanh trạng thái hiển thị gì
+Thanh trạng thái có hai khối:
+* Cây — số liệu của đầu ra văn bản dạng cây;
+* Nội dung - số liệu về đầu ra nội dung tệp đã xuất.
+
+Định dạng:
+* Dòng
+* ký tự
+* ~Token (xấp xỉ)
+
+Các giá trị lớn được hiển thị bằng hậu tố rút gọn (K/M).
+
+Quan trọng:
+* "Dòng" trong khối "Cây" có nghĩa là số dòng trong biểu diễn cây cuối cùng, không phải số lượng tệp trên đĩa;
+* giá trị này bao gồm các thư mục, tệp và các thành phần dịch vụ cây (ví dụ: các nút bị từ chối truy cập).
+
+### 13.2 Cách tính số liệu
+Chỉ số cây:
+* được tính từ sản lượng cây thực tế được tạo ra bởi cùng một đường ống xuất;
+* tôn trọng định dạng cây hiện tại.
+
+Chỉ số nội dung:
+* tuân theo các quy tắc tương tự như sao chép/xuất nội dung;
+* các tập tin nhị phân bị loại trừ;
+* các tệp trống và chỉ có khoảng trắng được tính thông qua các điểm đánh dấu dịch vụ ( `[No Content, 0 bytes]`, `[Whitespace, N bytes]`).
+
+### 13.3 Khi bộ đếm cập nhật
+Tính toán lại chạy:
+* sau khi mở/làm mới một dự án;
+* sau khi áp dụng cài đặt (loại trừ và tiện ích mở rộng);
+* khi các hộp kiểm cây thay đổi (có gỡ lỗi);
+* khi chuyển đổi định dạng cây (đối với các hoạt động sử dụng đầu ra dạng cây).
+* khi tính toán nền bị hủy, bộ đếm được đặt thành 0 cho đến lần tính toán lại hoàn thành tiếp theo.
+
+## 14) Biểu tượng
+Thứ tự lựa chọn biểu tượng:
+1) loại nút (thư mục/tập tin)
+2) tên chính xác (nếu quy tắc tồn tại)
+3) sự mở rộng
+4) mặt khác - không rõ
+
+## 15) Chủ đề và hiệu ứng
+Phần Chủ đề cho phép bạn chọn Hệ thống, Sáng hoặc Tối và một hiệu ứng nền:
+* Minh bạch
+* Làm mờ
+* Mica
+
+Hệ thống được chọn theo mặc định và tuân theo các thay đổi về chủ đề của hệ điều hành. Sau lần khởi chạy đầu tiên hoặc đặt lại cài đặt, chủ đề hệ thống sáng bắt đầu với nền mờ thông thường, trong khi chủ đề hệ thống tối bắt đầu với Blur. Nếu không thể xác định tùy chọn hệ thống, DevProjex sẽ sử dụng Dark with Blur. Sáng và Tối ghi nhớ tác dụng của chúng một cách độc lập. Lựa chọn Sáng hoặc Tối rõ ràng sẽ bỏ qua các thay đổi của hệ thống cho đến khi Hệ thống được chọn lại.
+
+Các hiệu ứng loại trừ lẫn nhau. Nhấp vào hiệu ứng đã chọn một lần nữa sẽ vô hiệu hóa nó và khôi phục nền mờ thông thường.
+
+Cài đặt có sẵn:
+* Độ trong suốt của nền - có sẵn cho Độ trong suốt và Độ mờ.
+* Độ tương phản của bảng trên cùng - điều chỉnh bảng chính chứa các lệnh Xem trước, Tìm kiếm, Bộ lọc và định dạng cây.
+* Độ trong suốt của menu - áp dụng như nhau cho menu chính và các menu phụ của nó.
+* Khả năng hiển thị đường viền - điều chỉnh mức độ hiển thị đường viền giao diện.
+
+Mica sử dụng vật liệu hệ thống của nền tảng và không có cài đặt độ trong suốt của nền riêng biệt. Nếu hiệu ứng Làm mờ hoặc Mica đã chọn không khả dụng thì trước tiên ứng dụng sẽ thử hiệu ứng gốc khác. Nền mờ thông thường chỉ được sử dụng khi cả Blur và Mica đều không có sẵn.
+
+Ở chế độ Trong suốt, nền cửa sổ chính vẫn trong suốt. Menu, menu con và các bề mặt bật lên khác sử dụng Blur khi được hỗ trợ để các phần tử cây và nội dung đằng sau chúng không ảnh hưởng đến khả năng đọc.
+
+## 16) Trợ giúp
+
+### 16.1 Cập nhật
+“Trợ giúp → Cập nhật” so sánh phiên bản hiện tại với bản phát hành GitHub ổn định mới nhất. Kiểm tra tự động bị tắt theo mặc định; khi được bật, DevProjex sẽ kiểm tra khi khởi động sau ít nhất bảy ngày kể từ lần kiểm tra thành công trước đó. Hộp kiểm có hiệu lực ngay lập tức. Kết quả thành công mới nhất được giữ lại giữa các lần chạy ứng dụng và không bị xóa do lỗi mạng sau này. Việc cài đặt vẫn là một hành động của người dùng.
+
+### 16.2 Đặt lại cài đặt
+Đặt lại cài đặt (Trợ giúp → Đặt lại cài đặt) khôi phục chủ đề, hiệu ứng, Chế độ thu gọn, cài đặt hoạt ảnh và ngôn ngữ giao diện mặc định. Hồ sơ dự án, lịch sử và tệp trên đĩa không bị thay đổi.
+
+### 16.3 Đặt lại dữ liệu
+Đặt lại dữ liệu (Trợ giúp → Đặt lại dữ liệu) xóa các cấu hình tham số dự án cục bộ đã lưu:
+* các loại tệp đã chọn;
+* các tùy chọn đã chọn trong phần "Loại trừ";
+* các cài đặt xử lý nội dung đã chọn;
+* các dấu bí mật được đánh thủ công.
+
+Quan trọng:
+* Lịch sử gần đây của các thư mục cục bộ không bị xóa;
+* Lịch sử kho lưu trữ gần đây trong cửa sổ Git Clone không bị xóa;
+* các tập tin và thư mục trên đĩa không bị sửa đổi hoặc xóa.
+
+## 17) Ngôn ngữ
+Ngôn ngữ được chọn thông qua menu Ngôn ngữ.
+Ngôn ngữ đã chọn sẽ được lưu giữa các lần khởi chạy. “Trợ giúp → Đặt lại cài đặt” sẽ xóa lựa chọn ngôn ngữ đã lưu và đưa ngôn ngữ giao diện về mặc định.
+
+## 18) Thanh tiến trình và hủy
+Trung tâm thanh trạng thái hiển thị hoạt động đang hoạt động và tiến trình của nó.
+
+Chế độ tiến bộ:
+* Không xác định - không có phần trăm (không xác định thời gian hoạt động).
+* Xác định - với phần trăm (0–100).
+
+Hành vi:
+* trong quá trình tính toán dữ liệu nền, tiến trình phần trăm được hiển thị;
+* đối với một số thao tác Git, phần trăm được hiển thị khi nguồn tiến trình cung cấp nó;
+* ứng dụng cài đặt và cập nhật tùy chọn có sẵn được hiển thị khi thao tác mất thời gian đáng chú ý;
+* hoạt động nhanh chóng kết thúc mà không hiển thị tiến bộ.
+
+Nút X (hủy) trên thanh trạng thái:
+* thực hiện việc hủy bỏ nỗ lực tốt nhất cho các hoạt động hỗ trợ việc hủy bỏ;
+* dừng tính toán dữ liệu nền;
+* khi bản cập nhật các tùy chọn khả dụng bị hủy, sẽ đưa bảng về trạng thái hoàn thành cuối cùng;
+* đối với các thao tác không hỗ trợ hủy, nó sẽ dừng chỉ báo trên thanh trạng thái, trong khi thao tác đó vẫn có thể kết thúc ở chế độ nền.
+
+## 19) Ghi chú
+* Nếu quyền không đủ, ứng dụng có thể đề xuất khởi động lại ở độ cao; nếu bị từ chối, một thông báo sẽ được hiển thị.

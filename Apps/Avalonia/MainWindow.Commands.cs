@@ -3,7 +3,6 @@ using DevProjex.Application.Updates;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Avalonia.Services;
 using DevProjex.Avalonia.Views;
-using DevProjex.Infrastructure.TerminalCommands;
 using ThemeSelectionMode = DevProjex.Infrastructure.ThemePresets.ThemeSelectionMode;
 
 namespace DevProjex.Avalonia;
@@ -26,6 +25,18 @@ public partial class MainWindow
         object? sender,
         RoutedEventArgs e)
         => _appearanceSettings.ToggleTreeExpansionAnimation();
+
+    private void OnToggleStatusMetricsAnimation(
+        object? sender,
+        RoutedEventArgs e)
+        => _appearanceSettings.ToggleStatusMetricsAnimation();
+
+    private void OnToggleToolAnimation(object? sender, RoutedEventArgs e)
+    {
+        _appearanceSettings.ToggleToolAnimation();
+        if (!_viewModel.IsToolAnimationEnabled)
+            _topMenuBar?.CompleteProjectToolsReveal();
+    }
 
     private void OnThemeMenuClick(object? sender, RoutedEventArgs e)
     {
@@ -84,6 +95,15 @@ public partial class MainWindow
     private void OnLangEs(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.Es);
     private void OnLangPt(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.Pt);
     private void OnLangPtPt(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.PtPt);
+    private void OnLangZhCn(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.ZhCn);
+    private void OnLangZhTw(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.ZhTw);
+    private void OnLangJa(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.Ja);
+    private void OnLangKo(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.Ko);
+    private void OnLangTr(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.Tr);
+    private void OnLangUk(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.Uk);
+    private void OnLangPl(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.Pl);
+    private void OnLangVi(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.Vi);
+    private void OnLangId(object? sender, RoutedEventArgs e) => SetLanguageAndPersist(AppLanguage.Id);
 
     private void OnAbout(object? sender, RoutedEventArgs e)
     {
@@ -183,7 +203,7 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            await ShowErrorAsync(ex.Message);
+            await ShowErrorAsync(ResolveDesktopExceptionMessage(ex));
             e.Handled = true;
         }
     }
@@ -214,7 +234,7 @@ public partial class MainWindow
                 if (pathResult.Success)
                     return;
 
-                await ShowErrorAsync(pathResult.ErrorMessage ?? _localization["Dialog.TerminalCommand.InstallFailed"]);
+                await ShowErrorAsync(ResolveTerminalCommandSetupFailureMessage());
                 snapshot = pathResult.Snapshot;
                 isAutomaticPrompt = false;
                 continue;
@@ -230,7 +250,7 @@ public partial class MainWindow
                     : _terminalCommandSetupService.InstallOrRepair());
             if (ResolveTerminalCommandPostInstallUiAction(installResult) == TerminalCommandPostInstallUiAction.ShowError)
             {
-                await ShowErrorAsync(installResult.ErrorMessage ?? _localization["Dialog.TerminalCommand.InstallFailed"]);
+                await ShowErrorAsync(ResolveTerminalCommandSetupFailureMessage());
                 return;
             }
 
@@ -240,7 +260,7 @@ public partial class MainWindow
                 if (pathResult.Success)
                     return;
 
-                await ShowErrorAsync(pathResult.ErrorMessage ?? _localization["Dialog.TerminalCommand.InstallFailed"]);
+                await ShowErrorAsync(ResolveTerminalCommandSetupFailureMessage());
                 snapshot = pathResult.Snapshot;
                 isAutomaticPrompt = false;
                 continue;
@@ -252,6 +272,7 @@ public partial class MainWindow
                     this,
                     _localization["Dialog.TerminalCommand.Title"],
                     _localization["Dialog.TerminalCommand.ReconfigureSucceeded"],
+                    _localization["Dialog.OK"],
                     height: 120);
             }
 
@@ -264,6 +285,11 @@ public partial class MainWindow
         installResult.Success
             ? TerminalCommandPostInstallUiAction.None
             : TerminalCommandPostInstallUiAction.ShowError;
+
+	private string ResolveTerminalCommandSetupFailureMessage() =>
+		DesktopExceptionPresentation.AppendCode(
+			_localization["Dialog.TerminalCommand.InstallFailed"],
+			DesktopExceptionPresentation.OperationFailedCode);
 
     internal static bool RequiresTerminalCommandPathConfiguration(TerminalCommandSetupSnapshot snapshot) =>
         snapshot.State is
@@ -319,10 +345,20 @@ public partial class MainWindow
             return;
         }
 
-        _projectProfiles.ClearAllProfiles();
-        _toastService.Show(_localization["Toast.Data.Reset"]);
+        var result = _projectProfiles.ClearAllProfiles();
+        _toastService.Show(_localization[ResolveResetDataResultLocalizationKey(result)]);
         e.Handled = true;
     }
+
+    internal static string ResolveResetDataResultLocalizationKey(ProjectProfileClearStatus status) =>
+        status switch
+        {
+            ProjectProfileClearStatus.Cleared => "Toast.Data.Reset",
+            ProjectProfileClearStatus.Busy => "Toast.Data.Reset.Busy",
+            ProjectProfileClearStatus.FutureSchema => "Toast.Data.Reset.FutureSchema",
+            ProjectProfileClearStatus.Failed => "Toast.Data.Reset.Failed",
+            _ => throw new ArgumentOutOfRangeException(nameof(status), status, null)
+        };
 
     private void ResetThemeSettings()
         => _appearanceSettings.ResetThemeSettings();
@@ -369,13 +405,29 @@ public partial class MainWindow
     private void OnSearchKeyDown(object? sender, KeyEventArgs e) =>
         _searchFilterController.HandleSearchInputKey(e);
 
+	private void OnTogglePreviewSearch(object? sender, RoutedEventArgs e) =>
+		_previewSearchController.Toggle();
+
+	private void OnPreviewSearchClose(object? sender, RoutedEventArgs e) =>
+		_previewSearchController.Close();
+
+	private void OnPreviewSearchNext(object? sender, RoutedEventArgs e) =>
+		_previewSearchController.Navigate(1);
+
+	private void OnPreviewSearchPrev(object? sender, RoutedEventArgs e) =>
+		_previewSearchController.Navigate(-1);
+
+	private void OnPreviewSearchKeyDown(object? sender, KeyEventArgs e) =>
+		_previewSearchController.HandleInputKey(e);
+
     private void OnKeyDown(object? sender, KeyEventArgs e)
     {
         CancelAllMemoryCleanup();
         var mods = e.KeyModifiers;
+        var shortcutModifiers = DesktopShortcutModifiers.Current;
 
-        // Ctrl+O (always available)
-        if (mods == KeyModifiers.Control && e.Key == Key.O)
+        // The open command is always available.
+        if (shortcutModifiers.IsPrimary(mods) && e.Key == Key.O)
         {
             if (_viewModel.CanChangeProjectTree)
                 OnOpenFolder(this, new RoutedEventArgs());
@@ -383,8 +435,17 @@ public partial class MainWindow
             return;
         }
 
+		if (_previewSearchController.TryHandleToggleHotkey(e))
+			return;
+
         if (_searchFilterController.TryHandleToggleHotkey(e))
             return;
+
+		if (_previewSearchController.TryHandleNavigationHotkey(e))
+			return;
+
+		if (_previewSearchController.TryHandleEscape(e))
+			return;
 
         // Esc closes the help popover
         if (e.Key == Key.Escape && _viewModel.HelpPopoverOpen)
@@ -414,23 +475,30 @@ public partial class MainWindow
         }
 
         // Zoom hotkeys (in WinForms they work even without a loaded project)
-        if (mods == KeyModifiers.Control && (e.Key == Key.OemPlus || e.Key == Key.Add))
+        if (shortcutModifiers.IsPrimaryWithOptionalShift(mods) &&
+            (e.Key == Key.OemPlus || e.Key == Key.Add))
         {
             _treeViewport.ZoomIn();
             e.Handled = true;
             return;
         }
 
-        if (mods == KeyModifiers.Control && (e.Key == Key.OemMinus || e.Key == Key.Subtract))
+        if (shortcutModifiers.IsPrimary(mods) && (e.Key == Key.OemMinus || e.Key == Key.Subtract))
         {
             _treeViewport.ZoomOut();
             e.Handled = true;
             return;
         }
 
-        if (mods == KeyModifiers.Control && (e.Key == Key.D0 || e.Key == Key.NumPad0))
+        if (shortcutModifiers.IsPrimary(mods) && (e.Key == Key.D0 || e.Key == Key.NumPad0))
         {
             OnZoomReset(this, new RoutedEventArgs());
+            e.Handled = true;
+            return;
+        }
+
+        if (shortcutModifiers.IsUnboundMacOSCommandW(e.Key, mods))
+        {
             e.Handled = true;
             return;
         }
@@ -438,24 +506,21 @@ public partial class MainWindow
         if (!_viewModel.IsProjectLoaded)
             return;
 
-        // Ctrl+B Preview mode toggle
-        if (mods == KeyModifiers.Control && e.Key == Key.B)
+        if (shortcutModifiers.IsPrimary(mods) && e.Key == Key.B)
         {
             OnTogglePreview(this, new RoutedEventArgs());
             e.Handled = true;
             return;
         }
 
-        // Ctrl+P Options panel toggle
-        if (mods == KeyModifiers.Control && e.Key == Key.P)
+        if (shortcutModifiers.IsPrimary(mods) && e.Key == Key.P)
         {
             OnToggleSettings(this, new RoutedEventArgs());
             e.Handled = true;
             return;
         }
 
-        // Ctrl+E Expand All
-        if (mods == KeyModifiers.Control && e.Key == Key.E)
+        if (shortcutModifiers.IsPrimary(mods) && e.Key == Key.E)
         {
             if (_viewModel.IsTreePaneVisible)
                 _treeViewport.ExpandAll();
@@ -463,8 +528,7 @@ public partial class MainWindow
             return;
         }
 
-        // Ctrl+W Collapse All
-        if (mods == KeyModifiers.Control && e.Key == Key.W)
+        if (shortcutModifiers.IsCollapseAll(e.Key, mods))
         {
             if (_viewModel.IsTreePaneVisible)
                 _treeViewport.CollapseAll();
@@ -473,28 +537,28 @@ public partial class MainWindow
         }
 
         // Copy hotkeys (same as WinForms)
-        if (mods == (KeyModifiers.Control | KeyModifiers.Shift) && e.Key == Key.C)
+        if (shortcutModifiers.IsPrimaryWithShift(mods) && e.Key == Key.C)
         {
             OnCopyTree(this, new RoutedEventArgs());
             e.Handled = true;
             return;
         }
 
-        if (mods == (KeyModifiers.Control | KeyModifiers.Alt) && e.Key == Key.C)
+        if (shortcutModifiers.IsPrimaryWithAlt(mods) && e.Key == Key.C)
         {
             OnCopyTree(this, new RoutedEventArgs());
             e.Handled = true;
             return;
         }
 
-        if (mods == (KeyModifiers.Control | KeyModifiers.Alt) && e.Key == Key.V)
+        if (shortcutModifiers.IsPrimaryWithAlt(mods) && e.Key == Key.V)
         {
             OnCopyContent(this, new RoutedEventArgs());
             e.Handled = true;
             return;
         }
 
-        if (mods == (KeyModifiers.Control | KeyModifiers.Shift) && e.Key == Key.V)
+        if (shortcutModifiers.IsPrimaryWithShift(mods) && e.Key == Key.V)
         {
             OnCopyTreeAndContent(this, new RoutedEventArgs());
             e.Handled = true;
@@ -532,15 +596,11 @@ public partial class MainWindow
     private void SyncSearchAndFilterVisualStateFromFlags() =>
         _searchFilterController.SyncVisualState();
 
-    private Task PrepareSearchAndFilterForProjectLoadAsync() =>
-        _searchFilterController.PrepareForProjectLoadAsync();
-
-    private void OnRootAllChanged(object? sender, RoutedEventArgs e)
-    {
-        // Get value directly from control - event fires BEFORE binding updates ViewModel
-        var check = (sender as CheckBox)?.IsChecked == true;
-        _selectionCoordinator.HandleRootAllChanged(check, _currentPath);
-    }
+	private Task PrepareSearchAndFilterForProjectLoadAsync()
+	{
+		_previewSearchController.ClearProjectState();
+		return _searchFilterController.PrepareForProjectLoadAsync();
+	}
 
     private void OnExtensionsAllChanged(object? sender, RoutedEventArgs e)
     {
@@ -556,8 +616,31 @@ public partial class MainWindow
         _selectionCoordinator.HandleIgnoreAllChanged(check, _currentPath);
     }
 
+	private void OnGitFilteringModeChanged(object? sender, SelectionChangedEventArgs e)
+	{
+		if (_viewModel.IsRefreshingGitFilteringModes)
+			return;
+		if ((sender as ComboBox)?.SelectedItem is not GitFilteringModeOptionViewModel option)
+			return;
+		var previousMode = e.RemovedItems.Count > 0 &&
+		                   e.RemovedItems[0] is GitFilteringModeOptionViewModel previousOption
+			? previousOption.Mode
+			: (GitFilteringMode?)null;
+		_selectionCoordinator.HandleGitFilteringModeChanged(option.Mode, _currentPath, previousMode);
+	}
+
+	private void OnContentProcessingAllChanged(object? sender, RoutedEventArgs e)
+	{
+		var check = (sender as CheckBox)?.IsChecked == true;
+		_selectionCoordinator.HandleContentProcessingAllChanged(check);
+	}
+
     private async void OnApplySettings(object? sender, RoutedEventArgs e)
     {
+        var activeOperationType = _statusOperations.GetActiveSnapshot().OperationType;
+        if (!_viewModel.TryBeginApplySettings(activeOperationType))
+            return;
+
         var applyTask = ApplySettingsAsync();
         _latestApplySettingsTask = applyTask;
         await applyTask;
@@ -567,9 +650,6 @@ public partial class MainWindow
 
     private async Task ApplySettingsAsync()
     {
-        if (!_viewModel.CanApplySettings)
-            return;
-
         var applyCts = ReplaceCancellationSource(ref _applySettingsCts);
         var cancellationToken = applyCts.Token;
         void CancelApply()
@@ -589,14 +669,6 @@ public partial class MainWindow
 
             try
             {
-                // Font family follows WinForms behavior: applied only on Apply
-                var pending = _viewModel.PendingFontFamily;
-                if (pending is not null &&
-                    !string.Equals(_viewModel.SelectedFontFamily?.Name, pending.Name, StringComparison.OrdinalIgnoreCase))
-                {
-                    _viewModel.SelectedFontFamily = pending;
-                }
-
                 // Apply must observe the latest converged section state. A user can click Apply
                 // while an earlier ignore refresh is still finishing; rebuilding the tree first
                 // would capture stale root-folder availability and keep newly revealed folders hidden.
@@ -604,18 +676,39 @@ public partial class MainWindow
                 do
                 {
                     await _selectionCoordinator.WaitForPendingRefreshesAsync(cancellationToken);
-                    await _selectionCoordinator.UpdateLiveOptionsFromRootSelectionIfDirtyAsync(
+                    await _selectionCoordinator.UpdateLiveOptionsForProjectScopeIfDirtyAsync(
                         _currentPath,
                         cancellationToken);
                     await _selectionCoordinator.WaitForPendingRefreshesAsync(cancellationToken);
-                    refreshOutcome = await RefreshTreeAsync(cancellationToken: cancellationToken);
+
+                    // Redaction changes do not affect the tree. Publish the draft as one operation
+                    // without rebuilding the tree.
+                    if (_selectionCoordinator.TryAcceptContentRedactionOnlyChangeAsApplied(_currentPath))
+                    {
+                        ApplySelectedContentRedactionStates();
+                        await _projectProfiles.PersistIfNeededAsync(_currentPath, cancellationToken);
+                        return;
+                    }
+
+                    if (_currentTree is { } currentTree &&
+                        _selectionCoordinator.TryAcceptContentTransformationOnlyChangeAsApplied(_currentPath))
+                    {
+                        await ApplyContentTransformationSettingsAsync(currentTree, cancellationToken);
+						await _projectProfiles.PersistIfNeededAsync(_currentPath, cancellationToken);
+                        return;
+                    }
+
+                    refreshOutcome = await RefreshTreeAsync(
+                        cancellationToken: cancellationToken,
+                        postLoadCleanupReason: MemoryCleanupReason.ApplySettingsWorkCompleted,
+                        preserveStatusMetrics: true);
 
                     // A checkbox can change while a large tree is being materialized. In that
                     // case the pipeline discards the obsolete graph and Apply converges again
                     // instead of presenting settings that describe a different tree.
                 } while (refreshOutcome == TreeRefreshOutcome.StaleInput);
 
-                _projectProfiles.PersistIfNeeded(_currentPath);
+				await _projectProfiles.PersistIfNeededAsync(_currentPath, cancellationToken);
             }
             catch (OperationCanceledException)
             {
@@ -623,12 +716,13 @@ public partial class MainWindow
             }
             catch (Exception ex)
             {
-                await ShowErrorAsync(ex.Message);
+                await ShowErrorAsync(ResolveDesktopExceptionMessage(ex));
             }
         }
         finally
         {
             DisposeIfCurrent(ref _applySettingsCts, applyCts);
+            _viewModel.CompleteApplySettings();
         }
     }
 }

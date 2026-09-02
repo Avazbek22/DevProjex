@@ -1,52 +1,99 @@
+using System.Collections.ObjectModel;
 using Terminal.Gui.Input;
+using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
 
 namespace DevProjex.Terminal.Tui;
 
 internal sealed class TerminalParameterListView : ListView
 {
-	private const long PointerEventDeduplicationWindowMilliseconds = 1_000;
-	private int _lastPressedViewportColumn = -1;
-	private int _lastPressedViewportRow = -1;
-	private long _lastPressedAt;
+	private readonly TerminalPointerEventDeduplicator _pointerEvents = new();
+	private IReadOnlyList<TerminalParameterRow>? _rows;
+
+	public TerminalParameterListView(
+		bool showVerticalScrollBar = false,
+		bool useUnicode = true)
+	{
+		if (showVerticalScrollBar)
+			TerminalScrollBarStyle.Apply(this, useUnicode, vertical: true, horizontal: false);
+	}
 
 	public event EventHandler? SelectionToggleRequested;
+	public event EventHandler? InteractionStarted;
+	public event EventHandler? CommandLineRequested;
+
+	public void SetParameterSource(ObservableCollection<TerminalParameterRow> rows)
+	{
+		ArgumentNullException.ThrowIfNull(rows);
+		_rows = rows;
+		SetSource(rows);
+	}
+
+	public override void OnRowRender(ListViewRowEventArgs rowEventArgs)
+	{
+		base.OnRowRender(rowEventArgs);
+		if (!IsRowEnabled(rowEventArgs.Row))
+			rowEventArgs.RowAttribute = GetScheme().Disabled;
+	}
+
+	protected override bool OnKeyDown(Key key)
+	{
+		return TerminalInteractiveView.TryActivateCommandLine(
+			key,
+			() => CommandLineRequested?.Invoke(this, EventArgs.Empty)) || base.OnKeyDown(key);
+	}
 
 	protected override bool OnMouseEvent(Mouse mouse)
 	{
 		if (mouse.Flags.HasFlag(MouseFlags.WheeledUp) ||
-		    mouse.Flags.HasFlag(MouseFlags.WheeledDown))
+			mouse.Flags.HasFlag(MouseFlags.WheeledDown))
 		{
 			return base.OnMouseEvent(mouse);
 		}
 
 		var pressed = mouse.Flags.HasFlag(MouseFlags.LeftButtonPressed);
-		var released = mouse.Flags.HasFlag(MouseFlags.LeftButtonReleased);
-		var clicked = mouse.Flags.HasFlag(MouseFlags.LeftButtonClicked);
-		if ((!pressed && !released && !clicked) || mouse.Position is not { } position)
+		if (!IsPrimaryActivation(mouse.Flags) || mouse.Position is not { } position)
 			return base.OnMouseEvent(mouse);
 
 		SetFocus();
-		var row = Viewport.Y + position.Y;
-		SelectedItem = row;
-		EnsureSelectedItemVisible();
-		var now = Environment.TickCount64;
-		if (!pressed &&
-		    _lastPressedViewportRow == position.Y &&
-		    _lastPressedViewportColumn == position.X &&
-		    now - _lastPressedAt <= PointerEventDeduplicationWindowMilliseconds)
+		InteractionStarted?.Invoke(this, EventArgs.Empty);
+		if (!TryResolveSelectionIndex(
+				Viewport.Y,
+				position.Y,
+				Source?.Count ?? 0,
+				out var row))
 		{
 			return true;
 		}
-		if (pressed)
+		if (!IsRowEnabled(row))
+			return true;
+		SelectedItem = row;
+		EnsureSelectedItemVisible();
+		if (!_pointerEvents.ShouldHandle(pressed, position.X, position.Y))
 		{
-			// A settings refresh can move the viewport before the matching release event.
-			_lastPressedViewportRow = position.Y;
-			_lastPressedViewportColumn = position.X;
-			_lastPressedAt = now;
+			return true;
 		}
-		if (position.X is >= 2 and <= 4)
-			SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
+		SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
 		return true;
+	}
+
+	internal bool IsRowEnabled(int row) =>
+		_rows is null || row >= 0 && row < _rows.Count && _rows[row].IsEnabled;
+
+	internal static bool IsPrimaryActivation(MouseFlags flags) =>
+		flags.HasFlag(MouseFlags.LeftButtonPressed) ||
+		flags.HasFlag(MouseFlags.LeftButtonClicked);
+
+	internal static bool TryResolveSelectionIndex(
+		int viewportTop,
+		int pointerRow,
+		int itemCount,
+		out int selectionIndex)
+	{
+		selectionIndex = viewportTop + pointerRow;
+		return viewportTop >= 0 &&
+		       pointerRow >= 0 &&
+		       selectionIndex >= 0 &&
+		       selectionIndex < itemCount;
 	}
 }

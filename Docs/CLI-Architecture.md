@@ -35,7 +35,7 @@ the long-running desktop from retaining redirected CLI streams.
 
 `System.CommandLine` owns parsing, validation, hierarchy, help metadata, and
 completion. There is no manual flat argument loop or parallel public parser.
-Human descriptions come from the shared 11-locale localization catalog.
+Human descriptions come from the shared 20-locale localization catalog.
 
 One bounded parser-boundary integrity check retains the distinction that
 System.CommandLine 2.0.10 loses for an empty inline assignment: `--name=`.
@@ -56,6 +56,8 @@ renderers.
 - selected relative paths;
 - one Git filtering mode;
 - ordinary Exclusions;
+- five independent opt-in content transformations: Hide Secrets, Hide Private
+  Data, Compress Code, Strip Comments, and Strip Blank Lines;
 - profile source.
 
 `ProjectSelectionResolver` applies standard/local/portable profile precedence and
@@ -67,6 +69,11 @@ and metrics. It produces one `ProjectContextPlan` consumed by analyze, context
 documents, project export, and Terminal Workspace.
 
 The planner does not introduce a second scanner or ignore engine.
+
+Hide Secrets is deliberately applied after the effective file selection. It uses
+the shared classified content reader and a per-operation redaction snapshot rather
+than adding a filesystem scanner or changing ignore-rule semantics. Preview,
+context serializers, and project-copy exporters consume the same session decisions.
 
 ## ProjectContextPlan
 

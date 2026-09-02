@@ -2,29 +2,90 @@ namespace DevProjex.Avalonia.Coordinators;
 
 public sealed partial class SelectionSyncCoordinator
 {
+	internal bool ApplyHideSecretsOverride(bool? enabled) =>
+		ApplyContentTransformationOverride(IgnoreOptionId.HideSecrets, enabled);
+
+	internal bool ApplyHidePrivateDataOverride(bool? enabled) =>
+		ApplyContentTransformationOverride(IgnoreOptionId.HidePrivateData, enabled);
+
+	internal bool ApplyCompressCodeOverride(bool? enabled) =>
+		ApplyContentTransformationOverride(IgnoreOptionId.CompressCode, enabled);
+
+	internal bool ApplyStripCommentsOverride(bool? enabled) =>
+		ApplyContentTransformationOverride(IgnoreOptionId.StripComments, enabled);
+
+	internal bool ApplyStripBlankLinesOverride(bool? enabled) =>
+		ApplyContentTransformationOverride(IgnoreOptionId.StripBlankLines, enabled);
+
+	private bool ApplyContentTransformationOverride(IgnoreOptionId optionId, bool? enabled)
+	{
+		if (enabled is null)
+			return false;
+
+		var currentState = _session.IgnoreOptions.TryGetCachedState(
+			optionId,
+			out var cachedState)
+			? cachedState
+			: viewModel.IgnoreOptions.FirstOrDefault(
+				option => option.Id == optionId)?.IsChecked == true;
+		if (currentState == enabled.Value)
+			return false;
+
+		var stateCache = _session.IgnoreOptions.SnapshotStateCache();
+		stateCache[optionId] = enabled.Value;
+		_session.IgnoreOptions.ReplaceStateCache(stateCache);
+		_session.IgnoreOptions.IsInitialized = true;
+
+		_suppressIgnoreItemCheck = true;
+		try
+		{
+			var option = viewModel.IgnoreOptions.FirstOrDefault(
+				candidate => candidate.Id == optionId);
+			if (option is not null)
+				option.IsChecked = enabled.Value;
+		}
+		finally
+		{
+			_suppressIgnoreItemCheck = false;
+		}
+
+		SynchronizeDerivedAggregateSelectionState();
+
+		RequestPendingApplyEvaluation();
+		contentTransformationChanged?.Invoke(optionId);
+		return true;
+	}
+
     internal bool ApplySelectionOverrides(
         string currentPath,
-        IReadOnlyCollection<string>? selectedRootFolders,
         IReadOnlyCollection<string>? selectedExtensions,
         IReadOnlySet<IgnoreOptionId>? selectedIgnoreOptions,
+		GitFilteringMode? gitModeOverride = null,
         bool ignoreOptionStateIsComplete = false,
-		bool resetRootSelectionToDefaults = false,
 		bool resetExtensionSelectionToDefaults = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(currentPath);
         if (IsStalePathRequest(currentPath))
             return false;
 
-        var rootSelectionChanged = resetRootSelectionToDefaults
-			? ResetRootSelectionToDefaults()
-			: ApplyRootSelectionOverride(selectedRootFolders);
         var extensionSelectionChanged = resetExtensionSelectionToDefaults
 			? ResetExtensionSelectionToDefaults()
 			: ApplyExtensionSelectionOverride(selectedExtensions);
-        var ignoreSelectionChanged = ApplyIgnoreSelectionOverrideCore(
+		var ignoreSelectionChanged = ApplyIgnoreSelectionOverrideCore(
             selectedIgnoreOptions,
             ignoreOptionStateIsComplete);
-        if (!rootSelectionChanged && !extensionSelectionChanged && !ignoreSelectionChanged)
+		var gitModeChanged = false;
+		if (gitModeOverride is { } gitMode)
+		{
+			_preservePreferredGitModeForPersistence = false;
+			if (gitMode != _session.IgnoreOptions.ActiveGitFilteringMode)
+			{
+				_session.IgnoreOptions.SetActiveGitFilteringMode(gitMode);
+				gitModeChanged = true;
+				RefreshGitFilteringModePresentation();
+			}
+		}
+		if (!extensionSelectionChanged && !ignoreSelectionChanged && !gitModeChanged)
             return false;
 
         _session.AdvanceRevision();
@@ -32,40 +93,13 @@ public sealed partial class SelectionSyncCoordinator
 
         // A combined Desktop request is one logical selection transaction. Queue only the
         // final state so intermediate checkbox states never start competing scans.
-        // Resetting roots from a local closed set back to profile defaults must rediscover
-        // top-level topology. A live refresh can only operate on the rows already visible.
-        if (ignoreSelectionChanged || resetRootSelectionToDefaults)
+        if (ignoreSelectionChanged)
             QueueFullRefresh(currentPath, changedIgnoreOptionId: null);
         else
             QueueLiveOptionsRefresh(currentPath, SelectionRefreshOrigin.Unknown);
 
 		return true;
     }
-
-	private bool ResetRootSelectionToDefaults()
-	{
-		var changed = _session.RootFolders.IsInitialized ||
-		              _session.RootSelectionIsExplicit ||
-		              viewModel.RootFolders.Any(static option => !option.IsChecked);
-		if (!changed)
-			return false;
-
-		_session.RootFolders.RestoreDefaults(trimExcess: false);
-		_session.RootSelectionIsExplicit = false;
-		_suppressRootItemCheck = true;
-		try
-		{
-			foreach (var option in viewModel.RootFolders)
-				option.IsChecked = true;
-		}
-		finally
-		{
-			_suppressRootItemCheck = false;
-		}
-
-		viewModel.AllRootFoldersChecked = true;
-		return true;
-	}
 
 	private bool ResetExtensionSelectionToDefaults()
 	{
@@ -88,51 +122,9 @@ public sealed partial class SelectionSyncCoordinator
 			_suppressExtensionItemCheck = false;
 		}
 
-		viewModel.AllExtensionsChecked = true;
+		SynchronizeDerivedAggregateSelectionState();
 		return true;
 	}
-
-    private bool ApplyRootSelectionOverride(IReadOnlyCollection<string>? selectedRootFolders)
-    {
-        if (selectedRootFolders is null)
-            return false;
-
-        var selected = new HashSet<string>(selectedRootFolders, PathComparer.Default);
-        var exactStates = BuildExactSelectionStates(
-            _session.RootFolders.OptionStates,
-            viewModel.RootFolders.Select(static option => option.Name),
-            selected,
-            PathComparer.Default);
-        var changed = !_session.RootSelectionIsExplicit ||
-                      !_session.RootFolders.IsInitialized ||
-                      !_session.RootFolders.HasFullState ||
-                      !SetStatesMatch(_session.RootFolders.SelectedNames, selected) ||
-                      !DictionaryStatesMatch(_session.RootFolders.OptionStates, exactStates);
-        _suppressRootItemCheck = true;
-        try
-        {
-            foreach (var option in viewModel.RootFolders)
-            {
-                var isChecked = selected.Contains(option.Name);
-                option.IsChecked = isChecked;
-            }
-        }
-        finally
-        {
-            _suppressRootItemCheck = false;
-        }
-
-        // Desktop/CLI collections are closed sets. Hidden cached rows must be set to false,
-        // otherwise they can silently reappear as selected after the next topology refresh.
-        _session.RootFolders.RestoreProfile(selected, exactStates);
-        _session.RootSelectionIsExplicit = true;
-        SyncAllCheckbox(
-            viewModel.RootFolders,
-            ref _suppressRootAllCheck,
-            value => viewModel.AllRootFoldersChecked = value,
-            emptyValue: true);
-		return changed;
-    }
 
     private bool ApplyExtensionSelectionOverride(IReadOnlyCollection<string>? selectedExtensions)
     {
@@ -166,10 +158,7 @@ public sealed partial class SelectionSyncCoordinator
 
         _session.Extensions.RestoreProfile(selected, exactStates);
         _session.ExtensionSelectionIsExplicit = true;
-        SyncAllCheckbox(
-            viewModel.Extensions,
-            ref _suppressExtensionAllCheck,
-            value => viewModel.AllExtensionsChecked = value);
+        RebuildVisibleExtensionAggregate();
         return changed;
     }
 

@@ -3,7 +3,9 @@ namespace DevProjex.Avalonia.Coordinators;
 internal sealed class ProjectTextOutputPipeline(
     TreeExportService treeExport,
     SelectedContentExportService contentExport,
-    TreeAndContentExportService treeAndContentExport)
+	TreeAndContentExportService treeAndContentExport,
+	PreviewDocumentBuilder previewDocumentBuilder,
+	TextFileExportService textFileExport)
 {
     public Task<ProjectTextOutputResult> BuildAsync(
         ProjectTextOutputMode mode,
@@ -21,19 +23,129 @@ internal sealed class ProjectTextOutputPipeline(
             cancellationToken);
     }
 
+	public Task<ProjectTextDocumentOutputResult> BuildDocumentAsync(
+		ProjectTextOutputMode mode,
+		ProjectTextOutputSnapshot snapshot,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(snapshot);
+		cancellationToken.ThrowIfCancellationRequested();
+		var effectiveSnapshot = NormalizeSelection(snapshot);
+		return Task.Run(
+			() => BuildDocumentOnWorkerAsync(mode, effectiveSnapshot, cancellationToken),
+			cancellationToken);
+	}
+
+	private async Task<ProjectTextDocumentOutputResult> BuildDocumentOnWorkerAsync(
+		ProjectTextOutputMode mode,
+		ProjectTextOutputSnapshot snapshot,
+		CancellationToken cancellationToken)
+	{
+		cancellationToken.ThrowIfCancellationRequested();
+		var outputPathRedaction = OutputRootPathPresentation.CaptureRedactionDecision(
+			snapshot.RedactionContext);
+		if (mode == ProjectTextOutputMode.Tree)
+		{
+			return new ProjectTextDocumentOutputResult(
+				previewDocumentBuilder.CreateDocument(
+					BuildTree(snapshot, cancellationToken, outputPathRedaction)),
+				CandidateFileCount: 0);
+		}
+
+		if (mode is not (ProjectTextOutputMode.Content or ProjectTextOutputMode.TreeAndContent))
+			throw new ArgumentOutOfRangeException(nameof(mode), mode, "Unsupported project text output mode.");
+
+		var files = ResolveContentFiles(snapshot);
+		var contentOnly = mode == ProjectTextOutputMode.Content;
+		var contentDocument = await BuildContentDocumentAsync(
+			files,
+			snapshot,
+			TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(snapshot.RootPath),
+			contentOnly ? ResolveContentRoot(snapshot) : null,
+			outputPathRedaction,
+			cancellationToken).ConfigureAwait(false);
+		if (contentOnly)
+		{
+			return new ProjectTextDocumentOutputResult(
+				contentDocument,
+				files.Count);
+		}
+
+		using (contentDocument)
+		{
+			var tree = BuildTree(snapshot, cancellationToken, outputPathRedaction);
+			if (contentDocument.CharacterCount == 0)
+			{
+				return new ProjectTextDocumentOutputResult(
+					previewDocumentBuilder.CreateDocument(tree),
+					CandidateFileCount: 0);
+			}
+
+			var trimmedTreeLength = TrailingLineEndingTrimming.GetTrimmedLength(tree);
+			var separator = string.Concat(
+				Environment.NewLine,
+				"\u00A0",
+				Environment.NewLine,
+				"\u00A0",
+				Environment.NewLine);
+			var combined = await previewDocumentBuilder.CreateDocumentAsync(
+				async (stream, writeCancellationToken) =>
+				{
+					await textFileExport.AppendAsync(
+						stream,
+						tree.AsMemory(0, trimmedTreeLength),
+						writeCancellationToken).ConfigureAwait(false);
+					await textFileExport.AppendAsync(
+						stream,
+						separator,
+						writeCancellationToken).ConfigureAwait(false);
+					await contentDocument
+						.WriteToAsync(stream, writeCancellationToken)
+						.ConfigureAwait(false);
+				},
+				cancellationToken).ConfigureAwait(false);
+			return new ProjectTextDocumentOutputResult(combined, CandidateFileCount: 0);
+		}
+	}
+
+	private async Task<IPreviewTextDocument> BuildContentDocumentAsync(
+		IReadOnlyList<string> files,
+		ProjectTextOutputSnapshot snapshot,
+		Func<string, string>? displayPathMapper,
+		string? displayRootPath,
+		OutputPathRedactionDecision? outputPathRedaction,
+		CancellationToken cancellationToken)
+	{
+		return await previewDocumentBuilder.CreateDocumentAsync(
+			(stream, writeCancellationToken) => contentExport.WriteAsync(
+				stream,
+				files,
+				writeCancellationToken,
+				displayPathMapper,
+				snapshot.RedactionContext,
+				displayRootPath,
+				outputPathRedaction),
+			cancellationToken).ConfigureAwait(false);
+	}
+
     private async Task<ProjectTextOutputResult> BuildOnWorkerAsync(
         ProjectTextOutputMode mode,
         ProjectTextOutputSnapshot snapshot,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+		var outputPathRedaction = OutputRootPathPresentation.CaptureRedactionDecision(
+			snapshot.RedactionContext);
 
         return mode switch
         {
             ProjectTextOutputMode.Tree => new ProjectTextOutputResult(
-                BuildTree(snapshot, cancellationToken),
+				BuildTree(snapshot, cancellationToken, outputPathRedaction),
                 CandidateFileCount: 0),
-            ProjectTextOutputMode.Content => await BuildContentAsync(snapshot, cancellationToken)
+			ProjectTextOutputMode.Content => await BuildContentAsync(
+				snapshot,
+				outputPathRedaction,
+				cancellationToken)
                 .ConfigureAwait(false),
             ProjectTextOutputMode.TreeAndContent => new ProjectTextOutputResult(
                 await treeAndContentExport.BuildAsync(
@@ -42,7 +154,9 @@ internal sealed class ProjectTextOutputPipeline(
                         snapshot.SelectedPaths,
                         snapshot.TreeFormat,
                         cancellationToken,
-                        snapshot.PathPresentation)
+						snapshot.PathPresentation,
+						snapshot.RedactionContext,
+						outputPathRedaction)
                     .ConfigureAwait(false),
                 CandidateFileCount: 0),
             _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, "Unsupported project text output mode.")
@@ -51,56 +165,71 @@ internal sealed class ProjectTextOutputPipeline(
 
     private async Task<ProjectTextOutputResult> BuildContentAsync(
         ProjectTextOutputSnapshot snapshot,
+		OutputPathRedactionDecision? outputPathRedaction,
         CancellationToken cancellationToken)
     {
         var files = ResolveContentFiles(snapshot);
-        if (files.Count == 0)
-            return new ProjectTextOutputResult(string.Empty, CandidateFileCount: 0);
-
-        var content = await contentExport.BuildAsync(
-                files,
-                cancellationToken,
-                snapshot.PathPresentation?.MapFilePath)
+		var content = await contentExport.BuildAsync(
+				files,
+				cancellationToken,
+				TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(snapshot.RootPath),
+				snapshot.RedactionContext,
+				displayRootPath: ResolveContentRoot(snapshot),
+				outputPathRedaction: outputPathRedaction)
             .ConfigureAwait(false);
 
-        return new ProjectTextOutputResult(content, files.Count);
-    }
+		return new ProjectTextOutputResult(content, files.Count);
+	}
+
+	private static string ResolveContentRoot(ProjectTextOutputSnapshot snapshot) =>
+		snapshot.PathPresentation?.DisplayRootPath ?? snapshot.RootPath;
 
     public string BuildTree(
         ProjectTextOutputSnapshot snapshot,
-        CancellationToken cancellationToken = default)
+		CancellationToken cancellationToken = default,
+		OutputPathRedactionDecision? outputPathRedaction = null)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         cancellationToken.ThrowIfCancellationRequested();
 
         snapshot = NormalizeSelection(snapshot);
-        var displayRootPath = snapshot.PathPresentation?.DisplayRootPath;
+		outputPathRedaction ??= OutputRootPathPresentation.CaptureRedactionDecision(
+			snapshot.RedactionContext);
+		var displayRootPath = OutputRootPathPresentation.Resolve(
+			snapshot.RootPath,
+			snapshot.PathPresentation,
+			outputPathRedaction);
         var displayRootName = snapshot.PathPresentation?.DisplayRootName;
         if (snapshot.SelectedPaths.Count == 0)
         {
-            return treeExport.BuildFullTree(
+            return treeExport.BuildFullTreeWithCancellation(
                 snapshot.RootPath,
                 snapshot.Root,
                 snapshot.TreeFormat,
                 displayRootPath,
-                displayRootName);
+                displayRootName,
+                includeRootPath: true,
+                cancellationToken: cancellationToken);
         }
 
-        var tree = treeExport.BuildSelectedTree(
+        var tree = treeExport.BuildSelectedTreeWithCancellation(
             snapshot.RootPath,
             snapshot.Root,
             snapshot.SelectedPaths,
             snapshot.TreeFormat,
             displayRootPath,
-            displayRootName);
+            displayRootName,
+            cancellationToken);
 
         return string.IsNullOrWhiteSpace(tree)
-            ? treeExport.BuildFullTree(
+            ? treeExport.BuildFullTreeWithCancellation(
                 snapshot.RootPath,
                 snapshot.Root,
                 snapshot.TreeFormat,
                 displayRootPath,
-                displayRootName)
+                displayRootName,
+                includeRootPath: true,
+                cancellationToken: cancellationToken)
             : tree;
     }
 
@@ -143,11 +272,19 @@ internal sealed record ProjectTextOutputSnapshot(
     IReadOnlySet<string> SelectedPaths,
     IReadOnlyList<string>? OrderedFilePaths,
     TreeTextFormat TreeFormat,
-    ExportPathPresentation? PathPresentation);
+    ExportPathPresentation? PathPresentation,
+	ContentTransformationContext? RedactionContext = null);
 
 internal sealed record ProjectTextOutputResult(
     string Content,
     int CandidateFileCount);
+
+internal sealed record ProjectTextDocumentOutputResult(
+	IPreviewTextDocument Document,
+	int CandidateFileCount) : IDisposable
+{
+	public void Dispose() => Document.Dispose();
+}
 
 internal enum ProjectTextOutputMode
 {

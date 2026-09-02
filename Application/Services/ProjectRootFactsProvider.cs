@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.IO.Enumeration;
 using System.Security.Cryptography;
 using DevProjex.Application.Diagnostics;
@@ -22,7 +23,7 @@ public sealed class ProjectRootFactsProvider
 	private readonly TimeSpan _cacheTtl;
 	private readonly int _cacheLimit;
 	private readonly Func<DateTime> _utcNowProvider;
-	private readonly Func<string, ProjectRootFacts> _factsBuilder;
+	private readonly Func<string, CancellationToken, ProjectRootFacts> _factsBuilder;
 	private readonly Dictionary<string, long> _latestBuildSequences = new(PathComparer.Default);
 	private long _cacheGeneration;
 	private long _nextBuildSequence;
@@ -40,6 +41,19 @@ public sealed class ProjectRootFactsProvider
 		int cacheLimit,
 		Func<DateTime>? utcNowProvider,
 		Func<string, ProjectRootFacts> factsBuilder)
+		: this(
+			cacheTtl,
+			cacheLimit,
+			utcNowProvider,
+			(path, _) => factsBuilder(path))
+	{
+	}
+
+	private ProjectRootFactsProvider(
+		TimeSpan? cacheTtl,
+		int cacheLimit,
+		Func<DateTime>? utcNowProvider,
+		Func<string, CancellationToken, ProjectRootFacts> factsBuilder)
 	{
 		_cacheTtl = cacheTtl ?? DefaultCacheTtl;
 		_cacheLimit = Math.Max(0, cacheLimit);
@@ -47,41 +61,44 @@ public sealed class ProjectRootFactsProvider
 		_factsBuilder = factsBuilder ?? throw new ArgumentNullException(nameof(factsBuilder));
 	}
 
-	public ProjectRootFacts Get(string rootPath, bool forceRefresh = false)
+	public ProjectRootFacts Get(string rootPath, bool forceRefresh = false) =>
+		GetWithCancellation(rootPath, forceRefresh, CancellationToken.None);
+
+	public ProjectRootFacts GetWithCancellation(
+		string rootPath,
+		bool forceRefresh,
+		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		IgnorePipelineDiagnostics.RecordRootFactsRequest();
-		if (string.IsNullOrWhiteSpace(rootPath))
+		if (PathUtility.IsMissingPath(rootPath))
 			return ProjectRootFacts.Missing(rootPath);
 
-		string normalizedRootPath;
-		try
-		{
-			normalizedRootPath = Path.GetFullPath(rootPath);
-		}
-		catch
-		{
+		if (!TryNormalizePath(rootPath, out var normalizedRootPath))
 			return ProjectRootFacts.Missing(rootPath);
-		}
 
 		var now = _utcNowProvider();
 		if (!forceRefresh && _cacheLimit > 0)
 		{
 			lock (_cacheSync)
 			{
-				if (_cache.TryGetValue(normalizedRootPath, out var cachedNode) &&
-				    now - cachedNode.Value.CachedAtUtc <= _cacheTtl)
+				if (_cache.TryGetValue(normalizedRootPath, out var cachedNode))
 				{
-					_cacheLru.Remove(cachedNode);
-					_cacheLru.AddFirst(cachedNode);
-					IgnorePipelineDiagnostics.RecordRootFactsCacheHit();
-					return cachedNode.Value.Facts;
+					var age = now - cachedNode.Value.CachedAtUtc;
+					if (age >= TimeSpan.Zero && age <= _cacheTtl)
+					{
+						_cacheLru.Remove(cachedNode);
+						_cacheLru.AddFirst(cachedNode);
+						IgnorePipelineDiagnostics.RecordRootFactsCacheHit();
+						return cachedNode.Value.Facts;
+					}
 				}
 			}
 		}
 
 		IgnorePipelineDiagnostics.RecordRootFactsBuild();
 		if (_cacheLimit == 0)
-			return _factsBuilder(normalizedRootPath);
+			return _factsBuilder(normalizedRootPath, cancellationToken);
 
 		long cacheGeneration;
 		long buildSequence;
@@ -95,7 +112,7 @@ public sealed class ProjectRootFactsProvider
 		ProjectRootFacts facts;
 		try
 		{
-			facts = _factsBuilder(normalizedRootPath);
+			facts = _factsBuilder(normalizedRootPath, cancellationToken);
 		}
 		catch
 		{
@@ -177,10 +194,13 @@ public sealed class ProjectRootFactsProvider
 		_cacheLru.Remove(node);
 	}
 
-	private static ProjectRootFacts Build(string rootPath)
+	private static ProjectRootFacts Build(string rootPath, CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
 		if (!Directory.Exists(rootPath))
 			return ProjectRootFacts.Missing(rootPath);
+		if (!FileSystemRootEntryPolicy.IsPhysicalDirectory(rootPath))
+			return ProjectRootFacts.Inaccessible(rootPath);
 
 		var files = new List<ProjectRootFileFact>();
 		var directories = new List<ProjectRootDirectoryFact>();
@@ -189,12 +209,20 @@ public sealed class ProjectRootFactsProvider
 		{
 			foreach (var entry in EnumerateTopLevelEntries(rootPath))
 			{
+				cancellationToken.ThrowIfCancellationRequested();
 				if (entry.IsDirectory)
 				{
 					directories.Add(new ProjectRootDirectoryFact(
 						entry.Name,
 						entry.FullPath,
 						entry.IsReparsePoint));
+					continue;
+				}
+
+				if (!entry.IsReparsePoint &&
+				    PathComparer.Default.Equals(entry.Name, ".git") &&
+				    !UnixFileTypeInspector.IsRegularFile(entry.FullPath))
+				{
 					continue;
 				}
 
@@ -213,7 +241,10 @@ public sealed class ProjectRootFactsProvider
 			return ProjectRootFacts.Inaccessible(rootPath);
 		}
 
-		var gitIgnoreSignature = TryGetTopLevelGitIgnoreSignature(rootPath, files);
+		var gitIgnoreSignature = TryGetTopLevelGitIgnoreSignature(
+			rootPath,
+			files,
+			cancellationToken);
 		return new ProjectRootFacts(
 			rootPath,
 			exists: true,
@@ -243,7 +274,8 @@ public sealed class ProjectRootFactsProvider
 
 	private static ProjectRootFileSignature? TryGetTopLevelGitIgnoreSignature(
 		string rootPath,
-		IReadOnlyList<ProjectRootFileFact> files)
+		IReadOnlyList<ProjectRootFileFact> files,
+		CancellationToken cancellationToken)
 	{
 		var hasGitIgnore = false;
 		foreach (var file in files)
@@ -258,13 +290,22 @@ public sealed class ProjectRootFactsProvider
 		if (!hasGitIgnore)
 			return null;
 
-		return TryGetFileSignature(Path.Combine(rootPath, ".gitignore"));
+		return TryGetFileSignatureWithCancellation(
+			Path.Combine(rootPath, ".gitignore"),
+			cancellationToken);
 	}
 
-	public static ProjectRootFileSignature? TryGetFileSignature(string filePath)
+	public static ProjectRootFileSignature? TryGetFileSignature(string filePath) =>
+		TryGetFileSignatureWithCancellation(filePath, CancellationToken.None);
+
+	internal static ProjectRootFileSignature? TryGetFileSignatureWithCancellation(
+		string filePath,
+		CancellationToken cancellationToken)
 	{
 		try
 		{
+			cancellationToken.ThrowIfCancellationRequested();
+			UnixFileTypeInspector.EnsureRegularFile(filePath);
 			var linkInfo = new FileInfo(filePath);
 			if (!linkInfo.Exists)
 				return null;
@@ -274,12 +315,80 @@ public sealed class ProjectRootFactsProvider
 				return null;
 			if (linkInfo.Length > GitIgnoreFileReader.MaximumFileSizeBytes)
 				return null;
+			var expectedLastWriteTicks = linkInfo.LastWriteTimeUtc.Ticks;
+			var expectedLength = linkInfo.Length;
+			IgnorePipelineDiagnostics.RecordGitIgnoreSourceReadRequest();
+			var fingerprint = ComputeContentFingerprintWithCancellation(
+				linkInfo.FullName,
+				expectedLength,
+				cancellationToken);
+			IgnorePipelineDiagnostics.RecordGitIgnoreSourceBytes(expectedLength);
+			linkInfo.Refresh();
+			if (!linkInfo.Exists ||
+			    linkInfo.LastWriteTimeUtc.Ticks != expectedLastWriteTicks ||
+			    linkInfo.Length != expectedLength)
+			{
+				return null;
+			}
 
 			return new ProjectRootFileSignature(
-				linkInfo.LastWriteTimeUtc.Ticks,
-				linkInfo.Length,
+				expectedLastWriteTicks,
+				expectedLength,
 				LinkTarget: string.Empty,
-				ComputeContentFingerprint(linkInfo.FullName));
+				fingerprint);
+		}
+		catch (Exception exception) when (exception is
+		       IOException or
+		       UnauthorizedAccessException or
+		       System.Security.SecurityException or
+		       NotSupportedException or
+		       ArgumentException)
+		{
+			return null;
+		}
+	}
+
+	internal static ProjectRootFileContentSnapshot? TryReadFileContentSnapshotWithCancellation(
+		string filePath,
+		CancellationToken cancellationToken)
+	{
+		try
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			UnixFileTypeInspector.EnsureRegularFile(filePath);
+			var linkInfo = new FileInfo(filePath);
+			if (!linkInfo.Exists)
+				return null;
+
+			if (linkInfo.Attributes.HasFlag(FileAttributes.ReparsePoint) ||
+			    !string.IsNullOrEmpty(linkInfo.LinkTarget))
+			{
+				return null;
+			}
+
+			if (linkInfo.Length > GitIgnoreFileReader.MaximumFileSizeBytes)
+				return null;
+			var expectedLastWriteTicks = linkInfo.LastWriteTimeUtc.Ticks;
+			var expectedLength = linkInfo.Length;
+			var source = GitIgnoreFileReader.ReadWithCancellation(filePath, cancellationToken);
+			linkInfo.Refresh();
+			if (!linkInfo.Exists ||
+			    linkInfo.Attributes.HasFlag(FileAttributes.ReparsePoint) ||
+			    !string.IsNullOrEmpty(linkInfo.LinkTarget) ||
+			    linkInfo.LastWriteTimeUtc.Ticks != expectedLastWriteTicks ||
+			    linkInfo.Length != expectedLength ||
+			    source.LengthBytes != expectedLength)
+			{
+				return null;
+			}
+
+			return new ProjectRootFileContentSnapshot(
+				new ProjectRootFileSignature(
+					expectedLastWriteTicks,
+					expectedLength,
+					LinkTarget: string.Empty,
+					source.ContentFingerprint),
+				source);
 		}
 		catch (Exception exception) when (exception is
 		       IOException or
@@ -321,7 +430,10 @@ public sealed class ProjectRootFactsProvider
 		}
 	}
 
-	private static string ComputeContentFingerprint(string filePath)
+	private static string ComputeContentFingerprintWithCancellation(
+		string filePath,
+		long expectedLength,
+		CancellationToken cancellationToken)
 	{
 		using var stream = new FileStream(
 			filePath,
@@ -330,14 +442,54 @@ public sealed class ProjectRootFactsProvider
 			FileShare.ReadWrite | FileShare.Delete,
 			bufferSize: 4096,
 			FileOptions.SequentialScan);
-		return Convert.ToHexString(SHA256.HashData(stream));
+		return ComputeContentFingerprintWithCancellation(stream, expectedLength, cancellationToken);
+	}
+
+	internal static string ComputeContentFingerprint(Stream stream, long expectedLength) =>
+		ComputeContentFingerprintWithCancellation(stream, expectedLength, CancellationToken.None);
+
+	internal static string ComputeContentFingerprintWithCancellation(
+		Stream stream,
+		long expectedLength,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(stream);
+		ArgumentOutOfRangeException.ThrowIfNegative(expectedLength);
+		if (stream.Length != expectedLength)
+			throw new IOException("The project root file changed before it could be hashed.");
+
+		using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+		var buffer = ArrayPool<byte>.Shared.Rent(16 * 1024);
+		try
+		{
+			var remaining = expectedLength;
+			while (remaining > 0)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				var readSize = (int)Math.Min(buffer.Length, remaining);
+				var read = stream.Read(buffer, 0, readSize);
+				if (read == 0)
+					throw new IOException("The project root file changed while it was being hashed.");
+				hash.AppendData(buffer, 0, read);
+				remaining -= read;
+			}
+
+			cancellationToken.ThrowIfCancellationRequested();
+			if (stream.Read(buffer, 0, 1) != 0 || stream.Length != expectedLength)
+				throw new IOException("The project root file changed while it was being hashed.");
+			return Convert.ToHexString(hash.GetHashAndReset());
+		}
+		finally
+		{
+			ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
+		}
 	}
 
 	private static bool TryNormalizePath(string path, out string normalizedPath)
 	{
 		try
 		{
-			normalizedPath = Path.GetFullPath(path);
+			normalizedPath = PathUtility.Normalize(path);
 			return true;
 		}
 		catch
@@ -348,22 +500,7 @@ public sealed class ProjectRootFactsProvider
 	}
 
 	private static bool IsSameOrDescendantPath(string candidatePath, string rootPath)
-	{
-		if (PathComparer.Default.Equals(candidatePath, rootPath))
-			return true;
-		if (!candidatePath.StartsWith(rootPath, PathComparison))
-			return false;
-
-		return candidatePath.Length > rootPath.Length &&
-		       IsDirectorySeparator(candidatePath[rootPath.Length]);
-	}
-
-	private static bool IsDirectorySeparator(char value) =>
-		value == Path.DirectorySeparatorChar || value == Path.AltDirectorySeparatorChar;
-
-	private static StringComparison PathComparison => OperatingSystem.IsWindows()
-		? StringComparison.OrdinalIgnoreCase
-		: StringComparison.Ordinal;
+		=> PathUtility.IsPathInside(candidatePath, rootPath);
 
 	private readonly record struct ProjectRootEntry(
 		string Name,
@@ -373,3 +510,7 @@ public sealed class ProjectRootFactsProvider
 
 	private sealed record CacheEntry(string Path, DateTime CachedAtUtc, ProjectRootFacts Facts);
 }
+
+internal readonly record struct ProjectRootFileContentSnapshot(
+	ProjectRootFileSignature Signature,
+	GitIgnoreFileContent Source);

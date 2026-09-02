@@ -1,6 +1,7 @@
 using System.Text.Json;
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.DesktopControl;
+using DevProjex.Terminal.Rendering;
 
 namespace DevProjex.Terminal.Execution;
 
@@ -8,7 +9,9 @@ public sealed class DesktopCommandHandler(
 	ITerminalEnvironment environment,
 	DesktopControlClient? client = null,
 	DesktopProcessLauncher? launcher = null,
-	bool writeOutput = true)
+	bool writeOutput = true,
+	LocalizationService? localization = null,
+	TimeProvider? timeProvider = null)
 {
 	private static readonly JsonSerializerOptions MachineJsonOptions = new()
 	{
@@ -18,10 +21,21 @@ public sealed class DesktopCommandHandler(
 
 	private readonly DesktopControlClient _client = client ?? new DesktopControlClient();
 	private readonly DesktopProcessLauncher _launcher = launcher ?? new DesktopProcessLauncher();
+	private readonly LocalizationService _localization = localization ??
+		new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);
+	private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+
+	public Task<int> ListAsync(bool json, CancellationToken cancellationToken) =>
+		ListAsync(
+			json,
+			new TerminalOutputOptions(),
+			TimeSpan.FromSeconds(10),
+			cancellationToken);
 
 	public async Task<int> OpenAsync(
 		DesktopOpenRequest request,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		string? repositoryUrlSource = null)
 	{
 		if (request.NewWindow)
 		{
@@ -39,7 +53,7 @@ public sealed class DesktopCommandHandler(
 				DesktopInstanceRegistry.TryDelete(launched.RequestPath);
 				throw;
 			}
-			WriteOutput(ResolveAcceptedProjectPath(request, state));
+			WriteOutput(ResolveAcceptedProjectPath(request, state, repositoryUrlSource));
 			return CommandLineExitCodes.Success;
 		}
 
@@ -68,7 +82,7 @@ public sealed class DesktopCommandHandler(
 				DesktopInstanceRegistry.TryDelete(launched.RequestPath);
 				throw;
 			}
-			WriteOutput(ResolveAcceptedProjectPath(request, state));
+			WriteOutput(ResolveAcceptedProjectPath(request, state, repositoryUrlSource));
 			return CommandLineExitCodes.Success;
 		}
 
@@ -79,13 +93,19 @@ public sealed class DesktopCommandHandler(
 			request.WaitForCompletion ? TimeSpan.FromMinutes(2) : TimeSpan.FromSeconds(10),
 			cancellationToken).ConfigureAwait(false);
 		EnsureSuccess(response);
-		WriteOutput(ResolveAcceptedProjectPath(request, response.State));
+		WriteOutput(ResolveAcceptedProjectPath(request, response.State, repositoryUrlSource));
 		return CommandLineExitCodes.Success;
 	}
 
-	public async Task<int> ListAsync(bool json, CancellationToken cancellationToken)
+	public async Task<int> ListAsync(
+		bool json,
+		TerminalOutputOptions outputOptions,
+		TimeSpan timeout,
+		CancellationToken cancellationToken)
 	{
-		var instances = await _client.ListAsync(cancellationToken).ConfigureAwait(false);
+		var instances = await _client.ListAsync(cancellationToken)
+			.WaitAsync(timeout, cancellationToken)
+			.ConfigureAwait(false);
 		if (json)
 		{
 			environment.Output.WriteLine(JsonSerializer.Serialize(
@@ -109,12 +129,45 @@ public sealed class DesktopCommandHandler(
 		}
 		else
 		{
-			foreach (var instance in instances)
-				environment.Output.WriteLine($"{instance.InstanceId}\t{instance.ProcessId}\t{instance.ProjectPath ?? "-"}");
+			if (instances.Count == 0)
+			{
+				environment.Error.WriteLine(_localization["Terminal.Ui.NoInstances"]);
+				return CommandLineExitCodes.Success;
+			}
+			foreach (var line in FormatTextInstances(instances, outputOptions))
+				environment.Output.WriteLine(line);
 		}
 
 		return CommandLineExitCodes.Success;
 	}
+
+	internal static string FormatTextInstance(DesktopInstanceRegistration instance) =>
+		TerminalColumnLayout.Format([
+			[
+				TerminalTextEscaping.EscapeSingleLine(instance.InstanceId),
+				instance.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+				TerminalTextEscaping.EscapeSingleLine(instance.ProjectPath ?? "-")
+			]
+		])[0];
+
+	private IReadOnlyList<string> FormatTextInstances(
+		IReadOnlyList<DesktopInstanceRegistration> instances,
+		TerminalOutputOptions outputOptions) =>
+		TerminalColumnLayout.FormatForOutput(
+			instances.Select(static instance => new[]
+			{
+				TerminalTextEscaping.EscapeSingleLine(instance.InstanceId),
+				instance.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture),
+				TerminalTextEscaping.EscapeSingleLine(instance.ProjectPath ?? "-")
+			}).ToArray(),
+			[
+				_localization["Terminal.Table.Instance"],
+				"PID",
+				_localization["Terminal.Tui.Recent.Path"]
+			],
+			environment,
+			outputOptions,
+			truncationColumn: 2);
 
 	public async Task<int> SendAsync(
 		DesktopTarget target,
@@ -171,18 +224,19 @@ public sealed class DesktopCommandHandler(
 	}
 
 	private static string? NormalizeMachinePath(string? path) =>
-		path?.Replace('\\', '/');
+		path is null ? null : MachinePathPresentation.Normalize(path);
 
 	private async Task<IReadOnlyDictionary<string, object?>?> WaitForLaunchedInstanceAsync(
 		int processId,
 		DesktopOpenRequest request,
 		CancellationToken cancellationToken)
 	{
-		var deadline = DateTimeOffset.UtcNow + (
+		var timeout =
 			request.WaitForCompletion
 				? TimeSpan.FromMinutes(2)
-				: TimeSpan.FromSeconds(10));
-		while (DateTimeOffset.UtcNow < deadline)
+				: TimeSpan.FromSeconds(10);
+		var startedAt = _timeProvider.GetTimestamp();
+		while (IsWithinLaunchWaitWindow(_timeProvider, startedAt, timeout))
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			var instances = await _client.ListAsync(cancellationToken).ConfigureAwait(false);
@@ -203,7 +257,7 @@ public sealed class DesktopCommandHandler(
 						"DevProjex Desktop could not apply the startup request.");
 				}
 				if (!request.WaitForCompletion &&
-				    request.Selection?.GitMode != GitFilteringMode.TrackedFilesOnly &&
+				    !DesktopOpenReadiness.RequiresGitReadiness(request.Selection?.GitMode) &&
 				    (!request.UseLastProject ||
 				     DesktopOpenReadiness.TryGetProjectPath(response.State, out _)))
 				{
@@ -221,10 +275,19 @@ public sealed class DesktopCommandHandler(
 			"DevProjex Desktop did not become ready before the timeout.");
 	}
 
+	internal static bool IsWithinLaunchWaitWindow(
+		TimeProvider timeProvider,
+		long startedAt,
+		TimeSpan timeout) =>
+		timeProvider.GetElapsedTime(startedAt) < timeout;
+
 	private static string ResolveAcceptedProjectPath(
 		DesktopOpenRequest request,
-		IReadOnlyDictionary<string, object?>? state)
+		IReadOnlyDictionary<string, object?>? state,
+		string? repositoryUrlSource)
 	{
+		if (!string.IsNullOrWhiteSpace(repositoryUrlSource))
+			return repositoryUrlSource;
 		if (!string.IsNullOrWhiteSpace(request.ProjectPath))
 			return PathUtility.Normalize(request.ProjectPath);
 		if (DesktopOpenReadiness.TryGetProjectPath(state, out var projectPath))
@@ -238,7 +301,7 @@ public sealed class DesktopCommandHandler(
 	private void WriteOutput(string value)
 	{
 		if (writeOutput)
-			environment.Output.WriteLine(value);
+			TerminalTextEscaping.WriteSingleLine(environment.Output, value);
 	}
 
 	private static DesktopInstanceRegistration? FindSuitableInstance(
@@ -318,7 +381,7 @@ internal static class DesktopOpenReadiness
 			return false;
 		if (request.Selection?.GitMode is { } gitMode &&
 		    (!StringEquals(state, "gitMode", ToToken(gitMode)) ||
-		     (gitMode == GitFilteringMode.TrackedFilesOnly &&
+		     (RequiresGitReadiness(gitMode) &&
 		      !ReadBoolean(state, "trackedGitReady"))))
 		{
 			return false;
@@ -418,6 +481,13 @@ internal static class DesktopOpenReadiness
 		GitFilteringMode.None => "none",
 		GitFilteringMode.RespectGitIgnore => "gitignore",
 		GitFilteringMode.TrackedFilesOnly => "tracked",
+		GitFilteringMode.Staged => "staged",
+		GitFilteringMode.Changes => "changes",
 		_ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null)
 	};
+
+	internal static bool RequiresGitReadiness(GitFilteringMode? mode) =>
+		mode is GitFilteringMode.TrackedFilesOnly or
+			GitFilteringMode.Staged or
+			GitFilteringMode.Changes;
 }

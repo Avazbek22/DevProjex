@@ -1,7 +1,7 @@
 ## 1) Cos’è e a cosa serve
 DevProjex prepara rapidamente il contesto del progetto: mostra la struttura di cartelle/file, permette di selezionare gli elementi e copiare l’albero e/o il contenuto dei file negli appunti. Utile per code review, supporto, formazione e condivisione della struttura con un assistente AI.
 
-Importante: l’app è solo in lettura e non modifica i file.
+Importante: DevProjex non modifica i file del progetto aperto.
 
 ## 2) Albero del progetto
 * Icone per tipo file/cartella.
@@ -11,11 +11,22 @@ Importante: l’app è solo in lettura e non modifica i file.
 Checkbox: la selezione di un nodo si applica ai figli; lo stato dei genitori è ricalcolato automaticamente.
 
 Scorciatoie:
-* Ctrl+E — espandi tutto
-* Ctrl+W — comprimi tutto (la radice resta aperta)
+* {mod}E — espandi tutto
+* {collapseAll} — comprimi tutto (la radice resta aperta)
+
+### Menu contestuale
+Clic destro su un nodo — oppure {shift}F10 / tasto Menu sul nodo selezionato:
+* Mostra in Esplora file / Mostra nel Finder / Apri nel gestore file — mostra l’elemento nel gestore file di sistema; l’etichetta dipende dalla piattaforma.
+* Copia percorso completo — il percorso assoluto dell’elemento.
+* Copia percorso relativo — il percorso dalla radice del progetto, che inizia con il nome della cartella radice, ad esempio `project/src/File.cs`.
+* Copia contenuto — per i file: copia il contenuto con le trasformazioni applicate, esattamente come copia ed esportazione.
+* Seleziona solo questo elemento — spunta solo questo nodo e azzera il resto della selezione; appare solo finché è spuntato anche un altro elemento.
+* Espandi ramo / Comprimi ramo — per le cartelle.
+
+Se il percorso non esiste più sul disco, l’apertura nel gestore file e la copia del contenuto mostrano un messaggio di errore; la copia dei percorsi continua a funzionare.
 
 ## 3) File
-* Apri cartella… — apri la cartella radice (Ctrl+O)
+* Apri cartella… — apri la cartella radice ({mod}O)
 * Nuova finestra — apri una nuova istanza indipendente di DevProjex
 * Recenti — elenco delle cartelle locali aperte di recente
 * Aggiorna — rileggi una cartella locale e ricostruisci l’albero (F5)
@@ -29,7 +40,7 @@ Scorciatoie:
 
 L’esportazione del progetto crea una cartella separata o un archivio ZIP dall’albero corrente, mantenendo la struttura delle directory.
 
-Vengono rispettati le cartelle di primo livello, i tipi di file, le regole di esclusione e gli elementi selezionati. Se non è selezionato nulla, viene esportato l’intero albero corrente.
+Vengono rispettati i tipi di file, le regole di esclusione e gli elementi selezionati. Se non è selezionato nulla, viene esportato l’intero albero corrente.
 
 Vengono copiati i file di testo e binari e conservate le cartelle vuote incluse. I file di origine non vengono modificati. Il risultato non può essere salvato all’interno del progetto di origine.
 
@@ -63,7 +74,7 @@ Regole:
 * nell’elenco vengono aggiunte solo cartelle locali;
 * i repository Git clonati tramite DevProjex non vengono aggiunti a questo elenco;
 * non vengono creati duplicati — riaprire la stessa cartella la sposta in cima;
-* vengono conservate fino a 15 cartelle recenti;
+* vengono conservate fino a 32 cartelle recenti;
 * la cronologia viene mantenuta tra gli avvii dell’applicazione.
 
 Per ogni elemento vengono mostrati la cartella padre e il nome del progetto, ad esempio `Projects / App`.
@@ -74,23 +85,30 @@ DevProjex offre uno spazio di lavoro interattivo nel terminale e comandi diretti
 Se il comando è già configurato, apri un terminale ed esegui:
 `devprojex --help`
 
-Così vedrai tutti i comandi, le opzioni e gli esempi disponibili.
+Così vedrai i comandi e le opzioni di primo livello. Le opzioni e gli esempi di un singolo comando si mostrano con `devprojex help <command>`.
 
 Esempi:
-* `devprojex` — aprire lo spazio di lavoro interattivo del terminale.
+* `devprojex` — aprire lo spazio di lavoro interattivo del terminale. All’interno dello spazio di lavoro, le azioni si eseguono tramite la riga di comando `:` (ad esempio `:copy`, `:analyze`, `:branch`, `:language`); l’elenco completo dei comandi è disponibile nella guida integrata dello spazio di lavoro e nella documentazione del progetto.
+* `devprojex tui .` — aprire la cartella indicata direttamente nello spazio di lavoro del terminale.
 * `devprojex open . --preview` — aprire la cartella corrente nell’anteprima Desktop.
 * `devprojex analyze . --format json` — analizzare il progetto corrente in formato JSON.
+* `devprojex tree .` — stampare l’albero del progetto nel terminale.
 * `devprojex export context . --format markdown -o ../devprojex-context.md` — salvare un contesto pronto per l’IA fuori dal progetto sorgente.
 * `devprojex export project . --as folder -o ../devprojex-submission` — esportare l’albero effettivo in una cartella esatta.
 * `devprojex export project . --as zip -o ../devprojex-submission.zip` — esportare l’albero effettivo in un archivio ZIP.
+* `devprojex export context https://github.com/owner/repo -o -` — impacchettare un repository remoto senza clonarlo manualmente.
 * `devprojex analyze . --git-mode tracked --exclude smart-ignore` — analizzare i file tracciati da Git con Smart Ignore.
+* `devprojex mcp --root .` — avviare il server MCP locale in sola lettura perché gli agenti IA leggano il progetto in sicurezza.
 
 Note:
 * `.` indica la cartella corrente del terminale;
 * i percorsi con spazi devono essere racchiusi tra virgolette;
-* `--git-mode` seleziona nessun filtro Git, `.gitignore` o solo i file tracciati da Git;
+* `--git-mode` seleziona `none`, `gitignore`, `tracked`, `staged`, `changes` o `diff:<ref>..<ref>`;
 * `--exclude` gestisce le esclusioni ordinarie separatamente dal filtro Git;
-* i comandi diretti sono deterministici e non aprono l’interfaccia Desktop;
+* i comandi di analisi ed esportazione sono deterministici e non aprono l’interfaccia grafica;
+* `tui`, `open`, `analyze` ed entrambi i comandi `export` accettano anche l’URL di un repository Git; il clone finisce in una cache gestita (`devprojex cache`);
+* i comandi hanno alias e forme brevi documentati, ad esempio `export ctx`, `-f`, `-n`; `devprojex help` li mostra;
+* `analyze --findings` elenca i rilevamenti di mascheramento senza i loro valori, e `--fail-on-findings` restituisce un codice di uscita diverso da zero per la CI;
 * il comando non modifica i file del progetto — DevProjex lavora in sola lettura.
 
 Se il comando `devprojex` non funziona, apri in DevProjex:
@@ -109,10 +127,10 @@ Nella finestra Git Clone può comparire sotto il campo URL un elenco «Repositor
 
 Regole:
 * l’elenco appare solo se nella cronologia esistono già repository clonati di recente;
-* nell’elenco vengono aggiunti solo gli URL dei repository;
-* le cartelle locali non vengono aggiunte a questo elenco;
+* vengono aggiunte all’elenco solo le origini di repository di rete (`https://`, `http://`, `ssh://`, `git://` e la sintassi SCP);
+* i percorsi locali e le origini `file://` non vengono aggiunti a questo elenco;
 * non vengono creati duplicati — clonare di nuovo lo stesso repository lo sposta in cima;
-* vengono conservati fino a 7 repository recenti;
+* vengono conservati fino a 16 repository recenti;
 * la cronologia viene mantenuta tra gli avvii dell’applicazione.
 
 Se selezioni un elemento dall’elenco, l’URL viene inserito automaticamente nel campo di input.
@@ -141,22 +159,23 @@ Il selettore non influisce su:
 Copia l’albero del progetto.
 Se ci sono nodi selezionati, l’albero è costruito dalla selezione; se la selezione è vuota o non valida, viene copiato l’albero completo.
 Il formato del risultato è definito dal selettore formato albero.
-Scorciatoie: Ctrl+Shift+C e Ctrl+Alt+C.
+Scorciatoie: {mod}{shift}C e {mod}{alt}C.
 
 ### Copia contenuto
 Copia il contenuto dei file:
 * se ci sono file selezionati — solo quelli; altrimenti — tutti i file del progetto;
+* ogni file è preceduto da un’intestazione con il suo percorso locale completo (per i progetti Git Clone — il percorso web del repository);
 * i file non testuali vengono ignorati (inclusi i binari);
 * per i file di testo vuoti vengono riportati il percorso e la riga `[No Content, 0 bytes]`;
 * per i file composti solo da spazi/ritorni a capo vengono riportati il percorso e la riga `[Whitespace, N bytes]`.
-Scorciatoia: Ctrl+Alt+V.
+Scorciatoia: {mod}{alt}V.
 
 ### Copia albero + contenuto
 Combina albero e contenuto:
 * albero dalla selezione; se la selezione è vuota o non valida, viene usato l’albero completo;
 * contenuto secondo le stesse regole di «Copia contenuto»;
 * il formato del blocco albero è definito dal selettore formato albero.
-Scorciatoia: Ctrl+Shift+V.
+Scorciatoia: {mod}{shift}V.
 
 ### Rappresentazioni dell’albero
 I formati albero rappresentano in modi diversi lo stesso albero di progetto selezionato.
@@ -183,7 +202,11 @@ Albero + contenuto:
 * esportazione in `.txt`.
 
 ## 7) Modalità anteprima
-Si apre con il pulsante con icona a forma di occhio nella barra superiore o con Ctrl+B.
+Si apre con il pulsante con icona a forma di occhio nella barra superiore o con {mod}B.
+
+I pulsanti laterali del mouse seguono la navigazione del browser: Avanti apre la modalità anteprima, Indietro la chiude. Ripetere la direzione già attiva non produce effetti.
+
+{mod}{shift}F apre o chiude la ricerca nel contenuto dei file dell’anteprima. Enter o F3 passa al risultato successivo; {shift}Enter o {shift}F3 a quello precedente.
 
 Mostra il risultato finale in un’area di lavoro separata accanto all’albero. Questa modalità non copia nulla negli appunti e non esporta nulla su file: serve solo per la visualizzazione.
 
@@ -204,7 +227,8 @@ Si applicano le stesse regole della copia e dell’esportazione:
 
 Inoltre:
 * i file nell’anteprima sono separati da linee orizzontali;
-* durante lo scorrimento, il percorso del file corrente resta fissato in alto;
+* durante lo scorrimento, il percorso del file corrente resta fissato in alto; un clic sul percorso fissato scorre all’inizio di quel file;
+* la barra di scorrimento dell’anteprima marca le corrispondenze di ricerca e le righe con valori rilevati; un clic su un segno salta alla sua riga; un valore conservato resta marcato, e i percorsi mascherati nelle intestazioni danno un solo segno alla loro prima riga;
 * lo zoom dell’albero e quello dell’anteprima possono vivere separatamente.
 * nella modalità anteprima puoi copiare sia il risultato completo corrente sia il blocco del file attualmente visibile senza aprire il menu «Copia».
 
@@ -216,22 +240,22 @@ Pulsanti:
 * X nel pannello dell’albero — nasconde l’albero e lascia solo il pannello di anteprima;
 * X nella barra superiore dell’anteprima — chiude completamente la modalità anteprima;
 * piccolo pulsante di copia nell’intestazione fissata del file — copia il blocco del file attualmente visibile esattamente come appare nell’anteprima;
-* anche premere di nuovo l’icona occhio o Ctrl+B chiude la modalità anteprima.
+* anche premere di nuovo l’icona occhio o {mod}B chiude la modalità anteprima.
 
 Ricerca e filtro restano disponibili finché nell’anteprima è visibile il pannello dell’albero.
 Se l’albero è nascosto, ricerca e filtro diventano temporaneamente non disponibili fino all’uscita dalla modalità solo anteprima.
 
 ## 8) Visualizza
 ### Zoom
-* Ctrl++ / Ctrl+= — aumenta
-* Ctrl+- — riduci
-* Ctrl+0 — reset
-* Ctrl + rotellina — zoom fluido nel pannello sotto il cursore
+* {mod}+ / {mod}= — aumenta
+* {mod}- — riduci
+* {mod}0 — reset
+* {mod}rotellina — zoom fluido nel pannello sotto il cursore
 
 Comportamento:
 * in modalità normale viene scalato l’albero;
 * in anteprima con l’albero visibile, Aumenta, Riduci e Reset dal menu si applicano contemporaneamente all’albero e all’anteprima;
-* con Ctrl + rotellina, albero e anteprima scalano in modo indipendente in base alla posizione del cursore;
+* con {mod}rotellina, albero e anteprima scalano in modo indipendente in base alla posizione del cursore;
 * in modalità solo anteprima viene scalato solo il pannello di anteprima.
 
 Intervallo: 6–28, reset: 15.
@@ -240,8 +264,8 @@ Intervallo: 6–28, reset: 15.
 Rende l'interfaccia più densa: spazi più piccoli nell'albero e nelle impostazioni.
 Quando l’area di lavoro di anteprima è attiva, la modalità compatta viene abilitata automaticamente.
 
-### Animazione di espansione dell’albero
-Ruota dolcemente la freccia ed espande o comprime un ramo spostando le righe adiacenti. È attiva per impostazione predefinita; se disattivata, l’espansione è immediata.
+### Animazioni
+«Visualizza → Animazioni» consente di controllare separatamente l’espansione dell’albero, i contatori di stato e la comparsa iniziale degli strumenti. Tutte e tre le animazioni sono attive per impostazione predefinita; disattivandone una, viene mostrato subito il suo stato finale.
 
 ### Font albero
 Il font dell’albero si sceglie da « Visualizza → Font albero ».
@@ -250,12 +274,13 @@ Il font scelto viene applicato dopo aver premuto « Applica » nel pannello impo
 
 ## 9) Ricerca nell'albero
 Apre la ricerca, evidenzia le corrispondenze e permette la navigazione.
-* Ctrl+F — mostra/nascondi
+* {mod}F — mostra/nascondi
 * Enter — risultato successivo
-* Shift+Enter — precedente
+* {shift}Enter — precedente
 * Esc — chiudi
 
 La ricerca apre solo i rami necessari; svuotando la query l’albero si richiude (tranne la radice).
+Le righe delle corrispondenze sono marcate anche sulla barra di scorrimento dell’albero; un clic su un segno salta a quella corrispondenza.
 Con un numero molto elevato di corrispondenze, l’app può limitare l’espansione automatica e l’evidenziazione globale per mantenere l’interfaccia reattiva.
 Alla chiusura della ricerca, la query viene svuotata dopo il completamento dell’animazione di chiusura.
 
@@ -266,7 +291,7 @@ Limitazioni:
 
 ## 10) Filtra per nome
 Mostra solo i nodi che corrispondono al filtro e i loro genitori. Aggiornamento con debounce.
-* Ctrl+Shift+N — mostra/nascondi filtro
+* {mod}{shift}N — mostra/nascondi filtro
 * Esc — chiudi filtro
 
 Limitazioni:
@@ -277,11 +302,11 @@ Limitazioni:
 ## 11) Opzioni
 A destra sono disponibili:
 * Applica
+* Elaborazione contenuti
 * Esclusioni
 * Tipi di file
-* Cartelle di primo livello
 
-Le modifiche in « Esclusioni », « Tipi di file » e « Cartelle di primo livello » vengono preparate nel pannello e applicate dopo aver premuto « Applica ».
+Le modifiche in « Esclusioni » e « Tipi di file » vengono preparate nel pannello e applicate dopo aver premuto « Applica ».
 
 Dopo la modifica di una casella, l’app può aggiornare in background le opzioni disponibili e i relativi contatori. L’albero risultante viene ricostruito solo dopo aver premuto « Applica ».
 
@@ -293,11 +318,18 @@ Nota su « Tipi di file »:
 * in questa lista vengono mostrati solo file con estensione;
 * i file senza estensione non vengono aggiunti a questa lista e sono gestiti da un’opzione separata in « Esclusioni ».
 
-Ctrl+P — mostra/nascondi pannello.
+Elaborazione contenuti:
+* questa sezione trasforma il contenuto dei file di testo selezionati senza modificare l’albero;
+* «Nascondi segreti» e «Nascondi dati privati» sostituiscono i valori rilevati (sezioni 12.3 e 12.4);
+* «Comprimi il codice» conserva le dichiarazioni e accorcia le implementazioni con nome in 14 linguaggi;
+* «Rimuovi commenti» elimina i commenti e i commenti di documentazione in 20 pacchetti di linguaggi;
+* «Rimuovi righe vuote» elimina le righe di soli spazi negli stessi pacchetti preservando i letterali multilinea;
+* le modifiche hanno effetto dopo «Applica».
+
+{mod}P — mostra/nascondi pannello.
 
 ### 11.1 Profili dei parametri dei progetti locali
 Per le cartelle locali, DevProjex memorizza gli ultimi parametri di progetto applicati:
-* cartelle di primo livello selezionate;
 * tipi di file selezionati;
 * opzioni selezionate nella sezione «Esclusioni».
 
@@ -308,18 +340,18 @@ Importante:
 * i profili vengono salvati solo per i progetti locali;
 * per i progetti aperti tramite Git Clone, i profili non vengono salvati;
 * se alcune opzioni salvate non sono più disponibili nel progetto corrente, vengono ignorate e gli altri parametri vengono applicati.
-* se l’aggiornamento o la riapertura mostra una nuova cartella di primo livello, un nuovo tipo di file o una nuova opzione in « Esclusioni », quel punto viene attivato per impostazione predefinita;
+* se l’aggiornamento o la riapertura mostra un nuovo tipo di file o una nuova opzione in « Esclusioni », quel punto viene attivato per impostazione predefinita;
 * i punti già noti mantengono la scelta esplicita dell’utente: nuovi file di un tipo disattivato non riattivano quel tipo.
 
 ## 12) Esclusioni
 La sezione «Esclusioni» controlla quali file e cartelle vengono esclusi dall’albero, dal contenuto, dalla copia e dall’esportazione.
 
-Un elemento viene mostrato solo se la cartella di primo livello e il tipo di file sono selezionati e nessuna regola attiva lo esclude. Le regole si sommano: se almeno una nasconde un elemento, un’altra non può renderlo visibile.
+Un elemento viene mostrato solo se il tipo di file è selezionato e nessuna regola attiva lo esclude. Le regole si sommano: se almeno una nasconde un elemento, un’altra non può renderlo visibile.
 
 ### 12.1 Regole disponibili
-In base al contenuto del progetto possono comparire Smart Ignore, «Usa .gitignore», «Solo file tracciati da Git», cartelle e file vuoti, nascosti o con punto iniziale e file senza estensione.
+Il selettore della GUI e le righe radio dell’asse Git nella TUI vengono nascosti completamente quando il filtro Git non è applicabile: non esiste un confine di repository e il filtro `.gitignore` non può modificare l’albero corrente. Quando l’asse è visibile fuori da un repository, la GUI offre solo nessun filtro e `.gitignore`, mentre la TUI disabilita le righe che richiedono un repository. In un repository Git sono disponibili i cinque valori normali: nessun filtro, `.gitignore`, file tracciati, file in staging e tutte le modifiche correnti; nella TUI, un ambito `diff:<ref>..<ref>` attivo compare come sesta riga. La scelta di un valore sostituisce la modalità Git corrente senza modificare Smart Ignore o le esclusioni di base. Le altre opzioni compaiono quando le relative regole possono cambiare l’albero corrente.
 
-In un repository Git, «Usa .gitignore» e «Solo file tracciati da Git» restano visibili come una coppia stabile. Le altre opzioni appaiono quando possono modificare l’albero corrente. L’elenco può quindi cambiare dopo la modifica di un’altra regola, di una cartella di primo livello o di un tipo di file. Una nuova opzione è attiva per impostazione predefinita alla prima comparsa; un’opzione già nota conserva la scelta dell’utente anche se scompare temporaneamente.
+Una nuova opzione è attiva per impostazione predefinita alla prima comparsa; un’opzione già nota conserva la scelta dell’utente anche se scompare temporaneamente.
 
 ### 12.2 Smart Ignore
 Smart Ignore nasconde dipendenze, risultati di build, cache e altri artefatti di servizio. DevProjex identifica il tipo di progetto dalla struttura e da file marker come `.csproj`, `package.json`, `pyproject.toml` o `Cargo.toml`. Le regole dello stack rilevato restano nell’area del progetto e non si estendono ai progetti vicini di un altro stack.
@@ -328,7 +360,23 @@ Per nomi ambigui come `build`, `vendor`, `packages`, `cache`, `pkg` o `Library` 
 
 La ricerca di nuove aree di progetto è limitata per evitare l’analisi ripetuta di ogni directory in una grande cartella utente. Le strutture normali usano una ricerca poco profonda, mentre i monorepo riconosciuti vengono esaminati più in profondità. Dopo il rilevamento, Smart Ignore si applica all’intero sottoalbero senza limite di profondità.
 
-### 12.3 Usa .gitignore
+### 12.3 Nascondi segreti
+«Nascondi segreti» è disattivato per impostazione predefinita. Analizza solo il testo selezionato e sostituisce ogni valore rilevato sul posto, conservando il file e il codice circostante. Quando è disattivato non viene eseguita alcuna scansione e non appare alcun contatore. Dopo la scansione della selezione corrente, l’etichetta mostra il numero di valori rilevati; se le decisioni «conserva» lasciano meno valori nascosti, mostra entrambi i numeri — rilevati/nascosti — e l’indicatore ? della riga li riporta in testo.
+
+Le corrispondenze sono evidenziate nell’anteprima. Fare clic su una di esse per conservare invariata solo quell’occorrenza; {alt}↓ / {alt}↑ scorrono i valori rilevati e Enter attiva o disattiva quello corrente. In Terminal Workspace, `[` e `]` scorrono le occorrenze e `Enter` o `Space` attivano o disattivano quella corrente. La decisione vale per la sessione in anteprima, appunti, esportazione del contesto, cartella e ZIP; non viene salvata nel profilo del progetto.
+
+Il menu contestuale dell’anteprima estende queste decisioni. Un clic destro su un’occorrenza rilevata consente di conservare — o nascondere di nuovo — in un’unica azione tutte le occorrenze della sua regola oppure tutte le occorrenze rilevate nello stesso file. Un clic destro su un valore selezionato nel contenuto di un file aggiunge un contrassegno manuale: «Nascondi … qui» nasconde solo quell’occorrenza per la sessione, «Nascondi sempre …» crea un contrassegno persistente per tutte le occorrenze del valore, e «Nascondi … come dato privato» crea un contrassegno persistente controllato da «Nascondi dati privati». «Rimuovi contrassegno» appare su un contrassegno manuale e lo elimina; un valore ancora riconosciuto dal rilevatore resta nascosto. Il valore manuale è una singola riga da 8 a 512 caratteri selezionata nel contenuto del file. La creazione di un contrassegno attiva automaticamente l’opzione corrispondente. I contrassegni persistenti conservano solo un’identità del valore con chiave e la sua classe, mai il testo originale.
+
+Anche una copia in cartella o ZIP modifica il testo corrispondente e potrebbe non compilarsi o avviarsi. I file binari non vengono analizzati e sono copiati senza modifiche. Un file di testo selezionato oltre 16 MiB viene omesso e segnalato, mentre il resto dell’output viene completato. Un errore di rilevamento interrompe l’intera operazione.
+
+Il contatore segnala soltanto le corrispondenze con le regole. Zero non significa che il progetto sia sicuro. La CLI usa `--hide-secrets`; i dettagli sono in `Docs/HideSecrets.md`.
+
+### 12.4 Nascondi dati privati
+«Nascondi dati privati» è disattivato per impostazione predefinita. Rileva indirizzi e-mail, indirizzi IP globali, nomi utente locali nei percorsi, indirizzi MAC e numeri di telefono internazionali nei file di testo selezionati. I risultati usano le stesse decisioni dell’anteprima e la stessa pipeline di output di Nascondi segreti; i contrassegni manuali creati con «Nascondi … come dato privato» appartengono a questa classe e seguono questa opzione (sezione 12.3). I nomi utente locali nelle intestazioni dei percorsi generati e nella radice dell’albero sono mascherati come un’unica scoperta condivisa: il contatore la conta come un valore, l’indicatore ? riporta se è nascosta o visibile, e un clic commuta tutti i percorsi mascherati insieme.
+
+Gli intervalli e gli host di documentazione, i comuni utenti CI, i resolver DNS pubblici noti e i numeri fittizi documentati rimangono visibili. Zero corrispondenze non garantisce la riservatezza. La CLI usa `--hide-private-data`; le regole complete e i limiti della prima fase sono in `Docs/HidePrivateData.md`.
+
+### 12.5 Usa .gitignore
 Quando è attiva, l’opzione applica ogni `.gitignore` raggiungibile, non solo quello nella radice. Ogni file agisce sulla cartella che lo contiene e su tutte le sottocartelle accessibili, ma non sulle cartelle superiori o adiacenti.
 
 Per un percorso, le regole vengono valutate dal `.gitignore` padre verso quelli più profondi; nello stesso file, dall’alto verso il basso. L’ultima regola corrispondente determina il risultato Git.
@@ -341,46 +389,45 @@ Un collegamento simbolico denominato `.gitignore` non viene seguito, in conformi
 
 Il profilo integrato `standard` seleziona `gitignore` e tutti gli otto gruppi di esclusione: `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` e `extensionless-files`.
 
-### 12.4 Solo file tracciati da Git
+### 12.6 Solo file tracciati da Git
 «Solo file tracciati da Git» costruisce la fase Git dell’albero dai file esistenti nell’albero di lavoro registrati in ogni indice Git leggibile. I file tracciati modificati e i nuovi file aggiunti all’indice restano inclusi; i file non tracciati vengono esclusi. Questo è l’albero di lavoro corrente, non un’istantanea storica di `HEAD` o di un repository remoto.
 
 Ogni repository annidato e ogni worktree raggiungibile vengono elaborati in modo indipendente a qualsiasi livello di annidamento raggiungibile. Un repository figlio non eredita i percorsi tracciati dal repository padre o da uno adiacente. Questa modalità richiede la CLI di Git; un indice vuoto ma leggibile è valido. Se lo spazio di lavoro del terminale (TUI) viene avviato in questa modalità e non è possibile caricare alcun indice applicabile, lo spazio di lavoro non viene aperto. Se la modalità viene selezionata interattivamente in uno spazio di lavoro TUI già aperto e non è possibile caricare alcun indice applicabile, la modifica viene rifiutata e resta attiva l’ultima modalità Git utilizzabile. Nella stessa situazione, i comandi diretti terminano con un errore di criterio o di verifica. DevProjex non passa mai silenziosamente a `.gitignore`. Quando è leggibile un altro indice applicabile, gli ambiti annidati non disponibili vengono esclusi con un avviso.
 
 In uno spazio di lavoro Desktop già aperto, la selezione esplicita resta visibile e fallisce in modo sicuro: output ed esportazione vengono bloccati se la verifica non riesce, mentre una disponibilità parziale consente di continuare con un avviso localizzato.
 
-«Usa .gitignore» e «Solo file tracciati da Git» si escludono a vicenda: l’attivazione di uno disattiva l’altro. Nei progetti locali che supportano i profili, la modalità scelta viene salvata insieme alle cartelle di primo livello, ai tipi di file e alle altre regole di esclusione.
+Le modalità Git si escludono a vicenda; `none` disattiva il filtro Git. Le modalità temporanee `staged`, `changes` e `diff:<ref>..<ref>` non vengono salvate nei profili. Quando una modalità temporanea è attiva, il profilo locale del progetto della GUI conserva l’ultima modalità persistente abilitata, `gitignore` o `tracked`. `none` viene salvata solo se è attiva al momento del salvataggio. La TUI e la CLI rifiutano di salvare un profilo portabile mentre è attiva una modalità temporanea.
 
-### 12.5 Relazione tra il filtro Git e Smart Ignore
-La modalità Git selezionata e Smart Ignore sono interruttori indipendenti. La modalità Git viene applicata per prima in ogni area Git raggiungibile, poi Smart Ignore elabora gli elementi rimasti e infine agiscono le regole di base.
+### 12.7 Relazione tra il filtro Git e Smart Ignore
+La modalità Git selezionata e Smart Ignore sono controllati in modo indipendente. La modalità Git viene applicata per prima in ogni area Git raggiungibile, poi Smart Ignore elabora gli elementi rimasti e infine agiscono le regole di base.
 
-Smart Ignore può restare nascosto finché la modalità Git selezionata copre già tutti i suoi candidati e comparire dopo un cambio di modalità. In un repository Git, le due modalità Git restano visibili come una coppia stabile.
+Smart Ignore può restare nascosto finché la modalità Git selezionata copre già tutti i suoi candidati e comparire dopo un cambio o la disattivazione della modalità. In un repository Git restano disponibili tutte le modalità che dipendono dal repository.
 
 Una negazione Git con `!` annulla solo il risultato Git. Non disattiva Smart Ignore né una regola di base.
 
-### 12.6 Regole di base
+### 12.8 Regole di base
 Le regole per il punto iniziale controllano il nome; quelle per gli elementi nascosti controllano l’attributo di sistema Hidden. A seconda della piattaforma possono riguardare lo stesso elemento oppure elementi diversi.
 
 «File vuoti» nasconde i file di 0 byte. «File senza estensione» nasconde, ad esempio, `Dockerfile`, `Makefile` e `README`.
 
 «Cartelle vuote» nasconde le cartelle logicamente vuote. Una cartella è logicamente vuota quando, dopo i tipi di file selezionati e tutte le altre regole, non rimangono file o sottocartelle visibili. Il relativo contatore può quindi cambiare quando viene modificata un’altra regola.
 
-### 12.7 Contatori
+### 12.9 Contatori
 Un contatore mostra il contributo diretto della regola con le impostazioni correnti, non il numero fisico di elementi simili sul disco. Lo stesso elemento non viene attribuito contemporaneamente a più contatori sovrapposti.
 
 L’ordine stabile di attribuzione è: per le cartelle, `.gitignore`, Smart Ignore, punto iniziale, attributo Hidden; per i file, `.gitignore`, Smart Ignore, punto iniziale, nessuna estensione, file vuoto, attributo Hidden. Questo ordine riguarda solo i contatori. Per la visibilità è sufficiente che un qualsiasi meccanismo attivo escluda l’elemento.
 
-### 12.8 Applicazione delle modifiche
+### 12.10 Applicazione delle modifiche
 Le caselle aggiornano prima le opzioni disponibili e i contatori. L’albero finale viene ricostruito dopo «Applica impostazioni». Se la preparazione viene annullata, DevProjex torna all’ultimo stato completato; le regole calcolate solo in parte non vengono applicate.
 
 ## 13) Come vengono calcolati albero e metriche
 Il risultato dipende da:
-* cartelle di primo livello selezionate
 * tipi di file selezionati
 * regole di esclusione
 * filtro attivo
 * nodi selezionati con checkbox nell’albero (per operazioni basate sulla selezione)
 
-Se l’accesso è negato, il nodo è marcato Accesso negato.
+Se l’accesso è negato, il nodo mantiene il nome e l’icona abituali e riceve il suffisso «[accesso negato]».
 
 ### 13.1 Cosa mostrano i contatori nella barra di stato
 La barra di stato contiene due blocchi:
@@ -449,13 +496,14 @@ In modalità Trasparenza, lo sfondo della finestra principale rimane trasparente
 «Aiuto → Aggiornamenti» confronta la versione corrente con l’ultima versione stabile pubblicata su GitHub. I controlli automatici sono disattivati per impostazione predefinita; se attivati, DevProjex controlla all’avvio quando sono trascorsi almeno sette giorni dall’ultimo controllo riuscito. La casella di controllo viene applicata immediatamente. L’ultimo risultato riuscito viene conservato tra le esecuzioni dell’applicazione e non viene cancellato da un successivo errore di rete. L’installazione resta un’azione dell’utente.
 
 ### 16.2 Ripristina impostazioni
-Ripristina impostazioni (Aiuto → Ripristina impostazioni) ripristina i valori predefiniti di tema, effetti, modalità compatta, animazione di espansione dell’albero e lingua dell’interfaccia. I profili dei progetti, la cronologia e i file sul disco non vengono modificati.
+Ripristina impostazioni (Aiuto → Ripristina impostazioni) ripristina i valori predefiniti di tema, effetti, modalità compatta, impostazioni delle animazioni e lingua dell’interfaccia. I profili dei progetti, la cronologia e i file sul disco non vengono modificati.
 
 ### 16.3 Ripristina dati
 Ripristina dati (Aiuto → Ripristina dati) rimuove i profili salvati dei parametri dei progetti locali:
-* cartelle di primo livello selezionate;
 * tipi di file selezionati;
-* opzioni selezionate nella sezione «Esclusioni».
+* opzioni selezionate nella sezione «Esclusioni»;
+* impostazioni selezionate per l'elaborazione dei contenuti;
+* contrassegni manuali dei segreti.
 
 Importante:
 * la cronologia «Recenti» delle cartelle locali non viene cancellata;

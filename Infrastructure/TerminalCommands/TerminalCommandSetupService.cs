@@ -1,4 +1,7 @@
+using System.Buffers;
 using System.Runtime.InteropServices;
+using DevProjex.Infrastructure.Persistence;
+using DevProjex.Infrastructure.Processes;
 
 namespace DevProjex.Infrastructure.TerminalCommands;
 
@@ -56,7 +59,11 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 	private const string WindowsEncodedTargetPrefix = "rem target-base64: ";
 	private const string WindowsPathHint =
 		"DevProjex will add its terminal launcher folder to your user PATH. Restart already-open terminal windows after enabling it.";
+	private const int MaximumManagedLauncherBytes = 64 * 1024;
+	private const int MaximumLauncherValidationOutputCharacters = 64 * 1024;
+	internal const int MaximumShellProfileBytes = 8 * 1024 * 1024;
 	private static readonly TimeSpan LauncherValidationTimeout = TimeSpan.FromSeconds(5);
+	private static readonly TimeSpan LauncherOutputDrainTimeout = TimeSpan.FromSeconds(2);
 	// Cover lock-free probes and writes within one process; the named mutex still protects separate processes.
 	private static readonly object ProcessSetupSync = new();
 
@@ -257,7 +264,10 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 			}
 
 			// A new foreign file must win the final race instead of being overwritten.
-			File.Move(tempPath, commandPath, overwrite: commandExistedBeforeReplacement);
+			CommitCommandFile(
+				tempPath,
+				commandPath,
+				commandExistedBeforeReplacement);
 			if (_options.Platform is TerminalCommandHostPlatform.Windows)
 				EnsureWindowsUserBinDirectoryIsInPath(initial.UserBinDirectory);
 			else
@@ -329,7 +339,8 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		if (!string.IsNullOrWhiteSpace(Environment.ProcessPath))
 			return Environment.ProcessPath;
 
-		return Process.GetCurrentProcess().MainModule?.FileName;
+		using var process = Process.GetCurrentProcess();
+		return process.MainModule?.FileName;
 	}
 
 	internal static string BuildWrapperContent(string targetPath)
@@ -531,8 +542,8 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 	{
 		try
 		{
-			return string.Equals(
-				ReadAllTextDuringAtomicReplacement(commandPath),
+			return TryReadManagedLauncher(commandPath, out var content) && string.Equals(
+				content,
 				BuildWindowsLauncherContent(targetPath),
 				StringComparison.Ordinal);
 		}
@@ -807,13 +818,9 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 	{
 		try
 		{
-			// Lock-free probes may read the previous complete launcher while a serialized writer atomically replaces it.
-			using var stream = new FileStream(
-				commandPath,
-				FileMode.Open,
-				FileAccess.Read,
-				FileShare.Read | FileShare.Delete);
-			using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+			if (!TryReadManagedLauncher(commandPath, out var content))
+				return new ManagedWrapperReadResult(ManagedWrapperReadStatus.Foreign, null);
+			using var reader = new StringReader(content);
 			var firstLine = reader.ReadLine();
 			var marker = firstLine;
 			var target = reader.ReadLine();
@@ -895,8 +902,8 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 	{
 		try
 		{
-			return string.Equals(
-				ReadAllTextDuringAtomicReplacement(commandPath),
+			return TryReadManagedLauncher(commandPath, out var content) && string.Equals(
+				content,
 				BuildWrapperContent(targetPath),
 				StringComparison.Ordinal);
 		}
@@ -910,7 +917,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		}
 	}
 
-	private static string ReadAllTextDuringAtomicReplacement(string path)
+	private static bool TryReadManagedLauncher(string path, out string content)
 	{
 		// Probes must not block the serialized writer from atomically replacing a complete launcher.
 		using var stream = new FileStream(
@@ -918,8 +925,35 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 			FileMode.Open,
 			FileAccess.Read,
 			FileShare.Read | FileShare.Delete);
-		using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
-		return reader.ReadToEnd();
+		return JsonStorePersistence.TryReadAllTextWithinSizeLimit(
+			stream,
+			MaximumManagedLauncherBytes,
+			out content);
+	}
+
+	private static void CommitCommandFile(
+		string temporaryPath,
+		string commandPath,
+		bool overwrite)
+	{
+		if (!overwrite || !File.Exists(commandPath))
+		{
+			File.Move(temporaryPath, commandPath, overwrite: false);
+			return;
+		}
+
+		try
+		{
+			File.Replace(temporaryPath, commandPath, destinationBackupFileName: null);
+		}
+		catch (FileNotFoundException) when (!File.Exists(commandPath))
+		{
+			File.Move(temporaryPath, commandPath, overwrite: false);
+		}
+		catch (NotSupportedException)
+		{
+			File.Move(temporaryPath, commandPath, overwrite: true);
+		}
 	}
 
 	private static bool HasUnixExecutableMode(string commandPath)
@@ -939,10 +973,10 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 
 	private bool IsDirectoryInPathValue(string directory, string? path)
 	{
-		if (string.IsNullOrWhiteSpace(path))
+		if (IsMissingPathValue(path))
 			return false;
 		var separator = _options.PathListSeparator ?? (_options.Platform == TerminalCommandHostPlatform.Windows ? ';' : ':');
-		foreach (var entry in path.Split(separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+		foreach (var entry in SplitPathEntries(path!, separator))
 		{
 			if (AreSameDirectory(entry, directory))
 				return true;
@@ -961,11 +995,11 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 
 	private string? FindFirstUnixCommand(string? path, string managedDirectory)
 	{
-		if (string.IsNullOrWhiteSpace(path))
+		if (IsMissingPathValue(path))
 			return null;
 
 		var separator = _options.PathListSeparator ?? ':';
-		foreach (var entry in path.Split(separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+		foreach (var entry in SplitPathEntries(path!, separator))
 		{
 			var candidate = Path.Combine(NormalizePath(entry), CommandLineExecutableAliases.UnixCommand);
 			if (File.Exists(candidate) && HasUnixExecutableMode(candidate))
@@ -999,12 +1033,12 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 
 	private string? FindFirstWindowsCommand(string? path, string managedDirectory)
 	{
-		if (string.IsNullOrWhiteSpace(path))
+		if (IsMissingPathValue(path))
 			return null;
 
 		var separator = _options.PathListSeparator ?? ';';
 		var extensions = GetWindowsPathExtensions();
-		foreach (var entry in path.Split(separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+		foreach (var entry in SplitPathEntries(path!, separator))
 		{
 			var isManagedDirectory = AreSameDirectory(entry, managedDirectory);
 			// Use the known physical path after a Windows-semantic match so case-sensitive CI hosts do not probe a synthetic casing.
@@ -1054,7 +1088,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		var separator = _options.PathListSeparator ?? ';';
 		var entries = string.IsNullOrWhiteSpace(userPath)
 			? new List<string>()
-			: userPath.Split(separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+			: SplitPathEntries(userPath, separator).ToList();
 
 		for (var index = entries.Count - 1; index >= 0; index--)
 		{
@@ -1292,22 +1326,35 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 
 	private string NormalizePath(string value)
 	{
-		var trimmed = value.Trim();
+		var normalized = value;
 		if (_options.Platform == TerminalCommandHostPlatform.Windows)
-			trimmed = Environment.ExpandEnvironmentVariables(trimmed.Trim('"'));
-		trimmed = TrimTrailingDirectorySeparators(trimmed);
-		if (trimmed.Length == 0)
-			return trimmed;
+			normalized = Environment.ExpandEnvironmentVariables(normalized.Trim().Trim('"'));
+		normalized = TrimTrailingDirectorySeparators(normalized);
+		if (normalized.Length == 0)
+			return normalized;
 
 		try
 		{
-			return TrimTrailingDirectorySeparators(Path.GetFullPath(trimmed));
+			return TrimTrailingDirectorySeparators(Path.GetFullPath(normalized));
 		}
 		catch
 		{
-			return trimmed;
+			return normalized;
 		}
 	}
+
+	private IEnumerable<string> SplitPathEntries(string value, char separator)
+	{
+		var options = StringSplitOptions.RemoveEmptyEntries;
+		if (_options.Platform == TerminalCommandHostPlatform.Windows)
+			options |= StringSplitOptions.TrimEntries;
+		return value.Split(separator, options);
+	}
+
+	private bool IsMissingPathValue(string? value) =>
+		string.IsNullOrEmpty(value) ||
+		(_options.Platform == TerminalCommandHostPlatform.Windows &&
+		 string.IsNullOrWhiteSpace(value));
 
 	private string TrimTrailingDirectorySeparators(string value)
 	{
@@ -1389,6 +1436,9 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 	internal static TerminalCommandValidationResult ValidateLauncher(string commandPath, TimeSpan timeout)
 	{
 		Process? process = null;
+		CancellationTokenSource? outputCancellation = null;
+		Task<BoundedTextReadResult>? standardOutput = null;
+		Task<BoundedTextReadResult>? standardError = null;
 		try
 		{
 			var startInfo = CreateLauncherValidationStartInfo(commandPath);
@@ -1397,19 +1447,37 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 				return new TerminalCommandValidationResult(false, "The terminal launcher process could not be started.");
 			process.StandardInput.Close();
 
-			var standardOutput = process.StandardOutput.ReadToEndAsync();
-			var standardError = process.StandardError.ReadToEndAsync();
-			var completion = Task.WhenAll(process.WaitForExitAsync(), standardOutput, standardError);
-			if (!completion.Wait(timeout))
+			outputCancellation = new CancellationTokenSource();
+			standardOutput = BoundedTextReader.ReadAsync(
+				process.StandardOutput,
+				MaximumLauncherValidationOutputCharacters,
+				outputCancellation.Token);
+			standardError = BoundedTextReader.ReadAsync(
+				process.StandardError,
+				MaximumLauncherValidationOutputCharacters,
+				outputCancellation.Token);
+			var validationStopwatch = Stopwatch.StartNew();
+			var timeoutMilliseconds = ToProcessTimeoutMilliseconds(timeout);
+			if (!process.WaitForExit(timeoutMilliseconds) ||
+			    !Task.WhenAll(standardOutput, standardError).Wait(
+				    ToProcessTimeoutMilliseconds(
+					    timeout == Timeout.InfiniteTimeSpan
+						    ? timeout
+						    : timeout - validationStopwatch.Elapsed)))
 			{
+				outputCancellation.Cancel();
 				TryKillProcess(process);
+				_ = process.WaitForExit(1000);
+				ObserveValidationReaders(process, standardOutput, standardError);
 				return new TerminalCommandValidationResult(false, "The terminal launcher validation timed out.");
 			}
+			if (standardOutput.Result.ExceededLimit || standardError.Result.ExceededLimit)
+				return new TerminalCommandValidationResult(false, "The terminal launcher returned too much output.");
 
 			if (process.ExitCode == 0)
 				return new TerminalCommandValidationResult(true);
 
-			var error = standardError.Result.Trim();
+			var error = standardError.Result.Text.Trim();
 			return new TerminalCommandValidationResult(
 				false,
 				string.IsNullOrWhiteSpace(error)
@@ -1418,12 +1486,69 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		}
 		catch (Exception ex)
 		{
+			outputCancellation?.Cancel();
 			TryKillProcess(process);
+			ObserveValidationReaders(process, standardOutput, standardError);
 			return new TerminalCommandValidationResult(false, ex.Message);
 		}
 		finally
 		{
+			outputCancellation?.Dispose();
 			process?.Dispose();
+		}
+	}
+
+	private static int ToProcessTimeoutMilliseconds(TimeSpan timeout)
+	{
+		if (timeout == Timeout.InfiniteTimeSpan)
+			return Timeout.Infinite;
+		if (timeout <= TimeSpan.Zero)
+			return 0;
+
+		return (int)Math.Min(Math.Ceiling(timeout.TotalMilliseconds), int.MaxValue);
+	}
+
+	private static void ObserveValidationReaders(
+		Process? process,
+		Task<BoundedTextReadResult>? standardOutput,
+		Task<BoundedTextReadResult>? standardError)
+	{
+		var readers = new List<Task>(capacity: 2);
+		if (standardOutput is not null)
+			readers.Add(standardOutput);
+		if (standardError is not null)
+			readers.Add(standardError);
+		if (readers.Count == 0)
+			return;
+
+		TryDisposeValidationReader(process, standardOutput: true);
+		TryDisposeValidationReader(process, standardOutput: false);
+		try
+		{
+			BoundedTextReader
+				.ObserveCompletionAsync(readers.ToArray())
+				.WaitAsync(LauncherOutputDrainTimeout)
+				.GetAwaiter()
+				.GetResult();
+		}
+		catch (TimeoutException)
+		{
+		}
+	}
+
+	private static void TryDisposeValidationReader(Process? process, bool standardOutput)
+	{
+		if (process is null)
+			return;
+		try
+		{
+			if (standardOutput)
+				process.StandardOutput.Dispose();
+			else
+				process.StandardError.Dispose();
+		}
+		catch (Exception exception) when (exception is IOException or InvalidOperationException)
+		{
 		}
 	}
 
@@ -1560,8 +1685,8 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		if (!string.IsNullOrWhiteSpace(home))
 		{
 			var relative = Path.GetRelativePath(home, path);
-			if (!relative.StartsWith("..", StringComparison.Ordinal) && !Path.IsPathRooted(relative))
-				return "~/" + relative.Replace('\\', '/');
+			if (!PathUtility.IsRelativePathOutsideRoot(relative))
+				return "~/" + PathUtility.NormalizeSeparators(relative);
 		}
 
 		return path;
@@ -1596,7 +1721,7 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 			Encoding.UTF8,
 			detectEncodingFromByteOrderMarks: true,
 			leaveOpen: true);
-		var content = reader.ReadToEnd();
+		var content = ReadBoundedShellProfile(stream, reader);
 		if (ContainsProfileLine(content, profile.SetupLine))
 			return;
 
@@ -1610,6 +1735,35 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 		stream.Position = stream.Length;
 		stream.Write(bytes);
 		stream.Flush(flushToDisk: true);
+	}
+
+	private static string ReadBoundedShellProfile(FileStream stream, StreamReader reader)
+	{
+		if (stream.Length > MaximumShellProfileBytes)
+			throw new IOException($"The shell profile exceeds {MaximumShellProfileBytes} bytes.");
+
+		var content = new StringBuilder((int)Math.Min(stream.Length, 16 * 1024));
+		var buffer = ArrayPool<char>.Shared.Rent(4096);
+		try
+		{
+			while (true)
+			{
+				var charactersRead = reader.Read(buffer, 0, buffer.Length);
+				if (charactersRead == 0)
+					break;
+				if (stream.Position > MaximumShellProfileBytes ||
+				    content.Length > MaximumShellProfileBytes - charactersRead)
+				{
+					throw new IOException($"The shell profile exceeds {MaximumShellProfileBytes} bytes.");
+				}
+				content.Append(buffer, 0, charactersRead);
+			}
+			return content.ToString();
+		}
+		finally
+		{
+			ArrayPool<char>.Shared.Return(buffer, clearArray: true);
+		}
 	}
 
 	private static bool ContainsProfileLine(string content, string expectedLine)
@@ -1631,9 +1785,9 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 			return;
 
 		var separator = _options.PathListSeparator ?? ':';
-		var entries = string.IsNullOrWhiteSpace(currentPath)
+		var entries = IsMissingPathValue(currentPath)
 			? new List<string>()
-			: currentPath.Split(separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+			: SplitPathEntries(currentPath!, separator).ToList();
 		entries.RemoveAll(entry => AreSameDirectory(entry, userBinDirectory));
 		entries.Insert(0, userBinDirectory);
 		var updatedPath = string.Join(separator, entries);
@@ -1691,8 +1845,10 @@ public sealed class TerminalCommandSetupService(TerminalCommandSetupServiceOptio
 
 		if (OperatingSystem.IsWindows() && commandPath.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase))
 		{
+			var fullCommandPath = Path.GetFullPath(commandPath);
 			startInfo.FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe";
-			startInfo.Arguments = $"/d /c \"\"{commandPath}\" --version\"";
+			startInfo.WorkingDirectory = Path.GetDirectoryName(fullCommandPath)!;
+			startInfo.Arguments = $"/d /s /c \"\"{Path.GetFileName(fullCommandPath)}\" --version\"";
 		}
 		else
 		{

@@ -1,0 +1,40 @@
+ DevProjex Terminal · <ID>
+ <PROJECT_ROOT>
+┌┤> PROJECT TREE├─────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├───────────────────────────────────────────┐┌┤  PARAMETERS├──────────────────────┐
+│v [x] <ID>   ││<ID>                                             ││┌┤Content processing [ ] All (5) ──┐│
+│  > [x] src                              ││├── src                                                                      │││[x] Hide secrets (1)              ││
+│    [x] global.json                      │││   └── App.cs                                                               │││[ ] Hide private data             ││
+│    [x] readme.md                        ││├── global.json                                                              │││[ ] Compress code                 ││
+│                                         ││└── readme.md                                                                │││[ ] Strip comments                ││
+│                                         ││                                                                             │││[ ] Strip blank lines             ││
+│                                         ││                                                                             ││└──────────────────────────────────┘│
+│                                         ││                                                                             ││┌┤Exclusions├─────────── [ ] All ──┐│
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             ││└──────────────────────────────────┘│
+│                                         ││                                                                             ││┌┤File types├─────── [x] All (3) ──┐│
+│                                         ││                                                                             │││[x] .cs                           ││
+│                                         ││                                                                             │││[x] .json                         ││
+│                                         ││                                                                             │││[x] .md                           ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││ Files 3  |  Lines 1-6/6                                                     ││└──────────────────────────────────┘│
+└─────────────────────────────────────────┘└─────────────────────────────────────────────────────────────────────────────┘└────────────────────────────────────┘
+
+ Files 3 · Folders 2 · 86 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
+ ✗ Unknown token 'hide-secret' (position 5). Similar: hide-secrets, hidden-files, gitignore.

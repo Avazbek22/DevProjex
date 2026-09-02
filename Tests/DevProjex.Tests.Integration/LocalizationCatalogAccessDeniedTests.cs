@@ -3,20 +3,7 @@ namespace DevProjex.Tests.Integration;
 public sealed class LocalizationCatalogAccessDeniedTests
 {
 	private const string Key = "Msg.AccessDeniedElevationRequired";
-	private static readonly AppLanguage[] SupportedLanguages =
-	[
-		AppLanguage.En,
-		AppLanguage.Ru,
-		AppLanguage.Uz,
-		AppLanguage.Tg,
-		AppLanguage.Kk,
-		AppLanguage.Fr,
-		AppLanguage.De,
-		AppLanguage.It,
-		AppLanguage.Es,
-		AppLanguage.Pt,
-		AppLanguage.PtPt
-	];
+	private static readonly AppLanguage[] SupportedLanguages = Enum.GetValues<AppLanguage>();
 
 	[Theory]
 	[MemberData(nameof(AllLanguageCases))]
@@ -30,6 +17,23 @@ public sealed class LocalizationCatalogAccessDeniedTests
 	public void AccessDeniedMessage_NonEnglishLanguagesDifferFromEnglish(AppLanguage language)
 	{
 		AssertNotEnglish(language);
+	}
+
+	[Theory]
+	[MemberData(nameof(AllLanguageCases))]
+	public void TreeAccessDeniedMarker_IsSuffixTextWithoutDecoration(AppLanguage language)
+	{
+		var localized = new JsonLocalizationCatalog().Get(language);
+
+		Assert.True(localized.TryGetValue("Tree.AccessDenied", out var marker));
+		Assert.False(string.IsNullOrWhiteSpace(marker));
+		// German capitalizes nouns, so its marker legitimately starts uppercase.
+		if (language != AppLanguage.De)
+			Assert.False(char.IsUpper(marker![0]));
+		Assert.DoesNotContain("⛔", marker, StringComparison.Ordinal);
+		Assert.DoesNotContain("[", marker, StringComparison.Ordinal);
+		Assert.DoesNotContain("]", marker, StringComparison.Ordinal);
+		Assert.DoesNotContain("Tree.AccessDeniedRoot", localized.Keys);
 	}
 
 	public static IEnumerable<object[]> AllLanguageCases()

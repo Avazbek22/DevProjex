@@ -1,40 +1,40 @@
  DevProjex Terminal · <PROJECT>
  <PROJECT_ROOT>
-┌┤  PROJECT TREE├─────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · XML├──────────────────────────────┐┌┤> PARAMETERS├─────────────────────────────────────┐
-│v [x] <PROJECT>   ││<d n="<PROJECT>">                      ││  GIT FILTERING                                    │
-│  > [x] src                              ││  <d n="src">                                                 ││  ( ) No Git filtering                             │
-│    [x] global.json                      ││    <d n="Feature">                                           ││  (*) Use .gitignore                               │
-│    [x] readme.md                        ││      <f>Handler.cs</f>                                       ││  ( ) Tracked Git files only                       │
-│                                 ┌┤Help├───────────────────────────────────────────────────────────────────────────────────┐                                  │
-│                                 │ PARAMETERS                                                                            ▲ │                                  │
-│                                 │ Up/Down or j/k selects a row; Enter changes the selected radio button, checkbox, or   █ │e                                 │
-│                                 │ All control. This panel contains only Git filtering, Exclusions, File Types, Root     █ │rs                                │
-│                                 │ Folders, and an unobtrusive saved-settings indicator when applicable. Use Ctrl+P for  █ │                                  │
-│                                 │ actions, E for context export, and Z for folder/ZIP export. Tab/F6 returns to Tree;   █ │ers                               │
-│                                 │ Shift+Tab/Shift+F6 moves to Preview.                                                  █ │s                                 │
-│                                 │                                                                                       █ │                                  │
-│                                 │ WORKSPACE                                                                             █ │                                  │
-│                                 │ Tree selects files and folders. Preview inspects the current context. Parameters      █ │ut extension                      │
-│                                 │ changes Git filtering, Exclusions, File Types, and Root Folders.                      █ │                                  │
-│                                 │                                                                                       ░ │                                  │
-│                                 │ ACTION PALETTE                                                                        ░ │                                  │
-│                                 │ Ctrl+P lists every important action and shortcut. Type to filter, use Up/Down, then   ░ │                                  │
-│                                 │ Enter. Esc restores the previous pane.                                                ░ │                                  │
-│                                 │                                                                                       ░ │                                  │
-│                                 │ PREVIEW AND SEARCH                                                                    ░ │                                  │
-│                                 │ 1/2/3 selects Tree, Content, or Tree + Content. F selects ASCII, JSON, XML, or        ░ │                                  │
-│                                 │ Markdown. / filters Tree names when Tree is focused and searches the complete Preview ▼ │                                  │
-│                                 │                                                                                         │                                  │
-│                                 │                                                                                         │                                  │
-│                                 │                                      ⟦► Close ◄⟧▖                                       │                                  │
-│                                 │                                      ▝▀▀▀▀▀▀▀▀▀▀▘                                       │                                  │
-│                                 └─────────────────────────────────────────────────────────────────────────────────────────┘                                  │
-│                                         ││                                                              ││                                                   │
-│                                         ││                                                              ││                                                   │
-│                                         ││                                                              ││                                                   │
-│                                         ││                                                              ││                                                   │
-│                                         ││ Files 4  |  Lines 1-10/10                                    ││                                                   │
-└─────────────────────────────────────────┘└──────────────────────────────────────────────────────────────┘└───────────────────────────────────────────────────┘
+┌┤  PROJECT TREE├─────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · XML├─────────────────────────────────────────────┐┌┤> PARAMETERS├──────────────────────┐
+│v [x] <PROJECT>   ││<d n="<PROJECT>">                                     ││┌┤Content processing [ ] All (5) ──┐│
+│  > [x] src                              ││  <d n="src">                                                                │││[ ] Hide secrets                  ││
+│    [x] global.json                      ││    <d n="Feature">                                                          │││[ ] Hide private data             ││
+│    [x] readme.md                        ││      <f>Handler.cs</f>                                                      │││[ ] Compress code                 ││
+│                                 ┌┤Help├───────────────────────────────────────────────────────────────────────────────────┐ ] Strip comments                ││
+│                                 │ PARAMETERS                                                                            ▲ │ ] Strip blank lines             ││
+│                                 │ Content Processing contains five immediate transformations. Exclusions has an All     █ │─────────────────────────────────┘│
+│                                 │ control and 5 mutually exclusive Git-mode radio rows; an active diff:<ref>..<ref>     █ │Exclusions├─────────── [ ] All ──┐│
+│                                 │ scope adds a sixth row. File Types has its own All control. Up/Down or j/k moves      █ │                                 ││
+│                                 │ inside a mini-panel and crosses to the next one at a boundary; Enter or Space toggles █ │                                 ││
+│                                 │ a row. Each long list scrolls independently. : opens workspace commands, Ctrl+P opens █ │                                 ││
+│                                 │ actions, E exports context, z exports a folder, and Shift+Z exports ZIP. Tab/F6       █ │                                 ││
+│                                 │ returns to Tree; Shift+Tab/Shift+F6 moves to Preview.                                 █ │                                 ││
+│                                 │                                                                                       █ │                                 ││
+│                                 │ WORKSPACE                                                                             ░ │                                 ││
+│                                 │ Tree selects files and folders. Preview inspects the current context. Parameters      ░ │                                 ││
+│                                 │ changes Content Processing, Exclusions, and File Types in three independent           ░ │                                 ││
+│                                 │ mini-panels.                                                                          ░ │                                 ││
+│                                 │                                                                                       ░ │                                 ││
+│                                 │ ACTION PALETTE                                                                        ░ │─────────────────────────────────┘│
+│                                 │ Ctrl+P lists every important action and shortcut. Type to filter, use Up/Down, then   ░ │File types├─────── [x] All (3) ──┐│
+│                                 │ Enter. Exclusions and File Types actions focus their mini-panels. Esc restores the    ░ │x] .cs                           ││
+│                                 │ previous pane.                                                                        ▼ │x] .json                         ││
+│                                 │                                                                                         │x] .md                           ││
+│                                 │                                                                                         │                                 ││
+│                                 │                                      ⟦► Close ◄⟧▖                                       │                                 ││
+│                                 │                                      ▝▀▀▀▀▀▀▀▀▀▀▘                                       │                                 ││
+│                                 └─────────────────────────────────────────────────────────────────────────────────────────┘                                 ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││ Files 4  |  Lines 1-10/10                                                   ││└──────────────────────────────────┘│
+└─────────────────────────────────────────┘└─────────────────────────────────────────────────────────────────────────────┘└────────────────────────────────────┘
 
  Files 4 · Folders 3 · 76 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
- Up/Down or j/k Navigate   Enter Change   Tab/F6 Tree   Ctrl+P Action palette   ? Help
+ C Content   X Exclusions   T Types   Enter Change   : Commands

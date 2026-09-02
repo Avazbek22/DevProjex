@@ -56,11 +56,10 @@ public static class ProcessEntryPointResolver
 
 		// Process paths can come from another target OS while packaging or testing.
 		// Resolve both directory separators instead of applying host-OS path semantics.
-		var trimmedPath = path.Trim();
 		var separatorIndex = Math.Max(
-			trimmedPath.LastIndexOf('/'),
-			trimmedPath.LastIndexOf('\\'));
-		var fileName = trimmedPath[(separatorIndex + 1)..];
+			path.LastIndexOf('/'),
+			path.LastIndexOf('\\'));
+		var fileName = path[(separatorIndex + 1)..];
 		return Path.GetFileNameWithoutExtension(fileName)
 			.Equals("dotnet", StringComparison.OrdinalIgnoreCase);
 	}

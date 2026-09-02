@@ -4,6 +4,60 @@ namespace DevProjex.Tests.Terminal;
 public sealed class TerminalPreviewRevisionPtyTests
 {
 	[Fact(Timeout = 90_000)]
+	public async Task CtrlUProjectsAnExplicitlyEmptySelectionUntilCtrlA()
+	{
+		using var project = new TemporaryDirectory();
+		project.WriteFile("first.cs", "internal sealed class First { }");
+		project.WriteFile("second.cs", "internal sealed class Second { }");
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			project.Path,
+			[
+				"tui",
+				project.Path,
+				"--profile",
+				"standard",
+				"--screen",
+				"inline",
+				"--no-mouse",
+				"--language",
+				"en"
+			],
+			columns: 120,
+			rows: 30,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.WaitForScreenAsync(
+			"Files 2",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("3", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"internal sealed class First",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("\u0015", TestContext.Current.CancellationToken);
+		var empty = await terminal.WaitForStableScreenAsync(
+			required: "Files 0",
+			forbidden: "internal sealed class First",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("[ ]", empty, StringComparison.Ordinal);
+		Assert.DoesNotContain("First", empty, StringComparison.Ordinal);
+		Assert.DoesNotContain("Second", empty, StringComparison.Ordinal);
+
+		await terminal.SendCtrlAAsync(TestContext.Current.CancellationToken);
+		var restored = await terminal.WaitForScreenAsync(
+			"internal sealed class First",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("[x]", restored, StringComparison.Ordinal);
+		Assert.Contains("Files 2", restored, StringComparison.Ordinal);
+
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
+	}
+
+	[Fact(Timeout = 90_000)]
 	public async Task LatestViewFormatAndSelectionWinDuringRapidInput()
 	{
 		using var project = new TemporaryDirectory();
@@ -86,7 +140,7 @@ public sealed class TerminalPreviewRevisionPtyTests
 			StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(

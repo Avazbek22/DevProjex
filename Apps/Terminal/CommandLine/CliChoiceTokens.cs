@@ -9,6 +9,13 @@ internal enum CliTextJsonFormat
 	Json
 }
 
+internal enum CliRecentKind
+{
+	All,
+	Folder,
+	Repository
+}
+
 internal readonly record struct CliExclusionValue(ProjectExclusion? Exclusion)
 {
 	public bool IsNone => Exclusion is null;
@@ -82,7 +89,7 @@ internal sealed class CliChoiceSet<T>(params CliChoiceSet<T>.Choice[] choices)
 		static choice => choice.Token);
 
 	public IReadOnlyList<string> Tokens { get; } =
-		choices.Select(static choice => choice.Token).ToArray();
+		choices.Where(static choice => choice.IsVisible).Select(static choice => choice.Token).ToArray();
 
 	public bool TryParse(string token, out T value) =>
 		_values.TryGetValue(token, out value);
@@ -92,7 +99,7 @@ internal sealed class CliChoiceSet<T>(params CliChoiceSet<T>.Choice[] choices)
 			? token
 			: throw new ArgumentOutOfRangeException(nameof(value), value, null);
 
-	public readonly record struct Choice(string Token, T Value);
+	public readonly record struct Choice(string Token, T Value, bool IsVisible = true);
 }
 
 internal static class CliChoiceSets
@@ -100,6 +107,11 @@ internal static class CliChoiceSets
 	public static CliChoiceSet<CliTextJsonFormat> TextJson { get; } = new(
 		new("text", CliTextJsonFormat.Text),
 		new("json", CliTextJsonFormat.Json));
+
+	public static CliChoiceSet<CliRecentKind> RecentKind { get; } = new(
+		new("all", CliRecentKind.All),
+		new("folder", CliRecentKind.Folder),
+		new("repository", CliRecentKind.Repository));
 
 	public static CliChoiceSet<ProjectContextView> ContextView { get; } = new(
 		ProjectPresentationCatalog.PreviewModes
@@ -135,9 +147,9 @@ internal static class CliChoiceSets
 		new("never", TerminalProgressMode.Never));
 
 	public static CliChoiceSet<TerminalVerbosity> Verbosity { get; } = new(
-		new("normal", TerminalVerbosity.Normal),
 		new("quiet", TerminalVerbosity.Quiet),
 		new("minimal", TerminalVerbosity.Minimal),
+		new("normal", TerminalVerbosity.Normal),
 		new("detailed", TerminalVerbosity.Detailed),
 		new("diagnostic", TerminalVerbosity.Diagnostic));
 
@@ -160,6 +172,14 @@ internal static class CliChoiceSets
 				new CliChoiceSet<GitFilteringMode>.Choice(descriptor.Token, descriptor.Id))
 			.ToArray());
 
+	public static CliChoiceSet<GitFilteringMode> PersistentGitMode { get; } = new(
+		ProjectPresentationCatalog.GitFiltering
+			.Where(static descriptor => GitScopeSelection.IsPersistent(descriptor.Id))
+			.OrderBy(static descriptor => descriptor.Order)
+			.Select(static descriptor =>
+				new CliChoiceSet<GitFilteringMode>.Choice(descriptor.Token, descriptor.Id))
+			.ToArray());
+
 	public static CliChoiceSet<CliExclusionValue> Exclusion { get; } = new(
 		[
 			new(
@@ -170,7 +190,11 @@ internal static class CliChoiceSets
 				.Select(static descriptor =>
 					new CliChoiceSet<CliExclusionValue>.Choice(
 						descriptor.Token,
-						new CliExclusionValue(descriptor.Id)))
+						new CliExclusionValue(descriptor.Id))),
+			new(
+				ProjectPresentationCatalog.Get(ProjectExclusion.HideSecrets).Token,
+				new CliExclusionValue(ProjectExclusion.HideSecrets),
+				IsVisible: false)
 		]);
 
 	public static CliChoiceSet<CliCompletionShell> CompletionShell { get; } = new(
@@ -195,7 +219,16 @@ internal static class CliChoiceSets
 		new("pt-pt", AppLanguage.PtPt),
 		new("kk", AppLanguage.Kk),
 		new("tg", AppLanguage.Tg),
-		new("uz", AppLanguage.Uz));
+		new("uz", AppLanguage.Uz),
+		new("zh-cn", AppLanguage.ZhCn),
+		new("zh-tw", AppLanguage.ZhTw),
+		new("ja", AppLanguage.Ja),
+		new("ko", AppLanguage.Ko),
+		new("tr", AppLanguage.Tr),
+		new("uk", AppLanguage.Uk),
+		new("pl", AppLanguage.Pl),
+		new("vi", AppLanguage.Vi),
+		new("id", AppLanguage.Id));
 
 	private static DesktopPreviewView ToDesktopPreviewView(ProjectContextView view) =>
 		view switch
@@ -237,6 +270,19 @@ internal static class CliChoiceSymbols
 							"standard, local, FILE")));
 						return new CliProfileValue(CliProfileSource.Invalid, string.Empty);
 					}
+					if (!(allowAuto && token.Equals("auto", StringComparison.OrdinalIgnoreCase)) &&
+					    !token.Equals("standard", StringComparison.OrdinalIgnoreCase) &&
+					    !token.Equals("local", StringComparison.OrdinalIgnoreCase) &&
+					    token.IndexOfAny([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar]) < 0 &&
+					    !token.Contains('.') &&
+					    !File.Exists(token))
+					{
+						result.AddError(LocalizedParseError.Create(localization.Format(
+							"Terminal.Validation.Choice",
+							"--profile",
+							allowAuto ? "auto, standard, local, FILE" : "standard, local, FILE")));
+						return new CliProfileValue(CliProfileSource.Invalid, string.Empty);
+					}
 					return CliProfileValue.Parse(token, allowAuto);
 				}
 
@@ -245,6 +291,7 @@ internal static class CliChoiceSymbols
 				return new CliProfileValue(CliProfileSource.Invalid, string.Empty);
 			}
 		};
+		option.Aliases.Add("-p");
 		option.CompletionSources.Add(profileTokens);
 		option.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
 			context,

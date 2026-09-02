@@ -1,7 +1,86 @@
+using DevProjex.Application.Context;
+using DevProjex.Application.Secrets;
+
 namespace DevProjex.Tests.Integration;
 
 public sealed class FileSystemReparsePointIntegrationTests
 {
+	[Fact]
+	public async Task ContextExport_SourceReplacedByFilesystemAlias_DoesNotReadTheExternalTarget()
+	{
+		const string externalContent = "outside-project-content-must-not-be-exported";
+		using var temp = new TemporaryDirectory();
+		var projectRoot = Path.Combine(temp.Path, "project");
+		Directory.CreateDirectory(projectRoot);
+		_ = temp.CreateFile("project/src/visible.txt", "original content");
+		var externalDirectory = temp.CreateDirectory("outside");
+		var externalPath = temp.CreateFile("outside/visible.txt", externalContent);
+		var plan = await new ProjectContextPlanner(CreateProjectAnalysisService())
+			.BuildAsync(
+				new ProjectContextRequest(
+					projectRoot,
+					new ProjectSelectionSpec(
+						GitMode: GitFilteringMode.None,
+						Exclusions: [])),
+				TestContext.Current.CancellationToken);
+		var plannedSourcePath = Assert.Single(plan.IncludedFiles);
+		Assert.Equal("visible.txt", Path.GetFileName(plannedSourcePath));
+
+		var sourceDirectory = Path.GetDirectoryName(plannedSourcePath)!;
+		Directory.Delete(sourceDirectory, recursive: true);
+		var aliasCreated = OperatingSystem.IsWindows()
+			? TryCreateDirectoryJunction(sourceDirectory, externalDirectory)
+			: CreateFileAlias();
+		if (!aliasCreated)
+			Assert.Skip("Filesystem aliases are unavailable in this test environment.");
+
+		bool CreateFileAlias()
+		{
+			Directory.CreateDirectory(sourceDirectory);
+			return TryCreateFileSymlink(plannedSourcePath, externalPath);
+		}
+
+		var service = new ProjectContextDocumentService(
+				new TreeExportService(),
+				new FileContentAnalyzer());
+		var bounded = await service.BuildAsync(
+			plan,
+			ProjectContextView.Content,
+			ProjectContextDocumentFormat.Text,
+			new ProjectContextDocumentLimits(),
+			TestContext.Current.CancellationToken);
+
+		using var destination = new MemoryStream();
+		await service.WriteCompleteAsync(
+				plan,
+				ProjectContextView.Content,
+				ProjectContextDocumentFormat.Text,
+				destination,
+				TestContext.Current.CancellationToken);
+
+		var output = Encoding.UTF8.GetString(destination.ToArray());
+		Assert.DoesNotContain(externalContent, bounded, StringComparison.Ordinal);
+		Assert.DoesNotContain(externalContent, output, StringComparison.Ordinal);
+
+		using var redactionSession = new SecretRedactionSession(new NoFindingsDetector());
+		using var redactedDestination = new MemoryStream();
+		var redactedPlan = plan with
+		{
+			Selection = plan.Selection with { HideSecrets = true }
+		};
+		await Assert.ThrowsAsync<SecretDetectionException>(() =>
+			new ProjectContextDocumentService(
+					new TreeExportService(),
+					new FileContentAnalyzer(),
+					secretRedactionSession: redactionSession)
+				.WriteCompleteAsync(
+					redactedPlan,
+					ProjectContextView.Content,
+					ProjectContextDocumentFormat.Text,
+					redactedDestination,
+					TestContext.Current.CancellationToken));
+		Assert.Empty(redactedDestination.ToArray());
+	}
 	[Fact]
 	public void TreeBuilder_DirectorySymlinkCycle_DoesNotTraverseReparsePointDirectory()
 	{
@@ -297,6 +376,24 @@ public sealed class FileSystemReparsePointIntegrationTests
 		IgnoreDotFiles: false,
 		SmartIgnoredFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase),
 		SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+
+	private static ProjectAnalysisService CreateProjectAnalysisService() =>
+		new(
+			new ScanOptionsUseCase(new FileSystemScanner()),
+			ProjectLoadWorkflowRuntime.CreateBuildTreeUseCase(),
+			new FilterOptionSelectionService(),
+			ProjectLoadWorkflowRuntime.CreateIgnoreOptionsService(),
+			ProjectLoadWorkflowRuntime.CreateIgnoreRulesService(),
+			new TreeExportService(),
+			new FileContentAnalyzer());
+
+	private sealed class NoFindingsDetector : ISecretDetector
+	{
+		public IReadOnlyList<DetectedSecret> Detect(
+			string repositoryRelativePath,
+			string content,
+			CancellationToken cancellationToken = default) => [];
+	}
 
 	private static bool TryCreateDirectorySymlink(string linkPath, string targetPath)
 	{

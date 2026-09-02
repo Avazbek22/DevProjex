@@ -35,7 +35,117 @@ public sealed class TreeExportServiceAdditionalTests
 	}
 
 	[Fact]
-	// Verifies full tree output includes root path and top-level display name.
+	public void HasSelectedDescendantOrSelf_DeepTreeDoesNotDependOnTheCallStack()
+	{
+		const int depth = 16_000;
+		const string selectedPath = "/leaf";
+		var root = new TreeNodeDescriptor("Leaf", selectedPath, false, false, "file", []);
+		for (var level = 0; level < depth; level++)
+		{
+			root = new TreeNodeDescriptor(
+				$"Node{level}",
+				$"/node-{level}",
+				true,
+				false,
+				"folder",
+				[root]);
+		}
+
+		Assert.True(TreeExportService.HasSelectedDescendantOrSelf(
+			root,
+			new HashSet<string> { selectedPath }));
+		Assert.False(TreeExportService.HasSelectedDescendantOrSelf(
+			root,
+			new HashSet<string> { "/missing" }));
+	}
+
+	[Theory]
+	[InlineData(TreeTextFormat.Ascii)]
+	[InlineData(TreeTextFormat.Json)]
+	[InlineData(TreeTextFormat.Xml)]
+	[InlineData(TreeTextFormat.Markdown)]
+	public void BuildFullTree_DeepStructuredTreeDoesNotDependOnTheCallStack(
+		TreeTextFormat format)
+	{
+		const int depth = 2_048;
+		var root = new TreeNodeDescriptor("leaf.txt", "/leaf.txt", false, false, "file", []);
+		for (var level = depth - 1; level >= 0; level--)
+		{
+			root = new TreeNodeDescriptor(
+				$"level-{level:D4}",
+				$"/level-{level:D4}",
+				true,
+				false,
+				"folder",
+				[root]);
+		}
+
+		var output = new TreeExportService().BuildFullTree("/", root, format);
+
+		Assert.Contains("level-0001", output, StringComparison.Ordinal);
+		Assert.Contains($"level-{depth - 1:D4}", output, StringComparison.Ordinal);
+		Assert.Contains("leaf.txt", output, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData(TreeTextFormat.Ascii)]
+	[InlineData(TreeTextFormat.Json)]
+	[InlineData(TreeTextFormat.Xml)]
+	[InlineData(TreeTextFormat.Markdown)]
+	public void BuildFullTree_StopsWhenCancellationArrivesDuringTraversal(TreeTextFormat format)
+	{
+		using var cancellation = new CancellationTokenSource();
+		var child = new TreeNodeDescriptor("child.txt", "/child.txt", false, false, "file", []);
+		var root = new TreeNodeDescriptor(
+			"root",
+			"/",
+			true,
+			false,
+			"folder",
+			new CancelOnAccessList(child, cancellation));
+
+		Assert.Throws<OperationCanceledException>(() => new TreeExportService().BuildFullTreeWithCancellation(
+			"/",
+			root,
+			format,
+			displayRootPath: null,
+			displayRootName: null,
+			includeRootPath: true,
+			cancellation.Token));
+	}
+
+	[Fact]
+	public void BuildSelectedTreeAndMetrics_DeepTreeDoNotDependOnTheCallStack()
+	{
+		const int depth = 2_048;
+		const string leafPath = "/leaf.txt";
+		var root = new TreeNodeDescriptor("leaf.txt", leafPath, false, false, "file", []);
+		for (var level = depth - 1; level >= 0; level--)
+		{
+			root = new TreeNodeDescriptor(
+				$"level-{level:D4}",
+				$"/level-{level:D4}",
+				true,
+				false,
+				"folder",
+				[root]);
+		}
+		var selectedPaths = new HashSet<string>(PathComparer.Default) { leafPath };
+		var service = new TreeExportService();
+
+		var output = service.BuildSelectedTree("/", root, selectedPaths, TreeTextFormat.Ascii);
+		var metrics = service.CalculateSelectedTreeMetrics(
+			"/",
+			root,
+			selectedPaths,
+			TreeTextFormat.Ascii);
+
+		Assert.Contains("leaf.txt", output, StringComparison.Ordinal);
+		Assert.Equal(ExportOutputMetricsCalculator.FromText(output), metrics);
+	}
+
+	[Fact]
+	// Verifies full tree output includes the root path once and starts with its children.
 	public void BuildFullTree_IncludesRootHeader()
 	{
 		var service = new TreeExportService();
@@ -44,7 +154,42 @@ public sealed class TreeExportServiceAdditionalTests
 		var output = service.BuildFullTree("/root", root);
 
 		Assert.Contains("/root:", output);
-		Assert.Contains("├── Root", output);
+		Assert.DoesNotContain("├── Root", output, StringComparison.Ordinal);
+		Assert.Contains("├── Alpha", output, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void BuildFullTree_MarkdownRootPreservesTheEstablishedLiteralFormat()
+	{
+		const string rootPath = "/tmp/my_project";
+		var output = new TreeExportService().BuildFullTree(
+			rootPath,
+			BuildTree(),
+			TreeTextFormat.Markdown);
+		var rootLine = output.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n')[0];
+		var normalizedRootPath = PathUtility.NormalizeSeparators(Path.GetFullPath(rootPath));
+
+		Assert.Equal(ContextRootPresentation.FormatMarkdownLine(normalizedRootPath), rootLine);
+		Assert.Equal($"Root: {normalizedRootPath.Replace("_", "\\_", StringComparison.Ordinal)}", rootLine);
+	}
+
+	[Fact]
+	public void HumanTextTreesRenderTheRootPathOnceAndStartAtRealChildren()
+	{
+		var service = new TreeExportService();
+		var root = BuildTree();
+		var selected = new HashSet<string>(PathComparer.Default) { "/root/beta/delta" };
+
+		var unicode = service.BuildFullTree("/root", root);
+		var plain = service.BuildFullTreePlain("/root", root);
+		var selectedTree = service.BuildSelectedTree("/root", root, selected);
+
+		Assert.StartsWith("/root:" + Environment.NewLine + "├── Alpha", unicode);
+		Assert.StartsWith("/root:" + Environment.NewLine + "|-- Alpha", plain);
+		Assert.StartsWith("/root:" + Environment.NewLine + "└── Beta", selectedTree);
+		Assert.DoesNotContain("├── Root", unicode, StringComparison.Ordinal);
+		Assert.DoesNotContain("|-- Root", plain, StringComparison.Ordinal);
+		Assert.DoesNotContain("├── Root", selectedTree, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -85,7 +230,7 @@ public sealed class TreeExportServiceAdditionalTests
 
 		var output = service.BuildSelectedTree("/root", root, selected);
 
-		Assert.Contains("Root", output);
+		Assert.StartsWith("/root:", output, StringComparison.Ordinal);
 		Assert.Contains("Beta", output);
 		Assert.Contains("Delta", output);
 		Assert.DoesNotContain("Alpha", output);
@@ -143,5 +288,32 @@ public sealed class TreeExportServiceAdditionalTests
 		return new HashSet<string>(
 			selections.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
 			StringComparer.OrdinalIgnoreCase);
+	}
+
+	private sealed class CancelOnAccessList(
+		TreeNodeDescriptor item,
+		CancellationTokenSource cancellation) : IReadOnlyList<TreeNodeDescriptor>
+	{
+		public int Count => 1;
+
+		public TreeNodeDescriptor this[int index]
+		{
+			get
+			{
+				if (index != 0)
+					throw new ArgumentOutOfRangeException(nameof(index));
+				cancellation.Cancel();
+				return item;
+			}
+		}
+
+		public IEnumerator<TreeNodeDescriptor> GetEnumerator()
+		{
+			cancellation.Cancel();
+			yield return item;
+		}
+
+		System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() =>
+			GetEnumerator();
 	}
 }

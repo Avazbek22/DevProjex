@@ -12,7 +12,10 @@ public sealed class CommandTreeContractTests
 		var root = new DevProjexCommandTree(environment).Build();
 
 		Assert.Equal(
-			["analyze", "completion", "doctor", "export", "open", "profile", "tui", "ui"],
+			[
+				"analyze", "cache", "completion", "doctor", "export", "help", "mcp", "open", "profile",
+				"recent", "tree", "tui", "ui"
+			],
 			root.Subcommands
 				.Where(static command => !command.Hidden)
 				.Select(static command => command.Name)
@@ -48,6 +51,7 @@ public sealed class CommandTreeContractTests
 
 	[Theory]
 	[InlineData("export")]
+	[InlineData("cache")]
 	[InlineData("profile")]
 	[InlineData("ui")]
 	public async Task ParentCommandWithoutChildPrintsHelp(string command)
@@ -107,6 +111,26 @@ public sealed class CommandTreeContractTests
 
 		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
 		Assert.Contains("devprojex analyze --format", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task ParserErrorsEscapeControlCharactersFromArguments()
+	{
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment)
+			.RunAsync(
+				["analyze", ".", "--forged\r\nline\t\u001b[31m", "--language", "en"],
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Contains("--forged\\r\\nline\\t\\u001B[31m", environment.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain('\u001b', environment.StandardError);
+		Assert.Equal(
+			2,
+			environment.StandardError
+				.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+				.Length);
 	}
 
 	[Theory]
@@ -214,6 +238,73 @@ public sealed class CommandTreeContractTests
 			"Команда, параметр или значение указаны неверно.",
 			environment.StandardError,
 			StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("0")]
+	[InlineData("1001")]
+	public async Task AnalyzeTopFilesRejectsValuesOutsideThePublishedRange(string value)
+	{
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment).RunAsync(
+			["analyze", ".", "--top-files", value, "--language", "en"],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Contains("--top-files must be between 1 and 1000.", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("1", 1L)]
+	[InlineData("1024", 1024L)]
+	[InlineData("1k", 1024L)]
+	[InlineData("2KB", 2048L)]
+	[InlineData("3mib", 3L * 1024 * 1024)]
+	[InlineData("1G", 1024L * 1024 * 1024)]
+	public void MaximumFileBytesAcceptsBytesAndBinarySuffixes(string token, long expected)
+	{
+		Assert.True(SelectionOptions.TryParseFileSize(token, out var actual));
+		Assert.Equal(expected, actual);
+	}
+
+	[Theory]
+	[InlineData("0")]
+	[InlineData("-1")]
+	[InlineData("1.5m")]
+	[InlineData("1b")]
+	[InlineData("9223372036854775807g")]
+	public async Task MaximumFileBytesRejectsInvalidSizesWithLocalizedGuidance(string value)
+	{
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment).RunAsync(
+			["analyze", ".", "--max-file-bytes", value, "--language", "en"],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Contains("--max-file-bytes must be at least 1 byte", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void MaximumFileBytesIsScopedToThePublishedSelectionCommands()
+	{
+		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
+		var analyze = root.Subcommands.Single(static command => command.Name == "analyze");
+		var tree = root.Subcommands.Single(static command => command.Name == "tree");
+		var export = root.Subcommands.Single(static command => command.Name == "export");
+		var context = export.Subcommands.Single(static command => command.Name == "context");
+		var project = export.Subcommands.Single(static command => command.Name == "project");
+		var profile = root.Subcommands.Single(static command => command.Name == "profile");
+		var profileSave = profile.Subcommands.Single(static command => command.Name == "save");
+		var open = root.Subcommands.Single(static command => command.Name == "open");
+
+		Assert.Contains(analyze.Options, static option => option.Name == "--max-file-bytes");
+		Assert.Contains(tree.Options, static option => option.Name == "--max-file-bytes");
+		Assert.Contains(context.Options, static option => option.Name == "--max-file-bytes");
+		Assert.DoesNotContain(project.Options, static option => option.Name == "--max-file-bytes");
+		Assert.DoesNotContain(profileSave.Options, static option => option.Name == "--max-file-bytes");
+		Assert.DoesNotContain(open.Options, static option => option.Name == "--max-file-bytes");
 	}
 
 	[Fact]

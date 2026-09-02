@@ -2,6 +2,17 @@ namespace DevProjex.Tests.Unit;
 
 public sealed class ProjectRootFactsProviderTests
 {
+	[Fact]
+	public void ProjectRootFacts_OrdinaryDirectoryLookupPreservesWhitespaceOnlyNames()
+	{
+		var directory = new ProjectRootDirectoryFact(" ", "root/ ", IsReparsePoint: false);
+		var facts = new ProjectRootFacts("root", true, true, [], [directory], null);
+
+		Assert.True(facts.HasDirectory(" "));
+		Assert.True(facts.TryGetDirectory(" ", out var resolved));
+		Assert.Equal(directory, resolved);
+	}
+
 	[Theory]
 	[InlineData(15)]
 	[InlineData(16)]
@@ -71,6 +82,38 @@ public sealed class ProjectRootFactsProviderTests
 		Assert.False(facts.HasMarkerFile("src/App.cs"));
 	}
 
+	#pragma warning disable xUnit1051 // This test verifies a caller-owned cancellation token.
+	[Fact]
+	public void GetWithCancellation_PreCancelledRequestDoesNotBuildOrPopulateCache()
+	{
+		var rootPath = Path.GetFullPath(Path.Combine(
+			Path.GetTempPath(),
+			"DevProjex",
+			"RootFactsCancellation",
+			Guid.NewGuid().ToString("N")));
+		var buildCount = 0;
+		var provider = new ProjectRootFactsProvider(
+			cacheTtl: TimeSpan.FromMinutes(5),
+			cacheLimit: 4,
+			utcNowProvider: null,
+			factsBuilder: path =>
+			{
+				buildCount++;
+				return CreateFacts(path, "package.json");
+			});
+		using var cancellation = new CancellationTokenSource();
+		cancellation.Cancel();
+
+		Assert.ThrowsAny<OperationCanceledException>(() =>
+			provider.GetWithCancellation(rootPath, forceRefresh: false, cancellation.Token));
+		Assert.Equal(0, buildCount);
+
+		var facts = provider.Get(rootPath);
+		Assert.True(facts.HasMarkerFile("package.json"));
+		Assert.Equal(1, buildCount);
+	}
+	#pragma warning restore xUnit1051
+
 	[Fact]
 	public void Get_ReusesCachedSnapshotWithinTtl_AndForceRefreshUpdates()
 	{
@@ -88,6 +131,44 @@ public sealed class ProjectRootFactsProviderTests
 		Assert.True(initial.HasMarkerFile("package.json"));
 		Assert.False(cached.HasMarkerFile("pyproject.toml"));
 		Assert.True(refreshed.HasMarkerFile("pyproject.toml"));
+	}
+
+	[Fact]
+	public void Get_TrailingSeparatorAliasSharesCacheEntry()
+	{
+		var rootPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")));
+		var buildCount = 0;
+		var provider = new ProjectRootFactsProvider(
+			cacheTtl: TimeSpan.FromMinutes(5),
+			cacheLimit: 4,
+			utcNowProvider: null,
+			factsBuilder: path => CreateFacts(path, $"build-{++buildCount}.marker"));
+
+		var first = provider.Get(rootPath);
+		var alias = provider.Get(rootPath + Path.DirectorySeparatorChar);
+
+		Assert.Same(first, alias);
+		Assert.Equal(1, buildCount);
+	}
+
+	[Fact]
+	public void Get_WhenClockMovesBackward_DoesNotExtendCacheLifetime()
+	{
+		var rootPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")));
+		var now = new DateTime(2026, 8, 20, 12, 0, 0, DateTimeKind.Utc);
+		var buildCount = 0;
+		var provider = new ProjectRootFactsProvider(
+			cacheTtl: TimeSpan.FromMinutes(5),
+			cacheLimit: 4,
+			utcNowProvider: () => now,
+			factsBuilder: path => CreateFacts(path, $"build-{++buildCount}.marker"));
+
+		var first = provider.Get(rootPath);
+		now = now.AddMinutes(-10);
+		var afterClockRollback = provider.Get(rootPath);
+
+		Assert.NotSame(first, afterClockRollback);
+		Assert.Equal(2, buildCount);
 	}
 
 	[Fact]
@@ -126,6 +207,36 @@ public sealed class ProjectRootFactsProviderTests
 		var signature = ProjectRootFactsProvider.TryGetFileSignature(gitIgnorePath);
 
 		Assert.Null(signature);
+	}
+
+	[Fact]
+	public void ContentFingerprint_RejectsFileThatGrewAfterMetadataProbe()
+	{
+		using var stream = new StaleLengthMemoryStream(
+			Encoding.UTF8.GetBytes("root-length-overflow"),
+			reportedLength: 4);
+
+		var exception = Assert.Throws<IOException>(() =>
+			ProjectRootFactsProvider.ComputeContentFingerprint(stream, expectedLength: 4));
+
+		Assert.Contains("changed", exception.Message, StringComparison.OrdinalIgnoreCase);
+		Assert.Equal(5, stream.Position);
+	}
+
+	[Fact]
+	public void ContentFingerprint_StopsReadingWhenOperationIsCanceled()
+	{
+		using var cancellation = new CancellationTokenSource();
+		using var stream = new CancelAfterFirstReadStream(
+			new byte[64 * 1024],
+			cancellation);
+
+		Assert.Throws<OperationCanceledException>(() =>
+			ProjectRootFactsProvider.ComputeContentFingerprintWithCancellation(
+				stream,
+				stream.Length,
+				cancellation.Token));
+		Assert.InRange(stream.Position, 1, stream.Length - 1);
 	}
 
 	[Fact]
@@ -170,6 +281,26 @@ public sealed class ProjectRootFactsProviderTests
 		var unrelatedAfterInvalidation = provider.Get(unrelated.Path);
 		Assert.Same(unrelatedBeforeInvalidation, unrelatedAfterInvalidation);
 		Assert.False(unrelatedAfterInvalidation.HasMarkerFile("pyproject.toml"));
+	}
+
+	[Fact]
+	public void Invalidate_FromFileSystemRoot_RemovesDescendantSnapshot()
+	{
+		var fileSystemRoot = Path.GetPathRoot(Path.GetTempPath())!;
+		var descendant = Path.Combine(fileSystemRoot, "DevProjex", "Tests", Guid.NewGuid().ToString("N"));
+		var buildCount = 0;
+		var provider = new ProjectRootFactsProvider(
+			cacheTtl: TimeSpan.FromMinutes(5),
+			cacheLimit: 4,
+			utcNowProvider: null,
+			factsBuilder: path => CreateFacts(path, $"build-{++buildCount}.marker"));
+
+		var initial = provider.Get(descendant);
+		provider.Invalidate(fileSystemRoot, includeDescendants: true);
+		var refreshed = provider.Get(descendant);
+
+		Assert.NotSame(initial, refreshed);
+		Assert.Equal(2, buildCount);
 	}
 
 	[Fact]
@@ -392,6 +523,32 @@ public sealed class ProjectRootFactsProviderTests
 			directories: [],
 			gitIgnoreSignature: null);
 
+	private sealed class StaleLengthMemoryStream(byte[] buffer, long reportedLength) :
+		MemoryStream(buffer, writable: false)
+	{
+		public override long Length => reportedLength;
+	}
+
+	private sealed class CancelAfterFirstReadStream(
+		byte[] buffer,
+		CancellationTokenSource cancellation) :
+		MemoryStream(buffer, writable: false)
+	{
+		private bool _firstRead = true;
+
+		public override int Read(byte[] destination, int offset, int count)
+		{
+			var read = base.Read(destination, offset, count);
+			if (_firstRead)
+			{
+				_firstRead = false;
+				cancellation.Cancel();
+			}
+
+			return read;
+		}
+	}
+
 	[Fact]
 	public void HasGitIgnoreFile_RejectsReparseFileAndAcceptsRegularFile()
 	{
@@ -439,5 +596,34 @@ public sealed class ProjectRootFactsProviderTests
 		Assert.False(facts.HasGitIgnoreFile);
 		Assert.Null(facts.GitIgnoreSignature);
 		Assert.Null(ProjectRootFactsProvider.TryGetFileSignature(linkPath));
+	}
+
+	[Fact]
+	public void Get_SymbolicLinkRootDoesNotExposeTargetFacts()
+	{
+		using var temp = new TemporaryDirectory();
+		var targetPath = temp.CreateFolder("physical-project");
+		temp.CreateFile("physical-project/package.json", "{}");
+		var linkPath = Path.Combine(temp.Path, "linked-project");
+		try
+		{
+			Directory.CreateSymbolicLink(linkPath, targetPath);
+			if (!File.GetAttributes(linkPath).HasFlag(FileAttributes.ReparsePoint))
+				Assert.Skip("The created directory link is not reported as a reparse point.");
+		}
+		catch (Exception exception) when (exception is
+		       IOException or
+		       UnauthorizedAccessException or
+		       PlatformNotSupportedException)
+		{
+			Assert.Skip($"Directory symbolic links are unavailable: {exception.GetType().Name}.");
+		}
+
+		var facts = new ProjectRootFactsProvider().Get(linkPath);
+
+		Assert.True(facts.Exists);
+		Assert.False(facts.IsAccessible);
+		Assert.Empty(facts.Files);
+		Assert.Empty(facts.Directories);
 	}
 }

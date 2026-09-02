@@ -1,12 +1,106 @@
+using DevProjex.Application.Presentation;
 using DevProjex.Application.Models;
+using DevProjex.Application.Secrets;
 using DevProjex.Infrastructure.FileSystem;
-using DevProjex.Tests.Shared.ProjectLoadWorkflow;
 
 namespace DevProjex.Tests.Unit;
 
 [Collection("AvaloniaUI")]
 public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
 {
+	[AvaloniaFact]
+	public async Task Refresh_WhenEnumerationFails_PreservesPublishedSelectionAndStateCaches()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.CreateFile("src/App.cs", "class App {}\n");
+		workspace.CreateFile("docs/readme.md", "# Readme\n");
+		var failEnumeration = false;
+		var notifications = 0;
+		var scanner = new FileSystemScanner((point, _) =>
+		{
+			if (failEnumeration && point == FileSystemScanEnumerationPoint.RootDirectories)
+				throw new IOException("Simulated refresh failure.");
+		});
+		var viewModel = CreateViewModel();
+		var ignoreRulesService = ProjectLoadWorkflowRuntime.CreateIgnoreRulesService();
+		using var coordinator = CreateCoordinator(
+			viewModel,
+			ignoreRulesService,
+			() => workspace.Path,
+			scanner,
+			() => notifications++);
+
+		await coordinator.RefreshProjectSelectionAsync(workspace.Path, TestContext.Current.CancellationToken);
+		coordinator.HookOptionListeners(viewModel.Extensions);
+		coordinator.HookIgnoreListeners(viewModel.IgnoreOptions);
+		SetChecked(viewModel.Extensions, ".md", false);
+		await coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken);
+		var extensionsBefore = viewModel.Extensions.Select(static item => (item.Name, item.IsChecked)).ToArray();
+		var ignoreBefore = viewModel.IgnoreOptions.Select(static item => (item.Id, item.IsChecked)).ToArray();
+		var rootsBefore = coordinator.GetProjectScanRoots().ToArray();
+		var extensionStatesBefore = coordinator.SnapshotExtensionOptionStatesForPersistence();
+
+		failEnumeration = true;
+		coordinator.InvalidateFileSystemCaches();
+		await coordinator.RefreshProjectSelectionAsync(workspace.Path, TestContext.Current.CancellationToken);
+
+		Assert.Equal(extensionsBefore, viewModel.Extensions.Select(static item => (item.Name, item.IsChecked)));
+		Assert.Equal(ignoreBefore, viewModel.IgnoreOptions.Select(static item => (item.Id, item.IsChecked)));
+		Assert.Equal(rootsBefore, coordinator.GetProjectScanRoots(), PathComparer.Default);
+		Assert.Equal(extensionStatesBefore, coordinator.SnapshotExtensionOptionStatesForPersistence());
+		Assert.Equal(1, notifications);
+
+		var store = new RecordingProfileStore();
+		using var secretSession = new SecretRedactionSession(new EmptySecretDetector());
+		var persistence = new ProjectProfilePersistenceCoordinator(
+			viewModel,
+			coordinator,
+			store,
+			secretSession);
+		await persistence.PersistIfNeededAsync(workspace.Path, TestContext.Current.CancellationToken);
+
+		Assert.Equal(1, store.SaveAttempts);
+		Assert.NotNull(store.LastProfile);
+		Assert.Contains(".cs", store.LastProfile.SelectedExtensions, StringComparer.OrdinalIgnoreCase);
+		Assert.True(store.LastProfile.ExtensionStates?[".cs"]);
+		Assert.False(store.LastProfile.ExtensionStates?[".md"]);
+	}
+
+	[AvaloniaFact]
+	public async Task InitialProfileScan_WhenEnumerationFails_RemainsIncompleteAndIsNotPersisted()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.CreateFile("app.cs", "class App {}\n");
+		var scanner = new FileSystemScanner((point, _) =>
+		{
+			if (point == FileSystemScanEnumerationPoint.RootFiles)
+				throw new IOException("Simulated initial scan failure.");
+		});
+		var viewModel = CreateViewModel();
+		var ignoreRulesService = ProjectLoadWorkflowRuntime.CreateIgnoreRulesService();
+		using var coordinator = CreateCoordinator(
+			viewModel,
+			ignoreRulesService,
+			() => workspace.Path,
+			scanner);
+		coordinator.ApplyProjectProfileSelections(
+			workspace.Path,
+			new ProjectSelectionProfile([], [".cs"], []));
+
+		await coordinator.RefreshProjectSelectionAsync(workspace.Path, TestContext.Current.CancellationToken);
+
+		Assert.False(coordinator.IsSelectionStateCompleteForPersistence);
+		var store = new RecordingProfileStore();
+		using var secretSession = new SecretRedactionSession(new EmptySecretDetector());
+		var persistence = new ProjectProfilePersistenceCoordinator(
+			viewModel,
+			coordinator,
+			store,
+			secretSession);
+		await persistence.PersistIfNeededAsync(workspace.Path, TestContext.Current.CancellationToken);
+		Assert.Equal(0, store.SaveAttempts);
+	}
+
     [AvaloniaFact]
     public async Task RepeatedF5MutationJourney_LongLivedIslandMatchesColdSnapshotAndFinalTreeAtEveryStep()
     {
@@ -15,16 +109,14 @@ public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
         var currentPath = workspace.Path;
         var viewModel = CreateViewModel();
         var ignoreRulesService = ProjectLoadWorkflowRuntime.CreateIgnoreRulesService();
-        using var coordinator = CreateCoordinator(viewModel, ignoreRulesService, () => currentPath);
+		using var coordinator = CreateCoordinator(viewModel, ignoreRulesService, () => currentPath);
 
-        await coordinator.RefreshRootAndDependentsAsync(
+        await coordinator.RefreshProjectSelectionAsync(
             currentPath,
             TestContext.Current.CancellationToken);
-        coordinator.HookOptionListeners(viewModel.RootFolders);
         coordinator.HookOptionListeners(viewModel.Extensions);
         coordinator.HookIgnoreListeners(viewModel.IgnoreOptions);
 
-        SetChecked(viewModel.RootFolders, "docs", false);
         SetChecked(viewModel.Extensions, ".md", false);
         SetChecked(viewModel.IgnoreOptions, IgnoreOptionId.EmptyFiles, false);
         await coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken);
@@ -40,8 +132,8 @@ public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
         File.SetLastWriteTimeUtc(gitIgnorePath, originalWriteTime);
         await RefreshLikeF5Async(workspace.Path, coordinator, ignoreRulesService);
 
-        AssertOption(viewModel.RootFolders, "git-cache-a", expectedChecked: true);
-        Assert.DoesNotContain(viewModel.RootFolders, option => option.Name == "git-cache-b");
+        Assert.Contains("git-cache-a", coordinator.GetProjectScanRoots(), PathComparer.Default);
+        Assert.DoesNotContain("git-cache-b", coordinator.GetProjectScanRoots(), PathComparer.Default);
         await AssertIslandMatchesColdSnapshotAsync(
             "same-metadata .gitignore rewrite",
             workspace.Path,
@@ -78,7 +170,7 @@ public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
         await RefreshLikeF5Async(workspace.Path, coordinator, ignoreRulesService);
 
         AssertOption(viewModel.IgnoreOptions, IgnoreOptionId.SmartIgnore, expectedChecked: true);
-        Assert.DoesNotContain(viewModel.RootFolders, option => option.Name == "node_modules");
+        Assert.DoesNotContain("node_modules", coordinator.GetProjectScanRoots(), PathComparer.Default);
         await AssertIslandMatchesColdSnapshotAsync(
             "smart controller evidence restored for another stack",
             workspace.Path,
@@ -87,19 +179,16 @@ public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
 
         Directory.Delete(Path.Combine(workspace.Path, "docs"), recursive: true);
         await RefreshLikeF5Async(workspace.Path, coordinator, ignoreRulesService);
-        Assert.DoesNotContain(viewModel.RootFolders, option => option.Name == "docs");
+        Assert.DoesNotContain("docs", coordinator.GetProjectScanRoots(), PathComparer.Default);
         Assert.DoesNotContain(viewModel.Extensions, option => option.Name == ".md");
 
         workspace.CreateFile("docs/readme.md", "# Restored\n");
         await RefreshLikeF5Async(workspace.Path, coordinator, ignoreRulesService);
 
-        AssertOption(viewModel.RootFolders, "docs", expectedChecked: false);
-        Assert.DoesNotContain(viewModel.Extensions, option => option.Name == ".md");
-        SetChecked(viewModel.RootFolders, "docs", true);
-        await coordinator.WaitForPendingRefreshesAsync(TestContext.Current.CancellationToken);
+        Assert.Contains("docs", coordinator.GetProjectScanRoots(), PathComparer.Default);
         AssertOption(viewModel.Extensions, ".md", expectedChecked: false);
         await AssertIslandMatchesColdSnapshotAsync(
-            "deleted unchecked root and extension restored",
+            "deleted root and unchecked extension restored",
             workspace.Path,
             viewModel,
             coordinator);
@@ -107,7 +196,7 @@ public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
         workspace.CreateFile("generated/report.json", "{}\n");
         await RefreshLikeF5Async(workspace.Path, coordinator, ignoreRulesService);
 
-        AssertOption(viewModel.RootFolders, "generated", expectedChecked: true);
+        Assert.Contains("generated", coordinator.GetProjectScanRoots(), PathComparer.Default);
         AssertOption(viewModel.Extensions, ".json", expectedChecked: true);
         await AssertIslandMatchesColdSnapshotAsync(
             "new root and extension",
@@ -120,7 +209,7 @@ public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
         await RefreshLikeF5Async(workspace.Path, coordinator, ignoreRulesService);
 
         Assert.DoesNotContain(viewModel.IgnoreOptions, option => option.Id == IgnoreOptionId.UseGitIgnore);
-        AssertOption(viewModel.RootFolders, "git-cache-b", expectedChecked: true);
+        Assert.Contains("git-cache-b", coordinator.GetProjectScanRoots(), PathComparer.Default);
         await AssertIslandMatchesColdSnapshotAsync(
             "git controller removed",
             workspace.Path,
@@ -131,8 +220,8 @@ public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
         await RefreshLikeF5Async(workspace.Path, coordinator, ignoreRulesService);
 
         AssertOption(viewModel.IgnoreOptions, IgnoreOptionId.UseGitIgnore, expectedChecked: true);
-        Assert.DoesNotContain(viewModel.RootFolders, option => option.Name == "git-cache-a");
-        AssertOption(viewModel.RootFolders, "git-cache-b", expectedChecked: true);
+        Assert.DoesNotContain("git-cache-a", coordinator.GetProjectScanRoots(), PathComparer.Default);
+        Assert.Contains("git-cache-b", coordinator.GetProjectScanRoots(), PathComparer.Default);
         await AssertIslandMatchesColdSnapshotAsync(
             "git controller restored",
             workspace.Path,
@@ -152,15 +241,11 @@ public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
         var currentPath = workspace.Path;
         var viewModel = CreateViewModel();
         var ignoreRulesService = ProjectLoadWorkflowRuntime.CreateIgnoreRulesService();
-        using var coordinator = CreateCoordinator(viewModel, ignoreRulesService, () => currentPath);
+		using var coordinator = CreateCoordinator(viewModel, ignoreRulesService, () => currentPath);
         var profile = new ProjectSelectionProfile(
-            SelectedRootFolders: ["workspace"],
+            SelectedRootFolders: [],
             SelectedExtensions: [".cs", ".deep"],
             SelectedIgnoreOptions: [],
-            RootFolderStates: new Dictionary<string, bool>(PathComparer.Default)
-            {
-                ["workspace"] = true
-            },
             ExtensionStates: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
             {
                 [".cs"] = true,
@@ -172,10 +257,9 @@ public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
             });
 
         coordinator.ApplyProjectProfileSelections(currentPath, profile);
-        await coordinator.RefreshRootAndDependentsAsync(
+        await coordinator.RefreshProjectSelectionAsync(
             currentPath,
             TestContext.Current.CancellationToken);
-        coordinator.HookOptionListeners(viewModel.RootFolders);
         coordinator.HookOptionListeners(viewModel.Extensions);
         coordinator.HookIgnoreListeners(viewModel.IgnoreOptions);
 
@@ -218,7 +302,7 @@ public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
         var currentPath = workspace.Path;
         var viewModel = CreateViewModel();
         var ignoreRulesService = ProjectLoadWorkflowRuntime.CreateIgnoreRulesService();
-        using var coordinator = CreateCoordinator(viewModel, ignoreRulesService, () => currentPath);
+		using var coordinator = CreateCoordinator(viewModel, ignoreRulesService, () => currentPath);
         var profile = new ProjectSelectionProfile(
             SelectedRootFolders: [],
             SelectedExtensions: [],
@@ -230,10 +314,9 @@ public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
             });
 
         coordinator.ApplyProjectProfileSelections(currentPath, profile);
-        await coordinator.RefreshRootAndDependentsAsync(
+        await coordinator.RefreshProjectSelectionAsync(
             currentPath,
             TestContext.Current.CancellationToken);
-        coordinator.HookOptionListeners(viewModel.RootFolders);
         coordinator.HookOptionListeners(viewModel.Extensions);
         coordinator.HookIgnoreListeners(viewModel.IgnoreOptions);
 
@@ -248,8 +331,8 @@ public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
 
         AssertOption(viewModel.IgnoreOptions, IgnoreOptionId.UseGitIgnore, expectedChecked: false);
         AssertOption(viewModel.IgnoreOptions, IgnoreOptionId.SmartIgnore, expectedChecked: false);
-        AssertOption(viewModel.RootFolders, "logs", expectedChecked: true);
-        AssertOption(viewModel.RootFolders, "__pycache__", expectedChecked: true);
+        Assert.Contains("logs", coordinator.GetProjectScanRoots(), PathComparer.Default);
+        Assert.Contains("__pycache__", coordinator.GetProjectScanRoots(), PathComparer.Default);
         await AssertIslandMatchesColdSnapshotAsync(
             "unchecked controllers appear",
             workspace.Path,
@@ -283,67 +366,6 @@ public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
             coordinator);
     }
 
-    [AvaloniaFact]
-    public async Task CorruptedPersistedRootStates_CannotEscapeProjectOrPublishPhantomOptions()
-    {
-        using var parent = new TemporaryDirectory();
-        var projectPath = parent.CreateFolder("project");
-        var outsidePath = parent.CreateFolder("outside");
-        WriteFile(projectPath, "src/App.cs", "class App {}\n");
-        WriteFile(outsidePath, "leak/secret.outside", "must not be scanned\n");
-
-        var viewModel = CreateViewModel();
-        var ignoreRulesService = ProjectLoadWorkflowRuntime.CreateIgnoreRulesService();
-        using var coordinator = CreateCoordinator(viewModel, ignoreRulesService, () => projectPath);
-        var maliciousRootStates = new Dictionary<string, bool>(PathComparer.Default)
-        {
-            ["src"] = true,
-            ["missing"] = true,
-            ["."] = true,
-            [".."] = true,
-            [$"..{Path.DirectorySeparatorChar}outside"] = true,
-            [$"src{Path.DirectorySeparatorChar}nested"] = true,
-            [outsidePath] = true
-        };
-        var profile = new ProjectSelectionProfile(
-            SelectedRootFolders: maliciousRootStates
-                .Where(static pair => pair.Value)
-                .Select(static pair => pair.Key)
-                .ToArray(),
-            SelectedExtensions: [".cs", ".outside"],
-            SelectedIgnoreOptions: [],
-            RootFolderStates: maliciousRootStates,
-            ExtensionStates: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
-            {
-                [".cs"] = true,
-                [".outside"] = true
-            },
-            IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>());
-
-        coordinator.ApplyProjectProfileSelections(projectPath, profile);
-        await coordinator.RefreshRootAndDependentsAsync(
-            projectPath,
-            TestContext.Current.CancellationToken);
-
-        var root = Assert.Single(viewModel.RootFolders);
-        Assert.Equal("src", root.Name);
-        Assert.True(root.IsChecked);
-        Assert.Contains(viewModel.Extensions, option => option.Name == ".cs" && option.IsChecked);
-        Assert.DoesNotContain(viewModel.Extensions, option => option.Name == ".outside");
-        Assert.All(
-            viewModel.RootFolders,
-            option => Assert.StartsWith(
-                Path.GetFullPath(projectPath) + Path.DirectorySeparatorChar,
-                Path.GetFullPath(Path.Combine(projectPath, option.Name)),
-                PathComparer.Comparison));
-
-        await AssertIslandMatchesColdSnapshotAsync(
-            "corrupted root profile",
-            projectPath,
-            viewModel,
-            coordinator);
-    }
-
     private static async Task RefreshLikeF5Async(
         string rootPath,
         SelectionSyncCoordinator coordinator,
@@ -355,7 +377,7 @@ public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
         if (!canReuseCaches)
             coordinator.InvalidateFileSystemCaches();
 
-        await coordinator.RefreshRootAndDependentsAsync(
+        await coordinator.RefreshProjectSelectionAsync(
             rootPath,
             TestContext.Current.CancellationToken);
     }
@@ -366,85 +388,81 @@ public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
         MainWindowViewModel viewModel,
         SelectionSyncCoordinator coordinator)
     {
-        var rootStates = coordinator.SnapshotRootOptionStatesForPersistence() ??
-            new Dictionary<string, bool>(PathComparer.Default);
+        var scanRoots = coordinator.GetProjectScanRoots().ToHashSet(PathComparer.Default);
         var extensionStates = coordinator.SnapshotExtensionOptionStatesForPersistence() ??
             new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
         var ignoreStates = coordinator.SnapshotIgnoreOptionStatesForPersistence() ??
             new Dictionary<IgnoreOptionId, bool>();
         var coldRulesService = ProjectLoadWorkflowRuntime.CreateIgnoreRulesService();
         var coldEngine = CreateEngine(coldRulesService);
-        var context = new SelectionRefreshContext(
-            Path: rootPath,
-            PreparedSelectionMode: PreparedSelectionMode.None,
-            AllRootFoldersChecked: viewModel.AllRootFoldersChecked && !rootStates.Values.Contains(false),
-            AllExtensionsChecked: viewModel.AllExtensionsChecked && !extensionStates.Values.Contains(false),
-            RootSelectionInitialized: true,
-            RootSelectionCache: rootStates
-                .Where(static pair => pair.Value)
-                .Select(static pair => pair.Key)
-                .ToHashSet(PathComparer.Default),
-            ExtensionsSelectionInitialized: true,
-            ExtensionsSelectionCache: extensionStates
+        var context = SelectionRefreshContext.ForDesktop(
+            path: rootPath,
+            preparedSelectionMode: PreparedSelectionMode.None,
+            allExtensionsChecked: viewModel.AllExtensionsChecked && !extensionStates.Values.Contains(false),
+            extensionsSelectionInitialized: true,
+            extensionsSelectionCache: extensionStates
                 .Where(static pair => pair.Value)
                 .Select(static pair => pair.Key)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase),
-            IgnoreSelectionInitialized: true,
-            IgnoreSelectionCache: ignoreStates
+            ignoreSelectionInitialized: true,
+            ignoreSelectionCache: ignoreStates
                 .Where(static pair => pair.Value)
                 .Select(static pair => pair.Key)
                 .ToHashSet(),
-            IgnoreOptionStateCache: ignoreStates,
-            IgnoreAllPreference: null,
-            CurrentSnapshotState: new IgnoreSectionSnapshotState(
+            ignoreOptionStateCache: ignoreStates,
+            ignoreAllPreference: null,
+            currentSnapshotState: new IgnoreSectionSnapshotState(
                 HasIgnoreOptionCounts: false,
                 IgnoreOptionCounts: IgnoreOptionCounts.Empty,
                 ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
                 HasExtensionlessEntries: false,
                 ExtensionlessEntriesCount: 0),
-            RootOptionStateCache: rootStates,
-            ExtensionOptionStateCache: extensionStates,
-            IgnoreOptionStateCacheIsComplete: true,
-            CaptureTreeInventory: true,
-            CurrentRootOptions: viewModel.RootFolders
-                .Select(static option => new SelectionOption(option.Name, option.IsChecked))
-                .ToArray());
+            extensionOptionStateCache: extensionStates,
+            ignoreOptionStateCacheIsComplete: true,
+            captureTreeInventory: true,
+            currentScanRootOptions: scanRoots
+                .Select(static root => new SelectionOption(root, true))
+                .ToArray(),
+            extensionSelectionIsExplicit: false);
         var coldSnapshot = coldEngine.ComputeFullRefreshSnapshot(
             context,
             TestContext.Current.CancellationToken);
 
-        AssertOptionsEqual(
-            coldSnapshot.RootOptions ?? [],
-            viewModel.RootFolders.Select(static option => new SelectionOption(option.Name, option.IsChecked)),
-            $"{step}: root options");
+        var coldScanRoots = (coldSnapshot.RootOptions ?? [])
+            .Where(static option => option.IsChecked)
+            .Select(static option => option.Name)
+            .ToHashSet(PathComparer.Default);
+        Assert.True(
+            scanRoots.SetEquals(coldScanRoots),
+            $"{step}: scan roots differ from a cold refresh. " +
+            $"Expected=[{string.Join(", ", coldScanRoots.Order(PathComparer.Default))}]; " +
+            $"Actual=[{string.Join(", ", scanRoots.Order(PathComparer.Default))}].");
         AssertOptionsEqual(
             coldSnapshot.EffectiveExtensionOptions,
             viewModel.Extensions.Select(static option => new SelectionOption(option.Name, option.IsChecked)),
             $"{step}: extension options");
         Assert.True(
             coldSnapshot.IgnoreOptions.SequenceEqual(
-                viewModel.IgnoreOptions.Select(static option =>
-                    new ResolvedIgnoreOptionState(option.Id, option.Label, DefaultChecked: true, option.IsChecked))),
+				 viewModel.IgnoreOptions.Select(static option =>
+					 new ResolvedIgnoreOptionState(
+						 option.Id,
+						 option.Label,
+						 DefaultChecked: !ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option.Id),
+						 option.IsChecked))),
             $"{step}: ignore options differ from a cold refresh.");
 
         Assert.Equal(
-            viewModel.RootFolders.Count == 0 || viewModel.RootFolders.All(static option => option.IsChecked),
-            viewModel.AllRootFoldersChecked);
-        Assert.Equal(
             viewModel.Extensions.Count > 0 && viewModel.Extensions.All(static option => option.IsChecked),
             viewModel.AllExtensionsChecked);
-        Assert.Equal(
-            viewModel.IgnoreOptions.Count > 0 && viewModel.IgnoreOptions.All(static option => option.IsChecked),
-            viewModel.AllIgnoreChecked);
+		Assert.Equal(
+			AreAllPathIgnoreOptionsChecked(viewModel.IgnoreOptions),
+			viewModel.AllIgnoreChecked);
 
         Assert.All(
-            viewModel.RootFolders,
-            option => Assert.True(
-                Directory.Exists(Path.Combine(rootPath, option.Name)),
-                $"{step}: root option '{option.Name}' is not a direct existing directory."));
-        Assert.Equal(
-            viewModel.RootFolders.Count,
-            viewModel.RootFolders.Select(static option => option.Name).Distinct(PathComparer.Default).Count());
+            scanRoots,
+            root => Assert.True(
+                Directory.Exists(Path.Combine(rootPath, root)),
+                $"{step}: scan root '{root}' is not a direct existing directory."));
         Assert.Equal(
             viewModel.Extensions.Count,
             viewModel.Extensions.Select(static option => option.Name)
@@ -454,10 +472,7 @@ public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
             viewModel.IgnoreOptions.Count,
             viewModel.IgnoreOptions.Select(static option => option.Id).Distinct().Count());
 
-        var selectedRoots = viewModel.RootFolders
-            .Where(static option => option.IsChecked)
-            .Select(static option => option.Name)
-            .ToHashSet(PathComparer.Default);
+        var selectedRoots = scanRoots;
         var selectedExtensions = viewModel.Extensions
             .Where(static option => option.IsChecked)
             .Select(static option => option.Name)
@@ -477,12 +492,26 @@ public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
             .ToHashSet(PathComparer.Default);
 
         Assert.True(
-            selectedRoots.SetEquals(treeRoots),
-            $"{step}: checked roots [{string.Join(", ", selectedRoots.Order(PathComparer.Default))}] " +
-            $"do not match final tree roots [{string.Join(", ", treeRoots.Order(PathComparer.Default))}].");
+            treeRoots.IsSubsetOf(selectedRoots),
+            $"{step}: final tree contains a root outside the structural project scope. " +
+            $"Scope=[{string.Join(", ", selectedRoots.Order(PathComparer.Default))}]; " +
+            $"Tree=[{string.Join(", ", treeRoots.Order(PathComparer.Default))}].");
 
         await Task.CompletedTask;
-    }
+	}
+
+	private static bool AreAllPathIgnoreOptionsChecked(IEnumerable<IgnoreOptionViewModel> options)
+	{
+		var pathOptions = options
+			.Where(static option =>
+				!ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option.Id) &&
+				!GitFilteringModeResolver.IsGitFilteringOption(option.Id))
+			.ToArray();
+		if (pathOptions.Length == 0)
+			return false;
+
+		return pathOptions.All(static option => option.IsChecked);
+	}
 
     private static void AssertOptionsEqual(
         IEnumerable<SelectionOption> expected,
@@ -516,11 +545,13 @@ public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
     private static SelectionSyncCoordinator CreateCoordinator(
         MainWindowViewModel viewModel,
         IgnoreRulesService ignoreRulesService,
-        Func<string?> currentPathProvider)
+        Func<string?> currentPathProvider,
+		FileSystemScanner? scanner = null,
+		Action? scanIncomplete = null)
     {
         return new SelectionSyncCoordinator(
             viewModel,
-            new ScanOptionsUseCase(new FileSystemScanner()),
+            new ScanOptionsUseCase(scanner ?? new FileSystemScanner()),
             new FilterOptionSelectionService(),
             ProjectLoadWorkflowRuntime.CreateIgnoreOptionsService(),
             (path, selectedIgnoreOptions, selectedRoots) =>
@@ -530,7 +561,8 @@ public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
                 ShowAdvancedCounts = true
             },
             _ => false,
-            currentPathProvider);
+            currentPathProvider,
+			scanIncomplete: scanIncomplete);
     }
 
     private static MainWindowViewModel CreateViewModel()
@@ -555,15 +587,6 @@ public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
         workspace.CreateFile("empty.txt", string.Empty);
     }
 
-    private static void WriteFile(string rootPath, string relativePath, string content)
-    {
-        var fullPath = Path.Combine(rootPath, relativePath);
-        var directory = Path.GetDirectoryName(fullPath);
-        if (!string.IsNullOrWhiteSpace(directory))
-            Directory.CreateDirectory(directory);
-        File.WriteAllText(fullPath, content);
-    }
-
     private static void SetChecked(
         IEnumerable<SelectionOptionViewModel> options,
         string name,
@@ -601,4 +624,43 @@ public sealed class SelectionSyncCoordinatorFilesystemMutationJourneyTests
         var option = Assert.Single(options, candidate => candidate.Id == id);
         Assert.Equal(expectedChecked, option.IsChecked);
     }
+
+	private sealed class RecordingProfileStore : IProjectProfileStore
+	{
+		public int SaveAttempts { get; private set; }
+		public ProjectSelectionProfile? LastProfile { get; private set; }
+
+		public bool EnsureStorageExists() => true;
+		public bool TryLoadProfile(string localProjectPath, out ProjectSelectionProfile profile)
+		{
+			profile = new ProjectSelectionProfile([], [], []);
+			return false;
+		}
+
+		public bool TrySaveProfile(string localProjectPath, ProjectSelectionProfile profile)
+		{
+			SaveAttempts++;
+			LastProfile = profile;
+			return true;
+		}
+
+		public bool TrySaveProfile(
+			string localProjectPath,
+			ProjectSelectionProfile profile,
+			DateTimeOffset updatedUtc) =>
+			TrySaveProfile(localProjectPath, profile);
+
+		public void SaveProfile(string localProjectPath, ProjectSelectionProfile profile) =>
+			_ = TrySaveProfile(localProjectPath, profile);
+
+		public ProjectProfileClearStatus ClearAllProfiles() => ProjectProfileClearStatus.Cleared;
+	}
+
+	private sealed class EmptySecretDetector : ISecretDetector
+	{
+		public IReadOnlyList<DetectedSecret> Detect(
+			string repositoryRelativePath,
+			string content,
+			CancellationToken cancellationToken = default) => [];
+	}
 }

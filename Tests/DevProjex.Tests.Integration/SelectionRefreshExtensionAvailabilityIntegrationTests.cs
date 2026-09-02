@@ -1,5 +1,3 @@
-using DevProjex.Tests.Shared.ProjectLoadWorkflow;
-
 namespace DevProjex.Tests.Integration;
 
 public sealed class SelectionRefreshExtensionAvailabilityIntegrationTests
@@ -191,7 +189,6 @@ public sealed class SelectionRefreshExtensionAvailabilityIntegrationTests
 
         return services.Engine.ComputeLiveRefreshSnapshot(
             context,
-            selectedRoots,
             TestContext.Current.CancellationToken);
     }
 

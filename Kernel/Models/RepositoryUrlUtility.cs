@@ -1,7 +1,19 @@
+using System.Security.Cryptography;
+using System.Text;
+
 namespace DevProjex.Kernel.Models;
 
 public static class RepositoryUrlUtility
 {
+	private const string ComparisonIdentityVersionPrefix = "v2:";
+	private static readonly HashSet<string> CaseInsensitiveRepositoryPathHosts = new(
+		StringComparer.OrdinalIgnoreCase)
+	{
+		"github.com",
+		"gitlab.com",
+		"bitbucket.org"
+	};
+
 	public static bool TryNormalize(string? repositoryUrl, out string normalizedUrl)
 	{
 		normalizedUrl = Normalize(repositoryUrl);
@@ -18,10 +30,23 @@ public static class RepositoryUrlUtility
 			return string.Empty;
 
 		if (TryParseScpSyntax(trimmed, out var scp))
-			return $"{scp.UserPrefix}{scp.Host.ToLowerInvariant()}:{NormalizePath(scp.Path)}";
+		{
+			var safePath = RemoveQueryAndFragment(scp.Path);
+			return safePath.Length == 0
+				? string.Empty
+				: $"{scp.UserPrefix}{scp.Host.ToLowerInvariant()}:{NormalizePath(safePath)}";
+		}
 
 		if (!Uri.TryCreate(trimmed.Replace('\\', '/'), UriKind.Absolute, out var uri))
-			return trimmed.Replace('\\', '/').TrimEnd('/');
+			return trimmed.Contains("://", StringComparison.Ordinal)
+				? string.Empty
+				: trimmed.Replace('\\', '/').TrimEnd('/');
+		if (uri.Host.Length == 0 &&
+		    !uri.IsFile &&
+		    trimmed.Contains('@', StringComparison.Ordinal))
+		{
+			return string.Empty;
+		}
 
 		try
 		{
@@ -53,18 +78,30 @@ public static class RepositoryUrlUtility
 			return string.Empty;
 
 		if (TryParseScpSyntax(normalized, out var scp))
-			return BuildHostPathKey(scp.Host, -1, scp.Path);
+			return BuildVersionedHostPathKey(scp.Host, -1, scp.Path);
 
 		if (Uri.TryCreate(normalized, UriKind.Absolute, out var uri) &&
 		    uri.Scheme is "http" or "https" or "ssh" or "git")
 		{
-			return BuildHostPathKey(
+			return BuildVersionedHostPathKey(
 				uri.Host,
 				uri.IsDefaultPort ? -1 : uri.Port,
 				uri.AbsolutePath);
 		}
+		if (uri?.IsFile == true)
+			return BuildVersionedFileSystemKey(uri.LocalPath);
 
-		return TrimGitSuffix(normalized);
+		try
+		{
+			if (Path.IsPathFullyQualified(normalized))
+				return BuildVersionedFileSystemKey(normalized);
+		}
+		catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
+		{
+			return string.Empty;
+		}
+
+		return VersionIdentity(TrimGitSuffix(normalized));
 	}
 
 	public static bool AreEquivalent(string? left, string? right)
@@ -72,7 +109,7 @@ public static class RepositoryUrlUtility
 		var leftKey = GetComparisonKey(left);
 		var rightKey = GetComparisonKey(right);
 		return leftKey.Length > 0 &&
-		       string.Equals(leftKey, rightKey, StringComparison.OrdinalIgnoreCase);
+		       string.Equals(leftKey, rightKey, StringComparison.Ordinal);
 	}
 
 	public static string GetRepositoryName(string? repositoryUrl)
@@ -111,6 +148,18 @@ public static class RepositoryUrlUtility
 
 	public static string ToSafeDisplay(string? repositoryUrl) => Normalize(repositoryUrl);
 
+	public static bool IsNetworkCloneSource(string? repositoryUrl)
+	{
+		if (!TryNormalize(repositoryUrl, out var normalized))
+			return false;
+
+		if (TryParseScpSyntax(normalized, out _))
+			return true;
+
+		return Uri.TryCreate(normalized, UriKind.Absolute, out var uri) &&
+		       uri.Scheme is "http" or "https" or "ssh" or "git";
+	}
+
 	public static bool IsSupportedCloneSource(string? repositoryUrl)
 	{
 		if (!TryNormalize(repositoryUrl, out var normalized) ||
@@ -137,13 +186,36 @@ public static class RepositoryUrlUtility
 		}
 	}
 
-	private static string BuildHostPathKey(string host, int port, string path)
+	public static bool IsScpStyleSource(string? repositoryUrl)
+	{
+		if (!TryNormalize(repositoryUrl, out var normalized))
+			return false;
+
+		return TryParseScpSyntax(normalized, out _);
+	}
+
+	private static string BuildVersionedHostPathKey(string host, int port, string path)
 	{
 		var normalizedHost = host.Trim().ToLowerInvariant();
-		var normalizedPath = TrimGitSuffix(NormalizePath(path));
+		var caseInsensitivePath = CaseInsensitiveRepositoryPathHosts.Contains(normalizedHost);
+		var normalizedPath = TrimGitSuffix(
+			NormalizePath(path),
+			caseInsensitivePath ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+		if (caseInsensitivePath)
+			normalizedPath = normalizedPath.ToLowerInvariant();
 		var portSuffix = port > 0 ? $":{port}" : string.Empty;
-		return $"{normalizedHost}{portSuffix}/{normalizedPath.TrimStart('/')}";
+		return VersionIdentity($"{normalizedHost}{portSuffix}/{normalizedPath.TrimStart('/')}");
 	}
+
+	private static string BuildVersionedFileSystemKey(string path)
+	{
+		var normalizedPath = PathUtility.NormalizeForCacheKey(TrimGitSuffix(path));
+		return VersionIdentity(
+			$"file/{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalizedPath)))}");
+	}
+
+	private static string VersionIdentity(string identity) =>
+		$"{ComparisonIdentityVersionPrefix}{identity}";
 
 	private static string GetLastPathSegment(string value)
 	{
@@ -157,8 +229,16 @@ public static class RepositoryUrlUtility
 	private static string NormalizePath(string value) =>
 		value.Replace('\\', '/').Trim().TrimEnd('/');
 
-	private static string TrimGitSuffix(string value) =>
-		value.EndsWith(".git", StringComparison.OrdinalIgnoreCase)
+	private static string RemoveQueryAndFragment(string value)
+	{
+		var separator = value.AsSpan().IndexOfAny('?', '#');
+		return separator < 0 ? value : value[..separator];
+	}
+
+	private static string TrimGitSuffix(
+		string value,
+		StringComparison comparison = StringComparison.OrdinalIgnoreCase) =>
+		value.EndsWith(".git", comparison)
 			? value[..^4]
 			: value;
 

@@ -9,7 +9,9 @@ internal static class ContextAwareCompletionEngine
 		RootCommand root,
 		string commandLine,
 		int cursorPosition,
-		string? baseDirectory = null)
+		string? baseDirectory = null,
+		string? rawBashCurrentWord = null,
+		bool useBashTokenization = false)
 	{
 		ArgumentNullException.ThrowIfNull(root);
 		ArgumentNullException.ThrowIfNull(commandLine);
@@ -19,7 +21,12 @@ internal static class ContextAwareCompletionEngine
 		if (normalized is null)
 			return [];
 
-		var parseResult = root.Parse(normalized.Value.CommandLine);
+		var currentWord = !useBashTokenization
+			? null
+			: BashCompletionWordDecoder.Decode(rawBashCurrentWord ?? string.Empty);
+		var parseResult = useBashTokenization
+			? root.Parse(TokenizeBashCommandLine(normalized.Value, rawBashCurrentWord))
+			: root.Parse(normalized.Value.CommandLine);
 		var command = parseResult.CommandResult.Command;
 		var options = root.Options
 			.Where(static option => option.Recursive)
@@ -34,7 +41,7 @@ internal static class ContextAwareCompletionEngine
 			.ToDictionary(static item => item.Token, static item => item.Option, StringComparer.Ordinal);
 		var visibleCommands = command.Subcommands
 			.Where(static child => !child.Hidden)
-			.Select(static child => child.Name)
+			.SelectMany(static child => new[] { child.Name }.Concat(child.Aliases))
 			.ToHashSet(StringComparer.Ordinal);
 		var completionContext = parseResult.GetCompletionContext();
 		var wordToComplete = completionContext.WordToComplete;
@@ -45,9 +52,11 @@ internal static class ContextAwareCompletionEngine
 			? null
 			: ResolveValueOptionContext(
 				optionByToken,
+				parseResult,
 				normalized.Value.CommandLine,
 				normalized.Value.CursorPosition,
-				wordToComplete);
+				wordToComplete,
+				currentWord);
 		var choiceOption = valueOption is not null &&
 		                   IsChoiceValueType(valueOption.ValueType)
 			? valueOption
@@ -86,7 +95,7 @@ internal static class ContextAwareCompletionEngine
 		{
 			completionValues = completionValues.Concat(
 				FileSystemCompletionSource.Complete(
-					ReadCurrentValuePrefix(
+					currentWord ?? ReadCurrentValuePrefix(
 						normalized.Value.CommandLine,
 						normalized.Value.CursorPosition),
 					fileSystemKind,
@@ -136,7 +145,8 @@ internal static class ContextAwareCompletionEngine
 			var valuePrefix = ResolveChoiceValuePrefix(
 				normalized.Value.CommandLine,
 				normalized.Value.CursorPosition,
-				wordToComplete);
+				wordToComplete,
+				currentWord);
 			if (choiceOption?.ValueType == typeof(CliProfileValue))
 			{
 				candidates = candidates
@@ -161,6 +171,18 @@ internal static class ContextAwareCompletionEngine
 		return candidates
 			.OrderBy(static value => value, StringComparer.Ordinal)
 			.ToArray();
+	}
+
+	private static IReadOnlyList<string> TokenizeBashCommandLine(
+		NormalizedInvocation invocation,
+		string? rawCurrentWord)
+	{
+		var arguments = BashCompletionWordDecoder.Tokenize(
+			invocation.CommandLine,
+			invocation.CursorPosition);
+		return rawCurrentWord is null
+			? [.. arguments, string.Empty]
+			: arguments;
 	}
 
 	private static bool TryGetFileSystemCompletionKind(
@@ -226,14 +248,15 @@ internal static class ContextAwareCompletionEngine
 			return acceptsDataCandidates;
 
 		var hiddenCommand = command.Subcommands.Any(child =>
-			child.Hidden && child.Name.Equals(value, StringComparison.Ordinal));
+			child.Hidden &&
+			(new[] { child.Name }.Concat(child.Aliases)).Contains(value, StringComparer.Ordinal));
 		if (hiddenCommand)
 			return false;
 		if (visibleCommands.Contains(value))
 			return true;
 		return acceptsDataCandidates &&
 		       !command.Subcommands.Any(child =>
-			       child.Name.Equals(value, StringComparison.Ordinal));
+			       new[] { child.Name }.Concat(child.Aliases).Contains(value, StringComparer.Ordinal));
 	}
 
 	private static bool IsAvailable(
@@ -256,11 +279,13 @@ internal static class ContextAwareCompletionEngine
 
 	private static Option? ResolveValueOptionContext(
 		IReadOnlyDictionary<string, Option> optionByToken,
+		ParseResult parseResult,
 		string commandLine,
 		int cursorPosition,
-		string wordToComplete)
+		string wordToComplete,
+		string? currentWord = null)
 	{
-		var lexeme = ReadLexemeBeforeCursor(commandLine, cursorPosition);
+		var lexeme = currentWord ?? ReadLexemeBeforeCursor(commandLine, cursorPosition);
 		var equalsIndex = lexeme.IndexOf('=');
 		if (equalsIndex >= 0)
 		{
@@ -273,6 +298,18 @@ internal static class ContextAwareCompletionEngine
 
 		if (wordToComplete.StartsWith("-", StringComparison.Ordinal))
 			return null;
+		if (currentWord is not null)
+		{
+			var parsedOption = optionByToken.Values
+				.Distinct()
+				.FirstOrDefault(option =>
+					RequiresValue(option) &&
+					parseResult.GetResult(option)?.Tokens.LastOrDefault()?.Value.Equals(
+						currentWord,
+						StringComparison.Ordinal) == true);
+			if (parsedOption is not null)
+				return parsedOption;
+		}
 
 		var precedingLexeme = ReadPrecedingLexeme(commandLine, cursorPosition);
 		return optionByToken.TryGetValue(precedingLexeme, out var option) &&
@@ -429,16 +466,17 @@ internal static class ContextAwareCompletionEngine
 	private static ChoiceValuePrefix ResolveChoiceValuePrefix(
 		string commandLine,
 		int cursorPosition,
-		string wordToComplete)
+		string wordToComplete,
+		string? currentWord)
 	{
 		var position = Math.Clamp(cursorPosition, 0, commandLine.Length);
 		var start = position;
 		while (start > 0 && !char.IsWhiteSpace(commandLine[start - 1]))
 			start--;
-		var lexeme = commandLine[start..position];
+		var lexeme = currentWord ?? commandLine[start..position];
 		var equalsIndex = lexeme.IndexOf('=');
 		return equalsIndex < 0
-			? new ChoiceValuePrefix(wordToComplete, string.Empty)
+			? new ChoiceValuePrefix(currentWord ?? wordToComplete, string.Empty)
 			: new ChoiceValuePrefix(
 				lexeme[(equalsIndex + 1)..],
 				lexeme[..(equalsIndex + 1)]);

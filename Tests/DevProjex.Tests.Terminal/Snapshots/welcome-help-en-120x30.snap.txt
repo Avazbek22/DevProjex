@@ -9,16 +9,16 @@
   │  Open curr│ Workspaces for local folders and Git repositories. The list opens from saved history  █ │rm it.      │
   │  Recent wo│ without network access; repository cache is checked only after selection. Open        █ │            │
   │> Browse fo│ project with settings file is available from the Action Palette.                      █ │            │
-  │  Clone rep│                                                                                       █ │            │
-  │  Open Desk│ WORKSPACE                                                                             █ │            │
-  │  Help     │ Tree controls selection. Preview shows Tree, Content, or Tree + Content in ASCII,     █ │            │
-  │  Exit     │ JSON, XML, or Markdown. Parameters exposes Git filtering, Exclusions, File Types, and █ │            │
-  └───────────│ Root Folders. Ctrl+P opens every action, including exports and Desktop.               █ │────────────┘
-              │                                                                                       █ │
+  │  Open proj│                                                                                       █ │            │
+  │  Clone rep│ WORKSPACE                                                                             █ │            │
+  │  Open Desk│ Tree controls selection. Preview shows Tree, Content, or Tree + Content in ASCII,     █ │            │
+  │  Help     │ JSON, XML, or Markdown. Parameters contains independent Content Processing,           █ │            │
+  │  Exit     │ Exclusions, and File Types mini-panels. Ctrl+P opens every action, including exports  █ │            │
+  └───────────│ and Desktop.                                                                          ░ │────────────┘
+              │                                                                                       ░ │
   Direct autom│ NAVIGATION                                                                            ░ │
               │ Up/Down or j/k moves, Enter opens, Space toggles, Tab/F6 changes panes, Shift         ░ │
-              │ reverses direction, / searches, and ? opens contextual Help. Esc closes one overlay   ░ │
-              │ or clears the current search.                                                         ▼ │
+              │ reverses direction, / searches, and ? opens contextual Help. Esc closes one overlay   ▼ │
               │                                                                                         │
               │                                                                                         │
               │                                      ⟦► Close ◄⟧▖                                       │
@@ -27,4 +27,4 @@
 
 
 
-  Up/Down or j/k Navigate   Enter Select   Ctrl+P Actions   ? Help   q Exit
+  1-9 Recent   Enter Select   : Commands   Ctrl+P Actions   ? Help   q Exit

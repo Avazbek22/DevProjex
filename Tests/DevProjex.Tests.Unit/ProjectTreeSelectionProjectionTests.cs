@@ -1,5 +1,3 @@
-using DevProjex.Application.Selection;
-
 namespace DevProjex.Tests.Unit;
 
 public sealed class ProjectTreeSelectionProjectionTests
@@ -65,12 +63,22 @@ public sealed class ProjectTreeSelectionProjectionTests
 			.Select(key => fixture.Paths[key])
 			.ToHashSet(PathComparer.Default);
 
-		var actual = ProjectTreeSelectionProjection.BuildIncludedNodes(fixture.Root, selected)
+		var includedNodes = ProjectTreeSelectionProjection.BuildIncludedNodes(fixture.Root, selected);
+		var actual = includedNodes
+			.Select(node => Path.GetRelativePath(fixture.Root.FullPath, node.FullPath).Replace('\\', '/'))
+			.OrderBy(path => path, StringComparer.Ordinal)
+			.ToArray();
+		var includedPaths = includedNodes
+			.Select(static node => node.FullPath)
+			.ToHashSet(PathComparer.Default);
+		var projected = ProjectTreeSelectionProjection.BuildProjectedTree(fixture.Root, includedPaths);
+		var projectedPaths = EnumerateNodes(projected!)
 			.Select(node => Path.GetRelativePath(fixture.Root.FullPath, node.FullPath).Replace('\\', '/'))
 			.OrderBy(path => path, StringComparer.Ordinal)
 			.ToArray();
 
 		Assert.Equal(expectedRelativePaths.OrderBy(path => path, StringComparer.Ordinal), actual);
+		Assert.Equal(expectedRelativePaths.OrderBy(path => path, StringComparer.Ordinal), projectedPaths);
 	}
 
 	[Fact]
@@ -103,7 +111,7 @@ public sealed class ProjectTreeSelectionProjectionTests
 			fixture.Root,
 			new HashSet<string>(PathComparer.Default),
 			Path.GetTempPath(),
-			ProjectCopyExportFormat.Folder));
+			ProjectCopyExportFormat.Folder), TestContext.Current.CancellationToken);
 		var checkedRootPlan = builder.Build(new ProjectCopyExportRequest(
 			fixture.Root.FullPath,
 			"root",
@@ -113,15 +121,18 @@ public sealed class ProjectTreeSelectionProjectionTests
 				fixture.Root.FullPath
 			},
 			Path.GetTempPath(),
-			ProjectCopyExportFormat.Folder));
+			ProjectCopyExportFormat.Folder), TestContext.Current.CancellationToken);
 
 		Assert.Equal(implicitPlan.Entries, checkedRootPlan.Entries);
 		Assert.Equal(implicitPlan.FileCount, checkedRootPlan.FileCount);
 		Assert.Equal(implicitPlan.DirectoryCount, checkedRootPlan.DirectoryCount);
 	}
 
-	[Fact]
-	public void ExportPlan_CaseVariantPathsFollowCurrentPlatformFilesystemSemantics()
+	[Theory]
+	[InlineData(ProjectCopyExportFormat.Folder)]
+	[InlineData(ProjectCopyExportFormat.Zip)]
+	public void ExportPlan_CaseVariantPathsFollowDestinationSemantics(
+		ProjectCopyExportFormat format)
 	{
 		var rootPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "project-copy-case-root"));
 		var upperPath = Path.Combine(rootPath, "File.txt");
@@ -137,11 +148,119 @@ public sealed class ProjectTreeSelectionProjectionTests
 			tree,
 			new HashSet<string>(PathComparer.Default),
 			Path.GetTempPath(),
+			format);
+
+		var builder = new ProjectCopyExportPlanBuilder();
+		if (OperatingSystem.IsWindows() && format == ProjectCopyExportFormat.Folder)
+		{
+			var exception = Assert.Throws<ProjectCopyExportException>(() =>
+				builder.Build(request, TestContext.Current.CancellationToken));
+			Assert.Equal(ProjectCopyExportError.InvalidRequest, exception.Error);
+			return;
+		}
+
+		var plan = builder.Build(
+			request,
+			TestContext.Current.CancellationToken);
+		Assert.Equal(2, plan.FileCount);
+		Assert.Equal(
+			["File.txt", "file.txt"],
+			plan.Entries
+				.Where(static entry => !entry.IsDirectory)
+				.Select(static entry => entry.RelativePath));
+	}
+
+	[Fact]
+	public void SparseSelection_DeepTreeDoesNotDependOnTheCallStack()
+	{
+		const int depth = 16_000;
+		var leafPath = "/root/leaf.txt";
+		TreeNodeDescriptor root = new("leaf.txt", leafPath, false, false, "file", []);
+		for (var level = depth - 1; level >= 0; level--)
+		{
+			root = new TreeNodeDescriptor(
+				$"level-{level:D4}",
+				$"/root/level-{level:D4}",
+				true,
+				false,
+				"folder",
+				[root]);
+		}
+		var selected = new HashSet<string>([leafPath], PathComparer.Default);
+
+		var included = ProjectTreeSelectionProjection.BuildIncludedNodes(root, selected);
+		var projected = ProjectTreeSelectionProjection.BuildProjectedTree(
+			root,
+			included.Select(static node => node.FullPath).ToHashSet(PathComparer.Default));
+		var orderedFiles = ProjectTreeSelectionProjection.BuildOrderedSelectedFilePaths(
+			root,
+			selected,
+			ensureExists: false);
+		var collected = new HashSet<string>(PathComparer.Default);
+		ProjectTreeSelectionProjection.CollectSelectedFilePaths(
+			root,
+			selected,
+			collected,
+			maxCount: 1,
+			ensureExists: false);
+
+		Assert.Equal(depth + 1, included.Count);
+		Assert.Equal(leafPath, included[0].FullPath);
+		Assert.Equal(root.FullPath, included[^1].FullPath);
+		Assert.Equal(depth + 1, EnumerateNodes(projected!).Count());
+		Assert.Equal(leafPath, Assert.Single(orderedFiles));
+		Assert.Equal(leafPath, Assert.Single(collected));
+	}
+
+	[Fact]
+	public void BuildIncludedNodesWithCancellation_StopsDuringTraversal()
+	{
+		using var cancellation = new CancellationTokenSource();
+		var child = new TreeNodeDescriptor("file.txt", "/root/file.txt", false, false, "file", []);
+		var root = new TreeNodeDescriptor(
+			"root",
+			"/root",
+			true,
+			false,
+			"folder",
+			new CancelOnReadList<TreeNodeDescriptor>([child], cancellation));
+
+		Assert.Throws<OperationCanceledException>(() =>
+			ProjectTreeSelectionProjection.BuildIncludedNodesWithCancellation(
+				root,
+				new HashSet<string>(PathComparer.Default),
+				cancellation.Token));
+	}
+
+	[Fact]
+	public void ExportPlanWithCancellation_StopsDuringTreeProjection()
+	{
+		using var cancellation = new CancellationTokenSource();
+		var rootPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "project-copy-cancel-root"));
+		var child = new TreeNodeDescriptor(
+			"file.txt",
+			Path.Combine(rootPath, "file.txt"),
+			false,
+			false,
+			"file",
+			[]);
+		var root = new TreeNodeDescriptor(
+			"root",
+			rootPath,
+			true,
+			false,
+			"folder",
+			new CancelOnReadList<TreeNodeDescriptor>([child], cancellation));
+		var request = new ProjectCopyExportRequest(
+			rootPath,
+			"root",
+			root,
+			new HashSet<string>(PathComparer.Default),
+			Path.GetTempPath(),
 			ProjectCopyExportFormat.Folder);
 
-		var plan = new ProjectCopyExportPlanBuilder().Build(request);
-
-		Assert.Equal(OperatingSystem.IsWindows() ? 1 : 2, plan.FileCount);
+		Assert.Throws<OperationCanceledException>(() =>
+			new ProjectCopyExportPlanBuilder().Build(request, cancellation.Token));
 	}
 
 	public static TheoryData<string, string[], string[]> SelectionCases => new()
@@ -182,6 +301,40 @@ public sealed class ProjectTreeSelectionProjectionTests
 			[".", "src", "src/Program.cs", "src/assets.bin"]
 		}
 	};
+
+	private sealed class CancelOnReadList<T>(
+		IReadOnlyList<T> items,
+		CancellationTokenSource cancellation) : IReadOnlyList<T>
+	{
+		public int Count => items.Count;
+
+		public T this[int index]
+		{
+			get
+			{
+				var item = items[index];
+				cancellation.Cancel();
+				return item;
+			}
+		}
+
+		public IEnumerator<T> GetEnumerator() => items.GetEnumerator();
+
+		System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+	}
+
+	private static IEnumerable<TreeNodeDescriptor> EnumerateNodes(TreeNodeDescriptor root)
+	{
+		var stack = new Stack<TreeNodeDescriptor>();
+		stack.Push(root);
+		while (stack.Count > 0)
+		{
+			var node = stack.Pop();
+			yield return node;
+			for (var index = node.Children.Count - 1; index >= 0; index--)
+				stack.Push(node.Children[index]);
+		}
+	}
 
 	private sealed record SelectionFixture(
 		TreeNodeDescriptor Root,

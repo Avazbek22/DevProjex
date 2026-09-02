@@ -11,14 +11,21 @@ public sealed class LocalizationToastKeysTests
 		"Toast.Export.Content",
 		"Toast.Export.TreeAndContent",
 		"Toast.NoMatches",
+		"Toast.Tree.CheckedSelectionHidden",
+		"Toast.Secret.AlreadyHidden",
 		"Toast.Git.CloneSuccess",
 		"Toast.Git.CloneError",
+		"Toast.Git.CachedUpdateFailed",
+		"Toast.Git.CacheEntryMissing",
 		"Toast.Git.UpdatesApplied",
 		"Toast.Git.NoUpdates",
 		"Toast.Git.BranchSwitched",
 		"Toast.Refresh.Success",
 		"Toast.Settings.Reset",
-		"Toast.Data.Reset"
+		"Toast.Data.Reset",
+		"Toast.Data.Reset.Busy",
+		"Toast.Data.Reset.FutureSchema",
+		"Toast.Data.Reset.Failed"
 	];
 
 	[Fact]
@@ -57,8 +64,10 @@ public sealed class LocalizationToastKeysTests
 		}
 	}
 
-	[Fact]
-	public void ToastBranchSwitched_ContainsPlaceholder()
+	[Theory]
+	[InlineData("Toast.Git.BranchSwitched")]
+	[InlineData("Toast.Tree.CheckedSelectionHidden")]
+	public void FormattedToast_ContainsPlaceholder(string key)
 	{
 		var localizationDir = Path.Combine(FindRepositoryRoot(), "Assets", "Localization");
 		var files = Directory.GetFiles(localizationDir, "*.json");
@@ -66,10 +75,22 @@ public sealed class LocalizationToastKeysTests
 		foreach (var file in files)
 		{
 			var map = ReadKeyValues(File.ReadAllText(file));
-			Assert.True(map.TryGetValue("Toast.Git.BranchSwitched", out var value),
-				$"Missing Toast.Git.BranchSwitched in {Path.GetFileName(file)}");
+			Assert.True(map.TryGetValue(key, out var value),
+				$"Missing {key} in {Path.GetFileName(file)}");
 			Assert.Contains("{0}", value);
 		}
+	}
+
+	[Theory]
+	[InlineData(ProjectProfileClearStatus.Cleared, "Toast.Data.Reset")]
+	[InlineData(ProjectProfileClearStatus.Busy, "Toast.Data.Reset.Busy")]
+	[InlineData(ProjectProfileClearStatus.FutureSchema, "Toast.Data.Reset.FutureSchema")]
+	[InlineData(ProjectProfileClearStatus.Failed, "Toast.Data.Reset.Failed")]
+	public void ResetDataResult_MapsToAnExplicitLocalizedMessage(
+		ProjectProfileClearStatus status,
+		string expectedKey)
+	{
+		Assert.Equal(expectedKey, MainWindow.ResolveResetDataResultLocalizationKey(status));
 	}
 
 	private static HashSet<string> ReadKeys(string json)

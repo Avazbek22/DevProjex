@@ -14,8 +14,11 @@ public partial class MainWindow : IPreviewWorkspacePipelineHost
 
     bool IPreviewWorkspacePipelineHost.EnsurePreviewTreeReady() => EnsureTreeReady();
 
-    void IPreviewWorkspacePipelineHost.ApplyPreviewNoDataText() =>
+    void IPreviewWorkspacePipelineHost.ApplyPreviewNoDataText()
+    {
         ApplyPreviewText(_viewModel.PreviewNoDataText);
+        CompleteDeferredRedactionDecisionPresentation();
+    }
 
     long IPreviewWorkspacePipelineHost.BeginPreviewBuildOperation(CancellationTokenSource previewCts)
     {
@@ -99,6 +102,15 @@ public partial class MainWindow : IPreviewWorkspacePipelineHost
             text.Length,
             lineCount);
     }
+
+    string IPreviewWorkspacePipelineHost.ResolvePreviewErrorMessage(Exception exception) =>
+        ResolveUserFacingOutputErrorMessage(exception);
+
+	void IPreviewWorkspacePipelineHost.HandlePreviewBuildFailure(Exception exception)
+	{
+		HandlePreviewSecretAnalysisFailure(exception);
+		CompleteDeferredRedactionDecisionPresentation();
+	}
 
     void IPreviewWorkspacePipelineHost.ClearPreviewDocument() =>
         ClearPreviewDocument();

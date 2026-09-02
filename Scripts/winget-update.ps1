@@ -9,6 +9,8 @@
     3) builds GitHub installer URLs for the selected architecture set
     4) runs wingetcreate update into a temp folder
     5) updates License field in locale manifests
+    5a) rewrites listing metadata (descriptions, tags, URLs, docs links,
+        release notes, 19 locale manifests) from winget-listing/listing.json
     6) validates manifest locally
     7) optionally tests local install from manifest
     8) optionally submits PR
@@ -26,7 +28,7 @@ param(
     [string]$Repository = "Avazbek22/DevProjex",
     [ValidateSet("x64", "arm64", "all")]
     [string]$Architecture = "all",
-    [string]$LicenseValue = "GPL-3.0-only"
+    [string]$LicenseValue = "Apache-2.0"
 )
 
 Set-StrictMode -Version Latest
@@ -159,6 +161,147 @@ function Update-LicenseInLocaleManifests([string]$manifestRoot, [string]$license
             $updated = [regex]::Replace($content, "(?m)^License:\s*.+$", "License: $licenseValue")
             Set-Content -Path $localeFile.FullName -Value $updated -Encoding UTF8
         }
+    }
+}
+
+function ConvertTo-YamlSingleQuoted([string]$value) {
+    return "'" + ($value -replace "'", "''") + "'"
+}
+
+function ConvertTo-YamlLiteralBlock([string]$fieldName, [string]$value) {
+    $lines = ($value -replace "`r`n", "`n") -split "`n"
+    $body = foreach ($line in $lines) {
+        if ([string]::IsNullOrEmpty($line)) { "" } else { "  " + $line }
+    }
+    return (, "${fieldName}: |-" + $body)
+}
+
+function Remove-YamlTopLevelFields([string[]]$lines, [string[]]$fieldNames) {
+    $result = New-Object System.Collections.Generic.List[string]
+    $skipping = $false
+    foreach ($line in $lines) {
+        if ($line -match '^[A-Za-z][A-Za-z0-9]*:') {
+            $key = ($line -split ':', 2)[0]
+            $skipping = $fieldNames -contains $key
+        }
+        if (-not $skipping) {
+            [void]$result.Add($line)
+        }
+    }
+    return $result.ToArray()
+}
+
+function Get-YamlTopLevelValue([string[]]$lines, [string]$fieldName) {
+    foreach ($line in $lines) {
+        if ($line -match "^${fieldName}:\s*(.+)$") {
+            return $Matches[1].Trim()
+        }
+    }
+    return $null
+}
+
+function Get-ListingDescriptionText($locale) {
+    $paragraphs = @($locale.description) -join "`n`n"
+    $featureLines = @($locale.features | ForEach-Object { "- $_" }) -join "`n"
+    return $paragraphs + "`n`n" + $locale.featuresHeader + "`n" + $featureLines
+}
+
+function Update-ListingInManifests(
+    [string]$manifestRoot,
+    [string]$packageIdentifier,
+    [string]$packageVersion,
+    [string]$displayVersion,
+    [string]$releaseTag,
+    [string]$listingDataPath) {
+    if (-not (Test-Path $listingDataPath)) {
+        Write-Warning "Listing data file not found, locale texts left as generated: $listingDataPath"
+        return
+    }
+
+    $listing = Get-Content -Path $listingDataPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $includeReleaseNotes = ($listing.releaseNotesVersion -eq $displayVersion)
+    if (-not $includeReleaseNotes) {
+        Write-Warning ("ReleaseNotes in listing.json target version {0}, current release is {1}; ReleaseNotes will be omitted." -f $listing.releaseNotesVersion, $displayVersion)
+    }
+
+    $defaultLocaleFile = Join-Path $manifestRoot "$packageIdentifier.locale.en-US.yaml"
+    if (-not (Test-Path $defaultLocaleFile)) {
+        throw "Default locale manifest not found: $defaultLocaleFile"
+    }
+
+    $lines = @(Get-Content -Path $defaultLocaleFile)
+    $publisherName = Get-YamlTopLevelValue -lines $lines -fieldName "Publisher"
+    $packageName = Get-YamlTopLevelValue -lines $lines -fieldName "PackageName"
+    $manifestVersion = Get-YamlTopLevelValue -lines $lines -fieldName "ManifestVersion"
+    $managedFields = @(
+        "Moniker", "ShortDescription", "Description", "Tags",
+        "ReleaseNotes", "ReleaseNotesUrl", "PackageUrl", "PublisherUrl",
+        "PublisherSupportUrl", "LicenseUrl", "Copyright", "CopyrightUrl",
+        "Documentations", "InstallationNotes"
+    )
+    $lines = Remove-YamlTopLevelFields -lines $lines -fieldNames $managedFields
+
+    $en = $listing.locales.'en-US'
+    $block = New-Object System.Collections.Generic.List[string]
+    [void]$block.Add("Moniker: $($listing.moniker)")
+    [void]$block.Add("PackageUrl: $($listing.packageUrl)")
+    [void]$block.Add("PublisherUrl: $($listing.publisherUrl)")
+    [void]$block.Add("PublisherSupportUrl: $($listing.publisherSupportUrl)")
+    [void]$block.Add("LicenseUrl: $($listing.licenseUrl)")
+    [void]$block.Add("Copyright: " + (ConvertTo-YamlSingleQuoted $listing.copyright))
+    [void]$block.Add("ShortDescription: " + (ConvertTo-YamlSingleQuoted $en.shortDescription))
+    foreach ($descLine in (ConvertTo-YamlLiteralBlock -fieldName "Description" -value (Get-ListingDescriptionText $en))) {
+        [void]$block.Add($descLine)
+    }
+    [void]$block.Add("Tags:")
+    foreach ($tag in $listing.tags) {
+        [void]$block.Add("- $tag")
+    }
+    [void]$block.Add("Documentations:")
+    foreach ($document in $listing.documentations) {
+        [void]$block.Add("- DocumentLabel: $($document.documentLabel)")
+        [void]$block.Add("  DocumentUrl: $($document.documentUrl)")
+    }
+    if ($includeReleaseNotes) {
+        [void]$block.Add("ReleaseNotes: " + (ConvertTo-YamlSingleQuoted $en.releaseNotes))
+    }
+    [void]$block.Add("ReleaseNotesUrl: https://github.com/$Repository/releases/tag/$releaseTag")
+    [void]$block.Add("InstallationNotes: " + (ConvertTo-YamlSingleQuoted $en.installationNotes))
+
+    $manifestTypeIndex = [array]::FindIndex($lines, [Predicate[string]] { param($line) $line -match '^ManifestType:' })
+    if ($manifestTypeIndex -lt 0) {
+        throw "ManifestType field not found in $defaultLocaleFile"
+    }
+    $updatedLines = @($lines[0..($manifestTypeIndex - 1)]) + $block.ToArray() + @($lines[$manifestTypeIndex..($lines.Count - 1)])
+    Set-Content -Path $defaultLocaleFile -Value ($updatedLines -join "`r`n") -Encoding UTF8
+
+    foreach ($localeProperty in @($listing.locales.PSObject.Properties | Where-Object { $_.Name -ne "en-US" })) {
+        $localeName = $localeProperty.Name
+        $locale = $localeProperty.Value
+        $localeLines = New-Object System.Collections.Generic.List[string]
+        if ($manifestVersion) {
+            [void]$localeLines.Add("# yaml-language-server: `$schema=https://aka.ms/winget-manifest.locale.$manifestVersion.schema.json")
+            [void]$localeLines.Add("")
+        }
+        [void]$localeLines.Add("PackageIdentifier: $packageIdentifier")
+        [void]$localeLines.Add("PackageVersion: $packageVersion")
+        [void]$localeLines.Add("PackageLocale: $localeName")
+        if ($publisherName) { [void]$localeLines.Add("Publisher: $publisherName") }
+        if ($packageName) { [void]$localeLines.Add("PackageName: $packageName") }
+        [void]$localeLines.Add("Copyright: " + (ConvertTo-YamlSingleQuoted $listing.copyright))
+        [void]$localeLines.Add("ShortDescription: " + (ConvertTo-YamlSingleQuoted $locale.shortDescription))
+        foreach ($descLine in (ConvertTo-YamlLiteralBlock -fieldName "Description" -value (Get-ListingDescriptionText $locale))) {
+            [void]$localeLines.Add($descLine)
+        }
+        if ($includeReleaseNotes) {
+            [void]$localeLines.Add("ReleaseNotes: " + (ConvertTo-YamlSingleQuoted $locale.releaseNotes))
+        }
+        [void]$localeLines.Add("InstallationNotes: " + (ConvertTo-YamlSingleQuoted $locale.installationNotes))
+        [void]$localeLines.Add("ManifestType: locale")
+        if ($manifestVersion) { [void]$localeLines.Add("ManifestVersion: $manifestVersion") }
+        $localeFile = Join-Path $manifestRoot "$packageIdentifier.locale.$localeName.yaml"
+        Set-Content -Path $localeFile -Value ($localeLines.ToArray() -join "`r`n") -Encoding UTF8
+        Write-Host "Locale manifest written: $localeFile"
     }
 }
 
@@ -331,6 +474,7 @@ Invoke-ExternalCommand -filePath "wingetcreate" -arguments $wingetUpdateArgument
 
 $manifestRoot = Resolve-ManifestRoot -outDirectory $tempOut -packageIdentifier $PackageIdentifier -packageVersion $packageVersion
 Update-LicenseInLocaleManifests -manifestRoot $manifestRoot -licenseValue $LicenseValue
+Update-ListingInManifests -manifestRoot $manifestRoot -packageIdentifier $PackageIdentifier -packageVersion $packageVersion -displayVersion $displayVersion -releaseTag $releaseTag -listingDataPath (Join-Path $PSScriptRoot "winget-listing\listing.json")
 
 Write-Step "Validating manifest"
 Invoke-ExternalCommand -filePath "winget" -arguments @(
@@ -340,7 +484,7 @@ Invoke-ExternalCommand -filePath "winget" -arguments @(
 
 $runInstallTest = Read-Optional -prompt "Run local install test (winget install --manifest)? y/N" -defaultValue "N"
 $installTestExecuted = $false
-if ($runInstallTest -match '^(y|yes|д|да)$') {
+if ($runInstallTest -match '^(y|yes)$') {
     Write-Step "Local install test"
     Invoke-ExternalCommand -filePath "winget" -arguments @(
         "install",
@@ -350,7 +494,7 @@ if ($runInstallTest -match '^(y|yes|д|да)$') {
 }
 
 $submit = Read-Optional -prompt "Submit PR to winget-pkgs now? Y/n" -defaultValue "Y"
-if ($submit -match '^(n|no|н|нет)$') {
+if ($submit -match '^(n|no)$') {
     Write-Step "Done (local only)"
     Write-Host "Manifest path: $manifestRoot"
     exit 0

@@ -1,5 +1,3 @@
-using DevProjex.Kernel;
-
 namespace DevProjex.Avalonia.Coordinators;
 
 internal sealed record ProjectTreeInventoryReuseScope(
@@ -19,7 +17,9 @@ internal sealed record ProjectTreeInventoryReuseScope(
     {
         return new ProjectTreeInventoryReuseScope(
             rootPath,
-            new HashSet<string>(options.AllowedRootFolders, PathComparer.Default),
+			new HashSet<string>(
+				options.AllowedRootFolders,
+				ProjectTreePathIdentity.CanonicalComparer),
             options.IgnoreRules.IsGitIgnoreTraversalEnabled,
             options.IgnoreRules.GitFilteringMode,
             options.IgnoreRules.UseSmartIgnore,
@@ -33,7 +33,7 @@ internal sealed record ProjectTreeInventoryReuseScope(
         if (!PathComparer.Default.Equals(RootPath, rootPath))
             return false;
 
-        if (!IsRootSelectionCovered(options.AllowedRootFolders))
+        if (!IsRequestedScopeCovered(options.AllowedRootFolders))
             return false;
 
         var rules = options.IgnoreRules;
@@ -54,7 +54,7 @@ internal sealed record ProjectTreeInventoryReuseScope(
         return true;
     }
 
-    private bool IsRootSelectionCovered(IReadOnlySet<string> requestedRootFolders)
+    private bool IsRequestedScopeCovered(IReadOnlySet<string> requestedRootFolders)
     {
         foreach (var rootFolder in requestedRootFolders)
         {

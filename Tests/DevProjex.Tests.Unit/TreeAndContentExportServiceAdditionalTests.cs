@@ -3,6 +3,31 @@ namespace DevProjex.Tests.Unit;
 public sealed class TreeAndContentExportServiceAdditionalTests
 {
 	[Fact]
+	public void CombineTreeAndContent_PreservesBytesWithoutAllocatingAnIntermediatePayload()
+	{
+		var lineEnding = Environment.NewLine;
+		var exact = TreeAndContentExportService.CombineTreeAndContent(
+			$"root/路径{lineEnding}{lineEnding}",
+			$"file.cs:{lineEnding}Привет\r\n");
+		Assert.Equal(
+			$"root/路径{lineEnding}\u00A0{lineEnding}\u00A0{lineEnding}file.cs:{lineEnding}Привет\r\n",
+			exact);
+
+		_ = TreeAndContentExportService.CombineTreeAndContent("warmup", "warmup");
+		var tree = new string('T', 1_000_000) + lineEnding;
+		var content = new string('C', 1_000_000);
+		var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+
+		var combined = TreeAndContentExportService.CombineTreeAndContent(tree, content);
+
+		var allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+		Assert.Equal(2_000_000 + lineEnding.Length * 3 + 2, combined.Length);
+		Assert.True(
+			allocated <= combined.Length * sizeof(char) + 64 * 1024L,
+			$"Combining allocated {allocated:N0} bytes for a {combined.Length:N0}-character result.");
+	}
+
+	[Fact]
 	// Verifies full tree export is used when no selection exists.
 	public void Build_NoSelection_UsesFullTree()
 	{
@@ -14,7 +39,8 @@ public sealed class TreeAndContentExportServiceAdditionalTests
 		var output = service.Build(temp.Path, root, new HashSet<string>());
 
 		Assert.Contains($"{temp.Path}:", output);
-		Assert.Contains("├── Root", output);
+		Assert.DoesNotContain("├── Root", output, StringComparison.Ordinal);
+		Assert.Contains("└── alpha.txt", output, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -46,7 +72,8 @@ public sealed class TreeAndContentExportServiceAdditionalTests
 
 		var output = service.Build(temp.Path, root, selected);
 
-		Assert.Contains("├── Root", output);
+		Assert.DoesNotContain("├── Root", output, StringComparison.Ordinal);
+		Assert.Contains("└── alpha.txt", output, StringComparison.Ordinal);
 		Assert.DoesNotContain("missing.txt:", output);
 	}
 
@@ -62,7 +89,8 @@ public sealed class TreeAndContentExportServiceAdditionalTests
 
 		var output = service.Build(temp.Path, root, selected);
 
-		Assert.Contains("├── Root", output);
+		Assert.DoesNotContain("├── Root", output, StringComparison.Ordinal);
+		Assert.Contains("└── alpha.txt", output, StringComparison.Ordinal);
 		Assert.Contains("alpha.txt:", output, StringComparison.Ordinal);
 		Assert.Contains("[No Content, 0 bytes]", output);
 		Assert.DoesNotContain($"{file}:", output, StringComparison.Ordinal);

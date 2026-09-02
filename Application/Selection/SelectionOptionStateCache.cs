@@ -52,6 +52,21 @@ public sealed class SelectionOptionStateCache
     }
 
     public void UpdateFromVisibleOptions(IEnumerable<SelectionOption> options)
+        => UpdateFromVisibleOptions(
+            options,
+            static option => option.Name,
+            static option => option.IsChecked);
+
+    public void UpdateFromVisibleOptionStates(IEnumerable<(string Name, bool IsChecked)> options)
+        => UpdateFromVisibleOptions(
+            options,
+            static option => option.Name,
+            static option => option.IsChecked);
+
+    private void UpdateFromVisibleOptions<T>(
+        IEnumerable<T> options,
+        Func<T, string> nameSelector,
+        Func<T, bool> isCheckedSelector)
     {
         IsInitialized = true;
         HasFullState = true;
@@ -59,15 +74,35 @@ public sealed class SelectionOptionStateCache
         SelectedNames.Clear();
         foreach (var option in options)
         {
-            if (option.IsChecked)
-                SelectedNames.Add(option.Name);
+            var name = nameSelector(option);
+            var isChecked = isCheckedSelector(option);
+            if (isChecked)
+                SelectedNames.Add(name);
 
             // Do not clear previous states here. Hidden options may be temporarily absent
             // because another section hides their evidence, and persistence must keep the
             // user's explicit choice until the option becomes visible again.
-            OptionStates[option.Name] = option.IsChecked;
+            OptionStates[name] = isChecked;
         }
     }
+
+    public bool TryUpdateKnownOption(string name, bool isChecked, out bool previousState)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        if (!OptionStates.TryGetValue(name, out previousState))
+            return false;
+
+        IsInitialized = true;
+        HasFullState = true;
+        OptionStates[name] = isChecked;
+        if (isChecked)
+            SelectedNames.Add(name);
+        else
+            SelectedNames.Remove(name);
+        return true;
+    }
+
+    public void MarkIncomplete() => HasFullState = false;
 
     public HashSet<string> SnapshotSelectedNames() =>
         new(SelectedNames, _comparer);

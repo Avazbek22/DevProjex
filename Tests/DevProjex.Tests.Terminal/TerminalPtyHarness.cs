@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Hex1b;
-using XTerm;
 using XTerm.Options;
 using XTermTerminal = XTerm.Terminal;
 
@@ -10,6 +9,8 @@ namespace DevProjex.Tests.Terminal;
 
 internal sealed class TerminalPtyHarness : IAsyncDisposable
 {
+	private const string SkipInteractiveTuiTestsVariable =
+		"DEVPROJEX_SKIP_TUI_PTY_TESTS";
 	internal const string DataRootDirectoryName = "dpx-pty";
 	public const string ShellCompletionMarker = "__DEVPROJEX_SHELL_RESTORED__";
 	public const string ShellTerminalStateRestoredMarker =
@@ -79,6 +80,15 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 	}
 
 	public bool HasExited => _exit.Task.IsCompleted;
+	public long PeakWorkingSetBytes
+	{
+		get
+		{
+			using var process = Process.GetProcessById(_process.ProcessId);
+			process.Refresh();
+			return process.PeakWorkingSet64;
+		}
+	}
 	public string RawOutput => CaptureRawOutput();
 	public int Columns
 	{
@@ -110,6 +120,15 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		bool useProgressCheckpointHost = false,
 		bool verifyExecutableRelaunch = false)
 	{
+		if (string.Equals(
+			    Environment.GetEnvironmentVariable(SkipInteractiveTuiTestsVariable),
+			    "1",
+			    StringComparison.Ordinal))
+		{
+			Assert.Skip(
+				"Interactive TUI PTY journeys are disabled in CI while the TUI is pending removal.");
+		}
+
 		var binary = useProgressCheckpointHost
 			? PublishedApplicationLocator.FindProgressCheckpointHostExecutable()
 			: PublishedApplicationLocator.FindExecutable();
@@ -369,6 +388,85 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 	public Task SendEnterAsync(CancellationToken cancellationToken = default) =>
 		SendAsync("\r", cancellationToken);
 
+	public async Task SendQuitAndConfirmAsync(CancellationToken cancellationToken = default)
+	{
+		for (var attempt = 0; attempt < 3; attempt++)
+		{
+			await WaitForScreenToSettleAsync(cancellationToken).ConfigureAwait(false);
+			var workspaceScreen = CaptureScreen();
+			await SendAsync("q", cancellationToken).ConfigureAwait(false);
+			await WaitForScreenChangeAsync(workspaceScreen, cancellationToken).ConfigureAwait(false);
+			await WaitForScreenToSettleAsync(cancellationToken).ConfigureAwait(false);
+			await SendEnterAsync(cancellationToken).ConfigureAwait(false);
+			if (await WaitForQuitCompletionAsync(cancellationToken).ConfigureAwait(false))
+				return;
+		}
+
+		throw new TimeoutException(
+			"Timed out waiting for the terminal to accept the quit confirmation.\n" +
+			$"Screen:\n{CaptureScreen()}\nRaw output tail:\n{CaptureRawOutputTail()}");
+	}
+
+	private async Task<bool> WaitForQuitCompletionAsync(CancellationToken cancellationToken)
+	{
+		var stopwatch = Stopwatch.StartNew();
+		while (stopwatch.Elapsed < TimeSpan.FromSeconds(3))
+		{
+			if (HasExited || CaptureRawOutput().Contains(ShellHandshakeMarker, StringComparison.Ordinal))
+				return true;
+			await Task.Delay(50, cancellationToken).ConfigureAwait(false);
+		}
+
+		return false;
+	}
+
+	private async Task WaitForScreenToSettleAsync(CancellationToken cancellationToken)
+	{
+		var previous = CaptureScreen();
+		var stableSamples = 0;
+		var stopwatch = Stopwatch.StartNew();
+		while (stopwatch.Elapsed < TimeSpan.FromSeconds(5))
+		{
+			await Task.Delay(50, cancellationToken).ConfigureAwait(false);
+			var current = CaptureScreen();
+			if (string.Equals(previous, current, StringComparison.Ordinal))
+			{
+				if (++stableSamples >= 2)
+					return;
+			}
+			else
+			{
+				previous = current;
+				stableSamples = 0;
+			}
+		}
+
+		throw new TimeoutException(
+			"Timed out waiting for the terminal screen to settle before quitting.\n" +
+			CaptureScreen());
+	}
+
+	private async Task WaitForScreenChangeAsync(
+		string previous,
+		CancellationToken cancellationToken)
+	{
+		var stopwatch = Stopwatch.StartNew();
+		while (stopwatch.Elapsed < TimeSpan.FromSeconds(5))
+		{
+			var current = CaptureScreen();
+			if (!string.Equals(previous, current, StringComparison.Ordinal))
+				return;
+			if (HasExited)
+				throw new Xunit.Sdk.XunitException(
+					$"Terminal process exited with code {_process.ExitCode} before the quit confirmation appeared.");
+			await Task.Delay(25, cancellationToken).ConfigureAwait(false);
+		}
+
+		throw new TimeoutException(
+			"Timed out waiting for the quit confirmation.\n" +
+			CaptureScreen());
+	}
+
 	public async Task CompleteShellRestorationHandshakeAsync(
 		CancellationToken cancellationToken = default)
 	{
@@ -509,16 +607,48 @@ internal sealed class TerminalPtyHarness : IAsyncDisposable
 		}
 	}
 
+	public Task SendMouseWheelDownAsync(
+		int column,
+		int row,
+		CancellationToken cancellationToken = default) =>
+		SendMouseWheelAsync(column, row, buttonCode: 65, cancellationToken);
+
+	public Task SendMouseWheelUpAsync(
+		int column,
+		int row,
+		CancellationToken cancellationToken = default) =>
+		SendMouseWheelAsync(column, row, buttonCode: 64, cancellationToken);
+
+	private Task SendMouseWheelAsync(
+		int column,
+		int row,
+		int buttonCode,
+		CancellationToken cancellationToken)
+	{
+		var x = column + 1;
+		var y = row + 1;
+		return SendAsync($"\u001b[<{buttonCode};{x};{y}M", cancellationToken);
+	}
+
 	public async Task ResizeAsync(
 		int columns,
 		int rows,
 		CancellationToken cancellationToken = default)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
+		var outputLengthBeforeResize = RawOutput.Length;
 		lock (_terminalGate)
 			_terminal.Resize(columns, rows);
 		await _process.ResizeAsync(columns, rows, cancellationToken).ConfigureAwait(false);
-		await Task.Delay(100, cancellationToken).ConfigureAwait(false);
+		var minimumRedrawLength = Math.Max(64, columns * 2);
+		var timeout = Stopwatch.StartNew();
+		while (!HasExited &&
+		       RawOutput.Length - outputLengthBeforeResize < minimumRedrawLength &&
+		       timeout.Elapsed < TimeSpan.FromSeconds(3))
+		{
+			await Task.Delay(25, cancellationToken).ConfigureAwait(false);
+		}
+		await Task.Delay(50, cancellationToken).ConfigureAwait(false);
 	}
 
 	public string CaptureScreen()
@@ -928,6 +1058,8 @@ internal static class PublishedApplicationLocator
 {
 	private const string ProgressCheckpointHostName =
 		"DevProjex.Tests.Terminal.ProgressHost";
+	private const string DebugConfiguration = "Debug";
+	private const string ReleaseConfiguration = "Release";
 
 	public static string FindExecutable()
 	{
@@ -936,11 +1068,7 @@ internal static class PublishedApplicationLocator
 			return Path.GetFullPath(explicitPath);
 
 		var repository = FindRepositoryRoot();
-		var configuration = AppContext.BaseDirectory.Contains(
-			$"{Path.DirectorySeparatorChar}Release{Path.DirectorySeparatorChar}",
-			StringComparison.OrdinalIgnoreCase)
-			? "Release"
-			: "Debug";
+		var configuration = ResolveBuildConfiguration(AppContext.BaseDirectory);
 		var executableName = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
 			? "DevProjex.exe"
 			: "DevProjex";
@@ -962,11 +1090,7 @@ internal static class PublishedApplicationLocator
 	public static string FindProgressCheckpointHostExecutable()
 	{
 		var repository = FindRepositoryRoot();
-		var configuration = AppContext.BaseDirectory.Contains(
-			$"{Path.DirectorySeparatorChar}Release{Path.DirectorySeparatorChar}",
-			StringComparison.OrdinalIgnoreCase)
-			? "Release"
-			: "Debug";
+		var configuration = ResolveBuildConfiguration(AppContext.BaseDirectory);
 		var executableName = OperatingSystem.IsWindows()
 			? $"{ProgressCheckpointHostName}.exe"
 			: ProgressCheckpointHostName;
@@ -983,6 +1107,49 @@ internal static class PublishedApplicationLocator
 		throw new FileNotFoundException(
 			"Build the terminal progress checkpoint test host before running progress PTY tests.",
 			path);
+	}
+
+	public static string FindApplicationAssembly()
+	{
+		var path = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"bin",
+			ResolveBuildConfiguration(AppContext.BaseDirectory),
+			"net10.0",
+			"DevProjex.dll");
+		if (File.Exists(path))
+			return path;
+		throw new FileNotFoundException(
+			"Build the DevProjex Avalonia host before running process tests.",
+			path);
+	}
+
+	internal static string ResolveBuildConfiguration(string baseDirectory)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(baseDirectory);
+		var directory = new DirectoryInfo(baseDirectory);
+		while (directory is not null)
+		{
+			if (string.Equals(
+			    directory.Name,
+			    ReleaseConfiguration,
+			    StringComparison.OrdinalIgnoreCase))
+			{
+				return ReleaseConfiguration;
+			}
+			if (string.Equals(
+			    directory.Name,
+			    DebugConfiguration,
+			    StringComparison.OrdinalIgnoreCase))
+			{
+				return DebugConfiguration;
+			}
+			directory = directory.Parent;
+		}
+
+		return DebugConfiguration;
 	}
 
 	internal static string FindRepositoryRoot()

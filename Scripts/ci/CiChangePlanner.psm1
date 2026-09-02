@@ -178,6 +178,13 @@ function Add-PathToCiPlan {
 		return
 	}
 
+	if (Test-PathEquals $normalized 'Tests/DevProjex.Tests.Terminal/PublishedSingleFileExtractionProcessTests.cs') {
+		# These tests skip without the RID-specific single-file artifact produced by Release Validation.
+		# Routing them only to the ordinary Terminal suite would report green without executing them.
+		Enable-CiTargets -Plan $Plan -Targets @('Terminal', 'Release') -Reason "Published process tests: $normalized"
+		return
+	}
+
 	if (Test-PathStartsWith $normalized 'Tests/DevProjex.Tests.Terminal/') {
 		Enable-CiTargets -Plan $Plan -Targets @('Terminal') -Reason "Terminal tests: $normalized"
 		return
@@ -216,6 +223,16 @@ function Add-PathToCiPlan {
 
 	if (Test-PathStartsWith $normalized 'Apps/Terminal/') {
 		Enable-CiTargets -Plan $Plan -Targets @('Integration', 'Terminal', 'TerminalCommand', 'Release', 'Store') -Reason "Terminal production surface: $normalized"
+		return
+	}
+
+	if ((Test-PathStartsWith $normalized 'Assets/HelpContent/') -and
+		$normalized.EndsWith('.txt', [StringComparison]::OrdinalIgnoreCase)) {
+		# Help text ships inside every product, but an edit can only break the suites that
+		# read it: embedded-resource loading (Unit), per-language coverage (Integration)
+		# and the documentation contracts (Terminal, Documentation). Non-text files in the
+		# same directory stay on the shared production layer plan below.
+		Enable-CiTargets -Plan $Plan -Targets @('Unit', 'Integration', 'Terminal', 'Documentation') -Reason "Help content: $normalized"
 		return
 	}
 

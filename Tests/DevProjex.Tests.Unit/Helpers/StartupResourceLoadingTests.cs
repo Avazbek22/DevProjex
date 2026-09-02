@@ -3,23 +3,33 @@ namespace DevProjex.Tests.Unit.Helpers;
 public sealed class StartupResourceLoadingTests
 {
 	[Fact]
-	public void LocalizationCatalog_LoadsOnlyRequestedLanguageUntilFallbackIsNeeded()
+	public void LocalizationCatalog_SharesEachImmutableLanguageResourceAcrossInstances()
 	{
-		var catalog = new JsonLocalizationCatalog();
-		var cache = GetCache<IReadOnlyDictionary<string, string>>(catalog);
+		var first = new JsonLocalizationCatalog();
+		var second = new JsonLocalizationCatalog();
+
+		Assert.Same(first.Get(AppLanguage.Ru), second.Get(AppLanguage.Ru));
+		Assert.Same(
+			first.Get((AppLanguage)int.MaxValue),
+			second.Get(AppLanguage.En));
+	}
+
+	[Fact]
+	public void LocalizationCatalog_CacheFactoryKeepsUnrequestedLanguagesLazy()
+	{
+		var factory = typeof(JsonLocalizationCatalog).GetMethod(
+			"CreateCache",
+			BindingFlags.Static | BindingFlags.NonPublic);
+		var cache = Assert.IsAssignableFrom<
+			IReadOnlyDictionary<AppLanguage, Lazy<IReadOnlyDictionary<string, string>>>>(
+			factory?.Invoke(null, null));
 
 		Assert.All(cache.Values, resource => Assert.False(resource.IsValueCreated));
-
-		Assert.NotEmpty(catalog.Get(AppLanguage.Ru));
-
+		Assert.NotEmpty(cache[AppLanguage.Ru].Value);
 		Assert.True(cache[AppLanguage.Ru].IsValueCreated);
-		Assert.False(cache[AppLanguage.En].IsValueCreated);
 		Assert.All(
-			cache.Where(pair => pair.Key is not AppLanguage.Ru and not AppLanguage.En),
-			pair => Assert.False(pair.Value.IsValueCreated));
-
-		Assert.NotEmpty(catalog.Get((AppLanguage)int.MaxValue));
-		Assert.True(cache[AppLanguage.En].IsValueCreated);
+			cache.Where(static pair => pair.Key != AppLanguage.Ru),
+			static pair => Assert.False(pair.Value.IsValueCreated));
 	}
 
 	[Fact]

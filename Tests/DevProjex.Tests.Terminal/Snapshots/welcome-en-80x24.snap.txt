@@ -9,6 +9,7 @@
   │> Open current directory                                                  │
   │  Recent workspaces                                                       │
   │  Browse folder                                                           │
+  │  Open project with settings file...                                      │
   │  Clone repository                                                        │
   │  Open Desktop                                                            │
   │  Help                                                                    │
@@ -18,7 +19,6 @@
   │ Open the current folder and prepare its effective context.               │
   │                                                                          │
   │                                                                          │
-  │                                                                          │
   └──────────────────────────────────────────────────────────────────────────┘
 
-  Up/Down or j/k Navigate   Enter Select   Ctrl+P Actions   ? Help   q Exit
+  1-9 Recent   Enter Select   : Commands   Ctrl+P Actions   ? Help   q Exit

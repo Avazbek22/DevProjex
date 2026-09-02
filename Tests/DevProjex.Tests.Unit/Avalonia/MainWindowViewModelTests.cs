@@ -1,5 +1,6 @@
-﻿namespace DevProjex.Tests.Unit.Avalonia;
+namespace DevProjex.Tests.Unit.Avalonia;
 
+using DevProjex.Application.Secrets;
 using ThemeEffectMode = DevProjex.Infrastructure.ThemePresets.ThemeEffectMode;
 using ThemeSelectionMode = DevProjex.Infrastructure.ThemePresets.ThemeSelectionMode;
 
@@ -16,17 +17,160 @@ public sealed class MainWindowViewModelTests
         return new MainWindowViewModel(localization, helpContentProvider);
     }
 
-    [Fact]
-    public void Constructor_SetsDefaults()
-    {
-        var viewModel = CreateViewModel();
+	private static RepositoryCacheEntryViewModel CreateCacheEntry(string localPath) => new(
+		new RepositoryCacheCatalogEntry(
+			"https://github.com/example/repository.git",
+			"repository",
+			"main",
+			DateTimeOffset.UtcNow,
+			1024,
+			RepositoryCacheContentKind.Git,
+			localPath),
+		"repository",
+		"main | 1 KB",
+		"https://github.com/example/repository.git",
+		"Remove",
+		CanDelete: true,
+		DeleteToolTip: null);
 
-        Assert.True(viewModel.AllExtensionsChecked);
-        Assert.True(viewModel.AllRootFoldersChecked);
-        Assert.True(viewModel.AllIgnoreChecked);
-        Assert.True(viewModel.IsDarkTheme);
-        Assert.True(viewModel.IsTransparentEnabled);
-        Assert.Equal(15, viewModel.TreeFontSize);
+	[Fact]
+	public void GitFilteringModes_RefreshRebindsSelectionToCurrentCollectionItem()
+	{
+		var viewModel = CreateViewModel();
+		viewModel.RefreshGitFilteringModes(
+			repositoryAvailable: true,
+			selectorVisible: true,
+			selectedMode: GitFilteringMode.Staged);
+		var previousSelection = Assert.IsType<GitFilteringModeOptionViewModel>(
+			viewModel.SelectedGitFilteringModeOption);
+
+		viewModel.RefreshGitFilteringModes(
+			repositoryAvailable: true,
+			selectorVisible: true,
+			selectedMode: GitFilteringMode.Staged);
+
+		var currentSelection = Assert.IsType<GitFilteringModeOptionViewModel>(
+			viewModel.SelectedGitFilteringModeOption);
+		Assert.Same(previousSelection, currentSelection);
+		Assert.Contains(
+			viewModel.GitFilteringModes,
+			option => ReferenceEquals(option, currentSelection));
+	}
+
+	[Fact]
+	public void GitFilteringModes_SelectorVisibilityFollowsCurrentGitApplicability()
+	{
+		var viewModel = CreateViewModel();
+
+		viewModel.RefreshGitFilteringModes(
+			repositoryAvailable: false,
+			selectorVisible: false,
+			selectedMode: GitFilteringMode.None);
+		Assert.False(viewModel.IsGitFilteringModeSelectorVisible);
+
+		viewModel.RefreshGitFilteringModes(
+			repositoryAvailable: true,
+			selectorVisible: true,
+			selectedMode: GitFilteringMode.None);
+		Assert.True(viewModel.IsGitFilteringModeSelectorVisible);
+	}
+
+	[Fact]
+	public void PreviewSearchAvailability_FollowsLoadedPreviewPane()
+	{
+		var viewModel = CreateViewModel();
+
+		Assert.False(viewModel.IsPreviewSearchAvailable);
+		viewModel.IsProjectLoaded = true;
+		Assert.False(viewModel.IsPreviewSearchAvailable);
+
+		viewModel.PreviewWorkspaceMode = PreviewWorkspaceMode.TreeAndPreview;
+		Assert.False(viewModel.IsPreviewSearchAvailable);
+		viewModel.SelectedPreviewContentMode = PreviewContentMode.Content;
+		Assert.True(viewModel.IsPreviewSearchAvailable);
+		viewModel.SelectedPreviewContentMode = PreviewContentMode.Tree;
+		Assert.False(viewModel.IsPreviewSearchAvailable);
+		viewModel.SelectedPreviewContentMode = PreviewContentMode.TreeAndContent;
+		Assert.True(viewModel.IsPreviewSearchAvailable);
+
+		viewModel.PreviewWorkspaceMode = PreviewWorkspaceMode.Off;
+		Assert.False(viewModel.IsPreviewSearchAvailable);
+	}
+
+	[Fact]
+	public void PreviewSearchSummary_ReportsZeroAndCappedResults()
+	{
+		var viewModel = CreateViewModel();
+		viewModel.PreviewSearchVisible = true;
+		viewModel.PreviewSearchQuery = "match";
+
+		viewModel.UpdatePreviewSearchMatchSummary(0, 0, matchesCapped: false);
+		Assert.Equal("(0 / 0)", viewModel.PreviewSearchMatchSummaryText);
+
+		viewModel.UpdatePreviewSearchMatchSummary(4, 10_000, matchesCapped: true);
+		Assert.StartsWith("(4 / ", viewModel.PreviewSearchMatchSummaryText, StringComparison.Ordinal);
+		Assert.EndsWith("+)", viewModel.PreviewSearchMatchSummaryText, StringComparison.Ordinal);
+	}
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ContentStripNotice_UsesNothingToStripForEveryKnownZeroTotalAndKeepsScanningPriority(
+        bool blankLines)
+    {
+        var viewModel = CreateViewModel(new Dictionary<string, string>
+        {
+            ["Settings.Comments.Status.Scanning"] = "Scanning comments",
+            ["Settings.Comments.Status.NothingToStrip"] = "No comments",
+            ["Settings.Comments.Status.Applied"] = "Comments {0}/{1}",
+            ["Settings.BlankLines.Status.Scanning"] = "Scanning blank lines",
+            ["Settings.BlankLines.Status.NothingToStrip"] = "No blank lines",
+            ["Settings.BlankLines.Status.Applied"] = "Blank lines {0}/{1}"
+        });
+        var expectedNothing = blankLines ? "No blank lines" : "No comments";
+        var expectedApplied = blankLines ? "Blank lines 5/150" : "Comments 5/150";
+        var expectedScanning = blankLines ? "Scanning blank lines" : "Scanning comments";
+
+        Assert.Equal(string.Empty, GetNotice(viewModel, blankLines));
+
+        SetStatus(viewModel, blankLines, 0, 150);
+        Assert.Equal(expectedNothing, GetNotice(viewModel, blankLines));
+
+        SetStatus(viewModel, blankLines, 0, 0);
+        Assert.Equal(expectedNothing, GetNotice(viewModel, blankLines));
+
+        SetStatus(viewModel, blankLines, 5, 150);
+        Assert.Equal(expectedApplied, GetNotice(viewModel, blankLines));
+
+        SetPreparationStatus(viewModel, blankLines, isActive: true);
+        SetStatus(viewModel, blankLines, 0, 150);
+        Assert.Equal(expectedScanning, GetNotice(viewModel, blankLines));
+
+        SetPreparationStatus(viewModel, blankLines, isActive: false);
+        Assert.Equal(expectedNothing, GetNotice(viewModel, blankLines));
+    }
+
+    private static string GetNotice(MainWindowViewModel viewModel, bool blankLines) =>
+        blankLines ? viewModel.SettingsBlankLineStripNotice : viewModel.SettingsCommentStripNotice;
+
+    private static void SetStatus(
+        MainWindowViewModel viewModel,
+        bool blankLines,
+        int? strippedFiles,
+        int? totalFiles)
+    {
+        if (blankLines)
+            viewModel.SetBlankLineStripStatus(strippedFiles, totalFiles);
+        else
+            viewModel.SetCommentStripStatus(strippedFiles, totalFiles);
+    }
+
+    private static void SetPreparationStatus(MainWindowViewModel viewModel, bool blankLines, bool isActive)
+    {
+        if (blankLines)
+            viewModel.SetBlankLineStripPreparationStatus(isActive);
+        else
+            viewModel.SetCommentStripPreparationStatus(isActive);
     }
 
     [Fact]
@@ -162,6 +306,40 @@ public sealed class MainWindowViewModelTests
         Assert.True(recentRepositoriesVisibilityRaised);
     }
 
+	[Fact]
+	public void GitCloneConfirmation_AllowsSelectedCacheEntryWithoutUrl()
+	{
+		var viewModel = CreateViewModel();
+		var entry = CreateCacheEntry("c:/cache/repository");
+
+		Assert.False(viewModel.CanStartGitClone);
+
+		viewModel.SelectedGitCloneCacheEntry = entry;
+
+		Assert.True(viewModel.CanStartGitClone);
+		viewModel.GitCloneInProgress = true;
+		Assert.False(viewModel.CanStartGitClone);
+	}
+
+	[Fact]
+	public void ReplaceCachedRepositories_PreservesSelectedPathAndClearsMissingSelection()
+	{
+		var viewModel = CreateViewModel();
+		var original = CreateCacheEntry("c:/cache/repository");
+		viewModel.ReplaceCachedRepositories([original]);
+		viewModel.SelectedGitCloneCacheEntry = original;
+		var refreshed = CreateCacheEntry("c:/cache/repository");
+
+		viewModel.ReplaceCachedRepositories([refreshed]);
+
+		Assert.Same(refreshed, viewModel.SelectedGitCloneCacheEntry);
+
+		viewModel.ReplaceCachedRepositories([]);
+
+		Assert.Null(viewModel.SelectedGitCloneCacheEntry);
+		Assert.False(viewModel.CanStartGitClone);
+	}
+
     [Fact]
     public void MenuFileOpenNewWindow_UsesLocalizedValue()
     {
@@ -237,6 +415,201 @@ public sealed class MainWindowViewModelTests
         Assert.False(viewModel.CanApplySettings);
         Assert.Equal(2, raisedCount);
     }
+
+    [Fact]
+    public void ApplySettingsGate_RejectsCleanAndDuplicateRequestsWithoutChangingUiAvailability()
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsProjectLoaded = true;
+        viewModel.SetPendingFilterSettingsChanges(true);
+
+        Assert.True(viewModel.TryBeginApplySettings());
+        Assert.True(viewModel.CanApplySettings);
+        Assert.False(viewModel.TryBeginApplySettings());
+
+        viewModel.CompleteApplySettings();
+
+        Assert.True(viewModel.CanApplySettings);
+        Assert.True(viewModel.TryBeginApplySettings());
+
+        viewModel.SetPendingFilterSettingsChanges(false);
+        viewModel.CompleteApplySettings();
+
+        Assert.True(viewModel.CanApplySettings);
+        Assert.False(viewModel.TryBeginApplySettings());
+    }
+
+    [Theory]
+    [InlineData(StatusOperationType.LoadProject)]
+    [InlineData(StatusOperationType.RefreshProject)]
+    [InlineData(StatusOperationType.GitPullUpdates)]
+    [InlineData(StatusOperationType.GitSwitchBranch)]
+    [InlineData(StatusOperationType.PreviewBuild)]
+    [InlineData(StatusOperationType.ProjectCopyExport)]
+    public void ApplySettingsGate_RejectsNonReplaceableBackendWorkWithoutWaitingForVisualDelay(
+        StatusOperationType activeOperationType)
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsProjectLoaded = true;
+        viewModel.SetPendingFilterSettingsChanges(true);
+
+        Assert.True(viewModel.CanApplySettings);
+        Assert.False(viewModel.TryBeginApplySettings(activeOperationType));
+        Assert.True(viewModel.CanApplySettings);
+    }
+
+    [Theory]
+    [InlineData(StatusOperationType.None)]
+    [InlineData(StatusOperationType.MetricsCalculation)]
+    [InlineData(StatusOperationType.SelectionRefresh)]
+    [InlineData(StatusOperationType.CompressionPreparation)]
+    [InlineData(StatusOperationType.SecretAnalysis)]
+    public void ApplySettingsGate_AllowsReplaceableBackendWork(StatusOperationType activeOperationType)
+    {
+        var viewModel = CreateViewModel();
+        viewModel.IsProjectLoaded = true;
+        viewModel.SetPendingFilterSettingsChanges(true);
+
+        Assert.True(viewModel.TryBeginApplySettings(activeOperationType));
+        Assert.False(viewModel.TryBeginApplySettings(activeOperationType));
+
+        viewModel.CompleteApplySettings();
+    }
+
+    [Fact]
+    public void ContentTransformationStatuses_FollowAppliedStateInsteadOfDraftCheckboxes()
+    {
+        var viewModel = CreateViewModel(new Dictionary<string, string>
+        {
+            ["Settings.Compression.Status.Applied"] = "Compressed {0}/{1}. {2}/{3}",
+            ["Settings.Comments.Status.Applied"] = "Comments {0}/{1}",
+            ["Settings.BlankLines.Status.Applied"] = "Blank lines {0}/{1}"
+        });
+        var compression = new IgnoreOptionViewModel(IgnoreOptionId.CompressCode, "compress", true);
+        var comments = new IgnoreOptionViewModel(IgnoreOptionId.StripComments, "comments", true);
+        var blankLines = new IgnoreOptionViewModel(IgnoreOptionId.StripBlankLines, "blank lines", true);
+        viewModel.IgnoreOptions.Add(compression);
+        viewModel.IgnoreOptions.Add(comments);
+        viewModel.IgnoreOptions.Add(blankLines);
+        viewModel.SetCompressionStatus(2, 5, 100, 80);
+        viewModel.SetCommentStripStatus(3, 5);
+        viewModel.SetBlankLineStripStatus(4, 5);
+        viewModel.SetAppliedContentTransformationState(
+            compressCode: true,
+            stripComments: true,
+            stripBlankLines: true);
+
+        var appliedStatuses = viewModel.ContentProcessingOptions
+            .ToDictionary(static option => option.Id, static option => option.StatusText);
+        compression.IsChecked = false;
+        comments.IsChecked = false;
+        blankLines.IsChecked = false;
+        viewModel.SetContentProcessingStatus(SecretScanState.Pending);
+
+        Assert.Equal(appliedStatuses[IgnoreOptionId.CompressCode], compression.StatusText);
+        Assert.Equal(appliedStatuses[IgnoreOptionId.StripComments], comments.StatusText);
+        Assert.Equal(appliedStatuses[IgnoreOptionId.StripBlankLines], blankLines.StatusText);
+
+        viewModel.SetAppliedContentTransformationState(
+            compressCode: false,
+            stripComments: false,
+            stripBlankLines: false);
+
+        Assert.Equal(string.Empty, compression.StatusText);
+        Assert.Equal(string.Empty, comments.StatusText);
+        Assert.Equal(string.Empty, blankLines.StatusText);
+    }
+
+	[Fact]
+	public void PrivateDataLimitedStatus_ShowsOnlyAppliedCounts()
+	{
+		var viewModel = CreateViewModel(new Dictionary<string, string>
+		{
+			["Settings.Secrets.Status.Applied"] = "Found {0}, hidden {1}",
+			["Settings.Secrets.Status.SizeLimit"] = "Too large: {0} over {1} MiB",
+			["Content.Redaction.UnscannableFiles"] = "Unscannable: {0}",
+			["Content.Redaction.Reason.TooLarge"] = "too large",
+			["Content.Redaction.Reason.UnsupportedEncoding"] = "unsupported encoding"
+		});
+		var legacyPath = Path.Combine("project", "legacy.txt");
+		var largePath = Path.Combine("project", "large.txt");
+
+		viewModel.SetPrivateDataProcessingStatus(
+			SecretScanState.Limited,
+			detectedCount: 2,
+			hiddenCount: 2,
+			skippedFileCount: 2,
+			failedFileCount: 0,
+			[
+				new UnscannableFile(legacyPath, FileContentClassification.UnsupportedEncoding),
+				new UnscannableFile(largePath, FileContentClassification.TooLarge)
+			]);
+
+		Assert.Equal("Found 2, hidden 2", viewModel.SettingsPrivateDataNotice);
+		Assert.DoesNotContain("Too large", viewModel.SettingsPrivateDataNotice, StringComparison.Ordinal);
+		Assert.DoesNotContain("Unscannable", viewModel.SettingsPrivateDataNotice, StringComparison.Ordinal);
+		Assert.DoesNotContain(legacyPath, viewModel.SettingsPrivateDataNotice, StringComparison.Ordinal);
+		Assert.DoesNotContain(largePath, viewModel.SettingsPrivateDataNotice, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData(true, "Found 1, hidden 1\nUser name in file paths: hidden.")]
+	[InlineData(false, "Found 1, hidden 0\nUser name in file paths: shown.")]
+	public void PrivateDataPathStatus_AppendsTheGeneratedPathDecision(
+		bool pathUserNameHidden,
+		string expected)
+	{
+		var viewModel = CreateViewModel(new Dictionary<string, string>
+		{
+			["Settings.Secrets.Status.Applied"] = "Found {0}, hidden {1}",
+			["Settings.PrivateData.Status.PathHidden"] = "User name in file paths: hidden.",
+			["Settings.PrivateData.Status.PathShown"] = "User name in file paths: shown."
+		});
+
+		viewModel.SetPrivateDataProcessingStatus(
+			SecretScanState.Completed,
+			detectedCount: 1,
+			hiddenCount: pathUserNameHidden ? 1 : 0,
+			pathUserNameHidden: pathUserNameHidden);
+
+		Assert.Equal(expected.Replace("\n", Environment.NewLine), viewModel.SettingsPrivateDataNotice);
+	}
+
+	[Fact]
+	public void SecretsFailedStatus_OmitsUnscannableFileDetails()
+	{
+		var viewModel = CreateViewModel(new Dictionary<string, string>
+		{
+			["Settings.Secrets.Status.Applied"] = "Found {0}, hidden {1}",
+			["Settings.Secrets.Status.FailedFiles"] = "Failed files: {0}",
+			["Settings.Secrets.Status.Retry"] = "Retry",
+			["Settings.Secrets.Status.SizeLimit"] = "Too large: {0} over {1} MiB",
+			["Content.Redaction.UnscannableFiles"] = "Unscannable: {0}",
+			["Content.Redaction.Reason.TooLarge"] = "too large",
+			["Content.Redaction.Reason.UnsupportedEncoding"] = "unsupported encoding"
+		});
+		var legacyPath = Path.Combine("project", "legacy.txt");
+		var largePath = Path.Combine("project", "large.txt");
+
+		viewModel.SetContentProcessingStatus(
+			SecretScanState.Failed,
+			detectedCount: 3,
+			hiddenCount: 2,
+			skippedFileCount: 2,
+			failedFileCount: 1,
+			[
+				new UnscannableFile(legacyPath, FileContentClassification.UnsupportedEncoding),
+				new UnscannableFile(largePath, FileContentClassification.TooLarge)
+			]);
+
+		Assert.Equal(
+			string.Join(Environment.NewLine, "Found 3, hidden 2", "Failed files: 1", "Retry"),
+			viewModel.SettingsSecretsNotice);
+		Assert.DoesNotContain("Too large", viewModel.SettingsSecretsNotice, StringComparison.Ordinal);
+		Assert.DoesNotContain("Unscannable", viewModel.SettingsSecretsNotice, StringComparison.Ordinal);
+		Assert.DoesNotContain(legacyPath, viewModel.SettingsSecretsNotice, StringComparison.Ordinal);
+		Assert.DoesNotContain(largePath, viewModel.SettingsSecretsNotice, StringComparison.Ordinal);
+	}
 
     [Fact]
     public void StatusPresentation_CanStayHiddenWhileOperationRemainsLogicallyBusy()
@@ -391,6 +764,32 @@ public sealed class MainWindowViewModelTests
         Assert.True(viewModel.IsSearchFilterAvailable);
         Assert.True(viewModel.AreFilterSettingsEnabled);
     }
+
+	[Fact]
+	public void ProjectLoad_KeepsSettingsInteractiveAndDisablesOnlyCommitSurfaceUntilPublication()
+	{
+		var viewModel = CreateViewModel();
+		viewModel.IsProjectLoaded = true;
+		var changed = new HashSet<string>();
+		viewModel.PropertyChanged += (_, args) =>
+		{
+			if (args.PropertyName is not null)
+				changed.Add(args.PropertyName);
+		};
+
+		viewModel.IsProjectLoadInProgress = true;
+
+		Assert.True(viewModel.AreFilterSettingsEnabled);
+		Assert.False(viewModel.CanApplySettings);
+		Assert.True(viewModel.CanChangeProjectTree);
+		Assert.DoesNotContain(nameof(MainWindowViewModel.AreFilterSettingsEnabled), changed);
+		Assert.Contains(nameof(MainWindowViewModel.CanApplySettings), changed);
+
+		viewModel.IsProjectLoadInProgress = false;
+
+		Assert.True(viewModel.AreFilterSettingsEnabled);
+		Assert.True(viewModel.CanApplySettings);
+	}
 
     [Fact]
     public void ProjectCopyExport_AllowsClosingExistingPreviewButBlocksReopeningIt()
@@ -1520,27 +1919,6 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public void AllRootFoldersChecked_Changes()
-    {
-        var viewModel = CreateViewModel();
-
-        viewModel.AllRootFoldersChecked = false;
-
-        Assert.False(viewModel.AllRootFoldersChecked);
-    }
-
-    [Fact]
-    public void AllRootFoldersChecked_CanToggleTrue()
-    {
-        var viewModel = CreateViewModel();
-        viewModel.AllRootFoldersChecked = false;
-
-        viewModel.AllRootFoldersChecked = true;
-
-        Assert.True(viewModel.AllRootFoldersChecked);
-    }
-
-    [Fact]
     public void AllIgnoreChecked_Changes()
     {
         var viewModel = CreateViewModel();
@@ -1580,27 +1958,6 @@ public sealed class MainWindowViewModelTests
         viewModel.SelectedFontFamily = null;
 
         Assert.Null(viewModel.SelectedFontFamily);
-    }
-
-    [Fact]
-    public void PendingFontFamily_Changes()
-    {
-        var viewModel = CreateViewModel();
-
-        viewModel.PendingFontFamily = "Consolas";
-
-        Assert.Equal("Consolas", viewModel.PendingFontFamily);
-    }
-
-    [Fact]
-    public void PendingFontFamily_CanBeCleared()
-    {
-        var viewModel = CreateViewModel();
-        viewModel.PendingFontFamily = "Consolas";
-
-        viewModel.PendingFontFamily = null;
-
-        Assert.Null(viewModel.PendingFontFamily);
     }
 
     [Fact]
@@ -1696,17 +2053,6 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public void SettingsAllRootFolders_WhenEmpty_ReturnsBaseText()
-    {
-        var viewModel = CreateViewModel(new Dictionary<string, string>
-        {
-            ["Settings.All"] = "All"
-        });
-
-        Assert.Equal("All", viewModel.SettingsAllRootFolders);
-    }
-
-    [Fact]
     public void SettingsAllIgnore_WhenHasItems_ReturnsTextWithCount()
     {
         var viewModel = CreateViewModel(new Dictionary<string, string>
@@ -1735,18 +2081,28 @@ public sealed class MainWindowViewModelTests
         Assert.Equal("All (3)", viewModel.SettingsAllExtensions);
     }
 
-    [Fact]
-    public void SettingsAllRootFolders_WhenHasItems_ReturnsTextWithCount()
-    {
-        var viewModel = CreateViewModel(new Dictionary<string, string>
-        {
-            ["Settings.All"] = "All"
-        });
+	[Fact]
+	public void SettingsAllContentProcessing_TracksOnlyTransformationCount()
+	{
+		var viewModel = CreateViewModel(new Dictionary<string, string>
+		{
+			["Settings.All"] = "All"
+		});
 
-        viewModel.RootFolders.Add(new SelectionOptionViewModel("src", true));
+		viewModel.IgnoreOptions.Add(
+			new IgnoreOptionViewModel(IgnoreOptionId.HiddenFolders, "hidden folders", true));
+		viewModel.IgnoreOptions.Add(
+			new IgnoreOptionViewModel(IgnoreOptionId.HideSecrets, "hide secrets", false));
+		viewModel.IgnoreOptions.Add(
+			new IgnoreOptionViewModel(IgnoreOptionId.CompressCode, "compress code", false));
 
-        Assert.Equal("All (1)", viewModel.SettingsAllRootFolders);
-    }
+		Assert.Equal("All (1)", viewModel.SettingsAllIgnore);
+		Assert.Equal("All (2)", viewModel.SettingsAllContentProcessing);
+
+		viewModel.IgnoreOptions.RemoveAt(2);
+
+		Assert.Equal("All (1)", viewModel.SettingsAllContentProcessing);
+	}
 
     [Fact]
     public void SettingsAllIgnore_WhenItemRemoved_UpdatesCount()
@@ -1779,21 +2135,6 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public void SettingsAllRootFolders_WhenItemRemoved_UpdatesCount()
-    {
-        var viewModel = CreateViewModel(new Dictionary<string, string>
-        {
-            ["Settings.All"] = "All"
-        });
-        viewModel.RootFolders.Add(new SelectionOptionViewModel("src", true));
-        viewModel.RootFolders.Add(new SelectionOptionViewModel("tests", true));
-
-        viewModel.RootFolders.RemoveAt(0);
-
-        Assert.Equal("All (1)", viewModel.SettingsAllRootFolders);
-    }
-
-    [Fact]
     public void SettingsAllIgnore_WhenCleared_ReturnsBaseText()
     {
         var viewModel = CreateViewModel(new Dictionary<string, string>
@@ -1819,38 +2160,6 @@ public sealed class MainWindowViewModelTests
         viewModel.Extensions.Clear();
 
         Assert.Equal("All", viewModel.SettingsAllExtensions);
-    }
-
-    [Fact]
-    public void SettingsAllRootFolders_WhenCleared_ReturnsBaseText()
-    {
-        var viewModel = CreateViewModel(new Dictionary<string, string>
-        {
-            ["Settings.All"] = "All"
-        });
-        viewModel.RootFolders.Add(new SelectionOptionViewModel("src", true));
-
-        viewModel.RootFolders.Clear();
-
-        Assert.Equal("All", viewModel.SettingsAllRootFolders);
-    }
-
-    [Fact]
-    public void SettingsAllLabels_AreIndependent()
-    {
-        var viewModel = CreateViewModel(new Dictionary<string, string>
-        {
-            ["Settings.All"] = "All"
-        });
-
-        viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.HiddenFolders, "bin", true));
-        viewModel.Extensions.Add(new SelectionOptionViewModel(".cs", true));
-        viewModel.Extensions.Add(new SelectionOptionViewModel(".js", true));
-        // RootFolders stays empty
-
-        Assert.Equal("All (1)", viewModel.SettingsAllIgnore);
-        Assert.Equal("All (2)", viewModel.SettingsAllExtensions);
-        Assert.Equal("All", viewModel.SettingsAllRootFolders);
     }
 
     [Fact]
@@ -1909,25 +2218,6 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public void SettingsAllRootFolders_RaisesPropertyChanged_WhenCollectionChanges()
-    {
-        var viewModel = CreateViewModel(new Dictionary<string, string>
-        {
-            ["Settings.All"] = "All"
-        });
-        var raised = false;
-        viewModel.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName == nameof(viewModel.SettingsAllRootFolders))
-                raised = true;
-        };
-
-        viewModel.RootFolders.Add(new SelectionOptionViewModel("src", true));
-
-        Assert.True(raised);
-    }
-
-    [Fact]
     public void SettingsAllIgnore_MultipleAdds_UpdatesCorrectly()
     {
         var viewModel = CreateViewModel(new Dictionary<string, string>
@@ -1958,40 +2248,6 @@ public sealed class MainWindowViewModelTests
             viewModel.Extensions.Add(new SelectionOptionViewModel($".ext{i}", true));
             Assert.Equal($"All ({i})", viewModel.SettingsAllExtensions);
         }
-    }
-
-    [Fact]
-    public void SettingsAllRootFolders_MultipleAdds_UpdatesCorrectly()
-    {
-        var viewModel = CreateViewModel(new Dictionary<string, string>
-        {
-            ["Settings.All"] = "All"
-        });
-
-        viewModel.RootFolders.Add(new SelectionOptionViewModel("src", true));
-        viewModel.RootFolders.Add(new SelectionOptionViewModel("tests", true));
-        viewModel.RootFolders.Add(new SelectionOptionViewModel("docs", true));
-        viewModel.RootFolders.Add(new SelectionOptionViewModel("lib", true));
-
-        Assert.Equal("All (4)", viewModel.SettingsAllRootFolders);
-    }
-
-    [Fact]
-    public void UpdateAllCheckboxLabels_ManualCall_UpdatesAllLabels()
-    {
-        var viewModel = CreateViewModel(new Dictionary<string, string>
-        {
-            ["Settings.All"] = "All"
-        });
-        viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.HiddenFolders, "bin", true));
-        viewModel.Extensions.Add(new SelectionOptionViewModel(".cs", true));
-        viewModel.RootFolders.Add(new SelectionOptionViewModel("src", true));
-
-        viewModel.UpdateAllCheckboxLabels();
-
-        Assert.Equal("All (1)", viewModel.SettingsAllIgnore);
-        Assert.Equal("All (1)", viewModel.SettingsAllExtensions);
-        Assert.Equal("All (1)", viewModel.SettingsAllRootFolders);
     }
 
     [Fact]
@@ -2039,28 +2295,6 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
-    public void SettingsAllRootFolders_WhenAddAndRemove_UpdatesCorrectly()
-    {
-        var viewModel = CreateViewModel(new Dictionary<string, string>
-        {
-            ["Settings.All"] = "All"
-        });
-
-        var item1 = new SelectionOptionViewModel("src", true);
-        var item2 = new SelectionOptionViewModel("tests", true);
-
-        viewModel.RootFolders.Add(item1);
-        viewModel.RootFolders.Add(item2);
-        Assert.Equal("All (2)", viewModel.SettingsAllRootFolders);
-
-        viewModel.RootFolders.Remove(item1);
-        Assert.Equal("All (1)", viewModel.SettingsAllRootFolders);
-
-        viewModel.RootFolders.Remove(item2);
-        Assert.Equal("All", viewModel.SettingsAllRootFolders);
-    }
-
-    [Fact]
     public void SettingsAllLabels_LargeCount_FormatsCorrectly()
     {
         var viewModel = CreateViewModel(new Dictionary<string, string>
@@ -2102,20 +2336,6 @@ public sealed class MainWindowViewModelTests
         viewModel.Extensions.Insert(0, new SelectionOptionViewModel(".js", true));
 
         Assert.Equal("All (2)", viewModel.SettingsAllExtensions);
-    }
-
-    [Fact]
-    public void SettingsAllRootFolders_InsertAtIndex_UpdatesCount()
-    {
-        var viewModel = CreateViewModel(new Dictionary<string, string>
-        {
-            ["Settings.All"] = "All"
-        });
-        viewModel.RootFolders.Add(new SelectionOptionViewModel("src", true));
-
-        viewModel.RootFolders.Insert(0, new SelectionOptionViewModel("tests", true));
-
-        Assert.Equal("All (2)", viewModel.SettingsAllRootFolders);
     }
 
     [Fact]
@@ -2183,26 +2403,6 @@ public sealed class MainWindowViewModelTests
         Assert.True(raised);
     }
 
-    [Fact]
-    public void SettingsAllRootFolders_RaisesPropertyChanged_OnInsert()
-    {
-        var viewModel = CreateViewModel(new Dictionary<string, string>
-        {
-            ["Settings.All"] = "All"
-        });
-
-        var raised = false;
-        viewModel.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName == nameof(viewModel.SettingsAllRootFolders))
-                raised = true;
-        };
-
-        viewModel.RootFolders.Insert(0, new SelectionOptionViewModel("src", true));
-
-        Assert.True(raised);
-    }
-
     [Theory]
     [InlineData(1, "All (1)")]
     [InlineData(5, "All (5)")]
@@ -2242,33 +2442,5 @@ public sealed class MainWindowViewModelTests
         Assert.Equal(expected, viewModel.SettingsAllExtensions);
     }
 
-    [Fact]
-    public void AllThreeLabels_IndependentPropertyChangedEvents()
-    {
-        var viewModel = CreateViewModel(new Dictionary<string, string>
-        {
-            ["Settings.All"] = "All"
-        });
-
-        var ignoreRaised = false;
-        var extensionsRaised = false;
-        var rootFoldersRaised = false;
-
-        viewModel.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName == nameof(viewModel.SettingsAllIgnore)) ignoreRaised = true;
-            if (e.PropertyName == nameof(viewModel.SettingsAllExtensions)) extensionsRaised = true;
-            if (e.PropertyName == nameof(viewModel.SettingsAllRootFolders)) rootFoldersRaised = true;
-        };
-
-        viewModel.IgnoreOptions.Add(new IgnoreOptionViewModel(IgnoreOptionId.HiddenFolders, "bin", true));
-
-        // All three should be raised because UpdateAllCheckboxLabels updates all
-        Assert.True(ignoreRaised);
-        Assert.True(extensionsRaised);
-        Assert.True(rootFoldersRaised);
-    }
-
     #endregion
 }
-

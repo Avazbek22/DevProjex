@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+using System.Security.Cryptography;
 using DevProjex.Tests.Shared.StoreListing;
 
 namespace DevProjex.Tests.Integration;
@@ -29,6 +31,166 @@ public sealed class StoreListingImportFolderIntegrationTests
         Assert.Single(csvFiles);
         Assert.True(screenshotFiles.Length >= localeColumns.Length, "The import folder should contain at least one screenshot asset per locale.");
         Assert.Single(logoFiles);
+    }
+
+    [Fact]
+    public void ImportFolder_ContainsLocalizedGuiAndTuiMedia()
+    {
+        var repositoryRoot = RepoRoot.Value;
+        var screenshotRoot = Path.Combine(StoreListingPaths.GetImportFolder(repositoryRoot), "Screenshots");
+        var languageCodes = Directory
+            .EnumerateFiles(Path.Combine(repositoryRoot, "Assets", "Localization"), "*.json")
+            .Select(Path.GetFileNameWithoutExtension)
+            .Select(static code => code!.ToUpperInvariant())
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        string[] guiDirectories =
+        [
+            "1_Main",
+            "2_Loaded_Project",
+            "3_Tree_Preview",
+            "4_Filter_Preview",
+            "5_Tree_Preview_Settings"
+        ];
+        foreach (var directory in guiDirectories)
+        {
+            AssertLocalizedScreenshotSet(screenshotRoot, directory, languageCodes, requireUniqueImages: false);
+        }
+
+        string[] tuiDirectories =
+        [
+            "6_Terminal_Workspace",
+            "7_Terminal_Command_Hints",
+            "8_Terminal_Action_Palette",
+            "9_Terminal_Markdown",
+            "10_Terminal_JSON"
+        ];
+        foreach (var directory in tuiDirectories)
+        {
+            AssertLocalizedScreenshotSet(screenshotRoot, directory, languageCodes, requireUniqueImages: true);
+        }
+
+        var document = StoreListingCsvDocument.Load(StoreListingPaths.GetImportCsvPath(repositoryRoot));
+        var localeColumns = StoreListingPaths.GetLocaleColumns(document.Headers);
+        for (var index = 0; index < tuiDirectories.Length; index++)
+        {
+            var row = document.RowsByField[$"DesktopScreenshot{index + 6}"];
+            foreach (var locale in localeColumns)
+            {
+                var languageCode = ResolveAppLanguageCode(locale, languageCodes);
+                var expectedPath = $"ImportFolder/Screenshots/{tuiDirectories[index]}/{languageCode}.png";
+                Assert.Equal(expectedPath, row.GetValue(locale));
+            }
+        }
+    }
+
+    private static void AssertLocalizedScreenshotSet(
+        string screenshotRoot,
+        string directory,
+        IReadOnlyCollection<string> expectedLanguageCodes,
+        bool requireUniqueImages)
+    {
+        var imagePaths = Directory
+            .EnumerateFiles(Path.Combine(screenshotRoot, directory), "*.png")
+            .ToArray();
+        var actualCodes = imagePaths
+            .Select(static imagePath => Path.GetFileNameWithoutExtension(imagePath)!)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(expectedLanguageCodes, actualCodes);
+        Assert.All(imagePaths, imagePath => AssertPngContract(
+            imagePath,
+            expectedWidth: 2048,
+            expectedHeight: 1280,
+            requireOpaquePixels: requireUniqueImages));
+        if (!requireUniqueImages)
+        {
+            return;
+        }
+
+        Assert.Equal(
+            imagePaths.Length,
+            imagePaths
+                .Select(static imagePath => File.ReadAllBytes(imagePath))
+                .Select(static bytes => SHA256.HashData(bytes))
+                .Select(static hash => Convert.ToHexString(hash))
+                .Distinct(StringComparer.Ordinal)
+                .Count());
+    }
+
+    private static string ResolveAppLanguageCode(string storeLocale, IReadOnlyCollection<string> supportedCodes)
+    {
+        var normalized = storeLocale.Replace('_', '-').ToUpperInvariant();
+        if (supportedCodes.Contains(normalized))
+        {
+            return normalized;
+        }
+
+        var primary = normalized.Split('-')[0];
+        Assert.Contains(primary, supportedCodes);
+        return primary;
+    }
+
+    private static void AssertPngContract(
+        string path,
+        int expectedWidth,
+        int expectedHeight,
+        bool requireOpaquePixels)
+    {
+        Span<byte> header = stackalloc byte[26];
+        using var stream = File.OpenRead(path);
+        stream.ReadExactly(header);
+
+        Assert.Equal(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }, header[..8].ToArray());
+        Assert.Equal(expectedWidth, BinaryPrimitives.ReadInt32BigEndian(header[16..20]));
+        Assert.Equal(expectedHeight, BinaryPrimitives.ReadInt32BigEndian(header[20..24]));
+        if (requireOpaquePixels)
+        {
+            var colorType = header[25];
+            Assert.True(
+                colorType is 2 or 3,
+                $"{path} must use truecolor or indexed color, but its PNG color type is {colorType}.");
+            if (colorType == 3)
+                AssertIndexedPngIsOpaque(stream, path);
+        }
+    }
+
+    private static void AssertIndexedPngIsOpaque(Stream stream, string path)
+    {
+        stream.Position = 8;
+        Span<byte> chunkHeader = stackalloc byte[8];
+        Span<byte> transparency = stackalloc byte[256];
+        while (stream.Position + 12 <= stream.Length)
+        {
+            stream.ReadExactly(chunkHeader);
+            var dataLength = BinaryPrimitives.ReadUInt32BigEndian(chunkHeader[..4]);
+            var isTransparencyChunk = chunkHeader[4..].SequenceEqual("tRNS"u8);
+            Assert.True(
+                stream.Length - stream.Position >= dataLength + 4,
+                $"{path} contains a truncated PNG chunk.");
+
+            if (isTransparencyChunk)
+            {
+                Assert.InRange(dataLength, 1u, (uint)transparency.Length);
+                var alphaValues = transparency[..checked((int)dataLength)];
+                stream.ReadExactly(alphaValues);
+                Assert.True(
+                    alphaValues.IndexOfAnyExcept(byte.MaxValue) < 0,
+                    $"{path} contains a non-opaque indexed palette entry.");
+            }
+            else
+            {
+                stream.Position += dataLength;
+            }
+
+            stream.Position += 4;
+            if (chunkHeader[4..].SequenceEqual("IEND"u8))
+                return;
+        }
+
+        Assert.Fail($"{path} does not contain a complete PNG end chunk.");
     }
 
     [Fact]
@@ -74,7 +236,9 @@ public sealed class StoreListingImportFolderIntegrationTests
         var templateLocales = StoreListingPaths.GetLocaleColumns(templateDocument.Headers);
 
         Assert.Equal(templateLocales, importLocales.Take(templateLocales.Length));
-        Assert.Equal(["es-es", "pt-br", "pt-pt"], importLocales.Skip(templateLocales.Length));
+        Assert.Equal(
+            ["pl-pl", "tr-tr", "uk-ua", "ja-jp", "ko-kr", "zh-cn", "zh-tw", "vi-vn", "id-id"],
+            importLocales.Skip(templateLocales.Length));
     }
 
     [Fact]
@@ -122,22 +286,31 @@ public sealed class StoreListingImportFolderIntegrationTests
     public void ImportFolder_FeatureSummaryAdvertisesBothGitAwareFilteringModes()
     {
         var document = StoreListingCsvDocument.Load(StoreListingPaths.GetImportCsvPath(RepoRoot.Value));
-        var feature = document.RowsByField["Feature4"];
+        var feature = document.RowsByField["Feature7"];
         var expectedValues = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["en-us"] = "Smart Ignore, .gitignore, and Git-tracked mode",
             ["en"] = "Smart Ignore, .gitignore, and Git-tracked mode",
-            ["ru"] = "Smart Ignore, .gitignore и режим отслеживаемых Git-файлов",
-            ["ru-ru"] = "Smart Ignore, .gitignore и режим отслеживаемых Git-файлов",
-            ["kk-kz"] = "Smart Ignore, .gitignore және Git бақылайтын файлдар режимі",
+            ["ru"] = "Smart Ignore, .gitignore и режим отслеживаемых файлов",
+            ["ru-ru"] = "Smart Ignore, .gitignore и режим отслеживаемых файлов",
+            ["kk-kz"] = "Smart Ignore, .gitignore және қадағаланатын файлдар режимі",
             ["de-de"] = "Smart Ignore, .gitignore und Git-Tracked-Modus",
-            ["it-it"] = "Smart Ignore, .gitignore e modalità file tracciati da Git",
-            ["tg-cyrl-tj"] = "Smart Ignore, .gitignore ва реҷаи файлҳои пайгиришавандаи Git",
-            ["uz-latn-uz"] = "Smart Ignore, .gitignore va Git kuzatadigan fayllar rejimi",
+            ["it-it"] = "Smart Ignore, .gitignore e modalità file tracciati",
+            ["tg-cyrl-tj"] = "Smart Ignore, .gitignore ва реҷаи файлҳои пайгиришаванда",
+            ["uz-latn-uz"] = "Smart Ignore, .gitignore va kuzatilgan fayllar rejimi",
             ["fr-fr"] = "Smart Ignore, .gitignore et mode fichiers suivis par Git",
-            ["es-es"] = "Smart Ignore, .gitignore y modo de archivos seguidos por Git",
-            ["pt-br"] = "Smart Ignore, .gitignore e arquivos rastreados pelo Git",
-            ["pt-pt"] = "Smart Ignore, .gitignore e ficheiros controlados pelo Git"
+            ["es-es"] = "Smart Ignore, .gitignore y modo de archivos rastreados",
+            ["pt-br"] = "Smart Ignore, .gitignore e modo de arquivos rastreados",
+            ["pt-pt"] = "Smart Ignore, .gitignore e modo de ficheiros seguidos",
+            ["pl-pl"] = "Smart Ignore, .gitignore i tryb plików śledzonych",
+            ["tr-tr"] = "Smart Ignore, .gitignore ve izlenen dosyalar modu",
+            ["uk-ua"] = "Smart Ignore, .gitignore і режим відстежуваних файлів",
+            ["ja-jp"] = "Smart Ignore・.gitignore・Git 追跡ファイルモード",
+            ["ko-kr"] = "Smart Ignore, .gitignore, Git 추적 파일 모드",
+            ["zh-cn"] = "Smart Ignore、.gitignore 与 Git 跟踪文件模式",
+            ["zh-tw"] = "Smart Ignore、.gitignore 與 Git 追蹤檔案模式",
+            ["vi-vn"] = "Smart Ignore, .gitignore và chế độ tệp Git theo dõi",
+            ["id-id"] = "Smart Ignore, .gitignore, dan mode berkas terlacak Git"
         };
 
         Assert.Equal(

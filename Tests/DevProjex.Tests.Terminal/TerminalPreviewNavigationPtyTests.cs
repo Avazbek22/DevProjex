@@ -33,10 +33,10 @@ public sealed partial class TerminalPreviewNavigationPtyTests
 			"CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);
 		initial = await terminal.WaitForScreenAsync(
-			"Tab/F6 Preview",
+			"Ctrl+A/U Select all/none",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("> PROJECT TREE", initial, StringComparison.Ordinal);
-		Assert.Contains("Tab/F6 Preview", initial, StringComparison.Ordinal);
+		Assert.Contains("Ctrl+A/U Select all/none", initial, StringComparison.Ordinal);
 		await terminal.SendAsync("2", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"ContentMarker001",
@@ -158,44 +158,50 @@ public sealed partial class TerminalPreviewNavigationPtyTests
 
 		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Choose exactly one mode",
+			"DPX-GIT-TRACKED-INDEX-UNAVAILABLE",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
-		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			"Choose exactly one mode",
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"(•) Use .gitignore",
 			cancellationToken: TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(
+			terminal,
+			TestContext.Current.CancellationToken);
+		await terminal.SendShiftTabAsync(TestContext.Current.CancellationToken);
 		var afterGitRefresh = await terminal.WaitForScreenAsync(
 			"> CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("> CONTEXT PREVIEW", afterGitRefresh, StringComparison.Ordinal);
-		Assert.DoesNotContain("Git filtering:", afterGitRefresh, StringComparison.Ordinal);
 		await WaitForStableScreenAsync(
 			terminal,
 			TestContext.Current.CancellationToken);
-		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
+		await terminal.SendAsync("x", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"(*) No Git filtering",
+			"(•) Use .gitignore",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			"Choose exactly one mode",
+		await WaitForStableScreenAsync(
+			terminal,
+			TestContext.Current.CancellationToken);
+		await terminal.SendShiftTabAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.SendAsync("x", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Toggle all changes only this section",
+			"> PARAMETERS",
 			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
 		await terminal.SendSpaceAsync(TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			"Toggle all changes only this section",
+		await terminal.WaitForScreenAsync(
+			"[x] All",
 			cancellationToken: TestContext.Current.CancellationToken);
+		await WaitForStableScreenAsync(
+			terminal,
+			TestContext.Current.CancellationToken);
+		await terminal.SendShiftTabAsync(TestContext.Current.CancellationToken);
 		var afterExclusionsRefresh = await terminal.WaitForScreenAsync(
-			"Files 62",
+			"> CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("> CONTEXT PREVIEW", afterExclusionsRefresh, StringComparison.Ordinal);
 		await WaitForStableScreenAsync(
@@ -234,7 +240,7 @@ public sealed partial class TerminalPreviewNavigationPtyTests
 
 		await terminal.ResizeAsync(120, 30, TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"1/2/3 View",
+			"W Wrap",
 			cancellationToken: TestContext.Current.CancellationToken);
 		var restored = await terminal.WaitForScreenAsync(
 			"PROJECT TREE",
@@ -246,7 +252,7 @@ public sealed partial class TerminalPreviewNavigationPtyTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.False(terminal.HasExited);
 
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(
@@ -278,8 +284,37 @@ public sealed partial class TerminalPreviewNavigationPtyTests
 				$"internal sealed class ContentMarker{index:D3} {{ }}");
 		}
 		project.WriteFile("node_modules/noise.js", "generated dependency noise");
+		InitializeGitRepository(project.Path);
+		File.WriteAllText(Path.Combine(project.Path, ".git", "index"), "not-a-git-index");
 
 		return project;
+	}
+
+	private static void InitializeGitRepository(string projectPath)
+	{
+		RunGit(projectPath, "init", "--quiet");
+		RunGit(projectPath, "config", "user.email", "terminal-tests@devprojex.local");
+		RunGit(projectPath, "config", "user.name", "DevProjex Terminal Tests");
+		RunGit(projectPath, "add", "--all");
+		RunGit(projectPath, "commit", "--quiet", "-m", "Initial test project");
+	}
+
+	private static void RunGit(string workingDirectory, params string[] arguments)
+	{
+		var startInfo = new ProcessStartInfo
+		{
+			FileName = OperatingSystem.IsWindows() ? "git.exe" : "git",
+			WorkingDirectory = workingDirectory,
+			UseShellExecute = false,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			CreateNoWindow = true
+		};
+		foreach (var argument in arguments)
+			startInfo.ArgumentList.Add(argument);
+
+		var result = TerminalTestProcess.Run(startInfo);
+		Assert.Equal(0, result.ExitCode);
 	}
 
 	private static async Task<string> WaitForScreenChangeAsync(

@@ -8,6 +8,16 @@ namespace DevProjex.Tests.Unit.Avalonia;
 public sealed class MessageDialogBehaviorTests
 {
     [AvaloniaFact]
+    public void BuildContent_UsesProvidedMessageAndButtonLabel()
+    {
+        var content = InvokeBuildContent("Saved", "Close");
+        var panel = Assert.IsType<DockPanel>(content);
+
+        Assert.Equal("Saved", Assert.Single(panel.Children.OfType<TextBlock>()).Text);
+        Assert.Equal("Close", Assert.Single(panel.Children.OfType<Button>()).Content);
+    }
+
+    [AvaloniaFact]
     public void BuildConfirmationContent_UsesProvidedMessageAndButtonLabels()
     {
         var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -59,6 +69,18 @@ public sealed class MessageDialogBehaviorTests
 
         Assert.NotNull(method);
         var content = (Control?)method!.Invoke(null, [message, confirmButtonText, cancelButtonText, completion]);
+        Assert.NotNull(content);
+        return content!;
+    }
+
+    private static Control InvokeBuildContent(string message, string closeButtonText)
+    {
+        var method = typeof(MessageDialog).GetMethod(
+            "BuildContent",
+            BindingFlags.NonPublic | BindingFlags.Static);
+
+        Assert.NotNull(method);
+        var content = (Control?)method!.Invoke(null, [message, closeButtonText]);
         Assert.NotNull(content);
         return content!;
     }

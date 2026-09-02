@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.ComponentModel;
+using DevProjex.Application.Services;
 using DevProjex.Infrastructure.Git;
 
 namespace DevProjex.Infrastructure.FileSystem;
@@ -11,15 +12,17 @@ internal static class GitTrackedPathIndexCache
 	private const long CacheByteLimit = 16L * 1024 * 1024;
 	private const long MaximumSingleEntryBytes = 64L * 1024 * 1024;
 	private const long EstimatedEmptyIndexBytes = 64;
-	private const int GitFileMaximumLength = 64 * 1024;
+	private const int MaximumTrackedPathLength = 32768;
+	private const int MaximumLoadAttempts = 2;
+	internal const int GitFileMaximumLength = 64 * 1024;
 	private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(30);
-	private static readonly string GitExecutable = OperatingSystem.IsWindows() ? "git.exe" : "git";
+	private static readonly TimeSpan FailedLoadRetryDelay = TimeSpan.FromMilliseconds(100);
 	private static readonly object CacheSync = new();
 	private static readonly Dictionary<string, LinkedListNode<CacheEntry>> Cache =
-		new(PathComparer.Default);
+		new(ProjectTreePathIdentity.CanonicalComparer);
 	private static readonly LinkedList<CacheEntry> CacheLru = new();
-	private static readonly ConcurrentDictionary<string, Lazy<Task<LoadedGitTrackedPathIndex?>>> InFlightLoads =
-		new(PathComparer.Default);
+	private static readonly ConcurrentDictionary<string, SharedAsyncOperation<LoadedGitTrackedPathIndex?>> InFlightLoads =
+		new(ProjectTreePathIdentity.CanonicalComparer);
 	private static long _cacheSizeBytes;
 	private static int _gitAvailability;
 
@@ -51,23 +54,44 @@ internal static class GitTrackedPathIndexCache
 			return false;
 
 		var loadKey = signature.CreateLoadKey();
-		var lazyLoad = InFlightLoads.GetOrAdd(
-			loadKey,
-			_ => new Lazy<Task<LoadedGitTrackedPathIndex?>>(
-				() => LoadAndStoreSafelyAsync(signature),
-				LazyThreadSafetyMode.ExecutionAndPublication));
-		var loadTask = lazyLoad.Value;
-		RemoveCompletedLoad(loadKey, lazyLoad, loadTask);
+		for (var attempt = 0; attempt < MaximumLoadAttempts; attempt++)
+		{
+			SharedAsyncOperation<LoadedGitTrackedPathIndex?> sharedLoad;
+			IDisposable lease;
+			while (true)
+			{
+				sharedLoad = GetOrCreateSharedLoad(loadKey, signature);
+				if (sharedLoad.TryAcquire(out lease))
+					break;
 
-		var loaded = loadTask
-			.WaitAsync(cancellationToken)
-			.GetAwaiter()
-			.GetResult();
-		if (loaded is null)
-			return false;
+				InFlightLoads.TryRemove(
+					new KeyValuePair<string, SharedAsyncOperation<LoadedGitTrackedPathIndex?>>(loadKey, sharedLoad));
+				if (TryGetCached(signature, out trackedPathIndex))
+					return true;
+			}
 
-		trackedPathIndex = loaded.Index;
-		return true;
+			LoadedGitTrackedPathIndex? loaded;
+			using (lease)
+			{
+				loaded = sharedLoad.Task
+					.WaitAsync(cancellationToken)
+					.GetAwaiter()
+					.GetResult();
+			}
+			if (loaded is not null)
+			{
+				trackedPathIndex = loaded.Index;
+				return true;
+			}
+			if (attempt + 1 >= MaximumLoadAttempts || Volatile.Read(ref _gitAvailability) < 0)
+				break;
+
+			Task.Delay(FailedLoadRetryDelay, cancellationToken).GetAwaiter().GetResult();
+			if (TryGetCached(signature, out trackedPathIndex))
+				return true;
+		}
+
+		return false;
 	}
 
 	public static bool TryLoadNearest(
@@ -90,7 +114,7 @@ internal static class GitTrackedPathIndexCache
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			var gitMetadataPath = Path.Combine(currentPath, ".git");
-			if (TryMetadataEntryExists(gitMetadataPath))
+			if (TryMetadataEntryEstablishesBoundary(gitMetadataPath))
 			{
 				if (TryLoad(
 					currentPath,
@@ -136,7 +160,7 @@ internal static class GitTrackedPathIndexCache
 		while (!string.IsNullOrWhiteSpace(currentPath))
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			if (TryMetadataEntryExists(Path.Combine(currentPath, ".git")))
+			if (TryMetadataEntryEstablishesBoundary(Path.Combine(currentPath, ".git")))
 			{
 				repositoryRootPath = currentPath;
 				return true;
@@ -151,12 +175,33 @@ internal static class GitTrackedPathIndexCache
 		return false;
 	}
 
-	private static async Task<LoadedGitTrackedPathIndex?> LoadAndStoreSafelyAsync(
+	private static SharedAsyncOperation<LoadedGitTrackedPathIndex?> GetOrCreateSharedLoad(
+		string loadKey,
 		GitIndexSignature signature)
+	{
+		while (true)
+		{
+			if (InFlightLoads.TryGetValue(loadKey, out var existing))
+				return existing;
+
+			var candidate = new SharedAsyncOperation<LoadedGitTrackedPathIndex?>(
+				cancellationToken => LoadAndStoreSafelyAsync(signature, cancellationToken),
+				load => InFlightLoads.TryRemove(
+					new KeyValuePair<string, SharedAsyncOperation<LoadedGitTrackedPathIndex?>>(loadKey, load)));
+			if (InFlightLoads.TryAdd(loadKey, candidate))
+				return candidate;
+
+			candidate.DisposeUnused();
+		}
+	}
+
+	private static async Task<LoadedGitTrackedPathIndex?> LoadAndStoreSafelyAsync(
+		GitIndexSignature signature,
+		CancellationToken cancellationToken)
 	{
 		try
 		{
-			var loaded = await LoadAsync(signature).ConfigureAwait(false);
+			var loaded = await LoadAsync(signature, cancellationToken).ConfigureAwait(false);
 			if (loaded is not null)
 				Store(signature, loaded);
 			return loaded;
@@ -167,30 +212,12 @@ internal static class GitTrackedPathIndexCache
 		}
 	}
 
-	private static void RemoveCompletedLoad(
-		string loadKey,
-		Lazy<Task<LoadedGitTrackedPathIndex?>> lazyLoad,
-		Task<LoadedGitTrackedPathIndex?> loadTask)
-	{
-		_ = loadTask.ContinueWith(
-			static (_, state) =>
-			{
-				var completedLoad = ((string Key, Lazy<Task<LoadedGitTrackedPathIndex?>> Load))state!;
-				InFlightLoads.TryRemove(
-					new KeyValuePair<string, Lazy<Task<LoadedGitTrackedPathIndex?>>>(
-						completedLoad.Key,
-						completedLoad.Load));
-			},
-			(loadKey, lazyLoad),
-			CancellationToken.None,
-			TaskContinuationOptions.ExecuteSynchronously,
-			TaskScheduler.Default);
-	}
-
 	private static async Task<LoadedGitTrackedPathIndex?> LoadAsync(
-		GitIndexSignature signature)
+		GitIndexSignature signature,
+		CancellationToken cancellationToken)
 	{
-		using var timeoutSource = new CancellationTokenSource(CommandTimeout);
+		using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		timeoutSource.CancelAfter(CommandTimeout);
 
 		using var process = new Process
 		{
@@ -203,37 +230,42 @@ internal static class GitTrackedPathIndexCache
 			process.StandardInput.Close();
 			Volatile.Write(ref _gitAvailability, 1);
 		}
-		catch (Win32Exception)
+		catch (Win32Exception exception)
 		{
-			Volatile.Write(ref _gitAvailability, -1);
+			if (IsPermanentGitStartFailure(exception))
+				Volatile.Write(ref _gitAvailability, -1);
 			return null;
 		}
 
-		using var cancellationRegistration = timeoutSource.Token.Register(
-			static state =>
-			{
-				var runningProcess = (Process)state!;
-				try
-				{
-					if (!runningProcess.HasExited)
-						runningProcess.Kill(entireProcessTree: true);
-				}
-				catch
-				{
-					// Cancellation and timeout cleanup are best-effort.
-				}
-			},
-			process);
-
 		var trackedPathsTask = ReadNullDelimitedPathsAsync(
 			process.StandardOutput,
-			timeoutSource.Token);
+			timeoutSource.Token,
+			timeoutSource.Cancel);
 		var errorDrainTask = DrainAsync(process.StandardError, timeoutSource.Token);
-		await process.WaitForExitAsync(timeoutSource.Token).ConfigureAwait(false);
-		var trackedPaths = await trackedPathsTask.ConfigureAwait(false);
-		await errorDrainTask.ConfigureAwait(false);
+		List<string>? trackedPaths;
+		try
+		{
+			await GitRepositoryService
+				.WaitForExitOrTerminateAsync(process, timeoutSource.Token)
+				.ConfigureAwait(false);
+			if (!await GitProcessOutputReader
+				    .WaitForCompletionAfterExitAsync(process, trackedPathsTask, errorDrainTask)
+				    .ConfigureAwait(false))
+			{
+				return null;
+			}
+			trackedPaths = await trackedPathsTask.ConfigureAwait(false);
+			await errorDrainTask.ConfigureAwait(false);
+		}
+		catch (OperationCanceledException)
+		{
+			await GitProcessOutputReader
+				.ObserveAfterTerminationAsync(process, trackedPathsTask, errorDrainTask)
+				.ConfigureAwait(false);
+			throw;
+		}
 
-		if (process.ExitCode != 0)
+		if (process.ExitCode != 0 || trackedPaths is null)
 			return null;
 
 		return new LoadedGitTrackedPathIndex(
@@ -258,42 +290,53 @@ internal static class GitTrackedPathIndexCache
 
 	internal static ProcessStartInfo CreateStartInfo(string repositoryRootPath)
 	{
-		var startInfo = new ProcessStartInfo
-		{
-			FileName = GitExecutable,
-			WorkingDirectory = repositoryRootPath,
-			UseShellExecute = false,
-			CreateNoWindow = true,
-			RedirectStandardInput = true,
-			RedirectStandardOutput = true,
-			RedirectStandardError = true,
-			StandardOutputEncoding = new UTF8Encoding(
-				encoderShouldEmitUTF8Identifier: false,
-				throwOnInvalidBytes: false),
-			StandardErrorEncoding = Encoding.UTF8
-		};
-		GitProcessEnvironmentSanitizer.RemoveRepositoryOverrides(startInfo);
-		startInfo.ArgumentList.Add("-C");
-		startInfo.ArgumentList.Add(repositoryRootPath);
-		startInfo.ArgumentList.Add("-c");
-		startInfo.ArgumentList.Add("core.quotepath=false");
-		startInfo.ArgumentList.Add("ls-files");
-		startInfo.ArgumentList.Add("--cached");
-		startInfo.ArgumentList.Add("--full-name");
-		startInfo.ArgumentList.Add("-z");
-		startInfo.ArgumentList.Add("--");
+		var startInfo = GitProcessStartInfoFactory.Create(
+			repositoryRootPath,
+			[
+				"-C", repositoryRootPath,
+				"-c", "core.quotepath=false",
+				"ls-files", "--cached", "--full-name", "-z", "--"
+			]);
+		startInfo.StandardOutputEncoding = new UTF8Encoding(
+			encoderShouldEmitUTF8Identifier: false,
+			throwOnInvalidBytes: false);
 		startInfo.Environment["GIT_OPTIONAL_LOCKS"] = "0";
-		startInfo.Environment["GIT_TERMINAL_PROMPT"] = "0";
 		return startInfo;
 	}
 
-	private static async Task<List<string>> ReadNullDelimitedPathsAsync(
-		StreamReader reader,
-		CancellationToken cancellationToken)
+	internal static bool IsPermanentGitStartFailure(Win32Exception exception)
 	{
+		ArgumentNullException.ThrowIfNull(exception);
+		if (exception.NativeErrorCode == 2)
+			return true;
+
+		return OperatingSystem.IsWindows() && exception.NativeErrorCode is 3 or 193 or 216;
+	}
+
+	internal static async Task<List<string>?> ReadNullDelimitedPathsAsync(
+		StreamReader reader,
+		CancellationToken cancellationToken,
+		Action abortProcess,
+		long maximumRetainedBytes = MaximumSingleEntryBytes,
+		int maximumPathLength = MaximumTrackedPathLength,
+		Func<long, bool>? reserveRetainedBytes = null)
+	{
+		ArgumentNullException.ThrowIfNull(reader);
+		ArgumentNullException.ThrowIfNull(abortProcess);
+		if (maximumRetainedBytes < EstimatedEmptyIndexBytes)
+			throw new ArgumentOutOfRangeException(nameof(maximumRetainedBytes));
+		if (maximumPathLength <= 0)
+			throw new ArgumentOutOfRangeException(nameof(maximumPathLength));
+		if (reserveRetainedBytes is not null && !reserveRetainedBytes(EstimatedEmptyIndexBytes))
+		{
+			abortProcess();
+			return null;
+		}
+
 		var paths = new List<string>(capacity: 1024);
 		var buffer = ArrayPool<char>.Shared.Rent(4096);
 		StringBuilder? spanningPath = null;
+		var estimatedRetainedBytes = EstimatedEmptyIndexBytes;
 		try
 		{
 			while (true)
@@ -313,12 +356,16 @@ internal static class GitTrackedPathIndexCache
 					var segmentLength = index - segmentStart;
 					if (spanningPath is null)
 					{
+						if (segmentLength > 0 && !TryReservePath(segmentLength))
+							return AbortRead();
 						if (segmentLength > 0)
 							paths.Add(new string(buffer, segmentStart, segmentLength));
 					}
 					else
 					{
 						spanningPath.Append(buffer, segmentStart, segmentLength);
+						if (spanningPath.Length > 0 && !TryReservePath(spanningPath.Length))
+							return AbortRead();
 						if (spanningPath.Length > 0)
 							paths.Add(spanningPath.ToString());
 						spanningPath = null;
@@ -331,16 +378,39 @@ internal static class GitTrackedPathIndexCache
 				{
 					spanningPath ??= new StringBuilder();
 					spanningPath.Append(buffer, segmentStart, read - segmentStart);
+					if (spanningPath.Length > maximumPathLength)
+						return AbortRead();
 				}
 			}
 
+			if (spanningPath is { Length: > 0 } && !TryReservePath(spanningPath.Length))
+				return AbortRead();
 			if (spanningPath is { Length: > 0 })
 				paths.Add(spanningPath.ToString());
 			return paths;
+
+			bool TryReservePath(int pathLength)
+			{
+				if (pathLength > maximumPathLength)
+					return false;
+				var pathBytes = IntPtr.Size + 32L + ((long)pathLength * sizeof(char));
+				if (maximumRetainedBytes - estimatedRetainedBytes < pathBytes)
+					return false;
+				if (reserveRetainedBytes is not null && !reserveRetainedBytes(pathBytes))
+					return false;
+				estimatedRetainedBytes += pathBytes;
+				return true;
+			}
+
+			List<string>? AbortRead()
+			{
+				abortProcess();
+				return null;
+			}
 		}
 		finally
 		{
-			ArrayPool<char>.Shared.Return(buffer);
+			ArrayPool<char>.Shared.Return(buffer, clearArray: true);
 		}
 	}
 
@@ -357,7 +427,7 @@ internal static class GitTrackedPathIndexCache
 		}
 		finally
 		{
-			ArrayPool<char>.Shared.Return(buffer);
+			ArrayPool<char>.Shared.Return(buffer, clearArray: true);
 		}
 	}
 
@@ -446,7 +516,7 @@ internal static class GitTrackedPathIndexCache
 		out ulong fingerprint)
 	{
 		fingerprint = 0;
-		if (lengthBytes <= 0)
+		if (lengthBytes <= 0 || !UnixFileTypeInspector.IsRegularFile(indexPath))
 			return false;
 
 		Span<byte> tail = stackalloc byte[64];
@@ -494,7 +564,9 @@ internal static class GitTrackedPathIndexCache
 		}
 
 		var gitFileInfo = new FileInfo(gitMetadataPath);
-		if (!gitFileInfo.Exists || gitFileInfo.Length > GitFileMaximumLength)
+		if (!gitFileInfo.Exists ||
+		    !UnixFileTypeInspector.IsRegularFile(gitMetadataPath) ||
+		    gitFileInfo.Length > GitFileMaximumLength)
 			return false;
 
 		using var stream = new FileStream(
@@ -504,19 +576,7 @@ internal static class GitTrackedPathIndexCache
 			FileShare.ReadWrite | FileShare.Delete,
 			bufferSize: 1024,
 			FileOptions.SequentialScan);
-		using var reader = new StreamReader(
-			stream,
-			Encoding.UTF8,
-			detectEncodingFromByteOrderMarks: true,
-			bufferSize: 1024,
-			leaveOpen: false);
-		var firstLine = reader.ReadLine();
-		const string prefix = "gitdir:";
-		if (firstLine is null || !firstLine.StartsWith(prefix, StringComparison.Ordinal))
-			return false;
-
-		var target = firstLine[prefix.Length..].Trim();
-		if (target.Length == 0)
+		if (!TryReadGitDirectoryPointer(stream, out var target))
 			return false;
 
 		var resolvedPath = Path.IsPathRooted(target)
@@ -526,12 +586,37 @@ internal static class GitTrackedPathIndexCache
 		return Directory.Exists(gitDirectoryPath);
 	}
 
-	private static bool TryMetadataEntryExists(string gitMetadataPath)
+	internal static bool TryReadGitDirectoryPointer(Stream stream, out string target)
+	{
+		target = string.Empty;
+		if (!GitLocalConfigSemanticsReader.TryReadBoundedText(
+				stream,
+				GitFileMaximumLength,
+				out var content))
+		{
+			return false;
+		}
+
+		var lineEnd = content.AsSpan().IndexOfAny('\r', '\n');
+		var firstLine = lineEnd >= 0 ? content[..lineEnd] : content;
+		const string prefix = "gitdir:";
+		if (!firstLine.StartsWith(prefix, StringComparison.Ordinal))
+			return false;
+
+		target = firstLine[prefix.Length..].Trim();
+		if (target.Length == 0)
+			return false;
+		return true;
+	}
+
+	internal static bool TryMetadataEntryEstablishesBoundary(string gitMetadataPath)
 	{
 		try
 		{
-			_ = File.GetAttributes(gitMetadataPath);
-			return true;
+			var attributes = File.GetAttributes(gitMetadataPath);
+			return UnixFileTypeInspector.IsPhysicalDirectoryOrRegularFile(
+				gitMetadataPath,
+				attributes);
 		}
 		catch (FileNotFoundException)
 		{
@@ -576,7 +661,7 @@ internal static class GitTrackedPathIndexCache
 
 	private static void Store(GitIndexSignature signature, LoadedGitTrackedPathIndex loaded)
 	{
-		if (loaded.EstimatedRetainedBytes > MaximumSingleEntryBytes)
+		if (!CanRetainCacheEntry(loaded.EstimatedRetainedBytes))
 			return;
 
 		lock (CacheSync)
@@ -597,6 +682,9 @@ internal static class GitTrackedPathIndexCache
 			}
 		}
 	}
+
+	internal static bool CanRetainCacheEntry(long estimatedRetainedBytes) =>
+		estimatedRetainedBytes is >= EstimatedEmptyIndexBytes and <= CacheByteLimit;
 
 	private static void Remove(string repositoryRootPath)
 	{

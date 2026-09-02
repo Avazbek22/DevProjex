@@ -1,21 +1,24 @@
 using System.CommandLine;
-using System.CommandLine.Invocation;
 using System.CommandLine.Parsing;
 using DevProjex.Terminal.DesktopControl;
 using DevProjex.Terminal.Execution;
 using DevProjex.Terminal.Rendering;
 using DevProjex.Terminal.Tui;
+using DevProjex.Mcp;
 
 namespace DevProjex.Terminal.CommandLine;
 
 public sealed class DevProjexCommandTree
 {
+	private static readonly TimeSpan MaximumRequestTimeout = TimeSpan.FromTicks(
+		(uint.MaxValue - 1L) * TimeSpan.TicksPerMillisecond);
 	private readonly ITerminalEnvironment environment;
 	private readonly TerminalServiceFactory _serviceFactory;
 	private readonly IDeveloperCommandRunner? _developerCommandRunner;
 	private readonly bool _implicitTuiInvocation;
 	private readonly LocalizationService _localization;
 	private readonly Option<AppLanguage> _language;
+	private readonly OutputOptions _output;
 	private readonly ITerminalOperationObserver _operationObserver;
 
 	public DevProjexCommandTree(
@@ -50,35 +53,138 @@ public sealed class DevProjexCommandTree
 		_localization = localization ?? new LocalizationService(
 			new JsonLocalizationCatalog(),
 			AppLanguageUtility.DetectSystemLanguage());
-		_language = CreateLanguageOption(localization);
+		_language = CreateLanguageOption(_localization, environment);
+		_output = new OutputOptions(_localization, environment);
 		_operationObserver = operationObserver ??
 			throw new ArgumentNullException(nameof(operationObserver));
 	}
 
 
-	public RootCommand Build()
+	public DevProjexRootCommand Build()
 	{
-		var root = new RootCommand(L("Terminal.Command.Root"));
+		var root = new DevProjexRootCommand(L("Terminal.Command.Root"));
 		var defaultVersionOption = root.Options.OfType<VersionOption>().Single();
 		root.Options.Remove(defaultVersionOption);
 		root.Options.Add(new VersionOption("--version", "-v"));
 		_language.Recursive = true;
 		root.Options.Add(_language);
+		_output.AddGlobalsTo(root);
 		root.Subcommands.Add(BuildTuiCommand());
+		root.Subcommands.Add(BuildMcpCommand());
 		root.Subcommands.Add(BuildOpenCommand());
 		root.Subcommands.Add(BuildAnalyzeCommand());
+		root.Subcommands.Add(BuildTreeCommand());
 		root.Subcommands.Add(BuildExportCommand());
 		root.Subcommands.Add(BuildProfileCommand());
+		root.Subcommands.Add(BuildRecentCommand());
+		root.Subcommands.Add(BuildCacheCommand());
 		root.Subcommands.Add(BuildUiCommand());
 		root.Subcommands.Add(BuildDoctorCommand());
+		root.Subcommands.Add(BuildHelpCommand(root));
 		root.Subcommands.Add(BuildCompletionCommand(root));
 		root.Subcommands.Add(BuildDevCommand(root));
+		_output.AddValidatorsTo(root);
 		CliExamplesRegistry.Set(
 			root,
 			"devprojex",
 			"devprojex analyze .",
 			"devprojex export context . -o ../devprojex-context.md");
 		return root;
+	}
+
+	private Command BuildMcpCommand()
+	{
+		var command = new Command("mcp", L("Terminal.Command.Mcp"));
+		var roots = new Option<string[]>("--root")
+		{
+			Description = L("Terminal.Option.McpRoot"),
+			HelpName = "PATH",
+			Arity = ArgumentArity.OneOrMore,
+			AllowMultipleArgumentsPerToken = false
+		};
+		var hidePrivateData = new Option<bool>("--hide-private-data")
+		{
+			Description = L("Terminal.Option.HidePrivateData")
+		};
+		var allowRemote = new Option<bool>("--allow-remote")
+		{
+			Description = L("Terminal.Option.McpAllowRemote")
+		};
+		var gitMode = CreateMcpGitModeOption();
+		roots.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
+			context,
+			FileSystemCompletionKind.Directories,
+			Directory.GetCurrentDirectory()));
+		command.Options.Add(roots);
+		command.Options.Add(hidePrivateData);
+		command.Options.Add(allowRemote);
+		command.Options.Add(gitMode);
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex mcp",
+			"devprojex mcp --root . --root ../shared",
+			"devprojex mcp --root . --hide-private-data",
+			"devprojex mcp --root . --git-mode tracked");
+		command.SetAction(async (parseResult, cancellationToken) =>
+		{
+			var explicitRoots = parseResult.GetValue(roots) ?? [];
+			var resolvedRoots = McpRootSourceResolver.Resolve(
+				explicitRoots,
+				environment.Variables,
+				Directory.GetCurrentDirectory());
+			try
+			{
+				await McpServerHost.RunWithStandardStreamsAsync(
+						resolvedRoots,
+						parseResult.GetValue(hidePrivateData),
+						parseResult.GetValue(allowRemote),
+						parseResult.GetValue(gitMode),
+						_serviceFactory.AppDataPathProvider,
+						cancellationToken)
+					.ConfigureAwait(false);
+				return CommandLineExitCodes.Success;
+			}
+			catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException)
+			{
+				environment.Error.WriteLine(
+					$"error[DPX-MCP-STARTUP]: {TerminalTextEscaping.EscapeSingleLine(exception.Message)}");
+				return CommandLineExitCodes.UsageError;
+			}
+		});
+		return command;
+	}
+
+	private Option<GitFilteringMode?> CreateMcpGitModeOption()
+	{
+		var choices = CliChoiceSets.PersistentGitMode;
+		var option = new Option<GitFilteringMode?>("--git-mode")
+		{
+			Description = L("Terminal.Option.McpGitMode"),
+			HelpName = string.Join('|', choices.Tokens),
+			CustomParser = result =>
+			{
+				if (result.Tokens.Count == 1)
+				{
+					var token = result.Tokens[0].Value;
+					if (choices.TryParse(token, out var mode))
+						return mode;
+					if (token.Equals("off", StringComparison.OrdinalIgnoreCase))
+						return GitFilteringMode.None;
+				}
+
+				if (result.Tokens.Count > 0)
+				{
+					result.AddError(LocalizedParseError.Create(_localization.Format(
+						"Terminal.Validation.Choice",
+						"--git-mode",
+						string.Join(", ", choices.Tokens))));
+				}
+
+				return null;
+			}
+		};
+		option.CompletionSources.Add(choices.Tokens.ToArray());
+		return option;
 	}
 
 	private Command BuildTuiCommand()
@@ -88,7 +194,7 @@ public sealed class DevProjexCommandTree
 			command,
 			"devprojex tui .",
 			"devprojex tui . --screen inline");
-		var project = ProjectArgument();
+		var project = ProjectSourceArgument();
 		var profile = CliChoiceSymbols.ProfileOption(
 			L("Terminal.Option.Profile"),
 			"auto",
@@ -102,58 +208,42 @@ public sealed class DevProjexCommandTree
 			_localization);
 		var mouse = new Option<bool>("--mouse") { Description = L("Terminal.Option.Mouse") };
 		var noMouse = new Option<bool>("--no-mouse") { Description = L("Terminal.Option.NoMouse") };
-		var color = CliChoiceSymbols.Option(
-			"--color",
-			L("Terminal.Option.Color"),
-			TerminalColorMode.Auto,
-			CliChoiceSets.ColorMode,
-			_localization);
-		var plain = new Option<bool>("--plain") { Description = L("Terminal.Option.Plain") };
+		var branch = BranchOption();
 		CliHelpMetadataRegistry.SuppressParserDefault(screen);
 		command.Arguments.Add(project);
 		command.Options.Add(profile);
 		command.Options.Add(screen);
 		command.Options.Add(mouse);
 		command.Options.Add(noMouse);
-		command.Options.Add(color);
-		command.Options.Add(plain);
+		command.Options.Add(branch);
 		CompletionConflictRegistry.RegisterMutual(mouse, noMouse);
-		CompletionAvailabilityRegistry.RegisterOption(
-			plain,
-			result =>
-				!CliParseValue.TryGet(result, color, out var colorValue) ||
-				colorValue != TerminalColorMode.Always);
-		CompletionAvailabilityRegistry.RegisterValue(
-			color,
-			(result, value) =>
-				!value.Equals("always", StringComparison.Ordinal) ||
-				!CliParseValue.TryGet(result, plain, out var plainValue) ||
-				!plainValue);
 		command.Validators.Add(result =>
 		{
 			if (result.GetValue(mouse) && result.GetValue(noMouse))
 				result.AddError(LocalizedParseError.Create(L("Terminal.Validation.MouseConflict")));
-			if (CliParseValue.TryGet(result, plain, out var plainValue) &&
-			    plainValue &&
-			    CliParseValue.TryGet(result, color, out var colorValue) &&
-			    colorValue == TerminalColorMode.Always)
-			{
-				result.AddError(LocalizedParseError.Create(
-					L("Terminal.Validation.PlainColorConflict")));
-			}
 		});
 		command.SetAction(async (parseResult, cancellationToken) =>
 		{
-			var output = new TerminalOutputOptions(
-				parseResult.GetValue(color),
-				Plain: parseResult.GetValue(plain));
+			if (!TerminalTuiInteractivityGate.TryEnter(environment, _localization))
+				return CommandLineExitCodes.UsageError;
+
+			var output = _output.Get(parseResult);
 			return await CommandExecution.RunAsync(
 				environment,
 				output,
 				async () =>
 				{
-					var services = CreateServices(parseResult);
-					var projectPath = parseResult.GetValue(project) ?? Directory.GetCurrentDirectory();
+					using var serviceScope = CreateServiceScope(parseResult);
+					var services = serviceScope.Services;
+					ApplyTuiLanguage(parseResult, services);
+					var projectSource = parseResult.GetValue(project) ?? Directory.GetCurrentDirectory();
+					await using var resolvedSource = await new TerminalProjectSourceResolver(
+							services,
+							environment,
+							output)
+						.ResolveAsync(projectSource, parseResult.GetValue(branch), cancellationToken)
+						.ConfigureAwait(false);
+					var projectPath = resolvedSource.ProjectPath;
 					var profileValue = parseResult.GetValue(profile);
 					var profileReference = profileValue.Resolve(projectPath, services);
 					var screenResult = parseResult.GetResult(screen);
@@ -192,37 +282,81 @@ public sealed class DevProjexCommandTree
 			command,
 			"devprojex analyze .",
 			"devprojex analyze . --format json -o -");
-		var project = ProjectArgument();
+		var project = ProjectSourceArgument();
 		var format = CliChoiceSymbols.Option(
 			"--format",
 			L("Terminal.Option.Format"),
 			CliTextJsonFormat.Text,
 			CliChoiceSets.TextJson,
 			_localization);
+		format.Aliases.Add("-f");
 		var outputPath = OutputPathOption();
+		var force = new Option<bool>("--force") { Description = L("Terminal.Option.ForceContext") };
 		var strict = new Option<bool>("--strict") { Description = L("Terminal.Option.Strict") };
-		var selection = new SelectionOptions(_localization);
-		var output = new OutputOptions(_localization);
+		var branch = BranchOption();
+		var findings = new Option<bool>("--findings")
+		{
+			Description = L("Terminal.Option.Findings")
+		};
+		var failOnFindings = new Option<bool>("--fail-on-findings")
+		{
+			Description = L("Terminal.Option.FailOnFindings")
+		};
+		var topFiles = new Option<int?>("--top-files")
+		{
+			Description = L("Terminal.Option.TopFiles"),
+			HelpName = "N"
+		};
+		var selection = new SelectionOptions(
+			_localization,
+			environment,
+			includeMaxFileBytes: true);
 		command.Arguments.Add(project);
 		command.Options.Add(format);
 		command.Options.Add(outputPath);
+		command.Options.Add(force);
 		command.Options.Add(strict);
+		command.Options.Add(findings);
+		command.Options.Add(failOnFindings);
+		command.Options.Add(topFiles);
+		command.Options.Add(branch);
 		selection.AddTo(command);
-		output.AddTo(command);
+		_output.AddProgressTo(command);
+		ConfigureFileForce(command, force, outputPath);
+		command.Validators.Add(result =>
+		{
+			if (CliParseValue.TryGet(result, topFiles, out var value) && value is < 1 or > 1_000)
+			{
+				result.AddError(LocalizedParseError.Create(
+					L("Terminal.Validation.TopFiles")));
+			}
+		});
 		command.SetAction(async (parseResult, cancellationToken) =>
 		{
-			var outputOptions = output.Get(parseResult);
+			var outputOptions = _output.Get(parseResult);
 			return await CommandExecution.RunAsync(
 				environment,
 				outputOptions,
 				async () =>
 				{
-					var services = CreateServices(parseResult);
-					var projectPath = parseResult.GetValue(project) ?? Directory.GetCurrentDirectory();
+					using var serviceScope = CreateServiceScope(parseResult);
+					var services = serviceScope.Services;
+					var selectedPaths = await selection.ReadSelectedPathsAsync(
+						parseResult,
+						cancellationToken).ConfigureAwait(false);
+					var projectSource = parseResult.GetValue(project) ?? Directory.GetCurrentDirectory();
+					await using var resolvedSource = await new TerminalProjectSourceResolver(
+							services,
+							environment,
+							outputOptions)
+						.ResolveAsync(projectSource, parseResult.GetValue(branch), cancellationToken)
+						.ConfigureAwait(false);
+					var projectPath = resolvedSource.ProjectPath;
 					var spec = await selection.ResolveAsync(
 						parseResult,
 						projectPath,
 						services,
+						selectedPaths,
 						cancellationToken).ConfigureAwait(false);
 					return await new AnalyzeCommandHandler(services, environment)
 						.ExecuteAsync(
@@ -237,7 +371,13 @@ public sealed class DevProjexCommandTree
 								},
 								parseResult.GetValue(outputPath),
 								parseResult.GetValue(strict),
-								outputOptions),
+								outputOptions,
+								parseResult.GetValue(findings),
+								parseResult.GetValue(failOnFindings),
+								Force: parseResult.GetValue(force),
+								TopFiles: parseResult.GetValue(topFiles),
+								MaxFileBytes: selection.GetMaxFileBytes(parseResult),
+								RepositorySourceUrl: resolvedSource.RepositorySourceUrl),
 							cancellationToken)
 						.ConfigureAwait(false);
 				},
@@ -262,11 +402,13 @@ public sealed class DevProjexCommandTree
 	private Command BuildExportContextCommand()
 	{
 		var command = new Command("context", L("Terminal.Command.ExportContext"));
+		command.Aliases.Add("ctx");
 		CliExamplesRegistry.Set(
 			command,
 			"devprojex export context . --view tree-content --format markdown -o ../devprojex-context.md",
-			"devprojex export context . --format json -o -");
-		var project = ProjectArgument();
+			"devprojex export context . --format json -o -",
+			"devprojex export context https://github.com/owner/repo -o -");
+		var project = ProjectSourceArgument();
 		var view = CliChoiceSymbols.Option(
 			"--view",
 			L("Terminal.Option.View"),
@@ -279,19 +421,30 @@ public sealed class DevProjexCommandTree
 			ProjectContextDocumentFormat.Markdown,
 			CliChoiceSets.ContextDocumentFormat,
 			_localization);
+		format.Aliases.Add("-f");
 		var outputPath = OutputPathOption();
 		var force = new Option<bool>("--force") { Description = L("Terminal.Option.ForceContext") };
-		var dryRun = new Option<bool>("--dry-run") { Description = L("Terminal.Option.DryRun") };
-		var selection = new SelectionOptions(_localization);
-		var output = new OutputOptions(_localization);
+		var dryRun = new Option<bool>("--dry-run", "-n") { Description = L("Terminal.Option.DryRun") };
+		var maximumEstimatedTokens = new Option<long?>("--max-tokens")
+		{
+			Description = L("Terminal.Option.MaxTokens"),
+			HelpName = "N"
+		};
+		var branch = BranchOption();
+		var selection = new SelectionOptions(
+			_localization,
+			environment,
+			includeMaxFileBytes: true);
 		command.Arguments.Add(project);
 		command.Options.Add(view);
 		command.Options.Add(format);
 		command.Options.Add(outputPath);
 		command.Options.Add(force);
 		command.Options.Add(dryRun);
+		command.Options.Add(maximumEstimatedTokens);
+		command.Options.Add(branch);
 		selection.AddTo(command);
-		output.AddTo(command);
+		_output.AddProgressTo(command);
 		CompletionAvailabilityRegistry.RegisterOption(
 			force,
 			result =>
@@ -310,21 +463,39 @@ public sealed class DevProjexCommandTree
 				result.AddError(LocalizedParseError.Create(
 					L("Terminal.Validation.ForceRequiresFileOutput")));
 			}
+			if (CliParseValue.TryGet(result, maximumEstimatedTokens, out var maximumTokens) &&
+			    maximumTokens is < 1)
+			{
+				result.AddError(LocalizedParseError.Create(
+					L("Terminal.Validation.MaxTokens")));
+			}
 		});
 		command.SetAction(async (parseResult, cancellationToken) =>
 		{
-			var outputOptions = output.Get(parseResult);
+			var outputOptions = _output.Get(parseResult);
 			return await CommandExecution.RunAsync(
 				environment,
 				outputOptions,
 				async () =>
 				{
-					var services = CreateServices(parseResult);
-					var projectPath = parseResult.GetValue(project) ?? Directory.GetCurrentDirectory();
+					using var serviceScope = CreateServiceScope(parseResult);
+					var services = serviceScope.Services;
+					var selectedPaths = await selection.ReadSelectedPathsAsync(
+						parseResult,
+						cancellationToken).ConfigureAwait(false);
+					var projectSource = parseResult.GetValue(project) ?? Directory.GetCurrentDirectory();
+					await using var resolvedSource = await new TerminalProjectSourceResolver(
+							services,
+							environment,
+							outputOptions)
+						.ResolveAsync(projectSource, parseResult.GetValue(branch), cancellationToken)
+						.ConfigureAwait(false);
+					var projectPath = resolvedSource.ProjectPath;
 					var spec = await selection.ResolveAsync(
 						parseResult,
 						projectPath,
 						services,
+						selectedPaths,
 						cancellationToken).ConfigureAwait(false);
 					return await new ExportContextCommandHandler(services, environment)
 						.ExecuteAsync(
@@ -336,7 +507,10 @@ public sealed class DevProjexCommandTree
 								parseResult.GetValue(outputPath),
 								parseResult.GetValue(force),
 								parseResult.GetValue(dryRun),
-								outputOptions),
+								parseResult.GetValue(maximumEstimatedTokens),
+								outputOptions,
+								MaxFileBytes: selection.GetMaxFileBytes(parseResult),
+								RepositorySourceUrl: resolvedSource.RepositorySourceUrl),
 							cancellationToken)
 						.ConfigureAwait(false);
 				},
@@ -348,11 +522,12 @@ public sealed class DevProjexCommandTree
 	private Command BuildExportProjectCommand()
 	{
 		var command = new Command("project", L("Terminal.Command.ExportProject"));
+		command.Aliases.Add("proj");
 		CliExamplesRegistry.Set(
 			command,
 			"devprojex export project . --as folder -o ../devprojex-submission",
 			"devprojex export project . --as zip -o ../devprojex-submission.zip");
-		var project = ProjectArgument();
+		var project = ProjectSourceArgument();
 		var kind = CliChoiceSymbols.RequiredOption(
 			"--as",
 			L("Terminal.Option.OutputKind"),
@@ -368,16 +543,17 @@ public sealed class DevProjexCommandTree
 			context,
 			FileSystemCompletionKind.FilesAndDirectories));
 		var force = new Option<bool>("--force") { Description = L("Terminal.Option.ForceZip") };
-		var dryRun = new Option<bool>("--dry-run") { Description = L("Terminal.Option.DryRun") };
-		var selection = new SelectionOptions(_localization);
-		var output = new OutputOptions(_localization);
+		var dryRun = new Option<bool>("--dry-run", "-n") { Description = L("Terminal.Option.DryRun") };
+		var branch = BranchOption();
+		var selection = new SelectionOptions(_localization, environment);
 		command.Arguments.Add(project);
 		command.Options.Add(kind);
 		command.Options.Add(outputPath);
 		command.Options.Add(force);
 		command.Options.Add(dryRun);
+		command.Options.Add(branch);
 		selection.AddTo(command);
-		output.AddTo(command);
+		_output.AddProgressTo(command);
 		CompletionAvailabilityRegistry.RegisterOption(
 			force,
 			result =>
@@ -385,20 +561,68 @@ public sealed class DevProjexCommandTree
 				outputKind == ProjectCopyExportFormat.Zip &&
 				(!CliParseValue.TryGet(result, outputPath, out var destination) ||
 				 destination != "-"));
+		command.Validators.Add(result =>
+		{
+			if (!CliParseValue.TryGet(result, kind, out var outputKind))
+				return;
+			if (outputKind == ProjectCopyExportFormat.Folder && result.GetValue(force))
+			{
+				result.AddError(LocalizedParseError.Create(
+					"DPX-CLI-FORCE-NOT-SUPPORTED",
+					L("Terminal.Error.ForceNotSupported")));
+			}
+			if (outputKind == ProjectCopyExportFormat.Folder &&
+			    CliParseValue.TryGet(result, outputPath, out var folderDestination) &&
+			    folderDestination == "-")
+			{
+				result.AddError(LocalizedParseError.Create(
+					"DPX-CLI-FOLDER-STDOUT-NOT-SUPPORTED",
+					L("Terminal.Error.FolderStdoutNotSupported")));
+			}
+			if (result.GetValue(force) &&
+			    CliParseValue.TryGet(result, outputPath, out var forcedDestination) &&
+			    forcedDestination == "-")
+			{
+				result.AddError(LocalizedParseError.Create(
+					L("Terminal.Validation.ForceRequiresFileOutput")));
+			}
+			if (outputKind == ProjectCopyExportFormat.Zip &&
+			    CliParseValue.TryGet(result, outputPath, out var destination) &&
+			    destination is not null &&
+			    destination != "-" &&
+			    !destination.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+			{
+				result.AddError(LocalizedParseError.Create(
+					"DPX-CLI-ZIP-EXTENSION-REQUIRED",
+					L("Terminal.Error.ZipExtensionRequired")));
+			}
+		});
 		command.SetAction(async (parseResult, cancellationToken) =>
 		{
-			var outputOptions = output.Get(parseResult);
+			var outputOptions = _output.Get(parseResult);
 			return await CommandExecution.RunAsync(
 				environment,
 				outputOptions,
 				async () =>
 				{
-					var services = CreateServices(parseResult);
-					var projectPath = parseResult.GetValue(project) ?? Directory.GetCurrentDirectory();
+					using var serviceScope = CreateServiceScope(parseResult);
+					var services = serviceScope.Services;
+					var selectedPaths = await selection.ReadSelectedPathsAsync(
+						parseResult,
+						cancellationToken).ConfigureAwait(false);
+					var projectSource = parseResult.GetValue(project) ?? Directory.GetCurrentDirectory();
+					await using var resolvedSource = await new TerminalProjectSourceResolver(
+							services,
+							environment,
+							outputOptions)
+						.ResolveAsync(projectSource, parseResult.GetValue(branch), cancellationToken)
+						.ConfigureAwait(false);
+					var projectPath = resolvedSource.ProjectPath;
 					var spec = await selection.ResolveAsync(
 						parseResult,
 						projectPath,
 						services,
+						selectedPaths,
 						cancellationToken).ConfigureAwait(false);
 					return await new ExportProjectCommandHandler(services, environment)
 						.ExecuteAsync(
@@ -409,7 +633,8 @@ public sealed class DevProjexCommandTree
 								parseResult.GetValue(outputPath)!,
 								parseResult.GetValue(force),
 								parseResult.GetValue(dryRun),
-								outputOptions),
+								outputOptions,
+								RepositorySourceUrl: resolvedSource.RepositorySourceUrl),
 							cancellationToken)
 						.ConfigureAwait(false);
 				},
@@ -425,7 +650,7 @@ public sealed class DevProjexCommandTree
 			command,
 			"devprojex open . --preview",
 			"devprojex open --last");
-		var project = ProjectArgument();
+		var project = ProjectSourceArgument();
 		var last = new Option<bool>("--last") { Description = L("Terminal.Option.Last") };
 		var newWindow = new Option<bool>("--new-window") { Description = L("Terminal.Option.NewWindow") };
 		var wait = new Option<bool>("--wait") { Description = L("Terminal.Option.Wait") };
@@ -440,6 +665,7 @@ public sealed class DevProjexCommandTree
 			L("Terminal.Option.TreeFormat"),
 			CliChoiceSets.TreeFormat,
 			_localization);
+		format.Aliases.Add("--format");
 		var filter = new Option<string?>("--filter") { Description = L("Terminal.Option.Filter") };
 		var search = new Option<string?>("--search") { Description = L("Terminal.Option.Search") };
 		filter.HelpName = "QUERY";
@@ -448,7 +674,12 @@ public sealed class DevProjexCommandTree
 		{
 			Hidden = true
 		};
-		var selection = new SelectionOptions(_localization, "auto");
+		var branch = BranchOption();
+		var selection = new SelectionOptions(
+			_localization,
+			environment,
+			"auto",
+			gitModeCapability: GitModeOptionCapability.Desktop);
 		command.Arguments.Add(project);
 		command.Options.Add(last);
 		command.Options.Add(newWindow);
@@ -459,14 +690,12 @@ public sealed class DevProjexCommandTree
 		command.Options.Add(filter);
 		command.Options.Add(search);
 		command.Options.Add(elevationAttempted);
+		command.Options.Add(branch);
 		selection.AddTo(command);
 		CompletionConflictRegistry.RegisterMutual(filter, search);
-		CompletionConflictRegistry.RegisterMutual(last, selection.Profile);
-		CompletionConflictRegistry.RegisterMutual(last, selection.Roots);
-		CompletionConflictRegistry.RegisterMutual(last, selection.Extensions);
-		CompletionConflictRegistry.RegisterMutual(last, selection.SelectedPaths);
-		CompletionConflictRegistry.RegisterMutual(last, selection.GitMode);
-		CompletionConflictRegistry.RegisterMutual(last, selection.Exclusions);
+		foreach (var symbol in selection.AllSymbols)
+			CompletionConflictRegistry.RegisterMutual(last, symbol);
+		CompletionConflictRegistry.RegisterMutual(last, branch);
 		command.Validators.Add(result =>
 		{
 			if (result.GetValue(last) && result.GetResult(project) is not null)
@@ -477,39 +706,70 @@ public sealed class DevProjexCommandTree
 				result.AddError(LocalizedParseError.Create(
 					L("Terminal.Validation.LastSelectionConflict")));
 			}
+			if (result.GetValue(last) &&
+			    result.GetResult(branch) is { Implicit: false })
+			{
+				result.AddError(LocalizedParseError.Create(
+					L("Terminal.Validation.LastBranchConflict")));
+			}
 			if (CliParseValue.TryGet(result, filter, out var filterValue) &&
 			    filterValue is not null &&
 			    CliParseValue.TryGet(result, search, out var searchValue) &&
 			    searchValue is not null)
 				result.AddError(LocalizedParseError.Create(L("Terminal.Validation.FilterSearchConflict")));
+			if (result.GetResult(selection.GitMode) is { Implicit: false } &&
+			    CliParseValue.TryGet(result, selection.GitMode, out var desktopGitMode) &&
+			    desktopGitMode is { Mode: GitFilteringMode.Diff })
+			{
+				result.AddError(LocalizedParseError.Create(
+					L("Terminal.Validation.DesktopGitMode")));
+			}
 		});
 		command.SetAction(async (parseResult, cancellationToken) =>
 		{
-			var outputOptions = new TerminalOutputOptions();
+			var outputOptions = _output.Get(parseResult);
 			return await CommandExecution.RunAsync(
 				environment,
 				outputOptions,
 				async () =>
 				{
 					var useLast = parseResult.GetValue(last);
-					var projectPath = useLast
+					var selectedPaths = await selection.ReadSelectedPathsAsync(
+						parseResult,
+						cancellationToken).ConfigureAwait(false);
+					var projectSource = useLast
 						? null
 						: parseResult.GetValue(project) ?? Directory.GetCurrentDirectory();
 					ProjectSelectionSpec? spec = null;
-					TerminalServices? services = null;
+					using var serviceScope = projectSource is null
+						? null
+						: CreateServiceScope(parseResult);
+					var services = serviceScope?.Services;
+					ResolvedTerminalProjectSource? resolvedSource = null;
+					if (projectSource is not null)
+					{
+						resolvedSource = await new TerminalProjectSourceResolver(
+								services!,
+								environment,
+								outputOptions)
+							.ResolveAsync(projectSource, parseResult.GetValue(branch), cancellationToken)
+							.ConfigureAwait(false);
+					}
+					await using var sourceLease = resolvedSource;
+					var projectPath = resolvedSource?.ProjectPath;
 					if (projectPath is not null)
 					{
-						services = CreateServices(parseResult);
 						spec = await selection.ResolveAsync(
 							parseResult,
 							projectPath,
-							services,
+							services!,
+							selectedPaths,
 							cancellationToken).ConfigureAwait(false);
-						var readinessExitCode = ValidateDesktopOpenGitReadiness(
-							services,
+						var readinessExitCode = await ValidateDesktopOpenGitReadinessAsync(
+							services!,
 							projectPath,
 							spec,
-							cancellationToken);
+							cancellationToken).ConfigureAwait(false);
 						if (readinessExitCode is not null)
 							return readinessExitCode.Value;
 					}
@@ -532,7 +792,10 @@ public sealed class DevProjexCommandTree
 								spec,
 								parseResult.GetValue(_language),
 								parseResult.GetValue(elevationAttempted)),
-							cancellationToken)
+							cancellationToken,
+							resolvedSource is { IsRepositoryUrl: true }
+								? resolvedSource.SafeRepositoryUrl
+								: null)
 						.ConfigureAwait(false);
 				},
 				_localization).ConfigureAwait(false);
@@ -545,13 +808,15 @@ public sealed class DevProjexCommandTree
 		var command = new Command("profile", L("Terminal.Command.Profile"));
 		CliExamplesRegistry.Set(
 			command,
-			"devprojex profile show .",
-			"devprojex profile validate ./.devprojex/profile.json");
+			"devprojex profile export . --profile standard -o ../devprojex-profile.json",
+			"devprojex profile validate ../devprojex-profile.json",
+			"devprojex profile show . --profile ../devprojex-profile.json --format json");
 		command.Subcommands.Add(BuildProfileShowCommand());
 		command.Subcommands.Add(BuildProfileExportCommand());
 		command.Subcommands.Add(BuildProfileImportCommand());
 		command.Subcommands.Add(BuildProfileValidateCommand());
 		command.Subcommands.Add(BuildProfileResetCommand());
+		command.Subcommands.Add(BuildProfileSaveCommand());
 		SetParentHelpAction(command, "profile");
 		return command;
 	}
@@ -559,6 +824,10 @@ public sealed class DevProjexCommandTree
 	private Command BuildProfileShowCommand()
 	{
 		var command = new Command("show", L("Terminal.Command.ProfileShow"));
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex profile show .",
+			"devprojex profile show . --profile ../devprojex-profile.json --format json");
 		var project = ProjectArgument();
 		var profile = ProfileOption("standard");
 		var format = CliChoiceSymbols.Option(
@@ -567,6 +836,7 @@ public sealed class DevProjexCommandTree
 			CliTextJsonFormat.Text,
 			CliChoiceSets.TextJson,
 			_localization);
+		format.Aliases.Add("-f");
 		command.Arguments.Add(project);
 		command.Options.Add(profile);
 		command.Options.Add(format);
@@ -589,6 +859,9 @@ public sealed class DevProjexCommandTree
 	private Command BuildProfileExportCommand()
 	{
 		var command = new Command("export", L("Terminal.Command.ProfileExport"));
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex profile export . --profile standard -o ../devprojex-profile.json");
 		var project = ProjectArgument();
 		var profile = ProfileOption("local");
 		var output = new Option<string>("--output", "-o")
@@ -601,10 +874,12 @@ public sealed class DevProjexCommandTree
 			context,
 			FileSystemCompletionKind.FilesAndDirectories));
 		var force = new Option<bool>("--force") { Description = L("Terminal.Option.ForceProfile") };
+		var dryRun = new Option<bool>("--dry-run", "-n") { Description = L("Terminal.Option.DryRun") };
 		command.Arguments.Add(project);
 		command.Options.Add(profile);
 		command.Options.Add(output);
 		command.Options.Add(force);
+		command.Options.Add(dryRun);
 		command.SetAction((parseResult, cancellationToken) =>
 			RunProfileAsync(
 				parseResult,
@@ -617,6 +892,7 @@ public sealed class DevProjexCommandTree
 						parseResult.GetValue(profile).Resolve(projectPath, services),
 						parseResult.GetValue(output)!,
 						parseResult.GetValue(force),
+						parseResult.GetValue(dryRun),
 						cancellationToken);
 				}));
 		return command;
@@ -625,6 +901,10 @@ public sealed class DevProjexCommandTree
 	private Command BuildProfileImportCommand()
 	{
 		var command = new Command("import", L("Terminal.Command.ProfileImport"));
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex profile import ../devprojex-profile.json .",
+			"devprojex profile import ../devprojex-profile.json . --apply");
 		var file = RequiredArgument("FILE");
 		var project = ProjectArgument();
 		var apply = new Option<bool>("--apply") { Description = L("Terminal.Option.ApplyProfile") };
@@ -645,30 +925,79 @@ public sealed class DevProjexCommandTree
 	private Command BuildProfileValidateCommand()
 	{
 		var command = new Command("validate", L("Terminal.Command.ProfileValidate"));
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex profile validate ../devprojex-profile.json");
 		var file = RequiredArgument("FILE");
+		var format = CliChoiceSymbols.Option(
+			"--format",
+			L("Terminal.Option.Format"),
+			CliTextJsonFormat.Text,
+			CliChoiceSets.TextJson,
+			_localization);
+		format.Aliases.Add("-f");
 		command.Arguments.Add(file);
+		command.Options.Add(format);
 		command.SetAction((parseResult, cancellationToken) =>
 			RunProfileAsync(
 				parseResult,
 				(_, handler) =>
-					handler.ValidateAsync(parseResult.GetValue(file)!, cancellationToken)));
+					handler.ValidateAsync(
+						parseResult.GetValue(file)!,
+						parseResult.GetValue(format) == CliTextJsonFormat.Json,
+						cancellationToken)));
+		return command;
+	}
+
+	private Command BuildProfileSaveCommand()
+	{
+		var command = new Command("save", L("Terminal.Command.ProfileSave"));
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex profile save . --root src --extension .cs");
+		var project = ProjectArgument();
+		var selection = new SelectionOptions(
+			_localization,
+			environment,
+			gitModeCapability: GitModeOptionCapability.Persistent);
+		command.Arguments.Add(project);
+		selection.AddTo(command);
+		command.SetAction((parseResult, cancellationToken) =>
+			RunProfileAsync(
+				parseResult,
+				async (services, handler) =>
+				{
+					var projectPath = parseResult.GetValue(project) ?? Directory.GetCurrentDirectory();
+					var spec = await selection.ResolveAsync(
+						parseResult,
+						projectPath,
+						services,
+						cancellationToken).ConfigureAwait(false);
+					return await handler.SaveAsync(projectPath, spec, cancellationToken)
+						.ConfigureAwait(false);
+				}));
 		return command;
 	}
 
 	private Command BuildProfileResetCommand()
 	{
 		var command = new Command("reset", L("Terminal.Command.ProfileReset"));
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex profile reset .");
 		var project = ProjectArgument();
 		command.Arguments.Add(project);
 		command.SetAction(parseResult =>
 		{
-			var output = new TerminalOutputOptions();
+			var output = _output.Get(parseResult);
 			return CommandExecution.RunAsync(
 					environment,
 					output,
-					() => Task.FromResult(
-						new ProfileCommandHandler(CreateServices(parseResult), environment)
-							.Reset(parseResult.GetValue(project) ?? Directory.GetCurrentDirectory())),
+					() => RunWithServicesAsync(
+						parseResult,
+						services => Task.FromResult(
+							new ProfileCommandHandler(services, environment)
+								.Reset(parseResult.GetValue(project) ?? Directory.GetCurrentDirectory()))),
 					_localization)
 				.GetAwaiter()
 				.GetResult();
@@ -684,8 +1013,18 @@ public sealed class DevProjexCommandTree
 			"devprojex ui list",
 			"devprojex ui status");
 		command.Subcommands.Add(BuildUiListCommand());
-		command.Subcommands.Add(BuildUiSimpleCommand("status", L("Terminal.Command.UiStatus"), "status", static _ => new { }));
-		command.Subcommands.Add(BuildUiSimpleCommand("activate", L("Terminal.Command.UiActivate"), "activate", static _ => new { }));
+		command.Subcommands.Add(BuildUiSimpleCommand(
+			"status",
+			L("Terminal.Command.UiStatus"),
+			"status",
+			static _ => new { },
+			"devprojex ui status --project ."));
+		command.Subcommands.Add(BuildUiSimpleCommand(
+			"activate",
+			L("Terminal.Command.UiActivate"),
+			"activate",
+			static _ => new { },
+			"devprojex ui activate --project ."));
 		command.Subcommands.Add(BuildUiPreviewCommand());
 		command.Subcommands.Add(BuildUiTreeCommand());
 		command.Subcommands.Add(BuildUiFilterCommand());
@@ -697,19 +1036,28 @@ public sealed class DevProjexCommandTree
 	private Command BuildUiListCommand()
 	{
 		var command = new Command("list", L("Terminal.Command.UiList"));
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex ui list",
+			"devprojex ui list --format json");
 		var format = CliChoiceSymbols.Option(
 			"--format",
 			L("Terminal.Option.Format"),
 			CliTextJsonFormat.Text,
 			CliChoiceSets.TextJson,
 			_localization);
+		format.Aliases.Add("-f");
+		var timeout = TimeoutOption();
 		command.Options.Add(format);
+		command.Options.Add(timeout);
 		command.SetAction((parseResult, cancellationToken) =>
 			CommandExecution.RunAsync(
 				environment,
-				new TerminalOutputOptions(),
-				() => new DesktopCommandHandler(environment).ListAsync(
+				_output.Get(parseResult),
+				() => new DesktopCommandHandler(environment, localization: _localization).ListAsync(
 					parseResult.GetValue(format) == CliTextJsonFormat.Json,
+					_output.Get(parseResult),
+					parseResult.GetValue(timeout),
 					cancellationToken),
 				_localization));
 		return command;
@@ -718,7 +1066,14 @@ public sealed class DevProjexCommandTree
 	private Command BuildUiPreviewCommand()
 	{
 		var command = new Command("preview", L("Terminal.Command.UiPreview"));
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex ui preview open --view tree-content --project .",
+			"devprojex ui preview close --project .");
 		var open = new Command("open", L("Terminal.Command.UiPreviewOpen"));
+		CliExamplesRegistry.Set(
+			open,
+			"devprojex ui preview open --view tree-content --project .");
 		var openView = CliChoiceSymbols.NullableOption(
 			"--view",
 			L("Terminal.Option.PreviewView"),
@@ -735,9 +1090,17 @@ public sealed class DevProjexCommandTree
 					: null
 			});
 		command.Subcommands.Add(open);
-		command.Subcommands.Add(BuildUiSimpleCommand("close", L("Terminal.Command.UiPreviewClose"), "preview.close", static _ => new { }));
+		command.Subcommands.Add(BuildUiSimpleCommand(
+			"close",
+			L("Terminal.Command.UiPreviewClose"),
+			"preview.close",
+			static _ => new { },
+			"devprojex ui preview close --project ."));
 
 		var setView = new Command("set-view", L("Terminal.Command.UiPreviewSetView"));
+		CliExamplesRegistry.Set(
+			setView,
+			"devprojex ui preview set-view tree-content --project .");
 		var view = CliChoiceSymbols.Argument(
 			"VIEW",
 			CliChoiceSets.DesktopView,
@@ -755,7 +1118,13 @@ public sealed class DevProjexCommandTree
 	private Command BuildUiTreeCommand()
 	{
 		var command = new Command("tree", L("Terminal.Command.UiTree"));
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex ui tree set-format json --project .");
 		var setFormat = new Command("set-format", L("Terminal.Command.UiTreeSetFormat"));
+		CliExamplesRegistry.Set(
+			setFormat,
+			"devprojex ui tree set-format json --project .");
 		var format = CliChoiceSymbols.Argument(
 			"FORMAT",
 			CliChoiceSets.TreeFormat,
@@ -773,12 +1142,24 @@ public sealed class DevProjexCommandTree
 	private Command BuildUiFilterCommand()
 	{
 		var command = new Command("filter", L("Terminal.Command.UiFilter"));
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex ui filter set Program --project .",
+			"devprojex ui filter clear --project .");
 		var set = new Command("set", L("Terminal.Command.UiFilterSet"));
+		CliExamplesRegistry.Set(
+			set,
+			"devprojex ui filter set Program --project .");
 		var query = RequiredArgument("QUERY");
 		set.Arguments.Add(query);
 		AddDesktopAction(set, "filter.set", result => new { query = result.GetValue(query) });
 		command.Subcommands.Add(set);
-		command.Subcommands.Add(BuildUiSimpleCommand("clear", L("Terminal.Command.UiFilterClear"), "filter.clear", static _ => new { }));
+		command.Subcommands.Add(BuildUiSimpleCommand(
+			"clear",
+			L("Terminal.Command.UiFilterClear"),
+			"filter.clear",
+			static _ => new { },
+			"devprojex ui filter clear --project ."));
 		SetParentHelpAction(command, "ui", "filter");
 		return command;
 	}
@@ -786,14 +1167,37 @@ public sealed class DevProjexCommandTree
 	private Command BuildUiSearchCommand()
 	{
 		var command = new Command("search", L("Terminal.Command.UiSearch"));
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex ui search set TODO --project .",
+			"devprojex ui search next --project .",
+			"devprojex ui search clear --project .");
 		var set = new Command("set", L("Terminal.Command.UiSearchSet"));
+		CliExamplesRegistry.Set(
+			set,
+			"devprojex ui search set TODO --project .");
 		var query = RequiredArgument("QUERY");
 		set.Arguments.Add(query);
 		AddDesktopAction(set, "search.set", result => new { query = result.GetValue(query) });
 		command.Subcommands.Add(set);
-		command.Subcommands.Add(BuildUiSimpleCommand("next", L("Terminal.Command.UiSearchNext"), "search.next", static _ => new { }));
-		command.Subcommands.Add(BuildUiSimpleCommand("previous", L("Terminal.Command.UiSearchPrevious"), "search.previous", static _ => new { }));
-		command.Subcommands.Add(BuildUiSimpleCommand("clear", L("Terminal.Command.UiSearchClear"), "search.clear", static _ => new { }));
+		command.Subcommands.Add(BuildUiSimpleCommand(
+			"next",
+			L("Terminal.Command.UiSearchNext"),
+			"search.next",
+			static _ => new { },
+			"devprojex ui search next --project ."));
+		command.Subcommands.Add(BuildUiSimpleCommand(
+			"previous",
+			L("Terminal.Command.UiSearchPrevious"),
+			"search.previous",
+			static _ => new { },
+			"devprojex ui search previous --project ."));
+		command.Subcommands.Add(BuildUiSimpleCommand(
+			"clear",
+			L("Terminal.Command.UiSearchClear"),
+			"search.clear",
+			static _ => new { },
+			"devprojex ui search clear --project ."));
 		SetParentHelpAction(command, "ui", "search");
 		return command;
 	}
@@ -802,9 +1206,11 @@ public sealed class DevProjexCommandTree
 		string name,
 		string description,
 		string action,
-		Func<ParseResult, object> payload)
+		Func<ParseResult, object> payload,
+		params string[] examples)
 	{
 		var command = new Command(name, description);
+		CliExamplesRegistry.Set(command, examples);
 		AddDesktopAction(command, action, payload);
 		return command;
 	}
@@ -816,14 +1222,7 @@ public sealed class DevProjexCommandTree
 	{
 		var instance = new Option<string?>("--instance") { Description = L("Terminal.Option.Instance") };
 		var project = new Option<string?>("--project") { Description = L("Terminal.Option.TargetProject") };
-		var timeout = new Option<TimeSpan>("--timeout")
-		{
-			Description = L("Terminal.Option.Timeout"),
-			HelpName = "DURATION",
-			DefaultValueFactory = _ => TimeSpan.FromSeconds(10),
-			CustomParser = result => ParseDuration(result, _localization)
-		};
-		CliHelpMetadataRegistry.SetDefaultDisplay(timeout, "10s");
+		var timeout = TimeoutOption();
 		instance.HelpName = "ID";
 		project.HelpName = "PATH";
 		project.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
@@ -835,7 +1234,7 @@ public sealed class DevProjexCommandTree
 		command.SetAction((parseResult, cancellationToken) =>
 			CommandExecution.RunAsync(
 				environment,
-				new TerminalOutputOptions(),
+				_output.Get(parseResult),
 				() => new DesktopCommandHandler(environment).SendAsync(
 					new DesktopTarget(
 						parseResult.GetValue(instance),
@@ -860,16 +1259,361 @@ public sealed class DevProjexCommandTree
 			CliTextJsonFormat.Text,
 			CliChoiceSets.TextJson,
 			_localization);
+		format.Aliases.Add("-f");
 		command.Options.Add(format);
 		command.SetAction((parseResult, cancellationToken) =>
 			CommandExecution.RunAsync(
 				environment,
-				new TerminalOutputOptions(),
-				() => new DoctorCommandHandler(CreateServices(parseResult), environment)
-					.ExecuteAsync(
-						parseResult.GetValue(format) == CliTextJsonFormat.Json,
-						cancellationToken),
+				_output.Get(parseResult),
+				() => RunWithServicesAsync(
+					parseResult,
+					services => new DoctorCommandHandler(services, environment)
+						.ExecuteAsync(
+							parseResult.GetValue(format) == CliTextJsonFormat.Json,
+							cancellationToken)),
 				_localization));
+		return command;
+	}
+
+	private Command BuildRecentCommand()
+	{
+		var command = new Command("recent", L("Terminal.Command.Recent"));
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex recent",
+			"devprojex recent --kind repository --format json");
+		var kind = CliChoiceSymbols.Option(
+			"--kind",
+			L("Terminal.Option.RecentKind"),
+			CliRecentKind.All,
+			CliChoiceSets.RecentKind,
+			_localization);
+		var limit = new Option<int>("--limit")
+		{
+			Description = L("Terminal.Option.Limit"),
+			HelpName = "N",
+			DefaultValueFactory = _ => 48
+		};
+		var format = CliChoiceSymbols.Option(
+			"--format",
+			L("Terminal.Option.Format"),
+			CliTextJsonFormat.Text,
+			CliChoiceSets.TextJson,
+			_localization);
+		format.Aliases.Add("-f");
+		command.Options.Add(kind);
+		command.Options.Add(limit);
+		command.Options.Add(format);
+		command.Validators.Add(result =>
+		{
+			if (CliParseValue.TryGet(result, limit, out var value) && value is < 1 or > 100_000)
+			{
+				result.AddError(LocalizedParseError.Create(
+					L("Terminal.Validation.Limit")));
+			}
+		});
+		command.SetAction(parseResult =>
+			CommandExecution.RunAsync(
+				environment,
+				_output.Get(parseResult),
+				() => RunWithRecentServicesAsync(
+					parseResult,
+					services => Task.FromResult(new RecentCommandHandler(
+							services,
+							environment)
+						.Execute(
+							parseResult.GetValue(kind),
+							parseResult.GetValue(limit),
+							parseResult.GetValue(format),
+							_output.Get(parseResult)))),
+				_localization));
+		return command;
+	}
+
+	private Command BuildCacheCommand()
+	{
+		var command = new Command("cache", L("Terminal.Command.Cache"));
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex cache path",
+			"devprojex cache list --format json",
+			"devprojex cache remove https://github.com/owner/repo --force");
+
+		var path = new Command("path", L("Terminal.Command.CachePath"));
+		CliExamplesRegistry.Set(
+			path,
+			"devprojex cache path");
+		path.SetAction(parseResult =>
+			CommandExecution.RunAsync(
+				environment,
+				_output.Get(parseResult),
+				() => RunWithCacheServicesAsync(
+					parseResult,
+					services => Task.FromResult(new CacheCommandHandler(
+							services,
+							environment)
+						.WritePath())),
+				_localization));
+
+		var list = new Command("list", L("Terminal.Command.CacheList"));
+		CliExamplesRegistry.Set(
+			list,
+			"devprojex cache list",
+			"devprojex cache list --format json");
+		var format = CliChoiceSymbols.Option(
+			"--format",
+			L("Terminal.Option.Format"),
+			CliTextJsonFormat.Text,
+			CliChoiceSets.TextJson,
+			_localization);
+		format.Aliases.Add("-f");
+		list.Options.Add(format);
+		list.SetAction(parseResult =>
+			CommandExecution.RunAsync(
+				environment,
+				_output.Get(parseResult),
+				() => RunWithCacheServicesAsync(
+					parseResult,
+					services => Task.FromResult(new CacheCommandHandler(
+							services,
+							environment)
+						.WriteList(parseResult.GetValue(format), _output.Get(parseResult)))),
+				_localization));
+
+		var remove = new Command("remove", L("Terminal.Command.CacheRemove"));
+		CliExamplesRegistry.Set(
+			remove,
+			"devprojex cache remove https://github.com/owner/repo --force");
+		var repositoryUrl = new Argument<string>("URL")
+		{
+			Description = L("Terminal.Argument.RepositoryUrl"),
+			Arity = ArgumentArity.ExactlyOne
+		};
+		var removeForce = new Option<bool>("--force", "-y", "--yes")
+		{
+			Description = L("Terminal.Option.CacheForce")
+		};
+		var removeDryRun = new Option<bool>("--dry-run", "-n")
+		{
+			Description = L("Terminal.Option.DryRun")
+		};
+		var removeFormat = CliChoiceSymbols.Option(
+			"--format",
+			L("Terminal.Option.Format"),
+			CliTextJsonFormat.Text,
+			CliChoiceSets.TextJson,
+			_localization);
+		removeFormat.Aliases.Add("-f");
+		remove.Arguments.Add(repositoryUrl);
+		remove.Options.Add(removeForce);
+		remove.Options.Add(removeDryRun);
+		remove.Options.Add(removeFormat);
+		RequireForce(remove, removeForce, removeDryRun);
+		remove.SetAction(parseResult =>
+			CommandExecution.RunAsync(
+				environment,
+				_output.Get(parseResult),
+				() => RunWithCacheServicesAsync(
+					parseResult,
+					services => Task.FromResult(new CacheCommandHandler(
+							services,
+							environment)
+						.Remove(
+							parseResult.GetValue(repositoryUrl)!,
+							parseResult.GetValue(removeFormat),
+							parseResult.GetValue(removeDryRun)))),
+				_localization));
+
+		var clear = new Command("clear", L("Terminal.Command.CacheClear"));
+		CliExamplesRegistry.Set(
+			clear,
+			"devprojex cache clear --force");
+		var clearForce = new Option<bool>("--force", "-y", "--yes")
+		{
+			Description = L("Terminal.Option.CacheForce")
+		};
+		var clearDryRun = new Option<bool>("--dry-run", "-n")
+		{
+			Description = L("Terminal.Option.DryRun")
+		};
+		var clearFormat = CliChoiceSymbols.Option(
+			"--format",
+			L("Terminal.Option.Format"),
+			CliTextJsonFormat.Text,
+			CliChoiceSets.TextJson,
+			_localization);
+		clearFormat.Aliases.Add("-f");
+		clear.Options.Add(clearForce);
+		clear.Options.Add(clearDryRun);
+		clear.Options.Add(clearFormat);
+		RequireForce(clear, clearForce, clearDryRun);
+		clear.SetAction(parseResult =>
+			CommandExecution.RunAsync(
+				environment,
+				_output.Get(parseResult),
+				() => RunWithCacheServicesAsync(
+					parseResult,
+					services => Task.FromResult(new CacheCommandHandler(
+							services,
+							environment)
+						.Clear(
+							parseResult.GetValue(clearFormat),
+							parseResult.GetValue(clearDryRun)))),
+				_localization));
+
+		var update = new Command("update", L("Terminal.Command.CacheUpdate"));
+		CliExamplesRegistry.Set(
+			update,
+			"devprojex cache update https://github.com/owner/repo");
+		var updateRepositoryUrl = new Argument<string>("URL")
+		{
+			Description = L("Terminal.Argument.RepositoryUrl"),
+			Arity = ArgumentArity.ExactlyOne
+		};
+		update.Arguments.Add(updateRepositoryUrl);
+		update.SetAction((parseResult, cancellationToken) =>
+			CommandExecution.RunAsync(
+				environment,
+				_output.Get(parseResult),
+				() => RunWithCacheServicesAsync(
+					parseResult,
+					services => new CacheCommandHandler(services, environment)
+						.UpdateAsync(parseResult.GetValue(updateRepositoryUrl)!, cancellationToken)),
+				_localization));
+
+		command.Subcommands.Add(path);
+		command.Subcommands.Add(list);
+		command.Subcommands.Add(remove);
+		command.Subcommands.Add(clear);
+		command.Subcommands.Add(update);
+		SetParentHelpAction(command, "cache");
+		return command;
+	}
+
+	private void RequireForce(
+		Command command,
+		Option<bool> force,
+		Option<bool> dryRun)
+	{
+		command.Validators.Add(result =>
+		{
+			if (!result.GetValue(force) && !result.GetValue(dryRun))
+			{
+				result.AddError(LocalizedParseError.Create(
+					L("Terminal.Validation.CacheForceRequired")));
+			}
+		});
+	}
+
+	private Command BuildTreeCommand()
+	{
+		var command = new Command("tree", L("Terminal.Command.Tree"));
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex tree .",
+			"devprojex tree . --format json -o -");
+		var project = ProjectSourceArgument();
+		var format = CliChoiceSymbols.Option(
+			"--format",
+			L("Terminal.Option.TreeFormat"),
+			ProjectContextDocumentFormat.Text,
+			CliChoiceSets.TreeFormat,
+			_localization);
+		format.Aliases.Add("-f");
+		var outputPath = OutputPathOption();
+		var force = new Option<bool>("--force") { Description = L("Terminal.Option.ForceContext") };
+		var branch = BranchOption();
+		var selection = new SelectionOptions(
+			_localization,
+			environment,
+			includeContentTransformations: false,
+			includeMaxFileBytes: true);
+		command.Arguments.Add(project);
+		command.Options.Add(format);
+		command.Options.Add(outputPath);
+		command.Options.Add(force);
+		command.Options.Add(branch);
+		selection.AddTo(command);
+		_output.AddProgressTo(command);
+		ConfigureFileForce(command, force, outputPath);
+		command.SetAction(async (parseResult, cancellationToken) =>
+		{
+			var outputOptions = _output.Get(parseResult);
+			return await CommandExecution.RunAsync(
+				environment,
+				outputOptions,
+				async () =>
+				{
+					using var serviceScope = CreateServiceScope(parseResult);
+					var services = serviceScope.Services;
+					var projectSource = parseResult.GetValue(project) ?? Directory.GetCurrentDirectory();
+					await using var resolvedSource = await new TerminalProjectSourceResolver(
+							services,
+							environment,
+							outputOptions)
+						.ResolveAsync(projectSource, parseResult.GetValue(branch), cancellationToken)
+						.ConfigureAwait(false);
+					var projectPath = resolvedSource.ProjectPath;
+					var spec = await selection.ResolveAsync(
+						parseResult,
+						projectPath,
+						services,
+						cancellationToken).ConfigureAwait(false);
+					return await new TreeCommandHandler(services, environment)
+						.ExecuteAsync(
+							new TreeCommandRequest(
+								projectPath,
+								spec,
+								ParseTreeFormat(parseResult.GetValue(format)),
+								parseResult.GetValue(outputPath),
+								outputOptions,
+								Force: parseResult.GetValue(force),
+								MaxFileBytes: selection.GetMaxFileBytes(parseResult),
+								RepositorySourceUrl: resolvedSource.RepositorySourceUrl),
+							cancellationToken)
+						.ConfigureAwait(false);
+				},
+				_localization).ConfigureAwait(false);
+		});
+		return command;
+	}
+
+	private Command BuildHelpCommand(RootCommand root)
+	{
+		var command = new Command("help", L("Terminal.Command.Help"));
+		CliExamplesRegistry.Set(
+			command,
+			"devprojex help",
+			"devprojex help export context");
+		var commandPath = new Argument<string[]>("COMMAND")
+		{
+			Description = L("Terminal.Argument.HelpCommand"),
+			HelpName = "COMMAND",
+			Arity = ArgumentArity.ZeroOrMore
+		};
+		commandPath.CompletionSources.Add(context => CompleteHelpCommandPath(
+			root,
+			commandPath,
+			context));
+		command.Arguments.Add(commandPath);
+		command.SetAction(parseResult =>
+		{
+			var requestedPath = parseResult.GetValue(commandPath) ?? [];
+			if (!TryResolveCommand(root, requestedPath, out var target, out var canonicalPath))
+			{
+				var unknown = requestedPath.Length == 0
+					? string.Empty
+					: requestedPath[^1];
+				environment.Error.WriteLine(
+					$"error[DPX-CLI-UNKNOWN-COMMAND]: " +
+					_localization.Format("Terminal.Error.UnknownCommand", unknown));
+				environment.Error.WriteLine(_localization["Terminal.Hint.Help"]);
+				return CommandLineExitCodes.UsageError;
+			}
+
+			new CommandHelpRenderer(environment, _localization).Write(target, canonicalPath);
+			return CommandLineExitCodes.Success;
+		});
 		return command;
 	}
 
@@ -957,6 +1701,10 @@ public sealed class DevProjexCommandTree
 			HelpName = "OFFSET",
 			Required = true
 		};
+		var positionUnit = new Option<string?>("--position-unit")
+		{
+			Hidden = true
+		};
 		var commandLine = new Argument<string>("COMMAND_LINE")
 		{
 			Arity = ArgumentArity.ExactlyOne
@@ -965,23 +1713,52 @@ public sealed class DevProjexCommandTree
 		{
 			Hidden = true
 		};
+		var nullDelimited = new Option<bool>("--null")
+		{
+			Hidden = true
+		};
 		var workingDirectoryBase64 = new Option<string?>("--working-directory-base64")
 		{
 			Hidden = true
 		};
+		var bashCurrentWord = new Option<string?>("--bash-current-word")
+		{
+			Hidden = true,
+			Arity = ArgumentArity.ZeroOrOne
+		};
 		complete.Options.Add(position);
+		complete.Options.Add(positionUnit);
 		complete.Options.Add(base64);
+		complete.Options.Add(nullDelimited);
 		complete.Options.Add(workingDirectoryBase64);
+		complete.Options.Add(bashCurrentWord);
 		complete.Arguments.Add(commandLine);
 		complete.SetAction(parseResult =>
 		{
 			var useBase64Transport = parseResult.GetValue(base64);
+			var useNullDelimitedTransport = parseResult.GetValue(nullDelimited);
+			if (useBase64Transport && useNullDelimitedTransport)
+			{
+				environment.Error.WriteLine("error[DPX-CLI-INVALID-SYNTAX]:");
+				environment.Error.WriteLine(L("Terminal.Error.ParserRejected"));
+				return CommandLineExitCodes.UsageError;
+			}
 			var completionCommandLine =
 				parseResult.GetValue(commandLine) ?? string.Empty;
 			if (useBase64Transport &&
 			    !CompletionCommandLineTransport.TryDecodeBase64(
 				    completionCommandLine,
 				    out completionCommandLine))
+			{
+				environment.Error.WriteLine("error[DPX-CLI-INVALID-SYNTAX]:");
+				environment.Error.WriteLine(L("Terminal.Error.ParserRejected"));
+				return CommandLineExitCodes.UsageError;
+			}
+			if (!CompletionCursorPositionNormalizer.TryNormalize(
+				    completionCommandLine,
+				    parseResult.GetValue(position),
+				    parseResult.GetValue(positionUnit),
+				    out var completionPosition))
 			{
 				environment.Error.WriteLine("error[DPX-CLI-INVALID-SYNTAX]:");
 				environment.Error.WriteLine(L("Terminal.Error.ParserRejected"));
@@ -1003,13 +1780,25 @@ public sealed class DevProjexCommandTree
 			foreach (var candidate in ContextAwareCompletionEngine.Complete(
 				         root,
 				         completionCommandLine,
-				         parseResult.GetValue(position),
-				         completionWorkingDirectory))
+				         completionPosition,
+				         completionWorkingDirectory,
+				         parseResult.GetValue(bashCurrentWord),
+				         parseResult.GetResult(bashCurrentWord) is not null))
 			{
-				environment.Output.WriteLine(
-					useBase64Transport
-						? CompletionCommandLineTransport.EncodeBase64(candidate)
-						: candidate);
+				if (useBase64Transport)
+				{
+					environment.Output.WriteLine(
+						CompletionCommandLineTransport.EncodeBase64(candidate));
+				}
+				else if (useNullDelimitedTransport)
+				{
+					environment.Output.Write(candidate);
+					environment.Output.Write('\0');
+				}
+				else
+				{
+					environment.Output.WriteLine(candidate);
+				}
 			}
 			return CommandLineExitCodes.Success;
 		});
@@ -1036,16 +1825,55 @@ public sealed class DevProjexCommandTree
 		ParseResult parseResult,
 		Func<TerminalServices, ProfileCommandHandler, Task<int>> operation)
 	{
-		var services = CreateServices(parseResult);
 		return CommandExecution.RunAsync(
 			environment,
-			new TerminalOutputOptions(),
-			() => operation(services, new ProfileCommandHandler(services, environment)),
+			_output.Get(parseResult),
+			() => RunWithServicesAsync(
+				parseResult,
+				services => operation(services, new ProfileCommandHandler(services, environment))),
 			_localization);
 	}
 
-	private TerminalServices CreateServices(ParseResult parseResult) =>
-		_serviceFactory.Create(parseResult.GetValue(_language));
+	private async Task<int> RunWithServicesAsync(
+		ParseResult parseResult,
+		Func<TerminalServices, Task<int>> operation)
+	{
+		using var serviceScope = CreateServiceScope(parseResult);
+		return await operation(serviceScope.Services).ConfigureAwait(false);
+	}
+
+	private async Task<int> RunWithCacheServicesAsync(
+		ParseResult parseResult,
+		Func<TerminalCacheServices, Task<int>> operation)
+	{
+		using var serviceScope = _serviceFactory.CreateCacheScope(parseResult.GetValue(_language));
+		return await operation(serviceScope.Services).ConfigureAwait(false);
+	}
+
+	private async Task<int> RunWithRecentServicesAsync(
+		ParseResult parseResult,
+		Func<TerminalRecentServices, Task<int>> operation)
+	{
+		using var serviceScope = _serviceFactory.CreateRecentScope(parseResult.GetValue(_language));
+		return await operation(serviceScope.Services).ConfigureAwait(false);
+	}
+
+	private TerminalServiceScope CreateServiceScope(ParseResult parseResult) =>
+		_serviceFactory.CreateScope(parseResult.GetValue(_language));
+
+	private void ApplyTuiLanguage(ParseResult parseResult, TerminalServices services)
+	{
+		var commandLineLanguage = parseResult.GetValue(_language);
+		var explicitLanguage = parseResult.GetResult(_language) is { Implicit: false }
+			? commandLineLanguage
+			: (AppLanguage?)null;
+		var language = TerminalWorkspaceLanguagePolicy.Resolve(
+			commandLineLanguage,
+			explicitLanguage,
+			services.TerminalSettingsStore.LoadLanguage());
+		_localization.SetLanguage(language);
+		services.Localization.SetLanguage(language);
+	}
 
 	private Argument<string?> ProjectArgument() =>
 		new("PROJECT")
@@ -1061,6 +1889,66 @@ public sealed class DevProjexCommandTree
 					FileSystemCompletionKind.Directories)
 			}
 		};
+
+	private Argument<string?> ProjectSourceArgument() =>
+		new("PROJECT")
+		{
+			Description = L("Terminal.Argument.ProjectSource"),
+			HelpName = "PROJECT",
+			Arity = ArgumentArity.ZeroOrOne,
+			DefaultValueFactory = _ => Directory.GetCurrentDirectory(),
+			CompletionSources =
+			{
+				context => FileSystemCompletionSource.Complete(
+					context,
+					FileSystemCompletionKind.Directories)
+			}
+		};
+
+	private Option<string?> BranchOption() =>
+		new("--branch", "-b")
+		{
+			Description = L("Terminal.Option.Branch"),
+			HelpName = "NAME"
+		};
+
+	private Option<TimeSpan> TimeoutOption()
+	{
+		var option = new Option<TimeSpan>("--timeout")
+		{
+			Description = L("Terminal.Option.Timeout"),
+			HelpName = "DURATION",
+			DefaultValueFactory = _ => TimeSpan.FromSeconds(10),
+			CustomParser = result => ParseDuration(result, _localization)
+		};
+		CliHelpMetadataRegistry.SetDefaultDisplay(option, "10s");
+		return option;
+	}
+
+	private void ConfigureFileForce(
+		Command command,
+		Option<bool> force,
+		Option<string?> outputPath)
+	{
+		CompletionAvailabilityRegistry.RegisterOption(
+			force,
+			result =>
+				result.GetResult(outputPath) is { Implicit: false } &&
+				CliParseValue.TryGet(result, outputPath, out var destination) &&
+				destination is not null and not "-");
+		command.Validators.Add(result =>
+		{
+			var hasFileDestination =
+				result.GetResult(outputPath) is { Implicit: false } &&
+				CliParseValue.TryGet(result, outputPath, out var destination) &&
+				destination is not null and not "-";
+			if (result.GetValue(force) && !hasFileDestination)
+			{
+				result.AddError(LocalizedParseError.Create(
+					L("Terminal.Validation.ForceRequiresFileOutput")));
+			}
+		});
+	}
 
 	private static Argument<string> RequiredArgument(string name)
 	{
@@ -1111,17 +1999,18 @@ public sealed class DevProjexCommandTree
 			defaultValue,
 			_localization);
 
-	private static Option<AppLanguage> CreateLanguageOption(LocalizationService? localization)
+	private static Option<AppLanguage> CreateLanguageOption(
+		LocalizationService localization,
+		ITerminalEnvironment environment)
 	{
-		var text = localization ?? new LocalizationService(
-			new JsonLocalizationCatalog(),
-			AppLanguageUtility.DetectSystemLanguage());
-		return CliChoiceSymbols.Option(
+		var option = CliChoiceSymbols.Option(
 			"--language",
-			text["Terminal.Option.Language"],
-			ResolveDefaultLanguage(),
+			localization["Terminal.Option.Language"],
+			TerminalLanguageResolver.Resolve([], environment.Variables),
 			CliChoiceSets.Language,
-			text);
+			localization);
+		option.HelpName = "CODE";
+		return option;
 	}
 
 	private void SetParentHelpAction(Command command, params string[] path) =>
@@ -1133,44 +2022,83 @@ public sealed class DevProjexCommandTree
 			return CommandLineExitCodes.Success;
 		});
 
+	private static bool TryResolveCommand(
+		RootCommand root,
+		IReadOnlyList<string> requestedPath,
+		out Command command,
+		out IReadOnlyList<string> canonicalPath)
+	{
+		command = root;
+		var path = new List<string> { "devprojex" };
+		foreach (var token in requestedPath)
+		{
+			var child = command.Subcommands.FirstOrDefault(candidate =>
+				!candidate.Hidden &&
+				(candidate.Name.Equals(token, StringComparison.Ordinal) ||
+				 candidate.Aliases.Contains(token, StringComparer.Ordinal)));
+			if (child is null)
+			{
+				canonicalPath = [];
+				return false;
+			}
+
+			command = child;
+			path.Add(child.Name);
+		}
+
+		canonicalPath = path;
+		return true;
+	}
+
+	private static string[] CompleteHelpCommandPath(
+		RootCommand root,
+		Argument<string[]> commandPath,
+		System.CommandLine.Completions.CompletionContext context)
+	{
+		var requestedPath = context.ParseResult.GetValue(commandPath)?.ToList() ?? [];
+		var word = context.WordToComplete ?? string.Empty;
+		if (word.Length > 0 &&
+		    requestedPath.Count > 0 &&
+		    string.Equals(requestedPath[^1], word, StringComparison.Ordinal))
+		{
+			requestedPath.RemoveAt(requestedPath.Count - 1);
+		}
+		if (!TryResolveCommand(root, requestedPath, out var parent, out _))
+			return [];
+
+		return parent.Subcommands
+			.Where(static candidate => !candidate.Hidden)
+			.SelectMany(static candidate => new[] { candidate.Name }.Concat(candidate.Aliases))
+			.Where(candidate => candidate.StartsWith(word, StringComparison.OrdinalIgnoreCase))
+			.Distinct(StringComparer.Ordinal)
+			.OrderBy(static candidate => candidate, StringComparer.Ordinal)
+			.ToArray();
+	}
+
 	private static bool HasExplicitSelectionOverride(
 		CommandResult result,
 		SelectionOptions selection) =>
-		result.GetResult(selection.Profile) is { Implicit: false } ||
-		result.GetResult(selection.Roots) is { Implicit: false } ||
-		result.GetResult(selection.Extensions) is { Implicit: false } ||
-		result.GetResult(selection.SelectedPaths) is { Implicit: false } ||
-		result.GetResult(selection.GitMode) is { Implicit: false } ||
-		result.GetResult(selection.Exclusions) is { Implicit: false };
+		selection.AllSymbols.Any(symbol =>
+			result.GetResult(symbol) is { Implicit: false });
 
-	private int? ValidateDesktopOpenGitReadiness(
+	private async Task<int?> ValidateDesktopOpenGitReadinessAsync(
 		TerminalServices services,
 		string projectPath,
 		ProjectSelectionSpec selection,
 		CancellationToken cancellationToken)
 	{
-		if (selection.GitMode != GitFilteringMode.TrackedFilesOnly)
-			return null;
-
-		var loaded = services.AnalysisService.Load(
-			new ProjectAnalysisRequest(
-				projectPath,
-				selection.Roots,
-				selection.Extensions,
-				ProjectSelectionAdapter.ToIgnoreOptions(selection)),
-			cancellationToken);
-		var readiness = ProjectContextGitReadiness.Evaluate(
-			GitFilteringMode.TrackedFilesOnly,
-			loaded.DiscoveredGitTrackedIndexCount,
-			loaded.UnavailableGitTrackedIndexCount);
-		if (readiness.CreateDiagnostic(PathUtility.Normalize(projectPath)) is not { } diagnostic)
+		var diagnostics = await DesktopOpenGitReadinessValidator
+			.ValidateAsync(services, projectPath, selection, cancellationToken)
+			.ConfigureAwait(false);
+		if (diagnostics.Count == 0)
 			return null;
 
 		new ContextDiagnosticRenderer(
 			environment,
 			new TerminalOutputOptions(),
-			services.Localization).Write([diagnostic]);
-		return diagnostic.Severity == ContextDiagnosticSeverity.Error
+			services.Localization).Write(diagnostics);
+		return diagnostics.Any(static diagnostic =>
+			diagnostic.Severity == ContextDiagnosticSeverity.Error)
 			? CommandLineExitCodes.PolicyFailure
 			: null;
 	}
@@ -1205,7 +2133,7 @@ public sealed class DevProjexCommandTree
 			    System.Globalization.CultureInfo.InvariantCulture,
 			    out duration))
 		{
-			return duration > TimeSpan.Zero;
+			return IsSupportedRequestTimeout(duration);
 		}
 		if (value.EndsWith('s') &&
 		    double.TryParse(value[..^1], System.Globalization.NumberStyles.Number,
@@ -1235,7 +2163,7 @@ public sealed class DevProjexCommandTree
 		try
 		{
 			duration = TimeSpan.FromSeconds(seconds);
-			return duration > TimeSpan.Zero;
+			return IsSupportedRequestTimeout(duration);
 		}
 		catch (ArgumentException)
 		{
@@ -1249,8 +2177,8 @@ public sealed class DevProjexCommandTree
 		}
 	}
 
-	private static AppLanguage ResolveDefaultLanguage() =>
-		AppLanguageUtility.DetectSystemLanguage();
+	private static bool IsSupportedRequestTimeout(TimeSpan duration) =>
+		duration > TimeSpan.Zero && duration <= MaximumRequestTimeout;
 
 	private string L(string key) => _localization[key];
 }

@@ -7,9 +7,10 @@ using DevProjex.Infrastructure.AppInstances;
 using DevProjex.Infrastructure.Persistence;
 using DevProjex.Infrastructure.SmartIgnore;
 using DevProjex.Infrastructure.ThemePresets;
-using DevProjex.Infrastructure.Reports;
 using DevProjex.Infrastructure.TerminalCommands;
 using DevProjex.Infrastructure.Updates;
+using DevProjex.Infrastructure.Secrets;
+using DevProjex.Infrastructure.Compression;
 
 namespace DevProjex.Avalonia.Services;
 
@@ -32,9 +33,13 @@ public static class AvaloniaCompositionRoot
         SessionMetricsOptions sessionMetrics,
         Func<string>? appDataPathProvider)
     {
+        var desktopPlatform = DesktopPlatformResolver.Resolve();
         var localizationCatalog = new JsonLocalizationCatalog();
-        var localization = new LocalizationService(localizationCatalog, language);
-        var helpContentProvider = new HelpContentProvider();
+        var localization = new LocalizationService(
+            localizationCatalog,
+            language,
+            text => DesktopShortcutTextFormatter.Format(text, desktopPlatform));
+        var helpContentProvider = new HelpContentProvider(desktopPlatform);
         var iconStore = new EmbeddedIconStore();
         var iconMapper = new IconMapper();
         var treePresenter = new TreeNodePresentationService(localization, iconMapper);
@@ -53,7 +58,9 @@ public static class AvaloniaCompositionRoot
             new RustArtifactsIgnoreRule(),
             new GoArtifactsIgnoreRule(),
             new PhpArtifactsIgnoreRule(),
-            new RubyArtifactsIgnoreRule()
+            new RubyArtifactsIgnoreRule(),
+            new SwiftArtifactsIgnoreRule(),
+            new DartArtifactsIgnoreRule()
         };
         var smartIgnoreService = new SmartIgnoreService(smartIgnoreRules);
         var ignoreOptionsService = new IgnoreOptionsService(localization);
@@ -64,9 +71,21 @@ public static class AvaloniaCompositionRoot
         var filterSelectionService = new FilterOptionSelectionService();
         var treeExportService = new TreeExportService();
         var fileContentAnalyzer = new FileContentAnalyzer();
+		var projectProfileStore = new ProjectProfileStore(appDataPathProvider);
+		var persistentSecretIdentity = new PersistentSecretIdentityProvider(appDataPathProvider);
+		var secretRedactionSession = SecretRedactionSession.CreateWithPrivateData(
+			new SmartSecretsDetector(new GitleaksSecretDetector(), smartIgnoreService),
+			new PrivateDataDetector(),
+			projectProfileStore,
+			persistentSecretIdentity);
+		var codeCompressionSession = CodeCompressionFactory.CreateSession();
         var contentExportService = new SelectedContentExportService(fileContentAnalyzer);
         var treeAndContentExportService = new TreeAndContentExportService(treeExportService, contentExportService);
-        var projectCopyExportService = new ProjectCopyExportService(new ProjectCopyExportPlanBuilder());
+        var projectCopyExportService = new ProjectCopyExportService(
+			new ProjectCopyExportPlanBuilder(),
+			fileContentAnalyzer,
+			secretRedactionSession,
+			codeCompressionSession);
         var projectAnalysisService = new ProjectAnalysisService(
             scanOptionsUseCase,
             buildTreeUseCase,
@@ -89,6 +108,7 @@ public static class AvaloniaCompositionRoot
         var toastService = new ToastService();
         var elevation = new ElevationService();
         var appInstanceLauncher = new AppInstanceLauncher();
+        var projectPathLauncher = new ProjectPathLauncher();
         // UI tests need an isolated app-data root so persisted settings/profiles from
         // previous runs cannot leak into the current window state and make workflow
         // scenarios nondeterministic on CI.
@@ -96,7 +116,6 @@ public static class AvaloniaCompositionRoot
         var themeSettingsStore = new ThemeSettingsStore(appDataPathProvider);
         var recentProjectsStore = new RecentProjectsStore(appDataPathProvider);
         var recentFolderAvailabilityService = new RecentFolderAvailabilityService();
-        var projectProfileStore = new ProjectProfileStore(appDataPathProvider);
         var gitRepositoryService = new GitRepositoryService();
         var repoCacheService = new RepoCacheService();
         var zipDownloadService = new ZipDownloadService();
@@ -132,6 +151,7 @@ public static class AvaloniaCompositionRoot
             ToastService: toastService,
             IconStore: iconStore,
             GitRepositoryService: gitRepositoryService,
+			GitScopePathProvider: new GitScopePathProvider(),
             RepoCacheService: repoCacheService,
             ZipDownloadService: zipDownloadService,
             FileContentAnalyzer: fileContentAnalyzer,
@@ -139,6 +159,9 @@ public static class AvaloniaCompositionRoot
             ApplicationUpdateService: applicationUpdateService,
             TerminalCommandSetupService: terminalCommandSetupService,
             TaskbarProgressService: taskbarProgressService,
-            SessionMetricsRecorder: sessionMetricsRecorder);
+            SessionMetricsRecorder: sessionMetricsRecorder,
+			SecretRedactionSession: secretRedactionSession,
+			CodeCompressionSession: codeCompressionSession,
+			ProjectPathLauncher: projectPathLauncher);
     }
 }

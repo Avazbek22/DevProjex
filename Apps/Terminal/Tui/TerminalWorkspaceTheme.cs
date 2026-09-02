@@ -10,6 +10,7 @@ internal static class TerminalWorkspaceTheme
 	public const string Panel = "DevProjexPanel";
 	public const string FocusedPanel = "DevProjexFocusedPanel";
 	public const string List = "DevProjexList";
+	public const string InactiveList = "DevProjexInactiveList";
 	public const string Accent = "DevProjexAccent";
 	public const string Secondary = "DevProjexSecondary";
 	public const string Success = "DevProjexSuccess";
@@ -62,6 +63,16 @@ internal static class TerminalWorkspaceTheme
 			Highlight = selection,
 			HotNormal = accent,
 			HotFocus = selection,
+			ReadOnly = terminal,
+			Disabled = secondary
+		});
+		Add(InactiveList, new Scheme(terminal)
+		{
+			Focus = terminal,
+			Active = terminal,
+			Highlight = terminal,
+			HotNormal = accent,
+			HotFocus = accent,
 			ReadOnly = terminal,
 			Disabled = secondary
 		});
@@ -137,6 +148,16 @@ internal static class TerminalWorkspaceTheme
 			Highlight = selection,
 			HotNormal = bold,
 			HotFocus = selection,
+			ReadOnly = terminal,
+			Disabled = dim
+		});
+		Add(InactiveList, new Scheme(terminal)
+		{
+			Focus = terminal,
+			Active = terminal,
+			Highlight = terminal,
+			HotNormal = bold,
+			HotFocus = bold,
 			ReadOnly = terminal,
 			Disabled = dim
 		});

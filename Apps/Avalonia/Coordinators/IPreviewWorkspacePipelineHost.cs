@@ -28,6 +28,17 @@ internal interface IPreviewWorkspacePipelineHost
 
     void ApplyPreviewText(string text, int lineCount);
 
+	string ResolvePreviewErrorMessage(Exception exception);
+
+	/// <summary>
+	/// Reports a preview build that ended in an error shown to the user. While a preview is visible
+	/// it owns the strict secret analysis, so state that normally comes from background discovery -
+	/// the Hide Secrets scan status - must learn about the failure from here or it stays Scanning.
+	/// </summary>
+	void HandlePreviewBuildFailure(Exception exception)
+	{
+	}
+
     void ClearPreviewDocument();
 
     Task<PreviewWarmupSnapshot?> TryBuildPreviewWarmupSnapshotAsync(

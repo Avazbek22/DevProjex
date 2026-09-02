@@ -1,7 +1,257 @@
+using DevProjex.Application.Compression;
+using DevProjex.Application.Preview;
+using DevProjex.Application.Secrets;
+using DevProjex.Infrastructure.Secrets;
+
 namespace DevProjex.Tests.Unit.Avalonia;
 
 public sealed class ProjectTextOutputPipelineTests
 {
+	[Theory]
+	[InlineData((int)ProjectTextOutputMode.Content)]
+	[InlineData((int)ProjectTextOutputMode.TreeAndContent)]
+	public async Task BuildDocumentAsync_LargeFileBackedOutputMatchesLegacyBytes(int modeValue)
+	{
+		using var project = new TemporaryDirectory();
+		var sourceFile = Path.Combine(project.Path, "large.txt");
+		var content = string.Concat(
+			Enumerable.Repeat("ASCII\r\nПривет🙂\rline\n", 32_000)) +
+			"tail";
+		await File.WriteAllTextAsync(
+			sourceFile,
+			content,
+			new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+			TestContext.Current.CancellationToken);
+		var root = DirectoryNode(project.Path, FileNode(sourceFile));
+		var snapshot = CreateSnapshot(
+			project.Path,
+			root,
+			new HashSet<string>(PathComparer.Default));
+		var pipeline = CreatePipeline();
+		var mode = (ProjectTextOutputMode)modeValue;
+
+		var legacy = await pipeline.BuildAsync(
+			mode,
+			snapshot,
+			TestContext.Current.CancellationToken);
+		using var streamed = await pipeline.BuildDocumentAsync(
+			mode,
+			snapshot,
+			TestContext.Current.CancellationToken);
+		Assert.IsType<FileBackedPreviewTextDocument>(streamed.Document);
+		await using var legacyBytes = new MemoryStream();
+		await using var streamedBytes = new MemoryStream();
+		var writer = new TextFileExportService();
+		await writer.WriteAsync(
+			legacyBytes,
+			legacy.Content,
+			TestContext.Current.CancellationToken);
+		await writer.WriteAsync(
+			streamedBytes,
+			streamed.Document,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(legacyBytes.ToArray(), streamedBytes.ToArray());
+	}
+
+	[Fact]
+	public async Task BuildDocumentAsync_TreeAndContentEdgeCasesMatchLegacyBytes()
+	{
+		using var project = new TemporaryDirectory();
+		var empty = project.CreateFile("empty.txt", string.Empty);
+		var whitespace = project.CreateFile("whitespace.txt", " \t\r\n");
+		var unicode = project.CreateFile("unicode.txt", "alpha\r\nПривет🙂\n終\r");
+		var binary = Path.Combine(project.Path, "binary.dat");
+		await File.WriteAllBytesAsync(binary, [0, 1, 2, 0, 3], TestContext.Current.CancellationToken);
+		var root = DirectoryNode(
+			project.Path,
+			FileNode(empty),
+			FileNode(whitespace),
+			FileNode(unicode),
+			FileNode(binary));
+		var snapshot = CreateSnapshot(
+			project.Path,
+			root,
+			new HashSet<string>(PathComparer.Default));
+		var pipeline = CreatePipeline();
+
+		var legacy = await pipeline.BuildAsync(
+			ProjectTextOutputMode.TreeAndContent,
+			snapshot,
+			TestContext.Current.CancellationToken);
+		using var streamed = await pipeline.BuildDocumentAsync(
+			ProjectTextOutputMode.TreeAndContent,
+			snapshot,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(legacy.Content, streamed.Document.GetFullText());
+	}
+
+	[Fact]
+	public async Task BuildDocumentAsync_TreeAndContentPreservesLegacyOmissionBeyondInteractiveReadLimit()
+	{
+		using var project = new TemporaryDirectory();
+		var sourceFile = project.CreateFile(
+			"large.txt",
+			new string('x', 10 * 1024 * 1024) + "TAIL");
+		var snapshot = CreateSnapshot(
+			project.Path,
+			DirectoryNode(project.Path, FileNode(sourceFile)),
+			new HashSet<string>(PathComparer.Default));
+		var pipeline = CreatePipeline();
+
+		var legacy = await pipeline.BuildAsync(
+			ProjectTextOutputMode.TreeAndContent,
+			snapshot,
+			TestContext.Current.CancellationToken);
+		using var streamed = await pipeline.BuildDocumentAsync(
+			ProjectTextOutputMode.TreeAndContent,
+			snapshot,
+			TestContext.Current.CancellationToken);
+		var streamedText = streamed.Document.GetFullText();
+
+		Assert.Equal(legacy.Content.Length, streamedText.Length);
+		Assert.Equal(legacy.Content, streamedText);
+		Assert.DoesNotContain("TAIL", streamedText, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task BuildAsync_ContentWritesRemoteRootOnceAndUsesRelativeFileHeaders()
+	{
+		using var project = new TemporaryDirectory();
+		var sourceFile = project.CreateFile(Path.Combine("src", "Program.cs"), "class Program {}");
+		var root = DirectoryNode(project.Path, DirectoryNode(Path.GetDirectoryName(sourceFile)!, FileNode(sourceFile)));
+		var displayRoot = "https://github.com/owner/repository";
+		var snapshot = CreateSnapshot(project.Path, root, new HashSet<string>(PathComparer.Default)) with
+		{
+			PathPresentation = new ExportPathPresentation(
+				displayRoot,
+				_ => $"{displayRoot}/src/Program.cs")
+		};
+
+		var result = await CreatePipeline().BuildAsync(
+			ProjectTextOutputMode.Content,
+			snapshot,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(
+			$"Root: {displayRoot}{Environment.NewLine}" +
+			$"\u00A0{Environment.NewLine}" +
+			$"\u00A0{Environment.NewLine}" +
+			$"src/Program.cs:{Environment.NewLine}" +
+			$"\u00A0{Environment.NewLine}" +
+			"class Program {}",
+			result.Content);
+		Assert.Equal(1, result.Content.Split(displayRoot, StringSplitOptions.None).Length - 1);
+	}
+
+	[Theory]
+	[InlineData((int)ProjectTextOutputMode.Tree, "git@example.com:owner/repository.git", "git@example.com:owner/repository")]
+	[InlineData((int)ProjectTextOutputMode.Content, "git@example.com:owner/repository.git", "git@example.com:owner/repository")]
+	[InlineData((int)ProjectTextOutputMode.TreeAndContent, "git@example.com:owner/repository.git", "git@example.com:owner/repository")]
+	[InlineData((int)ProjectTextOutputMode.Tree, "file:///srv/git/repository.git", "file:///srv/git/repository")]
+	[InlineData((int)ProjectTextOutputMode.Content, "file:///srv/git/repository.git", "file:///srv/git/repository")]
+	[InlineData((int)ProjectTextOutputMode.TreeAndContent, "file:///srv/git/repository.git", "file:///srv/git/repository")]
+	public async Task BuildAsync_SupportedRepositoryPresentationNeverExposesCheckoutRoot(
+		int modeValue,
+		string repositorySource,
+		string expectedDisplayRoot)
+	{
+		using var project = new TemporaryDirectory();
+		var sourceFile = project.CreateFile(Path.Combine("src", "Program.cs"), "class Program {}");
+		var root = DirectoryNode(
+			project.Path,
+			DirectoryNode(Path.GetDirectoryName(sourceFile)!, FileNode(sourceFile)));
+		var presentation = new RepositoryWebPathPresentationService().TryCreate(
+			project.Path,
+			repositorySource);
+		Assert.NotNull(presentation);
+		var snapshot = CreateSnapshot(
+			project.Path,
+			root,
+			new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer)) with
+		{
+			PathPresentation = presentation
+		};
+
+		var result = await CreatePipeline().BuildAsync(
+			(ProjectTextOutputMode)modeValue,
+			snapshot,
+			TestContext.Current.CancellationToken);
+
+		Assert.Contains(expectedDisplayRoot, result.Content, StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			project.Path,
+			result.Content,
+			OperatingSystem.IsWindows()
+				? StringComparison.OrdinalIgnoreCase
+				: StringComparison.Ordinal);
+		Assert.Contains("Program.cs", result.Content, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData((int)ProjectTextOutputMode.Tree)]
+	[InlineData((int)ProjectTextOutputMode.Content)]
+	[InlineData((int)ProjectTextOutputMode.TreeAndContent)]
+	public async Task BuildAsync_PrivateDataMasksDisplayRootInEveryMode(int modeValue)
+	{
+		using var project = new TemporaryDirectory();
+		var sourceFile = project.CreateFile("Program.cs", "class Program {}");
+		var root = DirectoryNode(project.Path, FileNode(sourceFile));
+		using var session = SecretRedactionSession.CreateWithPrivateData(
+			new NoFindingsDetector(),
+			new PrivateDataDetector());
+		var displayRoot = @"C:\Users\alice\repository";
+		var snapshot = CreateSnapshot(project.Path, root, new HashSet<string>(PathComparer.Default)) with
+		{
+			PathPresentation = new ExportPathPresentation(
+				displayRoot,
+				_ => $@"{displayRoot}\Program.cs"),
+			RedactionContext = new ContentTransformationContext(
+				Compression: null,
+				Redaction: new SecretRedactionContext(
+					project.Path,
+					session,
+					SecretRedactionFeatures.PrivateData))
+		};
+
+		var pipeline = CreatePipeline();
+		var result = await pipeline.BuildAsync(
+			(ProjectTextOutputMode)modeValue,
+			snapshot,
+			TestContext.Current.CancellationToken);
+		using var documentResult = await pipeline.BuildDocumentAsync(
+			(ProjectTextOutputMode)modeValue,
+			snapshot,
+			TestContext.Current.CancellationToken);
+
+		Assert.Contains(@"C:\Users\[local-user-1]\repository", result.Content, StringComparison.Ordinal);
+		Assert.DoesNotContain(displayRoot, result.Content, StringComparison.Ordinal);
+		Assert.Equal(result.Content, documentResult.Document.GetFullText());
+	}
+
+	[Fact]
+	public async Task BuildAsync_DisabledPrivateDataLeavesDisplayRootUnchanged()
+	{
+		using var project = new TemporaryDirectory();
+		var sourceFile = project.CreateFile("Program.cs", "class Program {}");
+		var root = DirectoryNode(project.Path, FileNode(sourceFile));
+		var displayRoot = @"C:\Users\alice\repository";
+		var snapshot = CreateSnapshot(project.Path, root, new HashSet<string>(PathComparer.Default)) with
+		{
+			PathPresentation = new ExportPathPresentation(displayRoot, _ => $@"{displayRoot}\Program.cs")
+		};
+
+		var result = await CreatePipeline().BuildAsync(
+			ProjectTextOutputMode.Content,
+			snapshot,
+			TestContext.Current.CancellationToken);
+
+		Assert.StartsWith($@"Root: {displayRoot}{Environment.NewLine}", result.Content, StringComparison.Ordinal);
+		Assert.Contains($"Program.cs:{Environment.NewLine}", result.Content, StringComparison.Ordinal);
+		Assert.Equal(1, result.Content.Split(displayRoot, StringSplitOptions.None).Length - 1);
+		Assert.DoesNotContain("[local-user-1]", result.Content, StringComparison.Ordinal);
+	}
     [Theory]
     [InlineData((int)ProjectTextOutputMode.Tree)]
     [InlineData((int)ProjectTextOutputMode.Content)]
@@ -71,7 +321,7 @@ public sealed class ProjectTextOutputPipelineTests
     }
 
     [Fact]
-    public async Task BuildAsync_ContentSelectionOutsideEffectiveTreeDoesNotReadUnrelatedFile()
+	public async Task BuildAsync_ContentSelectionOutsideEffectiveTreeReturnsRootOnly()
     {
         using var temp = new TemporaryDirectory();
         var effectiveFile = temp.CreateFile("effective.txt", "effective");
@@ -83,13 +333,20 @@ public sealed class ProjectTextOutputPipelineTests
             new HashSet<string>(PathComparer.Default) { outsideFile });
         var pipeline = CreatePipeline();
 
-        var result = await pipeline.BuildAsync(
-            ProjectTextOutputMode.Content,
-            snapshot,
-            TestContext.Current.CancellationToken);
+		var result = await pipeline.BuildAsync(
+			ProjectTextOutputMode.Content,
+			snapshot,
+			TestContext.Current.CancellationToken);
+		using var document = await pipeline.BuildDocumentAsync(
+			ProjectTextOutputMode.Content,
+			snapshot,
+			TestContext.Current.CancellationToken);
+		var expected = ContextRootPresentation.FormatLine(temp.Path);
 
-        Assert.Equal(0, result.CandidateFileCount);
-        Assert.Empty(result.Content);
+		Assert.Equal(0, result.CandidateFileCount);
+		Assert.Equal(expected, result.Content);
+		Assert.Equal(expected, document.Document.GetFullText());
+		Assert.DoesNotContain("outside", result.Content, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -139,7 +396,9 @@ public sealed class ProjectTextOutputPipelineTests
         return new ProjectTextOutputPipeline(
             treeExport,
             contentExport,
-            new TreeAndContentExportService(treeExport, contentExport));
+			new TreeAndContentExportService(treeExport, contentExport),
+			new PreviewDocumentBuilder(new FileContentAnalyzer()),
+			new TextFileExportService());
     }
 
     private static ProjectTextOutputSnapshot CreateSnapshot(
@@ -173,4 +432,12 @@ public sealed class ProjectTextOutputPipelineTests
             IsAccessDenied: false,
             IconKey: "file",
             Children: []);
+
+	private sealed class NoFindingsDetector : ISecretDetector
+	{
+		public IReadOnlyList<DetectedSecret> Detect(
+			string repositoryRelativePath,
+			string content,
+			CancellationToken cancellationToken = default) => [];
+	}
 }

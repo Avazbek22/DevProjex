@@ -1,3 +1,6 @@
+using System.Text;
+using DevProjex.Application.Preview;
+
 namespace DevProjex.Application.Services;
 
 public static class ExportOutputMetricsCalculator
@@ -22,13 +25,53 @@ public static class ExportOutputMetricsCalculator
 		return new ExportOutputMetrics(lines, chars, tokens);
 	}
 
+	public static async Task<ExportOutputMetrics> FromDocumentAsync(
+		IPreviewTextDocument document,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(document);
+		return await FromUtf8WriterAsync(
+				(stream, token) => document.WriteToAsync(stream, token).AsTask(),
+				cancellationToken)
+			.ConfigureAwait(false);
+	}
+
+	public static async Task<ExportOutputMetrics> FromUtf8WriterAsync(
+		Func<Stream, CancellationToken, Task> writeAsync,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(writeAsync);
+		using var metricsStream = new Utf8MetricsStream();
+		await writeAsync(metricsStream, cancellationToken).ConfigureAwait(false);
+		return metricsStream.Complete(cancellationToken);
+	}
+
+	internal static TextMetricsWriter CreateTextWriter() => new();
+
+	internal static ExportOutputMetrics TrimTrailingLineFeeds(
+		ExportOutputMetrics metrics,
+		int count)
+	{
+		ArgumentOutOfRangeException.ThrowIfNegative(count);
+		if (count == 0 || metrics == ExportOutputMetrics.Empty)
+			return metrics;
+
+		var chars = Math.Max(0, metrics.Chars - count);
+		if (chars == 0)
+			return ExportOutputMetrics.Empty;
+		return new ExportOutputMetrics(
+			Math.Max(1, metrics.Lines - count),
+			chars,
+			EstimateTokens(chars));
+	}
+
 	public static ExportOutputMetrics FromContentFiles(IEnumerable<ContentFileMetrics> files)
 	{
-		var uniquePaths = new HashSet<string>(PathComparer.Default);
+		var uniquePaths = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
 		var ordered = new List<ContentFileMetrics>();
 		foreach (var file in files)
 		{
-			if (string.IsNullOrWhiteSpace(file.Path))
+			if (string.IsNullOrEmpty(file.Path))
 				continue;
 
 			if (!uniquePaths.Add(file.Path))
@@ -40,7 +83,7 @@ public static class ExportOutputMetricsCalculator
 		if (ordered.Count == 0)
 			return ExportOutputMetrics.Empty;
 
-		ordered.Sort(static (left, right) => PathComparer.Default.Compare(left.Path, right.Path));
+		ordered.Sort(static (left, right) => ProjectTreePathIdentity.CanonicalComparer.Compare(left.Path, right.Path));
 		return FromOrderedContentFiles(ordered);
 	}
 
@@ -74,14 +117,31 @@ public static class ExportOutputMetricsCalculator
 		private long _lineBreaks;
 		private long _trailingLineBreakChars;
 		private long _trailingLineBreaks;
-		private bool _anyWritten;
+		private bool _hasRootHeader;
+		private bool _anyFileWritten;
+
+		public void AppendRootHeader(string displayRootPath)
+		{
+			if (_hasRootHeader || _anyFileWritten || string.IsNullOrWhiteSpace(displayRootPath))
+				return;
+
+			AppendRenderedLine(
+				renderedChars: ContextRootPresentation.FormatLine(displayRootPath).Length,
+				internalLineBreaks: 0,
+				newLineChars: NormalizedNewLineChars,
+				chars: ref _chars,
+				lineBreaks: ref _lineBreaks,
+				trailingLineBreakChars: ref _trailingLineBreakChars,
+				trailingLineBreaks: ref _trailingLineBreaks);
+			_hasRootHeader = true;
+		}
 
 		public void AppendFile(ContentFileMetrics file)
 		{
-			if (string.IsNullOrWhiteSpace(file.Path))
+			if (string.IsNullOrEmpty(file.Path))
 				return;
 
-			if (_anyWritten)
+			if (_hasRootHeader || _anyFileWritten)
 			{
 				AppendLiteralLine(
 					ClipboardBlankLine,
@@ -99,13 +159,13 @@ public static class ExportOutputMetricsCalculator
 					ref _trailingLineBreaks);
 			}
 
-			_anyWritten = true;
+			_anyFileWritten = true;
 
 			// Metrics need the rendered header length, not a materialized "<path>:"
 			// string. Avoiding that allocation matters when thousands of files are
 			// recalculated after a selection or format change.
 			AppendRenderedLine(
-				renderedChars: file.Path.Length + 1,
+				renderedChars: SingleLineTextEscaping.GetEscapedLength(file.Path.AsSpan()) + 1L,
 				internalLineBreaks: 0,
 				newLineChars: NormalizedNewLineChars,
 				chars: ref _chars,
@@ -265,6 +325,311 @@ public static class ExportOutputMetricsCalculator
 	}
 
 	private readonly record struct NormalizedTextStats(int NormalizedChars, int LineBreaks);
+
+	internal sealed class TextMetricsWriter : TextWriter
+	{
+		private NormalizedTextMetricsAccumulator _metrics;
+		private bool _completed;
+
+		public override Encoding Encoding => Encoding.Unicode;
+
+		public ExportOutputMetrics Complete(CancellationToken cancellationToken)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			if (!_completed)
+			{
+				_completed = true;
+				return _metrics.Complete();
+			}
+
+			return _metrics.ToMetrics();
+		}
+
+		public override void Write(char value)
+		{
+			ThrowIfCompleted();
+			_metrics.Append(value);
+		}
+
+		public override void Write(string? value)
+		{
+			if (value is null)
+				return;
+
+			Write(value.AsSpan());
+		}
+
+		public override void Write(char[] buffer, int index, int count)
+		{
+			ArgumentNullException.ThrowIfNull(buffer);
+			ArgumentOutOfRangeException.ThrowIfNegative(index);
+			ArgumentOutOfRangeException.ThrowIfNegative(count);
+			if (index > buffer.Length - count)
+				throw new ArgumentException("The write range exceeds the source buffer.", nameof(count));
+
+			Write(buffer.AsSpan(index, count));
+		}
+
+		public override void Write(ReadOnlySpan<char> buffer)
+		{
+			ThrowIfCompleted();
+			_metrics.Append(buffer);
+		}
+
+		public override Task WriteAsync(char value)
+		{
+			Write(value);
+			return Task.CompletedTask;
+		}
+
+		public override Task WriteAsync(string? value)
+		{
+			Write(value);
+			return Task.CompletedTask;
+		}
+
+		public override Task WriteAsync(char[] buffer, int index, int count)
+		{
+			Write(buffer, index, count);
+			return Task.CompletedTask;
+		}
+
+		public override Task WriteAsync(
+			ReadOnlyMemory<char> buffer,
+			CancellationToken cancellationToken = default)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			Write(buffer.Span);
+			return Task.CompletedTask;
+		}
+
+		public override Task FlushAsync()
+		{
+			ThrowIfCompleted();
+			return Task.CompletedTask;
+		}
+
+		private void ThrowIfCompleted()
+		{
+			if (_completed)
+				throw new InvalidOperationException("Output metrics were already finalized.");
+		}
+	}
+
+	private sealed class Utf8MetricsStream : Stream
+	{
+		private const int CharacterBufferSize = 4 * 1024;
+		private static readonly UTF8Encoding StrictUtf8 = new(
+			encoderShouldEmitUTF8Identifier: false,
+			throwOnInvalidBytes: true);
+		private readonly Decoder _decoder = StrictUtf8.GetDecoder();
+		private readonly char[] _characterBuffer = new char[CharacterBufferSize];
+		private NormalizedTextMetricsAccumulator _metrics;
+		private bool _completed;
+
+		public override bool CanRead => false;
+		public override bool CanSeek => false;
+		public override bool CanWrite => true;
+		public override long Length => throw new NotSupportedException();
+		public override long Position
+		{
+			get => throw new NotSupportedException();
+			set => throw new NotSupportedException();
+		}
+
+		public ExportOutputMetrics Complete(CancellationToken cancellationToken)
+		{
+			if (!_completed)
+			{
+				Decode(ReadOnlySpan<byte>.Empty, flush: true, cancellationToken);
+				_completed = true;
+				return _metrics.Complete();
+			}
+
+			return _metrics.ToMetrics();
+		}
+
+		public override void Flush()
+		{
+		}
+
+		public override Task FlushAsync(CancellationToken cancellationToken)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			return Task.CompletedTask;
+		}
+
+		public override void Write(byte[] buffer, int offset, int count)
+		{
+			ArgumentNullException.ThrowIfNull(buffer);
+			ArgumentOutOfRangeException.ThrowIfNegative(offset);
+			ArgumentOutOfRangeException.ThrowIfNegative(count);
+			if (offset > buffer.Length - count)
+				throw new ArgumentException("The write range exceeds the source buffer.", nameof(count));
+			Write(buffer.AsSpan(offset, count));
+		}
+
+		public override void Write(ReadOnlySpan<byte> buffer)
+		{
+			ThrowIfCompleted();
+			Decode(buffer, flush: false, CancellationToken.None);
+		}
+
+		public override ValueTask WriteAsync(
+			ReadOnlyMemory<byte> buffer,
+			CancellationToken cancellationToken = default)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			ThrowIfCompleted();
+			Decode(buffer.Span, flush: false, cancellationToken);
+			return ValueTask.CompletedTask;
+		}
+
+		public override Task WriteAsync(
+			byte[] buffer,
+			int offset,
+			int count,
+			CancellationToken cancellationToken)
+		{
+			ArgumentNullException.ThrowIfNull(buffer);
+			ArgumentOutOfRangeException.ThrowIfNegative(offset);
+			ArgumentOutOfRangeException.ThrowIfNegative(count);
+			if (offset > buffer.Length - count)
+				throw new ArgumentException("The write range exceeds the source buffer.", nameof(count));
+			cancellationToken.ThrowIfCancellationRequested();
+			ThrowIfCompleted();
+			Decode(buffer.AsSpan(offset, count), flush: false, cancellationToken);
+			return Task.CompletedTask;
+		}
+
+		public override int Read(byte[] buffer, int offset, int count) =>
+			throw new NotSupportedException();
+
+		public override long Seek(long offset, SeekOrigin origin) =>
+			throw new NotSupportedException();
+
+		public override void SetLength(long value) =>
+			throw new NotSupportedException();
+
+		private void Decode(
+			ReadOnlySpan<byte> bytes,
+			bool flush,
+			CancellationToken cancellationToken)
+		{
+			do
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				_decoder.Convert(
+					bytes,
+					_characterBuffer,
+					flush,
+					out var bytesUsed,
+					out var charactersUsed,
+					out var completed);
+				_metrics.Append(_characterBuffer.AsSpan(0, charactersUsed));
+				bytes = bytes[bytesUsed..];
+				if (completed)
+					break;
+			}
+			while (!bytes.IsEmpty || flush);
+		}
+
+		private void ThrowIfCompleted()
+		{
+			if (_completed)
+				throw new InvalidOperationException("Output metrics were already finalized.");
+		}
+	}
+
+	private struct NormalizedTextMetricsAccumulator
+	{
+		private long _normalizedCharacters;
+		private long _lineBreaks;
+		private bool _pendingCarriageReturn;
+
+		public void Append(ReadOnlySpan<char> characters)
+		{
+			var index = 0;
+			if (_pendingCarriageReturn && !characters.IsEmpty)
+			{
+				FlushPendingCarriageReturn();
+				if (characters[0] == '\n')
+					index = 1;
+			}
+
+			while (index < characters.Length)
+			{
+				var remaining = characters[index..];
+				var lineBreakOffset = remaining.IndexOfAny(LineBreakCharacters);
+				if (lineBreakOffset < 0)
+				{
+					_normalizedCharacters += remaining.Length;
+					return;
+				}
+
+				_normalizedCharacters += lineBreakOffset;
+				index += lineBreakOffset;
+				var lineBreak = characters[index++];
+				if (lineBreak == '\r' && index == characters.Length)
+				{
+					_pendingCarriageReturn = true;
+					return;
+				}
+
+				_normalizedCharacters++;
+				_lineBreaks++;
+				if (lineBreak == '\r' && characters[index] == '\n')
+					index++;
+			}
+		}
+
+		public void Append(char character)
+		{
+			if (_pendingCarriageReturn)
+			{
+				FlushPendingCarriageReturn();
+				if (character == '\n')
+					return;
+			}
+
+			if (character == '\r')
+			{
+				_pendingCarriageReturn = true;
+				return;
+			}
+
+			_normalizedCharacters++;
+			if (character == '\n')
+				_lineBreaks++;
+		}
+
+		public ExportOutputMetrics Complete()
+		{
+			FlushPendingCarriageReturn();
+			return ToMetrics();
+		}
+
+		public ExportOutputMetrics ToMetrics()
+		{
+			if (_normalizedCharacters == 0)
+				return ExportOutputMetrics.Empty;
+
+			return new ExportOutputMetrics(
+				_lineBreaks + 1,
+				_normalizedCharacters,
+				EstimateTokens(_normalizedCharacters));
+		}
+
+		private void FlushPendingCarriageReturn()
+		{
+			if (!_pendingCarriageReturn)
+				return;
+
+			_pendingCarriageReturn = false;
+			_normalizedCharacters++;
+			_lineBreaks++;
+		}
+	}
 }
 
 public readonly record struct ContentFileMetrics(

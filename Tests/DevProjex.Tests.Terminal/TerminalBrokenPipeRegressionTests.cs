@@ -69,6 +69,21 @@ public sealed class TerminalBrokenPipeRegressionTests
 	}
 
 	[Fact]
+	public void InvocationErrorTranslatesOnlyNativeBrokenPipeIoFailure()
+	{
+		var nativeCode = OperatingSystem.IsWindows() ? 109 : 32;
+		var failure = new NativeCodeIOException(nativeCode);
+		using var consoleError = new ConsoleErrorScope(
+			new ThrowingTextWriter(failure));
+		var environment = new InvocationEnvironment(hasAttachedConsole: false);
+
+		var exception = Assert.Throws<TerminalBrokenPipeException>(
+			() => environment.Error.Write("diagnostic"));
+
+		Assert.Same(failure, exception.InnerException);
+	}
+
+	[Fact]
 	public async Task WriterTranslatesConfirmedAsynchronousBrokenPipeFailure()
 	{
 		var failure = new NativeCodeIOException(109);
@@ -100,6 +115,80 @@ public sealed class TerminalBrokenPipeRegressionTests
 	}
 
 	[Fact]
+	public async Task HelpExitsCleanlyWhenStdoutConsumerClosesEarly()
+	{
+		string[][] invocations = [[], ["--help"]];
+		foreach (var arguments in invocations)
+		{
+			var environment = new TestTerminalEnvironment
+			{
+				OutputOverride = new BrokenPipeTextWriter()
+			};
+
+			var exitCode = await new TerminalApplication(environment).RunAsync(
+				arguments,
+				TestContext.Current.CancellationToken);
+
+			Assert.Equal(CommandLineExitCodes.Success, exitCode);
+			Assert.Empty(environment.StandardError);
+		}
+	}
+
+	[Fact]
+	public async Task ParserDiagnosticPreservesUsageExitWhenStderrConsumerClosesEarly()
+	{
+		var environment = new TestTerminalEnvironment
+		{
+			ErrorOverride = new BrokenPipeTextWriter()
+		};
+
+		var exitCode = await new TerminalApplication(environment).RunAsync(
+			["unknown-command"],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+	}
+
+	[Fact]
+	public async Task CancellationPreservesCanceledExitWhenStderrConsumerClosesEarly()
+	{
+		var environment = new TestTerminalEnvironment
+		{
+			ErrorOverride = new BrokenPipeTextWriter()
+		};
+		var application = new TerminalApplication(
+			environment,
+			developerCommandRunner: new ThrowingDeveloperCommandRunner(
+				new OperationCanceledException()));
+
+		var exitCode = await application.RunAsync(
+			["dev", "session", "."],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.Canceled, exitCode);
+	}
+
+	[Fact]
+	public async Task RuntimeFailurePreservesRuntimeExitWhenStderrConsumerClosesEarly()
+	{
+		var environment = new TestTerminalEnvironment
+		{
+			ErrorOverride = new BrokenPipeTextWriter()
+		};
+		var application = new TerminalApplication(
+			environment,
+			developerCommandRunner: new ThrowingDeveloperCommandRunner(
+				new InvalidOperationException("failure")));
+
+		var exitCode = await application.RunAsync(
+			["dev", "session", "."],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.RuntimeError, exitCode);
+	}
+
+	[Fact]
 	public async Task ApplicationExitsCleanlyWhenStdoutConsumerClosesEarly()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -109,7 +198,7 @@ public sealed class TerminalBrokenPipeRegressionTests
 			source,
 			4 * 1024 * 1024,
 			TestContext.Current.CancellationToken);
-		var applicationAssembly = FindApplicationAssembly();
+		var applicationAssembly = PublishedApplicationLocator.FindApplicationAssembly();
 		Assert.True(
 			File.Exists(applicationAssembly),
 			$"Application assembly was not found: {applicationAssembly}");
@@ -197,24 +286,6 @@ public sealed class TerminalBrokenPipeRegressionTests
 		}
 	}
 
-	private static string FindApplicationAssembly()
-	{
-		var configuration = new DirectoryInfo(
-				AppContext.BaseDirectory.TrimEnd(
-					Path.DirectorySeparatorChar,
-					Path.AltDirectorySeparatorChar))
-			.Parent?
-			.Name ?? "Debug";
-		return Path.Combine(
-			PublishedApplicationLocator.FindRepositoryRoot(),
-			"Apps",
-			"Avalonia",
-			"bin",
-			configuration,
-			"net10.0",
-			"DevProjex.dll");
-	}
-
 	private sealed class NativeCodeIOException : IOException
 	{
 		public NativeCodeIOException(int nativeCode)
@@ -248,6 +319,87 @@ public sealed class TerminalBrokenPipeRegressionTests
 			Task.FromException(exception);
 	}
 
+	[Fact]
+	public async Task ApplicationDoesNotCrashWhenStderrConsumerClosesEarly()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/source.txt", "content\n");
+		var applicationAssembly = PublishedApplicationLocator.FindApplicationAssembly();
+		Assert.True(
+			File.Exists(applicationAssembly),
+			$"Application assembly was not found: {applicationAssembly}");
+
+		using var process = new Process
+		{
+			StartInfo = new ProcessStartInfo
+			{
+				FileName = "dotnet",
+				UseShellExecute = false,
+				CreateNoWindow = true,
+				RedirectStandardInput = true,
+				RedirectStandardOutput = true,
+				RedirectStandardError = true
+			}
+		};
+		process.StartInfo.ArgumentList.Add(applicationAssembly);
+		process.StartInfo.ArgumentList.Add("analyze");
+		process.StartInfo.ArgumentList.Add(project);
+		process.StartInfo.ArgumentList.Add("--git-mode");
+		process.StartInfo.ArgumentList.Add("none");
+		process.StartInfo.ArgumentList.Add("--exclude");
+		process.StartInfo.ArgumentList.Add("none");
+		process.StartInfo.ArgumentList.Add("--select-from");
+		process.StartInfo.ArgumentList.Add("-");
+		process.StartInfo.Environment[InvocationEnvironment.TerminalHostVariable] = "1";
+		process.StartInfo.Environment[InvocationEnvironment.InternalDataRootVariable] =
+			workspace.CreateDirectory("app-data");
+		process.StartInfo.Environment["DOTNET_NOLOGO"] = "1";
+
+		Assert.True(process.Start());
+		using var timeout = CancellationTokenSource.CreateLinkedTokenSource(
+			TestContext.Current.CancellationToken);
+		timeout.CancelAfter(TimeSpan.FromSeconds(30));
+		var standardOutputTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
+		try
+		{
+			process.StandardError.Dispose();
+			await process.StandardInput.WriteLineAsync("missing.txt");
+			process.StandardInput.Close();
+
+			await process.WaitForExitAsync(timeout.Token);
+			var standardOutput = await standardOutputTask;
+
+			Assert.True(
+				process.ExitCode is CommandLineExitCodes.Success or CommandLineExitCodes.UsageError,
+				$"Unexpected exit code: {process.ExitCode}");
+			Assert.Empty(standardOutput);
+		}
+		finally
+		{
+			if (!process.HasExited)
+			{
+				process.Kill(entireProcessTree: true);
+				await process.WaitForExitAsync(CancellationToken.None);
+			}
+		}
+	}
+
+	private sealed class BrokenPipeTextWriter : TextWriter
+	{
+		public override Encoding Encoding => Encoding.UTF8;
+
+		public override void Write(string? value) => throw new TerminalBrokenPipeException();
+	}
+
+	private sealed class ThrowingDeveloperCommandRunner(Exception exception) : IDeveloperCommandRunner
+	{
+		public Task<int> RunAsync(
+			DeveloperCommandRequest request,
+			CancellationToken cancellationToken) =>
+			Task.FromException<int>(exception);
+	}
+
 	private sealed class ConsoleOutputScope : IDisposable
 	{
 		private readonly TextWriter _original = Console.Out;
@@ -256,5 +408,15 @@ public sealed class TerminalBrokenPipeRegressionTests
 			Console.SetOut(replacement);
 
 		public void Dispose() => Console.SetOut(_original);
+	}
+
+	private sealed class ConsoleErrorScope : IDisposable
+	{
+		private readonly TextWriter _original = Console.Error;
+
+		public ConsoleErrorScope(TextWriter replacement) =>
+			Console.SetError(replacement);
+
+		public void Dispose() => Console.SetError(_original);
 	}
 }

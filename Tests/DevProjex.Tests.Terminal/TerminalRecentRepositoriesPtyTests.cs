@@ -1,10 +1,12 @@
 using System.Diagnostics;
+using System.Text.RegularExpressions;
+using DevProjex.Infrastructure.Git;
 using DevProjex.Infrastructure.RecentProjects;
 
 namespace DevProjex.Tests.Terminal;
 
 [Collection(TerminalProcessCollection.Name)]
-public sealed class TerminalRecentRepositoriesPtyTests
+public sealed partial class TerminalRecentRepositoriesPtyTests
 {
 	private const string RepositoryUrl = "https://github.com/Avazbek22/DevProjex";
 	private const string CacheFolderName = "DevProjex_8DEEC71CEE019B1";
@@ -14,13 +16,18 @@ public sealed class TerminalRecentRepositoriesPtyTests
 	{
 		using var welcomeDirectory = new TemporaryDirectory();
 		welcomeDirectory.WriteFile("notes.txt", "markerless directory");
+		string? internalDataRoot = null;
 		await using var terminal = await TerminalPtyHarness.StartAsync(
 			welcomeDirectory.Path,
 			["--language", "en"],
 			columns: 150,
 			rows: 35,
 			cancellationToken: TestContext.Current.CancellationToken,
-			initializeDataRoot: SeedCachedRepository);
+			initializeDataRoot: dataRoot =>
+			{
+				internalDataRoot = dataRoot;
+				SeedCachedRepository(dataRoot);
+			});
 
 		await terminal.WaitForScreenAsync(
 			"Choose a workspace action",
@@ -61,12 +68,44 @@ public sealed class TerminalRecentRepositoriesPtyTests
 		Assert.Contains("PARAMETERS", workspace, StringComparison.Ordinal);
 		Assert.DoesNotContain(CacheFolderName, workspace, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
+		Assert.NotNull(internalDataRoot);
+		var retained = new RepoCacheService(Path.Combine(internalDataRoot, "RepoCache"))
+			.ClearAllCacheWithResult();
+		Assert.Equal(new CacheClearResult(0, 1, 0), retained);
 		Verify(
 			"recent-repositories-workspace-en-150x35",
 			terminal,
 			welcomeDirectory.Path);
 
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendAsync("\u0010", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Filter actions:",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("metadata", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Inspect project source and repository metadata.",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		var details = await terminal.WaitForStableScreenAsync(
+			"Last opened",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains(RepositoryUrl, details, StringComparison.Ordinal);
+		Assert.Contains("Branch: main", details, StringComparison.Ordinal);
+		Assert.Contains("Size:", details, StringComparison.Ordinal);
+		Assert.DoesNotContain("Internal cache path", details, StringComparison.Ordinal);
+		Assert.DoesNotContain(CacheFolderName, details, StringComparison.Ordinal);
+		Assert.DoesNotContain("Source reference", details, StringComparison.Ordinal);
+		Verify(
+			"repository-source-details-en-150x35",
+			terminal,
+			welcomeDirectory.Path,
+			normalizeRepositorySize: true);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenWithoutAsync(
+			"Last opened",
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(
@@ -130,7 +169,7 @@ public sealed class TerminalRecentRepositoriesPtyTests
 			terminal.CaptureScreen(),
 			StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(
@@ -140,37 +179,32 @@ public sealed class TerminalRecentRepositoriesPtyTests
 	private static void Verify(
 		string name,
 		TerminalPtyHarness terminal,
-		string welcomeDirectory)
+		string welcomeDirectory,
+		bool normalizeRepositorySize = false)
 	{
+		var screen = terminal.CaptureScreen();
+		if (normalizeRepositorySize)
+		{
+			screen = RepositorySizePattern().Replace(
+				screen,
+				static match =>
+					(match.Groups["prefix"].Value + "<REPOSITORY_SIZE>")
+					.PadRight(match.Length));
+		}
 		TerminalScreenSnapshot.Verify(
 			name,
-			terminal.CaptureScreen(),
+			screen,
 			(welcomeDirectory, "<WELCOME_ROOT>"),
 			(Path.GetDirectoryName(welcomeDirectory) ?? string.Empty, "<TEMP_ROOT>"));
 		TerminalVisualArtifactWriter.WriteIfRequested(name, terminal);
 	}
 
+	[GeneratedRegex(@"(?<prefix> Size:\s*)[^\r\n│]*(?=│)", RegexOptions.CultureInvariant)]
+	private static partial Regex RepositorySizePattern();
+
 	private static void SeedCachedRepository(string dataRoot)
 	{
 		var cachePath = Path.Combine(dataRoot, "RepoCache", CacheFolderName);
-		var gitDirectory = Path.Combine(cachePath, ".git");
-		Directory.CreateDirectory(gitDirectory);
-		Directory.CreateDirectory(Path.Combine(gitDirectory, "objects"));
-		Directory.CreateDirectory(Path.Combine(gitDirectory, "refs", "heads"));
-		File.WriteAllText(
-			Path.Combine(gitDirectory, "config"),
-			$"""
-			[core]
-				repositoryformatversion = 0
-				bare = false
-			[remote "origin"]
-				url = {RepositoryUrl}
-			""",
-			new UTF8Encoding(false));
-		File.WriteAllText(
-			Path.Combine(gitDirectory, "HEAD"),
-			"ref: refs/heads/main\n",
-			new UTF8Encoding(false));
 		Directory.CreateDirectory(Path.Combine(cachePath, "src"));
 		File.WriteAllText(
 			Path.Combine(cachePath, "src", "RepositoryMarker.cs"),
@@ -180,8 +214,41 @@ public sealed class TerminalRecentRepositoriesPtyTests
 			Path.Combine(cachePath, "README.md"),
 			"# DevProjex",
 			new UTF8Encoding(false));
+		RunGit(cachePath, "init", "--initial-branch=main");
+		RunGit(cachePath, "config", "user.email", "terminal-tests@devprojex.local");
+		RunGit(cachePath, "config", "user.name", "DevProjex Terminal Tests");
+		RunGit(cachePath, "add", ".");
+		RunGit(cachePath, "commit", "-m", "seed cached repository");
+		RunGit(cachePath, "remote", "add", "origin", RepositoryUrl);
+		var commit = RunGit(cachePath, "rev-parse", "HEAD").Trim();
+		var cache = new RepoCacheService(Path.Combine(dataRoot, "RepoCache"));
+		cache.RecordIndexedRepository(
+			RepositoryUrl,
+			cachePath,
+			"main",
+			commit);
 		var store = new RecentProjectsStore(() => dataRoot);
 		store.AddRepository(store.Load(), RepositoryUrl);
+	}
+
+	private static string RunGit(string workingDirectory, params string[] arguments)
+	{
+		var startInfo = new ProcessStartInfo("git")
+		{
+			WorkingDirectory = workingDirectory,
+			UseShellExecute = false,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			CreateNoWindow = true
+		};
+		foreach (var argument in arguments)
+			startInfo.ArgumentList.Add(argument);
+		var result = TerminalTestProcess.Run(startInfo);
+		Assert.True(
+			result.ExitCode == 0,
+			$"git {string.Join(' ', arguments)} failed: " +
+			$"{result.StandardOutput}{result.StandardError}");
+		return result.StandardOutput;
 	}
 
 	private static async Task SelectWelcomeActionAsync(

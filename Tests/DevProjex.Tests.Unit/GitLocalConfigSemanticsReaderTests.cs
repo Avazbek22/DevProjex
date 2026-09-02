@@ -188,6 +188,31 @@ public sealed class GitLocalConfigSemanticsReaderTests
 			out _));
 	}
 
+	[Fact]
+	public void BoundedTextRead_ExactLimitSucceedsAndOverflowStopsAfterProbeCharacter()
+	{
+		using var exactReader = new StaleLengthMemoryStream(
+			Encoding.UTF8.GetBytes("0123456789"),
+			reportedLength: 10);
+		using var oversizedReader = new StaleLengthMemoryStream(
+			Encoding.UTF8.GetBytes(new string('\u00E9', 10_000)),
+			reportedLength: 10);
+
+		var exact = GitLocalConfigSemanticsReader.TryReadBoundedText(
+			exactReader,
+			maximumBytes: 10,
+			out var text);
+		var oversized = GitLocalConfigSemanticsReader.TryReadBoundedText(
+			oversizedReader,
+			maximumBytes: 10,
+			out _);
+
+		Assert.True(exact);
+		Assert.Equal("0123456789", text);
+		Assert.False(oversized);
+		Assert.Equal(11, oversizedReader.Position);
+	}
+
 	private static string CreateStandardMetadata(TemporaryDirectory temp, string relativeGitPath)
 	{
 		var gitMetadataPath = temp.CreateFolder(relativeGitPath);
@@ -195,5 +220,11 @@ public sealed class GitLocalConfigSemanticsReaderTests
 		temp.CreateFolder(Path.Combine(relativeGitPath, "objects"));
 		temp.CreateFolder(Path.Combine(relativeGitPath, "refs"));
 		return gitMetadataPath;
+	}
+
+	private sealed class StaleLengthMemoryStream(byte[] buffer, long reportedLength) :
+		MemoryStream(buffer, writable: false)
+	{
+		public override long Length => reportedLength;
 	}
 }

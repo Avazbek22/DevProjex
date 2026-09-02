@@ -1,11 +1,14 @@
 using Avalonia.VisualTree;
 using Avalonia.Interactivity;
+using DevProjex.Avalonia.Controls;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Application.Context;
+using DevProjex.Application.Compression;
 using DevProjex.Application.Preview;
 using DevProjex.Application.Services;
+using DevProjex.Application.Secrets;
 using DevProjex.Kernel.Contracts;
-using DevProjex.Tests.Shared.ProjectLoadWorkflow;
+using DevProjex.Infrastructure.Git;
 using System.Globalization;
 using System.Reflection;
 using System.Text.RegularExpressions;
@@ -32,14 +35,24 @@ internal static class UiTestDriver
         bool waitForStatusIdle = true,
         ProjectSourceType projectSourceType = ProjectSourceType.LocalFolder,
         string? managedClonePath = null,
-        string? repositoryUrl = null)
+        string? repositoryUrl = null,
+        SessionMetricsOptions? sessionMetrics = null,
+        ProjectSelectionSpec? startupSelection = null)
     {
         var options = new DesktopStartupOptions(
-            new DesktopOpenRequest(project.RootPath, Language: AppLanguage.En));
+            new DesktopOpenRequest(
+                project.RootPath,
+                Selection: startupSelection,
+                Language: AppLanguage.En),
+            sessionMetrics);
         var appDataPath = appDataPathOverride ?? Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(appDataPath);
 
         var services = AvaloniaCompositionRoot.CreateDefault(options, () => appDataPath);
+		services = services with
+		{
+			RepoCacheService = new RepoCacheService(Path.Combine(appDataPath, "RepoCache"))
+		};
         if (configureServices is not null)
             services = configureServices(services);
         var window = new MainWindow(options, services)
@@ -204,17 +217,28 @@ internal static class UiTestDriver
         bool fromDialog = true,
         bool recordRecentFolder = true)
     {
-        var method = typeof(MainWindow).GetMethod("TryOpenFolderAsync", BindingFlags.Instance | BindingFlags.NonPublic);
-        Assert.NotNull(method);
-
-        var task = await window.Dispatcher.InvokeAsync<Task>(() =>
-        {
-            var result = method!.Invoke(window, [path, fromDialog, recordRecentFolder]);
-            return Assert.IsAssignableFrom<Task>(result);
-        }, DispatcherPriority.Normal);
-        await task;
-        await WaitForSelectionRefreshIdleAsync(window);
+		var task = await BeginOpenFolderAsync(window, path, fromDialog, recordRecentFolder);
+		await task;
+		await WaitForSelectionRefreshIdleAsync(window);
     }
+
+	public static async Task<Task> BeginOpenFolderAsync(
+		MainWindow window,
+		string path,
+		bool fromDialog = true,
+		bool recordRecentFolder = true)
+	{
+		var method = typeof(MainWindow).GetMethod(
+			"TryOpenFolderAsync",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(method);
+
+		return await window.Dispatcher.InvokeAsync<Task>(() =>
+		{
+			var result = method!.Invoke(window, [path, fromDialog, recordRecentFolder, null]);
+			return Assert.IsAssignableFrom<Task>(result);
+		}, DispatcherPriority.Normal);
+	}
 
     public static async Task RefreshProjectAsync(MainWindow window)
     {
@@ -260,31 +284,11 @@ internal static class UiTestDriver
         return Assert.IsType<CheckBox>(checkBox);
     }
 
-    public static CheckBox GetRequiredRootFolderCheckBox(MainWindow window, string rootFolderName)
-    {
-        var checkBox = FindRootFolderCheckBox(window, rootFolderName);
-
-        return Assert.IsType<CheckBox>(checkBox);
-    }
-
     public static CheckBox GetRequiredExtensionCheckBox(MainWindow window, string extensionName)
     {
         var checkBox = FindExtensionCheckBox(window, extensionName);
 
         return Assert.IsType<CheckBox>(checkBox);
-    }
-
-    public static async Task ClickRootFolderCheckBoxAsync(MainWindow window, string rootFolderName)
-    {
-        await ScrollSettingsItemIntoViewAsync(
-            window,
-            "RootFoldersList",
-            GetViewModel(window).RootFolders.FirstOrDefault(option =>
-                string.Equals(option.Name, rootFolderName, StringComparison.Ordinal)));
-        await ClickResolvedControlAsync(
-            window,
-            () => FindRootFolderCheckBox(window, rootFolderName),
-            $"root folder checkbox '{rootFolderName}'");
     }
 
     public static async Task ClickExtensionCheckBoxAsync(MainWindow window, string extensionName)
@@ -302,14 +306,53 @@ internal static class UiTestDriver
 
     public static async Task ClickIgnoreOptionCheckBoxAsync(MainWindow window, IgnoreOptionId optionId)
     {
-        await ScrollSettingsItemIntoViewAsync(
-            window,
-            "IgnoreOptionsList",
-            GetViewModel(window).IgnoreOptions.FirstOrDefault(option => option.Id == optionId));
+        if (GitFilteringModeResolver.IsGitFilteringOption(optionId))
+        {
+            var activeMode = GetViewModel(window).SelectedGitFilteringModeOption?.Mode ??
+                             GitFilteringMode.None;
+            var requestedMode = optionId == IgnoreOptionId.UseGitIgnore
+                ? GitFilteringMode.RespectGitIgnore
+                : GitFilteringMode.TrackedFilesOnly;
+            await SelectGitFilteringModeAsync(
+                window,
+                activeMode == requestedMode ? GitFilteringMode.None : requestedMode);
+            return;
+        }
+
+        if (optionId != IgnoreOptionId.HideSecrets)
+        {
+            await ScrollSettingsItemIntoViewAsync(
+                window,
+                "IgnoreOptionsList",
+                GetViewModel(window).IgnoreOptions.FirstOrDefault(option => option.Id == optionId));
+        }
         await ClickResolvedControlAsync(
             window,
             () => FindIgnoreOptionCheckBox(window, optionId),
             $"ignore checkbox '{optionId}'");
+    }
+
+    public static async Task SelectGitFilteringModeAsync(
+        MainWindow window,
+        GitFilteringMode mode)
+    {
+        await WaitForConditionAsync(
+            window,
+            () => GetViewModel(window).GitFilteringModes.Any(option => option.Mode == mode),
+            $"Git filtering mode '{mode}' to become available");
+
+        var comboBox = GetRequiredControl<ComboBox>(window, "GitFilteringModeComboBox");
+        await window.Dispatcher.InvokeAsync(() =>
+        {
+            comboBox.SelectedItem = GetViewModel(window).GitFilteringModes.Single(option =>
+                option.Mode == mode);
+        }, DispatcherPriority.Normal);
+
+        await WaitForConditionAsync(
+            window,
+            () => GetViewModel(window).SelectedGitFilteringModeOption?.Mode == mode,
+            $"Git filtering mode '{mode}' to become selected");
+        await WaitForSettledFramesAsync(frameCount: 8);
     }
 
     public static async Task ClickApplySettingsAsync(MainWindow window)
@@ -342,21 +385,34 @@ internal static class UiTestDriver
 
     public static async Task<GitCloneWindow> OpenGitCloneWindowAsync(MainWindow window)
     {
-        var cloneWindow = new GitCloneWindow
-        {
-            DataContext = GetViewModel(window)
-        };
-        TrackTopLevelWindow(cloneWindow);
+        var method = typeof(MainWindow).GetMethod(
+            "OnGitClone",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        await window.Dispatcher.InvokeAsync(() =>
+            method!.Invoke(window, [window, new RoutedEventArgs()]));
 
-        cloneWindow.Show(window);
+        GitCloneWindow? cloneWindow = null;
+        await WaitForConditionAsync(
+            window,
+            () =>
+            {
+                var field = typeof(MainWindow).GetField(
+                    "_gitCloneWindow",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                cloneWindow = field?.GetValue(window) as GitCloneWindow;
+                return cloneWindow is not null;
+            },
+            "git clone window to be created");
+        TrackTopLevelWindow(cloneWindow!);
 
         await WaitForConditionAsync(
             window,
-            () => cloneWindow.IsVisible,
+            () => cloneWindow!.IsVisible,
             "git clone window to open");
 
         await WaitForSettledFramesAsync(frameCount: 4);
-        return cloneWindow;
+        return cloneWindow!;
     }
 
     public static Button GetRequiredApplySettingsButton(MainWindow window)
@@ -383,19 +439,103 @@ internal static class UiTestDriver
 
     public static async Task ClickAsync(MainWindow window, Control control)
     {
+        var inputRoot = TopLevel.GetTopLevel(control) ?? window;
         await EnsureControlVisibleAsync(window, control);
-        await WaitForControlReadyForPointerAsync(window, control);
+        await WaitForControlReadyForPointerAsync(window, inputRoot, control);
 
-        await ClickReadyControlAsync(window, control);
+        await ClickReadyControlAsync(inputRoot, control);
+	}
+
+    public static async Task OpenToolTipThroughClickAsync(MainWindow window, Control control)
+    {
+        var inputRoot = TopLevel.GetTopLevel(control) ?? window;
+        await EnsureControlVisibleAsync(window, control);
+        await WaitForControlReadyForPointerAsync(window, inputRoot, control);
+        var clickPoint = FindPointerHitPoint(inputRoot, control);
+
+        inputRoot.MouseMove(clickPoint, RawInputModifiers.None);
+        await WaitForSettledFramesAsync(frameCount: 2);
+        inputRoot.MouseDown(clickPoint, MouseButton.Left, RawInputModifiers.LeftMouseButton);
+        inputRoot.MouseUp(clickPoint, MouseButton.Left, RawInputModifiers.None);
+        await WaitForConditionAsync(
+            window,
+            () => ToolTip.GetIsOpen(control),
+            $"the tooltip for '{GetControlDebugName(control)}' to open through pointer input");
     }
 
-    private static async Task ClickReadyControlAsync(MainWindow window, Control control)
+    public static async Task OpenToolTipThroughPointerAsync(MainWindow window, Control control)
     {
-        var clickPoint = GetControlCenter(control, window);
-        window.MouseMove(clickPoint, RawInputModifiers.None);
+        var inputRoot = TopLevel.GetTopLevel(control) ?? window;
+        await EnsureControlVisibleAsync(window, control);
+        await WaitForControlReadyForPointerAsync(window, inputRoot, control);
+        inputRoot.MouseMove(FindPointerHitPoint(inputRoot, control), RawInputModifiers.None);
+        await WaitForConditionAsync(
+            window,
+            () => ToolTip.GetIsOpen(control),
+            $"the tooltip for '{GetControlDebugName(control)}' to open through pointer hover");
+    }
+
+    private static Point FindPointerHitPoint(TopLevel inputRoot, Control control)
+    {
+        ReadOnlySpan<double> relativeCoordinates = [0.5, 0.25, 0.75, 0.125, 0.875];
+        foreach (var relativeY in relativeCoordinates)
+        {
+            foreach (var relativeX in relativeCoordinates)
+            {
+                var point = control.TranslatePoint(
+                    new Point(control.Bounds.Width * relativeX, control.Bounds.Height * relativeY),
+                    inputRoot);
+                if (point is not { } candidate)
+                    continue;
+
+                var hit = inputRoot.InputHitTest(candidate);
+                if (hit is Visual visual &&
+                    (ReferenceEquals(visual, control) || visual.GetVisualAncestors().Contains(control)))
+                {
+                    return candidate;
+                }
+            }
+        }
+
+        var center = GetControlCenter(control, inputRoot);
+        var centerHit = inputRoot.InputHitTest(center);
+        throw new XunitException(
+            $"No pointer-hit location was found for '{GetControlDebugName(control)}'. " +
+            $"Center hit: '{centerHit?.GetType().FullName ?? "none"}'.");
+    }
+
+    private static async Task ClickReadyControlAsync(TopLevel inputRoot, Control control)
+    {
+        var clickPoint = GetControlCenter(control, inputRoot);
+        inputRoot.MouseMove(clickPoint, RawInputModifiers.None);
         await WaitForSettledFramesAsync(frameCount: 2);
-        window.MouseDown(clickPoint, MouseButton.Left, RawInputModifiers.LeftMouseButton);
-        window.MouseUp(clickPoint, MouseButton.Left, RawInputModifiers.None);
+        inputRoot.MouseDown(clickPoint, MouseButton.Left, RawInputModifiers.LeftMouseButton);
+        inputRoot.MouseUp(clickPoint, MouseButton.Left, RawInputModifiers.None);
+        await WaitForSettledFramesAsync(frameCount: 4);
+    }
+
+    public static async Task PressExtendedMouseButtonAsync(
+        MainWindow window,
+        Control control,
+        MouseButton button)
+    {
+        var pressedModifier = button switch
+        {
+            MouseButton.XButton1 => RawInputModifiers.XButton1MouseButton,
+            MouseButton.XButton2 => RawInputModifiers.XButton2MouseButton,
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(button),
+                button,
+                "An extended mouse button is required.")
+        };
+
+        await EnsureControlVisibleAsync(window, control);
+        await WaitForControlReadyForPointerAsync(window, control);
+        var point = FindPointerHitPoint(window, control);
+        window.MouseMove(point, RawInputModifiers.None);
+        await WaitForSettledFramesAsync(frameCount: 1);
+        window.MouseDown(point, button, pressedModifier);
+        window.MouseUp(point, button, RawInputModifiers.None);
         await WaitForSettledFramesAsync(frameCount: 4);
     }
 
@@ -437,30 +577,64 @@ internal static class UiTestDriver
         await WaitForSettledFramesAsync(frameCount: 12);
     }
 
-    public static async Task PressKeyAsync(MainWindow window, Key key, RawInputModifiers modifiers = RawInputModifiers.None)
+    public static async Task PressKeyAsync(TopLevel inputRoot, Key key, RawInputModifiers modifiers = RawInputModifiers.None)
     {
         var physicalKey = key switch
         {
             Key.F => PhysicalKey.F,
+			Key.O => PhysicalKey.O,
             Key.B => PhysicalKey.B,
             Key.P => PhysicalKey.P,
             Key.N => PhysicalKey.N,
+			Key.Enter => PhysicalKey.Enter,
+			Key.Down => PhysicalKey.ArrowDown,
+			Key.Up => PhysicalKey.ArrowUp,
             Key.Escape => PhysicalKey.Escape,
             Key.Space => PhysicalKey.Space,
             Key.D0 => PhysicalKey.Digit0,
             _ => PhysicalKey.None
         };
         var keySymbol = physicalKey.ToQwertyKeySymbol(modifiers.HasFlag(RawInputModifiers.Shift));
-        window.KeyPress(key, modifiers, physicalKey, keySymbol);
-        await WaitForSettledFramesAsync(frameCount: 1);
-        window.KeyRelease(key, modifiers, physicalKey, keySymbol);
+        var inputWindow = inputRoot as Window;
+        var windowClosed = false;
+        EventHandler? closedHandler = null;
+        if (inputWindow is not null)
+        {
+            closedHandler = (_, _) => windowClosed = true;
+            inputWindow.Closed += closedHandler;
+        }
+
+        try
+        {
+            inputRoot.KeyPress(key, modifiers, physicalKey, keySymbol);
+            await WaitForSettledFramesAsync(frameCount: 1);
+            if (!windowClosed && inputRoot.IsVisible)
+            {
+                try
+                {
+                    inputRoot.KeyRelease(key, modifiers, physicalKey, keySymbol);
+                }
+                catch (ObjectDisposedException) when (inputWindow is not null)
+                {
+                    // Enter may synchronously destroy a dialog before Avalonia raises Closed.
+                    // A real input source cannot deliver the matching release to that top-level.
+                }
+            }
+        }
+        finally
+        {
+            if (inputWindow is not null && closedHandler is not null)
+                inputWindow.Closed -= closedHandler;
+        }
+
         await WaitForSettledFramesAsync(frameCount: 3);
     }
 
     public static async Task EnterTextAsync(MainWindow window, TextBox textBox, string text)
     {
         await ClickAsync(window, textBox);
-        window.KeyTextInput(text);
+		var inputRoot = TopLevel.GetTopLevel(textBox) ?? window;
+		inputRoot.KeyTextInput(text);
         await WaitForSettledFramesAsync(frameCount: 4);
     }
 
@@ -688,46 +862,22 @@ internal static class UiTestDriver
         MainWindow window,
         CancellationToken cancellationToken = default)
     {
-        await WaitForSelectionRefreshIdleAsync(window);
+		await WaitForSelectionRefreshIdleAsync(window);
 
-        var currentTree = GetRequiredPrivateField<BuildTreeResult>(window, "_currentTree");
-        var currentPath = GetRequiredPrivateField<string>(window, "_currentPath");
-        var treeExport = GetRequiredPrivateField<TreeExportService>(window, "_treeExport");
-        var contentExport = GetRequiredPrivateField<SelectedContentExportService>(window, "_contentExport");
-        var selectedPaths = InvokePrivateMethodAssignable<IReadOnlySet<string>>(
-            window,
-            "GetCheckedPaths");
-        var hasSelection = selectedPaths.Count > 0;
-        var treeFormat = InvokePrivateMethod<TreeTextFormat>(window, "GetCurrentTreeTextFormat");
-        var pathPresentation = InvokePrivateMethodAllowNull<ExportPathPresentation>(window, "CreateExportPathPresentation");
-
-        // UI workflow assertions must compare the status bar against the already-applied
-        // tree/export pipeline of the open window. Rebuilding a second tree from settings
-        // state looked cheaper, but it let CI drift away from the actual MainWindow state.
-        var treeText = hasSelection
-            ? treeExport.BuildSelectedTree(
-                currentPath,
-                currentTree.Root,
-                selectedPaths,
-                treeFormat,
-                pathPresentation?.DisplayRootPath,
-                pathPresentation?.DisplayRootName)
-            : treeExport.BuildFullTree(
-                currentPath,
-                currentTree.Root,
-                treeFormat,
-                pathPresentation?.DisplayRootPath,
-                pathPresentation?.DisplayRootName);
-        var treeMetrics = ExportOutputMetricsCalculator.FromText(treeText);
-
-        var orderedFilePaths = hasSelection
-            ? BuildOrderedSelectedFilePaths(currentTree.Root, selectedPaths)
-            : BuildOrderedAllFilePaths(currentTree.Root);
-        var contentText = await contentExport.BuildAsync(
-            orderedFilePaths,
-            cancellationToken,
-            pathPresentation?.MapFilePath);
-        var contentMetrics = ExportOutputMetricsCalculator.FromText(contentText);
+		var pipeline = GetRequiredPrivateField<ProjectTextOutputPipeline>(window, "_textOutputPipeline");
+		var snapshot = InvokePrivateMethod<ProjectTextOutputSnapshot>(
+			window,
+			"CaptureProjectTextOutputSnapshot");
+		var tree = await pipeline.BuildAsync(
+			ProjectTextOutputMode.Tree,
+			snapshot,
+			cancellationToken);
+		var content = await pipeline.BuildAsync(
+			ProjectTextOutputMode.Content,
+			snapshot,
+			cancellationToken);
+		var treeMetrics = ExportOutputMetricsCalculator.FromText(tree.Content);
+		var contentMetrics = ExportOutputMetricsCalculator.FromText(content.Content);
 
         return new ProjectLoadWorkflowRuntime.ProjectLoadWorkflowMetrics(treeMetrics, contentMetrics);
     }
@@ -763,6 +913,377 @@ internal static class UiTestDriver
         Assert.NotNull(document);
         return PreviewClipboardPayloadBuilder.BuildFullDocumentPayload(document);
     }
+
+	public static async Task<(string RelativePath, int SourceOffset)> RequestPersistentSecretMarkAsync(
+		MainWindow window,
+		string value,
+		bool persistent = true,
+		ManualRedactionClass classification = ManualRedactionClass.Secret)
+	{
+		var viewModel = GetViewModel(window);
+		var textControl = GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>(
+			window,
+			"PreviewTextControl");
+		var document = textControl.Document ?? viewModel.PreviewDocument;
+		Assert.NotNull(document);
+		Assert.True(MarkedSecretValueNormalizer.TryCreate(value, out var markedValue, out _));
+		var selection = default(PreviewSelectionRange);
+		var found = false;
+		for (var lineNumber = 1; lineNumber <= document!.LineCount; lineNumber++)
+		{
+			var column = document.GetLineText(lineNumber).IndexOf(value, StringComparison.Ordinal);
+			if (column < 0)
+				continue;
+			selection = new PreviewSelectionRange(
+				lineNumber,
+				column,
+				lineNumber,
+				column + value.Length);
+			found = true;
+			break;
+		}
+		Assert.True(found, "The value to mark was not found in the current preview document.");
+
+		var controller = GetRequiredPrivateField<PreviewSurfaceController>(window, "_previewSurfaceController");
+		var request = new DevProjex.Avalonia.Controls.PreviewManualSecretMarkRequestedEventArgs(
+			markedValue,
+			selection,
+			classification,
+			persistent);
+		var resolve = typeof(PreviewSurfaceController).GetMethod(
+			"TryResolveManualMarkLocation",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(resolve);
+		object?[] resolveArguments = [document, request, null];
+		Assert.True(Assert.IsType<bool>(resolve!.Invoke(controller, resolveArguments)));
+		Assert.NotNull(resolveArguments[2]);
+		var location = resolveArguments[2]!;
+		var relativePath = Assert.IsType<string>(location.GetType().GetProperty("RelativePath")?.GetValue(location));
+		var sourceOffset = Assert.IsType<int>(location.GetType().GetProperty("SourceOffset")?.GetValue(location));
+		var handler = typeof(PreviewSurfaceController).GetMethod(
+			"OnManualSecretMarkRequested",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(handler);
+		await window.Dispatcher.InvokeAsync(
+			() => handler!.Invoke(
+				controller,
+				[
+					textControl,
+					request
+				]),
+			DispatcherPriority.Normal);
+		return (relativePath, sourceOffset);
+	}
+
+	public static async Task RequestSecretMarkThroughContextMenuAsync(
+		MainWindow window,
+		string value,
+		bool persistent = false,
+		int clickCount = 1,
+		ManualRedactionClass classification = ManualRedactionClass.Secret)
+	{
+		Assert.True(clickCount > 0);
+		await WaitForPreviewReadyAsync(window);
+		var textControl = GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>(
+			window,
+			"PreviewTextControl");
+		var scrollViewer = GetRequiredPreviewScrollViewer(window);
+		var document = textControl.Document ?? GetViewModel(window).PreviewDocument;
+		Assert.NotNull(document);
+		var lineNumber = 0;
+		var startColumn = -1;
+		for (var candidateLine = 1; candidateLine <= document!.LineCount; candidateLine++)
+		{
+			var candidateColumn = document.GetLineText(candidateLine).IndexOf(value, StringComparison.Ordinal);
+			if (candidateColumn < 0)
+				continue;
+			lineNumber = candidateLine;
+			startColumn = candidateColumn;
+			break;
+		}
+		Assert.True(lineNumber > 0, "The value to mark was not found in the current preview document.");
+
+		var lineHeight = InvokeRequiredPrivateMethod<double>(textControl, "ResolveLineHeight");
+		var contentTopPadding = InvokeRequiredPrivateMethod<double>(textControl, "ResolveContentTopPadding");
+		var localY = contentTopPadding + ((lineNumber - 1) * lineHeight) + (lineHeight / 2);
+		var startTarget = await FindHorizontalTargetForColumnAsync(
+			window,
+			textControl,
+			scrollViewer,
+			localY,
+			lineNumber,
+			startColumn);
+		var endTarget = await FindHorizontalTargetForColumnAsync(
+			window,
+			textControl,
+			scrollViewer,
+			localY,
+			lineNumber,
+			startColumn + value.Length);
+
+		textControl.ClearSelection();
+		await SetHorizontalOffsetAsync(scrollViewer, startTarget.HorizontalOffset);
+		var start = ResolveViewportPoint(window, textControl, startTarget.ContentX, localY);
+		textControl.Focus();
+		window.MouseMove(start, RawInputModifiers.None);
+		window.MouseDown(start, MouseButton.Left, RawInputModifiers.LeftMouseButton);
+		window.MouseUp(start, MouseButton.Left, RawInputModifiers.None);
+		await SetHorizontalOffsetAsync(scrollViewer, endTarget.HorizontalOffset);
+		var end = ResolveViewportPoint(window, textControl, endTarget.ContentX, localY);
+		window.MouseMove(end, RawInputModifiers.Shift);
+		window.MouseDown(
+			end,
+			MouseButton.Left,
+			RawInputModifiers.LeftMouseButton | RawInputModifiers.Shift);
+		window.MouseUp(end, MouseButton.Left, RawInputModifiers.Shift);
+		var selected = string.Equals(value, textControl.GetSelectedText(), StringComparison.Ordinal);
+		Assert.True(
+			selected,
+			$"Expected exact pointer selection '{value}', actual '{textControl.GetSelectedText()}'. " +
+			$"target={lineNumber}:{startColumn}-{startColumn + value.Length}, " +
+			$"offsets={startTarget.HorizontalOffset:0.###}/{endTarget.HorizontalOffset:0.###}.");
+
+		await WaitForSettledFramesAsync(frameCount: 2);
+		var currentEnd = ResolveViewportPoint(window, textControl, endTarget.ContentX, localY);
+		var contextPoint = new Point(currentEnd.X - 12, currentEnd.Y);
+		window.MouseDown(contextPoint, MouseButton.Right, RawInputModifiers.RightMouseButton);
+		window.MouseUp(contextPoint, MouseButton.Right, RawInputModifiers.None);
+		await WaitForSettledFramesAsync(frameCount: 2);
+
+		var flyout = Assert.IsType<MenuFlyout>(textControl.ContextFlyout);
+		Assert.True(flyout.IsOpen);
+		var menuItem = GetRequiredPrivateField<MenuItem>(
+			textControl,
+			(classification, persistent) switch
+			{
+				(ManualRedactionClass.Secret, false) => "_secretHideHereMenuItem",
+				(ManualRedactionClass.Secret, true) => "_secretAlwaysHideMenuItem",
+				(ManualRedactionClass.PrivateData, true) => "_privateDataAlwaysHideMenuItem",
+				_ => throw new ArgumentOutOfRangeException(nameof(classification), classification, null)
+			});
+		Assert.True(menuItem.IsVisible);
+		Assert.True(menuItem.IsEnabled);
+		for (var click = 0; click < clickCount; click++)
+			menuItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+		await WaitForSettledFramesAsync(frameCount: 4);
+		flyout.Hide();
+		await WaitForSettledFramesAsync(frameCount: 2);
+	}
+
+	private static async Task<PointerViewportTarget> FindHorizontalTargetForColumnAsync(
+		MainWindow window,
+		DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl textControl,
+		ScrollViewer scrollViewer,
+		double localY,
+		int targetLine,
+		int targetColumn)
+	{
+		var maximumX = Math.Max(0, scrollViewer.Extent.Width - scrollViewer.Viewport.Width);
+		var low = 8.0;
+		var high = Math.Max(low, scrollViewer.Extent.Width - 32);
+		var preferredViewportX = Math.Max(8, Math.Min(72, scrollViewer.Viewport.Width - 32));
+		var diagnostics = new List<string>();
+		for (var attempt = 0; attempt < 24 && low <= high; attempt++)
+		{
+			var contentX = (low + high) / 2;
+			var horizontalOffset = Math.Clamp(contentX - preferredViewportX, 0, maximumX);
+			await SetHorizontalOffsetAsync(scrollViewer, horizontalOffset);
+			var point = ResolveViewportPoint(window, textControl, contentX, localY);
+			var probeEnd = new Point(point.X + 24, point.Y);
+			textControl.ClearSelection();
+			window.MouseMove(point, RawInputModifiers.None);
+			window.MouseDown(point, MouseButton.Left, RawInputModifiers.LeftMouseButton);
+			window.MouseMove(probeEnd, RawInputModifiers.LeftMouseButton);
+			window.MouseUp(probeEnd, MouseButton.Left, RawInputModifiers.None);
+			if (!textControl.TryGetSelectionRange(out var actual) || actual.StartLine != targetLine)
+			{
+				diagnostics.Add($"{contentX:0.###}:none");
+				high = contentX - 0.25;
+				continue;
+			}
+
+			diagnostics.Add($"{contentX:0.###}:{actual.StartLine}:{actual.StartColumn}");
+			if (actual.StartColumn == targetColumn)
+				return new PointerViewportTarget(horizontalOffset, contentX);
+			if (actual.StartColumn < targetColumn)
+				low = contentX + 0.25;
+			else
+				high = contentX - 0.25;
+		}
+
+		throw new XunitException(
+			$"Could not position preview column {targetLine}:{targetColumn} inside the pointer viewport. " +
+			string.Join(", ", diagnostics));
+	}
+
+	private static Point ResolveViewportPoint(
+		MainWindow window,
+		DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl textControl,
+		double contentX,
+		double localY)
+	{
+		return Assert.IsType<Point>(textControl.TranslatePoint(
+			new Point(contentX, localY),
+			window));
+	}
+
+	private static async Task SetHorizontalOffsetAsync(ScrollViewer scrollViewer, double offset)
+	{
+		scrollViewer.Offset = new Vector(offset, scrollViewer.Offset.Y);
+		await WaitForSettledFramesAsync(frameCount: 2);
+	}
+
+	private readonly record struct PointerViewportTarget(double HorizontalOffset, double ContentX);
+
+	public static async Task RequestManualSecretUnmarkThroughContextMenuAsync(MainWindow window)
+	{
+		var textControl = GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>(
+			window,
+			"PreviewTextControl");
+		var redaction = Assert.Single(
+			(textControl.Document ?? GetViewModel(window).PreviewDocument)!.Redactions,
+			static span => span.PersistentMarkId is not null || !string.IsNullOrWhiteSpace(span.SessionMarkId));
+		InvokeRequiredPrivateMethod(textControl, "EnsureContextMenu");
+		var contextField = textControl.GetType().GetField(
+			"_contextManualRedaction",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(contextField);
+		contextField!.SetValue(textControl, redaction);
+		InvokeRequiredPrivateMethod(textControl, "PrepareManualSecretMenuItems");
+		await WaitForSettledFramesAsync(frameCount: 2);
+		var remove = GetRequiredPrivateField<MenuItem>(textControl, "_removeSecretMarkMenuItem");
+		Assert.True(remove.IsVisible);
+		Assert.True(remove.IsEnabled);
+		await RaiseMenuItemClickAsync(remove);
+	}
+
+	public static async Task RequestBulkRedactionToggleThroughContextMenuAsync(
+		MainWindow window,
+		string occurrenceId,
+		bool ruleScope)
+	{
+		var textControl = GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>(
+			window,
+			"PreviewTextControl");
+		var document = textControl.Document ?? GetViewModel(window).PreviewDocument;
+		Assert.NotNull(document);
+		var redaction = document!.Redactions.First(span =>
+			string.Equals(span.OccurrenceId, occurrenceId, StringComparison.Ordinal));
+		InvokeRequiredPrivateMethod(textControl, "EnsureContextMenu");
+		var contextField = textControl.GetType().GetField(
+			"_contextDetectorRedaction",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(contextField);
+		contextField!.SetValue(textControl, redaction);
+		InvokeRequiredPrivateMethod(textControl, "PrepareBulkSecretMenuItems");
+		await WaitForSettledFramesAsync(frameCount: 2);
+		var item = GetRequiredPrivateField<MenuItem>(
+			textControl,
+			ruleScope ? "_bulkRuleRedactionMenuItem" : "_bulkFileRedactionMenuItem");
+		Assert.True(item.IsVisible);
+		Assert.True(item.IsEnabled);
+		await RaiseMenuItemClickAsync(item);
+	}
+
+	public static async Task RequestRedactionToggleAsync(MainWindow window, string occurrenceId)
+	{
+		var textControl = GetRequiredControl<VirtualizedPreviewTextControl>(window, "PreviewTextControl");
+		var controller = GetRequiredPrivateField<PreviewSurfaceController>(window, "_previewSurfaceController");
+		var handler = typeof(PreviewSurfaceController).GetMethod(
+			"OnRedactionToggleRequested",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(handler);
+		await window.Dispatcher.InvokeAsync(
+			() => handler!.Invoke(
+				controller,
+				[textControl, new PreviewRedactionToggleRequestedEventArgs(occurrenceId)]),
+			DispatcherPriority.Normal);
+		await WaitForSettledFramesAsync(frameCount: 4);
+	}
+
+	public static (string OccurrenceId, int LineNumber, int StartColumn)? GetActiveRedactionTarget(
+		VirtualizedPreviewTextControl control)
+	{
+		var field = typeof(VirtualizedPreviewTextControl).GetField(
+			"_activeRedactionTarget",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(field);
+		var target = field!.GetValue(control);
+		if (target is null)
+			return null;
+
+		var targetType = target.GetType();
+		return (
+			Assert.IsType<string>(targetType.GetProperty("OccurrenceId")!.GetValue(target)),
+			Assert.IsType<int>(targetType.GetProperty("LineNumber")!.GetValue(target)),
+			Assert.IsType<int>(targetType.GetProperty("StartColumn")!.GetValue(target)));
+	}
+
+	public static DevProjex.Avalonia.Services.ToastService GetToastService(MainWindow window) =>
+		GetRequiredPrivateField<DevProjex.Avalonia.Services.ToastService>(window, "_toastService");
+
+	public static string GetWindowAppDataPath(MainWindow window) =>
+		WindowAppDataPaths.TryGetValue(window, out var path)
+			? path
+			: throw new XunitException("The window app-data path is not tracked.");
+
+	public static void OverridePreviewErrorHandler(
+		MainWindow window,
+		Func<string, Task> handler)
+	{
+		ArgumentNullException.ThrowIfNull(handler);
+		var controller = GetRequiredPrivateField<PreviewSurfaceController>(
+			window,
+			"_previewSurfaceController");
+		var field = typeof(PreviewSurfaceController).GetField(
+			"_showErrorAsync",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(field);
+		field!.SetValue(controller, handler);
+	}
+
+	public static void OverridePersistentSecretMarkDeltaHandler(
+		MainWindow window,
+		Func<PersistentSecretMarkDelta, Task<PersistentSecretMarkWriteResult>> handler)
+	{
+		ArgumentNullException.ThrowIfNull(handler);
+		var controller = GetRequiredPrivateField<PreviewSurfaceController>(
+			window,
+			"_previewSurfaceController");
+		var field = typeof(PreviewSurfaceController).GetField(
+			"_applyPersistentMarkDelta",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(field);
+		field!.SetValue(controller, handler);
+	}
+
+	public static void SetCurrentProjectPath(MainWindow window, string projectPath) =>
+		SetRequiredPrivateField(window, "_currentPath", projectPath);
+
+	public static string RedactFileWithCurrentSession(MainWindow window, string filePath)
+	{
+		var session = GetRequiredPrivateField<SecretRedactionSession>(window, "_secretRedactionSession");
+		var projectRoot = GetRequiredPrivateField<string>(window, "_currentPath");
+		var scope = session.BeginOutput(projectRoot, [filePath]);
+		var result = scope.Redact(filePath, File.ReadAllText(filePath));
+		scope.Complete();
+		return result.Text;
+	}
+
+	public static SecretRedactionSession GetSecretRedactionSession(MainWindow window) =>
+		GetRequiredPrivateField<SecretRedactionSession>(window, "_secretRedactionSession");
+
+	public static int GetPendingPersistentMarkCount(SecretRedactionSession session)
+	{
+		var property = typeof(SecretRedactionSession).GetProperty(
+			"PendingPersistentMarkCount",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(property);
+		return Assert.IsType<int>(property!.GetValue(session));
+	}
+
+	public static CodeCompressionSession GetCodeCompressionSession(MainWindow window) =>
+		GetRequiredPrivateField<CodeCompressionSession>(window, "_codeCompressionSession");
 
     public static string ComputeVisibleStickyHeaderCopyPayload(MainWindow window)
     {
@@ -875,6 +1396,51 @@ internal static class UiTestDriver
         return GetSelectionCoordinator(window).GetSelectedIgnoreOptionIds();
     }
 
+	public static long GetSelectionRevision(MainWindow window) =>
+		GetSelectionCoordinator(window).CurrentSelectionRevision;
+
+	public static object GetCurrentTreeIdentity(MainWindow window) =>
+		GetRequiredPrivateFieldValue(window, "_currentTree");
+
+	public static object GetCurrentTreeInventoryIdentity(MainWindow window) =>
+		GetRequiredPrivateFieldValue(window, "_currentTreeInventory");
+
+	public static long GetRetainedReadFactBytes(MainWindow window) =>
+		GetRequiredPrivateField<MetricsPipeline>(window, "_metrics").RetainedReadFactBytes;
+
+	public static (bool CompressCode, bool StripComments, bool StripBlankLines)
+		GetAppliedContentTransformationState(MainWindow window) =>
+		(
+			GetRequiredPrivateField<bool>(window, "_appliedCompressCodeEnabled"),
+			GetRequiredPrivateField<bool>(window, "_appliedStripCommentsEnabled"),
+			GetRequiredPrivateField<bool>(window, "_appliedStripBlankLinesEnabled")
+		);
+
+	public static (bool HideSecrets, bool HidePrivateData) GetAppliedContentRedactionState(
+		MainWindow window) =>
+		(
+			GetRequiredPrivateField<bool>(window, "_appliedHideSecretsEnabled"),
+			GetRequiredPrivateField<bool>(window, "_appliedHidePrivateDataEnabled")
+		);
+
+	public static (long Requested, long Completed, int Build) GetPreviewRefreshVersions(
+		MainWindow window)
+	{
+		var pipeline = GetRequiredPrivateField<PreviewWorkspacePipeline>(window, "_previewPipeline");
+		return (
+			GetRequiredPrivateField<long>(pipeline, "_requestedRefreshVersion"),
+			GetRequiredPrivateField<long>(pipeline, "_completedRefreshVersion"),
+			GetRequiredPrivateField<int>(pipeline, "_buildVersion"));
+	}
+
+	public static HashSet<string> GetCheckedTreePaths(MainWindow window)
+	{
+		var selected = new HashSet<string>(PathComparer.Default);
+		foreach (var root in GetViewModel(window).TreeNodes)
+			root.CollectCheckedPaths(selected);
+		return selected;
+	}
+
     public static ContextDiagnostic? GetAppliedGitReadinessDiagnostic(
         MainWindow window,
         string projectPath) =>
@@ -899,6 +1465,30 @@ internal static class UiTestDriver
         await WaitForSettledFramesAsync(frameCount: 6);
     }
 
+    public static async Task WaitForSecretDiscoveryIdleAsync(MainWindow window, TimeSpan? timeout = null)
+    {
+        var effectiveTimeout = timeout ?? TimeSpan.FromSeconds(30);
+        await WaitForSelectionRefreshIdleAsync(window, effectiveTimeout);
+        await WaitForConditionAsync(
+            window,
+            () =>
+            {
+                var cancellationField = typeof(MainWindow).GetField(
+                    "_secretRedactionCountCts",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                var requestField = typeof(MainWindow).GetField(
+                    "_activeSecretDiscoveryRequest",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.NotNull(cancellationField);
+                Assert.NotNull(requestField);
+                return cancellationField!.GetValue(window) is null &&
+                       requestField!.GetValue(window) is null;
+            },
+            "secret discovery to release its active request",
+            effectiveTimeout);
+        await WaitForSettledFramesAsync(frameCount: 4);
+    }
+
     public static async Task WaitForInitialMetricsBaselineAsync(
         MainWindow window,
         TimeSpan? timeout = null)
@@ -907,15 +1497,30 @@ internal static class UiTestDriver
             window,
             "_metrics");
 
-        // Project load can be idle briefly before deferred post-load metrics become eligible.
-        // Tests that take ownership of StatusBusy must wait for the baseline itself, otherwise a
-        // later metrics completion can overwrite their synthetic status operation.
+        // Project load can be idle briefly before deferred post-load metrics or compression
+        // prewarm become eligible. Tests that take ownership of status presentation must wait for
+        // both pipelines, otherwise a late completion can overwrite their synthetic state.
         await WaitForConditionAsync(
             window,
             () => metrics.HasCompleteBaseline &&
                   !metrics.IsBackgroundActive &&
+                  !metrics.IsCompressionPrewarmActive &&
                   !GetViewModel(window).StatusBusy,
             "initial metrics baseline to finish",
+            timeout);
+    }
+
+    public static async Task WaitForMemoryCleanupIdleAsync(
+        MainWindow window,
+        TimeSpan? timeout = null)
+    {
+        var coordinator = GetRequiredPrivateField<MemoryCleanupCoordinator>(
+            window,
+            "_memoryCleanup");
+        await WaitForConditionAsync(
+            window,
+            () => !coordinator.IsCleanupPendingOrRunning,
+            "deferred memory cleanup to become idle",
             timeout);
     }
 
@@ -969,6 +1574,9 @@ internal static class UiTestDriver
 
         await WaitForSettledFramesAsync(frameCount: 12);
     }
+
+    public static CodeCompressionDiagnosticsSnapshot GetCodeCompressionDiagnostics(MainWindow window) =>
+        GetRequiredPrivateField<CodeCompressionSession>(window, "_codeCompressionSession").Diagnostics;
 
     public static async Task WaitForPreviewReadyAsync(MainWindow window)
     {
@@ -1228,10 +1836,16 @@ internal static class UiTestDriver
     }
 
     private static async Task WaitForControlReadyForPointerAsync(MainWindow window, Control control)
+        => await WaitForControlReadyForPointerAsync(window, window, control);
+
+    private static async Task WaitForControlReadyForPointerAsync(
+        MainWindow window,
+        TopLevel inputRoot,
+        Control control)
     {
         await WaitForConditionAsync(
             window,
-            () => IsControlReadyForPointer(control, window),
+            () => IsControlReadyForPointer(control, inputRoot),
             $"control '{GetControlDebugName(control)}' to be ready for pointer input");
     }
 
@@ -1274,11 +1888,11 @@ internal static class UiTestDriver
             $"Timed out waiting for {description} to stay ready for pointer input.{lastFailureText} Current state: {DescribeState(window)}");
     }
 
-    private static bool IsControlReadyForPointer(Control control, MainWindow window)
+    private static bool IsControlReadyForPointer(Control control, TopLevel inputRoot)
         => control.IsVisible
            && control.Bounds.Width > 0.5
            && control.Bounds.Height > 0.5
-           && control.TranslatePoint(default, window).HasValue;
+           && control.TranslatePoint(default, inputRoot).HasValue;
 
     private static string GetControlDebugName(Control control)
         => string.IsNullOrWhiteSpace(control.Name) ? control.GetType().Name : control.Name!;
@@ -1339,6 +1953,9 @@ internal static class UiTestDriver
         var settingsWidth = settingsContainer is null
             ? 0.0
             : GetActualWidth(settingsContainer);
+        var ignoreOptions = string.Join(
+            ";",
+            viewModel.IgnoreOptions.Select(static option => $"{option.Id}:{option.IsChecked}"));
         return string.Join(
             ", ",
             [
@@ -1355,6 +1972,7 @@ internal static class UiTestDriver
                 $"SearchBusy={viewModel.IsSearchInProgress}",
                 $"FilterBusy={viewModel.IsFilterInProgress}",
                 $"StatusBusy={viewModel.StatusBusy}",
+                $"IgnoreOptions=[{ignoreOptions}]",
                 $"StatusTree={viewModel.StatusTreeStatsText}",
                 $"StatusContent={viewModel.StatusContentStatsText}"
             ]);
@@ -1370,16 +1988,6 @@ internal static class UiTestDriver
             .OfType<CheckBox>()
             .FirstOrDefault(control => control.DataContext is IgnoreOptionViewModel option &&
                                        option.Id == optionId &&
-                                       IsInteractableWithinWindow(control, window));
-    }
-
-    private static CheckBox? FindRootFolderCheckBox(MainWindow window, string rootFolderName)
-    {
-        return window
-            .GetVisualDescendants()
-            .OfType<CheckBox>()
-            .FirstOrDefault(control => control.DataContext is SelectionOptionViewModel option &&
-                                       string.Equals(option.Name, rootFolderName, StringComparison.Ordinal) &&
                                        IsInteractableWithinWindow(control, window));
     }
 
@@ -1402,16 +2010,6 @@ internal static class UiTestDriver
             .FirstOrDefault(control => control.DataContext is TreeNodeViewModel node &&
                                        string.Equals(node.DisplayName, displayName, StringComparison.Ordinal) &&
                                        IsInteractableWithinWindow(control, window));
-    }
-
-    private static async Task<CheckBox> WaitForRootFolderCheckBoxAsync(MainWindow window, string rootFolderName)
-    {
-        await WaitForConditionAsync(
-            window,
-            () => FindRootFolderCheckBox(window, rootFolderName) is not null,
-            $"root folder checkbox '{rootFolderName}' to become interactable");
-
-        return GetRequiredRootFolderCheckBox(window, rootFolderName);
     }
 
     private static async Task<CheckBox> WaitForExtensionCheckBoxAsync(MainWindow window, string extensionName)
@@ -1479,6 +2077,48 @@ internal static class UiTestDriver
         var field = typeof(MainWindow).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
         return Assert.IsType<T>(field?.GetValue(window));
     }
+
+	private static T GetRequiredPrivateField<T>(object instance, string fieldName)
+	{
+		var field = instance.GetType().GetField(
+			fieldName,
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(field);
+		return Assert.IsType<T>(field!.GetValue(instance));
+	}
+
+	private static T InvokeRequiredPrivateMethod<T>(
+		object instance,
+		string methodName,
+		params object?[] arguments)
+	{
+		var method = instance.GetType().GetMethod(
+			methodName,
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(method);
+		return Assert.IsType<T>(method!.Invoke(instance, arguments));
+	}
+
+	private static void InvokeRequiredPrivateMethod(
+		object instance,
+		string methodName,
+		params object?[] arguments)
+	{
+		var method = instance.GetType().GetMethod(
+			methodName,
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(method);
+		method!.Invoke(instance, arguments);
+	}
+
+	private static object GetRequiredPrivateFieldValue(MainWindow window, string fieldName)
+	{
+		var field = typeof(MainWindow).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(field);
+		var value = field!.GetValue(window);
+		Assert.NotNull(value);
+		return value!;
+	}
 
     private static void SetRequiredPrivateField(MainWindow window, string fieldName, object? value)
     {

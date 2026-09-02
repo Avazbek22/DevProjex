@@ -1,5 +1,6 @@
 using Avalonia.Interactivity;
 using Avalonia.Controls.Shapes;
+using Avalonia.Media;
 using Avalonia.VisualTree;
 using DevProjex.Application.Services;
 using DevProjex.Application.Updates;
@@ -32,14 +33,14 @@ public sealed class TopMenuBarFormatSwitcherUiTests
 
 			viewModel.CompleteUpdateCheck(new ApplicationUpdateCheckResult(
 				ApplicationUpdateAvailability.UpdateAvailable,
-				"5.0",
+				"5.1",
 				"5.1"));
 			await FlushUiAsync();
 			Assert.True(indicator.IsVisible);
 
 			viewModel.CompleteUpdateCheck(new ApplicationUpdateCheckResult(
 				ApplicationUpdateAvailability.CheckFailed,
-				"5.0"));
+				"5.1"));
 			await FlushUiAsync();
 			Assert.True(indicator.IsVisible);
 
@@ -94,6 +95,64 @@ public sealed class TopMenuBarFormatSwitcherUiTests
 
 			Assert.Equal(ExportFormat.Markdown, viewModel.SelectedExportFormat);
 			Assert.Contains("segment-selected", buttons[3].Classes);
+		}
+		finally
+		{
+			window.Close();
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task ProjectToolsReveal_StartsTogetherAndCancellationRestoresInteractiveControls()
+	{
+		var viewModel = CreateViewModel();
+		viewModel.IsProjectLoaded = true;
+		var view = new TopMenuBarView { DataContext = viewModel };
+		var window = new Window
+		{
+			Content = view,
+			Width = 900,
+			Height = 90
+		};
+
+		try
+		{
+			window.Show();
+			await FlushUiAsync();
+			var controls = new Control[]
+			{
+				Assert.IsAssignableFrom<Control>(view.FindControl<Control>("FilterToggleButton")),
+				Assert.IsAssignableFrom<Control>(view.FindControl<Control>("PreviewToggleButton")),
+				Assert.IsAssignableFrom<Control>(view.FindControl<Control>("FormatSegmentedControl"))
+			};
+
+			view.PrepareProjectToolsReveal(animate: true);
+			Assert.All(controls, static control =>
+			{
+				Assert.Equal(0, control.Opacity);
+				Assert.False(control.IsHitTestVisible);
+			});
+
+			var revealTask = view.RevealProjectToolsAsync(
+				animate: true,
+				TestContext.Current.CancellationToken);
+			await Dispatcher.UIThread.InvokeAsync(static () => { }, DispatcherPriority.Render);
+			var firstOpacity = controls[0].Opacity;
+			Assert.All(controls, static control =>
+			{
+				Assert.True(control.IsHitTestVisible);
+				Assert.IsType<RectangleGeometry>(control.Clip);
+			});
+			Assert.All(controls, control => Assert.Equal(firstOpacity, control.Opacity, 3));
+
+			view.CompleteProjectToolsReveal();
+			await revealTask;
+			Assert.All(controls, static control =>
+			{
+				Assert.Equal(1, control.Opacity);
+				Assert.True(control.IsHitTestVisible);
+				Assert.Null(control.Clip);
+			});
 		}
 		finally
 		{

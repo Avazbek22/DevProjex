@@ -16,19 +16,17 @@ internal interface IProjectLoadPipelineHost
 
     Task YieldProjectLoadStartupFrameAsync(CancellationToken cancellationToken);
 
-    void ClearPreviousProjectState(bool forceCompactingGc);
+    void ClearPreviousProjectState(bool forceCompactingGc, bool preserveProjectSessions);
 
     void SetProjectLoadIdentity(string path, bool fromDialog);
 
     void UpdateTitle();
 
-    Task ReloadProjectAsync(CancellationToken cancellationToken, bool applyStoredProfile);
+    Task<bool> ReloadProjectAsync(CancellationToken cancellationToken, bool applyStoredProfile);
 
     Task RecordRecentFolderAsync(string path, CancellationToken cancellationToken);
 
-    Task DeleteRepositoryDirectoryAsync(string path, CancellationToken cancellationToken);
-
-    void ClearCurrentCachedRepoPath();
+    void ReleaseCurrentRepositorySession();
 
     void ClearProjectLoadCancellation();
 

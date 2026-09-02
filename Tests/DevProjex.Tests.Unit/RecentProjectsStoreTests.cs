@@ -1,4 +1,5 @@
 using DevProjex.Infrastructure.RecentProjects;
+using DevProjex.Infrastructure.Persistence;
 
 namespace DevProjex.Tests.Unit;
 
@@ -208,17 +209,17 @@ public sealed class RecentProjectsStoreTests
 	}
 
 	[Fact]
-	public void AddFolder_ClampsToFifteenItems()
+	public void AddFolder_ClampsToThirtyTwoItems()
 	{
 		using var temp = new TemporaryDirectory();
 		var store = new RecentProjectsStore(() => temp.Path);
 		var db = store.Load();
 
-		for (var i = 0; i < 17; i++)
+		for (var i = 0; i < 34; i++)
 			db = store.AddFolder(db, Path.Combine(temp.Path, $"Folder{i}"));
 
-		Assert.Equal(15, db.RecentFolders.Count);
-		Assert.Contains(db.RecentFolders, entry => entry.Path.EndsWith("Folder16", StringComparison.Ordinal));
+		Assert.Equal(32, db.RecentFolders.Count);
+		Assert.Contains(db.RecentFolders, entry => entry.Path.EndsWith("Folder33", StringComparison.Ordinal));
 		Assert.DoesNotContain(db.RecentFolders, entry => entry.Path.EndsWith("Folder0", StringComparison.Ordinal));
 	}
 
@@ -237,17 +238,17 @@ public sealed class RecentProjectsStoreTests
 	}
 
 	[Fact]
-	public void AddRepository_ClampsToSevenItems()
+	public void AddRepository_ClampsToSixteenItems()
 	{
 		using var temp = new TemporaryDirectory();
 		var store = new RecentProjectsStore(() => temp.Path);
 		var db = store.Load();
 
-		for (var i = 0; i < 9; i++)
+		for (var i = 0; i < 18; i++)
 			db = store.AddRepository(db, $"https://example.com/user/repo{i}");
 
-		Assert.Equal(7, db.RecentRepositories.Count);
-		Assert.Contains(db.RecentRepositories, entry => entry.Url.EndsWith("repo8", StringComparison.Ordinal));
+		Assert.Equal(16, db.RecentRepositories.Count);
+		Assert.Contains(db.RecentRepositories, entry => entry.Url.EndsWith("repo17", StringComparison.Ordinal));
 		Assert.DoesNotContain(db.RecentRepositories, entry => entry.Url.EndsWith("repo0", StringComparison.Ordinal));
 	}
 
@@ -263,6 +264,54 @@ public sealed class RecentProjectsStoreTests
 
 		Assert.Single(db.RecentRepositories);
 		Assert.Equal("https://github.com/user/repo", db.RecentRepositories[0].Url);
+	}
+
+	[Fact]
+	public void AddRepository_LocalSourcesAreIgnoredWithoutPersistingHistory()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.CreateFolder("State"));
+		var localRepositoryPath = temp.CreateFolder("LocalRepository");
+		const string retainedRepositoryUrl = "https://github.com/example/retained";
+		var state = new RecentProjectsDb
+		{
+			RecentRepositories =
+			[
+				new RecentRepositoryEntry { Url = retainedRepositoryUrl }
+			]
+		};
+
+		state = store.AddRepository(state, new Uri(localRepositoryPath).AbsoluteUri);
+
+		Assert.Equal(retainedRepositoryUrl, Assert.Single(state.RecentRepositories).Url);
+		Assert.False(File.Exists(store.GetPath()));
+		Assert.False(File.Exists(store.GetPath() + ".bak"));
+
+		state = store.AddRepository(state, localRepositoryPath);
+
+		Assert.Equal(retainedRepositoryUrl, Assert.Single(state.RecentRepositories).Url);
+		Assert.False(File.Exists(store.GetPath()));
+		Assert.False(File.Exists(store.GetPath() + ".bak"));
+	}
+
+	[Fact]
+	public void AddRepository_LocalSourceIsIgnoredWhenStoreIsUnavailable()
+	{
+		using var temp = new TemporaryDirectory();
+		var invalidRoot = string.Concat("broken", '\0', "root");
+		var store = new RecentProjectsStore(() => invalidRoot);
+		const string retainedRepositoryUrl = "https://github.com/example/retained";
+		var state = new RecentProjectsDb
+		{
+			RecentRepositories =
+			[
+				new RecentRepositoryEntry { Url = retainedRepositoryUrl }
+			]
+		};
+
+		state = store.AddRepository(state, temp.Path);
+
+		Assert.Equal(retainedRepositoryUrl, Assert.Single(state.RecentRepositories).Url);
 	}
 
 	[Fact]
@@ -316,7 +365,7 @@ public sealed class RecentProjectsStoreTests
 		var folder = temp.CreateFolder("Workspace");
 
 		db = store.AddFolder(db, folder);
-		db = store.AddFolder(db, folder + '\\');
+		db = store.AddFolder(db, folder + Path.DirectorySeparatorChar);
 
 		Assert.Single(db.RecentFolders);
 		Assert.Equal(Path.GetFullPath(folder).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), db.RecentFolders[0].Path);
@@ -375,6 +424,55 @@ public sealed class RecentProjectsStoreTests
 	}
 
 	[Fact]
+	public void Load_OversizedPrimary_ReturnsDefaultWithoutMaterializingOrDestroyingFile()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var filePath = store.GetPath();
+		Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+		using (var stream = new FileStream(filePath, FileMode.CreateNew, FileAccess.Write))
+			stream.SetLength(JsonStorePersistence.SmallDocumentMaximumBytes + 1);
+
+		var loaded = store.Load();
+
+		Assert.Equal(3, loaded.SchemaVersion);
+		Assert.Empty(loaded.RecentFolders);
+		Assert.Empty(loaded.RecentRepositories);
+		Assert.Equal(JsonStorePersistence.SmallDocumentMaximumBytes + 1, new FileInfo(filePath).Length);
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public void FutureSchemaInPrimaryOrBackup_IsPreservedAndBlocksPersistence(bool useBackup)
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var primaryPath = store.GetPath();
+		var futurePath = useBackup ? primaryPath + ".bak" : primaryPath;
+		const string futureJson = """
+		{
+		  "schemaVersion": 999,
+		  "recentFolders": [],
+		  "recentRepositories": [],
+		  "futureHistory": { "keep": true }
+		}
+		""";
+		Directory.CreateDirectory(Path.GetDirectoryName(primaryPath)!);
+		File.WriteAllText(futurePath, futureJson);
+
+		var loaded = store.Load();
+		var updated = store.AddRepository(loaded, "https://github.com/example/new-repository");
+
+		Assert.Empty(loaded.RecentRepositories);
+		Assert.Single(updated.RecentRepositories);
+		Assert.False(store.TryPersist(updated));
+		Assert.True(store.EnsureStorageExists());
+		Assert.Equal(futureJson, File.ReadAllText(futurePath));
+		Assert.Equal(!useBackup, File.Exists(primaryPath));
+	}
+
+	[Fact]
 	public void Load_RemovesApplicationStateDirectory_FromLegacyData()
 	{
 		using var temp = new TemporaryDirectory();
@@ -400,6 +498,49 @@ public sealed class RecentProjectsStoreTests
 		Assert.Single(loaded.RecentFolders);
 		Assert.Equal(PathUtility.Normalize(validFolder), loaded.RecentFolders[0].Path);
 		Assert.DoesNotContain(applicationStateDirectory, File.ReadAllText(filePath), StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void Load_RemovesLocalRepositoryHistoryAndPersistsNetworkOnlyState()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.CreateFolder("State"));
+		var localRepositoryUrl = new Uri(temp.CreateFolder("LocalRepository")).AbsoluteUri;
+		const string retainedRepositoryUrl = "https://github.com/example/retained";
+		const string retainedRemovalUrl = "ssh://git@example.com/example/removed.git";
+		var persistedState = new RecentProjectsDb
+		{
+			SchemaVersion = 3,
+			RecentRepositories =
+			[
+				new RecentRepositoryEntry { Url = localRepositoryUrl },
+				new RecentRepositoryEntry { Url = retainedRepositoryUrl }
+			],
+			RecentRepositoryRemovals =
+			[
+				new RecentRepositoryRemovalEntry { Url = localRepositoryUrl },
+				new RecentRepositoryRemovalEntry { Url = retainedRemovalUrl }
+			]
+		};
+		var serializerOptions = new JsonSerializerOptions
+		{
+			PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+			PropertyNameCaseInsensitive = true
+		};
+		var filePath = store.GetPath();
+		Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+		File.WriteAllText(filePath, JsonSerializer.Serialize(persistedState, serializerOptions));
+
+		var loaded = store.Load();
+		var rewritten = JsonSerializer.Deserialize<RecentProjectsDb>(
+			File.ReadAllText(filePath),
+			serializerOptions);
+
+		Assert.Equal(retainedRepositoryUrl, Assert.Single(loaded.RecentRepositories).Url);
+		Assert.Equal(retainedRemovalUrl, Assert.Single(loaded.RecentRepositoryRemovals).Url);
+		Assert.NotNull(rewritten);
+		Assert.Equal(retainedRepositoryUrl, Assert.Single(rewritten!.RecentRepositories).Url);
+		Assert.Equal(retainedRemovalUrl, Assert.Single(rewritten.RecentRepositoryRemovals).Url);
 	}
 
 	[Fact]
@@ -596,6 +737,43 @@ public sealed class RecentProjectsStoreTests
 		Assert.Equal(
 			"git@github.com:example/repository.git",
 			reloaded.RecentRepositories[0].Url);
+	}
+
+	[Fact]
+	public void ExtremePersistedTimestamps_DoNotBreakRemovalOrReopening()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new RecentProjectsStore(() => temp.Path);
+		var folderPath = temp.CreateFolder("Workspace");
+		const string repositoryUrl = "https://github.com/example/repository";
+		var state = new RecentProjectsDb
+		{
+			RecentFolders =
+			[
+				new RecentFolderEntry
+				{
+					Path = folderPath,
+					OpenedUtc = DateTimeOffset.MaxValue
+				}
+			],
+			RecentRepositories =
+			[
+				new RecentRepositoryEntry
+				{
+					Url = repositoryUrl,
+					OpenedUtc = DateTimeOffset.MaxValue
+				}
+			]
+		};
+
+		state = store.RemoveFolder(state, folderPath);
+		state = store.RemoveRepository(state, repositoryUrl);
+		state = store.AddFolder(state, folderPath);
+		state = store.AddRepository(state, repositoryUrl);
+		var reloaded = store.Load();
+
+		Assert.Equal(PathUtility.Normalize(folderPath), Assert.Single(reloaded.RecentFolders).Path);
+		Assert.Equal(repositoryUrl, Assert.Single(reloaded.RecentRepositories).Url);
 	}
 
 	[Fact]

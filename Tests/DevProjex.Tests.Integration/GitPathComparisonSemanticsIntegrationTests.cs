@@ -1,5 +1,3 @@
-using DevProjex.Infrastructure.Git;
-
 namespace DevProjex.Tests.Integration;
 
 public sealed class GitPathComparisonSemanticsIntegrationTests
@@ -121,6 +119,24 @@ public sealed class GitPathComparisonSemanticsIntegrationTests
 
 		resolver.Invalidate(secondRepository);
 		Assert.True(resolver.Resolve(secondRepository).IgnoreCase);
+	}
+
+	[Fact]
+	public void InvalidatingFromFileSystemRootEvictsDescendantRepositorySemantics()
+	{
+		EnsureGitAvailable();
+		using var temp = new TemporaryDirectory();
+		var repositoryRoot = temp.CreateDirectory("root-invalidation-repository");
+		RunGit(repositoryRoot, "init", "--quiet");
+		RunGit(repositoryRoot, "config", "core.ignoreCase", "false");
+		var resolver = GitConfigPathComparisonSemanticsResolver.Instance;
+		resolver.Invalidate(repositoryRoot);
+		Assert.False(resolver.Resolve(repositoryRoot).IgnoreCase);
+
+		RunGit(repositoryRoot, "config", "core.ignoreCase", "true");
+		resolver.Invalidate(Path.GetPathRoot(repositoryRoot)!);
+
+		Assert.True(resolver.Resolve(repositoryRoot).IgnoreCase);
 	}
 
 	[Fact]

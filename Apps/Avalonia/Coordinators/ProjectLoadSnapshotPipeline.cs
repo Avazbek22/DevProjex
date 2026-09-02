@@ -4,10 +4,14 @@ namespace DevProjex.Avalonia.Coordinators;
 
 internal sealed class ProjectLoadSnapshotPipeline(IProjectLoadSnapshotPipelineHost host)
 {
-    public async Task ReloadAsync(string currentPath, CancellationToken cancellationToken)
+    public async Task<bool> ReloadAsync(
+        string currentPath,
+        bool preserveTreeState,
+		PersistentSecretMarksSnapshot? persistentMarks,
+        CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(currentPath))
-            return;
+            return false;
 
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -15,13 +19,16 @@ internal sealed class ProjectLoadSnapshotPipeline(IProjectLoadSnapshotPipelineHo
 
         var selectionSnapshot = await host.BuildSelectionSnapshotAsync(currentPath, cancellationToken);
         if (selectionSnapshot is null)
-            return;
+            return false;
 
         cancellationToken.ThrowIfCancellationRequested();
         if (host.TryHandleSelectionRootAccessDenied(currentPath, selectionSnapshot))
-            return;
+            return false;
 
-        var treeInput = host.CreateTreeRefreshInput(currentPath, selectionSnapshot);
+        var treeInput = host.CreateTreeRefreshInput(
+            currentPath,
+            selectionSnapshot,
+            preserveTreeState);
         host.BeforeProjectLoadTreeRefresh();
 
         BuildTreeSnapshotResult treeBuild;
@@ -36,20 +43,39 @@ internal sealed class ProjectLoadSnapshotPipeline(IProjectLoadSnapshotPipelineHo
         }
 
         cancellationToken.ThrowIfCancellationRequested();
+		if (host.TryHandleGitScopeDiagnostics(treeBuild))
+			return false;
         if (host.TryHandleTreeRootAccessDenied(treeInput, treeBuild.Tree))
-            return;
+            return false;
+
+		if (treeBuild.Tree.HadScanFailure)
+		{
+			if (!selectionSnapshot.HadScanFailure)
+				host.ReportIncompleteTreeScan();
+			treeBuild = treeBuild with { Inventory = null };
+		}
 
         TreeNodeViewModel treeRoot;
         using (PerformanceMetrics.Measure("ProjectLoadSnapshotPipeline.BuildTreeViewModel"))
         {
             treeRoot = await Task.Run(
-                () => host.BuildTreeViewModel(treeInput, treeBuild.Tree),
+				() => host.BuildTreeViewModel(
+					treeInput,
+					treeBuild.Tree,
+					cancellationToken),
                 cancellationToken);
         }
 
         cancellationToken.ThrowIfCancellationRequested();
-        host.ApplyProjectLoadSnapshot(
-            new ProjectLoadSnapshot(selectionSnapshot, treeInput, treeBuild.Tree, treeBuild.Inventory, treeRoot),
+		return host.ApplyProjectLoadSnapshot(
+			new ProjectLoadSnapshot(
+				selectionSnapshot,
+				treeInput,
+				treeBuild.Tree,
+				treeBuild.Inventory,
+				treeBuild.GitScopePresentation,
+				treeRoot,
+				persistentMarks),
             cancellationToken);
     }
 }

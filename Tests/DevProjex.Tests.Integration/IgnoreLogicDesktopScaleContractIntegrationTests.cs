@@ -60,7 +60,6 @@ public sealed class IgnoreLogicDesktopScaleContractIntegrationTests
 		var srcOnlyContext = CreateSingleRootContext(workspace.Path, baseline, "src");
 		var srcOnlyLiveSnapshot = services.Engine.ComputeLiveRefreshSnapshot(
 			srcOnlyContext,
-			new HashSet<string>(PathComparer.Default) { "src" },
 			TestContext.Current.CancellationToken);
 
 		// Live root filtering may narrow content roots, but root-level directory-toggle

@@ -12,18 +12,17 @@ public sealed record IgnoreRules(
 	IReadOnlySet<string> SmartIgnoredFolders,
 	IReadOnlySet<string> SmartIgnoredFiles)
 {
-	private static readonly StringComparison PathComparison = PathComparer.Comparison;
 	private static readonly StringComparer PathStringComparer = PathComparer.Default;
 	private const int ScopedMatcherChainCacheLimit = 2048;
 	private const int SmartScopeApplicabilityCacheLimit = 2048;
 	private readonly ConcurrentDictionary<string, ScopedGitIgnoreMatcher[]> _scopedMatcherChainCache =
-		new(PathStringComparer);
+		new(ProjectTreePathIdentity.CanonicalComparer);
 	private readonly ConcurrentDictionary<string, ScopedGitIgnoreMatcher[]> _candidateScopedMatcherChainCache =
-		new(PathStringComparer);
+		new(ProjectTreePathIdentity.CanonicalComparer);
 	private readonly ConcurrentDictionary<string, bool> _smartScopeApplicabilityCache =
-		new(PathStringComparer);
+		new(ProjectTreePathIdentity.CanonicalComparer);
 	private readonly ConcurrentDictionary<string, bool> _candidateSmartScopeApplicabilityCache =
-		new(PathStringComparer);
+		new(ProjectTreePathIdentity.CanonicalComparer);
 	private readonly ConcurrentQueue<string> _scopedMatcherChainCacheOrder = new();
 	private readonly ConcurrentQueue<string> _candidateScopedMatcherChainCacheOrder = new();
 	private readonly ConcurrentQueue<string> _smartScopeApplicabilityCacheOrder = new();
@@ -145,7 +144,7 @@ public sealed record IgnoreRules(
 			var relativePath = Path.GetRelativePath(scanRootPath, scopeRootPath);
 			scopeRelativePath = relativePath == "."
 				? string.Empty
-				: relativePath.Replace('\\', '/').Trim('/');
+				: PathUtility.NormalizeSeparators(relativePath).Trim('/');
 			return true;
 		}
 		catch
@@ -186,11 +185,17 @@ public sealed record IgnoreRules(
 			return GitIgnoreScanContext.Relative(this, matcher, baseRelativePath, useCandidates);
 		}
 
+		var applicableScopes = GetApplicableScopes(
+			scanRootPath,
+			scopedMatchers,
+			static scoped => scoped.ScopeRootPath);
 		var requiresRulesFallback = false;
-		foreach (var scoped in scopedMatchers)
+		foreach (var scoped in applicableScopes)
 		{
-			if (!PathStringComparer.Equals(scoped.ScopeRootPath, scanRootPath) &&
-			    IsPathInsideScope(scanRootPath, scoped.ScopeRootPath))
+			if (!AreEquivalentScopePaths(
+				    scoped.ScopeRootPath,
+				    scanRootPath,
+				    PathComparer.Comparison))
 			{
 				requiresRulesFallback = true;
 				break;
@@ -201,9 +206,12 @@ public sealed record IgnoreRules(
 		// entered. Eagerly evaluating every known project scope for every path is both
 		// redundant and quadratic in large multi-repository workspaces.
 		var context = GitIgnoreScanContext.Scoped(this, useCandidates, requiresRulesFallback);
-		foreach (var scoped in scopedMatchers)
+		foreach (var scoped in applicableScopes)
 		{
-			if (PathStringComparer.Equals(scoped.ScopeRootPath, scanRootPath))
+			if (AreEquivalentScopePaths(
+				    scoped.ScopeRootPath,
+				    scanRootPath,
+				    PathComparer.Comparison))
 				context = context.WithScope(scoped, scopeRelativePath: string.Empty);
 		}
 
@@ -219,13 +227,13 @@ public sealed record IgnoreRules(
 			return GitIgnoreMatcher;
 
 		ScopedGitIgnoreMatcher? bestMatch = null;
-		foreach (var scoped in ScopedGitIgnoreMatchers)
+		foreach (var scoped in GetApplicableScopes(
+			         fullPath,
+			         ScopedGitIgnoreMatchers,
+			         static scoped => scoped.ScopeRootPath))
 		{
-			if (IsPathInsideScope(fullPath, scoped.ScopeRootPath))
-			{
-				if (bestMatch is null || scoped.ScopeRootPath.Length > bestMatch.ScopeRootPath.Length)
-					bestMatch = scoped;
-			}
+			if (bestMatch is null || scoped.ScopeRootPath.Length > bestMatch.ScopeRootPath.Length)
+				bestMatch = scoped;
 		}
 
 		return bestMatch?.Matcher ?? GitIgnoreMatcher.Empty;
@@ -261,7 +269,7 @@ public sealed record IgnoreRules(
 		if (scopedCount == 1)
 		{
 			var scoped = scopedMatchersSource[0];
-			if (!IsPathInsideScope(fullPath, scoped.ScopeRootPath))
+			if (!IsPathInsideCompatibleScope(fullPath, scoped.ScopeRootPath))
 				return GitIgnoreEvaluation.NotIgnored;
 
 			return EvaluateWithSingleMatcher(scoped.Matcher, fullPath, isDirectory, name);
@@ -440,15 +448,10 @@ public sealed record IgnoreRules(
 		if (cache.TryGetValue(probePath, out var cached))
 			return cached;
 
-		var applies = false;
-		foreach (var scopeRoot in scopeRoots)
-		{
-			if (!IsPathInsideScope(probePath, scopeRoot))
-				continue;
-
-			applies = true;
-			break;
-		}
+		var applies = GetApplicableScopes(
+			probePath,
+			scopeRoots,
+			static scopeRoot => scopeRoot).Count > 0;
 
 		if (cache.TryAdd(probePath, applies))
 		{
@@ -659,12 +662,10 @@ public sealed record IgnoreRules(
 		if (cache.TryGetValue(cacheKeyPath, out var cached))
 			return cached;
 
-		var matched = new List<ScopedGitIgnoreMatcher>();
-		foreach (var scoped in scopedMatchersSource)
-		{
-			if (IsPathInsideScope(cacheKeyPath, scoped.ScopeRootPath))
-				matched.Add(scoped);
-		}
+		var matched = GetApplicableScopes(
+			cacheKeyPath,
+			scopedMatchersSource,
+			static scoped => scoped.ScopeRootPath);
 
 		ScopedGitIgnoreMatcher[] resolved = matched.Count == 0
 			? Array.Empty<ScopedGitIgnoreMatcher>()
@@ -720,11 +721,11 @@ public sealed record IgnoreRules(
 		IReadOnlyList<ScopedSmartIgnoreMatcher> matchers)
 	{
 		ScopedSmartIgnoreMatcher? mostSpecific = null;
-		foreach (var matcher in matchers)
+		foreach (var matcher in GetApplicableScopes(
+			         fullPath,
+			         matchers,
+			         static matcher => matcher.ScopeRootPath))
 		{
-			if (!IsPathInsideScope(fullPath, matcher.ScopeRootPath))
-				continue;
-
 			if (mostSpecific is null || matcher.ScopeRootPath.Length > mostSpecific.ScopeRootPath.Length)
 				mostSpecific = matcher;
 		}
@@ -732,8 +733,119 @@ public sealed record IgnoreRules(
 		return mostSpecific;
 	}
 
+	private static IReadOnlyList<TScope> GetApplicableScopes<TScope>(
+		string fullPath,
+		IReadOnlyList<TScope> scopes,
+		Func<TScope, string> scopePathSelector)
+	{
+		if (scopes.Count == 0 || string.IsNullOrWhiteSpace(fullPath))
+			return [];
+
+		var exactMatches = new bool[scopes.Count];
+		var hasExactMatch = false;
+		for (var index = 0; index < scopes.Count; index++)
+		{
+			exactMatches[index] = IsPathInsideScope(
+				fullPath,
+				scopePathSelector(scopes[index]),
+				ProjectTreePathIdentity.CanonicalComparison);
+			hasExactMatch |= exactMatches[index];
+		}
+
+		if (!OperatingSystem.IsWindows())
+			return MaterializeApplicableScopes(scopes, exactMatches);
+
+		var compatibleMatches = new bool[scopes.Count];
+		for (var index = 0; index < scopes.Count; index++)
+		{
+			if (exactMatches[index])
+				continue;
+
+			compatibleMatches[index] = IsPathInsideScope(
+				fullPath,
+				scopePathSelector(scopes[index]),
+				PathComparer.Comparison);
+		}
+
+		var selectedMatches = hasExactMatch
+			? (bool[])exactMatches.Clone()
+			: exactMatches;
+		for (var index = 0; index < scopes.Count; index++)
+		{
+			if (!compatibleMatches[index])
+				continue;
+
+			var scopePath = scopePathSelector(scopes[index]);
+			var hasExactAlias = false;
+			var hasAmbiguousAlias = false;
+			for (var otherIndex = 0; otherIndex < scopes.Count; otherIndex++)
+			{
+				if (otherIndex == index)
+					continue;
+
+				var otherScopePath = scopePathSelector(scopes[otherIndex]);
+				if (!AreEquivalentScopePaths(scopePath, otherScopePath, PathComparer.Comparison))
+					continue;
+
+				if (exactMatches[otherIndex])
+				{
+					hasExactAlias = true;
+					break;
+				}
+
+				if (compatibleMatches[otherIndex] &&
+				    !AreEquivalentScopePaths(
+					    scopePath,
+					    otherScopePath,
+					    ProjectTreePathIdentity.CanonicalComparison))
+				{
+					hasAmbiguousAlias = true;
+				}
+			}
+
+			if (!hasExactAlias && !hasAmbiguousAlias)
+				selectedMatches[index] = true;
+		}
+
+		return MaterializeApplicableScopes(scopes, selectedMatches);
+	}
+
+	private static IReadOnlyList<TScope> MaterializeApplicableScopes<TScope>(
+		IReadOnlyList<TScope> scopes,
+		IReadOnlyList<bool> selectedMatches)
+	{
+		var result = new List<TScope>();
+		for (var index = 0; index < scopes.Count; index++)
+		{
+			if (selectedMatches[index])
+				result.Add(scopes[index]);
+		}
+
+		return result;
+	}
+
+	private static bool IsPathInsideCompatibleScope(string fullPath, string scopeRootPath) =>
+		IsPathInsideScope(
+			fullPath,
+			scopeRootPath,
+			ProjectTreePathIdentity.CanonicalComparison) ||
+		OperatingSystem.IsWindows() && IsPathInsideScope(
+			fullPath,
+			scopeRootPath,
+			PathComparer.Comparison);
+
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	private static bool IsPathInsideScope(string fullPath, string scopeRootPath)
+	private static bool IsPathInsideScope(string fullPath, string scopeRootPath) =>
+		IsPathInsideScope(
+			fullPath,
+			scopeRootPath,
+			ProjectTreePathIdentity.CanonicalComparison);
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private static bool IsPathInsideScope(
+		string fullPath,
+		string scopeRootPath,
+		StringComparison comparison)
 	{
 		if (string.IsNullOrWhiteSpace(fullPath) || string.IsNullOrWhiteSpace(scopeRootPath))
 			return false;
@@ -741,7 +853,7 @@ public sealed record IgnoreRules(
 		var fullSpan = fullPath.AsSpan();
 		var scopeSpan = scopeRootPath.AsSpan();
 
-		if (!StartsWithPathPrefix(fullSpan, scopeSpan))
+		if (!StartsWithPathPrefix(fullSpan, scopeSpan, comparison))
 			return false;
 
 		if (fullSpan.Length == scopeSpan.Length)
@@ -753,7 +865,8 @@ public sealed record IgnoreRules(
 
 	private static bool StartsWithPathPrefix(
 		ReadOnlySpan<char> fullPath,
-		ReadOnlySpan<char> scopeRootPath)
+		ReadOnlySpan<char> scopeRootPath,
+		StringComparison comparison)
 	{
 		if (scopeRootPath.Length > fullPath.Length)
 			return false;
@@ -768,11 +881,31 @@ public sealed record IgnoreRules(
 				continue;
 			}
 
-			if (!fullPath.Slice(index, 1).Equals(scopeRootPath.Slice(index, 1), PathComparison))
+			if (!fullPath.Slice(index, 1).Equals(
+				    scopeRootPath.Slice(index, 1),
+				    comparison))
 				return false;
 		}
 
 		return true;
+	}
+
+	private static bool AreEquivalentScopePaths(
+		string left,
+		string right,
+		StringComparison comparison)
+	{
+		var leftPath = TrimTrailingDirectorySeparators(left.AsSpan());
+		var rightPath = TrimTrailingDirectorySeparators(right.AsSpan());
+		return leftPath.Length == rightPath.Length && StartsWithPathPrefix(leftPath, rightPath, comparison);
+	}
+
+	private static ReadOnlySpan<char> TrimTrailingDirectorySeparators(ReadOnlySpan<char> path)
+	{
+		while (path.Length > 0 && IsDirectorySeparator(path[^1]))
+			path = path[..^1];
+
+		return path;
 	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -800,11 +933,16 @@ public sealed record IgnoreRules(
 
 	private static GitIgnoreEvaluation EvaluateWithSingleMatcherRelative(
 		GitIgnoreMatcher matcher,
-		string relativePath,
+		ReadOnlySpan<char> baseRelativePath,
+		ReadOnlySpan<char> scanRelativePath,
 		bool isDirectory,
 		string name)
 	{
-		var evaluation = matcher.EvaluateRelative(relativePath, isDirectory, name);
+		var evaluation = matcher.EvaluateRelativeNormalized(
+			baseRelativePath,
+			scanRelativePath,
+			isDirectory,
+			name);
 		if (!evaluation.HasMatch || !evaluation.IsIgnored)
 			return GitIgnoreEvaluation.NotIgnored;
 
@@ -813,7 +951,24 @@ public sealed record IgnoreRules(
 
 		return new GitIgnoreEvaluation(
 			IsIgnored: true,
-			ShouldTraverseIgnoredDirectory: matcher.ShouldTraverseIgnoredDirectoryRelative(relativePath, name));
+			ShouldTraverseIgnoredDirectory: matcher.ShouldTraverseIgnoredDirectoryRelativeNormalized(
+				baseRelativePath,
+				scanRelativePath,
+				name));
+	}
+
+	private static GitIgnoreMatcher.IgnoreEvaluation EvaluateRulesOnlyWithSingleMatcherRelative(
+		GitIgnoreMatcher matcher,
+		ReadOnlySpan<char> baseRelativePath,
+		ReadOnlySpan<char> scanRelativePath,
+		bool isDirectory,
+		string name)
+	{
+		return matcher.EvaluateRelativeRulesOnlyNormalized(
+			baseRelativePath,
+			scanRelativePath,
+			isDirectory,
+			name);
 	}
 
 	public readonly struct GitIgnoreScanContext
@@ -1000,12 +1155,12 @@ public sealed record IgnoreRules(
 			}
 			else
 			{
-				var matcherRelativePath = BuildMatcherRelativePath(relativePath);
-				evaluation = matcherRelativePath.Length == 0
+				evaluation = _baseRelativePath.Length == 0 && relativePath.Length == 0
 					? GitIgnoreEvaluation.NotIgnored
 					: EvaluateWithSingleMatcherRelative(
 						_relativeMatcher,
-						matcherRelativePath,
+						_baseRelativePath.AsSpan(),
+						relativePath.AsSpan(),
 						isDirectory,
 						name);
 			}
@@ -1122,11 +1277,12 @@ public sealed record IgnoreRules(
 			}
 			else
 			{
-				var matcherRelativePath = BuildMatcherRelativePath(relativePath);
-				evaluation = matcherRelativePath.Length == 0
+				evaluation = _baseRelativePath.Length == 0 && relativePath.Length == 0
 					? default
-					: _relativeMatcher.EvaluateRelativeRulesOnlyNormalized(
-						matcherRelativePath.AsSpan(),
+					: EvaluateRulesOnlyWithSingleMatcherRelative(
+						_relativeMatcher,
+						_baseRelativePath.AsSpan(),
+						relativePath.AsSpan(),
 						isDirectory,
 						name);
 			}
@@ -1162,17 +1318,6 @@ public sealed record IgnoreRules(
 			}
 		}
 
-		private string BuildMatcherRelativePath(string scanRelativePath)
-		{
-			if (_baseRelativePath.Length == 0)
-				return scanRelativePath;
-
-			if (string.IsNullOrEmpty(scanRelativePath))
-				return _baseRelativePath;
-
-			return $"{_baseRelativePath}/{scanRelativePath}";
-		}
-
 		private sealed class AdditionalGitIgnoreScope(
 			AdditionalGitIgnoreScope? parent,
 			ScopedGitIgnoreMatcher scopedMatcher,
@@ -1186,7 +1331,9 @@ public sealed record IgnoreRules(
 			{
 				for (var current = this; current is not null; current = current._parent)
 				{
-					if (PathStringComparer.Equals(current._scopedMatcher.ScopeRootPath, scopeRootPath))
+					if (ProjectTreePathIdentity.CanonicalComparer.Equals(
+						    current._scopedMatcher.ScopeRootPath,
+						    scopeRootPath))
 						return true;
 				}
 
@@ -1214,11 +1361,11 @@ public sealed record IgnoreRules(
 				GitIgnoreMatcher.IgnoreEvaluation local;
 				if (matcherBaseRelativePath is not null)
 				{
-					var matcherRelativePath = BuildAncestorMatcherRelativePath(scanRelativePath);
-					if (matcherRelativePath.Length == 0)
+					if (matcherBaseRelativePath.Length == 0 && scanRelativePath.Length == 0)
 						return evaluation;
 					local = _scopedMatcher.Matcher.EvaluateRelativeNormalized(
-						matcherRelativePath.AsSpan(),
+						matcherBaseRelativePath.AsSpan(),
+						scanRelativePath.AsSpan(),
 						isDirectory,
 						name);
 				}
@@ -1257,11 +1404,12 @@ public sealed record IgnoreRules(
 				GitIgnoreMatcher.IgnoreEvaluation local;
 				if (matcherBaseRelativePath is not null)
 				{
-					var matcherRelativePath = BuildAncestorMatcherRelativePath(scanRelativePath);
-					if (matcherRelativePath.Length == 0)
+					if (matcherBaseRelativePath.Length == 0 && scanRelativePath.Length == 0)
 						return evaluation;
-					local = _scopedMatcher.Matcher.EvaluateRelativeRulesOnlyNormalized(
-						matcherRelativePath.AsSpan(),
+					local = EvaluateRulesOnlyWithSingleMatcherRelative(
+						_scopedMatcher.Matcher,
+						matcherBaseRelativePath.AsSpan(),
+						scanRelativePath.AsSpan(),
 						isDirectory,
 						name);
 				}
@@ -1284,10 +1432,10 @@ public sealed record IgnoreRules(
 
 				if (matcherBaseRelativePath is not null)
 				{
-					var matcherRelativePath = BuildAncestorMatcherRelativePath(scanRelativePath);
-					return matcherRelativePath.Length > 0 &&
+					return (matcherBaseRelativePath.Length > 0 || scanRelativePath.Length > 0) &&
 					       _scopedMatcher.Matcher.ShouldTraverseIgnoredDirectoryRelativeNormalized(
-						       matcherRelativePath.AsSpan(),
+						       matcherBaseRelativePath.AsSpan(),
+						       scanRelativePath.AsSpan(),
 						       name);
 				}
 
@@ -1295,16 +1443,6 @@ public sealed record IgnoreRules(
 				       _scopedMatcher.Matcher.ShouldTraverseIgnoredDirectoryRelativeNormalized(
 					       descendantRelativePath,
 					       name);
-			}
-
-			private string BuildAncestorMatcherRelativePath(string scanRelativePath)
-			{
-				if (matcherBaseRelativePath!.Length == 0)
-					return scanRelativePath;
-				if (scanRelativePath.Length == 0)
-					return matcherBaseRelativePath;
-
-				return $"{matcherBaseRelativePath}/{scanRelativePath}";
 			}
 
 			private bool TryGetMatcherRelativePath(
@@ -1322,7 +1460,7 @@ public sealed record IgnoreRules(
 				    relativePath[scopeRelativePath.Length] != '/' ||
 				    !relativePath[..scopeRelativePath.Length].Equals(
 					    scopeRelativePath.AsSpan(),
-					    PathComparison))
+					    ProjectTreePathIdentity.CanonicalComparison))
 				{
 					matcherRelativePath = default;
 					return false;

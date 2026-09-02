@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using DevProjex.Kernel.IO;
 
 namespace DevProjex.Terminal.DesktopControl;
 
@@ -7,14 +8,29 @@ public sealed record DesktopRegistrySnapshot(
 	IReadOnlyList<DesktopInstanceRegistration> Instances,
 	int StaleEntryCount);
 
-public sealed class DesktopInstanceRegistry(DesktopControlPaths? paths = null)
+public sealed class DesktopInstanceRegistry
 {
+	private static readonly TimeSpan StaleTemporaryFileAge = TimeSpan.FromHours(24);
 	private static readonly JsonSerializerOptions JsonOptions = new()
 	{
 		PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
 		WriteIndented = true
 	};
-	private readonly DesktopControlPaths _paths = paths ?? new DesktopControlPaths();
+	private readonly DesktopControlPaths _paths;
+	private readonly Action? _afterRegistrationReadOpened;
+
+	public DesktopInstanceRegistry(DesktopControlPaths? paths = null)
+		: this(paths, afterRegistrationReadOpened: null)
+	{
+	}
+
+	internal DesktopInstanceRegistry(
+		DesktopControlPaths? paths,
+		Action? afterRegistrationReadOpened)
+	{
+		_paths = paths ?? new DesktopControlPaths();
+		_afterRegistrationReadOpened = afterRegistrationReadOpened;
+	}
 
 	internal string RegistryDirectory => _paths.RegistryDirectory;
 
@@ -22,6 +38,10 @@ public sealed class DesktopInstanceRegistry(DesktopControlPaths? paths = null)
 		DesktopInstanceRegistration registration,
 		CancellationToken cancellationToken = default)
 	{
+		ArgumentNullException.ThrowIfNull(registration);
+		if (!HasValidFields(registration))
+			throw new ArgumentException("Desktop registration fields are invalid.", nameof(registration));
+
 		EnsurePrivateDirectory(_paths.RegistryDirectory);
 		var target = _paths.GetRegistrationPath(registration.InstanceId);
 		var temp = target + $".{Guid.NewGuid():N}.tmp";
@@ -34,7 +54,7 @@ public sealed class DesktopInstanceRegistry(DesktopControlPaths? paths = null)
 				new UTF8Encoding(false),
 				cancellationToken).ConfigureAwait(false);
 			SetPrivateFileMode(temp);
-			File.Move(temp, target, overwrite: true);
+			CommitRegistration(temp, target);
 			SetPrivateFileMode(target);
 		}
 		finally
@@ -45,7 +65,8 @@ public sealed class DesktopInstanceRegistry(DesktopControlPaths? paths = null)
 
 	public Task UnregisterAsync(string instanceId)
 	{
-		TryDelete(_paths.GetRegistrationPath(instanceId));
+		if (IsValidInstanceId(instanceId))
+			TryDelete(_paths.GetRegistrationPath(instanceId));
 		return Task.CompletedTask;
 	}
 
@@ -59,6 +80,11 @@ public sealed class DesktopInstanceRegistry(DesktopControlPaths? paths = null)
 	{
 		if (!Directory.Exists(_paths.RegistryDirectory))
 			return new DesktopRegistrySnapshot([], 0);
+		if (!IsDirectPrivateDirectory(_paths.RegistryDirectory))
+			return new DesktopRegistrySnapshot([], 0);
+
+		if (removeStale)
+			RemoveStaleTemporaryFiles(cancellationToken);
 
 		var registrations = new List<DesktopInstanceRegistration>();
 		var staleEntryCount = 0;
@@ -66,17 +92,26 @@ public sealed class DesktopInstanceRegistry(DesktopControlPaths? paths = null)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 			var registration = await TryReadAsync(path, cancellationToken).ConfigureAwait(false);
-			if (registration is null || !IsLiveProcess(registration))
+			if (registration is null)
+			{
+				if (removeStale)
+					TryDelete(path);
+				staleEntryCount++;
+				continue;
+			}
+			if (!IsLiveProcess(registration))
 			{
 				if (removeStale)
 				{
 					TryDelete(path);
-					if (registration?.Transport == "unix")
+					if (IsOwnedUnixEndpoint(registration))
 						TryDelete(registration.Endpoint);
 				}
 				staleEntryCount++;
 				continue;
 			}
+			if (registration.ProtocolVersion != DesktopProtocol.CurrentVersion)
+				continue;
 
 			registrations.Add(registration);
 		}
@@ -89,15 +124,48 @@ public sealed class DesktopInstanceRegistry(DesktopControlPaths? paths = null)
 			staleEntryCount);
 	}
 
-	private static async Task<DesktopInstanceRegistration?> TryReadAsync(
+	private bool IsOwnedUnixEndpoint(DesktopInstanceRegistration registration)
+	{
+		if (!string.Equals(registration.Transport, "unix", StringComparison.Ordinal))
+			return false;
+		try
+		{
+			return PathComparer.Default.Equals(
+				Path.GetFullPath(registration.Endpoint),
+				Path.GetFullPath(_paths.GetSocketPath(registration.InstanceId)));
+		}
+		catch (Exception exception) when (
+			exception is ArgumentException or NotSupportedException or PathTooLongException)
+		{
+			return false;
+		}
+	}
+
+	private async Task<DesktopInstanceRegistration?> TryReadAsync(
 		string path,
 		CancellationToken cancellationToken)
 	{
 		try
 		{
-			var json = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
-			var registration = JsonSerializer.Deserialize<DesktopInstanceRegistration>(json, JsonOptions);
-			return registration?.ProtocolVersion == DesktopProtocol.CurrentVersion
+			await using var source = new FileStream(
+				path,
+				FileMode.Open,
+				FileAccess.Read,
+				FileShare.ReadWrite | FileShare.Delete,
+				bufferSize: 4 * 1024,
+				FileOptions.Asynchronous | FileOptions.SequentialScan);
+			_afterRegistrationReadOpened?.Invoke();
+			await using var stream = new MaximumLengthReadStream(
+				source,
+				DesktopProtocol.MaximumMessageBytes,
+				static () => new IOException("Desktop registration exceeds the protocol limit."));
+			var registration = await JsonSerializer
+				.DeserializeAsync<DesktopInstanceRegistration>(
+					stream,
+					JsonOptions,
+					cancellationToken)
+				.ConfigureAwait(false);
+			return registration is not null && IsValidRegistrationFile(registration, path)
 				? registration
 				: null;
 		}
@@ -108,6 +176,111 @@ public sealed class DesktopInstanceRegistry(DesktopControlPaths? paths = null)
 		catch
 		{
 			return null;
+		}
+	}
+
+	private static bool IsValidRegistrationFile(
+		DesktopInstanceRegistration registration,
+		string path) =>
+		HasValidStructuralFields(registration) &&
+		string.Equals(
+			Path.GetFileNameWithoutExtension(path),
+			registration.InstanceId,
+			StringComparison.Ordinal);
+
+	private static bool HasValidFields(DesktopInstanceRegistration registration) =>
+		registration.ProtocolVersion == DesktopProtocol.CurrentVersion &&
+		HasValidStructuralFields(registration);
+
+	private static bool HasValidStructuralFields(DesktopInstanceRegistration registration) =>
+		registration.ProtocolVersion > 0 &&
+		IsValidInstanceId(registration.InstanceId) &&
+		registration.ProcessId > 0 &&
+		registration.ProcessStartTimeUtcTicks > 0 &&
+		registration.Transport is "pipe" or "unix" &&
+		!string.IsNullOrWhiteSpace(registration.Endpoint) &&
+		!registration.Endpoint.Any(char.IsControl);
+
+	private static bool IsValidInstanceId(string? instanceId) =>
+		!string.IsNullOrEmpty(instanceId) &&
+		instanceId.Length <= 128 &&
+		instanceId.All(static character =>
+			char.IsAsciiLetterOrDigit(character) || character is '-' or '_');
+
+	private void RemoveStaleTemporaryFiles(CancellationToken cancellationToken)
+	{
+		var cutoff = DateTime.UtcNow - StaleTemporaryFileAge;
+		foreach (var path in Directory.EnumerateFiles(_paths.RegistryDirectory, "*.tmp"))
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			try
+			{
+				if (!IsOwnedRegistrationTemporaryFile(path) ||
+				    File.GetLastWriteTimeUtc(path) > cutoff)
+				{
+					continue;
+				}
+
+				TryDelete(path);
+			}
+			catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+			{
+			}
+		}
+	}
+
+	private static bool IsOwnedRegistrationTemporaryFile(string path)
+	{
+		var fileName = Path.GetFileName(path);
+		if (!fileName.EndsWith(".tmp", StringComparison.Ordinal))
+			return false;
+
+		var withoutSuffix = fileName[..^4];
+		var nonceSeparator = withoutSuffix.LastIndexOf('.');
+		if (nonceSeparator <= 0)
+			return false;
+
+		var nonce = withoutSuffix.AsSpan(nonceSeparator + 1);
+		if (nonce.Length != 32 || !ContainsOnlyAsciiHexDigits(nonce))
+			return false;
+
+		var registrationFileName = withoutSuffix[..nonceSeparator];
+		if (!registrationFileName.EndsWith(".json", StringComparison.Ordinal))
+			return false;
+
+		return IsValidInstanceId(Path.GetFileNameWithoutExtension(registrationFileName));
+	}
+
+	private static bool ContainsOnlyAsciiHexDigits(ReadOnlySpan<char> value)
+	{
+		foreach (var character in value)
+		{
+			if (character is not (>= '0' and <= '9' or >= 'a' and <= 'f'))
+				return false;
+		}
+
+		return true;
+	}
+
+	private static void CommitRegistration(string temporaryPath, string targetPath)
+	{
+		if (!File.Exists(targetPath))
+		{
+			File.Move(temporaryPath, targetPath);
+			return;
+		}
+
+		try
+		{
+			File.Replace(temporaryPath, targetPath, destinationBackupFileName: null);
+		}
+		catch (FileNotFoundException) when (!File.Exists(targetPath))
+		{
+			File.Move(temporaryPath, targetPath);
+		}
+		catch (NotSupportedException)
+		{
+			File.Move(temporaryPath, targetPath, overwrite: true);
 		}
 	}
 
@@ -129,13 +302,32 @@ public sealed class DesktopInstanceRegistry(DesktopControlPaths? paths = null)
 	internal static void EnsurePrivateDirectory(string path)
 	{
 		Directory.CreateDirectory(path);
+		if (!IsDirectPrivateDirectory(path))
+			throw new IOException("Desktop control storage cannot use a symbolic link or reparse point.");
 		if (!OperatingSystem.IsWindows())
 		{
 			File.SetUnixFileMode(
 				path,
 				UnixFileMode.UserRead |
 				UnixFileMode.UserWrite |
-				UnixFileMode.UserExecute);
+					UnixFileMode.UserExecute);
+		}
+		if (!IsDirectPrivateDirectory(path))
+			throw new IOException("Desktop control storage changed while it was being secured.");
+	}
+
+	private static bool IsDirectPrivateDirectory(string path)
+	{
+		try
+		{
+			var attributes = File.GetAttributes(path);
+			return attributes.HasFlag(FileAttributes.Directory) &&
+			       !attributes.HasFlag(FileAttributes.ReparsePoint);
+		}
+		catch (Exception exception) when (exception is
+		       IOException or UnauthorizedAccessException or NotSupportedException)
+		{
+			return false;
 		}
 	}
 
@@ -149,12 +341,11 @@ public sealed class DesktopInstanceRegistry(DesktopControlPaths? paths = null)
 	{
 		try
 		{
-			if (File.Exists(path))
-				File.Delete(path);
+			File.Delete(path);
 		}
 		catch
 		{
-			// Stale entries are retried by the next registry probe.
+			// Cleanup is best-effort because another process may still own the entry.
 		}
 	}
 }

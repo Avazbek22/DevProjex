@@ -1,6 +1,8 @@
 using DevProjex.Kernel.Contracts;
+using Avalonia.Controls.Documents;
 using Avalonia.VisualTree;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using DevProjex.Avalonia.Controls;
 using DevProjex.Avalonia.Coordinators;
 using System.Reflection;
@@ -27,12 +29,177 @@ public sealed class MainWindowSearchFilterUiTests(UiWorkspaceFixture workspace)
             var viewModel = UiTestDriver.GetViewModel(window);
             Assert.True(viewModel.SearchVisible);
             Assert.True(viewModel.SearchTotalMatches > 0);
+            AssertPanelBorderIsFullyVisible(
+                searchBar,
+                UiTestDriver.GetRequiredControl<Border>(window, "SearchBarContainer"),
+                window);
 
             await UiTestDriver.PressKeyAsync(window, Key.Escape);
+            Assert.False(viewModel.SearchVisible);
+            await GetSearchFilterController(window).CloseSearchAsync();
             await UiTestDriver.WaitForConditionAsync(
                 window,
                 () => !UiTestDriver.GetViewModel(window).SearchVisible,
                 "search bar to close");
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task SearchMarkers_AppearOnTreeScrollBarNavigateAndClearWithQuery()
+    {
+        using var project = UiTestProject.CreateWithLargeFlatTree(fileCount: 120);
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+        try
+        {
+            window.Height = window.MinHeight;
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
+            await UiTestDriver.OpenSearchAsync(window);
+
+            var searchBar = UiTestDriver.GetRequiredControl<SearchBarView>(
+                window,
+                "SearchBar");
+            var searchBox = Assert.IsType<TextBox>(searchBar.SearchBoxControl);
+            var markerBar = UiTestDriver.GetRequiredControl<PreviewMarkerBar>(
+                window,
+                "TreeSearchMarkerBar");
+            var tree = UiTestDriver.GetRequiredControl<ProjectTreeView>(
+                window,
+                "ProjectTree");
+            var scrollViewer = Assert.IsType<ScrollViewer>(
+                tree.FindDescendantOfType<ScrollViewer>());
+
+            await UiTestDriver.EnterTextAsync(window, searchBox, "file-");
+            await UiTestDriver.WaitForSearchAppliedAsync(window, "file-");
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => markerBar.IsVisible &&
+                      markerBar.MarkerTicks.Count > 1 &&
+                      scrollViewer.Extent.Height > scrollViewer.Viewport.Height,
+                "tree search results to publish scrollbar markers");
+
+            var targetTick = markerBar.MarkerTicks
+                .Where(static tick =>
+                    tick.Target.Category == PreviewMarkerCategory.Search)
+                .OrderByDescending(static tick => tick.Y)
+                .First();
+            var expectedMatchIndex = targetTick.Target.LineNumber - 2;
+            var expectedFileName =
+                $"file-{expectedMatchIndex - 1:0000}.txt";
+            var markerPoint = Assert.IsType<Point>(markerBar.TranslatePoint(
+                new Point(markerBar.Bounds.Width - 1, targetTick.Y),
+                window));
+            window.MouseMove(markerPoint, RawInputModifiers.None);
+            window.MouseDown(
+                markerPoint,
+                MouseButton.Left,
+                RawInputModifiers.LeftMouseButton);
+            window.MouseUp(markerPoint, MouseButton.Left, RawInputModifiers.None);
+
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => tree.SelectedItem is TreeNodeViewModel selectedNode &&
+                      string.Equals(
+                          selectedNode.DisplayName,
+                          expectedFileName,
+                          StringComparison.Ordinal) &&
+                      UiTestDriver.GetViewModel(window).SearchCurrentMatchIndex ==
+                      expectedMatchIndex &&
+                      scrollViewer.Offset.Y > 0,
+                "last tree-search marker to navigate to the matching node");
+
+            searchBox.Text = string.Empty;
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => UiTestDriver.GetViewModel(window).SearchTotalMatches == 0 &&
+                      markerBar.MarkerTicks.Count == 0 &&
+                      !markerBar.IsVisible,
+                "clearing tree search to remove scrollbar markers");
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task SearchSummary_RemainsVisibleAtMinimumWidthWithPreviewOpen()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            window.Width = window.MinWidth;
+            await UiTestDriver.OpenPreviewAsync(window);
+            await UiTestDriver.OpenSearchAsync(window);
+
+            var searchBar = UiTestDriver.GetRequiredControl<SearchBarView>(window, "SearchBar");
+            var searchBox = Assert.IsType<TextBox>(searchBar.SearchBoxControl);
+            await UiTestDriver.EnterTextAsync(window, searchBox, "app");
+            await UiTestDriver.WaitForSearchAppliedAsync(window, "app");
+
+            var summary = Assert.IsType<TextBlock>(
+                searchBar.FindControl<TextBlock>("SearchMatchSummary"));
+            var previousButton = Assert.IsType<Button>(
+                searchBar.FindControl<Button>("SearchPreviousButton"));
+            var searchBoxBounds = UiTestDriver.GetBoundsInWindow(searchBox, window);
+            var summaryBounds = UiTestDriver.GetBoundsInWindow(summary, window);
+            var previousButtonBounds = UiTestDriver.GetBoundsInWindow(previousButton, window);
+
+            Assert.True(summary.IsVisible);
+            Assert.False(string.IsNullOrWhiteSpace(summary.Text));
+            Assert.True(
+                summaryBounds.Width >= 40,
+                $"The tree-search summary was compressed: summary={summaryBounds}, searchBar={searchBar.Bounds}.");
+            Assert.True(summaryBounds.Left >= searchBoxBounds.Right - 0.5);
+            Assert.True(summaryBounds.Right <= previousButtonBounds.Left + 0.5);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task SearchInput_UsesSurplusWidthWithoutShiftingWhenResultsAppear()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            window.Width = window.MinWidth;
+            await UiTestDriver.OpenPreviewAsync(window);
+            await UiTestDriver.OpenSearchAsync(window);
+
+            var searchBar = UiTestDriver.GetRequiredControl<SearchBarView>(window, "SearchBar");
+            var searchBox = Assert.IsType<TextBox>(searchBar.SearchBoxControl);
+            var initialBounds = UiTestDriver.GetBoundsInWindow(searchBox, window);
+
+            await UiTestDriver.EnterTextAsync(window, searchBox, "app");
+            await UiTestDriver.WaitForSearchAppliedAsync(window, "app");
+            var populatedBounds = UiTestDriver.GetBoundsInWindow(searchBox, window);
+
+            Assert.Equal(initialBounds.Left, populatedBounds.Left, precision: 1);
+            Assert.Equal(initialBounds.Width, populatedBounds.Width, precision: 1);
+
+            window.Width = window.MinWidth + 300;
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
+            await UiTestDriver.DragAsync(
+                window,
+                UiTestDriver.GetRequiredControl<Border>(window, "TreePreviewSplitter"),
+                deltaX: 150);
+            var expandedBounds = UiTestDriver.GetBoundsInWindow(searchBox, window);
+
+            Assert.Equal(populatedBounds.Left, expandedBounds.Left, precision: 1);
+            Assert.True(
+                expandedBounds.Width > populatedBounds.Width,
+                $"The tree-search input did not use surplus width: before={populatedBounds}, after={expandedBounds}, " +
+                $"searchBar={searchBar.Bounds}, tree={UiTestDriver.GetRequiredControl<Border>(window, "TreeIsland").Bounds}.");
+            Assert.InRange(expandedBounds.Width, populatedBounds.Width, 370.5);
         }
         finally
         {
@@ -104,12 +271,195 @@ public sealed class MainWindowSearchFilterUiTests(UiWorkspaceFixture workspace)
             Assert.True(viewModel.FilterVisible);
             Assert.True(viewModel.FilterMatchCount > 0);
             Assert.NotEmpty(viewModel.TreeNodes);
+            AssertPanelBorderIsFullyVisible(
+                filterBar,
+                UiTestDriver.GetRequiredControl<Border>(window, "FilterBarContainer"),
+                window);
 
             await UiTestDriver.PressKeyAsync(window, Key.Escape);
+            Assert.False(viewModel.FilterVisible);
+            await GetSearchFilterController(window).CloseFilterAsync();
             await UiTestDriver.WaitForConditionAsync(
                 window,
                 () => !UiTestDriver.GetViewModel(window).FilterVisible,
                 "filter bar to close");
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task SearchHighlights_UseMasterPaletteForRegularAndCurrentMatches()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            await UiTestDriver.OpenSearchAsync(window);
+            var searchBar = UiTestDriver.GetRequiredControl<SearchBarView>(window, "SearchBar");
+            var searchBox = Assert.IsType<TextBox>(searchBar.SearchBoxControl);
+            await UiTestDriver.EnterTextAsync(window, searchBox, "app");
+            await UiTestDriver.WaitForSearchAppliedAsync(window, "app");
+
+            var highlightedNodes = Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes)
+                .Flatten()
+                .Where(static node => node.HasHighlightedDisplay)
+                .ToArray();
+            Assert.Contains(highlightedNodes, static node => node.IsCurrentSearchMatch);
+            Assert.Contains(highlightedNodes, static node => !node.IsCurrentSearchMatch);
+
+            foreach (var node in highlightedNodes)
+            {
+                var expectedBackground = node.IsCurrentSearchMatch ? "#F9A825" : "#FFEB3B";
+                var highlightedRuns = node.DisplayInlines!
+                    .OfType<Run>()
+                    .Where(static run => run.Background is not null)
+                    .ToArray();
+                Assert.NotEmpty(highlightedRuns);
+                Assert.All(
+                    highlightedRuns,
+                    run =>
+                    {
+                        Assert.Equal(
+                            Color.Parse(expectedBackground),
+                            Assert.IsType<SolidColorBrush>(run.Background).Color);
+                        Assert.Equal(
+                            Color.Parse("#000000"),
+                            Assert.IsType<SolidColorBrush>(run.Foreground).Color);
+                    });
+            }
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task InteractiveFilter_PreservesHiddenSelectionAndRestoresEntryExpansion()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var root = Assert.Single(viewModel.TreeNodes);
+            root.IsChecked = false;
+            var readme = Assert.Single(
+                root.Children,
+                node => string.Equals(node.DisplayName, "README.md", StringComparison.Ordinal));
+            var docs = Assert.Single(
+                root.Children,
+                node => string.Equals(node.DisplayName, "docs", StringComparison.Ordinal));
+            var source = Assert.Single(
+                root.Children,
+                node => string.Equals(node.DisplayName, "src", StringComparison.Ordinal));
+            var previewService = Assert.Single(
+                root.Flatten(),
+                node => string.Equals(node.DisplayName, "PreviewService.cs", StringComparison.Ordinal));
+            readme.IsChecked = true;
+            previewService.IsChecked = true;
+            docs.IsExpanded = true;
+            source.IsExpanded = false;
+            var expectedReadmePath = readme.FullPath;
+
+            await UiTestDriver.OpenFilterAsync(window);
+            var filterBar = UiTestDriver.GetRequiredControl<FilterBarView>(window, "FilterBar");
+            await UiTestDriver.EnterTextAsync(
+                window,
+                Assert.IsType<TextBox>(filterBar.FilterBoxControl),
+                "PreviewService");
+            await UiTestDriver.WaitForFilterAppliedAsync(window, "PreviewService");
+
+            var filteredRoot = Assert.Single(viewModel.TreeNodes);
+            var filteredPreviewService = Assert.Single(
+                filteredRoot.Flatten(),
+                node => string.Equals(node.DisplayName, "PreviewService.cs", StringComparison.Ordinal));
+            Assert.True(filteredPreviewService.IsChecked);
+            filteredPreviewService.IsChecked = false;
+
+            await UiTestDriver.PressKeyAsync(window, Key.Escape);
+            Assert.False(viewModel.FilterVisible);
+            await GetSearchFilterController(window).CloseFilterAsync();
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => !viewModel.FilterVisible &&
+                      !viewModel.IsFilterInProgress &&
+                      string.IsNullOrEmpty(viewModel.NameFilter),
+                "filter close to restore selection and expansion");
+
+            var restoredRoot = Assert.Single(viewModel.TreeNodes);
+            Assert.Equal([expectedReadmePath], UiTestDriver.GetCheckedTreePaths(window));
+            Assert.True(Assert.Single(
+                restoredRoot.Children,
+                node => string.Equals(node.DisplayName, "docs", StringComparison.Ordinal)).IsExpanded);
+            Assert.False(Assert.Single(
+                restoredRoot.Children,
+                node => string.Equals(node.DisplayName, "src", StringComparison.Ordinal)).IsExpanded);
+            Assert.DoesNotContain(
+                UiTestDriver.GetToastService(window).Items,
+                toast => toast.Message.StartsWith(
+                    "Checked items hidden by the current settings:",
+                    StringComparison.Ordinal));
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task InteractiveFilter_MultipleQueriesPreserveLatestSelectionOverrides()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var root = Assert.Single(viewModel.TreeNodes);
+            root.IsChecked = false;
+            var readme = Assert.Single(
+                root.Children,
+                node => string.Equals(node.DisplayName, "README.md", StringComparison.Ordinal));
+            var previewService = Assert.Single(
+                root.Flatten(),
+                node => string.Equals(node.DisplayName, "PreviewService.cs", StringComparison.Ordinal));
+            var readmePath = readme.FullPath;
+            readme.IsChecked = true;
+            previewService.IsChecked = true;
+
+            await UiTestDriver.OpenFilterAsync(window);
+            var filterBar = UiTestDriver.GetRequiredControl<FilterBarView>(window, "FilterBar");
+            var filterBox = Assert.IsType<TextBox>(filterBar.FilterBoxControl);
+            await UiTestDriver.EnterTextAsync(window, filterBox, "PreviewService");
+            await UiTestDriver.WaitForFilterAppliedAsync(window, "PreviewService");
+            Assert.True(Assert.Single(
+                Assert.Single(viewModel.TreeNodes).Flatten(),
+                node => string.Equals(node.DisplayName, "PreviewService.cs", StringComparison.Ordinal)).IsChecked);
+            Assert.Single(
+                Assert.Single(viewModel.TreeNodes).Flatten(),
+                node => string.Equals(node.DisplayName, "PreviewService.cs", StringComparison.Ordinal)).IsChecked = false;
+
+            await SetFilterTextAsync(window, filterBox, "README");
+            var filteredReadme = Assert.Single(
+                Assert.Single(viewModel.TreeNodes).Flatten(),
+                node => string.Equals(node.DisplayName, "README.md", StringComparison.Ordinal));
+            Assert.True(filteredReadme.IsChecked);
+            filteredReadme.IsChecked = false;
+            filteredReadme.IsChecked = true;
+
+            await SetFilterTextAsync(window, filterBox, "PreviewService");
+            Assert.False(Assert.Single(
+                Assert.Single(viewModel.TreeNodes).Flatten(),
+                node => string.Equals(node.DisplayName, "PreviewService.cs", StringComparison.Ordinal)).IsChecked);
+
+            await UiTestDriver.PressKeyAsync(window, Key.Escape);
+            Assert.False(viewModel.FilterVisible);
+            await GetSearchFilterController(window).CloseFilterAsync();
+
+            Assert.Equal([readmePath], UiTestDriver.GetCheckedTreePaths(window));
         }
         finally
         {
@@ -154,6 +504,33 @@ public sealed class MainWindowSearchFilterUiTests(UiWorkspaceFixture workspace)
                            !UiTestDriver.GetRequiredControl<Border>(window, "FilterBarContainer").IsVisible;
                 },
                 "search to replace filter");
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task SearchClose_InterruptsOpeningWithoutQueuedSecondAnimation()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var controller = GetSearchFilterController(window);
+            var searchBar = UiTestDriver.GetRequiredControl<SearchBarView>(window, "SearchBar");
+            var container = UiTestDriver.GetRequiredControl<Border>(window, "SearchBarContainer");
+
+            controller.ShowSearch(focusInput: false);
+            await controller.CloseSearchAsync(focusTree: false);
+
+            Assert.False(controller.IsAnimating);
+            Assert.False(UiTestDriver.GetViewModel(window).SearchVisible);
+            Assert.False(container.IsVisible);
+            Assert.Equal(0, container.Height);
+            Assert.Equal(0, searchBar.Opacity);
+            Assert.Equal(5, Assert.IsType<TranslateTransform>(searchBar.RenderTransform).Y);
         }
         finally
         {
@@ -242,6 +619,8 @@ public sealed class MainWindowSearchFilterUiTests(UiWorkspaceFixture workspace)
             Assert.False(root.IsExpanded);
 
             await UiTestDriver.PressKeyAsync(window, Key.Escape);
+            Assert.False(UiTestDriver.GetViewModel(window).SearchVisible);
+            await GetSearchFilterController(window).CloseSearchAsync();
             await UiTestDriver.WaitForConditionAsync(
                 window,
                 () =>
@@ -1081,6 +1460,8 @@ public sealed class MainWindowSearchFilterUiTests(UiWorkspaceFixture workspace)
             Assert.True(CountDescriptorNodes(filteredRoot.Descriptor) < baselineCount);
 
             await UiTestDriver.PressKeyAsync(window, Key.Escape);
+            Assert.False(viewModel.FilterVisible);
+            await GetSearchFilterController(window).CloseFilterAsync();
             await UiTestDriver.WaitForConditionAsync(
                 window,
                 () =>
@@ -1106,6 +1487,23 @@ public sealed class MainWindowSearchFilterUiTests(UiWorkspaceFixture workspace)
         }
     }
 
+    private static void AssertPanelBorderIsFullyVisible(
+        UserControl surface,
+        Border container,
+        MainWindow window)
+    {
+        var panel = Assert.IsType<Border>(surface.Content);
+        var panelBounds = UiTestDriver.GetBoundsInWindow(panel, window);
+        var containerBounds = UiTestDriver.GetBoundsInWindow(container, window);
+
+        Assert.InRange(containerBounds.Height, 47.5, 48.5);
+        Assert.InRange(panelBounds.Height, 45.5, 46.5);
+        Assert.True(panelBounds.Top >= containerBounds.Top - 0.5);
+        Assert.True(
+            panelBounds.Bottom <= containerBounds.Bottom + 0.5,
+            $"The panel border extends beyond its clipping container: panel={panelBounds}, container={containerBounds}.");
+    }
+
     private static async Task ApplyAndCloseSearchAsync(MainWindow window, string query)
     {
         await UiTestDriver.OpenSearchAsync(window);
@@ -1126,6 +1524,15 @@ public sealed class MainWindowSearchFilterUiTests(UiWorkspaceFixture workspace)
                        string.IsNullOrEmpty(viewModel.SearchQuery);
             },
             "search cycle to close");
+    }
+
+    private static async Task SetFilterTextAsync(
+        MainWindow window,
+        TextBox filterBox,
+        string query)
+    {
+        await window.Dispatcher.InvokeAsync(() => filterBox.Text = query);
+        await UiTestDriver.WaitForFilterAppliedAsync(window, query);
     }
 
     private static int CountRealizedNodes(TreeNodeViewModel root)

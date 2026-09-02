@@ -15,10 +15,10 @@ public sealed class SelectionSessionStateTests
                 [".hidden"] = false
             });
 
-        cache.UpdateFromVisibleOptions(
+        cache.UpdateFromVisibleOptionStates(
         [
-            new(".cs", true),
-            new(".json", true)
+            (".cs", true),
+            (".json", true)
         ]);
 
         var states = cache.SnapshotOptionStatesOrNull(suppressLegacySelectedOnlyState: true);
@@ -44,6 +44,42 @@ public sealed class SelectionSessionStateTests
     }
 
     [Fact]
+    public void SelectionOptionStateCache_TryUpdateKnownOption_UpdatesInPlaceAndPreservesHiddenState()
+    {
+        var cache = new SelectionOptionStateCache(StringComparer.OrdinalIgnoreCase);
+        cache.RestoreProfile(
+            selectedNames: [".cs", ".hidden-selected"],
+            optionStates: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+            {
+                [".cs"] = true,
+                [".hidden-selected"] = true,
+                [".hidden"] = false
+            });
+        var selectedNames = cache.SelectedNames;
+        var optionStates = cache.OptionStates;
+        cache.MarkIncomplete();
+
+        var updated = cache.TryUpdateKnownOption(".CS", isChecked: false, out var previousState);
+
+        Assert.True(updated);
+        Assert.True(previousState);
+        Assert.True(cache.HasFullState);
+        Assert.Same(selectedNames, cache.SelectedNames);
+        Assert.Same(optionStates, cache.OptionStates);
+        Assert.DoesNotContain(".cs", cache.SelectedNames, StringComparer.OrdinalIgnoreCase);
+        Assert.Contains(".hidden-selected", cache.SelectedNames, StringComparer.OrdinalIgnoreCase);
+        Assert.False(cache.OptionStates[".cs"]);
+        Assert.True(cache.OptionStates[".hidden-selected"]);
+        Assert.False(cache.OptionStates[".hidden"]);
+        Assert.True(cache.TryUpdateKnownOption(".cs", isChecked: true, out previousState));
+        Assert.False(previousState);
+        Assert.Contains(".cs", cache.SelectedNames, StringComparer.OrdinalIgnoreCase);
+        Assert.True(cache.OptionStates[".cs"]);
+        Assert.False(cache.TryUpdateKnownOption(".new", isChecked: true, out _));
+        Assert.DoesNotContain(".new", cache.OptionStates.Keys, StringComparer.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void SelectionOptionStateCache_LegacyProfile_DoesNotPretendToHaveFullState()
     {
         var cache = new SelectionOptionStateCache(PathComparer.Default);
@@ -60,123 +96,9 @@ public sealed class SelectionSessionStateTests
     }
 
     [Fact]
-    public void ProjectSelectionSessionState_ApplyProfileAndReset_OwnsPreparedLifecycle()
-    {
-        var session = new ProjectSelectionSessionState();
-        var profile = new ProjectSelectionProfile(
-            SelectedRootFolders: ["src"],
-            SelectedExtensions: [".cs"],
-            SelectedIgnoreOptions: [IgnoreOptionId.SmartIgnore],
-            RootFolderStates: new Dictionary<string, bool>(PathComparer.Default)
-            {
-                ["src"] = true,
-                ["docs"] = false
-            },
-            ExtensionStates: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
-            {
-                [".cs"] = true,
-                [".csv"] = false
-            },
-            IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
-            {
-                [IgnoreOptionId.SmartIgnore] = true,
-                [IgnoreOptionId.EmptyFiles] = false
-            });
-
-        session.ApplyProfile(@"C:\ProjectA", profile);
-
-        Assert.Equal(PreparedSelectionMode.Profile, session.PreparedMode);
-        Assert.True(session.HasPreparedSelectionForPath(@"C:\ProjectA"));
-        Assert.True(session.RootFolders.IsInitialized);
-        Assert.True(session.Extensions.IsInitialized);
-        Assert.True(session.IgnoreOptions.IsInitialized);
-        Assert.True(session.IgnoreOptionStateCacheIsComplete);
-        Assert.False(session.RootFolders.OptionStates["docs"]);
-        Assert.False(session.Extensions.OptionStates[".csv"]);
-        Assert.False(session.IgnoreOptions.OptionStateCache[IgnoreOptionId.EmptyFiles]);
-
-        session.ConsumePreparedSelectionForPath(@"C:\ProjectA");
-
-        Assert.Equal(PreparedSelectionMode.None, session.PreparedMode);
-        Assert.False(session.HasPreparedSelectionForPath(@"C:\ProjectA"));
-
-        session.ResetToDefaultsForProject(@"C:\ProjectB");
-
-        Assert.Equal(PreparedSelectionMode.Defaults, session.PreparedMode);
-        Assert.True(session.HasPreparedSelectionForPath(@"C:\ProjectB"));
-        Assert.False(session.RootFolders.IsInitialized);
-        Assert.False(session.Extensions.IsInitialized);
-        Assert.False(session.IgnoreOptions.IsInitialized);
-        Assert.False(session.IgnoreOptionStateCacheIsComplete);
-    }
-
-    [Fact]
-    public void ProjectSelectionSessionState_SnapshotRoundTrip_PreservesExactPreparedAndGitPreferenceState()
-    {
-        var session = new ProjectSelectionSessionState
-        {
-            LastLoadedPath = @"C:\ProjectA"
-        };
-        session.ApplyProfile(
-            @"C:\ProjectA",
-            new ProjectSelectionProfile(
-                SelectedRootFolders: ["src"],
-                SelectedExtensions: [".cs"],
-                SelectedIgnoreOptions: [IgnoreOptionId.TrackedGitFilesOnly],
-                RootFolderStates: new Dictionary<string, bool>(PathComparer.Default)
-                {
-                    ["src"] = true,
-                    ["hidden-root"] = false
-                },
-                ExtensionStates: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
-                {
-                    [".cs"] = true,
-                    [".hidden"] = false
-                },
-                IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
-                {
-                    [IgnoreOptionId.UseGitIgnore] = false,
-                    [IgnoreOptionId.TrackedGitFilesOnly] = true,
-                    [IgnoreOptionId.SmartIgnore] = false
-                }));
-        session.IgnoreOptions.AllPreference = false;
-        session.IgnoreOptions.ApplyAllPreferenceToKnownStates(false);
-        session.RootSelectionIsExplicit = true;
-        session.ExtensionSelectionIsExplicit = true;
-        session.AdvanceRevision();
-        var snapshot = session.CaptureSnapshot();
-
-        session.ResetToDefaultsForProject(@"C:\ProjectB");
-        session.LastLoadedPath = @"C:\ProjectB";
-        var revisionBeforeRestore = session.AdvanceRevision();
-
-        session.RestoreSnapshot(snapshot);
-
-        Assert.Equal(revisionBeforeRestore, session.Revision);
-        Assert.Equal(@"C:\ProjectA", session.LastLoadedPath);
-        Assert.Equal(@"C:\ProjectA", session.PreparedPath);
-        Assert.Equal(PreparedSelectionMode.Profile, session.PreparedMode);
-        Assert.False(session.RootFolders.OptionStates["hidden-root"]);
-        Assert.False(session.Extensions.OptionStates[".hidden"]);
-        Assert.False(session.IgnoreOptions.OptionStateCache[IgnoreOptionId.TrackedGitFilesOnly]);
-        Assert.True(session.RootSelectionIsExplicit);
-        Assert.True(session.ExtensionSelectionIsExplicit);
-
-        session.IgnoreOptions.ApplyAllPreferenceToKnownStates(true);
-
-        Assert.False(session.IgnoreOptions.OptionStateCache[IgnoreOptionId.UseGitIgnore]);
-        Assert.True(session.IgnoreOptions.OptionStateCache[IgnoreOptionId.TrackedGitFilesOnly]);
-    }
-
-    [Fact]
-    public void ProjectSelectionProfileBuilder_Create_MergesHiddenStatesWithVisibleSelections()
+    public void ProjectSelectionProfileBuilder_Create_PersistsOnlyDesktopExtensionAndExclusionState()
     {
         var profile = ProjectSelectionProfileBuilder.Create(
-            visibleRootFolders:
-            [
-                new("src", true),
-                new("docs", false)
-            ],
             visibleExtensions:
             [
                 new(".cs", true),
@@ -187,10 +109,6 @@ public sealed class SelectionSessionStateTests
                 new(IgnoreOptionId.SmartIgnore, true),
                 new(IgnoreOptionId.EmptyFiles, false)
             ],
-            cachedRootFolderStates: new Dictionary<string, bool>(PathComparer.Default)
-            {
-                ["hidden-root"] = false
-            },
             cachedExtensionStates: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
             {
                 [".csv"] = false
@@ -200,18 +118,12 @@ public sealed class SelectionSessionStateTests
                 [IgnoreOptionId.DotFolders] = false
             },
             selectedIgnoreOptions: [IgnoreOptionId.SmartIgnore],
-            rootFolderComparer: PathComparer.Default,
             extensionComparer: StringComparer.OrdinalIgnoreCase);
 
-        Assert.Equal(["src"], profile.SelectedRootFolders);
+        Assert.Empty(profile.SelectedRootFolders);
+        Assert.Null(profile.RootFolderStates);
         Assert.Equal([".cs"], profile.SelectedExtensions);
         Assert.Equal([IgnoreOptionId.SmartIgnore], profile.SelectedIgnoreOptions);
-
-        var rootStates = profile.RootFolderStates;
-        Assert.NotNull(rootStates);
-        Assert.True(rootStates!["src"]);
-        Assert.False(rootStates["docs"]);
-        Assert.False(rootStates["hidden-root"]);
 
         var extensionStates = profile.ExtensionStates;
         Assert.NotNull(extensionStates);

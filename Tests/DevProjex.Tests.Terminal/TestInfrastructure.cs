@@ -4,10 +4,16 @@ internal sealed class TestTerminalEnvironment : ITerminalEnvironment
 {
 	private readonly StringWriter _output = new();
 	private readonly StringWriter _error = new();
+	private readonly MemoryStream _rawOutput = new();
 
 	public TextReader Input { get; init; } = new StringReader(string.Empty);
-	public TextWriter Output => _output;
-	public TextWriter Error => _error;
+	public Stream? RawInput { get; init; }
+	public Stream? RawOutput => RawOutputOverride ?? _rawOutput;
+	public Stream? RawOutputOverride { get; init; }
+	public TextWriter Output => OutputOverride ?? _output;
+	public TextWriter Error => ErrorOverride ?? _error;
+	public TextWriter? OutputOverride { get; init; }
+	public TextWriter? ErrorOverride { get; init; }
 	public bool IsInputInteractive { get; init; }
 	public bool IsOutputInteractive { get; init; }
 	public bool IsErrorInteractive { get; init; }
@@ -17,13 +23,14 @@ internal sealed class TestTerminalEnvironment : ITerminalEnvironment
 	public bool IsTermDumb { get; init; }
 	public bool IsNoColor { get; init; }
 	public bool SupportsUnicode { get; init; } = true;
-	public int Width { get; init; } = 120;
+	public int Width { get; set; } = 120;
 	public int Height { get; init; } = 30;
 	public IReadOnlyDictionary<string, string?> Variables { get; init; } =
 		new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
 
 	public string StandardOutput => _output.ToString();
 	public string StandardError => _error.ToString();
+	public byte[] StandardOutputBytes => _rawOutput.ToArray();
 }
 
 internal sealed class TemporaryDirectory : IDisposable

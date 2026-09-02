@@ -12,15 +12,23 @@ internal interface IProjectLoadSnapshotPipelineHost
 
     TreeRefreshInput CreateTreeRefreshInput(
         string currentPath,
-        SelectionRefreshSnapshot selectionSnapshot);
+        SelectionRefreshSnapshot selectionSnapshot,
+        bool preserveTreeState);
 
     void BeforeProjectLoadTreeRefresh();
 
     BuildTreeSnapshotResult BuildTree(TreeRefreshInput input, CancellationToken cancellationToken);
 
+	bool TryHandleGitScopeDiagnostics(BuildTreeSnapshotResult result) => false;
+
     bool TryHandleTreeRootAccessDenied(TreeRefreshInput input, BuildTreeResult result);
 
-    TreeNodeViewModel BuildTreeViewModel(TreeRefreshInput input, BuildTreeResult result);
+	void ReportIncompleteTreeScan();
 
-    void ApplyProjectLoadSnapshot(ProjectLoadSnapshot snapshot, CancellationToken cancellationToken);
+	TreeNodeViewModel BuildTreeViewModel(
+		TreeRefreshInput input,
+		BuildTreeResult result,
+		CancellationToken cancellationToken);
+
+    bool ApplyProjectLoadSnapshot(ProjectLoadSnapshot snapshot, CancellationToken cancellationToken);
 }

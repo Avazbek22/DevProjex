@@ -1,5 +1,3 @@
-using System.Text.Json;
-
 namespace DevProjex.Tests.Terminal;
 
 [Collection(EnvironmentVariableCollection.Name)]
@@ -99,6 +97,32 @@ public sealed class TerminalReleaseContractRegressionTests
 	}
 
 	[Fact]
+	public async Task SessionCompletionRunsWhenStartFails()
+	{
+		var expected = new InvalidOperationException("start failed");
+		var runCalled = false;
+		var completionCalled = false;
+
+		var actual = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+			TerminalWorkspace.RunSessionLifecycleAsync(
+				() => throw expected,
+				() =>
+				{
+					runCalled = true;
+					return Task.CompletedTask;
+				},
+				() =>
+				{
+					completionCalled = true;
+					return Task.CompletedTask;
+				}));
+
+		Assert.Same(expected, actual);
+		Assert.False(runCalled);
+		Assert.True(completionCalled);
+	}
+
+	[Fact]
 	public async Task EquivalentCommandDoesNotEmitShellMetacharacterValuesAsRawTokens()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -143,6 +167,51 @@ public sealed class TerminalReleaseContractRegressionTests
 		Assert.Equal(["devprojex", "export", "context"], contextArguments[..3]);
 		Assert.Contains(Path.GetFullPath(contextDestination), contextArguments);
 		Assert.Equal("--dry-run", contextArguments[^1]);
+	}
+
+	[Fact]
+	public async Task EquivalentCommandsPreserveExplicitEmptySelection()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("src/app.cs", "class App {}");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TestTerminalEnvironment());
+		using var state = await controller.OpenAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+		state.SelectNone();
+
+		var contextArguments = ParseArgumentVector(
+			TerminalWorkspaceController.BuildEquivalentContextCommand(
+				state,
+				ProjectContextView.TreeContent,
+				ProjectContextDocumentFormat.Markdown,
+				Path.Combine(workspace.Path, "context.md")));
+		var projectArguments = ParseArgumentVector(
+			TerminalWorkspaceController.BuildEquivalentProjectCommand(
+				state,
+				ProjectCopyExportFormat.Folder,
+				Path.Combine(workspace.Path, "export")));
+
+		var expectedSource = OperatingSystem.IsWindows() ? "NUL" : "/dev/null";
+		AssertEmptySelectionSource(contextArguments, expectedSource);
+		AssertEmptySelectionSource(projectArguments, expectedSource);
+		Assert.Empty(await SelectionPathListReader.ReadAsync(
+			expectedSource,
+			new TestTerminalEnvironment(),
+			TestContext.Current.CancellationToken));
+	}
+
+	private static void AssertEmptySelectionSource(
+		string[] arguments,
+		string expectedSource)
+	{
+		var optionIndex = Array.IndexOf(arguments, "--select-from");
+		Assert.InRange(optionIndex, 0, arguments.Length - 2);
+		Assert.Equal(expectedSource, arguments[optionIndex + 1]);
+		Assert.DoesNotContain("--select", arguments);
 	}
 
 	private static string[] ParseArgumentVector(string representation)

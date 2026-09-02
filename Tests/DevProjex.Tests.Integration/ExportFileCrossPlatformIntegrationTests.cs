@@ -22,6 +22,43 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 	}
 
 	[Fact]
+	public async Task TextTreeAndContentHeaders_EscapeControlCharactersIntoSingleLines()
+	{
+		using var temp = new TemporaryDirectory();
+		var filePath = temp.CreateFile("safe.txt", "content");
+		const string unsafeName = "safe\nforged\t\u001b.txt";
+		const string escapedName = "safe\\nforged\\t\\u001B.txt";
+		var root = new TreeNodeDescriptor(
+			"root",
+			temp.Path,
+			true,
+			false,
+			"folder",
+			[new TreeNodeDescriptor(unsafeName, filePath, false, false, "text", [])]);
+		var treeExport = new TreeExportService();
+
+		var ascii = treeExport.BuildFullTree(temp.Path, root, TreeTextFormat.Ascii);
+		var plain = treeExport.BuildFullTreePlain(temp.Path, root);
+		var markdown = treeExport.BuildFullTree(temp.Path, root, TreeTextFormat.Markdown);
+		var content = await new SelectedContentExportService(new FileContentAnalyzer())
+			.BuildAsync(
+				[filePath],
+				TestContext.Current.CancellationToken,
+				_ => unsafeName);
+
+		foreach (var output in new[] { ascii, plain, content })
+		{
+			Assert.Contains(escapedName, output, StringComparison.Ordinal);
+			Assert.DoesNotContain(unsafeName, output, StringComparison.Ordinal);
+		}
+		Assert.Contains(@"safe\\nforged\\t\\u001B.txt", markdown, StringComparison.Ordinal);
+		Assert.DoesNotContain(unsafeName, markdown, StringComparison.Ordinal);
+		Assert.Equal(
+			ExportOutputMetricsCalculator.FromText(ascii),
+			treeExport.CalculateFullTreeMetrics(temp.Path, root, TreeTextFormat.Ascii));
+	}
+
+	[Fact]
 	public async Task ExportJsonTreeToFile_WritesValidJsonWithoutBom()
 	{
 		using var temp = new TemporaryDirectory();
@@ -79,7 +116,9 @@ public sealed class ExportFileCrossPlatformIntegrationTests
 		}
 		else
 		{
-			Assert.StartsWith($"Root: {Path.GetFullPath(temp.Path).Replace('\\', '/')}", written, StringComparison.Ordinal);
+			var rootLine = ContextRootPresentation.FormatMarkdownLine(
+				Path.GetFullPath(temp.Path).Replace('\\', '/'));
+			Assert.StartsWith(rootLine, written, StringComparison.Ordinal);
 			Assert.Contains("- src/", written, StringComparison.Ordinal);
 			Assert.Contains("  - main.cs", written, StringComparison.Ordinal);
 			Assert.Contains("- README.md", written, StringComparison.Ordinal);

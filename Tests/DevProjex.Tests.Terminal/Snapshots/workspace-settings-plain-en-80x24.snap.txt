@@ -1,0 +1,24 @@
+ DevProjex Terminal | <ID>
+ <PROJECT_ROOT>
+> PARAMETERS
+  [ ] All (5)
+[ ] Hide secrets
+[ ] Hide private data
+[ ] Compress code
+[ ] Strip comments
+[ ] Strip blank lines
+
+  [ ] All
+( ) No Git filtering                                                           ▲
+(*) Use .gitignore                                                             |
+( ) Tracked Git files only                                                     .
+( ) Staged Git files                                                           ▼
+  [x] All (3)
+[x] .cs
+[x] .json
+[x] .md
+
+
+
+ Files 3 | Folders 2 | 40 B | ~<TOKENS> tokens | Warnings 0 | Errors 0
+ C Content  X Exclusions  T Types  M Git mode  : Commands

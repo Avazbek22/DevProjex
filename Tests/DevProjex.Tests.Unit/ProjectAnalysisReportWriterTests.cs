@@ -18,6 +18,7 @@ public sealed class ProjectAnalysisReportWriterTests
 		var root = document.RootElement;
 		Assert.Equal(ProjectAnalysisReport.CurrentSchemaVersion, root.GetProperty("schemaVersion").GetInt32());
 		Assert.Equal("first", root.GetProperty("rootPath").GetString());
+		Assert.Equal("src", root.GetProperty("selection").GetProperty("selectedRootFolders")[0].GetString());
 		Assert.Equal("dotFolders", root.GetProperty("selection").GetProperty("selectedIgnoreOptions")[0].GetString());
 		Assert.False(Directory.EnumerateFiles(Path.GetDirectoryName(path)!, "*.tmp").Any());
 	}
@@ -35,6 +36,30 @@ public sealed class ProjectAnalysisReportWriterTests
 		var json = await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken);
 		using var document = JsonDocument.Parse(json);
 		Assert.Equal("second", document.RootElement.GetProperty("rootPath").GetString());
+	}
+
+	[Fact]
+	public async Task WriteAsync_AtomicReplacementPreservesExistingReaders()
+	{
+		using var temp = new TemporaryDirectory();
+		var path = Path.Combine(temp.Path, "report.json");
+		var writer = new ProjectAnalysisReportWriter();
+		await writer.WriteAsync(CreateReport("first"), path, TestContext.Current.CancellationToken);
+		await using var existingReader = new FileStream(
+			path,
+			FileMode.Open,
+			FileAccess.Read,
+			FileShare.ReadWrite | FileShare.Delete);
+
+		await writer.WriteAsync(CreateReport("second"), path, TestContext.Current.CancellationToken);
+
+		using var originalDocument = await JsonDocument.ParseAsync(
+			existingReader,
+			cancellationToken: TestContext.Current.CancellationToken);
+		using var replacementDocument = JsonDocument.Parse(
+			await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken));
+		Assert.Equal("first", originalDocument.RootElement.GetProperty("rootPath").GetString());
+		Assert.Equal("second", replacementDocument.RootElement.GetProperty("rootPath").GetString());
 	}
 
 	[Fact]
@@ -101,6 +126,7 @@ public sealed class ProjectAnalysisReportWriterTests
 		var root = document.RootElement;
 		Assert.Equal(ProjectAnalysisReport.CurrentSchemaVersion, root.GetProperty("schemaVersion").GetInt32());
 		Assert.Equal("stdout-root", root.GetProperty("rootPath").GetString());
+		Assert.Equal("src", root.GetProperty("selection").GetProperty("selectedRootFolders")[0].GetString());
 		Assert.Equal("dotFolders", root.GetProperty("selection").GetProperty("selectedIgnoreOptions")[0].GetString());
 	}
 

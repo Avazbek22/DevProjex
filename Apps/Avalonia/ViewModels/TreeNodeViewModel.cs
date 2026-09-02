@@ -1,6 +1,5 @@
 using Avalonia.Controls.Documents;
 using DevProjex.Avalonia.Collections;
-using DevProjex.Kernel;
 using System.Runtime.CompilerServices;
 
 namespace DevProjex.Avalonia.ViewModels;
@@ -236,14 +235,79 @@ public sealed class TreeNodeViewModel(
     /// </summary>
     public void CollectCheckedPaths(HashSet<string> selected)
     {
-        if (_isChecked == true)
+        var pending = new Stack<TreeNodeViewModel>();
+        pending.Push(this);
+        while (pending.Count > 0)
         {
-            selected.Add(FullPath);
-            return;
+            var current = pending.Pop();
+            if (current._isChecked == true)
+            {
+                selected.Add(current.FullPath);
+                continue;
+            }
+
+            for (var index = current._children.Count - 1; index >= 0; index--)
+                pending.Push(current._children[index]);
+        }
+    }
+
+    internal void SetCheckedForTreeStateRestore(bool value)
+    {
+        _deferredChildCheckedState = value;
+        if (_isChecked != value)
+        {
+            _isChecked = value;
+            RaisePropertyChanged(nameof(IsChecked));
         }
 
-        foreach (var child in _children)
-            child.CollectCheckedPaths(selected);
+        if (_children.Count == 0)
+            return;
+
+        var pending = new Stack<TreeNodeViewModel>();
+        for (var index = _children.Count - 1; index >= 0; index--)
+            pending.Push(_children[index]);
+        while (pending.Count > 0)
+        {
+            var current = pending.Pop();
+            current._deferredChildCheckedState = value;
+            if (current._isChecked != value)
+            {
+                current._isChecked = value;
+                current.RaisePropertyChanged(nameof(IsChecked));
+            }
+
+            for (var index = current._children.Count - 1; index >= 0; index--)
+                pending.Push(current._children[index]);
+        }
+    }
+
+    internal void RecalculateCheckedStateForTreeRestore()
+    {
+        if (_children.Count == 0)
+            return;
+
+        var allChecked = true;
+        var anyChecked = false;
+        for (var index = 0; index < _children.Count; index++)
+        {
+            var childState = _children[index]._isChecked;
+            if (childState != true)
+                allChecked = false;
+            if (childState != false)
+                anyChecked = true;
+            if (!allChecked && anyChecked)
+                break;
+        }
+
+        if (_children.Count < Descriptor.Children.Count)
+            allChecked = false;
+
+        bool? next = allChecked ? true : anyChecked ? null : false;
+        if (_isChecked == next)
+            return;
+
+        _isChecked = next;
+        RaisePropertyChanged(nameof(IsChecked));
     }
 
     public void UpdateIcon(IImage? icon)
@@ -428,13 +492,7 @@ public sealed class TreeNodeViewModel(
             _deferredChildCheckedState = value.Value;
 
         if (updateChildren && value.HasValue)
-        {
-            // Only propagate to already realized children. Unrealized branches inherit the
-            // latest explicit state when they are materialized later, which keeps checkbox
-            // toggles responsive even on very large trees.
-            foreach (var child in _children)
-                child.SetChecked(value.Value, updateChildren: true, updateParent: false);
-        }
+            SetRealizedDescendantsChecked(value.Value);
 
         if (updateParent)
         {
@@ -445,36 +503,56 @@ public sealed class TreeNodeViewModel(
 
     private void UpdateCheckedFromChildren()
     {
-        if (_children.Count == 0)
-            return;
-
-        // Single pass through children instead of two LINQ enumerations
-        var allChecked = true;
-        var anyChecked = false;
-        foreach (var child in _children)
+        var current = this;
+        while (current._children.Count > 0)
         {
-            if (child.IsChecked != true)
-                allChecked = false;
-            if (child.IsChecked != false)
-                anyChecked = true;
+            var allChecked = true;
+            var anyChecked = false;
+            foreach (var child in current._children)
+            {
+                if (child.IsChecked != true)
+                    allChecked = false;
+                if (child.IsChecked != false)
+                    anyChecked = true;
 
-            // Early exit: if we know result is indeterminate, stop checking
-            if (!allChecked && anyChecked)
+                if (!allChecked && anyChecked)
+                    break;
+            }
+
+            if (current._children.Count < (current.Descriptor?.Children.Count ?? current._children.Count))
+                allChecked = false;
+
+            bool? next = allChecked ? true : anyChecked ? null : false;
+            if (current._isChecked != next)
+            {
+                current._isChecked = next;
+                current.RaisePropertyChanged(nameof(IsChecked));
+            }
+
+            current = current.Parent;
+            if (current is null)
                 break;
         }
+    }
 
-        if (_children.Count < (Descriptor?.Children.Count ?? _children.Count))
-            allChecked = false;
+    private void SetRealizedDescendantsChecked(bool value)
+    {
+        var pending = new Stack<TreeNodeViewModel>();
+        for (var index = _children.Count - 1; index >= 0; index--)
+            pending.Push(_children[index]);
 
-        bool? next = allChecked ? true : anyChecked ? null : false;
-
-        if (_isChecked != next)
+        while (pending.Count > 0)
         {
-            _isChecked = next;
-            RaisePropertyChanged(nameof(IsChecked));
-        }
+            var current = pending.Pop();
+            current._deferredChildCheckedState = value;
+            if (current._isChecked == value)
+                continue;
 
-        Parent?.UpdateCheckedFromChildren();
+            current._isChecked = value;
+            current.RaisePropertyChanged(nameof(IsChecked));
+            for (var index = current._children.Count - 1; index >= 0; index--)
+                pending.Push(current._children[index]);
+        }
     }
 
     private static void SetExpandedRecursiveCore(
@@ -482,12 +560,19 @@ public sealed class TreeNodeViewModel(
         bool expanded,
         bool realizeLazyChildren)
     {
-        node.IsExpanded = expanded;
-        var children = realizeLazyChildren
-            ? node.EnsureChildrenRealized()
-            : node._children;
-        foreach (var child in children)
-            SetExpandedRecursiveCore(child, expanded, realizeLazyChildren);
+        var stack = new Stack<TreeNodeViewModel>();
+        stack.Push(node);
+
+        while (stack.Count > 0)
+        {
+            var current = stack.Pop();
+            current.IsExpanded = expanded;
+            var children = realizeLazyChildren
+                ? current.EnsureChildrenRealized()
+                : current._children;
+            for (var index = children.Count - 1; index >= 0; index--)
+                stack.Push(children[index]);
+        }
     }
 
     private IList<TreeNodeViewModel> EnsureChildrenRealized()
@@ -553,7 +638,7 @@ public sealed class TreeNodeViewModel(
         {
             var candidate = preservedChildren[index];
             if (ReferenceEquals(candidate.Descriptor, descriptor) ||
-                PathComparer.Default.Equals(
+                ProjectTreePathIdentity.CanonicalComparer.Equals(
                     candidate.FullPath,
                     descriptor.FullPath))
             {

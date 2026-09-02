@@ -57,7 +57,15 @@ Assert-Plan -Name 'Unknown documentation asset format fails safe' -Path '.github
 Assert-Plan -Name 'Root text note only' -Path 'release-note.txt' `
 	-Disabled ($allHeavyTargets + 'Documentation')
 
-Assert-Plan -Name 'Embedded help text is production' -Path 'Assets/HelpContent/en/overview.txt' `
+Assert-Plan -Name 'Embedded help text runs only content-coupled suites' -Path 'Assets/HelpContent/help.de.txt' `
+	-Enabled @('Unit', 'Integration', 'Terminal', 'Documentation') `
+	-Disabled @('UI', 'TerminalCommand', 'IgnoreScanner', 'Release', 'Store', 'Full')
+
+Assert-Plan -Name 'Nested help text stays content-coupled' -Path 'Assets/HelpContent/en/overview.txt' `
+	-Enabled @('Unit', 'Integration', 'Terminal', 'Documentation') `
+	-Disabled @('UI', 'TerminalCommand', 'IgnoreScanner', 'Release', 'Store', 'Full')
+
+Assert-Plan -Name 'Non-text file under help content fails safe to production' -Path 'Assets/HelpContent/generate-help.ps1' `
 	-Enabled @('Unit', 'Integration', 'Terminal', 'UI', 'TerminalCommand', 'Release', 'Store') `
 	-Disabled @('Full')
 
@@ -88,6 +96,11 @@ Assert-Plan -Name 'Ignore integration test' -Path 'Tests/DevProjex.Tests.Integra
 Assert-Plan -Name 'Windows path normalization' -Path 'Tests\DevProjex.Tests.UI\MainWindowTests.cs' `
 	-Enabled UI `
 	-Disabled @('Unit', 'Integration', 'Terminal', 'Release', 'Store', 'Full')
+
+Assert-Plan -Name 'Published single-file process test' `
+	-Path 'Tests/DevProjex.Tests.Terminal/PublishedSingleFileExtractionProcessTests.cs' `
+	-Enabled @('Terminal', 'Release') `
+	-Disabled @('Unit', 'Integration', 'UI', 'TerminalCommand', 'IgnoreScanner', 'Documentation', 'Store', 'Full')
 
 Assert-Plan -Name 'Mixed changes union their targets' -Path @('README.md', 'Tests/DevProjex.Tests.Unit/FooTests.cs') `
 	-Enabled @('Documentation', 'Unit') `

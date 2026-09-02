@@ -42,20 +42,11 @@ public sealed class TerminalProgressPtyTests
 		await terminal.WaitForScreenAsync(
 			"> CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendAsync("Z", TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
-			"Choose the physical output kind",
-			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync("z", TestContext.Current.CancellationToken);
 		await ReplacePromptTextAsync(terminal, destination);
 		await terminal.WaitForScreenAsync(
-			"Destination state: Ready",
+			"Export?",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 
 		Assert.NotNull(dataRoot);
@@ -76,6 +67,14 @@ public sealed class TerminalProgressPtyTests
 		Assert.Contains("Esc or Ctrl+C", active, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 
+		await terminal.SendAsync(":\u001bOP\u0010", TestContext.Current.CancellationToken);
+		await Task.Delay(150, TestContext.Current.CancellationToken);
+		var gated = terminal.CaptureScreen();
+		Assert.Contains("Esc or Ctrl+C", gated, StringComparison.Ordinal);
+		Assert.DoesNotContain("Filter actions:", gated, StringComparison.Ordinal);
+		Assert.DoesNotContain(":set", gated, StringComparison.Ordinal);
+		Assert.DoesNotContain("ACTION PALETTE", gated, StringComparison.Ordinal);
+
 		await terminal.SendCtrlCAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"Operation canceled",
@@ -86,26 +85,30 @@ public sealed class TerminalProgressPtyTests
 		await terminal.WaitForScreenAsync(
 			"> CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync(":", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			":set",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> CONTEXT PREVIEW",
+			cancellationToken: TestContext.Current.CancellationToken);
 
 		await StartFolderExportAsync(
 			terminal,
 			destination,
 			TestContext.Current.CancellationToken);
 		var completed = await terminal.WaitForScreenAsync(
-			"Equivalent command:",
+			"Export completed:",
 			timeout: TimeSpan.FromSeconds(45),
 			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.Contains("Elapsed:", completed, StringComparison.Ordinal);
+		Assert.Contains("Export completed:", completed, StringComparison.Ordinal);
 		Assert.True(Directory.Exists(destination));
 		Assert.Equal(
 			1_001,
 			Directory.EnumerateFiles(destination, "*", SearchOption.AllDirectories).Count());
 		Assert.False(terminal.HasExited);
 
-		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			"Equivalent command:",
-			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"> CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);
@@ -117,7 +120,7 @@ public sealed class TerminalProgressPtyTests
 		await terminal.WaitForScreenAsync(
 			"> CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		await terminal.CompleteShellRestorationHandshakeAsync(
 			TestContext.Current.CancellationToken);
 		TerminalPtyStateAssertions.AssertRestoredAtShellCompletion(
@@ -152,20 +155,11 @@ public sealed class TerminalProgressPtyTests
 		string destination,
 		CancellationToken cancellationToken)
 	{
-		await terminal.SendAsync("Z", cancellationToken);
-		await terminal.WaitForScreenAsync(
-			"Choose the physical output kind",
-			cancellationToken: cancellationToken);
-		await terminal.SendTabAsync(cancellationToken);
-		await terminal.SendTabAsync(cancellationToken);
-		await terminal.SendEnterAsync(cancellationToken);
+		await terminal.SendAsync("z", cancellationToken);
 		await ReplacePromptTextAsync(terminal, destination);
 		await terminal.WaitForScreenAsync(
-			"Destination state: Ready",
+			"Export?",
 			cancellationToken: cancellationToken);
-		await terminal.SendTabAsync(cancellationToken);
-		await terminal.SendTabAsync(cancellationToken);
-		await terminal.SendTabAsync(cancellationToken);
 		await terminal.SendEnterAsync(cancellationToken);
 	}
 

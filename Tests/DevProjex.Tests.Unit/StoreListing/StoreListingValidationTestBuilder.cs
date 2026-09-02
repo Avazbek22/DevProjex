@@ -14,29 +14,29 @@ internal sealed class StoreListingValidationTestBuilder
     [
         "Field",
         "ID",
-        "Type (Тип)",
+        "Type",
         "default",
         .. StoreListingPaths.LocaleColumns
     ];
 
     private readonly Dictionary<string, Dictionary<string, string>> _rows = new(StringComparer.Ordinal)
     {
-        ["Title"] = CreateRow("4", "Текст"),
-        ["Description"] = CreateRow("2", "Текст"),
-        ["ShortDescription"] = CreateRow("8", "Текст"),
-        ["DesktopScreenshot1"] = CreateRow("100", "Относительный путь (или URL-адрес файла в Центре партнеров)"),
-        ["DesktopScreenshot2"] = CreateRow("101", "Относительный путь (или URL-адрес файла в Центре партнеров)"),
-        ["DesktopScreenshot3"] = CreateRow("102", "Относительный путь (или URL-адрес файла в Центре партнеров)"),
-        ["DesktopScreenshot4"] = CreateRow("103", "Относительный путь (или URL-адрес файла в Центре партнеров)"),
-        ["DesktopScreenshot5"] = CreateRow("104", "Относительный путь (или URL-адрес файла в Центре партнеров)"),
-        ["StoreLogo300x300"] = CreateRow("602", "Относительный путь (или URL-адрес файла в Центре партнеров)"),
-        ["SearchTerm1"] = CreateRow("900", "Текст"),
-        ["SearchTerm2"] = CreateRow("901", "Текст"),
-        ["SearchTerm3"] = CreateRow("902", "Текст"),
-        ["SearchTerm4"] = CreateRow("903", "Текст"),
-        ["SearchTerm5"] = CreateRow("904", "Текст"),
-        ["SearchTerm6"] = CreateRow("905", "Текст"),
-        ["SearchTerm7"] = CreateRow("906", "Текст")
+        ["Title"] = CreateRow("4", "Text"),
+        ["Description"] = CreateRow("2", "Text"),
+        ["ShortDescription"] = CreateRow("8", "Text"),
+        ["DesktopScreenshot1"] = CreateRow("100", "Relative path (or URL to file in Partner Center)"),
+        ["DesktopScreenshot2"] = CreateRow("101", "Relative path (or URL to file in Partner Center)"),
+        ["DesktopScreenshot3"] = CreateRow("102", "Relative path (or URL to file in Partner Center)"),
+        ["DesktopScreenshot4"] = CreateRow("103", "Relative path (or URL to file in Partner Center)"),
+        ["DesktopScreenshot5"] = CreateRow("104", "Relative path (or URL to file in Partner Center)"),
+        ["StoreLogo300x300"] = CreateRow("602", "Relative path (or URL to file in Partner Center)"),
+        ["SearchTerm1"] = CreateRow("900", "Text"),
+        ["SearchTerm2"] = CreateRow("901", "Text"),
+        ["SearchTerm3"] = CreateRow("902", "Text"),
+        ["SearchTerm4"] = CreateRow("903", "Text"),
+        ["SearchTerm5"] = CreateRow("904", "Text"),
+        ["SearchTerm6"] = CreateRow("905", "Text"),
+        ["SearchTerm7"] = CreateRow("906", "Text")
     };
 
     private readonly string[] _defaultSearchTerms =
@@ -251,7 +251,7 @@ internal sealed class StoreListingValidationTestBuilder
         {
             ["Field"] = string.Empty,
             ["ID"] = id,
-            ["Type (Тип)"] = type,
+            ["Type"] = type,
             ["default"] = string.Empty
         };
 

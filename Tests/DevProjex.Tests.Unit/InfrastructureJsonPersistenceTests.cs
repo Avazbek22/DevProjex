@@ -64,6 +64,41 @@ public sealed class InfrastructureJsonPersistenceTests
 	}
 
 	[Fact]
+	public async Task ProjectProfileStore_LoadsMissingMarkedSecretsAndPersistsMarksInDedicatedStore()
+	{
+		using var temp = new TemporaryDirectory();
+		var store = new ProjectProfileStore(() => Path.Combine(temp.Path, "appdata"));
+		var projectPath = Path.Combine(temp.Path, "RepoBeforeManualMarks");
+		var storePath = store.GetPath();
+		Directory.CreateDirectory(Path.GetDirectoryName(storePath)!);
+		File.WriteAllText(storePath, CreateLegacyProfileJson(projectPath));
+
+		Assert.True(store.TryLoadProfile(projectPath, out var loaded));
+		Assert.Empty(loaded.MarkedSecrets!);
+
+		var write = await store.AddMarkAsync(
+			projectPath,
+			new MarkedSecretProfileEntry("9f2a4c1e8b3d", "STRIPE_SECRET_KEY", 24),
+			TestContext.Current.CancellationToken);
+		Assert.True(write.Succeeded);
+
+		using var document = JsonDocument.Parse(File.ReadAllText(storePath));
+		var persistedMarks = document.RootElement
+			.GetProperty("profiles")
+			.EnumerateObject()
+			.Single()
+			.Value
+			.GetProperty("markedSecrets")
+			.EnumerateArray();
+		Assert.Empty(persistedMarks);
+		Assert.True(store.TryLoadProfile(projectPath, out var reloaded));
+		var persistedMark = Assert.Single(reloaded.MarkedSecrets!);
+		Assert.Equal("9f2a4c1e8b3d", persistedMark.H);
+		Assert.Equal("STRIPE_SECRET_KEY", persistedMark.Key);
+		Assert.Equal(24, persistedMark.Length);
+	}
+
+	[Fact]
 	public void ProjectProfileStore_LoadsLegacySelectedOnlyPayloadAndRewritesFullStateShape()
 	{
 		using var temp = new TemporaryDirectory();
@@ -179,6 +214,8 @@ public sealed class InfrastructureJsonPersistenceTests
 		{
 			IsCompactMode = true,
 			IsTreeExpansionAnimationEnabled = false,
+			IsStatusMetricsAnimationEnabled = false,
+			IsToolAnimationEnabled = false,
 			IsTerminalCommandPromptDismissed = true,
 			PreferredLanguage = AppLanguage.Ru
 		};
@@ -201,12 +238,16 @@ public sealed class InfrastructureJsonPersistenceTests
 		Assert.False(preset.TryGetProperty("theme", out _));
 		Assert.False(preset.TryGetProperty("effect", out _));
 		Assert.True(viewSettings.GetProperty("isTerminalCommandPromptDismissed").GetBoolean());
+		Assert.False(viewSettings.GetProperty("isStatusMetricsAnimationEnabled").GetBoolean());
+		Assert.False(viewSettings.GetProperty("isToolAnimationEnabled").GetBoolean());
 		Assert.Equal("ru", viewSettings.GetProperty("preferredLanguage").GetString());
 		Assert.False(userDocument.RootElement.TryGetProperty("presets", out _));
 
 		var loaded = store.Load();
 		Assert.True(loaded.ViewSettings.IsCompactMode);
 		Assert.False(loaded.ViewSettings.IsTreeExpansionAnimationEnabled);
+		Assert.False(loaded.ViewSettings.IsStatusMetricsAnimationEnabled);
+		Assert.False(loaded.ViewSettings.IsToolAnimationEnabled);
 		Assert.True(loaded.ViewSettings.IsTerminalCommandPromptDismissed);
 		Assert.Equal(AppLanguage.Ru, loaded.ViewSettings.PreferredLanguage);
 		Assert.Equal(42, themeStore.Load().Presets["Dark.Acrylic"].BackgroundTransparency);
@@ -256,6 +297,45 @@ public sealed class InfrastructureJsonPersistenceTests
 		Assert.Equal("{ invalid json", File.ReadAllText(fileSet.PrimaryPath));
 	}
 
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public void JsonStorePersistence_TryReadNormalized_RejectsMalformedUtf8WithoutMutatingPrimary(
+		bool useBoundedReader)
+	{
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "settings.json");
+		Directory.CreateDirectory(fileSet.DirectoryPath);
+		var prefix = Encoding.UTF8.GetBytes("{\"name\":\"");
+		var suffix = Encoding.UTF8.GetBytes("\",\"count\":3}");
+		var payload = prefix.Concat([byte.MaxValue]).Concat(suffix).ToArray();
+		File.WriteAllBytes(fileSet.PrimaryPath, payload);
+
+		TestDocument document;
+		bool requiresRewrite;
+		var result = useBoundedReader
+			? JsonStorePersistence.TryReadNormalized(
+				fileSet.PrimaryPath,
+				JsonOptions,
+				static () => new TestDocument("default", 0),
+				static document => document,
+				out document,
+				out requiresRewrite,
+				maximumDocumentBytes: 256)
+			: JsonStorePersistence.TryReadNormalized(
+				fileSet.PrimaryPath,
+				JsonOptions,
+				static () => new TestDocument("default", 0),
+				static document => document,
+				out document,
+				out requiresRewrite);
+
+		Assert.False(result);
+		Assert.False(requiresRewrite);
+		Assert.Equal(new TestDocument("default", 0), document);
+		Assert.Equal(payload, File.ReadAllBytes(fileSet.PrimaryPath));
+	}
+
 	[Fact]
 	public void JsonStorePersistence_TryReadNormalized_ReportsRewriteOnlyAfterSuccessfulNormalization()
 	{
@@ -278,6 +358,151 @@ public sealed class InfrastructureJsonPersistenceTests
 	}
 
 	[Fact]
+	public void JsonStorePersistence_TryReadNormalized_RejectsDocumentBeyondExplicitLimit()
+	{
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "settings.json");
+		Directory.CreateDirectory(fileSet.DirectoryPath);
+		using (var stream = new FileStream(fileSet.PrimaryPath, FileMode.CreateNew, FileAccess.Write))
+			stream.SetLength(257);
+
+		var result = JsonStorePersistence.TryReadNormalized(
+			fileSet.PrimaryPath,
+			JsonOptions,
+			static () => new TestDocument("default", 0),
+			static document => document,
+			out var document,
+			out var requiresRewrite,
+			maximumDocumentBytes: 256);
+
+		Assert.False(result);
+		Assert.False(requiresRewrite);
+		Assert.Equal(new TestDocument("default", 0), document);
+		Assert.Equal(257, new FileInfo(fileSet.PrimaryPath).Length);
+	}
+
+	[Fact]
+	public void JsonStorePersistence_BoundedReadRejectsContentThatGrewAfterLengthProbe()
+	{
+		var bytes = Encoding.UTF8.GetBytes("0123456789overflow");
+		using var stream = new StaleLengthMemoryStream(bytes, reportedLength: 10);
+
+		var result = JsonStorePersistence.TryReadAllTextWithinSizeLimit(
+			stream,
+			maximumDocumentBytes: 10,
+			out var text);
+
+		Assert.False(result);
+		Assert.Empty(text);
+		Assert.Equal(11, stream.Position);
+	}
+
+	[Fact]
+	public void JsonStorePersistence_BoundedJsonParseRejectsContentThatGrewAfterLengthProbe()
+	{
+		var bytes = Encoding.UTF8.GetBytes("{\"value\":1}overflow");
+		using var stream = new StaleLengthMemoryStream(bytes, reportedLength: 11);
+
+		var result = JsonStorePersistence.TryParseDocumentWithinSizeLimit(
+			stream,
+			maximumDocumentBytes: 11,
+			default,
+			out var document);
+
+		Assert.False(result);
+		Assert.Null(document);
+		Assert.Equal(12, stream.Position);
+	}
+
+	[Fact]
+	public void JsonStorePersistence_ContainsFutureDocument_ProtectsDocumentBeyondExplicitLimit()
+	{
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "settings.json");
+		Directory.CreateDirectory(fileSet.DirectoryPath);
+		using (var stream = new FileStream(fileSet.PrimaryPath, FileMode.CreateNew, FileAccess.Write))
+			stream.SetLength(257);
+
+		var protectedDocument = JsonStorePersistence.ContainsFutureDocument(
+			fileSet,
+			currentSchemaVersion: 1,
+			maximumDocumentBytes: 256);
+
+		Assert.True(protectedDocument);
+		Assert.Equal(257, new FileInfo(fileSet.PrimaryPath).Length);
+	}
+
+	[Fact]
+	public void JsonStorePersistence_ContainsFutureDocument_DefaultLimitProtectsGrowingStores()
+	{
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "settings.json");
+		Directory.CreateDirectory(fileSet.DirectoryPath);
+		using (var stream = new FileStream(fileSet.PrimaryPath, FileMode.CreateNew, FileAccess.Write))
+			stream.SetLength(JsonStorePersistence.SmallDocumentMaximumBytes + 1);
+
+		var protectedDocument = JsonStorePersistence.ContainsFutureDocument(
+			fileSet,
+			currentSchemaVersion: 1);
+
+		Assert.True(protectedDocument);
+	}
+
+	[Theory]
+	[InlineData("utf16-le")]
+	[InlineData("utf16-be")]
+	[InlineData("utf32-le")]
+	[InlineData("utf32-be")]
+	public void JsonStorePersistence_ContainsFutureDocument_DetectsUnicodeSchema(string encodingName)
+	{
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "settings.json");
+		Directory.CreateDirectory(fileSet.DirectoryPath);
+		Encoding encoding = encodingName switch
+		{
+			"utf16-le" => new UnicodeEncoding(false, true, true),
+			"utf16-be" => new UnicodeEncoding(true, true, true),
+			"utf32-le" => new UTF32Encoding(false, true, true),
+			"utf32-be" => new UTF32Encoding(true, true, true),
+			_ => throw new ArgumentOutOfRangeException(nameof(encodingName))
+		};
+		File.WriteAllText(
+			fileSet.PrimaryPath,
+			"""{ "schemaVersion": 2, "name": "future" }""",
+			encoding);
+
+		var protectedDocument = JsonStorePersistence.ContainsFutureDocument(
+			fileSet,
+			currentSchemaVersion: 1,
+			maximumDocumentBytes: 256);
+
+		Assert.True(protectedDocument);
+	}
+
+	[Theory]
+	[InlineData("schemaVersion", null)]
+	[InlineData("defaultsRevision", 1)]
+	public void JsonStorePersistence_ContainsFutureDocument_ProtectsVersionBeyondInt32(
+		string propertyName,
+		int? currentDefaultsRevision)
+	{
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "settings.json");
+		Directory.CreateDirectory(fileSet.DirectoryPath);
+		var json = propertyName == "schemaVersion"
+			? """{ "schemaVersion": 2147483648 }"""
+			: """{ "schemaVersion": 1, "defaultsRevision": 2147483648 }""";
+		File.WriteAllText(fileSet.PrimaryPath, json);
+
+		var protectedDocument = JsonStorePersistence.ContainsFutureDocument(
+			fileSet,
+			currentSchemaVersion: 1,
+			currentDefaultsRevision);
+
+		Assert.True(protectedDocument);
+	}
+
+	[Fact]
 	public void JsonStorePersistence_TryWriteAtomic_CommitsPrimaryMirrorsBackupAndLeavesNoTempFiles()
 	{
 		using var temp = new TemporaryDirectory();
@@ -297,6 +522,57 @@ public sealed class InfrastructureJsonPersistenceTests
 	}
 
 	[Fact]
+	public void JsonStorePersistence_TryWriteAtomic_RestrictsUnixStoreCopiesToCurrentUser()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Unix file modes do not apply on Windows.");
+			return;
+		}
+
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "settings.json");
+
+		Assert.True(JsonStorePersistence.TryWriteAtomic(
+			fileSet,
+			new TestDocument("private", 1),
+			JsonOptions));
+
+		const UnixFileMode expected = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+		Assert.Equal(expected, File.GetUnixFileMode(fileSet.PrimaryPath));
+		Assert.Equal(expected, File.GetUnixFileMode(fileSet.BackupPath));
+	}
+
+	[Fact]
+	public void JsonStorePersistence_ContainsFutureDocument_RestrictsExistingUnixStoreCopiesWithoutRewriting()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Unix file modes do not apply on Windows.");
+			return;
+		}
+
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "settings.json");
+		Directory.CreateDirectory(fileSet.DirectoryPath);
+		const string payload = "{\"schemaVersion\":1,\"name\":\"existing\"}";
+		File.WriteAllText(fileSet.PrimaryPath, payload);
+		File.WriteAllText(fileSet.BackupPath, payload);
+		const UnixFileMode legacyMode = UnixFileMode.UserRead | UnixFileMode.UserWrite |
+		                                UnixFileMode.GroupRead | UnixFileMode.OtherRead;
+		File.SetUnixFileMode(fileSet.PrimaryPath, legacyMode);
+		File.SetUnixFileMode(fileSet.BackupPath, legacyMode);
+
+		Assert.False(JsonStorePersistence.ContainsFutureDocument(fileSet, currentSchemaVersion: 1));
+
+		const UnixFileMode expected = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+		Assert.Equal(payload, File.ReadAllText(fileSet.PrimaryPath));
+		Assert.Equal(payload, File.ReadAllText(fileSet.BackupPath));
+		Assert.Equal(expected, File.GetUnixFileMode(fileSet.PrimaryPath));
+		Assert.Equal(expected, File.GetUnixFileMode(fileSet.BackupPath));
+	}
+
+	[Fact]
 	public void JsonStorePersistence_TryWriteAtomic_ReturnsFalseForUnresolvablePrimaryDirectory()
 	{
 		var fileSet = new JsonStoreFileSet("settings.json", "settings.json.bak", "settings.json.lock");
@@ -310,6 +586,28 @@ public sealed class InfrastructureJsonPersistenceTests
 	}
 
 	[Fact]
+	public void JsonStorePersistence_DurableWriteDoesNotReportSuccessWithoutBackup()
+	{
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "secret-marks.json");
+		Directory.CreateDirectory(fileSet.DirectoryPath);
+		File.WriteAllText(fileSet.PrimaryPath, "old");
+		var operations = new JsonStoreWriteOperations(
+			static (_, _, _) => throw new PlatformNotSupportedException("replace unavailable"),
+			static (_, _, _) => throw new IOException("backup unavailable"));
+
+		var result = JsonStorePersistence.TryWriteAtomicDurable(
+			fileSet,
+			new TestDocument("committed", 7),
+			JsonOptions,
+			operations);
+
+		Assert.False(result);
+		Assert.Contains("\"name\":\"committed\"", File.ReadAllText(fileSet.PrimaryPath));
+		Assert.False(File.Exists(fileSet.BackupPath));
+	}
+
+	[Fact]
 	public void CrossProcessFileLock_AcquireFailsFastWhenSidecarLockIsAlreadyHeld()
 	{
 		using var temp = new TemporaryDirectory();
@@ -317,6 +615,56 @@ public sealed class InfrastructureJsonPersistenceTests
 		using var heldLock = CrossProcessFileLock.Acquire(fileSet, TimeSpan.Zero);
 
 		Assert.ThrowsAny<IOException>(() => CrossProcessFileLock.Acquire(fileSet, TimeSpan.Zero));
+	}
+
+	[Fact]
+	public void CrossProcessFileLock_BoundedWaitTimesOutAndDoesNotPoisonTheSidecar()
+	{
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "settings.json");
+		var timeout = TimeSpan.FromMilliseconds(75);
+		var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+		using (CrossProcessFileLock.Acquire(fileSet, TimeSpan.Zero))
+		{
+			Assert.ThrowsAny<IOException>(() => CrossProcessFileLock.Acquire(fileSet, timeout));
+		}
+		stopwatch.Stop();
+
+		Assert.True(stopwatch.Elapsed >= timeout, $"Lock wait ended after {stopwatch.Elapsed}.");
+		using var reacquired = CrossProcessFileLock.Acquire(fileSet, TimeSpan.Zero);
+		Assert.NotNull(reacquired);
+	}
+
+	[Fact]
+	public async Task CrossProcessFileLock_BoundedWaitObservesCancellationPromptly()
+	{
+		using var temp = new TemporaryDirectory();
+		var fileSet = CreateFileSet(temp, "settings.json");
+		using var heldLock = CrossProcessFileLock.Acquire(fileSet, TimeSpan.Zero);
+		using var cancellation = new CancellationTokenSource();
+		using var acquisitionStarted = new ManualResetEventSlim();
+		var acquisition = Task.Factory.StartNew(
+			() =>
+			{
+				acquisitionStarted.Set();
+				return CrossProcessFileLock.AcquireWithCancellation(
+					fileSet,
+					TimeSpan.FromSeconds(5),
+					cancellation.Token);
+			},
+			CancellationToken.None,
+			TaskCreationOptions.LongRunning,
+			TaskScheduler.Default);
+		Assert.True(acquisitionStarted.Wait(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken));
+		Assert.False(acquisition.IsCompleted);
+
+		var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+		cancellation.Cancel();
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(() => acquisition);
+
+		Assert.True(
+			stopwatch.Elapsed < TimeSpan.FromSeconds(1),
+			$"Cancellation was observed after {stopwatch.Elapsed}.");
 	}
 
 	[Fact]
@@ -356,6 +704,12 @@ public sealed class InfrastructureJsonPersistenceTests
 	{
 		var primaryPath = Path.Combine(temp.Path, "appdata", fileName);
 		return new JsonStoreFileSet(primaryPath, $"{primaryPath}.bak", $"{primaryPath}.lock");
+	}
+
+	private sealed class StaleLengthMemoryStream(byte[] buffer, long reportedLength) :
+		MemoryStream(buffer, writable: false)
+	{
+		public override long Length => reportedLength;
 	}
 
 	private sealed record TestDocument(string Name, int Count);

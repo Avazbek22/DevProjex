@@ -34,9 +34,15 @@ public sealed class ContextDiagnosticRenderer(
 			};
 			console.MarkupLine(
 				$"[{color}]{label}[[{Markup.Escape(diagnostic.Code)}]][/]:");
-			console.WriteLine(ResolveMessage(localization, diagnostic.Code));
+			console.WriteLine(ResolveMessage(localization, diagnostic));
 			if (!string.IsNullOrWhiteSpace(diagnostic.Path))
-				console.WriteLine($"{localization["Terminal.Label.Path"]}: {diagnostic.Path}");
+			{
+				var labelKey = diagnostic.Code == "DPX-PROJECT-SELECTION-WARNING"
+					? "Terminal.Label.Value"
+					: "Terminal.Label.Path";
+				environment.Error.WriteLine(
+					$"{localization[labelKey]}: {TerminalTextEscaping.EscapeSingleLine(diagnostic.Path)}");
+			}
 		}
 	}
 
@@ -50,6 +56,10 @@ public sealed class ContextDiagnosticRenderer(
 				"Terminal.Diagnostic.TrackedIndexUnavailable",
 			"DPX-GIT-TRACKED-INDEX-PARTIAL" =>
 				"Terminal.Diagnostic.TrackedIndexPartial",
+			GitScopeFilter.UnavailableDiagnosticCode =>
+				"Terminal.Diagnostic.GitStateUnavailable",
+			GitScopeFilter.DeletedDiagnosticCode =>
+				"Terminal.Diagnostic.GitStateDeleted",
 			"DPX-SELECTION-PATH-MISSING" =>
 				"Terminal.Diagnostic.SelectedPathMissing",
 			"DPX-PROJECT-ROOT-ACCESS-DENIED" =>
@@ -62,4 +72,11 @@ public sealed class ContextDiagnosticRenderer(
 		};
 		return localization[key];
 	}
+
+	internal static string ResolveMessage(
+		LocalizationService localization,
+		ContextDiagnostic diagnostic) =>
+		diagnostic.Code == GitScopeFilter.DeletedDiagnosticCode
+			? localization.Format("Terminal.Diagnostic.GitStateDeleted", diagnostic.Count ?? 0)
+			: ResolveMessage(localization, diagnostic.Code);
 }

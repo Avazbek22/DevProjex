@@ -1,8 +1,6 @@
-using Avalonia.Threading;
 using DevProjex.Application.Context;
 using DevProjex.Application.DesktopControl;
 using DevProjex.Avalonia.Coordinators;
-using DevProjex.Kernel;
 using DevProjex.Terminal.DesktopControl;
 
 namespace DevProjex.Avalonia;
@@ -11,13 +9,40 @@ public partial class MainWindow
 {
     private async Task EnsureDesktopControlServerAsync(CancellationToken cancellationToken)
     {
-        if (_desktopControlServer is not null)
+        if (Volatile.Read(ref _desktopControlServerShutdownRequested) != 0)
+            return;
+        if (Volatile.Read(ref _desktopControlServer) is not null)
             return;
 
-        _desktopControlServer = await DesktopControlServer.StartAsync(
+        var server = await _desktopControlServerFactory(
             new AvaloniaDesktopInteractionHandler(this),
             _currentPath,
-            cancellationToken: cancellationToken);
+            cancellationToken);
+        if (cancellationToken.IsCancellationRequested ||
+            Volatile.Read(ref _desktopControlServerShutdownRequested) != 0)
+        {
+            await server.DisposeAsync();
+            cancellationToken.ThrowIfCancellationRequested();
+            return;
+        }
+
+        if (Interlocked.CompareExchange(ref _desktopControlServer, server, null) is not null)
+        {
+            await server.DisposeAsync();
+            cancellationToken.ThrowIfCancellationRequested();
+            return;
+        }
+
+        if ((cancellationToken.IsCancellationRequested ||
+             Volatile.Read(ref _desktopControlServerShutdownRequested) != 0) &&
+            ReferenceEquals(
+                Interlocked.CompareExchange(ref _desktopControlServer, null, server),
+                server))
+        {
+            await server.DisposeAsync();
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
     }
 
     private async Task<DesktopInteractionResult> HandleDesktopInteractionAsync(
@@ -88,7 +113,7 @@ public partial class MainWindow
         var controller = CreateStartupInteractionController(
             request,
             diagnosticScenario: null);
-        await controller.ApplySelectionOverridesAsync();
+        await controller.ApplySelectionOverridesAsync(cancellationToken);
         var gitReadinessDiagnostic = GetDesktopGitReadinessDiagnostic(request);
         if (gitReadinessDiagnostic is { Severity: ContextDiagnosticSeverity.Error })
         {
@@ -225,6 +250,8 @@ public partial class MainWindow
                 {
                     GitFilteringMode.RespectGitIgnore => "gitignore",
                     GitFilteringMode.TrackedFilesOnly => "tracked",
+					GitFilteringMode.Staged => "staged",
+					GitFilteringMode.Changes => "changes",
                     _ => "none"
                 },
                 ["trackedGitReady"] = _selectionCoordinator.AppliedGitReadiness.IsReady
@@ -232,20 +259,27 @@ public partial class MainWindow
 
     private ContextDiagnostic? GetDesktopGitReadinessDiagnostic(DesktopOpenRequest request)
     {
-        if (request.Selection?.GitMode != GitFilteringMode.TrackedFilesOnly)
+		if (request.Selection?.GitMode is not { } requestedMode ||
+		    requestedMode is not (GitFilteringMode.TrackedFilesOnly or
+			    GitFilteringMode.Staged or GitFilteringMode.Changes))
             return null;
 
         var projectPath = _currentPath ?? request.ProjectPath;
         if (string.IsNullOrWhiteSpace(projectPath))
         {
-            return ProjectContextGitReadiness
-                .Evaluate(GitFilteringMode.TrackedFilesOnly, 0, 0)
-                .CreateDiagnostic(string.Empty);
+			return requestedMode == GitFilteringMode.TrackedFilesOnly
+				? ProjectContextGitReadiness
+					.Evaluate(GitFilteringMode.TrackedFilesOnly, 0, 0)
+					.CreateDiagnostic(string.Empty)
+				: new ContextDiagnostic(
+					GitScopeFilter.UnavailableDiagnosticCode,
+					ContextDiagnosticSeverity.Error,
+					"The requested Git state could not be applied.");
         }
 
         return _selectionCoordinator.GetAppliedGitReadinessDiagnostic(
             projectPath,
-            GitFilteringMode.TrackedFilesOnly);
+			requestedMode);
     }
 
     private static DesktopInteractionResult Failure(string code) =>

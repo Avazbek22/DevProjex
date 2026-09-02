@@ -246,11 +246,11 @@ public sealed class MemoryCleanupCoordinatorTests
     }
 
     [AvaloniaFact]
-    public async Task Schedule_ReusedSearchHeapWithSevereFragmentation_RunsAggressiveCleanupAfterBackground()
+    public async Task Schedule_InteractiveHeapWithSevereFragmentation_RunsCompactingCleanupAfterBackground()
     {
         var backgroundCompleted = 0;
         var modes = new ConcurrentQueue<MemoryCleanupCollectionMode>();
-        var aggressiveCleanupCompleted = NewCompletionSource();
+        var compactingCleanupCompleted = NewCompletionSource();
         using var coordinator = CreateCoordinator(
             captureMemorySnapshot: () =>
                 Volatile.Read(ref backgroundCompleted) == 0
@@ -265,31 +265,33 @@ public sealed class MemoryCleanupCoordinatorTests
                 modes.Enqueue(mode);
                 if (mode == MemoryCleanupCollectionMode.Background)
                     Volatile.Write(ref backgroundCompleted, 1);
-                if (mode == MemoryCleanupCollectionMode.Aggressive)
-                    aggressiveCleanupCompleted.TrySetResult(mode);
+                if (mode == MemoryCleanupCollectionMode.Compacting)
+                    compactingCleanupCompleted.TrySetResult(mode);
             });
 
         coordinator.Schedule(MemoryCleanupReason.PreviewRebuildCompleted);
 
-        var mode = await aggressiveCleanupCompleted.Task.WaitAsync(
+        var mode = await compactingCleanupCompleted.Task.WaitAsync(
             CompletionTimeout);
         await WaitUntilIdleAsync(coordinator);
 
-        Assert.Equal(MemoryCleanupCollectionMode.Aggressive, mode);
+        Assert.Equal(MemoryCleanupCollectionMode.Compacting, mode);
         Assert.Equal(
             [
                 MemoryCleanupCollectionMode.Background,
-                MemoryCleanupCollectionMode.Aggressive
+                MemoryCleanupCollectionMode.Compacting
             ],
             modes.ToArray());
     }
 
     [AvaloniaFact]
-    public async Task SchedulePreview_SeverePostCollectionFragmentation_RunsAggressiveCleanupAfterBackground()
+    public async Task SchedulePreview_SeverePostCollectionFragmentation_RunsCompactingCleanupWithoutTrim()
     {
         var backgroundCompleted = 0;
         var modes = new ConcurrentQueue<MemoryCleanupCollectionMode>();
         var compactionCompleted = NewCompletionSource();
+        var trimCount = 0;
+		var traceLines = new ConcurrentQueue<string>();
         using var coordinator = CreateCoordinator(
             captureMemorySnapshot: () =>
                 Volatile.Read(ref backgroundCompleted) == 0
@@ -303,9 +305,13 @@ public sealed class MemoryCleanupCoordinatorTests
                 modes.Enqueue(mode);
                 if (mode == MemoryCleanupCollectionMode.Background)
                     Volatile.Write(ref backgroundCompleted, 1);
-                if (mode == MemoryCleanupCollectionMode.Aggressive)
+                if (mode == MemoryCleanupCollectionMode.Compacting)
                     compactionCompleted.TrySetResult(mode);
-            });
+            },
+            trimWorkingSet: () => Interlocked.Increment(ref trimCount),
+			memoryCleanupTrace: new MemoryCleanupTrace(
+				static () => new MemoryCleanupRetentionSnapshot(123, 456),
+				traceLines.Enqueue));
 
         coordinator.SchedulePreview(
             MemoryCleanupReason.PreviewRebuildCompleted);
@@ -313,7 +319,64 @@ public sealed class MemoryCleanupCoordinatorTests
         var mode = await compactionCompleted.Task.WaitAsync(CompletionTimeout);
         await WaitUntilIdleAsync(coordinator);
 
-        Assert.Equal(MemoryCleanupCollectionMode.Aggressive, mode);
+        Assert.Equal(MemoryCleanupCollectionMode.Compacting, mode);
+        Assert.Equal(
+            [
+                MemoryCleanupCollectionMode.Background,
+                MemoryCleanupCollectionMode.Compacting
+            ],
+            modes.ToArray());
+        Assert.Equal(0, Volatile.Read(ref trimCount));
+		Assert.Collection(
+			traceLines,
+			line =>
+			{
+				Assert.Contains("reason=PreviewRebuildCompleted", line, StringComparison.Ordinal);
+				Assert.Contains("stage=Background", line, StringComparison.Ordinal);
+				Assert.Contains("planCache=123->123", line, StringComparison.Ordinal);
+				Assert.Contains("readFacts=456->456", line, StringComparison.Ordinal);
+			},
+			line =>
+			{
+				Assert.Contains("reason=PreviewRebuildCompleted", line, StringComparison.Ordinal);
+				Assert.Contains("stage=Compacting", line, StringComparison.Ordinal);
+			});
+    }
+
+    [AvaloniaFact]
+    public async Task Schedule_BackgroundPlanWithAggressiveEscalation_RunsAggressiveCleanupAndTrim()
+    {
+        var backgroundCompleted = 0;
+        var modes = new ConcurrentQueue<MemoryCleanupCollectionMode>();
+        var trimCompleted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        using var coordinator = CreateCoordinator(
+            captureMemorySnapshot: () =>
+                Volatile.Read(ref backgroundCompleted) == 0
+                    ? PreCollectionSnapshot()
+                    : PostCollectionSnapshot(
+                        collectionIndex: 11,
+                        heapSizeMegabytes: 640,
+                        fragmentedMegabytes: 256),
+            collect: mode =>
+            {
+                modes.Enqueue(mode);
+                if (mode == MemoryCleanupCollectionMode.Background)
+                    Volatile.Write(ref backgroundCompleted, 1);
+            },
+            trimWorkingSet: () => trimCompleted.TrySetResult());
+
+        coordinator.Schedule(
+            MemoryCleanupReason.InitialProjectLoad,
+            new MemoryCleanupPlan(
+                Delay: TimeSpan.Zero,
+                WaitForUiSettled: false,
+                CollectionMode: MemoryCleanupCollectionMode.Background,
+                EscalationMode: MemoryCleanupEscalationMode.Aggressive));
+
+        await trimCompleted.Task.WaitAsync(CompletionTimeout);
+        await WaitUntilIdleAsync(coordinator);
+
         Assert.Equal(
             [
                 MemoryCleanupCollectionMode.Background,
@@ -323,7 +386,30 @@ public sealed class MemoryCleanupCoordinatorTests
     }
 
     [AvaloniaFact]
-    public async Task CancelAll_AfterBackgroundCollection_CancelsPendingAggressiveCleanup()
+    public async Task Schedule_BackgroundPlanWithoutEscalation_StopsAfterBackground()
+    {
+        var modes = new ConcurrentQueue<MemoryCleanupCollectionMode>();
+        using var coordinator = CreateCoordinator(
+            captureMemorySnapshot: static () => PreCollectionSnapshot(),
+            collect: modes.Enqueue);
+
+        coordinator.Schedule(
+            MemoryCleanupReason.ApplySettingsWorkCompleted,
+            new MemoryCleanupPlan(
+                Delay: TimeSpan.Zero,
+                WaitForUiSettled: false,
+                CollectionMode: MemoryCleanupCollectionMode.Background,
+                EscalationMode: MemoryCleanupEscalationMode.None));
+
+        await WaitUntilIdleAsync(coordinator);
+
+        Assert.Equal(
+            [MemoryCleanupCollectionMode.Background],
+            modes.ToArray());
+    }
+
+    [AvaloniaFact]
+    public async Task CancelAll_AfterBackgroundCollection_CancelsPendingCompactingCleanup()
     {
         var backgroundCompleted = 0;
         var modes = new ConcurrentQueue<MemoryCleanupCollectionMode>();
@@ -365,7 +451,7 @@ public sealed class MemoryCleanupCoordinatorTests
     }
 
     [AvaloniaFact]
-    public async Task CancelAll_DuringFinalSnapshot_CancelsAggressiveCleanupAtLastGate()
+    public async Task CancelAll_DuringFinalSnapshot_CancelsCompactingCleanupAtLastGate()
     {
         var backgroundCompleted = 0;
         var postCollectionCaptureCount = 0;
@@ -411,7 +497,7 @@ public sealed class MemoryCleanupCoordinatorTests
     }
 
     [AvaloniaFact]
-    public async Task SchedulePreview_CollectionIndexTimeout_DoesNotRunAggressiveFollowUp()
+    public async Task SchedulePreview_CollectionIndexTimeout_DoesNotRunCompactingFollowUp()
     {
         var backgroundCompleted = 0;
         var modes = new ConcurrentQueue<MemoryCleanupCollectionMode>();
@@ -662,7 +748,8 @@ public sealed class MemoryCleanupCoordinatorTests
         TimeSpan? uiReadinessPollInterval = null,
         int uiReadinessMaximumAttempts = 24,
         Action? trimWorkingSet = null,
-        Func<TimeSpan, CancellationToken, Task>? deferCleanup = null)
+        Func<TimeSpan, CancellationToken, Task>? deferCleanup = null,
+		MemoryCleanupTrace? memoryCleanupTrace = null)
     {
         var readinessProbe = uiReady ?? (static () => true);
         return new MemoryCleanupCoordinator(
@@ -677,7 +764,8 @@ public sealed class MemoryCleanupCoordinatorTests
             trimWorkingSet ?? (static () => { }),
             deferCleanup,
             waitForRenderPasses: static _ => Task.CompletedTask,
-            queryUiReadiness: _ => Task.FromResult(readinessProbe()));
+            queryUiReadiness: _ => Task.FromResult(readinessProbe()),
+			memoryCleanupTrace);
     }
 
     private static async Task WaitUntilIdleAsync(

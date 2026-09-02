@@ -7,15 +7,18 @@ internal sealed class GitTestRepository : IDisposable, IAsyncDisposable
 
     private readonly TemporaryDirectory _tempDirectory;
     private readonly string _seedRepositoryPath;
+    private readonly string _bareRepositoryRootPath;
 
     private GitTestRepository(
         TemporaryDirectory tempDirectory,
         string seedRepositoryPath,
+        string bareRepositoryRootPath,
         string bareRepositoryPath,
         string repositoryName)
     {
         _tempDirectory = tempDirectory;
         _seedRepositoryPath = seedRepositoryPath;
+        _bareRepositoryRootPath = bareRepositoryRootPath;
         BareRepositoryPath = bareRepositoryPath;
         RepositoryName = repositoryName;
         RepositoryUrl = new Uri(BareRepositoryPath).AbsoluteUri;
@@ -40,15 +43,30 @@ internal sealed class GitTestRepository : IDisposable, IAsyncDisposable
     {
         var tempDirectory = new TemporaryDirectory();
         var seedRepositoryPath = tempDirectory.CreateDirectory("seed");
-        var bareRepositoryPath = Path.Combine(tempDirectory.Path, $"{repositoryName}.git");
+        var bareRepositoryRootPath = Path.Combine(
+            Path.GetTempPath(),
+            "DevProjex",
+            "GitTestRepositories",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(bareRepositoryRootPath);
+        var bareRepositoryPath = Path.Combine(bareRepositoryRootPath, $"{repositoryName}.git");
         var repository = new GitTestRepository(
             tempDirectory,
             seedRepositoryPath,
+            bareRepositoryRootPath,
             bareRepositoryPath,
             repositoryName);
 
-        await repository.InitializeAsync(includeLargePayload, cancellationToken);
-        return repository;
+        try
+        {
+            await repository.InitializeAsync(includeLargePayload, cancellationToken);
+            return repository;
+        }
+        catch
+        {
+            repository.Dispose();
+            throw;
+        }
     }
 
     public async Task AddCommitToBranchAsync(
@@ -68,10 +86,22 @@ internal sealed class GitTestRepository : IDisposable, IAsyncDisposable
         await File.WriteAllTextAsync(fullPath, content, cancellationToken);
         await RunGitAsync(_seedRepositoryPath, $"add \"{relativePath}\"", cancellationToken);
         await RunGitAsync(_seedRepositoryPath, $"commit -m \"{commitMessage}\"", cancellationToken);
-        await RunGitAsync(_seedRepositoryPath, $"push origin \"{branchName}\"", cancellationToken);
+        await PushBranchAsync(branchName, force: false, setUpstream: false, cancellationToken);
     }
 
-    public void Dispose() => _tempDirectory.Dispose();
+    public async Task<string> GetBranchHeadAsync(
+        string branchName,
+        CancellationToken cancellationToken = default) =>
+        (await RunGitAsync(
+            null,
+            $"--git-dir=\"{BareRepositoryPath}\" rev-parse --verify \"refs/heads/{branchName}\"",
+            cancellationToken)).Trim();
+
+    public void Dispose()
+    {
+        DeleteDirectoryBestEffort(_bareRepositoryRootPath);
+        _tempDirectory.Dispose();
+    }
 
     public ValueTask DisposeAsync()
     {
@@ -109,18 +139,111 @@ internal sealed class GitTestRepository : IDisposable, IAsyncDisposable
         await CommitSeedAsync("Release commit", cancellationToken);
 
         await RunGitAsync(_seedRepositoryPath, $"checkout \"{DefaultBranchName}\"", cancellationToken);
-        await RunGitAsync(null, $"init --bare \"{BareRepositoryPath}\"", cancellationToken);
+        try
+        {
+            await RunGitAsync(null, $"init --bare \"{BareRepositoryPath}\"", cancellationToken);
+        }
+        catch (InvalidOperationException exception)
+        {
+            throw new InvalidOperationException(
+                $"Git test bare repository initialization failed. {DescribeBareRepositoryState()}",
+                exception);
+        }
+
+        EnsureBareRepositoryStructure("bare init");
         await RunGitAsync(_seedRepositoryPath, $"remote add origin \"{BareRepositoryPath}\"", cancellationToken);
-        await RunGitAsync(
-            _seedRepositoryPath,
-            $"push --force --set-upstream origin \"{DefaultBranchName}\"",
-            cancellationToken);
-        await RunGitAsync(_seedRepositoryPath, $"push --force origin \"{FeatureBranchName}\"", cancellationToken);
-        await RunGitAsync(_seedRepositoryPath, $"push --force origin \"{ReleaseBranchName}\"", cancellationToken);
+        await PushBranchAsync(DefaultBranchName, force: true, setUpstream: true, cancellationToken);
+        await PushBranchAsync(FeatureBranchName, force: true, setUpstream: false, cancellationToken);
+        await PushBranchAsync(ReleaseBranchName, force: true, setUpstream: false, cancellationToken);
         await RunGitAsync(
             null,
             $"--git-dir=\"{BareRepositoryPath}\" symbolic-ref HEAD refs/heads/{DefaultBranchName}",
             cancellationToken);
+    }
+
+    private async Task PushBranchAsync(
+        string branchName,
+        bool force,
+        bool setUpstream,
+        CancellationToken cancellationToken)
+    {
+        EnsureBareRepositoryStructure($"before push of '{branchName}'");
+        var options = force ? " --force" : string.Empty;
+        if (setUpstream)
+            options += " --set-upstream";
+
+        try
+        {
+            await RunGitAsync(
+                _seedRepositoryPath,
+                $"push{options} origin \"{branchName}\"",
+                cancellationToken);
+        }
+        catch (InvalidOperationException exception)
+        {
+            throw new InvalidOperationException(
+                $"Git test repository push failed for '{branchName}'. {DescribeBareRepositoryState()}",
+                exception);
+        }
+
+        EnsureBareRepositoryStructure($"after push of '{branchName}'");
+        var localHead = (await RunGitAsync(
+            _seedRepositoryPath,
+            $"rev-parse --verify \"refs/heads/{branchName}\"",
+            cancellationToken)).Trim();
+        string bareHead;
+        try
+        {
+            bareHead = await GetBranchHeadAsync(branchName, cancellationToken);
+        }
+        catch (InvalidOperationException exception)
+        {
+            throw new InvalidOperationException(
+                $"Git test repository ref verification failed for '{branchName}'. {DescribeBareRepositoryState()}",
+                exception);
+        }
+
+        if (!string.Equals(localHead, bareHead, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Git test repository ref mismatch for '{branchName}': local={localHead}, bare={bareHead}. " +
+                DescribeBareRepositoryState());
+        }
+    }
+
+    private void EnsureBareRepositoryStructure(string phase)
+    {
+        if (Directory.Exists(BareRepositoryPath) &&
+            Directory.Exists(Path.Combine(BareRepositoryPath, "objects")) &&
+            Directory.Exists(Path.Combine(BareRepositoryPath, "refs", "heads")))
+        {
+            return;
+        }
+
+        throw new InvalidOperationException(
+            $"Git test bare repository disappeared during {phase}. {DescribeBareRepositoryState()}");
+    }
+
+    private string DescribeBareRepositoryState() =>
+        $"root='{_bareRepositoryRootPath}' exists={Directory.Exists(_bareRepositoryRootPath)}; " +
+        $"bare='{BareRepositoryPath}' exists={Directory.Exists(BareRepositoryPath)}; " +
+        $"objects exists={Directory.Exists(Path.Combine(BareRepositoryPath, "objects"))}; " +
+        $"refs/heads exists={Directory.Exists(Path.Combine(BareRepositoryPath, "refs", "heads"))}.";
+
+    private static void DeleteDirectoryBestEffort(string path)
+    {
+        // Git may release fixture files shortly after the test process observes completion.
+        try
+        {
+            if (Directory.Exists(path))
+                Directory.Delete(path, recursive: true);
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+        catch (IOException)
+        {
+        }
     }
 
     private async Task CreateInitialContentAsync(bool includeLargePayload, CancellationToken cancellationToken)

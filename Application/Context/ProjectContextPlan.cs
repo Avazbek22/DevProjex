@@ -1,3 +1,5 @@
+using DevProjex.Application.Secrets;
+
 namespace DevProjex.Application.Context;
 
 public enum ContextDiagnosticSeverity
@@ -11,21 +13,28 @@ public sealed record ContextDiagnostic(
 	string Code,
 	ContextDiagnosticSeverity Severity,
 	string Message,
-	string? Path = null);
+	string? Path = null,
+	int? Count = null);
 
 public sealed record ProjectContextGitReadiness(
 	GitFilteringMode Mode,
 	int LoadedTrackedIndexCount,
 	bool IsReady,
-	int UnavailableTrackedIndexCount = 0)
+	int UnavailableTrackedIndexCount = 0,
+	bool HasRepositoryBoundaryEvidence = false)
 {
+	public bool HasRepositoryBoundary =>
+		HasRepositoryBoundaryEvidence ||
+		LoadedTrackedIndexCount + UnavailableTrackedIndexCount > 0;
+
 	public const string UnavailableDiagnosticCode = "DPX-GIT-TRACKED-INDEX-UNAVAILABLE";
 	public const string PartialDiagnosticCode = "DPX-GIT-TRACKED-INDEX-PARTIAL";
 
 	public static ProjectContextGitReadiness Evaluate(
 		GitFilteringMode mode,
 		int discoveredTrackedIndexCount,
-		int unavailableTrackedIndexCount)
+		int unavailableTrackedIndexCount,
+		bool hasRepositoryBoundaryEvidence = false)
 	{
 		var unavailableCount = Math.Clamp(
 			unavailableTrackedIndexCount,
@@ -36,18 +45,21 @@ public sealed record ProjectContextGitReadiness(
 			mode,
 			loadedCount,
 			mode != GitFilteringMode.TrackedFilesOnly || loadedCount > 0,
-			unavailableCount);
+			unavailableCount,
+			hasRepositoryBoundaryEvidence);
 	}
 
 	public static ProjectContextGitReadiness Evaluate(
 		GitFilteringMode mode,
-		ProjectTreeInventorySnapshot? inventory)
+		ProjectTreeInventorySnapshot? inventory,
+		GitWorkspaceEvidence gitEvidence = default)
 	{
 		var indexes = inventory?.DiscoveredGitTrackedPathIndexes;
 		return Evaluate(
 			mode,
 			indexes?.Count ?? 0,
-			indexes?.Count(static index => !index.IsAvailable) ?? 0);
+			indexes?.Count(static index => !index.IsAvailable) ?? 0,
+			gitEvidence.HasRepositoryBoundary || inventory?.GitEvidence.HasRepositoryBoundary == true);
 	}
 
 	public ContextDiagnostic? CreateDiagnostic(string sourceRoot)
@@ -83,6 +95,19 @@ public sealed record ProjectSourceIdentity(
 	string? CommitHash = null,
 	bool IsCachedRepository = false);
 
+public sealed record SecretRedactionSummary(int MatchedCount, int RedactedCount);
+
+public sealed record PrivateDataRedactionSummary(int MatchedCount, int RedactedCount);
+
+public sealed record CodeCompressionSummary(
+	int CompressedFiles,
+	int UnchangedFiles,
+	long SourceCharacters,
+	long TransformedCharacters,
+	int BodyTransformedFiles = 0,
+	int CommentTransformedFiles = 0,
+	int BlankLineTransformedFiles = 0);
+
 public sealed record ProjectContextPlan(
 	string SourceRoot,
 	ProjectSelectionSpec Selection,
@@ -101,19 +126,40 @@ public sealed record ProjectContextPlan(
 	string Fingerprint,
 	long IncludedBytes = 0,
 	IReadOnlyDictionary<string, long>? EffectiveFileSizes = null,
-	ProjectSourceIdentity? SourceIdentity = null)
+	ProjectSourceIdentity? SourceIdentity = null,
+	SecretRedactionSummary? Redaction = null,
+	CodeCompressionSummary? Compression = null,
+	PrivateDataRedactionSummary? Privacy = null,
+	IReadOnlyList<UnscannableFile>? UnscannableFiles = null,
+	IReadOnlyList<EffectiveRedactionFinding>? Findings = null,
+	int? FindingCount = null,
+	bool HasIgnoreOptionCounts = false,
+	IgnoreOptionCounts IgnoreOptionCounts = default,
+	IgnoreControllerImpactCounts IgnoreControllerImpactCounts = default,
+	IReadOnlyList<TopFileMetric>? TopFiles = null,
+	FileSizeFilterSummary? FileSizeFilter = null)
 {
 	public bool HasErrors => Diagnostics.Any(static diagnostic =>
 		diagnostic.Severity == ContextDiagnosticSeverity.Error);
+
+	internal bool IncludesOutputMetrics { get; init; } = true;
 }
 
 public sealed record ProjectContextRequest(
 	string ProjectPath,
 	ProjectSelectionSpec Selection,
-	ProjectSourceIdentity? SourceIdentity = null);
+	ProjectSourceIdentity? SourceIdentity = null)
+{
+	public IReadOnlyDictionary<string, bool>? KnownExtensionStates { get; init; }
+	internal bool CaptureIgnoreImpactCounts { get; init; }
+}
 
-public sealed class ProjectContextValidationException(string code, string message)
+public sealed class ProjectContextValidationException(
+	string code,
+	string message,
+	string? contextPath = null)
 	: ArgumentException(message)
 {
 	public string Code { get; } = code;
+	public string? ContextPath { get; } = contextPath;
 }

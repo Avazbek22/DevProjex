@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Xml.Linq;
 using DevProjex.Kernel.Abstractions;
@@ -7,6 +8,110 @@ namespace DevProjex.Tests.Terminal;
 
 public sealed class ProjectContextStreamingRegressionTests
 {
+	[Theory]
+	[InlineData(ProjectContextView.Content)]
+	[InlineData(ProjectContextView.TreeContent)]
+	public async Task MarkdownTreatsProjectHeadingAndContentRootAsLiteralData(
+		ProjectContextView view)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project-[root](target)");
+		workspace.WriteFile("project-[root](target)/src/app.cs", "class App {}\n");
+		using var services = new TerminalServiceFactory(
+				() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var plan = await services.ContextFactory.BuildAsync(
+			project,
+			new ProjectSelectionSpec(GitMode: GitFilteringMode.None, Exclusions: []),
+			cancellationToken: TestContext.Current.CancellationToken);
+		plan = plan with
+		{
+			SourceIdentity = new ProjectSourceIdentity(
+				"[title](target) *em* <tag> &copy; # hash",
+				ProjectSourceType.LocalFolder,
+				project)
+		};
+
+		var bounded = await services.ContextDocumentService.BuildAsync(
+			plan,
+			view,
+			ProjectContextDocumentFormat.Markdown,
+			new ProjectContextDocumentLimits(
+				MaximumTreeNodes: 100,
+				MaximumFiles: 10,
+				MaximumCharacters: 10_000,
+				MaximumFileBytes: 4_096),
+			TestContext.Current.CancellationToken);
+		var complete = await CompleteContextDocumentTestHelper.BuildAsync(
+			services.ContextDocumentService,
+			plan,
+			view,
+			ProjectContextDocumentFormat.Markdown,
+			TestContext.Current.CancellationToken);
+
+		foreach (var document in new[] { bounded, complete })
+		{
+			Assert.StartsWith(
+				"# \\[title\\](target) \\*em\\* \\<tag\\> \\&copy; # hash",
+				document,
+				StringComparison.Ordinal);
+			Assert.DoesNotContain("# [title](target)", document, StringComparison.Ordinal);
+			if (view == ProjectContextView.Content)
+			{
+				var rootLine = document
+					.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+					.Single(static line => line.StartsWith(ContextRootPresentation.Prefix, StringComparison.Ordinal));
+				Assert.Contains("project-\\[root\\](target)", rootLine, StringComparison.Ordinal);
+				Assert.DoesNotContain("project-[root](target)", rootLine, StringComparison.Ordinal);
+			}
+		}
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task CompleteContentRootHonorsTheGeneratedPathOccurrenceDecision(bool keep)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		var sourcePath = workspace.WriteFile("project/src/app.cs", "class App {}\n");
+		using var services = new TerminalServiceFactory(
+				() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var plan = await services.ContextFactory.BuildAsync(
+			project,
+			new ProjectSelectionSpec(
+				GitMode: GitFilteringMode.None,
+				Exclusions: [],
+				HidePrivateData: true),
+			cancellationToken: TestContext.Current.CancellationToken);
+		var documentService = new ProjectContextDocumentService(
+			services.TreeExportService,
+			new FileContentAnalyzer(),
+			outputPathRedactionDecision: new OutputPathRedactionDecision("generated-path", keep));
+		await using var destination = new MemoryStream();
+
+		await documentService.WriteCompleteAsync(
+			plan,
+			ProjectContextView.Content,
+			ProjectContextDocumentFormat.Text,
+			destination,
+			TestContext.Current.CancellationToken,
+			plain: true,
+			useSourceMappedStructuredPaths: true);
+
+		var payload = Encoding.UTF8.GetString(destination.ToArray());
+		var expectedRoot = keep
+			? project
+			: OutputRootPathPresentation.MaskLocalUserSegment(project);
+		var firstLine = payload.Split(["\r\n", "\n"], 2, StringSplitOptions.None)[0];
+		Assert.Equal(
+			$"Root: {expectedRoot}".Replace('\\', '/'),
+			firstLine.Replace('\\', '/'));
+		Assert.Contains($"src/app.cs:{Environment.NewLine}", payload, StringComparison.Ordinal);
+		Assert.DoesNotContain(sourcePath, payload, StringComparison.OrdinalIgnoreCase);
+	}
+
 	[Fact]
 	public async Task DocumentServiceRejectsUnknownFormatBeforeWritingAnyBytes()
 	{
@@ -76,6 +181,312 @@ public sealed class ProjectContextStreamingRegressionTests
 				null!,
 				TestContext.Current.CancellationToken));
 		Assert.Equal("limits", exception.ParamName);
+	}
+
+	[Fact]
+	public async Task BoundedDocumentCharacterLimitNeverSplitsAUnicodeScalar()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/content.txt", "x😀tail");
+		using var services = new TerminalServiceFactory(
+				() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var plan = await services.ContextFactory.BuildAsync(
+			project,
+			new ProjectSelectionSpec(GitMode: GitFilteringMode.None, Exclusions: []),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var document = await services.ContextDocumentService.BuildAsync(
+			plan,
+			ProjectContextView.Content,
+			ProjectContextDocumentFormat.Json,
+			new ProjectContextDocumentLimits(
+				MaximumTreeNodes: 10,
+				MaximumFiles: 1,
+				MaximumCharacters: 2,
+				MaximumFileBytes: 4_096),
+			TestContext.Current.CancellationToken);
+
+		using var json = JsonDocument.Parse(document);
+		var file = Assert.Single(json.RootElement.GetProperty("files").EnumerateArray());
+		Assert.Equal("x", file.GetProperty("content").GetString());
+	}
+
+	[Fact]
+	public async Task BoundedDocumentReadAheadPreservesByteIdentityAndOrderWithinConcurrencyBound()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		for (var index = 0; index < 8; index++)
+			workspace.WriteFile($"project/src/{index:D2}.txt", $"content-{index}\n");
+		var services = new TerminalServiceFactory(
+				() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var plan = await services.ContextFactory.BuildAsync(
+			project,
+			new ProjectSelectionSpec(GitMode: GitFilteringMode.None, Exclusions: []),
+			cancellationToken: TestContext.Current.CancellationToken);
+		var limits = new ProjectContextDocumentLimits(
+			MaximumTreeNodes: 32,
+			MaximumFiles: 8,
+			MaximumCharacters: 16 * 1024,
+			MaximumFileBytes: 4 * 1024);
+		var baseline = await new ProjectContextDocumentService(
+				services.TreeExportService,
+				new FileContentAnalyzer())
+			.BuildAsync(
+				plan,
+				ProjectContextView.Content,
+				ProjectContextDocumentFormat.Json,
+				limits with { MaximumFileBytes = long.MaxValue },
+				TestContext.Current.CancellationToken);
+		var analyzer = ReadAheadProbeAnalyzer.CreateCoordinated(requiredConcurrency: 4);
+
+		var actual = await new ProjectContextDocumentService(
+				services.TreeExportService,
+				analyzer)
+			.BuildAsync(
+				plan,
+				ProjectContextView.Content,
+				ProjectContextDocumentFormat.Json,
+				limits,
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(baseline, actual);
+		Assert.InRange(analyzer.MaximumConcurrency, 4, 8);
+		Assert.NotEqual(
+			Path.GetFileName(plan.IncludedFiles[0]),
+			Assert.Single(analyzer.CompletionOrder.Take(1)));
+	}
+
+	[Fact]
+	public async Task BoundedDocumentReadAheadCancelsAndDrainsEveryStartedRead()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		for (var index = 0; index < 8; index++)
+			workspace.WriteFile($"project/src/{index:D2}.txt", $"content-{index}\n");
+		var services = new TerminalServiceFactory(
+				() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var plan = await services.ContextFactory.BuildAsync(
+			project,
+			new ProjectSelectionSpec(GitMode: GitFilteringMode.None, Exclusions: []),
+			cancellationToken: TestContext.Current.CancellationToken);
+		var analyzer = ReadAheadProbeAnalyzer.CreateBlocking();
+		using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(
+			TestContext.Current.CancellationToken);
+		var build = new ProjectContextDocumentService(
+				services.TreeExportService,
+				analyzer)
+			.BuildAsync(
+				plan,
+				ProjectContextView.Content,
+				ProjectContextDocumentFormat.Text,
+				new ProjectContextDocumentLimits(
+					MaximumTreeNodes: 32,
+					MaximumFiles: 8,
+					MaximumCharacters: 16 * 1024,
+					MaximumFileBytes: 4 * 1024),
+				cancellation.Token);
+		await analyzer.FirstReadStarted.WaitAsync(
+			TimeSpan.FromSeconds(5),
+			TestContext.Current.CancellationToken);
+
+		cancellation.Cancel();
+
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(() => build);
+		Assert.Equal(0, analyzer.ActiveReads);
+		Assert.InRange(analyzer.MaximumConcurrency, 1, 8);
+	}
+
+	[Fact]
+	public async Task CompleteDocumentReadAheadPreservesByteIdentityAndOrderWithinConcurrencyBound()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		for (var index = 0; index < 12; index++)
+			workspace.WriteFile($"project/src/{index:D2}.txt", $"content-{index}\n");
+		var services = new TerminalServiceFactory(
+				() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var plan = await services.ContextFactory.BuildAsync(
+			project,
+			new ProjectSelectionSpec(GitMode: GitFilteringMode.None, Exclusions: []),
+			cancellationToken: TestContext.Current.CancellationToken);
+		var limits = new ProjectContextDocumentLimits(
+			MaximumTreeNodes: 64,
+			MaximumFiles: plan.IncludedFiles.Count,
+			MaximumCharacters: 64 * 1024,
+			MaximumFileBytes: 4 * 1024);
+		var expected = await services.ContextDocumentService.BuildAsync(
+			plan,
+			ProjectContextView.Content,
+			ProjectContextDocumentFormat.Json,
+			limits,
+			TestContext.Current.CancellationToken);
+		var analyzer = CompleteSnapshotReadAheadProbeAnalyzer.CreateCoordinated(
+			requiredConcurrency: 4);
+		await using var destination = new WriteOnlyNonSeekableStream();
+
+		await new ProjectContextDocumentService(
+				services.TreeExportService,
+				analyzer)
+			.WriteCompleteAsync(
+				plan,
+				ProjectContextView.Content,
+				ProjectContextDocumentFormat.Json,
+				destination,
+				TestContext.Current.CancellationToken);
+
+		Assert.Equal(Encoding.UTF8.GetBytes(expected), destination.ToArray());
+		Assert.InRange(analyzer.MaximumConcurrency, 4, 8);
+		Assert.Equal(plan.IncludedFiles.Count, analyzer.CompletionOrder.Count);
+		Assert.Equal(analyzer.CreatedSnapshots, analyzer.DisposedSnapshots);
+		Assert.Equal(0, analyzer.ActiveSnapshots);
+	}
+
+	[Fact]
+	public async Task CompleteDocumentReadAheadCancellationDisposesEveryPrefetchedSnapshot()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		for (var index = 0; index < 12; index++)
+			workspace.WriteFile($"project/src/{index:D2}.txt", $"content-{index}\n");
+		var services = new TerminalServiceFactory(
+				() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var plan = await services.ContextFactory.BuildAsync(
+			project,
+			new ProjectSelectionSpec(GitMode: GitFilteringMode.None, Exclusions: []),
+			cancellationToken: TestContext.Current.CancellationToken);
+		var analyzer = CompleteSnapshotReadAheadProbeAnalyzer.CreateWithBlockingCopy(
+			requiredConcurrency: 4);
+		using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(
+			TestContext.Current.CancellationToken);
+		await using var destination = new WriteOnlyNonSeekableStream();
+		var write = new ProjectContextDocumentService(
+				services.TreeExportService,
+				analyzer)
+			.WriteCompleteAsync(
+				plan,
+				ProjectContextView.Content,
+				ProjectContextDocumentFormat.Text,
+				destination,
+				cancellation.Token);
+		await analyzer.FirstCopyStarted.WaitAsync(
+			TimeSpan.FromSeconds(5),
+			TestContext.Current.CancellationToken);
+
+		cancellation.Cancel();
+
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(() => write);
+		Assert.InRange(analyzer.CreatedSnapshots, 4, 8);
+		Assert.Equal(analyzer.CreatedSnapshots, analyzer.DisposedSnapshots);
+		Assert.Equal(0, analyzer.ActiveSnapshots);
+		Assert.Equal(0, analyzer.ActiveReads);
+	}
+
+	[Theory]
+	[InlineData(ProjectContextDocumentFormat.Json)]
+	[InlineData(ProjectContextDocumentFormat.Xml)]
+	public async Task BoundedStructuredTreeDoesNotDependOnTheCallStack(
+		ProjectContextDocumentFormat format)
+	{
+		const int depth = 2_048;
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/seed.txt", string.Empty);
+		var services = new TerminalServiceFactory(
+				() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var plan = await services.ContextFactory.BuildAsync(
+			project,
+			new ProjectSelectionSpec(GitMode: GitFilteringMode.None, Exclusions: []),
+			cancellationToken: TestContext.Current.CancellationToken);
+		TreeNodeDescriptor deepTree = new(
+			"leaf.txt",
+			Path.Combine(project, "leaf.txt"),
+			false,
+			false,
+			"file",
+			[]);
+		for (var level = depth - 1; level >= 0; level--)
+		{
+			deepTree = new TreeNodeDescriptor(
+				$"level-{level:D4}",
+				Path.Combine(project, $"level-{level:D4}"),
+				true,
+				false,
+				"folder",
+				[deepTree]);
+		}
+		var deepPlan = plan with
+		{
+			EffectiveTree = deepTree,
+			ProjectedTree = deepTree,
+			IncludedFiles = [],
+			IncludedFolders = []
+		};
+
+		var document = await services.ContextDocumentService.BuildAsync(
+			deepPlan,
+			ProjectContextView.Tree,
+			format,
+			new ProjectContextDocumentLimits(MaximumTreeNodes: depth + 1),
+			TestContext.Current.CancellationToken);
+
+		Assert.Contains("level-0000", document, StringComparison.Ordinal);
+		Assert.Contains($"level-{depth - 1:D4}", document, StringComparison.Ordinal);
+		Assert.Contains("leaf.txt", document, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task BoundedTreeDocumentStopsCloningAfterCancellation()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/seed.txt", string.Empty);
+		var services = new TerminalServiceFactory(
+				() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var plan = await services.ContextFactory.BuildAsync(
+			project,
+			new ProjectSelectionSpec(GitMode: GitFilteringMode.None, Exclusions: []),
+			cancellationToken: TestContext.Current.CancellationToken);
+		using var cancellation = new CancellationTokenSource();
+		var child = new TreeNodeDescriptor(
+			"child",
+			Path.Combine(project, "child"),
+			true,
+			false,
+			"folder",
+			[]);
+		var root = new TreeNodeDescriptor(
+			"project",
+			project,
+			true,
+			false,
+			"folder",
+			new CancelThenRejectFurtherReadsList<TreeNodeDescriptor>(
+				[child, child],
+				cancellation));
+		var projectedPlan = plan with
+		{
+			EffectiveTree = root,
+			ProjectedTree = root,
+			IncludedFiles = [],
+			IncludedFolders = []
+		};
+
+		await Assert.ThrowsAsync<OperationCanceledException>(() =>
+			services.ContextDocumentService.BuildAsync(
+				projectedPlan,
+				ProjectContextView.Tree,
+				ProjectContextDocumentFormat.Text,
+				new ProjectContextDocumentLimits(MaximumTreeNodes: 3),
+				cancellation.Token));
 	}
 
 	[Fact]
@@ -294,6 +705,49 @@ public sealed class ProjectContextStreamingRegressionTests
 	}
 
 	[Theory]
+	[InlineData(ProjectContextDocumentFormat.Json)]
+	[InlineData(ProjectContextDocumentFormat.Xml)]
+	public async Task CompleteStructuredTreeStartsWritingBeforeEnumeratingEveryNode(
+		ProjectContextDocumentFormat format)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/seed.txt", string.Empty);
+		var services = new TerminalServiceFactory(
+				() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var plan = await services.ContextFactory.BuildAsync(
+			project,
+			new ProjectSelectionSpec(
+				GitMode: GitFilteringMode.None,
+				Exclusions: []),
+			cancellationToken: TestContext.Current.CancellationToken);
+		const int nodeCount = 50_000;
+		var children = new LazyWideTreeChildren(plan.SourceRoot, nodeCount);
+		var wideRoot = plan.ProjectedTree with { Children = children };
+		var widePlan = plan with
+		{
+			EffectiveTree = wideRoot,
+			ProjectedTree = wideRoot,
+			IncludedFiles = [],
+			IncludedFolders = []
+		};
+		await using var destination = new CountingDiscardStream(
+			() => children.AccessCount);
+
+		await services.ContextDocumentService.WriteCompleteAsync(
+			widePlan,
+			ProjectContextView.Tree,
+			format,
+			destination,
+			TestContext.Current.CancellationToken);
+
+		Assert.InRange(destination.AccessCountAtFirstWrite, 0, nodeCount - 1);
+		Assert.True(destination.WriteCount > 1);
+		Assert.True(destination.TotalBytesWritten > 1_000_000);
+	}
+
+	[Theory]
 	[InlineData(false)]
 	[InlineData(true)]
 	public async Task CompleteMarkdownTreePreservesExactFenceAndFinalNewlineContract(
@@ -387,11 +841,13 @@ public sealed class ProjectContextStreamingRegressionTests
 		var payload = Encoding.UTF8.GetString(destination.ToArray());
 		switch (format)
 		{
-			case ProjectContextDocumentFormat.Text:
-				Assert.Equal(
-					$"src/chunk.txt:{Environment.NewLine}{Environment.NewLine}" +
-					content.TrimEnd('\r', '\n'),
-					payload);
+		case ProjectContextDocumentFormat.Text:
+			Assert.Equal(
+				ContextRootPresentation.FormatLine(project) +
+				Environment.NewLine + Environment.NewLine +
+				$"src/chunk.txt:{Environment.NewLine}{Environment.NewLine}" +
+				content.TrimEnd('\r', '\n'),
+				payload);
 				break;
 			case ProjectContextDocumentFormat.Markdown:
 				Assert.Contains(content, payload, StringComparison.Ordinal);
@@ -833,7 +1289,7 @@ public sealed class ProjectContextStreamingRegressionTests
 			largeSource,
 			largeFileSize,
 			TestContext.Current.CancellationToken);
-		var applicationAssembly = FindApplicationAssembly();
+		var applicationAssembly = PublishedApplicationLocator.FindApplicationAssembly();
 		Assert.True(
 			File.Exists(applicationAssembly),
 			$"Application assembly was not found: {applicationAssembly}");
@@ -950,24 +1406,6 @@ public sealed class ProjectContextStreamingRegressionTests
 			await Task.Delay(TimeSpan.FromMilliseconds(10), cancellationToken);
 		}
 		return peakWorkingSet;
-	}
-
-	private static string FindApplicationAssembly()
-	{
-		var configuration = new DirectoryInfo(
-				AppContext.BaseDirectory.TrimEnd(
-					Path.DirectorySeparatorChar,
-					Path.AltDirectorySeparatorChar))
-			.Parent?
-			.Name ?? "Debug";
-		return Path.Combine(
-			PublishedApplicationLocator.FindRepositoryRoot(),
-			"Apps",
-			"Avalonia",
-			"bin",
-			configuration,
-			"net10.0",
-			"DevProjex.dll");
 	}
 
 	private static async Task WriteLargeTextFileAsync(
@@ -1270,6 +1708,414 @@ public sealed class ProjectContextStreamingRegressionTests
 		}
 	}
 
+	private sealed class ReadAheadProbeAnalyzer : IFileContentAnalyzer
+	{
+		private readonly FileContentAnalyzer _inner = new();
+		private readonly ConcurrentQueue<string> _completionOrder = new();
+		private readonly TaskCompletionSource<bool> _firstReadStarted = new(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		private readonly TaskCompletionSource<bool>? _release;
+		private readonly TaskCompletionSource<bool>? _nonFirstReadCompleted;
+		private readonly int _requiredConcurrency;
+		private readonly bool _blockUntilCancellation;
+		private int _activeReads;
+		private int _maximumConcurrency;
+
+		private ReadAheadProbeAnalyzer(int requiredConcurrency, bool blockUntilCancellation)
+		{
+			_requiredConcurrency = requiredConcurrency;
+			_blockUntilCancellation = blockUntilCancellation;
+			if (!blockUntilCancellation)
+			{
+				_release = new TaskCompletionSource<bool>(
+					TaskCreationOptions.RunContinuationsAsynchronously);
+				_nonFirstReadCompleted = new TaskCompletionSource<bool>(
+					TaskCreationOptions.RunContinuationsAsynchronously);
+			}
+		}
+
+		public int ActiveReads => Volatile.Read(ref _activeReads);
+		public IReadOnlyList<string> CompletionOrder => _completionOrder.ToArray();
+		public Task FirstReadStarted => _firstReadStarted.Task;
+		public int MaximumConcurrency => Volatile.Read(ref _maximumConcurrency);
+
+		public static ReadAheadProbeAnalyzer CreateBlocking() => new(1, blockUntilCancellation: true);
+
+		public static ReadAheadProbeAnalyzer CreateCoordinated(int requiredConcurrency) =>
+			new(requiredConcurrency, blockUntilCancellation: false);
+
+		public FileContentClassification? ClassifyWithoutReading(string path) =>
+			_inner.ClassifyWithoutReading(path);
+
+		public async ValueTask<FileContentReadResult> ReadClassifiedAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default)
+		{
+			var concurrency = Interlocked.Increment(ref _activeReads);
+			UpdateMaximumConcurrency(concurrency);
+			_firstReadStarted.TrySetResult(true);
+			try
+			{
+				if (_blockUntilCancellation)
+				{
+					await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken)
+						.ConfigureAwait(false);
+					throw new InvalidOperationException("The blocking read completed without cancellation.");
+				}
+
+				if (concurrency >= _requiredConcurrency)
+					_release!.TrySetResult(true);
+				await _release!.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+				var stem = Path.GetFileNameWithoutExtension(path);
+				var index = int.TryParse(stem, out var parsed) ? parsed : 0;
+				await Task.Delay(TimeSpan.FromMilliseconds(Math.Max(1, 9 - index) * 10), cancellationToken)
+					.ConfigureAwait(false);
+				if (index == 0)
+				{
+					await _nonFirstReadCompleted!.Task
+						.WaitAsync(cancellationToken)
+						.ConfigureAwait(false);
+				}
+				var result = await _inner
+					.ReadClassifiedAsync(path, maxSizeForFullRead, cancellationToken)
+					.ConfigureAwait(false);
+				_completionOrder.Enqueue(Path.GetFileName(path));
+				if (index != 0)
+					_nonFirstReadCompleted!.TrySetResult(true);
+				return result;
+			}
+			finally
+			{
+				Interlocked.Decrement(ref _activeReads);
+			}
+		}
+
+		public ValueTask<bool> IsTextFileAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			_inner.IsTextFileAsync(path, cancellationToken);
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			_inner.GetTextFileMetricsAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			_inner.TryReadAsTextAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			_inner.TryReadAsTextAsync(path, maxSizeForFullRead, cancellationToken);
+
+		private void UpdateMaximumConcurrency(int concurrency)
+		{
+			var observed = Volatile.Read(ref _maximumConcurrency);
+			while (concurrency > observed)
+			{
+				var original = Interlocked.CompareExchange(
+					ref _maximumConcurrency,
+					concurrency,
+					observed);
+				if (original == observed)
+					return;
+				observed = original;
+			}
+		}
+	}
+
+	[Fact]
+	public async Task TextTokenBudgetTrimsTheLastIncludedFileWhenLaterFilesAreSkipped()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/A-included.txt", "a\n");
+		workspace.WriteFile("project/B-skipped.txt", new string('b', 20) + "\n");
+		var services = new TerminalServiceFactory(
+				() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var plan = await services.ContextFactory.BuildAsync(
+			project,
+			new ProjectSelectionSpec(
+				GitMode: GitFilteringMode.None,
+				Exclusions: []),
+			cancellationToken: TestContext.Current.CancellationToken);
+		await using var destination = new WriteOnlyNonSeekableStream();
+
+		var result = await services.ContextDocumentService.WriteCompleteWithReportAsync(
+			plan,
+			ProjectContextView.Content,
+			ProjectContextDocumentFormat.Text,
+			destination,
+			TestContext.Current.CancellationToken,
+			maximumEstimatedTokens: 1);
+
+		Assert.Equal(
+			ContextRootPresentation.FormatLine(project) +
+			Environment.NewLine + Environment.NewLine +
+			$"A-included.txt:{Environment.NewLine}{Environment.NewLine}a",
+			Encoding.UTF8.GetString(destination.ToArray()));
+		Assert.Equal(1, result.TokenBudget?.IncludedFileCount);
+		Assert.Equal(1, result.TokenBudget?.SkippedFileCount);
+	}
+
+	[Fact]
+	public async Task TokenBudgetReportsEveryProcessedFileAcrossCompleteWriters()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/A-skipped.txt", new string('a', 40));
+		workspace.WriteFile("project/B-included.txt", "b");
+		workspace.WriteFile("project/C-included.txt", "c");
+		var services = new TerminalServiceFactory(
+				() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var plan = await services.ContextFactory.BuildAsync(
+			project,
+			new ProjectSelectionSpec(GitMode: GitFilteringMode.None, Exclusions: []),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		foreach (var format in Enum.GetValues<ProjectContextDocumentFormat>())
+		{
+			var updates = new List<ProjectCopyExportProgress>();
+			var progress = new SynchronousProgress<ProjectCopyExportProgress>(updates.Add);
+			await using var destination = new MemoryStream();
+
+			await services.ContextDocumentService.WriteCompleteWithReportAsync(
+				plan,
+				ProjectContextView.Content,
+				format,
+				destination,
+				TestContext.Current.CancellationToken,
+				writeProgress: progress,
+				maximumEstimatedTokens: 2);
+
+			Assert.Equal([1, 2, 3], updates.Select(static update => update.ProcessedEntryCount));
+			Assert.All(updates, static update => Assert.Equal(3, update.TotalEntryCount));
+			Assert.Equal(100d, updates[^1].Percentage);
+		}
+	}
+
+	[Fact]
+	public async Task CompleteTextDocumentMatchesBoundedOutputAcrossTrailingLineEndings()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/A-lf.txt", "alpha\n");
+		workspace.WriteFile("project/B-crlf.txt", "beta\r\n");
+		workspace.WriteFile("project/C-empty.txt", string.Empty);
+		workspace.WriteFile("project/D-none.txt", "delta");
+		var services = new TerminalServiceFactory(
+				() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var plan = await services.ContextFactory.BuildAsync(
+			project,
+			new ProjectSelectionSpec(GitMode: GitFilteringMode.None, Exclusions: []),
+			cancellationToken: TestContext.Current.CancellationToken);
+		var expected = await services.ContextDocumentService.BuildAsync(
+			plan,
+			ProjectContextView.Content,
+			ProjectContextDocumentFormat.Text,
+			new ProjectContextDocumentLimits(
+				MaximumFiles: plan.IncludedFiles.Count,
+				MaximumCharacters: 16 * 1024,
+				MaximumFileBytes: 16 * 1024),
+			TestContext.Current.CancellationToken);
+		await using var destination = new WriteOnlyNonSeekableStream();
+
+		await services.ContextDocumentService.WriteCompleteAsync(
+			plan,
+			ProjectContextView.Content,
+			ProjectContextDocumentFormat.Text,
+			destination,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(Encoding.UTF8.GetBytes(expected), destination.ToArray());
+	}
+
+	private sealed class CompleteSnapshotReadAheadProbeAnalyzer : IFileContentAnalyzer
+	{
+		private readonly FileContentAnalyzer _inner = new();
+		private readonly ConcurrentQueue<string> _completionOrder = new();
+		private readonly TaskCompletionSource<bool> _release = new(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		private readonly TaskCompletionSource<bool> _firstCopyStarted = new(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		private readonly TaskCompletionSource<bool> _snapshotsReady = new(
+			TaskCreationOptions.RunContinuationsAsynchronously);
+		private readonly int _requiredConcurrency;
+		private readonly bool _blockCopy;
+		private int _activeReads;
+		private int _maximumConcurrency;
+		private int _createdSnapshots;
+		private int _disposedSnapshots;
+		private int _activeSnapshots;
+
+		private CompleteSnapshotReadAheadProbeAnalyzer(
+			int requiredConcurrency,
+			bool blockCopy)
+		{
+			_requiredConcurrency = requiredConcurrency;
+			_blockCopy = blockCopy;
+		}
+
+		public int ActiveReads => Volatile.Read(ref _activeReads);
+		public int ActiveSnapshots => Volatile.Read(ref _activeSnapshots);
+		public IReadOnlyList<string> CompletionOrder => _completionOrder.ToArray();
+		public int CreatedSnapshots => Volatile.Read(ref _createdSnapshots);
+		public int DisposedSnapshots => Volatile.Read(ref _disposedSnapshots);
+		public Task FirstCopyStarted => _firstCopyStarted.Task;
+		public int MaximumConcurrency => Volatile.Read(ref _maximumConcurrency);
+
+		public static CompleteSnapshotReadAheadProbeAnalyzer CreateCoordinated(
+			int requiredConcurrency) =>
+			new(requiredConcurrency, blockCopy: false);
+
+		public static CompleteSnapshotReadAheadProbeAnalyzer CreateWithBlockingCopy(
+			int requiredConcurrency) =>
+			new(requiredConcurrency, blockCopy: true);
+
+		public FileContentClassification? ClassifyWithoutReading(string path) =>
+			_inner.ClassifyWithoutReading(path);
+
+		public async ValueTask<IFileContentSnapshot> OpenCompleteSnapshotAsync(
+			string path,
+			CancellationToken cancellationToken = default)
+		{
+			var concurrency = Interlocked.Increment(ref _activeReads);
+			UpdateMaximumConcurrency(concurrency);
+			try
+			{
+				if (concurrency >= _requiredConcurrency)
+					_release.TrySetResult(true);
+				await _release.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+				var stem = Path.GetFileNameWithoutExtension(path);
+				var index = int.TryParse(stem, out var parsed) ? parsed : 0;
+				await Task.Delay(
+						TimeSpan.FromMilliseconds(Math.Max(1, 12 - index) * 5),
+						cancellationToken)
+					.ConfigureAwait(false);
+				var snapshot = await _inner
+					.OpenCompleteSnapshotAsync(path, cancellationToken)
+					.ConfigureAwait(false);
+				_completionOrder.Enqueue(Path.GetFileName(path));
+				var createdSnapshots = Interlocked.Increment(ref _createdSnapshots);
+				Interlocked.Increment(ref _activeSnapshots);
+				var trackingSnapshot = new TrackingSnapshot(snapshot, this, _blockCopy);
+				if (_blockCopy)
+				{
+					if (createdSnapshots >= _requiredConcurrency)
+						_snapshotsReady.TrySetResult(true);
+					try
+					{
+						await _snapshotsReady.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+					}
+					catch
+					{
+						await trackingSnapshot.DisposeAsync().ConfigureAwait(false);
+						throw;
+					}
+				}
+				return trackingSnapshot;
+			}
+			finally
+			{
+				Interlocked.Decrement(ref _activeReads);
+			}
+		}
+
+		public ValueTask<bool> IsTextFileAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			_inner.IsTextFileAsync(path, cancellationToken);
+
+		public ValueTask<TextFileMetrics?> GetTextFileMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			_inner.GetTextFileMetricsAsync(path, cancellationToken);
+
+		public ValueTask<FileContentMetricsResult> GetClassifiedMetricsAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			_inner.GetClassifiedMetricsAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			CancellationToken cancellationToken = default) =>
+			_inner.TryReadAsTextAsync(path, cancellationToken);
+
+		public ValueTask<TextFileContent?> TryReadAsTextAsync(
+			string path,
+			long maxSizeForFullRead,
+			CancellationToken cancellationToken = default) =>
+			_inner.TryReadAsTextAsync(path, maxSizeForFullRead, cancellationToken);
+
+		private void UpdateMaximumConcurrency(int concurrency)
+		{
+			var observed = Volatile.Read(ref _maximumConcurrency);
+			while (concurrency > observed)
+			{
+				var original = Interlocked.CompareExchange(
+					ref _maximumConcurrency,
+					concurrency,
+					observed);
+				if (original == observed)
+					return;
+				observed = original;
+			}
+		}
+
+		private void SnapshotDisposed()
+		{
+			Interlocked.Increment(ref _disposedSnapshots);
+			Interlocked.Decrement(ref _activeSnapshots);
+		}
+
+		private sealed class TrackingSnapshot(
+			IFileContentSnapshot inner,
+			CompleteSnapshotReadAheadProbeAnalyzer owner,
+			bool blockCopy) : IFileContentSnapshot
+		{
+			private int _disposed;
+
+			public FileContentMetricsResult Result => inner.Result;
+
+			public async ValueTask CopyTextToAsync(
+				int maximumCharacters,
+				Func<ReadOnlyMemory<char>, CancellationToken, ValueTask> writeChunk,
+				CancellationToken cancellationToken = default)
+			{
+				if (blockCopy)
+				{
+					owner._firstCopyStarted.TrySetResult(true);
+					await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken)
+						.ConfigureAwait(false);
+				}
+
+				await inner.CopyTextToAsync(maximumCharacters, writeChunk, cancellationToken)
+					.ConfigureAwait(false);
+			}
+
+			public async ValueTask DisposeAsync()
+			{
+				if (Interlocked.Exchange(ref _disposed, 1) != 0)
+					return;
+				try
+				{
+					await inner.DisposeAsync().ConfigureAwait(false);
+				}
+				finally
+				{
+					owner.SnapshotDisposed();
+				}
+			}
+		}
+	}
+
 	private sealed class MaterializedContentRejectingAnalyzer : IFileContentAnalyzer
 	{
 		private readonly FileContentAnalyzer _inner = new();
@@ -1401,4 +2247,35 @@ public sealed class ProjectContextStreamingRegressionTests
 		string StandardOutput,
 		string StandardError,
 		long PeakWorkingSetBytes);
+
+	private sealed class SynchronousProgress<T>(Action<T> report) : IProgress<T>
+	{
+		public void Report(T value) => report(value);
+	}
+
+	private sealed class CancelThenRejectFurtherReadsList<T>(
+		IReadOnlyList<T> items,
+		CancellationTokenSource cancellation) : IReadOnlyList<T>
+	{
+		private int _reads;
+
+		public int Count => items.Count;
+
+		public T this[int index]
+		{
+			get
+			{
+				if (Interlocked.Increment(ref _reads) != 1)
+					throw new InvalidOperationException("Traversal continued after cancellation.");
+
+				var item = items[index];
+				cancellation.Cancel();
+				return item;
+			}
+		}
+
+		public IEnumerator<T> GetEnumerator() => items.GetEnumerator();
+
+		IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+	}
 }

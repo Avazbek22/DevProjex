@@ -1,7 +1,7 @@
 ## 1) Was ist das und wozu
 DevProjex bereitet den Projektkontext schnell auf: zeigt die Ordner/Dateistruktur, erlaubt das Markieren von Elementen und das Kopieren des Baums und/oder von Dateiinhalten in die Zwischenablage. Nützlich für Code‑Reviews, Support, Schulung und das Teilen der Struktur mit einem KI‑Assistenten.
 
-Wichtig: Die App arbeitet nur lesend und ändert keine Dateien.
+Wichtig: DevProjex ändert keine Dateien im geöffneten Projekt.
 
 ## 2) Projektbaum
 * Symbole für Datei/Ordner‑Typen.
@@ -11,11 +11,22 @@ Wichtig: Die App arbeitet nur lesend und ändert keine Dateien.
 Kontrollkästchen: Die Markierung eines Knotens gilt für seine Kinder; der Elternstatus wird automatisch neu berechnet.
 
 Tastenkürzel:
-* Ctrl+E — alles aufklappen
-* Ctrl+W — alles zuklappen (Wurzel bleibt offen)
+* {mod}E — alles aufklappen
+* {collapseAll} — alles zuklappen (Wurzel bleibt offen)
+
+### Kontextmenü
+Rechtsklick auf einen Knoten — oder {shift}F10 bzw. die Menütaste auf dem fokussierten Knoten:
+* Im Datei-Explorer anzeigen / Im Finder zeigen / Im Dateimanager öffnen — zeigt das Element im Dateimanager des Systems; die Beschriftung entspricht der aktuellen Plattform.
+* Vollständigen Pfad kopieren — der absolute Pfad des Elements.
+* Relativen Pfad kopieren — der Pfad ab der Projektwurzel, beginnend mit dem Namen des Wurzelordners, zum Beispiel `project/src/File.cs`.
+* Inhalt kopieren — für Dateien: kopiert den Inhalt mit den angewendeten Inhaltstransformationen, genau wie beim Kopieren und Exportieren.
+* Nur dieses Element auswählen — markiert nur diesen Knoten und hebt die übrige Auswahl auf; erscheint nur, solange auch ein anderes Element markiert ist.
+* Zweig erweitern / Zweig reduzieren — für Ordner.
+
+Existiert der Pfad nicht mehr auf der Festplatte, zeigen das Öffnen im Dateimanager und das Kopieren des Inhalts eine Fehlermeldung; das Kopieren der Pfade funktioniert weiterhin.
 
 ## 3) Datei
-* Ordner öffnen… — Wurzelordner öffnen (Ctrl+O)
+* Ordner öffnen… — Wurzelordner öffnen ({mod}O)
 * Neues Fenster — eine neue unabhängige DevProjex-Instanz öffnen
 * Zuletzt verwendet — Liste zuletzt geöffneter lokaler Ordner
 * Aktualisieren — einen lokalen Ordner neu einlesen und den Baum aufbauen (F5)
@@ -29,7 +40,7 @@ Tastenkürzel:
 
 Der Projektexport erstellt aus dem aktuellen Baum einen separaten Ordner oder ein ZIP-Archiv und behält die Verzeichnisstruktur bei.
 
-Ausgewählte Ordner der obersten Ebene, Dateitypen, Ausschlussregeln und markierte Elemente werden berücksichtigt. Ist nichts markiert, wird der gesamte aktuelle Baum exportiert.
+Ausgewählte Dateitypen, Ausschlussregeln und markierte Elemente werden berücksichtigt. Ist nichts markiert, wird der gesamte aktuelle Baum exportiert.
 
 Text- und Binärdateien werden kopiert, einbezogene leere Ordner bleiben erhalten. Die Quelldateien werden nicht verändert. Das Ergebnis kann nicht innerhalb des Quellprojekts gespeichert werden.
 
@@ -63,7 +74,7 @@ Regeln:
 * in die Liste werden nur lokale Ordner aufgenommen;
 * über DevProjex geklonte Git-Repositories werden dieser Liste nicht hinzugefügt;
 * es werden keine Duplikate erzeugt — das erneute Öffnen desselben Ordners verschiebt ihn nach oben;
-* es werden bis zu 15 letzte Ordner gespeichert;
+* es werden bis zu 32 letzte Ordner gespeichert;
 * der Verlauf bleibt zwischen App-Starts erhalten.
 
 Für jeden Eintrag werden der übergeordnete Ordner und der Projektname angezeigt, zum Beispiel `Projects / App`.
@@ -74,23 +85,30 @@ DevProjex bietet einen interaktiven Terminal-Arbeitsbereich und direkte Befehle 
 Wenn der Befehl bereits eingerichtet ist, öffnen Sie ein Terminal und führen Sie aus:
 `devprojex --help`
 
-So sehen Sie alle verfügbaren Befehle, Optionen und Beispiele.
+So sehen Sie die Befehle und Optionen der obersten Ebene. Die Optionen und Beispiele eines einzelnen Befehls zeigt `devprojex help <command>`.
 
 Beispiele:
-* `devprojex` — den interaktiven Terminal-Arbeitsbereich öffnen.
+* `devprojex` — den interaktiven Terminal-Arbeitsbereich öffnen. Im Arbeitsbereich steuert die `:`-Befehlszeile die Aktionen (zum Beispiel `:copy`, `:analyze`, `:branch`, `:language`); die vollständige Befehlsliste finden Sie in der integrierten Hilfe des Arbeitsbereichs und in der Projektdokumentation.
+* `devprojex tui .` — den angegebenen Ordner direkt im Terminal-Arbeitsbereich öffnen.
 * `devprojex open . --preview` — den aktuellen Ordner in der Desktop-Vorschau öffnen.
 * `devprojex analyze . --format json` — das aktuelle Projekt als JSON analysieren.
+* `devprojex tree .` — den Projektbaum im Terminal ausgeben.
 * `devprojex export context . --format markdown -o ../devprojex-context.md` — KI-fertigen Kontext außerhalb des Quellprojekts speichern.
 * `devprojex export project . --as folder -o ../devprojex-submission` — den effektiven Projektbaum in einen exakten Ordner exportieren.
 * `devprojex export project . --as zip -o ../devprojex-submission.zip` — den effektiven Projektbaum in ein ZIP-Archiv exportieren.
+* `devprojex export context https://github.com/owner/repo -o -` — ein entferntes Repository packen, ohne es selbst zu klonen.
 * `devprojex analyze . --git-mode tracked --exclude smart-ignore` — von Git verfolgte Dateien mit Smart Ignore analysieren.
+* `devprojex mcp --root .` — den lokalen MCP-Server im Nur-Lese-Modus starten, damit KI-Agenten das Projekt sicher lesen.
 
 Hinweise:
 * `.` bedeutet den aktuellen Terminal-Ordner;
 * Pfade mit Leerzeichen müssen in Anführungszeichen stehen;
-* `--git-mode` wählt keine Git-Filterung, `.gitignore` oder nur von Git verfolgte Dateien;
+* `--git-mode` wählt `none`, `gitignore`, `tracked`, `staged`, `changes` oder `diff:<ref>..<ref>`;
 * `--exclude` steuert gewöhnliche Ausschlüsse getrennt von der Git-Filterung;
-* direkte Befehle sind deterministisch und öffnen die Desktop-Oberfläche nicht;
+* Analyse- und Exportbefehle sind deterministisch und öffnen die Desktop-Oberfläche nicht;
+* `tui`, `open`, `analyze` und beide `export`-Befehle akzeptieren auch eine Git-Repository-URL; der Klon landet in einem verwalteten Cache (`devprojex cache`);
+* Befehle haben dokumentierte Aliasse und Kurzformen — zum Beispiel `export ctx`, `-f`, `-n`; `devprojex help` zeigt sie an;
+* `analyze --findings` listet Maskierungsfunde ohne ihre Werte auf, und `--fail-on-findings` liefert für CI einen Exit-Code ungleich null;
 * der Befehl ändert keine Projektdateien — DevProjex arbeitet im Lesemodus.
 
 Wenn der Befehl `devprojex` nicht funktioniert, öffnen Sie in DevProjex:
@@ -109,10 +127,10 @@ Im Git-Clone-Fenster kann unter dem URL-Feld eine Liste „Zuletzt verwendete Re
 
 Regeln:
 * die Liste erscheint nur, wenn im Verlauf bereits zuletzt geklonte Repositories vorhanden sind;
-* in die Liste werden nur Repository-URLs aufgenommen;
-* lokale Ordner werden dieser Liste nicht hinzugefügt;
+* nur Netzwerkquellen für Repositorys (`https://`, `http://`, `ssh://`, `git://` und SCP-Syntax) werden der Liste hinzugefügt;
+* lokale Pfade und `file://`-Quellen werden dieser Liste nicht hinzugefügt;
 * es werden keine Duplikate erzeugt — das erneute Klonen desselben Repositories verschiebt es nach oben;
-* es werden bis zu 7 letzte Repositories gespeichert;
+* es werden bis zu 16 letzte Repositories gespeichert;
 * der Verlauf bleibt zwischen App-Starts erhalten.
 
 Wenn Sie einen Eintrag auswählen, wird die URL automatisch in das Eingabefeld eingesetzt.
@@ -141,22 +159,23 @@ Der Schalter beeinflusst nicht:
 Kopiert den Projektbaum.
 Wenn Knoten markiert sind, wird der Baum aus der Auswahl gebaut; bei leerer oder ungültiger Auswahl wird der volle Baum kopiert.
 Das Ergebnisformat wird vom Baumformat-Schalter bestimmt.
-Tastenkürzel: Ctrl+Shift+C und Ctrl+Alt+C.
+Tastenkürzel: {mod}{shift}C und {mod}{alt}C.
 
 ### Inhalt kopieren
 Kopiert Dateiinhalte:
 * wenn Dateien markiert sind — nur diese; sonst — alle Projektdateien;
+* vor jeder Datei steht eine Kopfzeile mit ihrem vollständigen lokalen Pfad (bei Git-Clone-Projekten — dem Web-Pfad des Repositories);
 * Nicht-Textdateien werden ignoriert (einschließlich Binärdateien);
 * bei leeren Textdateien werden Pfad und die Zeile `[No Content, 0 bytes]` ausgegeben;
 * bei Dateien, die nur aus Leerzeichen/Zeilenumbrüchen bestehen, werden Pfad und die Zeile `[Whitespace, N bytes]` ausgegeben.
-Tastenkürzel: Ctrl+Alt+V.
+Tastenkürzel: {mod}{alt}V.
 
 ### Baum + Inhalt kopieren
 Kombiniert Baum und Inhalte:
 * Baum aus der Auswahl; bei leerer oder ungültiger Auswahl wird der volle Baum verwendet;
 * Inhalte nach denselben Regeln wie „Inhalt kopieren“;
 * das Format des Baumblocks wird vom Baumformat-Schalter bestimmt.
-Tastenkürzel: Ctrl+Shift+V.
+Tastenkürzel: {mod}{shift}V.
 
 ### Baumdarstellungen
 Baumformate stellen denselben ausgewählten Projektbaum unterschiedlich dar.
@@ -183,7 +202,11 @@ Baum + Inhalt:
 * Export erfolgt als `.txt`.
 
 ## 7) Vorschaumodus
-Wird über die Schaltfläche mit dem Auge in der oberen Leiste oder mit Ctrl+B geöffnet.
+Wird über die Schaltfläche mit dem Auge in der oberen Leiste oder mit {mod}B geöffnet.
+
+Die seitlichen Maustasten funktionieren wie die Browsernavigation: Vorwärts öffnet den Vorschaumodus, Zurück schließt ihn. Ein erneuter Druck in der bereits aktiven Richtung hat keine Wirkung.
+
+{mod}{shift}F öffnet oder schließt die Suche in den Dateiinhalten der Vorschau. Enter oder F3 geht zum nächsten Treffer, {shift}Enter oder {shift}F3 zum vorherigen.
 
 Zeigt das Endergebnis in einem separaten Arbeitsbereich neben dem Baum. Dieser Modus kopiert nichts in die Zwischenablage und exportiert nichts in eine Datei — er dient nur zur Vorschau.
 
@@ -204,7 +227,8 @@ Es gelten dieselben Regeln wie beim Kopieren und Exportieren:
 
 Zusätzlich:
 * Dateien in der Vorschau werden durch horizontale Linien getrennt;
-* beim Scrollen wird der Pfad der aktuellen Datei oben angeheftet;
+* beim Scrollen wird der Pfad der aktuellen Datei oben angeheftet; ein Klick auf den angehefteten Pfad scrollt zum Anfang dieser Datei;
+* die Bildlaufleiste der Vorschau markiert Suchtreffer und Zeilen mit erkannten Werten; ein Klick auf eine Markierung springt zu ihrer Zeile; ein beibehaltener Fund bleibt markiert, maskierte Pfade in Kopfzeilen ergeben eine einzige Markierung an ihrer ersten Zeile;
 * Baum und Vorschau können unterschiedliche Zoomstufen haben.
 * im Vorschaumodus können Sie entweder das vollständige aktuelle Ergebnis oder den aktuell sichtbaren Dateiblock kopieren, ohne das Menü „Kopieren“ zu öffnen.
 
@@ -216,22 +240,22 @@ Schaltflächen:
 * X in der Bauminsel — blendet den Baum aus und lässt nur die Vorschauinsel übrig;
 * X in der oberen Vorschauleiste — schließt den Vorschaumodus vollständig;
 * kleine Kopier-Schaltfläche in der fixierten oberen Dateileiste — kopiert den aktuell sichtbaren Dateiblock genau so, wie er in der Vorschau angezeigt wird;
-* ein erneuter Klick auf das Auge oder Ctrl+B schließt den Vorschaumodus ebenfalls.
+* ein erneuter Klick auf das Auge oder {mod}B schließt den Vorschaumodus ebenfalls.
 
 Suche und Filter sind verfügbar, solange in der Vorschau die Bauminsel sichtbar ist.
 Wenn der Baum ausgeblendet ist, sind Suche und Filter vorübergehend nicht verfügbar, bis der Nur-Vorschau-Modus verlassen wird.
 
 ## 8) Ansicht
 ### Zoom
-* Ctrl++ / Ctrl+= — vergrößern
-* Ctrl+- — verkleinern
-* Ctrl+0 — zurücksetzen
-* Ctrl + Mausrad — weiches Zoomen in der Insel unter dem Cursor
+* {mod}+ / {mod}= — vergrößern
+* {mod}- — verkleinern
+* {mod}0 — zurücksetzen
+* {mod}Mausrad — weiches Zoomen in der Insel unter dem Cursor
 
 Verhalten:
 * im normalen Modus wird der Baum skaliert;
 * in der Vorschau mit sichtbarem Baum wirken Vergrößern, Verkleinern und Zurücksetzen aus dem Menü gleichzeitig auf Baum und Vorschau;
-* mit Ctrl + Mausrad werden Baum und Vorschau abhängig von der Cursorposition unabhängig voneinander skaliert;
+* mit {mod}Mausrad werden Baum und Vorschau abhängig von der Cursorposition unabhängig voneinander skaliert;
 * im Nur-Vorschau-Modus wird nur die Vorschauinsel skaliert.
 
 Bereich: 6–28, Reset: 15.
@@ -240,8 +264,8 @@ Bereich: 6–28, Reset: 15.
 Macht die Oberfläche dichter: kleinere Abstände im Baum und in den Einstellungen.
 Während der Vorschau-Arbeitsbereich aktiv ist, wird der Kompaktmodus automatisch eingeschaltet.
 
-### Animation beim Aufklappen des Baums
-Dreht den Pfeil sanft und klappt einen Baumzweig auf oder zu, während benachbarte Zeilen verschoben werden. Standardmäßig aktiviert; bei Deaktivierung erfolgt das Aufklappen sofort.
+### Animationen
+Unter „Ansicht → Animationen“ lassen sich das Aufklappen des Baums, die Statuszähler und das erstmalige Einblenden der Werkzeuge unabhängig steuern. Alle drei Animationen sind standardmäßig aktiviert; eine deaktivierte Animation zeigt sofort ihren Endzustand.
 
 ### Baum-Schrift
 Die Baum-Schrift wird über „Ansicht → Baum-Schrift“ ausgewählt.
@@ -250,12 +274,13 @@ Die ausgewählte Schrift wird nach dem Klick auf „Anwenden“ im Einstellungen
 
 ## 9) Suche im Baum
 Öffnet die Suche, hebt Treffer hervor und erlaubt Navigation.
-* Ctrl+F — anzeigen/ausblenden
+* {mod}F — anzeigen/ausblenden
 * Enter — nächstes Ergebnis
-* Shift+Enter — vorheriges
+* {shift}Enter — vorheriges
 * Esc — schließen
 
 Die Suche öffnet nur benötigte Zweige; beim Leeren der Suche wird der Baum eingeklappt (außer der Wurzel).
+Trefferzeilen werden auch auf der Bildlaufleiste des Baums markiert; ein Klick auf eine Markierung springt zu diesem Treffer.
 Bei sehr großen Treffermengen kann die App Auto-Expand und globale Hervorhebung begrenzen, damit die UI reaktionsfähig bleibt.
 Beim Schließen der Suche wird die Suchanfrage nach Abschluss der Schließanimation geleert.
 
@@ -266,7 +291,7 @@ Einschränkungen:
 
 ## 10) Filter nach Namen
 Zeigt nur passende Knoten und ihre Eltern. Aktualisierung mit Verzögerung (Debounce).
-* Ctrl+Shift+N — Filter anzeigen/ausblenden
+* {mod}{shift}N — Filter anzeigen/ausblenden
 * Esc — Filter schließen
 
 Einschränkungen:
@@ -277,11 +302,11 @@ Einschränkungen:
 ## 11) Optionen
 Rechts verfügbar:
 * Anwenden
+* Inhaltsverarbeitung
 * Ausschlüsse
 * Dateitypen
-* Ordner der obersten Ebene
 
-Änderungen in „Ausschlüsse“, „Dateitypen“ und „Ordner der obersten Ebene“ werden im Panel vorbereitet und nach dem Klick auf „Anwenden“ angewendet.
+Änderungen in „Ausschlüsse“ und „Dateitypen“ werden im Panel vorbereitet und nach dem Klick auf „Anwenden“ angewendet.
 
 Nach dem Ändern eines Kontrollkästchens kann die App verfügbare Optionen und deren Zähler im Hintergrund aktualisieren. Der resultierende Baum wird erst nach dem Klick auf „Anwenden“ neu aufgebaut.
 
@@ -293,11 +318,18 @@ Hinweis zu „Dateitypen“:
 * in dieser Liste werden nur Dateien mit Erweiterung angezeigt;
 * Dateien ohne Erweiterung werden hier nicht angezeigt und über eine separate Option in „Ausschlüsse“ gesteuert.
 
-Ctrl+P — Panel anzeigen/ausblenden.
+Inhaltsverarbeitung:
+* dieser Bereich transformiert den Inhalt ausgewählter Textdateien, ohne den Baum zu verändern;
+* „Geheimnisse verbergen“ und „Private Daten verbergen“ ersetzen erkannte Werte (Abschnitte 12.3 und 12.4);
+* „Code komprimieren“ erhält Deklarationen und kürzt benannte Implementierungen in 14 Sprachen;
+* „Kommentare entfernen“ entfernt Kommentare und Dokumentationskommentare in 20 Sprachpaketen;
+* „Leerzeilen entfernen“ entfernt Zeilen nur aus Leerzeichen in denselben Paketen und bewahrt mehrzeilige Literale;
+* Änderungen wirken nach „Anwenden“.
+
+{mod}P — Panel anzeigen/ausblenden.
 
 ### 11.1 Profile lokaler Projektparameter
 Für lokale Ordner merkt sich DevProjex die zuletzt angewendeten Projektparameter:
-* ausgewählte Ordner der obersten Ebene;
 * ausgewählte Dateitypen;
 * ausgewählte Optionen im Bereich „Ausschlüsse“.
 
@@ -308,18 +340,18 @@ Wichtig:
 * Profile werden nur für lokale Projekte gespeichert;
 * für Projekte, die über Git Clone geöffnet wurden, werden keine Profile gespeichert;
 * wenn einzelne gespeicherte Punkte im aktuellen Projekt nicht mehr verfügbar sind, werden sie übersprungen, die übrigen Parameter werden angewendet.
-* wenn nach Aktualisieren oder erneutem Öffnen ein neuer Ordner der obersten Ebene, ein neuer Dateityp oder eine neue Option in „Ausschlüsse“ erscheint, ist dieser Punkt standardmäßig aktiviert;
+* wenn nach Aktualisieren oder erneutem Öffnen ein neuer Dateityp oder eine neue Option in „Ausschlüsse“ erscheint, ist dieser Punkt standardmäßig aktiviert;
 * bereits bekannte Punkte behalten die ausdrückliche Auswahl des Benutzers: neue Dateien eines deaktivierten Typs aktivieren diesen Typ nicht erneut.
 
 ## 12) Ausschlüsse
 Der Bereich „Ausschlüsse“ steuert, welche Dateien und Ordner aus Baum, Inhalt, Kopier- und Exportergebnissen ausgeschlossen werden.
 
-Ein Element wird nur angezeigt, wenn sein Ordner der obersten Ebene und sein Dateityp ausgewählt sind und keine aktivierte Ignore-Regel es ausschließt. Die Regeln wirken gemeinsam: Blendet mindestens eine Regel ein Element aus, kann eine andere Regel es nicht wieder sichtbar machen.
+Ein Element wird nur angezeigt, wenn sein Dateityp ausgewählt ist und keine aktivierte Ignore-Regel es ausschließt. Die Regeln wirken gemeinsam: Blendet mindestens eine Regel ein Element aus, kann eine andere Regel es nicht wieder sichtbar machen.
 
 ### 12.1 Verfügbare Regeln
-Je nach Projektinhalt können Smart Ignore, „.gitignore verwenden“, „Nur von Git verfolgte Dateien“, leere, versteckte oder mit Punkt beginnende Ordner und Dateien sowie Dateien ohne Erweiterung angezeigt werden.
+Das GUI-Auswahlfeld und die Optionsfeldzeilen der Git-Achse in der TUI werden vollständig ausgeblendet, wenn die Git-Filterung nicht anwendbar ist: Es gibt keine Repository-Grenze und der `.gitignore`-Filter kann den aktuellen Baum nicht verändern. Ist die Achse außerhalb eines Repositorys sichtbar, bietet die GUI nur keine Filterung und `.gitignore` an, während die TUI die repositorygebundenen Zeilen deaktiviert. In einem Git-Repository stehen fünf reguläre Werte zur Verfügung: keine Filterung, `.gitignore`, verfolgte Dateien, zum Commit vorgemerkte Dateien und alle aktuellen Änderungen; in der TUI erscheint ein aktiver Bereich `diff:<ref>..<ref>` als sechste Zeile. Eine Auswahl ersetzt den aktuellen Git-Modus, ohne Smart Ignore oder die grundlegenden Ausschlüsse zu ändern. Weitere Optionen werden angezeigt, wenn ihre Regeln den aktuellen Baum beeinflussen können.
 
-In einem Git-Repository bleiben „.gitignore verwenden“ und „Nur von Git verfolgte Dateien“ als stabiles Schalterpaar sichtbar. Andere Optionen erscheinen, wenn sie den aktuellen Baum verändern können. Die Liste kann sich daher nach dem Umschalten einer anderen Regel, eines Ordners der obersten Ebene oder eines Dateityps ändern. Eine neue Option ist beim ersten Erscheinen standardmäßig aktiviert; eine bekannte Option behält die Auswahl des Benutzers, auch wenn sie vorübergehend verschwindet.
+Eine neue Option ist beim ersten Erscheinen standardmäßig aktiviert; eine bekannte Option behält die Auswahl des Benutzers, auch wenn sie vorübergehend verschwindet.
 
 ### 12.2 Smart Ignore
 Smart Ignore blendet Abhängigkeiten, Build-Ausgaben, Caches und andere Projektartefakte aus. DevProjex erkennt den Projekttyp anhand der Struktur und Markerdateien wie `.csproj`, `package.json`, `pyproject.toml` oder `Cargo.toml`. Die Regeln des entsprechenden Stacks gelten nur innerhalb des erkannten Projektbereichs und nicht für benachbarte Projekte anderer Stacks.
@@ -328,7 +360,23 @@ Bei mehrdeutigen Namen wie `build`, `vendor`, `packages`, `cache`, `pkg` oder `L
 
 Die Erkennung neuer Projektbereiche ist begrenzt, damit große Benutzerordner nicht vollständig wiederholt analysiert werden. Normale Strukturen werden flach, erkannte Monorepos tiefer durchsucht. Nach der Erkennung gilt Smart Ignore ohne Tiefenbegrenzung für den gesamten Unterbaum des Bereichs.
 
-### 12.3 .gitignore verwenden
+### 12.3 Geheimnisse verbergen
+„Geheimnisse verbergen“ ist standardmäßig deaktiviert. Die Option prüft nur ausgewählte Textinhalte und ersetzt jeden erkannten Wert an seiner Stelle; Datei und umgebender Code bleiben erhalten. Solange sie ausgeschaltet ist, erfolgt keine Prüfung und es erscheint kein Zähler. Nach der Prüfung zeigt die Bezeichnung die Anzahl der erkannten Werte; bleiben durch „Beibehalten“-Entscheidungen weniger Werte verborgen, erscheinen beide Zahlen — erkannt/verborgen — und der ?-Indikator der Zeile nennt beide im Text.
+
+Erkannte Stellen werden in der Vorschau hervorgehoben. Ein Klick behält nur dieses Vorkommen unverändert; {alt}↓ / {alt}↑ wechseln zwischen den Funden, Enter schaltet den aktiven um. Im Terminal Workspace wechseln `[` und `]` zwischen den Vorkommen; `Enter` oder `Space` schalten das aktive um. Die Entscheidung gilt während der aktuellen Sitzung für Vorschau, Zwischenablage, Kontextexport, Ordner und ZIP und wird nicht im Projektprofil gespeichert.
+
+Das Kontextmenü der Vorschau erweitert diese Entscheidungen. Ein Rechtsklick auf ein erkanntes Vorkommen behält — oder verbirgt wieder — in einer Aktion alle Vorkommen seiner Regel oder alle erkannten Vorkommen in derselben Datei. Ein Rechtsklick auf einen markierten Wert im Dateiinhalt setzt eine manuelle Markierung: „… hier ausblenden“ verbirgt nur dieses Vorkommen für die Sitzung, „… immer ausblenden“ erstellt eine dauerhafte Markierung für jedes Vorkommen des Werts, und „… als private Daten ausblenden“ erstellt eine dauerhafte Markierung, die von „Private Daten verbergen“ gesteuert wird. „Markierung entfernen“ erscheint auf einer manuellen Markierung und löscht sie; ein weiterhin vom Detektor erkannter Wert bleibt verborgen. Ein manueller Wert ist eine einzelne Zeile von 8 bis 512 Zeichen, markiert im Dateiinhalt. Das Erstellen einer Markierung aktiviert die entsprechende Option automatisch. Dauerhafte Markierungen speichern nur eine schlüsselbasierte Wertidentität und ihre Klasse, niemals den Originaltext.
+
+Auch eine Ordner- oder ZIP-Kopie ändert passenden Text und lässt sich möglicherweise nicht mehr erstellen oder ausführen. Binärdateien werden unverändert kopiert und nicht geprüft. Eine ausgewählte Textdatei über 16 MiB wird ausgelassen und gemeldet, während die übrige Ausgabe abgeschlossen wird. Ein Erkennungsfehler beendet den gesamten Vorgang.
+
+Der Zähler meldet nur Regelübereinstimmungen. Null bedeutet nicht, dass das Projekt sicher ist. In der CLI gilt `--hide-secrets`; Einzelheiten stehen in `Docs/HideSecrets.md`.
+
+### 12.4 Private Daten verbergen
+"Private Daten verbergen" ist standardmäßig deaktiviert. Die Option erkennt E-Mail-Adressen, globale IP-Adressen, lokale Benutzernamen in Pfaden, MAC-Adressen und internationale Telefonnummern in ausgewählten Textdateien. Für Treffer gelten dieselben Vorschauentscheidungen und dieselbe Ausgabepipeline wie für Geheimnisse; manuelle Markierungen, die mit „… als private Daten ausblenden“ erstellt wurden, gehören zu dieser Klasse und folgen dieser Option (Abschnitt 12.3). Lokale Benutzernamen in generierten Pfad-Kopfzeilen und in der Baumwurzel werden als ein gemeinsamer Fund maskiert: Der Zähler zählt ihn als einen Wert, der ?-Indikator meldet, ob er verborgen oder sichtbar ist, und ein Klick schaltet alle maskierten Pfade zugleich um.
+
+Dokumentationsbereiche und -hosts, gängige CI-Benutzernamen, bekannte öffentliche DNS-Resolver und dokumentierte fiktive Telefonnummern bleiben sichtbar. Null Treffer sind keine Datenschutzgarantie. Die CLI verwendet `--hide-private-data`; vollständige Regeln und Grenzen der ersten Phase stehen in `Docs/HidePrivateData.md`.
+
+### 12.5 .gitignore verwenden
 Wenn aktiviert, berücksichtigt DevProjex jede erreichbare `.gitignore`, nicht nur die Datei im Wurzelordner. Jede Datei gilt für ihren eigenen Ordner und alle erreichbaren Unterordner, jedoch nicht für übergeordnete oder benachbarte Ordner.
 
 Für einen Pfad werden die Regeln von der übergeordneten zur tieferen `.gitignore` ausgewertet; innerhalb einer Datei von oben nach unten. Die letzte passende Regel bestimmt das Git-Ergebnis.
@@ -341,46 +389,45 @@ Ein symbolischer Link namens `.gitignore` wird entsprechend dem Verhalten von Gi
 
 Das integrierte Profil `standard` wählt `gitignore` und alle acht Ausschlussgruppen: `smart-ignore`, `hidden-folders`, `hidden-files`, `dot-folders`, `dot-files`, `empty-folders`, `empty-files` und `extensionless-files`.
 
-### 12.4 Nur von Git verfolgte Dateien
+### 12.6 Nur von Git verfolgte Dateien
 „Nur von Git verfolgte Dateien“ baut die Git-Stufe des Baums aus vorhandenen Arbeitsbaumdateien auf, die in jedem lesbaren Git-Index eingetragen sind. Geänderte verfolgte Dateien und neu zum Index hinzugefügte Dateien bleiben enthalten; nicht verfolgte Dateien werden ausgeschlossen. Dies ist der aktuelle Arbeitsbaum, kein historischer Snapshot von `HEAD` oder einem entfernten Repository.
 
 Jedes erreichbare verschachtelte Repository und jeder erreichbare Worktree wird auf jeder erreichbaren Verschachtelungsebene unabhängig verarbeitet. Ein untergeordnetes Repository übernimmt keine verfolgten Pfade vom übergeordneten oder einem benachbarten Repository. Dieser Modus benötigt die Git CLI; ein lesbarer leerer Index ist gültig. Wird der Terminal-Arbeitsbereich (TUI) in diesem Modus gestartet und kann kein passender Index geladen werden, wird der Arbeitsbereich nicht geöffnet. Wird der Modus interaktiv in einem bereits geöffneten TUI-Arbeitsbereich gewählt und kann kein passender Index geladen werden, wird die Änderung abgelehnt und der letzte verwendbare Git-Modus bleibt aktiv. Direkte Befehle enden in diesem Fall mit einem Richtlinien- oder Prüfungsfehler. DevProjex wechselt niemals stillschweigend zu `.gitignore`. Ist ein anderer passender Index lesbar, werden nicht verfügbare verschachtelte Bereiche mit einer Warnung ausgeschlossen.
 
 In einem bereits geöffneten Desktop-Arbeitsbereich bleibt die explizite Auswahl sichtbar und ausfallsicher: Bei fehlender Bereitschaft sind Ausgabe und Export gesperrt; bei teilweiser Bereitschaft wird mit einer lokalisierten Warnung fortgefahren.
 
-„.gitignore verwenden“ und „Nur von Git verfolgte Dateien“ schließen sich gegenseitig aus: Das Aktivieren des einen deaktiviert das andere. Bei lokalen Projekten mit Profilunterstützung wird der gewählte Modus zusammen mit den Ordnern der obersten Ebene, Dateitypen und übrigen Ausschlusseinstellungen gespeichert.
+Git-Modi schließen sich gegenseitig aus; `none` deaktiviert die Git-Filterung. Die temporären Modi `staged`, `changes` und `diff:<ref>..<ref>` werden nicht in Profilen gespeichert. Solange ein temporärer Modus aktiv ist, behält das lokale Projektprofil der GUI den zuletzt aktivierten dauerhaften Modus `gitignore` oder `tracked`. `none` wird nur gespeichert, wenn dieser Modus beim Speichern selbst aktiv ist. TUI und CLI lehnen das Speichern eines portablen Profils ab, solange ein temporärer Modus aktiv ist.
 
-### 12.5 Zusammenspiel von Git-Filterung und Smart Ignore
-Der gewählte Git-Modus und Smart Ignore sind unabhängige Schalter. Der Git-Modus wird zuerst in jedem erreichbaren Git-Bereich angewendet, danach verarbeitet Smart Ignore die verbleibenden Elemente und zuletzt folgen die Grundregeln.
+### 12.7 Zusammenspiel von Git-Filterung und Smart Ignore
+Der gewählte Git-Modus und Smart Ignore werden unabhängig voneinander gesteuert. Der Git-Modus wird zuerst in jedem erreichbaren Git-Bereich angewendet, danach verarbeitet Smart Ignore die verbleibenden Elemente und zuletzt folgen die Grundregeln.
 
-Smart Ignore kann ausgeblendet bleiben, solange der gewählte Git-Modus bereits alle seine Kandidaten abdeckt, und nach einem Moduswechsel erscheinen. In einem Git-Repository bleiben beide Git-Modi als stabiles Schalterpaar sichtbar.
+Smart Ignore kann ausgeblendet bleiben, solange der gewählte Git-Modus bereits alle seine Kandidaten abdeckt, und nach einem Wechsel oder Deaktivieren des Git-Modus erscheinen. In einem Git-Repository bleiben alle repositorygebundenen Git-Modi verfügbar.
 
 Eine Git-Negation mit `!` hebt nur das Git-Ergebnis auf. Smart Ignore und Grundregeln bleiben wirksam.
 
-### 12.6 Grundregeln
+### 12.8 Grundregeln
 Regeln für führende Punkte prüfen den Namen; Regeln für versteckte Elemente prüfen das Hidden-Systemattribut. Beides kann je nach Plattform dasselbe oder verschiedene Elemente betreffen.
 
 „Leere Dateien“ blendet Dateien mit 0 Byte aus. „Dateien ohne Erweiterung“ betrifft beispielsweise `Dockerfile`, `Makefile` und `README`.
 
 „Leere Ordner“ blendet logisch leere Ordner aus. Ein Ordner ist logisch leer, wenn nach Anwendung der ausgewählten Dateitypen und aller anderen Regeln keine sichtbaren Dateien oder Unterordner verbleiben. Deshalb kann sich sein Zähler ändern, wenn eine andere Regel umgeschaltet wird.
 
-### 12.7 Zähler
+### 12.9 Zähler
 Ein Zähler zeigt den direkten Beitrag einer Regel unter den aktuellen Einstellungen, nicht die physische Anzahl ähnlicher Elemente auf dem Datenträger. Ein Element wird nicht gleichzeitig mehreren überlappenden Zählern zugeordnet.
 
 Die feste Zuordnung lautet: für Ordner `.gitignore`, Smart Ignore, führender Punkt, Hidden-Attribut; für Dateien `.gitignore`, Smart Ignore, führender Punkt, keine Erweiterung, leere Datei, Hidden-Attribut. Diese Reihenfolge betrifft nur die Zähler. Für die Sichtbarkeit genügt jeder aktivierte Mechanismus, der das Element ausschließt.
 
-### 12.8 Änderungen anwenden
+### 12.10 Änderungen anwenden
 Das Umschalten von Kontrollkästchen aktualisiert zuerst die verfügbaren Einstellungen und Zähler. Der endgültige Baum wird nach „Einstellungen anwenden“ neu aufgebaut. Wird die Vorbereitung abgebrochen, kehrt DevProjex zum letzten vollständig abgeschlossenen Zustand zurück; teilweise berechnete Regeln werden nicht angewendet.
 
 ## 13) Wie Baum und Kennzahlen berechnet werden
 Das Ergebnis hängt ab von:
-* ausgewählte Ordner der obersten Ebene
 * ausgewählte Dateitypen
 * Ignorier‑Regeln
 * aktivem Filter
 * markierten Knoten im Baum (für auswahlbasierte Operationen)
 
-Wenn der Zugriff verweigert wird, wird der Knoten als Zugriff verweigert markiert.
+Wenn der Zugriff verweigert wird, behält der Knoten seinen Namen und sein Symbol und erhält den Zusatz „[Zugriff verweigert]“.
 
 ### 13.1 Was die Zähler in der Statusleiste zeigen
 Die Statusleiste hat zwei Blöcke:
@@ -449,13 +496,14 @@ Im Transparenzmodus bleibt der Hintergrund des Hauptfensters transparent. Menüs
 „Hilfe → Updates“ vergleicht die aktuelle Version mit dem neuesten stabilen GitHub-Release. Automatische Prüfungen sind standardmäßig deaktiviert; wenn sie aktiviert sind, prüft DevProjex beim Start, sobald seit der letzten erfolgreichen Prüfung mindestens sieben Tage vergangen sind. Die Checkbox wird sofort angewendet. Das letzte erfolgreiche Ergebnis bleibt zwischen Anwendungsstarts erhalten und wird durch einen späteren Netzwerkfehler nicht gelöscht. Die Installation bleibt eine Benutzeraktion.
 
 ### 16.2 Einstellungen zurücksetzen
-Einstellungen zurücksetzen (Hilfe → Einstellungen zurücksetzen) stellt Theme, Effekte, Kompaktmodus, Animation beim Aufklappen des Baums und Oberflächensprache auf die Standardwerte zurück. Projektprofile, Verlauf und Dateien auf dem Datenträger bleiben unverändert.
+Einstellungen zurücksetzen (Hilfe → Einstellungen zurücksetzen) stellt Theme, Effekte, Kompaktmodus, Animationseinstellungen und Oberflächensprache auf die Standardwerte zurück. Projektprofile, Verlauf und Dateien auf dem Datenträger bleiben unverändert.
 
 ### 16.3 Daten zurücksetzen
 Daten zurücksetzen (Hilfe → Daten zurücksetzen) löscht gespeicherte Profile lokaler Projektparameter:
-* ausgewählte Ordner der obersten Ebene;
 * ausgewählte Dateitypen;
-* ausgewählte Optionen im Bereich „Ausschlüsse“.
+* ausgewählte Optionen im Bereich „Ausschlüsse“;
+* ausgewählte Einstellungen zur Inhaltsverarbeitung;
+* manuelle Geheimnismarkierungen.
 
 Wichtig:
 * der Verlauf „Zuletzt verwendet“ für lokale Ordner wird nicht gelöscht;

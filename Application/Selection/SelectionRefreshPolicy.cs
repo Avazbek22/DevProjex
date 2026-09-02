@@ -60,7 +60,9 @@ public static class SelectionRefreshPolicy
         return true;
     }
 
-    public static IReadOnlyList<SelectionOption> ApplyMissingProfileSelectionsFallbackToRootFolders(
+    // TODO(cli): Remove with the legacy --root/profile selection contract. Desktop no longer
+    // exposes or persists top-level-folder selection.
+    public static IReadOnlyList<SelectionOption> ApplyLegacyCliRootFallback(
         PreparedSelectionMode preparedSelectionMode,
         IReadOnlyCollection<string> cachedSelections,
         IReadOnlyList<SelectionOption> options,
@@ -69,23 +71,13 @@ public static class SelectionRefreshPolicy
         FilterOptionSelectionService filterSelectionService,
         IReadOnlySet<string> emptySelectionSet)
     {
-        if (preparedSelectionMode != PreparedSelectionMode.Profile)
-            return options;
-        if (cachedSelections.Count == 0 || options.Count == 0)
-            return options;
-
-        var hasAnyMatchedSelection = false;
-        foreach (var option in options)
+        if (preparedSelectionMode != PreparedSelectionMode.Profile ||
+            cachedSelections.Count == 0 ||
+            options.Count == 0 ||
+            options.Any(static option => option.IsChecked))
         {
-            if (option.IsChecked)
-            {
-                hasAnyMatchedSelection = true;
-                break;
-            }
-        }
-
-        if (hasAnyMatchedSelection)
             return options;
+        }
 
         return filterSelectionService.BuildRootFolderOptions(
             scannedRootFolders,
@@ -116,7 +108,12 @@ public static class SelectionRefreshPolicy
     public static bool CanUseIgnoreDefaultFallback(IgnoreOptionId optionId) =>
         optionId is not IgnoreOptionId.UseGitIgnore
             and not IgnoreOptionId.TrackedGitFilesOnly
-            and not IgnoreOptionId.SmartIgnore;
+            and not IgnoreOptionId.SmartIgnore
+            and not IgnoreOptionId.HideSecrets
+			and not IgnoreOptionId.HidePrivateData
+			and not IgnoreOptionId.CompressCode
+			and not IgnoreOptionId.StripComments
+			and not IgnoreOptionId.StripBlankLines;
 
     private static bool HasPreparedSelectionForPath(string? preparedSelectionPath, string path)
     {

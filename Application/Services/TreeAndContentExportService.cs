@@ -7,7 +7,12 @@ public sealed class TreeAndContentExportService(
 	SelectedContentExportService contentExport)
 {
 	private const string ClipboardBlankLine = "\u00A0"; // NBSP: looks empty but won't collapse on paste
-	private static readonly IReadOnlySet<string> EmptySelection = new HashSet<string>(PathComparer.Default);
+	private const int MaximumCachedRelativePathMappers = 32;
+	private static readonly IReadOnlySet<string> EmptySelection = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
+	private static readonly object RelativePathMapperSync = new();
+	private static readonly Dictionary<string, RelativePathMapperCacheEntry> RelativePathMappers =
+		new(ProjectTreePathIdentity.CanonicalComparer);
+	private static readonly LinkedList<string> RelativePathMapperLru = new();
 
 	public string Build(string rootPath, TreeNodeDescriptor root, IReadOnlySet<string> selectedPaths)
 		=> Build(rootPath, root, selectedPaths, TreeTextFormat.Ascii);
@@ -36,38 +41,98 @@ public sealed class TreeAndContentExportService(
 		IReadOnlySet<string> selectedPaths,
 		TreeTextFormat format,
 		CancellationToken cancellationToken,
-		ExportPathPresentation? pathPresentation = null)
+		ExportPathPresentation? pathPresentation = null,
+		ContentTransformationContext? transformationContext = null,
+		OutputPathRedactionDecision? outputPathRedaction = null)
 	{
-		var displayRootPath = pathPresentation?.DisplayRootPath;
+		outputPathRedaction ??= OutputRootPathPresentation.CaptureRedactionDecision(transformationContext);
+		var displayRootPath = OutputRootPathPresentation.Resolve(
+			rootPath,
+			pathPresentation,
+			outputPathRedaction);
 		var displayRootName = pathPresentation?.DisplayRootName;
-		bool hasSelection = selectedPaths.Count > 0 && TreeExportService.HasSelectedDescendantOrSelf(root, selectedPaths);
+		var hasSelection = selectedPaths.Count > 0;
+		string tree;
+		if (hasSelection)
+		{
+			tree = treeExport.BuildSelectedTreeWithCancellation(
+				rootPath,
+				root,
+				selectedPaths,
+				format,
+				displayRootPath,
+				displayRootName,
+				cancellationToken);
+			if (string.IsNullOrWhiteSpace(tree))
+			{
+				hasSelection = false;
+				tree = treeExport.BuildFullTreeWithCancellation(
+					rootPath,
+					root,
+					format,
+					displayRootPath,
+					displayRootName,
+					includeRootPath: true,
+					cancellationToken: cancellationToken);
+			}
+		}
+		else
+		{
+			tree = treeExport.BuildFullTreeWithCancellation(
+				rootPath,
+				root,
+				format,
+				displayRootPath,
+				displayRootName,
+				includeRootPath: true,
+				cancellationToken: cancellationToken);
+		}
 
-		string tree = hasSelection
-			? treeExport.BuildSelectedTree(rootPath, root, selectedPaths, format, displayRootPath, displayRootName)
-			: treeExport.BuildFullTree(rootPath, root, format, displayRootPath, displayRootName);
-
-		if (hasSelection && string.IsNullOrWhiteSpace(tree))
-			tree = treeExport.BuildFullTree(rootPath, root, format, displayRootPath, displayRootName);
-
-		var files = ProjectTreeSelectionProjection.BuildOrderedSelectedFilePaths(
+		var files = ProjectTreeSelectionProjection.BuildOrderedSelectedFilePathsWithCancellation(
 			root,
 			hasSelection ? selectedPaths : EmptySelection,
-			ensureExists: hasSelection);
+			ensureExists: hasSelection,
+			cancellationToken);
 		var contentPathMapper = CreateRelativeContentHeaderPathMapper(rootPath);
 
-		var content = await contentExport.BuildAsync(files, cancellationToken, contentPathMapper).ConfigureAwait(false);
+		var contentResult = await contentExport.BuildResultAsync(
+			files,
+			cancellationToken,
+			contentPathMapper,
+			transformationContext,
+			displayRootPath: null,
+			outputPathRedaction: outputPathRedaction).ConfigureAwait(false);
+		var content = contentResult.Text;
 		if (string.IsNullOrWhiteSpace(content))
 			return tree;
 
 		// The selected format applies only to the tree block; file content stays plain text.
-		var sb = new StringBuilder();
-		sb.Append(tree.TrimEnd('\r', '\n'));
-		sb.AppendLine();
-		AppendClipboardBlankLine(sb);
-		AppendClipboardBlankLine(sb);
-		sb.Append(content);
+		return CombineTreeAndContent(tree, content);
+	}
 
-		return sb.ToString();
+	internal static string CombineTreeAndContent(string tree, string content)
+	{
+		var treeLength = TrailingLineEndingTrimming.GetTrimmedLength(tree);
+		var lineEnding = Environment.NewLine;
+		var resultLength = checked(treeLength + content.Length + lineEnding.Length * 3 + 2);
+		return string.Create(
+			resultLength,
+			(Tree: tree, TreeLength: treeLength, Content: content, LineEnding: lineEnding),
+			static (destination, state) =>
+			{
+				var offset = 0;
+				state.Tree.AsSpan(0, state.TreeLength).CopyTo(destination);
+				offset += state.TreeLength;
+				state.LineEnding.AsSpan().CopyTo(destination[offset..]);
+				offset += state.LineEnding.Length;
+				destination[offset++] = ClipboardBlankLine[0];
+				state.LineEnding.AsSpan().CopyTo(destination[offset..]);
+				offset += state.LineEnding.Length;
+				destination[offset++] = ClipboardBlankLine[0];
+				state.LineEnding.AsSpan().CopyTo(destination[offset..]);
+				offset += state.LineEnding.Length;
+				state.Content.AsSpan().CopyTo(destination[offset..]);
+			});
 	}
 
 	public static Func<string, string> CreateRelativeContentHeaderPathMapper(string rootPath)
@@ -84,7 +149,28 @@ public sealed class TreeAndContentExportService(
 			normalizedRootPath = null;
 		}
 
-		return filePath => MapRelativeContentHeaderPathFromNormalizedRoot(normalizedRootPath, filePath);
+		var cacheKey = normalizedRootPath ?? rootPath;
+		lock (RelativePathMapperSync)
+		{
+			if (RelativePathMappers.TryGetValue(cacheKey, out var cached))
+			{
+				RelativePathMapperLru.Remove(cached.Node);
+				RelativePathMapperLru.AddFirst(cached.Node);
+				return cached.Mapper;
+			}
+
+			Func<string, string> mapper = filePath =>
+				MapRelativeContentHeaderPathFromNormalizedRoot(normalizedRootPath, filePath);
+			var node = RelativePathMapperLru.AddFirst(cacheKey);
+			RelativePathMappers.Add(cacheKey, new RelativePathMapperCacheEntry(mapper, node));
+			if (RelativePathMappers.Count > MaximumCachedRelativePathMappers &&
+			    RelativePathMapperLru.Last is { } oldest)
+			{
+				RelativePathMappers.Remove(oldest.Value);
+				RelativePathMapperLru.RemoveLast();
+			}
+			return mapper;
+		}
 	}
 
 	public static string MapRelativeContentHeaderPath(string rootPath, string filePath)
@@ -112,12 +198,12 @@ public sealed class TreeAndContentExportService(
 				return GetFallbackContentHeaderPath(filePath);
 
 			var relativePath = Path.GetRelativePath(normalizedRootPath, filePath);
-			if (!string.IsNullOrWhiteSpace(relativePath) &&
+			if (!string.IsNullOrEmpty(relativePath) &&
 			    relativePath != "." &&
-			    !IsOutsideRoot(relativePath) &&
+			    !PathUtility.IsRelativePathOutsideRoot(relativePath) &&
 			    !Path.IsPathRooted(relativePath))
 			{
-				return relativePath.Replace('\\', '/');
+				return PathUtility.NormalizeSeparators(relativePath);
 			}
 		}
 		catch
@@ -132,13 +218,10 @@ public sealed class TreeAndContentExportService(
 	private static string GetFallbackContentHeaderPath(string filePath)
 	{
 		var fileName = Path.GetFileName(filePath);
-		return string.IsNullOrWhiteSpace(fileName) ? filePath.Replace('\\', '/') : fileName;
+		return string.IsNullOrEmpty(fileName) ? PathUtility.NormalizeSeparators(filePath) : fileName;
 	}
 
-	private static bool IsOutsideRoot(string relativePath) =>
-		relativePath.Equals("..", StringComparison.Ordinal) ||
-		relativePath.StartsWith("../", StringComparison.Ordinal) ||
-		relativePath.StartsWith(@"..\", StringComparison.Ordinal);
-
-	private static void AppendClipboardBlankLine(StringBuilder sb) => sb.AppendLine(ClipboardBlankLine);
+	private sealed record RelativePathMapperCacheEntry(
+		Func<string, string> Mapper,
+		LinkedListNode<string> Node);
 }

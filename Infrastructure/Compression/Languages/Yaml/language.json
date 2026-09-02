@@ -1,0 +1,18 @@
+{
+  "id": "yaml",
+  "displayName": "YAML",
+  "extensions": [
+    ".yml",
+    ".yaml"
+  ],
+  "library": "tree-sitter-yaml",
+  "export": "tree_sitter_yaml",
+  "queryVersion": 1,
+  "transformCapabilities": [
+    "comments",
+    "blankLines"
+  ],
+  "blockPlaceholder": "",
+  "containerNodeTypes": [],
+  "executableOwnerKinds": []
+}

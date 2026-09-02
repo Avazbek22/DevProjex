@@ -1,5 +1,5 @@
-using System.Diagnostics;
 using System.IO.Compression;
+using System.Xml.Linq;
 
 namespace DevProjex.Tests.Integration;
 
@@ -126,6 +126,165 @@ public sealed class TerminalProcessSmokeIntegrationTests
 		}
 		Assert.DoesNotContain("\u001b", context.StandardOutput, StringComparison.Ordinal);
 		Assert.Empty(context.StandardError);
+	}
+
+	[Fact]
+	public async Task ContextTokenBudgetRunsThroughTheRealEntryPoint()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("token-budget-source");
+		File.WriteAllText(Path.Combine(project, "A-size-filtered.txt"), new string('a', 200));
+		File.WriteAllText(Path.Combine(project, "B-budget-skipped.txt"), new string('b', 40));
+		File.WriteAllText(Path.Combine(project, "C-included.txt"), "c");
+
+		var context = await RunAsync(
+		[
+			"export", "context", project,
+			"--view", "tree-content",
+			"--format", "json",
+			"--output", "-",
+			"--max-file-bytes", "100",
+			"--max-tokens", "1",
+			"--git-mode", "none",
+			"--exclude", "none",
+			"--progress", "never",
+			"--language", "en"
+		]);
+
+		Assert.Equal(CommandLineExitCodes.Success, context.ExitCode);
+		using var document = JsonDocument.Parse(context.StandardOutput);
+		var file = Assert.Single(document.RootElement.GetProperty("files").EnumerateArray());
+		Assert.Equal("C-included.txt", file.GetProperty("path").GetString());
+		var budget = document.RootElement.GetProperty("tokenBudget");
+		Assert.Equal(1, budget.GetProperty("includedFiles").GetInt32());
+		Assert.Equal(1, budget.GetProperty("skippedFiles").GetInt32());
+		Assert.Contains("Estimated token budget: 1.", context.StandardError, StringComparison.Ordinal);
+		Assert.Contains("B-budget-skipped.txt", context.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain("A-size-filtered.txt", context.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("A-size-filtered.txt", context.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain("\u001b", context.StandardOutput, StringComparison.Ordinal);
+		Assert.DoesNotContain("\u001b", context.StandardError, StringComparison.Ordinal);
+
+		var outputPath = Path.Combine(workspace.Path, "budget.xml");
+		var fileContext = await RunAsync(
+		[
+			"export", "context", project,
+			"--view", "content",
+			"--format", "xml",
+			"--output", outputPath,
+			"--max-file-bytes", "100",
+			"--max-tokens", "1",
+			"--git-mode", "none",
+			"--exclude", "none",
+			"--progress", "never",
+			"--language", "en"
+		]);
+
+		Assert.Equal(CommandLineExitCodes.Success, fileContext.ExitCode);
+		Assert.Equal(outputPath, fileContext.StandardOutput.TrimEnd('\r', '\n'));
+		var fileDocument = XDocument.Load(outputPath);
+		var fileEntry = Assert.Single(fileDocument.Root!.Element("files")!.Elements("file"));
+		Assert.Equal(
+			PathUtility.NormalizeSeparators(Path.Combine(project, "C-included.txt")),
+			fileEntry.Attribute("path")?.Value);
+		var tokenBudget = fileDocument.Root.Element("tokenBudget")!;
+		Assert.Equal("1", tokenBudget.Element("includedFiles")?.Value);
+		Assert.Equal(
+			PathUtility.NormalizeSeparators(Path.Combine(project, "B-budget-skipped.txt")),
+			tokenBudget.Element("largestSkippedFiles")?.Element("file")?.Attribute("path")?.Value);
+		Assert.DoesNotContain("A-size-filtered.txt", fileDocument.ToString(), StringComparison.Ordinal);
+		Assert.DoesNotContain("A-size-filtered.txt", fileContext.StandardError, StringComparison.Ordinal);
+		Assert.Contains("Estimated token budget: 1.", fileContext.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain("\u001b", fileContext.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task ContextExportReportsFifoAsUnreadableWithoutBlocking()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("Windows does not expose POSIX FIFO entries.");
+
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("fifo-source");
+		var fifoPath = Path.Combine(project, "events.txt");
+		await CreateFifoAsync(fifoPath);
+
+		var context = await RunAsync(
+		[
+			"export", "context", project,
+			"--view", "content",
+			"--format", "json",
+			"--output", "-",
+			"--git-mode", "none",
+			"--exclude", "none",
+			"--hide-secrets",
+			"--progress", "never",
+			"--language", "en"
+		]);
+
+		Assert.Equal(CommandLineExitCodes.Success, context.ExitCode);
+		using var document = JsonDocument.Parse(context.StandardOutput);
+		var file = Assert.Single(document.RootElement.GetProperty("files").EnumerateArray());
+		Assert.Equal(fifoPath, file.GetProperty("path").GetString());
+		Assert.Equal("unreadable", file.GetProperty("classification").GetString());
+		Assert.Equal(JsonValueKind.Null, file.GetProperty("content").ValueKind);
+		Assert.Contains("File could not be read.", context.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task ProjectExportRejectsFifoWithoutBlocking()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("Windows does not expose POSIX FIFO entries.");
+
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("fifo-copy-source");
+		await CreateFifoAsync(Path.Combine(project, "events.txt"));
+		var destination = Path.Combine(workspace.Path, "copy");
+
+		var context = await RunAsync(
+		[
+			"export", "project", project,
+			"--as", "folder",
+			"--output", destination,
+			"--git-mode", "none",
+			"--exclude", "none",
+			"--progress", "never",
+			"--language", "en"
+		]);
+
+		Assert.Equal(CommandLineExitCodes.RuntimeError, context.ExitCode);
+		Assert.Contains("DPX-EXPORT-SOURCE-UNAVAILABLE", context.StandardError, StringComparison.Ordinal);
+		Assert.False(Path.Exists(destination));
+	}
+
+	[Fact]
+	public async Task ContextExportDoesNotOpenFifoGitIgnore()
+	{
+		if (OperatingSystem.IsWindows())
+			Assert.Skip("Windows does not expose POSIX FIFO entries.");
+
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("fifo-gitignore-source");
+		await CreateFifoAsync(Path.Combine(project, ".gitignore"));
+		workspace.CreateFile("fifo-gitignore-source/App.cs", "class App {}");
+
+		var context = await RunAsync(
+		[
+			"export", "context", project,
+			"--view", "content",
+			"--format", "json",
+			"--output", "-",
+			"--git-mode", "gitignore",
+			"--exclude", "none",
+			"--progress", "never",
+			"--language", "en"
+		]);
+
+		Assert.Equal(CommandLineExitCodes.Success, context.ExitCode);
+		using var document = JsonDocument.Parse(context.StandardOutput);
+		Assert.Equal("devprojex-context", document.RootElement.GetProperty("kind").GetString());
+		Assert.Contains("DPX-PROJECT-PARTIAL-ACCESS", context.StandardError, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -409,6 +568,26 @@ public sealed class TerminalProcessSmokeIntegrationTests
 			process.ExitCode,
 			await outputTask,
 			await errorTask);
+	}
+
+	private static async Task CreateFifoAsync(string path)
+	{
+		var startInfo = new ProcessStartInfo("mkfifo")
+		{
+			UseShellExecute = false,
+			RedirectStandardOutput = true,
+			RedirectStandardError = true,
+			CreateNoWindow = true
+		};
+		startInfo.ArgumentList.Add(path);
+		using var process = new Process { StartInfo = startInfo };
+		Assert.True(process.Start(), "Failed to start mkfifo.");
+		var output = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
+		var error = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+		await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+		Assert.True(
+			process.ExitCode == 0,
+			$"mkfifo failed: {await output} {await error}");
 	}
 
 	private static string ResolveExecutableAssembly()

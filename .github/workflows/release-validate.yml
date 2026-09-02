@@ -4,7 +4,7 @@ on:
   push:
     branches: [ "master" ]
   pull_request:
-    branches: [ "master", "v4.9.5" ]
+    branches: [ "master", "v5.1" ]
   workflow_dispatch:
 
 permissions:
@@ -14,6 +14,7 @@ permissions:
 env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DEVPROJEX_SKIP_TUI_PTY_TESTS: 1
 
 concurrency:
   group: release-validate-${{ github.workflow }}-${{ github.ref }}
@@ -502,6 +503,109 @@ jobs:
             throw "Published export smoke did not print the expected tree for ${{ matrix.rid }}. StdOut=$exportStdout"
           }
 
+      - name: Extended Command-line Contracts (Native Published Artifact)
+        shell: pwsh
+        run: |
+          $exePath = (Resolve-Path "artifacts/publish/${{ matrix.rid }}/${{ matrix.binary }}").Path
+          $projectDirectory = Join-Path $env:RUNNER_TEMP "devprojex-native-export-project-${{ matrix.rid }}"
+          $sourceDirectory = Join-Path $projectDirectory "src"
+
+          function Invoke-NativeCommand {
+            param(
+              [Parameter(Mandatory = $true)]
+              [string] $Name,
+              [Parameter(Mandatory = $true)]
+              [string[]] $Arguments,
+              [hashtable] $Environment = @{}
+            )
+
+            $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+            $startInfo.FileName = $exePath
+            $startInfo.UseShellExecute = $false
+            $startInfo.CreateNoWindow = $true
+            $startInfo.RedirectStandardOutput = $true
+            $startInfo.RedirectStandardError = $true
+            foreach ($argument in $Arguments) {
+              $startInfo.ArgumentList.Add($argument)
+            }
+            foreach ($entry in $Environment.GetEnumerator()) {
+              if ($null -eq $entry.Value) {
+                $startInfo.Environment.Remove([string] $entry.Key)
+              }
+              else {
+                $startInfo.Environment[[string] $entry.Key] = [string] $entry.Value
+              }
+            }
+
+            $process = [System.Diagnostics.Process]::new()
+            $process.StartInfo = $startInfo
+            if (-not $process.Start()) {
+              throw "Could not start published command '$Name'."
+            }
+
+            $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+            $stderrTask = $process.StandardError.ReadToEndAsync()
+            if (-not $process.WaitForExit(60000)) {
+              $process.Kill($true)
+              throw "Published command '$Name' timed out."
+            }
+
+            $result = [pscustomobject]@{
+              ExitCode = $process.ExitCode
+              StdOut = $stdoutTask.GetAwaiter().GetResult()
+              StdErr = $stderrTask.GetAwaiter().GetResult()
+            }
+            $process.Dispose()
+            return $result
+          }
+
+          $smartSecretsProject = Join-Path `
+            $env:RUNNER_TEMP `
+            "devprojex-smart-secrets-${{ matrix.rid }}"
+          Remove-Item -LiteralPath $smartSecretsProject -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $smartSecretsProject | Out-Null
+          $smartSecretsSourcePath = Join-Path $smartSecretsProject "appsettings.json"
+          $originalPassword = "Admin123!"
+          $smartSecretsSource = @"
+          {
+            "ConnectionStrings": {
+              "Primary": "Host=db;Username=admin;Password=$originalPassword;Database=app"
+            }
+          }
+          "@
+          $smartSecretsSource | Set-Content `
+            -LiteralPath $smartSecretsSourcePath `
+            -Encoding utf8NoBOM `
+            -NoNewline
+          $smartSecretsSourceBytes = [System.IO.File]::ReadAllBytes($smartSecretsSourcePath)
+
+          $smartSecretsContext = Invoke-NativeCommand `
+            -Name "Smart Secrets context contract" `
+            -Arguments @(
+              "export", "context", $smartSecretsProject,
+              "--view", "content",
+              "--format", "text",
+              "--git-mode", "none",
+              "--exclude", "none",
+              "--hide-secrets",
+              "--plain",
+              "--language", "en",
+              "-o", "-")
+          if ($smartSecretsContext.ExitCode -ne 0 -or
+              -not [string]::IsNullOrWhiteSpace($smartSecretsContext.StdErr) -or
+              $smartSecretsContext.StdOut.Contains($originalPassword, [StringComparison]::Ordinal) -or
+              -not $smartSecretsContext.StdOut.Contains(
+                "Password=DEVPROJEX_REDACTED[connection-password#1]",
+                [StringComparison]::Ordinal)) {
+            throw "Published Smart Secrets context contract failed. ExitCode=$($smartSecretsContext.ExitCode) StdOut=$($smartSecretsContext.StdOut) StdErr=$($smartSecretsContext.StdErr)"
+          }
+
+          $smartSecretsSourceBytesAfter = [System.IO.File]::ReadAllBytes($smartSecretsSourcePath)
+          if ([Convert]::ToBase64String($smartSecretsSourceBytes) -ne
+              [Convert]::ToBase64String($smartSecretsSourceBytesAfter)) {
+            throw "Published Smart Secrets context export modified the source file."
+          }
+
           $emptyGitIgnoreDestination = Join-Path $env:RUNNER_TEMP "devprojex-empty-gitignore-${{ matrix.rid }}"
           Remove-Item -LiteralPath $emptyGitIgnoreDestination -Recurse -Force -ErrorAction SilentlyContinue
           $emptyGitIgnore = Invoke-NativeCommand -Name "empty gitignore contract" -Arguments @(
@@ -636,6 +740,61 @@ jobs:
           if ([Convert]::ToBase64String($sourceBytesBeforeProjectExport) -ne
               [Convert]::ToBase64String($sourceBytesAfterProjectExport)) {
             throw "Published project export modified the source file."
+          }
+
+      - name: Machine-output and Failure Contracts (Native Published Artifact)
+        shell: pwsh
+        run: |
+          $exePath = (Resolve-Path "artifacts/publish/${{ matrix.rid }}/${{ matrix.binary }}").Path
+          $projectDirectory = Join-Path $env:RUNNER_TEMP "devprojex-native-export-project-${{ matrix.rid }}"
+
+          function Invoke-NativeCommand {
+            param(
+              [Parameter(Mandatory = $true)]
+              [string] $Name,
+              [Parameter(Mandatory = $true)]
+              [string[]] $Arguments,
+              [hashtable] $Environment = @{}
+            )
+
+            $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+            $startInfo.FileName = $exePath
+            $startInfo.UseShellExecute = $false
+            $startInfo.CreateNoWindow = $true
+            $startInfo.RedirectStandardOutput = $true
+            $startInfo.RedirectStandardError = $true
+            foreach ($argument in $Arguments) {
+              $startInfo.ArgumentList.Add($argument)
+            }
+            foreach ($entry in $Environment.GetEnumerator()) {
+              if ($null -eq $entry.Value) {
+                $startInfo.Environment.Remove([string] $entry.Key)
+              }
+              else {
+                $startInfo.Environment[[string] $entry.Key] = [string] $entry.Value
+              }
+            }
+
+            $process = [System.Diagnostics.Process]::new()
+            $process.StartInfo = $startInfo
+            if (-not $process.Start()) {
+              throw "Could not start published command '$Name'."
+            }
+
+            $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+            $stderrTask = $process.StandardError.ReadToEndAsync()
+            if (-not $process.WaitForExit(60000)) {
+              $process.Kill($true)
+              throw "Published command '$Name' timed out."
+            }
+
+            $result = [pscustomobject]@{
+              ExitCode = $process.ExitCode
+              StdOut = $stdoutTask.GetAwaiter().GetResult()
+              StdErr = $stderrTask.GetAwaiter().GetResult()
+            }
+            $process.Dispose()
+            return $result
           }
 
           $analysis = Invoke-NativeCommand -Name "mixed-case analysis JSON" -Arguments @(
@@ -793,7 +952,7 @@ jobs:
           dotnet test Tests/DevProjex.Tests.Terminal/DevProjex.Tests.Terminal.csproj `
             -c Release `
             --no-restore `
-            --filter "FullyQualifiedName~PublishedSingleFileExtractionProcessTests" `
+            --filter "FullyQualifiedName~PublishedSingleFileExtractionProcessTests|FullyQualifiedName~McpServerProcessTests.PublishedSingleFileCompletesHandshakeListsToolsCallsToolAndExitsOnEof" `
             --logger "console;verbosity=minimal"
 
       - name: Published Completion Native Shell Integration
@@ -1439,6 +1598,8 @@ jobs:
 
       - name: Portable Launcher ConPTY TUI Smoke (Windows x64)
         if: ${{ matrix.rid == 'win-x64' }}
+        env:
+          DEVPROJEX_SKIP_TUI_PTY_TESTS: 0
         shell: pwsh
         run: |
           $launcherRoot = Join-Path $env:RUNNER_TEMP "devprojex-official-launcher-${{ matrix.rid }}"
@@ -1459,7 +1620,8 @@ jobs:
             "FullyQualifiedName~TerminalPtyLifecycleTests.TooSmallTerminalRecoversAfterResizeWithoutRestarting",
             "FullyQualifiedName~TerminalPtyLifecycleTests.ExplicitMouseModeEnablesTrackingAndRestoresItOnExit",
             "FullyQualifiedName~TerminalPtyLifecycleTests.ExplicitNoMouseModeIgnoresMouseInput",
-            "FullyQualifiedName~TerminalPlainPtyTests.PlainWorkspaceIsStableKeyboardAccessibleAndRestoresTerminal"
+            "FullyQualifiedName~TerminalPlainPtyTests.PlainWorkspaceIsStableKeyboardAccessibleAndRestoresTerminal",
+            "FullyQualifiedName~TerminalWorkspaceCommandLinePtyTests.CopyThenCjkLanguageSwitchKeepsThePublishedWorkspaceInteractive"
           ) -join "|"
           dotnet test Tests/DevProjex.Tests.Terminal/DevProjex.Tests.Terminal.csproj `
             -c Release `
@@ -1469,6 +1631,8 @@ jobs:
 
       - name: Published Native PTY TUI Smoke (Unix)
         if: ${{ startsWith(matrix.rid, 'linux-') || startsWith(matrix.rid, 'osx-') }}
+        env:
+          DEVPROJEX_SKIP_TUI_PTY_TESTS: 0
         shell: pwsh
         run: |
           if ($env:RUNNER_OS -eq "macOS") {
@@ -1495,6 +1659,7 @@ jobs:
             "FullyQualifiedName~TerminalPtyLifecycleTests.ExplicitMouseModeEnablesTrackingAndRestoresItOnExit",
             "FullyQualifiedName~TerminalPtyLifecycleTests.ExplicitNoMouseModeIgnoresMouseInput",
             "FullyQualifiedName~TerminalPlainPtyTests.PlainWorkspaceIsStableKeyboardAccessibleAndRestoresTerminal",
+            "FullyQualifiedName~TerminalWorkspaceCommandLinePtyTests.CopyThenCjkLanguageSwitchKeepsThePublishedWorkspaceInteractive",
             "FullyQualifiedName~TerminalSignalProcessRegressionTests"
           ) -join "|"
           dotnet test Tests/DevProjex.Tests.Terminal/DevProjex.Tests.Terminal.csproj `

@@ -2,6 +2,13 @@ using DevProjex.Application.Diagnostics;
 
 namespace DevProjex.Tests.Integration;
 
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class IgnorePipelinePerformanceCollection
+{
+	public const string Name = "Ignore pipeline performance";
+}
+
+[Collection(IgnorePipelinePerformanceCollection.Name)]
 [Trait("Category", "LocalPerformance")]
 public sealed class IgnorePipelinePerformanceSmokeIntegrationTests
 {
@@ -166,6 +173,61 @@ public sealed class IgnorePipelinePerformanceSmokeIntegrationTests
 		Assert.Contains($"{deepestScope}/keep.cache", observation.Paths);
 	}
 
+	[Fact]
+	public void DiscoveredGitIgnoreScopes_FiveThousandUniqueAndDuplicateEntries_PreservesFirstWinsOrder()
+	{
+		if (!string.Equals(
+			    Environment.GetEnvironmentVariable("DEVPROJEX_RUN_LARGE_PERF_TESTS"),
+			    "1",
+			    StringComparison.Ordinal))
+		{
+			Assert.Skip("Set DEVPROJEX_RUN_LARGE_PERF_TESTS=1 for the pre-release performance gate.");
+		}
+
+		const int scopeCount = 5_000;
+		var firstMatchers = Enumerable.Range(0, scopeCount)
+			.Select(static index => new ScopedGitIgnoreMatcher(
+				Path.Combine("repo", $"scope-{index:D4}"),
+				GitIgnoreMatcher.Empty))
+			.ToArray();
+		var duplicateMatchers = firstMatchers
+			.Reverse()
+			.Select(static matcher => new ScopedGitIgnoreMatcher(
+				matcher.ScopeRootPath,
+				GitIgnoreMatcher.Empty))
+			.ToArray();
+
+		var legacy = new List<ScopedGitIgnoreMatcher>();
+		var legacyAllocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+		var legacyStopwatch = Stopwatch.StartNew();
+		foreach (var matcher in firstMatchers)
+			AddDiscoveredMatcherLinear(legacy, matcher);
+		foreach (var matcher in duplicateMatchers)
+			AddDiscoveredMatcherLinear(legacy, matcher);
+		legacyStopwatch.Stop();
+		var legacyAllocatedBytes = GC.GetAllocatedBytesForCurrentThread() - legacyAllocatedBefore;
+
+		var accumulator = new ScopedGitIgnoreMatcherAccumulator();
+		var accumulatorAllocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+		var accumulatorStopwatch = Stopwatch.StartNew();
+		foreach (var matcher in firstMatchers)
+			accumulator.Add(matcher);
+		foreach (var matcher in duplicateMatchers)
+			accumulator.Add(matcher);
+		accumulatorStopwatch.Stop();
+		var accumulatorAllocatedBytes = GC.GetAllocatedBytesForCurrentThread() - accumulatorAllocatedBefore;
+
+		Assert.Equal(legacy.Count, accumulator.Items.Count);
+		for (var index = 0; index < scopeCount; index++)
+		{
+			Assert.Same(firstMatchers[index], legacy[index]);
+			Assert.Same(firstMatchers[index], accumulator.Items[index]);
+		}
+		TestContext.Current.TestOutputHelper?.WriteLine(
+			$"Discovered scope dedupe: linear={legacyStopwatch.Elapsed.TotalMilliseconds:F3} ms/{legacyAllocatedBytes:N0} B; " +
+			$"accumulator={accumulatorStopwatch.Elapsed.TotalMilliseconds:F3} ms/{accumulatorAllocatedBytes:N0} B.");
+	}
+
 	private static TimeSpan MeasureIgnoreSnapshot(string rootPath)
 	{
 		var stopwatch = Stopwatch.StartNew();
@@ -173,6 +235,19 @@ public sealed class IgnorePipelinePerformanceSmokeIntegrationTests
 		stopwatch.Stop();
 
 		return stopwatch.Elapsed;
+	}
+
+	private static void AddDiscoveredMatcherLinear(
+		List<ScopedGitIgnoreMatcher> matchers,
+		ScopedGitIgnoreMatcher matcher)
+	{
+		foreach (var discovered in matchers)
+		{
+			if (PathComparer.Default.Equals(discovered.ScopeRootPath, matcher.ScopeRootPath))
+				return;
+		}
+
+		matchers.Add(matcher);
 	}
 
 	private static void RunIgnoreSnapshot(string rootPath)

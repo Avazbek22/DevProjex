@@ -1,4 +1,4 @@
-using System.Text;
+using DevProjex.Terminal.Rendering;
 using Terminal.Gui.Text;
 
 namespace DevProjex.Terminal.Tui;
@@ -18,7 +18,9 @@ internal sealed class TerminalRecentWorkspaceRow(
 	{
 		var marker = IsSelected ? ">" : " ";
 		var kind = FitToColumns(kindLabel(Workspace.Kind), KindWidth);
-		var name = FitToColumns(Workspace.DisplayName, NameWidth);
+		var name = FitToColumns(
+			TerminalRecentWorkspacePresentation.DisplayName(Workspace),
+			NameWidth);
 		var opened = openedLabel(Workspace.OpenedUtc);
 		return $"{marker} {PadToColumns(kind, KindWidth)} " +
 		       $"{PadToColumns(name, NameWidth)} {opened}";
@@ -26,6 +28,7 @@ internal sealed class TerminalRecentWorkspaceRow(
 
 	internal static string FitToColumns(string value, int width)
 	{
+		value = TerminalTextEscaping.EscapeSingleLine(value);
 		if (string.IsNullOrEmpty(value) || width <= 0)
 			return string.Empty;
 		if (value.GetColumns() <= width)
@@ -48,6 +51,15 @@ internal sealed class TerminalRecentWorkspaceRow(
 
 	private static string PadToColumns(string value, int width) =>
 		value + new string(' ', Math.Max(0, width - value.GetColumns()));
+}
+
+internal static class TerminalRecentWorkspacePresentation
+{
+	public static string DisplayName(RecentWorkspaceDescriptor workspace) =>
+		TerminalTextEscaping.EscapeSingleLine(workspace.DisplayName);
+
+	public static string DisplaySource(RecentWorkspaceDescriptor workspace) =>
+		TerminalTextEscaping.EscapeSingleLine(workspace.DisplaySource);
 }
 
 internal enum TerminalRecentWorkspaceDecisionKind

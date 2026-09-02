@@ -1,40 +1,40 @@
  DevProjex Terminal · <PROJECT>
  <PROJECT_ROOT>
-┌┤> PROJECT TREE├─────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · XML├──────────────────────────────┐┌┤  PARAMETERS├─────────────────────────────────────┐
-│v [x] <PROJECT>   ││<d n="<PROJECT>">                      ││  GIT FILTERING                                    │
-│  > [x] src                              ││  <d n="src">                                                 ││  ( ) No Git filtering                             │
-│    [x] global.json                      ││    <d n="Feature">                                           ││  (*) Use .gitignore                               │
-│    [x] readme.md                        ││      <f>Handler.cs</f>                                       ││  ( ) Tracked Git files only                       │
-│                                         ││    </d>                                                      ││  EXCLUSIONS                                       │
-│                                         ││    <f>App.cs</f>                                             ││  [x] All                                          │
-│                                         ││  </d>                                                        ││  [x] Smart ignore                                 │
-│                                         ││  <f>global.json</f>                                          ││  [x] Empty folders                                │
-│                                         ││  <f>readme.md</f>                                            ││  [x] Empty files                                  │
-│                                         ││</d>                                                          ││  [x] Hidden folders                               │
-│                                         ││                                                              ││  [x] Hidden files                                 │
-│                                         ││                                                              ││  [x] dot folders                                  │
-│                                         ││                                                              ││  [x] dot files                                    │
-│                                         ││                                                              ││  [x] Files without extension                      │
-│                                         ││                                                              ││  FILE TYPES                                       │
-│                                         ││                                                              ││  [x] All                                          │
-│                                         ││                                                              ││  [x] .cs                                          │
-│                                         ││                                                              ││  [x] .json                                        │
-│                                         ││                                                              ││  [x] .md                                          │
-│                                         ││                                                              ││  ROOT FOLDERS                                     │
-│                                         ││                                                              ││  [x] All                                          │
-│                                         ││                                                              ││  [x] src                                          │
-│                                         ││                                                              ││                                                   │
-│                                         ││                                                              ││                                                   │
-│                                         ││                                                              ││                                                   │
-│                                         ││                                                              ││                                                   │
-│                                         ││                                                              ││                                                   │
-│                                         ││                                                              ││                                                   │
-│                                         ││                                                              ││                                                   │
-│                                         ││                                                              ││                                                   │
-│                                         ││                                                              ││                                                   │
-│                                         ││                                                              ││                                                   │
-│                                         ││ Files 4  |  Lines 1-10/10                                    ││                                                   │
-└─────────────────────────────────────────┘└──────────────────────────────────────────────────────────────┘└───────────────────────────────────────────────────┘
+┌┤> PROJECT TREE├─────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · XML├─────────────────────────────────────────────┐┌┤  PARAMETERS├──────────────────────┐
+│v [x] <PROJECT>   ││<d n="<PROJECT>">                                     ││┌┤Content processing [ ] All (5) ──┐│
+│  > [x] src                              ││  <d n="src">                                                                │││[ ] Hide secrets                  ││
+│    [x] global.json                      ││    <d n="Feature">                                                          │││[ ] Hide private data             ││
+│    [x] readme.md                        ││      <f>Handler.cs</f>                                                      │││[ ] Compress code                 ││
+│                                         ││    </d>                                                                     │││[ ] Strip comments                ││
+│                                         ││    <f>App.cs</f>                                                            │││[ ] Strip blank lines             ││
+│                                         ││  </d>                                                                       ││└──────────────────────────────────┘│
+│                                         ││  <f>global.json</f>                                                         ││┌┤Exclusions├─────────── [ ] All ──┐│
+│                                         ││  <f>readme.md</f>                                                           │││                                  ││
+│                                         ││</d>                                                                         │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             ││└──────────────────────────────────┘│
+│                                         ││                                                                             ││┌┤File types├─────── [x] All (3) ──┐│
+│                                         ││                                                                             │││[x] .cs                           ││
+│                                         ││                                                                             │││[x] .json                         ││
+│                                         ││                                                                             │││[x] .md                           ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││ Files 4  |  Lines 1-10/10                                                   ││└──────────────────────────────────┘│
+└─────────────────────────────────────────┘└─────────────────────────────────────────────────────────────────────────────┘└────────────────────────────────────┘
 
  Files 4 · Folders 3 · 76 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
- Up/Down Navigate   Enter Expand   Space Toggle   / Search   Tab/F6 Preview   Ctrl+P Actions   ? Help
+ Space Toggle   Shift+←/→ Collapse/expand all   Ctrl+A/U Select all/none   R Reveal   : Commands

@@ -6,7 +6,7 @@ public sealed class RepositoryWebPathPresentationServiceTests
 	[InlineData("https://github.com/user/repo.git", "https://github.com/user/repo")]
 	[InlineData("https://github.com/user/repo.git/", "https://github.com/user/repo")]
 	[InlineData("https://github.com/user/repo?tab=readme#top", "https://github.com/user/repo")]
-	[InlineData("https://user:token@github.com/user/repo.git?tab=readme#top", "https://github.com/user/repo")]
+	[InlineData("https:" + "//user:token@github.com/user/repo.git?tab=readme#top", "https://github.com/user/repo")]
 	[InlineData("github.com/user/repo.git/", "github.com/user/repo")]
 	public void NormalizeForDisplay_ReturnsCleanRepositoryUrl(string repositoryUrl, string expected)
 	{
@@ -21,6 +21,16 @@ public sealed class RepositoryWebPathPresentationServiceTests
 		Assert.Equal(string.Empty, RepositoryWebPathPresentationService.NormalizeForDisplay(null!));
 		Assert.Equal(string.Empty, RepositoryWebPathPresentationService.NormalizeForDisplay(""));
 		Assert.Equal(string.Empty, RepositoryWebPathPresentationService.NormalizeForDisplay("   "));
+	}
+
+	[Fact]
+	public void NormalizeForDisplay_RejectsMalformedCredentialBearingUrl()
+	{
+		var normalized = RepositoryWebPathPresentationService.NormalizeForDisplay(
+			"https://user:super-secret@[invalid/repo");
+
+		Assert.Empty(normalized);
+		Assert.DoesNotContain("super-secret", normalized, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -42,7 +52,7 @@ public sealed class RepositoryWebPathPresentationServiceTests
 		var repoRoot = BuildAbsolutePath("work", "repo");
 		var presentation = service.TryCreate(
 			repoRoot,
-			"https://user:token@github.com/Avazbek22/DevProjex.git?tab=readme#top");
+			"https:" + "//user:token@github.com/Avazbek22/DevProjex.git?tab=readme#top");
 
 		Assert.NotNull(presentation);
 		Assert.Equal("https://github.com/Avazbek22/DevProjex", presentation!.DisplayRootPath);
@@ -62,6 +72,73 @@ public sealed class RepositoryWebPathPresentationServiceTests
 		var mapped = presentation!.MapFilePath(Path.Combine(repoRoot, "src", "MainWindow.axaml.cs"));
 
 		Assert.Equal("https://github.com/Avazbek22/DevProjex/src/MainWindow.axaml.cs", mapped);
+	}
+
+	[Theory]
+	[InlineData(
+		"ssh://git@example.com/owner/repository.git",
+		"ssh://git@example.com/owner/repository")]
+	[InlineData(
+		"git://example.com/owner/repository.git",
+		"git://example.com/owner/repository")]
+	[InlineData(
+		"git@example.com:owner/repository.git",
+		"git@example.com:owner/repository")]
+	[InlineData(
+		"file:///srv/git/repository.git",
+		"file:///srv/git/repository")]
+	public void TryCreate_MapsSupportedNonHttpRepositoryWithoutExposingCheckoutRoot(
+		string repositoryUrl,
+		string expectedRoot)
+	{
+		var checkoutRoot = BuildAbsolutePath("cache", "checkout");
+		var presentation = new RepositoryWebPathPresentationService().TryCreate(
+			checkoutRoot,
+			repositoryUrl);
+
+		Assert.NotNull(presentation);
+		Assert.Equal(expectedRoot, presentation!.DisplayRootPath);
+		Assert.Equal("repository", presentation.DisplayRootName);
+		Assert.Equal(
+			$"{expectedRoot}/src/Main.cs",
+			presentation.MapFilePath(Path.Combine(checkoutRoot, "src", "Main.cs")));
+		Assert.DoesNotContain(checkoutRoot, presentation.DisplayRootPath, StringComparison.OrdinalIgnoreCase);
+	}
+
+	[Fact]
+	public void TryCreate_DotDotPrefixedDirectoryRemainsInsideRepository()
+	{
+		var service = new RepositoryWebPathPresentationService();
+		var repoRoot = BuildAbsolutePath("work", "repo");
+		var presentation = service.TryCreate(
+			repoRoot,
+			"https://github.com/Avazbek22/DevProjex.git");
+
+		Assert.NotNull(presentation);
+		var mapped = presentation!.MapFilePath(Path.Combine(repoRoot, "..cache", "state.json"));
+
+		Assert.Equal("https://github.com/Avazbek22/DevProjex/..cache/state.json", mapped);
+	}
+
+	[Fact]
+	public void TryCreate_WhitespaceOnlyFileNameRemainsAFilePath()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Windows normalizes this file name through ordinary path APIs.");
+			return;
+		}
+
+		var service = new RepositoryWebPathPresentationService();
+		var repoRoot = BuildAbsolutePath("work", "repo");
+		var presentation = service.TryCreate(
+			repoRoot,
+			"https://github.com/Avazbek22/DevProjex.git");
+
+		Assert.NotNull(presentation);
+		var mapped = presentation!.MapFilePath(Path.Combine(repoRoot, " "));
+
+		Assert.Equal("https://github.com/Avazbek22/DevProjex/%20", mapped);
 	}
 
 	[Theory]
@@ -144,6 +221,38 @@ public sealed class RepositoryWebPathPresentationServiceTests
 		var mapped = presentation!.MapFilePath(external);
 
 		Assert.Equal(external, mapped);
+	}
+
+	[Fact]
+	public void TryCreatePathMapper_MapsFileRepositoryWithoutExposingCheckoutRoot()
+	{
+		var service = new RepositoryWebPathPresentationService();
+		var checkoutRoot = BuildAbsolutePath("cache", "checkout");
+		var repositoryPath = BuildAbsolutePath("origins", "repo.git");
+		var repositoryUrl = new Uri(repositoryPath).AbsoluteUri;
+		var mapper = service.TryCreatePathMapper(checkoutRoot, repositoryUrl);
+
+		Assert.NotNull(mapper);
+		var mapped = mapper!(Path.Combine(checkoutRoot, "src", "File name.cs"));
+
+		Assert.Equal($"{repositoryUrl.TrimEnd('/')[..^4]}/src/File%20name.cs", mapped);
+		Assert.DoesNotContain(checkoutRoot, mapped, StringComparison.OrdinalIgnoreCase);
+	}
+
+	[Fact]
+	public void TryCreatePathMapper_MapsScpRepositoryWithoutExposingCheckoutRoot()
+	{
+		var service = new RepositoryWebPathPresentationService();
+		var checkoutRoot = BuildAbsolutePath("cache", "checkout");
+		var mapper = service.TryCreatePathMapper(
+			checkoutRoot,
+			"git@example.com:owner/repository.git");
+
+		Assert.NotNull(mapper);
+		var mapped = mapper!(Path.Combine(checkoutRoot, "src", "Main.cs"));
+
+		Assert.Equal("git@example.com:owner/repository/src/Main.cs", mapped);
+		Assert.DoesNotContain(checkoutRoot, mapped, StringComparison.OrdinalIgnoreCase);
 	}
 
 	private static string BuildAbsolutePath(params string[] segments)

@@ -1,14 +1,13 @@
-using System.ComponentModel;
-using DevProjex.Avalonia.Controls;
 using DevProjex.Avalonia.Services;
-using DevProjex.Kernel;
 
 namespace DevProjex.Avalonia.Coordinators;
 
 internal sealed record PreviewSurfaceControls(
+	Border Surface,
     ScrollViewer TextScrollViewer,
     VirtualizedPreviewTextControl TextControl,
     VirtualizedLineNumbersControl LineNumbersControl,
+    PreviewMarkerBar MarkerBar,
     Border StickyHeaderCap,
     Border StickyHeaderContainer,
     TextBlock StickyHeaderText);
@@ -21,6 +20,7 @@ internal sealed class PreviewSurfaceController : IDisposable
     private const int PreviewWarmupContentFileLimit = 6;
     private const int PreviewWarmupMaxFileBytes = 64 * 1024;
     private const int PreviewWarmupMaxCharacters = 96 * 1024;
+	internal const long MaximumClipboardSelectionBytes = 256L * 1024 * 1024;
     private static readonly IReadOnlySet<string> EmptySelectedPaths =
         new HashSet<string>(PathComparer.Default);
     private static readonly TimeSpan SelectionMetricsDebounceInterval =
@@ -32,6 +32,8 @@ internal sealed class PreviewSurfaceController : IDisposable
     private readonly LocalizationService _localization;
     private readonly IToastService _toastService;
     private readonly PreviewDocumentBuilder _previewDocumentBuilder;
+	private readonly SecretRedactionOutputPreparer _secretRedactionPreparer;
+	private readonly SecretRedactionSession _secretRedactionSession;
     private readonly SelectedContentExportService _contentExport;
     private readonly ProjectTextOutputPipeline _textOutputPipeline;
     private readonly TreeExportService _treeExport;
@@ -40,6 +42,16 @@ internal sealed class PreviewSurfaceController : IDisposable
     private readonly Func<bool> _ensureClipboardOutputReady;
     private readonly Func<string, Task> _setClipboardTextAsync;
     private readonly Func<string, Task> _showErrorAsync;
+	private readonly Func<ContentTransformationContext?> _transformationContextProvider;
+	private readonly Func<string?> _projectRootProvider;
+	private readonly Action _requestRedactionRefresh;
+	private readonly Func<ManualRedactionClass, bool> _ensureManualRedactionClassEnabled;
+	private readonly Func<PersistentSecretMarkDelta, Task<PersistentSecretMarkWriteResult>> _applyPersistentMarkDelta;
+	private readonly Func<CancellationToken, Task> _persistProjectProfile;
+	private readonly object _manualMarkOperationsSync = new();
+	private readonly HashSet<Task> _manualMarkOperations = [];
+	private readonly SemaphoreSlim _manualMarkMutationGate = new(1, 1);
+    private readonly Thickness _stickyHeaderBaseMargin;
 
     private CancellationTokenSource? _selectionMetricsCts;
     private DispatcherTimer? _selectionMetricsDebounceTimer;
@@ -48,6 +60,21 @@ internal sealed class PreviewSurfaceController : IDisposable
         ExportOutputMetrics.Empty;
     private bool _hasSelectionMetricsSnapshot;
     private bool _scrollSyncActive;
+    private ScrollBar? _verticalScrollBar;
+	private Cursor? _previewMarkerHandCursor;
+	private Cursor? _previewMarkerDragCursor;
+	private InputElement? _previewMarkerCursorTarget;
+	private IPointer? _previewMarkerDragPointer;
+	private double _previewMarkerDragStartY;
+	private double _previewMarkerDragStartOffsetY;
+	private bool _previewMarkerDragging;
+	private bool _previewMarkerScrollBarAllowAutoHide;
+	private bool _previewMarkerScrollBarInteractionActive;
+	private bool _previewMarkerRailPointerOver;
+	private Point? _previewMarkerPointerPosition;
+    private double _stickyHeaderScrollBarInset = -1;
+	private Vector? _pendingRedactionViewportOffset;
+	private PersistentSecretMarkId? _pendingMarkedSecretId;
     private bool _disposed;
 
     public PreviewSurfaceController(
@@ -57,6 +84,8 @@ internal sealed class PreviewSurfaceController : IDisposable
         LocalizationService localization,
         IToastService toastService,
         PreviewDocumentBuilder previewDocumentBuilder,
+		SecretRedactionOutputPreparer secretRedactionPreparer,
+		SecretRedactionSession secretRedactionSession,
         SelectedContentExportService contentExport,
         ProjectTextOutputPipeline textOutputPipeline,
         TreeExportService treeExport,
@@ -64,7 +93,13 @@ internal sealed class PreviewSurfaceController : IDisposable
         PreviewWorkspacePipeline previewPipeline,
         Func<bool> ensureClipboardOutputReady,
         Func<string, Task> setClipboardTextAsync,
-        Func<string, Task> showErrorAsync)
+		Func<string, Task> showErrorAsync,
+		Func<string?> projectRootProvider,
+		Func<ContentTransformationContext?> transformationContextProvider,
+		Action requestRedactionRefresh,
+		Func<ManualRedactionClass, bool> ensureManualRedactionClassEnabled,
+		Func<PersistentSecretMarkDelta, Task<PersistentSecretMarkWriteResult>> applyPersistentMarkDelta,
+		Func<CancellationToken, Task> persistProjectProfile)
     {
         _window = window;
         _viewModel = viewModel;
@@ -72,6 +107,8 @@ internal sealed class PreviewSurfaceController : IDisposable
         _localization = localization;
         _toastService = toastService;
         _previewDocumentBuilder = previewDocumentBuilder;
+		_secretRedactionPreparer = secretRedactionPreparer;
+		_secretRedactionSession = secretRedactionSession;
         _contentExport = contentExport;
         _textOutputPipeline = textOutputPipeline;
         _treeExport = treeExport;
@@ -79,7 +116,14 @@ internal sealed class PreviewSurfaceController : IDisposable
         _previewPipeline = previewPipeline;
         _ensureClipboardOutputReady = ensureClipboardOutputReady;
         _setClipboardTextAsync = setClipboardTextAsync;
-        _showErrorAsync = showErrorAsync;
+		_showErrorAsync = showErrorAsync;
+		_projectRootProvider = projectRootProvider;
+		_transformationContextProvider = transformationContextProvider;
+		_requestRedactionRefresh = requestRedactionRefresh;
+		_ensureManualRedactionClassEnabled = ensureManualRedactionClassEnabled;
+		_applyPersistentMarkDelta = applyPersistentMarkDelta;
+		_persistProjectProfile = persistProjectProfile;
+        _stickyHeaderBaseMargin = controls.StickyHeaderContainer.Margin;
 
         controls.TextControl.VerticalOffset =
             Math.Max(0, controls.TextScrollViewer.Offset.Y);
@@ -89,9 +133,768 @@ internal sealed class PreviewSurfaceController : IDisposable
             Math.Max(0, controls.TextScrollViewer.Viewport.Width);
         controls.TextControl.CopyingToClipboard += OnCopyingToClipboard;
         controls.TextControl.CopiedToClipboard += OnCopiedToClipboard;
+		controls.TextControl.ClipboardCopyFailed += OnClipboardCopyFailed;
         controls.TextControl.PreviewSelectionChanged +=
             OnSelectionChanged;
+		controls.TextControl.RedactionToggleRequested += OnRedactionToggleRequested;
+		controls.TextControl.BulkRedactionToggleRequested += OnBulkRedactionToggleRequested;
+		controls.TextControl.ManualSecretMarkRequested += OnManualSecretMarkRequested;
+		controls.TextControl.ManualSecretUnmarkRequested += OnManualSecretUnmarkRequested;
+		controls.TextControl.ManualSecretMarkRejected += OnManualSecretMarkRejected;
+		controls.TextControl.PreviewMarkersChanged += OnPreviewMarkersChanged;
+		controls.MarkerBar.SetMarkers(controls.TextControl.MarkerSnapshot);
+		controls.Surface.AddHandler(
+			InputElement.PointerPressedEvent,
+			OnPreviewMarkerPointerPressed,
+			RoutingStrategies.Tunnel,
+			handledEventsToo: true);
+		controls.Surface.AddHandler(
+			InputElement.PointerMovedEvent,
+			OnPreviewMarkerPointerMoved,
+			RoutingStrategies.Tunnel,
+			handledEventsToo: true);
+		controls.Surface.AddHandler(
+			InputElement.PointerReleasedEvent,
+			OnPreviewMarkerPointerReleased,
+			RoutingStrategies.Tunnel,
+			handledEventsToo: true);
+		controls.Surface.PointerExited += OnPreviewMarkerPointerExited;
+		controls.TextScrollViewer.PointerCaptureLost += OnPreviewMarkerPointerCaptureLost;
+        controls.TextScrollViewer.LayoutUpdated += OnTextScrollViewerLayoutUpdated;
     }
+
+	private void OnPreviewMarkersChanged(
+		object? sender,
+		PreviewMarkersChangedEventArgs e)
+	{
+		_controls.MarkerBar.SetMarkers(e.Snapshot);
+		UpdateStickyHeaderScrollBarInset();
+	}
+
+	private void OnPreviewMarkerPointerPressed(
+		object? sender,
+		PointerPressedEventArgs e)
+	{
+		if (!e.GetCurrentPoint(_controls.TextScrollViewer).Properties.IsLeftButtonPressed)
+			return;
+
+		var target = _controls.MarkerBar.FindTargetAt(e.GetPosition(_controls.MarkerBar));
+		if (target is null)
+			return;
+
+		_controls.TextControl.NavigateToMarker(target.Value);
+		_previewMarkerDragPointer = e.Pointer;
+		_previewMarkerDragStartY = e.GetPosition(_controls.MarkerBar).Y;
+		_previewMarkerDragStartOffsetY = _controls.TextScrollViewer.Offset.Y;
+		_previewMarkerDragging = false;
+		e.Pointer.Capture(_controls.TextScrollViewer);
+		BeginPreviewMarkerScrollBarInteraction();
+		SetPreviewMarkerCursor(_controls.TextScrollViewer, isDragging: true);
+		e.Handled = true;
+	}
+
+	private void OnPreviewMarkerPointerMoved(
+		object? sender,
+		PointerEventArgs e)
+	{
+		_previewMarkerPointerPosition = e.GetPosition(_window);
+		UpdatePreviewMarkerRailPointerState(IsPointerWithinPreviewScrollBar(e));
+		if (ReferenceEquals(_previewMarkerDragPointer, e.Pointer) &&
+		    e.GetCurrentPoint(_controls.TextScrollViewer).Properties.IsLeftButtonPressed)
+		{
+			var deltaY = e.GetPosition(_controls.MarkerBar).Y - _previewMarkerDragStartY;
+			_previewMarkerDragging |= Math.Abs(deltaY) >= 2;
+			if (_previewMarkerDragging)
+			{
+				KeepPreviewMarkerScrollBarActive();
+				SetPreviewMarkerCursor(_controls.TextScrollViewer, isDragging: true);
+				ScrollFromPreviewMarkerDrag(deltaY);
+			}
+
+			e.Handled = true;
+			return;
+		}
+
+		RefreshPreviewMarkerCursor();
+	}
+
+	private void OnPreviewMarkerPointerReleased(
+		object? sender,
+		PointerReleasedEventArgs e)
+	{
+		if (!ReferenceEquals(_previewMarkerDragPointer, e.Pointer))
+			return;
+
+		UpdatePreviewMarkerRailPointerState(IsPointerWithinPreviewScrollBar(e));
+		EndPreviewMarkerDrag(releaseCapture: true);
+		_previewMarkerPointerPosition = e.GetPosition(_window);
+		RefreshPreviewMarkerCursor();
+		e.Handled = true;
+	}
+
+	private void OnPreviewMarkerPointerCaptureLost(
+		object? sender,
+		PointerCaptureLostEventArgs e)
+	{
+		if (ReferenceEquals(_previewMarkerDragPointer, e.Pointer))
+		{
+			EndPreviewMarkerDrag(releaseCapture: false);
+			SetPreviewMarkerCursor(null);
+		}
+	}
+
+	private void ScrollFromPreviewMarkerDrag(double deltaY)
+	{
+		if (_verticalScrollBar?.GetVisualDescendants().OfType<Track>().FirstOrDefault() is not { } track ||
+		    track.GetVisualDescendants().OfType<Thumb>().FirstOrDefault() is not { } thumb)
+		{
+			return;
+		}
+
+		var maximumOffset = Math.Max(
+			0,
+			_controls.TextScrollViewer.Extent.Height - _controls.TextScrollViewer.Viewport.Height);
+		var thumbTravel = Math.Max(1, track.Bounds.Height - thumb.Bounds.Height);
+		var targetY = Math.Clamp(
+			_previewMarkerDragStartOffsetY + ((deltaY / thumbTravel) * maximumOffset),
+			0,
+			maximumOffset);
+		_controls.TextScrollViewer.Offset = new Vector(
+			_controls.TextScrollViewer.Offset.X,
+			targetY);
+	}
+
+	private void EndPreviewMarkerDrag(bool releaseCapture)
+	{
+		var pointer = _previewMarkerDragPointer;
+		_previewMarkerDragPointer = null;
+		_previewMarkerDragging = false;
+		if (releaseCapture && ReferenceEquals(pointer?.Captured, _controls.TextScrollViewer))
+			pointer.Capture(null);
+
+		if (!_previewMarkerRailPointerOver)
+			EndPreviewMarkerScrollBarInteraction();
+	}
+
+	private bool IsPointerWithinPreviewScrollBar(PointerEventArgs e)
+		=> _verticalScrollBar is { IsVisible: true, Bounds.Width: > 0 } scrollBar &&
+		   new Rect(scrollBar.Bounds.Size).Contains(e.GetPosition(scrollBar));
+
+	private void UpdatePreviewMarkerRailPointerState(bool pointerOver)
+	{
+		if (_previewMarkerRailPointerOver == pointerOver)
+			return;
+
+		_previewMarkerRailPointerOver = pointerOver;
+		if (pointerOver)
+		{
+			BeginPreviewMarkerScrollBarInteraction();
+		}
+		else if (_previewMarkerDragPointer is null)
+		{
+			EndPreviewMarkerScrollBarInteraction();
+		}
+
+		UpdateStickyHeaderScrollBarInset();
+	}
+
+	private void BeginPreviewMarkerScrollBarInteraction()
+	{
+		if (_previewMarkerScrollBarInteractionActive)
+		{
+			KeepPreviewMarkerScrollBarActive();
+			return;
+		}
+
+		_previewMarkerScrollBarAllowAutoHide = _verticalScrollBar?.AllowAutoHide ?? true;
+		_previewMarkerScrollBarInteractionActive = true;
+		if (_verticalScrollBar is not null)
+			_verticalScrollBar.SetCurrentValue(ScrollBar.AllowAutoHideProperty, false);
+	}
+
+	private void KeepPreviewMarkerScrollBarActive()
+	{
+		_verticalScrollBar?.SetCurrentValue(ScrollBar.AllowAutoHideProperty, false);
+	}
+
+	private void EndPreviewMarkerScrollBarInteraction()
+	{
+		if (!_previewMarkerScrollBarInteractionActive)
+			return;
+
+		_previewMarkerScrollBarInteractionActive = false;
+		if (_verticalScrollBar is null)
+			return;
+
+		_verticalScrollBar.SetCurrentValue(
+			ScrollBar.AllowAutoHideProperty,
+			_previewMarkerScrollBarAllowAutoHide);
+	}
+
+	private void OnPreviewMarkerPointerExited(
+		object? sender,
+		PointerEventArgs e)
+	{
+		_previewMarkerPointerPosition = null;
+		UpdatePreviewMarkerRailPointerState(pointerOver: false);
+		SetPreviewMarkerCursor(null);
+	}
+
+	private void RefreshPreviewMarkerCursor()
+	{
+		if (_previewMarkerDragPointer is not null)
+		{
+			SetPreviewMarkerCursor(_controls.TextScrollViewer, isDragging: true);
+			return;
+		}
+
+		if (_previewMarkerPointerPosition is not { } pointerPosition ||
+		    _window.TranslatePoint(pointerPosition, _controls.MarkerBar) is not { } markerPosition)
+		{
+			SetPreviewMarkerCursor(null);
+			return;
+		}
+
+		var markerTarget = _controls.MarkerBar.FindTargetAt(markerPosition);
+		var cursorTarget = markerTarget is not null || _previewMarkerRailPointerOver
+			? _window.InputHitTest(pointerPosition) as InputElement
+			: null;
+		SetPreviewMarkerCursor(
+			cursorTarget,
+			isDragging: markerTarget is null && _previewMarkerRailPointerOver);
+	}
+
+	private void SetPreviewMarkerCursor(
+		InputElement? target,
+		bool isDragging = false)
+	{
+		var cursor = isDragging
+			? _previewMarkerDragCursor ??= new Cursor(StandardCursorType.Arrow)
+			: _previewMarkerHandCursor ??= new Cursor(StandardCursorType.Hand);
+		if (ReferenceEquals(_previewMarkerCursorTarget, target) &&
+		    ReferenceEquals(target?.Cursor, cursor))
+		{
+			return;
+		}
+
+		_previewMarkerCursorTarget?.ClearValue(InputElement.CursorProperty);
+		_previewMarkerCursorTarget = target;
+		if (target is null)
+			return;
+
+		target.Cursor = cursor;
+	}
+
+    private void OnVerticalScrollBarPropertyChanged(
+        object? sender,
+        AvaloniaPropertyChangedEventArgs e)
+    {
+        if (!_disposed &&
+            (e.Property == ScrollBar.IsExpandedProperty ||
+             e.Property == Visual.IsVisibleProperty ||
+             e.Property == Layoutable.BoundsProperty))
+        {
+            UpdateStickyHeaderScrollBarInset();
+        }
+    }
+
+    private void OnTextScrollViewerLayoutUpdated(object? sender, EventArgs e)
+    {
+		if (_disposed)
+			return;
+
+		UpdateStickyHeaderScrollBarInset();
+		RefreshPreviewMarkerCursor();
+    }
+
+	private async void OnManualSecretMarkRejected(
+		object? sender,
+		PreviewManualSecretMarkRejectedEventArgs e)
+	{
+		if (!_disposed)
+			await _showErrorAsync(e.Message);
+	}
+
+	private void OnRedactionToggleRequested(
+		object? sender,
+		PreviewRedactionToggleRequestedEventArgs e)
+	{
+		var context = _transformationContextProvider()?.Redaction;
+		if (context is null)
+			return;
+
+		_pendingRedactionViewportOffset = _controls.TextScrollViewer.Offset;
+		if (e.RestoreOccurrenceIds is { Count: > 0 })
+			context.Session.SetKeepAsIs(e.RestoreOccurrenceIds, keep: false);
+		else
+			context.Session.ToggleKeepAsIs(e.OccurrenceId);
+		_requestRedactionRefresh();
+	}
+
+	private void OnBulkRedactionToggleRequested(
+		object? sender,
+		PreviewBulkRedactionToggleRequestedEventArgs e)
+	{
+		var context = _transformationContextProvider()?.Redaction;
+		if (context is null)
+			return;
+
+		var changedCount = context.Session.SetKeepAsIs(e.OccurrenceIds, e.Keep);
+		if (changedCount == 0)
+			return;
+
+		_pendingRedactionViewportOffset = _controls.TextScrollViewer.Offset;
+		_requestRedactionRefresh();
+		_toastService.Show(_localization.Format(
+			e.Keep ? "Toast.Secret.KeptCount" : "Toast.Secret.RehiddenCount",
+			changedCount));
+	}
+
+	private void OnManualSecretMarkRequested(
+		object? sender,
+		PreviewManualSecretMarkRequestedEventArgs e)
+	{
+		var operation = ApplyManualSecretMarkAsync(e);
+		TrackManualMarkOperation(operation);
+	}
+
+	private async Task ApplyManualSecretMarkAsync(
+		PreviewManualSecretMarkRequestedEventArgs e)
+	{
+		string? operationProjectRoot = null;
+		try
+		{
+			operationProjectRoot = _projectRootProvider();
+			var document = _controls.TextControl.Document ?? _viewModel.PreviewDocument;
+			if (document is null || string.IsNullOrWhiteSpace(operationProjectRoot) ||
+			    !TryResolveManualMarkLocation(document, e, out var location))
+			{
+				if (!_disposed)
+					await _showErrorAsync(_localization["Error.Secret.MarkApplyFailed"]);
+				return;
+			}
+
+			var sessionMarkAdded = TryApplySessionOnlyManualMark(location, e.Value, e.Class);
+			if (!sessionMarkAdded && !e.Persistent)
+			{
+				_toastService.Show(_localization["Toast.Secret.AlreadyHidden"]);
+				return;
+			}
+			if (!sessionMarkAdded && !_ensureManualRedactionClassEnabled(e.Class))
+				_requestRedactionRefresh();
+			await _persistProjectProfile(CancellationToken.None);
+			var mark = e.Persistent
+				? await _secretRedactionSession.CreatePersistentMarkedSecretAsync(
+					e.Value,
+					location.Key,
+					e.Class,
+					CancellationToken.None)
+				: await _secretRedactionSession.CreatePersistentSourceMarkedSecretAsync(
+					e.Value,
+					location.Key,
+					location.RelativePath,
+					location.SourceOffset,
+					e.Class,
+					CancellationToken.None);
+			if (mark is null)
+			{
+				if (IsCurrentProject(operationProjectRoot))
+					await _showErrorAsync(_localization["Terminal.Error.ProfileWriteFailed"]);
+				return;
+			}
+			if (_disposed || !IsCurrentProject(operationProjectRoot))
+				return;
+			PersistentSecretMarkDelta delta;
+			PersistentMarkStageResult promotion;
+			await _manualMarkMutationGate.WaitAsync(CancellationToken.None);
+			try
+			{
+				if (_disposed || !IsCurrentProject(operationProjectRoot))
+					return;
+				delta = PersistentSecretMarkDelta.Add(
+					mark,
+					_secretRedactionSession.PersistentMarksStoreRevision);
+				promotion = _secretRedactionSession.TryPromoteSessionMarkToPendingPersistentMark(
+					operationProjectRoot,
+					location.RelativePath,
+					location.SourceOffset,
+					e.Value,
+					delta);
+			}
+			finally
+			{
+				_manualMarkMutationGate.Release();
+			}
+			if (!promotion.Staged)
+				return;
+
+			PersistentSecretMarkWriteResult write;
+			try
+			{
+				write = await _applyPersistentMarkDelta(delta);
+			}
+			catch
+			{
+				if (!_disposed && IsCurrentProject(operationProjectRoot))
+					DowngradePersistentMarkToSession(
+						operationProjectRoot,
+						delta.OperationId,
+						location,
+						e.Value,
+						e.Class);
+				throw;
+			}
+			if (_disposed)
+				return;
+			if (write.Succeeded)
+			{
+				if (IsCurrentProject(operationProjectRoot))
+				{
+					_pendingMarkedSecretId = new PersistentSecretMarkId(
+						mark.H,
+						mark.Length,
+						mark.RelativePath,
+						mark.SourceOffset,
+						mark.Class);
+					_requestRedactionRefresh();
+				}
+				return;
+			}
+
+			if (IsCurrentProject(operationProjectRoot))
+				DowngradePersistentMarkToSession(
+					operationProjectRoot,
+					delta.OperationId,
+					location,
+					e.Value,
+					e.Class);
+			if (IsCurrentProject(operationProjectRoot))
+				await _showErrorAsync(_localization["Terminal.Error.ProfileWriteFailed"]);
+		}
+		catch (OperationCanceledException)
+		{
+			// Window teardown can cancel pending UI work after the durable store has already decided it.
+		}
+		catch (Exception exception)
+		{
+			if (!_disposed && IsCurrentProject(operationProjectRoot))
+				await _showErrorAsync(DesktopExceptionPresentation.Format(_localization, exception));
+		}
+	}
+
+	private void TrackManualMarkOperation(Task operation)
+	{
+		if (operation.IsCompleted)
+			return;
+		lock (_manualMarkOperationsSync)
+			_manualMarkOperations.Add(operation);
+		_ = operation.ContinueWith(
+			completed =>
+			{
+				lock (_manualMarkOperationsSync)
+					_manualMarkOperations.Remove(completed);
+			},
+			CancellationToken.None,
+			TaskContinuationOptions.ExecuteSynchronously,
+			TaskScheduler.Default);
+	}
+
+	internal bool HasPendingManualMarkOperations
+	{
+		get
+		{
+			lock (_manualMarkOperationsSync)
+				return _manualMarkOperations.Count > 0;
+		}
+	}
+
+	internal async Task WaitForPendingManualMarkOperationsAsync()
+	{
+		while (true)
+		{
+			Task pending;
+			lock (_manualMarkOperationsSync)
+			{
+				if (_manualMarkOperations.Count == 0)
+					return;
+				pending = Task.WhenAll(_manualMarkOperations);
+			}
+			await pending.ConfigureAwait(true);
+		}
+	}
+
+	private Task[] CapturePendingManualMarkOperations()
+	{
+		lock (_manualMarkOperationsSync)
+			return _manualMarkOperations.ToArray();
+	}
+
+	private void DowngradePersistentMarkToSession(
+		string projectRoot,
+		Guid operationId,
+		ManualSecretLocation location,
+		MarkedSecretValue value,
+		ManualRedactionClass classification)
+	{
+		TryApplySessionOnlyManualMark(location, value, classification);
+		_secretRedactionSession.RollbackPendingPersistentMarkDelta(projectRoot, operationId);
+	}
+
+	private bool TryApplySessionOnlyManualMark(
+		ManualSecretLocation location,
+		MarkedSecretValue value,
+		ManualRedactionClass classification)
+	{
+		if (!_secretRedactionSession.AddSessionMarkedSecret(
+			    location.RelativePath,
+			    location.SourceOffset,
+			    value,
+			    classification))
+		{
+			return false;
+		}
+
+		_pendingRedactionViewportOffset = _controls.TextScrollViewer.Offset;
+		if (!_ensureManualRedactionClassEnabled(classification))
+			_requestRedactionRefresh();
+		return true;
+	}
+
+	private void OnManualSecretUnmarkRequested(
+		object? sender,
+		PreviewManualSecretUnmarkRequestedEventArgs e)
+	{
+		var operation = RemoveManualSecretMarkAsync(e);
+		TrackManualMarkOperation(operation);
+	}
+
+	private async Task RemoveManualSecretMarkAsync(
+		PreviewManualSecretUnmarkRequestedEventArgs e)
+	{
+		string? operationProjectRoot = null;
+		try
+		{
+			var precedingOperations = CapturePendingManualMarkOperations();
+			operationProjectRoot = _projectRootProvider();
+			if (string.IsNullOrWhiteSpace(operationProjectRoot))
+				return;
+			PersistentSecretMarkId? persistentMarkId = e.PersistentMarkId;
+			if (persistentMarkId is null && !string.IsNullOrWhiteSpace(e.PersistentMarkHash))
+			{
+				if (!PersistentSecretIdentity.IsSupported(e.PersistentMarkHash) ||
+				    e.PersistentMarkLength is < MarkedSecretValueNormalizer.MinimumLength or
+					    > MarkedSecretValueNormalizer.MaximumLength)
+				{
+					await _showErrorAsync(_localization["Error.Secret.MarkApplyFailed"]);
+					return;
+				}
+
+				persistentMarkId = new PersistentSecretMarkId(
+					e.PersistentMarkHash,
+					e.PersistentMarkLength);
+			}
+			else if (persistentMarkId is { } suppliedMarkId &&
+			         (!PersistentSecretIdentity.IsSupported(suppliedMarkId.Hash) ||
+			          suppliedMarkId.Length is < MarkedSecretValueNormalizer.MinimumLength or
+				          > MarkedSecretValueNormalizer.MaximumLength))
+			{
+				await _showErrorAsync(_localization["Error.Secret.MarkApplyFailed"]);
+				return;
+			}
+			var sessionRemoved = false;
+			var waitsForPersistentAdd = persistentMarkId is not null;
+			PersistentSecretMarkDelta? pendingRemove = null;
+			var persistentStage = default(PersistentMarkStageResult);
+			await _manualMarkMutationGate.WaitAsync(CancellationToken.None);
+			try
+			{
+				if (persistentMarkId is null &&
+				    !string.IsNullOrWhiteSpace(e.SessionMarkId) &&
+				    _secretRedactionSession.TryResolvePromotedPersistentMarkId(
+					    e.SessionMarkId,
+					    out var promotedMarkId))
+				{
+					persistentMarkId = promotedMarkId;
+					waitsForPersistentAdd = true;
+				}
+				sessionRemoved = !string.IsNullOrWhiteSpace(e.SessionMarkId) &&
+				                 _secretRedactionSession.RemoveSessionMarkedSecret(e.SessionMarkId);
+			}
+			finally
+			{
+				_manualMarkMutationGate.Release();
+			}
+
+			if (persistentMarkId is null)
+			{
+				if (sessionRemoved)
+				{
+					_pendingRedactionViewportOffset = _controls.TextScrollViewer.Offset;
+					_requestRedactionRefresh();
+				}
+				return;
+			}
+
+			if (waitsForPersistentAdd && precedingOperations.Length > 0)
+				await Task.WhenAll(precedingOperations);
+			if (_disposed || !IsCurrentProject(operationProjectRoot))
+				return;
+
+			await _manualMarkMutationGate.WaitAsync(CancellationToken.None);
+			try
+			{
+				if (_disposed || !IsCurrentProject(operationProjectRoot))
+					return;
+				if (!string.IsNullOrWhiteSpace(e.SessionMarkId))
+				{
+					if (_secretRedactionSession.TryResolvePromotedPersistentMarkId(
+					    e.SessionMarkId,
+					    out var promotedMarkId))
+					{
+						persistentMarkId = promotedMarkId;
+					}
+					sessionRemoved |= _secretRedactionSession.RemoveSessionMarkedSecret(e.SessionMarkId);
+				}
+
+				pendingRemove = PersistentSecretMarkDelta.Remove(
+					persistentMarkId.Value,
+					_secretRedactionSession.PersistentMarksStoreRevision);
+				persistentStage = _secretRedactionSession.StagePersistentMarkDelta(
+					operationProjectRoot,
+					pendingRemove);
+			}
+			finally
+			{
+				_manualMarkMutationGate.Release();
+			}
+			if (!persistentStage.Staged && !sessionRemoved)
+				return;
+
+			if (persistentStage.EffectiveChanged || sessionRemoved)
+			{
+				_pendingRedactionViewportOffset = _controls.TextScrollViewer.Offset;
+				_requestRedactionRefresh();
+			}
+			if (persistentStage.Staged && pendingRemove is not null)
+			{
+				PersistentSecretMarkWriteResult write;
+				try
+				{
+					write = await _applyPersistentMarkDelta(pendingRemove);
+				}
+				catch
+				{
+					if (!_disposed && IsCurrentProject(operationProjectRoot))
+					{
+						_secretRedactionSession.RollbackPendingPersistentMarkDelta(
+							operationProjectRoot,
+							pendingRemove.OperationId);
+						_requestRedactionRefresh();
+					}
+					throw;
+				}
+				if (_disposed)
+					return;
+				if (!write.Succeeded)
+				{
+					if (IsCurrentProject(operationProjectRoot))
+					{
+						_secretRedactionSession.RollbackPendingPersistentMarkDelta(
+							operationProjectRoot,
+							pendingRemove.OperationId);
+						_requestRedactionRefresh();
+					}
+					if (IsCurrentProject(operationProjectRoot))
+						await _showErrorAsync(_localization["Terminal.Error.ProfileWriteFailed"]);
+					return;
+				}
+			}
+
+			if (IsCurrentProject(operationProjectRoot))
+			{
+				_toastService.Show(_localization[
+					e.AlsoDetected
+						? "Toast.Secret.MarkRemovedStillDetected"
+						: "Toast.Secret.MarkRemoved"]);
+			}
+		}
+		catch (OperationCanceledException)
+		{
+			// Window teardown can cancel pending UI work after the durable store has already decided it.
+		}
+		catch (Exception exception)
+		{
+			if (!_disposed && IsCurrentProject(operationProjectRoot))
+				await _showErrorAsync(DesktopExceptionPresentation.Format(_localization, exception));
+		}
+	}
+
+	private bool IsCurrentProject(string? expectedProjectRoot)
+	{
+		if (string.IsNullOrWhiteSpace(expectedProjectRoot))
+			return false;
+		var currentProjectRoot = _projectRootProvider();
+		if (string.IsNullOrWhiteSpace(currentProjectRoot))
+			return false;
+		try
+		{
+			return PathComparer.Default.Equals(
+				Path.GetFullPath(expectedProjectRoot),
+				Path.GetFullPath(currentProjectRoot));
+		}
+		catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
+		{
+			return false;
+		}
+	}
+
+	private bool TryResolveManualMarkLocation(
+		IPreviewTextDocument document,
+		PreviewManualSecretMarkRequestedEventArgs request,
+		out ManualSecretLocation location)
+	{
+		location = default;
+		var selection = request.Selection.Normalize();
+		if (selection.StartLine != selection.EndLine)
+			return false;
+		var section = PreviewDocumentSectionLookup.FindContainingSection(
+			document.Sections,
+			selection.StartLine);
+		if (section is null || selection.StartLine < section.ContentStartLine)
+			return false;
+
+		var previewLine = document.GetLineText(selection.StartLine);
+		var key = MarkedSecretValueNormalizer.ExtractKey(
+			previewLine,
+			selection.StartColumn + request.Value.LeadingCharactersRemoved);
+		if (section.CoordinateMap is null ||
+		    !section.CoordinateMap.TryToSourceOffset(
+			    selection.StartLine - section.ContentStartLine,
+			    selection.StartColumn + request.Value.LeadingCharactersRemoved,
+			    out var sourceOffset))
+		{
+			return false;
+		}
+
+		location = new ManualSecretLocation(
+			ResolveManualMarkRelativePath(
+				section,
+				_projectRootProvider()),
+			sourceOffset,
+			key);
+		return true;
+	}
+
+	private static string ResolveManualMarkRelativePath(
+		PreviewDocumentSection section,
+		string? projectRoot)
+	{
+		var sourcePath = section.SourcePath;
+		if (string.IsNullOrWhiteSpace(sourcePath) || string.IsNullOrWhiteSpace(projectRoot))
+			return section.DisplayPath;
+
+		return PathUtility.GetPortableRelativePath(projectRoot, sourcePath);
+	}
 
     public bool HasSelectionMetricsSnapshot =>
         _hasSelectionMetricsSnapshot;
@@ -139,18 +942,6 @@ internal sealed class PreviewSurfaceController : IDisposable
         UpdateStickyPath();
     }
 
-    public void HandleToolTipLoaded(object? sender)
-    {
-        if (sender is not ToolTip toolTip)
-            return;
-
-        PopupBackdropConfigurator.TryApply(
-            toolTip,
-            TopLevel.GetTopLevel(_window),
-            _viewModel.ActiveThemeEffect,
-            PopupBackdropTransparencyFallback.Transparent);
-    }
-
     public async Task CopyVisibleFilePathAsync()
     {
         if (!_ensureClipboardOutputReady() ||
@@ -169,7 +960,7 @@ internal sealed class PreviewSurfaceController : IDisposable
         }
         catch (Exception ex)
         {
-            await _showErrorAsync(ex.Message);
+            await _showErrorAsync(DesktopExceptionPresentation.Format(_localization, ex));
         }
     }
 
@@ -198,12 +989,43 @@ internal sealed class PreviewSurfaceController : IDisposable
         }
         catch (Exception ex)
         {
-            await _showErrorAsync(ex.Message);
+            await _showErrorAsync(DesktopExceptionPresentation.Format(_localization, ex));
         }
     }
 
     public void RefreshStickyPath()
         => UpdateStickyPath();
+
+    public void ScrollCurrentStickySectionToStart()
+    {
+        if (!TryGetCurrentStickySection(out var currentSection))
+            return;
+
+        var scrollViewer = _controls.TextScrollViewer;
+        var maximumY = Math.Max(0, scrollViewer.Extent.Height - scrollViewer.Viewport.Height);
+        var targetOffset = new Vector(
+            scrollViewer.Offset.X,
+            Math.Clamp(
+                _controls.TextControl.GetVerticalOffsetForLine(currentSection.HeaderLine),
+                0,
+                maximumY));
+
+        try
+        {
+            _scrollSyncActive = true;
+            scrollViewer.Offset = targetOffset;
+            _controls.LineNumbersControl.VerticalOffset = targetOffset.Y;
+            _controls.TextControl.HorizontalOffset = targetOffset.X;
+            _controls.TextControl.VerticalOffset = targetOffset.Y;
+        }
+        finally
+        {
+            _scrollSyncActive = false;
+        }
+
+        _controls.TextControl.Focus();
+        UpdateStickyPath();
+    }
 
     public void HandleScrollViewerPointerPressed(
         PointerPressedEventArgs e)
@@ -300,7 +1122,7 @@ internal sealed class PreviewSurfaceController : IDisposable
         if (topLine < sections[0].StartLine)
             return false;
 
-        currentSection =
+        var section =
             PreviewDocumentSectionLookup.FindContainingSection(
                 sections,
                 topLine) ??
@@ -308,6 +1130,10 @@ internal sealed class PreviewSurfaceController : IDisposable
                 sections,
                 topLine) ??
             sections[^1];
+        if (topLine <= section.HeaderLine)
+            return false;
+
+        currentSection = section;
         return true;
     }
 
@@ -325,6 +1151,13 @@ internal sealed class PreviewSurfaceController : IDisposable
             string noCheckedFilesText,
             CancellationToken cancellationToken)
     {
+        var transformationContext = _transformationContextProvider();
+        // A partial warmup cannot assign the same deterministic secret indexes as the full
+        // selection. Compression is safe here: its plans are file-local and reused by the full build.
+        if (!PreviewWarmupPolicy.SupportsTransformationContext(transformationContext))
+            return null;
+        var compressionContext = transformationContext?.Compression;
+
         if (!PreviewWarmupPolicy.ShouldBuildPreviewWarmup(
                 mode,
                 hasSelection,
@@ -350,7 +1183,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 
             if (mode == PreviewContentMode.Content)
             {
-                if (files.Count == 0)
+                if (string.IsNullOrWhiteSpace(currentPath))
                 {
                     var fallbackText = hasSelection
                         ? noCheckedFilesText
@@ -364,7 +1197,10 @@ internal sealed class PreviewSurfaceController : IDisposable
                         PreviewWarmupMaxFileBytes,
                         PreviewWarmupMaxCharacters,
                         cancellationToken,
-                        pathPresentation?.MapFilePath)
+						TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(
+							currentPath),
+						compressionContext,
+						pathPresentation?.DisplayRootPath ?? currentPath)
                     .GetAwaiter()
                     .GetResult();
                 if (string.IsNullOrWhiteSpace(contentText))
@@ -392,7 +1228,8 @@ internal sealed class PreviewSurfaceController : IDisposable
                     EmptySelectedPaths,
                     OrderedFilePaths: null,
                     treeFormat,
-                    pathPresentation),
+                    pathPresentation,
+					transformationContext),
                 cancellationToken);
             if (string.IsNullOrWhiteSpace(treeText))
                 return null;
@@ -414,7 +1251,8 @@ internal sealed class PreviewSurfaceController : IDisposable
                     cancellationToken,
                     TreeAndContentExportService
                         .CreateRelativeContentHeaderPathMapper(
-                            currentPath))
+                            currentPath),
+                    compressionContext)
                 .GetAwaiter()
                 .GetResult();
             if (string.IsNullOrWhiteSpace(combinedContent))
@@ -425,7 +1263,8 @@ internal sealed class PreviewSurfaceController : IDisposable
                     treeText.Length +
                     combinedContent.Length +
                     16);
-            combinedBuilder.Append(treeText.TrimEnd('\r', '\n'));
+			combinedBuilder.Append(
+				treeText.AsSpan(0, TrailingLineEndingTrimming.GetTrimmedLength(treeText)));
             combinedBuilder.AppendLine("\u00A0");
             combinedBuilder.AppendLine("\u00A0");
             combinedBuilder.Append(combinedContent);
@@ -448,10 +1287,30 @@ internal sealed class PreviewSurfaceController : IDisposable
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+		var transformationContext = _transformationContextProvider();
+		var outputPathRedaction = OutputRootPathPresentation.CaptureRedactionDecision(
+			transformationContext);
 
         if (selectedMode == PreviewContentMode.Tree)
         {
-            var treePreviewText =
+			if (transformationContext?.Redaction is not null && currentTreeRoot is not null)
+			{
+				var selectedFiles = ResolvePreviewFiles(
+					selectedPaths,
+					hasSelection,
+					currentTreeRoot,
+					currentTreeOrderedFilePaths);
+				_secretRedactionPreparer
+					.AnalyzeAsync(transformationContext, selectedFiles, cancellationToken)
+					.GetAwaiter()
+					.GetResult();
+			}
+
+			var treeRootPresentation = OutputRootPathPresentation.ResolveWithRedaction(
+				currentPath ?? string.Empty,
+				pathPresentation,
+				outputPathRedaction);
+			var treePreviewText =
                 !string.IsNullOrWhiteSpace(currentPath) &&
                 currentTreeRoot is not null
                     ? _textOutputPipeline.BuildTree(
@@ -461,16 +1320,19 @@ internal sealed class PreviewSurfaceController : IDisposable
                             selectedPaths,
                             currentTreeOrderedFilePaths,
                             treeFormat,
-                            pathPresentation),
-                        cancellationToken)
+                            pathPresentation,
+							transformationContext),
+						cancellationToken,
+						outputPathRedaction)
                     : string.Empty;
             var effectiveTreeText =
                 string.IsNullOrEmpty(treePreviewText)
                     ? noDataText
                     : treePreviewText;
             return new PreviewBuildResult(
-                _previewDocumentBuilder.CreateInMemory(
-                    effectiveTreeText));
+				_previewDocumentBuilder.CreateInMemoryWithGeneratedPathRedaction(
+					effectiveTreeText,
+					treeRootPresentation));
         }
 
         var files = ResolvePreviewFiles(
@@ -481,7 +1343,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 
         if (selectedMode == PreviewContentMode.Content)
         {
-            if (files.Count == 0)
+            if (string.IsNullOrWhiteSpace(currentPath))
             {
                 var fallbackText = hasSelection
                     ? noCheckedFilesText
@@ -491,11 +1353,17 @@ internal sealed class PreviewSurfaceController : IDisposable
                         fallbackText));
             }
 
-            var contentDocument =
+			var contentDocument =
                 _previewDocumentBuilder.BuildContentDocumentAsync(
                         files,
                         cancellationToken,
-                        pathPresentation?.MapFilePath)
+						TreeAndContentExportService.CreateRelativeContentHeaderPathMapper(
+							currentPath),
+						transformationContext: transformationContext,
+						includeSourceCoordinateMaps: true,
+						displayRootPath: pathPresentation?.DisplayRootPath ?? currentPath,
+						outputPathRedaction: outputPathRedaction,
+						projectRoot: currentPath)
                     .GetAwaiter()
                     .GetResult();
             return new PreviewBuildResult(
@@ -512,30 +1380,40 @@ internal sealed class PreviewSurfaceController : IDisposable
                     noTextContentText));
         }
 
+		var treeRootPathPresentation = OutputRootPathPresentation.ResolveWithRedaction(
+			currentPath,
+			pathPresentation,
+			outputPathRedaction);
+		var displayRootPath = treeRootPathPresentation.Text;
         var treeText = selectedPaths.Count > 0
-            ? _treeExport.BuildSelectedTree(
+            ? _treeExport.BuildSelectedTreeWithCancellation(
                 currentPath,
                 currentTreeRoot,
                 selectedPaths,
                 treeFormat,
-                pathPresentation?.DisplayRootPath,
-                pathPresentation?.DisplayRootName)
-            : _treeExport.BuildFullTree(
+                displayRootPath,
+                pathPresentation?.DisplayRootName,
+                cancellationToken)
+            : _treeExport.BuildFullTreeWithCancellation(
                 currentPath,
                 currentTreeRoot,
                 treeFormat,
-                pathPresentation?.DisplayRootPath,
-                pathPresentation?.DisplayRootName);
+                displayRootPath,
+                pathPresentation?.DisplayRootName,
+                includeRootPath: true,
+                cancellationToken: cancellationToken);
 
         if (selectedPaths.Count > 0 &&
             string.IsNullOrWhiteSpace(treeText))
         {
-            treeText = _treeExport.BuildFullTree(
+            treeText = _treeExport.BuildFullTreeWithCancellation(
                 currentPath,
                 currentTreeRoot,
                 treeFormat,
-                pathPresentation?.DisplayRootPath,
-                pathPresentation?.DisplayRootName);
+                displayRootPath,
+                pathPresentation?.DisplayRootName,
+                includeRootPath: true,
+                cancellationToken: cancellationToken);
         }
 
         if (string.IsNullOrWhiteSpace(treeText))
@@ -547,7 +1425,9 @@ internal sealed class PreviewSurfaceController : IDisposable
         if (files.Count == 0)
         {
             return new PreviewBuildResult(
-                _previewDocumentBuilder.CreateInMemory(treeText));
+				_previewDocumentBuilder.CreateInMemoryWithGeneratedPathRedaction(
+					treeText,
+					treeRootPathPresentation));
         }
 
         var document =
@@ -558,7 +1438,12 @@ internal sealed class PreviewSurfaceController : IDisposable
                     cancellationToken,
                     TreeAndContentExportService
                         .CreateRelativeContentHeaderPathMapper(
-                            currentPath))
+                            currentPath),
+                    transformationContext: transformationContext,
+					includeSourceCoordinateMaps: true,
+					outputPathRedaction: outputPathRedaction,
+					treeRootPresentation: treeRootPathPresentation,
+					projectRoot: currentPath)
                 .GetAwaiter()
                 .GetResult();
         return new PreviewBuildResult(document);
@@ -588,6 +1473,8 @@ internal sealed class PreviewSurfaceController : IDisposable
 
     public void ClearDocument()
     {
+		_pendingRedactionViewportOffset = null;
+		_pendingMarkedSecretId = null;
         ClearSelectionMetrics();
         var previousDocument = _viewModel.PreviewDocument;
         _viewModel.PreviewDocument = null;
@@ -666,12 +1553,37 @@ internal sealed class PreviewSurfaceController : IDisposable
             return;
 
         _disposed = true;
-        _controls.TextControl.CopyingToClipboard -=
-            OnCopyingToClipboard;
-        _controls.TextControl.CopiedToClipboard -=
+		_controls.TextControl.CopyingToClipboard -=
+			OnCopyingToClipboard;
+		_controls.TextControl.RedactionToggleRequested -= OnRedactionToggleRequested;
+		_controls.TextControl.BulkRedactionToggleRequested -= OnBulkRedactionToggleRequested;
+		_controls.TextControl.CopiedToClipboard -=
             OnCopiedToClipboard;
+		_controls.TextControl.ClipboardCopyFailed -= OnClipboardCopyFailed;
         _controls.TextControl.PreviewSelectionChanged -=
             OnSelectionChanged;
+		_controls.TextControl.ManualSecretMarkRequested -= OnManualSecretMarkRequested;
+		_controls.TextControl.ManualSecretUnmarkRequested -= OnManualSecretUnmarkRequested;
+		_controls.TextControl.ManualSecretMarkRejected -= OnManualSecretMarkRejected;
+		_controls.TextControl.PreviewMarkersChanged -= OnPreviewMarkersChanged;
+		_controls.Surface.RemoveHandler(
+			InputElement.PointerPressedEvent,
+			OnPreviewMarkerPointerPressed);
+		_controls.Surface.RemoveHandler(
+			InputElement.PointerMovedEvent,
+			OnPreviewMarkerPointerMoved);
+		_controls.Surface.RemoveHandler(
+			InputElement.PointerReleasedEvent,
+			OnPreviewMarkerPointerReleased);
+		_controls.Surface.PointerExited -= OnPreviewMarkerPointerExited;
+		_controls.TextScrollViewer.PointerCaptureLost -= OnPreviewMarkerPointerCaptureLost;
+		EndPreviewMarkerDrag(releaseCapture: true);
+		_previewMarkerRailPointerOver = false;
+		EndPreviewMarkerScrollBarInteraction();
+		SetPreviewMarkerCursor(null);
+        _controls.TextScrollViewer.LayoutUpdated -= OnTextScrollViewerLayoutUpdated;
+        if (_verticalScrollBar is not null)
+            _verticalScrollBar.PropertyChanged -= OnVerticalScrollBarPropertyChanged;
 
         if (_selectionMetricsDebounceTimer is not null)
         {
@@ -691,19 +1603,22 @@ internal sealed class PreviewSurfaceController : IDisposable
         IPreviewTextDocument document,
         int lineCount)
     {
+		var preservedOffset = _pendingRedactionViewportOffset;
+		_pendingRedactionViewportOffset = null;
         ClearSelectionMetrics();
         var previousDocument = _viewModel.PreviewDocument;
         _viewModel.PreviewDocument = document;
         _viewModel.PreviewText = string.Empty;
         _viewModel.PreviewLineCount = Math.Max(1, lineCount);
 
-        _controls.TextScrollViewer.Offset = default;
-        _controls.LineNumbersControl.VerticalOffset = 0;
+		if (preservedOffset is null)
+			_controls.TextScrollViewer.Offset = default;
+		_controls.LineNumbersControl.VerticalOffset = preservedOffset?.Y ?? 0;
         _controls.LineNumbersControl.ExtentHeight =
             Math.Max(0, _controls.TextScrollViewer.Extent.Height);
         _controls.LineNumbersControl.ViewportHeight =
             Math.Max(0, _controls.TextScrollViewer.Viewport.Height);
-        _controls.TextControl.VerticalOffset = 0;
+		_controls.TextControl.VerticalOffset = preservedOffset?.Y ?? 0;
         _controls.TextControl.ViewportHeight =
             Math.Max(0, _controls.TextScrollViewer.Viewport.Height);
         _controls.TextControl.ViewportWidth =
@@ -712,11 +1627,60 @@ internal sealed class PreviewSurfaceController : IDisposable
         if (!ReferenceEquals(previousDocument, document))
             previousDocument?.Dispose();
 
+		if (_pendingMarkedSecretId is { } markId)
+		{
+			_pendingMarkedSecretId = null;
+			var hiddenCount = document.Redactions
+				.Where(span =>
+					span.State == SecretPreviewSpanState.Redacted &&
+					span.PersistentMarkId == markId)
+				.Select(static span => span.OccurrenceId)
+				.Distinct(StringComparer.Ordinal)
+				.Count();
+			_toastService.Show(_localization.Format("Toast.Secret.HiddenCount", hiddenCount));
+		}
+
         UpdateStickyPath();
         Dispatcher.UIThread.Post(
-            UpdateStickyPath,
+			() =>
+			{
+				if (preservedOffset is { } offset)
+					RestoreViewportAfterRedaction(offset);
+				else
+					UpdateStickyPath();
+			},
             DispatcherPriority.Render);
     }
+
+	private readonly record struct ManualSecretLocation(
+		string RelativePath,
+		int SourceOffset,
+		string? Key);
+
+	private void RestoreViewportAfterRedaction(Vector requestedOffset)
+	{
+		var scrollViewer = _controls.TextScrollViewer;
+		var maximumX = Math.Max(0, scrollViewer.Extent.Width - scrollViewer.Viewport.Width);
+		var maximumY = Math.Max(0, scrollViewer.Extent.Height - scrollViewer.Viewport.Height);
+		var restoredOffset = new Vector(
+			Math.Clamp(requestedOffset.X, 0, maximumX),
+			Math.Clamp(requestedOffset.Y, 0, maximumY));
+
+		try
+		{
+			_scrollSyncActive = true;
+			scrollViewer.Offset = restoredOffset;
+			_controls.LineNumbersControl.VerticalOffset = restoredOffset.Y;
+			_controls.TextControl.HorizontalOffset = restoredOffset.X;
+			_controls.TextControl.VerticalOffset = restoredOffset.Y;
+		}
+		finally
+		{
+			_scrollSyncActive = false;
+		}
+
+		UpdateStickyPath();
+	}
 
     private IReadOnlyList<string> ResolvePreviewFiles(
         IReadOnlySet<string> selectedPaths,
@@ -752,6 +1716,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 
     private void UpdateStickyPath()
     {
+        UpdateStickyHeaderScrollBarInset();
         if (!TryGetCurrentStickySection(out var currentSection))
         {
             HideStickyPath();
@@ -771,6 +1736,95 @@ internal sealed class PreviewSurfaceController : IDisposable
         _controls.LineNumbersControl.StickyHeaderReserved = false;
         _controls.LineNumbersControl.StickyHeaderVisible = false;
     }
+
+    private void UpdateStickyHeaderScrollBarInset()
+    {
+        if (_verticalScrollBar is null)
+        {
+            _verticalScrollBar = _controls.TextScrollViewer
+                .GetVisualDescendants()
+                .OfType<ScrollBar>()
+                .FirstOrDefault(static scrollBar => scrollBar.Orientation == Orientation.Vertical);
+            if (_verticalScrollBar is not null)
+            {
+                _verticalScrollBar.PropertyChanged += OnVerticalScrollBarPropertyChanged;
+            }
+        }
+
+		UpdatePreviewMarkerTrackMargin();
+
+        var inset = 0.0;
+        if (_verticalScrollBar is
+            {
+                IsVisible: true,
+                Bounds.Width: > 0
+            } scrollBar &&
+		    (scrollBar.IsExpanded ||
+		     _previewMarkerRailPointerOver ||
+		     _previewMarkerDragPointer is not null))
+        {
+            var origin = scrollBar.TranslatePoint(default, _controls.TextScrollViewer);
+            inset = origin is { } scrollBarOrigin
+                ? Math.Clamp(
+                    _controls.TextScrollViewer.Bounds.Width - scrollBarOrigin.X,
+                    0,
+                    _controls.TextScrollViewer.Bounds.Width)
+                : scrollBar.Bounds.Width;
+        }
+
+        if (Math.Abs(_stickyHeaderScrollBarInset - inset) < 0.1)
+            return;
+
+        _stickyHeaderScrollBarInset = inset;
+        _controls.StickyHeaderContainer.Margin = new Thickness(
+            _stickyHeaderBaseMargin.Left,
+            _stickyHeaderBaseMargin.Top,
+            _stickyHeaderBaseMargin.Right + inset,
+            _stickyHeaderBaseMargin.Bottom);
+    }
+
+	private void UpdatePreviewMarkerTrackMargin()
+	{
+		var margin = default(Thickness);
+		if (_verticalScrollBar is { IsVisible: true } scrollBar &&
+		    scrollBar.GetVisualDescendants().OfType<Track>().FirstOrDefault() is { } track &&
+		    track.GetVisualDescendants().OfType<Thumb>().FirstOrDefault() is { } thumb &&
+		    track.TranslatePoint(default, _controls.TextScrollViewer) is { } origin)
+		{
+			var availableHeight = Math.Max(0, _controls.TextScrollViewer.Bounds.Height);
+			var top = Math.Clamp(origin.Y, 0, availableHeight);
+			var bottom = Math.Clamp(
+				availableHeight - top - track.Bounds.Height,
+				0,
+				availableHeight);
+			margin = new Thickness(0, top, 0, bottom);
+
+			var lineCount = _controls.TextControl.MarkerSnapshot.TotalLineCount;
+			var firstLineTop = _controls.TextControl.GetVerticalOffsetForLine(1);
+			var lineHeight = lineCount > 1
+				? _controls.TextControl.GetVerticalOffsetForLine(2) - firstLineTop
+				: Math.Max(1, _controls.TextScrollViewer.Extent.Height - firstLineTop);
+			_controls.MarkerBar.SetScrollMetrics(new PreviewMarkerScrollMetrics(
+				_controls.TextScrollViewer.Extent.Height,
+				_controls.TextScrollViewer.Viewport.Height,
+				thumb.Bounds.Height,
+				firstLineTop,
+				lineHeight));
+		}
+		else
+		{
+			_controls.MarkerBar.SetScrollMetrics(null);
+		}
+
+		var current = _controls.MarkerBar.Margin;
+		if (Math.Abs(current.Top - margin.Top) < 0.1 &&
+		    Math.Abs(current.Bottom - margin.Bottom) < 0.1)
+		{
+			return;
+		}
+
+		_controls.MarkerBar.Margin = margin;
+	}
 
     private void HideStickyPath()
     {
@@ -803,7 +1857,7 @@ internal sealed class PreviewSurfaceController : IDisposable
 
     private async Task<bool> WaitForClipboardSourceReadyAsync()
     {
-        if (!_viewModel.IsAnyPreviewVisible)
+        if (_disposed || !_viewModel.IsAnyPreviewVisible)
             return false;
 
         if (!_viewModel.IsPreviewLoading)
@@ -814,7 +1868,8 @@ internal sealed class PreviewSurfaceController : IDisposable
 
         var timeout = TimeSpan.FromSeconds(10);
         var stopwatch = Stopwatch.StartNew();
-        while (_viewModel.IsAnyPreviewVisible &&
+        while (!_disposed &&
+               _viewModel.IsAnyPreviewVisible &&
                _viewModel.IsPreviewLoading &&
                stopwatch.Elapsed < timeout)
         {
@@ -823,19 +1878,65 @@ internal sealed class PreviewSurfaceController : IDisposable
             await Task.Delay(15).ConfigureAwait(true);
         }
 
-        return !_viewModel.IsPreviewLoading &&
+        return !_disposed &&
+               !_viewModel.IsPreviewLoading &&
                (_controls.TextControl.Document ??
                 _viewModel.PreviewDocument) is not null;
     }
 
-    private void OnCopyingToClipboard(object? sender, CancelEventArgs e)
-        => e.Cancel = !_ensureClipboardOutputReady();
+	private void OnCopyingToClipboard(object? sender, CancelEventArgs e)
+	{
+		if (sender is VirtualizedPreviewTextControl preview &&
+		    ExceedsClipboardSelectionLimit(preview.PendingClipboardCharacterCount))
+		{
+			e.Cancel = true;
+			_ = ShowClipboardSelectionTooLargeAsync(preview.PendingClipboardCharacterCount);
+			return;
+		}
+
+		e.Cancel = !_ensureClipboardOutputReady();
+	}
+
+	internal static bool ExceedsClipboardSelectionLimit(long characterCount) =>
+		characterCount > MaximumClipboardSelectionBytes / sizeof(char);
+
+	private async Task ShowClipboardSelectionTooLargeAsync(long characterCount)
+	{
+		try
+		{
+			await _showErrorAsync(_localization.Format(
+				"Preview.Selection.ClipboardTooLarge",
+				characterCount));
+		}
+		catch
+		{
+			// Dialog failures must not turn a rejected clipboard operation into an application crash.
+		}
+	}
 
     private void OnCopiedToClipboard(object? sender, EventArgs e)
     {
         if (_viewModel.IsAnyPreviewVisible)
             _toastService.Show(_localization["Toast.Copy.Preview"]);
     }
+
+	private void OnClipboardCopyFailed(object? sender, PreviewClipboardCopyFailedEventArgs e)
+	{
+		if (!_disposed)
+			_ = ShowClipboardCopyFailureAsync(e.Exception);
+	}
+
+	private async Task ShowClipboardCopyFailureAsync(Exception exception)
+	{
+		try
+		{
+			await _showErrorAsync(DesktopExceptionPresentation.Format(_localization, exception));
+		}
+		catch
+		{
+			// A dialog failure must not turn a clipboard provider failure into an application crash.
+		}
+	}
 
     private void OnSelectionChanged(object? sender, EventArgs e)
         => ScheduleSelectionMetricsUpdate();

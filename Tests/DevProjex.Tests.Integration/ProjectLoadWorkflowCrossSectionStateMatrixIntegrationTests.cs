@@ -1,4 +1,3 @@
-using DevProjex.Tests.Shared.ProjectLoadWorkflow;
 using static DevProjex.Tests.Shared.ProjectLoadWorkflow.ProjectLoadWorkflowRefreshHarness;
 
 namespace DevProjex.Tests.Integration;
@@ -8,11 +7,9 @@ public sealed class ProjectLoadWorkflowCrossSectionStateMatrixIntegrationTests
     [Theory]
     [MemberData(nameof(Cases))]
     public async Task ComputeFullRefreshSnapshot_CrossSectionStateMatrix_ConvergesAndPreservesSelectionContracts(
-        string rootScenarioName,
         string extensionScenarioName,
         string ignoreScenarioName)
     {
-        var rootScenario = Enum.Parse<WorkflowRootScenario>(rootScenarioName);
         var extensionScenario = Enum.Parse<WorkflowExtensionScenario>(extensionScenarioName);
         var ignoreScenario = Enum.Parse<WorkflowIgnoreScenario>(ignoreScenarioName);
 
@@ -22,7 +19,7 @@ public sealed class ProjectLoadWorkflowCrossSectionStateMatrixIntegrationTests
         var baselineSnapshot = services.Engine.ComputeFullRefreshSnapshot(
             CreateDefaultContext(rootPath) with { CaptureTreeInventory = true },
             CancellationToken.None);
-        var scenario = CreateScenario(baselineSnapshot, rootScenario, extensionScenario, ignoreScenario);
+        var scenario = CreateScenario(baselineSnapshot, extensionScenario, ignoreScenario);
 
         var scenarioContext = CreateScenarioContext(rootPath, scenario) with { CaptureTreeInventory = true };
         var firstSnapshot = services.Engine.ComputeFullRefreshSnapshot(
@@ -56,13 +53,10 @@ public sealed class ProjectLoadWorkflowCrossSectionStateMatrixIntegrationTests
 
     public static IEnumerable<object[]> Cases()
     {
-        foreach (var rootScenario in Enum.GetValues<WorkflowRootScenario>())
+        foreach (var extensionScenario in Enum.GetValues<WorkflowExtensionScenario>())
         {
-            foreach (var extensionScenario in Enum.GetValues<WorkflowExtensionScenario>())
-            {
-                foreach (var ignoreScenario in Enum.GetValues<WorkflowIgnoreScenario>())
-                    yield return [rootScenario.ToString(), extensionScenario.ToString(), ignoreScenario.ToString()];
-            }
+            foreach (var ignoreScenario in Enum.GetValues<WorkflowIgnoreScenario>())
+                yield return [extensionScenario.ToString(), ignoreScenario.ToString()];
         }
     }
 }

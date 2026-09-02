@@ -9,13 +9,14 @@
   │  Open current directory                │  │ Open a recent local folder or Git repository from one shared         │
   │> Recent workspaces                     │  │ history.                                                             │
   │  Browse folder ┌┤Recent workspaces├────────────────────────────────────────────────────────────┐                 │
-  │  Clone reposito│ (none available)                                                              │                 │
+  │  Open project w│ (none available)                                                              │                 │
+  │  Clone reposito│                                                                               │                 │
   │  Open Desktop  │                                                                               │                 │
   │  Help          │                                                                               │                 │
-  │  Exit          │                                                                               │                 │
-  └────────────────│                                 ⟦► Close ◄⟧▖                                  │─────────────────┘
-                   │                                 ▝▀▀▀▀▀▀▀▀▀▀▘                                  │
-  Direct automation└───────────────────────────────────────────────────────────────────────────────┘
+  │  Exit          │                                 ⟦► Close ◄⟧▖                                  │                 │
+  └────────────────│                                 ▝▀▀▀▀▀▀▀▀▀▀▘                                  │─────────────────┘
+                   └───────────────────────────────────────────────────────────────────────────────┘
+  Direct automation: devprojex analyze .  |  devprojex export context . -o context.md
 
 
 
@@ -26,5 +27,4 @@
 
 
 
-
-  Up/Down or j/k Navigate   Enter Select   Ctrl+P Actions   ? Help   q Exit
+  1-9 Recent   Enter Select   : Commands   Ctrl+P Actions   ? Help   q Exit

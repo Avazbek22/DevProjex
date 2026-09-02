@@ -251,44 +251,78 @@ internal sealed class TreeNameFilterSession
         string query,
         CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        var selfMatches = node.DisplayName.Contains(query, StringComparison.OrdinalIgnoreCase);
-        if (node.Children.Count == 0)
-            return selfMatches ? node : null;
-
-        List<TreeNodeDescriptor>? filteredChildren = null;
-        var originalChildren = node.Children;
-        var matchedChildrenCount = 0;
-
-        for (var index = 0; index < originalChildren.Count; index++)
+        var pending = new List<FilterFrame>
         {
-            var originalChild = originalChildren[index];
-            var filteredChild = FilterNode(originalChild, query, cancellationToken);
+            new(node, query)
+        };
+        while (pending.Count > 0)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var frameIndex = pending.Count - 1;
+            var frame = pending[frameIndex];
+            if (frame.NextChildIndex < frame.Node.Children.Count)
+            {
+                var child = frame.Node.Children[frame.NextChildIndex++];
+                pending[frameIndex] = frame;
+                pending.Add(new FilterFrame(child, query));
+                continue;
+            }
+
+            pending.RemoveAt(frameIndex);
+            var filteredNode = frame.Complete();
+            if (pending.Count == 0)
+                return filteredNode;
+
+            var parentIndex = pending.Count - 1;
+            var parent = pending[parentIndex];
+            parent.AcceptChild(filteredNode);
+            pending[parentIndex] = parent;
+        }
+
+        throw new InvalidOperationException("Tree filtering did not produce a root node.");
+    }
+
+    private struct FilterFrame(TreeNodeDescriptor node, string query)
+    {
+        private List<TreeNodeDescriptor>? _filteredChildren;
+        private int _matchedChildrenCount;
+
+        public TreeNodeDescriptor Node { get; } = node;
+        public bool SelfMatches { get; } = node.DisplayName.Contains(
+            query,
+            StringComparison.OrdinalIgnoreCase);
+        public int NextChildIndex { get; set; }
+
+        public void AcceptChild(TreeNodeDescriptor? filteredChild)
+        {
+            var childIndex = NextChildIndex - 1;
             if (filteredChild is null)
             {
-                filteredChildren ??= CopyPrefix(originalChildren, index, capacityLimit: 8);
-                continue;
+                _filteredChildren ??= CopyPrefix(Node.Children, childIndex, capacityLimit: 8);
+                return;
             }
 
-            matchedChildrenCount++;
-            if (filteredChildren is not null)
+            _matchedChildrenCount++;
+            if (_filteredChildren is not null)
             {
-                filteredChildren.Add(filteredChild);
-                continue;
+                _filteredChildren.Add(filteredChild);
+                return;
             }
 
+            var originalChild = Node.Children[childIndex];
             if (!ReferenceEquals(filteredChild, originalChild))
             {
-                filteredChildren = CopyPrefix(originalChildren, index, capacityLimit: 8);
-                filteredChildren.Add(filteredChild);
+                _filteredChildren = CopyPrefix(Node.Children, childIndex, capacityLimit: 8);
+                _filteredChildren.Add(filteredChild);
             }
         }
 
-        if (!selfMatches && matchedChildrenCount == 0)
-            return null;
-
-        return filteredChildren is null ? node : node with { Children = filteredChildren };
+        public TreeNodeDescriptor? Complete() =>
+            !SelfMatches && _matchedChildrenCount == 0
+                ? null
+                : _filteredChildren is null
+                    ? Node
+                    : Node with { Children = _filteredChildren };
     }
 
     private static List<TreeNodeDescriptor> CopyPrefix(

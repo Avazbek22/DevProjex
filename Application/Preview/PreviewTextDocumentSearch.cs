@@ -2,38 +2,77 @@ namespace DevProjex.Application.Preview;
 
 public readonly record struct PreviewTextSearchMatch(int Line, int Column);
 
+public readonly record struct PreviewTextSearchResult(
+	IReadOnlyList<PreviewTextSearchMatch> Matches,
+	bool IsCapped);
+
 public static class PreviewTextDocumentSearch
 {
+	public const int MinimumQueryLength = 2;
+	public const int MaximumMatches = 10_000;
+
+	public static bool CanSearch(string? query)
+	{
+		if (string.IsNullOrWhiteSpace(query) || query.AsSpan().IndexOfAny('\r', '\n') >= 0)
+			return false;
+
+		var normalizedQuery = query.Trim();
+		var runeCount = 0;
+		foreach (var _ in normalizedQuery.EnumerateRunes())
+		{
+			if (++runeCount == MinimumQueryLength)
+				return true;
+		}
+		return false;
+	}
+
 	public static IReadOnlyList<PreviewTextSearchMatch> FindAll(
+		IPreviewTextDocument document,
+		string query,
+		CancellationToken cancellationToken = default) =>
+		Find(document, query, cancellationToken).Matches;
+
+	public static PreviewTextSearchResult Find(
 		IPreviewTextDocument document,
 		string query,
 		CancellationToken cancellationToken = default)
 	{
 		ArgumentNullException.ThrowIfNull(document);
-		if (string.IsNullOrWhiteSpace(query))
-			return [];
+		if (!CanSearch(query))
+			return new PreviewTextSearchResult([], IsCapped: false);
 
 		var normalizedQuery = query.Trim();
 		var matches = new List<PreviewTextSearchMatch>();
-		for (var lineIndex = 0; lineIndex < document.LineCount; lineIndex++)
-		{
-			cancellationToken.ThrowIfCancellationRequested();
-			var line = document.GetLineText(lineIndex + 1);
-			var searchStart = 0;
-			while (searchStart <= line.Length)
+		var capped = false;
+		document.VisitLines(
+			1,
+			document.LineCount,
+			(lineNumber, line) =>
 			{
-				var match = line.IndexOf(
-					normalizedQuery,
-					searchStart,
-					StringComparison.OrdinalIgnoreCase);
-				if (match < 0)
-					break;
+				var columnOffset = 0;
+				while (line.Length >= normalizedQuery.Length)
+				{
+					var match = line.IndexOf(
+						normalizedQuery.AsSpan(),
+						StringComparison.OrdinalIgnoreCase);
+					if (match < 0)
+						break;
 
-				matches.Add(new PreviewTextSearchMatch(lineIndex, match));
-				searchStart = match + Math.Max(1, normalizedQuery.Length);
-			}
-		}
+					if (matches.Count == MaximumMatches)
+					{
+						capped = true;
+						return false;
+					}
+					matches.Add(new PreviewTextSearchMatch(lineNumber - 1, columnOffset + match));
+					var consumed = match + normalizedQuery.Length;
+					columnOffset += consumed;
+					line = line[consumed..];
+				}
 
-		return matches;
+				return true;
+			},
+			cancellationToken);
+
+		return new PreviewTextSearchResult(matches, capped);
 	}
 }

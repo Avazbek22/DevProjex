@@ -1,5 +1,3 @@
-using DevProjex.Terminal.CommandLine;
-
 namespace DevProjex.Tests.Terminal;
 
 public sealed class FixedLengthSnapshotDirectoryTests
@@ -90,5 +88,26 @@ public sealed class FixedLengthSnapshotDirectoryTests
 		Assert.Equal(
 			"DevProjex-Tui-Progress-Project",
 			Path.GetFileName(result.Path));
+	}
+
+	[Fact]
+	public void DisposeRemovesReadOnlyGitObjectFilesOnWindows()
+	{
+		if (!OperatingSystem.IsWindows())
+			Assert.Skip("Read-only file attributes affect recursive directory deletion on Windows.");
+
+		var temporaryRoot = FixedLengthSnapshotDirectory.ResolveTemporaryRoot().TrimEnd(
+			Path.DirectorySeparatorChar,
+			Path.AltDirectorySeparatorChar);
+		using var directory = new FixedLengthSnapshotDirectory(temporaryRoot.Length + 49);
+		var objectDirectory = Path.Combine(directory.Path, ".git", "objects", "10");
+		Directory.CreateDirectory(objectDirectory);
+		var objectPath = Path.Combine(objectDirectory, new string('a', 38));
+		File.WriteAllText(objectPath, "object");
+		File.SetAttributes(objectPath, File.GetAttributes(objectPath) | FileAttributes.ReadOnly);
+
+		directory.Dispose();
+
+		Assert.False(Directory.Exists(directory.Path));
 	}
 }

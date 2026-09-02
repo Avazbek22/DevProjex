@@ -9,11 +9,19 @@ internal sealed class RefreshTreePipeline(IRefreshTreePipelineHost host) : IDisp
 
     public async Task<TreeRefreshOutcome> RefreshTreeAsync(
         bool interactiveFilter = false,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        MemoryCleanupReason? postLoadCleanupReason = null,
+        bool preserveStatusMetrics = false)
     {
-        var input = host.CaptureTreeRefreshInput();
+        var input = host.CaptureTreeRefreshInput(preserveCheckedPaths: true);
         if (input is null)
             return TreeRefreshOutcome.Skipped;
+
+        input = input with
+        {
+            PreserveCheckedPaths = true,
+            PreserveExpandedPaths = !interactiveFilter
+        };
 
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -26,7 +34,7 @@ internal sealed class RefreshTreePipeline(IRefreshTreePipelineHost host) : IDisp
         if (interactiveFilter)
             host.BeforeInteractiveFilterRefresh();
         else
-            host.BeforeFullTreeRefresh();
+            host.BeforeFullTreeRefresh(preserveStatusMetrics);
 
         try
         {
@@ -53,15 +61,26 @@ internal sealed class RefreshTreePipeline(IRefreshTreePipelineHost host) : IDisp
             }
 
             linkedToken.ThrowIfCancellationRequested();
+			if (host.TryHandleGitScopeDiagnostics(result))
+				return TreeRefreshOutcome.Skipped;
 
             if (host.TryHandleRootAccessDenied(input, result.Tree))
                 return TreeRefreshOutcome.Skipped;
+
+			if (result.Tree.HadScanFailure)
+			{
+				if (!host.IsTreeRefreshInputCurrent(input))
+					return TreeRefreshOutcome.StaleInput;
+
+				host.ReportIncompleteTreeScan();
+				return TreeRefreshOutcome.Skipped;
+			}
 
             TreeNodeViewModel root;
             using (PerformanceMetrics.Measure("BuildTreeViewModel"))
             {
                 root = await Task.Run(
-                    () => host.BuildTreeViewModel(input, result.Tree),
+					() => host.BuildTreeViewModel(input, result.Tree, linkedToken),
                     linkedToken);
             }
 
@@ -78,6 +97,7 @@ internal sealed class RefreshTreePipeline(IRefreshTreePipelineHost host) : IDisp
                 root,
                 interactiveFilter,
                 usedInMemoryFilter,
+                postLoadCleanupReason,
                 cancellationToken);
             return TreeRefreshOutcome.Applied;
         }

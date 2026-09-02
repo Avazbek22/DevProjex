@@ -1,0 +1,311 @@
+name: Grammar Delivery
+
+# Permanent gate for the tree-sitter grammar delivery contract.
+#
+# It exists because two failure modes are invisible on the developer machine and only appear in a
+# published artifact: a RID-specific publish bundles every grammar of that architecture (+68 MB),
+# and under PublishSingleFile the native extraction directory is not on the OS loader search path,
+# so grammars cannot be loaded by name at all. Both are re-checked here on every RID DevProjex
+# ships, every time the binding version, the curated set or the delivery code changes.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - 'Packaging/GrammarDeliveryProbe/**'
+      - 'Application/Compression/**'
+      - 'Infrastructure/Compression/**'
+      - 'Infrastructure/Grammars/**'
+      - 'Infrastructure/Infrastructure.csproj'
+      - 'tools/grammars/**'
+      - 'Directory.Build.targets'
+      - 'Directory.Packages.props'
+      - '.github/workflows/grammar-delivery.yml'
+  pull_request:
+    paths:
+      - 'Packaging/GrammarDeliveryProbe/**'
+      - 'Application/Compression/**'
+      - 'Infrastructure/Compression/**'
+      - 'Infrastructure/Grammars/**'
+      - 'Infrastructure/Infrastructure.csproj'
+      - 'tools/grammars/**'
+      - 'Directory.Build.targets'
+      - 'Directory.Packages.props'
+      - '.github/workflows/grammar-delivery.yml'
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  # Loader traces are the only diagnostic available when a RID-specific load fails.
+  TREESITTER_DEBUG_LOADER: 1
+
+concurrency:
+  group: grammar-delivery-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable:
+    name: Portable (${{ matrix.rid }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: win-x64
+            runner: windows-latest
+            binary: GrammarDeliveryProbe.exe
+          - rid: win-arm64
+            runner: windows-11-arm
+            binary: GrammarDeliveryProbe.exe
+          - rid: linux-x64
+            runner: ubuntu-latest
+            binary: GrammarDeliveryProbe
+          - rid: linux-arm64
+            runner: ubuntu-24.04-arm
+            binary: GrammarDeliveryProbe
+          - rid: osx-x64
+            # Pinned deliberately, not an oversight: macos-latest is Apple silicon, so an
+            # x86_64 image must be named explicitly. macos-15-intel is the LAST x86_64 image
+            # GitHub Actions offers and is scheduled to retire in autumn 2027. When it goes,
+            # either drop the osx-x64 release target or move this leg to a self-hosted Intel Mac.
+            runner: macos-15-intel
+            binary: GrammarDeliveryProbe
+          - rid: osx-arm64
+            runner: macos-latest
+            binary: GrammarDeliveryProbe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-grammar-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Directory.Packages.props') }}
+          restore-keys: |
+            nuget-grammar-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Verify vendored grammar supply chain
+        shell: pwsh
+        run: ./tools/grammars/build-vendored-grammars.ps1 -VerifyOnly
+
+      - name: Publish baseline (no grammars)
+        shell: bash
+        run: >
+          dotnet publish Packaging/GrammarDeliveryProbe/GrammarDeliveryProbe.csproj
+          -c Release -r ${{ matrix.rid }} --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:PublishReadyToRun=true
+          -p:PublishTrimmed=false
+          -p:DebugType=None
+          -p:DebugSymbols=false
+          -p:DevProjexExcludeGrammars=true
+          -o artifacts/grammar-delivery/baseline
+
+      - name: Publish with curated grammars
+        shell: bash
+        run: >
+          dotnet publish Packaging/GrammarDeliveryProbe/GrammarDeliveryProbe.csproj
+          -c Release -r ${{ matrix.rid }} --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:PublishReadyToRun=true
+          -p:PublishTrimmed=false
+          -p:DebugType=None
+          -p:DebugSymbols=false
+          -o artifacts/grammar-delivery/embedded
+
+      - name: Assert a single published file
+        shell: bash
+        run: |
+          # Mirrors the invariant Scripts/release-all.ps1 enforces on the real artifacts:
+          # a grammar leaking into the publish directory would break the release, not this job.
+          count=$(find artifacts/grammar-delivery/embedded -type f | wc -l)
+          if [ "$count" -ne 1 ]; then
+            echo "::error::Expected exactly one published file, found $count:"
+            find artifacts/grammar-delivery/embedded -type f
+            exit 1
+          fi
+
+      - name: Load and parse every curated grammar
+        shell: bash
+        run: |
+          chmod +x "artifacts/grammar-delivery/embedded/${{ matrix.binary }}" 2>/dev/null || true
+          if [[ "${{ matrix.rid }}" == linux-* ]]; then
+            grammar_home="${RUNNER_TEMP}/grammar-delivery-home-${{ matrix.rid }}"
+            rm -rf -- "$grammar_home"
+            mkdir -p -- "$grammar_home"
+            env -u XDG_DATA_HOME HOME="$grammar_home" \
+              "artifacts/grammar-delivery/embedded/${{ matrix.binary }}"
+          else
+            "artifacts/grammar-delivery/embedded/${{ matrix.binary }}"
+          fi
+
+      - name: Materialize, load and parse from one cold cache in four processes
+        shell: bash
+        run: |
+          cold_root="${RUNNER_TEMP}/grammar-delivery-cold-${{ matrix.rid }}"
+          logs="${RUNNER_TEMP}/grammar-delivery-cold-logs-${{ matrix.rid }}"
+          rm -rf -- "$cold_root" "$logs"
+          mkdir -p -- "$cold_root" "$logs"
+          pids=()
+          for index in 1 2 3 4; do
+            "artifacts/grammar-delivery/embedded/${{ matrix.binary }}" \
+              --root "$cold_root" \
+              >"$logs/process-$index.log" 2>&1 &
+            pids+=("$!")
+          done
+          failed=0
+          for pid in "${pids[@]}"; do
+            wait "$pid" || failed=1
+          done
+          cat "$logs"/*.log
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::Concurrent grammar materialization, native loading or parsing failed."
+            exit 1
+          fi
+          staging=$(find "$cold_root" -type f -name '*.tmp' | wc -l)
+          if [ "$staging" -ne 0 ]; then
+            echo "::error::Concurrent materialization left $staging staging file(s)."
+            find "$cold_root" -type f -name '*.tmp'
+            exit 1
+          fi
+
+      - name: Re-run and verify repair of a damaged grammar
+        shell: bash
+        run: |
+          # Second start: proves the materialized copies are reused rather than rewritten, and
+          # that a damaged copy is repaired before it is ever loaded. Damage between sessions is
+          # the realistic case - a truncated write, an antivirus quarantine, a bad sector - and
+          # loading damaged native code instead of repairing it is the failure worth gating on.
+          if [[ "${{ matrix.rid }}" == linux-* ]]; then
+            grammar_home="${RUNNER_TEMP}/grammar-delivery-home-${{ matrix.rid }}"
+            env -u XDG_DATA_HOME HOME="$grammar_home" \
+              "artifacts/grammar-delivery/embedded/${{ matrix.binary }}" --verify-recovery
+          else
+            "artifacts/grammar-delivery/embedded/${{ matrix.binary }}" --verify-recovery
+          fi
+
+      - name: Report binary growth
+        shell: bash
+        run: |
+          baseline=$(wc -c < "artifacts/grammar-delivery/baseline/${{ matrix.binary }}")
+          embedded=$(wc -c < "artifacts/grammar-delivery/embedded/${{ matrix.binary }}")
+          delta=$((embedded - baseline))
+          mib=$(( delta / 1048576 ))
+          echo "| ${{ matrix.rid }} | $baseline | $embedded | $delta (~${mib} MiB) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "GRAMMAR-DELIVERY-SIZE rid=${{ matrix.rid }} baseline=$baseline embedded=$embedded delta=$delta"
+          # The twenty-language payload, including six comments-only packs, stays below 32 MiB
+          # on every RID. Keep a tight absolute ceiling so further native growth is explicit.
+          budget=$((32 * 1024 * 1024))
+          if [ "$delta" -gt "$budget" ]; then
+            echo "::error::Grammar payload for ${{ matrix.rid }} is $delta bytes, over the 32 MiB budget."
+            exit 1
+          fi
+
+  packaged:
+    name: Packaged content strategy (${{ matrix.rid }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: win-x64
+            runner: windows-latest
+          - rid: win-arm64
+            runner: windows-11-arm
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-grammar-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Directory.Packages.props') }}
+          restore-keys: |
+            nuget-grammar-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Publish with grammars as package content
+        shell: bash
+        run: >
+          dotnet publish Packaging/GrammarDeliveryProbe/GrammarDeliveryProbe.csproj
+          -c Release -r ${{ matrix.rid }} --self-contained true
+          -p:PublishSingleFile=false
+          -p:PublishTrimmed=false
+          -p:DebugType=None
+          -p:DebugSymbols=false
+          -p:DevProjexGrammarDelivery=Content
+          -o artifacts/grammar-delivery/content
+
+      - name: Assert the packaged layout
+        shell: bash
+        run: |
+          # The MSIX build must never write executable code at runtime: grammars ship as ordinary
+          # package files so they inherit the package signature. Extracted DLLs would not, and are
+          # blocked by Smart App Control and S mode.
+          grammars=$(find artifacts/grammar-delivery/content/grammars -type f | wc -l)
+          if [ "$grammars" -eq 0 ]; then
+            echo "::error::No packaged grammars were published."
+            exit 1
+          fi
+          stray=$(find artifacts/grammar-delivery/content -maxdepth 1 -name 'tree-sitter-*' | wc -l)
+          if [ "$stray" -ne 0 ]; then
+            echo "::error::Unfiltered grammar natives reached the publish root:"
+            find artifacts/grammar-delivery/content -maxdepth 1 -name 'tree-sitter-*'
+            exit 1
+          fi
+          if [ ! -f artifacts/grammar-delivery/content/tree-sitter.dll ]; then
+            echo "::error::The core tree-sitter native was filtered out; the managed binding cannot load."
+            exit 1
+          fi
+
+      - name: Load and parse from the packaged layout
+        shell: bash
+        run: artifacts/grammar-delivery/content/GrammarDeliveryProbe.exe --content
+
+  gate:
+    name: Grammar Delivery Gate
+    needs:
+      - portable
+      - packaged
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Verify delivery jobs
+        shell: bash
+        env:
+          PORTABLE_RESULT: ${{ needs.portable.result }}
+          PACKAGED_RESULT: ${{ needs.packaged.result }}
+        run: |
+          failed=""
+          for pair in "portable=$PORTABLE_RESULT" "packaged=$PACKAGED_RESULT"; do
+            value="${pair#*=}"
+            if [ "$value" != "success" ] && [ "$value" != "skipped" ]; then
+              failed="$failed ${pair}"
+            fi
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::Grammar delivery jobs failed:$failed"
+            exit 1
+          fi

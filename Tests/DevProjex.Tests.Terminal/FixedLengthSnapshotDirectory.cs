@@ -1,5 +1,3 @@
-using DevProjex.Terminal.CommandLine;
-
 namespace DevProjex.Tests.Terminal;
 
 internal sealed class FixedLengthSnapshotDirectory : IDisposable
@@ -123,7 +121,21 @@ internal sealed class FixedLengthSnapshotDirectory : IDisposable
 
 	private void DeleteOwnedRoot()
 	{
-		if (Directory.Exists(_ownedRoot))
-			Directory.Delete(_ownedRoot, recursive: true);
+		if (!Directory.Exists(_ownedRoot))
+			return;
+
+		if (OperatingSystem.IsWindows())
+			ClearReadOnlyFileAttributes(_ownedRoot);
+		Directory.Delete(_ownedRoot, recursive: true);
+	}
+
+	private static void ClearReadOnlyFileAttributes(string rootPath)
+	{
+		foreach (var filePath in Directory.EnumerateFiles(rootPath, "*", SearchOption.AllDirectories))
+		{
+			var attributes = File.GetAttributes(filePath);
+			if ((attributes & FileAttributes.ReadOnly) != 0)
+				File.SetAttributes(filePath, attributes & ~FileAttributes.ReadOnly);
+		}
 	}
 }

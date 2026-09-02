@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using DevProjex.Terminal.Rendering;
 using Terminal.Gui.App;
 using Terminal.Gui.Drawing;
 using Terminal.Gui.Text;
@@ -31,6 +32,7 @@ internal sealed class TerminalOperationProgressView : IDisposable
 	private double? _measuredFraction;
 	private int _frameWidth;
 	private bool _disposed;
+	public string OperationName { get; }
 
 	public TerminalOperationProgressView(
 		IApplication application,
@@ -43,13 +45,14 @@ internal sealed class TerminalOperationProgressView : IDisposable
 		bool plain = false)
 	{
 		_application = application;
+		OperationName = SanitizeLine(operationName);
 		_elapsedFormatter = elapsedFormatter;
-		_sourceText = source ?? string.Empty;
+		_sourceText = SanitizeSource(source);
 		_useTextProgress = useTextProgress;
 		_allowMotion = !plain;
 		_frame = new TerminalLiteralFrameView
 		{
-			Title = operationName,
+			Title = OperationName,
 			BorderStyle = plain ? LineStyle.None : LineStyle.Single,
 			SchemeName = TerminalWorkspaceTheme.Dialog,
 			CanFocus = false
@@ -59,7 +62,7 @@ internal sealed class TerminalOperationProgressView : IDisposable
 			X = 2,
 			Y = 1,
 			Width = Dim.Fill(2),
-			Text = phase,
+			Text = SanitizeLine(phase),
 			SchemeName = TerminalWorkspaceTheme.Accent
 		};
 		_textProgressBar = new TerminalLiteralLabel
@@ -132,7 +135,7 @@ internal sealed class TerminalOperationProgressView : IDisposable
 			X = 2,
 			Y = Pos.AnchorEnd(1),
 			Width = Dim.Fill(2),
-			Text = cancelHint,
+			Text = SanitizeLine(cancelHint),
 			SchemeName = TerminalWorkspaceTheme.Secondary
 		};
 		_frame.Add(
@@ -172,15 +175,15 @@ internal sealed class TerminalOperationProgressView : IDisposable
 		string? metrics = null,
 		string? detail = null)
 	{
-		_phase.Text = phase;
+		_phase.Text = SanitizeLine(phase);
 		_measuredFraction = null;
 		_spinner.Visible = _allowMotion;
 		_progressBar.Visible = false;
 		_textProgressBar.Visible = !_allowMotion;
 		if (!_allowMotion)
 			_textProgressBar.Text = "[...]";
-		_metrics.Text = metrics ?? string.Empty;
-		_detail.Text = detail ?? string.Empty;
+		_metrics.Text = SanitizeLine(metrics);
+		_detail.Text = SanitizeLine(detail);
 		_frame.SetNeedsDraw();
 	}
 
@@ -190,7 +193,7 @@ internal sealed class TerminalOperationProgressView : IDisposable
 		string metrics,
 		string? detail = null)
 	{
-		_phase.Text = phase;
+		_phase.Text = SanitizeLine(phase);
 		_measuredFraction = Math.Clamp(fraction, 0, 1);
 		_spinner.Visible = false;
 		_progressBar.Visible = !_useTextProgress;
@@ -200,8 +203,8 @@ internal sealed class TerminalOperationProgressView : IDisposable
 			_textProgressBar.Text = BuildTextProgress(
 				_measuredFraction.Value,
 				_frameWidth);
-		_metrics.Text = metrics;
-		_detail.Text = detail ?? string.Empty;
+		_metrics.Text = SanitizeLine(metrics);
+		_detail.Text = SanitizeLine(detail);
 		_frame.SetNeedsDraw();
 	}
 
@@ -248,6 +251,12 @@ internal sealed class TerminalOperationProgressView : IDisposable
 		}
 		return stablePrefix + "..." + string.Concat(runes.AsSpan(start).ToArray());
 	}
+
+	internal static string SanitizeSource(string? source) =>
+		SanitizeLine(source);
+
+	internal static string SanitizeLine(string? value) =>
+		TerminalTextEscaping.EscapeSingleLine(value ?? string.Empty);
 
 	private static string BuildTextProgress(double fraction, int frameWidth)
 	{

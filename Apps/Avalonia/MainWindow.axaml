@@ -144,11 +144,6 @@
       <Setter Property="UseLayoutRounding" Value="True" />
     </Style>
 
-    <Style Selector="Border.island-splitter:pointerover, Border.island-splitter.splitter-dragging">
-      <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
-      <Setter Property="Opacity" Value="0.44" />
-    </Style>
-
     <Style Selector="Border.status-strip">
       <Setter Property="Background" Value="{DynamicResource AppPanelBrush}" />
       <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
@@ -209,6 +204,8 @@
                           ZoomResetRequested="OnZoomReset"
                           ToggleCompactModeRequested="OnToggleCompactMode"
                           ToggleTreeExpansionAnimationRequested="OnToggleTreeExpansionAnimation"
+                          ToggleStatusMetricsAnimationRequested="OnToggleStatusMetricsAnimation"
+                          ToggleToolAnimationRequested="OnToggleToolAnimation"
                           ToggleSearchRequested="OnToggleSearch"
                           ToggleSettingsRequested="OnToggleSettings"
                           TogglePreviewRequested="OnTogglePreview"
@@ -233,6 +230,15 @@
                           LanguageEsRequested="OnLangEs"
                           LanguagePtRequested="OnLangPt"
                           LanguagePtPtRequested="OnLangPtPt"
+                          LanguageZhCnRequested="OnLangZhCn"
+                          LanguageZhTwRequested="OnLangZhTw"
+                          LanguageJaRequested="OnLangJa"
+                          LanguageKoRequested="OnLangKo"
+                          LanguageTrRequested="OnLangTr"
+                          LanguageUkRequested="OnLangUk"
+                          LanguagePlRequested="OnLangPl"
+                          LanguageViRequested="OnLangVi"
+                          LanguageIdRequested="OnLangId"
                           AboutRequested="OnAbout"
                           AboutCloseRequested="OnAboutClose"
                           AboutSupportRequested="OnAboutSupport"
@@ -252,25 +258,19 @@
     <Border DockPanel.Dock="Bottom" Classes="status-strip" IsVisible="{Binding IsProjectLoaded}">
       <Grid ColumnDefinitions="Auto,*,Auto">
         <!-- Left: Tree metrics -->
-        <StackPanel Grid.Column="0"
-                    Orientation="Horizontal"
-                    VerticalAlignment="Center"
-                    IsVisible="{Binding StatusMetricsVisible}">
-          <TextBlock Text="{Binding StatusTreeLabel}"
-                     FontSize="12"
-                     FontWeight="SemiBold"
-                     Opacity="0.9"
-                     VerticalAlignment="Center" />
-          <TextBlock Text=" - "
-                     FontSize="12"
-                     Opacity="0.6"
-                     VerticalAlignment="Center" />
-          <TextBlock Text="{Binding StatusTreeStatsText}"
-                     FontSize="12"
-                     Foreground="{DynamicResource AppTextBrush}"
-                     Opacity="0.88"
-                     VerticalAlignment="Center" />
-        </StackPanel>
+        <controls:StatusMetricWaveText Name="StatusTreeMetricsWave"
+                                       Grid.Column="0"
+                                       Label="{Binding StatusTreeLabel}"
+                                       Text="{Binding StatusTreeStatsText}"
+                                       TextFontSize="12"
+                                       TextBrush="{DynamicResource AppTextBrush}"
+                                       IsAnimationEnabled="{Binding IsStatusMetricsAnimationEnabled}"
+                                       RevealDirection="LeftToRight"
+                                       HorizontalAlignment="Left"
+                                       VerticalAlignment="Center"
+                                       IsVisible="{Binding StatusMetricsVisible}"
+                                       AutomationProperties.Name="{Binding StatusTreeLabel}"
+                                       AutomationProperties.HelpText="{Binding StatusTreeStatsText}" />
 
         <!-- Center: Progress bar with operation text -->
         <StackPanel Grid.Column="1"
@@ -325,25 +325,19 @@
         </StackPanel>
 
         <!-- Right: Content metrics -->
-        <StackPanel Grid.Column="2"
-                    Orientation="Horizontal"
-                    VerticalAlignment="Center"
-                    IsVisible="{Binding StatusMetricsVisible}">
-          <TextBlock Text="{Binding StatusContentLabel}"
-                     FontSize="12"
-                     FontWeight="SemiBold"
-                     Opacity="0.9"
-                     VerticalAlignment="Center" />
-          <TextBlock Text=" - "
-                     FontSize="12"
-                     Opacity="0.6"
-                     VerticalAlignment="Center" />
-          <TextBlock Text="{Binding StatusContentStatsText}"
-                     FontSize="12"
-                     Foreground="{DynamicResource AppTextBrush}"
-                     Opacity="0.88"
-                     VerticalAlignment="Center" />
-        </StackPanel>
+        <controls:StatusMetricWaveText Name="StatusContentMetricsWave"
+                                       Grid.Column="2"
+                                       Label="{Binding StatusContentLabel}"
+                                       Text="{Binding StatusContentStatsText}"
+                                       TextFontSize="12"
+                                       TextBrush="{DynamicResource AppTextBrush}"
+                                       IsAnimationEnabled="{Binding IsStatusMetricsAnimationEnabled}"
+                                       RevealDirection="RightToLeft"
+                                       HorizontalAlignment="Right"
+                                       VerticalAlignment="Center"
+                                       IsVisible="{Binding StatusMetricsVisible}"
+                                       AutomationProperties.Name="{Binding StatusContentLabel}"
+                                       AutomationProperties.HelpText="{Binding StatusContentStatsText}" />
       </Grid>
     </Border>
 
@@ -446,7 +440,7 @@
                       VerticalAlignment="Center"
                       BorderBrush="{DynamicResource AppBorderBrush}"
                       BorderThickness="1">
-                <TextBlock Text="Ctrl+O"
+				<TextBlock Text="{Binding DropZoneShortcut}"
                            FontSize="11"
                            FontFamily="Consolas, monospace"
                            VerticalAlignment="Center"
@@ -617,6 +611,14 @@
                     </controls:ProjectTreeView.ItemTemplate>
                   </controls:ProjectTreeView>
 
+                  <controls:PreviewMarkerBar Name="TreeSearchMarkerBar"
+                                             Width="15"
+                                             HorizontalAlignment="Right"
+                                             VerticalAlignment="Stretch"
+                                             IsHitTestVisible="False"
+                                             RedactionBrush="{DynamicResource AppAccentBrush}"
+                                             SearchBrush="{DynamicResource TreeSearchHighlightBrush}" />
+
                   <Button Name="PreviewTreeHideButton"
                           Classes="menu-icon-button tree-island-close-button"
                           IsVisible="{Binding IsPreviewMode}"
@@ -698,7 +700,7 @@
 
             <Grid Grid.Column="1"
                   Name="PreviewPaneRoot"
-                  RowDefinitions="Auto,*">
+                  RowDefinitions="Auto,Auto,*">
             <!-- Animated preview bar container -->
             <Border Grid.Row="0"
                     Name="PreviewBarContainer"
@@ -720,8 +722,7 @@
                         Margin="0,0,8,0"
                         Click="OnPreviewCopyCurrentMode">
                   <ToolTip.Tip>
-                    <ToolTip Classes="preview-blurred-tooltip"
-                             Loaded="OnPreviewToolTipLoaded">
+                    <ToolTip>
                       <TextBlock Text="{Binding PreviewCopyCurrentModeTooltip}" />
                     </ToolTip>
                   </ToolTip.Tip>
@@ -773,20 +774,74 @@
                             Click="OnPreviewTreeAndContentModeClick" />
                   </Grid>
                 </Border>
-                <Button Grid.Column="2"
-                        Name="PreviewCloseButton"
-                        Classes="menu-icon-button preview-close-button"
-                        Width="32"
-                        Height="32"
-                        Margin="5,0,0,0"
-                        Content="✕"
-                        Click="OnPreviewClose" />
+                <StackPanel Grid.Column="2"
+                            Orientation="Horizontal"
+                            Spacing="5">
+                  <Button Name="PreviewSearchButton"
+                          Classes="menu-icon-button preview-copy-button"
+                          ToolTip.ShowDelay="700"
+                          ToolTip.Placement="BottomEdgeAlignedRight"
+                          ToolTip.VerticalOffset="5"
+                          Width="32"
+                          Height="32"
+                          Opacity="0"
+                          IsHitTestVisible="False"
+                          Click="OnTogglePreviewSearch">
+                    <ToolTip.Tip>
+                      <ToolTip>
+                        <TextBlock Text="{Binding PreviewSearchTooltip}" />
+                      </ToolTip>
+                    </ToolTip.Tip>
+                    <Viewbox Name="PreviewSearchIcon"
+                             Width="16"
+                             Height="16"
+                             Stretch="Uniform">
+					  <Canvas Width="18" Height="18">
+						<Ellipse Canvas.Left="2.25"
+						         Canvas.Top="2.25"
+						         Width="10"
+						         Height="10"
+						         Stroke="{DynamicResource AppTextBrush}"
+						         StrokeThickness="1.75" />
+						<Path Classes="preview-icon"
+						      Data="M 10.5,10.5 L 15.75,15.75"
+						      Stroke="{DynamicResource AppTextBrush}"
+						      StrokeThickness="1.75"
+						      StrokeLineCap="Round" />
+					  </Canvas>
+                    </Viewbox>
+                  </Button>
+                  <Button Name="PreviewCloseButton"
+                          Classes="menu-icon-button preview-close-button"
+                          Width="32"
+                          Height="32"
+                          Content="✕"
+                          Click="OnPreviewClose" />
+                </StackPanel>
               </Grid>
               </Border>
             </Border>
 
-            <!-- Preview content island -->
             <Border Grid.Row="1"
+                    Name="PreviewSearchBarContainer"
+                    UseLayoutRounding="True"
+                    ClipToBounds="True"
+                    Height="0">
+              <views:PreviewSearchBarView Name="PreviewSearchBar"
+                                          IsEnabled="{Binding IsPreviewSearchAvailable}"
+                                          RenderTransformOrigin="50%,0%"
+                                          SearchKeyDown="OnPreviewSearchKeyDown"
+                                          SearchPrevRequested="OnPreviewSearchPrev"
+                                          SearchNextRequested="OnPreviewSearchNext"
+                                          SearchCloseRequested="OnPreviewSearchClose">
+                <views:PreviewSearchBarView.RenderTransform>
+                  <TranslateTransform Y="0" />
+                </views:PreviewSearchBarView.RenderTransform>
+              </views:PreviewSearchBarView>
+            </Border>
+
+            <!-- Preview content island -->
+            <Border Grid.Row="2"
                     Name="PreviewIsland"
                     Classes="island-panel content-island"
                     IsVisible="{Binding IsPreviewPaneVisible}">
@@ -824,7 +879,23 @@
                                                             Document="{Binding PreviewDocument}"
                                                             CopyMenuHeader="{Binding PreviewSelectionCopy}"
                                                             SelectAllMenuHeader="{Binding PreviewSelectionSelectAll}"
-                                                            ClearSelectionMenuHeader="{Binding PreviewSelectionClear}"
+                                                            RedactedSecretToolTipFormat="{Binding PreviewSecretRedactedTooltip}"
+                                                            KeptSecretToolTipFormat="{Binding PreviewSecretKeptTooltip}"
+													AlwaysHideSecretFormat="{Binding PreviewSecretAlwaysHideFormat}"
+													HideSecretHereFormat="{Binding PreviewSecretHideHereFormat}"
+													PrivateDataAlwaysHideFormat="{Binding PreviewPrivateDataAlwaysHideFormat}"
+													HideHereSecretToolTip="{Binding PreviewSecretHideHereTooltip}"
+													AlwaysHideValueToolTip="{Binding PreviewSecretAlwaysHideTooltip}"
+													PrivateDataAlwaysHideToolTip="{Binding PreviewPrivateDataAlwaysHideTooltip}"
+                                                            RemoveSecretMarkHeader="{Binding PreviewSecretRemoveMark}"
+                                                            KeepAllRuleOccurrencesFormat="{Binding PreviewSecretKeepAllRuleFormat}"
+                                                            HideAllRuleOccurrencesFormat="{Binding PreviewSecretHideAllRuleFormat}"
+                                                            KeepAllFileOccurrencesFormat="{Binding PreviewSecretKeepAllFileFormat}"
+                                                            HideAllFileOccurrencesFormat="{Binding PreviewSecretHideAllFileFormat}"
+                                                            SecretSelectionTooShort="{Binding PreviewSecretSelectionTooShort}"
+                                                            SecretSelectionTooLong="{Binding PreviewSecretSelectionTooLong}"
+                                                            SecretSelectionMultiline="{Binding PreviewSecretSelectionMultiline}"
+                                                            SecretSelectionContentOnly="{Binding PreviewSecretSelectionContentOnly}"
                                                             TextFontFamily="{Binding SelectedFontFamily}"
                                                             TextFontSize="{Binding PreviewFontSize}"
                                                             TextBrush="{DynamicResource AppTextBrush}"
@@ -836,6 +907,7 @@
                                                             HorizontalAlignment="Left"
                                                             VerticalAlignment="Top" />
                   </ScrollViewer>
+
                 </Grid>
 
                 <Grid Grid.ColumnSpan="2"
@@ -856,8 +928,7 @@
                               VerticalAlignment="Center"
                               Click="OnPreviewCopyVisibleFilePath">
                         <ToolTip.Tip>
-                          <ToolTip Classes="preview-blurred-tooltip"
-                                   Loaded="OnPreviewToolTipLoaded">
+                          <ToolTip>
                             <TextBlock Text="{Binding PreviewCopyFilePathTooltip}" />
                           </ToolTip>
                         </ToolTip.Tip>
@@ -877,16 +948,32 @@
                           Name="PreviewStickyHeaderContainer"
                           Classes="preview-sticky-header"
                           IsVisible="False">
-                    <TextBlock Name="PreviewStickyHeaderText"
-                               Classes="preview-sticky-header-text"
-                               FontFamily="{Binding SelectedFontFamily}"
-                               FontSize="{Binding PreviewFontSize}"
-                               Margin="10,4,10,4"
-                               MinWidth="0"
-                               VerticalAlignment="Center"
-                               TextTrimming="CharacterEllipsis" />
+                    <Button Name="PreviewStickyHeaderNavigateButton"
+                            Classes="preview-sticky-header-navigate"
+                            Click="OnPreviewStickyHeaderNavigate">
+                      <TextBlock Name="PreviewStickyHeaderText"
+                                 Classes="preview-sticky-header-text"
+                                 FontFamily="{Binding SelectedFontFamily}"
+                                 FontSize="{Binding PreviewFontSize}"
+                                 Margin="10,4,10,4"
+                                 MinWidth="0"
+                                 VerticalAlignment="Center"
+                                 TextTrimming="CharacterEllipsis" />
+                    </Button>
                   </Border>
                 </Grid>
+
+                <controls:PreviewMarkerBar Grid.Column="1"
+                                           Name="PreviewMarkerBar"
+                                           Width="15"
+                                           MinWidth="15"
+                                           HorizontalAlignment="Right"
+                                           VerticalAlignment="Stretch"
+                                           ZIndex="20"
+                                           IsHitTestVisible="False"
+                                           IsMarkerDisplayEnabled="{Binding IsPreviewPaneVisible}"
+                                           RedactionBrush="{DynamicResource AppAccentBrush}"
+                                           SearchBrush="{DynamicResource TreeSearchHighlightBrush}" />
               </Grid>
             </Grid>
             </Border>
@@ -921,8 +1008,10 @@
               <views:SettingsPanelView Name="SettingsPanel"
                                        ApplySettingsRequested="OnApplySettings"
                                        IgnoreAllChanged="OnIgnoreAllChanged"
+									   GitFilteringModeChanged="OnGitFilteringModeChanged"
+									   ContentProcessingAllChanged="OnContentProcessingAllChanged"
                                        ExtensionsAllChanged="OnExtensionsAllChanged"
-                                       RootAllChanged="OnRootAllChanged" />
+                                       SecretScanRetryRequested="OnSecretScanRetryRequested" />
             </Border>
           </Grid>
         </Border>

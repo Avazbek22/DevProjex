@@ -8,6 +8,8 @@ public sealed class IgnoreOptionsServiceComprehensiveMatrixTests
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
 				["Settings.Ignore.SmartIgnore"] = "Smart ignore",
+				["Settings.Ignore.HideSecrets"] = "Hide secrets",
+				["Settings.Ignore.CompressCode"] = "Compress code",
 				["Settings.Ignore.UseGitIgnore"] = "Use .gitignore",
 				["Settings.Ignore.TrackedGitFilesOnly"] = "Tracked Git files only",
 				["Settings.Ignore.HiddenFolders"] = "Hidden folders",
@@ -142,8 +144,13 @@ public sealed class IgnoreOptionsServiceComprehensiveMatrixTests
 		var availability = BuildSingleOptionAvailability(optionId, count, showAdvanced);
 		var options = service.GetOptions(availability);
 
-		Assert.Single(options);
-		Assert.Equal(optionId, options[0].Id);
+		// One path row plus the whole transformation block, which is always offered.
+		Assert.Equal(1 + IgnoreOptionOrder.Count, options.Count);
+		Assert.Equal(IgnoreOptionOrder.ContentTransformations, options.Take(IgnoreOptionOrder.Count).Select(static option => option.Id));
+		Assert.All(
+			options.Take(IgnoreOptionOrder.Count),
+			static transformation => Assert.False(transformation.DefaultChecked));
+		var option = Assert.Single(options, candidate => candidate.Id == optionId);
 
 		var baseLabel = optionId switch
 		{
@@ -161,7 +168,7 @@ public sealed class IgnoreOptionsServiceComprehensiveMatrixTests
 			? $"{baseLabel} ({count})"
 			: baseLabel;
 
-		Assert.Equal(expected, options[0].Label);
+		Assert.Equal(expected, option.Label);
 	}
 
 	private static IgnoreOptionId[] BuildExpectedIds(
@@ -175,9 +182,10 @@ public sealed class IgnoreOptionsServiceComprehensiveMatrixTests
 		bool includeDotFiles,
 		bool includeExtensionless)
 	{
-		var ordered = new List<IgnoreOptionId>(9);
-		if (includeGit) ordered.Add(IgnoreOptionId.UseGitIgnore);
+		var ordered = new List<IgnoreOptionId>(10);
 		if (includeSmart) ordered.Add(IgnoreOptionId.SmartIgnore);
+		ordered.AddRange(IgnoreOptionOrder.ContentTransformations);
+		if (includeGit) ordered.Add(IgnoreOptionId.UseGitIgnore);
 		if (includeEmptyFolders) ordered.Add(IgnoreOptionId.EmptyFolders);
 		if (includeEmptyFiles) ordered.Add(IgnoreOptionId.EmptyFiles);
 		if (includeHiddenFolders) ordered.Add(IgnoreOptionId.HiddenFolders);

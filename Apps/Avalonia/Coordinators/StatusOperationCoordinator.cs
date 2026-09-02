@@ -37,6 +37,12 @@ public sealed class StatusOperationCoordinator(
 
         lock (_sync)
         {
+			// Background metrics remain useful, but must not replace feedback for an explicit
+			// user operation. Lifecycle operations are the exception: metrics are their planned
+			// successor after the project tree has been published.
+			if (ShouldYieldToActiveOperation(operationType, _activeOperationType, _activeOperationId))
+				return operationId;
+
             _activeOperationId = operationId;
             _activeOperationType = operationType;
             _activeCancelAction = cancelAction;
@@ -66,6 +72,20 @@ public sealed class StatusOperationCoordinator(
 
         return operationId;
     }
+
+	private static bool ShouldYieldToActiveOperation(
+		StatusOperationType incomingOperationType,
+		StatusOperationType activeOperationType,
+		long activeOperationId) =>
+		incomingOperationType == StatusOperationType.MetricsCalculation &&
+		activeOperationId != 0 &&
+		activeOperationType is not (
+			StatusOperationType.None or
+			StatusOperationType.MetricsCalculation or
+			StatusOperationType.LoadProject or
+			StatusOperationType.RefreshProject or
+			StatusOperationType.GitPullUpdates or
+			StatusOperationType.GitSwitchBranch);
 
     public void UpdateText(string text, long? operationId = null)
     {

@@ -1,3 +1,4 @@
+using DevProjex.Application.Presentation;
 using static DevProjex.Tests.Shared.ProjectLoadWorkflow.ProjectLoadWorkflowRefreshHarness;
 
 namespace DevProjex.Tests.Integration;
@@ -53,7 +54,6 @@ public sealed class IgnoreOptionCrossLayerParityMatrixIntegrationTests
 			{
 				CaptureTreeInventory = scenario.CaptureTreeInventory
 			},
-			CollectCheckedRootNames(fullSnapshot),
 			TestContext.Current.CancellationToken);
 
 		AssertEquivalentDynamicSections(fullSnapshot, liveSnapshot, scenario);
@@ -527,7 +527,8 @@ public sealed class IgnoreOptionCrossLayerParityMatrixIntegrationTests
 	{
 		foreach (var option in snapshot.IgnoreOptions)
 		{
-			if (option.Id is IgnoreOptionId.UseGitIgnore or IgnoreOptionId.SmartIgnore)
+			if (option.Id is IgnoreOptionId.UseGitIgnore or IgnoreOptionId.SmartIgnore ||
+                ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option.Id))
 			{
 				Assert.DoesNotMatch(@"\(\d+\)$", option.Label);
 				continue;

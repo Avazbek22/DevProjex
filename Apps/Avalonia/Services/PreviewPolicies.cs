@@ -1,6 +1,4 @@
 using System.Runtime.CompilerServices;
-using DevProjex.Application.Selection;
-using DevProjex.Kernel;
 
 namespace DevProjex.Avalonia.Services;
 
@@ -42,7 +40,9 @@ internal sealed class PreviewWarmupSelectedNode(
 internal static class PreviewWarmupPolicy
 {
     private const int SmallChildListLinearLookupThreshold = 32;
-    private const int MaxCaseEquivalentNameProbes = 32;
+
+    public static bool SupportsTransformationContext(ContentTransformationContext? context) =>
+        context?.Redaction is null;
 
     public static bool ShouldBuildPreviewWarmup(
         PreviewContentMode mode,
@@ -103,11 +103,10 @@ internal static class PreviewWarmupPolicy
         if (selectionPlan is null || maxNodeCount <= 0)
             return null;
 
-        var remainingNodeCount = maxNodeCount;
-        return selectionPlan.SelectedRoot is not null
-            ? CloneSelectedNode(selectionPlan.SelectedRoot, ref remainingNodeCount)
-            // The final tree preview falls back to the full tree when every captured path is stale.
-            : CloneWholeSubtree(selectionPlan.Root, ref remainingNodeCount);
+        return CloneBoundedTree(
+            selectionPlan.SelectedRoot,
+            selectionPlan.Root,
+            maxNodeCount);
     }
 
     public static int CountSelectedFilesUpToLimit(
@@ -180,7 +179,7 @@ internal static class PreviewWarmupPolicy
             return [];
         }
 
-        var uniqueFiles = new HashSet<string>(PathComparer.Default);
+        var uniqueFiles = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
         if (!selectionPlan.HasExplicitSelection &&
             orderedFilePaths is not null)
         {
@@ -204,7 +203,7 @@ internal static class PreviewWarmupPolicy
             return [];
 
         var files = new List<string>(uniqueFiles);
-        files.Sort(PathComparer.Default);
+        files.Sort(ProjectTreePathIdentity.CanonicalComparer);
         if (files.Count > maxFileCount)
             files.RemoveRange(maxFileCount, files.Count - maxFileCount);
 
@@ -288,7 +287,7 @@ internal static class PreviewWarmupPolicy
     }
 
     private static readonly IReadOnlySet<string> EmptySelectedPaths =
-        new HashSet<string>(PathComparer.Default);
+        new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
 
     private static void CollectInitialPreviewFilesFromWholeSubtree(
         TreeNodeDescriptor node,
@@ -325,77 +324,92 @@ internal static class PreviewWarmupPolicy
         }
     }
 
-    private static TreeNodeDescriptor? CloneSelectedNode(
-        PreviewWarmupSelectedNode selectedNode,
-        ref int remainingNodeCount)
+    private static TreeNodeDescriptor CloneBoundedTree(
+        PreviewWarmupSelectedNode? selectedRoot,
+        TreeNodeDescriptor fallbackRoot,
+        int maximumNodeCount)
     {
-        if (remainingNodeCount <= 0)
-            return null;
+        var root = selectedRoot?.Source ?? fallbackRoot;
+        var remainingNodeCount = maximumNodeCount - 1;
+        if (!root.IsDirectory || remainingNodeCount == 0)
+            return root with { Children = [] };
 
-        var node = selectedNode.Source;
-        remainingNodeCount--;
-        if (!node.IsDirectory || remainingNodeCount == 0)
-            return node with { Children = [] };
+        var frames = new Stack<PreviewTreeCloneFrame>();
+        frames.Push(new PreviewTreeCloneFrame(root, selectedRoot));
+        TreeNodeDescriptor? completedTree = null;
 
-        if (selectedNode.IncludesWholeSubtree)
+        while (frames.TryPeek(out var frame))
         {
-            var wholeChildren = CloneWholeChildren(
-                node.Children,
-                ref remainingNodeCount);
-            return node with { Children = wholeChildren };
+            if (remainingNodeCount > 0 && frame.TryTakeNextChild(out var child, out var selectedChild))
+            {
+                remainingNodeCount--;
+                if (!child.IsDirectory || remainingNodeCount == 0)
+                {
+                    frame.Children.Add(child with { Children = [] });
+                    continue;
+                }
+
+                frames.Push(new PreviewTreeCloneFrame(child, selectedChild));
+                continue;
+            }
+
+            var completedNode = frame.Source with { Children = frame.Children };
+            frames.Pop();
+            if (frames.TryPeek(out var parent))
+                parent.Children.Add(completedNode);
+            else
+                completedTree = completedNode;
         }
 
-        var children = new List<TreeNodeDescriptor>(
-            Math.Min(selectedNode.Children.Count, remainingNodeCount));
-        foreach (var selectedChild in selectedNode.Children)
-        {
-            var projectedChild = CloneSelectedNode(
-                selectedChild,
-                ref remainingNodeCount);
-            if (projectedChild is not null)
-                children.Add(projectedChild);
-            if (remainingNodeCount == 0)
-                break;
-        }
-
-        return node with { Children = children };
+        return completedTree!;
     }
 
-    private static TreeNodeDescriptor? CloneWholeSubtree(
-        TreeNodeDescriptor node,
-        ref int remainingNodeCount)
+    private sealed class PreviewTreeCloneFrame(
+        TreeNodeDescriptor source,
+        PreviewWarmupSelectedNode? selectedNode)
     {
-        if (remainingNodeCount <= 0)
-            return null;
+        private readonly IReadOnlyList<TreeNodeDescriptor>? _wholeChildren =
+            selectedNode is null || selectedNode.IncludesWholeSubtree
+                ? source.Children
+                : null;
+        private readonly IReadOnlyList<PreviewWarmupSelectedNode>? _selectedChildren =
+            selectedNode is not null && !selectedNode.IncludesWholeSubtree
+                ? selectedNode.Children
+                : null;
+        private int _nextChildIndex;
 
-        remainingNodeCount--;
-        if (!node.IsDirectory || remainingNodeCount == 0)
-            return node with { Children = [] };
+        public TreeNodeDescriptor Source { get; } = source;
+        public List<TreeNodeDescriptor> Children { get; } = [];
 
-        var children = CloneWholeChildren(
-            node.Children,
-            ref remainingNodeCount);
-        return node with { Children = children };
-    }
-
-    private static IReadOnlyList<TreeNodeDescriptor> CloneWholeChildren(
-        IReadOnlyList<TreeNodeDescriptor> sourceChildren,
-        ref int remainingNodeCount)
-    {
-        var children = new List<TreeNodeDescriptor>(
-            Math.Min(sourceChildren.Count, remainingNodeCount));
-        foreach (var child in sourceChildren)
+        public bool TryTakeNextChild(
+            out TreeNodeDescriptor child,
+            out PreviewWarmupSelectedNode? selectedChild)
         {
-            var clonedChild = CloneWholeSubtree(
-                child,
-                ref remainingNodeCount);
-            if (clonedChild is not null)
-                children.Add(clonedChild);
-            if (remainingNodeCount == 0)
-                break;
-        }
+            if (_wholeChildren is not null)
+            {
+                if (_nextChildIndex >= _wholeChildren.Count)
+                {
+                    child = null!;
+                    selectedChild = null;
+                    return false;
+                }
 
-        return children;
+                child = _wholeChildren[_nextChildIndex++];
+                selectedChild = null;
+                return true;
+            }
+
+            if (_selectedChildren is not null && _nextChildIndex < _selectedChildren.Count)
+            {
+                selectedChild = _selectedChildren[_nextChildIndex++];
+                child = selectedChild.Source;
+                return true;
+            }
+
+            child = null!;
+            selectedChild = null;
+            return false;
+        }
     }
 
     private static SelectionPathTrieNode BuildSelectionTrie(
@@ -601,11 +615,9 @@ internal static class PreviewWarmupPolicy
                 high = middle;
         }
 
-        var equivalentNameProbes = 0;
         for (var index = low;
-             index < endIndex &&
-             equivalentNameProbes < MaxCaseEquivalentNameProbes;
-             index++, equivalentNameProbes++)
+             index < endIndex;
+             index++)
         {
             var candidate = children[index];
             if (ComparePathName(candidate.FullPath, childName) != 0)
@@ -637,10 +649,10 @@ internal static class PreviewWarmupPolicy
         string candidate,
         string expected)
     {
-        if (PathComparer.Default.Equals(candidate, expected))
+        if (ProjectTreePathIdentity.CanonicalComparer.Equals(candidate, expected))
             return true;
 
-        return PathComparer.Default.Equals(
+        return ProjectTreePathIdentity.CanonicalComparer.Equals(
             NormalizePathOrOriginal(candidate),
             expected);
     }
@@ -677,7 +689,7 @@ internal static class PreviewWarmupPolicy
     private sealed class SelectionPathTrieNode
     {
         public Dictionary<string, SelectionPathTrieNode> Children { get; } =
-            new(PathComparer.Default);
+            new(ProjectTreePathIdentity.CanonicalComparer);
 
         public bool IsSelected { get; set; }
     }
@@ -739,20 +751,83 @@ internal static class PreviewFileCollectionPolicy
     }
 
     public static int BuildPathSetHash(IReadOnlySet<string> selectedPaths)
+		=> BuildPathSetHashWithCancellation(selectedPaths, CancellationToken.None);
+
+	public static int BuildPathSetHashWithCancellation(
+		IReadOnlySet<string> selectedPaths,
+		CancellationToken cancellationToken)
     {
+		cancellationToken.ThrowIfCancellationRequested();
         if (selectedPaths.Count == 0)
             return 0;
 
-        var ordered = new List<string>(selectedPaths.Count);
-        ordered.AddRange(selectedPaths);
-        ordered.Sort(PathComparer.Default);
-
-        var hash = new HashCode();
-        foreach (var path in ordered)
-            hash.Add(path, PathComparer.Default);
-
-        return hash.ToHashCode();
+		return selectedPaths is HashSet<string> hashSet
+			? BuildHashSetFingerprint(hashSet, cancellationToken)
+			: BuildSetFingerprint(selectedPaths, cancellationToken);
     }
+
+	private static int BuildHashSetFingerprint(
+		HashSet<string> selectedPaths,
+		CancellationToken cancellationToken)
+	{
+		var accumulator = new PathSetHashAccumulator();
+		foreach (var path in selectedPaths)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			accumulator.Add(path);
+		}
+
+		return accumulator.Complete();
+	}
+
+	private static int BuildSetFingerprint(
+		IEnumerable<string> selectedPaths,
+		CancellationToken cancellationToken)
+	{
+		var accumulator = new PathSetHashAccumulator();
+		foreach (var path in selectedPaths)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			accumulator.Add(path);
+		}
+
+		return accumulator.Complete();
+	}
+
+	private struct PathSetHashAccumulator
+	{
+		private int _count;
+		private uint _sum;
+		private uint _sumOfSquares;
+		private uint _xor;
+
+		public void Add(string path)
+		{
+			_count++;
+			var hash = Mix(unchecked((uint)
+				ProjectTreePathIdentity.CanonicalComparer.GetHashCode(path)));
+			unchecked
+			{
+				_sum += hash;
+				_sumOfSquares += hash * hash;
+				_xor ^= hash;
+			}
+		}
+
+		public readonly int Complete() => HashCode.Combine(_count, _sum, _sumOfSquares, _xor);
+
+		private static uint Mix(uint value)
+		{
+			unchecked
+			{
+				value ^= value >> 16;
+				value *= 0x7FEB352D;
+				value ^= value >> 15;
+				value *= 0x846CA68B;
+				return value ^ (value >> 16);
+			}
+		}
+	}
 
     public static int CountSelectedFilesUpToLimit(
         IReadOnlySet<string> selectedPaths,
@@ -763,7 +838,7 @@ internal static class PreviewFileCollectionPolicy
         if (maxCount <= 0)
             return 0;
 
-        var uniquePaths = new HashSet<string>(PathComparer.Default);
+        var uniquePaths = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
         ProjectTreeSelectionProjection.CollectSelectedFilePaths(
             treeRoot,
             selectedPaths,
@@ -779,16 +854,34 @@ internal static class PreviewFileCollectionPolicy
         bool ensureExists = true) =>
         ProjectTreeSelectionProjection.BuildOrderedSelectedFilePaths(treeRoot, selectedPaths, ensureExists);
 
+	public static List<string> BuildOrderedSelectedFilePathsWithCancellation(
+		IReadOnlySet<string> selectedPaths,
+		TreeNodeDescriptor treeRoot,
+		bool ensureExists,
+		CancellationToken cancellationToken) =>
+		ProjectTreeSelectionProjection.BuildOrderedSelectedFilePathsWithCancellation(
+			treeRoot,
+			selectedPaths,
+			ensureExists,
+			cancellationToken);
+
     public static List<string> BuildOrderedAllFilePaths(TreeNodeDescriptor treeRoot)
+		=> BuildOrderedAllFilePathsWithCancellation(treeRoot, CancellationToken.None);
+
+	public static List<string> BuildOrderedAllFilePathsWithCancellation(
+		TreeNodeDescriptor treeRoot,
+		CancellationToken cancellationToken)
     {
+		cancellationToken.ThrowIfCancellationRequested();
         // Keep a path-based uniqueness pass even though runtime trees should already be unique.
         // Tests intentionally synthesize case-variant nodes to verify cross-platform comparer semantics.
-        var uniquePaths = new HashSet<string>(PathComparer.Default);
+        var uniquePaths = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
         var stack = new Stack<TreeNodeDescriptor>();
         stack.Push(treeRoot);
 
         while (stack.Count > 0)
         {
+			cancellationToken.ThrowIfCancellationRequested();
             var node = stack.Pop();
             if (!node.IsDirectory)
             {
@@ -797,13 +890,19 @@ internal static class PreviewFileCollectionPolicy
             }
 
             for (var index = node.Children.Count - 1; index >= 0; index--)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
                 stack.Push(node.Children[index]);
+			}
         }
 
         var orderedPaths = new List<string>(uniquePaths.Count);
         orderedPaths.AddRange(uniquePaths);
-        orderedPaths.Sort(PathComparer.Default);
-        return orderedPaths;
+		CancellationAwareSort.Sort(
+			orderedPaths,
+			ProjectTreePathIdentity.CanonicalComparer,
+			cancellationToken);
+		return orderedPaths;
     }
 
     public static IEnumerable<string> EnumerateFilePaths(TreeNodeDescriptor node)

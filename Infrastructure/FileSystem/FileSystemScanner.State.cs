@@ -1,5 +1,14 @@
 namespace DevProjex.Infrastructure.FileSystem;
 
+internal enum FileSystemScanEnumerationPoint
+{
+    RootDirectories,
+    DirectoryDiscovery,
+    DirectoryFiles,
+    RootFiles,
+    SelectedRootFallback
+}
+
 public sealed partial class FileSystemScanner
 {
     private sealed class LocalExtensionScanState
@@ -18,9 +27,7 @@ public sealed partial class FileSystemScanner
         public IgnoreControllerImpactCounts ControllerImpactCounts { get; set; } = IgnoreControllerImpactCounts.Empty;
     }
 
-    private sealed class ProjectWorkspaceScanLocalState(
-        bool captureTreeInventory,
-        bool captureRootScanBreakdown)
+    private sealed class ProjectWorkspaceScanLocalState(bool captureTreeInventory)
     {
         public HashSet<string> Extensions { get; } = new(StringComparer.OrdinalIgnoreCase);
         public HashSet<string> EffectiveExtensions { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -29,8 +36,6 @@ public sealed partial class FileSystemScanner
         public IgnoreControllerImpactCounts ControllerImpactCounts { get; set; } = IgnoreControllerImpactCounts.Empty;
         public GitWorkspaceEvidence GitEvidence { get; set; }
         public List<ProjectTreeInventorySnapshot>? TreeInventories { get; } = captureTreeInventory ? [] : null;
-        public List<KeyValuePair<string, ProjectWorkspaceRootScanSnapshot>>? RootSnapshots { get; } =
-            captureRootScanBreakdown ? [] : null;
 
         public bool IsEmpty =>
             Extensions.Count == 0 &&
@@ -39,8 +44,7 @@ public sealed partial class FileSystemScanner
             EffectiveCounts == IgnoreOptionCounts.Empty &&
             ControllerImpactCounts == IgnoreControllerImpactCounts.Empty &&
             GitEvidence == GitWorkspaceEvidence.Empty &&
-            (TreeInventories is null || TreeInventories.Count == 0) &&
-            (RootSnapshots is null || RootSnapshots.Count == 0);
+            (TreeInventories is null || TreeInventories.Count == 0);
     }
 
     private sealed class ProjectTreeInventoryCapture
@@ -53,7 +57,8 @@ public sealed partial class FileSystemScanner
         List<DirectoryScanFacts> DirectoryToggleCandidates,
         List<DirectoryScanFacts> ControllerImpactCandidates,
         bool RootAccessDenied,
-        bool HadAccessDenied);
+        bool HadAccessDenied,
+        bool HadScanFailure);
 
     private sealed class RootDirectoryToggleCandidateAccumulator
     {
@@ -116,11 +121,12 @@ public sealed partial class FileSystemScanner
         bool GitIgnoreVisible,
         bool SmartIgnoreVisible);
 
-    private struct EffectiveIgnoreScanNode(
-        string path,
-        string relativePath,
-        string name,
-        int parentIndex,
+	private struct EffectiveIgnoreScanNode(
+		string path,
+		string relativePath,
+		string name,
+		IReadOnlyList<FileSystemFileEntry>? files,
+		int parentIndex,
         bool isAccessDenied,
         bool isHidden,
         bool isDot,
@@ -132,9 +138,10 @@ public sealed partial class FileSystemScanner
         IgnoreRules.GitIgnoreScanContext gitIgnoreContext,
         IgnoreRules.GitIgnoreScanContext gitIgnoreCandidateContext)
     {
-        public string Path { get; } = path;
-        public string RelativePath { get; } = relativePath;
-        public string Name { get; } = name;
+		public string Path { get; } = path;
+		public string RelativePath { get; } = relativePath;
+		public string Name { get; } = name;
+		public IReadOnlyList<FileSystemFileEntry>? Files { get; } = files;
         public int ParentIndex { get; } = parentIndex;
         public bool IsAccessDenied { get; set; } = isAccessDenied;
         public bool IsHidden { get; } = isHidden;
@@ -158,6 +165,7 @@ public sealed partial class FileSystemScanner
         List<EffectiveIgnoreScanNode> Nodes,
         IReadOnlyList<ScopedGitIgnoreMatcher> DiscoveredGitIgnoreMatchers,
         IReadOnlyList<GitTrackedPathIndex> DiscoveredGitTrackedPathIndexes,
+		IReadOnlyList<string> DiscoveredGitRepositoryRoots,
         GitWorkspaceEvidence GitEvidence);
 
     private struct EffectiveIgnoreNodeFileMetrics

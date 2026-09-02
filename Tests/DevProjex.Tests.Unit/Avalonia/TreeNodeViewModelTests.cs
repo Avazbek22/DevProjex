@@ -346,6 +346,27 @@ public sealed class TreeNodeViewModelTests
     }
 
     [Fact]
+    public void SetExpandedRecursive_DeepTreeDoesNotDependOnTheCallStack()
+    {
+        const int depth = 16_000;
+        var root = CreateNode("Root");
+        var current = root;
+
+        for (var level = 0; level < depth; level++)
+        {
+            var child = new TreeNodeViewModel(CreateDescriptor($"Node{level}"), current, null);
+            current.Children.Add(child);
+            current = child;
+        }
+
+        root.SetExpandedRecursive(true);
+        Assert.True(current.IsExpanded);
+
+        root.SetExpandedRecursive(false);
+        Assert.False(current.IsExpanded);
+    }
+
+    [Fact]
     public void EnsureParentsExpanded_DoesNotChangeLeafSelection()
     {
         var root = CreateTree();
@@ -364,6 +385,30 @@ public sealed class TreeNodeViewModelTests
         node.IsChecked = true;
 
         Assert.True(node.IsChecked is true);
+    }
+
+    [Fact]
+    public void CheckedStateAndCollection_DeepTreeDoNotDependOnTheCallStack()
+    {
+        const int depth = 16_000;
+        var root = CreateNode("Root");
+        var current = root;
+        for (var level = 0; level < depth; level++)
+        {
+            var child = new TreeNodeViewModel(CreateDescriptor($"Node{level}"), current, null);
+            current.Children.Add(child);
+            current = child;
+        }
+
+        root.IsChecked = true;
+        Assert.True(current.IsChecked);
+
+        current.IsChecked = false;
+        Assert.False(root.IsChecked);
+
+        var selected = new HashSet<string>();
+        root.CollectCheckedPaths(selected);
+        Assert.Empty(selected);
     }
 
     [Fact]
@@ -457,6 +502,61 @@ public sealed class TreeNodeViewModelTests
         Assert.DoesNotContain(firstRoot.FullPath, second);
         Assert.Contains(secondRoot.FullPath, second);
     }
+
+    [Fact]
+    public void TreeSelectionSnapshotCache_DetachesRawSnapshotWithoutCopyingIt()
+    {
+        var root = CreateTree();
+        root.IsChecked = true;
+        var roots = new List<TreeNodeViewModel> { root };
+        var cache = new TreeSelectionSnapshotCache();
+        var cached = cache.GetOrCreate(roots);
+
+        var detached = cache.DetachRawSnapshotForTreeReplacement(roots);
+        var rebuilt = cache.GetOrCreate(roots);
+
+        Assert.Same(cached, detached);
+        Assert.NotSame(detached, rebuilt);
+        Assert.Equal(detached, rebuilt);
+    }
+
+	[Fact]
+	public void TreeSelectionSnapshotCache_ReusesNormalizedSelectionAndOrderedFilesPerRevision()
+	{
+		using var temporary = new TemporaryDirectory();
+		var rootPath = temporary.CreateFolder("selection-cache");
+		var firstPath = temporary.CreateFile("selection-cache/a.cs", "class A {}");
+		var secondPath = temporary.CreateFile("selection-cache/b.cs", "class B {}");
+		var firstDescriptor = new TreeNodeDescriptor("a.cs", firstPath, false, false, "file", []);
+		var secondDescriptor = new TreeNodeDescriptor("b.cs", secondPath, false, false, "file", []);
+		var rootDescriptor = new TreeNodeDescriptor(
+			"selection-cache",
+			rootPath,
+			true,
+			false,
+			"folder",
+			[firstDescriptor, secondDescriptor]);
+		var root = new TreeNodeViewModel(rootDescriptor, null, null, BuildChildrenFromDescriptor);
+		var roots = new List<TreeNodeViewModel> { root };
+		root.Children[0].IsChecked = true;
+		var cache = new TreeSelectionSnapshotCache();
+
+		var firstNormalized = cache.GetOrCreateNormalized(roots, rootDescriptor);
+		var secondNormalized = cache.GetOrCreateNormalized(roots, rootDescriptor);
+		var firstOrdered = cache.GetOrCreateOrderedFiles(roots, rootDescriptor, [firstPath, secondPath]);
+		var secondOrdered = cache.GetOrCreateOrderedFiles(roots, rootDescriptor, [firstPath, secondPath]);
+
+		Assert.Same(firstNormalized, secondNormalized);
+		Assert.Same(firstOrdered, secondOrdered);
+		Assert.Equal([firstPath], firstOrdered);
+
+		root.Children[1].IsChecked = true;
+		cache.Invalidate();
+		var changedOrdered = cache.GetOrCreateOrderedFiles(roots, rootDescriptor, [firstPath, secondPath]);
+
+		Assert.NotSame(firstOrdered, changedOrdered);
+		Assert.Equal([firstPath, secondPath], changedOrdered);
+	}
 
     [Fact]
     public void Flatten_ReturnsLeafOnlyWhenNoChildren()

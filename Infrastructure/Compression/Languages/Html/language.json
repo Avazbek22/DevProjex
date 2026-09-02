@@ -1,0 +1,18 @@
+{
+  "id": "html",
+  "displayName": "HTML",
+  "extensions": [
+    ".html",
+    ".htm"
+  ],
+  "library": "tree-sitter-html",
+  "export": "tree_sitter_html",
+  "queryVersion": 1,
+  "transformCapabilities": [
+    "comments",
+    "blankLines"
+  ],
+  "blockPlaceholder": "",
+  "containerNodeTypes": [],
+  "executableOwnerKinds": []
+}

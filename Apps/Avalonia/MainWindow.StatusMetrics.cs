@@ -7,9 +7,83 @@ public partial class MainWindow
     private bool IsBackgroundMetricsActive()
         => _metrics.IsBackgroundActive;
 
-    private void OnTreeNodeCheckedChanged(TreeNodeViewModel _)
+	private void OnTreeNodeCheckedChanged(TreeNodeViewModel node)
     {
-        _treeSelectionSnapshotCache.Invalidate();
+		if (_suppressTreeSelectionChanges > 0)
+			return;
+		_explicitTreeSelectionProjectPath = _currentPath;
+
+		RecordTreeSelectionOverride(node.FullPath, node.IsChecked == true);
+
+		if (_treeSelectionChangeBatchDepth > 0)
+		{
+			_treeSelectionChangedDuringBatch = true;
+			return;
+		}
+
+		PublishTreeSelectionChange();
+	}
+
+	private void RecordTreeSelectionOverride(string path, bool isChecked)
+	{
+		if (string.IsNullOrWhiteSpace(_currentPath))
+			return;
+
+		var filterSnapshot = _interactiveFilterSelectionSnapshot;
+		if (filterSnapshot is not null && filterSnapshot.IsForProject(_currentPath))
+			filterSnapshot.RecordOverride(path, isChecked);
+
+		var gitScopeSnapshot = _gitScopeSelectionSnapshot;
+		if (gitScopeSnapshot is not null &&
+		    !ReferenceEquals(gitScopeSnapshot, filterSnapshot) &&
+		    gitScopeSnapshot.IsForProject(_currentPath))
+		{
+			gitScopeSnapshot.RecordOverride(path, isChecked);
+		}
+	}
+
+	private void ApplyTreeSelectionWithoutPublishing(Action applyChanges)
+	{
+		ArgumentNullException.ThrowIfNull(applyChanges);
+		_suppressTreeSelectionChanges++;
+		try
+		{
+			applyChanges();
+		}
+		finally
+		{
+			_suppressTreeSelectionChanges--;
+		}
+	}
+
+	private void ApplyTreeSelectionBatch(Action applyChanges)
+	{
+		ArgumentNullException.ThrowIfNull(applyChanges);
+		_treeSelectionChangeBatchDepth++;
+		try
+		{
+			applyChanges();
+		}
+		finally
+		{
+			_treeSelectionChangeBatchDepth--;
+			if (_treeSelectionChangeBatchDepth == 0 && _treeSelectionChangedDuringBatch)
+			{
+				// Restoring a saved selection may touch thousands of nodes. Publish it as one atomic
+				// selection revision so dependent scans start once from the final state.
+				_treeSelectionChangedDuringBatch = false;
+				PublishTreeSelectionChange();
+			}
+		}
+	}
+
+	private void PublishTreeSelectionChange()
+	{
+		_treeSelectionSnapshotCache.Invalidate();
+		if (CaptureGitScopePresentationRefreshContext() is not null)
+			BeginOrderedSelectionProjectionBuild(StatusOperationPresentation.ExtendedDelay);
+		InvalidateSecretRedactionCount();
+		ScheduleCompressionRefreshForSelectionChange();
         _metrics.ScheduleRecalculate();
         SchedulePreviewRefresh();
     }
@@ -64,6 +138,9 @@ public partial class MainWindow
             case StatusOperationType.ProjectCopyExport:
                 _projectCopyExportCts?.Cancel();
                 break;
+			case StatusOperationType.SecretAnalysis:
+				_secretRedactionCountCts?.Cancel();
+				break;
             case StatusOperationType.MetricsCalculation:
             case StatusOperationType.None:
             default:

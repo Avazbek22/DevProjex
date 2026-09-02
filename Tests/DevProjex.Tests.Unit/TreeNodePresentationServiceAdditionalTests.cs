@@ -7,14 +7,13 @@ public sealed class TreeNodePresentationServiceAdditionalTests
 		{
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
-				["Tree.AccessDenied"] = "Access denied",
-				["Tree.AccessDeniedRoot"] = "Access denied root"
+				["Tree.AccessDenied"] = "access denied"
 			}
 		};
 
 	[Fact]
-	// Verifies access denied root uses the root-specific localization key.
-	public void Build_AccessDeniedRoot_UsesRootLabel()
+	// Verifies access denied root uses the same suffix composition as every node.
+	public void Build_AccessDeniedRoot_PreservesRootName()
 	{
 		var localization = new LocalizationService(new StubLocalizationCatalog(CatalogData), AppLanguage.En);
 		var iconMapper = new StubIconMapper { IconKey = "rootIcon" };
@@ -23,12 +22,12 @@ public sealed class TreeNodePresentationServiceAdditionalTests
 
 		var descriptor = service.Build(root);
 
-		Assert.Equal("Access denied root", descriptor.DisplayName);
+		Assert.Equal("root [access denied]", descriptor.DisplayName);
 	}
 
 	[Fact]
-	// Verifies access denied non-root uses the non-root localization key.
-	public void Build_AccessDeniedChild_UsesChildLabel()
+	// Verifies access denied non-root preserves its original name.
+	public void Build_AccessDeniedChild_PreservesChildName()
 	{
 		var localization = new LocalizationService(new StubLocalizationCatalog(CatalogData), AppLanguage.En);
 		var iconMapper = new StubIconMapper { IconKey = "childIcon" };
@@ -38,7 +37,7 @@ public sealed class TreeNodePresentationServiceAdditionalTests
 
 		var descriptor = service.Build(root);
 
-		Assert.Equal("Access denied", descriptor.Children[0].DisplayName);
+		Assert.Equal("child [access denied]", descriptor.Children[0].DisplayName);
 	}
 
 	[Fact]

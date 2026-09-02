@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Verifies that DevProjex can actually deliver and load its native grammars in every shape it
+    ships. It drives the PRODUCTION delivery code in Infrastructure rather than a copy, so what CI
+    proves on six RIDs is what users run.
+
+    Loaded by DevProjex.sln for IDE analysis, but excluded from normal solution build
+    configurations. The grammar-delivery workflow publishes it explicitly.
+
+    Two facts it guards, both measured rather than assumed:
+      * A RID-specific publish bundles ALL 30 grammars of that architecture (+68 MB) unless the
+        publish list is filtered - Directory.Build.targets does that repository-wide.
+      * Under PublishSingleFile the natives are extracted to a directory the OS loader does not
+        search, so TreeSitter's Language(id) constructor throws DllNotFoundException. Everything is
+        loaded by absolute path instead.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>DevProjex.Packaging.GrammarDeliveryProbe</RootNamespace>
+    <AssemblyName>GrammarDeliveryProbe</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference
+      Include="..\..\Infrastructure\Infrastructure.csproj">
+      <AdditionalProperties Condition="'$(RuntimeIdentifier)'!=''">DevProjexGrammarRuntimeIdentifier=$(RuntimeIdentifier)</AdditionalProperties>
+    </ProjectReference>
+  </ItemGroup>
+
+</Project>

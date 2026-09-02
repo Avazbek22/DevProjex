@@ -26,11 +26,29 @@ public sealed record TerminalExportSummary(
 	long EstimatedTokens,
 	GitFilteringMode GitMode,
 	IReadOnlyList<ProjectExclusion> Exclusions,
-	int DiagnosticCount);
+	int DiagnosticCount,
+	bool SecretsRedacted = false,
+	bool PrivateDataRedacted = false,
+	string? GitDiffRange = null);
 
 internal enum TerminalExportDecision
 {
 	Cancel = 0,
 	Export = 1,
-	DryRun = 2
+	DryRun = 2,
+	Overwrite = 3
+}
+
+internal sealed class TerminalExportDestinationHistory
+{
+	private readonly Dictionary<TerminalExportKind, string> _destinations = [];
+
+	public string Resolve(TerminalExportKind kind, string fallback) =>
+		_destinations.GetValueOrDefault(kind) ?? fallback;
+
+	public void Remember(TerminalExportKind kind, string destination)
+	{
+		if (!string.IsNullOrWhiteSpace(destination))
+			_destinations[kind] = destination;
+	}
 }

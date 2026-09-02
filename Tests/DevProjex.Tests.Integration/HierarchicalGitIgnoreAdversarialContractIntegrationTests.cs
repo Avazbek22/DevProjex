@@ -1,6 +1,3 @@
-using System.Text;
-using DevProjex.Tests.Shared.ProjectLoadWorkflow;
-
 namespace DevProjex.Tests.Integration;
 
 public sealed class HierarchicalGitIgnoreAdversarialContractIntegrationTests

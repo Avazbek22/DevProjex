@@ -1,6 +1,7 @@
 using System.Globalization;
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.Execution;
+using DevProjex.Terminal.Rendering;
 using Terminal.Gui.App;
 using Terminal.Gui.Drawing;
 using Terminal.Gui.ViewBase;
@@ -58,8 +59,8 @@ public sealed class TerminalWorkspace
 		CancellationToken cancellationToken)
 	{
 		if (!environment.IsInputInteractive ||
-		    !environment.IsOutputInteractive ||
-		    environment.IsTermDumb)
+			!environment.IsOutputInteractive ||
+			environment.IsTermDumb)
 		{
 			environment.Error.WriteLine("error[DPX-TUI-NOT-INTERACTIVE]:");
 			environment.Error.WriteLine(L("Terminal.Tui.Error.NotInteractive"));
@@ -73,6 +74,8 @@ public sealed class TerminalWorkspace
 		// disposal, so bracket its teardown with idempotent visibility restoration.
 		using var postApplicationCursorRestoration =
 			new TerminalCursorRestoration(environment.Output);
+		using var inputShutdownGuard = new WindowsTerminalInputShutdownGuard();
+		using var inputShutdownRegistration = cancellationToken.Register(inputShutdownGuard.Arm);
 		using IApplication application = global::Terminal.Gui.App.Application.Create();
 		using var preDisposeCursorRestoration = new TerminalCursorRestoration(environment.Output);
 		application.Mouse.IsMouseDisabled = !mouseEnabled;
@@ -97,7 +100,7 @@ public sealed class TerminalWorkspace
 			var rootWidth = environment.Width;
 			var rootHeight = environment.Height;
 			if (screenMode == TerminalScreenMode.Inline &&
-			    application.Driver is { } driver)
+				application.Driver is { } driver)
 			{
 				rootWidth = Math.Max(environment.Width, driver.Screen.Width);
 				rootHeight = Math.Max(environment.Height, driver.Screen.Height);
@@ -126,16 +129,12 @@ public sealed class TerminalWorkspace
 				options,
 				this,
 				operationObserver,
-				cancellationToken);
-			session.Start();
-			try
-			{
-				await application.RunAsync(root, cancellationToken).ConfigureAwait(false);
-			}
-			finally
-			{
-				await session.CompleteAsync().ConfigureAwait(false);
-			}
+				cancellationToken,
+				inputShutdownGuard.Arm);
+			await RunSessionLifecycleAsync(
+				session.Start,
+				() => application.RunAsync(root, cancellationToken),
+				session.CompleteAsync).ConfigureAwait(false);
 
 			return cancellationToken.IsCancellationRequested && !session.ExitRequested
 				? CommandLineExitCodes.Canceled
@@ -143,6 +142,10 @@ public sealed class TerminalWorkspace
 		}
 		finally
 		{
+			// Terminal.Gui 2.4.17 (#5442) can race its one-shot CancelIoEx against a new
+			// synchronous Windows console read. Keep cancellation active until the
+			// application disposal below has actually joined the input worker.
+			inputShutdownGuard.Arm();
 			if (initialized)
 			{
 				try
@@ -172,6 +175,25 @@ public sealed class TerminalWorkspace
 			TerminalMouseMode.Disabled => false,
 			_ => throw new ArgumentOutOfRangeException(nameof(mode), mode, null)
 		};
+
+	internal static async Task RunSessionLifecycleAsync(
+		Action start,
+		Func<Task> runAsync,
+		Func<Task> completeAsync)
+	{
+		ArgumentNullException.ThrowIfNull(start);
+		ArgumentNullException.ThrowIfNull(runAsync);
+		ArgumentNullException.ThrowIfNull(completeAsync);
+		try
+		{
+			start();
+			await runAsync().ConfigureAwait(false);
+		}
+		finally
+		{
+			await completeAsync().ConfigureAwait(false);
+		}
+	}
 
 	private sealed class TerminalGuiMousePolicy : IDisposable
 	{
@@ -212,45 +234,43 @@ public sealed class TerminalWorkspace
 		return true;
 	}
 
-	internal string BuildExportSummaryText(TerminalExportSummary summary)
+	internal string BuildExportSummaryText(
+		TerminalExportSummary summary,
+		int maximumValueColumns = int.MaxValue)
 	{
-		var outputKind = summary.Kind switch
-		{
-			TerminalExportKind.Context => L("Terminal.Tui.ExportContext"),
-			TerminalExportKind.Folder => L("Terminal.Tui.Folder"),
-			_ => "ZIP"
-		};
-		var destinationState = summary.DestinationState == TerminalExportDestinationState.Ready
-			? L("Terminal.Tui.DestinationReady")
-			: L("Terminal.Tui.DestinationConflict");
-		var gitMode = L(ProjectPresentationCatalog.Get(summary.GitMode).LabelKey);
+		var gitMode = summary.GitMode == GitFilteringMode.Diff
+			? GitScopeSelection.ToToken(summary.GitMode, summary.GitDiffRange)
+			: L(ProjectPresentationCatalog.Get(summary.GitMode).LabelKey);
 		var exclusions = summary.Exclusions.Count == 0
-			? L("Terminal.Tui.NoneAvailable")
+			? L("Terminal.Tui.NoneSelected")
 			: string.Join(", ", summary.Exclusions.Select(LocalizeExclusion));
-		var lines = new List<string>
+		string Fit(string value) => maximumValueColumns == int.MaxValue
+			? value
+			: TerminalParameterRow.FitLabel(value, maximumValueColumns, useUnicode: true);
+		var rows = new List<string[]>
 		{
-			$"{L("Terminal.Tui.OutputKind")}: {outputKind}"
+			new[]
+			{
+				L("Terminal.Tui.Destination").TrimEnd(':'),
+				Fit(TerminalTextEscaping.EscapeSingleLine(summary.Destination))
+			},
+			new[] { L("Terminal.Analysis.Files"), summary.FileCount.ToString("N0", CultureInfo.CurrentCulture) },
+			new[] { L("Terminal.Analysis.Folders"), summary.FolderCount.ToString("N0", CultureInfo.CurrentCulture) },
+			new[] { L("Terminal.Analysis.Size"), FormatBytes(summary.Bytes) },
+			new[] { L("Terminal.Analysis.Tokens"), summary.EstimatedTokens.ToString("N0", CultureInfo.CurrentCulture) },
+			new[] { L("Terminal.Tui.Filters"), Fit($"{gitMode}; {exclusions}") },
+			new[] { L("Terminal.Tui.Diagnostics"), summary.DiagnosticCount.ToString("N0", CultureInfo.CurrentCulture) }
 		};
-		if (summary.View is { } view)
-			lines.Add($"{L("Terminal.Tui.View")}: {LocalizeView(view)}");
-		if (summary.DocumentFormat is { } format)
-			lines.Add(
-				$"{L("Terminal.Tui.Format")}: " +
-				$"{ProjectPresentationCatalog.Get(format).UserLabel}");
-		lines.AddRange(
-		[
-			$"{L("Terminal.Analysis.Files")}: {summary.FileCount:N0}",
-			$"{L("Terminal.Analysis.Folders")}: {summary.FolderCount:N0}",
-			$"{L("Terminal.Analysis.Size")}: {FormatBytes(summary.Bytes)}",
-			$"{L("Terminal.Analysis.Characters")}: {summary.Characters:N0}",
-			$"{L("Terminal.Analysis.Tokens")}: {summary.EstimatedTokens:N0}",
-			$"{L("Terminal.Tui.Destination").TrimEnd(':')}: {summary.Destination}",
-			$"{L("Terminal.Tui.DestinationState")}: {destinationState}",
-			$"{L("Terminal.Tui.GitFiltering")}: {gitMode}",
-			$"{L("Terminal.Tui.Exclusions")}: {exclusions}",
-			$"{L("Terminal.Tui.Diagnostics")}: {summary.DiagnosticCount:N0}"
-		]);
-		return string.Join(Environment.NewLine, lines);
+		var redactionKey = (summary.SecretsRedacted, summary.PrivateDataRedacted) switch
+		{
+			(true, true) => "Terminal.Tui.Export.RedactionInline",
+			(true, false) => "Terminal.Tui.Export.SecretsOnlyRedactionInline",
+			(false, true) => "Terminal.Tui.Export.PrivateDataOnlyRedactionInline",
+			_ => null
+		};
+		if (redactionKey is not null)
+			rows.Add([L("Terminal.Tui.Redaction"), L(redactionKey)]);
+		return string.Join(Environment.NewLine, TerminalColumnLayout.Format(rows));
 	}
 
 	internal string LocalizeView(ProjectContextView view) =>
@@ -262,7 +282,7 @@ public sealed class TerminalWorkspace
 	internal static string FormatContextFormat(ProjectContextDocumentFormat format) =>
 		ProjectPresentationCatalog.Get(format).UserLabel;
 
-	internal static string FormatBytes(long bytes)
+	internal static string FormatBytes(long bytes, IFormatProvider? formatProvider = null)
 	{
 		string[] units = ["B", "KB", "MB", "GB", "TB"];
 		var value = Math.Max(0, bytes);
@@ -275,8 +295,8 @@ public sealed class TerminalWorkspace
 		}
 
 		return unit == 0
-			? $"{value} {units[unit]}"
-			: $"{display:0.##} {units[unit]}";
+			? $"{value.ToString(formatProvider)} {units[unit]}"
+			: $"{display.ToString("0.##", formatProvider)} {units[unit]}";
 	}
 
 	internal string FormatCount(long value) =>

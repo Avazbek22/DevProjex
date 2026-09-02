@@ -1,4 +1,3 @@
-using System.Reflection;
 using DevProjex.Terminal.DesktopControl;
 using DevProjex.Terminal.Execution;
 
@@ -81,7 +80,7 @@ internal sealed class AvaloniaDeveloperCommandRunner(
 
 	private static BenchmarkAnalysisServices CreateAnalysisServices()
 	{
-		var services = new TerminalServiceFactory().Create(AppLanguage.En);
+		using var services = new TerminalServiceFactory().Create(AppLanguage.En);
 		return new BenchmarkAnalysisServices(
 			services.AnalysisService,
 			services.AnalysisReportWriter);

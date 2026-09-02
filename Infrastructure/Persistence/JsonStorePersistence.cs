@@ -1,15 +1,53 @@
+using System.Buffers;
+using System.Diagnostics.CodeAnalysis;
+
 namespace DevProjex.Infrastructure.Persistence;
 
 internal static class JsonStorePersistence
 {
+    internal const long SmallDocumentMaximumBytes = 8 * 1024 * 1024;
+	private const UnixFileMode PrivateUnixFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+    private static readonly Encoding StrictUtf8 = new UTF8Encoding(
+        encoderShouldEmitUTF8Identifier: false,
+        throwOnInvalidBytes: true);
+    private static readonly Encoding StrictUtf16LittleEndian = new UnicodeEncoding(
+        bigEndian: false,
+        byteOrderMark: true,
+        throwOnInvalidBytes: true);
+    private static readonly Encoding StrictUtf16BigEndian = new UnicodeEncoding(
+        bigEndian: true,
+        byteOrderMark: true,
+        throwOnInvalidBytes: true);
+    private static readonly Encoding StrictUtf32LittleEndian = new UTF32Encoding(
+        bigEndian: false,
+        byteOrderMark: true,
+        throwOnInvalidCharacters: true);
+    private static readonly Encoding StrictUtf32BigEndian = new UTF32Encoding(
+        bigEndian: true,
+        byteOrderMark: true,
+        throwOnInvalidCharacters: true);
+
     // A future backup is authoritative even when the primary is missing, corrupt or older.
     // Treating the complete file set as read-only prevents recovery from downgrading both copies.
     public static bool ContainsFutureDocument(
         JsonStoreFileSet fileSet,
         int currentSchemaVersion,
-        int? currentDefaultsRevision = null) =>
-        IsFutureDocument(fileSet.PrimaryPath, currentSchemaVersion, currentDefaultsRevision) ||
-        IsFutureDocument(fileSet.BackupPath, currentSchemaVersion, currentDefaultsRevision);
+        int? currentDefaultsRevision = null,
+        long maximumDocumentBytes = SmallDocumentMaximumBytes)
+    {
+        TryEnsurePrivateUnixFileMode(fileSet.PrimaryPath);
+        TryEnsurePrivateUnixFileMode(fileSet.BackupPath);
+        return IsFutureDocument(
+                   fileSet.PrimaryPath,
+                   currentSchemaVersion,
+                   currentDefaultsRevision,
+                   maximumDocumentBytes) ||
+               IsFutureDocument(
+                   fileSet.BackupPath,
+                   currentSchemaVersion,
+                   currentDefaultsRevision,
+                   maximumDocumentBytes);
+    }
 
     public static bool TryReadNormalized<TDocument>(
         string path,
@@ -17,7 +55,8 @@ internal static class JsonStorePersistence
         Func<TDocument> createDefault,
         Func<TDocument, TDocument> normalize,
         out TDocument document,
-        out bool requiresRewrite)
+        out bool requiresRewrite,
+        long maximumDocumentBytes = long.MaxValue)
     {
         document = createDefault();
         requiresRewrite = false;
@@ -25,9 +64,26 @@ internal static class JsonStorePersistence
         if (!File.Exists(path))
             return false;
 
+        TryEnsurePrivateUnixFileMode(path);
         try
         {
-            var json = File.ReadAllText(path);
+            string json;
+            if (maximumDocumentBytes == long.MaxValue)
+            {
+                using var stream = new FileStream(
+                    path,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete,
+                    bufferSize: 16 * 1024,
+                    FileOptions.SequentialScan);
+                json = ReadAllTextStrict(stream);
+            }
+            else if (maximumDocumentBytes > int.MaxValue ||
+                     !TryReadAllTextWithinSizeLimit(path, (int)maximumDocumentBytes, out json))
+            {
+                return false;
+            }
             var deserialized = JsonSerializer.Deserialize<TDocument>(json, serializerOptions);
             if (deserialized is null)
                 return false;
@@ -51,7 +107,81 @@ internal static class JsonStorePersistence
         JsonStoreFileSet fileSet,
         TDocument document,
         JsonSerializerOptions serializerOptions)
+		=> TryWriteAtomic(
+			fileSet,
+			document,
+			serializerOptions,
+			flushToDisk: false,
+			maximumPayloadBytes: long.MaxValue,
+			requireBackup: false,
+			JsonStoreWriteOperations.Default);
+
+	public static bool TryWriteAtomic<TDocument>(
+		JsonStoreFileSet fileSet,
+		TDocument document,
+		JsonSerializerOptions serializerOptions,
+		long maximumPayloadBytes)
+		=> TryWriteAtomic(
+			fileSet,
+			document,
+			serializerOptions,
+			flushToDisk: false,
+			maximumPayloadBytes,
+			requireBackup: false,
+			JsonStoreWriteOperations.Default);
+
+	public static bool TryWriteAtomicDurable<TDocument>(
+		JsonStoreFileSet fileSet,
+		TDocument document,
+		JsonSerializerOptions serializerOptions)
+		=> TryWriteAtomic(
+			fileSet,
+			document,
+			serializerOptions,
+			flushToDisk: true,
+			maximumPayloadBytes: long.MaxValue,
+			requireBackup: true,
+			JsonStoreWriteOperations.Default);
+
+	public static bool TryWriteAtomicDurable<TDocument>(
+		JsonStoreFileSet fileSet,
+		TDocument document,
+		JsonSerializerOptions serializerOptions,
+		long maximumPayloadBytes)
+		=> TryWriteAtomic(
+			fileSet,
+			document,
+			serializerOptions,
+			flushToDisk: true,
+			maximumPayloadBytes,
+			requireBackup: true,
+			JsonStoreWriteOperations.Default);
+
+	internal static bool TryWriteAtomicDurable<TDocument>(
+		JsonStoreFileSet fileSet,
+		TDocument document,
+		JsonSerializerOptions serializerOptions,
+		JsonStoreWriteOperations writeOperations) =>
+		TryWriteAtomic(
+			fileSet,
+			document,
+			serializerOptions,
+			flushToDisk: true,
+			maximumPayloadBytes: long.MaxValue,
+			requireBackup: true,
+			writeOperations);
+
+	private static bool TryWriteAtomic<TDocument>(
+		JsonStoreFileSet fileSet,
+		TDocument document,
+		JsonSerializerOptions serializerOptions,
+		bool flushToDisk,
+		long maximumPayloadBytes,
+		bool requireBackup,
+		JsonStoreWriteOperations writeOperations)
     {
+		ArgumentNullException.ThrowIfNull(writeOperations);
+		string? tempPath = null;
         try
         {
             if (string.IsNullOrWhiteSpace(fileSet.DirectoryPath))
@@ -59,80 +189,358 @@ internal static class JsonStorePersistence
 
             Directory.CreateDirectory(fileSet.DirectoryPath);
 
-            var json = JsonSerializer.Serialize(document, serializerOptions);
-            var tempPath = Path.Combine(fileSet.DirectoryPath, $"{fileSet.FileName}.{Guid.NewGuid():N}.tmp");
-            File.WriteAllText(tempPath, json);
+			var payload = JsonSerializer.SerializeToUtf8Bytes(document, serializerOptions);
+			if (payload.LongLength > maximumPayloadBytes)
+				return false;
+			tempPath = Path.Combine(fileSet.DirectoryPath, $"{fileSet.FileName}.{Guid.NewGuid():N}.tmp");
+			using (var stream = new FileStream(tempPath, CreatePrivateWriteOptions(flushToDisk)))
+			{
+				stream.Write(payload);
+				stream.Flush(flushToDisk);
+			}
 
-            try
+            if (File.Exists(fileSet.PrimaryPath))
             {
-                // Replace keeps the primary update atomic on supported platforms
-                // and gives us a rollback snapshot for free when the file already exists.
-                if (File.Exists(fileSet.PrimaryPath))
-                    File.Replace(tempPath, fileSet.PrimaryPath, fileSet.BackupPath);
-                else
-                    File.Move(tempPath, fileSet.PrimaryPath);
+				try
+				{
+					// Replace keeps the primary update atomic and creates the rollback snapshot.
+					writeOperations.Replace(tempPath, fileSet.PrimaryPath, fileSet.BackupPath);
+				}
+				catch (NotSupportedException)
+				{
+					File.Move(tempPath, fileSet.PrimaryPath, overwrite: true);
+				}
             }
-            catch
+			else
             {
-                File.Move(tempPath, fileSet.PrimaryPath, overwrite: true);
+				File.Move(tempPath, fileSet.PrimaryPath);
             }
 
-            TryMirrorPrimaryToBackup(fileSet);
-            return true;
+			EnsurePrivateUnixFileMode(fileSet.PrimaryPath);
+
+			var backupMirrored = TryMirrorPrimaryToBackup(fileSet, writeOperations);
+			return backupMirrored || !requireBackup;
         }
         catch
         {
             return false;
         }
+		finally
+		{
+			if (tempPath is not null)
+			{
+				try
+				{
+					File.Delete(tempPath);
+				}
+				catch
+				{
+					// A failed atomic write must not mask its original persistence result.
+				}
+			}
+		}
     }
 
-    private static void TryMirrorPrimaryToBackup(JsonStoreFileSet fileSet)
+	private static FileStreamOptions CreatePrivateWriteOptions(bool flushToDisk)
+	{
+		var options = new FileStreamOptions
+		{
+			Mode = FileMode.CreateNew,
+			Access = FileAccess.Write,
+			Share = FileShare.None,
+			BufferSize = 16 * 1024,
+			Options = flushToDisk ? FileOptions.WriteThrough : FileOptions.None
+		};
+		if (!OperatingSystem.IsWindows())
+			options.UnixCreateMode = PrivateUnixFileMode;
+		return options;
+	}
+
+	private static void EnsurePrivateUnixFileMode(string path)
+	{
+		if (!OperatingSystem.IsWindows())
+			File.SetUnixFileMode(path, PrivateUnixFileMode);
+	}
+
+	private static void TryEnsurePrivateUnixFileMode(string path)
+	{
+		if (OperatingSystem.IsWindows() || !File.Exists(path))
+			return;
+
+		try
+		{
+			// Store recovery never follows a substituted link just to tighten permissions.
+			var attributes = File.GetAttributes(path);
+			if ((attributes & (FileAttributes.ReparsePoint | FileAttributes.Directory)) != 0)
+				return;
+
+			using var handle = File.OpenHandle(
+				path,
+				FileMode.Open,
+				FileAccess.Read,
+				FileShare.ReadWrite | FileShare.Delete);
+			if (File.GetUnixFileMode(handle) != PrivateUnixFileMode)
+				File.SetUnixFileMode(handle, PrivateUnixFileMode);
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+		                                      PlatformNotSupportedException or NotSupportedException)
+		{
+			// Reading a valid existing store remains possible on filesystems without Unix mode support.
+		}
+	}
+
+	private static bool TryMirrorPrimaryToBackup(
+		JsonStoreFileSet fileSet,
+		JsonStoreWriteOperations writeOperations)
     {
         try
         {
             // The backup must mirror the final committed primary snapshot.
             // This keeps recovery deterministic across multiple processes.
             if (File.Exists(fileSet.PrimaryPath))
-                File.Copy(fileSet.PrimaryPath, fileSet.BackupPath, overwrite: true);
+			{
+				writeOperations.Copy(fileSet.PrimaryPath, fileSet.BackupPath, overwrite: true);
+				EnsurePrivateUnixFileMode(fileSet.BackupPath);
+			}
+			return true;
         }
         catch
         {
-            // Best effort only. The primary file remains authoritative.
+			return false;
+        }
+    }
+
+    internal static bool IsDocumentWithinSizeLimit(string path, long maximumDocumentBytes)
+    {
+        if (maximumDocumentBytes < 0)
+            return false;
+
+        try
+        {
+            return new FileInfo(path).Length <= maximumDocumentBytes;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    internal static bool TryReadAllTextWithinSizeLimit(
+        string path,
+        int maximumDocumentBytes,
+        out string text)
+    {
+        TryEnsurePrivateUnixFileMode(path);
+        using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete,
+            bufferSize: 16 * 1024,
+            FileOptions.SequentialScan);
+        return TryReadAllTextWithinSizeLimit(stream, maximumDocumentBytes, out text);
+    }
+
+    internal static bool TryReadAllTextWithinSizeLimit(
+        Stream stream,
+        int maximumDocumentBytes,
+        out string text)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentOutOfRangeException.ThrowIfNegative(maximumDocumentBytes);
+        text = string.Empty;
+        if (!TryBufferWithinSizeLimit(stream, maximumDocumentBytes, out var content))
+            return false;
+
+        using (content)
+        {
+            try
+            {
+                text = ReadAllTextStrict(content);
+            }
+            catch (DecoderFallbackException)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    internal static bool TryParseDocumentWithinSizeLimit(
+        Stream stream,
+        int maximumDocumentBytes,
+        JsonDocumentOptions options,
+        [NotNullWhen(true)] out JsonDocument? document)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentOutOfRangeException.ThrowIfNegative(maximumDocumentBytes);
+        document = null;
+        if (!TryBufferWithinSizeLimit(stream, maximumDocumentBytes, out var content))
+            return false;
+
+        using (content)
+            document = JsonDocument.Parse(content, options);
+        return true;
+    }
+
+    private static bool TryBufferWithinSizeLimit(
+        Stream stream,
+        int maximumDocumentBytes,
+        [NotNullWhen(true)] out MemoryStream? content)
+    {
+        content = null;
+        if (stream.Length > maximumDocumentBytes)
+            return false;
+
+        var initialCapacity = (int)Math.Min(stream.Length, Math.Min(maximumDocumentBytes, 16 * 1024));
+        var buffered = new MemoryStream(initialCapacity);
+        var buffer = ArrayPool<byte>.Shared.Rent(16 * 1024);
+        try
+        {
+            var totalBytes = 0;
+            while (true)
+            {
+                var remaining = maximumDocumentBytes - totalBytes;
+                var readSize = remaining >= buffer.Length ? buffer.Length : remaining + 1;
+                var read = stream.Read(buffer, 0, readSize);
+                if (read == 0)
+                    break;
+                if (read > remaining)
+                    return false;
+                buffered.Write(buffer, 0, read);
+                totalBytes += read;
+            }
+
+            buffered.Position = 0;
+            content = buffered;
+            return true;
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
+            if (content is null)
+                buffered.Dispose();
         }
     }
 
     private static bool IsFutureDocument(
         string path,
         int currentSchemaVersion,
-        int? currentDefaultsRevision)
+        int? currentDefaultsRevision,
+        long maximumDocumentBytes)
     {
         if (!File.Exists(path))
             return false;
 
         try
         {
-            using var stream = new FileStream(
-                path,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.ReadWrite | FileShare.Delete);
-            using var document = JsonDocument.Parse(stream);
-            var root = document.RootElement;
-            var schemaVersion = root.TryGetProperty("schemaVersion", out var schemaElement) &&
-                                schemaElement.TryGetInt32(out var schema)
-                ? schema
-                : 0;
-            if (schemaVersion > currentSchemaVersion)
-                return true;
+            JsonDocument document;
+            if (maximumDocumentBytes == long.MaxValue)
+            {
+                using var stream = new FileStream(
+                    path,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete);
+                document = ParseDocument(stream);
+            }
+            else
+            {
+                // An unbounded document cannot be classified safely and must not be downgraded.
+                if (maximumDocumentBytes > int.MaxValue ||
+                    !TryReadAllTextWithinSizeLimit(path, (int)maximumDocumentBytes, out var json))
+                {
+                    return true;
+                }
+                document = JsonDocument.Parse(json);
+            }
+            using (document)
+            {
+                var root = document.RootElement;
+                if (IsVersionNewer(root, "schemaVersion", currentSchemaVersion))
+                    return true;
 
-            return currentDefaultsRevision is { } currentRevision &&
-                   root.TryGetProperty("defaultsRevision", out var revisionElement) &&
-                   revisionElement.TryGetInt32(out var revision) &&
-                   revision > currentRevision;
+                return currentDefaultsRevision is { } currentRevision &&
+                       IsVersionNewer(root, "defaultsRevision", currentRevision);
+            }
         }
         catch
         {
             return false;
         }
     }
+
+    private static bool IsVersionNewer(JsonElement root, string propertyName, int currentVersion)
+    {
+        if (!root.TryGetProperty(propertyName, out var element))
+            return false;
+        if (element.TryGetInt64(out var signedVersion))
+            return signedVersion > currentVersion;
+        return element.TryGetUInt64(out var unsignedVersion) &&
+               unsignedVersion > (ulong)Math.Max(0, currentVersion);
+    }
+
+    private static JsonDocument ParseDocument(FileStream stream)
+    {
+        var encoding = DetectUnicodeEncoding(stream);
+        if (encoding is null)
+            return JsonDocument.Parse(stream);
+
+        using var reader = new StreamReader(
+            stream,
+            encoding,
+            detectEncodingFromByteOrderMarks: true,
+            bufferSize: 1024,
+            leaveOpen: true);
+        return JsonDocument.Parse(reader.ReadToEnd());
+    }
+
+    private static string ReadAllTextStrict(Stream stream)
+    {
+        var encoding = DetectUnicodeEncoding(stream) ?? StrictUtf8;
+        using var reader = new StreamReader(
+            stream,
+            encoding,
+            detectEncodingFromByteOrderMarks: true,
+            bufferSize: 1024,
+            leaveOpen: true);
+        return reader.ReadToEnd();
+    }
+
+    private static Encoding? DetectUnicodeEncoding(Stream stream)
+    {
+        Span<byte> prefix = stackalloc byte[4];
+        var bytesRead = stream.Read(prefix);
+        stream.Position = 0;
+        if (bytesRead >= 4)
+        {
+            if (prefix[0] == 0xFF && prefix[1] == 0xFE && prefix[2] == 0x00 && prefix[3] == 0x00)
+                return StrictUtf32LittleEndian;
+            if (prefix[0] == 0x00 && prefix[1] == 0x00 && prefix[2] == 0xFE && prefix[3] == 0xFF)
+                return StrictUtf32BigEndian;
+        }
+        if (bytesRead >= 2)
+        {
+            if (prefix[0] == 0xFF && prefix[1] == 0xFE)
+                return StrictUtf16LittleEndian;
+            if (prefix[0] == 0xFE && prefix[1] == 0xFF)
+                return StrictUtf16BigEndian;
+        }
+        return null;
+    }
+}
+
+internal sealed class JsonStoreWriteOperations(
+	Action<string, string, string> replace,
+	Action<string, string, bool> copy)
+{
+	internal static JsonStoreWriteOperations Default { get; } = new(
+		static (source, destination, backup) => File.Replace(source, destination, backup),
+		static (source, destination, overwrite) => File.Copy(source, destination, overwrite));
+
+	internal void Replace(string source, string destination, string backup) =>
+		replace(source, destination, backup);
+
+	internal void Copy(string source, string destination, bool overwrite) =>
+		copy(source, destination, overwrite);
 }

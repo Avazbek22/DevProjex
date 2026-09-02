@@ -264,6 +264,27 @@ public sealed class AppInstancePackagingContractTests
 
         Assert.Contains("Rid = \"linux-x64\"", releaseScript, StringComparison.Ordinal);
         Assert.Contains("Rid = \"linux-arm64\"", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("DevProjex.v$version.linux-x64.tar.gz", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("DevProjex.v$version.linux-arm64.tar.gz", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("DevProjex.v$version.osx-x64.app.tar.gz", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("DevProjex.v$version.osx-arm64.app.tar.gz", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("New-UstarGzipArchive", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("Read-UstarGzipArchive", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("-GitHubOnly:$GitHubArtifactsOnly", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("(Join-Path $sourceRoot \"artifacts\")", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("(Join-Path $sourceRoot \".artifacts\")", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("\"bin\"", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("\"obj\"", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("Assert-IsolatedWorkspaceCapacity -sourceRoot $sourceRoot", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("$sourceBytes * 2", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("\"/XJ\"", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("$isolatedPackages + [System.IO.Path]::DirectorySeparatorChar", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("Resolve-IsolatedWorkspaceCleanupTarget", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("FileAttributes]::ReparsePoint", releaseScript, StringComparison.Ordinal);
+        Assert.Contains("Remove-Item -LiteralPath $cleanupTarget -Recurse", releaseScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("cmd /c", releaseScript, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("linux-x64.portable", releaseScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("linux-arm64.portable", releaseScript, StringComparison.Ordinal);
         Assert.Contains("\"/p:PublishSingleFile=true\"", releaseScript, StringComparison.Ordinal);
         Assert.Contains("\"/p:IncludeNativeLibrariesForSelfExtract=true\"", releaseScript, StringComparison.Ordinal);
         Assert.Contains("\"/p:PublishReadyToRun=true\"", releaseScript, StringComparison.Ordinal);
@@ -332,7 +353,9 @@ public sealed class AppInstancePackagingContractTests
         Assert.Contains($"/Applications/{CommandLineExecutableAliases.DisplayName}.app/Contents/MacOS/{CommandLineExecutableAliases.DisplayName}", readme, StringComparison.Ordinal);
         Assert.Contains("DEVPROJEX_TERMINAL_HOST=1", readme, StringComparison.Ordinal);
         Assert.Contains("<string>14.0</string>", readme, StringComparison.Ordinal);
-        Assert.Contains("unprepared `.app`", readme, StringComparison.Ordinal);
+        Assert.Contains("DevProjex.v<version>.osx-<architecture>.app.tar.gz", readme, StringComparison.Ordinal);
+        Assert.Contains("generates `app.icns` deterministically", readme, StringComparison.Ordinal);
+        Assert.DoesNotContain("generate-app-icns.sh", readme, StringComparison.Ordinal);
         Assert.Contains("does not modify shell profiles or global environment variables", readme, StringComparison.Ordinal);
         Assert.DoesNotContain(CommandLineExecutableAliases.WindowsStoreAlias, readme, StringComparison.Ordinal);
     }

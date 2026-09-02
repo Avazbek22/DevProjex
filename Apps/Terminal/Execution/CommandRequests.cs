@@ -14,7 +14,23 @@ public sealed record AnalyzeCommandRequest(
 	AnalysisOutputFormat Format,
 	string? OutputPath,
 	bool Strict,
-	TerminalOutputOptions Output);
+	TerminalOutputOptions Output,
+	bool IncludeFindings = false,
+	bool FailOnFindings = false,
+	bool Force = false,
+	int? TopFiles = null,
+	long? MaxFileBytes = null,
+	string? RepositorySourceUrl = null);
+
+public sealed record TreeCommandRequest(
+	string ProjectPath,
+	ProjectSelectionSpec Selection,
+	TreeTextFormat Format,
+	string? OutputPath,
+	TerminalOutputOptions Output,
+	bool Force = false,
+	long? MaxFileBytes = null,
+	string? RepositorySourceUrl = null);
 
 public sealed record ExportContextCommandRequest(
 	string ProjectPath,
@@ -24,7 +40,10 @@ public sealed record ExportContextCommandRequest(
 	string? OutputPath,
 	bool Force,
 	bool DryRun,
-	TerminalOutputOptions Output);
+	long? MaximumEstimatedTokens,
+	TerminalOutputOptions Output,
+	long? MaxFileBytes = null,
+	string? RepositorySourceUrl = null);
 
 public sealed record ExportProjectCommandRequest(
 	string ProjectPath,
@@ -33,4 +52,5 @@ public sealed record ExportProjectCommandRequest(
 	string OutputPath,
 	bool Force,
 	bool DryRun,
-	TerminalOutputOptions Output);
+	TerminalOutputOptions Output,
+	string? RepositorySourceUrl = null);

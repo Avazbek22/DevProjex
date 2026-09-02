@@ -18,4 +18,14 @@ public sealed record IgnoreOptionsAvailability(
 	bool IncludeEmptyFiles = false,
 	int EmptyFilesCount = 0,
 	bool ShowAdvancedCounts = false,
-	bool IncludeTrackedGitFilesOnly = false);
+	bool IncludeTrackedGitFilesOnly = false,
+	int? SecretRedactionsCount = null,
+	int? SecretMatchesCount = null,
+	int? CompressedFilesCount = null,
+	int? UncompressedFilesCount = null,
+	int? CommentStrippedFilesCount = null,
+	int? CommentUnchangedFilesCount = null,
+	int? BlankLineStrippedFilesCount = null,
+	int? BlankLineUnchangedFilesCount = null,
+	int? PrivateDataRedactionsCount = null,
+	int? PrivateDataMatchesCount = null);

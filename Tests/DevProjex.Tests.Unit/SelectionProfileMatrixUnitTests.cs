@@ -1,3 +1,4 @@
+using DevProjex.Application.Presentation;
 namespace DevProjex.Tests.Unit;
 
 public sealed class SelectionProfileMatrixUnitTests
@@ -57,7 +58,18 @@ public sealed class SelectionProfileMatrixUnitTests
 			Assert.Equal(shouldBeChecked, option.IsChecked);
 		}
 
-		var allCheckedExpected = availableIds.Length > 0 && expectedChecked.Count == availableIds.Length;
+		var availablePathOptions = availableIds
+			.Where(static option => !ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option))
+			.ToArray();
+		var ordinaryPathOptions = availablePathOptions
+			.Where(static option => !GitFilteringModeResolver.IsGitFilteringOption(option))
+			.ToArray();
+		var gitPathOptions = availablePathOptions
+			.Where(GitFilteringModeResolver.IsGitFilteringOption)
+			.ToArray();
+		var allCheckedExpected = availablePathOptions.Length > 0 &&
+		                         ordinaryPathOptions.All(expectedChecked.Contains) &&
+		                         (gitPathOptions.Length == 0 || gitPathOptions.Any(expectedChecked.Contains));
 		Assert.Equal(allCheckedExpected, viewModel.AllIgnoreChecked);
 	}
 
@@ -148,7 +160,10 @@ public sealed class SelectionProfileMatrixUnitTests
 			new[] { IgnoreOptionId.SmartIgnore, IgnoreOptionId.HiddenFiles, IgnoreOptionId.DotFolders },
 			new[] { IgnoreOptionId.ExtensionlessFiles, IgnoreOptionId.HiddenFolders, IgnoreOptionId.HiddenFiles },
 			new[] { IgnoreOptionId.HiddenFolders, IgnoreOptionId.HiddenFolders, IgnoreOptionId.UseGitIgnore },
-			new[] { IgnoreOptionId.DotFiles, IgnoreOptionId.DotFiles, IgnoreOptionId.SmartIgnore }
+			new[] { IgnoreOptionId.DotFiles, IgnoreOptionId.DotFiles, IgnoreOptionId.SmartIgnore },
+			new[] { IgnoreOptionId.HideSecrets },
+			new[] { IgnoreOptionId.HideSecrets, IgnoreOptionId.HiddenFolders },
+			new[] { IgnoreOptionId.HideSecrets, IgnoreOptionId.SmartIgnore }
 		};
 
 		var caseId = 0;
@@ -161,7 +176,7 @@ public sealed class SelectionProfileMatrixUnitTests
 				yield return [ caseId++, saved ];
 		}
 
-		// Sanity: 26 variants * 3 contexts = 78 theory cases.
+		// Sanity: 29 variants * 3 contexts = 87 theory cases.
 		_ = available;
 	}
 
@@ -202,9 +217,15 @@ public sealed class SelectionProfileMatrixUnitTests
 				matched.Add(option);
 		}
 
-		return matched.Count > 0
-			? matched
-			: [..available];
+		if (matched.Count > 0)
+			return matched;
+
+		// Legacy selected-only profiles may fall back to the old default-on filters when none of
+		// their saved options is available. Content transformations are explicitly opt-in and must
+		// never become enabled through that compatibility fallback.
+		return available
+			.Where(static option => !ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option))
+			.ToHashSet();
 	}
 
 	private static MainWindowViewModel CreateViewModel()
@@ -247,6 +268,7 @@ public sealed class SelectionProfileMatrixUnitTests
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
 				["Settings.Ignore.SmartIgnore"] = "Smart ignore",
+				["Settings.Ignore.HideSecrets"] = "Hide secrets",
 				["Settings.Ignore.UseGitIgnore"] = "Use .gitignore",
 				["Settings.Ignore.HiddenFolders"] = "Hidden folders",
 				["Settings.Ignore.HiddenFiles"] = "Hidden files",

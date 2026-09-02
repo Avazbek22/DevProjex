@@ -1,0 +1,146 @@
+using DevProjex.Infrastructure.Compression;
+using TreeSitter;
+
+namespace DevProjex.Tests.Unit;
+
+/// <summary>
+/// Loads a shipped language pack and its grammar the same way the product does — embedded resource,
+/// materialized to app data, loaded by absolute path — so the tests exercise the real delivery path
+/// rather than a convenient shortcut.
+/// </summary>
+internal sealed class CodeCompressionTestHarness : IDisposable
+{
+	private static readonly IReadOnlyList<CompressionLanguagePack> Packs = CompressionLanguagePack.LoadAll();
+
+	public static IReadOnlyList<string> LanguageIds { get; } =
+		Packs.Select(static pack => pack.Id).ToArray();
+
+	public static IReadOnlyList<CompressionLanguagePack> LanguagePacks => Packs;
+
+	private CodeCompressionTestHarness(CompressionLanguagePack pack, Language language, string fixture)
+	{
+		Pack = pack;
+		Language = language;
+		Fixture = fixture;
+		Parser = new Parser(language);
+		Bodies = pack.BodiesQuery is null ? null : new Query(language, pack.BodiesQuery);
+		Declarations = new Query(language, pack.DeclarationsQuery);
+		Preserves = pack.PreservesQuery is null ? null : new Query(language, pack.PreservesQuery);
+		Comments = pack.CommentsQuery is null ? null : new Query(language, pack.CommentsQuery);
+	}
+
+	public CompressionLanguagePack Pack { get; }
+
+	public Language Language { get; }
+
+	public Parser Parser { get; }
+
+	public Query? Bodies { get; }
+
+	public Query Declarations { get; }
+
+	public Query? Preserves { get; }
+
+	public Query? Comments { get; }
+
+	public string Fixture { get; }
+
+	public static TreeSitterCodeCompressor CreateCompressor() => new(CreateLocator());
+
+	public static TreeSitterCodeCompressor CreateCompressor(CompressionLanguagePack pack) =>
+		new TreeSitterCodeCompressor(CreateLocator(), [pack]);
+
+	/// <summary>
+	/// A pack whose body query captures a container as well as the leaf bodies inside it, which is
+	/// what a careless "(_ body: (_) @body)" produces. Used to prove a pack defect costs one file.
+	/// </summary>
+	public static CompressionLanguagePack PackWithOverlappingBodyQuery(string languageId)
+	{
+		var pack = Packs.Single(candidate => candidate.Id.Equals(languageId, StringComparison.Ordinal));
+		if (pack.BodiesQuery is null)
+			throw new InvalidOperationException($"Language pack '{languageId}' has no body query.");
+		return pack with
+		{
+			BodiesQuery = pack.BodiesQuery + "\n(class_declaration body: (declaration_list) @body)\n",
+			ContainerNodeTypes = new HashSet<string>(StringComparer.Ordinal)
+		};
+	}
+
+	public static IGrammarLibraryLocator CreateLocator() =>
+		new EmbeddedGrammarLibraryLocator(
+			typeof(TreeSitterCodeCompressor).Assembly,
+			"DevProjex.Grammars/",
+			EmbeddedGrammarLibraryLocator.DefaultRootDirectory("tests"));
+
+	public static CodeCompressionTestHarness For(string languageId)
+	{
+		var pack = Packs.Single(candidate => candidate.Id.Equals(languageId, StringComparison.Ordinal));
+		var language = new Language(CreateLocator().Resolve(pack.Library), pack.Export);
+		return new CodeCompressionTestHarness(pack, language, FixtureFor(languageId));
+	}
+
+	public int CountCaptures(Query query)
+		=> CountCaptures(query, Fixture);
+
+	public int CountCaptures(Query query, string source)
+	{
+		using var tree = Parser.Parse(source)!;
+		using var cursor = query.Execute(tree.RootNode);
+		return cursor.Captures.Count();
+	}
+
+	public IReadOnlyCollection<string> CapturedNodeTypes(Query query)
+	{
+		using var tree = Parser.Parse(Fixture)!;
+		using var cursor = query.Execute(tree.RootNode);
+		return cursor.Captures
+			.Select(static capture => capture.Node.Type)
+			.ToHashSet(StringComparer.Ordinal);
+	}
+
+	public static string FixtureFor(string languageId) => languageId switch
+	{
+		"bash" => "#!/usr/bin/env bash\n# note\nbuild() { printf '%s\\n' \"ready#now\"; }\n",
+		"c" => CodeCompressionFixtures.C,
+		"csharp" => CodeCompressionFixtures.CSharp,
+		"cpp" => CodeCompressionFixtures.Cpp,
+		"css" => "/* note */\n.card { content: \"/* literal */\"; color: red; }\n",
+		"go" => CodeCompressionFixtures.Go,
+		"html" => "<!doctype html>\n<!-- note -->\n<main>Ready</main>\n",
+		"java" => CodeCompressionFixtures.Java,
+		"javascript" => CodeCompressionFixtures.JavaScript,
+		"kotlin" => CodeCompressionFixtures.Kotlin,
+		"php" => CodeCompressionFixtures.Php,
+		"python" => CodeCompressionFixtures.PythonSource,
+		"ruby" => CodeCompressionFixtures.Ruby,
+		"rust" => CodeCompressionFixtures.Rust,
+		"scala" => CodeCompressionFixtures.Scala,
+		"toml" => "# note\n[service]\nname = \"api#worker\"\n",
+		"tsx" => CodeCompressionFixtures.Tsx,
+		"typescript" => CodeCompressionFixtures.TypeScript,
+		"xml" => "<?xml version=\"1.0\"?>\n<!-- note -->\n<root><![CDATA[<!-- data -->]]></root>\n",
+		"yaml" => "---\n# note\nservice: api\n",
+		_ => throw new ArgumentOutOfRangeException(nameof(languageId), languageId, "No fixture for this language.")
+	};
+
+	public static string CommentFixtureFor(string languageId) => languageId switch
+	{
+		"bash" or "toml" => "# comment\n",
+		"css" => "/* comment */\n",
+		"html" or "xml" => "<!-- comment -->\n",
+		"python" or "ruby" => "# comment\n",
+		"php" => "<?php // comment\n?>",
+		"yaml" => "# comment\n",
+		_ => "// comment\n"
+	};
+
+	public void Dispose()
+	{
+		Comments?.Dispose();
+		Preserves?.Dispose();
+		Declarations.Dispose();
+		Bodies?.Dispose();
+		Parser.Dispose();
+		Language.Dispose();
+	}
+}

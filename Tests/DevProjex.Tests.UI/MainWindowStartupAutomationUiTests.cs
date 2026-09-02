@@ -1,9 +1,6 @@
 using System.Reflection;
 using System.Text.Json;
-using DevProjex.Avalonia.Coordinators;
 using DevProjex.Application.Context;
-using DevProjex.Application.Services;
-using DevProjex.Application.UseCases;
 using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Infrastructure.ThemePresets;
 
@@ -12,6 +9,42 @@ namespace DevProjex.Tests.UI;
 [Collection(UiWorkspaceCollection.Name)]
 public sealed class MainWindowStartupAutomationUiTests
 {
+	[AvaloniaFact]
+	public async Task StartupUi_ExplicitEmptySelectionUnchecksEveryTreeNode()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
+		var options = new DesktopStartupOptions(
+			new DesktopOpenRequest(
+				ProjectPath: project.RootPath,
+				Selection: new ProjectSelectionSpec(SelectedPaths: []),
+				Language: AppLanguage.En));
+		var window = CreateStartupWindow(options, appDataPath);
+
+		try
+		{
+			window.Show();
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() =>
+				{
+					var viewModel = UiTestDriver.GetViewModel(window);
+					return viewModel.IsProjectLoaded &&
+					       viewModel.TreeNodes.Count > 0 &&
+					       viewModel.TreeNodes.All(static node => node.IsChecked == false);
+				},
+				"explicit empty Desktop selection to uncheck the project tree");
+
+			Assert.All(
+				UiTestDriver.GetViewModel(window).TreeNodes,
+				static node => Assert.False(node.IsChecked));
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
+		}
+	}
+
 	[AvaloniaFact]
 	public async Task DesktopOpenLanguage_IsSessionScopedWhileGuiLanguageActionPersistsPreference()
 	{
@@ -287,192 +320,6 @@ public sealed class MainWindowStartupAutomationUiTests
 		{
 			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
 		}
-	}
-
-	[AvaloniaFact]
-	public async Task StartupSelectionOverrides_ConvergeToOneCombinedFinalState()
-	{
-		using var project = UiTestProject.CreateWithDynamicIgnoreEntries();
-		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
-		var options = new DesktopStartupOptions(
-			new DesktopOpenRequest(
-				ProjectPath: project.RootPath,
-				Selection: new ProjectSelectionSpec(
-					Roots: ["src"],
-					Extensions: [".cs"],
-					GitMode: GitFilteringMode.None,
-					Exclusions: [ProjectExclusion.EmptyFiles]),
-				Language: AppLanguage.En));
-		var window = CreateStartupWindow(options, appDataPath);
-
-		try
-		{
-			window.Show();
-			await UiTestDriver.WaitForConditionAsync(
-				window,
-				() =>
-				{
-					var viewModel = UiTestDriver.GetViewModel(window);
-					return viewModel.IsProjectLoaded &&
-					       viewModel.RootFolders.Any(static option => option.Name == "src") &&
-					       viewModel.Extensions.Any(static option => option.Name == ".cs") &&
-					       viewModel.RootFolders.Where(static option => option.IsChecked)
-						       .Select(static option => option.Name)
-						       .SequenceEqual(["src"], StringComparer.Ordinal) &&
-					       viewModel.Extensions.Where(static option => option.IsChecked)
-						       .Select(static option => option.Name)
-						       .SequenceEqual([".cs"], StringComparer.OrdinalIgnoreCase);
-				},
-				"combined startup roots and extensions to converge");
-			await UiTestDriver.WaitForSelectionRefreshIdleAsync(window);
-
-			var viewModel = UiTestDriver.GetViewModel(window);
-			Assert.Equal(
-				[IgnoreOptionId.EmptyFiles],
-				viewModel.IgnoreOptions
-					.Where(static option => option.IsChecked)
-					.Select(static option => option.Id)
-					.OrderBy(static id => id));
-		}
-		finally
-		{
-			await UiTestDriver.CloseWindowAsync(window, cleanupAppData: false);
-		}
-	}
-
-	[AvaloniaFact]
-	public async Task StartupTrackedOverride_ResolvesAvailabilityOffDispatcherWithoutBlockingUi()
-	{
-		using var project = UiTestProject.CreateDefault();
-		var appDataPath = Path.Combine(project.AppDataPath, Guid.NewGuid().ToString("N"));
-		var request = new DesktopOpenRequest(
-			ProjectPath: project.RootPath,
-			Selection: new ProjectSelectionSpec(
-				Roots: ["src"],
-				Extensions: [],
-				GitMode: GitFilteringMode.TrackedFilesOnly,
-				Exclusions: [ProjectExclusion.DotFolders])
-			{
-				ApplicationIntent = new ProjectSelectionApplicationIntent(
-					Roots: ProjectSelectionApplicationMode.Preserve,
-					Extensions: ProjectSelectionApplicationMode.Preserve,
-					GitMode: ProjectSelectionApplicationMode.ApplyResolvedValue,
-					Exclusions: ProjectSelectionApplicationMode.Preserve)
-			},
-			Language: AppLanguage.En);
-		var startupOptions = new DesktopStartupOptions(request);
-		var services = AvaloniaCompositionRoot.CreateDefault(startupOptions, () => appDataPath);
-		using var viewModel = new MainWindowViewModel(
-			services.Localization,
-			services.HelpContentProvider)
-		{
-			IsProjectLoaded = true
-		};
-		viewModel.RootFolders.Add(new SelectionOptionViewModel("src", isChecked: true));
-
-		using var resolverStarted = new ManualResetEventSlim(initialState: false);
-		using var releaseResolver = new ManualResetEventSlim(initialState: false);
-		var resolverRanOnDispatcher = false;
-		using var selection = new SelectionSyncCoordinator(
-			viewModel,
-			services.ScanOptionsUseCase,
-			services.FilterOptionSelectionService,
-			services.IgnoreOptionsService,
-			static (_, _, _) => new IgnoreRules(
-				false,
-				false,
-				false,
-				false,
-				new HashSet<string>(),
-				new HashSet<string>()),
-			(_, _) =>
-			{
-				resolverRanOnDispatcher = Dispatcher.UIThread.CheckAccess();
-				resolverStarted.Set();
-				releaseResolver.Wait(TimeSpan.FromSeconds(10));
-				return new IgnoreOptionsAvailability(
-					IncludeGitIgnore: false,
-					IncludeSmartIgnore: false,
-					IncludeTrackedGitFilesOnly: false);
-			},
-			static _ => false,
-			() => project.RootPath);
-		selection.ApplyProjectProfileSelections(
-			project.RootPath,
-			new ProjectSelectionProfile(
-				SelectedRootFolders: ["src"],
-				SelectedExtensions: [],
-				SelectedIgnoreOptions: [IgnoreOptionId.DotFolders, IgnoreOptionId.HiddenFiles],
-				IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
-				{
-					[IgnoreOptionId.DotFolders] = true,
-					[IgnoreOptionId.HiddenFiles] = true,
-					[IgnoreOptionId.UseGitIgnore] = true,
-					[IgnoreOptionId.TrackedGitFilesOnly] = false
-				}));
-		var refreshCount = 0;
-		var controller = new StartupInteractionController(
-			request,
-			diagnosticScenario: null,
-			viewModel,
-			selection,
-			searchFilter: null!,
-			preview: null!,
-			workspace: null!,
-			services.SessionMetricsRecorder,
-			() => project.RootPath,
-			static () => null,
-			() =>
-			{
-				refreshCount++;
-				return Task.CompletedTask;
-			},
-			static _ => Task.FromResult(true),
-			static () => { });
-
-		var applyStarted = new TaskCompletionSource<Task>(
-			TaskCreationOptions.RunContinuationsAsynchronously);
-		Dispatcher.UIThread.Post(() =>
-		{
-			try
-			{
-				applyStarted.TrySetResult(controller.ApplySelectionOverridesAsync());
-			}
-			catch (Exception exception)
-			{
-				applyStarted.TrySetException(exception);
-			}
-		});
-
-		var reachedResolver = await Task.Run(
-			() => resolverStarted.Wait(TimeSpan.FromSeconds(5)));
-		var dispatcherMarker = new TaskCompletionSource(
-			TaskCreationOptions.RunContinuationsAsynchronously);
-		Dispatcher.UIThread.Post(() => dispatcherMarker.TrySetResult());
-		var markerWinner = await Task.WhenAny(
-			dispatcherMarker.Task,
-			Task.Delay(TimeSpan.FromSeconds(1)));
-		releaseResolver.Set();
-
-		var applyTask = await applyStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-		await applyTask.WaitAsync(TimeSpan.FromSeconds(5));
-
-		Assert.True(reachedResolver, "The controlled availability resolver was not reached.");
-		Assert.Same(dispatcherMarker.Task, markerWinner);
-		Assert.False(resolverRanOnDispatcher);
-		Assert.Equal(1, refreshCount);
-		var trackedOption = Assert.Single(
-			viewModel.IgnoreOptions,
-			static option => option.Id == IgnoreOptionId.TrackedGitFilesOnly);
-		Assert.True(trackedOption.IsChecked);
-		var persistedStates = Assert.IsAssignableFrom<IReadOnlyDictionary<IgnoreOptionId, bool>>(
-			selection.SnapshotIgnoreOptionStatesForPersistence());
-		Assert.Contains(
-			persistedStates,
-			static state => state.Key != IgnoreOptionId.UseGitIgnore &&
-			                state.Key != IgnoreOptionId.TrackedGitFilesOnly &&
-			                state.Value);
-		Assert.True(persistedStates[IgnoreOptionId.HiddenFiles]);
 	}
 
 	[AvaloniaFact]

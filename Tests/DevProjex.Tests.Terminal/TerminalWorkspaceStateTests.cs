@@ -1,15 +1,145 @@
+using System.Collections.Specialized;
+using DevProjex.Application.Preview;
+using Terminal.Gui.Text;
+
 namespace DevProjex.Tests.Terminal;
 
 public sealed class TerminalWorkspaceStateTests
 {
 	[Fact]
+	public void VisibleTreeRebuildPublishesOneResetAndKeepsCachedRowText()
+	{
+		using var state = new TerminalWorkspaceState(CreatePlan());
+		var collectionEvents = new List<NotifyCollectionChangedAction>();
+		state.VisibleRows.CollectionChanged += (_, eventArgs) =>
+			collectionEvents.Add(eventArgs.Action);
+		var sourceRow = FindRow(state, "src");
+
+		state.Expand(sourceRow);
+
+		Assert.Equal([NotifyCollectionChangedAction.Reset], collectionEvents);
+		var row = state.VisibleRows[sourceRow];
+		Assert.Same(row.ToString(), row.ToString());
+		Assert.Equal(row.ToString().GetColumns(), row.DisplayWidth);
+	}
+
+	[Fact]
+	public void PreviewRefreshPublishesDocumentAndExactOutputMetricsTogether()
+	{
+		using var state = new TerminalWorkspaceState(CreatePlan());
+		const string payload = "tree\r\nПривет 🙂\rcontent";
+		var metrics = ExportOutputMetricsCalculator.FromText(payload);
+		var document = new InMemoryPreviewTextDocument(payload);
+
+		var applied = state.TrySetPreviewDocument(document, metrics, state.Revision);
+
+		Assert.True(applied);
+		Assert.Same(document, state.PreviewDocument);
+		Assert.Equal(metrics, state.PreviewOutputMetrics);
+		Assert.Equal(metrics.Tokens, TerminalWorkspaceSession.ResolveDisplayedTokenCount(state));
+	}
+
+	[Fact]
+	public void EmptyEffectiveTreeRetainsOnlyTheRealRoot()
+	{
+		var root = CreateSyntheticRoot("empty-effective-tree");
+		var tree = new TreeNodeDescriptor("project", root, true, false, "folder", []);
+		using var state = new TerminalWorkspaceState(CreatePlan(tree, [], [root]));
+
+		var row = Assert.Single(state.VisibleRows);
+		Assert.Same(tree, row.Node);
+		Assert.False(state.HasVisibleTreeItems);
+		Assert.Empty(state.Plan.IncludedFiles);
+	}
+
+	[Fact]
+	public void TreePreviewEscapesControlCharactersInDisplayNames()
+	{
+		var root = CreateSyntheticRoot("unsafe-tree-preview");
+		var filePath = System.IO.Path.Combine(root, "file.cs");
+		var file = new TreeNodeDescriptor("line\nbreak\t\u001B.cs", filePath, false, false, "file", []);
+		var tree = new TreeNodeDescriptor("project\rname", root, true, false, "folder", [file]);
+		using var state = new TerminalWorkspaceState(CreatePlan(tree, [filePath], [root]));
+
+		Assert.Equal(
+			$"+ project\\rname{Environment.NewLine}  - line\\nbreak\\t\\u001B.cs",
+			state.PreviewText);
+	}
+
+	[Fact]
 	public void CompleteSelectionUsesCanonicalEmptySelectedPaths()
 	{
-		var state = new TerminalWorkspaceState(CreatePlan());
+		using var state = new TerminalWorkspaceState(CreatePlan());
 
 		Assert.Empty(state.BuildSelectedRelativePaths());
+		Assert.Null(state.BuildSelection().SelectedPaths);
 		Assert.Equal(2, state.SelectedFileCount);
 		Assert.Equal(3, state.SelectedFolderCount);
+
+		state.SelectNone();
+
+		Assert.Empty(state.BuildSelection().SelectedPaths!);
+	}
+
+	[Fact]
+	public void CaseVariantFilesKeepIndependentSelectionState()
+	{
+		var root = CreateSyntheticRoot("case-variant-selection");
+		var upperPath = Path.Combine(root, "Foo.cs");
+		var lowerPath = Path.Combine(root, "foo.cs");
+		var upper = new TreeNodeDescriptor("Foo.cs", upperPath, false, false, "file", []);
+		var lower = new TreeNodeDescriptor("foo.cs", lowerPath, false, false, "file", []);
+		var tree = new TreeNodeDescriptor("project", root, true, false, "folder", [upper, lower]);
+		using var state = new TerminalWorkspaceState(CreatePlan(
+			tree,
+			[upperPath, lowerPath],
+			[root]));
+
+		Assert.Equal(2, state.SelectedFileCount);
+
+		state.ToggleSelection(FindRow(state, "Foo.cs"));
+
+		Assert.Equal(1, state.SelectedFileCount);
+		Assert.Equal(["foo.cs"], state.BuildSelectedRelativePaths());
+		Assert.Equal(
+			TerminalTreeCheckState.Unchecked,
+			state.VisibleRows.Single(static row => row.Node.DisplayName == "Foo.cs").CheckState);
+		Assert.Equal(
+			TerminalTreeCheckState.Checked,
+			state.VisibleRows.Single(static row => row.Node.DisplayName == "foo.cs").CheckState);
+	}
+
+	[Fact]
+	public void PersistedSelectionUsesMinimalRootsWithoutLosingAllOrNone()
+	{
+		using var state = new TerminalWorkspaceState(CreatePlan());
+		Assert.Equal(["."], state.BuildPersistedSelectedRelativePaths());
+
+		state.SelectNone();
+		Assert.Empty(state.BuildPersistedSelectedRelativePaths());
+
+		state.RestoreSelectedRelativePaths(["src"]);
+		Assert.Equal(["src"], state.BuildPersistedSelectedRelativePaths());
+		Assert.Equal(2, state.SelectedFileCount);
+
+		state.RestoreSelectedRelativePaths(["."]);
+		Assert.Equal(["."], state.BuildPersistedSelectedRelativePaths());
+		Assert.Equal(2, state.SelectedFileCount);
+	}
+
+	[Fact]
+	public void DesktopSelectionPreservesWholeTreeAndExplicitEmptyIntent()
+	{
+		using var state = new TerminalWorkspaceState(CreatePlan());
+
+		Assert.Equal(
+			["."],
+			TerminalWorkspaceController.BuildDesktopSelection(state).SelectedPaths);
+
+		state.SelectNone();
+
+		Assert.Empty(
+			TerminalWorkspaceController.BuildDesktopSelection(state).SelectedPaths!);
 	}
 
 	[Fact]
@@ -52,6 +182,32 @@ public sealed class TerminalWorkspaceStateTests
 		Assert.Equal(TerminalTreeCheckState.Indeterminate, root.CheckState);
 		Assert.Equal(TerminalTreeCheckState.Indeterminate, src.CheckState);
 		Assert.Equal(["empty", "src/b.cs"], state.BuildSelectedRelativePaths());
+	}
+
+	[Fact]
+	public void RepeatedLeafTogglesKeepAncestorStatesAndFolderCountsExact()
+	{
+		using var state = new TerminalWorkspaceState(CreatePlan());
+		state.Expand(FindRow(state, "src"));
+		var firstFileRow = FindRow(state, "a.cs");
+		var secondFileRow = FindRow(state, "b.cs");
+
+		state.ToggleSelection(firstFileRow);
+		Assert.Equal(TerminalTreeCheckState.Indeterminate, state.VisibleRows[0].CheckState);
+		Assert.Equal(TerminalTreeCheckState.Indeterminate, state.VisibleRows[1].CheckState);
+		Assert.Equal(3, state.SelectedFolderCount);
+
+		state.ToggleSelection(secondFileRow);
+		Assert.Equal(TerminalTreeCheckState.Indeterminate, state.VisibleRows[0].CheckState);
+		Assert.Equal(TerminalTreeCheckState.Unchecked, state.VisibleRows[1].CheckState);
+		Assert.Equal(2, state.SelectedFolderCount);
+
+		state.ToggleSelection(firstFileRow);
+		state.ToggleSelection(secondFileRow);
+		Assert.Equal(TerminalTreeCheckState.Checked, state.VisibleRows[0].CheckState);
+		Assert.Equal(TerminalTreeCheckState.Checked, state.VisibleRows[1].CheckState);
+		Assert.Equal(3, state.SelectedFolderCount);
+		Assert.Empty(state.BuildSelectedRelativePaths());
 	}
 
 	[Fact]
@@ -300,6 +456,59 @@ public sealed class TerminalWorkspaceStateTests
 		Assert.Equal(TerminalTreeCheckState.Unchecked, state.VisibleRows[2].CheckState);
 	}
 
+	[Fact]
+	public void DeepTreeInteractionDoesNotDependOnTheCallStack()
+	{
+		const int depth = 16_000;
+		var rootPath = CreateSyntheticRoot("deep-interaction");
+		var targetPath = Path.Combine(rootPath, "target.cs");
+		TreeNodeDescriptor tree = new(
+			"target.cs",
+			targetPath,
+			IsDirectory: false,
+			IsAccessDenied: false,
+			"file",
+			[]);
+		for (var index = depth - 1; index >= 0; index--)
+		{
+			var siblingPath = Path.Combine(rootPath, $"unselected-{index:D5}.cs");
+			var sibling = new TreeNodeDescriptor(
+				Path.GetFileName(siblingPath),
+				siblingPath,
+				IsDirectory: false,
+				IsAccessDenied: false,
+				"file",
+				[]);
+			var directoryPath = Path.Combine(rootPath, $"directory-{index:D5}");
+			tree = new TreeNodeDescriptor(
+				Path.GetFileName(directoryPath),
+				directoryPath,
+				IsDirectory: true,
+				IsAccessDenied: false,
+				"folder",
+				[tree, sibling]);
+		}
+		tree = new TreeNodeDescriptor(
+			"project",
+			rootPath,
+			IsDirectory: true,
+			IsAccessDenied: false,
+			"folder",
+			[tree]);
+
+		using var state = new TerminalWorkspaceState(CreatePlan(
+			tree,
+			includedFiles: [targetPath],
+			includedFolders: []));
+
+		Assert.Equal(["target.cs"], state.BuildSelectedRelativePaths());
+		state.ApplyTreeFilter("target.cs");
+		Assert.Equal(depth + 2, state.VisibleRows.Count);
+		state.ApplyTreeFilter(null);
+		var match = state.FindNext("target.cs", startIndex: -1);
+		Assert.Equal(targetPath, state.VisibleRows[match].Node.FullPath);
+	}
+
 	[Theory]
 	[InlineData(59, 20, TerminalWorkspaceLayoutMode.TooSmall)]
 	[InlineData(60, 20, TerminalWorkspaceLayoutMode.Compact)]
@@ -311,6 +520,64 @@ public sealed class TerminalWorkspaceStateTests
 		TerminalWorkspaceLayoutMode expected)
 	{
 		Assert.Equal(expected, TerminalWorkspaceLayout.Resolve(width, height));
+	}
+
+	[Fact]
+	public void BulkTreeOperationsAndRevealPreserveCanonicalState()
+	{
+		using var state = new TerminalWorkspaceState(CreatePlan());
+		state.CollapseAll();
+		Assert.Single(state.VisibleRows);
+
+		var revealed = state.Reveal("src/a.cs");
+		Assert.True(revealed >= 0);
+		Assert.Equal("a.cs", state.VisibleRows[revealed].Node.DisplayName);
+
+		state.SelectNone();
+		Assert.Equal(0, state.SelectedFileCount);
+		state.SelectAll();
+		Assert.Equal(2, state.SelectedFileCount);
+
+		state.ExpandAll();
+		Assert.Equal(5, state.VisibleRows.Count);
+		Assert.Contains("src", state.BuildExpandedRelativePaths());
+	}
+
+	[Fact]
+	public async Task CorruptedPersistedPathsAreSkippedPerElement()
+	{
+		using var data = new TemporaryDirectory();
+		using var state = new TerminalWorkspaceState(CreatePlan());
+		var store = new TerminalSettingsStore(() => data.Path);
+		await store.SaveProjectSettingsAsync(
+			new TerminalProjectSettings(
+				state.Plan.SourceRoot,
+				["src"],
+				["src"],
+				null,
+				ProjectContextView.TreeContent,
+				ProjectContextDocumentFormat.Markdown,
+				DateTimeOffset.UtcNow),
+			TestContext.Current.CancellationToken);
+		var settingsPath = store.GetPath();
+		var json = await File.ReadAllTextAsync(settingsPath, TestContext.Current.CancellationToken);
+		json = json
+			.Replace("\"SelectedPaths\":[\"src\"]", "\"SelectedPaths\":[null,\"\",\"\\u0000\",\"src\"]", StringComparison.Ordinal)
+			.Replace("\"ExpandedPaths\":[\"src\"]", "\"ExpandedPaths\":[null,\" \",\"\\u0000\",\"src\"]", StringComparison.Ordinal);
+		await File.WriteAllTextAsync(settingsPath, json, TestContext.Current.CancellationToken);
+		var persisted = new TerminalSettingsStore(() => data.Path)
+			.LoadProjectSettings(state.Plan.SourceRoot);
+		Assert.NotNull(persisted);
+
+		var exception = Record.Exception(() =>
+		{
+			state.RestoreSelectedRelativePaths(persisted.SelectedPaths);
+			state.RestoreExpandedRelativePaths(persisted.ExpandedPaths);
+		});
+
+		Assert.Null(exception);
+		Assert.Equal(["src"], state.BuildSelectedRelativePaths());
+		Assert.Contains("src", state.BuildExpandedRelativePaths());
 	}
 
 	private static int FindRow(TerminalWorkspaceState state, string name) =>

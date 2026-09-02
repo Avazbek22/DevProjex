@@ -1,0 +1,35 @@
+ DevProjex Terminal · DevProjex [main]
+ https://github.com/Avazbek22/DevProjex
+┌┤> PROJECT TREE├──────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├────────────────────────────────────┐┌┤  PARAMETERS├──────────────────────┐
+│v [x] DevProjex                       ││DevProjex                                                             ││┌┤Content processing [ ] All (5) ──┐│
+│  > [x] src                           ││├── src                                                               │││[ ] Hide secrets                  ││
+│    [x] README.md                     │││   └── RepositoryMarker.cs                                           │││[ ] Hide private data             ││
+│                                      ││└── README.md                                                         │││[ ] Compress code                 ││
+│                                      ││                                                                      │││[ ] Strip comments                ││
+│                                      ││                                                                      │││[ ] Strip blank lines             ││
+│                                      ││                                                                      ││└──────────────────────────────────┘│
+│                                      ││                                                                      ││┌┤Exclusions├─────────── [ ] All ──┐│
+│                                 ┌┤Details├──────────────────────────────────────────────────────────────────────┐ ) No Git filtering              ││
+│                                 │ Repository URL: https://github.com/Avazbek22/DevProjex                        │•) Use .gitignore                ││
+│                                 │ Branch: main                                                                  │ ) Tracked Git files only        ││
+│                                 │ Commit: <ID-PART>                                                          │ ) Staged Git files              ││
+│                                 │ Size: <REPOSITORY_SIZE>                                                       │ ) Current Git changes           ││
+│                                 │ Last opened: <TIMESTAMP>│                                 ││
+│                                 │                                                                               │                                 ││
+│                                 │                                                                               │                                 ││
+│                                 │                                 ⟦► Close ◄⟧▖                                  │─────────────────────────────────┘│
+│                                 │                                 ▝▀▀▀▀▀▀▀▀▀▀▘                                  │File types├─────── [x] All (2) ──┐│
+│                                 └───────────────────────────────────────────────────────────────────────────────┘x] .cs                           ││
+│                                      ││                                                                      │││[x] .md                           ││
+│                                      ││                                                                      │││                                  ││
+│                                      ││                                                                      │││                                  ││
+│                                      ││                                                                      │││                                  ││
+│                                      ││                                                                      │││                                  ││
+│                                      ││                                                                      │││                                  ││
+│                                      ││                                                                      │││                                  ││
+│                                      ││                                                                      │││                                  ││
+│                                      ││ Files 2  |  Lines 1-5/5                                              ││└──────────────────────────────────┘│
+└──────────────────────────────────────┘└──────────────────────────────────────────────────────────────────────┘└────────────────────────────────────┘
+
+ Files 2 · Folders 2 · 52 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
+ Space Toggle   Shift+←/→ Collapse/expand all   Ctrl+A/U Select all/none   R Reveal   : Commands

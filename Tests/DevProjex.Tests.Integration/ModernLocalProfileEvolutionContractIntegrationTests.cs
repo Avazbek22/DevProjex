@@ -183,8 +183,8 @@ public sealed class ModernLocalProfileEvolutionContractIntegrationTests
 			new HashSet<string>(["src/App.cs", "web/package.json"], StringComparer.Ordinal),
 			RelativeIncludedFiles(state.Plan));
 
-		// Changing Extensions must close only that island. Roots remain open-world, so a
-		// later repository update can still select a genuinely new root by default.
+		// Changing Extensions must close only that island. Scan roots remain structural,
+		// so directories without a currently selected file type stay in the project scope.
 		await controller.SetExtensionsAsync(state, [".cs"], TestContext.Current.CancellationToken);
 		workspace.CreateFile("project/docs/Guide.cs", "public sealed class Guide {}\n");
 		Directory.SetLastWriteTimeUtc(project, originalRootTimestamp);
@@ -194,9 +194,8 @@ public sealed class ModernLocalProfileEvolutionContractIntegrationTests
 			TestContext.Current.CancellationToken);
 
 		Assert.Equal(
-			new HashSet<string>(["docs", "src"], PathComparer.Default),
+			new HashSet<string>(["docs", "src", "web"], PathComparer.Default),
 			state.Plan.SelectedRoots.ToHashSet(PathComparer.Default));
-		Assert.Contains("web", state.Plan.Selection.Roots ?? [], PathComparer.Default);
 		Assert.Equal([".cs"], state.Plan.SelectedExtensions);
 		Assert.Equal(
 			new HashSet<string>(["docs/Guide.cs", "src/App.cs"], StringComparer.Ordinal),
@@ -212,6 +211,130 @@ public sealed class ModernLocalProfileEvolutionContractIntegrationTests
 		Assert.Equal(
 			new HashSet<string>(["docs/Guide.cs", "src/App.cs", "web/package.json"], StringComparer.Ordinal),
 			RelativeIncludedFiles(state.Plan));
+	}
+
+	[Fact]
+	public async Task TuiRepositoryRebuild_ReconcilesNewItemsAndPreservesExplicitChoices()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.CreateFile("project/src/kept.cs", "internal sealed class Kept { }\n");
+		workspace.CreateFile("project/src/cleared.cs", "internal sealed class Cleared { }\n");
+		workspace.CreateFile("project/docs/guide.md", "# Guide\n");
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TerminalTestHost());
+		using var state = await controller.OpenAsync(
+			project,
+			ProjectProfileReference.Standard,
+			TestContext.Current.CancellationToken);
+
+		await controller.SetExtensionsAsync(
+			state,
+			[".cs"],
+			TestContext.Current.CancellationToken);
+		var sourceRow = state.VisibleRows
+			.Select((row, index) => (row, index))
+			.Single(item => Path.GetFileName(item.row.Node.FullPath) == "src");
+		state.Expand(sourceRow.index);
+		var clearedRow = state.VisibleRows
+			.Select((row, index) => (row, index))
+			.Single(item => Path.GetFileName(item.row.Node.FullPath) == "cleared.cs");
+		state.ToggleSelection(clearedRow.index);
+
+		workspace.CreateFile("project/src/new.cs", "internal sealed class New { }\n");
+		workspace.CreateFile("project/src/settings.json", "{}\n");
+		await controller.RebuildRepositoryAsync(
+			state,
+			state.BuildSelection(),
+			TestContext.Current.CancellationToken);
+
+		Assert.Contains(".json", state.Plan.SelectedExtensions, StringComparer.OrdinalIgnoreCase);
+		Assert.DoesNotContain(".md", state.Plan.SelectedExtensions, StringComparer.OrdinalIgnoreCase);
+		var included = RelativeIncludedFiles(state.Plan);
+		Assert.Contains("src/settings.json", included);
+		Assert.Contains("src/new.cs", included);
+		Assert.DoesNotContain("src/cleared.cs", included);
+	}
+
+	[Fact]
+	public async Task TuiLocalProfile_RemembersAHiddenUncheckedExtensionWhenItBecomesAvailable()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.CreateFile("project/.gitignore", "*.generated\n");
+		workspace.CreateFile("project/src/App.cs", "internal sealed class App { }\n");
+		workspace.CreateFile("project/src/output.generated", "generated\n");
+		new ProjectProfileStore(() => appData.Path).SaveProfile(
+			project,
+			new ProjectSelectionProfile(
+				SelectedRootFolders: ["src"],
+				SelectedExtensions: [".cs"],
+				SelectedIgnoreOptions: [IgnoreOptionId.UseGitIgnore],
+				RootFolderStates: new Dictionary<string, bool>(PathComparer.Default)
+				{
+					["src"] = true
+				},
+				ExtensionStates: new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+				{
+					[".cs"] = true,
+					[".generated"] = false
+				},
+				IgnoreOptionStates: new Dictionary<IgnoreOptionId, bool>
+				{
+					[IgnoreOptionId.UseGitIgnore] = true
+				}));
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		var controller = new TerminalWorkspaceController(services, new TerminalTestHost());
+		using var state = await controller.OpenAsync(
+			project,
+			ProjectProfileReference.Local,
+			TestContext.Current.CancellationToken);
+
+		Assert.DoesNotContain(".generated", state.Plan.AvailableExtensions, StringComparer.OrdinalIgnoreCase);
+		Assert.True(state.ExtensionOptionStates.TryGetValue(".generated", out var isSelected));
+		Assert.False(isSelected);
+
+		await controller.SetGitModeAsync(
+			state,
+			GitFilteringMode.None,
+			TestContext.Current.CancellationToken);
+
+		Assert.Contains(".generated", state.Plan.AvailableExtensions, StringComparer.OrdinalIgnoreCase);
+		Assert.DoesNotContain(".generated", state.Plan.SelectedExtensions, StringComparer.OrdinalIgnoreCase);
+		Assert.DoesNotContain("src/output.generated", RelativeIncludedFiles(state.Plan));
+	}
+
+	[Fact]
+	public async Task TuiPlanCarriesTheDesktopIgnoreImpactSnapshotWithoutAnotherScan()
+	{
+		using var workspace = new TemporaryDirectory();
+		using var appData = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.CreateFile("project/.gitignore", "*.tmp\n");
+		workspace.CreateFile("project/src/App.cs", "internal sealed class App { }\n");
+		workspace.CreateFile("project/src/.private.cs", "internal sealed class Private { }\n");
+		workspace.CreateFile("project/src/LICENSE", "license\n");
+		workspace.CreateFile("project/src/empty.cs", string.Empty);
+		workspace.CreateFile("project/src/ignored.tmp", "ignored\n");
+		workspace.CreateFile("project/node_modules/pkg/index.js", "module.exports = {};\n");
+		workspace.CreateDirectory("project/src/empty-folder");
+		var workflow = ProjectLoadWorkflowRefreshHarness.CreateServices();
+		var desktop = workflow.Engine.ComputeFullRefreshSnapshot(
+			ProjectLoadWorkflowRefreshHarness.CreateDefaultContext(project),
+			TestContext.Current.CancellationToken);
+		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
+		using var state = await new TerminalWorkspaceController(services, new TerminalTestHost())
+			.OpenAsync(
+				project,
+				ProjectProfileReference.Standard,
+				TestContext.Current.CancellationToken);
+
+		Assert.True(desktop.HasIgnoreOptionCounts);
+		Assert.True(state.Plan.HasIgnoreOptionCounts);
+		Assert.Equal(desktop.IgnoreOptionCounts, state.Plan.IgnoreOptionCounts);
+		Assert.Equal(desktop.ControllerImpactCounts, state.Plan.IgnoreControllerImpactCounts);
 	}
 
 	[Fact]

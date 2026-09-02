@@ -109,13 +109,6 @@ public partial class MainWindow
 
     private void OnWindowPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
     {
-        if (e.Property == ActualTransparencyLevelProperty)
-        {
-            if (_themeEffectRuntimeProbeReady)
-                _themeBrushCoordinator.ScheduleActualEffectSynchronization();
-            return;
-        }
-
         if (e.Property != BoundsProperty)
             return;
 
@@ -490,15 +483,17 @@ public partial class MainWindow
         {
             _taskbarProgress.Attach(this);
             UpdateAdaptiveWorkspaceChrome(forcePreviewLabels: true);
+            var gitAvailabilityTask = _selectionCoordinator
+                .EnsureGitCliAvailabilityAsync(cancellationToken);
 
             // The IPC registration and compositor warmup are independent. Running them
             // together removes registry/socket IO from the first-visible-frame critical path.
             await Task.WhenAll(
                 EnsureDesktopControlServerAsync(cancellationToken),
                 RevealStartupWindowAfterCompositionWarmupAsync(cancellationToken));
+            await gitAvailabilityTask;
             cancellationToken.ThrowIfCancellationRequested();
-            _themeEffectRuntimeProbeReady = true;
-            _themeBrushCoordinator.ScheduleActualEffectSynchronization();
+            _themeBrushCoordinator.ScheduleStartupEffectSynchronization();
             StartDeferredAppStateBootstrap(cancellationToken);
             StartDeferredRecentProjectsLoad(cancellationToken);
             ScheduleOptionalFontCatalogLoad();
@@ -528,7 +523,7 @@ public partial class MainWindow
 
                 if (opened)
                 {
-                    await TryApplyStartupSelectionOverridesAsync();
+                    await TryApplyStartupSelectionOverridesAsync(cancellationToken);
                     if (_desktopStartupRequest is not null &&
                         GetDesktopGitReadinessDiagnostic(_desktopStartupRequest) is
                             { Severity: ContextDiagnosticSeverity.Error } diagnostic)
@@ -554,9 +549,7 @@ public partial class MainWindow
                 await TryShowAutomaticTerminalCommandPromptAsync(cancellationToken);
             }
 
-            ObserveDetachedTask(
-                Task.Run(_repoCacheService.CleanupStaleCacheOnStartup, cancellationToken),
-                "CleanupStaleRepositoryCache");
+            _repoCacheService.RequestStaleCacheCleanupOnStartup();
             ObserveDetachedTask(
                 _applicationUpdates.RunAutomaticCheckIfDueAsync(cancellationToken),
                 "AutomaticUpdateCheck");
@@ -570,7 +563,7 @@ public partial class MainWindow
             if (_desktopStartupRequest is not null)
                 _desktopStartupErrorCode = "DPX-DESKTOP-STARTUP-FAILED";
             if (!cancellationToken.IsCancellationRequested && IsVisible)
-                await ShowErrorAsync(ex.Message);
+                await ShowErrorAsync(ResolveDesktopExceptionMessage(ex));
         }
         finally
         {
@@ -688,7 +681,7 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            await ShowErrorAsync(ex.Message);
+            await ShowErrorAsync(ResolveDesktopExceptionMessage(ex));
         }
     }
 

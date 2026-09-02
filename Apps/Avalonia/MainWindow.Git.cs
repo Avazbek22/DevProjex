@@ -1,7 +1,6 @@
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Avalonia.Services;
 using DevProjex.Avalonia.Views;
-using DevProjex.Kernel;
 
 namespace DevProjex.Avalonia;
 
@@ -13,43 +12,79 @@ public partial class MainWindow
     {
         if (!_viewModel.CanChangeProjectTree)
             return;
+        if (_gitCloneWindow is not null)
+        {
+            _gitCloneWindow.Activate();
+            e.Handled = true;
+            return;
+        }
+        if (Interlocked.CompareExchange(ref _gitCloneDialogOpenInProgress, 1, 0) != 0)
+        {
+            e.Handled = true;
+            return;
+        }
 
         try
         {
             await EnsureRecentProjectsLoadedAsync(
                 _windowLifetimeCts?.Token ?? CancellationToken.None);
+            if (_gitCloneWindow is not null)
+            {
+                _gitCloneWindow.Activate();
+                return;
+            }
+
+            _viewModel.GitCloneUrl = string.Empty;
+            _viewModel.GitCloneStatus = string.Empty;
+            _viewModel.GitCloneInProgress = false;
+            _viewModel.GitCloneProgressIsIndeterminate = true;
+            _viewModel.GitCloneProgressValue = 0;
+            _viewModel.GitCloneCacheManagementInProgress = false;
+            _viewModel.ReplaceCachedRepositories([]);
+
+            var cloneWindow = new GitCloneWindow
+            {
+                DataContext = _viewModel
+            };
+            _gitCloneWindow = cloneWindow;
+
+            cloneWindow.StartCloneRequested += OnGitCloneStart;
+            cloneWindow.CancelRequested += OnGitCloneCancel;
+            cloneWindow.OpenCachedRepositoryRequested += OnOpenCachedRepositoryRequested;
+            cloneWindow.DeleteCachedRepositoryRequested += OnDeleteCachedRepositoryRequested;
+            cloneWindow.Closed += OnGitCloneWindowClosed;
+
+            _ = cloneWindow.ShowDialog(this);
+			var catalogCts = ReplaceGitCloneCatalogCancellation();
+			_ = TrackGitOperationAsync(() => RefreshGitCloneCacheCatalogAsync(
+				cloneWindow,
+				catalogCts));
         }
         catch (OperationCanceledException)
         {
-            return;
         }
-
-        _viewModel.GitCloneUrl = string.Empty;
-        _viewModel.GitCloneStatus = string.Empty;
-        _viewModel.GitCloneInProgress = false;
-
-        // Create and show Git Clone window
-        _gitCloneWindow = new GitCloneWindow
+        finally
         {
-            DataContext = _viewModel
-        };
-
-        _gitCloneWindow.StartCloneRequested += OnGitCloneStart;
-        _gitCloneWindow.CancelRequested += OnGitCloneCancel;
-
-        _ = _gitCloneWindow.ShowDialog(this);
-        e.Handled = true;
+            Volatile.Write(ref _gitCloneDialogOpenInProgress, 0);
+            e.Handled = true;
+        }
     }
 
     private void OnGitCloneClose(object? sender, RoutedEventArgs e)
     {
         CancelGitCloneOperation();
+		CancelWithoutDisposal(_gitCloneCatalogCts);
         _gitCloneWindow?.Close();
         _gitCloneWindow = null;
         e.Handled = true;
     }
 
-    private async void OnGitCloneStart(object? sender, RoutedEventArgs e)
+	private async void OnGitCloneStart(object? sender, RoutedEventArgs e)
+	{
+		await TrackGitOperationAsync(() => RunGitCloneAsync(e));
+	}
+
+	private async Task RunGitCloneAsync(RoutedEventArgs e)
     {
         var url = _viewModel.GitCloneUrl?.Trim();
         if (string.IsNullOrWhiteSpace(url))
@@ -58,112 +93,183 @@ public partial class MainWindow
             return;
         }
 
-        // Validate URL format before attempting to clone
-        if (!IsValidGitRepositoryUrl(url))
+        if (!RepositoryUrlUtility.IsSupportedCloneSource(url))
         {
             await ShowErrorAsync(_viewModel.GitErrorInvalidUrl);
             return;
         }
+		if (Interlocked.CompareExchange(ref _gitCloneActionInProgress, 1, 0) != 0)
+		{
+			e.Handled = true;
+			return;
+		}
 
         var gitCloneCts = ReplaceCancellationSource(ref _gitCloneCts);
         var cancellationToken = gitCloneCts.Token;
 
         _viewModel.GitCloneInProgress = true;
         _viewModel.GitCloneStatus = _viewModel.GitCloneProgressCheckingGit;
+        _viewModel.GitCloneProgressIsIndeterminate = true;
+        _viewModel.GitCloneProgressValue = 0;
         _taskbarProgress.BeginGitClone();
 
         string? stagingPath = null;
+		IRepositoryCacheSession? cacheSession = null;
 
         try
         {
-            // Check internet connection before starting
-            var hasInternet = await CheckInternetConnectionAsync(cancellationToken);
-            if (!hasInternet)
-            {
-                _viewModel.GitCloneInProgress = false;
-                _gitCloneWindow?.Close();
-                _gitCloneWindow = null;
-                _taskbarProgress.MarkGitCloneError();
-                await ShowErrorAsync(_viewModel.GitErrorNoInternetConnection);
-                return;
-            }
-
-            stagingPath = _repoCacheService.CreateRepositoryStagingDirectory(url);
-
             // Track current operation for progress reporting
             string currentOperation = string.Empty;
 
-            var progress = new Progress<string>(status =>
+            void UpdateCloneProgress(string status)
             {
-                Dispatcher.Post(() =>
+                if (!Dispatcher.UIThread.CheckAccess())
                 {
-                    _taskbarProgress.UpdateGitClone(status);
+                    Dispatcher.Post(() => UpdateCloneProgress(status));
+                    return;
+                }
 
-                    // Handle phase transition markers
-                    if (status == "::EXTRACTING::")
+                if (status == "::EXTRACTING::")
+                {
+                    currentOperation = _viewModel.GitCloneProgressExtracting;
+                    BeginGitCloneProgressPhase(currentOperation);
+                    return;
+                }
+
+                if (string.IsNullOrEmpty(currentOperation) ||
+                    !GitProgressStatusParser.TryParsePercent(status, out var percent))
+                {
+                    return;
+                }
+
+                _viewModel.GitCloneStatus = $"{currentOperation} {percent.ToString("0.##", CultureInfo.CurrentCulture)}%";
+                _viewModel.GitCloneProgressIsIndeterminate = false;
+                _viewModel.GitCloneProgressValue = percent;
+                _taskbarProgress.UpdateGitClone(status);
+            }
+
+			async Task PublishCachedRefreshPhaseAsync(CachedRepositoryRefreshPhase phase)
+			{
+				void Publish()
+				{
+					currentOperation = phase == CachedRepositoryRefreshPhase.SwitchingBranch
+						? _viewModel.GitCloneProgressSwitchingBranch
+						: _viewModel.StatusOperationGettingUpdates;
+					BeginGitCloneProgressPhase(currentOperation);
+				}
+
+				if (Dispatcher.UIThread.CheckAccess())
+				{
+					Publish();
+					return;
+				}
+
+				await Dispatcher.UIThread.InvokeAsync(Publish);
+			}
+
+            var progress = new Progress<string>(UpdateCloneProgress);
+
+            GitCloneResult result;
+            var cachedUpdateFailed = false;
+            await using (await _repoCacheService.AcquireRepositoryOperationAsync(url, cancellationToken))
+            {
+                cacheSession = await _repoCacheService.TryAcquireRepositorySessionAsync(
+                    url,
+                    cancellationToken: cancellationToken);
+                if (cacheSession is not null)
+                {
+					var branch = cacheSession.Branch;
+					if (cacheSession.ContentKind == RepositoryCacheContentKind.Git)
+					{
+						var refresh = await CachedRepositoryRefreshCoordinator.RefreshAsync(
+							_gitService,
+							cacheSession.RepositoryPath,
+							branch,
+							PublishCachedRefreshPhaseAsync,
+							progress,
+							cancellationToken);
+						branch = refresh.Branch;
+						cachedUpdateFailed = refresh.UpdateFailed;
+					}
+                    result = new GitCloneResult(
+                        Success: true,
+                        LocalPath: cacheSession.RepositoryPath,
+                        SourceType: cacheSession.ContentKind == RepositoryCacheContentKind.Git
+                            ? ProjectSourceType.GitClone
+                            : ProjectSourceType.ZipDownload,
+						DefaultBranch: branch,
+                        RepositoryName: RepositoryUrlUtility.GetRepositoryName(cacheSession.RepositoryUrl),
+                        RepositoryUrl: cacheSession.RepositoryUrl,
+                        ErrorMessage: null);
+                }
+                else
+                {
+                    stagingPath = _repoCacheService.CreateRepositoryStagingDirectory(url);
+                    var gitAvailable = await _gitService.IsGitAvailableAsync(cancellationToken);
+                    if (gitAvailable)
                     {
-                        currentOperation = _viewModel.GitCloneProgressExtracting;
-                        _viewModel.GitCloneStatus = currentOperation;
+                        currentOperation = _viewModel.GitCloneProgressCloning;
+                        BeginGitCloneProgressPhase(currentOperation);
+                        result = await _gitService.CloneAsync(url, stagingPath, progress, cancellationToken);
+                    }
+                    else
+                    {
+                        _viewModel.GitCloneStatus = _viewModel.GitErrorGitNotFound;
+                        await Task.Delay(1500, cancellationToken);
+                        currentOperation = _viewModel.GitCloneProgressDownloading;
+                        BeginGitCloneProgressPhase(currentOperation);
+                        result = await _zipDownloadService.DownloadAndExtractAsync(
+                            url,
+                            stagingPath,
+                            progress,
+                            cancellationToken);
+                    }
+
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (!result.Success)
+                    {
+                        await DeleteRepositoryDirectoryAsync(stagingPath, CancellationToken.None);
+                        _gitCloneWindow?.Close();
+                        _gitCloneWindow = null;
+                        _viewModel.GitCloneInProgress = false;
+                        _taskbarProgress.MarkGitCloneError();
+                        await ShowErrorAsync(_localization.Format(
+                            "Git.Error.CloneFailed",
+							DesktopExceptionPresentation.Format(_localization, exception: null)));
+                        _toastService.Show(_localization["Toast.Git.CloneError"]);
                         return;
                     }
 
-                    // Keep localized phase labels and append numeric progress only.
-                    // Raw git stderr lines (e.g. "Cloning into ...") are not shown in UI.
-                    if (status.EndsWith('%') && status.Length <= 4 && !string.IsNullOrEmpty(currentOperation))
-                    {
-                        _viewModel.GitCloneStatus = $"{currentOperation} {status}";
-                    }
-                    else if (!string.IsNullOrEmpty(currentOperation))
-                    {
-                        _viewModel.GitCloneStatus = currentOperation;
-                    }
-                });
-            });
-
-            GitCloneResult result;
-
-            // Check if Git is available
-            var gitAvailable = await _gitService.IsGitAvailableAsync(cancellationToken);
-
-            if (gitAvailable)
-            {
-                currentOperation = _viewModel.GitCloneProgressCloning;
-                _viewModel.GitCloneStatus = currentOperation;
-                _taskbarProgress.SetGitCloneIndeterminate();
-                result = await _gitService.CloneAsync(url, stagingPath, progress, cancellationToken);
-            }
-            else
-            {
-                // Fallback to ZIP download
-                _viewModel.GitCloneStatus = _viewModel.GitErrorGitNotFound;
-                await Task.Delay(1500, cancellationToken);
-
-                currentOperation = _viewModel.GitCloneProgressDownloading;
-                _viewModel.GitCloneStatus = currentOperation;
-                _taskbarProgress.SetGitCloneIndeterminate();
-                result = await _zipDownloadService.DownloadAndExtractAsync(url, stagingPath, progress, cancellationToken);
+                    var repositoryUrl = string.IsNullOrWhiteSpace(result.RepositoryUrl)
+                        ? url
+                        : result.RepositoryUrl;
+                    var publishedPath = _repoCacheService.PublishRepositoryDirectory(
+                        stagingPath,
+                        repositoryUrl);
+                    stagingPath = null;
+                    _repoCacheService.RecordIndexedRepository(
+                        repositoryUrl,
+                        publishedPath,
+                        result.DefaultBranch);
+                    cacheSession = await _repoCacheService.TryAcquireRepositorySessionAsync(
+                        repositoryUrl,
+                        result.DefaultBranch,
+                        cancellationToken);
+                    if (cacheSession is null)
+                        throw new IOException("Published repository session could not be acquired.");
+                    result = result with { LocalPath = cacheSession.RepositoryPath };
+                }
             }
 
-            cancellationToken.ThrowIfCancellationRequested();
-
-            if (!result.Success)
-            {
-                await DeleteRepositoryDirectoryAsync(stagingPath, CancellationToken.None);
-                _gitCloneWindow?.Close();
-                _gitCloneWindow = null;
-                _viewModel.GitCloneInProgress = false;
-                _taskbarProgress.MarkGitCloneError();
-                await ShowErrorAsync(_localization.Format("Git.Error.CloneFailed", result.ErrorMessage ?? "Unknown error"));
-                _toastService.Show(_localization["Toast.Git.CloneError"]);
-                return;
-            }
-
-            var cachePath = _repoCacheService.PublishRepositoryDirectory(
-                stagingPath,
-                string.IsNullOrWhiteSpace(result.RepositoryUrl) ? url : result.RepositoryUrl);
-            stagingPath = null;
-            result = result with { LocalPath = cachePath };
-            await ApplySuccessfulGitCloneAsync(result, cachePath, url, cancellationToken);
+			await ApplySuccessfulGitCloneAsync(
+				result,
+				cacheSession.RepositoryPath,
+				url,
+				cancellationToken,
+				cacheSession,
+				cachedUpdateFailed,
+				refreshGitBranches: !cachedUpdateFailed,
+				showSuccessToast: !cachedUpdateFailed);
         }
         catch (OperationCanceledException)
         {
@@ -171,6 +277,17 @@ public partial class MainWindow
             {
                 await DeleteRepositoryDirectoryAsync(stagingPath, CancellationToken.None);
             }
+        }
+        catch (RepositoryBranchUnavailableException ex)
+        {
+            if (stagingPath is not null)
+                await DeleteRepositoryDirectoryAsync(stagingPath, CancellationToken.None);
+
+            _gitCloneWindow?.Close();
+            _gitCloneWindow = null;
+            _taskbarProgress.MarkGitCloneError();
+            await ShowErrorAsync(FormatRepositoryBranchUnavailableMessage(ex));
+            _toastService.Show(_localization["Toast.Git.CloneError"]);
         }
         catch (Exception ex)
         {
@@ -182,14 +299,19 @@ public partial class MainWindow
             _gitCloneWindow?.Close();
             _gitCloneWindow = null;
             _taskbarProgress.MarkGitCloneError();
-            await ShowErrorAsync(_localization.Format("Git.Error.CloneFailed", ex.Message));
+			await ShowErrorAsync(_localization.Format(
+				"Git.Error.CloneFailed",
+				ResolveDesktopExceptionMessage(ex)));
             _toastService.Show(_localization["Toast.Git.CloneError"]);
         }
         finally
         {
+			if (cacheSession is not null && !ReferenceEquals(_currentRepositorySession, cacheSession))
+				cacheSession.Dispose();
             _viewModel.GitCloneInProgress = false;
             _taskbarProgress.CompleteGitClone();
             DisposeIfCurrent(ref _gitCloneCts, gitCloneCts);
+			Volatile.Write(ref _gitCloneActionInProgress, 0);
         }
 
         e.Handled = true;
@@ -206,16 +328,28 @@ public partial class MainWindow
         GitCloneResult result,
         string cachePath,
         string requestedUrl,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IRepositoryCacheSession? preparedSession = null,
+		bool cachedUpdateFailed = false,
+		bool refreshGitBranches = true,
+		bool showSuccessToast = true)
     {
         ArgumentNullException.ThrowIfNull(result);
         cancellationToken.ThrowIfCancellationRequested();
 
         _gitCloneWindow?.Close();
         _gitCloneWindow = null;
-        _viewModel.GitCloneInProgress = false;
+
+        var opened = await TryOpenFolderAsync(
+            result.LocalPath,
+            fromDialog: false,
+            recordRecentFolder: false,
+            preparedSession);
+        if (!opened || !PathComparer.Default.Equals(_currentPath, result.LocalPath))
+            return;
+
         _viewModel.ProjectSourceType = result.SourceType;
-        _viewModel.CurrentBranch = result.DefaultBranch ?? "main";
+        _viewModel.CurrentBranch = result.DefaultBranch ?? string.Empty;
         _currentProjectDisplayName = result.RepositoryName;
         _currentRepositoryUrl = string.IsNullOrWhiteSpace(result.RepositoryUrl)
             ? requestedUrl
@@ -227,10 +361,7 @@ public partial class MainWindow
             result.DefaultBranch,
             commitHash: null,
             cancellationToken);
-
-        var opened = await TryOpenFolderAsync(result.LocalPath, fromDialog: false, recordRecentFolder: false);
-        if (!opened || !PathComparer.Default.Equals(_currentPath, result.LocalPath))
-            return;
+        UpdateTitle();
 
         await RecordRecentRepositoryAsync(
             string.IsNullOrWhiteSpace(result.RepositoryUrl) ? requestedUrl : result.RepositoryUrl,
@@ -238,7 +369,7 @@ public partial class MainWindow
 
         // Clone-only branch discovery stays behind the shared post-reveal stability gate. Waiting
         // only for transition completion can still compete with the island's final layout pass.
-        if (result.SourceType == ProjectSourceType.GitClone)
+        if (result.SourceType == ProjectSourceType.GitClone && refreshGitBranches)
         {
             var visualReadyTask = _postLoadVisualReadyTask;
             await MetricsCalculationPolicy.WaitForInitialVisualReadyAsync(
@@ -251,8 +382,267 @@ public partial class MainWindow
         }
 
         if (PathComparer.Default.Equals(_currentPath, result.LocalPath))
-            _toastService.Show(_localization["Toast.Git.CloneSuccess"]);
+        {
+			if (showSuccessToast)
+				_toastService.Show(_localization["Toast.Git.CloneSuccess"]);
+			if (cachedUpdateFailed)
+				_toastService.Show(_localization["Toast.Git.CachedUpdateFailed"]);
+		}
     }
+
+	private async void OnOpenCachedRepositoryRequested(object? sender, RepositoryCacheEntryEventArgs e)
+	{
+		await TrackGitOperationAsync(() => OpenCachedRepositoryAsync(e));
+	}
+
+	private async Task OpenCachedRepositoryAsync(RepositoryCacheEntryEventArgs e)
+	{
+		if (Interlocked.CompareExchange(ref _gitCloneActionInProgress, 1, 0) != 0)
+			return;
+
+		var operationCts = ReplaceCancellationSource(ref _gitCloneCts);
+		var cancellationToken = operationCts.Token;
+		_viewModel.GitCloneInProgress = true;
+		_viewModel.GitCloneStatus = _viewModel.GitCloneProgressPreparing;
+		_viewModel.GitCloneProgressIsIndeterminate = true;
+		_viewModel.GitCloneProgressValue = 0;
+		IRepositoryCacheSession? session = null;
+		try
+		{
+			session = await Task.Run(
+				() => _repoCacheService.TryAcquireRepositorySessionByPathAsync(
+					e.Entry.LocalPath,
+					cancellationToken),
+				cancellationToken);
+			if (session is null)
+			{
+				if (_gitCloneWindow is not null)
+					await RefreshGitCloneCacheAsync(_gitCloneWindow, cancellationToken);
+				_toastService.Show(_localization["Toast.Git.CacheEntryMissing"]);
+				return;
+			}
+
+			var result = new GitCloneResult(
+				Success: true,
+				LocalPath: session.RepositoryPath,
+				SourceType: session.ContentKind == RepositoryCacheContentKind.Git
+					? ProjectSourceType.GitClone
+					: ProjectSourceType.ZipDownload,
+				DefaultBranch: session.Branch,
+				RepositoryName: RepositoryUrlUtility.GetRepositoryName(session.RepositoryUrl),
+				RepositoryUrl: session.RepositoryUrl,
+				ErrorMessage: null);
+			await ApplySuccessfulGitCloneAsync(
+				result,
+				session.RepositoryPath,
+				session.RepositoryUrl,
+				cancellationToken,
+				session,
+				cachedUpdateFailed: false,
+				refreshGitBranches: false,
+				showSuccessToast: false);
+		}
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+		{
+		}
+		catch (RepositoryBranchUnavailableException ex)
+		{
+			await ShowErrorAsync(FormatRepositoryBranchUnavailableMessage(ex));
+		}
+		catch (Exception ex)
+		{
+			await ShowErrorAsync(_localization.Format(
+				"Git.Error.CloneFailed",
+				ResolveDesktopExceptionMessage(ex)));
+		}
+		finally
+		{
+			if (session is not null && !ReferenceEquals(_currentRepositorySession, session))
+				session.Dispose();
+			_viewModel.GitCloneInProgress = false;
+			DisposeIfCurrent(ref _gitCloneCts, operationCts);
+			Volatile.Write(ref _gitCloneActionInProgress, 0);
+		}
+	}
+
+	private string FormatRepositoryBranchUnavailableMessage(RepositoryBranchUnavailableException exception) =>
+		DesktopExceptionPresentation.AppendCode(
+			exception.Reason == RepositoryBranchUnavailableReason.WorktreeUnsupported
+			? _localization.Format("Git.Error.WorktreeBranchUnavailable", exception.Branch)
+			: _localization.Format("Git.Error.BranchSwitchFailed", exception.Branch),
+			DesktopExceptionPresentation.ResourceUnavailableCode);
+
+	private void BeginGitCloneProgressPhase(string status)
+	{
+		_viewModel.GitCloneStatus = status;
+		_viewModel.GitCloneProgressIsIndeterminate = true;
+		_viewModel.GitCloneProgressValue = 0;
+		_taskbarProgress.SetGitCloneIndeterminate();
+	}
+
+	private async void OnDeleteCachedRepositoryRequested(object? sender, RepositoryCacheEntryEventArgs e)
+	{
+		await TrackGitOperationAsync(() => DeleteCachedRepositoryAsync(e));
+	}
+
+	private async Task DeleteCachedRepositoryAsync(RepositoryCacheEntryEventArgs e)
+	{
+		if (Interlocked.CompareExchange(ref _gitCloneActionInProgress, 1, 0) != 0)
+			return;
+		if (!e.Entry.CanDelete)
+		{
+			Volatile.Write(ref _gitCloneActionInProgress, 0);
+			return;
+		}
+
+		_viewModel.GitCloneCacheManagementInProgress = true;
+		try
+		{
+			await Task.Run(() =>
+			{
+				var activePath = _currentCachedRepoPath;
+				if (activePath is not null &&
+				    _repoCacheService.PathsBelongToSameRepository(activePath, e.Entry.LocalPath))
+				{
+					return;
+				}
+
+				_repoCacheService.DeleteRepositoryDirectory(e.Entry.LocalPath);
+			});
+			if (_gitCloneWindow is not null)
+				await RefreshGitCloneCacheAsync(_gitCloneWindow, CancellationToken.None);
+		}
+		catch
+		{
+			if (_gitCloneWindow is not null)
+				await RefreshGitCloneCacheAsync(_gitCloneWindow, CancellationToken.None);
+		}
+		finally
+		{
+			_viewModel.GitCloneCacheManagementInProgress = false;
+			Volatile.Write(ref _gitCloneActionInProgress, 0);
+		}
+	}
+
+	private async Task RefreshGitCloneCacheCatalogAsync(
+		GitCloneWindow window,
+		CancellationTokenSource catalogCts)
+	{
+		try
+		{
+			await RefreshGitCloneCacheAsync(window, catalogCts.Token);
+		}
+		finally
+		{
+			Interlocked.CompareExchange(ref _gitCloneCatalogCts, null, catalogCts);
+			catalogCts.Dispose();
+		}
+	}
+
+	private async Task RefreshGitCloneCacheAsync(
+		GitCloneWindow window,
+		CancellationToken cancellationToken)
+	{
+		if (!ReferenceEquals(_gitCloneWindow, window))
+			return;
+		_viewModel.GitCloneCacheLoading = true;
+		try
+		{
+			while (true)
+			{
+				var activePath = _currentCachedRepoPath;
+				var snapshot = await Task.Run(
+					() => LoadGitCloneCacheSnapshot(activePath),
+					cancellationToken);
+				cancellationToken.ThrowIfCancellationRequested();
+				if (!ReferenceEquals(_gitCloneWindow, window))
+					return;
+				if (!PathComparer.Default.Equals(activePath, _currentCachedRepoPath))
+					continue;
+
+				PublishGitCloneCacheEntries(snapshot.Entries, snapshot.ActiveEntries);
+				break;
+			}
+		}
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+		{
+		}
+        catch
+        {
+            if (ReferenceEquals(_gitCloneWindow, window))
+                _viewModel.ReplaceCachedRepositories([]);
+        }
+		finally
+		{
+			if (ReferenceEquals(_gitCloneWindow, window))
+				_viewModel.GitCloneCacheLoading = false;
+		}
+	}
+
+	private (IReadOnlyList<RepositoryCacheCatalogEntry> Entries, bool[] ActiveEntries)
+		LoadGitCloneCacheSnapshot(string? activePath)
+	{
+		var entries = _repoCacheService.ListIndexedRepositories();
+		var activeEntries = new bool[entries.Count];
+		if (activePath is null)
+			return (entries, activeEntries);
+
+		for (var index = 0; index < entries.Count; index++)
+		{
+			activeEntries[index] = _repoCacheService.PathsBelongToSameRepository(
+				activePath,
+				entries[index].LocalPath);
+		}
+		return (entries, activeEntries);
+	}
+
+	private void PublishGitCloneCacheEntries(
+		IReadOnlyList<RepositoryCacheCatalogEntry> entries,
+		IReadOnlyList<bool> activeEntries)
+	{
+		CultureInfo culture;
+		try
+		{
+			culture = CultureInfo.CreateSpecificCulture(
+				AppLanguageUtility.ToCode(_localization.CurrentLanguage));
+		}
+		catch (CultureNotFoundException)
+		{
+			culture = CultureInfo.CurrentCulture;
+		}
+
+		var items = new RepositoryCacheEntryViewModel[entries.Count];
+		for (var index = 0; index < entries.Count; index++)
+		{
+			var entry = entries[index];
+			items[index] = RepositoryCacheEntryViewModel.Create(
+				entry,
+				culture,
+				_viewModel.GitCloneLocalCacheZip,
+				_viewModel.GitCloneLocalCacheRemove,
+				!activeEntries[index],
+				_viewModel.GitCloneLocalCacheActiveDeleteToolTip);
+		}
+
+		_viewModel.ReplaceCachedRepositories(items);
+	}
+
+	private void OnGitCloneWindowClosed(object? sender, EventArgs e)
+	{
+		if (sender is not GitCloneWindow window)
+			return;
+		window.StartCloneRequested -= OnGitCloneStart;
+		window.CancelRequested -= OnGitCloneCancel;
+		window.OpenCachedRepositoryRequested -= OnOpenCachedRepositoryRequested;
+		window.DeleteCachedRepositoryRequested -= OnDeleteCachedRepositoryRequested;
+		window.Closed -= OnGitCloneWindowClosed;
+		CancelWithoutDisposal(_gitCloneCatalogCts);
+		_viewModel.GitCloneCacheLoading = false;
+		_viewModel.GitCloneCacheManagementInProgress = false;
+		_viewModel.ReplaceCachedRepositories([]);
+		if (ReferenceEquals(_gitCloneWindow, window))
+			_gitCloneWindow = null;
+	}
 
     private void OnGitCloneCancel(object? sender, RoutedEventArgs e)
     {
@@ -284,7 +674,10 @@ public partial class MainWindow
         e.Handled = true;
     }
 
-    private async Task GetGitUpdatesAsync()
+	private Task GetGitUpdatesAsync() =>
+		TrackGitOperationAsync(GetGitUpdatesCoreAsync);
+
+	private async Task GetGitUpdatesCoreAsync()
     {
         if (!_viewModel.IsGitMode || string.IsNullOrEmpty(_currentPath))
             return;
@@ -319,20 +712,22 @@ public partial class MainWindow
             if (!success)
             {
                 _statusOperations.Complete(statusOperationId);
-                await ShowErrorAsync(_localization.Format("Git.Error.UpdateFailed", "Pull failed"));
+				await ShowErrorAsync(_localization.Format(
+					"Git.Error.UpdateFailed",
+					DesktopExceptionPresentation.Format(_localization, exception: null)));
                 return;
             }
 
-            // Refresh branches and tree
-            await RefreshGitBranchesAsync(_currentPath, cancellationToken);
-            await ReloadProjectAsync(cancellationToken);
-
             var afterHash = await _gitService.GetHeadCommitAsync(_currentPath, cancellationToken);
+			await RefreshGitBranchesAsync(_currentPath, cancellationToken);
             await RecordCachedRepositoryAsync(
                 _currentPath,
                 _currentRepositoryUrl,
                 _viewModel.CurrentBranch,
                 afterHash,
+                cancellationToken);
+            await Task.Run(
+                () => _repoCacheService.RefreshIndexedRepositorySize(_currentPath),
                 cancellationToken);
             if (!string.IsNullOrWhiteSpace(beforeHash) && !string.IsNullOrWhiteSpace(afterHash) && beforeHash == afterHash)
             {
@@ -341,6 +736,7 @@ public partial class MainWindow
             }
             else
             {
+				await ReloadProjectAsync(cancellationToken, applyStoredProfile: true);
                 _toastService.Show(_localization["Toast.Git.UpdatesApplied"]);
                 _statusOperations.Complete(statusOperationId);
                 // Clean up memory from old tree after successful update.
@@ -355,7 +751,9 @@ public partial class MainWindow
         catch (Exception ex)
         {
             _statusOperations.Complete(statusOperationId);
-            await ShowErrorAsync(_localization.Format("Git.Error.UpdateFailed", ex.Message));
+			await ShowErrorAsync(_localization.Format(
+				"Git.Error.UpdateFailed",
+				ResolveDesktopExceptionMessage(ex)));
         }
         finally
         {
@@ -363,7 +761,12 @@ public partial class MainWindow
         }
     }
 
-    private async void OnGitBranchSwitch(object? sender, string branchName)
+	private async void OnGitBranchSwitch(object? sender, string branchName)
+	{
+		await TrackGitOperationAsync(() => SwitchGitBranchAsync(branchName));
+	}
+
+	private async Task SwitchGitBranchAsync(string branchName)
     {
         if (!_viewModel.CanGetGitUpdates || string.IsNullOrEmpty(_currentPath))
             return;
@@ -399,13 +802,15 @@ public partial class MainWindow
             if (!success)
             {
                 _statusOperations.Complete(statusOperationId);
-                await ShowErrorAsync(_localization.Format("Git.Error.BranchSwitchFailed", branchName));
+				await ShowErrorAsync(DesktopExceptionPresentation.AppendCode(
+					_localization.Format("Git.Error.BranchSwitchFailed", branchName),
+					DesktopExceptionPresentation.OperationFailedCode));
                 return;
             }
 
             // Reload tree first so branch/title state is only updated after full success.
             // This keeps UI stable if reload fails or gets cancelled mid-flight.
-            await ReloadProjectAsync(cancellationToken);
+			await ReloadProjectAsync(cancellationToken, applyStoredProfile: true);
             await RefreshGitBranchesAsync(_currentPath, cancellationToken);
             _statusOperations.Complete(statusOperationId);
 
@@ -431,13 +836,89 @@ public partial class MainWindow
         catch (Exception ex)
         {
             _statusOperations.Complete(statusOperationId);
-            await ShowErrorAsync(_localization.Format("Git.Error.BranchSwitchFailed", ex.Message));
+			await ShowErrorAsync(_localization.Format(
+				"Git.Error.BranchSwitchFailed",
+				ResolveDesktopExceptionMessage(ex)));
         }
         finally
         {
             DisposeIfCurrent(ref _gitOperationCts, gitCts);
         }
     }
+
+	private async Task TrackGitOperationAsync(Func<Task> operationFactory)
+	{
+		var operation = operationFactory();
+		lock (_gitOperationTasksLock)
+			_activeGitOperationTasks.Add(operation);
+
+		try
+		{
+			await operation;
+		}
+		finally
+		{
+			lock (_gitOperationTasksLock)
+				_activeGitOperationTasks.Remove(operation);
+		}
+	}
+
+	private bool HasActiveGitOperations()
+	{
+		lock (_gitOperationTasksLock)
+			return _activeGitOperationTasks.Count > 0;
+	}
+
+	private void CancelActiveGitOperations()
+	{
+		CancelWithoutDisposal(_gitCloneCts);
+		CancelWithoutDisposal(_gitCloneCatalogCts);
+		CancelWithoutDisposal(_gitOperationCts);
+	}
+
+	private CancellationTokenSource ReplaceGitCloneCatalogCancellation()
+	{
+		var replacement = new CancellationTokenSource();
+		var previous = Interlocked.Exchange(ref _gitCloneCatalogCts, replacement);
+		CancelWithoutDisposal(previous);
+		return replacement;
+	}
+
+	private async Task WaitForActiveGitOperationsAsync()
+	{
+		while (true)
+		{
+			Task[] operations;
+			lock (_gitOperationTasksLock)
+			{
+				_activeGitOperationTasks.RemoveWhere(static operation => operation.IsCompleted);
+				if (_activeGitOperationTasks.Count == 0)
+					return;
+				operations = [.. _activeGitOperationTasks];
+			}
+
+			try
+			{
+				await Task.WhenAll(operations);
+			}
+			catch (Exception exception)
+			{
+				Trace.TraceWarning("Git operation cleanup failed during shutdown: {0}", exception.GetType().Name);
+			}
+		}
+	}
+
+	private static void CancelWithoutDisposal(CancellationTokenSource? source)
+	{
+		try
+		{
+			source?.Cancel();
+		}
+		catch (ObjectDisposedException)
+		{
+			// The operation completed while shutdown was requesting cancellation.
+		}
+	}
 
     private async Task RefreshGitBranchesAsync(string repositoryPath, CancellationToken cancellationToken = default)
     {
@@ -493,7 +974,7 @@ public partial class MainWindow
         // Clear old items - they will be garbage collected since they have no external references
         // and we're using a named handler method instead of lambda captures
         branchMenuItem.Items.Clear();
-        GitBranchMenuScrollBehavior.SetScrollable(branchMenuItem, _viewModel.GitBranches.Count);
+        MenuScrollBehavior.SetScrollable(branchMenuItem, _viewModel.GitBranches.Count);
 
         foreach (var branch in _viewModel.GitBranches)
             branchMenuItem.Items.Add(CreateBranchMenuItem(branch));

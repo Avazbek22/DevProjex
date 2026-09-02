@@ -10,6 +10,7 @@ public sealed class AvaloniaCompiledBindingContractTests
 		"FilterBarView.axaml",
 		"GitCloneWindow.axaml",
 		"HelpPopoverView.axaml",
+		"PreviewSearchBarView.axaml",
 		"SearchBarView.axaml",
 		"SettingsPanelView.axaml",
 		"ThemePopoverView.axaml",
@@ -83,6 +84,31 @@ public sealed class AvaloniaCompiledBindingContractTests
 	}
 
 	[Fact]
+	public void SettingsPanel_ExposesContentExclusionsAndFileTypes()
+	{
+		var viewFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"Views",
+			"SettingsPanelView.axaml");
+		var document = XDocument.Load(viewFile);
+		var root = Assert.IsType<XElement>(document.Root);
+		var xamlNamespace = XNamespace.Get("http://schemas.microsoft.com/winfx/2006/xaml");
+		var controlNames = root
+			.Descendants()
+			.Select(element =>
+				element.Attribute("Name")?.Value ??
+				element.Attribute(xamlNamespace + "Name")?.Value)
+			.Where(static name => name is not null)
+			.ToHashSet(StringComparer.Ordinal);
+
+		Assert.Contains("ContentProcessingOptionsList", controlNames);
+		Assert.Contains("IgnoreOptionsList", controlNames);
+		Assert.Contains("ExtensionsList", controlNames);
+	}
+
+	[Fact]
 	public void HelpMenu_PlacesUpdatesImmediatelyAfterAbout()
 	{
 		var viewFile = Path.Combine(
@@ -112,6 +138,42 @@ public sealed class AvaloniaCompiledBindingContractTests
 
 		Assert.True(aboutIndex >= 0);
 		Assert.Equal(aboutIndex + 1, updatesIndex);
+	}
+
+	[Fact]
+	public void ViewMenu_GroupsAnimationPreferencesBeforeCompactMode()
+	{
+		var viewFile = Path.Combine(
+			FindRepositoryRoot(),
+			"Apps",
+			"Avalonia",
+			"Views",
+			"TopMenuBarView.axaml");
+		var document = XDocument.Load(viewFile);
+		var root = Assert.IsType<XElement>(document.Root);
+		var avaloniaNamespace = root.Name.Namespace;
+		var animations = root
+			.Descendants(avaloniaNamespace + "MenuItem")
+			.Single(element => element.Attribute("Name")?.Value == "AnimationsMenuItem");
+		var animationItems = animations
+			.Elements(avaloniaNamespace + "MenuItem")
+			.Select(element => element.Attribute("Name")?.Value)
+			.OfType<string>()
+			.ToArray();
+
+		Assert.Equal(
+			[
+				"TreeExpansionAnimationMenuItem",
+				"StatusMetricsAnimationMenuItem",
+				"ToolAnimationMenuItem"
+			],
+			animationItems);
+		var compactMode = root
+			.Descendants(avaloniaNamespace + "MenuItem")
+			.Single(element => element.Attribute("Name")?.Value == "CompactModeMenuItem");
+		Assert.Same(animations.Parent, compactMode.Parent);
+		Assert.True(
+			animations.ElementsBeforeSelf().Count() < compactMode.ElementsBeforeSelf().Count());
 	}
 
 	[Fact]
@@ -280,6 +342,60 @@ public sealed class AvaloniaCompiledBindingContractTests
 	}
 
 	[Fact]
+	public void ThemeStyles_ToolTipsUseOneAdaptivePopupMaterialAndBackdropPipeline()
+	{
+		var repositoryRoot = FindRepositoryRoot();
+		var styleFile = Path.Combine(
+			repositoryRoot,
+			"Apps",
+			"Avalonia",
+			"Styles",
+			"Theme.axaml");
+		var document = XDocument.Load(styleFile);
+		var root = Assert.IsType<XElement>(document.Root);
+		var avaloniaNamespace = root.Name.Namespace;
+		var toolTipStyle = Assert.Single(
+			root.Descendants(avaloniaNamespace + "Style"),
+			element => element.Attribute("Selector")?.Value == "ToolTip");
+		var setters = toolTipStyle
+			.Elements(avaloniaNamespace + "Setter")
+			.ToDictionary(
+				setter => setter.Attribute("Property")?.Value ?? string.Empty,
+				setter => setter.Attribute("Value")?.Value ?? string.Empty,
+				StringComparer.Ordinal);
+
+		Assert.Equal("{DynamicResource MenuPopupBrush}", setters["Background"]);
+		Assert.Equal("{DynamicResource AppBorderBrush}", setters["BorderBrush"]);
+		Assert.Equal("1", setters["BorderThickness"]);
+		Assert.Equal("8", setters["CornerRadius"]);
+		Assert.Equal("10,6", setters["Padding"]);
+		Assert.Equal("1", setters["Opacity"]);
+
+		var avaloniaDirectory = Path.Combine(repositoryRoot, "Apps", "Avalonia");
+		foreach (var viewFile in Directory.EnumerateFiles(
+			         avaloniaDirectory,
+			         "*.axaml",
+			         SearchOption.AllDirectories))
+		{
+			if (PathComparer.Default.Equals(viewFile, styleFile))
+				continue;
+
+			var viewDocument = XDocument.Load(viewFile);
+			Assert.DoesNotContain(
+				viewDocument.Descendants(),
+				element => element.Name.LocalName == "Style" &&
+				           element.Attribute("Selector")?.Value == "ToolTip");
+		}
+
+		var appSource = File.ReadAllText(Path.Combine(avaloniaDirectory, "App.axaml.cs"));
+		Assert.Contains("ThemedToolTipService.Initialize();", appSource, StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			"preview-blurred-tooltip",
+			File.ReadAllText(styleFile),
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void ThemeStyles_UnavailableRecentFolderRemainsEnabledButVisuallyMuted()
 	{
 		var styleFile = Path.Combine(
@@ -324,6 +440,11 @@ public sealed class AvaloniaCompiledBindingContractTests
 			styles,
 			"ScrollViewer.preview-scroll",
 			"Ibeam",
+			avaloniaNamespace);
+		AssertCursorSetter(
+			styles,
+			"MenuFlyoutPresenter",
+			"Arrow",
 			avaloniaNamespace);
 		foreach (var selector in new[]
 		         {

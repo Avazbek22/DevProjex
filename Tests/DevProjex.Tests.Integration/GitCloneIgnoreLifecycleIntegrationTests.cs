@@ -1,11 +1,10 @@
-using DevProjex.Tests.Shared.ProjectLoadWorkflow;
-
+using DevProjex.Application.Presentation;
 namespace DevProjex.Tests.Integration;
 
 public sealed class GitCloneIgnoreLifecycleIntegrationTests
 {
 	[Fact]
-	public void ManagedCloneMetadata_IndividualDirectoryToggleJourney_KeepsOptionsCountsAndRootsStable()
+	public void ManagedCloneMetadata_IndividualDirectoryToggleJourney_KeepsOptionsAndCountsStable()
 	{
 		using var workspace = CreateDirectoryToggleWorkspace();
 		var services = CreateManagedCloneServices();
@@ -19,8 +18,7 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 			services,
 			snapshot,
 			dotFoldersChecked: true,
-			emptyFoldersChecked: true,
-			expectedRoots: ["src"]);
+			emptyFoldersChecked: true);
 
 		snapshot = ToggleIgnoreOption(
 			workspace.Path,
@@ -33,8 +31,7 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 			services,
 			snapshot,
 			dotFoldersChecked: false,
-			emptyFoldersChecked: true,
-			expectedRoots: [".workspace", "src"]);
+			emptyFoldersChecked: true);
 
 		snapshot = ToggleIgnoreOption(
 			workspace.Path,
@@ -47,8 +44,7 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 			services,
 			snapshot,
 			dotFoldersChecked: false,
-			emptyFoldersChecked: false,
-			expectedRoots: [".workspace", "empty-root", "src"]);
+			emptyFoldersChecked: false);
 
 		snapshot = ToggleIgnoreOption(
 			workspace.Path,
@@ -61,8 +57,7 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 			services,
 			snapshot,
 			dotFoldersChecked: true,
-			emptyFoldersChecked: false,
-			expectedRoots: ["empty-root", "src"]);
+			emptyFoldersChecked: false);
 
 		snapshot = ToggleIgnoreOption(
 			workspace.Path,
@@ -75,8 +70,7 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 			services,
 			snapshot,
 			dotFoldersChecked: true,
-			emptyFoldersChecked: true,
-			expectedRoots: ["src"]);
+			emptyFoldersChecked: true);
 	}
 
 	[Fact]
@@ -102,7 +96,6 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 		AssertIgnoreOption(refreshed, IgnoreOptionId.EmptyFolders, expectedChecked: true, expectedCount: 1);
 		AssertGitFilteringPair(refreshed, expectedUseGitIgnoreChecked: true);
 		AssertCloneMetadataExcluded(refreshed);
-		Assert.Equal(["app", "worker"], SnapshotRootNames(refreshed));
 		Assert.DoesNotContain(refreshed.IgnoreOptions, option => option.Id is
 			IgnoreOptionId.HiddenFolders or
 			IgnoreOptionId.SmartIgnore);
@@ -117,7 +110,6 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 		AssertIgnoreOption(allDisabled, IgnoreOptionId.EmptyFolders, expectedChecked: false, expectedCount: 1);
 		AssertGitFilteringPair(allDisabled, expectedUseGitIgnoreChecked: false);
 		AssertCloneMetadataExcluded(allDisabled);
-		Assert.Equal([".github", "app", "empty-cache", "worker"], SnapshotRootNames(allDisabled));
 		Assert.DoesNotContain(allDisabled.IgnoreOptions, option => option.Id is
 			IgnoreOptionId.HiddenFolders or
 			IgnoreOptionId.SmartIgnore);
@@ -132,7 +124,6 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 		AssertIgnoreOption(allReenabled, IgnoreOptionId.EmptyFolders, expectedChecked: true, expectedCount: 1);
 		AssertGitFilteringPair(allReenabled, expectedUseGitIgnoreChecked: true);
 		AssertCloneMetadataExcluded(allReenabled);
-		Assert.Equal(["app", "worker"], SnapshotRootNames(allReenabled));
 		Assert.Equal(
 			refreshed.IgnoreOptions.Select(static option => option.Id),
 			allReenabled.IgnoreOptions.Select(static option => option.Id));
@@ -143,7 +134,7 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 	}
 
 	[Fact]
-	public void ManagedCloneMetadata_AllOffBeforeCandidatesAppear_KeepsNewCandidatesUncheckedAndRootsVisible()
+	public void ManagedCloneMetadata_AllOffBeforeCandidatesAppear_KeepsNewCandidatesUncheckedAndVisible()
 	{
 		using var workspace = CreateBareManagedCloneWorkspace();
 		var services = CreateManagedCloneServices();
@@ -154,7 +145,6 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 
 		AssertGitFilteringPair(baseline, expectedUseGitIgnoreChecked: true);
 		AssertCloneMetadataExcluded(baseline);
-		Assert.Equal(["src"], SnapshotRootNames(baseline));
 
 		var allOffIntent = ApplyAll(workspace.Path, services, baseline, isChecked: false);
 
@@ -183,7 +173,6 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 			IgnoreOptionId.SmartIgnore);
 		AssertGitFilteringPair(discovered, expectedUseGitIgnoreChecked: false);
 		AssertCloneMetadataExcluded(discovered);
-		Assert.Equal([".settings", "empty-root", "src"], SnapshotRootNames(discovered));
 		AssertTreePathVisible(workspace.Path, services, discovered, Path.Combine(".settings", "config.json"));
 		AssertTreePathVisible(workspace.Path, services, discovered, "empty-root");
 		AssertTreePathVisible(workspace.Path, services, discovered, Path.Combine("src", ".env"));
@@ -203,7 +192,6 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 		AssertIgnoreOption(allReenabled, IgnoreOptionId.ExtensionlessFiles, expectedChecked: true, expectedCount: 1);
 		AssertGitFilteringPair(allReenabled, expectedUseGitIgnoreChecked: true);
 		AssertCloneMetadataExcluded(allReenabled);
-		Assert.Equal(["src"], SnapshotRootNames(allReenabled));
 		AssertTreePathHidden(workspace.Path, services, allReenabled, Path.Combine(".settings", "config.json"));
 		AssertTreePathHidden(workspace.Path, services, allReenabled, "empty-root");
 		AssertTreePathHidden(workspace.Path, services, allReenabled, Path.Combine("src", ".env"));
@@ -216,7 +204,7 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 	}
 
 	[Fact]
-	public void ManagedCloneMetadata_UncheckedEmptyRootDisappearsAndReappears_RestoresStateAndProjection()
+	public void ManagedCloneMetadata_UncheckedEmptyFolderDisappearsAndReappears_RestoresState()
 	{
 		using var workspace = CreateBareManagedCloneWorkspace();
 		workspace.CreateDirectory("empty-first");
@@ -227,7 +215,6 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 			ProjectLoadWorkflowRefreshHarness.CreateDefaultContext(workspace.Path));
 
 		AssertIgnoreOption(baseline, IgnoreOptionId.EmptyFolders, expectedChecked: true, expectedCount: 1);
-		Assert.Equal(["src"], SnapshotRootNames(baseline));
 
 		var disabled = ToggleIgnoreOption(
 			workspace.Path,
@@ -237,7 +224,6 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 			isChecked: false);
 
 		AssertIgnoreOption(disabled, IgnoreOptionId.EmptyFolders, expectedChecked: false, expectedCount: 1);
-		Assert.Equal(["empty-first", "src"], SnapshotRootNames(disabled));
 		AssertTreePathVisible(workspace.Path, services, disabled, "empty-first");
 		SelectionSnapshotContractAssertions.AssertAllSectionsConsistent(
 			workspace.Path,
@@ -253,7 +239,6 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 		Assert.Equal(0, absent.IgnoreOptionCounts.EmptyFolders);
 		Assert.DoesNotContain(absent.IgnoreOptions, option => option.Id == IgnoreOptionId.EmptyFolders);
 		Assert.False(absent.IgnoreOptionStateCache[IgnoreOptionId.EmptyFolders]);
-		Assert.Equal(["src"], SnapshotRootNames(absent));
 		SelectionSnapshotContractAssertions.AssertAllSectionsConsistent(
 			workspace.Path,
 			services.IgnoreRulesService,
@@ -266,7 +251,6 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 			ProjectLoadWorkflowRefreshHarness.CreateContextFromSnapshot(workspace.Path, absent));
 
 		AssertIgnoreOption(reappeared, IgnoreOptionId.EmptyFolders, expectedChecked: false, expectedCount: 1);
-		Assert.Equal(["empty-second", "src"], SnapshotRootNames(reappeared));
 		AssertTreePathVisible(workspace.Path, services, reappeared, "empty-second");
 		SelectionSnapshotContractAssertions.AssertAllSectionsConsistent(
 			workspace.Path,
@@ -281,7 +265,6 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 			isChecked: true);
 
 		AssertIgnoreOption(reenabled, IgnoreOptionId.EmptyFolders, expectedChecked: true, expectedCount: 1);
-		Assert.Equal(["src"], SnapshotRootNames(reenabled));
 		AssertTreePathHidden(workspace.Path, services, reenabled, "empty-second");
 		SelectionSnapshotContractAssertions.AssertAllSectionsConsistent(
 			workspace.Path,
@@ -307,7 +290,6 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 		Assert.Equal(2, baseline.IgnoreOptionCounts.DotFolders);
 		AssertIgnoreOption(baseline, IgnoreOptionId.DotFolders, expectedChecked: true, expectedCount: 2);
 		AssertCloneMetadataExcluded(baseline);
-		Assert.Equal(["src"], SnapshotRootNames(baseline));
 		AssertTreePathHidden(workspace.Path, services, baseline, Path.Combine("src", ".git", "metadata.txt"));
 
 		var dotFoldersDisabled = ToggleIgnoreOption(
@@ -319,7 +301,6 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 
 		AssertIgnoreOption(dotFoldersDisabled, IgnoreOptionId.DotFolders, expectedChecked: false, expectedCount: 2);
 		AssertCloneMetadataExcluded(dotFoldersDisabled);
-		Assert.Equal(["src"], SnapshotRootNames(dotFoldersDisabled));
 		AssertTreePathHidden(workspace.Path, services, dotFoldersDisabled, Path.Combine("src", ".git"));
 		AssertTreePathHidden(workspace.Path, services, dotFoldersDisabled, Path.Combine("src", ".git", "metadata.txt"));
 		AssertTreePathVisible(workspace.Path, services, dotFoldersDisabled, Path.Combine("src", ".github", "workflow.yml"));
@@ -338,7 +319,6 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 
 		AssertIgnoreOption(dotFoldersReenabled, IgnoreOptionId.DotFolders, expectedChecked: true, expectedCount: 2);
 		AssertCloneMetadataExcluded(dotFoldersReenabled);
-		Assert.Equal(["src"], SnapshotRootNames(dotFoldersReenabled));
 		AssertTreePathHidden(workspace.Path, services, dotFoldersReenabled, Path.Combine("src", ".git", "metadata.txt"));
 		SelectionSnapshotContractAssertions.AssertAllSectionsConsistent(
 			workspace.Path,
@@ -349,7 +329,7 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 	[Theory]
 	[InlineData(CloneFixtureKind.Python, 2)]
 	[InlineData(CloneFixtureKind.DotNet, 1)]
-	public void ManagedCloneMetadata_AllAndFileToggleCycles_KeepIgnoreRootsAndExtensionsCoherent(
+	public void ManagedCloneMetadata_AllAndFileToggleCycles_KeepIgnoreAndExtensionsCoherent(
 		CloneFixtureKind fixtureKind,
 		int expectedDotFileCount)
 	{
@@ -361,8 +341,12 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 			ProjectLoadWorkflowRefreshHarness.CreateDefaultContext(workspace.Path));
 
 		AssertStableCloneBoundary(baseline, expectedDotFileCount);
-		var baselineRootNames = SnapshotRootNames(baseline);
 		var baselineIgnoreOptions = baseline.IgnoreOptions.ToArray();
+		var allEnabledIgnoreOptions = baselineIgnoreOptions
+			.Select(static option => ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option.Id)
+				? option with { IsChecked = true }
+				: option)
+			.ToArray();
 
 		var current = baseline;
 		for (var cycle = 0; cycle < 3; cycle++)
@@ -374,15 +358,13 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 				expectedDotFilesChecked: false,
 				expectedExtensionlessChecked: false,
 				expectedUseGitIgnoreChecked: false);
-			Assert.Equal(baselineRootNames, SnapshotRootNames(current));
 			Assert.Contains(current.EffectiveExtensionOptions, option => option.Name == ".gitignore");
 			Assert.Contains(current.TreeInventory!.Entries, entry =>
 				!entry.IsDirectory && entry.RelativePath == ".gitignore");
 
 			current = ApplyAll(workspace.Path, services, current, isChecked: true);
 			AssertStableCloneBoundary(current, expectedDotFileCount);
-			Assert.Equal(baselineRootNames, SnapshotRootNames(current));
-			Assert.Equal(baselineIgnoreOptions, current.IgnoreOptions);
+			Assert.Equal(allEnabledIgnoreOptions, current.IgnoreOptions);
 
 			current = ToggleFileOption(
 				workspace.Path,
@@ -400,7 +382,7 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 				IgnoreOptionId.DotFiles,
 				isChecked: true);
 			AssertStableCloneBoundary(current, expectedDotFileCount);
-			Assert.Equal(baselineIgnoreOptions, current.IgnoreOptions);
+			Assert.Equal(allEnabledIgnoreOptions, current.IgnoreOptions);
 		}
 
 		current = RefreshFull(
@@ -409,8 +391,7 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 			ProjectLoadWorkflowRefreshHarness.CreateContextFromSnapshot(workspace.Path, current));
 
 		AssertStableCloneBoundary(current, expectedDotFileCount);
-		Assert.Equal(baselineRootNames, SnapshotRootNames(current));
-		Assert.Equal(baselineIgnoreOptions, current.IgnoreOptions);
+		Assert.Equal(allEnabledIgnoreOptions, current.IgnoreOptions);
 	}
 
 	[Fact]
@@ -480,10 +461,6 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 		{
 			[optionId] = isChecked
 		};
-		var selectedRoots = snapshot.RootOptions!
-			.Where(static option => option.IsChecked)
-			.Select(static option => option.Name)
-			.ToHashSet(PathComparer.Default);
 		var liveSnapshot = services.Engine.ComputeLiveRefreshSnapshot(
 			context with
 			{
@@ -495,7 +472,6 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 				IgnoreAllPreference = null,
 				CaptureTreeInventory = true
 			},
-			selectedRoots,
 			TestContext.Current.CancellationToken);
 
 		return liveSnapshot with { RootOptions = snapshot.RootOptions };
@@ -531,13 +507,11 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 		ProjectLoadWorkflowRefreshHarness.WorkflowServices services,
 		SelectionRefreshSnapshot snapshot,
 		bool dotFoldersChecked,
-		bool emptyFoldersChecked,
-		string[] expectedRoots)
+		bool emptyFoldersChecked)
 	{
 		AssertIgnoreOption(snapshot, IgnoreOptionId.DotFolders, dotFoldersChecked, expectedCount: 1);
 		AssertIgnoreOption(snapshot, IgnoreOptionId.EmptyFolders, emptyFoldersChecked, expectedCount: 1);
 		AssertCloneMetadataExcluded(snapshot);
-		Assert.Equal(expectedRoots, SnapshotRootNames(snapshot));
 		SelectionSnapshotContractAssertions.AssertAllSectionsConsistent(
 			rootPath,
 			services.IgnoreRulesService,
@@ -675,9 +649,6 @@ public sealed class GitCloneIgnoreLifecycleIntegrationTests
 		Assert.Equal(expectedUseGitIgnoreChecked, useGitIgnore.IsChecked);
 		Assert.False(trackedOnly.IsChecked);
 	}
-
-	private static string[] SnapshotRootNames(SelectionRefreshSnapshot snapshot) =>
-		snapshot.RootOptions!.Select(static option => option.Name).ToArray();
 
 	private static TemporaryDirectory CreateWorkspace(CloneFixtureKind fixtureKind)
 	{

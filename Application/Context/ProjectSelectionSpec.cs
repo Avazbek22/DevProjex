@@ -9,7 +9,8 @@ public enum ProjectExclusion
 	DotFiles,
 	EmptyFolders,
 	EmptyFiles,
-	ExtensionlessFiles
+	ExtensionlessFiles,
+	HideSecrets
 }
 
 public enum ProjectProfileSourceKind
@@ -37,7 +38,13 @@ public sealed record ProjectSelectionSpec(
 	IReadOnlyCollection<string>? SelectedPaths = null,
 	GitFilteringMode? GitMode = null,
 	IReadOnlyCollection<ProjectExclusion>? Exclusions = null,
-	ProjectProfileReference? ProfileSource = null)
+	bool? HideSecrets = null,
+	bool? CompressCode = null,
+	bool? StripComments = null,
+	bool? StripBlankLines = null,
+	ProjectProfileReference? ProfileSource = null,
+	bool? HidePrivateData = null,
+	string? GitDiffRange = null)
 {
 	/// <summary>
 	/// Preserves which resolved components came from explicit/profile intent when a selection
@@ -66,6 +73,11 @@ public sealed record ProjectSelectionSpec(
 	public static ProjectSelectionSpec Standard { get; } = new(
 		GitMode: GitFilteringMode.RespectGitIgnore,
 		Exclusions: StandardExclusions,
+		HideSecrets: false,
+		HidePrivateData: false,
+		CompressCode: false,
+		StripComments: false,
+		StripBlankLines: false,
 		ProfileSource: ProjectProfileReference.Standard);
 }
 
@@ -80,7 +92,12 @@ public sealed record ProjectSelectionApplicationIntent(
 	ProjectSelectionApplicationMode Roots,
 	ProjectSelectionApplicationMode Extensions,
 	ProjectSelectionApplicationMode GitMode,
-	ProjectSelectionApplicationMode Exclusions);
+	ProjectSelectionApplicationMode Exclusions,
+	ProjectSelectionApplicationMode HideSecrets = ProjectSelectionApplicationMode.Preserve,
+	ProjectSelectionApplicationMode CompressCode = ProjectSelectionApplicationMode.Preserve,
+	ProjectSelectionApplicationMode StripComments = ProjectSelectionApplicationMode.Preserve,
+	ProjectSelectionApplicationMode StripBlankLines = ProjectSelectionApplicationMode.Preserve,
+	ProjectSelectionApplicationMode HidePrivateData = ProjectSelectionApplicationMode.Preserve);
 
 internal sealed record LocalProjectSelectionState(
 	ProjectSelectionProfile Profile,

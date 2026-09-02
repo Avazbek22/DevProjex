@@ -1,0 +1,27 @@
+{
+  "id": "xml",
+  "displayName": "XML",
+  "extensions": [
+    ".xml",
+    ".xaml",
+    ".axaml",
+    ".csproj",
+    ".props",
+    ".targets",
+    ".vbproj",
+    ".fsproj",
+    ".nuspec",
+    ".config",
+    ".resx"
+  ],
+  "library": "tree-sitter-xml",
+  "export": "tree_sitter_xml",
+  "queryVersion": 1,
+  "transformCapabilities": [
+    "comments",
+    "blankLines"
+  ],
+  "blockPlaceholder": "",
+  "containerNodeTypes": [],
+  "executableOwnerKinds": []
+}

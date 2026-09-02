@@ -10,21 +10,21 @@
 │                                                     ││internal sealed class LargeMarker061 { }                      ·│
 │                                                     ││xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx·│
 │                                                     ││                                                              ·│
-│                                                     ││                                                              ·│
-│                                                     ││src/File062.cs:                                               ┃│
+│                                                     ││                                                              ┃│
+│                                                     ││src/File062.cs:                                               ·│
 │                                                     ││                                                              ·│
 │                                                     ││internal sealed class LargeMarker062 { }                      ·│
 │                                                     ││xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx·│
 │                                                     ││                                                              ·│
 │                                                     ││                                                              ·│
 │                                                     ││src/File063.cs:                                               ·│
-│                                                     ││                                                              ·│
-│                                                     ││internal sealed class LargeMarker063 { }                      ·│
-│                                                     ││xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx·│
 │                                                     ││                                                              ▼│
 │                                                     ││◄━···························································► │
-│                                                     ││ / 1/1  |  F 60-63/120  |  L 357-377/718  |  C 1-62/5 500      │
+│                                                     ││ <SPINNER> 1/1  |  F 60-63/120  |  L 360-377/721  |  C 1-62/5 500      │
 └─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
 
+┌┤  PARAMETERS├────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ Content 0/5 · Exclusions 0/0 · File types 1/1                                                                        │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
  Files 120 · Folders 2 · 649.34 KB · ~<TOKENS> tokens · Warnings 0 · Errors 0
- j/k Scroll   PgUp/PgDn Page   / Search   n/N Match   1/2/3 View   F Format   Tab/F6 Parameters
+ j/k Scroll   {/} Section   Ctrl+G Line   W Wrap   / Search   n/N Match   : Commands

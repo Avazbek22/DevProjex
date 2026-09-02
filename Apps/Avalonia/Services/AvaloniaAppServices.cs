@@ -1,7 +1,9 @@
 using DevProjex.Infrastructure.ThemePresets;
 using DevProjex.Infrastructure.RecentProjects;
-using DevProjex.Infrastructure.Reports;
 using DevProjex.Application.Updates;
+using DevProjex.Infrastructure.FileSystem;
+using DevProjex.Application.DesktopControl;
+using DevProjex.Terminal.DesktopControl;
 
 namespace DevProjex.Avalonia.Services;
 
@@ -32,6 +34,7 @@ public sealed record AvaloniaAppServices(
     IToastService ToastService,
     IIconStore IconStore,
     IGitRepositoryService GitRepositoryService,
+	IGitScopePathProvider GitScopePathProvider,
     IRepoCacheService RepoCacheService,
     IZipDownloadService ZipDownloadService,
     IFileContentAnalyzer FileContentAnalyzer,
@@ -39,4 +42,15 @@ public sealed record AvaloniaAppServices(
     IApplicationUpdateService ApplicationUpdateService,
     ITerminalCommandSetupService TerminalCommandSetupService,
     ITaskbarProgressService TaskbarProgressService,
-    SessionMetricsRecorder SessionMetricsRecorder);
+    SessionMetricsRecorder SessionMetricsRecorder,
+	SecretRedactionSession SecretRedactionSession,
+	CodeCompressionSession CodeCompressionSession,
+	IProjectPathLauncher ProjectPathLauncher)
+{
+	internal Func<IDesktopInteractionHandler, string?, CancellationToken, Task<DesktopControlServer>>
+		DesktopControlServerFactory { get; init; } = static (handler, projectPath, cancellationToken) =>
+			DesktopControlServer.StartAsync(
+				handler,
+				projectPath,
+				cancellationToken: cancellationToken);
+}

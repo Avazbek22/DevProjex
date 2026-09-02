@@ -1,0 +1,18 @@
+{
+  "id": "bash",
+  "displayName": "Bash",
+  "extensions": [
+    ".sh",
+    ".bash"
+  ],
+  "library": "tree-sitter-bash",
+  "export": "tree_sitter_bash",
+  "queryVersion": 1,
+  "transformCapabilities": [
+    "comments",
+    "blankLines"
+  ],
+  "blockPlaceholder": "",
+  "containerNodeTypes": [],
+  "executableOwnerKinds": []
+}

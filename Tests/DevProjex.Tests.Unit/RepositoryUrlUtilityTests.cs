@@ -28,19 +28,77 @@ public sealed class RepositoryUrlUtilityTests
 		Assert.True(RepositoryUrlUtility.AreEquivalent(left, right));
 		Assert.Equal(
 			RepositoryUrlUtility.GetComparisonKey(left),
-			RepositoryUrlUtility.GetComparisonKey(right),
-			ignoreCase: true);
+			RepositoryUrlUtility.GetComparisonKey(right));
+	}
+
+	[Theory]
+	[InlineData("https://GITHUB.com/Owner/Repo.git", "https://github.com/owner/repo")]
+	[InlineData("https://gitlab.com/Group/Repo.git", "git@gitlab.com:group/repo.git")]
+	[InlineData("https://BITBUCKET.org/Team/Repo.git", "https://bitbucket.org/team/repo")]
+	public void KnownRepositoryHostsUseCaseInsensitivePaths(string left, string right)
+	{
+		Assert.True(RepositoryUrlUtility.AreEquivalent(left, right));
+		Assert.Equal(
+			RepositoryUrlUtility.GetComparisonKey(left),
+			RepositoryUrlUtility.GetComparisonKey(right));
+	}
+
+	[Fact]
+	public void SelfHostedRepositoryUsesCaseInsensitiveHostAndCaseSensitivePath()
+	{
+		const string canonical = "https://Git.Example.test/Owner/Repo.git";
+
+		Assert.True(RepositoryUrlUtility.AreEquivalent(
+			canonical,
+			"https://git.example.test/Owner/Repo"));
+		Assert.False(RepositoryUrlUtility.AreEquivalent(
+			canonical,
+			"https://git.example.test/owner/repo"));
+		Assert.False(RepositoryUrlUtility.AreEquivalent(
+			canonical,
+			"https://git.example.test/Owner/Repo.GIT"));
+	}
+
+	[Fact]
+	public void ComparisonIdentityCarriesItsVersion()
+	{
+		Assert.StartsWith(
+			"v2:",
+			RepositoryUrlUtility.GetComparisonKey("https://example.com/Owner/Repo.git"),
+			StringComparison.Ordinal);
 	}
 
 	[Fact]
 	public void SafeDisplayRemovesCredentialsQueryAndFragment()
 	{
 		var display = RepositoryUrlUtility.ToSafeDisplay(
-			"https://user:super-secret@example.com/owner/repo.git?access_token=hidden#fragment");
+			"https:" + "//user:super-secret@example.com/owner/repo.git?access_token=hidden#fragment");
 
 		Assert.Equal("https://example.com/owner/repo.git", display);
 		Assert.DoesNotContain("super-secret", display, StringComparison.Ordinal);
 		Assert.DoesNotContain("access_token", display, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void SafeDisplayRemovesScpStyleQueryAndFragment()
+	{
+		var display = RepositoryUrlUtility.ToSafeDisplay(
+			"git@example.com:owner/repo.git?access_token=hidden#fragment");
+
+		Assert.Equal("git@example.com:owner/repo.git", display);
+		Assert.DoesNotContain("access_token", display, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("https://user:super-secret@[invalid/repo")]
+	[InlineData("ssh://user:super-secret@")]
+	[InlineData("user:super-secret@example.com:repo")]
+	public void SafeDisplayRejectsMalformedSourcesInsteadOfReturningCredentials(string source)
+	{
+		var display = RepositoryUrlUtility.ToSafeDisplay(source);
+
+		Assert.Empty(display);
+		Assert.DoesNotContain("super-secret", display, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -53,6 +111,32 @@ public sealed class RepositoryUrlUtilityTests
 
 		Assert.StartsWith("file://", display, StringComparison.OrdinalIgnoreCase);
 		Assert.Equal(repositoryUrl.TrimEnd('/'), display);
+	}
+
+	[Fact]
+	public void LocalRepositoryIdentityUsesPlatformPathCaseSemantics()
+	{
+		var upperPath = Path.Combine(Path.GetTempPath(), "DevProjex", "CaseIdentity", "Repo.git");
+		var lowerPath = Path.Combine(Path.GetTempPath(), "DevProjex", "CaseIdentity", "repo.git");
+		var upperUri = new Uri(upperPath).AbsoluteUri;
+		var lowerUri = new Uri(lowerPath).AbsoluteUri;
+
+		Assert.Equal(
+			OperatingSystem.IsWindows(),
+			RepositoryUrlUtility.AreEquivalent(upperUri, lowerUri));
+		Assert.Equal(
+			OperatingSystem.IsWindows(),
+			RepositoryUrlUtility.AreEquivalent(upperPath, lowerPath));
+	}
+
+	[Fact]
+	public void LocalRepositoryIdentityStillIgnoresGitSuffix()
+	{
+		var repositoryPath = Path.Combine(Path.GetTempPath(), "DevProjex", "LocalIdentity", "repo");
+
+		Assert.True(RepositoryUrlUtility.AreEquivalent(
+			new Uri(repositoryPath).AbsoluteUri,
+			new Uri(repositoryPath + ".git").AbsoluteUri));
 	}
 
 	[Theory]
@@ -74,6 +158,36 @@ public sealed class RepositoryUrlUtilityTests
 	public void SupportedRemoteCloneSourcesAreAccepted(string source)
 	{
 		Assert.True(RepositoryUrlUtility.IsSupportedCloneSource(source));
+	}
+
+	[Theory]
+	[InlineData("https://example.com/owner/repo.git")]
+	[InlineData("http://example.com/owner/repo.git")]
+	[InlineData("ssh://git@example.com/owner/repo.git")]
+	[InlineData("git://example.com/owner/repo.git")]
+	[InlineData("git@github.com:owner/repo.git")]
+	public void NetworkCloneSourcesAreAccepted(string source)
+	{
+		Assert.True(RepositoryUrlUtility.IsNetworkCloneSource(source));
+	}
+
+	[Theory]
+	[InlineData("")]
+	[InlineData("file:///tmp/repository")]
+	[InlineData("relative/repository")]
+	public void NonNetworkCloneSourcesAreRejected(string source)
+	{
+		Assert.False(RepositoryUrlUtility.IsNetworkCloneSource(source));
+	}
+
+	[Fact]
+	public void ExistingAbsoluteFolderIsNotANetworkCloneSource()
+	{
+		using var temporary = new TemporaryDirectory();
+
+		Assert.False(RepositoryUrlUtility.IsNetworkCloneSource(temporary.Path));
+		Assert.False(RepositoryUrlUtility.IsNetworkCloneSource(
+			Path.Combine(temporary.Path, "MissingRepository")));
 	}
 
 	[Fact]

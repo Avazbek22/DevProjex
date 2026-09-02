@@ -20,7 +20,7 @@ public sealed class ProgressRenderer(
 		if (!capabilities.UseInteractiveProgress)
 			return await operation(null).ConfigureAwait(false);
 		if (!capabilities.UseAnsi)
-			return await RunPlainProjectExportAsync(operation).ConfigureAwait(false);
+			return await RunInteractiveTextProjectExportAsync(operation).ConfigureAwait(false);
 
 		var channel = Channel.CreateBounded<ProjectCopyExportProgress>(
 			new BoundedChannelOptions(32)
@@ -128,6 +128,33 @@ public sealed class ProgressRenderer(
 		return await operationTask.ConfigureAwait(false);
 	}
 
+	private async Task<T> RunInteractiveTextProjectExportAsync<T>(
+		Func<IProgress<ProjectCopyExportProgress>?, Task<T>> operation)
+	{
+		var state = new LatestProgressState();
+		var progress = new CallbackProgress<ProjectCopyExportProgress>(state.Update);
+		var stopwatch = Stopwatch.StartNew();
+		using var line = new CarriageReturnProgressLine(environment);
+		var operationTask = operation(progress);
+		long renderedRevision = 0;
+
+		while (!operationTask.IsCompleted)
+		{
+			await Task.WhenAny(operationTask, Task.Delay(40)).ConfigureAwait(false);
+			var snapshot = state.Read();
+			if (snapshot.Revision == renderedRevision)
+				continue;
+
+			line.Render(FormatProgress(snapshot.Progress, stopwatch.Elapsed));
+			renderedRevision = snapshot.Revision;
+		}
+
+		var finalSnapshot = state.Read();
+		if (finalSnapshot.Revision > 0 && finalSnapshot.Revision != renderedRevision)
+			line.Render(FormatProgress(finalSnapshot.Progress, stopwatch.Elapsed));
+		return await operationTask.ConfigureAwait(false);
+	}
+
 	private void ApplyUpdate(
 		ProgressTask task,
 		ProjectCopyExportProgress update)
@@ -146,17 +173,21 @@ public sealed class ProgressRenderer(
 	private void WritePlainProgress(
 		ProjectCopyExportProgress update,
 		TimeSpan elapsed)
+		=> environment.Error.WriteLine(FormatProgress(update, elapsed));
+
+	private string FormatProgress(
+		ProjectCopyExportProgress update,
+		TimeSpan elapsed)
 	{
 		var total = Math.Max(1, update.TotalEntryCount);
 		var processed = Math.Clamp(update.ProcessedEntryCount, 0, total);
 		var percentage = (int)Math.Floor(processed * 100d / total);
-		environment.Error.WriteLine(
-			$"{localization.Format(
-				"Terminal.Progress.ExportProject",
-				processed,
-				update.TotalEntryCount,
-				FormatBytes(update.BytesWritten))} | " +
-			$"{percentage}% | {elapsed:m\\:ss}");
+		var description = localization.Format(
+			"Terminal.Progress.ExportProject",
+			processed,
+			update.TotalEntryCount,
+			FormatBytes(update.BytesWritten));
+		return $"{description} | {percentage}% | {elapsed:m\\:ss}";
 	}
 
 	private static string FormatBytes(long bytes)

@@ -1,0 +1,17 @@
+{
+  "id": "toml",
+  "displayName": "TOML",
+  "extensions": [
+    ".toml"
+  ],
+  "library": "tree-sitter-toml",
+  "export": "tree_sitter_toml",
+  "queryVersion": 1,
+  "transformCapabilities": [
+    "comments",
+    "blankLines"
+  ],
+  "blockPlaceholder": "",
+  "containerNodeTypes": [],
+  "executableOwnerKinds": []
+}

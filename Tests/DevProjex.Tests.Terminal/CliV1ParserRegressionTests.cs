@@ -8,6 +8,141 @@ namespace DevProjex.Tests.Terminal;
 
 public sealed class CliV1ParserRegressionTests
 {
+	[Theory]
+	[InlineData("analyze|.|--hide-secrets|on|--no-strip-comments")]
+	[InlineData("analyze|.|-p|standard|-r|src|-e|.cs|-s|src/a.cs|-x|smart-ignore")]
+	[InlineData("tree|https://github.com/owner/repo|-b|main|--force|-o|tree.txt")]
+	[InlineData("cache|remove|https://github.com/owner/repo|-y|-n|-f|json")]
+	[InlineData("cache|update|https://github.com/owner/repo")]
+	[InlineData("profile|save|.|--hide-private-data|off")]
+	[InlineData("profile|validate|profile.json|-f|json")]
+	[InlineData("ui|list|--timeout|5s|--quiet")]
+	public void TerminalPolishFormsParse(string invocation)
+	{
+		var result = new DevProjexCommandTree(new TestTerminalEnvironment())
+			.Build()
+			.Parse(invocation.Split('|'));
+		Assert.Empty(result.Errors);
+	}
+
+	[Fact]
+	public void PositiveAndNegativeBooleanFormsConflict()
+	{
+		var result = new DevProjexCommandTree(new TestTerminalEnvironment())
+			.Build()
+			.Parse(["analyze", ".", "--hide-secrets", "--no-hide-secrets"]);
+		Assert.NotEmpty(result.Errors);
+	}
+
+	[Theory]
+	[InlineData("--hide-secrets")]
+	[InlineData("--hide-private-data")]
+	[InlineData("--compress-code")]
+	[InlineData("--strip-comments")]
+	[InlineData("--strip-blank-lines")]
+	public void BareTransformationFlagBeforeProjectDoesNotConsumeProject(string option)
+	{
+		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
+		var command = ResolveCommand(root, ["analyze"]);
+		var project = Assert.IsType<Argument<string?>>(Assert.Single(command.Arguments));
+
+		var result = root.Parse(["analyze", option, "project-root"]);
+
+		Assert.Empty(result.Errors);
+		Assert.Equal("project-root", result.GetValue(project));
+	}
+
+	[Fact]
+	public void BareMisspelledProfileTokenIsRejectedAsAChoiceInsteadOfAPath()
+	{
+		var result = new DevProjexCommandTree(new TestTerminalEnvironment())
+			.Build()
+			.Parse(["analyze", ".", "--profile", "stanadrd"]);
+
+		var error = Assert.Single(result.Errors);
+		Assert.Contains(
+			"standard, local, FILE",
+			error.Message,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void DevProjexEnvironmentDefaultsApplyAndExplicitFlagsWin()
+	{
+		var environment = new TestTerminalEnvironment
+		{
+			Variables = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+			{
+				["DEVPROJEX_COLOR"] = "always",
+				["DEVPROJEX_PROGRESS"] = "never",
+				["DEVPROJEX_VERBOSITY"] = "detailed",
+				["DEVPROJEX_LANGUAGE"] = "uz"
+			}
+		};
+		var root = new DevProjexCommandTree(environment).Build();
+		var analyze = ResolveCommand(root, ["analyze"]);
+		var defaults = root.Parse(["analyze", "."]);
+
+		Assert.Equal(TerminalColorMode.Always,
+			defaults.GetValue(Assert.IsType<Option<TerminalColorMode>>(
+				root.Options.Single(static option => option.Name == "--color"))));
+		Assert.Equal(TerminalProgressMode.Never,
+			defaults.GetValue(Assert.IsType<Option<TerminalProgressMode>>(
+				analyze.Options.Single(static option => option.Name == "--progress"))));
+		Assert.Equal(TerminalVerbosity.Detailed,
+			defaults.GetValue(Assert.IsType<Option<TerminalVerbosity>>(
+				root.Options.Single(static option => option.Name == "--verbosity"))));
+		Assert.Equal(AppLanguage.Uz,
+			defaults.GetValue(Assert.IsType<Option<AppLanguage>>(
+				root.Options.Single(static option => option.Name == "--language"))));
+
+		var explicitValues = root.Parse([
+			"analyze", ".",
+			"--color", "never",
+			"--progress", "always",
+			"--verbosity", "minimal",
+			"--language", "en"
+		]);
+		Assert.Empty(explicitValues.Errors);
+		Assert.Equal(TerminalColorMode.Never,
+			explicitValues.GetValue(Assert.IsType<Option<TerminalColorMode>>(
+				root.Options.Single(static option => option.Name == "--color"))));
+		Assert.Equal(TerminalProgressMode.Always,
+			explicitValues.GetValue(Assert.IsType<Option<TerminalProgressMode>>(
+				analyze.Options.Single(static option => option.Name == "--progress"))));
+	}
+
+	[Fact]
+	public void RecursiveQuietAliasConflictsWithExplicitVerbosity()
+	{
+		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
+
+		var parseResult = root.Parse([
+			"doctor",
+			"--quiet",
+			"--verbosity", "normal"
+		]);
+
+		Assert.NotEmpty(parseResult.Errors);
+	}
+
+	[Fact]
+	public void DevProjexRootPrecedesClaudeProjectDirUnlessRootsAreExplicit()
+	{
+		var variables = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+		{
+			["DEVPROJEX_ROOT"] = "devprojex-root",
+			["CLAUDE_PROJECT_DIR"] = "claude-root"
+		};
+
+		Assert.Equal(
+			["explicit-root"],
+			McpRootSourceResolver.Resolve(["explicit-root"], variables, "working-root"));
+		Assert.Equal(
+			["devprojex-root"],
+			McpRootSourceResolver.Resolve([], variables, "working-root"));
+	}
+
 	[Fact]
 	public void SelectionChoiceSetsAreDerivedFromTheSharedCatalogAndRejectInvalidEnums()
 	{
@@ -44,15 +179,23 @@ public sealed class CliV1ParserRegressionTests
 		AssertCompleteChoiceSet(CliChoiceSets.ProgressMode);
 		AssertCompleteChoiceSet(CliChoiceSets.Verbosity);
 		AssertCompleteChoiceSet(CliChoiceSets.DesktopView);
-		AssertCompleteChoiceSet(CliChoiceSets.GitMode);
+		Assert.Equal(
+			Enum.GetValues<GitFilteringMode>().Where(static mode => mode != GitFilteringMode.Diff),
+			CliChoiceSets.GitMode.Tokens.Select(token =>
+			{
+				Assert.True(CliChoiceSets.GitMode.TryParse(token, out var mode));
+				return mode;
+			}));
+		Assert.False(CliChoiceSets.GitMode.TryParse("diff:main..feature", out _));
 		AssertCompleteChoiceSet(CliChoiceSets.CompletionShell);
 		AssertCompleteChoiceSet(CliChoiceSets.DeveloperScenario);
 		AssertCompleteChoiceSet(CliChoiceSets.Language);
+		AssertCompleteChoiceSet(CliChoiceSets.RecentKind);
 
 		Assert.Equal(
 			Enum.GetValues<ProjectExclusion>().Order(),
-			ProjectPresentationCatalog.Exclusions
-				.Select(static descriptor => descriptor.Id)
+			ProjectPresentationCatalog.LegacyExclusionChoices
+				.Select(static descriptor => descriptor.RequireId())
 				.Order());
 		Assert.Equal(
 			Enum.GetValues<ProjectContextView>().Order(),
@@ -450,12 +593,45 @@ public sealed class CliV1ParserRegressionTests
 	}
 
 	[Theory]
+	[InlineData("folder", "output", true, true)]
+	[InlineData("zip", "output.txt", false, true)]
+	[InlineData("folder", "output", false, false)]
+	[InlineData("zip", "output.ZIP", true, false)]
+	public void ProjectExportUsageIsValidatedBeforeSourceResolution(
+		string kind,
+		string destination,
+		bool force,
+		bool expectsError)
+	{
+		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
+		var arguments = new List<string>
+		{
+			"export", "project", "https://example.com/owner/repository.git",
+			"--as", kind,
+			"--output", destination
+		};
+		if (force)
+			arguments.Add("--force");
+
+		var parseResult = root.Parse(arguments);
+
+		Assert.Equal(expectsError, parseResult.Errors.Count > 0);
+	}
+
+	[Theory]
 	[InlineData("--profile|standard")]
 	[InlineData("--root|src")]
 	[InlineData("--extension|.cs")]
 	[InlineData("--select|src/app.cs")]
+	[InlineData("--select-from|selection.txt")]
 	[InlineData("--git-mode|none")]
 	[InlineData("--exclude|none")]
+	[InlineData("--hide-secrets")]
+	[InlineData("--hide-private-data")]
+	[InlineData("--compress-code")]
+	[InlineData("--strip-comments")]
+	[InlineData("--strip-blank-lines")]
+	[InlineData("--branch|main")]
 	public void OpenLastRejectsEveryExplicitSelectionOverride(string selectionOverride)
 	{
 		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
@@ -536,6 +712,16 @@ public sealed class CliV1ParserRegressionTests
 		Assert.NotEmpty(parseResult.Errors);
 	}
 
+	[Fact]
+	public void UiTimeoutBeyondCancellationTimerRangeIsRejectedBeforeTheAction()
+	{
+		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
+
+		var parseResult = root.Parse(["ui", "status", "--timeout=50.00:00:00"]);
+
+		Assert.NotEmpty(parseResult.Errors);
+	}
+
 	[Theory]
 	[InlineData("NaNs")]
 	[InlineData("Infinitys")]
@@ -560,6 +746,8 @@ public sealed class CliV1ParserRegressionTests
 	[InlineData("Infinitys", true)]
 	[InlineData("999999999999999999999999s", false)]
 	[InlineData("999999999999999999999999s", true)]
+	[InlineData("50.00:00:00", false)]
+	[InlineData("50.00:00:00", true)]
 	public async Task InvalidUiTimeoutIsASafeUsageError(
 		string token,
 		bool equalsSyntax)
@@ -628,7 +816,8 @@ public sealed class CliV1ParserRegressionTests
 		var localization = new LocalizationService(
 			new JsonLocalizationCatalog(),
 			AppLanguage.En);
-		var selection = new SelectionOptions(localization, "auto");
+		var environment = new TestTerminalEnvironment();
+		var selection = new SelectionOptions(localization, environment, "auto");
 		var command = new RootCommand();
 		selection.AddTo(command);
 		var parseResult = command.Parse([]);
@@ -641,6 +830,32 @@ public sealed class CliV1ParserRegressionTests
 
 		Assert.Equal(ProjectProfileSourceKind.Local, resolved.ProfileSource?.Kind);
 		Assert.Equal([".cs"], resolved.Extensions);
+	}
+
+	[Fact]
+	public async Task OpenSelectionResolvesExplicitHidePrivateDataIntent()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = CreateProject(workspace);
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("open-private-data"))
+			.Create(AppLanguage.En);
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);
+		var environment = new TestTerminalEnvironment();
+		var selection = new SelectionOptions(localization, environment, "auto");
+		var command = new RootCommand();
+		selection.AddTo(command);
+		var parseResult = command.Parse(["--hide-private-data"]);
+
+		var resolved = await selection.ResolveAsync(
+			parseResult,
+			project,
+			services,
+			TestContext.Current.CancellationToken);
+
+		Assert.True(resolved.HidePrivateData);
+		Assert.Equal(
+			ProjectSelectionApplicationMode.ApplyResolvedValue,
+			resolved.ApplicationIntent?.HidePrivateData);
 	}
 
 	private static TerminalApplication CreateApplication(

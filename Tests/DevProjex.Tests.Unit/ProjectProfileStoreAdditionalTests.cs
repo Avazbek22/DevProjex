@@ -63,8 +63,98 @@ public sealed class ProjectProfileStoreAdditionalTests
 		try
 		{
 			var store = CreateStore(tempRoot);
-			store.ClearAllProfiles();
+			var result = store.ClearAllProfiles();
+			Assert.Equal(ProjectProfileClearStatus.Cleared, result);
 			Assert.False(File.Exists(store.GetPath()));
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
+	public void ClearAllProfiles_WhenStorageLockIsBusy_ReturnsBusyAndPreservesProfiles()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			var projectPath = Path.Combine(tempRoot, "RepoBusy");
+			store.SaveProfile(projectPath, CreateProfile());
+			using var heldLock = new FileStream(
+				store.GetPath() + ".lock",
+				FileMode.OpenOrCreate,
+				FileAccess.ReadWrite,
+				FileShare.None);
+
+			var result = store.ClearAllProfiles();
+
+			Assert.Equal(ProjectProfileClearStatus.Busy, result);
+			Assert.True(File.Exists(store.GetPath()));
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
+	public void ClearAllProfiles_WhenStorageUsesFutureSchema_ReturnsFutureSchemaAndPreservesDocument()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			var storagePath = store.GetPath();
+			Directory.CreateDirectory(Path.GetDirectoryName(storagePath)!);
+			const string futureDocument = "{\"schemaVersion\":2147483647,\"profiles\":{}}";
+			File.WriteAllText(storagePath, futureDocument);
+
+			var result = store.ClearAllProfiles();
+
+			Assert.Equal(ProjectProfileClearStatus.FutureSchema, result);
+			Assert.Equal(futureDocument, File.ReadAllText(storagePath));
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
+	public void ClearAllProfiles_WhenStoragePathIsInvalid_ReturnsFailed()
+	{
+		var store = new ProjectProfileStore(() => string.Concat("invalid", '\0', "root"));
+
+		var result = store.ClearAllProfiles();
+
+		Assert.Equal(ProjectProfileClearStatus.Failed, result);
+	}
+
+	[Fact]
+	public async Task ClearAllProfiles_ReturnsClearedOnlyAfterPersistentMarksAreRemoved()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			var projectPath = Path.Combine(tempRoot, "RepoWithMarks");
+			store.SaveProfile(projectPath, CreateProfile());
+			var write = await store.AddMarkAsync(
+				projectPath,
+				new MarkedSecretProfileEntry("9f2a4c1e8b3d", "TOKEN", 24),
+				TestContext.Current.CancellationToken);
+			Assert.True(write.Succeeded);
+
+			var result = store.ClearAllProfiles();
+			var marks = await store.LoadMarksAsync(
+				projectPath,
+				TestContext.Current.CancellationToken);
+
+			Assert.Equal(ProjectProfileClearStatus.Cleared, result);
+			Assert.True(marks.Succeeded);
+			Assert.Empty(Assert.IsType<PersistentSecretMarksSnapshot>(marks.Snapshot).Marks);
 		}
 		finally
 		{
@@ -129,7 +219,7 @@ public sealed class ProjectProfileStoreAdditionalTests
 	}
 
 	[Fact]
-	public void SaveProfile_DropsWhitespaceAndDuplicateRootFolders()
+	public void SaveProfile_NormalizesRootFoldersUsingPlatformPathSemantics()
 	{
 		var tempRoot = CreateTempDirectory();
 		try
@@ -143,12 +233,18 @@ public sealed class ProjectProfileStoreAdditionalTests
 					SelectedIgnoreOptions: []));
 
 			Assert.True(store.TryLoadProfile(Path.Combine(tempRoot, "RepoA"), out var loaded));
-			var expectedRootFolders = new HashSet<string>(PathComparer.Default) { "src", "SRC", "tests" };
+			var expectedRootFolders = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer)
+			{
+				"src",
+				"SRC",
+				"tests"
+			};
+			if (!OperatingSystem.IsWindows())
+				expectedRootFolders.Add("   ");
 			Assert.Equal(expectedRootFolders.Count, loaded.SelectedRootFolders.Count);
 			Assert.Contains("src", loaded.SelectedRootFolders);
+			Assert.Contains("SRC", loaded.SelectedRootFolders);
 			Assert.Contains("tests", loaded.SelectedRootFolders);
-			if (!OperatingSystem.IsWindows())
-				Assert.Contains("SRC", loaded.SelectedRootFolders);
 		}
 		finally
 		{
@@ -546,6 +642,90 @@ public sealed class ProjectProfileStoreAdditionalTests
 			Assert.DoesNotContain(".cs", loaded.SelectedExtensions);
 			Assert.Contains(IgnoreOptionId.UseGitIgnore, loaded.SelectedIgnoreOptions);
 			Assert.DoesNotContain(IgnoreOptionId.DotFiles, loaded.SelectedIgnoreOptions);
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
+	public void TrySaveProfile_ExtremePersistedTimestamp_DoesNotBlockLaterRevision()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			var projectPath = Path.Combine(tempRoot, "RepoA");
+			var original = new ProjectSelectionProfile(
+				SelectedRootFolders: ["src"],
+				SelectedExtensions: [".cs"],
+				SelectedIgnoreOptions: [IgnoreOptionId.DotFiles]);
+			var replacement = new ProjectSelectionProfile(
+				SelectedRootFolders: ["docs"],
+				SelectedExtensions: [".md"],
+				SelectedIgnoreOptions: [IgnoreOptionId.UseGitIgnore]);
+			Assert.True(store.TrySaveProfile(projectPath, original));
+			var storagePath = store.GetPath();
+			var document = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(storagePath))!;
+			var profile = document["profiles"]![PathUtility.Normalize(projectPath)]!;
+			profile["updatedUtc"] = DateTimeOffset.MaxValue;
+			File.WriteAllText(storagePath, document.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+			var applyRevision = DateTimeOffset.UtcNow;
+
+			Assert.True(store.TrySaveProfile(
+				projectPath,
+				replacement,
+				applyRevision));
+			using (var persistedDocument = JsonDocument.Parse(File.ReadAllBytes(storagePath)))
+			{
+				var persistedProfile = persistedDocument.RootElement
+					.GetProperty("profiles")
+					.GetProperty(PathUtility.Normalize(projectPath));
+				Assert.Equal(applyRevision, persistedProfile.GetProperty("updatedUtc").GetDateTimeOffset());
+				Assert.Equal(
+					["docs"],
+					persistedProfile.GetProperty("selectedRootFolders")
+						.EnumerateArray()
+						.Select(static value => value.GetString()));
+			}
+			Assert.True(store.TryLoadProfile(projectPath, out var loaded));
+			Assert.Contains("docs", loaded.SelectedRootFolders);
+			Assert.DoesNotContain("src", loaded.SelectedRootFolders);
+			Assert.Contains(".md", loaded.SelectedExtensions);
+			Assert.DoesNotContain(".cs", loaded.SelectedExtensions);
+		}
+		finally
+		{
+			Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
+	public void TrySaveProfile_ExtremeCallerTimestamp_CannotBypassNormalizedRevisionOrdering()
+	{
+		var tempRoot = CreateTempDirectory();
+		try
+		{
+			var store = CreateStore(tempRoot);
+			var projectPath = Path.Combine(tempRoot, "RepoA");
+			var currentProfile = new ProjectSelectionProfile(
+				SelectedRootFolders: ["current"],
+				SelectedExtensions: [".cs"],
+				SelectedIgnoreOptions: [IgnoreOptionId.DotFiles]);
+			var staleProfile = new ProjectSelectionProfile(
+				SelectedRootFolders: ["stale"],
+				SelectedExtensions: [".txt"],
+				SelectedIgnoreOptions: [IgnoreOptionId.EmptyFiles]);
+			var currentRevision = DateTimeOffset.UtcNow.AddHours(1);
+
+			Assert.True(store.TrySaveProfile(projectPath, currentProfile, currentRevision));
+			Assert.True(store.TrySaveProfile(projectPath, staleProfile, DateTimeOffset.MaxValue));
+			Assert.True(store.TryLoadProfile(projectPath, out var loaded));
+			Assert.Contains("current", loaded.SelectedRootFolders);
+			Assert.DoesNotContain("stale", loaded.SelectedRootFolders);
+			Assert.Contains(".cs", loaded.SelectedExtensions);
+			Assert.DoesNotContain(".txt", loaded.SelectedExtensions);
 		}
 		finally
 		{

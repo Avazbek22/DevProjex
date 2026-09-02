@@ -1,3 +1,5 @@
+using DevProjex.Application.Compression;
+
 namespace DevProjex.Tests.Unit;
 
 /// <summary>
@@ -6,6 +8,169 @@ namespace DevProjex.Tests.Unit;
 public sealed class FileContentAnalyzerTests
 {
 	private readonly IFileContentAnalyzer _analyzer = new FileContentAnalyzer();
+
+	[Fact]
+	public void SensitiveCharacterBufferCleanup_ClearsUsedContentAndUnusedCapacity()
+	{
+		var buffer = Enumerable.Repeat('x', 64).ToArray();
+		buffer.AsSpan(0, 8).Fill('s');
+
+		FileContentAnalyzer.ClearSensitiveCharacterBuffer(buffer);
+
+		Assert.All(buffer, static character => Assert.Equal('\0', character));
+	}
+
+	[Theory]
+	[InlineData(0L, 1)]
+	[InlineData(60L, 1)]
+	[InlineData(120L, 2)]
+	[InlineData(long.MaxValue, int.MaxValue)]
+	public void EstimateLineCount_SaturatesAtMetricBoundary(long sizeBytes, int expected)
+	{
+		Assert.Equal(expected, FileContentAnalyzer.EstimateLineCount(sizeBytes));
+	}
+
+	[Theory]
+	[InlineData(ProbeOperation.CompleteTextBuffer)]
+	[InlineData(ProbeOperation.StreamingMetrics)]
+	[InlineData(ProbeOperation.CompleteSnapshot)]
+	[InlineData(ProbeOperation.ReadFact)]
+	public async Task NullByteProbe_IoFailureIsUnreadableRatherThanBinary(ProbeOperation operation)
+	{
+		using var temp = new TemporaryDirectory();
+		var path = temp.CreateFile("probe.txt", "ordinary text");
+		var analyzer = new FileContentAnalyzer(
+			(filePath, _, _, _) => new ProbeFailureFileStream(filePath));
+
+		var classification = await ClassifyAsync(analyzer, path, operation);
+
+		Assert.Equal(FileContentClassification.Unreadable, classification);
+		Assert.NotEqual(FileContentClassification.Binary, classification);
+	}
+
+	[Theory]
+	[InlineData(ProbeOperation.CompleteTextBuffer)]
+	[InlineData(ProbeOperation.StreamingMetrics)]
+	[InlineData(ProbeOperation.CompleteSnapshot)]
+	[InlineData(ProbeOperation.ReadFact)]
+	public async Task UnexpectedReadFailurePropagates(ProbeOperation operation)
+	{
+		using var temp = new TemporaryDirectory();
+		var path = temp.CreateFile("unexpected.txt", "ordinary text");
+		var analyzer = new FileContentAnalyzer(
+			static (_, _, _, _) => throw new InvalidOperationException("unexpected failure"));
+
+		var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+			() => ClassifyAsync(analyzer, path, operation));
+
+		Assert.Equal("unexpected failure", exception.Message);
+	}
+
+	[Fact]
+	public async Task PrewarmRead_UnexpectedFailurePropagates()
+	{
+		var analyzer = new FileContentAnalyzer(
+			static (_, _, _, _) => throw new InvalidOperationException("unexpected prewarm failure"));
+		using var byteBudget = new WeightedByteBudget(1024);
+		using var decodeGate = new SemaphoreSlim(1, 1);
+
+		var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+			await ((IPrewarmFileContentAnalyzer)analyzer).ReadFactWithBudgetAsync(
+				"ignored.txt",
+				maximumReadBytes: 512,
+				byteBudget,
+				decodeGate,
+				TestContext.Current.CancellationToken));
+
+		Assert.Equal("unexpected prewarm failure", exception.Message);
+	}
+
+	[Fact]
+	public async Task SourceReadsAllowAtomicReplacementButNotInPlaceMutation()
+	{
+		using var temp = new TemporaryDirectory();
+		var path = temp.CreateFile("source.txt", "ordinary text");
+		var observedShares = new List<FileShare>();
+		var analyzer = new FileContentAnalyzer(
+			(filePath, bufferSize, share, asynchronous) =>
+			{
+				observedShares.Add(share);
+				return new FileStream(
+					filePath,
+					FileMode.Open,
+					FileAccess.Read,
+					share,
+					bufferSize,
+					FileOptions.SequentialScan |
+					(asynchronous ? FileOptions.Asynchronous : FileOptions.None));
+			});
+
+		await analyzer.GetClassifiedMetricsAsync(path, TestContext.Current.CancellationToken);
+		await analyzer.ReadFactAsync(path, 1024, TestContext.Current.CancellationToken);
+		await using (await analyzer.OpenCompleteTextBufferAsync(
+			path,
+			1024,
+			TestContext.Current.CancellationToken))
+		{
+		}
+		await using (await analyzer.OpenCompleteSnapshotAsync(
+			path,
+			TestContext.Current.CancellationToken))
+		{
+		}
+		using var byteBudget = new WeightedByteBudget(4096);
+		using var decodeGate = new SemaphoreSlim(1, 1);
+		var budgeted = await ((IPrewarmFileContentAnalyzer)analyzer).ReadFactWithBudgetAsync(
+			path,
+			1024,
+			byteBudget,
+			decodeGate,
+			TestContext.Current.CancellationToken);
+		budgeted.Lease?.Dispose();
+
+		Assert.NotEmpty(observedShares);
+		Assert.All(observedShares, static share =>
+		{
+			Assert.True(share.HasFlag(FileShare.Delete));
+			Assert.False(share.HasFlag(FileShare.Write));
+		});
+	}
+
+	private static async Task<FileContentClassification> ClassifyAsync(
+		FileContentAnalyzer analyzer,
+		string path,
+		ProbeOperation operation)
+	{
+		switch (operation)
+		{
+			case ProbeOperation.CompleteTextBuffer:
+				await using (var buffer = await analyzer.OpenCompleteTextBufferAsync(
+				             path,
+				             maximumBytes: 1024,
+				             TestContext.Current.CancellationToken))
+				{
+					return buffer.Classification;
+				}
+			case ProbeOperation.StreamingMetrics:
+				return (await analyzer.GetClassifiedMetricsAsync(
+					path,
+					TestContext.Current.CancellationToken)).Classification;
+			case ProbeOperation.CompleteSnapshot:
+				await using (var snapshot = await analyzer.OpenCompleteSnapshotAsync(
+				             path,
+				             TestContext.Current.CancellationToken))
+				{
+					return snapshot.Result.Classification;
+				}
+			case ProbeOperation.ReadFact:
+				return (await analyzer.ReadFactAsync(
+					path,
+					maxSizeForFullRead: 1024,
+					TestContext.Current.CancellationToken)).Classification;
+			default:
+				throw new ArgumentOutOfRangeException(nameof(operation), operation, null);
+		}
+	}
 
 	#region IsTextFileAsync Tests
 
@@ -444,6 +609,10 @@ public sealed class FileContentAnalyzerTests
 				path,
 				long.MaxValue,
 				TestContext.Current.CancellationToken);
+			var fact = await _analyzer.ReadFactAsync(
+				path,
+				long.MaxValue,
+				TestContext.Current.CancellationToken);
 			var metrics = await _analyzer.GetTextFileMetricsAsync(
 				path,
 				TestContext.Current.CancellationToken);
@@ -454,6 +623,11 @@ public sealed class FileContentAnalyzerTests
 			Assert.Equal(FileContentClassification.Text, classified.Classification);
 			Assert.Equal(FileContentClassification.Text, classifiedMetrics.Classification);
 			Assert.Equal(source, classified.Content?.Content);
+			Assert.Equal(source, fact.Content);
+			Assert.Equal(
+				FileContentAnalyzer.ComputeMetrics(source, payload.Length),
+				fact.RawMetrics);
+			Assert.Equal(ContentFingerprint.Compute(source), fact.Fingerprint);
 			Assert.True(await _analyzer.IsTextFileAsync(
 				path,
 				TestContext.Current.CancellationToken));
@@ -585,6 +759,184 @@ public sealed class FileContentAnalyzerTests
 	}
 
 	[Theory]
+	[InlineData("utf8", false, "empty")]
+	[InlineData("utf8", true, "empty")]
+	[InlineData("utf8", false, "mixed")]
+	[InlineData("utf8", true, "mixed")]
+	[InlineData("utf16-le", true, "mixed")]
+	[InlineData("utf16-be", true, "mixed")]
+	[InlineData("utf32-le", true, "mixed")]
+	[InlineData("utf32-be", true, "mixed")]
+	public async Task StreamingMetrics_MatchMaterializedMetrics_AcrossStrictEncodingMatrix(
+		string encodingId,
+		bool emitBom,
+		string contentId)
+	{
+		using var temp = new TemporaryDirectory();
+		var content = contentId switch
+		{
+			"empty" => string.Empty,
+			"mixed" => "alpha\r\nПривет\n世界😀\r",
+			_ => throw new ArgumentOutOfRangeException(nameof(contentId))
+		};
+		var encoding = CreateStrictEncoding(encodingId, emitBom);
+		var payload = encoding.GetPreamble()
+			.Concat(encoding.GetBytes(content))
+			.ToArray();
+		var path = temp.CreateBinaryFile($"{encodingId}-{contentId}.txt", payload);
+
+		var streaming = await _analyzer.GetClassifiedMetricsAsync(
+			path,
+			TestContext.Current.CancellationToken);
+		var materialized = await _analyzer.ReadFactAsync(
+			path,
+			long.MaxValue,
+			TestContext.Current.CancellationToken);
+		await using var snapshot = await _analyzer.OpenCompleteSnapshotAsync(
+			path,
+			TestContext.Current.CancellationToken);
+		var copied = new StringBuilder();
+		await snapshot.CopyTextToAsync(
+			content.Length,
+			(chunk, _) =>
+			{
+				copied.Append(chunk.Span);
+				return ValueTask.CompletedTask;
+			},
+			TestContext.Current.CancellationToken);
+
+		var expected = FileContentAnalyzer.ComputeMetrics(content, payload.Length);
+		Assert.Equal(FileContentClassification.Text, streaming.Classification);
+		Assert.Equal(FileContentClassification.Text, materialized.Classification);
+		Assert.Equal(FileContentClassification.Text, snapshot.Result.Classification);
+		Assert.Equal(content, materialized.Content);
+		Assert.Equal(content, copied.ToString());
+		Assert.Equal(expected, streaming.Metrics);
+		Assert.Equal(expected, materialized.RawMetrics);
+		Assert.Equal(expected, snapshot.Result.Metrics);
+	}
+
+	[Fact]
+	public async Task StreamingMetrics_Utf8ScalarAcrossByteBufferBoundary_MatchesMaterializedMetrics()
+	{
+		using var temp = new TemporaryDirectory();
+		var content = new string('a', 8190) + "😀\r\nnext";
+		var path = temp.CreateBinaryFile("split-scalar.txt", new UTF8Encoding(false, true).GetBytes(content));
+
+		var streaming = await _analyzer.GetClassifiedMetricsAsync(
+			path,
+			TestContext.Current.CancellationToken);
+		var materialized = await _analyzer.ReadFactAsync(
+			path,
+			long.MaxValue,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(FileContentClassification.Text, streaming.Classification);
+		Assert.Equal(content, materialized.Content);
+		Assert.Equal(materialized.RawMetrics, streaming.Metrics);
+		Assert.Equal(ContentFingerprint.Compute(content), materialized.Fingerprint);
+	}
+
+	[Fact]
+	public async Task StreamingMetrics_InvalidSequencesMatchMaterializedStrictFallbackClassification()
+	{
+		using var temp = new TemporaryDirectory();
+		var invalidPayloads = new Dictionary<string, byte[]>(StringComparer.Ordinal)
+		{
+			["utf8"] = [0xC3, 0x28],
+			["utf8-incomplete"] = [0xE2, 0x82]
+		};
+
+		foreach (var (caseId, payload) in invalidPayloads)
+		{
+			var path = temp.CreateBinaryFile($"invalid-{caseId}.txt", payload);
+			var streaming = await _analyzer.GetClassifiedMetricsAsync(
+				path,
+				TestContext.Current.CancellationToken);
+			var materialized = await _analyzer.ReadFactAsync(
+				path,
+				long.MaxValue,
+				TestContext.Current.CancellationToken);
+
+			Assert.True(
+				streaming.Classification == FileContentClassification.UnsupportedEncoding,
+				$"Streaming classification for {caseId} was {streaming.Classification}.");
+			Assert.True(
+				materialized.Classification == FileContentClassification.UnsupportedEncoding,
+				$"Materialized classification for {caseId} was {materialized.Classification}.");
+			Assert.Null(streaming.Metrics);
+			Assert.Null(materialized.Content);
+			Assert.Null(materialized.RawMetrics);
+		}
+	}
+
+	[Fact]
+	public async Task MalformedBomPayloadsAreUnsupportedAcrossReadSurfaces()
+	{
+		using var temp = new TemporaryDirectory();
+		var malformedPayloads = new Dictionary<string, byte[]>(StringComparer.Ordinal)
+		{
+			["utf8-invalid"] = [0xEF, 0xBB, 0xBF, 0xC3, 0x28],
+			["utf8-incomplete"] = [0xEF, 0xBB, 0xBF, 0xE2, 0x82],
+			["utf16-le-low-surrogate"] = [0xFF, 0xFE, 0x00, 0xDC],
+			["utf16-be-low-surrogate"] = [0xFE, 0xFF, 0xDC, 0x00],
+			["utf32-le-out-of-range"] = [0xFF, 0xFE, 0x00, 0x00, 0x00, 0x00, 0x11, 0x00],
+			["utf32-be-out-of-range"] = [0x00, 0x00, 0xFE, 0xFF, 0x00, 0x11, 0x00, 0x00]
+		};
+
+		foreach (var (caseId, payload) in malformedPayloads)
+		{
+			var path = temp.CreateBinaryFile($"malformed-{caseId}.txt", payload);
+			var streaming = await _analyzer.GetClassifiedMetricsAsync(
+				path,
+				TestContext.Current.CancellationToken);
+			var materialized = await _analyzer.ReadFactAsync(
+				path,
+				long.MaxValue,
+				TestContext.Current.CancellationToken);
+			await using var snapshot = await _analyzer.OpenCompleteSnapshotAsync(
+				path,
+				TestContext.Current.CancellationToken);
+			await using var buffer = await _analyzer.OpenCompleteTextBufferAsync(
+				path,
+				long.MaxValue,
+				TestContext.Current.CancellationToken);
+
+			Assert.Equal(FileContentClassification.UnsupportedEncoding, streaming.Classification);
+			Assert.Equal(FileContentClassification.UnsupportedEncoding, materialized.Classification);
+			Assert.Equal(FileContentClassification.UnsupportedEncoding, snapshot.Result.Classification);
+			Assert.Equal(FileContentClassification.UnsupportedEncoding, buffer.Classification);
+			Assert.Null(streaming.Metrics);
+			Assert.Null(materialized.Content);
+			Assert.Null(materialized.RawMetrics);
+			Assert.Null(snapshot.Result.Metrics);
+			Assert.True(buffer.Content.IsEmpty, caseId);
+		}
+	}
+
+	[Fact]
+	public async Task StreamingMetrics_NullAfterInitialProbeMatchesMaterializedBinaryClassification()
+	{
+		using var temp = new TemporaryDirectory();
+		var payload = Enumerable.Repeat((byte)'a', 8194).ToArray();
+		payload[8192] = 0;
+		var path = temp.CreateBinaryFile("late-null.txt", payload);
+
+		var streaming = await _analyzer.GetClassifiedMetricsAsync(
+			path,
+			TestContext.Current.CancellationToken);
+		var materialized = await _analyzer.ReadFactAsync(
+			path,
+			long.MaxValue,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(FileContentClassification.Binary, streaming.Classification);
+		Assert.Equal(FileContentClassification.Binary, materialized.Classification);
+		Assert.Null(streaming.Metrics);
+		Assert.Null(materialized.Content);
+	}
+
+	[Theory]
 	[InlineData("single line")]
 	[InlineData("line 1\nline 2\n")]
 	[InlineData("line 1\rline 2\r")]
@@ -655,6 +1007,125 @@ public sealed class FileContentAnalyzerTests
 			Assert.Equal(2, result.LineCount);
 			Assert.False(result.IsEstimated);
 		});
+	}
+
+	[Fact]
+	public async Task OpenCompleteTextBufferAsync_SupportedEncodings_ReturnExactOperationOwnedText()
+	{
+		using var temp = new TemporaryDirectory();
+		const string content = "secret=Привет-世界\r\nnext=value";
+		var encodings = new Encoding[]
+		{
+			new UTF8Encoding(false, true),
+			new UTF8Encoding(true, true),
+			new UnicodeEncoding(false, true, true),
+			new UnicodeEncoding(true, true, true),
+			new UTF32Encoding(false, true, true),
+			new UTF32Encoding(true, true, true)
+		};
+
+		for (var index = 0; index < encodings.Length; index++)
+		{
+			var path = Path.Combine(temp.Path, $"encoded-{index}.txt");
+			await File.WriteAllTextAsync(path, content, encodings[index], TestContext.Current.CancellationToken);
+			await using var buffer = await _analyzer.OpenCompleteTextBufferAsync(
+				path,
+				1024 * 1024,
+				TestContext.Current.CancellationToken);
+
+			Assert.Equal(FileContentClassification.Text, buffer.Classification);
+			Assert.Equal(new FileInfo(path).Length, buffer.SizeBytes);
+			Assert.Equal(content, buffer.Content.ToString());
+		}
+	}
+
+	[Fact]
+	public async Task OpenCompleteTextBufferAsync_BinaryAndLimitRemainExplicit()
+	{
+		using var temp = new TemporaryDirectory();
+		var binary = temp.CreateBinaryFile("opaque.unknown", [0x41, 0x42, 0x00, 0x43]);
+		var oversized = temp.CreateFile("oversized.txt", new string('x', 1024));
+
+		await using var binaryBuffer = await _analyzer.OpenCompleteTextBufferAsync(
+			binary,
+			2,
+			TestContext.Current.CancellationToken);
+		await using var oversizedBuffer = await _analyzer.OpenCompleteTextBufferAsync(
+			oversized,
+			128,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(FileContentClassification.Binary, binaryBuffer.Classification);
+		Assert.Equal(4, binaryBuffer.SizeBytes);
+		Assert.True(binaryBuffer.Content.IsEmpty);
+		Assert.Equal(FileContentClassification.TooLarge, oversizedBuffer.Classification);
+		Assert.Equal(1024, oversizedBuffer.SizeBytes);
+		Assert.True(oversizedBuffer.Content.IsEmpty);
+	}
+
+	[Fact]
+	public async Task OpenCompleteTextBufferAsync_DisposeInvalidatesPooledContent()
+	{
+		using var temp = new TemporaryDirectory();
+		var path = temp.CreateFile("content.txt", "sensitive operation text");
+		var buffer = await _analyzer.OpenCompleteTextBufferAsync(
+			path,
+			1024,
+			TestContext.Current.CancellationToken);
+		Assert.Equal("sensitive operation text", buffer.Content.ToString());
+
+		await buffer.DisposeAsync();
+
+		Assert.Throws<ObjectDisposedException>(() => _ = buffer.Content);
+	}
+
+	private static Encoding CreateStrictEncoding(string encodingId, bool emitBom) =>
+		encodingId switch
+		{
+			"utf8" => new UTF8Encoding(emitBom, throwOnInvalidBytes: true),
+			"utf16-le" => new UnicodeEncoding(
+				bigEndian: false,
+				byteOrderMark: emitBom,
+				throwOnInvalidBytes: true),
+			"utf16-be" => new UnicodeEncoding(
+				bigEndian: true,
+				byteOrderMark: emitBom,
+				throwOnInvalidBytes: true),
+			"utf32-le" => new UTF32Encoding(
+				bigEndian: false,
+				byteOrderMark: emitBom,
+				throwOnInvalidCharacters: true),
+			"utf32-be" => new UTF32Encoding(
+				bigEndian: true,
+				byteOrderMark: emitBom,
+				throwOnInvalidCharacters: true),
+			_ => throw new ArgumentOutOfRangeException(nameof(encodingId))
+		};
+
+	public enum ProbeOperation
+	{
+		CompleteTextBuffer,
+		StreamingMetrics,
+		CompleteSnapshot,
+		ReadFact
+	}
+
+	private sealed class ProbeFailureFileStream(string path) : FileStream(
+		path,
+		FileMode.Open,
+		FileAccess.Read,
+		FileShare.ReadWrite | FileShare.Delete,
+		bufferSize: 1,
+		FileOptions.SequentialScan)
+	{
+		private int _spanReads;
+
+		public override int Read(Span<byte> buffer)
+		{
+			if (Interlocked.Increment(ref _spanReads) == 2)
+				throw new IOException("Injected null-byte probe failure.");
+			return base.Read(buffer);
+		}
 	}
 
 	#endregion

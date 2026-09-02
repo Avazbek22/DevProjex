@@ -1,9 +1,7 @@
 using System.Runtime.CompilerServices;
 using Avalonia.Platform.Storage;
-using DevProjex.Application;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Avalonia.Services;
-using DevProjex.Kernel;
 using DevProjex.Infrastructure.TerminalCommands;
 using AppViewSettings = DevProjex.Infrastructure.ThemePresets.AppViewSettings;
 
@@ -13,6 +11,7 @@ public partial class MainWindow : Window
 {
     private const double BranchMenuItemHeight = 32;
     private const double TreeFontMenuItemHeight = 32;
+	private static readonly TimeSpan ShutdownPersistenceBudget = TimeSpan.FromSeconds(10);
 
     internal enum TerminalCommandPostInstallUiAction
     {
@@ -155,7 +154,6 @@ public partial class MainWindow : Window
     {
         _viewModel.FontFamilies.Add(FontFamily.Default);
         _viewModel.SelectedFontFamily = FontFamily.Default;
-        _viewModel.PendingFontFamily = FontFamily.Default;
     }
 
     private void ScheduleOptionalFontCatalogLoad()
@@ -253,18 +251,26 @@ public partial class MainWindow : Window
         UpdateTitle();
         UpdateToastHostLayout();
 
-        _selectionCoordinator.RelabelIgnoreOptions(AdvancedIgnoreCountsAlwaysEnabled);
+		RelabelIgnoreOptionsWithCurrentCounts();
     }
 
     private async Task ShowErrorAsync(string message)
     {
         // Show error relative to Git Clone window if it's open, otherwise relative to main window
         var owner = _gitCloneWindow ?? (Window)this;
-        await MessageDialog.ShowAsync(owner, _localization["Msg.ErrorTitle"], message);
+        await MessageDialog.ShowAsync(
+            owner,
+            _localization["Msg.ErrorTitle"],
+            message,
+            _localization["Dialog.OK"]);
     }
 
     private async Task ShowInfoAsync(string message) =>
-        await MessageDialog.ShowAsync(this, _localization["Msg.InfoTitle"], message);
+        await MessageDialog.ShowAsync(
+            this,
+            _localization["Msg.InfoTitle"],
+            message,
+            _localization["Dialog.OK"]);
 
     private async void OnOpenFolder(object? sender, RoutedEventArgs e)
     {
@@ -305,7 +311,7 @@ public partial class MainWindow : Window
         {
             _awaitingSystemDialogActivation = false;
             _systemDialogActivationTcs = null;
-            await ShowErrorAsync(ex.Message);
+            await ShowErrorAsync(ResolveDesktopExceptionMessage(ex));
         }
     }
 
@@ -315,10 +321,9 @@ public partial class MainWindow : Window
         if (launchResult.Succeeded)
             return;
 
-        var details = string.IsNullOrWhiteSpace(launchResult.ErrorMessage)
-            ? "No launch candidate was available."
-            : launchResult.ErrorMessage;
-        await ShowErrorAsync(_localization.Format("Msg.NewWindowLaunchFailed", details));
+        await ShowErrorAsync(DesktopExceptionPresentation.FormatNewWindowLaunchFailure(
+            _localization,
+            launchResult));
     }
 
     private async void OnRefresh(object? sender, RoutedEventArgs e)
@@ -363,7 +368,7 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             _statusOperations.Complete(statusOperationId);
-            await ShowErrorAsync(ex.Message);
+            await ShowErrorAsync(ResolveDesktopExceptionMessage(ex));
         }
         finally
         {
@@ -379,6 +384,203 @@ public partial class MainWindow : Window
         _previewPipeline.ScheduleRefresh(immediate);
     }
 
+	private void ScheduleContentTransformationRefresh(IgnoreOptionId? changedOptionId)
+	{
+		// The regular cache key already tracks selection and presentation changes. Redaction
+		// overrides are separate content state, so invalidate only when that state changes;
+		// invalidating every preview refresh would rescan all selected text unnecessarily.
+		InvalidatePreviewCache();
+		PublishTransformationContext();
+		if (RequiresCompressionRefresh(changedOptionId))
+		{
+			// A complete baseline only describes one transformation identity. Mark it incomplete so
+			// MetricsPipeline fills the missing raw/compressed variants instead of republishing the
+			// previous identity; already measured variants remain cached and are reused on later
+			// toggles. The metrics identity contains only compression, so a Hide Secrets toggle
+			// would recompute the exact numbers already on screen - it skips this block entirely.
+			_metrics.HasCompleteBaseline = false;
+			_metrics.ScheduleRecalculate();
+			// Redaction consumes compressed text but does not change the compression plan. Restarting
+			// Tree-sitter for a Hide Secrets toggle stalls the checkbox without changing its result.
+			var compressionEnabled = CreateCodeCompressionContext() is not null;
+			_metrics.CancelCompressionPrewarm();
+			if (_currentTree is not null)
+			{
+				ObserveDetachedTask(
+					_metrics.PrewarmCompressionAsync(
+						_currentTree,
+						CancellationToken.None,
+						cleanupAfterCompletion:
+							MemoryCleanupReason.ApplySettingsWorkCompleted),
+					"PrewarmCodeCompression");
+			}
+
+			// Compression publishes counts only after it has produced output. Clear a disabled
+			// transformation immediately instead of attaching the previous run to an inactive row.
+			_codeCompressionSnapshot = compressionEnabled
+				? GetCompressionSnapshotForCurrentSelection()
+				: null;
+		}
+		if (!IsAnyContentRedactionEnabled)
+		{
+			// Redaction scanning is strictly opt-in: with both checkboxes off no discovery may run, not
+			// even in the background. Cancel anything in flight and return the row to neutral.
+			CancelSecretRedactionDiscovery();
+			_secretRedactionMatchedCount = null;
+			_secretRedactionCount = null;
+			_privateDataRedactionMatchedCount = null;
+			_privateDataRedactionCount = null;
+			_secretRedactionScanState = SecretScanState.Disabled;
+			ApplyRedactionStatus(SecretScanState.Disabled);
+			RelabelIgnoreOptionsWithCurrentCounts();
+			if (_viewModel.IsAnyPreviewVisible)
+				_previewPipeline.ScheduleRefresh(immediate: true);
+			return;
+		}
+		// Start detector-only initialization before Preview and count pipelines read any
+		// selected content. This is engine warm-up; it never accesses the project tree.
+		_ = _secretRedactionSession.BeginWarmUp(AppliedRedactionFeatures);
+		// A canceled option refresh may restore the exact selection that was already scanned.
+		// Reuse that snapshot synchronously so rollback also restores the measured label.
+		var discoveryActive = IsSecretDiscoveryActiveForCurrentSelection();
+		var cachedRedactionSnapshot = GetCachedSecretRedactionSnapshotForCurrentSelection();
+		if (cachedRedactionSnapshot is not null)
+		{
+			_secretRedactionMatchedCount = cachedRedactionSnapshot.SecretDetectedCount;
+			_secretRedactionCount = cachedRedactionSnapshot.SecretRedactedCount;
+			_privateDataRedactionMatchedCount = cachedRedactionSnapshot.PrivateDataDetectedCount;
+			_privateDataRedactionCount = cachedRedactionSnapshot.PrivateDataRedactedCount;
+			_secretRedactionScanState = ResolveSecretScanState(cachedRedactionSnapshot);
+			ApplyRedactionStatus(
+				_secretRedactionScanState,
+				cachedRedactionSnapshot.SkippedFileCount,
+				cachedRedactionSnapshot.FailedFileCount,
+				cachedRedactionSnapshot.UnscannableFiles);
+		}
+		// A visible preview is already a complete measurement. Keep it until its replacement
+		// publishes so a session-to-durable mark transition cannot flash an empty status.
+		else if (!_viewModel.IsAnyPreviewVisible || _secretRedactionCount is null)
+		{
+			_secretRedactionMatchedCount = null;
+			_secretRedactionCount = null;
+			_privateDataRedactionMatchedCount = null;
+			_privateDataRedactionCount = null;
+			_secretRedactionScanState = discoveryActive
+				? SecretScanState.Scanning
+				: SecretScanState.Pending;
+			ApplyRedactionStatus(_secretRedactionScanState);
+		}
+		RelabelIgnoreOptionsWithCurrentCounts();
+		if (_viewModel.IsAnyPreviewVisible)
+			_previewPipeline.ScheduleRefresh(immediate: true);
+		// Applying a redaction change is an explicit request: its scan starts without a debounce and
+		// with visible progress. Selection-driven refreshes keep the delayed anti-flash presentation.
+		ScheduleSecretRedactionCountRefresh(
+			changedOptionId is IgnoreOptionId.HideSecrets or IgnoreOptionId.HidePrivateData
+				? StatusOperationPresentation.Immediate
+				: StatusOperationPresentation.ExtendedDelay);
+	}
+
+	private void ApplyProgrammaticContentTransformationSelectionChange(IgnoreOptionId? changedOptionId)
+	{
+		if (changedOptionId is IgnoreOptionId.HideSecrets or IgnoreOptionId.HidePrivateData)
+		{
+			TryApplySelectedContentRedactionState(changedOptionId.Value);
+			return;
+		}
+
+		ScheduleContentTransformationRefresh(changedOptionId);
+	}
+
+	private bool EnsureManualRedactionClassEnabled(ManualRedactionClass classification)
+	{
+		var optionId = classification switch
+		{
+			ManualRedactionClass.Secret => IgnoreOptionId.HideSecrets,
+			ManualRedactionClass.PrivateData => IgnoreOptionId.HidePrivateData,
+			_ => throw new ArgumentOutOfRangeException(nameof(classification), classification, null)
+		};
+		var wasApplied = optionId == IgnoreOptionId.HideSecrets
+			? _appliedHideSecretsEnabled
+			: _appliedHidePrivateDataEnabled;
+		_selectionCoordinator.ApplyContentRedactionOverrideAsApplied(
+			_currentPath,
+			optionId,
+			enabled: true);
+		var isApplied = optionId == IgnoreOptionId.HideSecrets
+			? _appliedHideSecretsEnabled
+			: _appliedHidePrivateDataEnabled;
+		return !wasApplied && isApplied || TryApplySelectedContentRedactionState(optionId);
+	}
+
+	private void ApplySelectedContentRedactionStates()
+	{
+		var selected = _selectionCoordinator.GetSelectedIgnoreOptionIds();
+		var hideSecrets = selected.Contains(IgnoreOptionId.HideSecrets);
+		var hidePrivateData = selected.Contains(IgnoreOptionId.HidePrivateData);
+		if (_appliedHideSecretsEnabled == hideSecrets &&
+		    _appliedHidePrivateDataEnabled == hidePrivateData)
+		{
+			return;
+		}
+
+		_appliedHideSecretsEnabled = hideSecrets;
+		_appliedHidePrivateDataEnabled = hidePrivateData;
+		ScheduleContentTransformationRefresh(IgnoreOptionId.HideSecrets);
+	}
+
+	private bool TryApplySelectedContentRedactionState(IgnoreOptionId optionId)
+	{
+		var selected = _selectionCoordinator
+			.GetSelectedIgnoreOptionIds()
+			.Contains(optionId);
+		var applied = optionId == IgnoreOptionId.HideSecrets
+			? _appliedHideSecretsEnabled
+			: _appliedHidePrivateDataEnabled;
+		if (applied == selected)
+			return false;
+
+		if (optionId == IgnoreOptionId.HideSecrets)
+			_appliedHideSecretsEnabled = selected;
+		else
+			_appliedHidePrivateDataEnabled = selected;
+		ScheduleContentTransformationRefresh(optionId);
+		return true;
+	}
+
+	internal static bool RequiresCompressionRefresh(IgnoreOptionId? changedOptionId) =>
+		changedOptionId is null or IgnoreOptionId.CompressCode or IgnoreOptionId.StripComments or
+			IgnoreOptionId.StripBlankLines;
+
+	private static SecretScanState ResolveSecretScanState(SecretRedactionSnapshot? snapshot) =>
+		snapshot switch
+		{
+			null => SecretScanState.Pending,
+			{ HasFailures: true } => SecretScanState.Failed,
+			{ HasLimitedCoverage: true } => SecretScanState.Limited,
+			{ IsComplete: true } => SecretScanState.Completed,
+			_ => SecretScanState.Failed
+		};
+
+	private void InvalidateSecretRedactionCount(bool scheduleRefreshImmediately = true)
+	{
+		CancelSecretRedactionDiscovery();
+		_secretRedactionSession.InvalidateSnapshots();
+		_secretRedactionScanState = IsAnyContentRedactionEnabled
+			? SecretScanState.Pending
+			: SecretScanState.Disabled;
+		ApplyRedactionStatus(_secretRedactionScanState);
+		if (_secretRedactionCount is not null)
+			_secretRedactionCount = null;
+		_secretRedactionMatchedCount = null;
+		_privateDataRedactionCount = null;
+		_privateDataRedactionMatchedCount = null;
+		RelabelIgnoreOptionsWithCurrentCounts();
+
+		if (scheduleRefreshImmediately)
+			ScheduleSecretRedactionCountRefresh();
+	}
+
     private void CancelPreviewRefresh()
     {
         _previewPipeline.CancelRefresh();
@@ -389,13 +591,15 @@ public partial class MainWindow : Window
         ScrollChangedEventArgs e)
         => _previewSurfaceController.HandleTextScrollChanged(sender, e);
 
-    private void OnPreviewToolTipLoaded(object? sender, RoutedEventArgs e)
-        => _previewSurfaceController.HandleToolTipLoaded(sender);
-
     private async void OnPreviewCopyVisibleFilePath(
         object? sender,
         RoutedEventArgs e)
         => await _previewSurfaceController.CopyVisibleFilePathAsync();
+
+    private void OnPreviewStickyHeaderNavigate(
+        object? sender,
+        RoutedEventArgs e)
+        => _previewSurfaceController.ScrollCurrentStickySectionToStart();
 
     private bool TryGetCurrentPreviewStickySection(
         out PreviewDocumentSection currentSection)
@@ -457,10 +661,16 @@ public partial class MainWindow : Window
         => _previewSurfaceController.ApplyText(text, lineCount);
 
     private void ApplyPreviewDocument(IPreviewTextDocument document)
-        => _previewSurfaceController.ApplyDocument(document);
+    {
+        _previewSurfaceController.ApplyDocument(document);
+        CompleteDeferredRedactionDecisionPresentation();
+    }
 
     private void ClearPreviewDocument()
-        => _previewSurfaceController.ClearDocument();
+    {
+        _previewSurfaceController.ClearDocument();
+        CompleteDeferredRedactionDecisionPresentation();
+    }
 
     private static int CountPreviewLines(string text) => PreviewFileCollectionPolicy.CountPreviewLines(text);
 
@@ -559,20 +769,42 @@ public partial class MainWindow : Window
             return;
 
         if (_viewModel.IsPreviewMode)
-        {
-            ObserveDetachedTask(
-                _previewWorkspaceController.CloseAsync(),
-                "ClosePreviewMode");
-        }
+            RequestPreviewClose();
         else
-        {
-            ObserveDetachedTask(
-                _previewWorkspaceController.OpenAsync(),
-                "OpenPreviewMode");
-        }
+            RequestPreviewOpen();
     }
 
     private void OnPreviewClose(object? sender, RoutedEventArgs e)
+        => RequestPreviewClose();
+
+    private void OnWindowPointerPressedForPreviewNavigation(
+        object? sender,
+        PointerPressedEventArgs e)
+    {
+        switch (e.Properties.PointerUpdateKind)
+        {
+            case PointerUpdateKind.XButton1Pressed:
+                e.Handled = true;
+                RequestPreviewClose();
+                break;
+            case PointerUpdateKind.XButton2Pressed:
+                e.Handled = true;
+                RequestPreviewOpen();
+                break;
+        }
+    }
+
+    private void RequestPreviewOpen()
+    {
+        if (!_viewModel.CanTogglePreview || _viewModel.IsPreviewMode)
+            return;
+
+        ObserveDetachedTask(
+            _previewWorkspaceController.OpenAsync(),
+            "OpenPreviewMode");
+    }
+
+    private void RequestPreviewClose()
     {
         if (!_viewModel.CanTogglePreview || !_viewModel.IsPreviewMode)
             return;
@@ -764,7 +996,8 @@ public partial class MainWindow : Window
         // Give persistence one last synchronous chance before the process exits.
         // This protects against transient IO failures that would otherwise make the UI look correct
         // during the session but leave no durable snapshot for the next launch.
-        _appearanceSettings.PersistPendingChanges();
+		var startedTimestamp = Stopwatch.GetTimestamp();
+		_appearanceSettings.PersistPendingChanges();
 
         if (_recentProjectsDb.RecentFolders.Count > 0 ||
             _recentProjectsDb.RecentFolderRemovals.Count > 0 ||
@@ -773,22 +1006,78 @@ public partial class MainWindow : Window
             _recentProjectsStore.TryPersist(_recentProjectsDb);
         }
 
-        _projectProfiles.FlushPending();
+		var remaining = ShutdownPersistenceBudget - Stopwatch.GetElapsedTime(startedTimestamp);
+		if (remaining < TimeSpan.Zero)
+			remaining = TimeSpan.Zero;
+		var result = _projectProfiles.FlushPending(remaining);
+		if (!result.Succeeded)
+		{
+			Trace.TraceWarning(
+				$"Project profile shutdown persistence was incomplete: " +
+				$"attempted={result.Attempted}, saved={result.Saved}, remaining={result.Remaining}.");
+		}
     }
 
-    private async Task<bool> TryOpenFolderAsync(string path, bool fromDialog, bool recordRecentFolder = true)
+    private async Task<bool> TryOpenFolderAsync(
+        string path,
+        bool fromDialog,
+        bool recordRecentFolder = true,
+        IRepositoryCacheSession? preparedSession = null)
     {
         if (!_viewModel.CanChangeProjectTree)
+        {
+            preparedSession?.Dispose();
             return false;
+        }
 
         var stopwatch = Stopwatch.StartNew();
+        var candidateSession = preparedSession;
+        var ownsCandidateSession = candidateSession is not null;
         string normalizedPath;
         try
         {
             normalizedPath = PathUtility.Normalize(path);
+
+            if (candidateSession is null && _repoCacheService.IsInCache(normalizedPath))
+            {
+                if (_currentRepositorySession is not null &&
+                    PathComparer.Default.Equals(
+                        _currentRepositorySession.RepositoryPath,
+                        normalizedPath))
+                {
+                    candidateSession = _currentRepositorySession;
+                }
+                else
+                {
+                    candidateSession = await _repoCacheService.TryAcquireRepositorySessionByPathAsync(
+                        normalizedPath,
+                        _windowLifetimeCts?.Token ?? CancellationToken.None);
+                    ownsCandidateSession = candidateSession is not null;
+                }
+            }
+
+            if (candidateSession is not null)
+                normalizedPath = PathUtility.Normalize(candidateSession.RepositoryPath);
+        }
+        catch (OperationCanceledException)
+        {
+            if (ownsCandidateSession)
+                candidateSession?.Dispose();
+            _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "load-canceled");
+            return false;
+        }
+        catch (RepositoryBranchUnavailableException exception)
+        {
+            if (ownsCandidateSession)
+                candidateSession?.Dispose();
+            _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "branch-unavailable");
+            await ShowErrorAsync(FormatRepositoryBranchUnavailableMessage(exception));
+            return false;
         }
         catch
         {
+            if (ownsCandidateSession)
+                candidateSession?.Dispose();
             _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "invalid-path");
             await ShowErrorAsync(_localization.Format("Msg.PathNotFound", path));
             return false;
@@ -806,6 +1095,8 @@ public partial class MainWindow : Window
 
         if (!rootAccess.Exists)
         {
+            if (ownsCandidateSession)
+                candidateSession?.Dispose();
             _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "folder-not-found");
             await ShowErrorAsync(_localization.Format("Msg.PathNotFound", path));
             return false;
@@ -813,6 +1104,8 @@ public partial class MainWindow : Window
 
         if (!rootAccess.CanRead)
         {
+            if (ownsCandidateSession)
+                candidateSession?.Dispose();
             _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "access-denied");
             if (TryElevateAndRestart(normalizedPath))
                 return false;
@@ -823,9 +1116,84 @@ public partial class MainWindow : Window
         }
 
         var projectLoadFinalization = BeginProjectLoadFinalization();
+        var previousSourceType = _viewModel.ProjectSourceType;
+        var previousBranch = _viewModel.CurrentBranch;
+		var previousBranches = _viewModel.GitBranches.ToArray();
+        var previousRepositoryUrl = _currentRepositoryUrl;
+        var previousProjectDisplayName = _currentProjectDisplayName;
+        var candidateBranch = ReferenceEquals(candidateSession, _currentRepositorySession)
+            ? previousBranch
+            : candidateSession?.Branch ?? string.Empty;
+        if (candidateSession is not null)
+        {
+            _viewModel.ProjectSourceType = candidateSession.ContentKind == RepositoryCacheContentKind.Git
+                ? ProjectSourceType.GitClone
+                : ProjectSourceType.ZipDownload;
+            _viewModel.CurrentBranch = candidateBranch;
+            _currentRepositoryUrl = candidateSession.RepositoryUrl;
+            _currentProjectDisplayName = RepositoryUrlUtility.GetRepositoryName(
+                candidateSession.RepositoryUrl);
+        }
         try
         {
-            await _projectLoadPipeline.OpenFolderAsync(normalizedPath, fromDialog, recordRecentFolder);
+            await _projectLoadPipeline.OpenFolderAsync(
+                normalizedPath,
+                candidateSession is null && (fromDialog || _currentRepositorySession is not null),
+                recordRecentFolder);
+            if (!PathComparer.Default.Equals(_currentPath, normalizedPath) ||
+                !_viewModel.IsProjectLoaded)
+            {
+                if (ownsCandidateSession)
+                    candidateSession?.Dispose();
+                _viewModel.ProjectSourceType = previousSourceType;
+                _viewModel.CurrentBranch = previousBranch;
+				RestoreGitBranches(previousBranches);
+                _currentRepositoryUrl = previousRepositoryUrl;
+                _currentProjectDisplayName = previousProjectDisplayName;
+                _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "load-canceled");
+                return false;
+            }
+
+            var previousSession = _currentRepositorySession;
+            if (!ReferenceEquals(previousSession, candidateSession))
+            {
+                _currentRepositorySession = candidateSession;
+                previousSession?.Dispose();
+                if (previousSession is not null)
+                    _repoCacheService.RequestGarbageCollection();
+            }
+
+            if (candidateSession is not null)
+            {
+                _currentCachedRepoPath = candidateSession.RepositoryPath;
+                _currentRepositoryUrl = candidateSession.RepositoryUrl;
+                _currentProjectDisplayName = RepositoryUrlUtility.GetRepositoryName(
+                    candidateSession.RepositoryUrl);
+                _viewModel.ProjectSourceType = candidateSession.ContentKind == RepositoryCacheContentKind.Git
+                    ? ProjectSourceType.GitClone
+                    : ProjectSourceType.ZipDownload;
+                _viewModel.CurrentBranch = candidateBranch;
+				_viewModel.GitBranches.Clear();
+				if (candidateSession.ContentKind == RepositoryCacheContentKind.Git &&
+				    !string.IsNullOrWhiteSpace(candidateBranch))
+				{
+					_viewModel.GitBranches.Add(
+						new GitBranch(candidateBranch, IsActive: true, IsRemote: false));
+				}
+				UpdateBranchMenu();
+				if (candidateSession.ContentKind == RepositoryCacheContentKind.Git)
+				{
+					ObserveDetachedTask(
+						RefreshCachedRepositoryBranchesAfterLoadAsync(normalizedPath),
+						"RefreshCachedRepositoryBranchesAfterLoad");
+				}
+                UpdateTitle();
+            }
+            else
+            {
+                _currentCachedRepoPath = null;
+            }
+
             if (_desktopControlServer is not null)
                 await _desktopControlServer.UpdateProjectAsync(normalizedPath);
             _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: true);
@@ -833,6 +1201,16 @@ public partial class MainWindow : Window
         }
         catch
         {
+            if (ownsCandidateSession && !ReferenceEquals(candidateSession, _currentRepositorySession))
+                candidateSession?.Dispose();
+            if (!ReferenceEquals(candidateSession, _currentRepositorySession))
+            {
+                _viewModel.ProjectSourceType = previousSourceType;
+                _viewModel.CurrentBranch = previousBranch;
+				RestoreGitBranches(previousBranches);
+                _currentRepositoryUrl = previousRepositoryUrl;
+                _currentProjectDisplayName = previousProjectDisplayName;
+            }
             _sessionMetrics.RecordProjectLoad(stopwatch.Elapsed, success: false, errorCode: "load-failed");
             throw;
         }
@@ -852,8 +1230,8 @@ public partial class MainWindow : Window
         return finalization;
     }
 
-    private Task TryApplyStartupSelectionOverridesAsync()
-        => _startupInteractions.ApplySelectionOverridesAsync();
+    private Task TryApplyStartupSelectionOverridesAsync(CancellationToken cancellationToken)
+        => _startupInteractions.ApplySelectionOverridesAsync(cancellationToken);
 
     private Task TryApplyStartupUiOptionsAsync()
         => _startupInteractions.ApplyUiOptionsAsync();
@@ -984,12 +1362,13 @@ public partial class MainWindow : Window
         return false;
     }
 
-    private async Task ReloadProjectAsync(
+    private async Task<bool> ReloadProjectAsync(
         CancellationToken cancellationToken = default,
         bool applyStoredProfile = false,
-        bool reuseUnchangedDiscoveryCaches = false)
+        bool reuseUnchangedDiscoveryCaches = false,
+        bool preserveTreeState = true)
     {
-        if (string.IsNullOrEmpty(_currentPath)) return;
+		if (string.IsNullOrEmpty(_currentPath)) return false;
         cancellationToken.ThrowIfCancellationRequested();
 
         // A no-change F5 validates only directories previously inspected by scope discovery.
@@ -1014,28 +1393,77 @@ public partial class MainWindow : Window
         _projectLoadTiming = timing;
 #endif
 
-        if (applyStoredProfile)
-        {
-            var profileSnapshot = await Task.Run(
-                () => _projectProfiles.LoadSnapshot(_currentPath),
-                cancellationToken);
-            cancellationToken.ThrowIfCancellationRequested();
+		PersistentSecretMarksSnapshot? persistentMarks = null;
+		if (applyStoredProfile)
+		{
+			var runtimeGitMode = _selectionCoordinator.ActiveGitFilteringMode;
+			var profileSnapshot = await LoadProjectProfileWithRetryAsync(
+				_currentPath,
+				cancellationToken);
+			cancellationToken.ThrowIfCancellationRequested();
 
-            if (profileSnapshot is { HasProfile: true, Profile: not null })
-                _selectionCoordinator.ApplyProjectProfileSelections(_currentPath, profileSnapshot.Profile);
-            else
-                _selectionCoordinator.ResetProjectProfileSelections(_currentPath);
-        }
+			if (profileSnapshot is { HasProfile: true, Profile: not null })
+			{
+				_selectionCoordinator.ApplyProjectProfileSelections(_currentPath, profileSnapshot.Profile);
+			}
+			else if (profileSnapshot.Status == ProjectProfileLookupStatus.Missing)
+			{
+				_selectionCoordinator.ResetProjectProfileSelections(_currentPath);
+			}
+			_selectionCoordinator.RestoreMomentaryGitFilteringMode(runtimeGitMode);
 
-        await _projectLoadSnapshotPipeline.ReloadAsync(_currentPath, cancellationToken);
-    }
+			if (profileSnapshot is
+			    {
+				    Status: ProjectProfileLookupStatus.Found or ProjectProfileLookupStatus.Missing,
+				    PersistentMarks: not null
+			    })
+			{
+				persistentMarks = profileSnapshot.PersistentMarks;
+			}
+		}
+
+		return await _projectLoadSnapshotPipeline.ReloadAsync(
+			_currentPath,
+			preserveTreeState,
+			persistentMarks,
+			cancellationToken);
+	}
+
+	private async Task<ProjectProfileLoadSnapshot> LoadProjectProfileWithRetryAsync(
+		string projectPath,
+		CancellationToken cancellationToken)
+	{
+		var retryDelay = TimeSpan.FromMilliseconds(100);
+		while (true)
+		{
+			var snapshot = await _projectProfiles
+				.LoadSnapshotAsync(projectPath, cancellationToken);
+			if (snapshot.Status != ProjectProfileLookupStatus.TemporarilyUnavailable)
+				return snapshot;
+
+			await Task.Delay(retryDelay, cancellationToken);
+			retryDelay = TimeSpan.FromMilliseconds(Math.Min(retryDelay.TotalMilliseconds * 2, 1000));
+		}
+	}
 
     /// <summary>
     /// Clears state from previous project to release memory before loading a new one.
     /// </summary>
-    private void ClearPreviousProjectState(bool forceCompactingGc = false)
+    private void ClearPreviousProjectState(
+		bool forceCompactingGc = false,
+		bool preserveProjectSessions = false)
     {
         _memoryCleanup.CancelPreview();
+		CancelSecretRedactionDiscovery();
+		ApplyProjectRuntimeState(ProjectRuntimeStateSnapshot.Cleared);
+		PublishTransformationContext();
+		if (!preserveProjectSessions)
+		{
+			_secretRedactionSession.Reset();
+			_codeCompressionSession.Reset();
+			_contentSessionProjectPath = null;
+		}
+		_selectionCoordinator.ClearAppliedSelectionState();
 
         // Background metrics become stale as soon as the visible tree is about to change.
         // Cancel them before tearing down the current project state to avoid wasted I/O.
@@ -1043,6 +1471,7 @@ public partial class MainWindow : Window
 
         // Clear search state first (holds references to TreeNodeViewModel)
         _searchFilterController.ClearProjectState();
+        _interactiveFilterSelectionSnapshot = null;
 
         // Clear TreeView selection and temporarily disconnect ItemsSource
         // to force Avalonia to release all TreeViewItem containers
@@ -1069,6 +1498,16 @@ public partial class MainWindow : Window
         _currentTree = null;
         _filterBaseTree = null;
         _currentTreeInventory = null;
+		_viewModel.SetAppliedContentTransformationState(
+			compressCode: false,
+			stripComments: false,
+			stripBlankLines: false);
+		_viewModel.SetCompressionPreparationStatus(isActive: false);
+		_viewModel.SetCommentStripPreparationStatus(isActive: false);
+		_viewModel.SetBlankLineStripPreparationStatus(isActive: false);
+		_viewModel.SetCompressionStatus(null, null, null, null);
+		_viewModel.SetCommentStripStatus(null, null);
+		_viewModel.SetBlankLineStripStatus(null, null);
         _metrics.HasCompleteBaseline = false;
         _viewModel.StatusMetricsVisible = false;
         _viewModel.StatusTreeStatsText = string.Empty;
@@ -1077,6 +1516,7 @@ public partial class MainWindow : Window
         _viewModel.IsPreviewLoading = false;
         InvalidatePreviewCache();
         _metrics.InvalidateComputedCaches();
+		_metrics.ResetStatusMetricsSnapshot();
 
         // Clear icon cache to release bitmaps
         _iconCache.Clear();
@@ -1088,30 +1528,96 @@ public partial class MainWindow : Window
             compactLargeObjectHeap: forceCompactingGc);
     }
 
+	private void RestoreGitBranches(IReadOnlyList<GitBranch> branches)
+	{
+		_viewModel.GitBranches.Clear();
+		foreach (var branch in branches)
+			_viewModel.GitBranches.Add(branch);
+		UpdateBranchMenu();
+	}
+
+	private async Task RefreshCachedRepositoryBranchesAfterLoadAsync(string projectPath)
+	{
+		var cancellationToken = _windowLifetimeCts?.Token ?? CancellationToken.None;
+		await MetricsCalculationPolicy.WaitForInitialVisualReadyAsync(
+			_postLoadVisualReadyTask,
+			MetricsCalculationPolicy.InitialVisualReadyTimeout,
+			cancellationToken);
+		if (PathComparer.Default.Equals(_currentPath, projectPath))
+			await RefreshGitBranchesAsync(projectPath, cancellationToken);
+	}
+
+	private ProjectRuntimeStateSnapshot CaptureProjectRuntimeState() => new(
+		_appliedHideSecretsEnabled,
+		_appliedHidePrivateDataEnabled,
+		_appliedCompressCodeEnabled,
+		_appliedStripCommentsEnabled,
+		_appliedStripBlankLinesEnabled,
+		_secretRedactionCount,
+		_secretRedactionMatchedCount,
+		_privateDataRedactionCount,
+		_privateDataRedactionMatchedCount,
+		_secretRedactionScanState,
+		_codeCompressionSnapshot);
+
+	private void ApplyProjectRuntimeState(ProjectRuntimeStateSnapshot state)
+	{
+		_appliedHideSecretsEnabled = state.HideSecretsApplied;
+		_appliedHidePrivateDataEnabled = state.HidePrivateDataApplied;
+		_appliedCompressCodeEnabled = state.CompressCodeApplied;
+		_appliedStripCommentsEnabled = state.StripCommentsApplied;
+		_appliedStripBlankLinesEnabled = state.StripBlankLinesApplied;
+		_secretRedactionCount = state.SecretRedactedCount;
+		_secretRedactionMatchedCount = state.SecretDetectedCount;
+		_privateDataRedactionCount = state.PrivateDataRedactedCount;
+		_privateDataRedactionMatchedCount = state.PrivateDataDetectedCount;
+		_secretRedactionScanState = state.SecretScanState;
+		_codeCompressionSnapshot = state.CompressionSnapshot;
+		_viewModel.SetAppliedContentTransformationState(
+			state.CompressCodeApplied,
+			state.StripCommentsApplied,
+			state.StripBlankLinesApplied);
+		ApplyRedactionStatus(state.SecretScanState);
+		RelabelIgnoreOptionsWithCurrentCounts();
+	}
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void ResetInteractiveFilterCache() =>
         _refreshPipeline.InvalidateInteractiveFilterCache();
 
     private Task<TreeRefreshOutcome> RefreshTreeAsync(
         bool interactiveFilter = false,
-        CancellationToken cancellationToken = default) =>
-        _refreshPipeline.RefreshTreeAsync(interactiveFilter, cancellationToken);
+        CancellationToken cancellationToken = default,
+        MemoryCleanupReason? postLoadCleanupReason = null,
+        bool preserveStatusMetrics = false) =>
+        _refreshPipeline.RefreshTreeAsync(
+            interactiveFilter,
+            cancellationToken,
+            postLoadCleanupReason,
+            preserveStatusMetrics);
 
-    private TreeNodeViewModel BuildTreeViewModel(TreeNodeDescriptor descriptor, TreeNodeViewModel? parent)
+	private TreeNodeViewModel BuildTreeViewModel(
+		TreeNodeDescriptor descriptor,
+		TreeNodeViewModel? parent,
+		CancellationToken cancellationToken = default)
     {
+		cancellationToken.ThrowIfCancellationRequested();
         return BuildTreeViewModelCore(
             descriptor,
             parent,
             materializeChildrenNow: parent is null,
-            allowParallelAtThisLevel: parent is null);
+			allowParallelAtThisLevel: parent is null,
+			cancellationToken);
     }
 
     private TreeNodeViewModel BuildTreeViewModelCore(
         TreeNodeDescriptor descriptor,
         TreeNodeViewModel? parent,
         bool materializeChildrenNow,
-        bool allowParallelAtThisLevel)
+		bool allowParallelAtThisLevel,
+		CancellationToken cancellationToken)
     {
+		cancellationToken.ThrowIfCancellationRequested();
         var icon = _iconCache.GetIcon(descriptor.IconKey);
         // Eagerly building the entire view-model graph was one of the biggest remaining
         // startup costs on large projects. We now materialize only the root-visible level
@@ -1128,7 +1634,11 @@ public partial class MainWindow : Window
         if (!materializeChildrenNow || descriptor.Children.Count == 0)
             return node;
 
-        foreach (var child in BuildImmediateChildViewModels(node, descriptor.Children, allowParallelAtThisLevel))
+		foreach (var child in BuildImmediateChildViewModels(
+			         node,
+			         descriptor.Children,
+			         allowParallelAtThisLevel,
+			         cancellationToken))
             node.Children.Add(child);
 
         return node;
@@ -1142,14 +1652,17 @@ public partial class MainWindow : Window
         return BuildImmediateChildViewModels(
             parent,
             parent.Descriptor.Children,
-            allowParallelAtThisLevel: false);
+			allowParallelAtThisLevel: false,
+			CancellationToken.None);
     }
 
     private List<TreeNodeViewModel> BuildImmediateChildViewModels(
         TreeNodeViewModel parent,
         IReadOnlyList<TreeNodeDescriptor> children,
-        bool allowParallelAtThisLevel)
+		bool allowParallelAtThisLevel,
+		CancellationToken cancellationToken)
     {
+		cancellationToken.ThrowIfCancellationRequested();
         if (children.Count == 0)
             return [];
 
@@ -1160,7 +1673,8 @@ public partial class MainWindow : Window
             var childNodes = new TreeNodeViewModel[children.Count];
             var parallelOptions = new ParallelOptions
             {
-                MaxDegreeOfParallelism = Math.Min(TreeViewModelBuildParallelism, children.Count)
+				MaxDegreeOfParallelism = Math.Min(TreeViewModelBuildParallelism, children.Count),
+				CancellationToken = cancellationToken
             };
 
             Parallel.For(0, children.Count, parallelOptions, index =>
@@ -1169,7 +1683,8 @@ public partial class MainWindow : Window
                     children[index],
                     parent,
                     materializeChildrenNow: false,
-                    allowParallelAtThisLevel: false);
+					allowParallelAtThisLevel: false,
+					cancellationToken);
             });
 
             return [.. childNodes];
@@ -1178,21 +1693,30 @@ public partial class MainWindow : Window
         var realizedChildren = new List<TreeNodeViewModel>(children.Count);
         foreach (var child in children)
         {
+			cancellationToken.ThrowIfCancellationRequested();
             var childViewModel = BuildTreeViewModelCore(
                 child,
                 parent,
                 materializeChildrenNow: false,
-                allowParallelAtThisLevel: false);
+				allowParallelAtThisLevel: false,
+				cancellationToken);
             realizedChildren.Add(childViewModel);
         }
 
         return realizedChildren;
     }
 
-    private void StartPostLoadBackgroundWork(BuildTreeResult currentTree, CancellationToken cancellationToken)
+    private void StartPostLoadBackgroundWork(
+        BuildTreeResult currentTree,
+        CancellationToken cancellationToken,
+        MemoryCleanupReason? cleanupAfterCompletion)
     {
-        // The tree is already visible at this point. Keep any non-critical post-load work detached
-        // so opening a project is no longer blocked by metrics warmup or cosmetic panel animation.
+        // Preserve the initial-load choreography defined by PostLoadBackgroundWorkSequencer:
+        // tree first, settings reveal second, background content work only after visual settle.
+        // Do not move any phase above this reveal or detach individual phases from the sequencer.
+        var statusPresentation =
+            PostLoadBackgroundWorkSequencer.ResolveStatusPresentation(
+                _statusOperations.GetActiveSnapshot().OperationType);
         var settingsRevealTask = StartDeferredSettingsPanelAnimationAsync(
             _projectLoadFinalizationTask,
             cancellationToken);
@@ -1214,22 +1738,70 @@ public partial class MainWindow : Window
             timing.HasLoadingElapsed = true;
         }
 
-        ObserveDetachedTask(
+        Func<CancellationToken, Task> initializeMetricsAsync = token =>
             TrackProjectAnalysisTimingAsync(
                 _metrics.InitializeFileMetricsCacheSoonAfterFirstPaintMeasuredAsync(
                     currentTree,
-                    postLoadVisualReadyTask,
-                    cancellationToken),
-                timing),
-            "InitializeFileMetricsCache");
+                    Task.CompletedTask,
+                    token,
+                    statusPresentation),
+                timing);
 #else
-        ObserveDetachedTask(
+        Func<CancellationToken, Task> initializeMetricsAsync = token =>
             _metrics.InitializeFileMetricsCacheSoonAfterFirstPaintAsync(
                 currentTree,
-                postLoadVisualReadyTask,
-                cancellationToken),
-            "InitializeFileMetricsCache");
+                Task.CompletedTask,
+                token,
+                statusPresentation);
 #endif
+        // Project lifecycle operations already committed to visible progress. Their compression
+        // and metrics phases must continue that feedback immediately once the reveal gate opens.
+        // Interactive option changes keep the delayed presentation to avoid flashing on fast work.
+		var secretRefreshVersion = Volatile.Read(ref _secretRedactionCountRefreshVersion);
+        ObserveDetachedTask(
+            RunPostLoadBackgroundWorkAsync(
+                postLoadVisualReadyTask,
+                currentTree,
+                statusPresentation,
+                initializeMetricsAsync,
+                cleanupAfterCompletion,
+				secretRefreshVersion,
+                cancellationToken),
+            "RunPostLoadBackgroundWork");
+    }
+
+    private async Task RunPostLoadBackgroundWorkAsync(
+        Task visualReadyTask,
+        BuildTreeResult currentTree,
+        StatusOperationPresentation statusPresentation,
+        Func<CancellationToken, Task> initializeMetricsAsync,
+        MemoryCleanupReason? cleanupAfterCompletion,
+		long secretRefreshVersion,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await PostLoadBackgroundWorkSequencer.RunAsync(
+                visualReadyTask,
+                token => _metrics.PrewarmCompressionAsync(
+                    currentTree,
+                    token,
+                    statusPresentation,
+                    retainReadFactsForNextMetricsPass: true),
+                initializeMetricsAsync,
+				() =>
+				{
+					if (secretRefreshVersion == Volatile.Read(ref _secretRedactionCountRefreshVersion))
+						ScheduleSecretRedactionCountRefresh(statusPresentation);
+				},
+                cleanupAfterCompletion,
+                ScheduleBackgroundMemoryCleanup,
+                cancellationToken);
+        }
+        finally
+        {
+            _metrics.ReleasePostLoadReadFacts();
+        }
     }
 
 #if DEVPROJEX_PROJECT_LOAD_TIMING
@@ -1265,8 +1837,12 @@ public partial class MainWindow : Window
         Task projectLoadFinalizationTask,
         CancellationToken cancellationToken)
     {
+        Task settingsRevealTask;
         if (_workspacePresentation.IsSettingsAnimating)
-            return _workspacePresentation.SettingsAnimationTask;
+        {
+            settingsRevealTask = _workspacePresentation.SettingsAnimationTask;
+            return RevealProjectToolsAfterSettingsAsync(settingsRevealTask, cancellationToken);
+        }
 
         // A visible-width island is already on screen (notably during F5). Treating it as a new
         // reveal would delay metrics and make existing status values disappear and jump again.
@@ -1275,10 +1851,26 @@ public partial class MainWindow : Window
                 settingsAnimating: false,
                 _workspacePresentation.HasVisibleSettingsPanelWidth()))
         {
-            return Task.CompletedTask;
+            return RevealProjectToolsAfterSettingsAsync(Task.CompletedTask, cancellationToken);
         }
 
-        return AnimateSettingsPanelWhenTreeReadyAsync(projectLoadFinalizationTask, cancellationToken);
+        settingsRevealTask = AnimateSettingsPanelWhenTreeReadyAsync(
+            projectLoadFinalizationTask,
+            cancellationToken);
+        return RevealProjectToolsAfterSettingsAsync(settingsRevealTask, cancellationToken);
+    }
+
+    private async Task RevealProjectToolsAfterSettingsAsync(
+        Task settingsRevealTask,
+        CancellationToken cancellationToken)
+    {
+        await settingsRevealTask.WaitAsync(cancellationToken);
+        if (_topMenuBar is not null)
+        {
+            await _topMenuBar.RevealProjectToolsAsync(
+                _viewModel.IsToolAnimationEnabled,
+                cancellationToken);
+        }
     }
 
     private async Task AnimateSettingsPanelWhenTreeReadyAsync(
@@ -1375,7 +1967,9 @@ public partial class MainWindow : Window
         {
             var displayRepositoryUrl = RepositoryWebPathPresentationService.NormalizeForDisplay(currentRepositoryUrl);
             if (string.IsNullOrWhiteSpace(displayRepositoryUrl))
-                displayRepositoryUrl = currentRepositoryUrl;
+                displayRepositoryUrl = currentProjectDisplayName;
+            if (string.IsNullOrWhiteSpace(displayRepositoryUrl))
+                return MainWindowViewModel.BaseTitle;
 
             var branchDisplay = !string.IsNullOrEmpty(currentBranch)
                 ? $" [{currentBranch}]"
@@ -1423,9 +2017,20 @@ public partial class MainWindow : Window
     private IgnoreRules BuildIgnoreRules(
         string rootPath,
         IReadOnlyCollection<IgnoreOptionId> selectedOptions,
-        IReadOnlyCollection<string>? selectedRootFolders)
+        IReadOnlyCollection<string>? selectedRootFolders) =>
+        BuildIgnoreRules(rootPath, selectedOptions, selectedRootFolders, CancellationToken.None);
+
+    private IgnoreRules BuildIgnoreRules(
+        string rootPath,
+        IReadOnlyCollection<IgnoreOptionId> selectedOptions,
+        IReadOnlyCollection<string>? selectedRootFolders,
+        CancellationToken cancellationToken)
     {
-        var rules = _ignoreRulesService.Build(rootPath, selectedOptions, selectedRootFolders);
+        var rules = _ignoreRulesService.BuildWithCancellation(
+            rootPath,
+            selectedOptions,
+            selectedRootFolders,
+            cancellationToken);
         if (!_viewModel.IsGitMode ||
             string.IsNullOrWhiteSpace(_currentCachedRepoPath) ||
             !PathComparer.Default.Equals(rootPath, _currentCachedRepoPath))
@@ -1438,20 +2043,33 @@ public partial class MainWindow : Window
 
     private IgnoreOptionsAvailability GetIgnoreOptionsAvailability(
         string rootPath,
-        IReadOnlyCollection<string> selectedRootFolders)
+        IReadOnlyCollection<string> selectedRootFolders) =>
+        GetIgnoreOptionsAvailability(rootPath, selectedRootFolders, CancellationToken.None);
+
+    private IgnoreOptionsAvailability GetIgnoreOptionsAvailability(
+        string rootPath,
+        IReadOnlyCollection<string> selectedRootFolders,
+        CancellationToken cancellationToken)
     {
-        var availability = _ignoreRulesService.GetIgnoreOptionsAvailability(rootPath, selectedRootFolders);
-        return availability with
-        {
-            ShowAdvancedCounts = AdvancedIgnoreCountsAlwaysEnabled
-        };
+        var availability = _ignoreRulesService.GetIgnoreOptionsAvailabilityWithCancellation(
+            rootPath,
+            selectedRootFolders,
+            cancellationToken);
+		return availability with
+		{
+			ShowAdvancedCounts = AdvancedIgnoreCountsAlwaysEnabled,
+			SecretRedactionsCount = _secretRedactionCount,
+			SecretMatchesCount = _secretRedactionMatchedCount,
+			PrivateDataRedactionsCount = _privateDataRedactionCount,
+			PrivateDataMatchesCount = _privateDataRedactionMatchedCount
+		};
     }
 
     private IgnoreRules BuildIgnoreRules(string rootPath)
     {
         var selected = _selectionCoordinator.GetSelectedIgnoreOptionIds();
-        var selectedRoots = _selectionCoordinator.GetSelectedRootFolders();
-        return BuildIgnoreRules(rootPath, selected, selectedRoots);
+        var scanRoots = _selectionCoordinator.GetProjectScanRoots();
+        return BuildIgnoreRules(rootPath, selected, scanRoots);
     }
 
     /// <summary>
@@ -1462,6 +2080,15 @@ public partial class MainWindow : Window
     {
         var hadLoadedProjectBefore = _viewModel.IsProjectLoaded && !string.IsNullOrWhiteSpace(_currentPath);
 		var selectionCheckpoint = _selectionCoordinator.CaptureProjectCheckpoint();
+		var treeSelection = hadLoadedProjectBefore
+			? ProjectTreeSelectionSnapshot.Capture(
+				_currentPath!,
+				_viewModel.TreeNodes,
+				_treeSelectionSnapshotCache)
+			: null;
+		var treeExpansion = hadLoadedProjectBefore
+			? ProjectTreeUiState.CaptureExpansion(_currentPath!, _viewModel.TreeNodes)
+			: null;
 
         return new ProjectLoadCancellationSnapshot(
             HadLoadedProjectBefore: hadLoadedProjectBefore,
@@ -1479,13 +2106,9 @@ public partial class MainWindow : Window
             StatusMetricsVisible: _viewModel.StatusMetricsVisible,
             StatusTreeStatsText: _viewModel.StatusTreeStatsText,
             StatusContentStatsText: _viewModel.StatusContentStatsText,
-            AllRootFoldersChecked: _viewModel.AllRootFoldersChecked,
             AllExtensionsChecked: _viewModel.AllExtensionsChecked,
             AllIgnoreChecked: _viewModel.AllIgnoreChecked,
             HasCompleteMetricsBaseline: _metrics.HasCompleteBaseline,
-            RootFolders: _viewModel.RootFolders
-				.Select(static option => new SelectionOptionSnapshot(option.Name, option.IsChecked))
-				.ToArray(),
             Extensions: _viewModel.Extensions
 				.Select(static option => new SelectionOptionSnapshot(option.Name, option.IsChecked))
 				.ToArray(),
@@ -1493,7 +2116,14 @@ public partial class MainWindow : Window
 				.Select(static option => new IgnoreOptionSnapshot(option.Id, option.Label, option.IsChecked))
 				.ToArray())
 		{
-			SelectionCheckpoint = selectionCheckpoint
+			SelectionCheckpoint = selectionCheckpoint,
+			RuntimeState = CaptureProjectRuntimeState(),
+			TreeSelection = treeSelection,
+			TreeExpansion = treeExpansion,
+			SearchQuery = _viewModel.SearchQuery,
+			NameFilter = _viewModel.NameFilter,
+			PreviewSearchVisible = _viewModel.PreviewSearchVisible,
+			PreviewSearchQuery = _viewModel.PreviewSearchQuery
 		};
     }
 
@@ -1506,6 +2136,7 @@ public partial class MainWindow : Window
 
     private void RestorePreviousProjectStateAfterCancellation(ProjectLoadCancellationSnapshot snapshot)
     {
+        _topMenuBar?.CompleteProjectToolsReveal();
         _currentPath = snapshot.Path;
         _currentProjectDisplayName = snapshot.ProjectDisplayName;
         _currentRepositoryUrl = snapshot.RepositoryUrl;
@@ -1524,6 +2155,9 @@ public partial class MainWindow : Window
         _viewModel.StatusMetricsVisible = snapshot.StatusMetricsVisible;
         _viewModel.StatusTreeStatsText = snapshot.StatusTreeStatsText;
         _viewModel.StatusContentStatsText = snapshot.StatusContentStatsText;
+		_viewModel.SearchQuery = snapshot.SearchQuery;
+		_viewModel.NameFilter = snapshot.NameFilter;
+		ApplyProjectRuntimeState(snapshot.RuntimeState);
 
         _viewModel.ProjectSourceType = snapshot.ProjectSourceType;
         _viewModel.CurrentBranch = snapshot.CurrentBranch;
@@ -1548,20 +2182,48 @@ public partial class MainWindow : Window
 
             var rootNode = BuildTreeViewModel(snapshot.Tree.Root, null);
             rootNode.DisplayName = displayName;
-            rootNode.IsExpanded = true;
             _viewModel.TreeNodes.Add(rootNode);
+			ProjectTreeUiState.RestoreExpansion(rootNode, snapshot.TreeExpansion);
+			if (snapshot.TreeSelection is not null)
+			{
+				ApplyTreeSelectionWithoutPublishing(() => snapshot.TreeSelection.Restore(rootNode));
+			}
         }
+		_previewSearchController.RestoreProjectState(
+			snapshot.PreviewSearchQuery,
+			snapshot.PreviewSearchVisible);
+		SyncSearchAndFilterVisualStateFromFlags();
+		_searchFilterController.ReapplyActiveTreeQueryPresentation();
+		_viewModel.IsProjectLoadInProgress = false;
+		PublishTransformationContext();
+		ScheduleRestoredPreviewRefresh(snapshot.Path);
 
         UpdateBranchMenu();
         UpdateTitle();
     }
 
+	private void ScheduleRestoredPreviewRefresh(string? restoredProjectPath)
+	{
+		Dispatcher.UIThread.Post(
+			() =>
+			{
+				if (string.IsNullOrWhiteSpace(restoredProjectPath) ||
+				    !PathComparer.Default.Equals(_currentPath, restoredProjectPath) ||
+				    !_viewModel.IsAnyPreviewVisible)
+				{
+					return;
+				}
+
+				var refresh = _previewPipeline.RefreshNowAsync(allowDuringModeSwitch: true);
+				ObserveDetachedTask(
+					refresh.Completion,
+					"RestoreProjectPreviewAfterCancellation");
+			},
+			DispatcherPriority.Background);
+	}
+
 	private void RestoreLegacySelectionSnapshot(ProjectLoadCancellationSnapshot snapshot)
 	{
-		_viewModel.RootFolders.Clear();
-		foreach (var option in snapshot.RootFolders)
-			_viewModel.RootFolders.Add(new SelectionOptionViewModel(option.Name, option.IsChecked));
-
 		_viewModel.Extensions.Clear();
 		foreach (var option in snapshot.Extensions)
 			_viewModel.Extensions.Add(new SelectionOptionViewModel(option.Name, option.IsChecked));
@@ -1589,7 +2251,6 @@ public partial class MainWindow : Window
 				isControllerGroupEnd: index == controllerGroupEndIndex));
 		}
 
-		_viewModel.AllRootFoldersChecked = snapshot.AllRootFoldersChecked;
 		_viewModel.AllExtensionsChecked = snapshot.AllExtensionsChecked;
 		_viewModel.AllIgnoreChecked = snapshot.AllIgnoreChecked;
 		_selectionCoordinator.ReevaluatePendingApplyChanges();
@@ -1615,6 +2276,7 @@ public partial class MainWindow : Window
 
     private void ResetToInitialProjectStateAfterCancellation()
     {
+        _topMenuBar?.CompleteProjectToolsReveal();
         _projectLoadCancellation.Clear();
         _metrics.CancelBackgroundCalculation();
         CancelPreviewRefresh();
@@ -1624,11 +2286,13 @@ public partial class MainWindow : Window
         _currentTree = null;
         _filterBaseTree = null;
         _currentTreeInventory = null;
+		_gitScopePresentationRefreshContext = null;
         _currentProjectDisplayName = null;
         _currentRepositoryUrl = null;
         _searchFilterController.ClearProjectState();
 
         _viewModel.IsProjectLoaded = false;
+		_viewModel.IsProjectLoadInProgress = false;
         _viewModel.SettingsVisible = false;
         _viewModel.SearchVisible = false;
         _viewModel.FilterVisible = false;
@@ -1638,7 +2302,6 @@ public partial class MainWindow : Window
         _viewModel.ProjectSourceType = ProjectSourceType.LocalFolder;
         _viewModel.CurrentBranch = string.Empty;
         _viewModel.GitBranches.Clear();
-        _viewModel.RootFolders.Clear();
         _viewModel.Extensions.Clear();
         _viewModel.IgnoreOptions.Clear();
         _selectionCoordinator.ClearAppliedSelectionState();
@@ -1658,13 +2321,10 @@ public partial class MainWindow : Window
             await clipboard.SetTextAsync(content);
     }
 
-    private static void OpenExternalLink(string url)
+    private void OpenExternalLink(string url)
     {
-        Process.Start(new ProcessStartInfo
-        {
-            FileName = url,
-            UseShellExecute = true
-        });
+        if (!ExternalLinkLauncher.TryOpen(url))
+            _toastService.Show(_localization["Desktop.Error.OperationFailed"]);
     }
 
     private bool EnsureTreeReady() => _currentTree is not null && !string.IsNullOrWhiteSpace(_currentPath);
@@ -1685,128 +2345,31 @@ public partial class MainWindow : Window
 
     private IReadOnlySet<string> GetCheckedPaths()
     {
-        var selectedPaths = _treeSelectionSnapshotCache.GetOrCreate(_viewModel.TreeNodes);
-        return _currentTree is null
-            ? selectedPaths
-            : ProjectTreeSelectionProjection.NormalizeSelectedPaths(
-                _currentTree.Root,
-                selectedPaths);
+		// Empty checked paths intentionally mean the whole tree in the GUI and must not be reinterpreted as Select None.
+		return _currentTree is null
+			? _treeSelectionSnapshotCache.GetOrCreate(_viewModel.TreeNodes)
+			: _treeSelectionSnapshotCache.GetOrCreateNormalized(
+				_viewModel.TreeNodes,
+				_currentTree.Root);
     }
 
-    private static List<string> BuildOrderedSelectedFilePaths(
-        TreeNodeDescriptor treeRoot,
-        IReadOnlySet<string> selectedPaths,
-        bool ensureExists = true) =>
-        PreviewFileCollectionPolicy.BuildOrderedSelectedFilePaths(selectedPaths, treeRoot, ensureExists);
+	private IReadOnlySet<string>? GetGitRepositoryScopePaths()
+	{
+		if (_viewModel.TreeNodes.Count == 0 ||
+		    string.IsNullOrWhiteSpace(_currentPath) ||
+		    !PathComparer.Default.Equals(_explicitTreeSelectionProjectPath, _currentPath))
+			return null;
 
-    /// <summary>
-    /// Validates that URL looks like a valid Git repository URL.
-    /// Accepts URLs from common Git hosting services (GitHub, GitLab, Bitbucket, etc.)
-    /// or any URL ending with .git
-    /// </summary>
-    private static bool IsValidGitRepositoryUrl(string url)
-    {
-        if (string.IsNullOrWhiteSpace(url))
-            return false;
-
-        try
-        {
-            // Try to parse as URI
-            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
-                return false;
-
-            // Must be HTTP or HTTPS
-            if (uri.Scheme != "http" && uri.Scheme != "https")
-                return false;
-
-            var host = uri.Host.ToLowerInvariant();
-            var path = uri.AbsolutePath.ToLowerInvariant();
-
-            // Check for common Git hosting services
-            var validHosts = new[]
-            {
-                "github.com",
-                "gitlab.com",
-                "bitbucket.org",
-                "gitea.com",
-                "codeberg.org",
-                "sourceforge.net",
-                "git.sr.ht"
-            };
-
-            // Allow subdomains (e.g., gitlab.mycompany.com)
-            var isKnownHost = validHosts.Any(h => host == h || host.EndsWith("." + h));
-
-            // Or URL ends with .git extension
-            var hasGitExtension = path.EndsWith(".git");
-
-            // Or contains /git/ in path (common for self-hosted instances)
-            var hasGitInPath = path.Contains("/git/");
-
-            return isKnownHost || hasGitExtension || hasGitInPath;
-        }
-        catch
-        {
-            return false;
-        }
+		var checkedPaths = GetCheckedPaths();
+		return checkedPaths.Count == 0 ? null : checkedPaths;
     }
 
-    /// <summary>
-    /// Checks if internet connection is available by attempting to connect to reliable hosts.
-    /// Returns true if connection successful, false otherwise.
-    /// This is a simple check - we try to resolve DNS and connect to well-known hosts.
-    /// </summary>
-    private static async Task<bool> CheckInternetConnectionAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            // Try to connect to multiple reliable hosts to avoid false negatives
-            // Use different providers to increase reliability
-            var hosts = new[]
-            {
-                "https://www.github.com",
-                "https://www.google.com",
-                "https://www.cloudflare.com"
-            };
-
-            using var httpClient = new HttpClient
-            {
-                Timeout = TimeSpan.FromSeconds(5)
-            };
-
-            // Try each host - if any succeeds, we have internet
-            foreach (var host in hosts)
-            {
-                try
-                {
-                    using var response = await httpClient.GetAsync(host, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-                    // If we get any response (even error status codes), it means we have connectivity
-                    return true;
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    throw;
-                }
-                catch
-                {
-                    // Try next host
-                    continue;
-                }
-            }
-
-            // All hosts failed
-            return false;
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch
-        {
-            // If exception occurs, assume no internet
-            return false;
-        }
-    }
-
+	private IReadOnlyList<string> GetOrderedSelectedFilePaths() =>
+		_currentTree is null
+			? Array.Empty<string>()
+			: _treeSelectionSnapshotCache.GetOrCreateOrderedFiles(
+				_viewModel.TreeNodes,
+				_currentTree.Root,
+				_currentTree.OrderedFilePaths);
 
 }

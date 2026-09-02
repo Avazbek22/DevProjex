@@ -51,7 +51,8 @@ public sealed class TreeAndContentExportPathPresentationTests
 			presentation);
 
 		Assert.Contains("https://github.com/user/repo:", result, StringComparison.Ordinal);
-		Assert.Contains("├── DevProjex", result, StringComparison.Ordinal);
+		Assert.Contains("└── src", result, StringComparison.Ordinal);
+		Assert.DoesNotContain("DevProjex", result, StringComparison.Ordinal);
 		Assert.Contains("src/main.cs:", result, StringComparison.Ordinal);
 		Assert.DoesNotContain("https://github.com/user/repo/src/main.cs:", result, StringComparison.Ordinal);
 		Assert.DoesNotContain($"{temp.Path}:", result, StringComparison.Ordinal);
@@ -119,7 +120,7 @@ public sealed class TreeAndContentExportPathPresentationTests
 	}
 
 	[Fact]
-	public async Task BuildAsync_WithInvalidSelectionFallback_StillUsesDisplayRootName()
+	public async Task BuildAsync_WithInvalidSelectionFallback_UsesDisplayRootWithoutSyntheticNode()
 	{
 		using var temp = new TemporaryDirectory();
 		var filePath = temp.CreateFile("a.txt", "content");
@@ -157,6 +158,10 @@ public sealed class TreeAndContentExportPathPresentationTests
 			CancellationToken.None,
 			presentation);
 
-		Assert.Contains("├── DevProjex", result, StringComparison.Ordinal);
+		Assert.StartsWith(
+			$"https://github.com/user/repo:{Environment.NewLine}└── a.txt",
+			result,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain("DevProjex", result, StringComparison.Ordinal);
 	}
 }

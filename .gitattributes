@@ -6,3 +6,8 @@ Packaging/Windows/StoreListing/ImportFolder/listingData.csv text eol=crlf
 # Keep the sibling working CSV consistent as well, because it is often used as the editable source
 # before copying into ImportFolder.
 Packaging/Windows/StoreListing/listingData.csv text eol=crlf
+
+# Vendored native grammars are immutable supply-chain artifacts verified by a checked-in lock file.
+Infrastructure/Grammars/vendored/**/*.dll binary
+Infrastructure/Grammars/vendored/**/*.so binary
+Infrastructure/Grammars/vendored/**/*.dylib binary

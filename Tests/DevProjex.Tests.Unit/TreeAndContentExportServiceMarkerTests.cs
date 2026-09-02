@@ -58,7 +58,8 @@ public sealed class TreeAndContentExportServiceMarkerTests
 
 		var output = service.Build(temp.Path, root, selected);
 
-		Assert.Contains("├── Root", output);
+		Assert.DoesNotContain("├── Root", output, StringComparison.Ordinal);
+		Assert.Contains("└── image.bin", output, StringComparison.Ordinal);
 		Assert.DoesNotContain($"{binary}:", output);
 	}
 

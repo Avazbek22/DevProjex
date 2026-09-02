@@ -1,5 +1,3 @@
-using DevProjex.Tests.Shared.ProjectLoadWorkflow;
-
 namespace DevProjex.Tests.UI;
 
 internal sealed class UiTestProject : IDisposable
@@ -26,6 +24,81 @@ internal sealed class UiTestProject : IDisposable
         });
     }
 
+    public static UiTestProject CreateDefaultUnderUserProfile()
+    {
+        var userProfilePath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (string.IsNullOrWhiteSpace(userProfilePath))
+            throw new InvalidOperationException("The user profile path is unavailable.");
+
+        return Create(
+            static rootPath =>
+            {
+                SeedDefaultWorkspace(rootPath);
+            },
+            workspaceDirectoryName: "workspace",
+            testRoot: userProfilePath,
+            instanceDirectoryPrefix: ".devprojex-tests-");
+    }
+
+    public static UiTestProject CreateWithSecretRedactionWorkspace()
+    {
+        return Create(static rootPath =>
+        {
+            WriteFile(
+                rootPath,
+                Path.Combine("src", "Secrets.cs"),
+                "const string awsAccessKey = \"AKIA" + "Z7M3Q5X2P6N4R7T5\";\n");
+            WriteFile(rootPath, "README.md", "# Secret redaction UI fixture\n");
+        });
+    }
+
+	public static UiTestProject CreateWithSecretRedactionSelectionWorkspace()
+	{
+		return Create(static rootPath =>
+		{
+			WriteFile(
+				rootPath,
+				Path.Combine("src", "Secrets.cs"),
+				"const string awsAccessKey = \"AKIA" + "Z7M3Q5X2P6N4R7T5\";\n");
+			WriteFile(rootPath, "README.md", "# Secret redaction selection fixture\n");
+			WriteFile(rootPath, Path.Combine("src", "empty.txt"), string.Empty);
+		});
+	}
+
+	public static UiTestProject CreateWithPreviewSearchWorkspace()
+	{
+		return Create(static rootPath =>
+		{
+			var lines = Enumerable.Range(1, 140)
+				.Select(index => index switch
+				{
+					60 => "first PreviewSearchNeedle occurrence",
+					95 => "second previewsearchneedle occurrence",
+					112 => "const string awsAccessKey = \"AKIA" + "Z7M3Q5X2P6N4R7T5\";",
+					136 => "third PreviewSearchNeedle occurrence",
+					_ => $"ordinary preview line {index:000}"
+				});
+			WriteFile(rootPath, Path.Combine("src", "PreviewSearch.cs"), string.Join('\n', lines));
+			WriteFile(rootPath, "README.md", "# Preview search fixture\n");
+		});
+	}
+
+	public static UiTestProject CreateWithPreviewMarkerWorkspace()
+	{
+		return Create(static rootPath =>
+		{
+			var lines = Enumerable.Range(1, 5_000)
+				.Select(index => index switch
+				{
+					2 or 2_500 or 4_900 =>
+						"const string awsAccessKey = \"AKIA" + "Z7M3Q5X2P6N4R7T5\";",
+					4 => new string('x', 512),
+					_ => $"ordinary preview marker line {index:000}"
+				});
+			WriteFile(rootPath, Path.Combine("src", "PreviewMarkers.cs"), string.Join('\n', lines));
+		});
+	}
+
     public static UiTestProject CreateWithScopedExtensionlessEntries()
     {
         return Create(static rootPath =>
@@ -45,6 +118,18 @@ internal sealed class UiTestProject : IDisposable
             Directory.CreateDirectory(Path.Combine(rootPath, "src", "empty-folder"));
         });
     }
+
+	public static UiTestProject CreateWithPlainWebAssetsWorkspace()
+	{
+		return Create(static rootPath =>
+		{
+			WriteFile(rootPath, "app.css", "body { color: black; }\n");
+			WriteFile(rootPath, "bootstrap.min.css", ".container { width: 100%; }\n");
+			WriteFile(rootPath, "MudBlazor.min.css", ".mud-primary { color: blue; }\n");
+			WriteFile(rootPath, "homePage.js.Без названия", "window.initializeHomePage = () => {};\n");
+			WriteFile(rootPath, "pushInterop.js.Без названия", "window.pushInterop = {};\n");
+		});
+	}
 
     public static UiTestProject CreateWithDeepHorizontalSearchWorkspace()
     {
@@ -465,13 +550,17 @@ internal sealed class UiTestProject : IDisposable
     private static UiTestProject Create(Action<string> seedWorkspace) =>
         Create(seedWorkspace, workspaceDirectoryName: "workspace");
 
-    private static UiTestProject Create(Action<string> seedWorkspace, string workspaceDirectoryName)
+    private static UiTestProject Create(
+        Action<string> seedWorkspace,
+        string workspaceDirectoryName,
+        string? testRoot = null,
+        string instanceDirectoryPrefix = "")
     {
-        var testRoot = Path.Combine(
+        testRoot ??= Path.Combine(
             Path.GetTempPath(),
             "DevProjex",
             "DevProjex.Tests.UI");
-        var instanceId = Guid.NewGuid().ToString("N");
+        var instanceId = instanceDirectoryPrefix + Guid.NewGuid().ToString("N");
         var rootPath = Path.Combine(testRoot, instanceId, workspaceDirectoryName);
         var appDataPath = Path.Combine(testRoot, instanceId, "appdata");
 

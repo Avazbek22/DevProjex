@@ -53,7 +53,7 @@ public sealed class TerminalProgressVisualSnapshotTests
 			checkpointRoot,
 			"25",
 			TestContext.Current.CancellationToken);
-		await WaitForStableScreenAsync(terminal, "25%");
+		await WaitForStableMeasuredScreenAsync(terminal, "25%");
 		Verify(
 			"workspace-progress-25-en-120x30",
 			terminal,
@@ -65,7 +65,7 @@ public sealed class TerminalProgressVisualSnapshotTests
 			checkpointRoot,
 			"50",
 			TestContext.Current.CancellationToken);
-		await WaitForStableScreenAsync(terminal, "50%");
+		await WaitForStableMeasuredScreenAsync(terminal, "50%");
 		Verify(
 			"workspace-progress-50-en-120x30",
 			terminal,
@@ -73,7 +73,7 @@ public sealed class TerminalProgressVisualSnapshotTests
 			(output.Path, "<OUTPUT_ROOT>"));
 		await terminal.ResizeAsync(80, 24, TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Up/Down Move",
+			"Ctrl+A/U Select",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await WaitForStableMeasuredScreenAsync(terminal, "50%");
 		Verify(
@@ -92,7 +92,7 @@ public sealed class TerminalProgressVisualSnapshotTests
 			checkpointRoot,
 			"90",
 			TestContext.Current.CancellationToken);
-		await WaitForStableScreenAsync(terminal, "90%");
+		await WaitForStableMeasuredScreenAsync(terminal, "90%");
 		Verify(
 			"workspace-progress-90-en-120x30",
 			terminal,
@@ -100,17 +100,13 @@ public sealed class TerminalProgressVisualSnapshotTests
 			(output.Path, "<OUTPUT_ROOT>"));
 		ReleaseCheckpoint(checkpointRoot, "90");
 
-		await WaitForStableScreenAsync(terminal, "Equivalent command:");
+		await WaitForStableScreenAsync(terminal, "Export completed:");
 		Verify(
 			"workspace-progress-complete-en-120x30",
 			terminal,
 			project.Path,
 			(output.Path, "<OUTPUT_ROOT>"));
 		Assert.True(File.Exists(Path.Combine(destination, "src", "File0100.bin")));
-		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			"Equivalent command:",
-			cancellationToken: TestContext.Current.CancellationToken);
 		await ExitAsync(terminal);
 	}
 
@@ -211,13 +207,9 @@ public sealed class TerminalProgressVisualSnapshotTests
 		ReleaseCheckpoint(checkpointRoot, "writing-context");
 
 		await terminal.WaitForScreenAsync(
-			"Equivalent command:",
+			"Export completed:",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.True(File.Exists(destination));
-		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			"Equivalent command:",
-			cancellationToken: TestContext.Current.CancellationToken);
 		await ExitAsync(terminal);
 	}
 
@@ -250,10 +242,11 @@ public sealed class TerminalProgressVisualSnapshotTests
 			GetCheckpointRoot(dataRoot),
 			"50",
 			TestContext.Current.CancellationToken);
-		await WaitForStableScreenAsync(terminal, "Building ZIP");
-		await terminal.WaitForScreenAsync(
-			"50%",
-			cancellationToken: TestContext.Current.CancellationToken);
+		await WaitForStableMeasuredScreenAsync(terminal, "50%");
+		Assert.Contains(
+			"Building ZIP",
+			terminal.CaptureScreen(),
+			StringComparison.Ordinal);
 		Verify(
 			"workspace-progress-50-zip-en-120x30",
 			terminal,
@@ -316,7 +309,9 @@ public sealed class TerminalProgressVisualSnapshotTests
 			GetCheckpointRoot(dataRoot),
 			"50",
 			TestContext.Current.CancellationToken);
-		var active = await WaitForStableScreenAsync(terminal, phase);
+		await WaitForStableMeasuredScreenAsync(terminal, "50%");
+		var active = terminal.CaptureScreen();
+		Assert.Contains(phase, active, StringComparison.Ordinal);
 		if (monochrome)
 			Assert.Matches(@"\[[#\-]+\] 50%", active);
 		Verify(
@@ -364,9 +359,6 @@ public sealed class TerminalProgressVisualSnapshotTests
 		CancellationToken cancellationToken,
 		string language = "en")
 	{
-		var outputKindPrompt = language == "ru"
-			? "Выберите тип физического результата"
-			: "Choose the physical output kind";
 		var destinationPrompt = language == "ru"
 			? "Точный путь назначения:"
 			: "Exact destination:";
@@ -374,11 +366,7 @@ public sealed class TerminalProgressVisualSnapshotTests
 			language == "ru" ? "ДЕРЕВО ПРОЕКТА" : "PROJECT TREE",
 			timeout: TimeSpan.FromSeconds(45),
 			cancellationToken: cancellationToken);
-		await terminal.SendAsync("Z", cancellationToken);
-		await terminal.WaitForScreenAsync(outputKindPrompt, cancellationToken: cancellationToken);
-		await terminal.SendTabAsync(cancellationToken);
-		await terminal.SendTabAsync(cancellationToken);
-		await terminal.SendEnterAsync(cancellationToken);
+		await terminal.SendAsync("z", cancellationToken);
 		await terminal.WaitForScreenAsync(destinationPrompt, cancellationToken: cancellationToken);
 		await terminal.SendCtrlAAsync(cancellationToken);
 		await terminal.SendAsync(destination, cancellationToken);
@@ -396,13 +384,6 @@ public sealed class TerminalProgressVisualSnapshotTests
 			cancellationToken: cancellationToken);
 		await terminal.SendAsync("Z", cancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Choose the physical output kind",
-			cancellationToken: cancellationToken);
-		await terminal.SendTabAsync(cancellationToken);
-		await terminal.SendTabAsync(cancellationToken);
-		await terminal.SendTabAsync(cancellationToken);
-		await terminal.SendEnterAsync(cancellationToken);
-		await terminal.WaitForScreenAsync(
 			"Exact destination:",
 			cancellationToken: cancellationToken);
 		await terminal.SendCtrlAAsync(cancellationToken);
@@ -415,13 +396,8 @@ public sealed class TerminalProgressVisualSnapshotTests
 		CancellationToken cancellationToken,
 		string language = "en")
 	{
-		var ready = language == "ru"
-			? "Состояние назначения: Готово"
-			: "Destination state: Ready";
-		await terminal.WaitForScreenAsync(ready, cancellationToken: cancellationToken);
-		await terminal.SendTabAsync(cancellationToken);
-		await terminal.SendTabAsync(cancellationToken);
-		await terminal.SendTabAsync(cancellationToken);
+		var title = language == "ru" ? "Экспортировать?" : "Export?";
+		await terminal.WaitForScreenAsync(title, cancellationToken: cancellationToken);
 		await terminal.SendEnterAsync(cancellationToken);
 	}
 
@@ -492,7 +468,7 @@ public sealed class TerminalProgressVisualSnapshotTests
 		{
 			var screen = terminal.CaptureScreen();
 			if (!string.IsNullOrWhiteSpace(screen) &&
-			    screen.Contains(expected, StringComparison.Ordinal))
+				screen.Contains(expected, StringComparison.Ordinal))
 			{
 				stableSamples++;
 				if (stableSamples >= 3)
@@ -560,7 +536,7 @@ public sealed class TerminalProgressVisualSnapshotTests
 
 	private static async Task ExitAsync(TerminalPtyHarness terminal)
 	{
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(

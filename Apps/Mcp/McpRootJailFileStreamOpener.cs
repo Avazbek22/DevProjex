@@ -1,0 +1,248 @@
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+
+namespace DevProjex.Mcp;
+
+internal sealed class McpRootJailFileStreamOpener
+{
+	private const int DarwinGetPath = 50;
+	private const int DarwinPathBufferLength = 1024;
+	private const uint WindowsShareRead = 0x00000001;
+	private const uint WindowsShareWrite = 0x00000002;
+	private const uint WindowsShareDelete = 0x00000004;
+	private const uint WindowsOpenExisting = 3;
+	private const uint WindowsBackupSemantics = 0x02000000;
+	private readonly McpProjectRootJail _roots;
+
+	public McpRootJailFileStreamOpener(McpProjectRootJail roots) =>
+		_roots = roots ?? throw new ArgumentNullException(nameof(roots));
+
+	public McpRootJailFileStreamOpener(McpRootRegistry roots)
+		: this(new McpProjectRootJail(roots))
+	{
+	}
+
+	public FileStream OpenRead(
+		string path,
+		int bufferSize,
+		FileShare fileShare,
+		bool asynchronous)
+	{
+		var lexicalRoot = _roots.ResolveLexicalRoot(path);
+		UnixFileTypeInspector.EnsureRegularFile(path);
+		var stream = new FileStream(
+			path,
+			FileMode.Open,
+			FileAccess.Read,
+			fileShare,
+			bufferSize,
+			FileOptions.SequentialScan |
+			(asynchronous ? FileOptions.Asynchronous : FileOptions.None));
+		try
+		{
+			var openedPath = ResolveOpenedPath(stream.SafeFileHandle);
+			_roots.EnsureOpenedPathIsWithin(lexicalRoot, path, openedPath);
+			return stream;
+		}
+		catch
+		{
+			stream.Dispose();
+			throw;
+		}
+	}
+
+	internal static string ResolveOpenedPath(SafeFileHandle handle)
+	{
+		ArgumentNullException.ThrowIfNull(handle);
+		if (handle.IsInvalid || handle.IsClosed)
+			throw new IOException("The opened project file handle is unavailable.");
+		if (OperatingSystem.IsWindows())
+			return ResolveWindowsPath(handle);
+		if (OperatingSystem.IsLinux())
+			return ResolveLinuxPath(handle);
+		if (OperatingSystem.IsMacOS())
+			return ResolveDarwinPath(handle);
+		throw new PlatformNotSupportedException("MCP root-jail file reads require Windows, Linux, or macOS.");
+	}
+
+	internal static string ResolveDirectoryPath(string path)
+	{
+		ArgumentException.ThrowIfNullOrWhiteSpace(path);
+		if (!OperatingSystem.IsWindows())
+			return ResolveUnixDirectoryPath(path);
+
+		using var handle = OpenWindowsDirectory(path);
+		if (handle.IsInvalid)
+			throw NativeFailure("The final path of an MCP project root could not be opened.");
+		return Path.TrimEndingDirectorySeparator(ResolveOpenedPath(handle));
+	}
+
+	private static SafeFileHandle OpenWindowsDirectory(string path) =>
+		CreateFile(
+			path,
+			desiredAccess: 0,
+			WindowsShareRead | WindowsShareWrite | WindowsShareDelete,
+			securityAttributes: IntPtr.Zero,
+			WindowsOpenExisting,
+			WindowsBackupSemantics,
+			templateFile: IntPtr.Zero);
+
+	private static string ResolveUnixDirectoryPath(string path)
+	{
+		if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+			throw new PlatformNotSupportedException(
+				"MCP root-jail directory handles require Windows, Linux, or macOS.");
+
+		var directory = OpenDirectory(path);
+		if (directory == IntPtr.Zero)
+			throw NativeFailure("The final path of an MCP project root could not be opened.");
+		try
+		{
+			var descriptor = GetDirectoryFileDescriptor(directory);
+			if (descriptor < 0)
+				throw NativeFailure("The final path of an MCP project root could not be opened.");
+			using var handle = new SafeFileHandle(descriptor, ownsHandle: false);
+			return Path.TrimEndingDirectorySeparator(ResolveOpenedPath(handle));
+		}
+		finally
+		{
+			_ = CloseDirectory(directory);
+		}
+	}
+
+	private static string ResolveWindowsPath(SafeFileHandle handle)
+	{
+		var capacity = 512;
+		while (capacity <= 32_768)
+		{
+			var path = new StringBuilder(capacity);
+			var length = GetFinalPathNameByHandle(handle, path, (uint)path.Capacity, 0);
+			if (length == 0)
+				throw NativeFailure("The final Windows path of an opened project file could not be resolved.");
+			if (length < path.Capacity)
+				return NormalizeWindowsPath(path.ToString());
+			capacity = checked((int)length + 1);
+		}
+		throw new IOException("The final Windows path of an opened project file is too long.");
+	}
+
+	private static string NormalizeWindowsPath(string path)
+	{
+		const string uncPrefix = @"\\?\UNC\";
+		const string extendedPrefix = @"\\?\";
+		if (path.StartsWith(uncPrefix, StringComparison.OrdinalIgnoreCase))
+			path = @"\\" + path[uncPrefix.Length..];
+		else if (path.StartsWith(extendedPrefix, StringComparison.OrdinalIgnoreCase))
+			path = path[extendedPrefix.Length..];
+		return Path.GetFullPath(path);
+	}
+
+	private static string ResolveLinuxPath(SafeFileHandle handle)
+	{
+		var descriptor = handle.DangerousGetHandle().ToInt32();
+		var descriptorPath = $"/proc/self/fd/{descriptor}";
+		for (var capacity = 1024; capacity <= 32_768; capacity *= 2)
+		{
+			var bytes = new byte[capacity];
+			var length = ReadLink(descriptorPath, bytes, (nuint)bytes.Length);
+			if (length < 0)
+				throw NativeFailure("The final Linux path of an opened project file could not be resolved.");
+			if (length < bytes.Length)
+				return Path.GetFullPath(Encoding.UTF8.GetString(bytes, 0, checked((int)length)));
+		}
+		throw new IOException("The final Linux path of an opened project file is too long.");
+	}
+
+	private static string ResolveDarwinPath(SafeFileHandle handle)
+	{
+		var descriptor = handle.DangerousGetHandle().ToInt32();
+		var pathBuffer = new byte[DarwinPathBufferLength];
+		var pinned = GCHandle.Alloc(pathBuffer, GCHandleType.Pinned);
+		try
+		{
+			var result = ReadDarwinPath(descriptor, pinned.AddrOfPinnedObject());
+			if (result != 0)
+				throw NativeFailure("The final macOS path of an opened project file could not be resolved.");
+		}
+		finally
+		{
+			pinned.Free();
+		}
+
+		var terminator = Array.IndexOf(pathBuffer, (byte)0);
+		if (terminator <= 0)
+			throw new IOException("The final macOS path of an opened project file is invalid.");
+		return Path.GetFullPath(Encoding.UTF8.GetString(pathBuffer, 0, terminator));
+	}
+
+	private static int ReadDarwinPath(int descriptor, IntPtr pathBuffer)
+	{
+		if (RuntimeInformation.ProcessArchitecture == Architecture.Arm64)
+		{
+			// Darwin ARM64 passes fcntl's variadic path pointer in its ABI stack slot.
+			return DarwinFcntlArm64(
+				descriptor,
+				DarwinGetPath,
+				0,
+				0,
+				0,
+				0,
+				0,
+				0,
+				pathBuffer);
+		}
+		return DarwinFcntl(descriptor, DarwinGetPath, pathBuffer);
+	}
+
+	private static IOException NativeFailure(string message) =>
+		new(message, new Win32Exception(Marshal.GetLastPInvokeError()));
+
+	[DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+	private static extern uint GetFinalPathNameByHandle(
+		SafeFileHandle handle,
+		StringBuilder path,
+		uint pathLength,
+		uint flags);
+
+	[DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+	private static extern SafeFileHandle CreateFile(
+		string fileName,
+		uint desiredAccess,
+		uint shareMode,
+		IntPtr securityAttributes,
+		uint creationDisposition,
+		uint flagsAndAttributes,
+		IntPtr templateFile);
+
+	[DllImport("libc", EntryPoint = "readlink", SetLastError = true)]
+	private static extern nint ReadLink(
+		[MarshalAs(UnmanagedType.LPUTF8Str)] string path,
+		byte[] buffer,
+		nuint bufferSize);
+
+	[DllImport("libc", EntryPoint = "opendir", SetLastError = true)]
+	private static extern IntPtr OpenDirectory(
+		[MarshalAs(UnmanagedType.LPUTF8Str)] string path);
+
+	[DllImport("libc", EntryPoint = "dirfd", SetLastError = true)]
+	private static extern int GetDirectoryFileDescriptor(IntPtr directory);
+
+	[DllImport("libc", EntryPoint = "closedir", SetLastError = true)]
+	private static extern int CloseDirectory(IntPtr directory);
+
+	[DllImport("libSystem.B.dylib", EntryPoint = "fcntl", SetLastError = true)]
+	private static extern int DarwinFcntl(int descriptor, int command, IntPtr pathBuffer);
+
+	[DllImport("libSystem.B.dylib", EntryPoint = "fcntl", SetLastError = true)]
+	private static extern int DarwinFcntlArm64(
+		int descriptor,
+		int command,
+		nint register2,
+		nint register3,
+		nint register4,
+		nint register5,
+		nint register6,
+		nint register7,
+		IntPtr pathBuffer);
+}

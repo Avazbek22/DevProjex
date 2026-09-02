@@ -20,6 +20,104 @@
     <Style Selector="Border.checklist-border">
       <Setter Property="Padding" Value="0" />
     </Style>
+    <Style Selector="Border.content-processing-status-indicator">
+      <Setter Property="Opacity" Value="0.72" />
+    </Style>
+    <Style Selector="Border.content-processing-status-indicator:pointerover">
+      <Setter Property="Opacity" Value="1" />
+    </Style>
+    <Style Selector="ComboBox.git-mode-selector">
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="MinHeight" Value="32" />
+      <Setter Property="Padding" Value="10,3" />
+      <Setter Property="FontSize" Value="12.5" />
+      <Setter Property="Background" Value="{DynamicResource MenuPopupBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="MaxDropDownHeight" Value="220" />
+    </Style>
+    <Style Selector="ComboBox.git-mode-selector:pointerover">
+      <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+    </Style>
+    <Style Selector="ComboBox.git-mode-selector:focus">
+      <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+    </Style>
+    <Style Selector="ComboBox.git-mode-selector /template/ Border#PART_BorderElement,
+                     ComboBox.git-mode-selector /template/ Border">
+      <Setter Property="CornerRadius" Value="8" />
+    </Style>
+    <Style Selector="ComboBox.git-mode-selector /template/ Popup#PART_Popup">
+      <Setter Property="ShouldUseOverlayLayer" Value="False" />
+      <Setter Property="WindowManagerAddShadowHint" Value="False" />
+    </Style>
+    <Style Selector="ComboBox.git-mode-selector /template/ Border#PopupBorder">
+      <Setter Property="Background" Value="{DynamicResource MenuPopupBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="ClipToBounds" Value="True" />
+      <Setter Property="Padding" Value="3" />
+      <Setter Property="BoxShadow" Value="0 6 18 0 #40000000" />
+    </Style>
+    <Style Selector="ComboBox.git-mode-selector ComboBoxItem">
+      <Setter Property="Margin" Value="1" />
+      <Setter Property="Padding" Value="10,4" />
+      <Setter Property="MinHeight" Value="28" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="FontSize" Value="12.5" />
+      <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+      <Setter Property="Cursor" Value="Hand" />
+      <Setter Property="Transitions">
+        <Transitions>
+          <BrushTransition Property="Background" Duration="0:0:0.12" Easing="CubicEaseOut" />
+          <BrushTransition Property="Foreground" Duration="0:0:0.12" Easing="CubicEaseOut" />
+        </Transitions>
+      </Setter>
+    </Style>
+    <Style Selector="ComboBox.git-mode-selector ComboBoxItem:pointerover /template/ Border#PART_BorderElement,
+                     ComboBox.git-mode-selector ComboBoxItem:pointerover /template/ Border">
+      <Setter Property="Background" Value="{DynamicResource MenuHoverBrush}" />
+      <Setter Property="CornerRadius" Value="6" />
+    </Style>
+    <Style Selector="ComboBox.git-mode-selector ComboBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource MenuHoverBrush}" />
+      <Setter Property="CornerRadius" Value="6" />
+    </Style>
+    <Style Selector="ComboBox.git-mode-selector ComboBoxItem:selected /template/ Border#PART_BorderElement,
+                     ComboBox.git-mode-selector ComboBoxItem:selected /template/ Border">
+      <Setter Property="Background" Value="{DynamicResource TreeSelectionBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="6" />
+    </Style>
+    <Style Selector="ComboBox.git-mode-selector ComboBoxItem:selected">
+      <Setter Property="Background" Value="{DynamicResource TreeSelectionBrush}" />
+      <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+      <Setter Property="FontWeight" Value="Medium" />
+    </Style>
+    <Style Selector="ComboBox.git-mode-selector ComboBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource TreeSelectionBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+    </Style>
+    <Style Selector="ComboBox.git-mode-selector ComboBoxItem:selected TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+    </Style>
+    <Style Selector="ComboBox.git-mode-selector ComboBoxItem:selected:pointerover /template/ Border#PART_BorderElement,
+                     ComboBox.git-mode-selector ComboBoxItem:selected:pointerover /template/ Border">
+      <Setter Property="Background" Value="{DynamicResource TreeSelectionBrush}" />
+      <Setter Property="CornerRadius" Value="6" />
+    </Style>
+    <Style Selector="ComboBox.git-mode-selector ComboBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource TreeSelectionBrush}" />
+      <Setter Property="CornerRadius" Value="6" />
+    </Style>
     <Style Selector="ListBox.settings-list /template/ ScrollViewer">
       <Setter Property="Padding" Value="5" />
       <Setter Property="Background" Value="Transparent" />
@@ -93,7 +191,7 @@
           Background="Transparent"
           BorderThickness="0"
           IsEnabled="{Binding AreFilterSettingsEnabled}">
-    <Grid RowDefinitions="Auto,*,*,*">
+    <Grid RowDefinitions="Auto,Auto,*,*">
       <!-- Apply stays at the top because filter options remain intentionally staged. -->
       <Button Name="ApplySettingsButton"
               Grid.Row="0"
@@ -108,17 +206,52 @@
               CornerRadius="3"/>
 
       <!-- Ignore section - equal star height -->
-      <Grid Grid.Row="1" RowDefinitions="Auto,*" Margin="0,2,0,0" IsEnabled="{Binding AreFilterSettingsEnabled}">
+      <Grid Grid.Row="2" RowDefinitions="Auto,*" Margin="0,10,0,0" IsEnabled="{Binding AreFilterSettingsEnabled}">
         <Grid Name="IgnoreHeaderGrid" Grid.Row="0" ColumnDefinitions="*,3,Auto" Margin="0,0,0,6">
           <TextBlock Name="IgnoreHeaderText" Classes="section-title" Grid.Column="0" Text="{Binding SettingsIgnoreTitle}" Margin="0" FontSize="15"/>
           <CheckBox Name="IgnoreAllCheckBox" Classes="section-all" Grid.Column="2" Content="{Binding SettingsAllIgnore}"
                     IsChecked="{Binding AllIgnoreChecked, Mode=TwoWay}"
                     IsCheckedChanged="OnIgnoreAllChanged" />
         </Grid>
-        <Border Grid.Row="1" Classes="checklist-border">
-          <ListBox Name="IgnoreOptionsList"
+		<Border Name="IgnoreOptionsBorder"
+				Grid.Row="1"
+				Classes="checklist-border"
+				Focusable="True"
+				IsTabStop="False">
+		  <Grid RowDefinitions="Auto,*">
+			<ComboBox Name="GitFilteringModeComboBox"
+					  Classes="git-mode-selector"
+					  Grid.Row="0"
+					  Margin="8,6,8,4"
+					  IsVisible="{Binding IsGitFilteringModeSelectorVisible}"
+					  ItemsSource="{Binding GitFilteringModes}"
+					  SelectedItem="{Binding SelectedGitFilteringModeOption, Mode=TwoWay}"
+					  DropDownOpened="OnGitFilteringModeDropDownOpened"
+					  DropDownClosed="OnGitFilteringModeDropDownClosed"
+					  SelectionChanged="OnGitFilteringModeChanged">
+			  <ComboBox.SelectionBoxItemTemplate>
+				<DataTemplate x:DataType="vm:GitFilteringModeOptionViewModel">
+				  <TextBlock Text="{Binding Label}"
+							 HorizontalAlignment="Stretch"
+							 TextAlignment="Center"
+							 TextWrapping="NoWrap"
+							 TextTrimming="CharacterEllipsis" />
+				</DataTemplate>
+			  </ComboBox.SelectionBoxItemTemplate>
+			  <ComboBox.ItemTemplate>
+				<DataTemplate x:DataType="vm:GitFilteringModeOptionViewModel">
+				  <TextBlock Text="{Binding Label}"
+							 HorizontalAlignment="Stretch"
+							 TextAlignment="Center"
+							 TextWrapping="NoWrap"
+							 TextTrimming="CharacterEllipsis" />
+				</DataTemplate>
+			  </ComboBox.ItemTemplate>
+			</ComboBox>
+			<ListBox Name="IgnoreOptionsList"
+					 Grid.Row="1"
                    Classes="settings-list"
-                   ItemsSource="{Binding IgnoreOptions}"
+                   ItemsSource="{Binding PathIgnoreOptions}"
                    SelectionMode="Multiple"
                    ScrollViewer.IsScrollInertiaEnabled="True"
                    ScrollViewer.VerticalScrollBarVisibility="Auto"
@@ -143,12 +276,146 @@
                 </Border>
               </DataTemplate>
             </ListBox.ItemTemplate>
-          </ListBox>
+			</ListBox>
+		  </Grid>
         </Border>
       </Grid>
 
+	  <!-- Content-processing options transform selected bytes without changing the tree. -->
+	  <Grid Name="ContentProcessingSection"
+			Grid.Row="1"
+			RowDefinitions="Auto,*"
+			Margin="0,8,0,0"
+			IsVisible="{Binding HasContentProcessingOptions}"
+			IsEnabled="{Binding AreFilterSettingsEnabled}">
+		<Grid Name="ContentProcessingHeaderGrid"
+			  Grid.Row="0"
+			  ColumnDefinitions="*,3,Auto"
+			  Margin="0,0,0,6">
+		  <TextBlock Name="ContentProcessingHeaderText"
+					 Grid.Column="0"
+					 Classes="section-title"
+					 Text="{Binding SettingsSecretsTitle}"
+					 Margin="0"
+					 FontSize="15" />
+		  <CheckBox Name="ContentProcessingAllCheckBox"
+					Classes="section-all"
+					Grid.Column="2"
+					Content="{Binding SettingsAllContentProcessing}"
+					IsChecked="{Binding AllContentProcessingChecked, Mode=TwoWay}"
+					Click="OnContentProcessingAllChanged" />
+		</Grid>
+		<Border Name="ContentProcessingOptionsBorder" Grid.Row="1" Classes="checklist-border">
+		  <Grid>
+			<ListBox Name="ContentProcessingOptionsList"
+					   Classes="settings-list"
+					   ItemsSource="{Binding ContentProcessingOptions}"
+					   SelectionMode="Multiple"
+					   ScrollViewer.VerticalScrollBarVisibility="Disabled"
+					   ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+			  <ListBox.ItemsPanel>
+				<ItemsPanelTemplate>
+				  <VirtualizingStackPanel />
+				</ItemsPanelTemplate>
+			  </ListBox.ItemsPanel>
+			  <ListBox.ItemTemplate>
+				<DataTemplate x:DataType="vm:IgnoreOptionViewModel">
+				  <!-- Left-aligned shrink-to-fit row: the star column collapses to the text width
+				       when the label fits, and constrains it when it does not, so a long locale
+				       label trims with an ellipsis while the counter and the status indicator
+				       always stay visible. -->
+				  <Grid ColumnDefinitions="*,6,16" HorizontalAlignment="Left">
+					<CheckBox Grid.Column="0"
+							  Classes="list-item settings-list-entry"
+							  IsChecked="{Binding IsChecked, Mode=TwoWay}">
+					  <!-- The Fluent CheckBox presenter inherits TextWrapping="Wrap" into its
+					       content, so NoWrap is forced here to keep the row on one line and let
+					       CharacterEllipsis trim instead of wrapping. -->
+					  <Grid ColumnDefinitions="*,Auto">
+						<TextBlock Grid.Column="0"
+								   Text="{Binding DisplayName}"
+								   TextWrapping="NoWrap"
+								   TextTrimming="CharacterEllipsis"
+								   VerticalAlignment="Center"
+								   ToolTip.Tip="{Binding Label}"
+								   ToolTip.ShowDelay="700" />
+						<TextBlock Grid.Column="1"
+								   Text="{Binding CounterText}"
+								   IsVisible="{Binding HasCounter}"
+								   TextWrapping="NoWrap"
+								   FontSize="12"
+								   Margin="4,0,0,0"
+								   VerticalAlignment="Center" />
+					  </Grid>
+					</CheckBox>
+					<Border Name="ContentProcessingStatusIndicator"
+							Classes="content-processing-status-indicator"
+							Grid.Column="2"
+							Width="16"
+							Height="16"
+							Background="Transparent"
+							Margin="0,1,0,0"
+							VerticalAlignment="Center"
+							IsVisible="{Binding HasStatus}"
+							AutomationProperties.HelpText="{Binding StatusText}"
+							PointerPressed="OnContentProcessingStatusIndicatorPointerPressed"
+							PointerReleased="OnContentProcessingStatusIndicatorPointerReleased"
+							ToolTip.ShowDelay="450"
+							ToolTip.Placement="BottomEdgeAlignedRight"
+							ToolTip.VerticalOffset="5">
+					  <Border.RenderTransform>
+						<TranslateTransform Y="2" />
+					  </Border.RenderTransform>
+					  <ToolTip.Tip>
+						<ToolTip MaxWidth="280">
+						  <TextBlock Text="{Binding StatusText}"
+									 MaxWidth="260"
+									 TextWrapping="Wrap" />
+						</ToolTip>
+					  </ToolTip.Tip>
+					  <Grid Width="16" Height="16">
+					  <Border Width="16"
+							  Height="16"
+							  CornerRadius="8"
+							  BorderThickness="1"
+							  BorderBrush="{DynamicResource AppMutedTextBrush}"
+							  Background="{DynamicResource MenuPressedBrush}"
+							  IsVisible="{Binding IsInformationStatus}">
+						<TextBlock Text="?"
+								   FontSize="10"
+								   FontWeight="SemiBold"
+								   Foreground="{DynamicResource AppTextBrush}"
+								   HorizontalAlignment="Center"
+								   VerticalAlignment="Center" />
+					  </Border>
+					  <Grid Width="16"
+							Height="16"
+							IsVisible="{Binding IsWarningStatus}">
+						<Path Data="M 8,1 L 15,14 L 1,14 Z"
+							  Stretch="Uniform"
+							  Fill="{DynamicResource MenuPressedBrush}"
+							  Stroke="{DynamicResource AppMutedTextBrush}"
+							  StrokeThickness="1" />
+						<TextBlock Text="!"
+								   Margin="0,2,0,0"
+								   FontSize="9"
+								   FontWeight="SemiBold"
+								   Foreground="{DynamicResource AppTextBrush}"
+								   HorizontalAlignment="Center"
+								   VerticalAlignment="Center" />
+					  </Grid>
+					  </Grid>
+					</Border>
+				  </Grid>
+				</DataTemplate>
+			  </ListBox.ItemTemplate>
+			</ListBox>
+		  </Grid>
+		</Border>
+	  </Grid>
+
       <!-- Extensions section - equal star height -->
-      <Grid Grid.Row="2" RowDefinitions="Auto,*" Margin="0,10,0,0" IsEnabled="{Binding AreFilterSettingsEnabled}">
+      <Grid Grid.Row="3" RowDefinitions="Auto,*" Margin="0,10,0,0" IsEnabled="{Binding AreFilterSettingsEnabled}">
         <Grid Name="ExtensionsHeaderGrid" Grid.Row="0" ColumnDefinitions="*,3,Auto" Margin="0,0,0,6">
           <TextBlock Name="ExtensionsHeaderText" Classes="section-title" Grid.Column="0" Text="{Binding SettingsExtensions}" Margin="0" FontSize="15"/>
           <CheckBox Name="ExtensionsAllCheckBox" Classes="section-all" Grid.Column="2" Content="{Binding SettingsAllExtensions}"
@@ -178,37 +445,6 @@
         </Border>
       </Grid>
 
-      <!-- RootFolders section - equal star height -->
-      <Grid Grid.Row="3" RowDefinitions="Auto,*" Margin="0,10,0,0" IsEnabled="{Binding AreFilterSettingsEnabled}">
-        <Grid Name="RootFoldersHeaderGrid" Grid.Row="0" ColumnDefinitions="*,3,Auto" Margin="0,0,0,6">
-          <TextBlock Name="RootFoldersHeaderText" Classes="section-title" Grid.Column="0" Text="{Binding SettingsRootFolders}" Margin="0" FontSize="15"/>
-          <CheckBox Name="RootFoldersAllCheckBox" Classes="section-all" Grid.Column="2" Content="{Binding SettingsAllRootFolders}"
-                    IsChecked="{Binding AllRootFoldersChecked, Mode=TwoWay}"
-                    IsEnabled="{Binding HasRootFolderOptions}"
-                    IsCheckedChanged="OnRootAllChanged" />
-        </Grid>
-        <Border Grid.Row="1" Classes="checklist-border">
-          <ListBox Name="RootFoldersList"
-                   Classes="settings-list"
-                   ItemsSource="{Binding RootFolders}"
-                   SelectionMode="Multiple"
-                   ScrollViewer.IsScrollInertiaEnabled="True"
-                   ScrollViewer.VerticalScrollBarVisibility="Auto"
-                   ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-            <ListBox.ItemsPanel>
-              <ItemsPanelTemplate>
-                <VirtualizingStackPanel />
-              </ItemsPanelTemplate>
-            </ListBox.ItemsPanel>
-            <ListBox.ItemTemplate>
-              <DataTemplate x:DataType="vm:SelectionOptionViewModel">
-                <CheckBox Classes="list-item settings-list-entry" Content="{Binding Name}"
-                          IsChecked="{Binding IsChecked, Mode=TwoWay}" />
-              </DataTemplate>
-            </ListBox.ItemTemplate>
-          </ListBox>
-        </Border>
-      </Grid>
     </Grid>
   </Border>
 </UserControl>

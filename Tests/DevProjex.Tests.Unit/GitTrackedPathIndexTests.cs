@@ -4,6 +4,114 @@ namespace DevProjex.Tests.Unit;
 
 public sealed class GitTrackedPathIndexTests
 {
+	[Fact]
+	public void GitDirectoryPointer_RejectsActualContentBeyondMaximumAfterLengthProbe()
+	{
+		var bytes = new byte[GitTrackedPathIndexCache.GitFileMaximumLength + 1];
+		Encoding.UTF8.GetBytes("gitdir: metadata", bytes);
+		using var stream = new StaleLengthMemoryStream(bytes, reportedLength: 16);
+
+		var result = GitTrackedPathIndexCache.TryReadGitDirectoryPointer(stream, out var target);
+
+		Assert.False(result);
+		Assert.Empty(target);
+		Assert.Equal(GitTrackedPathIndexCache.GitFileMaximumLength + 1, stream.Position);
+	}
+
+	[Fact]
+	public async Task NullDelimitedReader_WhenRetainedBudgetIsExceeded_AbortsBeforeMaterializingRemainder()
+	{
+		var payload = Encoding.UTF8.GetBytes("first.cs\0second-long-path.cs\0third.cs\0");
+		await using var stream = new MemoryStream(payload);
+		using var reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: false);
+		var abortCount = 0;
+
+		var paths = await GitTrackedPathIndexCache.ReadNullDelimitedPathsAsync(
+			reader,
+			TestContext.Current.CancellationToken,
+			() => abortCount++,
+			maximumRetainedBytes: 64 + IntPtr.Size + 32 + ("first.cs".Length * sizeof(char)),
+			maximumPathLength: 32768);
+
+		Assert.Null(paths);
+		Assert.Equal(1, abortCount);
+	}
+
+	[Fact]
+	public async Task NullDelimitedReader_WhenWithinBudget_ReturnsEveryPathWithoutAborting()
+	{
+		var payload = Encoding.UTF8.GetBytes("src/app.cs\0docs/readme.md\0");
+		await using var stream = new MemoryStream(payload);
+		using var reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: false);
+		var abortCount = 0;
+
+		var paths = await GitTrackedPathIndexCache.ReadNullDelimitedPathsAsync(
+			reader,
+			TestContext.Current.CancellationToken,
+			() => abortCount++);
+
+		Assert.Equal(["src/app.cs", "docs/readme.md"], paths);
+		Assert.Equal(0, abortCount);
+	}
+
+	[Fact]
+	public async Task NullDelimitedReader_WhenSharedBudgetIsExhausted_AbortsTheCurrentProducer()
+	{
+		var payload = Encoding.UTF8.GetBytes("first.cs\0second.cs\0");
+		await using var stream = new MemoryStream(payload);
+		using var reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: false);
+		var remaining = 64L + IntPtr.Size + 32 + ("first.cs".Length * sizeof(char));
+		var abortCount = 0;
+
+		var paths = await GitTrackedPathIndexCache.ReadNullDelimitedPathsAsync(
+			reader,
+			TestContext.Current.CancellationToken,
+			() => abortCount++,
+			reserveRetainedBytes: bytes =>
+			{
+				if (remaining < bytes)
+					return false;
+				remaining -= bytes;
+				return true;
+			});
+
+		Assert.Null(paths);
+		Assert.Equal(1, abortCount);
+		Assert.Equal(0, remaining);
+	}
+
+	[Fact]
+	public async Task NullDelimitedReader_WhenSinglePathExceedsLimit_AbortsWithoutReturningPartialIndex()
+	{
+		var payload = Encoding.UTF8.GetBytes("path-that-is-too-long\0");
+		await using var stream = new MemoryStream(payload);
+		using var reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: false);
+		var processKilled = false;
+
+		var paths = await GitTrackedPathIndexCache.ReadNullDelimitedPathsAsync(
+			reader,
+			TestContext.Current.CancellationToken,
+			() => processKilled = true,
+			maximumPathLength: 8);
+
+		Assert.Null(paths);
+		Assert.True(processKilled);
+	}
+
+	[Theory]
+	[InlineData(64, true)]
+	[InlineData(16 * 1024 * 1024, true)]
+	[InlineData(16 * 1024 * 1024 + 1, false)]
+	[InlineData(64 * 1024 * 1024, false)]
+	public void CacheRetentionPolicy_EnforcesTheGlobalRetainedByteBudget(
+		long estimatedRetainedBytes,
+		bool expected)
+	{
+		Assert.Equal(
+			expected,
+			GitTrackedPathIndexCache.CanRetainCacheEntry(estimatedRetainedBytes));
+	}
+
 	[Theory]
 	[InlineData("src/App.cs", true, false, true)]
 	[InlineData("src", false, true, true)]
@@ -58,6 +166,35 @@ public sealed class GitTrackedPathIndexTests
 		Assert.True(startInfo.RedirectStandardOutput);
 		Assert.True(startInfo.RedirectStandardError);
 		Assert.Equal("0", startInfo.Environment["GIT_TERMINAL_PROMPT"]);
+	}
+
+	[Theory]
+	[InlineData(2, true)]
+	[InlineData(5, false)]
+	[InlineData(8, false)]
+	[InlineData(11, false)]
+	public void GitStartFailureCaching_DistinguishesMissingExecutableFromTransientFailures(
+		int nativeErrorCode,
+		bool expectedPermanent)
+	{
+		var exception = new System.ComponentModel.Win32Exception(nativeErrorCode);
+
+		Assert.Equal(
+			expectedPermanent,
+			GitTrackedPathIndexCache.IsPermanentGitStartFailure(exception));
+	}
+
+	[Theory]
+	[InlineData(3)]
+	[InlineData(193)]
+	[InlineData(216)]
+	public void WindowsSpecificGitStartFailures_ArePermanentOnlyOnWindows(int nativeErrorCode)
+	{
+		var exception = new System.ComponentModel.Win32Exception(nativeErrorCode);
+
+		Assert.Equal(
+			OperatingSystem.IsWindows(),
+			GitTrackedPathIndexCache.IsPermanentGitStartFailure(exception));
 	}
 
 	[Fact]
@@ -142,6 +279,7 @@ public sealed class GitTrackedPathIndexTests
 	{
 		using var temp = new TemporaryDirectory();
 		var repositoryRoot = temp.CreateFolder("repo");
+		temp.CreateFile("repo/Src/App.cs", "content");
 		var index = new GitTrackedPathIndex(repositoryRoot, ["Src/App.cs"]);
 		var differentlyCasedDirectory = Path.Combine(repositoryRoot, "src");
 		var differentlyCasedFile = Path.Combine(differentlyCasedDirectory, "app.cs");
@@ -152,13 +290,14 @@ public sealed class GitTrackedPathIndexTests
 	}
 
 	[Fact]
-	public void ExplicitCaseInsensitiveSemantics_DeduplicateAndMatchRepositoryPaths()
+	public void ExplicitCaseInsensitiveSemantics_MatchAUniqueWorkingTreeAlias()
 	{
 		using var temp = new TemporaryDirectory();
 		var repositoryRoot = temp.CreateFolder("repo");
+		temp.CreateFile("repo/Src/App.cs", "content");
 		var index = new GitTrackedPathIndex(
 			repositoryRoot,
-			["Src/App.cs", "src/app.cs"],
+			["Src/App.cs"],
 			new GitPathComparisonSemantics(
 				IgnoreCase: true,
 				NormalizeUnicode: false));
@@ -169,10 +308,66 @@ public sealed class GitTrackedPathIndexTests
 	}
 
 	[Fact]
+	public void ExplicitCaseInsensitiveSemantics_RejectAnAmbiguousWorkingTreeAlias()
+	{
+		using var temp = new TemporaryDirectory();
+		var repositoryRoot = temp.CreateFolder("repo");
+		var upperPath = temp.CreateFile("repo/Foo.cs", "upper");
+		var lowerPath = temp.CreateFile("repo/foo.cs", "lower");
+		if (Directory.EnumerateFiles(repositoryRoot, "*.cs").Count() < 2)
+			Assert.Skip("The temporary file system is case-insensitive.");
+
+		var scopedIndex = new GitTrackedPathIndex(
+			repositoryRoot,
+			["Foo.cs"],
+			new GitPathComparisonSemantics(
+				IgnoreCase: true,
+				NormalizeUnicode: false));
+		var completeIndex = new GitTrackedPathIndex(
+			repositoryRoot,
+			["Foo.cs", "foo.cs"],
+			new GitPathComparisonSemantics(
+				IgnoreCase: true,
+				NormalizeUnicode: false));
+
+		Assert.True(scopedIndex.Contains(upperPath));
+		Assert.False(scopedIndex.Contains(lowerPath));
+		Assert.Equal(2, completeIndex.Count);
+		Assert.True(completeIndex.Contains(upperPath));
+		Assert.True(completeIndex.Contains(lowerPath));
+		Assert.False(completeIndex.Contains(Path.Combine(repositoryRoot, "FOO.cs")));
+	}
+
+	[Fact]
+	public void WindowsCompatibilityAliasSelectionRequiresOneDiscoveredSibling()
+	{
+		var parent = Path.Combine(Path.GetTempPath(), "case-alias-parent");
+		var upper = Path.Combine(parent, "Repo");
+		var lower = Path.Combine(parent, "repo");
+
+		Assert.False(GitTrackedPathIndex.TryFindUniqueWindowsCompatibleEntry(
+			[upper, lower],
+			"REPO",
+			out _));
+		Assert.True(GitTrackedPathIndex.TryFindUniqueWindowsCompatibleEntry(
+			[upper, lower],
+			"Repo",
+			out var exact));
+		Assert.Equal(upper, exact);
+		Assert.True(GitTrackedPathIndex.TryFindUniqueWindowsCompatibleEntry(
+			[upper],
+			"repo",
+			out var unique));
+		Assert.Equal(upper, unique);
+	}
+
+	[Fact]
 	public void ExplicitCaseInsensitiveSemantics_UseGitAsciiFoldWithoutMergingUnicodeNames()
 	{
 		using var temp = new TemporaryDirectory();
 		var repositoryRoot = temp.CreateFolder("repo");
+		temp.CreateFile("repo/ASCII/FILE.cs", "content");
+		temp.CreateFile("repo/Ä.cs", "content");
 		var index = new GitTrackedPathIndex(
 			repositoryRoot,
 			["ASCII/FILE.cs", "Ä.cs"],
@@ -201,15 +396,33 @@ public sealed class GitTrackedPathIndexTests
 	}
 
 	[Fact]
+	public void RepositoryOwnershipUsesPlatformSemanticsInsteadOfGitPathSemantics()
+	{
+		using var temp = new TemporaryDirectory();
+		var repositoryRoot = temp.CreateFolder("Repo");
+		var alternateRoot = Path.Combine(temp.Path, "repo");
+		var index = new GitTrackedPathIndex(
+			repositoryRoot,
+			["App.cs"],
+			new GitPathComparisonSemantics(IgnoreCase: true, NormalizeUnicode: true));
+
+		Assert.Equal(OperatingSystem.IsWindows(), index.MatchesRepositoryRoot(alternateRoot));
+		Assert.Equal(
+			OperatingSystem.IsWindows(),
+			index.OwnsPath(Path.Combine(alternateRoot, "App.cs")));
+	}
+
+	[Fact]
 	public void UnicodeNormalizationSemantics_MatchCanonicallyEquivalentGitPaths()
 	{
 		using var temp = new TemporaryDirectory();
 		var repositoryRoot = temp.CreateFolder("repo");
 		const string precomposedName = "caf\u00e9.cs";
 		const string decomposedName = "cafe\u0301.cs";
+		temp.CreateFile($"repo/{precomposedName}", "content");
 		var index = new GitTrackedPathIndex(
 			repositoryRoot,
-			[precomposedName, decomposedName],
+			[precomposedName],
 			new GitPathComparisonSemantics(
 				IgnoreCase: false,
 				NormalizeUnicode: true));
@@ -236,10 +449,11 @@ public sealed class GitTrackedPathIndexTests
 	}
 
 	[Fact]
-	public void ScanContext_UsesRepositorySpecificCaseAndUnicodeSemanticsToResolveIndex()
+	public void ScanContext_UsesRepositorySpecificSemanticsOnlyInsideThePhysicalRepository()
 	{
 		using var temp = new TemporaryDirectory();
 		var repositoryRoot = temp.CreateFolder("r\u00e9po");
+		temp.CreateFile("r\u00e9po/Src/caf\u00e9.cs", "content");
 		var index = new GitTrackedPathIndex(
 			repositoryRoot,
 			["Src/caf\u00e9.cs"],
@@ -257,11 +471,8 @@ public sealed class GitTrackedPathIndexTests
 			UseTrackedGitFilesOnly = true,
 			EnableGitIgnoreTraversal = true
 		};
-		var alternateRootPath = Path.Combine(
-			Path.GetDirectoryName(repositoryRoot)!,
-			"Re\u0301PO");
 		var alternateFilePath = Path.Combine(
-			alternateRootPath,
+			repositoryRoot,
 			"src",
 			"cafe\u0301.cs");
 		var context = rules
@@ -274,8 +485,47 @@ public sealed class GitTrackedPathIndexTests
 			isDirectory: false,
 			"cafe\u0301.cs");
 
-		Assert.True(context.ContainsTrackedPathIndex(alternateRootPath));
+		Assert.True(context.ContainsTrackedPathIndex(repositoryRoot));
 		Assert.False(evaluation.IsIgnored);
+	}
+
+	[Fact]
+	public void ScanContext_DoesNotMergeCaseDistinctRepositoryRoots()
+	{
+		using var temp = new TemporaryDirectory();
+		var upperRoot = temp.CreateFolder("Repo");
+		var lowerRoot = temp.CreateFolder("repo");
+		var upperFile = temp.CreateFile("Repo/Upper.cs", "upper");
+		var lowerFile = temp.CreateFile("repo/Lower.cs", "lower");
+		if (Directory.EnumerateDirectories(temp.Path).Count() < 2)
+			Assert.Skip("The temporary file system is case-insensitive.");
+
+		var rules = new IgnoreRules(
+			IgnoreHiddenFolders: false,
+			IgnoreHiddenFiles: false,
+			IgnoreDotFolders: false,
+			IgnoreDotFiles: false,
+			SmartIgnoredFolders: new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+			SmartIgnoredFiles: new HashSet<string>(StringComparer.OrdinalIgnoreCase))
+		{
+			UseTrackedGitFilesOnly = true,
+			EnableGitIgnoreTraversal = true
+		};
+		var context = rules
+			.CreateGitIgnoreScanContext(temp.Path)
+			.WithTrackedPathIndex(new GitTrackedPathIndex(
+				upperRoot,
+				["Upper.cs"],
+				new GitPathComparisonSemantics(IgnoreCase: true, NormalizeUnicode: false)))
+			.WithTrackedPathIndex(new GitTrackedPathIndex(
+				lowerRoot,
+				["Lower.cs"],
+				new GitPathComparisonSemantics(IgnoreCase: false, NormalizeUnicode: false)));
+
+		Assert.True(context.ContainsTrackedPathIndex(upperRoot));
+		Assert.True(context.ContainsTrackedPathIndex(lowerRoot));
+		Assert.False(context.Evaluate(upperFile, "Repo/Upper.cs", false, "Upper.cs").IsIgnored);
+		Assert.False(context.Evaluate(lowerFile, "repo/Lower.cs", false, "Lower.cs").IsIgnored);
 	}
 
 	[Fact]
@@ -466,5 +716,11 @@ public sealed class GitTrackedPathIndexTests
 			"tracked.tmp");
 
 		Assert.False(evaluation.IsIgnored);
+	}
+
+	private sealed class StaleLengthMemoryStream(byte[] buffer, long reportedLength) :
+		MemoryStream(buffer, writable: false)
+	{
+		public override long Length => reportedLength;
 	}
 }

@@ -1,3 +1,7 @@
+using System.Buffers.Binary;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+
 namespace DevProjex.Kernel.Abstractions;
 
 /// <summary>
@@ -85,6 +89,21 @@ public interface IFileContentAnalyzer
 	}
 
 	/// <summary>
+	/// Reads a bounded text file into an operation-owned buffer in one pass. Callers that need
+	/// random access to the complete text, such as span-based scanners, should use this contract
+	/// instead of measuring a snapshot and streaming the same file a second time.
+	/// </summary>
+	async ValueTask<ICompleteTextFileBuffer> OpenCompleteTextBufferAsync(
+		string path,
+		long maximumBytes,
+		CancellationToken cancellationToken = default)
+	{
+		var result = await ReadClassifiedAsync(path, maximumBytes, cancellationToken)
+			.ConfigureAwait(false);
+		return new MaterializedCompleteTextFileBuffer(result);
+	}
+
+	/// <summary>
 	/// Tries to read file as text content with full content loaded.
 	/// Returns null if file is binary or cannot be read.
 	/// Use this for export operations where content is needed.
@@ -106,6 +125,52 @@ public interface IFileContentAnalyzer
 		string path,
 		long maxSizeForFullRead,
 		CancellationToken cancellationToken = default);
+
+	/// <summary>
+	/// Reads one coherent text fact for consumers that need content, exact raw metrics and a stable
+	/// content identity. Implementations should calculate all three while decoding the same stream.
+	/// </summary>
+	async ValueTask<ContentReadFact> ReadFactAsync(
+		string path,
+		long maxSizeForFullRead,
+		CancellationToken cancellationToken = default)
+	{
+		var result = await ReadClassifiedAsync(path, maxSizeForFullRead, cancellationToken)
+			.ConfigureAwait(false);
+		return ContentReadFact.FromReadResult(result);
+	}
+}
+
+public interface ICompleteTextFileBuffer : IAsyncDisposable
+{
+	FileContentClassification Classification { get; }
+
+	long SizeBytes { get; }
+
+	ReadOnlyMemory<char> Content { get; }
+}
+
+internal sealed class MaterializedCompleteTextFileBuffer : ICompleteTextFileBuffer
+{
+	private readonly string? _content;
+
+	public MaterializedCompleteTextFileBuffer(FileContentReadResult result)
+	{
+		ArgumentNullException.ThrowIfNull(result);
+		Classification = result.Classification;
+		SizeBytes = result.Content?.SizeBytes ?? 0;
+		_content = result.Classification == FileContentClassification.Text
+			? result.Content?.Content
+			: null;
+	}
+
+	public FileContentClassification Classification { get; }
+
+	public long SizeBytes { get; }
+
+	public ReadOnlyMemory<char> Content => _content?.AsMemory() ?? ReadOnlyMemory<char>.Empty;
+
+	public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }
 
 public interface IFileContentSnapshot : IAsyncDisposable
@@ -204,9 +269,20 @@ public enum FileContentClassification
 	UnsupportedEncoding
 }
 
+public enum TextFileEncoding
+{
+	Utf8 = 0,
+	Utf8Bom = 1,
+	Utf16LittleEndian = 2,
+	Utf16BigEndian = 3,
+	Utf32LittleEndian = 4,
+	Utf32BigEndian = 5
+}
+
 public sealed record FileContentReadResult(
 	FileContentClassification Classification,
-	TextFileContent? Content = null)
+	TextFileContent? Content = null,
+	TextFileEncoding? Encoding = null)
 {
 	public bool IsText =>
 		Classification is FileContentClassification.Text or FileContentClassification.TooLarge;
@@ -263,3 +339,105 @@ public sealed record TextFileContent(
 	bool IsEstimated = false,
 	int TrailingNewlineChars = 0,
 	int TrailingNewlineLineBreaks = 0);
+
+/// <summary>A canonical SHA-256 over the UTF-16 text consumed by transformation caches.</summary>
+public readonly record struct ContentFingerprint(
+	ulong Part0,
+	ulong Part1,
+	ulong Part2,
+	ulong Part3)
+{
+	public const int ByteLength = SHA256.HashSizeInBytes;
+
+	public static ContentFingerprint Compute(ReadOnlySpan<char> content)
+	{
+		Span<byte> hash = stackalloc byte[ByteLength];
+		SHA256.HashData(MemoryMarshal.AsBytes(content), hash);
+		return FromBytes(hash);
+	}
+
+	public static ContentFingerprint FromBytes(ReadOnlySpan<byte> hash)
+	{
+		if (hash.Length != ByteLength)
+			throw new ArgumentException($"A SHA-256 fingerprint must contain {ByteLength} bytes.", nameof(hash));
+		return new ContentFingerprint(
+			BinaryPrimitives.ReadUInt64LittleEndian(hash),
+			BinaryPrimitives.ReadUInt64LittleEndian(hash[8..]),
+			BinaryPrimitives.ReadUInt64LittleEndian(hash[16..]),
+			BinaryPrimitives.ReadUInt64LittleEndian(hash[24..]));
+	}
+
+	public void WriteBytes(Span<byte> destination)
+	{
+		if (destination.Length < ByteLength)
+			throw new ArgumentException($"The destination must contain at least {ByteLength} bytes.", nameof(destination));
+		BinaryPrimitives.WriteUInt64LittleEndian(destination, Part0);
+		BinaryPrimitives.WriteUInt64LittleEndian(destination[8..], Part1);
+		BinaryPrimitives.WriteUInt64LittleEndian(destination[16..], Part2);
+		BinaryPrimitives.WriteUInt64LittleEndian(destination[24..], Part3);
+	}
+
+	public string ToHexString()
+	{
+		Span<byte> hash = stackalloc byte[ByteLength];
+		WriteBytes(hash);
+		return Convert.ToHexString(hash);
+	}
+}
+
+/// <summary>
+/// Immutable result of one full decode. The content, metrics and fingerprint always describe the
+/// same stream version, which lets downstream phases avoid independent reads and hashes.
+/// </summary>
+public sealed record ContentReadFact(
+	string? Content,
+	FileContentClassification Classification,
+	TextFileMetrics? RawMetrics,
+	ContentFingerprint? Fingerprint,
+	TextFileEncoding? Encoding = null)
+{
+	public bool IsMaterializedText =>
+		Classification == FileContentClassification.Text && Content is not null && RawMetrics is not null;
+
+	public long ApproximateRetainedBytes =>
+		Content is null ? 128 : 128L + Content.Length * sizeof(char);
+
+	public FileContentReadResult ToReadResult()
+	{
+		TextFileContent? text = null;
+		if (RawMetrics is { } metrics)
+		{
+			text = new TextFileContent(
+				Content ?? string.Empty,
+				metrics.SizeBytes,
+				metrics.LineCount,
+				metrics.CharCount,
+				metrics.IsEmpty,
+				metrics.IsWhitespaceOnly,
+				metrics.IsEstimated,
+				metrics.TrailingNewlineChars,
+				metrics.TrailingNewlineLineBreaks);
+		}
+		return new FileContentReadResult(Classification, text, Encoding);
+	}
+
+	public static ContentReadFact FromReadResult(FileContentReadResult result)
+	{
+		var text = result.Content;
+		var metrics = text is null
+			? null
+			: new TextFileMetrics(
+				text.SizeBytes,
+				text.LineCount,
+				text.CharCount,
+				text.IsEmpty,
+				text.IsWhitespaceOnly,
+				text.IsEstimated,
+				TrailingNewlineChars: text.TrailingNewlineChars,
+				TrailingNewlineLineBreaks: text.TrailingNewlineLineBreaks);
+		ContentFingerprint? fingerprint = result.Classification == FileContentClassification.Text && text is not null
+			? ContentFingerprint.Compute(text.Content.AsSpan())
+			: null;
+		return new ContentReadFact(text?.Content, result.Classification, metrics, fingerprint, result.Encoding);
+	}
+}

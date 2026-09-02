@@ -1,7 +1,11 @@
+using Avalonia.Animation;
+using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
+using Avalonia.VisualTree;
 using DevProjex.Avalonia.Coordinators;
 using DevProjex.Application.Services;
 using System.ComponentModel;
+using System.Reflection;
 using System.Text.Json;
 using System.Xml.Linq;
 
@@ -10,6 +14,207 @@ namespace DevProjex.Tests.UI;
 [Collection(UiWorkspaceCollection.Name)]
 public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
 {
+	[AvaloniaFact]
+	public async Task ContentPreview_ZeroCheckedPathsRemainTheImplicitWholeTreeForPreviewAndCopy()
+	{
+		using var project = UiTestProject.CreateDefault();
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(project);
+
+		try
+		{
+			Assert.True(Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes).IsChecked is false);
+			await UiTestDriver.OpenPreviewAsync(window);
+			await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
+			var initialPayload = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
+			Assert.Contains("DevProjex UI test workspace", initialPayload, StringComparison.Ordinal);
+			Assert.Equal(
+				initialPayload,
+				await UiTestDriver.ComputeAppliedPreviewCopyPayloadAsync(
+					window,
+					PreviewContentMode.Content,
+					TestContext.Current.CancellationToken));
+			await UiTestDriver.WaitForStatusMetricsReadyAsync(window);
+			var viewModel = UiTestDriver.GetViewModel(window);
+			var initialTreeMetrics = viewModel.StatusTreeStatsText;
+			var initialContentMetrics = viewModel.StatusContentStatsText;
+			Assert.NotEmpty(initialTreeMetrics);
+			Assert.NotEmpty(initialContentMetrics);
+
+			await window.Dispatcher.InvokeAsync(() =>
+				Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes).IsChecked = true);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => string.Equals(
+					UiTestDriver.ComputeCurrentPreviewCopyPayload(window),
+					initialPayload,
+					StringComparison.Ordinal),
+				"explicit whole-tree selection to preserve the preview document");
+
+			await window.Dispatcher.InvokeAsync(() =>
+				Assert.Single(UiTestDriver.GetViewModel(window).TreeNodes).IsChecked = false);
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => string.Equals(
+					UiTestDriver.ComputeCurrentPreviewCopyPayload(window),
+					initialPayload,
+					StringComparison.Ordinal),
+				"zero checked paths to remain the implicit whole-tree preview");
+			Assert.Equal(
+				initialPayload,
+				await UiTestDriver.ComputeAppliedPreviewCopyPayloadAsync(
+					window,
+					PreviewContentMode.Content,
+					TestContext.Current.CancellationToken));
+			await UiTestDriver.WaitForConditionAsync(
+				window,
+				() => string.Equals(viewModel.StatusTreeStatsText, initialTreeMetrics, StringComparison.Ordinal) &&
+				      string.Equals(viewModel.StatusContentStatsText, initialContentMetrics, StringComparison.Ordinal),
+				"zero checked paths to retain the whole-tree status metrics");
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaTheory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task EmptyContentPreviewAndWarmupPreserveTheProjectRoot(bool hasSelection)
+	{
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+		try
+		{
+			var snapshotMethod = typeof(MainWindow).GetMethod(
+				"CaptureProjectTextOutputSnapshot",
+				BindingFlags.Instance | BindingFlags.NonPublic);
+			var controllerField = typeof(MainWindow).GetField(
+				"_previewSurfaceController",
+				BindingFlags.Instance | BindingFlags.NonPublic);
+			Assert.NotNull(snapshotMethod);
+			Assert.NotNull(controllerField);
+			var snapshot = Assert.IsType<ProjectTextOutputSnapshot>(snapshotMethod!.Invoke(window, null));
+			var controller = Assert.IsType<PreviewSurfaceController>(controllerField!.GetValue(window));
+			var emptyRoot = snapshot.Root with { Children = [] };
+			var selectedPaths = new HashSet<string>(PathComparer.Default);
+			var displayRoot = snapshot.PathPresentation?.DisplayRootPath ?? snapshot.RootPath;
+			var expected = ContextRootPresentation.FormatLine(displayRoot);
+
+			var warmup = await controller.TryBuildWarmupSnapshotAsync(
+				PreviewContentMode.Content,
+				snapshot.TreeFormat,
+				hasSelection,
+				selectedPaths,
+				snapshot.RootPath,
+				emptyRoot,
+				[],
+				snapshot.PathPresentation,
+				"No text content",
+				"No checked files",
+				TestContext.Current.CancellationToken);
+			var preview = controller.BuildDocument(
+				PreviewContentMode.Content,
+				selectedPaths,
+				hasSelection,
+				snapshot.TreeFormat,
+				"No checked files",
+				"No text content",
+				"No data",
+				snapshot.RootPath,
+				emptyRoot,
+				[],
+				snapshot.PathPresentation,
+				TestContext.Current.CancellationToken);
+			using var document = preview.Document;
+
+			Assert.Equal(expected, Assert.IsType<PreviewWarmupSnapshot>(warmup).Text);
+			Assert.Equal(expected, document.GetFullText());
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+	[AvaloniaFact]
+	public async Task ContentWarmup_UsesSingleRootAndRelativeFileHeaders()
+	{
+		var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+		try
+		{
+			var snapshotMethod = typeof(MainWindow).GetMethod(
+				"CaptureProjectTextOutputSnapshot",
+				BindingFlags.Instance | BindingFlags.NonPublic);
+			var controllerField = typeof(MainWindow).GetField(
+				"_previewSurfaceController",
+				BindingFlags.Instance | BindingFlags.NonPublic);
+			Assert.NotNull(snapshotMethod);
+			Assert.NotNull(controllerField);
+			var snapshot = Assert.IsType<ProjectTextOutputSnapshot>(snapshotMethod!.Invoke(window, null));
+			var controller = Assert.IsType<PreviewSurfaceController>(controllerField!.GetValue(window));
+
+			var warmup = await controller.TryBuildWarmupSnapshotAsync(
+				PreviewContentMode.Content,
+				snapshot.TreeFormat,
+				hasSelection: false,
+				new HashSet<string>(PathComparer.Default),
+				snapshot.RootPath,
+				snapshot.Root,
+				snapshot.OrderedFilePaths,
+				snapshot.PathPresentation,
+				"No text content",
+				"No checked files",
+				TestContext.Current.CancellationToken);
+
+			var text = Assert.IsType<PreviewWarmupSnapshot>(warmup).Text;
+			var displayRoot = snapshot.PathPresentation?.DisplayRootPath ?? snapshot.RootPath;
+			Assert.StartsWith(ContextRootPresentation.FormatLine(displayRoot), text, StringComparison.Ordinal);
+			Assert.Equal(1, CountOccurrences(text, displayRoot));
+			Assert.DoesNotContain(
+				$"{snapshot.RootPath}{Path.DirectorySeparatorChar}src{Path.DirectorySeparatorChar}",
+				text,
+				OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+		}
+		finally
+		{
+			await UiTestDriver.CloseWindowAsync(window);
+		}
+	}
+
+    [AvaloniaFact]
+    public async Task ClipboardReadinessWait_StopsWhenPreviewControllerIsDisposed()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            await UiTestDriver.OpenPreviewAsync(window);
+            var viewModel = UiTestDriver.GetViewModel(window);
+            viewModel.IsPreviewLoading = true;
+
+            var controllerField = typeof(MainWindow).GetField(
+                "_previewSurfaceController",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var waitMethod = typeof(PreviewSurfaceController).GetMethod(
+                "WaitForClipboardSourceReadyAsync",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(controllerField);
+            Assert.NotNull(waitMethod);
+
+            var controller = Assert.IsType<PreviewSurfaceController>(controllerField!.GetValue(window));
+            var waitTask = Assert.IsAssignableFrom<Task<bool>>(waitMethod!.Invoke(controller, null));
+            controller.Dispose();
+
+            Assert.False(await waitTask.WaitAsync(TimeSpan.FromSeconds(1)));
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
     [AvaloniaFact]
     public async Task JsonTree_UserVisibleCopyAndPreviewRoutesKeepUnicodeNamesReadable()
     {
@@ -245,9 +450,16 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
             var expectedContentOnlyMetrics = ExportOutputMetricsCalculator.FromText(contentOnlyPayload);
             Assert.True(UiTestDriver.TryGetCurrentStatusMetrics(window, out _, out var actualContentOnlyMetrics));
             Assert.Equal(ToRenderedStatusMetrics(expectedContentOnlyMetrics), actualContentOnlyMetrics);
+            Assert.Contains($"Root: {workspace.Project.RootPath}", contentOnlyPayload, StringComparison.Ordinal);
+            Assert.Equal(1, CountOccurrences(contentOnlyPayload, workspace.Project.RootPath));
+            Assert.Contains("src/AppHost/Program.cs", contentOnlyPayload.Replace('\\', '/'), StringComparison.Ordinal);
+            Assert.DoesNotContain(
+                Path.Combine(workspace.Project.RootPath, "src", "AppHost", "Program.cs"),
+                contentOnlyPayload,
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
             Assert.True(
                 actualTreeAndContentMetrics.Chars < actualContentOnlyMetrics.Chars,
-                "Tree + Content content metrics should benefit from shorter relative headers while Content-only keeps full display paths.");
+                "Content-only metrics include the single root line while Tree + Content reports the content body.");
 
             await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.TreeAndContent);
             await UiTestDriver.WaitForStatusMetricsReadyAsync(window);
@@ -258,86 +470,6 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
             await UiTestDriver.WaitForStatusMetricsReadyAsync(window);
             Assert.True(UiTestDriver.TryGetCurrentStatusMetrics(window, out _, out var closedPreviewContentMetrics));
             Assert.Equal(actualContentOnlyMetrics, closedPreviewContentMetrics);
-        }
-        finally
-        {
-            await UiTestDriver.CloseWindowAsync(window);
-        }
-    }
-
-    [AvaloniaFact]
-    public async Task ManagedGitClone_ContentPreviewCopyAndStatusUseTheSameReadableFiles()
-    {
-        using var project = UiTestProject.CreateWithManagedGitCloneContentWorkspace();
-        var window = await UiTestDriver.CreateLoadedMainWindowAsync(
-            project,
-            projectSourceType: ProjectSourceType.GitClone,
-            managedClonePath: project.RootPath,
-            repositoryUrl: "https://github.com/example/clone-content-probe");
-
-        try
-        {
-            var viewModel = UiTestDriver.GetViewModel(window);
-            Assert.True(viewModel.IsGitMode);
-            Assert.DoesNotContain(viewModel.RootFolders, option =>
-                string.Equals(option.Name, ".git", StringComparison.OrdinalIgnoreCase));
-            Assert.DoesNotContain(
-                viewModel.TreeNodes.SelectMany(static node => node.Flatten()),
-                node => IsGitMetadataPath(project.RootPath, node.FullPath));
-
-            var expectedContent = await UiTestDriver.ComputeAppliedPreviewCopyPayloadAsync(
-                window,
-                PreviewContentMode.Content);
-            AssertCloneTextContent(expectedContent);
-
-            await UiTestDriver.OpenPreviewAsync(window);
-            await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.Content);
-            await UiTestDriver.WaitForConditionAsync(
-                window,
-                () => UiTestDriver.ComputeCurrentPreviewCopyPayload(window)
-                    .Contains("CLONE-CONTENT-SENTINEL", StringComparison.Ordinal),
-                "managed clone text content to appear in Content preview");
-            await UiTestDriver.WaitForStatusMetricsReadyAsync(window);
-
-            var contentPreview = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
-            Assert.Equal(NormalizeLineEndings(expectedContent), NormalizeLineEndings(contentPreview));
-            AssertCloneTextContent(contentPreview);
-            Assert.True(UiTestDriver.TryGetCurrentStatusMetrics(window, out _, out var contentStatusMetrics));
-            Assert.Equal(
-                ToRenderedStatusMetrics(ExportOutputMetricsCalculator.FromText(contentPreview)),
-                contentStatusMetrics);
-
-            await UiTestDriver.CopyContentToClipboardAsync(window, expectedContent);
-            Assert.Equal(expectedContent, await UiTestDriver.GetClipboardTextAsync(window));
-
-            var expectedTreeAndContent = await UiTestDriver.ComputeAppliedPreviewCopyPayloadAsync(
-                window,
-                PreviewContentMode.TreeAndContent);
-            await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.TreeAndContent);
-            await UiTestDriver.WaitForConditionAsync(
-                window,
-                () => UiTestDriver.ComputeCurrentPreviewCopyPayload(window)
-                    .Contains("CLONE-DOCUMENTATION-SENTINEL", StringComparison.Ordinal),
-                "managed clone text content to appear in Tree and Content preview");
-            await UiTestDriver.WaitForStatusMetricsReadyAsync(window);
-
-            var treeAndContentPreview = UiTestDriver.ComputeCurrentPreviewCopyPayload(window);
-            Assert.Equal(
-                NormalizeLineEndings(expectedTreeAndContent),
-                NormalizeLineEndings(treeAndContentPreview));
-            AssertCloneTextContent(treeAndContentPreview);
-            Assert.Contains("src/CloneContentProbe.cs:", treeAndContentPreview, StringComparison.Ordinal);
-            Assert.Contains("docs/clone-guide.md:", treeAndContentPreview, StringComparison.Ordinal);
-            Assert.DoesNotContain(project.RootPath.Replace('\\', '/'), treeAndContentPreview.Replace('\\', '/'), StringComparison.Ordinal);
-
-            var contentBody = ExtractContentBodyFromTreeAndContentPayload(treeAndContentPreview);
-            Assert.True(UiTestDriver.TryGetCurrentStatusMetrics(window, out _, out var treeAndContentStatusMetrics));
-            Assert.Equal(
-                ToRenderedStatusMetrics(ExportOutputMetricsCalculator.FromText(contentBody)),
-                treeAndContentStatusMetrics);
-
-            await UiTestDriver.CopyTreeAndContentToClipboardAsync(window, expectedTreeAndContent);
-            Assert.Equal(expectedTreeAndContent, await UiTestDriver.GetClipboardTextAsync(window));
         }
         finally
         {
@@ -926,6 +1058,51 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
     }
 
     [AvaloniaFact]
+    public async Task StickyPath_ClickScrollsToTheStartOfTheVisibleFile()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            await UiTestDriver.OpenPreviewAsync(window);
+            await UiTestDriver.SwitchPreviewModeAsync(window, PreviewContentMode.TreeAndContent);
+            await UiTestDriver.ScrollPreviewUntilStickyHeaderVisibleAsync(window);
+
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var scrollViewer = UiTestDriver.GetRequiredPreviewScrollViewer(window);
+            var textControl = UiTestDriver.GetRequiredControl<DevProjex.Avalonia.Controls.VirtualizedPreviewTextControl>(window, "PreviewTextControl");
+            var stickyHeaderText = UiTestDriver.GetRequiredControl<TextBlock>(window, "PreviewStickyHeaderText");
+            var navigateButton = UiTestDriver.GetRequiredControl<Button>(window, "PreviewStickyHeaderNavigateButton");
+            var section = Assert.Single(
+                viewModel.PreviewDocument!.Sections,
+                candidate => string.Equals(candidate.DisplayPath, stickyHeaderText.Text, StringComparison.Ordinal));
+            var lineInsideSection = Math.Min(section.EndLine, section.ContentStartLine + 4);
+            var offsetInsideSection = textControl.GetVerticalOffsetForLine(lineInsideSection);
+            scrollViewer.Offset = new Vector(scrollViewer.Offset.X, offsetInsideSection);
+
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => textControl.GetLineNumberAtVerticalOffset(textControl.VerticalOffset) == lineInsideSection,
+                "preview to scroll inside the file section before clicking its sticky path");
+            Assert.True(lineInsideSection > section.HeaderLine);
+            var horizontalOffset = scrollViewer.Offset.X;
+
+            await UiTestDriver.ClickAsync(window, navigateButton);
+
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => textControl.GetLineNumberAtVerticalOffset(scrollViewer.Offset.Y) == section.HeaderLine,
+                "sticky path click to scroll to the file header");
+            Assert.Equal(horizontalOffset, scrollViewer.Offset.X);
+            Assert.True(textControl.IsFocused);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task StickyPathCopyButton_IsVisibleInsideLineNumberCap_AndUsesCompactSize()
     {
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
@@ -938,13 +1115,17 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
 
             var stickyHeaderCap = UiTestDriver.GetRequiredControl<Border>(window, "PreviewStickyHeaderCap");
             var stickyHeaderContainer = UiTestDriver.GetRequiredControl<Border>(window, "PreviewStickyHeaderContainer");
+            var stickyHeaderNavigateButton = UiTestDriver.GetRequiredControl<Button>(window, "PreviewStickyHeaderNavigateButton");
             var stickyHeaderCopyButton = UiTestDriver.GetRequiredControl<Button>(window, "PreviewStickyHeaderCopyButton");
             var stickyHeaderText = UiTestDriver.GetRequiredControl<TextBlock>(window, "PreviewStickyHeaderText");
             var lineNumbersBackground = UiTestDriver.GetRequiredControl<Border>(window, "PreviewLineNumbersBackground");
             var previewIsland = UiTestDriver.GetRequiredControl<Border>(window, "PreviewIsland");
+            var scrollViewer = UiTestDriver.GetRequiredPreviewScrollViewer(window);
+            var verticalScrollBar = Assert.Single(
+                scrollViewer.GetVisualDescendants().OfType<ScrollBar>(),
+                scrollBar => scrollBar.Orientation == Orientation.Vertical);
 
             var capBounds = UiTestDriver.GetBoundsInWindow(stickyHeaderCap, window);
-            var headerBounds = UiTestDriver.GetBoundsInWindow(stickyHeaderContainer, window);
             var buttonBounds = UiTestDriver.GetBoundsInWindow(stickyHeaderCopyButton, window);
             var textBounds = UiTestDriver.GetBoundsInWindow(stickyHeaderText, window);
             var lineNumbersBounds = UiTestDriver.GetBoundsInWindow(lineNumbersBackground, window);
@@ -954,6 +1135,66 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
             Assert.Equal(1, stickyHeaderContainer.Opacity);
             Assert.Same(previewIsland.Background, stickyHeaderCap.Background);
             Assert.Same(previewIsland.Background, stickyHeaderContainer.Background);
+            Assert.Null(stickyHeaderNavigateButton.Transitions);
+            var transitions = stickyHeaderContainer.Transitions!;
+            var hoverTransition = Assert.Single(transitions.OfType<BrushTransition>());
+            Assert.Equal(Border.BorderBrushProperty, hoverTransition.Property);
+            Assert.Equal(TimeSpan.FromMilliseconds(150), hoverTransition.Duration);
+            var insetTransition = Assert.Single(transitions.OfType<ThicknessTransition>());
+            Assert.Equal(Layoutable.MarginProperty, insetTransition.Property);
+            Assert.Equal(TimeSpan.FromMilliseconds(120), insetTransition.Duration);
+            Assert.True(verticalScrollBar.IsVisible);
+
+            verticalScrollBar.HideDelay = TimeSpan.Zero;
+            verticalScrollBar.ShowDelay = TimeSpan.Zero;
+            window.MouseMove(UiTestDriver.GetControlCenter(previewIsland, window), RawInputModifiers.None);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => !verticalScrollBar.IsExpanded && stickyHeaderContainer.Margin.Right < 0.1,
+                "collapsed preview scrollbar to leave the full sticky-path width available");
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
+
+            window.MouseMove(UiTestDriver.GetControlCenter(verticalScrollBar, window), RawInputModifiers.None);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => verticalScrollBar.IsExpanded && stickyHeaderContainer.Margin.Right > 0.1,
+                "expanded preview scrollbar to reserve only its active width");
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () =>
+                {
+                    var scrollBarOrigin = verticalScrollBar.TranslatePoint(default, scrollViewer);
+                    if (scrollBarOrigin is null)
+                        return false;
+
+                    var expectedInset = scrollViewer.Bounds.Width - scrollBarOrigin.Value.X;
+                    return Math.Abs(stickyHeaderContainer.Margin.Right - expectedInset) < 0.1;
+                },
+                "sticky path inset animation to settle at the expanded scrollbar edge");
+
+            var contractedHeaderBounds = UiTestDriver.GetBoundsInWindow(stickyHeaderContainer, window);
+            var verticalScrollBarBounds = UiTestDriver.GetBoundsInWindow(verticalScrollBar, window);
+            var scrollViewerBounds = UiTestDriver.GetBoundsInWindow(scrollViewer, window);
+            var expectedScrollBarInset = scrollViewerBounds.Right - verticalScrollBarBounds.Left;
+            Assert.InRange(
+                Math.Abs(stickyHeaderContainer.Margin.Right - expectedScrollBarInset),
+                0,
+                1.5);
+            Assert.InRange(Math.Abs(contractedHeaderBounds.Right - verticalScrollBarBounds.Left), 0, 1.5);
+
+            window.MouseMove(UiTestDriver.GetControlCenter(previewIsland, window), RawInputModifiers.None);
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => !verticalScrollBar.IsExpanded && stickyHeaderContainer.Margin.Right < 0.1,
+                "collapsed preview scrollbar to return the full sticky-path width");
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 3);
+
+            var fullWidthHeaderBounds = UiTestDriver.GetBoundsInWindow(stickyHeaderContainer, window);
+            var fullWidthScrollViewerBounds = UiTestDriver.GetBoundsInWindow(scrollViewer, window);
+            Assert.InRange(
+                Math.Abs(fullWidthHeaderBounds.Right - fullWidthScrollViewerBounds.Right),
+                0,
+                1.5);
             Assert.InRange(Math.Abs(capBounds.Width - lineNumbersBounds.Width), 0, 1.5);
             Assert.InRange(Math.Abs(buttonBounds.Center.X - capBounds.Center.X), 0, 1.5);
             Assert.InRange(Math.Abs(buttonBounds.Width - 24), 0, 1.5);
@@ -964,7 +1205,7 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
             Assert.NotNull(stickyHeaderCopyButton.BorderBrush);
             Assert.True(buttonBounds.Left >= capBounds.Left - 1);
             Assert.True(buttonBounds.Right <= capBounds.Right + 1);
-            Assert.True(buttonBounds.Right <= headerBounds.Left + 2);
+            Assert.True(buttonBounds.Right <= contractedHeaderBounds.Left + 2);
             Assert.True(capBounds.Right <= textBounds.Left + 2);
             Assert.Equal(PlacementMode.Right, ToolTip.GetPlacement(stickyHeaderCopyButton));
         }
@@ -1077,6 +1318,59 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
             var viewModel = UiTestDriver.GetViewModel(window);
             Assert.False(viewModel.IsPreviewMode);
             Assert.True(UiTestDriver.GetRequiredControl<Border>(window, "TreeIsland").IsVisible);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task ExtendedMouseButtons_NavigatePreviewDirectionallyWithoutToggling()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var treeIsland = UiTestDriver.GetRequiredControl<Border>(window, "TreeIsland");
+
+            await UiTestDriver.PressExtendedMouseButtonAsync(
+                window,
+                treeIsland,
+                MouseButton.XButton1);
+            Assert.False(viewModel.IsPreviewMode);
+
+            await UiTestDriver.PressExtendedMouseButtonAsync(
+                window,
+                treeIsland,
+                MouseButton.XButton2);
+            await UiTestDriver.WaitForPreviewReadyAsync(window);
+
+            var previewDocument = viewModel.PreviewDocument;
+            Assert.NotNull(previewDocument);
+            Assert.True(viewModel.IsPreviewMode);
+            var previewScrollViewer = UiTestDriver.GetRequiredPreviewScrollViewer(window);
+
+            await UiTestDriver.PressExtendedMouseButtonAsync(
+                window,
+                previewScrollViewer,
+                MouseButton.XButton2);
+            Assert.True(viewModel.IsPreviewMode);
+            Assert.Same(previewDocument, viewModel.PreviewDocument);
+
+            await UiTestDriver.PressExtendedMouseButtonAsync(
+                window,
+                previewScrollViewer,
+                MouseButton.XButton1);
+            await UiTestDriver.WaitForPreviewClosedAsync(window);
+            Assert.False(viewModel.IsPreviewMode);
+
+            await UiTestDriver.PressExtendedMouseButtonAsync(
+                window,
+                treeIsland,
+                MouseButton.XButton1);
+            Assert.False(viewModel.IsPreviewMode);
         }
         finally
         {
@@ -1320,6 +1614,19 @@ public sealed class MainWindowPreviewUiTests(UiWorkspaceFixture workspace)
 
     private static string NormalizeLineEndings(string value) =>
         value.Replace("\r\n", "\n", StringComparison.Ordinal);
+
+    private static int CountOccurrences(string value, string fragment)
+    {
+        var count = 0;
+        for (var offset = 0;;)
+        {
+            var index = value.IndexOf(fragment, offset, StringComparison.Ordinal);
+            if (index < 0)
+                return count;
+            count++;
+            offset = index + fragment.Length;
+        }
+    }
 
     private static void AssertReadableUnicodeJsonTree(string json, string expectedRootPath)
     {

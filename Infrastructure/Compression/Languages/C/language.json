@@ -1,0 +1,12 @@
+{
+  "id": "c",
+  "displayName": "C",
+  "extensions": [".c", ".h"],
+  "library": "tree-sitter-c",
+  "export": "tree_sitter_c",
+  "queryVersion": 4,
+  "transformCapabilities": ["bodies", "comments", "blankLines"],
+  "blockPlaceholder": "{ }",
+  "containerNodeTypes": ["translation_unit", "field_declaration_list"],
+  "executableOwnerKinds": ["function_definition"]
+}

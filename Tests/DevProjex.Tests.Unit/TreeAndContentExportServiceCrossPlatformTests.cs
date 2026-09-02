@@ -28,6 +28,34 @@ public sealed class TreeAndContentExportServiceCrossPlatformTests
 	}
 
 	[Fact]
+	public void MapRelativeContentHeaderPath_WhitespaceOnlyUnixFileNameRemainsRelative()
+	{
+		using var temp = new TemporaryDirectory();
+		var file = Path.Combine(temp.Path, " ");
+
+		var mapped = TreeAndContentExportService.MapRelativeContentHeaderPath(temp.Path, file);
+
+		Assert.Equal(" ", mapped);
+	}
+
+	[Fact]
+	public void MapRelativeContentHeaderPath_PreservesBackslashInUnixDirectoryName()
+	{
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.Skip("Windows treats a backslash as a directory separator.");
+			return;
+		}
+
+		using var temp = new TemporaryDirectory();
+		var file = Path.Combine(temp.Path, @"..\cache", "state.json");
+
+		var mapped = TreeAndContentExportService.MapRelativeContentHeaderPath(temp.Path, file);
+
+		Assert.Equal("..\\cache/state.json", mapped);
+	}
+
+	[Fact]
 	public void Build_Ascii_IncludesTreeAndContentSeparator()
 	{
 		using var temp = new TemporaryDirectory();
@@ -598,6 +626,37 @@ public sealed class TreeAndContentExportServiceCrossPlatformTests
 	}
 
 	[Fact]
+	public async Task BuildAsync_CancellationDuringSelectionProbeStopsBeforeFurtherTraversal()
+	{
+		using var temp = new TemporaryDirectory();
+		using var cancellation = new CancellationTokenSource();
+		var child = new TreeNodeDescriptor(
+			"child",
+			Path.Combine(temp.Path, "child"),
+			IsDirectory: true,
+			IsAccessDenied: false,
+			IconKey: "folder",
+			Children: []);
+		var root = new TreeNodeDescriptor(
+			"root",
+			temp.Path,
+			IsDirectory: true,
+			IsAccessDenied: false,
+			IconKey: "folder",
+			Children: new CancelThenRejectFurtherReadsList<TreeNodeDescriptor>(
+				[child, child],
+				cancellation));
+
+		await Assert.ThrowsAsync<OperationCanceledException>(() =>
+			CreateService().BuildAsync(
+				temp.Path,
+				root,
+				new HashSet<string> { Path.Combine(temp.Path, "missing") },
+				TreeTextFormat.Json,
+				cancellation.Token));
+	}
+
+	[Fact]
 	public void Build_Json_AccessDeniedScannerMetadataIsNotExported()
 	{
 		using var temp = new TemporaryDirectory();
@@ -704,5 +763,31 @@ public sealed class TreeAndContentExportServiceCrossPlatformTests
 		Assert.Contains("\tindented", contentPart);
 		Assert.Contains("\t\tdouble indented", contentPart);
 		Assert.Contains("    spaces", contentPart);
+	}
+
+	private sealed class CancelThenRejectFurtherReadsList<T>(
+		IReadOnlyList<T> items,
+		CancellationTokenSource cancellation) : IReadOnlyList<T>
+	{
+		private int _reads;
+
+		public int Count => items.Count;
+
+		public T this[int index]
+		{
+			get
+			{
+				if (Interlocked.Increment(ref _reads) != 1)
+					throw new InvalidOperationException("Traversal continued after cancellation.");
+
+				var item = items[index];
+				cancellation.Cancel();
+				return item;
+			}
+		}
+
+		public IEnumerator<T> GetEnumerator() => items.GetEnumerator();
+
+		System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
 	}
 }

@@ -1,30 +1,23 @@
 using DevProjex.Application.Models;
+using DevProjex.Application.Selection;
 
 namespace DevProjex.Avalonia.Coordinators;
 
 internal sealed record SelectionRefreshRollbackSnapshot(
     string Path,
-    IReadOnlyList<SelectionOption> RootOptions,
+    IReadOnlyList<SelectionOption> ScanRootOptions,
     IReadOnlyList<SelectionOption> ExtensionOptions,
     IReadOnlyList<ResolvedIgnoreOptionState> IgnoreOptions,
     int ExtensionlessEntriesCount,
     bool HasIgnoreOptionCounts,
     IgnoreOptionCounts IgnoreOptionCounts,
     IgnoreControllerImpactCounts ControllerImpactCounts,
-    IReadOnlyDictionary<IgnoreOptionId, bool> IgnoreOptionStateCache,
-    IReadOnlySet<string> SelectedRootFolders,
-    IReadOnlyDictionary<string, bool> RootOptionStateCache,
-    bool RootSelectionInitialized,
-    bool RootOptionStateCacheIsComplete,
+    IgnoreSelectionStateSnapshot IgnoreSelectionState,
     IReadOnlySet<string> SelectedExtensions,
     IReadOnlyDictionary<string, bool> ExtensionOptionStateCache,
     bool ExtensionSelectionInitialized,
     bool ExtensionOptionStateCacheIsComplete,
-    bool AllRootFoldersChecked,
-    bool AllExtensionsChecked,
-    bool AllIgnoreChecked,
-    bool IgnoreOptionsInitialized,
-    bool? IgnoreAllPreference,
     bool IgnoreOptionStateCacheIsComplete,
-    bool HasAuthoritativeRootOptions,
+    bool SelectionPersistenceBlockedByIncompleteScan,
+    bool HasAuthoritativeScanRoots,
     GitWorkspaceEvidence GitEvidence = default);

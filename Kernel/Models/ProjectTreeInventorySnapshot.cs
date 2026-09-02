@@ -11,11 +11,14 @@ public sealed class ProjectTreeInventorySnapshot(
 	bool rootAccessDenied,
 	bool hadAccessDenied,
 	IReadOnlyList<ScopedGitIgnoreMatcher>? discoveredGitIgnoreMatchers = null,
-	IReadOnlyList<GitTrackedPathIndex>? discoveredGitTrackedPathIndexes = null)
+	IReadOnlyList<GitTrackedPathIndex>? discoveredGitTrackedPathIndexes = null,
+	bool hadScanFailure = false,
+	IReadOnlyList<string>? discoveredGitRepositoryRoots = null)
 {
 	public IReadOnlyList<ProjectTreeInventoryEntry> Entries => entries;
 	public bool RootAccessDenied { get; } = rootAccessDenied;
 	public bool HadAccessDenied { get; } = hadAccessDenied;
+	public bool HadScanFailure { get; } = hadScanFailure;
 
 	// Inventory projections do not touch the filesystem again, so they must carry every
 	// reachable per-directory rule that affected discovery and can affect later selections.
@@ -24,6 +27,13 @@ public sealed class ProjectTreeInventorySnapshot(
 
 	public IReadOnlyList<GitTrackedPathIndex> DiscoveredGitTrackedPathIndexes { get; } =
 		discoveredGitTrackedPathIndexes ?? [];
+
+	public IReadOnlyList<string> DiscoveredGitRepositoryRoots { get; } =
+		discoveredGitRepositoryRoots ?? [];
+
+	public GitWorkspaceEvidence GitEvidence { get; } = new(
+		(discoveredGitRepositoryRoots?.Count ?? 0) > 0 ||
+		(discoveredGitTrackedPathIndexes?.Count ?? 0) > 0);
 
 	public ProjectTreeInventoryEntry GetEntry(int index) => entries[index];
 

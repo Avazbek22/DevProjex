@@ -13,15 +13,25 @@ public sealed class ProjectAnalysisService(
 	IFileContentAnalyzer fileContentAnalyzer,
 	Func<DateTimeOffset>? utcNowProvider = null)
 {
-	private const int MaximumConcurrentContentMetricReads = 4;
-	private const int ContentMetricBatchSize = 1024;
-	private static readonly IReadOnlySet<string> EmptyRootSelection = new HashSet<string>(PathComparer.Default);
+	private static readonly IReadOnlySet<string> EmptyRootSelection =
+		new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
 	private static readonly IReadOnlySet<string> EmptyExtensionSelection =
 		new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 	private static readonly IReadOnlySet<IgnoreOptionId> EmptyIgnoreSelection = new HashSet<IgnoreOptionId>();
 	private static readonly IReadOnlyDictionary<IgnoreOptionId, bool> EmptyIgnoreState =
 		new Dictionary<IgnoreOptionId, bool>();
 	private readonly Func<DateTimeOffset> _utcNowProvider = utcNowProvider ?? (() => DateTimeOffset.UtcNow);
+
+	public Task<ExportOutputMetrics> CalculateContentMetricsAsync(
+		IReadOnlyList<string>? orderedFilePaths,
+		Action<ContentFileMetrics>? fileMetricsObserver,
+		CancellationToken cancellationToken = default) =>
+		ProjectContentMetricsCalculator.CalculateAsync(
+			fileContentAnalyzer,
+			orderedFilePaths,
+			fileMetricsObserver,
+			progress: null,
+			cancellationToken);
 
 	public async Task<ProjectAnalysisReport> AnalyzeAsync(
 		ProjectAnalysisRequest request,
@@ -35,7 +45,8 @@ public sealed class ProjectAnalysisService(
 		ProjectAnalysisRequest request,
 		CancellationToken cancellationToken = default)
 	{
-		if (string.IsNullOrWhiteSpace(request.RootPath))
+		cancellationToken.ThrowIfCancellationRequested();
+		if (PathUtility.IsMissingPath(request.RootPath))
 			throw new ArgumentException("Root path is required.", nameof(request));
 
 		var rootPath = PathUtility.Normalize(request.RootPath);
@@ -60,7 +71,11 @@ public sealed class ProjectAnalysisService(
 			useAllRootFoldersForDefaults: request.SelectedRootFolders is null,
 			request.SelectedIgnoreOptions,
 			cancellationToken);
-		var discoveryRules = ignoreRules.Build(rootPath, selectedIgnoreOptions, selectedRootFolders);
+		var discoveryRules = ignoreRules.BuildWithCancellation(
+			rootPath,
+			selectedIgnoreOptions,
+			selectedRootFolders,
+			cancellationToken);
 		ScanOptionsResult scan;
 		ProjectTreeInventorySnapshot? treeInventory = null;
 		IReadOnlyList<string> allowedRootFolders;
@@ -69,14 +84,22 @@ public sealed class ProjectAnalysisService(
 		    buildTree.SupportsCompositeInventory)
 		{
 			var rootFolders = scanOptions.GetRootFolders(rootPath, discoveryRules, cancellationToken);
-			var rootProjectionRules = ignoreRules.Build(rootPath, selectedIgnoreOptions, rootFolders.Value);
+			var rootProjectionRules = ignoreRules.BuildWithCancellation(
+				rootPath,
+				selectedIgnoreOptions,
+				rootFolders.Value,
+				cancellationToken);
 			allowedRootFolders = RootFolderVisibilityProjection.ApplyScopedControllerRules(
 				rootPath,
 				rootFolders.Value,
 				rootProjectionRules,
 				cancellationToken);
-			rules = ignoreRules.Build(rootPath, selectedIgnoreOptions, allowedRootFolders);
-			var allowedRootFolderSet = allowedRootFolders.ToHashSet(PathComparer.Default);
+			rules = ignoreRules.BuildWithCancellation(
+				rootPath,
+				selectedIgnoreOptions,
+				allowedRootFolders,
+				cancellationToken);
+			var allowedRootFolderSet = allowedRootFolders.ToHashSet(ProjectTreePathIdentity.CanonicalComparer);
 			treeInventory = buildTree.ReadCompositeInventory(
 				rootPath,
 				allowedRootFolderSet,
@@ -89,12 +112,16 @@ public sealed class ProjectAnalysisService(
 					treeInventory,
 					discoveryRules,
 					cancellationToken));
-			availableExtensions.Sort(StringComparer.OrdinalIgnoreCase);
+			CancellationAwareSort.Sort(
+				availableExtensions,
+				StringComparer.OrdinalIgnoreCase,
+				cancellationToken);
 			scan = new ScanOptionsResult(
 				Extensions: availableExtensions,
 				RootFolders: allowedRootFolders,
 				RootAccessDenied: rootFolders.RootAccessDenied || treeInventory.RootAccessDenied,
-				HadAccessDenied: rootFolders.HadAccessDenied || treeInventory.HadAccessDenied);
+				HadAccessDenied: rootFolders.HadAccessDenied || treeInventory.HadAccessDenied,
+				HadScanFailure: rootFolders.HadScanFailure || treeInventory.HadScanFailure);
 		}
 		else
 		{
@@ -103,23 +130,35 @@ public sealed class ProjectAnalysisService(
 				scan = scanOptions.Execute(
 					new ScanOptionsRequest(rootPath, discoveryRules),
 					cancellationToken);
-				var rootProjectionRules = ignoreRules.Build(rootPath, selectedIgnoreOptions, scan.RootFolders);
+				var rootProjectionRules = ignoreRules.BuildWithCancellation(
+					rootPath,
+					selectedIgnoreOptions,
+					scan.RootFolders,
+					cancellationToken);
 				allowedRootFolders = RootFolderVisibilityProjection.ApplyScopedControllerRules(
 					rootPath,
 					scan.RootFolders,
 					rootProjectionRules,
 					cancellationToken);
 				scan = scan with { RootFolders = allowedRootFolders };
-				rules = ignoreRules.Build(rootPath, selectedIgnoreOptions, allowedRootFolders);
+				rules = ignoreRules.BuildWithCancellation(
+					rootPath,
+					selectedIgnoreOptions,
+					allowedRootFolders,
+					cancellationToken);
 			}
 			else
 			{
-				allowedRootFolders = selectedRootFolders.ToArray();
 				var rootFolders = scanOptions.GetRootFolders(
 					rootPath,
 					discoveryRules,
 					cancellationToken);
-				rules = discoveryRules;
+				allowedRootFolders = ResolveRequestedRootFolders(rootFolders.Value, selectedRootFolders);
+				rules = ignoreRules.BuildWithCancellation(
+					rootPath,
+					selectedIgnoreOptions,
+					allowedRootFolders,
+					cancellationToken);
 				if (buildTree.SupportsCompositeInventory)
 				{
 					// Explicit CLI/TUI selections do not need the interactive convergence loop.
@@ -127,7 +166,7 @@ public sealed class ProjectAnalysisService(
 					// so the optimized path remains exact without scanning every file twice.
 					treeInventory = buildTree.ReadCompositeInventory(
 						rootPath,
-						allowedRootFolders.ToHashSet(PathComparer.Default),
+						allowedRootFolders.ToHashSet(ProjectTreePathIdentity.CanonicalComparer),
 						discoveryRules,
 						rules,
 						cancellationToken);
@@ -141,7 +180,8 @@ public sealed class ProjectAnalysisService(
 							.ToArray(),
 						RootFolders: rootFolders.Value,
 						RootAccessDenied: rootFolders.RootAccessDenied || treeInventory.RootAccessDenied,
-						HadAccessDenied: rootFolders.HadAccessDenied || treeInventory.HadAccessDenied);
+						HadAccessDenied: rootFolders.HadAccessDenied || treeInventory.HadAccessDenied,
+						HadScanFailure: rootFolders.HadScanFailure || treeInventory.HadScanFailure);
 				}
 				else
 				{
@@ -156,7 +196,8 @@ public sealed class ProjectAnalysisService(
 							.ToArray(),
 						RootFolders: rootFolders.Value,
 						RootAccessDenied: rootFolders.RootAccessDenied || extensions.RootAccessDenied,
-						HadAccessDenied: rootFolders.HadAccessDenied || extensions.HadAccessDenied);
+						HadAccessDenied: rootFolders.HadAccessDenied || extensions.HadAccessDenied,
+						HadScanFailure: rootFolders.HadScanFailure || extensions.HadScanFailure);
 				}
 			}
 		}
@@ -169,7 +210,7 @@ public sealed class ProjectAnalysisService(
 			rootPath,
 			new TreeFilterOptions(
 				AllowedExtensions: allowedExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase),
-				AllowedRootFolders: allowedRootFolders.ToHashSet(PathComparer.Default),
+				AllowedRootFolders: allowedRootFolders.ToHashSet(ProjectTreePathIdentity.CanonicalComparer),
 				IgnoreRules: rules));
 		BuildTreeSnapshotResult treeResult;
 		if (treeInventory is not null)
@@ -211,11 +252,24 @@ public sealed class ProjectAnalysisService(
 			DiscoveredGitTrackedIndexCount: treeInventory?.DiscoveredGitTrackedPathIndexes.Count ?? 0,
 			UnavailableGitTrackedIndexCount: treeInventory?.DiscoveredGitTrackedPathIndexes.Count(
 				static index => !index.IsAvailable) ?? 0,
-			TreeInventory: treeInventory);
+			TreeInventory: treeInventory,
+			GitEvidence: treeInventory?.GitEvidence ?? scan.GitEvidence)
+		{
+			RequestedRootFoldersForDiagnostics = request.SelectedRootFolders is null
+				? null
+				: selectedRootFolders,
+			EffectiveRules = rules,
+			RootSelectionIsExplicit = request.SelectedRootFolders is not null,
+			EffectiveExtensionPolicy = request.SelectedExtensions is null
+				? null
+				: new ExtensionSetInclusionPolicy(
+					allowedExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase))
+		};
 	}
 
 	private static bool CanUseUnifiedSelectionPipeline(ProjectAnalysisRequest request) =>
 		request.LocalProfileState is not null ||
+		request.CaptureIgnoreImpactCounts ||
 		(request.SelectedRootFolders is null &&
 		 request.SelectedExtensions is null &&
 		 request.SelectedIgnoreOptions is null);
@@ -233,7 +287,20 @@ public sealed class ProjectAnalysisService(
 			(candidateRootPath, selectedOptions, selectedRootFolders) =>
 				ignoreRules.Build(candidateRootPath, selectedOptions, selectedRootFolders),
 			(candidateRootPath, selectedRootFolders) =>
-				ignoreRules.GetIgnoreOptionsAvailability(candidateRootPath, selectedRootFolders));
+				ignoreRules.GetIgnoreOptionsAvailability(candidateRootPath, selectedRootFolders),
+			buildIgnoreRulesWithCancellation:
+				(candidateRootPath, selectedOptions, selectedRootFolders, token) =>
+					ignoreRules.BuildWithCancellation(
+						candidateRootPath,
+						selectedOptions,
+						selectedRootFolders,
+						token),
+			getIgnoreOptionsAvailabilityWithCancellation:
+				(candidateRootPath, selectedRootFolders, token) =>
+					ignoreRules.GetIgnoreOptionsAvailabilityWithCancellation(
+						candidateRootPath,
+						selectedRootFolders,
+						token));
 		var selectionContext = BuildUnifiedSelectionContext(rootPath, request);
 		var snapshot = selectionRefreshEngine.ComputeFullRefreshSnapshot(
 			selectionContext,
@@ -253,12 +320,16 @@ public sealed class ProjectAnalysisService(
 			.ToArray();
 		var selectedIgnoreOptions = snapshot.EffectiveIgnoreOptions.ToArray();
 		var rules = snapshot.EffectiveRules ??
-		            ignoreRules.Build(rootPath, selectedIgnoreOptions, selectedRootFolders);
+		            ignoreRules.BuildWithCancellation(
+			            rootPath,
+			            selectedIgnoreOptions,
+			            selectedRootFolders,
+			            cancellationToken);
 		var treeRequest = new BuildTreeRequest(
 			rootPath,
 			new TreeFilterOptions(
 				AllowedExtensions: selectedExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase),
-				AllowedRootFolders: selectedRootFolders.ToHashSet(PathComparer.Default),
+				AllowedRootFolders: selectedRootFolders.ToHashSet(ProjectTreePathIdentity.CanonicalComparer),
 				IgnoreRules: rules));
 		var treeResult = buildTree.ExecuteWithInventory(
 			treeRequest,
@@ -280,7 +351,8 @@ public sealed class ProjectAnalysisService(
 			DiscoveredGitTrackedIndexCount: inventory.DiscoveredGitTrackedPathIndexes.Count,
 			UnavailableGitTrackedIndexCount: inventory.DiscoveredGitTrackedPathIndexes.Count(
 				static index => !index.IsAvailable),
-			TreeInventory: inventory)
+			TreeInventory: inventory,
+			GitEvidence: snapshot.GitEvidence)
 		{
 			// The refresh snapshot intentionally contains only effective rows. Keep the
 			// requested selection separately so stale profile/CLI values still produce the
@@ -291,7 +363,13 @@ public sealed class ProjectAnalysisService(
 			RequestedExtensionsForDiagnostics = selectionContext.ExtensionsSelectionInitialized
 				? selectionContext.ExtensionsSelectionCache
 				: selectedExtensions,
-			ResolvedIgnoreOptionStates = snapshot.IgnoreOptionStateCache
+			ResolvedIgnoreOptionStates = snapshot.IgnoreOptionStateCache,
+			EffectiveRules = rules,
+			RootSelectionIsExplicit = selectionContext.RootSelectionIsExplicit,
+			EffectiveExtensionPolicy = ExtensionInclusionPolicyFactory.Create(selectionContext),
+			HasIgnoreOptionCounts = snapshot.HasIgnoreOptionCounts,
+			IgnoreOptionCounts = snapshot.IgnoreOptionCounts,
+			IgnoreControllerImpactCounts = snapshot.ControllerImpactCounts
 		};
 	}
 
@@ -301,21 +379,39 @@ public sealed class ProjectAnalysisService(
 	{
 		if (request.LocalProfileState is not { } localState)
 		{
+			var rootsAreExplicit = request.SelectedRootFolders is not null;
+			var hasKnownExtensionStates = request.KnownExtensionStates is not null;
+			var extensionsAreExplicit = request.SelectedExtensions is not null &&
+			                            !hasKnownExtensionStates;
+			var ignoreOptionsAreExplicit = request.SelectedIgnoreOptions is not null;
+			var requestedIgnoreOptions = request.SelectedIgnoreOptions ?? EmptyIgnoreSelection;
 			return new SelectionRefreshContext(
 				Path: rootPath,
 				PreparedSelectionMode: PreparedSelectionMode.Defaults,
-				AllRootFoldersChecked: true,
-				AllExtensionsChecked: true,
-				RootSelectionInitialized: false,
-				RootSelectionCache: EmptyRootSelection,
-				ExtensionsSelectionInitialized: false,
-				ExtensionsSelectionCache: EmptyExtensionSelection,
-				IgnoreSelectionInitialized: false,
-				IgnoreSelectionCache: EmptyIgnoreSelection,
-				IgnoreOptionStateCache: EmptyIgnoreState,
+				AllRootFoldersChecked: !rootsAreExplicit,
+				AllExtensionsChecked: !extensionsAreExplicit &&
+				                      (request.KnownExtensionStates is null ||
+				                       !request.KnownExtensionStates.Values.Contains(false)),
+				RootSelectionInitialized: rootsAreExplicit,
+				RootSelectionCache: request.SelectedRootFolders?
+					.ToHashSet(ProjectTreePathIdentity.CanonicalComparer) ??
+				                    EmptyRootSelection,
+				ExtensionsSelectionInitialized:
+					request.SelectedExtensions is not null || hasKnownExtensionStates,
+				ExtensionsSelectionCache: request.SelectedExtensions?
+					.ToHashSet(StringComparer.OrdinalIgnoreCase) ?? EmptyExtensionSelection,
+				IgnoreSelectionInitialized: ignoreOptionsAreExplicit,
+				IgnoreSelectionCache: requestedIgnoreOptions.ToHashSet(),
+				IgnoreOptionStateCache: ignoreOptionsAreExplicit
+					? BuildExplicitIgnoreState(requestedIgnoreOptions)
+					: EmptyIgnoreState,
 				IgnoreAllPreference: null,
 				CurrentSnapshotState: default,
-				CaptureTreeInventory: true);
+				ExtensionOptionStateCache: request.KnownExtensionStates,
+				IgnoreOptionStateCacheIsComplete: ignoreOptionsAreExplicit,
+				CaptureTreeInventory: true,
+				RootSelectionIsExplicit: rootsAreExplicit,
+				ExtensionSelectionIsExplicit: extensionsAreExplicit);
 		}
 
 		var profile = localState.Profile;
@@ -335,7 +431,7 @@ public sealed class ProjectAnalysisService(
 			AllRootFoldersChecked: false,
 			AllExtensionsChecked: false,
 			RootSelectionInitialized: true,
-			RootSelectionCache: selectedRoots.ToHashSet(PathComparer.Default),
+			RootSelectionCache: selectedRoots.ToHashSet(ProjectTreePathIdentity.CanonicalComparer),
 			ExtensionsSelectionInitialized: true,
 			ExtensionsSelectionCache: selectedExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase),
 			IgnoreSelectionInitialized: true,
@@ -344,7 +440,8 @@ public sealed class ProjectAnalysisService(
 			IgnoreAllPreference: null,
 			CurrentSnapshotState: default,
 			RootOptionStateCache: localState.RootsOverridden ? null : profile.RootFolderStates,
-			ExtensionOptionStateCache: localState.ExtensionsOverridden ? null : profile.ExtensionStates,
+			ExtensionOptionStateCache: request.KnownExtensionStates ??
+			                           (localState.ExtensionsOverridden ? null : profile.ExtensionStates),
 			IgnoreOptionStateCacheIsComplete:
 				localState.IgnoreOptionsOverridden || profile.IgnoreOptionStates is not null,
 			CaptureTreeInventory: true,
@@ -372,22 +469,53 @@ public sealed class ProjectAnalysisService(
 		return names;
 	}
 
-	public async Task<ProjectAnalysisReport> BuildReportFromTreeAsync(
+	public Task<ProjectAnalysisReport> BuildReportFromTreeAsync(
 		LoadedProjectAnalysisRequest request,
 		CancellationToken cancellationToken = default)
+		=> BuildReportFromTreeAsync(
+			request,
+			includeOutputMetrics: true,
+			cancellationToken);
+
+	internal Task<ProjectAnalysisReport> BuildReportFromTreeAsync(
+		LoadedProjectAnalysisRequest request,
+		bool includeOutputMetrics,
+		CancellationToken cancellationToken) =>
+		BuildReportFromTreeAsync(
+			request,
+			includeTreeOutputMetrics: includeOutputMetrics,
+			includeContentOutputMetrics: includeOutputMetrics,
+			cancellationToken);
+
+	internal async Task<ProjectAnalysisReport> BuildReportFromTreeAsync(
+		LoadedProjectAnalysisRequest request,
+		bool includeTreeOutputMetrics,
+		bool includeContentOutputMetrics,
+		CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 
 		var analysisStopwatch = Stopwatch.StartNew();
-		var treeMetrics = treeExport.CalculateFullTreeMetrics(request.RootPath, request.Tree.Root, TreeTextFormat.Ascii);
-		var contentMetrics = await CalculateContentMetricsAsync(request.Tree.OrderedFilePaths, cancellationToken)
-			.ConfigureAwait(false);
+		var treeMetrics = includeTreeOutputMetrics
+			? treeExport.CalculateFullTreeMetricsWithCancellation(
+				request.RootPath,
+				request.Tree.Root,
+				TreeTextFormat.Ascii,
+				displayRootPath: null,
+				displayRootName: null,
+				cancellationToken)
+			: ExportOutputMetrics.Empty;
+		var contentMetrics = includeContentOutputMetrics
+			? await CalculateContentMetricsAsync(request.Tree.OrderedFilePaths, cancellationToken)
+				.ConfigureAwait(false)
+			: ExportOutputMetrics.Empty;
+		cancellationToken.ThrowIfCancellationRequested();
 		analysisStopwatch.Stop();
 
 		var loadingElapsed = request.KnownLoadingElapsed ?? TimeSpan.Zero;
 		var analysisElapsed = analysisStopwatch.Elapsed;
 		var totalElapsed = loadingElapsed + analysisElapsed;
-		var treeSummary = CountTree(request.Tree.Root);
+		var treeSummary = CountTree(request.Tree.Root, cancellationToken);
 
 		return new ProjectAnalysisReport(
 			SchemaVersion: ProjectAnalysisReport.CurrentSchemaVersion,
@@ -398,7 +526,9 @@ public sealed class ProjectAnalysisService(
 				SelectedExtensions: NormalizeResolvedExtensionNames(request.SelectedExtensions).ToArray(),
 				SelectedIgnoreOptions: request.SelectedIgnoreOptions.OrderBy(static option => (int)option).ToArray()),
 			Inventory: new ProjectAnalysisInventoryReport(
-				AvailableRootFolders: request.AvailableRootFolders.OrderBy(static value => value, PathComparer.Default).ToArray(),
+				AvailableRootFolders: request.AvailableRootFolders
+					.OrderBy(static value => value, ProjectTreePathIdentity.CanonicalComparer)
+					.ToArray(),
 				AvailableExtensions: request.AvailableExtensions.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase).ToArray(),
 				Tree: treeSummary),
 			Metrics: new ProjectAnalysisOutputMetricsReport(
@@ -408,14 +538,19 @@ public sealed class ProjectAnalysisService(
 				LoadingMilliseconds: ToMilliseconds(loadingElapsed),
 				AnalysisMilliseconds: ToMilliseconds(analysisElapsed),
 				TotalMilliseconds: ToMilliseconds(totalElapsed)),
-			Diagnostics: BuildDiagnostics(request));
+			Diagnostics: BuildDiagnostics(request, cancellationToken));
 	}
 
 	public static ProjectAnalysisDiagnosticsReport BuildDiagnostics(LoadedProjectAnalysisRequest request) =>
+		BuildDiagnostics(request, CancellationToken.None);
+
+	private static ProjectAnalysisDiagnosticsReport BuildDiagnostics(
+		LoadedProjectAnalysisRequest request,
+		CancellationToken cancellationToken) =>
 		new(
 			RootAccessDenied: request.RootAccessDenied,
 			HadAccessDenied: request.HadAccessDenied,
-			Warnings: BuildWarnings(request).ToArray());
+			Warnings: BuildWarnings(request, cancellationToken));
 
 	private IReadOnlyCollection<IgnoreOptionId> ResolveSelectedIgnoreOptions(
 		string rootPath,
@@ -427,12 +562,19 @@ public sealed class ProjectAnalysisService(
 		if (overrideOptions is not null)
 			return overrideOptions.Distinct().ToArray();
 
-		var availability = ignoreRules.GetIgnoreOptionsAvailability(rootPath, selectedRootFolders);
+		var availability = ignoreRules.GetIgnoreOptionsAvailabilityWithCancellation(
+			rootPath,
+			selectedRootFolders,
+			cancellationToken);
 		var discoveryOptions = ignoreOptions.GetOptions(availability)
 			.Where(static option => option.DefaultChecked)
 			.Select(static option => option.Id)
 			.ToArray();
-		var discoveryRules = ignoreRules.Build(rootPath, discoveryOptions, selectedRootFolders);
+		var discoveryRules = ignoreRules.BuildWithCancellation(
+			rootPath,
+			discoveryOptions,
+			selectedRootFolders,
+			cancellationToken);
 		var discoveryRootFolders = useAllRootFoldersForDefaults
 			? scanOptions.GetRootFolders(rootPath, discoveryRules, cancellationToken).Value
 			: selectedRootFolders;
@@ -470,62 +612,14 @@ public sealed class ProjectAnalysisService(
 
 	private async Task<ExportOutputMetrics> CalculateContentMetricsAsync(
 		IReadOnlyList<string>? orderedFilePaths,
+		CancellationToken cancellationToken) =>
+		await ProjectContentMetricsCalculator
+			.CalculateAsync(fileContentAnalyzer, orderedFilePaths, cancellationToken)
+			.ConfigureAwait(false);
+
+	private static ProjectTreeSummaryReport CountTree(
+		TreeNodeDescriptor root,
 		CancellationToken cancellationToken)
-	{
-		if (orderedFilePaths is null || orderedFilePaths.Count == 0)
-			return ExportOutputMetrics.Empty;
-
-		var parallelOptions = new ParallelOptions
-		{
-			MaxDegreeOfParallelism = Math.Min(
-				MaximumConcurrentContentMetricReads,
-				ScanParallelismPolicy.MaxDegreeOfParallelism),
-			CancellationToken = cancellationToken
-		};
-		var accumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
-		var batchMetrics = new FileContentMetricsResult?[Math.Min(ContentMetricBatchSize, orderedFilePaths.Count)];
-		for (var batchStart = 0; batchStart < orderedFilePaths.Count; batchStart += batchMetrics.Length)
-		{
-			var batchCount = Math.Min(batchMetrics.Length, orderedFilePaths.Count - batchStart);
-			await Parallel.ForAsync(
-				0,
-				batchCount,
-				parallelOptions,
-				async (batchIndex, token) =>
-				{
-					batchMetrics[batchIndex] = await fileContentAnalyzer
-						.GetClassifiedMetricsAsync(orderedFilePaths[batchStart + batchIndex], token)
-						.ConfigureAwait(false);
-				}).ConfigureAwait(false);
-
-			for (var batchIndex = 0; batchIndex < batchCount; batchIndex++)
-			{
-				cancellationToken.ThrowIfCancellationRequested();
-				var result = batchMetrics[batchIndex];
-				var metrics = result?.IsText == true ? result.Metrics : null;
-				if (metrics is null)
-					continue;
-
-				accumulator.AppendFile(new ContentFileMetrics(
-					Path: orderedFilePaths[batchStart + batchIndex],
-					SizeBytes: metrics.SizeBytes,
-					LineCount: metrics.LineCount,
-					CharCount: metrics.CharCount,
-					IsEmpty: metrics.IsEmpty,
-					IsWhitespaceOnly: metrics.IsWhitespaceOnly,
-					IsEstimated: metrics.IsEstimated,
-					CrLfPairCount: metrics.CrLfPairCount,
-					TrailingNewlineChars: metrics.TrailingNewlineChars,
-					TrailingNewlineLineBreaks: metrics.TrailingNewlineLineBreaks));
-			}
-
-			Array.Clear(batchMetrics, 0, batchCount);
-		}
-
-		return accumulator.ToMetrics();
-	}
-
-	private static ProjectTreeSummaryReport CountTree(TreeNodeDescriptor root)
 	{
 		var directories = 0;
 		var files = 0;
@@ -535,6 +629,7 @@ public sealed class ProjectAnalysisService(
 
 		while (stack.Count > 0)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			var node = stack.Pop();
 			if (node.IsDirectory)
 			{
@@ -554,21 +649,30 @@ public sealed class ProjectAnalysisService(
 		return new ProjectTreeSummaryReport(directories, files, accessDeniedDirectories);
 	}
 
-	private static IEnumerable<string> BuildWarnings(LoadedProjectAnalysisRequest request)
+	private static IReadOnlyList<string> BuildWarnings(
+		LoadedProjectAnalysisRequest request,
+		CancellationToken cancellationToken)
 	{
+		var warnings = new List<string>();
+		var availableRoots = request.AvailableRootFolders.ToArray();
 		var requestedRoots = request.RequestedRootFoldersForDiagnostics ?? request.SelectedRootFolders;
 		foreach (var root in requestedRoots)
 		{
-			if (!request.AvailableRootFolders.Contains(root, PathComparer.Default))
-				yield return $"Selected root folder was not found in the current project: {root}";
+			cancellationToken.ThrowIfCancellationRequested();
+			if (!ProjectTreePathIdentity.TryResolveAvailableName(availableRoots, root, out _))
+				warnings.Add($"Selected root folder was not found in the current project: {root}");
 		}
 
+		var availableExtensions = request.AvailableExtensions.ToHashSet(StringComparer.OrdinalIgnoreCase);
 		var requestedExtensions = request.RequestedExtensionsForDiagnostics ?? request.SelectedExtensions;
 		foreach (var extension in requestedExtensions)
 		{
-			if (!request.AvailableExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase))
-				yield return $"Selected extension was not found in the current project: {extension}";
+			cancellationToken.ThrowIfCancellationRequested();
+			if (!availableExtensions.Contains(extension))
+				warnings.Add($"Selected extension was not found in the current project: {extension}");
 		}
+
+		return warnings;
 	}
 
 	private static IReadOnlyCollection<string> NormalizeRootFolders(IReadOnlyCollection<string>? rootFolders)
@@ -578,9 +682,30 @@ public sealed class ProjectAnalysisService(
 
 		return rootFolders
 			// Root folder names come from the filesystem. Do not trim legal POSIX names.
-			.Where(static value => !string.IsNullOrWhiteSpace(value))
-			.Distinct(PathComparer.Default)
-			.OrderBy(static value => value, PathComparer.Default)
+			.Where(static value => !string.IsNullOrEmpty(value))
+			.Distinct(ProjectTreePathIdentity.CanonicalComparer)
+			.OrderBy(static value => value, ProjectTreePathIdentity.CanonicalComparer)
+			.ToArray();
+	}
+
+	private static IReadOnlyList<string> ResolveRequestedRootFolders(
+		IReadOnlyList<string> availableRootFolders,
+		IReadOnlyCollection<string> requestedRootFolders)
+	{
+		var resolved = new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer);
+		foreach (var requestedRoot in requestedRootFolders)
+		{
+			if (ProjectTreePathIdentity.TryResolveAvailableName(
+				    availableRootFolders,
+				    requestedRoot,
+				    out var availableRoot))
+			{
+				resolved.Add(availableRoot);
+			}
+		}
+
+		return resolved
+			.OrderBy(static value => value, ProjectTreePathIdentity.CanonicalComparer)
 			.ToArray();
 	}
 
@@ -590,7 +715,7 @@ public sealed class ProjectAnalysisService(
 			return [];
 
 		return extensions
-			.Where(static value => !string.IsNullOrWhiteSpace(value))
+			.Where(static value => !string.IsNullOrEmpty(value))
 			.Select(NormalizeExtension)
 			.Where(static value => value.Length > 0)
 			.Distinct(StringComparer.OrdinalIgnoreCase)
@@ -605,8 +730,7 @@ public sealed class ProjectAnalysisService(
 			return [];
 
 		return extensions
-			.Where(static value => !string.IsNullOrWhiteSpace(value))
-			.Select(static value => value.Trim())
+			.Where(static value => !string.IsNullOrEmpty(value))
 			.Distinct(StringComparer.OrdinalIgnoreCase)
 			.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
 			.ToArray();
@@ -614,11 +738,10 @@ public sealed class ProjectAnalysisService(
 
 	private static string NormalizeExtension(string value)
 	{
-		var trimmed = value.Trim();
-		if (trimmed.Length == 0 || trimmed == ".")
+		if (value.Length == 0 || value == ".")
 			return string.Empty;
 
-		return trimmed[0] == '.' ? trimmed : "." + trimmed;
+		return value[0] == '.' ? value : "." + value;
 	}
 
 	private static ProjectOutputMetricsReport ToReportMetrics(ExportOutputMetrics metrics) =>
@@ -635,6 +758,8 @@ public sealed record ProjectAnalysisRequest(
 	IReadOnlyCollection<IgnoreOptionId>? SelectedIgnoreOptions = null)
 {
 	internal LocalProjectSelectionState? LocalProfileState { get; init; }
+	internal IReadOnlyDictionary<string, bool>? KnownExtensionStates { get; init; }
+	internal bool CaptureIgnoreImpactCounts { get; init; }
 }
 
 public sealed record LoadedProjectAnalysisRequest(
@@ -650,9 +775,16 @@ public sealed record LoadedProjectAnalysisRequest(
 	TimeSpan? KnownLoadingElapsed = null,
 	int DiscoveredGitTrackedIndexCount = 0,
 	int UnavailableGitTrackedIndexCount = 0,
-	ProjectTreeInventorySnapshot? TreeInventory = null)
+	ProjectTreeInventorySnapshot? TreeInventory = null,
+	GitWorkspaceEvidence GitEvidence = default)
 {
 	internal IReadOnlyCollection<string>? RequestedRootFoldersForDiagnostics { get; init; }
 	internal IReadOnlyCollection<string>? RequestedExtensionsForDiagnostics { get; init; }
 	internal IReadOnlyDictionary<IgnoreOptionId, bool>? ResolvedIgnoreOptionStates { get; init; }
+	internal IgnoreRules? EffectiveRules { get; init; }
+	internal bool RootSelectionIsExplicit { get; init; }
+	internal IExtensionInclusionPolicy? EffectiveExtensionPolicy { get; init; }
+	internal bool HasIgnoreOptionCounts { get; init; }
+	internal IgnoreOptionCounts IgnoreOptionCounts { get; init; }
+	internal IgnoreControllerImpactCounts IgnoreControllerImpactCounts { get; init; }
 }

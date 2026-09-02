@@ -101,7 +101,7 @@ public sealed class TerminalRecentProjectsPtyTests
 		await terminal.WaitForScreenWithoutAsync(
 			"Remove entry",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(
@@ -157,9 +157,10 @@ public sealed class TerminalRecentProjectsPtyTests
 		await terminal.ResizeAsync(160, 40, TestContext.Current.CancellationToken);
 		await terminal.SendShiftF6Async(TestContext.Current.CancellationToken);
 		var parameters = await terminal.WaitForScreenAsync(
-			"Saved project settings",
+			"Content processing",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("PARAMETERS", parameters, StringComparison.Ordinal);
+		Assert.DoesNotContain("Saved settings", parameters, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 		await ExitAsync(terminal);
 	}
@@ -438,8 +439,8 @@ public sealed class TerminalRecentProjectsPtyTests
 			{
 				await Task.Delay(150, cancellationToken);
 				if (terminal.CaptureScreen()
-				    .Split('\n')
-				    .Any(line => line.Contains($"> {action}", StringComparison.Ordinal)))
+					.Split('\n')
+					.Any(line => line.Contains($"> {action}", StringComparison.Ordinal)))
 				{
 					return;
 				}
@@ -484,7 +485,7 @@ public sealed class TerminalRecentProjectsPtyTests
 
 	private static async Task ExitAsync(TerminalPtyHarness terminal)
 	{
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(

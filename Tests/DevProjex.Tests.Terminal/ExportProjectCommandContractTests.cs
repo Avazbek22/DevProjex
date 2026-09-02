@@ -105,6 +105,47 @@ public sealed class ExportProjectCommandContractTests
 			$".{Path.GetFileName(output)}.*.tmp"));
 	}
 
+	[Fact]
+	public async Task ZipCanStreamToStandardOutputWithoutTextContamination()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("stream-project");
+		workspace.WriteFile("stream-project/src/app.cs", "class App {}\n");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(project, "-", "zip", environment);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Empty(environment.StandardError);
+		using var bytes = new MemoryStream(environment.StandardOutputBytes, writable: false);
+		using var archive = new ZipArchive(bytes, ZipArchiveMode.Read);
+		var entry = Assert.Single(
+			archive.Entries,
+			static candidate => candidate.FullName == "stream-project/src/app.cs");
+		using var reader = new StreamReader(entry.Open());
+		Assert.Equal("class App {}\n", await reader.ReadToEndAsync(
+			TestContext.Current.CancellationToken));
+	}
+
+	[Fact]
+	public async Task FolderCannotStreamToStandardOutput()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/app.cs", "class App {}\n");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(project, "-", "folder", environment);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains(
+			"DPX-CLI-FOLDER-STDOUT-NOT-SUPPORTED",
+			environment.StandardError,
+			StringComparison.Ordinal);
+	}
+
 	[Theory]
 	[InlineData("folder", "submission")]
 	[InlineData("zip", "submission.zip")]
@@ -228,6 +269,32 @@ public sealed class ExportProjectCommandContractTests
 		Assert.Empty(Directory.EnumerateFileSystemEntries(
 			Path.GetDirectoryName(conflictOutput)!,
 			".devprojex-*.tmp"));
+	}
+
+	[Theory]
+	[InlineData("--compress-code")]
+	[InlineData("--strip-comments")]
+	[InlineData("--strip-blank-lines")]
+	public async Task DryRunAnnouncesNoticeForEveryCodeTransformation(string option)
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		workspace.WriteFile("project/app.cs", "// note\nclass App { void Run() { } }\n");
+		var output = Path.Combine(workspace.CreateDirectory("output"), "submission");
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await RunAsync(
+			project,
+			output,
+			"folder",
+			environment,
+			"--dry-run",
+			"--language", "en",
+			option);
+
+		Assert.Equal(CommandLineExitCodes.Success, exitCode);
+		Assert.Contains("intentionally not a byte-for-byte copy", environment.StandardError, StringComparison.Ordinal);
+		Assert.False(Path.Exists(output));
 	}
 
 	[Fact]

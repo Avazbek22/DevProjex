@@ -197,38 +197,19 @@ public sealed class CancellationPatternTests
 		using var cts = new CancellationTokenSource();
 		var handledGracefully = false;
 		var releaseGate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+		var calc1 = releaseGate.Task.WaitAsync(cts.Token);
+		var calc2 = releaseGate.Task.WaitAsync(cts.Token);
 
-		var task = Task.Run(async () =>
+		cts.Cancel();
+
+		try
 		{
-			var calc1 = Task.Run(async () =>
-			{
-				await releaseGate.Task.WaitAsync(cts.Token);
-				return 1;
-			}, cts.Token);
-
-			var calc2 = Task.Run(async () =>
-			{
-				await releaseGate.Task.WaitAsync(cts.Token);
-				return 2;
-			}, cts.Token);
-
-			cts.Cancel();
-			releaseGate.TrySetResult(true);
-
-			try
-			{
-				await Task.WhenAll(calc1, calc2);
-			}
-			catch (OperationCanceledException)
-			{
-				handledGracefully = true;
-				return;
-			}
-
-			Assert.Fail("Should have caught OperationCanceledException");
-		}, TestContext.Current.CancellationToken);
-
-		await task;
+			await Task.WhenAll(calc1, calc2);
+		}
+		catch (OperationCanceledException)
+		{
+			handledGracefully = true;
+		}
 
 		Assert.True(handledGracefully);
 	}

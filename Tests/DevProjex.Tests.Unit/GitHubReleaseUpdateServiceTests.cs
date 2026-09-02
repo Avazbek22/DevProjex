@@ -103,6 +103,42 @@ public sealed class GitHubReleaseUpdateServiceTests
         Assert.Null(result.LatestVersion);
     }
 
+    [Fact]
+    public async Task CheckAsync_DeclaredOversizedMetadata_ReturnsTypedFailureWithoutReadingBody()
+    {
+        var content = new TrackingHttpContent(
+            GitHubReleaseUpdateService.MaximumReleaseMetadataBytes + 1,
+            writeBytes: 0);
+        using var handler = new StubHttpMessageHandler(
+            _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
+        using var service = new GitHubReleaseUpdateService(handler);
+
+        var result = await service.CheckAsync(
+            "5.0",
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(ApplicationUpdateAvailability.CheckFailed, result.Availability);
+        Assert.Equal(0, content.SerializeCallCount);
+    }
+
+    [Fact]
+    public async Task CheckAsync_ChunkedOversizedMetadata_ReturnsTypedFailureAtBufferLimit()
+    {
+        var content = new TrackingHttpContent(
+            declaredLength: null,
+            writeBytes: GitHubReleaseUpdateService.MaximumReleaseMetadataBytes + 1);
+        using var handler = new StubHttpMessageHandler(
+            _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
+        using var service = new GitHubReleaseUpdateService(handler);
+
+        var result = await service.CheckAsync(
+            "5.0",
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(ApplicationUpdateAvailability.CheckFailed, result.Availability);
+        Assert.Equal(1, content.SerializeCallCount);
+    }
+
     private static HttpResponseMessage JsonResponse(string json)
         => new(HttpStatusCode.OK)
         {
@@ -121,6 +157,32 @@ public sealed class GitHubReleaseUpdateServiceTests
             Request = request;
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(responseFactory(request));
+        }
+    }
+
+    private sealed class TrackingHttpContent(long? declaredLength, long writeBytes) : HttpContent
+    {
+        public int SerializeCallCount { get; private set; }
+
+        protected override async Task SerializeToStreamAsync(
+            Stream stream,
+            TransportContext? context)
+        {
+            SerializeCallCount++;
+            var buffer = new byte[4096];
+            var remaining = writeBytes;
+            while (remaining > 0)
+            {
+                var count = (int)Math.Min(buffer.Length, remaining);
+                await stream.WriteAsync(buffer.AsMemory(0, count));
+                remaining -= count;
+            }
+        }
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = declaredLength.GetValueOrDefault();
+            return declaredLength.HasValue;
         }
     }
 }

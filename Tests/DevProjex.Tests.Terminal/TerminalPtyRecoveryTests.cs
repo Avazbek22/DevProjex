@@ -36,14 +36,11 @@ public sealed class TerminalPtyRecoveryTests
 		Assert.Contains("Destination:", prompt, StringComparison.Ordinal);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Destination state: Ready",
+			"Export?",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Equivalent command:",
+			"Export completed:",
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		Assert.True(File.Exists(destination));
@@ -57,10 +54,6 @@ public sealed class TerminalPtyRecoveryTests
 			path => Path.GetFileName(path).Equals(
 				"Project-context.txt",
 				StringComparison.OrdinalIgnoreCase));
-		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			"Equivalent command:",
-			cancellationToken: TestContext.Current.CancellationToken);
 		await ExitAsync(terminal);
 	}
 
@@ -95,7 +88,7 @@ public sealed class TerminalPtyRecoveryTests
 	}
 
 	[Fact(Timeout = 60_000)]
-	public async Task UnavailableTrackedModeShowsErrorAndPreservesLastUsablePlan()
+	public async Task UnavailableTrackedModeIsRejectedAndPreservesLastUsablePlan()
 	{
 		using var project = CreateProject();
 		await using var terminal = await StartProjectAsync(
@@ -107,31 +100,13 @@ public sealed class TerminalPtyRecoveryTests
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
 
-		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
-		var initialMode = await terminal.WaitForScreenAsync(
-			"Tracked Git files only",
+		await terminal.SendAsync(":set git tracked\r", TestContext.Current.CancellationToken);
+		var rejected = await terminal.WaitForScreenAsync(
+			"The command cannot be applied to the current workspace state",
 			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.Contains("(*) Use .gitignore", initialMode, StringComparison.Ordinal);
-		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
-		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
-			"DPX-GIT-TRACKED-INDEX-UNAVAILABLE",
-			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("Files 4", rejected, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
-
-		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			"DPX-GIT-TRACKED-INDEX-UNAVAILABLE",
-			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
-		var recoveredMode = await terminal.WaitForScreenAsync(
-			"Tracked Git files only",
-			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.Contains("(*) Use .gitignore", recoveredMode, StringComparison.Ordinal);
-		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			"Tracked Git files only",
-			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		var recovered = await terminal.WaitForScreenAsync(
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
@@ -141,7 +116,7 @@ public sealed class TerminalPtyRecoveryTests
 	}
 
 	[Fact(Timeout = 90_000)]
-	public async Task DestinationConflictReturnsToWorkspaceAndProjectFolderExportCompletes()
+	public async Task DestinationConflictOffersOverwriteAndProjectFolderExportCompletes()
 	{
 		using var project = CreateProject();
 		using var output = new TemporaryDirectory();
@@ -157,43 +132,29 @@ public sealed class TerminalPtyRecoveryTests
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendAsync("E", TestContext.Current.CancellationToken);
 		await ReplacePromptTextAsync(terminal, conflict);
-		await terminal.WaitForScreenAsync(
-			"DPX-EXPORT-DESTINATION-EXISTS",
+		var conflictSummary = await terminal.WaitForScreenAsync(
+			"Export?",
 			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("Overwrite", conflictSummary, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenWithoutAsync(
-			"DPX-EXPORT-DESTINATION-EXISTS",
+			"Export?",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
 
-		await terminal.SendAsync("Z", TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
-			"Choose the physical output kind",
-			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync("z", TestContext.Current.CancellationToken);
 		await ReplacePromptTextAsync(terminal, folderDestination, "Exact destination:");
 		await terminal.WaitForScreenAsync(
-			"Destination state: Ready",
+			"Export?",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		var completed = await terminal.WaitForScreenAsync(
-			"Equivalent command:",
+			"Export completed:",
 			cancellationToken: TestContext.Current.CancellationToken);
-		if (!completed.Contains("project-export", StringComparison.Ordinal))
-		{
-			completed = await terminal.WaitForScreenAsync(
-				"project-export",
-				cancellationToken: TestContext.Current.CancellationToken);
-		}
-		Assert.Contains("Equivalent command:", completed, StringComparison.Ordinal);
+		Assert.Contains("Export completed:", completed, StringComparison.Ordinal);
 
 		Assert.True(File.Exists(Path.Combine(folderDestination, "src", "App.cs")));
 		Assert.Equal(
@@ -202,10 +163,6 @@ public sealed class TerminalPtyRecoveryTests
 				Path.Combine(folderDestination, "src", "App.cs"),
 				TestContext.Current.CancellationToken));
 		Assert.False(terminal.HasExited);
-		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			"Equivalent command:",
-			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
@@ -279,7 +236,7 @@ public sealed class TerminalPtyRecoveryTests
 
 	private static async Task ExitAsync(TerminalPtyHarness terminal)
 	{
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(

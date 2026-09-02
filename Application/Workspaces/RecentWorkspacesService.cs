@@ -69,7 +69,7 @@ public sealed class RecentWorkspacesService
 				source.Kind,
 				normalizedPath,
 				normalizedPath,
-				string.IsNullOrWhiteSpace(displayName) ? normalizedPath : displayName,
+				string.IsNullOrEmpty(displayName) ? normalizedPath : displayName,
 				$"folder:{identityPath}",
 				source.OpenedUtc);
 		}

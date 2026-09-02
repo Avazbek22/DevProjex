@@ -34,15 +34,19 @@ public sealed class SelectionSyncCoordinatorAdvancedIgnoreOptionContractMatrixTe
 		if (effectiveCount == 0)
 		{
 			Assert.Null(option);
-			Assert.Empty(viewModel.IgnoreOptions);
+			Assert.Equal(
+				IgnoreOptionOrder.ContentTransformations,
+				viewModel.IgnoreOptions.Select(static item => item.Id));
+			Assert.All(viewModel.IgnoreOptions, static item => Assert.False(item.IsChecked));
 			Assert.False(viewModel.AllIgnoreChecked);
 			return;
 		}
 
 		Assert.NotNull(option);
-		Assert.Single(viewModel.IgnoreOptions);
+		Assert.Equal(1 + IgnoreOptionOrder.Count, viewModel.IgnoreOptions.Count);
 		Assert.Equal($"{optionCase.BaseLabel} ({effectiveCount})", option!.Label);
 		Assert.True(option.IsChecked);
+		Assert.False(GetHideSecretsOption(viewModel).IsChecked);
 		Assert.True(viewModel.AllIgnoreChecked);
 	}
 
@@ -71,7 +75,7 @@ public sealed class SelectionSyncCoordinatorAdvancedIgnoreOptionContractMatrixTe
 			gitIgnoreImpact: 0);
 		coordinator.PopulateIgnoreOptionsForRootSelection(["src"], ProjectPath);
 
-		var option = Assert.Single(viewModel.IgnoreOptions);
+		var option = Assert.Single(viewModel.IgnoreOptions, item => item.Id == optionCase.Id);
 		option.IsChecked = false;
 		coordinator.UpdateIgnoreSelectionCache();
 		coordinator.SyncIgnoreAllCheckbox();
@@ -83,6 +87,7 @@ public sealed class SelectionSyncCoordinatorAdvancedIgnoreOptionContractMatrixTe
 			gitIgnoreImpact: 0);
 		coordinator.PopulateIgnoreOptionsForRootSelection(["src"], ProjectPath);
 		Assert.DoesNotContain(viewModel.IgnoreOptions, item => item.Id == optionCase.Id);
+		Assert.False(GetHideSecretsOption(viewModel).IsChecked);
 
 		ApplyScanState(
 			coordinator,
@@ -91,7 +96,7 @@ public sealed class SelectionSyncCoordinatorAdvancedIgnoreOptionContractMatrixTe
 			gitIgnoreImpact: 0);
 		coordinator.PopulateIgnoreOptionsForRootSelection(["src"], ProjectPath);
 
-		option = Assert.Single(viewModel.IgnoreOptions);
+		option = Assert.Single(viewModel.IgnoreOptions, item => item.Id == optionCase.Id);
 		Assert.Equal(optionCase.Id, option.Id);
 		Assert.False(option.IsChecked);
 		Assert.Equal($"{optionCase.BaseLabel} ({reappearingCount})", option.Label);
@@ -106,7 +111,7 @@ public sealed class SelectionSyncCoordinatorAdvancedIgnoreOptionContractMatrixTe
 
 	[Theory]
 	[MemberData(nameof(AllIgnoreCases))]
-	public void PopulateIgnoreOptionsForRootSelection_WhenUncheckedAdvancedOptionDisappears_AllIgnoreTracksRemainingVisibleOptions(
+	public void PopulateIgnoreOptionsForRootSelection_WhenUncheckedAdvancedOptionDisappears_EmptyPathAggregateStaysUnchecked(
 		IgnoreOptionCase optionCase)
 	{
 		var viewModel = CreateViewModel();
@@ -131,15 +136,17 @@ public sealed class SelectionSyncCoordinatorAdvancedIgnoreOptionContractMatrixTe
 		coordinator.PopulateIgnoreOptionsForRootSelection(["src"], ProjectPath);
 
 		Assert.DoesNotContain(viewModel.IgnoreOptions, item => item.Id == optionCase.Id);
-		Assert.Single(viewModel.IgnoreOptions);
-		Assert.Equal(IgnoreOptionId.UseGitIgnore, viewModel.IgnoreOptions[0].Id);
-		Assert.True(viewModel.IgnoreOptions[0].IsChecked);
-		Assert.True(viewModel.AllIgnoreChecked);
+		Assert.Equal(1 + IgnoreOptionOrder.Count, viewModel.IgnoreOptions.Count);
+		Assert.False(GetHideSecretsOption(viewModel).IsChecked);
+		Assert.True(Assert.Single(
+			viewModel.IgnoreOptions,
+			item => item.Id == IgnoreOptionId.UseGitIgnore).IsChecked);
+		Assert.False(viewModel.AllIgnoreChecked);
 	}
 
 	[Theory]
 	[MemberData(nameof(AllIgnoreCases))]
-	public void PopulateIgnoreOptionsForRootSelection_WhenUncheckedAdvancedOptionReappears_AllIgnoreBecomesFalseAgain(
+	public void PopulateIgnoreOptionsForRootSelection_WhenUncheckedAdvancedOptionReappears_PreservesStateAcrossEmptyPathAggregate(
 		IgnoreOptionCase optionCase)
 	{
 		var viewModel = CreateViewModel();
@@ -161,7 +168,7 @@ public sealed class SelectionSyncCoordinatorAdvancedIgnoreOptionContractMatrixTe
 			IgnoreOptionCounts.Empty,
 			hasIgnoreCounts: true);
 		coordinator.PopulateIgnoreOptionsForRootSelection(["src"], ProjectPath);
-		Assert.True(viewModel.AllIgnoreChecked);
+		Assert.False(viewModel.AllIgnoreChecked);
 
 		ApplyScanState(
 			coordinator,
@@ -172,6 +179,11 @@ public sealed class SelectionSyncCoordinatorAdvancedIgnoreOptionContractMatrixTe
 		target = Assert.Single(viewModel.IgnoreOptions, item => item.Id == optionCase.Id);
 		Assert.False(target.IsChecked);
 		Assert.False(viewModel.AllIgnoreChecked);
+	}
+
+	private static IgnoreOptionViewModel GetHideSecretsOption(MainWindowViewModel viewModel)
+	{
+		return Assert.Single(viewModel.IgnoreOptions, item => item.Id == IgnoreOptionId.HideSecrets);
 	}
 
 	private static IEnumerable<IgnoreOptionCase> AdvancedOptionCases()
@@ -266,6 +278,7 @@ public sealed class SelectionSyncCoordinatorAdvancedIgnoreOptionContractMatrixTe
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
 				["Settings.Ignore.SmartIgnore"] = "Smart ignore",
+				["Settings.Ignore.HideSecrets"] = "Hide secrets",
 				["Settings.Ignore.UseGitIgnore"] = "Use .gitignore",
 				["Settings.Ignore.HiddenFolders"] = "Hidden folders",
 				["Settings.Ignore.HiddenFiles"] = "Hidden files",

@@ -1,10 +1,14 @@
 using Avalonia.Controls;
 using Avalonia.Input;
-using Avalonia.Input.Raw;
+using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
+using Avalonia.Styling;
+using System.Text;
 using DevProjex.Application.Preview;
+using DevProjex.Application.Secrets;
 using DevProjex.Avalonia.Controls;
+using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Tests.Unit.Avalonia;
 
@@ -84,6 +88,1076 @@ public sealed class VirtualizedPreviewTextControlTests
     }
 
     [AvaloniaFact]
+    public void ClickingRedactedSpan_RequestsOnlyThatOccurrenceOverride()
+    {
+        const string placeholder = "DEVPROJEX_REDACTED[github-pat#1]";
+        const string occurrenceId = "github-occurrence";
+        const string prefix = "token = \"";
+        var text = prefix + placeholder + "\";";
+        using var document = new InMemoryPreviewTextDocument(
+            text,
+            redactions:
+            [
+                new PreviewRedactionSpan(
+                    occurrenceId,
+                    "github-pat",
+                    1,
+                    prefix.Length,
+                    placeholder.Length,
+                    SecretPreviewSpanState.Redacted)
+            ]);
+        var control = new VirtualizedPreviewTextControl
+        {
+            Document = document,
+            Width = 720,
+            Height = 120,
+            TextFontSize = 16,
+            TextBrush = Brushes.White
+        };
+        var window = new Window
+        {
+            Width = 760,
+            Height = 180,
+            WindowDecorations = WindowDecorations.None,
+            Content = control
+        };
+        string? requestedOccurrence = null;
+        control.RedactionToggleRequested += (_, eventArgs) =>
+            requestedOccurrence = eventArgs.OccurrenceId;
+
+        try
+        {
+            window.Show();
+            AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+            var origin = Assert.IsType<Point>(control.TranslatePoint(default, window));
+            var typeface = ResolveTestTypeface(control);
+            var x = origin.X + control.LeftPadding +
+                    MeasureRenderedPrefixWidth(control, text, prefix.Length + 2, typeface);
+            var y = origin.Y + control.TopPadding + (InvokeResolveLineHeight(control) / 2);
+            var point = new Point(x, y);
+			var ordinaryTextPoint = new Point(origin.X + control.LeftPadding + 1, y);
+
+			window.MouseMove(ordinaryTextPoint, RawInputModifiers.None);
+			var textCursor = Assert.IsType<Cursor>(control.Cursor);
+			window.MouseMove(point, RawInputModifiers.None);
+			Assert.NotSame(textCursor, control.Cursor);
+			var toolTip = Assert.IsType<ToolTip>(ToolTip.GetTip(control));
+			Assert.Equal(
+				string.Format(control.RedactedSecretToolTipFormat, "github-pat"),
+				Assert.IsType<TextBlock>(toolTip.Content).Text);
+
+            window.MouseDown(point, MouseButton.Left, RawInputModifiers.LeftMouseButton);
+            window.MouseUp(point, MouseButton.Left, RawInputModifiers.None);
+
+            Assert.Equal(occurrenceId, requestedOccurrence);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+	[AvaloniaFact]
+	public void ContextGestureOutsideSelection_SelectsTokenAndOpensContextFlyout()
+	{
+		const string secret = "manual-secret-value-42";
+		const string prefix = "TOKEN=";
+		var text = $"config.env:\n\n{prefix}{secret};";
+		using var document = new InMemoryPreviewTextDocument(
+			text,
+			[new PreviewDocumentSection("config.env", 1, 3, 1, 3)]);
+		var control = new VirtualizedPreviewTextControl
+		{
+			Document = document,
+			Width = 720,
+			Height = 180,
+			TextFontSize = 16,
+			TextBrush = Brushes.White,
+			HideHereSecretToolTip = "only this occurrence",
+			AlwaysHideValueToolTip = "all value occurrences",
+			PrivateDataAlwaysHideToolTip = "private-data controlled occurrences"
+		};
+		var window = new Window
+		{
+			Width = 760,
+			Height = 240,
+			WindowDecorations = WindowDecorations.None,
+			Content = control
+		};
+
+		try
+		{
+			window.Show();
+			AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+			var typeface = ResolveTestTypeface(control);
+			var x = control.LeftPadding +
+			        MeasureRenderedPrefixWidth(control, prefix + secret, prefix.Length + 2, typeface);
+			var y = control.TopPadding +
+			        (InvokeResolveLineHeight(control) * 2) +
+			        (InvokeResolveLineHeight(control) / 2);
+
+			var point = new Point(x, y);
+			InvokePrivate(control, "PrepareContextSelection", point);
+			InvokePrivate(control, "OpenContextMenu");
+			AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+
+			Assert.Equal(secret, control.GetSelectedText());
+			var flyout = Assert.IsType<MenuFlyout>(control.ContextFlyout);
+			Assert.True(flyout.IsOpen);
+			Separator? manualSeparator = null;
+			Separator? bulkSeparator = null;
+			Assert.Collection(
+				flyout.Items,
+				item => Assert.Same(GetMenuItem(control, "_copyMenuItem"), item),
+				item => Assert.Same(GetMenuItem(control, "_selectAllMenuItem"), item),
+				item => manualSeparator = Assert.IsType<Separator>(item),
+				item => Assert.Same(GetMenuItem(control, "_secretHideHereMenuItem"), item),
+				item => Assert.Same(GetMenuItem(control, "_secretAlwaysHideMenuItem"), item),
+				item => Assert.Same(GetMenuItem(control, "_privateDataAlwaysHideMenuItem"), item),
+				item => Assert.Same(GetMenuItem(control, "_removeSecretMarkMenuItem"), item),
+				item => bulkSeparator = Assert.IsType<Separator>(item),
+				item => Assert.Same(GetMenuItem(control, "_bulkRuleRedactionMenuItem"), item),
+				item => Assert.Same(GetMenuItem(control, "_bulkFileRedactionMenuItem"), item));
+			var alwaysItem = GetMenuItem(control, "_secretAlwaysHideMenuItem");
+			Assert.Same(alwaysItem.Cursor, manualSeparator!.Cursor);
+			Assert.True(manualSeparator.IsVisible);
+			Assert.False(bulkSeparator!.IsVisible);
+			Assert.True(alwaysItem.IsEnabled);
+			var hideHereItem = GetMenuItem(control, "_secretHideHereMenuItem");
+			Assert.Contains('…', Assert.IsType<string>(hideHereItem.Header));
+			Assert.DoesNotContain(secret, Assert.IsType<string>(hideHereItem.Header), StringComparison.Ordinal);
+			Assert.Equal("only this occurrence", ToolTip.GetTip(hideHereItem));
+			Assert.Equal("all value occurrences", ToolTip.GetTip(alwaysItem));
+			Assert.Equal(
+				"private-data controlled occurrences",
+				ToolTip.GetTip(GetMenuItem(control, "_privateDataAlwaysHideMenuItem")));
+			Assert.False(GetMenuItem(control, "_bulkRuleRedactionMenuItem").IsVisible);
+			Assert.False(GetMenuItem(control, "_bulkFileRedactionMenuItem").IsVisible);
+			Assert.Contains('…', Assert.IsType<string>(alwaysItem.Header));
+			Assert.DoesNotContain(secret, Assert.IsType<string>(alwaysItem.Header), StringComparison.Ordinal);
+			flyout.Hide();
+		}
+		finally
+		{
+			window.Close();
+		}
+	}
+
+	[AvaloniaFact]
+	public void ValidContentSelection_OffersThreeClassScopedManualMarkCommands()
+	{
+		const string value = "manual-mark-value-42";
+		using var document = new InMemoryPreviewTextDocument(
+			$"config.env:\n\n{value}",
+			[new PreviewDocumentSection("config.env", 1, 3, 1, 3)]);
+		var control = new VirtualizedPreviewTextControl
+		{
+			Document = document,
+			Width = 640,
+			Height = 160
+		};
+		var window = new Window { Content = control };
+		var requests = new List<(ManualRedactionClass Class, bool Persistent)>();
+		control.ManualSecretMarkRequested += (_, args) => requests.Add((args.Class, args.Persistent));
+
+		try
+		{
+			window.Show();
+			SelectRange(window, control, new PreviewSelectionRange(3, 0, 3, value.Length));
+			InvokePrivate(control, "EnsureContextMenu");
+			InvokePrivate(control, "PrepareManualSecretMenuItems");
+			foreach (var field in new[]
+			{
+				"_secretHideHereMenuItem",
+				"_secretAlwaysHideMenuItem",
+				"_privateDataAlwaysHideMenuItem"
+			})
+			{
+				var item = GetMenuItem(control, field);
+				Assert.True(item.IsVisible);
+				Assert.True(item.IsEnabled);
+				item.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+			}
+		}
+		finally
+		{
+			window.Close();
+		}
+
+		Assert.Equal(
+			[
+				(ManualRedactionClass.Secret, false),
+				(ManualRedactionClass.Secret, true),
+				(ManualRedactionClass.PrivateData, true)
+			],
+			requests);
+	}
+
+	[AvaloniaFact]
+	public void ContextMenu_SeparatorsFollowVisibleActionGroups()
+	{
+		const string value = "manual-mark-value-42";
+		using var document = new InMemoryPreviewTextDocument(
+			$"config.env:\n\n{value}",
+			[new PreviewDocumentSection("config.env", 1, 3, 1, 3)]);
+		var control = new VirtualizedPreviewTextControl
+		{
+			Document = document,
+			Width = 640,
+			Height = 160
+		};
+		var window = new Window { Content = control };
+
+		try
+		{
+			window.Show();
+			InvokePrivate(control, "EnsureContextMenu");
+			var manualSeparator = GetSeparator(control, "_manualRedactionSeparator");
+			var bulkSeparator = GetSeparator(control, "_bulkRedactionSeparator");
+
+			control.ClearSelection();
+			InvokePrivate(control, "OnContextMenuOpening", null!, EventArgs.Empty);
+			Assert.False(manualSeparator.IsVisible);
+			Assert.False(bulkSeparator.IsVisible);
+
+			SelectRange(window, control, new PreviewSelectionRange(1, 0, 1, "config.env".Length));
+			InvokePrivate(control, "OnContextMenuOpening", null!, EventArgs.Empty);
+			Assert.False(manualSeparator.IsVisible);
+			Assert.False(bulkSeparator.IsVisible);
+
+			SelectRange(window, control, new PreviewSelectionRange(3, 0, 3, value.Length));
+			InvokePrivate(control, "OnContextMenuOpening", null!, EventArgs.Empty);
+			Assert.True(manualSeparator.IsVisible);
+			Assert.False(bulkSeparator.IsVisible);
+		}
+		finally
+		{
+			window.Close();
+		}
+	}
+
+	[AvaloniaFact]
+	public void DetectorContextMenu_BulkScopesCountDistinctOccurrencesAndRaiseOneRequest()
+	{
+		const string placeholder = "DEVPROJEX_REDACTED[email#1]";
+		var lines = new[]
+		{
+			$"a={placeholder}",
+			$"b={placeholder}",
+			$"c={placeholder}",
+			$"d={placeholder}",
+			$"e={placeholder}"
+		};
+		using var document = new InMemoryPreviewTextDocument(
+			string.Join('\n', lines),
+			redactions:
+			[
+				new PreviewRedactionSpan("multi", "email", 1, 2, placeholder.Length, SecretPreviewSpanState.Redacted, RelativePath: "src/a.txt"),
+				new PreviewRedactionSpan("multi", "email", 2, 2, placeholder.Length, SecretPreviewSpanState.Redacted, RelativePath: "src/a.txt"),
+				new PreviewRedactionSpan("same-rule-file", "email", 3, 2, placeholder.Length, SecretPreviewSpanState.Redacted, RelativePath: "src/a.txt"),
+				new PreviewRedactionSpan("same-rule-other-file", "email", 4, 2, placeholder.Length, SecretPreviewSpanState.Redacted, RelativePath: "src/b.txt"),
+				new PreviewRedactionSpan("other-rule-same-file", "ipv4", 5, 2, placeholder.Length, SecretPreviewSpanState.Redacted, RelativePath: "src/a.txt")
+			]);
+		var control = new VirtualizedPreviewTextControl
+		{
+			Document = document,
+			Width = 720,
+			Height = 220,
+			TextFontSize = 16,
+			TextBrush = Brushes.White
+		};
+		var window = new Window
+		{
+			Width = 760,
+			Height = 280,
+			WindowDecorations = WindowDecorations.None,
+			Content = control
+		};
+		var requests = new List<PreviewBulkRedactionToggleRequestedEventArgs>();
+		control.BulkRedactionToggleRequested += (_, eventArgs) => requests.Add(eventArgs);
+
+		try
+		{
+			window.Show();
+			AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+			var origin = Assert.IsType<Point>(control.TranslatePoint(default, window));
+			var typeface = ResolveTestTypeface(control);
+			var point = new Point(
+				origin.X + control.LeftPadding + MeasureRenderedPrefixWidth(control, lines[0], 4, typeface),
+				origin.Y + control.TopPadding + (InvokeResolveLineHeight(control) / 2));
+
+			InvokePrivate(control, "PrepareContextSelection", point);
+			InvokePrivate(control, "OpenContextMenu");
+			AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+
+			var ruleItem = GetMenuItem(control, "_bulkRuleRedactionMenuItem");
+			var fileItem = GetMenuItem(control, "_bulkFileRedactionMenuItem");
+			Assert.False(GetSeparator(control, "_manualRedactionSeparator").IsVisible);
+			Assert.True(GetSeparator(control, "_bulkRedactionSeparator").IsVisible);
+			Assert.True(ruleItem.IsVisible);
+			Assert.True(fileItem.IsVisible);
+			Assert.Equal("Keep all occurrences \"email\" (3)", ruleItem.Header);
+			Assert.Equal("Keep all occurrences in \"a.txt\" (3)", fileItem.Header);
+
+			ruleItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+			fileItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+		}
+		finally
+		{
+			window.Close();
+		}
+
+		Assert.Collection(
+			requests,
+			request =>
+			{
+				Assert.True(request.Keep);
+				Assert.Equal(3, request.OccurrenceIds.Count);
+				Assert.Contains("multi", request.OccurrenceIds);
+				Assert.Contains("same-rule-file", request.OccurrenceIds);
+				Assert.Contains("same-rule-other-file", request.OccurrenceIds);
+			},
+			request =>
+			{
+				Assert.True(request.Keep);
+				Assert.Equal(3, request.OccurrenceIds.Count);
+				Assert.Contains("multi", request.OccurrenceIds);
+				Assert.Contains("same-rule-file", request.OccurrenceIds);
+				Assert.Contains("other-rule-same-file", request.OccurrenceIds);
+			});
+	}
+
+	[AvaloniaFact]
+	public void GeneratedPathRedaction_TogglesNormallyButDoesNotOfferBulkActions()
+	{
+		const string placeholder = "[local-user-1]";
+		var text = $@"C:\Users\{placeholder}\repo:";
+		using var document = new InMemoryPreviewTextDocument(
+			text,
+			redactions:
+			[
+				new PreviewRedactionSpan(
+					"generated-path",
+					"local-user",
+					1,
+					@"C:\Users\".Length,
+					placeholder.Length,
+					SecretPreviewSpanState.Redacted,
+					SourceLength: "alice".Length,
+					Source: SecretFindingSource.GeneratedPath)
+			]);
+		var control = new VirtualizedPreviewTextControl
+		{
+			Document = document,
+			Width = 720,
+			Height = 120,
+			TextFontSize = 16,
+			TextBrush = Brushes.White
+		};
+		var window = new Window
+		{
+			Width = 760,
+			Height = 180,
+			WindowDecorations = WindowDecorations.None,
+			Content = control
+		};
+		string? requestedOccurrence = null;
+		control.RedactionToggleRequested += (_, eventArgs) => requestedOccurrence = eventArgs.OccurrenceId;
+
+		try
+		{
+			window.Show();
+			AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+			var origin = Assert.IsType<Point>(control.TranslatePoint(default, window));
+			var typeface = ResolveTestTypeface(control);
+			var point = new Point(
+				origin.X + control.LeftPadding +
+				MeasureRenderedPrefixWidth(control, text, @"C:\Users\".Length + 2, typeface),
+				origin.Y + control.TopPadding + (InvokeResolveLineHeight(control) / 2));
+
+			InvokePrivate(control, "PrepareContextSelection", point);
+			InvokePrivate(control, "OpenContextMenu");
+			AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+			Assert.False(GetMenuItem(control, "_bulkRuleRedactionMenuItem").IsVisible);
+			Assert.False(GetMenuItem(control, "_bulkFileRedactionMenuItem").IsVisible);
+			Assert.False(GetSeparator(control, "_bulkRedactionSeparator").IsVisible);
+			Assert.False(GetSeparator(control, "_manualRedactionSeparator").IsVisible);
+			Assert.IsType<MenuFlyout>(control.ContextFlyout).Hide();
+
+			window.MouseDown(point, MouseButton.Left, RawInputModifiers.LeftMouseButton);
+			window.MouseUp(point, MouseButton.Left, RawInputModifiers.None);
+			Assert.Equal("generated-path", requestedOccurrence);
+		}
+		finally
+		{
+			window.Close();
+		}
+	}
+
+	[AvaloniaFact]
+	public void KeptDetectorContextMenu_OffersBulkHide()
+	{
+		const string value = "ivan.petrov@corp.local";
+		using var document = new InMemoryPreviewTextDocument(
+			value,
+			redactions:
+			[
+				new PreviewRedactionSpan(
+					"occurrence",
+					"email",
+					1,
+					0,
+					value.Length,
+					SecretPreviewSpanState.KeptAsIs,
+					RelativePath: "config/appsettings.json")
+			]);
+		var control = new VirtualizedPreviewTextControl
+		{
+			Document = document,
+			Width = 720,
+			Height = 120,
+			TextFontSize = 16,
+			TextBrush = Brushes.White
+		};
+		var window = new Window
+		{
+			Width = 760,
+			Height = 180,
+			WindowDecorations = WindowDecorations.None,
+			Content = control
+		};
+		PreviewBulkRedactionToggleRequestedEventArgs? requested = null;
+		control.BulkRedactionToggleRequested += (_, eventArgs) => requested = eventArgs;
+
+		try
+		{
+			window.Show();
+			AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+			InvokePrivate(control, "EnsureContextMenu");
+			var contextField = typeof(VirtualizedPreviewTextControl).GetField(
+				"_contextDetectorRedaction",
+				BindingFlags.Instance | BindingFlags.NonPublic);
+			Assert.NotNull(contextField);
+			contextField!.SetValue(control, Assert.Single(document.Redactions));
+			InvokePrivate(control, "PrepareBulkSecretMenuItems");
+
+			var item = GetMenuItem(control, "_bulkRuleRedactionMenuItem");
+			Assert.Equal("Hide all occurrences \"email\" (1)", item.Header);
+			item.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+		}
+		finally
+		{
+			window.Close();
+		}
+
+		Assert.NotNull(requested);
+		Assert.False(requested!.Keep);
+		Assert.Equal(["occurrence"], requested.OccurrenceIds);
+	}
+
+	[AvaloniaFact]
+	public void ReplacingDocumentClearsPendingBulkContext()
+	{
+		const string placeholder = "DEVPROJEX_REDACTED[email#1]";
+		using var firstDocument = new InMemoryPreviewTextDocument(
+			placeholder,
+			redactions:
+			[
+				new PreviewRedactionSpan(
+					"old-occurrence",
+					"email",
+					1,
+					0,
+					placeholder.Length,
+					SecretPreviewSpanState.Redacted,
+					RelativePath: "old.txt")
+			]);
+		using var secondDocument = new InMemoryPreviewTextDocument("replacement");
+		var control = new VirtualizedPreviewTextControl { Document = firstDocument };
+		InvokePrivate(control, "EnsureContextMenu");
+		var contextField = typeof(VirtualizedPreviewTextControl).GetField(
+			"_contextDetectorRedaction",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(contextField);
+		contextField!.SetValue(control, Assert.Single(firstDocument.Redactions));
+		InvokePrivate(control, "PrepareBulkSecretMenuItems");
+		Assert.True(GetMenuItem(control, "_bulkRuleRedactionMenuItem").IsVisible);
+
+		control.Document = secondDocument;
+		InvokePrivate(control, "PrepareBulkSecretMenuItems");
+
+		Assert.False(GetMenuItem(control, "_bulkRuleRedactionMenuItem").IsVisible);
+		Assert.False(GetMenuItem(control, "_bulkFileRedactionMenuItem").IsVisible);
+	}
+
+	[AvaloniaFact]
+	public void ManualSecretContextMenu_DisabledSelectionsExposeAndReportTheirReason()
+	{
+		const string text = "config.env:\n\nshort\nfirst-valid-value\nsecond-valid-value";
+		using var document = new InMemoryPreviewTextDocument(
+			text,
+			[new PreviewDocumentSection("config.env", 1, 5, 1, 3)]);
+		var control = new VirtualizedPreviewTextControl
+		{
+			Document = document,
+			Width = 720,
+			Height = 220,
+			TextFontSize = 16,
+			TextBrush = Brushes.White,
+			SecretSelectionTooShort = "too short",
+			SecretSelectionMultiline = "multiline",
+			SecretSelectionContentOnly = "content only"
+		};
+		var window = new Window
+		{
+			Width = 760,
+			Height = 280,
+			WindowDecorations = WindowDecorations.None,
+			Content = control
+		};
+		string? rejected = null;
+		control.ManualSecretMarkRejected += (_, args) => rejected = args.Message;
+
+		try
+		{
+			window.Show();
+			AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+			InvokePrivate(control, "EnsureContextMenu");
+			AssertHidden(new PreviewSelectionRange(1, 0, 1, "config.env".Length));
+			AssertRejected(new PreviewSelectionRange(3, 0, 3, "short".Length), "too short");
+			AssertRejected(
+				new PreviewSelectionRange(4, 0, 5, "second-valid-value".Length),
+				"multiline");
+			AssertStaleActiveRequestIsRejected();
+		}
+		finally
+		{
+			window.Close();
+		}
+
+		void AssertHidden(PreviewSelectionRange range)
+		{
+			SelectRange(window, control, range);
+			InvokePrivate(control, "PrepareManualSecretMenuItems");
+			Assert.False(GetMenuItem(control, "_secretHideHereMenuItem").IsVisible);
+			Assert.False(GetMenuItem(control, "_secretAlwaysHideMenuItem").IsVisible);
+			Assert.False(GetMenuItem(control, "_privateDataAlwaysHideMenuItem").IsVisible);
+		}
+
+		void AssertRejected(PreviewSelectionRange range, string expectedReason)
+		{
+			SelectRange(window, control, range);
+			InvokePrivate(control, "PrepareManualSecretMenuItems");
+			var item = GetMenuItem(control, "_secretHideHereMenuItem");
+			Assert.True(item.IsVisible);
+			Assert.False(item.IsEnabled);
+			Assert.Equal(expectedReason, ToolTip.GetTip(item));
+		}
+
+		void AssertStaleActiveRequestIsRejected()
+		{
+			var range = new PreviewSelectionRange(4, 0, 4, "first-valid-value".Length);
+			SelectRange(window, control, range);
+			InvokePrivate(control, "PrepareManualSecretMenuItems");
+			var item = GetMenuItem(control, "_secretHideHereMenuItem");
+			Assert.True(item.IsEnabled);
+			var candidateField = typeof(VirtualizedPreviewTextControl).GetField(
+				"_contextMarkedSecret",
+				BindingFlags.Instance | BindingFlags.NonPublic);
+			Assert.NotNull(candidateField);
+			candidateField!.SetValue(control, null);
+			rejected = null;
+			item.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+			Assert.Equal("content only", rejected);
+		}
+	}
+
+	[AvaloniaFact]
+	public void PersistentManualPlaceholder_RightClickOffersUndoAndReportsDetectorOverlap()
+	{
+		const string hash = "9f2a4c1e8b3d";
+		const string placeholder = "DEVPROJEX_REDACTED[manual-secret#1]";
+		using var document = new InMemoryPreviewTextDocument(
+			placeholder,
+			[new PreviewDocumentSection("config.env", 1, 1, 1, 1)],
+			[
+				new PreviewRedactionSpan(
+					"occurrence",
+					"manual-secret",
+					1,
+					0,
+					placeholder.Length,
+					SecretPreviewSpanState.Redacted,
+					20,
+					SecretFindingSource.PersistentMark | SecretFindingSource.Detector,
+					hash)
+			]);
+		var control = new VirtualizedPreviewTextControl
+		{
+			Document = document,
+			Width = 720,
+			Height = 120,
+			TextFontSize = 16,
+			TextBrush = Brushes.White
+		};
+		var window = new Window
+		{
+			Width = 760,
+			Height = 180,
+			WindowDecorations = WindowDecorations.None,
+			Content = control
+		};
+		PreviewManualSecretUnmarkRequestedEventArgs? requested = null;
+		control.ManualSecretUnmarkRequested += (_, eventArgs) => requested = eventArgs;
+
+		try
+		{
+			window.Show();
+			AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+			var origin = Assert.IsType<Point>(control.TranslatePoint(default, window));
+			var typeface = ResolveTestTypeface(control);
+			var point = new Point(
+				origin.X + control.LeftPadding + MeasureRenderedPrefixWidth(control, placeholder, 3, typeface),
+				origin.Y + control.TopPadding + (InvokeResolveLineHeight(control) / 2));
+			window.MouseDown(point, MouseButton.Right, RawInputModifiers.RightMouseButton);
+			window.MouseUp(point, MouseButton.Right, RawInputModifiers.None);
+			AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+
+			var undoItem = GetMenuItem(control, "_removeSecretMarkMenuItem");
+			Assert.True(undoItem.IsVisible);
+			Assert.Equal("Remove mark", undoItem.Header);
+			Assert.False(GetMenuItem(control, "_secretAlwaysHideMenuItem").IsVisible);
+			Assert.False(GetMenuItem(control, "_secretHideHereMenuItem").IsVisible);
+			Assert.False(GetMenuItem(control, "_privateDataAlwaysHideMenuItem").IsVisible);
+			undoItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+		}
+		finally
+		{
+			window.Close();
+		}
+
+		Assert.NotNull(requested);
+		Assert.Equal(hash, requested!.PersistentMarkHash);
+		Assert.Equal(20, requested.PersistentMarkLength);
+		Assert.Null(requested.SessionMarkId);
+		Assert.True(requested.AlsoDetected);
+	}
+
+	[AvaloniaFact]
+	public void SessionManualPlaceholder_RightClickOffersUndoForThatOccurrence()
+	{
+		const string sessionMarkId = "session-mark-id";
+		const string placeholder = "DEVPROJEX_REDACTED[manual-secret#1]";
+		using var document = new InMemoryPreviewTextDocument(
+			placeholder,
+			[new PreviewDocumentSection("config.env", 1, 1, 1, 1)],
+			[
+				new PreviewRedactionSpan(
+					"occurrence",
+					"manual-secret",
+					1,
+					0,
+					placeholder.Length,
+					SecretPreviewSpanState.Redacted,
+					20,
+					SecretFindingSource.SessionMark,
+					null,
+					sessionMarkId)
+			]);
+		var control = new VirtualizedPreviewTextControl
+		{
+			Document = document,
+			Width = 720,
+			Height = 120,
+			TextFontSize = 16,
+			TextBrush = Brushes.White
+		};
+		var window = new Window
+		{
+			Width = 760,
+			Height = 180,
+			WindowDecorations = WindowDecorations.None,
+			Content = control
+		};
+		PreviewManualSecretUnmarkRequestedEventArgs? requested = null;
+		control.ManualSecretUnmarkRequested += (_, eventArgs) => requested = eventArgs;
+
+		try
+		{
+			window.Show();
+			AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+			var origin = Assert.IsType<Point>(control.TranslatePoint(default, window));
+			var typeface = ResolveTestTypeface(control);
+			var point = new Point(
+				origin.X + control.LeftPadding + MeasureRenderedPrefixWidth(control, placeholder, 3, typeface),
+				origin.Y + control.TopPadding + (InvokeResolveLineHeight(control) / 2));
+			window.MouseDown(point, MouseButton.Right, RawInputModifiers.RightMouseButton);
+			window.MouseUp(point, MouseButton.Right, RawInputModifiers.None);
+			AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+
+			var undoItem = GetMenuItem(control, "_removeSecretMarkMenuItem");
+			Assert.True(undoItem.IsVisible);
+			undoItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+		}
+		finally
+		{
+			window.Close();
+		}
+
+		Assert.NotNull(requested);
+		Assert.Null(requested!.PersistentMarkHash);
+		Assert.Equal(20, requested.PersistentMarkLength);
+		Assert.Equal(sessionMarkId, requested.SessionMarkId);
+		Assert.False(requested.AlsoDetected);
+	}
+
+	[AvaloniaFact]
+	public void KeyboardNavigation_CyclesFindingsAndEnterTogglesTheActiveOccurrence()
+	{
+		const string firstOccurrence = "first-occurrence";
+		const string secondOccurrence = "second-occurrence";
+		const string firstPlaceholder = "DEVPROJEX_REDACTED[github-pat#1]";
+		const string secondPlaceholder = "DEVPROJEX_REDACTED[aws-access-token#1]";
+		var text = $"first={firstPlaceholder}\nsecond={secondPlaceholder}";
+		using var document = new InMemoryPreviewTextDocument(
+			text,
+			redactions:
+			[
+				new PreviewRedactionSpan(
+					firstOccurrence,
+					"github-pat",
+					1,
+					"first=".Length,
+					firstPlaceholder.Length,
+					SecretPreviewSpanState.Redacted),
+				new PreviewRedactionSpan(
+					secondOccurrence,
+					"aws-access-token",
+					2,
+					"second=".Length,
+					secondPlaceholder.Length,
+					SecretPreviewSpanState.Redacted)
+			]);
+		var control = new VirtualizedPreviewTextControl
+		{
+			Document = document,
+			Width = 720,
+			Height = 160,
+			TextFontSize = 16,
+			TextBrush = Brushes.White
+		};
+		var window = new Window
+		{
+			Width = 760,
+			Height = 220,
+			WindowDecorations = WindowDecorations.None,
+			Content = control
+		};
+		string? requestedOccurrence = null;
+		control.RedactionToggleRequested += (_, eventArgs) =>
+			requestedOccurrence = eventArgs.OccurrenceId;
+
+		try
+		{
+			window.Show();
+			control.Focus();
+			AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+
+			window.KeyPress(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
+			Assert.Equal(firstOccurrence, GetActiveRedactionOccurrenceId(control));
+			window.KeyRelease(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
+
+			window.KeyPress(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
+			Assert.Equal(secondOccurrence, GetActiveRedactionOccurrenceId(control));
+			window.KeyRelease(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
+
+			window.KeyPress(Key.Up, RawInputModifiers.Alt, PhysicalKey.None, null);
+			Assert.Equal(firstOccurrence, GetActiveRedactionOccurrenceId(control));
+			window.KeyRelease(Key.Up, RawInputModifiers.Alt, PhysicalKey.None, null);
+
+			window.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, "\r");
+			Assert.Equal(firstOccurrence, requestedOccurrence);
+			window.KeyRelease(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, "\r");
+		}
+		finally
+		{
+			window.Close();
+		}
+	}
+
+	[AvaloniaFact]
+	public void FullyKeptExactCascade_RequestsRestoringEveryCandidate()
+	{
+		var occurrenceIds = new[] { "secret-occurrence", "private-occurrence" };
+		var span = new PreviewRedactionSpan(
+			occurrenceIds[0],
+			"secret-rule",
+			1,
+			0,
+			12,
+			SecretPreviewSpanState.KeptAsIs,
+			CascadedOccurrenceIds: occurrenceIds);
+		var control = new VirtualizedPreviewTextControl();
+		PreviewRedactionToggleRequestedEventArgs? requested = null;
+		control.RedactionToggleRequested += (_, eventArgs) => requested = eventArgs;
+
+		InvokePrivate(control, "RaiseRedactionToggleRequested", span);
+
+		Assert.NotNull(requested);
+		Assert.Equal(occurrenceIds[0], requested!.OccurrenceId);
+		Assert.Equal(occurrenceIds, requested.RestoreOccurrenceIds);
+	}
+
+	[AvaloniaFact]
+	public void KeyboardNavigation_VisitsEveryVisualSegmentOfSharedOccurrences()
+	{
+		const string generatedOccurrence = "generated-path";
+		const string multilineOccurrence = "multiline-value";
+		const string placeholder = "[local-user-1]";
+		var lines = new[]
+		{
+			$"a={placeholder}",
+			$"first={placeholder}",
+			$"second={placeholder}",
+			$"b={placeholder}",
+			$"c={placeholder}"
+		};
+		var generatedSpans = new[]
+		{
+			new PreviewRedactionSpan(
+				generatedOccurrence,
+				"local-user",
+				1,
+				"a=".Length,
+				placeholder.Length,
+				SecretPreviewSpanState.Redacted,
+				Source: SecretFindingSource.GeneratedPath),
+			new PreviewRedactionSpan(
+				generatedOccurrence,
+				"local-user",
+				4,
+				"b=".Length,
+				placeholder.Length,
+				SecretPreviewSpanState.Redacted,
+				Source: SecretFindingSource.GeneratedPath),
+			new PreviewRedactionSpan(
+				generatedOccurrence,
+				"local-user",
+				5,
+				"c=".Length,
+				placeholder.Length,
+				SecretPreviewSpanState.Redacted,
+				Source: SecretFindingSource.GeneratedPath)
+		};
+		using var document = new InMemoryPreviewTextDocument(
+			string.Join('\n', lines),
+			redactions:
+			[
+				generatedSpans[0],
+				new PreviewRedactionSpan(
+					multilineOccurrence,
+					"multi-line",
+					2,
+					"first=".Length,
+					placeholder.Length,
+					SecretPreviewSpanState.Redacted),
+				new PreviewRedactionSpan(
+					multilineOccurrence,
+					"multi-line",
+					3,
+					"second=".Length,
+					placeholder.Length,
+					SecretPreviewSpanState.Redacted),
+				generatedSpans[1],
+				generatedSpans[2]
+			]);
+		var control = new VirtualizedPreviewTextControl
+		{
+			Document = document,
+			Width = 720,
+			Height = 180,
+			TextFontSize = 16,
+			TextBrush = Brushes.White
+		};
+		var window = new Window
+		{
+			Width = 760,
+			Height = 240,
+			WindowDecorations = WindowDecorations.None,
+			Content = control
+		};
+		string? requestedOccurrence = null;
+		control.RedactionToggleRequested += (_, eventArgs) => requestedOccurrence = eventArgs.OccurrenceId;
+
+		try
+		{
+			window.Show();
+			control.Focus();
+			AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+
+			Navigate(Key.Down, expectedLine: 1);
+			Navigate(Key.Down, expectedLine: 2);
+			Navigate(Key.Down, expectedLine: 3);
+			window.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, "\r");
+			window.KeyRelease(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, "\r");
+			Assert.Equal(multilineOccurrence, requestedOccurrence);
+			requestedOccurrence = null;
+			Navigate(Key.Down, expectedLine: 4);
+			Navigate(Key.Down, expectedLine: 5);
+			Navigate(Key.Down, expectedLine: 1);
+			Navigate(Key.Up, expectedLine: 5);
+			Navigate(Key.Up, expectedLine: 4);
+
+			Assert.False(IsActiveRedactionStop(control, generatedSpans[0]));
+			Assert.True(IsActiveRedactionStop(control, generatedSpans[1]));
+			Assert.False(IsActiveRedactionStop(control, generatedSpans[2]));
+			window.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, "\r");
+			window.KeyRelease(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, "\r");
+			Assert.Equal(generatedOccurrence, requestedOccurrence);
+		}
+		finally
+		{
+			window.Close();
+		}
+
+		void Navigate(Key key, int expectedLine)
+		{
+			window.KeyPress(key, RawInputModifiers.Alt, PhysicalKey.None, null);
+			window.KeyRelease(key, RawInputModifiers.Alt, PhysicalKey.None, null);
+			Assert.Equal(expectedLine, GetActiveRedactionLineNumber(control));
+		}
+	}
+
+	[AvaloniaFact]
+	public void RebuildRedactionIndex_DropsAStaleGeneratedPathPositionWithTheSameOccurrenceId()
+	{
+		const string occurrenceId = "generated-path";
+		const string placeholder = "[local-user-1]";
+		using var firstDocument = new InMemoryPreviewTextDocument(
+			$"a={placeholder}\nplain\nb={placeholder}",
+			redactions:
+			[
+				new PreviewRedactionSpan(
+					occurrenceId,
+					"local-user",
+					1,
+					2,
+					placeholder.Length,
+					SecretPreviewSpanState.Redacted,
+					Source: SecretFindingSource.GeneratedPath),
+				new PreviewRedactionSpan(
+					occurrenceId,
+					"local-user",
+					3,
+					2,
+					placeholder.Length,
+					SecretPreviewSpanState.Redacted,
+					Source: SecretFindingSource.GeneratedPath)
+			]);
+		using var replacement = new InMemoryPreviewTextDocument(
+			$"a={placeholder}",
+			redactions:
+			[
+				new PreviewRedactionSpan(
+					occurrenceId,
+					"local-user",
+					1,
+					2,
+					placeholder.Length,
+					SecretPreviewSpanState.Redacted,
+					Source: SecretFindingSource.GeneratedPath)
+			]);
+		var control = new VirtualizedPreviewTextControl { Document = firstDocument };
+
+		InvokePrivate(control, "MoveToRedaction", true);
+		InvokePrivate(control, "MoveToRedaction", true);
+		Assert.Equal(3, GetActiveRedactionLineNumber(control));
+
+		control.Document = replacement;
+
+		Assert.False(HasActiveRedactionTarget(control));
+	}
+
+	[AvaloniaFact]
+	public void KeyboardNavigation_AfterManualScroll_ContinuesFromViewportInsteadOfHiddenActiveFinding()
+	{
+		const string firstOccurrence = "first-occurrence";
+		const string secondOccurrence = "second-occurrence";
+		const string placeholder = "DEVPROJEX_REDACTED[github-pat#1]";
+		var lines = Enumerable.Range(1, 100)
+			.Select(lineNumber => lineNumber is 40 or 80
+				? $"secret-{lineNumber}={placeholder}"
+				: $"preview line {lineNumber}")
+			.ToArray();
+		using var document = new InMemoryPreviewTextDocument(
+			string.Join('\n', lines),
+			redactions:
+			[
+				new PreviewRedactionSpan(
+					firstOccurrence,
+					"github-pat",
+					40,
+					"secret-40=".Length,
+					placeholder.Length,
+					SecretPreviewSpanState.Redacted),
+				new PreviewRedactionSpan(
+					secondOccurrence,
+					"github-pat",
+					80,
+					"secret-80=".Length,
+					placeholder.Length,
+					SecretPreviewSpanState.Redacted)
+			]);
+		var control = new VirtualizedPreviewTextControl
+		{
+			Document = document,
+			TextFontSize = 16,
+			TextBrush = Brushes.White
+		};
+		var scrollViewer = new ScrollViewer
+		{
+			Width = 720,
+			Height = 160,
+			Content = control
+		};
+		var window = new Window
+		{
+			Width = 760,
+			Height = 220,
+			WindowDecorations = WindowDecorations.None,
+			Content = scrollViewer
+		};
+
+		try
+		{
+			window.Show();
+			control.Focus();
+			AvaloniaHeadlessPlatform.ForceRenderTimerTick(2);
+
+			window.KeyPress(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
+			window.KeyRelease(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
+			Assert.Equal(firstOccurrence, GetActiveRedactionOccurrenceId(control));
+			Assert.True(scrollViewer.Offset.Y > 0);
+
+			scrollViewer.Offset = default;
+			AvaloniaHeadlessPlatform.ForceRenderTimerTick(1);
+			window.KeyPress(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
+			window.KeyRelease(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
+
+			Assert.Equal(firstOccurrence, GetActiveRedactionOccurrenceId(control));
+			Assert.True(scrollViewer.Offset.Y > 0);
+
+			window.KeyPress(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
+			window.KeyRelease(Key.Down, RawInputModifiers.Alt, PhysicalKey.None, null);
+			Assert.Equal(secondOccurrence, GetActiveRedactionOccurrenceId(control));
+		}
+		finally
+		{
+			window.Close();
+		}
+	}
+
+    [AvaloniaFact]
     public void SelectAll_WithDocument_SelectsFullNormalizedTextAndRange()
     {
         using var document = new InMemoryPreviewTextDocument("alpha\r\nbeta\ngamma");
@@ -119,6 +1193,59 @@ public sealed class VirtualizedPreviewTextControlTests
         Assert.True(control.TryGetSelectionRange(out var selectionRange));
         Assert.Equal(new PreviewSelectionRange(1, 0, 2, 3), selectionRange);
     }
+
+	[AvaloniaFact]
+	public async Task CopySelection_PublishesBoundedSizeBeforeBuildingClipboardPayload()
+	{
+		using var document = new InMemoryPreviewTextDocument("alpha\nbeta");
+		var control = new VirtualizedPreviewTextControl { Document = document };
+		control.SelectAll();
+		long observedCharacterCount = 0;
+		control.CopyingToClipboard += (_, eventArgs) =>
+		{
+			observedCharacterCount = control.PendingClipboardCharacterCount;
+			eventArgs.Cancel = true;
+		};
+
+		var copyMethod = typeof(VirtualizedPreviewTextControl).GetMethod(
+			"CopySelectionToClipboardAsync",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		var copyTask = Assert.IsAssignableFrom<Task>(copyMethod?.Invoke(control, null));
+		await copyTask;
+
+		Assert.Equal($"alpha{Environment.NewLine}beta".Length, observedCharacterCount);
+		Assert.Equal(0, control.PendingClipboardCharacterCount);
+	}
+
+	[AvaloniaFact]
+	public async Task CopySelection_ObservesClipboardProviderFailure()
+	{
+		using var document = new InMemoryPreviewTextDocument("alpha\nbeta");
+		var control = new VirtualizedPreviewTextControl { Document = document };
+		var failure = new IOException("clipboard provider failed");
+		Exception? observedFailure = null;
+		var copiedCount = 0;
+		control.SelectAll();
+		control.ClipboardCopyFailed += (_, eventArgs) => observedFailure = eventArgs.Exception;
+		control.CopiedToClipboard += (_, _) => copiedCount++;
+
+		await control.CopySelectionToClipboardUsingAsync(
+			_ => Task.FromException(failure));
+
+		Assert.Same(failure, observedFailure);
+		Assert.Equal(0, copiedCount);
+		Assert.Equal(0, control.PendingClipboardCharacterCount);
+	}
+
+	[Fact]
+	public void ClipboardSelectionLimit_IsInclusiveAt256MiBOfUtf16Text()
+	{
+		var maximumCharacters =
+			PreviewSurfaceController.MaximumClipboardSelectionBytes / sizeof(char);
+
+		Assert.False(PreviewSurfaceController.ExceedsClipboardSelectionLimit(maximumCharacters));
+		Assert.True(PreviewSurfaceController.ExceedsClipboardSelectionLimit(maximumCharacters + 1));
+	}
 
     [AvaloniaFact]
     public void ClearSelection_AfterSelectAll_RemovesSelectionAndRaisesEvent()
@@ -352,6 +1479,220 @@ public sealed class VirtualizedPreviewTextControlTests
             (512 + (3 * 2)) * 2);
     }
 
+	[Fact]
+	public void RedactionRenderStyleCache_ReusesAllFourStylesForTheSameThemeAndAccent()
+	{
+		var cache = new PreviewRedactionRenderStyleCache();
+		var accent = Color.Parse("#6D5DFB");
+		var states = new[]
+		{
+			(SecretPreviewSpanState.Redacted, false),
+			(SecretPreviewSpanState.Redacted, true),
+			(SecretPreviewSpanState.KeptAsIs, false),
+			(SecretPreviewSpanState.KeptAsIs, true)
+		};
+		cache.Update(ThemeVariant.Dark, accent);
+		var firstPass = states
+			.Select(state => cache.Resolve(state.Item1, state.Item2))
+			.ToArray();
+		var secondPass = states
+			.Select(state => cache.Resolve(state.Item1, state.Item2))
+			.ToArray();
+
+		for (var index = 0; index < firstPass.Length; index++)
+		{
+			Assert.Same(firstPass[index].Background, secondPass[index].Background);
+			Assert.Same(firstPass[index].Border, secondPass[index].Border);
+		}
+		for (var left = 0; left < firstPass.Length; left++)
+		{
+			for (var right = left + 1; right < firstPass.Length; right++)
+			{
+				Assert.NotSame(firstPass[left].Background, firstPass[right].Background);
+				Assert.NotSame(firstPass[left].Border, firstPass[right].Border);
+			}
+		}
+	}
+
+	[Fact]
+	public void RedactionRenderStyleCache_RebuildsWhenAccentOrThemeChanges()
+	{
+		var cache = new PreviewRedactionRenderStyleCache();
+		var firstAccent = Color.Parse("#6D5DFB");
+		var secondAccent = Color.Parse("#12947A");
+		cache.Update(ThemeVariant.Dark, firstAccent);
+		var initial = cache.Resolve(
+			SecretPreviewSpanState.Redacted,
+			isInteractive: false);
+		cache.Update(ThemeVariant.Dark, secondAccent);
+		var afterAccentChange = cache.Resolve(
+			SecretPreviewSpanState.Redacted,
+			isInteractive: false);
+		cache.Update(ThemeVariant.Light, secondAccent);
+		var afterThemeChange = cache.Resolve(
+			SecretPreviewSpanState.Redacted,
+			isInteractive: false);
+
+		Assert.NotSame(initial.Background, afterAccentChange.Background);
+		Assert.NotSame(initial.Border, afterAccentChange.Border);
+		Assert.NotSame(afterAccentChange.Background, afterThemeChange.Background);
+		Assert.NotSame(afterAccentChange.Border, afterThemeChange.Border);
+		Assert.Equal(
+			Color.FromArgb(54, secondAccent.R, secondAccent.G, secondAccent.B),
+			Assert.IsAssignableFrom<ISolidColorBrush>(afterThemeChange.Background).Color);
+		Assert.Equal(
+			Color.FromArgb(180, secondAccent.R, secondAccent.G, secondAccent.B),
+			Assert.IsAssignableFrom<ISolidColorBrush>(afterThemeChange.Border.Brush).Color);
+		var reused = cache.Resolve(
+			SecretPreviewSpanState.Redacted,
+			isInteractive: false);
+		Assert.Same(afterThemeChange.Background, reused.Background);
+		Assert.Same(afterThemeChange.Border, reused.Border);
+	}
+
+	[Fact]
+	public void RedactionRenderStyleCache_WarmResolutionAllocatesNoPerSpanObjects()
+	{
+		var cache = new PreviewRedactionRenderStyleCache();
+		cache.Update(ThemeVariant.Dark, Color.Parse("#6D5DFB"));
+		_ = cache.Resolve(SecretPreviewSpanState.Redacted, isInteractive: false);
+
+		var before = GC.GetAllocatedBytesForCurrentThread();
+		for (var index = 0; index < 100_000; index++)
+		{
+			_ = cache.Resolve(
+				(index & 2) == 0
+					? SecretPreviewSpanState.Redacted
+					: SecretPreviewSpanState.KeptAsIs,
+				(index & 1) != 0);
+		}
+		var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+		Assert.InRange(allocated, 0, 128);
+	}
+
+	[AvaloniaFact]
+	public void RedactionColumnGeometryCache_PreservesAsciiCjkEmojiAndTrailingSpaceWidths()
+	{
+		const string text = "ab中🙂 cd  ";
+		using var document = new InMemoryPreviewTextDocument(
+			text,
+			redactions:
+			[
+				new PreviewRedactionSpan("ascii", "manual", 1, 0, 2, SecretPreviewSpanState.Redacted),
+				new PreviewRedactionSpan("cjk", "manual", 1, 2, 1, SecretPreviewSpanState.Redacted),
+				new PreviewRedactionSpan("emoji", "manual", 1, 3, 2, SecretPreviewSpanState.Redacted),
+				new PreviewRedactionSpan("spaces", "manual", 1, 8, 2, SecretPreviewSpanState.Redacted)
+			]);
+		var control = new VirtualizedPreviewTextControl
+		{
+			Document = document,
+			TextBrush = Brushes.White,
+			TextFontSize = 16,
+			ViewportWidth = 640,
+			ViewportHeight = 120,
+			Width = 640,
+			Height = 120
+		};
+		control.Measure(new Size(640, 120));
+		control.Arrange(new Rect(0, 0, 640, 120));
+		using var bitmap = new RenderTargetBitmap(new PixelSize(640, 120));
+		bitmap.Render(control);
+
+		var cache = GetColumnGeometryCache(control);
+		var typeface = ResolveTestTypeface(control);
+		foreach (var column in new[] { 2, 3, 5, 8, 10 })
+		{
+			Assert.True(cache.TryGet(1, column, out var actual));
+			Assert.Equal(
+				MeasureRenderedPrefixWidth(control, text, column, typeface),
+				actual,
+				precision: 6);
+		}
+	}
+
+	[AvaloniaFact]
+	public void HighlightRendering_FileBackedVisibleWindowDoesNotReadIndividualLines()
+	{
+		using var document = CreateCountingFileBackedDocument();
+		var control = new VirtualizedPreviewTextControl
+		{
+			Document = document,
+			TextBrush = Brushes.White,
+			TextFontSize = 16,
+			ViewportWidth = 640,
+			ViewportHeight = 120,
+			Width = 640,
+			Height = 120
+		};
+		control.SetSearchMatches(
+			[new PreviewSearchMatch(2, 0, "search".Length)],
+			activateNearestToViewport: false,
+			scrollIntoView: false);
+		control.ClearSelection();
+		control.Measure(new Size(640, 120));
+		control.Arrange(new Rect(0, 0, 640, 120));
+		using var bitmap = new RenderTargetBitmap(new PixelSize(640, 120));
+
+		bitmap.Render(control);
+		bitmap.Render(control);
+
+		Assert.Equal(1, document.LineRangeReadCount);
+		Assert.Equal(0, document.LineReadCount);
+	}
+
+	[Fact]
+	public void ColumnGeometryCache_EvictsOldestEntriesAtItsFixedLimit()
+	{
+		var cache = new PreviewColumnGeometryCache();
+		for (var column = 0; column < PreviewColumnGeometryCache.MaximumEntries + 32; column++)
+			cache.Store(lineNumber: 1, column, distance: column + 0.25);
+
+		Assert.Equal(PreviewColumnGeometryCache.MaximumEntries, cache.Count);
+		Assert.False(cache.TryGet(1, 0, out _));
+		Assert.True(cache.TryGet(
+			1,
+			PreviewColumnGeometryCache.MaximumEntries + 31,
+			out var newest));
+		Assert.Equal(PreviewColumnGeometryCache.MaximumEntries + 31.25, newest);
+	}
+
+	[AvaloniaFact]
+	public void FormattedLineEvictionClearsDependentColumnGeometry()
+	{
+		var control = new VirtualizedPreviewTextControl
+		{
+			TextBrush = Brushes.White,
+			TextFontSize = 16
+		};
+		var cache = GetColumnGeometryCache(control);
+		cache.Store(lineNumber: 1, column: 1, distance: 10);
+		var method = typeof(VirtualizedPreviewTextControl).GetMethod(
+			"TrimFormattedLineCache",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(method);
+		var linesField = typeof(VirtualizedPreviewTextControl).GetField(
+			"_formattedLineCache",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(linesField);
+		var lines = Assert.IsAssignableFrom<System.Collections.IDictionary>(
+			linesField!.GetValue(control));
+		var orderField = typeof(VirtualizedPreviewTextControl).GetField(
+			"_formattedLineCacheOrder",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(orderField);
+		var order = Assert.IsType<Queue<int>>(orderField!.GetValue(control));
+		for (var line = 0; line <= 2048; line++)
+		{
+			lines[line] = null;
+			order.Enqueue(line);
+		}
+
+		method!.Invoke(control, []);
+
+		Assert.Equal(0, cache.Count);
+	}
+
     private static double InvokeResolveLineHeight(VirtualizedPreviewTextControl control)
     {
         var method = typeof(VirtualizedPreviewTextControl).GetMethod(
@@ -374,6 +1715,137 @@ public sealed class VirtualizedPreviewTextControlTests
         return lineStarts.Capacity;
     }
 
+	private static MenuItem GetMenuItem(VirtualizedPreviewTextControl control, string fieldName)
+	{
+		var field = typeof(VirtualizedPreviewTextControl).GetField(
+			fieldName,
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(field);
+		return Assert.IsType<MenuItem>(field!.GetValue(control));
+	}
+
+	private static Separator GetSeparator(VirtualizedPreviewTextControl control, string fieldName)
+	{
+		var field = typeof(VirtualizedPreviewTextControl).GetField(
+			fieldName,
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(field);
+		return Assert.IsType<Separator>(field!.GetValue(control));
+	}
+
+	private static void InvokePrivate(
+		VirtualizedPreviewTextControl control,
+		string methodName,
+		params object[] arguments)
+	{
+		var method = typeof(VirtualizedPreviewTextControl).GetMethod(
+			methodName,
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(method);
+		method!.Invoke(control, arguments);
+	}
+
+	private static string? GetActiveRedactionOccurrenceId(
+		VirtualizedPreviewTextControl control)
+	{
+		var field = typeof(VirtualizedPreviewTextControl).GetField(
+			"_activeRedactionTarget",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+
+		Assert.NotNull(field);
+		var target = field!.GetValue(control);
+		Assert.NotNull(target);
+		var property = target!.GetType().GetProperty("OccurrenceId");
+		Assert.NotNull(property);
+		return Assert.IsType<string>(property!.GetValue(target));
+	}
+
+	private static int GetActiveRedactionLineNumber(VirtualizedPreviewTextControl control)
+	{
+		var field = typeof(VirtualizedPreviewTextControl).GetField(
+			"_activeRedactionTarget",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(field);
+		var target = field!.GetValue(control);
+		Assert.NotNull(target);
+		var property = target!.GetType().GetProperty("LineNumber");
+		Assert.NotNull(property);
+		return Assert.IsType<int>(property!.GetValue(target));
+	}
+
+	private static bool HasActiveRedactionTarget(VirtualizedPreviewTextControl control)
+	{
+		var field = typeof(VirtualizedPreviewTextControl).GetField(
+			"_activeRedactionTarget",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(field);
+		return field!.GetValue(control) is not null;
+	}
+
+	private static bool IsActiveRedactionStop(
+		VirtualizedPreviewTextControl control,
+		PreviewRedactionSpan span)
+	{
+		var field = typeof(VirtualizedPreviewTextControl).GetField(
+			"_activeRedactionTarget",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(field);
+		var target = field!.GetValue(control);
+		Assert.NotNull(target);
+		var method = typeof(VirtualizedPreviewTextControl).GetMethod(
+			"IsNavigationTarget",
+			BindingFlags.Static | BindingFlags.NonPublic);
+		Assert.NotNull(method);
+		return Assert.IsType<bool>(method!.Invoke(null, [span, target]));
+	}
+
+	private static void SelectRange(
+		Window window,
+		VirtualizedPreviewTextControl control,
+		PreviewSelectionRange range)
+	{
+		_ = window;
+		var positionType = typeof(VirtualizedPreviewTextControl).GetNestedType(
+			"SelectionPosition",
+			BindingFlags.NonPublic);
+		Assert.NotNull(positionType);
+		var anchor = Activator.CreateInstance(positionType!, range.StartLine, range.StartColumn);
+		var active = Activator.CreateInstance(positionType!, range.EndLine, range.EndColumn);
+		Assert.NotNull(anchor);
+		Assert.NotNull(active);
+		SetSelectionAnchor(control, anchor!);
+		var activeField = typeof(VirtualizedPreviewTextControl).GetField(
+			"_selectionActive",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(activeField);
+		activeField!.SetValue(control, active);
+		Assert.Equal(range.Normalize(), AssertSelectionRange(control));
+	}
+
+	private static PreviewSelectionRange AssertSelectionRange(VirtualizedPreviewTextControl control)
+	{
+		Assert.True(control.TryGetSelectionRange(out var range));
+		return range;
+	}
+
+	private static Point ResolvePoint(
+		Window window,
+		VirtualizedPreviewTextControl control,
+		int lineNumber,
+		int column)
+	{
+		var origin = Assert.IsType<Point>(control.TranslatePoint(default, window));
+		var typeface = ResolveTestTypeface(control);
+		var lineHeight = InvokeResolveLineHeight(control);
+		return new Point(
+			origin.X + control.LeftPadding + MeasureRenderedPrefixWidth(
+				control,
+				control.Document!.GetLineText(lineNumber),
+				column,
+				typeface),
+			origin.Y + control.TopPadding + ((lineNumber - 1) * lineHeight) + (lineHeight / 2));
+	}
+
     private static Dictionary<int, object> GetFormattedLineCacheEntries(
         VirtualizedPreviewTextControl control)
     {
@@ -393,6 +1865,16 @@ public sealed class VirtualizedPreviewTextControlTests
 
         return entries;
     }
+
+	private static PreviewColumnGeometryCache GetColumnGeometryCache(
+		VirtualizedPreviewTextControl control)
+	{
+		var field = typeof(VirtualizedPreviewTextControl).GetField(
+			"_columnGeometryCache",
+			BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull(field);
+		return Assert.IsType<PreviewColumnGeometryCache>(field!.GetValue(control));
+	}
 
     private static double InvokeResolveDistanceFromColumn(
         VirtualizedPreviewTextControl control,
@@ -462,6 +1944,82 @@ public sealed class VirtualizedPreviewTextControlTests
 
         return formattedText.WidthIncludingTrailingWhitespace;
     }
+
+	private static CountingPreviewTextDocument CreateCountingFileBackedDocument()
+	{
+		const string placeholder = "DEVPROJEX_REDACTED[test#1]";
+		var firstLine = $"token={placeholder}";
+		var text = $"{firstLine}\nsearch target";
+		var bytes = Encoding.UTF8.GetBytes(text);
+		var storagePath = Path.Combine(
+			Path.GetTempPath(),
+			$"devprojex-preview-render-{Guid.NewGuid():N}.tmp");
+		File.WriteAllBytes(storagePath, bytes);
+		try
+		{
+			var document = new FileBackedPreviewTextDocument(
+				storagePath,
+				[0, Encoding.UTF8.GetByteCount(firstLine + "\n")],
+				bytes.Length,
+				maxLineLength: Math.Max(firstLine.Length, "search target".Length),
+				characterCount: text.Length,
+				redactions:
+				[
+					new PreviewRedactionSpan(
+						"file-backed",
+						"test",
+						1,
+						"token=".Length,
+						placeholder.Length,
+						SecretPreviewSpanState.Redacted)
+				]);
+			return new CountingPreviewTextDocument(document);
+		}
+		catch
+		{
+			File.Delete(storagePath);
+			throw;
+		}
+	}
+
+	private sealed class CountingPreviewTextDocument(IPreviewTextDocument inner) : IPreviewTextDocument
+	{
+		public int LineReadCount { get; private set; }
+		public int LineRangeReadCount { get; private set; }
+		public int LineCount => inner.LineCount;
+		public int MaxLineLength => inner.MaxLineLength;
+		public long CharacterCount => inner.CharacterCount;
+		public IReadOnlyList<PreviewDocumentSection> Sections => inner.Sections;
+		public IReadOnlyList<PreviewRedactionSpan> Redactions => inner.Redactions;
+
+		public string GetFullText() => inner.GetFullText();
+
+		public string GetLineText(int lineNumber)
+		{
+			LineReadCount++;
+			return inner.GetLineText(lineNumber);
+		}
+
+		public string GetLineRangeText(int firstLine, int lastLine)
+		{
+			LineRangeReadCount++;
+			return inner.GetLineRangeText(firstLine, lastLine);
+		}
+
+		public void VisitLines(
+			int firstLine,
+			int lastLine,
+			PreviewTextLineVisitor visitor,
+			CancellationToken cancellationToken = default) =>
+			inner.VisitLines(firstLine, lastLine, visitor, cancellationToken);
+
+		public ValueTask WriteToAsync(
+			Stream destination,
+			CancellationToken cancellationToken = default) =>
+			inner.WriteToAsync(destination, cancellationToken);
+
+		public void Dispose() => inner.Dispose();
+	}
 
     private sealed class SyntheticLargePreviewDocument(int lineCount) : IPreviewTextDocument
     {

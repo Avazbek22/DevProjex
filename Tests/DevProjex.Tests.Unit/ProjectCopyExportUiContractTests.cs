@@ -50,10 +50,10 @@ public sealed class ProjectCopyExportUiContractTests
         Assert.Equal("16", Attribute(indicator, "Width"));
         Assert.Equal("16", Attribute(indicator, "Height"));
         Assert.Equal("8", Attribute(indicator, "CornerRadius"));
-        Assert.Equal("Help", Attribute(indicator, "Cursor"));
+        Assert.Null(Attribute(indicator, "Cursor"));
         Assert.Equal("OnProjectCopyHelpIndicatorPointerPressed", Attribute(indicator, "PointerPressed"));
         Assert.Equal("OnProjectCopyHelpIndicatorPointerReleased", Attribute(indicator, "PointerReleased"));
-        Assert.Equal("OnToolTipLoaded", Attribute(tooltip, "Loaded"));
+        Assert.Null(Attribute(tooltip, "Loaded"));
         Assert.Contains(indicator.Descendants(), element =>
             element.Name.LocalName == "TextBlock" && Attribute(element, "Text") == $"{{Binding {helpProperty}}}" &&
             Attribute(element, "TextWrapping") == "Wrap");
@@ -70,6 +70,7 @@ public sealed class ProjectCopyExportUiContractTests
             "TopMenuBarView.axaml.cs");
         AssertPointerHandlerConsumes(source, "OnProjectCopyHelpIndicatorPointerPressed");
         AssertPointerHandlerConsumes(source, "OnProjectCopyHelpIndicatorPointerReleased");
+        Assert.Contains("ToolTip.SetIsOpen(indicator, true);", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -107,7 +108,7 @@ public sealed class ProjectCopyExportUiContractTests
             "Avalonia",
             "MainWindow.TextOutput.cs");
         Assert.Contains(
-            "result.Content,\n                snapshot.RootPath,",
+			"result.Document,\n                snapshot.RootPath,",
             source.ReplaceLineEndings("\n"),
             StringComparison.Ordinal);
         var methodStart = source.IndexOf(
@@ -303,10 +304,13 @@ public sealed class ProjectCopyExportUiContractTests
 
     private static bool IsMenuItem(XElement element) => element.Name.LocalName == "MenuItem";
 
-    private static string? Attribute(XElement element, string localName) =>
-        element.Attributes().SingleOrDefault(attribute =>
-            attribute.Name.LocalName == localName ||
+    private static string? Attribute(XElement element, string localName)
+    {
+        var exact = element.Attributes().SingleOrDefault(attribute =>
+            attribute.Name.LocalName == localName);
+        return exact?.Value ?? element.Attributes().SingleOrDefault(attribute =>
             attribute.Name.LocalName.EndsWith($".{localName}", StringComparison.Ordinal))?.Value;
+    }
 
     private static string ReadRepositoryFile(params string[] parts) =>
         File.ReadAllText(Path.Combine([FindRepositoryRoot(), .. parts]));

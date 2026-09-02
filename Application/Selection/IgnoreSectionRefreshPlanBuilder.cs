@@ -19,13 +19,13 @@ public static class IgnoreSectionRefreshPlanBuilder
             if (impact == IgnoreOptionRefreshImpact.None)
                 return IgnoreSectionRefreshPlan.None;
 
-            // A checked-state change can alter root/extension output even when the visible
-            // availability counters stay numerically equal. The follow-up keeps root options,
-            // extension options, and the final tree rules aligned inside the same refresh.
+            // A checked-state change can alter scan scope or extension output even when the
+            // visible availability counters stay numerically equal. The follow-up keeps the
+            // final tree rules and both remaining option sections aligned.
             return new IgnoreSectionRefreshPlan(
                 RequiresIgnoreOptionsRefresh: true,
                 RequiresSecondSnapshotPass: true,
-                RequiresRootFolderRefresh: (impact & IgnoreOptionRefreshImpact.RootStructure) != 0,
+                RequiresScanRootRefresh: (impact & IgnoreOptionRefreshImpact.RootStructure) != 0,
                 Impact: impact);
         }
 
@@ -34,14 +34,14 @@ public static class IgnoreSectionRefreshPlanBuilder
             return new IgnoreSectionRefreshPlan(
                 RequiresIgnoreOptionsRefresh: true,
                 RequiresSecondSnapshotPass: false,
-                RequiresRootFolderRefresh: false,
+                RequiresScanRootRefresh: false,
                 Impact: IgnoreOptionRefreshImpact.None);
         }
 
         return new IgnoreSectionRefreshPlan(
             RequiresIgnoreOptionsRefresh: true,
             RequiresSecondSnapshotPass: true,
-            RequiresRootFolderRefresh: (impact & IgnoreOptionRefreshImpact.RootStructure) != 0,
+            RequiresScanRootRefresh: (impact & IgnoreOptionRefreshImpact.RootStructure) != 0,
             Impact: impact);
     }
 }

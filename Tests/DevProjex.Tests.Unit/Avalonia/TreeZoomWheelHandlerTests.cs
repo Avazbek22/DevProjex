@@ -1,5 +1,6 @@
 using Avalonia.Input;
 using DevProjex.Avalonia.Services;
+using DevProjex.Infrastructure.FileSystem;
 
 namespace DevProjex.Tests.Unit.Avalonia;
 
@@ -45,17 +46,34 @@ public sealed class TreeZoomWheelHandlerTests
     }
 
     [Fact]
-    public void TryGetZoomStep_ReturnsNegativeStep_ForMetaWheelDown()
+	public void TryGetZoomStep_ReturnsNegativeStep_ForMacOSMetaWheelDown()
     {
         var handled = TreeZoomWheelHandler.TryGetZoomStep(
             KeyModifiers.Meta,
             new Vector(0, -1),
             pointerOverTree: true,
-            out var step);
+			out var step,
+			new DesktopShortcutModifiers(DesktopPlatform.MacOS));
 
         Assert.True(handled);
         Assert.Equal(-1, step);
     }
+
+	[Theory]
+	[InlineData(DesktopPlatform.Windows)]
+	[InlineData(DesktopPlatform.Linux)]
+	public void TryGetZoomStep_RejectsMetaOutsideMacOS(DesktopPlatform platform)
+	{
+		var handled = TreeZoomWheelHandler.TryGetZoomStep(
+			KeyModifiers.Meta,
+			new Vector(0, -1),
+			pointerOverTree: true,
+			out var step,
+			new DesktopShortcutModifiers(platform));
+
+		Assert.False(handled);
+		Assert.Equal(0, step);
+	}
 
     [Fact]
     public void TryGetZoomStep_ReturnsFalse_WhenDeltaIsZero()

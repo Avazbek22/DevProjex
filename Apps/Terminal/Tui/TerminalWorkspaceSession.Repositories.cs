@@ -72,7 +72,8 @@ internal sealed partial class TerminalWorkspaceSession
 				{
 					var remove = ShowChoice(
 						L("Terminal.Tui.Error"),
-						$"{L("Terminal.Tui.Error.ProjectUnavailable")}\n\n{workspace.Source}",
+						$"{L("Terminal.Tui.Error.ProjectUnavailable")}\n\n" +
+						TerminalRecentWorkspacePresentation.DisplaySource(workspace),
 						L("Terminal.Tui.Back"),
 						L("Terminal.Tui.Recent.Remove"));
 					if (remove == 1)
@@ -190,7 +191,8 @@ internal sealed partial class TerminalWorkspaceSession
 			_recentWorkspaceSelectionKey = workspace.IdentityKey;
 			var sourceWidth = Math.Max(8, dialogWidth - 8);
 			details.Text =
-				$"{KindLabel(workspace.Kind)}{PanelSeparator}{workspace.DisplayName}\n" +
+				$"{KindLabel(workspace.Kind)}{PanelSeparator}" +
+				$"{TerminalRecentWorkspacePresentation.DisplayName(workspace)}\n" +
 				$"{FitPathToWidth(workspace.DisplaySource, sourceWidth)}\n" +
 				$"{L("Terminal.Tui.Recent.LastOpened")}: " +
 				workspace.OpenedUtc.ToLocalTime().ToString("g", CultureInfo.CurrentCulture);
@@ -224,24 +226,37 @@ internal sealed partial class TerminalWorkspaceSession
 			L("Terminal.Tui.LoadingProject"),
 			workspace.DisplaySource);
 		var operationCts = ReplaceActiveOperation();
-		_activeOperationTask = Task.Run(async () =>
+		TrackActiveOperation(Task.Run(async () =>
 		{
+			IRepositoryCacheSession? preparedRepositorySession = null;
 			try
 			{
 				var cache = await _services.RepositoryCacheCatalog
 					.FindAsync(workspace.Source, operationCts.Token)
 					.ConfigureAwait(false);
-				await InvokeAsync(() =>
+				if (cache.State == RepositoryCacheState.Ready &&
+				    cache.LocalPath is { Length: > 0 } &&
+				    Directory.Exists(cache.LocalPath))
 				{
-					if (cache.State == RepositoryCacheState.Ready &&
-					    cache.LocalPath is { Length: > 0 } localPath &&
-					    Directory.Exists(localPath))
+					preparedRepositorySession = await _services.RepoCacheService
+						.TryAcquireRepositorySessionAsync(
+							workspace.Source,
+							cancellationToken: operationCts.Token)
+						.ConfigureAwait(false);
+				}
+
+				var sessionTransferred = await InvokeAsync(() =>
+				{
+					if (preparedRepositorySession is { } session &&
+					    Directory.Exists(session.RepositoryPath))
 					{
-						if (!TryResolveAutomaticProfileInteractively(localPath, out var profile))
+						if (!TryResolveAutomaticProfileInteractively(
+							    session.RepositoryPath,
+							    out var profile))
 						{
 							ShowWelcome(TerminalWelcomeActionKind.RecentWorkspaces);
 							_application.Invoke(OpenRecentWorkspaces);
-							return true;
+							return false;
 						}
 						var identity = ProjectSourceIdentityResolver.CreateCloneIdentity(
 							workspace.Source,
@@ -249,10 +264,11 @@ internal sealed partial class TerminalWorkspaceSession
 							cache.Branch,
 							cache.CommitHash);
 						BeginOpenProject(
-							localPath,
+							session.RepositoryPath,
 							profile,
 							TerminalProjectOpenSource.RecentRepository,
-							identity);
+							identity,
+							session);
 						return true;
 					}
 
@@ -267,8 +283,10 @@ internal sealed partial class TerminalWorkspaceSession
 					{
 						_application.Invoke(OpenRecentWorkspaces);
 					}
-					return true;
+					return false;
 				}).ConfigureAwait(false);
+				if (sessionTransferred)
+					preparedRepositorySession = null;
 			}
 			catch (OperationCanceledException) when (operationCts.IsCancellationRequested)
 			{
@@ -283,9 +301,10 @@ internal sealed partial class TerminalWorkspaceSession
 			}
 			finally
 			{
+				preparedRepositorySession?.Dispose();
 				ReleaseActiveOperation(operationCts);
 			}
-		}, CancellationToken.None);
+		}, CancellationToken.None));
 	}
 
 	private bool HandleUnavailableRepository(
@@ -296,7 +315,7 @@ internal sealed partial class TerminalWorkspaceSession
 			L("Terminal.Tui.Welcome.Recent"),
 			$"{L(damaged
 				? "Terminal.Tui.RecentRepositories.CacheDamaged"
-				: "Terminal.Tui.RecentRepositories.CacheMissing")}\n\n{repository.Url}",
+				: "Terminal.Tui.RecentRepositories.CacheMissing")}\n\n{repository.SafeDisplayUrl}",
 			L("Terminal.Tui.Back"),
 			L("Terminal.Tui.Recent.Remove"),
 			L("Terminal.Tui.RecentRepositories.CloneAgain"));
@@ -317,7 +336,7 @@ internal sealed partial class TerminalWorkspaceSession
 	private void ReturnToRepositoryHistoryAfterCancellation(
 		CancellationTokenSource operationCts)
 	{
-		if (_stopping || !ReferenceEquals(_activeOperationCts, operationCts))
+		if (_stopping || !_operations.IsCurrent(WorkspaceOperationKind.Active, operationCts))
 			return;
 		_application.Invoke(() =>
 		{
@@ -332,7 +351,7 @@ internal sealed partial class TerminalWorkspaceSession
 		string code,
 		string message)
 	{
-		if (_stopping || !ReferenceEquals(_activeOperationCts, operationCts))
+		if (_stopping || !_operations.IsCurrent(WorkspaceOperationKind.Active, operationCts))
 			return;
 		_application.Invoke(() =>
 		{

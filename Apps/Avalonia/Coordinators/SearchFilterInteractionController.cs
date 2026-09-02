@@ -2,16 +2,20 @@ using Avalonia.Animation;
 using Avalonia.Animation.Easings;
 using DevProjex.Avalonia.Services;
 using DevProjex.Avalonia.Views;
-using DevProjex.Kernel;
 
 namespace DevProjex.Avalonia.Coordinators;
 
 internal sealed class SearchFilterInteractionController : IDisposable
 {
-    private const double ToolBarHeight = 46.0;
+    private const double ToolBarHeight = 48.0;
     private const double PanelIslandSpacing = 4.0;
+    private const double ToolBarContentOffset = 5.0;
     private static readonly TimeSpan ToolBarAnimationDuration =
-        UiTimingProfile.Scale(TimeSpan.FromMilliseconds(250));
+        UiTimingProfile.Scale(TimeSpan.FromMilliseconds(220));
+    private static readonly TimeSpan ToolBarContentAnimationDuration =
+        UiTimingProfile.Scale(TimeSpan.FromMilliseconds(180));
+    private static readonly TimeSpan ToolBarFadeDuration =
+        UiTimingProfile.Scale(TimeSpan.FromMilliseconds(160));
     private static readonly TimeSpan HotkeyDebounceWindow =
         UiTimingProfile.Scale(TimeSpan.FromMilliseconds(220));
 
@@ -35,8 +39,14 @@ internal sealed class SearchFilterInteractionController : IDisposable
     private readonly Action _cancelMemoryCleanup;
     private readonly CancellationTokenSource _lifetimeCts = new();
     private readonly CancellationToken _lifetimeToken;
+    private readonly DesktopShortcutModifiers _shortcutModifiers;
+    private readonly PreviewMarkerBar? _treeSearchMarkerBar;
 
-    private HashSet<string>? _filterExpansionSnapshot;
+    private ProjectTreeExpansionSnapshot? _filterExpansionSnapshot;
+    private ScrollViewer? _treeScrollViewer;
+    private ScrollBar? _treeVerticalScrollBar;
+    private Cursor? _searchMarkerCursor;
+    private InputElement? _searchMarkerCursorTarget;
     private SuspendedTextTool _suspendedTool;
     private int _filterApplyVersion;
     private int _realtimeSuppressionDepth;
@@ -66,7 +76,9 @@ internal sealed class SearchFilterInteractionController : IDisposable
         Func<bool> wasLastInteractiveFilterInMemory,
         Func<Exception, Task> showErrorAsync,
         Action<MemoryCleanupReason> scheduleMemoryCleanup,
-        Action cancelMemoryCleanup)
+        Action cancelMemoryCleanup,
+        DesktopShortcutModifiers? shortcutModifiers = null,
+        PreviewMarkerBar? treeSearchMarkerBar = null)
     {
         _lifetimeToken = _lifetimeCts.Token;
         _window = window;
@@ -83,6 +95,8 @@ internal sealed class SearchFilterInteractionController : IDisposable
         _showErrorAsync = showErrorAsync;
         _scheduleMemoryCleanup = scheduleMemoryCleanup;
         _cancelMemoryCleanup = cancelMemoryCleanup;
+        _shortcutModifiers = shortcutModifiers ?? DesktopShortcutModifiers.Current;
+        _treeSearchMarkerBar = treeSearchMarkerBar;
 
         _search = CreateToolState(
             TextToolKind.Search,
@@ -99,6 +113,23 @@ internal sealed class SearchFilterInteractionController : IDisposable
             viewModel,
             treeView,
             sessionMetrics);
+        if (_treeSearchMarkerBar is not null)
+        {
+            _searchCoordinator.SearchMarkersChanged += OnSearchMarkersChanged;
+            _treeSearchMarkerBar.SetMarkers(_searchCoordinator.SearchMarkerSnapshot);
+            _treeView.AddHandler(
+                InputElement.PointerPressedEvent,
+                OnSearchMarkerPointerPressed,
+                RoutingStrategies.Tunnel,
+                handledEventsToo: true);
+            _treeView.AddHandler(
+                InputElement.PointerMovedEvent,
+                OnSearchMarkerPointerMoved,
+                RoutingStrategies.Tunnel,
+                handledEventsToo: true);
+            _treeView.PointerExited += OnSearchMarkerPointerExited;
+            _treeView.LayoutUpdated += OnTreeLayoutUpdated;
+        }
         _filterCoordinator = new NameFilterCoordinator(
             ApplyFilterRealtime,
             () => !string.IsNullOrWhiteSpace(viewModel.NameFilter),
@@ -115,6 +146,127 @@ internal sealed class SearchFilterInteractionController : IDisposable
     public bool IsSearchEffectivelyVisible => IsEffectivelyVisible(_search);
 
     public bool IsFilterEffectivelyVisible => IsEffectivelyVisible(_filter);
+
+    private void OnSearchMarkersChanged(
+        object? sender,
+        PreviewMarkersChangedEventArgs e)
+    {
+        _treeSearchMarkerBar?.SetMarkers(e.Snapshot);
+        UpdateSearchMarkerTrackGeometry();
+    }
+
+    private void OnTreeLayoutUpdated(object? sender, EventArgs e) =>
+        UpdateSearchMarkerTrackGeometry();
+
+    private void UpdateSearchMarkerTrackGeometry()
+    {
+        if (_treeSearchMarkerBar is null)
+            return;
+
+        _treeScrollViewer ??= _treeView.FindDescendantOfType<ScrollViewer>();
+        _treeVerticalScrollBar ??= _treeScrollViewer?
+            .GetVisualDescendants()
+            .OfType<ScrollBar>()
+            .FirstOrDefault(static scrollBar =>
+                scrollBar.Orientation == Orientation.Vertical);
+
+        var hasVerticalScrollBar = _treeVerticalScrollBar is { IsVisible: true };
+        _treeSearchMarkerBar.IsMarkerDisplayEnabled = hasVerticalScrollBar;
+
+        var margin = default(Thickness);
+        if (_treeScrollViewer is { } scrollViewer &&
+            _treeVerticalScrollBar is { IsVisible: true } scrollBar &&
+            scrollBar.GetVisualDescendants()
+                .OfType<Track>()
+                .FirstOrDefault() is { } track &&
+            track.GetVisualDescendants()
+                .OfType<Thumb>()
+                .FirstOrDefault() is { } thumb &&
+            track.TranslatePoint(default, _treeView) is { } origin)
+        {
+            var availableHeight = Math.Max(0, _treeView.Bounds.Height);
+            var top = Math.Clamp(origin.Y, 0, availableHeight);
+            var bottom = Math.Clamp(
+                availableHeight - top - track.Bounds.Height,
+                0,
+                availableHeight);
+            margin = new Thickness(0, top, 0, bottom);
+
+            var visibleLineCount =
+                _searchCoordinator.SearchMarkerSnapshot.TotalLineCount;
+            var lineHeight = visibleLineCount > 0
+                ? Math.Max(1, scrollViewer.Extent.Height / visibleLineCount)
+                : 1;
+            _treeSearchMarkerBar.SetScrollMetrics(new PreviewMarkerScrollMetrics(
+                scrollViewer.Extent.Height,
+                scrollViewer.Viewport.Height,
+                thumb.Bounds.Height,
+                FirstLineTop: 0,
+                lineHeight));
+        }
+        else
+        {
+            _treeSearchMarkerBar.SetScrollMetrics(null);
+        }
+
+        if (_treeSearchMarkerBar.Margin != margin)
+            _treeSearchMarkerBar.Margin = margin;
+    }
+
+    private void OnSearchMarkerPointerPressed(
+        object? sender,
+        PointerPressedEventArgs e)
+    {
+        if (_treeSearchMarkerBar is null ||
+            !_treeSearchMarkerBar.IsVisible ||
+            !e.GetCurrentPoint(_treeView).Properties.IsLeftButtonPressed ||
+            _treeSearchMarkerBar.FindTargetAt(
+                e.GetPosition(_treeSearchMarkerBar)) is not { } target ||
+            !_searchCoordinator.TryNavigateToSearchMarker(target))
+        {
+            return;
+        }
+
+        e.Handled = true;
+    }
+
+    private void OnSearchMarkerPointerMoved(
+        object? sender,
+        PointerEventArgs e)
+    {
+        if (_treeSearchMarkerBar is not { IsVisible: true })
+        {
+            SetSearchMarkerCursor(null);
+            return;
+        }
+
+        SetSearchMarkerCursor(
+            _treeSearchMarkerBar.FindTargetAt(
+                e.GetPosition(_treeSearchMarkerBar)) is not null
+                ? e.Source as InputElement
+                : null);
+    }
+
+    private void OnSearchMarkerPointerExited(
+        object? sender,
+        PointerEventArgs e) =>
+        SetSearchMarkerCursor(null);
+
+    private void SetSearchMarkerCursor(InputElement? target)
+    {
+        var cursor = _searchMarkerCursor ??=
+            new Cursor(StandardCursorType.Hand);
+        if (ReferenceEquals(_searchMarkerCursorTarget, target) &&
+            ReferenceEquals(target?.Cursor, cursor))
+        {
+            return;
+        }
+
+        _searchMarkerCursorTarget?.ClearValue(InputElement.CursorProperty);
+        _searchMarkerCursorTarget = target;
+        if (target is not null)
+            target.Cursor = cursor;
+    }
 
     public void OnSearchQueryChanged()
     {
@@ -233,9 +385,7 @@ internal sealed class SearchFilterInteractionController : IDisposable
     private async Task CloseSearchCoreAsync(bool focusTree)
     {
         InvalidateFocusRequest(_search);
-        PrepareForClose(_search, focusTree);
-        if (!await WaitForAnimationAsync(_search, _lifetimeToken))
-            return;
+        await PrepareForCloseAsync(_search, focusTree);
 
         if (_disposed || _viewModel.SearchVisible)
             return;
@@ -278,9 +428,7 @@ internal sealed class SearchFilterInteractionController : IDisposable
     private async Task CloseFilterCoreAsync(bool focusTree)
     {
         InvalidateFocusRequest(_filter);
-        PrepareForClose(_filter, focusTree);
-        if (!await WaitForAnimationAsync(_filter, _lifetimeToken))
-            return;
+        await PrepareForCloseAsync(_filter, focusTree);
 
         if (_disposed || _viewModel.FilterVisible)
             return;
@@ -330,7 +478,7 @@ internal sealed class SearchFilterInteractionController : IDisposable
             return false;
 
         var modifiers = e.KeyModifiers;
-        if (modifiers == KeyModifiers.Control && e.Key == Key.F)
+        if (_shortcutModifiers.IsPrimary(modifiers) && e.Key == Key.F)
         {
             if (!IsHotkeyDebounced(ref _lastSearchHotkeyTimestamp))
                 ScheduleHotkeyToggle(TextToolKind.Search);
@@ -339,7 +487,7 @@ internal sealed class SearchFilterInteractionController : IDisposable
             return true;
         }
 
-        if (modifiers != (KeyModifiers.Control | KeyModifiers.Shift) || e.Key != Key.N)
+        if (!_shortcutModifiers.IsPrimaryWithShift(modifiers) || e.Key != Key.N)
             return false;
 
         if (!IsHotkeyDebounced(ref _lastFilterHotkeyTimestamp))
@@ -385,7 +533,8 @@ internal sealed class SearchFilterInteractionController : IDisposable
         var version = 0;
         try
         {
-            if (string.IsNullOrEmpty(_getCurrentPath()))
+            var currentPath = _getCurrentPath();
+            if (string.IsNullOrEmpty(currentPath))
             {
                 _viewModel.UpdateFilterMatchSummary(0);
                 _viewModel.SetFilterInProgress(false);
@@ -395,9 +544,6 @@ internal sealed class SearchFilterInteractionController : IDisposable
             var query = _viewModel.NameFilter?.Trim();
             var hasQuery = !string.IsNullOrWhiteSpace(query);
             version = Interlocked.Increment(ref _filterApplyVersion);
-
-            if (hasQuery && _filterExpansionSnapshot is null)
-                _filterExpansionSnapshot = CaptureExpandedNodes();
 
             cancellationToken.ThrowIfCancellationRequested();
             _lifetimeToken.ThrowIfCancellationRequested();
@@ -415,7 +561,12 @@ internal sealed class SearchFilterInteractionController : IDisposable
 
             if (!hasQuery && _filterExpansionSnapshot is not null)
             {
-                RestoreExpandedNodes(_filterExpansionSnapshot);
+                if (_viewModel.TreeNodes.Count == 1)
+                {
+                    ProjectTreeUiState.RestoreExpansion(
+                        _viewModel.TreeNodes[0],
+                        _filterExpansionSnapshot);
+                }
                 _filterExpansionSnapshot = null;
                 _resetInteractiveFilterCache();
             }
@@ -553,22 +704,16 @@ internal sealed class SearchFilterInteractionController : IDisposable
         {
             _viewModel.SearchVisible = false;
             _viewModel.FilterVisible = false;
-            _search.ClosePending = false;
-            _filter.ClosePending = false;
-
-            if (searchWasVisible && !_search.IsAnimating)
-                _ = AnimateAsync(_search, show: false);
-            if (filterWasVisible && !_filter.IsAnimating)
-                _ = AnimateAsync(_filter, show: false);
+            var searchCloseTask = searchWasVisible
+                ? AnimateAsync(_search, show: false)
+                : Task.CompletedTask;
+            var filterCloseTask = filterWasVisible
+                ? AnimateAsync(_filter, show: false)
+                : Task.CompletedTask;
 
             if (searchWasVisible || filterWasVisible)
             {
-                if (!await WaitForAnimationAsync(
-                        _search,
-                        _lifetimeToken))
-                {
-                    return;
-                }
+                await Task.WhenAll(searchCloseTask, filterCloseTask);
             }
 
             if (_disposed)
@@ -651,6 +796,16 @@ internal sealed class SearchFilterInteractionController : IDisposable
         _resetInteractiveFilterCache();
     }
 
+    public void CaptureFilterExpansionForTreeReplacement(string projectPath)
+    {
+        if (_filterExpansionSnapshot is not null)
+            return;
+
+        _filterExpansionSnapshot = ProjectTreeUiState.CaptureExpansion(
+            projectPath,
+            _viewModel.TreeNodes);
+    }
+
     public IDisposable SuppressRealtimeUpdates()
     {
         Interlocked.Increment(ref _realtimeSuppressionDepth);
@@ -675,6 +830,20 @@ internal sealed class SearchFilterInteractionController : IDisposable
         Interlocked.Exchange(ref _pendingSearchHotkeyToggle, 0);
         Interlocked.Exchange(ref _pendingFilterHotkeyToggle, 0);
         ResetAnimationState();
+        if (_treeSearchMarkerBar is not null)
+        {
+            _searchCoordinator.SearchMarkersChanged -= OnSearchMarkersChanged;
+            _treeView.RemoveHandler(
+                InputElement.PointerPressedEvent,
+                OnSearchMarkerPointerPressed);
+            _treeView.RemoveHandler(
+                InputElement.PointerMovedEvent,
+                OnSearchMarkerPointerMoved);
+            _treeView.PointerExited -= OnSearchMarkerPointerExited;
+            _treeView.LayoutUpdated -= OnTreeLayoutUpdated;
+            SetSearchMarkerCursor(null);
+        }
+
         _searchCoordinator.Dispose();
         _filterCoordinator.Dispose();
         _filterExpansionSnapshot = null;
@@ -688,8 +857,7 @@ internal sealed class SearchFilterInteractionController : IDisposable
     {
         if (_disposed ||
             !_viewModel.IsProjectLoaded ||
-            !IsAvailable(tool) ||
-            tool.IsAnimating)
+            !IsAvailable(tool))
             return;
 
         _cancelMemoryCleanup();
@@ -704,7 +872,7 @@ internal sealed class SearchFilterInteractionController : IDisposable
         _ = FocusAfterOpenAsync(tool, selectAllOnFocus, focusVersion);
     }
 
-    private void PrepareForClose(TextToolState tool, bool focusTree)
+    private async Task PrepareForCloseAsync(TextToolState tool, bool focusTree)
     {
         if (_disposed)
             return;
@@ -714,20 +882,20 @@ internal sealed class SearchFilterInteractionController : IDisposable
 
         SuppressAccent(tool);
         SetLogicalVisibility(tool, false);
-        if (tool.IsAnimating)
-            tool.ClosePending = true;
-        else
-            _ = AnimateAsync(tool, show: false);
+        var animationTask = AnimateAsync(tool, show: false);
 
         if (focusTree)
             _treeView.Focus();
+
+        await animationTask;
     }
 
     private async Task AnimateAsync(TextToolState tool, bool show)
     {
-        if (_disposed || tool.IsAnimating)
+        if (_disposed)
             return;
 
+        var version = Interlocked.Increment(ref tool.AnimationVersion);
         tool.IsAnimating = true;
         try
         {
@@ -745,12 +913,12 @@ internal sealed class SearchFilterInteractionController : IDisposable
 
             tool.Container.Height = show ? ToolBarHeight : 0.0;
             tool.Container.Margin = new Thickness(0, 0, 0, show ? PanelIslandSpacing : 0.0);
-            tool.Transform.Y = 0.0;
+            tool.Transform.Y = show ? 0.0 : ToolBarContentOffset;
             tool.Surface.Opacity = show ? 1.0 : 0.0;
             if (!await WaitForAnimationAsync(tool, _lifetimeToken))
                 return;
 
-            if (_disposed)
+            if (_disposed || version != Interlocked.Read(ref tool.AnimationVersion))
                 return;
 
             if (!show && !IsLogicallyVisible(tool))
@@ -766,14 +934,8 @@ internal sealed class SearchFilterInteractionController : IDisposable
         }
         finally
         {
-            tool.IsAnimating = false;
-            if (!_disposed &&
-                tool.ClosePending &&
-                !IsLogicallyVisible(tool))
-            {
-                tool.ClosePending = false;
-                _ = AnimateAsync(tool, show: false);
-            }
+            if (version == Interlocked.Read(ref tool.AnimationVersion))
+                tool.IsAnimating = false;
         }
     }
 
@@ -962,45 +1124,6 @@ internal sealed class SearchFilterInteractionController : IDisposable
         return false;
     }
 
-    private HashSet<string> CaptureExpandedNodes()
-    {
-        var result = new HashSet<string>(PathComparer.Default);
-        TreeNodeViewModel.ForEachRealizedDescendant(_viewModel.TreeNodes, node =>
-        {
-            if (node.IsExpanded)
-                result.Add(node.FullPath);
-        });
-        return result;
-    }
-
-    private void RestoreExpandedNodes(HashSet<string> expandedPaths)
-    {
-        using (TreeNodeViewModel.BeginPreserveDescendantExpansionStateScope())
-        {
-            var stack = new Stack<TreeNodeViewModel>();
-            for (var index = _viewModel.TreeNodes.Count - 1; index >= 0; index--)
-                stack.Push(_viewModel.TreeNodes[index]);
-
-            while (stack.Count > 0)
-            {
-                var node = stack.Pop();
-                var shouldExpand = node.Parent is null || expandedPaths.Contains(node.FullPath);
-                node.IsExpanded = shouldExpand;
-
-                // Only an expanded branch can contain another expansion state worth restoring.
-                if (!shouldExpand || !node.HasChildren)
-                    continue;
-
-                var children = node.Children;
-                for (var index = children.Count - 1; index >= 0; index--)
-                    stack.Push(children[index]);
-            }
-        }
-
-        if (_viewModel.TreeNodes.FirstOrDefault() is { } root && !root.IsExpanded)
-            root.IsExpanded = true;
-    }
-
     private static TextToolState CreateToolState(
         TextToolKind kind,
         Control surface,
@@ -1020,13 +1143,13 @@ internal sealed class SearchFilterInteractionController : IDisposable
             {
                 Property = Layoutable.HeightProperty,
                 Duration = ToolBarAnimationDuration,
-                Easing = new CubicEaseOut()
+                Easing = new CubicEaseInOut()
             },
             new ThicknessTransition
             {
                 Property = Layoutable.MarginProperty,
                 Duration = ToolBarAnimationDuration,
-                Easing = new CubicEaseOut()
+                Easing = new CubicEaseInOut()
             }
         ];
         tool.Surface.Transitions ??=
@@ -1034,7 +1157,16 @@ internal sealed class SearchFilterInteractionController : IDisposable
             new DoubleTransition
             {
                 Property = Visual.OpacityProperty,
-                Duration = ToolBarAnimationDuration,
+                Duration = ToolBarFadeDuration,
+                Easing = new CubicEaseOut()
+            }
+        ];
+        tool.Transform.Transitions ??=
+        [
+            new DoubleTransition
+            {
+                Property = TranslateTransform.YProperty,
+                Duration = ToolBarContentAnimationDuration,
                 Easing = new CubicEaseOut()
             }
         ];
@@ -1042,26 +1174,47 @@ internal sealed class SearchFilterInteractionController : IDisposable
 
     private static void ForceHidden(TextToolState tool)
     {
-        SuppressAccent(tool);
-        tool.Container.Height = 0;
-        tool.Container.Margin = new Thickness(0);
-        tool.Container.IsVisible = false;
-        tool.Transform.Y = 0;
-        tool.Surface.Opacity = 0;
-        tool.Surface.IsHitTestVisible = false;
-        tool.Surface.IsEnabled = false;
+        SetForcedVisualState(tool, visible: false);
     }
 
     private static void ForceVisible(TextToolState tool)
     {
-        RestoreAccent(tool);
-        tool.Container.Height = ToolBarHeight;
-        tool.Container.Margin = new Thickness(0, 0, 0, PanelIslandSpacing);
-        tool.Container.IsVisible = true;
-        tool.Transform.Y = 0;
-        tool.Surface.Opacity = 1;
-        tool.Surface.IsHitTestVisible = true;
-        tool.Surface.IsEnabled = true;
+        SetForcedVisualState(tool, visible: true);
+    }
+
+    private static void SetForcedVisualState(TextToolState tool, bool visible)
+    {
+        var containerTransitions = tool.Container.Transitions;
+        var surfaceTransitions = tool.Surface.Transitions;
+        var transformTransitions = tool.Transform.Transitions;
+        tool.Container.Transitions = null;
+        tool.Surface.Transitions = null;
+        tool.Transform.Transitions = null;
+        try
+        {
+            if (visible)
+                RestoreAccent(tool);
+            else
+                SuppressAccent(tool);
+
+            tool.Container.Height = visible ? ToolBarHeight : 0;
+            tool.Container.Margin = new Thickness(
+                0,
+                0,
+                0,
+                visible ? PanelIslandSpacing : 0);
+            tool.Container.IsVisible = visible;
+            tool.Transform.Y = visible ? 0 : ToolBarContentOffset;
+            tool.Surface.Opacity = visible ? 1 : 0;
+            tool.Surface.IsHitTestVisible = visible;
+            tool.Surface.IsEnabled = visible;
+        }
+        finally
+        {
+            tool.Container.Transitions = containerTransitions;
+            tool.Surface.Transitions = surfaceTransitions;
+            tool.Transform.Transitions = transformTransitions;
+        }
     }
 
     private static void SetForcedVisibility(TextToolState tool, bool visible)
@@ -1137,10 +1290,10 @@ internal sealed class SearchFilterInteractionController : IDisposable
 
     private void ResetAnimationState()
     {
+        Interlocked.Increment(ref _search.AnimationVersion);
         _search.IsAnimating = false;
-        _search.ClosePending = false;
+        Interlocked.Increment(ref _filter.AnimationVersion);
         _filter.IsAnimating = false;
-        _filter.ClosePending = false;
     }
 
     private void ReleaseRealtimeSuppression()
@@ -1175,7 +1328,7 @@ internal sealed class SearchFilterInteractionController : IDisposable
         public TranslateTransform Transform { get; } = transform;
         public Func<TextBox?> GetInput { get; } = getInput;
         public bool IsAnimating { get; set; }
-        public bool ClosePending { get; set; }
+        public long AnimationVersion;
         public int FocusVersion;
     }
 

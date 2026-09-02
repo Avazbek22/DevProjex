@@ -9,9 +9,19 @@ public readonly record struct SmartIgnoreScopeDecision(bool IsResolved, bool IsI
 	public static SmartIgnoreScopeDecision Exclude { get; } = new(true, true);
 }
 
+public readonly record struct SmartProjectScopeResolution(
+	string RootPath,
+	ProjectRootFacts Facts,
+	bool HasKnownMarker);
+
 public interface ISmartIgnoreScopeResolver
 {
 	SmartIgnoreScopeDecision EvaluateDirectory(string fullPath, string name);
 
 	SmartIgnoreScopeDecision EvaluateFile(string fullPath, string name);
+
+	SmartProjectScopeResolution ResolveFileOwningScope(
+		string fullFilePath,
+		IReadOnlySet<string>? additionalMarkerFiles = null,
+		IReadOnlySet<string>? additionalMarkerExtensions = null);
 }

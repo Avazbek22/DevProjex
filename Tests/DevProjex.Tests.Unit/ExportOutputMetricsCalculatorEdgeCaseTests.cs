@@ -1,3 +1,5 @@
+using DevProjex.Application.Preview;
+
 namespace DevProjex.Tests.Unit;
 
 public sealed class ExportOutputMetricsCalculatorEdgeCaseTests
@@ -39,10 +41,39 @@ public sealed class ExportOutputMetricsCalculatorEdgeCaseTests
 	}
 
 	[Fact]
-	public void FromContentFiles_IgnoresBlankPathsDeduplicatesAndKeepsFirstDuplicateMetrics()
+	public async Task FromDocumentAsync_PreservesUtf8RunesAndEveryLineEndingAcrossChunks()
+	{
+		const string text = "A🙂\r\nБ\rC\n終";
+		using var document = new SingleByteChunkPreviewDocument(text);
+
+		var actual = await ExportOutputMetricsCalculator.FromDocumentAsync(
+			document,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(ExportOutputMetricsCalculator.FromText(text), actual);
+	}
+
+	[Fact]
+	public async Task TextMetricsWriter_PreservesLineEndingsSplitAcrossWrites()
+	{
+		const string text = "A\r\nБ\rC\n終";
+		using var writer = ExportOutputMetricsCalculator.CreateTextWriter();
+
+		await writer.WriteAsync("A\r".AsMemory(), TestContext.Current.CancellationToken);
+		await writer.WriteAsync("\nБ\r".AsMemory(), TestContext.Current.CancellationToken);
+		await writer.WriteAsync("C\n終".AsMemory(), TestContext.Current.CancellationToken);
+
+		Assert.Equal(
+			ExportOutputMetricsCalculator.FromText(text),
+			writer.Complete(TestContext.Current.CancellationToken));
+	}
+
+	[Fact]
+	public void FromContentFiles_IgnoresEmptyPathsAndPreservesWhitespaceOnlyFileNames()
 	{
 		var files = new[]
 		{
+			new ContentFileMetrics("", 0, 0, 0, IsEmpty: true, IsWhitespaceOnly: false),
 			new ContentFileMetrics(" ", 0, 0, 0, IsEmpty: true, IsWhitespaceOnly: false),
 			new ContentFileMetrics("b.txt", 4, 1, 4, IsEmpty: false, IsWhitespaceOnly: false),
 			new ContentFileMetrics("a.txt", 0, 0, 0, IsEmpty: true, IsWhitespaceOnly: false),
@@ -52,6 +83,16 @@ public sealed class ExportOutputMetricsCalculatorEdgeCaseTests
 		var expectedText = string.Join(
 			'\n',
 			[
+				"\\t:",
+				ClipboardBlankLine,
+				"[No Content, 0 bytes]",
+				ClipboardBlankLine,
+				ClipboardBlankLine,
+				" :",
+				ClipboardBlankLine,
+				"[No Content, 0 bytes]",
+				ClipboardBlankLine,
+				ClipboardBlankLine,
 				"a.txt:",
 				ClipboardBlankLine,
 				"[No Content, 0 bytes]",
@@ -109,14 +150,34 @@ public sealed class ExportOutputMetricsCalculatorEdgeCaseTests
 	}
 
 	[Fact]
-	public void OrderedAccumulator_ReturnsEmptyWhenOnlyInvalidOrTrailingBlankRowsWereAppended()
+	public void FromContentFiles_PreservesCaseDistinctProjectEntries()
+	{
+		var upper = new ContentFileMetrics(
+			"Foo.cs", 5, 1, 5, IsEmpty: false, IsWhitespaceOnly: false);
+		var lower = new ContentFileMetrics(
+			"foo.cs", 7, 1, 7, IsEmpty: false, IsWhitespaceOnly: false);
+
+		var combined = ExportOutputMetricsCalculator.FromContentFiles([lower, upper]);
+		var upperOnly = ExportOutputMetricsCalculator.FromContentFiles([upper]);
+		var lowerOnly = ExportOutputMetricsCalculator.FromContentFiles([lower]);
+
+		Assert.True(combined.Lines > upperOnly.Lines);
+		Assert.True(combined.Lines > lowerOnly.Lines);
+		Assert.True(combined.Chars > upperOnly.Chars);
+		Assert.True(combined.Chars > lowerOnly.Chars);
+	}
+
+	[Fact]
+	public void OrderedAccumulator_IgnoresEmptyPathButPreservesWhitespaceOnlyFileName()
 	{
 		var accumulator = new ExportOutputMetricsCalculator.OrderedContentMetricsAccumulator();
 
 		accumulator.AppendFile(new ContentFileMetrics("", 0, 0, 0, IsEmpty: true, IsWhitespaceOnly: false));
 		accumulator.AppendFile(new ContentFileMetrics("   ", 0, 0, 0, IsEmpty: true, IsWhitespaceOnly: false));
 
-		Assert.Equal(ExportOutputMetrics.Empty, accumulator.ToMetrics());
+		var expected = ExportOutputMetricsCalculator.FromText(
+			$"   :\n{ClipboardBlankLine}\n[No Content, 0 bytes]");
+		Assert.Equal(expected, accumulator.ToMetrics());
 	}
 
 	[Fact]
@@ -160,5 +221,36 @@ public sealed class ExportOutputMetricsCalculatorEdgeCaseTests
 		}
 
 		return count;
+	}
+
+	private sealed class SingleByteChunkPreviewDocument(string text) : IPreviewTextDocument
+	{
+		public int LineCount => 1;
+		public int MaxLineLength => text.Length;
+		public long CharacterCount => text.Length;
+		public IReadOnlyList<PreviewDocumentSection> Sections => [];
+
+		public string GetFullText() => text;
+		public string GetLineText(int lineNumber) => text;
+		public string GetLineRangeText(int firstLine, int lastLine) => text;
+
+		public async ValueTask WriteToAsync(
+			Stream destination,
+			CancellationToken cancellationToken = default)
+		{
+			var bytes = Encoding.UTF8.GetBytes(text);
+			var singleByte = new byte[1];
+			foreach (var value in bytes)
+			{
+				singleByte[0] = value;
+				await destination
+					.WriteAsync(singleByte, cancellationToken)
+					.ConfigureAwait(false);
+			}
+		}
+
+		public void Dispose()
+		{
+		}
 	}
 }

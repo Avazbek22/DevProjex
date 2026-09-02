@@ -1,0 +1,219 @@
+namespace DevProjex.Application.Secrets;
+
+/// <summary>
+/// Detects credential values in already decoded text. Implementations must not read files:
+/// classification and source IO remain owned by <see cref="IFileContentAnalyzer"/>.
+/// </summary>
+public interface ISecretDetector
+{
+	/// <summary>
+	/// Identifies the exact rule set used to produce findings. Cache entries must never cross
+	/// this boundary because equal file bytes can produce different findings after a rule update.
+	/// </summary>
+	string RulesIdentity => GetType().FullName ?? nameof(ISecretDetector);
+
+	/// <summary>
+	/// Performs detector-only initialization before source buffers enter the pipeline. The
+	/// default is intentionally free so lightweight and test detectors pay no startup cost.
+	/// </summary>
+	void WarmUp(CancellationToken cancellationToken = default)
+	{
+	}
+
+	/// <summary>
+	/// Returns whether automatic detection needs the file content. Implementations may use only
+	/// path-level policy here; source IO remains owned by the application pipeline.
+	/// </summary>
+	bool ShouldInspectPath(string repositoryRelativePath) => true;
+
+	ISecretDetectionScope CreateScope(string projectRoot) =>
+		new UnscopedSecretDetectionScope(this);
+
+	IReadOnlyList<DetectedSecret> Detect(
+		string repositoryRelativePath,
+		string content,
+		CancellationToken cancellationToken = default);
+
+	/// <summary>
+	/// Detects directly over an operation-owned buffer. Production detectors should override
+	/// this overload so count-only scans do not manufacture a full-file string per source file.
+	/// </summary>
+	IReadOnlyList<DetectedSecret> Detect(
+		string repositoryRelativePath,
+		ReadOnlySpan<char> content,
+		CancellationToken cancellationToken = default) =>
+		Detect(repositoryRelativePath, content.ToString(), cancellationToken);
+
+	IReadOnlyList<DetectedSecret> Detect(
+		string repositoryRelativePath,
+		ReadOnlySpan<char> content,
+		SecretFileInspectionBudget budget,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(budget);
+		var findings = Detect(repositoryRelativePath, content, cancellationToken);
+		budget.RegisterFindings(findings.Count, cancellationToken);
+		return findings;
+	}
+}
+
+public interface ISecretDetectionScope
+{
+	string GetRulesIdentity(string fullPath, string repositoryRelativePath);
+
+	bool ShouldInspectPath(string fullPath, string repositoryRelativePath) => true;
+
+	IReadOnlyList<DetectedSecret> Detect(
+		string fullPath,
+		string repositoryRelativePath,
+		ReadOnlySpan<char> content,
+		CancellationToken cancellationToken = default);
+
+	IReadOnlyList<DetectedSecret> Detect(
+		string fullPath,
+		string repositoryRelativePath,
+		ReadOnlySpan<char> content,
+		SecretFileInspectionBudget budget,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(budget);
+		var findings = Detect(fullPath, repositoryRelativePath, content, cancellationToken);
+		budget.RegisterFindings(findings.Count, cancellationToken);
+		return findings;
+	}
+}
+
+internal sealed class UnscopedSecretDetectionScope(ISecretDetector detector) : ISecretDetectionScope
+{
+	public string GetRulesIdentity(string fullPath, string repositoryRelativePath) =>
+		detector.RulesIdentity;
+
+	public bool ShouldInspectPath(string fullPath, string repositoryRelativePath) =>
+		detector.ShouldInspectPath(repositoryRelativePath);
+
+	public IReadOnlyList<DetectedSecret> Detect(
+		string fullPath,
+		string repositoryRelativePath,
+		ReadOnlySpan<char> content,
+		CancellationToken cancellationToken = default) =>
+		detector.Detect(repositoryRelativePath, content, cancellationToken);
+
+	public IReadOnlyList<DetectedSecret> Detect(
+		string fullPath,
+		string repositoryRelativePath,
+		ReadOnlySpan<char> content,
+		SecretFileInspectionBudget budget,
+		CancellationToken cancellationToken = default) =>
+		detector.Detect(repositoryRelativePath, content, budget, cancellationToken);
+}
+
+internal sealed class CombinedSecretDetectionScope(
+	ISecretDetectionScope secrets,
+	ISecretDetectionScope privateData) : ISecretDetectionScope
+{
+	public string GetRulesIdentity(string fullPath, string repositoryRelativePath) =>
+		$"{secrets.GetRulesIdentity(fullPath, repositoryRelativePath)}+" +
+		privateData.GetRulesIdentity(fullPath, repositoryRelativePath);
+
+	public bool ShouldInspectPath(string fullPath, string repositoryRelativePath) =>
+		secrets.ShouldInspectPath(fullPath, repositoryRelativePath) ||
+		privateData.ShouldInspectPath(fullPath, repositoryRelativePath);
+
+	public IReadOnlyList<DetectedSecret> Detect(
+		string fullPath,
+		string repositoryRelativePath,
+		ReadOnlySpan<char> content,
+		CancellationToken cancellationToken = default) =>
+		Detect(
+			fullPath,
+			repositoryRelativePath,
+			content,
+			new SecretFileInspectionBudget(),
+			cancellationToken);
+
+	public IReadOnlyList<DetectedSecret> Detect(
+		string fullPath,
+		string repositoryRelativePath,
+		ReadOnlySpan<char> content,
+		SecretFileInspectionBudget budget,
+		CancellationToken cancellationToken = default)
+	{
+		var secretFindings = secrets.ShouldInspectPath(fullPath, repositoryRelativePath)
+			? secrets.Detect(fullPath, repositoryRelativePath, content, budget, cancellationToken)
+			: [];
+		var privateFindings = privateData.ShouldInspectPath(fullPath, repositoryRelativePath)
+			? privateData.Detect(fullPath, repositoryRelativePath, content, budget, cancellationToken)
+			: [];
+		budget.Checkpoint(cancellationToken);
+		if (secretFindings.Count + privateFindings.Count > 1)
+			EnsureRuleIdsBelongToOneCategory(secretFindings, privateFindings);
+		if (secretFindings.Count == 0)
+			return privateFindings;
+		if (privateFindings.Count == 0)
+			return secretFindings;
+
+		var combined = new DetectedSecret[secretFindings.Count + privateFindings.Count];
+		for (var index = 0; index < secretFindings.Count; index++)
+			combined[index] = secretFindings[index];
+		for (var index = 0; index < privateFindings.Count; index++)
+			combined[secretFindings.Count + index] = privateFindings[index];
+		return combined;
+	}
+
+	private static void EnsureRuleIdsBelongToOneCategory(
+		IReadOnlyList<DetectedSecret> secretFindings,
+		IReadOnlyList<DetectedSecret> privateFindings)
+	{
+		var categories = new Dictionary<string, RedactionFindingCategory>(StringComparer.Ordinal);
+		foreach (var finding in secretFindings)
+			Add(finding);
+		foreach (var finding in privateFindings)
+			Add(finding);
+
+		void Add(DetectedSecret finding)
+		{
+			if (categories.TryGetValue(finding.RuleId, out var category) && category != finding.Category)
+			{
+				throw new SecretDetectionException(
+					$"Redaction rule '{finding.RuleId}' produced findings in multiple categories.");
+			}
+			categories.TryAdd(finding.RuleId, finding.Category);
+		}
+	}
+}
+
+/// <summary>
+/// A match identifies only the value that may be replaced, never the surrounding assignment.
+/// The value is intentionally short-lived and must not be persisted or logged.
+/// </summary>
+public sealed record DetectedSecret(
+	string RuleId,
+	int Start,
+	int Length,
+	string Value,
+	int RuleOrder,
+	SecretFindingSource Source = SecretFindingSource.Detector,
+	string? PersistentMarkHash = null,
+	string? SessionMarkId = null,
+	PersistentSecretMarkId? PersistentMarkId = null,
+	RedactionFindingCategory Category = RedactionFindingCategory.Secrets);
+
+public enum RedactionFindingCategory : byte
+{
+	Secrets = 0,
+	PrivateData = 1
+}
+
+[Flags]
+public enum SecretFindingSource
+{
+	Detector = 1,
+	PersistentMark = 2,
+	SessionMark = 4,
+	GeneratedPath = 8
+}
+
+public class SecretDetectionException(
+	string message,
+	Exception? innerException = null)
+	: Exception(message, innerException);

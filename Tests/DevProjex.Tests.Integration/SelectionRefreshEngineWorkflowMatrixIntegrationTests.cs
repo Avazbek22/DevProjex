@@ -1,5 +1,5 @@
+using DevProjex.Application.Presentation;
 using DevProjex.Application.Models;
-using DevProjex.Tests.Shared.ProjectLoadWorkflow;
 
 namespace DevProjex.Tests.Integration;
 
@@ -30,32 +30,12 @@ public sealed class SelectionRefreshEngineWorkflowMatrixIntegrationTests
         if (RequiresDeferredProfileReconciliation(workflowCaseName))
         {
             workflowCase.AssertSnapshot(secondSnapshot);
-            if (workflowCaseName == "profile-stale-hidden-roots")
-            {
-                Assert.Contains(firstSnapshot.RootOptions!, option =>
-                    string.Equals(option.Name, "node_modules", StringComparison.Ordinal) && option.IsChecked);
-                Assert.DoesNotContain(secondSnapshot.RootOptions!, option =>
-                    string.Equals(option.Name, "node_modules", StringComparison.Ordinal));
-            }
             AssertDeferredProfileReconciliation(firstSnapshot, secondSnapshot, workflowCaseName);
             AssertVisibleAdvancedIgnoreOptionsCarryPositiveCounts(secondSnapshot);
 
             var reconciledMetrics = await ComputeMetricsFromSnapshotAsync(rootPath, secondSnapshot, services);
-            if (workflowCaseName != "profile-stale-hidden-roots")
-            {
-                Assert.True(
-                    firstMetrics.TreeMetrics == reconciledMetrics.TreeMetrics,
-                    $"Tree metrics changed. First roots: {DescribeSelectionOptions(firstSnapshot.RootOptions)}; second roots: {DescribeSelectionOptions(secondSnapshot.RootOptions)}; first ignore: {DescribeIgnoreOptions(firstSnapshot.IgnoreOptions)}; second ignore: {DescribeIgnoreOptions(secondSnapshot.IgnoreOptions)}.");
-                Assert.True(
-                    firstMetrics.ContentMetrics == reconciledMetrics.ContentMetrics,
-                    $"Content metrics changed. First roots: {DescribeSelectionOptions(firstSnapshot.RootOptions)}; second roots: {DescribeSelectionOptions(secondSnapshot.RootOptions)}; first ignore: {DescribeIgnoreOptions(firstSnapshot.IgnoreOptions)}; second ignore: {DescribeIgnoreOptions(secondSnapshot.IgnoreOptions)}.");
-            }
-            else
-            {
-                // Legacy selected-only profiles may reconcile stale hidden roots once the
-                // first full-state snapshot has made dynamic availability explicit.
-                Assert.NotEqual(ExportOutputMetrics.Empty, reconciledMetrics.TreeMetrics);
-            }
+            Assert.Equal(firstMetrics.TreeMetrics, reconciledMetrics.TreeMetrics);
+            Assert.Equal(firstMetrics.ContentMetrics, reconciledMetrics.ContentMetrics);
             return;
         }
 
@@ -65,23 +45,6 @@ public sealed class SelectionRefreshEngineWorkflowMatrixIntegrationTests
         var secondMetrics = await ComputeMetricsFromSnapshotAsync(rootPath, secondSnapshot, services);
         Assert.Equal(firstMetrics.TreeMetrics, secondMetrics.TreeMetrics);
         Assert.Equal(firstMetrics.ContentMetrics, secondMetrics.ContentMetrics);
-    }
-
-    [Fact]
-    public void ComputeFullRefreshSnapshot_ProfileAllRoots_ActivatesNowAvailableDotFolderToggleConsistently()
-    {
-        var rootPath = ProjectLoadWorkflowSharedWorkspace.RootPath;
-        var services = CreateServices();
-
-        var snapshot = services.Engine.ComputeFullRefreshSnapshot(
-            CreateProfileWithAllVisibleRootsAndUnavailableDotFolderContext(rootPath),
-            CancellationToken.None);
-
-        Assert.DoesNotContain(snapshot.RootOptions!, option => string.Equals(option.Name, ".cache", StringComparison.Ordinal));
-        Assert.All(
-            snapshot.RootOptions!.Where(option => !string.Equals(option.Name, ".cache", StringComparison.Ordinal)),
-            option => Assert.True(option.IsChecked));
-        Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.DotFolders && option.IsChecked);
     }
 
     public static IEnumerable<object[]> WorkflowCases()
@@ -98,10 +61,6 @@ public sealed class SelectionRefreshEngineWorkflowMatrixIntegrationTests
             CreateDefaultsContext,
             snapshot =>
             {
-                Assert.Contains(snapshot.RootOptions!, option => string.Equals(option.Name, "docs", StringComparison.Ordinal));
-                Assert.Contains(snapshot.RootOptions!, option => string.Equals(option.Name, "samples", StringComparison.Ordinal));
-                Assert.Contains(snapshot.RootOptions!, option => string.Equals(option.Name, "src", StringComparison.Ordinal));
-                Assert.All(snapshot.RootOptions!, option => Assert.True(option.IsChecked));
                 Assert.Contains(snapshot.ExtensionOptions, option => string.Equals(option.Name, ".cs", StringComparison.OrdinalIgnoreCase));
                 Assert.Contains(snapshot.ExtensionOptions, option => string.Equals(option.Name, ".json", StringComparison.OrdinalIgnoreCase));
                 Assert.Contains(snapshot.ExtensionOptions, option => string.Equals(option.Name, ".md", StringComparison.OrdinalIgnoreCase));
@@ -116,21 +75,7 @@ public sealed class SelectionRefreshEngineWorkflowMatrixIntegrationTests
             CreateIgnoreAllOffContext,
             snapshot =>
             {
-                Assert.Contains(snapshot.RootOptions!, option => string.Equals(option.Name, ".cache", StringComparison.Ordinal));
-                Assert.Contains(snapshot.RootOptions!, option => string.Equals(option.Name, "generated", StringComparison.Ordinal));
-                Assert.Contains(snapshot.RootOptions!, option => string.Equals(option.Name, "logs", StringComparison.Ordinal));
-                Assert.Contains(snapshot.RootOptions!, option => string.Equals(option.Name, "node_modules", StringComparison.Ordinal));
                 Assert.All(snapshot.IgnoreOptions, option => Assert.False(option.IsChecked));
-            }),
-        new WorkflowCase(
-            "docs-only",
-            PreparedSelectionMode.Defaults,
-            CreateDocsOnlyContext,
-            snapshot =>
-            {
-                Assert.Contains(snapshot.RootOptions!, option => string.Equals(option.Name, "docs", StringComparison.Ordinal) && option.IsChecked);
-                Assert.Contains(snapshot.RootOptions!, option => string.Equals(option.Name, "samples", StringComparison.Ordinal) && !option.IsChecked);
-                Assert.Contains(snapshot.RootOptions!, option => string.Equals(option.Name, "src", StringComparison.Ordinal) && !option.IsChecked);
             }),
         new WorkflowCase(
             "code-only-extensions",
@@ -145,24 +90,13 @@ public sealed class SelectionRefreshEngineWorkflowMatrixIntegrationTests
                 Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.EmptyFolders);
             }),
         new WorkflowCase(
-            "mixed-manual-selection",
+            "mixed-manual-ignore-selection",
             PreparedSelectionMode.Defaults,
             CreateMixedManualSelectionContext,
             snapshot =>
             {
-                Assert.Contains(snapshot.RootOptions!, option => string.Equals(option.Name, "docs", StringComparison.Ordinal) && option.IsChecked);
-                Assert.Contains(snapshot.RootOptions!, option => string.Equals(option.Name, "src", StringComparison.Ordinal) && option.IsChecked);
                 Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.DotFiles && option.IsChecked);
                 Assert.Contains(snapshot.IgnoreOptions, option => option.Id == IgnoreOptionId.EmptyFolders && option.IsChecked);
-            }),
-        new WorkflowCase(
-            "profile-stale-hidden-roots",
-            PreparedSelectionMode.Profile,
-            CreateProfileWithUnavailableRootSelectionsContext,
-            snapshot =>
-            {
-				Assert.Contains(snapshot.RootOptions!, option => string.Equals(option.Name, "docs", StringComparison.Ordinal) && !option.IsChecked);
-                Assert.DoesNotContain(snapshot.RootOptions!, option => string.Equals(option.Name, "generated", StringComparison.Ordinal));
             }),
         new WorkflowCase(
             "profile-stale-unavailable-extension",
@@ -195,7 +129,7 @@ public sealed class SelectionRefreshEngineWorkflowMatrixIntegrationTests
     }
 
     private static bool RequiresDeferredProfileReconciliation(string workflowCaseName) =>
-        workflowCaseName is "profile-stale-hidden-roots" or "profile-stale-unavailable-ignore-option";
+        workflowCaseName == "profile-stale-unavailable-ignore-option";
 
     private static SelectionRefreshContext CreateDefaultsContext(string rootPath) =>
         new(
@@ -223,14 +157,6 @@ public sealed class SelectionRefreshEngineWorkflowMatrixIntegrationTests
             IgnoreAllPreference = false
         };
 
-    private static SelectionRefreshContext CreateDocsOnlyContext(string rootPath) =>
-        CreateDefaultsContext(rootPath) with
-        {
-            AllRootFoldersChecked = false,
-            RootSelectionInitialized = true,
-            RootSelectionCache = new HashSet<string>(PathComparer.Default) { "docs" }
-        };
-
     private static SelectionRefreshContext CreateCodeOnlyExtensionsContext(string rootPath) =>
         CreateDefaultsContext(rootPath) with
         {
@@ -251,9 +177,6 @@ public sealed class SelectionRefreshEngineWorkflowMatrixIntegrationTests
 
         return CreateDefaultsContext(rootPath) with
         {
-            AllRootFoldersChecked = false,
-            RootSelectionInitialized = true,
-            RootSelectionCache = new HashSet<string>(PathComparer.Default) { "docs", "src" },
             AllExtensionsChecked = false,
             ExtensionsSelectionInitialized = true,
             ExtensionsSelectionCache = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs", ".json", ".md", ".txt" },
@@ -263,22 +186,6 @@ public sealed class SelectionRefreshEngineWorkflowMatrixIntegrationTests
             IgnoreAllPreference = false
         };
     }
-
-    private static SelectionRefreshContext CreateProfileWithUnavailableRootSelectionsContext(string rootPath) =>
-        new(
-            Path: rootPath,
-            PreparedSelectionMode: PreparedSelectionMode.Profile,
-            AllRootFoldersChecked: false,
-            AllExtensionsChecked: true,
-            RootSelectionInitialized: true,
-            RootSelectionCache: new HashSet<string>(PathComparer.Default) { ".cache", "generated", "node_modules" },
-            ExtensionsSelectionInitialized: false,
-            ExtensionsSelectionCache: new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-            IgnoreSelectionInitialized: false,
-            IgnoreSelectionCache: new HashSet<IgnoreOptionId>(),
-            IgnoreOptionStateCache: new Dictionary<IgnoreOptionId, bool>(),
-            IgnoreAllPreference: null,
-            CurrentSnapshotState: EmptySnapshotState);
 
     private static SelectionRefreshContext CreateProfileWithUnavailableExtensionSelectionsContext(string rootPath) =>
         new(
@@ -307,35 +214,6 @@ public sealed class SelectionRefreshEngineWorkflowMatrixIntegrationTests
             AllExtensionsChecked: true,
             RootSelectionInitialized: true,
             RootSelectionCache: new HashSet<string>(PathComparer.Default) { "docs" },
-            ExtensionsSelectionInitialized: false,
-            ExtensionsSelectionCache: new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-            IgnoreSelectionInitialized: true,
-            IgnoreSelectionCache: new HashSet<IgnoreOptionId>(selectedIgnoreOptions),
-            IgnoreOptionStateCache: BuildIgnoreStateCache(selectedIgnoreOptions),
-            IgnoreAllPreference: null,
-            CurrentSnapshotState: EmptySnapshotState);
-    }
-
-    private static SelectionRefreshContext CreateProfileWithAllVisibleRootsAndUnavailableDotFolderContext(string rootPath)
-    {
-        var selectedIgnoreOptions = new[] { IgnoreOptionId.DotFolders };
-
-        return new SelectionRefreshContext(
-            Path: rootPath,
-            PreparedSelectionMode: PreparedSelectionMode.Profile,
-            AllRootFoldersChecked: true,
-            AllExtensionsChecked: true,
-            RootSelectionInitialized: true,
-            RootSelectionCache: new HashSet<string>(PathComparer.Default)
-            {
-                "docs",
-                "generated",
-                "logs",
-                "node_modules",
-                "samples",
-                "src",
-                "stealth-root"
-            },
             ExtensionsSelectionInitialized: false,
             ExtensionsSelectionCache: new HashSet<string>(StringComparer.OrdinalIgnoreCase),
             IgnoreSelectionInitialized: true,
@@ -470,19 +348,12 @@ public sealed class SelectionRefreshEngineWorkflowMatrixIntegrationTests
             Assert.Equal(expected[index], actual[index]);
     }
 
-    private static string DescribeSelectionOptions(IReadOnlyList<SelectionOption>? options) =>
-        options is null
-            ? "<null>"
-            : string.Join(", ", options.Select(option => $"{option.Name}:{option.IsChecked}"));
-
-    private static string DescribeIgnoreOptions(IReadOnlyList<ResolvedIgnoreOptionState> options) =>
-        string.Join(", ", options.Select(option => $"{option.Id}:{option.IsChecked}"));
-
     private static void AssertVisibleAdvancedIgnoreOptionsCarryPositiveCounts(SelectionRefreshSnapshot snapshot)
     {
         foreach (var option in snapshot.IgnoreOptions)
         {
-            if (option.Id is IgnoreOptionId.UseGitIgnore or IgnoreOptionId.SmartIgnore)
+            if (option.Id is IgnoreOptionId.UseGitIgnore or IgnoreOptionId.SmartIgnore ||
+                ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option.Id))
                 continue;
 
             var expectedCount = GetIgnoreCount(snapshot.IgnoreOptionCounts, option.Id);

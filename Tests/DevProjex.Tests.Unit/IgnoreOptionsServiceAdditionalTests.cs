@@ -1,3 +1,6 @@
+using DevProjex.Application.Presentation;
+using DevProjex.Application.Secrets;
+
 namespace DevProjex.Tests.Unit;
 
 public sealed class IgnoreOptionsServiceAdditionalTests
@@ -7,6 +10,8 @@ public sealed class IgnoreOptionsServiceAdditionalTests
 		{
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
+				["Settings.Ignore.HideSecrets"] = "Hide secrets",
+				["Settings.Ignore.CompressCode"] = "Compress code",
 				["Settings.Ignore.UseGitIgnore"] = "Use GitIgnore",
 				["Settings.Ignore.HiddenFolders"] = "Ignore hidden folders",
 				["Settings.Ignore.HiddenFiles"] = "Ignore hidden files",
@@ -23,7 +28,7 @@ public sealed class IgnoreOptionsServiceAdditionalTests
 
 		var options = service.GetOptions();
 
-		Assert.Equal(4, options.Count);
+		Assert.Equal(5 + IgnoreOptionOrder.Count - 1, options.Count);
 	}
 
 	[Theory]
@@ -32,6 +37,7 @@ public sealed class IgnoreOptionsServiceAdditionalTests
 	[InlineData(IgnoreOptionId.HiddenFiles)]
 	[InlineData(IgnoreOptionId.DotFolders)]
 	[InlineData(IgnoreOptionId.DotFiles)]
+	[InlineData(IgnoreOptionId.HideSecrets)]
 	public void GetOptions_ContainsExpectedIds(IgnoreOptionId id)
 	{
 		var service = new IgnoreOptionsService(new LocalizationService(new StubLocalizationCatalog(CatalogData), AppLanguage.En));
@@ -47,6 +53,7 @@ public sealed class IgnoreOptionsServiceAdditionalTests
 	[InlineData(IgnoreOptionId.HiddenFiles, "Ignore hidden files")]
 	[InlineData(IgnoreOptionId.DotFolders, "Ignore dot folders")]
 	[InlineData(IgnoreOptionId.DotFiles, "Ignore dot files")]
+	[InlineData(IgnoreOptionId.HideSecrets, "Hide secrets")]
 	public void GetOptions_ReturnsLocalizedLabels(IgnoreOptionId id, string expectedLabel)
 	{
 		var service = new IgnoreOptionsService(new LocalizationService(new StubLocalizationCatalog(CatalogData), AppLanguage.En));
@@ -57,14 +64,17 @@ public sealed class IgnoreOptionsServiceAdditionalTests
 	}
 
 	[Fact]
-	// Verifies all ignore options default to checked.
-	public void GetOptions_DefaultChecked_IsTrue()
+	// Hide Secrets is intentionally opt-in; path-only exclusions keep their existing defaults.
+	public void GetOptions_UsesSafeDefaults()
 	{
 		var service = new IgnoreOptionsService(new LocalizationService(new StubLocalizationCatalog(CatalogData), AppLanguage.En));
 
 		var options = service.GetOptions();
 
-		Assert.All(options, option => Assert.True(option.DefaultChecked));
+		Assert.False(options.Single(option => option.Id == IgnoreOptionId.HideSecrets).DefaultChecked);
+		Assert.All(
+			options.Where(option => !ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option.Id)),
+			option => Assert.True(option.DefaultChecked));
 	}
 
 	[Fact]
@@ -85,9 +95,71 @@ public sealed class IgnoreOptionsServiceAdditionalTests
 
 		var options = service.GetOptions(includeGitIgnore: true);
 
-		Assert.Equal(5, options.Count);
-		Assert.Equal(IgnoreOptionId.UseGitIgnore, options[0].Id);
-		Assert.Equal("Use GitIgnore", options[0].Label);
-		Assert.True(options[0].DefaultChecked);
+		Assert.Equal(6 + IgnoreOptionOrder.Count - 1, options.Count);
+		Assert.Equal(IgnoreOptionOrder.ContentTransformations, options.Skip(0).Take(IgnoreOptionOrder.Count).Select(static option => option.Id));
+		Assert.Equal(IgnoreOptionId.UseGitIgnore, options[IgnoreOptionOrder.Count].Id);
+		Assert.Equal("Use GitIgnore", options[IgnoreOptionOrder.Count].Label);
+		Assert.True(options[IgnoreOptionOrder.Count].DefaultChecked);
+	}
+
+	[Theory]
+	[InlineData(SecretScanState.Disabled)]
+	[InlineData(SecretScanState.Pending)]
+	[InlineData(SecretScanState.Failed)]
+	public void FormatHideSecretsLabel_WithoutCompletedResult_DoesNotInventZero(SecretScanState state)
+	{
+		var service = new IgnoreOptionsService(
+			new LocalizationService(new StubLocalizationCatalog(CatalogData), AppLanguage.En));
+
+		Assert.Equal(
+			"Hide secrets",
+			service.FormatHideSecretsLabel(state, matchedCount: null, redactionCount: null));
+	}
+
+	[Fact]
+	public void FormatHideSecretsLabel_WhileScanning_StaysShortAndDoesNotInventCount()
+	{
+		var service = new IgnoreOptionsService(
+			new LocalizationService(new StubLocalizationCatalog(CatalogData), AppLanguage.En));
+
+		Assert.Equal("Hide secrets", service.FormatHideSecretsLabel(
+			SecretScanState.Scanning,
+			matchedCount: null,
+			redactionCount: null));
+	}
+
+	[Theory]
+	[InlineData(SecretScanState.Completed)]
+	[InlineData(SecretScanState.Limited)]
+	public void FormatHideSecretsLabel_WithMeasuredResult_ShowsMatchedAndHiddenCounts(
+		SecretScanState state)
+	{
+		var service = new IgnoreOptionsService(
+			new LocalizationService(new StubLocalizationCatalog(CatalogData), AppLanguage.En));
+
+		Assert.Equal(
+			"Hide secrets (4/1)",
+			service.FormatHideSecretsLabel(state, matchedCount: 4, redactionCount: 1));
+	}
+
+	[Theory]
+	[InlineData(0, 0, "Hide secrets")]
+	[InlineData(4, 4, "Hide secrets (4)")]
+	[InlineData(4, 1, "Hide secrets (4/1)")]
+	[InlineData(4, 0, "Hide secrets (4/0)")]
+	public void FormatHideSecretsLabel_AfterCompletion_ShowsMatchedAndHiddenCounts(
+		int matchedCount,
+		int redactionCount,
+		string expected)
+	{
+		var service = new IgnoreOptionsService(
+			new LocalizationService(new StubLocalizationCatalog(CatalogData), AppLanguage.En));
+
+		Assert.Equal(
+			expected,
+			service.FormatHideSecretsLabel(
+				SecretScanState.Completed,
+				matchedCount,
+				redactionCount));
 	}
 }

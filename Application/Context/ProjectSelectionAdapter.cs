@@ -2,6 +2,18 @@ namespace DevProjex.Application.Context;
 
 public static class ProjectSelectionAdapter
 {
+	public static IReadOnlyDictionary<string, bool>? GetLocalProfileExtensionStates(
+		ProjectSelectionSpec selection)
+	{
+		ArgumentNullException.ThrowIfNull(selection);
+		var profileState = selection.LocalProfileState;
+		var extensionStates = profileState?.Profile.ExtensionStates;
+		if (profileState is null || profileState.ExtensionsOverridden || extensionStates is null)
+			return null;
+
+		return new Dictionary<string, bool>(extensionStates, StringComparer.OrdinalIgnoreCase);
+	}
+
 	public static IReadOnlyCollection<IgnoreOptionId> ToIgnoreOptions(ProjectSelectionSpec selection)
 	{
 		ArgumentNullException.ThrowIfNull(selection);
@@ -9,18 +21,35 @@ public static class ProjectSelectionAdapter
 			throw new ArgumentException("The project selection must be fully resolved.", nameof(selection));
 
 		var options = new HashSet<IgnoreOptionId>();
-		switch (selection.GitMode.Value)
+		switch (GitScopeSelection.ToUnderlayMode(selection.GitMode.Value))
 		{
+			case GitFilteringMode.None:
+				break;
 			case GitFilteringMode.RespectGitIgnore:
 				options.Add(IgnoreOptionId.UseGitIgnore);
 				break;
 			case GitFilteringMode.TrackedFilesOnly:
 				options.Add(IgnoreOptionId.TrackedGitFilesOnly);
 				break;
+			default:
+				throw new ArgumentOutOfRangeException(
+					nameof(selection),
+					selection.GitMode,
+					"The Git filtering mode is invalid.");
 		}
 
 		foreach (var exclusion in selection.Exclusions)
 			options.Add(ToIgnoreOption(exclusion));
+		if (selection.HideSecrets is true)
+			options.Add(IgnoreOptionId.HideSecrets);
+		if (selection.HidePrivateData is true)
+			options.Add(IgnoreOptionId.HidePrivateData);
+		if (selection.CompressCode is true)
+			options.Add(IgnoreOptionId.CompressCode);
+		if (selection.StripComments is true)
+			options.Add(IgnoreOptionId.StripComments);
+		if (selection.StripBlankLines is true)
+			options.Add(IgnoreOptionId.StripBlankLines);
 
 		return options.OrderBy(static option => (int)option).ToArray();
 	}
@@ -33,6 +62,9 @@ public static class ProjectSelectionAdapter
 		var exclusions = new HashSet<ProjectExclusion>();
 		foreach (var option in options)
 		{
+			// Content transformations are carried as dedicated flags, never as exclusions.
+			if (ProjectPresentationCatalog.ContentTransformationOptionIds.Contains(option))
+				continue;
 			if (TryToExclusion(option, out var exclusion))
 				exclusions.Add(exclusion);
 		}
@@ -50,9 +82,16 @@ public static class ProjectSelectionAdapter
 		return new ProjectSelectionSpec(
 			Roots: ResolveNullableSelection(profile.SelectedRootFolders, profile.RootFolderStates),
 			Extensions: ResolveNullableSelection(profile.SelectedExtensions, profile.ExtensionStates),
-			SelectedPaths: profile.SelectedPaths?.ToArray() ?? [],
+			SelectedPaths: profile.SelectedPaths is { Count: > 0 }
+				? profile.SelectedPaths.ToArray()
+				: null,
 			GitMode: GitFilteringModeResolver.Resolve(profile.SelectedIgnoreOptions),
 			Exclusions: ToExclusions(profile.SelectedIgnoreOptions),
+			HideSecrets: profile.SelectedIgnoreOptions.Contains(IgnoreOptionId.HideSecrets),
+			HidePrivateData: profile.SelectedIgnoreOptions.Contains(IgnoreOptionId.HidePrivateData),
+			CompressCode: profile.SelectedIgnoreOptions.Contains(IgnoreOptionId.CompressCode),
+			StripComments: profile.SelectedIgnoreOptions.Contains(IgnoreOptionId.StripComments),
+			StripBlankLines: profile.SelectedIgnoreOptions.Contains(IgnoreOptionId.StripBlankLines),
 			ProfileSource: source);
 	}
 
@@ -80,6 +119,7 @@ public static class ProjectSelectionAdapter
 			ProjectExclusion.EmptyFolders => IgnoreOptionId.EmptyFolders,
 			ProjectExclusion.EmptyFiles => IgnoreOptionId.EmptyFiles,
 			ProjectExclusion.ExtensionlessFiles => IgnoreOptionId.ExtensionlessFiles,
+			ProjectExclusion.HideSecrets => IgnoreOptionId.HideSecrets,
 			_ => throw new ArgumentOutOfRangeException(nameof(exclusion), exclusion, null)
 		};
 
@@ -110,6 +150,9 @@ public static class ProjectSelectionAdapter
 				return true;
 			case IgnoreOptionId.ExtensionlessFiles:
 				exclusion = ProjectExclusion.ExtensionlessFiles;
+				return true;
+			case IgnoreOptionId.HideSecrets:
+				exclusion = ProjectExclusion.HideSecrets;
 				return true;
 			default:
 				exclusion = default;

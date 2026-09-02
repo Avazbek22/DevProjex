@@ -1,5 +1,3 @@
-using DevProjex.Tests.Shared.ProjectLoadWorkflow;
-
 namespace DevProjex.Tests.Integration;
 
 public sealed class HierarchicalGitIgnoreTraversalIntegrationTests
@@ -271,6 +269,104 @@ public sealed class HierarchicalGitIgnoreTraversalIntegrationTests
 		Assert.Contains("workspace/open/keep.txt", paths);
 		Assert.DoesNotContain(".tmp", scan.Value.IgnoreSection.VisibleExtensions);
 		Assert.Contains(".txt", scan.Value.IgnoreSection.VisibleExtensions);
+	}
+
+	[Fact]
+	public void CaseDistinctSiblingScopesRemainIndependentAcrossInventoryAndDirectTrees()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("Repo/.gitignore", "upper.drop\n");
+		temp.CreateFile("Repo/upper.drop", "ignored by upper scope");
+		temp.CreateFile("Repo/lower.drop", "visible in upper scope");
+		temp.CreateFile("repo/.gitignore", "lower.drop\n");
+		temp.CreateFile("repo/upper.drop", "visible in lower scope");
+		temp.CreateFile("repo/lower.drop", "ignored by lower scope");
+		if (Directory.EnumerateDirectories(temp.Path)
+		    .Select(Path.GetFileName)
+		    .Distinct(ProjectTreePathIdentity.CanonicalComparer)
+		    .Count() < 2)
+		{
+			Assert.Skip("The temporary file system is case-insensitive.");
+		}
+
+		var rules = CreateRules(enableGitIgnore: true);
+		var selectedRoots = new HashSet<string>(
+			["Repo", "repo"],
+			ProjectTreePathIdentity.CanonicalComparer);
+		var extensions = new HashSet<string>([".drop"], StringComparer.OrdinalIgnoreCase);
+		var options = new TreeFilterOptions(extensions, selectedRoots, rules);
+		var scanner = new FileSystemScanner();
+		var scan = scanner.ScanProjectWorkspace(
+			new ProjectWorkspaceScanRequest(
+				temp.Path,
+				selectedRoots,
+				rules,
+				rules,
+				new ExtensionSetInclusionPolicy(extensions),
+				CaptureTreeInventory: true,
+				IncludeDirectoryToggleProbeRoots: false,
+				IncludeControllerImpactProbeRoots: false),
+			TestContext.Current.CancellationToken);
+		var inventory = Assert.IsType<ProjectTreeInventorySnapshot>(scan.Value.TreeInventory);
+		var inventoryTree = new TreeBuilder().Build(
+			inventory,
+			options,
+			TestContext.Current.CancellationToken);
+		var directTree = new TreeBuilder().Build(
+			temp.Path,
+			options,
+			TestContext.Current.CancellationToken);
+		var inventoryPaths = FlattenRelativePaths(temp.Path, inventoryTree.Root);
+		var directPaths = FlattenRelativePaths(temp.Path, directTree.Root);
+
+		Assert.Equal(2, inventory.DiscoveredGitIgnoreMatchers.Count);
+		Assert.Equal(directPaths, inventoryPaths);
+		Assert.DoesNotContain("Repo/upper.drop", inventoryPaths);
+		Assert.Contains("Repo/lower.drop", inventoryPaths);
+		Assert.Contains("repo/upper.drop", inventoryPaths);
+		Assert.DoesNotContain("repo/lower.drop", inventoryPaths);
+	}
+
+	[Fact]
+	public void UppercaseGitIgnoreIsAcceptedOnlyWhenTheCanonicalWindowsPathResolves()
+	{
+		using var temp = new TemporaryDirectory();
+		var repositoryRoot = temp.CreateDirectory("repo");
+		temp.CreateFile("repo/.GITIGNORE", "*.drop\n");
+		temp.CreateFile("repo/value.drop", "content");
+		var acceptsWindowsAlias = OperatingSystem.IsWindows() &&
+		                          File.Exists(Path.Combine(repositoryRoot, ".gitignore"));
+		var rules = CreateRules(enableGitIgnore: true);
+		var selectedRoots = new HashSet<string>(["repo"], ProjectTreePathIdentity.CanonicalComparer);
+		var extensions = new HashSet<string>([".drop"], StringComparer.OrdinalIgnoreCase);
+		var options = new TreeFilterOptions(extensions, selectedRoots, rules);
+		var scanner = new FileSystemScanner();
+		var scan = scanner.ScanProjectWorkspace(
+			new ProjectWorkspaceScanRequest(
+				temp.Path,
+				selectedRoots,
+				rules,
+				rules,
+				new ExtensionSetInclusionPolicy(extensions),
+				CaptureTreeInventory: true,
+				IncludeDirectoryToggleProbeRoots: false,
+				IncludeControllerImpactProbeRoots: false),
+			TestContext.Current.CancellationToken);
+		var inventory = Assert.IsType<ProjectTreeInventorySnapshot>(scan.Value.TreeInventory);
+		var inventoryTree = new TreeBuilder().Build(
+			inventory,
+			options,
+			TestContext.Current.CancellationToken);
+		var directTree = new TreeBuilder().Build(
+			temp.Path,
+			options,
+			TestContext.Current.CancellationToken);
+		var inventoryPaths = FlattenRelativePaths(temp.Path, inventoryTree.Root);
+		var directPaths = FlattenRelativePaths(temp.Path, directTree.Root);
+
+		Assert.Equal(acceptsWindowsAlias ? 1 : 0, inventory.DiscoveredGitIgnoreMatchers.Count);
+		Assert.Equal(directPaths, inventoryPaths);
+		Assert.Equal(!acceptsWindowsAlias, inventoryPaths.Contains("repo/value.drop"));
 	}
 
 	private static string SeedDeepWorkspace(TemporaryDirectory temp)

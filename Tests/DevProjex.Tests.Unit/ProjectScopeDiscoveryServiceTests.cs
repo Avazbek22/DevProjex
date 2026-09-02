@@ -3,6 +3,124 @@ namespace DevProjex.Tests.Unit;
 public sealed class ProjectScopeDiscoveryServiceTests
 {
 	[Fact]
+	public void Discover_UnixWhitespaceOnlySelectedRootRemainsAProjectScope()
+	{
+		if (OperatingSystem.IsWindows())
+			return;
+
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(" /package.json", "{}");
+		var discovery = CreateDiscovery();
+
+		var context = discovery.Discover(temp.Path, [" "]);
+
+		Assert.Contains(
+			context.Scopes,
+			scope => Path.GetFileName(scope.RootPath) == " " && scope.HasProjectMarker);
+	}
+
+	[Fact]
+	public void Invalidate_TrailingSeparatorAliasRefreshesCanonicalScope()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("source.txt", "plain");
+		var discovery = CreateDiscovery();
+		var initial = discovery.Discover(temp.Path, selectedRootFolders: null);
+		Assert.False(initial.HasAnyGitIgnore);
+
+		temp.CreateFile(".gitignore", "*.cache\n");
+		discovery.Invalidate(temp.Path + Path.DirectorySeparatorChar);
+		var refreshed = discovery.Discover(temp.Path, selectedRootFolders: null);
+
+		Assert.True(refreshed.HasAnyGitIgnore);
+		Assert.NotSame(initial, refreshed);
+	}
+
+	[Fact]
+	public void Discover_WhenClockMovesBackward_DoesNotReuseStaleScopeTopology()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile("package.json", "{}");
+		var now = new DateTime(2026, 8, 20, 12, 0, 0, DateTimeKind.Utc);
+		var discovery = new ProjectScopeDiscoveryService(
+			new SmartIgnoreService([]),
+			utcNowProvider: () => now);
+		var initial = discovery.Discover(temp.Path, selectedRootFolders: null);
+		Assert.Single(initial.Scopes);
+
+		temp.CreateFile("nested/pyproject.toml", "[project]\nname = \"nested\"\n");
+		now = now.AddMinutes(-10);
+		var afterClockRollback = discovery.Discover(temp.Path, selectedRootFolders: null);
+
+		Assert.NotSame(initial, afterClockRollback);
+		Assert.Contains(
+			afterClockRollback.Scopes,
+			scope => ScopeEndsWith(scope, "nested"));
+	}
+
+	#pragma warning disable xUnit1051 // This test cancels discovery from the controlled facts provider.
+	[Fact]
+	public void Discover_CancelledDuringCandidateScanStopsBeforeInspectingEveryScope()
+	{
+		const int candidateCount = 256;
+		var rootPath = Path.GetFullPath(Path.Combine(
+			Path.GetTempPath(),
+			"DevProjex",
+			"ScopeCancellation",
+			Guid.NewGuid().ToString("N")));
+		var directories = Enumerable.Range(0, candidateCount)
+			.Select(index =>
+			{
+				var name = $"scope-{index:D3}";
+				return new ProjectRootDirectoryFact(
+					name,
+					Path.Combine(rootPath, name),
+					IsReparsePoint: false);
+			})
+			.ToArray();
+		using var cancellation = new CancellationTokenSource();
+		var inspectedCandidates = 0;
+		var factsProvider = new ProjectRootFactsProvider(
+			cacheTtl: TimeSpan.Zero,
+			cacheLimit: 0,
+			utcNowProvider: null,
+			factsBuilder: path =>
+			{
+				if (PathComparer.Default.Equals(path, rootPath))
+				{
+					return new ProjectRootFacts(
+						rootPath,
+						exists: true,
+						isAccessible: true,
+						files: [],
+						directories,
+						gitIgnoreSignature: null);
+				}
+
+				Interlocked.Increment(ref inspectedCandidates);
+				cancellation.Cancel();
+				return new ProjectRootFacts(
+					path,
+					exists: true,
+					isAccessible: true,
+					files: [new ProjectRootFileFact("package.json", ".json", IsReparsePoint: false)],
+					directories: [],
+					gitIgnoreSignature: null);
+			});
+		var discovery = new ProjectScopeDiscoveryService(
+			new SmartIgnoreService([]),
+			factsProvider);
+
+		Assert.ThrowsAny<OperationCanceledException>(() =>
+			discovery.DiscoverWithCancellation(
+				rootPath,
+				selectedRootFolders: null,
+				cancellation.Token));
+		Assert.InRange(Volatile.Read(ref inspectedCandidates), 1, candidateCount - 1);
+	}
+	#pragma warning restore xUnit1051
+
+	[Fact]
 	public async Task Discover_InvalidatedWhileFactsAreBuilding_DoesNotPublishStaleTopology()
 	{
 		using var buildStarted = new ManualResetEventSlim();
@@ -39,7 +157,14 @@ public sealed class ProjectScopeDiscoveryServiceTests
 			new SmartIgnoreService([]),
 			factsProvider);
 
-		var staleDiscovery = Task.Run(() => discovery.Discover(rootPath, selectedRootFolders: null));
+		// This test intentionally blocks the worker inside the facts builder. A dedicated
+		// thread makes the controlled race independent of ThreadPool saturation from other
+		// parallel unit tests while preserving the production publication boundary under test.
+		var staleDiscovery = Task.Factory.StartNew(
+			() => discovery.Discover(rootPath, selectedRootFolders: null),
+			TestContext.Current.CancellationToken,
+			TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
+			TaskScheduler.Default);
 		Assert.True(buildStarted.Wait(
 			TimeSpan.FromSeconds(2),
 			TestContext.Current.CancellationToken));

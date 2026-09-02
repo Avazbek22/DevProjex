@@ -7,7 +7,7 @@ internal static class GitIgnoreAncestorScopeBootstrapper
 		IgnoreRules.GitIgnoreScanContext activeContext,
 		IgnoreRules.GitIgnoreScanContext candidateContext,
 		CancellationToken cancellationToken,
-		List<ScopedGitIgnoreMatcher>? discoveredMatchers = null,
+		ScopedGitIgnoreMatcherAccumulator? discoveredMatchers = null,
 		GitIgnoreMatcherLoadSession? loadSession = null)
 	{
 		loadSession ??= new GitIgnoreMatcherLoadSession();
@@ -49,9 +49,10 @@ internal static class GitIgnoreAncestorScopeBootstrapper
 		foreach (var scopePath in scopePaths)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
-			var loadResult = loadSession.Load(
+			var loadResult = loadSession.LoadWithCancellation(
 				scopePath,
-				Path.Combine(scopePath, ".gitignore"));
+				Path.Combine(scopePath, ".gitignore"),
+				cancellationToken);
 			lastStatus = loadResult.Status;
 			if (loadResult.Status == GitIgnoreMatcherLoadStatus.ReadFailure)
 			{
@@ -66,7 +67,7 @@ internal static class GitIgnoreAncestorScopeBootstrapper
 
 			activeContext = activeContext.WithAncestorScope(matcher, normalizedScanRoot);
 			candidateContext = candidateContext.WithAncestorScope(matcher, normalizedScanRoot);
-			AddDiscoveredMatcher(discoveredMatchers, matcher);
+			discoveredMatchers?.Add(matcher);
 		}
 
 		return new GitIgnoreAncestorScopeBootstrapResult(
@@ -95,21 +96,6 @@ internal static class GitIgnoreAncestorScopeBootstrapper
 		return paths;
 	}
 
-	private static void AddDiscoveredMatcher(
-		List<ScopedGitIgnoreMatcher>? discoveredMatchers,
-		ScopedGitIgnoreMatcher matcher)
-	{
-		if (discoveredMatchers is null)
-			return;
-
-		foreach (var discovered in discoveredMatchers)
-		{
-			if (PathComparer.Default.Equals(discovered.ScopeRootPath, matcher.ScopeRootPath))
-				return;
-		}
-
-		discoveredMatchers.Add(matcher);
-	}
 }
 
 internal readonly record struct GitIgnoreAncestorScopeBootstrapResult(

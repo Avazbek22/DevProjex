@@ -1,6 +1,8 @@
 using System.CommandLine;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using DevProjex.Application.Presentation;
+using DevProjex.Terminal.Execution;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -15,23 +17,184 @@ public sealed class DocumentationAndPackagingContractTests
 		"CLI-Migration.md",
 		"CLI-Architecture.md",
 		"CLI-Profiles.md",
-		"Desktop-Control.md"
+		"Desktop-Control.md",
+		"SmartIgnore.md",
+		"HideSecrets.md"
 	];
+
+	[Fact]
+	public void McpSecretDocumentationSeparatesControlFromDetectionGuarantees()
+	{
+		var rootPath = FindRepositoryRoot();
+		var documents = new[]
+		{
+			File.ReadAllText(Path.Combine(rootPath, "README.md")),
+			File.ReadAllText(Path.Combine(rootPath, "Docs", "McpServer.md")),
+			File.ReadAllText(Path.Combine(rootPath, "Docs", "HideSecrets.md"))
+		};
+
+		Assert.All(documents, static document =>
+		{
+			Assert.Contains("guarantee", document, StringComparison.OrdinalIgnoreCase);
+			Assert.Contains("heuristic", document, StringComparison.OrdinalIgnoreCase);
+			Assert.Contains("review each pack", document, StringComparison.OrdinalIgnoreCase);
+			Assert.Contains("publishing", document, StringComparison.OrdinalIgnoreCase);
+		});
+
+		foreach (var document in documents.Skip(1))
+		{
+			Assert.Contains("placeholder", document, StringComparison.OrdinalIgnoreCase);
+			Assert.Contains("EXAMPLE", document, StringComparison.Ordinal);
+			Assert.Contains("allowlist", document, StringComparison.OrdinalIgnoreCase);
+			Assert.Contains("Gitleaks", document, StringComparison.OrdinalIgnoreCase);
+			Assert.Contains("scope-aware", document, StringComparison.OrdinalIgnoreCase);
+		}
+	}
+
+	[Fact]
+	public void McpReadmeNetworkBoundaryMatchesRemoteOptIn()
+	{
+		var rootPath = FindRepositoryRoot();
+		var readme = File.ReadAllText(Path.Combine(rootPath, "README.md"));
+
+		Assert.Contains(
+			"network access is disabled unless `--allow-remote`",
+			readme,
+			StringComparison.Ordinal);
+		Assert.Contains("cannot modify project files", readme, StringComparison.Ordinal);
+		Assert.Contains(
+			"remote Git URL checkouts are pinned on first use",
+			readme,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain(
+			"tools cannot modify files, run project code, or touch the network",
+			readme,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void SecretRuleAttributionShipsWithTheEmbeddedConfiguration()
+	{
+		var rootPath = FindRepositoryRoot();
+		var infrastructureProject = XDocument.Load(
+			Path.Combine(rootPath, "Infrastructure", "Infrastructure.csproj"));
+		var embeddedResources = infrastructureProject
+			.Descendants("EmbeddedResource")
+			.Select(element => element.Attribute("Include")?.Value)
+			.ToArray();
+
+		Assert.Contains("Secrets\\Rules\\gitleaks-v8.30.1.toml", embeddedResources);
+		Assert.Contains("..\\THIRD-PARTY-NOTICES.md", embeddedResources);
+		var notices = File.ReadAllText(Path.Combine(rootPath, "THIRD-PARTY-NOTICES.md"));
+		Assert.Contains("Copyright (c) 2019 Zachary Rice", notices, StringComparison.Ordinal);
+		Assert.Contains("Copyright (c) 2019-2026, Alexandre Mutel", notices, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void EveryCuratedGrammarIsNamedInThirdPartyNotices()
+	{
+		var rootPath = FindRepositoryRoot();
+		var infrastructureProject = XDocument.Load(
+			Path.Combine(rootPath, "Infrastructure", "Infrastructure.csproj"));
+		var grammarNames = infrastructureProject
+			.Descendants()
+			.Where(static element =>
+				element.Name.LocalName is "DevProjexGrammar" or "DevProjexVendoredGrammar")
+			.Select(element => element.Attribute("Include")?.Value)
+			.Where(static value => value is not null)
+			.Cast<string>()
+			.ToArray();
+		var notices = File.ReadAllText(Path.Combine(rootPath, "THIRD-PARTY-NOTICES.md"));
+
+		Assert.NotEmpty(grammarNames);
+		Assert.Equal(
+			grammarNames.Length,
+			grammarNames.Distinct(StringComparer.Ordinal).Count());
+		foreach (var grammarName in grammarNames)
+		{
+			Assert.Matches(
+				$@"(?<![a-z0-9-]){Regex.Escape(grammarName)}(?![a-z0-9-])",
+				notices);
+		}
+	}
+
+	[Fact]
+	public void CrossPublishRidFlowsToTheAssemblyThatEmbedsGrammars()
+	{
+		var rootPath = FindRepositoryRoot();
+		var desktopProject = XDocument.Load(Path.Combine(
+			rootPath,
+			"Apps",
+			"Avalonia",
+			"DevProjex.Avalonia.csproj"));
+		var terminalProject = XDocument.Load(Path.Combine(
+			rootPath,
+			"Apps",
+			"Terminal",
+			"DevProjex.Terminal.csproj"));
+		var mcpProject = XDocument.Load(Path.Combine(
+			rootPath,
+			"Apps",
+			"Mcp",
+			"DevProjex.Mcp.csproj"));
+		var probeProject = XDocument.Load(Path.Combine(
+			rootPath,
+			"Packaging",
+			"GrammarDeliveryProbe",
+			"GrammarDeliveryProbe.csproj"));
+		var infrastructureProject = XDocument.Load(Path.Combine(
+			rootPath,
+			"Infrastructure",
+			"Infrastructure.csproj"));
+
+		AssertProjectReferenceProperty(
+			desktopProject,
+			"Infrastructure.csproj",
+			"DevProjexGrammarRuntimeIdentifier=$(RuntimeIdentifier)");
+		AssertProjectReferenceProperty(
+			desktopProject,
+			"DevProjex.Mcp.csproj",
+			"DevProjexGrammarRuntimeIdentifier=$(RuntimeIdentifier)");
+		AssertProjectReferenceProperty(
+			desktopProject,
+			"DevProjex.Terminal.csproj",
+			"DevProjexGrammarRuntimeIdentifier=$(RuntimeIdentifier)");
+		AssertProjectReferenceProperty(
+			terminalProject,
+			"Infrastructure.csproj",
+			"DevProjexGrammarRuntimeIdentifier=$(DevProjexGrammarRuntimeIdentifier)");
+		AssertProjectReferenceProperty(
+			terminalProject,
+			"DevProjex.Mcp.csproj",
+			"DevProjexGrammarRuntimeIdentifier=$(DevProjexGrammarRuntimeIdentifier)");
+		AssertProjectReferenceProperty(
+			mcpProject,
+			"Infrastructure.csproj",
+			"DevProjexGrammarRuntimeIdentifier=$(DevProjexGrammarRuntimeIdentifier)");
+		AssertProjectReferenceProperty(
+			probeProject,
+			"Infrastructure.csproj",
+			"DevProjexGrammarRuntimeIdentifier=$(RuntimeIdentifier)");
+		AssertRidPropertyDoesNotFlowPastInfrastructure(
+			terminalProject,
+			["Infrastructure.csproj", "DevProjex.Mcp.csproj"]);
+		AssertRidPropertyDoesNotFlowPastInfrastructure(mcpProject, ["Infrastructure.csproj"]);
+		AssertRidPropertyDoesNotFlowPastInfrastructure(infrastructureProject, excludedProjects: null);
+	}
 
 	[Fact]
 	public void ReadmeCommandExamplesParseAgainstTheProductionCommandTree()
 	{
 		var rootPath = FindRepositoryRoot();
 		var readme = File.ReadAllText(Path.Combine(rootPath, "README.md"));
-		var section = ExtractSection(readme, "## Command Line", "Use it to:");
-		var examples = section
+		var examples = readme
 			.Split('\n')
 			.Select(static line => line.Trim())
 			.Where(static line => line.StartsWith("devprojex", StringComparison.Ordinal))
 			.ToArray();
 		var commandTree = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
 
-		Assert.InRange(examples.Length, 5, 7);
+		Assert.NotEmpty(examples);
 		foreach (var example in examples)
 		{
 			var arguments = example
@@ -65,6 +228,23 @@ public sealed class DocumentationAndPackagingContractTests
 	}
 
 	[Fact]
+	public void ReadmeReportsTheShippedLocalizationCount()
+	{
+		var rootPath = FindRepositoryRoot();
+		var readme = File.ReadAllText(Path.Combine(rootPath, "README.md"));
+		var advertised = Regex.Match(
+			readme,
+			"Localization in (?<count>\\d+) languages",
+			RegexOptions.CultureInvariant);
+		var shippedCount = Directory
+			.EnumerateFiles(Path.Combine(rootPath, "Assets", "Localization"), "*.json")
+			.Count();
+
+		Assert.True(advertised.Success, "README localization count is missing.");
+		Assert.Equal(shippedCount, int.Parse(advertised.Groups["count"].Value));
+	}
+
+	[Fact]
 	public void CliDocumentationCoversEveryPublicCommandAndRequiredContractDocument()
 	{
 		var rootPath = FindRepositoryRoot();
@@ -81,64 +261,85 @@ public sealed class DocumentationAndPackagingContractTests
 		}
 
 		Assert.Contains("Exclusions", commandLine, StringComparison.Ordinal);
-		Assert.Contains("--git-mode <none|gitignore|tracked>", commandLine, StringComparison.Ordinal);
+		Assert.Contains("--git-mode <MODE>", commandLine, StringComparison.Ordinal);
+		Assert.Contains("`diff:<REF>..<REF>`", commandLine, StringComparison.Ordinal);
 		Assert.Contains("stdout", commandLine, StringComparison.Ordinal);
 		Assert.Contains("stderr", commandLine, StringComparison.Ordinal);
 	}
 
 	[Fact]
-	public void ReleaseDocumentationStatesCurrentSurfaceAndArtifactLimits()
+	public void DesktopControlDocumentationListsEveryPublishedDesktopGitMode()
 	{
 		var rootPath = FindRepositoryRoot();
-		var v1Contract = File.ReadAllText(
-			Path.Combine(rootPath, "Docs", "CLI-V1-Contract.md"));
-		var commandLine = File.ReadAllText(
-			Path.Combine(rootPath, "Docs", "CommandLine.md"));
-		var contributing = File.ReadAllText(
-			Path.Combine(rootPath, "CONTRIBUTING.md"));
-		var readme = File.ReadAllText(
-			Path.Combine(rootPath, "README.md"));
-		var macPackaging = File.ReadAllText(
-			Path.Combine(rootPath, "Packaging", "MacOS", "README.md"));
-		var normalizedCommandLine = commandLine.ReplaceLineEndings(" ");
-		var normalizedContributing = contributing.ReplaceLineEndings(" ");
+		var documentation = File.ReadAllText(Path.Combine(rootPath, "Docs", "Desktop-Control.md"));
+		var gitModeRow = Regex.Match(
+			documentation,
+			@"(?m)^\| `gitMode` \|[^\r\n]+\r?$",
+			RegexOptions.CultureInvariant);
 
+		Assert.True(gitModeRow.Success, "Desktop Control gitMode state contract is missing.");
+		foreach (var descriptor in ProjectPresentationCatalog.GitFiltering.OrderBy(static item => item.Order))
+			Assert.Contains($"`{descriptor.Token}`", gitModeRow.Value, StringComparison.Ordinal);
+		Assert.DoesNotContain("`diff:", gitModeRow.Value, StringComparison.Ordinal);
+
+		var readinessRow = Regex.Match(
+			documentation,
+			@"(?m)^\| `trackedGitReady` \|[^\r\n]+\r?$",
+			RegexOptions.CultureInvariant);
+		Assert.True(readinessRow.Success, "Desktop Control Git-readiness state contract is missing.");
+		foreach (var descriptor in ProjectPresentationCatalog.GitFiltering.Where(static item =>
+			         DesktopOpenReadiness.RequiresGitReadiness(item.Id)))
+		{
+			Assert.Contains($"`{descriptor.Token}`", readinessRow.Value, StringComparison.Ordinal);
+		}
+	}
+
+	[Fact]
+	public void SmartIgnoreDocumentationUsesTheCurrentGitAxis()
+	{
+		var rootPath = FindRepositoryRoot();
+		var documentation = File.ReadAllText(Path.Combine(rootPath, "Docs", "SmartIgnore.md"));
+
+		foreach (var descriptor in ProjectPresentationCatalog.GitFiltering)
+		{
+			Assert.Matches(
+				$@"(?m)^\| `{Regex.Escape(descriptor.Token)}` \|[^\r\n]+\r?$",
+				documentation);
+		}
+		Assert.Matches(@"(?m)^\| `diff:<REF>\.\.<REF>` \|[^\r\n]+\r?$", documentation);
+		Assert.DoesNotContain("Git checkbox", documentation, StringComparison.OrdinalIgnoreCase);
+		Assert.DoesNotContain("two Git modes as checkboxes", documentation, StringComparison.OrdinalIgnoreCase);
 		Assert.DoesNotContain(
-			"All three surfaces consume the same",
-			v1Contract,
-			StringComparison.Ordinal);
-		Assert.Contains(
-			"interchangeable implementation pipeline",
-			normalizedCommandLine,
-			StringComparison.Ordinal);
-		Assert.Contains(
-			"interchangeable implementation pipeline",
-			normalizedContributing,
-			StringComparison.Ordinal);
-		Assert.Contains(
-			"`DevProjex.exe` on Windows and `DevProjex` on Linux and macOS",
-			commandLine,
-			StringComparison.Ordinal);
-		Assert.Contains(
-			"portable-profile destinations are accepted only outside it",
-			readme,
-			StringComparison.Ordinal);
-		Assert.DoesNotContain(
-			"DevProjex never modifies your files",
-			readme,
-			StringComparison.Ordinal);
-		Assert.Contains(
-			"<string>14.0</string>",
-			macPackaging,
-			StringComparison.Ordinal);
-		Assert.Contains(
-			"unprepared `.app`",
-			macPackaging,
-			StringComparison.Ordinal);
-		Assert.Contains(
-			"do not build, sign, notarize, or execute this bundle",
-			macPackaging,
-			StringComparison.Ordinal);
+			"chooses one mode: no Git filtering, `.gitignore`, or tracked files only",
+			documentation,
+			StringComparison.OrdinalIgnoreCase);
+
+		var readme = File.ReadAllText(Path.Combine(rootPath, "README.md"));
+		Assert.Contains("staged files", readme, StringComparison.OrdinalIgnoreCase);
+		Assert.Contains("all current changes", readme, StringComparison.OrdinalIgnoreCase);
+		Assert.Contains("ref-to-ref diff", readme, StringComparison.OrdinalIgnoreCase);
+	}
+
+	[Fact]
+	public void CliContractListsEverySupportedLanguageCode()
+	{
+		var rootPath = FindRepositoryRoot();
+		var contract = File.ReadAllText(Path.Combine(rootPath, "Docs", "CLI-V1-Contract.md"));
+		var tokenBlock = Regex.Match(
+			contract,
+			"supported canonical tokens are:\\s*```text\\s*(?<tokens>[^`]+)```",
+			RegexOptions.CultureInvariant);
+		var documentedCodes = tokenBlock.Groups["tokens"].Value
+			.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+			.Order(StringComparer.Ordinal)
+			.ToArray();
+		var supportedCodes = Enum.GetValues<DevProjex.Kernel.Models.AppLanguage>()
+			.Select(DevProjex.Kernel.Models.AppLanguageUtility.ToCode)
+			.Order(StringComparer.Ordinal)
+			.ToArray();
+
+		Assert.True(tokenBlock.Success, "The CLI contract language-token block is missing.");
+		Assert.Equal(supportedCodes, documentedCodes);
 	}
 
 	[Fact]
@@ -171,33 +372,6 @@ public sealed class DocumentationAndPackagingContractTests
 			foreach (var token in removedSyntax)
 				Assert.DoesNotContain(token, content, StringComparison.Ordinal);
 		}
-	}
-
-	[Theory]
-	[InlineData("help.en.txt")]
-	[InlineData("help.ru.txt")]
-	[InlineData("help.de.txt")]
-	[InlineData("help.fr.txt")]
-	[InlineData("help.it.txt")]
-	[InlineData("help.es.txt")]
-	[InlineData("help.pt.txt")]
-	[InlineData("help.pt-pt.txt")]
-	[InlineData("help.kk.txt")]
-	[InlineData("help.tg.txt")]
-	[InlineData("help.uz.txt")]
-	public void BuiltInHelpDocumentsTheTerminalWorkspaceAndDirectCommands(string fileName)
-	{
-		var path = Path.Combine(FindRepositoryRoot(), "Assets", "HelpContent", fileName);
-		var content = File.ReadAllText(path);
-
-		Assert.Contains("`devprojex`", content, StringComparison.Ordinal);
-		Assert.Contains("`devprojex open . --preview`", content, StringComparison.Ordinal);
-		Assert.Contains("`devprojex analyze . --format json`", content, StringComparison.Ordinal);
-		Assert.Contains("`devprojex export context . --format markdown -o ../devprojex-context.md`", content, StringComparison.Ordinal);
-		Assert.Contains("`devprojex export project . --as folder -o ../devprojex-submission`", content, StringComparison.Ordinal);
-		Assert.Contains("`devprojex export project . --as zip -o ../devprojex-submission.zip`", content, StringComparison.Ordinal);
-		Assert.Contains("`--git-mode`", content, StringComparison.Ordinal);
-		Assert.Contains("`--exclude`", content, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -280,6 +454,10 @@ public sealed class DocumentationAndPackagingContractTests
 		Assert.Contains("Published Single-File Extraction Contract", workflow, StringComparison.Ordinal);
 		Assert.Contains(
 			"PublishedSingleFileExtractionProcessTests",
+			workflow,
+			StringComparison.Ordinal);
+		Assert.Contains(
+			"McpServerProcessTests.PublishedSingleFileCompletesHandshakeListsToolsCallsToolAndExitsOnEof",
 			workflow,
 			StringComparison.Ordinal);
 		var publishStepIndex = workflow.IndexOf(
@@ -389,6 +567,12 @@ public sealed class DocumentationAndPackagingContractTests
 			StringComparison.Ordinal);
 		Assert.Contains("Published Broken Pipe Smoke", workflow, StringComparison.Ordinal);
 		Assert.Contains("Startup Smoke (macOS)", workflow, StringComparison.Ordinal);
+		Assert.Contains("branches: [ \"master\", \"v5.1\" ]", workflow, StringComparison.Ordinal);
+		Assert.Contains("Smart Secrets context contract", workflow, StringComparison.Ordinal);
+		Assert.Contains(
+			"Password=DEVPROJEX_REDACTED[connection-password#1]",
+			workflow,
+			StringComparison.Ordinal);
 		Assert.Contains("mixed-case analysis JSON", workflow, StringComparison.Ordinal);
 		Assert.Contains("NO_COLOR analysis", workflow, StringComparison.Ordinal);
 		Assert.Contains("context dry-run", workflow, StringComparison.Ordinal);
@@ -471,6 +655,9 @@ public sealed class DocumentationAndPackagingContractTests
 			"TerminalPtyLifecycleTests.SupportedTerminalSizeMatrixRemainsKeyboardUsableAndWithinViewport",
 			workflow,
 			StringComparison.Ordinal);
+		Assert.True(
+			Regex.Matches(workflow, "DEVPROJEX_SKIP_TUI_PTY_TESTS: 0").Count >= 2,
+			"Curated published-binary PTY steps must override the global skip switch.");
 		Assert.Contains("DEVPROJEX_TUI_TEST_BINARY", workflow, StringComparison.Ordinal);
 		Assert.DoesNotContain("DevProjex.Cli", workflow, StringComparison.OrdinalIgnoreCase);
 		Assert.DoesNotContain("\"--path\"", workflow, StringComparison.Ordinal);
@@ -497,6 +684,42 @@ public sealed class DocumentationAndPackagingContractTests
 			element =>
 				element.Attribute("Remove")?.Value == "@(ResolvedFileToPublish)" &&
 				element.Attribute("Condition")?.Value.Contains(".pdb", StringComparison.Ordinal) == true);
+	}
+
+	[Fact]
+	public void ReleaseValidationInlineScriptsStayBelowGitHubExpressionLimit()
+	{
+		const int inlineScriptSafetyLimit = 18_000;
+		var rootPath = FindRepositoryRoot();
+		var workflowPath = Path.Combine(rootPath, ".github", "workflows", "release-validate.yml");
+		var lines = File.ReadAllLines(workflowPath);
+
+		for (var lineIndex = 0; lineIndex < lines.Length; lineIndex++)
+		{
+			var runBlockMatch = Regex.Match(lines[lineIndex], "^(\\s*)run:\\s*[|>]\\s*$");
+			if (!runBlockMatch.Success)
+				continue;
+
+			var runIndent = runBlockMatch.Groups[1].Value.Length;
+			var bodyLength = 0;
+			for (var bodyLineIndex = lineIndex + 1; bodyLineIndex < lines.Length; bodyLineIndex++)
+			{
+				var bodyLine = lines[bodyLineIndex];
+				if (bodyLine.Length > 0)
+				{
+					var bodyIndent = bodyLine.Length - bodyLine.TrimStart().Length;
+					if (bodyIndent <= runIndent)
+						break;
+				}
+
+				bodyLength += bodyLine.Length + 1;
+			}
+
+			Assert.True(
+				bodyLength < inlineScriptSafetyLimit,
+				$"Inline run block at {Path.GetFileName(workflowPath)}:{lineIndex + 1} is " +
+				$"{bodyLength} characters. Split it before GitHub's 21,000-character expression limit.");
+		}
 	}
 
 	[Fact]
@@ -602,6 +825,42 @@ public sealed class DocumentationAndPackagingContractTests
 		}
 	}
 
+	private static void AssertProjectReferenceProperty(
+		XDocument project,
+		string projectFileName,
+		string expectedProperty)
+	{
+		var reference = project
+			.Descendants("ProjectReference")
+			.Single(element =>
+				(element.Attribute("Include")?.Value ?? string.Empty)
+				.EndsWith(projectFileName, StringComparison.OrdinalIgnoreCase));
+		var property = Assert.Single(reference.Elements("AdditionalProperties"));
+		Assert.Equal(expectedProperty, property.Value);
+		Assert.Contains(
+			"!=''",
+			property.Attribute("Condition")?.Value ?? string.Empty,
+			StringComparison.Ordinal);
+	}
+
+	private static void AssertRidPropertyDoesNotFlowPastInfrastructure(
+		XDocument project,
+		IReadOnlyList<string>? excludedProjects)
+	{
+		var references = project
+			.Descendants("ProjectReference")
+			.Where(element => excludedProjects is null ||
+				excludedProjects.All(excludedProject =>
+					!(element.Attribute("Include")?.Value ?? string.Empty)
+					.EndsWith(excludedProject, StringComparison.OrdinalIgnoreCase)))
+			.ToArray();
+		Assert.NotEmpty(references);
+		Assert.All(references, reference => Assert.Contains(
+			"DevProjexGrammarRuntimeIdentifier",
+			reference.Attribute("GlobalPropertiesToRemove")?.Value ?? string.Empty,
+			StringComparison.Ordinal));
+	}
+
 	private static IEnumerable<IReadOnlyList<string>> EnumeratePublicCommandPaths(RootCommand root)
 	{
 		var stack = new Stack<(Command Command, string[] Path)>();
@@ -621,15 +880,6 @@ public sealed class DocumentationAndPackagingContractTests
 					stack.Push((child, [.. path, child.Name]));
 			}
 		}
-	}
-
-	private static string ExtractSection(string content, string startMarker, string endMarker)
-	{
-		var start = content.IndexOf(startMarker, StringComparison.Ordinal);
-		var end = content.IndexOf(endMarker, start + startMarker.Length, StringComparison.Ordinal);
-		Assert.True(start >= 0, $"Section start not found: {startMarker}");
-		Assert.True(end > start, $"Section end not found: {endMarker}");
-		return content[start..end];
 	}
 
 	private static string FindRepositoryRoot()

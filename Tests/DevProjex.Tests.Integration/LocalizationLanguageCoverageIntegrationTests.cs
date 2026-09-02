@@ -26,6 +26,38 @@ public sealed class LocalizationLanguageCoverageIntegrationTests
         }
     }
 
+    [Fact]
+    public void EveryAppLanguage_ResolvesItsOwnEmbeddedResources()
+    {
+        var root = FindRepositoryRoot();
+        var catalog = new JsonLocalizationCatalog();
+        var helpProvider = new HelpContentProvider(DesktopPlatform.Windows);
+
+        foreach (var language in Enum.GetValues<AppLanguage>())
+        {
+            var code = AppLanguageUtility.ToCode(language);
+            var localizationPath = Path.Combine(root, "Assets", "Localization", $"{code}.json");
+            var expectedLocalization = JsonSerializer.Deserialize<Dictionary<string, string>>(
+                File.ReadAllText(localizationPath))!;
+            var actualLocalization = catalog.Get(language);
+
+            Assert.Equal(expectedLocalization.Count, actualLocalization.Count);
+            foreach (var (key, expectedValue) in expectedLocalization)
+            {
+                Assert.True(
+                    actualLocalization.TryGetValue(key, out var actualValue),
+                    $"{code}.json/{key} was not loaded for {language}.");
+                Assert.Equal(expectedValue, actualValue);
+            }
+
+            var helpPath = Path.Combine(root, "Assets", "HelpContent", $"help.{code}.txt");
+            var expectedHelp = DesktopShortcutTextFormatter.Format(
+                File.ReadAllText(helpPath),
+                DesktopPlatform.Windows);
+            Assert.Equal(expectedHelp, helpProvider.GetHelpBody(language));
+        }
+    }
+
     [Theory]
     [InlineData(AppLanguage.Es, "Aplicar configuración", "Acceso denegado")]
     [InlineData(AppLanguage.Pt, "Aplicar configurações", "Acesso negado")]
@@ -119,9 +151,19 @@ public sealed class LocalizationLanguageCoverageIntegrationTests
                 "LanguageItMenuItem",
                 "LanguageTgMenuItem",
                 "LanguageUzMenuItem",
-                "LanguageKkMenuItem"
+                "LanguageKkMenuItem",
+                "LanguageZhCnMenuItem",
+                "LanguageZhTwMenuItem",
+                "LanguageJaMenuItem",
+                "LanguageKoMenuItem",
+                "LanguageTrMenuItem",
+                "LanguageUkMenuItem",
+                "LanguagePlMenuItem",
+                "LanguageViMenuItem",
+                "LanguageIdMenuItem"
             ],
             languageItems.Select(static item => item.Name));
+        Assert.Equal(20, languageItems.Length);
         Assert.Equal("Español", languageItems[2].Header);
         Assert.Equal("Português (Brasil)", languageItems[3].Header);
         Assert.Equal("Português (Portugal)", languageItems[4].Header);

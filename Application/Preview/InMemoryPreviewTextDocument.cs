@@ -7,10 +7,14 @@ public sealed class InMemoryPreviewTextDocument : IPreviewTextDocument
     private readonly int _lineCount;
     private readonly int _maxLineLength;
 
-    public InMemoryPreviewTextDocument(string? text, IReadOnlyList<PreviewDocumentSection>? sections = null)
+    public InMemoryPreviewTextDocument(
+		string? text,
+		IReadOnlyList<PreviewDocumentSection>? sections = null,
+		IReadOnlyList<PreviewRedactionSpan>? redactions = null)
     {
         _text = text ?? string.Empty;
         Sections = sections is { Count: > 0 } ? sections.ToArray() : Array.Empty<PreviewDocumentSection>();
+		Redactions = redactions is { Count: > 0 } ? redactions.ToArray() : Array.Empty<PreviewRedactionSpan>();
         (_lineCount, _maxLineLength) = BuildLineMetadata(_text, _lineStarts);
     }
 
@@ -22,7 +26,14 @@ public sealed class InMemoryPreviewTextDocument : IPreviewTextDocument
 
     public IReadOnlyList<PreviewDocumentSection> Sections { get; }
 
+	public IReadOnlyList<PreviewRedactionSpan> Redactions { get; }
+
     public string GetFullText() => _text;
+
+	public ValueTask WriteToAsync(
+		Stream destination,
+		CancellationToken cancellationToken = default) =>
+		PreviewTextStreamWriter.WriteAsync(destination, _text, cancellationToken);
 
     public string GetLineText(int lineNumber)
     {
@@ -59,6 +70,27 @@ public sealed class InMemoryPreviewTextDocument : IPreviewTextDocument
 
         return builder.ToString();
     }
+
+	public void VisitLines(
+		int firstLine,
+		int lastLine,
+		PreviewTextLineVisitor visitor,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(visitor);
+		if (!PreviewTextLineRange.TryNormalize(LineCount, firstLine, lastLine, out var first, out var last))
+			return;
+
+		for (var lineNumber = first; lineNumber <= last; lineNumber++)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+			var line = _text.Length == 0
+				? ReadOnlySpan<char>.Empty
+				: GetLineSlice(_text, _lineStarts, lineNumber - 1);
+			if (!visitor(lineNumber, line))
+				return;
+		}
+	}
 
     public void Dispose()
     {

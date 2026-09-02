@@ -4,8 +4,11 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.VisualTree;
 using DevProjex.Avalonia.Controls;
+using DevProjex.Avalonia.Coordinators;
 using DevProjex.Infrastructure.RecentProjects;
 using DevProjex.Kernel.Abstractions;
+using System.Reflection;
+using System.Text.Json;
 
 namespace DevProjex.Tests.UI;
 
@@ -186,6 +189,74 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
                         .GetVisualAncestors()
                         .Select(visual =>
                             $"{visual.GetType().Name} '{(visual as Control)?.Name}': IsVisible={visual.IsVisible}")));
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(window);
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task TreeChevron_HasAccessibleHitTargetWithoutGrowingItsGlyph()
+    {
+        var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(window);
+            var rootNode = Assert.Single(viewModel.TreeNodes);
+            rootNode.IsExpanded = true;
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 6);
+
+            var folderNode = rootNode.Children.Single(
+                node => string.Equals(
+                    node.DisplayName,
+                    "src",
+                    StringComparison.Ordinal));
+            folderNode.IsExpanded = false;
+            folderNode.IsChecked = false;
+            folderNode.IsSelected = false;
+
+            var chevron = Assert.Single(
+                window.GetVisualDescendants().OfType<ToggleButton>(),
+                control =>
+                    control.Name == "PART_ExpandCollapseChevron" &&
+                    ReferenceEquals(control.DataContext, folderNode));
+            var glyph = Assert.Single(
+                chevron.GetVisualDescendants()
+                    .OfType<global::Avalonia.Controls.Shapes.Path>(),
+                path => path.Name == "ChevronPath");
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 4);
+
+            var targetBounds = UiTestDriver.GetBoundsInWindow(chevron, window);
+            var glyphBounds = UiTestDriver.GetBoundsInWindow(glyph, window);
+            Assert.InRange(targetBounds.Width, 23.5, 24.5);
+            Assert.InRange(targetBounds.Height, 23.5, 24.5);
+            Assert.InRange(glyphBounds.Width, 5.5, 6.5);
+            Assert.InRange(glyphBounds.Height, 11.5, 12.5);
+
+            var paddedClickPoint = new Point(
+                targetBounds.Left + 2,
+                targetBounds.Center.Y);
+            Assert.True(paddedClickPoint.X < glyphBounds.Left);
+
+            window.MouseMove(paddedClickPoint, RawInputModifiers.None);
+            window.MouseDown(
+                paddedClickPoint,
+                MouseButton.Left,
+                RawInputModifiers.LeftMouseButton);
+            window.MouseUp(
+                paddedClickPoint,
+                MouseButton.Left,
+                RawInputModifiers.None);
+
+            await UiTestDriver.WaitForConditionAsync(
+                window,
+                () => folderNode.IsExpanded,
+                "tree folder to expand from the padded chevron hit target");
+
+            Assert.False(folderNode.IsChecked);
+            Assert.False(folderNode.IsSelected);
         }
         finally
         {
@@ -426,6 +497,82 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
     }
 
     [AvaloniaFact]
+    public async Task AnimationMenu_StatusAndToolPreferences_PersistAcrossWindows()
+    {
+        var appDataPath = Path.Combine(
+            workspace.Project.AppDataPath,
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(appDataPath);
+        var firstWindow = await UiTestDriver.CreateLoadedMainWindowAsync(
+            workspace.Project,
+            appDataPathOverride: appDataPath);
+
+        try
+        {
+            var viewModel = UiTestDriver.GetViewModel(firstWindow);
+            var animationsMenu = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(
+                firstWindow,
+                "AnimationsMenuItem");
+            var statusMenu = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(
+                firstWindow,
+                "StatusMetricsAnimationMenuItem");
+            var toolMenu = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(
+                firstWindow,
+                "ToolAnimationMenuItem");
+
+            Assert.Equal("Animations", animationsMenu.Header);
+            Assert.True(viewModel.IsStatusMetricsAnimationEnabled);
+            Assert.True(viewModel.IsToolAnimationEnabled);
+
+            await UiTestDriver.RaiseMenuItemClickAsync(statusMenu);
+            await UiTestDriver.RaiseMenuItemClickAsync(toolMenu);
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+
+            Assert.False(viewModel.IsStatusMetricsAnimationEnabled);
+            Assert.False(viewModel.IsToolAnimationEnabled);
+            Assert.False(Assert.IsType<CheckBox>(statusMenu.Header).IsChecked);
+            Assert.False(Assert.IsType<CheckBox>(toolMenu.Header).IsChecked);
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(firstWindow, cleanupAppData: false);
+        }
+
+        var secondWindow = await UiTestDriver.CreateLoadedMainWindowAsync(
+            workspace.Project,
+            appDataPathOverride: appDataPath);
+        try
+        {
+            var restored = UiTestDriver.GetViewModel(secondWindow);
+            Assert.False(restored.IsStatusMetricsAnimationEnabled);
+            Assert.False(restored.IsToolAnimationEnabled);
+
+            var resetMethod = typeof(MainWindow).GetMethod(
+                "ResetThemeSettings",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(resetMethod);
+            resetMethod.Invoke(secondWindow, null);
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 2);
+
+            Assert.True(restored.IsTreeExpansionAnimationEnabled);
+            Assert.True(restored.IsStatusMetricsAnimationEnabled);
+            Assert.True(restored.IsToolAnimationEnabled);
+            Assert.False(restored.IsCompactMode);
+            using var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(
+                appDataPath,
+                "DevProjex",
+                "user-settings.json")));
+            var persisted = document.RootElement.GetProperty("viewSettings");
+            Assert.True(persisted.GetProperty("isStatusMetricsAnimationEnabled").GetBoolean());
+            Assert.True(persisted.GetProperty("isToolAnimationEnabled").GetBoolean());
+        }
+        finally
+        {
+            await UiTestDriver.CloseWindowAsync(secondWindow);
+        }
+    }
+
+    [AvaloniaFact]
     public async Task RecentProjects_AreFlushedOnClose_WhenImmediateSaveFails()
     {
         var appDataPath = Path.Combine(workspace.Project.AppDataPath, Guid.NewGuid().ToString("N"));
@@ -537,6 +684,7 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
                 },
                 "initial settings pane to become visually available before applying settings");
 
+            await UiTestDriver.ClickExtensionCheckBoxAsync(window, ".md");
             var applyButton = UiTestDriver.GetRequiredApplySettingsButton(window);
             await UiTestDriver.RaiseButtonClickAsync(applyButton);
             await UiTestDriver.WaitForConditionAsync(
@@ -631,11 +779,12 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
         public void SaveProfile(string localProjectPath, ProjectSelectionProfile profile)
             => TrySaveProfile(localProjectPath, profile);
 
-        public void ClearAllProfiles()
+        public ProjectProfileClearStatus ClearAllProfiles()
         {
             _profiles.Clear();
             if (File.Exists(StoragePath))
                 File.Delete(StoragePath);
+            return ProjectProfileClearStatus.Cleared;
         }
 
         private static ProjectSelectionProfile CreateEmptyProfile()
@@ -845,10 +994,12 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
 
             var panelRoot = UiTestDriver.GetRequiredControl<Border>(window, "PanelRoot");
             var applyButton = UiTestDriver.GetRequiredControl<Button>(window, "ApplySettingsButton");
+			var processingHeader = UiTestDriver.GetRequiredControl<TextBlock>(window, "ContentProcessingHeaderText");
             var ignoreHeader = UiTestDriver.GetRequiredControl<Grid>(window, "IgnoreHeaderGrid");
 
             var panelBounds = UiTestDriver.GetBoundsInWindow(panelRoot, window);
             var buttonBounds = UiTestDriver.GetBoundsInWindow(applyButton, window);
+			var processingHeaderBounds = UiTestDriver.GetBoundsInWindow(processingHeader, window);
             var ignoreHeaderBounds = UiTestDriver.GetBoundsInWindow(ignoreHeader, window);
 
             Assert.DoesNotContain(
@@ -866,14 +1017,16 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
             Assert.True(applyButton.Margin.Bottom >= 0);
 
             Assert.InRange(buttonBounds.Left - ignoreHeaderBounds.Left, -1, 1);
+			Assert.InRange(buttonBounds.Left - processingHeaderBounds.Left, -1, 1);
             Assert.True(
                 buttonBounds.Width < ignoreHeaderBounds.Width - 20,
                 $"Apply button should keep its natural width. Button={buttonBounds.Width:F2}, Header={ignoreHeaderBounds.Width:F2}.");
 
             var topGap = buttonBounds.Top - panelBounds.Top;
-            var headerGap = ignoreHeaderBounds.Top - buttonBounds.Bottom;
+			var headerGap = processingHeaderBounds.Top - buttonBounds.Bottom;
             Assert.InRange(topGap, 0, 16);
-            Assert.InRange(headerGap, 0, 16);
+			Assert.InRange(headerGap, 8, 24);
+			Assert.True(processingHeaderBounds.Bottom < ignoreHeaderBounds.Top);
         }
         finally
         {
@@ -889,7 +1042,7 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
 
         try
         {
-            foreach (var listName in new[] { "IgnoreOptionsList", "ExtensionsList", "RootFoldersList" })
+            foreach (var listName in new[] { "IgnoreOptionsList", "ExtensionsList" })
             {
                 var listBox = UiTestDriver.GetRequiredControl<ListBox>(window, listName);
                 var firstItem = Assert.IsAssignableFrom<object>(listBox.Items.FirstOrDefault());
@@ -919,13 +1072,14 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
     }
 
     [AvaloniaFact]
-    public async Task ViewTreeFontMenu_UsesDynamicItemsWithPendingCheck()
+    public async Task ViewTreeFontMenu_AppliesSelectionImmediatelyAndUpdatesCheck()
     {
         var window = await UiTestDriver.CreateLoadedMainWindowAsync(workspace.Project);
 
         try
         {
             var viewModel = UiTestDriver.GetViewModel(window);
+            var projectTree = UiTestDriver.GetRequiredControl<ProjectTreeView>(window, "ProjectTree");
             var defaultFont = FontFamily.Default;
             var customFont = new FontFamily("Consolas");
 
@@ -933,7 +1087,6 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
             viewModel.FontFamilies.Add(defaultFont);
             viewModel.FontFamilies.Add(customFont);
             viewModel.SelectedFontFamily = defaultFont;
-            viewModel.PendingFontFamily = defaultFont;
 
             InvokeRefreshTreeFontMenu(window);
 
@@ -947,11 +1100,11 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
             Assert.StartsWith("   ", initialItems[1].Header?.ToString());
 
             await UiTestDriver.RaiseMenuItemClickAsync(initialItems[1]);
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 1);
 
-            Assert.Equal(customFont.Name, viewModel.PendingFontFamily?.Name);
-            Assert.Equal(defaultFont.Name, viewModel.SelectedFontFamily?.Name);
+            Assert.Equal(customFont.Name, viewModel.SelectedFontFamily?.Name);
+            Assert.Equal(customFont.Name, projectTree.FontFamily.Name);
 
-            InvokeRefreshTreeFontMenu(window);
             var refreshedItems = fontMenu.Items.OfType<MenuItem>().ToArray();
             Assert.StartsWith("   ", refreshedItems[0].Header?.ToString());
             Assert.StartsWith("✓ ", refreshedItems[1].Header?.ToString());
@@ -971,14 +1124,36 @@ public sealed class MainWindowWorkspaceInteractionUiTests(UiWorkspaceFixture wor
         {
             var englishItem = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "LanguageEnMenuItem");
             var russianItem = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "LanguageRuMenuItem");
+            var simplifiedChineseItem = UiTestDriver.GetRequiredTopMenuControl<MenuItem>(window, "LanguageZhCnMenuItem");
+            var languageMenu = Assert.IsType<MenuItem>(englishItem.Parent);
 
+            Assert.Equal(20, languageMenu.Items.OfType<MenuItem>().Count());
+            Assert.Contains(MenuScrollBehavior.ScrollableClass, languageMenu.Classes);
             Assert.StartsWith("✓ ", englishItem.Header?.ToString());
             Assert.StartsWith("   ", russianItem.Header?.ToString());
+
+            languageMenu.IsSubMenuOpen = true;
+            await UiTestDriver.WaitForSettledFramesAsync(frameCount: 12);
+
+            var popup = Assert.Single(
+                languageMenu.GetVisualDescendants().OfType<Popup>(),
+                static candidate => candidate.IsOpen);
+            var popupRoot = Assert.IsAssignableFrom<Visual>(popup.Child);
+            var scrollViewer = Assert.Single(popupRoot.GetVisualDescendants().OfType<ScrollViewer>());
+            Assert.Equal(ScrollBarVisibility.Hidden, scrollViewer.VerticalScrollBarVisibility);
+            Assert.Single(
+                popupRoot.GetVisualDescendants().OfType<Control>(),
+                control => control.Classes.Contains(MenuScrollBehavior.ExternalScrollBarClass));
 
             await UiTestDriver.RaiseMenuItemClickAsync(russianItem);
 
             Assert.StartsWith("   ", englishItem.Header?.ToString());
             Assert.StartsWith("✓ ", russianItem.Header?.ToString());
+
+            await UiTestDriver.RaiseMenuItemClickAsync(simplifiedChineseItem);
+
+            Assert.StartsWith("   ", russianItem.Header?.ToString());
+            Assert.StartsWith("✓ ", simplifiedChineseItem.Header?.ToString());
         }
         finally
         {

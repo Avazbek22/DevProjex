@@ -1,20 +1,29 @@
+using DevProjex.Avalonia.Services;
+
 namespace DevProjex.Avalonia.Coordinators;
 
 internal interface IRefreshTreePipelineHost
 {
     MainWindowViewModel ViewModel { get; }
 
-    TreeRefreshInput? CaptureTreeRefreshInput();
+    TreeRefreshInput? CaptureTreeRefreshInput(bool preserveCheckedPaths);
 
-    void BeforeFullTreeRefresh();
+    void BeforeFullTreeRefresh(bool preserveStatusMetrics);
 
     void BeforeInteractiveFilterRefresh();
 
     BuildTreeSnapshotResult BuildTree(TreeRefreshInput input, CancellationToken cancellationToken);
 
+	bool TryHandleGitScopeDiagnostics(BuildTreeSnapshotResult result) => false;
+
     bool TryHandleRootAccessDenied(TreeRefreshInput input, BuildTreeResult result);
 
-    TreeNodeViewModel BuildTreeViewModel(TreeRefreshInput input, BuildTreeResult result);
+	void ReportIncompleteTreeScan();
+
+	TreeNodeViewModel BuildTreeViewModel(
+		TreeRefreshInput input,
+		BuildTreeResult result,
+		CancellationToken cancellationToken);
 
     bool IsTreeRefreshInputCurrent(TreeRefreshInput input);
 
@@ -24,5 +33,6 @@ internal interface IRefreshTreePipelineHost
         TreeNodeViewModel root,
         bool interactiveFilter,
         bool usedInMemoryFilter,
+        MemoryCleanupReason? postLoadCleanupReason,
         CancellationToken cancellationToken);
 }

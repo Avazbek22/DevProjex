@@ -1,3 +1,4 @@
+using DevProjex.Avalonia.Coordinators;
 using DevProjex.Avalonia.Services;
 
 namespace DevProjex.Avalonia;
@@ -116,6 +117,7 @@ public partial class MainWindow
 
         if (_viewModel.RecentFolders.Count == 0)
         {
+            MenuScrollBehavior.SetScrollable(recentMenuItem, 0);
             recentMenuItem.Items.Add(new MenuItem
             {
                 Header = _viewModel.MenuFileRecentEmpty,
@@ -139,6 +141,8 @@ public partial class MainWindow
             item.Click += OnRecentFolderMenuItemClick;
             recentMenuItem.Items.Add(item);
         }
+
+        MenuScrollBehavior.SetScrollable(recentMenuItem, _viewModel.RecentFolders.Count);
     }
 
     private async void OnRecentFolderMenuItemClick(object? sender, RoutedEventArgs e)
@@ -175,7 +179,18 @@ public partial class MainWindow
             return;
         }
 
-        await TryOpenFolderAsync(path, fromDialog: true);
+		try
+		{
+			await TryOpenFolderAsync(path, fromDialog: true);
+		}
+		catch (OperationCanceledException)
+		{
+			// Cancellation is handled by the project-load fallback.
+		}
+		catch (Exception exception)
+		{
+			await ShowErrorAsync(ResolveDesktopExceptionMessage(exception));
+		}
     }
 
     private void StartRecentFolderAvailabilityRefresh()
@@ -302,6 +317,9 @@ public partial class MainWindow
 
     private void RefreshLanguageMenuChecks()
     {
+        if (_topMenuBar?.LanguageMenuItemControl is { } languageMenuItem)
+            MenuScrollBehavior.SetScrollable(languageMenuItem, languageMenuItem.Items.Count);
+
         foreach (var (item, language, label) in EnumerateLanguageMenuItems())
         {
             if (item is null)
@@ -328,6 +346,15 @@ public partial class MainWindow
         yield return (topMenuBar.LanguageTgMenuItemControl, AppLanguage.Tg, "Тоҷикӣ");
         yield return (topMenuBar.LanguageUzMenuItemControl, AppLanguage.Uz, "Oʻzbek");
         yield return (topMenuBar.LanguageKkMenuItemControl, AppLanguage.Kk, "Қазақ");
+        yield return (topMenuBar.LanguageZhCnMenuItemControl, AppLanguage.ZhCn, "中文（简体）");
+        yield return (topMenuBar.LanguageZhTwMenuItemControl, AppLanguage.ZhTw, "中文（繁體）");
+        yield return (topMenuBar.LanguageJaMenuItemControl, AppLanguage.Ja, "日本語");
+        yield return (topMenuBar.LanguageKoMenuItemControl, AppLanguage.Ko, "한국어");
+        yield return (topMenuBar.LanguageTrMenuItemControl, AppLanguage.Tr, "Türkçe");
+        yield return (topMenuBar.LanguageUkMenuItemControl, AppLanguage.Uk, "Українська");
+        yield return (topMenuBar.LanguagePlMenuItemControl, AppLanguage.Pl, "Polski");
+        yield return (topMenuBar.LanguageViMenuItemControl, AppLanguage.Vi, "Tiếng Việt");
+        yield return (topMenuBar.LanguageIdMenuItemControl, AppLanguage.Id, "Bahasa Indonesia");
     }
 
     private static string CreateCheckedMenuHeader(bool isChecked, string label)
@@ -381,7 +408,7 @@ public partial class MainWindow
         var displayName = GetTreeFontDisplayName(fontFamily);
         var item = new MenuItem
         {
-            Header = CreateCheckedMenuHeader(IsPendingTreeFont(fontFamily), displayName),
+            Header = CreateCheckedMenuHeader(IsSelectedTreeFont(fontFamily), displayName),
             Tag = fontFamily,
             MinHeight = TreeFontMenuItemHeight
         };
@@ -395,12 +422,12 @@ public partial class MainWindow
         if (sender is not MenuItem { Tag: FontFamily fontFamily })
             return;
 
-        _viewModel.PendingFontFamily = fontFamily;
+        _viewModel.SelectedFontFamily = fontFamily;
         e.Handled = true;
     }
 
-    private bool IsPendingTreeFont(FontFamily fontFamily)
-        => AreSameTreeFont(_viewModel.PendingFontFamily, fontFamily);
+    private bool IsSelectedTreeFont(FontFamily fontFamily)
+        => AreSameTreeFont(_viewModel.SelectedFontFamily, fontFamily);
 
     private string GetTreeFontDisplayName(FontFamily fontFamily)
     {

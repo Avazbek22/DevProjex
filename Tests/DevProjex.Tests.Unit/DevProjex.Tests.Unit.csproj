@@ -15,12 +15,21 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\Application\Application.csproj" />
+    <ProjectReference Include="..\..\Apps\Mcp\DevProjex.Mcp.csproj" />
     <ProjectReference Include="..\..\Apps\Avalonia\DevProjex.Avalonia.csproj" />
     <ProjectReference Include="..\..\Kernel\Kernel.csproj" />
+    <ProjectReference
+      Include="..\DevProjex.Tests.Terminal.ProgressHost\DevProjex.Tests.Terminal.ProgressHost.csproj"
+      ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <ItemGroup>
     <Compile Include="..\Shared\StoreListing\**\*.cs" LinkBase="StoreListing" />
     <Compile Include="..\Shared\ProjectLoadWorkflow\**\*.cs" LinkBase="ProjectLoadWorkflow" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="..\Fixtures\Secrets\gitleaks-v8.30.1-corpus.jsonl"
+                      Link="Fixtures\Secrets\gitleaks-v8.30.1-corpus.jsonl" />
   </ItemGroup>
 </Project>

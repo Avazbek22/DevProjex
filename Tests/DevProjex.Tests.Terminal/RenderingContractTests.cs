@@ -1,5 +1,7 @@
 using DevProjex.Terminal.Rendering;
 using DevProjex.Infrastructure.ResourceStore;
+using DevProjex.Application.Secrets;
+using DevProjex.Kernel.Abstractions;
 
 namespace DevProjex.Tests.Terminal;
 
@@ -142,10 +144,53 @@ public sealed class RenderingContractTests
 	}
 
 	[Fact]
+	public void RedirectedDiagnosticKeepsEscapedLongPathOnOnePhysicalLine()
+	{
+		var environment = new TestTerminalEnvironment
+		{
+			Width = 40
+		};
+		var renderer = new ContextDiagnosticRenderer(
+			environment,
+			new TerminalOutputOptions(),
+			new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En));
+		var diagnosticPath = Path.Combine(
+			"diagnostic-path-start",
+			new string('a', 80),
+			"leaf") + "\nforged\rsegment\t\u001bcontrol\u2028end";
+
+		renderer.Write(
+		[
+			new ContextDiagnostic(
+				"DPX-PROJECT-SELECTION-WARNING",
+				ContextDiagnosticSeverity.Warning,
+				"Selection warning.",
+				diagnosticPath)
+		]);
+
+		var lines = environment.StandardError
+			.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
+		var pathLine = Assert.Single(
+			lines,
+			static line => line.Contains("diagnostic-path-start", StringComparison.Ordinal));
+		Assert.True(pathLine.Length > environment.Width);
+		Assert.Contains(
+			"\\nforged\\rsegment\\t\\u001Bcontrol\\u2028end",
+			pathLine,
+			StringComparison.Ordinal);
+		Assert.DoesNotContain('\n', pathLine);
+		Assert.DoesNotContain('\r', pathLine);
+		Assert.DoesNotContain('\t', pathLine);
+		Assert.DoesNotContain('\u001b', pathLine);
+		Assert.DoesNotContain('\u2028', pathLine);
+	}
+
+	[Fact]
 	public async Task RussianHumanDiagnosticNeverFallsBackToInternalEnglishMessage()
 	{
 		using var workspace = new TemporaryDirectory();
-		workspace.WriteFile("src/app.cs", "class App {}\n");
+		workspace.WriteFile("missing.cs", "class App {}\n");
+		workspace.WriteFile("README.md", "# Project\n");
 		var environment = new TestTerminalEnvironment();
 
 		var exitCode = await new TerminalApplication(
@@ -157,6 +202,8 @@ public sealed class RenderingContractTests
 				workspace.Path,
 				"--select",
 				"missing.cs",
+				"--extension",
+				"md",
 				"--git-mode",
 				"none",
 				"--exclude",
@@ -252,6 +299,325 @@ public sealed class RenderingContractTests
 		Assert.DoesNotContain('\u001b', environment.StandardError);
 		Assert.DoesNotContain('\u0007', environment.StandardError);
 		Assert.DoesNotContain('\u2028', environment.StandardError);
+	}
+
+	[Fact]
+	public void RedirectedErrorEscapesControlCharactersInMessageAndHint()
+	{
+		var environment = new TestTerminalEnvironment();
+		var renderer = new ErrorRenderer(
+			environment,
+			new TerminalOutputOptions(Plain: true));
+
+		renderer.Write(new TerminalError(
+			"DPX-TEST",
+			"safe\r\nforged\u001b[31m",
+			"retry\twithout\u0007control"));
+
+		Assert.Contains("safe\\r\\nforged\\u001B[31m", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains("retry\\twithout\\u0007control", environment.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain('\u001b', environment.StandardError);
+		Assert.DoesNotContain('\u0007', environment.StandardError);
+	}
+
+	[Fact]
+	public void TextFindingEscapesPathControlCharactersIntoOneLine()
+	{
+		var finding = new EffectiveRedactionFinding(
+			"rule-id",
+			RedactionFindingCategory.Secrets,
+			"safe\nforged\rsegment\t\u001bname.cs",
+			42);
+
+		var formatted = AnalysisTextFormatter.FormatFinding(finding);
+
+		Assert.Equal("secret  rule-id  safe\\nforged\\rsegment\\t\\u001Bname.cs:42", formatted);
+		Assert.DoesNotContain('\n', formatted);
+		Assert.DoesNotContain('\r', formatted);
+		Assert.DoesNotContain('\t', formatted);
+		Assert.DoesNotContain('\u001b', formatted);
+	}
+
+	[Fact]
+	public async Task AnalysisRowsEscapeControlCharactersInUserDerivedFields()
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("App.cs", "internal sealed class App {}");
+		var services = new TerminalServiceFactory(() => workspace.CreateDirectory("app-data"))
+			.Create(AppLanguage.En);
+		var selection = await services.SelectionResolver.ResolveAsync(
+			workspace.Path,
+			ProjectProfileReference.Standard,
+			new ProjectSelectionSpec(),
+			TestContext.Current.CancellationToken);
+		var plan = await services.ContextPlanner.BuildAsync(
+			new ProjectContextRequest(workspace.Path, selection),
+			TestContext.Current.CancellationToken);
+		plan = plan with
+		{
+			Selection = plan.Selection with
+			{
+				ProfileSource = new ProjectProfileReference(
+					ProjectProfileSourceKind.Portable,
+					"profile\rforged.json")
+			},
+			SelectedRoots = ["root\nforged"],
+			SelectedExtensions = [".cs\tforged"],
+			SourceIdentity = new ProjectSourceIdentity(
+				"project\nforged",
+				ProjectSourceType.GitClone,
+				"source",
+				"https://example.invalid/repo\rforged")
+		};
+
+		var rows = AnalysisTextFormatter.BuildRows(
+			plan,
+			new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En));
+
+		Assert.Contains(rows, static row => row.Value == "project\\nforged");
+		Assert.Contains(rows, static row => row.Value == "https://example.invalid/repo\\rforged");
+		Assert.Contains(rows, static row => row.Value == "profile\\rforged.json");
+		Assert.Contains(rows, static row => row.Value == "root\\nforged");
+		Assert.Contains(rows, static row => row.Value == ".cs\\tforged");
+		Assert.All(rows, static row =>
+		{
+			Assert.DoesNotContain('\r', row.Value);
+			Assert.DoesNotContain('\n', row.Value);
+			Assert.DoesNotContain('\t', row.Value);
+		});
+	}
+
+	[Fact]
+	public void DryRunEscapesControlCharactersInDestination()
+	{
+		var environment = new TestTerminalEnvironment();
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);
+
+		DryRunRenderer.WritePlan(environment, localization, "safe\nforged\tpath");
+
+		Assert.Contains("safe\\nforged\\tpath", environment.StandardError, StringComparison.Ordinal);
+		Assert.DoesNotContain('\n', environment.StandardError.TrimEnd('\r', '\n'));
+		Assert.DoesNotContain('\t', environment.StandardError);
+	}
+
+	[Fact]
+	public void UnscannableSummaryEscapesControlCharactersInPaths()
+	{
+		var root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "DevProjexUnscannable"));
+		var path = Path.Combine(root, "safe\nforged\tfile.cs");
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);
+
+		var summary = UnscannableFileOutput.FormatSummary(
+			root,
+			[new UnscannableFile(path, FileContentClassification.TooLarge)],
+			localization);
+
+		Assert.Contains("safe\\nforged\\tfile.cs", summary, StringComparison.Ordinal);
+		Assert.DoesNotContain('\n', summary);
+		Assert.DoesNotContain('\t', summary);
+	}
+
+	[Theory]
+	[InlineData(1)]
+	[InlineData(2)]
+	public void DeletedGitStateDiagnosticUsesCountNeutralGrammar(int count)
+	{
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);
+		var diagnostic = GitScopeFilter.CreateDeletedDiagnostic("project", count);
+
+		Assert.Equal(
+			$"Deleted files excluded from the Git state: {count}.",
+			ContextDiagnosticRenderer.ResolveMessage(localization, diagnostic));
+	}
+
+	[Fact]
+	public void TerminalColumnsAlignWideRunesWithoutTabs()
+	{
+		var lines = TerminalColumnLayout.Format(
+		[
+			["界", "first"],
+			["aa", "second"]
+		]);
+
+		Assert.Equal(["界  first", "aa  second"], lines);
+		Assert.All(lines, static line => Assert.DoesNotContain('\t', line));
+	}
+
+	[Fact]
+	public void FindingTableSnapshotUsesLocalizedThreeColumnLayout()
+	{
+		var localization = new LocalizationService(new JsonLocalizationCatalog(), AppLanguage.En);
+		var lines = AnalysisTextFormatter.BuildFindingTable(
+		[
+			new EffectiveRedactionFinding(
+				"github-pat",
+				RedactionFindingCategory.Secrets,
+				"src/a.cs",
+				4),
+			new EffectiveRedactionFinding(
+				"email",
+				RedactionFindingCategory.PrivateData,
+				"src/界.cs",
+				20)
+		],
+			localization);
+
+		Assert.Equal(
+		[
+			"Category      Rule        File:line",
+			"secret        github-pat  src/a.cs:4",
+			"private-data  email       src/界.cs:20"
+		], lines);
+		Assert.All(lines, static line => Assert.DoesNotContain('\t', line));
+	}
+
+	[Fact]
+	public void InteractiveGitProgressRewritesPadsAndClearsOneLine()
+	{
+		var environment = new TestTerminalEnvironment
+		{
+			IsErrorInteractive = true,
+			Width = 40
+		};
+		using var renderer = Assert.IsType<GitOperationProgressRenderer>(
+			GitOperationProgressRenderer.Create(
+				environment,
+				new TerminalOutputOptions(Progress: TerminalProgressMode.Always),
+				"clone",
+				"complete"));
+
+		renderer.Start();
+		renderer.Report("abcdefghij 25%");
+		renderer.Report("x 50%");
+		var beforeCompletion = environment.StandardError;
+		renderer.Complete();
+
+		Assert.Equal(
+			"\rclone\rabcdefghij 25%\rx 50%" + new string(' ', 9),
+			beforeCompletion);
+		Assert.Equal(beforeCompletion + "\r" + new string(' ', 5) + "\r", environment.StandardError);
+		Assert.DoesNotContain('\n', environment.StandardError);
+		Assert.DoesNotContain('\u001b', environment.StandardError);
+		Assert.Empty(environment.StandardOutput);
+	}
+
+	[Fact]
+	public void InteractiveGitProgressRereadsWidthAndTruncatesWideTextByColumns()
+	{
+		var environment = new TestTerminalEnvironment
+		{
+			IsErrorInteractive = true,
+			Width = 9
+		};
+		using var renderer = Assert.IsType<GitOperationProgressRenderer>(
+			GitOperationProgressRenderer.Create(
+				environment,
+				new TerminalOutputOptions(),
+				"go",
+				"complete"));
+
+		renderer.Start();
+		renderer.Report("界界界界界");
+		environment.Width = 5;
+		renderer.Report("界界界界界");
+
+		Assert.Contains("\r界界界界", environment.StandardError, StringComparison.Ordinal);
+		Assert.EndsWith("\r界界", environment.StandardError, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void RedirectedGitProgressSplitsCrAndLfAndEmitsOnlyBoundedMilestones()
+	{
+		var environment = new TestTerminalEnvironment();
+		using var renderer = Assert.IsType<GitOperationProgressRenderer>(
+			GitOperationProgressRenderer.Create(
+				environment,
+				new TerminalOutputOptions(),
+				"Cloning safe-url...",
+				"Clone completed."));
+
+		renderer.Start();
+		renderer.Report(
+			"remote: Enumerating objects: 100%\rReceiving objects: 24%\r" +
+			"Receiving objects: 25%\u001b\rReceiving objects: 55%\n" +
+			"Receiving objects: 76%\rResolving deltas: 100%");
+		renderer.Complete();
+
+		var lines = environment.StandardError
+			.ReplaceLineEndings("\n")
+			.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+		Assert.Equal(5, lines.Length);
+		Assert.Equal("Cloning safe-url...", lines[0]);
+		Assert.Contains("25%", lines[1], StringComparison.Ordinal);
+		Assert.Contains("55%", lines[2], StringComparison.Ordinal);
+		Assert.Contains("76%", lines[3], StringComparison.Ordinal);
+		Assert.Equal("Clone completed.", lines[4]);
+		Assert.DoesNotContain('\u001b', environment.StandardError);
+		Assert.Contains("\\u001B", lines[1], StringComparison.Ordinal);
+		Assert.Empty(environment.StandardOutput);
+	}
+
+	[Theory]
+	[InlineData(TerminalProgressMode.Never, TerminalVerbosity.Normal)]
+	[InlineData(TerminalProgressMode.Always, TerminalVerbosity.Quiet)]
+	[InlineData(TerminalProgressMode.Always, TerminalVerbosity.Minimal)]
+	public void DisabledOrQuietGitProgressWritesNoBytes(
+		TerminalProgressMode progressMode,
+		TerminalVerbosity verbosity)
+	{
+		var environment = new TestTerminalEnvironment { IsErrorInteractive = true };
+		using var renderer = GitOperationProgressRenderer.Create(
+			environment,
+			new TerminalOutputOptions(Progress: progressMode, Verbosity: verbosity),
+			"start",
+			"complete");
+
+		renderer?.Start();
+		renderer?.Report("Receiving objects: 50%");
+		renderer?.Complete();
+
+		Assert.Empty(environment.StandardError);
+		Assert.Empty(environment.StandardOutput);
+	}
+
+	[Fact]
+	public void PlainGitProgressUsesMilestonesInsteadOfCarriageReturnFrames()
+	{
+		var environment = new TestTerminalEnvironment { IsErrorInteractive = true };
+		using var renderer = Assert.IsType<GitOperationProgressRenderer>(
+			GitOperationProgressRenderer.Create(
+				environment,
+				new TerminalOutputOptions(Plain: true),
+				"start",
+				"complete"));
+
+		renderer.Start();
+		renderer.Report("Receiving objects: 50%");
+		renderer.Complete();
+
+		Assert.Equal(
+			$"start{Environment.NewLine}Receiving objects: 50%{Environment.NewLine}complete{Environment.NewLine}",
+			environment.StandardError);
+	}
+
+	[Fact]
+	public void RedirectedGitProgressStopsWritingAfterDiagnosticsPipeCloses()
+	{
+		var error = new BrokenPipeTextWriter(failOnAttempt: 2);
+		var environment = new TestTerminalEnvironment { ErrorOverride = error };
+		using var renderer = Assert.IsType<GitOperationProgressRenderer>(
+			GitOperationProgressRenderer.Create(
+				environment,
+				new TerminalOutputOptions(),
+				"start",
+				"complete"));
+
+		renderer.Start();
+		renderer.Report("Receiving objects: 25%");
+		renderer.Report("Receiving objects: 50%");
+		renderer.Complete();
+
+		Assert.Equal(2, error.WriteAttempts);
 	}
 
 	[Fact]
@@ -401,34 +767,44 @@ public sealed class RenderingContractTests
 		Assert.DoesNotContain("100%", environment.StandardError, StringComparison.Ordinal);
 	}
 
-	[Fact]
-	public async Task NoColorProjectExportProgressRemainsReadableWithoutAnsi()
+	[Theory]
+	[InlineData(TerminalColorMode.Auto, true)]
+	[InlineData(TerminalColorMode.Never, false)]
+	public async Task InteractiveMonochromeProjectExportProgressRewritesAndClearsOneLine(
+		TerminalColorMode color,
+		bool noColor)
 	{
 		using var appData = new TemporaryDirectory();
 		var environment = new TestTerminalEnvironment
 		{
 			IsErrorInteractive = true,
-			IsNoColor = true,
+			IsNoColor = noColor,
 			Width = 100
 		};
 		var services = new TerminalServiceFactory(() => appData.Path).Create(AppLanguage.En);
 		var renderer = new ProgressRenderer(
 			environment,
-			new TerminalOutputOptions(Progress: TerminalProgressMode.Always),
+			new TerminalOutputOptions(
+				Color: color,
+				Progress: TerminalProgressMode.Always),
 			services.Localization);
 
-		await renderer.RunProjectExportAsync(async progress =>
+		var result = await renderer.RunProjectExportAsync(progress =>
 		{
 			Assert.NotNull(progress);
+			progress.Report(new ProjectCopyExportProgress(1, 4, 1_024, 25));
 			progress.Report(new ProjectCopyExportProgress(2, 4, 2_048, 50));
-			await Task.Delay(300, TestContext.Current.CancellationToken);
-			return true;
+			return Task.FromResult(42);
 		});
 
+		Assert.Equal(42, result);
 		Assert.Empty(environment.StandardOutput);
 		Assert.Contains("Exporting project 2/4 (2 KB)", environment.StandardError, StringComparison.Ordinal);
 		Assert.Contains("50%", environment.StandardError, StringComparison.Ordinal);
-		Assert.DoesNotContain("\u001b", environment.StandardError, StringComparison.Ordinal);
+		Assert.Contains('\r', environment.StandardError);
+		Assert.DoesNotContain('\n', environment.StandardError);
+		Assert.DoesNotContain('\u001b', environment.StandardError);
+		Assert.EndsWith("\r", environment.StandardError, StringComparison.Ordinal);
 	}
 
 	[Theory]
@@ -509,5 +885,19 @@ public sealed class RenderingContractTests
 				StringSplitOptions.RemoveEmptyEntries).Length,
 			1,
 			2);
+	}
+
+	private sealed class BrokenPipeTextWriter(int failOnAttempt) : TextWriter
+	{
+		private int _writeAttempts;
+
+		public override Encoding Encoding => Encoding.UTF8;
+		public int WriteAttempts => _writeAttempts;
+
+		public override void WriteLine(string? value)
+		{
+			if (++_writeAttempts >= failOnAttempt)
+				throw new TerminalBrokenPipeException();
+		}
 	}
 }

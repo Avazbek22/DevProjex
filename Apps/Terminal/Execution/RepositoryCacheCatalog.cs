@@ -81,7 +81,7 @@ public sealed class RepositoryCacheCatalog(
 		string candidate,
 		CancellationToken cancellationToken)
 	{
-		if (!Directory.Exists(candidate))
+		if (!IsSafeCacheCandidate(candidate) || HasLinkedGitMetadata(candidate))
 			return null;
 
 		var remoteUrl = await gitRepositoryService
@@ -125,7 +125,7 @@ public sealed class RepositoryCacheCatalog(
 		{
 			try
 			{
-				if (!Directory.Exists(searchRoot))
+				if (!IsSafeCacheCandidate(searchRoot))
 					continue;
 
 				candidates.AddRange(
@@ -154,6 +154,43 @@ public sealed class RepositoryCacheCatalog(
 				Path.GetFileName(path).StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
 			.ThenByDescending(GetLastModified)
 			.ToArray();
+	}
+
+	private static bool IsSafeCacheCandidate(string path)
+	{
+		try
+		{
+			return Directory.Exists(path) &&
+			       !File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint);
+		}
+		catch (Exception exception) when (exception is
+			       IOException or
+			       UnauthorizedAccessException or
+			       ArgumentException or
+			       NotSupportedException or
+			       System.Security.SecurityException)
+		{
+			return false;
+		}
+	}
+
+	private static bool HasLinkedGitMetadata(string path)
+	{
+		var metadataPath = Path.Combine(path, ".git");
+		try
+		{
+			return (Directory.Exists(metadataPath) || File.Exists(metadataPath)) &&
+			       File.GetAttributes(metadataPath).HasFlag(FileAttributes.ReparsePoint);
+		}
+		catch (Exception exception) when (exception is
+			       IOException or
+			       UnauthorizedAccessException or
+			       ArgumentException or
+			       NotSupportedException or
+			       System.Security.SecurityException)
+		{
+			return true;
+		}
 	}
 
 	private static bool HasGitMetadata(string path) =>

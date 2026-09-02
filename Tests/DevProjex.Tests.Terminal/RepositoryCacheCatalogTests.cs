@@ -175,6 +175,91 @@ public sealed class RepositoryCacheCatalogTests
 		Assert.Equal(0, git.NetworkOperationCount);
 	}
 
+	[Fact]
+	public async Task LinkedCacheCandidateIsRemovedWithoutQueryingGit()
+	{
+		using var temporary = new TemporaryDirectory();
+		var cacheRoot = temporary.CreateDirectory("RepoCache");
+		var externalRepository = temporary.CreateDirectory("external-repository");
+		Directory.CreateDirectory(Path.Combine(externalRepository, ".git"));
+		var linkedCandidate = Path.Combine(cacheRoot, "linked-repository");
+		try
+		{
+			Directory.CreateSymbolicLink(linkedCandidate, externalRepository);
+			if (!File.GetAttributes(linkedCandidate).HasFlag(FileAttributes.ReparsePoint))
+				Assert.Skip("The filesystem did not create a detectable directory symbolic link.");
+		}
+		catch (Exception exception) when (exception is
+			       UnauthorizedAccessException or
+			       IOException or
+			       PlatformNotSupportedException)
+		{
+			Assert.Skip($"Directory symbolic links are unavailable: {exception.GetType().Name}.");
+		}
+
+		const string requestedUrl = "https://example.com/owner/repository.git";
+		var git = new FakeGitRepositoryService();
+		git.Repositories[linkedCandidate] = new FakeRepository(
+			requestedUrl,
+			"main",
+			"0123456789abcdef");
+		var cache = new RepoCacheService(cacheRoot);
+		cache.RecordIndexedRepository(requestedUrl, linkedCandidate);
+		var catalog = new RepositoryCacheCatalog(git, cache);
+
+		var result = await catalog.FindAsync(
+			requestedUrl,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(RepositoryCacheState.Missing, result.State);
+		Assert.Null(result.LocalPath);
+		Assert.Null(cache.FindIndexedRepository(requestedUrl));
+		Assert.Equal(0, git.RemoteQueryCount);
+	}
+
+	[Fact]
+	public async Task LinkedGitMetadataIsIgnoredWithoutQueryingGit()
+	{
+		using var temporary = new TemporaryDirectory();
+		var cacheRoot = temporary.CreateDirectory("RepoCache");
+		var cachePath = Path.Combine(cacheRoot, "linked-metadata-repository");
+		Directory.CreateDirectory(cachePath);
+		var externalMetadata = temporary.CreateDirectory("external-git-metadata");
+		var linkedMetadata = Path.Combine(cachePath, ".git");
+		try
+		{
+			Directory.CreateSymbolicLink(linkedMetadata, externalMetadata);
+			if (!File.GetAttributes(linkedMetadata).HasFlag(FileAttributes.ReparsePoint))
+				Assert.Skip("The filesystem did not create a detectable directory symbolic link.");
+		}
+		catch (Exception exception) when (exception is
+			       UnauthorizedAccessException or
+			       IOException or
+			       PlatformNotSupportedException)
+		{
+			Assert.Skip($"Directory symbolic links are unavailable: {exception.GetType().Name}.");
+		}
+
+		const string requestedUrl = "https://example.com/owner/repository.git";
+		var git = new FakeGitRepositoryService();
+		git.Repositories[cachePath] = new FakeRepository(
+			requestedUrl,
+			"main",
+			"0123456789abcdef");
+		var cache = new RepoCacheService(cacheRoot);
+		cache.RecordIndexedRepository(requestedUrl, cachePath);
+		var catalog = new RepositoryCacheCatalog(git, cache);
+
+		var result = await catalog.FindAsync(
+			requestedUrl,
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(RepositoryCacheState.Missing, result.State);
+		Assert.Null(result.LocalPath);
+		Assert.Null(cache.FindIndexedRepository(requestedUrl));
+		Assert.Equal(0, git.RemoteQueryCount);
+	}
+
 	private sealed record FakeRepository(
 		string RemoteUrl,
 		string? Branch,
@@ -230,6 +315,14 @@ public sealed class RepositoryCacheCatalogTests
 		}
 
 		public Task<IReadOnlyList<GitBranch>> GetBranchesAsync(
+			string repositoryPath,
+			CancellationToken cancellationToken = default)
+		{
+			NetworkOperationCount++;
+			throw new NotSupportedException();
+		}
+
+		public Task<string?> GetDefaultBranchAsync(
 			string repositoryPath,
 			CancellationToken cancellationToken = default)
 		{

@@ -1,5 +1,3 @@
-using DevProjex.Terminal.Tui;
-
 namespace DevProjex.Tests.Terminal;
 
 public sealed class TerminalPathPickerModelTests
@@ -69,6 +67,34 @@ public sealed class TerminalPathPickerModelTests
 	}
 
 	[Fact]
+	public void BoundedOrderingRetainsOnlyTheRequestedBestEntriesInStableOrder()
+	{
+		const int maximumCount = 1_001;
+		var source = Enumerable.Range(0, 25_000)
+			.Select(index =>
+			{
+				var name = $"entry-{25_000 - index:D5}";
+				return new TerminalPathPickerEntry(
+					$"/synthetic/{name}",
+					name,
+					IsDirectory: index % 3 == 0,
+					IsParent: false);
+			})
+			.ToArray();
+		var expected = source
+			.OrderByDescending(static entry => entry.IsDirectory)
+			.ThenBy(static entry => entry.Name, StringComparer.CurrentCultureIgnoreCase)
+			.Take(maximumCount)
+			.Select(static entry => entry.Path)
+			.ToArray();
+
+		var actual = TerminalPathPickerModel.TakeOrderedEntries(source, maximumCount);
+
+		Assert.InRange(actual.Count, 0, maximumCount);
+		Assert.Equal(expected, actual.Select(static entry => entry.Path));
+	}
+
+	[Fact]
 	public void MissingInitialPathFallsBackToCurrentDirectory()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -79,5 +105,29 @@ public sealed class TerminalPathPickerModelTests
 
 		Assert.Equal(expectedCurrentDirectory, model.CurrentDirectory);
 		Assert.Equal(TerminalPathPickerError.None, model.Error);
+	}
+
+	[Theory]
+	[InlineData(TerminalPathPickerMode.Directory)]
+	[InlineData(TerminalPathPickerMode.JsonFile)]
+	internal void MissingTypedPathNeverFallsBackToTheCurrentOrSelectedEntry(
+		TerminalPathPickerMode mode)
+	{
+		using var workspace = new TemporaryDirectory();
+		workspace.WriteFile("settings.json", "{}");
+		var model = new TerminalPathPickerModel(mode, workspace.Path);
+		var fallbackIndex = mode == TerminalPathPickerMode.JsonFile
+			? model.Entries
+				.Select((entry, index) => (entry, index))
+				.First(pair => !pair.entry.IsDirectory)
+				.index
+			: 0;
+
+		var selection = model.ResolveSelection(
+			Path.Combine(workspace.Path, "missing"),
+			fallbackIndex);
+
+		Assert.True(selection.InvalidTypedPath);
+		Assert.Null(selection.Path);
 	}
 }

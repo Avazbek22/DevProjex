@@ -1,5 +1,6 @@
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.Rendering;
+using DevProjex.Application.Secrets;
 
 namespace DevProjex.Terminal.Execution;
 
@@ -36,7 +37,7 @@ internal static class CommandExecution
 			var isRuntimeFailure = exception.Code == "DPX-CLI-PROFILE-WRITE-FAILED";
 			return WriteError(environment, outputOptions, text, new TerminalError(
 				exception.Code,
-				SafeMessageFor(exception.Code, text),
+				SafePortableProfileMessageFor(exception, text),
 				isDestinationConflict
 					? text["Terminal.Hint.DestinationForce"]
 					: null,
@@ -52,8 +53,10 @@ internal static class CommandExecution
 			return WriteError(environment, outputOptions, text, new TerminalError(
 				exception.Code,
 				SafeMessageFor(exception.Code, text),
+				HintFor(exception.Code, text),
 				ExitCode: CommandLineExitCodes.UsageError,
-				Exception: exception));
+				Exception: exception,
+				ContextPath: exception.ContextPath));
 		}
 		catch (DesktopControl.DesktopControlException exception)
 		{
@@ -70,6 +73,31 @@ internal static class CommandExecution
 		{
 			var error = ProjectCopyTerminalErrorMapper.Map(exception, text);
 			return WriteError(environment, outputOptions, text, error);
+		}
+		catch (TerminalProjectSourceException exception)
+		{
+			return WriteError(environment, outputOptions, text, new TerminalError(
+				exception.Code,
+				SafeMessageFor(exception.Code, text),
+				ExitCode: exception.ExitCode,
+				Exception: exception));
+		}
+		catch (SecretScanLimitExceededException exception)
+		{
+			return WriteError(environment, outputOptions, text, new TerminalError(
+				"DPX-SECRET-SCAN-LIMIT-EXCEEDED",
+				text["Error.ProjectCopy.SecretScanLimitExceeded"],
+				ExitCode: CommandLineExitCodes.RuntimeError,
+				Exception: exception,
+				ContextPath: exception.Path));
+		}
+		catch (SecretDetectionException exception)
+		{
+			return WriteError(environment, outputOptions, text, new TerminalError(
+				"DPX-SECRET-DETECTION-FAILED",
+				text["Error.ProjectCopy.SecretDetectionFailed"],
+				ExitCode: CommandLineExitCodes.RuntimeError,
+				Exception: exception));
 		}
 		catch (OutputDestinationConflictException exception)
 		{
@@ -122,6 +150,15 @@ internal static class CommandExecution
 		"DPX-PROJECT-PATH-REQUIRED" => localization["Terminal.Error.ProjectPathRequired"],
 		"DPX-PROJECT-NOT-FOUND" => localization["Terminal.Error.ProjectNotFound"],
 		"DPX-SELECTION-PATH-INVALID" => localization["Terminal.Error.SelectionPathInvalid"],
+		"DPX-SELECTION-PATH-MISSING" => localization["Terminal.Diagnostic.SelectedPathMissing"],
+		"DPX-CLI-SELECT-FROM-INVALID" => localization["Terminal.Error.SelectFromInvalid"],
+		"DPX-CLI-GIT-URL-INVALID" => localization["Terminal.Error.RepositoryUrlInvalid"],
+		"DPX-CLI-GIT-BRANCH-INVALID" => localization["Terminal.Error.BranchInvalid"],
+		"DPX-CLI-GIT-BRANCH-LOCAL" => localization["Terminal.Error.BranchLocal"],
+		"DPX-CLI-GIT-BRANCH-UNAVAILABLE" => localization["Terminal.Error.BranchUnavailable"],
+		"DPX-CLI-GIT-UNAVAILABLE" => localization["Terminal.Error.GitUnavailable"],
+		"DPX-CLI-GIT-CLONE-FAILED" => localization["Terminal.Error.CloneFailed"],
+		"DPX-CLI-GIT-CACHE-FAILED" => localization["Terminal.Error.CloneCacheFailed"],
 		"DPX-CLI-PROFILE-NOT-FOUND" => localization["Terminal.Error.ProfileUnresolved"],
 		"DPX-CLI-PROFILE-UNRESOLVED" => localization["Terminal.Error.ProfileUnresolved"],
 		"DPX-CLI-PROFILE-INVALID" => localization["Terminal.Error.ProfileInvalid"],
@@ -136,8 +173,27 @@ internal static class CommandExecution
 		"DPX-DESKTOP-PAYLOAD-TOO-LARGE" => localization["Terminal.Error.DesktopPayloadTooLarge"],
 		ProjectContextGitReadiness.UnavailableDiagnosticCode =>
 			localization["Terminal.Diagnostic.TrackedIndexUnavailable"],
+		GitScopeFilter.UnavailableDiagnosticCode =>
+			localization["Terminal.Diagnostic.GitStateUnavailable"],
 		var value when value.StartsWith("DPX-DESKTOP-", StringComparison.Ordinal) =>
 			localization["Terminal.Error.DesktopRequestFailed"],
 		_ => localization["Terminal.Error.CommandInvalid"]
+	};
+
+	private static string SafePortableProfileMessageFor(
+		PortableProjectProfileException exception,
+		LocalizationService localization)
+	{
+		var transientGitModeMessage = localization["Terminal.Error.ProfileTransientGitMode"];
+		return exception.Code == "DPX-CLI-PROFILE-INVALID" &&
+		       string.Equals(exception.Message, transientGitModeMessage, StringComparison.Ordinal)
+			? transientGitModeMessage
+			: SafeMessageFor(exception.Code, localization);
+	}
+
+	private static string? HintFor(string code, LocalizationService localization) => code switch
+	{
+		"DPX-CLI-PROFILE-NOT-FOUND" => localization["Terminal.Hint.ProfileStandard"],
+		_ => null
 	};
 }

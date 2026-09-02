@@ -1,3 +1,5 @@
+using DevProjex.Application.Secrets;
+
 namespace DevProjex.Application.Services;
 
 public enum ProjectCopyExportFormat
@@ -30,7 +32,10 @@ public enum ProjectCopyExportError
 	IoFailure = 7,
 	UnsafeDestinationPath = 8,
 	UnexpectedFailure = 9,
-	DestinationConflict = 10
+	DestinationConflict = 10,
+	SecretDetectionFailed = 11,
+	SecretScanLimitExceeded = 12,
+	ReservedNoticeNameConflict = 13
 }
 
 public sealed record ProjectCopyExportRequest(
@@ -41,13 +46,37 @@ public sealed record ProjectCopyExportRequest(
 	string DestinationPath,
 	ProjectCopyExportFormat Format,
 	ProjectCopyDestinationMode DestinationMode = ProjectCopyDestinationMode.AutomaticName,
-	ProjectCopyConflictPolicy ConflictPolicy = ProjectCopyConflictPolicy.Fail);
+	ProjectCopyConflictPolicy ConflictPolicy = ProjectCopyConflictPolicy.Fail,
+	bool RedactSecrets = false,
+	bool CompressCode = false,
+	bool StripComments = false,
+	bool StripBlankLines = false,
+	ProjectCopyNoticeText? NoticeText = null,
+	bool RedactPrivateData = false);
+
+/// <summary>
+/// Localized text for the notice a transformed copy carries in its root. Passed in rather than
+/// resolved here so the Application layer keeps no opinion about the user's language.
+/// </summary>
+/// <param name="ExcludedUnscannable">
+/// Header for the list of files left out because content redaction could not inspect them. The paths
+/// follow on their own lines, so the reader can tell an omission from a file that never existed.
+/// </param>
+public sealed record ProjectCopyNoticeText(
+	string Redaction,
+	string Compression,
+	string ExcludedUnscannable = "",
+	string TooLargeReason = "",
+	string UnsupportedEncodingReason = "",
+	string UnreadableReason = "");
 
 public sealed record ProjectCopyExportResult(
 	string DestinationPath,
 	int CopiedFileCount,
 	int CreatedDirectoryCount,
-	long BytesWritten);
+	long BytesWritten,
+	int RedactedValueCount = 0,
+	IReadOnlyList<UnscannableFile>? UnscannableFiles = null);
 
 public sealed record ProjectCopyExportProgress(
 	int ProcessedEntryCount,

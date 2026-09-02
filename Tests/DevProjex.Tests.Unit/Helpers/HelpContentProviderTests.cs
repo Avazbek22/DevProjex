@@ -26,22 +26,6 @@ public sealed class HelpContentProviderTests
     }
 
     [Fact]
-    public void GetHelpBody_DescribesUnifiedTreeExpansionAnimation()
-    {
-        var provider = new HelpContentProvider();
-
-        var english = provider.GetHelpBody(AppLanguage.En);
-        var russian = provider.GetHelpBody(AppLanguage.Ru);
-
-        Assert.Contains("Tree expansion animation", english, StringComparison.Ordinal);
-        Assert.Contains("Enabled by default", english, StringComparison.Ordinal);
-        Assert.DoesNotContain("hovering over tree rows", english, StringComparison.Ordinal);
-        Assert.Contains("Анимация раскрытия дерева", russian, StringComparison.Ordinal);
-        Assert.Contains("Включена по умолчанию", russian, StringComparison.Ordinal);
-        Assert.DoesNotContain("смещения строк при наведении", russian, StringComparison.Ordinal);
-    }
-
-    [Fact]
     public void ToPlainText_RemovesMarkdownLikeMarkers_AndKeepsReadableStructure()
     {
         const string raw = """

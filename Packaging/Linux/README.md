@@ -79,5 +79,5 @@ The desktop entry invokes `devprojex open`, so graphical launchers always open D
 
 Portable Linux single-file artifacts are published as:
 
-- `DevProjex.v<version>.linux-x64.portable`
-- `DevProjex.v<version>.linux-arm64.portable`
+- `DevProjex.v<version>.linux-x64.tar.gz`
+- `DevProjex.v<version>.linux-arm64.tar.gz`

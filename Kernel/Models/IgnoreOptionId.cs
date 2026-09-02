@@ -11,5 +11,10 @@ public enum IgnoreOptionId
 	EmptyFolders,
 	EmptyFiles,
 	ExtensionlessFiles,
-	TrackedGitFilesOnly
+	TrackedGitFilesOnly,
+	HideSecrets,
+	CompressCode,
+	StripComments,
+	StripBlankLines,
+	HidePrivateData
 }

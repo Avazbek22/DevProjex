@@ -11,6 +11,7 @@ public sealed class JvmArtifactsIgnoreRule :
 {
 	private static readonly IReadOnlySet<string> MarkerFiles = SmartIgnoreRuleSet.Create(
 		"pom.xml",
+		"build.sbt",
 		"build.gradle",
 		"build.gradle.kts",
 		"settings.gradle",

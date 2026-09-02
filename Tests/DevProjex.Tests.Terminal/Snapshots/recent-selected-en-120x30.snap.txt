@@ -4,22 +4,21 @@
 
   Current directory                                                                            Current folder is ready
   <TEMP_ROOT>/<ID>
-       ┌┤Recent workspaces├────────────────────────────────────────────────────────────────────────────────────┐
-  ┌┤Act│ Open a recent local folder or Git repository from one shared history.                                 │─────┐
-  │  Op│                                                                                                       │     │
-  │> Re│   Folder     AlphaProject                 Today                                                       │     │
-  │  Br│ > Folder     Beta Project                 Today                                                       │     │
-  │  Cl│                                                                                                       │     │
-  │  Op│ Folder · Beta Project                                                                                 │     │
-  │  He│ <PROJECTS_ROOT>/Beta Project │     │
-  │  Ex│ Last opened: <TIMESTAMP>│     │
-  └────│                                                                                                       │─────┘
-       │                                                                                                       │
-  Direc│                                                                                                       │
-       │                                                                                                       │
-       │                                ⟦ Back ⟧▖ ⟦ Remove entry ⟧▖ ⟦► Open ◄⟧▖                                │
-       │                                ▝▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▘ ▝▀▀▀▀▀▀▀▀▀▘                                │
-       └───────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+  ┌┤Actions├───────────────────────────────┐  ┌┤Details├─────────────────────────────────────────────────────────────┐
+  │  Open current directory                │  │ Open this recent project.                                            │
+  │  [1] <RECENT_PATH>│  │                                                                      │
+  │> [2] <RECENT_PATH>│  │                                                                      │
+  │  Recent workspaces                     │  │                                                                      │
+  │  Browse folder                         │  │                                                                      │
+  │  Open project with settings file...    │  │                                                                      │
+  │  Clone repository                      │  │                                                                      │
+  │  Open Desktop                          │  │                                                                      │
+  │  Help                                  │  │                                                                      │
+  │  Exit                                  │  │                                                                      │
+  └────────────────────────────────────────┘  └──────────────────────────────────────────────────────────────────────┘
+
+  Direct automation: devprojex analyze .  |  devprojex export context . -o context.md
 
 
 
@@ -27,4 +26,5 @@
 
 
 
-  Up/Down or j/k Navigate   Enter Select   Ctrl+P Actions   ? Help   q Exit
+
+  1-9 Recent   Enter Select   : Commands   Ctrl+P Actions   ? Help   q Exit

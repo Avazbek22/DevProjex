@@ -24,7 +24,6 @@ public sealed class MainWindowViewModelResettableCollectionsTests
         var viewModel = CreateViewModel();
         var ignoreOptions = Assert.IsType<ResettableObservableCollection<IgnoreOptionViewModel>>(viewModel.IgnoreOptions);
         var extensions = Assert.IsType<ResettableObservableCollection<SelectionOptionViewModel>>(viewModel.Extensions);
-        var rootFolders = Assert.IsType<ResettableObservableCollection<SelectionOptionViewModel>>(viewModel.RootFolders);
 
         ignoreOptions.ReplaceAll([
             new IgnoreOptionViewModel(IgnoreOptionId.EmptyFiles, "Empty files", true),
@@ -35,13 +34,7 @@ public sealed class MainWindowViewModelResettableCollectionsTests
             new SelectionOptionViewModel(".xaml", true),
             new SelectionOptionViewModel(".json", true)
         ]);
-        rootFolders.ReplaceAll([
-            new SelectionOptionViewModel("src", true),
-            new SelectionOptionViewModel("tests", true)
-        ]);
-
         Assert.Equal("All (2)", viewModel.SettingsAllIgnore);
         Assert.Equal("All (3)", viewModel.SettingsAllExtensions);
-        Assert.Equal("All (2)", viewModel.SettingsAllRootFolders);
     }
 }

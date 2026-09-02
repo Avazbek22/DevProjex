@@ -1,7 +1,67 @@
-using System.ComponentModel;
 using DevProjex.Avalonia.Services;
+using DevProjex.Infrastructure.FileSystem;
 
 namespace DevProjex.Avalonia.Controls;
+
+public sealed class PreviewRedactionToggleRequestedEventArgs(
+	string occurrenceId,
+	IReadOnlyCollection<string>? restoreOccurrenceIds = null) : EventArgs
+{
+	public string OccurrenceId { get; } = occurrenceId;
+	public IReadOnlyCollection<string>? RestoreOccurrenceIds { get; } = restoreOccurrenceIds;
+}
+
+public sealed class PreviewBulkRedactionToggleRequestedEventArgs(
+	IReadOnlyCollection<string> occurrenceIds,
+	bool keep) : EventArgs
+{
+	public IReadOnlyCollection<string> OccurrenceIds { get; } = occurrenceIds;
+	public bool Keep { get; } = keep;
+}
+
+public sealed class PreviewManualSecretMarkRequestedEventArgs(
+	MarkedSecretValue value,
+	PreviewSelectionRange selection,
+	ManualRedactionClass classification,
+	bool persistent) : EventArgs
+{
+	public PreviewManualSecretMarkRequestedEventArgs(
+		MarkedSecretValue value,
+		PreviewSelectionRange selection,
+		bool persistent)
+		: this(value, selection, ManualRedactionClass.Secret, persistent)
+	{
+	}
+
+	public MarkedSecretValue Value { get; } = value;
+	public PreviewSelectionRange Selection { get; } = selection;
+	public ManualRedactionClass Class { get; } = classification;
+	public bool Persistent { get; } = persistent;
+}
+
+public sealed class PreviewManualSecretUnmarkRequestedEventArgs(
+	string? persistentMarkHash,
+	int persistentMarkLength,
+	string? sessionMarkId,
+	bool alsoDetected,
+	PersistentSecretMarkId? persistentMarkId = null) : EventArgs
+{
+	public string? PersistentMarkHash { get; } = persistentMarkHash;
+	public int PersistentMarkLength { get; } = persistentMarkLength;
+	public string? SessionMarkId { get; } = sessionMarkId;
+	public bool AlsoDetected { get; } = alsoDetected;
+	public PersistentSecretMarkId? PersistentMarkId { get; } = persistentMarkId;
+}
+
+internal sealed class PreviewManualSecretMarkRejectedEventArgs(string message) : EventArgs
+{
+	public string Message { get; } = message;
+}
+
+internal sealed class PreviewClipboardCopyFailedEventArgs(Exception exception) : EventArgs
+{
+	public Exception Exception { get; } = exception;
+}
 
 /// <summary>
 /// Draws only visible preview text lines for large payloads.
@@ -12,7 +72,15 @@ public sealed class VirtualizedPreviewTextControl : Control
 {
     public event EventHandler<CancelEventArgs>? CopyingToClipboard;
     public event EventHandler? CopiedToClipboard;
+	internal event EventHandler<PreviewClipboardCopyFailedEventArgs>? ClipboardCopyFailed;
     public event EventHandler? PreviewSelectionChanged;
+	public event EventHandler<PreviewRedactionToggleRequestedEventArgs>? RedactionToggleRequested;
+	public event EventHandler<PreviewBulkRedactionToggleRequestedEventArgs>? BulkRedactionToggleRequested;
+	public event EventHandler<PreviewManualSecretMarkRequestedEventArgs>? ManualSecretMarkRequested;
+	public event EventHandler<PreviewManualSecretUnmarkRequestedEventArgs>? ManualSecretUnmarkRequested;
+	internal event EventHandler<PreviewManualSecretMarkRejectedEventArgs>? ManualSecretMarkRejected;
+	internal event EventHandler? SearchDocumentChanged;
+	internal event EventHandler<PreviewMarkersChangedEventArgs>? PreviewMarkersChanged;
 
     public static readonly StyledProperty<string> TextProperty =
         AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(nameof(Text), string.Empty);
@@ -82,8 +150,92 @@ public sealed class VirtualizedPreviewTextControl : Control
     public static readonly StyledProperty<string> SelectAllMenuHeaderProperty =
         AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(nameof(SelectAllMenuHeader), "Select All");
 
-    public static readonly StyledProperty<string> ClearSelectionMenuHeaderProperty =
-        AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(nameof(ClearSelectionMenuHeader), "Clear selection");
+	public static readonly StyledProperty<string> RedactedSecretToolTipFormatProperty =
+		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
+			nameof(RedactedSecretToolTipFormat),
+			DesktopShortcutTextFormatter.Format(
+				"Detected {0}.\nClick to keep the original value.\n{alt}↑ / {alt}↓ navigates findings.",
+				DesktopPlatformResolver.Resolve()));
+
+	public static readonly StyledProperty<string> KeptSecretToolTipFormatProperty =
+		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
+			nameof(KeptSecretToolTipFormat),
+			"Detected {0}.\nThe original value is kept.\nClick to redact it again.");
+
+	public static readonly StyledProperty<string> AlwaysHideSecretFormatProperty =
+		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
+			nameof(AlwaysHideSecretFormat),
+			"Always hide secret \"{0}\"");
+
+	public static readonly StyledProperty<string> HideSecretHereFormatProperty =
+		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
+			nameof(HideSecretHereFormat),
+			"Hide \"{0}\" here");
+
+	public static readonly StyledProperty<string> PrivateDataAlwaysHideFormatProperty =
+		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
+			nameof(PrivateDataAlwaysHideFormat),
+			"Hide \"{0}\" as private data");
+
+	public static readonly StyledProperty<string> HideHereSecretToolTipProperty =
+		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
+			nameof(HideHereSecretToolTip),
+			"Only this occurrence");
+
+	public static readonly StyledProperty<string> AlwaysHideValueToolTipProperty =
+		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
+			nameof(AlwaysHideValueToolTip),
+			"All occurrences of this value");
+
+	public static readonly StyledProperty<string> PrivateDataAlwaysHideToolTipProperty =
+		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
+			nameof(PrivateDataAlwaysHideToolTip),
+			"All occurrences; controlled by Hide private data");
+
+	public static readonly StyledProperty<string> RemoveSecretMarkHeaderProperty =
+		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
+			nameof(RemoveSecretMarkHeader),
+			"Remove mark");
+
+	public static readonly StyledProperty<string> KeepAllRuleOccurrencesFormatProperty =
+		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
+			nameof(KeepAllRuleOccurrencesFormat),
+			"Keep all occurrences \"{0}\" ({1})");
+
+	public static readonly StyledProperty<string> HideAllRuleOccurrencesFormatProperty =
+		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
+			nameof(HideAllRuleOccurrencesFormat),
+			"Hide all occurrences \"{0}\" ({1})");
+
+	public static readonly StyledProperty<string> KeepAllFileOccurrencesFormatProperty =
+		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
+			nameof(KeepAllFileOccurrencesFormat),
+			"Keep all occurrences in \"{0}\" ({1})");
+
+	public static readonly StyledProperty<string> HideAllFileOccurrencesFormatProperty =
+		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
+			nameof(HideAllFileOccurrencesFormat),
+			"Hide all occurrences in \"{0}\" ({1})");
+
+	public static readonly StyledProperty<string> SecretSelectionTooShortProperty =
+		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
+			nameof(SecretSelectionTooShort),
+			"Select at least 8 characters.");
+
+	public static readonly StyledProperty<string> SecretSelectionTooLongProperty =
+		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
+			nameof(SecretSelectionTooLong),
+			"Select no more than 512 characters.");
+
+	public static readonly StyledProperty<string> SecretSelectionMultilineProperty =
+		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
+			nameof(SecretSelectionMultiline),
+			"Multiline values are not supported.");
+
+	public static readonly StyledProperty<string> SecretSelectionContentOnlyProperty =
+		AvaloniaProperty.Register<VirtualizedPreviewTextControl, string>(
+			nameof(SecretSelectionContentOnly),
+			"Select a value inside file content.");
 
     private const int RenderBufferLines = 3;
     private const int MaxFallbackVisibleLines = 120;
@@ -102,6 +254,14 @@ public sealed class VirtualizedPreviewTextControl : Control
     private int _cachedVisibleWindowLastLine;
     private readonly Dictionary<int, FormattedLineCacheEntry> _formattedLineCache = [];
     private readonly Queue<int> _formattedLineCacheOrder = [];
+	private readonly PreviewColumnGeometryCache _columnGeometryCache = new();
+	private Dictionary<int, PreviewRedactionSpan[]> _redactionsByLine = [];
+	private PreviewRedactionSpan[] _redactionOccurrences = [];
+	private PreviewSearchMatch[] _searchMatches = [];
+	private int _activeSearchMatchIndex = -1;
+	private bool _selectionOwnedBySearch;
+	private string? _hoveredRedactionOccurrenceId;
+	private RedactionNavigationTarget? _activeRedactionTarget;
     private string? _formattedLineCacheFontFamilyName;
     private string? _formattedLineCacheCultureName;
     private double _formattedLineCacheFontSize = double.NaN;
@@ -111,19 +271,43 @@ public sealed class VirtualizedPreviewTextControl : Control
     private int _maxLineLength;
     private SelectionPosition? _selectionAnchor;
     private SelectionPosition? _selectionActive;
+	private long _pendingClipboardCharacterCount;
     private bool _isSelecting;
     private Point _selectionPointerViewportPoint;
     private ThemeVariant? _cachedSelectionTheme;
     private IBrush? _cachedSelectionBackground;
     private IBrush? _cachedSelectionForeground;
+	private ThemeVariant? _cachedSearchTheme;
+	private IBrush? _cachedSearchHighlightBrush;
+	private IBrush? _cachedSearchCurrentBrush;
+	private IBrush? _cachedSearchHighlightTextBrush;
+	private readonly PreviewRedactionRenderStyleCache _redactionRenderStyleCache = new();
     private StickyHeaderTrimCacheKey? _cachedStickyHeaderTrimKey;
     private string? _cachedStickyHeaderTrimText;
-    private ContextMenu? _contextMenu;
+	private MenuFlyout? _contextFlyout;
+	private MenuItem? _secretHideHereMenuItem;
+	private MenuItem? _secretAlwaysHideMenuItem;
+	private MenuItem? _privateDataAlwaysHideMenuItem;
+	private MenuItem? _removeSecretMarkMenuItem;
+	private Separator? _manualRedactionSeparator;
+	private Separator? _bulkRedactionSeparator;
+	private MenuItem? _bulkRuleRedactionMenuItem;
+	private MenuItem? _bulkFileRedactionMenuItem;
     private MenuItem? _copyMenuItem;
     private MenuItem? _selectAllMenuItem;
-    private MenuItem? _clearSelectionMenuItem;
+	private ToolTip? _redactionToolTip;
+	private TextBlock? _redactionToolTipText;
+	private MarkedSecretValue? _contextMarkedSecret;
+	private PreviewSelectionRange _contextSelectionRange;
+	private string? _contextSecretMarkRejectionMessage;
+	private PreviewRedactionSpan? _contextManualRedaction;
+	private PreviewRedactionSpan? _contextDetectorRedaction;
+	private IReadOnlyCollection<string> _contextRuleOccurrenceIds = [];
+	private IReadOnlyCollection<string> _contextFileOccurrenceIds = [];
+	private bool _contextBulkKeep;
     private static Cursor? _previewTextCursor;
     private static Cursor? _previewMenuCursor;
+	private static Cursor? _previewActionCursor;
 
     // Cursor construction resolves a platform service. Keep it out of the type
     // initializer so geometry helpers and detached controls remain usable before
@@ -133,6 +317,9 @@ public sealed class VirtualizedPreviewTextControl : Control
 
     private static Cursor PreviewMenuCursor =>
         _previewMenuCursor ??= new Cursor(StandardCursorType.Arrow);
+
+	private static Cursor PreviewActionCursor =>
+		_previewActionCursor ??= new Cursor(StandardCursorType.Hand);
 
     static VirtualizedPreviewTextControl()
     {
@@ -159,7 +346,23 @@ public sealed class VirtualizedPreviewTextControl : Control
             StickyHeaderBorderBrushProperty,
             CopyMenuHeaderProperty,
             SelectAllMenuHeaderProperty,
-            ClearSelectionMenuHeaderProperty);
+			RedactedSecretToolTipFormatProperty,
+			KeptSecretToolTipFormatProperty,
+			AlwaysHideSecretFormatProperty,
+			HideSecretHereFormatProperty,
+			PrivateDataAlwaysHideFormatProperty,
+			HideHereSecretToolTipProperty,
+			AlwaysHideValueToolTipProperty,
+			PrivateDataAlwaysHideToolTipProperty,
+			RemoveSecretMarkHeaderProperty,
+			KeepAllRuleOccurrencesFormatProperty,
+			HideAllRuleOccurrencesFormatProperty,
+			KeepAllFileOccurrencesFormatProperty,
+			HideAllFileOccurrencesFormatProperty,
+			SecretSelectionTooShortProperty,
+			SecretSelectionTooLongProperty,
+			SecretSelectionMultilineProperty,
+			SecretSelectionContentOnlyProperty);
 
         AffectsMeasure<VirtualizedPreviewTextControl>(
             TextProperty,
@@ -179,7 +382,10 @@ public sealed class VirtualizedPreviewTextControl : Control
 
         DocumentProperty.Changed.AddClassHandler<VirtualizedPreviewTextControl>((control, _) =>
         {
+			control.ClearSearchMatches(publishMarkers: false);
+            control.RebuildRedactionIndex();
             control.RebuildTextLayoutMetadata();
+			control.SearchDocumentChanged?.Invoke(control, EventArgs.Empty);
         });
 
         CopyMenuHeaderProperty.Changed.AddClassHandler<VirtualizedPreviewTextControl>((control, _) =>
@@ -192,10 +398,60 @@ public sealed class VirtualizedPreviewTextControl : Control
             control.UpdateContextMenuHeaders();
         });
 
-        ClearSelectionMenuHeaderProperty.Changed.AddClassHandler<VirtualizedPreviewTextControl>((control, _) =>
-        {
-            control.UpdateContextMenuHeaders();
-        });
+		AlwaysHideSecretFormatProperty.Changed.AddClassHandler<VirtualizedPreviewTextControl>((control, _) =>
+		{
+			control.UpdateContextMenuHeaders();
+		});
+
+		HideSecretHereFormatProperty.Changed.AddClassHandler<VirtualizedPreviewTextControl>((control, _) =>
+		{
+			control.UpdateContextMenuHeaders();
+		});
+
+		PrivateDataAlwaysHideFormatProperty.Changed.AddClassHandler<VirtualizedPreviewTextControl>((control, _) =>
+		{
+			control.UpdateContextMenuHeaders();
+		});
+
+		HideHereSecretToolTipProperty.Changed.AddClassHandler<VirtualizedPreviewTextControl>((control, _) =>
+		{
+			control.UpdateContextMenuHeaders();
+		});
+
+		AlwaysHideValueToolTipProperty.Changed.AddClassHandler<VirtualizedPreviewTextControl>((control, _) =>
+		{
+			control.UpdateContextMenuHeaders();
+		});
+
+		PrivateDataAlwaysHideToolTipProperty.Changed.AddClassHandler<VirtualizedPreviewTextControl>((control, _) =>
+		{
+			control.UpdateContextMenuHeaders();
+		});
+
+		RemoveSecretMarkHeaderProperty.Changed.AddClassHandler<VirtualizedPreviewTextControl>((control, _) =>
+		{
+			control.UpdateContextMenuHeaders();
+		});
+
+		KeepAllRuleOccurrencesFormatProperty.Changed.AddClassHandler<VirtualizedPreviewTextControl>((control, _) =>
+		{
+			control.UpdateContextMenuHeaders();
+		});
+
+		HideAllRuleOccurrencesFormatProperty.Changed.AddClassHandler<VirtualizedPreviewTextControl>((control, _) =>
+		{
+			control.UpdateContextMenuHeaders();
+		});
+
+		KeepAllFileOccurrencesFormatProperty.Changed.AddClassHandler<VirtualizedPreviewTextControl>((control, _) =>
+		{
+			control.UpdateContextMenuHeaders();
+		});
+
+		HideAllFileOccurrencesFormatProperty.Changed.AddClassHandler<VirtualizedPreviewTextControl>((control, _) =>
+		{
+			control.UpdateContextMenuHeaders();
+		});
     }
 
     public string Text
@@ -330,11 +586,107 @@ public sealed class VirtualizedPreviewTextControl : Control
         set => SetValue(SelectAllMenuHeaderProperty, value);
     }
 
-    public string ClearSelectionMenuHeader
-    {
-        get => GetValue(ClearSelectionMenuHeaderProperty);
-        set => SetValue(ClearSelectionMenuHeaderProperty, value);
-    }
+	public string RedactedSecretToolTipFormat
+	{
+		get => GetValue(RedactedSecretToolTipFormatProperty);
+		set => SetValue(RedactedSecretToolTipFormatProperty, value);
+	}
+
+	public string KeptSecretToolTipFormat
+	{
+		get => GetValue(KeptSecretToolTipFormatProperty);
+		set => SetValue(KeptSecretToolTipFormatProperty, value);
+	}
+
+	public string AlwaysHideSecretFormat
+	{
+		get => GetValue(AlwaysHideSecretFormatProperty);
+		set => SetValue(AlwaysHideSecretFormatProperty, value);
+	}
+
+	public string HideSecretHereFormat
+	{
+		get => GetValue(HideSecretHereFormatProperty);
+		set => SetValue(HideSecretHereFormatProperty, value);
+	}
+
+	public string PrivateDataAlwaysHideFormat
+	{
+		get => GetValue(PrivateDataAlwaysHideFormatProperty);
+		set => SetValue(PrivateDataAlwaysHideFormatProperty, value);
+	}
+
+	public string HideHereSecretToolTip
+	{
+		get => GetValue(HideHereSecretToolTipProperty);
+		set => SetValue(HideHereSecretToolTipProperty, value);
+	}
+
+	public string AlwaysHideValueToolTip
+	{
+		get => GetValue(AlwaysHideValueToolTipProperty);
+		set => SetValue(AlwaysHideValueToolTipProperty, value);
+	}
+
+	public string PrivateDataAlwaysHideToolTip
+	{
+		get => GetValue(PrivateDataAlwaysHideToolTipProperty);
+		set => SetValue(PrivateDataAlwaysHideToolTipProperty, value);
+	}
+
+	public string RemoveSecretMarkHeader
+	{
+		get => GetValue(RemoveSecretMarkHeaderProperty);
+		set => SetValue(RemoveSecretMarkHeaderProperty, value);
+	}
+
+	public string KeepAllRuleOccurrencesFormat
+	{
+		get => GetValue(KeepAllRuleOccurrencesFormatProperty);
+		set => SetValue(KeepAllRuleOccurrencesFormatProperty, value);
+	}
+
+	public string HideAllRuleOccurrencesFormat
+	{
+		get => GetValue(HideAllRuleOccurrencesFormatProperty);
+		set => SetValue(HideAllRuleOccurrencesFormatProperty, value);
+	}
+
+	public string KeepAllFileOccurrencesFormat
+	{
+		get => GetValue(KeepAllFileOccurrencesFormatProperty);
+		set => SetValue(KeepAllFileOccurrencesFormatProperty, value);
+	}
+
+	public string HideAllFileOccurrencesFormat
+	{
+		get => GetValue(HideAllFileOccurrencesFormatProperty);
+		set => SetValue(HideAllFileOccurrencesFormatProperty, value);
+	}
+
+	public string SecretSelectionTooShort
+	{
+		get => GetValue(SecretSelectionTooShortProperty);
+		set => SetValue(SecretSelectionTooShortProperty, value);
+	}
+
+	public string SecretSelectionTooLong
+	{
+		get => GetValue(SecretSelectionTooLongProperty);
+		set => SetValue(SecretSelectionTooLongProperty, value);
+	}
+
+	public string SecretSelectionMultiline
+	{
+		get => GetValue(SecretSelectionMultilineProperty);
+		set => SetValue(SecretSelectionMultilineProperty, value);
+	}
+
+	public string SecretSelectionContentOnly
+	{
+		get => GetValue(SecretSelectionContentOnlyProperty);
+		set => SetValue(SecretSelectionContentOnlyProperty, value);
+	}
 
     public bool HasSelection => TryGetNormalizedSelection(out _, out _);
 
@@ -362,7 +714,9 @@ public sealed class VirtualizedPreviewTextControl : Control
         ClearSelectionState(invalidateVisual: true);
     }
 
-    public string GetSelectedText() => BuildSelectedText();
+    public string GetSelectedText() => BuildSelectedText(normalizeForClipboard: false);
+
+	internal long PendingClipboardCharacterCount => _pendingClipboardCharacterCount;
 
     public bool TryGetSelectionRange(out PreviewSelectionRange selectionRange)
     {
@@ -375,6 +729,83 @@ public sealed class VirtualizedPreviewTextControl : Control
         selectionRange = new PreviewSelectionRange(start.Line, start.Column, end.Line, end.Column);
         return true;
     }
+
+	internal int SearchMatchCount => _searchMatches.Length;
+
+	internal int ActiveSearchMatchIndex => _activeSearchMatchIndex;
+	internal PreviewMarkerSnapshot MarkerSnapshot { get; private set; } = PreviewMarkerSnapshot.Empty;
+
+	internal int SetSearchMatches(
+		PreviewSearchMatch[] matches,
+		bool activateNearestToViewport,
+		bool scrollIntoView)
+	{
+		ArgumentNullException.ThrowIfNull(matches);
+		_searchMatches = matches;
+		PublishPreviewMarkers();
+		if (matches.Length == 0)
+		{
+			_activeSearchMatchIndex = -1;
+			ClearSearchSelection();
+			InvalidateVisual();
+			return 0;
+		}
+
+		var nextIndex = activateNearestToViewport
+			? ResolveNearestSearchMatchIndexFromViewportTop()
+			: Math.Clamp(_activeSearchMatchIndex, 0, matches.Length - 1);
+		ActivateSearchMatch(nextIndex, scrollIntoView);
+		return nextIndex + 1;
+	}
+
+	internal int NavigateSearchMatch(int step)
+	{
+		if (_searchMatches.Length == 0 || step == 0)
+			return _activeSearchMatchIndex + 1;
+
+		var currentIndex = _activeSearchMatchIndex;
+		if (currentIndex < 0 || currentIndex >= _searchMatches.Length)
+			currentIndex = ResolveNearestSearchMatchIndexFromViewportTop();
+		var nextIndex = step > 0
+			? (currentIndex + 1) % _searchMatches.Length
+			: (currentIndex - 1 + _searchMatches.Length) % _searchMatches.Length;
+		ActivateSearchMatch(nextIndex, scrollIntoView: true);
+		return nextIndex + 1;
+	}
+
+	internal void NavigateRedaction(bool forward) => MoveToRedaction(forward);
+
+	internal void NavigateToMarker(PreviewMarkerTarget target)
+	{
+		if (target.Category == PreviewMarkerCategory.Redaction)
+		{
+			var index = FindNearestRedactedOccurrenceIndex(target.LineNumber);
+			if (index >= 0)
+				ActivateRedaction(_redactionOccurrences[index], centerInViewport: true);
+		}
+		else
+		{
+			var index = FindNearestSearchMatchIndex(target.LineNumber);
+			if (index >= 0)
+				ActivateSearchMatch(index, scrollIntoView: true, centerInViewport: true);
+		}
+
+		Focus();
+	}
+
+	internal void ClearSearchMatches(bool publishMarkers = true)
+	{
+		var hadMatches = _searchMatches.Length > 0 || _activeSearchMatchIndex >= 0;
+		_searchMatches = [];
+		_activeSearchMatchIndex = -1;
+		ClearSearchSelection();
+		if (hadMatches)
+		{
+			if (publishMarkers)
+				PublishPreviewMarkers();
+			InvalidateVisual();
+		}
+	}
 
     public bool TryHandleViewportSelectionStart(IPointer pointer, Point viewportPoint, KeyModifiers keyModifiers)
     {
@@ -396,6 +827,17 @@ public sealed class VirtualizedPreviewTextControl : Control
             return 1;
 
         return ResolveLineNumberAtOffset(verticalOffset, TopPadding, lineHeight, ResolveLineCount());
+    }
+
+    public double GetVerticalOffsetForLine(int lineNumber)
+    {
+        var lineCount = ResolveLineCount();
+        var lineHeight = ResolveLineHeight();
+        if (lineCount <= 0 || lineHeight <= 0)
+            return 0;
+
+        var normalizedLineNumber = Math.Clamp(lineNumber, 1, lineCount);
+        return TopPadding + ((normalizedLineNumber - 1) * lineHeight);
     }
 
     protected override Size MeasureOverride(Size availableSize)
@@ -437,6 +879,7 @@ public sealed class VirtualizedPreviewTextControl : Control
         var visibleWindow = BuildVisibleTextWindow(firstVisibleLine, lastVisibleLine);
         if (visibleWindow.Text.Length == 0)
             return;
+		EnsureFormattedLineCacheStyle();
 
         var origin = new Point(
             LeftPadding,
@@ -454,9 +897,21 @@ public sealed class VirtualizedPreviewTextControl : Control
         using (PushTopOverlayClip(context, viewportHeight))
         {
             DrawVisibleSectionDividers(context, firstVisibleLine, lastVisibleLine, lineHeight, viewportTop);
+			DrawVisibleRedactionHighlights(
+				context,
+				visibleWindow,
+				origin,
+				typeface,
+				lineHeight);
 
             if (!TryGetVisibleSelectionRange(visibleWindow, out _, out _))
             {
+				DrawVisibleSearchHighlights(
+					context,
+					visibleWindow,
+					origin,
+					typeface,
+					lineHeight);
                 DrawVisibleTextLines(
                     context,
                     visibleWindow,
@@ -474,8 +929,21 @@ public sealed class VirtualizedPreviewTextControl : Control
                     typeface,
                     lineHeight,
                     viewportTop);
+				DrawVisibleSearchHighlights(
+					context,
+					visibleWindow,
+					origin,
+					typeface,
+					lineHeight);
                 DrawVisibleTextLinesWithSelection(context, visibleWindow, origin, typeface, lineHeight, selectionForeground);
             }
+
+			DrawVisibleSearchHighlightText(
+				context,
+				visibleWindow,
+				origin,
+				typeface,
+				lineHeight);
         }
 
         DrawStickyHeader(context, typeface);
@@ -503,7 +971,6 @@ public sealed class VirtualizedPreviewTextControl : Control
         Typeface typeface,
         double lineHeight)
     {
-        EnsureFormattedLineCacheStyle();
         for (var lineIndex = 0; lineIndex < visibleWindow.LineCount; lineIndex++)
         {
             var lineOrigin = new Point(origin.X, origin.Y + (lineIndex * lineHeight));
@@ -514,6 +981,260 @@ public sealed class VirtualizedPreviewTextControl : Control
                 lineOrigin);
         }
     }
+
+	private void DrawVisibleRedactionHighlights(
+		DrawingContext context,
+		VisibleTextWindow visibleWindow,
+		Point origin,
+		Typeface typeface,
+		double lineHeight)
+	{
+		if (_redactionsByLine.Count == 0)
+			return;
+
+		var firstLine = visibleWindow.FirstLine;
+		var lastLine = firstLine + visibleWindow.LineCount - 1;
+		var renderStyles = ResolveRedactionRenderStyles();
+		for (var lineNumber = firstLine; lineNumber <= lastLine; lineNumber++)
+		{
+			if (!_redactionsByLine.TryGetValue(lineNumber, out var lineRedactions))
+				continue;
+
+			var lineEntry = GetOrCreateVisibleFormattedLine(
+				visibleWindow,
+				lineNumber,
+				typeface);
+			var lineText = lineEntry.Text;
+			foreach (var span in lineRedactions)
+			{
+				if (span.Length <= 0)
+					continue;
+				var startColumn = Math.Clamp(span.StartColumn, 0, lineText.Length);
+				var endColumn = Math.Clamp(span.StartColumn + span.Length, startColumn, lineText.Length);
+				if (endColumn <= startColumn)
+					continue;
+
+				var start = ResolveCachedDistanceFromColumn(
+					lineNumber,
+					lineEntry,
+					startColumn,
+					typeface);
+				var end = ResolveCachedDistanceFromColumn(
+					lineNumber,
+					lineEntry,
+					endColumn,
+					typeface);
+				var x = origin.X + start;
+				var width = Math.Max(
+					1,
+					end - start);
+				var y = origin.Y + ((lineNumber - firstLine) * lineHeight);
+				var isInteractive = span.OccurrenceId == _hoveredRedactionOccurrenceId ||
+				                    IsNavigationTarget(span, _activeRedactionTarget);
+				var style = renderStyles.Resolve(span.State, isInteractive);
+				context.DrawRectangle(
+					style.Background,
+					style.Border,
+					new RoundedRect(new Rect(x, y + 1, width, Math.Max(1, lineHeight - 2)), 3));
+			}
+		}
+	}
+
+	private void DrawVisibleSearchHighlightText(
+		DrawingContext context,
+		VisibleTextWindow visibleWindow,
+		Point origin,
+		Typeface typeface,
+		double lineHeight)
+	{
+		if (_searchMatches.Length == 0)
+			return;
+
+		var highlightTextBrush = ResolveSearchHighlightTextBrush();
+		var firstMatchIndex = FindFirstSearchMatchOnOrAfterLine(visibleWindow.FirstLine);
+		var currentLineNumber = -1;
+		var lineText = string.Empty;
+		FormattedLineCacheEntry? lineEntry = null;
+		FormattedText? formattedLine = null;
+		for (var matchIndex = firstMatchIndex;
+		     matchIndex < _searchMatches.Length;
+		     matchIndex++)
+		{
+			var match = _searchMatches[matchIndex];
+			if (match.LineNumber > visibleWindow.LastLine)
+				break;
+			if (match.LineNumber < visibleWindow.FirstLine || match.Length <= 0)
+				continue;
+
+			if (currentLineNumber != match.LineNumber)
+			{
+				currentLineNumber = match.LineNumber;
+				lineEntry = GetOrCreateVisibleFormattedLine(
+					visibleWindow,
+					match.LineNumber,
+					typeface);
+				lineText = lineEntry.Text;
+				formattedLine = BuildFormattedText(lineText, typeface);
+				formattedLine.SetForegroundBrush(highlightTextBrush);
+			}
+
+			var startColumn = Math.Clamp(match.StartColumn, 0, lineText.Length);
+			var endColumn = Math.Clamp(match.StartColumn + match.Length, startColumn, lineText.Length);
+			if (endColumn <= startColumn || formattedLine is null || lineEntry is null)
+				continue;
+
+			var left = origin.X + ResolveCachedDistanceFromColumn(
+				match.LineNumber,
+				lineEntry,
+				startColumn,
+				typeface);
+			var right = origin.X + ResolveCachedDistanceFromColumn(
+				match.LineNumber,
+				lineEntry,
+				endColumn,
+				typeface);
+			var top = origin.Y + ((match.LineNumber - visibleWindow.FirstLine) * lineHeight);
+			using (context.PushClip(new Rect(left, top, Math.Max(1, right - left), lineHeight)))
+			{
+				context.DrawText(
+					formattedLine,
+					new Point(origin.X, top));
+			}
+		}
+	}
+
+	private void DrawVisibleSearchHighlights(
+		DrawingContext context,
+		VisibleTextWindow visibleWindow,
+		Point origin,
+		Typeface typeface,
+		double lineHeight)
+	{
+		if (_searchMatches.Length == 0)
+			return;
+
+		var firstMatchIndex = FindFirstSearchMatchOnOrAfterLine(visibleWindow.FirstLine);
+		var currentLineNumber = -1;
+		var currentLineText = string.Empty;
+		FormattedLineCacheEntry? currentLineEntry = null;
+		for (var matchIndex = firstMatchIndex;
+		     matchIndex < _searchMatches.Length;
+		     matchIndex++)
+		{
+			var match = _searchMatches[matchIndex];
+			if (match.LineNumber > visibleWindow.LastLine)
+				break;
+			if (match.LineNumber < visibleWindow.FirstLine || match.Length <= 0)
+				continue;
+
+			if (currentLineNumber != match.LineNumber)
+			{
+				currentLineNumber = match.LineNumber;
+				currentLineEntry = GetOrCreateVisibleFormattedLine(
+					visibleWindow,
+					match.LineNumber,
+					typeface);
+				currentLineText = currentLineEntry.Text;
+			}
+
+			var lineText = currentLineText;
+			var startColumn = Math.Clamp(match.StartColumn, 0, lineText.Length);
+			var endColumn = Math.Clamp(match.StartColumn + match.Length, startColumn, lineText.Length);
+			if (endColumn <= startColumn || currentLineEntry is null)
+				continue;
+
+			var left = origin.X + ResolveCachedDistanceFromColumn(
+				match.LineNumber,
+				currentLineEntry,
+				startColumn,
+				typeface);
+			var right = origin.X + ResolveCachedDistanceFromColumn(
+				match.LineNumber,
+				currentLineEntry,
+				endColumn,
+				typeface);
+			var top = origin.Y + ((match.LineNumber - visibleWindow.FirstLine) * lineHeight);
+			context.FillRectangle(
+				ResolveSearchBrush(matchIndex == _activeSearchMatchIndex),
+				new Rect(left, top + 1, Math.Max(1, right - left), Math.Max(1, lineHeight - 2)));
+		}
+	}
+
+	private int FindFirstSearchMatchOnOrAfterLine(int lineNumber)
+	{
+		var low = 0;
+		var high = _searchMatches.Length;
+		while (low < high)
+		{
+			var middle = low + ((high - low) / 2);
+			if (_searchMatches[middle].LineNumber < lineNumber)
+				low = middle + 1;
+			else
+				high = middle;
+		}
+
+		return low;
+	}
+
+	private IBrush ResolveSearchBrush(bool current)
+	{
+		var application = global::Avalonia.Application.Current;
+		var theme = application?.ActualThemeVariant ?? ThemeVariant.Light;
+		if (_cachedSearchTheme != theme ||
+		    _cachedSearchHighlightBrush is null ||
+		    _cachedSearchCurrentBrush is null ||
+		    _cachedSearchHighlightTextBrush is null)
+		{
+			_cachedSearchTheme = theme;
+			_cachedSearchHighlightBrush = ResolveSearchBrushResource(
+				application,
+				theme,
+				"TreeSearchHighlightBrush",
+				"#FFEB3B");
+			_cachedSearchCurrentBrush = ResolveSearchBrushResource(
+				application,
+				theme,
+				"TreeSearchCurrentBrush",
+				"#F9A825");
+			_cachedSearchHighlightTextBrush = ResolveSearchBrushResource(
+				application,
+				theme,
+				"TreeSearchHighlightTextBrush",
+				"#000000");
+		}
+
+		return current ? _cachedSearchCurrentBrush : _cachedSearchHighlightBrush;
+	}
+
+	private IBrush ResolveSearchHighlightTextBrush()
+	{
+		_ = ResolveSearchBrush(current: false);
+		return _cachedSearchHighlightTextBrush!;
+	}
+
+	private static IBrush ResolveSearchBrushResource(
+		global::Avalonia.Application? application,
+		ThemeVariant theme,
+		string resourceKey,
+		string fallbackColor)
+	{
+		return application?.TryFindResource(resourceKey, theme, out var resource) == true &&
+		       resource is IBrush brush
+			? brush
+			: new SolidColorBrush(Color.Parse(fallbackColor));
+	}
+
+	private PreviewRedactionRenderStyleCache ResolveRedactionRenderStyles()
+	{
+		var application = global::Avalonia.Application.Current;
+		var theme = application?.ActualThemeVariant ?? ThemeVariant.Light;
+		var accent = application?.Resources.TryGetResource("AppAccentBrush", theme, out var resource) == true &&
+		             resource is ISolidColorBrush solid
+			? solid.Color
+			: Color.Parse("#6D5DFB");
+		_redactionRenderStyleCache.Update(theme, accent);
+		return _redactionRenderStyleCache;
+	}
 
     private void DrawVisibleTextLinesWithSelection(
         DrawingContext context,
@@ -555,22 +1276,45 @@ public sealed class VirtualizedPreviewTextControl : Control
         int lineNumber,
         ReadOnlySpan<char> lineText,
         Typeface typeface)
+		=> GetOrCreateFormattedLineEntry(lineNumber, lineText, typeface).FormattedText;
+
+	private FormattedLineCacheEntry GetOrCreateVisibleFormattedLine(
+		VisibleTextWindow visibleWindow,
+		int lineNumber,
+		Typeface typeface)
+	{
+		var lineIndex = Math.Clamp(
+			lineNumber - visibleWindow.FirstLine,
+			0,
+			visibleWindow.LineCount - 1);
+		return GetOrCreateFormattedLineEntry(
+			lineNumber,
+			visibleWindow.GetLineSpan(lineIndex),
+			typeface);
+	}
+
+	private FormattedLineCacheEntry GetOrCreateFormattedLineEntry(
+		int lineNumber,
+		ReadOnlySpan<char> lineText,
+		Typeface typeface)
     {
         if (_formattedLineCache.TryGetValue(lineNumber, out var cachedLine) &&
             lineText.SequenceEqual(cachedLine.Text.AsSpan()))
         {
-            return cachedLine.FormattedText;
+			return cachedLine;
         }
 
+		if (cachedLine is not null)
+			_columnGeometryCache.Clear();
         var text = lineText.ToString();
         var formattedText = BuildFormattedText(text, typeface);
         if (cachedLine is null)
             _formattedLineCacheOrder.Enqueue(lineNumber);
 
-        _formattedLineCache[lineNumber] =
-            new FormattedLineCacheEntry(text, formattedText);
+        var entry = new FormattedLineCacheEntry(text, formattedText);
+        _formattedLineCache[lineNumber] = entry;
         TrimFormattedLineCache();
-        return formattedText;
+		return entry;
     }
 
     private void EnsureFormattedLineCacheStyle()
@@ -599,19 +1343,23 @@ public sealed class VirtualizedPreviewTextControl : Control
         _formattedLineCacheBrush = brush;
     }
 
-    private void TrimFormattedLineCache()
-    {
-        while (_formattedLineCache.Count > MaxCachedFormattedLines &&
-               _formattedLineCacheOrder.TryDequeue(out var lineNumber))
-        {
-            _formattedLineCache.Remove(lineNumber);
-        }
-    }
+	private void TrimFormattedLineCache()
+	{
+		var evicted = false;
+		while (_formattedLineCache.Count > MaxCachedFormattedLines &&
+		       _formattedLineCacheOrder.TryDequeue(out var lineNumber))
+		{
+			evicted |= _formattedLineCache.Remove(lineNumber);
+		}
+		if (evicted)
+			_columnGeometryCache.Clear();
+	}
 
     private void ClearFormattedLineCache()
     {
         _formattedLineCache.Clear();
         _formattedLineCacheOrder.Clear();
+		_columnGeometryCache.Clear();
     }
 
     protected override void OnPointerPressed(PointerPressedEventArgs e)
@@ -619,10 +1367,17 @@ public sealed class VirtualizedPreviewTextControl : Control
         base.OnPointerPressed(e);
 
         var properties = e.GetCurrentPoint(this).Properties;
-        if (properties.IsRightButtonPressed)
+		var isContextGesture = properties.IsRightButtonPressed ||
+			properties.PointerUpdateKind == PointerUpdateKind.RightButtonPressed ||
+			(DesktopShortcutModifiers.Current.Platform == DesktopPlatform.MacOS &&
+			 (properties.IsLeftButtonPressed ||
+			  properties.PointerUpdateKind == PointerUpdateKind.LeftButtonPressed) &&
+			 DesktopShortcutModifiers.Current.IsMacOSSecondaryClickModifier(e.KeyModifiers));
+		if (isContextGesture)
         {
             Focus();
-            OpenContextMenu();
+			PrepareContextSelection(e.GetPosition(this));
+			OpenContextMenu();
             e.Handled = true;
             return;
         }
@@ -631,6 +1386,21 @@ public sealed class VirtualizedPreviewTextControl : Control
             return;
 
         Focus();
+		var hitPosition = HitTestSelectionPosition(e.GetPosition(this));
+		if (TryGetRedactionAt(hitPosition, out var redaction))
+		{
+			_activeRedactionTarget = CreateNavigationTarget(redaction);
+			InvalidateVisual();
+			RaiseRedactionToggleRequested(redaction);
+			e.Handled = true;
+			return;
+		}
+
+		if (_activeRedactionTarget is not null)
+		{
+			_activeRedactionTarget = null;
+			InvalidateVisual();
+		}
         CaptureSelectionPointer(e);
         TryStartSelection(e.Pointer, e.GetPosition(this), e.KeyModifiers);
         e.Handled = true;
@@ -640,15 +1410,27 @@ public sealed class VirtualizedPreviewTextControl : Control
     {
         base.OnPointerMoved(e);
 
-        if (!_isSelecting || e.Pointer.Captured != this)
-            return;
+		if (!_isSelecting || e.Pointer.Captured != this)
+		{
+			var position = HitTestSelectionPosition(e.GetPosition(this));
+			UpdateHoveredRedaction(TryGetRedactionAt(position, out var hovered) ? hovered : null);
+			return;
+		}
 
+		UpdateHoveredRedaction(null);
         CaptureSelectionPointer(e);
         UpdateSelectionActivePosition(HitTestSelectionPosition(e.GetPosition(this)));
         UpdateSelectionAutoScrollState();
         Cursor = PreviewTextCursor;
         e.Handled = true;
     }
+
+	protected override void OnPointerExited(PointerEventArgs e)
+	{
+		base.OnPointerExited(e);
+		if (!_isSelecting)
+			UpdateHoveredRedaction(null);
+	}
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
@@ -677,26 +1459,506 @@ public sealed class VirtualizedPreviewTextControl : Control
         if (e.Handled)
             return;
 
-        if (e.KeyModifiers == KeyModifiers.Control && e.Key == Key.A)
+		if (DesktopShortcutModifiers.Current.IsPrimary(e.KeyModifiers) && e.Key == Key.A)
         {
             SelectAll();
             e.Handled = true;
             return;
         }
 
-        if (e.KeyModifiers == KeyModifiers.Control && e.Key == Key.C && HasSelection)
+		if (DesktopShortcutModifiers.Current.IsPrimary(e.KeyModifiers) && e.Key == Key.C && HasSelection)
         {
             _ = CopySelectionToClipboardAsync();
             e.Handled = true;
             return;
         }
 
-        if (e.Key == Key.Escape && (_selectionAnchor is not null || _selectionActive is not null))
+		if (e.Key == Key.Escape &&
+		    (_selectionAnchor is not null ||
+		     _selectionActive is not null ||
+		     _activeRedactionTarget is not null))
         {
             ClearSelection();
+			_activeRedactionTarget = null;
+			InvalidateVisual();
             e.Handled = true;
+			return;
         }
+
+		if (e.Key is Key.Enter or Key.Space &&
+		    TryGetActiveRedaction(out var redaction))
+		{
+			RaiseRedactionToggleRequested(redaction);
+			e.Handled = true;
+			return;
+		}
+
+		if (e.Key is Key.Up or Key.Down && e.KeyModifiers == KeyModifiers.Alt)
+		{
+			MoveToRedaction(forward: e.Key == Key.Down);
+			e.Handled = true;
+		}
     }
+
+	private bool TryGetActiveRedaction(out PreviewRedactionSpan redaction)
+	{
+		if (_activeRedactionTarget is { } target)
+		{
+			redaction = FindRedaction(target)!;
+			if (redaction is not null)
+				return true;
+		}
+
+		if (_selectionActive is { } active)
+			return TryGetRedactionAt(active, out redaction);
+
+		redaction = null!;
+		return false;
+	}
+
+	private bool TryGetRedactionAt(
+		SelectionPosition position,
+		out PreviewRedactionSpan redaction)
+	{
+		redaction = null!;
+		if (!_redactionsByLine.TryGetValue(position.Line, out var redactions))
+			return false;
+
+		foreach (var candidate in redactions)
+		{
+			if (candidate.LineNumber == position.Line &&
+			    position.Column >= candidate.StartColumn &&
+			    position.Column < candidate.StartColumn + candidate.Length)
+			{
+				redaction = candidate;
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	private void RebuildRedactionIndex()
+	{
+		_contextDetectorRedaction = null;
+		_contextRuleOccurrenceIds = [];
+		_contextFileOccurrenceIds = [];
+		_contextFlyout?.Hide();
+		var redactions = Document?.Redactions ?? Array.Empty<PreviewRedactionSpan>();
+		_redactionsByLine = redactions
+			.GroupBy(static span => span.LineNumber)
+			.ToDictionary(
+				static group => group.Key,
+				static group => group.OrderBy(static span => span.StartColumn).ToArray());
+		_redactionOccurrences = BuildRedactionNavigationStops(redactions);
+		if (_activeRedactionTarget is { } active && FindRedaction(active) is null)
+			_activeRedactionTarget = null;
+		UpdateHoveredRedaction(null);
+		PublishPreviewMarkers();
+	}
+
+	private void PublishPreviewMarkers()
+	{
+		var document = Document;
+		if (document is null)
+		{
+			MarkerSnapshot = PreviewMarkerSnapshot.Empty;
+			PreviewMarkersChanged?.Invoke(this, new PreviewMarkersChangedEventArgs(MarkerSnapshot));
+			return;
+		}
+
+		List<PreviewMarkerSource>? markers = null;
+		int? firstGeneratedPathLine = null;
+		foreach (var (lineNumber, redactions) in _redactionsByLine)
+		{
+			if (redactions.Any(static span => span.Source == SecretFindingSource.GeneratedPath))
+			{
+				firstGeneratedPathLine = firstGeneratedPathLine is { } current
+					? Math.Min(current, lineNumber)
+					: lineNumber;
+			}
+
+			if (!redactions.Any(static span => span.Source != SecretFindingSource.GeneratedPath))
+				continue;
+
+			markers ??= [];
+			markers.Add(new PreviewMarkerSource(lineNumber, PreviewMarkerCategory.Redaction));
+		}
+		if (firstGeneratedPathLine is { } generatedPathLine &&
+		    (markers is null || !markers.Any(marker =>
+			    marker.LineNumber == generatedPathLine &&
+			    marker.Category == PreviewMarkerCategory.Redaction)))
+		{
+			markers ??= [];
+			markers.Add(new PreviewMarkerSource(generatedPathLine, PreviewMarkerCategory.Redaction));
+		}
+
+		var previousSearchLine = -1;
+		foreach (var match in _searchMatches)
+		{
+			if (match.LineNumber == previousSearchLine)
+				continue;
+
+			markers ??= [];
+			markers.Add(new PreviewMarkerSource(match.LineNumber, PreviewMarkerCategory.Search));
+			previousSearchLine = match.LineNumber;
+		}
+
+		MarkerSnapshot = new PreviewMarkerSnapshot(
+			Math.Max(1, document.LineCount),
+			markers?.ToArray() ?? []);
+		PreviewMarkersChanged?.Invoke(this, new PreviewMarkersChangedEventArgs(MarkerSnapshot));
+	}
+
+	private void RaiseRedactionToggleRequested(PreviewRedactionSpan redaction)
+	{
+		var restoreOccurrenceIds = redaction.State == SecretPreviewSpanState.KeptAsIs
+			? redaction.CascadedOccurrenceIds
+			: null;
+		RedactionToggleRequested?.Invoke(
+			this,
+			new PreviewRedactionToggleRequestedEventArgs(
+				redaction.OccurrenceId,
+				restoreOccurrenceIds));
+	}
+
+	private static PreviewRedactionSpan[] BuildRedactionNavigationStops(
+		IReadOnlyList<PreviewRedactionSpan> redactions)
+	{
+		var stops = redactions.ToArray();
+		Array.Sort(stops, CompareRedactionPositions);
+		return stops;
+	}
+
+	private PreviewRedactionSpan? FindRedaction(RedactionNavigationTarget target)
+	{
+		if (!_redactionsByLine.TryGetValue(target.LineNumber, out var lineRedactions))
+			return null;
+
+		return lineRedactions.FirstOrDefault(span => IsNavigationTarget(span, target));
+	}
+
+	private static int CompareRedactionPositions(PreviewRedactionSpan left, PreviewRedactionSpan right)
+	{
+		var lineComparison = left.LineNumber.CompareTo(right.LineNumber);
+		return lineComparison != 0
+			? lineComparison
+			: left.StartColumn.CompareTo(right.StartColumn);
+	}
+
+	private static RedactionNavigationTarget CreateNavigationTarget(PreviewRedactionSpan span) =>
+		new(span.OccurrenceId, span.LineNumber, span.StartColumn);
+
+	private static bool IsNavigationTarget(
+		PreviewRedactionSpan span,
+		RedactionNavigationTarget? target) =>
+		target is { } value &&
+		string.Equals(span.OccurrenceId, value.OccurrenceId, StringComparison.Ordinal) &&
+		span.LineNumber == value.LineNumber &&
+		span.StartColumn == value.StartColumn;
+
+	private void UpdateHoveredRedaction(PreviewRedactionSpan? redaction)
+	{
+		var occurrenceId = redaction?.OccurrenceId;
+		var changed = !string.Equals(
+			_hoveredRedactionOccurrenceId,
+			occurrenceId,
+			StringComparison.Ordinal);
+		_hoveredRedactionOccurrenceId = occurrenceId;
+		Cursor = redaction is null ? PreviewTextCursor : PreviewActionCursor;
+		if (redaction is null)
+		{
+			ToolTip.SetTip(this, null);
+		}
+		else
+		{
+			var toolTip = EnsureRedactionToolTip();
+			_redactionToolTipText!.Text = string.Format(
+				CultureInfo.CurrentCulture,
+				redaction.State == SecretPreviewSpanState.Redacted
+					? RedactedSecretToolTipFormat
+					: KeptSecretToolTipFormat,
+				redaction.RuleId);
+			ToolTip.SetTip(this, toolTip);
+		}
+		if (changed)
+			InvalidateVisual();
+	}
+
+	private ToolTip EnsureRedactionToolTip()
+	{
+		if (_redactionToolTip is not null)
+			return _redactionToolTip;
+
+		_redactionToolTipText = new TextBlock
+		{
+			TextWrapping = TextWrapping.Wrap
+		};
+		_redactionToolTip = new ToolTip
+		{
+			Content = _redactionToolTipText,
+			MaxWidth = 420
+		};
+		return _redactionToolTip;
+	}
+
+	private void MoveToRedaction(bool forward)
+	{
+		if (_redactionOccurrences.Length == 0)
+			return;
+
+		var nextIndex = ResolveRedactionNavigationIndex(forward);
+		ActivateRedaction(_redactionOccurrences[nextIndex], centerInViewport: false);
+	}
+
+	private void ActivateRedaction(
+		PreviewRedactionSpan redaction,
+		bool centerInViewport)
+	{
+		_activeRedactionTarget = CreateNavigationTarget(redaction);
+		_selectionOwnedBySearch = false;
+		_selectionAnchor = new SelectionPosition(redaction.LineNumber, redaction.StartColumn);
+		_selectionActive = _selectionAnchor;
+		UpdateHoveredRedaction(null);
+		ScrollRedactionIntoView(redaction, centerInViewport);
+		InvalidateVisual();
+		PreviewSelectionChanged?.Invoke(this, EventArgs.Empty);
+	}
+
+	private int FindNearestRedactedOccurrenceIndex(int targetLine)
+	{
+		var nearestIndex = -1;
+		var nearestDistance = int.MaxValue;
+		for (var index = 0; index < _redactionOccurrences.Length; index++)
+		{
+			var occurrence = _redactionOccurrences[index];
+			if (occurrence.State != SecretPreviewSpanState.Redacted)
+				continue;
+
+			var distance = Math.Abs(occurrence.LineNumber - targetLine);
+			if (distance < nearestDistance)
+			{
+				nearestIndex = index;
+				nearestDistance = distance;
+			}
+			else if (occurrence.LineNumber > targetLine && distance > nearestDistance)
+			{
+				break;
+			}
+		}
+
+		return nearestIndex;
+	}
+
+	private int ResolveRedactionNavigationIndex(bool forward)
+	{
+		var currentIndex = _activeRedactionTarget is null
+			? -1
+			: Array.FindIndex(
+				_redactionOccurrences,
+				span => IsNavigationTarget(span, _activeRedactionTarget));
+		var scrollViewer = GetOwnerScrollViewer();
+		if (currentIndex >= 0 &&
+		    (scrollViewer is null || IsRedactionVisible(_redactionOccurrences[currentIndex], scrollViewer)))
+		{
+			return forward
+				? (currentIndex + 1) % _redactionOccurrences.Length
+				: (currentIndex - 1 + _redactionOccurrences.Length) % _redactionOccurrences.Length;
+		}
+
+		if (scrollViewer is null || scrollViewer.Viewport.Height <= 0)
+			return forward ? 0 : _redactionOccurrences.Length - 1;
+
+		var lineHeight = ResolveLineHeight();
+		var viewportTop = scrollViewer.Offset.Y;
+		var viewportBottom = viewportTop + scrollViewer.Viewport.Height;
+		if (forward)
+		{
+			var index = Array.FindIndex(
+				_redactionOccurrences,
+				span => ResolveRedactionLineBottom(span, lineHeight) > viewportTop);
+			return index >= 0 ? index : 0;
+		}
+
+		var previousIndex = Array.FindLastIndex(
+			_redactionOccurrences,
+			span => ResolveRedactionLineTop(span, lineHeight) < viewportBottom);
+		return previousIndex >= 0 ? previousIndex : _redactionOccurrences.Length - 1;
+	}
+
+	private bool IsRedactionVisible(PreviewRedactionSpan redaction, ScrollViewer scrollViewer)
+	{
+		if (scrollViewer.Viewport.Height <= 0)
+			return true;
+
+		var lineHeight = ResolveLineHeight();
+		var viewportTop = scrollViewer.Offset.Y;
+		var viewportBottom = viewportTop + scrollViewer.Viewport.Height;
+		return ResolveRedactionLineBottom(redaction, lineHeight) > viewportTop &&
+		       ResolveRedactionLineTop(redaction, lineHeight) < viewportBottom;
+	}
+
+	private double ResolveRedactionLineTop(PreviewRedactionSpan redaction, double lineHeight)
+		=> ResolveContentTopPadding() + ((redaction.LineNumber - 1) * lineHeight);
+
+	private double ResolveRedactionLineBottom(PreviewRedactionSpan redaction, double lineHeight)
+		=> ResolveRedactionLineTop(redaction, lineHeight) + lineHeight;
+
+	private void ScrollRedactionIntoView(
+		PreviewRedactionSpan redaction,
+		bool centerInViewport = false)
+	{
+		var scrollViewer = GetOwnerScrollViewer();
+		if (scrollViewer is null)
+			return;
+
+		var lineHeight = ResolveLineHeight();
+		var lineTop = ResolveRedactionLineTop(redaction, lineHeight);
+		var lineBottom = ResolveRedactionLineBottom(redaction, lineHeight);
+		var offset = scrollViewer.Offset;
+		var targetY = ResolveTargetVerticalOffset(
+			lineTop,
+			lineBottom,
+			offset.Y,
+			scrollViewer.Viewport.Height,
+			centerInViewport);
+
+		var lineText = GetLineText(redaction.LineNumber);
+		var typeface = ResolveTypeface();
+		var spanLeft = LeftPadding + ResolveDistanceFromColumn(lineText, redaction.StartColumn, typeface);
+		var spanRight = LeftPadding + ResolveDistanceFromColumn(
+			lineText,
+			redaction.StartColumn + redaction.Length,
+			typeface);
+		var targetX = offset.X;
+		if (spanLeft < offset.X)
+			targetX = spanLeft - LeftPadding;
+		else if (spanRight > offset.X + scrollViewer.Viewport.Width)
+			targetX = spanRight - scrollViewer.Viewport.Width + RightPadding;
+
+		var maximumX = Math.Max(0, scrollViewer.Extent.Width - scrollViewer.Viewport.Width);
+		var maximumY = Math.Max(0, scrollViewer.Extent.Height - scrollViewer.Viewport.Height);
+		scrollViewer.Offset = new Vector(
+			Math.Clamp(targetX, 0, maximumX),
+			Math.Clamp(targetY, 0, maximumY));
+	}
+
+	private int ResolveNearestSearchMatchIndexFromViewportTop()
+	{
+		if (_searchMatches.Length == 0)
+			return -1;
+
+		var scrollViewer = GetOwnerScrollViewer();
+		if (scrollViewer is null)
+			return 0;
+
+		var topLine = GetLineNumberAtVerticalOffset(scrollViewer.Offset.Y);
+		var index = FindFirstSearchMatchOnOrAfterLine(topLine);
+		return index < _searchMatches.Length ? index : 0;
+	}
+
+	private int FindNearestSearchMatchIndex(int targetLine)
+	{
+		if (_searchMatches.Length == 0)
+			return -1;
+
+		var nextIndex = FindFirstSearchMatchOnOrAfterLine(targetLine);
+		if (nextIndex == 0)
+			return 0;
+		if (nextIndex == _searchMatches.Length)
+			return nextIndex - 1;
+
+		return targetLine - _searchMatches[nextIndex - 1].LineNumber <=
+		       _searchMatches[nextIndex].LineNumber - targetLine
+			? nextIndex - 1
+			: nextIndex;
+	}
+
+	private void ActivateSearchMatch(
+		int index,
+		bool scrollIntoView,
+		bool centerInViewport = false)
+	{
+		if (index < 0 || index >= _searchMatches.Length)
+			return;
+
+		_activeSearchMatchIndex = index;
+		var match = _searchMatches[index];
+		_selectionAnchor = new SelectionPosition(match.LineNumber, match.StartColumn);
+		_selectionActive = new SelectionPosition(
+			match.LineNumber,
+			match.StartColumn + match.Length);
+		_selectionOwnedBySearch = true;
+		_activeRedactionTarget = null;
+		UpdateHoveredRedaction(null);
+		if (scrollIntoView)
+			ScrollSearchMatchIntoView(match, centerInViewport);
+
+		InvalidateVisual();
+		PreviewSelectionChanged?.Invoke(this, EventArgs.Empty);
+	}
+
+	private void ScrollSearchMatchIntoView(
+		PreviewSearchMatch match,
+		bool centerInViewport = false)
+	{
+		var scrollViewer = GetOwnerScrollViewer();
+		if (scrollViewer is null)
+			return;
+
+		var lineHeight = ResolveLineHeight();
+		var lineTop = ResolveContentTopPadding() + ((match.LineNumber - 1) * lineHeight);
+		var lineBottom = lineTop + lineHeight;
+		var offset = scrollViewer.Offset;
+		var targetY = ResolveTargetVerticalOffset(
+			lineTop,
+			lineBottom,
+			offset.Y,
+			scrollViewer.Viewport.Height,
+			centerInViewport);
+
+		var lineText = GetLineText(match.LineNumber);
+		var typeface = ResolveTypeface();
+		var spanLeft = LeftPadding + ResolveDistanceFromColumn(lineText, match.StartColumn, typeface);
+		var spanRight = LeftPadding + ResolveDistanceFromColumn(
+			lineText,
+			match.StartColumn + match.Length,
+			typeface);
+		var targetX = offset.X;
+		if (spanLeft < offset.X)
+			targetX = spanLeft - LeftPadding;
+		else if (spanRight > offset.X + scrollViewer.Viewport.Width)
+			targetX = spanRight - scrollViewer.Viewport.Width + RightPadding;
+
+		var maximumX = Math.Max(0, scrollViewer.Extent.Width - scrollViewer.Viewport.Width);
+		var maximumY = Math.Max(0, scrollViewer.Extent.Height - scrollViewer.Viewport.Height);
+		scrollViewer.Offset = new Vector(
+			Math.Clamp(targetX, 0, maximumX),
+			Math.Clamp(targetY, 0, maximumY));
+	}
+
+	private static double ResolveTargetVerticalOffset(
+		double lineTop,
+		double lineBottom,
+		double viewportTop,
+		double viewportHeight,
+		bool centerInViewport)
+	{
+		if (centerInViewport)
+			return ((lineTop + lineBottom) / 2) - (viewportHeight / 2);
+
+		return lineTop < viewportTop || lineBottom > viewportTop + viewportHeight
+			? lineTop - (viewportHeight * 0.35)
+			: viewportTop;
+	}
+
+	private void ClearSearchSelection()
+	{
+		if (!_selectionOwnedBySearch)
+			return;
+
+		ClearSelectionState(invalidateVisual: false);
+	}
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
@@ -704,6 +1966,9 @@ public sealed class VirtualizedPreviewTextControl : Control
         _isSelecting = false;
         ReleaseSelectionAutoScrollTimer();
         _ownerScrollViewer = null;
+		_activeRedactionTarget = null;
+		UpdateHoveredRedaction(null);
+		ToolTip.SetTip(this, null);
         CloseContextMenu();
         ResetVisibleWindowCache();
     }
@@ -716,6 +1981,10 @@ public sealed class VirtualizedPreviewTextControl : Control
         _cachedSelectionTheme = null;
         _cachedSelectionBackground = null;
         _cachedSelectionForeground = null;
+		_cachedSearchTheme = null;
+		_cachedSearchHighlightBrush = null;
+		_cachedSearchCurrentBrush = null;
+		_cachedSearchHighlightTextBrush = null;
 
         if (Document is { } document)
         {
@@ -1048,6 +2317,24 @@ public sealed class VirtualizedPreviewTextControl : Control
         return BuildFormattedText(lineText[..clampedColumn], typeface).WidthIncludingTrailingWhitespace;
     }
 
+	private double ResolveCachedDistanceFromColumn(
+		int lineNumber,
+		FormattedLineCacheEntry lineEntry,
+		int column,
+		Typeface typeface)
+	{
+		if (string.IsNullOrEmpty(lineEntry.Text) || column <= 0)
+			return 0;
+
+		var clampedColumn = Math.Clamp(column, 0, lineEntry.Text.Length);
+		if (_columnGeometryCache.TryGet(lineNumber, clampedColumn, out var cachedDistance))
+			return cachedDistance;
+
+		var distance = ResolveDistanceFromColumn(lineEntry.Text, clampedColumn, typeface);
+		_columnGeometryCache.Store(lineNumber, clampedColumn, distance);
+		return distance;
+	}
+
     private double ResolveCharacterMidpoint(string lineText, int column, Typeface typeface)
     {
         var left = ResolveDistanceFromColumn(lineText, column, typeface);
@@ -1076,6 +2363,7 @@ public sealed class VirtualizedPreviewTextControl : Control
         var hadState = _selectionAnchor is not null || _selectionActive is not null;
         _selectionAnchor = null;
         _selectionActive = null;
+		_selectionOwnedBySearch = false;
 
         if (invalidateVisual && hadState)
             InvalidateVisual();
@@ -1122,24 +2410,83 @@ public sealed class VirtualizedPreviewTextControl : Control
             : left.Column.CompareTo(right.Column);
     }
 
-    private async Task CopySelectionToClipboardAsync()
-    {
-        var selectedText = BuildSelectedText();
-        if (string.IsNullOrEmpty(selectedText))
-            return;
+	private Task CopySelectionToClipboardAsync()
+	{
+		try
+		{
+			var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+			return CopySelectionToClipboardUsingAsync(
+				clipboard is null ? null : clipboard.SetTextAsync);
+		}
+		catch (Exception exception)
+		{
+			ClipboardCopyFailed?.Invoke(this, new PreviewClipboardCopyFailedEventArgs(exception));
+			return Task.CompletedTask;
+		}
+	}
 
-        var copying = new CancelEventArgs();
-        CopyingToClipboard?.Invoke(this, copying);
-        if (copying.Cancel)
-            return;
+	internal async Task CopySelectionToClipboardUsingAsync(Func<string, Task>? writeTextAsync)
+	{
+		try
+		{
+			if (!TryGetNormalizedSelection(out var start, out var end))
+				return;
 
-        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
-        if (clipboard is null)
-            return;
+			_pendingClipboardCharacterCount = MeasureSelectedTextLength(start, end, normalizeForClipboard: true);
+			if (_pendingClipboardCharacterCount <= 0)
+				return;
 
-        await clipboard.SetTextAsync(selectedText);
-        CopiedToClipboard?.Invoke(this, EventArgs.Empty);
+			var copying = new CancelEventArgs();
+			try
+			{
+				CopyingToClipboard?.Invoke(this, copying);
+				if (copying.Cancel)
+					return;
+			}
+			finally
+			{
+				_pendingClipboardCharacterCount = 0;
+			}
+
+			var selectedText = BuildSelectedText(normalizeForClipboard: true);
+			if (string.IsNullOrEmpty(selectedText) || writeTextAsync is null)
+				return;
+
+			await writeTextAsync(selectedText);
+			CopiedToClipboard?.Invoke(this, EventArgs.Empty);
+		}
+		catch (Exception exception)
+		{
+			ClipboardCopyFailed?.Invoke(this, new PreviewClipboardCopyFailedEventArgs(exception));
+		}
     }
+
+	private long MeasureSelectedTextLength(
+		SelectionPosition start,
+		SelectionPosition end,
+		bool normalizeForClipboard)
+	{
+		long characterCount = 0;
+		for (var lineNumber = start.Line; lineNumber <= end.Line; lineNumber++)
+		{
+			var lineText = GetLineText(lineNumber);
+			var segmentStart = lineNumber == start.Line
+				? Math.Clamp(start.Column, 0, lineText.Length)
+				: 0;
+			var segmentEnd = lineNumber == end.Line
+				? Math.Clamp(end.Column, segmentStart, lineText.Length)
+				: lineText.Length;
+			characterCount += segmentEnd - segmentStart;
+			if (lineNumber < end.Line)
+			{
+				characterCount += normalizeForClipboard
+					? Environment.NewLine.Length
+					: 1;
+			}
+		}
+
+		return characterCount;
+	}
 
     public void SelectAll()
     {
@@ -1160,23 +2507,35 @@ public sealed class VirtualizedPreviewTextControl : Control
 
         _selectionAnchor = new SelectionPosition(1, 0);
         _selectionActive = new SelectionPosition(lastLine, lastLineLength);
+		_selectionOwnedBySearch = false;
         InvalidateVisual();
         PreviewSelectionChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    private string BuildSelectedText()
+    private string BuildSelectedText(bool normalizeForClipboard)
     {
         if (!TryGetNormalizedSelection(out var start, out var end))
             return string.Empty;
 
+        string selectedText;
         if (start.Line == end.Line)
         {
             var lineText = GetLineText(start.Line);
             var startColumn = Math.Clamp(start.Column, 0, lineText.Length);
             var endColumn = Math.Clamp(end.Column, startColumn, lineText.Length);
-            return endColumn > startColumn
+            selectedText = endColumn > startColumn
                 ? lineText[startColumn..endColumn]
                 : string.Empty;
+
+			return normalizeForClipboard
+				? PreviewClipboardPayloadBuilder.BuildSelectionPayload(
+					Document,
+					start.Line,
+					startColumn,
+					end.Line,
+					endColumn,
+					selectedText)
+				: selectedText;
         }
 
         var estimatedLineLength = Math.Max(12, Math.Min(Document?.MaxLineLength ?? _maxLineLength, 256));
@@ -1199,7 +2558,16 @@ public sealed class VirtualizedPreviewTextControl : Control
                 builder.Append('\n');
         }
 
-        return builder.ToString();
+        selectedText = builder.ToString();
+		return normalizeForClipboard
+			? PreviewClipboardPayloadBuilder.BuildSelectionPayload(
+				Document,
+				start.Line,
+				start.Column,
+				end.Line,
+				end.Column,
+				selectedText)
+			: selectedText;
     }
 
     private string GetLineText(int lineNumber)
@@ -1416,32 +2784,49 @@ public sealed class VirtualizedPreviewTextControl : Control
 
     private void EnsureContextMenu()
     {
-        if (_contextMenu is not null)
+		if (_contextFlyout is not null)
             return;
 
-        _copyMenuItem = new MenuItem();
-        _copyMenuItem.Cursor = PreviewMenuCursor;
-        _copyMenuItem.Click += OnCopyMenuItemClick;
+		_secretHideHereMenuItem = CreateContextMenuItem(OnSecretHideHereMenuItemClick);
+		_secretAlwaysHideMenuItem = CreateContextMenuItem(OnSecretAlwaysHideMenuItemClick);
+		_privateDataAlwaysHideMenuItem = CreateContextMenuItem(OnPrivateDataAlwaysHideMenuItemClick);
+		_removeSecretMarkMenuItem = CreateContextMenuItem(OnRemoveSecretMarkMenuItemClick);
+		_bulkRuleRedactionMenuItem = CreateContextMenuItem(OnBulkRuleRedactionMenuItemClick);
+		_bulkFileRedactionMenuItem = CreateContextMenuItem(OnBulkFileRedactionMenuItemClick);
+		_manualRedactionSeparator = new Separator { Cursor = PreviewMenuCursor };
+		_bulkRedactionSeparator = new Separator { Cursor = PreviewMenuCursor };
+		ToolTip.SetShowOnDisabled(_secretHideHereMenuItem, true);
+		ToolTip.SetShowOnDisabled(_secretAlwaysHideMenuItem, true);
+		ToolTip.SetShowOnDisabled(_privateDataAlwaysHideMenuItem, true);
 
-        _selectAllMenuItem = new MenuItem();
-        _selectAllMenuItem.Cursor = PreviewMenuCursor;
-        _selectAllMenuItem.Click += OnSelectAllMenuItemClick;
+		_copyMenuItem = CreateContextMenuItem(OnCopyMenuItemClick);
 
-        _clearSelectionMenuItem = new MenuItem();
-        _clearSelectionMenuItem.Cursor = PreviewMenuCursor;
-        _clearSelectionMenuItem.Click += OnClearSelectionMenuItemClick;
+		_selectAllMenuItem = CreateContextMenuItem(OnSelectAllMenuItemClick);
 
-        _contextMenu = new ContextMenu();
-        _contextMenu.Cursor = PreviewMenuCursor;
-        _contextMenu.Items.Add(_copyMenuItem);
-        _contextMenu.Items.Add(_selectAllMenuItem);
-        _contextMenu.Items.Add(new Separator());
-        _contextMenu.Items.Add(_clearSelectionMenuItem);
-        _contextMenu.Opening += OnContextMenuOpening;
-        _contextMenu.Opened += OnContextMenuOpened;
+		_contextFlyout = new MenuFlyout();
+		_contextFlyout.Items.Add(_copyMenuItem);
+		_contextFlyout.Items.Add(_selectAllMenuItem);
+		_contextFlyout.Items.Add(_manualRedactionSeparator);
+		_contextFlyout.Items.Add(_secretHideHereMenuItem);
+		_contextFlyout.Items.Add(_secretAlwaysHideMenuItem);
+		_contextFlyout.Items.Add(_privateDataAlwaysHideMenuItem);
+		_contextFlyout.Items.Add(_removeSecretMarkMenuItem);
+		_contextFlyout.Items.Add(_bulkRedactionSeparator);
+		_contextFlyout.Items.Add(_bulkRuleRedactionMenuItem);
+		_contextFlyout.Items.Add(_bulkFileRedactionMenuItem);
+		_contextFlyout.Opening += OnContextMenuOpening;
+		_contextFlyout.Opened += OnContextMenuOpened;
+		ContextFlyout = _contextFlyout;
 
         UpdateContextMenuHeaders();
     }
+
+	private static MenuItem CreateContextMenuItem(EventHandler<RoutedEventArgs> clickHandler)
+	{
+		var item = new MenuItem { Cursor = PreviewMenuCursor };
+		item.Click += clickHandler;
+		return item;
+	}
 
     private void UpdateContextMenuHeaders()
     {
@@ -1451,37 +2836,48 @@ public sealed class VirtualizedPreviewTextControl : Control
         if (_selectAllMenuItem is not null)
             _selectAllMenuItem.Header = SelectAllMenuHeader;
 
-        if (_clearSelectionMenuItem is not null)
-            _clearSelectionMenuItem.Header = ClearSelectionMenuHeader;
+		if (_removeSecretMarkMenuItem is not null)
+			_removeSecretMarkMenuItem.Header = RemoveSecretMarkHeader;
+
+		PrepareBulkSecretMenuItems();
     }
 
     private void OpenContextMenu()
     {
         EnsureContextMenu();
-        _contextMenu?.Open(this);
+		_contextFlyout?.ShowAt(this, showAtPointer: true);
     }
 
     private void CloseContextMenu()
     {
-        _contextMenu?.Close();
+		_contextFlyout?.Hide();
     }
 
-    private void OnContextMenuOpening(object? sender, CancelEventArgs e)
-    {
+	private void OnContextMenuOpening(object? sender, EventArgs e)
+	{
+		PrepareManualSecretMenuItems();
+		PrepareBulkSecretMenuItems();
+
         if (_copyMenuItem is not null)
             _copyMenuItem.IsEnabled = HasSelection;
 
-        if (_selectAllMenuItem is not null)
-            _selectAllMenuItem.IsEnabled = ResolveLineCount() > 0 && (ResolveLineCount() > 1 || GetLineText(1).Length > 0);
+		if (_selectAllMenuItem is not null)
+			_selectAllMenuItem.IsEnabled = ResolveLineCount() > 0 && (ResolveLineCount() > 1 || GetLineText(1).Length > 0);
 
-        if (_clearSelectionMenuItem is not null)
-            _clearSelectionMenuItem.IsEnabled = HasSelection;
-    }
+		UpdateContextMenuSeparatorVisibility();
+	}
 
-    private void OnContextMenuOpened(object? sender, RoutedEventArgs e)
-    {
-        ApplyContextMenuBackdrop();
-    }
+	private void OnContextMenuOpened(object? sender, EventArgs e)
+	{
+		if (DataContext is not MainWindowViewModel viewModel)
+			return;
+
+		PopupBackdropConfigurator.TryApply(
+			_copyMenuItem,
+			TopLevel.GetTopLevel(this),
+			viewModel.ActiveThemeEffect,
+			PopupBackdropTransparencyFallback.Transparent);
+	}
 
     private void OnCopyMenuItemClick(object? sender, RoutedEventArgs e)
     {
@@ -1493,22 +2889,331 @@ public sealed class VirtualizedPreviewTextControl : Control
         SelectAll();
     }
 
-    private void OnClearSelectionMenuItemClick(object? sender, RoutedEventArgs e)
-    {
-        ClearSelection();
-    }
+	private void OnSecretHideHereMenuItemClick(object? sender, RoutedEventArgs e) =>
+		RaiseManualSecretMarkRequested(ManualRedactionClass.Secret, persistent: false);
 
-    private void ApplyContextMenuBackdrop()
-    {
-        if (DataContext is not MainWindowViewModel viewModel)
-            return;
+	private void OnSecretAlwaysHideMenuItemClick(object? sender, RoutedEventArgs e) =>
+		RaiseManualSecretMarkRequested(ManualRedactionClass.Secret, persistent: true);
 
-        PopupBackdropConfigurator.TryApply(
-            _contextMenu,
-            TopLevel.GetTopLevel(this),
-            viewModel.ActiveThemeEffect,
-            PopupBackdropTransparencyFallback.Transparent);
-    }
+	private void OnPrivateDataAlwaysHideMenuItemClick(object? sender, RoutedEventArgs e) =>
+		RaiseManualSecretMarkRequested(ManualRedactionClass.PrivateData, persistent: true);
+
+	private void OnRemoveSecretMarkMenuItemClick(object? sender, RoutedEventArgs e)
+	{
+		if (_contextManualRedaction is not { } redaction || !HasManualMarkIdentity(redaction))
+			return;
+		ManualSecretUnmarkRequested?.Invoke(
+			this,
+			new PreviewManualSecretUnmarkRequestedEventArgs(
+				redaction.PersistentMarkHash,
+				redaction.SourceLength,
+				redaction.SessionMarkId,
+				redaction.Source.HasFlag(SecretFindingSource.Detector),
+				redaction.PersistentMarkId));
+	}
+
+	private void OnBulkRuleRedactionMenuItemClick(object? sender, RoutedEventArgs e) =>
+		RaiseBulkRedactionToggleRequested(_contextRuleOccurrenceIds);
+
+	private void OnBulkFileRedactionMenuItemClick(object? sender, RoutedEventArgs e) =>
+		RaiseBulkRedactionToggleRequested(_contextFileOccurrenceIds);
+
+	private void RaiseBulkRedactionToggleRequested(IReadOnlyCollection<string> occurrenceIds)
+	{
+		if (occurrenceIds.Count == 0)
+			return;
+
+		BulkRedactionToggleRequested?.Invoke(
+			this,
+			new PreviewBulkRedactionToggleRequestedEventArgs(occurrenceIds, _contextBulkKeep));
+	}
+
+	private void RaiseManualSecretMarkRequested(
+		ManualRedactionClass classification,
+		bool persistent)
+	{
+		if (_contextMarkedSecret is null || _contextSelectionRange.IsCollapsed)
+		{
+			ManualSecretMarkRejected?.Invoke(
+				this,
+				new PreviewManualSecretMarkRejectedEventArgs(
+					_contextSecretMarkRejectionMessage ?? SecretSelectionContentOnly));
+			return;
+		}
+		ManualSecretMarkRequested?.Invoke(
+			this,
+			new PreviewManualSecretMarkRequestedEventArgs(
+				_contextMarkedSecret,
+				_contextSelectionRange,
+				classification,
+				persistent));
+	}
+
+	private void PrepareContextSelection(Point point)
+	{
+		_contextManualRedaction = null;
+		_contextDetectorRedaction = null;
+		var hit = HitTestSelectionPosition(point);
+		if (TryGetRedactionAt(hit, out var redaction))
+		{
+			if (redaction.Source.HasFlag(SecretFindingSource.Detector))
+				_contextDetectorRedaction = redaction;
+			if (HasManualMarkIdentity(redaction))
+			{
+				_contextManualRedaction = redaction;
+			}
+			else
+			{
+				ClearSelection();
+			}
+			return;
+		}
+
+		if (TryGetNormalizedSelection(out var selectionStart, out var selectionEnd) &&
+		    IsWithinSelection(hit, selectionStart, selectionEnd))
+		{
+			return;
+		}
+
+		SelectTokenAt(hit);
+	}
+
+	private void PrepareBulkSecretMenuItems()
+	{
+		if (_bulkRedactionSeparator is null ||
+		    _bulkRuleRedactionMenuItem is null ||
+		    _bulkFileRedactionMenuItem is null)
+		{
+			return;
+		}
+
+		_contextRuleOccurrenceIds = [];
+		_contextFileOccurrenceIds = [];
+		var visible = _contextDetectorRedaction is not null && Document is not null;
+		_bulkRuleRedactionMenuItem.IsVisible = visible;
+		_bulkFileRedactionMenuItem.IsVisible = visible;
+		if (!visible)
+			return;
+
+		var target = _contextDetectorRedaction!;
+		(_contextRuleOccurrenceIds, _contextFileOccurrenceIds) = CollectBulkOccurrenceIds(target);
+		_contextBulkKeep = target.State == SecretPreviewSpanState.Redacted;
+		_bulkRuleRedactionMenuItem.Header = string.Format(
+			CultureInfo.CurrentCulture,
+			_contextBulkKeep ? KeepAllRuleOccurrencesFormat : HideAllRuleOccurrencesFormat,
+			target.RuleId,
+			_contextRuleOccurrenceIds.Count);
+		_bulkFileRedactionMenuItem.Header = string.Format(
+			CultureInfo.CurrentCulture,
+			_contextBulkKeep ? KeepAllFileOccurrencesFormat : HideAllFileOccurrencesFormat,
+			GetRelativeFileName(target.RelativePath),
+			_contextFileOccurrenceIds.Count);
+	}
+
+	private (IReadOnlyCollection<string> Rule, IReadOnlyCollection<string> File)
+		CollectBulkOccurrenceIds(PreviewRedactionSpan target)
+	{
+		if (Document is not { } document)
+			return ([], []);
+
+		var ruleOccurrenceIds = new HashSet<string>(StringComparer.Ordinal);
+		var fileOccurrenceIds = new HashSet<string>(StringComparer.Ordinal);
+		foreach (var span in document.Redactions)
+		{
+			if (!span.Source.HasFlag(SecretFindingSource.Detector))
+				continue;
+
+			if (string.Equals(span.RuleId, target.RuleId, StringComparison.Ordinal))
+				ruleOccurrenceIds.Add(span.OccurrenceId);
+			if (string.Equals(span.RelativePath, target.RelativePath, StringComparison.Ordinal))
+				fileOccurrenceIds.Add(span.OccurrenceId);
+		}
+
+		return (ruleOccurrenceIds, fileOccurrenceIds);
+	}
+
+	private static string GetRelativeFileName(string relativePath)
+	{
+		var separatorIndex = relativePath.LastIndexOfAny('/', '\\');
+		return separatorIndex >= 0 && separatorIndex < relativePath.Length - 1
+			? relativePath[(separatorIndex + 1)..]
+			: relativePath;
+	}
+
+	private void PrepareManualSecretMenuItems()
+	{
+		if (_secretHideHereMenuItem is null ||
+		    _secretAlwaysHideMenuItem is null ||
+		    _privateDataAlwaysHideMenuItem is null ||
+		    _removeSecretMarkMenuItem is null)
+		{
+			return;
+		}
+
+		var removeVisible = _contextManualRedaction is { } redaction && HasManualMarkIdentity(redaction);
+		_removeSecretMarkMenuItem.IsVisible = removeVisible;
+		_secretHideHereMenuItem.IsVisible = false;
+		_secretAlwaysHideMenuItem.IsVisible = false;
+		_privateDataAlwaysHideMenuItem.IsVisible = false;
+		_contextMarkedSecret = null;
+		_contextSelectionRange = default;
+		_contextSecretMarkRejectionMessage = null;
+		if (removeVisible || !HasSelection)
+			return;
+
+		var selectedText = GetSelectedText();
+		var hasRange = TryGetSelectionRange(out _contextSelectionRange);
+		var isContentSelection = hasRange && IsFileContentSelection(_contextSelectionRange);
+		if (!isContentSelection)
+			return;
+		_secretHideHereMenuItem.IsVisible = true;
+		_secretAlwaysHideMenuItem.IsVisible = true;
+		_privateDataAlwaysHideMenuItem.IsVisible = true;
+		var isValid = MarkedSecretValueNormalizer.TryCreate(
+			selectedText,
+			out var candidate,
+			out var validationError);
+		if (isValid)
+			_contextMarkedSecret = candidate;
+
+		var displayValue = (isValid ? candidate.NormalizedValue : selectedText.Trim())
+			.Replace('\r', ' ')
+			.Replace('\n', ' ');
+		var masked = MaskSecretValue(displayValue);
+		_secretHideHereMenuItem.Header = string.Format(
+			CultureInfo.CurrentCulture,
+			HideSecretHereFormat,
+			masked);
+		_secretAlwaysHideMenuItem.Header = string.Format(
+			CultureInfo.CurrentCulture,
+			AlwaysHideSecretFormat,
+			masked);
+		_privateDataAlwaysHideMenuItem.Header = string.Format(
+			CultureInfo.CurrentCulture,
+			PrivateDataAlwaysHideFormat,
+			masked);
+
+		var enabled = isValid;
+		_secretHideHereMenuItem.IsEnabled = enabled;
+		_secretAlwaysHideMenuItem.IsEnabled = enabled;
+		_privateDataAlwaysHideMenuItem.IsEnabled = enabled;
+		var reason = GetValidationMessage(validationError);
+		_contextSecretMarkRejectionMessage = enabled ? null : reason;
+		ToolTip.SetTip(_secretHideHereMenuItem, enabled ? HideHereSecretToolTip : reason);
+		ToolTip.SetTip(_secretAlwaysHideMenuItem, enabled ? AlwaysHideValueToolTip : reason);
+		ToolTip.SetTip(_privateDataAlwaysHideMenuItem, enabled ? PrivateDataAlwaysHideToolTip : reason);
+	}
+
+	private void UpdateContextMenuSeparatorVisibility()
+	{
+		if (_contextFlyout is null)
+			return;
+
+		var hasVisibleItemInGroup = false;
+		for (var index = _contextFlyout.Items.Count - 1; index >= 0; index--)
+		{
+			switch (_contextFlyout.Items[index])
+			{
+				case MenuItem menuItem:
+					hasVisibleItemInGroup |= menuItem.IsVisible;
+					break;
+				case Separator separator:
+					separator.IsVisible = hasVisibleItemInGroup;
+					hasVisibleItemInGroup = false;
+					break;
+			}
+		}
+	}
+
+	private static bool HasManualMarkIdentity(PreviewRedactionSpan redaction) =>
+		redaction.PersistentMarkHash is { Length: > 0 } ||
+		redaction.SessionMarkId is { Length: > 0 };
+
+	private bool IsFileContentSelection(PreviewSelectionRange selection)
+	{
+		if (Document is not { } document)
+			return false;
+		var section = PreviewDocumentSectionLookup.FindContainingSection(
+			document.Sections,
+			selection.StartLine);
+		return section is not null &&
+		       selection.StartLine >= section.ContentStartLine &&
+		       selection.EndLine >= section.ContentStartLine &&
+		       selection.EndLine <= section.EndLine;
+	}
+
+	private string GetValidationMessage(MarkedSecretValidationError error) => error switch
+	{
+		MarkedSecretValidationError.TooLong => SecretSelectionTooLong,
+		MarkedSecretValidationError.Multiline => SecretSelectionMultiline,
+		_ => SecretSelectionTooShort
+	};
+
+	private void SelectTokenAt(SelectionPosition position)
+	{
+		var line = GetLineText(position.Line);
+		if (line.Length == 0)
+		{
+			ClearSelection();
+			return;
+		}
+
+		var column = Math.Clamp(position.Column, 0, line.Length - 1);
+		if (!IsSecretSelectionCharacter(line[column]) &&
+		    column > 0 &&
+		    IsSecretSelectionCharacter(line[column - 1]))
+		{
+			column--;
+		}
+		if (!IsSecretSelectionCharacter(line[column]))
+		{
+			ClearSelection();
+			return;
+		}
+
+		var start = column;
+		while (start > 0 && IsSecretSelectionCharacter(line[start - 1]))
+			start--;
+		var end = column + 1;
+		while (end < line.Length && IsSecretSelectionCharacter(line[end]))
+			end++;
+
+		_selectionAnchor = new SelectionPosition(position.Line, start);
+		_selectionActive = new SelectionPosition(position.Line, end);
+		_selectionOwnedBySearch = false;
+		InvalidateVisual();
+		PreviewSelectionChanged?.Invoke(this, EventArgs.Empty);
+	}
+
+	private static bool IsWithinSelection(
+		SelectionPosition position,
+		SelectionPosition start,
+		SelectionPosition end) =>
+		ComparePositions(position, start) >= 0 && ComparePositions(position, end) < 0;
+
+	private static bool IsSecretSelectionCharacter(char character) =>
+		!char.IsWhiteSpace(character) && character is not ('\'' or '"' or '`' or '=' or ',' or ';' or
+			'(' or ')' or '[' or ']' or '{' or '}' or '<' or '>');
+
+	private static string MaskSecretValue(string value)
+	{
+		var elements = StringInfo.GetTextElementEnumerator(value);
+		var graphemes = new List<string>();
+		while (elements.MoveNext())
+			graphemes.Add(elements.GetTextElement());
+		if (graphemes.Count == 0)
+			return string.Empty;
+
+		var leadingCount = Math.Min(8, Math.Max(2, graphemes.Count - 6));
+		var trailingCount = Math.Min(4, Math.Max(2, graphemes.Count - leadingCount - 2));
+		if (leadingCount + trailingCount >= graphemes.Count)
+		{
+			leadingCount = Math.Max(1, graphemes.Count / 2 - 1);
+			trailingCount = Math.Max(1, graphemes.Count - leadingCount - 2);
+		}
+		return string.Concat(graphemes.Take(leadingCount)) + "…" +
+		       string.Concat(graphemes.Skip(graphemes.Count - trailingCount));
+	}
 
     private static IBrush EnsureOpaqueSelectionBrush(IBrush brush)
     {
@@ -1563,6 +3268,7 @@ public sealed class VirtualizedPreviewTextControl : Control
     {
         var previousAnchor = _selectionAnchor;
         var previousActive = _selectionActive;
+		_selectionOwnedBySearch = false;
         var hit = HitTestSelection(documentPoint);
         if (!keyModifiers.HasFlag(KeyModifiers.Shift) &&
             (hit.Kind == SelectionHitKind.Empty ||
@@ -1728,6 +3434,11 @@ public sealed class VirtualizedPreviewTextControl : Control
     }
 
     private readonly record struct SelectionHitResult(SelectionPosition Position, SelectionHitKind Kind);
+	private readonly record struct RedactionNavigationTarget(
+		string OccurrenceId,
+		int LineNumber,
+		int StartColumn);
+
     private readonly record struct SelectionPosition(int Line, int Column);
     private sealed record FormattedLineCacheEntry(
         string Text,
@@ -1831,4 +3542,99 @@ public sealed class VirtualizedPreviewTextControl : Control
             return lineStarts;
         }
     }
+}
+
+internal readonly record struct PreviewRedactionRenderStyle(
+	IBrush Background,
+	Pen Border);
+
+internal sealed class PreviewColumnGeometryCache
+{
+	internal const int MaximumEntries = 32 * 1024;
+	private readonly Dictionary<ColumnGeometryCacheKey, double> _distances = [];
+	private readonly Queue<ColumnGeometryCacheKey> _insertionOrder = [];
+
+	internal int Count => _distances.Count;
+
+	public bool TryGet(int lineNumber, int column, out double distance) =>
+		_distances.TryGetValue(new ColumnGeometryCacheKey(lineNumber, column), out distance);
+
+	public void Store(int lineNumber, int column, double distance)
+	{
+		var key = new ColumnGeometryCacheKey(lineNumber, column);
+		if (!_distances.TryAdd(key, distance))
+			return;
+
+		_insertionOrder.Enqueue(key);
+		while (_distances.Count > MaximumEntries && _insertionOrder.TryDequeue(out var oldest))
+			_distances.Remove(oldest);
+	}
+
+	public void Clear()
+	{
+		_distances.Clear();
+		_insertionOrder.Clear();
+	}
+
+	private readonly record struct ColumnGeometryCacheKey(
+		int LineNumber,
+		int Column);
+}
+
+internal sealed class PreviewRedactionRenderStyleCache
+{
+	private const int StyleCount = 4;
+	private ThemeVariant? _theme;
+	private Color _accent;
+	private PreviewRedactionRenderStyle[] _styles = [];
+
+	public void Update(
+		ThemeVariant theme,
+		Color accent)
+	{
+		ArgumentNullException.ThrowIfNull(theme);
+		if (_styles.Length == StyleCount && _theme == theme && _accent == accent)
+			return;
+
+		_theme = theme;
+		_accent = accent;
+		_styles =
+		[
+			Create(accent, SecretPreviewSpanState.Redacted, isInteractive: false),
+			Create(accent, SecretPreviewSpanState.Redacted, isInteractive: true),
+			Create(accent, SecretPreviewSpanState.KeptAsIs, isInteractive: false),
+			Create(accent, SecretPreviewSpanState.KeptAsIs, isInteractive: true)
+		];
+	}
+
+	public PreviewRedactionRenderStyle Resolve(
+		SecretPreviewSpanState state,
+		bool isInteractive)
+	{
+		if (_styles.Length != StyleCount)
+			throw new InvalidOperationException("Redaction render styles were not initialized.");
+
+		var stateOffset = state == SecretPreviewSpanState.Redacted ? 0 : 2;
+		return _styles[stateOffset + (isInteractive ? 1 : 0)];
+	}
+
+	private static PreviewRedactionRenderStyle Create(
+		Color accent,
+		SecretPreviewSpanState state,
+		bool isInteractive)
+	{
+		var backgroundAlpha = state == SecretPreviewSpanState.Redacted
+			? (isInteractive ? (byte)82 : (byte)54)
+			: (isInteractive ? (byte)38 : (byte)14);
+		var borderAlpha = isInteractive
+			? (byte)240
+			: state == SecretPreviewSpanState.Redacted ? (byte)180 : (byte)190;
+		var background = new SolidColorBrush(
+			Color.FromArgb(backgroundAlpha, accent.R, accent.G, accent.B));
+		var border = new SolidColorBrush(
+			Color.FromArgb(borderAlpha, accent.R, accent.G, accent.B));
+		return new PreviewRedactionRenderStyle(
+			background,
+			new Pen(border, isInteractive ? 1.6 : 1.15));
+	}
 }

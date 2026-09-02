@@ -3,9 +3,9 @@
 ┌┤> PROJECT TREE├─────────────────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├─────────────────────────────┐
 │v [x] <PROJECT>                 ││+ <PROJECT>                              ▲│
 │  > [x] src                                          ││  + src                                                       ┃│
-│    [x] global.json                                  ││    - File0001.bin                                            ┃│
-│                                                     ││    - File0002.bin                                            ┃│
-│              ┌┤Export project├────────────────────────────────────────────────────────────────────────┐             ┃│
+│    [x] global.json                                  ││    <SPINNER> File0001.bin                                            ┃│
+│                                                     ││    <SPINNER> File0002.bin                                            ┃│
+│              ┌┤Export project├────────────────────────────────────────────────────────────────────────┐             ·│
 │              │                                                                                        │             ·│
 │              │  Copying files                                                                         │             ·│
 │              │                                                                                        │             ·│
@@ -19,12 +19,12 @@
 │              │                                                                                        │             ·│
 │              │                                                                                        │             ·│
 │              │  Esc or Ctrl+C cancels this operation                                                  │             ·│
-│              └────────────────────────────────────────────────────────────────────────────────────────┘             ·│
-│                                                     ││    - File0018.bin                                            ·│
-│                                                     ││    - File0019.bin                                            ·│
-│                                                     ││    - File0020.bin                                            ▼│
-│                                                     ││ Files 101  |  Lines 1-22/103                                  │
+│              └────────────────────────────────────────────────────────────────────────────────────────┘             ▼│
+│                                                     ││ Files 101  |  Lines 1-19/103                                  │
 └─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
 
+┌┤  PARAMETERS├────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ Content 0/5 · Exclusions 9/9 · File types 2/2                                                                        │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
  Files 101 · Folders 2 · 100 KB · ~<TOKENS> tokens · Warnings 0 · Errors 0
- Up/Down Navigate   Enter Expand   Space Toggle   / Search   Tab/F6 Preview   Ctrl+P Actions   ? Help
+ Space Toggle   Shift+←/→ Collapse/expand all   Ctrl+A/U Select all/none   R Reveal   : Commands

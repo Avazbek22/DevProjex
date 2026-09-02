@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using DevProjex.Infrastructure.Persistence;
 using DevProjex.Infrastructure.ThemePresets;
 
 namespace DevProjex.Tests.Unit;
@@ -206,6 +207,23 @@ public sealed class ThemeSettingsStoreTests
         Assert.Equal(originalJson, File.ReadAllText(store.GetPath()));
     }
 
+    [Fact]
+    public void OversizedDocument_IsPreservedAndRejectsWrites()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new ThemeSettingsStore(() => temp.Path);
+        var path = store.GetPath();
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        using (var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write))
+            stream.SetLength(JsonStorePersistence.SmallDocumentMaximumBytes + 1);
+
+        var loaded = store.LoadForStartup(TimeSpan.FromSeconds(1));
+
+        Assert.Equal("Dark.Acrylic", loaded.SelectedPreset);
+        Assert.False(store.TrySave(loaded));
+        Assert.Equal(JsonStorePersistence.SmallDocumentMaximumBytes + 1, new FileInfo(path).Length);
+    }
+
     [Theory]
     [InlineData("missing")]
     [InlineData("corrupt")]
@@ -356,6 +374,28 @@ public sealed class ThemeSettingsStoreTests
 
         Assert.Equal("Light.Mica", recovered.SelectedPreset);
         Assert.Equal(edited, recovered.Presets["Light.Mica"]);
+    }
+
+    [Fact]
+    public void EnsureStorageExists_CorruptPrimaryRestoresCurrentBackupBeforeCreatingDefaults()
+    {
+        using var temp = new TemporaryDirectory();
+        var store = new ThemeSettingsStore(() => temp.Path);
+        var current = store.Load();
+        var edited = CreatePreset(43);
+        store.SetPreset(current, ThemeVariant.Light, ThemeEffectMode.Mica, edited);
+        current.SelectedPreset = "Light.Mica";
+        Assert.True(store.TrySave(current));
+        File.WriteAllText(store.GetPath(), "{ invalid");
+
+        Assert.True(store.EnsureStorageExists());
+
+        var recovered = new ThemeSettingsStore(() => temp.Path).Load();
+        Assert.Equal("Light.Mica", recovered.SelectedPreset);
+        Assert.Equal(edited, recovered.Presets["Light.Mica"]);
+        Assert.Equal(
+            File.ReadAllText(store.GetPath()),
+            File.ReadAllText(store.GetPath() + ".bak"));
     }
 
     [Fact]

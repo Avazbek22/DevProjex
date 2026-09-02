@@ -1,4 +1,3 @@
-using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace DevProjex.Tests.Terminal;
@@ -96,6 +95,11 @@ internal static partial class TerminalScreenSnapshot
 		string value,
 		IReadOnlyList<(string Value, string Replacement)> replacements)
 	{
+		var hasProjectRootReplacement = replacements.Any(
+			static replacement => string.Equals(
+				replacement.Replacement,
+				"<PROJECT_ROOT>",
+				StringComparison.Ordinal));
 		var normalized = value
 			.Replace("\r\n", "\n", StringComparison.Ordinal)
 			.Replace('\u00A0', ' ');
@@ -112,6 +116,21 @@ internal static partial class TerminalScreenSnapshot
 					replacement,
 					OperatingSystem.IsMacOS());
 			}
+		}
+		normalized = InlineRecentPathPattern().Replace(
+			normalized,
+			static match =>
+				$"{match.Groups["prefix"].Value}<RECENT_PATH>{match.Groups["suffix"].Value}");
+		normalized = ReplacePathForSnapshot(
+			normalized,
+			Path.GetTempPath(),
+			"<SYSTEM_TEMP>/",
+			OperatingSystem.IsMacOS());
+		normalized = ClippedContextRootPattern().Replace(normalized, "<PROJECT_ROOT>");
+		if (hasProjectRootReplacement)
+		{
+			normalized = ClippedSystemTemporaryContextRootPattern()
+				.Replace(normalized, "<PROJECT_ROOT>");
 		}
 		normalized = NormalizeMacOsSystemPathAliases(
 			normalized,
@@ -136,6 +155,7 @@ internal static partial class TerminalScreenSnapshot
 			normalized,
 			static match =>
 				$"{match.Groups["prefix"].Value}<SPINNER>{match.Groups["suffix"].Value}");
+		normalized = HeaderSpinnerFramePattern().Replace(normalized, "<SPINNER>");
 		normalized = FileUriPlaceholderPrefixPattern().Replace(normalized, "file:///");
 		normalized = NormalizePathPlaceholderSeparators(normalized);
 		normalized = PreviewColumnCountPattern().Replace(
@@ -318,7 +338,8 @@ internal static partial class TerminalScreenSnapshot
 			"<TEMP_ROOT>",
 			"<ORIGIN_ROOT>",
 			"<WELCOME_ROOT>",
-			"<OUTPUT_ROOT>"
+			"<OUTPUT_ROOT>",
+			"<SYSTEM_TEMP>"
 		};
 		var normalizedLines = string.Join(
 			'\n',
@@ -348,6 +369,9 @@ internal static partial class TerminalScreenSnapshot
 	[GeneratedRegex(@"\b[0-9a-f]{32}\b", RegexOptions.IgnoreCase)]
 	private static partial Regex IdentifierPattern();
 
+	[GeneratedRegex(@"(?m)(?<prefix>│(?:> |  )\[[1-9]\] )[^\n│]*(?<suffix>│)")]
+	private static partial Regex InlineRecentPathPattern();
+
 	[GeneratedRegex(@"(?<=<TEMP_ROOT>[\\/])[0-9a-f]{8,32}", RegexOptions.IgnoreCase)]
 	private static partial Regex TruncatedProjectIdentifierPattern();
 
@@ -364,6 +388,15 @@ internal static partial class TerminalScreenSnapshot
 	private static partial Regex ClippedTemporaryProjectPathPattern();
 
 	[GeneratedRegex(
+		@"(?<=Root: )<SYSTEM_TEMP>/DevProjex\.Tests\.Termin(?:al(?:[\\/][0-9a-f]{1,32})?)?",
+		RegexOptions.IgnoreCase)]
+	private static partial Regex ClippedContextRootPattern();
+
+	[GeneratedRegex(
+		@"(?<=Root: )<SYSTEM_TEMP>/[^\r\n\u2500-\u257F▲▼◀▶]*(?=[\u2500-\u257F▲▼◀▶])")]
+	private static partial Regex ClippedSystemTemporaryContextRootPattern();
+
+	[GeneratedRegex(
 		@"(?<label>Elapsed|Прошло|Vergangen|Transcurrido|Écoulé|Trascorso|Өткен уақыт|Decorrido|Вақти гузашта|O‘tgan vaqt):\s*\d{1,2}:\d{2}(?::\d{2})?")]
 	private static partial Regex ElapsedPattern();
 
@@ -371,8 +404,11 @@ internal static partial class TerminalScreenSnapshot
 		@"(?<label>Last opened|Zuletzt geöffnet|Última apertura|Dernière ouverture|Ultima apertura|Соңғы ашылуы|Última abertura|Последнее открытие|Кушодани охирин|So‘nggi ochilish):[^\n│]*")]
 	private static partial Regex RecentOpenedPattern();
 
-	[GeneratedRegex(@"(?m)(?<prefix>(?:^|│)\s{2})[|/\\-](?<suffix>\s{3,})")]
+	[GeneratedRegex(@"(?m)(?<prefix>(?:^|│)\s*)[|/\\\-⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏](?<suffix>\s+)")]
 	private static partial Regex SpinnerFramePattern();
+
+	[GeneratedRegex(@"[|/\\\-⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏](?=\s+(?:Updating options|Building tree|Building preview)…)")]
+	private static partial Regex HeaderSpinnerFramePattern();
 
 	[GeneratedRegex(@"(?<=\d)[, \u202F](?=\d{3}(?:\D|$))")]
 	private static partial Regex GroupedNumberSeparatorPattern();

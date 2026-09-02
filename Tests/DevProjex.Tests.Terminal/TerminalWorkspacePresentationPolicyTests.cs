@@ -1,5 +1,6 @@
-using DevProjex.Terminal.CommandLine;
-using DevProjex.Terminal.Tui;
+using System.Drawing;
+using DevProjex.Application.Preview;
+using DevProjex.Application.Secrets;
 using Terminal.Gui.Drawing;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
@@ -73,5 +74,326 @@ public sealed class TerminalWorkspacePresentationPolicyTests
 
 		Assert.False(view.ViewportSettings.HasFlag(
 			ViewportSettingsFlags.HasScrollBars));
+	}
+
+	[Fact]
+	public void PreviewRedactionNavigation_TogglesOnlyTheActiveOccurrence()
+	{
+		const string firstOccurrence = "occurrence-a";
+		const string secondOccurrence = "occurrence-b";
+		using var document = new InMemoryPreviewTextDocument(
+			"DEVPROJEX_REDACTED[github-pat#1]\nDEVPROJEX_REDACTED[aws-access-token#1]",
+			redactions:
+			[
+				new PreviewRedactionSpan(
+					firstOccurrence,
+					"github-pat",
+					1,
+					0,
+					35,
+					SecretPreviewSpanState.Redacted),
+				new PreviewRedactionSpan(
+					secondOccurrence,
+					"aws-access-token",
+					2,
+					0,
+					41,
+					SecretPreviewSpanState.Redacted)
+			]);
+		using var view = new TerminalVirtualizedPreviewView();
+		var toggled = new List<string>();
+		view.RedactionToggleRequested += (_, eventArgs) => toggled.Add(eventArgs.OccurrenceId);
+		view.SetDocument(document, preserveViewport: false);
+
+		Assert.True(view.MoveActiveRedaction(reverse: false));
+		Assert.True(view.TryToggleActiveRedaction());
+		Assert.True(view.MoveActiveRedaction(reverse: false));
+		Assert.True(view.TryToggleActiveRedaction());
+
+		Assert.Equal([firstOccurrence, secondOccurrence], toggled);
+	}
+
+	[Theory]
+	[InlineData(false, false)]
+	[InlineData(true, true)]
+	public void LocalizedTextUsesAsciiWhenPlainOrUnicodeIsUnavailable(
+		bool plain,
+		bool supportsUnicode)
+	{
+		var value = TerminalWorkspaceSession.NormalizeLocalizedText(
+			"↑/↓ Action…",
+			plain,
+			supportsUnicode);
+
+		Assert.Equal("k/j Action...", value);
+	}
+
+	[Fact]
+	public void PreviewNavigationProjectsWidePrefixesToTerminalColumns()
+	{
+		const string occurrence = "wide-prefix";
+		using var document = new InMemoryPreviewTextDocument(
+			"界界DEVPROJEX_REDACTED[secret#1]",
+			redactions:
+			[
+				new PreviewRedactionSpan(
+					occurrence,
+					"secret",
+					1,
+					2,
+					30,
+					SecretPreviewSpanState.Redacted)
+			]);
+		using var view = new TerminalVirtualizedPreviewView();
+		view.SetDocument(document, preserveViewport: false);
+
+		Assert.Equal(4, view.GetDisplayColumn(0, 2));
+		Assert.True(view.MoveActiveRedaction(reverse: false));
+
+		Assert.Equal(2, view.HorizontalOffset);
+		Assert.True(view.MaxLineLength > document.MaxLineLength);
+	}
+
+	[Fact]
+	public void RepeatedPreviewLayout_ReusesDecodedDocumentLine()
+	{
+		using var document = new CountingPreviewTextDocument("界ABC");
+		using var view = new TerminalVirtualizedPreviewView(showScrollBars: false);
+		view.SetDocument(document, preserveViewport: false);
+
+		for (var iteration = 0; iteration < 100; iteration++)
+			Assert.Equal(5, view.GetDisplayColumn(0, 4));
+
+		Assert.Equal(1, document.LineReadCount);
+
+		using var replacement = new CountingPreviewTextDocument("日Z");
+		view.SetDocument(replacement, preserveViewport: true);
+		Assert.Equal(3, view.GetDisplayColumn(0, 2));
+		Assert.Equal(1, replacement.LineReadCount);
+		Assert.Equal(1, document.LineReadCount);
+	}
+
+	[Fact]
+	public void VisiblePreviewLinesUseOneRangeVisitAndRemainCached()
+	{
+		using var document = new CountingRangePreviewTextDocument(40);
+		using var view = new TerminalVirtualizedPreviewView(showScrollBars: false)
+		{
+			Frame = new Rectangle(0, 0, 80, 20)
+		};
+		view.SetDocument(document, preserveViewport: false);
+
+		view.PrimeVisibleLineCache();
+		for (var lineNumber = 1; lineNumber <= 20; lineNumber++)
+			Assert.Equal($"line-{lineNumber}", view.GetDisplayLine(lineNumber));
+		view.PrimeVisibleLineCache();
+
+		Assert.Equal(1, document.RangeVisitCount);
+		Assert.Equal(0, document.LineReadCount);
+	}
+
+	[Theory]
+	[InlineData("界AB", 1, 2, " A")]
+	[InlineData("界AB", 2, 2, "AB")]
+	[InlineData("e\u0301x", 0, 2, "e\u0301x")]
+	public void PreviewHorizontalSlicePreservesTerminalColumns(
+		string value,
+		int startColumn,
+		int width,
+		string expected)
+	{
+		Assert.Equal(expected, TerminalVirtualizedPreviewView.SliceColumns(
+			value,
+			startColumn,
+			width));
+	}
+
+	[Theory]
+	[InlineData(true)]
+	[InlineData(false)]
+	public void PreviewScrollRaisesOneVisibleRangeChange(bool showScrollBars)
+	{
+		using var document = new InMemoryPreviewTextDocument("first\nsecond\nthird");
+		using var view = new TerminalVirtualizedPreviewView(showScrollBars: showScrollBars)
+		{
+			Frame = new Rectangle(0, 0, 20, 1)
+		};
+		view.SetDocument(document, preserveViewport: false);
+		var notifications = 0;
+		view.VisibleRangeChanged += (_, _) => notifications++;
+
+		view.ScrollTo(1, 0);
+
+		Assert.Equal(1, notifications);
+	}
+
+	private sealed class CountingPreviewTextDocument(string line) : IPreviewTextDocument
+	{
+		public int LineReadCount { get; private set; }
+		public int LineCount => 1;
+		public int MaxLineLength => line.Length;
+		public long CharacterCount => line.Length;
+		public IReadOnlyList<PreviewDocumentSection> Sections => [];
+		public IReadOnlyList<PreviewRedactionSpan> Redactions => [];
+		public string GetFullText() => line;
+		public string GetLineText(int lineNumber)
+		{
+			LineReadCount++;
+			return line;
+		}
+
+		public string GetLineRangeText(int firstLine, int lastLine) => line;
+		public ValueTask WriteToAsync(Stream destination, CancellationToken cancellationToken = default) =>
+			ValueTask.CompletedTask;
+		public void Dispose()
+		{
+		}
+	}
+
+	private sealed class CountingRangePreviewTextDocument(int lineCount) : IPreviewTextDocument
+	{
+		public int RangeVisitCount { get; private set; }
+		public int LineReadCount { get; private set; }
+		public int LineCount => lineCount;
+		public int MaxLineLength => 16;
+		public long CharacterCount => lineCount * 8L;
+		public IReadOnlyList<PreviewDocumentSection> Sections => [];
+		public string GetFullText() => string.Empty;
+		public string GetLineText(int lineNumber)
+		{
+			LineReadCount++;
+			return $"line-{lineNumber}";
+		}
+		public string GetLineRangeText(int firstLine, int lastLine) => string.Empty;
+		public void VisitLines(
+			int firstLine,
+			int lastLine,
+			PreviewTextLineVisitor visitor,
+			CancellationToken cancellationToken = default)
+		{
+			RangeVisitCount++;
+			for (var lineNumber = firstLine; lineNumber <= lastLine; lineNumber++)
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				if (!visitor(lineNumber, $"line-{lineNumber}"))
+					break;
+			}
+		}
+		public ValueTask WriteToAsync(Stream destination, CancellationToken cancellationToken = default) =>
+			ValueTask.CompletedTask;
+		public void Dispose()
+		{
+		}
+	}
+
+	[Fact]
+	public void PreviewWordWrapUsesVisualRowsAndRestoresHorizontalGeometry()
+	{
+		using var document = new InMemoryPreviewTextDocument(
+			"0123456789\nabcdefghij\nklmnopqrst");
+		using var view = new TerminalVirtualizedPreviewView(showScrollBars: false)
+		{
+			Frame = new Rectangle(0, 0, 5, 2)
+		};
+		view.SetDocument(document, preserveViewport: false);
+		var maximumWidth = view.MaxLineLength;
+
+		Assert.True(view.ToggleWordWrap());
+		Assert.Equal(6, view.ContentRowCount);
+		Assert.Equal(6, view.GetContentSize().Height);
+		Assert.True(view.HasVerticalOverflow);
+		Assert.False(view.HasHorizontalOverflow);
+
+		view.ScrollToContentRow(view.ContentRowCount - 1, 0);
+
+		Assert.Equal(4, view.FirstVisibleContentRow);
+		Assert.Equal(2, view.FirstVisibleLine);
+		Assert.Equal(3, view.VisibleLastLine);
+
+		Assert.False(view.ToggleWordWrap());
+		Assert.Equal(maximumWidth, view.MaxLineLength);
+		Assert.Equal(document.LineCount, view.ContentRowCount);
+		Assert.Equal(maximumWidth, view.GetContentSize().Width);
+		Assert.True(view.HasHorizontalOverflow);
+	}
+
+	[Fact]
+	public void PreviewWordWrapBuildsFileBackedGeometryThroughOneRangeVisit()
+	{
+		using var document = new CountingRangePreviewTextDocument(40);
+		using var view = new TerminalVirtualizedPreviewView(showScrollBars: false)
+		{
+			Frame = new Rectangle(0, 0, 5, 2)
+		};
+		view.SetDocument(document, preserveViewport: false);
+
+		view.ToggleWordWrap();
+
+		Assert.Equal(1, document.RangeVisitCount);
+		Assert.Equal(0, document.LineReadCount);
+		Assert.True(view.ContentRowCount > document.LineCount);
+	}
+
+	[Fact]
+	public void PreviewWordWrapMapsSearchNavigationToWrappedCoordinates()
+	{
+		using var document = new InMemoryPreviewTextDocument("012345secret-tail");
+		using var view = new TerminalVirtualizedPreviewView(showScrollBars: false)
+		{
+			Frame = new Rectangle(0, 0, 5, 1)
+		};
+		view.SetDocument(document, preserveViewport: false);
+		view.ToggleWordWrap();
+
+		var match = Assert.NotNull(view.SetSearchQuery("secret", 0, -1));
+		view.ScrollTo(match.Line, view.GetDisplayColumn(match.Line, match.Column));
+
+		var position = view.ResolveDocumentPosition(view.FirstVisibleContentRow);
+		Assert.Equal(0, position.Line);
+		Assert.Equal(5, position.DisplayColumn);
+		Assert.InRange(match.Column, position.DisplayColumn, position.DisplayColumn + view.VisibleTextWidth);
+	}
+
+	[Fact]
+	public void PreviewWordWrapMovesAWideRuneIntactToTheNextVisualRow()
+	{
+		using var document = new InMemoryPreviewTextDocument("ab界");
+		using var view = new TerminalVirtualizedPreviewView(showScrollBars: false)
+		{
+			Frame = new Rectangle(0, 0, 3, 2)
+		};
+		view.SetDocument(document, preserveViewport: false);
+
+		view.ToggleWordWrap();
+
+		Assert.Equal([0, 2], TerminalVirtualizedPreviewView.BuildWrappedSegmentColumns("ab界", 3));
+		Assert.Equal(2, view.ContentRowCount);
+		var first = view.ResolveDocumentPosition(0);
+		var second = view.ResolveDocumentPosition(1);
+		Assert.Equal((0, 0), (first.Line, first.DisplayColumn));
+		Assert.Equal((0, 2), (second.Line, second.DisplayColumn));
+		Assert.Equal("ab", TerminalVirtualizedPreviewView.SliceColumns("ab界", first.DisplayColumn, 3));
+		Assert.Equal("界", TerminalVirtualizedPreviewView.SliceColumns("ab界", second.DisplayColumn, 3).TrimEnd());
+	}
+
+	[Fact]
+	public void PreviewSearchUsesTheSharedMinimumAndCappedWraparoundSet()
+	{
+		using var document = new InMemoryPreviewTextDocument(
+			string.Join('\n', Enumerable.Repeat("marker marker", 5_001)));
+		using var view = new TerminalVirtualizedPreviewView(showScrollBars: false);
+		view.SetDocument(document, preserveViewport: false);
+
+		Assert.Null(view.SetSearchQuery("界", 0, -1));
+		Assert.Equal(0, view.SearchMatchCount);
+		var first = Assert.NotNull(view.SetSearchQuery("marker", 0, -1));
+
+		Assert.Equal(PreviewTextDocumentSearch.MaximumMatches, view.SearchMatchCount);
+		Assert.True(view.IsSearchCapped);
+		var current = first;
+		for (var index = 1; index < PreviewTextDocumentSearch.MaximumMatches; index++)
+			current = Assert.NotNull(view.FindNextSearchMatch(current.Line, current.Column, reverse: false));
+		var wrapped = Assert.NotNull(view.FindNextSearchMatch(current.Line, current.Column, reverse: false));
+		Assert.Equal(first, wrapped);
 	}
 }

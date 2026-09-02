@@ -2,8 +2,15 @@
  <PROJECTS_ROOT>
 ┌┤  PROJECT TREE├─────────────────────────────────────┐┌┤> CONTEXT PREVIEW · Content · ASCII├──────────────────────────┐
 │v [x] <ID>               ││                                                              ▲│
-│  > [x] src                                          ││internal sealed class ContentMarker004 { }                    ·│
+│  > [x] src                                          ││src/Feature003.cs:                                            ·│
 │    [x] global.json                                  ││                                                              ┃│
+│                                                     ││internal sealed class ContentMarker003 { }                    ·│
+│                                                     ││                                                              ·│
+│                                                     ││                                                              ·│
+│                                                     ││src/Feature004.cs:                                            ·│
+│                                                     ││                                                              ·│
+│                                                     ││internal sealed class ContentMarker004 { }                    ·│
+│                                                     ││                                                              ·│
 │                                                     ││                                                              ·│
 │                                                     ││src/Feature005.cs:                                            ·│
 │                                                     ││                                                              ·│
@@ -11,20 +18,13 @@
 │                                                     ││                                                              ·│
 │                                                     ││                                                              ·│
 │                                                     ││src/Feature006.cs:                                            ·│
-│                                                     ││                                                              ·│
-│                                                     ││internal sealed class ContentMarker006 { }                    ·│
-│                                                     ││                                                              ·│
-│                                                     ││                                                              ·│
-│                                                     ││src/Feature007.cs:                                            ·│
-│                                                     ││                                                              ·│
-│                                                     ││internal sealed class ContentMarker007 { }                    ·│
-│                                                     ││                                                              ·│
-│                                                     ││                                                              ·│
-│                                                     ││src/Feature008.cs:                                            ·│
-│                                                     ││                                                              ·│
-│                                                     ││internal sealed class ContentMarker008 { }                    ▼│
-│                                                     ││ Files 5-9/61  |  Lines 22-43/303                              │
+│                                                     ││                                                              ▼│
+│                                                     ││◄━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━······················► │
+│                                                     ││ Files 4-7/61  |  Lines 18-35/306  |  Columns 1-62/<COLUMNS>          │
 └─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
 
+┌┤  PARAMETERS├────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ Content 0/5 · Exclusions 0/0 · File types 2/2                                                                        │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
  Files 61 · Folders 2 · 2.46 KB · ~<TOKENS> tokens · Warnings 0 · Errors 0
- j/k Scroll   PgUp/PgDn Page   / Search   n/N Match   1/2/3 View   F Format   Tab/F6 Parameters
+ j/k Scroll   {/} Section   Ctrl+G Line   W Wrap   / Search   n/N Match   : Commands

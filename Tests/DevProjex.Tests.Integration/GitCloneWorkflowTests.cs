@@ -246,41 +246,61 @@ public sealed class GitCloneWorkflowTests : IAsyncLifetime, IDisposable
     }
 
     [Fact]
-    public async Task WorkflowSimulation_CloneRepo_OpenLocalFolder_CacheDeleted()
+    public async Task WorkflowSimulation_CloneRepo_OpenLocalFolder_ReleasesLeaseAndRetainsCache()
     {
         if (!_gitAvailable)
             return;
 
         // Arrange
         string? currentCachedRepoPath = null;
+		IRepositoryCacheSession? session = null;
         var localFolder = _tempDir.CreateDirectory("local-project");
         File.WriteAllText(Path.Combine(localFolder, "test.txt"), "local content");
 
         try
         {
             // Step 1: Clone repository
-            currentCachedRepoPath = _cacheService.CreateRepositoryDirectory(TestRepoUrl);
-            var cloneResult = await _gitService.CloneAsync(TestRepoUrl, currentCachedRepoPath, cancellationToken: TestContext.Current.CancellationToken);
+            var stagingPath = _cacheService.CreateRepositoryStagingDirectory(TestRepoUrl);
+            var cloneResult = await _gitService.CloneAsync(TestRepoUrl, stagingPath, cancellationToken: TestContext.Current.CancellationToken);
             Assert.True(cloneResult.Success);
+			currentCachedRepoPath = _cacheService.PublishRepositoryDirectory(stagingPath, TestRepoUrl);
+			_cacheService.RecordIndexedRepository(
+				TestRepoUrl,
+				currentCachedRepoPath,
+				cloneResult.DefaultBranch);
+			session = await _cacheService.TryAcquireRepositorySessionAsync(
+				TestRepoUrl,
+				cancellationToken: TestContext.Current.CancellationToken);
+			Assert.NotNull(session);
 
-            // Step 2: User opens a local folder (via File → Open)
-            // MainWindow should clean up Git cache when switching to local folder
+            // Step 2: User opens a local folder (via File → Open).
             Assert.True(Directory.Exists(currentCachedRepoPath));
 
-            // Simulate: fromDialog = true → cleanup Git cache (best effort)
-            var originalPath = currentCachedRepoPath;
-            _cacheService.DeleteRepositoryDirectory(currentCachedRepoPath);
-            currentCachedRepoPath = null;
+            // Opening a local folder releases the session lease but retains the persistent cache.
+			session.Dispose();
+			session = null;
 
             // Simulate opening local folder
             var projectSourceType = ProjectSourceType.LocalFolder;
 
-            // Assert - test that cleanup was called and project type changed
-            Assert.NotEqual(originalPath, currentCachedRepoPath); // Cleared the reference
+            // The repository remains available offline and its released lease no longer blocks deletion.
             Assert.Equal(ProjectSourceType.LocalFolder, projectSourceType);
+			Assert.True(Directory.Exists(currentCachedRepoPath));
+			Assert.NotNull(_cacheService.FindIndexedRepository(TestRepoUrl));
+			using (var reopened = await _cacheService.TryAcquireRepositorySessionByPathAsync(
+				       currentCachedRepoPath,
+				       TestContext.Current.CancellationToken))
+			{
+				Assert.NotNull(reopened);
+			}
+			_cacheService.DeleteRepositoryDirectory(currentCachedRepoPath);
+			await AssertCacheEventuallyDeletedAsync(currentCachedRepoPath);
+			Assert.Null(_cacheService.FindIndexedRepository(TestRepoUrl));
+			currentCachedRepoPath = null;
         }
         finally
         {
+			session?.Dispose();
             if (currentCachedRepoPath is not null)
                 _cacheService.DeleteRepositoryDirectory(currentCachedRepoPath);
         }

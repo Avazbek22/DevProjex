@@ -5,24 +5,37 @@ namespace DevProjex.Application.Services;
 public sealed class ProjectCopyExportPlanBuilder
 {
 	public ProjectCopyExportPlan Build(ProjectCopyExportRequest request)
+		=> Build(request, CancellationToken.None);
+
+	public ProjectCopyExportPlan Build(
+		ProjectCopyExportRequest request,
+		CancellationToken cancellationToken)
 	{
 		ArgumentNullException.ThrowIfNull(request);
 		ArgumentNullException.ThrowIfNull(request.TreeRoot);
 		ArgumentNullException.ThrowIfNull(request.SelectedPaths);
+		cancellationToken.ThrowIfCancellationRequested();
 
 		if (string.IsNullOrWhiteSpace(request.ProjectRootPath))
 			throw InvalidRequest("The project root path is required.");
 
 		var rootPath = PathUtility.Normalize(request.ProjectRootPath);
 		var projectName = NormalizeProjectName(request.ProjectName, rootPath);
-		var nodes = ProjectTreeSelectionProjection.BuildIncludedNodes(request.TreeRoot, request.SelectedPaths);
+		var nodes = ProjectTreeSelectionProjection.BuildIncludedNodesWithCancellation(
+			request.TreeRoot,
+			request.SelectedPaths,
+			cancellationToken);
 		if (nodes.Count == 0)
 			throw InvalidRequest("The selected paths do not belong to the effective project tree.");
 
 		var entries = new List<ProjectCopyExportPlanEntry>(nodes.Count);
-		var relativePaths = new HashSet<string>(PathComparer.Default);
+		var destinationPathComparer = request.Format == ProjectCopyExportFormat.Zip
+			? StringComparer.Ordinal
+			: PathComparer.Default;
+		var relativePaths = new HashSet<string>(destinationPathComparer);
 		foreach (var node in nodes)
 		{
+			cancellationToken.ThrowIfCancellationRequested();
 			var sourcePath = PathUtility.Normalize(node.FullPath);
 			if (!PathUtility.IsPathInside(sourcePath, rootPath))
 			{
@@ -42,11 +55,15 @@ public sealed class ProjectCopyExportPlanBuilder
 					$"The effective tree contains an unsafe relative path: {relativePath}");
 			}
 
-			if (relativePaths.Add(relativePath))
-				entries.Add(new ProjectCopyExportPlanEntry(sourcePath, relativePath, node.IsDirectory));
+			if (!relativePaths.Add(relativePath))
+			{
+				throw InvalidRequest(
+					$"The effective tree contains duplicate destination path '{relativePath}'.");
+			}
+			entries.Add(new ProjectCopyExportPlanEntry(sourcePath, relativePath, node.IsDirectory));
 		}
 
-		entries.Sort(CompareEntries);
+		CancellationAwareSort.Sort(entries, CompareEntries, cancellationToken);
 		return new ProjectCopyExportPlan(rootPath, projectName, entries);
 	}
 
@@ -58,9 +75,13 @@ public sealed class ProjectCopyExportPlanBuilder
 			return 1;
 
 		var directoryOrder = right.IsDirectory.CompareTo(left.IsDirectory);
-		return directoryOrder != 0
-			? directoryOrder
-			: PathComparer.Default.Compare(left.RelativePath, right.RelativePath);
+		if (directoryOrder != 0)
+			return directoryOrder;
+
+		var pathOrder = PathComparer.Default.Compare(left.RelativePath, right.RelativePath);
+		return pathOrder != 0
+			? pathOrder
+			: StringComparer.Ordinal.Compare(left.RelativePath, right.RelativePath);
 	}
 
 	private static bool ContainsParentTraversal(string relativePath)

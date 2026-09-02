@@ -1,0 +1,50 @@
+ DevProjex Terminal · <ID>
+ <PROJECT_ROOT>
+┌┤  PROJECT TREE├─────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├───────────────────────────────────────────┐┌┤> PARAMETERS├──────────────────────┐
+│v [x] <ID>   ││<ID>                                             ││┌┤Content processing [ ] All (5) ──┐│
+│  > [x] src                              ││├── src                                                                      │││[ ] Hide secrets                  ││
+│    [x] global.json                      │││   └── App.cs                                                               │││[ ] Hide private data             ││
+│    [x] readme.md                        ││├── global.json                                                              │││[ ] Compress code                 ││
+│                                         ││└── readme.md                                                                │││[ ] Strip comments                ││
+│                                         ││                                                                             │││[ ] Strip blank lines             ││
+│                                         ││                                                                             ││└──────────────────────────────────┘│
+│                                         ││                                                                             ││┌┤Exclusions├─────────── [ ] All ──┐│
+│                                         ││                                                                             │││( ) No Git filtering              ││
+│                                         ││                                                                             │││(•) Use .gitignore                ││
+│                                         ││                                                                             │││( ) Tracked Git files only        ││
+│                                         ││                                                                             │││( ) Staged Git files              ││
+│                                         ││                                                                             │││( ) Current Git changes           ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             ││└──────────────────────────────────┘│
+│                                         ││                                                                             ││┌┤File types├─────── [x] All (3) ──┐│
+│                                         ││                                                                             │││[x] .cs                           ││
+│                                         ││                                                                             │││[x] .json                         ││
+│                                         ││                                                                             │││[x] .md                           ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││                                                                             │││                                  ││
+│                                         ││ Files 3  |  Lines 1-6/6                                                     ││└──────────────────────────────────┘│
+└─────────────────────────────────────────┘└─────────────────────────────────────────────────────────────────────────────┘└────────────────────────────────────┘
+
+ Files 3 · Folders 2 · 40 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
+ C Content   X Exclusions   T Types   M Cycle Git mode   Enter Change   : Commands

@@ -7,7 +7,11 @@ namespace DevProjex.Avalonia;
 
 public sealed class App : global::Avalonia.Application
 {
-    public override void Initialize() => AvaloniaXamlLoader.Load(this);
+    public override void Initialize()
+    {
+        AvaloniaXamlLoader.Load(this);
+        ThemedToolTipService.Initialize();
+    }
 
     public override void OnFrameworkInitializationCompleted()
     {

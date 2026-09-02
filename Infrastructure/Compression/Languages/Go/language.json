@@ -1,0 +1,12 @@
+{
+  "id": "go",
+  "displayName": "Go",
+  "extensions": [".go"],
+  "library": "tree-sitter-go",
+  "export": "tree_sitter_go",
+  "queryVersion": 5,
+  "transformCapabilities": ["bodies", "comments", "blankLines"],
+  "blockPlaceholder": "{ }",
+  "containerNodeTypes": ["source_file"],
+  "executableOwnerKinds": ["function_declaration", "method_declaration"]
+}

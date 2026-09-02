@@ -12,6 +12,37 @@ public sealed class TerminalProcessCollection
 public sealed class TerminalPtyJourneyTests
 {
 	[Fact(Timeout = 60_000)]
+	public async Task ImmediateExitFlushesThePendingWorkspaceSelection()
+	{
+		using var workspace = CreateProject();
+		string? dataRoot = null;
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			workspace.Path,
+			["tui", workspace.Path, "--profile", "standard", "--language", "en"],
+			cancellationToken: TestContext.Current.CancellationToken,
+			initializeDataRoot: root => dataRoot = root);
+		await terminal.WaitForScreenAsync(
+			"> PROJECT TREE",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
+		await terminal.SendDownAsync(TestContext.Current.CancellationToken);
+		await terminal.SendSpaceAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Files 2",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(cancellationToken: TestContext.Current.CancellationToken));
+
+		var settings = new TerminalSettingsStore(() => dataRoot!)
+			.LoadProjectSettings(workspace.Path);
+		Assert.NotNull(settings);
+		Assert.DoesNotContain(".", settings.SelectedPaths);
+		Assert.DoesNotContain("src", settings.SelectedPaths);
+	}
+
+	[Fact(Timeout = 60_000)]
 	public async Task ImplicitTuiPreservesExplicitlySavedInlineScreenMode()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -40,7 +71,7 @@ public sealed class TerminalPtyJourneyTests
 			TerminalScreenMode.Inline,
 			new TerminalSettingsStore(() => dataRoot!).LoadScreenMode());
 
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(
@@ -67,16 +98,15 @@ public sealed class TerminalPtyJourneyTests
 		await terminal.WaitForScreenAsync(
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
-		var workspaceScreen = await terminal.WaitForScreenAsync(
+		var workspaceScreen = await terminal.WaitForStableScreenAsync(
 			"App.cs",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.Contains("PROJECT TREE", workspaceScreen, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 
-		await terminal.SendF6Async(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
-			"> CONTEXT PREVIEW",
-			cancellationToken: TestContext.Current.CancellationToken);
+		await OpenContextPreviewWhenWorkspaceReadyAsync(
+			terminal,
+			TestContext.Current.CancellationToken);
 		await terminal.ResizeAsync(80, 24, TestContext.Current.CancellationToken);
 		var compactPreview = await terminal.WaitForStableScreenAsync(
 			required: "> CONTEXT PREVIEW",
@@ -94,7 +124,7 @@ public sealed class TerminalPtyJourneyTests
 			"> PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
 
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		await terminal.CompleteShellRestorationHandshakeAsync(
 			TestContext.Current.CancellationToken);
 		TerminalPtyStateAssertions.AssertRestoredAtShellCompletion(
@@ -144,7 +174,7 @@ public sealed class TerminalPtyJourneyTests
 		TerminalVisualArtifactWriter.WriteIfRequested(
 			"literal-underscores-welcome-en-180x35",
 			welcome);
-		await welcome.SendAsync("q", TestContext.Current.CancellationToken);
+		await welcome.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await welcome.WaitForExitAsync(
@@ -195,7 +225,7 @@ public sealed class TerminalPtyJourneyTests
 			"literal-underscores-workspace-en-180x35",
 			terminal);
 
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(
@@ -253,7 +283,7 @@ public sealed class TerminalPtyJourneyTests
 		await terminal.WaitForScreenAsync(
 			"> PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(
@@ -399,7 +429,7 @@ public sealed class TerminalPtyJourneyTests
 	[Fact(Timeout = 60_000)]
 	public async Task ProjectWorkspaceSupportsNavigationOverlaysAndLiveResize()
 	{
-		using var workspace = CreateProject();
+		using var workspace = CreateGitProject();
 		await using var terminal = await TerminalPtyHarness.StartAsync(
 			workspace.Path,
 			[
@@ -495,38 +525,37 @@ public sealed class TerminalPtyJourneyTests
 			"Name contains:",
 			cancellationToken: TestContext.Current.CancellationToken);
 
+		await terminal.SendAsync("X", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> PARAMETERS",
+			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"No Git filtering",
+			"(•) Tracked Git files only",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			"No Git filtering",
+		await terminal.SendShiftTabAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.SendAsync("X", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Toggle all changes only this section",
+			"> PARAMETERS",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			"Toggle all changes only this section",
+		await terminal.SendShiftTabAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.SendAsync("R", TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
-			"Toggle all changes only this section",
-			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			"Toggle all changes only this section",
-			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.DoesNotContain("ROOT FOLDERS", terminal.CaptureScreen(), StringComparison.Ordinal);
 		await terminal.SendAsync("T", TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenAsync(
-			"Toggle all changes only this section",
+		var fileTypes = await terminal.WaitForScreenAsync(
+			"> PARAMETERS",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
-		await terminal.WaitForScreenWithoutAsync(
-			"Toggle all changes only this section",
+		Assert.Contains("File types", fileTypes, StringComparison.Ordinal);
+		await terminal.SendShiftTabAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);
 
 		await terminal.SendAsync("A", TestContext.Current.CancellationToken);
@@ -551,10 +580,9 @@ public sealed class TerminalPtyJourneyTests
 		await terminal.SendAsync(dryRunDestination, TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"Destination state:",
+			"Export?",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.SendShiftTabAsync(TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"Validation completed",
@@ -569,22 +597,30 @@ public sealed class TerminalPtyJourneyTests
 			"--dry-run",
 			cancellationToken: TestContext.Current.CancellationToken);
 
+		await terminal.SendAsync("T", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> PARAMETERS",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendShiftTabAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> CONTEXT PREVIEW",
+			cancellationToken: TestContext.Current.CancellationToken);
 		await terminal.ResizeAsync(80, 24, TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenWithoutAsync(
-			"CONTEXT PREVIEW",
-			cancellationToken: TestContext.Current.CancellationToken);
-		var compact = await terminal.WaitForScreenAsync(
 			"PROJECT TREE",
 			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.Contains("PROJECT TREE", compact, StringComparison.Ordinal);
-		Assert.DoesNotContain("CONTEXT PREVIEW", compact, StringComparison.Ordinal);
+		var compact = await terminal.WaitForScreenAsync(
+			"CONTEXT PREVIEW",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("CONTEXT PREVIEW", compact, StringComparison.Ordinal);
+		Assert.DoesNotContain("PROJECT TREE", compact, StringComparison.Ordinal);
 		await terminal.ResizeAsync(120, 30, TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.False(terminal.HasExited);
 
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(
@@ -599,6 +635,31 @@ public sealed class TerminalPtyJourneyTests
 		workspace.WriteFile("src/Feature/Handler.cs", "internal sealed class Handler {}");
 		workspace.WriteFile("README.md", "# Test project");
 		return workspace;
+	}
+
+	private static async Task<string> OpenContextPreviewWhenWorkspaceReadyAsync(
+		TerminalPtyHarness terminal,
+		CancellationToken cancellationToken)
+	{
+		const string previewHeading = "> CONTEXT PREVIEW";
+		for (var attempt = 0; attempt < 3; attempt++)
+		{
+			await terminal.SendF6Async(cancellationToken);
+			try
+			{
+				return await terminal.WaitForScreenAsync(
+					previewHeading,
+					TimeSpan.FromSeconds(3),
+					cancellationToken);
+			}
+			catch (TimeoutException) when (
+				attempt < 2 &&
+				terminal.CaptureScreen().Contains("> PROJECT TREE", StringComparison.Ordinal))
+			{
+			}
+		}
+
+		throw new TimeoutException($"Timed out waiting for '{previewHeading}'.");
 	}
 
 	private static TemporaryDirectory CreateGitProject()
@@ -625,15 +686,11 @@ public sealed class TerminalPtyJourneyTests
 		};
 		foreach (var argument in arguments)
 			startInfo.ArgumentList.Add(argument);
-		using var process = Process.Start(startInfo);
-		Assert.NotNull(process);
-		var standardOutput = process.StandardOutput.ReadToEnd();
-		var standardError = process.StandardError.ReadToEnd();
-		process.WaitForExit();
+		var result = TerminalTestProcess.Run(startInfo);
 		Assert.True(
-			process.ExitCode == 0,
-			$"git {string.Join(' ', arguments)} failed with exit code {process.ExitCode}.\n" +
-			$"{standardOutput}\n{standardError}");
+			result.ExitCode == 0,
+			$"git {string.Join(' ', arguments)} failed with exit code {result.ExitCode}.\n" +
+			$"{result.StandardOutput}\n{result.StandardError}");
 	}
 
 	private static void AssertSelectionIsVisible(

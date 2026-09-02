@@ -3,7 +3,7 @@ namespace DevProjex.Kernel.Abstractions;
 /// <summary>
 /// Manages the persistent repository cache and temporary clone staging.
 /// </summary>
-public interface IRepoCacheService
+public interface IRepoCacheService : IDisposable
 {
     /// <summary>
     /// Gets the root path of the repository cache.
@@ -37,6 +37,42 @@ public interface IRepoCacheService
     RepositoryCacheIndexEntry? FindIndexedRepository(string repositoryUrl);
 
     /// <summary>
+    /// Lists ready repositories from the current and compatibility cache indexes.
+    /// Missing repository directories are removed from their owning indexes.
+    /// </summary>
+    IReadOnlyList<RepositoryCacheCatalogEntry> ListIndexedRepositories();
+
+    /// <summary>
+    /// Lists every existing indexed cache entry for explicit cache management, including damaged
+    /// entries that normal repository discovery must not offer for opening, and reports cache
+    /// roots that could not be read safely.
+    /// </summary>
+    RepositoryCacheManagementListResult ListCacheEntriesForManagement();
+
+    /// <summary>
+    /// Pins a cache checkout for an indexed repository. Cache roots must be on a local file system;
+    /// exclusive file-handle leases are not reliable on every network file system.
+    /// </summary>
+    Task<IRepositoryCacheSession?> TryAcquireRepositorySessionAsync(
+        string repositoryUrl,
+        string? branch = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Pins the indexed repository containing an existing cache path.
+    /// </summary>
+    Task<IRepositoryCacheSession?> TryAcquireRepositorySessionByPathAsync(
+        string repositoryPath,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Serializes initial publication for equivalent repository URLs across processes.
+    /// </summary>
+    Task<IAsyncDisposable> AcquireRepositoryOperationAsync(
+        string repositoryUrl,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Records repository metadata after a cache is published, opened or refreshed.
     /// </summary>
     void RecordIndexedRepository(
@@ -64,13 +100,50 @@ public interface IRepoCacheService
     void ClearAllCache();
 
     /// <summary>
+    /// Clears all cached repositories and reports entries removed, retained by leases,
+    /// or left behind after a failed cleanup.
+    /// </summary>
+    CacheClearResult ClearAllCacheWithResult();
+
+    /// <summary>
+    /// Removes cached entries for an equivalent repository URL and reports the outcome.
+    /// </summary>
+    CacheClearResult RemoveCachedRepositoryWithResult(string repositoryUrl);
+
+    /// <summary>
     /// Cleans up abandoned staging directories. Completed repositories are retained
     /// regardless of age until an explicit cache-management policy removes them.
     /// </summary>
     void CleanupStaleCacheOnStartup();
 
     /// <summary>
+    /// Requests coalesced startup cleanup on the cache-owned background scheduler.
+    /// </summary>
+    void RequestStaleCacheCleanupOnStartup();
+
+    /// <summary>
+    /// Runs best-effort trash cleanup and size/age eviction without touching pinned repositories.
+    /// </summary>
+    void CollectGarbage();
+
+    /// <summary>
+    /// Requests best-effort garbage collection on the shared background scheduler.
+    /// Repeated requests are coalesced without blocking the caller.
+    /// </summary>
+    void RequestGarbageCollection();
+
+    /// <summary>
+    /// Recomputes the approximate size after an explicit repository update.
+    /// </summary>
+    void RefreshIndexedRepositorySize(string localPath);
+
+    /// <summary>
     /// Checks if the given path is within the cache.
     /// </summary>
     bool IsInCache(string path);
+
+    /// <summary>
+    /// Determines whether two cache paths belong to the same managed repository container.
+    /// </summary>
+    bool PathsBelongToSameRepository(string left, string right);
 }

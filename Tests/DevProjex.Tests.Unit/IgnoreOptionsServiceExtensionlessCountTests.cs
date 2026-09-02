@@ -8,6 +8,7 @@ public sealed class IgnoreOptionsServiceExtensionlessCountTests
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
 				["Settings.Ignore.SmartIgnore"] = "Smart ignore",
+				["Settings.Ignore.HideSecrets"] = "Hide secrets",
 				["Settings.Ignore.UseGitIgnore"] = "Use .gitignore",
 				["Settings.Ignore.HiddenFolders"] = "Hidden folders",
 				["Settings.Ignore.HiddenFiles"] = "Hidden files",
@@ -68,15 +69,17 @@ public sealed class IgnoreOptionsServiceExtensionlessCountTests
 			ExtensionlessFilesCount: 2,
 			ShowAdvancedCounts: true));
 
-		Assert.Equal(7, options.Count);
-		Assert.Equal(IgnoreOptionId.UseGitIgnore, options[0].Id);
-		Assert.Equal(IgnoreOptionId.SmartIgnore, options[1].Id);
-		Assert.Equal(IgnoreOptionId.HiddenFolders, options[2].Id);
-		Assert.Equal(IgnoreOptionId.HiddenFiles, options[3].Id);
-		Assert.Equal(IgnoreOptionId.DotFolders, options[4].Id);
-		Assert.Equal(IgnoreOptionId.DotFiles, options[5].Id);
-		Assert.Equal(IgnoreOptionId.ExtensionlessFiles, options[6].Id);
-		Assert.Equal("Files without extension (2)", options[6].Label);
+		Assert.Equal(8 + IgnoreOptionOrder.Count - 1, options.Count);
+		Assert.Equal(IgnoreOptionId.SmartIgnore, options[0].Id);
+		Assert.Equal(IgnoreOptionOrder.ContentTransformations, options.Skip(1).Take(IgnoreOptionOrder.Count).Select(static option => option.Id));
+		var afterTransformations = 1 + IgnoreOptionOrder.Count;
+		Assert.Equal(IgnoreOptionId.UseGitIgnore, options[afterTransformations].Id);
+		Assert.Equal(IgnoreOptionId.HiddenFolders, options[afterTransformations + 1].Id);
+		Assert.Equal(IgnoreOptionId.HiddenFiles, options[afterTransformations + 2].Id);
+		Assert.Equal(IgnoreOptionId.DotFolders, options[afterTransformations + 3].Id);
+		Assert.Equal(IgnoreOptionId.DotFiles, options[afterTransformations + 4].Id);
+		Assert.Equal(IgnoreOptionId.ExtensionlessFiles, options[^1].Id);
+		Assert.Equal("Files without extension (2)", options[^1].Label);
 	}
 
 	private static IgnoreOptionsService CreateService()

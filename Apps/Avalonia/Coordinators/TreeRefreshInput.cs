@@ -8,4 +8,12 @@ internal sealed record TreeRefreshInput(
     ProjectTreeInventorySnapshot? TreeInventory = null,
     ProjectTreeInventoryReuseScope? TreeInventoryScope = null,
     long? SelectionRevision = null,
-    BuildTreeResult? InteractiveFilterBaseTree = null);
+    BuildTreeResult? InteractiveFilterBaseTree = null,
+	GitFilteringMode GitMode = GitFilteringMode.None,
+    GitScopePathResult? GitScope = null,
+	GitScopePresentationProjection? GitScopePresentation = null,
+	IExtensionInclusionPolicy? EffectiveExtensionPolicy = null,
+	IReadOnlySet<string>? AvailableRootFolders = null,
+	IReadOnlySet<string>? GitRepositoryScopePaths = null,
+    bool PreserveCheckedPaths = false,
+    bool PreserveExpandedPaths = false);

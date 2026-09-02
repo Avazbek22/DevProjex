@@ -22,7 +22,7 @@
           Grid.ColumnSpan="4"
           Margin="0"
           Padding="0,0,210,0">
-      <MenuItem Header="{Binding MenuFile}">
+      <MenuItem Name="FileMenuItem" Header="{Binding MenuFile}">
         <MenuItem Header="{Binding MenuFileOpen}"
                   Click="OnOpenFolder"
                   IsEnabled="{Binding CanChangeProjectTree}" />
@@ -71,14 +71,13 @@
                         BorderThickness="1"
                         BorderBrush="{DynamicResource AppMutedTextBrush}"
                         Background="{DynamicResource MenuPressedBrush}"
-                        Cursor="Help"
                         VerticalAlignment="Center"
                         PointerPressed="OnProjectCopyHelpIndicatorPointerPressed"
                         PointerReleased="OnProjectCopyHelpIndicatorPointerReleased"
                         ToolTip.ShowDelay="450"
                         ToolTip.Placement="Right">
                   <ToolTip.Tip>
-                    <ToolTip Loaded="OnToolTipLoaded" MaxWidth="340">
+                    <ToolTip MaxWidth="340">
                       <TextBlock Text="{Binding MenuFileExportProjectCopyFolderHelp}"
                                  MaxWidth="320"
                                  TextWrapping="Wrap" />
@@ -116,14 +115,13 @@
                         BorderThickness="1"
                         BorderBrush="{DynamicResource AppMutedTextBrush}"
                         Background="{DynamicResource MenuPressedBrush}"
-                        Cursor="Help"
                         VerticalAlignment="Center"
                         PointerPressed="OnProjectCopyHelpIndicatorPointerPressed"
                         PointerReleased="OnProjectCopyHelpIndicatorPointerReleased"
                         ToolTip.ShowDelay="450"
                         ToolTip.Placement="Right">
                   <ToolTip.Tip>
-                    <ToolTip Loaded="OnToolTipLoaded" MaxWidth="340">
+                    <ToolTip MaxWidth="340">
                       <TextBlock Text="{Binding MenuFileExportProjectCopyZipHelp}"
                                  MaxWidth="320"
                                  TextWrapping="Wrap" />
@@ -171,7 +169,36 @@
           <!-- Populated dynamically from the tree-font list. -->
         </MenuItem>
         <Separator IsVisible="{Binding IsTreePaneVisible}" />
-        <MenuItem Click="OnToggleCompactMode"
+        <MenuItem Name="AnimationsMenuItem"
+                  Header="{Binding MenuViewAnimations}">
+          <MenuItem Name="TreeExpansionAnimationMenuItem"
+                    Click="OnToggleTreeExpansionAnimation"
+                    IsVisible="{Binding IsTreePaneVisible}">
+            <MenuItem.Header>
+              <CheckBox Content="{Binding MenuViewTreeExpansionAnimation}"
+                        IsChecked="{Binding IsTreeExpansionAnimationEnabled}"
+                        IsHitTestVisible="False"/>
+            </MenuItem.Header>
+          </MenuItem>
+          <MenuItem Name="StatusMetricsAnimationMenuItem"
+                    Click="OnToggleStatusMetricsAnimation">
+            <MenuItem.Header>
+              <CheckBox Content="{Binding MenuViewStatusMetricsAnimation}"
+                        IsChecked="{Binding IsStatusMetricsAnimationEnabled}"
+                        IsHitTestVisible="False"/>
+            </MenuItem.Header>
+          </MenuItem>
+          <MenuItem Name="ToolAnimationMenuItem"
+                    Click="OnToggleToolAnimation">
+            <MenuItem.Header>
+              <CheckBox Content="{Binding MenuViewToolAnimation}"
+                        IsChecked="{Binding IsToolAnimationEnabled}"
+                        IsHitTestVisible="False"/>
+            </MenuItem.Header>
+          </MenuItem>
+        </MenuItem>
+        <MenuItem Name="CompactModeMenuItem"
+                  Click="OnToggleCompactMode"
                   IsVisible="{Binding IsTreePaneVisible}"
                   IsEnabled="{Binding CanToggleCompactMode}">
           <MenuItem.Header>
@@ -180,19 +207,10 @@
                       IsHitTestVisible="False"/>
           </MenuItem.Header>
         </MenuItem>
-        <MenuItem Name="TreeExpansionAnimationMenuItem"
-                  Click="OnToggleTreeExpansionAnimation"
-                  IsVisible="{Binding IsTreePaneVisible}">
-          <MenuItem.Header>
-            <CheckBox Content="{Binding MenuViewTreeExpansionAnimation}"
-                      IsChecked="{Binding IsTreeExpansionAnimationEnabled}"
-                      IsHitTestVisible="False"/>
-          </MenuItem.Header>
-        </MenuItem>
       </MenuItem>
       <MenuItem Header="{Binding MenuSearch}" IsEnabled="{Binding IsSearchAvailable}" Click="OnToggleSearch" />
       <MenuItem Header="{Binding MenuOptions}" IsEnabled="{Binding IsProjectLoaded}" Click="OnToggleSettings" />
-      <MenuItem Header="{Binding MenuLanguage}">
+      <MenuItem Name="LanguageMenuItem" Header="{Binding MenuLanguage}">
         <MenuItem Name="LanguageEnMenuItem" Header="English" Click="OnLangEn" />
         <MenuItem Name="LanguageRuMenuItem" Header="Русский" Click="OnLangRu" />
         <MenuItem Name="LanguageEsMenuItem" Header="Español" Click="OnLangEs" />
@@ -204,6 +222,15 @@
         <MenuItem Name="LanguageTgMenuItem" Header="Тоҷикӣ" Click="OnLangTg" />
         <MenuItem Name="LanguageUzMenuItem" Header="Oʻzbek" Click="OnLangUz" />
         <MenuItem Name="LanguageKkMenuItem" Header="Қазақ" Click="OnLangKk" />
+        <MenuItem Name="LanguageZhCnMenuItem" Header="中文（简体）" Click="OnLangZhCn" />
+        <MenuItem Name="LanguageZhTwMenuItem" Header="中文（繁體）" Click="OnLangZhTw" />
+        <MenuItem Name="LanguageJaMenuItem" Header="日本語" Click="OnLangJa" />
+        <MenuItem Name="LanguageKoMenuItem" Header="한국어" Click="OnLangKo" />
+        <MenuItem Name="LanguageTrMenuItem" Header="Türkçe" Click="OnLangTr" />
+        <MenuItem Name="LanguageUkMenuItem" Header="Українська" Click="OnLangUk" />
+        <MenuItem Name="LanguagePlMenuItem" Header="Polski" Click="OnLangPl" />
+        <MenuItem Name="LanguageViMenuItem" Header="Tiếng Việt" Click="OnLangVi" />
+        <MenuItem Name="LanguageIdMenuItem" Header="Bahasa Indonesia" Click="OnLangId" />
       </MenuItem>
       <MenuItem Name="ThemeMenuItem" Header="{Binding MenuTheme}" Click="OnThemeMenuClick" />
       <MenuItem Name="HelpMenuItem" Header="{Binding MenuHelp}">
@@ -242,7 +269,7 @@
             ToolTip.ShowDelay="700"
             ToolTip.Placement="Bottom">
       <ToolTip.Tip>
-        <ToolTip Loaded="OnToolTipLoaded">
+        <ToolTip>
           <TextBlock Text="{Binding CopyFormatTooltip}" />
         </ToolTip>
       </ToolTip.Tip>
@@ -304,10 +331,12 @@
             IsEnabled="{Binding IsProjectLoaded}"
             IsVisible="{Binding IsProjectLoaded}"
             Margin="0,0,3,0"
+            AutomationProperties.HelpText="{Binding PreviewTooltip}"
             ToolTip.ShowDelay="700"
-            ToolTip.Placement="Left">
+            ToolTip.Placement="BottomEdgeAlignedRight"
+            ToolTip.VerticalOffset="5">
       <ToolTip.Tip>
-        <ToolTip Loaded="OnToolTipLoaded">
+        <ToolTip>
           <TextBlock Text="{Binding PreviewTooltip}" />
         </ToolTip>
       </ToolTip.Tip>
@@ -327,9 +356,10 @@
             IsEnabled="{Binding IsProjectLoaded}"
             IsVisible="{Binding IsProjectLoaded}"
             ToolTip.ShowDelay="700"
-            ToolTip.Placement="Left">
+            ToolTip.Placement="BottomEdgeAlignedRight"
+            ToolTip.VerticalOffset="5">
       <ToolTip.Tip>
-        <ToolTip Loaded="OnToolTipLoaded">
+        <ToolTip>
           <TextBlock Text="{Binding FilterTooltip}" />
         </ToolTip>
       </ToolTip.Tip>

@@ -5,6 +5,84 @@ namespace DevProjex.Tests.Unit;
 public sealed class SelectionRefreshEngineTests
 {
 	[Fact]
+	public void ComputeFullRefreshSnapshot_Defaults_PerformsOneWorkspaceScan()
+	{
+		var scanner = CreateCountingWorkspaceScanner(out var scanCount);
+		var engine = CreateEngine(scanner);
+
+		_ = engine.ComputeFullRefreshSnapshot(CreateDefaultsContext(), CancellationToken.None);
+
+		Assert.Equal(1, scanCount());
+	}
+
+	[Fact]
+	public void ComputeFullRefreshSnapshot_AvailabilityIoFailureUsesMeasuredFallback()
+	{
+		var scanner = new DotFolderNoiseScanner();
+		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
+		var engine = new SelectionRefreshEngine(
+			new ScanOptionsUseCase(LegacyWorkspaceScannerTestAdapter.Adapt(scanner)),
+			new FilterOptionSelectionService(),
+			new IgnoreOptionsService(localization),
+			BuildIgnoreRules,
+			static (_, _) => throw new IOException("transient availability failure"));
+
+		var snapshot = engine.ComputeFullRefreshSnapshot(
+			CreateDefaultsContext(),
+			CancellationToken.None);
+
+		Assert.Contains(
+			snapshot.IgnoreOptions,
+			static option => option.Id == IgnoreOptionId.DotFolders && option.IsChecked);
+	}
+
+	[Fact]
+	public void ComputeFullRefreshSnapshot_UnexpectedAvailabilityFailurePropagates()
+	{
+		var scanner = new DotFolderNoiseScanner();
+		var localization = new LocalizationService(CreateCatalog(), AppLanguage.En);
+		var engine = new SelectionRefreshEngine(
+			new ScanOptionsUseCase(LegacyWorkspaceScannerTestAdapter.Adapt(scanner)),
+			new FilterOptionSelectionService(),
+			new IgnoreOptionsService(localization),
+			BuildIgnoreRules,
+			static (_, _) => throw new InvalidOperationException("unexpected availability failure"));
+
+		var exception = Assert.Throws<InvalidOperationException>(() =>
+			engine.ComputeFullRefreshSnapshot(CreateDefaultsContext(), CancellationToken.None));
+
+		Assert.Equal("unexpected availability failure", exception.Message);
+	}
+
+	[Fact]
+	public void ComputeLiveRefreshSnapshot_NewFileOptionState_PerformsOneWorkspaceScan()
+	{
+		var scanner = CreateCountingWorkspaceScanner(out var scanCount);
+		var engine = CreateEngine(scanner);
+		var context = CreateDefaultsContext() with
+		{
+			CurrentRootOptions = [new SelectionOption("src", true)],
+			IgnoreSelectionInitialized = true,
+			IgnoreSelectionCache = new HashSet<IgnoreOptionId> { IgnoreOptionId.HiddenFiles },
+			IgnoreOptionStateCache = new Dictionary<IgnoreOptionId, bool>
+			{
+				[IgnoreOptionId.HiddenFiles] = true
+			},
+			IgnoreOptionStateCacheIsComplete = true,
+			CurrentSnapshotState = new IgnoreSectionSnapshotState(
+				HasIgnoreOptionCounts: true,
+				IgnoreOptionCounts: new IgnoreOptionCounts(HiddenFiles: 1),
+				ControllerImpactCounts: IgnoreControllerImpactCounts.Empty,
+				HasExtensionlessEntries: false,
+				ExtensionlessEntriesCount: 0)
+		};
+
+		_ = engine.ComputeLiveRefreshSnapshot(context, CancellationToken.None);
+
+		Assert.Equal(1, scanCount());
+	}
+
+	[Fact]
 	public void ComputeFullRefreshSnapshot_DefaultDirectoryTogglesUseSinglePassRootProjection()
 	{
 		var scanner = new DotFolderNoiseScanner();
@@ -55,6 +133,20 @@ public sealed class SelectionRefreshEngineTests
 
 		Assert.Equal(1, scanner.RootFolderScanCount);
 		Assert.Equal(2, scanner.IgnoreSnapshotCallCount);
+	}
+
+	[Fact]
+	public void ComputeFullRefreshSnapshot_AllPreferenceDoesNotEnableContentTransformations()
+	{
+		var engine = CreateEngine(new DotFolderNoiseScanner());
+		var context = CreateDefaultsContext() with { IgnoreAllPreference = true };
+
+		var snapshot = engine.ComputeFullRefreshSnapshot(context, CancellationToken.None);
+
+		Assert.Contains(snapshot.IgnoreOptions, option =>
+			option.Id == IgnoreOptionId.HideSecrets && !option.IsChecked);
+		Assert.Contains(snapshot.IgnoreOptions, option =>
+			option.Id == IgnoreOptionId.CompressCode && !option.IsChecked);
 	}
 
 	[Fact]
@@ -301,12 +393,16 @@ public sealed class SelectionRefreshEngineTests
 				return BuildIgnoreRules(path, selectedIgnoreOptions, selectedRootFolders);
 			},
 			GetIgnoreAvailability);
-		var context = CreateDefaultsContext();
+		var context = CreateDefaultsContext() with
+		{
+			CurrentRootOptions = [new SelectionOption("src", true)]
+		};
 
-		_ = engine.ComputeLiveRefreshSnapshot(context, ["src"], CancellationToken.None);
-		_ = engine.ComputeLiveRefreshSnapshot(context, ["src"], CancellationToken.None);
+		_ = engine.ComputeLiveRefreshSnapshot(context, CancellationToken.None);
+		_ = engine.ComputeLiveRefreshSnapshot(context, CancellationToken.None);
 
 		Assert.Equal(1, buildCount);
+		Assert.Equal(0, scanner.RootFolderScanCount);
 	}
 
 	[Fact]
@@ -343,6 +439,34 @@ public sealed class SelectionRefreshEngineTests
 			new IgnoreOptionsService(localization),
 			BuildIgnoreRules,
 			GetIgnoreAvailability);
+	}
+
+	private static StubFileSystemScanner CreateCountingWorkspaceScanner(out Func<int> getScanCount)
+	{
+		var scanCount = 0;
+		var scanner = new StubFileSystemScanner
+		{
+			GetRootFolderNamesHandler = (_, _) => new ScanResult<List<string>>(["src"], false, false),
+			ScanProjectWorkspaceHandler = (request, cancellationToken) =>
+			{
+				cancellationToken.ThrowIfCancellationRequested();
+				scanCount++;
+				var extensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".cs" };
+				return new ScanResult<ProjectWorkspaceScanSnapshot>(
+					new ProjectWorkspaceScanSnapshot(
+						new IgnoreSectionScanData(
+							extensions,
+							IgnoreOptionCounts.Empty,
+							new IgnoreOptionCounts(HiddenFiles: 1),
+							IgnoreControllerImpactCounts.Empty,
+							new HashSet<string>(extensions, StringComparer.OrdinalIgnoreCase)),
+						TreeInventory: null),
+					RootAccessDenied: false,
+					HadAccessDenied: false);
+			}
+		};
+		getScanCount = () => scanCount;
+		return scanner;
 	}
 
 	private static SelectionRefreshContext CreateDefaultsContext() =>
@@ -457,6 +581,8 @@ public sealed class SelectionRefreshEngineTests
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
 				["Settings.Ignore.SmartIgnore"] = "Smart ignore",
+				["Settings.Ignore.HideSecrets"] = "Hide secrets",
+				["Settings.Ignore.CompressCode"] = "Compress code",
 				["Settings.Ignore.UseGitIgnore"] = "Use .gitignore",
 				["Settings.Ignore.TrackedGitFilesOnly"] = "Tracked Git files only",
 				["Settings.Ignore.HiddenFolders"] = "Hidden folders",
@@ -1141,6 +1267,8 @@ public sealed class SelectionRefreshEngineTests
 	private sealed class StableSnapshotScanner
 		: IFileSystemScanner, IFileSystemScannerExtensionPolicySnapshotProvider
 	{
+		public int RootFolderScanCount { get; private set; }
+
 		public bool CanReadRoot(string rootPath) => true;
 
 		public ScanResult<HashSet<string>> GetExtensions(string rootPath, IgnoreRules rules, CancellationToken cancellationToken = default)
@@ -1150,7 +1278,10 @@ public sealed class SelectionRefreshEngineTests
 			=> new(new HashSet<string>(StringComparer.OrdinalIgnoreCase), false, false);
 
 		public ScanResult<List<string>> GetRootFolderNames(string rootPath, IgnoreRules rules, CancellationToken cancellationToken = default)
-			=> new(new List<string> { "src" }, false, false);
+		{
+			RootFolderScanCount++;
+			return new(new List<string> { "src" }, false, false);
+		}
 
 		public ScanResult<IgnoreSectionScanData> GetIgnoreSectionSnapshot(
 			string rootPath,

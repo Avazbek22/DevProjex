@@ -3,6 +3,19 @@ namespace DevProjex.Tests.Unit;
 public sealed class SelectedContentExportServiceAdditionalTests
 {
 	[Fact]
+	public void MaterializationTrimsWithoutMutatingTheReusableBuffer()
+	{
+		var buffer = new StringBuilder("content\r\n");
+
+		var first = SelectedContentExportService.MaterializeWithoutTrailingLineEndings(buffer);
+		var second = SelectedContentExportService.MaterializeWithoutTrailingLineEndings(buffer);
+
+		Assert.Equal("content", first);
+		Assert.Equal(first, second);
+		Assert.Equal("content\r\n", buffer.ToString());
+	}
+
+	[Fact]
 	// Verifies empty input yields an empty export.
 	public void Build_EmptyList_ReturnsEmpty()
 	{
@@ -140,5 +153,52 @@ public sealed class SelectedContentExportServiceAdditionalTests
 
 		Assert.True(firstIndex >= 0);
 		Assert.True(secondIndex > firstIndex);
+	}
+
+	[Fact]
+	public async Task BuildAsync_CancellationDuringInputEnumerationStopsBeforeNextRead()
+	{
+		using var cancellation = new CancellationTokenSource();
+		var paths = new CancelThenRejectFurtherEnumeration("unused.txt", cancellation);
+		var service = new SelectedContentExportService(new FileContentAnalyzer());
+
+		await Assert.ThrowsAsync<OperationCanceledException>(() =>
+			service.BuildAsync(paths, cancellation.Token));
+	}
+
+	private sealed class CancelThenRejectFurtherEnumeration(
+		string item,
+		CancellationTokenSource cancellation) : IEnumerable<string>
+	{
+		public IEnumerator<string> GetEnumerator() => new Enumerator(item, cancellation);
+
+		System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+
+		private sealed class Enumerator(
+			string item,
+			CancellationTokenSource cancellation) : IEnumerator<string>
+		{
+			private int _state;
+
+			public string Current { get; private set; } = string.Empty;
+
+			object System.Collections.IEnumerator.Current => Current;
+
+			public bool MoveNext()
+			{
+				if (_state++ != 0)
+					throw new InvalidOperationException("Enumeration continued after cancellation.");
+
+				Current = item;
+				cancellation.Cancel();
+				return true;
+			}
+
+			public void Reset() => throw new NotSupportedException();
+
+			public void Dispose()
+			{
+			}
+		}
 	}
 }

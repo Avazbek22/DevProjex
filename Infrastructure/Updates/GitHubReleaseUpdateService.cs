@@ -8,6 +8,7 @@ public sealed class GitHubReleaseUpdateService : IApplicationUpdateService, IDis
     private static readonly Uri LatestReleaseEndpoint = new(
         "https://api.github.com/repos/Avazbek22/DevProjex/releases/latest");
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(10);
+    internal const long MaximumReleaseMetadataBytes = 1024 * 1024;
 
     private readonly HttpClient _httpClient;
 
@@ -50,7 +51,10 @@ public sealed class GitHubReleaseUpdateService : IApplicationUpdateService, IDis
                 timeout.Token);
             if (!response.IsSuccessStatusCode)
                 return Failed(current.ToString());
+            if (response.Content.Headers.ContentLength is > MaximumReleaseMetadataBytes)
+                return Failed(current.ToString());
 
+            await response.Content.LoadIntoBufferAsync(MaximumReleaseMetadataBytes, timeout.Token);
             await using var content = await response.Content.ReadAsStreamAsync(timeout.Token);
             var release = await JsonSerializer.DeserializeAsync(
                 content,

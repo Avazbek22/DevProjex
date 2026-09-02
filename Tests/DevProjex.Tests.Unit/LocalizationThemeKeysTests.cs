@@ -10,6 +10,14 @@ public sealed class LocalizationThemeKeysTests
         "Theme.Dark"
     ];
 
+    private static readonly string[] RequiredAnimationKeys =
+    [
+        "Menu.View.Animations",
+        "Menu.View.TreeExpansionAnimation",
+        "Menu.View.StatusMetricsAnimation",
+        "Menu.View.ToolAnimation"
+    ];
+
     [Fact]
     public void LocalizationFiles_ContainNonEmptyThemeSelectionLabels()
     {
@@ -34,7 +42,7 @@ public sealed class LocalizationThemeKeysTests
     }
 
     [Fact]
-    public void LocalizationFiles_ContainTreeExpansionAnimationLabel()
+    public void LocalizationFiles_ContainEveryAnimationLabel()
     {
         var localizationDirectory = Path.Combine(
             FindRepositoryRoot(),
@@ -44,17 +52,32 @@ public sealed class LocalizationThemeKeysTests
         foreach (var file in Directory.GetFiles(localizationDirectory, "*.json"))
         {
             using var document = JsonDocument.Parse(File.ReadAllText(file));
-            Assert.True(
-                document.RootElement.TryGetProperty(
-                    "Menu.View.TreeExpansionAnimation",
-                    out var value),
-                $"Missing tree expansion animation label in {Path.GetFileName(file)}.");
-            Assert.False(
-                string.IsNullOrWhiteSpace(value.GetString()),
-                $"Tree expansion animation label is empty in {Path.GetFileName(file)}.");
+            foreach (var key in RequiredAnimationKeys)
+            {
+                Assert.True(
+                    document.RootElement.TryGetProperty(key, out var value),
+                    $"Missing {key} in {Path.GetFileName(file)}.");
+                Assert.False(
+                    string.IsNullOrWhiteSpace(value.GetString()),
+                    $"{key} is empty in {Path.GetFileName(file)}.");
+            }
             Assert.False(
                 document.RootElement.TryGetProperty("Menu.View.TreeAnimation", out _),
                 $"Obsolete tree hover animation label remains in {Path.GetFileName(file)}.");
+
+            var languageCode = Path.GetFileNameWithoutExtension(file);
+            var animationSectionTitle = document.RootElement
+                .GetProperty("Menu.View.Animations")
+                .GetString();
+            var helpPath = Path.Combine(
+                FindRepositoryRoot(),
+                "Assets",
+                "HelpContent",
+                $"help.{languageCode}.txt");
+            Assert.Contains(
+                $"### {animationSectionTitle}",
+                File.ReadAllText(helpPath),
+                StringComparison.Ordinal);
         }
 
         using var russian = JsonDocument.Parse(

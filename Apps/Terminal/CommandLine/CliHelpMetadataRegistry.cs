@@ -6,6 +6,7 @@ namespace DevProjex.Terminal.CommandLine;
 internal static class CliHelpMetadataRegistry
 {
 	private static readonly ConditionalWeakTable<Option, DefaultDisplay> Defaults = new();
+	private static readonly ConditionalWeakTable<Option, RequiredDisplay> Required = new();
 
 	public static void SuppressParserDefault(Option option)
 	{
@@ -34,5 +35,14 @@ internal static class CliHelpMetadataRegistry
 		return false;
 	}
 
+	public static void MarkRequired(Option option)
+	{
+		ArgumentNullException.ThrowIfNull(option);
+		Required.AddOrUpdate(option, new RequiredDisplay());
+	}
+
+	public static bool IsRequired(Option option) => Required.TryGetValue(option, out _);
+
 	private sealed record DefaultDisplay(string? Value);
+	private sealed record RequiredDisplay;
 }

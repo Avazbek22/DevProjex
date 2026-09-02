@@ -11,11 +11,28 @@ public static class ScanParallelismPolicy
 
 	public static int MaxDegreeOfParallelism { get; } = ResolveMaxDegreeOfParallelism();
 
-	public static ParallelOptions CreateOptions(CancellationToken cancellationToken = default) => new()
+	public static ParallelOptions CreateOptions(
+		CancellationToken cancellationToken = default,
+		int? maximumDegreeOfParallelism = null)
 	{
-		MaxDegreeOfParallelism = MaxDegreeOfParallelism,
-		CancellationToken = cancellationToken
-	};
+		if (maximumDegreeOfParallelism is <= 0)
+			throw new ArgumentOutOfRangeException(nameof(maximumDegreeOfParallelism));
+
+		return new ParallelOptions
+		{
+			MaxDegreeOfParallelism = Math.Min(
+				maximumDegreeOfParallelism ?? MaxDegreeOfParallelism,
+				MaxDegreeOfParallelism),
+			CancellationToken = cancellationToken
+		};
+	}
+
+	public static int PartitionDegreeOfParallelism(int concurrentPartitions)
+	{
+		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(concurrentPartitions);
+		var activePartitions = Math.Min(concurrentPartitions, MaxDegreeOfParallelism);
+		return Math.Max(1, MaxDegreeOfParallelism / activePartitions);
+	}
 
 	private static int ResolveMaxDegreeOfParallelism()
 	{

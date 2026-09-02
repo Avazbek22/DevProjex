@@ -160,6 +160,33 @@ public class GitBranchOperationsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SwitchBranchAsync_AtSignDoesNotReportHeadAsSuccessfulBranchSwitch()
+    {
+        if (!_gitAvailable)
+            return;
+
+        var repoPath = _tempDir.CreateDirectory("switch-at-sign");
+        var cloneResult = await _service.CloneAsync(
+            TestRepoUrl,
+            repoPath,
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.True(cloneResult.Success);
+        var branchBefore = await _service.GetCurrentBranchAsync(
+            repoPath,
+            TestContext.Current.CancellationToken);
+
+        var success = await _service.SwitchBranchAsync(
+            repoPath,
+            "@",
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.False(success);
+        Assert.Equal(
+            branchBefore,
+            await _service.GetCurrentBranchAsync(repoPath, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task SwitchBranchAsync_ToSameBranch_Succeeds()
     {
         if (!_gitAvailable)

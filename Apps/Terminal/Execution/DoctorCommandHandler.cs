@@ -4,9 +4,10 @@ using System.Runtime.InteropServices;
 using System.Security;
 using System.Text.Json;
 using DevProjex.Infrastructure.Persistence;
-using DevProjex.Infrastructure.ProjectProfiles;
+using DevProjex.Infrastructure.Processes;
 using DevProjex.Terminal.CommandLine;
 using DevProjex.Terminal.DesktopControl;
+using DevProjex.Terminal.Rendering;
 
 namespace DevProjex.Terminal.Execution;
 
@@ -23,6 +24,8 @@ public sealed class DoctorCommandHandler(
 	Func<string>? currentDirectoryProvider = null,
 	Func<DoctorStorageRoots>? storageRootsProvider = null)
 {
+	private const int MaximumGitVersionOutputCharacters = 64 * 1024;
+	private static readonly TimeSpan GitVersionOutputDrainTimeout = TimeSpan.FromSeconds(2);
 	private readonly DesktopInstanceRegistry _desktopRegistry =
 		desktopRegistry ?? new DesktopInstanceRegistry();
 	private readonly Func<string> _currentDirectoryProvider =
@@ -72,14 +75,18 @@ public sealed class DoctorCommandHandler(
 		else
 		{
 			environment.Output.WriteLine($"DevProjex {ResolveVersion()}");
-			environment.Output.WriteLine($"{RuntimeInformation.OSDescription} ({RuntimeInformation.ProcessArchitecture})");
+			environment.Output.WriteLine(
+				$"{TerminalTextEscaping.EscapeSingleLine(RuntimeInformation.OSDescription)} " +
+				$"({RuntimeInformation.ProcessArchitecture})");
 			foreach (var check in checks)
 			{
 				environment.Output.WriteLine(
-					$"{StatusMarker(check.Status)} {ResolveCheckName(check.Name)}: {check.Detail}");
+					$"{StatusMarker(check.Status)} {ResolveCheckName(check.Name)}: " +
+					TerminalTextEscaping.EscapeSingleLine(check.Detail));
 				if (!string.IsNullOrWhiteSpace(check.Hint))
 					environment.Output.WriteLine(
-						$"  {services.Localization["Terminal.Label.Hint"]}: {check.Hint}");
+						$"  {services.Localization["Terminal.Label.Hint"]}: " +
+						TerminalTextEscaping.EscapeSingleLine(check.Hint));
 			}
 		}
 
@@ -119,9 +126,7 @@ public sealed class DoctorCommandHandler(
 				terminal.ResolvedCommandPath),
 			new DoctorCheck(
 				"path-resolution",
-				Status(
-					terminal.State != TerminalCommandSetupState.CommandShadowed,
-					DoctorCheckStatus.Warning),
+				ResolvePathResolutionStatus(terminal),
 				terminal.ResolvedCommandPath ?? L("Terminal.Doctor.Value.NotResolved"),
 				terminal.State == TerminalCommandSetupState.CommandShadowed
 					? L("Terminal.Doctor.Hint.PathShadowed")
@@ -435,34 +440,68 @@ public sealed class DoctorCommandHandler(
 	private static async Task<(bool Available, string Version)> TryReadGitVersionAsync(
 		CancellationToken cancellationToken)
 	{
+		return await TryReadGitVersionAsync(
+			CreateGitVersionStartInfo(),
+			TimeSpan.FromSeconds(3),
+			cancellationToken).ConfigureAwait(false);
+	}
+
+	internal static async Task<(bool Available, string Version)> TryReadGitVersionAsync(
+		ProcessStartInfo startInfo,
+		TimeSpan timeout,
+		CancellationToken cancellationToken)
+	{
+		ArgumentNullException.ThrowIfNull(startInfo);
+		if (timeout <= TimeSpan.Zero)
+			throw new ArgumentOutOfRangeException(nameof(timeout));
+
 		try
 		{
 			using var process = new Process
 			{
-				StartInfo = CreateGitVersionStartInfo()
+				StartInfo = startInfo
 			};
 			if (!process.Start())
 				return (false, "unavailable");
 			process.StandardInput.Close();
 			using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-			timeoutSource.CancelAfter(TimeSpan.FromSeconds(3));
-			var outputTask = process.StandardOutput.ReadToEndAsync(timeoutSource.Token);
-			var errorTask = process.StandardError.ReadToEndAsync(timeoutSource.Token);
+			using var outputDrainSource = new CancellationTokenSource();
+			timeoutSource.CancelAfter(timeout);
+			var outputTask = BoundedTextReader.ReadAsync(
+				process.StandardOutput,
+				MaximumGitVersionOutputCharacters,
+				outputDrainSource.Token);
+			var errorTask = BoundedTextReader.ReadAsync(
+				process.StandardError,
+				MaximumGitVersionOutputCharacters,
+				outputDrainSource.Token);
 			try
 			{
-				await process.WaitForExitAsync(timeoutSource.Token).ConfigureAwait(false);
-				var version = (await outputTask.ConfigureAwait(false)).Trim();
-				_ = await errorTask.ConfigureAwait(false);
+				await ExternalProcessLifetime
+					.WaitForExitOrTerminateAsync(process, timeoutSource.Token)
+					.ConfigureAwait(false);
+				outputDrainSource.CancelAfter(GitVersionOutputDrainTimeout);
+				var output = await outputTask.ConfigureAwait(false);
+				var error = await errorTask.ConfigureAwait(false);
+				if (output.ExceededLimit || error.ExceededLimit)
+					return (false, "unavailable");
+				var version = output.Text.Trim();
 				return (process.ExitCode == 0 && version.Length > 0, version);
 			}
 			catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
 			{
-				TryTerminate(process);
+				outputDrainSource.CancelAfter(GitVersionOutputDrainTimeout);
+				await BoundedTextReader
+					.ObserveCompletionAsync(outputTask, errorTask)
+					.ConfigureAwait(false);
 				return (false, "unavailable");
 			}
 			catch (OperationCanceledException)
 			{
-				TryTerminate(process);
+				outputDrainSource.CancelAfter(GitVersionOutputDrainTimeout);
+				await BoundedTextReader
+					.ObserveCompletionAsync(outputTask, errorTask)
+					.ConfigureAwait(false);
 				throw;
 			}
 		}
@@ -490,22 +529,6 @@ public sealed class DoctorCommandHandler(
 		startInfo.ArgumentList.Add("--version");
 		startInfo.Environment["GIT_TERMINAL_PROMPT"] = "0";
 		return startInfo;
-	}
-
-	private static void TryTerminate(Process process)
-	{
-		try
-		{
-			if (!process.HasExited)
-				process.Kill(entireProcessTree: true);
-		}
-		catch (Exception exception) when (exception is
-			       InvalidOperationException or
-			       NotSupportedException or
-			       System.ComponentModel.Win32Exception)
-		{
-			// The process may already have exited or the platform may not expose tree termination.
-		}
 	}
 
 	private static bool CanReadDirectory(string path)
@@ -602,6 +625,14 @@ public sealed class DoctorCommandHandler(
 		DoctorCheckStatus failureStatus) =>
 		passed ? DoctorCheckStatus.Pass : failureStatus;
 
+	private static DoctorCheckStatus ResolvePathResolutionStatus(
+		TerminalCommandSetupSnapshot terminal) =>
+		terminal.State == TerminalCommandSetupState.CommandShadowed
+			? DoctorCheckStatus.Warning
+			: string.IsNullOrWhiteSpace(terminal.ResolvedCommandPath)
+				? DoctorCheckStatus.Skip
+				: DoctorCheckStatus.Pass;
+
 	private static string StatusMarker(DoctorCheckStatus status) =>
 		status switch
 		{
@@ -633,7 +664,7 @@ public sealed class DoctorCommandHandler(
 		};
 
 	private static string NormalizeMachinePath(string path) =>
-		path.Replace('\\', '/');
+		PathUtility.NormalizeSeparators(path);
 
 	private enum DoctorCheckStatus
 	{

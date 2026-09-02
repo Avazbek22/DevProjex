@@ -1,0 +1,30 @@
+ DevProjex Terminal · <ID>
+ <PROJECT_ROOT>
+┌┤> PROJECT TREE├─────────────────────────────────────┐┌┤  CONTEXT PREVIEW · Tree · ASCII├─────────────────────────────┐
+│v [x] <ID>               ││<ID>                               │
+│  > [x] src                                          ││├── src                                                        │
+│    [x] global.json                                  │││   └── App.cs                                                 │
+│    [x] readme.md                                    ││├── global.json                                                │
+│                                                     ││└── readme.md                                                  │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││                                                               │
+│                                                     ││ Files 3  |  Lines 1-6/6                                       │
+└─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
+
+ Files 3 · Folders 2 · 86 B · ~<TOKENS> tokens · Warnings 0 · Errors 0
+ :view

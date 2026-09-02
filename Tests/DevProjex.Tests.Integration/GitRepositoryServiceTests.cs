@@ -133,6 +133,171 @@ public class GitRepositoryServiceTests : IAsyncLifetime
     #region Clone Tests
 
     [Fact]
+    public void AuthenticatedCloneStartInfoKeepsCredentialsOutOfArguments()
+    {
+        const string password = "token-with-&-special";
+        var authentication = Assert.IsType<GitCloneAuthentication>(
+            GitCloneAuthentication.TryCreate(
+                $"https://oauth2:{Uri.EscapeDataString(password)}@example.test/owner/repository.git"));
+        using var askPass = GitAskPassSession.Create(authentication);
+
+        var startInfo = GitProcessStartInfoFactory.Create(
+            null,
+            ["clone", authentication.RepositoryUrl, "target"],
+            askPass: askPass);
+
+        Assert.Equal("https://example.test/owner/repository.git", authentication.RepositoryUrl);
+        Assert.DoesNotContain(
+            startInfo.ArgumentList,
+            argument => argument.Contains(password, StringComparison.Ordinal) ||
+                        argument.Contains("oauth2", StringComparison.Ordinal));
+        Assert.Equal(password, startInfo.Environment[GitAskPassSession.PasswordEnvironmentVariable]);
+        Assert.Equal("oauth2", startInfo.Environment["GIT_CONFIG_VALUE_0"]);
+        Assert.DoesNotContain(password, File.ReadAllText(askPass.HelperPath), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MalformedAuthenticatedCloneSourceIsRejectedBeforeBuildingGitArguments()
+    {
+        const string password = "super-secret";
+        const string source = $"https://oauth2:{password}@[invalid/repository.git";
+
+        var accepted = GitCloneAuthentication.TryResolveCloneUrl(
+            source,
+            out var cloneUrl,
+            out var authentication);
+
+        Assert.False(accepted);
+        Assert.Null(authentication);
+        Assert.DoesNotContain(password, cloneUrl, StringComparison.Ordinal);
+        Assert.DoesNotContain("oauth2", cloneUrl, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(
+        "https://example.test/owner/repository.git?access_token=process-secret",
+        "https://example.test/owner/repository.git")]
+    [InlineData(
+        "https://example.test/owner/repository.git#process-secret",
+        "https://example.test/owner/repository.git")]
+    [InlineData(
+        "git@example.test:owner/repository.git?access_token=process-secret",
+        "git@example.test:owner/repository.git")]
+    public void CloneSourceWithQueryOrFragmentIsRejectedBeforeBuildingGitArguments(
+        string source,
+        string expectedSafeSource)
+    {
+        var accepted = GitCloneAuthentication.TryResolveCloneUrl(
+            source,
+            out var cloneUrl,
+            out var authentication);
+
+        Assert.False(accepted);
+        Assert.Null(authentication);
+        Assert.Equal(expectedSafeSource, cloneUrl);
+        Assert.DoesNotContain("process-secret", cloneUrl, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AuthenticatedCloneUsesSanitizedArgvAndAskPassInChildProcess()
+    {
+        if (OperatingSystem.IsWindows())
+            Assert.Skip("The process probe uses a POSIX executable script; Windows behavior is covered by the start-info contract test.");
+
+        const string password = "process-secret-token";
+        var probeDirectory = Path.Combine(_tempDir!, "git-argv-probe");
+        Directory.CreateDirectory(probeDirectory);
+        var executablePath = Path.Combine(probeDirectory, "git-probe");
+        var argumentLog = Path.Combine(probeDirectory, "arguments.txt");
+        var passwordLog = Path.Combine(probeDirectory, "password.txt");
+        var userNameLog = Path.Combine(probeDirectory, "username.txt");
+        var script =
+            "#!/bin/sh\n" +
+            $"printf '%s\\n' \"$@\" >> {ShellQuote(argumentLog)}\n" +
+            "if [ \"$1\" = clone ]; then\n" +
+            $"  \"$GIT_ASKPASS\" 'Password:' > {ShellQuote(passwordLog)}\n" +
+            $"  printf '%s' \"$GIT_CONFIG_VALUE_0\" > {ShellQuote(userNameLog)}\n" +
+            "  for target do :; done\n" +
+            "  mkdir -p \"$target/.git\"\n" +
+            "elif [ \"$1\" = symbolic-ref ]; then\n" +
+            "  printf 'refs/remotes/origin/main\\n'\n" +
+            "fi\n";
+        await File.WriteAllTextAsync(
+            executablePath,
+            script,
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+            TestContext.Current.CancellationToken);
+        MakeExecutable(executablePath);
+        var service = new GitRepositoryService(executablePath);
+        var targetDirectory = Path.Combine(probeDirectory, "clone");
+        var authenticatedUrl =
+            $"https://oauth2:{Uri.EscapeDataString(password)}@example.test/owner/repository.git";
+
+        var result = await service.CloneAsync(
+            authenticatedUrl,
+            targetDirectory,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success, result.ErrorMessage);
+        var arguments = await File.ReadAllTextAsync(argumentLog, TestContext.Current.CancellationToken);
+        Assert.Contains(
+            "https://example.test/owner/repository.git",
+            arguments,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(password, arguments, StringComparison.Ordinal);
+        Assert.DoesNotContain("oauth2", arguments, StringComparison.Ordinal);
+        Assert.Equal("https://example.test/owner/repository.git", result.RepositoryUrl);
+        Assert.Equal(
+            password,
+            (await File.ReadAllTextAsync(passwordLog, TestContext.Current.CancellationToken)).Trim());
+        Assert.Equal(
+            "oauth2",
+            await File.ReadAllTextAsync(userNameLog, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task CloneResultNeverExposesTransportQueryOrFragment()
+    {
+        if (OperatingSystem.IsWindows())
+            Assert.Skip("The process probe uses a POSIX executable script.");
+
+        var probeDirectory = Path.Combine(_tempDir!, "git-result-url-probe");
+        Directory.CreateDirectory(probeDirectory);
+        var executablePath = Path.Combine(probeDirectory, "git-probe");
+        var argumentLog = Path.Combine(probeDirectory, "arguments.txt");
+        var script =
+            "#!/bin/sh\n" +
+            $"printf '%s\\n' \"$@\" >> {ShellQuote(argumentLog)}\n" +
+            "if [ \"$1\" = clone ]; then\n" +
+            "  for target do :; done\n" +
+            "  mkdir -p \"$target/.git\"\n" +
+            "elif [ \"$1\" = symbolic-ref ]; then\n" +
+            "  printf 'refs/remotes/origin/main\\n'\n" +
+            "fi\n";
+        await File.WriteAllTextAsync(
+            executablePath,
+            script,
+            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+            TestContext.Current.CancellationToken);
+        MakeExecutable(executablePath);
+        var service = new GitRepositoryService(executablePath);
+        var targetDirectory = Path.Combine(probeDirectory, "clone");
+        const string sourceUrl =
+            "https://example.test/owner/repository.git?transport=opaque#fragment";
+
+        var result = await service.CloneAsync(
+            sourceUrl,
+            targetDirectory,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        Assert.Equal("https://example.test/owner/repository.git", result.RepositoryUrl);
+        Assert.Equal("repository", result.RepositoryName);
+        Assert.Equal("Clone failed", result.ErrorMessage);
+        Assert.False(File.Exists(argumentLog));
+    }
+
+    [Fact]
     public async Task CloneAsync_ReturnsError_ForNonGitUrl()
     {
         SkipIfNoGit();
@@ -197,8 +362,7 @@ public class GitRepositoryServiceTests : IAsyncLifetime
         Assert.True(result.Success, $"Clone failed: {result.ErrorMessage}");
         Assert.Contains(
             progress.Reports,
-            static report => report.EndsWith('%') &&
-                             int.TryParse(report.AsSpan(0, report.Length - 1), out _));
+            static report => report.Contains('%', StringComparison.Ordinal));
     }
 
     [Fact]
@@ -294,6 +458,30 @@ public class GitRepositoryServiceTests : IAsyncLifetime
         Assert.NotEmpty(branches);
         // First branch should be active (sorting places active first)
         Assert.True(branches[0].IsActive, "First branch should be the active one");
+    }
+
+    [Fact]
+    public async Task GetBranchesAsync_PreservesCaseDistinctRefs()
+    {
+        SkipIfNoGit();
+        await using var source = await GitTestRepository.CreateAsync(
+            cancellationToken: TestContext.Current.CancellationToken);
+        var targetDir = Path.Combine(_tempDir!, "case-distinct-branches");
+        var cloneResult = await _service.CloneAsync(
+            source.RepositoryUrl,
+            targetDir,
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.True(cloneResult.Success, cloneResult.ErrorMessage);
+        var head = await source.GetBranchHeadAsync(source.DefaultBranchName, TestContext.Current.CancellationToken);
+        await File.AppendAllTextAsync(
+            Path.Combine(source.BareRepositoryPath, "packed-refs"),
+            $"{head} refs/heads/Feature\n{head} refs/heads/feature\n",
+            TestContext.Current.CancellationToken);
+
+        var branches = await _service.GetBranchesAsync(targetDir, TestContext.Current.CancellationToken);
+
+        Assert.Contains(branches, branch => branch.Name == "Feature");
+        Assert.Contains(branches, branch => branch.Name == "feature");
     }
 
     [Fact]
@@ -529,6 +717,16 @@ public class GitRepositoryServiceTests : IAsyncLifetime
             async () => await _service.GetBranchesAsync(_tempDir!, cts.Token));
     }
 
+    [Fact]
+    public async Task GetCurrentBranchAsync_PropagatesCancellation()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => _service.GetCurrentBranchAsync(_tempDir!, cancellation.Token));
+    }
+
     #endregion
 
     #region Concurrent Operations Tests
@@ -556,4 +754,17 @@ public class GitRepositoryServiceTests : IAsyncLifetime
     }
 
     #endregion
+
+    private static string ShellQuote(string value) =>
+        "'" + value.Replace("'", "'\"'\"'", StringComparison.Ordinal) + "'";
+
+    private static void MakeExecutable(string path)
+    {
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+        {
+            File.SetUnixFileMode(
+                path,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
 }

@@ -25,9 +25,17 @@ public static class ProjectSelectionTokens
 	public static string ToToken(GitFilteringMode mode) =>
 		ProjectPresentationCatalog.Get(mode).Token;
 
+	public static string ToToken(ProjectSelectionSpec selection)
+	{
+		ArgumentNullException.ThrowIfNull(selection);
+		return GitScopeSelection.ToToken(
+			selection.GitMode ?? GitFilteringMode.None,
+			selection.GitDiffRange);
+	}
+
 	public static bool TryParseExclusion(string? value, out ProjectExclusion exclusion)
 	{
-		var descriptor = ProjectPresentationCatalog.Exclusions.FirstOrDefault(
+		var descriptor = ProjectPresentationCatalog.LegacyExclusionChoices.FirstOrDefault(
 			item => string.Equals(item.Token, value, StringComparison.OrdinalIgnoreCase));
 		exclusion = descriptor?.Id ?? (ProjectExclusion)(-1);
 		return descriptor is not null;
@@ -35,4 +43,15 @@ public static class ProjectSelectionTokens
 
 	public static string ToToken(ProjectExclusion exclusion) =>
 		ProjectPresentationCatalog.Get(exclusion).Token;
+
+	public static IReadOnlyList<ProjectExclusion> OrderExclusions(
+		IEnumerable<ProjectExclusion> exclusions)
+	{
+		ArgumentNullException.ThrowIfNull(exclusions);
+		return exclusions
+			.Where(static exclusion => exclusion != ProjectExclusion.HideSecrets)
+			.Distinct()
+			.OrderBy(static exclusion => ProjectPresentationCatalog.Get(exclusion).Order)
+			.ToArray();
+	}
 }

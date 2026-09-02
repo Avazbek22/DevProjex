@@ -16,6 +16,10 @@ public sealed class EmptyEqualsParserRegressionTests
 				"--format"
 			},
 			{
+				["analyze", ".", "--top-files=", "10"],
+				"--top-files"
+			},
+			{
 				["analyze", ".", "--profile=", "standard"],
 				"--profile"
 			},
@@ -40,6 +44,10 @@ public sealed class EmptyEqualsParserRegressionTests
 				"--exclude"
 			},
 			{
+				["analyze", ".", "--max-file-bytes=", "1m"],
+				"--max-file-bytes"
+			},
+			{
 				["analyze", ".", "--color=", "never"],
 				"--color"
 			},
@@ -62,6 +70,10 @@ public sealed class EmptyEqualsParserRegressionTests
 			{
 				["export", "context", ".", "--view=", "tree"],
 				"--view"
+			},
+			{
+				["export", "context", ".", "--max-tokens=", "10"],
+				"--max-tokens"
 			},
 			{
 				["tui", ".", "--screen=", "inline"],
@@ -120,8 +132,16 @@ public sealed class EmptyEqualsParserRegressionTests
 
 	private static readonly string[] ExpectedPublicValueOptionTokens =
 	[
+		"-b",
+		"-e",
+		"-f",
 		"-o",
+		"-p",
+		"-r",
+		"-s",
+		"-x",
 		"--as",
+		"--branch",
 		"--color",
 		"--exclude",
 		"--extension",
@@ -129,7 +149,11 @@ public sealed class EmptyEqualsParserRegressionTests
 		"--format",
 		"--git-mode",
 		"--instance",
+		"--kind",
 		"--language",
+		"--limit",
+		"--max-file-bytes",
+		"--max-tokens",
 		"--output",
 		"--profile",
 		"--progress",
@@ -138,7 +162,9 @@ public sealed class EmptyEqualsParserRegressionTests
 		"--screen",
 		"--search",
 		"--select",
+		"--select-from",
 		"--timeout",
+		"--top-files",
 		"--tree-format",
 		"--verbosity",
 		"--view"
@@ -162,6 +188,24 @@ public sealed class EmptyEqualsParserRegressionTests
 		Assert.True(detected);
 		Assert.Equal(CliInputIntegrityErrorKind.MissingOptionValue, error.Kind);
 		Assert.Equal(expectedOption, error.SymbolName);
+	}
+
+	[Fact]
+	public void RequiredValueFollowedByARecognizedOptionIsMissing()
+	{
+		string[] arguments = ["export", "project", "--as", "--language", "en"];
+		var root = new DevProjexCommandTree(new TestTerminalEnvironment()).Build();
+		var parseResult = root.Parse(arguments);
+
+		var detected = CliInputIntegrityGuard.TryFindError(
+			arguments,
+			root,
+			parseResult,
+			out var error);
+
+		Assert.True(detected);
+		Assert.Equal(CliInputIntegrityErrorKind.MissingOptionValue, error.Kind);
+		Assert.Equal("--as", error.SymbolName);
 	}
 
 	[Fact]

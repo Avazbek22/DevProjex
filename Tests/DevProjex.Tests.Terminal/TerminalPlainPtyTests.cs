@@ -56,14 +56,14 @@ public sealed partial class TerminalPlainPtyTests
 		AssertPlainScreen(terminal.CaptureScreen());
 		await terminal.SendAsync("?", TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
-			"ACTION PALETTE",
+			"WORKSPACE",
 			cancellationToken: TestContext.Current.CancellationToken);
 		AssertPlainScreen(terminal.CaptureScreen());
 		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
 		await terminal.WaitForScreenAsync(
 			"> CONTEXT PREVIEW",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		await terminal.CompleteShellRestorationHandshakeAsync(
 			TestContext.Current.CancellationToken);
 
@@ -130,19 +130,12 @@ public sealed partial class TerminalPlainPtyTests
 		ReleaseCheckpoint(checkpointRoot, "writing-context");
 
 		await terminal.WaitForStableScreenAsync(
-			"Equivalent command:",
+			"Export completed:",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.True(File.Exists(destination));
-		await terminal.SendEscapeAsync(TestContext.Current.CancellationToken);
-		var restoredWorkspace = await terminal.WaitForStableScreenAsync(
-			"> PROJECT TREE",
-			"Equivalent command:",
-			cancellationToken: TestContext.Current.CancellationToken);
-		Assert.DoesNotContain(
-			"Equivalent command:",
-			restoredWorkspace,
-			StringComparison.Ordinal);
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		var restoredWorkspace = terminal.CaptureScreen();
+		Assert.Contains("> PROJECT TREE", restoredWorkspace, StringComparison.Ordinal);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(
@@ -183,11 +176,8 @@ public sealed partial class TerminalPlainPtyTests
 	private static async Task ConfirmExportSummaryAsync(TerminalPtyHarness terminal)
 	{
 		await terminal.WaitForScreenAsync(
-			"Destination state: Ready",
+			"Export?",
 			cancellationToken: TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
-		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
 		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
 	}
 

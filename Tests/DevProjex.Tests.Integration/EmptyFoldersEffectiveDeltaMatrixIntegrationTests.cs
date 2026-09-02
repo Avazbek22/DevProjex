@@ -246,7 +246,6 @@ public sealed class EmptyFoldersEffectiveDeltaMatrixIntegrationTests
 		{
 			return new Dictionary<string, string>
 			{
-				["Tree.AccessDeniedRoot"] = "Access denied",
 				["Tree.AccessDenied"] = "Access denied"
 			};
 		}

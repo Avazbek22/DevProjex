@@ -1,8 +1,7 @@
 using System.Text.Encodings.Web;
-using System.Text.Json.Serialization;
 using DevProjex.Application.Context;
 using DevProjex.Application.Services;
-using DevProjex.Infrastructure.Persistence;
+using DevProjex.Kernel.IO;
 
 namespace DevProjex.Infrastructure.ProjectProfiles;
 
@@ -21,6 +20,7 @@ public sealed class PortableProjectProfileService
 {
 	public const int CurrentSchemaVersion = 1;
 	public const string DocumentKind = "devprojex-profile";
+	internal const long MaximumDocumentBytes = ProjectProfileStorageLimits.MaximumJsonBytes;
 
 	private static readonly JsonSerializerOptions ReadOptions = new()
 	{
@@ -44,13 +44,16 @@ public sealed class PortableProjectProfileService
 		var fullPath = NormalizeProfilePath(path);
 		try
 		{
-			await using var stream = new FileStream(
-				fullPath,
-				FileMode.Open,
-				FileAccess.Read,
-				FileShare.Read,
-				16 * 1024,
-				FileOptions.Asynchronous | FileOptions.SequentialScan);
+			await using var stream = new MaximumLengthReadStream(
+				new FileStream(
+					fullPath,
+					FileMode.Open,
+					FileAccess.Read,
+					FileShare.ReadWrite | FileShare.Delete,
+					16 * 1024,
+					FileOptions.Asynchronous | FileOptions.SequentialScan),
+				MaximumDocumentBytes,
+				static () => new IOException("Portable profile exceeds the document limit."));
 			var document = await JsonSerializer
 				.DeserializeAsync<PortableProfileDocument>(stream, ReadOptions, cancellationToken)
 				.ConfigureAwait(false);
@@ -89,10 +92,7 @@ public sealed class PortableProjectProfileService
 		try
 		{
 			var requestedPath = NormalizeProfilePath(path);
-			_ = ExactFileOutputDestinationPolicy.Resolve(
-				sourceRoot,
-				requestedPath,
-				overwrite);
+			_ = ValidateSaveDestination(sourceRoot, requestedPath, overwrite);
 			return await AtomicFileOutput.WriteAsync(
 					requestedPath,
 					overwrite,
@@ -123,6 +123,38 @@ public sealed class PortableProjectProfileService
 		catch (OperationCanceledException)
 		{
 			throw;
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+		{
+			throw new PortableProjectProfileException(
+				"DPX-CLI-PROFILE-WRITE-FAILED",
+				"The portable profile could not be written.",
+				exception);
+		}
+	}
+
+	public string ValidateSaveDestination(
+		string sourceRoot,
+		string path,
+		bool overwrite)
+	{
+		try
+		{
+			return ExactFileOutputDestinationPolicy.Resolve(
+				sourceRoot,
+				NormalizeProfilePath(path),
+				overwrite);
+		}
+		catch (PortableProjectProfileException)
+		{
+			throw;
+		}
+		catch (AtomicFileOutputConflictException exception)
+		{
+			throw new PortableProjectProfileException(
+				"DPX-PROFILE-DESTINATION-EXISTS",
+				"The portable profile destination already exists.",
+				exception);
 		}
 		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
 		{
@@ -169,8 +201,15 @@ public sealed class PortableProjectProfileService
 				"DPX-CLI-PROFILE-INVALID",
 				"Portable profile contains an unknown Git filtering mode.");
 		}
+		if (GitScopeSelection.IsMomentary(gitMode))
+		{
+			throw new PortableProjectProfileException(
+				"DPX-CLI-PROFILE-INVALID",
+				"Momentary Git scopes cannot be loaded from a portable profile.");
+		}
 
 		var exclusions = new HashSet<ProjectExclusion>();
+		var legacyHideSecrets = false;
 		foreach (var value in document.Selection.Exclusions ?? [])
 		{
 			if (!ProjectSelectionTokens.TryParseExclusion(value, out var exclusion))
@@ -180,28 +219,25 @@ public sealed class PortableProjectProfileService
 					"Portable profile contains an unknown exclusion.");
 			}
 
-			exclusions.Add(exclusion);
+			if (exclusion == ProjectExclusion.HideSecrets)
+				legacyHideSecrets = true;
+			else
+				exclusions.Add(exclusion);
 		}
 
-		IReadOnlyCollection<string> selectedPaths;
-		try
-		{
-			selectedPaths = NormalizeSelectedPaths(document.Selection.SelectedPaths);
-		}
-		catch (ProjectContextValidationException exception)
-		{
-			throw new PortableProjectProfileException(
-				"DPX-CLI-PROFILE-INVALID",
-				"Portable profile contains an unsafe selected path.",
-				exception);
-		}
+		var selectedPaths = NormalizeSelectedPathsOrThrow(document.Selection.SelectedPaths);
 
 		return new ProjectSelectionSpec(
-			Roots: NormalizeNullableValues(document.Selection.Roots, PathComparer.Default),
-			Extensions: NormalizeNullableValues(document.Selection.Extensions, StringComparer.OrdinalIgnoreCase),
-			SelectedPaths: selectedPaths,
+			Roots: NormalizeRootNames(document.Selection.Roots),
+			Extensions: NormalizeExtensionNames(document.Selection.Extensions),
+			SelectedPaths: selectedPaths.Count == 0 ? null : selectedPaths,
 			GitMode: gitMode,
-			Exclusions: exclusions.OrderBy(static exclusion => exclusion).ToArray(),
+			Exclusions: ProjectSelectionTokens.OrderExclusions(exclusions),
+			HideSecrets: document.Selection.HideSecrets ?? legacyHideSecrets,
+			HidePrivateData: document.Selection.HidePrivateData ?? false,
+			CompressCode: document.Selection.CompressCode ?? false,
+			StripComments: document.Selection.StripComments ?? false,
+			StripBlankLines: document.Selection.StripBlankLines ?? false,
 			ProfileSource: new ProjectProfileReference(ProjectProfileSourceKind.Portable, fullPath));
 	}
 
@@ -213,21 +249,34 @@ public sealed class PortableProjectProfileService
 				"DPX-CLI-PROFILE-INVALID",
 				"Only a fully resolved selection can be saved as a portable profile.");
 		}
+		if (GitScopeSelection.IsMomentary(selection.GitMode.Value))
+		{
+			throw new PortableProjectProfileException(
+				"DPX-CLI-PROFILE-INVALID",
+				"Momentary Git scopes cannot be saved in a portable profile.");
+		}
 
+		var selectedPaths = NormalizeSelectedPathsOrThrow(selection.SelectedPaths);
 		return new PortableProfileDocument
 		{
 			SchemaVersion = CurrentSchemaVersion,
 			Kind = DocumentKind,
 			Selection = new PortableSelectionDocument
 			{
-				Roots = selection.Roots?.OrderBy(static value => value, PathComparer.Default).ToArray(),
+				Roots = selection.Roots?
+					.OrderBy(static value => value, ProjectTreePathIdentity.CanonicalComparer)
+					.ToArray(),
 				Extensions = selection.Extensions?.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase).ToArray(),
-				SelectedPaths = (selection.SelectedPaths ?? []).OrderBy(static value => value, PathComparer.Default).ToArray(),
+				SelectedPaths = selectedPaths.ToArray(),
 				GitMode = ProjectSelectionTokens.ToToken(selection.GitMode.Value),
-				Exclusions = selection.Exclusions
+				Exclusions = ProjectSelectionTokens.OrderExclusions(selection.Exclusions)
 					.Select(ProjectSelectionTokens.ToToken)
-					.OrderBy(static value => value, StringComparer.Ordinal)
-					.ToArray()
+					.ToArray(),
+				HideSecrets = selection.HideSecrets == true,
+				HidePrivateData = selection.HidePrivateData == true,
+				CompressCode = selection.CompressCode == true,
+				StripComments = selection.StripComments == true,
+				StripBlankLines = selection.StripBlankLines == true
 			}
 		};
 	}
@@ -254,30 +303,51 @@ public sealed class PortableProjectProfileService
 		}
 	}
 
-	private static IReadOnlyCollection<string>? NormalizeNullableValues(
-		IReadOnlyCollection<string>? values,
-		StringComparer comparer) =>
-		values is null ? null : NormalizeValues(values, comparer);
+	private static IReadOnlyCollection<string>? NormalizeExtensionNames(
+		IReadOnlyCollection<string>? values) =>
+		values is null
+			? null
+			: values
+				.Where(static value => !string.IsNullOrEmpty(value))
+				.Distinct(StringComparer.OrdinalIgnoreCase)
+				.OrderBy(static value => value, StringComparer.OrdinalIgnoreCase)
+				.ToArray();
 
-	private static IReadOnlyCollection<string> NormalizeValues(
-		IReadOnlyCollection<string>? values,
-		StringComparer comparer) =>
-		(values ?? [])
-		.Where(static value => !string.IsNullOrWhiteSpace(value))
-		.Select(static value => value.Trim())
-		.Distinct(comparer)
-		.OrderBy(static value => value, comparer)
-		.ToArray();
+	private static IReadOnlyCollection<string>? NormalizeRootNames(
+		IReadOnlyCollection<string>? values) =>
+		values is null
+			? null
+			: values
+				.Where(static value => !string.IsNullOrEmpty(value))
+				.Distinct(ProjectTreePathIdentity.CanonicalComparer)
+				.OrderBy(static value => value, ProjectTreePathIdentity.CanonicalComparer)
+				.ToArray();
 
 	private static IReadOnlyCollection<string> NormalizeSelectedPaths(
 		IReadOnlyCollection<string>? values) =>
 		(values ?? [])
-		.Where(static value => !string.IsNullOrWhiteSpace(value))
-		.Select(ProjectSelectionPath.NormalizeRelative)
+		.Where(static value => !string.IsNullOrEmpty(value))
+		.Select(ProjectSelectionPath.NormalizePortableRelative)
 		.Where(static value => value.Length > 0)
-		.Distinct(PathComparer.Default)
-		.OrderBy(static value => value, PathComparer.Default)
+		.Distinct(ProjectTreePathIdentity.CanonicalComparer)
+		.OrderBy(static value => value, ProjectTreePathIdentity.CanonicalComparer)
 		.ToArray();
+
+	private static IReadOnlyCollection<string> NormalizeSelectedPathsOrThrow(
+		IReadOnlyCollection<string>? values)
+	{
+		try
+		{
+			return NormalizeSelectedPaths(values);
+		}
+		catch (ProjectContextValidationException exception)
+		{
+			throw new PortableProjectProfileException(
+				"DPX-CLI-PROFILE-INVALID",
+				"Portable profile contains an unsafe selected path.",
+				exception);
+		}
+	}
 
 	private sealed class PortableProfileDocument
 	{
@@ -296,6 +366,11 @@ public sealed class PortableProjectProfileService
 		public IReadOnlyList<string> SelectedPaths { get; set; } = [];
 		public string? GitMode { get; set; }
 		public IReadOnlyList<string> Exclusions { get; set; } = [];
+		public bool? HideSecrets { get; set; }
+		public bool? HidePrivateData { get; set; }
+		public bool? CompressCode { get; set; }
+		public bool? StripComments { get; set; }
+		public bool? StripBlankLines { get; set; }
 
 		[JsonExtensionData]
 		public Dictionary<string, JsonElement>? AdditionalProperties { get; set; }

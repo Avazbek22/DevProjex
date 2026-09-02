@@ -1,3 +1,6 @@
+using DevProjex.Terminal.Rendering;
+using System.Text.RegularExpressions;
+
 namespace DevProjex.Terminal.Tui;
 
 internal enum TerminalPathPickerMode
@@ -13,6 +16,10 @@ internal enum TerminalPathPickerError
 	Unavailable
 }
 
+internal readonly record struct TerminalPathPickerSelection(
+	string? Path,
+	bool InvalidTypedPath);
+
 internal sealed record TerminalPathPickerEntry(
 	string Path,
 	string Name,
@@ -23,8 +30,8 @@ internal sealed record TerminalPathPickerEntry(
 		IsParent
 			? "[..] .."
 			: IsDirectory
-				? $"[D]  {Name}"
-				: $"[F]  {Name}";
+				? $"[D]  {TerminalTextEscaping.EscapeSingleLine(Name)}"
+				: $"[F]  {TerminalTextEscaping.EscapeSingleLine(Name)}";
 }
 
 internal sealed class TerminalPathPickerModel
@@ -64,15 +71,13 @@ internal sealed class TerminalPathPickerModel
 					IsParent: true));
 			}
 
-			var children = Directory
-				.EnumerateFileSystemEntries(normalized)
-				.Select(CreateEntry)
-				.Where(entry => entry.IsDirectory || IsVisibleFile(entry.Path))
-				.OrderByDescending(static entry => entry.IsDirectory)
-				.ThenBy(static entry => entry.Name, StringComparer.CurrentCultureIgnoreCase)
-				.Take(MaximumEntries + 1)
-				.ToArray();
-			IsTruncated = children.Length > MaximumEntries;
+			var children = TakeOrderedEntries(
+				Directory
+					.EnumerateFileSystemEntries(normalized)
+					.Select(CreateEntry)
+					.Where(entry => entry.IsDirectory || IsVisibleFile(entry.Path)),
+				MaximumEntries + 1);
+			IsTruncated = children.Count > MaximumEntries;
 			entries.AddRange(children.Take(MaximumEntries));
 			CurrentDirectory = normalized;
 			Entries = entries;
@@ -130,6 +135,149 @@ internal sealed class TerminalPathPickerModel
 		};
 	}
 
+	public TerminalPathPickerSelection ResolveSelection(string input, int selectedIndex)
+	{
+		if (!string.IsNullOrWhiteSpace(input))
+		{
+			return SelectInputPath(input) is { } typedPath
+				? new TerminalPathPickerSelection(typedPath, InvalidTypedPath: false)
+				: new TerminalPathPickerSelection(null, InvalidTypedPath: true);
+		}
+
+		var fallback = _mode == TerminalPathPickerMode.Directory
+			? SelectCurrentDirectory()
+			: SelectEntry(selectedIndex);
+		return new TerminalPathPickerSelection(fallback, InvalidTypedPath: false);
+	}
+
+	public string ResolveInputPath(string input)
+	{
+		var expanded = ExpandPath(input);
+		return Path.GetFullPath(Path.IsPathRooted(expanded)
+			? expanded
+			: Path.Combine(CurrentDirectory, expanded));
+	}
+
+	public string? SelectInputPath(string input)
+	{
+		try
+		{
+			var path = ResolveInputPath(input);
+			return _mode switch
+			{
+				TerminalPathPickerMode.Directory when Directory.Exists(path) => path,
+				TerminalPathPickerMode.JsonFile when File.Exists(path) &&
+					path.EndsWith(".json", StringComparison.OrdinalIgnoreCase) => path,
+				_ => null
+			};
+		}
+		catch (Exception exception) when (exception is ArgumentException or NotSupportedException or IOException)
+		{
+			return null;
+		}
+	}
+
+	public string CompleteInputPath(string input)
+	{
+		try
+		{
+			var expanded = ExpandPath(input);
+			var absolute = Path.GetFullPath(Path.IsPathRooted(expanded)
+				? expanded
+				: Path.Combine(CurrentDirectory, expanded));
+			var directory = Directory.Exists(absolute)
+				? absolute
+				: Path.GetDirectoryName(absolute);
+			var prefix = Directory.Exists(absolute) ? string.Empty : Path.GetFileName(absolute);
+			if (directory is null || !Directory.Exists(directory))
+				return input;
+			var matches = Directory.EnumerateFileSystemEntries(directory)
+				.Where(path => Path.GetFileName(path).StartsWith(prefix, StringComparison.CurrentCultureIgnoreCase))
+				.Where(path => Directory.Exists(path) || IsVisibleFile(path))
+				.Take(100)
+				.ToArray();
+			if (matches.Length == 0)
+				return input;
+			var completion = matches.Length == 1
+				? matches[0]
+				: Path.Combine(directory, CommonPrefix(matches.Select(path => Path.GetFileName(path) ?? string.Empty)));
+			if (matches.Length == 1 && Directory.Exists(completion))
+				completion += Path.DirectorySeparatorChar;
+			return completion;
+		}
+		catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+			ArgumentException or NotSupportedException)
+		{
+			return input;
+		}
+	}
+
+	internal static string ExpandPath(string input)
+	{
+		var value = input.Trim();
+		if (value == "~" || value.StartsWith($"~{Path.DirectorySeparatorChar}") ||
+			value.StartsWith($"~{Path.AltDirectorySeparatorChar}"))
+		{
+			value = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) + value[1..];
+		}
+		value = Environment.ExpandEnvironmentVariables(value);
+		return Regex.Replace(value, @"\$(?:\{(?<name>[A-Za-z_][A-Za-z0-9_]*)\}|(?<name>[A-Za-z_][A-Za-z0-9_]*))", match =>
+			Environment.GetEnvironmentVariable(match.Groups["name"].Value) ?? match.Value);
+	}
+
+	private static string CommonPrefix(IEnumerable<string> values)
+	{
+		var items = values.ToArray();
+		if (items.Length == 0)
+			return string.Empty;
+		var prefix = items[0];
+		foreach (var item in items.Skip(1))
+		{
+			var length = 0;
+			while (length < prefix.Length && length < item.Length &&
+				char.ToUpperInvariant(prefix[length]) == char.ToUpperInvariant(item[length]))
+			{
+				length++;
+			}
+			prefix = prefix[..length];
+		}
+		return prefix;
+	}
+
+	internal static IReadOnlyList<TerminalPathPickerEntry> TakeOrderedEntries(
+		IEnumerable<TerminalPathPickerEntry> source,
+		int maximumCount)
+	{
+		ArgumentNullException.ThrowIfNull(source);
+		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumCount);
+
+		var nameComparer = StringComparer.CurrentCultureIgnoreCase;
+		var orderedComparer = new PathPickerCandidateComparer(nameComparer, reverse: false);
+		var worstFirstComparer = new PathPickerCandidateComparer(nameComparer, reverse: true);
+		var retained = new PriorityQueue<PathPickerCandidate, PathPickerCandidate>(worstFirstComparer);
+		long sequence = 0;
+		foreach (var entry in source)
+		{
+			var candidate = new PathPickerCandidate(entry, sequence++);
+			if (retained.Count < maximumCount)
+			{
+				retained.Enqueue(candidate, candidate);
+			}
+			else if (orderedComparer.Compare(candidate, retained.Peek()) < 0)
+			{
+				retained.Dequeue();
+				retained.Enqueue(candidate, candidate);
+			}
+		}
+
+		var result = new PathPickerCandidate[retained.Count];
+		var index = 0;
+		foreach (var item in retained.UnorderedItems)
+			result[index++] = item.Element;
+		Array.Sort(result, orderedComparer);
+		return result.Select(static candidate => candidate.Entry).ToArray();
+	}
+
 	private bool IsVisibleFile(string path) =>
 		_mode == TerminalPathPickerMode.JsonFile &&
 		path.EndsWith(".json", StringComparison.OrdinalIgnoreCase);
@@ -155,5 +303,25 @@ internal sealed class TerminalPathPickerModel
 		}
 
 		return Directory.GetCurrentDirectory();
+	}
+
+	private readonly record struct PathPickerCandidate(
+		TerminalPathPickerEntry Entry,
+		long Sequence);
+
+	private sealed class PathPickerCandidateComparer(
+		StringComparer nameComparer,
+		bool reverse) : IComparer<PathPickerCandidate>
+	{
+		public int Compare(PathPickerCandidate left, PathPickerCandidate right) =>
+			reverse ? CompareCore(right, left) : CompareCore(left, right);
+
+		private int CompareCore(PathPickerCandidate left, PathPickerCandidate right)
+		{
+			if (left.Entry.IsDirectory != right.Entry.IsDirectory)
+				return left.Entry.IsDirectory ? -1 : 1;
+			var nameOrder = nameComparer.Compare(left.Entry.Name, right.Entry.Name);
+			return nameOrder != 0 ? nameOrder : left.Sequence.CompareTo(right.Sequence);
+		}
 	}
 }

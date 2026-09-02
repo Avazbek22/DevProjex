@@ -82,6 +82,18 @@ public class ZipDownloadServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public void TryGetZipUrl_StripsQueryAndFragmentBeforeBuildingArchiveUrl()
+    {
+        var result = _service.TryGetZipUrl(
+            "https://github.com/owner/repo.git?tab=readme#files",
+            out var zipUrl,
+            out _);
+
+        Assert.True(result);
+        Assert.Equal("https://github.com/owner/repo/archive/refs/heads/main.zip", zipUrl);
+    }
+
+    [Fact]
     public void TryGetZipUrl_ReturnsFalse_ForInvalidUrl()
     {
         // Invalid URLs should return false
@@ -116,6 +128,21 @@ public class ZipDownloadServiceTests : IAsyncLifetime
     #region Download Tests
 
     [Fact]
+    public void DefaultResourceLimits_MatchTheUntrustedArchivePolicy()
+    {
+        const long gibibyte = 1024L * 1024 * 1024;
+        var limits = ZipResourceLimits.Default;
+
+        Assert.Equal(2 * gibibyte, limits.MaxDownloadedArchiveBytes);
+        Assert.Equal(8 * gibibyte, limits.MaxTotalExtractedBytes);
+        Assert.Equal(2 * gibibyte, limits.MaxSingleEntryBytes);
+        Assert.Equal(250_000, limits.MaxEntryCount);
+        Assert.Equal(128, limits.MaxPathDepth);
+        Assert.Equal(200, limits.MaxCompressionRatio);
+        Assert.Equal(gibibyte, limits.FreeSpaceReserveBytes);
+    }
+
+    [Fact]
     public async Task DownloadAndExtractAsync_DownloadsAndExtracts_Successfully()
     {
         var targetDir = Path.Combine(_tempDir!, "download-test");
@@ -133,6 +160,291 @@ public class ZipDownloadServiceTests : IAsyncLifetime
         // Verify content was extracted
         var files = Directory.GetFiles(targetDir, "*", SearchOption.AllDirectories);
         Assert.NotEmpty(files);
+    }
+
+    [Fact]
+    public async Task DownloadAndExtractAsync_UsesDefaultBranchFromGitHubMetadata()
+    {
+        var archive = CreateArchive(("repo-develop/file.txt", "develop"u8.ToArray()));
+        var handler = new DefaultBranchArchiveHandler("develop", archive);
+        using var service = new ZipDownloadService(handler, ZipResourceLimits.Default with
+        {
+            FreeSpaceReserveBytes = 0
+        });
+        var targetDir = Path.Combine(_tempDir!, "develop-default");
+
+        var result = await service.DownloadAndExtractAsync(
+            "https://github.com/owner/repo",
+            targetDir,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.Equal("develop", result.DefaultBranch);
+        Assert.Contains("/refs/heads/develop.zip", handler.ArchiveRequestUri, StringComparison.Ordinal);
+        Assert.Equal("develop", await File.ReadAllTextAsync(
+            Path.Combine(targetDir, "file.txt"),
+            TestContext.Current.CancellationToken));
+    }
+
+	[Fact]
+	public async Task DownloadAndExtractAsync_DefaultBranchWithSlash_PreservesBranchSegmentsInArchiveUrl()
+	{
+		var archive = CreateArchive(("repo-release-5.1/file.txt", "release"u8.ToArray()));
+		var handler = new DefaultBranchArchiveHandler("release/5.1", archive);
+		using var service = new ZipDownloadService(handler, ZipResourceLimits.Default with
+		{
+			FreeSpaceReserveBytes = 0
+		});
+		var targetDir = Path.Combine(_tempDir!, "release-default");
+
+		var result = await service.DownloadAndExtractAsync(
+			"https://github.com/owner/repo",
+			targetDir,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.True(result.Success, result.ErrorMessage);
+		Assert.Equal("release/5.1", result.DefaultBranch);
+		Assert.Contains(
+			"/archive/refs/heads/release/5.1.zip",
+			handler.ArchiveRequestUri,
+			StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public async Task DownloadAndExtractAsync_OversizedRepositoryMetadataUsesLegacyBranchFallback()
+	{
+		var archive = CreateArchive(("repo-main/file.txt", "main"u8.ToArray()));
+		var metadata = Encoding.UTF8.GetBytes(
+			$"{{\"default_branch\":\"develop\",\"padding\":\"{new string('x', 70 * 1024)}\"}}");
+		var handler = new DefaultBranchArchiveHandler("develop", archive, metadata);
+		using var service = new ZipDownloadService(handler, ZipResourceLimits.Default with
+		{
+			FreeSpaceReserveBytes = 0
+		});
+		var targetDir = Path.Combine(_tempDir!, "oversized-metadata");
+
+		var result = await service.DownloadAndExtractAsync(
+			"https://github.com/owner/repo",
+			targetDir,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.True(result.Success, result.ErrorMessage);
+		Assert.Equal("main", result.DefaultBranch);
+		Assert.Contains("/refs/heads/main.zip", handler.ArchiveRequestUri, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void CreateZipUrl_EncodesSpecialCharactersInsideEachBranchSegment()
+	{
+		var url = ZipDownloadService.CreateZipUrl(
+			"owner",
+			"repo",
+			"release candidate/#5");
+
+		Assert.Equal(
+			"https://github.com/owner/repo/archive/refs/heads/release%20candidate/%235.zip",
+			url);
+	}
+
+    [Theory]
+	[InlineData("nul")]
+	[InlineData("CON.txt")]
+	[InlineData("com1.tar.gz")]
+	[InlineData("COM\u00B9.txt")]
+	[InlineData("src/LPT\u00B2/file.cs")]
+	[InlineData("src/AUX/x.cs")]
+	public async Task DownloadAndExtractAsync_RejectsWindowsReservedDeviceNames(string entryPath)
+	{
+		var archive = CreateArchive(($"repo-main/{entryPath}", "payload"u8.ToArray()));
+		using var service = new ZipDownloadService(
+			new ArchiveBytesHandler(archive),
+			ZipResourceLimits.Default with { FreeSpaceReserveBytes = 0 });
+		var targetDir = Path.Combine(_tempDir!, $"reserved-{Guid.NewGuid():N}");
+
+		var result = await service.DownloadAndExtractAsync(
+			TestRepoUrl,
+			targetDir,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.False(result.Success);
+			Assert.Contains("reserved Windows device name", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+			Assert.False(Directory.Exists(targetDir));
+		}
+		else
+		{
+			Assert.True(result.Success, result.ErrorMessage);
+		}
+	}
+
+	[Theory]
+	[InlineData("COM10")]
+	[InlineData("console.log")]
+	[InlineData("nullable.cs")]
+	public async Task DownloadAndExtractAsync_AllowsNonReservedSimilarNames(string entryPath)
+	{
+		var archive = CreateArchive(($"repo-main/{entryPath}", "payload"u8.ToArray()));
+		using var service = new ZipDownloadService(
+			new ArchiveBytesHandler(archive),
+			ZipResourceLimits.Default with { FreeSpaceReserveBytes = 0 });
+		var targetDir = Path.Combine(_tempDir!, $"allowed-{Guid.NewGuid():N}");
+
+		var result = await service.DownloadAndExtractAsync(
+			TestRepoUrl,
+			targetDir,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.True(result.Success, result.ErrorMessage);
+		Assert.True(File.Exists(Path.Combine(targetDir, entryPath.Replace('/', Path.DirectorySeparatorChar))));
+	}
+
+	[Fact]
+	public async Task DownloadAndExtractAsync_RejectsNtfsAlternateDataStreamPathOnWindows()
+	{
+		const string entryPath = "readme.txt:hidden";
+		var archive = CreateArchive(($"repo-main/{entryPath}", "payload"u8.ToArray()));
+		using var service = new ZipDownloadService(
+			new ArchiveBytesHandler(archive),
+			ZipResourceLimits.Default with { FreeSpaceReserveBytes = 0 });
+		var targetDir = Path.Combine(_tempDir!, $"alternate-stream-{Guid.NewGuid():N}");
+
+		var result = await service.DownloadAndExtractAsync(
+			TestRepoUrl,
+			targetDir,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		if (OperatingSystem.IsWindows())
+		{
+			Assert.False(result.Success);
+			Assert.Contains("alternate data stream", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+			Assert.False(Directory.Exists(targetDir));
+		}
+		else
+		{
+			Assert.True(result.Success, result.ErrorMessage);
+			Assert.True(File.Exists(Path.Combine(targetDir, entryPath)));
+		}
+	}
+
+    [Theory]
+    [InlineData("case")]
+    [InlineData("duplicate")]
+    [InlineData("file-directory")]
+    [InlineData("unicode")]
+    public async Task DownloadAndExtractAsync_RejectsCanonicalPathCollisions(string collisionKind)
+    {
+        var entries = collisionKind switch
+        {
+            "case" => new[]
+            {
+                ("repo-main/Foo.cs", "first"u8.ToArray()),
+                ("repo-main/foo.cs", "second"u8.ToArray())
+            },
+            "duplicate" => new[]
+            {
+                ("repo-main/file.txt", "first"u8.ToArray()),
+                ("repo-main/file.txt", "second"u8.ToArray())
+            },
+            "file-directory" => new[]
+            {
+                ("repo-main/path", "file"u8.ToArray()),
+                ("repo-main/path/child.txt", "child"u8.ToArray())
+            },
+            "unicode" => new[]
+            {
+                ("repo-main/caf\u00E9.txt", "first"u8.ToArray()),
+                ("repo-main/cafe\u0301.txt", "second"u8.ToArray())
+            },
+            _ => throw new ArgumentOutOfRangeException(nameof(collisionKind))
+        };
+        var archive = CreateArchive(entries);
+        using var service = new ZipDownloadService(
+            new ArchiveBytesHandler(archive),
+            ZipResourceLimits.Default with { FreeSpaceReserveBytes = 0 });
+        var targetDir = Path.Combine(_tempDir!, $"collision-{collisionKind}");
+
+        var result = await service.DownloadAndExtractAsync(
+            TestRepoUrl,
+            targetDir,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        Assert.Contains("same file-system path", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.False(Directory.Exists(targetDir));
+    }
+
+    [Fact]
+    public async Task DownloadAndExtractAsync_RejectsTraversalWhenItIsTheFirstArchiveEntry()
+    {
+        var archive = CreateArchive(("../outside.txt", "payload"u8.ToArray()));
+        using var service = new ZipDownloadService(
+            new ArchiveBytesHandler(archive),
+            ZipResourceLimits.Default with { FreeSpaceReserveBytes = 0 });
+        var targetDir = Path.Combine(_tempDir!, "first-entry-traversal");
+
+        var result = await service.DownloadAndExtractAsync(
+            TestRepoUrl,
+            targetDir,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        Assert.Contains("invalid path", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.False(Directory.Exists(targetDir));
+        Assert.False(File.Exists(Path.Combine(_tempDir!, "outside.txt")));
+    }
+
+    [Fact]
+    public async Task DownloadAndExtractAsync_OnWindowsRejectsDriveLikeFirstArchiveEntry()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        var archive = CreateArchive(("C:/outside.txt", "payload"u8.ToArray()));
+        using var service = new ZipDownloadService(
+            new ArchiveBytesHandler(archive),
+            ZipResourceLimits.Default with { FreeSpaceReserveBytes = 0 });
+        var targetDir = Path.Combine(_tempDir!, "first-entry-drive");
+
+        var result = await service.DownloadAndExtractAsync(
+            TestRepoUrl,
+            targetDir,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        Assert.Contains("alternate data stream", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.False(Directory.Exists(targetDir));
+    }
+
+    [Fact]
+    public async Task DownloadAndExtractAsync_FailureDuringStagedExtractionLeavesOccupiedTargetUntouched()
+    {
+        var archive = CreateArchive(
+            ("repo-main/first.txt", "first"u8.ToArray()),
+            ("repo-main/second.txt", "second"u8.ToArray()));
+        var openedEntries = 0;
+        using var service = new ZipDownloadService(
+            new ArchiveBytesHandler(archive),
+            ZipResourceLimits.Default with { FreeSpaceReserveBytes = 0 },
+            entry => Interlocked.Increment(ref openedEntries) == 2
+                ? throw new IOException("Simulated extraction failure.")
+                : entry.Open());
+        var targetDir = Path.Combine(_tempDir!, "occupied-target");
+        Directory.CreateDirectory(targetDir);
+        var originalPath = Path.Combine(targetDir, "original.txt");
+        await File.WriteAllTextAsync(originalPath, "original", TestContext.Current.CancellationToken);
+
+        var result = await service.DownloadAndExtractAsync(
+            TestRepoUrl,
+            targetDir,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        Assert.Equal("original", await File.ReadAllTextAsync(originalPath, TestContext.Current.CancellationToken));
+        Assert.Single(Directory.EnumerateFileSystemEntries(targetDir));
+        Assert.DoesNotContain(
+            Directory.EnumerateDirectories(_tempDir!),
+            path => Path.GetFileName(path).Contains(".occupied-target.extract-", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -323,9 +635,39 @@ public class ZipDownloadServiceTests : IAsyncLifetime
         Assert.Equal(originalUrl, result.RepositoryUrl);
     }
 
+    [Fact]
+    public async Task DownloadAndExtractAsync_ResultOmitsCredentialsQueryAndFragment()
+    {
+        var targetDir = Path.Combine(_tempDir!, "safe-url-result-test");
+
+        var result = await _service.DownloadAndExtractAsync(
+            "https://oauth2:secret@github.com/octocat/Hello-World.git?transport=opaque#fragment",
+            targetDir,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.Equal("https://github.com/octocat/Hello-World.git", result.RepositoryUrl);
+        Assert.Equal(TestRepoName, result.RepositoryName);
+        Assert.DoesNotContain("secret", result.RepositoryUrl, StringComparison.Ordinal);
+    }
+
     #endregion
 
     #region Cleanup Tests
+
+    [Fact]
+    public void TemporaryArchiveHandle_DeletesStorageWhenClosed()
+    {
+        var path = Path.Combine(_tempDir!, $"{Guid.NewGuid():N}.zip");
+
+        using (var stream = ZipDownloadService.OpenTemporaryArchive(path))
+        {
+            stream.WriteByte(1);
+            Assert.Equal(1, stream.Length);
+        }
+
+        Assert.False(File.Exists(path));
+    }
 
     [Fact]
     public async Task DownloadAndExtractAsync_CleansUpTempFile_OnSuccess()
@@ -354,6 +696,305 @@ public class ZipDownloadServiceTests : IAsyncLifetime
         // Temp file should be cleaned up even on error
         // This is best-effort verification
         Assert.False(result.Success);
+    }
+
+    [Fact]
+    public async Task DownloadAndExtractAsync_RejectsActualCompressionRatioAndCleansStaging()
+    {
+        var archive = CreateArchive(("repo-main/payload.bin", new byte[1]));
+        var limits = ZipResourceLimits.Default with
+        {
+            MaxCompressionRatio = 2,
+            FreeSpaceReserveBytes = 0
+        };
+        var targetDir = CreateEmptyTarget("ratio-limit");
+        using var service = new ZipDownloadService(
+            new ArchiveBytesHandler(archive),
+            limits,
+            _ => new MemoryStream(new byte[4096], writable: false));
+
+        var result = await service.DownloadAndExtractAsync(
+            TestRepoUrl,
+            targetDir,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        Assert.Contains("compression ratio", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(targetDir));
+    }
+
+    [Fact]
+    public async Task DownloadAndExtractAsync_RejectsEntryCountBeforeExtraction()
+    {
+        var archive = CreateArchive(
+            ("repo-main/a.txt", "a"u8.ToArray()),
+            ("repo-main/b.txt", "b"u8.ToArray()),
+            ("repo-main/c.txt", "c"u8.ToArray()));
+        var limits = ZipResourceLimits.Default with
+        {
+            MaxEntryCount = 2,
+            FreeSpaceReserveBytes = 0
+        };
+        var targetDir = CreateEmptyTarget("entry-count-limit");
+        using var service = new ZipDownloadService(new ArchiveBytesHandler(archive), limits);
+
+        var result = await service.DownloadAndExtractAsync(
+            TestRepoUrl,
+            targetDir,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        Assert.Contains("entry count", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(targetDir));
+    }
+
+    [Fact]
+    public async Task DownloadAndExtractAsync_RejectsActualEntryBytesWhenDeclaredSizeIsSmall()
+    {
+        var archive = CreateArchive(("repo-main/payload.bin", new byte[1]));
+        var limits = ZipResourceLimits.Default with
+        {
+            MaxSingleEntryBytes = 64,
+            MaxCompressionRatio = 10_000,
+            FreeSpaceReserveBytes = 0
+        };
+        var targetDir = CreateEmptyTarget("entry-size-limit");
+        using var service = new ZipDownloadService(
+            new ArchiveBytesHandler(archive),
+            limits,
+            _ => new MemoryStream(new byte[1024], writable: false));
+
+        var result = await service.DownloadAndExtractAsync(
+            TestRepoUrl,
+            targetDir,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        Assert.Contains("single entry size", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(targetDir));
+    }
+
+    [Fact]
+    public async Task DownloadAndExtractAsync_RejectsActualAggregateExtractedBytes()
+    {
+        var archive = CreateArchive(
+            ("repo-main/a.bin", new byte[1]),
+            ("repo-main/b.bin", new byte[1]));
+        var expandedEntries = new Queue<Stream>(
+        [
+            new MemoryStream(new byte[80], writable: false),
+            new MemoryStream(new byte[80], writable: false)
+        ]);
+        var limits = ZipResourceLimits.Default with
+        {
+            MaxTotalExtractedBytes = 100,
+            MaxSingleEntryBytes = 90,
+            MaxCompressionRatio = 10_000,
+            FreeSpaceReserveBytes = 0
+        };
+        var targetDir = CreateEmptyTarget("aggregate-size-limit");
+        using var service = new ZipDownloadService(
+            new ArchiveBytesHandler(archive),
+            limits,
+            _ => expandedEntries.Dequeue());
+
+        var result = await service.DownloadAndExtractAsync(
+            TestRepoUrl,
+            targetDir,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        Assert.Contains("total extracted size", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(targetDir));
+    }
+
+    [Fact]
+    public async Task DownloadAndExtractAsync_RejectsExcessiveEntryPathDepth()
+    {
+        var archive = CreateArchive(("repo-main/a/b/c/file.txt", "content"u8.ToArray()));
+        var limits = ZipResourceLimits.Default with
+        {
+            MaxPathDepth = 4,
+            FreeSpaceReserveBytes = 0
+        };
+        var targetDir = CreateEmptyTarget("path-depth-limit");
+        using var service = new ZipDownloadService(new ArchiveBytesHandler(archive), limits);
+
+        var result = await service.DownloadAndExtractAsync(
+            TestRepoUrl,
+            targetDir,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        Assert.Contains("path depth", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(targetDir));
+    }
+
+    [Fact]
+    public async Task DownloadAndExtractAsync_RejectsActualDownloadWithoutContentLength()
+    {
+        var payload = new byte[129];
+        var limits = ZipResourceLimits.Default with
+        {
+            MaxDownloadedArchiveBytes = 128,
+            FreeSpaceReserveBytes = 0
+        };
+        var targetDir = CreateEmptyTarget("download-size-limit");
+        using var service = new ZipDownloadService(
+            new ArchiveBytesHandler(payload, includeContentLength: false),
+            limits);
+
+        var result = await service.DownloadAndExtractAsync(
+            TestRepoUrl,
+            targetDir,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        Assert.Contains("downloaded archive size", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(targetDir));
+    }
+
+    [Fact]
+    public async Task DownloadAndExtractAsync_DoesNotTrustOversizedContentLength()
+    {
+        var archive = CreateArchive(("repo-main/file.txt", "content"u8.ToArray()));
+        var limits = ZipResourceLimits.Default with
+        {
+            MaxDownloadedArchiveBytes = archive.Length + 1,
+            FreeSpaceReserveBytes = 0
+        };
+        var targetDir = Path.Combine(_tempDir!, "advisory-content-length");
+        using var service = new ZipDownloadService(
+            new ArchiveBytesHandler(
+                archive,
+                declaredContentLength: limits.MaxDownloadedArchiveBytes + 1024),
+            limits);
+
+        var result = await service.DownloadAndExtractAsync(
+            TestRepoUrl,
+            targetDir,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.True(File.Exists(Path.Combine(targetDir, "file.txt")));
+    }
+
+    [Fact]
+    public async Task DownloadAndExtractAsync_ExtractsSmallArchiveWithinLimits()
+    {
+        var archive = CreateArchive(("repo-main/src/app.txt", "content"u8.ToArray()));
+        var limits = new ZipResourceLimits
+        {
+            MaxDownloadedArchiveBytes = 4096,
+            MaxTotalExtractedBytes = 1024,
+            MaxSingleEntryBytes = 512,
+            MaxEntryCount = 4,
+            MaxPathDepth = 8,
+            MaxCompressionRatio = 200,
+            FreeSpaceReserveBytes = 0
+        };
+        var targetDir = Path.Combine(_tempDir!, "small-archive");
+        using var service = new ZipDownloadService(new ArchiveBytesHandler(archive), limits);
+
+        var result = await service.DownloadAndExtractAsync(
+            TestRepoUrl,
+            targetDir,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success, result.ErrorMessage);
+        Assert.Equal("content", await File.ReadAllTextAsync(
+            Path.Combine(targetDir, "src", "app.txt"),
+            TestContext.Current.CancellationToken));
+    }
+
+    private string CreateEmptyTarget(string name)
+    {
+        var target = Path.Combine(_tempDir!, name);
+        Directory.CreateDirectory(target);
+        return target;
+    }
+
+    private static byte[] CreateArchive(params (string Path, byte[] Content)[] entries)
+    {
+        using var buffer = new MemoryStream();
+        using (var archive = new ZipArchive(buffer, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            foreach (var (path, content) in entries)
+            {
+                var entry = archive.CreateEntry(path, CompressionLevel.SmallestSize);
+                using var output = entry.Open();
+                output.Write(content);
+            }
+        }
+
+        return buffer.ToArray();
+    }
+
+    private sealed class ArchiveBytesHandler(
+        byte[] archive,
+        bool includeContentLength = true,
+        long? declaredContentLength = null)
+        : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            HttpContent content = includeContentLength
+                ? new ByteArrayContent(archive)
+                : new UnknownLengthContent(archive);
+            if (declaredContentLength.HasValue)
+                content.Headers.ContentLength = declaredContentLength.Value;
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = content });
+        }
+    }
+
+    private sealed class DefaultBranchArchiveHandler(
+	    string defaultBranch,
+	    byte[] archive,
+	    byte[]? metadata = null) : HttpMessageHandler
+    {
+        public string? ArchiveRequestUri { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var uri = request.RequestUri?.AbsoluteUri ?? string.Empty;
+            if (uri.StartsWith("https://api.github.com/repos/", StringComparison.Ordinal))
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+	                Content = metadata is null
+	                    ? new StringContent($"{{\"default_branch\":\"{defaultBranch}\"}}")
+	                    : new UnknownLengthContent(metadata)
+                });
+            }
+
+            ArchiveRequestUri = uri;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(archive)
+            });
+        }
+    }
+
+    private sealed class UnknownLengthContent(byte[] content) : HttpContent
+    {
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context)
+        {
+            stream.Write(content);
+            return Task.CompletedTask;
+        }
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+            return false;
+        }
     }
 
     private sealed class GitHubArchiveHandler : HttpMessageHandler

@@ -1,8 +1,5 @@
-using System.Diagnostics;
-using System.Text;
 using DevProjex.Application.Context;
 using DevProjex.Application.Diagnostics;
-using DevProjex.Tests.Shared.ProjectLoadWorkflow;
 
 namespace DevProjex.Tests.Integration;
 
@@ -346,6 +343,48 @@ public sealed class GitIgnoreSourceIoIntegrationTests
 		Assert.Equal(GitIgnoreMatcherLoadStatus.Loaded, first.Status);
 		Assert.Equal(GitIgnoreMatcherLoadStatus.Loaded, second.Status);
 		Assert.NotSame(first.Matcher, second.Matcher);
+	}
+
+	[Fact]
+	public void NewlineDenseSourceDoesNotMaterializeEveryLineBeforeMatching()
+	{
+		using var temp = new TemporaryDirectory();
+		var content = new string('\n', 1024 * 1024);
+		var gitIgnorePath = Path.Combine(temp.Path, ".gitignore");
+		CreateSparseFile(gitIgnorePath, content.Length);
+		var source = new GitIgnoreFileContent(content, content.Length, "newline-dense-source");
+		var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+
+		var result = GitIgnoreMatcherFileCache.Load(
+			temp.Path,
+			gitIgnorePath,
+			_ => source);
+		var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+		Assert.Equal(GitIgnoreMatcherLoadStatus.Loaded, result.Status);
+		Assert.InRange(allocatedBytes, 0, 4 * 1024 * 1024);
+	}
+
+	[Fact]
+	public void ExcessiveEffectiveRuleCountHasTypedReadFailureOutcome()
+	{
+		const int excessiveRuleCount = 8_193;
+		using var temp = new TemporaryDirectory();
+		var content = string.Join(
+			'\n',
+			Enumerable.Range(0, excessiveRuleCount)
+				.Select(static index => $"literal-{index}"));
+		var gitIgnorePath = Path.Combine(temp.Path, ".gitignore");
+		CreateSparseFile(gitIgnorePath, content.Length);
+		var source = new GitIgnoreFileContent(content, content.Length, "excessive-rules-source");
+
+		var result = GitIgnoreMatcherFileCache.Load(
+			temp.Path,
+			gitIgnorePath,
+			_ => source);
+
+		Assert.Equal(GitIgnoreMatcherLoadStatus.ReadFailure, result.Status);
+		Assert.Null(result.Matcher);
 	}
 
 	[Fact]

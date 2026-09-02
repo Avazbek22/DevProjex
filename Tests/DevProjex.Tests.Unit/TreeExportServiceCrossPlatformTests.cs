@@ -68,7 +68,10 @@ public sealed class TreeExportServiceCrossPlatformTests
 		var ascii = service.BuildFullTree(rootPath, root, TreeTextFormat.Ascii);
 
 		Assert.Contains(Environment.NewLine, ascii);
-		Assert.Contains("├── Root", ascii);
+		Assert.DoesNotContain("├── Root", ascii, StringComparison.Ordinal);
+		Assert.Equal(
+			$"{SingleLineTextEscaping.Escape(rootPath)}:{Environment.NewLine}",
+			ascii);
 	}
 
 	[Fact]

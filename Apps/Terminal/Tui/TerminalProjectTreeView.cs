@@ -6,24 +6,34 @@ namespace DevProjex.Terminal.Tui;
 
 internal sealed class TerminalProjectTreeView : ListView
 {
-	private const long PointerEventDeduplicationWindowMilliseconds = 1_000;
 	private const long DoubleClickWindowMilliseconds = 500;
 	private readonly Func<int, TerminalTreeRow?> _rowResolver;
-	private int _lastPressedViewportColumn = -1;
-	private int _lastPressedViewportRow = -1;
-	private long _lastPressedAt;
+	private readonly TerminalPointerEventDeduplicator _pointerEvents = new();
 	private int _lastNamePressedRow = -1;
+	private int _lastNamePressedColumn = -1;
 	private long _lastNamePressedAt;
+	private int _lastManualDoubleClickRow = -1;
+	private int _lastManualDoubleClickColumn = -1;
+	private long _lastManualDoubleClickAt;
 
-	public TerminalProjectTreeView(Func<int, TerminalTreeRow?> rowResolver)
+	public TerminalProjectTreeView(
+		Func<int, TerminalTreeRow?> rowResolver,
+		bool useUnicode = true,
+		bool showScrollBars = true)
 	{
 		_rowResolver = rowResolver;
+		if (showScrollBars)
+			TerminalScrollBarStyle.Apply(this, useUnicode, vertical: true, horizontal: true);
 	}
 
 	public event EventHandler? SelectionToggleRequested;
 	public event EventHandler? ExpansionToggleRequested;
+	public event EventHandler? CommandLineRequested;
 
 	public int VerticalOffset => Viewport.Y;
+
+	public void UpdateContentMetrics(int rowWidth, int rowCount) =>
+		SetContentSize(new Size(Math.Max(1, rowWidth), Math.Max(1, rowCount)));
 
 	public void RestoreVerticalOffset(int offset, int rowCount)
 	{
@@ -36,19 +46,24 @@ internal sealed class TerminalProjectTreeView : ListView
 		SetNeedsDraw();
 	}
 
+	protected override bool OnKeyDown(Key key)
+	{
+		return TerminalInteractiveView.TryActivateCommandLine(
+			key,
+			() => CommandLineRequested?.Invoke(this, EventArgs.Empty)) || base.OnKeyDown(key);
+	}
+
 	protected override bool OnMouseEvent(Mouse mouse)
 	{
 		if (mouse.Flags.HasFlag(MouseFlags.WheeledUp) ||
-		    mouse.Flags.HasFlag(MouseFlags.WheeledDown))
+			mouse.Flags.HasFlag(MouseFlags.WheeledDown))
 		{
 			return base.OnMouseEvent(mouse);
 		}
 
 		var isPressed = mouse.Flags.HasFlag(MouseFlags.LeftButtonPressed);
-		var isReleased = mouse.Flags.HasFlag(MouseFlags.LeftButtonReleased);
-		var isClicked = mouse.Flags.HasFlag(MouseFlags.LeftButtonClicked);
 		var isDoubleClicked = mouse.Flags.HasFlag(MouseFlags.LeftButtonDoubleClicked);
-		if (!isPressed && !isReleased && !isClicked && !isDoubleClicked)
+		if (!IsPrimaryActivation(mouse.Flags))
 			return base.OnMouseEvent(mouse);
 		if (mouse.Position is not { } position)
 			return true;
@@ -59,64 +74,56 @@ internal sealed class TerminalProjectTreeView : ListView
 			return true;
 
 		var now = Environment.TickCount64;
-		if (!isPressed &&
-		    _lastPressedViewportRow == position.Y &&
-		    _lastPressedViewportColumn == position.X &&
-		    now - _lastPressedAt <= PointerEventDeduplicationWindowMilliseconds)
+		if (isDoubleClicked &&
+		    _lastManualDoubleClickRow == rowIndex &&
+		    _lastManualDoubleClickColumn == position.X &&
+		    now - _lastManualDoubleClickAt <= DoubleClickWindowMilliseconds)
 		{
+			_lastManualDoubleClickRow = -1;
+			_lastManualDoubleClickColumn = -1;
 			return true;
 		}
-		if (isPressed)
+		if (!isDoubleClicked && !_pointerEvents.ShouldHandle(isPressed, position.X, position.Y))
 		{
-			// A selection refresh can move the viewport before the matching release event.
-			_lastPressedViewportRow = position.Y;
-			_lastPressedViewportColumn = position.X;
-			_lastPressedAt = now;
+			return true;
 		}
 
 		SetFocus();
 		SelectedItem = rowIndex;
 		EnsureSelectedItemVisible();
 
-		var disclosureColumn = row.Depth * 2;
-		var checkboxStart = disclosureColumn + 2;
-		var nameStart = disclosureColumn + 6;
-		if (isDoubleClicked)
+		if (isDoubleClicked ||
+			isPressed && row.Node.IsDirectory &&
+			_lastNamePressedRow == rowIndex &&
+			_lastNamePressedColumn == position.X &&
+			now - _lastNamePressedAt <= DoubleClickWindowMilliseconds)
 		{
-			if (position.X >= nameStart && row.Node.IsDirectory)
+			if (row.Node.IsDirectory)
+			{
+				// The first click already toggled the whole row. Balance the second
+				// click so a double-click changes expansion without changing selection.
+				SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
 				ExpansionToggleRequested?.Invoke(this, EventArgs.Empty);
+				if (!isDoubleClicked)
+				{
+					_lastManualDoubleClickRow = rowIndex;
+					_lastManualDoubleClickColumn = position.X;
+					_lastManualDoubleClickAt = now;
+				}
+			}
+			_lastNamePressedRow = -1;
+			_lastNamePressedColumn = -1;
 			return true;
 		}
-
-		if (position.X == disclosureColumn && row.Node.IsDirectory)
-		{
-			_lastNamePressedRow = -1;
-			ExpansionToggleRequested?.Invoke(this, EventArgs.Empty);
-		}
-		else if (position.X >= checkboxStart &&
-		         position.X < checkboxStart + 3)
-		{
-			_lastNamePressedRow = -1;
-			SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
-		}
-		else if (position.X >= nameStart && row.Node.IsDirectory)
-		{
-			if (_lastNamePressedRow == rowIndex &&
-			    now - _lastNamePressedAt <= DoubleClickWindowMilliseconds)
-			{
-				_lastNamePressedRow = -1;
-				ExpansionToggleRequested?.Invoke(this, EventArgs.Empty);
-			}
-			else
-			{
-				_lastNamePressedRow = rowIndex;
-				_lastNamePressedAt = now;
-			}
-		}
-		else
-		{
-			_lastNamePressedRow = -1;
-		}
+		_lastNamePressedRow = row.Node.IsDirectory ? rowIndex : -1;
+		_lastNamePressedColumn = row.Node.IsDirectory ? position.X : -1;
+		_lastNamePressedAt = now;
+		SelectionToggleRequested?.Invoke(this, EventArgs.Empty);
 		return true;
 	}
+
+	internal static bool IsPrimaryActivation(MouseFlags flags) =>
+		flags.HasFlag(MouseFlags.LeftButtonPressed) ||
+		flags.HasFlag(MouseFlags.LeftButtonClicked) ||
+		flags.HasFlag(MouseFlags.LeftButtonDoubleClicked);
 }

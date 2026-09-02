@@ -15,53 +15,64 @@ public sealed class RepositoryWebPathPresentationService
         if (string.IsNullOrWhiteSpace(localRootPath) || string.IsNullOrWhiteSpace(repositoryUrl))
             return null;
 
-        var normalizedRootPath = Path.GetFullPath(localRootPath);
-        if (!Uri.TryCreate(NormalizeForDisplay(repositoryUrl), UriKind.Absolute, out var repoUri))
+        if (!RepositoryUrlUtility.IsSupportedCloneSource(repositoryUrl))
             return null;
 
-        if (!repoUri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) &&
-            !repoUri.Scheme.Equals(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase))
+        string normalizedRootPath;
+        try
+        {
+            normalizedRootPath = Path.GetFullPath(localRootPath);
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or NotSupportedException or PathTooLongException)
         {
             return null;
         }
 
-        var rootWebPath = repoUri.ToString().TrimEnd('/');
-        var displayRootName = ExtractRepositoryName(repoUri);
+        var rootWebPath = NormalizeForDisplay(repositoryUrl);
+        if (rootWebPath.Length == 0)
+            return null;
+        var displayRootName = Uri.TryCreate(rootWebPath, UriKind.Absolute, out var repositoryUri)
+            ? ExtractRepositoryName(repositoryUri)
+            : RepositoryUrlUtility.GetRepositoryName(rootWebPath);
 
         return new ExportPathPresentation(
             displayRootPath: rootWebPath,
-            mapFilePath: filePath => MapToFileWebPath(filePath, normalizedRootPath, rootWebPath),
+            mapFilePath: filePath => MapToRepositoryPath(filePath, normalizedRootPath, rootWebPath),
             displayRootName: displayRootName);
+    }
+
+    public Func<string, string>? TryCreatePathMapper(string localRootPath, string repositoryUrl)
+    {
+        if (string.IsNullOrWhiteSpace(localRootPath))
+            return null;
+
+        var displayRootPath = NormalizeForDisplay(repositoryUrl);
+        if (displayRootPath.Length == 0)
+            return null;
+
+        string normalizedRootPath;
+        try
+        {
+            normalizedRootPath = Path.GetFullPath(localRootPath);
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return null;
+        }
+
+        return filePath => MapToRepositoryPath(filePath, normalizedRootPath, displayRootPath);
     }
 
     private static string NormalizeRepositoryUrl(string repositoryUrl)
     {
-        var normalized = repositoryUrl.Trim();
-        if (!Uri.TryCreate(normalized, UriKind.Absolute, out var uri))
-        {
-            var fallback = normalized.TrimEnd('/');
-            if (fallback.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
-                fallback = fallback[..^4];
-            return fallback;
-        }
-
-        var builder = new UriBuilder(uri)
-        {
-            UserName = string.Empty,
-            Password = string.Empty,
-            Query = string.Empty,
-            Fragment = string.Empty
-        };
-
-        var normalizedPath = builder.Path.TrimEnd('/');
-        if (normalizedPath.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
-            normalizedPath = normalizedPath[..^4];
-        builder.Path = normalizedPath;
-
-        return builder.Uri.ToString().TrimEnd('/');
+        var normalized = RepositoryUrlUtility.ToSafeDisplay(repositoryUrl).TrimEnd('/');
+        return normalized.EndsWith(".git", StringComparison.OrdinalIgnoreCase)
+            ? normalized[..^4]
+            : normalized;
     }
 
-    private static string MapToFileWebPath(string fullPath, string localRootPath, string rootWebPath)
+    private static string MapToRepositoryPath(string fullPath, string localRootPath, string rootDisplayPath)
     {
         if (string.IsNullOrWhiteSpace(fullPath))
             return fullPath;
@@ -76,16 +87,16 @@ public sealed class RepositoryWebPathPresentationService
             return fullPath;
         }
 
-        if (string.IsNullOrWhiteSpace(relativePath) || relativePath == ".")
-            return rootWebPath;
+        if (string.IsNullOrEmpty(relativePath) || relativePath == ".")
+            return rootDisplayPath;
 
-        if (relativePath.StartsWith("..", StringComparison.Ordinal))
+        if (PathUtility.IsRelativePathOutsideRoot(relativePath))
             return fullPath;
 
-        var relativeUnixPath = relativePath.Replace('\\', '/');
+        var relativeUnixPath = PathUtility.NormalizeSeparators(relativePath);
         var encodedRelativePath = EncodePathSegments(relativeUnixPath);
 
-        return $"{rootWebPath}/{encodedRelativePath}";
+        return $"{rootDisplayPath}/{encodedRelativePath}";
     }
 
     private static string? ExtractRepositoryName(Uri repositoryUri)
@@ -104,7 +115,7 @@ public sealed class RepositoryWebPathPresentationService
 
     private static string EncodePathSegments(string path)
     {
-        if (string.IsNullOrWhiteSpace(path))
+        if (string.IsNullOrEmpty(path))
             return string.Empty;
 
         var span = path.AsSpan();

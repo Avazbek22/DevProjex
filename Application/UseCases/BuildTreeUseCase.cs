@@ -25,13 +25,14 @@ public sealed class BuildTreeUseCase(ITreeBuilder treeBuilder, TreeNodePresentat
 	public BuildTreeResult Execute(BuildTreeRequest request, CancellationToken cancellationToken = default)
 	{
 		var result = treeBuilder.Build(request.RootPath, request.Filter, cancellationToken);
-		var presentation = presenter.BuildWithFilePaths(result.Root);
+		var presentation = presenter.BuildWithFilePathsWithCancellation(result.Root, cancellationToken);
 
 		return new BuildTreeResult(
 			presentation.Root,
 			result.RootAccessDenied,
 			result.HadAccessDenied,
-			presentation.OrderedFilePaths);
+			presentation.OrderedFilePaths,
+			result.HadScanFailure);
 	}
 
 	public BuildTreeSnapshotResult ExecuteWithInventory(
@@ -52,13 +53,14 @@ public sealed class BuildTreeUseCase(ITreeBuilder treeBuilder, TreeNodePresentat
 			inventory,
 			request.Filter,
 			cancellationToken);
-		var presentation = presenter.BuildWithFilePaths(result.Root);
+		var presentation = presenter.BuildWithFilePathsWithCancellation(result.Root, cancellationToken);
 		return new BuildTreeSnapshotResult(
 			new BuildTreeResult(
 				presentation.Root,
 				result.RootAccessDenied,
 				result.HadAccessDenied,
-				presentation.OrderedFilePaths),
+				presentation.OrderedFilePaths,
+				result.HadScanFailure),
 			inventory);
 	}
 
@@ -76,13 +78,14 @@ public sealed class BuildTreeUseCase(ITreeBuilder treeBuilder, TreeNodePresentat
 			inventory,
 			request.Filter,
 			cancellationToken);
-		var presentation = presenter.BuildWithFilePaths(result.Root);
+		var presentation = presenter.BuildWithFilePathsWithCancellation(result.Root, cancellationToken);
 		return new BuildTreeSnapshotResult(
 			new BuildTreeResult(
 				presentation.Root,
 				result.RootAccessDenied,
 				result.HadAccessDenied,
-				presentation.OrderedFilePaths),
+				presentation.OrderedFilePaths,
+				result.HadScanFailure),
 			inventory);
 	}
 }

@@ -7,12 +7,35 @@ public sealed record GitFilteringDescriptor(
 	string LabelKey,
 	int Order);
 
+/// <summary>
+/// A row in the ignore/content-processing panel. <see cref="Id"/> is null for transformations that
+/// never existed as a v5 --exclude token: compression does not exclude anything, it transforms, and
+/// giving it an --exclude alias would freeze that confusion into the CLI contract.
+/// </summary>
 public sealed record ProjectExclusionDescriptor(
-	ProjectExclusion Id,
+	ProjectExclusion? Id,
 	IgnoreOptionId LegacyOptionId,
 	string Token,
 	string LabelKey,
-	int Order);
+	int Order)
+{
+	public ProjectExclusionDescriptor(
+		ProjectExclusion id,
+		IgnoreOptionId legacyOptionId,
+		string token,
+		string labelKey,
+		int order)
+		: this((ProjectExclusion?)id, legacyOptionId, token, labelKey, order)
+	{
+	}
+
+	/// <summary>
+	/// The v5 --exclude id. Path exclusions always have one; call this only where the descriptor
+	/// is known to come from <see cref="ProjectPresentationCatalog.Exclusions"/>.
+	/// </summary>
+	public ProjectExclusion RequireId() =>
+		Id ?? throw new InvalidOperationException($"'{Token}' is a content transformation and has no exclusion id.");
+}
 
 public sealed record ProjectContextViewDescriptor(
 	ProjectContextView Id,
@@ -48,7 +71,19 @@ public static class ProjectPresentationCatalog
 			IgnoreOptionId.TrackedGitFilesOnly,
 			"tracked",
 			"Settings.Ignore.TrackedGitFilesOnly",
-			2)
+			2),
+		new(
+			GitFilteringMode.Staged,
+			null,
+			"staged",
+			"Settings.Ignore.GitStaged",
+			3),
+		new(
+			GitFilteringMode.Changes,
+			null,
+			"changes",
+			"Settings.Ignore.GitChanges",
+			4)
 	];
 
 	public static IReadOnlyList<ProjectExclusionDescriptor> Exclusions { get; } =
@@ -64,44 +99,97 @@ public static class ProjectPresentationCatalog
 			IgnoreOptionId.EmptyFolders,
 			"empty-folders",
 			"Settings.Ignore.EmptyFolders",
-			1),
+			2),
 		new(
 			ProjectExclusion.EmptyFiles,
 			IgnoreOptionId.EmptyFiles,
 			"empty-files",
 			"Settings.Ignore.EmptyFiles",
-			2),
+			3),
 		new(
 			ProjectExclusion.HiddenFolders,
 			IgnoreOptionId.HiddenFolders,
 			"hidden-folders",
 			"Settings.Ignore.HiddenFolders",
-			3),
+			4),
 		new(
 			ProjectExclusion.HiddenFiles,
 			IgnoreOptionId.HiddenFiles,
 			"hidden-files",
 			"Settings.Ignore.HiddenFiles",
-			4),
+			5),
 		new(
 			ProjectExclusion.DotFolders,
 			IgnoreOptionId.DotFolders,
 			"dot-folders",
 			"Settings.Ignore.DotFolders",
-			5),
+			6),
 		new(
 			ProjectExclusion.DotFiles,
 			IgnoreOptionId.DotFiles,
 			"dot-files",
 			"Settings.Ignore.DotFiles",
-			6),
+			7),
 		new(
 			ProjectExclusion.ExtensionlessFiles,
 			IgnoreOptionId.ExtensionlessFiles,
 			"extensionless-files",
 			"Settings.Ignore.ExtensionlessFiles",
-			7)
+			8)
 	];
+
+	/// <summary>
+	/// Content transformations operate on selected bytes after path filtering. Keeping them out
+	/// of <see cref="Exclusions"/> prevents UI and cache consumers from treating them as tree rules.
+	/// </summary>
+	public static IReadOnlyList<ProjectExclusionDescriptor> ContentTransformations { get; } =
+	[
+		new(
+			ProjectExclusion.HideSecrets,
+			IgnoreOptionId.HideSecrets,
+			"hide-secrets",
+			"Settings.Ignore.HideSecrets",
+			0),
+		new(
+			null,
+			IgnoreOptionId.HidePrivateData,
+			"hide-private-data",
+			"Settings.Ignore.HidePrivateData",
+			1),
+		new(
+			null,
+			IgnoreOptionId.CompressCode,
+			"compress-code",
+			"Settings.Ignore.CompressCode",
+			2),
+		new(
+			null,
+			IgnoreOptionId.StripComments,
+			"strip-comments",
+			"Settings.Ignore.StripComments",
+			3),
+		new(
+			null,
+			IgnoreOptionId.StripBlankLines,
+			"strip-blank-lines",
+			"Settings.Ignore.StripBlankLines",
+			4)
+	];
+
+	/// <summary>
+	/// Single source of truth for "is this row a content transformation". Everything that used to
+	/// compare against HideSecrets by name reads this instead, so a second transformation cannot be
+	/// half-registered.
+	/// </summary>
+	public static IReadOnlySet<IgnoreOptionId> ContentTransformationOptionIds { get; } =
+		ContentTransformations.Select(static descriptor => descriptor.LegacyOptionId).ToHashSet();
+
+	/// <summary>
+	/// Preserves parsing of v5 --exclude tokens while new command surfaces expose transformations
+	/// through dedicated additive options.
+	/// </summary>
+	public static IReadOnlyList<ProjectExclusionDescriptor> LegacyExclusionChoices { get; } =
+		[.. Exclusions, .. ContentTransformations.Where(static descriptor => descriptor.Id is not null)];
 
 	public static IReadOnlyList<ProjectContextViewDescriptor> PreviewModes { get; } =
 	[
@@ -119,7 +207,7 @@ public static class ProjectPresentationCatalog
 	];
 
 	public static ProjectExclusionDescriptor Get(ProjectExclusion exclusion) =>
-		Exclusions.FirstOrDefault(descriptor => descriptor.Id == exclusion) ??
+		LegacyExclusionChoices.FirstOrDefault(descriptor => descriptor.Id == exclusion) ??
 		throw new ArgumentOutOfRangeException(nameof(exclusion), exclusion, null);
 
 	public static GitFilteringDescriptor Get(GitFilteringMode mode) =>

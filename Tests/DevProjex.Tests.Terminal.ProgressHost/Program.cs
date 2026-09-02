@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Text;
+using DevProjex.Application.Preview;
 using DevProjex.Application.Services;
 using DevProjex.Kernel;
 using DevProjex.Kernel.Models;
@@ -14,6 +16,40 @@ internal static class Program
 {
 	public static int Main(string[] args)
 	{
+		if (args is ["--pipe-flood"])
+		{
+			Console.Error.Write(new string('x', 1024 * 1024));
+			Console.Out.Write("completed");
+			return CommandLineExitCodes.Success;
+		}
+		if (args is ["--stdin-eof"])
+		{
+			_ = Console.In.ReadToEnd();
+			Console.Out.Write("eof");
+			return CommandLineExitCodes.Success;
+		}
+		if (args is ["--hold-process-tree", var parentLockPath, var parentReadyPath])
+		{
+			return HoldProcessTree(parentLockPath, parentReadyPath);
+		}
+		if (args is ["--hold-lock", var childLockPath, var childReadyPath])
+		{
+			return HoldLock(childLockPath, childReadyPath);
+		}
+		if (args is ["--file-backed-export", var sourcePath, var destinationPath,
+		    var readyPath, var cancelPath, var outcomePath])
+		{
+			RunFileBackedExportAsync(
+					sourcePath,
+					destinationPath,
+					readyPath,
+					cancelPath,
+					outcomePath)
+				.GetAwaiter()
+				.GetResult();
+			return CommandLineExitCodes.Success;
+		}
+
 		if (string.Equals(
 			    Environment.GetEnvironmentVariable(
 				    TerminalSignalCheckpointProtocol.EnabledVariable),
@@ -46,6 +82,94 @@ internal static class Program
 			.GetResult();
 	}
 
+	private static int HoldProcessTree(string lockPath, string readyPath)
+	{
+		using var child = new Process
+		{
+			StartInfo = CreateSelfStartInfo("--hold-lock", lockPath, readyPath)
+		};
+		if (!child.Start())
+			return CommandLineExitCodes.RuntimeError;
+
+		child.WaitForExit();
+		return child.ExitCode;
+	}
+
+	private static int HoldLock(string lockPath, string readyPath)
+	{
+		using var heldHandle = new FileStream(
+			lockPath,
+			FileMode.OpenOrCreate,
+			FileAccess.ReadWrite,
+			FileShare.None);
+		File.WriteAllText(readyPath, Environment.ProcessId.ToString(CultureInfo.InvariantCulture));
+
+		using var exitSignal = new ManualResetEventSlim(initialState: false);
+		exitSignal.Wait();
+		return CommandLineExitCodes.Success;
+	}
+
+	private static ProcessStartInfo CreateSelfStartInfo(params string[] arguments)
+	{
+		var executable = Environment.ProcessPath ??
+		                 throw new InvalidOperationException("The test host executable path is unavailable.");
+		var startInfo = new ProcessStartInfo
+		{
+			FileName = executable,
+			UseShellExecute = false,
+			CreateNoWindow = true
+		};
+		foreach (var argument in arguments)
+			startInfo.ArgumentList.Add(argument);
+		return startInfo;
+	}
+
+	private static async Task RunFileBackedExportAsync(
+		string sourcePath,
+		string destinationPath,
+		string readyPath,
+		string cancelPath,
+		string outcomePath)
+	{
+		var sourceLength = new FileInfo(sourcePath).Length;
+		using var document = new FileBackedPreviewTextDocument(
+			sourcePath,
+			[0],
+			sourceLength,
+			maxLineLength: 0,
+			characterCount: sourceLength);
+		await using var destinationFile = new FileStream(
+			destinationPath,
+			FileMode.CreateNew,
+			FileAccess.Write,
+			FileShare.Read,
+			bufferSize: 64 * 1024,
+			FileOptions.Asynchronous | FileOptions.SequentialScan);
+		using var cancellation = new CancellationTokenSource();
+		await using var destination = new DelayedWriteStream(
+			destinationFile,
+			cancelPath,
+			cancellation);
+		var pendingReadyPath = readyPath + ".pending";
+		await File.WriteAllTextAsync(
+			pendingReadyPath,
+			Environment.WorkingSet.ToString(CultureInfo.InvariantCulture));
+		File.Move(pendingReadyPath, readyPath);
+
+		try
+		{
+			await new TextFileExportService().WriteAsync(
+				destination,
+				document,
+				cancellation.Token);
+			await File.WriteAllTextAsync(outcomePath, "completed");
+		}
+		catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+		{
+			await File.WriteAllTextAsync(outcomePath, "canceled");
+		}
+	}
+
 	private static int RunSignalCheckpointProtocol()
 	{
 		using var cancellation = TerminalCancellationCoordinator.Register();
@@ -68,6 +192,7 @@ internal static class Program
 internal sealed class FileTerminalOperationObserver : ITerminalOperationObserver
 {
 	private readonly string _directory;
+	private readonly object _observationSync = new();
 	private readonly Queue<int> _pendingPercentages;
 	private readonly HashSet<TerminalOperationPhase> _pendingPhases;
 
@@ -109,12 +234,27 @@ internal sealed class FileTerminalOperationObserver : ITerminalOperationObserver
 		TerminalOperationPhase phase,
 		CancellationToken cancellationToken)
 	{
+		var token = ToToken(phase);
+		RecordObservation(token);
 		if (!_pendingPhases.Remove(phase))
 			return ValueTask.CompletedTask;
 
 		return new ValueTask(Task.Run(
-			() => PauseAt(ToToken(phase), cancellationToken),
+			() => PauseAt(token, cancellationToken),
 			CancellationToken.None));
+	}
+
+	private void RecordObservation(string checkpoint)
+	{
+		lock (_observationSync)
+		{
+			File.AppendAllText(
+				Path.Combine(
+					_directory,
+					TerminalProgressCheckpointProtocol.GetObservedFileName(checkpoint)),
+				checkpoint + Environment.NewLine,
+				new UTF8Encoding(false));
+		}
 	}
 
 	public void ObserveProgress(
@@ -229,6 +369,7 @@ internal sealed class FileTerminalOperationObserver : ITerminalOperationObserver
 		{
 			"clone-connecting" => TerminalOperationPhase.CloneConnecting,
 			"project-loading" => TerminalOperationPhase.ProjectLoading,
+			"background-refresh" => TerminalOperationPhase.BackgroundRefresh,
 			"preparing" => TerminalOperationPhase.Preparing,
 			"writing-context" => TerminalOperationPhase.WritingContext,
 			_ => null
@@ -239,6 +380,7 @@ internal sealed class FileTerminalOperationObserver : ITerminalOperationObserver
 		{
 			TerminalOperationPhase.CloneConnecting => "clone-connecting",
 			TerminalOperationPhase.ProjectLoading => "project-loading",
+			TerminalOperationPhase.BackgroundRefresh => "background-refresh",
 			TerminalOperationPhase.Preparing => "preparing",
 			TerminalOperationPhase.WritingContext => "writing-context",
 			_ => throw new ArgumentOutOfRangeException(nameof(phase), phase, null)

@@ -1,9 +1,82 @@
 using DevProjex.Avalonia.Services;
+using DevProjex.Application.Compression;
+using DevProjex.Application.Secrets;
 
 namespace DevProjex.Tests.Unit.Avalonia;
 
 public sealed class MainWindowPreviewWarmupTests
 {
+	[Fact]
+	public void BoundedProjectionFindsExactPathBeyondLargeCaseEquivalentSiblingGroup()
+	{
+		var rootPath = Path.Combine(Path.GetTempPath(), "preview-case-equivalent");
+		var children = Enumerable.Range(0, 64)
+			.Select(index =>
+			{
+				var stem = string.Create(6, index, static (buffer, value) =>
+				{
+					for (var position = 0; position < buffer.Length; position++)
+					{
+						var letter = (char)('a' + position);
+						buffer[position] = (value & (1 << position)) == 0
+							? letter
+							: char.ToUpperInvariant(letter);
+					}
+				});
+				var name = $"{stem}.cs";
+				return new TreeNodeDescriptor(
+					name,
+					Path.Combine(rootPath, name),
+					false,
+					false,
+					"csharp",
+					[]);
+			})
+			.OrderBy(static child => child.DisplayName, StringComparer.OrdinalIgnoreCase)
+			.ToArray();
+		var root = new TreeNodeDescriptor(
+			"preview-case-equivalent",
+			rootPath,
+			true,
+			false,
+			"folder",
+			children);
+		var expected = children[^1];
+
+		var projection = PreviewWarmupPolicy.CreateBoundedTreeProjection(
+			root,
+			new HashSet<string>(ProjectTreePathIdentity.CanonicalComparer)
+			{
+				expected.FullPath
+			},
+			maxNodeCount: 2);
+
+		var selected = Assert.Single(projection!.Children);
+		Assert.Equal(expected.FullPath, selected.FullPath);
+	}
+
+    [Fact]
+    public void SupportsTransformationContext_CompressionOnlyAllowsWarmup()
+    {
+        using var compressionSession = new CodeCompressionSession(new NoOpCodeCompressor());
+        var context = ContentTransformationContext.For(
+            new CodeCompressionContext("project", compressionSession),
+            redaction: null);
+
+        Assert.True(PreviewWarmupPolicy.SupportsTransformationContext(context));
+    }
+
+    [Fact]
+    public void SupportsTransformationContext_SecretRedactionSuppressesWarmup()
+    {
+        using var redactionSession = new SecretRedactionSession(new EmptySecretDetector());
+        var context = ContentTransformationContext.For(
+            compression: null,
+            new SecretRedactionContext("project", redactionSession));
+
+        Assert.False(PreviewWarmupPolicy.SupportsTransformationContext(context));
+    }
+
     [Fact]
     public void CreateSelectionPlan_CheckedRootUsesImplicitFullTreePlan()
     {
@@ -19,6 +92,37 @@ public sealed class MainWindowPreviewWarmupTests
         Assert.False(plan.HasExplicitSelection);
         Assert.NotNull(plan.SelectedRoot);
         Assert.True(plan.SelectedRoot.IncludesWholeSubtree);
+    }
+
+    private sealed class NoOpCodeCompressor : ICodeCompressor
+    {
+        public string TransformIdentity => "no-op:v1";
+
+        public bool IsSupported(string relativePath) => false;
+
+        public ICodeCompressionScope CreateScope(string projectRoot) => new Scope();
+
+        private sealed class Scope : ICodeCompressionScope
+        {
+            public CodeCompressionAnalysis Analyze(
+                string fullPath,
+                string relativePath,
+                string content,
+                CancellationToken cancellationToken) =>
+                throw new InvalidOperationException("No file should be analyzed by this policy test.");
+
+            public void Dispose()
+            {
+            }
+        }
+    }
+
+    private sealed class EmptySecretDetector : ISecretDetector
+    {
+        public IReadOnlyList<DetectedSecret> Detect(
+            string repositoryRelativePath,
+            string content,
+            CancellationToken cancellationToken = default) => [];
     }
 
     [Fact]
@@ -251,6 +355,22 @@ public sealed class MainWindowPreviewWarmupTests
         Assert.Equal(
             Enumerable.Range(0, 7).Select(index => $"node-{index}"),
             EnumerateNodes(projection!).Select(static node => node.DisplayName));
+    }
+
+    [Fact]
+    public void CreateBoundedTreeProjection_DeepTreeDoesNotDependOnTheCallStack()
+    {
+        const int depth = 16_000;
+        var root = CreateNestedTree(depth);
+
+        var projection = PreviewWarmupPolicy.CreateBoundedTreeProjection(
+            root,
+            new HashSet<string>(PathComparer.Default),
+            maxNodeCount: depth);
+
+        Assert.NotNull(projection);
+        Assert.Equal(depth, CountNodes(projection!));
+        Assert.Equal($"node-{depth - 1}", EnumerateNodes(projection!).Last().DisplayName);
     }
 
     [Fact]

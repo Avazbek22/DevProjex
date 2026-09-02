@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Security.Cryptography;
 
 namespace DevProjex.Tests.Terminal;
@@ -84,7 +85,7 @@ public sealed class TerminalClonePtyTests
 			"The repository could not be cloned.",
 			cancellationToken: TestContext.Current.CancellationToken);
 		Assert.False(terminal.HasExited);
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(
@@ -141,7 +142,7 @@ public sealed class TerminalClonePtyTests
 		Assert.Contains("PublishedCloneMarker.cs", preview, StringComparison.Ordinal);
 		Assert.False(terminal.HasExited);
 
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(
@@ -149,6 +150,253 @@ public sealed class TerminalClonePtyTests
 		Assert.Equal(sourceFingerprint, ComputeWorkingTreeFingerprint(origin));
 		Assert.Equal(sourceHead, RunGit(origin, "rev-parse", "HEAD"));
 		Assert.Empty(RunGit(origin, "status", "--porcelain=v1", "--untracked-files=all"));
+	}
+
+	[Fact(Timeout = 120_000)]
+	public async Task RepositoryUpdateReconcilesAndSelectsANewExtension()
+	{
+		using var originRoot = new TemporaryDirectory();
+		var origin = originRoot.CreateDirectory("UpdateRepository");
+		File.WriteAllText(
+			Path.Combine(origin, "Existing.cs"),
+			"internal sealed class Existing {}",
+			new UTF8Encoding(false));
+		InitializeGitRepository(origin);
+		using var welcomeDirectory = new TemporaryDirectory();
+		welcomeDirectory.WriteFile("notes.txt", "markerless directory");
+
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			welcomeDirectory.Path,
+			["--language", "en"],
+			columns: 120,
+			rows: 30,
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Choose a workspace action",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await StartCloneAsync(
+			terminal,
+			new Uri(origin).AbsoluteUri,
+			TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Existing.cs",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		File.WriteAllText(
+			Path.Combine(origin, "NewView.qml"),
+			"import QtQuick\nItem {}\n",
+			new UTF8Encoding(false));
+		RunGit(origin, "add", "NewView.qml");
+		RunGit(origin, "commit", "-m", "Add QML view");
+
+		await terminal.SendAsync(":update\r", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Repository updated and project context rebuilt.",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"NewView.qml",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendAsync("M", TestContext.Current.CancellationToken);
+		var parameters = await terminal.WaitForScreenAsync(
+			"[x] .qml",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		Assert.Contains("[x] .cs", parameters, StringComparison.Ordinal);
+		Assert.False(terminal.HasExited);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
+	}
+
+	[Fact(Timeout = 120_000)]
+	public async Task BranchCommandSwitchesTheCachedWorkspaceAndKeepsItInteractive()
+	{
+		using var originRoot = new TemporaryDirectory();
+		var origin = originRoot.CreateDirectory("BranchRepository");
+		File.WriteAllText(
+			Path.Combine(origin, "MainOnly.cs"),
+			"internal sealed class MainOnly {}",
+			new UTF8Encoding(false));
+		InitializeGitRepository(origin);
+		RunGit(origin, "checkout", "-b", "feature");
+		File.Delete(Path.Combine(origin, "MainOnly.cs"));
+		File.WriteAllText(
+			Path.Combine(origin, "FeatureOnly.cs"),
+			"internal sealed class FeatureOnly {}",
+			new UTF8Encoding(false));
+		RunGit(origin, "add", "--all");
+		RunGit(origin, "commit", "-m", "Add feature branch content");
+		RunGit(origin, "checkout", "main");
+		using var welcomeDirectory = new TemporaryDirectory();
+		welcomeDirectory.WriteFile("notes.txt", "markerless directory");
+
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			welcomeDirectory.Path,
+			["--language", "en"],
+			columns: 120,
+			rows: 30,
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Choose a workspace action",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await StartCloneAsync(
+			terminal,
+			new Uri(origin).AbsoluteUri,
+			TestContext.Current.CancellationToken);
+		var main = await terminal.WaitForScreenAsync(
+			"MainOnly.cs",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.DoesNotContain("FeatureOnly.cs", main, StringComparison.Ordinal);
+
+		await terminal.SendAsync(":branch feature\r", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Branch: feature",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+		var feature = await terminal.WaitForScreenAsync(
+			"FeatureOnly.cs",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.DoesNotContain("MainOnly.cs", feature, StringComparison.Ordinal);
+
+		await terminal.SendAsync("3", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"internal sealed class FeatureOnly",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.False(terminal.HasExited);
+		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
+	}
+
+	[Fact(Timeout = 120_000)]
+	public async Task UrlWorkspaceAppliesEveryTransformationAndExportsRedactedZip()
+	{
+		const string secret = "ghp_a7D9mQ2xK4vN8sR6tY3uW5zB1cE0fG2hJ9pL";
+		const string privateEmail = "ivan.petrov@corp.internal";
+		using var originRoot = new TemporaryDirectory();
+		var origin = originRoot.CreateDirectory("TransformationRepository");
+		Directory.CreateDirectory(Path.Combine(origin, "src"));
+		File.WriteAllText(
+			Path.Combine(origin, "src", "Config.cs"),
+			$$"""
+			namespace Sample;
+
+			// remove this comment
+			internal sealed class Config
+			{
+				private const string Token = "{{secret}}";
+				private const string Email = "{{privateEmail}}";
+
+				public void Run()
+				{
+					Console.WriteLine(Token);
+				}
+			}
+			""",
+			new UTF8Encoding(false));
+		InitializeGitRepository(origin);
+		using var welcomeDirectory = new TemporaryDirectory();
+		welcomeDirectory.WriteFile("notes.txt", "markerless directory");
+		using var output = new TemporaryDirectory();
+		var destination = Path.Combine(output.Path, "transformed-project.zip");
+		await using var terminal = await TerminalPtyHarness.StartAsync(
+			welcomeDirectory.Path,
+			["--language", "en"],
+			columns: 120,
+			rows: 30,
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		await terminal.WaitForScreenAsync(
+			"Choose a workspace action",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await StartCloneAsync(
+			terminal,
+			new Uri(origin).AbsoluteUri,
+			TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Config.cs",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> CONTEXT PREVIEW",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendTabAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"> PARAMETERS",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendHomeAsync(TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"[x] All (5)",
+			timeout: TimeSpan.FromSeconds(30),
+			cancellationToken: TestContext.Current.CancellationToken);
+		foreach (var expected in new[]
+			{
+				"Hide secrets",
+				"Hide private data",
+				"Compress code",
+				"Strip comments",
+				"Strip blank lines"
+			})
+		{
+			Assert.Contains(
+				$"[x] {expected}",
+				terminal.CaptureScreen(),
+				StringComparison.Ordinal);
+		}
+
+		await terminal.SendAsync("Z", TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Exact destination:",
+			cancellationToken: TestContext.Current.CancellationToken);
+		await terminal.SendCtrlAAsync(TestContext.Current.CancellationToken);
+		await terminal.SendAsync(destination, TestContext.Current.CancellationToken);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		var summary = await terminal.WaitForScreenAsync(
+			"Redaction",
+			cancellationToken: TestContext.Current.CancellationToken);
+		Assert.Contains("Export?", summary, StringComparison.Ordinal);
+		Assert.Contains(
+			"Secrets and private data are redacted in the exported artifact.",
+			summary,
+			StringComparison.Ordinal);
+		await terminal.SendEnterAsync(TestContext.Current.CancellationToken);
+		await terminal.WaitForScreenAsync(
+			"Export completed:",
+			timeout: TimeSpan.FromSeconds(45),
+			cancellationToken: TestContext.Current.CancellationToken);
+
+		var extracted = output.CreateDirectory("extracted");
+		ZipFile.ExtractToDirectory(destination, extracted);
+		var exportedPath = Assert.Single(Directory.EnumerateFiles(
+			extracted,
+			"Config.cs",
+			SearchOption.AllDirectories));
+		var exported = await File.ReadAllTextAsync(
+			exportedPath,
+			TestContext.Current.CancellationToken);
+		Assert.DoesNotContain(secret, exported, StringComparison.Ordinal);
+		Assert.DoesNotContain(privateEmail, exported, StringComparison.Ordinal);
+		Assert.DoesNotContain("remove this comment", exported, StringComparison.Ordinal);
+		Assert.DoesNotContain("\n\n", exported.Replace("\r\n", "\n", StringComparison.Ordinal), StringComparison.Ordinal);
+		Assert.DoesNotContain("Console.WriteLine(Token)", exported, StringComparison.Ordinal);
+
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
+		Assert.Equal(
+			CommandLineExitCodes.Success,
+			await terminal.WaitForExitAsync(
+				cancellationToken: TestContext.Current.CancellationToken));
 	}
 
 	[Fact(Timeout = 120_000)]
@@ -261,7 +509,7 @@ public sealed class TerminalClonePtyTests
 			originRoot.Path,
 			welcomeDirectory.Path);
 
-		await terminal.SendAsync("q", TestContext.Current.CancellationToken);
+		await terminal.SendQuitAndConfirmAsync(TestContext.Current.CancellationToken);
 		Assert.Equal(
 			CommandLineExitCodes.Success,
 			await terminal.WaitForExitAsync(
@@ -404,16 +652,12 @@ public sealed class TerminalClonePtyTests
 		};
 		foreach (var argument in arguments)
 			startInfo.ArgumentList.Add(argument);
-		using var process = Process.Start(startInfo);
-		Assert.NotNull(process);
-		var standardOutput = process.StandardOutput.ReadToEnd();
-		var standardError = process.StandardError.ReadToEnd();
-		process.WaitForExit();
+		var result = TerminalTestProcess.Run(startInfo);
 		Assert.True(
-			process.ExitCode == 0,
-			$"git {string.Join(' ', arguments)} failed with exit code {process.ExitCode}.\n" +
-			$"{standardOutput}\n{standardError}");
-		return standardOutput.Trim();
+			result.ExitCode == 0,
+			$"git {string.Join(' ', arguments)} failed with exit code {result.ExitCode}.\n" +
+			$"{result.StandardOutput}\n{result.StandardError}");
+		return result.StandardOutput.Trim();
 	}
 
 	private static string ComputeWorkingTreeFingerprint(string root)
@@ -474,10 +718,14 @@ public sealed class TerminalClonePtyTests
 
 		foreach (var directory in Directory.EnumerateDirectories(cacheRoot))
 		{
-			if (!string.Equals(
-				    Path.GetFileName(directory),
-				    ".staging",
-				    StringComparison.Ordinal))
+			var name = Path.GetFileName(directory);
+			if (string.Equals(name, ".locks", StringComparison.Ordinal) ||
+			    string.Equals(name, "l", StringComparison.Ordinal))
+			{
+				continue;
+			}
+
+			if (!string.Equals(name, ".staging", StringComparison.Ordinal))
 			{
 				return false;
 			}

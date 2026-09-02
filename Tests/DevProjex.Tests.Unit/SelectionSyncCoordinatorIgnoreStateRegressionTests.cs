@@ -42,11 +42,15 @@ public sealed class SelectionSyncCoordinatorIgnoreStateRegressionTests
 
 		ApplyIgnoreCounts(coordinator, IgnoreOptionCounts.Empty);
 		coordinator.PopulateIgnoreOptionsForRootSelection([], ProjectPath);
+		coordinator.ConsumePreparedSelectionForPath(ProjectPath);
 
 		var selected = coordinator.GetSelectedIgnoreOptionIds();
 		Assert.DoesNotContain(IgnoreOptionId.DotFolders, selected);
 		Assert.DoesNotContain(IgnoreOptionId.EmptyFolders, selected);
-		Assert.Empty(viewModel.IgnoreOptions);
+		Assert.Equal(
+			IgnoreOptionOrder.ContentTransformations,
+			viewModel.IgnoreOptions.Select(static option => option.Id));
+		Assert.All(viewModel.IgnoreOptions, static option => Assert.False(option.IsChecked));
 	}
 
 	[Fact]
@@ -76,6 +80,7 @@ public sealed class SelectionSyncCoordinatorIgnoreStateRegressionTests
 
 		ApplyIgnoreCounts(coordinator, new IgnoreOptionCounts(DotFiles: 1, ExtensionlessFiles: 2));
 		coordinator.PopulateIgnoreOptionsForRootSelection([], ProjectPath);
+		coordinator.ConsumePreparedSelectionForPath(ProjectPath);
 
 		var selected = coordinator.GetSelectedIgnoreOptionIds();
 		Assert.Contains(IgnoreOptionId.DotFiles, selected);
@@ -85,6 +90,7 @@ public sealed class SelectionSyncCoordinatorIgnoreStateRegressionTests
 
 		GetIgnoreOption(viewModel, IgnoreOptionId.DotFiles).IsChecked = false;
 		GetIgnoreOption(viewModel, IgnoreOptionId.ExtensionlessFiles).IsChecked = false;
+		coordinator.UpdateIgnoreSelectionCache();
 
 		selected = coordinator.GetSelectedIgnoreOptionIds();
 		Assert.Empty(selected);
@@ -202,6 +208,7 @@ public sealed class SelectionSyncCoordinatorIgnoreStateRegressionTests
 			[AppLanguage.En] = new Dictionary<string, string>
 			{
 				["Settings.Ignore.SmartIgnore"] = "Smart ignore",
+				["Settings.Ignore.HideSecrets"] = "Hide secrets",
 				["Settings.Ignore.UseGitIgnore"] = "Use .gitignore",
 				["Settings.Ignore.TrackedGitFilesOnly"] = "Tracked Git files only",
 				["Settings.Ignore.HiddenFolders"] = "Hidden folders",

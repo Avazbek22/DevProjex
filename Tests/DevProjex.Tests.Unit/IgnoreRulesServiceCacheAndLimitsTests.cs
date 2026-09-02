@@ -1,3 +1,5 @@
+using DevProjex.Application.Diagnostics;
+
 namespace DevProjex.Tests.Unit;
 
 public sealed class IgnoreRulesServiceCacheAndLimitsTests
@@ -103,6 +105,29 @@ public sealed class IgnoreRulesServiceCacheAndLimitsTests
 	}
 
 	[Fact]
+	public void InvalidateCaches_FromFileSystemRootEvictsDescendantGitIgnoreMatcher()
+	{
+		using var temp = new TemporaryDirectory();
+		temp.CreateFile(".gitignore", "*.cache\n");
+		temp.CreateFile("artifact.cache", "ignored");
+		var service = CreateServiceWithSmartIgnore([]);
+		var before = service.Build(temp.Path, [IgnoreOptionId.UseGitIgnore]);
+		Assert.True(before.IsGitIgnored(
+			Path.Combine(temp.Path, "artifact.cache"),
+			isDirectory: false,
+			"artifact.cache"));
+
+		service.InvalidateCaches(Path.GetPathRoot(temp.Path)!);
+		var after = service.Build(temp.Path, [IgnoreOptionId.UseGitIgnore]);
+
+		Assert.NotSame(before.GitIgnoreMatcher, after.GitIgnoreMatcher);
+		Assert.True(after.IsGitIgnored(
+			Path.Combine(temp.Path, "artifact.cache"),
+			isDirectory: false,
+			"artifact.cache"));
+	}
+
+	[Fact]
 	public void Build_GitIgnoreRewriteWithSameLengthAndTimestamp_InvalidatesMatcher()
 	{
 		using var temp = new TemporaryDirectory();
@@ -120,10 +145,58 @@ public sealed class IgnoreRulesServiceCacheAndLimitsTests
 		File.SetLastWriteTimeUtc(gitIgnorePath, originalTimestamp);
 		Assert.Equal(5, new FileInfo(gitIgnorePath).Length);
 
+		using var measurement = IgnorePipelineDiagnostics.BeginMeasurement();
 		var after = service.Build(temp.Path, [IgnoreOptionId.UseGitIgnore], ["old", "new"]);
+		var diagnostics = measurement.Capture();
 
 		Assert.False(after.IsGitIgnored(Path.Combine(temp.Path, "old"), isDirectory: true, "old"));
 		Assert.True(after.IsGitIgnored(Path.Combine(temp.Path, "new"), isDirectory: true, "new"));
+		Assert.Equal(2, diagnostics.GitIgnoreSourceReadRequests);
+		Assert.Equal(10, diagnostics.GitIgnoreSourceBytes);
+	}
+
+	[Fact]
+	public void Build_GitIgnoreSourceIo_ReadsOnceForColdCachedAndMetadataChangedPaths()
+	{
+		using var temp = new TemporaryDirectory();
+		var gitIgnorePath = temp.CreateFile(".gitignore", "old/\n");
+		temp.CreateFile("old/file.txt", "old");
+		temp.CreateFile("new-target/file.txt", "new");
+		var service = CreateServiceWithSmartIgnore([]);
+		_ = service.GetIgnoreOptionsAvailability(temp.Path, []);
+
+		using (var coldMeasurement = IgnorePipelineDiagnostics.BeginMeasurement())
+		{
+			var coldRules = service.Build(temp.Path, [IgnoreOptionId.UseGitIgnore], []);
+			var diagnostics = coldMeasurement.Capture();
+
+			Assert.True(coldRules.IsGitIgnored(Path.Combine(temp.Path, "old"), true, "old"));
+			Assert.Equal(1, diagnostics.GitIgnoreSourceReadRequests);
+			Assert.Equal(5, diagnostics.GitIgnoreSourceBytes);
+		}
+
+		using (var cachedMeasurement = IgnorePipelineDiagnostics.BeginMeasurement())
+		{
+			var cachedRules = service.Build(temp.Path, [IgnoreOptionId.UseGitIgnore], []);
+			var diagnostics = cachedMeasurement.Capture();
+
+			Assert.True(cachedRules.IsGitIgnored(Path.Combine(temp.Path, "old"), true, "old"));
+			Assert.Equal(1, diagnostics.GitIgnoreSourceReadRequests);
+			Assert.Equal(5, diagnostics.GitIgnoreSourceBytes);
+		}
+
+		File.WriteAllText(gitIgnorePath, "new-target/\n");
+		using var changedMeasurement = IgnorePipelineDiagnostics.BeginMeasurement();
+		var changedRules = service.Build(temp.Path, [IgnoreOptionId.UseGitIgnore], []);
+		var changedDiagnostics = changedMeasurement.Capture();
+
+		Assert.False(changedRules.IsGitIgnored(Path.Combine(temp.Path, "old"), true, "old"));
+		Assert.True(changedRules.IsGitIgnored(
+			Path.Combine(temp.Path, "new-target"),
+			isDirectory: true,
+			"new-target"));
+		Assert.Equal(1, changedDiagnostics.GitIgnoreSourceReadRequests);
+		Assert.Equal(new FileInfo(gitIgnorePath).Length, changedDiagnostics.GitIgnoreSourceBytes);
 	}
 
 	[Fact]
