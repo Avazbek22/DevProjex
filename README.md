@@ -185,7 +185,7 @@ devprojex mcp --root /path/to/project
 
 For Claude Code it's one command: `claude mcp add devprojex -- devprojex mcp --root .`
 
-Seven read-only tools cover the whole workflow: `list_projects`, `get_tree`, `analyze`, `search_project`, `get_file`, `pack_context`, and `read_pack`. Oversized results are stored as session packs and read back in line ranges instead of flooding the agent's context, and long operations report standard MCP progress notifications.
+Seven read-only tools cover the whole workflow: `list_projects`, `get_tree`, `analyze`, `search_project`, `get_file`, `pack_context`, and `read_pack`. Only `pack_context` stores oversized context as a session pack; `read_pack` reads it back in line ranges instead of flooding the agent's context. Long operations report standard MCP progress notifications.
 
 The server enforces hard security boundaries on top of DevProjex's read-only design:
 
@@ -200,9 +200,9 @@ The missing off switch is a control guarantee, not a detection guarantee. DevPro
 detects common secret formats, but detection is heuristic; review each pack before
 publishing it outside your environment.
 
-**Built for agent efficiency.** Trees default to compact markdown, content declares the root once and uses relative paths — no tokens wasted on scaffolding. A `max_tokens` budget packs the largest files that fit and reports what was included, `top_files` shows where the tokens go, `git_scope` narrows any call to staged files, current changes, or a ref-to-ref diff, and `profile` switches between built-in defaults, your saved Desktop selections, or a portable profile file.
+**Built for agent efficiency.** Trees default to compact markdown, content declares the root once and uses relative paths — no tokens wasted on scaffolding. A `max_tokens` budget packs the largest files that fit and reports what was included, `top_files` shows where the tokens go, `git_scope` narrows `get_tree`, `analyze`, `pack_context`, or `search_project` to staged files, current changes, or a ref-to-ref diff, and `profile` switches between built-in defaults, your saved Desktop selections, or a portable profile file.
 
-Want to audit what the agent gets? Open the same project in the GUI — same engine, same filters, same redaction.
+Want to audit what the agent gets? Open the same project in the GUI: the engine and redaction pipeline are shared, and filters match when the same profile and parameters are used.
 
 ### How DevProjex compares as an MCP server
 

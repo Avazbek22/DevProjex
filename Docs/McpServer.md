@@ -96,7 +96,8 @@ list_projects -> get_tree/analyze -> search_project/get_file -> pack_context -> 
 
 Errors returned by tools have `isError: true` and stable `DPX-MCP-*` codes. They
 describe the valid roots, ranges, or retry action. Malformed JSON-RPC traffic is
-the only case reported as a protocol error.
+reported as a protocol error; an unknown tool name is also a protocol-level error
+and returns JSON-RPC code `-32602`.
 
 Remote-specific errors are `DPX-MCP-REMOTE-DISABLED` when a URL is passed to a
 server started without `--allow-remote`, `DPX-MCP-INVALID-ARGUMENTS` for an
