@@ -226,8 +226,12 @@ public sealed class StoreListingImportFolderIntegrationTests
     }
 
     [Fact]
-    public void ImportFolder_PreservesTemplateLocalesAndAppendsNewListings()
+    public void ImportFolder_MatchesTemplateLocalesExactly()
     {
+        // Since the 2026-09-03 import, every listing language exists in Partner Center,
+        // so the exported template and the import CSV must carry the same locale columns
+        // in the same order. A new language starts as an extra column appended after the
+        // template columns and joins the template with the next fresh export.
         var repositoryRoot = RepoRoot.Value;
         var importDocument = StoreListingCsvDocument.Load(StoreListingPaths.GetImportCsvPath(repositoryRoot));
         var templateDocument = StoreListingCsvDocument.Load(StoreListingPaths.FindLatestExportTemplateCsv(repositoryRoot));
@@ -235,10 +239,7 @@ public sealed class StoreListingImportFolderIntegrationTests
         var importLocales = StoreListingPaths.GetLocaleColumns(importDocument.Headers);
         var templateLocales = StoreListingPaths.GetLocaleColumns(templateDocument.Headers);
 
-        Assert.Equal(templateLocales, importLocales.Take(templateLocales.Length));
-        Assert.Equal(
-            ["pl-pl", "tr-tr", "uk-ua", "ja-jp", "ko-kr", "zh-cn", "zh-tw", "vi-vn", "id-id"],
-            importLocales.Skip(templateLocales.Length));
+        Assert.Equal(templateLocales, importLocales);
     }
 
     [Fact]
