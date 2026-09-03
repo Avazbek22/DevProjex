@@ -5,7 +5,8 @@ internal sealed class McpProjectService(
 	McpProjectRootJail roots,
 	McpServices services,
 	bool hidePrivateData,
-	GitFilteringMode? serverGitMode)
+	GitFilteringMode? serverGitMode,
+	IReadOnlyCollection<ProjectExclusion>? serverExclusions = null)
 {
 	internal const int MaximumRequestedPaths = 256;
 	internal const int MaximumRequestedPathLength = 4096;
@@ -39,12 +40,16 @@ internal sealed class McpProjectService(
 			: string.IsNullOrEmpty(profile)
 				? serverGitMode
 				: null;
+		// The startup exclusion baseline follows the --git-mode precedent: an explicit
+		// profile carries its own exclusion state, so the baseline yields to it.
+		var baselineExclusions = string.IsNullOrEmpty(profile) ? serverExclusions : null;
 		var selection = await services.SelectionResolver
 			.ResolveAsync(
 				projectRoot,
 				profileReference,
 				new ProjectSelectionSpec(
 					GitMode: baselineGitMode,
+					Exclusions: baselineExclusions,
 					HideSecrets: true,
 					HidePrivateData: hidePrivateData),
 				cancellationToken)

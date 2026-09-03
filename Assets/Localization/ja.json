@@ -487,6 +487,7 @@
   "Terminal.Option.Select": "相対ファイルまたはディレクトリ パスを含めます。",
   "Terminal.Option.GitMode": "Gitフィルタリングモード：none、gitignore、tracked、staged、changes、またはdiff:<ref>..<ref>。",
   "Terminal.Option.McpGitMode": "基本Gitフィルタリングモード：none、gitignore、またはtracked。",
+  "Terminal.Option.McpExclude": "サーバーの基本除外セット：除外名または none（繰り返し指定可）。",
   "Terminal.Validation.GitMode": "none、gitignore、tracked、staged、changes、またはdiff:<ref>..<ref>を指定してください。",
   "Terminal.Validation.DesktopGitMode": "Desktopで使用できるのはnone、gitignore、tracked、staged、changesです。diff範囲にはtree、analyze、export context、TUI、またはMCPを使用してください。",
   "Terminal.Error.ProfileTransientGitMode": "一時的なGitモードはプロファイルに保存できません。none、gitignore、またはtrackedを使用してください。",

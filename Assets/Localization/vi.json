@@ -487,6 +487,7 @@
   "Terminal.Option.Select": "Bao gồm đường dẫn tệp hoặc thư mục tương đối.",
   "Terminal.Option.GitMode": "Chế độ lọc Git: none, gitignore, tracked, staged, changes hoặc diff:<ref>..<ref>.",
   "Terminal.Option.McpGitMode": "Chế độ lọc Git cơ sở: none, gitignore hoặc tracked.",
+  "Terminal.Option.McpExclude": "Tập loại trừ cơ sở của máy chủ: tên các mục loại trừ hoặc none (có thể lặp lại).",
   "Terminal.Validation.GitMode": "Dùng none, gitignore, tracked, staged, changes hoặc diff:<ref>..<ref>.",
   "Terminal.Validation.DesktopGitMode": "Desktop hỗ trợ none, gitignore, tracked, staged và changes; hãy dùng tree, analyze, export context, TUI hoặc MCP cho phạm vi diff.",
   "Terminal.Error.ProfileTransientGitMode": "Không thể lưu chế độ Git tức thời vào hồ sơ; hãy dùng none, gitignore hoặc tracked.",

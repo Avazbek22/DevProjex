@@ -16,12 +16,14 @@ public static class McpServerHost
 		bool hidePrivateData = false,
 		bool allowRemote = false,
 		GitFilteringMode? gitMode = null,
+		IReadOnlyCollection<ProjectExclusion>? exclusions = null,
 		CancellationToken cancellationToken = default) =>
 		RunWithStandardStreamsAsync(
 			roots,
 			hidePrivateData,
 			allowRemote,
 			gitMode,
+			exclusions,
 			appDataPathProvider: null,
 			cancellationToken);
 
@@ -30,10 +32,12 @@ public static class McpServerHost
 		bool hidePrivateData,
 		bool allowRemote,
 		GitFilteringMode? gitMode,
+		IReadOnlyCollection<ProjectExclusion>? exclusions,
 		Func<string>? appDataPathProvider,
 		CancellationToken cancellationToken)
 	{
 		ValidateGitMode(gitMode);
+		ValidateExclusions(exclusions);
 		return RunWithStreamsAsync(
 			roots,
 			Console.OpenStandardInput(),
@@ -42,7 +46,8 @@ public static class McpServerHost
 			cancellationToken,
 			appDataPathProvider,
 			allowRemote: allowRemote,
-			gitMode: gitMode);
+			gitMode: gitMode,
+			exclusions: exclusions);
 	}
 
 	internal static async Task RunWithStreamsAsync(
@@ -56,12 +61,14 @@ public static class McpServerHost
 		Func<McpProjectRootJail, McpServices>? servicesFactory = null,
 		bool allowRemote = false,
 		Func<McpRemoteProjectServices>? remoteServicesFactory = null,
-		GitFilteringMode? gitMode = null)
+		GitFilteringMode? gitMode = null,
+		IReadOnlyCollection<ProjectExclusion>? exclusions = null)
 	{
 		ArgumentNullException.ThrowIfNull(roots);
 		ArgumentNullException.ThrowIfNull(input);
 		ArgumentNullException.ThrowIfNull(output);
 		ValidateGitMode(gitMode);
+		ValidateExclusions(exclusions);
 
 		var rootRegistry = new McpRootRegistry(roots);
 		using var projectSources = new McpProjectSourceResolver(
@@ -80,7 +87,8 @@ public static class McpServerHost
 				rootJail,
 				services.Value,
 				hidePrivateData,
-				gitMode),
+				gitMode,
+				exclusions),
 			LazyThreadSafetyMode.ExecutionAndPublication);
 		var tools = new DevProjexMcpTools(rootRegistry, projectService, packs);
 		var catalog = new DevProjexMcpToolCatalog(tools, allowRemote);
@@ -133,6 +141,25 @@ public static class McpServerHost
 			nameof(gitMode),
 			gitMode,
 			"The MCP server Git mode must be none, gitignore, or tracked.");
+	}
+
+	internal static void ValidateExclusions(IReadOnlyCollection<ProjectExclusion>? exclusions)
+	{
+		if (exclusions is null)
+			return;
+
+		foreach (var exclusion in exclusions)
+		{
+			// Content redaction is never part of the exclusion baseline; only the eight
+			// path-visibility toggles from the shared presentation catalog are accepted.
+			if (!ProjectSelectionSpec.StandardExclusions.Contains(exclusion))
+			{
+				throw new ArgumentOutOfRangeException(
+					nameof(exclusions),
+					exclusion,
+					"The MCP server exclusion baseline accepts only path exclusion toggles.");
+			}
+		}
 	}
 
 	private static string ResolveVersion() =>

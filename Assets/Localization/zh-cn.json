@@ -487,6 +487,7 @@
   "Terminal.Option.Select": "包括相对文件或目录路径。",
   "Terminal.Option.GitMode": "Git过滤模式：none、gitignore、tracked、staged、changes或diff:<ref>..<ref>。",
   "Terminal.Option.McpGitMode": "基础Git过滤模式：none、gitignore或tracked。",
+  "Terminal.Option.McpExclude": "服务器的基线排除集：排除项名称或 none（可重复）。",
   "Terminal.Validation.GitMode": "请使用none、gitignore、tracked、staged、changes或diff:<ref>..<ref>。",
   "Terminal.Validation.DesktopGitMode": "Desktop支持none、gitignore、tracked、staged和changes；diff范围请使用tree、analyze、export context、TUI或MCP。",
   "Terminal.Error.ProfileTransientGitMode": "瞬时Git模式无法保存到配置文件；请使用none、gitignore或tracked。",

@@ -487,6 +487,7 @@
     "Terminal.Option.Select": "Inclui um caminho relativo de arquivo ou pasta.",
     "Terminal.Option.GitMode": "Modo de filtro Git: none, gitignore, tracked, staged, changes ou diff:<ref>..<ref>.",
     "Terminal.Option.McpGitMode": "Modo base de filtro Git: none, gitignore ou tracked.",
+    "Terminal.Option.McpExclude": "Conjunto de exclusões base do servidor: nomes de exclusões ou none (repetível).",
     "Terminal.Validation.GitMode": "Use none, gitignore, tracked, staged, changes ou diff:<ref>..<ref>.",
     "Terminal.Validation.DesktopGitMode": "O Desktop aceita none, gitignore, tracked, staged e changes; use tree, analyze, export context, TUI ou MCP para intervalos diff.",
     "Terminal.Error.ProfileTransientGitMode": "Modos Git momentâneos não podem ser salvos em perfis; use none, gitignore ou tracked.",

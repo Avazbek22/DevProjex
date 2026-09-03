@@ -38,7 +38,25 @@ public sealed class McpCommandContractTests
 		Assert.Contains("--hide-private-data", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("--allow-remote", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("--git-mode", environment.StandardOutput, StringComparison.Ordinal);
+		Assert.Contains("--exclude", environment.StandardOutput, StringComparison.Ordinal);
 		Assert.Contains("Run the local read-only MCP stdio server.", environment.StandardOutput, StringComparison.Ordinal);
+	}
+
+	[Theory]
+	[InlineData("hide-secrets")]
+	[InlineData("hide-private-data")]
+	[InlineData("nonsense")]
+	public async Task McpServerBaselineRejectsUnknownAndRedactionExclusions(string exclusion)
+	{
+		var environment = new TestTerminalEnvironment();
+
+		var exitCode = await new TerminalApplication(environment).RunAsync(
+			["mcp", "--exclude", exclusion, "--language", "en"],
+			TestContext.Current.CancellationToken);
+
+		Assert.Equal(CommandLineExitCodes.UsageError, exitCode);
+		Assert.Empty(environment.StandardOutput);
+		Assert.Contains("Unknown exclusion", environment.StandardError, StringComparison.Ordinal);
 	}
 
 	[Theory]
@@ -115,6 +133,7 @@ public sealed class McpCommandContractTests
 			Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("Terminal.Command.Mcp").GetString()));
 			Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("Terminal.Option.McpRoot").GetString()));
 			Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("Terminal.Option.McpGitMode").GetString()));
+			Assert.False(string.IsNullOrWhiteSpace(document.RootElement.GetProperty("Terminal.Option.McpExclude").GetString()));
 		});
 
 		var solution = File.ReadAllText(Path.Combine(repository, "DevProjex.sln"));

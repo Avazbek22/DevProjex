@@ -487,6 +487,7 @@
   "Terminal.Option.Select": "상대 파일 또는 디렉터리 경로를 포함합니다.",
   "Terminal.Option.GitMode": "Git 필터링 모드: none, gitignore, tracked, staged, changes 또는 diff:<ref>..<ref>.",
   "Terminal.Option.McpGitMode": "기본 Git 필터링 모드: none, gitignore 또는 tracked.",
+  "Terminal.Option.McpExclude": "서버의 기본 제외 집합: 제외 이름 또는 none (반복 가능).",
   "Terminal.Validation.GitMode": "none, gitignore, tracked, staged, changes 또는 diff:<ref>..<ref>를 사용하세요.",
   "Terminal.Validation.DesktopGitMode": "Desktop은 none, gitignore, tracked, staged, changes를 지원합니다. diff 범위에는 tree, analyze, export context, TUI 또는 MCP를 사용하세요.",
   "Terminal.Error.ProfileTransientGitMode": "일시적 Git 모드는 프로필에 저장할 수 없습니다. none, gitignore 또는 tracked를 사용하세요.",

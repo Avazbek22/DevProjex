@@ -54,6 +54,82 @@ public sealed class McpServerIntegrationTests
 	}
 
 	[Fact]
+	public void McpHostAcceptsOnlyPathExclusionsInTheBaseline()
+	{
+		McpServerHost.ValidateExclusions(null);
+		McpServerHost.ValidateExclusions([]);
+		McpServerHost.ValidateExclusions(ProjectSelectionSpec.StandardExclusions);
+
+		Assert.Throws<ArgumentOutOfRangeException>(() =>
+			McpServerHost.ValidateExclusions([ProjectExclusion.HideSecrets]));
+		Assert.Throws<ArgumentOutOfRangeException>(() =>
+			McpServerHost.ValidateExclusions([ProjectExclusion.SmartIgnore, (ProjectExclusion)int.MaxValue]));
+	}
+
+	[Fact]
+	public async Task ServerExclusionBaselineReplacesTheStandardSetAndYieldsToProfiles()
+	{
+		using var workspace = new TemporaryDirectory();
+		var project = workspace.CreateDirectory("project");
+		Directory.CreateDirectory(Path.Combine(project, "Src"));
+		File.WriteAllText(Path.Combine(project, "Src", "Visible.cs"), "visible-baseline\n");
+		File.WriteAllText(Path.Combine(project, ".dotted.cs"), "dotted-baseline\n");
+		File.WriteAllText(Path.Combine(project, "Empty.cs"), string.Empty);
+		const string profileName = "baseline-profile.json";
+		File.WriteAllText(
+			Path.Combine(project, profileName),
+			JsonSerializer.Serialize(new
+			{
+				schemaVersion = PortableProjectProfileService.CurrentSchemaVersion,
+				kind = PortableProjectProfileService.DocumentKind,
+				selection = new
+				{
+					roots = (string[]?)null,
+					extensions = new[] { ".cs" },
+					selectedPaths = (string[]?)null,
+					gitMode = "none",
+					exclusions = new[] { "dot-files" },
+					hideSecrets = false,
+					hidePrivateData = false
+				}
+			}));
+
+		await using var standardServer = await McpTestServer.StartAsync(project, workspace.Path);
+		var standardTree = await standardServer.CallAsync("get_tree");
+		Assert.Contains("Visible.cs", Text(standardTree), StringComparison.Ordinal);
+		Assert.DoesNotContain(".dotted.cs", Text(standardTree), StringComparison.Ordinal);
+		Assert.DoesNotContain("Empty.cs", Text(standardTree), StringComparison.Ordinal);
+
+		// The baseline is a full replacement of the standard set, not an addition to it:
+		// keeping only dot-files re-admits the empty file the standard set would hide.
+		await using var narrowedServer = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			exclusions: [ProjectExclusion.DotFiles]);
+		var narrowedTree = await narrowedServer.CallAsync("get_tree");
+		Assert.Contains("Empty.cs", Text(narrowedTree), StringComparison.Ordinal);
+		Assert.DoesNotContain(".dotted.cs", Text(narrowedTree), StringComparison.Ordinal);
+
+		await using var openServer = await McpTestServer.StartAsync(
+			project,
+			workspace.Path,
+			exclusions: []);
+		var openTree = await openServer.CallAsync("get_tree");
+		Assert.Contains(".dotted.cs", Text(openTree), StringComparison.Ordinal);
+		Assert.Contains("Empty.cs", Text(openTree), StringComparison.Ordinal);
+
+		var openPack = await openServer.CallAsync("pack_context");
+		Assert.Contains("dotted-baseline", Text(openPack), StringComparison.Ordinal);
+
+		// An explicit profile carries its own exclusion state, so the startup baseline yields.
+		var profiledPack = await openServer.CallAsync(
+			"pack_context",
+			new Dictionary<string, object?> { ["profile"] = profileName });
+		Assert.Contains("visible-baseline", Text(profiledPack), StringComparison.Ordinal);
+		Assert.DoesNotContain("dotted-baseline", Text(profiledPack), StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public async Task TreeAndAnalyzeAvoidUnusedPlanningContentPasses()
 	{
 		using var workspace = new TemporaryDirectory();
@@ -4102,7 +4178,8 @@ public sealed class McpServerIntegrationTests
 			Action? servicesCreated = null,
 			bool allowRemote = false,
 			Func<McpRemoteProjectServices>? remoteServicesFactory = null,
-			GitFilteringMode? gitMode = null)
+			GitFilteringMode? gitMode = null,
+			IReadOnlyCollection<ProjectExclusion>? exclusions = null)
 		{
 			var clientToServer = new Pipe();
 			var serverToClient = new Pipe();
@@ -4123,7 +4200,8 @@ public sealed class McpServerIntegrationTests
 				},
 				allowRemote,
 				remoteServicesFactory,
-				gitMode);
+				gitMode,
+				exclusions);
 			var recordingInput = new RecordingWriteStream(clientToServer.Writer.AsStream());
 			var recordingOutput = new RecordingReadStream(serverToClient.Reader.AsStream());
 			var transport = new StreamClientTransport(

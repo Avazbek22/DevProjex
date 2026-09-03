@@ -111,6 +111,7 @@ public sealed class DevProjexCommandTree
 			Description = L("Terminal.Option.McpAllowRemote")
 		};
 		var gitMode = CreateMcpGitModeOption();
+		var exclude = CreateMcpExcludeOption();
 		roots.CompletionSources.Add(context => FileSystemCompletionSource.Complete(
 			context,
 			FileSystemCompletionKind.Directories,
@@ -119,12 +120,14 @@ public sealed class DevProjexCommandTree
 		command.Options.Add(hidePrivateData);
 		command.Options.Add(allowRemote);
 		command.Options.Add(gitMode);
+		command.Options.Add(exclude);
 		CliExamplesRegistry.Set(
 			command,
 			"devprojex mcp",
 			"devprojex mcp --root . --root ../shared",
 			"devprojex mcp --root . --hide-private-data",
-			"devprojex mcp --root . --git-mode tracked");
+			"devprojex mcp --root . --git-mode tracked",
+			"devprojex mcp --root . --exclude smart-ignore --exclude dot-folders");
 		command.SetAction(async (parseResult, cancellationToken) =>
 		{
 			var explicitRoots = parseResult.GetValue(roots) ?? [];
@@ -132,6 +135,10 @@ public sealed class DevProjexCommandTree
 				explicitRoots,
 				environment.Variables,
 				Directory.GetCurrentDirectory());
+			var excludeValues = parseResult.GetValue(exclude);
+			var baselineExclusions = excludeValues is { Length: > 0 }
+				? SelectionOptions.ParseExclusions(excludeValues)
+				: null;
 			try
 			{
 				await McpServerHost.RunWithStandardStreamsAsync(
@@ -139,6 +146,7 @@ public sealed class DevProjexCommandTree
 						parseResult.GetValue(hidePrivateData),
 						parseResult.GetValue(allowRemote),
 						parseResult.GetValue(gitMode),
+						baselineExclusions,
 						_serviceFactory.AppDataPathProvider,
 						cancellationToken)
 					.ConfigureAwait(false);
@@ -152,6 +160,47 @@ public sealed class DevProjexCommandTree
 			}
 		});
 		return command;
+	}
+
+	private Option<CliExclusionValue[]> CreateMcpExcludeOption()
+	{
+		var option = new Option<CliExclusionValue[]>("--exclude", "-x")
+		{
+			Description = L("Terminal.Option.McpExclude"),
+			HelpName = "NAME",
+			Arity = ArgumentArity.OneOrMore,
+			AllowMultipleArgumentsPerToken = false,
+			CustomParser = result =>
+			{
+				var values = new List<CliExclusionValue>(result.Tokens.Count);
+				foreach (var token in result.Tokens)
+				{
+					// The hidden legacy hide-secrets alias stays out of the server baseline:
+					// redaction is not an exclusion the MCP surface may reason about.
+					if (CliChoiceSets.Exclusion.TryParse(token.Value, out var value) &&
+					    value.Exclusion is not ProjectExclusion.HideSecrets)
+					{
+						values.Add(value);
+						continue;
+					}
+
+					result.AddError(LocalizedParseError.Create(_localization.Format(
+						"Terminal.Validation.UnknownExclusion",
+						token.Value)));
+				}
+
+				if (values.Any(static value => value.IsNone) &&
+				    values.Any(static value => !value.IsNone))
+				{
+					result.AddError(LocalizedParseError.Create(
+						_localization["Terminal.Validation.ExcludeNone"]));
+				}
+
+				return values.ToArray();
+			}
+		};
+		option.CompletionSources.Add(CliChoiceSets.Exclusion.Tokens.ToArray());
+		return option;
 	}
 
 	private Option<GitFilteringMode?> CreateMcpGitModeOption()
