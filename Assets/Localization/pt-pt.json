@@ -469,7 +469,7 @@
     "Terminal.Option.Select": "Inclui um caminho relativo de ficheiro ou pasta.",
     "Terminal.Option.GitMode": "Modo de filtragem Git: none, gitignore, tracked, staged, changes ou diff:<ref>..<ref>.",
     "Terminal.Option.McpGitMode": "Modo base de filtragem Git: none, gitignore ou tracked.",
-    "Terminal.Option.McpExclude": "Conjunto de exclusões base do servidor: nomes de exclusões ou none (repetível).",
+    "Terminal.Option.McpExclude": "Conjunto de exclusões base do servidor: nomes de exclusões ou none.",
     "Terminal.Option.McpAgentExclusions": "Permite que o agente defina as exclusões a cada chamada (adiciona um parâmetro exclusions às ferramentas de seleção).",
     "Terminal.Validation.GitMode": "Use none, gitignore, tracked, staged, changes ou diff:<ref>..<ref>.",
     "Terminal.Validation.DesktopGitMode": "O Desktop suporta none, gitignore, tracked, staged e changes; use tree, analyze, export context, TUI ou MCP para intervalos diff.",

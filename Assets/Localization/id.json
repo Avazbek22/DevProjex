@@ -487,7 +487,7 @@
   "Terminal.Option.Select": "Sertakan file relatif atau jalur direktori.",
   "Terminal.Option.GitMode": "Mode pemfilteran Git: none, gitignore, tracked, staged, changes, atau diff:<ref>..<ref>.",
   "Terminal.Option.McpGitMode": "Mode pemfilteran Git dasar: none, gitignore, atau tracked.",
-  "Terminal.Option.McpExclude": "Set pengecualian dasar server: nama pengecualian atau none (dapat diulang).",
+  "Terminal.Option.McpExclude": "Set pengecualian dasar server: nama pengecualian atau none.",
   "Terminal.Option.McpAgentExclusions": "Mengizinkan agen mengatur pengecualian pada setiap panggilan (menambahkan parameter exclusions ke alat pemilihan).",
   "Terminal.Validation.GitMode": "Gunakan none, gitignore, tracked, staged, changes, atau diff:<ref>..<ref>.",
   "Terminal.Validation.DesktopGitMode": "Desktop mendukung none, gitignore, tracked, staged, dan changes; gunakan tree, analyze, export context, TUI, atau MCP untuk cakupan diff.",

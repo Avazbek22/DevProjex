@@ -475,7 +475,7 @@
   "Terminal.Option.Select": "Файлдың немесе қалтаның салыстырмалы жолын қосады.",
   "Terminal.Option.GitMode": "Git сүзгілеу режимі: none, gitignore, tracked, staged, changes немесе diff:<ref>..<ref>.",
   "Terminal.Option.McpGitMode": "Негізгі Git сүзгілеу режимі: none, gitignore немесе tracked.",
-  "Terminal.Option.McpExclude": "Сервердің негізгі ерекшеліктер жиыны: ерекшелік атаулары немесе none (қайталауға болады).",
+  "Terminal.Option.McpExclude": "Сервердің негізгі ерекшеліктер жиыны: ерекшелік атаулары немесе none.",
   "Terminal.Option.McpAgentExclusions": "Агентке әр шақыруда ерекшеліктерді орнатуға рұқсат береді (таңдау құралдарына exclusions параметрін қосады).",
   "Terminal.Validation.GitMode": "none, gitignore, tracked, staged, changes немесе diff:<ref>..<ref> мәнін пайдаланыңыз.",
   "Terminal.Validation.DesktopGitMode": "Desktop none, gitignore, tracked, staged және changes режимдерін қолдайды; diff ауқымдары үшін tree, analyze, export context, TUI немесе MCP пайдаланыңыз.",
