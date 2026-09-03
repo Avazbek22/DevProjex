@@ -59,7 +59,18 @@ Without the flag the parameter does not exist in any schema and is rejected as
 an unknown argument, so a default server keeps today's narrowing-only contract
 unchanged. Turning toggles off widens the per-call scan to trees the standard
 set skips (subject to the Git baseline), so enable this delegation only for
-agents you trust with full-project walks.
+agents you trust with full-project walks. Both the startup baseline and the
+delegated set apply to opt-in remote checkouts exactly as they do to local
+roots.
+
+Because the parameter is a full desired state, growing the exclusion
+vocabulary in a future version is a compatibility checkpoint: a token absent
+from a replayed full-state array is turned off, including tokens the caller
+predates. The supported way to build a full-state value is read-modify-write —
+call `analyze`, copy its echoed `exclusions` array, edit, and send; the echo
+uses the same tokens and stays valid across versions. A `paths` entry that the
+effective exclusion set hides yields an empty selection rather than an error,
+so check `analyze.files` when combining `paths` with exclusions.
 
 The recommended tool sequence is:
 
@@ -117,8 +128,10 @@ list_projects -> get_tree/analyze -> search_project/get_file -> pack_context -> 
 - Product exclusions, including built-in rules and `.gitignore`, remain active.
   Agent paths and globs can only narrow the effective selection. The exclusion
   toggles themselves stay under human control: agents can change them only on a
-  server deliberately started with `--agent-exclusions`, and that delegation
-  covers file visibility only, never the redaction pass.
+  server deliberately started with `--agent-exclusions`, or by naming a profile
+  that already exists inside the project root — treat committed profile files
+  as part of the selection surface you publish. Delegation covers file
+  visibility only, never the redaction pass.
 - Large packs are kept in an application-owned temporary session directory. Pack
   ids are random, valid only in the current server process, and removed at exit.
   After a server restart, call `pack_context` again to create a new id.

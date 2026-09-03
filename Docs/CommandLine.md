@@ -85,7 +85,9 @@ enables RepoCache-backed clone/acquire for MCP project tools without changing
 the local roots returned by `list_projects`.
 `--exclude` sets the server baseline exclusion set from the shared exclusion
 tokens (`none` disables all toggles) and applies only when a tool does not name
-an explicit profile. `--agent-exclusions` opts in to per-call agent control by
+an explicit profile. An explicit `--exclude` list pins the set: exclusion
+toggles added in later versions default to off for that server until the line
+is updated. `--agent-exclusions` opts in to per-call agent control by
 publishing an `exclusions` array parameter on the selection tools; redaction
 toggles are never part of that vocabulary.
 Explicit MCP roots take precedence over `DEVPROJEX_ROOT`, then

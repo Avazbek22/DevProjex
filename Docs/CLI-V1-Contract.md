@@ -1158,8 +1158,10 @@ parameter on `get_tree`, `analyze`, `pack_context`, `search_project`, and
 `get_file`; the value is the full desired toggle set, an empty array disables
 every toggle, and it outranks the server baseline and profile exclusions.
 Without the flag the parameter does not exist in any schema. Redaction toggles
-are not part of the vocabulary on either surface, and `analyze` results echo
-the effective set in an additive `exclusions` array.
+are not part of the vocabulary on either surface. `analyze` results echo the
+effective set in an `exclusions` array that is required on every server —
+including servers started without the exclusion flags — so consumers that
+pinned the pre-v5.2 `analyze` output schema must refresh their copy.
 
 MCP `get_tree.format` is an additive input with `markdown` as its compact default.
 The existing `text`, `json`, and `xml` tree serializers are available explicitly;
